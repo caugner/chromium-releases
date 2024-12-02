@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "views/controls/button/text_button.h"
 #include "views/controls/tabbed_pane/tabbed_pane.h"
 #include "views/examples/examples_main.h"
@@ -53,19 +54,6 @@ class ContainerView : public View {
 
 }  // namespace
 
-namespace views {
-
-// OS_CHROMEOS requires a MenuWrapper::CreateWrapper implementation.
-// TODO(oshima): Fix chromium-os:7409 so that this isn't required.
-#if defined(OS_CHROMEOS)
-// static
-MenuWrapper* MenuWrapper::CreateWrapper(Menu2* menu) {
-  return new NativeMenuGtk(menu);
-}
-#endif  // OS_CHROMEOS
-
-}  // namespace views
-
 namespace examples {
 
 ExampleBase::ExampleBase(ExamplesMain* main)
@@ -78,7 +66,7 @@ void ExampleBase::PrintStatus(const wchar_t* format, ...) {
   va_list ap;
   va_start(ap, format);
   std::wstring msg;
-  StringAppendV(&msg, format, ap);
+  base::StringAppendV(&msg, format, ap);
   main_->SetStatus(msg);
 }
 

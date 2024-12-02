@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -31,6 +31,7 @@
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/test/test_timeouts.h"
 #include "chrome/browser/net/url_request_mock_http_job.h"
 #include "chrome/browser/plugin_download_helper.h"
 #include "chrome/common/chrome_switches.h"
@@ -38,6 +39,7 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
 #include "net/base/capturing_net_log.h"
+#include "net/base/cert_verifier.h"
 #include "net/base/host_resolver.h"
 #include "net/base/net_util.h"
 #include "net/base/ssl_config_service_defaults.h"
@@ -47,8 +49,9 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_status.h"
 #include "third_party/npapi/bindings/npapi.h"
-#include "webkit/glue/plugins/plugin_constants_win.h"
-#include "webkit/glue/plugins/plugin_list.h"
+#include "webkit/plugins/npapi/plugin_constants_win.h"
+#include "webkit/plugins/npapi/plugin_list.h"
+#include "webkit/plugins/plugin_switches.h"
 
 #if defined(OS_WIN)
 #include "base/win/registry.h"
@@ -73,8 +76,8 @@ class PluginTest : public UITest {
   }
 
  protected:
-#if defined(OS_WIN)
   virtual void SetUp() {
+#if defined(OS_WIN)
     const testing::TestInfo* const test_info =
         testing::UnitTest::GetInstance()->current_test_info();
     if (strcmp(test_info->name(), "MediaPlayerNew") == 0) {
@@ -83,21 +86,23 @@ class PluginTest : public UITest {
       base::win::RegKey regkey;
       if (regkey.Open(HKEY_LOCAL_MACHINE,
                       L"Software\\Microsoft\\MediaPlayer\\ShimInclusionList",
-                      KEY_WRITE)) {
+                      KEY_WRITE) == ERROR_SUCCESS) {
         regkey.CreateKey(L"CHROME.EXE", KEY_READ);
       }
     } else if (strcmp(test_info->name(), "MediaPlayerOld") == 0) {
       // When testing the old WMP plugin, we need to force Chrome to not load
       // the new plugin.
-      launch_arguments_.AppendSwitch(kUseOldWMPPluginSwitch);
+      launch_arguments_.AppendSwitch(switches::kUseOldWMPPlugin);
     } else if (strcmp(test_info->name(), "FlashSecurity") == 0) {
       launch_arguments_.AppendSwitchASCII(switches::kTestSandbox,
                                           "security_tests.dll");
     }
+#endif  // defined(OS_WIN)
+
+    launch_arguments_.AppendSwitch(switches::kAllowOutdatedPlugins);
 
     UITest::SetUp();
   }
-#endif  // defined(OS_WIN)
 
   void TestPlugin(const std::string& test_case,
                   int timeout,
@@ -135,7 +140,8 @@ TEST_F(PluginTest, Flash) {
       "libflashplayer.so"
 #endif
       ;
-  TestPlugin("flash.html?" + kFlashQuery, action_max_timeout_ms(), false);
+  TestPlugin("flash.html?" + kFlashQuery,
+             TestTimeouts::action_max_timeout_ms(), false);
 }
 
 class ClickToPlayPluginTest : public PluginTest {
@@ -159,7 +165,7 @@ TEST_F(ClickToPlayPluginTest, Flash) {
 
   ASSERT_TRUE(tab->LoadBlockedPlugins());
 
-  WaitForFinish(action_max_timeout_ms(), true);
+  WaitForFinish(TestTimeouts::action_max_timeout_ms(), true);
 }
 
 TEST_F(ClickToPlayPluginTest, FlashDocument) {
@@ -180,13 +186,13 @@ TEST_F(ClickToPlayPluginTest, FlashDocument) {
 
   ASSERT_TRUE(tab->LoadBlockedPlugins());
 
-  WaitForFinish(action_max_timeout_ms(), true);
+  WaitForFinish(TestTimeouts::action_max_timeout_ms(), true);
 }
 
 #if defined(OS_WIN)
 // Windows only test
 TEST_F(PluginTest, DISABLED_FlashSecurity) {
-  TestPlugin("flash.html", action_max_timeout_ms(), false);
+  TestPlugin("flash.html", TestTimeouts::action_max_timeout_ms(), false);
 }
 #endif  // defined(OS_WIN)
 
@@ -195,32 +201,27 @@ TEST_F(PluginTest, DISABLED_FlashSecurity) {
 // plugins.
 // Flaky: http://crbug.com/55915
 TEST_F(PluginTest, FLAKY_Quicktime) {
-  TestPlugin("quicktime.html", action_max_timeout_ms(), false);
+  TestPlugin("quicktime.html", TestTimeouts::action_max_timeout_ms(), false);
 }
 
-// Disabled on Release bots - http://crbug.com/44662
-#if defined(NDEBUG)
-#define MediaPlayerNew DISABLED_MediaPlayerNew
-#endif
-TEST_F(PluginTest, MediaPlayerNew) {
-  TestPlugin("wmp_new.html", action_max_timeout_ms(), false);
+// Disabled - http://crbug.com/44662
+TEST_F(PluginTest, DISABLED_MediaPlayerNew) {
+  TestPlugin("wmp_new.html", TestTimeouts::action_max_timeout_ms(), false);
 }
 
 // http://crbug.com/4809
 TEST_F(PluginTest, DISABLED_MediaPlayerOld) {
-  TestPlugin("wmp_old.html", action_max_timeout_ms(), false);
+  TestPlugin("wmp_old.html", TestTimeouts::action_max_timeout_ms(), false);
 }
 
-#if defined(NDEBUG)
-#define Real DISABLED_Real
-#endif
-// Disabled on Release bots - http://crbug.com/44673
-TEST_F(PluginTest, Real) {
-  TestPlugin("real.html", action_max_timeout_ms(), false);
+// Disabled - http://crbug.com/44673
+TEST_F(PluginTest, DISABLED_Real) {
+  TestPlugin("real.html", TestTimeouts::action_max_timeout_ms(), false);
 }
 
 TEST_F(PluginTest, FlashOctetStream) {
-  TestPlugin("flash-octet-stream.html", action_max_timeout_ms(), false);
+  TestPlugin("flash-octet-stream.html",
+             TestTimeouts::action_max_timeout_ms(), false);
 }
 
 #if defined(OS_WIN)
@@ -229,16 +230,17 @@ TEST_F(PluginTest, FLAKY_FlashLayoutWhilePainting) {
 #else
 TEST_F(PluginTest, FlashLayoutWhilePainting) {
 #endif
-  TestPlugin("flash-layout-while-painting.html", action_max_timeout_ms(), true);
+  TestPlugin("flash-layout-while-painting.html",
+             TestTimeouts::action_max_timeout_ms(), true);
 }
 
 // http://crbug.com/8690
 TEST_F(PluginTest, DISABLED_Java) {
-  TestPlugin("Java.html", action_max_timeout_ms(), false);
+  TestPlugin("Java.html", TestTimeouts::action_max_timeout_ms(), false);
 }
 
 TEST_F(PluginTest, Silverlight) {
-  TestPlugin("silverlight.html", action_max_timeout_ms(), false);
+  TestPlugin("silverlight.html", TestTimeouts::action_max_timeout_ms(), false);
 }
 
 // This class provides functionality to test the plugin installer download
@@ -248,7 +250,7 @@ class PluginInstallerDownloadTest
       public testing::Test {
  public:
   // This class provides HTTP request context information for the downloads.
-  class UploadRequestContext : public URLRequestContext {
+  class UploadRequestContext : public net::URLRequestContext {
    public:
     UploadRequestContext() {
       Initialize();
@@ -258,12 +260,15 @@ class PluginInstallerDownloadTest
       DVLOG(1) << __FUNCTION__;
       delete http_transaction_factory_;
       delete http_auth_handler_factory_;
+      delete cert_verifier_;
+      delete host_resolver_;
     }
 
     void Initialize() {
       host_resolver_ =
           net::CreateSystemHostResolver(net::HostResolver::kDefaultParallelism,
                                         NULL, NULL);
+      cert_verifier_ = new net::CertVerifier;
       net::ProxyConfigService* proxy_config_service =
           net::ProxyService::CreateSystemProxyConfigService(NULL, NULL);
       DCHECK(proxy_config_service);
@@ -280,6 +285,7 @@ class PluginInstallerDownloadTest
           host_resolver_);
       http_transaction_factory_ = new net::HttpCache(
           net::HttpNetworkLayer::CreateFactory(host_resolver_,
+                                               cert_verifier_,
                                                NULL /* dnsrr_resolver */,
                                                NULL /* dns_cert_checker */,
                                                NULL /* ssl_host_info_factory */,
@@ -288,6 +294,7 @@ class PluginInstallerDownloadTest
                                                http_auth_handler_factory_,
                                                network_delegate_,
                                                NULL),
+          NULL /* net_log */,
           net::HttpCache::DefaultBackend::InMemory(0));
     }
 

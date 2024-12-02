@@ -17,12 +17,12 @@
 #include "gfx/rect.h"
 #include "gfx/size.h"
 #include "ipc/ipc_channel.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebCompositionUnderline.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPopupType.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebTextDirection.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebTextInputType.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebWidgetClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebTextInputType.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebWidgetClient.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "webkit/glue/webcursor.h"
 
@@ -46,9 +46,15 @@ class WebWidget;
 struct WebPopupMenuInfo;
 }
 
-namespace webkit_glue {
+namespace webkit {
+namespace npapi {
 struct WebPluginGeometry;
-}
+}  // namespace npapi
+
+namespace ppapi {
+class PluginInstance;
+}  // namespace ppapi
+}  // namespace webkit
 
 // RenderWidget provides a communication bridge between a WebWidget and
 // a RenderWidgetHost, the latter of which lives in a different process.
@@ -86,7 +92,7 @@ class RenderWidget : public IPC::Channel::Listener,
   bool has_focus() const { return has_focus_; }
 
   // IPC::Channel::Listener
-  virtual void OnMessageReceived(const IPC::Message& msg);
+  virtual bool OnMessageReceived(const IPC::Message& msg);
 
   // IPC::Message::Sender
   virtual bool Send(IPC::Message* msg);
@@ -96,6 +102,7 @@ class RenderWidget : public IPC::Channel::Listener,
   virtual void didScrollRect(int dx, int dy, const WebKit::WebRect& clipRect);
   virtual void didActivateAcceleratedCompositing(bool active);
   virtual void scheduleComposite();
+  virtual void scheduleAnimation();
   virtual void didFocus();
   virtual void didBlur();
   virtual void didChangeCursor(const WebKit::WebCursorInfo&);
@@ -111,7 +118,7 @@ class RenderWidget : public IPC::Channel::Listener,
 
   // Called when a plugin is moved.  These events are queued up and sent with
   // the next paint or scroll message to the host.
-  void SchedulePluginMove(const webkit_glue::WebPluginGeometry& move);
+  void SchedulePluginMove(const webkit::npapi::WebPluginGeometry& move);
 
   // Called when a plugin window has been destroyed, to make sure the currently
   // pending moves don't try to reference it.
@@ -152,6 +159,8 @@ class RenderWidget : public IPC::Channel::Listener,
   // Paints a border at the given rect for debugging purposes.
   void PaintDebugBorder(const gfx::Rect& rect, skia::PlatformCanvas* canvas);
 
+  void AnimationCallback();
+  void AnimateIfNeeded();
   void CallDoDeferredUpdate();
   void DoDeferredUpdate();
   void DoDeferredClose();
@@ -182,7 +191,7 @@ class RenderWidget : public IPC::Channel::Listener,
       const std::vector<WebKit::WebCompositionUnderline>& underlines,
       int selection_start,
       int selection_end);
-  void OnImeConfirmComposition();
+  void OnImeConfirmComposition(const string16& text);
   void OnMsgPaintAtSize(const TransportDIB::Handle& dib_id,
                         int tag,
                         const gfx::Size& page_size,
@@ -200,17 +209,22 @@ class RenderWidget : public IPC::Channel::Listener,
   // Detects if a suitable opaque plugin covers the given paint bounds with no
   // compositing necessary.
   //
-  // Returns true if the paint can be handled by just blitting the plugin
-  // bitmap. In this case, the location, clipping, and ID of the backing store
-  // will be filled into the given output parameters.
+  // Returns the plugin instance that's the source of the paint if the paint
+  // can be handled by just blitting the plugin bitmap. In this case, the
+  // location, clipping, and ID of the backing store will be filled into the
+  // given output parameters.
   //
-  // A return value of false means optimized painting can not be used and we
+  // A return value of null means optimized painting can not be used and we
   // should continue with the normal painting code path.
-  virtual bool GetBitmapForOptimizedPluginPaint(
+  virtual webkit::ppapi::PluginInstance* GetBitmapForOptimizedPluginPaint(
       const gfx::Rect& paint_bounds,
       TransportDIB** dib,
       gfx::Rect* location,
       gfx::Rect* clip);
+
+  // Gets the scroll offset of this widget, if this widget has a notion of
+  // scroll offset.
+  virtual gfx::Size GetScrollOffset();
 
   // Sets the "hidden" state of this widget.  All accesses to is_hidden_ should
   // use this method so that we can properly inform the RenderThread of our
@@ -337,7 +351,7 @@ class RenderWidget : public IPC::Channel::Listener,
   WebKit::WebPopupType popup_type_;
 
   // Holds all the needed plugin window moves for a scroll.
-  typedef std::vector<webkit_glue::WebPluginGeometry> WebPluginGeometryVector;
+  typedef std::vector<webkit::npapi::WebPluginGeometry> WebPluginGeometryVector;
   WebPluginGeometryVector plugin_window_moves_;
 
   // A custom background for the widget.
@@ -356,6 +370,10 @@ class RenderWidget : public IPC::Channel::Listener,
   // Set to true if painting to the window is handled by the accelerated
   // compositor.
   bool is_accelerated_compositing_active_;
+
+  base::Time animation_floor_time_;
+  bool animation_update_pending_;
+  bool animation_task_posted_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidget);
 };

@@ -4,7 +4,6 @@
 
 #include "chrome/browser/dom_ui/options/core_options_handler.h"
 
-#include "app/l10n_util.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -12,8 +11,8 @@
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/common/notification_details.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
@@ -22,6 +21,7 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 
 CoreOptionsHandler::CoreOptionsHandler() {}
 
@@ -61,9 +61,6 @@ void CoreOptionsHandler::GetLocalizedValues(
   // Search
   localized_strings->SetString("searchPageTitle",
       l10n_util::GetStringUTF16(IDS_OPTIONS_SEARCH_PAGE_TITLE));
-  localized_strings->SetString("searchPageInfo",
-      l10n_util::GetStringFUTF16(IDS_OPTIONS_SEARCH_PAGE_INFO,
-          l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
   localized_strings->SetString("searchPageNoMatches",
       l10n_util::GetStringUTF16(IDS_OPTIONS_SEARCH_PAGE_NO_MATCHES));
   localized_strings->SetString("searchPageHelpLabel",
@@ -135,6 +132,8 @@ void CoreOptionsHandler::RegisterMessages() {
       NewCallback(this, &CoreOptionsHandler::HandleSetBooleanPref));
   dom_ui_->RegisterMessageCallback("setIntegerPref",
       NewCallback(this, &CoreOptionsHandler::HandleSetIntegerPref));
+  dom_ui_->RegisterMessageCallback("setRealPref",
+      NewCallback(this, &CoreOptionsHandler::HandleSetRealPref));
   dom_ui_->RegisterMessageCallback("setStringPref",
       NewCallback(this, &CoreOptionsHandler::HandleSetStringPref));
   dom_ui_->RegisterMessageCallback("setObjectPref",
@@ -181,14 +180,25 @@ void CoreOptionsHandler::SetPref(const std::string& pref_name,
     case Value::TYPE_BOOLEAN:
       pref_service->SetBoolean(pref_name.c_str(), value_string == "true");
       break;
+
     case Value::TYPE_INTEGER:
       int int_value;
-      if (base::StringToInt(value_string, &int_value))
-        pref_service->SetInteger(pref_name.c_str(), int_value);
+      CHECK(base::StringToInt(value_string, &int_value));
+      pref_service->SetInteger(pref_name.c_str(), int_value);
+
       break;
+
+    case Value::TYPE_REAL:
+      double double_value;
+      CHECK(base::StringToDouble(value_string, &double_value));
+      pref_service->SetReal(pref_name.c_str(), double_value);
+
+      break;
+
     case Value::TYPE_STRING:
       pref_service->SetString(pref_name.c_str(), value_string);
       break;
+
     default:
       NOTREACHED();
       return;
@@ -299,6 +309,10 @@ void CoreOptionsHandler::HandleSetIntegerPref(const ListValue* args) {
   HandleSetPref(args, Value::TYPE_INTEGER);
 }
 
+void CoreOptionsHandler::HandleSetRealPref(const ListValue* args) {
+  HandleSetPref(args, Value::TYPE_REAL);
+}
+
 void CoreOptionsHandler::HandleSetStringPref(const ListValue* args) {
   HandleSetPref(args, Value::TYPE_STRING);
 }
@@ -367,4 +381,3 @@ void CoreOptionsHandler::NotifyPrefChanged(const std::string* pref_name) {
     }
   }
 }
-

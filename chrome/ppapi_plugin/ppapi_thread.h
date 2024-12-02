@@ -7,6 +7,7 @@
 #pragma once
 
 #include "base/basictypes.h"
+#include "base/process.h"
 #include "base/scoped_native_library.h"
 #include "base/scoped_ptr.h"
 #include "build/build_config.h"
@@ -31,12 +32,15 @@ class PpapiThread : public ChildThread {
 
  private:
   // ChildThread overrides.
-  virtual void OnMessageReceived(const IPC::Message& msg);
+  virtual bool OnMessageReceived(const IPC::Message& msg);
 
   // Message handlers.
-  void OnLoadPlugin(const FilePath& path, int renderer_id);
+  void OnMsgLoadPlugin(base::ProcessHandle renderer_handle,
+                       const FilePath& path,
+                       int renderer_id);
 
-  bool LoadPluginLib(const FilePath& path);
+  bool LoadPluginLib(base::ProcessHandle host_process_handle,
+                     const FilePath& path);
 
   // Sets up the channel to the given renderer. On success, returns true and
   // fills the given ChannelHandle with the information from the new channel.

@@ -18,8 +18,8 @@
 #include "googleurl/src/gurl.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_message.h"
-#include "webkit/glue/plugins/webplugininfo.h"
-#include "webkit/glue/plugins/webplugin_delegate.h"
+#include "webkit/plugins/npapi/webplugininfo.h"
+#include "webkit/plugins/npapi/webplugin_delegate.h"
 
 #if defined(OS_MACOSX)
 #include "base/hash_tables.h"
@@ -44,14 +44,16 @@ namespace skia {
 class PlatformCanvas;
 }
 
-namespace webkit_glue {
+namespace webkit {
+namespace npapi {
 class WebPlugin;
+}
 }
 
 // An implementation of WebPluginDelegate that proxies all calls to
 // the plugin process.
 class WebPluginDelegateProxy
-    : public webkit_glue::WebPluginDelegate,
+    : public webkit::npapi::WebPluginDelegate,
       public IPC::Channel::Listener,
       public IPC::Message::Sender,
       public base::SupportsWeakPtr<WebPluginDelegateProxy> {
@@ -64,7 +66,7 @@ class WebPluginDelegateProxy
   virtual bool Initialize(const GURL& url,
                           const std::vector<std::string>& arg_names,
                           const std::vector<std::string>& arg_values,
-                          webkit_glue::WebPlugin* plugin,
+                          webkit::npapi::WebPlugin* plugin,
                           bool load_manually);
   virtual void UpdateGeometry(const gfx::Rect& window_rect,
                               const gfx::Rect& clip_rect);
@@ -88,13 +90,14 @@ class WebPluginDelegateProxy
   virtual void SetContainerVisibility(bool is_visible);
   // Informs the plugin that its enclosing window's frame has changed.
   virtual void WindowFrameChanged(gfx::Rect window_frame, gfx::Rect view_frame);
-  // Informs the plugin that text is avaiable from plugin IME.
-  virtual void ImeCompositionConfirmed(const string16& text, int plugin_id);
+  // Informs the plugin that plugin IME has completed.
+  // If |text| is empty, composition was cancelled.
+  virtual void ImeCompositionCompleted(const string16& text, int plugin_id);
 #endif
 
   // IPC::Channel::Listener implementation:
-  virtual void OnMessageReceived(const IPC::Message& msg);
-  void OnChannelError();
+  virtual bool OnMessageReceived(const IPC::Message& msg);
+  virtual void OnChannelError();
 
   // IPC::Message::Sender implementation:
   virtual bool Send(IPC::Message* msg);
@@ -113,9 +116,9 @@ class WebPluginDelegateProxy
   virtual void DidFinishManualLoading();
   virtual void DidManualLoadFail();
   virtual void InstallMissingPlugin();
-  virtual webkit_glue::WebPluginResourceClient* CreateResourceClient(
+  virtual webkit::npapi::WebPluginResourceClient* CreateResourceClient(
       unsigned long resource_id, const GURL& url, int notify_id);
-  virtual webkit_glue::WebPluginResourceClient* CreateSeekableResourceClient(
+  virtual webkit::npapi::WebPluginResourceClient* CreateSeekableResourceClient(
       unsigned long resource_id, int range_request_id);
 
   CommandBufferProxy* CreateCommandBuffer();
@@ -162,7 +165,8 @@ class WebPluginDelegateProxy
   void OnDeferResourceLoading(unsigned long resource_id, bool defer);
 
 #if defined(OS_MACOSX)
-  void OnSetImeEnabled(bool enabled);
+  void OnFocusChanged(bool focused);
+  void OnStartIme();
   void OnBindFakePluginWindowHandle(bool opaque);
   void OnUpdateGeometry_ACK(int ack_key);
   void OnAcceleratedSurfaceSetIOSurface(gfx::PluginWindowHandle window,
@@ -231,13 +235,13 @@ class WebPluginDelegateProxy
 #endif
 
   base::WeakPtr<RenderView> render_view_;
-  webkit_glue::WebPlugin* plugin_;
+  webkit::npapi::WebPlugin* plugin_;
   bool uses_shared_bitmaps_;
   gfx::PluginWindowHandle window_;
   scoped_refptr<PluginChannelHost> channel_host_;
   std::string mime_type_;
   int instance_id_;
-  WebPluginInfo info_;
+  webkit::npapi::WebPluginInfo info_;
 
   gfx::Rect plugin_rect_;
   gfx::Rect clip_rect_;

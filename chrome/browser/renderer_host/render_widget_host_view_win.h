@@ -25,9 +25,8 @@
 #include "gfx/native_widget_types.h"
 #include "webkit/glue/webcursor.h"
 
-namespace app {
-class ViewProp;
-}
+class BackingStore;
+class RenderWidgetHost;
 
 namespace gfx {
 class Size;
@@ -38,8 +37,9 @@ namespace IPC {
 class Message;
 }
 
-class BackingStore;
-class RenderWidgetHost;
+namespace ui {
+class ViewProp;
+}
 
 typedef CWinTraits<WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS, 0>
     RenderWidgetHostHWNDTraits;
@@ -132,7 +132,7 @@ class RenderWidgetHostViewWin
   virtual void SetSize(const gfx::Size& size);
   virtual gfx::NativeView GetNativeView();
   virtual void MovePluginWindows(
-      const std::vector<webkit_glue::WebPluginGeometry>& moves);
+      const std::vector<webkit::npapi::WebPluginGeometry>& moves);
   virtual void Focus();
   virtual void Blur();
   virtual bool HasFocus();
@@ -148,7 +148,8 @@ class RenderWidgetHostViewWin
   virtual void DidUpdateBackingStore(
       const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
       const std::vector<gfx::Rect>& copy_rects);
-  virtual void RenderViewGone();
+  virtual void RenderViewGone(base::TerminationStatus status,
+                              int error_code);
   virtual void WillWmDestroy();  // called by TabContents before DestroyWindow
   virtual void WillDestroyRenderWidget(RenderWidgetHost* rwh);
   virtual void Destroy();
@@ -349,7 +350,7 @@ class RenderWidgetHostViewWin
   // method.
   WebKit::WebTextInputType text_input_type_;
 
-  ScopedVector<app::ViewProp> props_;
+  ScopedVector<ui::ViewProp> props_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewWin);
 };

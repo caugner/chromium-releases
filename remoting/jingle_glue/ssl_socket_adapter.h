@@ -15,6 +15,10 @@
 #include "third_party/libjingle/source/talk/base/asyncsocket.h"
 #include "third_party/libjingle/source/talk/base/ssladapter.h"
 
+namespace net {
+class CertVerifier;
+}  // namespace net
+
 namespace remoting {
 
 class SSLSocketAdapter;
@@ -42,7 +46,7 @@ class TransportSocket : public net::ClientSocket, public sigslot::has_slots<> {
   virtual bool IsConnected() const;
   virtual bool IsConnectedAndIdle() const;
   virtual int GetPeerAddress(net::AddressList* address) const;
-  virtual const net::BoundNetLog& NetLog() const { return net_log_; }
+  virtual const net::BoundNetLog& NetLog() const;
   virtual void SetSubresourceSpeculation();
   virtual void SetOmniboxSpeculation();
   virtual bool WasEverUsed() const;
@@ -129,6 +133,7 @@ class SSLSocketAdapter : public talk_base::SSLAdapter {
   std::string hostname_;
   TransportSocket* transport_socket_;
   scoped_ptr<net::SSLClientSocket> ssl_socket_;
+  scoped_ptr<net::CertVerifier> cert_verifier_;
   net::CompletionCallbackImpl<SSLSocketAdapter> connected_callback_;
   net::CompletionCallbackImpl<SSLSocketAdapter> read_callback_;
   net::CompletionCallbackImpl<SSLSocketAdapter> write_callback_;

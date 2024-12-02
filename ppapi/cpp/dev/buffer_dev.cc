@@ -9,13 +9,15 @@
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/module_impl.h"
 
+namespace pp {
+
 namespace {
 
-DeviceFuncs<PPB_Buffer_Dev> buffer_f(PPB_BUFFER_DEV_INTERFACE);
+template <> const char* interface_name<PPB_Buffer_Dev>() {
+  return PPB_BUFFER_DEV_INTERFACE;
+}
 
 }  // namespace
-
-namespace pp {
 
 Buffer_Dev::Buffer_Dev() : data_(NULL), size_(0) {
 }
@@ -26,29 +28,17 @@ Buffer_Dev::Buffer_Dev(const Buffer_Dev& other)
       size_(other.size_) {
 }
 
-Buffer_Dev::Buffer_Dev(int32_t size) : data_(NULL), size_(0) {
-  if (!buffer_f)
+Buffer_Dev::Buffer_Dev(Instance* instance, uint32_t size)
+    : data_(NULL),
+      size_(0) {
+  if (!has_interface<PPB_Buffer_Dev>())
     return;
 
-  PassRefFromConstructor(buffer_f->Create(Module::Get()->pp_module(), size));
-  if (!buffer_f->Describe(pp_resource(), &size_) ||
-      !(data_ = buffer_f->Map(pp_resource())))
+  PassRefFromConstructor(get_interface<PPB_Buffer_Dev>()->Create(
+      instance->pp_instance(), size));
+  if (!get_interface<PPB_Buffer_Dev>()->Describe(pp_resource(), &size_) ||
+      !(data_ = get_interface<PPB_Buffer_Dev>()->Map(pp_resource())))
     *this = Buffer_Dev();
-}
-
-Buffer_Dev::~Buffer_Dev() {
-}
-
-Buffer_Dev& Buffer_Dev::operator=(const Buffer_Dev& other) {
-  Buffer_Dev copy(other);
-  swap(copy);
-  return *this;
-}
-
-void Buffer_Dev::swap(Buffer_Dev& other) {
-  Resource::swap(other);
-  std::swap(size_, other.size_);
-  std::swap(data_, other.data_);
 }
 
 }  // namespace pp

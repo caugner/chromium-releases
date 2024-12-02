@@ -130,34 +130,36 @@ class Message : public Pickle {
     header()->routing = new_id;
   }
 
-  template<class T>
-  static bool Dispatch(const Message* msg, T* obj, void (T::*func)()) {
+  template<class T, class S>
+  static bool Dispatch(const Message* msg, T* obj, S* sender,
+                       void (T::*func)()) {
     (obj->*func)();
     return true;
   }
 
-  template<class T>
-  static bool Dispatch(const Message* msg, T* obj, void (T::*func)() const) {
+  template<class T, class S>
+  static bool Dispatch(const Message* msg, T* obj, S* sender,
+                       void (T::*func)() const) {
     (obj->*func)();
     return true;
   }
 
-  template<class T>
-  static bool Dispatch(const Message* msg, T* obj,
+  template<class T, class S>
+  static bool Dispatch(const Message* msg, T* obj, S* sender,
                        void (T::*func)(const Message&)) {
     (obj->*func)(*msg);
     return true;
   }
 
-  template<class T>
-  static bool Dispatch(const Message* msg, T* obj,
+  template<class T, class S>
+  static bool Dispatch(const Message* msg, T* obj, S* sender,
                        void (T::*func)(const Message&) const) {
     (obj->*func)(*msg);
     return true;
   }
 
   // Used for async messages with no parameters.
-  static void Log(const Message* msg, std::string* l) {
+  static void Log(std::string* name, const Message* msg, std::string* l) {
   }
 
   // Find the end of the message data that starts at range_start.  Returns NULL

@@ -31,14 +31,10 @@ cr.define('options', function() {
       OptionsPage.prototype.initializePage.call(this);
       var timezone = $('timezone-select');
       if (timezone) {
-        timezone.initializeValues(templateData.timezoneList);
         // Disable the timezone setting for non-owners, as this is a
         // system wide setting.
-        if (!AccountsOptions.currentUserIsOwner()) {
+        if (!AccountsOptions.currentUserIsOwner())
           timezone.disabled = true;
-          // Mark that this is manually disabled. See also pref_ui.js.
-          timezone.manually_disabled = true;
-        }
       }
 
       $('language-button').onclick = function(event) {

@@ -14,7 +14,6 @@
 #include "base/json/json_writer.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
@@ -51,7 +50,7 @@ bool WebDriverCommand::Init(Response* const response) {
   }
 
   VLOG(1) << "Fetching session: " << session_id;
-  session_ = Singleton<SessionManager>::get()->GetSession(session_id);
+  session_ = SessionManager::GetInstance()->GetSession(session_id);
   if (session_ == NULL) {
     response->set_value(Value::CreateStringValue(
         "Session not found: " + session_id));
@@ -75,4 +74,3 @@ bool WebDriverCommand::VerifyTabIsValid(Response* response) {
 }
 
 }  // namespace webdriver
-

@@ -113,15 +113,13 @@ void AddHTMLFromAppCacheToOutput(
                  info->size, GetByteDisplayUnits(info->size), true)),
              out);
     AddLiTag(kCreationTime,
-             WideToUTF8(TimeFormatFriendlyDateAndTime(
-                 info->creation_time)),
+             UTF16ToUTF8(TimeFormatFriendlyDateAndTime(info->creation_time)),
              out);
     AddLiTag(kLastAccessTime,
-             WideToUTF8(
-                 TimeFormatFriendlyDateAndTime(info->last_access_time)),
+             UTF16ToUTF8(TimeFormatFriendlyDateAndTime(info->last_access_time)),
              out);
     AddLiTag(kLastUpdateTime,
-             WideToUTF8(TimeFormatFriendlyDateAndTime(info->last_update_time)),
+             UTF16ToUTF8(TimeFormatFriendlyDateAndTime(info->last_update_time)),
              out);
 
     out->append("</ul></p></br>");
@@ -152,9 +150,10 @@ struct ManifestURLComparator {
 namespace appcache {
 
 ViewAppCacheInternalsJob::ViewAppCacheInternalsJob(
-    URLRequest* request,
-    AppCacheService* service) : URLRequestSimpleJob(request),
-                                appcache_service_(service) {
+    net::URLRequest* request,
+    AppCacheService* service)
+    : net::URLRequestSimpleJob(request),
+      appcache_service_(service) {
 }
 
 ViewAppCacheInternalsJob::~ViewAppCacheInternalsJob() {

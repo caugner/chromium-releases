@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,17 +11,18 @@
 #include "base/linked_ptr.h"
 #include "base/logging.h"
 #include "build/build_config.h"
+#include "ppapi/c/private/ppb_pdf.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/plugin_resource.h"
+#include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
-#include "webkit/glue/plugins/ppb_private.h"
 
 namespace pp {
 namespace proxy {
 
 class PrivateFontFile : public PluginResource {
  public:
-  PrivateFontFile() {}
+  PrivateFontFile(PP_Instance instance) : PluginResource(instance) {}
   virtual ~PrivateFontFile() {}
 
   // Resource overrides.
@@ -57,21 +58,24 @@ std::string* PrivateFontFile::AddFontTable(uint32_t table,
 namespace {
 
 PP_Resource GetFontFileWithFallback(
-    PP_Module module_id,
+    PP_Instance instance,
     const PP_FontDescription_Dev* description,
     PP_PrivateFontCharset charset) {
-  PluginDispatcher* dispatcher = PluginDispatcher::Get();
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
+  if (!dispatcher)
+    return 0;
+
   SerializedFontDescription desc;
   desc.SetFromPPFontDescription(dispatcher, *description, true);
 
   PP_Resource result = 0;
-  dispatcher->Send(new PpapiHostMsg_PPBPdf_GetFontFileWithFallback(
-      INTERFACE_ID_PPB_PDF, module_id, desc, charset, &result));
+  dispatcher->Send(new PpapiHostMsg_PPBPDF_GetFontFileWithFallback(
+      INTERFACE_ID_PPB_PDF, instance, desc, charset, &result));
   if (!result)
     return 0;
 
-  linked_ptr<PrivateFontFile> object(new PrivateFontFile);
-  dispatcher->plugin_resource_tracker()->AddResource(result, object);
+  linked_ptr<PrivateFontFile> object(new PrivateFontFile(instance));
+  PluginResourceTracker::GetInstance()->AddResource(result, object);
   return result;
 }
 
@@ -82,13 +86,16 @@ bool GetFontTableForPrivateFontFile(PP_Resource font_file,
   PrivateFontFile* object = PluginResource::GetAs<PrivateFontFile>(font_file);
   if (!object)
     return false;
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(
+      object->instance());
+  if (!dispatcher)
+    return false;
 
   std::string* contents = object->GetFontTable(table);
   if (!contents) {
     std::string deserialized;
-    PluginDispatcher::Get()->Send(
-        new PpapiHostMsg_PPBPdf_GetFontTableForPrivateFontFile(
-            INTERFACE_ID_PPB_PDF, font_file, table, &deserialized));
+    dispatcher->Send(new PpapiHostMsg_PPBPDF_GetFontTableForPrivateFontFile(
+        INTERFACE_ID_PPB_PDF, font_file, table, &deserialized));
     if (deserialized.empty())
       return false;
     contents = object->AddFontTable(table, deserialized);
@@ -100,7 +107,7 @@ bool GetFontTableForPrivateFontFile(PP_Resource font_file,
   return true;
 }
 
-const PPB_Private ppb_private = {
+const PPB_PDF ppb_pdf = {
   NULL,  // &GetLocalizedString,
   NULL,  // &GetResourceImage,
   &GetFontFileWithFallback,
@@ -109,44 +116,47 @@ const PPB_Private ppb_private = {
 
 }  // namespace
 
-PPB_Pdf_Proxy::PPB_Pdf_Proxy(Dispatcher* dispatcher,
+PPB_PDF_Proxy::PPB_PDF_Proxy(Dispatcher* dispatcher,
                              const void* target_interface)
     : InterfaceProxy(dispatcher, target_interface) {
 }
 
-PPB_Pdf_Proxy::~PPB_Pdf_Proxy() {
+PPB_PDF_Proxy::~PPB_PDF_Proxy() {
 }
 
-const void* PPB_Pdf_Proxy::GetSourceInterface() const {
-  return &ppb_private;
+const void* PPB_PDF_Proxy::GetSourceInterface() const {
+  return &ppb_pdf;
 }
 
-InterfaceID PPB_Pdf_Proxy::GetInterfaceId() const {
+InterfaceID PPB_PDF_Proxy::GetInterfaceId() const {
   return INTERFACE_ID_PPB_PDF;
 }
 
-void PPB_Pdf_Proxy::OnMessageReceived(const IPC::Message& msg) {
-  IPC_BEGIN_MESSAGE_MAP(PPB_Pdf_Proxy, msg)
-    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBPdf_GetFontFileWithFallback,
+bool PPB_PDF_Proxy::OnMessageReceived(const IPC::Message& msg) {
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(PPB_PDF_Proxy, msg)
+    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBPDF_GetFontFileWithFallback,
                         OnMsgGetFontFileWithFallback)
-    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBPdf_GetFontTableForPrivateFontFile,
+    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBPDF_GetFontTableForPrivateFontFile,
                         OnMsgGetFontTableForPrivateFontFile)
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   // TODO(brettw): handle bad messages!
+  return handled;
 }
 
-void PPB_Pdf_Proxy::OnMsgGetFontFileWithFallback(
-    PP_Module module,
+void PPB_PDF_Proxy::OnMsgGetFontFileWithFallback(
+    PP_Instance instance,
     const SerializedFontDescription& in_desc,
     int32_t charset,
     PP_Resource* result) {
   PP_FontDescription_Dev desc;
   in_desc.SetToPPFontDescription(dispatcher(), &desc, false);
-  *result = ppb_pdf_target()->GetFontFileWithFallback(module, &desc,
+  *result = ppb_pdf_target()->GetFontFileWithFallback(instance, &desc,
       static_cast<PP_PrivateFontCharset>(charset));
 }
 
-void PPB_Pdf_Proxy::OnMsgGetFontTableForPrivateFontFile(PP_Resource font_file,
+void PPB_PDF_Proxy::OnMsgGetFontTableForPrivateFontFile(PP_Resource font_file,
                                                         uint32_t table,
                                                         std::string* result) {
   // TODO(brettw): It would be nice not to copy here. At least on Linux,

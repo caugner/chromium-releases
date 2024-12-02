@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,9 @@
 #include "base/debug/leak_tracker.h"
 #include "base/linked_ptr.h"
 #include "base/logging.h"
-#include "base/non_thread_safe.h"
 #include "base/ref_counted.h"
 #include "base/string16.h"
+#include "base/threading/non_thread_safe.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/load_states.h"
 #include "net/base/net_log.h"
@@ -28,17 +28,7 @@ namespace base {
 class Time;
 }  // namespace base
 
-namespace net {
-class CookieOptions;
-class IOBuffer;
-class SSLCertRequestInfo;
-class UploadData;
-class URLRequestJob;
-class X509Certificate;
-}  // namespace net
-
 class FilePath;
-class URLRequestContext;
 
 // This stores the values of the Set-Cookie headers received during the request.
 // Each item in the vector corresponds to a Set-Cookie: line received,
@@ -46,6 +36,15 @@ class URLRequestContext;
 typedef std::vector<std::string> ResponseCookies;
 
 namespace net {
+
+class CookieOptions;
+class IOBuffer;
+class SSLCertRequestInfo;
+class UploadData;
+class URLRequestContext;
+class URLRequestJob;
+class X509Certificate;
+
 //-----------------------------------------------------------------------------
 // A class  representing the asynchronous load of a data stream from an URL.
 //
@@ -57,8 +56,23 @@ namespace net {
 //
 // NOTE: All usage of all instances of this class should be on the same thread.
 //
-class URLRequest : public NonThreadSafe {
+class URLRequest : public base::NonThreadSafe {
  public:
+  // Callback function implemented by protocol handlers to create new jobs.
+  // The factory may return NULL to indicate an error, which will cause other
+  // factories to be queried.  If no factory handles the request, then the
+  // default job will be used.
+  typedef URLRequestJob* (ProtocolFactory)(URLRequest* request,
+                                           const std::string& scheme);
+
+  // HTTP request/response header IDs (via some preprocessor fun) for use with
+  // SetRequestHeaderById and GetResponseHeaderById.
+  enum {
+#define HTTP_ATOM(x) HTTP_ ## x,
+#include "net/http/http_atom_list.h"
+#undef HTTP_ATOM
+  };
+
   // Derive from this class and add your own data members to associate extra
   // information with a URLRequest. Use GetUserData(key) and SetUserData()
   class UserData {
@@ -66,13 +80,6 @@ class URLRequest : public NonThreadSafe {
     UserData() {}
     virtual ~UserData() {}
   };
-
-  // Callback function implemented by protocol handlers to create new jobs.
-  // The factory may return NULL to indicate an error, which will cause other
-  // factories to be queried.  If no factory handles the request, then the
-  // default job will be used.
-  typedef URLRequestJob* (ProtocolFactory)(URLRequest* request,
-                                           const std::string& scheme);
 
   // This class handles network interception.  Use with
   // (Un)RegisterRequestInterceptor.
@@ -435,7 +442,7 @@ class URLRequest : public NonThreadSafe {
   bool is_pending() const { return is_pending_; }
 
   // Returns the error status of the request.
-  const URLRequestStatus& status() const { return status_; }
+  const net::URLRequestStatus& status() const { return status_; }
 
   // This method is called to start the request.  The delegate will receive
   // a OnResponseStarted callback when the request is started.
@@ -510,14 +517,6 @@ class URLRequest : public NonThreadSafe {
   // cancel the request instead, call Cancel().
   void ContinueDespiteLastError();
 
-  // HTTP request/response header IDs (via some preprocessor fun) for use with
-  // SetRequestHeaderById and GetResponseHeaderById.
-  enum {
-#define HTTP_ATOM(x) HTTP_ ## x,
-#include "net/http/http_atom_list.h"
-#undef HTTP_ATOM
-  };
-
   // Returns true if performance profiling should be enabled on the
   // URLRequestJob serving this request.
   bool enable_profiling() const { return enable_profiling_; }
@@ -550,7 +549,7 @@ class URLRequest : public NonThreadSafe {
   void set_is_pending(bool value) { is_pending_ = value; }
 
   // Allow the URLRequestJob class to set our status too
-  void set_status(const URLRequestStatus& value) { status_ = value; }
+  void set_status(const net::URLRequestStatus& value) { status_ = value; }
 
   // Allow the URLRequestJob to redirect this request.  Returns net::OK if
   // successful, otherwise an error code is returned.
@@ -569,6 +568,7 @@ class URLRequest : public NonThreadSafe {
 
  private:
   friend class URLRequestJob;
+  typedef std::map<const void*, linked_ptr<UserData> > UserDataMap;
 
   void StartJob(URLRequestJob* job);
 
@@ -610,7 +610,7 @@ class URLRequest : public NonThreadSafe {
   // Current error status of the job. When no error has been encountered, this
   // will be SUCCESS. If multiple errors have been encountered, this will be
   // the first non-SUCCESS status seen.
-  URLRequestStatus status_;
+  net::URLRequestStatus status_;
 
   // The HTTP response info, lazily initialized.
   net::HttpResponseInfo response_info_;
@@ -621,7 +621,6 @@ class URLRequest : public NonThreadSafe {
   bool is_pending_;
 
   // Externally-defined data accessible by key
-  typedef std::map<const void*, linked_ptr<UserData> > UserDataMap;
   UserDataMap user_data_;
 
   // Whether to enable performance profiling on the job serving this request.
@@ -645,7 +644,5 @@ class URLRequest : public NonThreadSafe {
 };
 
 }  // namespace net
-
-typedef net::URLRequest URLRequest;
 
 #endif  // NET_URL_REQUEST_URL_REQUEST_H_

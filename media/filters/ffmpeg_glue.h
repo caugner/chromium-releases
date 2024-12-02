@@ -29,8 +29,8 @@
 #include <map>
 #include <string>
 
-#include "base/lock.h"
 #include "base/singleton.h"
+#include "base/synchronization/lock.h"
 
 namespace media {
 
@@ -64,8 +64,11 @@ class FFmpegURLProtocol {
   DISALLOW_COPY_AND_ASSIGN(FFmpegURLProtocol);
 };
 
-class FFmpegGlue : public Singleton<FFmpegGlue> {
+class FFmpegGlue {
  public:
+  // Returns the singleton instance.
+  static FFmpegGlue* GetInstance();
+
   // Adds a FFmpegProtocol to the FFmpeg glue layer and returns a unique string
   // that can be passed to FFmpeg to identify the data source.
   std::string AddProtocol(FFmpegURLProtocol* protocol);
@@ -90,7 +93,7 @@ class FFmpegGlue : public Singleton<FFmpegGlue> {
   std::string GetProtocolKey(FFmpegURLProtocol* protocol);
 
   // Mutual exclusion while adding/removing items from the map.
-  Lock lock_;
+  base::Lock lock_;
 
   // Map between keys and FFmpegProtocol references.
   typedef std::map<std::string, FFmpegURLProtocol*> ProtocolMap;

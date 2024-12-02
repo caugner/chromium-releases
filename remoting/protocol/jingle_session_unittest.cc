@@ -2,8 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/file_path.h"
+#include "base/file_util.h"
+#include "base/nss_util.h"
+#include "base/path_service.h"
 #include "base/time.h"
-#include "base/waitable_event.h"
+#include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
@@ -128,6 +132,34 @@ class JingleSessionTest : public testing::Test {
         session_manager_pair_->client_session_manager(),
         NewCallback(&client_server_callback_,
                     &MockSessionManagerCallback::OnIncomingSession));
+
+    FilePath certs_dir;
+    PathService::Get(base::DIR_SOURCE_ROOT, &certs_dir);
+    certs_dir = certs_dir.AppendASCII("net");
+    certs_dir = certs_dir.AppendASCII("data");
+    certs_dir = certs_dir.AppendASCII("ssl");
+    certs_dir = certs_dir.AppendASCII("certificates");
+
+    FilePath cert_path = certs_dir.AppendASCII("unittest.selfsigned.der");
+    std::string cert_der;
+    ASSERT_TRUE(file_util::ReadFileToString(cert_path, &cert_der));
+
+    scoped_refptr<net::X509Certificate> cert =
+        net::X509Certificate::CreateFromBytes(cert_der.data(),
+                                              cert_der.size());
+
+    FilePath key_path = certs_dir.AppendASCII("unittest.key.bin");
+    std::string key_string;
+    ASSERT_TRUE(file_util::ReadFileToString(key_path, &key_string));
+    std::vector<uint8> key_vector(
+        reinterpret_cast<const uint8*>(key_string.data()),
+        reinterpret_cast<const uint8*>(key_string.data() +
+                                       key_string.length()));
+
+    scoped_ptr<base::RSAPrivateKey> private_key(
+        base::RSAPrivateKey::CreateFromPrivateKeyInfo(key_vector));
+    host_server_->SetCertificate(cert);
+    host_server_->SetPrivateKey(private_key.release());
   }
 
   bool InitiateConnection() {
@@ -514,6 +546,10 @@ class UDPChannelTester : public ChannelTesterBase {
   int broken_packets_;
 };
 
+// Mac needs to implement X509Certificate::CreateSelfSigned to enable these
+// tests.
+#if defined(USE_NSS) || defined(OS_WIN)
+
 // Verify that we can create and destory server objects without a connection.
 TEST_F(JingleSessionTest, CreateAndDestoy) {
   CreateServerPair();
@@ -570,7 +606,6 @@ TEST_F(JingleSessionTest, TestControlChannel) {
   CloseSessions();
 }
 
-
 // Verify that data can be transmitted over the video channel.
 TEST_F(JingleSessionTest, TestVideoChannel) {
   CreateServerPair();
@@ -615,6 +650,8 @@ TEST_F(JingleSessionTest, TestVideoRtpChannel) {
   // Connections must be closed while |tester| still exists.
   CloseSessions();
 }
+
+#endif
 
 }  // namespace protocol
 }  // namespace remoting

@@ -11,10 +11,10 @@
 #include <vector>
 
 #include "base/file_path.h"
-#include "base/lock.h"
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
-#include "base/thread.h"
+#include "base/synchronization/lock.h"
+#include "base/threading/thread.h"
 #include "base/timer.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/sync/engine/syncapi.h"
@@ -71,6 +71,19 @@ class SyncFrontend {
   virtual void OnClearServerDataSucceeded() = 0;
   virtual void OnClearServerDataFailed() = 0;
 
+  // The syncer requires a passphrase to decrypt sensitive
+  // updates. This is called when the first sensitive data type is
+  // setup by the user as well as anytime any the passphrase is
+  // changed in another synced client.  if
+  // |passphrase_required_for_decryption| is false, the passphrase is
+  // required only for encryption.
+  virtual void OnPassphraseRequired(bool for_decryption) = 0;
+
+  // Called when the passphrase provided by the user is
+  // accepted. After this is called, updates to sensitive nodes are
+  // encrypted using the accepted passphrase.
+  virtual void OnPassphraseAccepted() = 0;
+
  protected:
   // Don't delete through SyncFrontend interface.
   virtual ~SyncFrontend() {
@@ -94,10 +107,7 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
   // Create a SyncBackendHost with a reference to the |frontend| that it serves
   // and communicates to via the SyncFrontend interface (on the same thread
   // it used to call the constructor).
-  SyncBackendHost(SyncFrontend* frontend,
-                  Profile* profile,
-                  const FilePath& profile_path,
-                  const DataTypeController::TypeMap& data_type_controllers);
+  SyncBackendHost(SyncFrontend* frontend, Profile* profile);
   // For testing.
   // TODO(skrul): Extract an interface so this is not needed.
   SyncBackendHost();
@@ -139,8 +149,23 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
   // The ready_task will be run when all of the requested data types
   // are up-to-date and ready for activation.  The task will cancelled
   // upon shutdown.  The method takes ownership of the task pointer.
-  virtual void ConfigureDataTypes(const syncable::ModelTypeSet& types,
-                                  CancelableTask* ready_task);
+  virtual void ConfigureDataTypes(
+      const DataTypeController::TypeMap& data_type_controllers,
+      const syncable::ModelTypeSet& types,
+      CancelableTask* ready_task);
+
+  syncable::AutofillMigrationState
+      GetAutofillMigrationState();
+
+  void SetAutofillMigrationState(
+      syncable::AutofillMigrationState state);
+
+  syncable::AutofillMigrationDebugInfo
+      GetAutofillMigrationDebugInfo();
+
+  void SetAutofillMigrationDebugInfo(
+      syncable::AutofillMigrationDebugInfo::PropertyToSet property_to_set,
+      const syncable::AutofillMigrationDebugInfo& info);
 
   // Activates change processing for the given data type.  This must
   // be called synchronously with the data type's model association so
@@ -445,6 +470,8 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
 
   UIModelWorker* ui_worker();
 
+  void ConfigureAutofillMigration();
+
   // A thread we dedicate for use by our Core to perform initialization,
   // authentication, handle messages from the syncapi, and periodically tell
   // the syncapi to persist itself.
@@ -480,7 +507,7 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
   // pointer value", and then invoke methods), because lifetimes are managed on
   // the UI thread.  Of course, this comment only applies to ModelSafeWorker
   // impls that are themselves thread-safe, such as UIModelWorker.
-  mutable Lock registrar_lock_;
+  mutable base::Lock registrar_lock_;
 
   // The frontend which we serve (and are owned by).
   SyncFrontend* frontend_;
@@ -490,9 +517,6 @@ class SyncBackendHost : public browser_sync::ModelSafeWorkerRegistrar {
 
   // Path of the folder that stores the sync data files.
   FilePath sync_data_folder_path_;
-
-  // List of registered data type controllers.
-  DataTypeController::TypeMap data_type_controllers_;
 
   // A task that should be called once data type configuration is
   // complete.

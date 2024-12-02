@@ -1,19 +1,20 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/extension_host_mac.h"
 
-#import "chrome/browser/cocoa/chrome_event_processing_window.h"
-#import "chrome/browser/cocoa/extensions/extension_popup_controller.h"
-#import "chrome/browser/cocoa/info_bubble_window.h"
 #include "chrome/browser/renderer_host/render_widget_host_view_mac.h"
+#import "chrome/browser/ui/cocoa/chrome_event_processing_window.h"
+#import "chrome/browser/ui/cocoa/extensions/extension_popup_controller.h"
+#import "chrome/browser/ui/cocoa/info_bubble_window.h"
 #include "chrome/common/native_web_keyboard_event.h"
 
 ExtensionHostMac::~ExtensionHostMac() {
   // If there is a popup open for this host's extension, close it.
   ExtensionPopupController* popup = [ExtensionPopupController popup];
-  if (popup && [popup extensionHost]->extension() == this->extension()) {
+  if ([[popup window] isVisible] &&
+      [popup extensionHost]->extension() == this->extension()) {
     InfoBubbleWindow* window = (InfoBubbleWindow*)[popup window];
     [window setDelayOnClose:NO];
     [popup close];

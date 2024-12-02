@@ -1,14 +1,15 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/test/ui/ui_test.h"
 
+#include "base/test/test_timeouts.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
 #include "chrome/browser/prefs/pref_value_store.h"
 #include "chrome/browser/sync/signin_manager.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/json_pref_store.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -23,11 +24,11 @@ class NewTabUITest : public UITest {
     dom_automation_enabled_ = true;
     // Set home page to the empty string so that we can set the home page using
     // preferences.
-    homepage_ = "";
+    set_homepage("");
 
     // Setup the DEFAULT_THEME profile (has fake history entries).
     set_template_user_data(UITest::ComputeTypicalUserDataSource(
-        UITest::DEFAULT_THEME));
+        ProxyLauncher::DEFAULT_THEME));
   }
 };
 
@@ -50,10 +51,11 @@ TEST_F(NewTabUITest, NTPHasThumbnails) {
   ASSERT_TRUE(WaitUntilJavaScriptCondition(tab, L"",
       L"window.domAutomationController.send("
       L"document.getElementsByClassName('filler').length <= 5)",
-      action_max_timeout_ms()));
+      TestTimeouts::action_max_timeout_ms()));
 }
 
-TEST_F(NewTabUITest, NTPHasLoginName) {
+// Sometimes hangs: http://crbug.com/70157
+TEST_F(NewTabUITest, DISABLED_NTPHasLoginName) {
   scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(window.get());
 
@@ -73,7 +75,7 @@ TEST_F(NewTabUITest, NTPHasLoginName) {
   ASSERT_TRUE(WaitUntilJavaScriptCondition(tab, L"",
       L"window.domAutomationController.send("
       L"document.getElementById('login-username').innerText.length > 0)",
-      action_max_timeout_ms()));
+      TestTimeouts::action_max_timeout_ms()));
 
   ASSERT_TRUE(tab->ExecuteAndExtractString(
       L"",
@@ -106,6 +108,42 @@ TEST_F(NewTabUITest, AboutHangInNTP) {
   scoped_refptr<TabProxy> tab2 = window->GetActiveTab();
   ASSERT_TRUE(tab2.get());
   ASSERT_TRUE(tab2->NavigateToURLAsync(GURL(chrome::kAboutHangURL)));
+}
+
+// Allows testing NTP in process-per-tab mode.
+class NewTabUIProcessPerTabTest : public NewTabUITest {
+ public:
+  NewTabUIProcessPerTabTest() : NewTabUITest() {}
+
+ protected:
+  virtual void SetUp() {
+    launch_arguments_.AppendSwitch(switches::kProcessPerTab);
+    UITest::SetUp();
+  }
+};
+
+// Navigates away from NTP before it commits, in process-per-tab mode.
+// Ensures that we don't load the normal page in the NTP process (and thus
+// crash), as in http://crbug.com/69224.
+TEST_F(NewTabUIProcessPerTabTest, NavBeforeNTPCommits) {
+  scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(window.get());
+
+  // Bring up a new tab page.
+  ASSERT_TRUE(window->RunCommand(IDC_NEW_TAB));
+  int load_time;
+  ASSERT_TRUE(automation()->WaitForInitialNewTabUILoad(&load_time));
+  scoped_refptr<TabProxy> tab = window->GetActiveTab();
+  ASSERT_TRUE(tab.get());
+
+  // Navigate to about:hang to stall the process.
+  ASSERT_TRUE(tab->NavigateToURLAsync(GURL(chrome::kAboutHangURL)));
+
+  // Visit a normal URL in another NTP that hasn't committed.
+  ASSERT_TRUE(window->RunCommand(IDC_NEW_TAB));
+  scoped_refptr<TabProxy> tab2 = window->GetActiveTab();
+  ASSERT_TRUE(tab2.get());
+  ASSERT_TRUE(tab2->NavigateToURL(GURL("data:text/html,hello world")));
 }
 
 // Fails about ~5% of the time on all platforms. http://crbug.com/45001

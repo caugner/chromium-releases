@@ -8,29 +8,34 @@
 
 #include <string>
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/i18n/rtl.h"
-#include "base/singleton.h"
+#include "base/lazy_instance.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/safe_browsing/malware_details.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/jstemplate_builder.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "net/base/escape.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 // For malware interstitial pages, we link the problematic URL to Google's
 // diagnostic page.
@@ -54,23 +59,40 @@ static const char* const kLearnMoreMalwareUrl =
 static const char* const kLearnMorePhishingUrl =
     "http://www.google.com/support/bin/answer.py?answer=106318";
 
-static const wchar_t* const kSbDiagnosticHtml =
-    L"<a href=\"\" onclick=\"sendCommand('showDiagnostic'); return false;\" "
-    L"onmousedown=\"return false;\">%ls</a>";
+// URL for the "Safe Browsing Privacy Policies" link on the blocking page.
+// Note: this page is not yet localized.
+static const char* const kSbPrivacyPolicyUrl =
+    "http://www.google.com/intl/en_us/privacy/browsing.html";
 
-static const wchar_t* const kPLinkHtml =
-    L"<a href=\"\" onclick=\"sendCommand('proceed'); return false;\" "
-    L"onmousedown=\"return false;\">%ls</a>";
+static const char* const kSbDiagnosticHtml =
+    "<a href=\"\" onclick=\"sendCommand('showDiagnostic'); return false;\" "
+    "onmousedown=\"return false;\">%s</a>";
+
+static const char* const kPLinkHtml =
+    "<a href=\"\" onclick=\"sendCommand('proceed'); return false;\" "
+    "onmousedown=\"return false;\">%s</a>";
+
+static const char* const kPrivacyLinkHtml =
+    "<a href=\"\" onclick=\"sendCommand('showPrivacy'); return false;\" "
+    "onmousedown=\"return false;\">%s</a>";
 
 // The commands returned by the page when the user performs an action.
 static const char* const kShowDiagnosticCommand = "showDiagnostic";
 static const char* const kReportErrorCommand = "reportError";
 static const char* const kLearnMoreCommand = "learnMore";
+static const char* const kShowPrivacyCommand = "showPrivacy";
 static const char* const kProceedCommand = "proceed";
 static const char* const kTakeMeBackCommand = "takeMeBack";
+static const char* const kDoReportCommand = "doReport";
+static const char* const kDontReportCommand = "dontReport";
+static const char* const kDisplayCheckBox = "displaycheckbox";
+static const char* const kBoxChecked = "boxchecked";
 
 // static
 SafeBrowsingBlockingPageFactory* SafeBrowsingBlockingPage::factory_ = NULL;
+
+static base::LazyInstance<SafeBrowsingBlockingPage::UnsafeResourceMap>
+    g_unsafe_resource_map(base::LINKER_INITIALIZED);
 
 // The default SafeBrowsingBlockingPageFactory.  Global, made a singleton so we
 // don't leak it.
@@ -86,12 +108,16 @@ class SafeBrowsingBlockingPageFactoryImpl
   }
 
  private:
-  friend struct DefaultSingletonTraits<SafeBrowsingBlockingPageFactoryImpl>;
+  friend struct base::DefaultLazyInstanceTraits<
+      SafeBrowsingBlockingPageFactoryImpl>;
 
   SafeBrowsingBlockingPageFactoryImpl() { }
 
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingBlockingPageFactoryImpl);
 };
+
+static base::LazyInstance<SafeBrowsingBlockingPageFactoryImpl>
+    g_safe_browsing_blocking_page_factory_impl(base::LINKER_INITIALIZED);
 
 SafeBrowsingBlockingPage::SafeBrowsingBlockingPage(
     SafeBrowsingService* sb_service,
@@ -102,7 +128,8 @@ SafeBrowsingBlockingPage::SafeBrowsingBlockingPage(
                        unsafe_resources[0].url),
       sb_service_(sb_service),
       is_main_frame_(IsMainPage(unsafe_resources)),
-      unsafe_resources_(unsafe_resources) {
+      unsafe_resources_(unsafe_resources),
+      malware_details_(NULL) {
   RecordUserAction(SHOW);
   if (!is_main_frame_) {
     navigation_entry_index_to_remove_ =
@@ -110,6 +137,23 @@ SafeBrowsingBlockingPage::SafeBrowsingBlockingPage(
   } else {
     navigation_entry_index_to_remove_ = -1;
   }
+
+  // Start computing malware details. They will be sent only
+  // if the user opts-in on the blocking page later.
+  // If there's more than one malicious resources, it means the user
+  // clicked through the first warning, so we don't prepare additional
+  // reports.
+  if (unsafe_resources.size() == 1 &&
+      unsafe_resources[0].threat_type == SafeBrowsingService::URL_MALWARE &&
+      malware_details_ == NULL &&
+      CanShowMalwareDetailsOption()) {
+    malware_details_ = new MalwareDetails(tab(), unsafe_resources[0]);
+  }
+}
+
+bool SafeBrowsingBlockingPage::CanShowMalwareDetailsOption() {
+  return (!tab()->profile()->IsOffTheRecord() &&
+          tab()->GetURL().SchemeIs(chrome::kHttpScheme));
 }
 
 SafeBrowsingBlockingPage::~SafeBrowsingBlockingPage() {
@@ -146,16 +190,16 @@ std::string SafeBrowsingBlockingPage::GetHTMLContents() {
 
 void SafeBrowsingBlockingPage::PopulateStringDictionary(
     DictionaryValue* strings,
-    const std::wstring& title,
-    const std::wstring& headline,
-    const std::wstring& description1,
-    const std::wstring& description2,
-    const std::wstring& description3) {
-  strings->SetString("title", WideToUTF16Hack(title));
-  strings->SetString("headLine", WideToUTF16Hack(headline));
-  strings->SetString("description1", WideToUTF16Hack(description1));
-  strings->SetString("description2", WideToUTF16Hack(description2));
-  strings->SetString("description3", WideToUTF16Hack(description3));
+    const string16& title,
+    const string16& headline,
+    const string16& description1,
+    const string16& description2,
+    const string16& description3) {
+  strings->SetString("title", title);
+  strings->SetString("headLine", headline);
+  strings->SetString("description1", description1);
+  strings->SetString("description2", description2);
+  strings->SetString("description3", description3);
 }
 
 void SafeBrowsingBlockingPage::PopulateMultipleThreatStringDictionary(
@@ -199,31 +243,34 @@ void SafeBrowsingBlockingPage::PopulateMultipleThreatStringDictionary(
     PopulateStringDictionary(
         strings,
         // Use the malware headline, it is the scariest one.
-        l10n_util::GetString(IDS_SAFE_BROWSING_MULTI_THREAT_TITLE),
-        l10n_util::GetString(IDS_SAFE_BROWSING_MALWARE_HEADLINE),
-        l10n_util::GetStringF(IDS_SAFE_BROWSING_MULTI_THREAT_DESCRIPTION1,
-                              UTF8ToWide(tab()->GetURL().host())),
-        l10n_util::GetString(IDS_SAFE_BROWSING_MULTI_THREAT_DESCRIPTION2),
-        L"");
+        l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MULTI_THREAT_TITLE),
+        l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MALWARE_HEADLINE),
+        l10n_util::GetStringFUTF16(IDS_SAFE_BROWSING_MULTI_THREAT_DESCRIPTION1,
+                                   UTF8ToUTF16(tab()->GetURL().host())),
+        l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MULTI_THREAT_DESCRIPTION2),
+        string16());
   } else if (malware) {
     // Just malware.
     PopulateStringDictionary(
         strings,
-        l10n_util::GetString(IDS_SAFE_BROWSING_MALWARE_TITLE),
-        l10n_util::GetString(IDS_SAFE_BROWSING_MALWARE_HEADLINE),
-        l10n_util::GetStringF(IDS_SAFE_BROWSING_MULTI_MALWARE_DESCRIPTION1,
-                              UTF8ToWide(tab()->GetURL().host())),
-        l10n_util::GetString(IDS_SAFE_BROWSING_MULTI_MALWARE_DESCRIPTION2),
-        l10n_util::GetString(IDS_SAFE_BROWSING_MULTI_MALWARE_DESCRIPTION3));
+        l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MALWARE_TITLE),
+        l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MALWARE_HEADLINE),
+        l10n_util::GetStringFUTF16(IDS_SAFE_BROWSING_MULTI_MALWARE_DESCRIPTION1,
+                                   UTF8ToUTF16(tab()->GetURL().host())),
+        l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MULTI_MALWARE_DESCRIPTION2),
+        l10n_util::GetStringUTF16(
+            IDS_SAFE_BROWSING_MULTI_MALWARE_DESCRIPTION3));
   } else {
     // Just phishing.
     PopulateStringDictionary(
         strings,
-        l10n_util::GetString(IDS_SAFE_BROWSING_PHISHING_TITLE),
-        l10n_util::GetString(IDS_SAFE_BROWSING_PHISHING_HEADLINE),
-        l10n_util::GetStringF(IDS_SAFE_BROWSING_MULTI_PHISHING_DESCRIPTION1,
-                              UTF8ToWide(tab()->GetURL().host())),
-        L"", L"");
+        l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_PHISHING_TITLE),
+        l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_PHISHING_HEADLINE),
+        l10n_util::GetStringFUTF16(
+            IDS_SAFE_BROWSING_MULTI_PHISHING_DESCRIPTION1,
+            UTF8ToUTF16(tab()->GetURL().host())),
+        string16(),
+        string16());
   }
 
   strings->SetString("confirm_text",
@@ -239,66 +286,98 @@ void SafeBrowsingBlockingPage::PopulateMultipleThreatStringDictionary(
 
 void SafeBrowsingBlockingPage::PopulateMalwareStringDictionary(
     DictionaryValue* strings) {
-  std::wstring diagnostic_link = StringPrintf(kSbDiagnosticHtml,
-      l10n_util::GetString(IDS_SAFE_BROWSING_MALWARE_DIAGNOSTIC_PAGE).c_str());
+  std::string diagnostic_link = StringPrintf(kSbDiagnosticHtml,
+      l10n_util::GetStringUTF8(
+        IDS_SAFE_BROWSING_MALWARE_DIAGNOSTIC_PAGE).c_str());
 
   strings->SetString("badURL", url().host());
   // Check to see if we're blocking the main page, or a sub-resource on the
   // main page.
-  std::wstring description1, description3, description5;
+  string16 description1, description3, description5;
   if (is_main_frame_) {
-    description1 = l10n_util::GetStringF(IDS_SAFE_BROWSING_MALWARE_DESCRIPTION1,
-                                         UTF8ToWide(url().host()));
+    description1 = l10n_util::GetStringFUTF16(
+        IDS_SAFE_BROWSING_MALWARE_DESCRIPTION1, UTF8ToUTF16(url().host()));
   } else {
-    description1 = l10n_util::GetStringF(IDS_SAFE_BROWSING_MALWARE_DESCRIPTION4,
-                                         UTF8ToWide(tab()->GetURL().host()),
-                                         UTF8ToWide(url().host()));
+    description1 = l10n_util::GetStringFUTF16(
+        IDS_SAFE_BROWSING_MALWARE_DESCRIPTION4,
+        UTF8ToUTF16(tab()->GetURL().host()),
+        UTF8ToUTF16(url().host()));
   }
 
-  std::wstring proceed_link = StringPrintf(kPLinkHtml,
-      l10n_util::GetString(IDS_SAFE_BROWSING_MALWARE_PROCEED_LINK).c_str());
-  description3 = l10n_util::GetStringF(IDS_SAFE_BROWSING_MALWARE_DESCRIPTION3,
-                                       proceed_link);
+  std::string proceed_link = StringPrintf(kPLinkHtml,
+      l10n_util::GetStringUTF8(IDS_SAFE_BROWSING_MALWARE_PROCEED_LINK).c_str());
+  description3 =
+      l10n_util::GetStringFUTF16(IDS_SAFE_BROWSING_MALWARE_DESCRIPTION3,
+                                 UTF8ToUTF16(proceed_link));
 
   PopulateStringDictionary(
       strings,
-      l10n_util::GetString(IDS_SAFE_BROWSING_MALWARE_TITLE),
-      l10n_util::GetString(IDS_SAFE_BROWSING_MALWARE_HEADLINE),
+      l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MALWARE_TITLE),
+      l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MALWARE_HEADLINE),
       description1,
-      l10n_util::GetString(IDS_SAFE_BROWSING_MALWARE_DESCRIPTION2),
+      l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MALWARE_DESCRIPTION2),
       description3);
 
-  description5 = l10n_util::GetStringF(IDS_SAFE_BROWSING_MALWARE_DESCRIPTION5,
-                                       UTF8ToWide(url().host()),
-                                       UTF8ToWide(url().host()),
-                                       diagnostic_link);
+  description5 =
+      l10n_util::GetStringFUTF16(IDS_SAFE_BROWSING_MALWARE_DESCRIPTION5,
+                                 UTF8ToUTF16(url().host()),
+                                 UTF8ToUTF16(url().host()),
+                                 UTF8ToUTF16(diagnostic_link));
 
-  strings->SetString("description5", WideToUTF16Hack(description5));
+  strings->SetString("description5", description5);
 
   strings->SetString("back_button",
       l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MALWARE_BACK_BUTTON));
-  strings->SetString("more_info_button",
-      l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MALWARE_MORE_INFO_BUTTON));
-  strings->SetString("less_info_button",
-      l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MALWARE_LESS_INFO_BUTTON));
   strings->SetString("proceed_link",
       l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_MALWARE_PROCEED_LINK));
   strings->SetString("textdirection", base::i18n::IsRTL() ? "rtl" : "ltr");
+
+  if (!CanShowMalwareDetailsOption()) {
+    strings->SetBoolean(kDisplayCheckBox, false);
+  } else {
+    // Show the checkbox for sending malware details.
+    strings->SetBoolean(kDisplayCheckBox, true);
+
+    std::string privacy_link = StringPrintf(
+        kPrivacyLinkHtml,
+        l10n_util::GetStringUTF8(
+            IDS_SAFE_BROWSING_PRIVACY_POLICY_PAGE).c_str());
+
+    strings->SetString("confirm_text",
+                       l10n_util::GetStringFUTF16(
+                           IDS_SAFE_BROWSING_MALWARE_REPORTING_AGREE,
+                           UTF8ToUTF16(privacy_link)));
+
+    const PrefService::Preference* pref =
+        tab()->profile()->GetPrefs()->FindPreference(
+            prefs::kSafeBrowsingReportingEnabled);
+
+    bool value;
+    if (pref && pref->GetValue()->GetAsBoolean(&value) && value) {
+      strings->SetString(kBoxChecked, "yes");
+    } else {
+      strings->SetString(kBoxChecked, "");
+    }
+  }
 }
 
 void SafeBrowsingBlockingPage::PopulatePhishingStringDictionary(
     DictionaryValue* strings) {
+  std::string proceed_link = StringPrintf(kPLinkHtml, l10n_util::GetStringUTF8(
+      IDS_SAFE_BROWSING_PHISHING_PROCEED_LINK).c_str());
+  string16 description3 = l10n_util::GetStringFUTF16(
+      IDS_SAFE_BROWSING_PHISHING_DESCRIPTION3,
+      UTF8ToUTF16(proceed_link));
+
   PopulateStringDictionary(
       strings,
-      l10n_util::GetString(IDS_SAFE_BROWSING_PHISHING_TITLE),
-      l10n_util::GetString(IDS_SAFE_BROWSING_PHISHING_HEADLINE),
-      l10n_util::GetStringF(IDS_SAFE_BROWSING_PHISHING_DESCRIPTION1,
-                            UTF8ToWide(url().host())),
-      l10n_util::GetString(IDS_SAFE_BROWSING_PHISHING_DESCRIPTION2),
-      L"");
+      l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_PHISHING_TITLE),
+      l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_PHISHING_HEADLINE),
+      l10n_util::GetStringFUTF16(IDS_SAFE_BROWSING_PHISHING_DESCRIPTION1,
+                                 UTF8ToUTF16(url().host())),
+      l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_PHISHING_DESCRIPTION2),
+      description3);
 
-  strings->SetString("continue_button",
-      l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_PHISHING_PROCEED_BUTTON));
   strings->SetString("back_button",
       l10n_util::GetStringUTF16(IDS_SAFE_BROWSING_PHISHING_BACK_BUTTON));
   strings->SetString("report_error",
@@ -313,6 +392,16 @@ void SafeBrowsingBlockingPage::CommandReceived(const std::string& cmd) {
     command = command.substr(1, command.length() - 2);
   }
 
+  if (command == kDoReportCommand) {
+    SetReportingPreference(true);
+    return;
+  }
+
+  if (command == kDontReportCommand) {
+    SetReportingPreference(false);
+    return;
+  }
+
   if (command == kLearnMoreCommand) {
     // User pressed "Learn more".
     GURL url;
@@ -324,6 +413,13 @@ void SafeBrowsingBlockingPage::CommandReceived(const std::string& cmd) {
     } else {
       NOTREACHED();
     }
+    tab()->OpenURL(url, GURL(), CURRENT_TAB, PageTransition::LINK);
+    return;
+  }
+
+  if (command == kShowPrivacyCommand) {
+    // User pressed "Safe Browsing privacy policy".
+    GURL url(kSbPrivacyPolicyUrl);
     tab()->OpenURL(url, GURL(), CURRENT_TAB, PageTransition::LINK);
     return;
   }
@@ -388,8 +484,14 @@ void SafeBrowsingBlockingPage::CommandReceived(const std::string& cmd) {
   NOTREACHED() << "Unexpected command: " << command;
 }
 
+void SafeBrowsingBlockingPage::SetReportingPreference(bool report) {
+  PrefService* pref = tab()->profile()->GetPrefs();
+  pref->SetBoolean(prefs::kSafeBrowsingReportingEnabled, report);
+}
+
 void SafeBrowsingBlockingPage::Proceed() {
   RecordUserAction(PROCEED);
+  FinishMalwareDetails();  // Send the malware details, if we opted to.
 
   NotifySafeBrowsingService(sb_service_, unsafe_resources_, true);
 
@@ -427,6 +529,7 @@ void SafeBrowsingBlockingPage::DontProceed() {
   }
 
   RecordUserAction(DONT_PROCEED);
+  FinishMalwareDetails();  // Send the malware details, if we opted to.
 
   NotifySafeBrowsingService(sb_service_, unsafe_resources_, false);
 
@@ -492,6 +595,25 @@ void SafeBrowsingBlockingPage::RecordUserAction(BlockingPageEvent event) {
   UserMetrics::RecordComputedAction(action);
 }
 
+void SafeBrowsingBlockingPage::FinishMalwareDetails() {
+  if (malware_details_ == NULL)
+    return;  // Not all interstitials have malware details (eg phishing).
+
+  const PrefService::Preference* pref =
+      tab()->profile()->GetPrefs()->FindPreference(
+          prefs::kSafeBrowsingReportingEnabled);
+
+  bool value;
+  if (pref && pref->GetValue()->GetAsBoolean(&value) && value) {
+    // Give the details object to the service class, so it can send it.
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        NewRunnableMethod(
+            sb_service_, &SafeBrowsingService::ReportMalwareDetails,
+            malware_details_));
+  }
+}
+
 // static
 void SafeBrowsingBlockingPage::NotifySafeBrowsingService(
     SafeBrowsingService* sb_service,
@@ -507,7 +629,7 @@ void SafeBrowsingBlockingPage::NotifySafeBrowsingService(
 // static
 SafeBrowsingBlockingPage::UnsafeResourceMap*
     SafeBrowsingBlockingPage::GetUnsafeResourcesMap() {
-  return Singleton<UnsafeResourceMap>::get();
+  return g_unsafe_resource_map.Pointer();
 }
 
 // static
@@ -536,7 +658,7 @@ void SafeBrowsingBlockingPage::ShowBlockingPage(
     // Set up the factory if this has not been done already (tests do that
     // before this method is called).
     if (!factory_)
-      factory_ = Singleton<SafeBrowsingBlockingPageFactoryImpl>::get();
+      factory_ = g_safe_browsing_blocking_page_factory_impl.Pointer();
     SafeBrowsingBlockingPage* blocking_page =
         factory_->CreateSafeBrowsingPage(sb_service, tab_contents, resources);
     blocking_page->Show();

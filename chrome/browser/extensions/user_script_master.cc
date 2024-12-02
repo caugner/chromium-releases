@@ -13,11 +13,10 @@
 #include "base/pickle.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "base/version.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/notification_service.h"
@@ -237,6 +236,9 @@ static base::SharedMemory* Serialize(const UserScriptList& scripts) {
   pickle.WriteSize(scripts.size());
   for (size_t i = 0; i < scripts.size(); i++) {
     const UserScript& script = scripts[i];
+    // TODO(aa): This can be replaced by sending content script metadata to
+    // renderers along with other extension data in ViewMsg_ExtensionLoaded.
+    // See crbug.com/70516.
     script.Pickle(&pickle);
     // Write scripts as 'data' so that we can read it out in the slave without
     // allocating a new string.
@@ -340,9 +342,9 @@ void UserScriptMaster::Observe(NotificationType type,
     case NotificationType::EXTENSION_LOADED: {
       // Add any content scripts inside the extension.
       const Extension* extension = Details<const Extension>(details).ptr();
-      bool incognito_enabled = profile_->GetExtensionsService()->
+      bool incognito_enabled = profile_->GetExtensionService()->
           IsIncognitoEnabled(extension);
-      bool allow_file_access = profile_->GetExtensionsService()->
+      bool allow_file_access = profile_->GetExtensionService()->
           AllowFileAccess(extension);
       const UserScriptList& scripts = extension->content_scripts();
       for (UserScriptList::const_iterator iter = scripts.begin();
@@ -357,7 +359,8 @@ void UserScriptMaster::Observe(NotificationType type,
     }
     case NotificationType::EXTENSION_UNLOADED: {
       // Remove any content scripts.
-      const Extension* extension = Details<const Extension>(details).ptr();
+      const Extension* extension =
+          Details<UnloadedExtensionInfo>(details)->extension;
       UserScriptList new_lone_scripts;
       for (UserScriptList::iterator iter = lone_scripts_.begin();
            iter != lone_scripts_.end(); ++iter) {
@@ -375,9 +378,9 @@ void UserScriptMaster::Observe(NotificationType type,
     case NotificationType::EXTENSION_USER_SCRIPTS_UPDATED: {
       const Extension* extension = Details<const Extension>(details).ptr();
       UserScriptList new_lone_scripts;
-      bool incognito_enabled = profile_->GetExtensionsService()->
+      bool incognito_enabled = profile_->GetExtensionService()->
           IsIncognitoEnabled(extension);
-      bool allow_file_access = profile_->GetExtensionsService()->
+      bool allow_file_access = profile_->GetExtensionService()->
           AllowFileAccess(extension);
       for (UserScriptList::iterator iter = lone_scripts_.begin();
            iter != lone_scripts_.end(); ++iter) {

@@ -41,10 +41,10 @@
 #include <mmsystem.h>
 
 #include "base/basictypes.h"
-#include "base/lock.h"
 #include "base/logging.h"
 #include "base/cpu.h"
 #include "base/singleton.h"
+#include "base/synchronization/lock.h"
 
 using base::Time;
 using base::TimeDelta;
@@ -262,7 +262,7 @@ DWORD last_seen_now = 0;
 // easy to use a Singleton without even knowing it, and that may lead to many
 // gotchas). Its impact on startup time should be negligible due to low-level
 // nature of time code.
-Lock rollover_lock;
+base::Lock rollover_lock;
 
 // We use timeGetTime() to implement TimeTicks::Now().  This can be problematic
 // because it returns the number of milliseconds since Windows has started,
@@ -270,7 +270,7 @@ Lock rollover_lock;
 // rollover ourselves, which works if TimeTicks::Now() is called at least every
 // 49 days.
 TimeDelta RolloverProtectedNow() {
-  AutoLock locked(rollover_lock);
+  base::AutoLock locked(rollover_lock);
   // We should hold the lock while calling tick_function to make sure that
   // we keep last_seen_now stay correctly in sync.
   DWORD now = tick_function();
@@ -310,16 +310,8 @@ TimeDelta RolloverProtectedNow() {
 // retrieve and more reliable.
 class HighResNowSingleton {
  public:
-  HighResNowSingleton()
-    : ticks_per_microsecond_(0.0),
-      skew_(0) {
-    InitializeClock();
-
-    // On Athlon X2 CPUs (e.g. model 15) QueryPerformanceCounter is
-    // unreliable.  Fallback to low-res clock.
-    base::CPU cpu;
-    if (cpu.vendor_name() == "AuthenticAMD" && cpu.family() == 15)
-      DisableHighResClock();
+  static HighResNowSingleton* GetInstance() {
+    return Singleton<HighResNowSingleton>::get();
   }
 
   bool IsUsingHighResClock() {
@@ -346,6 +338,18 @@ class HighResNowSingleton {
   }
 
  private:
+  HighResNowSingleton()
+    : ticks_per_microsecond_(0.0),
+      skew_(0) {
+    InitializeClock();
+
+    // On Athlon X2 CPUs (e.g. model 15) QueryPerformanceCounter is
+    // unreliable.  Fallback to low-res clock.
+    base::CPU cpu;
+    if (cpu.vendor_name() == "AuthenticAMD" && cpu.family() == 15)
+      DisableHighResClock();
+  }
+
   // Synchronize the QPC clock with GetSystemTimeAsFileTime.
   void InitializeClock() {
     LARGE_INTEGER ticks_per_sec = {0};
@@ -374,7 +378,7 @@ class HighResNowSingleton {
   float ticks_per_microsecond_;  // 0 indicates QPF failed and we're broken.
   int64 skew_;  // Skew between lo-res and hi-res clocks (for debugging).
 
-  DISALLOW_COPY_AND_ASSIGN(HighResNowSingleton);
+  friend struct DefaultSingletonTraits<HighResNowSingleton>;
 };
 
 }  // namespace
@@ -394,15 +398,15 @@ TimeTicks TimeTicks::Now() {
 
 // static
 TimeTicks TimeTicks::HighResNow() {
-  return TimeTicks() + Singleton<HighResNowSingleton>::get()->Now();
+  return TimeTicks() + HighResNowSingleton::GetInstance()->Now();
 }
 
 // static
 int64 TimeTicks::GetQPCDriftMicroseconds() {
-  return Singleton<HighResNowSingleton>::get()->GetQPCDriftMicroseconds();
+  return HighResNowSingleton::GetInstance()->GetQPCDriftMicroseconds();
 }
 
 // static
 bool TimeTicks::IsHighResClockWorking() {
-  return Singleton<HighResNowSingleton>::get()->IsUsingHighResClock();
+  return HighResNowSingleton::GetInstance()->IsUsingHighResClock();
 }

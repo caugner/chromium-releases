@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,16 +15,16 @@
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_thread.h"
+#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/dom_ui/ntp_resource_cache.h"
-#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/extensions/extension_pref_store.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/favicon_service.h"
-#include "chrome/browser/find_bar_state.h"
 #include "chrome/browser/geolocation/geolocation_content_settings_map.h"
 #include "chrome/browser/geolocation/geolocation_permission_context.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/top_sites.h"
-#include "chrome/browser/host_content_settings_map.h"
 #include "chrome/browser/in_process_webkit/webkit_context.h"
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/net/pref_proxy_config_service.h"
@@ -35,10 +35,12 @@
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
+#include "chrome/browser/ui/find_bar/find_bar_state.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/test/test_url_request_context_getter.h"
 #include "chrome/test/testing_pref_service.h"
 #include "chrome/test/ui_test_utils.h"
 #include "net/base/cookie_monster.h"
@@ -48,7 +50,7 @@
 #include "webkit/database/database_tracker.h"
 
 #if defined(OS_LINUX) && !defined(TOOLKIT_VIEWS)
-#include "chrome/browser/gtk/gtk_theme_provider.h"
+#include "chrome/browser/ui/gtk/gtk_theme_provider.h"
 #endif
 
 using base::Time;
@@ -112,27 +114,7 @@ class BookmarkLoadObserver : public BookmarkModelObserver {
   DISALLOW_COPY_AND_ASSIGN(BookmarkLoadObserver);
 };
 
-// Used to return a dummy context (normally the context is on the IO thread).
-// The one here can be run on the main test thread. Note that this can lead to
-// a leak if your test does not have a BrowserThread::IO in it because
-// URLRequestContextGetter is defined as a ReferenceCounted object with a
-// special trait that deletes it on the IO thread.
-class TestURLRequestContextGetter : public URLRequestContextGetter {
- public:
-  virtual URLRequestContext* GetURLRequestContext() {
-    if (!context_)
-      context_ = new TestURLRequestContext();
-    return context_.get();
-  }
-  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() const {
-    return BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
-  }
-
- private:
-  scoped_refptr<URLRequestContext> context_;
-};
-
-class TestExtensionURLRequestContext : public URLRequestContext {
+class TestExtensionURLRequestContext : public net::URLRequestContext {
  public:
   TestExtensionURLRequestContext() {
     net::CookieMonster* cookie_monster = new net::CookieMonster(NULL, NULL);
@@ -144,7 +126,7 @@ class TestExtensionURLRequestContext : public URLRequestContext {
 
 class TestExtensionURLRequestContextGetter : public URLRequestContextGetter {
  public:
-  virtual URLRequestContext* GetURLRequestContext() {
+  virtual net::URLRequestContext* GetURLRequestContext() {
     if (!context_)
       context_ = new TestExtensionURLRequestContext();
     return context_.get();
@@ -154,7 +136,7 @@ class TestExtensionURLRequestContextGetter : public URLRequestContextGetter {
   }
 
  private:
-  scoped_refptr<URLRequestContext> context_;
+  scoped_refptr<net::URLRequestContext> context_;
 };
 
 }  // namespace
@@ -249,7 +231,7 @@ void TestingProfile::DestroyHistoryService() {
 void TestingProfile::CreateTopSites() {
   DestroyTopSites();
   top_sites_ = new history::TopSites(this);
-  FilePath file_name = temp_dir_.path().Append(chrome::kTopSitesFilename);
+  FilePath file_name = GetPath().Append(chrome::kTopSitesFilename);
   top_sites_->Init(file_name);
 }
 
@@ -344,12 +326,17 @@ void TestingProfile::UseThemeProvider(BrowserThemeProvider* theme_provider) {
   theme_provider_.reset(theme_provider);
 }
 
-scoped_refptr<ExtensionsService> TestingProfile::CreateExtensionsService(
+scoped_refptr<ExtensionService> TestingProfile::CreateExtensionService(
     const CommandLine* command_line,
     const FilePath& install_directory) {
-  extensions_service_ = new ExtensionsService(this,
+  extension_pref_store_.reset(new ExtensionPrefStore);
+  extension_prefs_.reset(new ExtensionPrefs(GetPrefs(),
+                                            install_directory,
+                                            extension_pref_store_.get()));
+  extensions_service_ = new ExtensionService(this,
                                               command_line,
                                               install_directory,
+                                              extension_prefs_.get(),
                                               false);
   return extensions_service_;
 }
@@ -372,7 +359,7 @@ webkit_database::DatabaseTracker* TestingProfile::GetDatabaseTracker() {
   return db_tracker_;
 }
 
-ExtensionsService* TestingProfile::GetExtensionsService() {
+ExtensionService* TestingProfile::GetExtensionService() {
   return extensions_service_.get();
 }
 
@@ -473,7 +460,7 @@ void TestingProfile::set_session_service(SessionService* session_service) {
 
 WebKitContext* TestingProfile::GetWebKitContext() {
   if (webkit_context_ == NULL)
-    webkit_context_ = new WebKitContext(this);
+    webkit_context_ = new WebKitContext(this, false);
   return webkit_context_;
 }
 

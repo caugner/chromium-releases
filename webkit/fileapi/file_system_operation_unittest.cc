@@ -14,40 +14,68 @@
 
 namespace fileapi {
 
-const int kInvalidRequestId = -1;
-const int kFileOperationStatusNotSet = 0;
-const int kFileOperationSucceeded = 1;
-
-static int last_request_id = -1;
+const int kFileOperationStatusNotSet = 1;
+const int kFileOperationSucceeded = 0;
 
 static bool FileExists(FilePath path) {
   return file_util::PathExists(path) && !file_util::DirectoryExists(path);
 }
 
-class MockDispatcher : public FileSystemCallbackDispatcher {
+class MockDispatcher;
+
+class FileSystemOperationTest : public testing::Test {
  public:
-  MockDispatcher(int request_id)
-      : status_(kFileOperationStatusNotSet),
-        request_id_(request_id) {
+  FileSystemOperationTest()
+      : status_(kFileOperationStatusNotSet) {
+    EXPECT_TRUE(base_.CreateUniqueTempDir());
   }
 
+  FileSystemOperation* operation();
+
+  void set_status(int status) { status_ = status; }
+  int status() const { return status_; }
+  void set_info(const base::PlatformFileInfo& info) { info_ = info; }
+  const base::PlatformFileInfo& info() const { return info_; }
+  void set_entries(const std::vector<base::FileUtilProxy::Entry>& entries) {
+    entries_ = entries;
+  }
+  const std::vector<base::FileUtilProxy::Entry>& entries() const {
+    return entries_;
+  }
+
+ protected:
+  // Common temp base for nondestructive uses.
+  ScopedTempDir base_;
+
+  // For post-operation status.
+  int status_;
+  base::PlatformFileInfo info_;
+  std::vector<base::FileUtilProxy::Entry> entries_;
+
+  DISALLOW_COPY_AND_ASSIGN(FileSystemOperationTest);
+};
+
+class MockDispatcher : public FileSystemCallbackDispatcher {
+ public:
+  MockDispatcher(FileSystemOperationTest* test) : test_(test) { }
+
   virtual void DidFail(base::PlatformFileError status) {
-    status_ = status;
+    test_->set_status(status);
   }
 
   virtual void DidSucceed() {
-    status_ = kFileOperationSucceeded;
+    test_->set_status(kFileOperationSucceeded);
   }
 
   virtual void DidReadMetadata(const base::PlatformFileInfo& info) {
-    info_ = info;
-    status_ = kFileOperationSucceeded;
+    test_->set_info(info);
+    test_->set_status(kFileOperationSucceeded);
   }
 
   virtual void DidReadDirectory(
       const std::vector<base::FileUtilProxy::Entry>& entries,
       bool /* has_more */) {
-    entries_ = entries;
+    test_->set_entries(entries);
   }
 
   virtual void DidOpenFileSystem(const std::string&, const FilePath&) {
@@ -58,58 +86,22 @@ class MockDispatcher : public FileSystemCallbackDispatcher {
     NOTREACHED();
   }
 
-  // Helpers for testing.
-  int status() const { return status_; }
-  int request_id() const { return request_id_; }
-  const base::PlatformFileInfo& info() const { return info_; }
-  const std::vector<base::FileUtilProxy::Entry>& entries() const {
-    return entries_;
-  }
-
  private:
-  int status_;
-  int request_id_;
-  base::PlatformFileInfo info_;
-  std::vector<base::FileUtilProxy::Entry> entries_;
+  FileSystemOperationTest* test_;
 };
 
-class FileSystemOperationTest : public testing::Test {
- public:
-  FileSystemOperationTest()
-      : request_id_(kInvalidRequestId),
-        operation_(NULL) {
-    base_.CreateUniqueTempDir();
-    EXPECT_TRUE(base_.IsValid());
-  }
-
-  FileSystemOperation* operation() {
-    request_id_ = ++last_request_id;
-    mock_dispatcher_ = new MockDispatcher(request_id_);
-    operation_.reset(new FileSystemOperation(
-        mock_dispatcher_, base::MessageLoopProxy::CreateForCurrentThread()));
-    return operation_.get();
-  }
-
- protected:
-  // Common temp base for nondestructive uses.
-  ScopedTempDir base_;
-
-  int request_id_;
-  scoped_ptr<FileSystemOperation> operation_;
-
-  // Owned by |operation_|.
-  MockDispatcher* mock_dispatcher_;
-
-  DISALLOW_COPY_AND_ASSIGN(FileSystemOperationTest);
-};
+FileSystemOperation* FileSystemOperationTest::operation() {
+  return new FileSystemOperation(
+      new MockDispatcher(this),
+      base::MessageLoopProxy::CreateForCurrentThread());
+}
 
 TEST_F(FileSystemOperationTest, TestMoveFailureSrcDoesntExist) {
   FilePath src(base_.path().Append(FILE_PATH_LITERAL("a")));
   FilePath dest(base_.path().Append(FILE_PATH_LITERAL("b")));
   operation()->Move(src, dest);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, status());
 }
 
 TEST_F(FileSystemOperationTest, TestMoveFailureContainsPath) {
@@ -121,9 +113,7 @@ TEST_F(FileSystemOperationTest, TestMoveFailureContainsPath) {
                                                  &dest_dir_path));
   operation()->Move(src_dir.path(), dest_dir_path);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_INVALID_OPERATION,
-            mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_INVALID_OPERATION, status());
 }
 
 TEST_F(FileSystemOperationTest, TestMoveFailureSrcDirExistsDestFile) {
@@ -138,9 +128,7 @@ TEST_F(FileSystemOperationTest, TestMoveFailureSrcDirExistsDestFile) {
 
   operation()->Move(src_dir.path(), dest_file);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_A_DIRECTORY,
-            mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_A_DIRECTORY, status());
 }
 
 TEST_F(FileSystemOperationTest, TestMoveFailureSrcFileExistsDestNonEmptyDir) {
@@ -155,8 +143,7 @@ TEST_F(FileSystemOperationTest, TestMoveFailureSrcFileExistsDestNonEmptyDir) {
 
   operation()->Move(src_dir.path(), dest_dir.path());
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_EMPTY, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_EMPTY, status());
 }
 
 TEST_F(FileSystemOperationTest, TestMoveFailureSrcFileExistsDestDir) {
@@ -171,9 +158,7 @@ TEST_F(FileSystemOperationTest, TestMoveFailureSrcFileExistsDestDir) {
 
   operation()->Move(src_file, dest_dir.path());
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_A_FILE,
-            mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_A_FILE, status());
 }
 
 TEST_F(FileSystemOperationTest, TestMoveFailureDestParentDoesntExist) {
@@ -186,8 +171,7 @@ TEST_F(FileSystemOperationTest, TestMoveFailureDestParentDoesntExist) {
 
   operation()->Move(src_dir.path(), nonexisting_file);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, status());
 }
 
 TEST_F(FileSystemOperationTest, TestMoveSuccessSrcFileAndOverwrite) {
@@ -203,9 +187,8 @@ TEST_F(FileSystemOperationTest, TestMoveSuccessSrcFileAndOverwrite) {
 
   operation()->Move(src_file, dest_file);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
+  EXPECT_EQ(kFileOperationSucceeded, status());
   EXPECT_TRUE(FileExists(dest_file));
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
 }
 
 TEST_F(FileSystemOperationTest, TestMoveSuccessSrcFileAndNew) {
@@ -220,9 +203,8 @@ TEST_F(FileSystemOperationTest, TestMoveSuccessSrcFileAndNew) {
 
   operation()->Move(src_file, dest_file);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
+  EXPECT_EQ(kFileOperationSucceeded, status());
   EXPECT_TRUE(FileExists(dest_file));
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
 }
 
 TEST_F(FileSystemOperationTest, TestMoveSuccessSrcDirAndOverwrite) {
@@ -234,8 +216,7 @@ TEST_F(FileSystemOperationTest, TestMoveSuccessSrcDirAndOverwrite) {
 
   operation()->Move(src_dir.path(), dest_dir.path());
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(kFileOperationSucceeded, status());
   EXPECT_FALSE(file_util::DirectoryExists(src_dir.path()));
 
   // Make sure we've overwritten but not moved the source under the |dest_dir|.
@@ -254,8 +235,7 @@ TEST_F(FileSystemOperationTest, TestMoveSuccessSrcDirAndNew) {
 
   operation()->Move(src_dir.path(), dest_dir_path);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(kFileOperationSucceeded, status());
   EXPECT_FALSE(file_util::DirectoryExists(src_dir.path()));
   EXPECT_TRUE(file_util::DirectoryExists(dest_dir_path));
 }
@@ -271,8 +251,7 @@ TEST_F(FileSystemOperationTest, TestMoveSuccessSrcDirRecursive) {
 
   operation()->Move(src_dir.path(), dest_dir.path());
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(kFileOperationSucceeded, status());
   EXPECT_TRUE(FileExists(dest_dir.path().Append(child_file.BaseName())));
 }
 
@@ -281,8 +260,7 @@ TEST_F(FileSystemOperationTest, TestCopyFailureSrcDoesntExist) {
   FilePath dest(base_.path().Append(FILE_PATH_LITERAL("b")));
   operation()->Copy(src, dest);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, status());
 }
 
 TEST_F(FileSystemOperationTest, TestCopyFailureContainsPath) {
@@ -294,9 +272,7 @@ TEST_F(FileSystemOperationTest, TestCopyFailureContainsPath) {
                                                  &dest_dir_path));
   operation()->Copy(src_dir.path(), dest_dir_path);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_INVALID_OPERATION,
-            mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_INVALID_OPERATION, status());
 }
 
 TEST_F(FileSystemOperationTest, TestCopyFailureSrcDirExistsDestFile) {
@@ -311,9 +287,7 @@ TEST_F(FileSystemOperationTest, TestCopyFailureSrcDirExistsDestFile) {
 
   operation()->Copy(src_dir.path(), dest_file);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_A_DIRECTORY,
-            mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_A_DIRECTORY, status());
 }
 
 TEST_F(FileSystemOperationTest, TestCopyFailureSrcFileExistsDestNonEmptyDir) {
@@ -328,8 +302,7 @@ TEST_F(FileSystemOperationTest, TestCopyFailureSrcFileExistsDestNonEmptyDir) {
 
   operation()->Copy(src_dir.path(), dest_dir.path());
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_EMPTY, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_EMPTY, status());
 }
 
 TEST_F(FileSystemOperationTest, TestCopyFailureSrcFileExistsDestDir) {
@@ -344,9 +317,7 @@ TEST_F(FileSystemOperationTest, TestCopyFailureSrcFileExistsDestDir) {
 
   operation()->Copy(src_file, dest_dir.path());
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_A_FILE,
-            mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_A_FILE, status());
 }
 
 TEST_F(FileSystemOperationTest, TestCopyFailureDestParentDoesntExist) {
@@ -362,8 +333,7 @@ TEST_F(FileSystemOperationTest, TestCopyFailureDestParentDoesntExist) {
 
   operation()->Copy(src_dir, nonexisting_file);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, status());
 }
 
 TEST_F(FileSystemOperationTest, TestCopySuccessSrcFileAndOverwrite) {
@@ -379,9 +349,8 @@ TEST_F(FileSystemOperationTest, TestCopySuccessSrcFileAndOverwrite) {
 
   operation()->Copy(src_file, dest_file);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
+  EXPECT_EQ(kFileOperationSucceeded, status());
   EXPECT_TRUE(FileExists(dest_file));
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
 }
 
 TEST_F(FileSystemOperationTest, TestCopySuccessSrcFileAndNew) {
@@ -396,9 +365,8 @@ TEST_F(FileSystemOperationTest, TestCopySuccessSrcFileAndNew) {
 
   operation()->Copy(src_file, dest_file);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
+  EXPECT_EQ(kFileOperationSucceeded, status());
   EXPECT_TRUE(FileExists(dest_file));
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
 }
 
 TEST_F(FileSystemOperationTest, TestCopySuccessSrcDirAndOverwrite) {
@@ -410,8 +378,7 @@ TEST_F(FileSystemOperationTest, TestCopySuccessSrcDirAndOverwrite) {
 
   operation()->Copy(src_dir.path(), dest_dir.path());
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(kFileOperationSucceeded, status());
 
   // Make sure we've overwritten but not copied the source under the |dest_dir|.
   EXPECT_TRUE(file_util::DirectoryExists(dest_dir.path()));
@@ -429,8 +396,7 @@ TEST_F(FileSystemOperationTest, TestCopySuccessSrcDirAndNew) {
 
   operation()->Copy(src_dir.path(), dest_dir);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(kFileOperationSucceeded, status());
   EXPECT_TRUE(file_util::DirectoryExists(dest_dir));
 }
 
@@ -445,8 +411,7 @@ TEST_F(FileSystemOperationTest, TestCopySuccessSrcDirRecursive) {
 
   operation()->Copy(src_dir.path(), dest_dir.path());
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(kFileOperationSucceeded, status());
   EXPECT_TRUE(FileExists(dest_dir.path().Append(child_file.BaseName())));
 }
 
@@ -459,36 +424,7 @@ TEST_F(FileSystemOperationTest, TestCreateFileFailure) {
   file_util::CreateTemporaryFileInDir(dir.path(), &file);
   operation()->CreateFile(file, true);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_EXISTS, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
-}
-
-TEST_F(FileSystemOperationTest, TestCreateVeryLongName) {
-  ScopedTempDir dir;
-  ASSERT_TRUE(dir.CreateUniqueTempDir());
-
-#if defined(OS_WIN)
-  FilePath dir_path(FILE_PATH_LITERAL("\\\\?\\") + dir.path().value());
-#else
-  FilePath dir_path = dir.path();
-#endif
-
-  // TODO(kkanetkar): Once each platform's limitations have been enforced
-  // consider that in this test. Currently this test is for
-  // windows primarily.
-  FilePath dir1 = dir_path.AppendASCII(
-      "012345678901234567890123456789012345678901234567890123456789"
-      "012345678901234567890123456789012345678901234567890123456789"
-      "0123456789012345678901234567890123456789");
-  FilePath file = dir1.AppendASCII(
-      "012345678901234567890123456789012345678901234567890123456789"
-      "012345678901234567890123456789012345678901234567890123456789"
-      "0123456789012345678901234567890123456789");
-  operation()->CreateDirectory(dir1, false, true);
-  MessageLoop::current()->RunAllPending();
-  operation()->CreateFile(file, true);
-  MessageLoop::current()->RunAllPending();
-  EXPECT_TRUE(file_util::PathExists(file));
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_EXISTS, status());
 }
 
 TEST_F(FileSystemOperationTest, TestCreateFileSuccessFileExists) {
@@ -500,9 +436,8 @@ TEST_F(FileSystemOperationTest, TestCreateFileSuccessFileExists) {
 
   operation()->CreateFile(file, false);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
+  EXPECT_EQ(kFileOperationSucceeded, status());
   EXPECT_TRUE(FileExists(file));
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
 }
 
 TEST_F(FileSystemOperationTest, TestCreateFileSuccessExclusive) {
@@ -512,9 +447,8 @@ TEST_F(FileSystemOperationTest, TestCreateFileSuccessExclusive) {
   FilePath file = dir.path().Append(FILE_PATH_LITERAL("FileDoesntExist"));
   operation()->CreateFile(file, true);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
+  EXPECT_EQ(kFileOperationSucceeded, status());
   EXPECT_TRUE(FileExists(file));
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
 }
 
 TEST_F(FileSystemOperationTest, TestCreateFileSuccessFileDoesntExist) {
@@ -524,8 +458,7 @@ TEST_F(FileSystemOperationTest, TestCreateFileSuccessFileDoesntExist) {
   FilePath file = dir.path().Append(FILE_PATH_LITERAL("FileDoesntExist"));
   operation()->CreateFile(file, false);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(kFileOperationSucceeded, status());
 }
 
 TEST_F(FileSystemOperationTest,
@@ -537,8 +470,7 @@ TEST_F(FileSystemOperationTest,
       FILE_PATH_LITERAL("FileDoesntExist"));
   operation()->CreateDirectory(nonexisting_file, false, false);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, status());
 }
 
 TEST_F(FileSystemOperationTest, TestCreateDirFailureDirExists) {
@@ -547,8 +479,7 @@ TEST_F(FileSystemOperationTest, TestCreateDirFailureDirExists) {
   ASSERT_TRUE(src_dir.CreateUniqueTempDir());
   operation()->CreateDirectory(src_dir.path(), true, false);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_EXISTS, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_EXISTS, status());
 }
 
 TEST_F(FileSystemOperationTest, TestCreateDirFailureFileExists) {
@@ -559,8 +490,7 @@ TEST_F(FileSystemOperationTest, TestCreateDirFailureFileExists) {
   file_util::CreateTemporaryFileInDir(dir.path(), &file);
   operation()->CreateDirectory(file, true, false);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_EXISTS, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_EXISTS, status());
 }
 
 TEST_F(FileSystemOperationTest, TestCreateDirSuccess) {
@@ -569,17 +499,15 @@ TEST_F(FileSystemOperationTest, TestCreateDirSuccess) {
   ASSERT_TRUE(dir.CreateUniqueTempDir());
   operation()->CreateDirectory(dir.path(), false, false);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(kFileOperationSucceeded, status());
 
   // Dir doesn't exist.
   FilePath nonexisting_dir_path(base_.path().Append(
       FILE_PATH_LITERAL("nonexistingdir")));
   operation()->CreateDirectory(nonexisting_dir_path, false, false);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
+  EXPECT_EQ(kFileOperationSucceeded, status());
   EXPECT_TRUE(file_util::DirectoryExists(nonexisting_dir_path));
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
 }
 
 TEST_F(FileSystemOperationTest, TestCreateDirSuccessExclusive) {
@@ -589,9 +517,8 @@ TEST_F(FileSystemOperationTest, TestCreateDirSuccessExclusive) {
 
   operation()->CreateDirectory(nonexisting_dir_path, true, false);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
+  EXPECT_EQ(kFileOperationSucceeded, status());
   EXPECT_TRUE(file_util::DirectoryExists(nonexisting_dir_path));
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
 }
 
 TEST_F(FileSystemOperationTest, TestExistsAndMetadataFailure) {
@@ -599,18 +526,16 @@ TEST_F(FileSystemOperationTest, TestExistsAndMetadataFailure) {
       FILE_PATH_LITERAL("nonexistingdir")));
   operation()->GetMetadata(nonexisting_dir_path);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, mock_dispatcher_->status());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, status());
 
   operation()->FileExists(nonexisting_dir_path);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, status());
 
   file_util::EnsureEndsWithSeparator(&nonexisting_dir_path);
   operation()->DirectoryExists(nonexisting_dir_path);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, status());
 }
 
 TEST_F(FileSystemOperationTest, TestExistsAndMetadataSuccess) {
@@ -619,27 +544,23 @@ TEST_F(FileSystemOperationTest, TestExistsAndMetadataSuccess) {
 
   operation()->DirectoryExists(dir.path());
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(kFileOperationSucceeded, status());
 
   operation()->GetMetadata(dir.path());
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
-  EXPECT_TRUE(mock_dispatcher_->info().is_directory);
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(kFileOperationSucceeded, status());
+  EXPECT_TRUE(info().is_directory);
 
   FilePath file;
   file_util::CreateTemporaryFileInDir(dir.path(), &file);
   operation()->FileExists(file);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(kFileOperationSucceeded, status());
 
   operation()->GetMetadata(file);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
-  EXPECT_FALSE(mock_dispatcher_->info().is_directory);
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(kFileOperationSucceeded, status());
+  EXPECT_FALSE(info().is_directory);
 }
 
 TEST_F(FileSystemOperationTest, TestReadDirFailure) {
@@ -649,8 +570,7 @@ TEST_F(FileSystemOperationTest, TestReadDirFailure) {
   file_util::EnsureEndsWithSeparator(&nonexisting_dir_path);
   operation()->ReadDirectory(nonexisting_dir_path);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, status());
 
   // File exists.
   ScopedTempDir dir;
@@ -660,8 +580,7 @@ TEST_F(FileSystemOperationTest, TestReadDirFailure) {
   operation()->ReadDirectory(file);
   MessageLoop::current()->RunAllPending();
   // TODO(kkanetkar) crbug.com/54309 to change the error code.
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, status());
 }
 
 TEST_F(FileSystemOperationTest, TestReadDirSuccess) {
@@ -679,17 +598,16 @@ TEST_F(FileSystemOperationTest, TestReadDirSuccess) {
 
   operation()->ReadDirectory(parent_dir.path());
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationStatusNotSet, mock_dispatcher_->status());
-  EXPECT_EQ(2u, mock_dispatcher_->entries().size());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(kFileOperationStatusNotSet, status());
+  EXPECT_EQ(2u, entries().size());
 
-  for (size_t i = 0; i < mock_dispatcher_->entries().size(); ++i) {
-    if (mock_dispatcher_->entries()[i].is_directory) {
+  for (size_t i = 0; i < entries().size(); ++i) {
+    if (entries()[i].is_directory) {
       EXPECT_EQ(child_dir.BaseName().value(),
-                mock_dispatcher_->entries()[i].name);
+                entries()[i].name);
     } else {
       EXPECT_EQ(child_file.BaseName().value(),
-                mock_dispatcher_->entries()[i].name);
+                entries()[i].name);
     }
   }
 }
@@ -702,8 +620,7 @@ TEST_F(FileSystemOperationTest, TestRemoveFailure) {
 
   operation()->Remove(nonexisting, false /* recursive */);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_FOUND, status());
 
   // It's an error to try to remove a non-empty directory if recursive flag
   // is false.
@@ -722,8 +639,7 @@ TEST_F(FileSystemOperationTest, TestRemoveFailure) {
   operation()->Remove(parent_dir.path(), false /* recursive */);
   MessageLoop::current()->RunAllPending();
   EXPECT_EQ(base::PLATFORM_FILE_ERROR_NOT_EMPTY,
-            mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+            status());
 }
 
 TEST_F(FileSystemOperationTest, TestRemoveSuccess) {
@@ -733,9 +649,8 @@ TEST_F(FileSystemOperationTest, TestRemoveSuccess) {
 
   operation()->Remove(empty_dir.path(), false /* recursive */);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
+  EXPECT_EQ(kFileOperationSucceeded, status());
   EXPECT_FALSE(file_util::DirectoryExists(empty_dir.path()));
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
 
   // Removing a non-empty directory with recursive flag == true should be ok.
   //      parent_dir
@@ -752,9 +667,8 @@ TEST_F(FileSystemOperationTest, TestRemoveSuccess) {
 
   operation()->Remove(parent_dir.path(), true /* recursive */);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
+  EXPECT_EQ(kFileOperationSucceeded, status());
   EXPECT_FALSE(file_util::DirectoryExists(parent_dir.path()));
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
 }
 
 // TODO(ericu): Add tests for Write, Cancel.
@@ -773,17 +687,15 @@ TEST_F(FileSystemOperationTest, TestTruncate) {
   // Check that its length is the size of the data written.
   operation()->GetMetadata(file);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
-  EXPECT_FALSE(mock_dispatcher_->info().is_directory);
-  EXPECT_EQ(data_size, mock_dispatcher_->info().size);
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(kFileOperationSucceeded, status());
+  EXPECT_FALSE(info().is_directory);
+  EXPECT_EQ(data_size, info().size);
 
   // Extend the file by truncating it.
   int length = 17;
   operation()->Truncate(file, length);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(kFileOperationSucceeded, status());
 
   // Check that its length is now 17 and that it's all zeroes after the test
   // data.
@@ -804,8 +716,7 @@ TEST_F(FileSystemOperationTest, TestTruncate) {
   length = 3;
   operation()->Truncate(file, length);
   MessageLoop::current()->RunAllPending();
-  EXPECT_EQ(kFileOperationSucceeded, mock_dispatcher_->status());
-  EXPECT_EQ(request_id_, mock_dispatcher_->request_id());
+  EXPECT_EQ(kFileOperationSucceeded, status());
 
   // Check that its length is now 3 and that it contains only bits of test data.
   EXPECT_TRUE(file_util::GetFileInfo(file, &info));

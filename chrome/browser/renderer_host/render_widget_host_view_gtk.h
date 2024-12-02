@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,19 +8,19 @@
 
 #include <gdk/gdk.h>
 
-#include <vector>
 #include <string>
+#include <vector>
 
-#include "app/animation_delegate.h"
-#include "app/slide_animation.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
-#include "chrome/browser/gtk/owned_widget_gtk.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
+#include "chrome/browser/ui/gtk/owned_widget_gtk.h"
 #include "gfx/native_widget_types.h"
 #include "gfx/rect.h"
-#include "webkit/glue/plugins/gtk_plugin_container_manager.h"
+#include "ui/base/animation/animation_delegate.h"
+#include "ui/base/animation/slide_animation.h"
 #include "webkit/glue/webcursor.h"
+#include "webkit/plugins/npapi/gtk_plugin_container_manager.h"
 
 class RenderWidgetHost;
 class GtkIMContextWrapper;
@@ -43,7 +43,7 @@ typedef struct _GtkSelectionData GtkSelectionData;
 // See comments in render_widget_host_view.h about this class and its members.
 // -----------------------------------------------------------------------------
 class RenderWidgetHostViewGtk : public RenderWidgetHostView,
-                                public AnimationDelegate {
+                                public ui::AnimationDelegate {
  public:
   explicit RenderWidgetHostViewGtk(RenderWidgetHost* widget);
   ~RenderWidgetHostViewGtk();
@@ -55,13 +55,13 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
   virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
                            const gfx::Rect& pos);
   virtual void InitAsFullscreen(RenderWidgetHostView* parent_host_view);
-  virtual RenderWidgetHost* GetRenderWidgetHost() const { return host_; }
+  virtual RenderWidgetHost* GetRenderWidgetHost() const;
   virtual void DidBecomeSelected();
   virtual void WasHidden();
   virtual void SetSize(const gfx::Size& size);
   virtual gfx::NativeView GetNativeView();
   virtual void MovePluginWindows(
-      const std::vector<webkit_glue::WebPluginGeometry>& moves);
+      const std::vector<webkit::npapi::WebPluginGeometry>& moves);
   virtual void Focus();
   virtual void Blur();
   virtual bool HasFocus();
@@ -77,7 +77,8 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
   virtual void DidUpdateBackingStore(
       const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
       const std::vector<gfx::Rect>& copy_rects);
-  virtual void RenderViewGone();
+  virtual void RenderViewGone(base::TerminationStatus status,
+                              int error_code);
   virtual void Destroy();
   virtual void WillDestroyRenderWidget(RenderWidgetHost* rwh) {}
   virtual void SetTooltipText(const std::wstring& tooltip_text);
@@ -91,10 +92,10 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
   virtual bool ContainsNativeView(gfx::NativeView native_view) const;
   virtual void AcceleratedCompositingActivated(bool activated);
 
-  // AnimationDelegate implementation.
-  virtual void AnimationEnded(const Animation* animation);
-  virtual void AnimationProgressed(const Animation* animation);
-  virtual void AnimationCanceled(const Animation* animation);
+  // ui::AnimationDelegate implementation.
+  virtual void AnimationEnded(const ui::Animation* animation);
+  virtual void AnimationProgressed(const ui::Animation* animation);
+  virtual void AnimationCanceled(const ui::Animation* animation);
 
   gfx::NativeView native_view() const { return view_.get(); }
 
@@ -178,7 +179,7 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
 
   // The animation used for the abovementioned shade effect. The animation's
   // value affects the alpha we use for |overlay_color_|.
-  SlideAnimation overlay_animation_;
+  ui::SlideAnimation overlay_animation_;
 
   // Variables used only for popups --------------------------------------------
   // Our parent widget.
@@ -207,7 +208,7 @@ class RenderWidgetHostViewGtk : public RenderWidgetHostView,
   scoped_ptr<GtkKeyBindingsHandler> key_bindings_handler_;
 
   // Helper class that lets us allocate plugin containers and move them.
-  GtkPluginContainerManager plugin_container_manager_;
+  webkit::npapi::GtkPluginContainerManager plugin_container_manager_;
 
   // The size that we want the renderer to be.  We keep this in a separate
   // variable because resizing in GTK+ is async.

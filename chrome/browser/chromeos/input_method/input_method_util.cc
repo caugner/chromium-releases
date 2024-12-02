@@ -5,13 +5,12 @@
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 
 #include <algorithm>
+#include <functional>
 #include <map>
 #include <utility>
 
 #include "unicode/uloc.h"
 
-#include "app/l10n_util.h"
-#include "app/l10n_util_collator.h"
 #include "base/basictypes.h"
 #include "base/hash_tables.h"
 #include "base/scoped_ptr.h"
@@ -20,11 +19,12 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/keyboard_library.h"
 #include "chrome/browser/chromeos/language_preferences.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/l10n/l10n_util_collator.h"
 
 namespace {
 
@@ -64,6 +64,8 @@ const struct InputMethodIdToKeyboardOverlayId {
   { "xkb:us:intl:eng", "en_US" },
   { "xkb:us:altgr-intl:eng", "en_US" },
   { "xkb:us:dvorak:eng", "en_US_dvorak" },
+  // TODO(mazda): Add keyboard overlay definition for US Colemak.
+  { "xkb:us:colemak:eng", "en_US" },
   { "hangul", "ko" },
   { "pinyin", "zh_CN" },
   { "m17n:ar:kbd", "ar" },
@@ -107,7 +109,11 @@ struct IdMaps {
   scoped_ptr<LanguageCodeToIdsMap> language_code_to_ids;
   scoped_ptr<std::map<std::string, std::string> > id_to_language_code;
   scoped_ptr<std::map<std::string, std::string> > id_to_display_name;
-  scoped_ptr<std::map<std::string, std::string> > id_to_keyboard_overlay_id;
+
+  // Returns the singleton instance.
+  static IdMaps* GetInstance() {
+    return Singleton<IdMaps>::get();
+  }
 
   void ReloadMaps() {
     chromeos::InputMethodLibrary* library =
@@ -122,7 +128,6 @@ struct IdMaps {
     language_code_to_ids->clear();
     id_to_language_code->clear();
     id_to_display_name->clear();
-    id_to_keyboard_overlay_id->clear();
 
     // Build the id to descriptor map for handling kExtraLanguages later.
     typedef std::map<std::string,
@@ -138,13 +143,6 @@ struct IdMaps {
       // Remember the pair.
       id_to_descriptor_map.insert(
           std::make_pair(input_method.id, &input_method));
-    }
-
-    for (size_t i = 0; i < arraysize(kInputMethodIdToKeyboardOverlayId); ++i) {
-      InputMethodIdToKeyboardOverlayId id_pair =
-          kInputMethodIdToKeyboardOverlayId[i];
-      id_to_keyboard_overlay_id->insert(
-          std::make_pair(id_pair.input_method_id, id_pair.keyboard_overlay_id));
     }
 
     // Go through the languages listed in kExtraLanguages.
@@ -165,8 +163,7 @@ struct IdMaps {
  private:
   IdMaps() : language_code_to_ids(new LanguageCodeToIdsMap),
              id_to_language_code(new std::map<std::string, std::string>),
-             id_to_display_name(new std::map<std::string, std::string>),
-             id_to_keyboard_overlay_id(new std::map<std::string, std::string>) {
+             id_to_display_name(new std::map<std::string, std::string>) {
     ReloadMaps();
   }
 
@@ -273,6 +270,7 @@ const struct EnglishToResouceId {
   { "Serbia", IDS_STATUSBAR_LAYOUT_SERBIA },
   { "Czechia", IDS_STATUSBAR_LAYOUT_CZECHIA },
   { "USA - Dvorak", IDS_STATUSBAR_LAYOUT_USA_DVORAK },
+  { "USA - Colemak", IDS_STATUSBAR_LAYOUT_USA_COLEMAK },
   { "Romania", IDS_STATUSBAR_LAYOUT_ROMANIA },
   { "USA", IDS_STATUSBAR_LAYOUT_USA },
   { "USA - International (AltGr dead keys)",
@@ -341,11 +339,11 @@ struct CompareLanguageCodesByLanguageName
   // efficient, but acceptable as the function is cheap, and the language
   // list is short (about 40 at most).
   bool operator()(const std::string& s1, const std::string& s2) const {
-    const std::wstring key1 =
+    const string16 key1 =
         chromeos::input_method::GetLanguageDisplayNameFromCode(s1);
-    const std::wstring key2 =
+    const string16 key2 =
         chromeos::input_method::GetLanguageDisplayNameFromCode(s2);
-    return l10n_util::StringComparator<std::wstring>(collator_)(key1, key2);
+    return l10n_util::StringComparator<string16>(collator_)(key1, key2);
   }
 
  private:
@@ -536,8 +534,8 @@ std::string GetLanguageCodeFromInputMethodId(
   // defined in app/l10_util.cc.
   const char kDefaultLanguageCode[] = "en-US";
   std::map<std::string, std::string>::const_iterator iter
-      = Singleton<IdMaps>::get()->id_to_language_code->find(input_method_id);
-  return (iter == Singleton<IdMaps>::get()->id_to_language_code->end()) ?
+      = IdMaps::GetInstance()->id_to_language_code->find(input_method_id);
+  return (iter == IdMaps::GetInstance()->id_to_language_code->end()) ?
       // Returning |kDefaultLanguageCode| here is not for Chrome OS but for
       // Ubuntu where the ibus-xkb-layouts engine could be missing.
       kDefaultLanguageCode : iter->second;
@@ -553,35 +551,26 @@ std::string GetKeyboardLayoutName(const std::string& input_method_id) {
   return (splitted_id.size() > 1) ? splitted_id[1] : "";
 }
 
-std::string GetKeyboardOverlayId(const std::string& input_method_id) {
-  const std::map<std::string, std::string>& id_map =
-      *(Singleton<IdMaps>::get()->id_to_keyboard_overlay_id);
-  std::map<std::string, std::string>::const_iterator iter =
-      id_map.find(input_method_id);
-  return (iter == id_map.end() ? "" : iter->second);
-}
-
 std::string GetInputMethodDisplayNameFromId(
     const std::string& input_method_id) {
   static const char kDefaultDisplayName[] = "USA";
   std::map<std::string, std::string>::const_iterator iter
-      = Singleton<IdMaps>::get()->id_to_display_name->find(input_method_id);
-  return (iter == Singleton<IdMaps>::get()->id_to_display_name->end()) ?
+      = IdMaps::GetInstance()->id_to_display_name->find(input_method_id);
+  return (iter == IdMaps::GetInstance()->id_to_display_name->end()) ?
       kDefaultDisplayName : iter->second;
 }
 
-std::wstring GetLanguageDisplayNameFromCode(const std::string& language_code) {
+string16 GetLanguageDisplayNameFromCode(const std::string& language_code) {
   if (!g_browser_process) {
-    return L"";
+    return string16();
   }
-  return UTF16ToWide(l10n_util::GetDisplayNameForLocale(
-      language_code, g_browser_process->GetApplicationLocale(), true));
+  return l10n_util::GetDisplayNameForLocale(
+      language_code, g_browser_process->GetApplicationLocale(), true);
 }
 
-std::wstring GetLanguageNativeDisplayNameFromCode(
+string16 GetLanguageNativeDisplayNameFromCode(
     const std::string& language_code) {
-  return UTF16ToWide(l10n_util::GetDisplayNameForLocale(
-      language_code, language_code, true));
+  return l10n_util::GetDisplayNameForLocale(language_code, language_code, true);
 }
 
 void SortLanguageCodesByNames(std::vector<std::string>* language_codes) {
@@ -603,7 +592,7 @@ void SortLanguageCodesByNames(std::vector<std::string>* language_codes) {
 
 void SortInputMethodIdsByNames(std::vector<std::string>* input_method_ids) {
   SortInputMethodIdsByNamesInternal(
-      *(Singleton<IdMaps>::get()->id_to_language_code), input_method_ids);
+      *(IdMaps::GetInstance()->id_to_language_code), input_method_ids);
 }
 
 void SortInputMethodIdsByNamesInternal(
@@ -629,7 +618,7 @@ bool GetInputMethodIdsFromLanguageCode(
     InputMethodType type,
     std::vector<std::string>* out_input_method_ids) {
   return GetInputMethodIdsFromLanguageCodeInternal(
-      *Singleton<IdMaps>::get()->language_code_to_ids,
+      *IdMaps::GetInstance()->language_code_to_ids,
       normalized_language_code, type, out_input_method_ids);
 }
 
@@ -687,7 +676,7 @@ void EnableInputMethods(const std::string& language_code, InputMethodType type,
 }
 
 void OnLocaleChanged() {
-  Singleton<IdMaps>::get()->ReloadMaps();
+  IdMaps::GetInstance()->ReloadMaps();
 }
 
 }  // namespace input_method

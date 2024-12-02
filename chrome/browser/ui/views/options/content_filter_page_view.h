@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,8 @@
 #define CHROME_BROWSER_UI_VIEWS_OPTIONS_CONTENT_FILTER_PAGE_VIEW_H_
 #pragma once
 
-#include "chrome/browser/host_content_settings_map.h"
-#include "chrome/browser/views/options/options_page_view.h"
+#include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/browser/ui/views/options/options_page_view.h"
 #include "chrome/common/content_settings_types.h"
 #include "chrome/common/notification_registrar.h"
 #include "views/controls/button/button.h"
@@ -39,7 +39,7 @@ class ContentFilterPageView : public OptionsPageView,
   virtual void UpdateView();
 
   virtual void NotifyContentSettingsChanged(
-      const HostContentSettingsMap::ContentSettingsDetails *details);
+      const ContentSettingsDetails* details);
 
   // OptionsPageView implementation:
   virtual void InitControlLayout();

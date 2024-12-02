@@ -1,4 +1,4 @@
-# Copyright (c) 2010 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,12 +9,12 @@ from xml.dom import minidom
 from grit.format.policy_templates.writers import xml_formatted_writer
 
 
-def GetWriter(config, messages):
+def GetWriter(config):
   '''Factory method for creating DocWriter objects.
   See the constructor of TemplateWriter for description of
   arguments.
   '''
-  return DocWriter(['*'], config, messages)
+  return DocWriter(['*'], config)
 
 
 class DocWriter(xml_formatted_writer.XMLFormattedWriter):
@@ -41,7 +41,7 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
     Returns:
       The localized message.
     '''
-    return self.messages['IDS_POLICY_DOC_' + msg_id.upper()]
+    return self.messages['doc_' + msg_id]['text']
 
   def _MapListToString(self, item_map, items):
     '''Creates a comma-separated list.
@@ -107,7 +107,7 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
   def _AddDescription(self, parent, policy):
     '''Adds a string containing the description of the policy. URLs are
     replaced with links and the possible choices are enumerated in case
-    of 'enum' type policies.
+    of 'string-enum' and 'int-enum' type policies.
 
     Args:
       parent: The DOM node for which the feature list will be added.
@@ -116,11 +116,15 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
     # Replace URLs with links in the description.
     self._AddTextWithLinks(parent, policy['desc'])
     # Add list of enum items.
-    if policy['type'] == 'enum':
+    if policy['type'] in ('string-enum', 'int-enum'):
       ul = self.AddElement(parent, 'ul')
       for item in policy['items']:
+        if policy['type'] == 'int-enum':
+          value_string = str(item['value'])
+        else:
+          value_string = '"%s"' % item['value']
         self.AddElement(
-            ul, 'li', {}, '%s = %s' % (item['value'], item['caption']))
+            ul, 'li', {}, '%s = %s' % (value_string, item['caption']))
 
   def _AddFeatures(self, parent, policy):
     '''Adds a string containing the list of supported features of a policy
@@ -132,7 +136,7 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
       policy: The data structure of a policy.
     '''
     features = []
-    for key, value in policy['annotations']['features'].iteritems():
+    for key, value in policy['features'].iteritems():
       key_name = self._FEATURE_MAP[key]
       if value == 0:
         value_name = self._GetLocalizedMessage('not_supported')
@@ -149,7 +153,7 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
       policy: A policy of type 'list', for which the Mac example value
         is generated.
     '''
-    example_value = policy['annotations']['example_value']
+    example_value = policy['example_value']
     self.AddElement(parent, 'dt', {}, 'Mac:')
     mac = self._AddStyledElement(parent, 'dd', ['.monospace', '.pre'])
 
@@ -167,7 +171,7 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
       policy: A policy of type 'list', for which the Windows example value
         is generated.
     '''
-    example_value = policy['annotations']['example_value']
+    example_value = policy['example_value']
     self.AddElement(parent, 'dt', {}, 'Windows:')
     win = self._AddStyledElement(parent, 'dd', ['.monospace', '.pre'])
     win_text = []
@@ -187,7 +191,7 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
       policy: A policy of type 'list', for which the Linux example value
         is generated.
     '''
-    example_value = policy['annotations']['example_value']
+    example_value = policy['example_value']
     self.AddElement(parent, 'dt', {}, 'Linux:')
     linux = self._AddStyledElement(parent, 'dd', ['.monospace'])
     linux_text = []
@@ -219,7 +223,7 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
       parent: The DOM node for which the example will be added.
       policy: The data structure of a policy.
     '''
-    example_value = policy['annotations']['example_value']
+    example_value = policy['example_value']
     examples = self._AddStyledElement(parent, 'dl', ['dd dl'])
     self._AddListExampleWindows(examples, policy)
     self._AddListExampleLinux(examples, policy)
@@ -240,7 +244,7 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
       Exception: If the type of the policy is unknown or the example value
         of the policy is out of its expected range.
     '''
-    example_value = policy['annotations']['example_value']
+    example_value = policy['example_value']
     policy_type = policy['type']
     if policy_type == 'main':
       if example_value == True:
@@ -253,10 +257,12 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
         raise Exception('Expected boolean value.')
     elif policy_type == 'string':
       self.AddText(parent, '"%s"' % example_value)
-    elif policy_type == 'enum':
+    elif policy_type in ('int', 'int-enum'):
       self.AddText(
           parent,
           '0x%08x (Windows), %d (Linux/Mac)' % (example_value, example_value))
+    elif policy_type == 'string-enum':
+      self.AddText(parent, '"%s"' % (example_value))
     elif policy_type == 'list':
       self._AddListExample(parent, policy)
     else:
@@ -324,7 +330,6 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
       parent: A DOM element for which the list will be added.
       policy: The data structure of the policy.
     '''
-    annotations = policy['annotations']
 
     dl = self.AddElement(parent, 'dl')
     self._AddPolicyAttribute(
@@ -357,9 +362,9 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
     Args:
       policy: The data structure of the policy.
     '''
-    if 'problem_href' not in policy['annotations']:
+    if 'problem_href' not in policy:
       return
-    problem_href = policy['annotations']['problem_href']
+    problem_href = policy['problem_href']
     div = self._AddStyledElement(parent, 'div', ['div.note'])
     note = self._GetLocalizedMessage('note').replace('$6', problem_href)
     self._AddTextWithLinks(div, note)
@@ -407,7 +412,11 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
     self.AddElement(h2, 'a', {'name': policy['name']})
     if policy['type'] != 'group':
       # Normal policies get a full description.
-      self.AddText(h2, policy['name'])
+      policy_name_text = policy['name']
+      if 'deprecated' in policy and policy['deprecated'] == True:
+        policy_name_text += " ("
+        policy_name_text += self._GetLocalizedMessage('deprecated') + ")"
+      self.AddText(h2, policy_name_text)
       self.AddElement(parent2, 'span', {}, policy['caption'])
       self._AddPolicyNote(parent2, policy)
       self._AddPolicyDetails(parent2, policy)
@@ -423,6 +432,9 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
   #
   # Implementation of abstract methods of TemplateWriter:
   #
+
+  def IsDeprecatedPolicySupported(self, policy):
+    return True
 
   def WritePolicy(self, policy):
     self._AddPolicyRow(self._summary_tbody, policy)
@@ -489,8 +501,10 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
     # Human-readable names of types.
     self._TYPE_MAP = {
       'string': 'String (REG_SZ)',
+      'int': 'Integer (REG_DWORD)',
       'main': 'Boolean (REG_DWORD)',
-      'enum': 'Integer (REG_DWORD)',
+      'int-enum': 'Integer (REG_DWORD)',
+      'string-enum': 'String (REG_SZ)',
       'list': 'List of strings',
     }
     # The CSS style-sheet used for the document. It will be used in Google

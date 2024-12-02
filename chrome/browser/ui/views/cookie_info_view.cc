@@ -1,23 +1,22 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/cookie_info_view.h"
+#include "chrome/browser/ui/views/cookie_info_view.h"
 
 #include <algorithm>
 
-#include "app/l10n_util.h"
 #include "base/i18n/time_formatting.h"
 #include "base/message_loop.h"
 #include "base/string16.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/cookies_tree_model.h"
-#include "chrome/browser/profile.h"
 #include "gfx/canvas.h"
 #include "gfx/color_utils.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "views/border.h"
 #include "views/grid_layout.h"
 #include "views/controls/label.h"
@@ -68,14 +67,15 @@ void CookieInfoView::SetCookie(
 
   std::wstring expire_text = cookie.DoesExpire() ?
       base::TimeFormatFriendlyDateAndTime(cookie.ExpiryDate()) :
-      l10n_util::GetString(IDS_COOKIES_COOKIE_EXPIRES_SESSION);
+      UTF16ToWide(
+          l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_EXPIRES_SESSION));
 
   if (editable_expiration_date_) {
     expire_combo_values_.clear();
     if (cookie.DoesExpire())
       expire_combo_values_.push_back(expire_text);
-    expire_combo_values_.push_back(
-      l10n_util::GetString(IDS_COOKIES_COOKIE_EXPIRES_SESSION));
+    expire_combo_values_.push_back(UTF16ToWide(
+        l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_EXPIRES_SESSION)));
     expires_value_combobox_->ModelChanged();
     expires_value_combobox_->SetSelectedItem(0);
     expires_value_combobox_->SetEnabled(true);
@@ -85,8 +85,10 @@ void CookieInfoView::SetCookie(
   }
 
   send_for_value_field_->SetText(cookie.IsSecure() ?
-      l10n_util::GetString(IDS_COOKIES_COOKIE_SENDFOR_SECURE) :
-      l10n_util::GetString(IDS_COOKIES_COOKIE_SENDFOR_ANY));
+      UTF16ToWide(
+          l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_SENDFOR_SECURE)) :
+      UTF16ToWide(
+          l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_SENDFOR_ANY)));
   EnableCookieDisplay(true);
   Layout();
 }
@@ -101,7 +103,7 @@ void CookieInfoView::SetCookieString(const GURL& url,
 
 void CookieInfoView::ClearCookieDisplay() {
   std::wstring no_cookie_string =
-      l10n_util::GetString(IDS_COOKIES_COOKIE_NONESELECTED);
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_NONESELECTED));
   name_value_field_->SetText(no_cookie_string);
   content_value_field_->SetText(no_cookie_string);
   domain_value_field_->SetText(no_cookie_string);
@@ -185,25 +187,25 @@ void CookieInfoView::Init() {
   set_border(border);
 
   name_label_ = new views::Label(
-      l10n_util::GetString(IDS_COOKIES_COOKIE_NAME_LABEL));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_NAME_LABEL)));
   name_value_field_ = new views::Textfield;
   content_label_ = new views::Label(
-      l10n_util::GetString(IDS_COOKIES_COOKIE_CONTENT_LABEL));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_CONTENT_LABEL)));
   content_value_field_ = new views::Textfield;
   domain_label_ = new views::Label(
-      l10n_util::GetString(IDS_COOKIES_COOKIE_DOMAIN_LABEL));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_DOMAIN_LABEL)));
   domain_value_field_ = new views::Textfield;
   path_label_ = new views::Label(
-      l10n_util::GetString(IDS_COOKIES_COOKIE_PATH_LABEL));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_PATH_LABEL)));
   path_value_field_ = new views::Textfield;
   send_for_label_ = new views::Label(
-      l10n_util::GetString(IDS_COOKIES_COOKIE_SENDFOR_LABEL));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_SENDFOR_LABEL)));
   send_for_value_field_ = new views::Textfield;
   created_label_ = new views::Label(
-      l10n_util::GetString(IDS_COOKIES_COOKIE_CREATED_LABEL));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_CREATED_LABEL)));
   created_value_field_ = new views::Textfield;
   expires_label_ = new views::Label(
-      l10n_util::GetString(IDS_COOKIES_COOKIE_EXPIRES_LABEL));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_COOKIES_COOKIE_EXPIRES_LABEL)));
   if (editable_expiration_date_)
     expires_value_combobox_ = new views::Combobox(this);
   else
@@ -275,4 +277,3 @@ void CookieInfoView::Init() {
     expires_value_field_->SetBackgroundColor(text_area_background);
   }
 }
-

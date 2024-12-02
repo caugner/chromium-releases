@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <string>
 
 #include "chrome/browser/content_exceptions_table_model.h"
-#include "chrome/browser/views/options/exception_editor_view.h"
+#include "chrome/browser/ui/views/options/exception_editor_view.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_types.h"
 #include "views/controls/button/button.h"
@@ -69,7 +69,7 @@ class ExceptionsView : public ExceptionEditorView::Delegate,
 
   // ExceptionEditorView::Delegate implementation.
   virtual void AcceptExceptionEdit(
-      const HostContentSettingsMap::Pattern& pattern,
+      const ContentSettingsPattern& pattern,
       ContentSetting setting,
       bool is_off_the_record,
       int index,

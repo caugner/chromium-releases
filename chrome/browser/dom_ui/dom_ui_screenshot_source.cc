@@ -9,8 +9,8 @@
 #include "base/path_service.h"
 #include "base/ref_counted_memory.h"
 #include "base/task.h"
-#include "base/thread.h"
-#include "base/waitable_event.h"
+#include "base/threading/thread.h"
+#include "base/synchronization/waitable_event.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
@@ -114,4 +114,10 @@ void DOMUIScreenshotSource::StartDataRequest(const std::string& path,
                                             bool is_off_the_record,
                                             int request_id) {
   SendResponse(request_id, new RefCountedBytes(GetScreenshot(path)));
+}
+
+std::string DOMUIScreenshotSource::GetMimeType(const std::string&) const {
+  // We need to explicitly return a mime type, otherwise if the user tries to
+  // drag the image they get no extension.
+  return "image/png";
 }

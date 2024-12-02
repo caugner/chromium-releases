@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/basictypes.h"
-#include "base/platform_thread.h"
+#include "base/threading/platform_thread.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -32,7 +32,8 @@ class MockAudioInputCallback : public AudioInputStream::AudioInputCallback {
 
 // ============================================================================
 // Validate that the AudioManager::AUDIO_MOCK callbacks work.
-TEST(FakeAudioInputTest, BasicCallbacks) {
+// Flaky, http://crbug.com/49497.
+TEST(FakeAudioInputTest, FLAKY_BasicCallbacks) {
   MockAudioInputCallback callback;
   EXPECT_CALL(callback, OnData(NotNull(), _, _)).Times(AtLeast(5));
   EXPECT_CALL(callback, OnError(NotNull(), _)).Times(Exactly(0));
@@ -45,7 +46,9 @@ TEST(FakeAudioInputTest, BasicCallbacks) {
   ASSERT_TRUE(NULL != stream);
   EXPECT_TRUE(stream->Open());
   stream->Start(&callback);
-  PlatformThread::Sleep(340);  // Give sufficient time to receive 5 / 6 packets.
+
+  // Give sufficient time to receive 5 / 6 packets.
+  base::PlatformThread::Sleep(340);
   stream->Stop();
   stream->Close();
 }

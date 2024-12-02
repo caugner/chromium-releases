@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 
 #include <vector>
 
+#include "app/win/scoped_com_initializer.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -29,14 +30,12 @@
 #include "chrome/browser/importer/importer.h"
 #include "chrome/browser/importer/importer_bridge.h"
 #include "chrome/browser/importer/importer_data_types.h"
-#include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/common/chrome_paths.h"
 #include "webkit/glue/password_form.h"
 
 #if defined(OS_WIN)
 #include "base/scoped_comptr_win.h"
-#include "app/win_util.h"
 #include "chrome/browser/importer/ie_importer.h"
 #include "chrome/browser/password_manager/ie7_password.h"
 #endif
@@ -358,9 +357,8 @@ void WritePStore(IPStore* pstore, const GUID* type, const GUID* subtype) {
 
 TEST_F(ImporterTest, IEImporter) {
   // Sets up a favorites folder.
-  win_util::ScopedCOMInitializer com_init;
-  std::wstring path = test_path_.ToWStringHack();
-  file_util::AppendToPath(&path, L"Favorites");
+  app::win::ScopedCOMInitializer com_init;
+  std::wstring path = test_path_.AppendASCII("Favorites").value();
   CreateDirectory(path.c_str(), NULL);
   CreateDirectory((path + L"\\SubFolder").c_str(), NULL);
   CreateDirectory((path + L"\\Links").c_str(), NULL);
@@ -639,9 +637,10 @@ class FirefoxObserver : public ProfileWriter,
       // The order might not be deterministic, look in the expected list for
       // that template URL.
       bool found = false;
-      std::wstring keyword = template_urls[i]->keyword();
+      string16 keyword = template_urls[i]->keyword();
       for (size_t j = 0; j < arraysize(kFirefox2Keywords); ++j) {
-        if (template_urls[i]->keyword() == kFirefox2Keywords[j].keyword) {
+        if (template_urls[i]->keyword() ==
+            WideToUTF16Hack(kFirefox2Keywords[j].keyword)) {
           EXPECT_EQ(kFirefox2Keywords[j].url, template_urls[i]->url()->url());
           found = true;
           break;
@@ -654,7 +653,7 @@ class FirefoxObserver : public ProfileWriter,
     if (default_keyword_index != -1) {
       EXPECT_LT(default_keyword_index, static_cast<int>(template_urls.size()));
       TemplateURL* default_turl = template_urls[default_keyword_index];
-      default_keyword_ = default_turl->keyword();
+      default_keyword_ = UTF16ToWideHack(default_turl->keyword());
       default_keyword_url_ = default_turl->url()->url();
     }
 
@@ -846,9 +845,10 @@ class Firefox3Observer : public ProfileWriter,
       // The order might not be deterministic, look in the expected list for
       // that template URL.
       bool found = false;
-      std::wstring keyword = template_urls[i]->keyword();
+      string16 keyword = template_urls[i]->keyword();
       for (size_t j = 0; j < arraysize(kFirefox3Keywords); ++j) {
-        if (template_urls[i]->keyword() == kFirefox3Keywords[j].keyword) {
+        if (template_urls[i]->keyword() ==
+            WideToUTF16Hack(kFirefox3Keywords[j].keyword)) {
           EXPECT_EQ(kFirefox3Keywords[j].url, template_urls[i]->url()->url());
           found = true;
           break;
@@ -861,7 +861,7 @@ class Firefox3Observer : public ProfileWriter,
     if (default_keyword_index != -1) {
       EXPECT_LT(default_keyword_index, static_cast<int>(template_urls.size()));
       TemplateURL* default_turl = template_urls[default_keyword_index];
-      default_keyword_ = default_turl->keyword();
+      default_keyword_ = UTF16ToWideHack(default_turl->keyword());
       default_keyword_url_ = default_turl->url()->url();
     }
 

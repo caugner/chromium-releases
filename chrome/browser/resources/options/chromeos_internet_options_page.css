@@ -6,10 +6,6 @@
   border: none;
 }
 
-#internetPage > section {
-  display: block;
-}
-
 #internetPage > section > h3 {
   font-size: 100%;
   width: auto;
@@ -53,8 +49,8 @@
 }
 
 .network-item[connected] {
-  background-image: -webkit-gradient(linear, left top, left bottom,
-      from(rgba(255,255,255,0.8)), to(rgba(255,255,255,0)));
+  background-image: -webkit-linear-gradient(rgba(255, 255, 255, 0.8),
+                                            rgba(255, 255, 255, 0));
   background-color: hsl(214,91%,89%);
   border-color: hsl(214, 91%, 65%);
 }
@@ -150,24 +146,62 @@ html[dir='rtl'] .details-button {
   float: left;
 }
 
+#lockedNetworkBanner {
+  height: 31px;
+  width: 100%;
+  margin: 0;
+  padding-top: 10px;
+  vertical-align: middle;
+}
+
+#lockedNetworkIcon {
+  background-image: url("chrome://theme/IDR_WARNING");
+  background-repeat: no-repeat;
+  background-position:center;
+  display: inline-block;
+  padding: 5px;
+  height: 21px;
+  vertical-align: middle;
+  width: 24px;
+}
+
+#accessLockedText {
+  vertical-align: middle;
+}
+
+#internetPage:not([accesslocked]) #lockedNetworkBanner,
+#internetPage[accesslocked] #wirelessButtons,
+#internetPage[accesslocked] #wiredSection,
+#internetPage[accesslocked] #wirelessSection,
+#internetPage[accesslocked] #rememberedSection,
+#internetPage[accesslocked] #detailsInternetPage {
+  display: none;
+}
+
 #detailsInternetPage:not([connected]) > #advancedSection,
 #detailsInternetPage[connecting] > * > #detailsInternetLogin,
 #detailsInternetPage[connected] > * > #detailsInternetLogin,
+#detailsInternetPage:not([connected])  > * > #buyplanDetails,
 #detailsInternetPage:not([wireless]) > * > #detailsInternetOk,
 #detailsInternetPage[ethernet] .wifi-details,
 #detailsInternetPage[ethernet] .cellular-details,
 #detailsInternetPage[cellular] .wifi-details,
+#detailsInternetPage:not([cellular])  > * > #activateDetails,
+#detailsInternetPage:not([cellular])  > * > #buyplanDetails,
 #detailsInternetPage[wireless] .cellular-details,
 #detailsInternetPage[cellplanloading] .no-plan-info,
 #detailsInternetPage[cellplanloading] .plan-details-info,
-#detailsInternetPage[cellplanloading] .needs-plan,
+#detailsInternetPage[cellplanloading]  > * > #buyplanDetails,
 #detailsInternetPage[cellplanloading] #planList,
+#detailsInternetPage[activated] > * > #activateDetails,
+#detailsInternetPage:not([activated]) > * > #buyplanDetails,
+#detailsInternetPage:not([activated]) > * > #detailsInternetLogin,
 #detailsInternetPage[hascellplan] .plan-loading-info,
 #detailsInternetPage[hascellplan] .no-plan-info,
-#detailsInternetPage[hascellplan] .needs-plan,
+#detailsInternetPage[hascellplan] > * > #buyplanDetails,
 #detailsInternetPage[nocellplan] .plan-loading-info,
 #detailsInternetPage[nocellplan] .plan-details-info,
-#detailsInternetPage[hasactiveplan] .needs-plan,
+#detailsInternetPage[hasactiveplan] > * > #buyplanDetails,
 #detailsInternetPage:not([gsm]) .gsm-only,
 #detailsInternetPage:not([password]) .password-details,
 #detailsInternetPage[cert] .password-details,

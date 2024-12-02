@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/ref_counted.h"
 
 #include "printing/backend/print_backend.h"
@@ -126,22 +127,43 @@ class PrintSystem : public base::RefCountedThreadSafe<PrintSystem> {
                        const std::string& print_data_mime_type,
                        const std::string& printer_name,
                        const std::string& job_title,
+                       const std::vector<std::string>& tags,
                        JobSpooler::Delegate* delegate) = 0;
   };
+
+  class PrintSystemResult {
+   public:
+    PrintSystemResult(bool succeeded, const std::string& message)
+        : succeeded_(succeeded), message_(message) { }
+    bool succeeded() const { return succeeded_; }
+    std::string message() const { return message_; }
+
+   private:
+    bool succeeded_;
+    std::string message_;
+
+    PrintSystemResult() { }
+  };
+
+  typedef Callback3<
+      bool,
+      const std::string&,
+      const printing::PrinterCapsAndDefaults&>::Type
+          PrinterCapsAndDefaultsCallback;
 
   virtual ~PrintSystem();
 
   // Initialize print system. This need to be called before any other function
   // of PrintSystem.
-  virtual void Init() = 0;
+  virtual PrintSystemResult Init() = 0;
 
   // Enumerates the list of installed local and network printers.
   virtual void EnumeratePrinters(printing::PrinterList* printer_list) = 0;
 
-  // Gets the capabilities and defaults for a specific printer.
-  virtual bool GetPrinterCapsAndDefaults(
+  // Gets the capabilities and defaults for a specific printer asynchronously.
+  virtual void GetPrinterCapsAndDefaults(
       const std::string& printer_name,
-      printing::PrinterCapsAndDefaults* printer_info) = 0;
+      PrinterCapsAndDefaultsCallback* callback) = 0;
 
   // Returns true if printer_name points to a valid printer.
   virtual bool IsValidPrinter(const std::string& printer_name) = 0;

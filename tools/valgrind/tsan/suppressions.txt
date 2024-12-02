@@ -56,13 +56,6 @@
 }
 
 {
-  bug_61210
-  ThreadSanitizer:Race
-  ...
-  fun:linked_ptr<PluginGroup>*
-}
-
-{
   bug_62880
   ThreadSanitizer:Race
   fun:ObserverListBase*Iterator*
@@ -87,33 +80,27 @@
 }
 
 {
-  bug_64080
+  bug_66994a
   ThreadSanitizer:Race
+  fun:HistoryURLProvider::Stop*
   ...
-  fun:chromeos::PulseAudioMixer::~PulseAudioMixer*
-  ...
-  fun:Singleton<chromeos::AudioHandler*>::OnExit*
+  fun:AutocompleteController::St*
 }
 
 {
-  bug_64186a
+  bug_66994b
   ThreadSanitizer:Race
-  fun:chromeos::CrosLibrary::Library*GetDefaultImpl*
-  fun:chromeos::CrosLibrary::GetSystemLibrary*
+  ...
+  fun:HistoryURLProvider::ExecuteWithDB*
 }
 
 {
-  bug_64186b
+  bug_67957
   ThreadSanitizer:Race
-  ...
-  fun:MetricsService::InitTask::Run*
-}
-
-{
-  bug_64188
-  ThreadSanitizer:Race
-  ...
-  fun:base::RefCounted<net::NetLog::EventParameters>::*
+  fun:Replace_memcpy
+  fun:memcpy
+  fun:Serialize*
+  fun:UserScriptMaster::ScriptReloader::RunScan*
 }
 
 ############################
@@ -244,6 +231,13 @@
   fun:*Worker*
   ...
   obj:*ipc_tests
+}
+
+{
+  bug_68481 [test-only race on bool]
+  ThreadSanitizer:Race
+  fun:tracked_objects::ThreadData::StartTracking*
+  fun:tracked_objects::TrackedObjectsTest_MinimalStartupShutdown_Test::TestBody*
 }
 
 # TODO(timurrrr): bug item

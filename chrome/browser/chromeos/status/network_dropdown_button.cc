@@ -4,8 +4,6 @@
 
 #include "chrome/browser/chromeos/status/network_dropdown_button.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
@@ -13,6 +11,8 @@
 #include "gfx/canvas_skia.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/window/window.h"
 
 namespace chromeos {
@@ -26,14 +26,15 @@ const int NetworkDropdownButton::kThrobDuration = 1000;
 NetworkDropdownButton::NetworkDropdownButton(bool browser_mode,
                                              gfx::NativeWindow parent_window)
     : DropDownButton(NULL,
-                     l10n_util::GetString(IDS_STATUSBAR_NO_NETWORKS_MESSAGE),
+                     UTF16ToWide(l10n_util::GetStringUTF16(
+                         IDS_STATUSBAR_NO_NETWORKS_MESSAGE)),
                      this,
                      true),
       browser_mode_(browser_mode),
       ALLOW_THIS_IN_INITIALIZER_LIST(animation_connecting_(this)),
       parent_window_(parent_window) {
   animation_connecting_.SetThrobDuration(kThrobDuration);
-  animation_connecting_.SetTweenType(Tween::EASE_IN_OUT);
+  animation_connecting_.SetTweenType(ui::Tween::EASE_IN_OUT);
   CrosLibrary::Get()->GetNetworkLibrary()->AddNetworkManagerObserver(this);
   // The initial state will be updated on Refresh.
   // See network_selection_view.cc.
@@ -44,9 +45,10 @@ NetworkDropdownButton::~NetworkDropdownButton() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// NetworkMenuButton, AnimationDelegate implementation:
+// NetworkMenuButton, ui::AnimationDelegate implementation:
 
-void NetworkDropdownButton::AnimationProgressed(const Animation* animation) {
+void NetworkDropdownButton::AnimationProgressed(
+    const ui::Animation* animation) {
   if (animation == &animation_connecting_) {
     SetIcon(IconForNetworkConnecting(animation_connecting_.GetCurrentValue(),
                                      true));
@@ -75,18 +77,24 @@ void NetworkDropdownButton::OnNetworkManagerChanged(NetworkLibrary* cros) {
   if (CrosLibrary::Get()->EnsureLoaded()) {
     // Always show the active network, if any
     const Network* active_network = cros->active_network();
-    const WirelessNetwork* wireless;
     if (active_network != NULL) {
       animation_connecting_.Stop();
       if (active_network->type() == TYPE_ETHERNET) {
         SetIcon(*rb.GetBitmapNamed(IDR_STATUSBAR_WIRED));
-        SetText(l10n_util::GetString(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET));
+        SetText(UTF16ToWide(
+            l10n_util::GetStringUTF16(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET)));
+      } else if (active_network->type() == TYPE_WIFI) {
+        const WifiNetwork* wifi =
+            static_cast<const WifiNetwork*>(active_network);
+        SetIcon(IconForNetworkStrength(wifi, true));
+        SetText(ASCIIToWide(wifi->name()));
+      } else if (active_network->type() == TYPE_CELLULAR) {
+        const CellularNetwork* cellular =
+            static_cast<const CellularNetwork*>(active_network);
+        SetIcon(IconForNetworkStrength(cellular, true));
+        SetText(ASCIIToWide(cellular->name()));
       } else {
-        DCHECK(active_network->type() == TYPE_WIFI ||
-               active_network->type() == TYPE_CELLULAR);
-        wireless = static_cast<const WirelessNetwork*>(active_network);
-        SetIcon(IconForNetworkStrength(wireless->strength(), true));
-        SetText(ASCIIToWide(wireless->name()));
+        NOTREACHED();
       }
     } else if (cros->wifi_connecting() || cros->cellular_connecting()) {
       if (!animation_connecting_.is_animating()) {
@@ -103,12 +111,14 @@ void NetworkDropdownButton::OnNetworkManagerChanged(NetworkLibrary* cros) {
     if (!cros->Connected() && !cros->Connecting()) {
       animation_connecting_.Stop();
       SetIcon(SkBitmap());
-      SetText(l10n_util::GetString(IDS_NETWORK_SELECTION_NONE));
+      SetText(UTF16ToWide(
+          l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_NONE)));
     }
   } else {
     animation_connecting_.Stop();
     SetIcon(SkBitmap());
-    SetText(l10n_util::GetString(IDS_STATUSBAR_NO_NETWORKS_MESSAGE));
+    SetText(UTF16ToWide(
+        l10n_util::GetStringUTF16(IDS_STATUSBAR_NO_NETWORKS_MESSAGE)));
   }
 
   SchedulePaint();

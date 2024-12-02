@@ -9,9 +9,9 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
@@ -113,9 +113,24 @@ void BackgroundContentsService::Observe(NotificationType type,
       DCHECK(IsTracked(Details<BackgroundContents>(details).ptr()));
       RegisterBackgroundContents(Details<BackgroundContents>(details).ptr());
       break;
-    case NotificationType::EXTENSION_UNLOADED:
-      ShutdownAssociatedBackgroundContents(
-          ASCIIToUTF16(Details<const Extension>(details)->id()));
+   case NotificationType::EXTENSION_UNLOADED:
+      switch (Details<UnloadedExtensionInfo>(details)->reason) {
+        case UnloadedExtensionInfo::DISABLE:  // Intentionally fall through.
+        case UnloadedExtensionInfo::UNINSTALL:
+          ShutdownAssociatedBackgroundContents(
+              ASCIIToUTF16(
+                  Details<UnloadedExtensionInfo>(details)->extension->id()));
+          break;
+        case UnloadedExtensionInfo::UPDATE:
+          // Leave BackgroundContents in place
+          break;
+        default:
+          NOTREACHED();
+          ShutdownAssociatedBackgroundContents(
+              ASCIIToUTF16(
+                  Details<UnloadedExtensionInfo>(details)->extension->id()));
+          break;
+      }
       break;
     default:
       NOTREACHED();
@@ -132,7 +147,7 @@ void BackgroundContentsService::LoadBackgroundContentsFromPrefs(
       prefs_->GetDictionary(prefs::kRegisteredBackgroundContents);
   if (!contents)
     return;
-  ExtensionsService* extensions_service = profile->GetExtensionsService();
+  ExtensionService* extensions_service = profile->GetExtensionService();
   DCHECK(extensions_service);
   for (DictionaryValue::key_iterator it = contents->begin_keys();
        it != contents->end_keys(); ++it) {

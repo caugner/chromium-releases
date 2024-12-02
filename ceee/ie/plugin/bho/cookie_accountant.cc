@@ -44,10 +44,15 @@ CookieAccountant::~CookieAccountant() {
 ProductionCookieAccountant::ProductionCookieAccountant() {
 }
 
+// static
+ProductionCookieAccountant* ProductionCookieAccountant::GetInstance() {
+  return Singleton<ProductionCookieAccountant>::get();
+}
+
 CookieAccountant* CookieAccountant::GetInstance() {
   // Unit tests can set singleton_instance_ directly.
   if (singleton_instance_ == NULL)
-    singleton_instance_ = ProductionCookieAccountant::get();
+    singleton_instance_ = ProductionCookieAccountant::GetInstance();
   return singleton_instance_;
 }
 
@@ -221,13 +226,22 @@ void CookieAccountant::RecordHttpResponseCookies(
   }
 }
 
-void CookieAccountant::PatchWininetFunctions() {
-  {
-    AutoLock lock(lock_);
-    if (patching_wininet_functions_)
-      return;
-    patching_wininet_functions_ = true;
+void CookieAccountant::ConnectBroker() {
+  if (!broker_rpc_client_.is_connected()) {
+    HRESULT hr = broker_rpc_client_.Connect(true);
+    DCHECK(SUCCEEDED(hr));
   }
+}
+
+void CookieAccountant::Initialize() {
+  {
+    base::AutoLock lock(lock_);
+    if (initializing_)
+      return;
+    initializing_ = true;
+  }
+  ConnectBroker();
+
   if (!internet_set_cookie_ex_a_patch_.is_patched()) {
     DWORD error = internet_set_cookie_ex_a_patch_.Patch(
         kMsHtmlModuleName, kWinInetModuleName,
@@ -243,7 +257,7 @@ void CookieAccountant::PatchWininetFunctions() {
   DCHECK(internet_set_cookie_ex_a_patch_.is_patched() ||
          internet_set_cookie_ex_w_patch_.is_patched());
   {
-    AutoLock lock(lock_);
-    patching_wininet_functions_ = false;
+    base::AutoLock lock(lock_);
+    initializing_ = false;
   }
 }

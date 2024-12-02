@@ -1,4 +1,4 @@
-# Copyright (c) 2010 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -37,14 +37,16 @@
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/testing/gmock.gyp:gmock',
         '<(DEPTH)/testing/gtest.gyp:gtest',
-        '<(DEPTH)/third_party/WebKit/WebKit/chromium/WebKit.gyp:inspector_resources',
-        '<(DEPTH)/third_party/WebKit/WebKit/chromium/WebKit.gyp:webkit',
+        '<(DEPTH)/third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:inspector_resources',
+        '<(DEPTH)/third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
         '<(DEPTH)/webkit/support/webkit_support.gyp:appcache',
         '<(DEPTH)/webkit/support/webkit_support.gyp:blob',
         '<(DEPTH)/webkit/support/webkit_support.gyp:database',
+        '<(DEPTH)/webkit/support/webkit_support.gyp:fileapi',
         '<(DEPTH)/webkit/support/webkit_support.gyp:glue',
+        '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_gpu',
         '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
-        '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_support',
+        '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_support_common',
       ],
       'msvs_guid': '77C32787-1B96-CB84-B905-7F170629F0AC',
       'sources': [
@@ -73,8 +75,6 @@
         'plain_text_controller.cc',
         'plain_text_controller.h',
         'resource.h',
-        'test_geolocation_service.cc',
-        'test_geolocation_service.h',
         'test_navigation_controller.cc',
         'test_navigation_controller.h',
         'test_shell.cc',
@@ -112,18 +112,18 @@
         'webview_host_gtk.cc',
         'webview_host_win.cc',
         'webwidget_host.h',
+        'webwidget_host.cc',
         'webwidget_host_gtk.cc',
         'webwidget_host_win.cc',
       ],
       'export_dependent_settings': [
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/net/net.gyp:net',
-        '<(DEPTH)/third_party/WebKit/WebKit/chromium/WebKit.gyp:webkit',
+        '<(DEPTH)/third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
         '<(DEPTH)/webkit/support/webkit_support.gyp:glue',
       ],
       'conditions': [
-        # http://code.google.com/p/chromium/issues/detail?id=18337
-        ['target_arch!="x64" and target_arch!="arm"', {
+        ['target_arch!="arm"', {
           'dependencies': [
             'copy_npapi_test_plugin',
           ],
@@ -176,6 +176,7 @@
               'action_name': 'test_shell_repack',
               'variables': {
                 'pak_inputs': [
+                  '<(SHARED_INTERMEDIATE_DIR)/gfx/gfx_resources.pak',
                   '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.pak',
                   '<(SHARED_INTERMEDIATE_DIR)/test_shell/test_shell_resources.pak',
                   '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.pak',
@@ -215,7 +216,7 @@
         '<(DEPTH)/net/net.gyp:net_test_support',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/third_party/mesa/mesa.gyp:osmesa',
-        '<(DEPTH)/third_party/WebKit/WebKit/chromium/WebKit.gyp:copy_TestNetscapePlugIn',
+        '<(DEPTH)/third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:copy_TestNetscapePlugIn',
         '<(DEPTH)/tools/imagediff/image_diff.gyp:image_diff',
       ],
       'defines': [
@@ -331,6 +332,7 @@
           ],
         }, { # OS != "mac"
           'dependencies': [
+            '<(DEPTH)/gfx/gfx.gyp:gfx_resources',
             '<(DEPTH)/net/net.gyp:net_resources',
             '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
             '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_strings',
@@ -348,6 +350,7 @@
       'dependencies': [
         'test_shell_common',
         '<(DEPTH)/base/base.gyp:test_support_base',
+        '<(DEPTH)/media/media.gyp:media_test_support',
         '<(DEPTH)/net/net.gyp:net_test_support',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/testing/gmock.gyp:gmock',
@@ -393,15 +396,10 @@
         '../../glue/glue_serialize_unittest.cc',
         '../../glue/iframe_redirect_unittest.cc',
         '../../glue/media/buffered_data_source_unittest.cc',
-        '../../glue/media/media_resource_loader_bridge_factory_unittest.cc',
-        '../../glue/media/mock_media_resource_loader_bridge_factory.h',
+        '../../glue/media/buffered_resource_loader_unittest.cc',
         '../../glue/media/simple_data_source_unittest.cc',
         '../../glue/mimetype_unittest.cc',
-        '../../glue/mock_resource_loader_bridge.h',
         '../../glue/multipart_response_delegate_unittest.cc',
-        '../../glue/plugins/plugin_group_unittest.cc',
-        '../../glue/plugins/plugin_lib_unittest.cc',
-        '../../glue/plugins/webplugin_impl_unittest.cc',
         '../../glue/regular_expression_unittest.cc',
         '../../glue/resource_fetcher_unittest.cc',
         '../../glue/unittest_test_server.h',
@@ -410,6 +408,21 @@
         '../../glue/webkit_glue_unittest.cc',
         '../../glue/webpasswordautocompletelistener_unittest.cc',
         '../../glue/webview_unittest.cc',
+        '../../mocks/mock_resource_loader_bridge.h',
+        '../../mocks/mock_webframe.h',
+        '../../mocks/mock_weburlloader.h',
+        '../../plugins/npapi/plugin_group_unittest.cc',
+        '../../plugins/npapi/plugin_lib_unittest.cc',
+        '../../plugins/npapi/plugin_list_unittest.cc',
+        '../../plugins/npapi/webplugin_impl_unittest.cc',
+        '../../plugins/ppapi/callbacks_unittest.cc',
+        '../../plugins/ppapi/mock_plugin_delegate.cc',
+        '../../plugins/ppapi/mock_plugin_delegate.h',
+        '../../plugins/ppapi/mock_resource.h',
+        '../../plugins/ppapi/ppapi_unittest.cc',
+        '../../plugins/ppapi/ppapi_unittest.h',
+        '../../plugins/ppapi/resource_tracker_unittest.cc',
+        '../../plugins/ppapi/url_request_info_unittest.cc',
         '../webcore_unit_tests/BMPImageDecoder_unittest.cpp',
         '../webcore_unit_tests/ICOImageDecoder_unittest.cpp',
         'event_listener_unittest.cc',
@@ -492,7 +505,7 @@
     },
   ],
   'conditions': [
-    ['target_arch!="x64" and target_arch!="arm"', {
+    ['target_arch!="arm"', {
       'targets': [
         {
           'target_name': 'npapi_test_common',
@@ -502,13 +515,13 @@
             '<(DEPTH)/third_party/npapi/npapi.gyp:npapi',
           ],
           'sources': [
-            '../../glue/plugins/test/npapi_constants.cc',
-            '../../glue/plugins/test/npapi_constants.h',
-            '../../glue/plugins/test/plugin_client.cc',
-            '../../glue/plugins/test/plugin_client.h',
-            '../../glue/plugins/test/plugin_test.cc',
-            '../../glue/plugins/test/plugin_test.h',
-            '../../glue/plugins/test/plugin_test_factory.h',
+            '../../plugins/npapi/test/npapi_constants.cc',
+            '../../plugins/npapi/test/npapi_constants.h',
+            '../../plugins/npapi/test/plugin_client.cc',
+            '../../plugins/npapi/test/plugin_client.h',
+            '../../plugins/npapi/test/plugin_test.cc',
+            '../../plugins/npapi/test/plugin_test.h',
+            '../../plugins/npapi/test/plugin_test_factory.h',
           ],
         },
         {
@@ -524,51 +537,51 @@
             'npapi_test_common',
           ],
           'sources': [
-            '../../glue/plugins/test/npapi_test.cc',
-            '../../glue/plugins/test/npapi_test.def',
-            '../../glue/plugins/test/npapi_test.rc',
-            '../../glue/plugins/test/plugin_arguments_test.cc',
-            '../../glue/plugins/test/plugin_arguments_test.h',
-            '../../glue/plugins/test/plugin_create_instance_in_paint.cc',
-            '../../glue/plugins/test/plugin_create_instance_in_paint.h',
-            '../../glue/plugins/test/plugin_delete_plugin_in_stream_test.cc',
-            '../../glue/plugins/test/plugin_delete_plugin_in_stream_test.h',
-            '../../glue/plugins/test/plugin_get_javascript_url_test.cc',
-            '../../glue/plugins/test/plugin_get_javascript_url_test.h',
-            '../../glue/plugins/test/plugin_get_javascript_url2_test.cc',
-            '../../glue/plugins/test/plugin_get_javascript_url2_test.h',
-            '../../glue/plugins/test/plugin_geturl_test.cc',
-            '../../glue/plugins/test/plugin_geturl_test.h',
-            '../../glue/plugins/test/plugin_javascript_open_popup.cc',
-            '../../glue/plugins/test/plugin_javascript_open_popup.h',
-            '../../glue/plugins/test/plugin_new_fails_test.cc',
-            '../../glue/plugins/test/plugin_new_fails_test.h',
-            '../../glue/plugins/test/plugin_npobject_lifetime_test.cc',
-            '../../glue/plugins/test/plugin_npobject_lifetime_test.h',
-            '../../glue/plugins/test/plugin_npobject_proxy_test.cc',
-            '../../glue/plugins/test/plugin_npobject_proxy_test.h',
-            '../../glue/plugins/test/plugin_schedule_timer_test.cc',
-            '../../glue/plugins/test/plugin_schedule_timer_test.h',
-            '../../glue/plugins/test/plugin_setup_test.cc',
-            '../../glue/plugins/test/plugin_setup_test.h',
-            '../../glue/plugins/test/plugin_thread_async_call_test.cc',
-            '../../glue/plugins/test/plugin_thread_async_call_test.h',
-            '../../glue/plugins/test/plugin_windowed_test.cc',
-            '../../glue/plugins/test/plugin_windowed_test.h',
-            '../../glue/plugins/test/plugin_private_test.cc',
-            '../../glue/plugins/test/plugin_private_test.h',
-            '../../glue/plugins/test/plugin_test_factory.cc',
-            '../../glue/plugins/test/plugin_window_size_test.cc',
-            '../../glue/plugins/test/plugin_window_size_test.h',
-            '../../glue/plugins/test/plugin_windowless_test.cc',
-            '../../glue/plugins/test/plugin_windowless_test.h',
-            '../../glue/plugins/test/resource.h',
+            '../../plugins/npapi/test/npapi_test.cc',
+            '../../plugins/npapi/test/npapi_test.def',
+            '../../plugins/npapi/test/npapi_test.rc',
+            '../../plugins/npapi/test/plugin_arguments_test.cc',
+            '../../plugins/npapi/test/plugin_arguments_test.h',
+            '../../plugins/npapi/test/plugin_create_instance_in_paint.cc',
+            '../../plugins/npapi/test/plugin_create_instance_in_paint.h',
+            '../../plugins/npapi/test/plugin_delete_plugin_in_stream_test.cc',
+            '../../plugins/npapi/test/plugin_delete_plugin_in_stream_test.h',
+            '../../plugins/npapi/test/plugin_get_javascript_url_test.cc',
+            '../../plugins/npapi/test/plugin_get_javascript_url_test.h',
+            '../../plugins/npapi/test/plugin_get_javascript_url2_test.cc',
+            '../../plugins/npapi/test/plugin_get_javascript_url2_test.h',
+            '../../plugins/npapi/test/plugin_geturl_test.cc',
+            '../../plugins/npapi/test/plugin_geturl_test.h',
+            '../../plugins/npapi/test/plugin_javascript_open_popup.cc',
+            '../../plugins/npapi/test/plugin_javascript_open_popup.h',
+            '../../plugins/npapi/test/plugin_new_fails_test.cc',
+            '../../plugins/npapi/test/plugin_new_fails_test.h',
+            '../../plugins/npapi/test/plugin_npobject_lifetime_test.cc',
+            '../../plugins/npapi/test/plugin_npobject_lifetime_test.h',
+            '../../plugins/npapi/test/plugin_npobject_proxy_test.cc',
+            '../../plugins/npapi/test/plugin_npobject_proxy_test.h',
+            '../../plugins/npapi/test/plugin_schedule_timer_test.cc',
+            '../../plugins/npapi/test/plugin_schedule_timer_test.h',
+            '../../plugins/npapi/test/plugin_setup_test.cc',
+            '../../plugins/npapi/test/plugin_setup_test.h',
+            '../../plugins/npapi/test/plugin_thread_async_call_test.cc',
+            '../../plugins/npapi/test/plugin_thread_async_call_test.h',
+            '../../plugins/npapi/test/plugin_windowed_test.cc',
+            '../../plugins/npapi/test/plugin_windowed_test.h',
+            '../../plugins/npapi/test/plugin_private_test.cc',
+            '../../plugins/npapi/test/plugin_private_test.h',
+            '../../plugins/npapi/test/plugin_test_factory.cc',
+            '../../plugins/npapi/test/plugin_window_size_test.cc',
+            '../../plugins/npapi/test/plugin_window_size_test.h',
+            '../../plugins/npapi/test/plugin_windowless_test.cc',
+            '../../plugins/npapi/test/plugin_windowless_test.h',
+            '../../plugins/npapi/test/resource.h',
           ],
           'include_dirs': [
             '../../..',
           ],
           'xcode_settings': {
-            'INFOPLIST_FILE': '<(DEPTH)/webkit/glue/plugins/test/Info.plist',
+            'INFOPLIST_FILE': '<(DEPTH)/webkit/plugins/npapi/test/Info.plist',
           },
           'conditions': [
             ['OS!="win"', {
@@ -576,16 +589,16 @@
                 # TODO(port):  Port these.
                  # plugin_npobject_lifetime_test.cc has win32-isms
                 #   (HWND, CALLBACK).
-                '../../glue/plugins/test/plugin_npobject_lifetime_test.cc',
+                '../../plugins/npapi/test/plugin_npobject_lifetime_test.cc',
                  # The window APIs are necessarily platform-specific.
-                '../../glue/plugins/test/plugin_window_size_test.cc',
-                '../../glue/plugins/test/plugin_windowed_test.cc',
+                '../../plugins/npapi/test/plugin_window_size_test.cc',
+                '../../plugins/npapi/test/plugin_windowed_test.cc',
                  # Seems windows specific.
-                '../../glue/plugins/test/plugin_create_instance_in_paint.cc',
-                '../../glue/plugins/test/plugin_create_instance_in_paint.h',
+                '../../plugins/npapi/test/plugin_create_instance_in_paint.cc',
+                '../../plugins/npapi/test/plugin_create_instance_in_paint.h',
                  # windows-specific resources
-                '../../glue/plugins/test/npapi_test.def',
-                '../../glue/plugins/test/npapi_test.rc',
+                '../../plugins/npapi/test/npapi_test.def',
+                '../../plugins/npapi/test/npapi_test.rc',
               ],
             }],
             ['OS=="mac"', {
@@ -599,7 +612,7 @@
             ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
               'sources!': [
                 # Needs simple event record type porting
-                '../../glue/plugins/test/plugin_windowless_test.cc',
+                '../../plugins/npapi/test/plugin_windowless_test.cc',
               ],
             }],
             ['(OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris") and (target_arch=="x64" or target_arch=="arm")', {
@@ -641,76 +654,6 @@
             }],
           ],
         },
-        {
-          'target_name': 'npapi_pepper_test_plugin',
-          'type': 'loadable_module',
-          'mac_bundle': 1,
-          'msvs_guid': '821F3B89-6AE1-4254-99CB-93C04D0A79BE',
-          'dependencies': [
-            '<(DEPTH)/gpu/gpu.gyp:pgl',
-            '<(DEPTH)/third_party/gles2_book/gles2_book.gyp:stencil_test',
-            'npapi_test_common',
-          ],
-          'sources': [
-            '../npapi_pepper_test_plugin/main.cc',
-            '../npapi_pepper_test_plugin/pepper_3d_test.cc',
-            '../npapi_pepper_test_plugin/pepper_3d_test.h',
-            '../npapi_pepper_test_plugin/plugin.def',
-            '../npapi_pepper_test_plugin/plugin.rc',
-            '../npapi_pepper_test_plugin/test_factory.cc',
-          ],
-          'include_dirs': [
-            '../../..',
-          ],
-          'conditions': [
-            ['OS!="win"', {
-              # windows-specific resources
-              'sources!': [
-                '../npapi_pepper_test_plugin/plugin.def',
-                '../npapi_pepper_test_plugin/plugin.rc',
-              ],
-            }],
-            ['OS=="mac"', {
-              'product_extension': 'plugin',
-            }],
-          ],
-          'xcode_settings': {
-            'INFOPLIST_FILE': '<(DEPTH)/webkit/tools/npapi_pepper_test_plugin/Info.plist',
-          },
-        },
-        {
-          'target_name': 'copy_npapi_pepper_test_plugin',
-          'type': 'none',
-          'dependencies': [
-            'npapi_pepper_test_plugin',
-          ],
-          'conditions': [
-            ['OS=="win"', {
-              'copies': [
-                {
-                  'destination': '<(PRODUCT_DIR)/plugins',
-                  'files': ['<(PRODUCT_DIR)/npapi_pepper_test_plugin.dll'],
-                },
-              ],
-            }],
-            ['OS=="mac"', {
-              'copies': [
-                {
-                  'destination': '<(PRODUCT_DIR)/plugins/',
-                  'files': ['<(PRODUCT_DIR)/npapi_pepper_test_plugin.plugin/'],
-                },
-              ]
-            }],
-            ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
-              'copies': [
-                {
-                  'destination': '<(PRODUCT_DIR)/plugins',
-                  'files': ['<(PRODUCT_DIR)/libnpapi_pepper_test_plugin.so'],
-                },
-              ],
-            }],
-          ],
-        },
       ],
     }],
     ['OS=="linux"  or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
@@ -733,7 +676,10 @@
                 '<(out_dir)/grit/test_shell_resources.h',
                 '<(out_dir)/test_shell_resources.pak',
               ],
-              'action': ['python', '<(grit_path)', '-i', '<(input_path)', 'build', '-o', '<(out_dir)'],
+              'action': ['python', '<(grit_path)',
+                  '-i', '<(input_path)',
+                  'build', '-o', '<(out_dir)',
+                  '<@(grit_defines)'],
               'message': 'Generating resources from <(input_path)',
             },
           ],

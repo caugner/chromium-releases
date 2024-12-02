@@ -1,14 +1,13 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/browser_action_test_util.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
-#include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/views/browser_actions_container.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/browser/ui/views/browser_actions_container.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
 
@@ -229,7 +228,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsContainerTest, ForceHide) {
   std::string idA = browser_actions_bar()->GetExtensionId(0);
 
   // Force hide this browser action.
-  ExtensionsService* service = browser()->profile()->GetExtensionsService();
+  ExtensionService* service = browser()->profile()->GetExtensionService();
   service->SetBrowserActionVisibility(service->GetExtensionById(idA, false),
                                       false);
   EXPECT_EQ(0, browser_actions_bar()->VisibleBrowserActions());
@@ -243,7 +242,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsContainerTest, ForceHide) {
 IN_PROC_BROWSER_TEST_F(BrowserActionsContainerTest, TestCrash57536) {
   LOG(INFO) << "Test starting\n" << std::flush;
 
-  ExtensionsService* service = browser()->profile()->GetExtensionsService();
+  ExtensionService* service = browser()->profile()->GetExtensionService();
   const size_t size_before = service->extensions()->size();
 
   LOG(INFO) << "Loading extension\n" << std::flush;

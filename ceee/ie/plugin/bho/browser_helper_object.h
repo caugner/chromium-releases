@@ -22,10 +22,10 @@
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_comptr.h"
 #include "base/task.h"
-#include "base/win/rgs_helper.h"
 #include "ceee/ie/broker/broker_rpc_client.h"
 #include "ceee/ie/plugin/bho/tab_events_funnel.h"
 #include "ceee/ie/common/chrome_frame_host.h"
+#include "ceee/ie/common/rgs_helper.h"
 #include "ceee/ie/plugin/bho/frame_event_handler.h"
 #include "ceee/ie/plugin/bho/extension_port_manager.h"
 #include "ceee/ie/plugin/bho/tool_band_visibility.h"
@@ -37,6 +37,8 @@
 
 #include "broker_lib.h"  // NOLINT
 #include "toolband.h"  // NOLINT
+
+struct IObjectWithSite;
 
 // Implementation of an IE browser helper object.
 class ATL_NO_VTABLE BrowserHelperObject
@@ -413,7 +415,10 @@ class ATL_NO_VTABLE BrowserHelperObject
                                    IWebBrowser2* root_browser);
 
   // Send metrics histograms about the average load time of IE addons.
-  void ReportAddonLoadTime(const char* addon_name, const CLSID& addon_id);
+  void ReportAddonTimes(const char* name, const CLSID& clsid);
+  void ReportSingleAddonTime(const char* name,
+                             const CLSID& clsid,
+                             const char* type);
 
   // This class is used as a replacement for the BrokerRpcClient for the
   // event funnels contained inside a BHO. When sending an event, this will
@@ -461,6 +466,10 @@ class ATL_NO_VTABLE BrowserHelperObject
 
   // Used to dispatch tab events back to Chrome.
   TabEventsFunnel tab_events_funnel_;
+
+  // List of BHOs which could be unregistered from IE and loaded by
+  // CEEE instead.
+  std::vector<base::win::ScopedComPtr<IObjectWithSite> > nested_bho_;
 };
 
 #endif  // CEEE_IE_PLUGIN_BHO_BROWSER_HELPER_OBJECT_H_

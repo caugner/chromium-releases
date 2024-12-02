@@ -7,6 +7,7 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
+#include "base/threading/platform_thread.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
@@ -149,7 +150,7 @@ class MockPendingClientSocket : public ClientSocket {
   virtual bool IsConnectedAndIdle() const {
     return is_connected_;
   }
-  virtual int GetPeerAddress(AddressList* address) const{
+  virtual int GetPeerAddress(AddressList* address) const {
     return ERR_UNEXPECTED;
   }
   virtual const BoundNetLog& NetLog() const {
@@ -251,6 +252,7 @@ class MockClientSocketFactory : public ClientSocketFactory {
       const HostPortPair& host_and_port,
       const SSLConfig& ssl_config,
       SSLHostInfo* ssl_host_info,
+      CertVerifier* cert_verifier,
       DnsCertProvenanceChecker* dns_cert_checker) {
     NOTIMPLEMENTED();
     delete ssl_host_info;
@@ -757,7 +759,8 @@ TEST_F(TCPClientSocketPoolTest, BackupSocketConnect) {
     MessageLoop::current()->RunAllPending();
 
     // Wait for the backup socket timer to fire.
-    PlatformThread::Sleep(ClientSocketPool::kMaxConnectRetryIntervalMs * 2);
+    base::PlatformThread::Sleep(
+        ClientSocketPool::kMaxConnectRetryIntervalMs * 2);
 
     // Let the appropriate socket connect.
     MessageLoop::current()->RunAllPending();
@@ -799,7 +802,7 @@ TEST_F(TCPClientSocketPoolTest, BackupSocketCancel) {
 
     if (index == CANCEL_AFTER_WAIT) {
       // Wait for the backup socket timer to fire.
-      PlatformThread::Sleep(ClientSocketPool::kMaxConnectRetryIntervalMs);
+      base::PlatformThread::Sleep(ClientSocketPool::kMaxConnectRetryIntervalMs);
     }
 
     // Let the appropriate socket connect.
@@ -842,7 +845,7 @@ TEST_F(TCPClientSocketPoolTest, BackupSocketFailAfterStall) {
   MessageLoop::current()->RunAllPending();
 
   // Wait for the backup socket timer to fire.
-  PlatformThread::Sleep(ClientSocketPool::kMaxConnectRetryIntervalMs);
+  base::PlatformThread::Sleep(ClientSocketPool::kMaxConnectRetryIntervalMs);
 
   // Let the second connect be synchronous. Otherwise, the emulated
   // host resolution takes an extra trip through the message loop.
@@ -887,7 +890,7 @@ TEST_F(TCPClientSocketPoolTest, BackupSocketFailAfterDelay) {
   MessageLoop::current()->RunAllPending();
 
   // Wait for the backup socket timer to fire.
-  PlatformThread::Sleep(ClientSocketPool::kMaxConnectRetryIntervalMs);
+  base::PlatformThread::Sleep(ClientSocketPool::kMaxConnectRetryIntervalMs);
 
   // Let the second connect be synchronous. Otherwise, the emulated
   // host resolution takes an extra trip through the message loop.

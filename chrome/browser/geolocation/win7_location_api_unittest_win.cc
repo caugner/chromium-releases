@@ -2,18 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <Objbase.h>
+
 #include <algorithm>
 #include <cmath>
-#include <Objbase.h>
 
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
-#include "base/win_util.h"
 #include "chrome/common/geoposition.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/geolocation/win7_location_api_win.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -25,12 +24,12 @@ using testing::Invoke;
 using testing::Return;
 
 class MockLatLongReport : public ILatLongReport {
-public:
+ public:
   MockLatLongReport() : ref_count_(1) {
     ON_CALL(*this, GetAltitude(_))
         .WillByDefault(Invoke(this, &MockLatLongReport::GetAltitudeValid));
     ON_CALL(*this, GetAltitudeError(_))
-        .WillByDefault(Invoke(this, 
+        .WillByDefault(Invoke(this,
         &MockLatLongReport::GetAltitudeErrorValid));
     ON_CALL(*this, GetErrorRadius(_))
         .WillByDefault(Invoke(this, &MockLatLongReport::GetErrorRadiusValid));
@@ -38,7 +37,7 @@ public:
         .WillByDefault(Invoke(this, &MockLatLongReport::GetLatitudeValid));
     ON_CALL(*this, GetLongitude(_))
         .WillByDefault(Invoke(this, &MockLatLongReport::GetLongitudeValid));
-    ON_CALL(*this, GetValue(_,_))
+    ON_CALL(*this, GetValue(_, _))
         .WillByDefault(Invoke(this, &MockLatLongReport::GetValueValid));
     ON_CALL(*this, Release())
         .WillByDefault(Invoke(this, &MockLatLongReport::ReleaseInternal));
@@ -120,7 +119,7 @@ public:
       delete this;
     return new_ref_count;
   }
-  
+
   LONG ref_count_;
 };
 
@@ -136,7 +135,7 @@ class MockReport : public ILocationReport {
     ON_CALL(*this, AddRef())
         .WillByDefault(Invoke(this, &MockReport::AddRefInternal));
   }
-  
+
   // ILocationReport
   MOCK_METHOD1_WITH_CALLTYPE(STDMETHODCALLTYPE,
                              GetSensorID,
@@ -160,7 +159,7 @@ class MockReport : public ILocationReport {
 
   MockLatLongReport* mock_lat_long_report_;
 
-private:
+ private:
   ~MockReport() {
     mock_lat_long_report_->Release();
   }
@@ -242,10 +241,10 @@ class MockLocation : public ILocation {
   MockReport* mock_report_;
 
  private:
-   ~MockLocation() {
+  ~MockLocation() {
     mock_report_->Release();
   }
-  
+
   HRESULT GetReportValid(REFIID report_type,
                          ILocationReport** location_report) {
     *location_report = reinterpret_cast<ILocationReport*>(mock_report_);
@@ -288,15 +287,14 @@ class GeolocationApiWin7Tests : public testing::Test {
     locator_->Release();
     api_.reset();
   }
-  ~GeolocationApiWin7Tests(){
+  ~GeolocationApiWin7Tests() {
   }
  protected:
   Win7LocationApi* CreateMock() {
     MockLocation* locator = new MockLocation();
     locator_ = locator;
-    return new Win7LocationApi(NULL,
-                               &MockPropVariantToDoubleFunction,
-                               locator);
+    return Win7LocationApi::CreateForTesting(&MockPropVariantToDoubleFunction,
+                                             locator);
   }
 
   scoped_ptr<Win7LocationApi> api_;

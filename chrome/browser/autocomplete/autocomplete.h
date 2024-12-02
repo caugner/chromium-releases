@@ -196,11 +196,14 @@ class AutocompleteInput {
 
   // Parses |text| and returns the type of input this will be interpreted as.
   // The components of the input are stored in the output parameter |parts|, if
-  // it is non-NULL.
+  // it is non-NULL. The scheme is stored in |scheme| if it is non-NULL. The
+  // canonicalized URL is stored in |canonicalized_url|; however, this URL is
+  // not guaranteed to be valid, especially if the parsed type is, e.g., QUERY.
   static Type Parse(const std::wstring& text,
                     const std::wstring& desired_tld,
                     url_parse::Parsed* parts,
-                    std::wstring* scheme);
+                    std::wstring* scheme,
+                    GURL* canonicalized_url);
 
   // Parses |text| and fill |scheme| and |host| by the positions of them.
   // The results are almost as same as the result of Parse(), but if the scheme
@@ -501,9 +504,7 @@ class AutocompleteResult {
   void Validate() const;
 #endif
 
-  // Max number of matches we'll show from the various providers. We may end
-  // up showing an additional shortcut for Destinations->History, see
-  // AddHistoryContentsShortcut.
+  // Max number of matches we'll show from the various providers.
   static const size_t kMaxMatches;
 
  private:
@@ -540,7 +541,6 @@ class AutocompleteController : public ACProviderListener {
 #ifdef UNIT_TEST
   explicit AutocompleteController(const ACProviders& providers)
       : providers_(providers),
-        history_contents_provider_(NULL),
         search_provider_(NULL),
         updated_latest_result_(false),
         delay_interval_has_passed_(false),
@@ -572,7 +572,8 @@ class AutocompleteController : public ACProviderListener {
   //
   // |allow_exact_keyword_match| should be false when triggering keyword mode on
   // the input string would be surprising or wrong, e.g. when highlighting text
-  // in a page and telling the browser to search for it or navigate to it.
+  // in a page and telling the browser to search for it or navigate to it. This
+  // parameter only applies to substituting keywords.
 
   // If |synchronous_only| is true, the controller asks the providers to only
   // return matches which are synchronously available, which should mean that
@@ -639,23 +640,11 @@ class AutocompleteController : public ACProviderListener {
   // notificiations.
   void CommitResult(bool notify_default_match);
 
-  // Returns the matches from |provider| whose destination urls are not in
-  // |latest_result_|.
-  ACMatches GetMatchesNotInLatestResult(
-      const AutocompleteProvider* provider) const;
-
-  // If the HistoryContentsAutocomplete provider is done and there are more
-  // matches in the database than currently shown, an entry is added to
-  // |latest_result_| to show all history matches.
-  void AddHistoryContentsShortcut();
-
   // Updates |done_| to be accurate with respect to current providers' statuses.
   void CheckIfDone();
 
   // A list of all providers.
   ACProviders providers_;
-
-  HistoryContentsProvider* history_contents_provider_;
 
   SearchProvider* search_provider_;
 

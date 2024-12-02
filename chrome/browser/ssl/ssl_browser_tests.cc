@@ -4,16 +4,13 @@
 
 #include "base/time.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/interstitial_page.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
-#include "chrome/common/pref_names.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
 #include "net/base/cert_status_flags.h"
@@ -164,6 +161,33 @@ class SSLUITest : public InProcessBrowserTest {
         top_frame_path);
   }
 
+  static bool GetPageWithUnsafeWorkerPath(
+      const net::TestServer& expired_https_server,
+      std::string* page_with_unsafe_worker_path) {
+    // Get the "imported.js" URL from the expired https server and
+    // substitute it into the unsafe_worker.js file.
+    GURL imported_js_url = expired_https_server.GetURL("files/ssl/imported.js");
+    std::vector<net::TestServer::StringPair> replacement_text_for_unsafe_worker;
+    replacement_text_for_unsafe_worker.push_back(
+        make_pair("REPLACE_WITH_IMPORTED_JS_URL", imported_js_url.spec()));
+    std::string unsafe_worker_path;
+    if (!net::TestServer::GetFilePathWithReplacements(
+        "unsafe_worker.js",
+        replacement_text_for_unsafe_worker,
+        &unsafe_worker_path))
+      return false;
+
+    // Now, substitute this into the page with unsafe worker.
+    std::vector<net::TestServer::StringPair>
+        replacement_text_for_page_with_unsafe_worker;
+    replacement_text_for_page_with_unsafe_worker.push_back(
+        make_pair("REPLACE_WITH_UNSAFE_WORKER_PATH", unsafe_worker_path));
+    return net::TestServer::GetFilePathWithReplacements(
+        "files/ssl/page_with_unsafe_worker.html",
+        replacement_text_for_page_with_unsafe_worker,
+        page_with_unsafe_worker_path);
+  }
+
   net::TestServer https_server_;
   net::TestServer https_server_expired_;
   net::TestServer https_server_mismatched_;
@@ -213,7 +237,8 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestOKHTTPS) {
 }
 
 // Visits a page with https error and proceed:
-IN_PROC_BROWSER_TEST_F(SSLUITest, TestHTTPSExpiredCertAndProceed) {
+// Disabled, http://crbug.com/68448.
+IN_PROC_BROWSER_TEST_F(SSLUITest, DISABLED_TestHTTPSExpiredCertAndProceed) {
   ASSERT_TRUE(https_server_expired_.Start());
 
   ui_test_utils::NavigateToURL(browser(),
@@ -633,16 +658,10 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestRunsCachedInsecureContent) {
   CheckAuthenticationBrokenState(tab, 0, true, false);
 }
 
-#if defined(OS_WIN)
-// See http://crbug.com/47170
-#define MAYBE_TestCNInvalidStickiness FLAKY_TestCNInvalidStickiness
-#else
-#define MAYBE_TestCNInvalidStickiness TestCNInvalidStickiness
-#endif
-
 // This test ensures the CN invalid status does not 'stick' to a certificate
 // (see bug #1044942) and that it depends on the host-name.
-IN_PROC_BROWSER_TEST_F(SSLUITest, MAYBE_TestCNInvalidStickiness) {
+// Disabled, see http://crbug.com/68448 and http://crbug.com/49377.
+IN_PROC_BROWSER_TEST_F(SSLUITest, DISABLED_TestCNInvalidStickiness) {
   ASSERT_TRUE(https_server_.Start());
   ASSERT_TRUE(https_server_mismatched_.Start());
 
@@ -783,7 +802,8 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestRedirectGoodToBadHTTPS) {
 }
 
 // Visit a page over http that is a redirect to a page with good HTTPS.
-IN_PROC_BROWSER_TEST_F(SSLUITest, TestRedirectHTTPToGoodHTTPS) {
+// Disabled, http://crbug.com/70216.
+IN_PROC_BROWSER_TEST_F(SSLUITest, DISABLED_TestRedirectHTTPToGoodHTTPS) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(https_server_.Start());
 
@@ -1031,8 +1051,11 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestUnsafeContentsInWorkerFiltered) {
 
   // This page will spawn a Worker which will try to load content from
   // BadCertServer.
+  std::string page_with_unsafe_worker_path;
+  ASSERT_TRUE(GetPageWithUnsafeWorkerPath(https_server_expired_,
+                                          &page_with_unsafe_worker_path));
   ui_test_utils::NavigateToURL(browser(), https_server_.GetURL(
-      "files/ssl/page_with_unsafe_worker.html"));
+      page_with_unsafe_worker_path));
   TabContents* tab = browser()->GetSelectedTabContents();
   // Expect Worker not to load insecure content.
   CheckWorkerLoadResult(tab, false);
@@ -1059,8 +1082,11 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestUnsafeContentsInWorker) {
   // Navigate to safe page that has Worker loading unsafe content.
   // Expect content to load but be marked as auth broken due to running insecure
   // content.
+  std::string page_with_unsafe_worker_path;
+  ASSERT_TRUE(GetPageWithUnsafeWorkerPath(https_server_expired_,
+                                          &page_with_unsafe_worker_path));
   ui_test_utils::NavigateToURL(browser(), https_server_.GetURL(
-      "files/ssl/page_with_unsafe_worker.html"));
+      page_with_unsafe_worker_path));
   CheckWorkerLoadResult(tab, true);  // Worker loads insecure content
   CheckAuthenticationBrokenState(tab, 0, true, false);
 }

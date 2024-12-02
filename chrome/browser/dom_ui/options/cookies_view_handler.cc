@@ -4,7 +4,6 @@
 
 #include "chrome/browser/dom_ui/options/cookies_view_handler.h"
 
-#include "app/l10n_util.h"
 #include "base/i18n/time_formatting.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
@@ -15,9 +14,10 @@
 #include "chrome/browser/browsing_data_database_helper.h"
 #include "chrome/browser/browsing_data_indexed_db_helper.h"
 #include "chrome/browser/browsing_data_local_storage_helper.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "grit/generated_resources.h"
 #include "net/base/cookie_monster.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace {
 
@@ -69,6 +69,9 @@ void GetCookieTreeNodeDictionary(const CookieTreeNode& node,
   switch (node.GetDetailedInfo().node_type) {
     case CookieTreeNode::DetailedInfo::TYPE_ORIGIN: {
       dict->SetString(kKeyType, "origin");
+#if defined(OS_MAC)
+      dict->SetString(kKeyIcon, "chrome://theme/IDR_BOOKMARK_BAR_FOLDER");
+#endif
       break;
     }
     case CookieTreeNode::DetailedInfo::TYPE_COOKIE: {
@@ -85,9 +88,9 @@ void GetCookieTreeNodeDictionary(const CookieTreeNode& node,
       dict->SetString(kKeySendFor, cookie.IsSecure() ?
           l10n_util::GetStringUTF8(IDS_COOKIES_COOKIE_SENDFOR_SECURE) :
           l10n_util::GetStringUTF8(IDS_COOKIES_COOKIE_SENDFOR_ANY));
-      dict->SetString(kKeyCreated, WideToUTF8(
+      dict->SetString(kKeyCreated, UTF16ToUTF8(
           base::TimeFormatFriendlyDateAndTime(cookie.CreationDate())));
-      dict->SetString(kKeyExpires, cookie.DoesExpire() ? WideToUTF8(
+      dict->SetString(kKeyExpires, cookie.DoesExpire() ? UTF16ToUTF8(
           base::TimeFormatFriendlyDateAndTime(cookie.ExpiryDate())) :
           l10n_util::GetStringUTF8(IDS_COOKIES_COOKIE_EXPIRES_SESSION));
 
@@ -108,7 +111,7 @@ void GetCookieTreeNodeDictionary(const CookieTreeNode& node,
           FormatBytes(database_info.size,
                       GetByteDisplayUnits(database_info.size),
                       true));
-      dict->SetString(kKeyModified, WideToUTF8(
+      dict->SetString(kKeyModified, UTF16ToUTF8(
           base::TimeFormatFriendlyDateAndTime(database_info.last_modified)));
 
       break;
@@ -125,7 +128,7 @@ void GetCookieTreeNodeDictionary(const CookieTreeNode& node,
           FormatBytes(local_storage_info.size,
                       GetByteDisplayUnits(local_storage_info.size),
                       true));
-      dict->SetString(kKeyModified, WideToUTF8(
+      dict->SetString(kKeyModified, UTF16ToUTF8(
           base::TimeFormatFriendlyDateAndTime(
               local_storage_info.last_modified)));
 
@@ -143,9 +146,9 @@ void GetCookieTreeNodeDictionary(const CookieTreeNode& node,
           FormatBytes(appcache_info.size,
                       GetByteDisplayUnits(appcache_info.size),
                       true));
-      dict->SetString(kKeyCreated, WideToUTF8(
+      dict->SetString(kKeyCreated, UTF16ToUTF8(
           base::TimeFormatFriendlyDateAndTime(appcache_info.creation_time)));
-      dict->SetString(kKeyAccessed, WideToUTF8(
+      dict->SetString(kKeyAccessed, UTF16ToUTF8(
           base::TimeFormatFriendlyDateAndTime(appcache_info.last_access_time)));
 
       break;
@@ -162,12 +165,15 @@ void GetCookieTreeNodeDictionary(const CookieTreeNode& node,
           FormatBytes(indexed_db_info.size,
                       GetByteDisplayUnits(indexed_db_info.size),
                       true));
-      dict->SetString(kKeyModified, WideToUTF8(
+      dict->SetString(kKeyModified, UTF16ToUTF8(
           base::TimeFormatFriendlyDateAndTime(indexed_db_info.last_modified)));
 
       break;
     }
     default:
+#if defined(OS_MAC)
+      dict->SetString(kKeyIcon, "chrome://theme/IDR_BOOKMARK_BAR_FOLDER");
+#endif
       break;
   }
 }
@@ -266,8 +272,8 @@ void CookiesViewHandler::RegisterMessages() {
       NewCallback(this, &CookiesViewHandler::LoadChildren));
 }
 
-void CookiesViewHandler::TreeNodesAdded(TreeModel* model,
-                                        TreeModelNode* parent,
+void CookiesViewHandler::TreeNodesAdded(ui::TreeModel* model,
+                                        ui::TreeModelNode* parent,
                                         int start,
                                         int count) {
   // Skip if there is a batch update in progress.
@@ -286,8 +292,8 @@ void CookiesViewHandler::TreeNodesAdded(TreeModel* model,
   dom_ui_->CallJavascriptFunction(L"CookiesView.onTreeItemAdded", args);
 }
 
-void CookiesViewHandler::TreeNodesRemoved(TreeModel* model,
-                                          TreeModelNode* parent,
+void CookiesViewHandler::TreeNodesRemoved(ui::TreeModel* model,
+                                          ui::TreeModelNode* parent,
                                           int start,
                                           int count) {
   // Skip if there is a batch update in progress.

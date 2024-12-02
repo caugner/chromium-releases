@@ -9,6 +9,7 @@
 #include <map>
 
 #include "base/singleton.h"
+#include "base/synchronization/lock.h"
 #include "gfx/native_widget_types.h"
 
 typedef unsigned long XID;
@@ -36,11 +37,11 @@ struct _GtkPreserveWindow;
 // pointers and observes the various signals from the widget for when an X
 // window is created, destroyed etc. Thus it provides a thread safe mapping
 // from NativeViewIds to the current XID for that widget.
-//
-// You get a reference to the global instance with:
-//   Singleton<GtkNativeViewManager>()
 class GtkNativeViewManager {
  public:
+  // Returns the singleton instance.
+  static GtkNativeViewManager* GetInstance();
+
   // Must be called from the UI thread:
   //
   // Return a NativeViewId for the given widget and attach to the various
@@ -84,7 +85,7 @@ class GtkNativeViewManager {
   void OnUnrealize(gfx::NativeView widget);
   void OnDestroy(gfx::NativeView widget);
 
-  Lock& unrealize_lock() { return unrealize_lock_; }
+  base::Lock& unrealize_lock() { return unrealize_lock_; }
 
  private:
   // This object is a singleton:
@@ -104,10 +105,10 @@ class GtkNativeViewManager {
   // This lock can be used to block GTK from unrealizing windows. This is needed
   // when the BACKGROUND_X11 thread is using a window obtained via GetXIDForId,
   // and can't allow the X11 resource to be deleted.
-  Lock unrealize_lock_;
+  base::Lock unrealize_lock_;
 
   // protects native_view_to_id_ and id_to_info_
-  Lock lock_;
+  base::Lock lock_;
 
   // If asked for an id for the same widget twice, we want to return the same
   // id. So this records the current mapping.

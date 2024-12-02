@@ -7,8 +7,8 @@
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/indexed_db_dispatcher.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDOMStringList.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDOMStringList.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 
 using WebKit::WebDOMStringList;
 using WebKit::WebFrame;
@@ -25,7 +25,6 @@ RendererWebIDBFactoryImpl::~RendererWebIDBFactoryImpl() {
 
 void RendererWebIDBFactoryImpl::open(
     const WebString& name,
-    const WebString& description,
     WebIDBCallbacks* callbacks,
     const WebSecurityOrigin& origin,
     WebFrame* web_frame,
@@ -35,6 +34,5 @@ void RendererWebIDBFactoryImpl::open(
   IndexedDBDispatcher* dispatcher =
       RenderThread::current()->indexed_db_dispatcher();
   dispatcher->RequestIDBFactoryOpen(
-      name, description, callbacks, origin.databaseIdentifier(), web_frame,
-      maximum_size);
+      name, callbacks, origin.databaseIdentifier(), web_frame, maximum_size);
 }

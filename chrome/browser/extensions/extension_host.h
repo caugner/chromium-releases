@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,15 +12,15 @@
 #include "base/perftimer.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
-#include "chrome/browser/js_modal_dialog.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
+#include "chrome/browser/ui/app_modal_dialogs/js_modal_dialog.h"
 #if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/views/extensions/extension_view.h"
+#include "chrome/browser/ui/views/extensions/extension_view.h"
 #elif defined(OS_MACOSX)
-#include "chrome/browser/cocoa/extension_view_mac.h"
+#include "chrome/browser/ui/cocoa/extensions/extension_view_mac.h"
 #elif defined(TOOLKIT_GTK)
-#include "chrome/browser/gtk/extension_view_gtk.h"
+#include "chrome/browser/ui/gtk/extension_view_gtk.h"
 #endif
 #include "chrome/common/notification_registrar.h"
 
@@ -53,14 +53,14 @@ class ExtensionHost : public RenderViewHostDelegate,
 
 #if defined(TOOLKIT_VIEWS)
   void set_view(ExtensionView* view) { view_.reset(view); }
-  ExtensionView* view() const { return view_.get(); }
+  const ExtensionView* view() const { return view_.get(); }
+  ExtensionView* view() { return view_.get(); }
 #elif defined(OS_MACOSX)
-  ExtensionViewMac* view() const { return view_.get(); }
+  const ExtensionViewMac* view() const { return view_.get(); }
+  ExtensionViewMac* view() { return view_.get(); }
 #elif defined(TOOLKIT_GTK)
-  ExtensionViewGtk* view() const { return view_.get(); }
-#else
-  // TODO(port): implement
-  void* view() const { return NULL; }
+  const ExtensionViewGtk* view() const { return view_.get(); }
+  ExtensionViewGtk* view() { return view_.get(); }
 #endif
 
   // Create an ExtensionView and tie it to this host and |browser|.  Note NULL
@@ -69,7 +69,7 @@ class ExtensionHost : public RenderViewHostDelegate,
   // instantiate Browser objects.
   void CreateView(Browser* browser);
 
-  const Extension* extension() { return extension_; }
+  const Extension* extension() const { return extension_; }
   RenderViewHost* render_view_host() const { return render_view_host_; }
   RenderProcessHost* render_process_host() const;
   SiteInstance* site_instance() const;
@@ -83,9 +83,7 @@ class ExtensionHost : public RenderViewHostDelegate,
   ViewType::Type extension_host_type() const { return extension_host_type_; }
 
   // ExtensionFunctionDispatcher::Delegate
-  virtual TabContents* associated_tab_contents() const {
-    return associated_tab_contents_;
-  }
+  virtual TabContents* associated_tab_contents() const;
   void set_associated_tab_contents(TabContents* associated_tab_contents) {
     associated_tab_contents_ = associated_tab_contents;
   }
@@ -109,12 +107,14 @@ class ExtensionHost : public RenderViewHostDelegate,
   void DisableScrollbarsForSmallWindows(const gfx::Size& size_limit);
 
   // RenderViewHostDelegate::View implementation.
-  virtual const GURL& GetURL() const { return url_; }
+  virtual const GURL& GetURL() const;
   virtual void RenderViewCreated(RenderViewHost* render_view_host);
   virtual ViewType::Type GetRenderViewType() const;
   virtual FileSelect* GetFileSelectDelegate();
   virtual int GetBrowserWindowID() const;
-  virtual void RenderViewGone(RenderViewHost* render_view_host);
+  virtual void RenderViewGone(RenderViewHost* render_view_host,
+                              base::TerminationStatus status,
+                              int error_code);
   virtual void DidNavigate(RenderViewHost* render_view_host,
                            const ViewHostMsg_FrameNavigate_Params& params);
   virtual void DidStopLoading();
@@ -192,8 +192,8 @@ class ExtensionHost : public RenderViewHostDelegate,
                                   const std::wstring& prompt);
   virtual void SetSuppressMessageBoxes(bool suppress_message_boxes) {}
   virtual gfx::NativeWindow GetMessageBoxRootWindow();
-  virtual TabContents* AsTabContents() { return NULL; }
-  virtual ExtensionHost* AsExtensionHost() { return this; }
+  virtual TabContents* AsTabContents();
+  virtual ExtensionHost* AsExtensionHost();
 
  protected:
   // Internal functions used to support the CreateNewWidget() method. If a
@@ -220,8 +220,11 @@ class ExtensionHost : public RenderViewHostDelegate,
   // Actually create the RenderView for this host. See CreateRenderViewSoon.
   void CreateRenderViewNow();
 
+  // Const version of below function.
+  const Browser* GetBrowser() const;
+
   // ExtensionFunctionDispatcher::Delegate
-  virtual Browser* GetBrowser() const;
+  virtual Browser* GetBrowser();
   virtual gfx::NativeView GetNativeViewOfHost();
 
   // Handles keyboard events that were not handled by HandleKeyboardEvent().

@@ -6,11 +6,10 @@
 #define CHROME_BROWSER_CHROMEOS_CROS_KEYBOARD_LIBRARY_H_
 #pragma once
 
-#include "cros/chromeos_keyboard.h"
-
 #include <string>
 
 #include "base/basictypes.h"
+#include "third_party/cros/chromeos_keyboard.h"
 
 namespace chromeos {
 
@@ -32,15 +31,6 @@ class KeyboardLibrary {
 
   // Remaps modifier keys.  Returns true on success.
   virtual bool RemapModifierKeys(const ModifierMap& modifier_map) = 0;
-
-  // Gets whehter we have separate keyboard layout per window, or not. The
-  // result is stored in |is_per_window|.  Returns true on success.
-  virtual bool GetKeyboardLayoutPerWindow(bool* is_per_window) const = 0;
-
-  // Sets whether we have separate keyboard layout per window, or not. If false
-  // is given, the same keyboard layout will be shared for all applications.
-  // Returns true on success.
-  virtual bool SetKeyboardLayoutPerWindow(bool is_per_window) = 0;
 
   // Gets the current auto-repeat mode of the keyboard. The result is stored in
   // |enabled|. Returns true on success.

@@ -9,7 +9,7 @@
 #define CHROME_INSTALLER_UTIL_MASTER_PREFERENCES_CONSTANTS_H_
 #pragma once
 
-namespace installer_util {
+namespace installer {
 namespace master_preferences {
 // All the preferences below are expected to be inside the JSON "distribution"
 // block. Some of them also have equivalent command line option. If same option
@@ -27,6 +27,8 @@ extern const char kCeee[];
 extern const char kChrome[];
 // Boolean. This is to be a Chrome Frame install.
 extern const char kChromeFrame[];
+// Boolean. Chrome Frame is to be installed in ready-mode.
+extern const char kChromeFrameReadyMode[];
 // Integer. Icon index from chrome.exe to use for shortcuts.
 extern const char kChromeShortcutIconIndex[];
 // Boolean. Create Desktop and QuickLaunch shortcuts. Cmd line override present.
@@ -82,6 +84,6 @@ extern const char kVerboseLogging[];
 // Name of the block that contains the extensions on the master preferences.
 extern const char kExtensionsBlock[];
 }  // namespace master_preferences
-}  // namespace installer_util
+}  // namespace installer
 
 #endif  // CHROME_INSTALLER_UTIL_MASTER_PREFERENCES_CONSTANTS_H_

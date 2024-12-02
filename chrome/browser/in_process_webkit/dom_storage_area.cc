@@ -5,16 +5,14 @@
 #include "chrome/browser/in_process_webkit/dom_storage_area.h"
 
 #include "base/task.h"
-#include "chrome/browser/browser_thread.h"
+#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/in_process_webkit/dom_storage_context.h"
-#include "chrome/browser/in_process_webkit/dom_storage_dispatcher_host.h"
 #include "chrome/browser/in_process_webkit/dom_storage_namespace.h"
-#include "chrome/browser/host_content_settings_map.h"
 #include "chrome/common/render_messages.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebStorageArea.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageArea.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
 #include "webkit/glue/webkit_glue.h"
 
 using WebKit::WebSecurityOrigin;
@@ -56,8 +54,8 @@ NullableString16 DOMStorageArea::GetItem(const string16& key) {
 
 NullableString16 DOMStorageArea::SetItem(
     const string16& key, const string16& value,
-    WebStorageArea::Result* result, DOMStorageDispatcherHost* sender) {
-  if (!CheckContentSetting(key, value, sender)) {
+    WebStorageArea::Result* result) {
+  if (!CheckContentSetting(key, value)) {
     *result = WebStorageArea::ResultBlockedByPolicy;
     return NullableString16(true);  // Ignored if the content was blocked.
   }
@@ -92,8 +90,7 @@ void DOMStorageArea::CreateWebStorageAreaIfNecessary() {
 }
 
 bool DOMStorageArea::CheckContentSetting(
-    const string16& key, const string16& value,
-    DOMStorageDispatcherHost* sender) {
+    const string16& key, const string16& value) {
   ContentSetting content_setting =
       host_content_settings_map_->GetContentSetting(
           origin_url_, CONTENT_SETTINGS_TYPE_COOKIES, "");

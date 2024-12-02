@@ -63,6 +63,57 @@ void AddDefaultExtensionValue(syncable::ModelType datatype,
   }
 }
 
+ModelType GetModelTypeFromExtensionFieldNumber(int field_number) {
+  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
+    ModelType model_type = ModelTypeFromInt(i);
+    if (GetExtensionFieldNumberFromModelType(model_type) == field_number)
+      return model_type;
+  }
+  NOTREACHED();
+  return UNSPECIFIED;
+}
+
+int GetExtensionFieldNumberFromModelType(ModelType model_type) {
+  switch (model_type) {
+    case BOOKMARKS:
+      return sync_pb::kBookmarkFieldNumber;
+      break;
+    case PASSWORDS:
+      return sync_pb::kPasswordFieldNumber;
+      break;
+    case PREFERENCES:
+      return sync_pb::kPreferenceFieldNumber;
+      break;
+    case AUTOFILL:
+      return sync_pb::kAutofillFieldNumber;
+      break;
+    case AUTOFILL_PROFILE:
+      return sync_pb::kAutofillProfileFieldNumber;
+      break;
+    case THEMES:
+      return sync_pb::kThemeFieldNumber;
+      break;
+    case TYPED_URLS:
+      return sync_pb::kTypedUrlFieldNumber;
+      break;
+    case EXTENSIONS:
+      return sync_pb::kExtensionFieldNumber;
+      break;
+    case NIGORI:
+      return sync_pb::kNigoriFieldNumber;
+      break;
+    case SESSIONS:
+      return sync_pb::kSessionFieldNumber;
+      break;
+    case APPS:
+      return sync_pb::kAppFieldNumber;
+      break;
+    default:
+      NOTREACHED() << "No known extension for model type.";
+      return 0;
+  }
+}
+
 // Note: keep this consistent with GetModelType in syncable.cc!
 ModelType GetModelType(const sync_pb::SyncEntity& sync_pb_entity) {
   const browser_sync::SyncEntity& sync_entity =
@@ -153,10 +204,13 @@ std::string ModelTypeToString(ModelType model_type) {
       return "Sessions";
     case APPS:
       return "Apps";
+    case AUTOFILL_PROFILE:
+      return "Autofill Profiles";
     default:
-      NOTREACHED() << "No known extension for model type.";
-      return "INVALID";
+      break;
   }
+  NOTREACHED() << "No known extension for model type.";
+  return "INVALID";
 }
 
 ModelType ModelTypeFromString(const std::string& model_type_string) {
@@ -168,6 +222,8 @@ ModelType ModelTypeFromString(const std::string& model_type_string) {
     return PASSWORDS;
   else if (model_type_string == "Autofill")
     return AUTOFILL;
+  else if (model_type_string == "Autofill Profiles")
+    return AUTOFILL_PROFILE;
   else if (model_type_string == "Themes")
     return THEMES;
   else if (model_type_string == "Typed URLs")
@@ -223,6 +279,10 @@ void PostTimeToTypeHistogram(ModelType model_type, base::TimeDelta time) {
         SYNC_FREQ_HISTOGRAM("Sync.FreqAutofill", time);
         return;
     }
+    case AUTOFILL_PROFILE: {
+        SYNC_FREQ_HISTOGRAM("Sync.FreqAutofillProfiles", time);
+        return;
+    }
     case THEMES: {
         SYNC_FREQ_HISTOGRAM("Sync.FreqThemes", time);
         return;
@@ -269,7 +329,7 @@ const char kAppNotificationType[] = "APP";
 const char kSessionNotificationType[] = "SESSION";
 // TODO(lipalani) Bug 64111.
 // talk to akalin to make sure this is what I understand this to be.
-const char kAutofillProfileType[] = "AUTOFILL_PROFILE";
+const char kAutofillProfileNotificationType[] = "AUTOFILL_PROFILE";
 // TODO(akalin): This is a hack to make new sync data types work with
 // server-issued notifications.  Remove this when it's not needed
 // anymore.
@@ -310,7 +370,7 @@ bool RealModelTypeToNotificationType(ModelType model_type,
       *notification_type = kSessionNotificationType;
       return true;
     case AUTOFILL_PROFILE:
-      *notification_type = kAutofillProfileType;
+      *notification_type = kAutofillProfileNotificationType;
       return true;
     // TODO(akalin): This is a hack to make new sync data types work with
     // server-issued notifications.  Remove this when it's not needed
@@ -356,6 +416,9 @@ bool NotificationTypeToRealModelType(const std::string& notification_type,
     return true;
   } else if (notification_type == kSessionNotificationType) {
     *model_type = SESSIONS;
+    return true;
+  } else if (notification_type == kAutofillProfileNotificationType) {
+    *model_type = AUTOFILL_PROFILE;
     return true;
   } else if (notification_type == kUnknownNotificationType) {
     // TODO(akalin): This is a hack to make new sync data types work with

@@ -8,10 +8,11 @@
 
 #include <string>
 
-#include "chrome/common/ipc_test_sink.h"
+#include "chrome/common/extensions/extension_set.h"
 #include "chrome/renderer/mock_printer.h"
 #include "chrome/renderer/render_thread.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebPopupType.h"
+#include "ipc/ipc_test_sink.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
 
 namespace IPC {
 class MessageReplyDeserializer;
@@ -29,6 +30,8 @@ class MockRenderThread : public RenderThreadBase {
  public:
   MockRenderThread();
   virtual ~MockRenderThread();
+
+  virtual const ExtensionSet* GetExtensions() const;
 
   // Provides access to the messages that have been received by this thread.
   IPC::TestSink& sink() { return sink_; }
@@ -82,7 +85,7 @@ class MockRenderThread : public RenderThreadBase {
 
  private:
   // This function operates as a regular IPC listener.
-  void OnMessageReceived(const IPC::Message& msg);
+  bool OnMessageReceived(const IPC::Message& msg);
 
   // The Widget expects to be returned valid route_id.
   void OnMsgCreateWidget(int opener_id,
@@ -100,9 +103,9 @@ class MockRenderThread : public RenderThreadBase {
                           base::SharedMemoryHandle* browser_handle);
 #endif
 
-#if defined(OS_MACOSX)
-  void OnAllocatePDFTransport(uint32 buffer_size,
-                              base::SharedMemoryHandle* handle);
+#if defined(OS_POSIX)
+  void OnAllocateSharedMemoryBuffer(uint32 buffer_size,
+                                    base::SharedMemoryHandle* handle);
 #endif
 
 #if defined(OS_LINUX)
@@ -138,6 +141,10 @@ class MockRenderThread : public RenderThreadBase {
 
   // A mock printer device used for printing tests.
   scoped_ptr<MockPrinter> printer_;
+
+  // Contains extensions currently loaded by browser. This is usually empty
+  // for MockRenderThread.
+  ExtensionSet extensions_;
 
   bool is_extension_process_;
 };

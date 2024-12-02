@@ -1,11 +1,11 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/view_text_utils.h"
 
-#include "app/bidi_line_iterator.h"
-#include "base/i18n/word_iterator.h"
+#include "base/i18n/bidi_line_iterator.h"
+#include "base/i18n/break_iterator.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
 #include "gfx/canvas_skia.h"
@@ -31,8 +31,8 @@ void DrawTextAndPositionUrl(gfx::Canvas* canvas,
   // a run is a sequence of words that share the same directionality. We
   // initialize a bidirectional ICU line iterator and split the text into
   // runs that are either strictly LTR or strictly RTL, with no mix.
-  BiDiLineIterator bidi_line;
-  if (!bidi_line.Open(text.c_str(), true, false))
+  base::i18n::BiDiLineIterator bidi_line;
+  if (!bidi_line.Open(WideToUTF16Hack(text), true, false))
     return;
 
   // Iterate over each run and draw it.
@@ -98,7 +98,7 @@ void DrawTextStartingFrom(gfx::Canvas* canvas,
   // Iterate through line breaking opportunities (which in English would be
   // spaces and such). This tells us where to wrap.
   string16 text16(WideToUTF16(text));
-  WordIterator iter(&text16, WordIterator::BREAK_LINE);
+  base::BreakIterator iter(&text16, base::BreakIterator::BREAK_SPACE);
   if (!iter.Init())
     return;
 
@@ -110,14 +110,14 @@ void DrawTextStartingFrom(gfx::Canvas* canvas,
   // iterate to the next line breaking opportunity.
   while (iter.Advance()) {
     // Get the word and figure out the dimensions.
-    std::wstring word;
+    string16 word;
     if (!ltr_within_rtl)
-      word = UTF16ToWide(iter.GetWord());  // Get the next word.
+      word = iter.GetString();  // Get the next word.
     else
-      word = text;  // Draw the whole text at once.
+      word = text16;  // Draw the whole text at once.
 
     int w = font.GetStringWidth(word), h = font.GetHeight();
-    gfx::CanvasSkia::SizeStringInt(WideToUTF16Hack(word), font, &w, &h, flags);
+    gfx::CanvasSkia::SizeStringInt(word, font, &w, &h, flags);
 
     // If we exceed the boundaries, we need to wrap.
     WrapIfWordDoesntFit(w, font.GetHeight(), position, bounds);
@@ -129,9 +129,10 @@ void DrawTextStartingFrom(gfx::Canvas* canvas,
       // When drawing LTR strings inside RTL text we need to make sure we
       // draw the trailing space (if one exists after the LTR text) to the
       // left of the LTR string.
-      if (ltr_within_rtl && word[word.size() - 1] == L' ') {
-        int space_w = font.GetStringWidth(L" "), space_h = font.GetHeight();
-        gfx::CanvasSkia::SizeStringInt(UTF8ToUTF16(" "), font, &space_w,
+      if (ltr_within_rtl && word[word.size() - 1] == ' ') {
+        int space_w = font.GetStringWidth(ASCIIToUTF16(" "));
+        int space_h = font.GetHeight();
+        gfx::CanvasSkia::SizeStringInt(ASCIIToUTF16(" "), font, &space_w,
                                        &space_h, flags);
         x += space_w;
       }
@@ -142,7 +143,7 @@ void DrawTextStartingFrom(gfx::Canvas* canvas,
     canvas->DrawStringInt(word, font, text_color, x, y, w, font.GetHeight(),
                           flags);
 
-    if (word.size() > 0 && word[word.size() - 1] == L'\x0a') {
+    if (word.size() > 0 && word[word.size() - 1] == '\x0a') {
       // When we come across '\n', we move to the beginning of the next line.
       position->set_width(0);
       position->Enlarge(0, font.GetHeight());

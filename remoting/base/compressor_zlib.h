@@ -23,6 +23,8 @@ class CompressorZlib : public Compressor {
                        uint8* output_data, int output_size,
                        CompressorFlush flush, int* consumed, int* written);
 
+  virtual void Reset();
+
  private:
   scoped_ptr<z_stream> stream_;
 };

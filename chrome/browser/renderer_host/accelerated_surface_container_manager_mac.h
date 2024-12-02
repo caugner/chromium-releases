@@ -11,11 +11,13 @@
 
 #include "app/surface/transport_dib.h"
 #include "base/basictypes.h"
-#include "base/lock.h"
+#include "base/synchronization/lock.h"
 #include "gfx/native_widget_types.h"
 
-namespace webkit_glue {
+namespace webkit {
+namespace npapi {
 struct WebPluginGeometry;
+}
 }
 
 class AcceleratedSurfaceContainerMac;
@@ -63,7 +65,8 @@ class AcceleratedSurfaceContainerManagerMac {
 
   // Takes an update from WebKit about a plugin's position and size and moves
   // the plugin accordingly.
-  void SetPluginContainerGeometry(const webkit_glue::WebPluginGeometry& move);
+  void SetPluginContainerGeometry(
+      const webkit::npapi::WebPluginGeometry& move);
 
   // Draws the plugin container associated with the given id into the given
   // OpenGL context, which must already be current.
@@ -113,7 +116,7 @@ class AcceleratedSurfaceContainerManagerMac {
   // Both |plugin_window_to_container_map_| and the
   // AcceleratedSurfaceContainerMac in it are not threadsafe, but accessed from
   // multiple threads. All these accesses are guarded by this lock.
-  mutable Lock lock_;
+  mutable base::Lock lock_;
 
   DISALLOW_COPY_AND_ASSIGN(AcceleratedSurfaceContainerManagerMac);
 };

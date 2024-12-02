@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,8 +6,9 @@
 #define CHROME_TEST_TEST_BROWSER_WINDOW_H_
 #pragma once
 
+#include <vector>
+
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/test/test_location_bar.h"
 
 // An implementation of BrowserWindow used for testing. TestBrowserWindow only
@@ -67,6 +68,7 @@ class TestBrowserWindow : public BrowserWindow {
 
   virtual bool IsBookmarkBarVisible() const { return false; }
   virtual bool IsBookmarkBarAnimating() const { return false; }
+  virtual bool IsTabStripEditable() const { return false; }
   virtual bool IsToolbarVisible() const { return false; }
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile) {}
@@ -74,6 +76,7 @@ class TestBrowserWindow : public BrowserWindow {
   virtual views::Window* ShowAboutChromeDialog() { return NULL; }
   virtual void ShowUpdateChromeDialog() {}
   virtual void ShowTaskManager() {}
+  virtual void ShowBackgroundPages() {}
   virtual void ShowBookmarkManager() {}
   virtual void ShowBookmarkBubble(const GURL& url, bool already_bookmarked) {}
   virtual bool IsDownloadShelfVisible() const { return false; }
@@ -108,6 +111,15 @@ class TestBrowserWindow : public BrowserWindow {
   virtual void ShowInstant(TabContents* preview_contents) {}
   virtual void HideInstant(bool instant_is_active) {}
   virtual gfx::Rect GetInstantBounds() { return gfx::Rect(); }
+
+  virtual gfx::Rect GrabWindowSnapshot(std::vector<unsigned char>*
+                                       png_representation) {
+    return gfx::Rect();
+  }
+
+#if defined(OS_CHROMEOS)
+  virtual void ShowKeyboardOverlay(gfx::NativeWindow owning_window) {}
+#endif
 
  protected:
   virtual void DestroyBrowser() {}

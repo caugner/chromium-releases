@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "base/message_loop.h"
-#include "base/thread.h"
-#include "base/waitable_event.h"
+#include "base/threading/thread.h"
+#include "base/synchronization/waitable_event.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_error_job.h"
@@ -71,18 +71,18 @@ class AppCacheRequestHandlerTest : public testing::Test {
   // Subclasses to simulate particular response codes so test cases can
   // exercise fallback code paths.
 
-  class MockURLRequestJob : public URLRequestJob {
+  class MockURLRequestJob : public net::URLRequestJob {
    public:
-    MockURLRequestJob(URLRequest* request, int response_code)
-        : URLRequestJob(request), response_code_(response_code) {}
+    MockURLRequestJob(net::URLRequest* request, int response_code)
+        : net::URLRequestJob(request), response_code_(response_code) {}
     virtual void Start() {}
     virtual int GetResponseCode() const { return response_code_; }
     int response_code_;
   };
 
-  class MockURLRequest : public URLRequest {
+  class MockURLRequest : public net::URLRequest {
    public:
-    explicit MockURLRequest(const GURL& url) : URLRequest(url, NULL) {}
+    explicit MockURLRequest(const GURL& url) : net::URLRequest(url, NULL) {}
 
     void SimulateResponseCode(int http_response_code) {
       mock_factory_job_ = new MockURLRequestJob(this, http_response_code);
@@ -94,16 +94,17 @@ class AppCacheRequestHandlerTest : public testing::Test {
     }
   };
 
-  static URLRequestJob* MockHttpJobFactory(URLRequest* request,
-                                           const std::string& scheme) {
+  static net::URLRequestJob* MockHttpJobFactory(net::URLRequest* request,
+                                                const std::string& scheme) {
     if (mock_factory_job_) {
-      URLRequestJob* temp = mock_factory_job_;
+      net::URLRequestJob* temp = mock_factory_job_;
       mock_factory_job_ = NULL;
       return temp;
     } else {
       // Some of these tests trigger UpdateJobs which start URLRequests.
       // We short circuit those be returning error jobs.
-      return new URLRequestErrorJob(request, net::ERR_INTERNET_DISCONNECTED);
+      return new net::URLRequestErrorJob(request,
+                                         net::ERR_INTERNET_DISCONNECTED);
     }
   }
 
@@ -133,7 +134,7 @@ class AppCacheRequestHandlerTest : public testing::Test {
 
   void SetUpTest() {
     DCHECK(MessageLoop::current() == io_thread_->message_loop());
-    orig_http_factory_ = URLRequest::RegisterProtocolFactory(
+    orig_http_factory_ = net::URLRequest::RegisterProtocolFactory(
         "http", MockHttpJobFactory);
     mock_service_.reset(new MockAppCacheService);
     mock_frontend_.reset(new MockFrontend);
@@ -148,7 +149,7 @@ class AppCacheRequestHandlerTest : public testing::Test {
   void TearDownTest() {
     DCHECK(MessageLoop::current() == io_thread_->message_loop());
     DCHECK(!mock_factory_job_);
-    URLRequest::RegisterProtocolFactory("http", orig_http_factory_);
+    net::URLRequest::RegisterProtocolFactory("http", orig_http_factory_);
     orig_http_factory_ = NULL;
     job_ = NULL;
     handler_.reset();
@@ -665,15 +666,15 @@ class AppCacheRequestHandlerTest : public testing::Test {
   scoped_ptr<MockURLRequest> request_;
   scoped_ptr<AppCacheRequestHandler> handler_;
   scoped_refptr<AppCacheURLRequestJob> job_;
-  URLRequest::ProtocolFactory* orig_http_factory_;
+  net::URLRequest::ProtocolFactory* orig_http_factory_;
 
   static scoped_ptr<base::Thread> io_thread_;
-  static URLRequestJob* mock_factory_job_;
+  static net::URLRequestJob* mock_factory_job_;
 };
 
 // static
 scoped_ptr<base::Thread> AppCacheRequestHandlerTest::io_thread_;
-URLRequestJob* AppCacheRequestHandlerTest::mock_factory_job_ = NULL;
+net::URLRequestJob* AppCacheRequestHandlerTest::mock_factory_job_ = NULL;
 
 TEST_F(AppCacheRequestHandlerTest, MainResource_Miss) {
   RunTestOnIOThread(&AppCacheRequestHandlerTest::MainResource_Miss);

@@ -4,13 +4,16 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
-#include "app/clipboard/scoped_clipboard_writer.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
+#include "ui/base/clipboard/scoped_clipboard_writer.h"
+
+#if !defined(OS_MACOSX)
+#include "chrome/browser/browser_process.h"
+#endif
 
 typedef testing::Test BookmarkUtilsTest;
 
@@ -118,7 +121,7 @@ TEST_F(BookmarkUtilsTest, CopyPaste) {
 
   // Write some text to the clipboard.
   {
-    ScopedClipboardWriter clipboard_writer(g_browser_process->clipboard());
+    ui::ScopedClipboardWriter clipboard_writer(g_browser_process->clipboard());
     clipboard_writer.WriteText(ASCIIToUTF16("foo"));
   }
 
@@ -127,4 +130,3 @@ TEST_F(BookmarkUtilsTest, CopyPaste) {
       bookmark_utils::CanPasteFromClipboard(model.GetBookmarkBarNode()));
 }
 #endif
-

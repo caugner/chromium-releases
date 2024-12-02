@@ -13,9 +13,9 @@
 #include "base/scoped_ptr.h"
 #include "chrome/renderer/ggl/ggl.h"
 #include "gfx/native_widget_types.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebGraphicsContext3D.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebGraphicsContext3D.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
 #if !defined(OS_MACOSX)
 #define FLIP_FRAMEBUFFER_VERTICALLY
@@ -361,6 +361,9 @@ class WebGraphicsContext3DCommandBufferImpl
   virtual void copyTextureToParentTextureCHROMIUM(
       unsigned texture, unsigned parentTexture);
 
+  virtual WebKit::WebString getRequestableExtensionsCHROMIUM();
+  virtual void requestExtensionCHROMIUM(const char*);
+
   virtual unsigned createCompositorTexture(unsigned width, unsigned height);
   virtual void deleteCompositorTexture(unsigned parent_texture);
   virtual void copyTextureToCompositor(unsigned texture,
@@ -369,6 +372,9 @@ class WebGraphicsContext3DCommandBufferImpl
   ggl::Context* context() { return context_; }
 
  private:
+  // SwapBuffers callback;
+  void OnSwapBuffers();
+
   // The GGL context we use for OpenGL rendering.
   ggl::Context* context_;
   // If rendering directly to WebView, weak pointer to it.

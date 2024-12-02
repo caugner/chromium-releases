@@ -8,10 +8,13 @@ import re
 
 import pyauto_functional  # Must be imported before pyauto
 import pyauto
+import test_utils
 
 
 class SearchEnginesTest(pyauto.PyUITest):
   """TestCase for Search Engines."""
+
+  _localhost_prefix = 'http://localhost:1000/'
 
   def _GetSearchEngineWithKeyword(self, keyword):
     """Get search engine info and return an element that matches keyword.
@@ -48,7 +51,10 @@ class SearchEnginesTest(pyauto.PyUITest):
     # Use omnibox to invoke search engine discovery.
     # Navigating using NavigateToURL does not currently invoke this logic.
     self.SetOmniboxText('http://www.youtube.com')
-    self.OmniboxAcceptInput()
+    # Due to slow navigation to youtube.com on Leopard test machines, waiting
+    # here 1 min (max).
+    test_utils.CallFunctionWithNewTimeout(self, 1 * 60 * 1000,
+                                          self.OmniboxAcceptInput)
     def InfoUpdated(old_info):
       new_info = self.GetSearchEngineInfo()
       if len(new_info) > len(old_info):
@@ -66,10 +72,11 @@ class SearchEnginesTest(pyauto.PyUITest):
     """Test searching using keyword of user-added search engine."""
     self.AddSearchEngine(title='foo',
                          keyword='foo.com',
-                         url='http://foo/?q=%s')
+                         url=self._localhost_prefix + '?q=%s')
     self.SetOmniboxText('foo.com foobar')
     self.OmniboxAcceptInput()
-    self.assertEqual('http://foo/?q=foobar', self.GetActiveTabURL().spec())
+    self.assertEqual(self._localhost_prefix + '?q=foobar',
+                     self.GetActiveTabURL().spec())
 
   def testEditSearchEngine(self):
     """Test editing a search engine's properties."""
@@ -79,12 +86,12 @@ class SearchEnginesTest(pyauto.PyUITest):
     self.EditSearchEngine(keyword='foo.com',
                           new_title='bar',
                           new_keyword='bar.com',
-                          new_url='http://foo/?bar=true&q=%s')
+                          new_url=self._localhost_prefix + '?bar=true&q=%s')
     self.assertTrue(self._GetSearchEngineWithKeyword('bar.com'))
     self.assertFalse(self._GetSearchEngineWithKeyword('foo.com'))
     self.SetOmniboxText('bar.com foobar')
     self.OmniboxAcceptInput()
-    self.assertEqual('http://foo/?bar=true&q=foobar',
+    self.assertEqual(self._localhost_prefix + '?bar=true&q=foobar',
                      self.GetActiveTabURL().spec())
 
   def testDeleteSearchEngine(self):
@@ -103,7 +110,7 @@ class SearchEnginesTest(pyauto.PyUITest):
     self.AddSearchEngine(
         title='foo',
         keyword='foo.com',
-        url='http://foo/?q=%s')
+        url=self._localhost_prefix + '?q=%s')
     foo = self._GetSearchEngineWithKeyword('foo.com')
     self.assertTrue(foo)
     self.assertFalse(foo['is_default'])
@@ -113,7 +120,7 @@ class SearchEnginesTest(pyauto.PyUITest):
     self.assertTrue(foo['is_default'])
     self.SetOmniboxText('foobar')
     self.OmniboxAcceptInput()
-    self.assertEqual('http://foo/?q=foobar',
+    self.assertEqual(self._localhost_prefix + '?q=foobar',
                      self.GetActiveTabURL().spec())
 
   def testTabToSearch(self):
@@ -151,6 +158,32 @@ class SearchEnginesTest(pyauto.PyUITest):
       self.SetOmniboxText('test search')
       self.OmniboxAcceptInput()
       self.assertTrue(re.search(keyword, self.GetActiveTabURL().spec()))
+
+  def testSearchEngineSpecialChars(self):
+    """Test add/edit/delete a search engine's properties using special chars."""
+    # Add a search engine with special chars.
+    self.AddSearchEngine(title='testspecial@#',
+                         keyword='testspecial@#.com',
+                         url=self._localhost_prefix + '?q=%s')
+    self.SetOmniboxText('testspecial@#.com foobar')
+    self.OmniboxAcceptInput()
+    self.assertEqual(self._localhost_prefix + '?q=foobar',
+                     self.GetActiveTabURL().spec())
+    # Edit a search engine with special chars.
+    self.EditSearchEngine(keyword='testspecial@#.com',
+                          new_title='Title Edited',
+                          new_keyword='testspecial@!%^*#.com',
+                          new_url=self._localhost_prefix + '?edited=true&q=%s')
+    self.assertTrue(self._GetSearchEngineWithKeyword('testspecial@!%^*#.com'))
+    self.assertFalse(self._GetSearchEngineWithKeyword('testspecial@#.com'))
+    self.SetOmniboxText('testspecial@!%^*#.com foobar')
+    self.OmniboxAcceptInput()
+    self.assertEqual(self._localhost_prefix + '?edited=true&q=foobar',
+                     self.GetActiveTabURL().spec())
+    # Delete a search engine.
+    self.assertTrue(self._GetSearchEngineWithKeyword('testspecial@!%^*#.com'))
+    self.DeleteSearchEngine('testspecial@!%^*#.com')
+    self.assertFalse(self._GetSearchEngineWithKeyword('testspecial@!%^*#.com'))
 
 
 if __name__ == '__main__':

@@ -22,7 +22,6 @@ class MockConnectionToClient : public ConnectionToClient {
   MockConnectionToClient() {}
 
   MOCK_METHOD1(Init, void(ChromotocolConnection* connection));
-  MOCK_METHOD2(SendInitClientMessage, void(int width, int height));
   MOCK_METHOD0(video_stub, VideoStub*());
   MOCK_METHOD0(Disconnect, void());
 
@@ -35,9 +34,6 @@ class MockConnectionToClientEventHandler :
  public:
   MockConnectionToClientEventHandler() {}
 
-  MOCK_METHOD2(HandleMessage,
-               void(ConnectionToClient* viewer,
-                    ChromotingClientMessage* message));
   MOCK_METHOD1(OnConnectionOpened, void(ConnectionToClient* connection));
   MOCK_METHOD1(OnConnectionClosed, void(ConnectionToClient* connection));
   MOCK_METHOD1(OnConnectionFailed, void(ConnectionToClient* connection));
@@ -63,6 +59,8 @@ class MockHostStub : public HostStub {
 
   MOCK_METHOD2(SuggestResolution, void(const SuggestResolutionRequest* msg,
                                        Task* done));
+  MOCK_METHOD2(BeginSessionRequest,
+               void(const LocalLoginCredentials* credentials, Task* done));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockHostStub);

@@ -1,8 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/extension_popup_api.h"
+
+#include <string>
 
 #include "base/json/json_writer.h"
 #include "base/string_util.h"
@@ -11,14 +13,13 @@
 #include "chrome/browser/extensions/extension_dom_ui.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_host.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_view_host_delegate.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/window_sizer.h"
+#include "chrome/browser/ui/window_sizer.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_service.h"
@@ -28,8 +29,8 @@
 #include "gfx/point.h"
 
 #if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/views/bubble_border.h"
-#include "chrome/browser/views/extensions/extension_popup.h"
+#include "chrome/browser/ui/views/bubble_border.h"
+#include "chrome/browser/ui/views/extensions/extension_popup.h"
 #include "views/view.h"
 #include "views/focus/focus_manager.h"
 #endif  // TOOLKIT_VIEWS

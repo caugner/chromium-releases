@@ -10,7 +10,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/engine/syncapi.h"
 #include "chrome/browser/sync/glue/synchronized_preferences.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -165,8 +165,19 @@ bool PreferenceModelAssociator::SyncModelHasUserCreatedNodes(bool* has_nodes) {
   return true;
 }
 
+const PrefService::Preference*
+PreferenceModelAssociator::GetChromeNodeFromSyncId(int64 sync_id) {
+  return NULL;
+}
+
+bool PreferenceModelAssociator::InitSyncNodeFromChromeId(
+    const std::string& node_id,
+    sync_api::BaseNode* sync_node) {
+  return false;
+}
+
 int64 PreferenceModelAssociator::GetSyncIdFromChromeId(
-    const std::string preference_name) {
+    const std::string& preference_name) {
   PreferenceNameToSyncIdMap::const_iterator iter =
       id_map_.find(preference_name);
   return iter == id_map_.end() ? sync_api::kInvalidId : iter->second;
@@ -252,7 +263,7 @@ Value* PreferenceModelAssociator::MergeListValues(const Value& from_value,
   DCHECK(to_value.GetType() == Value::TYPE_LIST);
   const ListValue& from_list_value = static_cast<const ListValue&>(from_value);
   const ListValue& to_list_value = static_cast<const ListValue&>(to_value);
-  ListValue* result = static_cast<ListValue*>(to_list_value.DeepCopy());
+  ListValue* result = to_list_value.DeepCopy();
 
   for (ListValue::const_iterator i = from_list_value.begin();
        i != from_list_value.end(); ++i) {
@@ -277,8 +288,7 @@ Value* PreferenceModelAssociator::MergeDictionaryValues(
       static_cast<const DictionaryValue&>(from_value);
   const DictionaryValue& to_dict_value =
       static_cast<const DictionaryValue&>(to_value);
-  DictionaryValue* result =
-      static_cast<DictionaryValue*>(to_dict_value.DeepCopy());
+  DictionaryValue* result = to_dict_value.DeepCopy();
 
   for (DictionaryValue::key_iterator key = from_dict_value.begin_keys();
        key != from_dict_value.end_keys(); ++key) {

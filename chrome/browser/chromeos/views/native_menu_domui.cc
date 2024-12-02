@@ -6,24 +6,26 @@
 
 #include <string>
 
-#include "app/menus/menu_model.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "chrome/browser/chromeos/dom_ui/menu_ui.h"
 #include "chrome/browser/chromeos/views/domui_menu_widget.h"
 #include "chrome/browser/chromeos/views/menu_locator.h"
-#include "chrome/browser/profile_manager.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/url_constants.h"
 #include "gfx/rect.h"
+#include "ui/base/models/menu_model.h"
 #include "views/controls/menu/menu_2.h"
-#include "views/controls/menu/native_menu_gtk.h"
 #include "views/controls/menu/nested_dispatcher_gtk.h"
 
 #if defined(TOUCH_UI)
 #include "views/focus/accelerator_handler.h"
+#include "views/controls/menu/native_menu_x.h"
+#else
+#include "views/controls/menu/native_menu_gtk.h"
 #endif
 
 namespace {
@@ -32,10 +34,10 @@ using chromeos::NativeMenuDOMUI;
 using chromeos::DOMUIMenuWidget;
 
 // Returns true if the menu item type specified can be executed as a command.
-bool MenuTypeCanExecute(menus::MenuModel::ItemType type) {
-  return type == menus::MenuModel::TYPE_COMMAND ||
-      type == menus::MenuModel::TYPE_CHECK ||
-      type == menus::MenuModel::TYPE_RADIO;
+bool MenuTypeCanExecute(ui::MenuModel::ItemType type) {
+  return type == ui::MenuModel::TYPE_COMMAND ||
+      type == ui::MenuModel::TYPE_CHECK ||
+      type == ui::MenuModel::TYPE_RADIO;
 }
 
 gboolean Destroy(GtkWidget* widget, gpointer data) {
@@ -83,7 +85,7 @@ void NativeMenuDOMUI::SetMenuURL(views::Menu2* menu2, const GURL& url) {
 ////////////////////////////////////////////////////////////////////////////////
 // NativeMenuDOMUI, public:
 
-NativeMenuDOMUI::NativeMenuDOMUI(menus::MenuModel* menu_model, bool root)
+NativeMenuDOMUI::NativeMenuDOMUI(ui::MenuModel* menu_model, bool root)
     : parent_(NULL),
       submenu_(NULL),
       model_(menu_model),
@@ -249,15 +251,19 @@ bool NativeMenuDOMUI::Dispatch(GdkEvent* event) {
 }
 
 #if defined(TOUCH_UI)
-bool NativeMenuDOMUI::Dispatch(XEvent* xevent) {
-  return views::DispatchXEvent(xevent);
+base::MessagePumpGlibXDispatcher::DispatchStatus NativeMenuDOMUI::Dispatch(
+    XEvent* xevent) {
+  return views::DispatchXEvent(xevent) ?
+      base::MessagePumpGlibXDispatcher::EVENT_PROCESSED :
+      base::MessagePumpGlibXDispatcher::EVENT_IGNORED;
+
 }
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeMenuDOMUI, MenuControl implementation:
 
-void NativeMenuDOMUI::Activate(menus::MenuModel* model,
+void NativeMenuDOMUI::Activate(ui::MenuModel* model,
                                int index,
                                ActivationMode activation) {
   NativeMenuDOMUI* root = GetRoot();
@@ -279,7 +285,7 @@ void NativeMenuDOMUI::Activate(menus::MenuModel* model,
 void NativeMenuDOMUI::OpenSubmenu(int index, int y) {
   submenu_.reset();
   // Returns the model for the submenu at the specified index.
-  menus::MenuModel* submenu = model_->GetSubmenuModelAt(index);
+  ui::MenuModel* submenu = model_->GetSubmenuModelAt(index);
   submenu_.reset(new chromeos::NativeMenuDOMUI(submenu, false));
   submenu_->set_menu_url(menu_url_);
   // y in menu_widget_ coordinate.
@@ -394,20 +400,3 @@ NativeMenuDOMUI* NativeMenuDOMUI::FindMenuAt(const gfx::Point& point) {
 }
 
 }  // namespace chromeos
-
-////////////////////////////////////////////////////////////////////////////////
-// MenuWrapper, public:
-
-namespace views {
-
-// static
-MenuWrapper* MenuWrapper::CreateWrapper(Menu2* menu) {
-  menus::MenuModel* model = menu->model();
-  if (chromeos::MenuUI::IsEnabled()) {
-    return new chromeos::NativeMenuDOMUI(model, true);
-  } else {
-    return new NativeMenuGtk(menu);
-  }
-}
-
-}  // namespace views

@@ -28,8 +28,6 @@ class FileSystemPathManager {
                         bool allow_file_access_from_files);
   ~FileSystemPathManager();
 
-  static FilePath GetFileSystemCommonRootDirectory(const FilePath& root_path);
-
   // Callback for GetFileSystemRootPath.
   // If the request is accepted and the root filesystem for the origin exists
   // the callback is called with success=true and valid root_path and name.
@@ -76,11 +74,11 @@ class FileSystemPathManager {
     return base_path_;
   }
 
- private:
-  class GetFileSystemRootPathTask;
-
   // Returns the storage identifier string for the given |url|.
   static std::string GetStorageIdentifierFromURL(const GURL& url);
+
+ private:
+  class GetFileSystemRootPathTask;
 
   scoped_refptr<base::MessageLoopProxy> file_message_loop_;
 

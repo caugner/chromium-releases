@@ -1,17 +1,19 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/info_bubble.h"
+#include "chrome/browser/ui/views/info_bubble.h"
 
-#include "app/keyboard_codes.h"
-#include "app/slide_animation.h"
-#include "chrome/browser/window_sizer.h"
+#include <vector>
+
+#include "chrome/browser/ui/window_sizer.h"
 #include "chrome/common/notification_service.h"
 #include "gfx/canvas_skia.h"
 #include "gfx/color_utils.h"
 #include "gfx/path.h"
 #include "third_party/skia/include/core/SkPaint.h"
+#include "ui/base/animation/slide_animation.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "views/fill_layout.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
@@ -20,8 +22,10 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/wm_ipc.h"
-#include "cros/chromeos_wm_ipc_enums.h"
+#include "third_party/cros/chromeos_wm_ipc_enums.h"
 #endif
+
+using std::vector;
 
 // How long the fade should last for.
 static const int kHideFadeDurationMS = 200;
@@ -256,8 +260,10 @@ InfoBubble* InfoBubble::ShowFocusless(
     const gfx::Rect& position_relative_to,
     BubbleBorder::ArrowLocation arrow_location,
     views::View* contents,
-    InfoBubbleDelegate* delegate) {
-  InfoBubble* window = new InfoBubble(views::WidgetGtk::TYPE_POPUP);
+    InfoBubbleDelegate* delegate,
+    bool show_while_screen_is_locked) {
+  InfoBubble* window = new InfoBubble(views::WidgetGtk::TYPE_POPUP,
+                                      show_while_screen_is_locked);
   window->Init(parent, position_relative_to, arrow_location,
                contents, delegate);
   return window;
@@ -276,7 +282,7 @@ void InfoBubble::Close() {
     DoClose(false);
 }
 
-void InfoBubble::AnimationEnded(const Animation* animation) {
+void InfoBubble::AnimationEnded(const ui::Animation* animation) {
   if (static_cast<int>(animation_->GetCurrentValue()) == 0) {
     // When fading out we just need to close the bubble at the end
     DoClose(false);
@@ -289,7 +295,7 @@ void InfoBubble::AnimationEnded(const Animation* animation) {
   }
 }
 
-void InfoBubble::AnimationProgressed(const Animation* animation) {
+void InfoBubble::AnimationProgressed(const ui::Animation* animation) {
 #if defined(OS_WIN)
   // Set the opacity for the main contents window.
   unsigned char opacity = static_cast<unsigned char>(
@@ -317,17 +323,22 @@ InfoBubble::InfoBubble()
       delegate_(NULL),
       show_status_(kOpen),
       fade_away_on_close_(false),
+#if defined(OS_CHROMEOS)
+      show_while_screen_is_locked_(false),
+#endif
       arrow_location_(BubbleBorder::NONE),
       contents_(NULL) {
 }
 
 #if defined(OS_CHROMEOS)
-InfoBubble::InfoBubble(views::WidgetGtk::Type type)
+InfoBubble::InfoBubble(views::WidgetGtk::Type type,
+                       bool show_while_screen_is_locked)
     : WidgetGtk(type),
       border_contents_(NULL),
       delegate_(NULL),
       show_status_(kOpen),
       fade_away_on_close_(false),
+      show_while_screen_is_locked_(show_while_screen_is_locked),
       arrow_location_(BubbleBorder::NONE),
       contents_(NULL) {
 }
@@ -380,10 +391,14 @@ void InfoBubble::Init(views::Widget* parent,
   make_transient_to_parent();
   WidgetGtk::InitWithWidget(parent, gfx::Rect());
 #if defined(OS_CHROMEOS)
-  chromeos::WmIpc::instance()->SetWindowType(
-      GetNativeView(),
-      chromeos::WM_IPC_WINDOW_CHROME_INFO_BUBBLE,
-      NULL);
+  {
+    vector<int> params;
+    params.push_back(show_while_screen_is_locked_ ? 1 : 0);
+    chromeos::WmIpc::instance()->SetWindowType(
+        GetNativeView(),
+        chromeos::WM_IPC_WINDOW_CHROME_INFO_BUBBLE,
+        &params);
+  }
 #endif
 #endif
 
@@ -434,7 +449,7 @@ void InfoBubble::Init(views::Widget* parent,
 
   // Register the Escape accelerator for closing.
   GetFocusManager()->RegisterAccelerator(
-      views::Accelerator(app::VKEY_ESCAPE, false, false, false), this);
+      views::Accelerator(ui::VKEY_ESCAPE, false, false, false), this);
 
   // Done creating the bubble.
   NotificationService::current()->Notify(NotificationType::INFO_BUBBLE_CREATED,
@@ -499,7 +514,7 @@ void InfoBubble::DoClose(bool closed_by_escape) {
     return;
 
   GetFocusManager()->UnregisterAccelerator(
-      views::Accelerator(app::VKEY_ESCAPE, false, false, false), this);
+      views::Accelerator(ui::VKEY_ESCAPE, false, false, false), this);
   if (delegate_)
     delegate_->InfoBubbleClosing(this, closed_by_escape);
   show_status_ = kClosed;
@@ -530,9 +545,9 @@ void InfoBubble::FadeOut() {
 }
 
 void InfoBubble::Fade(bool fade_in) {
-  animation_.reset(new SlideAnimation(this));
+  animation_.reset(new ui::SlideAnimation(this));
   animation_->SetSlideDuration(kHideFadeDurationMS);
-  animation_->SetTweenType(Tween::LINEAR);
+  animation_->SetTweenType(ui::Tween::LINEAR);
 
   animation_->Reset(fade_in ? 0.0 : 1.0);
   if (fade_in)

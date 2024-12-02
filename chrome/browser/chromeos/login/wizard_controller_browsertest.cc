@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "app/l10n_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/account_screen.h"
 #include "chrome/browser/chromeos/login/eula_view.h"
@@ -14,12 +14,11 @@
 #include "chrome/browser/chromeos/login/user_image_screen.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/login/wizard_in_process_browser_test.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/test/ui_test_utils.h"
 #include "grit/generated_resources.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "unicode/locid.h"
 #include "views/accelerator.h"
 
@@ -81,13 +80,15 @@ IN_PROC_BROWSER_TEST_F(WizardControllerTest, FAILS_SwitchLanguage) {
   EXPECT_EQ("en-US", g_browser_process->GetApplicationLocale());
   EXPECT_STREQ("en", icu::Locale::getDefault().getLanguage());
   EXPECT_FALSE(base::i18n::IsRTL());
-  const std::wstring en_str = l10n_util::GetString(IDS_NETWORK_SELECTION_TITLE);
+  const std::wstring en_str =
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_TITLE));
 
   chromeos::LanguageSwitchMenu::SwitchLanguage("fr");
   EXPECT_EQ("fr", g_browser_process->GetApplicationLocale());
   EXPECT_STREQ("fr", icu::Locale::getDefault().getLanguage());
   EXPECT_FALSE(base::i18n::IsRTL());
-  const std::wstring fr_str = l10n_util::GetString(IDS_NETWORK_SELECTION_TITLE);
+  const std::wstring fr_str =
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_TITLE));
 
   EXPECT_NE(en_str, fr_str);
 
@@ -95,7 +96,8 @@ IN_PROC_BROWSER_TEST_F(WizardControllerTest, FAILS_SwitchLanguage) {
   EXPECT_EQ("ar", g_browser_process->GetApplicationLocale());
   EXPECT_STREQ("ar", icu::Locale::getDefault().getLanguage());
   EXPECT_TRUE(base::i18n::IsRTL());
-  const std::wstring ar_str = l10n_util::GetString(IDS_NETWORK_SELECTION_TITLE);
+  const std::wstring ar_str =
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_TITLE));
 
   EXPECT_NE(fr_str, ar_str);
 }
@@ -228,12 +230,12 @@ IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest, MAYBE_Accelerators) {
 
   views::FocusManager* focus_manager =
       controller()->contents()->GetFocusManager();
-  views::Accelerator accel_account_screen(app::VKEY_A, false, true, true);
-  views::Accelerator accel_login_screen(app::VKEY_L, false, true, true);
-  views::Accelerator accel_network_screen(app::VKEY_N, false, true, true);
-  views::Accelerator accel_update_screen(app::VKEY_U, false, true, true);
-  views::Accelerator accel_image_screen(app::VKEY_I, false, true, true);
-  views::Accelerator accel_eula_screen(app::VKEY_E, false, true, true);
+  views::Accelerator accel_account_screen(ui::VKEY_A, false, true, true);
+  views::Accelerator accel_login_screen(ui::VKEY_L, false, true, true);
+  views::Accelerator accel_network_screen(ui::VKEY_N, false, true, true);
+  views::Accelerator accel_update_screen(ui::VKEY_U, false, true, true);
+  views::Accelerator accel_image_screen(ui::VKEY_I, false, true, true);
+  views::Accelerator accel_eula_screen(ui::VKEY_E, false, true, true);
 
   EXPECT_CALL(*mock_network_screen_, Hide()).Times(1);
   EXPECT_CALL(*mock_account_screen_, Show()).Times(1);

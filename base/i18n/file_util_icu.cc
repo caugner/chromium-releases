@@ -21,6 +21,10 @@ namespace {
 
 class IllegalCharacters {
  public:
+  static IllegalCharacters* GetInstance() {
+    return Singleton<IllegalCharacters>::get();
+  }
+
   bool contains(UChar32 ucs4) {
     return !!set->contains(ucs4);
   }
@@ -76,6 +80,30 @@ IllegalCharacters::IllegalCharacters() {
 
 class LocaleAwareComparator {
  public:
+  static LocaleAwareComparator* GetInstance() {
+    return Singleton<LocaleAwareComparator>::get();
+  }
+
+  // Note: A similar function is available in l10n_util.
+  // We cannot use it because base should not depend on l10n_util.
+  // TODO(yuzo): Move some of l10n_util to base.
+  int Compare(const string16& a, const string16& b) {
+    // We are not sure if Collator::compare is thread-safe.
+    // Use an AutoLock just in case.
+    base::AutoLock auto_lock(lock_);
+
+    UErrorCode error_code = U_ZERO_ERROR;
+    UCollationResult result = collator_->compare(
+        static_cast<const UChar*>(a.c_str()),
+        static_cast<int>(a.length()),
+        static_cast<const UChar*>(b.c_str()),
+        static_cast<int>(b.length()),
+        error_code);
+    DCHECK(U_SUCCESS(error_code));
+    return result;
+  }
+
+ private:
   LocaleAwareComparator() {
     UErrorCode error_code = U_ZERO_ERROR;
     // Use the default collator. The default locale should have been properly
@@ -91,28 +119,8 @@ class LocaleAwareComparator {
     // order doesn't change much anyway.
   }
 
-  // Note: A similar function is available in l10n_util.
-  // We cannot use it because base should not depend on l10n_util.
-  // TODO(yuzo): Move some of l10n_util to base.
-  int Compare(const string16& a, const string16& b) {
-    // We are not sure if Collator::compare is thread-safe.
-    // Use an AutoLock just in case.
-    AutoLock auto_lock(lock_);
-
-    UErrorCode error_code = U_ZERO_ERROR;
-    UCollationResult result = collator_->compare(
-        static_cast<const UChar*>(a.c_str()),
-        static_cast<int>(a.length()),
-        static_cast<const UChar*>(b.c_str()),
-        static_cast<int>(b.length()),
-        error_code);
-    DCHECK(U_SUCCESS(error_code));
-    return result;
-  }
-
- private:
   scoped_ptr<icu::Collator> collator_;
-  Lock lock_;
+  base::Lock lock_;
   friend struct DefaultSingletonTraits<LocaleAwareComparator>;
 
   DISALLOW_COPY_AND_ASSIGN(LocaleAwareComparator);
@@ -123,19 +131,19 @@ class LocaleAwareComparator {
 namespace file_util {
 
 bool IsFilenameLegal(const string16& file_name) {
-  return Singleton<IllegalCharacters>()->containsNone(file_name);
+  return IllegalCharacters::GetInstance()->containsNone(file_name);
 }
 
 void ReplaceIllegalCharactersInPath(FilePath::StringType* file_name,
                                     char replace_char) {
   DCHECK(file_name);
 
-  DCHECK(!(Singleton<IllegalCharacters>()->contains(replace_char)));
+  DCHECK(!(IllegalCharacters::GetInstance()->contains(replace_char)));
 
   // Remove leading and trailing whitespace.
   TrimWhitespace(*file_name, TRIM_ALL, file_name);
 
-  IllegalCharacters* illegal = Singleton<IllegalCharacters>::get();
+  IllegalCharacters* illegal = IllegalCharacters::GetInstance();
   int cursor = 0;  // The ICU macros expect an int.
   while (cursor < static_cast<int>(file_name->size())) {
     int char_begin = cursor;
@@ -171,8 +179,8 @@ void ReplaceIllegalCharactersInPath(FilePath::StringType* file_name,
 
 bool LocaleAwareCompareFilenames(const FilePath& a, const FilePath& b) {
 #if defined(OS_WIN)
-  return Singleton<LocaleAwareComparator>()->Compare(a.value().c_str(),
-                                                     b.value().c_str()) < 0;
+  return LocaleAwareComparator::GetInstance()->Compare(a.value().c_str(),
+                                                       b.value().c_str()) < 0;
 
 #elif defined(OS_POSIX)
   // On linux, the file system encoding is not defined. We assume
@@ -181,7 +189,7 @@ bool LocaleAwareCompareFilenames(const FilePath& a, const FilePath& b) {
   // ICU's collator can take strings in OS native encoding. But we convert the
   // strings to UTF-16 ourselves to ensure conversion consistency.
   // TODO(yuzo): Perhaps we should define SysNativeMBToUTF16?
-  return Singleton<LocaleAwareComparator>()->Compare(
+  return LocaleAwareComparator::GetInstance()->Compare(
       WideToUTF16(base::SysNativeMBToWide(a.value().c_str())),
       WideToUTF16(base::SysNativeMBToWide(b.value().c_str()))) < 0;
 #else

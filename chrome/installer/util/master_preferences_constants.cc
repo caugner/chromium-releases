@@ -4,13 +4,14 @@
 
 #include "chrome/installer/util/master_preferences_constants.h"
 
-namespace installer_util {
+namespace installer {
 namespace master_preferences {
   const char kAltFirstRunBubble[] = "oem_bubble";
   const char kAltShortcutText[] = "alternate_shortcut_text";
   const char kCeee[] = "ceee";
   const char kChrome[] = "chrome";
   const char kChromeFrame[] = "chrome_frame";
+  const char kChromeFrameReadyMode[] = "ready_mode";
   const char kChromeShortcutIconIndex[] = "chrome_shortcut_icon_index";
   const char kCreateAllShortcuts[] = "create_all_shortcuts";
   const char kDisableLogging[] = "disable_logging";
@@ -41,4 +42,4 @@ namespace master_preferences {
   const char kVerboseLogging[] = "verbose_logging";
   const char kExtensionsBlock[] = "extensions.settings";
 }  // namespace master_preferences
-}  // namespace installer_util
+}  // namespace installer

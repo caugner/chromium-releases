@@ -7,10 +7,11 @@
 #include "base/auto_reset.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
+#include "base/threading/platform_thread.h"
 #include "base/utf_string_conversions.h"
 #include "third_party/sqlite/sqlite3.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebDatabase.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDatabase.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "webkit/database/database_util.h"
 #include "webkit/database/vfs_backend.h"
 
@@ -27,7 +28,7 @@ SimpleDatabaseSystem* SimpleDatabaseSystem::GetInstance() {
 
 SimpleDatabaseSystem::SimpleDatabaseSystem()
     : waiting_for_dbs_to_close_(false) {
-  temp_dir_.CreateUniqueTempDir();
+  CHECK(temp_dir_.CreateUniqueTempDir());
   db_tracker_ = new DatabaseTracker(temp_dir_.path(), false);
   db_tracker_->AddObserver(this);
   DCHECK(!instance_);
@@ -66,7 +67,7 @@ int SimpleDatabaseSystem::DeleteFile(
     error_code = VfsBackend::DeleteFile(file_name, sync_dir);
   } while ((++num_retries < kNumDeleteRetries) &&
            (error_code == SQLITE_IOERR_DELETE) &&
-           (PlatformThread::Sleep(10), 1));
+           (base::PlatformThread::Sleep(10), 1));
 
   return error_code;
 }
@@ -174,7 +175,7 @@ void SimpleDatabaseSystem::SetFullFilePathsForVfsFile(
   FilePath file_name =
       DatabaseUtil::GetFullFilePathForVfsFile(db_tracker_, vfs_file_name);
 
-  AutoLock file_names_auto_lock(file_names_lock_);
+  base::AutoLock file_names_auto_lock(file_names_lock_);
   file_names_[vfs_file_name] = file_name;
   file_names_[vfs_file_name + ASCIIToUTF16("-journal")] =
       FilePath::FromWStringHack(file_name.ToWStringHack() +
@@ -186,7 +187,7 @@ FilePath SimpleDatabaseSystem::GetFullFilePathForVfsFile(
   if (vfs_file_name.empty())  // temp file, used for vacuuming
     return FilePath();
 
-  AutoLock file_names_auto_lock(file_names_lock_);
+  base::AutoLock file_names_auto_lock(file_names_lock_);
   DCHECK(file_names_.find(vfs_file_name) != file_names_.end());
   return file_names_[vfs_file_name];
 }

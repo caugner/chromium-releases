@@ -16,21 +16,29 @@ typedef struct tagNMLVCUSTOMDRAW NMLVCUSTOMDRAW;
 #include <map>
 #include <vector>
 
-#include "app/keyboard_codes.h"
-#include "app/table_model_observer.h"
+#include "base/gtest_prod_util.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/base/models/table_model_observer.h"
+
 #if defined(OS_WIN)
 // TODO(port): remove the ifdef when native_control.h is ported.
 #include "views/controls/native_control.h"
 #endif  // defined(OS_WIN)
 
+class SkBitmap;
+
+namespace ui {
+struct TableColumn;
+class TableModel;
+}
+using ui::TableColumn;
+using ui::TableModel;
+using ui::TableModelObserver; // TODO(beng): remove these.
+
 namespace gfx {
 class Font;
 }
-
-struct TableColumn;
-class TableModel;
-class SkBitmap;
 
 // A TableView is a view that displays multiple rows with any number of columns.
 // TableView is driven by a TableModel. The model returns the contents
@@ -257,7 +265,7 @@ class TableView : public NativeControl,
   virtual void OnMiddleClick();
 
   // Overridden from NativeControl. Notifies the observer.
-  virtual bool OnKeyDown(app::KeyboardCode virtual_keycode);
+  virtual bool OnKeyDown(ui::KeyboardCode virtual_keycode);
 
   // Invoked to customize the colors or font at a particular cell. If you
   // change the colors or font, return true. This is only invoked if
@@ -323,6 +331,9 @@ class TableView : public NativeControl,
 
   friend class ListViewParent;
   friend class TableSelectionIterator;
+  friend class GroupModelTableViewTest;
+  FRIEND_TEST_ALL_PREFIXES(GroupModelTableViewTest, ShiftSelectAcrossGroups);
+  FRIEND_TEST_ALL_PREFIXES(GroupModelTableViewTest, ShiftSelectSameGroup);
 
   LRESULT OnCustomDraw(NMLVCUSTOMDRAW* draw_info);
 
@@ -339,6 +350,13 @@ class TableView : public NativeControl,
   // Does the actual sort and updates the mappings (view_to_model and
   // model_to_view) appropriately.
   void SortItemsAndUpdateMapping();
+
+  // Selects multiple items from the current view row to the marked view row
+  // (implements shift-click behavior). |view_index| is the most recent row
+  // that the user clicked on, and so there is no guarantee that
+  // |view_index| > |mark_view_index| or vice-versa. Returns false if the
+  // selection attempt was rejected because it crossed group boundaries.
+  bool SelectMultiple(int view_index, int mark_view_index);
 
   // Method invoked by ListView to compare the two values. Invokes CompareRows.
   static int CALLBACK SortFunc(LPARAM model_index_1_p,
@@ -479,7 +497,7 @@ class TableView : public NativeControl,
   scoped_array<int> view_to_model_;
   scoped_array<int> model_to_view_;
 
-  std::wstring alt_text_;
+  string16 alt_text_;
 
   DISALLOW_COPY_AND_ASSIGN(TableView);
 };

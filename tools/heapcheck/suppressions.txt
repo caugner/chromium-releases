@@ -101,6 +101,24 @@
    fun:base::OpenTestNSSDB
    fun:net::CertDatabaseNSSTest::SetUp
 }
+{
+   bug_66941_a
+   Heapcheck:Leak
+   fun:PR_NewLock
+   fun:net::TestRootCerts::*
+}
+{
+   bug_66941_b
+   Heapcheck:Leak
+   fun:nss_ZAlloc
+   fun:net::TestRootCerts::*
+}
+{
+   bug_66941_c
+   Heapcheck:Leak
+   fun:PL_ArenaAllocate
+   fun:net::TestRootCerts::*
+}
 
 #-----------------------------------------------------------------------
 # 2. intentional unit test errors, or stuff that is somehow a false positive
@@ -108,7 +126,7 @@
 {
    Heapcheck sanity test (ToolsSanityTest.MemoryLeak).
    Heapcheck:Leak
-   fun:ToolsSanityTest_MemoryLeak_Test::TestBody
+   fun:base::ToolsSanityTest_MemoryLeak_Test::TestBody
 }
 {
    Intentional leak in BrowserThreadTest.NotReleasedIfTargetThreadNonExistent
@@ -153,7 +171,7 @@
    Heapcheck:Leak
    fun:URLRequestHttpJob::Factory
    fun:URLRequestJobManager::CreateJob
-   fun:URLRequest::Start
+   fun:net::URLRequest::Start
    fun:URLRequestTest_CancelTest_DuringCookiePolicy_Test::TestBody
    fun:testing::HandleExceptionsInMethodIfSupported
    fun:testing::Test::Run
@@ -703,7 +721,7 @@
    fun:std::string::_Rep::_S_create
    fun:std::string::_Rep::_M_clone
    fun:std::string::reserve
-   fun:bool ::InitCanonical
+   fun:*InitCanonical
    fun:GURL
    fun:net::::IOThread::Init
    fun:base::Thread::ThreadMain
@@ -861,13 +879,13 @@
    fun:PurgePluginListCache
    fun:PluginService::Observe
    fun:NotificationService::Notify
-   fun:ExtensionsService::NotifyExtensionLoaded
-   fun:ExtensionsService::OnExtensionLoaded
-   fun:ExtensionsService::LoadInstalledExtension
-   fun:ExtensionsService::ContinueLoadAllExtensions
-   fun:ExtensionsService::LoadAllExtensions
-   fun:ExtensionsService::Init
-   fun:ExtensionsServiceTest_CleanupOnStartup_Test::TestBody
+   fun:ExtensionService::NotifyExtensionLoaded
+   fun:ExtensionService::OnExtensionLoaded
+   fun:ExtensionService::LoadInstalledExtension
+   fun:ExtensionService::ContinueLoadAllExtensions
+   fun:ExtensionService::LoadAllExtensions
+   fun:ExtensionService::Init
+   fun:ExtensionServiceTest_CleanupOnStartup_Test::TestBody
 }
 {
    bug_53184
@@ -1053,4 +1071,128 @@
    fun:ReloadButtonGtkTest_*_Test::TestBody
    fun:testing::HandleExceptionsInMethodIfSupported
    fun:testing::Test::Run
+}
+{
+   bug_65680a
+   Heapcheck:Leak
+   fun:remoting::ScreenRecorderTest_OneRecordCycle_Test::TestBody
+   fun:testing::HandleExceptionsInMethodIfSupported
+}
+{
+   bug_65680b
+   Heapcheck:Leak
+   fun:remoting::ScreenRecorder::DoSendVideoPacket
+   fun:void DispatchToMethod
+   fun:RunnableMethod::Run
+   fun:MessageLoop::RunTask
+   fun:MessageLoop::DeferOrRunPendingTask
+   fun:MessageLoop::DoWork
+   fun:base::MessagePumpDefault::Run
+   fun:MessageLoop::RunInternal
+   fun:MessageLoop::RunHandler
+   fun:MessageLoop::RunAllPending
+   fun:remoting::ScreenRecorderTest_OneRecordCycle_Test::TestBody
+}
+{
+   bug_66054_a
+   Heapcheck:Leak
+   ...
+   fun:policy::CreateSequencedTestDictionaryActionP::gmock_Impl::gmock_PerformImpl
+   fun:testing::internal::ActionHelper::Perform
+   fun:policy::CreateSequencedTestDictionaryActionP::gmock_Impl::Perform
+   fun:testing::Action::Perform
+   fun:testing::internal::FunctionMockerBase::InvokeWith
+   fun:testing::internal::FunctionMocker::Invoke
+   fun:policy::ProviderDelegateMock::Load
+   fun:policy::AsynchronousPolicyLoader::Reload
+   fun:policy::AsynchronousPolicyLoaderTest_ProviderNotificationOnPolicyChange_Test::TestBody
+}
+{
+   bug_66054_b
+   Heapcheck:Leak
+   fun:policy::AsynchronousPolicyTestBase_ProviderRefresh_Test::TestBody
+}
+{
+   bug_66227
+   Heapcheck:Leak
+   ...
+   fun:MalwareDetailsTest_*
+}
+{
+   bug_67524
+   Heapcheck:Leak
+   ...
+   fun:net::::ProxyResolverV8WithMockBindings::SetPacScriptFromDisk
+}
+{
+   bug_67933
+   Heapcheck:Leak
+   fun:_Znw*
+   fun:_ZN3net25DiskCacheBasedSSLHostInfoC1ERKSsRKNS_9SSLConfigEPNS_9HttpCacheE
+   fun:_ZN3net9HttpCache25SSLHostInfoFactoryAdaptor10GetForHostERKSsRKNS_9SSLConfigE
+   fun:_ZN3net13SSLConnectJob12DoTCPConnectEv
+   fun:_ZN3net13SSLConnectJob6DoLoopEi
+   fun:_ZN3net13SSLConnectJob15ConnectInternalEv
+   fun:_ZN3net10ConnectJob7ConnectEv
+   fun:_ZN3net8internal26ClientSocketPoolBaseHelper21RequestSocketInternalERKSsPKNS1_7RequestE
+   fun:_ZN3net8internal26ClientSocketPoolBaseHelper13RequestSocketERKSsPKNS1_7RequestE
+   fun:_ZN3net20ClientSocketPoolBaseINS_15SSLSocketParamsEE13RequestSocketERKSsRK13scoped_refptrIS1_ENS_15RequestPriorityEPNS_18ClientSocketHandleEP14CallbackRunnerI6Tuple1IiEERKNS_11BoundNetLogE
+   fun:_ZN3net19SSLClientSocketPool13RequestSocketERKSsPKvNS_15RequestPriorityEPNS_18ClientSocketHandleEP14CallbackRunnerI6Tuple1IiEERKNS_11BoundNetLogE
+   fun:_ZN3net18ClientSocketHandle4InitINS_15SSLSocketParamsENS_19SSLClientSocketPoolEEEiRKSsRK13scoped_refptrIT_ENS_15RequestPriorityEP14CallbackRunnerI6Tuple1IiEEPT0_RKNS_11BoundNetLogE
+   fun:_ZN3net17HttpStreamRequest16DoInitConnectionEv
+   fun:_ZN3net17HttpStreamRequest6DoLoopEi
+   fun:_ZN3net17HttpStreamRequest7RunLoopEi
+   fun:_ZN3net17HttpStreamRequest13StartInternalEPKNS_15HttpRequestInfoEPNS_9SSLConfigEPNS_9ProxyInfoERKNS_11BoundNetLogE
+   fun:_ZN3net17HttpStreamRequest5StartEPKNS_15HttpRequestInfoEPNS_9SSLConfigEPNS_9ProxyInfoEPNS_13StreamRequest8DelegateERKNS_11BoundNetLogE
+   fun:_ZN3net17HttpStreamFactory13RequestStreamEPKNS_15HttpRequestInfoEPNS_9SSLConfigEPNS_9ProxyInfoEPNS_18HttpNetworkSessionEPNS_13StreamRequest8DelegateERKNS_11BoundNetLogE
+   fun:_ZN3net22HttpNetworkTransaction14DoCreateStreamEv
+   fun:_ZN3net22HttpNetworkTransaction6DoLoopEi
+   fun:_ZN3net22HttpNetworkTransaction5StartEPKNS_15HttpRequestInfoEP14CallbackRunnerI6Tuple1IiEERKNS_11BoundNetLogE
+   fun:_ZN3net9HttpCache11Transaction13DoSendRequestEv
+}
+{
+   bug_68304
+   Heapcheck:Leak
+   ...
+   fun:IPC::ParamTraits::Read
+   fun:IPC::ReadParam
+   fun:IPC::MessageWithTuple::Read
+   fun:IPC::MessageWithTuple::Dispatch
+   fun:ResourceDispatcherHost::OnMessageReceived
+   fun:ResourceDispatcherHostTest::MakeTestRequest
+}
+{
+   Bug_70062
+   Heapcheck:Leak
+   fun:PR_NewLock
+   fun:InitSessionCacheLocks
+   fun:initSessionCacheLocksLazily
+   fun:PR_CallOnce
+}
+{
+   bug_70115
+   Heapcheck:Leak
+   fun:FilePathWatcher
+   fun:PluginService
+   fun:DefaultSingletonTraits::New
+   fun:Singleton::get
+   fun:PluginService::GetInstance
+   fun:ResourceDispatcherHost::BeginRequest
+   fun:ResourceDispatcherHost::OnRequestResource
+   fun:IPC::MessageWithTuple::Dispatch
+   fun:ResourceDispatcherHost::OnMessageReceived
+   fun:ResourceDispatcherHostTest::MakeTestRequest
+   fun:ResourceDispatcherHostTest::MakeTestRequest
+   fun:ResourceDispatcherHostTest_TestMany_Test::TestBody
+}
+{
+   bug_70327
+   Heapcheck:Leak
+   fun:g_malloc
+   fun:gfx::CanvasSkia::SizeStringInt
+   fun:gfx::PlatformFontGtk::GetStringWidth
+   fun:gfx::Font::GetStringWidth
+   fun:ui::ElideUrl
+   fun:ui::::RunTest
+   fun:ui::TextEliderTest_TestGeneralEliding_Test::TestBody
 }

@@ -6,7 +6,7 @@
 
 #include "chrome/browser/browsing_instance.h"
 #include "chrome/browser/dom_ui/dom_ui_factory.h"
-#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/renderer_host/browser_render_process_host.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/notification_service.h"
@@ -19,6 +19,7 @@ static bool IsURLSameAsAnySiteInstance(const GURL& url) {
     return false;
   return url.SchemeIs(chrome::kJavaScriptScheme) ||
          url.spec() == chrome::kAboutCrashURL ||
+         url.spec() == chrome::kAboutKillURL ||
          url.spec() == chrome::kAboutHangURL ||
          url.spec() == chrome::kAboutShorthangURL;
 }
@@ -187,11 +188,11 @@ bool SiteInstance::IsSameWebSite(Profile* profile,
 
 /*static*/
 GURL SiteInstance::GetEffectiveURL(Profile* profile, const GURL& url) {
-  if (!profile || !profile->GetExtensionsService())
+  if (!profile || !profile->GetExtensionService())
     return url;
 
   const Extension* extension =
-      profile->GetExtensionsService()->GetExtensionByWebExtent(url);
+      profile->GetExtensionService()->GetExtensionByWebExtent(url);
   if (extension) {
     // If the URL is part of an extension's web extent, convert it to an
     // extension URL.

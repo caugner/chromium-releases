@@ -6,15 +6,15 @@
 
 #import <AddressBook/AddressBook.h>
 
-#include "app/l10n_util_mac.h"
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "base/scoped_vector.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/phone_number.h"
-#include "chrome/browser/guid.h"
+#include "chrome/common/guid.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util_mac.h"
 
 namespace {
 

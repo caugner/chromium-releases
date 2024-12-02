@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,49 +9,70 @@
 #include "base/ref_counted.h"
 #include "base/time.h"
 #include "chrome/browser/plugin_process_host.h"
-#include "ipc/ipc_channel_proxy.h"
-#include "ipc/ipc_message.h"
+#include "ipc/ipc_channel.h"
 
 class Task;
 
 namespace base {
 class MessageLoopProxy;
+class WaitableEvent;
 }
 
-class PluginDataRemover : public PluginProcessHost::Client,
+class PluginDataRemover : public base::RefCountedThreadSafe<PluginDataRemover>,
+                          public PluginProcessHost::Client,
                           public IPC::Channel::Listener {
  public:
   PluginDataRemover();
-  ~PluginDataRemover();
 
-  // Starts removing plug-in data stored since |begin_time| and calls
-  // |done_task| on the current thread when finished.
-  void StartRemoving(base::Time begin_time, Task* done_task);
+  // Used in tests to call a different plugin.
+  void set_mime_type(const std::string& mime_type) { mime_type_ = mime_type; }
+
+  // Starts removing plug-in data stored since |begin_time|.
+  base::WaitableEvent* StartRemoving(const base::Time& begin_time);
+
+  // Returns whether there is a plug-in installed that supports removing
+  // LSO data. Because this method possibly has to load the plug-in list, it
+  // should only be called on the FILE thread.
+  static bool IsSupported();
+
+  bool is_removing() const { return is_removing_; }
+
+  // Wait until removing has finished. When the browser is still running (i.e.
+  // not during shutdown), you should use a WaitableEventWatcher in combination
+  // with the WaitableEvent returned by StartRemoving.
+  void Wait();
 
   // PluginProcessHost::Client methods
   virtual int ID();
   virtual bool OffTheRecord();
-  virtual void SetPluginInfo(const WebPluginInfo& info);
+  virtual void SetPluginInfo(const webkit::npapi::WebPluginInfo& info);
   virtual void OnChannelOpened(const IPC::ChannelHandle& handle);
   virtual void OnError();
 
-  // IPC::ChannelProxy::MessageFilter methods
-  virtual void OnMessageReceived(const IPC::Message& message);
+  // IPC::Channel::Listener methods
+  virtual bool OnMessageReceived(const IPC::Message& message);
   virtual void OnChannelError();
 
  private:
+  friend class base::RefCountedThreadSafe<PluginDataRemover>;
+  friend class PluginDataRemoverTest;
+  ~PluginDataRemover();
+
   void SignalDone();
-  void SignalError();
+  void ConnectToChannel(const IPC::ChannelHandle& handle);
   void OnClearSiteDataResult(bool success);
   void OnTimeout();
 
-  scoped_refptr<base::MessageLoopProxy> message_loop_;
-  scoped_ptr<Task> done_task_;
+  std::string mime_type_;
+  bool is_removing_;
+  // The point in time when we start removing data.
+  base::Time remove_start_time_;
+  // The point in time from which on we remove data.
   base::Time begin_time_;
+  scoped_ptr<base::WaitableEvent> event_;
   // We own the channel, but it's used on the IO thread, so it needs to be
   // deleted there as well.
   IPC::Channel* channel_;
-  ScopedRunnableMethodFactory<PluginDataRemover> method_factory_;
 };
 
 #endif  // CHROME_BROWSER_PLUGIN_DATA_REMOVER_H_

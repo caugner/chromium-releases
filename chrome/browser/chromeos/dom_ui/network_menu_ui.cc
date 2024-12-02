@@ -4,7 +4,6 @@
 
 #include "chrome/browser/chromeos/dom_ui/network_menu_ui.h"
 
-#include "app/l10n_util.h"
 #include "base/values.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
@@ -19,6 +18,7 @@
 #include "googleurl/src/gurl.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "views/controls/menu/menu_2.h"
 
 namespace {
@@ -70,7 +70,7 @@ void NetworkMenuHandler::RegisterMessages() {
 }
 
 void NetworkMenuHandler::HandleAction(const ListValue* values) {
-  menus::MenuModel* model = GetMenuModel();
+  ui::MenuModel* model = GetMenuModel();
   if (model) {
     chromeos::NetworkMenuUI* network_menu_ui =
         static_cast<chromeos::NetworkMenuUI*>(dom_ui_);
@@ -121,12 +121,12 @@ NetworkMenuUI::NetworkMenuUI(TabContents* contents)
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
           make_scoped_refptr(theme)));
 }
 
-bool NetworkMenuUI::ModelAction(const menus::MenuModel* model,
+bool NetworkMenuUI::ModelAction(const ui::MenuModel* model,
                                 const ListValue* values) {
   const NetworkMenu* network_menu = static_cast<const NetworkMenu*>(model);
   std::string action;
@@ -165,7 +165,7 @@ bool NetworkMenuUI::ModelAction(const menus::MenuModel* model,
   return close_menu;
 }
 
-DictionaryValue* NetworkMenuUI::CreateMenuItem(const menus::MenuModel* model,
+DictionaryValue* NetworkMenuUI::CreateMenuItem(const ui::MenuModel* model,
                                                int index,
                                                const char* type,
                                                int* max_icon_width,
@@ -192,7 +192,7 @@ DictionaryValue* NetworkMenuUI::CreateMenuItem(const menus::MenuModel* model,
   return item;
 }
 
-views::Menu2* NetworkMenuUI::CreateMenu2(menus::MenuModel* model) {
+views::Menu2* NetworkMenuUI::CreateMenu2(ui::MenuModel* model) {
   views::Menu2* menu = new views::Menu2(model);
   NativeMenuDOMUI::SetMenuURL(
       menu, GURL(StringPrintf("chrome://%s", chrome::kChromeUINetworkMenu)));

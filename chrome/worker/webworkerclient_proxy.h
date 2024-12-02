@@ -9,8 +9,8 @@
 #include "base/basictypes.h"
 #include "base/task.h"
 #include "ipc/ipc_channel.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFileSystem.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebWorkerClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystem.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebWorkerClient.h"
 
 namespace WebKit {
 class WebApplicationCacheHost;
@@ -64,12 +64,7 @@ class WebWorkerClientProxy : public WebKit::WebWorkerClient {
   virtual void workerContextDestroyed();
   virtual WebKit::WebWorker* createWorker(WebKit::WebWorkerClient* client);
 
-  virtual WebKit::WebNotificationPresenter* notificationPresenter() {
-    // TODO(johnnyg): Notifications are not yet hooked up to workers.
-    // Coming soon.
-    NOTREACHED();
-    return NULL;
-  }
+  virtual WebKit::WebNotificationPresenter* notificationPresenter();
 
   virtual WebKit::WebApplicationCacheHost* createApplicationCacheHost(
       WebKit::WebApplicationCacheHostClient* client);

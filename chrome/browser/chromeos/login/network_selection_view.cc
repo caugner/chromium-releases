@@ -8,8 +8,6 @@
 #include <sys/types.h>
 #include <string>
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/keyboard_switch_menu.h"
@@ -23,6 +21,8 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/controls/label.h"
 #include "views/controls/throbber.h"
 #include "views/fill_layout.h"
@@ -331,18 +331,19 @@ void NetworkSelectionView::Init() {
 
 void NetworkSelectionView::UpdateLocalizedStrings() {
   languages_menubutton_->SetText(
-      delegate_->language_switch_menu()->GetCurrentLocaleName());
+      UTF16ToWide(delegate_->language_switch_menu()->GetCurrentLocaleName()));
   keyboards_menubutton_->SetText(
-      delegate_->keyboard_switch_menu()->GetCurrentKeyboardName());
-  welcome_label_->SetText(l10n_util::GetString(IDS_NETWORK_SELECTION_TITLE));
+      UTF16ToWide(delegate_->keyboard_switch_menu()->GetCurrentKeyboardName()));
+  welcome_label_->SetText(
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_TITLE)));
   select_language_label_->SetText(
-      l10n_util::GetString(IDS_LANGUAGE_SELECTION_SELECT));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_LANGUAGE_SELECTION_SELECT)));
   select_keyboard_label_->SetText(
-      l10n_util::GetString(IDS_KEYBOARD_SELECTION_SELECT));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_KEYBOARD_SELECTION_SELECT)));
   select_network_label_->SetText(
-      l10n_util::GetString(IDS_NETWORK_SELECTION_SELECT));
-  proxy_settings_link_->SetText(
-      l10n_util::GetString(IDS_OPTIONS_PROXIES_CONFIGURE_BUTTON));
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_SELECT)));
+  proxy_settings_link_->SetText(UTF16ToWide(
+      l10n_util::GetStringUTF16(IDS_OPTIONS_PROXIES_CONFIGURE_BUTTON)));
   RecreateNativeControls();
   UpdateConnectingNetworkLabel();
   network_dropdown_->Refresh();
@@ -448,13 +449,14 @@ void NetworkSelectionView::RecreateNativeControls() {
   delete continue_button_;
   continue_button_ = new login::WideButton(
       delegate_,
-      l10n_util::GetString(IDS_NETWORK_SELECTION_CONTINUE_BUTTON));
+      UTF16ToWide(
+          l10n_util::GetStringUTF16(IDS_NETWORK_SELECTION_CONTINUE_BUTTON)));
   continue_button_->SetEnabled(is_continue_enabled);
 }
 
 void NetworkSelectionView::UpdateConnectingNetworkLabel() {
-  connecting_network_label_->SetText(l10n_util::GetStringF(
-      IDS_NETWORK_SELECTION_CONNECTING, UTF16ToWide(network_id_)));
+  connecting_network_label_->SetText(UTF16ToWide(l10n_util::GetStringFUTF16(
+      IDS_NETWORK_SELECTION_CONNECTING, network_id_)));
 }
 
 }  // namespace chromeos

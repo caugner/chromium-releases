@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,11 +19,11 @@
 #include "base/win/scoped_handle.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
-#include "base/thread_restrictions.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "base/win_util.h"
 #include "base/win/scoped_comptr.h"
+#include "base/win/win_util.h"
 #include "base/win/windows_version.h"
 
 namespace file_util {
@@ -76,19 +76,6 @@ bool DevicePathToDriveLetterPath(const FilePath& device_path,
 }
 
 }  // namespace
-
-std::wstring GetDirectoryFromPath(const std::wstring& path) {
-  base::ThreadRestrictions::AssertIOAllowed();
-  wchar_t path_buffer[MAX_PATH];
-  wchar_t* file_ptr = NULL;
-  if (GetFullPathName(path.c_str(), MAX_PATH, path_buffer, &file_ptr) == 0)
-    return L"";
-
-  std::wstring::size_type length =
-      file_ptr ? file_ptr - path_buffer : path.length();
-  std::wstring directory(path, 0, length);
-  return FilePath(directory).StripTrailingSeparators().value();
-}
 
 bool AbsolutePath(FilePath* path) {
   base::ThreadRestrictions::AssertIOAllowed();
@@ -163,6 +150,14 @@ bool Delete(const FilePath& path, bool recursive) {
   if (!recursive)
     file_operation.fFlags |= FOF_NORECURSION | FOF_FILESONLY;
   int err = SHFileOperation(&file_operation);
+
+  // Since we're passing flags to the operation telling it to be silent,
+  // it's possible for the operation to be aborted/cancelled without err
+  // being set (although MSDN doesn't give any scenarios for how this can
+  // happen).  See MSDN for SHFileOperation and SHFILEOPTSTRUCT.
+  if (file_operation.fAnyOperationsAborted)
+    return false;
+
   // Some versions of Windows return ERROR_FILE_NOT_FOUND (0x2) when deleting
   // an empty directory and some return 0x402 when they should be returning
   // ERROR_FILE_NOT_FOUND. MSDN says Vista and up won't return 0x402.
@@ -439,7 +434,7 @@ bool CreateShortcutLink(const wchar_t *source, const wchar_t *destination,
     if (FAILED(property_store.QueryFrom(i_shell_link)))
       return false;
 
-    if (!win_util::SetAppIdForPropertyStore(property_store, app_id))
+    if (!base::win::SetAppIdForPropertyStore(property_store, app_id))
       return false;
   }
 
@@ -491,7 +486,7 @@ bool UpdateShortcutLink(const wchar_t *source, const wchar_t *destination,
     if (FAILED(property_store.QueryFrom(i_shell_link)))
       return false;
 
-    if (!win_util::SetAppIdForPropertyStore(property_store, app_id))
+    if (!base::win::SetAppIdForPropertyStore(property_store, app_id))
       return false;
   }
 
@@ -672,9 +667,10 @@ bool CreateDirectory(const FilePath& full_path) {
   if (!::CreateDirectory(full_path_str, NULL)) {
     DWORD error_code = ::GetLastError();
     if (error_code == ERROR_ALREADY_EXISTS && DirectoryExists(full_path)) {
-      // This error code doesn't indicate whether we were racing with someone
-      // creating the same directory, or a file with the same path, therefore
-      // we check.
+      // This error code ERROR_ALREADY_EXISTS doesn't indicate whether we
+      // were racing with someone creating the same directory, or a file
+      // with the same path.  If DirectoryExists() returns true, we lost the
+      // race to create the same directory.
       return true;
     } else {
       LOG(WARNING) << "Failed to create directory " << full_path_str
@@ -749,9 +745,8 @@ int WriteFile(const FilePath& filename, const char* data, int size) {
                                           0,
                                           NULL));
   if (!file) {
-    LOG(WARNING) << "CreateFile failed for path " << filename.value() <<
-        " error code=" << GetLastError() <<
-        " error text=" << win_util::FormatLastWin32Error();
+    LOG(WARNING) << "CreateFile failed for path " << filename.value()
+                 << " error code=" << GetLastError();
     return -1;
   }
 
@@ -762,9 +757,8 @@ int WriteFile(const FilePath& filename, const char* data, int size) {
 
   if (!result) {
     // WriteFile failed.
-    LOG(WARNING) << "writing file " << filename.value() <<
-        " failed, error code=" << GetLastError() <<
-        " description=" << win_util::FormatLastWin32Error();
+    LOG(WARNING) << "writing file " << filename.value()
+                 << " failed, error code=" << GetLastError();
   } else {
     // Didn't write all the bytes.
     LOG(WARNING) << "wrote" << written << " bytes to " <<

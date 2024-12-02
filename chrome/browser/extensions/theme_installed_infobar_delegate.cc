@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,17 +6,17 @@
 
 #include <string>
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/extensions/extensions_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 ThemeInstalledInfoBarDelegate::ThemeInstalledInfoBarDelegate(
     TabContents* tab_contents,
@@ -33,6 +33,10 @@ ThemeInstalledInfoBarDelegate::ThemeInstalledInfoBarDelegate(
                  NotificationService::AllSources());
 }
 
+bool ThemeInstalledInfoBarDelegate::MatchesTheme(const Extension* theme) {
+  return theme && (theme->id() == theme_id_);
+}
+
 ThemeInstalledInfoBarDelegate::~ThemeInstalledInfoBarDelegate() {
   // We don't want any notifications while we're running our destructor.
   registrar_.RemoveAll();
@@ -40,13 +44,25 @@ ThemeInstalledInfoBarDelegate::~ThemeInstalledInfoBarDelegate() {
   profile_->GetThemeProvider()->OnInfobarDestroyed();
 }
 
-void ThemeInstalledInfoBarDelegate::InfoBarClosed() {
-  delete this;
+bool ThemeInstalledInfoBarDelegate::Cancel() {
+  if (!previous_theme_id_.empty()) {
+    ExtensionService* service = profile_->GetExtensionService();
+    if (service) {
+      const Extension* previous_theme =
+          service->GetExtensionById(previous_theme_id_, true);
+      if (previous_theme) {
+        profile_->SetTheme(previous_theme);
+        return true;
+      }
+    }
+  }
+
+  profile_->ClearTheme();
+  return true;
 }
 
-string16 ThemeInstalledInfoBarDelegate::GetMessageText() const {
-  return l10n_util::GetStringFUTF16(IDS_THEME_INSTALL_INFOBAR_LABEL,
-                                    UTF8ToUTF16(name_));
+void ThemeInstalledInfoBarDelegate::InfoBarClosed() {
+  delete this;
 }
 
 SkBitmap* ThemeInstalledInfoBarDelegate::GetIcon() const {
@@ -60,34 +76,19 @@ ThemeInstalledInfoBarDelegate*
   return this;
 }
 
+string16 ThemeInstalledInfoBarDelegate::GetMessageText() const {
+  return l10n_util::GetStringFUTF16(IDS_THEME_INSTALL_INFOBAR_LABEL,
+                                    UTF8ToUTF16(name_));
+}
+
 int ThemeInstalledInfoBarDelegate::GetButtons() const {
   return BUTTON_CANCEL;
 }
 
 string16 ThemeInstalledInfoBarDelegate::GetButtonLabel(
-    ConfirmInfoBarDelegate::InfoBarButton button) const {
-  // The InfoBar will create a default OK button and make it invisible.
-  // TODO(mirandac): remove the default OK button from ConfirmInfoBar.
-  return (button == BUTTON_CANCEL) ?
-      l10n_util::GetStringUTF16(IDS_THEME_INSTALL_INFOBAR_UNDO_BUTTON) :
-      string16();
-}
-
-bool ThemeInstalledInfoBarDelegate::Cancel() {
-  if (!previous_theme_id_.empty()) {
-    ExtensionsService* service = profile_->GetExtensionsService();
-    if (service) {
-      const Extension* previous_theme =
-          service->GetExtensionById(previous_theme_id_, true);
-      if (previous_theme) {
-        profile_->SetTheme(previous_theme);
-        return true;
-      }
-    }
-  }
-
-  profile_->ClearTheme();
-  return true;
+    InfoBarButton button) const {
+  DCHECK_EQ(BUTTON_CANCEL, button);
+  return l10n_util::GetStringUTF16(IDS_THEME_INSTALL_INFOBAR_UNDO_BUTTON);
 }
 
 void ThemeInstalledInfoBarDelegate::Observe(
@@ -114,8 +115,4 @@ void ThemeInstalledInfoBarDelegate::Observe(
       // http://crbug.com/62154.
     }
   }
-}
-
-bool ThemeInstalledInfoBarDelegate::MatchesTheme(const Extension* theme) {
-  return (theme && theme->id() == theme_id_);
 }

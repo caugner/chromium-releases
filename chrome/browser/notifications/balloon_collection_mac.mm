@@ -6,7 +6,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-#include "chrome/browser/cocoa/notifications/balloon_view_bridge.h"
+#include "chrome/browser/ui/cocoa/notifications/balloon_view_bridge.h"
 
 Balloon* BalloonCollectionImpl::MakeBalloon(const Notification& notification,
                                             Profile* profile) {
@@ -41,6 +41,27 @@ void BalloonCollectionImpl::PositionBalloons(bool reposition) {
   [[NSAnimationContext currentContext] setDuration:0.1f];
   PositionBalloonsInternal(reposition);
   [NSAnimationContext endGrouping];
+}
+
+void BalloonCollectionImpl::SetPositionPreference(
+    PositionPreference position) {
+  if (position == DEFAULT_POSITION)
+    position = UPPER_RIGHT;
+
+  // All positioning schemes are vertical, but mac
+  // uses a vertically reversed screen orientation.
+  if (position == UPPER_RIGHT)
+    layout_.set_placement(Layout::VERTICALLY_FROM_BOTTOM_RIGHT);
+  else if (position == UPPER_LEFT)
+    layout_.set_placement(Layout::VERTICALLY_FROM_BOTTOM_LEFT);
+  else if (position == LOWER_LEFT)
+    layout_.set_placement(Layout::VERTICALLY_FROM_TOP_LEFT);
+  else if (position == LOWER_RIGHT)
+    layout_.set_placement(Layout::VERTICALLY_FROM_TOP_RIGHT);
+  else
+    NOTREACHED();
+
+  PositionBalloons(true);
 }
 
 // static

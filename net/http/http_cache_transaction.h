@@ -28,7 +28,7 @@ struct HttpRequestInfo;
 // factory.
 class HttpCache::Transaction : public HttpTransaction {
  public:
-  Transaction(HttpCache* cache, bool enable_range_support);
+  Transaction(HttpCache* cache);
   virtual ~Transaction();
 
   // HttpTransaction methods:
@@ -109,6 +109,8 @@ class HttpCache::Transaction : public HttpTransaction {
   LoadState GetWriterLoadState() const;
 
   CompletionCallback* io_callback() { return &io_callback_; }
+
+  const BoundNetLog& net_log() const;
 
  private:
   static const size_t kNumValidationHeaders = 2;
@@ -312,9 +314,6 @@ class HttpCache::Transaction : public HttpTransaction {
   // working with range requests.
   int DoPartialCacheReadCompleted(int result);
 
-  // Sends a histogram with info about the response headers.
-  void HistogramHeaders(const HttpResponseHeaders* headers);
-
   // Called to signal completion of asynchronous IO.
   void OnIOComplete(int result);
 
@@ -339,7 +338,6 @@ class HttpCache::Transaction : public HttpTransaction {
   State target_state_;
   bool reading_;  // We are already reading.
   bool invalid_range_;  // We may bypass the cache for this request.
-  bool enable_range_support_;
   bool truncated_;  // We don't have all the response data.
   bool is_sparse_;  // The data is stored in sparse byte ranges.
   bool server_responded_206_;

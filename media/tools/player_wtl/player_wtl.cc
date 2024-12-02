@@ -19,7 +19,7 @@
 // See player_wtl.h to enable timing code by turning on TESTING macro.
 
 namespace switches {
-const wchar_t* const kExit = L"exit";
+const char kExit[] = "exit";
 }  // namespace switches
 
 CAppModule g_module;
@@ -55,7 +55,7 @@ int Run(wchar_t* win_cmd_line, int cmd_show) {
 
   int result = the_loop.Run();
 
-  media::Movie::get()->Close();
+  media::Movie::GetInstance()->Close();
 
   g_module.RemoveMessageLoop();
   return result;

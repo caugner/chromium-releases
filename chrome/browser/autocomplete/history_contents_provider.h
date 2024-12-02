@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_AUTOCOMPLETE_HISTORY_CONTENTS_PROVIDER_H_
 #pragma once
 
-#include "chrome/browser/autocomplete/autocomplete.h"
+#include "chrome/browser/autocomplete/history_provider.h"
 #include "chrome/browser/history/history.h"
 
 namespace bookmark_utils {
@@ -20,25 +20,15 @@ struct TitleMatch;
 //   previously viewed pages. This is asynchronous.
 // . BookmarkModel: provides results for matches in the titles of bookmarks.
 //   This is synchronous.
-class HistoryContentsProvider : public AutocompleteProvider {
+class HistoryContentsProvider : public HistoryProvider {
  public:
   HistoryContentsProvider(ACProviderListener* listener, Profile* profile);
 
   // As necessary asks the history service for the relevant results. When
   // done SetResults is invoked.
   virtual void Start(const AutocompleteInput& input,
-                     bool minimal_changes);
-
-  virtual void Stop();
-
-  // Returns the total number of matches available in the database, up to
-  // kMaxMatchCount, whichever is smaller.
-  // Return value is incomplete if done() returns false.
-  size_t db_match_count() const { return results_.size(); }
-
-  // The maximum match count we'll report. If the db_match_count is greater
-  // than this, it will be clamped to this result.
-  static const size_t kMaxMatchCount = 50;
+                     bool minimal_changes) OVERRIDE;
+  virtual void Stop() OVERRIDE;
 
  private:
   ~HistoryContentsProvider();

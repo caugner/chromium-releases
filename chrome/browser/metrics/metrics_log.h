@@ -12,12 +12,17 @@
 #include "base/basictypes.h"
 #include "chrome/common/metrics_helpers.h"
 #include "chrome/common/page_transition_types.h"
-#include "webkit/glue/plugins/webplugininfo.h"
 
 struct AutocompleteLog;
 class DictionaryValue;
 class GURL;
 class PrefService;
+
+namespace webkit {
+namespace npapi {
+struct WebPluginInfo;
+}
+}
 
 class MetricsLog : public MetricsLogBase {
  public:
@@ -35,8 +40,9 @@ class MetricsLog : public MetricsLogBase {
   // profile_metrics, if non-null, gives a dictionary of all profile metrics
   // that are to be recorded. Each value in profile_metrics should be a
   // dictionary giving the metrics for the profile.
-  void RecordEnvironment(const std::vector<WebPluginInfo>& plugin_list,
-                         const DictionaryValue* profile_metrics);
+  void RecordEnvironment(
+      const std::vector<webkit::npapi::WebPluginInfo>& plugin_list,
+      const DictionaryValue* profile_metrics);
 
   // Records the input text, available choices, and selected entry when the
   // user uses the Omnibox to open a URL.
@@ -58,6 +64,8 @@ class MetricsLog : public MetricsLogBase {
   virtual MetricsLog* AsMetricsLog();
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(MetricsLogTest, ChromeOSStabilityData);
+
   // Returns the date at which the current metrics client ID was created as
   // a string containing milliseconds since the epoch, or "0" if none was found.
   std::string GetInstallDate() const;
@@ -65,7 +73,7 @@ class MetricsLog : public MetricsLogBase {
 
   // Writes application stability metrics (as part of the profile log).
   // NOTE: Has the side-effect of clearing those counts.
-  void WriteStabilityElement();
+  void WriteStabilityElement(PrefService* pref);
 
   // Within stability group, write plugin crash stats.
   void WritePluginStabilityElements(PrefService* pref);
@@ -80,7 +88,8 @@ class MetricsLog : public MetricsLogBase {
   void WriteRealtimeStabilityAttributes(PrefService* pref);
 
   // Writes the list of installed plugins.
-  void WritePluginList(const std::vector<WebPluginInfo>& plugin_list);
+  void WritePluginList(
+      const std::vector<webkit::npapi::WebPluginInfo>& plugin_list);
 
   // Within the profile group, write basic install info including appversion.
   void WriteInstallElement();

@@ -1,16 +1,18 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/views/infobars/infobar_container.h"
+#include "chrome/browser/ui/views/infobars/infobar_container.h"
 
-#include "app/l10n_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/view_ids.h"
-#include "chrome/browser/views/infobars/infobars.h"
-#include "chrome/common/notification_service.h"
+#include "chrome/browser/ui/view_ids.h"
+#include "chrome/browser/ui/views/infobars/infobars.h"
+#include "chrome/common/notification_details.h"
+#include "chrome/common/notification_source.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 
 // InfoBarContainer, public: ---------------------------------------------------
 
@@ -18,7 +20,8 @@ InfoBarContainer::InfoBarContainer(Delegate* delegate)
     : delegate_(delegate),
       tab_contents_(NULL) {
   SetID(VIEW_ID_INFO_BAR_CONTAINER);
-  SetAccessibleName(l10n_util::GetString(IDS_ACCNAME_INFOBAR_CONTAINER));
+  SetAccessibleName(
+      l10n_util::GetStringUTF16(IDS_ACCNAME_INFOBAR_CONTAINER));
 }
 
 InfoBarContainer::~InfoBarContainer() {
@@ -49,7 +52,7 @@ void InfoBarContainer::ChangeTabContents(TabContents* contents) {
 
 void InfoBarContainer::InfoBarAnimated(bool completed) {
   if (delegate_)
-    delegate_->InfoBarSizeChanged(!completed);
+    delegate_->InfoBarContainerSizeChanged(!completed);
 }
 
 void InfoBarContainer::RemoveDelegate(InfoBarDelegate* delegate) {
@@ -89,7 +92,7 @@ void InfoBarContainer::ViewHierarchyChanged(bool is_add,
     if (delegate_) {
       // An InfoBar child was added or removed. Tell the delegate it needs to
       // re-layout since our preferred size will have changed.
-      delegate_->InfoBarSizeChanged(false);
+      delegate_->InfoBarContainerSizeChanged(false);
     }
   }
 }

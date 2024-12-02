@@ -5,6 +5,7 @@
 #include "chrome/test/live_sync/live_extensions_sync_test.h"
 
 #include "base/basictypes.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/extension.h"
 
 class TwoClientLiveExtensionsSyncTest : public LiveExtensionsSyncTest {
@@ -25,8 +26,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveExtensionsSyncTest,
   ASSERT_TRUE(AllProfilesHaveSameExtensionsAsVerifier());
 }
 
+// TODO(rsimha): Enable after http://crbug.com/70028 is fixed.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveExtensionsSyncTest,
-                       StartWithSameExtensions) {
+                       DISABLED_StartWithSameExtensions) {
   ASSERT_TRUE(SetupClients());
 
   const int kNumExtensions = 5;
@@ -43,8 +45,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveExtensionsSyncTest,
   ASSERT_TRUE(AllProfilesHaveSameExtensionsAsVerifier());
 }
 
+// TODO(rsimha): Remove DISABLED_ prefix after http://crbug.com/66925 is fixed.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveExtensionsSyncTest,
-                       StartWithDifferentExtensions) {
+                       DISABLED_StartWithDifferentExtensions) {
   ASSERT_TRUE(SetupClients());
 
   int i = 0;
@@ -78,8 +81,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientLiveExtensionsSyncTest,
   ASSERT_TRUE(AllProfilesHaveSameExtensionsAsVerifier());
 }
 
+// TODO(rsimha): Remove DISABLED_ prefix after http://crbug.com/66925 is fixed.
 IN_PROC_BROWSER_TEST_F(TwoClientLiveExtensionsSyncTest,
-                       InstallDifferentExtensions) {
+                       DISABLED_InstallDifferentExtensions) {
   ASSERT_TRUE(SetupClients());
 
   int i = 0;

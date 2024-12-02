@@ -9,17 +9,29 @@
 #include "base/command_line.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
-#include "base/thread_restrictions.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/time.h"
 #include "base/win/registry.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/browser_distribution.h"
+#include "chrome/installer/util/channel_info.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/install_util.h"
+#include "chrome/installer/util/package.h"
+#include "chrome/installer/util/package_properties.h"
+#include "chrome/installer/util/product.h"
 
 using base::win::RegKey;
 
 namespace {
+
+// An list of search results in increasing order of desirability.
+enum EulaSearchResult {
+  NO_SETTING,
+  FOUND_CLIENT_STATE,
+  FOUND_OPPOSITE_SETTING,
+  FOUND_SAME_SETTING
+};
 
 bool ReadGoogleUpdateStrKey(const wchar_t* const name, std::wstring* value) {
   // The registry functions below will end up going to disk.  Do this on another
@@ -28,9 +40,9 @@ bool ReadGoogleUpdateStrKey(const wchar_t* const name, std::wstring* value) {
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   std::wstring reg_path = dist->GetStateKey();
   RegKey key(HKEY_CURRENT_USER, reg_path.c_str(), KEY_READ);
-  if (!key.ReadValue(name, value)) {
+  if (key.ReadValue(name, value) != ERROR_SUCCESS) {
     RegKey hklm_key(HKEY_LOCAL_MACHINE, reg_path.c_str(), KEY_READ);
-    return hklm_key.ReadValue(name, value);
+    return (hklm_key.ReadValue(name, value) == ERROR_SUCCESS);
   }
   return true;
 }
@@ -40,7 +52,7 @@ bool WriteGoogleUpdateStrKey(const wchar_t* const name,
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   std::wstring reg_path = dist->GetStateKey();
   RegKey key(HKEY_CURRENT_USER, reg_path.c_str(), KEY_READ | KEY_WRITE);
-  return key.WriteValue(name, value.c_str());
+  return (key.WriteValue(name, value.c_str()) == ERROR_SUCCESS);
 }
 
 bool ClearGoogleUpdateStrKey(const wchar_t* const name) {
@@ -48,9 +60,9 @@ bool ClearGoogleUpdateStrKey(const wchar_t* const name) {
   std::wstring reg_path = dist->GetStateKey();
   RegKey key(HKEY_CURRENT_USER, reg_path.c_str(), KEY_READ | KEY_WRITE);
   std::wstring value;
-  if (!key.ReadValue(name, &value))
+  if (key.ReadValue(name, &value) != ERROR_SUCCESS)
     return false;
-  return key.WriteValue(name, L"");
+  return (key.WriteValue(name, L"") == ERROR_SUCCESS);
 }
 
 bool RemoveGoogleUpdateStrKey(const wchar_t* const name) {
@@ -59,7 +71,21 @@ bool RemoveGoogleUpdateStrKey(const wchar_t* const name) {
   RegKey key(HKEY_CURRENT_USER, reg_path.c_str(), KEY_READ | KEY_WRITE);
   if (!key.ValueExists(name))
     return true;
-  return key.DeleteValue(name);
+  return (key.DeleteValue(name) == ERROR_SUCCESS);
+}
+
+EulaSearchResult HasEULASetting(HKEY root, const std::wstring& state_key,
+                                bool setting) {
+  RegKey key;
+  DWORD previous_value = setting ? 1 : 0;
+  if (key.Open(root, state_key.c_str(), KEY_QUERY_VALUE) != ERROR_SUCCESS)
+    return NO_SETTING;
+  if (key.ReadValueDW(google_update::kRegEULAAceptedField,
+                      &previous_value) != ERROR_SUCCESS)
+    return FOUND_CLIENT_STATE;
+
+  return ((previous_value != 0) == setting) ?
+      FOUND_SAME_SETTING : FOUND_OPPOSITE_SETTING;
 }
 
 }  // namespace.
@@ -68,11 +94,11 @@ bool GoogleUpdateSettings::GetCollectStatsConsent() {
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   std::wstring reg_path = dist->GetStateKey();
   RegKey key(HKEY_CURRENT_USER, reg_path.c_str(), KEY_READ);
-  DWORD value;
-  if (!key.ReadValueDW(google_update::kRegUsageStatsField, &value)) {
-    RegKey hklm_key(HKEY_LOCAL_MACHINE, reg_path.c_str(), KEY_READ);
-    if (!hklm_key.ReadValueDW(google_update::kRegUsageStatsField, &value))
-      return false;
+  DWORD value = 0;
+  if (key.ReadValueDW(google_update::kRegUsageStatsField, &value) !=
+      ERROR_SUCCESS) {
+    key.Open(HKEY_LOCAL_MACHINE, reg_path.c_str(), KEY_READ);
+    key.ReadValueDW(google_update::kRegUsageStatsField, &value);
   }
   return (1 == value);
 }
@@ -82,12 +108,13 @@ bool GoogleUpdateSettings::SetCollectStatsConsent(bool consented) {
   // Writing to HKLM is only a best effort deal.
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   std::wstring reg_path = dist->GetStateMediumKey();
-  RegKey key_hklm(HKEY_LOCAL_MACHINE, reg_path.c_str(), KEY_READ | KEY_WRITE);
-  key_hklm.WriteValue(google_update::kRegUsageStatsField, value);
+  RegKey key(HKEY_LOCAL_MACHINE, reg_path.c_str(), KEY_READ | KEY_WRITE);
+  key.WriteValue(google_update::kRegUsageStatsField, value);
   // Writing to HKCU is used both by chrome and by the crash reporter.
   reg_path = dist->GetStateKey();
-  RegKey key_hkcu(HKEY_CURRENT_USER, reg_path.c_str(), KEY_READ | KEY_WRITE);
-  return key_hkcu.WriteValue(google_update::kRegUsageStatsField, value);
+  key.Create(HKEY_CURRENT_USER, reg_path.c_str(), KEY_READ | KEY_WRITE);
+  return (key.WriteValue(google_update::kRegUsageStatsField, value) ==
+      ERROR_SUCCESS);
 }
 
 bool GoogleUpdateSettings::GetMetricsId(std::wstring* metrics_id) {
@@ -98,11 +125,39 @@ bool GoogleUpdateSettings::SetMetricsId(const std::wstring& metrics_id) {
   return WriteGoogleUpdateStrKey(google_update::kRegMetricsId, metrics_id);
 }
 
-bool GoogleUpdateSettings::SetEULAConsent(bool consented) {
-  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  std::wstring reg_path = dist->GetStateMediumKey();
-  RegKey key(HKEY_LOCAL_MACHINE, reg_path.c_str(), KEY_READ | KEY_SET_VALUE);
-  return key.WriteValue(google_update::kRegEULAAceptedField, consented? 1 : 0);
+bool GoogleUpdateSettings::SetEULAConsent(
+    const installer::Package& package,
+    bool consented) {
+  // If this is a multi install, Google Update will have put eulaaccepted=0 into
+  // the ClientState key of the multi-installer.  Conduct a brief search for
+  // this value and store the consent in the corresponding location.
+  HKEY root = package.system_level() ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
+
+  std::wstring reg_path = package.properties()->GetStateMediumKey();
+  EulaSearchResult status = HasEULASetting(
+      root, package.properties()->GetStateKey(), !consented);
+  if (status != FOUND_SAME_SETTING) {
+    EulaSearchResult new_status = NO_SETTING;
+    installer::Products::const_iterator scan = package.products().begin();
+    installer::Products::const_iterator end = package.products().end();
+    for (; status != FOUND_SAME_SETTING && scan != end; ++scan) {
+      const installer::Product& product = *(scan->get());
+      new_status = HasEULASetting(root, product.distribution()->GetStateKey(),
+                                  !consented);
+      if (new_status > status) {
+        status = new_status;
+        reg_path = product.distribution()->GetStateMediumKey();
+      }
+    }
+    if (status == NO_SETTING) {
+      LOG(WARNING)
+          << "eulaaccepted value not found; setting consent on package";
+      reg_path = package.properties()->GetStateMediumKey();
+    }
+  }
+  RegKey key(HKEY_LOCAL_MACHINE, reg_path.c_str(), KEY_SET_VALUE);
+  return (key.WriteValue(google_update::kRegEULAAceptedField,
+                         consented ? 1 : 0) == ERROR_SUCCESS);
 }
 
 int GoogleUpdateSettings::GetLastRunTime() {
@@ -164,90 +219,103 @@ bool GoogleUpdateSettings::GetChromeChannel(bool system_install,
   HKEY root_key = system_install ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
   std::wstring reg_path = dist->GetStateKey();
   RegKey key(root_key, reg_path.c_str(), KEY_READ);
-  std::wstring update_branch;
-  if (!key.ReadValue(google_update::kRegApField, &update_branch)) {
+  installer::ChannelInfo channel_info;
+  if (!channel_info.Initialize(key)) {
     *channel = L"unknown";
     return false;
   }
 
-  // Map to something pithy for human consumption. There are no rules as to
-  // what the ap string can contain, but generally it will contain a number
-  // followed by a dash followed by the branch name (and then some random
-  // suffix). We fall back on empty string in case we fail to parse.
-  // Only ever return "", "unknown", "dev" or "beta".
-  if (update_branch.find(L"-beta") != std::wstring::npos)
-    *channel = L"beta";
-  else if (update_branch.find(L"-dev") != std::wstring::npos)
-    *channel = L"dev";
-  else if (update_branch.empty())
-    *channel = L"";
-  else
+  if (!channel_info.GetChannelName(channel))
     *channel = L"unknown";
+
+  // Tag the channel name if this is a multi-install product.
+  if (channel_info.IsMultiInstall()) {
+    if (!channel->empty())
+      channel->append(1, L'-');
+    channel->append(1, L'm');
+  }
 
   return true;
 }
 
-void GoogleUpdateSettings::UpdateDiffInstallStatus(bool system_install,
-    bool incremental_install, int install_return_code,
+void GoogleUpdateSettings::UpdateInstallStatus(bool system_install,
+    bool incremental_install, bool multi_install, int install_return_code,
     const std::wstring& product_guid) {
   HKEY reg_root = (system_install) ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
 
   RegKey key;
-  std::wstring ap_key_value;
+  installer::ChannelInfo channel_info;
   std::wstring reg_key(google_update::kRegPathClientState);
   reg_key.append(L"\\");
   reg_key.append(product_guid);
-  if (!key.Open(reg_root, reg_key.c_str(), KEY_ALL_ACCESS) ||
-      !key.ReadValue(google_update::kRegApField, &ap_key_value)) {
+  LONG result = key.Open(reg_root, reg_key.c_str(),
+                         KEY_QUERY_VALUE | KEY_SET_VALUE);
+  if (result != ERROR_SUCCESS || !channel_info.Initialize(key)) {
     VLOG(1) << "Application key not found.";
-    if (!incremental_install || !install_return_code) {
+    if (!incremental_install && !multi_install || !install_return_code) {
       VLOG(1) << "Returning without changing application key.";
-      key.Close();
       return;
     } else if (!key.Valid()) {
       reg_key.assign(google_update::kRegPathClientState);
-      if (!key.Open(reg_root, reg_key.c_str(), KEY_ALL_ACCESS) ||
-          !key.CreateKey(product_guid.c_str(), KEY_ALL_ACCESS)) {
-        LOG(ERROR) << "Failed to create application key.";
-        key.Close();
+      result = key.Open(reg_root, reg_key.c_str(), KEY_CREATE_SUB_KEY);
+      if (result == ERROR_SUCCESS)
+        result = key.CreateKey(product_guid.c_str(), KEY_SET_VALUE);
+
+      if (result != ERROR_SUCCESS) {
+        LOG(ERROR) << "Failed to create application key. Error: " << result;
         return;
       }
     }
   }
 
-  std::wstring new_value = GetNewGoogleUpdateApKey(
-      incremental_install, install_return_code, ap_key_value);
-  if ((new_value.compare(ap_key_value) != 0) &&
-      !key.WriteValue(google_update::kRegApField, new_value.c_str())) {
-    LOG(ERROR) << "Failed to write value " << new_value
+  if (UpdateGoogleUpdateApKey(incremental_install, multi_install,
+                              install_return_code, &channel_info) &&
+      !channel_info.Write(&key)) {
+    LOG(ERROR) << "Failed to write value " << channel_info.value()
                << " to the registry field " << google_update::kRegApField;
   }
-  key.Close();
 }
 
-std::wstring GoogleUpdateSettings::GetNewGoogleUpdateApKey(
-    bool diff_install, int install_return_code, const std::wstring& value) {
-  // Magic suffix that we need to add or remove to "ap" key value.
-  const std::wstring kMagicSuffix = L"-full";
+bool GoogleUpdateSettings::UpdateGoogleUpdateApKey(
+    bool diff_install, bool multi_install, int install_return_code,
+    installer::ChannelInfo* value) {
+  bool modified = false;
 
-  bool has_magic_string = false;
-  if ((value.length() >= kMagicSuffix.length()) &&
-      (value.rfind(kMagicSuffix) == (value.length() - kMagicSuffix.length()))) {
-    VLOG(1) << "Incremental installer failure key already set.";
-    has_magic_string = true;
+  if (!diff_install || !install_return_code) {
+    if (value->SetFullSuffix(false)) {
+      VLOG(1) << "Removed incremental installer failure key; "
+                 "switching to channel: "
+              << value->value();
+      modified = true;
+    }
+  } else {
+    if (value->SetFullSuffix(true)) {
+      VLOG(1) << "Incremental installer failed; switching to channel: "
+              << value->value();
+      modified = true;
+    } else {
+      VLOG(1) << "Incremental installer failure; already on channel: "
+              << value->value();
+    }
   }
 
-  std::wstring new_value(value);
-  if ((!diff_install || !install_return_code) && has_magic_string) {
-    VLOG(1) << "Removing failure key from value " << value;
-    new_value = value.substr(0, value.length() - kMagicSuffix.length());
-  } else if ((diff_install && install_return_code) &&
-             !has_magic_string) {
-    VLOG(1) << "Incremental installer failed, setting failure key.";
-    new_value.append(kMagicSuffix);
+  if (!multi_install || !install_return_code) {
+    if (value->SetMultiFailSuffix(false)) {
+      VLOG(1) << "Removed multi-install failure key; switching to channel: "
+              << value->value();
+      modified = true;
+    }
+  } else {
+    if (value->SetMultiFailSuffix(true)) {
+      VLOG(1) << "Multi-install failed; switching to channel: "
+              << value->value();
+      modified = true;
+    } else {
+      VLOG(1) << "Multi-install failed; already on channel: " << value->value();
+    }
   }
 
-  return new_value;
+  return modified;
 }
 
 int GoogleUpdateSettings::DuplicateGoogleUpdateSystemClientKey() {

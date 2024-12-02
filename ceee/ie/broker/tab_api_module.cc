@@ -153,8 +153,7 @@ bool CeeeMapTabIdToHandle(const std::string& input_args,
   int tab_id = kInvalidChromeSessionId;
   HWND tab_handle = NULL;
   if (GetIdAndHandleFromArgs(input_args, &tab_id, &tab_handle)) {
-    Singleton<ExecutorsManager, ExecutorsManager::SingletonTraits>::get()->
-        SetTabIdForHandle(tab_id, tab_handle);
+    ExecutorsManager::GetInstance()->SetTabIdForHandle(tab_id, tab_handle);
     return true;
   }
   return false;
@@ -166,8 +165,8 @@ bool CeeeMapToolbandIdToHandle(const std::string& input_args,
   int toolband_id = kInvalidChromeSessionId;
   HWND tab_handle = NULL;
   if (GetIdAndHandleFromArgs(input_args, &toolband_id, &tab_handle)) {
-    Singleton<ExecutorsManager, ExecutorsManager::SingletonTraits>::get()->
-        SetTabToolBandIdForHandle(toolband_id, tab_handle);
+    ExecutorsManager::GetInstance()->SetTabToolBandIdForHandle(toolband_id,
+                                                               tab_handle);
     return true;
   }
   return false;
@@ -970,10 +969,10 @@ void CreateTab::Execute(const ListValue& args, int request_id) {
     long flags = selected ? navOpenInNewTab : navOpenInBackgroundTab;
     HRESULT hr = executor->Navigate(base::win::ScopedBstr(url_wstring.c_str()),
                                     flags, base::win::ScopedBstr(L"_blank"));
-    // We can DCHECK here because navigating to a new tab shouldn't fail as
-    // described in the comment at the bottom of CeeeExecutor::Navigate().
-    DCHECK(SUCCEEDED(hr)) << "Failed to create tab. " << com::LogHr(hr);
     if (FAILED(hr)) {
+      // Log the error without DCHECKING. There are legit reasons for Navigate
+      // to fail, as explained in comments in CeeeExecutor::Navigate.
+      LOG(ERROR) << "Failed to create tab. " << com::LogHr(hr);
       result->PostError("Internal error while trying to create tab.");
       return;
     }

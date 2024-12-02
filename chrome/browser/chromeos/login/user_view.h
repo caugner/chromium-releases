@@ -38,6 +38,9 @@ class UserView : public views::View,
 
     // Notifies that user would like to remove this user from login screen.
     virtual void OnRemoveUser() {}
+
+    // Returns true if current user is selected.
+    virtual bool IsUserSelected() const = 0;
   };
 
   // Creates UserView for login screen (|is_login| == true) or screen locker.
@@ -55,10 +58,6 @@ class UserView : public views::View,
 
   // Sets tooltip over the image.
   void SetTooltipText(const std::wstring& text);
-
-  // Start/Stop throbber.
-  void StartThrobber();
-  void StopThrobber();
 
   // Show/Hide remove button.
   void SetRemoveButtonVisible(bool flag);
@@ -80,8 +79,6 @@ class UserView : public views::View,
 
   SignoutView* signout_view_;
   PodImageView* image_view_;
-
-  views::Throbber* throbber_;
 
   views::TextButton* remove_button_;
 

@@ -25,7 +25,6 @@
       <include name="IDR_APP_DEFAULT_ICON" file="app_default_icon.png" type="BINDATA" />
       <include name="IDR_APP_DROPARROW" file="app_droparrow.png" type="BINDATA" />
       <include name="IDR_BACKGROUND_BADGE" file="background_badge.png" type="BINDATA" />
-      <include name="IDR_BACKGROUND_MENU" file="background_menu.png" type="BINDATA" />
       <include name="IDR_BACK" file="back.png" type="BINDATA" />
       <include name="IDR_BACK_D" file="back_d.png" type="BINDATA" />
       <include name="IDR_BACK_H" file="back_h.png" type="BINDATA" />
@@ -47,6 +46,7 @@
       </if>
       <if expr="os == 'darwin'">
         <include name="IDR_BOOKMARK_BAR_FOLDER" file="bookmark_bar_folder_mac.png" type="BINDATA" />
+        <include name="IDR_TABPOSE_CLOSE" file="tabpose_close.png" type="BINDATA" />
       </if>
       <include name="IDR_BROWSER_ACTION" file="browser_action.png" type="BINDATA" />
       <include name="IDR_BROWSER_ACTION_H" file="browser_action_h.png" type="BINDATA" />
@@ -242,9 +242,6 @@
       <include name="IDR_OMNIBOX_HTTPS_WARNING" file="omnibox_https_warning.png" type="BINDATA" />
       <include name="IDR_OMNIBOX_HTTP_DARK" file="omnibox_http_dark.png" type="BINDATA" />
       <include name="IDR_OMNIBOX_HTTP_SELECTED" file="omnibox_http_selected.png" type="BINDATA" />
-      <include name="IDR_OMNIBOX_MORE" file="omnibox_more.png" type="BINDATA" />
-      <include name="IDR_OMNIBOX_MORE_DARK" file="omnibox_more_dark.png" type="BINDATA" />
-      <include name="IDR_OMNIBOX_MORE_SELECTED" file="omnibox_more_selected.png" type="BINDATA" />
       <include name="IDR_OMNIBOX_SEARCH" file="omnibox_search.png" type="BINDATA" />
       <include name="IDR_OMNIBOX_SEARCH_DARK" file="omnibox_search_dark.png" type="BINDATA" />
       <include name="IDR_OMNIBOX_SEARCH_SELECTED" file="omnibox_search_selected.png" type="BINDATA" />
@@ -288,6 +285,7 @@
       <include name="IDR_RESTORE_BUTTON_MASK" file="restore_button_mask.png" type="BINDATA" />
       <include name="IDR_SAD_FAVICON" file="sadfavicon.png" type="BINDATA" />
       <include name="IDR_SAD_TAB" file="sadtab.png" type="BINDATA" />
+      <include name="IDR_KILLED_TAB" file="killtab.png" type="BINDATA" />
       <include name="IDR_SEARCH_ENGINE_DIALOG_TOP" file="search_engine_top.png" type="BINDATA" />
       <if expr="pp_ifdef('_google_chrome')">
         <include name="IDR_SEARCH_ENGINE_LOGO_ABCSOK" file="google_chrome/search_abcsok.png" type="BINDATA" />
@@ -552,9 +550,11 @@
         <include name="IDR_STATUSBAR_NETWORK_3G" file="statusbar_network_3g.png" type="BINDATA" />
         <include name="IDR_STATUSBAR_NETWORK_3G_WARN" file="statusbar_network_3g_warn.png" type="BINDATA" />
         <include name="IDR_STATUSBAR_NETWORK_3G_ERROR" file="statusbar_network_3g_error.png" type="BINDATA" />
+        <include name="IDR_STATUSBAR_NETWORK_3G_UNKNOWN" file="statusbar_network_3g_unknown.png" type="BINDATA" />
         <include name="IDR_STATUSBAR_NETWORK_1X" file="statusbar_network_1x.png" type="BINDATA" />
         <include name="IDR_STATUSBAR_NETWORK_1X_WARN" file="statusbar_network_1x_warn.png" type="BINDATA" />
         <include name="IDR_STATUSBAR_NETWORK_1X_ERROR" file="statusbar_network_1x_error.png" type="BINDATA" />
+        <include name="IDR_STATUSBAR_NETWORK_1X_UNKNOWN" file="statusbar_network_1x_unknown.png" type="BINDATA" />
         <include name="IDR_STATUSBAR_NETWORK_BARS0" file="statusbar_network_bars0.png" type="BINDATA" />
         <include name="IDR_STATUSBAR_NETWORK_BARS0_BLACK" file="statusbar_network_bars0b.png" type="BINDATA" />
         <include name="IDR_STATUSBAR_NETWORK_BARS1" file="statusbar_network_bars1.png" type="BINDATA" />
@@ -584,7 +584,10 @@
         <include name="IDR_USER_IMAGE_RECYCLE" file="discard_wide.png" type="BINDATA" />
         <include name="IDR_USER_IMAGE_CAPTURE_DISABLED" file="snapshot_wide_disabled.png" type="BINDATA" />
         <include name="IDR_USER_IMAGE_INITIALIZING" file="initializing_video.png" type="BINDATA" />
-        <include name="IDR_VOLUMEBUBBLE_ICON" file="volume_icon.png" type="BINDATA" />
+        <include name="IDR_VOLUME_BUBBLE_UP_ICON" file="volume_up_icon.png" type="BINDATA" />
+        <include name="IDR_VOLUME_BUBBLE_DOWN_ICON" file="volume_down_icon.png" type="BINDATA" />
+        <include name="IDR_VOLUME_BUBBLE_MUTE_ICON" file="volume_mute_icon.png" type="BINDATA" />
+        <include name="IDR_BRIGHTNESS_BUBBLE_ICON" file="brightness_icon.png" type="BINDATA" />
         <include name="IDR_SCROLL_BACKGROUND" file="chromeos_scroll_background.png" type="BINDATA" />
         <include name="IDR_SCROLL_BACKGROUND_BORDER_UP" file="chromeos_scroll_background_border_up.png" type="BINDATA" />
         <include name="IDR_SCROLL_BACKGROUND_BORDER_DOWN" file="chromeos_scroll_background_border_down.png" type="BINDATA" />

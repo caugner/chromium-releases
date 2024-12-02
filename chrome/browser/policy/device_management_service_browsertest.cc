@@ -1,13 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/message_loop.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/policy/device_management_backend_mock.h"
 #include "chrome/browser/policy/device_management_service.h"
 #include "chrome/browser/policy/proto/device_management_constants.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "net/test/test_server.h"
@@ -43,28 +42,28 @@ const char kServiceResponseUnregister[] =
 #define PROTO_STRING(name) (std::string(name, arraysize(name) - 1))
 
 // Interceptor implementation that returns test data back to the service.
-class CannedResponseInterceptor : public URLRequest::Interceptor {
+class CannedResponseInterceptor : public net::URLRequest::Interceptor {
  public:
   CannedResponseInterceptor(const GURL& service_url,
                             const std::string& response_data)
       : service_url_(service_url),
         response_data_(response_data) {
-    URLRequest::RegisterRequestInterceptor(this);
+    net::URLRequest::RegisterRequestInterceptor(this);
   }
 
   virtual ~CannedResponseInterceptor() {
-    URLRequest::UnregisterRequestInterceptor(this);
+    net::URLRequest::UnregisterRequestInterceptor(this);
   }
 
  private:
-  // URLRequest::Interceptor overrides.
-  virtual URLRequestJob* MaybeIntercept(URLRequest* request) {
+  // net::URLRequest::Interceptor overrides.
+  virtual net::URLRequestJob* MaybeIntercept(net::URLRequest* request) {
     if (request->url().GetOrigin() == service_url_.GetOrigin() &&
         request->url().path() == service_url_.path()) {
-      return new URLRequestTestJob(request,
-                                   URLRequestTestJob::test_headers(),
-                                   response_data_,
-                                   true);
+      return new net::URLRequestTestJob(request,
+                                        net::URLRequestTestJob::test_headers(),
+                                        response_data_,
+                                        true);
     }
 
     return NULL;

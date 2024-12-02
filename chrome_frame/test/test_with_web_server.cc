@@ -8,9 +8,11 @@
 #include "base/file_version_info.h"
 #include "base/path_service.h"
 #include "base/stringprintf.h"
+#include "base/test/test_timeouts.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/installer/util/product.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome_frame/html_utils.h"
@@ -26,8 +28,6 @@ using testing::_;
 using testing::StrCaseEq;
 
 const wchar_t kDocRoot[] = L"chrome_frame\\test\\data";
-const int kLongWaitTimeout = 15 * 1000;
-const int kShortWaitTimeout = 5 * 1000;
 
 namespace {
 
@@ -92,7 +92,7 @@ void ChromeFrameTestWithWebServer::SetUp() {
   // Make sure our playground is clean before we start.
   CloseAllBrowsers();
 
-  // Make sure that we are not accidently enabling gcf protocol.
+  // Make sure that we are not accidentally enabling gcf protocol.
   SetConfigBool(kAllowUnsafeURLs, false);
 
   FilePath chrome_frame_source_path;
@@ -220,12 +220,17 @@ void ChromeFrameTestWithWebServer::SimpleBrowserTestExpectedResult(
   ASSERT_TRUE(LaunchBrowser(browser, page));
   server_mock_.ExpectAndHandlePostedResult(CFInvocation(CFInvocation::NONE),
                                            kPostedResultSubstring);
-  WaitForTestToComplete(kLongWaitTimeout);
+  WaitForTestToComplete(TestTimeouts::action_max_timeout_ms());
   ASSERT_EQ(result, server_mock_.posted_result());
 }
 
 void ChromeFrameTestWithWebServer::SimpleBrowserTest(BrowserKind browser,
     const wchar_t* page) {
+  if (browser == FIREFOX &&
+      base::win::GetVersion() == base::win::VERSION_WIN7) {
+    LOG(INFO) << "Not running Firefox tests on Windows 7";
+    return;
+  }
   SimpleBrowserTestExpectedResult(browser, page, "OK");
 }
 
@@ -237,13 +242,19 @@ void ChromeFrameTestWithWebServer::OptionalBrowserTest(BrowserKind browser,
   } else {
     server_mock_.ExpectAndHandlePostedResult(CFInvocation(CFInvocation::NONE),
                                              kPostedResultSubstring);
-    WaitForTestToComplete(kLongWaitTimeout);
+    WaitForTestToComplete(TestTimeouts::action_max_timeout_ms());
     ASSERT_EQ("OK", server_mock_.posted_result());
   }
 }
 
 void ChromeFrameTestWithWebServer::VersionTest(BrowserKind browser,
     const wchar_t* page) {
+  if (browser == FIREFOX &&
+      base::win::GetVersion() == base::win::VERSION_WIN7) {
+    LOG(INFO) << "Not running Firefox tests on Windows 7";
+    return;
+  }
+
   FilePath plugin_path;
   PathService::Get(base::DIR_MODULE, &plugin_path);
   plugin_path = plugin_path.AppendASCII("servers");
@@ -259,15 +270,15 @@ void ChromeFrameTestWithWebServer::VersionTest(BrowserKind browser,
   // If we can't find the Chrome Frame DLL in the src tree, we turn to
   // the directory where chrome is installed.
   if (!version_info) {
-    installer::Version* ver_system = InstallUtil::GetChromeVersion(true);
-    installer::Version* ver_user = InstallUtil::GetChromeVersion(false);
-    ASSERT_TRUE(ver_system || ver_user);
+    BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+    scoped_ptr<Version> ver_system(InstallUtil::GetChromeVersion(dist, true));
+    scoped_ptr<Version> ver_user(InstallUtil::GetChromeVersion(dist, false));
+    ASSERT_TRUE(ver_system.get() || ver_user.get());
 
-    bool system_install = ver_system ? true : false;
-    FilePath cf_dll_path = FilePath::FromWStringHack(
-        installer::GetChromeInstallPath(system_install));
-    cf_dll_path = cf_dll_path.Append(
-        ver_system ? ver_system->GetString() : ver_user->GetString());
+    bool system_install = ver_system.get() ? true : false;
+    FilePath cf_dll_path(installer::GetChromeInstallPath(system_install, dist));
+    cf_dll_path = cf_dll_path.Append(UTF8ToWide(
+        ver_system.get() ? ver_system->GetString() : ver_user->GetString()));
     cf_dll_path = cf_dll_path.Append(kChromeFrameDllName);
     version_info = FileVersionInfo::CreateFileVersionInfo(cf_dll_path);
     if (version_info)
@@ -281,7 +292,7 @@ void ChromeFrameTestWithWebServer::VersionTest(BrowserKind browser,
   EXPECT_TRUE(LaunchBrowser(browser, page));
   server_mock_.ExpectAndHandlePostedResult(CFInvocation(CFInvocation::NONE),
                                            kPostedResultSubstring);
-  WaitForTestToComplete(kLongWaitTimeout);
+  WaitForTestToComplete(TestTimeouts::action_max_timeout_ms());
   ASSERT_EQ(version, UTF8ToWide(server_mock_.posted_result()));
 }
 
@@ -289,12 +300,18 @@ void ChromeFrameTestWithWebServer::SessionIdTest(BrowserKind browser,
                                                  const wchar_t* page,
                                                  int privilege_mode,
                                                  const char* expected_result) {
+  if (browser == FIREFOX &&
+      base::win::GetVersion() == base::win::VERSION_WIN7) {
+    LOG(INFO) << "Not running Firefox tests on Windows 7";
+    return;
+  }
+
   SetConfigInt(kEnableFirefoxPrivilegeMode, privilege_mode);
   EXPECT_TRUE(LaunchBrowser(browser, page));
   server_mock_.set_expected_result(expected_result);
   server_mock_.ExpectAndHandlePostedResult(CFInvocation(CFInvocation::NONE),
                                            kPostedResultSubstring);
-  WaitForTestToComplete(kLongWaitTimeout);
+  WaitForTestToComplete(TestTimeouts::action_max_timeout_ms());
   ASSERT_EQ(expected_result, server_mock_.posted_result());
 }
 
@@ -489,7 +506,7 @@ TEST_F(ChromeFrameTestWithWebServer, DISABLED_WidgetModeOpera_ObjectFocus) {
   if (!LaunchBrowser(OPERA, kNavigateSimpleObjectFocus)) {
     LOG(ERROR) << "Failed to launch browser " << ToString(OPERA);
   } else {
-    ASSERT_TRUE(WaitForOnLoad(kLongWaitTimeout));
+    ASSERT_TRUE(WaitForOnLoad(TestTimeouts::action_max_timeout_ms()));
     server_mock_.ExpectAndHandlePostedResult(CFInvocation(CFInvocation::NONE),
                                              kPostedResultSubstring);
     BringBrowserToTop();
@@ -1050,13 +1067,6 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_WindowClose) {
 }
 
 TEST_F(ChromeFrameTestWithWebServer, FullTabModeFF_WindowClose) {
-  // Please see http://code.google.com/p/chromium/issues/detail?id=60987
-  // for more information on why this test is disabled for Vista with IE7.
-  if (base::win::GetVersion() == base::win::VERSION_VISTA &&
-      chrome_frame_test::GetInstalledIEVersion() == IE_7) {
-    LOG(INFO) << "Not running test on Vista with IE7";
-    return;
-  }
   SimpleBrowserTest(FIREFOX, kWindowCloseTestUrl);
 }
 

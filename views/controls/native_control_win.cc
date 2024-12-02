@@ -6,13 +6,13 @@
 
 #include <windowsx.h>
 
-#include "app/l10n_util_win.h"
-#include "app/view_prop.h"
 #include "base/logging.h"
-#include "base/win_util.h"
+#include "ui/base/l10n/l10n_util_win.h"
+#include "ui/base/view_prop.h"
+#include "ui/base/win/hwnd_util.h"
 #include "views/focus/focus_manager.h"
 
-using app::ViewProp;
+using ui::ViewProp;
 
 namespace views {
 
@@ -136,9 +136,8 @@ void NativeControlWin::NativeControlCreated(HWND native_control) {
   props_.push_back(ChildWindowMessageProcessor::Register(native_control, this));
 
   // Subclass so we get WM_KEYDOWN and WM_SETFOCUS messages.
-  original_wndproc_ =
-      win_util::SetWindowProc(native_control,
-                              &NativeControlWin::NativeControlWndProc);
+  original_wndproc_ = ui::SetWindowProc(
+      native_control, &NativeControlWin::NativeControlWndProc);
 
   Attach(native_control);
   // native_view() is now valid.
@@ -214,7 +213,7 @@ LRESULT NativeControlWin::NativeControlWndProc(HWND window,
     }
   } else if (message == WM_DESTROY) {
     native_control->props_.reset();
-    win_util::SetWindowProc(window, native_control->original_wndproc_);
+    ui::SetWindowProc(window, native_control->original_wndproc_);
   }
 
   return CallWindowProc(native_control->original_wndproc_, window, message,

@@ -4,12 +4,13 @@
 
 #include <vector>
 
-#include "app/table_model.h"
-#include "app/table_model_observer.h"
+#include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/models/table_model.h"
+#include "ui/base/models/table_model_observer.h"
 #include "views/controls/table/table_view.h"
 #include "views/controls/table/table_view2.h"
 #include "views/window/window_delegate.h"
@@ -19,7 +20,12 @@
 #include "views/window/window_gtk.h"
 #endif
 
-using views::TableView;
+using ui::TableModel;
+using ui::TableModelObserver; // TODO(beng): remove these
+
+// Put the tests in the views namespace to make it easier to declare them as
+// friend classes.
+namespace views {
 
 // TestTableModel --------------------------------------------------------------
 
@@ -45,10 +51,10 @@ class TestTableModel : public TableModel {
   void ChangeRow(int row, int c1_value, int c2_value);
 
   // TableModel
-  virtual int RowCount();
-  virtual std::wstring GetText(int row, int column_id);
-  virtual void SetObserver(TableModelObserver* observer);
-  virtual int CompareValues(int row1, int row2, int column_id);
+  virtual int RowCount() OVERRIDE;
+  virtual string16 GetText(int row, int column_id) OVERRIDE;
+  virtual void SetObserver(TableModelObserver* observer) OVERRIDE;
+  virtual int CompareValues(int row1, int row2, int column_id) OVERRIDE;
 
  private:
   TableModelObserver* observer_;
@@ -57,6 +63,27 @@ class TestTableModel : public TableModel {
   std::vector<std::vector<int> > rows_;
 
   DISALLOW_COPY_AND_ASSIGN(TestTableModel);
+};
+
+// Same behavior as TestTableModel, except even items are in one group, while
+// odd items are put in a different group.
+class GroupTestTableModel : public TestTableModel {
+  virtual bool HasGroups() { return true; }
+
+  virtual Groups GetGroups() {
+    Groups groups;
+    Group group1, group2;
+    group1.title = ASCIIToUTF16("Group 1");
+    group1.id = 0;
+    group2.title = ASCIIToUTF16("Group 2");
+    group2.id = 0;
+    groups.push_back(group1);
+    groups.push_back(group2);
+    return groups;
+  }
+
+  // Return group = 0 if row is even, otherwise group = 1.
+  virtual int GetGroupID(int row) { return row % 2; }
 };
 
 TestTableModel::TestTableModel() : observer_(NULL) {
@@ -93,8 +120,8 @@ int TestTableModel::RowCount() {
   return static_cast<int>(rows_.size());
 }
 
-std::wstring TestTableModel::GetText(int row, int column_id) {
-  return UTF8ToWide(base::IntToString(rows_[row][column_id]));
+string16 TestTableModel::GetText(int row, int column_id) {
+  return UTF8ToUTF16(base::IntToString(rows_[row][column_id]));
 }
 
 void TestTableModel::SetObserver(TableModelObserver* observer) {
@@ -120,12 +147,12 @@ class TableViewTest : public testing::Test, views::WindowDelegate {
 
  protected:
   // Creates the model.
-  TestTableModel* CreateModel();
+  virtual TestTableModel* CreateModel();
 
   // Verifies the view order matches that of the supplied arguments. The
   // arguments are in terms of the model. For example, values of '1, 0' indicate
   // the model index at row 0 is 1 and the model index at row 1 is 0.
-  void VeriyViewOrder(int first, ...);
+  void VerifyViewOrder(int first, ...);
 
   // Verifies the selection matches the supplied arguments. The supplied
   // arguments are in terms of this model. This uses the iterator returned by
@@ -168,7 +195,7 @@ void TableViewTest::TearDown() {
   OleUninitialize();
 }
 
-void TableViewTest::VeriyViewOrder(int first, ...) {
+void TableViewTest::VerifyViewOrder(int first, ...) {
   va_list marker;
   va_start(marker, first);
   int value = first;
@@ -209,7 +236,7 @@ void TableViewTest::SetUpMultiSelectTestState(bool sort) {
   TableView::SortDescriptors sd;
   sd.push_back(TableView::SortDescriptor(0, false));
   table_->SetSortDescriptors(sd);
-  VeriyViewOrder(2, 1, 0, -1);
+  VerifyViewOrder(2, 1, 0, -1);
   if (HasFatalFailure())
     return;
 
@@ -232,6 +259,14 @@ class NullModelTableViewTest : public TableViewTest {
   }
 };
 
+// GroupModelTableViewTest -----------------------------------------------------
+class GroupModelTableViewTest : public TableViewTest {
+ protected:
+  TestTableModel* CreateModel() {
+    return new GroupTestTableModel();
+  }
+};
+
 // Tests -----------------------------------------------------------------------
 
 // Failing: http://crbug.com/45015
@@ -241,7 +276,7 @@ TEST_F(TableViewTest, DISABLED_Sort) {
   TableView::SortDescriptors sort;
   sort.push_back(TableView::SortDescriptor(0, false));
   table_->SetSortDescriptors(sort);
-  VeriyViewOrder(2, 1, 0, -1);
+  VerifyViewOrder(2, 1, 0, -1);
   if (HasFatalFailure())
     return;
 
@@ -251,13 +286,13 @@ TEST_F(TableViewTest, DISABLED_Sort) {
   sort.push_back(TableView::SortDescriptor(0, false));
   sort[1].ascending = false;
   table_->SetSortDescriptors(sort);
-  VeriyViewOrder(1, 0, 2, -1);
+  VerifyViewOrder(1, 0, 2, -1);
   if (HasFatalFailure())
     return;
 
   // Clear the sort.
   table_->SetSortDescriptors(TableView::SortDescriptors());
-  VeriyViewOrder(0, 1, 2, -1);
+  VerifyViewOrder(0, 1, 2, -1);
   if (HasFatalFailure())
     return;
 }
@@ -269,12 +304,12 @@ TEST_F(TableViewTest, DISABLED_SortThenChange) {
   TableView::SortDescriptors sort;
   sort.push_back(TableView::SortDescriptor(0, false));
   table_->SetSortDescriptors(sort);
-  VeriyViewOrder(2, 1, 0, -1);
+  VerifyViewOrder(2, 1, 0, -1);
   if (HasFatalFailure())
     return;
 
   model_->ChangeRow(0, 3, 1);
-  VeriyViewOrder(0, 2, 1, -1);
+  VerifyViewOrder(0, 2, 1, -1);
 }
 
 // Failing: http://crbug.com/45015
@@ -284,19 +319,19 @@ TEST_F(TableViewTest, DISABLED_AddToSorted) {
   TableView::SortDescriptors sort;
   sort.push_back(TableView::SortDescriptor(0, false));
   table_->SetSortDescriptors(sort);
-  VeriyViewOrder(2, 1, 0, -1);
+  VerifyViewOrder(2, 1, 0, -1);
   if (HasFatalFailure())
     return;
 
   // Add row so that it occurs first.
   model_->AddRow(0, 5, -1);
-  VeriyViewOrder(0, 3, 2, 1, -1);
+  VerifyViewOrder(0, 3, 2, 1, -1);
   if (HasFatalFailure())
     return;
 
   // Add row so that it occurs last.
   model_->AddRow(0, -1, -1);
-  VeriyViewOrder(1, 4, 3, 2, 0, -1);
+  VerifyViewOrder(1, 4, 3, 2, 0, -1);
 }
 
 // Failing: http://crbug.com/45015
@@ -309,7 +344,7 @@ TEST_F(TableViewTest, DISABLED_PersistSelectionOnSort) {
   TableView::SortDescriptors sort;
   sort.push_back(TableView::SortDescriptor(0, false));
   table_->SetSortDescriptors(sort);
-  VeriyViewOrder(2, 1, 0, -1);
+  VerifyViewOrder(2, 1, 0, -1);
   if (HasFatalFailure())
     return;
 
@@ -393,6 +428,28 @@ TEST_F(TableViewTest, DISABLED_PersistMultiSelectionOnAdd) {
   model_->AddRow(3, 4, 4);
 
   VerifySelectedRows(1, 0, -1);
+}
+
+TEST_F(GroupModelTableViewTest, IndividualSelectAcrossGroups) {
+  table_->SetSelectedState(0, true);
+  table_->SetSelectedState(1, true);
+  table_->SetSelectedState(2, true);
+  VerifySelectedRows(2, 1, 0, -1);
+}
+
+TEST_F(GroupModelTableViewTest, ShiftSelectAcrossGroups) {
+  table_->SetSelectedState(0, true);
+  // Try to select across groups - this should fail.
+  ASSERT_FALSE(table_->SelectMultiple(1, 0));
+  VerifySelectedRows(0, -1);
+}
+
+TEST_F(GroupModelTableViewTest, ShiftSelectSameGroup) {
+  table_->SetSelectedState(0, true);
+  // Try to select in the same group - this should work but should only select
+  // items in the "even" group.
+  ASSERT_TRUE(table_->SelectMultiple(2, 0));
+  VerifySelectedRows(2, 0, -1);
 }
 
 // Crashing: http://crbug.com/45015
@@ -572,3 +629,5 @@ TEST_F(TableView2Test, RowFocusTest) {
   EXPECT_EQ(-1, table_->GetFirstSelectedRow());
 }
 #endif
+
+}  // namespace views

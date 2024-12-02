@@ -7,8 +7,6 @@
 #include <algorithm>
 #include <limits>
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
@@ -17,6 +15,8 @@
 #include "gfx/canvas_skia.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/window/window.h"
 
 namespace chromeos {
@@ -33,7 +33,7 @@ NetworkMenuButton::NetworkMenuButton(StatusAreaHost* host)
       host_(host),
       ALLOW_THIS_IN_INITIALIZER_LIST(animation_connecting_(this)) {
   animation_connecting_.SetThrobDuration(kThrobDuration);
-  animation_connecting_.SetTweenType(Tween::EASE_IN_OUT);
+  animation_connecting_.SetTweenType(ui::Tween::EASE_IN_OUT);
   OnNetworkManagerChanged(CrosLibrary::Get()->GetNetworkLibrary());
   CrosLibrary::Get()->GetNetworkLibrary()->AddNetworkManagerObserver(this);
   CrosLibrary::Get()->GetNetworkLibrary()->AddCellularDataPlanObserver(this);
@@ -47,9 +47,9 @@ NetworkMenuButton::~NetworkMenuButton() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// NetworkMenuButton, AnimationDelegate implementation:
+// NetworkMenuButton, ui::AnimationDelegate implementation:
 
-void NetworkMenuButton::AnimationProgressed(const Animation* animation) {
+void NetworkMenuButton::AnimationProgressed(const ui::Animation* animation) {
   if (animation == &animation_connecting_) {
     SetIcon(IconForNetworkConnecting(animation_connecting_.GetCurrentValue(),
                                      false));
@@ -79,6 +79,8 @@ void NetworkMenuButton::OnNetworkManagerChanged(NetworkLibrary* cros) {
 // NetworkMenuButton, NetworkLibrary::NetworkObserver implementation:
 void NetworkMenuButton::OnNetworkChanged(NetworkLibrary* cros,
                                          const Network* network) {
+  // This gets called on initialization, so any changes should be reflected
+  // in CrosMock::SetNetworkLibraryStatusAreaExpectations().
   SetNetworkIcon(cros, network);
   RefreshNetworkObserver(cros);
   SchedulePaint();
@@ -94,7 +96,7 @@ void NetworkMenuButton::OnCellularDataPlanChanged(NetworkLibrary* cros) {
 // NetworkMenuButton, NetworkMenu implementation:
 
 bool NetworkMenuButton::IsBrowserMode() const {
-  return host_->IsBrowserMode();
+  return host_->GetScreenMode() == StatusAreaHost::kBrowserMode;
 }
 
 gfx::NativeWindow NetworkMenuButton::GetNativeWindow() const {
@@ -119,8 +121,8 @@ void NetworkMenuButton::SetNetworkIcon(NetworkLibrary* cros,
   if (!cros || !CrosLibrary::Get()->EnsureLoaded()) {
     SetIcon(*rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_BARS0));
     SetBadge(*rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_WARNING));
-    SetTooltipText(l10n_util::GetString(
-        IDS_STATUSBAR_NETWORK_NO_NETWORK_TOOLTIP));
+    SetTooltipText(UTF16ToWide(l10n_util::GetStringUTF16(
+        IDS_STATUSBAR_NETWORK_NO_NETWORK_TOOLTIP)));
     return;
   }
 
@@ -128,8 +130,8 @@ void NetworkMenuButton::SetNetworkIcon(NetworkLibrary* cros,
     animation_connecting_.Stop();
     SetIcon(*rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_BARS0));
     SetBadge(*rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_DISCONNECTED));
-    SetTooltipText(l10n_util::GetString(
-        IDS_STATUSBAR_NETWORK_NO_NETWORK_TOOLTIP));
+    SetTooltipText(UTF16ToWide(l10n_util::GetStringUTF16(
+        IDS_STATUSBAR_NETWORK_NO_NETWORK_TOOLTIP)));
     return;
   }
 
@@ -148,11 +150,10 @@ void NetworkMenuButton::SetNetworkIcon(NetworkLibrary* cros,
       wireless = cros->cellular_network();
       SetBadge(BadgeForNetworkTechnology(cros->cellular_network()));
     }
-    SetTooltipText(
-        l10n_util::GetStringF(wireless->configuring() ?
-            IDS_STATUSBAR_NETWORK_CONFIGURING_TOOLTIP :
-            IDS_STATUSBAR_NETWORK_CONNECTING_TOOLTIP,
-            UTF8ToWide(wireless->name())));
+    SetTooltipText(UTF16ToWide(l10n_util::GetStringFUTF16(
+        wireless->configuring() ? IDS_STATUSBAR_NETWORK_CONFIGURING_TOOLTIP
+                                : IDS_STATUSBAR_NETWORK_CONNECTING_TOOLTIP,
+        UTF8ToUTF16(wireless->name()))));
   } else {
     // Stop connecting animation since we are not connecting.
     animation_connecting_.Stop();
@@ -162,29 +163,25 @@ void NetworkMenuButton::SetNetworkIcon(NetworkLibrary* cros,
         SetIcon(*rb.GetBitmapNamed(IDR_STATUSBAR_WIRED));
         SetBadge(SkBitmap());
         SetTooltipText(
-            l10n_util::GetStringF(
+            UTF16ToWide(l10n_util::GetStringFUTF16(
                 IDS_STATUSBAR_NETWORK_CONNECTED_TOOLTIP,
-                l10n_util::GetString(IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET)));
+                l10n_util::GetStringUTF16(
+                    IDS_STATUSBAR_NETWORK_DEVICE_ETHERNET))));
       } else if (network->type() == TYPE_WIFI) {
         const WifiNetwork* wifi = static_cast<const WifiNetwork*>(network);
-        SetIcon(IconForNetworkStrength(wifi->strength(), false));
+        SetIcon(IconForNetworkStrength(wifi, false));
         SetBadge(SkBitmap());
-        SetTooltipText(l10n_util::GetStringF(
+        SetTooltipText(UTF16ToWide(l10n_util::GetStringFUTF16(
             IDS_STATUSBAR_NETWORK_CONNECTED_TOOLTIP,
-            UTF8ToWide(wifi->name())));
+            UTF8ToUTF16(wifi->name()))));
       } else if (network->type() == TYPE_CELLULAR) {
         const CellularNetwork* cellular =
             static_cast<const CellularNetwork*>(network);
-        if (cellular->GetDataLeft() == CellularNetwork::DATA_NONE) {
-          // If no data, then we show 0 bars.
-          SetIcon(*rb.GetBitmapNamed(IDR_STATUSBAR_NETWORK_BARS0));
-        } else {
-          SetIcon(IconForNetworkStrength(cellular));
-        }
+        SetIcon(IconForNetworkStrength(cellular, false));
         SetBadge(BadgeForNetworkTechnology(cellular));
-        SetTooltipText(l10n_util::GetStringF(
+        SetTooltipText(UTF16ToWide(l10n_util::GetStringFUTF16(
             IDS_STATUSBAR_NETWORK_CONNECTED_TOOLTIP,
-            UTF8ToWide(cellular->name())));
+            UTF8ToUTF16(cellular->name()))));
       }
     }
   }

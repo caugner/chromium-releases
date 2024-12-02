@@ -149,6 +149,10 @@ void FFmpegDemuxerStream::Stop() {
   stopped_ = true;
 }
 
+base::TimeDelta FFmpegDemuxerStream::duration() {
+  return duration_;
+}
+
 const MediaFormat& FFmpegDemuxerStream::media_format() {
   return media_format_;
 }
@@ -219,6 +223,10 @@ void FFmpegDemuxerStream::EnableBitstreamConverter() {
   }
 }
 
+AVStream* FFmpegDemuxerStream::GetAVStream() {
+  return stream_;
+}
+
 // static
 base::TimeDelta FFmpegDemuxerStream::ConvertStreamTimestamp(
     const AVRational& time_base, int64 timestamp) {
@@ -231,12 +239,14 @@ base::TimeDelta FFmpegDemuxerStream::ConvertStreamTimestamp(
 //
 // FFmpegDemuxer
 //
-FFmpegDemuxer::FFmpegDemuxer()
-    : format_context_(NULL),
+FFmpegDemuxer::FFmpegDemuxer(MessageLoop* message_loop)
+    : message_loop_(message_loop),
+      format_context_(NULL),
       read_event_(false, false),
       read_has_failed_(false),
       last_read_bytes_(0),
       read_position_(0) {
+  DCHECK(message_loop_);
 }
 
 FFmpegDemuxer::~FFmpegDemuxer() {
@@ -271,13 +281,13 @@ FFmpegDemuxer::~FFmpegDemuxer() {
 }
 
 void FFmpegDemuxer::PostDemuxTask() {
-  message_loop()->PostTask(FROM_HERE,
+  message_loop_->PostTask(FROM_HERE,
       NewRunnableMethod(this, &FFmpegDemuxer::DemuxTask));
 }
 
 void FFmpegDemuxer::Stop(FilterCallback* callback) {
   // Post a task to notify the streams to stop as well.
-  message_loop()->PostTask(FROM_HERE,
+  message_loop_->PostTask(FROM_HERE,
       NewRunnableMethod(this, &FFmpegDemuxer::StopTask, callback));
 
   // Then wakes up the thread from reading.
@@ -289,18 +299,18 @@ void FFmpegDemuxer::Seek(base::TimeDelta time, FilterCallback* callback) {
   // operation is completed and filters behind the demuxer is good to issue
   // more reads, but we are posting a task here, which makes the seek operation
   // asynchronous, should change how seek works to make it fully asynchronous.
-  message_loop()->PostTask(FROM_HERE,
+  message_loop_->PostTask(FROM_HERE,
       NewRunnableMethod(this, &FFmpegDemuxer::SeekTask, time, callback));
 }
 
 void FFmpegDemuxer::OnAudioRendererDisabled() {
-  message_loop()->PostTask(FROM_HERE,
+  message_loop_->PostTask(FROM_HERE,
       NewRunnableMethod(this, &FFmpegDemuxer::DisableAudioStreamTask));
 }
 
 void FFmpegDemuxer::Initialize(DataSource* data_source,
                                FilterCallback* callback) {
-  message_loop()->PostTask(
+  message_loop_->PostTask(
       FROM_HERE,
       NewRunnableMethod(this,
                         &FFmpegDemuxer::InitializeTask,
@@ -326,11 +336,11 @@ int FFmpegDemuxer::Read(int size, uint8* data) {
   if (read_has_failed_)
     return AVERROR_IO;
 
-  // If the read position exceeds the size of the data source. We should return
-  // end-of-file directly.
+  // Even though FFmpeg defines AVERROR_EOF, it's not to be used with I/O
+  // routines.  Instead return 0 for any read at or past EOF.
   int64 file_size;
   if (data_source_->GetSize(&file_size) && read_position_ >= file_size)
-    return AVERROR_EOF;
+    return 0;
 
   // Asynchronous read from data source.
   data_source_->Read(read_position_, size, data,
@@ -383,15 +393,19 @@ bool FFmpegDemuxer::IsStreaming() {
   return data_source_->IsStreaming();
 }
 
+MessageLoop* FFmpegDemuxer::message_loop() {
+  return message_loop_;
+}
+
 void FFmpegDemuxer::InitializeTask(DataSource* data_source,
                                    FilterCallback* callback) {
-  DCHECK_EQ(MessageLoop::current(), message_loop());
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
   scoped_ptr<FilterCallback> c(callback);
 
   data_source_ = data_source;
 
   // Add ourself to Protocol list and get our unique key.
-  std::string key = FFmpegGlue::get()->AddProtocol(this);
+  std::string key = FFmpegGlue::GetInstance()->AddProtocol(this);
 
   // Open FFmpeg AVFormatContext.
   DCHECK(!format_context_);
@@ -399,7 +413,7 @@ void FFmpegDemuxer::InitializeTask(DataSource* data_source,
   int result = av_open_input_file(&context, key.c_str(), NULL, 0, NULL);
 
   // Remove ourself from protocol list.
-  FFmpegGlue::get()->RemoveProtocol(this);
+  FFmpegGlue::GetInstance()->RemoveProtocol(this);
 
   if (result < 0) {
     host()->SetError(DEMUXER_ERROR_COULD_NOT_OPEN);
@@ -469,7 +483,7 @@ void FFmpegDemuxer::InitializeTask(DataSource* data_source,
 }
 
 void FFmpegDemuxer::SeekTask(base::TimeDelta time, FilterCallback* callback) {
-  DCHECK_EQ(MessageLoop::current(), message_loop());
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
   scoped_ptr<FilterCallback> c(callback);
 
   // Tell streams to flush buffers due to seeking.
@@ -496,7 +510,7 @@ void FFmpegDemuxer::SeekTask(base::TimeDelta time, FilterCallback* callback) {
 }
 
 void FFmpegDemuxer::DemuxTask() {
-  DCHECK_EQ(MessageLoop::current(), message_loop());
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
 
   // Make sure we have work to do before demuxing.
   if (!StreamsHavePendingReads()) {
@@ -548,7 +562,7 @@ void FFmpegDemuxer::DemuxTask() {
 }
 
 void FFmpegDemuxer::StopTask(FilterCallback* callback) {
-  DCHECK_EQ(MessageLoop::current(), message_loop());
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
   StreamVector::iterator iter;
   for (iter = streams_.begin(); iter != streams_.end(); ++iter) {
     (*iter)->Stop();
@@ -560,7 +574,7 @@ void FFmpegDemuxer::StopTask(FilterCallback* callback) {
 }
 
 void FFmpegDemuxer::DisableAudioStreamTask() {
-  DCHECK_EQ(MessageLoop::current(), message_loop());
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
 
   StreamVector::iterator iter;
   for (size_t i = 0; i < packet_streams_.size(); ++i) {
@@ -578,7 +592,7 @@ void FFmpegDemuxer::DisableAudioStreamTask() {
 }
 
 bool FFmpegDemuxer::StreamsHavePendingReads() {
-  DCHECK_EQ(MessageLoop::current(), message_loop());
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
   StreamVector::iterator iter;
   for (iter = streams_.begin(); iter != streams_.end(); ++iter) {
     if ((*iter)->HasPendingReads()) {
@@ -589,7 +603,7 @@ bool FFmpegDemuxer::StreamsHavePendingReads() {
 }
 
 void FFmpegDemuxer::StreamHasEnded() {
-  DCHECK_EQ(MessageLoop::current(), message_loop());
+  DCHECK_EQ(MessageLoop::current(), message_loop_);
   StreamVector::iterator iter;
   for (iter = streams_.begin(); iter != streams_.end(); ++iter) {
     AVPacket* packet = new AVPacket();

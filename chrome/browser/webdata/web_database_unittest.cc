@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,13 +22,13 @@
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/autofill_type.h"
 #include "chrome/browser/autofill/credit_card.h"
-#include "chrome/browser/guid.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/password_manager/encryptor.h"
 #include "chrome/browser/webdata/autofill_change.h"
 #include "chrome/browser/webdata/autofill_entry.h"
 #include "chrome/browser/webdata/web_database.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/guid.h"
 #include "chrome/test/ui_test_utils.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -305,8 +305,8 @@ TEST_F(WebDatabaseTest, Keywords) {
   ASSERT_EQ(sql::INIT_OK, db.Init(file_));
 
   TemplateURL template_url;
-  template_url.set_short_name(L"short_name");
-  template_url.set_keyword(L"keyword");
+  template_url.set_short_name(ASCIIToUTF16("short_name"));
+  template_url.set_keyword(ASCIIToUTF16("keyword"));
   GURL favicon_url("http://favicon.url/");
   GURL originating_url("http://google.com/");
   template_url.SetFavIconURL(favicon_url);
@@ -398,8 +398,8 @@ TEST_F(WebDatabaseTest, UpdateKeyword) {
   ASSERT_EQ(sql::INIT_OK, db.Init(file_));
 
   TemplateURL template_url;
-  template_url.set_short_name(L"short_name");
-  template_url.set_keyword(L"keyword");
+  template_url.set_short_name(ASCIIToUTF16("short_name"));
+  template_url.set_keyword(ASCIIToUTF16("keyword"));
   GURL favicon_url("http://favicon.url/");
   GURL originating_url("http://originating.url/");
   template_url.SetFavIconURL(favicon_url);
@@ -414,7 +414,7 @@ TEST_F(WebDatabaseTest, UpdateKeyword) {
   GURL originating_url2("http://originating.url/");
   template_url.set_originating_url(originating_url2);
   template_url.set_autogenerate_keyword(true);
-  EXPECT_EQ(L"url", template_url.keyword());
+  EXPECT_EQ(ASCIIToUTF16("url"), template_url.keyword());
   template_url.add_input_encoding("Shift_JIS");
   set_prepopulate_id(&template_url, 5);
   set_logo_id(&template_url, 2000);
@@ -468,8 +468,8 @@ TEST_F(WebDatabaseTest, KeywordWithNoFavicon) {
   ASSERT_EQ(sql::INIT_OK, db.Init(file_));
 
   TemplateURL template_url;
-  template_url.set_short_name(L"short_name");
-  template_url.set_keyword(L"keyword");
+  template_url.set_short_name(ASCIIToUTF16("short_name"));
+  template_url.set_keyword(ASCIIToUTF16("keyword"));
   template_url.SetURL("http://url/", 0, 0);
   template_url.set_safe_for_autoreplace(true);
   SetID(-100, &template_url);

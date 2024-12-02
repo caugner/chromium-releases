@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define SKIA_EXT_VECTOR_PLATFORM_DEVICE_LINUX_H_
 #pragma once
 
+#include "base/compiler_specific.h"
 #include "skia/ext/platform_device.h"
 #include "third_party/skia/include/core/SkMatrix.h"
 #include "third_party/skia/include/core/SkRegion.h"
@@ -14,11 +15,13 @@ namespace skia {
 
 class VectorPlatformDeviceFactory : public SkDeviceFactory {
  public:
-  virtual SkDevice* newDevice(SkBitmap::Config config, int width, int height,
-                              bool isOpaque, bool isForLayer);
-
   static SkDevice* CreateDevice(cairo_t* context, int width, int height,
                                 bool isOpaque);
+
+  // Overridden from SkDeviceFactory:
+  virtual SkDevice* newDevice(SkCanvas* ignored, SkBitmap::Config config,
+                              int width, int height,
+                              bool isOpaque, bool isForLayer);
 };
 
 // This device is basically a wrapper that provides a surface for SkCanvas
@@ -28,53 +31,57 @@ class VectorPlatformDeviceFactory : public SkDeviceFactory {
 // meaningless.
 class VectorPlatformDevice : public PlatformDevice {
  public:
+  virtual ~VectorPlatformDevice();
+
   // Factory function. Ownership of |context| is not transferred.
   static VectorPlatformDevice* create(PlatformSurface context,
                                       int width, int height);
-  virtual ~VectorPlatformDevice();
-
-  virtual SkDeviceFactory* getDeviceFactory() {
-    return SkNEW(VectorPlatformDeviceFactory);
-  }
-
-  virtual bool IsVectorial() { return true; }
-  virtual PlatformSurface beginPlatformPaint() { return context_; }
-
-  // We translate following skia APIs into corresponding Cairo APIs.
-  virtual void drawBitmap(const SkDraw& draw, const SkBitmap& bitmap,
-                          const SkMatrix& matrix, const SkPaint& paint);
-  virtual void drawDevice(const SkDraw& draw, SkDevice*, int x, int y,
-                          const SkPaint&);
-  virtual void drawPaint(const SkDraw& draw, const SkPaint& paint);
-  virtual void drawPath(const SkDraw& draw, const SkPath& path,
-                        const SkPaint& paint);
-  virtual void drawPoints(const SkDraw& draw, SkCanvas::PointMode mode,
-                          size_t count, const SkPoint[], const SkPaint& paint);
-  virtual void drawPosText(const SkDraw& draw, const void* text, size_t len,
-                           const SkScalar pos[], SkScalar constY,
-                           int scalarsPerPos, const SkPaint& paint);
-  virtual void drawRect(const SkDraw& draw, const SkRect& r,
-                        const SkPaint& paint);
-  virtual void drawSprite(const SkDraw& draw, const SkBitmap& bitmap,
-                          int x, int y, const SkPaint& paint);
-  virtual void drawText(const SkDraw& draw, const void* text, size_t len,
-                        SkScalar x, SkScalar y, const SkPaint& paint);
-  virtual void drawTextOnPath(const SkDraw& draw, const void* text, size_t len,
-                              const SkPath& path, const SkMatrix* matrix,
-                              const SkPaint& paint);
-  virtual void drawVertices(const SkDraw& draw, SkCanvas::VertexMode,
-                            int vertexCount,
-                            const SkPoint verts[], const SkPoint texs[],
-                            const SkColor colors[], SkXfermode* xmode,
-                            const uint16_t indices[], int indexCount,
-                            const SkPaint& paint);
-  virtual void setMatrixClip(const SkMatrix& transform,
-                             const SkRegion& region);
 
   // Clean up cached fonts. It is an error to call this while some
   // VectorPlatformDevice callee is still using fonts created for it by this
   // class.
   static void ClearFontCache();
+
+  // Overridden from SkDevice (through PlatformDevice):
+  virtual SkDeviceFactory* getDeviceFactory();
+
+  // Overridden from PlatformDevice:
+  virtual void drawPaint(const SkDraw& draw, const SkPaint& paint) OVERRIDE;
+  virtual void drawPoints(const SkDraw& draw, SkCanvas::PointMode mode,
+                          size_t count, const SkPoint[],
+                          const SkPaint& paint) OVERRIDE;
+  virtual void drawRect(const SkDraw& draw, const SkRect& r,
+                        const SkPaint& paint) OVERRIDE;
+  virtual void drawPath(const SkDraw& draw, const SkPath& path,
+                        const SkPaint& paint,
+                        const SkMatrix* prePathMatrix = NULL,
+                        bool pathIsMutable = false) OVERRIDE;
+  virtual void drawBitmap(const SkDraw& draw, const SkBitmap& bitmap,
+                          const SkIRect* srcRectOrNull,
+                          const SkMatrix& matrix,
+                          const SkPaint& paint) OVERRIDE;
+  virtual void drawSprite(const SkDraw& draw, const SkBitmap& bitmap,
+                          int x, int y, const SkPaint& paint) OVERRIDE;
+  virtual void drawText(const SkDraw& draw, const void* text, size_t len,
+                        SkScalar x, SkScalar y, const SkPaint& paint) OVERRIDE;
+  virtual void drawPosText(const SkDraw& draw, const void* text, size_t len,
+                           const SkScalar pos[], SkScalar constY,
+                           int scalarsPerPos, const SkPaint& paint) OVERRIDE;
+  virtual void drawTextOnPath(const SkDraw& draw, const void* text, size_t len,
+                              const SkPath& path, const SkMatrix* matrix,
+                              const SkPaint& paint) OVERRIDE;
+  virtual void drawVertices(const SkDraw& draw, SkCanvas::VertexMode,
+                            int vertexCount,
+                            const SkPoint verts[], const SkPoint texs[],
+                            const SkColor colors[], SkXfermode* xmode,
+                            const uint16_t indices[], int indexCount,
+                            const SkPaint& paint) OVERRIDE;
+  virtual void drawDevice(const SkDraw& draw, SkDevice*, int x, int y,
+                          const SkPaint&) OVERRIDE;
+
+  virtual void setMatrixClip(const SkMatrix& transform, const SkRegion& region);
+  virtual PlatformSurface beginPlatformPaint();
+  virtual bool IsVectorial();
 
  protected:
   explicit VectorPlatformDevice(PlatformSurface context,

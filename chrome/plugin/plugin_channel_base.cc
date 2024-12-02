@@ -28,11 +28,11 @@ static base::LazyInstance<std::stack<scoped_refptr<PluginChannelBase> > >
 static int next_pipe_id = 0;
 
 PluginChannelBase* PluginChannelBase::GetChannel(
-    const std::string& channel_key, IPC::Channel::Mode mode,
+    const IPC::ChannelHandle& channel_handle, IPC::Channel::Mode mode,
     PluginChannelFactory factory, MessageLoop* ipc_message_loop,
     bool create_pipe_now) {
   scoped_refptr<PluginChannelBase> channel;
-
+  std::string channel_key = channel_handle.name;
   PluginChannelMap::const_iterator iter = g_plugin_channels_.find(channel_key);
   if (iter == g_plugin_channels_.end()) {
     channel = factory();
@@ -43,10 +43,10 @@ PluginChannelBase* PluginChannelBase::GetChannel(
   DCHECK(channel != NULL);
 
   if (!channel->channel_valid()) {
-    channel->channel_name_ = channel_key;
+    channel->channel_handle_ = channel_handle;
     if (mode == IPC::Channel::MODE_SERVER) {
-      channel->channel_name_.append(".");
-      channel->channel_name_.append(base::IntToString(next_pipe_id++));
+      channel->channel_handle_.name.append(".");
+      channel->channel_handle_.name.append(base::IntToString(next_pipe_id++));
     }
     channel->mode_ = mode;
     if (channel->Init(ipc_message_loop, create_pipe_now)) {
@@ -115,7 +115,7 @@ NPObjectBase* PluginChannelBase::GetNPObjectListenerForRoute(int route_id) {
 bool PluginChannelBase::Init(MessageLoop* ipc_message_loop,
                              bool create_pipe_now) {
   channel_.reset(new IPC::SyncChannel(
-      channel_name_, mode_, this, NULL, ipc_message_loop, create_pipe_now,
+      channel_handle_, mode_, this, ipc_message_loop, create_pipe_now,
       ChildProcess::current()->GetShutDownEvent()));
   channel_valid_ = true;
   return true;
@@ -140,19 +140,20 @@ int PluginChannelBase::Count() {
   return static_cast<int>(g_plugin_channels_.size());
 }
 
-void PluginChannelBase::OnMessageReceived(const IPC::Message& message) {
+bool PluginChannelBase::OnMessageReceived(const IPC::Message& message) {
   // This call might cause us to be deleted, so keep an extra reference to
   // ourself so that we can send the reply and decrement back in_dispatch_.
   lazy_plugin_channel_stack_.Pointer()->push(
       scoped_refptr<PluginChannelBase>(this));
 
+  bool handled;
   if (message.should_unblock())
     in_unblock_dispatch_++;
   if (message.routing_id() == MSG_ROUTING_CONTROL) {
-    OnControlMessageReceived(message);
+    handled = OnControlMessageReceived(message);
   } else {
-    bool routed = router_.RouteMessage(message);
-    if (!routed && message.is_sync()) {
+    handled = router_.RouteMessage(message);
+    if (!handled && message.is_sync()) {
       // The listener has gone away, so we must respond or else the caller will
       // hang waiting for a reply.
       IPC::Message* reply = IPC::SyncMessage::GenerateReply(&message);
@@ -164,6 +165,7 @@ void PluginChannelBase::OnMessageReceived(const IPC::Message& message) {
     in_unblock_dispatch_--;
 
   lazy_plugin_channel_stack_.Pointer()->pop();
+  return handled;
 }
 
 void PluginChannelBase::OnChannelConnected(int32 peer_pid) {
@@ -219,11 +221,6 @@ void PluginChannelBase::RemoveRoute(int route_id) {
     for (PluginChannelMap::iterator iter = g_plugin_channels_.begin();
          iter != g_plugin_channels_.end(); ++iter) {
       if (iter->second == this) {
-#if defined(OS_POSIX)
-        if (channel_valid()) {
-          IPC::RemoveAndCloseChannelSocket(channel_name());
-        }
-#endif
         g_plugin_channels_.erase(iter);
         return;
       }
@@ -233,16 +230,12 @@ void PluginChannelBase::RemoveRoute(int route_id) {
   }
 }
 
-void PluginChannelBase::OnControlMessageReceived(const IPC::Message& msg) {
+bool PluginChannelBase::OnControlMessageReceived(const IPC::Message& msg) {
   NOTREACHED() <<
       "should override in subclass if you care about control messages";
+  return false;
 }
 
 void PluginChannelBase::OnChannelError() {
-#if defined(OS_POSIX)
-  if (channel_valid()) {
-    IPC::RemoveAndCloseChannelSocket(channel_name());
-  }
-#endif
   channel_valid_ = false;
 }

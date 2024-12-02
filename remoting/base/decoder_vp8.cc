@@ -10,15 +10,16 @@
 
 extern "C" {
 #define VPX_CODEC_DISABLE_COMPAT 1
-#include "third_party/libvpx/include/vpx/vpx_codec.h"
-#include "third_party/libvpx/include/vpx/vpx_decoder.h"
-#include "third_party/libvpx/include/vpx/vp8dx.h"
+#include "third_party/libvpx/source/libvpx/vpx/vpx_codec.h"
+#include "third_party/libvpx/source/libvpx/vpx/vpx_decoder.h"
+#include "third_party/libvpx/source/libvpx/vpx/vp8dx.h"
 }
 
 namespace remoting {
 
 DecoderVp8::DecoderVp8()
-    : state_(kUninitialized),
+    : reverse_rows_(true),
+      state_(kUninitialized),
       codec_(NULL) {
 }
 
@@ -51,8 +52,7 @@ Decoder::DecodeResult DecoderVp8::DecodePacket(const VideoPacket* packet) {
     codec_ = new vpx_codec_ctx_t();
     vpx_codec_err_t ret =
         vpx_codec_dec_init(
-            codec_,
-            (const vpx_codec_iface_t*)media::GetVp8DxAlgoAddress(), NULL, 0);
+            codec_, vpx_codec_vp8_dx(), NULL, 0);
     if (ret != VPX_CODEC_OK) {
       LOG(INFO) << "Cannot initialize codec.";
       delete codec_;
@@ -82,11 +82,16 @@ Decoder::DecodeResult DecoderVp8::DecodePacket(const VideoPacket* packet) {
   }
 
   // Perform YUV conversion.
+  uint8* data_start = frame_->data(media::VideoFrame::kRGBPlane);
+  int stride = frame_->stride(media::VideoFrame::kRGBPlane);
+  if (reverse_rows_) {
+    data_start = data_start + (frame_->height() - 1) * stride;
+    stride = -stride;
+  }
+
   media::ConvertYUVToRGB32(image->planes[0], image->planes[1], image->planes[2],
-                           frame_->data(media::VideoFrame::kRGBPlane),
-                           frame_->width(), frame_->height(),
-                           image->stride[0], image->stride[1],
-                           frame_->stride(media::VideoFrame::kRGBPlane),
+                           data_start, frame_->width(), frame_->height(),
+                           image->stride[0], image->stride[1], stride,
                            media::YV12);
   return DECODE_DONE;
 }

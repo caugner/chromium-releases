@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -9,11 +9,14 @@
 #define CHROME_INSTALLER_UTIL_GOOGLE_CHROME_DISTRIBUTION_H_
 #pragma once
 
+#include <string>
+
 #include "base/gtest_prod_util.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/util_constants.h"
 
 class DictionaryValue;
+class FilePath;
 
 class GoogleChromeDistribution : public BrowserDistribution {
  public:
@@ -26,8 +29,8 @@ class GoogleChromeDistribution : public BrowserDistribution {
   // distribution_data contains Google Update related data that will be
   //   concatenated to the survey url if the file in local_data_path indicates
   //   the user has opted in to providing anonymous usage data.
-  virtual void DoPostUninstallOperations(const installer::Version& version,
-                                         const std::wstring& local_data_path,
+  virtual void DoPostUninstallOperations(const Version& version,
+                                         const FilePath& local_data_path,
                                          const std::wstring& distribution_data);
 
   virtual std::wstring GetAppGuid();
@@ -55,7 +58,7 @@ class GoogleChromeDistribution : public BrowserDistribution {
   // This method reads data from the Google Update ClientState key for
   // potential use in the uninstall survey. It must be called before the
   // key returned by GetVersionKey() is deleted.
-  virtual std::wstring GetDistributionData(base::win::RegKey* key);
+  virtual std::wstring GetDistributionData(HKEY root_key);
 
   virtual std::wstring GetUninstallLinkName();
 
@@ -63,27 +66,31 @@ class GoogleChromeDistribution : public BrowserDistribution {
 
   virtual std::wstring GetVersionKey();
 
-  virtual std::wstring GetEnvVersionKey();
+  virtual void UpdateInstallStatus(bool system_install,
+      bool incremental_install, bool multi_install,
+      installer::InstallStatus install_status);
 
-  virtual void UpdateDiffInstallStatus(bool system_install,
-      bool incremental_install, installer_util::InstallStatus install_status);
-
-  virtual void LaunchUserExperiment(installer_util::InstallStatus status,
-                                    const installer::Version& version,
-                                    bool system_install);
+  virtual void LaunchUserExperiment(installer::InstallStatus status,
+      const Version& version,
+      const installer::Product& installation,
+      bool system_level);
 
   // Assuming that the user qualifies, this function performs the inactive user
   // toast experiment. It will use chrome to show the UI and it will record the
   // outcome in the registry.
-  virtual void InactiveUserToastExperiment(int flavor, bool system_install);
+  virtual void InactiveUserToastExperiment(int flavor,
+      const installer::Product& installation);
 
-  std::wstring product_guid() { return product_guid_; }
+  const std::wstring& product_guid() { return product_guid_; }
+
+  virtual bool SetChannelFlags(bool set, installer::ChannelInfo* channel_info);
 
  protected:
-  void set_product_guid(std::wstring guid) { product_guid_ = guid; }
+  void set_product_guid(const std::wstring& guid) { product_guid_ = guid; }
 
   // Disallow construction from others.
-  GoogleChromeDistribution();
+  explicit GoogleChromeDistribution(
+      const installer::MasterPreferences& prefs);
 
  private:
   friend class BrowserDistribution;
@@ -96,11 +103,11 @@ class GoogleChromeDistribution : public BrowserDistribution {
   // Returns true if uninstall_metrics has been successfully populated with
   // the uninstall metrics, false otherwise.
   virtual bool ExtractUninstallMetricsFromFile(
-      const std::wstring& file_path, std::wstring* uninstall_metrics);
+      const FilePath& file_path, std::wstring* uninstall_metrics);
 
   // Extracts uninstall metrics from the given JSON value.
   virtual bool ExtractUninstallMetrics(const DictionaryValue& root,
-      std::wstring* uninstall_metrics);
+                                       std::wstring* uninstall_metrics);
 
   // Given a DictionaryValue containing a set of uninstall metrics,
   // this builds a URL parameter list of all the contained metrics.

@@ -17,7 +17,7 @@
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebTextDirection.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
 
 class Notification;
 class NotificationUIManager;
@@ -93,6 +93,7 @@ class DesktopNotificationService : public NotificationObserver {
   // been allowed or denied yet.
   ContentSetting GetDefaultContentSetting();
   void SetDefaultContentSetting(ContentSetting setting);
+  bool IsDefaultContentSettingManaged() const;
 
   // NOTE: This should only be called on the UI thread.
   void ResetToDefaultContentSetting();

@@ -9,14 +9,13 @@
 
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/lock.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/sha2.h"
 #include "base/string_util.h"
+#include "base/synchronization/lock.h"
 #include "base/third_party/nss/blapi.h"
 #include "base/third_party/nss/sha256.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
 #include "chrome/browser/chromeos/login/auth_response_handler.h"
@@ -24,8 +23,8 @@
 #include "chrome/browser/chromeos/login/login_status_consumer.h"
 #include "chrome/browser/chromeos/login/ownership_service.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/browser/profile.h"
-#include "chrome/browser/profile_manager.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/net/gaia/gaia_auth_fetcher.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
@@ -132,7 +131,7 @@ void ParallelAuthenticator::OnLoginSuccess(
     const GaiaAuthConsumer::ClientLoginResult& credentials,
     bool request_pending) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  VLOG(1) << "Online login success";
+  VLOG(1) << "Login success";
   // Send notification of success
   AuthenticationNotificationDetails details(true);
   NotificationService::current()->Notify(
@@ -140,7 +139,7 @@ void ParallelAuthenticator::OnLoginSuccess(
       NotificationService::AllSources(),
       Details<AuthenticationNotificationDetails>(&details));
   {
-    AutoLock for_this_block(success_lock_);
+    base::AutoLock for_this_block(success_lock_);
     already_reported_success_ = true;
   }
   consumer_->OnLoginSuccess(current_state_->username,
@@ -168,8 +167,8 @@ void ParallelAuthenticator::OnPasswordChangeDetected(
 
 void ParallelAuthenticator::CheckLocalaccount(const LoginFailure& error) {
   {
-    AutoLock for_this_block(localaccount_lock_);
-    VLOG(1) << "Checking localaccount";
+    base::AutoLock for_this_block(localaccount_lock_);
+    VLOG(2) << "Checking localaccount";
     if (!checked_for_localaccount_) {
       BrowserThread::PostDelayedTask(
           BrowserThread::FILE, FROM_HERE,
@@ -227,7 +226,7 @@ void ParallelAuthenticator::RecoverEncryptedData(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(this,
                         &ParallelAuthenticator::ResyncRecoverHelper,
-                        key_migrator_.get()));
+                        key_migrator_));
 }
 
 void ParallelAuthenticator::ResyncEncryptedData(
@@ -238,7 +237,7 @@ void ParallelAuthenticator::ResyncEncryptedData(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(this,
                         &ParallelAuthenticator::ResyncRecoverHelper,
-                        data_remover_.get()));
+                        data_remover_));
 }
 
 void ParallelAuthenticator::ResyncRecoverHelper(CryptohomeOp* to_initiate) {
@@ -273,7 +272,9 @@ void ParallelAuthenticator::Resolve() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   bool request_pending = false;
   bool create = false;
-  switch (ResolveState()) {
+  ParallelAuthenticator::AuthState state = ResolveState();
+  VLOG(1) << "Resolved state to: " << state;
+  switch (state) {
     case CONTINUE:
     case POSSIBLE_PW_CHANGE:
     case NO_MOUNT:
@@ -334,7 +335,7 @@ void ParallelAuthenticator::Resolve() {
       // the 'changed password' path when we know doing so won't succeed.
     case NEED_NEW_PW:
       {
-        AutoLock for_this_block(success_lock_);
+        base::AutoLock for_this_block(success_lock_);
         if (!already_reported_success_) {
           // This allows us to present the same behavior for "online:
           // fail, offline: ok", regardless of the order in which we
@@ -351,7 +352,9 @@ void ParallelAuthenticator::Resolve() {
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
           NewRunnableMethod(this, &ParallelAuthenticator::OnLoginFailure,
-                            current_state_->online_outcome()));
+                            (reauth_state_.get() ?
+                             reauth_state_->online_outcome() :
+                             current_state_->online_outcome())));
       break;
     case HAVE_NEW_PW:
       key_migrator_ =
@@ -364,11 +367,13 @@ void ParallelAuthenticator::Resolve() {
           NewRunnableMethod(key_migrator_.get(), &CryptohomeOp::Initiate));
       break;
     case OFFLINE_LOGIN:
+      VLOG(2) << "Offline login";
       request_pending = !current_state_->online_complete();
       // Fall through.
     case UNLOCK:
       // Fall through.
     case ONLINE_LOGIN:
+      VLOG(2) << "Online login";
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
           NewRunnableMethod(this, &ParallelAuthenticator::OnLoginSuccess,
@@ -545,7 +550,7 @@ void ParallelAuthenticator::LoadSystemSalt() {
 void ParallelAuthenticator::LoadLocalaccount(const std::string& filename) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   {
-    AutoLock for_this_block(localaccount_lock_);
+    base::AutoLock for_this_block(localaccount_lock_);
     if (checked_for_localaccount_)
       return;
   }
@@ -553,7 +558,7 @@ void ParallelAuthenticator::LoadLocalaccount(const std::string& filename) {
   std::string localaccount;
   if (PathService::Get(base::DIR_EXE, &localaccount_file)) {
     localaccount_file = localaccount_file.Append(filename);
-    VLOG(1) << "Looking for localaccount in " << localaccount_file.value();
+    VLOG(2) << "Looking for localaccount in " << localaccount_file.value();
 
     ReadFileToString(localaccount_file, &localaccount);
     TrimWhitespaceASCII(localaccount, TRIM_TRAILING, &localaccount);
@@ -567,7 +572,7 @@ void ParallelAuthenticator::LoadLocalaccount(const std::string& filename) {
 void ParallelAuthenticator::SetLocalaccount(const std::string& new_name) {
   localaccount_ = new_name;
   {  // extra braces for clarity about AutoLock scope.
-    AutoLock for_this_block(localaccount_lock_);
+    base::AutoLock for_this_block(localaccount_lock_);
     checked_for_localaccount_ = true;
   }
 }

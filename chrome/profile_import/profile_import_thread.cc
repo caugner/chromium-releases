@@ -34,7 +34,8 @@ ProfileImportThread::ProfileImportThread()
 
 ProfileImportThread::~ProfileImportThread() {}
 
-void ProfileImportThread::OnControlMessageReceived(const IPC::Message& msg) {
+bool ProfileImportThread::OnControlMessageReceived(const IPC::Message& msg) {
+  bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ProfileImportThread, msg)
     IPC_MESSAGE_HANDLER(ProfileImportProcessMsg_StartImport,
                         OnImportStart)
@@ -42,7 +43,9 @@ void ProfileImportThread::OnControlMessageReceived(const IPC::Message& msg) {
                         OnImportCancel)
     IPC_MESSAGE_HANDLER(ProfileImportProcessMsg_ReportImportItemFinished,
                         OnImportItemFinished)
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+  return handled;
 }
 
 void ProfileImportThread::OnImportStart(
@@ -52,8 +55,8 @@ void ProfileImportThread::OnImportStart(
     bool import_to_bookmark_bar) {
   bridge_ = new ExternalProcessImporterBridge(this, localized_strings);
 
-  ImporterList importer_list;
-  importer_ = importer_list.CreateImporterByType(profile_info.browser_type);
+  scoped_refptr<ImporterList> importer_list(new ImporterList);
+  importer_ = importer_list->CreateImporterByType(profile_info.browser_type);
   if (!importer_) {
     Send(new ProfileImportProcessHostMsg_Import_Finished(false,
         "Importer could not be created."));

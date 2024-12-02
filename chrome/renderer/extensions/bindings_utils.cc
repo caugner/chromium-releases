@@ -1,13 +1,14 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/renderer/extensions/bindings_utils.h"
 
+#include "base/lazy_instance.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "chrome/renderer/render_view.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 
 using WebKit::WebFrame;
 using WebKit::WebView;
@@ -21,6 +22,23 @@ struct SingletonData {
   ContextList contexts;
   PendingRequestMap pending_requests;
 };
+static base::LazyInstance<SingletonData> g_singleton_data(
+    base::LINKER_INITIALIZED);
+
+typedef std::map<int, std::string> StringMap;
+static base::LazyInstance<StringMap> g_string_map(base::LINKER_INITIALIZED);
+
+const char* GetStringResource(int resource_id) {
+  StringMap* strings = g_string_map.Pointer();
+  StringMap::iterator it = strings->find(resource_id);
+  if (it == strings->end()) {
+    it = strings->insert(std::make_pair(
+        resource_id,
+        ResourceBundle::GetSharedInstance().GetRawDataResource(
+            resource_id).as_string())).first;
+  }
+  return it->second.c_str();
+}
 
 // ExtensionBase
 
@@ -44,7 +62,7 @@ v8::Handle<v8::Value> ExtensionBase::GetChromeHidden(
     hidden = v8::Object::New();
     global->SetHiddenValue(v8::String::New(kChromeHidden), hidden);
 
-#ifdef _DEBUG
+#ifndef NDEBUG
     // Tell extension_process_bindings.js to validate callbacks and events
     // against their schema definitions in api/extension_api.json.
     v8::Local<v8::Object>::Cast(hidden)
@@ -70,7 +88,7 @@ ContextInfo::ContextInfo(v8::Persistent<v8::Context> context,
 ContextInfo::~ContextInfo() {}
 
 ContextList& GetContexts() {
-  return Singleton<SingletonData>::get()->contexts;
+  return g_singleton_data.Get().contexts;
 }
 
 ContextList GetContextsForExtension(const std::string& extension_id) {
@@ -120,7 +138,7 @@ ContextList::iterator FindContext(v8::Handle<v8::Context> context) {
 }
 
 PendingRequestMap& GetPendingRequestMap() {
-  return Singleton<SingletonData>::get()->pending_requests;
+  return g_singleton_data.Get().pending_requests;
 }
 
 RenderView* GetRenderViewForCurrentContext() {

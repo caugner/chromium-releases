@@ -38,7 +38,7 @@ struct _egl_config
 
 /**
  * Given a key, return an index into the storage of the config.
- * Return -1 if the key is invalid.
+ * The key must be valid, or an assertion may be thrown.
  */
 static INLINE EGLint
 _eglIndexConfig(const _EGLConfig *conf, EGLint key)
@@ -49,10 +49,13 @@ _eglIndexConfig(const _EGLConfig *conf, EGLint key)
       return key - _EGL_CONFIG_FIRST_ATTRIB;
    
    switch (key) {
+#ifdef EGL_NOK_texture_from_pixmap
    case EGL_Y_INVERTED_NOK:
       return _EGL_CONFIG_FIRST_EXTRA_ATTRIB;
+#endif
    default:
-      return -1;
+      assert(0);
+      return 0;
    }
 }
 
@@ -80,7 +83,6 @@ static INLINE void
 _eglSetConfigKey(_EGLConfig *conf, EGLint key, EGLint val)
 {
    EGLint idx = _eglIndexConfig(conf, key);
-   assert(idx >= 0);
    conf->Storage[idx] = val;
 }
 
@@ -92,7 +94,6 @@ static INLINE EGLint
 _eglGetConfigKey(const _EGLConfig *conf, EGLint key)
 {
    EGLint idx = _eglIndexConfig(conf, key);
-   assert(idx >= 0);
    return conf->Storage[idx];
 }
 

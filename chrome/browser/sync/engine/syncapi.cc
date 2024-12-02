@@ -4,26 +4,21 @@
 
 #include "chrome/browser/sync/engine/syncapi.h"
 
-#include "build/build_config.h"
-
 #include <bitset>
 #include <iomanip>
 #include <list>
 #include <string>
 #include <vector>
 
-#include "base/basictypes.h"
 #include "base/base64.h"
-#include "base/lock.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/platform_thread.h"
 #include "base/scoped_ptr.h"
 #include "base/sha1.h"
 #include "base/string_util.h"
+#include "base/synchronization/lock.h"
 #include "base/task.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/sync/sync_constants.h"
 #include "chrome/browser/sync/engine/all_status.h"
@@ -40,7 +35,6 @@
 #include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
 #include "chrome/browser/sync/protocol/extension_specifics.pb.h"
 #include "chrome/browser/sync/protocol/nigori_specifics.pb.h"
-#include "chrome/browser/sync/protocol/password_specifics.pb.h"
 #include "chrome/browser/sync/protocol/preference_specifics.pb.h"
 #include "chrome/browser/sync/protocol/session_specifics.pb.h"
 #include "chrome/browser/sync/protocol/service_constants.h"
@@ -48,10 +42,10 @@
 #include "chrome/browser/sync/protocol/theme_specifics.pb.h"
 #include "chrome/browser/sync/protocol/typed_url_specifics.pb.h"
 #include "chrome/browser/sync/sessions/sync_session_context.h"
+#include "chrome/browser/sync/syncable/autofill_migration.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/syncable.h"
 #include "chrome/browser/sync/util/crypto_helpers.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/deprecated/event_sys.h"
 #include "chrome/common/net/gaia/gaia_authenticator.h"
 #include "jingle/notifier/listener/mediator_thread_impl.h"
@@ -221,6 +215,10 @@ int64 BaseNode::GetId() const {
   return GetEntry()->Get(syncable::META_HANDLE);
 }
 
+int64 BaseNode::GetModificationTime() const {
+  return GetEntry()->Get(syncable::MTIME);
+}
+
 bool BaseNode::GetIsFolder() const {
   return GetEntry()->Get(syncable::IS_DIR);
 }
@@ -377,6 +375,20 @@ void WriteNode::PutAutofillSpecificsAndMarkForSyncing(
     const sync_pb::AutofillSpecifics& new_value) {
   sync_pb::EntitySpecifics entity_specifics;
   entity_specifics.MutableExtension(sync_pb::autofill)->CopyFrom(new_value);
+  PutSpecificsAndMarkForSyncing(entity_specifics);
+}
+
+void WriteNode::SetAutofillProfileSpecifics(
+    const sync_pb::AutofillProfileSpecifics& new_value) {
+  DCHECK_EQ(GetModelType(), syncable::AUTOFILL_PROFILE);
+  PutAutofillProfileSpecificsAndMarkForSyncing(new_value);
+}
+
+void WriteNode::PutAutofillProfileSpecificsAndMarkForSyncing(
+    const sync_pb::AutofillProfileSpecifics& new_value) {
+  sync_pb::EntitySpecifics entity_specifics;
+  entity_specifics.MutableExtension(sync_pb::autofill_profile)->CopyFrom(
+      new_value);
   PutSpecificsAndMarkForSyncing(entity_specifics);
 }
 
@@ -1050,16 +1062,7 @@ class SyncManager::SyncInternal
     return share_.name;
   }
 
-  // Note about SyncManager::Status implementation: Status is a trimmed
-  // down AllStatus::Status, augmented with authentication failure information
-  // gathered from the internal AuthWatcher. The sync UI itself hooks up to
-  // various sources like the AuthWatcher individually, but with syncapi we try
-  // to keep everything status-related in one place. This means we have to
-  // privately manage state about authentication failures, and whenever the
-  // status or status summary is requested we aggregate this state with
-  // AllStatus::Status information.
-  Status ComputeAggregatedStatus();
-  Status::Summary ComputeAggregatedStatusSummary();
+  Status GetStatus();
 
   // See SyncManager::Shutdown for information.
   void Shutdown();
@@ -1067,7 +1070,7 @@ class SyncManager::SyncInternal
   // Whether we're initialized to the point of being able to accept changes
   // (and hence allow transaction creation). See initialized_ for details.
   bool initialized() const {
-    AutoLock lock(initialized_mutex_);
+    base::AutoLock lock(initialized_mutex_);
     return initialized_;
   }
 
@@ -1097,6 +1100,50 @@ class SyncManager::SyncInternal
         return false;
     }
     return true;
+  }
+
+  syncable::AutofillMigrationState GetAutofillMigrationState() {
+    syncable::ScopedDirLookup lookup(dir_manager(), username_for_share());
+    if (!lookup.good()) {
+      DCHECK(false) << "ScopedDirLookup failed when checking initial sync";
+      return syncable::NOT_MIGRATED;
+    }
+
+    return lookup->get_autofill_migration_state();
+  }
+
+  void SetAutofillMigrationState(syncable::AutofillMigrationState state) {
+    syncable::ScopedDirLookup lookup(dir_manager(), username_for_share());
+    if (!lookup.good()) {
+      DCHECK(false) << "ScopedDirLookup failed when checking initial sync";
+      return;
+    }
+
+    return lookup->set_autofill_migration_state(state);
+  }
+
+  void SetAutofillMigrationDebugInfo(
+      syncable::AutofillMigrationDebugInfo::PropertyToSet property_to_set,
+      const syncable::AutofillMigrationDebugInfo& info) {
+    syncable::ScopedDirLookup lookup(dir_manager(), username_for_share());
+    if (!lookup.good()) {
+      DCHECK(false) << "ScopedDirLookup failed when checking initial sync";
+      return;
+    }
+
+    return lookup->set_autofill_migration_state_debug_info(
+        property_to_set, info);
+  }
+
+  syncable::AutofillMigrationDebugInfo
+      GetAutofillMigrationDebugInfo() {
+    syncable::ScopedDirLookup lookup(dir_manager(), username_for_share());
+    if (!lookup.good()) {
+      DCHECK(false) << "ScopedDirLookup failed when checking initial sync";
+      syncable::AutofillMigrationDebugInfo null_value = {0};
+      return null_value;
+    }
+    return lookup->get_autofill_migration_debug_info();
   }
 
   // SyncEngineEventListener implementation.
@@ -1263,7 +1310,7 @@ class SyncManager::SyncInternal
   // meaning we are ready to accept changes.  Protected by initialized_mutex_
   // as it can get read/set by both the SyncerThread and the AuthWatcherThread.
   bool initialized_;
-  mutable Lock initialized_mutex_;
+  mutable base::Lock initialized_mutex_;
 
   notifier::NotifierOptions notifier_options_;
 
@@ -1318,6 +1365,27 @@ bool SyncManager::InitialSyncEndedForAllEnabledTypes() {
 
 void SyncManager::StartSyncing() {
   data_->StartSyncing();
+}
+
+syncable::AutofillMigrationState
+    SyncManager::GetAutofillMigrationState() {
+  return data_->GetAutofillMigrationState();
+}
+
+void SyncManager::SetAutofillMigrationState(
+    syncable::AutofillMigrationState state) {
+  return data_->SetAutofillMigrationState(state);
+}
+
+syncable::AutofillMigrationDebugInfo
+    SyncManager::GetAutofillMigrationDebugInfo() {
+  return data_->GetAutofillMigrationDebugInfo();
+}
+
+void SyncManager::SetAutofillMigrationDebugInfo(
+    syncable::AutofillMigrationDebugInfo::PropertyToSet property_to_set,
+    const syncable::AutofillMigrationDebugInfo& info) {
+  return data_->SetAutofillMigrationDebugInfo(property_to_set, info);
 }
 
 void SyncManager::SetPassphrase(const std::string& passphrase,
@@ -1463,7 +1531,7 @@ void SyncManager::SyncInternal::MarkAndNotifyInitializationComplete() {
   // between their respective threads to call MarkAndNotify.  We need to make
   // sure the observer is notified once and only once.
   {
-    AutoLock lock(initialized_mutex_);
+    base::AutoLock lock(initialized_mutex_);
     if (initialized_)
       return;
     initialized_ = true;
@@ -1986,47 +2054,8 @@ void SyncManager::SyncInternal::HandleCalculateChangesChangeEventFromSyncer(
   }
 }
 
-SyncManager::Status::Summary
-SyncManager::SyncInternal::ComputeAggregatedStatusSummary() {
-  switch (allstatus_.status().icon) {
-    case AllStatus::OFFLINE:
-      return Status::OFFLINE;
-    case AllStatus::OFFLINE_UNSYNCED:
-      return Status::OFFLINE_UNSYNCED;
-    case AllStatus::SYNCING:
-      return Status::SYNCING;
-    case AllStatus::READY:
-      return Status::READY;
-    case AllStatus::CONFLICT:
-      return Status::CONFLICT;
-    case AllStatus::OFFLINE_UNUSABLE:
-      return Status::OFFLINE_UNUSABLE;
-    default:
-      return Status::INVALID;
-  }
-}
-
-SyncManager::Status SyncManager::SyncInternal::ComputeAggregatedStatus() {
-  Status return_status =
-      { ComputeAggregatedStatusSummary(),
-        allstatus_.status().authenticated,
-        allstatus_.status().server_up,
-        allstatus_.status().server_reachable,
-        allstatus_.status().server_broken,
-        allstatus_.status().notifications_enabled,
-        allstatus_.status().notifications_received,
-        allstatus_.status().notifications_sent,
-        allstatus_.status().unsynced_count,
-        allstatus_.status().conflicting_count,
-        allstatus_.status().syncing,
-        allstatus_.status().initial_sync_ended,
-        allstatus_.status().syncer_stuck,
-        allstatus_.status().updates_available,
-        allstatus_.status().updates_received,
-        allstatus_.status().disk_full,
-        false,   // TODO(ncarter): invalid store?
-        allstatus_.status().max_consecutive_errors};
-  return return_status;
+SyncManager::Status SyncManager::SyncInternal::GetStatus() {
+  return allstatus_.status();
 }
 
 void SyncManager::SyncInternal::OnSyncEngineEvent(
@@ -2232,11 +2261,11 @@ void SyncManager::SyncInternal::WriteState(const std::string& state) {
 }
 
 SyncManager::Status::Summary SyncManager::GetStatusSummary() const {
-  return data_->ComputeAggregatedStatusSummary();
+  return data_->GetStatus().summary;
 }
 
 SyncManager::Status SyncManager::GetDetailedStatus() const {
-  return data_->ComputeAggregatedStatus();
+  return data_->GetStatus();
 }
 
 SyncManager::SyncInternal* SyncManager::GetImpl() const { return data_; }

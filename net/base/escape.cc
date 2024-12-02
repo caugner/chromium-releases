@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,19 +71,27 @@ const std::string Escape(const std::string& text, const Charmap& charmap,
 //
 // The basic rule is that we can't unescape anything that would changing parsing
 // like # or ?. We also can't unescape &, =, or + since that could be part of a
-// query and that could change the server's parsing of the query.
+// query and that could change the server's parsing of the query. Nor can we
+// unescape \ since googleurl will convert it to a /.
+//
+// Lastly, we can't unescape anything that doesn't have a canonical
+// representation in a URL. This means that unescaping will change the URL, and
+// you could get different behavior if you copy and paste the URL, or press
+// enter in the URL bar. The list of characters that fall into this category
+// are the ones labeled PASS (allow either escaped or unescaped) in the big
+// lookup table at the top of googleurl/src/url_canon_path.cc
 const char kUrlUnescape[128] = {
 //   NULL, control chars...
      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 //  ' ' !  "  #  $  %  &  '  (  )  *  +  ,  -  .  /
-     0, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1,
+     0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
 //   0  1  2  3  4  5  6  7  8  9  :  ;  <  =  >  ?
-     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0,
+     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0,
 //   @  A  B  C  D  E  F  G  H  I  J  K  L  M  N  O
      0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 //   P  Q  R  S  T  U  V  W  X  Y  Z  [  \  ]  ^  _
-     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1,
 //   `  a  b  c  d  e  f  g  h  i  j  k  l  m  n  o
      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 //   p  q  r  s  t  u  v  w  x  y  z  {  |  }  ~  <NBSP>
@@ -184,9 +192,9 @@ std::string EscapeQueryParamValue(const std::string& text, bool use_plus) {
 
 // Convert the string to a sequence of bytes and then % escape anything
 // except alphanumerics and !'()*-._~
-std::wstring EscapeQueryParamValueUTF8(const std::wstring& text,
-                                       bool use_plus) {
-  return UTF8ToWide(Escape(WideToUTF8(text), kQueryCharmap, use_plus));
+string16 EscapeQueryParamValueUTF8(const string16& text,
+                                   bool use_plus) {
+  return UTF8ToUTF16(Escape(UTF16ToUTF8(text), kQueryCharmap, use_plus));
 }
 
 // non-printable, non-7bit, and (including space)  "#%:<>?[\]^`{|}

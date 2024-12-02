@@ -31,16 +31,17 @@ enum UploadRequired {
   USE_UPLOAD_RATES
 };
 
+class AutoFillMetrics;
+
 // FormStructure stores a single HTML form together with the values entered
 // in the fields along with additional information needed by AutoFill.
 class FormStructure {
  public:
   explicit FormStructure(const webkit_glue::FormData& form);
-  ~FormStructure();
+  virtual ~FormStructure();
 
   // Encodes the XML upload request from this FormStructure.
-  bool EncodeUploadRequest(bool auto_fill_used,
-                           std::string* encoded_xml) const;
+  bool EncodeUploadRequest(bool auto_fill_used, std::string* encoded_xml) const;
 
   // Encodes the XML query request for the set of forms.
   // All fields are returned in one XML. For example, there are three forms,
@@ -55,7 +56,8 @@ class FormStructure {
   // same as the one passed to EncodeQueryRequest when constructing the query.
   static void ParseQueryResponse(const std::string& response_xml,
                                  const std::vector<FormStructure*>& forms,
-                                 UploadRequired* upload_required);
+                                 UploadRequired* upload_required,
+                                 const AutoFillMetrics& metric_logger);
 
   // The unique signature for this form, composed of the target url domain,
   // the form name, and the form field names in a 64-bit hash.
@@ -103,7 +105,15 @@ class FormStructure {
   bool operator==(const webkit_glue::FormData& form) const;
   bool operator!=(const webkit_glue::FormData& form) const;
 
+ protected:
+  // For tests.
+  ScopedVector<AutoFillField>* fields() { return &fields_; }
+
  private:
+  friend class FormStructureTest;
+  // 64-bit hash of the string - used in FormSignature and unit-tests.
+  static std::string Hash64Bit(const std::string& str);
+
   enum EncodeRequestType {
     QUERY,
     UPLOAD,
@@ -120,6 +130,10 @@ class FormStructure {
   // it is a query or upload.
   bool EncodeFormRequest(EncodeRequestType request_type,
                          buzz::XmlElement* encompassing_xml_element) const;
+
+  // Helper for EncodeUploadRequest() that collects presense of all data in the
+  // form structure and converts it to string for uploading.
+  std::string ConvertPresenceBitsToString() const;
 
   // The name of the form.
   string16 form_name_;

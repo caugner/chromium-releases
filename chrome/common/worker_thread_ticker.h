@@ -8,8 +8,8 @@
 
 #include <vector>
 
-#include "base/lock.h"
-#include "base/thread.h"
+#include "base/synchronization/lock.h"
+#include "base/threading/thread.h"
 
 // This class provides the following functionality:
 // It invokes a set of registered handlers at periodic intervals in
@@ -74,7 +74,7 @@ class WorkerThreadTicker {
   typedef std::vector<Callback*> TickHandlerListType;
 
   // Lock to protect is_running_ and tick_handler_list_
-  Lock lock_;
+  base::Lock lock_;
 
   base::Thread timer_thread_;
   bool is_running_;

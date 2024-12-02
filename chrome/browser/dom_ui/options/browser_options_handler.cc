@@ -1,10 +1,9 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/dom_ui/options/browser_options_handler.h"
 
-#include "app/l10n_util.h"
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
 #include "base/singleton.h"
@@ -14,18 +13,21 @@
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/custom_home_pages_table_model.h"
 #include "chrome/browser/dom_ui/dom_ui_favicon_source.h"
+#include "chrome/browser/dom_ui/options/dom_options_util.h"
 #include "chrome/browser/dom_ui/options/options_managed_banner_handler.h"
 #include "chrome/browser/instant/instant_confirm_dialog.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/net/url_fixer_upper.h"
-#include "chrome/browser/options_window.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
+#include "chrome/browser/ui/options/options_window.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 
 BrowserOptionsHandler::BrowserOptionsHandler()
     : template_url_model_(NULL), startup_custom_pages_table_model_(NULL) {
@@ -45,7 +47,8 @@ void BrowserOptionsHandler::GetLocalizedValues(
     DictionaryValue* localized_strings) {
   DCHECK(localized_strings);
   localized_strings->SetString("startupGroupName",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_STARTUP_GROUP_NAME));
+      dom_options_util::StripColon(
+          l10n_util::GetStringUTF16(IDS_OPTIONS_STARTUP_GROUP_NAME)));
   localized_strings->SetString("startupShowDefaultAndNewTab",
       l10n_util::GetStringUTF16(IDS_OPTIONS_STARTUP_SHOW_DEFAULT_AND_NEWTAB));
   localized_strings->SetString("startupShowLastSession",
@@ -54,24 +57,25 @@ void BrowserOptionsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_OPTIONS_STARTUP_SHOW_PAGES));
   localized_strings->SetString("startupAddButton",
       l10n_util::GetStringUTF16(IDS_OPTIONS_STARTUP_ADD_BUTTON));
-  localized_strings->SetString("startupRemoveButton",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_STARTUP_REMOVE_BUTTON));
   localized_strings->SetString("startupUseCurrent",
       l10n_util::GetStringUTF16(IDS_OPTIONS_STARTUP_USE_CURRENT));
   localized_strings->SetString("homepageGroupName",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_HOMEPAGE_GROUP_NAME));
+      dom_options_util::StripColon(
+          l10n_util::GetStringUTF16(IDS_OPTIONS_HOMEPAGE_GROUP_NAME)));
   localized_strings->SetString("homepageUseNewTab",
       l10n_util::GetStringUTF16(IDS_OPTIONS_HOMEPAGE_USE_NEWTAB));
   localized_strings->SetString("homepageUseURL",
       l10n_util::GetStringUTF16(IDS_OPTIONS_HOMEPAGE_USE_URL));
   localized_strings->SetString("toolbarGroupName",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_TOOLBAR_GROUP_NAME));
+      dom_options_util::StripColon(
+          l10n_util::GetStringUTF16(IDS_OPTIONS_TOOLBAR_GROUP_NAME)));
   localized_strings->SetString("toolbarShowHomeButton",
       l10n_util::GetStringUTF16(IDS_OPTIONS_TOOLBAR_SHOW_HOME_BUTTON));
   localized_strings->SetString("defaultSearchGroupName",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_DEFAULTSEARCH_GROUP_NAME));
-  localized_strings->SetString("defaultSearchManageEnginesLink",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_DEFAULTSEARCH_MANAGE_ENGINES_LINK));
+      dom_options_util::StripColon(
+          l10n_util::GetStringUTF16(IDS_OPTIONS_DEFAULTSEARCH_GROUP_NAME)));
+  localized_strings->SetString("defaultSearchManageEngines",
+      l10n_util::GetStringUTF16(IDS_OPTIONS_DEFAULTSEARCH_MANAGE_ENGINES));
   localized_strings->SetString("instantName",
       l10n_util::GetStringUTF16(IDS_INSTANT_PREF));
   localized_strings->SetString("instantWarningText",
@@ -83,7 +87,8 @@ void BrowserOptionsHandler::GetLocalizedValues(
   localized_strings->SetString("instantConfirmMessage",
       l10n_util::GetStringUTF16(IDS_INSTANT_OPT_IN_MESSAGE));
   localized_strings->SetString("defaultBrowserGroupName",
-      l10n_util::GetStringUTF16(IDS_OPTIONS_DEFAULTBROWSER_GROUP_NAME));
+      dom_options_util::StripColon(
+          l10n_util::GetStringUTF16(IDS_OPTIONS_DEFAULTBROWSER_GROUP_NAME)));
   localized_strings->SetString("defaultBrowserUnknown",
       l10n_util::GetStringFUTF16(IDS_OPTIONS_DEFAULTBROWSER_UNKNOWN,
           l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
@@ -93,6 +98,9 @@ void BrowserOptionsHandler::GetLocalizedValues(
 }
 
 void BrowserOptionsHandler::RegisterMessages() {
+  dom_ui_->RegisterMessageCallback(
+      "setHomePage",
+      NewCallback(this, &BrowserOptionsHandler::SetHomePage));
   dom_ui_->RegisterMessageCallback(
       "becomeDefaultBrowser",
       NewCallback(this, &BrowserOptionsHandler::BecomeDefaultBrowser));
@@ -106,19 +114,25 @@ void BrowserOptionsHandler::RegisterMessages() {
       "addStartupPage",
       NewCallback(this, &BrowserOptionsHandler::AddStartupPage));
   dom_ui_->RegisterMessageCallback(
+      "editStartupPage",
+      NewCallback(this, &BrowserOptionsHandler::EditStartupPage));
+  dom_ui_->RegisterMessageCallback(
       "setStartupPagesToCurrentPages",
       NewCallback(this, &BrowserOptionsHandler::SetStartupPagesToCurrentPages));
 }
 
 void BrowserOptionsHandler::Initialize() {
+  Profile* profile = dom_ui_->GetProfile();
+
   // Create our favicon data source.
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
-          make_scoped_refptr(new DOMUIFavIconSource(dom_ui_->GetProfile()))));
+          make_scoped_refptr(new DOMUIFavIconSource(profile))));
 
+  homepage_.Init(prefs::kHomePage, profile->GetPrefs(), NULL);
   UpdateDefaultBrowserState();
   UpdateStartupPages();
   UpdateSearchEngines();
@@ -126,6 +140,24 @@ void BrowserOptionsHandler::Initialize() {
       new OptionsManagedBannerHandler(dom_ui_,
                                       ASCIIToUTF16("BrowserOptions"),
                                       OPTIONS_PAGE_GENERAL));
+}
+
+void BrowserOptionsHandler::SetHomePage(const ListValue* args) {
+  std::string url_string;
+  std::string do_fixup_string;
+  int do_fixup;
+  if (args->GetSize() != 2 ||
+      !args->GetString(0, &url_string) ||
+      !args->GetString(1, &do_fixup_string) ||
+      !base::StringToInt(do_fixup_string, &do_fixup)) {
+    CHECK(false);
+  };
+
+  if (do_fixup) {
+    GURL fixed_url = URLFixerUpper::FixupURL(url_string, std::string());
+    url_string = fixed_url.spec();
+  }
+  homepage_.SetValueIfNotManaged(url_string);
 }
 
 void BrowserOptionsHandler::UpdateDefaultBrowserState() {
@@ -222,7 +254,7 @@ void BrowserOptionsHandler::OnTemplateURLModelChanged() {
       continue;
 
     DictionaryValue* entry = new DictionaryValue();
-    entry->SetString("name", WideToUTF16Hack(model_urls[i]->short_name()));
+    entry->SetString("name", model_urls[i]->short_name());
     entry->SetInteger("index", i);
     search_engines.Append(entry);
     if (model_urls[i] == default_url)
@@ -277,11 +309,11 @@ void BrowserOptionsHandler::OnModelChanged() {
   std::vector<GURL> urls = startup_custom_pages_table_model_->GetURLs();
   for (int i = 0; i < page_count; ++i) {
     DictionaryValue* entry = new DictionaryValue();
-    entry->SetString("title", WideToUTF16Hack(
-        startup_custom_pages_table_model_->GetText(i, 0)));
+    entry->SetString("title", startup_custom_pages_table_model_->GetText(i, 0));
     entry->SetString("url", urls[i].spec());
-    entry->SetString("tooltip", WideToUTF16Hack(
-        startup_custom_pages_table_model_->GetTooltip(i)));
+    entry->SetString("tooltip",
+                     startup_custom_pages_table_model_->GetTooltip(i));
+    entry->SetString("modelIndex", base::IntToString(i));
     startup_pages.Append(entry);
   }
 
@@ -311,8 +343,7 @@ void BrowserOptionsHandler::RemoveStartupPages(const ListValue* args) {
   for (int i = args->GetSize() - 1; i >= 0; --i) {
     std::string string_value;
     if (!args->GetString(i, &string_value)) {
-      NOTREACHED();
-      return;
+      CHECK(false);
     }
     int selected_index;
     base::StringToInt(string_value, &selected_index);
@@ -335,8 +366,7 @@ void BrowserOptionsHandler::AddStartupPage(const ListValue* args) {
       !args->GetString(0, &url_string) ||
       !args->GetString(1, &index_string) ||
       !base::StringToInt(index_string, &index)) {
-    NOTREACHED();
-    return;
+    CHECK(false);
   };
 
   if (index == -1)
@@ -348,6 +378,27 @@ void BrowserOptionsHandler::AddStartupPage(const ListValue* args) {
 
   startup_custom_pages_table_model_->Add(index, url);
   SaveStartupPagesPref();
+}
+
+void BrowserOptionsHandler::EditStartupPage(const ListValue* args) {
+  std::string url_string;
+  std::string index_string;
+  int index;
+  if (args->GetSize() != 2 ||
+      !args->GetString(0, &index_string) ||
+      !base::StringToInt(index_string, &index) ||
+      !args->GetString(1, &url_string)) {
+    CHECK(false);
+  };
+
+  if (index < 0 || index > startup_custom_pages_table_model_->RowCount()) {
+    NOTREACHED();
+    return;
+  }
+
+  std::vector<GURL> urls = startup_custom_pages_table_model_->GetURLs();
+  urls[index] = URLFixerUpper::FixupURL(url_string, std::string());
+  startup_custom_pages_table_model_->SetURLs(urls);
 }
 
 void BrowserOptionsHandler::SaveStartupPagesPref() {

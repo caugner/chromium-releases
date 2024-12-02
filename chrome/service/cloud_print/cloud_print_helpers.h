@@ -35,6 +35,9 @@ class CloudPrintHelpers {
   static GURL GetUrlForJobStatusUpdate(
       const GURL& cloud_print_server_url, const std::string& job_id,
       const cloud_print::PrintJobDetails& details);
+  static GURL GetUrlForUserMessage(const GURL& cloud_print_server_url,
+                                   const std::string& message_id);
+
   // Parses the response data for any cloud print server request. The method
   // returns false if there was an error in parsing the JSON. The succeeded
   // value returns the value of the "success" value in the response JSON.
@@ -57,6 +60,8 @@ class CloudPrintHelpers {
       const std::string& mime_boundary,
       std::string* post_data);
 
+  // Returns true is tags indicate a dry run (test) job.
+  static bool IsDryRunJob(const std::vector<std::string>& tags);
  private:
   CloudPrintHelpers() {
   }

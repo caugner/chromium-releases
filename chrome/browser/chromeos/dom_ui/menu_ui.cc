@@ -4,8 +4,8 @@
 
 #include "chrome/browser/chromeos/dom_ui/menu_ui.h"
 
-#include "app/menus/menu_model.h"
-#include "app/resource_bundle.h"
+#include <algorithm>
+
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/json/json_writer.h"
@@ -20,7 +20,6 @@
 #include "chrome/browser/chromeos/views/domui_menu_widget.h"
 #include "chrome/browser/chromeos/views/native_menu_domui.h"
 #include "chrome/browser/dom_ui/dom_ui_util.h"
-#include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/common/url_constants.h"
@@ -31,6 +30,8 @@
 #include "gfx/font.h"
 #include "grit/app_resources.h"
 #include "grit/browser_resources.h"
+#include "ui/base/models/menu_model.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/accelerator.h"
 #include "views/controls/menu/menu_config.h"
 #include "views/controls/menu/radio_button_image_gtk.h"
@@ -42,30 +43,30 @@ namespace {
 const int kNoExtraResource = -1;
 
 // A utility function that generates css font property from gfx::Font.
-std::wstring GetFontShorthand(const gfx::Font* font) {
-  std::wstring out;
+// NOTE: Returns UTF-8.
+std::string GetFontShorthand(const gfx::Font* font) {
+  std::string out;
   if (font == NULL) {
     font = &(views::MenuConfig::instance().font);
   }
   if (font->GetStyle() & gfx::Font::BOLD) {
-    out.append(L"bold ");
+    out.append("bold ");
   }
   if (font->GetStyle() & gfx::Font::ITALIC) {
-    out.append(L"italic ");
+    out.append("italic ");
   }
   if (font->GetStyle() & gfx::Font::UNDERLINED) {
-    out.append(L"underline ");
+    out.append("underline ");
   }
 
   // TODO(oshima): The font size from gfx::Font is too small when
   // used in webkit. Figure out the reason.
-  out.append(ASCIIToWide(base::IntToString(font->GetFontSize() + 4)));
-  out.append(L"px/");
-  out.append(ASCIIToWide(base::IntToString(
-      std::max(kFavIconSize, font->GetHeight()))));
-  out.append(L"px \"");
-  out.append(font->GetFontName());
-  out.append(L"\",sans-serif");
+  out.append(base::IntToString(font->GetFontSize() + 4));
+  out.append("px/");
+  out.append(base::IntToString(std::max(kFavIconSize, font->GetHeight())));
+  out.append("px \"");
+  out.append(UTF16ToUTF8(font->GetFontName()));
+  out.append("\",sans-serif");
   return out;
 }
 
@@ -314,8 +315,7 @@ MenuUIHTMLSource::MenuUIHTMLSource(const chromeos::MenuSourceDelegate* delegate,
       delegate_(delegate),
       menu_class_(menu_class),
       menu_source_id_(menu_source_id),
-      menu_css_id_(menu_css_id)
-{
+      menu_css_id_(menu_css_id) {
 }
 
 void MenuUIHTMLSource::StartDataRequest(const std::string& path,
@@ -405,7 +405,7 @@ void MenuHandler::HandleActivate(const ListValue* values) {
   DCHECK(success);
   chromeos::DOMUIMenuControl* control = GetMenuControl();
   if (control) {
-    menus::MenuModel* model = GetMenuModel();
+    ui::MenuModel* model = GetMenuModel();
     DCHECK(model);
     DCHECK_GE(index, 0);
     DCHECK(activation == "close_and_activate" ||
@@ -464,7 +464,7 @@ void MenuHandler::HandleCloseAll(const ListValue* values) {
 }
 
 void MenuHandler::HandleModelUpdated(const ListValue* values) {
-  menus::MenuModel* model = GetMenuModel();
+  ui::MenuModel* model = GetMenuModel();
   if (model)
     static_cast<chromeos::MenuUI*>(dom_ui_)->ModelUpdated(model);
 }
@@ -514,7 +514,7 @@ chromeos::DOMUIMenuControl* MenuHandlerBase::GetMenuControl() {
     return NULL;
 }
 
-menus::MenuModel* MenuHandlerBase::GetMenuModel() {
+ui::MenuModel* MenuHandlerBase::GetMenuModel() {
   DOMUIMenuControl* control = GetMenuControl();
   if (control)
     return control->GetMenuModel();
@@ -535,7 +535,7 @@ MenuUI::MenuUI(TabContents* contents) : DOMUI(contents) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
           make_scoped_refptr(CreateDataSource())));
 }
@@ -548,39 +548,39 @@ MenuUI::MenuUI(TabContents* contents, ChromeURLDataManager::DataSource* source)
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
           make_scoped_refptr(source)));
 }
 
-void MenuUI::ModelUpdated(const menus::MenuModel* model) {
+void MenuUI::ModelUpdated(const ui::MenuModel* model) {
   DictionaryValue json_model;
   ListValue* items = new ListValue();
   json_model.Set("items", items);
   int max_icon_width = 0;
   bool has_accelerator = false;
   for (int index = 0; index < model->GetItemCount(); ++index) {
-    menus::MenuModel::ItemType type = model->GetTypeAt(index);
+    ui::MenuModel::ItemType type = model->GetTypeAt(index);
     DictionaryValue* item;
     switch (type) {
-      case menus::MenuModel::TYPE_SEPARATOR:
+      case ui::MenuModel::TYPE_SEPARATOR:
         item = CreateMenuItem(model, index, "separator",
                               &max_icon_width, &has_accelerator);
         break;
-      case menus::MenuModel::TYPE_RADIO:
+      case ui::MenuModel::TYPE_RADIO:
         max_icon_width = std::max(max_icon_width, 12);
         item = CreateMenuItem(model, index, "radio",
                               &max_icon_width, &has_accelerator);
         break;
-      case menus::MenuModel::TYPE_SUBMENU:
+      case ui::MenuModel::TYPE_SUBMENU:
         item = CreateMenuItem(model, index, "submenu",
                               &max_icon_width, &has_accelerator);
         break;
-      case menus::MenuModel::TYPE_COMMAND:
+      case ui::MenuModel::TYPE_COMMAND:
         item = CreateMenuItem(model, index, "command",
                               &max_icon_width, &has_accelerator);
         break;
-      case menus::MenuModel::TYPE_CHECK:
+      case ui::MenuModel::TYPE_CHECK:
         // Add space even when unchecked.
         max_icon_width = std::max(max_icon_width, 12);
         item = CreateMenuItem(model, index, "check",
@@ -603,7 +603,7 @@ void MenuUI::ModelUpdated(const menus::MenuModel* model) {
   CallJavascriptFunction(L"updateModel", json_model);
 }
 
-DictionaryValue* MenuUI::CreateMenuItem(const menus::MenuModel* model,
+DictionaryValue* MenuUI::CreateMenuItem(const ui::MenuModel* model,
                                         int index,
                                         const char* type,
                                         int* max_icon_width,
@@ -619,7 +619,7 @@ DictionaryValue* MenuUI::CreateMenuItem(const menus::MenuModel* model,
   item->SetBoolean("checked", model->IsItemCheckedAt(index));
   item->SetInteger("command_id", model->GetCommandIdAt(index));
   item->SetString(
-      "font", WideToUTF16(GetFontShorthand(model->GetLabelFontAt(index))));
+      "font", GetFontShorthand(model->GetLabelFontAt(index)));
   SkBitmap icon;
   if (model->GetIconAt(index, &icon) && !icon.isNull() && !icon.empty()) {
     item->SetString("icon", dom_ui_util::GetImageDataUrl(icon));
@@ -627,7 +627,7 @@ DictionaryValue* MenuUI::CreateMenuItem(const menus::MenuModel* model,
   }
   views::Accelerator menu_accelerator;
   if (model->GetAcceleratorAt(index, &menu_accelerator)) {
-    item->SetString("accel", WideToUTF16(menu_accelerator.GetShortcutText()));
+    item->SetString("accel", menu_accelerator.GetShortcutText());
     *has_accel = true;
   }
   return item;

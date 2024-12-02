@@ -9,13 +9,8 @@
 
 #include <algorithm>
 
-#include "app/l10n_util.h"
-#include "app/l10n_util_win.h"
-#include "app/resource_bundle.h"
-#include "app/table_model.h"
 #include "base/i18n/rtl.h"
 #include "base/string_util.h"
-#include "base/win_util.h"
 #include "gfx/canvas_skia.h"
 #include "gfx/favicon_size.h"
 #include "gfx/font.h"
@@ -23,8 +18,15 @@
 #include "skia/ext/skia_utils_win.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/l10n/l10n_util_win.h"
+#include "ui/base/models/table_model.h"
+#include "ui/base/resource/resource_bundle.h"
+#include "ui/base/win/hwnd_util.h"
 #include "views/controls/native/native_view_host.h"
 #include "views/controls/table/table_view_observer.h"
+
+using ui::TableColumn;
 
 namespace {
 
@@ -680,13 +682,10 @@ LRESULT CALLBACK TableView::TableWndProc(HWND window,
               // Unselect everything.
               ListView_SetItemState(window, -1, 0, LVIS_SELECTED);
               select = false;
-
-              // Select from mark to mouse down location.
-              for (int i = std::min(view_index, mark_view_index),
-                   max_i = std::max(view_index, mark_view_index); i <= max_i;
-                   ++i) {
-                table_view->SetSelectedState(table_view->ViewToModel(i),
-                                             true);
+              if (!table_view->SelectMultiple(view_index, mark_view_index)) {
+                // Selection spans group boundary - reset selection to current.
+                table_view->SetSelectedState(model_index, true);
+                ListView_SetSelectionMark(window, view_index);
               }
             }
           }
@@ -838,14 +837,14 @@ HWND TableView::CreateNativeControl(HWND parent_container) {
     DCHECK(header);
     SetWindowLongPtr(header, GWLP_USERDATA,
         reinterpret_cast<LONG_PTR>(&table_view_wrapper_));
-    header_original_handler_ = win_util::SetWindowProc(header,
+    header_original_handler_ = ui::SetWindowProc(header,
         &TableView::TableHeaderWndProc);
   }
 
   SetWindowLongPtr(list_view_, GWLP_USERDATA,
       reinterpret_cast<LONG_PTR>(&table_view_wrapper_));
   original_handler_ =
-      win_util::SetWindowProc(list_view_, &TableView::TableWndProc);
+      ui::SetWindowProc(list_view_, &TableView::TableWndProc);
 
   // Bug 964884: detach the IME attached to this window.
   // We should attach IMEs only when we need to input CJK strings.
@@ -916,6 +915,32 @@ void TableView::SortItemsAndUpdateMapping() {
     view_to_model_[i] = model_index;
     model_to_view_[model_index] = i;
   }
+}
+
+bool TableView::SelectMultiple(int view_index, int mark_view_index) {
+  int group_id = 0;
+  if (model_->HasGroups()) {
+    group_id = model_->GetGroupID(ViewToModel(view_index));
+    if (group_id != model_->GetGroupID(ViewToModel(mark_view_index))) {
+      // User is trying to do a cross-group selection - bail out.
+      return false;
+    }
+  }
+
+  // Select from mark to mouse down location.
+  for (int i = std::min(view_index, mark_view_index),
+       max_i = std::max(view_index, mark_view_index); i <= max_i;
+       ++i) {
+    // Items between the view_index and mark_view_index are not necessarily in
+    // the same group, so don't select anything outside the group the user
+    // just clicked in.
+    if (model_->HasGroups() &&
+        model_->GetGroupID(ViewToModel(i)) != group_id) {
+      continue;
+    }
+    SetSelectedState(ViewToModel(i), true);
+  }
+  return true;
 }
 
 // static
@@ -1480,7 +1505,7 @@ void TableView::OnSelectedStateChanged() {
   }
 }
 
-bool TableView::OnKeyDown(app::KeyboardCode virtual_keycode) {
+bool TableView::OnKeyDown(ui::KeyboardCode virtual_keycode) {
   if (!ignore_listview_change_ && table_view_observer_) {
     table_view_observer_->OnKeyDown(virtual_keycode);
   }

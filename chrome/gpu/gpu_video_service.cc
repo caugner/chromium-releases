@@ -23,6 +23,11 @@ GpuVideoService::~GpuVideoService() {
   UnintializeGpuVideoService();
 }
 
+// static
+GpuVideoService* GpuVideoService::GetInstance() {
+  return Singleton<GpuVideoService>::get();
+}
+
 void GpuVideoService::OnChannelConnected(int32 peer_pid) {
   LOG(ERROR) << "GpuVideoService::OnChannelConnected";
 }
@@ -31,12 +36,13 @@ void GpuVideoService::OnChannelError() {
   LOG(ERROR) << "GpuVideoService::OnChannelError";
 }
 
-void GpuVideoService::OnMessageReceived(const IPC::Message& msg) {
+bool GpuVideoService::OnMessageReceived(const IPC::Message& msg) {
 #if 0
   IPC_BEGIN_MESSAGE_MAP(GpuVideoService, msg)
     IPC_MESSAGE_UNHANDLED_ERROR()
   IPC_END_MESSAGE_MAP()
 #endif
+  return false;
 }
 
 bool GpuVideoService::IntializeGpuVideoService() {

@@ -1,12 +1,13 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/file_path.h"
 #include "base/string_util.h"
+#include "base/test/test_timeouts.h"
+#include "base/threading/platform_thread.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/worker_host/worker_service.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
@@ -47,7 +48,7 @@ class WorkerTest : public UILayoutTest {
     ASSERT_TRUE(tab->NavigateToURL(url));
 
     std::string value = WaitUntilCookieNonEmpty(tab.get(), url,
-        kTestCompleteCookie, action_max_timeout_ms());
+        kTestCompleteCookie, TestTimeouts::action_max_timeout_ms());
     ASSERT_STREQ(kTestCompleteSuccess, value.c_str());
   }
 
@@ -70,7 +71,7 @@ class WorkerTest : public UILayoutTest {
     ASSERT_TRUE(tab->NavigateToURL(url));
 
     std::string value = WaitUntilCookieNonEmpty(tab.get(), url,
-        kTestCompleteCookie, action_max_timeout_ms());
+        kTestCompleteCookie, TestTimeouts::action_max_timeout_ms());
 
     // Close the incognito window
     ASSERT_TRUE(incognito->RunCommand(IDC_CLOSE_WINDOW));
@@ -83,7 +84,7 @@ class WorkerTest : public UILayoutTest {
   bool WaitForProcessCountToBe(int tabs, int workers) {
     // The 1 is for the browser process.
     int number_of_processes = 1 + workers +
-        (UITest::in_process_renderer() ? 0 : tabs);
+        (ProxyLauncher::in_process_renderer() ? 0 : tabs);
 #if defined(OS_LINUX)
     // On Linux, we also have a zygote process and a sandbox host process.
     number_of_processes += 2;
@@ -95,7 +96,7 @@ class WorkerTest : public UILayoutTest {
       if (cur_process_count == number_of_processes)
         return true;
 
-      PlatformThread::Sleep(sleep_timeout_ms() / 10);
+      base::PlatformThread::Sleep(TestTimeouts::action_timeout_ms() / 10);
     }
 
     EXPECT_EQ(number_of_processes, cur_process_count);
@@ -445,8 +446,7 @@ TEST_F(WorkerTest, DISABLED_WorkerHttpLayoutTests) {
   StopHttpServer();
 }
 
-// Times out, see http://crbug.com/49381
-TEST_F(WorkerTest, DISABLED_WorkerWebSocketLayoutTests) {
+TEST_F(WorkerTest, WorkerWebSocketLayoutTests) {
   static const char* kLayoutTestFiles[] = {
     "close-in-onmessage-crash.html",
     "close-in-shared-worker.html",
@@ -459,22 +459,22 @@ TEST_F(WorkerTest, DISABLED_WorkerWebSocketLayoutTests) {
   FilePath websocket_test_dir;
   websocket_test_dir = websocket_test_dir.AppendASCII("http");
   websocket_test_dir = websocket_test_dir.AppendASCII("tests");
-  websocket_test_dir = websocket_test_dir.AppendASCII("websocket");
-  websocket_test_dir = websocket_test_dir.AppendASCII("tests");
 
   FilePath worker_test_dir;
+  worker_test_dir = worker_test_dir.AppendASCII("websocket");
+  worker_test_dir = worker_test_dir.AppendASCII("tests");
   worker_test_dir = worker_test_dir.AppendASCII("workers");
-  InitializeForLayoutTest(websocket_test_dir, worker_test_dir, kWebSocketPort);
-  test_case_dir_ = test_case_dir_.AppendASCII("http");
-  test_case_dir_ = test_case_dir_.AppendASCII("tests");
-  test_case_dir_ = test_case_dir_.AppendASCII("websocket");
-  test_case_dir_ = test_case_dir_.AppendASCII("tests");
-  test_case_dir_ = test_case_dir_.AppendASCII("workers");
+  InitializeForLayoutTest(websocket_test_dir, worker_test_dir, kHttpPort);
 
-  ui_test_utils::TestWebSocketServer websocket_server(
-      temp_test_dir_.AppendASCII("LayoutTests"));
+  FilePath websocket_root_dir(temp_test_dir_);
+  websocket_root_dir = websocket_root_dir.AppendASCII("LayoutTests");
+  ui_test_utils::TestWebSocketServer websocket_server;
+  ASSERT_TRUE(websocket_server.Start(websocket_root_dir));
+
+  StartHttpServer(new_http_root_dir_);
   for (size_t i = 0; i < arraysize(kLayoutTestFiles); ++i)
-    RunLayoutTest(kLayoutTestFiles[i], kWebSocketPort);
+    RunLayoutTest(kLayoutTestFiles[i], kHttpPort);
+  StopHttpServer();
 }
 
 TEST_F(WorkerTest, DISABLED_WorkerXhrHttpLayoutTests) {
@@ -607,7 +607,7 @@ TEST_F(WorkerTest, FLAKY_WorkerClose) {
                                        FilePath(kWorkerClose));
   ASSERT_TRUE(tab->NavigateToURL(url));
   std::string value = WaitUntilCookieNonEmpty(tab.get(), url,
-      kTestCompleteCookie, action_max_timeout_ms());
+      kTestCompleteCookie, TestTimeouts::action_max_timeout_ms());
   ASSERT_STREQ(kTestCompleteSuccess, value.c_str());
   ASSERT_TRUE(WaitForProcessCountToBe(1, 0));
 }
@@ -624,12 +624,13 @@ TEST_F(WorkerTest, QueuedSharedWorkerShutdown) {
   ASSERT_TRUE(tab.get());
   ASSERT_TRUE(tab->NavigateToURL(url));
   std::string value = WaitUntilCookieNonEmpty(tab.get(), url,
-      kTestCompleteCookie, action_max_timeout_ms());
+      kTestCompleteCookie, TestTimeouts::action_max_timeout_ms());
   ASSERT_STREQ(kTestCompleteSuccess, value.c_str());
   ASSERT_TRUE(WaitForProcessCountToBe(1, max_workers_per_tab));
 }
 
-TEST_F(WorkerTest, MultipleTabsQueuedSharedWorker) {
+// Flaky, http://crbug.com/69881.
+TEST_F(WorkerTest, FLAKY_MultipleTabsQueuedSharedWorker) {
   // Tests to make sure that only one instance of queued shared workers are
   // started up even when those instances are on multiple tabs.
   int max_workers_per_tab = WorkerService::kMaxWorkersPerTabWhenSeparate;
@@ -657,7 +658,7 @@ TEST_F(WorkerTest, MultipleTabsQueuedSharedWorker) {
   ASSERT_TRUE(window->AppendTab(url2));
 
   std::string value = WaitUntilCookieNonEmpty(tab.get(), url,
-      kTestCompleteCookie, action_max_timeout_ms());
+      kTestCompleteCookie, TestTimeouts::action_max_timeout_ms());
   ASSERT_STREQ(kTestCompleteSuccess, value.c_str());
   ASSERT_TRUE(WaitForProcessCountToBe(3, max_workers_per_tab));
 }
@@ -686,7 +687,7 @@ TEST_F(WorkerTest, FLAKY_QueuedSharedWorkerStartedFromOtherTab) {
   ASSERT_TRUE(window->AppendTab(url2));
 
   std::string value = WaitUntilCookieNonEmpty(tab.get(), url,
-      kTestCompleteCookie, action_max_timeout_ms());
+      kTestCompleteCookie, TestTimeouts::action_max_timeout_ms());
   ASSERT_STREQ(kTestCompleteSuccess, value.c_str());
   ASSERT_TRUE(WaitForProcessCountToBe(2, max_workers_per_tab+1));
 }

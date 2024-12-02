@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,8 @@
 #include <string>
 #include <vector>
 
-#include "app/l10n_util.h"
-#include "app/win_util.h"
+#include "app/win/scoped_co_mem.h"
+#include "app/win/scoped_com_initializer.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/scoped_comptr_win.h"
@@ -26,6 +26,7 @@
 #include "base/values.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
+#include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/importer/importer_bridge.h"
@@ -38,6 +39,7 @@
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "webkit/glue/password_form.h"
 
 using base::Time;
@@ -48,7 +50,7 @@ namespace {
 // Gets the creation time of the given file or directory.
 static Time GetFileCreationTime(const std::wstring& file) {
   Time creation_time;
-  ScopedHandle file_handle(
+  base::win::ScopedHandle file_handle(
       CreateFile(file.c_str(), GENERIC_READ,
                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                  NULL, OPEN_EXISTING,
@@ -78,7 +80,7 @@ void IEImporter::StartImport(const ProfileInfo& profile_info,
   bridge_->NotifyStarted();
 
   // Some IE settings (such as Protected Storage) are obtained via COM APIs.
-  win_util::ScopedCOMInitializer com_initializer;
+  app::win::ScopedCOMInitializer com_initializer;
 
   if ((items & importer::HOME_PAGE) && !cancelled())
     ImportHomepage();  // Doesn't have a UI item.
@@ -122,7 +124,7 @@ void IEImporter::ImportFavorites() {
 
   if (!bookmarks.empty() && !cancelled()) {
     const std::wstring& first_folder_name =
-        l10n_util::GetString(IDS_BOOKMARK_GROUP_FROM_IE);
+        UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOKMARK_GROUP_FROM_IE));
     int options = 0;
     if (import_to_bookmark_bar())
       options = ProfileWriter::IMPORT_TO_BOOKMARK_BAR;
@@ -261,19 +263,18 @@ void IEImporter::ImportPasswordsIE7() {
   base::win::RegKey key(HKEY_CURRENT_USER, kStorage2Path, KEY_READ);
   base::win::RegistryValueIterator reg_iterator(HKEY_CURRENT_USER,
                                                 kStorage2Path);
+  IE7PasswordInfo password_info;
   while (reg_iterator.Valid() && !cancelled()) {
     // Get the size of the encrypted data.
     DWORD value_len = 0;
-    if (key.ReadValue(reg_iterator.Name(), NULL, &value_len, NULL) &&
-        value_len) {
+    key.ReadValue(reg_iterator.Name(), NULL, &value_len, NULL);
+    if (value_len) {
       // Query the encrypted data.
-      std::vector<unsigned char> value;
-      value.resize(value_len);
-      if (key.ReadValue(reg_iterator.Name(), &value.front(), &value_len,
-                        NULL)) {
-        IE7PasswordInfo password_info;
+      password_info.encrypted_data.resize(value_len);
+      if (key.ReadValue(reg_iterator.Name(),
+                        &password_info.encrypted_data.front(),
+                        &value_len, NULL) == ERROR_SUCCESS) {
         password_info.url_hash = reg_iterator.Name();
-        password_info.encrypted_data = value;
         password_info.date_created = Time::Now();
 
         bridge_->AddIE7PasswordInfo(password_info);
@@ -364,7 +365,8 @@ void IEImporter::ImportSearchEngines() {
     base::win::RegKey sub_key(HKEY_CURRENT_USER, sub_key_name.c_str(),
                               KEY_READ);
     std::wstring wide_url;
-    if (!sub_key.ReadValue(L"URL", &wide_url) || wide_url.empty()) {
+    if ((sub_key.ReadValue(L"URL", &wide_url) != ERROR_SUCCESS) ||
+        wide_url.empty()) {
       VLOG(1) << "No URL for IE search engine at " << key_iterator.Name();
       ++key_iterator;
       continue;
@@ -373,9 +375,10 @@ void IEImporter::ImportSearchEngines() {
     // non displayable name in DisplayName, and the readable name under the
     // default value).
     std::wstring name;
-    if (!sub_key.ReadValue(NULL, &name) || name.empty()) {
+    if ((sub_key.ReadValue(NULL, &name) != ERROR_SUCCESS) || name.empty()) {
       // Try the displayable name.
-      if (!sub_key.ReadValue(L"DisplayName", &name) || name.empty()) {
+      if ((sub_key.ReadValue(L"DisplayName", &name) != ERROR_SUCCESS) ||
+          name.empty()) {
         VLOG(1) << "No name for IE search engine at " << key_iterator.Name();
         ++key_iterator;
         continue;
@@ -431,7 +434,8 @@ void IEImporter::ImportHomepage() {
 
   base::win::RegKey key(HKEY_CURRENT_USER, kIESettingsMain, KEY_READ);
   std::wstring homepage_url;
-  if (!key.ReadValue(kIEHomepage, &homepage_url) || homepage_url.empty())
+  if (key.ReadValue(kIEHomepage, &homepage_url) != ERROR_SUCCESS ||
+      homepage_url.empty())
     return;
 
   GURL homepage = GURL(homepage_url);
@@ -441,8 +445,8 @@ void IEImporter::ImportHomepage() {
   // Check to see if this is the default website and skip import.
   base::win::RegKey keyDefault(HKEY_LOCAL_MACHINE, kIESettingsMain, KEY_READ);
   std::wstring default_homepage_url;
-  if (keyDefault.ReadValue(kIEDefaultHomepage, &default_homepage_url) &&
-      !default_homepage_url.empty()) {
+  LONG result = keyDefault.ReadValue(kIEDefaultHomepage, &default_homepage_url);
+  if (result == ERROR_SUCCESS && !default_homepage_url.empty()) {
     if (homepage.spec() == GURL(default_homepage_url).spec())
       return;
   }
@@ -475,7 +479,8 @@ bool IEImporter::GetFavoritesInfo(IEImporter::FavoritesInfo *info) {
     DWORD buffer_length = sizeof(buffer);
     base::win::RegKey reg_key(HKEY_CURRENT_USER,
         L"Software\\Microsoft\\Internet Explorer\\Toolbar", KEY_READ);
-    if (!reg_key.ReadValue(L"LinksFolderName", buffer, &buffer_length, NULL))
+    if (reg_key.ReadValue(L"LinksFolderName", buffer,
+                          &buffer_length, NULL) != ERROR_SUCCESS)
       return false;
     info->links_folder = buffer;
   } else {
@@ -487,7 +492,8 @@ bool IEImporter::GetFavoritesInfo(IEImporter::FavoritesInfo *info) {
 
 void IEImporter::ParseFavoritesFolder(const FavoritesInfo& info,
                                       BookmarkVector* bookmarks) {
-  std::wstring ie_folder = l10n_util::GetString(IDS_BOOKMARK_GROUP_FROM_IE);
+  std::wstring ie_folder =
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_BOOKMARK_GROUP_FROM_IE));
   BookmarkVector toolbar_bookmarks;
   FilePath file;
   std::vector<FilePath::StringType> file_list;
@@ -552,7 +558,7 @@ void IEImporter::ParseFavoritesFolder(const FavoritesInfo& info,
 }
 
 std::wstring IEImporter::ResolveInternetShortcut(const std::wstring& file) {
-  win_util::CoMemReleaser<wchar_t> url;
+  app::win::ScopedCoMem<wchar_t> url;
   ScopedComPtr<IUniformResourceLocator> url_locator;
   HRESULT result = url_locator.CreateInstance(CLSID_InternetShortcut, NULL,
                                               CLSCTX_INPROC_SERVER);
@@ -584,8 +590,8 @@ int IEImporter::CurrentIEVersion() const {
     DWORD buffer_length = sizeof(buffer);
     base::win::RegKey reg_key(HKEY_LOCAL_MACHINE,
         L"Software\\Microsoft\\Internet Explorer", KEY_READ);
-    bool result = reg_key.ReadValue(L"Version", buffer, &buffer_length, NULL);
-    version = (result ? _wtoi(buffer) : 0);
+    LONG result = reg_key.ReadValue(L"Version", buffer, &buffer_length, NULL);
+    version = ((result == ERROR_SUCCESS)? _wtoi(buffer) : 0);
   }
   return version;
 }

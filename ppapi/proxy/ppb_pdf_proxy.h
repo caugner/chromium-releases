@@ -8,26 +8,26 @@
 #include "ppapi/c/pp_module.h"
 #include "ppapi/proxy/interface_proxy.h"
 
-struct PPB_Private;
+struct PPB_PDF;
 
 namespace pp {
 namespace proxy {
 
 struct SerializedFontDescription;
 
-class PPB_Pdf_Proxy : public InterfaceProxy {
+class PPB_PDF_Proxy : public InterfaceProxy {
  public:
-  PPB_Pdf_Proxy(Dispatcher* dispatcher, const void* target_interface);
-  virtual ~PPB_Pdf_Proxy();
+  PPB_PDF_Proxy(Dispatcher* dispatcher, const void* target_interface);
+  virtual ~PPB_PDF_Proxy();
 
-  const PPB_Private* ppb_pdf_target() const {
-    return static_cast<const PPB_Private*>(target_interface());
+  const PPB_PDF* ppb_pdf_target() const {
+    return static_cast<const PPB_PDF*>(target_interface());
   }
 
   // InterfaceProxy implementation.
   virtual const void* GetSourceInterface() const;
   virtual InterfaceID GetInterfaceId() const;
-  virtual void OnMessageReceived(const IPC::Message& msg);
+  virtual bool OnMessageReceived(const IPC::Message& msg);
 
  private:
   // Message handlers.

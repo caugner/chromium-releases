@@ -7,8 +7,8 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebWorker.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebWorkerClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebWorker.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebWorkerClient.h"
 
 
 // Forward declaration for the listener thread pointer.
@@ -24,15 +24,15 @@ class NativeWebWorkerImpl : public WebKit::WebWorker {
   static WebWorker* create(WebKit::WebWorkerClient* client);
 
   // WebWorker implementation.
-  void startWorkerContext(const WebKit::WebURL& script_url,
-                          const WebKit::WebString& user_agent,
-                          const WebKit::WebString& source_code);
-  void terminateWorkerContext();
-  void postMessageToWorkerContext(
+  virtual void startWorkerContext(const WebKit::WebURL& script_url,
+                                  const WebKit::WebString& user_agent,
+                                  const WebKit::WebString& source_code);
+  virtual void terminateWorkerContext();
+  virtual void postMessageToWorkerContext(
       const WebKit::WebString& message,
       const WebKit::WebMessagePortChannelArray& channels);
-  void workerObjectDestroyed();
-  void clientDestroyed();
+  virtual void workerObjectDestroyed();
+  virtual void clientDestroyed();
 
  private:
   WebKit::WebWorkerClient* client_;

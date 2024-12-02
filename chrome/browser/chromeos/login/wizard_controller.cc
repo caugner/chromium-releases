@@ -11,7 +11,6 @@
 #include <string>
 #include <vector>
 
-#include "app/resource_bundle.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
@@ -43,12 +42,13 @@
 #include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
 #include "chrome/browser/chromeos/wm_ipc.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile_manager.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/pref_names.h"
-#include "cros/chromeos_wm_ipc_enums.h"
+#include "third_party/cros/chromeos_wm_ipc_enums.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "unicode/timezone.h"
 #include "views/accelerator.h"
 #include "views/painter.h"
@@ -80,27 +80,27 @@ const int kWaitForRebootTimeSec = 3;
 class ContentView : public views::View {
  public:
   ContentView()
-      : accel_enable_accessibility_(
+      : accel_toggle_accessibility_(
             chromeos::WizardAccessibilityHelper::GetAccelerator()) {
 #if defined(OFFICIAL_BUILD)
-    accel_cancel_update_ =  views::Accelerator(app::VKEY_ESCAPE,
+    accel_cancel_update_ =  views::Accelerator(ui::VKEY_ESCAPE,
                                                true, true, true);
 #else
-    accel_cancel_update_ =  views::Accelerator(app::VKEY_ESCAPE,
+    accel_cancel_update_ =  views::Accelerator(ui::VKEY_ESCAPE,
                                                false, false, false);
-    accel_account_screen_ = views::Accelerator(app::VKEY_A,
+    accel_account_screen_ = views::Accelerator(ui::VKEY_A,
                                                false, true, true);
-    accel_login_screen_ = views::Accelerator(app::VKEY_L,
+    accel_login_screen_ = views::Accelerator(ui::VKEY_L,
                                              false, true, true);
-    accel_network_screen_ = views::Accelerator(app::VKEY_N,
+    accel_network_screen_ = views::Accelerator(ui::VKEY_N,
                                                false, true, true);
-    accel_update_screen_ = views::Accelerator(app::VKEY_U,
+    accel_update_screen_ = views::Accelerator(ui::VKEY_U,
                                               false, true, true);
-    accel_image_screen_ = views::Accelerator(app::VKEY_I,
+    accel_image_screen_ = views::Accelerator(ui::VKEY_I,
                                              false, true, true);
-    accel_eula_screen_ = views::Accelerator(app::VKEY_E,
+    accel_eula_screen_ = views::Accelerator(ui::VKEY_E,
                                             false, true, true);
-    accel_register_screen_ = views::Accelerator(app::VKEY_R,
+    accel_register_screen_ = views::Accelerator(ui::VKEY_R,
                                                 false, true, true);
     AddAccelerator(accel_account_screen_);
     AddAccelerator(accel_login_screen_);
@@ -110,7 +110,7 @@ class ContentView : public views::View {
     AddAccelerator(accel_eula_screen_);
     AddAccelerator(accel_register_screen_);
 #endif
-    AddAccelerator(accel_enable_accessibility_);
+    AddAccelerator(accel_toggle_accessibility_);
     AddAccelerator(accel_cancel_update_);
   }
 
@@ -126,8 +126,8 @@ class ContentView : public views::View {
     if (!controller)
       return false;
 
-    if (accel == accel_enable_accessibility_) {
-      chromeos::WizardAccessibilityHelper::GetInstance()->EnableAccessibility(
+    if (accel == accel_toggle_accessibility_) {
+      chromeos::WizardAccessibilityHelper::GetInstance()->ToggleAccessibility(
           controller->contents()); }
     else if (accel == accel_cancel_update_) {
       controller->CancelOOBEUpdate();
@@ -174,7 +174,7 @@ class ContentView : public views::View {
   views::Accelerator accel_eula_screen_;
   views::Accelerator accel_register_screen_;
 #endif
-  views::Accelerator accel_enable_accessibility_;
+  views::Accelerator accel_toggle_accessibility_;
   views::Accelerator accel_cancel_update_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentView);
@@ -307,10 +307,12 @@ void WizardController::Init(const std::string& first_screen_name,
 }
 
 void WizardController::Show() {
-  // In tests we might startup without initial screen
-  // so widget_ hasn't been created yet.
-  if (first_screen_name_ != kTestNoScreenName)
+  // In tests and in case of --login-screen=login there is no screen to show.
+  if (first_screen_name_ != kTestNoScreenName &&
+      first_screen_name_ != kLoginScreenName) {
     DCHECK(widget_);
+  }
+
   if (widget_)
     widget_->Show();
 }

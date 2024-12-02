@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,11 @@
 
 #include "base/compiler_specific.h"
 #include "base/lazy_instance.h"
-#include "base/lock.h"
 #include "base/message_loop_proxy.h"
 #include "base/scoped_ptr.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "chrome/common/net/url_request_context_getter.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/load_flags.h"
@@ -31,7 +30,7 @@ bool URLFetcher::g_interception_enabled = false;
 
 class URLFetcher::Core
     : public base::RefCountedThreadSafe<URLFetcher::Core>,
-      public URLRequest::Delegate {
+      public net::URLRequest::Delegate {
  public:
   // For POST requests, set |content_type| to the MIME type of the content
   // and set |content| to the data to upload.  |flags| are flags to apply to
@@ -57,9 +56,9 @@ class URLFetcher::Core
   // Reports that the received content was malformed.
   void ReceivedContentWasMalformed();
 
-  // URLRequest::Delegate implementation.
-  virtual void OnResponseStarted(URLRequest* request);
-  virtual void OnReadCompleted(URLRequest* request, int bytes_read);
+  // Overridden from net::URLRequest::Delegate:
+  virtual void OnResponseStarted(net::URLRequest* request);
+  virtual void OnReadCompleted(net::URLRequest* request, int bytes_read);
 
   URLFetcher::Delegate* delegate() const { return delegate_; }
 
@@ -91,7 +90,7 @@ class URLFetcher::Core
   void StartURLRequest();
   void StartURLRequestWhenAppropriate();
   void CancelURLRequest();
-  void OnCompletedURLRequest(const URLRequestStatus& status);
+  void OnCompletedURLRequest(const net::URLRequestStatus& status);
   void NotifyMalformedContent();
 
   // Deletes the request, removes it from the registry, and removes the
@@ -113,7 +112,7 @@ class URLFetcher::Core
   scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy_;
                                      // The message loop proxy for the thread
                                      // on which the request IO happens.
-  scoped_ptr<URLRequest> request_;   // The actual request this wraps
+  scoped_ptr<net::URLRequest> request_;   // The actual request this wraps
   int load_flags_;                   // Flags for the load operation
   int response_code_;                // HTTP status code for the request
   std::string data_;                 // Results of the request
@@ -127,6 +126,7 @@ class URLFetcher::Core
 
   std::string upload_content_;       // HTTP POST payload
   std::string upload_content_type_;  // MIME type of POST payload
+  std::string referrer_;             // HTTP Referer header value
 
   // Used to determine how long to wait before making a request or doing a
   // retry.
@@ -264,7 +264,7 @@ void URLFetcher::Core::CancelAll() {
   g_registry.Get().CancelAll();
 }
 
-void URLFetcher::Core::OnResponseStarted(URLRequest* request) {
+void URLFetcher::Core::OnResponseStarted(net::URLRequest* request) {
   DCHECK_EQ(request, request_.get());
   DCHECK(io_message_loop_proxy_->BelongsToCurrentThread());
   if (request_->status().is_success()) {
@@ -282,7 +282,8 @@ void URLFetcher::Core::OnResponseStarted(URLRequest* request) {
   OnReadCompleted(request_.get(), bytes_read);
 }
 
-void URLFetcher::Core::OnReadCompleted(URLRequest* request, int bytes_read) {
+void URLFetcher::Core::OnReadCompleted(net::URLRequest* request,
+                                       int bytes_read) {
   DCHECK(request == request_);
   DCHECK(io_message_loop_proxy_->BelongsToCurrentThread());
 
@@ -328,13 +329,14 @@ void URLFetcher::Core::StartURLRequest() {
   DCHECK(!request_.get());
 
   g_registry.Get().AddURLFetcherCore(this);
-  request_.reset(new URLRequest(original_url_, this));
+  request_.reset(new net::URLRequest(original_url_, this));
   int flags = request_->load_flags() | load_flags_;
   if (!g_interception_enabled) {
     flags = flags | net::LOAD_DISABLE_INTERCEPT;
   }
   request_->set_load_flags(flags);
   request_->set_context(request_context_getter_->GetURLRequestContext());
+  request_->set_referrer(referrer_);
 
   switch (request_type_) {
     case GET:
@@ -407,7 +409,8 @@ void URLFetcher::Core::CancelURLRequest() {
   was_cancelled_ = true;
 }
 
-void URLFetcher::Core::OnCompletedURLRequest(const URLRequestStatus& status) {
+void URLFetcher::Core::OnCompletedURLRequest(
+    const net::URLRequestStatus& status) {
   DCHECK(delegate_loop_proxy_->BelongsToCurrentThread());
 
   // Checks the response from server.
@@ -477,6 +480,10 @@ void URLFetcher::set_upload_data(const std::string& upload_content_type,
 
 const std::string& URLFetcher::upload_data() const {
   return core_->upload_content_;
+}
+
+void URLFetcher::set_referrer(const std::string& referrer) {
+  core_->referrer_ = referrer;
 }
 
 void URLFetcher::set_load_flags(int load_flags) {

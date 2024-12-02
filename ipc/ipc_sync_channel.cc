@@ -6,10 +6,10 @@
 
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/thread_local.h"
 #include "base/message_loop.h"
-#include "base/waitable_event.h"
-#include "base/waitable_event_watcher.h"
+#include "base/threading/thread_local.h"
+#include "base/synchronization/waitable_event.h"
+#include "base/synchronization/waitable_event_watcher.h"
 #include "ipc/ipc_sync_message.h"
 
 using base::TimeDelta;
@@ -55,7 +55,7 @@ class SyncChannel::ReceivedSyncMsgQueue :
   void QueueMessage(const Message& msg, SyncChannel::SyncContext* context) {
     bool was_task_pending;
     {
-      AutoLock auto_lock(message_lock_);
+      base::AutoLock auto_lock(message_lock_);
 
       was_task_pending = task_pending_;
       task_pending_ = true;
@@ -80,7 +80,7 @@ class SyncChannel::ReceivedSyncMsgQueue :
   // messages.
   void DispatchMessagesTask() {
     {
-      AutoLock auto_lock(message_lock_);
+      base::AutoLock auto_lock(message_lock_);
       task_pending_ = false;
     }
     DispatchMessages();
@@ -91,7 +91,7 @@ class SyncChannel::ReceivedSyncMsgQueue :
       Message* message;
       scoped_refptr<SyncChannel::SyncContext> context;
       {
-        AutoLock auto_lock(message_lock_);
+        base::AutoLock auto_lock(message_lock_);
         if (message_queue_.empty())
           break;
 
@@ -107,7 +107,7 @@ class SyncChannel::ReceivedSyncMsgQueue :
 
   // SyncChannel calls this in its destructor.
   void RemoveContext(SyncContext* context) {
-    AutoLock auto_lock(message_lock_);
+    base::AutoLock auto_lock(message_lock_);
 
     SyncMessageQueue::iterator iter = message_queue_.begin();
     while (iter != message_queue_.end()) {
@@ -185,7 +185,7 @@ class SyncChannel::ReceivedSyncMsgQueue :
   // message.
   WaitableEvent dispatch_event_;
   MessageLoop* listener_message_loop_;
-  Lock message_lock_;
+  base::Lock message_lock_;
   bool task_pending_;
   int listener_count_;
 
@@ -200,10 +200,9 @@ base::LazyInstance<base::ThreadLocalPointer<SyncChannel::ReceivedSyncMsgQueue> >
 
 SyncChannel::SyncContext::SyncContext(
     Channel::Listener* listener,
-    MessageFilter* filter,
     MessageLoop* ipc_thread,
     WaitableEvent* shutdown_event)
-    : ChannelProxy::Context(listener, filter, ipc_thread),
+    : ChannelProxy::Context(listener, ipc_thread),
       received_sync_msgs_(ReceivedSyncMsgQueue::AddContext()),
       shutdown_event_(shutdown_event) {
 }
@@ -224,14 +223,14 @@ void SyncChannel::SyncContext::Push(SyncMessage* sync_msg) {
   PendingSyncMsg pending(SyncMessage::GetMessageId(*sync_msg),
                          sync_msg->GetReplyDeserializer(),
                          new WaitableEvent(true, false));
-  AutoLock auto_lock(deserializers_lock_);
+  base::AutoLock auto_lock(deserializers_lock_);
   deserializers_.push_back(pending);
 }
 
 bool SyncChannel::SyncContext::Pop() {
   bool result;
   {
-    AutoLock auto_lock(deserializers_lock_);
+    base::AutoLock auto_lock(deserializers_lock_);
     PendingSyncMsg msg = deserializers_.back();
     delete msg.deserializer;
     delete msg.done_event;
@@ -252,7 +251,7 @@ bool SyncChannel::SyncContext::Pop() {
 }
 
 WaitableEvent* SyncChannel::SyncContext::GetSendDoneEvent() {
-  AutoLock auto_lock(deserializers_lock_);
+  base::AutoLock auto_lock(deserializers_lock_);
   return deserializers_.back().done_event;
 }
 
@@ -265,7 +264,7 @@ void SyncChannel::SyncContext::DispatchMessages() {
 }
 
 bool SyncChannel::SyncContext::TryToUnblockListener(const Message* msg) {
-  AutoLock auto_lock(deserializers_lock_);
+  base::AutoLock auto_lock(deserializers_lock_);
   if (deserializers_.empty() ||
       !SyncMessage::IsMessageReplyTo(*msg, deserializers_.back().id)) {
     return false;
@@ -286,22 +285,22 @@ void SyncChannel::SyncContext::Clear() {
   Context::Clear();
 }
 
-void SyncChannel::SyncContext::OnMessageReceived(const Message& msg) {
+bool SyncChannel::SyncContext::OnMessageReceived(const Message& msg) {
   // Give the filters a chance at processing this message.
   if (TryFilters(msg))
-    return;
+    return true;
 
   if (TryToUnblockListener(&msg))
-    return;
+    return true;
 
   if (msg.should_unblock()) {
     received_sync_msgs_->QueueMessage(msg, this);
-    return;
+    return true;
   }
 
   if (msg.is_reply()) {
     received_sync_msgs_->QueueReply(msg, this);
-    return;
+    return true;
   }
 
   return Context::OnMessageReceivedNoFilter(msg);
@@ -325,7 +324,7 @@ void SyncChannel::SyncContext::OnChannelClosed() {
 }
 
 void SyncChannel::SyncContext::OnSendTimeout(int message_id) {
-  AutoLock auto_lock(deserializers_lock_);
+  base::AutoLock auto_lock(deserializers_lock_);
   PendingSyncMessageQueue::iterator iter;
   for (iter = deserializers_.begin(); iter != deserializers_.end(); iter++) {
     if (iter->id == message_id) {
@@ -336,7 +335,7 @@ void SyncChannel::SyncContext::OnSendTimeout(int message_id) {
 }
 
 void SyncChannel::SyncContext::CancelPendingSends() {
-  AutoLock auto_lock(deserializers_lock_);
+  base::AutoLock auto_lock(deserializers_lock_);
   PendingSyncMessageQueue::iterator iter;
   for (iter = deserializers_.begin(); iter != deserializers_.end(); iter++)
     iter->done_event->Signal();
@@ -356,13 +355,15 @@ void SyncChannel::SyncContext::OnWaitableEventSignaled(WaitableEvent* event) {
 
 
 SyncChannel::SyncChannel(
-    const std::string& channel_id, Channel::Mode mode,
-    Channel::Listener* listener, MessageFilter* filter,
-    MessageLoop* ipc_message_loop, bool create_pipe_now,
+    const IPC::ChannelHandle& channel_handle,
+    Channel::Mode mode,
+    Channel::Listener* listener,
+    MessageLoop* ipc_message_loop,
+    bool create_pipe_now,
     WaitableEvent* shutdown_event)
     : ChannelProxy(
-          channel_id, mode, ipc_message_loop,
-          new SyncContext(listener, filter, ipc_message_loop, shutdown_event),
+          channel_handle, mode, ipc_message_loop,
+          new SyncContext(listener, ipc_message_loop, shutdown_event),
           create_pipe_now),
       sync_messages_with_no_timeout_allowed_(true) {
   // Ideally we only want to watch this object when running a nested message

@@ -39,15 +39,7 @@ class TCPSocketParams : public base::RefCounted<TCPSocketParams> {
   ~TCPSocketParams();
 
   void Initialize(RequestPriority priority, const GURL& referrer,
-                  bool disable_resolver_cache) {
-    // The referrer is used by the DNS prefetch system to correlate resolutions
-    // with the page that triggered them. It doesn't impact the actual addresses
-    // that we resolve to.
-    destination_.set_referrer(referrer);
-    destination_.set_priority(priority);
-    if (disable_resolver_cache)
-      destination_.set_allow_cached_response(false);
-  }
+                  bool disable_resolver_cache);
 
   HostResolver::RequestInfo destination_;
 
@@ -79,11 +71,6 @@ class TCPConnectJob : public ConnectJob {
     STATE_NONE,
   };
 
-  // Begins the host resolution and the TCP connect.  Returns OK on success
-  // and ERR_IO_PENDING if it cannot immediately service the request.
-  // Otherwise, it returns a net error code.
-  virtual int ConnectInternal();
-
   void OnIOComplete(int result);
 
   // Runs the state transition loop.
@@ -93,6 +80,11 @@ class TCPConnectJob : public ConnectJob {
   int DoResolveHostComplete(int result);
   int DoTCPConnect();
   int DoTCPConnectComplete(int result);
+
+  // Begins the host resolution and the TCP connect.  Returns OK on success
+  // and ERR_IO_PENDING if it cannot immediately service the request.
+  // Otherwise, it returns a net error code.
+  virtual int ConnectInternal();
 
   scoped_refptr<TCPSocketParams> params_;
   ClientSocketFactory* const client_socket_factory_;
@@ -147,9 +139,7 @@ class TCPClientSocketPool : public ClientSocketPool {
 
   virtual void CloseIdleSockets();
 
-  virtual int IdleSocketCount() const {
-    return base_.idle_socket_count();
-  }
+  virtual int IdleSocketCount() const;
 
   virtual int IdleSocketCountInGroup(const std::string& group_name) const;
 
@@ -158,17 +148,11 @@ class TCPClientSocketPool : public ClientSocketPool {
 
   virtual DictionaryValue* GetInfoAsValue(const std::string& name,
                                           const std::string& type,
-                                          bool include_nested_pools) const {
-    return base_.GetInfoAsValue(name, type);
-  }
+                                          bool include_nested_pools) const;
 
-  virtual base::TimeDelta ConnectionTimeout() const {
-    return base_.ConnectionTimeout();
-  }
+  virtual base::TimeDelta ConnectionTimeout() const;
 
-  virtual ClientSocketPoolHistograms* histograms() const {
-    return base_.histograms();
-  }
+  virtual ClientSocketPoolHistograms* histograms() const;
 
  private:
   typedef ClientSocketPoolBase<TCPSocketParams> PoolBase;

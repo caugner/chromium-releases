@@ -4,7 +4,6 @@
 
 #include "chrome/browser/profile_import_process_host.h"
 
-#include "app/l10n_util.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
@@ -14,6 +13,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "grit/generated_resources.h"
 #include "ipc/ipc_switches.h"
+#include "ui/base/l10n/l10n_util.h"
 
 ProfileImportProcessHost::ProfileImportProcessHost(
     ResourceDispatcherHost* resource_dispatcher,
@@ -118,39 +118,36 @@ bool ProfileImportProcessHost::StartProcess() {
   return true;
 }
 
-void ProfileImportProcessHost::OnMessageReceived(const IPC::Message& message) {
+bool ProfileImportProcessHost::OnMessageReceived(const IPC::Message& message) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   BrowserThread::PostTask(
       thread_id_, FROM_HERE,
       NewRunnableMethod(import_process_client_.get(),
                         &ImportProcessClient::OnMessageReceived,
                         message));
+  return true;
 }
 
-void ProfileImportProcessHost::OnProcessCrashed() {
+void ProfileImportProcessHost::OnProcessCrashed(int exit_code) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   BrowserThread::PostTask(
       thread_id_, FROM_HERE,
       NewRunnableMethod(import_process_client_.get(),
-                        &ImportProcessClient::OnProcessCrashed));
+                        &ImportProcessClient::OnProcessCrashed,
+                        exit_code));
 }
 
 bool ProfileImportProcessHost::CanShutdown() {
   return true;
 }
 
-URLRequestContext* ProfileImportProcessHost::GetRequestContext(
-    uint32 request_id,
-    const ViewHostMsg_Resource_Request& request_data) {
-  return NULL;
-}
-
 ProfileImportProcessHost::ImportProcessClient::ImportProcessClient() {}
 
 ProfileImportProcessHost::ImportProcessClient::~ImportProcessClient() {}
 
-void ProfileImportProcessHost::ImportProcessClient::OnMessageReceived(
+bool ProfileImportProcessHost::ImportProcessClient::OnMessageReceived(
     const IPC::Message& message) {
+  bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ProfileImportProcessHost, message)
     // Notification messages about the state of the import process.
     IPC_MESSAGE_HANDLER(ProfileImportProcessHostMsg_Import_Started,
@@ -181,5 +178,7 @@ void ProfileImportProcessHost::ImportProcessClient::OnMessageReceived(
                         ImportProcessClient::OnPasswordFormImportReady)
     IPC_MESSAGE_HANDLER(ProfileImportProcessHostMsg_NotifyKeywordsReady,
                         ImportProcessClient::OnKeywordsImportReady)
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
+  return handled;
 }

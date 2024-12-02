@@ -13,16 +13,17 @@
 #include <string>
 
 #include "app/surface/transport_dib.h"
+#include "base/platform_file.h"
 #include "base/process.h"
+#include "base/scoped_callback_factory.h"
 #include "base/scoped_ptr.h"
 #include "base/timer.h"
 #include "chrome/browser/child_process_launcher.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebCache.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 
-class AudioRendererHost;
 class CommandLine;
 class GURL;
 class RendererMainThread;
@@ -68,7 +69,7 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   virtual bool WaitForUpdateMsg(int render_widget_id,
                                 const base::TimeDelta& max_delay,
                                 IPC::Message* msg);
-  virtual void ReceivedBadMessage(uint32 msg_type);
+  virtual void ReceivedBadMessage();
   virtual void WidgetRestored();
   virtual void WidgetHidden();
   virtual void ViewCreated();
@@ -84,15 +85,9 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   virtual bool Send(IPC::Message* msg);
 
   // IPC::Channel::Listener via RenderProcessHost.
-  virtual void OnMessageReceived(const IPC::Message& msg);
+  virtual bool OnMessageReceived(const IPC::Message& msg);
   virtual void OnChannelConnected(int32 peer_pid);
   virtual void OnChannelError();
-
-  // If the a process has sent a message that cannot be decoded, it is deemed
-  // corrupted and thus needs to be terminated using this call. This function
-  // can be safely called from any thread.
-  static void BadMessageTerminateProcess(uint32 msg_type,
-                                         base::ProcessHandle renderer);
 
   // NotificationObserver implementation.
   virtual void Observe(NotificationType type,
@@ -104,6 +99,9 @@ class BrowserRenderProcessHost : public RenderProcessHost,
 
  private:
   friend class VisitRelayingRenderProcessHost;
+
+  // Creates and adds the IO thread message filters.
+  void CreateMessageFilters();
 
   // Control message handlers.
   void OnUpdatedCacheStats(const WebKit::WebCache::UsageStats& stats);
@@ -133,10 +131,6 @@ class BrowserRenderProcessHost : public RenderProcessHost,
 
   // Sends the renderer process a new set of user scripts.
   void SendUserScriptsUpdate(base::SharedMemory* shared_memory);
-
-  // Sends the renderer process the list of all loaded extensions along with a
-  // subset of information the renderer needs about them.
-  void SendExtensionInfo();
 
   // Generates a command line to be used to spawn a renderer and appends the
   // results to |*command_line|.
@@ -168,6 +162,15 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   // Tell the renderer that auto spell correction has been enabled/disabled.
   void EnableAutoSpellCorrect(bool enable);
 
+  // Initializes client-side phishing detection.  Starts reading the phishing
+  // model from the client-side detection service class.  Once the model is read
+  // OpenPhishingModelDone() is invoked.
+  void InitClientSidePhishingDetection();
+
+  // Called once the client-side detection service class is done with opening
+  // the model file.
+  void OpenPhishingModelDone(base::PlatformFile model_file);
+
   NotificationRegistrar registrar_;
 
   // The count of currently visible widgets.  Since the host can be a container
@@ -181,9 +184,6 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   // Used to allow a RenderWidgetHost to intercept various messages on the
   // IO thread.
   scoped_refptr<RenderWidgetHelper> widget_helper_;
-
-  // The host of audio renderers in the renderer process.
-  scoped_refptr<AudioRendererHost> audio_renderer_host_;
 
   // A map of transport DIB ids to cached TransportDIBs
   std::map<TransportDIB::Id, TransportDIB*> cached_dibs_;
@@ -220,6 +220,8 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   // messages that are sent once the process handle is available.  This is
   // because the queued messages may have dependencies on the init messages.
   std::queue<IPC::Message*> queued_messages_;
+
+  base::ScopedCallbackFactory<BrowserRenderProcessHost> callback_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserRenderProcessHost);
 };

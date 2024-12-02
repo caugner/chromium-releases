@@ -26,6 +26,7 @@
 class DictionaryValue;
 class ExtensionAction;
 class ExtensionResource;
+class ExtensionSidebarDefaults;
 class SkBitmap;
 class Version;
 
@@ -83,9 +84,9 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
     EXTENSION_ICON_BITTY = 16,
   };
 
-  // Type used for UMA_HISTOGRAM_ENUMERATION about extensions.
-  // Do not change the order of entries or remove entries in this list.
-  enum HistogramType {
+  // Do not change the order of entries or remove entries in this list
+  // as this is used in UMA_HISTOGRAM_ENUMERATIONs about extensions.
+  enum Type {
     TYPE_UNKNOWN = 0,
     TYPE_EXTENSION,
     TYPE_THEME,
@@ -98,6 +99,12 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   struct PluginInfo {
     FilePath path;  // Path to the plugin.
     bool is_public;  // False if only this extension can load this plugin.
+  };
+
+  struct TtsVoice {
+    std::string voice_name;
+    std::string locale;
+    std::string gender;
   };
 
   // A permission is defined by its |name| (what is used in the manifest),
@@ -145,6 +152,7 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // Max size (both dimensions) for browser and page actions.
   static const int kPageActionIconMaxSize;
   static const int kBrowserActionIconMaxSize;
+  static const int kSidebarIconMaxSize;
 
   // Each permission is a module that the extension is permitted to use.
   //
@@ -227,8 +235,8 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
            IsExternalLocation(location);
   }
 
-  // See HistogramType definition above.
-  HistogramType GetHistogramType() const;
+  // See Type definition above.
+  Type GetType() const;
 
   // Returns an absolute url to a resource inside of an extension. The
   // |extension_url| argument should be the url() from an Extension object. The
@@ -296,26 +304,13 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // Returns the url prefix for the extension/apps gallery. Can be set via the
   // --apps-gallery-url switch. The URL returned will not contain a trailing
   // slash. Do not use this as a prefix/extent for the store.  Instead see
-  // ExtensionsService::GetWebStoreApp or
-  // ExtensionsService::IsDownloadFromGallery
+  // ExtensionService::GetWebStoreApp or
+  // ExtensionService::IsDownloadFromGallery
   static std::string ChromeStoreLaunchURL();
-
-  // Helper function that consolidates the check for whether the script can
-  // execute into one location. |page_url| is the page that is the candidate
-  // for running the script, |can_execute_script_everywhere| specifies whether
-  // the extension is on the whitelist, |allowed_pages| is a vector of
-  // URLPatterns, listing what access the extension has, |script| is the script
-  // pointer (if content script) and |error| is an optional parameter, which
-  // will receive the error string listing why access was denied.
-  static bool CanExecuteScriptOnPage(
-      const GURL& page_url,
-      bool can_execute_script_everywhere,
-      const std::vector<URLPattern>* allowed_pages,
-      UserScript* script,
-      std::string* error);
 
   // Adds an extension to the scripting whitelist. Used for testing only.
   static void SetScriptingWhitelist(const ScriptingWhitelist& whitelist);
+  static const ScriptingWhitelist* GetScriptingWhitelist();
 
   // Returns true if the extension has the specified API permission.
   static bool HasApiPermission(const std::set<std::string>& api_permissions,
@@ -356,6 +351,9 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // having an NPAPI plugin).
   bool HasFullPermissions() const;
 
+  // Whether context menu should be shown for page and browser actions.
+  bool ShowConfigureContextMenus() const;
+
   // Returns the Homepage URL for this extension. If homepage_url was not
   // specified in the manifest, this returns the Google Gallery URL. For
   // third-party extensions, this returns a blank GURL.
@@ -372,6 +370,7 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
 
   // Gets the fully resolved absolute launch URL.
   GURL GetFullLaunchURL() const;
+
   // Image cache related methods. These are only valid on the UI thread and
   // not maintained by this class. See ImageLoadingTracker for usage. The
   // |original_size| parameter should be the size of the image at |source|
@@ -383,6 +382,18 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
                       const gfx::Size& max_size) const;
   SkBitmap GetCachedImage(const ExtensionResource& source,
                           const gfx::Size& max_size) const;
+
+  // Returns true if this extension can execute script on a page. If a
+  // UserScript object is passed, permission to run that specific script is
+  // checked (using its matches list). Otherwise, permission to execute script
+  // programmatically is checked (using the extension's host permission).
+  //
+  // This method is also aware of certain special pages that extensions are
+  // usually not allowed to run script on.
+  bool CanExecuteScriptOnPage(const GURL& page_url,
+                              UserScript* script,
+                              std::string* error) const;
+
   // Returns true if this extension is a COMPONENT extension, or if it is
   // on the whitelist of extensions that can script all pages.
   bool CanExecuteScriptEverywhere() const;
@@ -408,6 +419,9 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   const UserScriptList& content_scripts() const { return content_scripts_; }
   ExtensionAction* page_action() const { return page_action_.get(); }
   ExtensionAction* browser_action() const { return browser_action_.get(); }
+  ExtensionSidebarDefaults* sidebar_defaults() const {
+    return sidebar_defaults_.get();
+  }
   const std::vector<PluginInfo>& plugins() const { return plugins_; }
   const GURL& background_url() const { return background_url_; }
   const GURL& options_url() const { return options_url_; }
@@ -428,6 +442,7 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   }
   const std::string omnibox_keyword() const { return omnibox_keyword_; }
   bool incognito_split_mode() const { return incognito_split_mode_; }
+  const std::vector<TtsVoice>& tts_voices() const { return tts_voices_; }
 
   // App-related.
   bool is_app() const { return is_app_; }
@@ -526,6 +541,11 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   ExtensionAction* LoadExtensionActionHelper(
       const DictionaryValue* extension_action, std::string* error);
 
+  // Helper method to load an ExtensionSidebarDefaults from the sidebar manifest
+  // entry.
+  ExtensionSidebarDefaults* LoadExtensionSidebarDefaults(
+      const DictionaryValue* sidebar, std::string* error);
+
   // Calculates the effective host permissions from the permissions and content
   // script petterns.
   void InitEffectiveHostPermissions();
@@ -619,6 +639,9 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // The extension's browser action, if any.
   scoped_ptr<ExtensionAction> browser_action_;
 
+  // The extension's sidebar, if any.
+  scoped_ptr<ExtensionSidebarDefaults> sidebar_defaults_;
+
   // Optional list of NPAPI plugins and associated properties.
   std::vector<PluginInfo> plugins_;
 
@@ -691,7 +714,10 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // The Omnibox keyword for this extension, or empty if there is none.
   std::string omnibox_keyword_;
 
-  FRIEND_TEST_ALL_PREFIXES(ExtensionsServiceTest,
+  // List of text-to-speech voices that this extension provides, if any.
+  std::vector<TtsVoice> tts_voices_;
+
+  FRIEND_TEST_ALL_PREFIXES(ExtensionServiceTest,
                            UpdateExtensionPreservesLocation);
   FRIEND_TEST_ALL_PREFIXES(ExtensionTest, LoadPageActionHelper);
   FRIEND_TEST_ALL_PREFIXES(ExtensionTest, InitFromValueInvalid);
@@ -730,12 +756,26 @@ struct UninstalledExtensionInfo {
 
   std::string extension_id;
   std::set<std::string> extension_api_permissions;
-  // TODO(akalin): Once we have a unified ExtensionType, replace the
-  // below member variables with a member of that type.
-  bool is_theme;
-  bool is_app;
-  bool converted_from_user_script;
+  Extension::Type extension_type;
   GURL update_url;
+};
+
+struct UnloadedExtensionInfo {
+  enum Reason {
+    DISABLE,    // The extension is being disabled.
+    UPDATE,     // The extension is being updated to a newer version.
+    UNINSTALL,  // The extension is being uninstalled.
+  };
+
+  Reason reason;
+
+  // Was the extension already disabled?
+  bool already_disabled;
+
+  // The extension being unloaded - this should always be non-NULL.
+  const Extension* extension;
+
+  UnloadedExtensionInfo(const Extension* extension, Reason reason);
 };
 
 #endif  // CHROME_COMMON_EXTENSIONS_EXTENSION_H_

@@ -1,9 +1,9 @@
-// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/basictypes.h"
-#include "base/platform_thread.h"
+#include "base/threading/platform_thread.h"
 #include "base/timer.h"
 #include "base/string_util.h"
 #include "net/base/io_buffer.h"
@@ -48,6 +48,7 @@ class DiskCacheEntryTest : public DiskCacheTestWithCache {
   void HugeSparseIO();
   void GetAvailableRange();
   void CouldBeSparse();
+  void UpdateSparseEntry();
   void DoomSparseEntry();
   void PartialSparseEntry();
 };
@@ -514,7 +515,7 @@ TEST_F(DiskCacheEntryTest, RequestThrottling) {
     int ret = entry->WriteData(0, 0, buffer, kSize, &cb, false);
     EXPECT_EQ(net::ERR_IO_PENDING, ret);
   }
-  // We have 9 queued requests, lets dispatch them all at once.
+  // We have 9 queued requests, let's dispatch them all.
   cache_impl_->ThrottleRequestsForTest(false);
   EXPECT_TRUE(helper.WaitUntilCacheIoFinished(expected));
 
@@ -633,7 +634,7 @@ void DiskCacheEntryTest::GetTimes() {
   EXPECT_TRUE(entry->GetLastModified() >= t1);
   EXPECT_TRUE(entry->GetLastModified() == entry->GetLastUsed());
 
-  PlatformThread::Sleep(20);
+  base::PlatformThread::Sleep(20);
   Time t2 = Time::Now();
   EXPECT_TRUE(t2 > t1);
   EXPECT_EQ(0, WriteData(entry, 0, 200, NULL, 0, false));
@@ -644,7 +645,7 @@ void DiskCacheEntryTest::GetTimes() {
   }
   EXPECT_TRUE(entry->GetLastModified() == entry->GetLastUsed());
 
-  PlatformThread::Sleep(20);
+  base::PlatformThread::Sleep(20);
   Time t3 = Time::Now();
   EXPECT_TRUE(t3 > t2);
   const int kSize = 200;
@@ -857,7 +858,7 @@ void DiskCacheEntryTest::ZeroLengthIO() {
   EXPECT_EQ(0, ReadData(entry, 0, 50000, NULL, 0));
   EXPECT_EQ(100000, entry->GetDataSize(0));
 
-  // Lets verify the actual content.
+  // Let's verify the actual content.
   const int kSize = 20;
   const char zeros[kSize] = {};
   scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kSize));
@@ -1285,7 +1286,7 @@ void DiskCacheEntryTest::DoomedEntry() {
   FlushQueueForTest();
   EXPECT_EQ(0, cache_->GetEntryCount());
   Time initial = Time::Now();
-  PlatformThread::Sleep(20);
+  base::PlatformThread::Sleep(20);
 
   const int kSize1 = 2000;
   const int kSize2 = 2000;
@@ -1655,6 +1656,50 @@ TEST_F(DiskCacheEntryTest, MemoryOnlyMisalignedGetAvailableRange) {
   entry->Close();
 }
 
+void DiskCacheEntryTest::UpdateSparseEntry() {
+  std::string key("the first key");
+  disk_cache::Entry* entry1;
+  ASSERT_EQ(net::OK, CreateEntry(key, &entry1));
+
+  const int kSize = 2048;
+  scoped_refptr<net::IOBuffer> buf_1(new net::IOBuffer(kSize));
+  scoped_refptr<net::IOBuffer> buf_2(new net::IOBuffer(kSize));
+  CacheTestFillBuffer(buf_1->data(), kSize, false);
+
+  // Write at offset 0.
+  VerifySparseIO(entry1, 0, buf_1, kSize, buf_2);
+  entry1->Close();
+
+  // Write at offset 2048.
+  ASSERT_EQ(net::OK, OpenEntry(key, &entry1));
+  VerifySparseIO(entry1, 2048, buf_1, kSize, buf_2);
+
+  disk_cache::Entry* entry2;
+  ASSERT_EQ(net::OK, CreateEntry("the second key", &entry2));
+
+  entry1->Close();
+  entry2->Close();
+  FlushQueueForTest();
+  if (memory_only_)
+    EXPECT_EQ(2, cache_->GetEntryCount());
+  else
+    EXPECT_EQ(3, cache_->GetEntryCount());
+}
+
+TEST_F(DiskCacheEntryTest, UpdateSparseEntry) {
+  SetDirectMode();
+  SetCacheType(net::MEDIA_CACHE);
+  InitCache();
+  UpdateSparseEntry();
+}
+
+TEST_F(DiskCacheEntryTest, MemoryOnlyUpdateSparseEntry) {
+  SetMemoryOnlyMode();
+  SetCacheType(net::MEDIA_CACHE);
+  InitCache();
+  UpdateSparseEntry();
+}
+
 void DiskCacheEntryTest::DoomSparseEntry() {
   std::string key1("the first key");
   std::string key2("the second key");
@@ -1701,7 +1746,7 @@ void DiskCacheEntryTest::DoomSparseEntry() {
       // Most likely we are waiting for the result of reading the sparse info
       // (it's always async on Posix so it is easy to miss). Unfortunately we
       // don't have any signal to watch for so we can only wait.
-      PlatformThread::Sleep(500);
+      base::PlatformThread::Sleep(500);
       MessageLoop::current()->RunAllPending();
     }
     EXPECT_EQ(0, cache_->GetEntryCount());

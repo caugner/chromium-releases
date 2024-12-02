@@ -5,6 +5,7 @@
 #include "net/http/http_network_layer.h"
 
 #include "base/logging.h"
+#include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "net/http/http_network_session.h"
@@ -21,6 +22,7 @@ namespace net {
 // static
 HttpTransactionFactory* HttpNetworkLayer::CreateFactory(
     HostResolver* host_resolver,
+    CertVerifier* cert_verifier,
     DnsRRResolver* dnsrr_resolver,
     DnsCertProvenanceChecker* dns_cert_checker,
     SSLHostInfoFactory* ssl_host_info_factory,
@@ -32,7 +34,7 @@ HttpTransactionFactory* HttpNetworkLayer::CreateFactory(
   DCHECK(proxy_service);
 
   return new HttpNetworkLayer(ClientSocketFactory::GetDefaultFactory(),
-                              host_resolver, dnsrr_resolver,
+                              host_resolver, cert_verifier, dnsrr_resolver,
                               dns_cert_checker,
                               ssl_host_info_factory, proxy_service,
                               ssl_config_service, http_auth_handler_factory,
@@ -52,6 +54,7 @@ HttpTransactionFactory* HttpNetworkLayer::CreateFactory(
 HttpNetworkLayer::HttpNetworkLayer(
     ClientSocketFactory* socket_factory,
     HostResolver* host_resolver,
+    CertVerifier* cert_verifier,
     DnsRRResolver* dnsrr_resolver,
     DnsCertProvenanceChecker* dns_cert_checker,
     SSLHostInfoFactory* ssl_host_info_factory,
@@ -62,6 +65,7 @@ HttpNetworkLayer::HttpNetworkLayer(
     NetLog* net_log)
     : socket_factory_(socket_factory),
       host_resolver_(host_resolver),
+      cert_verifier_(cert_verifier),
       dnsrr_resolver_(dnsrr_resolver),
       dns_cert_checker_(dns_cert_checker),
       ssl_host_info_factory_(ssl_host_info_factory),
@@ -80,6 +84,7 @@ HttpNetworkLayer::HttpNetworkLayer(
 HttpNetworkLayer::HttpNetworkLayer(
     ClientSocketFactory* socket_factory,
     HostResolver* host_resolver,
+    CertVerifier* cert_verifier,
     DnsRRResolver* dnsrr_resolver,
     DnsCertProvenanceChecker* dns_cert_checker,
     SSLHostInfoFactory* ssl_host_info_factory,
@@ -91,6 +96,7 @@ HttpNetworkLayer::HttpNetworkLayer(
     NetLog* net_log)
     : socket_factory_(socket_factory),
       host_resolver_(host_resolver),
+      cert_verifier_(cert_verifier),
       dnsrr_resolver_(dnsrr_resolver),
       dns_cert_checker_(dns_cert_checker),
       ssl_host_info_factory_(ssl_host_info_factory),
@@ -108,6 +114,8 @@ HttpNetworkLayer::HttpNetworkLayer(
 
 HttpNetworkLayer::HttpNetworkLayer(HttpNetworkSession* session)
     : socket_factory_(ClientSocketFactory::GetDefaultFactory()),
+      host_resolver_(NULL),
+      cert_verifier_(NULL),
       dnsrr_resolver_(NULL),
       dns_cert_checker_(NULL),
       ssl_host_info_factory_(NULL),
@@ -150,6 +158,7 @@ HttpNetworkSession* HttpNetworkLayer::GetSession() {
       spdy_session_pool_.reset(new SpdySessionPool(ssl_config_service_));
     session_ = new HttpNetworkSession(
         host_resolver_,
+        cert_verifier_,
         dnsrr_resolver_,
         dns_cert_checker_,
         ssl_host_info_factory_,
@@ -162,6 +171,7 @@ HttpNetworkSession* HttpNetworkLayer::GetSession() {
         net_log_);
     // These were just temps for lazy-initializing HttpNetworkSession.
     host_resolver_ = NULL;
+    cert_verifier_ = NULL;
     dnsrr_resolver_ = NULL;
     dns_cert_checker_ = NULL;
     ssl_host_info_factory_ = NULL;
@@ -179,6 +189,7 @@ void HttpNetworkLayer::EnableSpdy(const std::string& mode) {
   static const char kOff[] = "off";
   static const char kSSL[] = "ssl";
   static const char kDisableSSL[] = "no-ssl";
+  static const char kExclude[] = "exclude";  // Hosts to exclude
   static const char kDisableCompression[] = "no-compress";
   static const char kDisableAltProtocols[] = "no-alt-protocols";
   static const char kEnableVersionOne[] = "v1";
@@ -219,7 +230,12 @@ void HttpNetworkLayer::EnableSpdy(const std::string& mode) {
 
   for (std::vector<std::string>::iterator it = spdy_options.begin();
        it != spdy_options.end(); ++it) {
-    const std::string& option = *it;
+    const std::string& element = *it;
+    std::vector<std::string> name_value;
+    base::SplitString(element, '=', &name_value);
+    const std::string& option = name_value[0];
+    const std::string value = name_value.size() > 1 ? name_value[1] : "";
+
     if (option == kOff) {
       HttpStreamFactory::set_spdy_enabled(false);
     } else if (option == kDisableSSL) {
@@ -229,6 +245,8 @@ void HttpNetworkLayer::EnableSpdy(const std::string& mode) {
     } else if (option == kSSL) {
       HttpStreamFactory::set_force_spdy_over_ssl(true);
       HttpStreamFactory::set_force_spdy_always(true);
+    } else if (option == kExclude) {
+      HttpStreamFactory::add_forced_spdy_exclusion(value);
     } else if (option == kDisableCompression) {
       spdy::SpdyFramer::set_enable_compression_default(false);
     } else if (option == kEnableNPN) {

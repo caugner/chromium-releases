@@ -9,10 +9,11 @@
 #include <vector>
 
 #include "base/message_loop.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebData.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "base/string_util.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/cpp_binding_example.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/tools/test_shell/test_shell_test.h"
@@ -63,7 +64,7 @@ class ExampleTestShell : public TestShell {
   // When called by WebViewDelegate::WindowObjectCleared method, this binds a
   // CppExampleObject to window.example.
   virtual void BindJSObjectsToWindow(WebFrame* frame) {
-    example_bound_class_.BindToJavascript(frame, L"example");
+    example_bound_class_.BindToJavascript(frame, "example");
     // We use the layoutTestController binding for notifyDone.
     TestShell::BindJSObjectsToWindow(frame);
   }
@@ -113,14 +114,15 @@ class CppBoundClassTest : public TestShellTest {
    // document text is exactly "SUCCESS".
    void CheckJavaScriptSuccess(const std::string& javascript) {
      ExecuteJavaScript(javascript);
-     EXPECT_EQ(L"SUCCESS", webkit_glue::DumpDocumentText(webframe_));
+     EXPECT_EQ("SUCCESS",
+               UTF16ToASCII(webkit_glue::DumpDocumentText(webframe_)));
    }
 
    // Executes the specified JavaScript and checks that the resulting document
    // text is empty.
    void CheckJavaScriptFailure(const std::string& javascript) {
      ExecuteJavaScript(javascript);
-     EXPECT_EQ(L"", webkit_glue::DumpDocumentText(webframe_));
+     EXPECT_EQ("", UTF16ToASCII(webkit_glue::DumpDocumentText(webframe_)));
    }
 
    // Constructs a JavaScript snippet that evaluates and compares the left and
@@ -228,7 +230,8 @@ TEST_F(CppBoundClassTest, SetAndGetPropertiesWithCallbacks) {
   CheckJavaScriptSuccess(js);
 }
 
-TEST_F(CppBoundClassTest, InvokeMethods) {
+// Disabled, http://crbug.com/68445.
+TEST_F(CppBoundClassTest, DISABLED_InvokeMethods) {
   // The expression on the left is expected to return the value on the right.
   static const std::string tests[] = {
     "example.echoValue(true)", "true",
@@ -238,8 +241,7 @@ TEST_F(CppBoundClassTest, InvokeMethods) {
     "example.echoValue()", "null",     // Too few arguments
 
     "example.echoType(false)", "true",
-    // Re-enable after merging r72243.
-    //"example.echoType(19)", "3.14159",
+    "example.echoType(19)", "3.14159",
     "example.echoType(9.876)", "3.14159",
     "example.echoType('test string')", "'Success!'",
     "example.echoType()", "null",      // Too few arguments

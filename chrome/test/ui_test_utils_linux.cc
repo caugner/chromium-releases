@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,10 @@
 #include "base/message_loop.h"
 #include "chrome/browser/automation/ui_controls.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/gtk/view_id_util.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/gtk/view_id_util.h"
 #if defined(TOOLKIT_VIEWS)
-#include "chrome/browser/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "views/focus/focus_manager.h"
 #endif
 
@@ -89,6 +89,9 @@ void HideNativeWindow(gfx::NativeWindow window) {
 }
 
 void ShowAndFocusNativeWindow(gfx::NativeWindow window) {
+  if (gtk_window_has_toplevel_focus(GTK_WINDOW(window)))
+    return;
+
   gtk_window_present(GTK_WINDOW(window));
 }
 

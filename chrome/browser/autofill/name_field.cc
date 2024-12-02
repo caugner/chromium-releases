@@ -4,10 +4,13 @@
 
 #include "chrome/browser/autofill/name_field.h"
 
+#include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_type.h"
+#include "grit/autofill_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 
 NameField* NameField::Parse(std::vector<AutoFillField*>::const_iterator* iter,
                             bool is_ecml) {
@@ -18,23 +21,32 @@ NameField* NameField::Parse(std::vector<AutoFillField*>::const_iterator* iter,
   return field;
 }
 
+bool FullNameField::GetFieldInfo(FieldTypeMap* field_type_map) const {
+  bool ok = Add(field_type_map, field_, AutoFillType(NAME_FULL));
+  DCHECK(ok);
+  return true;
+}
+
 FullNameField* FullNameField::Parse(
     std::vector<AutoFillField*>::const_iterator* iter) {
   // Exclude labels containing the string "username", which typically
   // denotes a login ID rather than the user's actual name.
   AutoFillField* field = **iter;
-  if (Match(field, ASCIIToUTF16("username"), false))
+  if (Match(field, l10n_util::GetStringUTF16(IDS_AUTOFILL_USERNAME_RE), false))
     return NULL;
 
   // Searching for any label containing the word "name" is too general;
   // for example, Travelocity_Edit travel profile.html contains a field
   // "Travel Profile Name".
-  const string16 name_match =
-      ASCIIToUTF16("^name|full *name|your name|customer name");
+  const string16 name_match = l10n_util::GetStringUTF16(IDS_AUTOFILL_NAME_RE);
   if (ParseText(iter, name_match, &field))
     return new FullNameField(field);
 
   return NULL;
+}
+
+FullNameField::FullNameField(AutoFillField* field)
+    : field_(field) {
 }
 
 FirstLastNameField* FirstLastNameField::Parse1(
@@ -45,7 +57,9 @@ FirstLastNameField* FirstLastNameField::Parse1(
   std::vector<AutoFillField*>::const_iterator q = *iter;
 
   AutoFillField* next;
-  if (ParseText(&q, ASCIIToUTF16("^name"), &v->first_name_) &&
+  if (ParseText(&q,
+                l10n_util::GetStringUTF16(IDS_AUTOFILL_NAME_SPECIFIC_RE),
+                &v->first_name_) &&
       ParseEmptyText(&q, &next)) {
     if (ParseEmptyText(&q, &v->last_name_)) {
       // There are three name fields; assume that the middle one is a
@@ -76,8 +90,7 @@ FirstLastNameField* FirstLastNameField::Parse2(
   // so we match "initials" here (and just fill in a first name there,
   // American-style).
   // The ".*first$" matches fields ending in "first" (example in sample8.html).
-  string16 match =
-      ASCIIToUTF16("first *name|first_name|initials|fname|first$");
+  string16 match = l10n_util::GetStringUTF16(IDS_AUTOFILL_FIRST_NAME_RE);
   if (!ParseText(&q, match, &v->first_name_))
     return NULL;
 
@@ -86,16 +99,16 @@ FirstLastNameField* FirstLastNameField::Parse2(
   // as both (the label text is "MI" and the element name is
   // "txtmiddlename"); such a field probably actually represents a
   // middle initial.
-  match = ASCIIToUTF16("middle *initial|middle_initial|m\\.i\\.|mi$");
+  match = l10n_util::GetStringUTF16(IDS_AUTOFILL_MIDDLE_INITIAL_RE);
   if (ParseText(&q, match, &v->middle_name_)) {
     v->middle_initial_ = true;
   } else {
-    match = ASCIIToUTF16("middle *name|middle_name|mname|middle$");
+    match = l10n_util::GetStringUTF16(IDS_AUTOFILL_MIDDLE_NAME_RE);
     ParseText(&q, match, &v->middle_name_);
   }
 
   // The ".*last$" matches fields ending in "last" (example in sample8.html).
-  match = ASCIIToUTF16("last *name|last_name|lname|surname|last$");
+  match = l10n_util::GetStringUTF16(IDS_AUTOFILL_LAST_NAME_RE);
   if (!ParseText(&q, match, &v->last_name_))
     return NULL;
 

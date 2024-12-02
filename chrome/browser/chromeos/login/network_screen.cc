@@ -4,8 +4,6 @@
 
 #include "chrome/browser/chromeos/login/network_screen.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/logging.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
@@ -16,6 +14,8 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/controls/menu/menu_2.h"
 #include "views/widget/widget.h"
 #include "views/window/window.h"
@@ -157,10 +157,11 @@ void NetworkScreen::OnConnectionTimeout() {
         network_control->GetScreenBounds(),
         BubbleBorder::LEFT_TOP,
         ResourceBundle::GetSharedInstance().GetBitmapNamed(IDR_WARNING),
-        l10n_util::GetStringF(IDS_NETWORK_SELECTION_ERROR,
-                              l10n_util::GetString(IDS_PRODUCT_OS_NAME),
-                              UTF16ToWide(network_id_)),
-        l10n_util::GetString(IDS_NETWORK_SELECTION_ERROR_HELP),
+        UTF16ToWide(l10n_util::GetStringFUTF16(
+            IDS_NETWORK_SELECTION_ERROR,
+            l10n_util::GetStringUTF16(IDS_PRODUCT_OS_NAME),
+            network_id_)),
+        UTF16ToWide(l10n_util::GetStringUTF16(IDS_LEARN_MORE)),
         this);
     network_control->RequestFocus();
   }

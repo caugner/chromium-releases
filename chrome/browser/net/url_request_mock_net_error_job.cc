@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,7 @@ void URLRequestMockNetErrorJob::AddMockedURL(const GURL& url,
 #endif
 
   url_mock_info_map_[url] = MockInfo(base, errors, ssl_cert);
-  URLRequestFilter::GetInstance()
+  net::URLRequestFilter::GetInstance()
       ->AddUrlHandler(url, &URLRequestMockNetErrorJob::Factory);
 }
 
@@ -53,12 +53,13 @@ void URLRequestMockNetErrorJob::RemoveMockedURL(const GURL& url) {
   URLMockInfoMap::iterator iter = url_mock_info_map_.find(url);
   DCHECK(iter != url_mock_info_map_.end());
   url_mock_info_map_.erase(iter);
-  URLRequestFilter::GetInstance()->RemoveUrlHandler(url);
+  net::URLRequestFilter::GetInstance()->RemoveUrlHandler(url);
 }
 
 // static
-URLRequestJob* URLRequestMockNetErrorJob::Factory(URLRequest* request,
-                                                  const std::string& scheme) {
+net::URLRequestJob* URLRequestMockNetErrorJob::Factory(
+    net::URLRequest* request,
+    const std::string& scheme) {
   GURL url = request->url();
 
   URLMockInfoMap::const_iterator iter = url_mock_info_map_.find(url);
@@ -66,9 +67,9 @@ URLRequestJob* URLRequestMockNetErrorJob::Factory(URLRequest* request,
 
   MockInfo mock_info = iter->second;
 
-  // URLRequestMockNetErrorJob derives from URLRequestFileJob.  We pass a
-  // FilePath so that the URLRequestFileJob methods will do the loading from
-  // the files.
+  // URLRequestMockNetErrorJob derives from net::URLRequestFileJob.  We pass a
+  // FilePath so that the net::URLRequestFileJob methods will do the loading
+  // from the files.
   std::wstring file_url(L"file:///");
   file_url.append(mock_info.base);
   file_url.append(UTF8ToWide(url.path()));
@@ -80,7 +81,7 @@ URLRequestJob* URLRequestMockNetErrorJob::Factory(URLRequest* request,
                                        file_path);
 }
 
-URLRequestMockNetErrorJob::URLRequestMockNetErrorJob(URLRequest* request,
+URLRequestMockNetErrorJob::URLRequestMockNetErrorJob(net::URLRequest* request,
     const std::vector<int>& errors, net::X509Certificate* cert,
     const FilePath& file_path)
     : URLRequestMockHTTPJob(request, file_path),
@@ -108,7 +109,8 @@ void URLRequestMockNetErrorJob::StartAsync() {
       request_->delegate()->OnSSLCertificateError(request_, error,
                                                   ssl_cert_.get());
     } else {
-      NotifyStartError(URLRequestStatus(URLRequestStatus::FAILED, error));
+      NotifyStartError(net::URLRequestStatus(net::URLRequestStatus::FAILED,
+                                             error));
     }
   }
 }

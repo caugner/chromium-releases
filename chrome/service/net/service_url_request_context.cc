@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "base/sys_info.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/service/service_process.h"
+#include "net/base/cert_verifier.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/cookie_policy.h"
 #include "net/base/dnsrr_resolver.h"
@@ -117,6 +118,7 @@ ServiceURLRequestContext::ServiceURLRequestContext(
           g_service_process->file_thread()->message_loop());
   proxy_service_ = net::ProxyService::CreateUsingSystemProxyResolver(
       proxy_config_service, 0u, NULL);
+  cert_verifier_ = new net::CertVerifier;
   dnsrr_resolver_ = new net::DnsRRResolver;
   ftp_transaction_factory_ = new net::FtpNetworkLayer(host_resolver_);
   ssl_config_service_ = new net::SSLConfigServiceDefaults;
@@ -124,6 +126,7 @@ ServiceURLRequestContext::ServiceURLRequestContext(
       host_resolver_);
   http_transaction_factory_ = new net::HttpCache(
       net::HttpNetworkLayer::CreateFactory(host_resolver_,
+                                           cert_verifier_,
                                            dnsrr_resolver_,
                                            NULL /* dns_cert_checker */,
                                            NULL /* ssl_host_info_factory */,
@@ -132,6 +135,7 @@ ServiceURLRequestContext::ServiceURLRequestContext(
                                            http_auth_handler_factory_,
                                            NULL /* network_delegate */,
                                            NULL /* net_log */),
+      NULL /* net_log */,
       net::HttpCache::DefaultBackend::InMemory(0));
   // In-memory cookie store.
   cookie_store_ = new net::CookieMonster(NULL, NULL);
@@ -139,10 +143,19 @@ ServiceURLRequestContext::ServiceURLRequestContext(
   accept_charset_ = "iso-8859-1,*,utf-8";
 }
 
+const std::string& ServiceURLRequestContext::GetUserAgent(
+    const GURL& url) const {
+  // If the user agent is set explicitly return that, otherwise call the
+  // base class method to return default value.
+  return user_agent_.empty() ?
+      net::URLRequestContext::GetUserAgent(url) : user_agent_;
+}
+
 ServiceURLRequestContext::~ServiceURLRequestContext() {
   delete ftp_transaction_factory_;
   delete http_transaction_factory_;
   delete http_auth_handler_factory_;
+  delete cert_verifier_;
   delete dnsrr_resolver_;
 }
 
@@ -153,7 +166,7 @@ ServiceURLRequestContextGetter::ServiceURLRequestContextGetter()
   user_agent_ = MakeUserAgentForServiceProcess();
 }
 
-URLRequestContext*
+net::URLRequestContext*
 ServiceURLRequestContextGetter::GetURLRequestContext() {
   if (!url_request_context_)
     url_request_context_ = new ServiceURLRequestContext(user_agent_);

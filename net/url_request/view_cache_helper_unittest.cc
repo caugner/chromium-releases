@@ -1,10 +1,11 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/url_request/view_cache_helper.h"
 
 #include "base/pickle.h"
+#include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/http/http_cache.h"
@@ -13,7 +14,7 @@
 
 namespace {
 
-class TestURLRequestContext : public URLRequestContext {
+class TestURLRequestContext : public net::URLRequestContext {
  public:
   TestURLRequestContext();
 
@@ -25,7 +26,7 @@ class TestURLRequestContext : public URLRequestContext {
 };
 
 TestURLRequestContext::TestURLRequestContext()
-    : cache_(reinterpret_cast<net::HttpTransactionFactory*>(NULL),
+    : cache_(reinterpret_cast<net::HttpTransactionFactory*>(NULL), NULL,
              net::HttpCache::DefaultBackend::InMemory(0)) {
   http_transaction_factory_ = &cache_;
 }
@@ -81,7 +82,7 @@ void WriteToEntry(disk_cache::Backend* cache, const std::string key,
   entry->Close();
 }
 
-void FillCache(URLRequestContext* context) {
+void FillCache(net::URLRequestContext* context) {
   TestCompletionCallback cb;
   disk_cache::Backend* cache;
   int rv =

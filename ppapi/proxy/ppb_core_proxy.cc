@@ -14,6 +14,7 @@
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/ppb_core.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
+#include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
 
 namespace pp {
@@ -28,11 +29,11 @@ base::MessageLoopProxy* GetMainThreadMessageLoop() {
 }
 
 void AddRefResource(PP_Resource resource) {
-  PluginDispatcher::Get()->plugin_resource_tracker()->AddRefResource(resource);
+  PluginResourceTracker::GetInstance()->AddRefResource(resource);
 }
 
 void ReleaseResource(PP_Resource resource) {
-  PluginDispatcher::Get()->plugin_resource_tracker()->ReleaseResource(resource);
+  PluginResourceTracker::GetInstance()->ReleaseResource(resource);
 }
 
 void* MemAlloc(size_t num_bytes) {
@@ -96,14 +97,17 @@ InterfaceID PPB_Core_Proxy::GetInterfaceId() const {
   return INTERFACE_ID_PPB_CORE;
 }
 
-void PPB_Core_Proxy::OnMessageReceived(const IPC::Message& msg) {
+bool PPB_Core_Proxy::OnMessageReceived(const IPC::Message& msg) {
+  bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPB_Core_Proxy, msg)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBCore_AddRefResource,
                         OnMsgAddRefResource)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBCore_ReleaseResource,
                         OnMsgReleaseResource)
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   // TODO(brettw) handle bad messages!
+  return handled;
 }
 
 void PPB_Core_Proxy::OnMsgAddRefResource(PP_Resource resource) {

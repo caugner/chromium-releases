@@ -6,17 +6,17 @@
 
 #include <vector>
 
-#include "base/platform_thread.h"
 #include "base/stl_util-inl.h"
+#include "base/threading/platform_thread.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/password_manager/password_form_manager.h"
 #include "chrome/browser/password_manager/password_manager_delegate.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/notification_registrar.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/render_messages.h"
 #include "chrome/common/render_messages_params.h"
 #include "grit/generated_resources.h"
 
@@ -36,8 +36,9 @@ void PasswordManager::RegisterUserPrefs(PrefService* prefs) {
 // avoid needing to lock (a static boolean flag is then sufficient to
 // guarantee running only once).
 static void ReportMetrics(bool password_manager_enabled) {
-  static PlatformThreadId initial_thread_id = PlatformThread::CurrentId();
-  DCHECK(initial_thread_id == PlatformThread::CurrentId());
+  static base::PlatformThreadId initial_thread_id =
+      base::PlatformThread::CurrentId();
+  DCHECK(initial_thread_id == base::PlatformThread::CurrentId());
 
   static bool ran_once = false;
   if (ran_once)
@@ -158,7 +159,18 @@ void PasswordManager::DidNavigateAnyFramePostCommit(
     ProvisionallySavePassword(params.password_form);
 }
 
-void PasswordManager::PasswordFormsFound(
+bool PasswordManager::OnMessageReceived(const IPC::Message& message) {
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(PasswordManager, message)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_PasswordFormsFound, OnPasswordFormsFound)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_PasswordFormsVisible,
+                        OnPasswordFormsVisible)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+  return handled;
+}
+
+void PasswordManager::OnPasswordFormsFound(
     const std::vector<PasswordForm>& forms) {
   if (!delegate_->GetProfileForPasswordManager())
     return;
@@ -179,7 +191,7 @@ void PasswordManager::PasswordFormsFound(
   }
 }
 
-void PasswordManager::PasswordFormsVisible(
+void PasswordManager::OnPasswordFormsVisible(
     const std::vector<PasswordForm>& visible_forms) {
   if (!provisional_save_manager_.get())
     return;

@@ -5,28 +5,31 @@
 #include "chrome/test/render_view_test.h"
 
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
+#include "chrome/common/dom_storage_common.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/render_messages_params.h"
 #include "chrome/common/renderer_preferences.h"
+#include "chrome/renderer/autofill_helper.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_process_bindings.h"
 #include "chrome/renderer/extensions/js_only_v8_extensions.h"
 #include "chrome/renderer/extensions/renderer_extension_bindings.h"
 #include "chrome/renderer/mock_render_process.h"
+#include "chrome/renderer/password_autocomplete_manager.h"
 #include "chrome/renderer/renderer_main_platform_delegate.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebScriptController.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebScriptSource.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptSource.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_LINUX)
-#include "app/event_synthesis_gtk.h"
+#include "ui/base/gtk/event_synthesis_gtk.h"
 #endif
 
 using WebKit::WebFrame;
@@ -134,6 +137,12 @@ void RenderViewTest::SetUp() {
 
   // Attach a pseudo keyboard device to this object.
   mock_keyboard_.reset(new MockKeyboard());
+
+  // RenderView doesn't expose it's PasswordAutocompleteManager or
+  // AutoFillHelper objects, because it has no need to store them directly
+  // (they're stored as RenderViewObserver*).  So just create another set.
+  password_autocomplete_ = new PasswordAutocompleteManager(view_);
+  autofill_helper_ = new AutoFillHelper(view_, password_autocomplete_);
 }
 
 void RenderViewTest::TearDown() {
@@ -204,8 +213,8 @@ int RenderViewTest::SendKeyEvent(MockKeyboard::Layout layout,
   // We ignore |layout|, which means we are only testing the layout of the
   // current locale. TODO(estade): fix this to respect |layout|.
   std::vector<GdkEvent*> events;
-  app::SynthesizeKeyPressEvents(
-      NULL, static_cast<app::KeyboardCode>(key_code),
+  ui::SynthesizeKeyPressEvents(
+      NULL, static_cast<ui::KeyboardCode>(key_code),
       modifiers & (MockKeyboard::LEFT_CONTROL | MockKeyboard::RIGHT_CONTROL),
       modifiers & (MockKeyboard::LEFT_SHIFT | MockKeyboard::RIGHT_SHIFT),
       modifiers & (MockKeyboard::LEFT_ALT | MockKeyboard::RIGHT_ALT),
@@ -244,7 +253,7 @@ void RenderViewTest::SendNativeKeyEvent(
   scoped_ptr<IPC::Message> input_message(new ViewMsg_HandleInputEvent(0));
   input_message->WriteData(reinterpret_cast<const char*>(&key_event),
                            sizeof(WebKit::WebKeyboardEvent));
-  view_->OnHandleInputEvent(*input_message);
+  view_->OnMessageReceived(*input_message);
 }
 
 void RenderViewTest::VerifyPageCount(int count) {
@@ -337,8 +346,9 @@ bool RenderViewTest::SimulateElementClick(const std::string& element_id) {
   mouse_event.y = bounds.CenterPoint().y();
   mouse_event.clickCount = 1;
   ViewMsg_HandleInputEvent input_event(0);
-  input_event.WriteData(reinterpret_cast<const char*>(&mouse_event),
-                        sizeof(WebMouseEvent));
-  view_->OnHandleInputEvent(input_event);
+  scoped_ptr<IPC::Message> input_message(new ViewMsg_HandleInputEvent(0));
+  input_message->WriteData(reinterpret_cast<const char*>(&mouse_event),
+                           sizeof(WebMouseEvent));
+  view_->OnMessageReceived(*input_message);
   return true;
 }

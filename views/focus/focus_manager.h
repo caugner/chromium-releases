@@ -126,6 +126,9 @@ class FocusManager {
  public:
   class WidgetFocusManager {
    public:
+    // Returns the singleton instance.
+    static WidgetFocusManager* GetInstance();
+
     // Adds/removes a WidgetFocusChangeListener |listener| to the set of
     // active listeners.
     void AddFocusChangeListener(WidgetFocusChangeListener* listener);
@@ -176,9 +179,7 @@ class FocusManager {
   virtual ~FocusManager();
 
   // Returns the global WidgetFocusManager instance for the running application.
-  static WidgetFocusManager* GetWidgetFocusManager() {
-    return Singleton<WidgetFocusManager>::get();
-  }
+  static WidgetFocusManager* GetWidgetFocusManager();
 
   // Processes the passed key event for accelerators and tab traversal.
   // Returns false if the event has been consumed and should not be processed

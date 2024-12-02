@@ -16,7 +16,10 @@ namespace proxy {
 namespace {
 
 PP_Var GetWindowObject(PP_Instance instance) {
-  Dispatcher* dispatcher = PluginDispatcher::Get();
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
+  if (!dispatcher)
+    return PP_MakeUndefined();
+
   ReceiveSerializedVarReturnValue result;
   dispatcher->Send(new PpapiHostMsg_PPBInstance_GetWindowObject(
       INTERFACE_ID_PPB_INSTANCE, instance, &result));
@@ -24,7 +27,10 @@ PP_Var GetWindowObject(PP_Instance instance) {
 }
 
 PP_Var GetOwnerElementObject(PP_Instance instance) {
-  Dispatcher* dispatcher = PluginDispatcher::Get();
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
+  if (!dispatcher)
+    return PP_MakeUndefined();
+
   ReceiveSerializedVarReturnValue result;
   dispatcher->Send(new PpapiHostMsg_PPBInstance_GetOwnerElementObject(
           INTERFACE_ID_PPB_INSTANCE, instance, &result));
@@ -32,21 +38,32 @@ PP_Var GetOwnerElementObject(PP_Instance instance) {
 }
 
 PP_Bool BindGraphics(PP_Instance instance, PP_Resource device) {
-  PP_Bool result;
-  PluginDispatcher::Get()->Send(new PpapiHostMsg_PPBInstance_BindGraphics(
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
+  if (!dispatcher)
+    return PP_FALSE;
+
+  PP_Bool result = PP_FALSE;
+  dispatcher->Send(new PpapiHostMsg_PPBInstance_BindGraphics(
       INTERFACE_ID_PPB_INSTANCE, instance, device, &result));
   return result;
 }
 
 PP_Bool IsFullFrame(PP_Instance instance) {
-  PP_Bool result;
-  PluginDispatcher::Get()->Send(new PpapiHostMsg_PPBInstance_IsFullFrame(
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
+  if (!dispatcher)
+    return PP_FALSE;
+
+  PP_Bool result = PP_FALSE;
+  dispatcher->Send(new PpapiHostMsg_PPBInstance_IsFullFrame(
       INTERFACE_ID_PPB_INSTANCE, instance, &result));
   return result;
 }
 
 PP_Var ExecuteScript(PP_Instance instance, PP_Var script, PP_Var* exception) {
-  Dispatcher* dispatcher = PluginDispatcher::Get();
+  PluginDispatcher* dispatcher = PluginDispatcher::GetForInstance(instance);
+  if (!dispatcher)
+    return PP_MakeUndefined();
+
   ReceiveSerializedException se(dispatcher, exception);
   if (se.IsThrown())
     return PP_MakeUndefined();
@@ -84,7 +101,8 @@ InterfaceID PPB_Instance_Proxy::GetInterfaceId() const {
   return INTERFACE_ID_PPB_INSTANCE;
 }
 
-void PPB_Instance_Proxy::OnMessageReceived(const IPC::Message& msg) {
+bool PPB_Instance_Proxy::OnMessageReceived(const IPC::Message& msg) {
+  bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPB_Instance_Proxy, msg)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_GetWindowObject,
                         OnMsgGetWindowObject)
@@ -96,7 +114,9 @@ void PPB_Instance_Proxy::OnMessageReceived(const IPC::Message& msg) {
                         OnMsgIsFullFrame)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_ExecuteScript,
                         OnMsgExecuteScript)
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+  return handled;
 }
 
 void PPB_Instance_Proxy::OnMsgGetWindowObject(

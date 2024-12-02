@@ -46,6 +46,7 @@
       ],
       'sources': [
         'file_descriptor_set_posix_unittest.cc',
+        'ipc_channel_posix_unittest.cc',
         'ipc_fuzzing_tests.cc',
         'ipc_message_unittest.cc',
         'ipc_send_fds_test.cc',
@@ -71,6 +72,18 @@
             }],
           ],
         }]
+      ],
+    },
+    {
+      'target_name': 'test_support_ipc',
+      'type': '<(library)',
+      'dependencies': [
+        'ipc',
+        '../base/base.gyp:base',
+      ],
+      'sources': [
+        'ipc_test_sink.cc',
+        'ipc_test_sink.h',
       ],
     },
   ],

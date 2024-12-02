@@ -17,41 +17,56 @@
 #include "base/message_loop.h"
 #include "ipc/file_descriptor_set_posix.h"
 
+#if !defined(OS_MACOSX)
+// On Linux, the seccomp sandbox makes it very expensive to call
+// recvmsg() and sendmsg(). The restriction on calling read() and write(), which
+// are cheap, is that we can't pass file descriptors over them.
+//
+// As we cannot anticipate when the sender will provide us with file
+// descriptors, we have to make the decision about whether we call read() or
+// recvmsg() before we actually make the call. The easiest option is to
+// create a dedicated socketpair() for exchanging file descriptors.
+// Mac can also run in IPC_USES_READWRITE mode if necessary, but at this time
+// doesn't take a performance hit from recvmsg and sendmsg, so it doesn't
+// make sense to waste resources on having the separate dedicated socketpair.
+// It is however useful for debugging between Linux and Mac to be able to turn
+// this switch 'on' on the Mac as well.
+
+// The HELLO message from the client to the server is always sent using
+// sendmsg because it will contain the file descriptor that the server
+// needs to send file descriptors in later messages.
+#define IPC_USES_READWRITE 1
+#endif
+
 namespace IPC {
 
-// Store that channel name |name| is available via socket |socket|.
-// Used when the channel has been precreated by another process on
-// our behalf and they've just shipped us the socket.
-void AddChannelSocket(const std::string& name, int socket);
-
-// Remove the channel name mapping, and close the corresponding socket.
-void RemoveAndCloseChannelSocket(const std::string& name);
-
-// Returns true if a channel named |name| is available.
-bool ChannelSocketExists(const std::string& name);
-
-// Construct a socket pair appropriate for IPC: UNIX domain, nonblocking.
-// Returns false on error.
-bool SocketPair(int* fd1, int* fd2);
-
-// An implementation of ChannelImpl for POSIX systems that works via
-// socketpairs.  See the .cc file for an overview of the implementation.
 class Channel::ChannelImpl : public MessageLoopForIO::Watcher {
  public:
   // Mirror methods of Channel, see ipc_channel.h for description.
-  ChannelImpl(const std::string& channel_id, Mode mode, Listener* listener);
+  ChannelImpl(const IPC::ChannelHandle& channel_handle, Mode mode,
+              Listener* listener);
   ~ChannelImpl();
   bool Connect();
   void Close();
   void set_listener(Listener* listener) { listener_ = listener; }
   bool Send(Message* message);
   int GetClientFileDescriptor() const;
+  bool AcceptsConnections() const;
+  bool HasAcceptedConnection() const;
+  void ResetToAcceptingConnectionState();
 
  private:
-  bool CreatePipe(const std::string& channel_id, Mode mode);
+  bool CreatePipe(const IPC::ChannelHandle& channel_handle,
+                  bool uses_domain_sockets,
+                  bool listening_socket);
 
   bool ProcessIncomingMessages();
   bool ProcessOutgoingMessages();
+
+  bool AcceptConnection();
+  void ClosePipeOnError();
+  void QueueHelloMessage();
+  bool IsHelloMessage(const Message* m) const;
 
   // MessageLoopForIO::Watcher implementation.
   virtual void OnFileCanReadWithoutBlocking(int fd);
@@ -67,17 +82,14 @@ class Channel::ChannelImpl : public MessageLoopForIO::Watcher {
 
   // Indicates whether we're currently blocked waiting for a write to complete.
   bool is_blocked_on_write_;
+  bool waiting_connect_;
 
   // If sending a message blocks then we use this variable
   // to keep track of where we are.
   size_t message_send_bytes_written_;
 
-  // If the kTestingChannelID flag is specified, we use a FIFO instead of
-  // a socketpair().
-  bool uses_fifo_;
-
-  // File descriptor we're listening on for new connections in the FIFO case;
-  // unused otherwise.
+  // File descriptor we're listening on for new connections if we listen
+  // for connections.
   int server_listen_pipe_;
 
   // The pipe used for communication.
@@ -87,7 +99,7 @@ class Channel::ChannelImpl : public MessageLoopForIO::Watcher {
   // pipe_ that is passed to the client.
   int client_pipe_;
 
-#if !defined(OS_MACOSX)
+#if defined(IPC_USES_READWRITE)
   // Linux/BSD use a dedicated socketpair() for passing file descriptors.
   int fd_pipe_;
   int remote_fd_pipe_;
@@ -125,15 +137,19 @@ class Channel::ChannelImpl : public MessageLoopForIO::Watcher {
   std::string input_overflow_buf_;
   std::vector<int> input_overflow_fds_;
 
-  // In server-mode, we have to wait for the client to connect before we
-  // can begin reading.  We make use of the input_state_ when performing
-  // the connect operation in overlapped mode.
-  bool waiting_connect_;
+  // True if we are responsible for unlinking the unix domain socket file.
+  bool must_unlink_;
 
   ScopedRunnableMethodFactory<ChannelImpl> factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ChannelImpl);
 };
+
+// The maximum length of the name of a pipe for MODE_NAMED_SERVER or
+// MODE_NAMED_CLIENT if you want to pass in your own socket.
+// The standard size on linux is 108, mac is 104. To maintain consistency
+// across platforms we standardize on the smaller value.
+static const size_t kMaxPipeNameLength = 104;
 
 }  // namespace IPC
 

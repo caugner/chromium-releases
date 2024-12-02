@@ -4,7 +4,7 @@
 
 #include "net/base/ssl_config_service_win.h"
 
-#include "base/thread_restrictions.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/win/registry.h"
 
 using base::TimeDelta;
@@ -29,7 +29,6 @@ static const wchar_t kProtocolsValueName[] = L"SecureProtocols";
 // The bits are OR'ed to form the DWORD value.  So 0xa0 means SSL 3.0 and
 // TLS 1.0.
 enum {
-  SSL2 = 0x08,
   SSL3 = 0x20,
   TLS1 = 0x80
 };
@@ -64,20 +63,17 @@ bool SSLConfigServiceWin::GetSSLConfigNow(SSLConfig* config) {
   // http://crbug.com/61455
   base::ThreadRestrictions::ScopedAllowIO allow_io;
   RegKey internet_settings;
-  if (!internet_settings.Open(HKEY_CURRENT_USER, kInternetSettingsSubKeyName,
-                              KEY_READ))
+  if (internet_settings.Open(HKEY_CURRENT_USER, kInternetSettingsSubKeyName,
+                             KEY_READ) != ERROR_SUCCESS)
     return false;
 
-  DWORD revocation;
-  if (!internet_settings.ReadValueDW(kRevocationValueName, &revocation))
-    revocation = REVOCATION_DEFAULT;
+  DWORD revocation = REVOCATION_DEFAULT;
+  internet_settings.ReadValueDW(kRevocationValueName, &revocation);
 
-  DWORD protocols;
-  if (!internet_settings.ReadValueDW(kProtocolsValueName, &protocols))
-    protocols = PROTOCOLS_DEFAULT;
+  DWORD protocols = PROTOCOLS_DEFAULT;
+  internet_settings.ReadValueDW(kProtocolsValueName, &protocols);
 
   config->rev_checking_enabled = (revocation != 0);
-  config->ssl2_enabled = ((protocols & SSL2) != 0);
   config->ssl3_enabled = ((protocols & SSL3) != 0);
   config->tls1_enabled = ((protocols & TLS1) != 0);
   SSLConfigService::SetSSLConfigFlags(config);
@@ -96,17 +92,13 @@ bool SSLConfigServiceWin::GetSSLConfigNow(SSLConfig* config) {
 void SSLConfigServiceWin::SetRevCheckingEnabled(bool enabled) {
   // This registry access goes to disk and will slow down the IO thread.
   // http://crbug.com/61455
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   DWORD value = enabled;
   RegKey internet_settings(HKEY_CURRENT_USER, kInternetSettingsSubKeyName,
                            KEY_WRITE);
   internet_settings.WriteValue(kRevocationValueName, value);
   // TODO(mattm): We should call UpdateConfig after updating settings, but these
   // methods are static.
-}
-
-// static
-void SSLConfigServiceWin::SetSSL2Enabled(bool enabled) {
-  SetSSLVersionEnabled(SSL2, enabled);
 }
 
 // static
@@ -123,11 +115,12 @@ void SSLConfigServiceWin::SetTLS1Enabled(bool enabled) {
 void SSLConfigServiceWin::SetSSLVersionEnabled(int version, bool enabled) {
   // This registry access goes to disk and will slow down the IO thread.
   // http://crbug.com/61455
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   RegKey internet_settings(HKEY_CURRENT_USER, kInternetSettingsSubKeyName,
                            KEY_READ | KEY_WRITE);
-  DWORD value;
-  if (!internet_settings.ReadValueDW(kProtocolsValueName, &value))
-    value = PROTOCOLS_DEFAULT;
+  DWORD value = PROTOCOLS_DEFAULT;
+  internet_settings.ReadValueDW(kProtocolsValueName, &value);
+
   if (enabled)
     value |= version;
   else

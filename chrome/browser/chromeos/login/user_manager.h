@@ -74,7 +74,7 @@ class UserManager : public UserImageLoader::Delegate,
   virtual bool IsKnownUser(const std::string& email);
 
   // Returns the logged-in user.
-  virtual const User& logged_in_user() {
+  virtual User logged_in_user() const {
     return logged_in_user_;
   }
 
@@ -85,10 +85,6 @@ class UserManager : public UserImageLoader::Delegate,
   // Saves image to file and saves image path in local state preferences.
   void SaveUserImage(const std::string& username,
                      const SkBitmap& image);
-
-  // Sets one of the default images to the specified user and saves this
-  // setting in local state.
-  void SetDefaultUserImage(const std::string& username);
 
   // chromeos::UserImageLoader::Delegate implementation.
   virtual void OnImageLoaded(const std::string& username,
@@ -124,6 +120,10 @@ class UserManager : public UserImageLoader::Delegate,
  private:
   // Notifies on new user session.
   void NotifyOnLogin();
+
+  // Sets one of the default images to the specified user and saves this
+  // setting in local state.
+  void SetDefaultUserImage(const std::string& username);
 
   // Loads user image from its file.
   scoped_refptr<UserImageLoader> image_loader_;

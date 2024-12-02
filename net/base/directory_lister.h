@@ -8,12 +8,12 @@
 
 #include <vector>
 
-#include "base/cancellation_flag.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/platform_thread.h"
 #include "base/ref_counted.h"
+#include "base/synchronization/cancellation_flag.h"
 #include "base/task.h"
+#include "base/threading/platform_thread.h"
 
 class MessageLoop;
 
@@ -27,7 +27,7 @@ namespace net {
 // is insulated from any of the multi-threading details.
 //
 class DirectoryLister : public base::RefCountedThreadSafe<DirectoryLister>,
-                        public PlatformThread::Delegate {
+                        public base::PlatformThread::Delegate {
  public:
   // Represents one file found.
   struct DirectoryListerData {
@@ -82,11 +82,13 @@ class DirectoryLister : public base::RefCountedThreadSafe<DirectoryLister>,
   void set_delegate(DirectoryListerDelegate* d) { delegate_ = d; }
 
   // PlatformThread::Delegate implementation
-  void ThreadMain();
+  virtual void ThreadMain();
 
  private:
   friend class base::RefCountedThreadSafe<DirectoryLister>;
   friend class DirectoryDataEvent;
+
+  ~DirectoryLister();
 
   // Comparison methods for sorting, chosen based on |sort_|.
   static bool CompareAlphaDirsFirst(const DirectoryListerData& a,
@@ -96,8 +98,6 @@ class DirectoryLister : public base::RefCountedThreadSafe<DirectoryLister>,
   static bool CompareFullPath(const DirectoryListerData& a,
                               const DirectoryListerData& b);
 
-  ~DirectoryLister();
-
   void OnReceivedData(const DirectoryListerData* data, int count);
   void OnDone(int error);
 
@@ -106,7 +106,7 @@ class DirectoryLister : public base::RefCountedThreadSafe<DirectoryLister>,
   DirectoryListerDelegate* delegate_;
   SORT_TYPE sort_;
   MessageLoop* message_loop_;
-  PlatformThreadHandle thread_;
+  base::PlatformThreadHandle thread_;
   base::CancellationFlag canceled_;
 };
 

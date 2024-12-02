@@ -8,18 +8,20 @@
 
 #include "ppapi/cpp/common.h"
 #include "ppapi/cpp/image_data.h"
-#include "ppapi/cpp/module.h"
+#include "ppapi/cpp/instance.h"
 #include "ppapi/cpp/point.h"
 #include "ppapi/cpp/rect.h"
 #include "ppapi/cpp/module_impl.h"
 
+namespace pp {
+
 namespace {
 
-DeviceFuncs<PPB_Font_Dev> font_f(PPB_FONT_DEV_INTERFACE);
+template <> const char* interface_name<PPB_Font_Dev>() {
+  return PPB_FONT_DEV_INTERFACE;
+}
 
 }  // namespace
-
-namespace pp {
 
 // FontDescription_Dev ---------------------------------------------------------
 
@@ -50,28 +52,14 @@ FontDescription_Dev::~FontDescription_Dev() {
 
 FontDescription_Dev& FontDescription_Dev::operator=(
     const FontDescription_Dev& other) {
-  FontDescription_Dev copy(other);
-  swap(copy);
-  return *this;
-}
+  pp_font_description_ = other.pp_font_description_;
 
-void FontDescription_Dev::swap(FontDescription_Dev& other) {
-  // Need to fix up both the face and the pp_font_description_.face which the
-  // setter does for us.
-  Var temp = face();
+  // Be careful about the refcount of the string, the copy that operator= made
+  // above didn't copy a ref.
+  pp_font_description_.face = PP_MakeUndefined();
   set_face(other.face());
-  other.set_face(temp);
 
-  std::swap(pp_font_description_.family, other.pp_font_description_.family);
-  std::swap(pp_font_description_.size, other.pp_font_description_.size);
-  std::swap(pp_font_description_.weight, other.pp_font_description_.weight);
-  std::swap(pp_font_description_.italic, other.pp_font_description_.italic);
-  std::swap(pp_font_description_.small_caps,
-            other.pp_font_description_.small_caps);
-  std::swap(pp_font_description_.letter_spacing,
-            other.pp_font_description_.letter_spacing);
-  std::swap(pp_font_description_.word_spacing,
-            other.pp_font_description_.word_spacing);
+  return *this;
 }
 
 // TextRun_Dev -----------------------------------------------------------------
@@ -101,57 +89,44 @@ TextRun_Dev::~TextRun_Dev() {
 }
 
 TextRun_Dev& TextRun_Dev::operator=(const TextRun_Dev& other) {
-  TextRun_Dev copy(other);
-  swap(copy);
-  return *this;
-}
-
-void TextRun_Dev::swap(TextRun_Dev& other) {
-  std::swap(text_, other.text_);
-
-  // Fix up both object's pp_text_run.text to point to their text_ member.
+  pp_text_run_ = other.pp_text_run_;
+  text_ = other.text_;
   pp_text_run_.text = text_.pp_var();
-  other.pp_text_run_.text = other.text_.pp_var();
-
-  std::swap(pp_text_run_.rtl, other.pp_text_run_.rtl);
-  std::swap(pp_text_run_.override_direction,
-            other.pp_text_run_.override_direction);
+  return *this;
 }
 
 // Font ------------------------------------------------------------------------
 
+Font_Dev::Font_Dev() : Resource() {
+}
+
 Font_Dev::Font_Dev(PP_Resource resource) : Resource(resource) {
 }
 
-Font_Dev::Font_Dev(const FontDescription_Dev& description) {
-  if (!font_f)
+Font_Dev::Font_Dev(Instance* instance, const FontDescription_Dev& description) {
+  if (!has_interface<PPB_Font_Dev>())
     return;
-  PassRefFromConstructor(font_f->Create(
-      Module::Get()->pp_module(), &description.pp_font_description()));
+  PassRefFromConstructor(get_interface<PPB_Font_Dev>()->Create(
+      instance->pp_instance(), &description.pp_font_description()));
 }
 
 Font_Dev::Font_Dev(const Font_Dev& other) : Resource(other) {
 }
 
 Font_Dev& Font_Dev::operator=(const Font_Dev& other) {
-  Font_Dev copy(other);
-  swap(copy);
+  Resource::operator=(other);
   return *this;
-}
-
-void Font_Dev::swap(Font_Dev& other) {
-  Resource::swap(other);
 }
 
 bool Font_Dev::Describe(FontDescription_Dev* description,
                         PP_FontMetrics_Dev* metrics) const {
-  if (!font_f)
+  if (!has_interface<PPB_Font_Dev>())
     return false;
 
   // Be careful with ownership of the |face| string. It will come back with
   // a ref of 1, which we want to assign to the |face_| member of the C++ class.
-  if (!font_f->Describe(pp_resource(), &description->pp_font_description_,
-                        metrics))
+  if (!get_interface<PPB_Font_Dev>()->Describe(
+      pp_resource(), &description->pp_font_description_, metrics))
     return false;
   description->face_ = Var(Var::PassRef(),
                            description->pp_font_description_.face);
@@ -165,38 +140,40 @@ bool Font_Dev::DrawTextAt(ImageData* dest,
                           uint32_t color,
                           const Rect& clip,
                           bool image_data_is_opaque) const {
-  if (!font_f)
+  if (!has_interface<PPB_Font_Dev>())
     return false;
-  return PPBoolToBool(font_f->DrawTextAt(pp_resource(),
-                                         dest->pp_resource(),
-                                         &text.pp_text_run(),
-                                         &position.pp_point(),
-                                         color,
-                                         &clip.pp_rect(),
-                                         BoolToPPBool(image_data_is_opaque)));
+  return PPBoolToBool(get_interface<PPB_Font_Dev>()->DrawTextAt(
+      pp_resource(),
+      dest->pp_resource(),
+      &text.pp_text_run(),
+      &position.pp_point(),
+      color,
+      &clip.pp_rect(),
+      BoolToPPBool(image_data_is_opaque)));
 }
 
 int32_t Font_Dev::MeasureText(const TextRun_Dev& text) const {
-  if (!font_f)
+  if (!has_interface<PPB_Font_Dev>())
     return -1;
-  return font_f->MeasureText(pp_resource(), &text.pp_text_run());
+  return get_interface<PPB_Font_Dev>()->MeasureText(pp_resource(),
+                                                    &text.pp_text_run());
 }
 
 uint32_t Font_Dev::CharacterOffsetForPixel(const TextRun_Dev& text,
                                            int32_t pixel_position) const {
-  if (!font_f)
+  if (!has_interface<PPB_Font_Dev>())
     return 0;
-  return font_f->CharacterOffsetForPixel(pp_resource(), &text.pp_text_run(),
-                                         pixel_position);
+  return get_interface<PPB_Font_Dev>()->CharacterOffsetForPixel(
+      pp_resource(), &text.pp_text_run(), pixel_position);
 
 }
 
 int32_t Font_Dev::PixelOffsetForCharacter(const TextRun_Dev& text,
                                           uint32_t char_offset) const {
-  if (!font_f)
+  if (!has_interface<PPB_Font_Dev>())
     return 0;
-  return font_f->PixelOffsetForCharacter(pp_resource(), &text.pp_text_run(),
-                                         char_offset);
+  return get_interface<PPB_Font_Dev>()->PixelOffsetForCharacter(
+      pp_resource(), &text.pp_text_run(), char_offset);
 }
 
 bool Font_Dev::DrawSimpleText(ImageData* dest,

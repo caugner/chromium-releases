@@ -1,19 +1,20 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/widget/widget_win.h"
 
-#include "app/keyboard_code_conversion_win.h"
-#include "app/l10n_util_win.h"
-#include "app/system_monitor.h"
-#include "app/view_prop.h"
-#include "app/win_util.h"
+#include "app/win/win_util.h"
 #include "base/string_util.h"
-#include "base/win_util.h"
 #include "gfx/canvas_skia.h"
 #include "gfx/native_theme_win.h"
 #include "gfx/path.h"
+#include "ui/base/keycodes/keyboard_code_conversion_win.h"
+#include "ui/base/l10n/l10n_util_win.h"
+#include "ui/base/system_monitor/system_monitor.h"
+#include "ui/base/theme_provider.h"
+#include "ui/base/view_prop.h"
+#include "ui/base/win/hwnd_util.h"
 #include "views/accessibility/view_accessibility.h"
 #include "views/controls/native_control_win.h"
 #include "views/focus/focus_util_win.h"
@@ -27,7 +28,7 @@
 #include "views/widget/widget_utils.h"
 #include "views/window/window_win.h"
 
-using app::ViewProp;
+using ui::ViewProp;
 
 namespace views {
 
@@ -78,7 +79,7 @@ WidgetWin* WidgetWin::GetWidget(HWND hwnd) {
   //                 WindowImpl).
   if (!WindowImpl::IsWindowImpl(hwnd))
     return NULL;
-  return reinterpret_cast<WidgetWin*>(win_util::GetWindowUserData(hwnd));
+  return reinterpret_cast<WidgetWin*>(ui::GetWindowUserData(hwnd));
 }
 
 // static
@@ -239,6 +240,9 @@ void WidgetWin::GetBounds(gfx::Rect* out, bool including_frame) const {
 }
 
 void WidgetWin::SetBounds(const gfx::Rect& bounds) {
+  LONG style = GetWindowLong(GWL_STYLE);
+  if (style & WS_MAXIMIZE)
+    SetWindowLong(GWL_STYLE, style & ~WS_MAXIMIZE);
   SetWindowPos(NULL, bounds.x(), bounds.y(), bounds.width(), bounds.height(),
                SWP_NOACTIVATE | SWP_NOZORDER);
 }
@@ -389,7 +393,7 @@ bool WidgetWin::IsVisible() const {
 }
 
 bool WidgetWin::IsActive() const {
-  return win_util::IsWindowActive(hwnd());
+  return app::win::IsWindowActive(hwnd());
 }
 
 bool WidgetWin::IsAccessibleWidget() const {
@@ -408,7 +412,7 @@ void WidgetWin::GenerateMousePressedForView(View* view,
   ProcessMousePressed(point_in_widget.ToPOINT(), MK_LBUTTON, false, false);
 }
 
-bool WidgetWin::GetAccelerator(int cmd_id, menus::Accelerator* accelerator) {
+bool WidgetWin::GetAccelerator(int cmd_id, ui::Accelerator* accelerator) {
   return false;
 }
 
@@ -622,7 +626,7 @@ LRESULT WidgetWin::OnGetObject(UINT uMsg, WPARAM w_param, LPARAM l_param) {
   // Accessibility readers will send an OBJID_CLIENT message
   if (OBJID_CLIENT == l_param) {
     // Retrieve MSAA dispatch object for the root view.
-    ScopedComPtr<IAccessible> root(
+    base::win::ScopedComPtr<IAccessible> root(
         ViewAccessibility::GetAccessibleForView(GetRootView()));
 
     // Create a reference that MSAA will marshall to the client.
@@ -661,8 +665,9 @@ void WidgetWin::OnInitMenuPopup(HMENU menu,
 }
 
 void WidgetWin::OnKeyDown(TCHAR c, UINT rep_cnt, UINT flags) {
-  KeyEvent event(Event::ET_KEY_PRESSED, app::KeyboardCodeForWindowsKeyCode(c),
-                 KeyEvent::GetKeyStateFlags(), rep_cnt, flags);
+  KeyEvent event(Event::ET_KEY_PRESSED, ui::KeyboardCodeForWindowsKeyCode(c),
+                 KeyEvent::GetKeyStateFlags(), rep_cnt, flags,
+                 WM_KEYDOWN);
   RootView* root_view = GetFocusedViewRootView();
   if (!root_view)
     root_view = root_view_.get();
@@ -671,8 +676,9 @@ void WidgetWin::OnKeyDown(TCHAR c, UINT rep_cnt, UINT flags) {
 }
 
 void WidgetWin::OnKeyUp(TCHAR c, UINT rep_cnt, UINT flags) {
-  KeyEvent event(Event::ET_KEY_RELEASED, app::KeyboardCodeForWindowsKeyCode(c),
-                 KeyEvent::GetKeyStateFlags(), rep_cnt, flags);
+  KeyEvent event(Event::ET_KEY_RELEASED, ui::KeyboardCodeForWindowsKeyCode(c),
+                 KeyEvent::GetKeyStateFlags(), rep_cnt, flags,
+                 WM_KEYUP);
   RootView* root_view = GetFocusedViewRootView();
   if (!root_view)
     root_view = root_view_.get();
@@ -865,7 +871,7 @@ void WidgetWin::OnPaint(HDC dc) {
 }
 
 LRESULT WidgetWin::OnPowerBroadcast(DWORD power_event, DWORD data) {
-  SystemMonitor* monitor = SystemMonitor::Get();
+  ui::SystemMonitor* monitor = ui::SystemMonitor::Get();
   if (monitor)
     monitor->ProcessWmPowerBroadcastMessage(power_event);
   SetMsgHandled(FALSE);
@@ -1105,7 +1111,7 @@ Window* WidgetWin::GetWindowImpl(HWND hwnd) {
   HWND parent = hwnd;
   while (parent) {
     WidgetWin* widget =
-        reinterpret_cast<WidgetWin*>(win_util::GetWindowUserData(parent));
+        reinterpret_cast<WidgetWin*>(ui::GetWindowUserData(parent));
     if (widget && widget->is_window_)
       return static_cast<WindowWin*>(widget);
     parent = ::GetParent(parent);

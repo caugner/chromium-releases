@@ -4,13 +4,13 @@
 
 #include "chrome/browser/default_encoding_combo_model.h"
 
-#include "app/l10n_util.h"
-#include "app/l10n_util_collator.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/l10n/l10n_util_collator.h"
 
 DefaultEncodingComboboxModel::DefaultEncodingComboboxModel() {
   // Initialize the vector of all sorted encodings according to current
@@ -33,7 +33,7 @@ int DefaultEncodingComboboxModel::GetItemCount() {
 
 string16 DefaultEncodingComboboxModel::GetItemAt(int index) {
   DCHECK(index >= 0 && index < GetItemCount());
-  return WideToUTF16Hack(sorted_encoding_list_[index].encoding_display_name);
+  return sorted_encoding_list_[index].encoding_display_name;
 }
 
 std::string DefaultEncodingComboboxModel::GetEncodingCharsetByIndex(int index) {

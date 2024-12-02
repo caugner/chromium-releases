@@ -9,7 +9,7 @@
 
 #include "base/callback.h"
 #include "base/task.h"
-#include "base/waitable_event.h"
+#include "base/synchronization/waitable_event.h"
 #include "webkit/appcache/appcache_interceptor.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
@@ -386,7 +386,8 @@ void SimpleAppCacheSystem::InitOnUIThread(const FilePath& cache_directory) {
   cache_directory_ = cache_directory;
 }
 
-void SimpleAppCacheSystem::InitOnIOThread(URLRequestContext* request_context) {
+void SimpleAppCacheSystem::InitOnIOThread(
+    net::URLRequestContext* request_context) {
   if (!is_initailized_on_ui_thread())
     return;
 
@@ -436,7 +437,7 @@ WebApplicationCacheHost* SimpleAppCacheSystem::CreateCacheHostForWebKit(
 }
 
 void SimpleAppCacheSystem::SetExtraRequestBits(
-    URLRequest* request, int host_id, ResourceType::Type resource_type) {
+    net::URLRequest* request, int host_id, ResourceType::Type resource_type) {
   if (is_initialized()) {
     DCHECK(is_io_thread());
     AppCacheInterceptor::SetExtraRequestInfo(
@@ -445,7 +446,7 @@ void SimpleAppCacheSystem::SetExtraRequestBits(
 }
 
 void SimpleAppCacheSystem::GetExtraResponseBits(
-    URLRequest* request, int64* cache_id, GURL* manifest_url) {
+    net::URLRequest* request, int64* cache_id, GURL* manifest_url) {
   if (is_initialized()) {
     DCHECK(is_io_thread());
     AppCacheInterceptor::GetExtraResponseInfo(

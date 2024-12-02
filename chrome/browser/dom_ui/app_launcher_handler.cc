@@ -4,7 +4,9 @@
 
 #include "chrome/browser/dom_ui/app_launcher_handler.h"
 
-#include "app/animation.h"
+#include <string>
+#include <vector>
+
 #include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
@@ -15,14 +17,13 @@
 #include "chrome/browser/dom_ui/shown_sections_handler.h"
 #include "chrome/browser/extensions/default_apps.h"
 #include "chrome/browser/extensions/extension_prefs.h"
-#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/platform_util.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_icon_set.h"
@@ -33,6 +34,7 @@
 #include "gfx/rect.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
+#include "ui/base/animation/animation.h"
 
 namespace {
 
@@ -74,7 +76,7 @@ bool IsPromoActive(const std::string& path) {
 
 }  // namespace
 
-AppLauncherHandler::AppLauncherHandler(ExtensionsService* extension_service)
+AppLauncherHandler::AppLauncherHandler(ExtensionService* extension_service)
     : extensions_service_(extension_service),
       promo_active_(false),
       ignore_changes_(false) {
@@ -132,7 +134,7 @@ bool AppLauncherHandler::HandlePing(Profile* profile, const std::string& path) {
     RecordAppLaunch(is_promo_active);
 
   if (is_promo_active)
-    profile->GetExtensionsService()->default_apps()->SetPromoHidden();
+    profile->GetExtensionService()->default_apps()->SetPromoHidden();
 
   return true;
 }
@@ -155,6 +157,8 @@ void AppLauncherHandler::RegisterMessages() {
       NewCallback(this, &AppLauncherHandler::HandleHideAppsPromo));
   dom_ui_->RegisterMessageCallback("createAppShortcut",
       NewCallback(this, &AppLauncherHandler::HandleCreateAppShortcut));
+  dom_ui_->RegisterMessageCallback("reorderApps",
+      NewCallback(this, &AppLauncherHandler::HandleReorderApps));
 }
 
 void AppLauncherHandler::Observe(NotificationType type,
@@ -166,6 +170,7 @@ void AppLauncherHandler::Observe(NotificationType type,
   switch (type.value) {
     case NotificationType::EXTENSION_LOADED:
     case NotificationType::EXTENSION_UNLOADED:
+    case NotificationType::EXTENSION_LAUNCHER_REORDERED:
       if (dom_ui_->tab_contents())
         HandleGetApps(NULL);
       break;
@@ -201,6 +206,12 @@ void AppLauncherHandler::FillAppDictionary(DictionaryValue* dictionary) {
 #if defined(OS_MACOSX)
   // App windows are not yet implemented on mac.
   dictionary->SetBoolean("disableAppWindowLaunch", true);
+  dictionary->SetBoolean("disableCreateAppShortcut", true);
+#endif
+
+#if defined(OS_CHROMEOS)
+  // Making shortcut does not make sense on ChromeOS because it does not have
+  // a desktop.
   dictionary->SetBoolean("disableCreateAppShortcut", true);
 #endif
 
@@ -248,6 +259,8 @@ void AppLauncherHandler::HandleGetApps(const ListValue* args) {
     registrar_.Add(this, NotificationType::EXTENSION_LOADED,
         NotificationService::AllSources());
     registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
+        NotificationService::AllSources());
+    registrar_.Add(this, NotificationType::EXTENSION_LAUNCHER_REORDERED,
         NotificationService::AllSources());
   }
   if (pref_change_registrar_.IsEmpty()) {
@@ -379,6 +392,17 @@ void AppLauncherHandler::HandleCreateAppShortcut(const ListValue* args) {
       browser->profile(), extension);
 }
 
+void AppLauncherHandler::HandleReorderApps(const ListValue* args) {
+  std::vector<std::string> extension_ids;
+  for (size_t i = 0; i < args->GetSize(); ++i) {
+    std::string value;
+    if (args->GetString(i, &value))
+      extension_ids.push_back(value);
+  }
+
+  extensions_service_->extension_prefs()->SetAppLauncherOrder(extension_ids);
+}
+
 // static
 void AppLauncherHandler::RecordWebStoreLaunch(bool promo_active) {
   if (!promo_active) return;
@@ -429,7 +453,7 @@ void AppLauncherHandler::AnimateAppIcon(const Extension* extension,
                                         const gfx::Rect& rect) {
   // We make this check for the case of minimized windows, unit tests, etc.
   if (platform_util::IsVisible(dom_ui_->tab_contents()->GetNativeView()) &&
-      Animation::ShouldRenderRichAnimation()) {
+      ui::Animation::ShouldRenderRichAnimation()) {
 #if defined(OS_WIN)
     AppLaunchedAnimation::Show(extension, rect);
 #else

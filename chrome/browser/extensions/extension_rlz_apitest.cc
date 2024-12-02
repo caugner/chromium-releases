@@ -5,7 +5,6 @@
 #include <map>
 
 #include "base/win/registry.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -81,14 +80,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Rlz) {
   ASSERT_TRUE(key.Valid());
 
   DWORD value;
-  ASSERT_TRUE(key.ReadValueDW(L"D3I", &value));
+  ASSERT_EQ(ERROR_SUCCESS, key.ReadValueDW(L"D3I", &value));
   ASSERT_EQ(1, value);
-  ASSERT_TRUE(key.ReadValueDW(L"D3S", &value));
+  ASSERT_EQ(ERROR_SUCCESS, key.ReadValueDW(L"D3S", &value));
   ASSERT_EQ(1, value);
-  ASSERT_TRUE(key.ReadValueDW(L"D3F", &value));
+  ASSERT_EQ(ERROR_SUCCESS, key.ReadValueDW(L"D3F", &value));
   ASSERT_EQ(1, value);
 
-  ASSERT_TRUE(key.ReadValueDW(L"D4I", &value));
+  ASSERT_EQ(ERROR_SUCCESS, key.ReadValueDW(L"D4I", &value));
   ASSERT_EQ(1, value);
 
   key.Open(HKEY_CURRENT_USER, L"Software\\Google\\Common\\Rlz\\Events\\D",

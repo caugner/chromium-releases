@@ -4,7 +4,8 @@
 
 #include "chrome/renderer/user_script_slave.h"
 
-#include "app/resource_bundle.h"
+#include <map>
+
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/perftimer.h"
@@ -12,18 +13,17 @@
 #include "base/shared_memory.h"
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/extension_groups.h"
-#include "chrome/renderer/extensions/extension_renderer_info.h"
 #include "chrome/renderer/render_thread.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebVector.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
-
 #include "grit/renderer_resources.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "ui/base/resource/resource_bundle.h"
 
 using WebKit::WebFrame;
 using WebKit::WebString;
@@ -60,9 +60,10 @@ int UserScriptSlave::GetIsolatedWorldId(const std::string& extension_id) {
   return new_id;
 }
 
-UserScriptSlave::UserScriptSlave()
+UserScriptSlave::UserScriptSlave(const ExtensionSet* extensions)
     : shared_memory_(NULL),
-      script_deleter_(&scripts_) {
+      script_deleter_(&scripts_),
+      extensions_(extensions) {
   api_js_ = ResourceBundle::GetSharedInstance().GetRawDataResource(
                 IDR_GREASEMONKEY_API_JS);
 }
@@ -203,22 +204,15 @@ void UserScriptSlave::InjectScripts(WebFrame* frame,
     if (frame->parent() && !script->match_all_frames())
       continue;  // Only match subframes if the script declared it wanted to.
 
-    ExtensionRendererInfo* extension =
-        ExtensionRendererInfo::GetByID(script->extension_id());
+    const Extension* extension = extensions_->GetByID(script->extension_id());
 
     // Since extension info is sent separately from user script info, they can
     // be out of sync. We just ignore this situation.
     if (!extension)
       continue;
 
-    if (!Extension::CanExecuteScriptOnPage(
-            frame_url,
-            extension->allowed_to_execute_script_everywhere(),
-            NULL,
-            script,
-            NULL)) {
+    if (!extension->CanExecuteScriptOnPage(frame_url, script, NULL))
       continue;
-    }
 
     if (frame_url.SchemeIsFile() && !script->allow_file_access())
       continue;  // This script isn't allowed to run on file URLs.

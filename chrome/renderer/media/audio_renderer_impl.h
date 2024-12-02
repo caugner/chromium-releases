@@ -11,10 +11,10 @@
 //           ^                                ^
 //           |                                |
 //           v                 IPC            v
-//   ResourceMessageFilter <---------> AudioMessageFilter
+//   RenderMessageFilter   <---------> AudioMessageFilter
 //
 // Implementation of interface with audio device is in AudioRendererHost and
-// it provides services and entry points in ResourceMessageFilter, allowing
+// it provides services and entry points in RenderMessageFilter, allowing
 // usage of IPC calls to interact with audio device. AudioMessageFilter acts
 // as a portal for IPC calls and does no more than delegation.
 //
@@ -41,8 +41,8 @@
 #include "base/gtest_prod_util.h"
 #include "base/message_loop.h"
 #include "base/scoped_ptr.h"
-#include "base/lock.h"
 #include "base/shared_memory.h"
+#include "base/synchronization/lock.h"
 #include "chrome/renderer/audio_message_filter.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_manager.h"
@@ -61,16 +61,16 @@ class AudioRendererImpl : public media::AudioRendererBase,
 
   // Methods called on IO thread ----------------------------------------------
   // AudioMessageFilter::Delegate methods, called by AudioMessageFilter.
-  void OnRequestPacket(AudioBuffersState buffers_state);
-  void OnStateChanged(const ViewMsg_AudioStreamState_Params& state);
-  void OnCreated(base::SharedMemoryHandle handle, uint32 length);
-  void OnLowLatencyCreated(base::SharedMemoryHandle handle,
-                           base::SyncSocket::Handle socket_handle,
-                           uint32 length);
-  void OnVolume(double volume);
+  virtual void OnRequestPacket(AudioBuffersState buffers_state);
+  virtual void OnStateChanged(const ViewMsg_AudioStreamState_Params& state);
+  virtual void OnCreated(base::SharedMemoryHandle handle, uint32 length);
+  virtual void OnLowLatencyCreated(base::SharedMemoryHandle handle,
+                                   base::SyncSocket::Handle socket_handle,
+                                   uint32 length);
+  virtual void OnVolume(double volume);
 
   // Methods called on pipeline thread ----------------------------------------
-  // media::MediaFilter implementation.
+  // media::Filter implementation.
   virtual void SetPlaybackRate(float rate);
   virtual void Pause(media::FilterCallback* callback);
   virtual void Seek(base::TimeDelta time, media::FilterCallback* callback);
@@ -134,7 +134,7 @@ class AudioRendererImpl : public media::AudioRendererBase,
   // - |stopped_|
   // - |pending_request_|
   // - |request_buffers_state_|
-  Lock lock_;
+  base::Lock lock_;
 
   // A flag that indicates this filter is called to stop.
   bool stopped_;

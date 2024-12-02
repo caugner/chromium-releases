@@ -25,13 +25,15 @@
 #include "base/process_util.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
-#include "base/thread.h"
-#include "base/thread_local.h"
+#include "base/threading/thread.h"
+#include "base/threading/thread_local.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/scoped_variant.h"
+#include "base/win/win_util.h"
 #include "grit/generated_resources.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/chrome_dll_resource.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/navigation_types.h"
 #include "chrome/common/page_zoom.h"
@@ -74,6 +76,7 @@ HRESULT ChromeActiveDocument::FinalConstruct() {
   // optimization to get Chrome active documents to load faster.
   ChromeActiveDocument* cached_document = g_active_doc_cache.Get();
   if (cached_document && cached_document->IsValid()) {
+    SetResourceModule();
     DCHECK(automation_client_.get() == NULL);
     automation_client_.swap(cached_document->automation_client_);
     DVLOG(1) << "Reusing automation client instance from " << cached_document;
@@ -111,6 +114,7 @@ HRESULT ChromeActiveDocument::FinalConstruct() {
   mshtml_group_commands_map_[IDM_BASELINEFONT3] = flags;
   mshtml_group_commands_map_[IDM_BASELINEFONT4] = flags;
   mshtml_group_commands_map_[IDM_BASELINEFONT5] = flags;
+  mshtml_group_commands_map_[IDM_VIEWSOURCE] = flags;
 
   HMODULE this_module = reinterpret_cast<HMODULE>(&__ImageBase);
   accelerator_table_ =
@@ -499,6 +503,18 @@ STDMETHODIMP ChromeActiveDocument::Next(BSTR* url, BSTR* policy,
   return S_OK;
 }
 
+bool ChromeActiveDocument::IsSchemeAllowed(const GURL& url) {
+  bool allowed = BaseActiveX::IsSchemeAllowed(url);
+  if (allowed)
+    return true;
+
+  if (url.SchemeIs(chrome::kAboutScheme)) {
+    if (LowerCaseEqualsASCII(url.spec(), chrome::kAboutPluginsURL))
+      return true;
+  }
+  return false;
+}
+
 HRESULT ChromeActiveDocument::GetInPlaceFrame(
     IOleInPlaceFrame** in_place_frame) {
   DCHECK(in_place_frame);
@@ -601,8 +617,8 @@ HRESULT ChromeActiveDocument::ActiveXDocActivate(LONG verb) {
   return S_OK;
 }
 
-void ChromeActiveDocument::OnNavigationStateChanged(int tab_handle, int flags,
-    const IPC::NavigationInfo& nav_info) {
+void ChromeActiveDocument::OnNavigationStateChanged(
+    int flags, const NavigationInfo& nav_info) {
   // TODO(joshia): handle INVALIDATE_TAB,INVALIDATE_LOAD etc.
   DVLOG(1) << __FUNCTION__
            << "\n Flags: " << flags
@@ -612,10 +628,10 @@ void ChromeActiveDocument::OnNavigationStateChanged(int tab_handle, int flags,
            << ", Relative Offset: " << nav_info.relative_offset
            << ", Index: " << nav_info.navigation_index;
 
-  UpdateNavigationState(nav_info);
+  UpdateNavigationState(nav_info, flags);
 }
 
-void ChromeActiveDocument::OnUpdateTargetUrl(int tab_handle,
+void ChromeActiveDocument::OnUpdateTargetUrl(
     const std::wstring& new_target_url) {
   if (in_place_frame_)
     in_place_frame_->SetStatusText(new_target_url.c_str());
@@ -625,12 +641,11 @@ bool IsFindAccelerator(const MSG& msg) {
   // TODO(robertshield): This may not stand up to localization. Fix if this
   // is the case.
   return msg.message == WM_KEYDOWN && msg.wParam == 'F' &&
-         win_util::IsCtrlPressed() &&
-         !(win_util::IsAltPressed() || win_util::IsShiftPressed());
+         base::win::IsCtrlPressed() &&
+         !(base::win::IsAltPressed() || base::win::IsShiftPressed());
 }
 
-void ChromeActiveDocument::OnAcceleratorPressed(int tab_handle,
-                                                const MSG& accel_message) {
+void ChromeActiveDocument::OnAcceleratorPressed(const MSG& accel_message) {
   if (::TranslateAccelerator(m_hWnd, accelerator_table_,
                              const_cast<MSG*>(&accel_message)))
     return;
@@ -646,14 +661,14 @@ void ChromeActiveDocument::OnAcceleratorPressed(int tab_handle,
       // Handle the showing of the find dialog explicitly.
       OnFindInPage();
     } else {
-      BaseActiveX::OnAcceleratorPressed(tab_handle, accel_message);
+      BaseActiveX::OnAcceleratorPressed(accel_message);
     }
   } else {
     DVLOG(1) << "IE handled accel key " << accel_message.wParam;
   }
 }
 
-void ChromeActiveDocument::OnTabbedOut(int tab_handle, bool reverse) {
+void ChromeActiveDocument::OnTabbedOut(bool reverse) {
   DVLOG(1) << __FUNCTION__;
   if (in_place_frame_) {
     MSG msg = { NULL, WM_KEYDOWN, VK_TAB };
@@ -661,8 +676,7 @@ void ChromeActiveDocument::OnTabbedOut(int tab_handle, bool reverse) {
   }
 }
 
-void ChromeActiveDocument::OnDidNavigate(int tab_handle,
-                                         const IPC::NavigationInfo& nav_info) {
+void ChromeActiveDocument::OnDidNavigate(const NavigationInfo& nav_info) {
   DVLOG(1) << __FUNCTION__ << std::endl
            << "Url: " << nav_info.url
            << ", Title: " << nav_info.title
@@ -679,12 +693,12 @@ void ChromeActiveDocument::OnDidNavigate(int tab_handle,
     return;
   }
 
-  UpdateNavigationState(nav_info);
+  UpdateNavigationState(nav_info, 0);
 }
 
-void ChromeActiveDocument::OnCloseTab(int tab_handle) {
+void ChromeActiveDocument::OnCloseTab() {
   // Base class will fire DIChromeFrameEvents::onclose.
-  BaseActiveX::OnCloseTab(tab_handle);
+  BaseActiveX::OnCloseTab();
 
   // Close the container window.
   ScopedComPtr<IWebBrowser2> web_browser2;
@@ -694,7 +708,7 @@ void ChromeActiveDocument::OnCloseTab(int tab_handle) {
 }
 
 void ChromeActiveDocument::UpdateNavigationState(
-    const IPC::NavigationInfo& new_navigation_info) {
+    const NavigationInfo& new_navigation_info, int flags) {
   HRESULT hr = S_OK;
   bool is_title_changed = (navigation_info_.title != new_navigation_info.title);
   bool is_ssl_state_changed =
@@ -741,7 +755,7 @@ void ChromeActiveDocument::UpdateNavigationState(
       cf_url.attach_to_external_tab();
 
   bool is_internal_navigation =
-      IsNewNavigation(new_navigation_info) || is_attach_external_tab_url;
+      IsNewNavigation(new_navigation_info, flags) || is_attach_external_tab_url;
 
   if (new_navigation_info.url.is_valid())
     url_.Allocate(UTF8ToWide(new_navigation_info.url.spec()).c_str());
@@ -905,8 +919,7 @@ void ChromeActiveDocument::OnUnload(const GUID* cmd_group_guid,
   }
 }
 
-void ChromeActiveDocument::OnOpenURL(int tab_handle,
-                                     const GURL& url_to_open,
+void ChromeActiveDocument::OnOpenURL(const GURL& url_to_open,
                                      const GURL& referrer,
                                      int open_disposition) {
   // If the disposition indicates that we should be opening the URL in the
@@ -920,11 +933,11 @@ void ChromeActiveDocument::OnOpenURL(int tab_handle,
     g_active_doc_cache.Set(this);
   }
 
-  BaseActiveX::OnOpenURL(tab_handle, url_to_open, referrer, open_disposition);
+  BaseActiveX::OnOpenURL(url_to_open, referrer, open_disposition);
 }
 
-void ChromeActiveDocument::OnAttachExternalTab(int tab_handle,
-    const IPC::AttachExternalTabParams& params) {
+void ChromeActiveDocument::OnAttachExternalTab(
+    const AttachExternalTabParams& params) {
   if (!automation_client_.get()) {
     DLOG(WARNING) << "Invalid automation client instance";
     return;
@@ -943,7 +956,7 @@ void ChromeActiveDocument::OnAttachExternalTab(int tab_handle,
   }
   // Allow popup
   if (hr == S_OK) {
-    BaseActiveX::OnAttachExternalTab(tab_handle, params);
+    BaseActiveX::OnAttachExternalTab(params);
     return;
   }
 
@@ -970,8 +983,8 @@ bool ChromeActiveDocument::PreProcessContextMenu(HMENU menu) {
   return BaseActiveX::PreProcessContextMenu(menu);
 }
 
-bool ChromeActiveDocument::HandleContextMenuCommand(UINT cmd,
-    const IPC::MiniContextMenuParams& params) {
+bool ChromeActiveDocument::HandleContextMenuCommand(
+    UINT cmd, const MiniContextMenuParams& params) {
   ScopedComPtr<IWebBrowser2> web_browser2;
   DoQueryService(SID_SWebBrowserApp, m_spClientSite, web_browser2.Receive());
 
@@ -1030,7 +1043,7 @@ bool ChromeActiveDocument::LaunchUrl(const ChromeFrameUrl& cf_url,
     SetWindowDimensions();
   } else if (!automation_client_->InitiateNavigation(cf_url.gurl().spec(),
                                                      referrer,
-                                                     is_privileged_)) {
+                                                     this)) {
     DLOG(ERROR) << "Invalid URL: " << url_;
     Error(L"Invalid URL");
     url_.Reset();
@@ -1067,6 +1080,37 @@ HRESULT ChromeActiveDocument::OnRefreshPage(const GUID* cmd_group_guid,
     // visible.
     IEExec(&CGID_DocHostCommandHandler, OLECMDID_PAGEACTIONBLOCKED,
         0x80000000 | OLECMDIDF_WINDOWSTATE_USERVISIBLE_VALID, NULL, NULL);
+  }
+
+  NavigationManager* mgr = NavigationManager::GetThreadInstance();
+  DLOG_IF(ERROR, !mgr) << "Couldn't get instance of NavigationManager";
+
+  // If ChromeFrame was activated on this page as a result of a document
+  // received in response to a top level post, then we ask the user for
+  // permission to repost and issue a navigation with the saved post data
+  // which reinitates the whole sequence, i.e. the server receives the top
+  // level post and chrome frame will be reactivated in response.
+  if (mgr && mgr->post_data().type() != VT_EMPTY) {
+    if (MessageBox(
+            SimpleResourceLoader::Get(IDS_HTTP_POST_WARNING).c_str(),
+            SimpleResourceLoader::Get(IDS_HTTP_POST_WARNING_TITLE).c_str(),
+            MB_YESNO | MB_ICONEXCLAMATION) == IDYES) {
+      base::win::ScopedComPtr<IWebBrowser2> web_browser2;
+      DoQueryService(SID_SWebBrowserApp, m_spClientSite,
+                     web_browser2.Receive());
+      DCHECK(web_browser2);
+      VARIANT empty = base::win::ScopedVariant::kEmptyVariant;
+      VARIANT flags = { VT_I4 };
+      V_I4(&flags) = navNoHistory;
+
+      return web_browser2->Navigate2(base::win::ScopedVariant(url_).AsInput(),
+                                     &flags,
+                                     &empty,
+                                     const_cast<VARIANT*>(&mgr->post_data()),
+                                     const_cast<VARIANT*>(&mgr->headers()));
+    } else {
+      return S_OK;
+    }
   }
 
   TabProxy* tab_proxy = GetTabProxy();
@@ -1188,8 +1232,7 @@ HRESULT ChromeActiveDocument::OnEncodingChange(const GUID* cmd_group_guid,
   return S_OK;
 }
 
-void ChromeActiveDocument::OnGoToHistoryEntryOffset(int tab_handle,
-                                                    int offset) {
+void ChromeActiveDocument::OnGoToHistoryEntryOffset(int offset) {
   DVLOG(1) <<  __FUNCTION__ << " - offset:" << offset;
 
   ScopedComPtr<IBrowserService> browser_service;
@@ -1322,14 +1365,20 @@ void ChromeActiveDocument::SetWindowDimensions() {
 }
 
 bool ChromeActiveDocument::IsNewNavigation(
-    const IPC::NavigationInfo& new_navigation_info) const {
+    const NavigationInfo& new_navigation_info, int flags) const {
   // A new navigation is typically an internal navigation which is initiated by
   // the renderer(WebKit). Condition 1 below has to be true along with the
   // any of the other conditions below.
-  // 1. The navigation index is greater than 0 which means that a top level
+  // 1. The navigation notification flags passed in as the flags parameter
+  //    is not INVALIDATE_LOAD which indicates that the loading state of the
+  //    tab changed.
+  // 2. The navigation index is greater than 0 which means that a top level
   //    navigation was initiated on the current external tab.
-  // 2. The navigation type has changed.
-  // 3. The url or the referrer are different.
+  // 3. The navigation type has changed.
+  // 4. The url or the referrer are different.
+  if (flags == TabContents::INVALIDATE_LOAD)
+    return false;
+
   if (new_navigation_info.navigation_index <= 0)
     return false;
 
@@ -1348,4 +1397,3 @@ bool ChromeActiveDocument::IsNewNavigation(
 
   return false;
 }
-

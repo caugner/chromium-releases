@@ -75,6 +75,7 @@ struct SessionDependencies {
   // Default set of dependencies -- "null" proxy service.
   SessionDependencies()
       : host_resolver(new MockHostResolver),
+        cert_verifier(new CertVerifier),
         proxy_service(ProxyService::CreateDirect()),
         ssl_config_service(new SSLConfigServiceDefaults),
         http_auth_handler_factory(
@@ -84,6 +85,7 @@ struct SessionDependencies {
   // Custom proxy service dependency.
   explicit SessionDependencies(ProxyService* proxy_service)
       : host_resolver(new MockHostResolver),
+        cert_verifier(new CertVerifier),
         proxy_service(proxy_service),
         ssl_config_service(new SSLConfigServiceDefaults),
         http_auth_handler_factory(
@@ -91,6 +93,7 @@ struct SessionDependencies {
         net_log(NULL) {}
 
   scoped_ptr<MockHostResolverBase> host_resolver;
+  scoped_ptr<CertVerifier> cert_verifier;
   scoped_refptr<ProxyService> proxy_service;
   scoped_refptr<SSLConfigService> ssl_config_service;
   MockClientSocketFactory socket_factory;
@@ -100,6 +103,7 @@ struct SessionDependencies {
 
 HttpNetworkSession* CreateSession(SessionDependencies* session_deps) {
   return new HttpNetworkSession(session_deps->host_resolver.get(),
+                                session_deps->cert_verifier.get(),
                                 NULL /* dnsrr_resolver */,
                                 NULL /* dns_cert_checker */,
                                 NULL /* ssl_host_info_factory */,
@@ -175,15 +179,18 @@ class HttpNetworkTransactionTest : public PlatformTest {
 
     rv = ReadTransaction(trans.get(), &out.response_data);
     EXPECT_EQ(OK, rv);
+
+    net::CapturingNetLog::EntryList entries;
+    log.GetEntries(&entries);
     size_t pos = ExpectLogContainsSomewhere(
-        log.entries(), 0, NetLog::TYPE_HTTP_TRANSACTION_SEND_REQUEST_HEADERS,
+        entries, 0, NetLog::TYPE_HTTP_TRANSACTION_SEND_REQUEST_HEADERS,
         NetLog::PHASE_NONE);
     ExpectLogContainsSomewhere(
-        log.entries(), pos,
+        entries, pos,
         NetLog::TYPE_HTTP_TRANSACTION_READ_RESPONSE_HEADERS,
         NetLog::PHASE_NONE);
 
-    CapturingNetLog::Entry entry = log.entries()[pos];
+    CapturingNetLog::Entry entry = entries[pos];
     NetLogHttpRequestParameter* request_params =
         static_cast<NetLogHttpRequestParameter*>(entry.extra_parameters.get());
     EXPECT_EQ("GET / HTTP/1.1\r\n", request_params->GetLine());
@@ -308,7 +315,8 @@ CaptureGroupNameHttpProxySocketPool::CaptureGroupNameSocketPool(
 template<>
 CaptureGroupNameSSLSocketPool::CaptureGroupNameSocketPool(
     HttpNetworkSession* session)
-    : SSLClientSocketPool(0, 0, NULL, session->host_resolver(), NULL, NULL,
+    : SSLClientSocketPool(0, 0, NULL, session->host_resolver(),
+                          session->cert_verifier(), NULL, NULL,
                           NULL, NULL, NULL, NULL, NULL, NULL, NULL) {}
 
 //-----------------------------------------------------------------------------
@@ -1526,11 +1534,13 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyNoKeepAlive) {
 
   rv = callback1.WaitForResult();
   EXPECT_EQ(OK, rv);
+  net::CapturingNetLog::EntryList entries;
+  log.GetEntries(&entries);
   size_t pos = ExpectLogContainsSomewhere(
-      log.entries(), 0, NetLog::TYPE_HTTP_TRANSACTION_SEND_TUNNEL_HEADERS,
+      entries, 0, NetLog::TYPE_HTTP_TRANSACTION_SEND_TUNNEL_HEADERS,
       NetLog::PHASE_NONE);
   ExpectLogContainsSomewhere(
-      log.entries(), pos,
+      entries, pos,
       NetLog::TYPE_HTTP_TRANSACTION_READ_TUNNEL_RESPONSE_HEADERS,
       NetLog::PHASE_NONE);
 
@@ -1630,11 +1640,13 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyKeepAlive) {
 
   rv = callback1.WaitForResult();
   EXPECT_EQ(OK, rv);
+  net::CapturingNetLog::EntryList entries;
+  log.GetEntries(&entries);
   size_t pos = ExpectLogContainsSomewhere(
-      log.entries(), 0, NetLog::TYPE_HTTP_TRANSACTION_SEND_TUNNEL_HEADERS,
+      entries, 0, NetLog::TYPE_HTTP_TRANSACTION_SEND_TUNNEL_HEADERS,
       NetLog::PHASE_NONE);
   ExpectLogContainsSomewhere(
-      log.entries(), pos,
+      entries, pos,
       NetLog::TYPE_HTTP_TRANSACTION_READ_TUNNEL_RESPONSE_HEADERS,
       NetLog::PHASE_NONE);
 
@@ -1832,11 +1844,13 @@ TEST_F(HttpNetworkTransactionTest, HttpsServerRequestsProxyAuthThroughProxy) {
 
   rv = callback1.WaitForResult();
   EXPECT_EQ(ERR_UNEXPECTED_PROXY_AUTH, rv);
+  net::CapturingNetLog::EntryList entries;
+  log.GetEntries(&entries);
   size_t pos = ExpectLogContainsSomewhere(
-      log.entries(), 0, NetLog::TYPE_HTTP_TRANSACTION_SEND_TUNNEL_HEADERS,
+      entries, 0, NetLog::TYPE_HTTP_TRANSACTION_SEND_TUNNEL_HEADERS,
       NetLog::PHASE_NONE);
   ExpectLogContainsSomewhere(
-      log.entries(), pos,
+      entries, pos,
       NetLog::TYPE_HTTP_TRANSACTION_READ_TUNNEL_RESPONSE_HEADERS,
       NetLog::PHASE_NONE);
 }
@@ -2267,10 +2281,11 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxySpdyConnectFailure) {
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
-  EXPECT_EQ(ERR_TUNNEL_CONNECTION_FAILED, rv);
+  EXPECT_EQ(OK, rv);
 
   const HttpResponseInfo* response = trans->GetResponseInfo();
-  ASSERT_TRUE(response == NULL);
+  ASSERT_FALSE(response == NULL);
+  EXPECT_EQ(500, response->headers->response_code());
 }
 
 // Test the challenge-response-retry sequence through an HTTPS Proxy
@@ -4458,6 +4473,238 @@ TEST_F(HttpNetworkTransactionTest, HTTPSViaHttpsProxy) {
   EXPECT_TRUE(HttpVersion(1, 1) == response->headers->GetHttpVersion());
 }
 
+// Test an HTTPS Proxy's ability to redirect a CONNECT request
+TEST_F(HttpNetworkTransactionTest, RedirectOfHttpsConnectViaHttpsProxy) {
+  SessionDependencies session_deps(
+      ProxyService::CreateFixed("https://proxy:70"));
+
+  HttpRequestInfo request;
+  request.method = "GET";
+  request.url = GURL("https://www.google.com/");
+  request.load_flags = 0;
+
+  MockWrite data_writes[] = {
+    MockWrite("CONNECT www.google.com:443 HTTP/1.1\r\n"
+              "Host: www.google.com\r\n"
+              "Proxy-Connection: keep-alive\r\n\r\n"),
+  };
+
+  MockRead data_reads[] = {
+    MockRead("HTTP/1.1 302 Redirect\r\n"),
+    MockRead("Location: http://login.example.com/\r\n"),
+    MockRead("Content-Length: 0\r\n\r\n"),
+    MockRead(false, OK),
+  };
+
+  StaticSocketDataProvider data(data_reads, arraysize(data_reads),
+                                data_writes, arraysize(data_writes));
+  SSLSocketDataProvider proxy_ssl(true, OK);  // SSL to the proxy
+
+  session_deps.socket_factory.AddSocketDataProvider(&data);
+  session_deps.socket_factory.AddSSLSocketDataProvider(&proxy_ssl);
+
+  TestCompletionCallback callback;
+
+  scoped_ptr<HttpTransaction> trans(
+      new HttpNetworkTransaction(CreateSession(&session_deps)));
+
+  int rv = trans->Start(&request, &callback, BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+
+  rv = callback.WaitForResult();
+  EXPECT_EQ(OK, rv);
+  const HttpResponseInfo* response = trans->GetResponseInfo();
+
+  ASSERT_FALSE(response == NULL);
+
+  EXPECT_EQ(302, response->headers->response_code());
+  std::string url;
+  EXPECT_TRUE(response->headers->IsRedirect(&url));
+  EXPECT_EQ("http://login.example.com/", url);
+}
+
+// Test an HTTPS (SPDY) Proxy's ability to redirect a CONNECT request
+TEST_F(HttpNetworkTransactionTest, RedirectOfHttpsConnectViaSpdyProxy) {
+  SessionDependencies session_deps(
+      ProxyService::CreateFixed("https://proxy:70"));
+
+  HttpRequestInfo request;
+  request.method = "GET";
+  request.url = GURL("https://www.google.com/");
+  request.load_flags = 0;
+
+  scoped_ptr<spdy::SpdyFrame> conn(ConstructSpdyConnect(NULL, 0, 1));
+  scoped_ptr<spdy::SpdyFrame> goaway(ConstructSpdyRstStream(1, spdy::CANCEL));
+  MockWrite data_writes[] = {
+    CreateMockWrite(*conn.get(), 0, false),
+  };
+
+  static const char* const kExtraHeaders[] = {
+    "location",
+    "http://login.example.com/",
+  };
+  scoped_ptr<spdy::SpdyFrame> resp(
+      ConstructSpdySynReplyError("302 Redirect", kExtraHeaders,
+                                 arraysize(kExtraHeaders)/2, 1));
+  MockRead data_reads[] = {
+    CreateMockRead(*resp.get(), 1, false),
+    MockRead(true, 0, 2),  // EOF
+  };
+
+  scoped_refptr<DelayedSocketData> data(
+      new DelayedSocketData(
+          1,  // wait for one write to finish before reading.
+          data_reads, arraysize(data_reads),
+          data_writes, arraysize(data_writes)));
+  SSLSocketDataProvider proxy_ssl(true, OK);  // SSL to the proxy
+  proxy_ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
+  proxy_ssl.next_proto = "spdy/2";
+  proxy_ssl.was_npn_negotiated = true;
+
+  session_deps.socket_factory.AddSocketDataProvider(data.get());
+  session_deps.socket_factory.AddSSLSocketDataProvider(&proxy_ssl);
+
+  TestCompletionCallback callback;
+
+  scoped_ptr<HttpTransaction> trans(
+      new HttpNetworkTransaction(CreateSession(&session_deps)));
+
+  int rv = trans->Start(&request, &callback, BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+
+  rv = callback.WaitForResult();
+  EXPECT_EQ(OK, rv);
+  const HttpResponseInfo* response = trans->GetResponseInfo();
+
+  ASSERT_FALSE(response == NULL);
+
+  EXPECT_EQ(302, response->headers->response_code());
+  std::string url;
+  EXPECT_TRUE(response->headers->IsRedirect(&url));
+  EXPECT_EQ("http://login.example.com/", url);
+}
+
+// Test an HTTPS Proxy's ability to provide a response to a CONNECT request
+TEST_F(HttpNetworkTransactionTest, ErrorResponseTofHttpsConnectViaHttpsProxy) {
+  SessionDependencies session_deps(
+      ProxyService::CreateFixed("https://proxy:70"));
+
+  HttpRequestInfo request;
+  request.method = "GET";
+  request.url = GURL("https://www.google.com/");
+  request.load_flags = 0;
+
+  MockWrite data_writes[] = {
+    MockWrite("CONNECT www.google.com:443 HTTP/1.1\r\n"
+              "Host: www.google.com\r\n"
+              "Proxy-Connection: keep-alive\r\n\r\n"),
+  };
+
+  MockRead data_reads[] = {
+    MockRead("HTTP/1.1 404 Not Found\r\n"),
+    MockRead("Content-Length: 23\r\n\r\n"),
+    MockRead("The host does not exist"),
+    MockRead(false, OK),
+  };
+
+  StaticSocketDataProvider data(data_reads, arraysize(data_reads),
+                                data_writes, arraysize(data_writes));
+  SSLSocketDataProvider proxy_ssl(true, OK);  // SSL to the proxy
+
+  session_deps.socket_factory.AddSocketDataProvider(&data);
+  session_deps.socket_factory.AddSSLSocketDataProvider(&proxy_ssl);
+
+  TestCompletionCallback callback;
+
+  scoped_ptr<HttpTransaction> trans(
+      new HttpNetworkTransaction(CreateSession(&session_deps)));
+
+  int rv = trans->Start(&request, &callback, BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+
+  rv = callback.WaitForResult();
+  EXPECT_EQ(OK, rv);
+  const HttpResponseInfo* response = trans->GetResponseInfo();
+
+  ASSERT_FALSE(response == NULL);
+
+  EXPECT_EQ(404, response->headers->response_code());
+  EXPECT_EQ(23, response->headers->GetContentLength());
+  EXPECT_TRUE(HttpVersion(1, 1) == response->headers->GetHttpVersion());
+  EXPECT_FALSE(response->ssl_info.is_valid());
+
+  std::string response_data;
+  ASSERT_EQ(OK, ReadTransaction(trans.get(), &response_data));
+  EXPECT_EQ("The host does not exist", response_data);
+}
+
+// Test an HTTPS (SPDY) Proxy's ability to provide a response to a CONNECT
+// request
+TEST_F(HttpNetworkTransactionTest, ErrorResponseTofHttpsConnectViaSpdyProxy) {
+  SessionDependencies session_deps(
+      ProxyService::CreateFixed("https://proxy:70"));
+
+  HttpRequestInfo request;
+  request.method = "GET";
+  request.url = GURL("https://www.google.com/");
+  request.load_flags = 0;
+
+  scoped_ptr<spdy::SpdyFrame> conn(ConstructSpdyConnect(NULL, 0, 1));
+  scoped_ptr<spdy::SpdyFrame> goaway(ConstructSpdyRstStream(1, spdy::CANCEL));
+  MockWrite data_writes[] = {
+    CreateMockWrite(*conn.get(), 0, false),
+  };
+
+  static const char* const kExtraHeaders[] = {
+    "location",
+    "http://login.example.com/",
+  };
+  scoped_ptr<spdy::SpdyFrame> resp(
+      ConstructSpdySynReplyError("404 Not Found", kExtraHeaders,
+                                 arraysize(kExtraHeaders)/2, 1));
+  scoped_ptr<spdy::SpdyFrame> body(
+      ConstructSpdyBodyFrame(1, "The host does not exist", 23, true));
+  MockRead data_reads[] = {
+    CreateMockRead(*resp.get(), 1, false),
+    CreateMockRead(*body.get(), 2, false),
+    MockRead(true, 0, 3),  // EOF
+  };
+
+  scoped_refptr<DelayedSocketData> data(
+      new DelayedSocketData(
+          1,  // wait for one write to finish before reading.
+          data_reads, arraysize(data_reads),
+          data_writes, arraysize(data_writes)));
+  SSLSocketDataProvider proxy_ssl(true, OK);  // SSL to the proxy
+  proxy_ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
+  proxy_ssl.next_proto = "spdy/2";
+  proxy_ssl.was_npn_negotiated = true;
+
+  session_deps.socket_factory.AddSocketDataProvider(data.get());
+  session_deps.socket_factory.AddSSLSocketDataProvider(&proxy_ssl);
+
+  TestCompletionCallback callback;
+
+  scoped_ptr<HttpTransaction> trans(
+      new HttpNetworkTransaction(CreateSession(&session_deps)));
+
+  int rv = trans->Start(&request, &callback, BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+
+  rv = callback.WaitForResult();
+  EXPECT_EQ(OK, rv);
+  const HttpResponseInfo* response = trans->GetResponseInfo();
+
+  ASSERT_FALSE(response == NULL);
+
+  EXPECT_EQ(404, response->headers->response_code());
+  EXPECT_FALSE(response->ssl_info.is_valid());
+
+  std::string response_data;
+  ASSERT_EQ(OK, ReadTransaction(trans.get(), &response_data));
+  EXPECT_EQ("The host does not exist", response_data);
+}
+
 // Test HTTPS connections to a site with a bad certificate, going through an
 // HTTPS proxy
 TEST_F(HttpNetworkTransactionTest, HTTPSBadCertificateViaHttpsProxy) {
@@ -6465,6 +6712,10 @@ class CapturingProxyResolver : public ProxyResolver {
     NOTREACHED();
   }
 
+  virtual void CancelSetPacScript() {
+    NOTREACHED();
+  }
+
   virtual int SetPacScript(const scoped_refptr<ProxyResolverScriptData>&,
                            CompletionCallback* /*callback*/) {
     return OK;
@@ -6671,7 +6922,8 @@ TEST_F(HttpNetworkTransactionTest,
   session->ssl_config_service()->GetSSLConfig(&ssl_config);
   ClientSocket* socket = connection->release_socket();
   socket = session->socket_factory()->CreateSSLClientSocket(
-      socket, HostPortPair("" , 443), ssl_config, NULL /* ssl_host_info */);
+      socket, HostPortPair("" , 443), ssl_config, NULL /* ssl_host_info */,
+      session->cert_verifier());
   connection->set_socket(socket);
   EXPECT_EQ(ERR_IO_PENDING, socket->Connect(&callback));
   EXPECT_EQ(OK, callback.WaitForResult());
@@ -7725,11 +7977,13 @@ TEST_F(HttpNetworkTransactionTest, ProxyTunnelGet) {
 
   rv = callback1.WaitForResult();
   EXPECT_EQ(OK, rv);
+  net::CapturingNetLog::EntryList entries;
+  log.GetEntries(&entries);
   size_t pos = ExpectLogContainsSomewhere(
-      log.entries(), 0, NetLog::TYPE_HTTP_TRANSACTION_SEND_TUNNEL_HEADERS,
+      entries, 0, NetLog::TYPE_HTTP_TRANSACTION_SEND_TUNNEL_HEADERS,
       NetLog::PHASE_NONE);
   ExpectLogContainsSomewhere(
-      log.entries(), pos,
+      entries, pos,
       NetLog::TYPE_HTTP_TRANSACTION_READ_TUNNEL_RESPONSE_HEADERS,
       NetLog::PHASE_NONE);
 
@@ -7787,11 +8041,13 @@ TEST_F(HttpNetworkTransactionTest, ProxyTunnelGetHangup) {
 
   rv = callback1.WaitForResult();
   EXPECT_EQ(ERR_EMPTY_RESPONSE, rv);
+  net::CapturingNetLog::EntryList entries;
+  log.GetEntries(&entries);
   size_t pos = ExpectLogContainsSomewhere(
-      log.entries(), 0, NetLog::TYPE_HTTP_TRANSACTION_SEND_TUNNEL_HEADERS,
+      entries, 0, NetLog::TYPE_HTTP_TRANSACTION_SEND_TUNNEL_HEADERS,
       NetLog::PHASE_NONE);
   ExpectLogContainsSomewhere(
-      log.entries(), pos,
+      entries, pos,
       NetLog::TYPE_HTTP_TRANSACTION_READ_TUNNEL_RESPONSE_HEADERS,
       NetLog::PHASE_NONE);
 }

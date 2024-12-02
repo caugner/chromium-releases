@@ -10,9 +10,10 @@
 #include <deque>
 
 #include "base/basictypes.h"
-#include "base/lock.h"
 #include "base/ref_counted.h"
-#include "base/waitable_event_watcher.h"
+#include "base/synchronization/lock.h"
+#include "base/synchronization/waitable_event_watcher.h"
+#include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_sync_message.h"
 
@@ -34,9 +35,11 @@ class MessageReplyDeserializer;
 class SyncChannel : public ChannelProxy,
                     public base::WaitableEventWatcher::Delegate {
  public:
-  SyncChannel(const std::string& channel_id, Channel::Mode mode,
-              Channel::Listener* listener, MessageFilter* filter,
-              MessageLoop* ipc_message_loop, bool create_pipe_now,
+  SyncChannel(const IPC::ChannelHandle& channel_handle,
+              Channel::Mode mode,
+              Channel::Listener* listener,
+              MessageLoop* ipc_message_loop,
+              bool create_pipe_now,
               base::WaitableEvent* shutdown_event);
   virtual ~SyncChannel();
 
@@ -59,7 +62,6 @@ class SyncChannel : public ChannelProxy,
                       public base::WaitableEventWatcher::Delegate {
    public:
     SyncContext(Channel::Listener* listener,
-                MessageFilter* filter,
                 MessageLoop* ipc_thread,
                 base::WaitableEvent* shutdown_event);
 
@@ -104,7 +106,7 @@ class SyncChannel : public ChannelProxy,
     virtual void Clear();
 
     // Called on the IPC thread.
-    virtual void OnMessageReceived(const Message& msg);
+    virtual bool OnMessageReceived(const Message& msg);
     virtual void OnChannelError();
     virtual void OnChannelOpened();
     virtual void OnChannelClosed();
@@ -117,7 +119,7 @@ class SyncChannel : public ChannelProxy,
 
     typedef std::deque<PendingSyncMsg> PendingSyncMessageQueue;
     PendingSyncMessageQueue deserializers_;
-    Lock deserializers_lock_;
+    base::Lock deserializers_lock_;
 
     scoped_refptr<ReceivedSyncMsgQueue> received_sync_msgs_;
 

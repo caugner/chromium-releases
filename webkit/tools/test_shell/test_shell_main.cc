@@ -22,6 +22,7 @@
 #include "base/string_number_conversions.h"
 #include "base/sys_info.h"
 #include "base/utf_string_conversions.h"
+#include "gfx/gfx_module.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/net_module.h"
 #include "net/base/net_util.h"
@@ -29,8 +30,8 @@
 #include "net/http/http_util.h"
 #include "net/test/test_server.h"
 #include "net/url_request/url_request_context.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/WebKit/chromium/public/WebScriptController.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/window_open_disposition.h"
 #include "webkit/extensions/v8/gc_extension.h"
@@ -117,7 +118,7 @@ int main(int argc, char* argv[]) {
       parsed_command_line.HasSwitch(test_shell::kGenericTheme);
 #else
   // Stop compiler warnings about unused variables.
-  ux_theme = ux_theme;
+  static_cast<void>(ux_theme);
 #endif
 
   bool enable_gp_fault_error_box = false;
@@ -202,8 +203,9 @@ int main(int argc, char* argv[]) {
   // Load ICU data tables
   icu_util::Initialize();
 
-  // Config the network module so it has access to a limited set of resources.
-  net::NetModule::SetResourceProvider(TestShell::NetResourceProvider);
+  // Config the modules that need access to a limited set of resources.
+  net::NetModule::SetResourceProvider(TestShell::ResourceProvider);
+  gfx::GfxModule::SetResourceProvider(TestShell::ResourceProvider);
 
   platform.InitializeGUI();
 

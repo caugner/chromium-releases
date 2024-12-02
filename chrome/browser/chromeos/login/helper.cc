@@ -4,12 +4,12 @@
 
 #include "chrome/browser/chromeos/login/helper.h"
 
-#include "app/resource_bundle.h"
 #include "chrome/browser/google/google_util.h"
 #include "gfx/canvas_skia.h"
 #include "googleurl/src/gurl.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/button/native_button.h"
 #include "views/controls/label.h"
@@ -17,6 +17,8 @@
 #include "views/controls/throbber.h"
 #include "views/painter.h"
 #include "views/screen.h"
+#include "views/widget/widget.h"
+#include "views/widget/widget_gtk.h"
 
 namespace chromeos {
 
@@ -67,7 +69,67 @@ class BackgroundPainter : public views::Painter {
 
 }  // namespace
 
-views::Throbber* CreateDefaultSmoothedThrobber() {
+ThrobberHostView::ThrobberHostView()
+    : host_view_(this),
+      throbber_widget_(NULL) {
+}
+
+ThrobberHostView::~ThrobberHostView() {
+  StopThrobber();
+}
+
+void ThrobberHostView::StartThrobber() {
+  StopThrobber();
+
+  views::Widget* host_widget = host_view_->GetWidget();
+  if (!host_widget) {
+    LOG(WARNING) << "Failed to start the throbber: no Widget";
+    return;
+  }
+
+  GtkWidget* host_gtk_window = host_widget->GetNativeView();
+  while (host_gtk_window && !GTK_IS_WINDOW(host_gtk_window))
+    host_gtk_window = gtk_widget_get_parent(host_gtk_window);
+  if (!host_gtk_window) {
+    LOG(WARNING) << "Failed to start the throbber: no GtkWindow";
+    return;
+  }
+
+  views::SmoothedThrobber* throbber = CreateDefaultSmoothedThrobber();
+  throbber->set_stop_delay_ms(0);
+  gfx::Rect throbber_bounds = CalculateThrobberBounds(throbber);
+
+  views::WidgetGtk* widget_gtk =
+      new views::WidgetGtk(views::WidgetGtk::TYPE_WINDOW);
+  widget_gtk->make_transient_to_parent();
+  widget_gtk->MakeTransparent();
+  throbber_widget_ = widget_gtk;
+
+  throbber_bounds.Offset(host_view_->GetScreenBounds().origin());
+  throbber_widget_->Init(host_gtk_window, throbber_bounds);
+  throbber_widget_->SetContentsView(throbber);
+  throbber_widget_->Show();
+  // WM can ignore bounds before widget is shown.
+  throbber_widget_->SetBounds(throbber_bounds);
+  throbber->Start();
+}
+
+void ThrobberHostView::StopThrobber() {
+  if (throbber_widget_) {
+    throbber_widget_->Close();
+    throbber_widget_ = NULL;
+  }
+}
+
+gfx::Rect ThrobberHostView::CalculateThrobberBounds(views::Throbber* throbber) {
+  gfx::Rect bounds(throbber->GetPreferredSize());
+  bounds.set_x(
+      host_view_->width() - login::kThrobberRightMargin - bounds.width());
+  bounds.set_y((host_view_->height() - bounds.height()) / 2);
+  return bounds;
+}
+
+views::SmoothedThrobber* CreateDefaultSmoothedThrobber() {
   views::SmoothedThrobber* throbber =
       new views::SmoothedThrobber(kThrobberFrameMs);
   throbber->SetFrames(
@@ -94,7 +156,6 @@ gfx::Rect CalculateScreenBounds(const gfx::Size& size) {
     int vertical_diff = bounds.height() - size.height();
     bounds.Inset(horizontal_diff / 2, vertical_diff / 2);
   }
-
   return bounds;
 }
 
@@ -124,9 +185,6 @@ GURL GetAccountRecoveryHelpUrl() {
 
 namespace login {
 
-// Minimal width for the button.
-const int kButtonMinWidth = 90;
-
 gfx::Size WideButton::GetPreferredSize() {
   gfx::Size preferred_size = NativeButton::GetPreferredSize();
   // Set minimal width.
@@ -138,4 +196,3 @@ gfx::Size WideButton::GetPreferredSize() {
 }  // namespace login
 
 }  // namespace chromeos
-

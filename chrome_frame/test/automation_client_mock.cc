@@ -1,12 +1,14 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
 #include "chrome_frame/test/automation_client_mock.h"
 
 #include "base/callback.h"
-#include "net/base/net_errors.h"
 #include "chrome_frame/custom_sync_call_context.h"
+#include "chrome_frame/navigation_constraints.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
+#include "net/base/net_errors.h"
 
 #define GMOCK_MUTANT_INCLUDE_LATE_OBJECT_BINDING
 #include "testing/gmock_mutant.h"
@@ -85,8 +87,8 @@ ACTION_P4(HandleCreateTab, tab_handle, external_tab_container, tab_wnd,
   delete context;
 }
 
-ACTION_P4(InitiateNavigation, client, url, referrer, privileged) {
-  client->InitiateNavigation(url, referrer, privileged);
+ACTION_P4(InitiateNavigation, client, url, referrer, constraints) {
+  client->InitiateNavigation(url, referrer, constraints);
 }
 
 // We mock ChromeFrameDelegate only. The rest is with real AutomationProxy
@@ -151,6 +153,8 @@ TEST(CFACWithChrome, CreateNotSoFast) {
 
 TEST(CFACWithChrome, NavigateOk) {
   MockCFDelegate cfd;
+  NavigationConstraintsImpl navigation_constraints;
+
   chrome_frame_test::TimedMsgLoop loop;
   const std::string url = "about:version";
   const FilePath profile_path(
@@ -162,22 +166,23 @@ TEST(CFACWithChrome, NavigateOk) {
 
   EXPECT_CALL(cfd, OnAutomationServerReady())
       .WillOnce(InitiateNavigation(client.get(),
-                                   url, std::string(), false));
+                                   url, std::string(),
+                                   &navigation_constraints));
 
   EXPECT_CALL(cfd, GetBounds(_)).Times(testing::AnyNumber());
 
-  EXPECT_CALL(cfd, OnNavigationStateChanged(_, _))
+  EXPECT_CALL(cfd, OnNavigationStateChanged(_))
       .Times(testing::AnyNumber());
 
   {
     testing::InSequence s;
 
-    EXPECT_CALL(cfd, OnDidNavigate(_, EqNavigationInfoUrl(GURL())))
+    EXPECT_CALL(cfd, OnDidNavigate(EqNavigationInfoUrl(GURL())))
         .Times(1);
 
-    EXPECT_CALL(cfd, OnUpdateTargetUrl(_, _)).Times(testing::AtMost(1));
+    EXPECT_CALL(cfd, OnUpdateTargetUrl(_)).Times(testing::AtMost(1));
 
-    EXPECT_CALL(cfd, OnLoad(_, _))
+    EXPECT_CALL(cfd, OnLoad(_))
         .Times(1)
         .WillOnce(QUIT_LOOP(loop));
   }
@@ -196,12 +201,13 @@ TEST(CFACWithChrome, NavigateOk) {
 
 TEST(CFACWithChrome, NavigateFailed) {
   MockCFDelegate cfd;
+  NavigationConstraintsImpl navigation_constraints;
   chrome_frame_test::TimedMsgLoop loop;
   const FilePath profile_path(
       chrome_frame_test::GetProfilePath(L"Adam.N.Epilinter"));
   const std::string url = "http://127.0.0.3:65412/";
-  const URLRequestStatus connection_failed(URLRequestStatus::FAILED,
-                                           net::ERR_INVALID_URL);
+  const net::URLRequestStatus connection_failed(net::URLRequestStatus::FAILED,
+                                                net::ERR_INVALID_URL);
 
   scoped_refptr<ChromeFrameAutomationClient> client;
   client = new ChromeFrameAutomationClient;
@@ -210,21 +216,21 @@ TEST(CFACWithChrome, NavigateFailed) {
   EXPECT_CALL(cfd, OnAutomationServerReady())
       .WillOnce(testing::IgnoreResult(testing::InvokeWithoutArgs(CreateFunctor(
           client.get(), &ChromeFrameAutomationClient::InitiateNavigation,
-          url, std::string(), false))));
+          url, std::string(), &navigation_constraints))));
 
   EXPECT_CALL(cfd, GetBounds(_)).Times(testing::AnyNumber());
-  EXPECT_CALL(cfd, OnNavigationStateChanged(_, _)).Times(testing::AnyNumber());
+  EXPECT_CALL(cfd, OnNavigationStateChanged(_)).Times(testing::AnyNumber());
 
-  EXPECT_CALL(cfd, OnRequestStart(_, _, _))
+  EXPECT_CALL(cfd, OnRequestStart(_, _))
       // Often there's another request for the error page
       .Times(testing::Between(1, 2))
-      .WillRepeatedly(testing::WithArgs<1>(testing::Invoke(CreateFunctor(&cfd,
+      .WillRepeatedly(testing::WithArgs<0>(testing::Invoke(CreateFunctor(&cfd,
           &MockCFDelegate::Reply, connection_failed))));
 
-  EXPECT_CALL(cfd, OnUpdateTargetUrl(_, _)).Times(testing::AnyNumber());
-  EXPECT_CALL(cfd, OnLoad(_, _)).Times(testing::AtMost(1));
+  EXPECT_CALL(cfd, OnUpdateTargetUrl(_)).Times(testing::AnyNumber());
+  EXPECT_CALL(cfd, OnLoad(_)).Times(testing::AtMost(1));
 
-  EXPECT_CALL(cfd, OnNavigationFailed(_, _, GURL(url)))
+  EXPECT_CALL(cfd, OnNavigationFailed(_, GURL(url)))
       .Times(1)
       .WillOnce(QUIT_LOOP_SOON(loop, 2));
 
@@ -253,7 +259,7 @@ TEST_F(CFACMockTest, MockedCreateTabOk) {
   HWND h1 = ::GetDesktopWindow();
   HWND h2 = ::GetDesktopWindow();
   EXPECT_CALL(mock_proxy_, SendAsAsync(testing::Property(
-      &IPC::SyncMessage::type, AutomationMsg_CreateExternalTab__ID),
+      &IPC::SyncMessage::type, AutomationMsg_CreateExternalTab::ID),
       testing::NotNull(), _))
           .Times(1).WillOnce(HandleCreateTab(tab_handle_, h1, h2, 99));
 
@@ -287,7 +293,7 @@ TEST_F(CFACMockTest, MockedCreateTabFailed) {
       .WillRepeatedly(Return(""));
 
   EXPECT_CALL(mock_proxy_, SendAsAsync(testing::Property(
-      &IPC::SyncMessage::type, AutomationMsg_CreateExternalTab__ID),
+      &IPC::SyncMessage::type, AutomationMsg_CreateExternalTab::ID),
       testing::NotNull(), _))
           .Times(1).WillOnce(HandleCreateTab(tab_handle_, null_wnd, null_wnd,
                                              99));
@@ -350,7 +356,7 @@ TEST_F(CFACMockTest, OnChannelError) {
   HWND h1 = ::GetDesktopWindow();
   HWND h2 = ::GetDesktopWindow();
   EXPECT_CALL(proxy, SendAsAsync(testing::Property(
-    &IPC::SyncMessage::type, AutomationMsg_CreateExternalTab__ID),
+    &IPC::SyncMessage::type, AutomationMsg_CreateExternalTab::ID),
     testing::NotNull(), _)).Times(3)
         .WillOnce(HandleCreateTab(tab_handle_, h1, h2, 99))
         .WillOnce(HandleCreateTab(tab_handle_ * 2, h1, h2, 100))
@@ -420,6 +426,8 @@ TEST_F(CFACMockTest, OnChannelError) {
 
 TEST_F(CFACMockTest, NavigateTwiceAfterInitToSameUrl) {
   int timeout = 500;
+  NavigationConstraintsImpl navigation_constraints;
+
   CreateTab();
   SetAutomationServerOk(1);
 
@@ -430,7 +438,7 @@ TEST_F(CFACMockTest, NavigateTwiceAfterInitToSameUrl) {
   HWND h1 = ::GetDesktopWindow();
   HWND h2 = ::GetDesktopWindow();
   EXPECT_CALL(mock_proxy_, SendAsAsync(testing::Property(
-      &IPC::SyncMessage::type, AutomationMsg_CreateExternalTab__ID),
+      &IPC::SyncMessage::type, AutomationMsg_CreateExternalTab::ID),
       testing::NotNull(), _))
           .Times(1).WillOnce(HandleCreateTab(tab_handle_, h1, h2, 99));
 
@@ -440,17 +448,17 @@ TEST_F(CFACMockTest, NavigateTwiceAfterInitToSameUrl) {
   EXPECT_CALL(cfd_, OnAutomationServerReady())
       .WillOnce(InitiateNavigation(client_.get(),
                                    std::string("http://www.nonexistent.com"),
-                                   std::string(), false));
+                                   std::string(), &navigation_constraints));
 
   EXPECT_CALL(mock_proxy_, SendAsAsync(testing::Property(
-      &IPC::SyncMessage::type, AutomationMsg_NavigateInExternalTab__ID),
+      &IPC::SyncMessage::type, AutomationMsg_NavigateInExternalTab::ID),
       testing::NotNull(), _))
           .Times(1).WillOnce(QUIT_LOOP(loop_));
 
   EXPECT_CALL(mock_proxy_, CancelAsync(_)).Times(testing::AnyNumber());
 
   EXPECT_CALL(mock_proxy_, Send(
-      testing::Property(&IPC::Message::type, AutomationMsg_TabReposition__ID)))
+      testing::Property(&IPC::Message::type, AutomationMsg_TabReposition::ID)))
           .Times(1)
           .WillOnce(Return(true));
 

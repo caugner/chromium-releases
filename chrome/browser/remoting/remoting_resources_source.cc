@@ -4,20 +4,22 @@
 
 #include "chrome/browser/remoting/remoting_resources_source.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
+#include <algorithm>
+#include <string>
+
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "googleurl/src/gurl.h"
 #include "grit/app_resources.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "grit/locale_settings.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 // Define the values of standard URLs.
 const char RemotingResourcesSource::kInvalidPasswordHelpUrl[] =
@@ -37,6 +39,8 @@ void RemotingResourcesSource::StartDataRequest(const std::string& path_raw,
   const char kRemotingGaiaLoginPath[] = "gaialogin";
   const char kRemotingSetupFlowPath[] = "setup";
   const char kRemotingSetupDonePath[] = "setupdone";
+  const char kRemotingSettingUpPath[] = "settingup";
+  const char kRemotingSetupErrorPath[] = "setuperror";
 
   std::string response;
   if (path_raw == kRemotingGaiaLoginPath) {
@@ -83,19 +87,50 @@ void RemotingResourcesSource::StartDataRequest(const std::string& path_raw,
         l10n_util::GetStringUTF16(IDS_SYNC_ERROR_SIGNING_IN));
     localized_strings.SetString("captchainstructions",
         l10n_util::GetStringUTF16(IDS_SYNC_GAIA_CAPTCHA_INSTRUCTIONS));
+    localized_strings.SetString("invalidaccesscode",
+        l10n_util::GetStringUTF16(IDS_SYNC_INVALID_ACCESS_CODE_LABEL));
+    localized_strings.SetString("enteraccesscode",
+        l10n_util::GetStringUTF16(IDS_SYNC_ENTER_ACCESS_CODE_LABEL));
+    localized_strings.SetString("getaccesscodehelp",
+        l10n_util::GetStringUTF16(IDS_SYNC_ACCESS_CODE_HELP_LABEL));
+    localized_strings.SetString("getaccesscodeurl",
+        l10n_util::GetStringUTF16(IDS_SYNC_GET_ACCESS_CODE_URL));
+
     static const base::StringPiece html(ResourceBundle::GetSharedInstance()
         .GetRawDataResource(IDR_GAIA_LOGIN_HTML));
+    SetFontAndTextDirection(&localized_strings);
+    response = jstemplate_builder::GetI18nTemplateHtml(
+        html, &localized_strings);
+  } else if (path_raw == kRemotingSettingUpPath) {
+    DictionaryValue localized_strings;
+    localized_strings.SetString("settingup",
+        l10n_util::GetStringUTF16(IDS_REMOTING_SETTING_UP_MESSAGE));
+    localized_strings.SetString("cancel",
+        l10n_util::GetStringUTF16(IDS_CANCEL));
+    static const base::StringPiece html(ResourceBundle::GetSharedInstance()
+        .GetRawDataResource(IDR_REMOTING_SETTING_UP_HTML));
     SetFontAndTextDirection(&localized_strings);
     response = jstemplate_builder::GetI18nTemplateHtml(
         html, &localized_strings);
   } else if (path_raw == kRemotingSetupDonePath) {
     DictionaryValue localized_strings;
     localized_strings.SetString("success",
-        l10n_util::GetStringUTF16(IDS_SYNC_SUCCESS));
+        l10n_util::GetStringUTF16(IDS_REMOTING_SUCCESS_TITLE));
     localized_strings.SetString("okay",
-        l10n_util::GetStringUTF16(IDS_SYNC_SETUP_OK_BUTTON_LABEL));
+        l10n_util::GetStringUTF16(IDS_OK));
     static const base::StringPiece html(ResourceBundle::GetSharedInstance()
         .GetRawDataResource(IDR_REMOTING_SETUP_DONE_HTML));
+    SetFontAndTextDirection(&localized_strings);
+    response = jstemplate_builder::GetI18nTemplateHtml(
+        html, &localized_strings);
+  } else if (path_raw == kRemotingSetupErrorPath) {
+    DictionaryValue localized_strings;
+    localized_strings.SetString("close",
+        l10n_util::GetStringUTF16(IDS_CLOSE));
+    localized_strings.SetString("retry",
+        l10n_util::GetStringUTF16(IDS_REMOTING_RETRY_BUTTON_TEXT));
+    static const base::StringPiece html(ResourceBundle::GetSharedInstance()
+        .GetRawDataResource(IDR_REMOTING_SETUP_ERROR_HTML));
     SetFontAndTextDirection(&localized_strings);
     response = jstemplate_builder::GetI18nTemplateHtml(
         html, &localized_strings);
@@ -109,6 +144,11 @@ void RemotingResourcesSource::StartDataRequest(const std::string& path_raw,
   html_bytes->data.resize(response.size());
   std::copy(response.begin(), response.end(), html_bytes->data.begin());
   SendResponse(request_id, html_bytes);
+}
+
+std::string RemotingResourcesSource::GetMimeType(
+    const std::string& path) const {
+  return "text/html";
 }
 
 std::string RemotingResourcesSource::GetLocalizedUrl(

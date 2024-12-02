@@ -13,14 +13,13 @@
 #include "base/file_util.h"
 #include "base/file_version_info.h"
 #include "base/lazy_instance.h"
-#include "base/lock.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "base/thread_local.h"
+#include "base/threading/thread_local.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_bstr.h"
@@ -31,6 +30,7 @@
 #include "chrome/installer/util/chrome_frame_distribution.h"
 #include "chrome_frame/extra_system_apis.h"
 #include "chrome_frame/html_utils.h"
+#include "chrome_frame/navigation_constraints.h"
 #include "chrome_frame/policy_settings.h"
 #include "chrome_frame/simple_resource_loader.h"
 #include "googleurl/src/gurl.h"
@@ -41,7 +41,6 @@
 
 using base::win::RegKey;
 using base::win::ScopedComPtr;
-using base::win::ScopedVariant;
 
 // Note that these values are all lower case and are compared to
 // lower-case-transformed values.
@@ -69,10 +68,6 @@ const wchar_t kEnableFirefoxPrivilegeMode[] = L"EnableFirefoxPrivilegeMode";
 static const wchar_t kChromeFrameNPAPIKey[] =
     L"Software\\MozillaPlugins\\@google.com/ChromeFrame,version=1.0";
 static const wchar_t kChromeFramePersistNPAPIReg[] = L"PersistNPAPIReg";
-
-// Used to isolate chrome frame builds from google chrome release channels.
-const wchar_t kChromeFrameOmahaSuffix[] = L"-cf";
-const wchar_t kDevChannelName[] = L"-dev";
 
 const char kAttachExternalTabPrefix[] = "attach_external_tab";
 
@@ -237,7 +232,8 @@ bool UtilChangePersistentNPAPIMarker(bool set) {
   bool success = false;
   if (cf_state_key.Valid()) {
     if (set) {
-      success = cf_state_key.WriteValue(kChromeFramePersistNPAPIReg, 1);
+      success = (cf_state_key.WriteValue(kChromeFramePersistNPAPIReg, 1) ==
+          ERROR_SUCCESS);
     } else {
       // Unfortunately, DeleteValue returns true only if the value
       // previously existed, so we do a separate existence check to
@@ -259,7 +255,8 @@ bool UtilIsPersistentNPAPIMarkerSet() {
   bool success = false;
   if (cf_state_key.Valid()) {
     DWORD val = 0;
-    if (cf_state_key.ReadValueDW(kChromeFramePersistNPAPIReg, &val)) {
+    if (cf_state_key.ReadValueDW(kChromeFramePersistNPAPIReg, &val) ==
+        ERROR_SUCCESS) {
       success = (val != 0);
     }
   }
@@ -419,7 +416,7 @@ uint32 GetIEMajorVersion() {
     wchar_t exe_path[MAX_PATH];
     HMODULE mod = GetModuleHandle(NULL);
     GetModuleFileName(mod, exe_path, arraysize(exe_path) - 1);
-    std::wstring exe_name(file_util::GetFilenameFromPath(exe_path));
+    std::wstring exe_name = FilePath(exe_path).BaseName().value();
     if (!LowerCaseEqualsASCII(exe_name, kIEImageName)) {
       ie_major_version = 0;
     } else {
@@ -680,11 +677,8 @@ int GetConfigInt(int default_value, const wchar_t* value_name) {
   int ret = default_value;
   RegKey config_key;
   if (config_key.Open(HKEY_CURRENT_USER, kChromeFrameConfigKey,
-                      KEY_QUERY_VALUE)) {
-    int value = FALSE;
-    if (config_key.ReadValueDW(value_name, reinterpret_cast<DWORD*>(&value))) {
-      ret = value;
-    }
+                      KEY_QUERY_VALUE) == ERROR_SUCCESS) {
+    config_key.ReadValueDW(value_name, reinterpret_cast<DWORD*>(&ret));
   }
 
   return ret;
@@ -698,8 +692,8 @@ bool GetConfigBool(bool default_value, const wchar_t* value_name) {
 bool SetConfigInt(const wchar_t* value_name, int value) {
   RegKey config_key;
   if (config_key.Create(HKEY_CURRENT_USER, kChromeFrameConfigKey,
-                        KEY_SET_VALUE)) {
-    if (config_key.WriteValue(value_name, value)) {
+                        KEY_SET_VALUE) == ERROR_SUCCESS) {
+    if (config_key.WriteValue(value_name, value) == ERROR_SUCCESS) {
       return true;
     }
   }
@@ -714,8 +708,10 @@ bool SetConfigBool(const wchar_t* value_name, bool value) {
 bool DeleteConfigValue(const wchar_t* value_name) {
   RegKey config_key;
   if (config_key.Open(HKEY_CURRENT_USER, kChromeFrameConfigKey,
-                      KEY_WRITE)) {
-    return config_key.DeleteValue(value_name);
+                      KEY_WRITE) == ERROR_SUCCESS) {
+    if (config_key.DeleteValue(value_name) == ERROR_SUCCESS) {
+      return true;
+    }
   }
   return false;
 }
@@ -724,15 +720,16 @@ bool IsGcfDefaultRenderer() {
   DWORD is_default = 0;  // NOLINT
 
   // First check policy settings
-  Singleton<PolicySettings> policy;
-  PolicySettings::RendererForUrl renderer = policy->default_renderer();
+  PolicySettings::RendererForUrl renderer =
+      PolicySettings::GetInstance()->default_renderer();
   if (renderer != PolicySettings::RENDERER_NOT_SPECIFIED) {
     is_default = (renderer == PolicySettings::RENDER_IN_CHROME_FRAME);
   } else {
     // TODO(tommi): Implement caching for this config value as it gets
     // checked frequently.
     RegKey config_key;
-    if (config_key.Open(HKEY_CURRENT_USER, kChromeFrameConfigKey, KEY_READ)) {
+    if (config_key.Open(HKEY_CURRENT_USER, kChromeFrameConfigKey,
+                        KEY_READ) == ERROR_SUCCESS) {
       config_key.ReadValueDW(kEnableGCFRendererByDefault, &is_default);
     }
   }
@@ -743,9 +740,8 @@ bool IsGcfDefaultRenderer() {
 RendererType RendererTypeForUrl(const std::wstring& url) {
   // First check if the default renderer settings are specified by policy.
   // If so, then that overrides the user settings.
-  Singleton<PolicySettings> policy;
-  PolicySettings::RendererForUrl renderer = policy->GetRendererForUrl(
-      url.c_str());
+  PolicySettings::RendererForUrl renderer =
+      PolicySettings::GetInstance()->GetRendererForUrl(url.c_str());
   if (renderer != PolicySettings::RENDERER_NOT_SPECIFIED) {
     // We may know at this point that policy says do NOT render in Chrome Frame.
     // To maintain consistency, we return RENDERER_TYPE_UNDETERMINED so that
@@ -756,8 +752,10 @@ RendererType RendererTypeForUrl(const std::wstring& url) {
   }
 
   RegKey config_key;
-  if (!config_key.Open(HKEY_CURRENT_USER, kChromeFrameConfigKey, KEY_READ))
+  if (config_key.Open(HKEY_CURRENT_USER, kChromeFrameConfigKey,
+                      KEY_READ) != ERROR_SUCCESS) {
     return RENDERER_TYPE_UNDETERMINED;
+  }
 
   RendererType renderer_type = RENDERER_TYPE_UNDETERMINED;
 
@@ -825,7 +823,7 @@ HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
   ScopedComPtr<IUriContainer> uri_container;
   hr = uri_container.QueryFrom(moniker);
 
-  ScopedVariant headers_var;
+  base::win::ScopedVariant headers_var;
   if (headers && headers[0])
     headers_var.Set(headers);
 
@@ -852,9 +850,17 @@ HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
       uri_container->GetIUri(uri_obj.Receive());
       DCHECK(uri_obj);
 
-      hr = browser_priv2->NavigateWithBindCtx2(uri_obj, NULL, NULL, NULL,
-                                               headers_var.AsInput(), bind_ctx,
-                                               const_cast<wchar_t*>(fragment));
+      if (GetIEVersion() < IE_9) {
+        hr = browser_priv2->NavigateWithBindCtx2(
+            uri_obj, NULL, NULL, NULL, headers_var.AsInput(), bind_ctx,
+            const_cast<wchar_t*>(fragment));
+      } else {
+        IWebBrowserPriv2CommonIE9* browser_priv2_ie9 =
+            reinterpret_cast<IWebBrowserPriv2CommonIE9*>(browser_priv2.get());
+        hr = browser_priv2_ie9->NavigateWithBindCtx2(
+            uri_obj, NULL, NULL, NULL, headers_var.AsInput(), bind_ctx,
+            const_cast<wchar_t*>(fragment), 0);
+      }
       DLOG_IF(WARNING, FAILED(hr))
           << base::StringPrintf(L"NavigateWithBindCtx2 0x%08X", hr);
     }
@@ -880,7 +886,7 @@ HRESULT NavigateBrowserToMoniker(IUnknown* browser, IMoniker* moniker,
           fragment = NULL;
         }
 
-        ScopedVariant var_url(UTF8ToWide(target_url.spec()).c_str());
+        base::win::ScopedVariant var_url(UTF8ToWide(target_url.spec()).c_str());
         hr = browser_priv->NavigateWithBindCtx(var_url.AsInput(), NULL, NULL,
                                                NULL, headers_var.AsInput(),
                                                bind_ctx,
@@ -1429,44 +1435,32 @@ void ChromeFrameUrl::Reset() {
   profile_name_.clear();
 }
 
-bool CanNavigate(const GURL& url, IInternetSecurityManager* security_manager,
-                 bool is_privileged) {
+bool CanNavigate(const GURL& url,
+                 NavigationConstraints* navigation_constraints) {
   if (!url.is_valid()) {
     DLOG(ERROR) << "Invalid URL passed to InitiateNavigation: " << url;
     return false;
   }
 
+  if (!navigation_constraints) {
+    NOTREACHED() << "Invalid NavigationConstraints passed in";
+    return false;
+  }
+
   // No sanity checks if unsafe URLs are allowed
-  if (GetConfigBool(false, kAllowUnsafeURLs))
+  if (navigation_constraints->AllowUnsafeUrls())
     return true;
 
-  if (!IsValidUrlScheme(url, is_privileged)) {
+  if (!navigation_constraints->IsSchemeAllowed(url)) {
     DLOG(WARNING) << __FUNCTION__ << " Disallowing navigation to url: " << url;
     return false;
   }
 
-  // Allow only about:blank or about:version
-  if (url.SchemeIs(chrome::kAboutScheme)) {
-    if (!LowerCaseEqualsASCII(url.spec(), chrome::kAboutBlankURL) &&
-        !LowerCaseEqualsASCII(url.spec(), chrome::kAboutVersionURL)) {
-      DLOG(WARNING) << __FUNCTION__
-                    << " Disallowing navigation to about url: " << url;
-      return false;
-    }
+  if (!navigation_constraints->IsZoneAllowed(url)) {
+    DLOG(WARNING) << __FUNCTION__
+                  << " Disallowing navigation to restricted url: " << url;
+    return false;
   }
-
-  // Prevent navigations to URLs in untrusted zone, even in Firefox.
-  if (security_manager) {
-    DWORD zone = URLZONE_INVALID;
-    std::wstring unicode_url = UTF8ToWide(url.spec());
-    security_manager->MapUrlToZone(unicode_url.c_str(), &zone, 0);
-    if (zone == URLZONE_UNTRUSTED) {
-      DLOG(WARNING) << __FUNCTION__
-                    << " Disallowing navigation to restricted url: " << url;
-      return false;
-    }
-  }
-
   return true;
 }
 
@@ -1581,4 +1575,11 @@ void EnumerateKeyValues(HKEY parent_key, const wchar_t* sub_key_name,
     values->push_back(url_list.Value());
     ++url_list;
   }
+}
+
+std::wstring GetCurrentModuleVersion() {
+  scoped_ptr<FileVersionInfo> module_version_info(
+      FileVersionInfo::CreateFileVersionInfoForCurrentModule());
+  DCHECK(module_version_info.get() != NULL);
+  return module_version_info->file_version();
 }

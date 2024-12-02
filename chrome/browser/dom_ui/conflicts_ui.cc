@@ -8,13 +8,13 @@
 
 #include <string>
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
 #include "chrome/browser/enumerate_modules_model_win.h"
+#include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
@@ -24,6 +24,8 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 namespace {
 
@@ -77,8 +79,8 @@ void ConflictsUIHTMLSource::StartDataRequest(const std::string& path,
       l10n_util::GetStringUTF16(IDS_CONFLICTS_HEADER_SIGNED_BY));
   localized_strings.SetString("headerLocation",
       l10n_util::GetStringUTF16(IDS_CONFLICTS_HEADER_LOCATION));
-  localized_strings.SetString("headerWarning",
-      l10n_util::GetStringUTF16(IDS_CONFLICTS_HEADER_WARNING));
+  localized_strings.SetString("headerVersion",
+      l10n_util::GetStringUTF16(IDS_CONFLICTS_HEADER_VERSION));
   localized_strings.SetString("headerHelpTip",
       l10n_util::GetStringUTF16(IDS_CONFLICTS_HEADER_HELP_TIP));
 
@@ -106,7 +108,7 @@ void ConflictsUIHTMLSource::StartDataRequest(const std::string& path,
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-// The handler for Javascript messages for the about:flags page.
+// The handler for JavaScript messages for the about:flags page.
 class ConflictsDOMHandler : public DOMMessageHandler,
                             public NotificationObserver {
  public:
@@ -140,11 +142,11 @@ void ConflictsDOMHandler::HandleRequestModuleList(const ListValue* args) {
   // This request is handled asynchronously. See Observe for when we reply back.
   registrar_.Add(this, NotificationType::MODULE_LIST_ENUMERATED,
                  NotificationService::AllSources());
-  EnumerateModulesModel::GetSingleton()->ScanNow();
+  EnumerateModulesModel::GetInstance()->ScanNow();
 }
 
 void ConflictsDOMHandler::SendModuleList() {
-  EnumerateModulesModel* loaded_modules = EnumerateModulesModel::GetSingleton();
+  EnumerateModulesModel* loaded_modules = EnumerateModulesModel::GetInstance();
   ListValue* list = loaded_modules->GetModuleList();
   DictionaryValue results;
   results.Set("moduleList", list);
@@ -192,6 +194,9 @@ void ConflictsDOMHandler::Observe(NotificationType type,
 ///////////////////////////////////////////////////////////////////////////////
 
 ConflictsUI::ConflictsUI(TabContents* contents) : DOMUI(contents) {
+  UserMetrics::RecordAction(
+      UserMetricsAction("ViewAboutConflicts"), contents->profile());
+
   AddMessageHandler((new ConflictsDOMHandler())->Attach(this));
 
   ConflictsUIHTMLSource* html_source = new ConflictsUIHTMLSource();
@@ -199,9 +204,9 @@ ConflictsUI::ConflictsUI(TabContents* contents) : DOMUI(contents) {
   // Set up the about:conflicts source.
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(Singleton<ChromeURLDataManager>::get(),
-          &ChromeURLDataManager::AddDataSource,
-          make_scoped_refptr(html_source)));
+      NewRunnableMethod(ChromeURLDataManager::GetInstance(),
+                        &ChromeURLDataManager::AddDataSource,
+                        make_scoped_refptr(html_source)));
 }
 
 // static

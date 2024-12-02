@@ -19,6 +19,10 @@
 #include "net/disk_cache/stats.h"
 #include "net/disk_cache/trace.h"
 
+namespace net {
+class NetLog;
+}  // namespace net
+
 namespace disk_cache {
 
 enum BackendFlags {
@@ -38,10 +42,11 @@ enum BackendFlags {
 class BackendImpl : public Backend {
   friend class Eviction;
  public:
-  BackendImpl(const FilePath& path, base::MessageLoopProxy* cache_thread);
+  BackendImpl(const FilePath& path, base::MessageLoopProxy* cache_thread,
+              net::NetLog* net_log);
   // mask can be used to limit the usable size of the hash table, for testing.
   BackendImpl(const FilePath& path, uint32 mask,
-              base::MessageLoopProxy* cache_thread);
+              base::MessageLoopProxy* cache_thread, net::NetLog* net_log);
   ~BackendImpl();
 
   // Returns a new backend with the desired flags. See the declaration of
@@ -49,28 +54,11 @@ class BackendImpl : public Backend {
   static int CreateBackend(const FilePath& full_path, bool force,
                            int max_bytes, net::CacheType type,
                            uint32 flags, base::MessageLoopProxy* thread,
-                           Backend** backend, CompletionCallback* callback);
+                           net::NetLog* net_log, Backend** backend,
+                           CompletionCallback* callback);
 
   // Performs general initialization for this current instance of the cache.
   int Init(CompletionCallback* callback);
-
-  // Backend interface.
-  virtual int32 GetEntryCount() const;
-  virtual int OpenEntry(const std::string& key, Entry** entry,
-                        CompletionCallback* callback);
-  virtual int CreateEntry(const std::string& key, Entry** entry,
-                          CompletionCallback* callback);
-  virtual int DoomEntry(const std::string& key, CompletionCallback* callback);
-  virtual int DoomAllEntries(CompletionCallback* callback);
-  virtual int DoomEntriesBetween(const base::Time initial_time,
-                                 const base::Time end_time,
-                                 CompletionCallback* callback);
-  virtual int DoomEntriesSince(const base::Time initial_time,
-                               CompletionCallback* callback);
-  virtual int OpenNextEntry(void** iter, Entry** next_entry,
-                            CompletionCallback* callback);
-  virtual void EndEnumeration(void** iter);
-  virtual void GetStats(StatsItems* stats);
 
   // Performs the actual initialization and final cleanup on destruction.
   int SyncInit();
@@ -252,9 +240,35 @@ class BackendImpl : public Backend {
   // Starts or stops throttling requests.
   void ThrottleRequestsForTest(bool throttle);
 
+  // Trims an entry (all if |empty| is true) from the list of deleted
+  // entries. This method should be called directly on the cache thread.
+  void TrimForTest(bool empty);
+
+  // Trims an entry (all if |empty| is true) from the list of deleted
+  // entries. This method should be called directly on the cache thread.
+  void TrimDeletedListForTest(bool empty);
+
   // Peforms a simple self-check, and returns the number of dirty items
   // or an error code (negative value).
   int SelfCheck();
+
+  // Backend interface.
+  virtual int32 GetEntryCount() const;
+  virtual int OpenEntry(const std::string& key, Entry** entry,
+                        CompletionCallback* callback);
+  virtual int CreateEntry(const std::string& key, Entry** entry,
+                          CompletionCallback* callback);
+  virtual int DoomEntry(const std::string& key, CompletionCallback* callback);
+  virtual int DoomAllEntries(CompletionCallback* callback);
+  virtual int DoomEntriesBetween(const base::Time initial_time,
+                                 const base::Time end_time,
+                                 CompletionCallback* callback);
+  virtual int DoomEntriesSince(const base::Time initial_time,
+                               CompletionCallback* callback);
+  virtual int OpenNextEntry(void** iter, Entry** next_entry,
+                            CompletionCallback* callback);
+  virtual void EndEnumeration(void** iter);
+  virtual void GetStats(StatsItems* stats);
 
  private:
   typedef base::hash_map<CacheAddr, EntryImpl*> EntriesMap;
@@ -265,7 +279,7 @@ class BackendImpl : public Backend {
   void AdjustMaxCacheSize(int table_len);
 
   // Deletes the cache and starts again.
-  void RestartCache();
+  void RestartCache(bool failure);
   void PrepareForRestart();
 
   // Creates a new entry object and checks to see if it is dirty. Returns zero
@@ -274,8 +288,13 @@ class BackendImpl : public Backend {
 
   // Returns a given entry from the cache. The entry to match is determined by
   // key and hash, and the returned entry may be the matched one or it's parent
-  // on the list of entries with the same hash (or bucket).
-  EntryImpl* MatchEntry(const std::string& key, uint32 hash, bool find_parent);
+  // on the list of entries with the same hash (or bucket). To look for a parent
+  // of a given entry, |entry_addr| should be grabbed from that entry, so that
+  // if it doesn't match the entry on the index, we know that it was replaced
+  // with a new entry; in this case |*match_error| will be set to true and the
+  // return value will be NULL.
+  EntryImpl* MatchEntry(const std::string& key, uint32 hash, bool find_parent,
+                        Addr entry_addr, bool* match_error);
 
   // Opens the next or previous entry on a cache iteration.
   EntryImpl* OpenFollowingEntry(bool forward, void** iter);
@@ -287,9 +306,8 @@ class BackendImpl : public Backend {
                                   CacheRankingsBlock** from_entry,
                                   EntryImpl** next_entry);
 
-  // Returns the entry that is pointed by |next|. If we are trimming the cache,
-  // |to_evict| should be true so that we don't perform extra disk writes.
-  EntryImpl* GetEnumeratedEntry(CacheRankingsBlock* next, bool to_evict);
+  // Returns the entry that is pointed by |next|.
+  EntryImpl* GetEnumeratedEntry(CacheRankingsBlock* next);
 
   // Re-opens an entry that was previously deleted.
   EntryImpl* ResurrectEntry(EntryImpl* deleted_entry);
@@ -356,6 +374,8 @@ class BackendImpl : public Backend {
   bool new_eviction_;  // What eviction algorithm should be used.
   bool first_timer_;  // True if the timer has not been called.
   bool throttle_requests_;
+
+  net::NetLog* net_log_;
 
   Stats stats_;  // Usage statistcs.
   base::RepeatingTimer<BackendImpl> timer_;  // Usage timer.

@@ -112,8 +112,13 @@ const struct {
     true,
     false,
     true, },
-  { "http://www.foo.com/always_prompt.pdf",
+  { "http://www.foo.com/sometimes_prompt.pdf",
     "application/pdf",
+    false,
+    true,
+    false, },
+  { "http://www.foo.com/always_prompt.jar",
+    "application/jar",
     false,
     true,
     true, },
@@ -152,30 +157,31 @@ const struct {
   bool will_delete_crdownload;
   int expected_rename_count;
 } kDownloadRenameCases[] = {
-  // Safe download, download finishes BEFORE rename.
-  // Needs to be renamed only once.  Crdownload file needs to be deleted.
+  // Safe download, download finishes BEFORE file name determined.
+  // Renamed twice (linear path through UI).  Crdownload file does not need
+  // to be deleted.
   { FILE_PATH_LITERAL("foo.zip"),
     false,
     true,
-    true,
-    1, },
-  // Dangerous download, download finishes BEFORE rename.
+    false,
+    2, },
+  // Dangerous download, download finishes BEFORE file name determined.
   // Needs to be renamed only once.
-  { FILE_PATH_LITERAL("unconfirmed xxx.crdownload"),
+  { FILE_PATH_LITERAL("Unconfirmed xxx.crdownload"),
     true,
     true,
     false,
     1, },
-  // Safe download, download finishes AFTER rename.
+  // Safe download, download finishes AFTER file name determined.
   // Needs to be renamed twice.
   { FILE_PATH_LITERAL("foo.zip"),
     false,
     false,
     false,
     2, },
-  // Dangerous download, download finishes AFTER rename.
+  // Dangerous download, download finishes AFTER file name determined.
   // Needs to be renamed only once.
-  { FILE_PATH_LITERAL("unconfirmed xxx.crdownload"),
+  { FILE_PATH_LITERAL("Unconfirmed xxx.crdownload"),
     true,
     false,
     false,
@@ -246,6 +252,8 @@ TEST_F(DownloadManagerTest, DownloadRenameTest) {
 
     if (kDownloadRenameCases[i].will_delete_crdownload)
       EXPECT_CALL(*download, DeleteCrDownload()).Times(1);
+
+    download_manager_->CreateDownloadItem(info);
 
     if (kDownloadRenameCases[i].finish_before_rename) {
       download_manager_->OnAllDataSaved(i, 1024);

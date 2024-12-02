@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,7 +38,6 @@ HRESULT WINAPI PrintDlgExMock(LPPRINTDLGEX lppd) {
   // Pretend the page range is 1-5, but since lppd->Flags does not have
   // PD_SELECTION set, this really shouldn't matter.
   lppd->nPageRanges = 1;
-  lppd->lpPageRanges = new PRINTPAGERANGE[1];
   lppd->lpPageRanges[0].nFromPage = 1;
   lppd->lpPageRanges[0].nToPage = 5;
 
@@ -103,14 +102,16 @@ HRESULT WINAPI PrintDlgExMock(LPPRINTDLGEX lppd) {
   return S_OK;
 }
 
-// crbug.com/61509
-TEST_F(PrintingContextTest, FLAKY_Base) {
-  printing::PrintSettings settings;
+TEST_F(PrintingContextTest, Base) {
+  // Sometimes ::GetDefaultPrinter() fails? bug 61509.
+  if (IsTestCaseDisabled())
+    return;
 
+  printing::PrintSettings settings;
   settings.set_device_name(GetDefaultPrinter());
   // Initialize it.
   scoped_ptr<printing::PrintingContext> context(
-      printing::PrintingContext::Create());
+      printing::PrintingContext::Create(std::string()));
   EXPECT_EQ(printing::PrintingContext::OK, context->InitWithSettings(settings));
 
   // The print may lie to use and may not support world transformation.
@@ -120,9 +121,13 @@ TEST_F(PrintingContextTest, FLAKY_Base) {
   EXPECT_TRUE(ModifyWorldTransform(context->context(), NULL, MWT_IDENTITY));
 }
 
-// http://crbug.com/61499
-TEST_F(PrintingContextTest, FLAKY_PrintAll) {
-  printing::PrintingContextWin context;
+TEST_F(PrintingContextTest, PrintAll) {
+  // Sometimes ::GetDefaultPrinter() fails? bug 61509.
+  if (IsTestCaseDisabled())
+    return;
+
+  std::string dummy_locale;
+  printing::PrintingContextWin context(dummy_locale);
   context.SetPrintDialog(&PrintDlgExMock);
   context.AskUserForSettings(
       NULL,

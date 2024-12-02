@@ -20,8 +20,8 @@
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "base/win_util.h"
 #include "base/win/registry.h"
+#include "base/win/win_util.h"
 #include "breakpad/src/client/windows/handler/exception_handler.h"
 #include "chrome/app/hard_error_handler_win.h"
 #include "chrome/common/child_process_logging.h"
@@ -92,7 +92,7 @@ std::wstring TrimToBreakpadMax(const std::wstring& str) {
 google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& dll_path,
                                                  const std::wstring& type) {
   scoped_ptr<FileVersionInfo>
-      version_info(FileVersionInfo::CreateFileVersionInfo(dll_path));
+      version_info(FileVersionInfo::CreateFileVersionInfo(FilePath(dll_path)));
 
   std::wstring version, product;
   if (version_info.get()) {
@@ -437,17 +437,18 @@ bool ShowRestartDialogIfCrashed(bool* exit_now) {
 // contains the value set by policy.
 static bool MetricsReportingControlledByPolicy(bool* result) {
   std::wstring key_name = UTF8ToWide(policy::key::kMetricsReportingEnabled);
-  DWORD value;
+  DWORD value = 0;
+  // TODO(joshia): why hkcu_policy_key opens HKEY_LOCAL_MACHINE?
   base::win::RegKey hkcu_policy_key(HKEY_LOCAL_MACHINE,
                                     policy::kRegistrySubKey, KEY_READ);
-  if (hkcu_policy_key.ReadValueDW(key_name.c_str(), &value)) {
+  if (hkcu_policy_key.ReadValueDW(key_name.c_str(), &value) == ERROR_SUCCESS) {
     *result = value != 0;
     return true;
   }
 
   base::win::RegKey hklm_policy_key(HKEY_CURRENT_USER,
                                     policy::kRegistrySubKey, KEY_READ);
-  if (hklm_policy_key.ReadValueDW(key_name.c_str(), &value)) {
+  if (hklm_policy_key.ReadValueDW(key_name.c_str(), &value) == ERROR_SUCCESS) {
     *result = value != 0;
     return true;
   }
@@ -508,7 +509,7 @@ static DWORD __stdcall InitCrashReporterThread(void* param) {
     // Per-user install: "NamedPipe\GoogleCrashServices\<user SID>"
     std::wstring user_sid;
     if (is_per_user_install) {
-      if (!win_util::GetUserSidString(&user_sid)) {
+      if (!base::win::GetUserSidString(&user_sid)) {
         if (callback)
           InitDefaultCrashCallback();
         return -1;

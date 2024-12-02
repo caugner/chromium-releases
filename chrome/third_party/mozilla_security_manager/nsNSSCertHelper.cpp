@@ -44,7 +44,6 @@
 #include <prprf.h>
 #include <unicode/uidna.h>
 
-#include "app/l10n_util.h"
 #include "base/i18n/number_formatting.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
@@ -53,6 +52,7 @@
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
 #include "net/third_party/mozilla_security_manager/nsNSSCertTrust.h"
+#include "ui/base/l10n/l10n_util.h"
 
 namespace {
 
@@ -774,7 +774,9 @@ std::string ProcessCrlDistPoints(SECItem* extension_data) {
     point = *points;
     switch (point->distPointType) {
       case generalName:
-        rv += ProcessGeneralName(arena.get(), point->distPoint.fullName);
+        // generalName is a typo in upstream NSS; fullName is actually a
+        // GeneralNames (SEQUENCE OF GeneralName). See Mozilla Bug #615100.
+        rv += ProcessGeneralNames(arena.get(), point->distPoint.fullName);
         break;
       case relativeDistinguishedName:
         rv += ProcessRDN(&point->distPoint.relativeName);

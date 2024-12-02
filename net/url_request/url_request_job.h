@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,20 +17,18 @@
 #include "net/base/filter.h"
 #include "net/base/load_states.h"
 
+
 namespace net {
+
 class AuthChallengeInfo;
 class HttpRequestHeaders;
 class HttpResponseInfo;
 class IOBuffer;
-class UploadData;
 class URLRequest;
-class X509Certificate;
-}  // namespace net
-
-class URLRequestStatus;
 class URLRequestJobMetrics;
-
-namespace net {
+class UploadData;
+class URLRequestStatus;
+class X509Certificate;
 
 class URLRequestJob : public base::RefCounted<URLRequestJob>,
                       public FilterContext {
@@ -65,9 +63,9 @@ class URLRequestJob : public base::RefCounted<URLRequestJob>,
 
   // This function MUST somehow call NotifyDone/NotifyCanceled or some requests
   // will get leaked. Certain callers use that message to know when they can
-  // delete their URLRequest object, even when doing a cancel. The default Kill
-  // implementation calls NotifyCanceled, so it is recommended that subclasses
-  // call URLRequestJob::Kill() after doing any additional work.
+  // delete their net::URLRequest object, even when doing a cancel. The default
+  // Kill implementation calls NotifyCanceled, so it is recommended that
+  // subclasses call URLRequestJob::Kill() after doing any additional work.
   //
   // The job should endeavor to stop working as soon as is convenient, but must
   // not send and complete notifications from inside this function. Instead,
@@ -90,12 +88,12 @@ class URLRequestJob : public base::RefCounted<URLRequestJob>,
 
   // Called to read post-filtered data from this Job, returning the number of
   // bytes read, 0 when there is no more data, or -1 if there was an error.
-  // This is just the backend for URLRequest::Read, see that function for more
-  // info.
+  // This is just the backend for net::URLRequest::Read, see that function for
+  // more info.
   bool Read(net::IOBuffer* buf, int buf_size, int* bytes_read);
 
   // Stops further caching of this request, if any. For more info, see
-  // URLRequest::StopCaching().
+  // net::URLRequest::StopCaching().
   virtual void StopCaching();
 
   // Called to fetch the current load state for the job.
@@ -131,13 +129,6 @@ class URLRequestJob : public base::RefCounted<URLRequestJob>,
   virtual bool GetContentEncodings(
       std::vector<Filter::FilterType>* encoding_types);
 
-  // Find out if this is a download.
-  virtual bool IsDownload() const;
-
-  // Find out if this is a response to a request that advertised an SDCH
-  // dictionary.  Only makes sense for some types of requests.
-  virtual bool IsSdchResponse() const;
-
   // Called to setup stream filter for this request. An example of filter is
   // content encoding/decoding.
   void SetupFilter();
@@ -157,8 +148,8 @@ class URLRequestJob : public base::RefCounted<URLRequestJob>,
 
   // Called to determine if it is okay to redirect this job to the specified
   // location.  This may be used to implement protocol-specific restrictions.
-  // If this function returns false, then the URLRequest will fail reporting
-  // net::ERR_UNSAFE_REDIRECT.
+  // If this function returns false, then the net::URLRequest will fail
+  // reporting net::ERR_UNSAFE_REDIRECT.
   virtual bool IsSafeRedirect(const GURL& location);
 
   // Called to determine if this response is asking for authentication.  Only
@@ -210,6 +201,8 @@ class URLRequestJob : public base::RefCounted<URLRequestJob>,
   virtual bool GetMimeType(std::string* mime_type) const;
   virtual bool GetURL(GURL* gurl) const;
   virtual base::Time GetRequestTime() const;
+  virtual bool IsDownload() const;
+  virtual bool IsSdchResponse() const;
   virtual bool IsCachedContent() const;
   virtual int64 GetByteReadCount() const;
   virtual int GetResponseCode() const;
@@ -227,21 +220,21 @@ class URLRequestJob : public base::RefCounted<URLRequestJob>,
   void NotifyReadComplete(int bytes_read);
 
   // Notifies the request that a start error has occurred.
-  void NotifyStartError(const URLRequestStatus& status);
+  void NotifyStartError(const net::URLRequestStatus& status);
 
   // NotifyDone marks when we are done with a request.  It is really
   // a glorified set_status, but also does internal state checking and
   // job tracking.  It should be called once per request, when the job is
   // finished doing all IO.
-  void NotifyDone(const URLRequestStatus& status);
+  void NotifyDone(const net::URLRequestStatus& status);
 
   // Some work performed by NotifyDone must be completed on a separate task
   // so as to avoid re-entering the delegate.  This method exists to perform
   // that work.
   void CompleteNotifyDone();
 
-  // Used as an asynchronous callback for Kill to notify the URLRequest that
-  // we were canceled.
+  // Used as an asynchronous callback for Kill to notify the net::URLRequest
+  // that we were canceled.
   void NotifyCanceled();
 
   // Notifies the job the request should be restarted.
@@ -256,7 +249,8 @@ class URLRequestJob : public base::RefCounted<URLRequestJob>,
   // If returning false, an error occurred or an async IO is now pending.
   // If async IO is pending, the status of the request will be
   // URLRequestStatus::IO_PENDING, and buf must remain available until the
-  // operation is completed.  See comments on URLRequest::Read for more info.
+  // operation is completed.  See comments on net::URLRequest::Read for more
+  // info.
   virtual bool ReadRawData(net::IOBuffer* buf, int buf_size, int *bytes_read);
 
   // Informs the filter that data has been read into its buffer
@@ -278,15 +272,15 @@ class URLRequestJob : public base::RefCounted<URLRequestJob>,
   // to get SDCH to emit stats.
   void DestroyFilters() { filter_.reset(); }
 
+  // The status of the job.
+  const net::URLRequestStatus GetStatus();
+
+  // Set the status of the job.
+  void SetStatus(const net::URLRequestStatus& status);
+
   // The request that initiated this job. This value MAY BE NULL if the
   // request was released by DetachRequest().
   net::URLRequest* request_;
-
-  // The status of the job.
-  const URLRequestStatus GetStatus();
-
-  // Set the status of the job.
-  void SetStatus(const URLRequestStatus& status);
 
   // Whether the job is doing performance profiling
   bool is_profiling_;
@@ -298,9 +292,10 @@ class URLRequestJob : public base::RefCounted<URLRequestJob>,
   int prefilter_bytes_read_;
   // The number of bytes read after passing through the filter.
   int postfilter_bytes_read_;
-  // True when (we believe) the content in this URLRequest was compressible.
+  // True when (we believe) the content in this net::URLRequest was
+  // compressible.
   bool is_compressible_content_;
-  // True when the content in this URLRequest was compressed.
+  // True when the content in this net::URLRequest was compressed.
   bool is_compressed_;
 
  private:
@@ -423,7 +418,5 @@ class URLRequestJob : public base::RefCounted<URLRequestJob>,
 };
 
 }  // namespace net
-
-typedef net::URLRequestJob URLRequestJob;
 
 #endif  // NET_URL_REQUEST_URL_REQUEST_JOB_H_

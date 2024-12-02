@@ -1,7 +1,6 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
 
 //------------------------------------------------------------------------------
 // Description of the life cycle of a instance of MetricsService.
@@ -54,12 +53,12 @@
 #endif
 
 #include "base/file_version_info.h"
-#include "base/lock.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "base/thread.h"
+#include "base/synchronization/lock.h"
 #include "base/string_number_conversions.h"
+#include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/net/url_fetcher.h"
@@ -74,6 +73,7 @@
 #include "chrome_frame/http_negotiate.h"
 #include "chrome_frame/utils.h"
 #include "net/base/capturing_net_log.h"
+#include "net/base/cert_verifier.h"
 #include "net/base/host_resolver.h"
 #include "net/base/ssl_config_service_defaults.h"
 #include "net/base/upload_data.h"
@@ -97,7 +97,7 @@ static const int kMinMilliSecondsPerUMAUpload = 600000;
 base::LazyInstance<MetricsService>
     g_metrics_instance_(base::LINKER_INITIALIZED);
 
-Lock MetricsService::metrics_service_lock_;
+base::Lock MetricsService::metrics_service_lock_;
 
 // Traits to create an instance of the ChromeFrame upload thread.
 struct UploadThreadInstanceTraits
@@ -106,7 +106,7 @@ struct UploadThreadInstanceTraits
     // Use placement new to initialize our instance in our preallocated space.
     // The parenthesis is very important here to force POD type initialization.
     base::Thread* upload_thread =
-        new (instance) base::Thread("ChromeFrameUploadThread");
+        new(instance) base::Thread("ChromeFrameUploadThread");
     base::Thread::Options options;
     options.message_loop_type = MessageLoop::TYPE_IO;
     bool ret = upload_thread->StartWithOptions(options);
@@ -122,17 +122,18 @@ struct UploadThreadInstanceTraits
 // started on. We don't have a good way of achieving this at this point. This
 // thread object is currently leaked.
 // TODO(ananta)
-// Fix this.
+// TODO(vitalybuka@chromium.org) : Fix this by using MetricsService::Stop() in
+// appropriate location.
 base::LazyInstance<base::Thread, UploadThreadInstanceTraits>
     g_metrics_upload_thread_(base::LINKER_INITIALIZED);
 
-Lock g_metrics_service_lock;
+base::Lock g_metrics_service_lock;
 
 extern base::LazyInstance<base::StatisticsRecorder> g_statistics_recorder_;
 
 // This class provides HTTP request context information for metrics upload
 // requests initiated by ChromeFrame.
-class ChromeFrameUploadRequestContext : public URLRequestContext {
+class ChromeFrameUploadRequestContext : public net::URLRequestContext {
  public:
   explicit ChromeFrameUploadRequestContext(MessageLoop* io_loop)
       : io_loop_(io_loop) {
@@ -143,6 +144,8 @@ class ChromeFrameUploadRequestContext : public URLRequestContext {
     DVLOG(1) << __FUNCTION__;
     delete http_transaction_factory_;
     delete http_auth_handler_factory_;
+    delete cert_verifier_;
+    delete host_resolver_;
   }
 
   void Initialize() {
@@ -153,6 +156,7 @@ class ChromeFrameUploadRequestContext : public URLRequestContext {
     host_resolver_ =
         net::CreateSystemHostResolver(net::HostResolver::kDefaultParallelism,
                                       NULL, NULL);
+    cert_verifier_ = new net::CertVerifier;
     net::ProxyConfigService* proxy_config_service =
         net::ProxyService::CreateSystemProxyConfigService(NULL, NULL);
     DCHECK(proxy_config_service);
@@ -176,6 +180,7 @@ class ChromeFrameUploadRequestContext : public URLRequestContext {
 
     http_transaction_factory_ = new net::HttpCache(
         net::HttpNetworkLayer::CreateFactory(host_resolver_,
+                                             cert_verifier_,
                                              NULL /* dnsrr_resovler */,
                                              NULL /* dns_cert_checker*/,
                                              NULL /* ssl_host_info */,
@@ -184,6 +189,7 @@ class ChromeFrameUploadRequestContext : public URLRequestContext {
                                              http_auth_handler_factory_,
                                              network_delegate_,
                                              NULL),
+        NULL /* net_log */,
         net::HttpCache::DefaultBackend::InMemory(0));
   }
 
@@ -204,7 +210,7 @@ class ChromeFrameUploadRequestContextGetter : public URLRequestContextGetter {
   explicit ChromeFrameUploadRequestContextGetter(MessageLoop* io_loop)
       : io_loop_(io_loop) {}
 
-  virtual URLRequestContext* GetURLRequestContext() {
+  virtual net::URLRequestContext* GetURLRequestContext() {
     if (!context_)
       context_ = new ChromeFrameUploadRequestContext(io_loop_);
     return context_;
@@ -222,7 +228,7 @@ class ChromeFrameUploadRequestContextGetter : public URLRequestContextGetter {
     DVLOG(1) << __FUNCTION__;
   }
 
-  scoped_refptr<URLRequestContext> context_;
+  scoped_refptr<net::URLRequestContext> context_;
   mutable scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy_;
   MessageLoop* io_loop_;
 };
@@ -245,12 +251,12 @@ class ChromeFrameMetricsDataUploader
   ChromeFrameMetricsDataUploader()
       : fetcher_(NULL) {
     DVLOG(1) << __FUNCTION__;
-    creator_thread_id_ = PlatformThread::CurrentId();
+    creator_thread_id_ = base::PlatformThread::CurrentId();
   }
 
   ~ChromeFrameMetricsDataUploader() {
     DVLOG(1) << __FUNCTION__;
-    DCHECK(creator_thread_id_ == PlatformThread::CurrentId());
+    DCHECK(creator_thread_id_ == base::PlatformThread::CurrentId());
   }
 
   virtual void OnFinalMessage(HWND wnd) {
@@ -327,7 +333,7 @@ class ChromeFrameMetricsDataUploader
   // URLFetcher::Delegate
   virtual void OnURLFetchComplete(const URLFetcher* source,
                                   const GURL& url,
-                                  const URLRequestStatus& status,
+                                  const net::URLRequestStatus& status,
                                   int response_code,
                                   const ResponseCookies& cookies,
                                   const std::string& data) {
@@ -344,11 +350,11 @@ class ChromeFrameMetricsDataUploader
 
  private:
   URLFetcher* fetcher_;
-  PlatformThreadId creator_thread_id_;
+  base::PlatformThreadId creator_thread_id_;
 };
 
 MetricsService* MetricsService::GetInstance() {
-  AutoLock lock(g_metrics_service_lock);
+  base::AutoLock lock(g_metrics_service_lock);
   return &g_metrics_instance_.Get();
 }
 
@@ -377,7 +383,7 @@ MetricsService::~MetricsService() {
 void MetricsService::InitializeMetricsState() {
   DCHECK(state_ == INITIALIZED);
 
-  thread_ = PlatformThread::CurrentId();
+  thread_ = base::PlatformThread::CurrentId();
 
   user_permits_upload_ = GoogleUpdateSettings::GetCollectStatsConsent();
   // Update session ID
@@ -397,7 +403,7 @@ void MetricsService::InitializeMetricsState() {
 
 // static
 void MetricsService::Start() {
-  AutoLock lock(metrics_service_lock_);
+  base::AutoLock lock(metrics_service_lock_);
 
   if (GetInstance()->state_ == ACTIVE)
     return;
@@ -409,10 +415,15 @@ void MetricsService::Start() {
 
 // static
 void MetricsService::Stop() {
-  AutoLock lock(metrics_service_lock_);
+  {
+    base::AutoLock lock(metrics_service_lock_);
 
-  GetInstance()->SetReporting(false);
-  GetInstance()->SetRecording(false);
+    GetInstance()->SetReporting(false);
+    GetInstance()->SetRecording(false);
+  }
+
+  if (GetInstance()->user_permits_upload_)
+    g_metrics_upload_thread_.Get().Stop();
 }
 
 void MetricsService::SetRecording(bool enabled) {
@@ -469,7 +480,7 @@ void CALLBACK MetricsService::TransmissionTimerProc(HWND window,
 void MetricsService::SetReporting(bool enable) {
   static const int kChromeFrameMetricsTimerId = 0xFFFFFFFF;
 
-  DCHECK_EQ(thread_, PlatformThread::CurrentId());
+  DCHECK_EQ(thread_, base::PlatformThread::CurrentId());
   if (reporting_active_ != enable) {
     reporting_active_ = enable;
     if (reporting_active_) {
@@ -487,7 +498,7 @@ void MetricsService::SetReporting(bool enable) {
 // Recording control methods
 
 void MetricsService::StartRecording() {
-  DCHECK_EQ(thread_, PlatformThread::CurrentId());
+  DCHECK_EQ(thread_, base::PlatformThread::CurrentId());
   if (current_log_)
     return;
 
@@ -498,7 +509,7 @@ void MetricsService::StartRecording() {
 }
 
 void MetricsService::StopRecording(bool save_log) {
-  DCHECK_EQ(thread_, PlatformThread::CurrentId());
+  DCHECK_EQ(thread_, base::PlatformThread::CurrentId());
   if (!current_log_)
     return;
 
@@ -516,7 +527,7 @@ void MetricsService::StopRecording(bool save_log) {
 }
 
 void MetricsService::MakePendingLog() {
-  DCHECK_EQ(thread_, PlatformThread::CurrentId());
+  DCHECK_EQ(thread_, base::PlatformThread::CurrentId());
   if (pending_log())
     return;
 
@@ -545,7 +556,7 @@ bool MetricsService::TransmissionPermitted() const {
 }
 
 std::string MetricsService::PrepareLogSubmissionString() {
-  DCHECK_EQ(thread_, PlatformThread::CurrentId());
+  DCHECK_EQ(thread_, base::PlatformThread::CurrentId());
 
   MakePendingLog();
   DCHECK(pending_log());
@@ -561,7 +572,7 @@ std::string MetricsService::PrepareLogSubmissionString() {
 }
 
 bool MetricsService::UploadData() {
-  DCHECK_EQ(thread_, PlatformThread::CurrentId());
+  DCHECK_EQ(thread_, base::PlatformThread::CurrentId());
 
   if (!GetInstance()->TransmissionPermitted())
     return false;

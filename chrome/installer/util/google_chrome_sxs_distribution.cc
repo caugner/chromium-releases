@@ -6,6 +6,9 @@
 
 #include "chrome/installer/util/google_chrome_sxs_distribution.h"
 
+#include "base/command_line.h"
+#include "base/logging.h"
+
 #include "installer_util_strings.h"
 
 namespace {
@@ -17,13 +20,15 @@ const int kSxSIconIndex = 4;
 
 }  // namespace
 
-GoogleChromeSxSDistribution::GoogleChromeSxSDistribution() {
+GoogleChromeSxSDistribution::GoogleChromeSxSDistribution(
+    const installer::MasterPreferences& prefs)
+        : GoogleChromeDistribution(prefs) {
   GoogleChromeDistribution::set_product_guid(kChromeSxSGuid);
 }
 
 std::wstring GoogleChromeSxSDistribution::GetAppShortCutName() {
   const std::wstring& shortcut_name =
-      installer_util::GetLocalizedString(IDS_SXS_SHORTCUT_NAME_BASE);
+      installer::GetLocalizedString(IDS_SXS_SHORTCUT_NAME_BASE);
   return shortcut_name;
 }
 
@@ -33,16 +38,12 @@ std::wstring GoogleChromeSxSDistribution::GetBrowserAppId() {
 
 std::wstring GoogleChromeSxSDistribution::GetInstallSubDir() {
   return GoogleChromeDistribution::GetInstallSubDir().append(
-      installer_util::kSxSSuffix);
+      installer::kSxSSuffix);
 }
 
 std::wstring GoogleChromeSxSDistribution::GetUninstallRegPath() {
   return GoogleChromeDistribution::GetUninstallRegPath().append(
-      installer_util::kSxSSuffix);
-}
-
-std::wstring GoogleChromeSxSDistribution::GetEnvVersionKey() {
-  return L"CHROME_SXS_VERSION";
+      installer::kSxSSuffix);
 }
 
 bool GoogleChromeSxSDistribution::CanSetAsDefault() {
@@ -60,4 +61,10 @@ bool GoogleChromeSxSDistribution::GetChromeChannel(std::wstring* channel) {
 
 std::wstring GoogleChromeSxSDistribution::ChannelName() {
   return kChannelName;
+}
+
+void GoogleChromeSxSDistribution::AppendUninstallCommandLineFlags(
+    CommandLine* cmd_line) {
+  DCHECK(cmd_line);
+  cmd_line->AppendSwitch(installer::switches::kChromeSxS);
 }

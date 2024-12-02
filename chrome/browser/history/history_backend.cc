@@ -4,7 +4,10 @@
 
 #include "chrome/browser/history/history_backend.h"
 
+#include <list>
+#include <map>
 #include <set>
+#include <vector>
 
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
@@ -24,7 +27,6 @@
 #include "chrome/browser/history/page_usage_data.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_type.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
@@ -581,7 +583,7 @@ void HistoryBackend::InitImpl(const std::string& languages) {
 
   // Thumbnail database.
   thumbnail_db_.reset(new ThumbnailDatabase());
-  if (history::TopSites::IsEnabled() && !db_->GetNeedsThumbnailMigration()) {
+  if (!db_->GetNeedsThumbnailMigration()) {
     // No convertion needed - use new filename right away.
     thumbnail_name = GetFaviconsFileName();
   }
@@ -596,7 +598,7 @@ void HistoryBackend::InitImpl(const std::string& languages) {
     thumbnail_db_.reset();
   }
 
-  if (history::TopSites::IsEnabled() && db_->GetNeedsThumbnailMigration()) {
+  if (db_->GetNeedsThumbnailMigration()) {
     VLOG(1) << "Starting TopSites migration";
     delegate_->StartTopSitesMigration();
   }
@@ -868,6 +870,23 @@ void HistoryBackend::SetPageTitle(const GURL& url,
   // Only bother committing if things changed.
   if (!changed_urls.empty())
     ScheduleCommit();
+}
+
+void HistoryBackend::AddPageNoVisitForBookmark(const GURL& url) {
+  if (!db_.get())
+    return;
+
+  URLRow url_info(url);
+  URLID url_id = db_->GetRowForURL(url, &url_info);
+  if (url_id) {
+    // URL is already known, nothing to do.
+    return;
+  }
+  url_info.set_last_visit(Time::Now());
+  // Mark the page hidden. If the user types it in, it'll unhide.
+  url_info.set_hidden(true);
+
+  db_->AddURL(url_info);
 }
 
 void HistoryBackend::IterateURLs(HistoryService::URLEnumerator* iterator) {

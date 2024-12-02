@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Records IO statistics associated with a URLRequestJob.
+// Records IO statistics associated with a net::URLRequestJob.
 // See description in navigation_profiler.h for an overview of perf profiling.
 
 #ifndef NET_URL_REQUEST_URL_REQUEST_JOB_METRICS_H_
@@ -16,10 +16,15 @@
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
 
+namespace net {
+
 class URLRequestJobMetrics {
  public:
   URLRequestJobMetrics();
   ~URLRequestJobMetrics();
+
+  // Append the text report of the frame loading to the input string.
+  void AppendText(std::wstring* text);
 
   // The original url the job has been created for.
   scoped_ptr<GURL> original_url_;
@@ -42,9 +47,8 @@ class URLRequestJobMetrics {
 
   // Final status of the job.
   bool success_;
-
-  // Append the text report of the frame loading to the input string.
-  void AppendText(std::wstring* text);
 };
+
+}  // namespace net
 
 #endif  // NET_URL_REQUEST_URL_REQUEST_JOB_METRICS_H_

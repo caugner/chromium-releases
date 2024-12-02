@@ -7,7 +7,9 @@
 #include <map>
 
 #include "base/logging.h"
+#include "ppapi/c/dev/ppb_var_deprecated.h"
 #include "ppapi/proxy/host_var_serialization_rules.h"
+#include "ppapi/proxy/ppapi_messages.h"
 
 namespace pp {
 namespace proxy {
@@ -19,14 +21,26 @@ InstanceToDispatcherMap* g_instance_to_dispatcher = NULL;
 
 }  // namespace
 
-HostDispatcher::HostDispatcher(const PPB_Var_Deprecated* var_interface,
+HostDispatcher::HostDispatcher(base::ProcessHandle remote_process_handle,
                                PP_Module module,
                                GetInterfaceFunc local_get_interface)
-    : Dispatcher(local_get_interface) {
+    : Dispatcher(remote_process_handle, local_get_interface) {
+  set_pp_module(module);
+  const PPB_Var_Deprecated* var_interface =
+      static_cast<const PPB_Var_Deprecated*>(
+          local_get_interface(PPB_VAR_DEPRECATED_INTERFACE));
   SetSerializationRules(new HostVarSerializationRules(var_interface, module));
 }
 
 HostDispatcher::~HostDispatcher() {
+  // Notify the plugin that it should exit.
+  Send(new PpapiMsg_Shutdown());
+}
+
+bool HostDispatcher::InitializeModule() {
+  bool init_result = false;
+  Send(new PpapiMsg_InitializeModule(pp_module(), &init_result));
+  return init_result;
 }
 
 // static
@@ -56,6 +70,10 @@ void HostDispatcher::RemoveForInstance(PP_Instance instance) {
       instance);
   if (found != g_instance_to_dispatcher->end())
     g_instance_to_dispatcher->erase(found);
+}
+
+bool HostDispatcher::IsPlugin() const {
+  return false;
 }
 
 }  // namespace proxy

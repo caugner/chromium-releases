@@ -4,8 +4,6 @@
 
 #include "chrome/browser/chromeos/dom_ui/keyboard_overlay_ui.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/callback.h"
 #include "base/values.h"
 #include "base/weak_ptr.h"
@@ -16,9 +14,11 @@
 #include "chrome/browser/dom_ui/chrome_url_data_manager.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
-#include "cros/chromeos_input_method.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
+#include "third_party/cros/chromeos_input_method.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 
 class KeyboardOverlayUIHTMLSource : public ChromeURLDataManager::DataSource {
@@ -269,12 +269,12 @@ void KeyboardOverlayHandler::RegisterMessages() {
 }
 
 void KeyboardOverlayHandler::GetKeyboardOverlayId(const ListValue* args) {
-  const chromeos::InputMethodLibrary* library =
+  chromeos::InputMethodLibrary* library =
       chromeos::CrosLibrary::Get()->GetInputMethodLibrary();
   const chromeos::InputMethodDescriptor& descriptor =
       library->current_input_method();
   const std::string keyboard_overlay_id =
-      chromeos::input_method::GetKeyboardOverlayId(descriptor.id);
+      library->GetKeyboardOverlayId(descriptor.id);
   StringValue param(keyboard_overlay_id);
   dom_ui_->CallJavascriptFunction(L"initKeyboardOverlayId", param);
 }
@@ -295,7 +295,7 @@ KeyboardOverlayUI::KeyboardOverlayUI(TabContents* contents)
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
           make_scoped_refptr(html_source)));
 }

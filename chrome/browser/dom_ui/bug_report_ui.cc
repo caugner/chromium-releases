@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,6 @@
 #include <string>
 #include <vector>
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/callback.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
@@ -26,29 +24,34 @@
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
 #include "gfx/rect.h"
-#include "views/window/window.h"
-
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 #if defined(USE_X11)
-#include "app/x11_util.h"
+#include "ui/base/x/x11_util.h"
 #elif defined(OS_MACOSX)
-#include "base/mac_util.h"
+#include "base/mac/mac_util.h"
 #elif defined(OS_WIN)
-#include "app/win_util.h"
+#include "app/win/win_util.h"
+#endif
+
+#if defined(TOOLKIT_VIEWS)
+#include "views/window/window.h"
 #endif
 
 #if defined(OS_CHROMEOS)
 #include "base/file_util.h"
 #include "base/path_service.h"
-#include "base/waitable_event.h"
+#include "base/synchronization/waitable_event.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/syslogs_library.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -139,55 +142,16 @@ namespace browser {
 std::vector<unsigned char>* last_screenshot_png = 0;
 gfx::Rect screen_size;
 
-// Get bounds in different ways for different OS's;
-#if defined(TOOLKIT_VIEWS)
-// Windows/ChromeOS support Views - so we get dimensions from the
-// views::Window object
-void RefreshLastScreenshot(views::Window* parent) {
-  gfx::NativeWindow window = parent->GetNativeWindow();
-  int width = parent->GetBounds().width();
-  int height = parent->GetBounds().height();
-#elif defined(OS_LINUX)
-// Linux provides its bounds and a native window handle to the screen
-void RefreshLastScreenshot(gfx::NativeWindow window,
-                           const gfx::Rect& bounds) {
-  int width = bounds.width();
-  int height = bounds.height();
-#elif defined(OS_MACOSX)
-// Mac gets its bounds from the GrabWindowSnapshot function
-void RefreshLastScreenshot(NSWindow* window) {
-  int width = 0;
-  int height = 0;
-#endif
-
-  // Grab an exact snapshot of the window that the user is seeing (i.e. as
-  // rendered--do not re-render, and include windowed plugins).
+void RefreshLastScreenshot(Browser* browser) {
   if (last_screenshot_png)
     last_screenshot_png->clear();
   else
     last_screenshot_png = new std::vector<unsigned char>;
 
-#if defined(USE_X11)
-  x11_util::GrabWindowSnapshot(window, last_screenshot_png);
-#elif defined(OS_MACOSX)
-  mac_util::GrabWindowSnapshot(window, last_screenshot_png, &width, &height);
-#elif defined(OS_WIN)
-  win_util::GrabWindowSnapshot(window, last_screenshot_png);
-#endif
-
-  screen_size.set_width(width);
-  screen_size.set_height(height);
+  screen_size = browser->window()->GrabWindowSnapshot(last_screenshot_png);
 }
 
-#if defined(TOOLKIT_VIEWS)
-void ShowHtmlBugReportView(views::Window* parent, Browser* browser) {
-#elif defined(OS_LINUX)
-void ShowHtmlBugReportView(gfx::NativeWindow window, const gfx::Rect& bounds,
-                           Browser* browser) {
-#elif defined(OS_MACOSX)
-void ShowHtmlBugReportView(NSWindow* window, Browser* browser) {
-#endif
-
+void ShowHtmlBugReportView(Browser* browser) {
   // First check if we're already open (we cannot depend on ShowSingletonTab
   // for this functionality since we need to make *sure* we never get
   // instantiated again while we are open - with singleton tabs, that can
@@ -199,15 +163,7 @@ void ShowHtmlBugReportView(NSWindow* window, Browser* browser) {
     return;
   }
 
-  // now for refreshing the last screenshot
-#if defined(TOOLKIT_VIEWS)
-  RefreshLastScreenshot(parent);
-#elif defined(OS_LINUX)
-  RefreshLastScreenshot(window, bounds);
-#elif defined(OS_MACOSX)
-  RefreshLastScreenshot(window);
-#endif
-
+  RefreshLastScreenshot(browser);
   std::string bug_report_url = std::string(chrome::kChromeUIBugReportURL) +
       "#" + base::IntToString(browser->selected_index());
   browser->ShowSingletonTab(GURL(bug_report_url), false);
@@ -270,7 +226,6 @@ class BugReportHandler : public DOMMessageHandler,
   DOMUIScreenshotSource* screenshot_source_;
 
   BugReportData* bug_report_;
-  string16 target_tab_title_;
   std::string target_tab_url_;
 #if defined(OS_CHROMEOS)
   // Variables to track SyslogsLibrary::RequestSyslogs callback.
@@ -449,7 +404,6 @@ void BugReportData::SendReport() {
   char* image_data = image_data_size ?
       reinterpret_cast<char*>(&(image_.front())) : NULL;
   BugReportUtil::SendReport(profile_
-                            , UTF16ToUTF8(target_tab_title_)
                             , problem_type_
                             , page_url_
                             , description_
@@ -513,7 +467,7 @@ void BugReportHandler::ClobberScreenshotsSource() {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
           make_scoped_refptr(new DOMUIScreenshotSource(NULL))));
 
@@ -532,7 +486,7 @@ void BugReportHandler::SetupScreenshotsSource() {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
           make_scoped_refptr(screenshot_source_)));
 }
@@ -571,8 +525,7 @@ base::StringPiece BugReportHandler::Init() {
 
   TabContents* target_tab = browser->GetTabContentsAt(index);
   if (target_tab) {
-    target_tab_title_ = target_tab->GetTitle();
-    target_tab_url_ = target_tab->controller().GetActiveEntry()->url().spec();
+    target_tab_url_ = target_tab->GetURL().spec();
   }
 
   // Setup the screenshot source after we've verified input is legit.
@@ -651,6 +604,11 @@ void BugReportHandler::HandleRefreshSavedScreenshots(const ListValue*) {
 
 
 void BugReportHandler::HandleSendReport(const ListValue* list_value) {
+  if (!bug_report_) {
+    LOG(ERROR) << "Bug report hasn't been intialized yet.";
+    return;
+  }
+
   ListValue::const_iterator i = list_value->begin();
   if (i == list_value->end()) {
     LOG(ERROR) << "Incorrect data passed to sendReport.";
@@ -724,7 +682,6 @@ void BugReportHandler::HandleSendReport(const ListValue* list_value) {
   // Update the data in bug_report_ so it can be sent
   bug_report_->UpdateData(dom_ui_->GetProfile()
                           , target_tab_url_
-                          , target_tab_title_
                           , problem_type
                           , page_url
                           , description
@@ -805,7 +762,7 @@ BugReportUI::BugReportUI(TabContents* tab) : HtmlDialogUI(tab) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(
-          Singleton<ChromeURLDataManager>::get(),
+          ChromeURLDataManager::GetInstance(),
           &ChromeURLDataManager::AddDataSource,
           make_scoped_refptr(html_source)));
 }

@@ -16,12 +16,12 @@
 #include "chrome/browser/instant/promo_counter.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
@@ -139,6 +139,15 @@ void InstantController::Disable(Profile* profile) {
   }
 
   service->SetBoolean(prefs::kInstantEnabled, false);
+}
+
+// static
+bool InstantController::CommitIfCurrent(InstantController* controller) {
+  if (controller && controller->IsCurrent()) {
+    controller->CommitCurrentPreview(INSTANT_COMMIT_PRESSED_ENTER);
+    return true;
+  }
+  return false;
 }
 
 void InstantController::Update(TabContentsWrapper* tab_contents,
@@ -610,8 +619,10 @@ bool InstantController::GetType(Profile* profile, Type* type) {
     *type = VERBATIM_TYPE;
     return true;
   }
-
-  // There is no switch for PREDICTIVE_NO_AUTO_COMPLETE_TYPE.
+  if (cl->HasSwitch(switches::kEnablePredictiveNoAutoCompleteInstant)) {
+    *type = PREDICTIVE_NO_AUTO_COMPLETE_TYPE;
+    return true;
+  }
 
   // Then prefs.
   PrefService* prefs = profile->GetPrefs();

@@ -1,10 +1,9 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <stdio.h>
 
-#include "app/keyboard_codes.h"
 #include "base/message_loop.h"
 #include "base/string16.h"
 #include "base/string_util.h"
@@ -19,23 +18,28 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/history/history.h"
-#include "chrome/browser/location_bar.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
 #include "net/base/mock_host_resolver.h"
+#include "ui/base/keycodes/keyboard_codes.h"
 #include "views/event.h"
 
 #if defined(OS_LINUX)
 #include <gdk/gdk.h>
 #include <gtk/gtk.h>
+#endif
+
+#if defined(TOOLKIT_VIEWS)
+#include "views/controls/textfield/native_textfield_views.h"
 #endif
 
 using base::Time;
@@ -45,24 +49,29 @@ namespace {
 
 const char kSearchKeyword[] = "foo";
 const wchar_t kSearchKeywordKeys[] = {
-  app::VKEY_F, app::VKEY_O, app::VKEY_O, 0
+  ui::VKEY_F, ui::VKEY_O, ui::VKEY_O, 0
 };
 const char kSearchURL[] = "http://www.foo.com/search?q={searchTerms}";
 const char kSearchShortName[] = "foo";
 const char kSearchText[] = "abc";
 const wchar_t kSearchTextKeys[] = {
-  app::VKEY_A, app::VKEY_B, app::VKEY_C, 0
+  ui::VKEY_A, ui::VKEY_B, ui::VKEY_C, 0
 };
 const char kSearchTextURL[] = "http://www.foo.com/search?q=abc";
 const char kSearchSingleChar[] = "z";
-const wchar_t kSearchSingleCharKeys[] = { app::VKEY_Z, 0 };
+const wchar_t kSearchSingleCharKeys[] = { ui::VKEY_Z, 0 };
 const char kSearchSingleCharURL[] = "http://www.foo.com/search?q=z";
 
 const char kHistoryPageURL[] = "chrome://history/#q=abc";
 
 const char kDesiredTLDHostname[] = "www.bar.com";
 const wchar_t kDesiredTLDKeys[] = {
-  app::VKEY_B, app::VKEY_A, app::VKEY_R, 0
+  ui::VKEY_B, ui::VKEY_A, ui::VKEY_R, 0
+};
+
+const char kInlineAutocompleteText[] = "def";
+const wchar_t kInlineAutocompleteTextKeys[] = {
+  ui::VKEY_D, ui::VKEY_E, ui::VKEY_F, 0
 };
 
 // Hostnames that shall be blocked by host resolver.
@@ -73,6 +82,8 @@ const char *kBlockedHostnames[] = {
   "*.bar.com",
   "abc",
   "*.abc.com",
+  "def",
+  "*.def.com",
   "history",
   "z"
 };
@@ -96,7 +107,7 @@ const struct TestHistoryEntry {
   {"http://www.bar.com/9", "Page 9", kSearchText, 1, 1, false },
 
   // To trigger inline autocomplete.
-  {"http://www.abc.com", "Page abc", kSearchText, 10000, 10000, true },
+  {"http://www.def.com", "Page def", kSearchText, 10000, 10000, true },
 };
 
 #if defined(OS_LINUX)
@@ -110,6 +121,14 @@ std::string GetPrimarySelectionText() {
   g_free(selection_text);
   return result;
 }
+
+// Stores the given text to clipboard.
+void SetClipboardText(const char* text) {
+  GtkClipboard* clipboard = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+  DCHECK(clipboard);
+
+  gtk_clipboard_set_text(clipboard, text, -1);
+}
 #endif
 
 }  // namespace
@@ -119,6 +138,18 @@ class AutocompleteEditViewTest : public InProcessBrowserTest,
  protected:
   AutocompleteEditViewTest() {
     set_show_window(true);
+  }
+
+  virtual void SetUpOnMainThread() {
+    ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
+    ASSERT_NO_FATAL_FAILURE(SetupComponents());
+    browser()->FocusLocationBar();
+#if defined(TOOLKIT_VIEWS)
+    if (views::NativeTextfieldViews::IsTextfieldViewsEnabled())
+      return;
+#endif
+    ASSERT_TRUE(ui_test_utils::IsViewFocused(browser(),
+                                             VIEW_ID_LOCATION_BAR));
   }
 
   static void GetAutocompleteEditViewForBrowser(
@@ -137,7 +168,7 @@ class AutocompleteEditViewTest : public InProcessBrowserTest,
   }
 
   static void SendKeyForBrowser(const Browser* browser,
-                                app::KeyboardCode key,
+                                ui::KeyboardCode key,
                                 bool control,
                                 bool shift,
                                 bool alt) {
@@ -145,13 +176,13 @@ class AutocompleteEditViewTest : public InProcessBrowserTest,
         browser, key, control, shift, alt, false /* command */));
   }
 
-  void SendKey(app::KeyboardCode key, bool control, bool shift, bool alt) {
+  void SendKey(ui::KeyboardCode key, bool control, bool shift, bool alt) {
     SendKeyForBrowser(browser(), key, control, shift, alt);
   }
 
   void SendKeySequence(const wchar_t* keys) {
     for (; *keys; ++keys)
-      ASSERT_NO_FATAL_FAILURE(SendKey(static_cast<app::KeyboardCode>(*keys),
+      ASSERT_NO_FATAL_FAILURE(SendKey(static_cast<ui::KeyboardCode>(*keys),
                                       false, false, false));
   }
 
@@ -216,14 +247,14 @@ class AutocompleteEditViewTest : public InProcessBrowserTest,
 
     TemplateURL* template_url = new TemplateURL();
     template_url->SetURL(kSearchURL, 0, 0);
-    template_url->set_keyword(UTF8ToWide(kSearchKeyword));
-    template_url->set_short_name(UTF8ToWide(kSearchShortName));
+    template_url->set_keyword(UTF8ToUTF16(kSearchKeyword));
+    template_url->set_short_name(UTF8ToUTF16(kSearchShortName));
 
     model->Add(template_url);
     model->SetDefaultSearchProvider(template_url);
   }
 
-  void SetupHistory() {
+  void AddHistoryEntry(const TestHistoryEntry& entry, const Time& time) {
     Profile* profile = browser()->profile();
     HistoryService* history_service =
         profile->GetHistoryService(Profile::EXPLICIT_ACCESS);
@@ -246,22 +277,26 @@ class AutocompleteEditViewTest : public InProcessBrowserTest,
       ui_test_utils::RunMessageLoop();
     }
 
-    // Add enough history pages containing |kSearchText| to trigger open history
-    // page url in autocomplete result.
+    GURL url(entry.url);
+    // Add everything in order of time. We don't want to have a time that
+    // is "right now" or it will nondeterministically appear in the results.
+    history_service->AddPageWithDetails(url, UTF8ToUTF16(entry.title),
+                                        entry.visit_count,
+                                        entry.typed_count, time, false,
+                                        history::SOURCE_BROWSED);
+    history_service->SetPageContents(url, UTF8ToUTF16(entry.body));
+    if (entry.starred)
+      bookmark_model->SetURLStarred(url, string16(), true);
+  }
+
+  void SetupHistory() {
+    // Add enough history pages containing |kSearchText| to trigger
+    // open history page url in autocomplete result.
     for (size_t i = 0; i < arraysize(kHistoryEntries); i++) {
-      const TestHistoryEntry& cur = kHistoryEntries[i];
-      GURL url(cur.url);
       // Add everything in order of time. We don't want to have a time that
       // is "right now" or it will nondeterministically appear in the results.
       Time t = Time::Now() - TimeDelta::FromHours(i + 1);
-      history_service->AddPageWithDetails(url, UTF8ToUTF16(cur.title),
-                                          cur.visit_count,
-                                          cur.typed_count, t, false,
-                                          history::SOURCE_BROWSED);
-      history_service->SetPageContents(url, UTF8ToUTF16(cur.body));
-      if (cur.starred) {
-        bookmark_model->SetURLStarred(url, string16(), true);
-      }
+      ASSERT_NO_FATAL_FAILURE(AddHistoryEntry(kHistoryEntries[i], t));
     }
   }
 
@@ -292,460 +327,579 @@ class AutocompleteEditViewTest : public InProcessBrowserTest,
     }
     MessageLoopForUI::current()->Quit();
   }
+
+  void BrowserAcceleratorsTest() {
+    AutocompleteEditView* edit_view = NULL;
+    ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
+
+    int tab_count = browser()->tab_count();
+
+    // Create a new Tab.
+    browser()->NewTab();
+    ASSERT_NO_FATAL_FAILURE(WaitForTabOpenOrClose(tab_count + 1));
+
+    // Select the first Tab.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_1, true, false, false));
+    ASSERT_EQ(0, browser()->selected_index());
+
+    browser()->FocusLocationBar();
+
+    // Select the second Tab.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_2, true, false, false));
+    ASSERT_EQ(1, browser()->selected_index());
+
+    browser()->FocusLocationBar();
+
+    // Try ctrl-w to close a Tab.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_W, true, false, false));
+    ASSERT_NO_FATAL_FAILURE(WaitForTabOpenOrClose(tab_count));
+
+    // Try ctrl-l to focus location bar.
+    edit_view->SetUserText(L"Hello world");
+    EXPECT_FALSE(edit_view->IsSelectAll());
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_L, true, false, false));
+    EXPECT_TRUE(edit_view->IsSelectAll());
+
+    // Try editing the location bar text.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_RIGHT, false, false, false));
+    EXPECT_FALSE(edit_view->IsSelectAll());
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_S, false, false, false));
+    EXPECT_EQ(L"Hello worlds", edit_view->GetText());
+
+    // Try ctrl-x to cut text.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_LEFT, true, true, false));
+    EXPECT_FALSE(edit_view->IsSelectAll());
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_X, true, false, false));
+    EXPECT_EQ(L"Hello ", edit_view->GetText());
+
+#if !defined(OS_CHROMEOS)
+    // Try alt-f4 to close the browser.
+    ASSERT_TRUE(ui_test_utils::SendKeyPressAndWait(
+        browser(), ui::VKEY_F4, false, false, true, false,
+        NotificationType::BROWSER_CLOSED, Source<Browser>(browser())));
+#endif
+  }
+
+  void PopupAcceleratorsTest() {
+    // Create a popup.
+    Browser* popup = CreateBrowserForPopup(browser()->profile());
+    AutocompleteEditView* edit_view = NULL;
+    ASSERT_NO_FATAL_FAILURE(
+        GetAutocompleteEditViewForBrowser(popup, &edit_view));
+    popup->FocusLocationBar();
+    EXPECT_TRUE(edit_view->IsSelectAll());
+
+    // Try ctrl-w to close the popup.
+    ASSERT_TRUE(ui_test_utils::SendKeyPressAndWait(
+        popup, ui::VKEY_W, true, false, false, false,
+        NotificationType::BROWSER_CLOSED, Source<Browser>(popup)));
+
+    // Create another popup.
+    popup = CreateBrowserForPopup(browser()->profile());
+    ASSERT_NO_FATAL_FAILURE(
+        GetAutocompleteEditViewForBrowser(popup, &edit_view));
+
+    // Set the edit text to "Hello world".
+    edit_view->SetUserText(L"Hello world");
+    EXPECT_FALSE(edit_view->IsSelectAll());
+    popup->FocusLocationBar();
+    EXPECT_TRUE(edit_view->IsSelectAll());
+
+    // Try editing the location bar text -- should be disallowed.
+    ASSERT_NO_FATAL_FAILURE(SendKeyForBrowser(popup, ui::VKEY_RIGHT, false,
+                                              false, false));
+    EXPECT_FALSE(edit_view->IsSelectAll());
+    ASSERT_NO_FATAL_FAILURE(SendKeyForBrowser(popup, ui::VKEY_S, false, false,
+                                              false));
+    EXPECT_EQ(L"Hello world", edit_view->GetText());
+
+    // Try ctrl-x to cut text -- should be disallowed.
+    ASSERT_NO_FATAL_FAILURE(SendKeyForBrowser(popup, ui::VKEY_LEFT, true, true,
+                                              false));
+    EXPECT_FALSE(edit_view->IsSelectAll());
+    ASSERT_NO_FATAL_FAILURE(SendKeyForBrowser(popup, ui::VKEY_X, true, false,
+                                              false));
+    EXPECT_EQ(L"Hello world", edit_view->GetText());
+
+#if !defined(OS_CHROMEOS)
+    // Try alt-f4 to close the popup.
+    ASSERT_TRUE(ui_test_utils::SendKeyPressAndWait(
+        popup, ui::VKEY_F4, false, false, true, false,
+        NotificationType::BROWSER_CLOSED, Source<Browser>(popup)));
+#endif
+  }
+
+  void BackspaceInKeywordModeTest() {
+    AutocompleteEditView* edit_view = NULL;
+    ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
+
+    // Trigger keyword hint mode.
+    ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchKeywordKeys));
+    ASSERT_TRUE(edit_view->model()->is_keyword_hint());
+    ASSERT_EQ(kSearchKeyword, WideToUTF8(edit_view->model()->keyword()));
+
+    // Trigger keyword mode.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_TAB, false, false, false));
+    ASSERT_FALSE(edit_view->model()->is_keyword_hint());
+    ASSERT_EQ(kSearchKeyword, WideToUTF8(edit_view->model()->keyword()));
+
+    // Backspace without search text should bring back keyword hint mode.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_BACK, false, false, false));
+    ASSERT_TRUE(edit_view->model()->is_keyword_hint());
+    ASSERT_EQ(kSearchKeyword, WideToUTF8(edit_view->model()->keyword()));
+
+    // Trigger keyword mode again.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_TAB, false, false, false));
+    ASSERT_FALSE(edit_view->model()->is_keyword_hint());
+    ASSERT_EQ(kSearchKeyword, WideToUTF8(edit_view->model()->keyword()));
+
+    // Input something as search text.
+    ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchTextKeys));
+
+    // Should stay in keyword mode while deleting search text by pressing
+    // backspace.
+    for (size_t i = 0; i < arraysize(kSearchText) - 1; ++i) {
+      ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_BACK, false, false, false));
+      ASSERT_FALSE(edit_view->model()->is_keyword_hint());
+      ASSERT_EQ(kSearchKeyword, WideToUTF8(edit_view->model()->keyword()));
+    }
+
+    // Input something as search text.
+    ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchTextKeys));
+
+    // Move cursor to the beginning of the search text.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_HOME, false, false, false));
+    // Backspace at the beginning of the search text shall turn off
+    // the keyword mode.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_BACK, false, false, false));
+    ASSERT_FALSE(edit_view->model()->is_keyword_hint());
+    ASSERT_EQ(std::string(), WideToUTF8(edit_view->model()->keyword()));
+    ASSERT_EQ(std::string(kSearchKeyword) + kSearchText,
+              WideToUTF8(edit_view->GetText()));
+  }
+
+  void EscapeTest() {
+    ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIHistoryURL));
+    browser()->FocusLocationBar();
+
+    AutocompleteEditView* edit_view = NULL;
+    ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
+
+    std::wstring old_text = edit_view->GetText();
+    EXPECT_FALSE(old_text.empty());
+    EXPECT_TRUE(edit_view->IsSelectAll());
+
+    // Delete all text in omnibox.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_BACK, false, false, false));
+    EXPECT_TRUE(edit_view->GetText().empty());
+
+    // Escape shall revert the text in omnibox.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_ESCAPE, false, false, false));
+    EXPECT_EQ(old_text, edit_view->GetText());
+    EXPECT_TRUE(edit_view->IsSelectAll());
+  }
+
+  void DesiredTLDTest() {
+    AutocompleteEditView* edit_view = NULL;
+    ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
+    AutocompletePopupModel* popup_model = edit_view->model()->popup_model();
+    ASSERT_TRUE(popup_model);
+
+    // Test ctrl-Enter.
+    ASSERT_NO_FATAL_FAILURE(SendKeySequence(kDesiredTLDKeys));
+    ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
+    ASSERT_TRUE(popup_model->IsOpen());
+    // ctrl-Enter triggers desired_tld feature, thus www.bar.com shall be opened.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_RETURN, true, false, false));
+
+    GURL url = browser()->GetSelectedTabContents()->GetURL();
+    EXPECT_STREQ(kDesiredTLDHostname, url.host().c_str());
+  }
+
+  void AltEnterTest() {
+    AutocompleteEditView* edit_view = NULL;
+    ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
+
+    edit_view->SetUserText(ASCIIToWide(chrome::kChromeUIHistoryURL));
+    int tab_count = browser()->tab_count();
+    // alt-Enter opens a new tab.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_RETURN, false, false, true));
+    ASSERT_NO_FATAL_FAILURE(WaitForTabOpenOrClose(tab_count + 1));
+  }
+
+  void EnterToSearchTest() {
+    AutocompleteEditView* edit_view = NULL;
+    ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
+    AutocompletePopupModel* popup_model = edit_view->model()->popup_model();
+    ASSERT_TRUE(popup_model);
+
+    // Test Enter to search.
+    ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchTextKeys));
+    ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
+    ASSERT_TRUE(popup_model->IsOpen());
+
+    // Check if the default match result is Search Primary Provider.
+    ASSERT_EQ(AutocompleteMatch::SEARCH_WHAT_YOU_TYPED,
+              popup_model->result().default_match()->type);
+
+    // Open the default match.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_RETURN, false, false, false));
+    GURL url = browser()->GetSelectedTabContents()->GetURL();
+    EXPECT_STREQ(kSearchTextURL, url.spec().c_str());
+
+    // Test that entering a single character then Enter performs a search.
+    browser()->FocusLocationBar();
+    EXPECT_TRUE(edit_view->IsSelectAll());
+    ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchSingleCharKeys));
+    ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
+    ASSERT_TRUE(popup_model->IsOpen());
+    EXPECT_EQ(kSearchSingleChar, WideToUTF8(edit_view->GetText()));
+
+    // Check if the default match result is Search Primary Provider.
+    ASSERT_EQ(AutocompleteMatch::SEARCH_WHAT_YOU_TYPED,
+              popup_model->result().default_match()->type);
+
+    // Open the default match.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_RETURN, false, false, false));
+    url = browser()->GetSelectedTabContents()->GetURL();
+    EXPECT_STREQ(kSearchSingleCharURL, url.spec().c_str());
+  }
+
+  void EscapeToDefaultMatchTest() {
+    AutocompleteEditView* edit_view = NULL;
+    ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
+    AutocompletePopupModel* popup_model = edit_view->model()->popup_model();
+    ASSERT_TRUE(popup_model);
+
+    // Input something to trigger inline autocomplete.
+    ASSERT_NO_FATAL_FAILURE(SendKeySequence(kInlineAutocompleteTextKeys));
+    ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
+    ASSERT_TRUE(popup_model->IsOpen());
+
+    std::wstring old_text = edit_view->GetText();
+
+    // Make sure inline autocomplete is triggerred.
+    EXPECT_GT(old_text.length(), arraysize(kInlineAutocompleteText) - 1);
+
+    size_t old_selected_line = popup_model->selected_line();
+    EXPECT_EQ(0U, old_selected_line);
+
+    // Move to another line with different text.
+    size_t size = popup_model->result().size();
+    while (popup_model->selected_line() < size - 1) {
+      ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_DOWN, false, false, false));
+      ASSERT_NE(old_selected_line, popup_model->selected_line());
+      if (old_text != edit_view->GetText())
+        break;
+    }
+
+    EXPECT_NE(old_text, edit_view->GetText());
+
+    // Escape shall revert back to the default match item.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_ESCAPE, false, false, false));
+    EXPECT_EQ(old_text, edit_view->GetText());
+    EXPECT_EQ(old_selected_line, popup_model->selected_line());
+  }
+
+  void BasicTextOperationsTest() {
+    ui_test_utils::NavigateToURL(browser(), GURL(chrome::kAboutBlankURL));
+    browser()->FocusLocationBar();
+
+    AutocompleteEditView* edit_view = NULL;
+    ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
+
+    std::wstring old_text = edit_view->GetText();
+    EXPECT_EQ(UTF8ToWide(chrome::kAboutBlankURL), old_text);
+    EXPECT_TRUE(edit_view->IsSelectAll());
+
+    std::wstring::size_type start, end;
+    edit_view->GetSelectionBounds(&start, &end);
+    EXPECT_EQ(0U, start);
+    EXPECT_EQ(old_text.size(), end);
+
+    // Move the cursor to the end.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_END, false, false, false));
+    EXPECT_FALSE(edit_view->IsSelectAll());
+
+    // Make sure the cursor is placed correctly.
+    edit_view->GetSelectionBounds(&start, &end);
+    EXPECT_EQ(old_text.size(), start);
+    EXPECT_EQ(old_text.size(), end);
+
+    // Insert one character at the end. Make sure we won't insert
+    // anything after the special ZWS mark used in gtk implementation.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_A, false, false, false));
+    EXPECT_EQ(old_text + L"a", edit_view->GetText());
+
+    // Delete one character from the end. Make sure we won't delete the special
+    // ZWS mark used in gtk implementation.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_BACK, false, false, false));
+    EXPECT_EQ(old_text, edit_view->GetText());
+
+    edit_view->SelectAll(true);
+    EXPECT_TRUE(edit_view->IsSelectAll());
+    edit_view->GetSelectionBounds(&start, &end);
+    EXPECT_EQ(0U, start);
+    EXPECT_EQ(old_text.size(), end);
+
+    // Delete the content
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_DELETE, false, false, false));
+    EXPECT_TRUE(edit_view->IsSelectAll());
+    edit_view->GetSelectionBounds(&start, &end);
+    EXPECT_EQ(0U, start);
+    EXPECT_EQ(0U, end);
+    EXPECT_TRUE(edit_view->GetText().empty());
+
+    // Check if RevertAll() can set text and cursor correctly.
+    edit_view->RevertAll();
+    EXPECT_FALSE(edit_view->IsSelectAll());
+    EXPECT_EQ(old_text, edit_view->GetText());
+    edit_view->GetSelectionBounds(&start, &end);
+    EXPECT_EQ(old_text.size(), start);
+    EXPECT_EQ(old_text.size(), end);
+  }
+
+  void AcceptKeywordBySpaceTest() {
+    AutocompleteEditView* edit_view = NULL;
+    ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
+
+    std::wstring text = UTF8ToWide(kSearchKeyword);
+
+    // Trigger keyword hint mode.
+    ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchKeywordKeys));
+    ASSERT_TRUE(edit_view->model()->is_keyword_hint());
+    ASSERT_EQ(text, edit_view->model()->keyword());
+    ASSERT_EQ(text, edit_view->GetText());
+
+    // Trigger keyword mode by space.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_SPACE, false, false, false));
+    ASSERT_FALSE(edit_view->model()->is_keyword_hint());
+    ASSERT_EQ(text, edit_view->model()->keyword());
+    ASSERT_TRUE(edit_view->GetText().empty());
+
+    // Revert to keyword hint mode.
+    edit_view->model()->ClearKeyword(std::wstring());
+    ASSERT_TRUE(edit_view->model()->is_keyword_hint());
+    ASSERT_EQ(text, edit_view->model()->keyword());
+    ASSERT_EQ(text, edit_view->GetText());
+
+    // Keyword should also be accepted by typing an ideographic space.
+    edit_view->OnBeforePossibleChange();
+    edit_view->SetWindowTextAndCaretPos(text + L"\x3000", text.length() + 1);
+    edit_view->OnAfterPossibleChange();
+    ASSERT_FALSE(edit_view->model()->is_keyword_hint());
+    ASSERT_EQ(text, edit_view->model()->keyword());
+    ASSERT_TRUE(edit_view->GetText().empty());
+
+    // Revert to keyword hint mode.
+    edit_view->model()->ClearKeyword(std::wstring());
+    ASSERT_TRUE(edit_view->model()->is_keyword_hint());
+    ASSERT_EQ(text, edit_view->model()->keyword());
+    ASSERT_EQ(text, edit_view->GetText());
+
+    // Keyword shouldn't be accepted by pasting.
+    // Simulate pasting a whitespace to the end of content.
+    edit_view->OnBeforePossibleChange();
+    edit_view->model()->on_paste();
+    edit_view->SetWindowTextAndCaretPos(text + L" ", text.length() + 1);
+    edit_view->OnAfterPossibleChange();
+    // Should be still in keyword hint mode.
+    ASSERT_TRUE(edit_view->model()->is_keyword_hint());
+    ASSERT_EQ(text, edit_view->model()->keyword());
+    ASSERT_EQ(text + L" ", edit_view->GetText());
+
+    // Keyword shouldn't be accepted by pressing space with a trailing
+    // whitespace.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_SPACE, false, false, false));
+    ASSERT_TRUE(edit_view->model()->is_keyword_hint());
+    ASSERT_EQ(text, edit_view->model()->keyword());
+    ASSERT_EQ(text + L"  ", edit_view->GetText());
+
+    // Keyword shouldn't be accepted by deleting the trailing space.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_BACK, false, false, false));
+    ASSERT_TRUE(edit_view->model()->is_keyword_hint());
+    ASSERT_EQ(text, edit_view->model()->keyword());
+    ASSERT_EQ(text + L" ", edit_view->GetText());
+
+    // Keyword shouldn't be accepted by pressing space in the middle
+    // of content.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_LEFT, false, false, false));
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_SPACE, false, false, false));
+    ASSERT_TRUE(edit_view->model()->is_keyword_hint());
+    ASSERT_EQ(text, edit_view->model()->keyword());
+    ASSERT_EQ(text + L"  ", edit_view->GetText());
+
+    // Keyword shouldn't be accepted by pasting "foo bar".
+    edit_view->SetUserText(std::wstring());
+    ASSERT_FALSE(edit_view->model()->is_keyword_hint());
+    ASSERT_TRUE(edit_view->model()->keyword().empty());
+
+    edit_view->OnBeforePossibleChange();
+    edit_view->model()->on_paste();
+    edit_view->SetWindowTextAndCaretPos(text + L" bar", text.length() + 4);
+    edit_view->OnAfterPossibleChange();
+    ASSERT_FALSE(edit_view->model()->is_keyword_hint());
+    ASSERT_TRUE(edit_view->model()->keyword().empty());
+    ASSERT_EQ(text + L" bar", edit_view->GetText());
+
+    // Keyword could be accepted by pressing space with a selected range at the
+    // end of text.
+    edit_view->OnBeforePossibleChange();
+    edit_view->OnInlineAutocompleteTextMaybeChanged(
+        text + L"  ", text.length());
+    edit_view->OnAfterPossibleChange();
+    ASSERT_TRUE(edit_view->model()->is_keyword_hint());
+    ASSERT_EQ(text, edit_view->model()->keyword());
+    ASSERT_EQ(text + L"  ", edit_view->GetText());
+
+    std::wstring::size_type start, end;
+    edit_view->GetSelectionBounds(&start, &end);
+    ASSERT_NE(start, end);
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_SPACE, false, false, false));
+    ASSERT_FALSE(edit_view->model()->is_keyword_hint());
+    ASSERT_EQ(text, edit_view->model()->keyword());
+    ASSERT_EQ(std::wstring(), edit_view->GetText());
+
+    edit_view->SetUserText(std::wstring());
+
+    // Space should accept keyword even when inline autocomplete is available.
+    const TestHistoryEntry kHistoryFoobar = {
+      "http://www.foobar.com", "Page foobar", kSearchText, 10000, 10000, true
+    };
+
+    // Add a history entry to trigger inline autocomplete when typing "foo".
+    ASSERT_NO_FATAL_FAILURE(
+        AddHistoryEntry(kHistoryFoobar, Time::Now() - TimeDelta::FromHours(1)));
+
+    // Type "foo" to trigger inline autocomplete.
+    ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchKeywordKeys));
+    ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
+    ASSERT_TRUE(edit_view->model()->popup_model()->IsOpen());
+    ASSERT_NE(text, edit_view->GetText());
+
+    // Keyword hint shouldn't be visible.
+    ASSERT_FALSE(edit_view->model()->is_keyword_hint());
+    ASSERT_TRUE(edit_view->model()->keyword().empty());
+
+    // Trigger keyword mode by space.
+    ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_SPACE, false, false, false));
+    ASSERT_FALSE(edit_view->model()->is_keyword_hint());
+    ASSERT_EQ(text, edit_view->model()->keyword());
+    ASSERT_TRUE(edit_view->GetText().empty());
+  }
+
+  void NonSubstitutingKeywordTest() {
+    AutocompleteEditView* edit_view = NULL;
+    ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
+    AutocompletePopupModel* popup_model = edit_view->model()->popup_model();
+    ASSERT_TRUE(popup_model);
+
+    TemplateURLModel* template_url_model =
+        browser()->profile()->GetTemplateURLModel();
+
+    // Add a non-default substituting keyword.
+    TemplateURL* template_url = new TemplateURL();
+    template_url->SetURL("http://abc.com/{searchTerms}", 0, 0);
+    template_url->set_keyword(UTF8ToUTF16(kSearchText));
+    template_url->set_short_name(UTF8ToUTF16("Search abc"));
+    template_url_model->Add(template_url);
+
+    edit_view->SetUserText(std::wstring());
+
+    // Non-default substituting keyword shouldn't be matched by default.
+    ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchTextKeys));
+    ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
+    ASSERT_TRUE(popup_model->IsOpen());
+
+    // Check if the default match result is Search Primary Provider.
+    ASSERT_EQ(AutocompleteMatch::SEARCH_WHAT_YOU_TYPED,
+              popup_model->result().default_match()->type);
+    ASSERT_EQ(kSearchTextURL,
+              popup_model->result().default_match()->destination_url.spec());
+
+    edit_view->SetUserText(std::wstring());
+    ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
+    ASSERT_FALSE(popup_model->IsOpen());
+
+    // Try a non-substituting keyword.
+    template_url_model->Remove(template_url);
+    template_url = new TemplateURL();
+    template_url->SetURL("http://abc.com/", 0, 0);
+    template_url->set_keyword(UTF8ToUTF16(kSearchText));
+    template_url->set_short_name(UTF8ToUTF16("abc"));
+    template_url_model->Add(template_url);
+
+    // We always allow exact matches for non-substituting keywords.
+    ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchTextKeys));
+    ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
+    ASSERT_TRUE(popup_model->IsOpen());
+    ASSERT_EQ(AutocompleteMatch::HISTORY_KEYWORD,
+              popup_model->result().default_match()->type);
+    ASSERT_EQ("http://abc.com/",
+              popup_model->result().default_match()->destination_url.spec());
+  }
 };
 
 // Test if ctrl-* accelerators are workable in omnibox.
 // See http://crbug.com/19193: omnibox blocks ctrl-* commands
-// Sometimes times out on Windows: http://crbug.com/57965
-#if defined(OS_WIN)
-#define MAYBE_BrowserAccelerators DISABLED_BrowserAccelerators
-#else
-#define MAYBE_BrowserAccelerators BrowserAccelerators
-#endif
-IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_BrowserAccelerators) {
-  browser()->FocusLocationBar();
-  AutocompleteEditView* edit_view = NULL;
-  ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
-
-  int tab_count = browser()->tab_count();
-
-  // Create a new Tab.
-  browser()->NewTab();
-  ASSERT_NO_FATAL_FAILURE(WaitForTabOpenOrClose(tab_count + 1));
-
-  // Select the first Tab.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_1, true, false, false));
-  ASSERT_EQ(0, browser()->selected_index());
-
-  browser()->FocusLocationBar();
-
-  // Select the second Tab.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_2, true, false, false));
-  ASSERT_EQ(1, browser()->selected_index());
-
-  browser()->FocusLocationBar();
-
-  // Try ctrl-w to close a Tab.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_W, true, false, false));
-  ASSERT_NO_FATAL_FAILURE(WaitForTabOpenOrClose(tab_count));
-
-  // Try ctrl-l to focus location bar.
-  edit_view->SetUserText(L"Hello world");
-  EXPECT_FALSE(edit_view->IsSelectAll());
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_L, true, false, false));
-  EXPECT_TRUE(edit_view->IsSelectAll());
-
-  // Try editing the location bar text.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_RIGHT, false, false, false));
-  EXPECT_FALSE(edit_view->IsSelectAll());
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_S, false, false, false));
-  EXPECT_EQ(L"Hello worlds", edit_view->GetText());
-
-  // Try ctrl-x to cut text.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_LEFT, true, true, false));
-  EXPECT_FALSE(edit_view->IsSelectAll());
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_X, true, false, false));
-  EXPECT_EQ(L"Hello ", edit_view->GetText());
-
-#if !defined(OS_CHROMEOS)
-  // Try alt-f4 to close the browser.
-  ASSERT_TRUE(ui_test_utils::SendKeyPressAndWait(
-      browser(), app::VKEY_F4, false, false, true, false,
-      NotificationType::BROWSER_CLOSED, Source<Browser>(browser())));
-#endif
+//
+// Flaky on interactive tests (dbg), http://crbug.com/69433
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, FLAKY_BrowserAccelerators) {
+  BrowserAcceleratorsTest();
 }
 
-// Sometimes times out on Windows: http://crbug.com/57965
+// Flakily fails and times out on Win only.  http://crbug.com/69941
 #if defined(OS_WIN)
 #define MAYBE_PopupAccelerators DISABLED_PopupAccelerators
 #else
 #define MAYBE_PopupAccelerators PopupAccelerators
 #endif
+
 IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_PopupAccelerators) {
-  // Create a popup.
-  Browser* popup = CreateBrowserForPopup(browser()->profile());
-  AutocompleteEditView* edit_view = NULL;
-  ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditViewForBrowser(popup, &edit_view));
-  popup->FocusLocationBar();
-  EXPECT_TRUE(edit_view->IsSelectAll());
-
-  // Try ctrl-w to close the popup.
-  ASSERT_TRUE(ui_test_utils::SendKeyPressAndWait(
-      popup, app::VKEY_W, true, false, false, false,
-      NotificationType::BROWSER_CLOSED, Source<Browser>(popup)));
-
-  // Create another popup.
-  popup = CreateBrowserForPopup(browser()->profile());
-  ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditViewForBrowser(popup, &edit_view));
-
-  // Set the edit text to "Hello world".
-  edit_view->SetUserText(L"Hello world");
-  EXPECT_FALSE(edit_view->IsSelectAll());
-  popup->FocusLocationBar();
-  EXPECT_TRUE(edit_view->IsSelectAll());
-
-  // Try editing the location bar text -- should be disallowed.
-  ASSERT_NO_FATAL_FAILURE(SendKeyForBrowser(popup, app::VKEY_RIGHT, false,
-                                            false, false));
-  EXPECT_FALSE(edit_view->IsSelectAll());
-  ASSERT_NO_FATAL_FAILURE(SendKeyForBrowser(popup, app::VKEY_S, false, false,
-                                            false));
-  EXPECT_EQ(L"Hello world", edit_view->GetText());
-
-  // Try ctrl-x to cut text -- should be disallowed.
-  ASSERT_NO_FATAL_FAILURE(SendKeyForBrowser(popup, app::VKEY_LEFT, true, true,
-                                            false));
-  EXPECT_FALSE(edit_view->IsSelectAll());
-  ASSERT_NO_FATAL_FAILURE(SendKeyForBrowser(popup, app::VKEY_X, true, false,
-                                            false));
-  EXPECT_EQ(L"Hello world", edit_view->GetText());
-
-#if !defined(OS_CHROMEOS)
-  // Try alt-f4 to close the popup.
-  ASSERT_TRUE(ui_test_utils::SendKeyPressAndWait(
-      popup, app::VKEY_F4, false, false, true, false,
-      NotificationType::BROWSER_CLOSED, Source<Browser>(popup)));
-#endif
+  PopupAcceleratorsTest();
 }
 
-// Sometimes times out on Windows: http://crbug.com/57965
-#if defined(OS_WIN)
-#define MAYBE_BackspaceInKeywordMode DISABLED_BackspaceInKeywordMode
-#else
-#define MAYBE_BackspaceInKeywordMode BackspaceInKeywordMode
-#endif
-IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_BackspaceInKeywordMode) {
-  ASSERT_NO_FATAL_FAILURE(SetupComponents());
-  browser()->FocusLocationBar();
-
-  AutocompleteEditView* edit_view = NULL;
-  ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
-
-  // Trigger keyword hint mode.
-  ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchKeywordKeys));
-  ASSERT_TRUE(edit_view->model()->is_keyword_hint());
-  ASSERT_EQ(kSearchKeyword, WideToUTF8(edit_view->model()->keyword()));
-
-  // Trigger keyword mode.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_TAB, false, false, false));
-  ASSERT_FALSE(edit_view->model()->is_keyword_hint());
-  ASSERT_EQ(kSearchKeyword, WideToUTF8(edit_view->model()->keyword()));
-
-  // Backspace without search text should bring back keyword hint mode.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_BACK, false, false, false));
-  ASSERT_TRUE(edit_view->model()->is_keyword_hint());
-  ASSERT_EQ(kSearchKeyword, WideToUTF8(edit_view->model()->keyword()));
-
-  // Trigger keyword mode again.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_TAB, false, false, false));
-  ASSERT_FALSE(edit_view->model()->is_keyword_hint());
-  ASSERT_EQ(kSearchKeyword, WideToUTF8(edit_view->model()->keyword()));
-
-  // Input something as search text.
-  ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchTextKeys));
-
-  // Should stay in keyword mode while deleting search text by pressing
-  // backspace.
-  for (size_t i = 0; i < arraysize(kSearchText) - 1; ++i) {
-    ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_BACK, false, false, false));
-    ASSERT_FALSE(edit_view->model()->is_keyword_hint());
-    ASSERT_EQ(kSearchKeyword, WideToUTF8(edit_view->model()->keyword()));
-  }
-
-  // Input something as search text.
-  ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchTextKeys));
-
-  // Move cursor to the beginning of the search text.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_HOME, false, false, false));
-  // Backspace at the beginning of the search text shall turn off
-  // the keyword mode.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_BACK, false, false, false));
-  ASSERT_FALSE(edit_view->model()->is_keyword_hint());
-  ASSERT_EQ(std::string(), WideToUTF8(edit_view->model()->keyword()));
-  ASSERT_EQ(std::string(kSearchKeyword) + kSearchText,
-            WideToUTF8(edit_view->GetText()));
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, BackspaceInKeywordMode) {
+  BackspaceInKeywordModeTest();
 }
 
-// Sometimes times out on Windows: http://crbug.com/57965
-#if defined(OS_WIN)
-#define MAYBE_Escape DISABLED_Escape
-#else
-#define MAYBE_Escape Escape
-#endif
-IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_Escape) {
-  ASSERT_NO_FATAL_FAILURE(SetupComponents());
-  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIHistoryURL));
-  browser()->FocusLocationBar();
-
-  AutocompleteEditView* edit_view = NULL;
-  ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
-
-  std::wstring old_text = edit_view->GetText();
-  EXPECT_FALSE(old_text.empty());
-  EXPECT_TRUE(edit_view->IsSelectAll());
-
-  // Delete all text in omnibox.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_BACK, false, false, false));
-  EXPECT_TRUE(edit_view->GetText().empty());
-
-  // Escape shall revert the text in omnibox.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_ESCAPE, false, false, false));
-  EXPECT_EQ(old_text, edit_view->GetText());
-  EXPECT_TRUE(edit_view->IsSelectAll());
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, Escape) {
+  EscapeTest();
 }
 
-// Sometimes times out on Windows: http://crbug.com/57965
-#if defined(OS_WIN)
-#define MAYBE_DesiredTLD DISABLED_DesiredTLD
-#else
-#define MAYBE_DesiredTLD DesiredTLD
-#endif
-IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_DesiredTLD) {
-  ASSERT_NO_FATAL_FAILURE(SetupComponents());
-  browser()->FocusLocationBar();
-
-  AutocompleteEditView* edit_view = NULL;
-  ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
-  AutocompletePopupModel* popup_model = edit_view->model()->popup_model();
-  ASSERT_TRUE(popup_model);
-
-  // Test ctrl-Enter.
-  ASSERT_NO_FATAL_FAILURE(SendKeySequence(kDesiredTLDKeys));
-  ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
-  ASSERT_TRUE(popup_model->IsOpen());
-  // ctrl-Enter triggers desired_tld feature, thus www.bar.com shall be opened.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_RETURN, true, false, false));
-
-  GURL url = browser()->GetSelectedTabContents()->GetURL();
-  EXPECT_STREQ(kDesiredTLDHostname, url.host().c_str());
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, DesiredTLD) {
+  DesiredTLDTest();
 }
 
-// Sometimes times out on Windows: http://crbug.com/57965
-#if defined(OS_WIN)
-#define MAYBE_AltEnter DISABLED_AltEnter
-#else
-#define MAYBE_AltEnter AltEnter
-#endif
-IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_AltEnter) {
-  ASSERT_NO_FATAL_FAILURE(SetupComponents());
-  browser()->FocusLocationBar();
-
-  AutocompleteEditView* edit_view = NULL;
-  ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
-
-  edit_view->SetUserText(ASCIIToWide(chrome::kChromeUIHistoryURL));
-  int tab_count = browser()->tab_count();
-  // alt-Enter opens a new tab.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_RETURN, false, false, true));
-  ASSERT_NO_FATAL_FAILURE(WaitForTabOpenOrClose(tab_count + 1));
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, AltEnter) {
+  AltEnterTest();
 }
 
-// Sometimes times out on Windows: http://crbug.com/57965
-#if defined(OS_WIN)
-#define MAYBE_EnterToSearch DISABLED_EnterToSearch
-#else
-#define MAYBE_EnterToSearch EnterToSearch
-#endif
-IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_EnterToSearch) {
-  ASSERT_NO_FATAL_FAILURE(SetupHostResolver());
-  ASSERT_NO_FATAL_FAILURE(SetupSearchEngine());
-  browser()->FocusLocationBar();
-
-  AutocompleteEditView* edit_view = NULL;
-  ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
-  AutocompletePopupModel* popup_model = edit_view->model()->popup_model();
-  ASSERT_TRUE(popup_model);
-
-  // Test Enter to search.
-  ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchTextKeys));
-  ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
-  ASSERT_TRUE(popup_model->IsOpen());
-
-  // Check if the default match result is Search Primary Provider.
-  ASSERT_EQ(AutocompleteMatch::SEARCH_WHAT_YOU_TYPED,
-            popup_model->result().default_match()->type);
-
-  // Open the default match.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_RETURN, false, false, false));
-  GURL url = browser()->GetSelectedTabContents()->GetURL();
-  EXPECT_STREQ(kSearchTextURL, url.spec().c_str());
-
-  // Test that entering a single character then Enter performs a search.
-  browser()->FocusLocationBar();
-  EXPECT_TRUE(edit_view->IsSelectAll());
-  ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchSingleCharKeys));
-  ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
-  ASSERT_TRUE(popup_model->IsOpen());
-  EXPECT_EQ(kSearchSingleChar, WideToUTF8(edit_view->GetText()));
-
-  // Check if the default match result is Search Primary Provider.
-  ASSERT_EQ(AutocompleteMatch::SEARCH_WHAT_YOU_TYPED,
-            popup_model->result().default_match()->type);
-
-  // Open the default match.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_RETURN, false, false, false));
-  url = browser()->GetSelectedTabContents()->GetURL();
-  EXPECT_STREQ(kSearchSingleCharURL, url.spec().c_str());
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, EnterToSearch) {
+  EnterToSearchTest();
 }
 
-// See http://crbug.com/20934: Omnibox keyboard behavior wrong for
-// "See recent pages in history"
-// Sometimes times out on Windows: http://crbug.com/57965
-#if defined(OS_WIN)
-#define MAYBE_EnterToOpenHistoryPage DISABLED_EnterToOpenHistoryPage
-#else
-#define MAYBE_EnterToOpenHistoryPage EnterToOpenHistoryPage
-#endif
-IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_EnterToOpenHistoryPage) {
-  ASSERT_NO_FATAL_FAILURE(SetupComponents());
-  browser()->FocusLocationBar();
-
-  AutocompleteEditView* edit_view = NULL;
-  ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
-  AutocompletePopupModel* popup_model = edit_view->model()->popup_model();
-  ASSERT_TRUE(popup_model);
-
-  ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchTextKeys));
-  ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
-  ASSERT_TRUE(popup_model->IsOpen());
-  EXPECT_EQ(0U, popup_model->selected_line());
-
-  // Move to the history page item.
-  size_t size = popup_model->result().size();
-  while (true) {
-    if (popup_model->result().match_at(popup_model->selected_line()).type ==
-        AutocompleteMatch::OPEN_HISTORY_PAGE)
-      break;
-    size_t old_selected_line = popup_model->selected_line();
-    ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_DOWN, false, false, false));
-    ASSERT_EQ(old_selected_line + 1, popup_model->selected_line());
-    if (popup_model->selected_line() == size - 1)
-      break;
-  }
-
-  // Make sure the history page item is selected.
-  ASSERT_EQ(AutocompleteMatch::OPEN_HISTORY_PAGE,
-            popup_model->result().match_at(popup_model->selected_line()).type);
-
-  // Open the history page item.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_RETURN, false, false, false));
-  GURL url = browser()->GetSelectedTabContents()->GetURL();
-  EXPECT_STREQ(kHistoryPageURL, url.spec().c_str());
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, EscapeToDefaultMatch) {
+  EscapeToDefaultMatchTest();
 }
 
-// Sometimes times out on Windows: http://crbug.com/57965
-#if defined(OS_WIN)
-#define MAYBE_EscapeToDefaultMatch DISABLED_EscapeToDefaultMatch
-#else
-#define MAYBE_EscapeToDefaultMatch EscapeToDefaultMatch
-#endif
-IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_EscapeToDefaultMatch) {
-  ASSERT_NO_FATAL_FAILURE(SetupComponents());
-  browser()->FocusLocationBar();
-
-  AutocompleteEditView* edit_view = NULL;
-  ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
-  AutocompletePopupModel* popup_model = edit_view->model()->popup_model();
-  ASSERT_TRUE(popup_model);
-
-  // Input something to trigger inline autocomplete.
-  ASSERT_NO_FATAL_FAILURE(SendKeySequence(kSearchTextKeys));
-  ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
-  ASSERT_TRUE(popup_model->IsOpen());
-
-  std::wstring old_text = edit_view->GetText();
-
-  // Make sure inline autocomplete is triggerred.
-  EXPECT_GT(old_text.length(), arraysize(kSearchText) - 1);
-
-  size_t old_selected_line = popup_model->selected_line();
-  EXPECT_EQ(0U, old_selected_line);
-
-  // Move to another line with different text.
-  size_t size = popup_model->result().size();
-  while (popup_model->selected_line() < size - 1) {
-    ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_DOWN, false, false, false));
-    ASSERT_NE(old_selected_line, popup_model->selected_line());
-    if (old_text != edit_view->GetText())
-      break;
-  }
-
-  EXPECT_NE(old_text, edit_view->GetText());
-
-  // Escape shall revert back to the default match item.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_ESCAPE, false, false, false));
-  EXPECT_EQ(old_text, edit_view->GetText());
-  EXPECT_EQ(old_selected_line, popup_model->selected_line());
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, BasicTextOperations) {
+  BasicTextOperationsTest();
 }
 
-// Sometimes times out on Windows: http://crbug.com/57965
-#if defined(OS_WIN)
-#define MAYBE_BasicTextOperations DISABLED_BasicTextOperations
-#else
-#define MAYBE_BasicTextOperations BasicTextOperations
-#endif
-IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, MAYBE_BasicTextOperations) {
-  ASSERT_NO_FATAL_FAILURE(SetupComponents());
-  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kAboutBlankURL));
-  browser()->FocusLocationBar();
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, AcceptKeywordBySpace) {
+  AcceptKeywordBySpaceTest();
+}
 
-  AutocompleteEditView* edit_view = NULL;
-  ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
-
-  std::wstring old_text = edit_view->GetText();
-  EXPECT_EQ(UTF8ToWide(chrome::kAboutBlankURL), old_text);
-  EXPECT_TRUE(edit_view->IsSelectAll());
-
-  std::wstring::size_type start, end;
-  edit_view->GetSelectionBounds(&start, &end);
-  EXPECT_EQ(0U, start);
-  EXPECT_EQ(old_text.size(), end);
-
-  // Move the cursor to the end.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_END, false, false, false));
-  EXPECT_FALSE(edit_view->IsSelectAll());
-
-  // Make sure the cursor is placed correctly.
-  edit_view->GetSelectionBounds(&start, &end);
-  EXPECT_EQ(old_text.size(), start);
-  EXPECT_EQ(old_text.size(), end);
-
-  // Insert one character at the end. Make sure we won't insert anything after
-  // the special ZWS mark used in gtk implementation.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_A, false, false, false));
-  EXPECT_EQ(old_text + L"a", edit_view->GetText());
-
-  // Delete one character from the end. Make sure we won't delete the special
-  // ZWS mark used in gtk implementation.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_BACK, false, false, false));
-  EXPECT_EQ(old_text, edit_view->GetText());
-
-  edit_view->SelectAll(true);
-  EXPECT_TRUE(edit_view->IsSelectAll());
-  edit_view->GetSelectionBounds(&start, &end);
-  EXPECT_EQ(0U, start);
-  EXPECT_EQ(old_text.size(), end);
-
-  // Delete the content
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_DELETE, false, false, false));
-  EXPECT_TRUE(edit_view->IsSelectAll());
-  edit_view->GetSelectionBounds(&start, &end);
-  EXPECT_EQ(0U, start);
-  EXPECT_EQ(0U, end);
-  EXPECT_TRUE(edit_view->GetText().empty());
-
-  // Check if RevertAll() can set text and cursor correctly.
-  edit_view->RevertAll();
-  EXPECT_FALSE(edit_view->IsSelectAll());
-  EXPECT_EQ(old_text, edit_view->GetText());
-  edit_view->GetSelectionBounds(&start, &end);
-  EXPECT_EQ(old_text.size(), start);
-  EXPECT_EQ(old_text.size(), end);
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, NonSubstitutingKeywordTest) {
+  NonSubstitutingKeywordTest();
 }
 
 #if defined(OS_LINUX)
+// TODO(oshima): enable these tests for views-implmentation when
+// these featuers are supported.
+
 IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, UndoRedoLinux) {
-  ASSERT_NO_FATAL_FAILURE(SetupComponents());
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kAboutBlankURL));
   browser()->FocusLocationBar();
 
@@ -757,15 +911,15 @@ IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, UndoRedoLinux) {
   EXPECT_TRUE(edit_view->IsSelectAll());
 
   // Undo should clear the omnibox.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_Z, true, false, false));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_Z, true, false, false));
   EXPECT_TRUE(edit_view->GetText().empty());
 
   // Nothing should happen if undo again.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_Z, true, false, false));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_Z, true, false, false));
   EXPECT_TRUE(edit_view->GetText().empty());
 
   // Redo should restore the original text.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_Z, true, true, false));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_Z, true, true, false));
   EXPECT_EQ(old_text, edit_view->GetText());
 
   // Looks like the undo manager doesn't support restoring selection.
@@ -778,56 +932,55 @@ IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, UndoRedoLinux) {
   EXPECT_EQ(old_text.size(), end);
 
   // Delete two characters.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_BACK, false, false, false));
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_BACK, false, false, false));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_BACK, false, false, false));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_BACK, false, false, false));
   EXPECT_EQ(old_text.substr(0, old_text.size() - 2), edit_view->GetText());
 
   // Undo delete.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_Z, true, false, false));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_Z, true, false, false));
   EXPECT_EQ(old_text, edit_view->GetText());
 
   // Redo delete.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_Z, true, true, false));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_Z, true, true, false));
   EXPECT_EQ(old_text.substr(0, old_text.size() - 2), edit_view->GetText());
 
   // Delete everything.
   edit_view->SelectAll(true);
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_BACK, false, false, false));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_BACK, false, false, false));
   EXPECT_TRUE(edit_view->GetText().empty());
 
   // Undo delete everything.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_Z, true, false, false));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_Z, true, false, false));
   EXPECT_EQ(old_text.substr(0, old_text.size() - 2), edit_view->GetText());
 
   // Undo delete two characters.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_Z, true, false, false));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_Z, true, false, false));
   EXPECT_EQ(old_text, edit_view->GetText());
 
   // Undo again.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_Z, true, false, false));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_Z, true, false, false));
   EXPECT_TRUE(edit_view->GetText().empty());
 }
 
 // See http://crbug.com/63860
 IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, PrimarySelection) {
-  browser()->FocusLocationBar();
   AutocompleteEditView* edit_view = NULL;
   ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
   edit_view->SetUserText(L"Hello world");
   EXPECT_FALSE(edit_view->IsSelectAll());
 
   // Move the cursor to the end.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_END, false, false, false));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_END, false, false, false));
 
   // Select all text by pressing Shift+Home
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_HOME, false, true, false));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_HOME, false, true, false));
   EXPECT_TRUE(edit_view->IsSelectAll());
 
   // The selected content should be saved to the PRIMARY clipboard.
   EXPECT_EQ("Hello world", GetPrimarySelectionText());
 
   // Move the cursor to the end.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_END, false, false, false));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_END, false, false, false));
   EXPECT_FALSE(edit_view->IsSelectAll());
 
   // The content in the PRIMARY clipboard should not be cleared.
@@ -837,17 +990,90 @@ IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, PrimarySelection) {
 // See http://crosbug.com/10306
 IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest,
                        BackspaceDeleteHalfWidthKatakana) {
-  browser()->FocusLocationBar();
   AutocompleteEditView* edit_view = NULL;
   ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
   // Insert text: ﾀﾞ
   edit_view->SetUserText(UTF8ToWide("\357\276\200\357\276\236"));
 
   // Move the cursor to the end.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_END, false, false, false));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_END, false, false, false));
 
   // Backspace should delete one character.
-  ASSERT_NO_FATAL_FAILURE(SendKey(app::VKEY_BACK, false, false, false));
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_BACK, false, false, false));
   EXPECT_EQ(UTF8ToWide("\357\276\200"), edit_view->GetText());
 }
+
+// http://crbug.com/12316
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewTest, PasteReplacingAll) {
+  AutocompleteEditView* edit_view = NULL;
+  ASSERT_NO_FATAL_FAILURE(GetAutocompleteEditView(&edit_view));
+  AutocompletePopupModel* popup_model = edit_view->model()->popup_model();
+  ASSERT_TRUE(popup_model);
+
+  SetClipboardText(kSearchText);
+
+  // Paste text.
+  ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_V, true, false, false));
+  ASSERT_NO_FATAL_FAILURE(WaitForAutocompleteControllerDone());
+  ASSERT_TRUE(popup_model->IsOpen());
+
+  // Inline autocomplete shouldn't be triggered.
+  ASSERT_EQ(L"abc", edit_view->GetText());
+}
+#endif
+
+#if defined(TOOLKIT_VIEWS)
+class AutocompleteEditViewViewsTest : public AutocompleteEditViewTest {
+ public:
+  AutocompleteEditViewViewsTest() {
+    views::NativeTextfieldViews::SetEnableTextfieldViews(true);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewViewsTest,
+                       FLAKY_BrowserAccelerators) {
+  BrowserAcceleratorsTest();
+}
+
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewViewsTest, MAYBE_PopupAccelerators) {
+  PopupAcceleratorsTest();
+}
+
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewViewsTest, BackspaceInKeywordMode) {
+  BackspaceInKeywordModeTest();
+}
+
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewViewsTest, Escape) {
+  EscapeTest();
+}
+
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewViewsTest, DesiredTLD) {
+  DesiredTLDTest();
+}
+
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewViewsTest, AltEnter) {
+  AltEnterTest();
+}
+
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewViewsTest, EnterToSearch) {
+  EnterToSearchTest();
+}
+
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewViewsTest, EscapeToDefaultMatch) {
+  EscapeToDefaultMatchTest();
+}
+
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewViewsTest, BasicTextOperations) {
+  BasicTextOperationsTest();
+}
+
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewViewsTest, AcceptKeywordBySpace) {
+  AcceptKeywordBySpaceTest();
+}
+
+IN_PROC_BROWSER_TEST_F(AutocompleteEditViewViewsTest,
+                       NonSubstitutingKeywordTest) {
+  NonSubstitutingKeywordTest();
+}
+
 #endif

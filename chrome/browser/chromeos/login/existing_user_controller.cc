@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,8 +8,6 @@
 #include <functional>
 #include <map>
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/stl_util-inl.h"
@@ -30,14 +28,16 @@
 #include "chrome/browser/chromeos/user_cros_settings_provider.h"
 #include "chrome/browser/chromeos/view_ids.h"
 #include "chrome/browser/chromeos/wm_ipc.h"
-#include "chrome/browser/profile_manager.h"
-#include "chrome/browser/views/window.h"
+#include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/views/window.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "gfx/native_widget_types.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "views/screen.h"
 #include "views/widget/widget_gtk.h"
 #include "views/window/window.h"
@@ -48,7 +48,10 @@ namespace {
 
 // Max number of users we'll show. The true max is the min of this and the
 // number of windows that fit on the screen.
-const size_t kMaxUsers = 5;
+const size_t kMaxUsers = 6;
+
+// Minimum number of users we'll show (including Guest and New User pods).
+const size_t kMinUsers = 3;
 
 // Used to indicate no user has been selected.
 const size_t kNotSelected = -1;
@@ -114,7 +117,7 @@ void EnableTooltipsIfNeeded(const std::vector<UserController*>& controllers) {
 }  // namespace
 
 ExistingUserController*
-  ExistingUserController::delete_scheduled_instance_ = NULL;
+  ExistingUserController::current_controller_ = NULL;
 
 // TODO(xiyuan): Wait for the cached settings update before using them.
 ExistingUserController::ExistingUserController(
@@ -126,40 +129,45 @@ ExistingUserController::ExistingUserController(
       selected_view_index_(kNotSelected),
       num_login_attempts_(0),
       bubble_(NULL),
-      user_settings_(new UserCrosSettingsProvider()) {
-  if (delete_scheduled_instance_)
-    delete_scheduled_instance_->Delete();
+      user_settings_(new UserCrosSettingsProvider),
+      method_factory_(this) {
+  if (current_controller_)
+    current_controller_->Delete();
+  current_controller_ = this;
 
-  // Caclulate the max number of users from available screen size.
+  // Calculate the max number of users from available screen size.
+  bool show_guest = UserCrosSettingsProvider::cached_allow_guest();
+  bool show_new_user = true;
   if (UserCrosSettingsProvider::cached_show_users_on_signin()) {
     size_t max_users = kMaxUsers;
     int screen_width = background_bounds.width();
     if (screen_width > 0) {
-      max_users = std::max(static_cast<size_t>(2), std::min(kMaxUsers,
-          static_cast<size_t>((screen_width - login::kUserImageSize)
-                              / (UserController::kUnselectedSize +
-                                 UserController::kPadding))));
+      size_t users_per_screen = (screen_width - login::kUserImageSize)
+          / (UserController::kUnselectedSize + UserController::kPadding);
+      max_users = std::max(kMinUsers, std::min(kMaxUsers, users_per_screen));
     }
 
-    size_t visible_users_count = std::min(users.size(), max_users - 1);
+    size_t visible_users_count = std::min(users.size(), max_users -
+        static_cast<int>(show_guest) - static_cast<int>(show_new_user));
     for (size_t i = 0; i < users.size(); ++i) {
-      if (controllers_.size() == visible_users_count)
-        break;
-
       // TODO(xiyuan): Clean user profile whose email is not in whitelist.
       if (UserCrosSettingsProvider::cached_allow_new_user() ||
           UserCrosSettingsProvider::IsEmailInCachedWhitelist(
               users[i].email())) {
-        controllers_.push_back(new UserController(this, users[i]));
+        UserController* user_controller = new UserController(this, users[i]);
+        if (controllers_.size() < visible_users_count)
+          controllers_.push_back(user_controller);
+        else
+          invisible_controllers_.push_back(user_controller);
       }
     }
   }
 
-  if (!controllers_.empty() && UserCrosSettingsProvider::cached_allow_guest())
+  if (!controllers_.empty() && show_guest)
     controllers_.push_back(new UserController(this, true));
 
-  // Add the view representing the new user.
-  controllers_.push_back(new UserController(this, false));
+  if (show_new_user)
+    controllers_.push_back(new UserController(this, false));
 }
 
 void ExistingUserController::Init() {
@@ -191,7 +199,7 @@ void ExistingUserController::Init() {
 
   EnableTooltipsIfNeeded(controllers_);
 
-  WmMessageListener::instance()->AddObserver(this);
+  WmMessageListener::GetInstance()->AddObserver(this);
 
   LoginUtils::Get()->PrewarmAuthentication();
   if (CrosLibrary::Get()->EnsureLoaded())
@@ -213,14 +221,11 @@ void ExistingUserController::LoginNewUser(const std::string& username,
   DCHECK(new_user->is_new_user());
   if (!new_user->is_new_user())
     return;
-  NewUserView* new_user_view = new_user->new_user_view();
-  new_user_view->SetUsername(username);
 
   if (password.empty())
     return;
 
-  new_user_view->SetPassword(password);
-  new_user_view->Login();
+  new_user->OnLogin(username, password);
 }
 
 void ExistingUserController::SelectNewUser() {
@@ -239,13 +244,15 @@ ExistingUserController::~ExistingUserController() {
   if (background_window_)
     background_window_->Close();
 
-  WmMessageListener::instance()->RemoveObserver(this);
+  WmMessageListener::GetInstance()->RemoveObserver(this);
 
   STLDeleteElements(&controllers_);
+  STLDeleteElements(&invisible_controllers_);
+  DCHECK(current_controller_ != NULL);
+  current_controller_ = NULL;
 }
 
 void ExistingUserController::Delete() {
-  delete_scheduled_instance_ = NULL;
   delete this;
 }
 
@@ -283,7 +290,10 @@ void ExistingUserController::Login(UserController* source,
   // Use the same LoginPerformer for subsequent login as it has state
   // such as CAPTCHA challenge token & corresponding user input.
   if (!login_performer_.get() || num_login_attempts_ <= 1) {
-    login_performer_.reset(new LoginPerformer(this));
+    LoginPerformer::Delegate* delegate = this;
+    if (login_performer_delegate_.get())
+      delegate = login_performer_delegate_.get();
+    login_performer_.reset(new LoginPerformer(delegate));
   }
   login_performer_->Login(controllers_[selected_view_index_]->user().email(),
                           UTF16ToUTF8(password));
@@ -302,8 +312,19 @@ void ExistingUserController::WhiteListCheckFailed(const std::string& email) {
 
 void ExistingUserController::LoginOffTheRecord() {
   // Check allow_guest in case this call is fired from key accelerator.
-  if (!UserCrosSettingsProvider::cached_allow_guest())
+  // Must not proceed without signature verification.
+  bool trusted_setting_available = user_settings_->RequestTrustedAllowGuest(
+      method_factory_.NewRunnableMethod(
+          &ExistingUserController::LoginOffTheRecord));
+  if (!trusted_setting_available) {
+    // Value of AllowGuest setting is still not verified.
+    // Another attempt will be invoked again after verification completion.
     return;
+  }
+  if (!UserCrosSettingsProvider::cached_allow_guest()) {
+    // Disallowed.
+    return;
+  }
 
   // Disable clicking on other windows.
   SendSetLoginState(false);
@@ -345,10 +366,6 @@ void ExistingUserController::ActivateWizard(const std::string& screen_name) {
   controller->set_start_url(start_url_);
   controller->Show();
 
-  // And schedule us for deletion. We delay for a second as the window manager
-  // is doing an animation with our windows.
-  DCHECK(!delete_scheduled_instance_);
-  delete_scheduled_instance_ = this;
   delete_timer_.Start(base::TimeDelta::FromSeconds(1), this,
                       &ExistingUserController::Delete);
 }
@@ -356,11 +373,10 @@ void ExistingUserController::ActivateWizard(const std::string& screen_name) {
 void ExistingUserController::RemoveUser(UserController* source) {
   ClearErrors();
 
-  // TODO(xiyuan): Wait for the cached settings update before using them.
-  if (UserCrosSettingsProvider::cached_owner() == source->user().email()) {
-    // Owner is not allowed to be removed from the device.
-    return;
-  }
+  // Owner is not allowed to be removed from the device.
+  // It must be enforced at upper levels.
+  DCHECK(user_settings_->RequestTrustedOwner(NULL));
+  DCHECK(source->user().email() != UserCrosSettingsProvider::cached_owner());
 
   UserManager::Get()->RemoveUser(source->user().email());
 
@@ -378,6 +394,33 @@ void ExistingUserController::RemoveUser(UserController* source) {
   new RemoveAttempt(source->user().email());
   // We need to unmap entry windows, the windows will be unmapped in destructor.
   delete source;
+
+  // Nothing to insert.
+  if (invisible_controllers_.empty())
+    return;
+
+  // Insert just before guest or add new user pods if any.
+  int insert_position = new_size;
+  while (insert_position > 0 &&
+         (controllers_[insert_position - 1]->is_new_user() ||
+          controllers_[insert_position - 1]->is_guest()))
+    --insert_position;
+
+  controllers_.insert(controllers_.begin() + insert_position,
+                      invisible_controllers_[0]);
+  invisible_controllers_.erase(invisible_controllers_.begin());
+
+  // Update counts for exiting pods.
+  new_size = static_cast<int>(controllers_.size());
+  for (int i = 0; i < new_size; ++i) {
+    if (i != insert_position)
+      controllers_[i]->UpdateUserCount(i, new_size);
+  }
+
+  // And initialize new one that was invisible.
+  controllers_[insert_position]->Init(insert_position, new_size, false);
+
+  EnableTooltipsIfNeeded(controllers_);
 }
 
 void ExistingUserController::SelectUser(int index) {
@@ -404,7 +447,8 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
         failure.error().state() == GoogleServiceAuthError::CAPTCHA_REQUIRED) {
       if (!failure.error().captcha().image_url.is_empty()) {
         CaptchaView* view =
-            new CaptchaView(failure.error().captcha().image_url);
+            new CaptchaView(failure.error().captcha().image_url, false);
+        view->Init();
         view->set_delegate(this);
         views::Window* window = browser::CreateViewsWindow(
             GetNativeWindow(), gfx::Rect(), view);
@@ -445,20 +489,21 @@ gfx::NativeWindow ExistingUserController::GetNativeWindow() const {
 void ExistingUserController::ShowError(int error_id,
                                        const std::string& details) {
   ClearErrors();
-  std::wstring error_text;
+  string16 error_text;
   // GetStringF fails on debug build if there's no replacement in the string.
   if (error_id == IDS_LOGIN_ERROR_AUTHENTICATING_HOSTED) {
-    error_text = l10n_util::GetStringF(
-        error_id, l10n_util::GetString(IDS_PRODUCT_OS_NAME));
+    error_text = l10n_util::GetStringFUTF16(
+        error_id, l10n_util::GetStringUTF16(IDS_PRODUCT_OS_NAME));
   } else {
-    error_text = l10n_util::GetString(error_id);
+    error_text = l10n_util::GetStringUTF16(error_id);
   }
   // TODO(dpolukhin): show detailed error info. |details| string contains
   // low level error info that is not localized and even is not user friendly.
   // For now just ignore it because error_text contains all required information
   // for end users, developers can see details string in Chrome logs.
 
-  gfx::Rect bounds = controllers_[selected_view_index_]->GetScreenBounds();
+  gfx::Rect bounds =
+      controllers_[selected_view_index_]->GetMainInputScreenBounds();
   BubbleBorder::ArrowLocation arrow;
   if (controllers_[selected_view_index_]->is_new_user()) {
     arrow = BubbleBorder::LEFT_TOP;
@@ -467,11 +512,11 @@ void ExistingUserController::ShowError(int error_id,
     bounds.set_width(kCursorOffset * 2);
     arrow = BubbleBorder::BOTTOM_LEFT;
   }
-  std::wstring help_link;
+  string16 help_link;
   if (error_id == IDS_LOGIN_ERROR_AUTHENTICATING_HOSTED) {
-    help_link = l10n_util::GetString(IDS_LEARN_MORE);
+    help_link = l10n_util::GetStringUTF16(IDS_LEARN_MORE);
   } else if (num_login_attempts_ > static_cast<size_t>(1)) {
-    help_link = l10n_util::GetString(IDS_CANT_ACCESS_ACCOUNT_BUTTON);
+    help_link = l10n_util::GetStringUTF16(IDS_CANT_ACCESS_ACCOUNT_BUTTON);
   }
 
   bubble_ = MessageBubble::Show(
@@ -479,8 +524,8 @@ void ExistingUserController::ShowError(int error_id,
       bounds,
       arrow,
       ResourceBundle::GetSharedInstance().GetBitmapNamed(IDR_WARNING),
-      error_text,
-      help_link,
+      UTF16ToWide(error_text),
+      UTF16ToWide(help_link),
       this);
 }
 
@@ -498,14 +543,8 @@ void ExistingUserController::OnLoginSuccess(
   LoginPerformer* performer = login_performer_.release();
   performer = NULL;
   bool known_user = UserManager::Get()->IsKnownUser(username);
-  if (credentials.two_factor && !known_user && !start_url_.is_valid()) {
-    // If we have a two factor error and and this is a new user and we are not
-    // already directing the user to a start url (e.g. a help page),
-    // direct them to the personal settings page.
-    // TODO(stevenjb): direct the user to a lightweight sync login page.
-    start_url_ = GURL(kSettingsSyncLoginUrl);
-  }
   AppendStartUrlToCmdline();
+  controllers_[selected_view_index_]->StopThrobber();
   if (selected_view_index_ + 1 == controllers_.size() && !known_user) {
 #if defined(OFFICIAL_BUILD)
     CommandLine::ForCurrentProcess()->AppendSwitchPath(
@@ -513,9 +552,18 @@ void ExistingUserController::OnLoginSuccess(
         FilePath(kGetStartedPath));
     CommandLine::ForCurrentProcess()->AppendArg(kGetStartedURL);
 #endif  // OFFICIAL_BUILD
+    if (credentials.two_factor) {
+      // If we have a two factor error and and this is a new user,
+      // load the personal settings page.
+      // TODO(stevenjb): direct the user to a lightweight sync login page.
+      CommandLine::ForCurrentProcess()->AppendArg(kSettingsSyncLoginUrl);
+    }
     // For new user login don't launch browser until we pass image screen.
     LoginUtils::Get()->EnableBrowserLaunch(false);
-    LoginUtils::Get()->CompleteLogin(username, password, credentials);
+    LoginUtils::Get()->CompleteLogin(username,
+                                     password,
+                                     credentials,
+                                     pending_requests);
     ActivateWizard(WizardController::IsDeviceRegistered() ?
         WizardController::kUserImageScreenName :
         WizardController::kRegistrationScreenName);
@@ -524,7 +572,10 @@ void ExistingUserController::OnLoginSuccess(
     WmIpc::Message message(WM_IPC_MESSAGE_WM_HIDE_LOGIN);
     WmIpc::instance()->SendMessage(message);
 
-    LoginUtils::Get()->CompleteLogin(username, password, credentials);
+    LoginUtils::Get()->CompleteLogin(username,
+                                     password,
+                                     credentials,
+                                     pending_requests);
 
     // Delay deletion as we're on the stack.
     MessageLoop::current()->DeleteSoon(FROM_HERE, this);
@@ -542,15 +593,18 @@ void ExistingUserController::OnOffTheRecordLoginSuccess() {
 
 void ExistingUserController::OnPasswordChangeDetected(
     const GaiaAuthConsumer::ClientLoginResult& credentials) {
-  // When signing in as a "New user" always remove old cryptohome.
-  if (selected_view_index_ == controllers_.size() - 1) {
-    ResyncEncryptedData();
+  // Must not proceed without signature verification.
+  bool trusted_setting_available = user_settings_->RequestTrustedOwner(
+      method_factory_.NewRunnableMethod(
+          &ExistingUserController::OnPasswordChangeDetected,
+          credentials));
+  if (!trusted_setting_available) {
+    // Value of owner email is still not verified.
+    // Another attempt will be invoked after verification completion.
     return;
   }
-
   // TODO(altimofeev): remove this constrain when full sync for the owner will
   // be correctly handled.
-  // TODO(xiyuan): Wait for the cached settings update before using them.
   bool full_sync_disabled = (UserCrosSettingsProvider::cached_owner() ==
       controllers_[selected_view_index_]->user().email());
 

@@ -1,14 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/alternate_nav_url_fetcher.h"
 
-#include "app/l10n_util.h"
-#include "app/resource_bundle.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/intranet_redirect_detector.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
@@ -17,6 +15,8 @@
 #include "grit/theme_resources.h"
 #include "net/base/registry_controlled_domain.h"
 #include "net/url_request/url_request.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 AlternateNavURLFetcher::AlternateNavURLFetcher(
     const GURL& alternate_nav_url)
@@ -86,15 +86,21 @@ void AlternateNavURLFetcher::Observe(NotificationType type,
   }
 }
 
-void AlternateNavURLFetcher::OnURLFetchComplete(const URLFetcher* source,
-                                                const GURL& url,
-                                                const URLRequestStatus& status,
-                                                int response_code,
-                                                const ResponseCookies& cookies,
-                                                const std::string& data) {
+void AlternateNavURLFetcher::OnURLFetchComplete(
+    const URLFetcher* source,
+    const GURL& url,
+    const net::URLRequestStatus& status,
+    int response_code,
+    const ResponseCookies& cookies,
+    const std::string& data) {
   DCHECK(fetcher_.get() == source);
   SetStatusFromURLFetch(url, status, response_code);
   ShowInfobarIfPossible();
+}
+
+SkBitmap* AlternateNavURLFetcher::GetIcon() const {
+  return ResourceBundle::GetSharedInstance().GetBitmapNamed(
+      IDR_INFOBAR_ALT_NAV_URL);
 }
 
 string16 AlternateNavURLFetcher::GetMessageTextWithOffset(
@@ -107,11 +113,6 @@ string16 AlternateNavURLFetcher::GetMessageTextWithOffset(
 
 string16 AlternateNavURLFetcher::GetLinkText() const {
   return UTF8ToUTF16(alternate_nav_url_.spec());
-}
-
-SkBitmap* AlternateNavURLFetcher::GetIcon() const {
-  return ResourceBundle::GetSharedInstance().GetBitmapNamed(
-      IDR_INFOBAR_ALT_NAV_URL);
 }
 
 bool AlternateNavURLFetcher::LinkClicked(WindowOpenDisposition disposition) {
@@ -133,7 +134,7 @@ void AlternateNavURLFetcher::InfoBarClosed() {
 
 void AlternateNavURLFetcher::SetStatusFromURLFetch(
     const GURL& url,
-    const URLRequestStatus& status,
+    const net::URLRequestStatus& status,
     int response_code) {
   if (!status.is_success() ||
       // HTTP 2xx, 401, and 407 all indicate that the target address exists.

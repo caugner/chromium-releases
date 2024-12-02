@@ -6,9 +6,9 @@
 #define BASE_MESSAGE_LOOP_PROXY_IMPL_H_
 #pragma once
 
-#include "base/lock.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
+#include "base/synchronization/lock.h"
 
 namespace base {
 
@@ -18,7 +18,7 @@ namespace base {
 class MessageLoopProxyImpl : public MessageLoopProxy,
                              public MessageLoop::DestructionObserver {
  public:
-  ~MessageLoopProxyImpl();
+  virtual ~MessageLoopProxyImpl();
 
   // MessageLoopProxy implementation
   virtual bool PostTask(const tracked_objects::Location& from_here,
@@ -33,8 +33,8 @@ class MessageLoopProxyImpl : public MessageLoopProxy,
       int64 delay_ms);
   virtual bool BelongsToCurrentThread();
 
-// MessageLoop::DestructionObserver implementation
-  void WillDestroyCurrentMessageLoop();
+  // MessageLoop::DestructionObserver implementation
+  virtual void WillDestroyCurrentMessageLoop();
 
  protected:
   // Override OnDestruct so that we can delete the object on the target message
@@ -50,7 +50,7 @@ class MessageLoopProxyImpl : public MessageLoopProxy,
   friend class MessageLoopProxy;
 
   // The lock that protects access to target_message_loop_.
-  mutable Lock message_loop_lock_;
+  mutable base::Lock message_loop_lock_;
   MessageLoop* target_message_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(MessageLoopProxyImpl);

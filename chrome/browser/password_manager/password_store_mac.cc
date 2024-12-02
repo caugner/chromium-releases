@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "base/logging.h"
-#include "base/mac_util.h"
+#include "base/mac/mac_util.h"
 #include "base/message_loop.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
@@ -20,6 +20,7 @@
 #include "chrome/browser/keychain_mac.h"
 #include "chrome/browser/password_manager/login_database.h"
 #include "chrome/browser/password_manager/password_store_change.h"
+#include "chrome/common/notification_service.h"
 
 using webkit_glue::PasswordForm;
 
@@ -564,7 +565,8 @@ bool MacKeychainPasswordFormAdapter::AddPassword(const PasswordForm& form) {
       password.size(), password.c_str(), &new_item);
 
   if (result == noErr) {
-    SetKeychainItemCreatorCode(new_item, mac_util::CreatorCodeForApplication());
+    SetKeychainItemCreatorCode(new_item,
+                               base::mac::CreatorCodeForApplication());
     keychain_->Free(new_item);
   } else if (result == errSecDuplicateItem) {
     // If we collide with an existing item, find and update it instead.
@@ -721,7 +723,7 @@ bool MacKeychainPasswordFormAdapter::SetKeychainItemCreatorCode(
 }
 
 OSType MacKeychainPasswordFormAdapter::CreatorCodeForSearch() {
-  return finds_only_owned_ ? mac_util::CreatorCodeForApplication() : 0;
+  return finds_only_owned_ ? base::mac::CreatorCodeForApplication() : 0;
 }
 
 #pragma mark -

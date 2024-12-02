@@ -101,84 +101,12 @@ loser:
 void
 ssl_FreePlatformKey(PlatformKey key)
 {
-    CryptReleaseContext(key, 0);
-}
-
-void
-ssl_FreePlatformAuthInfo(PlatformAuthInfo* info)
-{
-    if (info->provider != NULL) {
-        PORT_Free(info->provider);
-        info->provider = NULL;
+    if (key) {
+        if (key->dwKeySpec != CERT_NCRYPT_KEY_SPEC)
+            CryptReleaseContext(key->hCryptProv, 0);
+        /* FIXME(rsleevi): Close CNG keys. */
+        PORT_Free(key);
     }
-    if (info->container != NULL) {
-        PORT_Free(info->container);
-        info->container = NULL;
-    }
-    info->provType = 0;
-}
-
-void
-ssl_InitPlatformAuthInfo(PlatformAuthInfo* info)
-{
-    info->provider  = NULL;
-    info->container = NULL;
-    info->provType  = 0;
-}
-
-PRBool
-ssl_PlatformAuthTokenPresent(PlatformAuthInfo *info)
-{
-    HCRYPTPROV prov = 0;
-
-    if (!info || !info->provider || !info->container)
-        return PR_FALSE;
-
-    if (!CryptAcquireContextA(&prov, info->container, info->provider,
-                              info->provType, 0))
-        return PR_FALSE;
-
-    CryptReleaseContext(prov, 0);
-    return PR_TRUE;
-}
-
-void
-ssl_GetPlatformAuthInfoForKey(PlatformKey key,
-                              PlatformAuthInfo *info)
-{
-    DWORD bytesNeeded = 0;
-    ssl_InitPlatformAuthInfo(info);
-    bytesNeeded = sizeof(info->provType);
-    if (!CryptGetProvParam(key, PP_PROVTYPE, (BYTE*)&info->provType,
-                           &bytesNeeded, 0))
-        goto error;
-
-    bytesNeeded = 0;
-    if (!CryptGetProvParam(key, PP_CONTAINER, NULL, &bytesNeeded, 0))
-        goto error;
-    info->container = (char*)PORT_Alloc(bytesNeeded);
-    if (info->container == NULL)
-        goto error;
-    if (!CryptGetProvParam(key, PP_CONTAINER, (BYTE*)info->container,
-                           &bytesNeeded, 0))
-        goto error;
-
-    bytesNeeded = 0;
-    if (!CryptGetProvParam(key, PP_NAME, NULL, &bytesNeeded, 0))
-        goto error;
-    info->provider = (char*)PORT_Alloc(bytesNeeded);
-    if (info->provider == NULL)
-        goto error;
-    if (!CryptGetProvParam(key, PP_NAME, (BYTE*)info->provider,
-                           &bytesNeeded, 0))
-        goto error;
-
-    goto done;
-error:
-    ssl_FreePlatformAuthInfo(info);
-
-done:
-    return;
 }
 
 SECStatus
@@ -188,10 +116,6 @@ ssl3_PlatformSignHashes(SSL3Hashes *hash, PlatformKey key, SECItem *buf,
     SECStatus    rv             = SECFailure;
     PRBool       doDerEncode    = PR_FALSE;
     SECItem      hashItem;
-    /* TODO(rsleevi): Should AT_SIGNATURE also be checked if doing client
-     * auth? 
-     */
-    DWORD        keySpec        = AT_KEYEXCHANGE;
     HCRYPTKEY    hKey           = 0;
     DWORD        argLen         = 0;
     ALG_ID       keyAlg         = 0;
@@ -202,7 +126,7 @@ ssl3_PlatformSignHashes(SSL3Hashes *hash, PlatformKey key, SECItem *buf,
     unsigned int i              = 0;
 
     buf->data = NULL;
-    if (!CryptGetUserKey(key, keySpec, &hKey)) {
+    if (!CryptGetUserKey(key->hCryptProv, key->dwKeySpec, &hKey)) {
         PORT_SetError(SEC_ERROR_INVALID_KEY);
         goto done;
     }
@@ -221,7 +145,6 @@ ssl3_PlatformSignHashes(SSL3Hashes *hash, PlatformKey key, SECItem *buf,
             hashItem.len  = sizeof(SSL3Hashes);
             break;
         case CALG_DSS_SIGN:
-        /* TODO: Support CALG_ECDSA once tested */
         case CALG_ECDSA:
             if (keyAlg == CALG_ECDSA) {
                 doDerEncode = PR_TRUE;
@@ -238,7 +161,7 @@ ssl3_PlatformSignHashes(SSL3Hashes *hash, PlatformKey key, SECItem *buf,
     }
     PRINT_BUF(60, (NULL, "hash(es) to be signed", hashItem.data, hashItem.len));
 
-    if (!CryptCreateHash(key, hashAlg, 0, 0, &hHash)) {
+    if (!CryptCreateHash(key->hCryptProv, hashAlg, 0, 0, &hHash)) {
         ssl_MapLowLevelError(SSL_ERROR_SIGN_HASHES_FAILURE);
         goto done;    
     }
@@ -255,7 +178,7 @@ ssl3_PlatformSignHashes(SSL3Hashes *hash, PlatformKey key, SECItem *buf,
         ssl_MapLowLevelError(SSL_ERROR_SIGN_HASHES_FAILURE);
         goto done;
     }
-    if (!CryptSignHash(hHash, keySpec, NULL, CRYPT_NOHASHOID,
+    if (!CryptSignHash(hHash, key->dwKeySpec, NULL, 0,
                        NULL, &signatureLen) || signatureLen == 0) {
         ssl_MapLowLevelError(SSL_ERROR_SIGN_HASHES_FAILURE);
         goto done;
@@ -264,7 +187,7 @@ ssl3_PlatformSignHashes(SSL3Hashes *hash, PlatformKey key, SECItem *buf,
     if (!buf->data)
         goto done;    /* error code was set. */
 
-    if (!CryptSignHash(hHash, keySpec, NULL, CRYPT_NOHASHOID,
+    if (!CryptSignHash(hHash, key->dwKeySpec, NULL, 0,
                        (BYTE*)buf->data, &signatureLen)) {
         ssl_MapLowLevelError(SSL_ERROR_SIGN_HASHES_FAILURE);
         goto done;
@@ -307,80 +230,10 @@ done:
 #elif defined(XP_MACOSX)
 #include <Security/cssm.h>
 
-/*
- * In Mac OS X 10.5, these two functions are private but implemented, and
- * in Mac OS X 10.6, these are exposed publicly.  To compile with the 10.5
- * SDK, we declare them here.
- */
-OSStatus SecKeychainItemCreatePersistentReference(SecKeychainItemRef itemRef, CFDataRef *persistentItemRef);
-OSStatus SecKeychainItemCopyFromPersistentReference(CFDataRef persistentItemRef, SecKeychainItemRef *itemRef);
-
 void
 ssl_FreePlatformKey(PlatformKey key)
 {
     CFRelease(key);
-}
-
-void
-ssl_FreePlatformAuthInfo(PlatformAuthInfo* info)
-{
-    if (info->keychain != NULL) {
-        CFRelease(info->keychain);
-        info->keychain = NULL;
-    }
-    if (info->persistentKey != NULL) {
-        CFRelease(info->persistentKey);
-        info->persistentKey = NULL;
-    }
-}
-
-void
-ssl_InitPlatformAuthInfo(PlatformAuthInfo* info)
-{
-    info->keychain = NULL;
-    info->persistentKey = NULL;
-}
-
-PRBool
-ssl_PlatformAuthTokenPresent(PlatformAuthInfo* info)
-{
-    if (!info || !info->keychain || !info->persistentKey)
-        return PR_FALSE;
-
-    // Not actually interested in the status, but it can be used to make sure
-    // that the keychain still exists (as smart card ejection will remove
-    // the keychain)
-    SecKeychainStatus keychainStatus;
-    OSStatus rv = SecKeychainGetStatus(info->keychain, &keychainStatus);
-    if (rv != noErr)
-        return PR_FALSE;
-
-    // Make sure the individual key still exists within the keychain, if
-    // the keychain is present
-    SecKeychainItemRef keychainItem;
-    rv = SecKeychainItemCopyFromPersistentReference(info->persistentKey,
-                                                    &keychainItem);
-    if (rv != noErr)
-        return PR_FALSE;
-
-    CFRelease(keychainItem);
-    return PR_TRUE;
-}
-
-void
-ssl_GetPlatformAuthInfoForKey(PlatformKey key,
-                              PlatformAuthInfo *info)
-{
-    SecKeychainItemRef keychainItem = (SecKeychainItemRef)key;
-    OSStatus rv = SecKeychainItemCopyKeychain(keychainItem, &info->keychain);
-    if (rv == noErr) {
-        rv = SecKeychainItemCreatePersistentReference(keychainItem,
-                                                      &info->persistentKey);
-    }
-    if (rv != noErr) {
-        ssl_FreePlatformAuthInfo(info);
-    }
-    return;
 }
 
 SECStatus
@@ -525,27 +378,6 @@ done:
 #else
 void
 ssl_FreePlatformKey(PlatformKey key)
-{
-}
-
-void
-ssl_FreePlatformAuthInfo(PlatformAuthInfo *info)
-{
-}
-
-void
-ssl_InitPlatformAuthInfo(PlatformAuthInfo *info)
-{
-}
-
-PRBool
-ssl_PlatformAuthTokenPresent(PlatformAuthInfo *info)
-{
-    return PR_FALSE;
-}
-
-void
-ssl_GetPlatformAuthInfoForKey(PlatformKey key, PlatformAuthInfo *info)
 {
 }
 

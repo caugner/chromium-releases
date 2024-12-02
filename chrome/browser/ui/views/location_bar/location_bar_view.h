@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,11 +13,10 @@
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/first_run/first_run.h"
-#include "chrome/browser/location_bar.h"
 #include "chrome/browser/search_engines/template_url_model_observer.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/browser/toolbar_model.h"
-#include "chrome/browser/views/extensions/extension_popup.h"
+#include "chrome/browser/ui/omnibox/location_bar.h"
+#include "chrome/browser/ui/toolbar/toolbar_model.h"
+#include "chrome/browser/ui/views/extensions/extension_popup.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "gfx/font.h"
@@ -26,9 +25,8 @@
 
 #if defined(OS_WIN)
 #include "chrome/browser/autocomplete/autocomplete_edit_view_win.h"
-#else
+#elif defined(OS_LINUX)
 #include "chrome/browser/autocomplete/autocomplete_edit_view_gtk.h"
-#include "chrome/browser/gtk/accessible_widget_helper_gtk.h"
 #endif
 
 class CommandUpdater;
@@ -43,7 +41,7 @@ class PageActionWithBadgeView;
 class Profile;
 class SelectedKeywordView;
 class StarView;
-class SuggestedTextView;
+class TabContents;
 class TabContentsWrapper;
 class TemplateURLModel;
 
@@ -51,6 +49,10 @@ namespace views {
 class HorizontalPainter;
 class Label;
 };
+
+#if defined(OS_WIN)
+class SuggestedTextView;
+#endif
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -154,8 +156,10 @@ class LocationBarView : public LocationBar,
   // appears, not where the icons are shown).
   gfx::Point GetLocationEntryOrigin() const;
 
+#if defined(OS_WIN)
   // Invoked from SuggestedTextView when the suggested text should be committed.
   void OnCommitSuggestedText();
+#endif
 
   // Sizing functions
   virtual gfx::Size GetPreferredSize();
@@ -192,7 +196,7 @@ class LocationBarView : public LocationBar,
   virtual void OnAutocompleteLosingFocus(gfx::NativeView view_gaining_focus);
   virtual void OnAutocompleteWillAccept();
   virtual bool OnCommitSuggestedText(const std::wstring& typed_text);
-  virtual void OnSetSuggestedSearchText(const string16& suggested_text);
+  virtual bool AcceptCurrentInstantPreview();
   virtual void OnPopupBoundsChanged(const gfx::Rect& bounds);
   virtual void OnAutocompleteAccept(const GURL& url,
                                     WindowOpenDisposition disposition,
@@ -309,13 +313,13 @@ class LocationBarView : public LocationBar,
 #if defined(OS_WIN)
   // Helper for the Mouse event handlers that does all the real work.
   void OnMouseEvent(const views::MouseEvent& event, UINT msg);
+
+  // Returns true if the suggest text is valid.
+  bool HasValidSuggestText();
 #endif
 
   // Helper to show the first run info bubble.
   void ShowFirstRunBubbleInternal(FirstRun::BubbleType bubble_type);
-
-  // Returns true if the suggest text is valid.
-  bool HasValidSuggestText();
 
   // Current profile. Not owned by us.
   Profile* profile_;
@@ -324,7 +328,7 @@ class LocationBarView : public LocationBar,
 #if defined(OS_WIN)
   scoped_ptr<AutocompleteEditViewWin> location_entry_;
 #else
-  scoped_ptr<AutocompleteEditViewGtk> location_entry_;
+  scoped_ptr<AutocompleteEditView> location_entry_;
 #endif
 
   // The CommandUpdater for the Browser object that corresponds to this View.
@@ -358,8 +362,8 @@ class LocationBarView : public LocationBar,
   // A bubble displayed for EV HTTPS sites.
   EVBubbleView* ev_bubble_view_;
 
-  // Location_entry view wrapper
-  views::NativeViewHost* location_entry_view_;
+  // Location_entry view
+  views::View* location_entry_view_;
 
   // The following views are used to provide hints and remind the user as to
   // what is going in the edit. They are all added a children of the
@@ -370,9 +374,11 @@ class LocationBarView : public LocationBar,
   // Shown if the user has selected a keyword.
   SelectedKeywordView* selected_keyword_view_;
 
+#if defined(OS_WIN)
   // View responsible for showing suggested text. This is NULL when there is no
   // suggested text.
   SuggestedTextView* suggested_text_view_;
+#endif
 
   // Shown if the selected url has a corresponding keyword.
   KeywordHintView* keyword_hint_view_;
@@ -400,10 +406,6 @@ class LocationBarView : public LocationBar,
   // because calling profile_->GetTemplateURLModel() in the destructor causes a
   // crash.
   TemplateURLModel* template_url_model_;
-
-#if defined(OS_LINUX)
-  scoped_ptr<AccessibleWidgetHelper> accessible_widget_helper_;
-#endif
 
   // Should instant be updated? This is set to false in OnAutocompleteWillAccept
   // and true in OnAutocompleteAccept. This is needed as prior to accepting an

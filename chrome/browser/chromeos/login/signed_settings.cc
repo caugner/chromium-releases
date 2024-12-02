@@ -13,6 +13,7 @@
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/login_library.h"
+#include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/ownership_service.h"
 #include "chrome/browser/chromeos/login/signed_settings_temp_storage.h"
 
@@ -24,12 +25,18 @@ SignedSettings::SignedSettings()
 
 SignedSettings::~SignedSettings() {}
 
+SignedSettings::ReturnCode SignedSettings::MapKeyOpCode(
+    OwnerManager::KeyOpCode return_code) {
+  return (return_code == OwnerManager::KEY_UNAVAILABLE ?
+          KEY_UNAVAILABLE : OPERATION_FAILED);
+}
+
 class CheckWhitelistOp : public SignedSettings {
  public:
   CheckWhitelistOp(const std::string& email,
                    SignedSettings::Delegate<bool>* d);
   virtual ~CheckWhitelistOp();
-  bool Execute();
+  void Execute();
   // Implementation of OwnerManager::Delegate::OnKeyOpComplete()
   void OnKeyOpComplete(const OwnerManager::KeyOpCode return_code,
                        const std::vector<uint8>& payload);
@@ -46,7 +53,7 @@ class WhitelistOp : public SignedSettings,
               bool add_to_whitelist,
               SignedSettings::Delegate<bool>* d);
   virtual ~WhitelistOp();
-  bool Execute();
+  void Execute();
   // Implementation of OwnerManager::Delegate::OnKeyOpComplete()
   void OnKeyOpComplete(const OwnerManager::KeyOpCode return_code,
                        const std::vector<uint8>& payload);
@@ -68,7 +75,7 @@ class StorePropertyOp : public SignedSettings,
                   const std::string& value,
                   SignedSettings::Delegate<bool>* d);
   virtual ~StorePropertyOp();
-  bool Execute();
+  void Execute();
   // Implementation of OwnerManager::Delegate::OnKeyOpComplete()
   void OnKeyOpComplete(const OwnerManager::KeyOpCode return_code,
                        const std::vector<uint8>& payload);
@@ -86,7 +93,7 @@ class RetrievePropertyOp : public SignedSettings {
   RetrievePropertyOp(const std::string& name,
                      SignedSettings::Delegate<std::string>* d);
   virtual ~RetrievePropertyOp();
-  bool Execute();
+  void Execute();
   // Implementation of OwnerManager::Delegate::OnKeyOpComplete()
   void OnKeyOpComplete(const OwnerManager::KeyOpCode return_code,
                        const std::vector<uint8>& payload);
@@ -102,7 +109,7 @@ SignedSettings* SignedSettings::CreateCheckWhitelistOp(
     const std::string& email,
     SignedSettings::Delegate<bool>* d) {
   DCHECK(d != NULL);
-  return new CheckWhitelistOp(email, d);
+  return new CheckWhitelistOp(Authenticator::Canonicalize(email), d);
 }
 
 // static
@@ -111,7 +118,9 @@ SignedSettings* SignedSettings::CreateWhitelistOp(
     bool add_to_whitelist,
     SignedSettings::Delegate<bool>* d) {
   DCHECK(d != NULL);
-  return new WhitelistOp(email, add_to_whitelist, d);
+  return new WhitelistOp(Authenticator::Canonicalize(email),
+                         add_to_whitelist,
+                         d);
 }
 
 // static
@@ -139,15 +148,15 @@ CheckWhitelistOp::CheckWhitelistOp(const std::string& email,
 
 CheckWhitelistOp::~CheckWhitelistOp() {}
 
-bool CheckWhitelistOp::Execute() {
+void CheckWhitelistOp::Execute() {
   CHECK(chromeos::CrosLibrary::Get()->EnsureLoaded());
   std::vector<uint8> sig;
-  if (!CrosLibrary::Get()->GetLoginLibrary()->CheckWhitelist(email_, &sig))
-    return false;
-
+  if (!CrosLibrary::Get()->GetLoginLibrary()->CheckWhitelist(email_, &sig)) {
+    d_->OnSettingsOpCompleted(NOT_FOUND, false);
+    return;
+  }
   // Posts a task to the FILE thread to verify |sig|.
   service_->StartVerifyAttempt(email_, sig, this);
-  return true;
 }
 
 void CheckWhitelistOp::OnKeyOpComplete(
@@ -162,10 +171,13 @@ void CheckWhitelistOp::OnKeyOpComplete(
                           return_code, payload));
     return;
   }
-  if (return_code == OwnerManager::SUCCESS)
-    d_->OnSettingsOpSucceeded(true);
-  else
-    d_->OnSettingsOpFailed();
+  if (return_code == OwnerManager::SUCCESS) {
+    VLOG(2) << "Whitelist check was successful.";
+    d_->OnSettingsOpCompleted(SUCCESS, true);
+  } else {
+    VLOG(2) << "Whitelist check failed.";
+    d_->OnSettingsOpCompleted(SignedSettings::MapKeyOpCode(return_code), false);
+  }
 }
 
 WhitelistOp::WhitelistOp(const std::string& email,
@@ -178,10 +190,9 @@ WhitelistOp::WhitelistOp(const std::string& email,
 
 WhitelistOp::~WhitelistOp() {}
 
-bool WhitelistOp::Execute() {
+void WhitelistOp::Execute() {
   // Posts a task to the FILE thread to sign |email_|.
   service_->StartSigningAttempt(email_, this);
-  return true;
 }
 
 void WhitelistOp::OnKeyOpComplete(const OwnerManager::KeyOpCode return_code,
@@ -196,20 +207,20 @@ void WhitelistOp::OnKeyOpComplete(const OwnerManager::KeyOpCode return_code,
     return;
   }
   // Now, sure we're on the UI thread.
-  bool success = false;
   if (return_code == OwnerManager::SUCCESS) {
-    // OnComplete() will be called when this is done.
-    success = InitiateWhitelistOp(payload);
+    // OnComplete() will be called by this call, if it succeeds.
+    if (!InitiateWhitelistOp(payload))
+      d_->OnSettingsOpCompleted(OPERATION_FAILED, false);
+  } else {
+    d_->OnSettingsOpCompleted(SignedSettings::MapKeyOpCode(return_code), false);
   }
-  if (!success)
-    d_->OnSettingsOpFailed();
 }
 
 void WhitelistOp::OnComplete(bool value) {
   if (value)
-    d_->OnSettingsOpSucceeded(value);
+    d_->OnSettingsOpCompleted(SUCCESS, value);
   else
-    d_->OnSettingsOpFailed();
+    d_->OnSettingsOpCompleted(NOT_FOUND, false);
 }
 
 bool WhitelistOp::InitiateWhitelistOp(const std::vector<uint8>& signature) {
@@ -229,14 +240,14 @@ StorePropertyOp::StorePropertyOp(const std::string& name,
 
 StorePropertyOp::~StorePropertyOp() {}
 
-bool StorePropertyOp::Execute() {
+void StorePropertyOp::Execute() {
   if (!service_->IsAlreadyOwned()) {
     if (g_browser_process &&
         g_browser_process->local_state() &&
         SignedSettingsTempStorage::Store(name_, value_,
                                          g_browser_process->local_state())) {
-      d_->OnSettingsOpSucceeded(true);
-      return true;
+      d_->OnSettingsOpCompleted(SUCCESS, true);
+      return;
     }
   }
   // Posts a task to the FILE thread to sign |name_|=|value_|.
@@ -244,7 +255,6 @@ bool StorePropertyOp::Execute() {
                                            name_.c_str(),
                                            value_.c_str());
   service_->StartSigningAttempt(to_sign, this);
-  return true;
 }
 
 void StorePropertyOp::OnKeyOpComplete(const OwnerManager::KeyOpCode return_code,
@@ -258,24 +268,26 @@ void StorePropertyOp::OnKeyOpComplete(const OwnerManager::KeyOpCode return_code,
                           return_code, payload));
     return;
   }
+  VLOG(2) << "StorePropertyOp::OnKeyOpComplete return_code = " << return_code;
   // Now, sure we're on the UI thread.
-  bool success = false;
   if (return_code == OwnerManager::SUCCESS) {
-    // OnComplete() will be called when this is done.
-    success = CrosLibrary::Get()->GetLoginLibrary()->StorePropertyAsync(name_,
-                                                                        value_,
-                                                                        payload,
-                                                                        this);
+    // OnComplete() will be called by this call, if it succeeds.
+    if (!CrosLibrary::Get()->GetLoginLibrary()->StorePropertyAsync(name_,
+                                                                   value_,
+                                                                   payload,
+                                                                   this)) {
+      d_->OnSettingsOpCompleted(OPERATION_FAILED, false);
+    }
+  } else {
+    d_->OnSettingsOpCompleted(SignedSettings::MapKeyOpCode(return_code), false);
   }
-  if (!success)
-    d_->OnSettingsOpFailed();
 }
 
 void StorePropertyOp::OnComplete(bool value) {
   if (value)
-    d_->OnSettingsOpSucceeded(value);
+    d_->OnSettingsOpCompleted(SUCCESS, value);
   else
-    d_->OnSettingsOpFailed();
+    d_->OnSettingsOpCompleted(NOT_FOUND, false);
 }
 
 RetrievePropertyOp::RetrievePropertyOp(const std::string& name,
@@ -286,7 +298,7 @@ RetrievePropertyOp::RetrievePropertyOp(const std::string& name,
 
 RetrievePropertyOp::~RetrievePropertyOp() {}
 
-bool RetrievePropertyOp::Execute() {
+void RetrievePropertyOp::Execute() {
   CHECK(chromeos::CrosLibrary::Get()->EnsureLoaded());
   // TODO(dilmah): Fix the race:
   // At the moment when device becomes owned there is lapse of time after
@@ -303,21 +315,21 @@ bool RetrievePropertyOp::Execute() {
           NewRunnableMethod(this,
                             &RetrievePropertyOp::OnKeyOpComplete,
                             OwnerManager::SUCCESS, std::vector<uint8>()));
-      return true;
+      return;
     }
   }
   std::vector<uint8> sig;
   if (!CrosLibrary::Get()->GetLoginLibrary()->RetrieveProperty(name_,
                                                                &value_,
                                                                &sig)) {
-    return false;
+    d_->OnSettingsOpCompleted(NOT_FOUND, std::string());
+    return;
   }
   std::string to_verify = base::StringPrintf("%s=%s",
                                              name_.c_str(),
                                              value_.c_str());
   // Posts a task to the FILE thread to verify |sig|.
   service_->StartVerifyAttempt(to_verify, sig, this);
-  return true;
 }
 
 void RetrievePropertyOp::OnKeyOpComplete(
@@ -333,9 +345,10 @@ void RetrievePropertyOp::OnKeyOpComplete(
   }
   // Now, sure we're on the UI thread.
   if (return_code == OwnerManager::SUCCESS)
-    d_->OnSettingsOpSucceeded(value_);
+    d_->OnSettingsOpCompleted(SUCCESS, value_);
   else
-    d_->OnSettingsOpFailed();
+    d_->OnSettingsOpCompleted(SignedSettings::MapKeyOpCode(return_code),
+                              std::string());
 }
 
 }  // namespace chromeos

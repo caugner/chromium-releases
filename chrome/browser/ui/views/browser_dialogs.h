@@ -85,11 +85,11 @@ void ShowPasswordsExceptionsWindowView(Profile* profile);
 // Shows the keyword editor. See KeywordEditorView.
 void ShowKeywordEditorView(Profile* profile);
 
-// Shows the "new profile" dialog box. See NewProfileDialog.
-void ShowNewProfileDialog();
-
 // Shows the Task Manager.
 void ShowTaskManager();
+
+// Shows the Task Manager, highlighting the background pages.
+void ShowBackgroundPages();
 
 #if defined(OS_CHROMEOS)
 // Shows the Login Wizard.

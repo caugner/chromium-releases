@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/path_service.h"
-#include "base/scoped_handle_win.h"
+#include "base/win/scoped_handle.h"
 #include "chrome_frame/test/test_server.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/host_resolver_proc.h"
@@ -58,12 +58,13 @@ class ScopedInternet {
   HINTERNET h_;
 };
 
-class URLRequestTestContext : public URLRequestContext {
+class URLRequestTestContext : public net::URLRequestContext {
  public:
   URLRequestTestContext() {
     host_resolver_ =
         net::CreateSystemHostResolver(net::HostResolver::kDefaultParallelism,
                                       NULL, NULL);
+    cert_verifier_ = new net::CertVerifier;
     proxy_service_ = net::ProxyService::CreateDirect();
     ssl_config_service_ = new net::SSLConfigServiceDefaults;
     http_auth_handler_factory_ = net::HttpAuthHandlerFactory::CreateDefault(
@@ -71,6 +72,7 @@ class URLRequestTestContext : public URLRequestContext {
     http_transaction_factory_ = new net::HttpCache(
         net::HttpNetworkLayer::CreateFactory(
             host_resolver_,
+            cert_verifier_,
             NULL /* dnsrr_resolver */,
             NULL /* dns_cert_checker */,
             NULL /* ssl_host_info_factory */,
@@ -79,6 +81,7 @@ class URLRequestTestContext : public URLRequestContext {
             http_auth_handler_factory_,
             NULL /* network_delegate */,
             NULL /* net_log */),
+        NULL /* net_log */,
         net::HttpCache::DefaultBackend::InMemory(0));
     // In-memory cookie store.
     cookie_store_ = new net::CookieMonster(NULL, NULL);
@@ -87,13 +90,15 @@ class URLRequestTestContext : public URLRequestContext {
   virtual ~URLRequestTestContext() {
     delete http_transaction_factory_;
     delete http_auth_handler_factory_;
+    delete cert_verifier_;
+    delete host_resolver_;
   }
 };
 
-class TestURLRequest : public URLRequest {
+class TestURLRequest : public net::URLRequest {
  public:
   TestURLRequest(const GURL& url, Delegate* delegate)
-      : URLRequest(url, delegate) {
+      : net::URLRequest(url, delegate) {
     set_context(new URLRequestTestContext());
   }
 };
@@ -187,7 +192,8 @@ TEST_F(TestServerTest, TestServer) {
   UrlTaskChain goog_task("http://localhost:1337/goog", &file_task);
 
   DWORD tid = 0;
-  ScopedHandle worker(::CreateThread(NULL, 0, FetchUrl, &goog_task, 0, &tid));
+  base::win::ScopedHandle worker(::CreateThread(
+      NULL, 0, FetchUrl, &goog_task, 0, &tid));
   loop.MessageLoop::Run();
 
   EXPECT_FALSE(quit_msg.hit_);

@@ -11,10 +11,12 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/scoped_ptr.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/version.h"
 #include "chrome/app/breakpad_win.h"
 #include "chrome/app/client_util.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/result_codes.h"
 #include "chrome/installer/util/browser_distribution.h"
@@ -57,7 +59,7 @@ bool GetVersion(const wchar_t* exe_path, const wchar_t* key_path,
   // TODO(cpu) : This is solving the same problem as the environment variable
   // so one of them will eventually be deprecated.
   std::wstring new_chrome_exe(exe_path);
-  new_chrome_exe.append(installer_util::kChromeNewExe);
+  new_chrome_exe.append(installer::kChromeNewExe);
   if (::PathFileExistsW(new_chrome_exe.c_str()) &&
       ReadRegistryStr(key, google_update::kRegOldVersionField, version)) {
     ::RegCloseKey(key);
@@ -102,14 +104,14 @@ HMODULE LoadChromeWithDirectory(std::wstring* dir) {
       (cmd_line.GetSwitchValueASCII(switches::kProcessType) ==
       switches::kNaClLoaderProcess)) {
     // Load the 64-bit DLL when running in a 64-bit process.
-    dir->append(installer_util::kChromeNaCl64Dll);
+    dir->append(installer::kChromeNaCl64Dll);
   } else {
     // Only NaCl broker and loader can be launched as Win64 processes.
     NOTREACHED();
     return NULL;
   }
 #else
-  dir->append(installer_util::kChromeDll);
+  dir->append(installer::kChromeDll);
 #endif
 
 #ifdef NDEBUG
@@ -212,27 +214,25 @@ HMODULE MainDllLoader::Load(std::wstring* out_version, std::wstring* out_file) {
   if (dll)
     return dll;
 
-  std::wstring version_env_string;
+  std::wstring version_string;
   scoped_ptr<Version> version;
   const CommandLine& cmd_line = *CommandLine::ForCurrentProcess();
   if (cmd_line.HasSwitch(switches::kChromeVersion)) {
-    version_env_string = cmd_line.GetSwitchValueNative(
-        switches::kChromeVersion);
-    version.reset(Version::GetVersionFromString(version_env_string));
+    version_string = cmd_line.GetSwitchValueNative(switches::kChromeVersion);
+    version.reset(Version::GetVersionFromString(WideToASCII(version_string)));
 
     if (!version.get()) {
       // If a bogus command line flag was given, then abort.
       LOG(ERROR) << "Invalid version string received on command line: "
-                 << version_env_string;
+                 << version_string;
       return NULL;
     }
   }
 
   if (!version.get()) {
-    if (EnvQueryStr(
-            BrowserDistribution::GetDistribution()->GetEnvVersionKey().c_str(),
-            &version_env_string)) {
-      version.reset(Version::GetVersionFromString(version_env_string));
+    if (EnvQueryStr(ASCIIToWide(chrome::kChromeVersionEnvVar).c_str(),
+                    &version_string)) {
+      version.reset(Version::GetVersionFromString(WideToASCII(version_string)));
     }
   }
 
@@ -241,13 +241,13 @@ HMODULE MainDllLoader::Load(std::wstring* out_version, std::wstring* out_file) {
     // Look into the registry to find the latest version. We don't validate
     // this by building a Version object to avoid harming normal case startup
     // time.
-    version_env_string.clear();
-    GetVersion(dir.c_str(), reg_path.c_str(), &version_env_string);
+    version_string.clear();
+    GetVersion(dir.c_str(), reg_path.c_str(), &version_string);
   }
 
-  if (version.get() || !version_env_string.empty()) {
+  if (version.get() || !version_string.empty()) {
     *out_file = dir;
-    *out_version = version_env_string;
+    *out_version = version_string;
     out_file->append(*out_version).append(L"\\");
     return LoadChromeWithDirectory(out_file);
   } else {
@@ -267,9 +267,7 @@ int MainDllLoader::Launch(HINSTANCE instance,
     return ResultCodes::MISSING_DATA;
 
   scoped_ptr<base::Environment> env(base::Environment::Create());
-  env->SetVar(WideToUTF8(
-      BrowserDistribution::GetDistribution()->GetEnvVersionKey()).c_str(),
-      WideToUTF8(version));
+  env->SetVar(chrome::kChromeVersionEnvVar, WideToUTF8(version));
 
   InitCrashReporterWithDllPath(file);
   OnBeforeLaunch();

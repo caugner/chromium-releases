@@ -12,21 +12,20 @@
 #include <string>
 #include <vector>
 
-#include "app/l10n_util.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/scoped_comptr_win.h"
 #include "base/string_util.h"
-#include "base/thread.h"
+#include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/favicon_service.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/page_usage_data.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/shell_integration.h"
@@ -36,10 +35,11 @@
 #include "gfx/codec/png_codec.h"
 #include "gfx/icon_util.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/skia/include/core/SkBitmap.h"
-
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/base/l10n/l10n_util.h"
+
 
 namespace {
 
@@ -293,7 +293,7 @@ HRESULT UpdateCategory(ScopedComPtr<ICustomDestinationList> list,
   if (data.empty() || !max_slots)
     return S_OK;
 
-  std::wstring category = l10n_util::GetString(category_id);
+  std::wstring category = UTF16ToWide(l10n_util::GetStringUTF16(category_id));
 
   // Create an EnumerableObjectCollection object.
   // We once add the given items to this collection object and add this
@@ -348,7 +348,8 @@ HRESULT UpdateTaskCategory(ScopedComPtr<ICustomDestinationList> list,
   // We remove '&' characters from this string so we can share it with our
   // system menu.
   scoped_refptr<ShellLinkItem> chrome(new ShellLinkItem);
-  std::wstring chrome_title(l10n_util::GetString(IDS_NEW_WINDOW));
+  std::wstring chrome_title =
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_NEW_WINDOW));
   ReplaceSubstringsAfterOffset(&chrome_title, 0, L"&", L"");
   chrome->SetTitle(chrome_title);
   chrome->SetIcon(chrome_path, 0, false);
@@ -360,7 +361,8 @@ HRESULT UpdateTaskCategory(ScopedComPtr<ICustomDestinationList> list,
   scoped_refptr<ShellLinkItem> incognito(new ShellLinkItem);
   incognito->SetArguments(
       ASCIIToWide(std::string("--") + switches::kIncognito));
-  std::wstring incognito_title(l10n_util::GetString(IDS_NEW_INCOGNITO_WINDOW));
+  std::wstring incognito_title =
+      UTF16ToWide(l10n_util::GetStringUTF16(IDS_NEW_INCOGNITO_WINDOW));
   ReplaceSubstringsAfterOffset(&incognito_title, 0, L"&", L"");
   incognito->SetTitle(incognito_title);
   incognito->SetIcon(chrome_path, 0, false);
@@ -416,7 +418,7 @@ bool UpdateJumpList(const wchar_t* app_id,
     return false;
 
   // Retrieve the absolute path to "chrome.exe".
-  std::wstring chrome_path;
+  FilePath chrome_path;
   if (!PathService::Get(base::FILE_EXE, &chrome_path))
     return false;
 
@@ -447,20 +449,21 @@ bool UpdateJumpList(const wchar_t* app_id,
   // This update request is applied into the JumpList when we commit this
   // transaction.
   result = UpdateCategory(destination_list, IDS_NEW_TAB_MOST_VISITED,
-                          chrome_path, chrome_switches, most_visited_pages,
-                          most_visited_items);
+                          chrome_path.value(), chrome_switches,
+                          most_visited_pages, most_visited_items);
   if (FAILED(result))
     return false;
 
   // Update the "Recently Closed" category of the JumpList.
   result = UpdateCategory(destination_list, IDS_NEW_TAB_RECENTLY_CLOSED,
-                          chrome_path, chrome_switches, recently_closed_pages,
-                          recently_closed_items);
+                          chrome_path.value(), chrome_switches,
+                          recently_closed_pages, recently_closed_items);
   if (FAILED(result))
     return false;
 
   // Update the "Tasks" category of the JumpList.
-  result = UpdateTaskCategory(destination_list, chrome_path, chrome_switches);
+  result = UpdateTaskCategory(destination_list, chrome_path.value(),
+                              chrome_switches);
   if (FAILED(result))
     return false;
 

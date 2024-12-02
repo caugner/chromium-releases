@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,7 @@
 #include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_thread.h"
-#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/chrome_cookie_notification_details.h"
@@ -20,7 +20,7 @@
 #include "chrome/browser/net/sqlite_persistent_cookie_store.h"
 #include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/net/pref_proxy_config_service.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
@@ -33,7 +33,7 @@
 #include "net/http/http_network_layer.h"
 #include "net/http/http_util.h"
 #include "net/proxy/proxy_config_service_fixed.h"
-#include "net/proxy/proxy_script_fetcher.h"
+#include "net/proxy/proxy_script_fetcher_impl.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request.h"
 #include "webkit/glue/webkit_glue.h"
@@ -93,10 +93,9 @@ net::ProxyConfigService* CreateProxyConfigService(Profile* profile) {
 // Create a proxy service according to the options on command line.
 net::ProxyService* CreateProxyService(
     net::NetLog* net_log,
-    URLRequestContext* context,
+    net::URLRequestContext* context,
     net::ProxyConfigService* proxy_config_service,
-    const CommandLine& command_line,
-    IOThread* io_thread) {
+    const CommandLine& command_line) {
   CheckCurrentlyOnIOThread();
 
   bool use_v8 = !command_line.HasSwitch(switches::kWinHttpProxyResolver);
@@ -127,7 +126,7 @@ net::ProxyService* CreateProxyService(
     return net::ProxyService::CreateUsingV8ProxyResolver(
         proxy_config_service,
         num_pac_threads,
-        io_thread->CreateAndRegisterProxyScriptFetcher(context),
+        new net::ProxyScriptFetcherImpl(context),
         context->host_resolver(),
         net_log);
   }
@@ -262,6 +261,7 @@ ChromeURLRequestContext* FactoryForOriginal::Create() {
 
   // Global host resolver for the context.
   context->set_host_resolver(io_thread_globals->host_resolver.get());
+  context->set_cert_verifier(io_thread_globals->cert_verifier.get());
   context->set_dnsrr_resolver(io_thread_globals->dnsrr_resolver.get());
   context->set_http_auth_handler_factory(
       io_thread_globals->http_auth_handler_factory.get());
@@ -273,24 +273,24 @@ ChromeURLRequestContext* FactoryForOriginal::Create() {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
 
   context->set_proxy_service(
-      CreateProxyService(io_thread_globals->net_log.get(),
-                         context,
+      CreateProxyService(io_thread()->net_log(),
+                         io_thread_globals->proxy_script_fetcher_context.get(),
                          proxy_config_service_.release(),
-                         command_line,
-                         io_thread()));
+                         command_line));
 
   net::HttpCache::DefaultBackend* backend = new net::HttpCache::DefaultBackend(
       net::DISK_CACHE, disk_cache_path_, cache_size_,
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE));
   net::HttpCache* cache =
       new net::HttpCache(context->host_resolver(),
+                         context->cert_verifier(),
                          context->dnsrr_resolver(),
                          context->dns_cert_checker(),
                          context->proxy_service(),
                          context->ssl_config_service(),
                          context->http_auth_handler_factory(),
                          &io_thread_globals->network_delegate,
-                         io_thread_globals->net_log.get(),
+                         io_thread()->net_log(),
                          backend);
 
   bool record_mode = chrome::kRecordModeEnabled &&
@@ -315,6 +315,7 @@ ChromeURLRequestContext* FactoryForOriginal::Create() {
 
     scoped_refptr<SQLitePersistentCookieStore> cookie_db =
         new SQLitePersistentCookieStore(cookie_store_path_);
+    cookie_db->SetClearLocalStateOnExit(clear_local_state_on_exit_);
     context->set_cookie_store(new net::CookieMonster(cookie_db.get(),
         cookie_monster_delegate_));
   }
@@ -324,7 +325,7 @@ ChromeURLRequestContext* FactoryForOriginal::Create() {
 
   appcache_service_->set_request_context(context);
 
-  context->set_net_log(io_thread_globals->net_log.get());
+  context->set_net_log(io_thread()->net_log());
   return context;
 }
 
@@ -399,9 +400,10 @@ ChromeURLRequestContext* FactoryForOffTheRecord::Create() {
 
   IOThread::Globals* io_thread_globals = io_thread()->globals();
 
-  // Share the same proxy service, host resolver, and http_auth_handler_factory
-  // as the original profile.
+  // Share the same proxy service, host resolver, cert verifier,
+  // and http_auth_handler_factory as the original profile.
   context->set_host_resolver(original_context->host_resolver());
+  context->set_cert_verifier(original_context->cert_verifier());
   context->set_proxy_service(original_context->proxy_service());
   context->set_http_auth_handler_factory(
       original_context->http_auth_handler_factory());
@@ -411,13 +413,14 @@ ChromeURLRequestContext* FactoryForOffTheRecord::Create() {
 
   net::HttpCache* cache =
       new net::HttpCache(context->host_resolver(),
+                         context->cert_verifier(),
                          context->dnsrr_resolver(),
                          NULL /* dns_cert_checker */,
                          context->proxy_service(),
                          context->ssl_config_service(),
                          context->http_auth_handler_factory(),
                          &io_thread_globals->network_delegate,
-                         io_thread_globals->net_log.get(),
+                         io_thread()->net_log(),
                          backend);
   context->set_cookie_store(new net::CookieMonster(NULL,
       cookie_monster_delegate_));
@@ -430,7 +433,7 @@ ChromeURLRequestContext* FactoryForOffTheRecord::Create() {
 
   appcache_service_->set_request_context(context);
 
-  context->set_net_log(io_thread_globals->net_log.get());
+  context->set_net_log(io_thread()->net_log());
   return context;
 }
 
@@ -447,7 +450,6 @@ class FactoryForMedia : public ChromeURLRequestContextFactory {
                 profile->GetRequestContext())),
         disk_cache_path_(disk_cache_path),
         cache_size_(cache_size) {
-    is_media_ = true;
     is_off_the_record_ = off_the_record;
   }
 
@@ -504,18 +506,19 @@ ChromeURLRequestContext* FactoryForMedia::Create() {
     // If original HttpCache doesn't exist, simply construct one with a whole
     // new set of network stack.
     cache = new net::HttpCache(main_context->host_resolver(),
+                               main_context->cert_verifier(),
                                main_context->dnsrr_resolver(),
                                NULL /* dns_cert_checker */,
                                main_context->proxy_service(),
                                main_context->ssl_config_service(),
                                main_context->http_auth_handler_factory(),
                                &io_thread_globals->network_delegate,
-                               io_thread_globals->net_log.get(),
+                               io_thread()->net_log(),
                                backend);
   }
 
   context->set_http_transaction_factory(cache);
-  context->set_net_log(io_thread_globals->net_log.get());
+  context->set_net_log(io_thread()->net_log());
 
   return context;
 }
@@ -544,7 +547,7 @@ ChromeURLRequestContextGetter::~ChromeURLRequestContextGetter() {
 
   DCHECK(registrar_.IsEmpty()) << "Probably didn't call CleanupOnUIThread";
 
-  // Either we already transformed the factory into a URLRequestContext, or
+  // Either we already transformed the factory into a net::URLRequestContext, or
   // we still have a pending factory.
   DCHECK((factory_.get() && !url_request_context_.get()) ||
          (!factory_.get() && url_request_context_.get()));
@@ -557,7 +560,7 @@ ChromeURLRequestContextGetter::~ChromeURLRequestContextGetter() {
 }
 
 // Lazily create a ChromeURLRequestContext using our factory.
-URLRequestContext* ChromeURLRequestContextGetter::GetURLRequestContext() {
+net::URLRequestContext* ChromeURLRequestContextGetter::GetURLRequestContext() {
   CheckCurrentlyOnIOThread();
 
   if (!url_request_context_) {
@@ -566,7 +569,8 @@ URLRequestContext* ChromeURLRequestContextGetter::GetURLRequestContext() {
     if (is_main()) {
       url_request_context_->set_is_main(true);
 #if defined(USE_NSS)
-      // TODO(ukai): find a better way to set the URLRequestContext for OCSP.
+      // TODO(ukai): find a better way to set the net::URLRequestContext for
+      // OCSP.
       net::SetURLRequestContextForOCSP(url_request_context_);
 #endif
     }
@@ -696,6 +700,15 @@ void ChromeURLRequestContextGetter::Observe(
               this,
               &ChromeURLRequestContextGetter::OnDefaultCharsetChange,
               default_charset));
+    } else if (*pref_name_in == prefs::kClearSiteDataOnExit) {
+      bool clear_site_data =
+          prefs->GetBoolean(prefs::kClearSiteDataOnExit);
+      BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
+          NewRunnableMethod(
+              this,
+              &ChromeURLRequestContextGetter::OnClearSiteDataOnExitChange,
+              clear_site_data));
     }
   } else {
     NOTREACHED();
@@ -708,6 +721,7 @@ void ChromeURLRequestContextGetter::RegisterPrefsObserver(Profile* profile) {
   registrar_.Init(profile->GetPrefs());
   registrar_.Add(prefs::kAcceptLanguages, this);
   registrar_.Add(prefs::kDefaultCharset, this);
+  registrar_.Add(prefs::kClearSiteDataOnExit, this);
 }
 
 // static
@@ -733,6 +747,12 @@ void ChromeURLRequestContextGetter::OnDefaultCharsetChange(
   GetIOContext()->OnDefaultCharsetChange(default_charset);
 }
 
+void ChromeURLRequestContextGetter::OnClearSiteDataOnExitChange(
+    bool clear_site_data) {
+  GetCookieStore()->GetCookieMonster()->
+      SetClearPersistentStoreOnExit(clear_site_data);
+}
+
 void ChromeURLRequestContextGetter::GetCookieStoreAsyncHelper(
     base::WaitableEvent* completion,
     net::CookieStore** result) {
@@ -746,8 +766,7 @@ void ChromeURLRequestContextGetter::GetCookieStoreAsyncHelper(
 // ----------------------------------------------------------------------------
 
 ChromeURLRequestContext::ChromeURLRequestContext()
-    : is_media_(false),
-      is_off_the_record_(false) {
+    : is_off_the_record_(false) {
   CheckCurrentlyOnIOThread();
 }
 
@@ -766,10 +785,10 @@ ChromeURLRequestContext::~ChromeURLRequestContext() {
 
 #if defined(USE_NSS)
   if (is_main()) {
-    URLRequestContext* ocsp_context = net::GetURLRequestContextForOCSP();
+    net::URLRequestContext* ocsp_context = net::GetURLRequestContextForOCSP();
     if (ocsp_context) {
       DCHECK_EQ(this, ocsp_context);
-      // We are releasing the URLRequestContext used by OCSP handlers.
+      // We are releasing the net::URLRequestContext used by OCSP handlers.
       net::SetURLRequestContextForOCSP(NULL);
     }
   }
@@ -777,7 +796,7 @@ ChromeURLRequestContext::~ChromeURLRequestContext() {
 
   NotificationService::current()->Notify(
       NotificationType::URL_REQUEST_CONTEXT_RELEASED,
-      Source<URLRequestContext>(this),
+      Source<net::URLRequestContext>(this),
       NotificationService::NoDetails());
 
   delete ftp_transaction_factory_;
@@ -785,7 +804,7 @@ ChromeURLRequestContext::~ChromeURLRequestContext() {
 
   // cookie_policy_'s lifetime is auto-managed by chrome_cookie_policy_.  We
   // null this out here to avoid a dangling reference to chrome_cookie_policy_
-  // when ~URLRequestContext runs.
+  // when ~net::URLRequestContext runs.
   cookie_policy_ = NULL;
 }
 
@@ -796,45 +815,6 @@ const std::string& ChromeURLRequestContext::GetUserAgent(
 
 bool ChromeURLRequestContext::IsExternal() const {
   return false;
-}
-
-ChromeURLRequestContext::ChromeURLRequestContext(
-    ChromeURLRequestContext* other) {
-  CheckCurrentlyOnIOThread();
-
-  // Set URLRequestContext members
-  net_log_ = other->net_log_;
-  host_resolver_ = other->host_resolver_;
-  proxy_service_ = other->proxy_service_;
-  ssl_config_service_ = other->ssl_config_service_;
-  http_transaction_factory_ = other->http_transaction_factory_;
-  ftp_transaction_factory_ = other->ftp_transaction_factory_;
-  cookie_store_ = other->cookie_store_;
-  cookie_policy_ = other->cookie_policy_;
-  transport_security_state_ = other->transport_security_state_;
-  accept_language_ = other->accept_language_;
-  accept_charset_ = other->accept_charset_;
-  referrer_charset_ = other->referrer_charset_;
-  // NOTE(cbentzel): Sharing the http_auth_handler_factory_ is potentially
-  // dangerous because it is a raw pointer. However, the current implementation
-  // creates and destroys the pointed-to-object in the io_thread and it is
-  // valid for the lifetime of all ChromeURLRequestContext objects.
-  // If this is no longer the case, HttpAuthHandlerFactory will need to be
-  // ref-counted or cloneable.
-  http_auth_handler_factory_ = other->http_auth_handler_factory_;
-
-  // Set ChromeURLRequestContext members
-  user_script_dir_path_ = other->user_script_dir_path_;
-  appcache_service_ = other->appcache_service_;
-  database_tracker_ = other->database_tracker_;
-  chrome_cookie_policy_ = other->chrome_cookie_policy_;
-  host_content_settings_map_ = other->host_content_settings_map_;
-  host_zoom_map_ = other->host_zoom_map_;
-  is_media_ = other->is_media_;
-  is_off_the_record_ = other->is_off_the_record_;
-  blob_storage_context_ = other->blob_storage_context_;
-  browser_file_system_context_ = other->browser_file_system_context_;
-  extension_info_map_ = other->extension_info_map_;
 }
 
 void ChromeURLRequestContext::OnAcceptLanguageChange(
@@ -861,8 +841,7 @@ void ChromeURLRequestContext::OnDefaultCharsetChange(
 // ChromeURLRequestContext on the IO thread (see
 // ApplyProfileParametersToContext() which reverses this).
 ChromeURLRequestContextFactory::ChromeURLRequestContextFactory(Profile* profile)
-    : is_media_(false),
-      is_off_the_record_(profile->IsOffTheRecord()),
+    : is_off_the_record_(profile->IsOffTheRecord()),
       io_thread_(g_browser_process->io_thread()) {
   CheckCurrentlyOnMainThread();
   PrefService* prefs = profile->GetPrefs();
@@ -873,6 +852,7 @@ ChromeURLRequestContextFactory::ChromeURLRequestContextFactory(Profile* profile)
   std::string default_charset = prefs->GetString(prefs::kDefaultCharset);
   accept_charset_ =
       net::HttpUtil::GenerateAcceptCharsetHeader(default_charset);
+  clear_local_state_on_exit_ = prefs->GetBoolean(prefs::kClearSiteDataOnExit);
 
   // At this point, we don't know the charset of the referring page
   // where a url request originates from. This is used to get a suggested
@@ -901,8 +881,9 @@ ChromeURLRequestContextFactory::ChromeURLRequestContextFactory(Profile* profile)
   appcache_service_ = profile->GetAppCacheService();
   database_tracker_ = profile->GetDatabaseTracker();
   blob_storage_context_ = profile->GetBlobStorageContext();
-  browser_file_system_context_ = profile->GetFileSystemContext();
+  file_system_context_ = profile->GetFileSystemContext();
   extension_info_map_ = profile->GetExtensionInfoMap();
+  prerender_manager_ = profile->GetPrerenderManager();
 }
 
 ChromeURLRequestContextFactory::~ChromeURLRequestContextFactory() {
@@ -913,7 +894,6 @@ void ChromeURLRequestContextFactory::ApplyProfileParametersToContext(
     ChromeURLRequestContext* context) {
   // Apply all the parameters. NOTE: keep this in sync with
   // ChromeURLRequestContextFactory(Profile*).
-  context->set_is_media(is_media_);
   context->set_is_off_the_record(is_off_the_record_);
   context->set_accept_language(accept_language_);
   context->set_accept_charset(accept_charset_);
@@ -927,6 +907,7 @@ void ChromeURLRequestContextFactory::ApplyProfileParametersToContext(
   context->set_appcache_service(appcache_service_);
   context->set_database_tracker(database_tracker_);
   context->set_blob_storage_context(blob_storage_context_);
-  context->set_browser_file_system_context(browser_file_system_context_);
+  context->set_file_system_context(file_system_context_);
   context->set_extension_info_map(extension_info_map_);
+  context->set_prerender_manager(prerender_manager_);
 }
