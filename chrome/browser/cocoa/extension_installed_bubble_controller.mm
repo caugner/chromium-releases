@@ -8,8 +8,6 @@
 #include "base/mac_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser.h"
-#include "chrome/browser/browser_window.h"
 #include "chrome/browser/cocoa/browser_window_cocoa.h"
 #include "chrome/browser/cocoa/browser_window_controller.h"
 #include "chrome/browser/cocoa/extensions/browser_actions_controller.h"
@@ -17,6 +15,8 @@
 #include "chrome/browser/cocoa/info_bubble_view.h"
 #include "chrome/browser/cocoa/location_bar/location_bar_view_mac.h"
 #include "chrome/browser/cocoa/toolbar_controller.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/notification_registrar.h"
@@ -31,10 +31,12 @@
 class ExtensionLoadedNotificationObserver : public NotificationObserver {
  public:
   ExtensionLoadedNotificationObserver(
-      ExtensionInstalledBubbleController* controller)
+      ExtensionInstalledBubbleController* controller, Profile* profile)
           : controller_(controller) {
     registrar_.Add(this, NotificationType::EXTENSION_LOADED,
-        NotificationService::AllSources());
+        Source<Profile>(profile));
+    registrar_.Add(this, NotificationType::EXTENSION_UNLOADED,
+        Source<Profile>(profile));
   }
 
  private:
@@ -44,9 +46,16 @@ class ExtensionLoadedNotificationObserver : public NotificationObserver {
                const NotificationSource& source,
                const NotificationDetails& details) {
     if (type == NotificationType::EXTENSION_LOADED) {
-      Extension* extension = Details<Extension>(details).ptr();
+      const Extension* extension = Details<const Extension>(details).ptr();
       if (extension == [controller_ extension]) {
         [controller_ performSelectorOnMainThread:@selector(showWindow:)
+                                      withObject:controller_
+                                   waitUntilDone:NO];
+      }
+    } else if (type == NotificationType::EXTENSION_UNLOADED) {
+      const Extension* extension = Details<const Extension>(details).ptr();
+      if (extension == [controller_ extension]) {
+        [controller_ performSelectorOnMainThread:@selector(extensionUnloaded:)
                                       withObject:controller_
                                    waitUntilDone:NO];
       }
@@ -65,7 +74,7 @@ class ExtensionLoadedNotificationObserver : public NotificationObserver {
 @synthesize pageActionRemoved = pageActionRemoved_;  // Exposed for unit test.
 
 - (id)initWithParentWindow:(NSWindow*)parentWindow
-                 extension:(Extension*)extension
+                 extension:(const Extension*)extension
                    browser:(Browser*)browser
                       icon:(SkBitmap)icon {
   NSString* nibPath =
@@ -81,7 +90,9 @@ class ExtensionLoadedNotificationObserver : public NotificationObserver {
     icon_.reset([gfx::SkBitmapToNSImage(icon) retain]);
     pageActionRemoved_ = NO;
 
-    if (extension->browser_action()) {
+    if (!extension->omnibox_keyword().empty()) {
+      type_ = extension_installed_bubble::kOmniboxKeyword;
+    } else if (extension->browser_action()) {
       type_ = extension_installed_bubble::kBrowserAction;
     } else if (extension->page_action() &&
                !extension->page_action()->default_icon_path().empty()) {
@@ -91,7 +102,8 @@ class ExtensionLoadedNotificationObserver : public NotificationObserver {
     }
 
     // Start showing window only after extension has fully loaded.
-    extensionObserver_.reset(new ExtensionLoadedNotificationObserver(self));
+    extensionObserver_.reset(new ExtensionLoadedNotificationObserver(
+        self, browser->profile()));
   }
   return self;
 }
@@ -140,8 +152,7 @@ class ExtensionLoadedNotificationObserver : public NotificationObserver {
 // Extracted to a function here so that it can be overwritten for unit
 // testing.
 - (void)removePageActionPreviewIfNecessary {
-  DCHECK(extension_);
-  if (!extension_->page_action() || pageActionRemoved_)
+  if (!extension_ || !extension_->page_action() || pageActionRemoved_)
     return;
   pageActionRemoved_ = YES;
 
@@ -165,6 +176,12 @@ class ExtensionLoadedNotificationObserver : public NotificationObserver {
   NSPoint arrowPoint = NSZeroPoint;
 
   switch(type_) {
+    case extension_installed_bubble::kOmniboxKeyword: {
+      LocationBarViewMac* locationBarView =
+          [window->cocoa_controller() locationBarBridge];
+      arrowPoint = locationBarView->GetPageInfoBubblePoint();
+      break;
+    }
     case extension_installed_bubble::kBrowserAction: {
       BrowserActionsController* controller =
           [[window->cocoa_controller() toolbarController]
@@ -226,7 +243,8 @@ class ExtensionLoadedNotificationObserver : public NotificationObserver {
   NSSize offsets = NSMakeSize(info_bubble::kBubbleArrowXOffset +
                               info_bubble::kBubbleArrowWidth / 2.0, 0);
   offsets = [[window contentView] convertSize:offsets toView:nil];
-  origin.x -= NSWidth([window frame]) - offsets.width;
+  if ([infoBubbleView_ arrowLocation] == info_bubble::kTopRight)
+    origin.x -= NSWidth([window frame]) - offsets.width;
   origin.y -= NSHeight([window frame]);
   [window setFrameOrigin:origin];
 
@@ -239,7 +257,12 @@ class ExtensionLoadedNotificationObserver : public NotificationObserver {
 // function is exposed for unit testing.
 - (NSWindow*)initializeWindow {
   NSWindow* window = [self window];  // completes nib load
-  [infoBubbleView_ setArrowLocation:info_bubble::kTopRight];
+
+  if (type_ == extension_installed_bubble::kOmniboxKeyword) {
+    [infoBubbleView_ setArrowLocation:info_bubble::kTopLeft];
+  } else {
+    [infoBubbleView_ setArrowLocation:info_bubble::kTopRight];
+  }
 
   // Set appropriate icon, resizing if necessary.
   if ([icon_ size].width > extension_installed_bubble::kIconSize) {
@@ -269,12 +292,26 @@ class ExtensionLoadedNotificationObserver : public NotificationObserver {
 
   // If type is page action, include a special message about page actions.
   if (type_ == extension_installed_bubble::kPageAction) {
-    [pageActionInfoMsg_ setHidden:NO];
-    [[pageActionInfoMsg_ cell]
+    [extraInfoMsg_ setHidden:NO];
+    [[extraInfoMsg_ cell]
         setFont:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]]];
     [GTMUILocalizerAndLayoutTweaker
-        sizeToFitFixedWidthTextField:pageActionInfoMsg_];
-    newWindowHeight += [pageActionInfoMsg_ frame].size.height +
+        sizeToFitFixedWidthTextField:extraInfoMsg_];
+    newWindowHeight += [extraInfoMsg_ frame].size.height +
+        extension_installed_bubble::kInnerVerticalMargin;
+  }
+
+  // If type is omnibox keyword, include a special message about the keyword.
+  if (type_ == extension_installed_bubble::kOmniboxKeyword) {
+    [extraInfoMsg_ setStringValue:l10n_util::GetNSStringF(
+        IDS_EXTENSION_INSTALLED_OMNIBOX_KEYWORD_INFO,
+        UTF8ToUTF16(extension_->omnibox_keyword()))];
+    [extraInfoMsg_ setHidden:NO];
+    [[extraInfoMsg_ cell]
+        setFont:[NSFont systemFontOfSize:[NSFont smallSystemFontSize]]];
+    [GTMUILocalizerAndLayoutTweaker
+        sizeToFitFixedWidthTextField:extraInfoMsg_];
+    newWindowHeight += [extraInfoMsg_ frame].size.height +
         extension_installed_bubble::kInnerVerticalMargin;
   }
 
@@ -298,14 +335,15 @@ class ExtensionLoadedNotificationObserver : public NotificationObserver {
       extensionMessageFrame1.size.height +
       extension_installed_bubble::kOuterVerticalMargin);
   [extensionInstalledMsg_ setFrame:extensionMessageFrame1];
-  if (type_ == extension_installed_bubble::kPageAction) {
-    // The page action message is only shown when appropriate.
-    NSRect pageActionMessageFrame = [pageActionInfoMsg_ frame];
-    pageActionMessageFrame.origin.y = extensionMessageFrame1.origin.y - (
-        pageActionMessageFrame.size.height +
+  if (type_ == extension_installed_bubble::kPageAction ||
+      type_ == extension_installed_bubble::kOmniboxKeyword) {
+    // The extra message is only shown when appropriate.
+    NSRect extraMessageFrame = [extraInfoMsg_ frame];
+    extraMessageFrame.origin.y = extensionMessageFrame1.origin.y - (
+        extraMessageFrame.size.height +
         extension_installed_bubble::kInnerVerticalMargin);
-    [pageActionInfoMsg_ setFrame:pageActionMessageFrame];
-    extensionMessageFrame2.origin.y = pageActionMessageFrame.origin.y - (
+    [extraInfoMsg_ setFrame:extraMessageFrame];
+    extensionMessageFrame2.origin.y = extraMessageFrame.origin.y - (
         extensionMessageFrame2.size.height +
         extension_installed_bubble::kInnerVerticalMargin);
   } else {
@@ -321,12 +359,16 @@ class ExtensionLoadedNotificationObserver : public NotificationObserver {
   return [extensionInstalledMsg_ frame];
 }
 
-- (NSRect)getPageActionInfoMsgFrame {
-  return [pageActionInfoMsg_ frame];
+- (NSRect)getExtraInfoMsgFrame {
+  return [extraInfoMsg_ frame];
 }
 
 - (NSRect)getExtensionInstalledInfoMsgFrame {
   return [extensionInstalledInfoMsg_ frame];
+}
+
+- (void)extensionUnloaded:(id)sender {
+  extension_ = NULL;
 }
 
 @end

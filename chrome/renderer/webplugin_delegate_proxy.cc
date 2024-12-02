@@ -55,10 +55,6 @@
 #include "ipc/ipc_channel_posix.h"
 #endif
 
-#if defined(OS_MACOSX)
-#include "base/scoped_cftyperef.h"
-#endif
-
 using WebKit::WebBindings;
 using WebKit::WebCursorInfo;
 using WebKit::WebDragData;
@@ -94,10 +90,10 @@ class ResourceClientProxy : public webkit_glue::WebPluginResourceClient {
   }
 
   // PluginResourceClient implementation:
-  void WillSendRequest(const GURL& url) {
+  void WillSendRequest(const GURL& url, int http_status_code) {
     DCHECK(channel_ != NULL);
     channel_->Send(new PluginMsg_WillSendRequest(instance_id_, resource_id_,
-                                                 url));
+                                                 url, http_status_code));
   }
 
   void DidReceiveResponse(const std::string& mime_type,
@@ -148,6 +144,10 @@ class ResourceClientProxy : public webkit_glue::WebPluginResourceClient {
 
   bool IsMultiByteResponseExpected() {
     return multibyte_response_expected_;
+  }
+
+  int ResourceId() {
+    return resource_id_;
   }
 
  private:
@@ -257,7 +257,7 @@ static bool SilverlightColorIsTransparent(const std::string& color) {
       return false;
     std::string value_string = color.substr(3, std::string::npos);
     std::vector<std::string> components;
-    SplitString(value_string, ',', &components);
+    base::SplitString(value_string, ',', &components);
     if (components.size() == 4 && !StartsWithASCII(components[0], "1", false))
       return true;
   } else if (LowerCaseEqualsASCII(color, "transparent")) {
@@ -298,9 +298,9 @@ bool WebPluginDelegateProxy::Initialize(const GURL& url,
     IPC::AddChannelSocket(channel_handle.name, channel_handle.socket.fd);
 #endif
 
-  scoped_refptr<PluginChannelHost> channel_host =
+  scoped_refptr<PluginChannelHost> channel_host(
       PluginChannelHost::GetPluginChannelHost(
-          channel_handle.name, ChildProcess::current()->io_message_loop());
+          channel_handle.name, ChildProcess::current()->io_message_loop()));
   if (!channel_host.get())
     return false;
 
@@ -349,19 +349,9 @@ bool WebPluginDelegateProxy::Initialize(const GURL& url,
       // Older versions of Flash don't support CA (and they assume QuickDraw
       // support, so we can't rely on negotiation to do the right thing).
       force_opaque_mode = true;
-    } else if (CommandLine::ForCurrentProcess()->HasSwitch(
-                  switches::kDisableFlashCoreAnimation)) {
-      // Temporary switch for testing; once any Flash + Core Animation issues
-      // have been shaken out, this switch (and the chrome_switches.h and
-      // command_line.h includes) can be removed.
-      force_opaque_mode = true;
     } else {
-      // Current betas of Flash 10.1 don't respect QuickDraw negotiation either,
-      // so we still have to force opaque mode on 10.5 (where we don't support
-      // Core Animation). If the final version of Flash 10.1 is fixed to do
-      // drawing model negotiation correctly instead of assuming that QuickDraw
-      // is available without asking, this whole block (and the sys_info.h
-      // include) can be removed.
+      // Flash 10.1 doesn't respect QuickDraw negotiation either, so we still
+      // have to force opaque mode on 10.5 (where it doesn't use CA).
       int32 major, minor, bugfix;
       base::SysInfo::OperatingSystemVersionNumbers(&major, &minor, &bugfix);
       if (major < 10 || (major == 10 && minor < 6))
@@ -491,6 +481,8 @@ void WebPluginDelegateProxy::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(PluginHostMsg_AcceleratedSurfaceBuffersSwapped,
                         OnAcceleratedSurfaceBuffersSwapped)
 #endif
+    IPC_MESSAGE_HANDLER(PluginHostMsg_URLRedirectResponse,
+                        OnURLRedirectResponse)
 
     IPC_MESSAGE_UNHANDLED_ERROR()
   IPC_END_MESSAGE_MAP()
@@ -522,6 +514,7 @@ void WebPluginDelegateProxy::UpdateGeometry(const gfx::Rect& window_rect,
   }
 
   plugin_rect_ = window_rect;
+  clip_rect_ = clip_rect;
 
   bool bitmaps_changed = false;
 
@@ -1359,7 +1352,7 @@ void WebPluginDelegateProxy::OnHandleURLRequest(
   plugin_->HandleURLRequest(
       params.url.c_str(), params.method.c_str(), target, data,
       static_cast<unsigned int>(params.buffer.size()), params.notify_id,
-      params.popups_allowed);
+      params.popups_allowed, params.notify_redirects);
 }
 
 webkit_glue::WebPluginResourceClient*
@@ -1420,7 +1413,7 @@ bool WebPluginDelegateProxy::BindFakePluginWindowHandle(bool opaque) {
   webkit_glue::WebPluginGeometry geom;
   geom.window = fake_window;
   geom.window_rect = plugin_rect_;
-  geom.clip_rect = gfx::Rect(plugin_rect_.size());
+  geom.clip_rect = clip_rect_;
   geom.rects_valid = true;
   geom.visible = true;
   render_view_->DidMovePlugin(geom);
@@ -1540,9 +1533,9 @@ void WebPluginDelegateProxy::OnAcceleratedSurfaceFreeTransportDIB(
 }
 
 void WebPluginDelegateProxy::OnAcceleratedSurfaceBuffersSwapped(
-    gfx::PluginWindowHandle window) {
+    gfx::PluginWindowHandle window, uint64 surface_id) {
   if (render_view_)
-    render_view_->AcceleratedSurfaceBuffersSwapped(window);
+    render_view_->AcceleratedSurfaceBuffersSwapped(window, surface_id);
 }
 #endif
 
@@ -1569,3 +1562,12 @@ bool WebPluginDelegateProxy::UseSynchronousGeometryUpdates() {
   return false;
 }
 #endif
+
+void WebPluginDelegateProxy::OnURLRedirectResponse(bool allow,
+                                                   int resource_id) {
+  if (!plugin_)
+    return;
+
+  plugin_->URLRedirectResponse(allow, resource_id);
+}
+

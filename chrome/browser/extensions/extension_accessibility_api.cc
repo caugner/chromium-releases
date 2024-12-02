@@ -8,15 +8,15 @@
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/values.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/extensions/extension_accessibility_api.h"
 #include "chrome/browser/extensions/extension_accessibility_api_constants.h"
+#include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
-#include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_service.h"
 
@@ -39,6 +39,9 @@ ExtensionAccessibilityEventRouter*
     ExtensionAccessibilityEventRouter::GetInstance() {
   return Singleton<ExtensionAccessibilityEventRouter>::get();
 }
+
+ExtensionAccessibilityEventRouter::ExtensionAccessibilityEventRouter()
+    : enabled_(false) {}
 
 ExtensionAccessibilityEventRouter::~ExtensionAccessibilityEventRouter() {
   STLDeleteElements(&on_enabled_listeners_);
@@ -181,8 +184,8 @@ void ExtensionAccessibilityEventRouter::DispatchEvent(
     Profile* profile,
     const char* event_name,
     const std::string& json_args) {
-  if (enabled_ && profile && profile->GetExtensionMessageService()) {
-    profile->GetExtensionMessageService()->DispatchEventToRenderers(
+  if (enabled_ && profile && profile->GetExtensionEventRouter()) {
+    profile->GetExtensionEventRouter()->DispatchEventToRenderers(
         event_name, json_args, NULL, GURL());
   }
 }

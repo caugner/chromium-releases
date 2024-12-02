@@ -11,12 +11,12 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/renderer_host/render_widget_host_view.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
@@ -501,14 +501,7 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, CommandKeyEvents) {
 }
 #endif
 
-#if defined(OS_WIN)
-// Tests may fail on windows:  http://crbug.com/55713
-#define MAYBE_AccessKeys FLAKY_AccessKeys
-#else
-#define MAYBE_AccessKeys AccessKeys
-#endif
-
-IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_AccessKeys) {
+IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, AccessKeys) {
 #if defined(OS_MACOSX)
   // On Mac, access keys use ctrl+alt modifiers.
   static const KeyEventTestData kTestAccessA = {

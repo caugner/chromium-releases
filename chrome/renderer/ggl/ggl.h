@@ -18,11 +18,15 @@
 class GpuChannelHost;
 class MessageLoop;
 
-namespace media {
+namespace gpu {
+namespace gles2 {
+class GLES2Implementation;
+}
+}
 
+namespace media {
 class VideoDecodeContext;
 class VideoDecodeEngine;
-
 }
 
 namespace ggl {
@@ -78,6 +82,7 @@ bool Terminate();
 Context* CreateViewContext(GpuChannelHost* channel,
                            gfx::NativeViewId view,
                            int render_view_id,
+                           const char* allowed_extensions,
                            const int32* attrib_list);
 
 #if defined(OS_MACOSX)
@@ -97,6 +102,7 @@ void ResizeOnscreenContext(Context* context, const gfx::Size& size);
 Context* CreateOffscreenContext(GpuChannelHost* channel,
                                 Context* parent,
                                 const gfx::Size& size,
+                                const char* allowed_extensions,
                                 const int32* attrib_list);
 
 // Resize an offscreen frame buffer. The resize occurs on the next call to
@@ -120,14 +126,10 @@ void DeleteParentTexture(Context* context, uint32 texture);
 
 // Provides a callback that will be invoked when SwapBuffers has completed
 // service side.
-void SetSwapBuffersCallback(Context* context,
-                            Callback1<Context*>::Type* callback);
+void SetSwapBuffersCallback(Context* context, Callback0::Type* callback);
 
 // Set the current GGL context for the calling thread.
 bool MakeCurrent(Context* context);
-
-// Get the calling thread's current GGL context.
-Context* GetCurrentContext();
 
 // For a view context, display everything that has been rendered since the
 // last call. For an offscreen context, resolve everything that has been
@@ -153,8 +155,16 @@ media::VideoDecodeContext* CreateVideoDecodeContext(Context* context,
 // TODO(gman): Remove this
 void DisableShaderTranslation(Context* context);
 
+// Allows direct access to the GLES2 implementation so a context
+// can be used without making it current.
+gpu::gles2::GLES2Implementation* GetImplementation(Context* context);
+
 // Return the current GGL error.
-Error GetError();
+Error GetError(Context* context);
+
+// Return true if GPU process reported context lost or there was a problem
+// communicating with the GPU process.
+bool IsCommandBufferContextLost(Context* context);
 
 }  // namespace ggl
 

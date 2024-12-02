@@ -7,7 +7,7 @@
 #include <cmath>
 
 #include "base/message_loop.h"
-#include "third_party/ppapi/c/pp_var.h"
+#include "ppapi/c/pp_var.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPluginParams.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPoint.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebRect.h"
@@ -28,6 +28,13 @@ using WebKit::WebVector;
 using WebKit::WebView;
 
 namespace pepper {
+
+struct WebPluginImpl::InitData {
+  scoped_refptr<PluginModule> module;
+  base::WeakPtr<PluginDelegate> delegate;
+  std::vector<std::string> arg_names;
+  std::vector<std::string> arg_values;
+};
 
 WebPluginImpl::WebPluginImpl(
     PluginModule* plugin_module,
@@ -100,6 +107,10 @@ void WebPluginImpl::updateGeometry(
   plugin_rect_ = window_rect;
   if (!instance_->IsFullscreen())
     instance_->ViewChanged(plugin_rect_, clip_rect);
+}
+
+unsigned WebPluginImpl::getBackingTextureId() {
+  return instance_->GetBackingTextureId();
 }
 
 void WebPluginImpl::updateFocus(bool focused) {

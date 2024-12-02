@@ -360,7 +360,7 @@ class SandboxIPCProcess  {
       return;
     int shm_fd = -1;
     base::SharedMemory shm;
-    if (shm.Create("", false, false, shm_size))
+    if (shm.CreateAnonymous(shm_size))
       shm_fd = shm.handle().fd;
     Pickle reply;
     SendRendererReply(fds, reply, shm_fd);
@@ -540,6 +540,9 @@ class SandboxIPCProcess  {
         FcLangSetAdd(langset, reinterpret_cast<const FcChar8*>("lv"));
         FcLangSetAdd(langset, reinterpret_cast<const FcChar8*>("lt"));
         break;
+      // TODO(jungshik): Would we be better off mapping Big5 to zh-tw
+      // and GB2312 to zh-cn? Fontconfig has 4 separate orthography
+      // files (zh-{cn,tw,hk,mo}.
       case NPCharsetChineseBIG5:
       case NPCharsetGB2312:
         FcLangSetAdd(langset, reinterpret_cast<const FcChar8*>("zh"));
@@ -565,7 +568,7 @@ class SandboxIPCProcess  {
         break;
       case NPCharsetShiftJIS:
         // Japanese
-        FcLangSetAdd(langset, reinterpret_cast<const FcChar8*>("jp"));
+        FcLangSetAdd(langset, reinterpret_cast<const FcChar8*>("ja"));
         break;
       case NPCharsetTurkish:
         FcLangSetAdd(langset, reinterpret_cast<const FcChar8*>("tr"));
@@ -634,15 +637,15 @@ class SandboxIPCProcess  {
 
 // Runs on the main thread at startup.
 RenderSandboxHostLinux::RenderSandboxHostLinux()
-    : init_(false),
+    : initialized_(false),
       renderer_socket_(0),
       childs_lifeline_fd_(0),
       pid_(0) {
 }
 
 void RenderSandboxHostLinux::Init(const std::string& sandbox_path) {
-  DCHECK(!init_);
-  init_ = true;
+  DCHECK(!initialized_);
+  initialized_ = true;
 
   int fds[2];
   // We use SOCK_SEQPACKET rather than SOCK_DGRAM to prevent the renderer from
@@ -670,7 +673,7 @@ void RenderSandboxHostLinux::Init(const std::string& sandbox_path) {
 }
 
 RenderSandboxHostLinux::~RenderSandboxHostLinux() {
-  if (init_) {
+  if (initialized_) {
     if (HANDLE_EINTR(close(renderer_socket_)) < 0)
       PLOG(ERROR) << "close";
     if (HANDLE_EINTR(close(childs_lifeline_fd_)) < 0)

@@ -13,20 +13,18 @@
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
 #include "base/sys_string_conversions.h"
-#include "chrome/app/chrome_dll_resource.h"
-#include "chrome/browser/browser.h"
-#include "chrome/browser/browser_init.h"
-#include "chrome/browser/browser_list.h"
+#import "base/worker_pool_mac.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/browser_thread.h"
-#include "chrome/browser/browser_window.h"
 #import "chrome/browser/cocoa/about_window_controller.h"
-#import "chrome/browser/cocoa/bookmark_menu_bridge.h"
+#import "chrome/browser/cocoa/bookmarks/bookmark_menu_bridge.h"
 #import "chrome/browser/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/cocoa/browser_window_controller.h"
 #import "chrome/browser/cocoa/bug_report_window_controller.h"
 #import "chrome/browser/cocoa/clear_browsing_data_controller.h"
+#import "chrome/browser/cocoa/confirm_quit_panel_controller.h"
 #import "chrome/browser/cocoa/encoding_menu_controller_delegate_mac.h"
 #import "chrome/browser/cocoa/history_menu_bridge.h"
 #import "chrome/browser/cocoa/import_settings_dialog.h"
@@ -46,6 +44,10 @@
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/sync/sync_ui_util_mac.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_init.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/app_mode_common_mac.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
@@ -221,6 +223,15 @@ void RecordLastRunAppBundlePath() {
   if (parsed_command_line.HasSwitch(switches::kActivateOnLaunch)) {
     [NSApp activateIgnoringOtherApps:YES];
   }
+
+  // Temporary flag to revert to the old WorkerPool implementation.
+  // This will be removed once we either fix the Mac WorkerPool
+  // implementation, or completely switch to the shared (with Linux)
+  // implementation.
+  // http://crbug.com/44392
+  if (parsed_command_line.HasSwitch(switches::kDisableLinuxWorkerPool)) {
+    worker_pool_mac::SetUseLinuxWorkerPool(false);
+  }
 }
 
 // (NSApplicationDelegate protocol) This is the Apple-approved place to override
@@ -241,6 +252,12 @@ void RecordLastRunAppBundlePath() {
   // TODO(viettrungluu): Remove Apple Event handlers here? (It's safe to leave
   // them in, but I'm not sure about UX; we'd also want to disable other things
   // though.) http://crbug.com/40861
+
+  // Check if the user really wants to quit by employing the confirm-to-quit
+  // mechanism.
+  if (!browser_shutdown::IsTryingToQuit() &&
+      [self applicationShouldTerminate:app] != NSTerminateNow)
+    return NO;
 
   size_t num_browsers = BrowserList::size();
 
@@ -265,6 +282,90 @@ void RecordLastRunAppBundlePath() {
     // TODO(viettrungluu): Were we to remove Apple Event handlers above, we
     // would have to reinstall them here. http://crbug.com/40861
   }
+}
+
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)app {
+  // Check if the experiment is enabled.
+  const CommandLine* commandLine(CommandLine::ForCurrentProcess());
+  if (!commandLine->HasSwitch(switches::kEnableConfirmToQuit))
+    return NSTerminateNow;
+
+  // If the application is going to terminate as the result of a Cmd+Q
+  // invocation, use the special sauce to prevent accidental quitting.
+  // http://dev.chromium.org/developers/design-documents/confirm-to-quit-experiment
+  NSEvent* currentEvent = [app currentEvent];
+  if ([currentEvent type] == NSKeyDown) {
+    // Show the info panel that explains what the user must to do confirm quit.
+    [[ConfirmQuitPanelController sharedController] showWindow:self];
+
+    // How long the user must hold down Cmd+Q to confirm the quit.
+    const NSTimeInterval kTimeToConfirmQuit = 1.5;
+    // Leeway between the |targetDate| and the current time that will confirm a
+    // quit.
+    const NSTimeInterval kTimeDeltaFuzzFactor = 1.0;
+    // Duration of the window fade out animation.
+    const NSTimeInterval kWindowFadeAnimationDuration = 0.2;
+
+    // Spin a nested run loop until the |targetDate| is reached or a KeyUp event
+    // is sent.
+    NSDate* targetDate =
+        [NSDate dateWithTimeIntervalSinceNow:kTimeToConfirmQuit];
+    BOOL willQuit = NO;
+    NSEvent* nextEvent = nil;
+    do {
+      // Dequeue events until a key up is received.
+      nextEvent = [app nextEventMatchingMask:NSKeyUpMask
+                                   untilDate:nil
+                                      inMode:NSEventTrackingRunLoopMode
+                                     dequeue:YES];
+
+      // Wait for the time expiry to happen. Once past the hold threshold,
+      // commit to quitting and hide all the open windows.
+      if (!willQuit) {
+        NSDate* now = [NSDate date];
+        NSTimeInterval difference = [targetDate timeIntervalSinceDate:now];
+        if (difference < kTimeDeltaFuzzFactor) {
+          willQuit = YES;
+
+          // At this point, the quit has been confirmed and windows should all
+          // fade out to convince the user to release the key combo to finalize
+          // the quit.
+          [NSAnimationContext beginGrouping];
+          [[NSAnimationContext currentContext] setDuration:
+              kWindowFadeAnimationDuration];
+          for (NSWindow* aWindow in [app windows]) {
+            // Windows that are set to animate and have a delegate do not
+            // expect to be animated by other things and could result in an
+            // invalid state. If a window is set up like so, just force the
+            // alpha value to 0. Otherwise, animate all pretty and stuff.
+            if (![[aWindow animationForKey:@"alphaValue"] delegate]) {
+              [[aWindow animator] setAlphaValue:0.0];
+            } else {
+              [aWindow setAlphaValue:0.0];
+            }
+          }
+          [NSAnimationContext endGrouping];
+        }
+      }
+    } while (!nextEvent);
+
+    // The user has released the key combo. Discard any events (i.e. the
+    // repeated KeyDown Cmd+Q).
+    [app discardEventsMatchingMask:NSAnyEventMask beforeEvent:nextEvent];
+    if (willQuit) {
+      // The user held down the combination long enough that quitting should
+      // happen.
+      return NSTerminateNow;
+    } else {
+      // Slowly fade the confirm window out in case the user doesn't
+      // understand what they have to do to quit.
+      [[ConfirmQuitPanelController sharedController] dismissPanel];
+      return NSTerminateCancel;
+    }
+  }  // if event type is KeyDown
+
+  // Default case: terminate.
+  return NSTerminateNow;
 }
 
 // Called when the app is shutting down. Clean-up as appropriate.
@@ -787,7 +888,7 @@ void RecordLastRunAppBundlePath() {
       else
         Browser::OpenHelpWindow(defaultProfile);
       break;
-    case IDC_REPORT_BUG: {
+    case IDC_FEEDBACK: {
       Browser* browser = BrowserList::GetLastActive();
       TabContents* currentTab =
           browser ? browser->GetSelectedTabContents() : NULL;
@@ -899,7 +1000,7 @@ void RecordLastRunAppBundlePath() {
   menuState_->UpdateCommandEnabled(IDC_MANAGE_EXTENSIONS, true);
   menuState_->UpdateCommandEnabled(IDC_HELP_PAGE, true);
   menuState_->UpdateCommandEnabled(IDC_IMPORT_SETTINGS, true);
-  menuState_->UpdateCommandEnabled(IDC_REPORT_BUG, true);
+  menuState_->UpdateCommandEnabled(IDC_FEEDBACK, true);
   menuState_->UpdateCommandEnabled(IDC_SYNC_BOOKMARKS, true);
   menuState_->UpdateCommandEnabled(IDC_TASK_MANAGER, true);
 }
@@ -938,7 +1039,7 @@ void RecordLastRunAppBundlePath() {
     browser->window()->Show();
   }
 
-  CommandLine dummy(CommandLine::ARGUMENTS_ONLY);
+  CommandLine dummy(CommandLine::NO_PROGRAM);
   BrowserInit::LaunchWithProfile launch(FilePath(), dummy);
   launch.OpenURLsInBrowser(browser, false, urls);
 }

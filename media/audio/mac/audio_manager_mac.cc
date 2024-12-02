@@ -4,6 +4,7 @@
 
 #include <CoreAudio/AudioHardware.h>
 
+#include "base/sys_info.h"
 #include "media/audio/fake_audio_input_stream.h"
 #include "media/audio/fake_audio_output_stream.h"
 #include "media/audio/mac/audio_input_mac.h"
@@ -12,8 +13,41 @@
 #include "media/base/limits.h"
 
 namespace {
+
 const int kMaxInputChannels = 2;
-const int kMaxSamplesPerPacket = media::Limits::kMaxSampleRate;
+
+// Maximum number of output streams that can be open simultaneously.
+const size_t kMaxOutputStreams = 50;
+
+// By experiment the maximum number of audio streams allowed in Leopard
+// is 18. But we put a slightly smaller number just to be safe.
+const size_t kMaxOutputStreamsLeopard = 15;
+
+// Initialized to ether |kMaxOutputStreams| or |kMaxOutputStreamsLeopard|.
+size_t g_max_output_streams = 0;
+
+// Returns the number of audio streams allowed. This is a practical limit to
+// prevent failure caused by too many audio streams opened.
+size_t GetMaxAudioOutputStreamsAllowed() {
+  if (g_max_output_streams == 0) {
+    // We are hitting a bug in Leopard where too many audio streams will cause
+    // a deadlock in the AudioQueue API when starting the stream. Unfortunately
+    // there's no way to detect it within the AudioQueue API, so we put a
+    // special hard limit only for Leopard.
+    // See bug: http://crbug.com/30242
+    int32 major, minor, bugfix;
+    base::SysInfo::OperatingSystemVersionNumbers(&major, &minor, &bugfix);
+    if (major < 10 || (major == 10 && minor <= 5)) {
+      g_max_output_streams = kMaxOutputStreamsLeopard;
+    } else {
+      // In OS other than OSX Leopard, the number of audio streams
+      // allowed is a lot more.
+      g_max_output_streams = kMaxOutputStreams;
+    }
+  }
+
+  return g_max_output_streams;
+}
 
 bool HasAudioHardware(AudioObjectPropertySelector selector) {
   AudioDeviceID output_device_id = kAudioObjectUnknown;
@@ -34,6 +68,13 @@ bool HasAudioHardware(AudioObjectPropertySelector selector) {
 }
 }  // namespace
 
+AudioManagerMac::AudioManagerMac()
+    : num_output_streams_(0) {
+}
+
+AudioManagerMac::~AudioManagerMac() {
+}
+
 bool AudioManagerMac::HasAudioOutputDevices() {
   return HasAudioHardware(kAudioHardwarePropertyDefaultOutputDevice);
 }
@@ -44,23 +85,33 @@ bool AudioManagerMac::HasAudioInputDevices() {
 
 AudioOutputStream* AudioManagerMac::MakeAudioOutputStream(
     AudioParameters params) {
-  if (params.format == AudioParameters::AUDIO_MOCK)
-    return FakeAudioOutputStream::MakeFakeStream();
-  else if (params.format != AudioParameters::AUDIO_PCM_LINEAR)
+  if (params.format == AudioParameters::AUDIO_MOCK) {
+    return FakeAudioOutputStream::MakeFakeStream(params);
+  } else if (params.format != AudioParameters::AUDIO_PCM_LINEAR) {
     return NULL;
+  }
+
+  // Limit the number of audio streams opened. This is to prevent using
+  // excessive resources for a large number of audio streams. More
+  // importantly it prevents instability on certain systems.
+  // See bug: http://crbug.com/30242
+  if (num_output_streams_ >= GetMaxAudioOutputStreamsAllowed()) {
+    return NULL;
+  }
+
+  num_output_streams_++;
   return new PCMQueueOutAudioOutputStream(this, params);
 }
 
 AudioInputStream* AudioManagerMac::MakeAudioInputStream(
-    AudioParameters params, int samples_per_packet) {
-  if (!params.IsValid() || (params.channels > kMaxInputChannels) ||
-      (samples_per_packet > kMaxSamplesPerPacket) || (samples_per_packet < 0))
+    AudioParameters params) {
+  if (!params.IsValid() || (params.channels > kMaxInputChannels))
     return NULL;
 
   if (params.format == AudioParameters::AUDIO_MOCK) {
-    return FakeAudioInputStream::MakeFakeStream(params, samples_per_packet);
+    return FakeAudioInputStream::MakeFakeStream(params);
   } else if (params.format == AudioParameters::AUDIO_PCM_LINEAR) {
-    return new PCMQueueInAudioInputStream(this, params, samples_per_packet);
+    return new PCMQueueInAudioInputStream(this, params);
   }
   return NULL;
 }
@@ -76,6 +127,8 @@ void AudioManagerMac::UnMuteAll() {
 // Called by the stream when it has been released by calling Close().
 void AudioManagerMac::ReleaseOutputStream(
     PCMQueueOutAudioOutputStream* stream) {
+  DCHECK(stream);
+  num_output_streams_--;
   delete stream;
 }
 

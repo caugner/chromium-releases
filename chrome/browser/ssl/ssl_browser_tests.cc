@@ -3,14 +3,16 @@
 // found in the LICENSE file.
 
 #include "base/time.h"
-#include "chrome/app/chrome_dll_resource.h"
-#include "chrome/browser/browser.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/interstitial_page.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
@@ -20,13 +22,16 @@
 const FilePath::CharType kDocRoot[] = FILE_PATH_LITERAL("chrome/test/data");
 
 class SSLUITest : public InProcessBrowserTest {
+  typedef net::TestServer::HTTPSOptions HTTPSOptions;
+
  public:
   SSLUITest()
-      : https_server_(net::TestServer::TYPE_HTTPS, FilePath(kDocRoot)),
-        https_server_expired_(net::TestServer::TYPE_HTTPS_EXPIRED_CERTIFICATE,
-                              FilePath(kDocRoot)),
+      : https_server_(
+            HTTPSOptions(HTTPSOptions::CERT_OK), FilePath(kDocRoot)),
+        https_server_expired_(
+            HTTPSOptions(HTTPSOptions::CERT_EXPIRED), FilePath(kDocRoot)),
         https_server_mismatched_(
-            net::TestServer::TYPE_HTTPS_MISMATCHED_HOSTNAME,
+            HTTPSOptions(HTTPSOptions::CERT_MISMATCHED_NAME),
             FilePath(kDocRoot)) {
     EnableDOMAutomation();
   }
@@ -35,7 +40,7 @@ class SSLUITest : public InProcessBrowserTest {
                                bool displayed_insecure_content) {
     NavigationEntry* entry = tab->controller().GetActiveEntry();
     ASSERT_TRUE(entry);
-    EXPECT_EQ(NavigationEntry::NORMAL_PAGE, entry->page_type());
+    EXPECT_EQ(NORMAL_PAGE, entry->page_type());
     EXPECT_EQ(SECURITY_STYLE_AUTHENTICATED, entry->ssl().security_style());
     EXPECT_EQ(0, entry->ssl().cert_status() & net::CERT_STATUS_ALL_ERRORS);
     EXPECT_EQ(displayed_insecure_content,
@@ -46,7 +51,7 @@ class SSLUITest : public InProcessBrowserTest {
   void CheckUnauthenticatedState(TabContents* tab) {
     NavigationEntry* entry = tab->controller().GetActiveEntry();
     ASSERT_TRUE(entry);
-    EXPECT_EQ(NavigationEntry::NORMAL_PAGE, entry->page_type());
+    EXPECT_EQ(NORMAL_PAGE, entry->page_type());
     EXPECT_EQ(SECURITY_STYLE_UNAUTHENTICATED, entry->ssl().security_style());
     EXPECT_EQ(0, entry->ssl().cert_status() & net::CERT_STATUS_ALL_ERRORS);
     EXPECT_FALSE(entry->ssl().displayed_insecure_content());
@@ -59,8 +64,7 @@ class SSLUITest : public InProcessBrowserTest {
                                       bool interstitial) {
     NavigationEntry* entry = tab->controller().GetActiveEntry();
     ASSERT_TRUE(entry);
-    EXPECT_EQ(interstitial ? NavigationEntry::INTERSTITIAL_PAGE :
-                             NavigationEntry::NORMAL_PAGE,
+    EXPECT_EQ(interstitial ? INTERSTITIAL_PAGE : NORMAL_PAGE,
               entry->page_type());
     EXPECT_EQ(SECURITY_STYLE_AUTHENTICATION_BROKEN,
               entry->ssl().security_style());
@@ -112,6 +116,54 @@ class SSLUITest : public InProcessBrowserTest {
     ui_test_utils::WaitForNavigation(&(tab->controller()));
   }
 
+  static bool GetFilePathWithHostAndPortReplacement(
+      const std::string& original_file_path,
+      const net::HostPortPair& host_port_pair,
+      std::string* replacement_path) {
+    std::vector<net::TestServer::StringPair> replacement_text;
+    replacement_text.push_back(
+        make_pair("REPLACE_WITH_HOST_AND_PORT", host_port_pair.ToString()));
+    return net::TestServer::GetFilePathWithReplacements(
+        original_file_path, replacement_text, replacement_path);
+  }
+
+  static bool GetTopFramePath(const net::TestServer& http_server,
+                              const net::TestServer& good_https_server,
+                              const net::TestServer& bad_https_server,
+                              std::string* top_frame_path) {
+    // The "frame_left.html" page contained in the top_frame.html page contains
+    // <a href>'s to three different servers. This sets up all of the
+    // replacement text to work with test servers which listen on ephemeral
+    // ports.
+    GURL http_url = http_server.GetURL("files/ssl/google.html");
+    GURL good_https_url = good_https_server.GetURL("files/ssl/google.html");
+    GURL bad_https_url = bad_https_server.GetURL(
+        "files/ssl/bad_iframe.html");
+
+    std::vector<net::TestServer::StringPair> replacement_text_frame_left;
+    replacement_text_frame_left.push_back(
+        make_pair("REPLACE_WITH_HTTP_PAGE", http_url.spec()));
+    replacement_text_frame_left.push_back(
+        make_pair("REPLACE_WITH_GOOD_HTTPS_PAGE", good_https_url.spec()));
+    replacement_text_frame_left.push_back(
+        make_pair("REPLACE_WITH_BAD_HTTPS_PAGE", bad_https_url.spec()));
+    std::string frame_left_path;
+    if (!net::TestServer::GetFilePathWithReplacements(
+            "frame_left.html",
+            replacement_text_frame_left,
+            &frame_left_path))
+      return false;
+
+    // Substitute the generated frame_left URL into the top_frame page.
+    std::vector<net::TestServer::StringPair> replacement_text_top_frame;
+    replacement_text_top_frame.push_back(
+        make_pair("REPLACE_WITH_FRAME_LEFT_PATH", frame_left_path));
+    return net::TestServer::GetFilePathWithReplacements(
+        "files/ssl/top_frame.html",
+        replacement_text_top_frame,
+        top_frame_path);
+  }
+
   net::TestServer https_server_;
   net::TestServer https_server_expired_;
   net::TestServer https_server_mismatched_;
@@ -138,8 +190,14 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestHTTPWithBrokenHTTPSResource) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(https_server_expired_.Start());
 
-  ui_test_utils::NavigateToURL(browser(),
-      test_server()->GetURL("files/ssl/page_with_unsafe_contents.html"));
+  std::string replacement_path;
+  ASSERT_TRUE(GetFilePathWithHostAndPortReplacement(
+      "files/ssl/page_with_unsafe_contents.html",
+      https_server_expired_.host_port_pair(),
+      &replacement_path));
+
+  ui_test_utils::NavigateToURL(
+      browser(), test_server()->GetURL(replacement_path));
 
   CheckUnauthenticatedState(browser()->GetSelectedTabContents());
 }
@@ -329,7 +387,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestHTTPSErrorWithNoNavEntry) {
   ASSERT_TRUE(https_server_expired_.Start());
 
   GURL url = https_server_expired_.GetURL("files/ssl/google.htm");
-  TabContents* tab2 =
+  TabContentsWrapper* tab2 =
       browser()->AddSelectedTabWithURL(url, PageTransition::TYPED);
   ui_test_utils::WaitForLoadStop(&(tab2->controller()));
 
@@ -337,7 +395,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestHTTPSErrorWithNoNavEntry) {
   EXPECT_FALSE(browser()->command_updater()->IsCommandEnabled(IDC_BACK));
 
   // We should have an interstitial page showing.
-  ASSERT_TRUE(tab2->interstitial_page());
+  ASSERT_TRUE(tab2->tab_contents()->interstitial_page());
 }
 
 //
@@ -349,9 +407,15 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestDisplaysInsecureContent) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(https_server_.Start());
 
+  std::string replacement_path;
+  ASSERT_TRUE(GetFilePathWithHostAndPortReplacement(
+      "files/ssl/page_displays_insecure_content.html",
+      test_server()->host_port_pair(),
+      &replacement_path));
+
   // Load a page that displays insecure content.
-  ui_test_utils::NavigateToURL(browser(), https_server_.GetURL(
-      "files/ssl/page_displays_insecure_content.html"));
+  ui_test_utils::NavigateToURL(browser(),
+                               https_server_.GetURL(replacement_path));
 
   CheckAuthenticatedState(browser()->GetSelectedTabContents(), true);
 }
@@ -359,9 +423,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestDisplaysInsecureContent) {
 // Visits a page that runs insecure content and tries to suppress the insecure
 // content warnings by randomizing location.hash.
 // Based on http://crbug.com/8706
-// Fails to terminate on all platforms.  See bug http://crbug.com/58230
-IN_PROC_BROWSER_TEST_F(SSLUITest,
-    DISABLED_TestRunsInsecuredContentRandomizeHash) {
+IN_PROC_BROWSER_TEST_F(SSLUITest, TestRunsInsecuredContentRandomizeHash) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(https_server_.Start());
 
@@ -380,8 +442,13 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestUnsafeContents) {
   ASSERT_TRUE(https_server_.Start());
   ASSERT_TRUE(https_server_expired_.Start());
 
-  ui_test_utils::NavigateToURL(browser(), https_server_.GetURL(
-      "files/ssl/page_with_unsafe_contents.html"));
+  std::string replacement_path;
+  ASSERT_TRUE(GetFilePathWithHostAndPortReplacement(
+      "files/ssl/page_with_unsafe_contents.html",
+      https_server_expired_.host_port_pair(),
+      &replacement_path));
+  ui_test_utils::NavigateToURL(browser(),
+                               https_server_.GetURL(replacement_path));
 
   TabContents* tab = browser()->GetSelectedTabContents();
   // When the bad content is filtered, the state is expected to be
@@ -417,8 +484,13 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestDisplaysInsecureContentLoadedFromJS) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(https_server_.Start());
 
+  std::string replacement_path;
+  ASSERT_TRUE(GetFilePathWithHostAndPortReplacement(
+      "files/ssl/page_with_dynamic_insecure_content.html",
+      test_server()->host_port_pair(),
+      &replacement_path));
   ui_test_utils::NavigateToURL(browser(), https_server_.GetURL(
-      "files/ssl/page_with_dynamic_insecure_content.html"));
+      replacement_path));
 
   TabContents* tab = browser()->GetSelectedTabContents();
   CheckAuthenticatedState(tab, false);
@@ -443,25 +515,32 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestDisplaysInsecureContentTwoTabs) {
   ui_test_utils::NavigateToURL(browser(),
       https_server_.GetURL("files/ssl/blank_page.html"));
 
-  TabContents* tab1 = browser()->GetSelectedTabContents();
+  TabContentsWrapper* tab1 = browser()->GetSelectedTabContentsWrapper();
 
   // This tab should be fine.
-  CheckAuthenticatedState(tab1, false);
+  CheckAuthenticatedState(tab1->tab_contents(), false);
 
   // Create a new tab.
-  GURL url = https_server_.GetURL(
-      "files/ssl/page_displays_insecure_content.html");
-  Browser::AddTabWithURLParams params(url, PageTransition::TYPED);
-  params.index = 0;
-  params.instance = tab1->GetSiteInstance();
-  TabContents* tab2 = browser()->AddTabWithURL(&params);
+  std::string replacement_path;
+  ASSERT_TRUE(GetFilePathWithHostAndPortReplacement(
+      "files/ssl/page_displays_insecure_content.html",
+      test_server()->host_port_pair(),
+      &replacement_path));
+
+  GURL url = https_server_.GetURL(replacement_path);
+  browser::NavigateParams params(browser(), url, PageTransition::TYPED);
+  params.disposition = NEW_FOREGROUND_TAB;
+  params.tabstrip_index = 0;
+  params.source_contents = tab1;
+  browser::Navigate(&params);
+  TabContentsWrapper* tab2 = params.target_contents;
   ui_test_utils::WaitForNavigation(&(tab2->controller()));
 
   // The new tab has insecure content.
-  CheckAuthenticatedState(tab2, true);
+  CheckAuthenticatedState(tab2->tab_contents(), true);
 
   // The original tab should not be contaminated.
-  CheckAuthenticatedState(tab1, false);
+  CheckAuthenticatedState(tab1->tab_contents(), false);
 }
 
 // Visits two pages from the same origin: one that runs insecure content and one
@@ -474,25 +553,32 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestRunsInsecureContentTwoTabs) {
   ui_test_utils::NavigateToURL(browser(),
       https_server_.GetURL("files/ssl/blank_page.html"));
 
-  TabContents* tab1 = browser()->GetSelectedTabContents();
+  TabContentsWrapper* tab1 = browser()->GetSelectedTabContentsWrapper();
 
   // This tab should be fine.
-  CheckAuthenticatedState(tab1, false);
+  CheckAuthenticatedState(tab1->tab_contents(), false);
+
+  std::string replacement_path;
+  ASSERT_TRUE(GetFilePathWithHostAndPortReplacement(
+      "files/ssl/page_runs_insecure_content.html",
+      test_server()->host_port_pair(),
+      &replacement_path));
 
   // Create a new tab.
-  GURL url =
-      https_server_.GetURL("files/ssl/page_runs_insecure_content.html");
-  Browser::AddTabWithURLParams params(url, PageTransition::TYPED);
-  params.instance = tab1->GetSiteInstance();
-  TabContents* tab2 = browser()->AddTabWithURL(&params);
+  GURL url = https_server_.GetURL(replacement_path);
+  browser::NavigateParams params(browser(), url, PageTransition::TYPED);
+  params.disposition = NEW_FOREGROUND_TAB;
+  params.source_contents = tab1;
+  browser::Navigate(&params);
+  TabContentsWrapper* tab2 = params.target_contents;
   ui_test_utils::WaitForNavigation(&(tab2->controller()));
 
   // The new tab has insecure content.
-  CheckAuthenticationBrokenState(tab2, 0, true, false);
+  CheckAuthenticationBrokenState(tab2->tab_contents(), 0, true, false);
 
   // Which means the origin for the first tab has also been contaminated with
   // insecure content.
-  CheckAuthenticationBrokenState(tab1, 0, true, false);
+  CheckAuthenticationBrokenState(tab1->tab_contents(), 0, true, false);
 }
 
 // Visits a page with an image over http.  Visits another page over https
@@ -502,15 +588,22 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestDisplaysCachedInsecureContent) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(https_server_.Start());
 
-  ui_test_utils::NavigateToURL(browser(), test_server()->GetURL(
-      "files/ssl/page_displays_insecure_content.html"));
+  std::string replacement_path;
+  ASSERT_TRUE(GetFilePathWithHostAndPortReplacement(
+      "files/ssl/page_displays_insecure_content.html",
+      test_server()->host_port_pair(),
+      &replacement_path));
+
+  // Load original page over HTTP.
+  const GURL url_http = test_server()->GetURL(replacement_path);
+  ui_test_utils::NavigateToURL(browser(), url_http);
   TabContents* tab = browser()->GetSelectedTabContents();
   CheckUnauthenticatedState(tab);
 
   // Load again but over SSL.  It should be marked as displaying insecure
   // content (even though the image comes from the WebCore memory cache).
-  ui_test_utils::NavigateToURL(browser(), https_server_.GetURL(
-      "files/ssl/page_displays_insecure_content.html"));
+  const GURL url_https = https_server_.GetURL(replacement_path);
+  ui_test_utils::NavigateToURL(browser(), url_https);
   CheckAuthenticatedState(tab, true);
 }
 
@@ -521,15 +614,22 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestRunsCachedInsecureContent) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(https_server_.Start());
 
-  ui_test_utils::NavigateToURL(browser(),
-      test_server()->GetURL("files/ssl/page_runs_insecure_content.html"));
+  std::string replacement_path;
+  ASSERT_TRUE(GetFilePathWithHostAndPortReplacement(
+      "files/ssl/page_runs_insecure_content.html",
+      test_server()->host_port_pair(),
+      &replacement_path));
+
+  // Load original page over HTTP.
+  const GURL url_http = test_server()->GetURL(replacement_path);
+  ui_test_utils::NavigateToURL(browser(), url_http);
   TabContents* tab = browser()->GetSelectedTabContents();
   CheckUnauthenticatedState(tab);
 
   // Load again but over SSL.  It should be marked as displaying insecure
   // content (even though the image comes from the WebCore memory cache).
-  ui_test_utils::NavigateToURL(browser(), https_server_.GetURL(
-      "files/ssl/page_runs_insecure_content.html"));
+  const GURL url_https = https_server_.GetURL(replacement_path);
+  ui_test_utils::NavigateToURL(browser(), url_https);
   CheckAuthenticationBrokenState(tab, 0, true, false);
 }
 
@@ -608,8 +708,14 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, DISABLED_TestCloseTabWithUnsafePopup) {
   ASSERT_TRUE(test_server()->Start());
   ASSERT_TRUE(https_server_expired_.Start());
 
+  std::string replacement_path;
+  ASSERT_TRUE(GetFilePathWithHostAndPortReplacement(
+      "files/ssl/page_with_unsafe_popup.html",
+      https_server_expired_.host_port_pair(),
+      &replacement_path));
+
   ui_test_utils::NavigateToURL(browser(),
-      test_server()->GetURL("files/ssl/page_with_unsafe_popup.html"));
+                               test_server()->GetURL(replacement_path));
 
   TabContents* tab1 = browser()->GetSelectedTabContents();
   // It is probably overkill to add a notification for a popup-opening, let's
@@ -626,12 +732,9 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, DISABLED_TestCloseTabWithUnsafePopup) {
   // Let's add another tab to make sure the browser does not exit when we close
   // the first tab.
   GURL url = test_server()->GetURL("files/ssl/google.html");
-  Browser::AddTabWithURLParams params(url, PageTransition::TYPED);
-  TabContents* tab2 = browser()->AddTabWithURL(&params);
+  TabContentsWrapper* tab2 =
+      browser()->AddSelectedTabWithURL(url, PageTransition::TYPED);
   ui_test_utils::WaitForNavigation(&(tab2->controller()));
-
-  // Ensure that the tab was created in the correct browser.
-  EXPECT_EQ(browser(), params.target);
 
   // Close the first tab.
   browser()->CloseTabContents(tab1);
@@ -758,9 +861,15 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, DISABLED_TestGoodFrameNavigation) {
   ASSERT_TRUE(https_server_.Start());
   ASSERT_TRUE(https_server_expired_.Start());
 
+  std::string top_frame_path;
+  ASSERT_TRUE(GetTopFramePath(*test_server(),
+                              https_server_,
+                              https_server_expired_,
+                              &top_frame_path));
+
   TabContents* tab = browser()->GetSelectedTabContents();
   ui_test_utils::NavigateToURL(browser(),
-      https_server_.GetURL("files/ssl/top_frame.html"));
+                               https_server_.GetURL(top_frame_path));
 
   CheckAuthenticatedState(tab, false);
 
@@ -826,9 +935,15 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestBadFrameNavigation) {
   ASSERT_TRUE(https_server_.Start());
   ASSERT_TRUE(https_server_expired_.Start());
 
+  std::string top_frame_path;
+  ASSERT_TRUE(GetTopFramePath(*test_server(),
+                              https_server_,
+                              https_server_expired_,
+                              &top_frame_path));
+
   TabContents* tab = browser()->GetSelectedTabContents();
   ui_test_utils::NavigateToURL(browser(),
-      https_server_expired_.GetURL("files/ssl/top_frame.html"));
+                               https_server_expired_.GetURL(top_frame_path));
   CheckAuthenticationBrokenState(tab, net::CERT_STATUS_DATE_INVALID, false,
                                  true);  // Interstitial showing
 
@@ -850,7 +965,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestBadFrameNavigation) {
 
 // From an HTTP top frame, navigate to good and bad HTTPS (security state should
 // stay unauthenticated).
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_CHROMEOS) || defined(OS_LINUX)
 // Disabled, flakily exceeds test timeout, http://crbug.com/43437.
 #define MAYBE_TestUnauthenticatedFrameNavigation \
       DISABLED_TestUnauthenticatedFrameNavigation
@@ -864,9 +979,15 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, MAYBE_TestUnauthenticatedFrameNavigation) {
   ASSERT_TRUE(https_server_.Start());
   ASSERT_TRUE(https_server_expired_.Start());
 
+  std::string top_frame_path;
+  ASSERT_TRUE(GetTopFramePath(*test_server(),
+                              https_server_,
+                              https_server_expired_,
+                              &top_frame_path));
+
   TabContents* tab = browser()->GetSelectedTabContents();
   ui_test_utils::NavigateToURL(browser(),
-      test_server()->GetURL("files/ssl/top_frame.html"));
+                               test_server()->GetURL(top_frame_path));
   CheckUnauthenticatedState(tab);
 
   // Now navigate inside the frame to a secure HTTPS frame.

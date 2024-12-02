@@ -8,7 +8,7 @@
 #include "base/at_exit.h"
 #include "base/base64.h"
 #include "base/command_line.h"
-#include "base/debug_util.h"
+#include "base/debug/debugger.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/i18n/icu_util.h"
@@ -28,6 +28,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFileSystemCallbacks.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebPluginParams.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebURLError.h"
@@ -47,10 +48,13 @@
 #include "webkit/support/test_webplugin_page_delegate.h"
 #include "webkit/support/test_webkit_client.h"
 #include "webkit/tools/test_shell/simple_database_system.h"
+#include "webkit/tools/test_shell/simple_file_system.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 
 using WebKit::WebCString;
 using WebKit::WebDevToolsAgentClient;
+using WebKit::WebFileSystem;
+using WebKit::WebFileSystemCallbacks;
 using WebKit::WebFrame;
 using WebKit::WebMediaPlayerClient;
 using WebKit::WebPlugin;
@@ -262,15 +266,15 @@ WebPlugin* CreateWebPlugin(WebFrame* frame,
 
 WebKit::WebMediaPlayer* CreateMediaPlayer(WebFrame* frame,
                                           WebMediaPlayerClient* client) {
-  scoped_refptr<media::FilterFactoryCollection> factory =
-      new media::FilterFactoryCollection();
+  scoped_ptr<media::MediaFilterCollection> collection(
+      new media::MediaFilterCollection());
 
   appcache::WebApplicationCacheHostImpl* appcache_host =
       appcache::WebApplicationCacheHostImpl::FromFrame(frame);
 
   // TODO(hclam): this is the same piece of code as in RenderView, maybe they
   // should be grouped together.
-  webkit_glue::MediaResourceLoaderBridgeFactory* bridge_factory =
+  webkit_glue::MediaResourceLoaderBridgeFactory* bridge_factory_simple =
       new webkit_glue::MediaResourceLoaderBridgeFactory(
           GURL(),  // referrer
           "null",  // frame origin
@@ -278,19 +282,28 @@ WebKit::WebMediaPlayer* CreateMediaPlayer(WebFrame* frame,
           base::GetCurrentProcId(),
           appcache_host ? appcache_host->host_id() : appcache::kNoHostId,
           0);
-  // A simple data source that keeps all data in memory.
-  media::FilterFactory* simple_data_source_factory =
-      webkit_glue::SimpleDataSource::CreateFactory(MessageLoop::current(),
-                                                   bridge_factory);
-  // A sophisticated data source that does memory caching.
-  media::FilterFactory* buffered_data_source_factory =
-      webkit_glue::BufferedDataSource::CreateFactory(MessageLoop::current(),
-                                                     bridge_factory);
-  factory->AddFactory(buffered_data_source_factory);
-  factory->AddFactory(simple_data_source_factory);
-  return new webkit_glue::WebMediaPlayerImpl(
-      client, factory,
-      new webkit_glue::VideoRendererImpl::FactoryFactory(false));
+  webkit_glue::MediaResourceLoaderBridgeFactory* bridge_factory_buffered =
+      new webkit_glue::MediaResourceLoaderBridgeFactory(
+          GURL(),  // referrer
+          "null",  // frame origin
+          "null",  // main_frame_origin
+          base::GetCurrentProcId(),
+          appcache_host ? appcache_host->host_id() : appcache::kNoHostId,
+          0);
+
+  scoped_refptr<webkit_glue::VideoRendererImpl> video_renderer(
+      new webkit_glue::VideoRendererImpl(false));
+  collection->AddVideoRenderer(video_renderer);
+
+  scoped_ptr<webkit_glue::WebMediaPlayerImpl> result(
+      new webkit_glue::WebMediaPlayerImpl(client, collection.release()));
+  if (!result->Initialize(bridge_factory_simple,
+                          bridge_factory_buffered,
+                          false,
+                          video_renderer)) {
+    return NULL;
+  }
+  return result.release();
 }
 
 WebKit::WebApplicationCacheHost* CreateApplicationCacheHost(
@@ -325,7 +338,7 @@ void ServeAsynchronousMockedRequests() {
 
 // Wrapper for debug_util
 bool BeingDebugged() {
-  return DebugUtil::BeingDebugged();
+  return base::debug::BeingDebugged();
 }
 
 // Wrappers for MessageLoop
@@ -458,7 +471,7 @@ std::string MakeURLErrorDescription(const WebKit::WebURLError& error) {
     domain = "NSURLErrorDomain";
     switch (error.reason) {
     case net::ERR_ABORTED:
-      code = -999;
+      code = -999;  // NSURLErrorCancelled
       break;
     case net::ERR_UNSAFE_PORT:
       // Our unsafe port checking happens at the network stack level, but we
@@ -468,7 +481,8 @@ std::string MakeURLErrorDescription(const WebKit::WebURLError& error) {
       break;
     case net::ERR_ADDRESS_INVALID:
     case net::ERR_ADDRESS_UNREACHABLE:
-      code = -1004;
+    case net::ERR_NETWORK_ACCESS_DENIED:
+      code = -1004;  // NSURLErrorCannotConnectToHost
       break;
     }
   } else
@@ -533,6 +547,14 @@ WebURL GetDevToolsPathAsURL() {
   FilePath devToolsPath = dirExe.AppendASCII(
       "resources/inspector/devtools.html");
   return net::FilePathToFileURL(devToolsPath);
+}
+
+// FileSystem
+void OpenFileSystem(WebFrame* frame, WebFileSystem::Type type,
+    long long size, bool create, WebFileSystemCallbacks* callbacks) {
+  SimpleFileSystem* fileSystem = static_cast<SimpleFileSystem*>(
+      test_environment->webkit_client()->fileSystem());
+  fileSystem->OpenFileSystem(frame, type, size, create, callbacks);
 }
 
 }  // namespace webkit_support

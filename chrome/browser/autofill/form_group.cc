@@ -4,6 +4,12 @@
 
 #include "chrome/browser/autofill/form_group.h"
 
+string16 FormGroup::GetPreviewText(const AutoFillType& type) const {
+  return GetFieldText(type);
+}
+
+const string16 FormGroup::Label() const { return string16(); }
+
 bool FormGroup::operator!=(const FormGroup& form_group) const {
   FieldTypeSet a, b, symmetric_difference;
   GetAvailableFieldTypes(&a);
@@ -66,6 +72,16 @@ void FormGroup::MergeWith(const FormGroup& form_group) {
 
   for (FieldTypeSet::const_iterator iter = intersection.begin();
        iter != intersection.end(); ++iter) {
+    AutoFillType type(*iter);
+    SetInfo(type, form_group.GetFieldText(type));
+  }
+}
+
+void FormGroup::OverwriteWith(const FormGroup& form_group) {
+  FieldTypeSet a;;
+  form_group.GetAvailableFieldTypes(&a);
+
+  for (FieldTypeSet::const_iterator iter = a.begin(); iter != a.end(); ++iter) {
     AutoFillType type(*iter);
     SetInfo(type, form_group.GetFieldText(type));
   }

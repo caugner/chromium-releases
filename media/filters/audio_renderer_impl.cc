@@ -6,6 +6,7 @@
 
 #include <math.h>
 
+#include "base/logging.h"
 #include "media/base/filter_host.h"
 #include "media/audio/audio_manager.h"
 
@@ -27,15 +28,6 @@ AudioRendererImpl::~AudioRendererImpl() {
     stream_->Stop();
     stream_->Close();
   }
-}
-
-bool AudioRendererImpl::IsMediaFormatSupported(
-    const MediaFormat& media_format) {
-  int channels;
-  int sample_rate;
-  int sample_bits;
-  return AudioManager::GetAudioManager()->HasAudioOutputDevices() &&
-      ParseMediaFormat(media_format, &channels, &sample_rate, &sample_bits);
 }
 
 void AudioRendererImpl::SetPlaybackRate(float rate) {
@@ -88,6 +80,9 @@ bool AudioRendererImpl::OnInitialize(const MediaFormat& media_format) {
     return false;
   }
 
+  // Set packet size.
+  params.samples_per_packet = kSamplesPerBuffer;
+
   bytes_per_second_ = params.sample_rate * params.channels *
       params.bits_per_sample / 8;
 
@@ -96,10 +91,7 @@ bool AudioRendererImpl::OnInitialize(const MediaFormat& media_format) {
   if (!stream_)
     return false;
 
-  // Calculate buffer size and open the stream.
-  size_t size = kSamplesPerBuffer * params.channels *
-      params.bits_per_sample / 8;
-  if (!stream_->Open(size)) {
+  if (!stream_->Open()) {
     stream_->Close();
     stream_ = NULL;
   }

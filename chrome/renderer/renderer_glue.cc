@@ -77,9 +77,7 @@ void ScopedClipboardWriterGlue::WriteBitmapFromPixels(const void* pixels,
   }
 #else  // !OS_POSIX
   shared_buf_ = new base::SharedMemory;
-  const bool created = shared_buf_ && shared_buf_->Create(
-      "", false /* read write */, true /* open existing */, buf_size);
-  if (!shared_buf_ || !created || !shared_buf_->Map(buf_size)) {
+  if (!shared_buf_->CreateAndMapAnonymous(buf_size)) {
     NOTREACHED();
     return;
   }
@@ -269,6 +267,11 @@ bool IsSingleProcess() {
 
 void EnableSpdy(bool enable) {
   RenderThread::current()->EnableSpdy(enable);
+}
+
+void UserMetricsRecordAction(const std::string& action) {
+  RenderThread::current()->Send(
+      new ViewHostMsg_UserMetricsRecordAction(action));
 }
 
 #if defined(OS_LINUX)

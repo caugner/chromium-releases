@@ -58,7 +58,6 @@ FFmpegDemuxerStream::FFmpegDemuxerStream(FFmpegDemuxer* demuxer,
                                          AVStream* stream)
     : demuxer_(demuxer),
       stream_(stream),
-      discontinuous_(false),
       stopped_(false) {
   DCHECK(demuxer_);
 
@@ -126,8 +125,8 @@ void FFmpegDemuxerStream::EnqueuePacket(AVPacket* packet) {
   }
 
   // Enqueue the callback and attempt to satisfy a read immediately.
-  scoped_refptr<Buffer> buffer =
-      new AVPacketBuffer(packet, timestamp, duration);
+  scoped_refptr<Buffer> buffer(
+      new AVPacketBuffer(packet, timestamp, duration));
   if (!buffer) {
     NOTREACHED() << "Unable to allocate AVPacketBuffer";
     return;
@@ -141,7 +140,6 @@ void FFmpegDemuxerStream::FlushBuffers() {
   DCHECK_EQ(MessageLoop::current(), demuxer_->message_loop());
   DCHECK(read_queue_.empty()) << "Read requests should be empty";
   buffer_queue_.clear();
-  discontinuous_ = true;
 }
 
 void FFmpegDemuxerStream::Stop() {
@@ -194,14 +192,6 @@ void FFmpegDemuxerStream::FulfillPendingRead() {
   buffer_queue_.pop_front();
   read_queue_.pop_front();
 
-  // Handle discontinuities due to FlushBuffers() being called.
-  //
-  // TODO(scherkus): get rid of |discontinuous_| and use buffer flags.
-  if (discontinuous_) {
-    buffer->SetDiscontinuous(true);
-    discontinuous_ = false;
-  }
-
   // Execute the callback.
   read_callback->Run(buffer);
 }
@@ -233,7 +223,7 @@ void FFmpegDemuxerStream::EnableBitstreamConverter() {
 base::TimeDelta FFmpegDemuxerStream::ConvertStreamTimestamp(
     const AVRational& time_base, int64 timestamp) {
   if (timestamp == static_cast<int64>(AV_NOPTS_VALUE))
-    return StreamSample::kInvalidTimestamp;
+    return kNoTimestamp;
 
   return ConvertTimestamp(time_base, timestamp);
 }
@@ -310,8 +300,11 @@ void FFmpegDemuxer::OnAudioRendererDisabled() {
 
 void FFmpegDemuxer::Initialize(DataSource* data_source,
                                FilterCallback* callback) {
-  message_loop()->PostTask(FROM_HERE,
-      NewRunnableMethod(this, &FFmpegDemuxer::InitializeTask, data_source,
+  message_loop()->PostTask(
+      FROM_HERE,
+      NewRunnableMethod(this,
+                        &FFmpegDemuxer::InitializeTask,
+                        make_scoped_refptr(data_source),
                         callback));
 }
 
@@ -444,8 +437,8 @@ void FFmpegDemuxer::InitializeTask(DataSource* data_source,
           = new FFmpegDemuxerStream(this, stream);
 
       DCHECK(demuxer_stream);
-      streams_.push_back(demuxer_stream);
-      packet_streams_.push_back(demuxer_stream);
+      streams_.push_back(make_scoped_refptr(demuxer_stream));
+      packet_streams_.push_back(make_scoped_refptr(demuxer_stream));
       max_duration = std::max(max_duration, demuxer_stream->duration());
     } else {
       packet_streams_.push_back(NULL);
@@ -492,10 +485,10 @@ void FFmpegDemuxer::SeekTask(base::TimeDelta time, FilterCallback* callback) {
   // will attempt to use the lowest-index video stream, if present, followed by
   // the lowest-index audio stream.
   if (av_seek_frame(format_context_, -1, time.InMicroseconds(), flags) < 0) {
-    // Use LOG(INFO) instead of NOTIMPLEMENTED() to prevent the message being
+    // Use VLOG(1) instead of NOTIMPLEMENTED() to prevent the message being
     // captured from stdout and contaminates testing.
     // TODO(scherkus): Implement this properly and signal error (BUG=23447).
-    LOG(INFO) << "Not implemented";
+    VLOG(1) << "Not implemented";
   }
 
   // Notify we're finished seeking.
@@ -526,7 +519,12 @@ void FFmpegDemuxer::DemuxTask() {
   // thread.
   DCHECK_GE(packet->stream_index, 0);
   DCHECK_LT(packet->stream_index, static_cast<int>(packet_streams_.size()));
-  FFmpegDemuxerStream* demuxer_stream = packet_streams_[packet->stream_index];
+  FFmpegDemuxerStream* demuxer_stream = NULL;
+  size_t i = packet->stream_index;
+  // Defend against ffmpeg giving us a bad stream index.
+  if (i < packet_streams_.size()) {
+    demuxer_stream = packet_streams_[i];
+  }
   if (demuxer_stream) {
     // Queue the packet with the appropriate stream.  The stream takes
     // ownership of the AVPacket.

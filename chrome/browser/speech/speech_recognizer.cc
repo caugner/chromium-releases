@@ -7,7 +7,7 @@
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/time.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/net/url_request_context_getter.h"
 #include "third_party/speex/include/speex/speex.h"
@@ -17,8 +17,6 @@ using std::list;
 using std::string;
 
 namespace {
-const char* const kDefaultSpeechRecognitionUrl =
-    "http://www.google.com/speech-api/v1/recognize?lang=en-us&client=chromium";
 const char* const kContentTypeSpeex =
     "audio/x-speex-with-header-byte; rate=16000";
 const int kSpeexEncodingQuality = 8;
@@ -70,6 +68,8 @@ class SpeexEncoder {
 };
 
 SpeexEncoder::SpeexEncoder() {
+  // speex_bits_init() does not initialize all of the |bits_| struct.
+  memset(&bits_, 0, sizeof(bits_));
   speex_bits_init(&bits_);
   encoder_state_ = speex_encoder_init(&speex_wb_mode);
   DCHECK(encoder_state_);
@@ -79,6 +79,7 @@ SpeexEncoder::SpeexEncoder() {
   speex_encoder_ctl(encoder_state_, SPEEX_SET_QUALITY, &quality);
   int vbr = 1;
   speex_encoder_ctl(encoder_state_, SPEEX_SET_VBR, &vbr);
+  memset(encoded_frame_data_, 0, sizeof(encoded_frame_data_));
 }
 
 SpeexEncoder::~SpeexEncoder() {
@@ -106,9 +107,16 @@ void SpeexEncoder::Encode(const short* samples,
   }
 }
 
-SpeechRecognizer::SpeechRecognizer(Delegate* delegate, int caller_id)
+SpeechRecognizer::SpeechRecognizer(Delegate* delegate,
+                                   int caller_id,
+                                   const std::string& language,
+                                   const std::string& grammar,
+                                   const std::string& hardware_info)
     : delegate_(delegate),
       caller_id_(caller_id),
+      language_(language),
+      grammar_(grammar),
+      hardware_info_(hardware_info),
       encoder_(new SpeexEncoder()),
       endpointer_(kAudioSampleRate),
       num_samples_recorded_(0),
@@ -143,11 +151,11 @@ bool SpeechRecognizer::StartRecording() {
   int samples_per_packet = (kAudioSampleRate * kAudioPacketIntervalMs) / 1000;
   DCHECK((samples_per_packet % encoder_->samples_per_frame()) == 0);
   AudioParameters params(AudioParameters::AUDIO_PCM_LINEAR, kNumAudioChannels,
-                         kAudioSampleRate, kNumBitsPerAudioSample);
-  audio_controller_ =
-      AudioInputController::Create(this, params, samples_per_packet);
+                         kAudioSampleRate, kNumBitsPerAudioSample,
+                         samples_per_packet);
+  audio_controller_ = AudioInputController::Create(this, params);
   DCHECK(audio_controller_.get());
-  LOG(INFO) << "SpeechRecognizer starting record.";
+  VLOG(1) << "SpeechRecognizer starting record.";
   num_samples_recorded_ = 0;
   audio_controller_->Record();
 
@@ -160,12 +168,12 @@ void SpeechRecognizer::CancelRecognition() {
 
   // Stop recording if required.
   if (audio_controller_.get()) {
-    LOG(INFO) << "SpeechRecognizer stopping record.";
+    VLOG(1) << "SpeechRecognizer stopping record.";
     audio_controller_->Close();
     audio_controller_ = NULL;  // Releases the ref ptr.
   }
 
-  LOG(INFO) << "SpeechRecognizer canceling recognition.";
+  VLOG(1) << "SpeechRecognizer canceling recognition.";
   ReleaseAudioBuffers();
   request_.reset();
 }
@@ -178,7 +186,7 @@ void SpeechRecognizer::StopRecording() {
   if (!audio_controller_.get())
     return;
 
-  LOG(INFO) << "SpeechRecognizer stopping record.";
+  VLOG(1) << "SpeechRecognizer stopping record.";
   audio_controller_->Close();
   audio_controller_ = NULL;  // Releases the ref ptr.
 
@@ -206,12 +214,11 @@ void SpeechRecognizer::StopRecording() {
        it != audio_buffers_.end(); it++) {
     data.append(*(*it));
   }
+
   DCHECK(!request_.get());
   request_.reset(new SpeechRecognitionRequest(
-      Profile::GetDefaultRequestContext(),
-      GURL(kDefaultSpeechRecognitionUrl),
-      this));
-  request_->Send(kContentTypeSpeex, data);
+      Profile::GetDefaultRequestContext(), this));
+  request_->Send(language_, grammar_, hardware_info_, kContentTypeSpeex, data);
   ReleaseAudioBuffers();  // No need to keep the audio anymore.
 }
 
@@ -311,13 +318,14 @@ void SpeechRecognizer::HandleOnData(string* data) {
   // here as POST chunks.
 }
 
-void SpeechRecognizer::SetRecognitionResult(bool error, const string16& value) {
-  if (value.empty()) {
+void SpeechRecognizer::SetRecognitionResult(
+    bool error, const SpeechInputResultArray& result) {
+  if (result.empty()) {
     InformErrorAndCancelRecognition(RECOGNIZER_ERROR_NO_RESULTS);
     return;
   }
 
-  delegate_->SetRecognitionResult(caller_id_, error, value);
+  delegate_->SetRecognitionResult(caller_id_, error, result);
 
   // Guard against the delegate freeing us until we finish our job.
   scoped_refptr<SpeechRecognizer> me(this);

@@ -72,11 +72,7 @@ void RendererCairo::Destroy() {
   display_ = NULL;
 }
 
-// TODO(fransiskusx): Need to check if the shared memory data has been
-// unregistered. It will prevent errors when accessing unregistered
-// shared memory data to render the frame.
 void RendererCairo::Paint() {
-  DLOG(INFO) << "To paint";
   cairo_t* current_drawing = cairo_create(main_surface_);
 
   // Paint the background.
@@ -90,10 +86,9 @@ void RendererCairo::Paint() {
 
     // Preparing and updating the Layer.
     Layer* cur = *i;
-    TextureCairo* cur_texture = cur->GetTexture();
-
-    // Check if the pointer to data is null.
-    if (cur_texture->GetData() == NULL) {
+    Pattern* pattern = cur->pattern();
+    if (!pattern) {
+      // Skip layers with no pattern assigned.
       continue;
     }
 
@@ -102,30 +97,14 @@ void RendererCairo::Paint() {
     start_mask_it++;
     MaskArea(current_drawing, start_mask_it);
 
-    // Preparing the image to render.
-    cairo_surface_t* image = cairo_image_surface_create_for_data(
-        const_cast<unsigned char*>(
-            static_cast<const unsigned char*>(cur_texture->GetData())),
-        CAIRO_FORMAT_ARGB32, cur_texture->GetWidth(),
-        cur_texture->GetHeight(), cur_texture->GetPitch());
+    cairo_translate(current_drawing, cur->x(), cur->y());
 
-    // Scale the image.
-    double width_scaling =
-        (static_cast<double>(cur->GetScaleX())) / cur_texture->GetWidth();
-    double height_scaling =
-        (static_cast<double>(cur->GetScaleY())) / cur_texture->GetHeight();
-
-    cairo_scale(current_drawing, width_scaling, height_scaling);
+    cairo_scale(current_drawing, cur->scale_x(), cur->scale_y());
 
     // Painting the image to the surface.
-    cairo_set_source_surface(current_drawing, image,
-        cur->GetTranslateX() / width_scaling,
-        cur->GetTranslateY() / height_scaling);
+    cairo_set_source(current_drawing, pattern->pattern());
 
-    cairo_paint_with_alpha(current_drawing, cur->GetAlpha());
-
-    // Cleaning up the memory.
-    cairo_surface_destroy(image);
+    cairo_paint_with_alpha(current_drawing, cur->alpha());
 
     // Restore to the state with no mask.
     cairo_restore(current_drawing);
@@ -152,16 +131,16 @@ void RendererCairo::MaskArea(cairo_t* cr,  LayerRefList::iterator it) {
 
     cairo_rectangle(cr, 0, 0, display_width(), display_height());
     cairo_rectangle(cr,
-                    cur_mask->GetTranslateX(),
-                    cur_mask->GetTranslateY(),
-                    static_cast<double>(cur_mask->GetScaleX()),
-                    static_cast<double>(cur_mask->GetScaleY()));
+                    cur_mask->x(),
+                    cur_mask->y(),
+                    cur_mask->width(),
+                    cur_mask->height());
     cairo_clip(cr);
   }
 }
 
 void RendererCairo::AddLayer(Layer* image) {
-  layer_list_.push_front(image);
+  layer_list_.push_front(Layer::Ref(image));
 }
 
 void RendererCairo::InitCommon() {

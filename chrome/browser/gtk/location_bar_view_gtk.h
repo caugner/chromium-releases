@@ -61,6 +61,9 @@ class LocationBarViewGtk : public AutocompleteEditController,
   // Returns the widget the page info bubble should point to.
   GtkWidget* location_icon_widget() const { return location_icon_image_; }
 
+  // Returns the widget the extension installed bubble should point to.
+  GtkWidget* location_entry_widget() const { return entry_box_; }
+
   // Returns the current TabContents.
   TabContents* GetTabContents() const;
 
@@ -88,18 +91,20 @@ class LocationBarViewGtk : public AutocompleteEditController,
   void SetStarred(bool starred);
 
   // Implement the AutocompleteEditController interface.
-  virtual void OnAutocompleteWillClosePopup() {}
-  virtual void OnAutocompleteLosingFocus(gfx::NativeView view_gaining_focus) {}
-  virtual void OnAutocompleteWillAccept() {}
-  virtual bool OnCommitSuggestedText(const std::wstring& typed_text) {
-    return false;
-  }
-  virtual void OnPopupBoundsChanged(const gfx::Rect& bounds) {}
+  virtual void OnAutocompleteWillClosePopup();
+  virtual void OnAutocompleteLosingFocus(gfx::NativeView view_gaining_focus);
+  virtual void OnAutocompleteWillAccept();
+  // For this implementation, the parameter is ignored.
+  virtual bool OnCommitSuggestedText(const std::wstring& typed_text);
+  virtual bool AcceptCurrentInstantPreview();
+  virtual void OnSetSuggestedSearchText(const string16& suggested_text);
+  virtual void OnPopupBoundsChanged(const gfx::Rect& bounds);
   virtual void OnAutocompleteAccept(const GURL& url,
       WindowOpenDisposition disposition,
       PageTransition::Type transition,
       const GURL& alternate_nav_url);
   virtual void OnChanged();
+  virtual void OnSelectionBoundsChanged();
   virtual void OnKillFocus();
   virtual void OnSetFocus();
   virtual void OnInputInProgress(bool in_progress);
@@ -152,7 +157,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
     void set_profile(Profile* profile) { profile_ = profile; }
 
     bool IsVisible() { return GTK_WIDGET_VISIBLE(widget()); }
-    void UpdateFromTabContents(const TabContents* tab_contents);
+    void UpdateFromTabContents(TabContents* tab_contents);
 
    private:
     CHROMEGTK_CALLBACK_1(ContentSettingImageViewGtk, gboolean, OnButtonPressed,
@@ -420,6 +425,9 @@ class LocationBarViewGtk : public AutocompleteEditController,
 
   // The last search keyword that was shown via the |tab_to_search_box_|.
   std::wstring last_keyword_;
+
+  // True if we should update the instant controller when the edit text changes.
+  bool update_instant_;
 
   DISALLOW_COPY_AND_ASSIGN(LocationBarViewGtk);
 };

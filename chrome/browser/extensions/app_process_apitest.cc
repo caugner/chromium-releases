@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_host.h"
@@ -11,6 +10,7 @@
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/ui_test_utils.h"
 #include "net/base/mock_host_resolver.h"
@@ -61,7 +61,14 @@ static void NavigateTabHelper(TabContents* contents, const GURL& url) {
   EXPECT_EQ(url, contents->controller().GetLastCommittedEntry()->url());
 }
 
-IN_PROC_BROWSER_TEST_F(AppApiTest, AppProcess) {
+#if defined(OS_WIN)
+// AppProcess sometimes hangs on Windows
+// http://crbug.com/58810
+#define MAYBE_AppProcess DISABLED_AppProcess
+#else
+#define MAYBE_AppProcess AppProcess
+#endif
+IN_PROC_BROWSER_TEST_F(AppApiTest, MAYBE_AppProcess) {
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kDisablePopupBlocking);
 
@@ -71,7 +78,15 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, AppProcess) {
   ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("app_process")));
 
   // Open two tabs in the app, one outside it.
-  GURL base_url("http://localhost:1337/files/extensions/api_test/app_process/");
+  GURL base_url = test_server()->GetURL(
+      "files/extensions/api_test/app_process/");
+
+  // The app under test acts on URLs whose host is "localhost",
+  // so the URLs we navigate to must have host "localhost".
+  GURL::Replacements replace_host;
+  replace_host.SetHostStr("localhost");
+  base_url = base_url.ReplaceComponents(replace_host);
+
   browser()->NewTab();
   ui_test_utils::NavigateToURL(browser(), base_url.Resolve("path1/empty.html"));
   browser()->NewTab();
@@ -96,8 +111,12 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, AppProcess) {
                    base_url.Resolve("path1/empty.html"), true);
   WindowOpenHelper(browser(), host,
                    base_url.Resolve("path2/empty.html"), true);
+  // TODO(creis): This should open in a new process (i.e., false for the last
+  // argument), but we temporarily avoid swapping processes away from an app
+  // until we're able to restore window.opener if the page later returns to an
+  // in-app URL.  See crbug.com/65953.
   WindowOpenHelper(browser(), host,
-                   base_url.Resolve("path3/empty.html"), false);
+                   base_url.Resolve("path3/empty.html"), true);
 
   // Now let's have these pages navigate, into or out of the extension web
   // extent. They should switch processes.
@@ -105,8 +124,23 @@ IN_PROC_BROWSER_TEST_F(AppApiTest, AppProcess) {
   const GURL& non_app_url(base_url.Resolve("path3/empty.html"));
   NavigateTabHelper(browser()->GetTabContentsAt(2), non_app_url);
   NavigateTabHelper(browser()->GetTabContentsAt(3), app_url);
-  EXPECT_NE(host->process(),
+  // TODO(creis): This should swap out of the app's process (i.e., EXPECT_NE),
+  // but we temporarily avoid swapping away from an app in case it needs to
+  // communicate with window.opener later.  See crbug.com/65953.
+  EXPECT_EQ(host->process(),
             browser()->GetTabContentsAt(2)->render_view_host()->process());
   EXPECT_EQ(host->process(),
             browser()->GetTabContentsAt(3)->render_view_host()->process());
+
+  // If one of the popup tabs navigates back to the app, window.opener should
+  // be valid.
+  NavigateTabHelper(browser()->GetTabContentsAt(6), app_url);
+  EXPECT_EQ(host->process(),
+            browser()->GetTabContentsAt(6)->render_view_host()->process());
+  bool windowOpenerValid = false;
+  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
+      browser()->GetTabContentsAt(6)->render_view_host(), L"",
+      L"window.domAutomationController.send(window.opener != null)",
+      &windowOpenerValid));
+  ASSERT_TRUE(windowOpenerValid);
 }

@@ -68,7 +68,9 @@ class WizardControllerTest : public chromeos::WizardInProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(WizardControllerTest);
 };
 
-IN_PROC_BROWSER_TEST_F(WizardControllerTest, SwitchLanguage) {
+// TODO(zelidrag): Need to revisit this once translation for fr and ar is
+// complete.  See http://crosbug.com/8974
+IN_PROC_BROWSER_TEST_F(WizardControllerTest, FAILS_SwitchLanguage) {
   WizardController* const wizard = controller();
   ASSERT_TRUE(wizard != NULL);
   wizard->ShowFirstScreen(WizardController::kNetworkScreenName);
@@ -214,7 +216,14 @@ IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest, ControlFlowErrorNetwork) {
   EXPECT_EQ(controller()->GetLoginScreen(), controller()->current_screen());
 }
 
-IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest, Accelerators) {
+#if defined(OFFICIAL_BUILD)
+// This test is supposed to fail on official test.
+#define MAYBE_Accelerators DISABLED_Accelerators
+#else
+#define MAYBE_Accelerators Accelerators
+#endif
+
+IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest, MAYBE_Accelerators) {
   EXPECT_EQ(controller()->GetNetworkScreen(), controller()->current_screen());
 
   views::FocusManager* focus_manager =

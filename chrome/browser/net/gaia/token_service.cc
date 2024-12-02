@@ -6,10 +6,10 @@
 
 #include "base/command_line.h"
 #include "base/string_util.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/net/gaia/gaia_authenticator2.h"
+#include "chrome/common/net/gaia/gaia_auth_fetcher.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/notification_service.h"
@@ -17,8 +17,13 @@
 // Unfortunately kNumServices must be defined in the .h.
 // TODO(chron): Sync doesn't use the TalkToken anymore so we can stop
 //              requesting it.
-const char* TokenService::kServices[] = {GaiaConstants::kSyncService,
-                                         GaiaConstants::kTalkService};
+const char* TokenService::kServices[] = {
+  GaiaConstants::kGaiaService,
+  GaiaConstants::kSyncService,
+  GaiaConstants::kTalkService,
+  GaiaConstants::kDeviceManagementService
+};
+
 TokenService::TokenService()
     : token_loading_query_(0) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -90,7 +95,7 @@ void TokenService::UpdateCredentials(
 
   // Cancels any currently running requests.
   for (int i = 0; i < kNumServices; i++) {
-    fetchers_[i].reset(new GaiaAuthenticator2(this, source_, getter_));
+    fetchers_[i].reset(new GaiaAuthFetcher(this, source_, getter_));
   }
 }
 
@@ -184,7 +189,7 @@ void TokenService::IssueAuthTokenForTest(const std::string& service,
 void TokenService::OnIssueAuthTokenSuccess(const std::string& service,
                                            const std::string& auth_token) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  LOG(INFO) << "Got an authorization token for " << service;
+  VLOG(1) << "Got an authorization token for " << service;
   token_map_[service] = auth_token;
   FireTokenAvailableNotification(service, auth_token);
   SaveAuthTokenToDB(service, auth_token);
@@ -237,8 +242,7 @@ void TokenService::LoadTokensIntoMemory(
         db_tokens.count(kServices[i])) {
       std::string db_token = db_tokens.find(kServices[i])->second;
       if (!db_token.empty()) {
-        LOG(INFO) << "Loading " << kServices[i] << "token from DB:"
-            << db_token;
+        VLOG(1) << "Loading " << kServices[i] << "token from DB: " << db_token;
         (*in_memory_tokens)[kServices[i]] = db_token;
         FireTokenAvailableNotification(kServices[i], db_token);
         // Failures are only for network errors.

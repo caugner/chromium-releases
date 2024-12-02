@@ -14,10 +14,8 @@
 #include "chrome/browser/chromeos/cros/power_library.h"
 #include "chrome/browser/chromeos/cros/touchpad_library.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
-#include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profile.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "unicode/timezone.h"
@@ -25,15 +23,14 @@
 namespace chromeos {
 
 static const char kFallbackInputMethodLocale[] = "en-US";
-static const char kTalkAppExtensionId[] = "ggnioahjipcehijkhpdjekioddnjoben";
 
-Preferences::Preferences(Profile* profile)
-    : profile_(profile) {
-}
+Preferences::Preferences() {}
+
+Preferences::~Preferences() {}
 
 // static
 void Preferences::RegisterUserPrefs(PrefService* prefs) {
-  prefs->RegisterBooleanPref(prefs::kTapToClickEnabled, false);
+  prefs->RegisterBooleanPref(prefs::kTapToClickEnabled, true);
   prefs->RegisterBooleanPref(prefs::kLabsMediaplayerEnabled, false);
   prefs->RegisterBooleanPref(prefs::kLabsAdvancedFilesystemEnabled, false);
   // Check if the accessibility pref is already registered, which can happen
@@ -42,7 +39,6 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
   if (prefs->FindPreference(prefs::kAccessibilityEnabled) == NULL) {
     prefs->RegisterBooleanPref(prefs::kAccessibilityEnabled, false);
   }
-  prefs->RegisterIntegerPref(prefs::kLabsTalkEnabled, 1);
   prefs->RegisterIntegerPref(prefs::kTouchpadSensitivity, 3);
   prefs->RegisterStringPref(prefs::kLanguageCurrentInputMethod, "");
   prefs->RegisterStringPref(prefs::kLanguagePreviousInputMethod, "");
@@ -52,8 +48,9 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
                             language_prefs::kHotkeyPreviousEngine);
   prefs->RegisterStringPref(prefs::kLanguagePreferredLanguages,
                             kFallbackInputMethodLocale);
+  KeyboardLibrary* keyboard_library = CrosLibrary::Get()->GetKeyboardLibrary();
   prefs->RegisterStringPref(prefs::kLanguagePreloadEngines,
-                            kFallbackInputMethodId);  // EN layout
+                            keyboard_library->GetHardwareKeyboardLayoutName());
   for (size_t i = 0; i < language_prefs::kNumChewingBooleanPrefs; ++i) {
     prefs->RegisterBooleanPref(
         language_prefs::kChewingBooleanPrefs[i].pref_name,
@@ -119,6 +116,9 @@ void Preferences::RegisterUserPrefs(PrefService* prefs) {
 
   // Screen lock default to off.
   prefs->RegisterBooleanPref(prefs::kEnableScreenLock, false);
+
+  // Mobile plan notifications default to on.
+  prefs->RegisterBooleanPref(prefs::kShowPlanNotifications, true);
 }
 
 void Preferences::Init(PrefService* prefs) {
@@ -183,8 +183,6 @@ void Preferences::Init(PrefService* prefs) {
       prefs::kLanguageXkbAutoRepeatDelay, prefs, this);
   language_xkb_auto_repeat_interval_pref_.Init(
       prefs::kLanguageXkbAutoRepeatInterval, prefs, this);
-
-  labs_talk_enabled_.Init(prefs::kLabsTalkEnabled, prefs, this);
 
   enable_screen_lock_.Init(prefs::kEnableScreenLock, prefs, this);
 
@@ -345,11 +343,6 @@ void Preferences::NotifyPrefChanged(const std::string* pref_name) {
     UpdateAutoRepeatRate();
   }
 
-  // Listen for explicit changes as ExtensionsService handles startup case.
-  if (pref_name && *pref_name == prefs::kLabsTalkEnabled) {
-    UpdateTalkApp();
-  }
-
   // Init or update power manager config.
   if (!pref_name || *pref_name == prefs::kEnableScreenLock) {
     CrosLibrary::Get()->GetPowerLibrary()->EnableScreenLock(
@@ -403,11 +396,11 @@ void Preferences::SetLanguageConfigStringList(
 void Preferences::SetLanguageConfigStringListAsCSV(const char* section,
                                                    const char* name,
                                                    const std::string& value) {
-  LOG(INFO) << "Setting " << name << " to '" << value << "'";
+  VLOG(1) << "Setting " << name << " to '" << value << "'";
 
   std::vector<std::string> split_values;
   if (!value.empty())
-    SplitString(value, ',', &split_values);
+    base::SplitString(value, ',', &split_values);
 
   // We should call the cros API even when |value| is empty, to disable default
   // config.
@@ -443,19 +436,6 @@ void Preferences::UpdateAutoRepeatRate() {
   DCHECK(rate.initial_delay_in_ms > 0);
   DCHECK(rate.repeat_interval_in_ms > 0);
   CrosLibrary::Get()->GetKeyboardLibrary()->SetAutoRepeatRate(rate);
-}
-
-void Preferences::UpdateTalkApp() {
-  if (!profile_->GetExtensionsService()->is_ready()) {
-    NOTREACHED() << "Extensions service should be ready";
-    return;
-  }
-
-  if (labs_talk_enabled_.GetValue() == 0) {
-    profile_->GetExtensionsService()->DisableExtension(kTalkAppExtensionId);
-  } else {
-    profile_->GetExtensionsService()->EnableExtension(kTalkAppExtensionId);
-  }
 }
 
 }  // namespace chromeos

@@ -13,19 +13,16 @@
 #include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "remoting/base/encoder.h"
-#include "remoting/base/protocol/chromotocol.pb.h"
 #include "remoting/host/capturer.h"
-
-namespace media {
-
-class DataBuffer;
-
-}  // namespace media
+#include "remoting/proto/video.pb.h"
 
 namespace remoting {
 
+namespace protocol {
+class ConnectionToClient;
+}  // namespace protocol
+
 class CaptureData;
-class ClientConnection;
 
 // A class for controlling and coordinate Capturer, Encoder
 // and NetworkChannel in a record session.
@@ -89,14 +86,14 @@ class SessionManager : public base::RefCountedThreadSafe<SessionManager> {
   // This method should be called before Start() is called.
   void SetMaxRate(double rate);
 
-  // Add a client to this recording session.
-  void AddClient(scoped_refptr<ClientConnection> client);
+  // Add a connection to this recording session.
+  void AddConnection(scoped_refptr<protocol::ConnectionToClient> connection);
 
-  // Remove a client from receiving screen updates.
-  void RemoveClient(scoped_refptr<ClientConnection> client);
+  // Remove a connection from receiving screen updates.
+  void RemoveConnection(scoped_refptr<protocol::ConnectionToClient> connection);
 
-  // Remove all clients.
-  void RemoveAllClients();
+  // Remove all connections.
+  void RemoveAllConnections();
 
  private:
   // Getters for capturer and encoder.
@@ -118,7 +115,7 @@ class SessionManager : public base::RefCountedThreadSafe<SessionManager> {
   void CaptureDoneCallback(scoped_refptr<CaptureData> capture_data);
   void DoFinishEncode();
 
-  void DoGetInitInfo(scoped_refptr<ClientConnection> client);
+  void DoGetInitInfo(scoped_refptr<protocol::ConnectionToClient> client);
 
   // Network thread -----------------------------------------------------------
 
@@ -131,13 +128,12 @@ class SessionManager : public base::RefCountedThreadSafe<SessionManager> {
   void DoRateControl();
 
   // DoSendUpdate takes ownership of header and is responsible for deleting it.
-  void DoSendUpdate(ChromotingHostMessage* message,
-                    Encoder::EncodingState state);
-  void DoSendInit(scoped_refptr<ClientConnection> client,
+  void DoSendVideoPacket(VideoPacket* packet);
+  void DoSendInit(scoped_refptr<protocol::ConnectionToClient> connection,
                   int width, int height);
 
-  void DoAddClient(scoped_refptr<ClientConnection> client);
-  void DoRemoveClient(scoped_refptr<ClientConnection> client);
+  void DoAddClient(scoped_refptr<protocol::ConnectionToClient> connection);
+  void DoRemoveClient(scoped_refptr<protocol::ConnectionToClient> connection);
   void DoRemoveAllClients();
 
   // Encoder thread -----------------------------------------------------------
@@ -146,8 +142,7 @@ class SessionManager : public base::RefCountedThreadSafe<SessionManager> {
 
   // EncodeDataAvailableTask takes ownership of header and is responsible for
   // deleting it.
-  void EncodeDataAvailableTask(ChromotingHostMessage* message,
-                               Encoder::EncodingState state);
+  void EncodeDataAvailableTask(VideoPacket* packet);
 
   // Message loops used by this class.
   MessageLoop* capture_loop_;
@@ -166,8 +161,9 @@ class SessionManager : public base::RefCountedThreadSafe<SessionManager> {
   // This member is always accessed on the NETWORK thread.
   // TODO(hclam): Have to scoped_refptr the clients since they have a shorter
   // lifetime than this object.
-  typedef std::vector<scoped_refptr<ClientConnection> > ClientConnectionList;
-  ClientConnectionList clients_;
+  typedef std::vector<scoped_refptr<protocol::ConnectionToClient> >
+      ConnectionToClientList;
+  ConnectionToClientList connections_;
 
   // The following members are accessed on the capture thread.
   double rate_;  // Number of captures to perform every second.

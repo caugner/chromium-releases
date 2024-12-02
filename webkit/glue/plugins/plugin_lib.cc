@@ -6,7 +6,7 @@
 
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/stats_counters.h"
+#include "base/metrics/stats_counters.h"
 #include "base/string_util.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/plugins/plugin_instance.h"
@@ -72,9 +72,9 @@ PluginLib::PluginLib(const WebPluginInfo& info,
       saved_data_(0),
       instance_count_(0),
       skip_unload_(false) {
-  StatsCounter(kPluginLibrariesLoadedCounter).Increment();
+  base::StatsCounter(kPluginLibrariesLoadedCounter).Increment();
   memset(static_cast<void*>(&plugin_funcs_), 0, sizeof(plugin_funcs_));
-  g_loaded_libs->push_back(this);
+  g_loaded_libs->push_back(make_scoped_refptr(this));
 
   if (entry_points) {
     internal_ = true;
@@ -87,7 +87,7 @@ PluginLib::PluginLib(const WebPluginInfo& info,
 }
 
 PluginLib::~PluginLib() {
-  StatsCounter(kPluginLibrariesLoadedCounter).Decrement();
+  base::StatsCounter(kPluginLibrariesLoadedCounter).Decrement();
   if (saved_data_ != 0) {
     // TODO - delete the savedData object here
   }
@@ -143,13 +143,13 @@ void PluginLib::PreventLibraryUnload() {
 PluginInstance* PluginLib::CreateInstance(const std::string& mime_type) {
   PluginInstance* new_instance = new PluginInstance(this, mime_type);
   instance_count_++;
-  StatsCounter(kPluginInstancesActiveCounter).Increment();
+  base::StatsCounter(kPluginInstancesActiveCounter).Increment();
   DCHECK_NE(static_cast<PluginInstance*>(NULL), new_instance);
   return new_instance;
 }
 
 void PluginLib::CloseInstance() {
-  StatsCounter(kPluginInstancesActiveCounter).Decrement();
+  base::StatsCounter(kPluginInstancesActiveCounter).Decrement();
   instance_count_--;
   // If a plugin is running in its own process it will get unloaded on process
   // shutdown.
@@ -165,7 +165,22 @@ bool PluginLib::Load() {
   base::NativeLibrary library = 0;
 
   if (!internal_) {
+#if defined(OS_WIN)
+    // This is to work around a bug in the Real player recorder plugin which
+    // intercepts LoadLibrary calls from chrome.dll and wraps NPAPI functions
+    // provided by the plugin. It crashes if the media player plugin is being
+    // loaded. Workaround is to load the dll dynamically by getting the
+    // LoadLibrary API address from kernel32.dll which bypasses the recorder
+    // plugin.
+    if (web_plugin_info_.name.find(L"Windows Media Player") !=
+        std::wstring::npos) {
+      library = base::LoadNativeLibraryDynamically(web_plugin_info_.path);
+    } else {
+      library = base::LoadNativeLibrary(web_plugin_info_.path);
+    }
+#else  // OS_WIN
     library = base::LoadNativeLibrary(web_plugin_info_.path);
+#endif  // OS_WIN
     if (library == 0) {
       LOG_IF(ERROR, PluginList::DebugPluginLoading())
           << "Couldn't load plugin " << web_plugin_info_.path.value();
@@ -235,25 +250,41 @@ bool PluginLib::Load() {
 // This class implements delayed NP_Shutdown and FreeLibrary on the plugin dll.
 class FreePluginLibraryTask : public Task {
  public:
-  FreePluginLibraryTask(base::NativeLibrary library,
+  FreePluginLibraryTask(const FilePath& path,
+                        base::NativeLibrary library,
                         NP_ShutdownFunc shutdown_func)
-      : library_(library),
+      : path_(path),
+        library_(library),
         NP_Shutdown_(shutdown_func) {
   }
 
   ~FreePluginLibraryTask() {}
 
   void Run() {
-    if (NP_Shutdown_)
-      NP_Shutdown_();
+    if (NP_Shutdown_) {
+      // Don't call NP_Shutdown if the library has been reloaded since this task
+      // was posted.
+      bool reloaded = false;
+      if (g_loaded_libs) {
+        for (size_t i = 0; i < g_loaded_libs->size(); ++i) {
+          if ((*g_loaded_libs)[i]->plugin_info().path == path_)
+            reloaded = true;
+        }
+      }
+      if (!reloaded)
+        NP_Shutdown_();
+    }
 
     if (library_) {
+      // Always call base::UnloadNativeLibrary so that the system reference
+      // count is decremented.
       base::UnloadNativeLibrary(library_);
       library_ = NULL;
     }
   }
 
  private:
+  FilePath path_;
   base::NativeLibrary library_;
   NP_ShutdownFunc NP_Shutdown_;
   DISALLOW_COPY_AND_ASSIGN(FreePluginLibraryTask);
@@ -277,7 +308,8 @@ void PluginLib::Unload() {
 
     if (defer_unload) {
       FreePluginLibraryTask* free_library_task =
-          new FreePluginLibraryTask(skip_unload_ ? NULL : library_,
+          new FreePluginLibraryTask(web_plugin_info_.path,
+                                    skip_unload_ ? NULL : library_,
                                     entry_points_.np_shutdown);
       LOG_IF(ERROR, PluginList::DebugPluginLoading())
           << "Scheduling delayed unload for plugin "

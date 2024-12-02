@@ -69,7 +69,7 @@ bool ContainsString(const std::string& haystack, const char* needle) {
                   haystack.end(),
                   needle,
                   needle + strlen(needle),
-                  CaseInsensitiveCompare<char>());
+                  base::CaseInsensitiveCompare<char>());
   return it != haystack.end();
 }
 
@@ -89,17 +89,21 @@ void FillBuffer(char* buffer, size_t len) {
 }
 
 scoped_refptr<net::UploadData> CreateSimpleUploadData(const char* data) {
-  scoped_refptr<net::UploadData> upload = new net::UploadData;
+  scoped_refptr<net::UploadData> upload(new net::UploadData);
   upload->AppendBytes(data, strlen(data));
   return upload;
 }
 
 // Verify that the SSLInfo of a successful SSL connection has valid values.
 void CheckSSLInfo(const net::SSLInfo& ssl_info) {
-  // Allow ChromeFrame fake certificates to get through.
+  // Allow ChromeFrame fake SSLInfo to get through.
   if (ssl_info.cert.get() &&
-      ssl_info.cert.get()->issuer().GetDisplayName() == "Chrome Internal")
+      ssl_info.cert.get()->issuer().GetDisplayName() == "Chrome Internal") {
+    // -1 means unknown.
+    EXPECT_EQ(ssl_info.security_bits, -1);
     return;
+  }
+
   // -1 means unknown.  0 means no encryption.
   EXPECT_GT(ssl_info.security_bits, 0);
 
@@ -113,6 +117,10 @@ void CheckSSLInfo(const net::SSLInfo& ssl_info) {
 
 // Inherit PlatformTest since we require the autorelease pool on Mac OS X.f
 class URLRequestTest : public PlatformTest {
+ public:
+  static void SetUpTestCase() {
+    URLRequest::AllowFileAccess();
+  }
 };
 
 class URLRequestTestHTTP : public URLRequestTest {
@@ -142,7 +150,7 @@ class URLRequestTestHTTP : public URLRequestTest {
     }
     uploadBytes[kMsgSize] = '\0';
 
-    scoped_refptr<URLRequestContext> context = new TestURLRequestContext();
+    scoped_refptr<URLRequestContext> context(new TestURLRequestContext());
 
     for (int i = 0; i < kIterations; ++i) {
       TestDelegate d;
@@ -306,7 +314,9 @@ TEST_F(HTTPSRequestTest, HTTPSGetTest) {
 }
 
 TEST_F(HTTPSRequestTest, HTTPSMismatchedTest) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTPS_MISMATCHED_HOSTNAME,
+  net::TestServer::HTTPSOptions https_options(
+      net::TestServer::HTTPSOptions::CERT_MISMATCHED_NAME);
+  net::TestServer test_server(https_options,
                               FilePath(FILE_PATH_LITERAL("net/data/ssl")));
   ASSERT_TRUE(test_server.Start());
 
@@ -336,7 +346,9 @@ TEST_F(HTTPSRequestTest, HTTPSMismatchedTest) {
 }
 
 TEST_F(HTTPSRequestTest, HTTPSExpiredTest) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTPS_EXPIRED_CERTIFICATE,
+  net::TestServer::HTTPSOptions https_options(
+      net::TestServer::HTTPSOptions::CERT_EXPIRED);
+  net::TestServer test_server(https_options,
                               FilePath(FILE_PATH_LITERAL("net/data/ssl")));
   ASSERT_TRUE(test_server.Start());
 
@@ -394,7 +406,9 @@ class SSLClientAuthTestDelegate : public TestDelegate {
 // - Getting a certificate request in an SSL renegotiation sending the
 //   HTTP request.
 TEST_F(HTTPSRequestTest, ClientAuthTest) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTPS_CLIENT_AUTH,
+  net::TestServer::HTTPSOptions https_options;
+  https_options.request_client_certificate = true;
+  net::TestServer test_server(https_options,
                               FilePath(FILE_PATH_LITERAL("net/data/ssl")));
   ASSERT_TRUE(test_server.Start());
 
@@ -517,7 +531,7 @@ TEST_F(URLRequestTestHTTP, CancelTest4) {
 TEST_F(URLRequestTestHTTP, CancelTest5) {
   ASSERT_TRUE(test_server_.Start());
 
-  scoped_refptr<URLRequestContext> context = new TestURLRequestContext();
+  scoped_refptr<URLRequestContext> context(new TestURLRequestContext());
 
   // populate cache
   {
@@ -1124,7 +1138,7 @@ TEST_F(URLRequestTestHTTP, CancelDeferredRedirect) {
 TEST_F(URLRequestTestHTTP, VaryHeader) {
   ASSERT_TRUE(test_server_.Start());
 
-  scoped_refptr<URLRequestContext> context = new TestURLRequestContext();
+  scoped_refptr<URLRequestContext> context(new TestURLRequestContext());
 
   // populate the cache
   {
@@ -1170,7 +1184,7 @@ TEST_F(URLRequestTestHTTP, VaryHeader) {
 TEST_F(URLRequestTestHTTP, BasicAuth) {
   ASSERT_TRUE(test_server_.Start());
 
-  scoped_refptr<URLRequestContext> context = new TestURLRequestContext();
+  scoped_refptr<URLRequestContext> context(new TestURLRequestContext());
 
   // populate the cache
   {
@@ -1220,7 +1234,7 @@ TEST_F(URLRequestTestHTTP, BasicAuthWithCookies) {
   // Request a page that will give a 401 containing a Set-Cookie header.
   // Verify that when the transaction is restarted, it includes the new cookie.
   {
-    scoped_refptr<URLRequestContext> context = new TestURLRequestContext();
+    scoped_refptr<URLRequestContext> context(new TestURLRequestContext());
     TestDelegate d;
     d.set_username(kUser);
     d.set_password(kSecret);
@@ -1241,7 +1255,7 @@ TEST_F(URLRequestTestHTTP, BasicAuthWithCookies) {
   // Same test as above, except this time the restart is initiated earlier
   // (without user intervention since identity is embedded in the URL).
   {
-    scoped_refptr<URLRequestContext> context = new TestURLRequestContext();
+    scoped_refptr<URLRequestContext> context(new TestURLRequestContext());
     TestDelegate d;
 
     GURL::Replacements replacements;
@@ -1269,7 +1283,7 @@ TEST_F(URLRequestTest, DoNotSendCookies) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath());
   ASSERT_TRUE(test_server.Start());
 
-  scoped_refptr<URLRequestContext> context = new TestURLRequestContext();
+  scoped_refptr<URLRequestContext> context(new TestURLRequestContext());
 
   // Set up a cookie.
   {
@@ -1318,7 +1332,7 @@ TEST_F(URLRequestTest, DoNotSaveCookies) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath());
   ASSERT_TRUE(test_server.Start());
 
-  scoped_refptr<URLRequestContext> context = new TestURLRequestContext();
+  scoped_refptr<URLRequestContext> context(new TestURLRequestContext());
 
   // Set up a cookie.
   {
@@ -1374,7 +1388,7 @@ TEST_F(URLRequestTest, DoNotSendCookies_ViaPolicy) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath());
   ASSERT_TRUE(test_server.Start());
 
-  scoped_refptr<TestURLRequestContext> context = new TestURLRequestContext();
+  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext());
 
   // Set up a cookie.
   {
@@ -1428,7 +1442,7 @@ TEST_F(URLRequestTest, DoNotSaveCookies_ViaPolicy) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath());
   ASSERT_TRUE(test_server.Start());
 
-  scoped_refptr<TestURLRequestContext> context = new TestURLRequestContext();
+  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext());
 
   // Set up a cookie.
   {
@@ -1485,7 +1499,7 @@ TEST_F(URLRequestTest, DoNotSaveEmptyCookies) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath());
   ASSERT_TRUE(test_server.Start());
 
-  scoped_refptr<TestURLRequestContext> context = new TestURLRequestContext();
+  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext());
 
   // Set up an empty cookie.
   {
@@ -1505,7 +1519,7 @@ TEST_F(URLRequestTest, DoNotSendCookies_ViaPolicy_Async) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath());
   ASSERT_TRUE(test_server.Start());
 
-  scoped_refptr<TestURLRequestContext> context = new TestURLRequestContext();
+  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext());
 
   // Set up a cookie.
   {
@@ -1560,7 +1574,7 @@ TEST_F(URLRequestTest, DoNotSaveCookies_ViaPolicy_Async) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath());
   ASSERT_TRUE(test_server.Start());
 
-  scoped_refptr<TestURLRequestContext> context = new TestURLRequestContext();
+  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext());
 
   // Set up a cookie.
   {
@@ -1617,7 +1631,7 @@ TEST_F(URLRequestTest, CancelTest_During_CookiePolicy) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath());
   ASSERT_TRUE(test_server.Start());
 
-  scoped_refptr<TestURLRequestContext> context = new TestURLRequestContext();
+  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext());
 
   TestCookiePolicy cookie_policy(TestCookiePolicy::ASYNC);
   context->set_cookie_policy(&cookie_policy);
@@ -1648,7 +1662,7 @@ TEST_F(URLRequestTest, CancelTest_During_OnGetCookies) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath());
   ASSERT_TRUE(test_server.Start());
 
-  scoped_refptr<TestURLRequestContext> context = new TestURLRequestContext();
+  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext());
 
   TestCookiePolicy cookie_policy(TestCookiePolicy::NO_GET_COOKIES);
   context->set_cookie_policy(&cookie_policy);
@@ -1677,7 +1691,7 @@ TEST_F(URLRequestTest, CancelTest_During_OnSetCookie) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath());
   ASSERT_TRUE(test_server.Start());
 
-  scoped_refptr<TestURLRequestContext> context = new TestURLRequestContext();
+  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext());
 
   TestCookiePolicy cookie_policy(TestCookiePolicy::NO_SET_COOKIE);
   context->set_cookie_policy(&cookie_policy);
@@ -1711,7 +1725,7 @@ TEST_F(URLRequestTest, CookiePolicy_ForceSession) {
   net::TestServer test_server(net::TestServer::TYPE_HTTP, FilePath());
   ASSERT_TRUE(test_server.Start());
 
-  scoped_refptr<TestURLRequestContext> context = new TestURLRequestContext();
+  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext());
 
   TestCookiePolicy cookie_policy(TestCookiePolicy::FORCE_SESSION);
   context->set_cookie_policy(&cookie_policy);

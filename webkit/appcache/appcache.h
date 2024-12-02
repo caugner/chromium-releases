@@ -58,6 +58,9 @@ class AppCache : public base::RefCounted<AppCache> {
 
   const EntryMap& entries() const { return entries_; }
 
+  // Returns the URL of the resource used as the fallback for 'namespace_url'.
+  GURL GetFallbackEntryUrl(const GURL& namespace_url) const;
+
   AppCacheHosts& associated_hosts() { return associated_hosts_; }
 
   bool IsNewerThan(AppCache* cache) const {
@@ -103,6 +106,10 @@ class AppCache : public base::RefCounted<AppCache> {
       AppCacheEntry* found_entry, AppCacheEntry* found_fallback_entry,
       GURL* found_fallback_namespace, bool* found_network_namespace);
 
+  static bool IsInNetworkNamespace(
+      const GURL& url,
+      const std::vector<GURL> &namespaces);
+
  private:
   friend class AppCacheGroup;
   friend class AppCacheHost;
@@ -117,7 +124,6 @@ class AppCache : public base::RefCounted<AppCache> {
 
   // FindResponseForRequest helpers
   FallbackNamespace* FindFallbackNamespace(const GURL& url);
-  bool IsInNetworkNamespace(const GURL& url);
 
   // Use AppCacheHost::AssociateCache() to manipulate host association.
   void AssociateHost(AppCacheHost* host) {

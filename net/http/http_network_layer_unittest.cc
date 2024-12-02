@@ -25,6 +25,8 @@ TEST_F(HttpNetworkLayerTest, CreateAndDestroy) {
       NULL,
       &host_resolver,
       NULL /* dnsrr_resolver */,
+      NULL /* dns_cert_checker */,
+      NULL /* ssl_host_info_factory */,
       net::ProxyService::CreateDirect(),
       new net::SSLConfigServiceDefaults,
       NULL,
@@ -43,6 +45,8 @@ TEST_F(HttpNetworkLayerTest, Suspend) {
       NULL,
       &host_resolver,
       NULL /* dnsrr_resolver */,
+      NULL /* dns_cert_checker */,
+      NULL /* ssl_host_info_factory */,
       net::ProxyService::CreateDirect(),
       new net::SSLConfigServiceDefaults,
       NULL,
@@ -82,7 +86,7 @@ TEST_F(HttpNetworkLayerTest, GET) {
                    "User-Agent: Foo/1.0\r\n\r\n"),
   };
   net::StaticSocketDataProvider data(data_reads, arraysize(data_reads),
-                                     data_writes, arraysize(data_reads));
+                                     data_writes, arraysize(data_writes));
   mock_socket_factory.AddSocketDataProvider(&data);
 
   MockHostResolver host_resolver;
@@ -90,6 +94,8 @@ TEST_F(HttpNetworkLayerTest, GET) {
       &mock_socket_factory,
       &host_resolver,
       NULL /* dnsrr_resolver */,
+      NULL /* dns_cert_checker */,
+      NULL /* ssl_host_info_factory */,
       net::ProxyService::CreateDirect(),
       new net::SSLConfigServiceDefaults,
       NULL,

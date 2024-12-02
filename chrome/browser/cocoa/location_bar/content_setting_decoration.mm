@@ -41,7 +41,7 @@ ContentSettingDecoration::~ContentSettingDecoration() {
 }
 
 bool ContentSettingDecoration::UpdateFromTabContents(
-    const TabContents* tab_contents) {
+    TabContents* tab_contents) {
   bool was_visible = IsVisible();
   int old_icon = content_setting_image_model_->get_icon();
   content_setting_image_model_->UpdateFromTabContents(tab_contents);
@@ -52,7 +52,7 @@ bool ContentSettingDecoration::UpdateFromTabContents(
     // TODO(thakis): We should use pdfs for these icons on OSX.
     // http://crbug.com/35847
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    SetImage(rb.GetNSImageNamed(content_setting_image_model_->get_icon()));
+    SetImage(rb.GetNativeImageNamed(content_setting_image_model_->get_icon()));
     SetToolTip(base::SysUTF8ToNSString(
         content_setting_image_model_->get_tooltip()));
   }

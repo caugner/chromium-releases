@@ -46,6 +46,7 @@
       "lastError": {
         "type": "object",
         "optional": true,
+        "unprivileged": true,
         "description": "Set for the lifetime of a callback if an ansychronous extension api has resulted in an error. If no error has occured lastError will be <var>undefined</var>.",
         "properties": {
           "message": { "type": "string", "description": "Description of the error that has taken place." }
@@ -80,14 +81,14 @@
         ],
         "returns": {
           "$ref": "Port",
-          "description": "Port through which messages can be sent and received with the extension."
+          "description": "Port through which messages can be sent and received with the extension. The port's <a href='extension.html#type-Port'>onDisconnect</a> event is fired if extension does not exist. "
         }
       },
       {
         "name": "sendRequest",
         "type": "function",
         "unprivileged": true,
-        "description": "Sends a single request to other listeners within the extension. Similar to chrome.extension.connect, but only sends a single request with an optional response.",
+        "description": "Sends a single request to other listeners within the extension. Similar to chrome.extension.connect, but only sends a single request with an optional response. The <a href='extension.html#event-onRequest'>chrome.extension.onRequest</a> event is fired in each page of the extension.",
         "parameters": [
           {"type": "string", "name": "extensionId", "optional": true, "description": "The extension ID of the extension you want to connect to. If omitted, default is your own extension."},
           { "type": "any", "name": "request" },
@@ -99,7 +100,7 @@
               {
                 "name": "response",
                 "type": "any",
-                "description": "The JSON response object sent by the handler of the request."
+                "description": "The JSON response object sent by the handler of the request. If an error occurs while connecting to the extension, the callback will be called with no arguments and <a href='extension.html#property-lastError'>chrome.extension.lastError</a> will be set to the error message."
               }
             ]
           }
@@ -114,7 +115,7 @@
           {
             "type": "string",
             "name": "path",
-            "description": "A path to a resource within an extension expressed relative to it's install directory."
+            "description": "A path to a resource within an extension expressed relative to its install directory."
           }
         ],
         "returns": {
@@ -188,6 +189,14 @@
           "description": "Array of global window objects",
           "items": { "type": "object", "isInstanceOf": "DOMWindow", "properties": {}, "additionalProperties": { "type": "any" } }
         }
+      },
+      {
+        "name": "setUpdateUrlData",
+        "type": "function",
+        "description": "Sets the value of the ap CGI parameter used in the extension's update URL.  This value is ignored for extensions that are hosted in the Chrome Extension Gallery.",
+        "parameters": [
+          {"type": "string", "name": "data", "maxLength": 1024}
+        ]
       }
     ],
     "events": [
@@ -503,7 +512,12 @@
             "optional": true,
             "description": "The speak options. This parameter is currently ignored.",
             "properties": {
-              "languageName": {
+              "enqueue": {
+	        "type": "boolean",
+		"optional": true,
+		"description": "If true, enqueues this utterance if TTS is already in progress. If false (the default), interrupts any current speech and flushes the speech queue before speaking this new utterance."
+              },
+	      "languageName": {
                 "type": "string",
                 "optional": true,
                 "description": "The language name for synthesis specified in the form <language>-<locale>, e.g. en-US, en-GB, fr-CA, zh-CN, etc."
@@ -687,7 +701,15 @@
             "type": "object",
             "name": "createData",
             "properties": {
-              "url": {"type": "string", "optional": true, "description": "The URL to navigate the first tab to. Fully-qualified URLs must include a scheme (i.e. 'http://www.google.com', not 'www.google.com'). Relative URLs will be relative to the current page within the extension. Defaults to the New Tab Page."},
+              "url": {
+                "type": "string",
+                "description": "A URL or list of URLs to open as tabs in the window. Fully-qualified URLs must include a scheme (i.e. 'http://www.google.com', not 'www.google.com'). Relative URLs will be relative to the current page within the extension. Defaults to the New Tab Page.",
+                "optional": true,
+                "choices": [
+                  {"type": "string"},
+                  {"type": "array", "items": {"type": "string"}}
+                ]
+              },
               "left": {"type": "integer", "optional": true, "description": "The number of pixels to position the new window from the left edge of the screen. If not specified, the new window is offset naturally from the last focusd window."},
               "top": {"type": "integer", "optional": true, "description": "The number of pixels to position the new window from the top edge of the screen. If not specified, the new window is offset naturally from the last focusd window."},
               "width": {"type": "integer", "minimum": 0, "optional": true, "description": "The width in pixels of the new window. If not specified defaults to a natural width."},
@@ -796,6 +818,7 @@
           "index": {"type": "integer", "minimum": 0, "description": "The zero-based index of the tab within its window."},
           "windowId": {"type": "integer", "minimum": 0, "description": "The ID of the window the tab is contained within."},
           "selected": {"type": "boolean", "description": "Whether the tab is selected."},
+          "pinned": {"type": "boolean", "description": "Whether the tab is pinned."},
           "url": {"type": "string", "description": "The URL the tab is displaying."},
           "title": {"type": "string", "optional": true, "description": "The title of the tab. This may not be available if the tab is loading."},
           "favIconUrl": {"type": "string", "optional": true, "description": "The URL of the tab's favicon. This may not be available if the tab is loading."},
@@ -863,7 +886,7 @@
         ],
         "returns": {
           "$ref": "Port",
-          "description": "A port that can be used to communicate with the content scripts running in the specified tab."
+          "description": "A port that can be used to communicate with the content scripts running in the specified tab. The port's <a href='extension.html#type-Port'>onDisconnect</a> event is fired if the tab closes or does not exist. "
         }
       },
       {
@@ -888,7 +911,7 @@
               {
                 "name": "response",
                 "type": "any",
-                "description": "The JSON response object sent by the handler of the request."
+                "description": "The JSON response object sent by the handler of the request. If an error occurs while connecting to the specified tab, the callback will be called with no arguments and <a href='extension.html#property-lastError'>chrome.extension.lastError</a> will be set to the error message."
               }
             ]
           }
@@ -966,6 +989,11 @@
                 "type": "boolean",
                 "optional": true,
                 "description": "Whether the tab should become the selected tab in the window. Defaults to <var>true</var>"
+              },
+              "pinned": {
+                "type": "boolean",
+                "optional": true,
+                "description": "Whether the tab should be pinned. Defaults to <var>false</var>"
               }
             }
           },
@@ -993,8 +1021,20 @@
             "type": "object",
             "name": "updateProperties",
             "properties": {
-              "url": {"type": "string", "optional": true},
-              "selected": {"type": "boolean", "optional": true}
+              "url": {
+                "optional": true,
+                "description": "A URL to navigate the tab to."
+              },
+              "selected": {
+                "type": "boolean", 
+                "optional": true,
+                "description": "Whether the tab should be selected."
+              },
+              "pinned": {
+                "type": "boolean", 
+                "optional": true,
+                "description": "Whether the tab should be pinned."
+              }
             }
           },
           {
@@ -1201,12 +1241,18 @@
             "properties": {
               "status": {
                 "type": "string",
+                "optional": true,
                 "description": "The status of the tab. Can be either <em>loading</em> or <em>complete</em>."
               },
               "url": {
                 "type": "string",
                 "optional": true,
-                "description": "Only specified if the tab's URL changed."
+                "description": "The tab's URL if it has changed."
+              },
+              "pinned": {
+                "type": "boolean",
+                "optional": true,
+                "description": "The tab's new pinned state."
               }
             }
           },
@@ -1295,7 +1341,14 @@
         "type": "function",
         "description": "Fires when a tab is closed.",
         "parameters": [
-          {"type": "integer", "name": "tabId", "minimum": 0}
+          {"type": "integer", "name": "tabId", "minimum": 0},
+          { 
+            "type": "object",
+            "name": "removeInfo",
+            "properties": {
+              "isWindowClosing": {"type": "boolean", "description": "True when the tab is being closed because its window is being closed." }
+            }            
+          }          
         ]
       }
     ]
@@ -1437,7 +1490,6 @@
     "events": [
       {
         "name": "onClicked",
-        "perExtensionEvent": true,
         "type": "function",
         "description": "Fired when a page action icon is clicked.  This event will not fire if the page action has a popup.",
         "parameters": [
@@ -1585,7 +1637,6 @@
     "events": [
       {
         "name": "onClicked",
-        "perExtensionEvent": true,
         "type": "function",
         "description": "Fired when a browser action icon is clicked.  This event will not fire if the browser action has a popup.",
         "parameters": [
@@ -2291,6 +2342,24 @@
                 "description": "Pass 'bubble' to give the pop-up window a bubble-chrome border, including an arrow pointing at the relative-to point.  Pass 'rectangle' to give the pop-up a rectangular black border with drop-shadow.  Default behaviour is to pass 'bubble'.",
                 "optional": true,
                 "enum": ["bubble", "rectangle"]
+              },
+              "maxSize": {
+                "type": "object",
+                "optional": true,
+                "properties": {
+                  "width": {
+                    "type": "integer",
+                    "description": "The maximal width to which the popup will resize.  If not present, the popup will be no wider than 800 pixels.  The popup will widen to no larger than the minimum of the width parameter and the width of the screen.",
+                    "optional": true,
+                    "minimum": 32
+                  },
+                  "height": {
+                    "type": "integer",
+                    "description": "The maximal height to which the popup will resize.  If not present, the popup will be no taller than 600 pixels.  The popup will grow to no taller than than the minimum of the height parameter and the width of the screen.",
+                    "optional": true,
+                    "minimum": 32
+                  }
+                }
               }
             }
           },
@@ -2330,7 +2399,7 @@
     "nodoc": true,
     "types": [
       {
-        "id": "BookmarkDragDataElement",
+        "id": "BookmarkNodeDataElement",
         "nodoc": true,
         "type": "object",
         "properties": {
@@ -2351,12 +2420,12 @@
           },
           "children": {
             "type": "array",
-            "items": {"$ref": "BookmarkDragDataElement"}
+            "items": {"$ref": "BookmarkNodeDataElement"}
           }
         }
       },
       {
-        "id": "BookmarkDragData",
+        "id": "BookmarkNodeData",
         "nodoc": true,
         "type": "object",
         "description": "Information about the drag and drop data for use with drag and drop events.",
@@ -2364,7 +2433,7 @@
           "sameProfile": {"type": "boolean"},
           "elements": {
             "type": "array",
-            "items": {"$ref": "BookmarkDragDataElement"}
+            "items": {"$ref": "BookmarkNodeDataElement"}
           }
         }
       }
@@ -2519,7 +2588,7 @@
         "type": "function",
         "description": "Fired when dragging bookmarks over the document",
         "parameters": [
-          {"$ref": "BookmarkDragData"}
+          {"$ref": "BookmarkNodeData"}
         ]
       },
       {
@@ -2527,7 +2596,7 @@
         "type": "function",
         "description": "Fired when the drag and drop leaves the document",
         "parameters": [
-          {"$ref": "BookmarkDragData"}
+          {"$ref": "BookmarkNodeData"}
         ]
       },
       {
@@ -2535,7 +2604,7 @@
         "type": "function",
         "description": "Fired when the user drops bookmarks on the document",
         "parameters": [
-          {"$ref": "BookmarkDragData"}
+          {"$ref": "BookmarkNodeData"}
         ]
       }
     ]
@@ -2575,16 +2644,37 @@
         "properties": {
           "id": {
             "type": "integer",
-            "description": "The internal ID of the process."
+            "description": "The ID of the process, as provided by the OS."
+          },
+          "type": {
+            "type": "string",
+            "enum": ["browser", "renderer", "extension", "notification", "plugin", "worker", "nacl", "utility", "gpu", "other"],
+            "description": "The type of process."
+          },
+          "cpu": {
+            "type": "number",
+            "description": "The most recent measurement of the process's CPU usage, between 0 and 100%."
+          },
+          "network": {
+            "type": "number",
+            "description": "The most recent measurement of the process's network usage, in bytes per second."
+          },
+          "privateMemory": {
+            "type": "number",
+            "description": "The most recent measurement of the process's private memory usage, in bytes."
+          },
+          "sharedMemory": {
+            "type": "number",
+            "description": "The most recent measurement of the process's shared memory usage, in bytes."
           }
         }
       }
     ],
     "functions": [
       {
-        "name": "getProcessForTab",
+        "name": "getProcessIdForTab",
         "type": "function",
-        "description": "Returns details about the current renderer process of the specified tab.",
+        "description": "Returns the ID of the renderer process for the specified tab.",
         "parameters": [
           {
             "name": "tabId",
@@ -2596,16 +2686,30 @@
             "name": "callback",
             "parameters": [
               {
-                "name": "process",
-                "$ref": "Process",
-                "description": "Details about the tab's process."
+                "name": "processId",
+                "type": "integer",
+                "description": "Process ID of the tab's renderer process."
               }
             ]
           }
         ]
       }
     ],
-    "events": []
+    "events": [
+      {
+        "name": "onUpdated",
+        "type": "function",
+        "description": "Fires each time the Task Manager updates its process statistics, providing the dictionary of updated Process objects, indexed by process ID.",
+        "parameters": [
+          {
+            "name": "processes",
+            "type": "object",
+            "properties": {},
+            "additionalProperties": { "$ref": "Process" }
+          }
+        ]
+      }
+    ]
   },
   {
     "namespace": "contextMenus",
@@ -2617,12 +2721,12 @@
         "properties": {
           "menuItemId": {
             "type": "integer",
-            "description": "The id of the menu item that was clicked."
+            "description": "The ID of the menu item that was clicked."
           },
           "parentMenuItemId": {
             "type": "integer",
             "optional": true,
-            "description": "The parent id, if any, for the item clicked."
+            "description": "The parent ID, if any, for the item clicked."
           },
           "mediaType": {
             "type": "string",
@@ -2632,29 +2736,29 @@
           "linkUrl": {
             "type": "string",
             "optional": true,
-            "description": "If the element is a link, the url it points to."
+            "description": "If the element is a link, the URL it points to."
           },
           "srcUrl": {
             "type": "string",
             "optional": true,
-            "description": "Will be present for elements with a 'src' url."
+            "description": "Will be present for elements with a 'src' URL."
           },
           "pageUrl": {
             "type": "string",
-            "description": "The url of the page where the menu item was clicked."
+            "description": "The URL of the page where the menu item was clicked."
           },
           "frameUrl": {
             "type": "string",
             "optional": true,
-            "description": " The url of the frame of the element where the context menu was clicked, if it was in a frame."
+            "description": " The URL of the frame of the element where the context menu was clicked, if it was in a frame."
           },
           "selectionText": {
             "type": "string",
             "optional": true,
             "description": "The text for the context selection, if any."
-          },   
+          },
           "editable": {
-            "type": "string",                   
+            "type": "string",
             "description": "A flag indicating whether the element is editable (text input, textarea, etc.)."
           }
         }
@@ -2667,7 +2771,7 @@
         "description": "Creates a new context menu item. Note that if an error occurs during creation, you may not find out until the creation callback fires (the details will be in chrome.extension.lastError).",
         "returns": {
           "type": "integer",
-          "description": "The id of the newly created item."
+          "description": "The ID of the newly created item."
         },
         "parameters": [
           {
@@ -2682,12 +2786,12 @@
               "title": {
                 "type": "string",
                 "optional": "true",
-                "description": "This must be specified unless type is 'separator'."
+                "description": "The text to be displayed in the item; this is <em>required</em> unless <em>type</em> is 'separator'. When the context is 'selection', you can use <code>%s</code> within the string to show the selected text. For example, if this parameter's value is \"Translate '%s' to Pig Latin\" and the user selects the word \"cool\", the context menu item for the selection is \"Translate 'cool' to Pig Latin\"."
               },
               "checked": {
                 "type": "boolean",
                 "optional": true,
-                "description": "This only applies to the initial state of a checkbox or radio item. It indicates if the item should initially be checked/selected. Only one radio item can be selected at a time in a given group of radio items."
+                "description": "The initial state of a checkbox or radio item: true for selected and false for unselected. Only one radio item can be selected at a time in a given group of radio items."
               },
               "contexts": {
                 "type": "array",
@@ -2711,24 +2815,24 @@
                     "$ref": "Tab",
                     "description": "The details of the tab where the click took place."
                   }
-                ]            
+                ]
               },
               "parentId": {
                 "type": "integer",
                 "optional": true,
-                "description": "The id of a parent menu item - this makes the item a child of a previously added item."
+                "description": "The ID of a parent menu item; this makes the item a child of a previously added item."
               },
               "documentUrlPatterns": {
                 "type": "array",
                 "items": {"type": "string"},
                 "optional": true,
-                "description": "Lets you restrict the item to only apply to documents whose URL matches one of the given patterns. (This applies to frames as well). For details on the format of a pattern, see <a href='match_patterns.html'>Match Patterns</a>."
+                "description": "Lets you restrict the item to apply only to documents whose URL matches one of the given patterns. (This applies to frames as well.) For details on the format of a pattern, see <a href='match_patterns.html'>Match Patterns</a>."
               },
               "targetUrlPatterns": {
                 "type": "array",
                 "items": {"type": "string"},
                 "optional": true,
-                "description": "Similar to documentUrlPatterns, but this lets you filter based on the src attribute of img/audio/video tags and the href of anchor tags."
+                "description": "Similar to documentUrlPatterns, but lets you filter based on the src attribute of img/audio/video tags and the href of anchor tags."
               }
             }
           },
@@ -2736,7 +2840,7 @@
             "type": "function",
             "name": "callback",
             "optional": true,
-            "description": "Called when the item has been created in the browser. If there were any problems creating the item, details will be avilable in chrome.extension.lastError.",
+            "description": "Called when the item has been created in the browser. If there were any problems creating the item, details will be available in chrome.extension.lastError.",
             "parameters": []
           }
         ]
@@ -2749,7 +2853,7 @@
           {
             "type": "integer",
             "name": "id",
-            "description": "The id of the item to update."
+            "description": "The ID of the item to update."
           },
           {
             "type": "object",
@@ -2781,7 +2885,7 @@
               "parentId": {
                 "type": "integer",
                 "optional": true,
-                "description": "Note: you cannot change an item to be a child of one of it's own descendants."
+                "description": "Note: You cannot change an item to be a child of one of its own descendants."
               },
               "documentUrlPatterns": {
                 "type": "array",
@@ -2812,7 +2916,7 @@
           {
             "type": "integer",
             "name": "menuItemId",
-            "description": "The id of the context menu item to remove."
+            "description": "The ID of the context menu item to remove."
           },
           {
             "type": "function",
@@ -3389,6 +3493,36 @@
     "types": [],
     "functions": [
       {
+        "name": "getConfig",
+        "type": "function",
+        "description": "Gives configuration options set by the test.",
+        "parameters": [
+          {
+            "type": "function", "name": "callback", "parameters": [
+              {
+                "type": "object",
+                "name": "testConfig",
+                "properties": {
+                  "testServer": {
+                    "type": "object",
+                    "optional": true,
+                    "description": "Details on the test server used to mock network responses.  Will be set only if test calls ExtensionApiTest::StartTestServer().",
+                    "properties": {
+                      "port": {
+                        "type": "integer",
+                        "description": "The port on which the test server is listening.",
+                        "minimum": 1024,
+                        "maximum": 65535
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
         "name": "notifyFail",
         "type": "function",
         "description": "Notify the browser process that test code running in the extension failed.  This is only used for internal unit testing.",
@@ -3769,7 +3903,6 @@
     "events": [
       {
         "name": "onStateChanged",
-        "perExtensionEvent": true,
         "unprivileged": true,
         "type": "function",
         "description": "Notifies about sidebar state changes.",
@@ -3793,7 +3926,7 @@
     ]
   },
   {
-    "namespace": "experimental.omnibox",
+    "namespace": "omnibox",
     "types": [
       {
         "id": "SuggestResult",
@@ -3808,19 +3941,7 @@
           "description": {
             "type": "string",
             "minLength": 1,
-            "description": "The text that is displayed in the URL dropdown. Can optionally be stylized by the descriptionStyles parameter."
-          },
-          "descriptionStyles": {
-            "type": "array",
-            "optional": true,
-            "items": {
-              "type": "object",
-              "description": "A style object, created using styleNone, styleUrl, styleMatch, or styleDim. A style applies to the region of text starting at the style's offset, until either the next style or the end of the description.",
-              "properties": {
-                "type": {"type": "string", "enum": ["none", "url", "match", "dim"]},
-                "offset": {"type": "integer"}
-              }
-            }
+            "description": "The text that is displayed in the URL dropdown. Can contain XML-style markup for styling. The supported tags are 'url' (for a literal URL), 'match' (for highlighting text that matched what the user's query), and 'dim' (for dim helper text). The styles can be nested, eg. <dim><match>dimmed match</match></dim>."
           }
         }
       }
@@ -3837,47 +3958,41 @@
             "type": "array",
             "description": "Array of suggest results",
             "items": {
-              "$ref": "SuggestResult"
+              "type": "object",
+              "additionalProperties": { "type": "any" }
             }
           }
         ]
       },
       {
-        "name": "styleNone",
+        "name": "setDefaultSuggestion",
         "type": "function",
-        "description": "Constructor for the descriptionStyles parameter of the suggest callback.",
-        "parameters": [ {"type": "integer", "name": "offset", "minimum": 0} ]
-      },
-      {
-        "name": "styleUrl",
-        "type": "function",
-        "description": "Constructor for the descriptionStyles parameter of the suggest callback. This style designates a region of text matching a URL or filename.",
-        "parameters": [ {"type": "integer", "name": "offset", "minimum": 0} ]
-      },
-      {
-        "name": "styleMatch",
-        "type": "function",
-        "description": "Constructor for the descriptionStyles parameter of the suggest callback. This style designates a region of text matching what the user typed.",
-        "parameters": [ {"type": "integer", "name": "offset", "minimum": 0} ]
-      },
-      {
-        "name": "styleDim",
-        "type": "function",
-        "description": "Constructor for the descriptionStyles parameter of the suggest callback. This style designates a region of dim helper text.",
-        "parameters": [ {"type": "integer", "name": "offset", "minimum": 0} ]
+        "description": "Sets the description and styling for the default suggestion. The default suggestion is the text that is displayed in the first suggestion row underneath the URL bar.",
+        "parameters": [
+          {
+            "type": "object",
+            "name": "suggestion",
+            "description": "A partial SuggestResult object, without the 'content' parameter. See SuggestResult for a description of the parameters.",
+            "properties": {
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The text to display in the default suggestion. The placeholder string '%s' can be included and will be replaced with the user's input."
+              }
+            }
+          }
+        ]
       }
     ],
     "events": [
       {
         "name": "onInputStarted",
-        "perExtensionEvent": true,
         "type": "function",
         "description": "User has started a keyword input session by typing the extension's keyword. This is guaranteed to be sent exactly once per input session, and before any onInputChanged events.",
         "parameters": []
       },
       {
         "name": "onInputChanged",
-        "perExtensionEvent": true,
         "type": "function",
         "description": "User has changed what is typed into the omnibox.",
         "parameters": [
@@ -3890,7 +4005,6 @@
             "type": "function",
             "description": "A callback passed to the onInputChanged event used for sending suggestions back to the browser.",
             "parameters": [
-              {"type": "integer", "name": "requestId"},
               {
                 "type": "array",
                 "description": "Array of suggest results",
@@ -3904,7 +4018,6 @@
       },
       {
         "name": "onInputEntered",
-        "perExtensionEvent": true,
         "type": "function",
         "description": "User has accepted what is typed into the omnibox.",
         "parameters": [
@@ -3916,7 +4029,6 @@
       },
       {
         "name": "onInputCancelled",
-        "perExtensionEvent": true,
         "type": "function",
         "description": "User has ended the keyword input session without accepting the input.",
         "parameters": []
@@ -3948,13 +4060,13 @@
             "description": "The name of this extension or app.",
             "type": "string"
           },
+          "description": {
+            "description": "The description of this extension or app.",
+            "type": "string"
+          },
           "version": {
             "description": "The <a href='manifest.html#version'>version</a> of this extension or app.",
             "type": "string"
-          },
-          "enabled": {
-            "description": "Whether it is currently enabled or disabled.",
-            "type": "boolean"
           },
           "enabled": {
             "description": "Whether it is currently enabled or disabled.",
@@ -3971,8 +4083,7 @@
           },
           "optionsUrl": {
             "description": "The url for the item's options page, if it has one.",
-            "type": "string",
-            "optional": true
+            "type": "string"
           },
           "icons": {
             "description": "A list of icon information. Note that this just reflects what was declared in the manifest, and the actual image at that url may be larger or smaller than what was declared, so you might consider using explicit width and height attributes on img tags referencing these images. See the <a href='manifest.html#icons'>manifest documentation on icons</a> for more details.",
@@ -3980,6 +4091,20 @@
             "optional": true,
             "items": {
               "$ref": "IconInfo"
+            }
+          },
+          "permissions": {
+            "description": "Returns a list of API based permissions.",
+            "type": "array",
+            "items" : {
+              "type": "string"
+            }
+          },
+          "hostPermissions": {
+            "description": "Returns a list of host based permissions.",
+            "type": "array",
+            "items" : {
+              "type": "string"
             }
           }
         }
@@ -4001,6 +4126,28 @@
                 "items": {
                   "$ref": "ExtensionInfo"
                 }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "get",
+        "description": "Return information about the installed extension with the given ID.",
+        "parameters": [
+          {
+            "name": "id",
+            "type": "string",
+            "description": "The ID from an item of $ref:ExtensionInfo."
+          },
+          {
+            "type": "function",
+            "name": "callback",
+            "optional": "true",
+            "parameters": [
+              {
+                "name": "result",
+                "$ref": "ExtensionInfo"
               }
             ]
           }
@@ -4059,7 +4206,7 @@
             "type": "function",
             "optional": "true",
             "parameters": []
-          }          
+          }
         ]
       }
     ],
@@ -4076,7 +4223,7 @@
         "type": "function",
         "parameters": [
           {
-           "name": "id", 
+           "name": "id",
            "type": "string",
            "description": "The id of the extension or app that was uninstalled."
           }
@@ -4119,6 +4266,40 @@
         ]
       },
       {
+        "name": "beginInstall",
+        "description": "Initiates the install process for the given extension id",
+        "parameters": [
+          {
+            "name": "expected_id",
+            "type": "string",
+            "description": "The id of the extension to be installled. Must be called during a user gesture."
+          },
+          {
+            "name": "callback",
+            "type": "function",
+            "optional": "true",
+            "parameters": []
+          }
+        ]
+      },
+      {
+        "name": "completeInstall",
+        "description": "",
+        "parameters": [
+          {
+            "name": "expected_id",
+            "type": "string",
+            "description": "The id of the extension to be installled. This should match a previous call to beginInstall."
+          },
+          {
+            "name": "callback",
+            "type": "function",
+            "optional": "true",
+            "parameters": []
+          }
+        ]
+      },
+      {
         "name": "getBrowserLogin",
         "description": "Returns the logged-in sync user login if there is one, or the empty string otherwise.",
         "parameters": [
@@ -4127,8 +4308,14 @@
             "type": "function",
             "optional": "false",
             "parameters": [
-              { "name": "login", "type": "string" },
-              { "name": "token", "type": "string", "optional": true }
+              {
+                "name": "info",
+                "type": "object",
+                "properties": {
+                  "login": { "type": "string" },
+                  "token": { "type": "string", "optional": true }
+                }
+              }
             ]
           }
         ]
@@ -4164,9 +4351,9 @@
             "type": "string",
             "description": "The email address to use to pre-populate the login dialog (can be an empty string)."
           },
-          { 
-            "name": "callback", 
-            "type": "function", 
+          {
+            "name": "callback",
+            "type": "function",
             "optional": "true",
             "parameters": [
               {

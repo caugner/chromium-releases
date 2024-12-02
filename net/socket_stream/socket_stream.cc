@@ -138,7 +138,8 @@ void SocketStream::Connect() {
   next_state_ = STATE_RESOLVE_PROXY;
   net_log_.BeginEvent(
       NetLog::TYPE_SOCKET_STREAM_CONNECT,
-      new NetLogStringParameter("url", url_.possibly_invalid_spec()));
+      make_scoped_refptr(
+          new NetLogStringParameter("url", url_.possibly_invalid_spec())));
   MessageLoop::current()->PostTask(
       FROM_HERE,
       NewRunnableMethod(this, &SocketStream::DoLoop, OK));
@@ -162,7 +163,8 @@ bool SocketStream::SendData(const char* data, int len) {
     if (current_amount_send > max_pending_send_allowed_)
       return false;
 
-    pending_write_bufs_.push_back(new IOBufferWithSize(len));
+    pending_write_bufs_.push_back(make_scoped_refptr(
+        new IOBufferWithSize(len)));
     memcpy(pending_write_bufs_.back()->data(), data, len);
     return true;
   }
@@ -259,7 +261,7 @@ void SocketStream::Finish(int result) {
   if (result == OK)
     result = ERR_CONNECTION_CLOSED;
   DCHECK_EQ(next_state_, STATE_NONE);
-  DLOG(INFO) << "Finish result=" << net::ErrorToString(result);
+  DVLOG(1) << "Finish result=" << net::ErrorToString(result);
   if (delegate_)
     delegate_->OnError(this, result);
 
@@ -445,8 +447,9 @@ void SocketStream::DoLoop(int result) {
     // close the connection.
     if (state != STATE_READ_WRITE && result < ERR_IO_PENDING) {
       DCHECK_EQ(next_state_, STATE_CLOSE);
-      net_log_.EndEvent(NetLog::TYPE_SOCKET_STREAM_CONNECT,
-                        new NetLogIntegerParameter("net_error", result));
+      net_log_.EndEvent(
+          NetLog::TYPE_SOCKET_STREAM_CONNECT,
+          make_scoped_refptr(new NetLogIntegerParameter("net_error", result)));
     }
   } while (result != ERR_IO_PENDING);
 }
@@ -482,7 +485,7 @@ int SocketStream::DoResolveProxyComplete(int result) {
       GURL::Replacements repl;
       repl.SetSchemeStr(scheme);
       proxy_url_ = url_.ReplaceComponents(repl);
-      DLOG(INFO) << "Try https proxy: " << proxy_url_;
+      DVLOG(1) << "Try https proxy: " << proxy_url_;
       next_state_ = STATE_RESOLVE_PROXY;
       return OK;
     }
@@ -793,8 +796,11 @@ int SocketStream::DoSOCKSConnectComplete(int result) {
 
 int SocketStream::DoSSLConnect() {
   DCHECK(factory_);
-  socket_.reset(factory_->CreateSSLClientSocket(
-      socket_.release(), url_.HostNoBrackets(), ssl_config_));
+  // TODO(agl): look into plumbing SSLHostInfo here.
+  socket_.reset(factory_->CreateSSLClientSocket(socket_.release(),
+                                                HostPortPair::FromURL(url_),
+                                                ssl_config_,
+                                                NULL /* ssl_host_info */));
   next_state_ = STATE_SSL_CONNECT_COMPLETE;
   metrics_->OnSSLConnection();
   return socket_->Connect(&io_callback_);
@@ -924,7 +930,7 @@ GURL SocketStream::ProxyAuthOrigin() const {
 int SocketStream::HandleAuthChallenge(const HttpResponseHeaders* headers) {
   GURL auth_origin(ProxyAuthOrigin());
 
-  LOG(INFO) << "The proxy " << auth_origin << " requested auth";
+  VLOG(1) << "The proxy " << auth_origin << " requested auth";
 
   // TODO(cbentzel): Since SocketStream only suppports basic authentication
   // right now, another challenge is always treated as a rejection.

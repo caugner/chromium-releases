@@ -28,10 +28,10 @@ class ExtensionInfoBarDelegate : public InfoBarDelegate,
   };
 
   ExtensionInfoBarDelegate(Browser* browser, TabContents* contents,
-                           Extension* extension, const GURL& url);
+                           const Extension* extension, const GURL& url);
   ~ExtensionInfoBarDelegate();
 
-  Extension* extension() { return extension_; }
+  const Extension* extension() { return extension_; }
   ExtensionHost* extension_host() { return extension_host_.get(); }
 
   void set_observer(DelegateObserver* observer) { observer_ = observer; }
@@ -54,13 +54,13 @@ class ExtensionInfoBarDelegate : public InfoBarDelegate,
   // The extension host we are showing the InfoBar for. The delegate needs to
   // own this since the InfoBar gets deleted and recreated when you switch tabs
   // and come back (and we don't want the user's interaction with the InfoBar to
-  // get lost at that point.
+  // get lost at that point).
   scoped_ptr<ExtensionHost> extension_host_;
 
   // The observer monitoring when the delegate dies.
   DelegateObserver* observer_;
 
-  Extension* extension_;
+  const Extension* extension_;
 
   TabContents* tab_contents_;
 

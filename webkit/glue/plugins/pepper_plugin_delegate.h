@@ -12,10 +12,13 @@
 #include "base/ref_counted.h"
 #include "base/shared_memory.h"
 #include "base/sync_socket.h"
-#include "base/task.h"
-#include "third_party/ppapi/c/pp_completion_callback.h"
-#include "third_party/ppapi/c/pp_errors.h"
-#include "third_party/ppapi/c/pp_stdint.h"
+#include "gfx/size.h"
+#include "googleurl/src/gurl.h"
+#include "ppapi/c/pp_completion_callback.h"
+#include "ppapi/c/pp_errors.h"
+#include "ppapi/c/pp_stdint.h"
+#include "webkit/fileapi/file_system_types.h"
+#include "webkit/glue/plugins/pepper_dir_contents.h"
 
 class AudioMessageFilter;
 class GURL;
@@ -34,7 +37,9 @@ class Rect;
 }
 
 namespace gpu {
-class CommandBuffer;
+namespace gles2 {
+class GLES2Implementation;
+}
 }
 
 namespace skia {
@@ -72,9 +77,10 @@ class PluginDelegate {
     virtual skia::PlatformCanvas* Map() = 0;
 
     // Returns the platform-specific shared memory handle of the data backing
-    // this image. This is used by NativeClient to send the image to the
-    // out-of-process plugin. Returns 0 on failure.
-    virtual intptr_t GetSharedMemoryHandle() const = 0;
+    // this image. This is used by PPAPI proxying to send the image to the
+    // out-of-process plugin. On success, the size in bytes will be placed into
+    // |*bytes_count|. Returns 0 on failure.
+    virtual intptr_t GetSharedMemoryHandle(uint32* byte_count) const = 0;
 
     virtual TransportDIB* GetTransportDIB() const = 0;
   };
@@ -84,14 +90,30 @@ class PluginDelegate {
     virtual ~PlatformContext3D() {}
 
     // Initialize the context.
-    virtual bool Init(const gfx::Rect& position, const gfx::Rect& clip) = 0;
+    virtual bool Init() = 0;
 
-    // This call will return the address of the command buffer object that is
-    // constructed in Initialize() and is valid until this context is destroyed.
-    virtual gpu::CommandBuffer* GetCommandBuffer() = 0;
+    // Present the rendered frame to the compositor.
+    virtual bool SwapBuffers() = 0;
 
-    // Sets the function to be called on repaint.
-    virtual void SetNotifyRepaintTask(Task* task) = 0;
+    // Get the last EGL error.
+    virtual unsigned GetError() = 0;
+
+    // Resize the backing texture used as a back buffer by OpenGL.
+    virtual void ResizeBackingTexture(const gfx::Size& size) = 0;
+
+    // Set an optional callback that will be invoked when the side effects of
+    // a SwapBuffers call become visible to the compositor. Takes ownership
+    // of the callback.
+    virtual void SetSwapBuffersCallback(Callback0::Type* callback) = 0;
+
+    // If the plugin instance is backed by an OpenGL, return its ID in the
+    // compositors namespace. Otherwise return 0. Returns 0 by default.
+    virtual unsigned GetBackingTextureId() = 0;
+
+    // This call will return the address of the GLES2 implementation for this
+    // context that is constructed in Initialize() and is valid until this
+    // context is destroyed.
+    virtual gpu::gles2::GLES2Implementation* GetGLES2Implementation() = 0;
   };
 
   class PlatformAudio {
@@ -107,8 +129,6 @@ class PluginDelegate {
                                  base::SyncSocket::Handle socket) = 0;
     };
 
-    virtual ~PlatformAudio() {}
-
     // Starts the playback. Returns false on error or if called before the
     // stream is created or after the stream is closed.
     virtual bool StartPlayback() = 0;
@@ -120,6 +140,9 @@ class PluginDelegate {
     // Closes the stream. Make sure to call this before the object is
     // destructed.
     virtual void ShutDown() = 0;
+
+   protected:
+    virtual ~PlatformAudio() {}
   };
 
   class PlatformVideoDecoder {
@@ -175,6 +198,11 @@ class PluginDelegate {
   virtual bool AsyncOpenFile(const FilePath& path,
                              int flags,
                              AsyncOpenFileCallback* callback) = 0;
+  virtual bool OpenFileSystem(
+      const GURL& url,
+      fileapi::FileSystemType type,
+      long long size,
+      fileapi::FileSystemCallbackDispatcher* dispatcher) = 0;
   virtual bool MakeDirectory(
       const FilePath& path,
       bool recursive,
@@ -190,6 +218,34 @@ class PluginDelegate {
   virtual bool Rename(const FilePath& file_path,
                       const FilePath& new_file_path,
                       fileapi::FileSystemCallbackDispatcher* dispatcher) = 0;
+  virtual bool ReadDirectory(
+      const FilePath& directory_path,
+      fileapi::FileSystemCallbackDispatcher* dispatcher) = 0;
+
+  virtual base::PlatformFileError OpenModuleLocalFile(
+      const std::string& module_name,
+      const FilePath& path,
+      int flags,
+      base::PlatformFile* file) = 0;
+  virtual base::PlatformFileError RenameModuleLocalFile(
+      const std::string& module_name,
+      const FilePath& path_from,
+      const FilePath& path_to) = 0;
+  virtual base::PlatformFileError DeleteModuleLocalFileOrDir(
+      const std::string& module_name,
+      const FilePath& path,
+      bool recursive) = 0;
+  virtual base::PlatformFileError CreateModuleLocalDir(
+      const std::string& module_name,
+      const FilePath& path) = 0;
+  virtual base::PlatformFileError QueryModuleLocalFile(
+      const std::string& module_name,
+      const FilePath& path,
+      base::PlatformFileInfo* info) = 0;
+  virtual base::PlatformFileError GetModuleLocalDirContents(
+      const std::string& module_name,
+      const FilePath& path,
+      PepperDirContents* contents) = 0;
 
   // Returns a MessageLoopProxy instance associated with the message loop
   // of the file thread in this renderer.

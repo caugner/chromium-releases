@@ -9,24 +9,21 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/sys_string_conversions.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
-#include "chrome/browser/browser.h"
-#include "chrome/browser/browser_list.h"
 #import "chrome/browser/cocoa/browser_window_controller.h"
 #import "chrome/browser/cocoa/bug_report_window_controller.h"
 #import "chrome/browser/cocoa/chrome_event_processing_window.h"
 #import "chrome/browser/cocoa/clear_browsing_data_controller.h"
 #import "chrome/browser/cocoa/collected_cookies_mac.h"
 #import "chrome/browser/cocoa/content_settings_dialog_controller.h"
-#import "chrome/browser/cocoa/download_shelf_controller.h"
+#import "chrome/browser/cocoa/download/download_shelf_controller.h"
 #import "chrome/browser/cocoa/edit_search_engine_cocoa_controller.h"
 #import "chrome/browser/cocoa/html_dialog_window_controller.h"
 #import "chrome/browser/cocoa/import_settings_dialog.h"
 #import "chrome/browser/cocoa/keyword_editor_cocoa_controller.h"
 #import "chrome/browser/cocoa/location_bar/location_bar_view_mac.h"
 #import "chrome/browser/cocoa/nsmenuitem_additions.h"
-#include "chrome/browser/cocoa/page_info_window_mac.h"
 #include "chrome/browser/cocoa/repost_form_warning_mac.h"
 #include "chrome/browser/cocoa/restart_browser.h"
 #include "chrome/browser/cocoa/status_bubble_mac.h"
@@ -35,11 +32,15 @@
 #import "chrome/browser/cocoa/toolbar_controller.h"
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/global_keyboard_shortcuts_mac.h"
+#include "chrome/browser/page_info_window.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/sidebar/sidebar_container.h"
 #include "chrome/browser/sidebar/sidebar_manager.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents_wrapper.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/native_web_keyboard_event.h"
 #include "chrome/common/notification_service.h"
@@ -151,7 +152,24 @@ void BrowserWindowCocoa::UpdateTitleBar() {
   NSString* newTitle =
       base::SysUTF16ToNSString(browser_->GetWindowTitleForCurrentTab());
 
-  [window() setTitle:newTitle];
+  // Work around Cocoa bug: if a window changes title during the tracking of the
+  // Window menu it doesn't display well and the constant re-sorting of the list
+  // makes it difficult for the user to pick the desired window. Delay window
+  // title updates until the default run-loop mode.
+
+  if (pending_window_title_.get())
+    [[NSRunLoop currentRunLoop]
+        cancelPerformSelector:@selector(setTitle:)
+                       target:window()
+                     argument:pending_window_title_.get()];
+
+  pending_window_title_.reset([newTitle copy]);
+  [[NSRunLoop currentRunLoop]
+      performSelector:@selector(setTitle:)
+               target:window()
+             argument:newTitle
+                order:0
+                modes:[NSArray arrayWithObject:NSDefaultRunLoopMode]];
 }
 
 void BrowserWindowCocoa::ShelfVisibilityChanged() {
@@ -163,7 +181,7 @@ void BrowserWindowCocoa::ShelfVisibilityChanged() {
 
 void BrowserWindowCocoa::UpdateDevTools() {
   [controller_ updateDevToolsForContents:
-      browser_->tabstrip_model()->GetSelectedTabContents()];
+      browser_->GetSelectedTabContents()];
 }
 
 void BrowserWindowCocoa::UpdateLoadingAnimations(bool should_animate) {
@@ -199,11 +217,6 @@ bool BrowserWindowCocoa::IsFullscreenBubbleVisible() const {
   return false;
 }
 
-gfx::Rect BrowserWindowCocoa::GetRootWindowResizerRect() const {
-  NSRect tabRect = [controller_ selectedTabGrowBoxRect];
-  return gfx::Rect(NSRectToCGRect(tabRect));
-}
-
 void BrowserWindowCocoa::ConfirmAddSearchProvider(
     const TemplateURL* template_url,
     Profile* profile) {
@@ -231,9 +244,9 @@ void BrowserWindowCocoa::UpdateReloadStopState(bool is_loading, bool force) {
   [controller_ setIsLoading:is_loading force:force];
 }
 
-void BrowserWindowCocoa::UpdateToolbar(TabContents* contents,
+void BrowserWindowCocoa::UpdateToolbar(TabContentsWrapper* contents,
                                        bool should_restore_state) {
-  [controller_ updateToolbarWithContents:contents
+  [controller_ updateToolbarWithContents:contents->tab_contents()
                       shouldRestoreState:should_restore_state ? YES : NO];
 }
 
@@ -401,11 +414,7 @@ void BrowserWindowCocoa::ShowPageInfo(Profile* profile,
                                       const GURL& url,
                                       const NavigationEntry::SSLStatus& ssl,
                                       bool show_history) {
-  const CommandLine* command_line(CommandLine::ForCurrentProcess());
-  if (!command_line->HasSwitch(switches::kDisableNewPageInfoBubble))
-    browser::ShowPageInfoBubble(window(), profile, url, ssl, show_history);
-  else
-    browser::ShowPageInfo(window(), profile, url, ssl, show_history);
+  browser::ShowPageInfoBubble(window(), profile, url, ssl, show_history);
 }
 
 void BrowserWindowCocoa::ShowAppMenu() {
@@ -540,7 +549,13 @@ bool BrowserWindowCocoa::HandleKeyboardEventInternal(NSEvent* event) {
   return [event_window redispatchKeyEvent:event];
 }
 
-void BrowserWindowCocoa::ShowCreateShortcutsDialog(TabContents* tab_contents) {
+void BrowserWindowCocoa::ShowCreateWebAppShortcutsDialog(
+    TabContents* tab_contents) {
+  NOTIMPLEMENTED();
+}
+
+void BrowserWindowCocoa::ShowCreateChromeAppShortcutsDialog(
+    Profile* profile, const Extension* app) {
   NOTIMPLEMENTED();
 }
 
@@ -564,18 +579,28 @@ void BrowserWindowCocoa::OpenTabpose() {
   [controller_ openTabpose];
 }
 
+void BrowserWindowCocoa::PrepareForInstant() {
+  // TODO: implement fade as done on windows.
+}
+
 void BrowserWindowCocoa::ShowInstant(TabContents* preview_contents) {
   [controller_ showInstant:preview_contents];
 }
 
-void BrowserWindowCocoa::HideInstant() {
+void BrowserWindowCocoa::HideInstant(bool instant_is_active) {
   [controller_ hideInstant];
+
+  // TODO: add support for |instant_is_active|.
 }
 
 gfx::Rect BrowserWindowCocoa::GetInstantBounds() {
-  // TODO: implement me
-  NOTIMPLEMENTED();
-  return gfx::Rect();
+  // Flip coordinates based on the primary screen.
+  NSScreen* screen = [[NSScreen screens] objectAtIndex:0];
+  NSRect monitorFrame = [screen frame];
+  NSRect frame = [controller_ instantFrame];
+  gfx::Rect bounds(NSRectToCGRect(frame));
+  bounds.set_y(NSHeight(monitorFrame) - bounds.y() - bounds.height());
+  return bounds;
 }
 
 void BrowserWindowCocoa::Observe(NotificationType type,
@@ -609,7 +634,7 @@ NSWindow* BrowserWindowCocoa::window() const {
 }
 
 void BrowserWindowCocoa::UpdateSidebarForContents(TabContents* tab_contents) {
-  if (tab_contents == browser_->tabstrip_model()->GetSelectedTabContents()) {
+  if (tab_contents == browser_->GetSelectedTabContents()) {
     [controller_ updateSidebarForContents:tab_contents];
   }
 }

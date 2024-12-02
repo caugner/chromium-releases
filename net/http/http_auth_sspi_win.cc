@@ -9,7 +9,6 @@
 
 #include "base/base64.h"
 #include "base/logging.h"
-#include "base/singleton.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/net_errors.h"
@@ -21,7 +20,7 @@ namespace {
 
 int MapAcquireCredentialsStatusToError(SECURITY_STATUS status,
                                        const SEC_WCHAR* package) {
-  LOG(INFO) << "AcquireCredentialsHandle returned 0x" << std::hex << status;
+  VLOG(1) << "AcquireCredentialsHandle returned 0x" << std::hex << status;
   switch (status) {
     case SEC_E_OK:
       return OK;
@@ -102,7 +101,7 @@ int AcquireDefaultCredentials(SSPILibrary* library, const SEC_WCHAR* package,
 }
 
 int MapInitializeSecurityContextStatusToError(SECURITY_STATUS status) {
-  LOG(INFO) << "InitializeSecurityContext returned 0x" << std::hex << status;
+  VLOG(1) << "InitializeSecurityContext returned 0x" << std::hex << status;
   switch (status) {
     case SEC_E_OK:
     case SEC_I_CONTINUE_NEEDED:
@@ -146,7 +145,7 @@ int MapInitializeSecurityContextStatusToError(SECURITY_STATUS status) {
 }
 
 int MapQuerySecurityPackageInfoStatusToError(SECURITY_STATUS status) {
-  LOG(INFO) << "QuerySecurityPackageInfo returned 0x" << std::hex << status;
+  VLOG(1) << "QuerySecurityPackageInfo returned 0x" << std::hex << status;
   switch (status) {
     case SEC_E_OK:
       return OK;
@@ -163,7 +162,7 @@ int MapQuerySecurityPackageInfoStatusToError(SECURITY_STATUS status) {
 }
 
 int MapFreeContextBufferStatusToError(SECURITY_STATUS status) {
-  LOG(INFO) << "FreeContextBuffer returned 0x" << std::hex << status;
+  VLOG(1) << "FreeContextBuffer returned 0x" << std::hex << status;
   switch (status) {
     case SEC_E_OK:
       return OK;
@@ -423,70 +422,6 @@ int DetermineMaxTokenLength(SSPILibrary* library,
     return rv;
   *max_token_length = token_length;
   return OK;
-}
-
-class SSPILibraryDefault : public SSPILibrary {
- public:
-  SSPILibraryDefault() {}
-  virtual ~SSPILibraryDefault() {}
-
-  virtual SECURITY_STATUS AcquireCredentialsHandle(LPWSTR pszPrincipal,
-                                                   LPWSTR pszPackage,
-                                                   unsigned long fCredentialUse,
-                                                   void* pvLogonId,
-                                                   void* pvAuthData,
-                                                   SEC_GET_KEY_FN pGetKeyFn,
-                                                   void* pvGetKeyArgument,
-                                                   PCredHandle phCredential,
-                                                   PTimeStamp ptsExpiry) {
-    return ::AcquireCredentialsHandle(pszPrincipal, pszPackage, fCredentialUse,
-                                      pvLogonId, pvAuthData, pGetKeyFn,
-                                      pvGetKeyArgument, phCredential,
-                                      ptsExpiry);
-  }
-
-  virtual SECURITY_STATUS InitializeSecurityContext(PCredHandle phCredential,
-                                                    PCtxtHandle phContext,
-                                                    SEC_WCHAR* pszTargetName,
-                                                    unsigned long fContextReq,
-                                                    unsigned long Reserved1,
-                                                    unsigned long TargetDataRep,
-                                                    PSecBufferDesc pInput,
-                                                    unsigned long Reserved2,
-                                                    PCtxtHandle phNewContext,
-                                                    PSecBufferDesc pOutput,
-                                                    unsigned long* contextAttr,
-                                                    PTimeStamp ptsExpiry) {
-    return ::InitializeSecurityContext(phCredential, phContext, pszTargetName,
-                                       fContextReq, Reserved1, TargetDataRep,
-                                       pInput, Reserved2, phNewContext, pOutput,
-                                       contextAttr, ptsExpiry);
-  }
-
-  virtual SECURITY_STATUS QuerySecurityPackageInfo(LPWSTR pszPackageName,
-                                                   PSecPkgInfoW *pkgInfo) {
-    return ::QuerySecurityPackageInfo(pszPackageName, pkgInfo);
-  }
-
-  virtual SECURITY_STATUS FreeCredentialsHandle(PCredHandle phCredential) {
-    return ::FreeCredentialsHandle(phCredential);
-  }
-
-  virtual SECURITY_STATUS DeleteSecurityContext(PCtxtHandle phContext) {
-    return ::DeleteSecurityContext(phContext);
-  }
-
-  virtual SECURITY_STATUS FreeContextBuffer(PVOID pvContextBuffer) {
-    return ::FreeContextBuffer(pvContextBuffer);
-  }
-
- private:
-  friend struct DefaultSingletonTraits<SSPILibraryDefault>;
-};
-
-// static
-SSPILibrary* SSPILibrary::GetDefault() {
-  return Singleton<SSPILibraryDefault>::get();
 }
 
 }  // namespace net

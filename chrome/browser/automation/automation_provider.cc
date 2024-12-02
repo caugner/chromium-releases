@@ -8,6 +8,7 @@
 
 #include "app/message_box_flags.h"
 #include "base/callback.h"
+#include "base/debug/trace_event.h"
 #include "base/file_path.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
@@ -19,12 +20,11 @@
 #include "base/string_util.h"
 #include "base/task.h"
 #include "base/thread.h"
-#include "base/trace_event.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/waitable_event.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/app_modal_dialog.h"
 #include "chrome/browser/app_modal_dialog_queue.h"
 #include "chrome/browser/autofill/autofill_manager.h"
@@ -85,6 +85,7 @@
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
 #include "chrome/common/automation_constants.h"
+#include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -95,7 +96,6 @@
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/automation/automation_messages.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "net/proxy/proxy_service.h"
 #include "net/proxy/proxy_config_service_fixed.h"
@@ -113,7 +113,9 @@ using base::Time;
 
 AutomationProvider::AutomationProvider(Profile* profile)
     : profile_(profile),
-      reply_message_(NULL) {
+      reply_message_(NULL),
+      is_connected_(false),
+      initial_loads_complete_(false) {
   TRACE_EVENT_BEGIN("AutomationProvider::AutomationProvider", 0, "");
 
   browser_tracker_.reset(new AutomationBrowserTracker(this));
@@ -123,7 +125,7 @@ AutomationProvider::AutomationProvider(Profile* profile)
   autocomplete_edit_tracker_.reset(
       new AutomationAutocompleteEditTracker(this));
   new_tab_ui_load_observer_.reset(new NewTabUILoadObserver(this));
-  dom_operation_observer_.reset(new DomOperationNotificationObserver(this));
+  dom_operation_observer_.reset(new DomOperationMessageSender(this));
   metric_event_duration_observer_.reset(new MetricEventDurationObserver());
   extension_test_result_observer_.reset(
       new ExtensionTestResultNotificationObserver(this));
@@ -149,29 +151,56 @@ AutomationProvider::~AutomationProvider() {
   g_browser_process->ReleaseModule();
 }
 
-void AutomationProvider::ConnectToChannel(const std::string& channel_id) {
-  TRACE_EVENT_BEGIN("AutomationProvider::ConnectToChannel", 0, "");
+bool AutomationProvider::InitializeChannel(const std::string& channel_id) {
+  TRACE_EVENT_BEGIN("AutomationProvider::InitializeChannel", 0, "");
 
-  automation_resource_message_filter_ = new AutomationResourceMessageFilter;
-  channel_.reset(
-      new IPC::SyncChannel(channel_id, IPC::Channel::MODE_CLIENT, this,
-                           automation_resource_message_filter_,
-                           g_browser_process->io_thread()->message_loop(),
-                           true, g_browser_process->shutdown_event()));
+  std::string effective_channel_id = channel_id;
+
+  // If the channel_id starts with kNamedInterfacePrefix, create a named IPC
+  // server and listen on it, else connect as client to an existing IPC server
+  bool use_named_interface =
+      channel_id.find(automation::kNamedInterfacePrefix) == 0;
+  if (use_named_interface) {
+    effective_channel_id = channel_id.substr(
+        strlen(automation::kNamedInterfacePrefix));
+    if (effective_channel_id.length() <= 0)
+      return false;
+  }
+
+  if (!automation_resource_message_filter_.get()) {
+    automation_resource_message_filter_ = new AutomationResourceMessageFilter;
+  }
+
+  channel_.reset(new IPC::SyncChannel(
+      effective_channel_id,
+      use_named_interface ? IPC::Channel::MODE_NAMED_SERVER
+                          : IPC::Channel::MODE_CLIENT,
+      this,
+      automation_resource_message_filter_,
+      g_browser_process->io_thread()->message_loop(),
+      true, g_browser_process->shutdown_event()));
+
+  TRACE_EVENT_END("AutomationProvider::InitializeChannel", 0, "");
+
+  return true;
+}
+
+std::string AutomationProvider::GetProtocolVersion() {
   chrome::VersionInfo version_info;
-
-  // Send a hello message with our current automation protocol version.
-  channel_->Send(new AutomationMsg_Hello(0, version_info.Version().c_str()));
-
-  TRACE_EVENT_END("AutomationProvider::ConnectToChannel", 0, "");
+  return version_info.Version().c_str();
 }
 
 void AutomationProvider::SetExpectedTabCount(size_t expected_tabs) {
-  if (expected_tabs == 0) {
-    Send(new AutomationMsg_InitialLoadsComplete(0));
-  } else {
+  if (expected_tabs == 0)
+    OnInitialLoadsComplete();
+  else
     initial_load_observer_.reset(new InitialLoadObserver(expected_tabs, this));
-  }
+}
+
+void AutomationProvider::OnInitialLoadsComplete() {
+  initial_loads_complete_ = true;
+  if (is_connected_)
+    Send(new AutomationMsg_InitialLoadsComplete(0));
 }
 
 NotificationObserver* AutomationProvider::AddNavigationStatusListener(
@@ -251,7 +280,7 @@ int AutomationProvider::GetIndexForNavigationController(
   return parent->GetIndexOfController(controller);
 }
 
-int AutomationProvider::AddExtension(Extension* extension) {
+int AutomationProvider::AddExtension(const Extension* extension) {
   DCHECK(extension);
   return extension_tracker_->Add(extension);
 }
@@ -275,8 +304,10 @@ DictionaryValue* AutomationProvider::GetDictionaryFromDownloadItem(
   dl_item_value->SetInteger("id", static_cast<int>(download->id()));
   dl_item_value->SetString("url", download->url().spec());
   dl_item_value->SetString("referrer_url", download->referrer_url().spec());
-  dl_item_value->SetString("file_name", download->GetFileName().value());
-  dl_item_value->SetString("full_path", download->full_path().value());
+  dl_item_value->SetString("file_name",
+                           download->GetFileNameToReportUser().value());
+  dl_item_value->SetString("full_path",
+                           download->GetTargetFilePath().value());
   dl_item_value->SetBoolean("is_paused", download->is_paused());
   dl_item_value->SetBoolean("open_when_complete",
                             download->open_when_complete());
@@ -292,12 +323,13 @@ DictionaryValue* AutomationProvider::GetDictionaryFromDownloadItem(
   return dl_item_value;
 }
 
-Extension* AutomationProvider::GetExtension(int extension_handle) {
+const Extension* AutomationProvider::GetExtension(int extension_handle) {
   return extension_tracker_->GetResource(extension_handle);
 }
 
-Extension* AutomationProvider::GetEnabledExtension(int extension_handle) {
-  Extension* extension = extension_tracker_->GetResource(extension_handle);
+const Extension* AutomationProvider::GetEnabledExtension(int extension_handle) {
+  const Extension* extension =
+      extension_tracker_->GetResource(extension_handle);
   ExtensionsService* service = profile_->GetExtensionsService();
   if (extension && service &&
       service->GetExtensionById(extension->id(), false))
@@ -305,14 +337,27 @@ Extension* AutomationProvider::GetEnabledExtension(int extension_handle) {
   return NULL;
 }
 
-Extension* AutomationProvider::GetDisabledExtension(int extension_handle) {
-  Extension* extension = extension_tracker_->GetResource(extension_handle);
+const Extension* AutomationProvider::GetDisabledExtension(
+    int extension_handle) {
+  const Extension* extension =
+      extension_tracker_->GetResource(extension_handle);
   ExtensionsService* service = profile_->GetExtensionsService();
   if (extension && service &&
       service->GetExtensionById(extension->id(), true) &&
       !service->GetExtensionById(extension->id(), false))
     return extension;
   return NULL;
+}
+
+void AutomationProvider::OnChannelConnected(int pid) {
+  is_connected_ = true;
+  LOG(INFO) << "Testing channel connected, sending hello message";
+
+  // Send a hello message with our current automation protocol version.
+  chrome::VersionInfo version_info;
+  channel_->Send(new AutomationMsg_Hello(0, version_info.Version()));
+  if (initial_loads_complete_)
+    Send(new AutomationMsg_InitialLoadsComplete(0));
 }
 
 void AutomationProvider::OnMessageReceived(const IPC::Message& message) {
@@ -431,7 +476,7 @@ void AutomationProvider::HandleUnused(const IPC::Message& message, int handle) {
 }
 
 void AutomationProvider::OnChannelError() {
-  LOG(INFO) << "AutomationProxy went away, shutting down app.";
+  VLOG(1) << "AutomationProxy went away, shutting down app.";
   AutomationProviderList::GetInstance()->RemoveProvider(this);
 }
 
@@ -481,11 +526,14 @@ void AutomationProvider::SendFindRequest(
     bool find_next,
     IPC::Message* reply_message) {
   int request_id = FindInPageNotificationObserver::kFindInPageRequestId;
-  find_in_page_observer_.reset(
+  FindInPageNotificationObserver* observer =
       new FindInPageNotificationObserver(this,
                                          tab_contents,
                                          with_json,
-                                         reply_message));
+                                         reply_message);
+  if (!with_json) {
+    find_in_page_observer_.reset(observer);
+  }
   tab_contents->set_current_find_request_id(request_id);
   tab_contents->render_view_host()->StartFinding(
       FindInPageNotificationObserver::kFindInPageRequestId,
@@ -749,12 +797,8 @@ void AutomationProvider::InstallExtension(const FilePath& crx_path,
                                              AutomationMsg_InstallExtension::ID,
                                              reply_message);
 
-    const FilePath& install_dir = service->install_directory();
     scoped_refptr<CrxInstaller> installer(
-        new CrxInstaller(install_dir,
-                         service,
-                         NULL));  // silent install, no UI
-    installer->set_allow_privilege_increase(true);
+        new CrxInstaller(service, NULL));  // silent install, no UI
     installer->InstallCrx(crx_path);
   } else {
     AutomationMsg_InstallExtension::WriteReplyParams(
@@ -789,10 +833,12 @@ void AutomationProvider::GetEnabledExtensions(
     const ExtensionList* extensions = service->extensions();
     DCHECK(extensions);
     for (size_t i = 0; i < extensions->size(); ++i) {
-      Extension* extension = (*extensions)[i];
+      const Extension* extension = (*extensions)[i];
       DCHECK(extension);
-      if (extension->location() == Extension::INTERNAL ||
-          extension->location() == Extension::LOAD) {
+      // AutomationProvider only exposes non app internal/loaded extensions.
+      if (!extension->is_app() &&
+          (extension->location() == Extension::INTERNAL ||
+           extension->location() == Extension::LOAD)) {
         result->push_back(extension->path());
       }
     }
@@ -822,11 +868,7 @@ void AutomationProvider::InstallExtensionAndGetHandle(
 
     ExtensionInstallUI* client =
         (with_ui ? new ExtensionInstallUI(profile_) : NULL);
-    scoped_refptr<CrxInstaller> installer(
-        new CrxInstaller(service->install_directory(),
-                         service,
-                         client));
-    installer->set_allow_privilege_increase(true);
+    scoped_refptr<CrxInstaller> installer(new CrxInstaller(service, client));
     installer->InstallCrx(crx_path);
   } else {
     AutomationMsg_InstallExtensionAndGetHandle::WriteReplyParams(
@@ -838,7 +880,7 @@ void AutomationProvider::InstallExtensionAndGetHandle(
 void AutomationProvider::UninstallExtension(int extension_handle,
                                             bool* success) {
   *success = false;
-  Extension* extension = GetExtension(extension_handle);
+  const Extension* extension = GetExtension(extension_handle);
   ExtensionsService* service = profile_->GetExtensionsService();
   if (extension && service) {
     ExtensionUnloadNotificationObserver observer;
@@ -851,7 +893,7 @@ void AutomationProvider::UninstallExtension(int extension_handle,
 
 void AutomationProvider::EnableExtension(int extension_handle,
                                          IPC::Message* reply_message) {
-  Extension* extension = GetDisabledExtension(extension_handle);
+  const Extension* extension = GetDisabledExtension(extension_handle);
   ExtensionsService* service = profile_->GetExtensionsService();
   ExtensionProcessManager* manager = profile_->GetExtensionProcessManager();
   // Only enable if this extension is disabled.
@@ -872,7 +914,7 @@ void AutomationProvider::EnableExtension(int extension_handle,
 void AutomationProvider::DisableExtension(int extension_handle,
                                           bool* success) {
   *success = false;
-  Extension* extension = GetEnabledExtension(extension_handle);
+  const Extension* extension = GetEnabledExtension(extension_handle);
   ExtensionsService* service = profile_->GetExtensionsService();
   if (extension && service) {
     ExtensionUnloadNotificationObserver observer;
@@ -887,7 +929,7 @@ void AutomationProvider::ExecuteExtensionActionInActiveTabAsync(
     int extension_handle, int browser_handle,
     IPC::Message* reply_message) {
   bool success = false;
-  Extension* extension = GetEnabledExtension(extension_handle);
+  const Extension* extension = GetEnabledExtension(extension_handle);
   ExtensionsService* service = profile_->GetExtensionsService();
   ExtensionMessageService* message_service =
       profile_->GetExtensionMessageService();
@@ -912,7 +954,7 @@ void AutomationProvider::ExecuteExtensionActionInActiveTabAsync(
 void AutomationProvider::MoveExtensionBrowserAction(
     int extension_handle, int index, bool* success) {
   *success = false;
-  Extension* extension = GetEnabledExtension(extension_handle);
+  const Extension* extension = GetEnabledExtension(extension_handle);
   ExtensionsService* service = profile_->GetExtensionsService();
   if (extension && service) {
     ExtensionToolbarModel* toolbar = service->toolbar_model();
@@ -933,7 +975,7 @@ void AutomationProvider::GetExtensionProperty(
     bool* success,
     std::string* value) {
   *success = false;
-  Extension* extension = GetExtension(extension_handle);
+  const Extension* extension = GetExtension(extension_handle);
   ExtensionsService* service = profile_->GetExtensionsService();
   if (extension && service) {
     ExtensionToolbarModel* toolbar = service->toolbar_model();

@@ -20,18 +20,22 @@
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
 #include "chrome/browser/chromeos/cros/login_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
-#include "chrome/browser/chromeos/cros_settings_provider_user.h"
 #include "chrome/browser/chromeos/login/background_view.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/message_bubble.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/chromeos/status/status_area_view.h"
+#include "chrome/browser/chromeos/user_cros_settings_provider.h"
+#include "chrome/browser/chromeos/view_ids.h"
 #include "chrome/browser/chromeos/wm_ipc.h"
+#include "chrome/browser/profile_manager.h"
 #include "chrome/browser/views/window.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "gfx/native_widget_types.h"
+#include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "views/screen.h"
@@ -53,6 +57,16 @@ const size_t kNotSelected = -1;
 // info bubble arrow to cursor.
 const int kCursorOffset = 5;
 
+// Url for setting up sync authentication.
+const char kSettingsSyncLoginUrl[] = "chrome://settings/personal";
+
+// URL that will be opened on when user logs in first time on the device.
+const char kGetStartedURL[] =
+    "chrome-extension://nbaambmfhicobichobkkokacjbaoinda/index.html";
+
+// Path to extracted version of Get Started app.
+const char kGetStartedPath[] = "/usr/share/chromeos-assets/getstarted";
+
 // Used to handle the asynchronous response of deleting a cryptohome directory.
 class RemoveAttempt : public CryptohomeLibrary::Delegate {
  public:
@@ -67,8 +81,8 @@ class RemoveAttempt : public CryptohomeLibrary::Delegate {
   void OnComplete(bool success, int return_code) {
     // Log the error, but there's not much we can do.
     if (!success) {
-      LOG(INFO) << "Removal of cryptohome for " << user_email_
-                << " failed, return code: " << return_code;
+      VLOG(1) << "Removal of cryptohome for " << user_email_
+              << " failed, return code: " << return_code;
     }
     delete this;
   }
@@ -91,26 +105,10 @@ void EnableTooltipsIfNeeded(const std::vector<UserController*>& controllers) {
     const std::string& display_name =
         controllers[i]->user().GetDisplayName();
     bool show_tooltip = controllers[i]->is_new_user() ||
-                        controllers[i]->is_bwsi() ||
+                        controllers[i]->is_guest() ||
                         visible_display_names[display_name] > 1;
     controllers[i]->EnableNameTooltip(show_tooltip);
   }
-}
-
-// Returns true if given email is in user whitelist.
-// Note this function is for display purpose only and should use
-// CheckWhitelist op for the real whitelist check.
-bool IsEmailInCachedWhitelist(const std::string& email) {
-  const ListValue* whitelist = UserCrosSettingsProvider::cached_whitelist();
-  if (whitelist) {
-    StringValue email_value(email);
-    for (ListValue::const_iterator i(whitelist->begin());
-        i != whitelist->end(); ++i) {
-      if ((*i)->Equals(&email_value))
-        return true;
-    }
-  }
-  return false;
 }
 
 }  // namespace
@@ -118,6 +116,7 @@ bool IsEmailInCachedWhitelist(const std::string& email) {
 ExistingUserController*
   ExistingUserController::delete_scheduled_instance_ = NULL;
 
+// TODO(xiyuan): Wait for the cached settings update before using them.
 ExistingUserController::ExistingUserController(
     const std::vector<UserManager::User>& users,
     const gfx::Rect& background_bounds)
@@ -126,7 +125,8 @@ ExistingUserController::ExistingUserController(
       background_view_(NULL),
       selected_view_index_(kNotSelected),
       num_login_attempts_(0),
-      bubble_(NULL) {
+      bubble_(NULL),
+      user_settings_(new UserCrosSettingsProvider()) {
   if (delete_scheduled_instance_)
     delete_scheduled_instance_->Delete();
 
@@ -148,13 +148,14 @@ ExistingUserController::ExistingUserController(
 
       // TODO(xiyuan): Clean user profile whose email is not in whitelist.
       if (UserCrosSettingsProvider::cached_allow_new_user() ||
-          IsEmailInCachedWhitelist(users[i].email())) {
+          UserCrosSettingsProvider::IsEmailInCachedWhitelist(
+              users[i].email())) {
         controllers_.push_back(new UserController(this, users[i]));
       }
     }
   }
 
-  if (!controllers_.empty() && UserCrosSettingsProvider::cached_allow_bwsi())
+  if (!controllers_.empty() && UserCrosSettingsProvider::cached_allow_guest())
     controllers_.push_back(new UserController(this, true));
 
   // Add the view representing the new user.
@@ -171,6 +172,7 @@ void ExistingUserController::Init() {
         background_bounds_,
         GURL(url_string),
         &background_view_);
+    background_view_->EnableShutdownButton(true);
 
     if (!WizardController::IsDeviceRegistered()) {
       background_view_->SetOobeProgressBarVisible(true);
@@ -179,18 +181,19 @@ void ExistingUserController::Init() {
 
     background_window_->Show();
   }
-  // If there's only new user pod, show BWSI link on it.
-  bool show_bwsi_link = controllers_.size() == 1;
+  // If there's only new user pod, show the guest session link on it.
+  bool show_guest_link = controllers_.size() == 1;
   for (size_t i = 0; i < controllers_.size(); ++i) {
     (controllers_[i])->Init(static_cast<int>(i),
                             static_cast<int>(controllers_.size()),
-                            show_bwsi_link);
+                            show_guest_link);
   }
 
   EnableTooltipsIfNeeded(controllers_);
 
   WmMessageListener::instance()->AddObserver(this);
 
+  LoginUtils::Get()->PrewarmAuthentication();
   if (CrosLibrary::Get()->EnsureLoaded())
     CrosLibrary::Get()->GetLoginLibrary()->EmitLoginPromptReady();
 }
@@ -201,7 +204,6 @@ void ExistingUserController::OwnBackground(
   DCHECK(!background_window_);
   background_window_ = background_widget;
   background_view_ = background_view;
-  background_view_->OnOwnerChanged();
 }
 
 void ExistingUserController::LoginNewUser(const std::string& username,
@@ -223,6 +225,12 @@ void ExistingUserController::LoginNewUser(const std::string& username,
 
 void ExistingUserController::SelectNewUser() {
   SelectUser(controllers_.size() - 1);
+}
+
+void ExistingUserController::SetStatusAreaEnabled(bool enable) {
+  if (background_view_) {
+    background_view_->SetStatusAreaEnabled(enable);
+  }
 }
 
 ExistingUserController::~ExistingUserController() {
@@ -293,8 +301,8 @@ void ExistingUserController::WhiteListCheckFailed(const std::string& email) {
 }
 
 void ExistingUserController::LoginOffTheRecord() {
-  // Check allow_bwsi in case this call is fired from key accelerator.
-  if (!UserCrosSettingsProvider::cached_allow_bwsi())
+  // Check allow_guest in case this call is fired from key accelerator.
+  if (!UserCrosSettingsProvider::cached_allow_guest())
     return;
 
   // Disable clicking on other windows.
@@ -318,6 +326,7 @@ void ExistingUserController::OnUserSelected(UserController* source) {
   if (new_selected_index != selected_view_index_ &&
       selected_view_index_ != kNotSelected) {
     controllers_[selected_view_index_]->ClearAndEnableFields();
+    controllers_[new_selected_index]->ClearAndEnableFields();
     login_performer_.reset(NULL);
     num_login_attempts_ = 0;
   }
@@ -347,6 +356,12 @@ void ExistingUserController::ActivateWizard(const std::string& screen_name) {
 void ExistingUserController::RemoveUser(UserController* source) {
   ClearErrors();
 
+  // TODO(xiyuan): Wait for the cached settings update before using them.
+  if (UserCrosSettingsProvider::cached_owner() == source->user().email()) {
+    // Owner is not allowed to be removed from the device.
+    return;
+  }
+
   UserManager::Get()->RemoveUser(source->user().email());
 
   controllers_.erase(controllers_.begin() + source->user_index());
@@ -374,10 +389,6 @@ void ExistingUserController::SelectUser(int index) {
   }
 }
 
-void ExistingUserController::OnGoIncognitoButton() {
-  LoginOffTheRecord();
-}
-
 void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
   std::string error = failure.GetErrorString();
 
@@ -403,6 +414,10 @@ void ExistingUserController::OnLoginFailure(const LoginFailure& failure) {
         LOG(WARNING) << "No captcha image url was found?";
         ShowError(IDS_LOGIN_ERROR_AUTHENTICATING, error);
       }
+    } else if (failure.reason() == LoginFailure::NETWORK_AUTH_FAILED &&
+               failure.error().state() ==
+                   GoogleServiceAuthError::HOSTED_NOT_ALLOWED) {
+      ShowError(IDS_LOGIN_ERROR_AUTHENTICATING_HOSTED, error);
     } else {
       if (controllers_[selected_view_index_]->is_new_user())
         ShowError(IDS_LOGIN_ERROR_AUTHENTICATING_NEW, error);
@@ -430,7 +445,14 @@ gfx::NativeWindow ExistingUserController::GetNativeWindow() const {
 void ExistingUserController::ShowError(int error_id,
                                        const std::string& details) {
   ClearErrors();
-  std::wstring error_text = l10n_util::GetString(error_id);
+  std::wstring error_text;
+  // GetStringF fails on debug build if there's no replacement in the string.
+  if (error_id == IDS_LOGIN_ERROR_AUTHENTICATING_HOSTED) {
+    error_text = l10n_util::GetStringF(
+        error_id, l10n_util::GetString(IDS_PRODUCT_OS_NAME));
+  } else {
+    error_text = l10n_util::GetString(error_id);
+  }
   // TODO(dpolukhin): show detailed error info. |details| string contains
   // low level error info that is not localized and even is not user friendly.
   // For now just ignore it because error_text contains all required information
@@ -446,8 +468,11 @@ void ExistingUserController::ShowError(int error_id,
     arrow = BubbleBorder::BOTTOM_LEFT;
   }
   std::wstring help_link;
-  if (num_login_attempts_ > static_cast<size_t>(1))
+  if (error_id == IDS_LOGIN_ERROR_AUTHENTICATING_HOSTED) {
+    help_link = l10n_util::GetString(IDS_LEARN_MORE);
+  } else if (num_login_attempts_ > static_cast<size_t>(1)) {
     help_link = l10n_util::GetString(IDS_CANT_ACCESS_ACCOUNT_BUTTON);
+  }
 
   bubble_ = MessageBubble::Show(
       controllers_[selected_view_index_]->controls_window(),
@@ -461,6 +486,7 @@ void ExistingUserController::ShowError(int error_id,
 
 void ExistingUserController::OnLoginSuccess(
     const std::string& username,
+    const std::string& password,
     const GaiaAuthConsumer::ClientLoginResult& credentials,
     bool pending_requests) {
   // LoginPerformer instance will delete itself once online auth result is OK.
@@ -471,12 +497,25 @@ void ExistingUserController::OnLoginSuccess(
   login_performer_->set_delegate(NULL);
   LoginPerformer* performer = login_performer_.release();
   performer = NULL;
+  bool known_user = UserManager::Get()->IsKnownUser(username);
+  if (credentials.two_factor && !known_user && !start_url_.is_valid()) {
+    // If we have a two factor error and and this is a new user and we are not
+    // already directing the user to a start url (e.g. a help page),
+    // direct them to the personal settings page.
+    // TODO(stevenjb): direct the user to a lightweight sync login page.
+    start_url_ = GURL(kSettingsSyncLoginUrl);
+  }
   AppendStartUrlToCmdline();
-  if (selected_view_index_ + 1 == controllers_.size() &&
-      !UserManager::Get()->IsKnownUser(username)) {
+  if (selected_view_index_ + 1 == controllers_.size() && !known_user) {
+#if defined(OFFICIAL_BUILD)
+    CommandLine::ForCurrentProcess()->AppendSwitchPath(
+        switches::kLoadExtension,
+        FilePath(kGetStartedPath));
+    CommandLine::ForCurrentProcess()->AppendArg(kGetStartedURL);
+#endif  // OFFICIAL_BUILD
     // For new user login don't launch browser until we pass image screen.
     LoginUtils::Get()->EnableBrowserLaunch(false);
-    LoginUtils::Get()->CompleteLogin(username, credentials);
+    LoginUtils::Get()->CompleteLogin(username, password, credentials);
     ActivateWizard(WizardController::IsDeviceRegistered() ?
         WizardController::kUserImageScreenName :
         WizardController::kRegistrationScreenName);
@@ -485,7 +524,7 @@ void ExistingUserController::OnLoginSuccess(
     WmIpc::Message message(WM_IPC_MESSAGE_WM_HIDE_LOGIN);
     WmIpc::instance()->SendMessage(message);
 
-    LoginUtils::Get()->CompleteLogin(username, credentials);
+    LoginUtils::Get()->CompleteLogin(username, password, credentials);
 
     // Delay deletion as we're on the stack.
     MessageLoop::current()->DeleteSoon(FROM_HERE, this);
@@ -505,11 +544,17 @@ void ExistingUserController::OnPasswordChangeDetected(
     const GaiaAuthConsumer::ClientLoginResult& credentials) {
   // When signing in as a "New user" always remove old cryptohome.
   if (selected_view_index_ == controllers_.size() - 1) {
-    login_performer_->ResyncEncryptedData();
+    ResyncEncryptedData();
     return;
   }
 
-  PasswordChangedView* view = new PasswordChangedView(this);
+  // TODO(altimofeev): remove this constrain when full sync for the owner will
+  // be correctly handled.
+  // TODO(xiyuan): Wait for the cached settings update before using them.
+  bool full_sync_disabled = (UserCrosSettingsProvider::cached_owner() ==
+      controllers_[selected_view_index_]->user().email());
+
+  PasswordChangedView* view = new PasswordChangedView(this, full_sync_disabled);
   views::Window* window = browser::CreateViewsWindow(GetNativeWindow(),
                                                      gfx::Rect(),
                                                      view);
@@ -522,13 +567,17 @@ void ExistingUserController::OnHelpLinkActivated() {
   if (!help_app_.get())
     help_app_.reset(new HelpAppLauncher(GetNativeWindow()));
   switch (login_performer_->error().state()) {
-    case(GoogleServiceAuthError::CONNECTION_FAILED):
+    case GoogleServiceAuthError::CONNECTION_FAILED:
       help_app_->ShowHelpTopic(
           HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT_OFFLINE);
       break;
-    case(GoogleServiceAuthError::ACCOUNT_DISABLED):
+    case GoogleServiceAuthError::ACCOUNT_DISABLED:
         help_app_->ShowHelpTopic(
             HelpAppLauncher::HELP_ACCOUNT_DISABLED);
+        break;
+    case GoogleServiceAuthError::HOSTED_NOT_ALLOWED:
+        help_app_->ShowHelpTopic(
+            HelpAppLauncher::HELP_HOSTED_ACCOUNT);
         break;
     default:
       help_app_->ShowHelpTopic(login_performer_->login_timed_out() ?
@@ -544,11 +593,15 @@ void ExistingUserController::OnCaptchaEntered(const std::string& captcha) {
 
 void ExistingUserController::RecoverEncryptedData(
     const std::string& old_password) {
-  login_performer_->RecoverEncryptedData(old_password);
+  // LoginPerformer instance has state of the user so it should exist.
+  if (login_performer_.get())
+    login_performer_->RecoverEncryptedData(old_password);
 }
 
 void ExistingUserController::ResyncEncryptedData() {
-  login_performer_->ResyncEncryptedData();
+  // LoginPerformer instance has state of the user so it should exist.
+  if (login_performer_.get())
+    login_performer_->ResyncEncryptedData();
 }
 
 }  // namespace chromeos

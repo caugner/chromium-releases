@@ -9,7 +9,7 @@
 #include "base/environment.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/histogram.h"
+#include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/scoped_ptr.h"
 #include "base/string_number_conversions.h"
@@ -23,20 +23,22 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_signin.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/chrome_blob_storage_context.h"
-#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_ui/ntp_resource_cache.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/extensions/default_apps.h"
 #include "chrome/browser/extensions/extension_devtools_manager.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_info_map.h"
+#include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/favicon_service.h"
-#include "chrome/browser/file_system/file_system_host_context.h"
+#include "chrome/browser/file_system/browser_file_system_context.h"
 #include "chrome/browser/find_bar_state.h"
 #include "chrome/browser/geolocation/geolocation_content_settings_map.h"
 #include "chrome/browser/geolocation/geolocation_permission_context.h"
@@ -44,13 +46,18 @@
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/host_content_settings_map.h"
 #include "chrome/browser/host_zoom_map.h"
+#include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/in_process_webkit/webkit_context.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/net/net_pref_observer.h"
+#include "chrome/browser/net/pref_proxy_config_service.h"
 #include "chrome/browser/net/ssl_config_service_manager.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/password_manager/password_store_default.h"
+#include "chrome/browser/policy/configuration_policy_provider.h"
+#include "chrome/browser/policy/configuration_policy_pref_store.h"
+#include "chrome/browser/policy/profile_policy_context.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/pref_value_store.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_proxy_service.h"
@@ -75,6 +82,7 @@
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/json_pref_store.h"
 #include "chrome/common/notification_service.h"
@@ -90,14 +98,16 @@
 #endif
 
 #if defined(OS_WIN)
+#include "chrome/browser/instant/promo_counter.h"
 #include "chrome/browser/password_manager/password_store_win.h"
+#include "chrome/installer/util/install_util.h"
 #elif defined(OS_MACOSX)
 #include "chrome/browser/keychain_mac.h"
 #include "chrome/browser/password_manager/password_store_mac.h"
 #elif defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/proxy_config_service_impl.h"
 #elif defined(OS_POSIX) && !defined(OS_CHROMEOS)
-#include "base/xdg_util.h"
+#include "base/nix/xdg_util.h"
 #if defined(USE_GNOME_KEYRING)
 #include "chrome/browser/password_manager/native_backend_gnome_x.h"
 #endif
@@ -162,11 +172,6 @@ FilePath GetCachePath(const FilePath& base) {
 
 FilePath GetMediaCachePath(const FilePath& base) {
   return base.Append(chrome::kMediaCacheDirname);
-}
-
-bool HasACacheSubdir(const FilePath &dir) {
-  return file_util::PathExists(GetCachePath(dir)) ||
-         file_util::PathExists(GetMediaCachePath(dir));
 }
 
 // Simple task to log the size of the current profile.
@@ -253,6 +258,9 @@ ProfileImpl::ProfileImpl(const FilePath& path)
       start_time_(Time::Now()),
       spellcheck_host_(NULL),
       spellcheck_host_ready_(false),
+#if defined(OS_WIN)
+      checked_instant_promo_(false),
+#endif
       shutdown_session_service_(false) {
   DCHECK(!path.empty()) << "Using an empty path will attempt to write " <<
                             "profile files to the root directory!";
@@ -269,44 +277,15 @@ ProfileImpl::ProfileImpl(const FilePath& path)
   // Convert active labs into switches. Modifies the current command line.
   about_flags::ConvertFlagsToSwitches(prefs, CommandLine::ForCurrentProcess());
 
-#if defined(OS_MACOSX)
-  // If the profile directory doesn't already have a cache directory and it
-  // is under ~/Library/Application Support, use a suitable cache directory
-  // under ~/Library/Caches.  For example, a profile directory of
-  // ~/Library/Application Support/Google/Chrome/MyProfileName that doesn't
-  // have a "Cache" or "MediaCache" subdirectory would use the cache directory
-  // ~/Library/Caches/Google/Chrome/MyProfileName.
-  //
-  // TODO(akalin): Come up with unit tests for this.
-  if (!HasACacheSubdir(path_)) {
-    FilePath app_data_path, user_cache_path;
-    if (PathService::Get(base::DIR_APP_DATA, &app_data_path) &&
-        PathService::Get(base::DIR_USER_CACHE, &user_cache_path) &&
-        app_data_path.AppendRelativePath(path_, &user_cache_path)) {
-      base_cache_path_ = user_cache_path;
-    }
-  }
-#elif defined(OS_POSIX)  // Posix minus Mac.
-  // See http://standards.freedesktop.org/basedir-spec/basedir-spec-latest.html
-  // for a spec on where cache files go.  The net effect for most systems is we
-  // use ~/.cache/chromium/ for Chromium and ~/.cache/google-chrome/ for
-  // official builds.
-#if defined(GOOGLE_CHROME_BUILD)
-  const char kCacheDir[] = "google-chrome";
-#else
-  const char kCacheDir[] = "chromium";
-#endif
-  PathService::Get(base::DIR_USER_CACHE, &base_cache_path_);
-  base_cache_path_ = base_cache_path_.Append(kCacheDir);
-  if (!file_util::PathExists(base_cache_path_))
-    file_util::CreateDirectory(base_cache_path_);
-#endif
-  if (base_cache_path_.empty())
-    base_cache_path_ = path_;
+  // It would be nice to use PathService for fetching this directory, but
+  // the cache directory depends on the profile directory, which isn't available
+  // to PathService.
+  chrome::GetUserCacheDirectory(path_, &base_cache_path_);
+  file_util::CreateDirectory(base_cache_path_);
 
-  // Listen for theme installation.
+  // Listen for theme installations from our original profile.
   registrar_.Add(this, NotificationType::THEME_INSTALLED,
-                 NotificationService::AllSources());
+                 Source<Profile>(GetOriginalProfile()));
 
   // Listen for bookmark model load, to bootstrap the sync service.
   registrar_.Add(this, NotificationType::BOOKMARK_MODEL_LOADED,
@@ -316,7 +295,7 @@ ProfileImpl::ProfileImpl(const FilePath& path)
       SSLConfigServiceManager::CreateDefaultManager(this));
 
 #if defined(OS_CHROMEOS)
-  chromeos_preferences_.reset(new chromeos::Preferences(this));
+  chromeos_preferences_.reset(new chromeos::Preferences());
   chromeos_preferences_->Init(prefs);
 #endif
 
@@ -337,9 +316,13 @@ ProfileImpl::ProfileImpl(const FilePath& path)
 
   extension_info_map_ = new ExtensionInfoMap();
 
+  GetPolicyContext()->Initialize();
+
   // Log the profile size after a reasonable startup delay.
   BrowserThread::PostDelayedTask(BrowserThread::FILE, FROM_HERE,
                                  new ProfileSizeTask(path_), 112000);
+
+  InstantController::RecordMetrics(this);
 }
 
 void ProfileImpl::InitExtensions() {
@@ -353,6 +336,7 @@ void ProfileImpl::InitExtensions() {
   }
 
   extension_process_manager_.reset(ExtensionProcessManager::Create(this));
+  extension_event_router_.reset(new ExtensionEventRouter(this));
   extension_message_service_ = new ExtensionMessageService(this);
 
   ExtensionErrorReporter::Init(true);  // allow noisy errors.
@@ -397,11 +381,6 @@ void ProfileImpl::RegisterComponentExtensions() {
   component_extensions.push_back(
       std::make_pair("web_store", IDR_WEBSTORE_MANIFEST));
 
-#if defined(OS_CHROMEOS) && defined(GOOGLE_CHROME_BUILD)
-  component_extensions.push_back(
-      std::make_pair("chat_manager", IDR_TALK_APP_MANIFEST));
-#endif
-
   for (ComponentExtensionList::iterator iter = component_extensions.begin();
     iter != component_extensions.end(); ++iter) {
     FilePath path;
@@ -420,28 +399,16 @@ void ProfileImpl::RegisterComponentExtensions() {
 }
 
 void ProfileImpl::InstallDefaultApps() {
-#if !defined(OS_CHROMEOS)
-  // On desktop Chrome, we don't have default apps on by, err, default yet.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableDefaultApps)) {
-    return;
-  }
-#endif
+  ExtensionsService* extension_service = GetExtensionsService();
+  DefaultApps* default_apps = extension_service->default_apps();
 
-  // The web store only supports en-US at the moment, so we don't install
-  // default apps in other locales.
-  if (g_browser_process->GetApplicationLocale() != "en-US")
+  if (!default_apps->ShouldInstallDefaultApps(extension_service->GetAppIds()))
     return;
 
-  ExtensionsService* extensions_service = GetExtensionsService();
-  const ExtensionIdSet* app_ids =
-      extensions_service->default_apps()->GetAppsToInstall();
-  if (!app_ids)
-    return;
-
-  for (ExtensionIdSet::const_iterator iter = app_ids->begin();
-       iter != app_ids->end(); ++iter) {
-    extensions_service->AddPendingExtensionFromDefaultAppList(*iter);
+  const ExtensionIdSet& app_ids = default_apps->default_apps();
+  for (ExtensionIdSet::const_iterator iter = app_ids.begin();
+       iter != app_ids.end(); ++iter) {
+    extension_service->AddPendingExtensionFromDefaultAppList(*iter);
   }
 }
 
@@ -472,6 +439,8 @@ ProfileImpl::~ProfileImpl() {
       NotificationType::PROFILE_DESTROYED,
       Source<Profile>(this),
       NotificationService::NoDetails());
+
+  GetPolicyContext()->Shutdown();
 
   tab_restore_service_ = NULL;
 
@@ -511,7 +480,7 @@ ProfileImpl::~ProfileImpl() {
     web_data_service_->Shutdown();
 
   if (top_sites_.get())
-    top_sites_->ClearProfile();
+    top_sites_->Shutdown();
 
   if (history_service_.get())
     history_service_->Cleanup();
@@ -544,6 +513,9 @@ ProfileImpl::~ProfileImpl() {
   if (extensions_service_)
     extensions_service_->DestroyingProfile();
 
+  if (pref_proxy_config_tracker_)
+    pref_proxy_config_tracker_->DetachFromPrefService();
+
   // This causes the Preferences file to be written to disk.
   MarkAsCleanShutdown();
 }
@@ -564,6 +536,11 @@ Profile* ProfileImpl::GetOffTheRecordProfile() {
   if (!off_the_record_profile_.get()) {
     scoped_ptr<Profile> p(CreateOffTheRecordProfile());
     off_the_record_profile_.swap(p);
+
+    NotificationService::current()->Notify(
+        NotificationType::OTR_PROFILE_CREATED,
+        Source<Profile>(off_the_record_profile_.get()),
+        NotificationService::NoDetails());
   }
   return off_the_record_profile_.get();
 }
@@ -617,7 +594,7 @@ ExtensionsService* ProfileImpl::GetExtensionsService() {
   return extensions_service_.get();
 }
 
-BackgroundContentsService* ProfileImpl::GetBackgroundContentsService() {
+BackgroundContentsService* ProfileImpl::GetBackgroundContentsService() const {
   return background_contents_service_.get();
 }
 
@@ -641,6 +618,10 @@ ExtensionProcessManager* ProfileImpl::GetExtensionProcessManager() {
 
 ExtensionMessageService* ProfileImpl::GetExtensionMessageService() {
   return extension_message_service_.get();
+}
+
+ExtensionEventRouter* ProfileImpl::GetExtensionEventRouter() {
+  return extension_event_router_.get();
 }
 
 SSLHostState* ProfileImpl::GetSSLHostState() {
@@ -762,18 +743,20 @@ URLRequestContextGetter* ProfileImpl::GetRequestContextForExtensions() {
   return extensions_request_context_;
 }
 
-void ProfileImpl::RegisterExtensionWithRequestContexts(Extension* extension) {
+void ProfileImpl::RegisterExtensionWithRequestContexts(
+    const Extension* extension) {
   // AddRef to ensure the data lives until the other thread gets it. Balanced in
   // OnNewExtensions.
-  extension->static_data()->AddRef();
+  extension->AddRef();
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(extension_info_map_.get(),
                         &ExtensionInfoMap::AddExtension,
-                        extension->static_data()));
+                        extension));
 }
 
-void ProfileImpl::UnregisterExtensionWithRequestContexts(Extension* extension) {
+void ProfileImpl::UnregisterExtensionWithRequestContexts(
+    const Extension* extension) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       NewRunnableMethod(extension_info_map_.get(),
@@ -918,49 +901,49 @@ void ProfileImpl::CreatePasswordStore() {
   // On POSIX systems, we try to use the "native" password management system of
   // the desktop environment currently running, allowing GNOME Keyring in XFCE.
   // (In all cases we fall back on the default store in case of failure.)
-  base::DesktopEnvironment desktop_env;
+  base::nix::DesktopEnvironment desktop_env;
   std::string store_type =
       CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kPasswordStore);
   if (store_type == "kwallet") {
-    desktop_env = base::DESKTOP_ENVIRONMENT_KDE4;
+    desktop_env = base::nix::DESKTOP_ENVIRONMENT_KDE4;
   } else if (store_type == "gnome") {
-    desktop_env = base::DESKTOP_ENVIRONMENT_GNOME;
+    desktop_env = base::nix::DESKTOP_ENVIRONMENT_GNOME;
   } else if (store_type == "detect") {
     scoped_ptr<base::Environment> env(base::Environment::Create());
-    desktop_env = base::GetDesktopEnvironment(env.get());
-    LOG(INFO) << "Password storage detected desktop environment: " <<
-              base::GetDesktopEnvironmentName(desktop_env);
+    desktop_env = base::nix::GetDesktopEnvironment(env.get());
+    VLOG(1) << "Password storage detected desktop environment: "
+            << base::nix::GetDesktopEnvironmentName(desktop_env);
   } else {
     // TODO(mdm): If the flag is not given, or has an unknown value, use the
     // default store for now. Once we're confident in the other stores, we can
     // default to detecting the desktop environment instead.
-    desktop_env = base::DESKTOP_ENVIRONMENT_OTHER;
+    desktop_env = base::nix::DESKTOP_ENVIRONMENT_OTHER;
   }
 
   scoped_ptr<PasswordStoreX::NativeBackend> backend;
-  if (desktop_env == base::DESKTOP_ENVIRONMENT_KDE4) {
+  if (desktop_env == base::nix::DESKTOP_ENVIRONMENT_KDE4) {
     // KDE3 didn't use DBus, which our KWallet store uses.
-    LOG(INFO) << "Trying KWallet for password storage.";
+    VLOG(1) << "Trying KWallet for password storage.";
     backend.reset(new NativeBackendKWallet());
     if (backend->Init())
-      LOG(INFO) << "Using KWallet for password storage.";
+      VLOG(1) << "Using KWallet for password storage.";
     else
       backend.reset();
-  } else if (desktop_env == base::DESKTOP_ENVIRONMENT_GNOME ||
-             desktop_env == base::DESKTOP_ENVIRONMENT_XFCE) {
+  } else if (desktop_env == base::nix::DESKTOP_ENVIRONMENT_GNOME ||
+             desktop_env == base::nix::DESKTOP_ENVIRONMENT_XFCE) {
 #if defined(USE_GNOME_KEYRING)
-    LOG(INFO) << "Trying GNOME keyring for password storage.";
+    VLOG(1) << "Trying GNOME keyring for password storage.";
     backend.reset(new NativeBackendGnome());
     if (backend->Init())
-      LOG(INFO) << "Using GNOME keyring for password storage.";
+      VLOG(1) << "Using GNOME keyring for password storage.";
     else
       backend.reset();
 #endif  // defined(USE_GNOME_KEYRING)
   }
   // TODO(mdm): this can change to a WARNING when we detect by default.
   if (!backend.get())
-    LOG(INFO) << "Using default (unencrypted) store for password storage.";
+    VLOG(1) << "Using default (unencrypted) store for password storage.";
 
   ps = new PasswordStoreX(login_db, this,
                           GetWebDataService(Profile::IMPLICIT_ACCESS),
@@ -1001,12 +984,12 @@ PersonalDataManager* ProfileImpl::GetPersonalDataManager() {
   return personal_data_manager_.get();
 }
 
-FileSystemHostContext* ProfileImpl::GetFileSystemHostContext() {
-  if (!file_system_host_context_.get())
-    file_system_host_context_ = new FileSystemHostContext(
+BrowserFileSystemContext* ProfileImpl::GetFileSystemContext() {
+  if (!browser_file_system_context_.get())
+    browser_file_system_context_ = new BrowserFileSystemContext(
         GetPath(), IsOffTheRecord());
-  DCHECK(file_system_host_context_.get());
-  return file_system_host_context_.get();
+  DCHECK(browser_file_system_context_.get());
+  return browser_file_system_context_.get();
 }
 
 void ProfileImpl::InitThemes() {
@@ -1021,7 +1004,7 @@ void ProfileImpl::InitThemes() {
   }
 }
 
-void ProfileImpl::SetTheme(Extension* extension) {
+void ProfileImpl::SetTheme(const Extension* extension) {
   InitThemes();
   theme_provider_.get()->SetTheme(extension);
 }
@@ -1036,7 +1019,7 @@ void ProfileImpl::ClearTheme() {
   theme_provider_.get()->UseDefaultTheme();
 }
 
-Extension* ProfileImpl::GetTheme() {
+const Extension* ProfileImpl::GetTheme() {
   InitThemes();
 
   std::string id = theme_provider_.get()->GetThemeID();
@@ -1073,6 +1056,10 @@ void ProfileImpl::ShutdownSessionService() {
 
 bool ProfileImpl::HasSessionService() const {
   return (session_service_.get() != NULL);
+}
+
+bool ProfileImpl::HasProfileSyncService() const {
+  return (sync_service_.get() != NULL);
 }
 
 bool ProfileImpl::DidLastSessionExitCleanly() {
@@ -1112,6 +1099,10 @@ history::TopSites* ProfileImpl::GetTopSites() {
     top_sites_ = new history::TopSites(this);
     top_sites_->Init(GetPath().Append(chrome::kTopSitesFilename));
   }
+  return top_sites_;
+}
+
+history::TopSites* ProfileImpl::GetTopSitesWithoutCreating() {
   return top_sites_;
 }
 
@@ -1204,7 +1195,8 @@ void ProfileImpl::Observe(NotificationType type,
               Source<Profile>(this), NotificationService::NoDetails());
     }
   } else if (NotificationType::THEME_INSTALLED == type) {
-    Extension* extension = Details<Extension>(details).ptr();
+    DCHECK_EQ(Source<Profile>(source).ptr(), GetOriginalProfile());
+    const Extension* extension = Details<const Extension>(details).ptr();
     SetTheme(extension);
   } else if (NotificationType::BOOKMARK_MODEL_LOADED == type) {
     GetProfileSyncService();  // Causes lazy-load if sync is enabled.
@@ -1236,6 +1228,13 @@ ProfileSyncService* ProfileImpl::GetProfileSyncService(
   if (!sync_service_.get())
     InitSyncService(cros_user);
   return sync_service_.get();
+}
+
+BrowserSignin* ProfileImpl::GetBrowserSignin() {
+  if (!browser_signin_.get()) {
+    browser_signin_.reset(new BrowserSignin(this));
+  }
+  return browser_signin_.get();
 }
 
 CloudPrintProxyService* ProfileImpl::GetCloudPrintProxyService() {
@@ -1272,6 +1271,35 @@ ExtensionInfoMap* ProfileImpl::GetExtensionInfoMap() {
   return extension_info_map_.get();
 }
 
+policy::ProfilePolicyContext* ProfileImpl::GetPolicyContext() {
+  if (!profile_policy_context_.get())
+    profile_policy_context_.reset(new policy::ProfilePolicyContext(this));
+
+  return profile_policy_context_.get();
+}
+
+PromoCounter* ProfileImpl::GetInstantPromoCounter() {
+#if defined(OS_WIN)
+  // TODO: enable this when we're ready to turn on the promo.
+  /*
+  if (!checked_instant_promo_) {
+    checked_instant_promo_ = true;
+    PrefService* prefs = GetPrefs();
+    if (!prefs->GetBoolean(prefs::kInstantEnabledOnce) &&
+        !InstantController::IsEnabled(this) &&
+        InstallUtil::IsChromeSxSProcess()) {
+      DCHECK(!instant_promo_counter_.get());
+      instant_promo_counter_.reset(
+          new PromoCounter(this, prefs::kInstantPromo, "Instant.Promo", 3, 3));
+    }
+  }
+  */
+  return instant_promo_counter_.get();
+#else
+  return NULL;
+#endif
+}
+
 #if defined(OS_CHROMEOS)
 chromeos::ProxyConfigServiceImpl*
     ProfileImpl::GetChromeOSProxyConfigServiceImpl() {
@@ -1282,3 +1310,10 @@ chromeos::ProxyConfigServiceImpl*
   return chromeos_proxy_config_service_impl_;
 }
 #endif  // defined(OS_CHROMEOS)
+
+PrefProxyConfigTracker* ProfileImpl::GetProxyConfigTracker() {
+  if (!pref_proxy_config_tracker_)
+    pref_proxy_config_tracker_ = new PrefProxyConfigTracker(GetPrefs());
+
+  return pref_proxy_config_tracker_;
+}

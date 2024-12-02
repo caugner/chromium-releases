@@ -18,7 +18,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_child_process_host.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/process_info_snapshot.h"
 #include "chrome/browser/renderer_host/backing_store_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
@@ -61,7 +61,10 @@ MemoryDetails::MemoryDetails() {
   // Chrome and Chromium at the same time!
   // TODO(viettrungluu): Get localized browser names for other browsers
   // (crbug.com/25779).
-  ProcessData process_template[MAX_BROWSERS] = {
+  struct {
+    const wchar_t* name;
+    const wchar_t* process_name;
+  } process_template[MAX_BROWSERS] = {
     { google_browser_name.c_str(), chrome::kBrowserProcessExecutableName, },
     { L"Safari", L"Safari", },
     { L"Firefox", L"firefox-bin", },
@@ -70,7 +73,7 @@ MemoryDetails::MemoryDetails() {
     { L"OmniWeb", L"OmniWeb", },
   };
 
-  for (size_t index = 0; index < arraysize(process_template); ++index) {
+  for (size_t index = 0; index < MAX_BROWSERS; ++index) {
     ProcessData process;
     process.name = process_template[index].name;
     process.process_name = process_template[index].process_name;

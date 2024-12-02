@@ -8,6 +8,7 @@
 
 #include <gtk/gtk.h>
 
+#include "app/gtk_signal.h"
 #include "base/basictypes.h"
 #include "chrome/browser/gtk/owned_widget_gtk.h"
 #include "chrome/browser/gtk/view_id_util.h"
@@ -32,6 +33,13 @@ class TabContentsContainerGtk : public NotificationObserver,
   void SetTabContents(TabContents* tab_contents);
   TabContents* GetTabContents() const { return tab_contents_; }
 
+  // Gets the tab contents currently being displayed (either |tab_contents_| or
+  // |preview_contents_|).
+  TabContents* GetVisibleTabContents();
+
+  void SetPreviewContents(TabContents* preview);
+  void PopPreviewContents();
+
   // Remove the tab from the hierarchy.
   void DetachTabContents(TabContents* tab_contents);
 
@@ -46,15 +54,6 @@ class TabContentsContainerGtk : public NotificationObserver,
   virtual GtkWidget* GetWidgetForViewID(ViewID id);
 
  private:
-  // Add or remove observers for events that we care about.
-  void AddObservers();
-  void RemoveObservers();
-
-  // Called when the RenderViewHost of the hosted TabContents has changed, e.g.
-  // to show an interstitial page.
-  void RenderViewHostChanged(RenderViewHost* old_host,
-                             RenderViewHost* new_host);
-
   // Called when a TabContents is destroyed. This gives us a chance to clean
   // up our internal state if the TabContents is somehow destroyed before we
   // get notified.
@@ -66,10 +65,29 @@ class TabContentsContainerGtk : public NotificationObserver,
       GtkFloatingContainer* container, GtkAllocation* allocation,
       TabContentsContainerGtk* tab_contents_container);
 
+  // Add |contents| to the container and start showing it.
+  void PackTabContents(TabContents* contents);
+
+  // Stop showing |contents|.
+  void HideTabContents(TabContents* contents);
+
+  // Removes |preview_contents_|.
+  void RemovePreviewContents();
+
+  // Handle focus traversal on the tab contents container. Focus should not
+  // traverse to the preview contents.
+  CHROMEGTK_CALLBACK_1(TabContentsContainerGtk, gboolean, OnFocus,
+                       GtkDirectionType);
+
   NotificationRegistrar registrar_;
 
-  // The currently visible TabContents.
+  // The TabContents for the currently selected tab. This will be showing unless
+  // there is a preview contents.
   TabContents* tab_contents_;
+
+  // The current preview contents (for instant). If non-NULL, it will be
+  // visible.
+  TabContents* preview_contents_;
 
   // The status bubble manager.  Always non-NULL.
   StatusBubbleGtk* status_bubble_;

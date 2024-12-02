@@ -10,7 +10,7 @@
 #include "base/file_util.h"
 #include "base/task.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
@@ -158,6 +158,12 @@ bool SyncBackendHost::IsNigoriEnabled() const {
       registrar_.routing_info.end();
 }
 
+bool SyncBackendHost::IsUsingExplicitPassphrase() {
+  return IsNigoriEnabled() && syncapi_initialized_ &&
+      core_->syncapi()->InitialSyncEndedForAllEnabledTypes() &&
+      core_->syncapi()->IsUsingExplicitPassphrase();
+}
+
 bool SyncBackendHost::IsCryptographerReady() const {
   return syncapi_initialized_ &&
       GetUserShareHandle()->dir_manager->cryptographer()->is_ready();
@@ -186,7 +192,8 @@ void SyncBackendHost::StartSyncingWithServer() {
       NewRunnableMethod(core_.get(), &SyncBackendHost::Core::DoStartSyncing));
 }
 
-void SyncBackendHost::SetPassphrase(const std::string& passphrase) {
+void SyncBackendHost::SetPassphrase(const std::string& passphrase,
+                                    bool is_explicit) {
   if (!IsNigoriEnabled()) {
     LOG(WARNING) << "Silently dropping SetPassphrase request.";
     return;
@@ -195,7 +202,7 @@ void SyncBackendHost::SetPassphrase(const std::string& passphrase) {
   // If encryption is enabled and we've got a SetPassphrase
   core_thread_.message_loop()->PostTask(FROM_HERE,
       NewRunnableMethod(core_.get(), &SyncBackendHost::Core::DoSetPassphrase,
-                        passphrase));
+                        passphrase, is_explicit));
 }
 
 void SyncBackendHost::Shutdown(bool sync_disabled) {
@@ -376,15 +383,17 @@ void SyncBackendHost::Core::NotifyResumed() {
                                          NotificationService::NoDetails());
 }
 
-void SyncBackendHost::Core::NotifyPassphraseRequired() {
+void SyncBackendHost::Core::NotifyPassphraseRequired(bool for_decryption) {
   NotificationService::current()->Notify(
       NotificationType::SYNC_PASSPHRASE_REQUIRED,
       Source<SyncBackendHost>(host_),
-      NotificationService::NoDetails());
+      Details<bool>(&for_decryption));
 }
 
 void SyncBackendHost::Core::NotifyPassphraseAccepted(
     const std::string& bootstrap_token) {
+  if (!host_)
+    return;
   host_->PersistEncryptionBootstrapToken(bootstrap_token);
   NotificationService::current()->Notify(
       NotificationType::SYNC_PASSPHRASE_ACCEPTED,
@@ -393,6 +402,8 @@ void SyncBackendHost::Core::NotifyPassphraseAccepted(
 }
 
 void SyncBackendHost::Core::NotifyUpdatedToken(const std::string& token) {
+  if (!host_)
+    return;
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   TokenAvailableDetails details(GaiaConstants::kSyncService, token);
   NotificationService::current()->Notify(
@@ -526,9 +537,10 @@ void SyncBackendHost::Core::DoStartSyncing() {
   syncapi_->StartSyncing();
 }
 
-void SyncBackendHost::Core::DoSetPassphrase(const std::string& passphrase) {
+void SyncBackendHost::Core::DoSetPassphrase(const std::string& passphrase,
+                                            bool is_explicit) {
   DCHECK(MessageLoop::current() == host_->core_thread_.message_loop());
-  syncapi_->SetPassphrase(passphrase);
+  syncapi_->SetPassphrase(passphrase, is_explicit);
 }
 
 UIModelWorker* SyncBackendHost::ui_worker() {
@@ -706,9 +718,9 @@ void SyncBackendHost::Core::OnAuthError(const AuthError& auth_error) {
       auth_error));
 }
 
-void SyncBackendHost::Core::OnPassphraseRequired() {
+void SyncBackendHost::Core::OnPassphraseRequired(bool for_decryption) {
   host_->frontend_loop_->PostTask(FROM_HERE,
-      NewRunnableMethod(this, &Core::NotifyPassphraseRequired));
+      NewRunnableMethod(this, &Core::NotifyPassphraseRequired, for_decryption));
 }
 
 void SyncBackendHost::Core::OnPassphraseAccepted(

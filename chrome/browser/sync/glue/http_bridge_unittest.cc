@@ -1,10 +1,10 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/message_loop_proxy.h"
 #include "base/thread.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/sync/glue/http_bridge.h"
 #include "chrome/common/net/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_unittest.h"
@@ -26,7 +26,7 @@ class TestURLRequestContextGetter : public URLRequestContextGetter {
       context_ = new TestURLRequestContext;
     return context_;
   }
-  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() {
+  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() const {
     return BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
   }
 
@@ -103,7 +103,7 @@ class HttpBridgeTest : public testing::Test {
 
 class DummyURLFetcher : public TestURLFetcher {
  public:
-  DummyURLFetcher() : TestURLFetcher(GURL(), POST, NULL) {}
+  DummyURLFetcher() : TestURLFetcher(0, GURL(), POST, NULL) {}
 
   net::HttpResponseHeaders* response_headers() const {
     return NULL;

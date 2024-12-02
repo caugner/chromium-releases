@@ -4,6 +4,9 @@
 
 #include "chrome/browser/sync/syncable/model_type.h"
 
+#include <sstream>
+
+#include "base/metrics/histogram.h"
 #include "chrome/browser/sync/engine/syncproto.h"
 #include "chrome/browser/sync/protocol/app_specifics.pb.h"
 #include "chrome/browser/sync/protocol/autofill_specifics.pb.h"
@@ -33,6 +36,9 @@ void AddDefaultExtensionValue(syncable::ModelType datatype,
       break;
     case AUTOFILL:
       specifics->MutableExtension(sync_pb::autofill);
+      break;
+    case AUTOFILL_PROFILE:
+      specifics->MutableExtension(sync_pb::autofill_profile);
       break;
     case THEMES:
       specifics->MutableExtension(sync_pb::theme);
@@ -101,6 +107,9 @@ ModelType GetModelTypeFromSpecifics(const sync_pb::EntitySpecifics& specifics) {
   if (specifics.HasExtension(sync_pb::autofill))
     return AUTOFILL;
 
+  if (specifics.HasExtension(sync_pb::autofill_profile))
+    return AUTOFILL_PROFILE;
+
   if (specifics.HasExtension(sync_pb::theme))
     return THEMES;
 
@@ -150,6 +159,101 @@ std::string ModelTypeToString(ModelType model_type) {
   }
 }
 
+ModelType ModelTypeFromString(const std::string& model_type_string) {
+  if (model_type_string == "Bookmarks")
+    return BOOKMARKS;
+  else if (model_type_string == "Preferences")
+    return PREFERENCES;
+  else if (model_type_string == "Passwords")
+    return PASSWORDS;
+  else if (model_type_string == "Autofill")
+    return AUTOFILL;
+  else if (model_type_string == "Themes")
+    return THEMES;
+  else if (model_type_string == "Typed URLs")
+    return TYPED_URLS;
+  else if (model_type_string == "Extensions")
+    return EXTENSIONS;
+  else if (model_type_string == "Encryption keys")
+    return NIGORI;
+  else if (model_type_string == "Sessions")
+    return SESSIONS;
+  else if (model_type_string == "Apps")
+    return APPS;
+  else
+    NOTREACHED() << "No known model type corresponding to "
+                 << model_type_string << ".";
+  return UNSPECIFIED;
+}
+
+bool ModelTypeBitSetFromString(
+    const std::string& model_type_bitset_string,
+    ModelTypeBitSet* model_types) {
+  if (model_type_bitset_string.length() != MODEL_TYPE_COUNT) {
+    return false;
+  }
+
+  std::istringstream iss(model_type_bitset_string);
+  iss >> *model_types;
+  iss.peek();   // Need to peek before checking EOF.
+  return iss.eof();
+}
+
+// For now, this just implements UMA_HISTOGRAM_LONG_TIMES. This can be adjusted
+// if we feel the min, max, or bucket count amount are not appropriate.
+#define SYNC_FREQ_HISTOGRAM(name, time) UMA_HISTOGRAM_CUSTOM_TIMES( \
+    name, time, base::TimeDelta::FromMilliseconds(1), \
+    base::TimeDelta::FromHours(1), 50)
+
+void PostTimeToTypeHistogram(ModelType model_type, base::TimeDelta time) {
+  switch (model_type) {
+    case BOOKMARKS: {
+        SYNC_FREQ_HISTOGRAM("Sync.FreqBookmarks", time);
+        return;
+    }
+    case PREFERENCES: {
+        SYNC_FREQ_HISTOGRAM("Sync.FreqPreferences", time);
+        return;
+    }
+    case PASSWORDS: {
+        SYNC_FREQ_HISTOGRAM("Sync.FreqPasswords", time);
+        return;
+    }
+    case AUTOFILL: {
+        SYNC_FREQ_HISTOGRAM("Sync.FreqAutofill", time);
+        return;
+    }
+    case THEMES: {
+        SYNC_FREQ_HISTOGRAM("Sync.FreqThemes", time);
+        return;
+    }
+    case TYPED_URLS: {
+        SYNC_FREQ_HISTOGRAM("Sync.FreqTypedUrls", time);
+        return;
+    }
+    case EXTENSIONS: {
+        SYNC_FREQ_HISTOGRAM("Sync.FreqExtensions", time);
+        return;
+    }
+    case NIGORI: {
+        SYNC_FREQ_HISTOGRAM("Sync.FreqNigori", time);
+        return;
+    }
+    case SESSIONS: {
+        SYNC_FREQ_HISTOGRAM("Sync.FreqSessions", time);
+        return;
+    }
+    case APPS: {
+        SYNC_FREQ_HISTOGRAM("Sync.FreqApps", time);
+        return;
+    }
+    default:
+      LOG(ERROR) << "No known extension for model type.";
+  }
+}
+
+#undef SYNC_FREQ_HISTOGRAM
+
 // TODO(akalin): Figure out a better way to do these mappings.
 
 namespace {
@@ -163,6 +267,9 @@ const char kExtensionNotificationType[] = "EXTENSION";
 const char kNigoriNotificationType[] = "NIGORI";
 const char kAppNotificationType[] = "APP";
 const char kSessionNotificationType[] = "SESSION";
+// TODO(lipalani) Bug 64111.
+// talk to akalin to make sure this is what I understand this to be.
+const char kAutofillProfileType[] = "AUTOFILL_PROFILE";
 // TODO(akalin): This is a hack to make new sync data types work with
 // server-issued notifications.  Remove this when it's not needed
 // anymore.
@@ -201,6 +308,9 @@ bool RealModelTypeToNotificationType(ModelType model_type,
       return true;
     case SESSIONS:
       *notification_type = kSessionNotificationType;
+      return true;
+    case AUTOFILL_PROFILE:
+      *notification_type = kAutofillProfileType;
       return true;
     // TODO(akalin): This is a hack to make new sync data types work with
     // server-issued notifications.  Remove this when it's not needed
@@ -247,8 +357,7 @@ bool NotificationTypeToRealModelType(const std::string& notification_type,
   } else if (notification_type == kSessionNotificationType) {
     *model_type = SESSIONS;
     return true;
-  }
-  else if (notification_type == kUnknownNotificationType) {
+  } else if (notification_type == kUnknownNotificationType) {
     // TODO(akalin): This is a hack to make new sync data types work with
     // server-issued notifications.  Remove this when it's not needed
     // anymore.

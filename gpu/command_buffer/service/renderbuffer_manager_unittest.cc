@@ -3,7 +3,8 @@
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/service/renderbuffer_manager.h"
-#include "app/gfx/gl/gl_mock.h"
+
+#include "gpu/command_buffer/common/gl_mock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace gpu {
@@ -11,7 +12,10 @@ namespace gles2 {
 
 class RenderbufferManagerTest : public testing::Test {
  public:
-  RenderbufferManagerTest() {
+  static const GLint kMaxSize = 128;
+
+  RenderbufferManagerTest()
+      : manager_(kMaxSize) {
   }
   ~RenderbufferManagerTest() {
     manager_.Destroy(false);
@@ -33,10 +37,16 @@ class RenderbufferManagerTest : public testing::Test {
   RenderbufferManager manager_;
 };
 
+// GCC requires these declarations, but MSVC requires they not be present
+#ifndef COMPILER_MSVC
+const GLint RenderbufferManagerTest::kMaxSize;
+#endif
+
 TEST_F(RenderbufferManagerTest, Basic) {
   const GLuint kClient1Id = 1;
   const GLuint kService1Id = 11;
   const GLuint kClient2Id = 2;
+  EXPECT_EQ(kMaxSize, manager_.max_renderbuffer_size());
   // Check we can create renderbuffer.
   manager_.CreateRenderbufferInfo(kClient1Id, kService1Id);
   // Check renderbuffer got created.

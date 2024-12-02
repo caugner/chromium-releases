@@ -29,6 +29,7 @@ extern const char kDefaultSearchProviderSearchURL[];
 extern const char kDefaultSearchProviderSuggestURL[];
 extern const char kDefaultSearchProviderIconURL[];
 extern const char kDefaultSearchProviderEncodings[];
+extern const char kDisableSpdy[];
 extern const char kProxyServerMode[];
 extern const char kProxyServer[];
 extern const char kProxyPacUrl[];
@@ -46,16 +47,37 @@ extern const char kApplicationLocaleValue[];
 extern const char kSyncDisabled[];
 extern const char kExtensionInstallAllowList[];
 extern const char kExtensionInstallDenyList[];
+extern const char kExtensionInstallForceList[];
 extern const char kShowHomeButton[];
 extern const char kPrintingEnabled[];
 extern const char kJavascriptEnabled[];
 extern const char kSavingBrowserHistoryDisabled[];
+extern const char kDeveloperToolsDisabled[];
+extern const char kBlockThirdPartyCookies[];
+extern const char kDefaultCookiesSetting[];
+extern const char kDefaultImagesSetting[];
+extern const char kDefaultJavaScriptSetting[];
+extern const char kDefaultPluginsSetting[];
+extern const char kDefaultPopupsSetting[];
+extern const char kAuthSchemes[];
+extern const char kDisableAuthNegotiateCnameLookup[];
+extern const char kEnableAuthNegotiatePort[];
+extern const char kAuthServerWhitelist[];
+extern const char kAuthNegotiateDelegateWhitelist[];
+extern const char kGSSAPILibraryName[];
+extern const char kDisable3DAPIs[];
 
 // Chrome Frame specific policy constants
 extern const char kChromeFrameRendererSettings[];
 extern const char kRenderInChromeFrameList[];
 extern const char kRenderInHostList[];
 extern const char kChromeFrameContentTypes[];
+
+#if defined(OS_CHROMEOS)
+// ChromeOS policy constants
+extern const char kChromeOsLockOnIdleSuspend[];
+#endif
+
 }  // namespace key
 
 }  // namespace policy

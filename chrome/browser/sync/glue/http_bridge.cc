@@ -7,9 +7,8 @@
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
 #include "base/string_number_conversions.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/profile.h"
-#include "chrome/browser/chrome_thread.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/host_resolver.h"
 #include "net/base/load_flags.h"
@@ -45,7 +44,7 @@ URLRequestContext* HttpBridge::RequestContextGetter::GetURLRequestContext() {
 }
 
 scoped_refptr<base::MessageLoopProxy>
-HttpBridge::RequestContextGetter::GetIOMessageLoopProxy() {
+HttpBridge::RequestContextGetter::GetIOMessageLoopProxy() const {
   return BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
 }
 

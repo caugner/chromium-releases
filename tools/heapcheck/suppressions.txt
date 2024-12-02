@@ -111,9 +111,10 @@
    fun:ToolsSanityTest_MemoryLeak_Test::TestBody
 }
 {
-   Intentional leak in ChromeThreadTest.NotReleasedIfTargetThreadNonExistent
+   Intentional leak in BrowserThreadTest.NotReleasedIfTargetThreadNonExistent
    Heapcheck:Leak
-   fun:ChromeThreadTest_NotReleasedIfTargetThreadNonExistent_Test::TestBody
+   fun:BrowserThreadTest_NotReleasedIfTargetThreadNonExistent_Test::TestBody
+   fun:testing::HandleExceptionsInMethodIfSupported
    fun:testing::Test::Run
 }
 #-----------------------------------------------------------------------
@@ -121,56 +122,6 @@
 # These should all be in chromium's bug tracking system (but a few aren't yet).
 # Periodically we should sweep this file and the bug tracker clean by
 # running overnight and removing outdated bugs/suppressions.
-{
-   bug_30547_a
-   Heapcheck:Leak
-   ...
-   fun:std::string::_Rep::_S_create
-   ...
-   fun:base::JSONWriter::Write
-   fun:JSONStringValueSerializer::Serialize
-   fun:BookmarkStorage::SerializeData
-   fun:BookmarkStorage::SaveNow
-   fun:BookmarkStorage::BookmarkModelDeleted
-   fun:*~BookmarkModel
-}
-{
-   bug_30547_b
-   Heapcheck:Leak
-   ...
-   fun:ImportantFileWriter::WriteNow
-   fun:BookmarkStorage::SaveNow
-   fun:BookmarkStorage::BookmarkModelDeleted
-}
-# IPCChannelTest.ChannelProxyTest leaks memory.
-{
-   bug_26920_a
-   Heapcheck:Leak
-   fun:*ChannelProxy
-   fun:IPCChannelTest_ChannelProxyTest_Test::TestBody
-}
-# TODO(glider): deal with asterisks in stack traces
-# (like "CancelableTask* NewRunnableMethod" here)
-{
-   bug_26920_b
-   Heapcheck:Leak
-   ...
-   fun:IPC::ChannelProxy::Context::OnChannelError
-   fun:IPC::Channel::ChannelImpl::OnFileCanReadWithoutBlocking
-   ...
-   fun:base::MessagePumpLibevent::OnLibeventNotification
-   fun:event_process_active
-   fun:event_base_loop
-}
-{
-   bug_26920_c
-   Heapcheck:Leak
-   fun:__gnu_cxx::new_allocator::allocate
-   fun:std::string::_Rep::_S_create
-   ...
-   fun:*basic_string
-   fun:IPCChannelTest_ChannelProxyTest_Test::TestBody
-}
 {
    bug_31643
    Heapcheck:Leak
@@ -194,7 +145,7 @@
   fun:std::vector::_M_insert_aux
   fun:std::vector::push_back
   fun:IPC::ChannelProxy::Context::OnAddFilter
-  fun:void DispatchToMethod
+  fun:*DispatchToMethod
   fun:RunnableMethod::Run
 }
 {
@@ -204,10 +155,12 @@
    fun:URLRequestJobManager::CreateJob
    fun:URLRequest::Start
    fun:URLRequestTest_CancelTest_DuringCookiePolicy_Test::TestBody
+   fun:testing::HandleExceptionsInMethodIfSupported
    fun:testing::Test::Run
-   fun:testing::internal::TestInfoImpl::Run
+   fun:testing::TestInfo::Run
    fun:testing::TestCase::Run
    fun:testing::internal::UnitTestImpl::RunAllTests
+   fun:testing::HandleExceptionsInMethodIfSupported
    fun:testing::UnitTest::Run
    fun:TestSuite::Run
    fun:main
@@ -240,21 +193,11 @@
   Heapcheck:Leak
   ...
   fun:::RenderThreadTest::SetUp
+  fun:testing::HandleExceptionsInMethodIfSupported
   fun:testing::Test::Run
 }
 # TODO(glider): sometimes the stacks differ between the bot and the local run,
 # e.g. "base::subtle::RefCountedBase::RefCountedBase" vs. "RefCountedBase".
-{
-  bug_38293
-  Heapcheck:Leak
-  ...
-  fun:ScopedRunnableMethodFactory::NewRunnableMethod
-  fun:BookmarkBarGtk::BookmarkNodeAdded
-  fun:BookmarkModel::AddNode
-  fun:BookmarkModel::AddURLWithCreationTime
-  fun:BookmarkModel::AddURL
-  fun:BookmarkBarGtkUnittest_*
-}
 {
   bug_38305
   Heapcheck:Leak
@@ -274,13 +217,6 @@
   Heapcheck:Leak
   ...
   fun:RenderViewTest::TearDown
-}
-{
-  bug_39009
-  Heapcheck:Leak
-  ...
-  fun:BookmarkModel::Load
-  fun:TestingProfile::CreateBookmarkModel
 }
 {
   bug_38487
@@ -306,9 +242,10 @@
   fun:UserScriptSlaveTest::Serialize
   ...
   fun:testing::Test::Run
-  fun:testing::internal::TestInfoImpl::Run
+  fun:testing::TestInfo::Run
   fun:testing::TestCase::Run
   fun:testing::internal::UnitTestImpl::RunAllTests
+  fun:testing::HandleExceptionsInMethodIfSupported
   fun:testing::UnitTest::Run
   fun:TestSuite::Run
 }
@@ -372,12 +309,6 @@
    Heapcheck:Leak
    fun:Callback1::Type* NewCallback
    fun:media::VideoDecoderImpl::DoInitialize
-}
-{
-   bug_45072
-   Heapcheck:Leak
-   fun:::RunTest_EnsureTaskDeletion*
-   fun:MessageLoopTest_*EnsureTaskDeletion_*::TestBody
 }
 {
    bug_46571_a
@@ -469,13 +400,12 @@
    fun:TestShell::LoadURLForFrame
    fun:TestShell::LoadURL
    fun:::BookmarkletTest_NonEmptyResult_Test::TestBody
+   fun:testing::HandleExceptionsInMethodIfSupported
    fun:testing::Test::Run
-   fun:testing::internal::TestInfoImpl::Run
+   fun:testing::TestInfo::Run
    fun:testing::TestCase::Run
    fun:testing::internal::UnitTestImpl::RunAllTests
-   fun:testing::UnitTest::Run
-   fun:main
-   fun:__libc_start_main
+   fun:testing::HandleExceptionsInMethodIfSupported
 }
 # "*~TestShell" means "~TestShell" and "TestShell::~TestShell".
 {
@@ -512,20 +442,20 @@
    fun:TestShell::LoadURLForFrame
    fun:TestShell::LoadURL
    fun:::BookmarkletTest_NonEmptyResult_Test::TestBody
+   fun:testing::HandleExceptionsInMethodIfSupported
    fun:testing::Test::Run
-   fun:testing::internal::TestInfoImpl::Run
+   fun:testing::TestInfo::Run
    fun:testing::TestCase::Run
    fun:testing::internal::UnitTestImpl::RunAllTests
+   fun:testing::HandleExceptionsInMethodIfSupported
    fun:testing::UnitTest::Run
-   fun:main
-   fun:__libc_start_main
 }
 {
    bug_32366
    Heapcheck:Leak
    fun:CallbackRunner* NewCallback
    fun:media::PipelineImpl::FilterStateTransitionTask
-   fun:void DispatchToMethod
+   fun:*DispatchToMethod
    fun:RunnableMethod::Run
    fun:MessageLoop::RunTask
 }
@@ -698,6 +628,7 @@
    bug_46678_c
    Heapcheck:Leak
    fun:remoting::DifferTest_*_Test::TestBody
+   fun:testing::HandleExceptionsInMethodIfSupported
    fun:testing::Test::Run
 }
 # '*ChromotingPlugin' stands for 'ChromotingPlugin' and
@@ -714,7 +645,7 @@
    Heapcheck:Leak
    fun:Callback*::Type* NewCallback
    fun:remoting::SessionManager::DoEncode
-   fun:void DispatchToMethod
+   fun:*DispatchToMethod
    fun:RunnableMethod::Run
 }
 {
@@ -784,7 +715,7 @@
    Heapcheck:Leak
    ...
    fun:net::SingleThreadedProxyResolver::Job::DoQuery
-   fun:void DispatchToMethod
+   fun:*DispatchToMethod
    fun:RunnableMethod::Run
    fun:MessageLoop::RunTask
    fun:MessageLoop::DeferOrRunPendingTask
@@ -845,6 +776,7 @@
    fun:ScopedRunnableMethodFactory::NewRunnableMethod
    fun:sync_notifier::ChromeSystemResources::MakeTaskToPost
    fun:sync_notifier::ChromeSystemResources::Schedule*
+   ...
    fun:sync_notifier::::ChromeSystemResourcesTest::ScheduleShouldNotRun
 }
 {
@@ -942,7 +874,7 @@
    Heapcheck:Leak
    fun:base::WaitableEventWatcher::StartWatching
    fun:IPC::SyncChannel::SyncContext::OnChannelOpened
-   fun:void DispatchToMethod
+   fun:*DispatchToMethod
    fun:RunnableMethod::Run
    fun:MessageLoop::RunTask
 }
@@ -999,25 +931,19 @@
    fun:::MessageLoopRelay::ProcessOnTargetThread
 }
 {
-   bug_57456
-   Heapcheck:Leak
-   fun:net::DnsRRResolver::Resolve
-   fun:net::DnsRRResolverTest_Resolve_Test::TestBody
-   fun:testing::Test::Run
-}
-{
    bug_57683
    Heapcheck:Leak
    ...
    fun:logging::MakeCheckOpString
-   fun:logging::CheckNEImpl
-   fun:logging::::LoggingTest_ChecksAreNotLazy_Test::TestBody
+   fun:logging::Check*Impl
+   fun:logging::::LoggingTest_*_Test::TestBody
 }
 {
    bug_57799
    Heapcheck:Leak
    fun:cricket::Transport::OnRemoteCandidate
    fun:cricket::Transport::OnRemoteCandidates
+   ...
    fun:cricket::Session::OnTransportInfoMessage
    fun:cricket::Session::OnIncomingMessage
    fun:cricket::SessionManager::OnIncomingMessage
@@ -1056,12 +982,8 @@
    bug_57966c
    Heapcheck:Leak
    ...
-   fun:remoting::JingleChromotingConnection::OnAccept
-   fun:remoting::JingleChromotingConnection::OnSessionState
-   fun:sigslot::_connection2::emit
-   fun:sigslot::signal2::operator
-   fun:cricket::BaseSession::SetState
-   fun:cricket::Session::Accept
+   fun:remoting::protocol::JingleSession::OnInitiate
+   fun:remoting::protocol::JingleSession::OnSessionState
 }
 {
    bug_58094
@@ -1094,10 +1016,12 @@
    Heapcheck:Leak
    ...
    fun:FileSystemHostContextTest_CheckValidPath_Test::TestBody
+   fun:testing::HandleExceptionsInMethodIfSupported
    fun:testing::Test::Run
-   fun:testing::internal::TestInfoImpl::Run
+   fun:testing::TestInfo::Run
    fun:testing::TestCase::Run
    fun:testing::internal::UnitTestImpl::RunAllTests
+   fun:testing::HandleExceptionsInMethodIfSupported
    fun:testing::UnitTest::Run
    fun:base::TestSuite::Run
    fun:main
@@ -1108,12 +1032,25 @@
    Heapcheck:Leak
    ...
    fun:FileSystemHostContextTest_GetRootPath_Test::TestBody
+   fun:testing::HandleExceptionsInMethodIfSupported
    fun:testing::Test::Run
-   fun:testing::internal::TestInfoImpl::Run
+   fun:testing::TestInfo::Run
    fun:testing::TestCase::Run
    fun:testing::internal::UnitTestImpl::RunAllTests
+   fun:testing::HandleExceptionsInMethodIfSupported
    fun:testing::UnitTest::Run
    fun:base::TestSuite::Run
    fun:main
    fun:__libc_start_main
+}
+{
+   bug_60872
+   Heapcheck:Leak
+   fun:base::BaseTimer::Start
+   fun:ReloadButtonGtk::OnClicked
+   fun:ReloadButtonGtk::OnClickedThunk
+   fun:g_closure_invoke
+   fun:ReloadButtonGtkTest_*_Test::TestBody
+   fun:testing::HandleExceptionsInMethodIfSupported
+   fun:testing::Test::Run
 }

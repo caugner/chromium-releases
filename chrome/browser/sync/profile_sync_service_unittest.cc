@@ -14,7 +14,7 @@
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
@@ -35,6 +35,7 @@
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/testing_profile.h"
+#include "chrome/test/testing_pref_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using std::vector;
@@ -468,6 +469,16 @@ TEST_F(ProfileSyncServiceTest, InitialState) {
   EXPECT_TRUE(bookmark_bar_id());
 
   ExpectModelMatch();
+}
+
+TEST_F(ProfileSyncServiceTest, DisabledByPolicy) {
+  profile_->GetTestingPrefService()->SetManagedPref(
+      prefs::kSyncManaged,
+      Value::CreateBooleanValue(true));
+  service_.reset(new TestProfileSyncService(&factory_, profile_.get(),
+                                            "", true, NULL));
+  service_->Initialize();
+  EXPECT_TRUE(service_->IsManaged());
 }
 
 TEST_F(ProfileSyncServiceTest, AbortedByShutdown) {

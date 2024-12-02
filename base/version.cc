@@ -63,8 +63,8 @@ int Version::CompareTo(const Version& other) const {
 const std::string Version::GetString() const {
   DCHECK(is_valid_);
   std::string version_str;
-  int count = components_.size();
-  for (int i = 0; i < count - 1; ++i) {
+  size_t count = components_.size();
+  for (size_t i = 0; i < count - 1; ++i) {
     version_str.append(base::IntToString(components_[i]));
     version_str.append(".");
   }
@@ -75,7 +75,7 @@ const std::string Version::GetString() const {
 bool Version::InitFromString(const std::string& version_str) {
   DCHECK(!is_valid_);
   std::vector<std::string> numbers;
-  SplitString(version_str, '.', &numbers);
+  base::SplitString(version_str, '.', &numbers);
   if (numbers.empty())
     return false;
   for (std::vector<std::string>::iterator i = numbers.begin();

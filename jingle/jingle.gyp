@@ -92,6 +92,19 @@
       ],
     },
     {
+      'target_name': 'notifier_test_util',
+      'type': '<(library)',
+      'sources': [
+        'notifier/base/fake_base_task.cc',
+        'notifier/base/fake_base_task.h',
+      ],
+      'dependencies': [
+        'notifier',
+        '../base/base.gyp:base',
+        '../testing/gmock.gyp:gmock',
+      ],
+    },
+    {
       'target_name': 'notifier_unit_tests',
       'type': 'executable',
       'sources': [
@@ -101,6 +114,7 @@
         'notifier/base/fake_ssl_client_socket_unittest.cc',
         'notifier/base/xmpp_connection_unittest.cc',
         'notifier/base/weak_xmpp_client_unittest.cc',
+        'notifier/communicator/xmpp_connection_generator_unittest.cc',
         'notifier/listener/push_notifications_subscribe_task_unittest.cc',
         'notifier/listener/talk_mediator_unittest.cc',
         'notifier/listener/send_update_task_unittest.cc',
@@ -112,6 +126,7 @@
       ],
       'dependencies': [
         'notifier',
+        'notifier_test_util',
         '../base/base.gyp:base',
         '../base/base.gyp:test_support_base',
         '../net/net.gyp:net',

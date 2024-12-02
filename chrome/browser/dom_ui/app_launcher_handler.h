@@ -18,6 +18,7 @@ class ExtensionPrefs;
 class ExtensionsService;
 class NotificationRegistrar;
 class PrefChangeRegistrar;
+class Profile;
 
 namespace gfx {
   class Rect;
@@ -32,6 +33,14 @@ class AppLauncherHandler
   explicit AppLauncherHandler(ExtensionsService* extension_service);
   virtual ~AppLauncherHandler();
 
+  // Populate a dictionary with the information from an extension.
+  static void CreateAppInfo(const Extension* extension,
+                            ExtensionPrefs* extension_prefs,
+                            DictionaryValue* value);
+
+  // Callback for pings related to launching apps on the NTP.
+  static bool HandlePing(Profile* profile, const std::string& path);
+
   // DOMMessageHandler implementation.
   virtual DOMMessageHandler* Attach(DOMUI* dom_ui);
   virtual void RegisterMessages();
@@ -40,11 +49,6 @@ class AppLauncherHandler
   virtual void Observe(NotificationType type,
                       const NotificationSource& source,
                       const NotificationDetails& details);
-
-  // Populate a dictionary with the information from an extension.
-  static void CreateAppInfo(Extension* extension,
-                            ExtensionPrefs* extension_prefs,
-                            DictionaryValue* value);
 
   // Populate the given dictionary with all installed app info.
   void FillAppDictionary(DictionaryValue* value);
@@ -64,7 +68,18 @@ class AppLauncherHandler
   // Callback for the "hideAppPromo" message.
   void HandleHideAppsPromo(const ListValue* args);
 
+  // Callback for the "createAppShortcut" message.
+  void HandleCreateAppShortcut(const ListValue* args);
+
  private:
+  // Records a web store launch in the appropriate histograms. |promo_active|
+  // specifies if the web store promotion was active.
+  static void RecordWebStoreLaunch(bool promo_active);
+
+  // Records an app launch in the appropriate histograms. |promo_active|
+  // specifies if the web store promotion was active.
+  static void RecordAppLaunch(bool promo_active);
+
   // ExtensionInstallUI::Delegate implementation, used for receiving
   // notification about uninstall confirmation dialog selections.
   virtual void InstallUIProceed();
@@ -75,7 +90,10 @@ class AppLauncherHandler
   ExtensionInstallUI* GetExtensionInstallUI();
 
   // Starts the animation of the app icon.
-  void AnimateAppIcon(Extension* extension, const gfx::Rect& rect);
+  void AnimateAppIcon(const Extension* extension, const gfx::Rect& rect);
+
+  // Helper that uninstalls all the default apps.
+  void UninstallDefaultApps();
 
   // The apps are represented in the extensions model.
   scoped_refptr<ExtensionsService> extensions_service_;
@@ -93,6 +111,13 @@ class AppLauncherHandler
 
   // The id of the extension we are prompting the user about.
   std::string extension_id_prompting_;
+
+  // Whether the promo is currently being shown.
+  bool promo_active_;
+
+  // When true, we ignore changes to the underlying data rather than immediately
+  // refreshing. This is useful when making many batch updates to avoid flicker.
+  bool ignore_changes_;
 
   DISALLOW_COPY_AND_ASSIGN(AppLauncherHandler);
 };

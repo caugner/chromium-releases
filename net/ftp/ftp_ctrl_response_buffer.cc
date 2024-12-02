@@ -14,6 +14,14 @@ namespace net {
 // static
 const int FtpCtrlResponse::kInvalidStatusCode = -1;
 
+FtpCtrlResponse::FtpCtrlResponse() : status_code(kInvalidStatusCode) {}
+
+FtpCtrlResponse::~FtpCtrlResponse() {}
+
+FtpCtrlResponseBuffer::FtpCtrlResponseBuffer() : multiline_(false) {}
+
+FtpCtrlResponseBuffer::~FtpCtrlResponseBuffer() {}
+
 int FtpCtrlResponseBuffer::ConsumeData(const char* data, int data_length) {
   buffer_.append(data, data_length);
   ExtractFullLinesFromBuffer();
@@ -64,13 +72,26 @@ int FtpCtrlResponseBuffer::ConsumeData(const char* data, int data_length) {
   return OK;
 }
 
+FtpCtrlResponse FtpCtrlResponseBuffer::PopResponse() {
+  FtpCtrlResponse result = responses_.front();
+  responses_.pop();
+  return result;
+}
+
+FtpCtrlResponseBuffer::ParsedLine::ParsedLine()
+    : has_status_code(false),
+      is_multiline(false),
+      is_complete(false),
+      status_code(FtpCtrlResponse::kInvalidStatusCode) {
+}
+
 // static
 FtpCtrlResponseBuffer::ParsedLine FtpCtrlResponseBuffer::ParseLine(
     const std::string& line) {
   ParsedLine result;
 
   if (line.length() >= 3) {
-    if (base::StringToInt(line.substr(0, 3), &result.status_code))
+    if (base::StringToInt(line.begin(), line.begin() + 3, &result.status_code))
       result.has_status_code = (100 <= result.status_code &&
                                 result.status_code <= 599);
     if (result.has_status_code && line.length() >= 4 && line[3] == ' ') {

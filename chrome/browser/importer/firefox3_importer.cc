@@ -35,6 +35,17 @@ using importer::ProfileInfo;
 using importer::SEARCH_ENGINES;
 using webkit_glue::PasswordForm;
 
+struct Firefox3Importer::BookmarkItem {
+  int parent;
+  int id;
+  GURL url;
+  std::wstring title;
+  int type;
+  std::string keyword;
+  base::Time date_added;
+  int64 favicon;
+};
+
 Firefox3Importer::Firefox3Importer() {
 #if defined(OS_LINUX)
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -45,7 +56,7 @@ Firefox3Importer::Firefox3Importer() {
 Firefox3Importer::~Firefox3Importer() {
 }
 
-void Firefox3Importer::StartImport(importer::ProfileInfo profile_info,
+void Firefox3Importer::StartImport(const importer::ProfileInfo& profile_info,
                                    uint16 items,
                                    ImporterBridge* bridge) {
 #if defined(OS_LINUX)

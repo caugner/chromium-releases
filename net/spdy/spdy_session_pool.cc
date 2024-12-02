@@ -5,6 +5,7 @@
 #include "net/spdy/spdy_session_pool.h"
 
 #include "base/logging.h"
+#include "base/values.h"
 #include "net/http/http_network_session.h"
 #include "net/spdy/spdy_session.h"
 
@@ -40,9 +41,10 @@ scoped_refptr<SpdySession> SpdySessionPool::Get(
     if (list->size() >= static_cast<unsigned int>(g_max_sessions_per_domain)) {
       spdy_session = list->front();
       list->pop_front();
-      net_log.AddEvent(NetLog::TYPE_SPDY_SESSION_POOL_FOUND_EXISTING_SESSION,
-                       new NetLogSourceParameter("session",
-                           spdy_session->net_log().source()));
+      net_log.AddEvent(
+          NetLog::TYPE_SPDY_SESSION_POOL_FOUND_EXISTING_SESSION,
+          make_scoped_refptr(new NetLogSourceParameter(
+              "session", spdy_session->net_log().source())));
     }
   } else {
     list = AddSessionList(host_port_proxy_pair);
@@ -52,9 +54,10 @@ scoped_refptr<SpdySession> SpdySessionPool::Get(
   if (!spdy_session) {
     spdy_session = new SpdySession(host_port_proxy_pair, this, spdy_settings,
                                    net_log.net_log());
-    net_log.AddEvent(NetLog::TYPE_SPDY_SESSION_POOL_CREATED_NEW_SESSION,
-                     new NetLogSourceParameter("session",
-                         spdy_session->net_log().source()));
+    net_log.AddEvent(
+        NetLog::TYPE_SPDY_SESSION_POOL_CREATED_NEW_SESSION,
+        make_scoped_refptr(new NetLogSourceParameter(
+            "session", spdy_session->net_log().source())));
   }
 
   DCHECK(spdy_session);
@@ -80,9 +83,10 @@ net::Error SpdySessionPool::GetSpdySessionFromSocket(
   DCHECK(list->empty());
   list->push_back(*spdy_session);
 
-  net_log.AddEvent(NetLog::TYPE_SPDY_SESSION_POOL_IMPORTED_SESSION_FROM_SOCKET,
-                   new NetLogSourceParameter("session",
-                       (*spdy_session)->net_log().source()));
+  net_log.AddEvent(
+      NetLog::TYPE_SPDY_SESSION_POOL_IMPORTED_SESSION_FROM_SOCKET,
+      make_scoped_refptr(new NetLogSourceParameter(
+          "session", (*spdy_session)->net_log().source())));
 
   // Now we can initialize the session with the SSL socket.
   return (*spdy_session)->InitializeWithSocket(connection, is_secure,
@@ -102,11 +106,27 @@ void SpdySessionPool::Remove(const scoped_refptr<SpdySession>& session) {
   if (!list)
     return;
   list->remove(session);
-  session->net_log().AddEvent(NetLog::TYPE_SPDY_SESSION_POOL_REMOVE_SESSION,
-                              new NetLogSourceParameter("session",
-                                  session->net_log().source()));
+  session->net_log().AddEvent(
+      NetLog::TYPE_SPDY_SESSION_POOL_REMOVE_SESSION,
+      make_scoped_refptr(new NetLogSourceParameter(
+          "session", session->net_log().source())));
   if (list->empty())
     RemoveSessionList(session->host_port_proxy_pair());
+}
+
+Value* SpdySessionPool::SpdySessionPoolInfoToValue() {
+  ListValue* list = new ListValue();
+
+  SpdySessionsMap::const_iterator spdy_session_pool_it = sessions_.begin();
+  for (SpdySessionsMap::const_iterator it = sessions_.begin();
+       it != sessions_.end(); it++) {
+    SpdySessionList* sessions = it->second;
+    for (SpdySessionList::const_iterator session = sessions->begin();
+         session != sessions->end(); session++) {
+      list->Append(session->get()->GetInfoAsValue());
+    }
+  }
+  return list;
 }
 
 void SpdySessionPool::OnIPAddressChanged() {

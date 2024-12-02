@@ -4,12 +4,12 @@
 
 #include "remoting/client/plugin/pepper_input_handler.h"
 
-#include "third_party/ppapi/c/pp_input_event.h"
+#include "ppapi/c/pp_input_event.h"
 
 namespace remoting {
 
 PepperInputHandler::PepperInputHandler(ClientContext* context,
-                                       HostConnection* connection,
+                                       protocol::ConnectionToHost* connection,
                                        ChromotingView* view)
   : InputHandler(context, connection, view) {
 }

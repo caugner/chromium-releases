@@ -27,11 +27,11 @@
       '<(xul_sdk_dir)/include/string',
       '<(xul_sdk_dir)/include/xpcom',
       '<(xul_sdk_dir)/include/xpconnect',
-    ],  
+    ],
     'conditions': [
       ['OS=="win"', {
         'python': [
-          '<(DEPTH)\\third_party\\python_24\\setup_env.bat && python'
+          '<(DEPTH)\\third_party\\python_26\\setup_env.bat && python'
         ],
       }, { # OS != win
         'python': [
@@ -60,6 +60,15 @@
   },
   'targets': [
     {
+      # Builds the crash tests in crash_reporting.
+      'target_name': 'chrome_frame_crash_tests',
+      'type': 'none',
+      'dependencies': [
+        'crash_reporting/crash_reporting.gyp:minidump_test',
+        'crash_reporting/crash_reporting.gyp:vectored_handler_tests',
+      ],
+    },
+    {
       # TODO(slightlyoff): de-win23-ify
       'target_name': 'xulrunner_sdk',
       'type': 'none',
@@ -79,37 +88,55 @@
       ],
     },
     {
-      # TODO(slightlyoff): de-win32-ify
-      #
-      # build the base_noicu.lib.
-      'target_name': 'base_noicu',
+      # Builds our IDL file to the shared intermediate directory.
+      'target_name': 'chrome_tab_idl',
+      'type': 'none',
+      'msvs_settings': {
+        'VCMIDLTool': {
+          'OutputDirectory': '<(SHARED_INTERMEDIATE_DIR)',
+        },
+      },
+      'sources': [
+        'chrome_tab.idl',
+      ],
+      # Add the output dir for those who depend on us.
+      'direct_dependent_settings': {
+        'include_dirs': ['<(SHARED_INTERMEDIATE_DIR)'],
+      },
+    },
+    {
+      'target_name': 'chrome_frame_privileged_mock',
       'type': 'none',
       'dependencies': [
-        '../base/base.gyp:base',
+        'chrome_tab_idl',
+      ],
+      'sources': [
+        '../ceee/testing/utils/com_mock.py',
+        '<(SHARED_INTERMEDIATE_DIR)/chrome_tab.h',
       ],
       'actions': [
         {
-          'action_name': 'combine_libs',
+          'action_name': 'make_chrome_frame_privileged_mock',
           'msvs_cygwin_shell': 0,
+          'msvs_quote_cmd': 0,
           'inputs': [
-            '<(PRODUCT_DIR)/lib/base.lib',
+            '../ceee/testing/utils/com_mock.py',
           ],
           'outputs': [
-            '<(PRODUCT_DIR)/lib/base_noicu.lib',
+            '<(SHARED_INTERMEDIATE_DIR)/mock_ichromeframeprivileged.gen',
           ],
           'action': [
             '<@(python)',
-            'combine_libs.py',
-            '-o', '<@(_outputs)',
-            '-r (icu_|_icu.obj)',
-            '<@(_inputs)'],
+            '../ceee/testing/utils/com_mock.py',
+            'IChromeFramePrivileged',
+            '<(SHARED_INTERMEDIATE_DIR)/chrome_tab.h',
+            '> "<(SHARED_INTERMEDIATE_DIR)/mock_ichromeframeprivileged.gen"',
+          ],
         },
       ],
-      'direct_dependent_settings': {
-        # linker_settings
-        'libraries': [
-          '<(PRODUCT_DIR)/lib/base_noicu.lib',
-        ],
+      # All who use this need to be able to find the .gen file we generate.
+      'all_dependent_settings': {
+        'include_dirs': ['<(SHARED_INTERMEDIATE_DIR)'],
       },
     },
     {
@@ -117,14 +144,17 @@
       'type': 'executable',
       'dependencies': [
         '../base/base.gyp:test_support_base',
+        '../ceee/ie/common/common.gyp:ie_common',
+        '../ceee/testing/utils/test_utils.gyp:test_utils',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
         'chrome_frame_ie',
+        'chrome_frame_privileged_mock',
         'chrome_frame_strings',
+        'chrome_tab_idl',
       ],
       'sources': [
         'chrome_tab.h',
-        'chrome_tab.idl',
         'chrome_frame_histograms.h',
         'chrome_frame_histograms.cc',
         'chrome_frame_unittest_main.cc',
@@ -133,12 +163,15 @@
         'chrome_launcher_unittest.cc',
         'function_stub_unittest.cc',
         'renderer_glue.cc',
+        'test/chrome_frame_activex_unittest.cc',
+        'test/chrome_tab_mocks.h',
         'test/chrome_frame_test_utils.h',
         'test/chrome_frame_test_utils.cc',
         'test/com_message_event_unittest.cc',
         'test/exception_barrier_unittest.cc',
         'test/html_util_unittests.cc',
         'test/http_negotiate_unittest.cc',
+        'test/module_utils_test.cc',
         'test/policy_settings_unittest.cc',
         'test/simulate_input.h',
         'test/simulate_input.cc',
@@ -152,10 +185,6 @@
         'urlmon_upload_data_stream.cc',
         'urlmon_upload_data_stream_unittest.cc',
         'vtable_patch_manager_unittest.cc',
-      ],
-      'include_dirs': [
-        # To allow including "chrome_tab.h"
-        '<(INTERMEDIATE_DIR)',
       ],
       'resource_include_dirs': [
         '<(INTERMEDIATE_DIR)',
@@ -186,7 +215,7 @@
                 '../chrome/chrome.gyp:automation',
               ],
             }],
-          ],        
+          ],
         }],
         ['OS=="win"', {
           'link_settings': {
@@ -224,6 +253,7 @@
       'dependencies': [
         '../base/base.gyp:test_support_base',
         '../build/temp_gyp/googleurl.gyp:googleurl',
+        '../chrome/chrome.gyp:chrome_version_header',
         '../chrome/chrome.gyp:common',
         '../chrome/chrome.gyp:utility',
         '../chrome/chrome.gyp:browser',
@@ -237,12 +267,14 @@
         'chrome_frame_npapi',
         'chrome_frame_strings',
         'chrome_frame_utils',
+        'chrome_tab_idl',
         'npchrome_frame',
         'xulrunner_sdk',
       ],
       'sources': [
         '../base/test_suite.h',
         'cfproxy_test.cc',
+        'external_tab_test.cc',
         'test/automation_client_mock.cc',
         'test/automation_client_mock.h',
         'test/chrome_frame_test_utils.cc',
@@ -252,6 +284,7 @@
         'test/chrome_frame_automation_mock.cc',
         'test/chrome_frame_automation_mock.h',
         'test/delete_chrome_history_test.cc',
+        'test/header_test.cc',
         'test/http_server.cc',
         'test/http_server.h',
         'test/ie_event_sink.cc',
@@ -277,16 +310,14 @@
         'test/url_request_test.cc',
         'test/win_event_receiver.cc',
         'test/win_event_receiver.h',
+        'chrome_launcher_version.rc',
         'chrome_tab.h',
-        'chrome_tab.idl',
         'test_utils.cc',
         'test_utils.h',
       ],
       'include_dirs': [
         '<@(xul_include_directories)',
         '<(DEPTH)/third_party/wtl/include',
-        # To allow including "chrome_tab.h"
-        '<(INTERMEDIATE_DIR)',
       ],
       'resource_include_dirs': [
         '<(INTERMEDIATE_DIR)',
@@ -304,7 +335,7 @@
             },
           },
           'dependencies': [
-	        '../chrome/chrome.gyp:crash_service',
+            '../chrome/chrome.gyp:crash_service',
             '../chrome/chrome.gyp:automation',
             '../chrome/chrome.gyp:installer_util',
             '../google_update/google_update.gyp:google_update',
@@ -333,6 +364,7 @@
       'msvs_guid': '3767888B-76ED-4D2A-B1F5-263CC56A12AA',
       'type': 'executable',
       'dependencies': [
+        '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:test_support_base',
         '../build/temp_gyp/googleurl.gyp:googleurl',
@@ -349,6 +381,7 @@
         'chrome_frame_npapi',
         'chrome_frame_strings',
         'chrome_frame_utils',
+        'chrome_tab_idl',
         'npchrome_frame',
         'xulrunner_sdk',
       ],
@@ -360,7 +393,6 @@
         '../chrome/test/chrome_process_util.h',
         '../chrome/test/ui/ui_test.cc',
         'chrome_tab.h',
-        'chrome_tab.idl',
         'test/chrome_frame_test_utils.cc',
         'test/chrome_frame_test_utils.h',
         'test/perf/chrome_frame_perftest.cc',
@@ -377,8 +409,6 @@
       'include_dirs': [
         '<@(xul_include_directories)',
         '<(DEPTH)/third_party/wtl/include',
-        # To allow including "chrome_tab.h"
-        '<(INTERMEDIATE_DIR)',
       ],
       'conditions': [
         ['OS=="win"', {
@@ -399,7 +429,7 @@
           'dependencies': [
             '../breakpad/breakpad.gyp:breakpad_handler',
             '../chrome/chrome.gyp:automation',
-	        '../chrome/chrome.gyp:crash_service',
+            '../chrome/chrome.gyp:crash_service',
             '../chrome/chrome.gyp:installer_util',
             '../google_update/google_update.gyp:google_update',
           ],
@@ -428,6 +458,7 @@
         '../third_party/icu/icu.gyp:icuuc',
         'chrome_frame_npapi',
         'chrome_frame_ie',
+        'chrome_tab_idl',
         'npchrome_frame',
       ],
       'sources': [
@@ -450,11 +481,6 @@
         'test/net/test_automation_resource_message_filter.cc',
         'test/net/test_automation_resource_message_filter.h',
         'chrome_tab.h',
-        'chrome_tab.idl',
-      ],
-      'include_dirs': [
-        # To allow including "chrome_tab.h"
-        '<(INTERMEDIATE_DIR)',
       ],
       'conditions': [
         ['OS=="win"', {
@@ -471,7 +497,7 @@
           'dependencies': [
             '../breakpad/breakpad.gyp:breakpad_handler',
             '../chrome/chrome.gyp:automation',
-	        '../chrome/chrome.gyp:crash_service',
+            '../chrome/chrome.gyp:crash_service',
             '../chrome/chrome.gyp:chrome_dll_version',
             '../chrome/chrome.gyp:installer_util',
             '../google_update/google_update.gyp:google_update',
@@ -494,6 +520,7 @@
       'type': 'executable',
       'msvs_guid': 'A1440368-4089-4E14-8864-D84D3C5714A7',
       'dependencies': [
+        '../base/base.gyp:base',
         '../base/base.gyp:test_support_base',
         '../chrome/chrome.gyp:browser',
         '../chrome/chrome.gyp:debugger',
@@ -501,10 +528,10 @@
         '../chrome/chrome.gyp:test_support_common',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
-        'base_noicu',
         'chrome_frame_ie',
         'chrome_frame_npapi',
         'chrome_frame_strings',
+        'chrome_tab_idl',
       ],
       'sources': [
         'test/reliability/run_all_unittests.cc',
@@ -522,17 +549,15 @@
         'test/win_event_receiver.cc',
         'test/win_event_receiver.h',
         'chrome_tab.h',
-        'chrome_tab.idl',
         '../base/test/test_file_util_win.cc',
+        '../chrome/test/automation/proxy_launcher.cc',
+        '../chrome/test/automation/proxy_launcher.h',
         '../chrome/test/ui/ui_test.cc',
+        '../chrome/test/ui/ui_test.h',
         '../chrome/test/ui/ui_test_suite.cc',
         '../chrome/test/ui/ui_test_suite.h',
         '../chrome/test/chrome_process_util.cc',
         '../chrome/test/chrome_process_util.h',
-      ],
-      'include_dirs': [
-        # To allow including "chrome_tab.h"
-        '<(INTERMEDIATE_DIR)',
       ],
       'resource_include_dirs': [
         '<(INTERMEDIATE_DIR)',
@@ -562,12 +587,23 @@
         }],
       ],
     },
-
+    {
+      'target_name': 'chrome_frame_npapi_core',
+      'type': 'static_library',
+      'dependencies': [
+        '../base/base.gyp:base',
+      ],
+      'sources': [
+        'np_browser_functions.cc',
+        'np_browser_functions.h',
+      ],
+    },
     {
       'target_name': 'chrome_frame_npapi',
       'type': 'static_library',
       'dependencies': [
         'chrome_frame_common',
+        'chrome_frame_npapi_core',
         'chrome_frame_strings',
         'chrome_frame_utils',
         '../chrome/chrome.gyp:common',
@@ -578,8 +614,6 @@
         'chrome_frame_npapi.h',
         'ff_30_privilege_check.cc',
         'ff_privilege_check.h',
-        'np_browser_functions.cc',
-        'np_browser_functions.h',
         'np_event_listener.cc',
         'np_event_listener.h',
         'np_proxy_service.cc',
@@ -610,7 +644,7 @@
             '<(SHARED_INTERMEDIATE_DIR)/chrome_frame/grit/<(RULE_INPUT_ROOT).h',
             '<(SHARED_INTERMEDIATE_DIR)/chrome_frame/<(RULE_INPUT_ROOT).pak',
           ],
-          'action': ['python', '<@(_inputs)', '-i', 
+          'action': ['python', '<@(_inputs)', '-i',
             '<(RULE_INPUT_PATH)',
             'build', '-o', '<(grit_out_dir)'
           ],
@@ -643,7 +677,7 @@
         '../chrome/chrome.gyp:chrome_version_header',
       ],
       'include_dirs': [
-        # To allow including "chrome_tab.h"
+        # To allow including "version.h"
         '<(SHARED_INTERMEDIATE_DIR)',
       ],
       'sources': [
@@ -660,6 +694,9 @@
         'chrome_frame_common',
         'chrome_frame_strings',
         'chrome_frame_utils',
+        'chrome_tab_idl',
+        '../ceee/ie/common/common.gyp:ie_common',
+        '../ceee/ie/common/common.gyp:ie_guids',
         '../chrome/chrome.gyp:common',
         '../chrome/chrome.gyp:utility',
         '../build/temp_gyp/googleurl.gyp:googleurl',
@@ -690,7 +727,6 @@
         'chrome_protocol.h',
         'chrome_protocol.rgs',
         'chrome_tab.h',
-        'chrome_tab.idl',
         'com_message_event.cc',
         'com_message_event.h',
         'com_type_info_holder.cc',
@@ -738,8 +774,6 @@
         'vtable_patch_manager.h',
       ],
       'include_dirs': [
-        # To allow including "chrome_tab.h"
-        '<(INTERMEDIATE_DIR)',
         '<(INTERMEDIATE_DIR)/../chrome_frame',
         '<(DEPTH)/third_party/wtl/include',
       ],
@@ -761,8 +795,6 @@
             '../google_update/google_update.gyp:google_update',
             # Crash Reporting
             'crash_reporting/crash_reporting.gyp:crash_report',
-            'crash_reporting/crash_reporting.gyp:minidump_test',
-            'crash_reporting/crash_reporting.gyp:vectored_handler_tests',
           ],
         },],
       ],
@@ -781,7 +813,9 @@
             '/c', '<(RULE_INPUT_PATH)',
           ],
           'process_outputs_as_sources': 0,
-          'message': 'Assembling <(RULE_INPUT_PATH) to <(INTERMEDIATE_DIR)\<(RULE_INPUT_ROOT).obj.',
+          'message':
+              'Assembling <(RULE_INPUT_PATH) to ' \
+              '<(INTERMEDIATE_DIR)\<(RULE_INPUT_ROOT).obj.',
         },
       ],
       'msvs_settings': {
@@ -824,17 +858,20 @@
       'type': 'shared_library',
       'msvs_guid': 'E3DE7E63-D3B6-4A9F-BCC4-5C8169E9C9F2',
       'dependencies': [
-        'base_noicu',
+        '../base/base.gyp:base',
         'chrome_frame_ie',
         'chrome_frame_npapi',
         'chrome_frame_strings',
         'chrome_frame_utils',
+        'chrome_tab_idl',
         'xulrunner_sdk',
         'chrome_frame_launcher.gyp:chrome_launcher',
         '../build/temp_gyp/googleurl.gyp:googleurl',
         'chrome_frame_launcher.gyp:chrome_frame_helper',
         'chrome_frame_launcher.gyp:chrome_frame_helper_dll',
-        '../chrome/chrome.gyp:chrome_version_header',
+        '../chrome/chrome.gyp:chrome',
+        '../chrome/chrome.gyp:chrome_dll',
+        '../chrome/chrome.gyp:chrome_dll_version',
         '../chrome/chrome.gyp:common',
         '../chrome/chrome.gyp:utility',
       ],
@@ -847,7 +884,6 @@
         'chrome_tab.cc',
         'chrome_tab.def',
         'chrome_tab.h',
-        'chrome_tab.idl',
         # FIXME(slightlyoff): For chrome_tab.tlb. Giant hack until we can
         #   figure out something more gyp-ish.
         'resources/tlb_resource.rc',
@@ -857,8 +893,8 @@
         'resource.h',
       ],
       'include_dirs': [
-        # To allow including "chrome_tab.h"
-        '<(INTERMEDIATE_DIR)',
+        # For chrome_tab.h
+        '<(SHARED_INTERMEDIATE_DIR)',
         '<(INTERMEDIATE_DIR)/../npchrome_frame',
       ],
       'conditions': [
@@ -882,7 +918,6 @@
             '../google_update/google_update.gyp:google_update',
             # Crash Reporting
             'crash_reporting/crash_reporting.gyp:crash_report',
-            'crash_reporting/crash_reporting.gyp:vectored_handler_tests',
           ],
           'link_settings': {
             'libraries': [
@@ -956,7 +991,7 @@
             # TODO(mad): FIX THIS!
             #'chrome_frame_net_tests',
             #'chrome_frame_reliability_tests',
-            
+
             # Other tests depend on Chrome bins being available when they run.
             # Those should be re-enabled as soon as we setup the build slave to
             # also build (or download an archive of) Chrome, even it it isn't

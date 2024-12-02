@@ -48,6 +48,11 @@ void CompareLists(const std::vector<std::string>& expected,
   }
 }
 
+static void AddPattern(ExtensionExtent* extent, const std::string& pattern) {
+  int schemes = URLPattern::SCHEME_ALL;
+  extent->AddPattern(URLPattern(schemes, pattern));
+}
+
 }
 
 class ExtensionTest : public testing::Test {
@@ -77,7 +82,9 @@ TEST(ExtensionTest, InitFromValueInvalid) {
 #elif defined(OS_POSIX)
   FilePath path(FILE_PATH_LITERAL("/foo"));
 #endif
-  Extension extension(path);
+  scoped_refptr<Extension> extension_ptr(new Extension(path,
+                                                       Extension::INVALID));
+  Extension& extension = *extension_ptr;
   int error_code = 0;
   std::string error;
 
@@ -250,9 +257,10 @@ TEST(ExtensionTest, InitFromValueInvalid) {
   EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
   EXPECT_TRUE(MatchPattern(error, errors::kInvalidPermission));
 
+  // We allow unknown API permissions, so this will be valid until we better
+  // distinguish between API and host permissions.
   permissions->Set(0, Value::CreateStringValue("www.google.com"));
-  EXPECT_FALSE(extension.InitFromValue(*input_value, true, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kInvalidPermission));
+  EXPECT_TRUE(extension.InitFromValue(*input_value, true, &error));
 
   // Multiple page actions are not allowed.
   input_value.reset(static_cast<DictionaryValue*>(valid_value->DeepCopy()));
@@ -303,7 +311,9 @@ TEST(ExtensionTest, InitFromValueValid) {
 #elif defined(OS_POSIX)
   FilePath path(FILE_PATH_LITERAL("/foo"));
 #endif
-  Extension extension(path);
+  scoped_refptr<Extension> extension_ptr(new Extension(path,
+                                                       Extension::INVALID));
+  Extension& extension = *extension_ptr;
   std::string error;
   DictionaryValue input_value;
 
@@ -323,10 +333,11 @@ TEST(ExtensionTest, InitFromValueValid) {
   ListValue* permissions = new ListValue;
   permissions->Set(0, Value::CreateStringValue("file:///C:/foo.txt"));
   input_value.Set(keys::kPermissions, permissions);
-  EXPECT_FALSE(extension.InitFromValue(input_value, false, &error));
-  EXPECT_TRUE(MatchPattern(error, errors::kInvalidPermission));
+
+  // We allow unknown API permissions, so this will be valid until we better
+  // distinguish between API and host permissions.
+  EXPECT_TRUE(extension.InitFromValue(input_value, false, &error));
   input_value.Remove(keys::kPermissions, NULL);
-  error.clear();
 
   // Test with an options page.
   input_value.SetString(keys::kOptionsPage, "options.html");
@@ -366,7 +377,9 @@ TEST(ExtensionTest, InitFromValueValidNameInRTL) {
 #elif defined(OS_POSIX)
   FilePath path(FILE_PATH_LITERAL("/foo"));
 #endif
-  Extension extension(path);
+  scoped_refptr<Extension> extension_ptr(new Extension(path,
+                                                       Extension::INVALID));
+  Extension& extension = *extension_ptr;
   std::string error;
   DictionaryValue input_value;
 
@@ -377,7 +390,7 @@ TEST(ExtensionTest, InitFromValueValidNameInRTL) {
   EXPECT_TRUE(extension.InitFromValue(input_value, false, &error));
   EXPECT_EQ("", error);
   std::wstring localized_name(name);
-  base::i18n::AdjustStringForLocaleDirection(localized_name, &localized_name);
+  base::i18n::AdjustStringForLocaleDirection(&localized_name);
   EXPECT_EQ(localized_name, UTF8ToWide(extension.name()));
 
   // Strong RTL characters in name.
@@ -386,7 +399,7 @@ TEST(ExtensionTest, InitFromValueValidNameInRTL) {
   EXPECT_TRUE(extension.InitFromValue(input_value, false, &error));
   EXPECT_EQ("", error);
   localized_name = name;
-  base::i18n::AdjustStringForLocaleDirection(localized_name, &localized_name);
+  base::i18n::AdjustStringForLocaleDirection(&localized_name);
   EXPECT_EQ(localized_name, UTF8ToWide(extension.name()));
 
   // Reset locale.
@@ -403,27 +416,31 @@ TEST(ExtensionTest, GetResourceURLAndPath) {
 #elif defined(OS_POSIX)
   FilePath path(FILE_PATH_LITERAL("/foo"));
 #endif
-  Extension extension(path);
   DictionaryValue input_value;
   input_value.SetString(keys::kVersion, "1.0.0.0");
   input_value.SetString(keys::kName, "my extension");
-  EXPECT_TRUE(extension.InitFromValue(input_value, false, NULL));
+  scoped_refptr<Extension> extension(Extension::Create(
+      path, Extension::INVALID, input_value, false, NULL));
+  EXPECT_TRUE(extension.get());
 
-  EXPECT_EQ(extension.url().spec() + "bar/baz.js",
-            Extension::GetResourceURL(extension.url(), "bar/baz.js").spec());
-  EXPECT_EQ(extension.url().spec() + "baz.js",
-            Extension::GetResourceURL(extension.url(), "bar/../baz.js").spec());
-  EXPECT_EQ(extension.url().spec() + "baz.js",
-            Extension::GetResourceURL(extension.url(), "../baz.js").spec());
+  EXPECT_EQ(extension->url().spec() + "bar/baz.js",
+            Extension::GetResourceURL(extension->url(), "bar/baz.js").spec());
+  EXPECT_EQ(extension->url().spec() + "baz.js",
+            Extension::GetResourceURL(extension->url(),
+                                      "bar/../baz.js").spec());
+  EXPECT_EQ(extension->url().spec() + "baz.js",
+            Extension::GetResourceURL(extension->url(), "../baz.js").spec());
 }
 
 TEST(ExtensionTest, LoadPageActionHelper) {
 #if defined(OS_WIN)
-    FilePath path(StringPrintf(L"c:\\extension"));
+    FilePath path(base::StringPrintf(L"c:\\extension"));
 #else
-    FilePath path(StringPrintf("/extension"));
+    FilePath path(base::StringPrintf("/extension"));
 #endif
-  Extension extension(path);
+  scoped_refptr<Extension> extension_ptr(new Extension(path,
+                                                       Extension::INVALID));
+  Extension& extension = *extension_ptr;
   std::string error_msg;
   scoped_ptr<ExtensionAction> action;
   DictionaryValue input;
@@ -537,11 +554,12 @@ TEST(ExtensionTest, LoadPageActionHelper) {
   input.SetString(keys::kPageActionDefaultTitle, kTitle);
   input.SetString(keys::kPageActionDefaultIcon, kIcon);
 
-  // LoadExtensionActionHelper expects the extension member |extension_url_|
+  // LoadExtensionActionHelper expects the extension member |extension_url|
   // to be set.
-  extension.extension_url_ = GURL(std::string(chrome::kExtensionScheme) +
-                                  chrome::kStandardSchemeSeparator +
-                                  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/");
+  extension.extension_url_ =
+      GURL(std::string(chrome::kExtensionScheme) +
+           chrome::kStandardSchemeSeparator +
+           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/");
 
   // Add key "popup", expect success.
   input.SetString(keys::kPageActionPopup, kPopupHtmlFile);
@@ -549,7 +567,7 @@ TEST(ExtensionTest, LoadPageActionHelper) {
   ASSERT_TRUE(NULL != action.get());
   ASSERT_TRUE(error_msg.empty());
   ASSERT_STREQ(
-      extension.extension_url_.Resolve(kPopupHtmlFile).spec().c_str(),
+      extension.url().Resolve(kPopupHtmlFile).spec().c_str(),
       action->GetPopupUrl(ExtensionAction::kDefaultTabId).spec().c_str());
 
   // Add key "default_popup", expect failure.
@@ -570,7 +588,7 @@ TEST(ExtensionTest, LoadPageActionHelper) {
   ASSERT_TRUE(NULL != action.get());
   ASSERT_TRUE(error_msg.empty());
   ASSERT_STREQ(
-      extension.extension_url_.Resolve(kPopupHtmlFile).spec().c_str(),
+      extension.url().Resolve(kPopupHtmlFile).spec().c_str(),
       action->GetPopupUrl(ExtensionAction::kDefaultTabId).spec().c_str());
 
   // Setting default_popup to "" is the same as having no popup.
@@ -650,18 +668,19 @@ TEST(ExtensionTest, UpdateUrls) {
 #if defined(OS_WIN)
     // (Why %Iu below?  This is the single file in the whole code base that
     // might make use of a WidePRIuS; let's not encourage any more.)
-    FilePath path(StringPrintf(L"c:\\extension%Iu", i));
+    FilePath path(base::StringPrintf(L"c:\\extension%Iu", i));
 #else
-    FilePath path(StringPrintf("/extension%" PRIuS, i));
+    FilePath path(base::StringPrintf("/extension%" PRIuS, i));
 #endif
-    Extension extension(path);
     std::string error;
 
     input_value.SetString(keys::kVersion, "1.0");
     input_value.SetString(keys::kName, "Test");
     input_value.SetString(keys::kUpdateURL, url.spec());
 
-    EXPECT_TRUE(extension.InitFromValue(input_value, false, &error));
+    scoped_refptr<Extension> extension(Extension::Create(
+        path, Extension::INVALID, input_value, false, &error));
+    EXPECT_TRUE(extension.get()) << error;
   }
 
   // Test some invalid update urls
@@ -674,17 +693,18 @@ TEST(ExtensionTest, UpdateUrls) {
 #if defined(OS_WIN)
     // (Why %Iu below?  This is the single file in the whole code base that
     // might make use of a WidePRIuS; let's not encourage any more.)
-    FilePath path(StringPrintf(L"c:\\extension%Iu", i));
+    FilePath path(base::StringPrintf(L"c:\\extension%Iu", i));
 #else
-    FilePath path(StringPrintf("/extension%" PRIuS, i));
+    FilePath path(base::StringPrintf("/extension%" PRIuS, i));
 #endif
-    Extension extension(path);
     std::string error;
     input_value.SetString(keys::kVersion, "1.0");
     input_value.SetString(keys::kName, "Test");
     input_value.SetString(keys::kUpdateURL, invalid[i]);
 
-    EXPECT_FALSE(extension.InitFromValue(input_value, false, &error));
+    scoped_refptr<Extension> extension(Extension::Create(
+        path, Extension::INVALID, input_value, false, &error));
+    EXPECT_FALSE(extension.get());
     EXPECT_TRUE(MatchPattern(error, errors::kInvalidUpdateURL));
   }
 }
@@ -713,8 +733,8 @@ TEST(ExtensionTest, MimeTypeSniffing) {
   EXPECT_EQ("application/octet-stream", result);
 }
 
-static Extension* LoadManifest(const std::string& dir,
-                               const std::string& test_file) {
+static scoped_refptr<Extension> LoadManifest(const std::string& dir,
+                                             const std::string& test_file) {
   FilePath path;
   PathService::Get(chrome::DIR_TEST_DATA, &path);
   path = path.AppendASCII("extensions")
@@ -729,94 +749,72 @@ static Extension* LoadManifest(const std::string& dir,
     return NULL;
   }
 
-  scoped_ptr<Extension> extension(new Extension(path.DirName()));
-  EXPECT_TRUE(extension->InitFromValue(
-      *static_cast<DictionaryValue*>(result.get()), false, &error)) << error;
-
-  return extension.release();
+  scoped_refptr<Extension> extension = Extension::Create(
+      path.DirName(), Extension::INVALID,
+      *static_cast<DictionaryValue*>(result.get()), false, &error);
+  EXPECT_TRUE(extension) << error;
+  return extension;
 }
 
-// TODO(erikkay): reenable this test once we actually merge overlapping host
-// permissions together.
-TEST(ExtensionTest, FAILS_EffectiveHostPermissions) {
-  scoped_ptr<Extension> extension;
+TEST(ExtensionTest, EffectiveHostPermissions) {
+  scoped_refptr<Extension> extension;
   ExtensionExtent hosts;
 
-  extension.reset(LoadManifest("effective_host_permissions", "empty.json"));
+  extension = LoadManifest("effective_host_permissions", "empty.json");
   EXPECT_EQ(0u, extension->GetEffectiveHostPermissions().patterns().size());
+  EXPECT_FALSE(hosts.ContainsURL(GURL("http://www.google.com")));
   EXPECT_FALSE(extension->HasEffectiveAccessToAllHosts());
 
-  extension.reset(LoadManifest("effective_host_permissions", "one_host.json"));
+  extension = LoadManifest("effective_host_permissions", "one_host.json");
   hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(1u, hosts.patterns().size());
   EXPECT_TRUE(hosts.ContainsURL(GURL("http://www.google.com")));
+  EXPECT_FALSE(hosts.ContainsURL(GURL("https://www.google.com")));
   EXPECT_FALSE(extension->HasEffectiveAccessToAllHosts());
 
-  extension.reset(LoadManifest("effective_host_permissions",
-                               "one_host_wildcard.json"));
+  extension = LoadManifest("effective_host_permissions",
+                           "one_host_wildcard.json");
   hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(1u, hosts.patterns().size());
   EXPECT_TRUE(hosts.ContainsURL(GURL("http://google.com")));
+  EXPECT_TRUE(hosts.ContainsURL(GURL("http://foo.google.com")));
   EXPECT_FALSE(extension->HasEffectiveAccessToAllHosts());
 
-  extension.reset(LoadManifest("effective_host_permissions",
-                               "two_hosts.json"));
+  extension = LoadManifest("effective_host_permissions", "two_hosts.json");
   hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(2u, hosts.patterns().size());
   EXPECT_TRUE(hosts.ContainsURL(GURL("http://www.google.com")));
   EXPECT_TRUE(hosts.ContainsURL(GURL("http://www.reddit.com")));
   EXPECT_FALSE(extension->HasEffectiveAccessToAllHosts());
 
-  extension.reset(LoadManifest("effective_host_permissions",
-                               "duplicate_host.json"));
+  extension = LoadManifest("effective_host_permissions",
+                           "https_not_considered.json");
   hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(1u, hosts.patterns().size());
   EXPECT_TRUE(hosts.ContainsURL(GURL("http://google.com")));
+  EXPECT_TRUE(hosts.ContainsURL(GURL("https://google.com")));
   EXPECT_FALSE(extension->HasEffectiveAccessToAllHosts());
 
-  extension.reset(LoadManifest("effective_host_permissions",
-                               "https_not_considered.json"));
+  extension = LoadManifest("effective_host_permissions",
+                           "two_content_scripts.json");
   hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(1u, hosts.patterns().size());
-  EXPECT_TRUE(hosts.ContainsURL(GURL("http://google.com")));
-  EXPECT_FALSE(extension->HasEffectiveAccessToAllHosts());
-
-  extension.reset(LoadManifest("effective_host_permissions",
-                               "two_content_scripts.json"));
-  hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(3u, hosts.patterns().size());
   EXPECT_TRUE(hosts.ContainsURL(GURL("http://google.com")));
   EXPECT_TRUE(hosts.ContainsURL(GURL("http://www.reddit.com")));
   EXPECT_TRUE(hosts.ContainsURL(GURL("http://news.ycombinator.com")));
   EXPECT_FALSE(extension->HasEffectiveAccessToAllHosts());
 
-  extension.reset(LoadManifest("effective_host_permissions",
-                               "duplicate_content_script.json"));
+  extension = LoadManifest("effective_host_permissions", "all_hosts.json");
   hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(3u, hosts.patterns().size());
-  EXPECT_TRUE(hosts.ContainsURL(GURL("http://google.com")));
-  EXPECT_TRUE(hosts.ContainsURL(GURL("http://www.reddit.com")));
-  EXPECT_FALSE(extension->HasEffectiveAccessToAllHosts());
-
-  extension.reset(LoadManifest("effective_host_permissions",
-                               "all_hosts.json"));
-  hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(1u, hosts.patterns().size());
   EXPECT_TRUE(hosts.ContainsURL(GURL("http://test/")));
+  EXPECT_FALSE(hosts.ContainsURL(GURL("https://test/")));
+  EXPECT_TRUE(hosts.ContainsURL(GURL("http://www.google.com")));
   EXPECT_TRUE(extension->HasEffectiveAccessToAllHosts());
 
-  extension.reset(LoadManifest("effective_host_permissions",
-                               "all_hosts2.json"));
+  extension = LoadManifest("effective_host_permissions", "all_hosts2.json");
   hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(2u, hosts.patterns().size());
   EXPECT_TRUE(hosts.ContainsURL(GURL("http://test/")));
   EXPECT_TRUE(hosts.ContainsURL(GURL("http://www.google.com")));
   EXPECT_TRUE(extension->HasEffectiveAccessToAllHosts());
 
-  extension.reset(LoadManifest("effective_host_permissions",
-                               "all_hosts3.json"));
+  extension = LoadManifest("effective_host_permissions", "all_hosts3.json");
   hosts = extension->GetEffectiveHostPermissions();
-  EXPECT_EQ(2u, hosts.patterns().size());
+  EXPECT_FALSE(hosts.ContainsURL(GURL("http://test/")));
   EXPECT_TRUE(hosts.ContainsURL(GURL("https://test/")));
   EXPECT_TRUE(hosts.ContainsURL(GURL("http://www.google.com")));
   EXPECT_TRUE(extension->HasEffectiveAccessToAllHosts());
@@ -825,46 +823,86 @@ TEST(ExtensionTest, FAILS_EffectiveHostPermissions) {
 TEST(ExtensionTest, IsPrivilegeIncrease) {
   const struct {
     const char* base_name;
-    bool expect_success;
+    // Increase these sizes if you have more than 10.
+    const char* granted_apis[10];
+    const char* granted_hosts[10];
+    bool full_access;
+    bool expect_increase;
   } kTests[] = {
-    { "allhosts1", false },  // all -> all
-    { "allhosts2", false },  // all -> one
-    { "allhosts3", true },  // one -> all
-    { "hosts1", false },  // http://a,http://b -> http://a,http://b
-    { "hosts2", false },  // http://a,http://b -> https://a,http://*.b
-    { "hosts3", false },  // http://a,http://b -> http://a
-    { "hosts4", true },  // http://a -> http://a,http://b
-    { "hosts5", false },  // http://a,b,c -> http://a,b,c + https://a,b,c
-    { "hosts6", false },  // http://a.com -> http://a.com + http://a.co.uk
-    { "permissions1", false },  // tabs -> tabs
-    { "permissions2", true },  // tabs -> tabs,bookmarks
-    { "permissions3", true },  // http://a -> http://a,tabs
-    { "permissions5", true },  // bookmarks -> bookmarks,history
+    { "allhosts1", {NULL}, {"http://*/", NULL}, false,
+      false },  // all -> all
+    { "allhosts2", {NULL}, {"http://*/", NULL}, false,
+      false },  // all -> one
+    { "allhosts3", {NULL}, {NULL}, false, true },  // one -> all
+    { "hosts1", {NULL},
+      {"http://www.google.com/", "http://www.reddit.com/", NULL}, false,
+      false },  // http://a,http://b -> http://a,http://b
+    { "hosts2", {NULL},
+      {"http://www.google.com/", "http://www.reddit.com/", NULL}, false,
+      true },  // http://a,http://b -> https://a,http://*.b
+    { "hosts3", {NULL},
+      {"http://www.google.com/", "http://www.reddit.com/", NULL}, false,
+      false },  // http://a,http://b -> http://a
+    { "hosts4", {NULL},
+      {"http://www.google.com/", NULL}, false,
+      true },  // http://a -> http://a,http://b
+    { "hosts5", {"tabs", "notifications", NULL},
+      {"http://*.example.com/", "http://*.example.com/*",
+       "http://*.example.co.uk/*", "http://*.example.com.au/*",
+       NULL}, false,
+      false },  // http://a,b,c -> http://a,b,c + https://a,b,c
+    { "hosts6", {"tabs", "notifications", NULL},
+      {"http://*.example.com/", "http://*.example.com/*", NULL}, false,
+      false },  // http://a.com -> http://a.com + http://a.co.uk
+    { "permissions1", {"tabs", NULL},
+      {NULL}, false, false },  // tabs -> tabs
+    { "permissions2", {"tabs", NULL},
+      {NULL}, false, true },  // tabs -> tabs,bookmarks
+    { "permissions3", {NULL},
+      {"http://*/*", NULL},
+      false, true },  // http://a -> http://a,tabs
+    { "permissions5", {"bookmarks", NULL},
+      {NULL}, false, true },  // bookmarks -> bookmarks,history
 #if !defined(OS_CHROMEOS)  // plugins aren't allowed in ChromeOS
-    { "permissions4", false },  // plugin -> plugin,tabs
-    { "plugin1", false },  // plugin -> plugin
-    { "plugin2", false },  // plugin -> none
-    { "plugin3", true },  // none -> plugin
+    { "permissions4", {NULL},
+      {NULL}, true, false },  // plugin -> plugin,tabs
+    { "plugin1", {NULL},
+      {NULL}, true, false },  // plugin -> plugin
+    { "plugin2", {NULL},
+      {NULL}, true, false },  // plugin -> none
+    { "plugin3", {NULL},
+      {NULL}, false, true },  // none -> plugin
 #endif
-    { "storage", false },  // none -> storage
-    { "notifications", false }  // none -> notifications
+    { "storage", {NULL},
+      {NULL}, false, false },  // none -> storage
+    { "notifications", {NULL},
+      {NULL}, false, false }  // none -> notifications
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTests); ++i) {
-    scoped_ptr<Extension> old_extension(
+    scoped_refptr<Extension> old_extension(
         LoadManifest("allow_silent_upgrade",
                      std::string(kTests[i].base_name) + "_old.json"));
-    scoped_ptr<Extension> new_extension(
+    scoped_refptr<Extension> new_extension(
         LoadManifest("allow_silent_upgrade",
                      std::string(kTests[i].base_name) + "_new.json"));
 
-    EXPECT_TRUE(old_extension.get()) << kTests[i].base_name << "_old.json";
+    std::set<std::string> granted_apis;
+    for (size_t j = 0; kTests[i].granted_apis[j] != NULL; ++j)
+      granted_apis.insert(kTests[i].granted_apis[j]);
+
+    ExtensionExtent granted_hosts;
+    for (size_t j = 0; kTests[i].granted_hosts[j] != NULL; ++j)
+      AddPattern(&granted_hosts, kTests[i].granted_hosts[j]);
+
     EXPECT_TRUE(new_extension.get()) << kTests[i].base_name << "_new.json";
-    if (!old_extension.get() || !new_extension.get())
+    if (!new_extension.get())
       continue;
 
-    EXPECT_EQ(kTests[i].expect_success,
-              Extension::IsPrivilegeIncrease(old_extension.get(),
+    EXPECT_EQ(kTests[i].expect_increase,
+              Extension::IsPrivilegeIncrease(kTests[i].full_access,
+                                             granted_apis,
+                                             granted_hosts,
                                              new_extension.get()))
         << kTests[i].base_name;
   }
@@ -929,11 +967,12 @@ TEST(ExtensionTest, ImageCaching) {
 
   // Initialize the Extension.
   std::string errors;
-  scoped_ptr<Extension> extension(new Extension(path));
   DictionaryValue values;
   values.SetString(keys::kName, "test");
   values.SetString(keys::kVersion, "0.1");
-  ASSERT_TRUE(extension->InitFromValue(values, false, &errors));
+  scoped_refptr<Extension> extension(Extension::Create(
+      path, Extension::INVALID, values, false, &errors));
+  ASSERT_TRUE(extension.get());
 
   // Create an ExtensionResource pointing at an icon.
   FilePath icon_relative_path(FILE_PATH_LITERAL("icon3.png"));
@@ -1014,10 +1053,11 @@ TEST(ExtensionTest, OldUnlimitedStoragePermission) {
 
   // Initialize the extension and make sure the permission for unlimited storage
   // is present.
-  Extension extension(extension_path);
   std::string errors;
-  EXPECT_TRUE(extension.InitFromValue(dictionary, false, &errors));
-  EXPECT_TRUE(extension.HasApiPermission(
+  scoped_refptr<Extension> extension(Extension::Create(
+      extension_path, Extension::INVALID, dictionary, false, &errors));
+  EXPECT_TRUE(extension.get());
+  EXPECT_TRUE(extension->HasApiPermission(
       Extension::kUnlimitedStoragePermission));
 }
 
@@ -1053,8 +1093,8 @@ TEST(ExtensionTest, ApiPermissions) {
     { "tabs.getSelected", false},
   };
 
-  scoped_ptr<Extension> extension;
-  extension.reset(LoadManifest("empty_manifest", "empty.json"));
+  scoped_refptr<Extension> extension;
+  extension = LoadManifest("empty_manifest", "empty.json");
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTests); ++i) {
     EXPECT_EQ(kTests[i].expect_success,
@@ -1063,7 +1103,7 @@ TEST(ExtensionTest, ApiPermissions) {
   }
 }
 
-TEST(ExtensionTest, GetDistinctHosts) {
+TEST(ExtensionTest, GetDistinctHostsForDisplay) {
   std::vector<std::string> expected;
   expected.push_back("www.foo.com");
   expected.push_back("www.bar.com");
@@ -1081,7 +1121,7 @@ TEST(ExtensionTest, GetDistinctHosts) {
     actual.push_back(
         URLPattern(URLPattern::SCHEME_HTTP, "http://www.baz.com/path"));
     CompareLists(expected,
-                 Extension::GetDistinctHosts(actual));
+                 Extension::GetDistinctHostsForDisplay(actual));
   }
 
   {
@@ -1093,7 +1133,7 @@ TEST(ExtensionTest, GetDistinctHosts) {
     actual.push_back(
         URLPattern(URLPattern::SCHEME_HTTP, "http://www.baz.com/path"));
     CompareLists(expected,
-                 Extension::GetDistinctHosts(actual));
+                 Extension::GetDistinctHostsForDisplay(actual));
   }
 
   {
@@ -1103,7 +1143,7 @@ TEST(ExtensionTest, GetDistinctHosts) {
     actual.push_back(
         URLPattern(URLPattern::SCHEME_HTTPS, "https://www.bar.com/path"));
     CompareLists(expected,
-                 Extension::GetDistinctHosts(actual));
+                 Extension::GetDistinctHostsForDisplay(actual));
   }
 
   {
@@ -1113,7 +1153,7 @@ TEST(ExtensionTest, GetDistinctHosts) {
     actual.push_back(
         URLPattern(URLPattern::SCHEME_HTTP, "http://www.bar.com/pathypath"));
     CompareLists(expected,
-                 Extension::GetDistinctHosts(actual));
+                 Extension::GetDistinctHostsForDisplay(actual));
   }
 
   {
@@ -1129,7 +1169,7 @@ TEST(ExtensionTest, GetDistinctHosts) {
     expected.push_back("bar.com");
 
     CompareLists(expected,
-                 Extension::GetDistinctHosts(actual));
+                 Extension::GetDistinctHostsForDisplay(actual));
   }
 
   {
@@ -1156,6 +1196,90 @@ TEST(ExtensionTest, GetDistinctHosts) {
     expected.push_back("www.foo.xyzzy");
 
     CompareLists(expected,
-                 Extension::GetDistinctHosts(actual));
+                 Extension::GetDistinctHostsForDisplay(actual));
   }
+
+  {
+    SCOPED_TRACE("wildcards");
+
+    actual.push_back(
+        URLPattern(URLPattern::SCHEME_HTTP, "http://*.google.com/*"));
+
+    expected.push_back("*.google.com");
+
+    CompareLists(expected,
+                 Extension::GetDistinctHostsForDisplay(actual));
+  }
+}
+
+TEST(ExtensionTest, IsElevatedHostList) {
+  URLPatternList list1;
+  URLPatternList list2;
+
+  list1.push_back(
+      URLPattern(URLPattern::SCHEME_HTTP, "http://www.google.com.hk/path"));
+  list1.push_back(
+      URLPattern(URLPattern::SCHEME_HTTP, "http://www.google.com/path"));
+
+  // Test that the host order does not matter.
+  list2.push_back(
+      URLPattern(URLPattern::SCHEME_HTTP, "http://www.google.com/path"));
+  list2.push_back(
+      URLPattern(URLPattern::SCHEME_HTTP, "http://www.google.com.hk/path"));
+
+  EXPECT_FALSE(Extension::IsElevatedHostList(list1, list2));
+  EXPECT_FALSE(Extension::IsElevatedHostList(list2, list1));
+
+  // Test that paths are ignored.
+  list2.clear();
+  list2.push_back(
+      URLPattern(URLPattern::SCHEME_HTTP, "http://www.google.com/*"));
+  EXPECT_FALSE(Extension::IsElevatedHostList(list1, list2));
+  EXPECT_FALSE(Extension::IsElevatedHostList(list2, list1));
+
+  // Test that RCDs are ignored.
+  list2.clear();
+  list2.push_back(
+      URLPattern(URLPattern::SCHEME_HTTP, "http://www.google.com.hk/*"));
+  EXPECT_FALSE(Extension::IsElevatedHostList(list1, list2));
+  EXPECT_FALSE(Extension::IsElevatedHostList(list2, list1));
+
+  // Test that subdomain wildcards are handled properly.
+  list2.clear();
+  list2.push_back(
+      URLPattern(URLPattern::SCHEME_HTTP, "http://*.google.com.hk/*"));
+  EXPECT_TRUE(Extension::IsElevatedHostList(list1, list2));
+  //TODO(jstritar): Does not match subdomains properly. http://crbug.com/65337
+  //EXPECT_FALSE(Extension::IsElevatedHostList(list2, list1));
+
+  // Test that different domains count as different hosts.
+  list2.clear();
+  list2.push_back(
+      URLPattern(URLPattern::SCHEME_HTTP, "http://www.google.com/path"));
+  list2.push_back(
+      URLPattern(URLPattern::SCHEME_HTTP, "http://www.example.org/path"));
+  EXPECT_TRUE(Extension::IsElevatedHostList(list1, list2));
+  EXPECT_FALSE(Extension::IsElevatedHostList(list2, list1));
+
+  // Test that different subdomains count as different hosts.
+  list2.clear();
+  list2.push_back(
+      URLPattern(URLPattern::SCHEME_HTTP, "http://mail.google.com/*"));
+  EXPECT_TRUE(Extension::IsElevatedHostList(list1, list2));
+  EXPECT_TRUE(Extension::IsElevatedHostList(list2, list1));
+}
+
+TEST(ExtensionTest, GenerateId) {
+  std::string result;
+  EXPECT_FALSE(Extension::GenerateId("", &result));
+
+  EXPECT_TRUE(Extension::GenerateId("test", &result));
+  EXPECT_EQ(result, "jpignaibiiemhngfjkcpokkamffknabf");
+
+  EXPECT_TRUE(Extension::GenerateId("_", &result));
+  EXPECT_EQ(result, "ncocknphbhhlhkikpnnlmbcnbgdempcd");
+
+  EXPECT_TRUE(Extension::GenerateId(
+      "this_string_is_longer_than_a_single_sha256_hash_digest", &result));
+  EXPECT_EQ(result, "jimneklojkjdibfkgiiophfhjhbdgcfi");
 }

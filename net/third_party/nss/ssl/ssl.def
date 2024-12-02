@@ -163,6 +163,8 @@ SSL_SetNextProtoNego;
 ;+    global:
 SSL_GetPredictedServerHelloData;
 SSL_GetSnapStartResult;
+SSL_GetStapledOCSPResponse;
+SSL_PeerCertificateChain;
 SSL_SetPredictedPeerCertificates;
 SSL_SetPredictedServerHelloData;
 SSL_SetSnapStartApplicationData;

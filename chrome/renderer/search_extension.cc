@@ -75,22 +75,17 @@ v8::Handle<v8::Value> SearchExtensionWrapper::SetSuggestResult(
     const v8::Arguments& args) {
   if (!args.Length() || !args[0]->IsString()) return v8::Undefined();
 
-  std::string suggest = std::string(*v8::String::Utf8Value(args[0]));
-  if (!suggest.length()) return v8::Undefined();
-
   RenderView* render_view = GetRenderView();
   if (!render_view) return v8::Undefined();
 
-  render_view->SetSuggestResult(suggest);
+  std::vector<std::string> suggestions;
+  suggestions.push_back(std::string(*v8::String::Utf8Value(args[0])));
+  render_view->SetSuggestions(suggestions);
   return v8::Undefined();
 }
 
 v8::Extension* SearchExtension::Get() {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableMatchPreview)) {
-    return new SearchExtensionWrapper();
-  }
-  return NULL;
+  return new SearchExtensionWrapper();
 }
 
 }  // namespace extensions_v8

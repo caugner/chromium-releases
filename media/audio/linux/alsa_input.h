@@ -30,8 +30,8 @@ class AlsaPcmInputStream : public AudioInputStream {
   // |kAutoSelectDevice|.
   AlsaPcmInputStream(const std::string& device_name,
                      const AudioParameters& params,
-                     int samples_per_packet,
                      AlsaWrapper* wrapper);
+  virtual ~AlsaPcmInputStream();
 
   // Implementation of AudioOutputStream.
   virtual bool Open();
@@ -52,7 +52,6 @@ class AlsaPcmInputStream : public AudioInputStream {
 
   std::string device_name_;
   AudioParameters params_;
-  int samples_per_packet_;
   int bytes_per_packet_;
   AlsaWrapper* wrapper_;
   int packet_duration_ms_;  // Length of each recorded packet in milliseconds.

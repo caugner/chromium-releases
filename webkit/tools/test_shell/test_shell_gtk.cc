@@ -376,10 +376,12 @@ void TestShell::TestFinished() {
     return;
 
   test_is_pending_ = false;
-  GtkWindow* window = *(TestShell::windowList()->begin());
-  TestShell* shell = static_cast<TestShell*>(g_object_get_data(G_OBJECT(window),
-                                             "test-shell"));
-  TestShell::Dump(shell);
+  if (dump_when_finished_) {
+    GtkWindow* window = *(TestShell::windowList()->begin());
+    TestShell* shell = static_cast<TestShell*>(
+        g_object_get_data(G_OBJECT(window), "test-shell"));
+    TestShell::Dump(shell);
+  }
   MessageLoop::current()->Quit();
 }
 
@@ -654,10 +656,6 @@ base::StringPiece GetDataResource(int resource_id) {
       break;
   }
   return TestShell::NetResourceProvider(resource_id);
-}
-
-void GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {
-  NPAPI::PluginList::Singleton()->GetPlugins(refresh, plugins);
 }
 
 }  // namespace webkit_glue

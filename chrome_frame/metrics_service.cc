@@ -42,8 +42,10 @@
 
 #include <atlbase.h>
 #include <atlwin.h>
-#include <windows.h>
 #include <objbase.h>
+#include <windows.h>
+
+#include <vector>
 
 #if defined(USE_SYSTEM_LIBBZ2)
 #include <bzlib.h>
@@ -61,7 +63,6 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/net/url_fetcher.h"
-#include "chrome/common/net/url_fetcher_protect.h"
 #include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/chrome_frame_distribution.h"
@@ -96,9 +97,11 @@ static const int kMinMilliSecondsPerUMAUpload = 600000;
 base::LazyInstance<MetricsService>
     g_metrics_instance_(base::LINKER_INITIALIZED);
 
+Lock MetricsService::metrics_service_lock_;
+
 // Traits to create an instance of the ChromeFrame upload thread.
 struct UploadThreadInstanceTraits
-    : public base::DefaultLazyInstanceTraits<base::Thread> {
+    : public base::LeakyLazyInstanceTraits<base::Thread> {
   static base::Thread* New(void* instance) {
     // Use placement new to initialize our instance in our preallocated space.
     // The parenthesis is very important here to force POD type initialization.
@@ -125,19 +128,19 @@ base::LazyInstance<base::Thread, UploadThreadInstanceTraits>
 
 Lock g_metrics_service_lock;
 
-extern base::LazyInstance<StatisticsRecorder> g_statistics_recorder_;
+extern base::LazyInstance<base::StatisticsRecorder> g_statistics_recorder_;
 
 // This class provides HTTP request context information for metrics upload
 // requests initiated by ChromeFrame.
 class ChromeFrameUploadRequestContext : public URLRequestContext {
  public:
-  ChromeFrameUploadRequestContext(MessageLoop* io_loop)
+  explicit ChromeFrameUploadRequestContext(MessageLoop* io_loop)
       : io_loop_(io_loop) {
     Initialize();
   }
 
   ~ChromeFrameUploadRequestContext() {
-    DLOG(INFO) << __FUNCTION__;
+    DVLOG(1) << __FUNCTION__;
     delete http_transaction_factory_;
     delete http_auth_handler_factory_;
   }
@@ -149,16 +152,13 @@ class ChromeFrameUploadRequestContext : public URLRequestContext {
 
     host_resolver_ =
         net::CreateSystemHostResolver(net::HostResolver::kDefaultParallelism,
-                                      NULL);
+                                      NULL, NULL);
     net::ProxyConfigService* proxy_config_service =
         net::ProxyService::CreateSystemProxyConfigService(NULL, NULL);
     DCHECK(proxy_config_service);
 
-    const size_t kNetLogBound = 50u;
-    net_log_.reset(new net::CapturingNetLog(kNetLogBound));
-
-    proxy_service_ = net::ProxyService::Create(proxy_config_service, false, 0,
-                                               this, net_log_.get(), io_loop_);
+    proxy_service_ = net::ProxyService::CreateUsingSystemProxyResolver(
+        proxy_config_service, 0, NULL);
     DCHECK(proxy_service_);
 
     ssl_config_service_ = new net::SSLConfigServiceDefaults;
@@ -168,15 +168,17 @@ class ChromeFrameUploadRequestContext : public URLRequestContext {
 
     std::string csv_auth_schemes = "basic,digest,ntlm,negotiate";
     std::vector<std::string> supported_schemes;
-    SplitString(csv_auth_schemes, ',', &supported_schemes);
+    base::SplitString(csv_auth_schemes, ',', &supported_schemes);
 
     http_auth_handler_factory_ = net::HttpAuthHandlerRegistryFactory::Create(
-        supported_schemes, url_security_manager_.get(), host_resolver_, false,
-        false);
+        supported_schemes, url_security_manager_.get(), host_resolver_,
+        std::string(), false, false);
 
     http_transaction_factory_ = new net::HttpCache(
         net::HttpNetworkLayer::CreateFactory(host_resolver_,
                                              NULL /* dnsrr_resovler */,
+                                             NULL /* dns_cert_checker*/,
+                                             NULL /* ssl_host_info */,
                                              proxy_service_,
                                              ssl_config_service_,
                                              http_auth_handler_factory_,
@@ -192,7 +194,6 @@ class ChromeFrameUploadRequestContext : public URLRequestContext {
  private:
   std::string user_agent_;
   MessageLoop* io_loop_;
-  scoped_ptr<net::NetLog> net_log_;
   scoped_ptr<net::URLSecurityManager> url_security_manager_;
 };
 
@@ -200,7 +201,7 @@ class ChromeFrameUploadRequestContext : public URLRequestContext {
 // metrics HTTP upload requests initiated by ChromeFrame.
 class ChromeFrameUploadRequestContextGetter : public URLRequestContextGetter {
  public:
-  ChromeFrameUploadRequestContextGetter(MessageLoop* io_loop)
+  explicit ChromeFrameUploadRequestContextGetter(MessageLoop* io_loop)
       : io_loop_(io_loop) {}
 
   virtual URLRequestContext* GetURLRequestContext() {
@@ -209,7 +210,7 @@ class ChromeFrameUploadRequestContextGetter : public URLRequestContextGetter {
     return context_;
   }
 
-  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() {
+  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() const {
     if (!io_message_loop_proxy_.get()) {
       io_message_loop_proxy_ = base::MessageLoopProxy::CreateForCurrentThread();
     }
@@ -218,11 +219,11 @@ class ChromeFrameUploadRequestContextGetter : public URLRequestContextGetter {
 
  private:
   ~ChromeFrameUploadRequestContextGetter() {
-    DLOG(INFO) << __FUNCTION__;
+    DVLOG(1) << __FUNCTION__;
   }
 
   scoped_refptr<URLRequestContext> context_;
-  scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy_;
+  mutable scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy_;
   MessageLoop* io_loop_;
 };
 
@@ -243,12 +244,12 @@ class ChromeFrameMetricsDataUploader
 
   ChromeFrameMetricsDataUploader()
       : fetcher_(NULL) {
-    DLOG(INFO) << __FUNCTION__;
+    DVLOG(1) << __FUNCTION__;
     creator_thread_id_ = PlatformThread::CurrentId();
   }
 
   ~ChromeFrameMetricsDataUploader() {
-    DLOG(INFO) << __FUNCTION__;
+    DVLOG(1) << __FUNCTION__;
     DCHECK(creator_thread_id_ == PlatformThread::CurrentId());
   }
 
@@ -330,11 +331,9 @@ class ChromeFrameMetricsDataUploader
                                   int response_code,
                                   const ResponseCookies& cookies,
                                   const std::string& data) {
-    DLOG(INFO) << __FUNCTION__
-               << base::StringPrintf(
-                       ": url : %hs, status:%d, response code: %d\n",
-                       url.spec().c_str(), status.status(),
-                       response_code);
+    DVLOG(1) << __FUNCTION__ << base::StringPrintf(
+        ": url : %hs, status:%d, response code: %d\n", url.spec().c_str(),
+        status.status(), response_code);
     delete fetcher_;
     fetcher_ = NULL;
 
@@ -398,6 +397,8 @@ void MetricsService::InitializeMetricsState() {
 
 // static
 void MetricsService::Start() {
+  AutoLock lock(metrics_service_lock_);
+
   if (GetInstance()->state_ == ACTIVE)
     return;
 
@@ -408,6 +409,8 @@ void MetricsService::Start() {
 
 // static
 void MetricsService::Stop() {
+  AutoLock lock(metrics_service_lock_);
+
   GetInstance()->SetReporting(false);
   GetInstance()->SetRecording(false);
 }
@@ -449,7 +452,7 @@ void CALLBACK MetricsService::TransmissionTimerProc(HWND window,
                                                     unsigned int message,
                                                     unsigned int event_id,
                                                     unsigned int time) {
-  DLOG(INFO) << "Transmission timer notified";
+  DVLOG(1) << "Transmission timer notified";
   DCHECK(GetInstance() != NULL);
   GetInstance()->UploadData();
   if (GetInstance()->initial_uma_upload_) {
@@ -474,6 +477,8 @@ void MetricsService::SetReporting(bool enable) {
           SetTimer(NULL, kChromeFrameMetricsTimerId,
                    kInitialUMAUploadTimeoutMilliSeconds,
                    reinterpret_cast<TIMERPROC>(TransmissionTimerProc));
+    } else {
+      UploadData();
     }
   }
 }
@@ -563,7 +568,7 @@ bool MetricsService::UploadData() {
 
   static long currently_uploading = 0;
   if (InterlockedCompareExchange(&currently_uploading, 1, 0)) {
-    DLOG(INFO) << "Contention for uploading metrics data. Backing off";
+    DVLOG(1) << "Contention for uploading metrics data. Backing off";
     return false;
   }
 
@@ -571,7 +576,7 @@ bool MetricsService::UploadData() {
   DCHECK(!pending_log_text.empty());
 
   // Allow security conscious users to see all metrics logs that we send.
-  LOG(INFO) << "METRICS LOG: " << pending_log_text;
+  VLOG(1) << "METRICS LOG: " << pending_log_text;
 
   bool ret = true;
 

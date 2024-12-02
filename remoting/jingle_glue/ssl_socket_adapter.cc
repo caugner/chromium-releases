@@ -7,6 +7,7 @@
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "net/base/address_list.h"
+#include "net/base/host_port_pair.h"
 #include "net/base/net_errors.h"
 #include "net/base/ssl_config_service.h"
 #include "net/base/sys_addrinfo.h"
@@ -67,7 +68,8 @@ int SSLSocketAdapter::BeginSSL() {
   transport_socket_->set_addr(talk_base::SocketAddress(hostname_, 0));
   ssl_socket_.reset(
       net::ClientSocketFactory::GetDefaultFactory()->CreateSSLClientSocket(
-          transport_socket_, hostname_.c_str(), ssl_config));
+          transport_socket_, net::HostPortPair(hostname_, 443), ssl_config,
+          NULL /* ssl_host_info */));
 
   int result = ssl_socket_->Connect(&connected_callback_);
 
@@ -83,7 +85,7 @@ int SSLSocketAdapter::Send(const void* buf, size_t len) {
   if (ssl_state_ != SSLSTATE_CONNECTED) {
     return AsyncSocketAdapter::Send(buf, len);
   } else {
-    scoped_refptr<net::IOBuffer> transport_buf = new net::IOBuffer(len);
+    scoped_refptr<net::IOBuffer> transport_buf(new net::IOBuffer(len));
     memcpy(transport_buf->data(), buf, len);
 
     int result = ssl_socket_->Write(transport_buf, len, NULL);
@@ -119,7 +121,7 @@ int SSLSocketAdapter::Recv(void* buf, size_t len) {
           } else {
             if (result < 0) {
               SetError(result);
-              LOG(INFO) << "Socket error " << result;
+              VLOG(1) << "Socket error " << result;
             }
             transport_buf_ = NULL;
           }
@@ -244,6 +246,10 @@ bool TransportSocket::WasEverUsed() const {
   // We don't use this in ClientSocketPools, so this should never be used.
   NOTREACHED();
   return was_used_to_convey_data_;
+}
+
+bool TransportSocket::UsingTCPFastOpen() const {
+  return false;
 }
 
 int TransportSocket::Read(net::IOBuffer* buf, int buf_len,

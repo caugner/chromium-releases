@@ -1,14 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/renderer_host/audio_renderer_host.h"
 
-#include "base/histogram.h"
-#include "base/lock.h"
+#include "base/metrics/histogram.h"
 #include "base/process.h"
 #include "base/shared_memory.h"
-#include "base/sys_info.h"
 #include "chrome/browser/renderer_host/audio_sync_reader.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/render_messages_params.h"
@@ -27,35 +25,7 @@ static const int kMaxSamplesPerHardwarePacket = 64 * 1024;
 // This value is selected so that we have 8192 samples for 48khz streams.
 static const int kMillisecondsPerHardwarePacket = 170;
 
-// We allow at most 50 concurrent audio streams in most case. This is a
-// rather high limit that is practically hard to reach.
-static const size_t kMaxStreams = 50;
-
-// By experiment the maximum number of audio streams allowed in Leopard
-// is 18. But we put a slightly smaller number just to be safe.
-static const size_t kMaxStreamsLeopard = 15;
-
-// Returns the number of audio streams allowed. This is a practical limit to
-// prevent failure caused by too many audio streams opened.
-static size_t GetMaxAudioStreamsAllowed() {
-#if defined(OS_MACOSX)
-  // We are hitting a bug in Leopard where too many audio streams will cause
-  // a deadlock in the AudioQueue API when starting the stream. Unfortunately
-  // there's no way to detect it within the AudioQueue API, so we put a
-  // special hard limit only for Leopard.
-  // See bug: http://crbug.com/30242
-  int32 major, minor, bugfix;
-  base::SysInfo::OperatingSystemVersionNumbers(&major, &minor, &bugfix);
-  if (major < 10 || (major == 10 && minor <= 5))
-    return kMaxStreamsLeopard;
-#endif
-
-  // In OS other than OSX Leopard, the number of audio streams allowed is a
-  // lot more so we return a separate number.
-  return kMaxStreams;
-}
-
-static uint32 SelectHardwarePacketSize(AudioParameters params) {
+static uint32 SelectSamplesPerPacket(AudioParameters params) {
   // Select the number of samples that can provide at least
   // |kMillisecondsPerHardwarePacket| worth of audio data.
   int samples = kMinSamplesPerHardwarePacket;
@@ -64,8 +34,17 @@ static uint32 SelectHardwarePacketSize(AudioParameters params) {
          params.sample_rate * kMillisecondsPerHardwarePacket) {
     samples *= 2;
   }
-  return params.channels * samples * params.bits_per_sample / 8;
+  return samples;
 }
+
+AudioRendererHost::AudioEntry::AudioEntry()
+    : render_view_id(0),
+      stream_id(0),
+      pending_buffer_request(false),
+      pending_close(false) {
+}
+
+AudioRendererHost::AudioEntry::~AudioEntry() {}
 
 ///////////////////////////////////////////////////////////////////////////////
 // AudioRendererHost implementations.
@@ -126,7 +105,7 @@ void AudioRendererHost::OnCreated(media::AudioOutputController* controller) {
       NewRunnableMethod(
           this,
           &AudioRendererHost::DoCompleteCreation,
-          controller));
+          make_scoped_refptr(controller)));
 }
 
 void AudioRendererHost::OnPlaying(media::AudioOutputController* controller) {
@@ -136,7 +115,7 @@ void AudioRendererHost::OnPlaying(media::AudioOutputController* controller) {
       NewRunnableMethod(
           this,
           &AudioRendererHost::DoSendPlayingMessage,
-          controller));
+          make_scoped_refptr(controller)));
 }
 
 void AudioRendererHost::OnPaused(media::AudioOutputController* controller) {
@@ -146,7 +125,7 @@ void AudioRendererHost::OnPaused(media::AudioOutputController* controller) {
       NewRunnableMethod(
           this,
           &AudioRendererHost::DoSendPausedMessage,
-          controller));
+          make_scoped_refptr(controller)));
 }
 
 void AudioRendererHost::OnError(media::AudioOutputController* controller,
@@ -156,7 +135,7 @@ void AudioRendererHost::OnError(media::AudioOutputController* controller,
       FROM_HERE,
       NewRunnableMethod(this,
                         &AudioRendererHost::DoHandleError,
-                        controller,
+                        make_scoped_refptr(controller),
                         error_code));
 }
 
@@ -167,7 +146,7 @@ void AudioRendererHost::OnMoreData(media::AudioOutputController* controller,
       FROM_HERE,
       NewRunnableMethod(this,
                         &AudioRendererHost::DoRequestMoreData,
-                        controller,
+                        make_scoped_refptr(controller),
                         buffers_state));
 }
 
@@ -216,7 +195,7 @@ void AudioRendererHost::DoCompleteCreation(
 
     SendMessage(new ViewMsg_NotifyLowLatencyAudioStreamCreated(
         entry->render_view_id, entry->stream_id, foreign_memory_handle,
-        foreign_socket_handle, entry->shared_memory.max_size()));
+        foreign_socket_handle, entry->shared_memory.created_size()));
     return;
   }
 
@@ -224,7 +203,7 @@ void AudioRendererHost::DoCompleteCreation(
   // process.
   SendMessage(new ViewMsg_NotifyAudioStreamCreated(
       entry->render_view_id, entry->stream_id, foreign_memory_handle,
-      entry->shared_memory.max_size()));
+      entry->shared_memory.created_size()));
 }
 
 void AudioRendererHost::DoSendPlayingMessage(
@@ -329,25 +308,17 @@ void AudioRendererHost::OnCreateStream(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(LookupById(msg.routing_id(), stream_id) == NULL);
 
-  // Limit the number of audio streams opened. This is to prevent using
-  // excessive resources for a large number of audio streams. More
-  // importantly it prevents instability on certain systems.
-  // See bug: http://crbug.com/30242
-  if (audio_entries_.size() >= GetMaxAudioStreamsAllowed()) {
-    SendErrorMessage(msg.routing_id(), stream_id);
-    return;
-  }
+  AudioParameters audio_params(params.params);
 
-  // Select the hardwaer packet size if not specified.
-  uint32 hardware_packet_size = params.packet_size;
-  if (!hardware_packet_size) {
-    hardware_packet_size = SelectHardwarePacketSize(params.params);
+  // Select the hardware packet size if not specified.
+  if (!audio_params.samples_per_packet) {
+    audio_params.samples_per_packet = SelectSamplesPerPacket(audio_params);
   }
+  uint32 packet_size = audio_params.GetPacketSize();
 
   scoped_ptr<AudioEntry> entry(new AudioEntry());
   // Create the shared memory and share with the renderer process.
-  if (!entry->shared_memory.Create("", false, false, hardware_packet_size) ||
-      !entry->shared_memory.Map(entry->shared_memory.max_size())) {
+  if (!entry->shared_memory.CreateAndMapAnonymous(packet_size)) {
     // If creation of shared memory failed then send an error message.
     SendErrorMessage(msg.routing_id(), stream_id);
     return;
@@ -368,16 +339,13 @@ void AudioRendererHost::OnCreateStream(
     // entry and construct an AudioOutputController.
     entry->reader.reset(reader.release());
     entry->controller =
-        media::AudioOutputController::CreateLowLatency(
-            this, params.params,
-            hardware_packet_size,
-            entry->reader.get());
+        media::AudioOutputController::CreateLowLatency(this, audio_params,
+                                                       entry->reader.get());
   } else {
     // The choice of buffer capacity is based on experiment.
     entry->controller =
-        media::AudioOutputController::Create(this, params.params,
-                                             hardware_packet_size,
-                                             3 * hardware_packet_size);
+        media::AudioOutputController::Create(this, audio_params,
+                                             3 * packet_size);
   }
 
   if (!entry->controller) {
@@ -390,9 +358,9 @@ void AudioRendererHost::OnCreateStream(
   entry->render_view_id = msg.routing_id();
   entry->stream_id = stream_id;
 
- audio_entries_.insert(std::make_pair(
-     AudioEntryId(msg.routing_id(), stream_id),
-     entry.release()));
+  audio_entries_.insert(std::make_pair(
+      AudioEntryId(msg.routing_id(), stream_id),
+      entry.release()));
 }
 
 void AudioRendererHost::OnPlayStream(const IPC::Message& msg, int stream_id) {
@@ -451,7 +419,8 @@ void AudioRendererHost::OnSetVolume(const IPC::Message& msg, int stream_id,
   }
 
   // Make sure the volume is valid.
-  CHECK(volume >= 0 && volume <= 1.0);
+  if (volume < 0 || volume > 1.0)
+      return;
   entry->controller->SetVolume(volume);
 }
 
@@ -471,7 +440,7 @@ void AudioRendererHost::OnNotifyPacketReady(
   }
 
   DCHECK(!entry->controller->LowLatencyMode());
-  CHECK(packet_size <= entry->shared_memory.max_size());
+  CHECK(packet_size <= entry->shared_memory.created_size());
 
   if (!entry->pending_buffer_request) {
     NOTREACHED() << "Buffer received but no such pending request";
@@ -563,7 +532,7 @@ AudioRendererHost::AudioEntry* AudioRendererHost::LookupById(
 
   AudioEntryMap::iterator i = audio_entries_.find(
       AudioEntryId(route_id, stream_id));
-  if (i != audio_entries_.end())
+  if (i != audio_entries_.end() && !i->second->pending_close)
     return i->second;
   return NULL;
 }
@@ -576,7 +545,7 @@ AudioRendererHost::AudioEntry* AudioRendererHost::LookupByController(
   // TODO(hclam): Implement a faster look up method.
   for (AudioEntryMap::iterator i = audio_entries_.begin();
        i != audio_entries_.end(); ++i) {
-    if (controller == i->second->controller.get())
+    if (!i->second->pending_close && controller == i->second->controller.get())
       return i->second;
   }
   return NULL;

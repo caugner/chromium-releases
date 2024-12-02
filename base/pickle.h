@@ -177,10 +177,12 @@ class Pickle {
   // Returns the address of the byte immediately following the currently valid
   // header + payload.
   char* end_of_payload() {
+    // We must have a valid header_.
     return payload() + payload_size();
   }
   const char* end_of_payload() const {
-    return payload() + payload_size();
+    // This object may be invalid.
+    return header_ ? payload() + payload_size() : NULL;
   }
 
   size_t capacity() const {
@@ -234,6 +236,7 @@ class Pickle {
 
   FRIEND_TEST_ALL_PREFIXES(PickleTest, Resize);
   FRIEND_TEST_ALL_PREFIXES(PickleTest, FindNext);
+  FRIEND_TEST_ALL_PREFIXES(PickleTest, FindNextWithIncompleteHeader);
   FRIEND_TEST_ALL_PREFIXES(PickleTest, IteratorHasRoom);
 };
 

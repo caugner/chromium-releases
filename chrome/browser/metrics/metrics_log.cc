@@ -17,8 +17,9 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/gpu_process_host.h"
+#include "chrome/browser/gpu_process_host_ui_shim.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
@@ -300,9 +301,9 @@ void MetricsLog::RecordEnvironment(
   {
     OPEN_ELEMENT_FOR_SCOPE("gpu");
     WriteIntAttribute("vendorid",
-                      GpuProcessHost::Get()->gpu_info().vendor_id());
+                      GpuProcessHostUIShim::Get()->gpu_info().vendor_id());
     WriteIntAttribute("deviceid",
-                      GpuProcessHost::Get()->gpu_info().device_id());
+                      GpuProcessHostUIShim::Get()->gpu_info().device_id());
   }
 
   {

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/host_content_settings_map.h"
 
+#include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
@@ -13,8 +14,10 @@
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/test/testing_pref_service.h"
 #include "chrome/test/testing_profile.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/static_cookie_policy.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 
@@ -47,6 +50,7 @@ class StubSettingsObserver : public NotificationObserver {
     last_pattern = settings_details.ptr()->pattern();
     last_update_all = settings_details.ptr()->update_all();
     last_update_all_types = settings_details.ptr()->update_all_types();
+    last_type = settings_details.ptr()->type();
     // This checks that calling a Get function from an observer doesn't
     // deadlock.
     last_notifier->GetContentSettings(GURL("http://random-hostname.com/"));
@@ -57,6 +61,7 @@ class StubSettingsObserver : public NotificationObserver {
   bool last_update_all;
   bool last_update_all_types;
   int counter;
+  ContentSettingsType last_type;
 
  private:
   NotificationRegistrar registrar_;
@@ -89,11 +94,18 @@ TEST_F(HostContentSettingsMapTest, DefaultValues) {
   EXPECT_EQ(CONTENT_SETTING_ALLOW, host_content_settings_map->GetContentSetting(
                 GURL(chrome::kChromeUINewTabURL),
                 CONTENT_SETTINGS_TYPE_IMAGES, ""));
-  host_content_settings_map->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_ASK);
-  EXPECT_EQ(CONTENT_SETTING_ASK,
-            host_content_settings_map->GetDefaultContentSetting(
-                CONTENT_SETTINGS_TYPE_PLUGINS));
+  {
+    // Click-to-play needs to be enabled to set the content setting to ASK.
+    CommandLine* cmd = CommandLine::ForCurrentProcess();
+    AutoReset<CommandLine> auto_reset(cmd, *cmd);
+    cmd->AppendSwitch(switches::kEnableClickToPlay);
+
+    host_content_settings_map->SetDefaultContentSetting(
+        CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_ASK);
+    EXPECT_EQ(CONTENT_SETTING_ASK,
+              host_content_settings_map->GetDefaultContentSetting(
+                  CONTENT_SETTINGS_TYPE_PLUGINS));
+  }
   host_content_settings_map->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_POPUPS, CONTENT_SETTING_ALLOW);
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
@@ -246,6 +258,40 @@ TEST_F(HostContentSettingsMapTest, PatternSupport) {
                GURL("http://example.org/")));
   EXPECT_FALSE(HostContentSettingsMap::Pattern("example.com").Matches(
                GURL("http://example.org/")));
+}
+
+TEST_F(HostContentSettingsMapTest, CanonicalizePattern) {
+  // Basic patterns.
+  EXPECT_STREQ("[*.]ikea.com", HostContentSettingsMap::Pattern("[*.]ikea.com")
+      .CanonicalizePattern().c_str());
+  EXPECT_STREQ("example.com", HostContentSettingsMap::Pattern("example.com")
+      .CanonicalizePattern().c_str());
+  EXPECT_STREQ("192.168.1.1", HostContentSettingsMap::Pattern("192.168.1.1")
+      .CanonicalizePattern().c_str());
+  EXPECT_STREQ("[::1]", HostContentSettingsMap::Pattern("[::1]")
+      .CanonicalizePattern().c_str());
+  // IsValid returns false for file:/// patterns.
+  EXPECT_STREQ("", HostContentSettingsMap::Pattern(
+      "file:///temp/file.html").CanonicalizePattern().c_str());
+
+  // UTF-8 patterns.
+  EXPECT_STREQ("[*.]xn--ira-ppa.com", HostContentSettingsMap::Pattern(
+      "[*.]\xC4\x87ira.com").CanonicalizePattern().c_str());
+  EXPECT_STREQ("xn--ira-ppa.com", HostContentSettingsMap::Pattern(
+      "\xC4\x87ira.com").CanonicalizePattern().c_str());
+  // IsValid returns false for file:/// patterns.
+  EXPECT_STREQ("", HostContentSettingsMap::Pattern(
+      "file:///\xC4\x87ira.html").CanonicalizePattern().c_str());
+
+  // Invalid patterns.
+  EXPECT_STREQ("", HostContentSettingsMap::Pattern(
+      "*example.com").CanonicalizePattern().c_str());
+  EXPECT_STREQ("", HostContentSettingsMap::Pattern(
+      "example.*").CanonicalizePattern().c_str());
+  EXPECT_STREQ("", HostContentSettingsMap::Pattern(
+      "*\xC4\x87ira.com").CanonicalizePattern().c_str());
+  EXPECT_STREQ("", HostContentSettingsMap::Pattern(
+      "\xC4\x87ira.*").CanonicalizePattern().c_str());
 }
 
 TEST_F(HostContentSettingsMapTest, Observer) {
@@ -492,8 +538,8 @@ TEST_F(HostContentSettingsMapTest, OffTheRecord) {
   HostContentSettingsMap* host_content_settings_map =
       profile.GetHostContentSettingsMap();
   profile.set_off_the_record(true);
-  scoped_refptr<HostContentSettingsMap> otr_map =
-      new HostContentSettingsMap(&profile);
+  scoped_refptr<HostContentSettingsMap> otr_map(
+      new HostContentSettingsMap(&profile));
   profile.set_off_the_record(false);
 
   GURL host("http://example.com/");
@@ -529,6 +575,91 @@ TEST_F(HostContentSettingsMapTest, OffTheRecord) {
                 host, CONTENT_SETTINGS_TYPE_IMAGES, ""));
 }
 
+TEST_F(HostContentSettingsMapTest, MigrateObsoletePrefs) {
+  // This feature is currently behind a flag.
+  CommandLine* cmd = CommandLine::ForCurrentProcess();
+  AutoReset<CommandLine> auto_reset(cmd, *cmd);
+  cmd->AppendSwitch(switches::kEnableResourceContentSettings);
+
+  TestingProfile profile;
+  PrefService* prefs = profile.GetPrefs();
+
+  // Set obsolete data.
+  prefs->SetInteger(prefs::kCookieBehavior,
+                    net::StaticCookiePolicy::BLOCK_ALL_COOKIES);
+
+  ListValue popup_hosts;
+  popup_hosts.Append(new StringValue("[*.]example.com"));
+  prefs->Set(prefs::kPopupWhitelistedHosts, popup_hosts);
+
+  HostContentSettingsMap* host_content_settings_map =
+      profile.GetHostContentSettingsMap();
+
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_COOKIES));
+
+  GURL host("http://example.com");
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetContentSetting(
+                host, CONTENT_SETTINGS_TYPE_POPUPS, ""));
+}
+
+// For a single Unicode encoded pattern, check if it gets converted to punycode
+// and old pattern gets deleted.
+TEST_F(HostContentSettingsMapTest, CanonicalizeExceptionsUnicodeOnly) {
+  TestingProfile profile;
+  PrefService* prefs = profile.GetPrefs();
+
+  // Set utf-8 data.
+  DictionaryValue* all_settings_dictionary =
+      prefs->GetMutableDictionary(prefs::kContentSettingsPatterns);
+  ASSERT_TRUE(NULL != all_settings_dictionary);
+
+  DictionaryValue* dummy_payload = new DictionaryValue;
+  dummy_payload->SetInteger("images", CONTENT_SETTING_ALLOW);
+  all_settings_dictionary->SetWithoutPathExpansion("[*.]\xC4\x87ira.com",
+                                                   dummy_payload);
+
+  profile.GetHostContentSettingsMap();
+
+  DictionaryValue* result = NULL;
+  EXPECT_FALSE(all_settings_dictionary->GetDictionaryWithoutPathExpansion(
+      "[*.]\xC4\x87ira.com", &result));
+  EXPECT_TRUE(all_settings_dictionary->GetDictionaryWithoutPathExpansion(
+      "[*.]xn--ira-ppa.com", &result));
+}
+
+// If both Unicode and its punycode pattern exist, make sure we don't touch the
+// settings for the punycode, and that Unicode pattern gets deleted.
+TEST_F(HostContentSettingsMapTest, CanonicalizeExceptionsUnicodeAndPunycode) {
+  // This feature is currently behind a flag.
+  CommandLine* cmd = CommandLine::ForCurrentProcess();
+  AutoReset<CommandLine> auto_reset(cmd, *cmd);
+  cmd->AppendSwitch(switches::kEnableResourceContentSettings);
+
+  TestingProfile profile;
+
+  scoped_ptr<Value> value(base::JSONReader::Read(
+      "{\"[*.]\\xC4\\x87ira.com\":{\"per_plugin\":{\"pluginx\":2}}}", false));
+  profile.GetPrefs()->Set(prefs::kContentSettingsPatterns, *value);
+
+  // Set punycode equivalent, with different setting.
+  scoped_ptr<Value> puny_value(base::JSONReader::Read(
+      "{\"[*.]xn--ira-ppa.com\":{\"per_plugin\":{\"pluginy\":2}}}", false));
+  profile.GetPrefs()->Set(prefs::kContentSettingsPatterns, *puny_value);
+
+  // Initialize the content map.
+  profile.GetHostContentSettingsMap();
+
+  const DictionaryValue* content_setting_prefs =
+      profile.GetPrefs()->GetDictionary(prefs::kContentSettingsPatterns);
+  std::string prefs_as_json;
+  base::JSONWriter::Write(content_setting_prefs, false, &prefs_as_json);
+  EXPECT_STREQ("{\"[*.]xn--ira-ppa.com\":{\"per_plugin\":{\"pluginy\":2}}}",
+               prefs_as_json.c_str());
+}
+
 TEST_F(HostContentSettingsMapTest, NonDefaultSettings) {
   TestingProfile profile;
   HostContentSettingsMap* host_content_settings_map =
@@ -553,9 +684,9 @@ TEST_F(HostContentSettingsMapTest, NonDefaultSettings) {
 
 TEST_F(HostContentSettingsMapTest, ResourceIdentifier) {
   // This feature is currently behind a flag.
-  CommandLine cl(*CommandLine::ForCurrentProcess());
-  CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableResourceContentSettings);
+  CommandLine* cmd = CommandLine::ForCurrentProcess();
+  AutoReset<CommandLine> auto_reset(cmd, *cmd);
+  cmd->AppendSwitch(switches::kEnableResourceContentSettings);
 
   TestingProfile profile;
   HostContentSettingsMap* host_content_settings_map =
@@ -577,14 +708,13 @@ TEST_F(HostContentSettingsMapTest, ResourceIdentifier) {
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
             host_content_settings_map->GetContentSetting(
                 host, CONTENT_SETTINGS_TYPE_PLUGINS, resource2));
-  *CommandLine::ForCurrentProcess() = cl;
 }
 
 TEST_F(HostContentSettingsMapTest, ResourceIdentifierPrefs) {
   // This feature is currently behind a flag.
-  CommandLine cl(*CommandLine::ForCurrentProcess());
-  CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableResourceContentSettings);
+  CommandLine* cmd = CommandLine::ForCurrentProcess();
+  AutoReset<CommandLine> auto_reset(cmd, *cmd);
+  cmd->AppendSwitch(switches::kEnableResourceContentSettings);
 
   TestingProfile profile;
   scoped_ptr<Value> value(base::JSONReader::Read(
@@ -619,7 +749,239 @@ TEST_F(HostContentSettingsMapTest, ResourceIdentifierPrefs) {
   base::JSONWriter::Write(content_setting_prefs, false, &prefs_as_json);
   EXPECT_STREQ("{\"[*.]example.com\":{\"per_plugin\":{\"otherplugin\":2}}}",
                prefs_as_json.c_str());
-  *CommandLine::ForCurrentProcess() = cl;
+}
+
+// If a default-content-setting is managed, the managed value should be used
+// instead of the default value.
+TEST_F(HostContentSettingsMapTest, ManagedDefaultContentSetting) {
+  TestingProfile profile;
+  HostContentSettingsMap* host_content_settings_map =
+      profile.GetHostContentSettingsMap();
+  TestingPrefService* prefs = profile.GetTestingPrefService();
+
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_JAVASCRIPT));
+
+  // Set managed-default-content-setting through the coresponding preferences.
+  prefs->SetManagedPref(prefs::kManagedDefaultJavaScriptSetting,
+                        Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_JAVASCRIPT));
+
+  // Remove managed-default-content-settings-preferences.
+  prefs->RemoveManagedPref(prefs::kManagedDefaultJavaScriptSetting);
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_JAVASCRIPT));
+
+  // Set preference to manage the default-content-setting for Plugins.
+  prefs->SetManagedPref(prefs::kManagedDefaultPluginsSetting,
+                        Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_PLUGINS));
+
+  // Remove the preference to manage the default-content-setting for Plugins.
+  prefs->RemoveManagedPref(prefs::kManagedDefaultPluginsSetting);
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_PLUGINS));
+}
+
+TEST_F(HostContentSettingsMapTest,
+       GetNonDefaultContentSettingsIfTypeManaged) {
+  TestingProfile profile;
+  HostContentSettingsMap* host_content_settings_map =
+      profile.GetHostContentSettingsMap();
+  TestingPrefService* prefs = profile.GetTestingPrefService();
+
+  // Set pattern for JavaScript setting.
+  HostContentSettingsMap::Pattern pattern("[*.]example.com");
+  host_content_settings_map->SetContentSetting(pattern,
+      CONTENT_SETTINGS_TYPE_JAVASCRIPT, "", CONTENT_SETTING_BLOCK);
+
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_JAVASCRIPT));
+
+  GURL host("http://example.com/");
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetContentSetting(
+                host, CONTENT_SETTINGS_TYPE_JAVASCRIPT, ""));
+
+  // Set managed-default-content-setting for content-settings-type JavaScript.
+  prefs->SetManagedPref(prefs::kManagedDefaultJavaScriptSetting,
+                        Value::CreateIntegerValue(CONTENT_SETTING_ALLOW));
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetContentSetting(
+                host, CONTENT_SETTINGS_TYPE_JAVASCRIPT, ""));
+}
+
+// Managed default content setting should have higher priority
+// than user defined patterns.
+TEST_F(HostContentSettingsMapTest,
+       ManagedDefaultContentSettingIgnoreUserPattern) {
+  TestingProfile profile;
+  HostContentSettingsMap* host_content_settings_map =
+      profile.GetHostContentSettingsMap();
+  TestingPrefService* prefs = profile.GetTestingPrefService();
+
+  // Block all JavaScript.
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_JAVASCRIPT, CONTENT_SETTING_BLOCK);
+
+  // Set an exception to allow "[*.]example.com"
+  HostContentSettingsMap::Pattern pattern("[*.]example.com");
+  host_content_settings_map->SetContentSetting(pattern,
+      CONTENT_SETTINGS_TYPE_JAVASCRIPT, "", CONTENT_SETTING_ALLOW);
+
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_JAVASCRIPT));
+  GURL host("http://example.com/");
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetContentSetting(
+                host, CONTENT_SETTINGS_TYPE_JAVASCRIPT, ""));
+
+  // Set managed-default-content-settings-preferences.
+  prefs->SetManagedPref(prefs::kManagedDefaultJavaScriptSetting,
+                        Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetContentSetting(
+                host, CONTENT_SETTINGS_TYPE_JAVASCRIPT, ""));
+
+  // Remove managed-default-content-settings-preferences.
+  prefs->RemoveManagedPref(prefs::kManagedDefaultJavaScriptSetting);
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetContentSetting(
+                host, CONTENT_SETTINGS_TYPE_JAVASCRIPT, ""));
+}
+
+// If a default-content-setting is set to managed setting, the user defined
+// setting should be preserved.
+TEST_F(HostContentSettingsMapTest, OverwrittenDefaultContentSetting) {
+  TestingProfile profile;
+  HostContentSettingsMap* host_content_settings_map =
+      profile.GetHostContentSettingsMap();
+  TestingPrefService* prefs = profile.GetTestingPrefService();
+
+  // Set user defined default-content-setting for Cookies.
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_COOKIES, CONTENT_SETTING_BLOCK);
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_COOKIES));
+
+  // Set preference to manage the default-content-setting for Cookies.
+  prefs->SetManagedPref(prefs::kManagedDefaultCookiesSetting,
+                        Value::CreateIntegerValue(CONTENT_SETTING_ALLOW));
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_COOKIES));
+
+  // Remove the preference to manage the default-content-setting for Cookies.
+  prefs->RemoveManagedPref(prefs::kManagedDefaultCookiesSetting);
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_COOKIES));
+ }
+
+// When a default-content-setting is set to a managed setting a
+// CONTENT_SETTINGS_CHANGED notification should be fired. The same should happen
+// if the managed setting is removed.
+TEST_F(HostContentSettingsMapTest, ObserveManagedSettingsChange) {
+  TestingProfile profile;
+  HostContentSettingsMap* host_content_settings_map =
+      profile.GetHostContentSettingsMap();
+  StubSettingsObserver observer;
+  TestingPrefService* prefs = profile.GetTestingPrefService();
+
+  // TODO(markusheintz): I think it would be better to send notifications only
+  // for a specific content-settings-type.
+
+  // Set the managed default-content-setting.
+  prefs->SetManagedPref(prefs::kManagedDefaultImagesSetting,
+                        Value::CreateIntegerValue(CONTENT_SETTING_BLOCK));
+  EXPECT_EQ(host_content_settings_map, observer.last_notifier);
+  EXPECT_EQ(HostContentSettingsMap::Pattern(), observer.last_pattern);
+  EXPECT_EQ(CONTENT_SETTINGS_TYPE_DEFAULT, observer.last_type);
+  EXPECT_TRUE(observer.last_update_all);
+  EXPECT_TRUE(observer.last_update_all_types);
+  EXPECT_EQ(1, observer.counter);
+
+  // Remove the managed default-content-setting.
+  prefs->RemoveManagedPref(prefs::kManagedDefaultImagesSetting);
+  EXPECT_EQ(host_content_settings_map, observer.last_notifier);
+  EXPECT_EQ(CONTENT_SETTINGS_TYPE_DEFAULT, observer.last_type);
+  EXPECT_EQ(HostContentSettingsMap::Pattern(), observer.last_pattern);
+  EXPECT_TRUE(observer.last_update_all);
+  EXPECT_TRUE(observer.last_update_all_types);
+  EXPECT_EQ(2, observer.counter);
+}
+
+// When a default-content-setting is set to a managed setting a
+// CONTENT_SETTINGS_CHANGED notification should be fired. The same should happen
+// if the managed setting is removed. In this test-case the actual managed
+// setting is the same. Just the managed status of the default-content-setting
+// changes.
+TEST_F(HostContentSettingsMapTest, ObserveManagedSettingsNoChange) {
+  TestingProfile profile;
+  HostContentSettingsMap* host_content_settings_map =
+      profile.GetHostContentSettingsMap();
+  StubSettingsObserver observer;
+  TestingPrefService* prefs = profile.GetTestingPrefService();
+
+  // TODO(markusheintz): I think it would be better to send notifications only
+  // for a specific content-settings-type.
+
+  // Set the managed default-content-setting. In this case the actual setting
+  // does not change.
+  prefs->SetManagedPref(prefs::kManagedDefaultImagesSetting,
+                        Value::CreateIntegerValue(CONTENT_SETTING_ALLOW));
+  EXPECT_EQ(host_content_settings_map, observer.last_notifier);
+  EXPECT_EQ(HostContentSettingsMap::Pattern(), observer.last_pattern);
+  EXPECT_EQ(CONTENT_SETTINGS_TYPE_DEFAULT, observer.last_type);
+  EXPECT_TRUE(observer.last_update_all);
+  EXPECT_TRUE(observer.last_update_all_types);
+  EXPECT_EQ(1, observer.counter);
+
+  // Remove the managed default-content-setting.
+  prefs->RemoveManagedPref(prefs::kManagedDefaultImagesSetting);
+  EXPECT_EQ(host_content_settings_map, observer.last_notifier);
+  EXPECT_EQ(CONTENT_SETTINGS_TYPE_DEFAULT, observer.last_type);
+  EXPECT_EQ(HostContentSettingsMap::Pattern(), observer.last_pattern);
+  EXPECT_TRUE(observer.last_update_all);
+  EXPECT_TRUE(observer.last_update_all_types);
+  EXPECT_EQ(2, observer.counter);
+}
+
+// If a setting for a default-content-setting-type is set while the type is
+// managed, then the new setting should be preserved and used after the
+// default-content-setting-type is not managed anymore.
+TEST_F(HostContentSettingsMapTest, SettingDefaultContentSettingsWhenManaged) {
+  TestingProfile profile;
+  HostContentSettingsMap* host_content_settings_map =
+      profile.GetHostContentSettingsMap();
+  TestingPrefService* prefs = profile.GetTestingPrefService();
+
+  prefs->SetManagedPref(prefs::kManagedDefaultPluginsSetting,
+                        Value::CreateIntegerValue(CONTENT_SETTING_ALLOW));
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_PLUGINS));
+
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_BLOCK);
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_PLUGINS));
+
+  prefs->RemoveManagedPref(prefs::kManagedDefaultPluginsSetting);
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_PLUGINS));
 }
 
 }  // namespace

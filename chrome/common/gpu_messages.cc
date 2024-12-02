@@ -4,11 +4,13 @@
 
 #include "chrome/common/gpu_messages.h"
 
+#include "chrome/common/gpu_create_command_buffer_config.h"
 #include "chrome/common/gpu_info.h"
 #include "chrome/common/dx_diag_node.h"
 #include "gfx/rect.h"
 #include "gfx/size.h"
 #include "ipc/ipc_channel_handle.h"
+#include "ipc/ipc_message_utils.h"
 
 #define MESSAGES_INTERNAL_IMPL_FILE \
   "chrome/common/gpu_messages_internal.h"
@@ -29,6 +31,15 @@ GpuHostMsg_AcceleratedSurfaceSetIOSurface_Params::
           identifier(0) {
 }
 
+GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params::
+    GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params()
+        : renderer_id(0),
+          render_view_id(0),
+          window(NULL),
+          surface_id(0),
+          route_id(0),
+          swap_buffers_count(0) {
+}
 #endif
 
 namespace IPC {
@@ -76,16 +87,58 @@ void ParamTraits<GpuHostMsg_AcceleratedSurfaceSetIOSurface_Params> ::Log(
   l->append(")");
 }
 
+void ParamTraits<GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params> ::Write(
+    Message* m,
+    const param_type& p) {
+  WriteParam(m, p.renderer_id);
+  WriteParam(m, p.render_view_id);
+  WriteParam(m, p.window);
+  WriteParam(m, p.surface_id);
+  WriteParam(m, p.route_id);
+  WriteParam(m, p.swap_buffers_count);
+}
+
+bool ParamTraits<GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params> ::Read(
+    const Message* m,
+    void** iter,
+    param_type* p) {
+  return ReadParam(m, iter, &p->renderer_id) &&
+      ReadParam(m, iter, &p->render_view_id) &&
+      ReadParam(m, iter, &p->window) &&
+      ReadParam(m, iter, &p->surface_id) &&
+      ReadParam(m, iter, &p->route_id) &&
+      ReadParam(m, iter, &p->swap_buffers_count);
+}
+
+void ParamTraits<GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params> ::Log(
+     const param_type& p,
+     std::string* l) {
+  l->append("(");
+  LogParam(p.renderer_id, l);
+  l->append(", ");
+  LogParam(p.render_view_id, l);
+  l->append(", ");
+  LogParam(p.window, l);
+  l->append(", ");
+  LogParam(p.surface_id, l);
+  l->append(", ");
+  LogParam(p.route_id, l);
+  l->append(", ");
+  LogParam(p.swap_buffers_count, l);
+  l->append(")");
+}
 #endif  // if defined(OS_MACOSX)
 
 void ParamTraits<GPUInfo> ::Write(Message* m, const param_type& p) {
-  m->WriteUInt32(p.vendor_id());
-  m->WriteUInt32(p.device_id());
-  m->WriteWString(p.driver_version());
-  m->WriteUInt32(p.pixel_shader_version());
-  m->WriteUInt32(p.vertex_shader_version());
-  m->WriteUInt32(p.gl_version());
-  m->WriteBool(p.can_lose_context());
+  WriteParam(m, static_cast<int32>(p.progress()));
+  WriteParam(m, p.initialization_time());
+  WriteParam(m, p.vendor_id());
+  WriteParam(m, p.device_id());
+  WriteParam(m, p.driver_version());
+  WriteParam(m, p.pixel_shader_version());
+  WriteParam(m, p.vertex_shader_version());
+  WriteParam(m, p.gl_version());
+  WriteParam(m, p.can_lose_context());
 
 #if defined(OS_WIN)
   ParamTraits<DxDiagNode> ::Write(m, p.dx_diagnostics());
@@ -93,6 +146,8 @@ void ParamTraits<GPUInfo> ::Write(Message* m, const param_type& p) {
 }
 
 bool ParamTraits<GPUInfo> ::Read(const Message* m, void** iter, param_type* p) {
+  int32 progress;
+  base::TimeDelta initialization_time;
   uint32 vendor_id;
   uint32 device_id;
   std::wstring driver_version;
@@ -100,13 +155,20 @@ bool ParamTraits<GPUInfo> ::Read(const Message* m, void** iter, param_type* p) {
   uint32 vertex_shader_version;
   uint32 gl_version;
   bool can_lose_context;
-  bool ret = m->ReadUInt32(iter, &vendor_id);
-  ret = ret && m->ReadUInt32(iter, &device_id);
-  ret = ret && m->ReadWString(iter, &driver_version);
-  ret = ret && m->ReadUInt32(iter, &pixel_shader_version);
-  ret = ret && m->ReadUInt32(iter, &vertex_shader_version);
-  ret = ret && m->ReadUInt32(iter, &gl_version);
-  ret = ret && m->ReadBool(iter, &can_lose_context);
+  bool ret = ReadParam(m, iter, &progress);
+  ret = ret && ReadParam(m, iter, &initialization_time);
+  ret = ret && ReadParam(m, iter, &vendor_id);
+  ret = ret && ReadParam(m, iter, &device_id);
+  ret = ret && ReadParam(m, iter, &driver_version);
+  ret = ret && ReadParam(m, iter, &pixel_shader_version);
+  ret = ret && ReadParam(m, iter, &vertex_shader_version);
+  ret = ret && ReadParam(m, iter, &gl_version);
+  ret = ret && ReadParam(m, iter, &can_lose_context);
+  p->SetProgress(static_cast<GPUInfo::Progress>(progress));
+  if (!ret)
+    return false;
+
+  p->SetInitializationTime(initialization_time);
   p->SetGraphicsInfo(vendor_id,
                      device_id,
                      driver_version,
@@ -117,37 +179,36 @@ bool ParamTraits<GPUInfo> ::Read(const Message* m, void** iter, param_type* p) {
 
 #if defined(OS_WIN)
   DxDiagNode dx_diagnostics;
-  ret = ret && ParamTraits<DxDiagNode> ::Read(m, iter, &dx_diagnostics);
+  if (!ReadParam(m, iter, &dx_diagnostics))
+    return false;
+
   p->SetDxDiagnostics(dx_diagnostics);
 #endif
 
-  return ret;
+  return true;
 }
 
 void ParamTraits<GPUInfo> ::Log(const param_type& p, std::string* l) {
-  l->append(StringPrintf("<GPUInfo> %x %x %ls %d",
-                         p.vendor_id(),
-                         p.device_id(),
-                         p.driver_version().c_str(),
-                         p.can_lose_context()));
+  l->append(base::StringPrintf("<GPUInfo> %d %d %x %x %ls %d",
+                               p.progress(),
+                               static_cast<int32>(
+                                   p.initialization_time().InMilliseconds()),
+                               p.vendor_id(),
+                               p.device_id(),
+                               p.driver_version().c_str(),
+                               p.can_lose_context()));
 }
 
 void ParamTraits<DxDiagNode> ::Write(Message* m, const param_type& p) {
-  ParamTraits<std::map<std::string, std::string> >::Write(m, p.values);
-  ParamTraits<std::map<std::string, DxDiagNode> >::Write(m, p.children);
+  WriteParam(m, p.values);
+  WriteParam(m, p.children);
 }
 
 bool ParamTraits<DxDiagNode> ::Read(const Message* m,
                                     void** iter,
                                     param_type* p) {
-  bool ret = ParamTraits<std::map<std::string, std::string> >::Read(
-      m,
-      iter,
-      &p->values);
-  ret = ret && ParamTraits<std::map<std::string, DxDiagNode> >::Read(
-      m,
-      iter,
-      &p->children);
+  bool ret = ReadParam(m, iter, &p->values);
+  ret = ret && ReadParam(m, iter, &p->children);
   return ret;
 }
 
@@ -157,22 +218,22 @@ void ParamTraits<DxDiagNode> ::Log(const param_type& p, std::string* l) {
 
 void ParamTraits<gpu::CommandBuffer::State> ::Write(Message* m,
                                                     const param_type& p) {
-  m->WriteInt(p.num_entries);
-  m->WriteInt(p.get_offset);
-  m->WriteInt(p.put_offset);
-  m->WriteInt(p.token);
-  m->WriteInt(p.error);
+  WriteParam(m, p.num_entries);
+  WriteParam(m, p.get_offset);
+  WriteParam(m, p.put_offset);
+  WriteParam(m, p.token);
+  WriteParam(m, static_cast<int32>(p.error));
 }
 
 bool ParamTraits<gpu::CommandBuffer::State> ::Read(const Message* m,
                                                    void** iter,
                                                    param_type* p) {
   int32 temp;
-  if (m->ReadInt(iter, &p->num_entries) &&
-      m->ReadInt(iter, &p->get_offset) &&
-      m->ReadInt(iter, &p->put_offset) &&
-      m->ReadInt(iter, &p->token) &&
-      m->ReadInt(iter, &temp)) {
+  if (ReadParam(m, iter, &p->num_entries) &&
+      ReadParam(m, iter, &p->get_offset) &&
+      ReadParam(m, iter, &p->put_offset) &&
+      ReadParam(m, iter, &p->token) &&
+      ReadParam(m, iter, &temp)) {
     p->error = static_cast<gpu::error::Error>(temp);
     return true;
   } else {
@@ -185,4 +246,24 @@ void ParamTraits<gpu::CommandBuffer::State> ::Log(const param_type& p,
   l->append("<CommandBuffer::State>");
 }
 
-} // namespace IPC
+void ParamTraits<GPUCreateCommandBufferConfig> ::Write(
+    Message* m, const param_type& p) {
+  WriteParam(m, p.allowed_extensions);
+  WriteParam(m, p.attribs);
+}
+
+bool ParamTraits<GPUCreateCommandBufferConfig> ::Read(
+    const Message* m, void** iter, param_type* p) {
+  if (!ReadParam(m, iter, &p->allowed_extensions) ||
+      !ReadParam(m, iter, &p->attribs)) {
+    return false;
+  }
+  return true;
+}
+
+void ParamTraits<GPUCreateCommandBufferConfig> ::Log(
+    const param_type& p, std::string* l) {
+  l->append("<GPUCreateCommandBufferConfig>");
+}
+
+}  // namespace IPC

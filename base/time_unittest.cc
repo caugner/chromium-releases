@@ -52,6 +52,19 @@ TEST(Time, TimeT) {
   EXPECT_EQ(0, Time::FromTimeT(0).ToInternalValue());
 }
 
+TEST(Time, FromExplodedWithMilliseconds) {
+  // Some platform implementations of FromExploded are liable to drop
+  // milliseconds if we aren't careful.
+  Time now = Time::NowFromSystemTime();
+  Time::Exploded exploded1 = {0};
+  now.UTCExplode(&exploded1);
+  exploded1.millisecond = 500;
+  Time time = Time::FromUTCExploded(exploded1);
+  Time::Exploded exploded2 = {0};
+  time.UTCExplode(&exploded2);
+  EXPECT_EQ(exploded1.millisecond, exploded2.millisecond);
+}
+
 TEST(Time, ZeroIsSymmetric) {
   Time zero_time(Time::FromTimeT(0));
   EXPECT_EQ(0, zero_time.ToTimeT());
@@ -125,18 +138,35 @@ TEST(TimeTicks, HighResNow) {
     return;
 #endif
 
-  TimeTicks ticks_start = TimeTicks::HighResNow();
+  // Why do we loop here?
+  // We're trying to measure that intervals increment in a VERY small amount
+  // of time --  less than 15ms.  Unfortunately, if we happen to have a
+  // context switch in the middle of our test, the context switch could easily
+  // exceed our limit.  So, we iterate on this several times.  As long as we're
+  // able to detect the fine-granularity timers at least once, then the test
+  // has succeeded.
+
+  const int kTargetGranularityUs = 15000;  // 15ms
+
+  bool success = false;
+  int retries = 100;  // Arbitrary.
   TimeDelta delta;
-  // Loop until we can detect that the clock has changed.  Non-HighRes timers
-  // will increment in chunks, e.g. 15ms.  By spinning until we see a clock
-  // change, we detect the minimum time between measurements.
-  do {
-    delta = TimeTicks::HighResNow() - ticks_start;
-  } while (delta.InMilliseconds() == 0);
+  while (!success && retries--) {
+    TimeTicks ticks_start = TimeTicks::HighResNow();
+    // Loop until we can detect that the clock has changed.  Non-HighRes timers
+    // will increment in chunks, e.g. 15ms.  By spinning until we see a clock
+    // change, we detect the minimum time between measurements.
+    do {
+      delta = TimeTicks::HighResNow() - ticks_start;
+    } while (delta.InMilliseconds() == 0);
+
+    if (delta.InMicroseconds() <= kTargetGranularityUs)
+      success = true;
+  }
 
   // In high resolution mode, we expect to see the clock increment
   // in intervals less than 15ms.
-  EXPECT_LT(delta.InMicroseconds(), 15000);
+  EXPECT_TRUE(success);
 }
 
 TEST(TimeDelta, FromAndIn) {

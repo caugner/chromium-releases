@@ -218,6 +218,7 @@ class LayoutTestController : public CppBoundClass {
   void repaintSweepHorizontally(const CppArgumentList& args, CppVariant* result);
   void clearBackForwardList(const CppArgumentList& args, CppVariant* result);
   void keepWebHistory(const CppArgumentList& args, CppVariant* result);
+  void layerTreeAsText(const CppArgumentList& args, CppVariant* result);
   void storeWebScriptObject(const CppArgumentList& args, CppVariant* result);
   void accessStoredWebScriptObject(const CppArgumentList& args, CppVariant* result);
   void objCClassNameOf(const CppArgumentList& args, CppVariant* result);
@@ -232,7 +233,7 @@ class LayoutTestController : public CppBoundClass {
   void overridePreference(const CppArgumentList& args, CppVariant* result);
   void setAllowUniversalAccessFromFileURLs(const CppArgumentList& args, CppVariant* result);
   void setAllowFileAccessFromFileURLs(const CppArgumentList& args, CppVariant* result);
-  void setMockSpeechInputResult(const CppArgumentList& args, CppVariant* result);
+  void addMockSpeechInputResult(const CppArgumentList& args, CppVariant* result);
 
   // The fallback method is called when a nonexistent method is called on
   // the layout test controller object.
@@ -299,6 +300,8 @@ class LayoutTestController : public CppBoundClass {
 
   void setMockDeviceOrientation(const CppArgumentList& args,
                                 CppVariant* result);
+
+  void hasSpellingMarker(const CppArgumentList& args, CppVariant* result);
 
  public:
   // The following methods are not exposed to JavaScript.

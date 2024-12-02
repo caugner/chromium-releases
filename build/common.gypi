@@ -314,6 +314,9 @@
     # whether to compile in the sources for the GPU plugin / process.
     'enable_gpu%': 1,
 
+    # Use GConf, the GNOME configuration system.
+    'use_gconf%': 1,
+
     # Use OpenSSL instead of NSS. Currently in development.
     'use_openssl%': 0,
 
@@ -392,6 +395,11 @@
           'NACL_WIN64',
         ],
       }],
+      ['OS=="mac" or (OS=="linux" and chromeos==0 and target_arch!="arm")', {
+        'use_cups%': 1,
+      }, {
+        'use_cups%': 0,
+      }],
     ],
 
     # NOTE: When these end up in the Mac bundle, we need to replace '-' for '_'
@@ -429,6 +437,12 @@
       # See http://msdn.microsoft.com/en-us/library/47238hez(VS.71).aspx
       'win_debug_InlineFunctionExpansion%': '',    # empty = default, 0 = off,
       'win_release_InlineFunctionExpansion%': '2', # 1 = only __inline, 2 = max
+      # VS inserts quite a lot of extra checks to algorithms like
+      # std::partial_sort in Debug build which make them O(N^2)
+      # instead of O(N*logN). This is particularly slow under memory
+      # tools like ThreadSanitizer so we want it to be disablable.
+      # See http://msdn.microsoft.com/en-us/library/aa985982(v=VS.80).aspx
+      'win_debug_disable_iterator_debugging%': '0',
 
       'release_extra_cflags%': '',
       'debug_extra_cflags%': '',
@@ -601,31 +615,31 @@
         ],
         'conditions': [
           ['OS!="win"', {
-            'sources/': [ ['exclude', '_win(_unittest)?\\.cc$'],
-                          ['exclude', '/win/'],
-                          ['exclude', '/win_[^/]*\\.cc$'] ],
+            'sources/': [ ['exclude', '_win(_unittest)?\\.(h|cc)$'],
+                          ['exclude', '(^|/)win/'],
+                          ['exclude', '(^|/)win_[^/]*\\.(h|cc)$'] ],
           }],
           ['OS!="mac"', {
-            'sources/': [ ['exclude', '_(cocoa|mac)(_unittest)?\\.cc$'],
-                          ['exclude', '/(cocoa|mac)/'],
-                          ['exclude', '\.mm?$' ] ],
+            'sources/': [ ['exclude', '_(cocoa|mac)(_unittest)?\\.(h|cc)$'],
+                          ['exclude', '(^|/)(cocoa|mac)/'],
+                          ['exclude', '\\.mm?$' ] ],
           }],
           ['OS!="linux" and OS!="freebsd" and OS!="openbsd"', {
             'sources/': [
-              ['exclude', '_(chromeos|gtk|x|x11|xdg)(_unittest)?\\.cc$'],
-              ['exclude', '/gtk/'],
-              ['exclude', '/(gtk|x11)_[^/]*\\.cc$'],
+              ['exclude', '_(chromeos|gtk|x|x11|xdg)(_unittest)?\\.(h|cc)$'],
+              ['exclude', '(^|/)gtk/'],
+              ['exclude', '(^|/)(gtk|x11)_[^/]*\\.(h|cc)$'],
             ],
           }],
           ['OS!="linux"', {
             'sources/': [
-              ['exclude', '_linux(_unittest)?\\.cc$'],
-              ['exclude', '/linux/'],
+              ['exclude', '_linux(_unittest)?\\.(h|cc)$'],
+              ['exclude', '(^|/)linux/'],
             ],
           }],
           # We use "POSIX" to refer to all non-Windows operating systems.
           ['OS=="win"', {
-            'sources/': [ ['exclude', '_posix\\.cc$'] ],
+            'sources/': [ ['exclude', '_posix\\.(h|cc)$'] ],
             # turn on warnings for signed/unsigned mismatch on chromium code.
             'msvs_settings': {
               'VCCLCompilerTool': {
@@ -634,10 +648,10 @@
             },
           }],
           ['chromeos!=1', {
-            'sources/': [ ['exclude', '_chromeos\\.cc$'] ]
+            'sources/': [ ['exclude', '_chromeos\\.(h|cc)$'] ]
           }],
           ['toolkit_views==0', {
-            'sources/': [ ['exclude', '_views\\.cc$'] ]
+            'sources/': [ ['exclude', '_views\\.(h|cc)$'] ]
           }],
         ],
       }],
@@ -650,8 +664,7 @@
       #   2 == /INCREMENTAL
       # Debug links incremental, Release does not.
       #
-      # Abstract base configurations to cover common
-      # attributes.
+      # Abstract base configurations to cover common attributes.
       #
       'Common_Base': {
         'abstract': 1,
@@ -717,6 +730,9 @@
               ['win_debug_InlineFunctionExpansion!=""', {
                 'InlineFunctionExpansion':
                   '<(win_debug_InlineFunctionExpansion)',
+              }],
+              ['win_debug_disable_iterator_debugging==1', {
+                'PreprocessorDefinitions': ['_HAS_ITERATOR_DEBUGGING=0'],
               }],
             ],
           },
@@ -991,6 +1007,11 @@
                   '-Wl,--gc-sections',
                 ],
               }],
+              ['clang==1', {
+                'cflags!': [
+                  '-fno-ident',
+                ],
+              }],
             ]
           },
         },
@@ -1147,6 +1168,9 @@
               # http://code.google.com/p/googletest/source/detail?r=446 .
               # TODO(thakis): Use -isystem instead (http://crbug.com/58751 ).
               '-Wno-unnamed-type-template-args',
+              # The integrated assembler chokes on one ffmpeg file.
+              # http://crbug.com/61931
+              '-no-integrated-as',
             ],
             'cflags!': [
               # Clang doesn't seem to know know this flag.
@@ -1255,6 +1279,8 @@
                 # Don't die on dtoa code that uses a char as an array index.
                 # This is required solely for base/third_party/dmg_fp/dtoa.cc.
                 '-Wno-char-subscripts',
+                # Clang spots more unused functions.
+                '-Wno-unused-function',
                 # Survive EXPECT_EQ(unnamed_enum, unsigned int) -- see
                 # http://code.google.com/p/googletest/source/detail?r=446 .
                 # TODO(thakis): Use -isystem instead (http://crbug.com/58751 ).

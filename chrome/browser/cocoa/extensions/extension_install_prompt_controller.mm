@@ -10,9 +10,9 @@
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser.h"
-#include "chrome/browser/browser_list.h"
-#include "chrome/browser/browser_window.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/extensions/extension.h"
 #include "grit/generated_resources.h"
 #include "skia/ext/skia_utils_mac.h"
@@ -58,7 +58,7 @@ void OffsetControlVertically(NSControl* control, CGFloat amount) {
 
 - (id)initWithParentWindow:(NSWindow*)window
                    profile:(Profile*)profile
-                 extension:(Extension*)extension
+                 extension:(const Extension*)extension
                   delegate:(ExtensionInstallUI::Delegate*)delegate
                       icon:(SkBitmap*)icon
                   warnings:(const std::vector<string16>&)warnings {
@@ -185,7 +185,10 @@ void OffsetControlVertically(NSControl* control, CGFloat amount) {
 
 
 void ExtensionInstallUI::ShowExtensionInstallUIPrompt2Impl(
-    Profile* profile, Delegate* delegate, Extension* extension, SkBitmap* icon,
+    Profile* profile,
+    Delegate* delegate,
+    const Extension* extension,
+    SkBitmap* icon,
     const std::vector<string16>& warnings) {
   Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
   if (!browser) {

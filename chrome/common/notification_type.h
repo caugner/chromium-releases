@@ -107,12 +107,23 @@ class NotificationType {
     FRAME_PROVISIONAL_LOAD_START,
 
     // The provisional load for a frame was committed. The source is a
-    // NavigationController corresponding to the tab in which the load occured.
+    // NavigationController corresponding to the tab in which the load occurred.
     // Details is a ProvisionalLoadDetails object. In contrast to
     // NAV_ENTRY_COMMITTED, this notification is sent when the load was
     // committed, even if no navigation entry was committed (such as
     // AUTO_SUBFRAME navigations).
     FRAME_PROVISIONAL_LOAD_COMMITTED,
+
+    // The DOM for a frame was fully constructed, but referenced resources
+    // might not be fully loaded yet. The source is a
+    // Source<NavigationController> corresponding to the tab in which the load
+    // occurred. Details are the long long frame ID.
+    FRAME_DOM_CONTENT_LOADED,
+
+    // The frame finished loading. The source is a Source<NavigationController>
+    // corresponding to the tab in which the load occurred. Details are the
+    // long long frame ID.
+    FRAME_DID_FINISH_LOAD,
 
     // Content was loaded from an in-memory cache.  The source will be a
     // Source<NavigationController> corresponding to the tab in which the load
@@ -631,6 +642,10 @@ class NotificationType {
     // the details is history::URLsDeletedDetails that lists the deleted URLs.
     HISTORY_URLS_DELETED,
 
+    // Sent when a keyword search term is updated. The source is the Profile and
+    // the details are history::KeywordSearchTermDetails
+    HISTORY_KEYWORD_SEARCH_TERM_UPDATED,
+
     // Sent by history when the favicon of a URL changes.  The source is the
     // profile, and the details is history::FavIconChangeDetails (see
     // history_notifications.h).
@@ -641,9 +656,26 @@ class NotificationType {
     // browser window should notify the user of this error.
     PROFILE_ERROR,
 
+    // Sent after an incognito profile has been created. The details are none
+    // and the source is the new profile.
+    OTR_PROFILE_CREATED,
+
     // Sent before a Profile is destroyed. The details are
     // none and the source is a Profile*.
     PROFILE_DESTROYED,
+
+    // TopSites ----------------------------------------------------------------
+
+    // Sent by TopSites when it finishes loading. The source is the profile the
+    // details the TopSites.
+    TOP_SITES_LOADED,
+
+    // Sent by TopSites when it has finished updating its most visited URLs
+    // cache after querying the history service. The source is the TopSites and
+    // the details a CancelableRequestProvider::Handle from the history service
+    // query.
+    // Used only in testing.
+    TOP_SITES_UPDATED,
 
     // Thumbnails---------------------------------------------------------------
 
@@ -691,6 +723,10 @@ class NotificationType {
     // NoDetails.
     TEMPLATE_URL_MODEL_LOADED,
 
+    // Sent when a TemplateURL is removed from the model. The source is the
+    // Profile, and the details the id of the TemplateURL being removed.
+    TEMPLATE_URL_REMOVED,
+
     // Notification triggered when a web application has been installed or
     // uninstalled. Any application view should reload its data.  The source is
     // the profile. No details are provided.
@@ -706,9 +742,10 @@ class NotificationType {
     // should be the UI thread.
     DEFAULT_REQUEST_CONTEXT_AVAILABLE,
 
-    // A new web resource has been made available. Source is the
-    // WebResourceService, and the details are NoDetails.
-    WEB_RESOURCE_AVAILABLE,
+    // The state of a web resource has been changed. A resource may have been
+    // added, removed, or altered. Source is WebResourceService, and the
+    // details are NoDetails.
+    WEB_RESOURCE_STATE_CHANGED,
 
     // Autocomplete ------------------------------------------------------------
 
@@ -885,6 +922,10 @@ class NotificationType {
     // are no details.
     EXTENSION_PAGE_ACTION_COUNT_CHANGED,
 
+    // Sent when a browser action's visibility has changed. The source is the
+    // ExtensionPrefs* that changed. The details are a Extension*.
+    EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED,
+
     // Sent when a page action's visibility has changed. The source is the
     // ExtensionAction* that changed. The details are a TabContents*.
     EXTENSION_PAGE_ACTION_VISIBILITY_CHANGED,
@@ -914,6 +955,10 @@ class NotificationType {
     // session. The source is the profile.
     EXTENSION_OMNIBOX_INPUT_ENTERED,
 
+    // Sent when an omnibox extension has updated the default suggestion. The
+    // source is the profile.
+    EXTENSION_OMNIBOX_DEFAULT_SUGGESTION_CHANGED,
+
     // Sent when an extension changes a preference value. The source is the
     // profile, and the details are an ExtensionPrefStore::ExtensionPrefDetails
     // object.
@@ -942,13 +987,27 @@ class NotificationType {
     // key of the entry that was affected.
     AUTOFILL_ENTRIES_CHANGED,
 
+    // DEPRECATED
+    // TODO(dhollowa): Remove this once Sync has migrated to GUID-based
+    // notifications.  http://crbug.com/58813
     // Sent when an AutoFillProfile has been added/removed/updated in the
     // WebDatabase.  The detail is an AutofillProfileChange.
     AUTOFILL_PROFILE_CHANGED,
 
+    // Sent when an AutoFillProfile has been added/removed/updated in the
+    // WebDatabase.  The detail is an AutofillProfileChangeGUID.
+    AUTOFILL_PROFILE_CHANGED_GUID,
+
+    // DEPRECATED
+    // TODO(dhollowa): Remove this once Sync has migrated to GUID-based
+    // notifications.  http://crbug.com/58813
     // Sent when an Autofill CreditCard has been added/removed/updated in the
     // WebDatabase.  The detail is an AutofillCreditCardChange.
     AUTOFILL_CREDIT_CARD_CHANGED,
+
+    // Sent when an Autofill CreditCard has been added/removed/updated in the
+    // WebDatabase.  The detail is an AutofillCreditCardChangeGUID.
+    AUTOFILL_CREDIT_CARD_CHANGED_GUID,
 
     // This notification is sent whenever the web database service has finished
     // loading the web database.  No details are expected.
@@ -973,6 +1032,23 @@ class NotificationType {
     // upgrade_detector.cc for details on how long it waits. No details are
     // expected.
     UPGRADE_RECOMMENDED,
+
+    // Software incompatibility notifications ----------------------------------
+
+    // Sent when Chrome has finished compiling the list of loaded modules (and
+    // other modules of interest). No details are expected.
+    MODULE_LIST_ENUMERATED,
+
+    // Sent when Chrome detects an incompatible module. Details is a boolean
+    // specifying true if one or more confirmed bad modules were found or false
+    // if only suspected bad modules were found.
+    MODULE_INCOMPATIBILITY_DETECTED,
+
+    // Background App Tracking Notifications -----------------------------------
+    // Sent when the state of the background page tracker has changed (the
+    // number of unacknowledged background pages have changed). Source is the
+    // BackgroundPageTracker and there are no Details.
+    BACKGROUND_PAGE_TRACKER_CHANGED,
 
     // Accessibility Notifications ---------------------------------------------
 
@@ -1018,10 +1094,9 @@ class NotificationType {
     // TabSpecificContentSettings object, there are no details.
     COLLECTED_COOKIES_SHOWN,
 
-    // Sent when a non-default setting in the the geolocation content settings
-    // map has changed. The source is the GeolocationContentSettingsMap, the
-    // details are None.
-    GEOLOCATION_SETTINGS_CHANGED,
+    // Sent when the default setting for desktop notifications has changed.
+    // The source is the DesktopNotificationService, the details are None.
+    DESKTOP_NOTIFICATION_DEFAULT_CHANGED,
 
     // Sent when a non-default setting in the the notification content settings
     // map has changed. The source is the DesktopNotificationService, the
@@ -1052,16 +1127,16 @@ class NotificationType {
     // session data.
     FOREIGN_SESSION_UPDATED,
 
-    // A foreign session has been deleted.  If a new tab page is open, the
-    // foreign session handler needs to update the new tab page's foreign
+    // Foreign sessions has been disabled. New tabs should not display foreign
     // session data.
-    FOREIGN_SESSION_DELETED,
+    FOREIGN_SESSION_DISABLED,
 
     // The syncer requires a passphrase to decrypt sensitive updates. This
     // notification is sent when the first sensitive data type is setup by the
     // user as well as anytime any the passphrase is changed in another synced
-    // client.  The source is the SyncBackendHost wanting a passphrase.  No
-    // details.
+    // client.  The source is the SyncBackendHost wanting a passphrase.  The
+    // details are a boolean: true if the passphrase is required for decryption,
+    // false if only required for encryption.
     SYNC_PASSPHRASE_REQUIRED,
 
     // Sent when the passphrase provided by the user is accepted. After this
@@ -1112,13 +1187,12 @@ class NotificationType {
     TOKEN_UPDATED,
 
     // Sent when a user signs into Google services such as sync.
-    // The source is the SigninManager instance. The details are a
-    // GoogleServiceSignin object.
+    // The source is the Profile. The details are a GoogleServiceSignin object.
     GOOGLE_SIGNIN_SUCCESSFUL,
 
     // Sent when a user fails to sign into Google services such as sync.
-    // The source is the SigninManager instance. The details are a
-    // GoogleServiceAuthError object.
+    // The source is the Profile. The details are a GoogleServiceAuthError
+    // object.
     GOOGLE_SIGNIN_FAILED,
 
     // AutoFill Notifications --------------------------------------------------
@@ -1198,6 +1272,12 @@ class NotificationType {
     // This is only sent from ChromeOS's TabCloseableStateWatcher.
     TAB_CLOSEABLE_STATE_CHANGED,
 
+    // Sent each time the InstantController is updated.
+    INSTANT_CONTROLLER_UPDATED,
+
+    // Sent each time the InstantController shows the InstantLoader.
+    INSTANT_CONTROLLER_SHOWN,
+
     // Password Store ----------------------------------------------------------
     // This notification is sent whenenever login entries stored in the password
     // store are changed. The detail of this notification is a list of changes
@@ -1210,6 +1290,14 @@ class NotificationType {
     // This notification is sent whenever the administrator changes policy.
     // The detail of this notification is not used.
     POLICY_CHANGED,
+
+    // This notification is sent whenever the device token becomes available
+    // that the policy subsystem uses to fetch policy from the cloud.
+    DEVICE_TOKEN_AVAILABLE,
+
+    // This notification is sent whenever cloud policies are fetched and
+    // updated. The detail of this notification is not used.
+    CLOUD_POLICY_UPDATE,
 
     // Count (must be last) ----------------------------------------------------
     // Used to determine the number of notification types.  Not valid as

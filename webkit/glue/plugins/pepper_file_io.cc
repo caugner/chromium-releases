@@ -11,10 +11,11 @@
 #include "base/platform_file.h"
 #include "base/logging.h"
 #include "base/time.h"
-#include "third_party/ppapi/c/dev/ppb_file_io_dev.h"
-#include "third_party/ppapi/c/dev/ppb_file_io_trusted_dev.h"
-#include "third_party/ppapi/c/pp_completion_callback.h"
-#include "third_party/ppapi/c/pp_errors.h"
+#include "ppapi/c/dev/ppb_file_io_dev.h"
+#include "ppapi/c/dev/ppb_file_io_trusted_dev.h"
+#include "ppapi/c/pp_completion_callback.h"
+#include "ppapi/c/pp_errors.h"
+#include "webkit/glue/plugins/pepper_common.h"
 #include "webkit/glue/plugins/pepper_file_ref.h"
 #include "webkit/glue/plugins/pepper_plugin_instance.h"
 #include "webkit/glue/plugins/pepper_plugin_module.h"
@@ -33,8 +34,8 @@ PP_Resource Create(PP_Module module_id) {
   return file_io->GetReference();
 }
 
-bool IsFileIO(PP_Resource resource) {
-  return !!Resource::GetAs<FileIO>(resource);
+PP_Bool IsFileIO(PP_Resource resource) {
+  return BoolToPPBool(!!Resource::GetAs<FileIO>(resource));
 }
 
 int32_t Open(PP_Resource file_io_id,
@@ -225,12 +226,11 @@ int32_t FileIO::Open(FileRef* file_ref,
     flags |= base::PLATFORM_FILE_WRITE;
     flags |= base::PLATFORM_FILE_WRITE_ATTRIBUTES;
   }
-  if (open_flags & PP_FILEOPENFLAG_TRUNCATE) {
-    DCHECK(flags & PP_FILEOPENFLAG_WRITE);
-    flags |= base::PLATFORM_FILE_TRUNCATE;
-  }
 
-  if (open_flags & PP_FILEOPENFLAG_CREATE) {
+  if (open_flags & PP_FILEOPENFLAG_TRUNCATE) {
+    DCHECK(open_flags & PP_FILEOPENFLAG_WRITE);
+    flags |= base::PLATFORM_FILE_TRUNCATE;
+  } else if (open_flags & PP_FILEOPENFLAG_CREATE) {
     if (open_flags & PP_FILEOPENFLAG_EXCLUSIVE)
       flags |= base::PLATFORM_FILE_CREATE;
     else
@@ -238,9 +238,9 @@ int32_t FileIO::Open(FileRef* file_ref,
   } else
     flags |= base::PLATFORM_FILE_OPEN;
 
-  file_system_type_ = file_ref->file_system_type();
+  file_system_type_ = file_ref->GetFileSystemType();
   if (!delegate_->AsyncOpenFile(
-          file_ref->system_path(), flags,
+          file_ref->GetSystemPath(), flags,
           callback_factory_.NewCallback(&FileIO::AsyncOpenFileCallback)))
     return PP_ERROR_FAILED;
 

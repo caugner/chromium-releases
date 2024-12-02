@@ -35,7 +35,7 @@ class TestShellWebKitInit : public webkit_glue::WebKitClientImpl {
   ~TestShellWebKitInit();
 
   virtual WebKit::WebMimeRegistry* mimeRegistry() {
-    return &mime_registry_;
+    return mime_registry_.get();
   }
 
   WebKit::WebClipboard* clipboard();
@@ -104,6 +104,13 @@ class TestShellWebKitInit : public webkit_glue::WebKitClientImpl {
   }
 
   virtual WebKit::WebData loadResource(const char* name);
+  virtual WebKit::WebString queryLocalizedString(
+      WebKit::WebLocalizedString::Name name);
+  virtual WebKit::WebString queryLocalizedString(
+      WebKit::WebLocalizedString::Name name, const WebKit::WebString& value);
+  virtual WebKit::WebString queryLocalizedString(
+      WebKit::WebLocalizedString::Name name,
+      const WebKit::WebString& value1, const WebKit::WebString& value2);
 
   virtual WebKit::WebString defaultLocale() {
     return ASCIIToUTF16("en-US");
@@ -158,7 +165,7 @@ class TestShellWebKitInit : public webkit_glue::WebKitClientImpl {
   }
 
  private:
-  TestShellWebMimeRegistryImpl mime_registry_;
+  scoped_ptr<webkit_glue::SimpleWebMimeRegistryImpl> mime_registry_;
   MockWebClipboardImpl mock_clipboard_;
   webkit_glue::WebClipboardImpl real_clipboard_;
   webkit_glue::WebFileUtilitiesImpl file_utilities_;

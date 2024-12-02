@@ -4,18 +4,18 @@
 
 #include "chrome/browser/extensions/extension_infobar_delegate.h"
 
-#include "chrome/browser/browser.h"
-#include "chrome/browser/profile.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/notification_details.h"
 #include "chrome/common/notification_source.h"
 #include "chrome/common/notification_type.h"
 
 ExtensionInfoBarDelegate::ExtensionInfoBarDelegate(Browser* browser,
                                                    TabContents* tab_contents,
-                                                   Extension* extension,
+                                                   const Extension* extension,
                                                    const GURL& url)
     : InfoBarDelegate(tab_contents),
       observer_(NULL),
@@ -78,7 +78,7 @@ void ExtensionInfoBarDelegate::Observe(NotificationType type,
       break;
     }
     case NotificationType::EXTENSION_UNLOADED: {
-      Extension* extension = Details<Extension>(details).ptr();
+      const Extension* extension = Details<const Extension>(details).ptr();
       if (extension_ == extension)
         tab_contents_->RemoveInfoBar(this);
       break;

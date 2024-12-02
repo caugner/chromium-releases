@@ -344,7 +344,8 @@ END_EXEC_COMMAND_MAP()
 
   // Callbacks from ChromeFramePlugin<T>
   bool PreProcessContextMenu(HMENU menu);
-  bool HandleContextMenuCommand(UINT cmd, const IPC::ContextMenuParams& params);
+  bool HandleContextMenuCommand(UINT cmd,
+                                const IPC::MiniContextMenuParams& params);
 
  // ChromeFramePlugin overrides.
   virtual void OnAutomationServerReady();
@@ -439,6 +440,10 @@ END_EXEC_COMMAND_MAP()
   // Sets the dimensions on the IE window. These dimensions are parsed out from
   // the information passed in from Chrome during window.open.
   void SetWindowDimensions();
+
+  // Returns true if the NavigationInfo object passed in represents a new
+  // navigation initiated by the renderer.
+  bool IsNewNavigation(const IPC::NavigationInfo& new_navigation_info) const;
 
  protected:
   typedef std::map<int, OLECMDF> CommandStatusMap;

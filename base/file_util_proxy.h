@@ -16,49 +16,40 @@
 
 namespace base {
 
-namespace file_util_proxy {
-
-// Holds metadata for file or directory entry.
-struct Entry {
-  FilePath::StringType name;
-  bool is_directory;
-};
-
-}  // namespace file_util_proxy
-
 class MessageLoopProxy;
 class Time;
 
 // This class provides asynchronous access to common file routines.
 class FileUtilProxy {
  public:
+  // Holds metadata for file or directory entry. Used by ReadDirectoryCallback.
+  struct Entry {
+    FilePath::StringType name;
+    bool is_directory;
+  };
+
   // This callback is used by methods that report only an error code.  It is
   // valid to pass NULL as the callback parameter to any function that takes a
   // StatusCallback, in which case the operation will complete silently.
-  typedef Callback1<base::PlatformFileError /* error code */
-                    >::Type StatusCallback;
+  typedef Callback1<PlatformFileError /* error code */>::Type StatusCallback;
 
   // Creates or opens a file with the given flags.  It is invalid to pass NULL
   // for the callback.
-  typedef Callback3<base::PlatformFileError /* error code */,
-                    base::PassPlatformFile,
+  // If PLATFORM_FILE_CREATE is set in |file_flags| it always tries to create
+  // a new file at the given |file_path| and calls back with
+  // PLATFORM_FILE_ERROR_FILE_EXISTS if the |file_path| already exists.
+  typedef Callback3<PlatformFileError /* error code */,
+                    PassPlatformFile,
                     bool /* created */>::Type CreateOrOpenCallback;
   static bool CreateOrOpen(scoped_refptr<MessageLoopProxy> message_loop_proxy,
                            const FilePath& file_path,
                            int file_flags,
                            CreateOrOpenCallback* callback);
 
-  // Creates a file with the given flags.  This one is a variation of
-  // CreateOrOpen but it doesn't return a file handle.
-  static bool Create(scoped_refptr<MessageLoopProxy> message_loop_proxy,
-                     const FilePath& file_path,
-                     int file_flags,
-                     CreateOrOpenCallback* callback);
-
   // Creates a temporary file for writing.  The path and an open file handle
   // are returned.  It is invalid to pass NULL for the callback.
-  typedef Callback3<base::PlatformFileError /* error code */,
-                    base::PassPlatformFile,
+  typedef Callback3<PlatformFileError /* error code */,
+                    PassPlatformFile,
                     FilePath>::Type CreateTemporaryCallback;
   static bool CreateTemporary(
       scoped_refptr<MessageLoopProxy> message_loop_proxy,
@@ -66,13 +57,29 @@ class FileUtilProxy {
 
   // Close the given file handle.
   static bool Close(scoped_refptr<MessageLoopProxy> message_loop_proxy,
-                    base::PlatformFile,
+                    PlatformFile,
                     StatusCallback* callback);
+
+  // Ensures that the given |file_path| exist.  This creates a empty new file
+  // at |file_path| if the |file_path| does not exist.
+  // If a new file han not existed and is created at the |file_path|,
+  // |created| of the callback argument is set true and |error code|
+  // is set PLATFORM_FILE_OK.
+  // If the file already exists, |created| is set false and |error code|
+  // is set PLATFORM_FILE_OK.
+  // If the file hasn't existed but it couldn't be created for some other
+  // reasons, |created| is set false and |error code| indicates the error.
+  typedef Callback2<PlatformFileError /* error code */,
+                    bool /* created */>::Type EnsureFileExistsCallback;
+  static bool EnsureFileExists(
+      scoped_refptr<MessageLoopProxy> message_loop_proxy,
+      const FilePath& file_path,
+      EnsureFileExistsCallback* callback);
 
   // Retrieves the information about a file. It is invalid to pass NULL for the
   // callback.
-  typedef Callback2<base::PlatformFileError /* error code */,
-                    const base::PlatformFileInfo& /* file_info */
+  typedef Callback2<PlatformFileError /* error code */,
+                    const PlatformFileInfo& /* file_info */
                     >::Type GetFileInfoCallback;
   static bool GetFileInfo(
       scoped_refptr<MessageLoopProxy> message_loop_proxy,
@@ -81,12 +88,11 @@ class FileUtilProxy {
 
   static bool GetFileInfoFromPlatformFile(
       scoped_refptr<MessageLoopProxy> message_loop_proxy,
-      base::PlatformFile file,
+      PlatformFile file,
       GetFileInfoCallback* callback);
 
-  typedef Callback2<base::PlatformFileError /* error code */,
-      const std::vector<base::file_util_proxy::Entry>&
-       >::Type ReadDirectoryCallback;
+  typedef Callback2<PlatformFileError /* error code */,
+      const std::vector<Entry>&>::Type ReadDirectoryCallback;
   static bool ReadDirectory(scoped_refptr<MessageLoopProxy> message_loop_proxy,
                             const FilePath& file_path,
                             ReadDirectoryCallback* callback);
@@ -136,11 +142,11 @@ class FileUtilProxy {
 
   // Reads from a file. On success, the file pointer is moved to position
   // |offset + bytes_to_read| in the file. The callback can be NULL.
-  typedef Callback2<base::PlatformFileError /* error code */,
+  typedef Callback2<PlatformFileError /* error code */,
                     int /* bytes read/written */>::Type ReadWriteCallback;
   static bool Read(
       scoped_refptr<MessageLoopProxy> message_loop_proxy,
-      base::PlatformFile file,
+      PlatformFile file,
       int64 offset,
       char* buffer,
       int bytes_to_read,
@@ -151,7 +157,7 @@ class FileUtilProxy {
   // |offset + bytes_to_write| in the file. The callback can be NULL.
   static bool Write(
       scoped_refptr<MessageLoopProxy> message_loop_proxy,
-      base::PlatformFile file,
+      PlatformFile file,
       int64 offset,
       const char* buffer,
       int bytes_to_write,
@@ -160,17 +166,17 @@ class FileUtilProxy {
   // Touches a file. The callback can be NULL.
   static bool Touch(
       scoped_refptr<MessageLoopProxy> message_loop_proxy,
-      base::PlatformFile file,
-      const base::Time& last_access_time,
-      const base::Time& last_modified_time,
+      PlatformFile file,
+      const Time& last_access_time,
+      const Time& last_modified_time,
       StatusCallback* callback);
 
   // Touches a file. The callback can be NULL.
   static bool Touch(
       scoped_refptr<MessageLoopProxy> message_loop_proxy,
       const FilePath& file_path,
-      const base::Time& last_access_time,
-      const base::Time& last_modified_time,
+      const Time& last_access_time,
+      const Time& last_modified_time,
       StatusCallback* callback);
 
   // Truncates a file to the given length. If |length| is greater than the
@@ -178,7 +184,7 @@ class FileUtilProxy {
   // The callback can be NULL.
   static bool Truncate(
       scoped_refptr<MessageLoopProxy> message_loop_proxy,
-      base::PlatformFile file,
+      PlatformFile file,
       int64 length,
       StatusCallback* callback);
 
@@ -194,7 +200,7 @@ class FileUtilProxy {
   // Flushes a file. The callback can be NULL.
   static bool Flush(
       scoped_refptr<MessageLoopProxy> message_loop_proxy,
-      base::PlatformFile file,
+      PlatformFile file,
       StatusCallback* callback);
 
  private:

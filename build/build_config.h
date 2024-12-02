@@ -17,6 +17,8 @@
 // A set of macros to use for platform detection.
 #if defined(__APPLE__)
 #define OS_MACOSX 1
+#elif defined(__native_client__)
+#define OS_NACL 1
 #elif defined(__linux__)
 #define OS_LINUX 1
 // Use TOOLKIT_GTK on linux if TOOLKIT_VIEWS isn't defined.
@@ -47,14 +49,20 @@
 
 #if defined(OS_LINUX) || defined(OS_FREEBSD) || defined(OS_OPENBSD) || \
     defined(OS_SOLARIS)
-#define USE_NSS 1  // Use NSS for crypto.
+#if !defined(USE_OPENSSL)
+#define USE_NSS 1  // Default to use NSS for crypto, unless OpenSSL is chosen.
+#endif
 #define USE_X11 1  // Use X for graphics.
+#endif
+
+#if defined(USE_OPENSSL) && defined(USE_NSS)
+#error Cannot use both OpenSSL and NSS
 #endif
 
 // For access to standard POSIXish features, use OS_POSIX instead of a
 // more specific macro.
 #if defined(OS_MACOSX) || defined(OS_LINUX) || defined(OS_FREEBSD) || \
-    defined(OS_OPENBSD) || defined(OS_SOLARIS)
+    defined(OS_OPENBSD) || defined(OS_SOLARIS) || defined(OS_NACL)
 #define OS_POSIX 1
 // Use base::DataPack for name/value pairs.
 #define USE_BASE_DATA_PACK 1
@@ -66,7 +74,7 @@
 #endif
 
 // Use heapchecker.
-#if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(NO_HEAPCHECKER)
+#if defined(OS_LINUX) && !defined(NO_HEAPCHECKER)
 #define USE_HEAPCHECKER 1
 #endif
 
@@ -117,6 +125,12 @@
 #define WCHAR_T_IS_UTF16
 #else
 #error Please add support for your compiler in build/build_config.h
+#endif
+
+#if defined(OS_CHROMEOS)
+// Single define to trigger whether CrOS fonts have BCI on.
+// In that case font sizes/deltas should be adjusted.
+//define CROS_FONTS_USING_BCI
 #endif
 
 #endif  // BUILD_BUILD_CONFIG_H_

@@ -441,14 +441,6 @@ bool WideToLatin1(const std::wstring& wide, std::string* latin1) {
   return true;
 }
 
-bool IsString8Bit(const std::wstring& str) {
-  for (size_t i = 0; i < str.length(); i++) {
-    if (str[i] > 255)
-      return false;
-  }
-  return true;
-}
-
 template<class STR>
 static bool DoIsStringASCII(const STR& str) {
   for (size_t i = 0; i < str.length(); i++) {
@@ -492,7 +484,7 @@ static inline bool DoLowerCaseEqualsASCII(Iter a_begin,
                                           Iter a_end,
                                           const char* b) {
   for (Iter it = a_begin; it != a_end; ++it, ++b) {
-    if (!*b || ToLowerASCII(*it) != *b)
+    if (!*b || base::ToLowerASCII(*it) != *b)
       return false;
   }
   return *b == 0;
@@ -576,7 +568,7 @@ bool StartsWithT(const STR& str, const STR& search, bool case_sensitive) {
     if (search.size() > str.size())
       return false;
     return std::equal(search.begin(), search.end(), str.begin(),
-                      CaseInsensitiveCompare<typename STR::value_type>());
+                      base::CaseInsensitiveCompare<typename STR::value_type>());
   }
 }
 
@@ -603,7 +595,7 @@ bool EndsWithT(const STR& str, const STR& search, bool case_sensitive) {
   } else {
     return std::equal(search.begin(), search.end(),
                       str.begin() + (str_length - search_length),
-                      CaseInsensitiveCompare<typename STR::value_type>());
+                      base::CaseInsensitiveCompare<typename STR::value_type>());
   }
 }
 
@@ -826,71 +818,8 @@ std::string JoinString(const std::vector<std::string>& parts, char sep) {
   return JoinStringT(parts, sep);
 }
 
-#if !defined(WCHAR_T_IS_UTF16)
 string16 JoinString(const std::vector<string16>& parts, char16 sep) {
   return JoinStringT(parts, sep);
-}
-#endif
-
-std::wstring JoinString(const std::vector<std::wstring>& parts, wchar_t sep) {
-  return JoinStringT(parts, sep);
-}
-
-template<typename STR>
-void SplitStringAlongWhitespaceT(const STR& str, std::vector<STR>* result) {
-  const size_t length = str.length();
-  if (!length)
-    return;
-
-  bool last_was_ws = false;
-  size_t last_non_ws_start = 0;
-  for (size_t i = 0; i < length; ++i) {
-    switch (str[i]) {
-      // HTML 5 defines whitespace as: space, tab, LF, line tab, FF, or CR.
-      case L' ':
-      case L'\t':
-      case L'\xA':
-      case L'\xB':
-      case L'\xC':
-      case L'\xD':
-        if (!last_was_ws) {
-          if (i > 0) {
-            result->push_back(
-                str.substr(last_non_ws_start, i - last_non_ws_start));
-          }
-          last_was_ws = true;
-        }
-        break;
-
-      default:  // Not a space character.
-        if (last_was_ws) {
-          last_was_ws = false;
-          last_non_ws_start = i;
-        }
-        break;
-    }
-  }
-  if (!last_was_ws) {
-    result->push_back(
-        str.substr(last_non_ws_start, length - last_non_ws_start));
-  }
-}
-
-void SplitStringAlongWhitespace(const std::wstring& str,
-                                std::vector<std::wstring>* result) {
-  SplitStringAlongWhitespaceT(str, result);
-}
-
-#if !defined(WCHAR_T_IS_UTF16)
-void SplitStringAlongWhitespace(const string16& str,
-                                std::vector<string16>* result) {
-  SplitStringAlongWhitespaceT(str, result);
-}
-#endif
-
-void SplitStringAlongWhitespace(const std::string& str,
-                                std::vector<std::string>* result) {
-  SplitStringAlongWhitespaceT(str, result);
 }
 
 template<class FormatStringType, class OutStringType>

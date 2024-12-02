@@ -2,16 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "webkit/support/test_webkit_client.h"
+
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
-#include "base/stats_counters.h"
+#include "base/metrics/stats_counters.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/cookie_monster.h"
 #include "net/http/http_cache.h"
 #include "net/test/test_server.h"
 #include "media/base/media.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCache.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebData.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebDatabase.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebFileSystem.h"
@@ -37,7 +40,6 @@
 #include "webkit/glue/webclipboard_impl.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webkitclient_impl.h"
-#include "webkit/support/test_webkit_client.h"
 #include "webkit/support/weburl_loader_mock_factory.h"
 #include "webkit/tools/test_shell/mock_webclipboard_impl.h"
 #include "webkit/tools/test_shell/simple_appcache_system.h"
@@ -62,7 +64,7 @@ using WebKit::WebScriptController;
 
 TestWebKitClient::TestWebKitClient(bool unit_test_mode)
       : unit_test_mode_(unit_test_mode) {
-  v8::V8::SetCounterFunction(StatsTable::FindLocation);
+  v8::V8::SetCounterFunction(base::StatsTable::FindLocation);
 
   WebKit::initialize(this);
   WebKit::setLayoutTestMode(true);
@@ -116,6 +118,12 @@ TestWebKitClient::TestWebKitClient(bool unit_test_mode)
 
   file_utilities_.set_sandbox_enabled(false);
 
+  if (!file_system_root_.CreateUniqueTempDir()) {
+    LOG(WARNING) << "Failed to create a temp dir for the filesystem."
+                    "FileSystem feature will be disabled.";
+    DCHECK(file_system_root_.path().empty());
+  }
+
 #if defined(OS_WIN)
   // Ensure we pick up the default theme engine.
   SetThemeEngine(NULL);
@@ -135,6 +143,8 @@ TestWebKitClient::TestWebKitClient(bool unit_test_mode)
 }
 
 TestWebKitClient::~TestWebKitClient() {
+  if (RunningOnValgrind())
+    WebKit::WebCache::clear();
   WebKit::shutdown();
 }
 
@@ -235,6 +245,58 @@ WebKit::WebData TestWebKitClient::loadResource(const char* name) {
     return WebKit::WebData(red_square, arraysize(red_square));
   }
   return webkit_glue::WebKitClientImpl::loadResource(name);
+}
+
+WebKit::WebString TestWebKitClient::queryLocalizedString(
+    WebKit::WebLocalizedString::Name name) {
+  // Returns messages same as WebKit's in DRT.
+  // We use different strings for form validation messages.
+  switch (name) {
+    case WebKit::WebLocalizedString::ValidationValueMissing:
+    case WebKit::WebLocalizedString::ValidationValueMissingForCheckbox:
+    case WebKit::WebLocalizedString::ValidationValueMissingForFile:
+    case WebKit::WebLocalizedString::ValidationValueMissingForMultipleFile:
+    case WebKit::WebLocalizedString::ValidationValueMissingForRadio:
+    case WebKit::WebLocalizedString::ValidationValueMissingForSelect:
+      return ASCIIToUTF16("value missing");
+    case WebKit::WebLocalizedString::ValidationTypeMismatch:
+    case WebKit::WebLocalizedString::ValidationTypeMismatchForEmail:
+    case WebKit::WebLocalizedString::ValidationTypeMismatchForMultipleEmail:
+    case WebKit::WebLocalizedString::ValidationTypeMismatchForURL:
+      return ASCIIToUTF16("type mismatch");
+    case WebKit::WebLocalizedString::ValidationPatternMismatch:
+      return ASCIIToUTF16("pattern mismatch");
+    case WebKit::WebLocalizedString::ValidationTooLong:
+      return ASCIIToUTF16("too long");
+    case WebKit::WebLocalizedString::ValidationRangeUnderflow:
+      return ASCIIToUTF16("range underflow");
+    case WebKit::WebLocalizedString::ValidationRangeOverflow:
+      return ASCIIToUTF16("range overflow");
+    case WebKit::WebLocalizedString::ValidationStepMismatch:
+      return ASCIIToUTF16("step mismatch");
+    default:
+      return WebKitClientImpl::queryLocalizedString(name);
+  }
+}
+
+WebKit::WebString TestWebKitClient::queryLocalizedString(
+    WebKit::WebLocalizedString::Name name, const WebKit::WebString& value) {
+  if (name == WebKit::WebLocalizedString::ValidationRangeUnderflow)
+    return ASCIIToUTF16("range underflow");
+  if (name == WebKit::WebLocalizedString::ValidationRangeOverflow)
+    return ASCIIToUTF16("range overflow");
+  return WebKitClientImpl::queryLocalizedString(name, value);
+}
+
+WebKit::WebString TestWebKitClient::queryLocalizedString(
+    WebKit::WebLocalizedString::Name name,
+    const WebKit::WebString& value1,
+    const WebKit::WebString& value2) {
+  if (name == WebKit::WebLocalizedString::ValidationTooLong)
+    return ASCIIToUTF16("too long");
+  if (name == WebKit::WebLocalizedString::ValidationStepMismatch)
+    return ASCIIToUTF16("step mismatch");
+  return WebKitClientImpl::queryLocalizedString(name, value1, value2);
 }
 
 WebKit::WebString TestWebKitClient::defaultLocale() {

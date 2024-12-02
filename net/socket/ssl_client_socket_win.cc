@@ -15,6 +15,7 @@
 #include "base/utf_string_conversions.h"
 #include "net/base/cert_verifier.h"
 #include "net/base/connection_type_histograms.h"
+#include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_log.h"
 #include "net/base/net_errors.h"
@@ -35,20 +36,23 @@ static int MapSecurityError(SECURITY_STATUS err) {
   // There are numerous security error codes, but these are the ones we thus
   // far find interesting.
   switch (err) {
-    case SEC_E_WRONG_PRINCIPAL:  // Schannel
+    case SEC_E_WRONG_PRINCIPAL:  // Schannel - server certificate error.
     case CERT_E_CN_NO_MATCH:  // CryptoAPI
       return ERR_CERT_COMMON_NAME_INVALID;
-    case SEC_E_UNTRUSTED_ROOT:  // Schannel - unknown_ca alert
+    case SEC_E_UNTRUSTED_ROOT:  // Schannel - server certificate error or
+                                // unknown_ca alert.
     case CERT_E_UNTRUSTEDROOT:  // CryptoAPI
       return ERR_CERT_AUTHORITY_INVALID;
-    case SEC_E_CERT_EXPIRED:  // Schannel - certificate_expired alert
+    case SEC_E_CERT_EXPIRED:  // Schannel - server certificate error or
+                              // certificate_expired alert.
     case CERT_E_EXPIRED:  // CryptoAPI
       return ERR_CERT_DATE_INVALID;
     case CRYPT_E_NO_REVOCATION_CHECK:
       return ERR_CERT_NO_REVOCATION_MECHANISM;
     case CRYPT_E_REVOCATION_OFFLINE:
       return ERR_CERT_UNABLE_TO_CHECK_REVOCATION;
-    case CRYPT_E_REVOKED:  // CryptoAPI and Schannel certificate_revoked alert
+    case CRYPT_E_REVOKED:  // CryptoAPI and Schannel server certificate error,
+                           // or certificate_revoked alert.
       return ERR_CERT_REVOKED;
 
     // We received one of the following alert messages from the server:
@@ -82,10 +86,6 @@ static int MapSecurityError(SECURITY_STATUS err) {
     // been omitted to prevent masking them as protocol errors.
       return ERR_SSL_PROTOCOL_ERROR;
 
-    // TODO(rsleevi): Add a new error code for access_denied - the peer has
-    // accepted the certificate as valid, but denied access to the requested
-    // resource. Returning ERR_BAD_SSL_CLIENT_AUTH simply gives the user a
-    // chance to select a new certificate, if they have one, and try again.
     case SEC_E_LOGON_DENIED:  // Received a access_denied alert.
       return ERR_BAD_SSL_CLIENT_AUTH_CERT;
 
@@ -93,6 +93,8 @@ static int MapSecurityError(SECURITY_STATUS err) {
     case SEC_E_ALGORITHM_MISMATCH:  // Received an insufficient_security alert.
       return ERR_SSL_VERSION_OR_CIPHER_MISMATCH;
 
+    case SEC_E_NO_CREDENTIALS:
+      return ERR_SSL_CLIENT_AUTH_CERT_NO_PRIVATE_KEY;
     case SEC_E_INVALID_HANDLE:
     case SEC_E_INVALID_TOKEN:
       LOG(ERROR) << "Unexpected error " << err;
@@ -142,7 +144,9 @@ class CredHandleTable {
                                          client_cert_creds_.end());
   }
 
-  CredHandle* GetHandle(PCCERT_CONTEXT client_cert, int ssl_version_mask) {
+  int GetHandle(PCCERT_CONTEXT client_cert,
+                int ssl_version_mask,
+                CredHandle** handle_ptr) {
     DCHECK(0 < ssl_version_mask &&
            ssl_version_mask < arraysize(anonymous_creds_));
     CredHandleClass* handle;
@@ -159,9 +163,13 @@ class CredHandleTable {
     } else {
       handle = &anonymous_creds_[ssl_version_mask];
     }
-    if (!SecIsValidHandle(handle))
-      InitializeHandle(handle, client_cert, ssl_version_mask);
-    return handle;
+    if (!SecIsValidHandle(handle)) {
+      int result = InitializeHandle(handle, client_cert, ssl_version_mask);
+      if (result != OK)
+        return result;
+    }
+    *handle_ptr = handle;
+    return OK;
   }
 
  private:
@@ -172,9 +180,10 @@ class CredHandleTable {
 
   typedef std::map<CredHandleMapKey, CredHandleClass*> CredHandleMap;
 
-  static void InitializeHandle(CredHandle* handle,
-                               PCCERT_CONTEXT client_cert,
-                               int ssl_version_mask);
+  // Returns OK on success or a network error code on failure.
+  static int InitializeHandle(CredHandle* handle,
+                              PCCERT_CONTEXT client_cert,
+                              int ssl_version_mask);
 
   Lock lock_;
 
@@ -187,9 +196,9 @@ class CredHandleTable {
 };
 
 // static
-void CredHandleTable::InitializeHandle(CredHandle* handle,
-                                       PCCERT_CONTEXT client_cert,
-                                       int ssl_version_mask) {
+int CredHandleTable::InitializeHandle(CredHandle* handle,
+                                      PCCERT_CONTEXT client_cert,
+                                      int ssl_version_mask) {
   SCHANNEL_CRED schannel_cred = {0};
   schannel_cred.dwVersion = SCHANNEL_CRED_VERSION;
   if (client_cert) {
@@ -254,16 +263,16 @@ void CredHandleTable::InitializeHandle(CredHandle* handle,
       NULL,  // Not used
       handle,
       &expiry);  // Optional
-  if (status != SEC_E_OK) {
+  if (status != SEC_E_OK)
     LOG(ERROR) << "AcquireCredentialsHandle failed: " << status;
-    // GetHandle will return a pointer to an uninitialized CredHandle, which
-    // will cause InitializeSecurityContext to fail with SEC_E_INVALID_HANDLE.
-  }
+  return MapSecurityError(status);
 }
 
 // For the SSL sockets to share SSL sessions by session resumption handshakes,
 // they need to use the same CredHandle.  The GetCredHandle function creates
-// and returns a shared CredHandle.
+// and stores a shared CredHandle in *handle_ptr.  On success, GetCredHandle
+// returns OK.  On failure, GetCredHandle returns a network error code and
+// leaves *handle_ptr unchanged.
 //
 // The versions of the SSL protocol enabled are a property of the CredHandle.
 // So we need a separate CredHandle for each combination of SSL versions.
@@ -272,17 +281,16 @@ void CredHandleTable::InitializeHandle(CredHandle* handle,
 // TLS-intolerant servers).  These CredHandles are initialized only when
 // needed.
 
-static CredHandle* GetCredHandle(PCCERT_CONTEXT client_cert,
-                                 int ssl_version_mask) {
-  // It doesn't matter whether GetCredHandle returns NULL or a pointer to an
-  // uninitialized CredHandle on failure.  Both of them cause
-  // InitializeSecurityContext to fail with SEC_E_INVALID_HANDLE.
+static int GetCredHandle(PCCERT_CONTEXT client_cert,
+                         int ssl_version_mask,
+                         CredHandle** handle_ptr) {
   if (ssl_version_mask <= 0 || ssl_version_mask >= SSL_VERSION_MASKS) {
     NOTREACHED();
-    return NULL;
+    return ERR_UNEXPECTED;
   }
   return Singleton<CredHandleTable>::get()->GetHandle(client_cert,
-                                                      ssl_version_mask);
+                                                      ssl_version_mask,
+                                                      handle_ptr);
 }
 
 //-----------------------------------------------------------------------------
@@ -364,7 +372,7 @@ class ClientCertStore {
 static const int kRecvBufferSize = (5 + 16*1024 + 64);
 
 SSLClientSocketWin::SSLClientSocketWin(ClientSocketHandle* transport_socket,
-                                       const std::string& hostname,
+                                       const HostPortPair& host_and_port,
                                        const SSLConfig& ssl_config)
     : ALLOW_THIS_IN_INITIALIZER_LIST(
         handshake_io_callback_(this,
@@ -374,7 +382,7 @@ SSLClientSocketWin::SSLClientSocketWin(ClientSocketHandle* transport_socket,
       ALLOW_THIS_IN_INITIALIZER_LIST(
         write_callback_(this, &SSLClientSocketWin::OnWriteComplete)),
       transport_(transport_socket),
-      hostname_(hostname),
+      host_and_port_(host_and_port),
       ssl_config_(ssl_config),
       user_connect_callback_(NULL),
       user_read_callback_(NULL),
@@ -446,7 +454,7 @@ void SSLClientSocketWin::GetSSLInfo(SSLInfo* ssl_info) {
 
 void SSLClientSocketWin::GetSSLCertRequestInfo(
     SSLCertRequestInfo* cert_request_info) {
-  cert_request_info->host_and_port = hostname_;  // TODO(wtc): no port!
+  cert_request_info->host_and_port = host_and_port_.ToString();
   cert_request_info->client_certs.clear();
 
   // Get the certificate_authorities field of the CertificateRequest message.
@@ -565,7 +573,9 @@ int SSLClientSocketWin::InitializeSSLContext() {
   PCCERT_CONTEXT cert_context = NULL;
   if (ssl_config_.client_cert)
     cert_context = ssl_config_.client_cert->os_cert_handle();
-  creds_ = GetCredHandle(cert_context, ssl_version_mask);
+  int result = GetCredHandle(cert_context, ssl_version_mask, &creds_);
+  if (result != OK)
+    return result;
 
   memset(&ctxt_, 0, sizeof(ctxt_));
 
@@ -592,7 +602,7 @@ int SSLClientSocketWin::InitializeSSLContext() {
   status = InitializeSecurityContext(
       creds_,
       NULL,  // NULL on the first call
-      const_cast<wchar_t*>(ASCIIToWide(hostname_).c_str()),
+      const_cast<wchar_t*>(ASCIIToWide(host_and_port_.host()).c_str()),
       flags,
       0,  // Reserved
       0,  // Not used with Schannel.
@@ -691,6 +701,14 @@ void SSLClientSocketWin::SetOmniboxSpeculation() {
 bool SSLClientSocketWin::WasEverUsed() const {
   if (transport_.get() && transport_->socket()) {
     return transport_->socket()->WasEverUsed();
+  }
+  NOTREACHED();
+  return false;
+}
+
+bool SSLClientSocketWin::UsingTCPFastOpen() const {
+  if (transport_.get() && transport_->socket()) {
+    return transport_->socket()->UsingTCPFastOpen();
   }
   NOTREACHED();
   return false;
@@ -958,6 +976,7 @@ int SSLClientSocketWin::DoHandshakeReadComplete(int result) {
   if (isc_status_ == SEC_E_INVALID_TOKEN) {
     // Peer sent us an SSL record type that's invalid during SSL handshake.
     // TODO(wtc): move this to MapSecurityError after sufficient testing.
+    LOG(ERROR) << "InitializeSecurityContext failed: " << isc_status_;
     return ERR_SSL_PROTOCOL_ERROR;
   }
 
@@ -992,17 +1011,26 @@ int SSLClientSocketWin::DidCallInitializeSecurityContext() {
 
   if (FAILED(isc_status_)) {
     LOG(ERROR) << "InitializeSecurityContext failed: " << isc_status_;
+    if (isc_status_ == SEC_E_INTERNAL_ERROR) {
+      // "The Local Security Authority cannot be contacted".  This happens
+      // when the user denies access to the private key for SSL client auth.
+      return ERR_SSL_CLIENT_AUTH_PRIVATE_KEY_ACCESS_DENIED;
+    }
     int result = MapSecurityError(isc_status_);
     // We told Schannel to not verify the server certificate
     // (SCH_CRED_MANUAL_CRED_VALIDATION), so any certificate error returned by
     // InitializeSecurityContext must be referring to the bad or missing
     // client certificate.
     if (IsCertificateError(result)) {
-      // TODO(wtc): Add new error codes for client certificate errors reported
-      // by the server using SSL/TLS alert messages.  See the MSDN page
-      // "Schannel Error Codes for TLS and SSL Alerts", which maps TLS alert
-      // messages to Windows error codes:
-      // http://msdn.microsoft.com/en-us/library/dd721886%28VS.85%29.aspx
+      // TODO(wtc): Add fine-grained error codes for client certificate errors
+      // reported by the server using the following SSL/TLS alert messages:
+      //   access_denied
+      //   bad_certificate
+      //   unsupported_certificate
+      //   certificate_expired
+      //   certificate_revoked
+      //   certificate_unknown
+      //   unknown_ca
       return ERR_BAD_SSL_CLIENT_AUTH_CERT;
     }
     return result;
@@ -1096,7 +1124,7 @@ int SSLClientSocketWin::DoVerifyCert() {
   if (ssl_config_.verify_ev_cert)
     flags |= X509Certificate::VERIFY_EV_CERT;
   verifier_.reset(new CertVerifier);
-  return verifier_->Verify(server_cert_, hostname_, flags,
+  return verifier_->Verify(server_cert_, host_and_port_.host(), flags,
                            &server_cert_verify_result_,
                            &handshake_io_callback_);
 }

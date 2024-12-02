@@ -8,14 +8,14 @@
 #include "base/base64.h"
 #endif
 #include "base/environment.h"
-#include "base/histogram.h"
 #include "base/logging.h"
+#include "base/metrics/histogram.h"
 #include "base/rand_util.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/task.h"
 #include "base/timer.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/safe_browsing/protocol_parser.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
@@ -76,7 +76,7 @@ SafeBrowsingProtocolManager::SafeBrowsingProtocolManager(
   next_update_sec_ = base::RandInt(60, kSbTimerStartIntervalSec);
 
   chrome::VersionInfo version_info;
-  if (!version_info.is_valid())
+  if (!version_info.is_valid() || version_info.Version().empty())
     version_ = "0.1";
   else
     version_ = version_info.Version();
@@ -207,11 +207,11 @@ void SafeBrowsingProtocolManager::OnURLFetchComplete(
     } else {
       HandleGetHashError(Time::Now());
       if (status.status() == URLRequestStatus::FAILED) {
-          SB_DLOG(INFO) << "SafeBrowsing GetHash request for: " << source->url()
-                        << " failed with os error: " << status.os_error();
+          VLOG(1) << "SafeBrowsing GetHash request for: " << source->url()
+                  << " failed with os error: " << status.os_error();
       } else {
-          SB_DLOG(INFO) << "SafeBrowsing GetHash request for: " << source->url()
-                        << " failed with error: " << response_code;
+          VLOG(1) << "SafeBrowsing GetHash request for: " << source->url()
+                  << " failed with error: " << response_code;
       }
     }
 
@@ -242,8 +242,8 @@ void SafeBrowsingProtocolManager::OnURLFetchComplete(
                                         data.data(),
                                         static_cast<int>(data.length()));
       if (!parsed_ok) {
-        SB_DLOG(INFO) << "SafeBrowsing request for: " << source->url()
-                      << "failed parse.";
+        VLOG(1) << "SafeBrowsing request for: " << source->url()
+                << " failed parse.";
         must_back_off = true;
         chunk_request_urls_.clear();
         UpdateFinished(false);
@@ -281,11 +281,11 @@ void SafeBrowsingProtocolManager::OnURLFetchComplete(
         chunk_request_urls_.clear();
       UpdateFinished(false);
       if (status.status() == URLRequestStatus::FAILED) {
-        SB_DLOG(INFO) << "SafeBrowsing request for: " << source->url()
-                      << " failed with os error: " << status.os_error();
+        VLOG(1) << "SafeBrowsing request for: " << source->url()
+                << " failed with os error: " << status.os_error();
       } else {
-        SB_DLOG(INFO) << "SafeBrowsing request for: " << source->url()
-                      << " failed with error: " << response_code;
+        VLOG(1) << "SafeBrowsing request for: " << source->url()
+                << " failed with error: " << response_code;
       }
     }
   }
@@ -376,12 +376,12 @@ bool SafeBrowsingProtocolManager::HandleServiceResponse(const GURL& url,
         data_str.assign(data, length);
         std::string encoded_chunk;
         base::Base64Encode(data, &encoded_chunk);
-        SB_DLOG(INFO) << "ParseChunk error for chunk: " << chunk_url.url
-                      << ", client_key: " << client_key_
-                      << ", wrapped_key: " << wrapped_key_
-                      << ", mac: " << chunk_url.mac
-                      << ", Base64Encode(data): " << encoded_chunk
-                      << ", length: " << length;
+        VLOG(1) << "ParseChunk error for chunk: " << chunk_url.url
+                << ", client_key: " << client_key_
+                << ", wrapped_key: " << wrapped_key_
+                << ", mac: " << chunk_url.mac
+                << ", Base64Encode(data): " << encoded_chunk
+                << ", length: " << length;
 #endif
         return false;
       }

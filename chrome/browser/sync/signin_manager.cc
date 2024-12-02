@@ -49,21 +49,24 @@ void SigninManager::StartSignIn(const std::string& username,
                                 const std::string& login_token,
                                 const std::string& login_captcha) {
   DCHECK(username_.empty());
+#if !defined(OS_CHROMEOS)
   // The Sign out should clear the token service credentials.
+  // Note: In CHROMEOS we might have valid credentials but still need to
+  // set up 2-factor authentication.
   DCHECK(!profile_->GetTokenService()->AreCredentialsValid());
-
+#endif
   username_.assign(username);
   password_.assign(password);
 
-  client_login_.reset(new GaiaAuthenticator2(this,
-                                             GaiaConstants::kChromeSource,
-                                             profile_->GetRequestContext()));
+  client_login_.reset(new GaiaAuthFetcher(this,
+                                          GaiaConstants::kChromeSource,
+                                          profile_->GetRequestContext()));
   client_login_->StartClientLogin(username,
                                   password,
                                   "",
                                   login_token,
                                   login_captcha,
-                                  GaiaAuthenticator2::HostedAccountsNotAllowed);
+                                  GaiaAuthFetcher::HostedAccountsNotAllowed);
 }
 
 void SigninManager::ProvideSecondFactorAccessCode(
@@ -71,18 +74,21 @@ void SigninManager::ProvideSecondFactorAccessCode(
   DCHECK(!username_.empty() && !password_.empty() &&
       last_result_.data.empty());
 
-  client_login_.reset(new GaiaAuthenticator2(this,
-                                             GaiaConstants::kChromeSource,
-                                             profile_->GetRequestContext()));
+  client_login_.reset(new GaiaAuthFetcher(this,
+                                          GaiaConstants::kChromeSource,
+                                          profile_->GetRequestContext()));
   client_login_->StartClientLogin(username_,
                                   access_code,
                                   "",
                                   std::string(),
                                   std::string(),
-                                  GaiaAuthenticator2::HostedAccountsNotAllowed);
+                                  GaiaAuthFetcher::HostedAccountsNotAllowed);
 }
 
 void SigninManager::SignOut() {
+  if (!profile_)
+    return;
+
   client_login_.reset();
   last_result_ = ClientLoginResult();
   username_.clear();
@@ -111,7 +117,7 @@ void SigninManager::OnGetUserInfoSuccess(const std::string& key,
   GoogleServiceSigninSuccessDetails details(username_, password_);
   NotificationService::current()->Notify(
       NotificationType::GOOGLE_SIGNIN_SUCCESSFUL,
-      Source<SigninManager>(this),
+      Source<Profile>(profile_),
       Details<const GoogleServiceSigninSuccessDetails>(&details));
 
   password_.clear();  // Don't need it anymore.
@@ -137,7 +143,7 @@ void SigninManager::OnGetUserInfoFailure(const GoogleServiceAuthError& error) {
 void SigninManager::OnClientLoginFailure(const GoogleServiceAuthError& error) {
   NotificationService::current()->Notify(
       NotificationType::GOOGLE_SIGNIN_FAILED,
-      Source<SigninManager>(this),
+      Source<Profile>(profile_),
       Details<const GoogleServiceAuthError>(&error));
 
   // We don't sign-out if the password was valid and we're just dealing with

@@ -44,7 +44,7 @@ class ExtensionBrowserEventRouter : public TabStripModelObserver,
 
   // BrowserList::Observer
   virtual void OnBrowserAdded(const Browser* browser);
-  virtual void OnBrowserRemoving(const Browser* browser);
+  virtual void OnBrowserRemoved(const Browser* browser);
   virtual void OnBrowserSetLastActive(const Browser* browser);
 
 #if defined(TOOLKIT_VIEWS)
@@ -59,19 +59,24 @@ class ExtensionBrowserEventRouter : public TabStripModelObserver,
   void OnBrowserWindowReady(const Browser* browser);
 
   // TabStripModelObserver
-  virtual void TabInsertedAt(TabContents* contents, int index, bool foreground);
-  virtual void TabClosingAt(TabContents* contents, int index);
-  virtual void TabDetachedAt(TabContents* contents, int index);
-  virtual void TabSelectedAt(TabContents* old_contents,
-                             TabContents* new_contents,
+  virtual void TabInsertedAt(TabContentsWrapper* contents, int index,
+                             bool foreground);
+  virtual void TabClosingAt(TabStripModel* tab_strip_model,
+                            TabContentsWrapper* contents,
+                            int index);
+  virtual void TabDetachedAt(TabContentsWrapper* contents, int index);
+  virtual void TabSelectedAt(TabContentsWrapper* old_contents,
+                             TabContentsWrapper* new_contents,
                              int index,
                              bool user_gesture);
-  virtual void TabMoved(TabContents* contents, int from_index, int to_index);
-  virtual void TabChangedAt(TabContents* contents, int index,
+  virtual void TabMoved(TabContentsWrapper* contents, int from_index,
+                        int to_index);
+  virtual void TabChangedAt(TabContentsWrapper* contents, int index,
                             TabChangeType change_type);
-  virtual void TabReplacedAt(TabContents* old_contents,
-                             TabContents* new_contents,
+  virtual void TabReplacedAt(TabContentsWrapper* old_contents,
+                             TabContentsWrapper* new_contents,
                              int index);
+  virtual void TabPinnedStateChanged(TabContentsWrapper* contents, int index);
   virtual void TabStripEmpty();
 
   // Page Action execute event.
@@ -98,6 +103,11 @@ class ExtensionBrowserEventRouter : public TabStripModelObserver,
   // and Observe/NAV_ENTRY_COMMITTED.
   void TabUpdated(TabContents* contents, bool did_navigate);
 
+  // Packages |changed_properties| as a tab updated event for the tab |contents|
+  // and dispatches the event to the extension.
+  void DispatchTabUpdatedEvent(TabContents* contents,
+                               DictionaryValue* changed_properties);
+
   // Called to dispatch a deprecated style page action click event that was
   // registered like:
   //   chrome.pageActions["name"].addListener(function(actionId, info){})
@@ -120,6 +130,7 @@ class ExtensionBrowserEventRouter : public TabStripModelObserver,
   void UnregisterForTabNotifications(TabContents* contents);
 
   ExtensionBrowserEventRouter();
+  ~ExtensionBrowserEventRouter();
   friend struct DefaultSingletonTraits<ExtensionBrowserEventRouter>;
 
   NotificationRegistrar registrar_;
@@ -160,6 +171,10 @@ class ExtensionBrowserEventRouter : public TabStripModelObserver,
 
     GURL url_;
   };
+
+  // Gets the TabEntry for the given |contents|. Returns TabEntry* if
+  // found, NULL if not.
+  TabEntry* GetTabEntry(const TabContents* contents);
 
   std::map<int, TabEntry> tab_entries_;
 

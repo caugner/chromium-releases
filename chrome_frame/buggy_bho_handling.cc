@@ -35,6 +35,7 @@ const ModuleAndVersion kBuggyModules[] = {
   { "rpshell32.dll", 6, 0 },  // troublemaker: 6.0.6000.1389
   { "msgsres.dll", 6, 0 },  // troublemaker: 6.0.6000.1389
   { "limewireinttb.dll", 4, 1  },  // troublemaker: 4.1.1.1000
+  { "pxsecure.dll", 3, 0  },  // troublemaker: 3.0.5.220
 
   // These BHOs seem to be out of the same buggy BHO factory
   { "tbabso.dll", 4, 5 },  // troublemaker: 4.5.156.0
@@ -103,7 +104,7 @@ STDMETHODIMP BuggyBhoTls::BuggyBhoInvoke(InvokeFunc original, IDispatch* me,
                                          WORD flags, DISPPARAMS* params,
                                          VARIANT* result, EXCEPINFO* ei,
                                          UINT* err) {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
 
   const BuggyBhoTls* tls = BuggyBhoTls::FromCurrentThread();
   if (tls && tls->IsBuggyObject(me)) {
@@ -215,4 +216,3 @@ HRESULT BuggyBhoTls::PatchBuggyBHOs(IWebBrowser2* browser) {
 }
 
 }  // end namespace buggy_bho
-

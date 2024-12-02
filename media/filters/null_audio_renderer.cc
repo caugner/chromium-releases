@@ -2,8 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
 #include <cmath>
 
+#include "base/logging.h"
 #include "media/base/filter_host.h"
 #include "media/filters/null_audio_renderer.h"
 
@@ -24,15 +26,6 @@ NullAudioRenderer::NullAudioRenderer()
 
 NullAudioRenderer::~NullAudioRenderer() {
   DCHECK_EQ(kNullThreadHandle, thread_);
-}
-
-// static
-bool NullAudioRenderer::IsMediaFormatSupported(
-    const MediaFormat& media_format) {
-  int channels;
-  int sample_rate;
-  int sample_bits;
-  return ParseMediaFormat(media_format, &channels, &sample_rate, &sample_bits);
 }
 
 void NullAudioRenderer::SetVolume(float volume) {

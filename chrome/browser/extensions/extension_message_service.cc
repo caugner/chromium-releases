@@ -14,9 +14,9 @@
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
-#include "chrome/browser/renderer_host/resource_message_filter.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/render_messages.h"
@@ -36,9 +36,9 @@
 struct ExtensionMessageService::MessagePort {
   IPC::Message::Sender* sender;
   int routing_id;
-  MessagePort(IPC::Message::Sender* sender = NULL,
-              int routing_id = MSG_ROUTING_CONTROL) :
-     sender(sender), routing_id(routing_id) {}
+  explicit MessagePort(IPC::Message::Sender* sender = NULL,
+              int routing_id = MSG_ROUTING_CONTROL)
+     : sender(sender), routing_id(routing_id) {}
 };
 
 struct ExtensionMessageService::MessageChannel {
@@ -52,8 +52,6 @@ const char ExtensionMessageService::kDispatchOnDisconnect[] =
     "Port.dispatchOnDisconnect";
 const char ExtensionMessageService::kDispatchOnMessage[] =
     "Port.dispatchOnMessage";
-const char ExtensionMessageService::kDispatchEvent[] =
-    "Event.dispatchJSON";
 
 namespace {
 
@@ -73,15 +71,17 @@ static void DispatchOnConnect(const ExtensionMessageService::MessagePort& port,
   args.Set(4, Value::CreateStringValue(target_extension_id));
   CHECK(port.sender);
   port.sender->Send(new ViewMsg_ExtensionMessageInvoke(port.routing_id,
-       ExtensionMessageService::kDispatchOnConnect, args, false, GURL()));
+       "", ExtensionMessageService::kDispatchOnConnect, args, GURL()));
 }
 
 static void DispatchOnDisconnect(
-    const ExtensionMessageService::MessagePort& port, int source_port_id) {
+    const ExtensionMessageService::MessagePort& port, int source_port_id,
+    bool connection_error) {
   ListValue args;
   args.Set(0, Value::CreateIntegerValue(source_port_id));
+  args.Set(1, Value::CreateBooleanValue(connection_error));
   port.sender->Send(new ViewMsg_ExtensionMessageInvoke(port.routing_id,
-      ExtensionMessageService::kDispatchOnDisconnect, args, false, GURL()));
+      "", ExtensionMessageService::kDispatchOnDisconnect, args, GURL()));
 }
 
 static void DispatchOnMessage(const ExtensionMessageService::MessagePort& port,
@@ -90,31 +90,10 @@ static void DispatchOnMessage(const ExtensionMessageService::MessagePort& port,
   args.Set(0, Value::CreateStringValue(message));
   args.Set(1, Value::CreateIntegerValue(source_port_id));
   port.sender->Send(new ViewMsg_ExtensionMessageInvoke(port.routing_id,
-      ExtensionMessageService::kDispatchOnMessage, args, false, GURL()));
-}
-
-static void DispatchEvent(const ExtensionMessageService::MessagePort& port,
-                          const std::string& event_name,
-                          const std::string& event_args,
-                          bool cross_incognito,
-                          const GURL& event_url) {
-  ListValue args;
-  args.Set(0, Value::CreateStringValue(event_name));
-  args.Set(1, Value::CreateStringValue(event_args));
-  port.sender->Send(new ViewMsg_ExtensionMessageInvoke(port.routing_id,
-      ExtensionMessageService::kDispatchEvent, args, cross_incognito,
-      event_url));
+      "", ExtensionMessageService::kDispatchOnMessage, args, GURL()));
 }
 
 }  // namespace
-
-// static
-std::string ExtensionMessageService::GetPerExtensionEventName(
-    const std::string& event_name, const std::string& extension_id) {
-  // This should match the method we use in extension_process_binding.js when
-  // setting up the corresponding chrome.Event object.
-  return event_name + "/" + extension_id;
-}
 
 // static
 void ExtensionMessageService::AllocatePortIdPair(int* port1, int* port2) {
@@ -136,16 +115,13 @@ void ExtensionMessageService::AllocatePortIdPair(int* port1, int* port2) {
 }
 
 ExtensionMessageService::ExtensionMessageService(Profile* profile)
-    : profile_(profile),
-      extension_devtools_manager_(NULL) {
+    : profile_(profile) {
   registrar_.Add(this, NotificationType::RENDERER_PROCESS_TERMINATED,
                  NotificationService::AllSources());
   registrar_.Add(this, NotificationType::RENDERER_PROCESS_CLOSED,
                  NotificationService::AllSources());
   registrar_.Add(this, NotificationType::RENDER_VIEW_HOST_DELETED,
                  NotificationService::AllSources());
-
-  extension_devtools_manager_ = profile_->GetExtensionDevToolsManager();
 }
 
 ExtensionMessageService::~ExtensionMessageService() {
@@ -157,46 +133,6 @@ void ExtensionMessageService::DestroyingProfile() {
   profile_ = NULL;
   if (!registrar_.IsEmpty())
     registrar_.RemoveAll();
-}
-
-void ExtensionMessageService::AddEventListener(const std::string& event_name,
-                                               int render_process_id) {
-  // It is possible that this RenderProcessHost is being destroyed. If that is
-  // the case, we'll have already removed his listeners, so do nothing here.
-  RenderProcessHost* rph = RenderProcessHost::FromID(render_process_id);
-  if (!rph || rph->ListenersIterator().IsAtEnd())
-    return;
-
-  DCHECK_EQ(listeners_[event_name].count(render_process_id), 0u) << event_name;
-  listeners_[event_name].insert(render_process_id);
-
-  if (extension_devtools_manager_.get()) {
-    extension_devtools_manager_->AddEventListener(event_name,
-                                                  render_process_id);
-  }
-}
-
-void ExtensionMessageService::RemoveEventListener(const std::string& event_name,
-                                                  int render_process_id) {
-  // The RenderProcessHost may be destroyed. See AddEventListener.
-  RenderProcessHost* rph = RenderProcessHost::FromID(render_process_id);
-  if (!rph || rph->ListenersIterator().IsAtEnd())
-    return;
-
-  DCHECK_EQ(listeners_[event_name].count(render_process_id), 1u)
-      << " PID=" << render_process_id << " event=" << event_name;
-  listeners_[event_name].erase(render_process_id);
-
-  if (extension_devtools_manager_.get()) {
-    extension_devtools_manager_->RemoveEventListener(event_name,
-                                                     render_process_id);
-  }
-}
-
-bool ExtensionMessageService::HasEventListener(
-    const std::string& event_name) {
-  return (listeners_.find(event_name) != listeners_.end() &&
-          !listeners_[event_name].empty());
 }
 
 void ExtensionMessageService::OpenChannelToExtension(
@@ -238,7 +174,7 @@ void ExtensionMessageService::OpenChannelToTab(
   if (!source)
     return;
 
-  TabContents* contents = NULL;
+  TabContentsWrapper* contents = NULL;
   MessagePort receiver;
   if (ExtensionTabUtil::GetTabById(tab_id, source->profile(), true,
                                    NULL, NULL, &contents, NULL)) {
@@ -250,7 +186,7 @@ void ExtensionMessageService::OpenChannelToTab(
     // The tab isn't loaded yet. Don't attempt to connect. Treat this as a
     // disconnect.
     DispatchOnDisconnect(MessagePort(source, MSG_ROUTING_CONTROL),
-                         GET_OPPOSITE_PORT_ID(receiver_port_id));
+                         GET_OPPOSITE_PORT_ID(receiver_port_id), true);
     return;
   }
 
@@ -276,14 +212,13 @@ bool ExtensionMessageService::OpenChannelImpl(
     const std::string& source_extension_id,
     const std::string& target_extension_id,
     const std::string& channel_name) {
-  // TODO(mpcomplete): notify source if receiver doesn't exist
   if (!source)
     return false;  // Closed while in flight.
 
   if (!receiver.sender) {
     // Treat it as a disconnect.
     DispatchOnDisconnect(MessagePort(source, MSG_ROUTING_CONTROL),
-                         GET_OPPOSITE_PORT_ID(receiver_port_id));
+                         GET_OPPOSITE_PORT_ID(receiver_port_id), true);
     return false;
   }
 
@@ -370,7 +305,7 @@ void ExtensionMessageService::CloseChannelImpl(
       channel_iter->second->receiver : channel_iter->second->opener;
 
   if (notify_other_port)
-    DispatchOnDisconnect(port, GET_OPPOSITE_PORT_ID(closing_port_id));
+    DispatchOnDisconnect(port, GET_OPPOSITE_PORT_ID(closing_port_id), false);
   delete channel_iter->second;
   channels_.erase(channel_iter);
 }
@@ -389,49 +324,6 @@ void ExtensionMessageService::PostMessageFromRenderer(
 
   DispatchOnMessage(port, message, dest_port_id);
 }
-
-void ExtensionMessageService::DispatchEventToRenderers(
-    const std::string& event_name, const std::string& event_args,
-    Profile* restrict_to_profile, const GURL& event_url) {
-  if (!profile_)
-    return;
-
-  // We don't expect to get events from a completely different profile.
-  DCHECK(!restrict_to_profile || profile_->IsSameProfile(restrict_to_profile));
-
-  ListenerMap::iterator it = listeners_.find(event_name);
-  if (it == listeners_.end())
-    return;
-
-  std::set<int>& pids = it->second;
-
-  // Send the event only to renderers that are listening for it.
-  for (std::set<int>::iterator pid = pids.begin(); pid != pids.end(); ++pid) {
-    RenderProcessHost* renderer = RenderProcessHost::FromID(*pid);
-    if (!renderer)
-      continue;
-    if (!ChildProcessSecurityPolicy::GetInstance()->
-            HasExtensionBindings(*pid)) {
-      // Don't send browser-level events to unprivileged processes.
-      continue;
-    }
-
-    // Is this event from a different profile than the renderer (ie, an
-    // incognito tab event sent to a normal process, or vice versa).
-    bool cross_incognito =
-        restrict_to_profile && renderer->profile() != restrict_to_profile;
-    DispatchEvent(renderer, event_name, event_args, cross_incognito, event_url);
-  }
-}
-
-void ExtensionMessageService::DispatchEventToExtension(
-    const std::string& extension_id,
-    const std::string& event_name, const std::string& event_args,
-    Profile* restrict_to_profile, const GURL& event_url) {
-  DispatchEventToRenderers(GetPerExtensionEventName(event_name, extension_id),
-                           event_args, restrict_to_profile, event_url);
-}
-
 void ExtensionMessageService::Observe(NotificationType type,
                                       const NotificationSource& source,
                                       const NotificationDetails& details) {
@@ -440,14 +332,6 @@ void ExtensionMessageService::Observe(NotificationType type,
     case NotificationType::RENDERER_PROCESS_CLOSED: {
       RenderProcessHost* renderer = Source<RenderProcessHost>(source).ptr();
       OnSenderClosed(renderer);
-
-      // Remove all event listeners associated with this renderer
-      for (ListenerMap::iterator it = listeners_.begin();
-           it != listeners_.end(); ) {
-        ListenerMap::iterator current = it++;
-        if (current->second.count(renderer->id()) != 0)
-          RemoveEventListener(current->first, renderer->id());
-      }
       break;
     }
     case NotificationType::RENDER_VIEW_HOST_DELETED:

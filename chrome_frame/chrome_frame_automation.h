@@ -92,6 +92,7 @@ class ChromeFrameAutomationProxyImpl
  protected:
   friend class AutomationProxyCacheEntry;
   ChromeFrameAutomationProxyImpl(AutomationProxyCacheEntry* entry,
+                                 std::string channel_id,
                                  int launch_timeout);
 
   class CFMsgDispatcher;
@@ -109,14 +110,15 @@ class ChromeFrameLaunchParams :  // NOLINT
   ChromeFrameLaunchParams(const GURL& url, const GURL& referrer,
                           const FilePath& profile_path,
                           const std::wstring& profile_name,
+                          const std::wstring& language,
                           const std::wstring& extra_arguments,
                           bool incognito, bool widget_mode,
                           bool route_all_top_level_navigations)
     : launch_timeout_(kCommandExecutionTimeout), url_(url),
       referrer_(referrer), profile_path_(profile_path),
-      profile_name_(profile_name), extra_arguments_(extra_arguments),
-      version_check_(true), incognito_mode_(incognito),
-      is_widget_mode_(widget_mode),
+      profile_name_(profile_name), language_(language),
+      extra_arguments_(extra_arguments), version_check_(true),
+      incognito_mode_(incognito), is_widget_mode_(widget_mode),
       route_all_top_level_navigations_(route_all_top_level_navigations) {
   }
 
@@ -155,6 +157,10 @@ class ChromeFrameLaunchParams :  // NOLINT
     return profile_name_;
   }
 
+  const std::wstring& language() const {
+    return language_;
+  }
+
   const std::wstring& extra_arguments() const {
     return extra_arguments_;
   }
@@ -190,6 +196,7 @@ class ChromeFrameLaunchParams :  // NOLINT
   GURL referrer_;
   FilePath profile_path_;
   std::wstring profile_name_;
+  std::wstring language_;
   std::wstring extra_arguments_;
   bool version_check_;
   bool incognito_mode_;
@@ -358,6 +365,9 @@ class ChromeFrameAutomationClient
       void* user_data,
       std::vector<FilePath>* extension_directories);
 
+  // Returns the session ID used to identify a Tab in Chrome.
+  virtual int GetSessionId() const;
+
   virtual void OnChromeFrameHostMoved();
 
   TabProxy* tab() const { return tab_.get(); }
@@ -452,7 +462,8 @@ class ChromeFrameAutomationClient
   void CreateExternalTab();
   AutomationLaunchResult CreateExternalTabComplete(HWND chrome_window,
                                                    HWND tab_window,
-                                                   int tab_handle);
+                                                   int tab_handle,
+                                                   int session_id);
   // Called in UI thread. Here we fire event to the client notifying for
   // the result of Initialize() method call.
   void InitializeComplete(AutomationLaunchResult result);
@@ -523,6 +534,8 @@ class ChromeFrameAutomationClient
   bool handle_top_level_requests_;
   ProxyFactory* proxy_factory_;
   int tab_handle_;
+  // The SessionId used by Chrome as the id in the Javascript Tab object.
+  int session_id_;
   // Only used if we attach to an existing tab.
   uint64 external_tab_cookie_;
 

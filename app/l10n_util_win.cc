@@ -2,17 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "app/l10n_util.h"
-
-#include <algorithm>
-#include <windowsx.h>
-
 #include "app/l10n_util_win.h"
-#include "base/i18n/rtl.h"
-#include "base/string_number_conversions.h"
-//#include "base/string_util.h"
-#include "base/win_util.h"
 
+#include <windowsx.h>
+#include <algorithm>
+#include <iterator>
+
+#include "app/l10n_util.h"
+#include "base/i18n/rtl.h"
+#include "base/lazy_instance.h"
+#include "base/string_number_conversions.h"
+#include "base/win/i18n.h"
+#include "base/win/windows_version.h"
 #include "grit/app_locale_settings.h"
 
 namespace {
@@ -54,6 +55,21 @@ bool IsFontPresent(const wchar_t* font_name) {
   return wcscmp(font_name, actual_font_name) == 0;
 }
 
+class OverrideLocaleHolder {
+ public:
+  OverrideLocaleHolder() {}
+  const std::vector<std::string>& value() const { return value_; }
+  void swap_value(std::vector<std::string>* override_value) {
+    value_.swap(*override_value);
+  }
+ private:
+  std::vector<std::string> value_;
+  DISALLOW_COPY_AND_ASSIGN(OverrideLocaleHolder);
+};
+
+base::LazyInstance<OverrideLocaleHolder>
+    override_locale_holder(base::LINKER_INITIALIZED);
+
 }  // namespace
 
 namespace l10n_util {
@@ -86,7 +102,7 @@ bool IsLocaleSupportedByOS(const std::string& locale) {
   // On Win XP, no Ethiopic/Amahric font is availabel out of box. We hard-coded
   // 'Abyssinica SIL' in the resource bundle to use in the UI. Check
   // for its presence to determine whether or not to support Amharic UI on XP.
-  return (win_util::GetWinVersion() >= win_util::WINVERSION_VISTA ||
+  return (base::win::GetVersion() >= base::win::VERSION_VISTA ||
       !LowerCaseEqualsASCII(locale, "am") || IsFontPresent(L"Abyssinica SIL"));
 }
 
@@ -102,7 +118,7 @@ bool NeedOverrideDefaultUIFont(std::wstring* override_font_family,
   // we need separate ui font specifications.
   int ui_font_family_id = IDS_UI_FONT_FAMILY;
   int ui_font_size_scaler_id = IDS_UI_FONT_SIZE_SCALER;
-  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA) {
+  if (base::win::GetVersion() < base::win::VERSION_VISTA) {
     ui_font_family_id = IDS_UI_FONT_FAMILY_XP;
     ui_font_size_scaler_id = IDS_UI_FONT_SIZE_SCALER_XP;
   }
@@ -147,6 +163,23 @@ void AdjustUIFontForWindow(HWND hwnd) {
         SetWindowFont(hwnd, hfont, FALSE);
     }
   }
+}
+
+void OverrideLocaleWithUILanguageList() {
+  std::vector<std::wstring> ui_languages;
+  if (base::win::i18n::GetThreadPreferredUILanguageList(&ui_languages)) {
+    std::vector<std::string> ascii_languages;
+    ascii_languages.reserve(ui_languages.size());
+    std::transform(ui_languages.begin(), ui_languages.end(),
+                   std::back_inserter(ascii_languages), &WideToASCII);
+    override_locale_holder.Get().swap_value(&ascii_languages);
+  } else {
+    NOTREACHED() << "Failed to determine the UI language for locale override.";
+  }
+}
+
+const std::vector<std::string>& GetLocaleOverrides() {
+  return override_locale_holder.Get().value();
 }
 
 }  // namespace l10n_util

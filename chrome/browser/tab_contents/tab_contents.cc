@@ -14,8 +14,8 @@
 #include "app/text_elider.h"
 #include "base/auto_reset.h"
 #include "base/file_version_info.h"
-#include "base/histogram.h"
 #include "base/i18n/rtl.h"
+#include "base/metrics/histogram.h"
 #include "base/process_util.h"
 #include "base/string16.h"
 #include "base/string_util.h"
@@ -24,7 +24,6 @@
 #include "chrome/browser/autocomplete_history_manager.h"
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/blocked_content_container.h"
-#include "chrome/browser/blocked_plugin_manager.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
@@ -56,10 +55,10 @@
 #include "chrome/browser/metrics/metric_event_duration_details.h"
 #include "chrome/browser/modal_html_dialog_delegate.h"
 #include "chrome/browser/omnibox_search_hint.h"
-#include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/plugin_installer.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/printing/print_preview_tab_controller.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
@@ -82,6 +81,7 @@
 #include "chrome/browser/tab_contents/tab_contents_ssl_helper.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
+#include "chrome/browser/tab_contents/web_navigation_observer.h"
 #include "chrome/browser/translate/page_translated_details.h"
 #include "chrome/common/bindings_policy.h"
 #include "chrome/common/chrome_switches.h"
@@ -110,6 +110,7 @@
 #include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/glue/password_form.h"
+#include "webkit/glue/plugins/plugin_list.h"
 
 // Cross-Site Navigations
 //
@@ -167,6 +168,7 @@ const int kJavascriptMessageExpectedDelay = 1000;
 // The list of prefs we want to observe.
 const char* kPrefsToObserve[] = {
   prefs::kAlternateErrorPagesEnabled,
+  prefs::kDefaultZoomLevel,
   prefs::kWebKitJavaEnabled,
   prefs::kWebKitJavascriptEnabled,
   prefs::kWebKitLoadsImagesAutomatically,
@@ -177,6 +179,8 @@ const char* kPrefsToObserve[] = {
   prefs::kWebKitFixedFontFamily,
   prefs::kWebKitDefaultFontSize,
   prefs::kWebKitDefaultFixedFontSize,
+  prefs::kWebKitMinimumFontSize,
+  prefs::kWebKitMinimumLogicalFontSize,
   prefs::kWebkitTabsToLinks,
   prefs::kDefaultCharset
   // kWebKitStandardFontIsSerif needs to be added
@@ -326,7 +330,6 @@ TabContents::TabContents(Profile* profile,
       save_package_(),
       autocomplete_history_manager_(),
       autofill_manager_(),
-      password_manager_(),
       plugin_installer_(),
       bookmark_drag_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(fav_icon_helper_(this)),
@@ -483,8 +486,13 @@ TabContents::~TabContents() {
 #if defined(OS_WIN)
   // If we still have a window handle, destroy it. GetNativeView can return
   // NULL if this contents was part of a window that closed.
-  if (GetNativeView())
+  if (GetNativeView()) {
+    RenderViewHost* host = render_view_host();
+    if (host && host->view()) {
+      host->view()->WillWmDestroy();
+    }
     ::DestroyWindow(GetNativeView());
+  }
 #endif
 
   // OnCloseStarted isn't called in unit tests.
@@ -562,12 +570,6 @@ AutoFillManager* TabContents::GetAutoFillManager() {
   return autofill_manager_.get();
 }
 
-PasswordManager* TabContents::GetPasswordManager() {
-  if (password_manager_.get() == NULL)
-    password_manager_.reset(new PasswordManager(this));
-  return password_manager_.get();
-}
-
 PluginInstaller* TabContents::GetPluginInstaller() {
   if (plugin_installer_.get() == NULL)
     plugin_installer_.reset(new PluginInstaller(this));
@@ -584,7 +586,7 @@ RenderProcessHost* TabContents::GetRenderProcessHost() const {
   return render_manager_.current_host()->process();
 }
 
-void TabContents::SetExtensionApp(Extension* extension) {
+void TabContents::SetExtensionApp(const Extension* extension) {
   DCHECK(!extension || extension->GetFullLaunchURL().is_valid());
   extension_app_ = extension;
 
@@ -601,12 +603,13 @@ void TabContents::SetExtensionAppById(const std::string& extension_app_id) {
     return;
 
   ExtensionsService* extension_service = profile()->GetExtensionsService();
-  if (extension_service && extension_service->is_ready()) {
-    Extension* extension =
-        extension_service->GetExtensionById(extension_app_id, false);
-    if (extension)
-      SetExtensionApp(extension);
-  }
+  if (!extension_service || !extension_service->is_ready())
+    return;
+
+  const Extension* extension =
+      extension_service->GetExtensionById(extension_app_id, false);
+  if (extension)
+    SetExtensionApp(extension);
 }
 
 SkBitmap* TabContents::GetExtensionAppIcon() {
@@ -681,7 +684,7 @@ bool TabContents::ShouldDisplayURL() {
   // Don't hide the url in view source mode and with interstitials.
   NavigationEntry* entry = controller_.GetActiveEntry();
   if (entry && (entry->IsViewSourceMode() ||
-                entry->page_type() == NavigationEntry::INTERSTITIAL_PAGE)) {
+                entry->page_type() == INTERSTITIAL_PAGE)) {
     return true;
   }
 
@@ -763,6 +766,14 @@ std::wstring TabContents::GetStatusText() const {
   return std::wstring();
 }
 
+void TabContents::AddNavigationObserver(WebNavigationObserver* observer) {
+  web_navigation_observers_.AddObserver(observer);
+}
+
+void TabContents::RemoveNavigationObserver(WebNavigationObserver* observer) {
+  web_navigation_observers_.RemoveObserver(observer);
+}
+
 void TabContents::SetIsCrashed(bool state) {
   if (state == is_crashed_)
     return;
@@ -791,6 +802,20 @@ void TabContents::DidBecomeSelected() {
   }
 
   WebCacheManager::GetInstance()->ObserveActivity(GetRenderProcessHost()->id());
+  last_selected_time_ = base::TimeTicks::Now();
+}
+
+void TabContents::FadeForInstant(bool animate) {
+  RenderWidgetHostView* rwhv = GetRenderWidgetHostView();
+  SkColor whitish = SkColorSetARGB(192, 255, 255, 255);
+  if (rwhv)
+    rwhv->SetVisuallyDeemphasized(&whitish, animate);
+}
+
+void TabContents::CancelInstantFade() {
+  RenderWidgetHostView* rwhv = GetRenderWidgetHostView();
+  if (rwhv)
+    rwhv->SetVisuallyDeemphasized(NULL, false);
 }
 
 void TabContents::WasHidden() {
@@ -837,6 +862,13 @@ void TabContents::HideContents() {
   WasHidden();
 }
 
+bool TabContents::NeedToFireBeforeUnload() {
+  // TODO(creis): Should we fire even for interstitial pages?
+  return notify_disconnection() &&
+      !showing_interstitial_page() &&
+      !render_view_host()->SuddenTerminationAllowed();
+}
+
 void TabContents::OpenURL(const GURL& url, const GURL& referrer,
                           WindowOpenDisposition disposition,
                           PageTransition::Type transition) {
@@ -861,12 +893,11 @@ bool TabContents::NavigateToEntry(
         kPreferredSizeWidth | kPreferredSizeHeightThisIsSlow);
   }
 
-  // For security, we should never send non-DOM-UI URLs (other than about:blank)
-  // to a DOM UI renderer.  Double check that here.
+  // For security, we should never send non-DOM-UI URLs to a DOM UI renderer.
+  // Double check that here.
   int enabled_bindings = dest_render_view_host->enabled_bindings();
   bool is_allowed_in_dom_ui_renderer =
-      DOMUIFactory::UseDOMUIForURL(profile(), entry.url()) ||
-      entry.url() == GURL(chrome::kAboutBlankURL);
+      DOMUIFactory::IsURLAcceptableForDOMUI(profile(), entry.url());
   CHECK(!BindingsPolicy::is_dom_ui_enabled(enabled_bindings) ||
         is_allowed_in_dom_ui_renderer);
 
@@ -884,6 +915,10 @@ bool TabContents::NavigateToEntry(
   // Navigate in the desired RenderViewHost.
   ViewMsg_Navigate_Params navigate_params;
   MakeNavigateParams(entry, controller_, reload_type, &navigate_params);
+  if (delegate_) {
+    navigate_params.extra_headers =
+        delegate_->GetNavigationHeaders(navigate_params.url);
+  }
   dest_render_view_host->Navigate(navigate_params);
 
   if (entry.page_id() == -1) {
@@ -896,10 +931,9 @@ bool TabContents::NavigateToEntry(
       return false;
   }
 
-  // Clear any provisional password saves - this stops password infobars
-  // showing up on pages the user navigates to while the right page is
-  // loading.
-  GetPasswordManager()->ClearProvisionalSave();
+  // Notify observers about navigation.
+  FOR_EACH_OBSERVER(WebNavigationObserver, web_navigation_observers_,
+                    NavigateToPendingEntry());
 
   if (reload_type != NavigationController::NO_RELOAD &&
       !profile()->IsOffTheRecord()) {
@@ -959,8 +993,10 @@ ConstrainedWindow* TabContents::CreateConstrainedDialog(
 
 void TabContents::BlockTabContent(bool blocked) {
   RenderWidgetHostView* rwhv = GetRenderWidgetHostView();
+  // 70% opaque grey.
+  SkColor greyish = SkColorSetARGB(178, 0, 0, 0);
   if (rwhv)
-    rwhv->SetVisuallyDeemphasized(blocked);
+    rwhv->SetVisuallyDeemphasized(blocked ? &greyish : NULL, false);
   render_view_host()->set_ignore_input_events(blocked);
   if (delegate_)
     delegate_->SetTabContentBlocked(this, blocked);
@@ -1174,9 +1210,8 @@ bool TabContents::ShouldShowBookmarkBar() {
   // is so the bookmarks bar disappears at the same time the page does.
   if (controller_.GetLastCommittedEntry()) {
     // Not the first load, always use the committed DOM UI.
-    if (render_manager_.dom_ui())
-      return render_manager_.dom_ui()->force_bookmark_bar_visible();
-    return false;  // Default.
+    return (render_manager_.dom_ui() == NULL) ?
+        false : render_manager_.dom_ui()->force_bookmark_bar_visible();
   }
 
   // When it's the first load, we know either the pending one or the committed
@@ -1184,9 +1219,8 @@ bool TabContents::ShouldShowBookmarkBar() {
   // of them will be valid, so we can just check both.
   if (render_manager_.pending_dom_ui())
     return render_manager_.pending_dom_ui()->force_bookmark_bar_visible();
-  if (render_manager_.dom_ui())
-    return render_manager_.dom_ui()->force_bookmark_bar_visible();
-  return false;  // Default.
+  return (render_manager_.dom_ui() == NULL) ?
+      false : render_manager_.dom_ui()->force_bookmark_bar_visible();
 }
 
 void TabContents::ToolbarSizeChanged(bool is_animating) {
@@ -1213,18 +1247,17 @@ void TabContents::OnStartDownload(DownloadItem* download) {
 }
 
 void TabContents::WillClose(ConstrainedWindow* window) {
-  ConstrainedWindowList::iterator it =
-      find(child_windows_.begin(), child_windows_.end(), window);
-  bool removed_topmost_window = it == child_windows_.begin();
-  if (it != child_windows_.end())
-    child_windows_.erase(it);
-  if (child_windows_.size() > 0) {
-    if (removed_topmost_window) {
-      child_windows_[0]->ShowConstrainedWindow();
-    }
-    BlockTabContent(true);
-  } else {
+  ConstrainedWindowList::iterator i(
+      std::find(child_windows_.begin(), child_windows_.end(), window));
+  bool removed_topmost_window = i == child_windows_.begin();
+  if (i != child_windows_.end())
+    child_windows_.erase(i);
+  if (child_windows_.empty()) {
     BlockTabContent(false);
+  } else {
+    if (removed_topmost_window)
+      child_windows_[0]->ShowConstrainedWindow();
+    BlockTabContent(true);
   }
 }
 
@@ -1349,8 +1382,14 @@ void TabContents::EmailPageLocation() {
 }
 
 void TabContents::PrintPreview() {
-  // We don't show the print preview yet, only the print dialog.
-  PrintNow();
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnablePrintPreview)) {
+    if (showing_interstitial_page())
+      return;
+    render_view_host()->PrintPreview();
+  } else {
+    PrintNow();
+  }
 }
 
 bool TabContents::PrintNow() {
@@ -1463,12 +1502,10 @@ void TabContents::UpdateHistoryPageTitle(const NavigationEntry& entry) {
     hs->SetPageTitle(entry.virtual_url(), entry.title());
 }
 
-int TabContents::GetZoomPercent(bool* enable_increment,
-                                bool* enable_decrement) {
-  *enable_decrement = *enable_increment = false;
+double TabContents::GetZoomLevel() const {
   HostZoomMap* zoom_map = profile()->GetHostZoomMap();
   if (!zoom_map)
-    return 100;
+    return 0;
 
   double zoom_level;
   if (temporary_zoom_settings_) {
@@ -1477,9 +1514,14 @@ int TabContents::GetZoomPercent(bool* enable_increment,
   } else {
     zoom_level = zoom_map->GetZoomLevel(GetURL());
   }
+  return zoom_level;
+}
 
+int TabContents::GetZoomPercent(bool* enable_increment,
+                                bool* enable_decrement) {
+  *enable_decrement = *enable_increment = false;
   int percent = static_cast<int>(
-      WebKit::WebView::zoomLevelToZoomFactor(zoom_level) * 100);
+      WebKit::WebView::zoomLevelToZoomFactor(GetZoomLevel()) * 100);
   *enable_decrement = percent > minimum_zoom_percent_;
   *enable_increment = percent < maximum_zoom_percent_;
   return percent;
@@ -1633,13 +1675,6 @@ void TabContents::DidNavigateMainFramePostCommit(
     // clear the bubble when a user navigates to a named anchor in the same
     // page.
     UpdateTargetURL(details.entry->page_id(), GURL());
-
-    // UpdateHelpersForDidNavigate will handle the case where the password_form
-    // origin is valid.
-    // TODO(brettw) bug 1343111: Password manager stuff in here needs to be
-    // cleaned up and covered by tests.
-    if (!params.password_form.origin.is_valid())
-      GetPasswordManager()->DidNavigate();
   }
 
   // The keyword generator uses the navigation entries, so must be called after
@@ -1701,6 +1736,10 @@ void TabContents::DidNavigateMainFramePostCommit(
   // Update the starred state.
   UpdateStarredStateForCurrentURL();
 
+  // Notify observers about navigation.
+  FOR_EACH_OBSERVER(WebNavigationObserver, web_navigation_observers_,
+                    DidNavigateMainFramePostCommit(details, params));
+
   // Clear the cache of forms in AutoFill.
   if (autofill_manager_.get())
     autofill_manager_->Reset();
@@ -1715,11 +1754,9 @@ void TabContents::DidNavigateAnyFramePostCommit(
   // reload the page to stop blocking.
   suppress_javascript_messages_ = false;
 
-  // Notify the password manager of the navigation or form submit.
-  // TODO(brettw) bug 1343111: Password manager stuff in here needs to be
-  // cleaned up and covered by tests.
-  if (params.password_form.origin.is_valid())
-    GetPasswordManager()->ProvisionallySavePassword(params.password_form);
+  // Notify observers about navigation.
+  FOR_EACH_OBSERVER(WebNavigationObserver, web_navigation_observers_,
+                    DidNavigateAnyFramePostCommit(details, params));
 
   // Let the LanguageState clear its state.
   language_state_.DidNavigate(details);
@@ -1755,6 +1792,10 @@ void TabContents::UpdateAlternateErrorPageURL() {
 
 void TabContents::UpdateWebPreferences() {
   render_view_host()->UpdateWebPreferences(GetWebkitPrefs());
+}
+
+void TabContents::UpdateZoomLevel() {
+  render_view_host()->SetZoomLevel(GetZoomLevel());
 }
 
 void TabContents::UpdateMaxPageIDIfNecessary(SiteInstance* site_instance,
@@ -2016,25 +2057,19 @@ void TabContents::OnCrashedPlugin(const FilePath& plugin_path) {
   DCHECK(!plugin_path.value().empty());
 
   std::wstring plugin_name = plugin_path.ToWStringHack();
-#if defined(OS_WIN) || defined(OS_MACOSX)
-  scoped_ptr<FileVersionInfo> version_info(
-      FileVersionInfo::CreateFileVersionInfo(plugin_path));
-  if (version_info.get()) {
-    const std::wstring& product_name = version_info->product_name();
-    if (!product_name.empty()) {
-      plugin_name = product_name;
+  WebPluginInfo plugin_info;
+  if (NPAPI::PluginList::Singleton()->GetPluginInfoByPath(
+          plugin_path, &plugin_info) &&
+      !plugin_info.name.empty()) {
+    plugin_name = UTF16ToWide(plugin_info.name);
 #if defined(OS_MACOSX)
-      // Many plugins on the Mac have .plugin in the actual name, which looks
-      // terrible, so look for that and strip it off if present.
-      const std::wstring plugin_extension(L".plugin");
-      if (EndsWith(plugin_name, plugin_extension, true))
-        plugin_name.erase(plugin_name.length() - plugin_extension.length());
+    // Many plugins on the Mac have .plugin in the actual name, which looks
+    // terrible, so look for that and strip it off if present.
+    const std::wstring plugin_extension(L".plugin");
+    if (EndsWith(plugin_name, plugin_extension, true))
+      plugin_name.erase(plugin_name.length() - plugin_extension.length());
 #endif  // OS_MACOSX
-    }
   }
-#else
-  NOTIMPLEMENTED() << " convert plugin path to plugin name";
-#endif
   SkBitmap* crash_icon = ResourceBundle::GetSharedInstance().GetBitmapNamed(
       IDR_INFOBAR_PLUGIN_CRASHED);
   AddInfoBar(new SimpleAlertInfoBarDelegate(
@@ -2049,13 +2084,17 @@ void TabContents::OnCrashedWorker() {
       NULL, true));
 }
 
-void TabContents::OnDidGetApplicationInfo(
-    int32 page_id,
-    const webkit_glue::WebApplicationInfo& info) {
+void TabContents::OnDidGetApplicationInfo(int32 page_id,
+                                          const WebApplicationInfo& info) {
   web_app_info_ = info;
 
   if (delegate())
     delegate()->OnDidGetApplicationInfo(this, page_id);
+}
+
+void TabContents::OnInstallApplication(const WebApplicationInfo& info) {
+  if (delegate())
+    delegate()->OnInstallApplication(this, info);
 }
 
 void TabContents::OnDisabledOutdatedPlugin(const string16& name,
@@ -2110,9 +2149,16 @@ void TabContents::OnPageTranslated(int32 page_id,
       Details<PageTranslatedDetails>(&details));
 }
 
-void TabContents::OnSetSuggestResult(int32 page_id, const std::string& result) {
+void TabContents::OnSetSuggestions(
+    int32 page_id,
+    const std::vector<std::string>& suggestions) {
   if (delegate())
-    delegate()->OnSetSuggestResult(page_id, result);
+    delegate()->OnSetSuggestions(page_id, suggestions);
+}
+
+void TabContents::OnInstantSupportDetermined(int32 page_id, bool result) {
+  if (delegate())
+    delegate()->OnInstantSupportDetermined(page_id, result);
 }
 
 void TabContents::DidStartProvisionalLoadForFrame(
@@ -2236,8 +2282,19 @@ void TabContents::DidFailProvisionalLoadWithError(
       Details<ProvisionalLoadDetails>(&details));
 }
 
-void TabContents::DocumentLoadedInFrame() {
+void TabContents::DocumentLoadedInFrame(long long frame_id) {
   controller_.DocumentLoadedInFrame();
+  NotificationService::current()->Notify(
+      NotificationType::FRAME_DOM_CONTENT_LOADED,
+      Source<NavigationController>(&controller_),
+      Details<long long>(&frame_id));
+}
+
+void TabContents::DidFinishLoad(long long frame_id) {
+  NotificationService::current()->Notify(
+      NotificationType::FRAME_DID_FINISH_LOAD,
+      Source<NavigationController>(&controller_),
+      Details<long long>(&frame_id));
 }
 
 void TabContents::OnContentSettingsAccessed(bool content_was_blocked) {
@@ -2288,12 +2345,6 @@ RenderViewHostDelegate::Autocomplete* TabContents::GetAutocompleteDelegate() {
 
 RenderViewHostDelegate::AutoFill* TabContents::GetAutoFillDelegate() {
   return GetAutoFillManager();
-}
-
-RenderViewHostDelegate::BlockedPlugin* TabContents::GetBlockedPluginDelegate() {
-  if (blocked_plugin_manager_.get() == NULL)
-    blocked_plugin_manager_.reset(new BlockedPluginManager(this));
-  return blocked_plugin_manager_.get();
 }
 
 RenderViewHostDelegate::SSL* TabContents::GetSSLDelegate() {
@@ -2562,33 +2613,29 @@ void TabContents::UpdateTargetURL(int32 page_id, const GURL& url) {
 void TabContents::UpdateThumbnail(const GURL& url,
                                   const SkBitmap& bitmap,
                                   const ThumbnailScore& score) {
+  if (profile()->IsOffTheRecord())
+    return;
+
   // Tell History about this thumbnail
   if (history::TopSites::IsEnabled()) {
-    if (!profile()->IsOffTheRecord())
-      profile()->GetTopSites()->SetPageThumbnail(url, bitmap, score);
+    history::TopSites* ts = profile()->GetTopSites();
+    if (ts)
+      ts->SetPageThumbnail(url, bitmap, score);
   } else {
-    HistoryService* hs;
-    if (!profile()->IsOffTheRecord() &&
-        (hs = profile()->GetHistoryService(Profile::IMPLICIT_ACCESS))) {
+    HistoryService* hs =
+        profile()->GetHistoryService(Profile::IMPLICIT_ACCESS);
+    if (hs)
       hs->SetPageThumbnail(url, bitmap, score);
-    }
   }
 }
 
 void TabContents::UpdateInspectorSetting(const std::string& key,
                                          const std::string& value) {
-  DictionaryValue* inspector_settings =
-      profile()->GetPrefs()->GetMutableDictionary(
-          prefs::kWebKitInspectorSettings);
-  inspector_settings->SetWithoutPathExpansion(key,
-                                              Value::CreateStringValue(value));
+  RenderViewHostDelegateHelper::UpdateInspectorSetting(profile(), key, value);
 }
 
 void TabContents::ClearInspectorSettings() {
-  DictionaryValue* inspector_settings =
-      profile()->GetPrefs()->GetMutableDictionary(
-          prefs::kWebKitInspectorSettings);
-  inspector_settings->Clear();
+  RenderViewHostDelegateHelper::ClearInspectorSettings(profile());
 }
 
 void TabContents::Close(RenderViewHost* rvh) {
@@ -2626,10 +2673,15 @@ void TabContents::RequestMove(const gfx::Rect& new_bounds) {
 
 void TabContents::DidStartLoading() {
   SetIsLoading(true, NULL);
+
   if (content_restrictions_) {
     content_restrictions_= 0;
     delegate()->ContentRestrictionsChanged(this);
   }
+
+  // Notify observers about navigation.
+  FOR_EACH_OBSERVER(WebNavigationObserver, web_navigation_observers_,
+                    DidStartLoading());
 }
 
 void TabContents::DidStopLoading() {
@@ -2649,11 +2701,11 @@ void TabContents::DidStopLoading() {
         controller_.GetCurrentEntryIndex()));
   }
 
-  // Tell PasswordManager we've finished a page load, which serves as a
-  // green light to save pending passwords and reset itself.
-  GetPasswordManager()->DidStopLoading();
-
   SetIsLoading(false, details.get());
+
+  // Notify observers about navigation.
+  FOR_EACH_OBSERVER(WebNavigationObserver, web_navigation_observers_,
+                    DidStopLoading());
 }
 
 void TabContents::DocumentOnLoadCompletedInMainFrame(
@@ -2731,8 +2783,10 @@ void TabContents::RunJavaScriptMessage(
   // Also suppress messages when showing an interstitial. The interstitial is
   // shown over the previous page, we don't want the hidden page dialogs to
   // interfere with the interstitial.
-  bool suppress_this_message = suppress_javascript_messages_ ||
-                               showing_interstitial_page();
+  bool suppress_this_message =
+      suppress_javascript_messages_ ||
+      showing_interstitial_page() ||
+      (delegate() && delegate()->ShouldSuppressDialogs());
   if (delegate())
     suppress_this_message |=
         (delegate()->GetConstrainingContents(this) != this);
@@ -2760,6 +2814,13 @@ void TabContents::RunJavaScriptMessage(
 
 void TabContents::RunBeforeUnloadConfirm(const std::wstring& message,
                                          IPC::Message* reply_msg) {
+  if (delegate())
+    delegate()->WillRunBeforeUnloadConfirm();
+  if (delegate() && delegate()->ShouldSuppressDialogs()) {
+    render_view_host()->JavaScriptMessageBoxClosed(reply_msg, true,
+                                                   std::wstring());
+    return;
+  }
   is_showing_before_unload_dialog_ = true;
   RunBeforeUnloadDialog(this, message, reply_msg);
 }
@@ -2777,12 +2838,14 @@ void TabContents::ShowModalHTMLDialog(const GURL& url, int width, int height,
 
 void TabContents::PasswordFormsFound(
     const std::vector<webkit_glue::PasswordForm>& forms) {
-  GetPasswordManager()->PasswordFormsFound(forms);
+  FOR_EACH_OBSERVER(WebNavigationObserver, web_navigation_observers_,
+                    PasswordFormsFound(forms));
 }
 
 void TabContents::PasswordFormsVisible(
     const std::vector<webkit_glue::PasswordForm>& visible_forms) {
-  GetPasswordManager()->PasswordFormsVisible(visible_forms);
+  FOR_EACH_OBSERVER(WebNavigationObserver, web_navigation_observers_,
+                    PasswordFormsVisible(visible_forms));
 }
 
 // Checks to see if we should generate a keyword based on the OSDD, and if
@@ -2883,8 +2946,8 @@ WebPreferences TabContents::GetWebkitPrefs() {
 
   // Force accelerated compositing and 2d canvas off for chrome: and
   // chrome-extension: pages.
-  if (GetURL().SchemeIs(chrome::kChromeUIScheme) ||
-      GetURL().SchemeIs(chrome::kExtensionScheme)) {
+  if (GetURL().SchemeIs(chrome::kChromeDevToolsScheme) ||
+      GetURL().SchemeIs(chrome::kChromeUIScheme)) {
     web_prefs.accelerated_compositing_enabled = false;
     web_prefs.accelerated_2d_canvas_enabled = false;
   }
@@ -2919,12 +2982,6 @@ void TabContents::OnCrossSiteResponse(int new_render_process_host_id,
   // handler of the old RenderViewHost before we can allow it to proceed.
   render_manager_.OnCrossSiteResponse(new_render_process_host_id,
                                       new_request_id);
-}
-
-gfx::Rect TabContents::GetRootWindowResizerRect() const {
-  if (delegate())
-    return delegate()->GetRootWindowResizerRect();
-  return gfx::Rect();
 }
 
 void TabContents::RendererUnresponsive(RenderViewHost* rvh,
@@ -3083,10 +3140,11 @@ void TabContents::Observe(NotificationType type,
       DCHECK(Source<PrefService>(source).ptr() == profile()->GetPrefs());
       if (*pref_name_in == prefs::kAlternateErrorPagesEnabled) {
         UpdateAlternateErrorPageURL();
-      } else if (*pref_name_in == prefs::kDefaultCharset ||
-          StartsWithASCII(*pref_name_in, "webkit.webprefs.", true)
-          ) {
+      } else if ((*pref_name_in == prefs::kDefaultCharset) ||
+                 StartsWithASCII(*pref_name_in, "webkit.webprefs.", true)) {
         UpdateWebPreferences();
+      } else if (*pref_name_in == prefs::kDefaultZoomLevel) {
+        UpdateZoomLevel();
       } else {
         NOTREACHED() << "unexpected pref change notification" << *pref_name_in;
       }
@@ -3150,7 +3208,7 @@ void TabContents::Observe(NotificationType type,
   }
 }
 
-void TabContents::UpdateExtensionAppIcon(Extension* extension) {
+void TabContents::UpdateExtensionAppIcon(const Extension* extension) {
   extension_app_icon_.reset();
 
   if (extension) {
@@ -3167,12 +3225,12 @@ void TabContents::UpdateExtensionAppIcon(Extension* extension) {
   }
 }
 
-Extension* TabContents::GetExtensionContaining(const GURL& url) {
+const Extension* TabContents::GetExtensionContaining(const GURL& url) {
   ExtensionsService* extensions_service = profile()->GetExtensionsService();
   if (!extensions_service)
     return NULL;
 
-  Extension* extension = extensions_service->GetExtensionByURL(url);
+  const Extension* extension = extensions_service->GetExtensionByURL(url);
   return extension ?
       extension : extensions_service->GetExtensionByWebExtent(url);
 }
@@ -3223,100 +3281,4 @@ void TabContents::set_encoding(const std::string& encoding) {
 void TabContents::SetAppIcon(const SkBitmap& app_icon) {
   app_icon_ = app_icon;
   NotifyNavigationStateChanged(INVALIDATE_TITLE);
-}
-
-// After a successful *new* login attempt, we take the PasswordFormManager in
-// provisional_save_manager_ and move it to a SavePasswordInfoBarDelegate while
-// the user makes up their mind with the "save password" infobar. Note if the
-// login is one we already know about, the end of the line is
-// provisional_save_manager_ because we just update it on success and so such
-// forms never end up in an infobar.
-class SavePasswordInfoBarDelegate : public ConfirmInfoBarDelegate {
- public:
-  SavePasswordInfoBarDelegate(TabContents* tab_contents,
-                              PasswordFormManager* form_to_save)
-      : ConfirmInfoBarDelegate(tab_contents),
-        form_to_save_(form_to_save),
-        infobar_response_(NO_RESPONSE) {}
-
-  virtual ~SavePasswordInfoBarDelegate() {}
-
-  // Begin ConfirmInfoBarDelegate implementation.
-  virtual void InfoBarClosed() {
-    UMA_HISTOGRAM_ENUMERATION("PasswordManager.InfoBarResponse",
-                              infobar_response_, NUM_RESPONSE_TYPES);
-    delete this;
-  }
-
-  virtual Type GetInfoBarType() { return PAGE_ACTION_TYPE; }
-
-  virtual string16 GetMessageText() const {
-    return l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_SAVE_PASSWORD_PROMPT);
-  }
-
-  virtual SkBitmap* GetIcon() const {
-    return ResourceBundle::GetSharedInstance().GetBitmapNamed(
-        IDR_INFOBAR_SAVE_PASSWORD);
-  }
-
-  virtual int GetButtons() const {
-    return BUTTON_OK | BUTTON_CANCEL;
-  }
-
-  virtual string16 GetButtonLabel(InfoBarButton button) const {
-    if (button == BUTTON_OK)
-      return l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_SAVE_BUTTON);
-    if (button == BUTTON_CANCEL)
-      return l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_BLACKLIST_BUTTON);
-    NOTREACHED();
-    return string16();
-  }
-
-  virtual bool Accept() {
-    DCHECK(form_to_save_.get());
-    form_to_save_->Save();
-    infobar_response_ = REMEMBER_PASSWORD;
-    return true;
-  }
-
-  virtual bool Cancel() {
-    DCHECK(form_to_save_.get());
-    form_to_save_->PermanentlyBlacklist();
-    infobar_response_ = DONT_REMEMBER_PASSWORD;
-    return true;
-  }
-  // End ConfirmInfoBarDelegate implementation.
-
- private:
-  // The PasswordFormManager managing the form we're asking the user about,
-  // and should update as per her decision.
-  scoped_ptr<PasswordFormManager> form_to_save_;
-
-  // Used to track the results we get from the info bar.
-  enum ResponseType {
-    NO_RESPONSE = 0,
-    REMEMBER_PASSWORD,
-    DONT_REMEMBER_PASSWORD,
-    NUM_RESPONSE_TYPES,
-  };
-  ResponseType infobar_response_;
-
-  DISALLOW_COPY_AND_ASSIGN(SavePasswordInfoBarDelegate);
-};
-
-void TabContents::FillPasswordForm(
-    const webkit_glue::PasswordFormFillData& form_data) {
-  render_view_host()->FillPasswordForm(form_data);
-}
-
-void TabContents::AddSavePasswordInfoBar(PasswordFormManager* form_to_save) {
-  AddInfoBar(new SavePasswordInfoBarDelegate(this, form_to_save));
-}
-
-Profile* TabContents::GetProfileForPasswordManager() {
-  return profile();
-}
-
-bool TabContents::DidLastPageLoadEncounterSSLErrors() {
-  return controller().ssl_manager()->ProcessedSSLErrorFromRequest();
 }

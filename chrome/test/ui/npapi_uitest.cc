@@ -45,9 +45,7 @@ TEST_F(NPAPITesterBase, Arguments) {
 }
 
 // Test invoking many plugins within a single page.
-// Test still flaky under valgrind
-// http://crbug.com/28372, http://crbug.com/45561
-TEST_F(NPAPITesterBase, FLAKY_ManyPlugins) {
+TEST_F(NPAPITesterBase, ManyPlugins) {
   const FilePath test_case(FILE_PATH_LITERAL("many_plugins.html"));
   GURL url(ui_test_utils::GetTestUrl(FilePath(kTestDir), test_case));
   ASSERT_NO_FATAL_FAILURE(NavigateToURL(url));
@@ -80,14 +78,21 @@ TEST_F(NPAPITesterBase, GetJavaScriptURL) {
                 kTestCompleteSuccess, action_max_timeout_ms());
 }
 
-// Flaky test: http://crbug.com/29020
 // Test that calling GetURL with a javascript URL and target=_self
 // works properly when the plugin is embedded in a subframe.
-TEST_F(NPAPITesterBase, FLAKY_GetJavaScriptURL2) {
+TEST_F(NPAPITesterBase, GetJavaScriptURL2) {
   const FilePath test_case(FILE_PATH_LITERAL("get_javascript_url2.html"));
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir), test_case);
   ASSERT_NO_FATAL_FAILURE(NavigateToURL(url));
   WaitForFinish("getjavascripturl2", "1", url, kTestCompleteCookie,
+                kTestCompleteSuccess, action_max_timeout_ms());
+}
+
+TEST_F(NPAPITesterBase, GetURLRedirectNotification) {
+  const FilePath test_case(FILE_PATH_LITERAL("geturl_redirect_notify.html"));
+  GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir), test_case);
+  ASSERT_NO_FATAL_FAILURE(NavigateToURL(url));
+  WaitForFinish("geturlredirectnotify", "1", url, kTestCompleteCookie,
                 kTestCompleteSuccess, action_max_timeout_ms());
 }
 
@@ -336,8 +341,7 @@ TEST_F(NPAPITesterBase, EnsureScriptingWorksInDestroy) {
 
 // This test uses a Windows Event to signal to the plugin that it should crash
 // on NP_Initialize.
-// This is flaky. http://crbug.com/32048
-TEST_F(NPAPITesterBase, FLAKY_NoHangIfInitCrashes) {
+TEST_F(NPAPITesterBase, NoHangIfInitCrashes) {
   if (UITest::in_process_renderer())
     return;
 
@@ -395,3 +399,22 @@ TEST_F(NPAPIVisiblePluginTester, PluginConvertPointTest) {
                 kTestCompleteSuccess, action_max_timeout_ms());
 }
 #endif
+
+TEST_F(NPAPIVisiblePluginTester, ClickToPlay) {
+  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
+  ASSERT_TRUE(browser.get());
+  ASSERT_TRUE(browser->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PLUGINS,
+                                                CONTENT_SETTING_BLOCK));
+
+  GURL url(URLRequestMockHTTPJob::GetMockUrl(
+               FilePath(FILE_PATH_LITERAL("npapi/click_to_play.html"))));
+  ASSERT_NO_FATAL_FAILURE(NavigateToURL(url));
+
+  scoped_refptr<TabProxy> tab(browser->GetTab(0));
+  ASSERT_TRUE(tab.get());
+
+  ASSERT_TRUE(tab->LoadBlockedPlugins());
+
+  WaitForFinish("setup", "1", url, kTestCompleteCookie,
+                kTestCompleteSuccess, action_max_timeout_ms());
+}

@@ -10,11 +10,10 @@
 #include "app/text_elider.h"
 #include "base/basictypes.h"
 #include "base/callback.h"
-#include "base/histogram.h"
+#include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_item.h"
 #include "chrome/browser/download/download_item_model.h"
@@ -27,6 +26,7 @@
 #include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/gtk/menu_gtk.h"
 #include "chrome/browser/gtk/nine_box.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/notification_service.h"
 #include "gfx/canvas_skia_paint.h"
 #include "gfx/color_utils.h"
@@ -90,8 +90,7 @@ class DownloadShelfContextMenuGtk : public DownloadShelfContextMenu,
   DownloadShelfContextMenuGtk(BaseDownloadItemModel* model,
                               DownloadItemGtk* download_item)
       : DownloadShelfContextMenu(model),
-        download_item_(download_item),
-        method_factory_(this) {
+        download_item_(download_item) {
   }
 
   ~DownloadShelfContextMenuGtk() {
@@ -143,8 +142,6 @@ class DownloadShelfContextMenuGtk : public DownloadShelfContextMenu,
 
   // The download item that created us.
   DownloadItemGtk* download_item_;
-
-  ScopedRunnableMethodFactory<DownloadShelfContextMenuGtk> method_factory_;
 };
 
 // DownloadItemGtk -------------------------------------------------------------
@@ -358,8 +355,8 @@ void DownloadItemGtk::OnDownloadUpdated(DownloadItem* download) {
     parent_shelf_->MaybeShowMoreDownloadItems();
   }
 
-  if (download->full_path() != icon_filepath_) {
-    // Turns out the file path is "unconfirmed %d.download" for dangerous
+  if (download->GetUserVerifiedFilePath() != icon_filepath_) {
+    // Turns out the file path is "unconfirmed %d.crdownload" for dangerous
     // downloads. When the download is confirmed, the file is renamed on
     // another thread, so reload the icon if the download filename changes.
     LoadIcon();
@@ -513,7 +510,7 @@ void DownloadItemGtk::OnLoadLargeIconComplete(IconManager::Handle handle,
 void DownloadItemGtk::LoadIcon() {
   icon_consumer_.CancelAllRequests();
   IconManager* im = g_browser_process->icon_manager();
-  icon_filepath_ = get_download()->full_path();
+  icon_filepath_ = get_download()->GetUserVerifiedFilePath();
   im->LoadIcon(icon_filepath_,
                IconLoader::SMALL, &icon_consumer_,
                NewCallback(this, &DownloadItemGtk::OnLoadSmallIconComplete));
@@ -524,7 +521,7 @@ void DownloadItemGtk::LoadIcon() {
 
 void DownloadItemGtk::UpdateTooltip() {
   string16 elided_filename = gfx::ElideFilename(
-      get_download()->GetFileName(),
+      get_download()->GetFileNameToReportUser(),
       gfx::Font(), kTooltipMaxWidth);
   gtk_widget_set_tooltip_text(body_.get(),
                               UTF16ToUTF8(elided_filename).c_str());
@@ -536,7 +533,7 @@ void DownloadItemGtk::UpdateNameLabel() {
   // much padding when we set the size request. We need to either use gfx::Font
   // or somehow extend TextElider.
   string16 elided_filename = gfx::ElideFilename(
-      get_download()->GetFileName(),
+      get_download()->GetFileNameToReportUser(),
       gfx::Font(), kTextWidth);
 
   GdkColor color = theme_provider_->GetGdkColor(
@@ -587,7 +584,7 @@ void DownloadItemGtk::UpdateDangerWarning() {
           l10n_util::GetStringUTF16(IDS_PROMPT_DANGEROUS_DOWNLOAD_EXTENSION);
     } else {
       string16 elided_filename = gfx::ElideFilename(
-          get_download()->original_name(), gfx::Font(), kTextWidth);
+          get_download()->target_name(), gfx::Font(), kTextWidth);
 
       dangerous_warning =
           l10n_util::GetStringFUTF16(IDS_PROMPT_DANGEROUS_DOWNLOAD,

@@ -58,7 +58,7 @@ void RenderViewFakeResourcesTest::SetUp() {
   // to fetch network resources.  These are then served canned content
   // in OnRequestResource().
   sandbox_init_wrapper_.reset(new SandboxInitWrapper);
-  command_line_.reset(new CommandLine(CommandLine::ARGUMENTS_ONLY));
+  command_line_.reset(new CommandLine(CommandLine::NO_PROGRAM));
   params_.reset(new MainFunctionParams(*command_line_,
                                        *sandbox_init_wrapper_, NULL));
   platform_.reset(new RendererMainPlatformDelegate(*params_));
@@ -150,8 +150,7 @@ void RenderViewFakeResourcesTest::OnRequestResource(
       message.routing_id(), request_id, response_head)));
 
   base::SharedMemory shared_memory;
-  ASSERT_TRUE(shared_memory.Create(std::string(), false, false, body.size()));
-  ASSERT_TRUE(shared_memory.Map(body.size()));
+  ASSERT_TRUE(shared_memory.CreateAndMapAnonymous(body.size()));
   memcpy(shared_memory.memory(), body.data(), body.size());
 
   base::SharedMemoryHandle handle;

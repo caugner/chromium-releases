@@ -7,6 +7,7 @@
 #include "base/at_exit.h"
 #include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "base/environment.h"
 #include "base/event_recorder.h"
 #include "base/file_path.h"
@@ -14,18 +15,18 @@
 #include "base/i18n/icu_util.h"
 #include "base/memory_debug.h"
 #include "base/message_loop.h"
+#include "base/metrics/stats_table.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/rand_util.h"
-#include "base/stats_table.h"
 #include "base/string_number_conversions.h"
 #include "base/sys_info.h"
-#include "base/trace_event.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/net_module.h"
 #include "net/base/net_util.h"
 #include "net/http/http_cache.h"
+#include "net/http/http_util.h"
 #include "net/test/test_server.h"
 #include "net/url_request/url_request_context.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
@@ -131,6 +132,21 @@ int main(int argc, char* argv[]) {
   if (parsed_command_line.HasSwitch(test_shell::kEnableAccelCompositing))
     TestShell::SetAcceleratedCompositingEnabled(true);
 
+  if (parsed_command_line.HasSwitch(test_shell::kMultipleLoads)) {
+    const std::string multiple_loads_str =
+        parsed_command_line.GetSwitchValueASCII(test_shell::kMultipleLoads);
+    int load_count;
+    base::StringToInt(multiple_loads_str, &load_count);
+    if (load_count <= 0) {
+  #ifndef NDEBUG
+      load_count = 2;
+  #else
+      load_count = 5;
+  #endif
+    }
+    TestShell::SetMultipleLoad(load_count);
+  }
+
   TestShell::InitLogging(suppress_error_dialogs,
                          layout_test_mode,
                          enable_gp_fault_error_box);
@@ -146,7 +162,7 @@ int main(int argc, char* argv[]) {
   }
 
   if (parsed_command_line.HasSwitch(test_shell::kEnableTracing))
-    base::TraceLog::StartTracing();
+    base::debug::TraceLog::StartTracing();
 
   net::HttpCache::Mode cache_mode = net::HttpCache::NORMAL;
 
@@ -247,11 +263,32 @@ int main(int argc, char* argv[]) {
     }
   }
 
+  // Get the JavaScript flags. The test runner might send a quoted string which
+  // needs to be unquoted before further processing.
   std::string js_flags =
       parsed_command_line.GetSwitchValueASCII(test_shell::kJavaScriptFlags);
+  js_flags = net::HttpUtil::Unquote(js_flags);
+  // Split the JavaScript flags into a list.
+  std::vector<std::string> js_flags_list;
+  size_t start = 0;
+  while (true) {
+    size_t comma_pos = js_flags.find_first_of(',', start);
+    std::string flags;
+    if (comma_pos == std::string::npos) {
+      flags = js_flags.substr(start, js_flags.length() - start);
+    } else {
+      flags = js_flags.substr(start, comma_pos - start);
+      start = comma_pos + 1;
+    }
+    js_flags_list.push_back(flags);
+    if (comma_pos == std::string::npos)
+      break;
+  }
+  TestShell::SetJavaScriptFlags(js_flags_list);
+
   // Test shell always exposes the GC.
-  js_flags += " --expose-gc";
-  webkit_glue::SetJavaScriptFlags(js_flags);
+  webkit_glue::SetJavaScriptFlags("--expose-gc");
+
   // Expose GCController to JavaScript.
   WebScriptController::registerExtension(extensions_v8::GCExtension::Get());
 
@@ -273,10 +310,10 @@ int main(int argc, char* argv[]) {
   std::string stats_filename = kStatsFilePrefix +
       base::Uint64ToString(base::RandUint64() & 0xFFFFFFFFL);
   RemoveSharedMemoryFile(stats_filename);
-  StatsTable *table = new StatsTable(stats_filename,
+  base::StatsTable *table = new base::StatsTable(stats_filename,
       kStatsFileThreads,
       kStatsFileCounters);
-  StatsTable::set_current(table);
+  base::StatsTable::set_current(table);
 
   TestShell* shell;
   if (TestShell::CreateNewWindow(starting_url, &shell)) {
@@ -361,7 +398,23 @@ int main(int argc, char* argv[]) {
               params.pixel_hash = pixel_hash;
           }
 
-          if (!TestShell::RunFileTest(params))
+          // Load the page the number of times specified.
+          bool fatal_error = false;
+          for (int i = 0; i < TestShell::GetLoadCount(); i++) {
+            // Set the JavaScript flags specified for this load.
+            webkit_glue::SetJavaScriptFlags(TestShell::GetJSFlagsForLoad(i));
+
+            // Only dump for the last load.
+            bool is_last_load = (i == (TestShell::GetLoadCount() - 1));
+            TestShell::SetDumpWhenFinished(is_last_load);
+
+            if (!TestShell::RunFileTest(params)) {
+              fatal_error = true;
+              break;
+            }
+          }
+
+          if (fatal_error)
             break;
 
           TestShell::SetFileTestTimeout(old_timeout_ms);
@@ -385,6 +438,7 @@ int main(int argc, char* argv[]) {
       // http://code.google.com/p/chromium/issues/detail?id=9500
       MessageLoop::current()->RunAllPending();
     } else {
+      webkit_glue::SetJavaScriptFlags(TestShell::GetJSFlagsForLoad(0));
       MessageLoop::current()->Run();
     }
 
@@ -398,7 +452,7 @@ int main(int argc, char* argv[]) {
   TestShell::CleanupLogging();
 
   // Tear down shared StatsTable; prevents unit_tests from leaking it.
-  StatsTable::set_current(NULL);
+  base::StatsTable::set_current(NULL);
   delete table;
   RemoveSharedMemoryFile(stats_filename);
 

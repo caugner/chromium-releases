@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include "chrome/plugin/plugin_thread.h"
 #include "chrome/plugin/webplugin_delegate_stub.h"
 #include "chrome/plugin/webplugin_proxy.h"
+#include "webkit/glue/plugins/plugin_instance.h"
 
 #if defined(OS_POSIX)
 #include "base/eintr_wrapper.h"
@@ -189,8 +190,8 @@ PluginChannel::~PluginChannel() {
 bool PluginChannel::Send(IPC::Message* msg) {
   in_send_++;
   if (log_messages_) {
-    LOG(INFO) << "sending message @" << msg << " on channel @" << this
-              << " with type " << msg->type();
+    VLOG(1) << "sending message @" << msg << " on channel @" << this
+            << " with type " << msg->type();
   }
   bool result = PluginChannelBase::Send(msg);
   in_send_--;
@@ -199,8 +200,8 @@ bool PluginChannel::Send(IPC::Message* msg) {
 
 void PluginChannel::OnMessageReceived(const IPC::Message& msg) {
   if (log_messages_) {
-    LOG(INFO) << "received message @" << &msg << " on channel @" << this
-              << " with type " << msg.type();
+    VLOG(1) << "received message @" << &msg << " on channel @" << this
+            << " with type " << msg.type();
   }
   PluginChannelBase::OnMessageReceived(msg);
 }
@@ -211,6 +212,7 @@ void PluginChannel::OnControlMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER_DELAY_REPLY(PluginMsg_DestroyInstance,
                                     OnDestroyInstance)
     IPC_MESSAGE_HANDLER(PluginMsg_GenerateRouteID, OnGenerateRouteID)
+    IPC_MESSAGE_HANDLER(PluginMsg_ClearSiteData, OnClearSiteData)
     IPC_MESSAGE_UNHANDLED_ERROR()
   IPC_END_MESSAGE_MAP()
 }
@@ -218,8 +220,8 @@ void PluginChannel::OnControlMessageReceived(const IPC::Message& msg) {
 void PluginChannel::OnCreateInstance(const std::string& mime_type,
                                      int* instance_id) {
   *instance_id = GenerateRouteID();
-  scoped_refptr<WebPluginDelegateStub> stub = new WebPluginDelegateStub(
-      mime_type, *instance_id, this);
+  scoped_refptr<WebPluginDelegateStub> stub(new WebPluginDelegateStub(
+      mime_type, *instance_id, this));
   AddRoute(*instance_id, stub, NULL);
   plugin_stubs_.push_back(stub);
 }
@@ -254,6 +256,35 @@ void PluginChannel::OnGenerateRouteID(int* route_id) {
 int PluginChannel::GenerateRouteID() {
   static int last_id = 0;
   return ++last_id;
+}
+
+void PluginChannel::OnClearSiteData(uint64 flags,
+                                    const std::string& domain,
+                                    base::Time begin_time) {
+  bool success = false;
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  FilePath path = command_line->GetSwitchValuePath(switches::kPluginPath);
+  scoped_refptr<NPAPI::PluginLib> plugin_lib(
+      NPAPI::PluginLib::CreatePluginLib(path));
+  if (plugin_lib.get()) {
+    NPError err = plugin_lib->NP_Initialize();
+    if (err == NPERR_NO_ERROR) {
+      scoped_refptr<NPAPI::PluginInstance> instance(
+          plugin_lib->CreateInstance(std::string()));
+
+      const char* domain_str = domain.empty() ? NULL : domain.c_str();
+      uint64 max_age;
+      if (begin_time > base::Time()) {
+        base::TimeDelta delta = base::Time::Now() - begin_time;
+        max_age = delta.InSeconds();
+      } else {
+        max_age = kuint64max;
+      }
+      err = instance->NPP_ClearSiteData(flags, domain_str, max_age);
+      success = (err == NPERR_NO_ERROR);
+    }
+  }
+  Send(new PluginHostMsg_ClearSiteDataResult(success));
 }
 
 base::WaitableEvent* PluginChannel::GetModalDialogEvent(

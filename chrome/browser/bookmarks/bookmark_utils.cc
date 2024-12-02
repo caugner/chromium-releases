@@ -13,12 +13,11 @@
 #include "base/string16.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/bookmarks/bookmark_drag_data.h"
+#include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #if defined(OS_MACOSX)
 #include "chrome/browser/bookmarks/bookmark_pasteboard_helper_mac.h"
 #endif
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_window.h"
@@ -28,6 +27,7 @@
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/page_navigator.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
 #include "grit/app_strings.h"
@@ -86,13 +86,10 @@ class NewBrowserPageNavigator : public PageNavigator {
   DISALLOW_COPY_AND_ASSIGN(NewBrowserPageNavigator);
 };
 
-// TODO(mrossetti): Rename CloneDragDataImpl to CloneBookmarkNodeImpl.
-// See: http://crbug.com/37891
-
-void CloneDragDataImpl(BookmarkModel* model,
-                       const BookmarkDragData::Element& element,
-                       const BookmarkNode* parent,
-                       int index_to_add_at) {
+void CloneBookmarkNodeImpl(BookmarkModel* model,
+                           const BookmarkNodeData::Element& element,
+                           const BookmarkNode* parent,
+                           int index_to_add_at) {
   if (element.is_url) {
     model->AddURL(parent, index_to_add_at, element.title, element.url);
   } else {
@@ -100,7 +97,7 @@ void CloneDragDataImpl(BookmarkModel* model,
                                                      index_to_add_at,
                                                      element.title);
     for (int i = 0; i < static_cast<int>(element.children.size()); ++i)
-      CloneDragDataImpl(model, element.children[i], new_folder, i);
+      CloneBookmarkNodeImpl(model, element.children[i], new_folder, i);
   }
 }
 
@@ -231,7 +228,7 @@ int BookmarkDragOperation(const BookmarkNode* node) {
 
 int BookmarkDropOperation(Profile* profile,
                           const views::DropTargetEvent& event,
-                          const BookmarkDragData& data,
+                          const BookmarkNodeData& data,
                           const BookmarkNode* parent,
                           int index) {
   if (data.IsFromProfile(profile) && data.size() > 1)
@@ -251,7 +248,7 @@ int BookmarkDropOperation(Profile* profile,
 }
 
 int PerformBookmarkDrop(Profile* profile,
-                        const BookmarkDragData& data,
+                        const BookmarkNodeData& data,
                         const BookmarkNode* parent_node,
                         int index) {
   BookmarkModel* model = profile->GetBookmarkModel();
@@ -269,12 +266,12 @@ int PerformBookmarkDrop(Profile* profile,
     return DragDropTypes::DRAG_NONE;
   }
   // Dropping a group from different profile. Always accept.
-  bookmark_utils::CloneDragData(model, data.elements, parent_node, index);
+  bookmark_utils::CloneBookmarkNode(model, data.elements, parent_node, index);
   return DragDropTypes::DRAG_COPY;
 }
 
 bool IsValidDropLocation(Profile* profile,
-                         const BookmarkDragData& data,
+                         const BookmarkNodeData& data,
                          const BookmarkNode* drop_parent,
                          int index) {
   if (!drop_parent->is_folder()) {
@@ -306,16 +303,16 @@ bool IsValidDropLocation(Profile* profile,
   return true;
 }
 
-void CloneDragData(BookmarkModel* model,
-                   const std::vector<BookmarkDragData::Element>& elements,
-                   const BookmarkNode* parent,
-                   int index_to_add_at) {
+void CloneBookmarkNode(BookmarkModel* model,
+                       const std::vector<BookmarkNodeData::Element>& elements,
+                       const BookmarkNode* parent,
+                       int index_to_add_at) {
   if (!parent->is_folder() || !model) {
     NOTREACHED();
     return;
   }
   for (size_t i = 0; i < elements.size(); ++i)
-    CloneDragDataImpl(model, elements[i], parent, index_to_add_at + i);
+    CloneBookmarkNodeImpl(model, elements[i], parent, index_to_add_at + i);
 }
 
 
@@ -328,7 +325,7 @@ void DragBookmarks(Profile* profile,
 #if defined(TOOLKIT_VIEWS)
   // Set up our OLE machinery
   OSExchangeData data;
-  BookmarkDragData drag_data(nodes);
+  BookmarkNodeData drag_data(nodes);
   drag_data.Write(profile, &data);
 
   views::RootView* root_view =
@@ -398,7 +395,7 @@ void CopyToClipboard(BookmarkModel* model,
   if (nodes.empty())
     return;
 
-  BookmarkDragData(nodes).WriteToClipboard(NULL);
+  BookmarkNodeData(nodes).WriteToClipboard(NULL);
 
   if (remove_nodes) {
     for (size_t i = 0; i < nodes.size(); ++i) {
@@ -414,19 +411,20 @@ void PasteFromClipboard(BookmarkModel* model,
   if (!parent)
     return;
 
-  BookmarkDragData bookmark_data;
+  BookmarkNodeData bookmark_data;
   if (!bookmark_data.ReadFromClipboard())
     return;
 
   if (index == -1)
     index = parent->GetChildCount();
-  bookmark_utils::CloneDragData(model, bookmark_data.elements, parent, index);
+  bookmark_utils::CloneBookmarkNode(
+      model, bookmark_data.elements, parent, index);
 }
 
 bool CanPasteFromClipboard(const BookmarkNode* node) {
   if (!node)
     return false;
-  return BookmarkDragData::ClipboardContainsBookmarks();
+  return BookmarkNodeData::ClipboardContainsBookmarks();
 }
 
 std::string GetNameForURL(const GURL& url) {
@@ -654,6 +652,19 @@ const BookmarkNode* GetParentForNewNodes(
   }
 
   return real_parent;
+}
+
+bool NodeHasURLs(const BookmarkNode* node) {
+  DCHECK(node);
+
+  if (node->is_url())
+    return true;
+
+  for (int i = 0; i < node->GetChildCount(); ++i) {
+    if (NodeHasURLs(node->GetChild(i)))
+      return true;
+  }
+  return false;
 }
 
 }  // namespace bookmark_utils

@@ -9,7 +9,6 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/time.h"
-#include "media/base/factory.h"
 #include "media/base/filters.h"
 #include "media/base/pts_heap.h"
 #include "media/base/video_frame.h"
@@ -26,11 +25,8 @@ class VideoDecodeEngine;
 class FFmpegVideoDecoder : public VideoDecoder,
                            public VideoDecodeEngine::EventHandler {
  public:
-  explicit FFmpegVideoDecoder(VideoDecodeEngine* engine);
+  explicit FFmpegVideoDecoder(VideoDecodeContext* decode_context);
   virtual ~FFmpegVideoDecoder();
-
-  static FilterFactory* CreateFactory();
-  static bool IsMediaFormatSupported(const MediaFormat& media_format);
 
   // MediaFilter implementation.
   virtual void Stop(FilterCallback* callback);
@@ -56,7 +52,6 @@ class FFmpegVideoDecoder : public VideoDecoder,
   virtual void ProduceVideoSample(scoped_refptr<Buffer> buffer);
   virtual void ConsumeVideoFrame(scoped_refptr<VideoFrame> frame);
 
-  friend class FilterFactoryImpl1<FFmpegVideoDecoder, VideoDecodeEngine*>;
   friend class DecoderPrivateMock;
   friend class FFmpegVideoDecoderTest;
   FRIEND_TEST_ALL_PREFIXES(FFmpegVideoDecoderTest, FindPtsAndDuration);
@@ -77,6 +72,7 @@ class FFmpegVideoDecoder : public VideoDecoder,
 
   enum DecoderState {
     kUnInitialized,
+    kInitializing,
     kNormal,
     kFlushCodec,
     kDecodeFinished,
@@ -122,6 +118,7 @@ class FFmpegVideoDecoder : public VideoDecoder,
   scoped_ptr<AVRational> time_base_;  // Pointer to avoid needing full type.
   DecoderState state_;
   scoped_ptr<VideoDecodeEngine> decode_engine_;
+  scoped_ptr<VideoDecodeContext> decode_context_;
 
   scoped_ptr<FilterCallback> initialize_callback_;
   scoped_ptr<FilterCallback> uninitialize_callback_;

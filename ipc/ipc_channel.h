@@ -6,6 +6,7 @@
 #define IPC_IPC_CHANNEL_H_
 #pragma once
 
+#include "base/compiler_specific.h"
 #include "ipc/ipc_message.h"
 
 namespace IPC {
@@ -35,14 +36,17 @@ class Channel : public Message::Sender {
   };
 
   enum Mode {
+    MODE_NONE,
     MODE_SERVER,
-    MODE_CLIENT
+    MODE_CLIENT,
+    MODE_NAMED_SERVER,
+    MODE_NAMED_CLIENT
   };
 
   enum {
     // The maximum message size in bytes. Attempting to receive a
     // message of this size or bigger results in a channel error.
-    kMaximumMessageSize = 256 * 1024 * 1024,
+    kMaximumMessageSize = 128 * 1024 * 1024,
 
     // Ammount of data to read at once from the pipe.
     kReadBufferSize = 4 * 1024
@@ -67,7 +71,7 @@ class Channel : public Message::Sender {
   // connect to a pre-existing pipe.  Note, calling Connect()
   // will not block the calling thread and may complete
   // asynchronously.
-  bool Connect();
+  bool Connect() WARN_UNUSED_RESULT;
 
   // Close this Channel explicitly.  May be called multiple times.
   void Close();
@@ -81,7 +85,7 @@ class Channel : public Message::Sender {
   // deleted once the contents of the Message have been sent.
   virtual bool Send(Message* message);
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) && !defined(OS_NACL)
   // On POSIX an IPC::Channel wraps a socketpair(), this method returns the
   // FD # for the client end of the socket.
   // This method may only be called on the server side of a channel.

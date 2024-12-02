@@ -12,9 +12,10 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
+#include "base/non_thread_safe.h"
 #include "base/scoped_callback_factory.h"
 #include "base/weak_ptr.h"
-#include "talk/xmpp/jid.h"
 
 namespace invalidation {
 class InvalidationClient;
@@ -26,8 +27,6 @@ class Task;
 }  // namespace
 
 namespace sync_notifier {
-
-// TODO(akalin): Add a NonThreadSafe member to this class and use it.
 
 class CacheInvalidationPacketHandler {
  public:
@@ -44,12 +43,16 @@ class CacheInvalidationPacketHandler {
   // anymore.
   ~CacheInvalidationPacketHandler();
 
+  // If |base_task| is non-NULL, sends any existing pending outbound
+  // packets.
+  void HandleOutboundPacket(invalidation::NetworkEndpoint* network_endpoint);
+
  private:
-  void HandleOutboundPacket(
-      invalidation::NetworkEndpoint* const& network_endpoint);
+  FRIEND_TEST(CacheInvalidationPacketHandlerTest, Basic);
 
   void HandleInboundPacket(const std::string& packet);
 
+  NonThreadSafe non_thread_safe_;
   base::ScopedCallbackFactory<CacheInvalidationPacketHandler>
       scoped_callback_factory_;
 

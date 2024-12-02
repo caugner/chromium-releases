@@ -11,6 +11,7 @@
 #include <algorithm>
 
 #include "app/l10n_util.h"
+#include "app/l10n_util_win.h"
 #include "app/win_util.h"
 #include "base/command_line.h"
 #include "base/environment.h"
@@ -19,13 +20,14 @@
 #include "base/path_service.h"
 #include "base/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
-#include "base/win_util.h"
+#include "base/win/windows_version.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/views/uninstall_view.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
+#include "chrome/common/main_function_params.h"
 #include "chrome/common/result_codes.h"
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/install_util.h"
@@ -49,7 +51,7 @@ void RecordBreakpadStatusUMA(MetricsService* metrics) {
 }
 
 void WarnAboutMinimumSystemRequirements() {
-  if (win_util::GetWinVersion() < win_util::WINVERSION_XP) {
+  if (base::win::GetVersion() < base::win::VERSION_XP) {
     // Display a warning message if the user is running chrome on Windows 2000.
     const std::wstring text =
         l10n_util::GetString(IDS_UNSUPPORTED_OS_PRE_WIN_XP);
@@ -92,15 +94,15 @@ int DoUninstallTasks(bool chrome_still_running) {
 
   if (ret != ResultCodes::UNINSTALL_USER_CANCEL) {
     // The following actions are just best effort.
-    LOG(INFO) << "Executing uninstall actions";
+    VLOG(1) << "Executing uninstall actions";
     if (!FirstRun::RemoveSentinel())
-      LOG(INFO) << "Failed to delete sentinel file.";
+      VLOG(1) << "Failed to delete sentinel file.";
     // We want to remove user level shortcuts and we only care about the ones
     // created by us and not by the installer so |alternate| is false.
     if (!ShellUtil::RemoveChromeDesktopShortcut(ShellUtil::CURRENT_USER, false))
-      LOG(INFO) << "Failed to delete desktop shortcut.";
+      VLOG(1) << "Failed to delete desktop shortcut.";
     if (!ShellUtil::RemoveChromeQuickLaunchShortcut(ShellUtil::CURRENT_USER))
-      LOG(INFO) << "Failed to delete quick launch shortcut.";
+      VLOG(1) << "Failed to delete quick launch shortcut.";
   }
   return ret;
 }
@@ -132,7 +134,7 @@ void PrepareRestartOnCrashEnviroment(const CommandLine &parsed_command_line) {
   dlg_strings.push_back('|');
   string16 adjusted_string(
       l10n_util::GetStringUTF16(IDS_CRASH_RECOVERY_CONTENT));
-  base::i18n::AdjustStringForLocaleDirection(adjusted_string, &adjusted_string);
+  base::i18n::AdjustStringForLocaleDirection(&adjusted_string);
   dlg_strings.append(adjusted_string);
   dlg_strings.push_back('|');
   dlg_strings.append(ASCIIToUTF16(
@@ -148,10 +150,10 @@ void PrepareRestartOnCrashEnviroment(const CommandLine &parsed_command_line) {
 int HandleIconsCommands(const CommandLine &parsed_command_line) {
   if (parsed_command_line.HasSwitch(switches::kHideIcons)) {
     std::wstring cp_applet;
-    win_util::WinVersion version = win_util::GetWinVersion();
-    if (version >= win_util::WINVERSION_VISTA) {
+    base::win::Version version = base::win::GetVersion();
+    if (version >= base::win::VERSION_VISTA) {
       cp_applet.assign(L"Programs and Features");  // Windows Vista and later.
-    } else if (version >= win_util::WINVERSION_XP) {
+    } else if (version >= base::win::VERSION_XP) {
       cp_applet.assign(L"Add/Remove Programs");  // Windows XP.
     } else {
       return ResultCodes::UNSUPPORTED_PARAM;  // Not supported
@@ -188,12 +190,12 @@ bool CheckMachineLevelInstall() {
       const std::wstring caption = l10n_util::GetString(IDS_PRODUCT_NAME);
       const UINT flags = MB_OK | MB_ICONERROR | MB_TOPMOST;
       win_util::MessageBox(NULL, text, caption, flags);
-      std::wstring uninstall_cmd = InstallUtil::GetChromeUninstallCmd(false);
-      if (!uninstall_cmd.empty()) {
-        uninstall_cmd.append(L" --");
-        uninstall_cmd.append(installer_util::switches::kForceUninstall);
-        uninstall_cmd.append(L" --");
-        uninstall_cmd.append(installer_util::switches::kDoNotRemoveSharedItems);
+      FilePath uninstall_path(InstallUtil::GetChromeUninstallCmd(false));
+      CommandLine uninstall_cmd(uninstall_path);
+      if (!uninstall_cmd.GetProgram().value().empty()) {
+        uninstall_cmd.AppendSwitch(installer_util::switches::kForceUninstall);
+        uninstall_cmd.AppendSwitch(
+            installer_util::switches::kDoNotRemoveSharedItems);
         base::LaunchApp(uninstall_cmd, false, false, NULL);
       }
       return true;
@@ -217,6 +219,13 @@ class BrowserMainPartsWin : public BrowserMainParts {
 
   virtual void PreMainMessageLoopStart() {
     OleInitialize(NULL);
+
+    // If we're running tests (ui_task is non-null), then the ResourceBundle
+    // has already been initialized.
+    if (!parameters().ui_task) {
+      // Override the configured locale with the user's preferred UI language.
+      l10n_util::OverrideLocaleWithUILanguageList();
+    }
   }
 
  private:

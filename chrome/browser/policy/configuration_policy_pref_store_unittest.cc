@@ -4,7 +4,6 @@
 
 #include <gtest/gtest.h>
 
-#include "base/command_line.h"
 #include "base/file_path.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
 #include "chrome/browser/policy/mock_configuration_policy_provider.h"
@@ -16,15 +15,15 @@ namespace policy {
 // Holds a set of test parameters, consisting of pref name and policy type.
 class TypeAndName {
  public:
-  TypeAndName(ConfigurationPolicyStore::PolicyType type, const char* pref_name)
+  TypeAndName(ConfigurationPolicyType type, const char* pref_name)
       : type_(type),
         pref_name_(pref_name) {}
 
-  ConfigurationPolicyStore::PolicyType type() const { return type_; }
+  ConfigurationPolicyType type() const { return type_; }
   const char* pref_name() const { return pref_name_; }
 
  private:
-  ConfigurationPolicyStore::PolicyType type_;
+  ConfigurationPolicyType type_;
   const char* pref_name_;
 };
 
@@ -34,13 +33,13 @@ class ConfigurationPolicyPrefStoreListTest
 };
 
 TEST_P(ConfigurationPolicyPrefStoreListTest, GetDefault) {
-  ConfigurationPolicyPrefStore store(NULL, NULL);
+  ConfigurationPolicyPrefStore store(NULL);
   ListValue* list = NULL;
   EXPECT_FALSE(store.prefs()->GetList(GetParam().pref_name(), &list));
 }
 
 TEST_P(ConfigurationPolicyPrefStoreListTest, SetValue) {
-  ConfigurationPolicyPrefStore store(NULL, NULL);
+  ConfigurationPolicyPrefStore store(NULL);
   ListValue* in_value = new ListValue();
   in_value->Append(Value::CreateStringValue("test1"));
   in_value->Append(Value::CreateStringValue("test2,"));
@@ -48,7 +47,7 @@ TEST_P(ConfigurationPolicyPrefStoreListTest, SetValue) {
   ListValue* list = NULL;
   EXPECT_TRUE(store.prefs()->GetList(GetParam().pref_name(), &list));
   ListValue::const_iterator current(list->begin());
-  ListValue::const_iterator end(list->end());
+  const ListValue::const_iterator end(list->end());
   ASSERT_TRUE(current != end);
   std::string value;
   (*current)->GetAsString(&value);
@@ -65,13 +64,13 @@ INSTANTIATE_TEST_CASE_P(
     ConfigurationPolicyPrefStoreListTestInstance,
     ConfigurationPolicyPrefStoreListTest,
     testing::Values(
-        TypeAndName(ConfigurationPolicyStore::kPolicyURLsToRestoreOnStartup,
+        TypeAndName(kPolicyURLsToRestoreOnStartup,
                     prefs::kURLsToRestoreOnStartup),
-        TypeAndName(ConfigurationPolicyStore::kPolicyExtensionInstallAllowList,
+        TypeAndName(kPolicyExtensionInstallAllowList,
                     prefs::kExtensionInstallAllowList),
-        TypeAndName(ConfigurationPolicyStore::kPolicyExtensionInstallDenyList,
+        TypeAndName(kPolicyExtensionInstallDenyList,
                     prefs::kExtensionInstallDenyList),
-        TypeAndName(ConfigurationPolicyStore::kPolicyDisabledPlugins,
+        TypeAndName(kPolicyDisabledPlugins,
                     prefs::kPluginsPluginsBlacklist)));
 
 // Test cases for string-valued policy settings.
@@ -80,13 +79,13 @@ class ConfigurationPolicyPrefStoreStringTest
 };
 
 TEST_P(ConfigurationPolicyPrefStoreStringTest, GetDefault) {
-  ConfigurationPolicyPrefStore store(NULL, NULL);
+  ConfigurationPolicyPrefStore store(NULL);
   std::string result;
   EXPECT_FALSE(store.prefs()->GetString(GetParam().pref_name(), &result));
 }
 
 TEST_P(ConfigurationPolicyPrefStoreStringTest, SetValue) {
-  ConfigurationPolicyPrefStore store(NULL, NULL);
+  ConfigurationPolicyPrefStore store(NULL);
   store.Apply(GetParam().type(),
               Value::CreateStringValue("http://chromium.org"));
   std::string result;
@@ -98,16 +97,26 @@ INSTANTIATE_TEST_CASE_P(
     ConfigurationPolicyPrefStoreStringTestInstance,
     ConfigurationPolicyPrefStoreStringTest,
     testing::Values(
-        TypeAndName(ConfigurationPolicyStore::kPolicyHomePage,
+        TypeAndName(kPolicyHomePage,
                     prefs::kHomePage),
-        TypeAndName(ConfigurationPolicyStore::kPolicyProxyServer,
+        TypeAndName(kPolicyProxyServer,
                     prefs::kProxyServer),
-        TypeAndName(ConfigurationPolicyStore::kPolicyProxyPacUrl,
+        TypeAndName(kPolicyProxyPacUrl,
                     prefs::kProxyPacUrl),
-        TypeAndName(ConfigurationPolicyStore::kPolicyProxyBypassList,
+        TypeAndName(kPolicyProxyBypassList,
                     prefs::kProxyBypassList),
-        TypeAndName(ConfigurationPolicyStore::kPolicyApplicationLocale,
-                    prefs::kApplicationLocale)));
+        TypeAndName(kPolicyApplicationLocale,
+                    prefs::kApplicationLocale),
+        TypeAndName(kPolicyApplicationLocale,
+                    prefs::kApplicationLocale),
+        TypeAndName(kPolicyAuthSchemes,
+                    prefs::kAuthSchemes),
+        TypeAndName(kPolicyAuthServerWhitelist,
+                    prefs::kAuthServerWhitelist),
+        TypeAndName(kPolicyAuthNegotiateDelegateWhitelist,
+                    prefs::kAuthNegotiateDelegateWhitelist),
+        TypeAndName(kPolicyGSSAPILibraryName,
+                    prefs::kGSSAPILibraryName)));
 
 // Test cases for boolean-valued policy settings.
 class ConfigurationPolicyPrefStoreBooleanTest
@@ -115,13 +124,13 @@ class ConfigurationPolicyPrefStoreBooleanTest
 };
 
 TEST_P(ConfigurationPolicyPrefStoreBooleanTest, GetDefault) {
-  ConfigurationPolicyPrefStore store(NULL, NULL);
+  ConfigurationPolicyPrefStore store(NULL);
   bool result = false;
   EXPECT_FALSE(store.prefs()->GetBoolean(GetParam().pref_name(), &result));
 }
 
 TEST_P(ConfigurationPolicyPrefStoreBooleanTest, SetValue) {
-  ConfigurationPolicyPrefStore store(NULL, NULL);
+  ConfigurationPolicyPrefStore store(NULL);
   store.Apply(GetParam().type(), Value::CreateBooleanValue(false));
   bool result = true;
   EXPECT_TRUE(store.prefs()->GetBoolean(GetParam().pref_name(), &result));
@@ -137,32 +146,49 @@ INSTANTIATE_TEST_CASE_P(
     ConfigurationPolicyPrefStoreBooleanTestInstance,
     ConfigurationPolicyPrefStoreBooleanTest,
     testing::Values(
-        TypeAndName(ConfigurationPolicyStore::kPolicyHomepageIsNewTabPage,
+        TypeAndName(kPolicyHomepageIsNewTabPage,
                     prefs::kHomePageIsNewTabPage),
-        TypeAndName(ConfigurationPolicyStore::kPolicyAlternateErrorPagesEnabled,
+        TypeAndName(kPolicyAlternateErrorPagesEnabled,
                     prefs::kAlternateErrorPagesEnabled),
-        TypeAndName(ConfigurationPolicyStore::kPolicySearchSuggestEnabled,
+        TypeAndName(kPolicySearchSuggestEnabled,
                     prefs::kSearchSuggestEnabled),
-        TypeAndName(ConfigurationPolicyStore::kPolicyDnsPrefetchingEnabled,
+        TypeAndName(kPolicyDnsPrefetchingEnabled,
                     prefs::kDnsPrefetchingEnabled),
-        TypeAndName(ConfigurationPolicyStore::kPolicySafeBrowsingEnabled,
+        TypeAndName(kPolicyDisableSpdy,
+                    prefs::kDisableSpdy),
+        TypeAndName(kPolicySafeBrowsingEnabled,
                     prefs::kSafeBrowsingEnabled),
-        TypeAndName(ConfigurationPolicyStore::kPolicyMetricsReportingEnabled,
+        TypeAndName(kPolicyMetricsReportingEnabled,
                     prefs::kMetricsReportingEnabled),
-        TypeAndName(ConfigurationPolicyStore::kPolicyPasswordManagerEnabled,
+        TypeAndName(kPolicyPasswordManagerEnabled,
                     prefs::kPasswordManagerEnabled),
-        TypeAndName(ConfigurationPolicyStore::
-                        kPolicyPasswordManagerAllowShowPasswords,
+        TypeAndName(kPolicyPasswordManagerAllowShowPasswords,
                     prefs::kPasswordManagerAllowShowPasswords),
-        TypeAndName(ConfigurationPolicyStore::kPolicyShowHomeButton,
+        TypeAndName(kPolicyShowHomeButton,
                     prefs::kShowHomeButton),
-        TypeAndName(ConfigurationPolicyStore::kPolicyPrintingEnabled,
+        TypeAndName(kPolicyPrintingEnabled,
                     prefs::kPrintingEnabled),
-        TypeAndName(ConfigurationPolicyStore::kPolicyJavascriptEnabled,
+        TypeAndName(kPolicyJavascriptEnabled,
                     prefs::kWebKitJavascriptEnabled),
-        TypeAndName(ConfigurationPolicyStore::
-                        kPolicySavingBrowserHistoryDisabled,
-                    prefs::kSavingBrowserHistoryDisabled)));
+        TypeAndName(kPolicySavingBrowserHistoryDisabled,
+                    prefs::kSavingBrowserHistoryDisabled),
+        TypeAndName(kPolicySavingBrowserHistoryDisabled,
+                    prefs::kSavingBrowserHistoryDisabled),
+        TypeAndName(kPolicyDisableAuthNegotiateCnameLookup,
+                    prefs::kDisableAuthNegotiateCnameLookup),
+        TypeAndName(kPolicyEnableAuthNegotiatePort,
+                    prefs::kEnableAuthNegotiatePort),
+        TypeAndName(kPolicyDisable3DAPIs,
+                    prefs::kDisable3DAPIs)));
+
+#if defined(OS_CHROMEOS)
+INSTANTIATE_TEST_CASE_P(
+    CrosConfigurationPolicyPrefStoreBooleanTestInstance,
+    ConfigurationPolicyPrefStoreBooleanTest,
+    testing::Values(
+        TypeAndName(kPolicyChromeOsLockOnIdleSuspend,
+                    prefs::kEnableScreenLock)));
+#endif  // defined(OS_CHROMEOS)
 
 // Test cases for integer-valued policy settings.
 class ConfigurationPolicyPrefStoreIntegerTest
@@ -170,13 +196,13 @@ class ConfigurationPolicyPrefStoreIntegerTest
 };
 
 TEST_P(ConfigurationPolicyPrefStoreIntegerTest, GetDefault) {
-  ConfigurationPolicyPrefStore store(NULL, NULL);
+  ConfigurationPolicyPrefStore store(NULL);
   int result = 0;
   EXPECT_FALSE(store.prefs()->GetInteger(GetParam().pref_name(), &result));
 }
 
 TEST_P(ConfigurationPolicyPrefStoreIntegerTest, SetValue) {
-  ConfigurationPolicyPrefStore store(NULL, NULL);
+  ConfigurationPolicyPrefStore store(NULL);
   store.Apply(GetParam().type(), Value::CreateIntegerValue(2));
   int result = 0;
   EXPECT_TRUE(store.prefs()->GetInteger(GetParam().pref_name(), &result));
@@ -187,186 +213,129 @@ INSTANTIATE_TEST_CASE_P(
     ConfigurationPolicyPrefStoreIntegerTestInstance,
     ConfigurationPolicyPrefStoreIntegerTest,
     testing::Values(
-        TypeAndName(ConfigurationPolicyStore::kPolicyRestoreOnStartup,
+        TypeAndName(kPolicyRestoreOnStartup,
                     prefs::kRestoreOnStartup)));
 
 // Test cases for the proxy policy settings.
 class ConfigurationPolicyPrefStoreProxyTest : public testing::Test {
 };
 
-TEST_F(ConfigurationPolicyPrefStoreProxyTest, CommandLine) {
-  CommandLine command_line(CommandLine::ARGUMENTS_ONLY);
-  command_line.AppendSwitch(switches::kNoProxyServer);
-  command_line.AppendSwitch(switches::kProxyAutoDetect);
-  command_line.AppendSwitchASCII(switches::kProxyPacUrl,
-                                 "http://chromium.org/test.pac");
-  command_line.AppendSwitchASCII(switches::kProxyServer,
-                                 "http://chromium2.org");
-  command_line.AppendSwitchASCII(switches::kProxyBypassList,
-                                 "http://chromium3.org");
-
-  ConfigurationPolicyPrefStore store(&command_line, NULL);
-  EXPECT_EQ(store.ReadPrefs(), PrefStore::PREF_READ_ERROR_NONE);
-
-  // Ensure that all traces of the command-line specified proxy
-  // switches have been overriden.
-  std::string string_result;
-  EXPECT_TRUE(store.prefs()->GetString(prefs::kProxyBypassList,
-                                       &string_result));
-  EXPECT_EQ(string_result, "http://chromium3.org");
-
-  EXPECT_TRUE(store.prefs()->GetString(prefs::kProxyPacUrl, &string_result));
-  EXPECT_EQ(string_result, "http://chromium.org/test.pac");
-  EXPECT_TRUE(store.prefs()->GetString(prefs::kProxyServer, &string_result));
-  EXPECT_EQ(string_result, "http://chromium2.org");
-  bool bool_result;
-  EXPECT_TRUE(store.prefs()->GetBoolean(prefs::kNoProxyServer, &bool_result));
-  EXPECT_TRUE(bool_result);
-  EXPECT_TRUE(store.prefs()->GetBoolean(prefs::kProxyAutoDetect, &bool_result));
-  EXPECT_TRUE(bool_result);
-}
-
-TEST_F(ConfigurationPolicyPrefStoreProxyTest, ManualOverride) {
-  CommandLine command_line(CommandLine::ARGUMENTS_ONLY);
-  command_line.AppendSwitch(switches::kNoProxyServer);
-  command_line.AppendSwitch(switches::kProxyAutoDetect);
-  command_line.AppendSwitchASCII(switches::kProxyPacUrl,
-                                 "http://chromium.org/test.pac");
-  command_line.AppendSwitchASCII(switches::kProxyServer,
-                                 "http://chromium.org");
-  command_line.AppendSwitchASCII(switches::kProxyBypassList,
-                                 "http://chromium.org");
-
+TEST_F(ConfigurationPolicyPrefStoreProxyTest, ManualOptions) {
   scoped_ptr<MockConfigurationPolicyProvider> provider(
       new MockConfigurationPolicyProvider());
-  provider->AddPolicy(ConfigurationPolicyStore::kPolicyProxyServerMode,
-      Value::CreateIntegerValue(
-          ConfigurationPolicyStore::kPolicyManuallyConfiguredProxyMode));
-  provider->AddPolicy(ConfigurationPolicyStore::kPolicyProxyBypassList,
-      Value::CreateStringValue("http://chromium.org/override"));
+  provider->AddPolicy(kPolicyProxyBypassList,
+                      Value::CreateStringValue("http://chromium.org/override"));
+  provider->AddPolicy(kPolicyProxyPacUrl,
+                      Value::CreateStringValue("http://short.org/proxy.pac"));
+  provider->AddPolicy(kPolicyProxyServer,
+                      Value::CreateStringValue("chromium.org"));
+  provider->AddPolicy(kPolicyProxyServerMode,
+                      Value::CreateIntegerValue(
+                          kPolicyManuallyConfiguredProxyMode));
 
-  ConfigurationPolicyPrefStore store(&command_line, provider.get());
+  ConfigurationPolicyPrefStore store(provider.get());
   EXPECT_EQ(store.ReadPrefs(), PrefStore::PREF_READ_ERROR_NONE);
 
-  // Ensure that all traces of the command-line specified proxy
-  // switches have been overriden.
   std::string string_result;
   EXPECT_TRUE(store.prefs()->GetString(prefs::kProxyBypassList,
                                        &string_result));
-  EXPECT_EQ(string_result, "http://chromium.org/override");
-
-  EXPECT_FALSE(store.prefs()->GetString(prefs::kProxyPacUrl, &string_result));
-  EXPECT_FALSE(store.prefs()->GetString(prefs::kProxyServer, &string_result));
+  EXPECT_EQ("http://chromium.org/override", string_result);
+  EXPECT_TRUE(store.prefs()->GetString(prefs::kProxyPacUrl, &string_result));
+  EXPECT_EQ("http://short.org/proxy.pac", string_result);
+  EXPECT_TRUE(store.prefs()->GetString(prefs::kProxyServer, &string_result));
+  EXPECT_EQ("chromium.org", string_result);
   bool bool_result;
   EXPECT_TRUE(store.prefs()->GetBoolean(prefs::kNoProxyServer, &bool_result));
   EXPECT_FALSE(bool_result);
-  EXPECT_TRUE(store.prefs()->GetBoolean(prefs::kProxyAutoDetect,
-                                        &bool_result));
+  EXPECT_TRUE(store.prefs()->GetBoolean(prefs::kProxyAutoDetect, &bool_result));
   EXPECT_FALSE(bool_result);
 }
 
 TEST_F(ConfigurationPolicyPrefStoreProxyTest, NoProxy) {
-  CommandLine command_line(CommandLine::ARGUMENTS_ONLY);
   scoped_ptr<MockConfigurationPolicyProvider> provider(
       new MockConfigurationPolicyProvider());
-  provider->AddPolicy(ConfigurationPolicyStore::kPolicyProxyBypassList,
-      Value::CreateStringValue("http://chromium.org/override"));
-  provider->AddPolicy(ConfigurationPolicyStore::kPolicyProxyServerMode,
-      Value::CreateIntegerValue(
-          ConfigurationPolicyStore::kPolicyNoProxyServerMode));
+  provider->AddPolicy(kPolicyProxyBypassList,
+                      Value::CreateStringValue("http://chromium.org/override"));
+  provider->AddPolicy(kPolicyProxyServerMode,
+                      Value::CreateIntegerValue(
+                          kPolicyNoProxyServerMode));
 
-  ConfigurationPolicyPrefStore store(&command_line, provider.get());
+  ConfigurationPolicyPrefStore store(provider.get());
   EXPECT_EQ(store.ReadPrefs(), PrefStore::PREF_READ_ERROR_NONE);
 
   std::string string_result;
   EXPECT_FALSE(store.prefs()->GetString(prefs::kProxyBypassList,
                                         &string_result));
-
   EXPECT_FALSE(store.prefs()->GetString(prefs::kProxyPacUrl, &string_result));
   EXPECT_FALSE(store.prefs()->GetString(prefs::kProxyServer, &string_result));
   bool bool_result;
   EXPECT_TRUE(store.prefs()->GetBoolean(prefs::kNoProxyServer, &bool_result));
   EXPECT_TRUE(bool_result);
-  EXPECT_TRUE(store.prefs()->GetBoolean(prefs::kProxyAutoDetect,
-                                        &bool_result));
+  EXPECT_TRUE(store.prefs()->GetBoolean(prefs::kProxyAutoDetect, &bool_result));
   EXPECT_FALSE(bool_result);
 }
 
 TEST_F(ConfigurationPolicyPrefStoreProxyTest, NoProxyReversedApplyOrder) {
-  CommandLine command_line(CommandLine::ARGUMENTS_ONLY);
   scoped_ptr<MockConfigurationPolicyProvider> provider(
       new MockConfigurationPolicyProvider());
-  provider->AddPolicy(ConfigurationPolicyStore::kPolicyProxyServerMode,
-      Value::CreateIntegerValue(
-          ConfigurationPolicyStore::kPolicyNoProxyServerMode));
-  provider->AddPolicy(ConfigurationPolicyStore::kPolicyProxyBypassList,
-      Value::CreateStringValue("http://chromium.org/override"));
+  provider->AddPolicy(kPolicyProxyServerMode,
+                      Value::CreateIntegerValue(
+                          kPolicyNoProxyServerMode));
+  provider->AddPolicy(kPolicyProxyBypassList,
+                      Value::CreateStringValue("http://chromium.org/override"));
 
-  ConfigurationPolicyPrefStore store(&command_line, provider.get());
+  ConfigurationPolicyPrefStore store(provider.get());
   EXPECT_EQ(store.ReadPrefs(), PrefStore::PREF_READ_ERROR_NONE);
 
   std::string string_result;
   EXPECT_FALSE(store.prefs()->GetString(prefs::kProxyBypassList,
                                         &string_result));
-
   EXPECT_FALSE(store.prefs()->GetString(prefs::kProxyPacUrl, &string_result));
   EXPECT_FALSE(store.prefs()->GetString(prefs::kProxyServer, &string_result));
   bool bool_result;
   EXPECT_TRUE(store.prefs()->GetBoolean(prefs::kNoProxyServer, &bool_result));
   EXPECT_TRUE(bool_result);
-  EXPECT_TRUE(store.prefs()->GetBoolean(prefs::kProxyAutoDetect,
-                                        &bool_result));
+  EXPECT_TRUE(store.prefs()->GetBoolean(prefs::kProxyAutoDetect, &bool_result));
   EXPECT_FALSE(bool_result);
 }
 
 TEST_F(ConfigurationPolicyPrefStoreProxyTest, AutoDetect) {
-  CommandLine command_line(CommandLine::ARGUMENTS_ONLY);
   scoped_ptr<MockConfigurationPolicyProvider> provider(
       new MockConfigurationPolicyProvider());
-  provider->AddPolicy(ConfigurationPolicyStore::kPolicyProxyBypassList,
-      Value::CreateStringValue("http://chromium.org/override"));
-  provider->AddPolicy(ConfigurationPolicyStore::kPolicyProxyServerMode,
-      Value::CreateIntegerValue(
-          ConfigurationPolicyStore::kPolicyAutoDetectProxyMode));
+  provider->AddPolicy(kPolicyProxyServerMode,
+                      Value::CreateIntegerValue(
+                          kPolicyAutoDetectProxyMode));
 
-  ConfigurationPolicyPrefStore store(&command_line, provider.get());
+  ConfigurationPolicyPrefStore store(provider.get());
   EXPECT_EQ(store.ReadPrefs(), PrefStore::PREF_READ_ERROR_NONE);
 
-  // Ensure that all traces of the command-line specified proxy
-  // switches have been overriden.
   std::string string_result;
-  EXPECT_TRUE(store.prefs()->GetString(prefs::kProxyBypassList,
-                                       &string_result));
-  EXPECT_EQ(string_result, "http://chromium.org/override");
-
+  EXPECT_FALSE(store.prefs()->GetString(prefs::kProxyBypassList,
+                                        &string_result));
   EXPECT_FALSE(store.prefs()->GetString(prefs::kProxyPacUrl, &string_result));
   EXPECT_FALSE(store.prefs()->GetString(prefs::kProxyServer, &string_result));
   bool bool_result;
   EXPECT_TRUE(store.prefs()->GetBoolean(prefs::kNoProxyServer, &bool_result));
   EXPECT_FALSE(bool_result);
-  EXPECT_TRUE(store.prefs()->GetBoolean(prefs::kProxyAutoDetect,
-                                        &bool_result));
+  EXPECT_TRUE(store.prefs()->GetBoolean(prefs::kProxyAutoDetect, &bool_result));
   EXPECT_TRUE(bool_result);
 }
 
 TEST_F(ConfigurationPolicyPrefStoreProxyTest, UseSystem) {
-  CommandLine command_line(CommandLine::ARGUMENTS_ONLY);
   scoped_ptr<MockConfigurationPolicyProvider> provider(
       new MockConfigurationPolicyProvider());
-  provider->AddPolicy(ConfigurationPolicyStore::kPolicyProxyBypassList,
-      Value::CreateStringValue("http://chromium.org/override"));
-  provider->AddPolicy(ConfigurationPolicyStore::kPolicyProxyServerMode,
-      Value::CreateIntegerValue(
-          ConfigurationPolicyStore::kPolicyUseSystemProxyMode));
+  provider->AddPolicy(kPolicyProxyBypassList,
+                      Value::CreateStringValue("http://chromium.org/override"));
+  provider->AddPolicy(kPolicyProxyServerMode,
+                      Value::CreateIntegerValue(
+                          kPolicyUseSystemProxyMode));
 
-  ConfigurationPolicyPrefStore store(&command_line, provider.get());
+  ConfigurationPolicyPrefStore store(provider.get());
   EXPECT_EQ(store.ReadPrefs(), PrefStore::PREF_READ_ERROR_NONE);
 
   std::string string_result;
   EXPECT_FALSE(store.prefs()->GetString(prefs::kProxyBypassList,
-                                       &string_result));
-  EXPECT_EQ(string_result, "");
-
+                                        &string_result));
   EXPECT_FALSE(store.prefs()->GetString(prefs::kProxyPacUrl, &string_result));
   EXPECT_FALSE(store.prefs()->GetString(prefs::kProxyServer, &string_result));
   bool bool_result;
@@ -376,23 +345,20 @@ TEST_F(ConfigurationPolicyPrefStoreProxyTest, UseSystem) {
 }
 
 TEST_F(ConfigurationPolicyPrefStoreProxyTest, UseSystemReversedApplyOrder) {
-  CommandLine command_line(CommandLine::ARGUMENTS_ONLY);
   scoped_ptr<MockConfigurationPolicyProvider> provider(
       new MockConfigurationPolicyProvider());
-  provider->AddPolicy(ConfigurationPolicyStore::kPolicyProxyServerMode,
-      Value::CreateIntegerValue(
-          ConfigurationPolicyStore::kPolicyUseSystemProxyMode));
-  provider->AddPolicy(ConfigurationPolicyStore::kPolicyProxyBypassList,
-      Value::CreateStringValue("http://chromium.org/override"));
+  provider->AddPolicy(kPolicyProxyServerMode,
+                      Value::CreateIntegerValue(
+                          kPolicyUseSystemProxyMode));
+  provider->AddPolicy(kPolicyProxyBypassList,
+                      Value::CreateStringValue("http://chromium.org/override"));
 
-  ConfigurationPolicyPrefStore store(&command_line, provider.get());
+  ConfigurationPolicyPrefStore store(provider.get());
   EXPECT_EQ(store.ReadPrefs(), PrefStore::PREF_READ_ERROR_NONE);
 
   std::string string_result;
   EXPECT_FALSE(store.prefs()->GetString(prefs::kProxyBypassList,
-                                       &string_result));
-  EXPECT_EQ(string_result, "");
-
+                                        &string_result));
   EXPECT_FALSE(store.prefs()->GetString(prefs::kProxyPacUrl, &string_result));
   EXPECT_FALSE(store.prefs()->GetString(prefs::kProxyServer, &string_result));
   bool bool_result;
@@ -407,21 +373,20 @@ class ConfigurationPolicyPrefStoreDefaultSearchTest : public testing::Test {
 // Checks that if the policy for default search is valid, i.e. there's a
 // search URL, that all the elements have been given proper defaults.
 TEST_F(ConfigurationPolicyPrefStoreDefaultSearchTest, MinimallyDefined) {
-  const char* search_url = "http://test.com/search?t={searchTerms}";
+  const char* const search_url = "http://test.com/search?t={searchTerms}";
   scoped_ptr<MockConfigurationPolicyProvider> provider(
       new MockConfigurationPolicyProvider());
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderEnabled,
+      kPolicyDefaultSearchProviderEnabled,
       Value::CreateBooleanValue(true));
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderSearchURL,
+      kPolicyDefaultSearchProviderSearchURL,
       Value::CreateStringValue(search_url));
 
-  CommandLine command_line(CommandLine::ARGUMENTS_ONLY);
-  ConfigurationPolicyPrefStore store(&command_line, provider.get());
+  ConfigurationPolicyPrefStore store(provider.get());
 
   EXPECT_EQ(store.ReadPrefs(), PrefStore::PREF_READ_ERROR_NONE);
-  DictionaryValue* prefs = store.prefs();
+  const DictionaryValue* prefs = store.prefs();
 
   std::string string_result;
   EXPECT_TRUE(prefs->GetString(prefs::kDefaultSearchProviderSearchURL,
@@ -434,58 +399,57 @@ TEST_F(ConfigurationPolicyPrefStoreDefaultSearchTest, MinimallyDefined) {
 
   EXPECT_TRUE(prefs->GetString(prefs::kDefaultSearchProviderKeyword,
                                &string_result));
-  EXPECT_EQ(string_result, "");
+  EXPECT_EQ(string_result, std::string());
 
   EXPECT_TRUE(prefs->GetString(prefs::kDefaultSearchProviderSuggestURL,
                                &string_result));
-  EXPECT_EQ(string_result, "");
+  EXPECT_EQ(string_result, std::string());
 
   EXPECT_TRUE(prefs->GetString(prefs::kDefaultSearchProviderIconURL,
                                &string_result));
-  EXPECT_EQ(string_result, "");
+  EXPECT_EQ(string_result, std::string());
 
   EXPECT_TRUE(prefs->GetString(prefs::kDefaultSearchProviderEncodings,
                                &string_result));
-  EXPECT_EQ(string_result, "");
+  EXPECT_EQ(string_result, std::string());
 }
 
 // Checks that for a fully defined search policy, all elements have been
 // read properly.
 TEST_F(ConfigurationPolicyPrefStoreDefaultSearchTest, FullyDefined) {
-  const char* search_url = "http://test.com/search?t={searchTerms}";
-  const char* suggest_url = "http://test.com/sugg?={searchTerms}";
-  const char* icon_url = "http://test.com/icon.jpg";
-  const char* name = "MyName";
-  const char* keyword = "MyKeyword";
-  const char* encodings = "UTF-16;UTF-8";
+  const char* const search_url = "http://test.com/search?t={searchTerms}";
+  const char* const suggest_url = "http://test.com/sugg?={searchTerms}";
+  const char* const icon_url = "http://test.com/icon.jpg";
+  const char* const name = "MyName";
+  const char* const keyword = "MyKeyword";
+  const char* const encodings = "UTF-16;UTF-8";
   scoped_ptr<MockConfigurationPolicyProvider> provider(
       new MockConfigurationPolicyProvider());
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderEnabled,
+      kPolicyDefaultSearchProviderEnabled,
       Value::CreateBooleanValue(true));
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderSearchURL,
+      kPolicyDefaultSearchProviderSearchURL,
       Value::CreateStringValue(search_url));
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderName,
+      kPolicyDefaultSearchProviderName,
       Value::CreateStringValue(name));
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderKeyword,
+      kPolicyDefaultSearchProviderKeyword,
       Value::CreateStringValue(keyword));
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderSuggestURL,
+      kPolicyDefaultSearchProviderSuggestURL,
       Value::CreateStringValue(suggest_url));
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderIconURL,
+      kPolicyDefaultSearchProviderIconURL,
       Value::CreateStringValue(icon_url));
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderEncodings,
+      kPolicyDefaultSearchProviderEncodings,
       Value::CreateStringValue(encodings));
 
-  CommandLine command_line(CommandLine::ARGUMENTS_ONLY);
-  ConfigurationPolicyPrefStore store(&command_line, provider.get());
+  ConfigurationPolicyPrefStore store(provider.get());
   EXPECT_EQ(store.ReadPrefs(), PrefStore::PREF_READ_ERROR_NONE);
-  DictionaryValue* prefs = store.prefs();
+  const DictionaryValue* prefs = store.prefs();
 
   std::string result_search_url;
   EXPECT_TRUE(prefs->GetString(prefs::kDefaultSearchProviderSearchURL,
@@ -521,105 +485,103 @@ TEST_F(ConfigurationPolicyPrefStoreDefaultSearchTest, FullyDefined) {
 // Checks that if the default search policy is missing, that no elements of the
 // default search policy will be present.
 TEST_F(ConfigurationPolicyPrefStoreDefaultSearchTest, MissingUrl) {
-  const char* suggest_url = "http://test.com/sugg?t={searchTerms}";
-  const char* icon_url = "http://test.com/icon.jpg";
-  const char* name = "MyName";
-  const char* keyword = "MyKeyword";
-  const char* encodings = "UTF-16;UTF-8";
+  const char* const suggest_url = "http://test.com/sugg?t={searchTerms}";
+  const char* const icon_url = "http://test.com/icon.jpg";
+  const char* const name = "MyName";
+  const char* const keyword = "MyKeyword";
+  const char* const encodings = "UTF-16;UTF-8";
   scoped_ptr<MockConfigurationPolicyProvider> provider(
       new MockConfigurationPolicyProvider());
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderEnabled,
+      kPolicyDefaultSearchProviderEnabled,
       Value::CreateBooleanValue(true));
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderName,
+      kPolicyDefaultSearchProviderName,
       Value::CreateStringValue(name));
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderKeyword,
+      kPolicyDefaultSearchProviderKeyword,
       Value::CreateStringValue(keyword));
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderSuggestURL,
+      kPolicyDefaultSearchProviderSuggestURL,
       Value::CreateStringValue(suggest_url));
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderIconURL,
+      kPolicyDefaultSearchProviderIconURL,
       Value::CreateStringValue(icon_url));
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderEncodings,
+      kPolicyDefaultSearchProviderEncodings,
       Value::CreateStringValue(encodings));
 
-  CommandLine command_line(CommandLine::ARGUMENTS_ONLY);
-  ConfigurationPolicyPrefStore store(&command_line, provider.get());
+  ConfigurationPolicyPrefStore store(provider.get());
   EXPECT_EQ(store.ReadPrefs(), PrefStore::PREF_READ_ERROR_NONE);
-  DictionaryValue* prefs = store.prefs();
+  const DictionaryValue* prefs = store.prefs();
 
   std::string string_result;
   EXPECT_FALSE(prefs->GetString(prefs::kDefaultSearchProviderSearchURL,
-                               &string_result));
+                                &string_result));
   EXPECT_FALSE(prefs->GetString(prefs::kDefaultSearchProviderName,
-                               &string_result));
+                                &string_result));
   EXPECT_FALSE(prefs->GetString(prefs::kDefaultSearchProviderKeyword,
-                               &string_result));
+                                &string_result));
   EXPECT_FALSE(prefs->GetString(prefs::kDefaultSearchProviderSuggestURL,
-                               &string_result));
+                                &string_result));
   EXPECT_FALSE(prefs->GetString(prefs::kDefaultSearchProviderIconURL,
-                               &string_result));
+                                &string_result));
   EXPECT_FALSE(prefs->GetString(prefs::kDefaultSearchProviderEncodings,
-                               &string_result));
+                                &string_result));
 }
 
 // Checks that if the default search policy is invalid, that no elements of the
 // default search policy will be present.
 TEST_F(ConfigurationPolicyPrefStoreDefaultSearchTest, Invalid) {
-  const char* bad_search_url = "http://test.com/noSearchTerms";
-  const char* suggest_url = "http://test.com/sugg?t={searchTerms}";
-  const char* icon_url = "http://test.com/icon.jpg";
-  const char* name = "MyName";
-  const char* keyword = "MyKeyword";
-  const char* encodings = "UTF-16;UTF-8";
+  const char* const bad_search_url = "http://test.com/noSearchTerms";
+  const char* const suggest_url = "http://test.com/sugg?t={searchTerms}";
+  const char* const icon_url = "http://test.com/icon.jpg";
+  const char* const name = "MyName";
+  const char* const keyword = "MyKeyword";
+  const char* const encodings = "UTF-16;UTF-8";
   scoped_ptr<MockConfigurationPolicyProvider> provider(
       new MockConfigurationPolicyProvider());
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderEnabled,
+      kPolicyDefaultSearchProviderEnabled,
       Value::CreateBooleanValue(true));
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderSearchURL,
+      kPolicyDefaultSearchProviderSearchURL,
       Value::CreateStringValue(bad_search_url));
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderName,
+      kPolicyDefaultSearchProviderName,
       Value::CreateStringValue(name));
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderKeyword,
+      kPolicyDefaultSearchProviderKeyword,
       Value::CreateStringValue(keyword));
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderSuggestURL,
+      kPolicyDefaultSearchProviderSuggestURL,
       Value::CreateStringValue(suggest_url));
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderIconURL,
+      kPolicyDefaultSearchProviderIconURL,
       Value::CreateStringValue(icon_url));
   provider->AddPolicy(
-      ConfigurationPolicyStore::kPolicyDefaultSearchProviderEncodings,
+      kPolicyDefaultSearchProviderEncodings,
       Value::CreateStringValue(encodings));
 
-  CommandLine command_line(CommandLine::ARGUMENTS_ONLY);
-  ConfigurationPolicyPrefStore store(&command_line, provider.get());
+  ConfigurationPolicyPrefStore store(provider.get());
   EXPECT_EQ(store.ReadPrefs(), PrefStore::PREF_READ_ERROR_NONE);
-  DictionaryValue* prefs = store.prefs();
+  const DictionaryValue* const prefs = store.prefs();
 
   std::string string_result;
   EXPECT_FALSE(prefs->GetString(prefs::kDefaultSearchProviderEnabled,
-                               &string_result));
+                                &string_result));
   EXPECT_FALSE(prefs->GetString(prefs::kDefaultSearchProviderSearchURL,
-                               &string_result));
+                                &string_result));
   EXPECT_FALSE(prefs->GetString(prefs::kDefaultSearchProviderName,
-                               &string_result));
+                                &string_result));
   EXPECT_FALSE(prefs->GetString(prefs::kDefaultSearchProviderKeyword,
-                               &string_result));
+                                &string_result));
   EXPECT_FALSE(prefs->GetString(prefs::kDefaultSearchProviderSuggestURL,
-                               &string_result));
+                                &string_result));
   EXPECT_FALSE(prefs->GetString(prefs::kDefaultSearchProviderIconURL,
-                               &string_result));
+                                &string_result));
   EXPECT_FALSE(prefs->GetString(prefs::kDefaultSearchProviderEncodings,
-                               &string_result));
+                                &string_result));
 }
 
 // Test cases for the Sync policy setting.
@@ -627,24 +589,22 @@ class ConfigurationPolicyPrefStoreSyncTest : public testing::Test {
 };
 
 TEST_F(ConfigurationPolicyPrefStoreSyncTest, Default) {
-  ConfigurationPolicyPrefStore store(NULL, NULL);
+  ConfigurationPolicyPrefStore store(NULL);
   bool result = false;
   EXPECT_FALSE(store.prefs()->GetBoolean(prefs::kSyncManaged, &result));
 }
 
 TEST_F(ConfigurationPolicyPrefStoreSyncTest, Enabled) {
-  ConfigurationPolicyPrefStore store(NULL, NULL);
-  store.Apply(ConfigurationPolicyPrefStore::kPolicySyncDisabled,
-              Value::CreateBooleanValue(false));
+  ConfigurationPolicyPrefStore store(NULL);
+  store.Apply(kPolicySyncDisabled, Value::CreateBooleanValue(false));
   // Enabling Sync should not set the pref.
   bool result = false;
   EXPECT_FALSE(store.prefs()->GetBoolean(prefs::kSyncManaged, &result));
 }
 
 TEST_F(ConfigurationPolicyPrefStoreSyncTest, Disabled) {
-  ConfigurationPolicyPrefStore store(NULL, NULL);
-  store.Apply(ConfigurationPolicyPrefStore::kPolicySyncDisabled,
-              Value::CreateBooleanValue(true));
+  ConfigurationPolicyPrefStore store(NULL);
+  store.Apply(kPolicySyncDisabled, Value::CreateBooleanValue(true));
   // Sync should be flagged as managed.
   bool result = false;
   EXPECT_TRUE(store.prefs()->GetBoolean(prefs::kSyncManaged, &result));
@@ -656,24 +616,22 @@ class ConfigurationPolicyPrefStoreAutoFillTest : public testing::Test {
 };
 
 TEST_F(ConfigurationPolicyPrefStoreAutoFillTest, Default) {
-  ConfigurationPolicyPrefStore store(NULL, NULL);
+  ConfigurationPolicyPrefStore store(NULL);
   bool result = false;
   EXPECT_FALSE(store.prefs()->GetBoolean(prefs::kAutoFillEnabled, &result));
 }
 
 TEST_F(ConfigurationPolicyPrefStoreAutoFillTest, Enabled) {
-  ConfigurationPolicyPrefStore store(NULL, NULL);
-  store.Apply(ConfigurationPolicyPrefStore::kPolicyAutoFillEnabled,
-              Value::CreateBooleanValue(true));
+  ConfigurationPolicyPrefStore store(NULL);
+  store.Apply(kPolicyAutoFillEnabled, Value::CreateBooleanValue(true));
   // Enabling AutoFill should not set the pref.
   bool result = false;
   EXPECT_FALSE(store.prefs()->GetBoolean(prefs::kAutoFillEnabled, &result));
 }
 
 TEST_F(ConfigurationPolicyPrefStoreAutoFillTest, Disabled) {
-  ConfigurationPolicyPrefStore store(NULL, NULL);
-  store.Apply(ConfigurationPolicyPrefStore::kPolicyAutoFillEnabled,
-              Value::CreateBooleanValue(false));
+  ConfigurationPolicyPrefStore store(NULL);
+  store.Apply(kPolicyAutoFillEnabled, Value::CreateBooleanValue(false));
   // Disabling AutoFill should switch the pref to managed.
   bool result = true;
   EXPECT_TRUE(store.prefs()->GetBoolean(prefs::kAutoFillEnabled, &result));

@@ -13,8 +13,8 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/field_trial.h"
-#include "base/histogram.h"
+#include "base/metrics/field_trial.h"
+#include "base/metrics/histogram.h"
 #include "base/ref_counted.h"
 #include "base/string_util.h"
 #include "base/time.h"
@@ -112,6 +112,7 @@ HttpCache::Transaction::Transaction(HttpCache* cache, bool enable_range_support)
       invalid_range_(false),
       enable_range_support_(enable_range_support),
       truncated_(false),
+      is_sparse_(false),
       server_responded_206_(false),
       cache_pending_(false),
       read_offset_(0),
@@ -625,16 +626,6 @@ int HttpCache::Transaction::DoSendRequest() {
     return rv;
 
   next_state_ = STATE_SEND_REQUEST_COMPLETE;
-  if (request_->url.SchemeIs("https") &&
-      SSLConfigService::snap_start_enabled()) {
-    // TODO(agl): in order to support AlternateProtocol there should probably
-    // be an object hanging off the HttpNetworkSession which constructs these.
-    // Note: when this test is removed, don't forget to remove the #include of
-    // ssl_config_service.h
-    scoped_refptr<DiskCacheBasedSSLHostInfo> hostinfo =
-        new DiskCacheBasedSSLHostInfo(request_->url.host(), cache_);
-    network_trans_->SetSSLNonSensitiveHostInfo(hostinfo.get());
-  }
   rv = network_trans_->Start(request_, &io_callback_, net_log_);
   return rv;
 }
@@ -686,7 +677,7 @@ int HttpCache::Transaction::DoSuccessfulSendRequest() {
     return OK;
   }
   if (server_responded_206_ && mode_ == READ_WRITE && !truncated_ &&
-      response_.headers->response_code() == 200) {
+      !is_sparse_) {
     // We have stored the full entry, but it changed and the server is
     // sending a range. We have to delete the old entry.
     DoneWritingToEntry(false);
@@ -780,7 +771,7 @@ int HttpCache::Transaction::DoOpenEntryComplete(int result) {
     return OK;
   }
   if (cache_->mode() == PLAYBACK)
-    DLOG(INFO) << "Playback Cache Miss: " << request_->url;
+    DVLOG(1) << "Playback Cache Miss: " << request_->url;
 
   // The entry does not exist, and we are not permitted to create a new entry,
   // so we must fail.
@@ -856,11 +847,11 @@ int HttpCache::Transaction::DoAddToEntryComplete(int result) {
       base::TimeTicks::Now() - entry_lock_waiting_since_;
   UMA_HISTOGRAM_TIMES("HttpCache.EntryLockWait", entry_lock_wait);
   static const bool prefetching_fieldtrial =
-      FieldTrialList::Find("Prefetch") &&
-      !FieldTrialList::Find("Prefetch")->group_name().empty();
+      base::FieldTrialList::Find("Prefetch") &&
+      !base::FieldTrialList::Find("Prefetch")->group_name().empty();
   if (prefetching_fieldtrial) {
     UMA_HISTOGRAM_TIMES(
-        FieldTrial::MakeName("HttpCache.EntryLockWait", "Prefetch"),
+        base::FieldTrial::MakeName("HttpCache.EntryLockWait", "Prefetch"),
         entry_lock_wait);
   }
 
@@ -896,6 +887,7 @@ int HttpCache::Transaction::DoAddToEntryComplete(int result) {
   return OK;
 }
 
+// We may end up here multiple times for a given request.
 int HttpCache::Transaction::DoStartPartialCacheValidation() {
   if (mode_ == NONE)
     return OK;
@@ -1348,7 +1340,7 @@ void HttpCache::Transaction::SetRequest(const BoundNetLog& net_log,
       partial_->SetHeaders(custom_request_->extra_headers);
     } else {
       // The range is invalid or we cannot handle it properly.
-      LOG(INFO) << "Invalid byte range found.";
+      VLOG(1) << "Invalid byte range found.";
       effective_load_flags_ |= LOAD_DISABLE_CACHE;
       partial_.reset(NULL);
     }
@@ -1456,6 +1448,7 @@ int HttpCache::Transaction::BeginPartialCacheValidation() {
   return ValidateEntryHeadersAndContinue(false);
 }
 
+// This should only be called once per request.
 int HttpCache::Transaction::ValidateEntryHeadersAndContinue(
     bool byte_range_requested) {
   DCHECK(mode_ == READ_WRITE);
@@ -1470,6 +1463,9 @@ int HttpCache::Transaction::ValidateEntryHeadersAndContinue(
     next_state_ = STATE_INIT_ENTRY;
     return OK;
   }
+
+  if (response_.headers->response_code() == 206)
+    is_sparse_ = true;
 
   if (!partial_->IsRequestedRangeOK()) {
     // The stored data is fine, but the request may be invalid.
@@ -1811,7 +1807,7 @@ int HttpCache::Transaction::WriteResponseInfoToEntry(bool truncated) {
     DCHECK_EQ(200, response_.headers->response_code());
   }
 
-  scoped_refptr<PickledIOBuffer> data = new PickledIOBuffer();
+  scoped_refptr<PickledIOBuffer> data(new PickledIOBuffer());
   response_.Persist(data->pickle(), skip_transient_headers, truncated);
   data->Done();
 
@@ -1838,8 +1834,8 @@ void HttpCache::Transaction::DoneWritingToEntry(bool success) {
     return;
 
   if (cache_->mode() == RECORD)
-    DLOG(INFO) << "Recorded: " << request_->method << request_->url
-               << " status: " << response_.headers->response_code();
+    DVLOG(1) << "Recorded: " << request_->method << request_->url
+             << " status: " << response_.headers->response_code();
 
   cache_->DoneWritingToEntry(entry_, success);
   entry_ = NULL;
@@ -1852,6 +1848,7 @@ void HttpCache::Transaction::DoomPartialEntry(bool delete_object) {
   DCHECK_EQ(OK, rv);
   cache_->DoneWithEntry(entry_, this, false);
   entry_ = NULL;
+  is_sparse_ = false;
   if (delete_object)
     partial_.reset(NULL);
 }

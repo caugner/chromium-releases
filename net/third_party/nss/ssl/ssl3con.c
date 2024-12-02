@@ -2011,6 +2011,12 @@ ssl3_ComputeRecordMAC(
 
 static PRBool
 ssl3_ClientAuthTokenPresent(sslSessionID *sid) {
+#ifdef NSS_PLATFORM_CLIENT_AUTH
+    if (!sid || !sid->u.ssl3.clPlatformAuthValid) {
+	return PR_TRUE;
+    }
+    return ssl_PlatformAuthTokenPresent(&sid->u.ssl3.clPlatformAuthInfo);
+#else
     PK11SlotInfo *slot = NULL;
     PRBool isPresent = PR_TRUE;
 
@@ -2034,6 +2040,7 @@ ssl3_ClientAuthTokenPresent(sslSessionID *sid) {
 	PK11_FreeSlot(slot);
     }
     return isPresent;
+#endif /* NSS_PLATFORM_CLIENT_AUTH */
 }
 
 SECStatus
@@ -4827,6 +4834,18 @@ ssl3_SendCertificateVerify(sslSocket *ss)
     }
 
     isTLS = (PRBool)(ss->ssl3.pwSpec->version > SSL_LIBRARY_VERSION_3_0);
+#ifdef NSS_PLATFORM_CLIENT_AUTH
+    rv = ssl3_PlatformSignHashes(&hashes, ss->ssl3.platformClientKey,
+                                 &buf, isTLS);
+    if (rv == SECSuccess) {
+        sslSessionID * sid = ss->sec.ci.sid;
+        ssl_GetPlatformAuthInfoForKey(ss->ssl3.platformClientKey,
+                                      &sid->u.ssl3.clPlatformAuthInfo);
+        sid->u.ssl3.clPlatformAuthValid = PR_TRUE;
+    }
+    ssl_FreePlatformKey(ss->ssl3.platformClientKey);
+    ss->ssl3.platformClientKey = (PlatformKey)NULL;
+#else /* NSS_PLATFORM_CLIENT_AUTH */
     rv = ssl3_SignHashes(&hashes, ss->ssl3.clientPrivateKey, &buf, isTLS);
     if (rv == SECSuccess) {
 	PK11SlotInfo * slot;
@@ -4843,14 +4862,9 @@ ssl3_SendCertificateVerify(sslSocket *ss)
 	sid->u.ssl3.clAuthValid      = PR_TRUE;
 	PK11_FreeSlot(slot);
     }
-    /* If we're doing RSA key exchange, we're all done with the private key
-     * here.  Diffie-Hellman key exchanges need the client's
-     * private key for the key exchange.
-     */
-    if (ss->ssl3.hs.kea_def->exchKeyType == kt_rsa) {
-	SECKEY_DestroyPrivateKey(ss->ssl3.clientPrivateKey);
-	ss->ssl3.clientPrivateKey = NULL;
-    }
+    SECKEY_DestroyPrivateKey(ss->ssl3.clientPrivateKey);
+    ss->ssl3.clientPrivateKey = NULL;
+#endif /* NSS_PLATFORM_CLIENT_AUTH */
     if (rv != SECSuccess) {
 	goto done;	/* err code was set by ssl3_SignHashes */
     }
@@ -5000,21 +5014,41 @@ ssl3_HandleServerHello(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 	desc    = unexpected_message;
 	goto alert_loser;
     }
-
-    if (!ss->ssl3.serverHelloPredictionData.data) {
-        /* If this allocation fails it will only stop the application from
-	 * recording the ServerHello information and performing future Snap
-	 * Starts. */
-	if (SECITEM_AllocItem(NULL, &ss->ssl3.serverHelloPredictionData,
-			      length))
-	    memcpy(ss->ssl3.serverHelloPredictionData.data, b, length);
-	/* ss->ssl3.serverHelloPredictionDataValid is still false at this
-	 * point. We have to record the contents of the ServerHello here
-	 * because we don't have a pointer to the whole message when handling
-	 * the extensions. However, we wait until the Snap Start extenion
-	 * handler to recognise that the server supports Snap Start and to set
-	 * serverHelloPredictionDataValid. */
+    
+    /* clean up anything left from previous handshake. */
+    if (ss->ssl3.clientCertChain != NULL) {
+       CERT_DestroyCertificateList(ss->ssl3.clientCertChain);
+       ss->ssl3.clientCertChain = NULL;
     }
+    if (ss->ssl3.clientCertificate != NULL) {
+       CERT_DestroyCertificate(ss->ssl3.clientCertificate);
+       ss->ssl3.clientCertificate = NULL;
+    }
+    if (ss->ssl3.clientPrivateKey != NULL) {
+       SECKEY_DestroyPrivateKey(ss->ssl3.clientPrivateKey);
+       ss->ssl3.clientPrivateKey = NULL;
+    }
+#ifdef NSS_PLATFORM_CLIENT_AUTH
+    if (ss->ssl3.platformClientKey) {
+       ssl_FreePlatformKey(ss->ssl3.platformClientKey);
+       ss->ssl3.platformClientKey = (PlatformKey)NULL;
+    }
+#endif  /* NSS_PLATFORM_CLIENT_AUTH */
+
+    if (ss->ssl3.serverHelloPredictionData.data)
+	SECITEM_FreeItem(&ss->ssl3.serverHelloPredictionData, PR_FALSE);
+
+    /* If this allocation fails it will only stop the application from
+     * recording the ServerHello information and performing future Snap
+     * Starts. */
+    if (SECITEM_AllocItem(NULL, &ss->ssl3.serverHelloPredictionData, length))
+	memcpy(ss->ssl3.serverHelloPredictionData.data, b, length);
+    /* ss->ssl3.serverHelloPredictionDataValid is still false at this
+     * point. We have to record the contents of the ServerHello here
+     * because we don't have a pointer to the whole message when handling
+     * the extensions. However, we wait until the Snap Start extension
+     * handler to recognise that the server supports Snap Start and to set
+     * serverHelloPredictionDataValid. */
 
     temp = ssl3_ConsumeHandshakeNumber(ss, 2, &b, &length);
     if (temp < 0) {
@@ -5481,6 +5515,10 @@ ssl3_HandleCertificateRequest(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
     SSL3AlertDescription desc        = illegal_parameter;
     SECItem              cert_types  = {siBuffer, NULL, 0};
     CERTDistNames        ca_list;
+#ifdef NSS_PLATFORM_CLIENT_AUTH
+    CERTCertList *       platform_cert_list = NULL;
+    CERTCertListNode *   certNode = NULL;
+#endif  /* NSS_PLATFORM_CLIENT_AUTH */
 
     SSL_TRC(3, ("%d: SSL3[%d]: handle certificate_request handshake",
 		SSL_GETPID(), ss->fd));
@@ -5493,20 +5531,13 @@ ssl3_HandleCertificateRequest(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 	errCode = SSL_ERROR_RX_UNEXPECTED_CERT_REQUEST;
 	goto alert_loser;
     }
-
-    /* clean up anything left from previous handshake. */
-    if (ss->ssl3.clientCertChain != NULL) {
-       CERT_DestroyCertificateList(ss->ssl3.clientCertChain);
-       ss->ssl3.clientCertChain = NULL;
-    }
-    if (ss->ssl3.clientCertificate != NULL) {
-       CERT_DestroyCertificate(ss->ssl3.clientCertificate);
-       ss->ssl3.clientCertificate = NULL;
-    }
-    if (ss->ssl3.clientPrivateKey != NULL) {
-       SECKEY_DestroyPrivateKey(ss->ssl3.clientPrivateKey);
-       ss->ssl3.clientPrivateKey = NULL;
-    }
+    
+    PORT_Assert(ss->ssl3.clientCertChain == NULL);
+    PORT_Assert(ss->ssl3.clientCertificate == NULL);
+    PORT_Assert(ss->ssl3.clientPrivateKey == NULL);
+#ifdef NSS_PLATFORM_CLIENT_AUTH
+    PORT_Assert(ss->ssl3.platformClientKey == (PlatformKey)NULL);
+#endif  /* NSS_PLATFORM_CLIENT_AUTH */    
 
     isTLS = (PRBool)(ss->ssl3.prSpec->version > SSL_LIBRARY_VERSION_3_0);
     rv = ssl3_ConsumeHandshakeVariable(ss, &cert_types, 1, &b, &length);
@@ -5573,6 +5604,18 @@ ssl3_HandleCertificateRequest(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
     desc = no_certificate;
     ss->ssl3.hs.ws = wait_hello_done;
 
+#ifdef NSS_PLATFORM_CLIENT_AUTH
+    if (ss->getPlatformClientAuthData == NULL) {
+	rv = SECFailure; /* force it to send a no_certificate alert */
+    } else {
+	/* XXX Should pass cert_types in this call!! */
+        rv = (SECStatus)(*ss->getPlatformClientAuthData)(
+                                        ss->getPlatformClientAuthDataArg,
+                                        ss->fd, &ca_list,
+                                        &platform_cert_list,
+                                        (void**)&ss->ssl3.platformClientKey);
+    }
+#else
     if (ss->getClientAuthData == NULL) {
 	rv = SECFailure; /* force it to send a no_certificate alert */
     } else {
@@ -5582,12 +5625,51 @@ ssl3_HandleCertificateRequest(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 						 &ss->ssl3.clientCertificate,
 						 &ss->ssl3.clientPrivateKey);
     }
+#endif   /* NSS_PLATFORM_CLIENT_AUTH */
     switch (rv) {
     case SECWouldBlock:	/* getClientAuthData has put up a dialog box. */
 	ssl_SetAlwaysBlock(ss);
 	break;	/* not an error */
 
     case SECSuccess:
+#ifdef NSS_PLATFORM_CLIENT_AUTH
+        if (!platform_cert_list || CERT_LIST_EMPTY(platform_cert_list) ||
+            !ss->ssl3.platformClientKey) {
+            if (platform_cert_list) {
+                CERT_DestroyCertList(platform_cert_list);
+                platform_cert_list = NULL;
+            }
+            if (ss->ssl3.platformClientKey) {
+                ssl_FreePlatformKey(ss->ssl3.platformClientKey);
+                ss->ssl3.platformClientKey = (PlatformKey)NULL;
+            }
+            goto send_no_certificate;
+        }
+
+        certNode = CERT_LIST_HEAD(platform_cert_list);
+        ss->ssl3.clientCertificate = CERT_DupCertificate(certNode->cert);
+
+        /* Setting ssl3.clientCertChain non-NULL will cause
+         * ssl3_HandleServerHelloDone to call SendCertificate.
+         * Note: clientCertChain should include the EE cert as
+         * clientCertificate is ignored during the actual sending
+         */
+        ss->ssl3.clientCertChain =
+            hack_NewCertificateListFromCertList(platform_cert_list);
+        CERT_DestroyCertList(platform_cert_list);
+        platform_cert_list = NULL;
+        if (ss->ssl3.clientCertChain == NULL) {
+            if (ss->ssl3.clientCertificate != NULL) {
+                CERT_DestroyCertificate(ss->ssl3.clientCertificate);
+                ss->ssl3.clientCertificate = NULL;
+            }
+            if (ss->ssl3.platformClientKey) {
+                ssl_FreePlatformKey(ss->ssl3.platformClientKey);
+                ss->ssl3.platformClientKey = (PlatformKey)NULL;
+            }
+            goto send_no_certificate;
+        } 
+#else
         /* check what the callback function returned */
         if ((!ss->ssl3.clientCertificate) || (!ss->ssl3.clientPrivateKey)) {
             /* we are missing either the key or cert */
@@ -5620,6 +5702,7 @@ ssl3_HandleCertificateRequest(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 	    }
 	    goto send_no_certificate;
 	}
+#endif   /* NSS_PLATFORM_CLIENT_AUTH */
 	break;	/* not an error */
 
     case SECFailure:
@@ -5650,6 +5733,10 @@ loser:
 done:
     if (arena != NULL)
     	PORT_FreeArena(arena, PR_FALSE);
+#ifdef NSS_PLATFORM_CLIENT_AUTH
+    if (platform_cert_list)
+        CERT_DestroyCertList(platform_cert_list);
+#endif
     return rv;
 }
 
@@ -5758,6 +5845,16 @@ ssl3_HandleServerHelloDone(sslSocket *ss)
 	    goto loser;	/* error code is set. */
     	}
     } else
+#ifdef NSS_PLATFORM_CLIENT_AUTH
+    if (ss->ssl3.clientCertChain != NULL &&
+        ss->ssl3.platformClientKey) {
+        send_verify = PR_TRUE;
+        rv = ssl3_SendCertificate(ss);
+        if (rv != SECSuccess) {
+            goto loser; /* error code is set. */
+        }
+    }
+#else
     if (ss->ssl3.clientCertChain  != NULL &&
 	ss->ssl3.clientPrivateKey != NULL) {
 	send_verify = PR_TRUE;
@@ -5766,6 +5863,7 @@ ssl3_HandleServerHelloDone(sslSocket *ss)
 	    goto loser;	/* error code is set. */
     	}
     }
+#endif /* NSS_PLATFORM_CLIENT_AUTH */
 
     rv = ssl3_SendClientKeyExchange(ss);
     if (rv != SECSuccess) {
@@ -7811,6 +7909,7 @@ void
 ssl3_CopyPeerCertsFromSID(sslSocket *ss, sslSessionID *sid)
 {
     PRArenaPool *arena;
+    ssl3CertNode *lastCert = NULL;
     ssl3CertNode *certs = NULL;
     int i;
 
@@ -7822,8 +7921,13 @@ ssl3_CopyPeerCertsFromSID(sslSocket *ss, sslSessionID *sid)
     for (i = 0; i < MAX_PEER_CERT_CHAIN_SIZE && sid->peerCertChain[i]; i++) {
 	ssl3CertNode *c = PORT_ArenaNew(arena, ssl3CertNode);
 	c->cert = CERT_DupCertificate(sid->peerCertChain[i]);
-	c->next = certs;
-	certs = c;
+	c->next = NULL;
+	if (lastCert) {
+	    lastCert->next = c;
+	} else {
+	    certs = c;
+	}
+	lastCert = c;
     }
     ss->ssl3.peerCertChain = certs;
 }
@@ -7840,6 +7944,57 @@ ssl3_CopyPeerCertsToSID(ssl3CertNode *certs, sslSessionID *sid)
 }
 
 /* Called from ssl3_HandleHandshakeMessage() when it has deciphered a complete
+ * ssl3 CertificateStatus message.
+ * Caller must hold Handshake and RecvBuf locks.
+ * This is always called before ssl3_HandleCertificate, even if the Certificate
+ * message is sent first.
+ */
+static SECStatus
+ssl3_HandleCertificateStatus(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
+{
+    PRInt32 status, len;
+    int     errCode;
+    SSL3AlertDescription desc;
+
+    if (!ss->ssl3.hs.may_get_cert_status ||
+	ss->ssl3.hs.ws != wait_server_cert ||
+	!ss->ssl3.hs.pending_cert_msg.data ||
+	ss->ssl3.hs.cert_status.data) {
+	errCode = SSL_ERROR_RX_UNEXPECTED_CERT_STATUS;
+	desc = unexpected_message;
+	goto alert_loser;
+    }
+
+    /* Consume the CertificateStatusType enum */
+    status = ssl3_ConsumeHandshakeNumber(ss, 1, &b, &length);
+    if (status != 1 /* ocsp */) {
+	goto format_loser;
+    }
+
+    len = ssl3_ConsumeHandshakeNumber(ss, 3, &b, &length);
+    if (len != length) {
+	goto format_loser;
+    }
+
+    if (SECITEM_AllocItem(NULL, &ss->ssl3.hs.cert_status, length) == NULL) {
+        return SECFailure;
+    }
+    ss->ssl3.hs.cert_status.type = siBuffer;
+    PORT_Memcpy(ss->ssl3.hs.cert_status.data, b, length);
+
+    return SECSuccess;
+
+format_loser:
+    errCode = SSL_ERROR_BAD_CERT_STATUS_RESPONSE_ALERT;
+    desc = bad_certificate_status_response;
+
+alert_loser:
+    (void)SSL3_SendAlert(ss, alert_fatal, desc);
+    (void)ssl_MapLowLevelError(errCode);
+    return SECFailure;
+}
+
+/* Called from ssl3_HandleHandshakeMessage() when it has deciphered a complete
  * ssl3 Certificate message.
  * Caller must hold Handshake and RecvBuf locks.
  */
@@ -7847,6 +8002,7 @@ static SECStatus
 ssl3_HandleCertificate(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 {
     ssl3CertNode *   c;
+    ssl3CertNode *   lastCert 	= NULL;
     ssl3CertNode *   certs 	= NULL;
     PRArenaPool *    arena 	= NULL;
     CERTCertificate *cert;
@@ -7974,8 +8130,13 @@ ssl3_HandleCertificate(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 	if (c->cert->trust)
 	    trusted = PR_TRUE;
 
-	c->next = certs;
-	certs = c;
+	c->next = NULL;
+	if (lastCert) {
+	    lastCert->next = c;
+	} else {
+	    certs = c;
+	}
+	lastCert = c;
     }
 
     if (remaining != 0)
@@ -8354,20 +8515,6 @@ ssl3_SendFinished(sslSocket *ss, PRInt32 flags)
 	}
     }
 
-    if ((ss->ssl3.hs.snapStartType == snap_start_recovery ||
-         ss->ssl3.hs.snapStartType == snap_start_resume_recovery) &&
-	ss->ssl3.snapStartApplicationData.data) {
-	/* In the event that the server ignored the application data in our
-	 * snap start extension, we need to retransmit it now. */
-	PRInt32 sent = ssl3_SendRecord(ss, content_application_data,
-                                       ss->ssl3.snapStartApplicationData.data,
-                                       ss->ssl3.snapStartApplicationData.len,
-                                       flags);
-	SECITEM_FreeItem(&ss->ssl3.snapStartApplicationData, PR_FALSE);
-	if (sent < 0)
-	    return (SECStatus)sent;	/* error code set by ssl3_SendRecord */
-    }
-
     return SECSuccess;
 
 fail:
@@ -8676,6 +8823,26 @@ xmit_loser:
     return SECSuccess;
 }
 
+/* This function handles any pending Certificate messages. Certificate messages
+ * can be pending if we expect a possible CertificateStatus message to follow.
+ *
+ * This function must be called immediately after handling the
+ * CertificateStatus message, and before handling any ServerKeyExchange or
+ * CertificateRequest messages.
+ */
+static SECStatus
+ssl3_MaybeHandlePendingCertificateMessage(sslSocket *ss)
+{
+    SECStatus rv = SECSuccess;
+
+    if (ss->ssl3.hs.pending_cert_msg.data) {
+	rv = ssl3_HandleCertificate(ss, ss->ssl3.hs.pending_cert_msg.data,
+				    ss->ssl3.hs.pending_cert_msg.len);
+	SECITEM_FreeItem(&ss->ssl3.hs.pending_cert_msg, PR_FALSE);
+    }
+    return rv;
+}
+
 /* Called from ssl3_HandleHandshake() when it has gathered a complete ssl3
  * hanshake message.
  * Caller must hold Handshake and RecvBuf locks.
@@ -8775,7 +8942,32 @@ ssl3_HandleHandshakeMessage(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 	rv = ssl3_HandleServerHello(ss, b, length);
 	break;
     case certificate:
+	if (ss->ssl3.hs.may_get_cert_status) {
+	    /* If we might get a CertificateStatus then we want to postpone the
+	     * processing of the Certificate message until after we have
+	     * processed the CertificateStatus */
+	    if (ss->ssl3.hs.pending_cert_msg.data ||
+		ss->ssl3.hs.ws != wait_server_cert) {
+		(void)SSL3_SendAlert(ss, alert_fatal, unexpected_message);
+		(void)ssl_MapLowLevelError(SSL_ERROR_RX_UNEXPECTED_CERTIFICATE);
+		return SECFailure;
+	    }
+	    if (SECITEM_AllocItem(NULL, &ss->ssl3.hs.pending_cert_msg,
+			          length) == NULL) {
+		return SECFailure;
+	    }
+	    ss->ssl3.hs.pending_cert_msg.type = siBuffer;
+	    PORT_Memcpy(ss->ssl3.hs.pending_cert_msg.data, b, length);
+	    break;
+	}
 	rv = ssl3_HandleCertificate(ss, b, length);
+	break;
+    case certificate_status:
+	rv = ssl3_HandleCertificateStatus(ss, b, length);
+	if (rv != SECSuccess)
+	    break;
+	PORT_Assert(ss->ssl3.hs.pending_cert_msg.data);
+	rv = ssl3_MaybeHandlePendingCertificateMessage(ss);
 	break;
     case server_key_exchange:
 	if (ss->sec.isServer) {
@@ -8783,6 +8975,9 @@ ssl3_HandleHandshakeMessage(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 	    PORT_SetError(SSL_ERROR_RX_UNEXPECTED_SERVER_KEY_EXCH);
 	    return SECFailure;
 	}
+	rv = ssl3_MaybeHandlePendingCertificateMessage(ss);
+	if (rv != SECSuccess)
+	    break;
 	rv = ssl3_HandleServerKeyExchange(ss, b, length);
 	break;
     case certificate_request:
@@ -8791,6 +8986,9 @@ ssl3_HandleHandshakeMessage(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 	    PORT_SetError(SSL_ERROR_RX_UNEXPECTED_CERT_REQUEST);
 	    return SECFailure;
 	}
+	rv = ssl3_MaybeHandlePendingCertificateMessage(ss);
+	if (rv != SECSuccess)
+	    break;
 	rv = ssl3_HandleCertificateRequest(ss, b, length);
 	break;
     case server_hello_done:
@@ -8804,6 +9002,9 @@ ssl3_HandleHandshakeMessage(sslSocket *ss, SSL3Opaque *b, PRUint32 length)
 	    PORT_SetError(SSL_ERROR_RX_UNEXPECTED_HELLO_DONE);
 	    return SECFailure;
 	}
+	rv = ssl3_MaybeHandlePendingCertificateMessage(ss);
+	if (rv != SECSuccess)
+	    break;
 	rv = ssl3_HandleServerHelloDone(ss);
 	break;
     case certificate_verify:
@@ -9628,6 +9829,10 @@ ssl3_DestroySSL3Info(sslSocket *ss)
 
     if (ss->ssl3.clientPrivateKey != NULL)
 	SECKEY_DestroyPrivateKey(ss->ssl3.clientPrivateKey);
+#ifdef NSS_PLATFORM_CLIENT_AUTH
+    if (ss->ssl3.platformClientKey)
+	ssl_FreePlatformKey(ss->ssl3.platformClientKey);    
+#endif /* NSS_PLATFORM_CLIENT_AUTH */
 
     if (ss->ssl3.peerCertArena != NULL)
 	ssl3_CleanupPeerCerts(ss);
@@ -9665,6 +9870,12 @@ ssl3_DestroySSL3Info(sslSocket *ss)
     }
     if (ss->ssl3.hs.origClientHello.data) {
 	SECITEM_FreeItem(&ss->ssl3.hs.origClientHello, PR_FALSE);
+    }
+    if (ss->ssl3.hs.pending_cert_msg.data) {
+	SECITEM_FreeItem(&ss->ssl3.hs.pending_cert_msg, PR_FALSE);
+    }
+    if (ss->ssl3.hs.cert_status.data) {
+	SECITEM_FreeItem(&ss->ssl3.hs.cert_status, PR_FALSE);
     }
 
     /* free the SSL3Buffer (msg_body) */

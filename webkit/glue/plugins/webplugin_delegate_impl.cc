@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/scoped_ptr.h"
-#include "base/stats_counters.h"
 #include "base/string_util.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
 #include "webkit/glue/plugins/plugin_constants_win.h"
@@ -33,8 +32,8 @@ WebPluginDelegateImpl* WebPluginDelegateImpl::Create(
     const FilePath& filename,
     const std::string& mime_type,
     gfx::PluginWindowHandle containing_view) {
-  scoped_refptr<NPAPI::PluginLib> plugin_lib =
-      NPAPI::PluginLib::CreatePluginLib(filename);
+  scoped_refptr<NPAPI::PluginLib> plugin_lib(
+      NPAPI::PluginLib::CreatePluginLib(filename));
   if (plugin_lib.get() == NULL)
     return NULL;
 
@@ -42,8 +41,8 @@ WebPluginDelegateImpl* WebPluginDelegateImpl::Create(
   if (err != NPERR_NO_ERROR)
     return NULL;
 
-  scoped_refptr<NPAPI::PluginInstance> instance =
-      plugin_lib->CreateInstance(mime_type);
+  scoped_refptr<NPAPI::PluginInstance> instance(
+      plugin_lib->CreateInstance(mime_type));
   return new WebPluginDelegateImpl(containing_view, instance.get());
 }
 
@@ -87,9 +86,9 @@ bool WebPluginDelegateImpl::Initialize(
     argc++;
   }
 
-  bool start_result = instance_->Start(
+  creation_succeeded_ = instance_->Start(
       url, argn.get(), argv.get(), argc, load_manually);
-  if (!start_result)
+  if (!creation_succeeded_)
     return false;
 
   windowless_ = instance_->windowless();
@@ -121,7 +120,8 @@ void WebPluginDelegateImpl::DestroyInstance() {
     instance_->CloseStreams();
 
     window_.window = NULL;
-    if (!(quirks_ & PLUGIN_QUIRK_DONT_SET_NULL_WINDOW_HANDLE_ON_DESTROY)) {
+    if (creation_succeeded_ &&
+        !(quirks_ & PLUGIN_QUIRK_DONT_SET_NULL_WINDOW_HANDLE_ON_DESTROY)) {
       instance_->NPP_SetWindow(&window_);
     }
 

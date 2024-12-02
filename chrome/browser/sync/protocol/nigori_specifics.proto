@@ -6,10 +6,8 @@
 
 syntax = "proto2";
 
-// TODO(akalin): Re-enable this once LITE_RUNTIME supports preserving
-// unknown fields.
-
-// option optimize_for = LITE_RUNTIME;
+option optimize_for = LITE_RUNTIME;
+option retain_unknown_fields = true;
 
 package sync_pb;
 
@@ -30,6 +28,9 @@ message NigoriKeyBag {
 // Properties of nigori sync object.
 message NigoriSpecifics {
   optional EncryptedData encrypted = 1;
+  // True if |encrypted| is encrypted using a passphrase
+  // explicitly set by the user.
+  optional bool using_explicit_passphrase = 2;
 }
 
 extend EntitySpecifics {

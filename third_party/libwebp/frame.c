@@ -31,13 +31,14 @@ int VP8InitFrame(VP8Decoder* const dec, VP8Io* io) {
   const int info_size = (mb_w + 1) * sizeof(VP8MB);
   const int yuv_size = YUV_SIZE * sizeof(*dec->yuv_b_);
   const int coeffs_size = 384 * sizeof(*dec->coeffs_);
-  const int cache_height = (dec->filter_type_ == 0) ? 0 :
-                           (16 + kFilterExtraRows[dec->filter_type_]) * 3 / 2;
+  const int cache_height = (16 + kFilterExtraRows[dec->filter_type_]) * 3 / 2;
   const int cache_size = top_size * cache_height;
   const int needed = intra_pred_mode_size
                    + top_size + info_size
                    + yuv_size + coeffs_size
                    + cache_size + ALIGN_MASK;
+  uint8_t* mem;
+
   if (needed > dec->mem_size_) {
     free(dec->mem_);
     dec->mem_size_ = 0;
@@ -48,7 +49,7 @@ int VP8InitFrame(VP8Decoder* const dec, VP8Io* io) {
     dec->mem_size_ = needed;
   }
 
-  uint8_t* mem = (uint8_t*)dec->mem_;
+  mem = (uint8_t*)dec->mem_;
   dec->intra_t_ = (uint8_t*)mem;
   mem += intra_pred_mode_size;
 
@@ -62,7 +63,7 @@ int VP8InitFrame(VP8Decoder* const dec, VP8Io* io) {
   dec->mb_info_ = ((VP8MB*)mem) + 1;
   mem += info_size;
 
-  mem = (uint8_t*)((uint64_t)(mem + ALIGN_MASK) & ~ALIGN_MASK);
+  mem = (uint8_t*)((uintptr_t)(mem + ALIGN_MASK) & ~ALIGN_MASK);
   assert((yuv_size & ALIGN_MASK) == 0);
   dec->yuv_b_ = (uint8_t*)mem;
   mem += yuv_size;
@@ -72,14 +73,10 @@ int VP8InitFrame(VP8Decoder* const dec, VP8Io* io) {
 
   dec->cache_y_stride_ = 16 * mb_w;
   dec->cache_uv_stride_ = 8 * mb_w;
-  if (dec->filter_type_ == 0) {
-    dec->cache_y_ = NULL;
-    dec->cache_u_ = NULL;
-    dec->cache_v_ = NULL;
-  } else {
+  {
     const int extra_rows = kFilterExtraRows[dec->filter_type_];
     const int extra_y = extra_rows * dec->cache_y_stride_;
-    const int extra_uv =(extra_rows / 2) * dec->cache_uv_stride_;
+    const int extra_uv = (extra_rows / 2) * dec->cache_uv_stride_;
     dec->cache_y_ = ((uint8_t*)mem) + extra_y;
     dec->cache_u_ = dec->cache_y_ + 16 * dec->cache_y_stride_ + extra_uv;
     dec->cache_v_ = dec->cache_u_ + 8 * dec->cache_uv_stride_ + extra_uv;
@@ -95,22 +92,13 @@ int VP8InitFrame(VP8Decoder* const dec, VP8Io* io) {
   // prepare 'io'
   io->width = dec->pic_hdr_.width_;
   io->height = dec->pic_hdr_.height_;
-  io->mb_x = 0;
   io->mb_y = 0;
-  if (dec->filter_type_ == 0) {
-    io->y = dec->yuv_b_ + Y_OFF;
-    io->u = dec->yuv_b_ + U_OFF;
-    io->v = dec->yuv_b_ + V_OFF;
-    io->y_stride = BPS;
-    io->uv_stride = BPS;
-  } else {
-    io->y = dec->cache_y_;
-    io->u = dec->cache_u_;
-    io->v = dec->cache_v_;
-    io->y_stride = dec->cache_y_stride_;
-    io->uv_stride = dec->cache_uv_stride_;
-    io->mb_w = io->width;
-  }
+  io->y = dec->cache_y_;
+  io->u = dec->cache_u_;
+  io->v = dec->cache_v_;
+  io->y_stride = dec->cache_y_stride_;
+  io->uv_stride = dec->cache_uv_stride_;
+  io->fancy_upscaling = 0;    // default
 
   // Init critical function pointers and look-up tables.
   VP8DspInitTables();
@@ -176,90 +164,97 @@ static void DoFilter(VP8Decoder* const dec, int mb_x, int mb_y) {
 }
 
 void VP8StoreBlock(VP8Decoder* const dec) {
-  VP8MB* const info = dec->mb_info_ + dec->mb_x_;
-  int level = dec->filter_levels_[dec->segment_];
-  if (dec->filter_hdr_.use_lf_delta_) {
-    // TODO(skal): only CURRENT is handled for now.
-    level += dec->filter_hdr_.ref_lf_delta_[0];
-    if (dec->is_i4x4_) {
-      level += dec->filter_hdr_.mode_lf_delta_[0];
+  if (dec->filter_type_ > 0) {
+    VP8MB* const info = dec->mb_info_ + dec->mb_x_;
+    int level = dec->filter_levels_[dec->segment_];
+    if (dec->filter_hdr_.use_lf_delta_) {
+      // TODO(skal): only CURRENT is handled for now.
+      level += dec->filter_hdr_.ref_lf_delta_[0];
+      if (dec->is_i4x4_) {
+        level += dec->filter_hdr_.mode_lf_delta_[0];
+      }
     }
-  }
-  level = (level < 0) ? 0 : (level > 63) ? 63 : level;
-  info->f_level_ = level;
+    level = (level < 0) ? 0 : (level > 63) ? 63 : level;
+    info->f_level_ = level;
 
-  if (dec->filter_hdr_.sharpness_ > 0) {
-    if (dec->filter_hdr_.sharpness_ > 4) {
-      level >>= 2;
-    } else {
-      level >>= 1;
+    if (dec->filter_hdr_.sharpness_ > 0) {
+      if (dec->filter_hdr_.sharpness_ > 4) {
+        level >>= 2;
+      } else {
+        level >>= 1;
+      }
+      if (level > 9 - dec->filter_hdr_.sharpness_) {
+        level = 9 - dec->filter_hdr_.sharpness_;
+      }
     }
-    if (level > 9 - dec->filter_hdr_.sharpness_) {
-      level = 9 - dec->filter_hdr_.sharpness_;
-    }
-  }
-  info->f_ilevel_ = (level < 1) ? 1 : level;
-  info->f_inner_ = (!info->skip_ || dec->is_i4x4_);
 
-  // Transfer samples to row cache
-  uint8_t* const ydst = dec->cache_y_ + dec->mb_x_ * 16;
-  uint8_t* const udst = dec->cache_u_ + dec->mb_x_ * 8;
-  uint8_t* const vdst = dec->cache_v_ + dec->mb_x_ * 8;
-  for (int y = 0; y < 16; ++y) {
-    memcpy(ydst + y * dec->cache_y_stride_,
-           dec->yuv_b_ + Y_OFF + y * BPS, 16);
+    info->f_ilevel_ = (level < 1) ? 1 : level;
+    info->f_inner_ = (!info->skip_ || dec->is_i4x4_);
   }
-  for (int y = 0; y < 8; ++y) {
-    memcpy(udst + y * dec->cache_uv_stride_,
+  {
+    // Transfer samples to row cache
+    int y;
+    uint8_t* const ydst = dec->cache_y_ + dec->mb_x_ * 16;
+    uint8_t* const udst = dec->cache_u_ + dec->mb_x_ * 8;
+    uint8_t* const vdst = dec->cache_v_ + dec->mb_x_ * 8;
+    for (y = 0; y < 16; ++y) {
+      memcpy(ydst + y * dec->cache_y_stride_,
+             dec->yuv_b_ + Y_OFF + y * BPS, 16);
+    }
+    for (y = 0; y < 8; ++y) {
+      memcpy(udst + y * dec->cache_uv_stride_,
            dec->yuv_b_ + U_OFF + y * BPS, 8);
-    memcpy(vdst + y * dec->cache_uv_stride_,
+      memcpy(vdst + y * dec->cache_uv_stride_,
            dec->yuv_b_ + V_OFF + y * BPS, 8);
+    }
   }
 }
 
-void VP8FilterRow(VP8Decoder* const dec, VP8Io* io) {
-  for (int mb_x = 0; mb_x < dec->mb_w_; ++mb_x) {
-    DoFilter(dec, mb_x, dec->mb_y_);
-  }
+void VP8FinishRow(VP8Decoder* const dec, VP8Io* io) {
   const int extra_y_rows = kFilterExtraRows[dec->filter_type_];
   const int ysize = extra_y_rows * dec->cache_y_stride_;
   const int uvsize = (extra_y_rows / 2) * dec->cache_uv_stride_;
+  const int first_row = (dec->mb_y_ == 0);
+  const int last_row = (dec->mb_y_ >= dec->mb_h_ - 1);
   uint8_t* const ydst = dec->cache_y_ - ysize;
   uint8_t* const udst = dec->cache_u_ - uvsize;
   uint8_t* const vdst = dec->cache_v_ - uvsize;
+  if (dec->filter_type_ > 0) {
+    int mb_x;
+    for (mb_x = 0; mb_x < dec->mb_w_; ++mb_x) {
+      DoFilter(dec, mb_x, dec->mb_y_);
+    }
+  }
   if (io->put) {
-    int y_end;
-    if (dec->mb_y_ > 0) {
-      io->mb_y = dec->mb_y_ * 16 - extra_y_rows;
+    int y_start = dec->mb_y_ * 16;
+    int y_end = y_start + 16;
+    if (!first_row) {
+      y_start -= extra_y_rows;
       io->y = ydst;
       io->u = udst;
       io->v = vdst;
-      if (dec->mb_y_ < dec->mb_h_ - 1) {
-        y_end = io->mb_y + 16;
-      } else {
-        y_end = io->height;   // last macroblock row.
-      }
-    } else {   // first macroblock row.
-      io->mb_y = 0;
-      y_end = 16 - extra_y_rows;
+    } else {
       io->y = dec->cache_y_;
       io->u = dec->cache_u_;
       io->v = dec->cache_v_;
     }
+    if (!last_row) {
+      y_end -= extra_y_rows;
+    }
     if (y_end > io->height) {
       y_end = io->height;
     }
-    io->mb_h = y_end - io->mb_y;
+    io->mb_y = y_start;
+    io->mb_h = y_end - y_start;
     io->put(io);
   }
-  // rotate top samples
-  if (dec->mb_y_ < dec->mb_h_ - 1) {
+    // rotate top samples
+  if (!last_row) {
     memcpy(ydst, ydst + 16 * dec->cache_y_stride_, ysize);
     memcpy(udst, udst + 8 * dec->cache_uv_stride_, uvsize);
     memcpy(vdst, vdst + 8 * dec->cache_uv_stride_, uvsize);
   }
 }
-
 
 //-----------------------------------------------------------------------------
 // Main reconstruction function.
@@ -294,18 +289,20 @@ void VP8ReconstructBlock(VP8Decoder* const dec) {
   // Rotate in the left samples from previously decoded block. We move four
   // pixels at a time for alignment reason, and because of in-loop filter.
   if (dec->mb_x_ > 0) {
-    for (int j = -1; j < 16; ++j) {
+    int j;
+    for (j = -1; j < 16; ++j) {
       Copy32b(&y_dst[j * BPS - 4], &y_dst[j * BPS + 12]);
     }
-    for (int j = -1; j < 8; ++j) {
+    for (j = -1; j < 8; ++j) {
       Copy32b(&u_dst[j * BPS - 4], &u_dst[j * BPS + 4]);
       Copy32b(&v_dst[j * BPS - 4], &v_dst[j * BPS + 4]);
     }
   } else {
-    for (int j = 0; j < 16; ++j) {
+    int j;
+    for (j = 0; j < 16; ++j) {
       y_dst[j * BPS - 1] = 129;
     }
-    for (int j = 0; j < 8; ++j) {
+    for (j = 0; j < 8; ++j) {
       u_dst[j * BPS - 1] = 129;
       v_dst[j * BPS - 1] = 129;
     }
@@ -314,89 +311,95 @@ void VP8ReconstructBlock(VP8Decoder* const dec) {
       y_dst[-1 - BPS] = u_dst[-1 - BPS] = v_dst[-1 - BPS] = 129;
     }
   }
+  {
+    // bring top samples into the cache
+    uint8_t* const top_y = dec->y_t_ + dec->mb_x_ * 16;
+    uint8_t* const top_u = dec->u_t_ + dec->mb_x_ * 8;
+    uint8_t* const top_v = dec->v_t_ + dec->mb_x_ * 8;
+    const int16_t* coeffs = dec->coeffs_;
+    int n;
 
-  // bring top samples into the cache
-  uint8_t* const top_y = dec->y_t_ + dec->mb_x_ * 16;
-  uint8_t* const top_u = dec->u_t_ + dec->mb_x_ * 8;
-  uint8_t* const top_v = dec->v_t_ + dec->mb_x_ * 8;
-  if (dec->mb_y_ > 0) {
-    memcpy(y_dst - BPS, top_y, 16);
-    memcpy(u_dst - BPS, top_u, 8);
-    memcpy(v_dst - BPS, top_v, 8);
-  } else if (dec->mb_x_ == 0) {
-    // we only need to do this init once at block (0,0).
-    // Afterward, it remains valid for the whole topmost row.
-    memset(y_dst - BPS - 1, 127, 16 + 4 + 1);
-    memset(u_dst - BPS - 1, 127, 8 + 1);
-    memset(v_dst - BPS - 1, 127, 8 + 1);
-  }
-
-  // predict and add residuals
-  const int16_t* coeffs = dec->coeffs_;
-  if (dec->is_i4x4_) {   // 4x4
-    uint32_t* const top_right = (uint32_t*)(y_dst - BPS + 16);
     if (dec->mb_y_ > 0) {
-      if (dec->mb_x_ >= dec->mb_w_ - 1) {    // on rightmost border
-        top_right[0] = top_y[15] * 0x01010101u;
-      } else {
-        memcpy(top_right, top_y + 16, sizeof(*top_right));
-      }
+      memcpy(y_dst - BPS, top_y, 16);
+      memcpy(u_dst - BPS, top_u, 8);
+      memcpy(v_dst - BPS, top_v, 8);
+    } else if (dec->mb_x_ == 0) {
+      // we only need to do this init once at block (0,0).
+      // Afterward, it remains valid for the whole topmost row.
+      memset(y_dst - BPS - 1, 127, 16 + 4 + 1);
+      memset(u_dst - BPS - 1, 127, 8 + 1);
+      memset(v_dst - BPS - 1, 127, 8 + 1);
     }
-    // replicate the top-right pixels below
-    top_right[BPS] = top_right[2 * BPS] = top_right[3 * BPS] = top_right[0];
 
-    // predict and add residues for all 4x4 blocks in turn.
-    for (int n = 0; n < 16; n++) {
-      uint8_t* const dst = y_dst + kScan[n];
-      VP8PredLuma4[dec->imodes_[n]](dst);
-      if (dec->non_zero_ & (1 << n)) {
-        VP8Transform(coeffs + n * 16, dst);
-      } else if (dec->non_zero_ & (1 << n)) {  // only DC is present
-        VP8TransformDC(coeffs + n * 16, dst);
+    // predict and add residuals
+
+    if (dec->is_i4x4_) {   // 4x4
+      uint32_t* const top_right = (uint32_t*)(y_dst - BPS + 16);
+
+      if (dec->mb_y_ > 0) {
+        if (dec->mb_x_ >= dec->mb_w_ - 1) {    // on rightmost border
+          top_right[0] = top_y[15] * 0x01010101u;
+        } else {
+          memcpy(top_right, top_y + 16, sizeof(*top_right));
+        }
       }
-    }
-  } else {    // 16x16
-    const int pred_func = CheckMode(dec, dec->imodes_[0]);
-    VP8PredLuma16[pred_func](y_dst);
-    if (dec->non_zero_) {
-      for (int n = 0; n < 16; n++) {
+      // replicate the top-right pixels below
+      top_right[BPS] = top_right[2 * BPS] = top_right[3 * BPS] = top_right[0];
+
+      // predict and add residues for all 4x4 blocks in turn.
+      for (n = 0; n < 16; n++) {
         uint8_t* const dst = y_dst + kScan[n];
-        if (dec->non_zero_ac_ & (1 << n)) {
+        VP8PredLuma4[dec->imodes_[n]](dst);
+        if (dec->non_zero_ & (1 << n)) {
           VP8Transform(coeffs + n * 16, dst);
         } else if (dec->non_zero_ & (1 << n)) {  // only DC is present
           VP8TransformDC(coeffs + n * 16, dst);
         }
       }
+    } else {    // 16x16
+      const int pred_func = CheckMode(dec, dec->imodes_[0]);
+      VP8PredLuma16[pred_func](y_dst);
+      if (dec->non_zero_) {
+        for (n = 0; n < 16; n++) {
+          uint8_t* const dst = y_dst + kScan[n];
+          if (dec->non_zero_ac_ & (1 << n)) {
+            VP8Transform(coeffs + n * 16, dst);
+          } else if (dec->non_zero_ & (1 << n)) {  // only DC is present
+            VP8TransformDC(coeffs + n * 16, dst);
+          }
+        }
+      }
     }
-  }
+    {
+      // Chroma
+      const int pred_func = CheckMode(dec, dec->uvmode_);
+      VP8PredChroma8[pred_func](u_dst);
+      VP8PredChroma8[pred_func](v_dst);
 
-  // Chroma
-  const int pred_func = CheckMode(dec, dec->uvmode_);
-  VP8PredChroma8[pred_func](u_dst);
-  VP8PredChroma8[pred_func](v_dst);
+      if (dec->non_zero_ & 0x0f0000) {   // chroma-U
+        const int16_t* const u_coeffs = dec->coeffs_ + 16 * 16;
+        if (dec->non_zero_ac_ & 0x0f0000) {
+          VP8TransformUV(u_coeffs, u_dst);
+        } else {
+          VP8TransformDCUV(u_coeffs, u_dst);
+        }
+      }
+      if (dec->non_zero_ & 0xf00000) {   // chroma-V
+        const int16_t* const v_coeffs = dec->coeffs_ + 20 * 16;
+        if (dec->non_zero_ac_ & 0xf00000) {
+          VP8TransformUV(v_coeffs, v_dst);
+        } else {
+          VP8TransformDCUV(v_coeffs, v_dst);
+        }
+      }
 
-  if (dec->non_zero_ & 0x0f0000) {   // chroma-U
-    const int16_t* const u_coeffs = dec->coeffs_ + 16 * 16;
-    if (dec->non_zero_ac_ & 0x0f0000) {
-      VP8TransformUV(u_coeffs, u_dst);
-    } else {
-      VP8TransformDCUV(u_coeffs, u_dst);
+      // stash away top samples for next block
+      if (dec->mb_y_ < dec->mb_h_ - 1) {
+        memcpy(top_y, y_dst + 15 * BPS, 16);
+        memcpy(top_u, u_dst +  7 * BPS,  8);
+        memcpy(top_v, v_dst +  7 * BPS,  8);
+      }
     }
-  }
-  if (dec->non_zero_ & 0xf00000) {   // chroma-V
-    const int16_t* const v_coeffs = dec->coeffs_ + 20 * 16;
-    if (dec->non_zero_ac_ & 0xf00000) {
-      VP8TransformUV(v_coeffs, v_dst);
-    } else {
-      VP8TransformDCUV(v_coeffs, v_dst);
-    }
-  }
-
-  // stash away top samples for next block
-  if (dec->mb_y_ < dec->mb_h_ - 1) {
-    memcpy(top_y, y_dst + 15 * BPS, 16);
-    memcpy(top_u, u_dst +  7 * BPS,  8);
-    memcpy(top_v, v_dst +  7 * BPS,  8);
   }
 }
 

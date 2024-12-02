@@ -56,6 +56,17 @@ class TestingProfile : public Profile {
   // for testing error conditions.
   void CreateHistoryService(bool delete_file, bool no_db);
 
+  // Shuts down and nulls out the reference to HistoryService.
+  void DestroyHistoryService();
+
+  // Creates TopSites. This returns immediately, and top sites may not be
+  // loaded. Use BlockUntilTopSitesLoaded to ensure TopSites has finished
+  // loading.
+  void CreateTopSites();
+
+  // Shuts down and nulls out the reference to TopSites.
+  void DestroyTopSites();
+
   // Creates the BookmkarBarModel. If not invoked the bookmark bar model is
   // NULL. If |delete_file| is true, the bookmarks file is deleted first, then
   // the model is created. As TestingProfile deletes the directory containing
@@ -80,6 +91,10 @@ class TestingProfile : public Profile {
   // CreateBookmarkModel.
   void BlockUntilBookmarkModelLoaded();
 
+  // Blocks until TopSites finishes loading.
+  void BlockUntilTopSitesLoaded();
+
+  // Creates a TemplateURLModel. If not invoked the TemplateURLModel is NULL.
   // Creates a TemplateURLFetcher. If not invoked, the TemplateURLFetcher is
   // NULL.
   void CreateTemplateURLFetcher();
@@ -132,6 +147,7 @@ class TestingProfile : public Profile {
   }
   virtual ExtensionProcessManager* GetExtensionProcessManager() { return NULL; }
   virtual ExtensionMessageService* GetExtensionMessageService() { return NULL; }
+  virtual ExtensionEventRouter* GetExtensionEventRouter() { return NULL; }
   virtual SSLHostState* GetSSLHostState() { return NULL; }
   virtual net::TransportSecurityState* GetTransportSecurityState() {
     return NULL;
@@ -164,9 +180,10 @@ class TestingProfile : public Profile {
   virtual PasswordStore* GetPasswordStore(ServiceAccessType access) {
     return NULL;
   }
-  // Initialized the profile's PrefService with an explicity specified
-  // PrefService. Must be called before the TestingProfile.
-  // The profile takes ownership of |pref|.
+  // Sets the profile's PrefService. If a pref service hasn't been explicitly
+  // set GetPrefs creates one, so normally you need not invoke this. If you need
+  // to set a pref service you must invoke this before GetPrefs.
+  // TestingPrefService takes ownership of |prefs|.
   void SetPrefService(PrefService* prefs);
   virtual PrefService* GetPrefs();
   virtual TemplateURLModel* GetTemplateURLModel() {
@@ -176,15 +193,19 @@ class TestingProfile : public Profile {
     return template_url_fetcher_.get();
   }
   virtual history::TopSites* GetTopSites();
+  virtual history::TopSites* GetTopSitesWithoutCreating() {
+    return top_sites_.get();
+  }
   virtual DownloadManager* GetDownloadManager() { return NULL; }
   virtual PersonalDataManager* GetPersonalDataManager() { return NULL; }
-  virtual FileSystemHostContext* GetFileSystemHostContext() { return NULL; }
+  virtual BrowserFileSystemContext* GetFileSystemContext() { return NULL; }
+  virtual BrowserSignin* GetBrowserSignin() { return NULL; }
   virtual bool HasCreatedDownloadManager() const { return false; }
   virtual void InitThemes();
-  virtual void SetTheme(Extension* extension) {}
+  virtual void SetTheme(const Extension* extension) {}
   virtual void SetNativeTheme() {}
   virtual void ClearTheme() {}
-  virtual Extension* GetTheme() { return NULL; }
+  virtual const Extension* GetTheme() { return NULL; }
   virtual BrowserThemeProvider* GetThemeProvider() {
     InitThemes();
     return theme_provider_.get();
@@ -220,6 +241,9 @@ class TestingProfile : public Profile {
   virtual bool HasSessionService() const {
     return (session_service_.get() != NULL);
   }
+  virtual bool HasProfileSyncService() const {
+    return (profile_sync_service_.get() != NULL);
+  }
   virtual std::wstring GetName() { return std::wstring(); }
   virtual void SetName(const std::wstring& name) {}
   virtual std::wstring GetID() { return id_; }
@@ -251,7 +275,7 @@ class TestingProfile : public Profile {
   virtual NTPResourceCache* GetNTPResourceCache();
 
   virtual DesktopNotificationService* GetDesktopNotificationService();
-  virtual BackgroundContentsService* GetBackgroundContentsService() {
+  virtual BackgroundContentsService* GetBackgroundContentsService() const {
     return NULL;
   }
   virtual StatusTray* GetStatusTray() {
@@ -270,6 +294,8 @@ class TestingProfile : public Profile {
   }
 #endif  // defined(OS_CHROMEOS)
 
+  virtual PrefProxyConfigTracker* GetProxyConfigTracker();
+
   // Schedules a task on the history backend and runs a nested loop until the
   // task is processed.  This has the effect of blocking the caller until the
   // history service processes all pending requests.
@@ -283,6 +309,8 @@ class TestingProfile : public Profile {
   virtual CloudPrintProxyService* GetCloudPrintProxyService() { return NULL; }
   virtual ChromeBlobStorageContext* GetBlobStorageContext() { return NULL; }
   virtual ExtensionInfoMap* GetExtensionInfoMap() { return NULL; }
+  virtual PromoCounter* GetInstantPromoCounter() { return NULL; }
+  virtual policy::ProfilePolicyContext* GetPolicyContext() { return NULL; }
 
  protected:
   base::Time start_time_;
@@ -293,10 +321,6 @@ class TestingProfile : public Profile {
  private:
   // Destroys favicon service if it has been created.
   void DestroyFaviconService();
-
-  // If the history service has been created, it is destroyed. This is invoked
-  // from the destructor.
-  void DestroyHistoryService();
 
   // If the webdata service has been created, it is destroyed.  This is invoked
   // from the destructor.
@@ -381,6 +405,9 @@ class TestingProfile : public Profile {
   // For properly notifying the ExtensionsService when the profile
   // is disposed.
   scoped_refptr<ExtensionsService> extensions_service_;
+
+  // The proxy prefs tracker.
+  scoped_refptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
 
   // We use a temporary directory to store testing profile data.
   ScopedTempDir temp_dir_;

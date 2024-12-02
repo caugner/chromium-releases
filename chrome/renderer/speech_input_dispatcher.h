@@ -6,6 +6,7 @@
 #define CHROME_RENDERER_SPEECH_INPUT_DISPATCHER_H_
 
 #include "base/basictypes.h"
+#include "chrome/common/speech_input_result.h"
 #include "ipc/ipc_message.h"
 #include "third_party/WebKit/WebKit/chromium/public/WebSpeechInputController.h"
 
@@ -13,8 +14,9 @@ class GURL;
 class RenderView;
 
 namespace WebKit {
-struct WebRect;
 class WebSpeechInputListener;
+class WebString;
+struct WebRect;
 }
 
 // SpeechInputDispatcher is a delegate for speech input messages used by WebKit.
@@ -29,12 +31,17 @@ class SpeechInputDispatcher : public WebKit::WebSpeechInputController {
   bool OnMessageReceived(const IPC::Message& msg);
 
   // WebKit::WebSpeechInputController.
-  bool startRecognition(int request_id, const WebKit::WebRect& element_rect);
+  bool startRecognition(int request_id,
+                        const WebKit::WebRect& element_rect,
+                        const WebKit::WebString& language,
+                        const WebKit::WebString& grammar);
+
   void cancelRecognition(int request_id);
   void stopRecording(int request_id);
 
  private:
-  void OnSpeechRecognitionResult(int request_id, const string16& result);
+  void OnSpeechRecognitionResult(
+      int request_id, const speech_input::SpeechInputResultArray& result);
   void OnSpeechRecordingComplete(int request_id);
   void OnSpeechRecognitionComplete(int request_id);
 

@@ -10,7 +10,6 @@
 
 #include "base/basictypes.h"
 #include "base/platform_thread.h"
-#include "base/scoped_bstr_win.h"
 #include "base/time.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome_frame/test/chrome_frame_test_utils.h"
@@ -92,10 +91,29 @@ ACTION_P(AccDoDefaultAction, matcher) {
   }
 }
 
+ACTION_P2(DelayAccDoDefaultAction, matcher, delay) {
+  SleepEx(delay, false);
+  scoped_refptr<AccObject> object;
+  if (FindAccObjectInWindow(arg0, matcher, &object)) {
+    EXPECT_TRUE(object->DoDefaultAction());
+  }
+}
+
 ACTION_P(AccLeftClick, matcher) {
   scoped_refptr<AccObject> object;
   if (FindAccObjectInWindow(arg0, matcher, &object)) {
     EXPECT_TRUE(object->LeftClick());
+  }
+}
+
+ACTION_P(AccSendCommand, matcher) {
+  scoped_refptr<AccObject> object;
+  if (FindAccObjectInWindow(arg0, matcher, &object)) {
+    HWND window = NULL;
+    object->GetWindow(&window);
+    long window_id = GetWindowLong(window, GWL_ID);
+    ::SendMessage(arg0, WM_COMMAND, MAKEWPARAM(window_id, BN_CLICKED),
+                  reinterpret_cast<LPARAM>(window));
   }
 }
 
@@ -170,6 +188,7 @@ ACTION_P2(AccSendCharMessage, matcher, character_code) {
     ::SendMessage(window, WM_CHAR, character_code, 0);
   }
 }
+
 // Various other actions
 
 ACTION(OpenContextMenuAsync) {
@@ -199,8 +218,8 @@ ACTION_P2(PostCharMessagesToRenderer, mock, character_codes) {
     ::PostMessage(window, WM_CHAR, codes[i], 0);
 }
 
-ACTION_P2(WatchWindow, mock, window_class) {
-  mock->WatchWindow(window_class);
+ACTION_P3(WatchWindow, mock, caption, window_class) {
+  mock->WatchWindow(caption, window_class);
 }
 
 ACTION_P(StopWindowWatching, mock) {
@@ -224,7 +243,7 @@ ACTION_P2(WatchRendererProcess, mock_observer, mock) {
 namespace { // NOLINT
 
 void DoCloseWindowNow(HWND hwnd) {
-  ::PostMessage(hwnd, WM_SYSCOMMAND, SC_CLOSE, 0);
+  ::PostMessage(hwnd, WM_CLOSE, 0, 0);
 }
 
 }  // namespace
@@ -283,13 +302,11 @@ ACTION_P5(ValidateWindowSize, mock, left, top, width, height) {
   web_browser2->get_Width(reinterpret_cast<long*>(&actual_width));  // NOLINT
   web_browser2->get_Height(reinterpret_cast<long*>(&actual_height));  // NOLINT
 
-  EXPECT_EQ(actual_left, left);
-  EXPECT_EQ(actual_top, top);
+  EXPECT_GE(actual_left, left);
+  EXPECT_GE(actual_top, top);
 
-  EXPECT_LE(actual_width, width + 20);
-  EXPECT_GT(actual_width, width - 20);
-  EXPECT_LE(actual_height, height + 100);
-  EXPECT_GT(actual_height, height - 100);
+  EXPECT_GE(actual_width, width);
+  EXPECT_GE(actual_height, height);
 }
 
 ACTION_P(VerifyAddressBarUrlWithGcf, mock) {
@@ -314,6 +331,17 @@ ACTION_P3(CloseWhenFileSaved, mock, file, timeout_ms) {
     }
   }
   mock->event_sink()->CloseWebBrowser();
+}
+
+ACTION_P2(WaitForFileSave, file, timeout_ms) {
+  base::Time start = base::Time::Now();
+  while (!file_util::PathExists(file)) {
+    PlatformThread::Sleep(200);
+    if ((base::Time::Now() - start).InMilliseconds() > timeout_ms) {
+      ADD_FAILURE() << "File was not saved within timeout";
+      break;
+    }
+  }
 }
 
 // Flaky actions

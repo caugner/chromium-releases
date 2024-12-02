@@ -32,7 +32,7 @@ class WorkerDocumentSet : public base::RefCounted<WorkerDocumentSet> {
 
     // Define operator "<", which is used to determine uniqueness within
     // the set.
-    bool operator <(DocumentInfo other) const {
+    bool operator <(const DocumentInfo& other) const {
       // Items are identical if the sender and document_id are identical,
       // otherwise create an arbitrary stable ordering based on the document
       // id/sender.
@@ -80,6 +80,9 @@ class WorkerDocumentSet : public base::RefCounted<WorkerDocumentSet> {
   const DocumentInfoSet& documents() { return document_set_; }
 
  private:
+  friend class base::RefCounted<WorkerDocumentSet>;
+  virtual ~WorkerDocumentSet();
+
   DocumentInfoSet document_set_;
 };
 

@@ -28,6 +28,11 @@ If you want the extension's icon to always be visible,
 use a <a href="browserAction.html">browser action</a> instead.
 </p>
 
+<p class="caution">
+<strong>Note:</strong>
+Packaged apps cannot use page actions.
+</p>
+
 
 <h2 id="manifest">Manifest</h2>
 
@@ -90,15 +95,6 @@ follow these guidelines:</p>
     for features that make sense
     for most pages.
     Use <a href="browserAction.html">browser actions</a> instead.
-  <li><b>Do</b> use icons
-    that are slightly lighter weight
-    than <a href="browserAction.html#icon">browser action icons</a>.
-    Most icons that Chrome displays
-    in the location bar
-    are smaller than 19 pixels.
-    If the edge pixels are used,
-    they are usually only used
-    for a faint shadow.
   <li><b>Don't</b> constantly animate your icon.
     That's just annoying.
 </ul>

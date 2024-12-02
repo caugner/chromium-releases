@@ -13,6 +13,7 @@
 #include "base/ref_counted.h"
 #include "base/stl_util-inl.h"
 #include "base/thread.h"
+#include "base/thread_local.h"
 #include "base/time.h"
 
 namespace remoting {
@@ -46,19 +47,19 @@ class OutputLogger {
   }
 
   void LogOneTrace(TraceBuffer* buffer) {
-    LOG(INFO) << "Trace: " << buffer->name();
+    VLOG(1) << "Trace: " << buffer->name();
     base::Time last_timestamp;
     for (int i = 0; i < buffer->record_size(); ++i) {
       const TraceRecord& record = buffer->record(i);
       base::Time timestamp = base::Time::FromInternalValue(record.timestamp());
       if (i == 0) {
-        LOG(INFO) << "  TS: " << record.timestamp()
-                  << " msg: " << record.annotation();
+        VLOG(1) << "  TS: " << record.timestamp()
+                << " msg: " << record.annotation();
       } else {
         base::TimeDelta delta = timestamp - last_timestamp;
-        LOG(INFO) << "  TS: " << record.timestamp()
-                  << " msg: " << record.annotation()
-                  << " [ " << delta.InMilliseconds() << "ms ]";
+        VLOG(1) << "  TS: " << record.timestamp()
+                << " msg: " << record.annotation()
+                << " [ " << delta.InMilliseconds() << "ms ]";
       }
       last_timestamp = timestamp;
     }
@@ -138,6 +139,46 @@ Tracer::~Tracer() {
     Singleton<OutputLogger>::get()->OutputTrace(buffer_.release());
   }
 }
+
+// static
+Tracer* TraceContext::tracer() {
+  return Get()->GetTracerInternal();
+}
+
+// static
+void TraceContext::PushTracer(Tracer* tracer) {
+  Get()->PushTracerInternal(tracer);
+}
+
+// static
+void TraceContext::PopTracer() {
+  Get()->PopTracerInternal();
+}
+
+// static
+TraceContext* TraceContext::Get() {
+  TraceContext* context =
+      Singleton<base::ThreadLocalPointer<TraceContext> >::get()->Get();
+  if (context == NULL) {
+    context = new TraceContext();
+    context->PushTracerInternal(new Tracer("default", 0.0));
+    Singleton<base::ThreadLocalPointer<TraceContext> >::get()->Set(context);
+  }
+  return context;
+}
+
+TraceContext::TraceContext() {}
+
+TraceContext::~TraceContext() {}
+
+void TraceContext::PushTracerInternal(Tracer* tracer) {
+  tracers_.push_back(make_scoped_refptr(tracer));
+}
+
+void TraceContext::PopTracerInternal() { tracers_.pop_back(); }
+
+Tracer* TraceContext::GetTracerInternal() { return tracers_.back(); }
+
 
 }  // namespace remoting
 

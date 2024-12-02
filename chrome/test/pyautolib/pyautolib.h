@@ -10,7 +10,7 @@
 #pragma once
 
 #include "base/message_loop.h"
-#include "base/scoped_nsautorelease_pool.h"
+#include "base/mac/scoped_nsautorelease_pool.h"
 #include "chrome/test/ui/ui_test.h"
 #include "chrome/test/ui/ui_test_suite.h"
 
@@ -30,7 +30,7 @@ class PyUITestSuiteBase : public UITestSuite {
   void Initialize(const FilePath& browser_dir);
 
  private:
-  base::ScopedNSAutoreleasePool pool_;
+  base::mac::ScopedNSAutoreleasePool pool_;
 };
 
 // The primary class that interfaces with Automation Proxy.
@@ -58,6 +58,10 @@ class PyUITestBase : public UITestBase {
   // Blocks until page loaded.
   void NavigateToURL(const char* url_string, int window_index, int tab_index);
 
+  // Reloads the active tab in the given window.
+  // Blocks until page reloaded.
+  void ReloadActiveTab(int window_index = 0);
+
   // Get the URL of the active tab.
   GURL GetActiveTabURL(int window_index = 0);
 
@@ -72,7 +76,7 @@ class PyUITestBase : public UITestBase {
 
   // Apply the accelerator with given id (IDC_BACK, IDC_NEWTAB ...) to the
   // browser window at the given or first index.
-  // The list can be found at chrome/app/chrome_dll_resource.h
+  // The list can be found at chrome/app/chrome_command_ids.h
   // Returns true if the call was successful.
   bool ApplyAccelerator(int id, int window_index = 0);
 

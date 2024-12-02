@@ -5,13 +5,15 @@
 #include "chrome/browser/autofill/autofill_ie_toolbar_import_win.h"
 
 #include "base/basictypes.h"
-#include "base/registry.h"
 #include "base/string16.h"
+#include "base/win/registry.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/credit_card.h"
 #include "chrome/browser/autofill/field_types.h"
 #include "chrome/browser/sync/util/data_encryption.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using base::win::RegKey;
 
 // Defined in autofill_ie_toolbar_import_win.cc. Not exposed in the header file.
 bool ImportCurrentUserProfiles(std::vector<AutoFillProfile>* profiles,
@@ -58,11 +60,11 @@ ValueDescription profile2[] = {
 
 ValueDescription credit_card[] = {
   { L"credit_card_name", L"Tommy Gun" },
-  // "12345790087665675" encrypted:
-  { L"credit_card_number", L"\x18B7\xE586\x459B\x7457\xA066\x3842\x71DA"
-                           L"\x4854\xB906\x9C7C\x50A6\x4376\xFD9D\x1E02"
-                           L"\x790A\x7330\xB77B\xAF32\x93EB\xB84F\xEC8F"
-                           L"\x265B\xD0E1\x4E27\xB758\x7985\xB92F" },
+  // "4111111111111111" encrypted:
+  { L"credit_card_number", L"\xE53F\x19AB\xC1BF\xC9EB\xECCC\x9BDA\x8515"
+                           L"\xE14D\x6852\x80A8\x50A3\x4375\xFD9F\x1E07"
+                           L"\x790E\x7336\xB773\xAF33\x93EA\xB846\xEC89"
+                           L"\x265C\xD0E6\x4E23\xB75F\x7983" },
   { L"credit_card_exp_month", L"11" },
   { L"credit_card_exp_4_digit_year", L"2011" },
 };
@@ -196,13 +198,12 @@ TEST_F(AutofillIeToolbarImportTest, TestAutoFillImport) {
             L"5556666");
   EXPECT_EQ(profiles[0].GetFieldText(AutoFillType(PHONE_FAX_WHOLE_NUMBER)),
             L"27775556666");
-#if defined(GOOGLE_CHROME_BUILD)
-  // We have the ability to export credit cards only in chrome build.
+
   ASSERT_EQ(credit_cards.size(), 1);
   EXPECT_EQ(credit_cards[0].GetFieldText(AutoFillType(CREDIT_CARD_NAME)),
             credit_card[0].value);
   EXPECT_EQ(credit_cards[0].GetFieldText(AutoFillType(CREDIT_CARD_NUMBER)),
-            L"12345790087665675");
+            L"4111111111111111");
   EXPECT_EQ(credit_cards[0].GetFieldText(AutoFillType(CREDIT_CARD_EXP_MONTH)),
             credit_card[2].value);
   EXPECT_EQ(credit_cards[0].GetFieldText(
@@ -223,9 +224,5 @@ TEST_F(AutofillIeToolbarImportTest, TestAutoFillImport) {
   EXPECT_EQ(profiles.size(), 2);
   // Credit cards are.
   EXPECT_EQ(credit_cards.size(), 0);
-#else  // defined(GOOGLE_CHROME_BUILD)
-  // Cannot decrypt CC in non-chrome build.
-  EXPECT_EQ(credit_cards.size(), 0);
-#endif  // defined(GOOGLE_CHROME_BUILD)
 }
 

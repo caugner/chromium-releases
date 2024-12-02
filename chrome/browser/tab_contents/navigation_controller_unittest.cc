@@ -1374,8 +1374,7 @@ TEST_F(NavigationControllerTest, Interstitial) {
   // Now navigate somewhere with an interstitial.
   const GURL url2("http://bar");
   controller().LoadURL(url1, GURL(), PageTransition::TYPED);
-  controller().pending_entry()->set_page_type(
-      NavigationEntry::INTERSTITIAL_PAGE);
+  controller().pending_entry()->set_page_type(INTERSTITIAL_PAGE);
 
   // At this point the interstitial will be displayed and the load will still
   // be pending. If the user continues, the load will commit.
@@ -1383,8 +1382,7 @@ TEST_F(NavigationControllerTest, Interstitial) {
 
   // The page should be a normal page again.
   EXPECT_EQ(url2, controller().GetLastCommittedEntry()->url());
-  EXPECT_EQ(NavigationEntry::NORMAL_PAGE,
-            controller().GetLastCommittedEntry()->page_type());
+  EXPECT_EQ(NORMAL_PAGE, controller().GetLastCommittedEntry()->page_type());
 }
 
 TEST_F(NavigationControllerTest, RemoveEntry) {
@@ -1674,7 +1672,7 @@ TEST_F(NavigationControllerTest, CloneOmitsInterstitials) {
 
   // Add an interstitial entry.  Should be deleted with controller.
   NavigationEntry* interstitial_entry = new NavigationEntry();
-  interstitial_entry->set_page_type(NavigationEntry::INTERSTITIAL_PAGE);
+  interstitial_entry->set_page_type(INTERSTITIAL_PAGE);
   controller().AddTransientEntry(interstitial_entry);
 
   scoped_ptr<TabContents> clone(controller().tab_contents()->Clone());
@@ -1742,9 +1740,9 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune) {
   EXPECT_EQ(url3, other_controller.GetEntryAtIndex(2)->url());
 
   // The session id of the new tab should be that of the old, and the old should
-  // be set to 0.
+  // get a new id.
   EXPECT_EQ(id.id(), other_controller.session_id().id());
-  EXPECT_EQ(0, controller().session_id().id());
+  EXPECT_NE(id.id(), controller().session_id().id());
 }
 
 // Test CopyStateFromAndPrune with 2 urls, the first selected and nothing in
@@ -1772,9 +1770,9 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune2) {
   EXPECT_EQ(url1, other_controller.GetEntryAtIndex(0)->url());
 
   // The session id of the new tab should be that of the old, and the old should
-  // be set to 0.
+  // get a new id.
   EXPECT_EQ(id.id(), other_controller.session_id().id());
-  EXPECT_EQ(0, controller().session_id().id());
+  EXPECT_NE(id.id(), controller().session_id().id());
 }
 
 // Test CopyStateFromAndPrune with 2 urls, the first selected and nothing in
@@ -1809,9 +1807,9 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune3) {
   EXPECT_EQ(url3, other_controller.pending_entry()->url());
 
   // The session id of the new tab should be that of the old, and the old should
-  // be set to 0.
+  // be get a new id.
   EXPECT_EQ(id.id(), other_controller.session_id().id());
-  EXPECT_EQ(0, controller().session_id().id());
+  EXPECT_NE(id.id(), controller().session_id().id());
 }
 
 // Tests that navigations initiated from the page (with the history object)

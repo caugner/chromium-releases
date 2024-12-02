@@ -7,6 +7,7 @@
 #include "gfx/rect.h"
 #include "base/i18n/rtl.h"
 #include "base/utf_string_conversions.h"
+#include "gfx/gtk_util.h"
 #include "gfx/path.h"
 #include "views/event.h"
 #include "views/screen.h"
@@ -206,9 +207,7 @@ void WindowGtk::UpdateWindowTitle() {
   // Update the native frame's text. We do this regardless of whether or not
   // the native frame is being used, since this also updates the taskbar, etc.
   std::wstring window_title = window_delegate_->GetWindowTitle();
-  std::wstring localized_text;
-  if (base::i18n::AdjustStringForLocaleDirection(window_title, &localized_text))
-    window_title.assign(localized_text);
+  base::i18n::AdjustStringForLocaleDirection(&window_title);
 
   gtk_window_set_title(GetNativeWindow(), WideToUTF8(window_title).c_str());
 }
@@ -329,9 +328,7 @@ gboolean WindowGtk::OnMotionNotify(GtkWidget* widget, GdkEventMotion* event) {
       non_client_view_->NonClientHitTest(gfx::Point(x, y));
   if (hittest_code != HTCLIENT) {
     GdkCursorType cursor_type = HitTestCodeToGdkCursorType(hittest_code);
-    GdkCursor* cursor = gdk_cursor_new(cursor_type);
-    gdk_window_set_cursor(widget->window, cursor);
-    gdk_cursor_destroy(cursor);
+    gdk_window_set_cursor(widget->window, gfx::GetCursor(cursor_type));
   }
 
   return WidgetGtk::OnMotionNotify(widget, event);
@@ -362,9 +359,7 @@ gboolean WindowGtk::OnWindowStateEvent(GtkWidget* widget,
 }
 
 gboolean WindowGtk::OnLeaveNotify(GtkWidget* widget, GdkEventCrossing* event) {
-  GdkCursor* cursor = gdk_cursor_new(GDK_LEFT_PTR);
-  gdk_window_set_cursor(widget->window, cursor);
-  gdk_cursor_destroy(cursor);
+  gdk_window_set_cursor(widget->window, gfx::GetCursor(GDK_LEFT_PTR));
 
   return WidgetGtk::OnLeaveNotify(widget, event);
 }
@@ -455,6 +450,8 @@ void WindowGtk::SetInitialBounds(GtkWindow* parent,
                                  const gfx::Rect& create_bounds) {
   gfx::Rect saved_bounds(create_bounds.ToGdkRectangle());
   if (window_delegate_->GetSavedWindowBounds(&saved_bounds)) {
+    if (!window_delegate_->ShouldRestoreWindowSize())
+      saved_bounds.set_size(non_client_view_->GetPreferredSize());
     WidgetGtk::SetBounds(saved_bounds);
   } else {
     if (create_bounds.IsEmpty()) {

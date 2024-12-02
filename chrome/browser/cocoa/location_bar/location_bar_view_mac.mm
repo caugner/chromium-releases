@@ -11,7 +11,7 @@
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/alternate_nav_url_fetcher.h"
 #import "chrome/browser/app_controller_mac.h"
 #import "chrome/browser/autocomplete/autocomplete_edit_view_mac.h"
@@ -56,6 +56,13 @@
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
+namespace {
+
+// Vertical space between the bottom edge of the location_bar and the first run
+// bubble arrow point.
+const static int kFirstRunBubbleYOffset = 1;
+
+}
 
 // TODO(shess): This code is mostly copied from the gtk
 // implementation.  Make sure it's all appropriate and flesh it out.
@@ -117,9 +124,15 @@ void LocationBarViewMac::ShowFirstRunBubbleInternal(
   if (!field_ || ![field_ window])
     return;
 
-  // The bubble needs to be just below the Omnibox and slightly to the right
-  // of the left omnibox icon, so shift x and y co-ordinates.
-  const NSPoint kOffset = NSMakePoint(1, 4);
+  // The first run bubble's left edge should line up with the left edge of the
+  // omnibox. This is different from other bubbles, which line up at a point
+  // set by their top arrow. Because the BaseBubbleController adjusts the
+  // window origin left to account for the arrow spacing, the first run bubble
+  // moves the window origin right by this spacing, so that the
+  // BaseBubbleController will move it back to the correct position.
+  const NSPoint kOffset = NSMakePoint(
+      info_bubble::kBubbleArrowXOffset + info_bubble::kBubbleArrowWidth/2.0,
+      kFirstRunBubbleYOffset);
   [FirstRunBubbleController showForView:field_ offset:kOffset profile:profile_];
 }
 
@@ -128,7 +141,8 @@ std::wstring LocationBarViewMac::GetInputString() const {
 }
 
 void LocationBarViewMac::SetSuggestedText(const string16& text) {
-  // TODO(rohitrao): implement me.  http://crbug.com/56385
+  edit_view_->SetSuggestText(
+      edit_view_->model()->UseVerbatimInstant() ? string16() : text);
 }
 
 WindowOpenDisposition LocationBarViewMac::GetWindowOpenDisposition() const {
@@ -209,25 +223,27 @@ void LocationBarViewMac::OnAutocompleteWillClosePopup() {
   InstantController* controller = browser_->instant();
   if (controller && !controller->commit_on_mouse_up())
     controller->DestroyPreviewContents();
+  SetSuggestedText(string16());
 }
 
 void LocationBarViewMac::OnAutocompleteLosingFocus(gfx::NativeView unused) {
+  SetSuggestedText(string16());
+
   InstantController* instant = browser_->instant();
   if (!instant)
-    return;
-
-  if (!instant->is_active() || !instant->GetPreviewContents())
     return;
 
   // If |IsMouseDownFromActivate()| returns false, the RenderWidgetHostView did
   // not receive a mouseDown event.  Therefore, we should destroy the preview.
   // Otherwise, the RWHV was clicked, so we commit the preview.
-  if (!instant->IsMouseDownFromActivate())
+  if (!instant->is_displayable() || !instant->GetPreviewContents() ||
+      !instant->IsMouseDownFromActivate()) {
     instant->DestroyPreviewContents();
-  else if (instant->IsShowingInstant())
+  } else if (instant->IsShowingInstant()) {
     instant->SetCommitOnMouseUp();
-  else
+  } else {
     instant->CommitCurrentPreview(INSTANT_COMMIT_FOCUS_LOST);
+  }
 }
 
 void LocationBarViewMac::OnAutocompleteWillAccept() {
@@ -235,10 +251,18 @@ void LocationBarViewMac::OnAutocompleteWillAccept() {
 }
 
 bool LocationBarViewMac::OnCommitSuggestedText(const std::wstring& typed_text) {
-  return false;
+  return edit_view_->CommitSuggestText();
+}
+
+void LocationBarViewMac::OnSetSuggestedSearchText(
+    const string16& suggested_text) {
+  SetSuggestedText(suggested_text);
 }
 
 void LocationBarViewMac::OnPopupBoundsChanged(const gfx::Rect& bounds) {
+  InstantController* instant = browser_->instant();
+  if (instant)
+    instant->SetOmniboxBounds(bounds);
 }
 
 void LocationBarViewMac::OnAutocompleteAccept(const GURL& url,
@@ -293,15 +317,28 @@ void LocationBarViewMac::OnChanged() {
   if (update_instant_ && instant && GetTabContents()) {
     if (edit_view_->model()->user_input_in_progress() &&
         edit_view_->model()->popup_model()->IsOpen()) {
-      instant->Update(GetTabContents(),
-                      edit_view_->model()->CurrentMatch(),
-                      WideToUTF16(edit_view_->GetText()),
-                      &suggested_text);
+      instant->Update
+          (browser_->GetSelectedTabContentsWrapper(),
+           edit_view_->model()->CurrentMatch(),
+           WideToUTF16(edit_view_->GetText()),
+           edit_view_->model()->UseVerbatimInstant(),
+           &suggested_text);
+      if (!instant->MightSupportInstant()) {
+        edit_view_->model()->FinalizeInstantQuery(std::wstring(),
+                                                  std::wstring());
+      }
     } else {
-      if (instant->is_active())
-        instant->DestroyPreviewContents();
+      instant->DestroyPreviewContents();
+      edit_view_->model()->FinalizeInstantQuery(std::wstring(),
+                                                std::wstring());
     }
   }
+
+  SetSuggestedText(suggested_text);
+}
+
+void LocationBarViewMac::OnSelectionBoundsChanged() {
+  NOTIMPLEMENTED();
 }
 
 void LocationBarViewMac::OnInputInProgress(bool in_progress) {
@@ -471,10 +508,19 @@ NSPoint LocationBarViewMac::GetBookmarkBubblePoint() const {
 
 NSPoint LocationBarViewMac::GetPageInfoBubblePoint() const {
   AutocompleteTextFieldCell* cell = [field_ cell];
-  const NSRect frame = [cell frameForDecoration:location_icon_decoration_.get()
-                                        inFrame:[field_ bounds]];
-  const NSPoint point = location_icon_decoration_->GetBubblePointInFrame(frame);
-  return [field_ convertPoint:point toView:nil];
+  if (ev_bubble_decoration_->IsVisible()) {
+    const NSRect frame = [cell frameForDecoration:ev_bubble_decoration_.get()
+                                          inFrame:[field_ bounds]];
+    const NSPoint point = ev_bubble_decoration_->GetBubblePointInFrame(frame);
+    return [field_ convertPoint:point toView:nil];
+  } else {
+    const NSRect frame =
+        [cell frameForDecoration:location_icon_decoration_.get()
+                         inFrame:[field_ bounds]];
+    const NSPoint point =
+        location_icon_decoration_->GetBubblePointInFrame(frame);
+    return [field_ convertPoint:point toView:nil];
+  }
 }
 
 NSImage* LocationBarViewMac::GetKeywordImage(const std::wstring& keyword) {
@@ -515,7 +561,7 @@ void LocationBarViewMac::PostNotification(NSString* notification) {
 
 bool LocationBarViewMac::RefreshContentSettingsDecorations() {
   const bool input_in_progress = toolbar_model_->input_in_progress();
-  const TabContents* tab_contents =
+  TabContents* tab_contents =
       input_in_progress ? NULL : browser_->GetSelectedTabContents();
   bool icons_updated = false;
   for (size_t i = 0; i < content_setting_decorations_.size(); ++i) {

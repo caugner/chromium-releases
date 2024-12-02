@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/message_loop.h"
 #include "base/process.h"
 #include "chrome/common/gpu_messages.h"
 #include "chrome/gpu/gpu_video_decoder.h"
-#include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder_mock.h"
 #include "ipc/ipc_message_utils.h"
 #include "media/video/mock_objects.h"
@@ -36,7 +36,7 @@ class MockGpuVideoDevice : public GpuVideoDevice {
                     scoped_refptr<media::VideoFrame>*));
   MOCK_METHOD1(ReleaseVideoFrame,
                void(const scoped_refptr<media::VideoFrame>& frame));
-  MOCK_METHOD2(UploadToVideoFrame,
+  MOCK_METHOD2(ConvertToVideoFrame,
                bool(void* buffer, scoped_refptr<media::VideoFrame> frame));
 
  private:
@@ -70,7 +70,7 @@ class GpuVideoDecoderTest : public testing::Test,
  public:
   GpuVideoDecoderTest() {
     // Create the mock objects.
-    gles2_decoder_.reset(new gpu::gles2::MockGLES2Decoder(&group_));
+    gles2_decoder_.reset(new gpu::gles2::MockGLES2Decoder());
 
     gpu_video_decoder_ = new GpuVideoDecoder(
         &message_loop_, kDecoderHostId, this, base::kNullProcessHandle,
@@ -227,7 +227,6 @@ class GpuVideoDecoderTest : public testing::Test,
   scoped_refptr<GpuVideoDecoder> gpu_video_decoder_;
   MockGpuVideoDevice* mock_device_;
   media::MockVideoDecodeEngine* mock_engine_;
-  gpu::gles2::ContextGroup group_;
   scoped_ptr<gpu::gles2::MockGLES2Decoder> gles2_decoder_;
   std::vector<scoped_refptr<media::VideoFrame> > decoder_frames_;
   scoped_refptr<media::VideoFrame> device_frame_;

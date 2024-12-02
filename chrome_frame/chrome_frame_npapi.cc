@@ -54,6 +54,8 @@ const NPUTF8* ChromeFrameNPAPI::plugin_property_identifier_names_[] = {
   "readystate",
   "onprivatemessage",
   "usechromenetwork",
+  "onclose",
+  "sessionid",
 };
 
 const NPUTF8* ChromeFrameNPAPI::plugin_method_identifier_names_[] = {
@@ -97,6 +99,8 @@ static const char kPluginOnloadAttribute[] = "onload";
 static const char kPluginOnErrorAttribute[] = "onloaderror";
 static const char kPluginOnMessageAttribute[] = "onmessage";
 static const char kPluginOnPrivateMessageAttribute[] = "onprivatemessage";
+static const char kPluginOnCloseAttribute[] = "onclose";
+
 // These properties can only be set in arguments at control instantiation.
 // When the privileged_mode property is provided and set to true, the control
 // will probe for whether its hosting document has the system principal, in
@@ -197,6 +201,8 @@ bool ChromeFrameNPAPI::Initialize(NPMIMEType mime_type, NPP instance,
       onerror_handler_ = JavascriptToNPObject(argv[i]);
     } else if (LowerCaseEqualsASCII(argn[i], kPluginOnMessageAttribute)) {
       onmessage_handler_ = JavascriptToNPObject(argv[i]);
+    } else if (LowerCaseEqualsASCII(argn[i], kPluginOnCloseAttribute)) {
+      onclose_handler_ = JavascriptToNPObject(argv[i]);
     } else if (LowerCaseEqualsASCII(argn[i],
                                    kPluginPrivilegedModeAttribute)) {
       // Test for the FireFox privileged mode if the user requests it
@@ -212,10 +218,10 @@ bool ChromeFrameNPAPI::Initialize(NPMIMEType mime_type, NPP instance,
     } else if (LowerCaseEqualsASCII(argn[i],
                                     kPluginChromeFunctionsAutomatedAttribute)) {
       functions_enabled_.clear();
-      // SplitString writes one empty entry for blank strings, so we need this
-      // to allow specifying zero automation of API functions.
+      // base::SplitString writes one empty entry for blank strings, so we need
+      // this to allow specifying zero automation of API functions.
       if (argv[i][0] != '\0')
-        SplitString(argv[i], ',', &functions_enabled_);
+        base::SplitString(argv[i], ',', &functions_enabled_);
     } else if (LowerCaseEqualsASCII(argn[i], kPluginUseChromeNetwork)) {
       chrome_network_arg_set = true;
       chrome_network_arg = atoi(argv[i]) ? true : false;
@@ -285,9 +291,8 @@ bool ChromeFrameNPAPI::Initialize(NPMIMEType mime_type, NPP instance,
 }
 
 void ChromeFrameNPAPI::Uninitialize() {
-  // Don't call SetReadyState as it will end up calling FireEvent.
-  // We are in the context of NPP_DESTROY.
-  ready_state_ = READYSTATE_UNINITIALIZED;
+  if (ready_state_ != READYSTATE_UNINITIALIZED)
+    SetReadyState(READYSTATE_UNINITIALIZED);
 
   UnsubscribeFromFocusEvents();
 
@@ -300,6 +305,7 @@ void ChromeFrameNPAPI::Uninitialize() {
   onerror_handler_.Free();
   onmessage_handler_.Free();
   onprivatemessage_handler_.Free();
+  onclose_handler_.Free();
 
   Base::Uninitialize();
 }
@@ -425,9 +431,9 @@ void ChromeFrameNPAPI::UrlNotify(const char* url, NPReason reason,
 
 void ChromeFrameNPAPI::OnAcceleratorPressed(int tab_handle,
                                             const MSG& accel_message) {
-  DLOG(INFO) << __FUNCTION__ << " msg:"
-      << base::StringPrintf("0x%04X", accel_message.message) << " key:"
-      << accel_message.wParam;
+  DVLOG(1) << __FUNCTION__
+           << " msg:" << base::StringPrintf("0x%04X", accel_message.message)
+           << " key:" << accel_message.wParam;
 
   // The host browser does call TranslateMessage on messages like WM_KEYDOWN
   // WM_KEYUP, etc, which will result in messages like WM_CHAR, WM_SYSCHAR, etc
@@ -455,7 +461,7 @@ void ChromeFrameNPAPI::OnAcceleratorPressed(int tab_handle,
 }
 
 void ChromeFrameNPAPI::OnTabbedOut(int tab_handle, bool reverse) {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
 
   ignore_setfocus_ = true;
   HWND parent = ::GetParent(m_hWnd);
@@ -641,6 +647,12 @@ bool ChromeFrameNPAPI::GetProperty(NPIdentifier name,
         return true;
       }
     }
+  } else if (name == plugin_property_identifiers_[PLUGIN_PROPERTY_ONCLOSE]) {
+    if (onclose_handler_) {
+      variant->type = NPVariantType_Object;
+      variant->value.objectValue = onclose_handler_.Copy();
+      return true;
+    }
   } else if (name == plugin_property_identifiers_[PLUGIN_PROPERTY_SRC]) {
     AllocateStringVariant(src_, variant);
     return true;
@@ -656,6 +668,14 @@ bool ChromeFrameNPAPI::GetProperty(NPIdentifier name,
         plugin_property_identifiers_[PLUGIN_PROPERTY_USECHROMENETWORK]) {
     BOOLEAN_TO_NPVARIANT(automation_client_->use_chrome_network(), *variant);
     return true;
+  } else if (name == plugin_property_identifiers_[PLUGIN_PROPERTY_SESSIONID]) {
+    if (!is_privileged_) {
+      DLOG(WARNING) << "Attempt to read sessionid property while not "
+                       "privileged";
+    } else {
+      INT32_TO_NPVARIANT(automation_client_->GetSessionId(), *variant);
+      return true;
+    }
   }
 
   return false;
@@ -698,6 +718,10 @@ bool ChromeFrameNPAPI::SetProperty(NPIdentifier name,
         onprivatemessage_handler_ = variant->value.objectValue;
         return true;
       }
+    } else if (name == plugin_property_identifiers_[PLUGIN_PROPERTY_ONCLOSE]) {
+      onclose_handler_.Free();
+      onclose_handler_ = variant->value.objectValue;
+      return true;
     }
   } else if (NPVARIANT_IS_STRING(*variant) || NPVARIANT_IS_NULL(*variant)) {
     if (name == plugin_property_identifiers_[PLUGIN_PROPERTY_SRC]) {
@@ -731,13 +755,13 @@ bool ChromeFrameNPAPI::SetProperty(NPObject* object, NPIdentifier name,
 }
 
 void ChromeFrameNPAPI::OnFocus() {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
   PostMessage(WM_SETFOCUS, 0, 0);
 }
 
 void ChromeFrameNPAPI::OnEvent(const char* event_name) {
   DCHECK(event_name);
-  DLOG(INFO) << event_name;
+  DVLOG(1) << event_name;
 
   if (lstrcmpiA(event_name, "focus") == 0) {
     OnFocus();
@@ -778,11 +802,11 @@ LRESULT ChromeFrameNPAPI::OnSetFocus(UINT message, WPARAM wparam,
 }
 
 void ChromeFrameNPAPI::OnBlur() {
-  DLOG(INFO) << __FUNCTION__;
+  DVLOG(1) << __FUNCTION__;
 }
 
 void ChromeFrameNPAPI::OnLoad(int, const GURL& gurl) {
-  DLOG(INFO) << "Firing onload";
+  DVLOG(1) << "Firing onload";
   FireEvent("load", gurl.spec());
 }
 
@@ -835,7 +859,7 @@ void ChromeFrameNPAPI::OnMessageFromChromeFrame(int tab_handle,
     }
     DLOG_IF(WARNING, !invoke) << "InvokeDefault failed";
   } else {
-    NOTREACHED() << "CreateMessageEvent";
+    DLOG(WARNING) << "CreateMessageEvent failed, probably exiting";
   }
 }
 
@@ -866,9 +890,22 @@ void ChromeFrameNPAPI::OnAutomationServerLaunchFailed(
     AutomationLaunchResult reason, const std::string& server_version) {
   SetReadyState(READYSTATE_UNINITIALIZED);
 
+  // In IE, we don't display warnings for privileged CF instances because
+  // there are 2 CFs created for each tab (so we decide on the CEEE side
+  // whether to show a warning). In FF however, there is only one privileged
+  // CF instance per Firefox window, so OK to show the warning there without
+  // any further logic.
   if (reason == AUTOMATION_VERSION_MISMATCH) {
+    THREAD_SAFE_UMA_HISTOGRAM_COUNTS("ChromeFrame.VersionMismatchDisplayed", 1);
     DisplayVersionMismatchWarning(m_hWnd, server_version);
   }
+}
+
+void ChromeFrameNPAPI::OnCloseTab(int tab_handle) {
+  std::string arg;
+  FireEvent("close", arg);
+  ScopedNpVariant result;
+  InvokeDefault(onclose_handler_, arg, &result);
 }
 
 bool ChromeFrameNPAPI::InvokeDefault(NPObject* object,
@@ -1026,7 +1063,7 @@ void ChromeFrameNPAPI::DispatchEvent(NPObject* event) {
         npapi::GetStringIdentifier("dispatchEvent"), &param, 1, &result);
     DLOG_IF(WARNING, !invoke) << "dispatchEvent failed";
   } else {
-    NOTREACHED() << "NPNVPluginElementNPObject";
+    DLOG(WARNING) << "ChromeFrameNPAPI::DispatchEvent failed, probably exiting";
   }
 }
 
@@ -1321,10 +1358,10 @@ bool ChromeFrameNPAPI::enableExtensionAutomation(NPObject* npobject,
     std::string functions_a(functions_str.UTF8Characters,
                             functions_str.UTF8Length);
 
-    // SplitString writes one empty entry for blank strings, so we need this
-    // to allow specifying zero automation of API functions.
+    // base::SplitString writes one empty entry for blank strings, so we need
+    // this to allow specifying zero automation of API functions.
     if (functions_a[0] != '\0')
-      SplitString(functions_a, ',', &functions);
+      base::SplitString(functions_a, ',', &functions);
   }
 
   automation_client_->tab()->SetEnableExtensionAutomation(functions);
@@ -1411,7 +1448,7 @@ NpProxyService* ChromeFrameNPAPI::CreatePrefService() {
 }
 
 NPObject* ChromeFrameNPAPI::GetWindowObject() const {
-  if (!window_object_.get()) {
+  if (!window_object_.get() && instance_) {
     NPError ret = npapi::GetValue(instance_, NPNVWindowNPObject,
         window_object_.Receive());
     DLOG_IF(ERROR, ret != NPERR_NO_ERROR) << "NPNVWindowNPObject failed";
@@ -1451,7 +1488,7 @@ bool ChromeFrameNPAPI::PreProcessContextMenu(HMENU menu) {
 }
 
 bool ChromeFrameNPAPI::HandleContextMenuCommand(UINT cmd,
-    const IPC::ContextMenuParams& params) {
+    const IPC::MiniContextMenuParams& params) {
   if (cmd == IDC_ABOUT_CHROME_FRAME) {
     // TODO: implement "About Chrome Frame"
   }

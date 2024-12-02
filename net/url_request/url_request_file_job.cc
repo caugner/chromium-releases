@@ -23,6 +23,7 @@
 #include "base/message_loop.h"
 #include "base/platform_file.h"
 #include "base/string_util.h"
+#include "base/thread_restrictions.h"
 #include "build/build_config.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/io_buffer.h"
@@ -32,6 +33,7 @@
 #include "net/base/net_util.h"
 #include "net/http/http_util.h"
 #include "net/url_request/url_request.h"
+#include "net/url_request/url_request_error_job.h"
 #include "net/url_request/url_request_file_dir_job.h"
 
 #if defined(OS_WIN)
@@ -39,8 +41,8 @@
 #endif
 
 #if defined(OS_WIN)
-class URLRequestFileJob::AsyncResolver :
-    public base::RefCountedThreadSafe<URLRequestFileJob::AsyncResolver> {
+class URLRequestFileJob::AsyncResolver
+    : public base::RefCountedThreadSafe<URLRequestFileJob::AsyncResolver> {
  public:
   explicit AsyncResolver(URLRequestFileJob* owner)
       : owner_(owner), owner_loop_(MessageLoop::current()) {
@@ -83,7 +85,15 @@ class URLRequestFileJob::AsyncResolver :
 // static
 URLRequestJob* URLRequestFileJob::Factory(
     URLRequest* request, const std::string& scheme) {
+
   FilePath file_path;
+  const bool is_file = net::FileURLToFilePath(request->url(), &file_path);
+
+#if defined(OS_CHROMEOS)
+  // Check file access.
+  if (AccessDisabled(file_path))
+    return new URLRequestErrorJob(request, net::ERR_ACCESS_DENIED);
+#endif
 
   // We need to decide whether to create URLRequestFileJob for file access or
   // URLRequestFileDirJob for directory access. To avoid accessing the
@@ -91,7 +101,7 @@ URLRequestJob* URLRequestFileJob::Factory(
   // The code in the URLRequestFileJob::Start() method discovers that a path,
   // which doesn't end with a slash, should really be treated as a directory,
   // and it then redirects to the URLRequestFileDirJob.
-  if (net::FileURLToFilePath(request->url(), &file_path) &&
+  if (is_file &&
       file_util::EndsWithSeparator(file_path) &&
       file_path.IsAbsolute())
     return new URLRequestFileDirJob(request, file_path);
@@ -128,8 +138,15 @@ void URLRequestFileJob::Start() {
     return;
   }
 #endif
+
+  // URL requests should not block on the disk!
+  //   http://code.google.com/p/chromium/issues/detail?id=59849
+  bool exists;
   base::PlatformFileInfo file_info;
-  bool exists = file_util::GetFileInfo(file_path_, &file_info);
+  {
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    exists = file_util::GetFileInfo(file_path_, &file_info);
+  }
 
   // Continue asynchronously.
   MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
@@ -195,6 +212,10 @@ bool URLRequestFileJob::GetContentEncodings(
 }
 
 bool URLRequestFileJob::GetMimeType(std::string* mime_type) const {
+  // URL requests should not block on the disk!  On Windows this goes to the
+  // registry.
+  //   http://code.google.com/p/chromium/issues/detail?id=59849
+  base::ThreadRestrictions::ScopedAllowIO allow_io;
   DCHECK(request_);
   return net::GetMimeTypeFromFile(file_path_, mime_type);
 }
@@ -244,6 +265,10 @@ void URLRequestFileJob::DidResolve(
   if (!exists) {
     rv = net::ERR_FILE_NOT_FOUND;
   } else if (!is_directory_) {
+    // URL requests should not block on the disk!
+    //   http://code.google.com/p/chromium/issues/detail?id=59849
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+
     int flags = base::PLATFORM_FILE_OPEN |
                 base::PLATFORM_FILE_READ |
                 base::PLATFORM_FILE_ASYNC;
@@ -330,3 +355,31 @@ bool URLRequestFileJob::IsRedirectResponse(GURL* location,
   return false;
 #endif
 }
+
+#if defined(OS_CHROMEOS)
+static const char* const kLocalAccessWhiteList[] = {
+  "/home/chronos/user/Downloads",
+  "/mnt/partner_partition",
+  "/usr/share/chromeos-assets",
+  "/tmp",
+  "/var/log",
+};
+
+// static
+bool URLRequestFileJob::AccessDisabled(const FilePath& file_path) {
+  if (URLRequest::IsFileAccessAllowed()) {  // for tests.
+    return false;
+  }
+
+  for (size_t i = 0; i < arraysize(kLocalAccessWhiteList); ++i) {
+    const FilePath white_listed_path(kLocalAccessWhiteList[i]);
+    // FilePath::operator== should probably handle trailing seperators.
+    if (white_listed_path == file_path.StripTrailingSeparators() ||
+        white_listed_path.IsParent(file_path)) {
+      return false;
+    }
+  }
+  return true;
+}
+#endif
+

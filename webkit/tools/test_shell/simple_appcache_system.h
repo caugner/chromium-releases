@@ -1,6 +1,6 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #ifndef WEBKIT_TOOLS_TEST_SHELL_SIMPLE_APPCACHE_SYSTEM_H_
 #define WEBKIT_TOOLS_TEST_SHELL_SIMPLE_APPCACHE_SYSTEM_H_
@@ -20,7 +20,11 @@ class WebApplicationCacheHostClient;
 }
 class SimpleBackendProxy;
 class SimpleFrontendProxy;
+
+namespace net {
 class URLRequest;
+}  // namespace net
+
 class URLRequestContext;
 
 // A class that composes the constituent parts of an appcache system
@@ -28,7 +32,7 @@ class URLRequestContext;
 // a UI thread on which webkit runs and an IO thread on which URLRequests
 // are handled. This class conspires with SimpleResourceLoaderBridge to
 // retrieve resources from the appcache.
-class SimpleAppCacheSystem : public MessageLoop::DestructionObserver {
+class SimpleAppCacheSystem {
  public:
   // Should be instanced somewhere in main(). If not instanced, the public
   // static methods are all safe no-ops.
@@ -51,6 +55,11 @@ class SimpleAppCacheSystem : public MessageLoop::DestructionObserver {
       instance_->InitOnIOThread(request_context);
   }
 
+  static void CleanupOnIOThread() {
+    if (instance_)
+      instance_->CleanupIOThread();
+  }
+
   // Called by TestShellWebKitInit to manufacture a 'host' for webcore.
   static WebKit::WebApplicationCacheHost* CreateApplicationCacheHost(
       WebKit::WebApplicationCacheHostClient* client) {
@@ -58,7 +67,7 @@ class SimpleAppCacheSystem : public MessageLoop::DestructionObserver {
   }
 
   // Called by SimpleResourceLoaderBridge to hook into resource loads.
-  static void SetExtraRequestInfo(URLRequest* request,
+  static void SetExtraRequestInfo(net::URLRequest* request,
                                   int host_id,
                                   ResourceType::Type resource_type) {
     if (instance_)
@@ -66,9 +75,9 @@ class SimpleAppCacheSystem : public MessageLoop::DestructionObserver {
   }
 
   // Called by SimpleResourceLoaderBridge extract extra response bits.
-  static void GetExtraResponseInfo(URLRequest* request,
-                            int64* cache_id,
-                            GURL* manifest_url) {
+  static void GetExtraResponseInfo(net::URLRequest* request,
+                                   int64* cache_id,
+                                   GURL* manifest_url) {
     if (instance_)
       instance_->GetExtraResponseBits(request, cache_id, manifest_url);
   }
@@ -108,12 +117,13 @@ class SimpleAppCacheSystem : public MessageLoop::DestructionObserver {
   // Instance methods called by our static public methods
   void InitOnUIThread(const FilePath& cache_directory);
   void InitOnIOThread(URLRequestContext* request_context);
+  void CleanupIOThread();
   WebKit::WebApplicationCacheHost* CreateCacheHostForWebKit(
       WebKit::WebApplicationCacheHostClient* client);
-  void SetExtraRequestBits(URLRequest* request,
+  void SetExtraRequestBits(net::URLRequest* request,
                            int host_id,
                            ResourceType::Type resource_type);
-  void GetExtraResponseBits(URLRequest* request,
+  void GetExtraResponseBits(net::URLRequest* request,
                             int64* cache_id,
                             GURL* manifest_url);
 
@@ -138,9 +148,6 @@ class SimpleAppCacheSystem : public MessageLoop::DestructionObserver {
     }
     return NULL;
   }
-
-  // IOThread DestructionObserver
-  virtual void WillDestroyCurrentMessageLoop();
 
   FilePath cache_directory_;
   MessageLoop* io_message_loop_;

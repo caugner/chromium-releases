@@ -7,17 +7,15 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/path_service.h"
-#include "base/scoped_nsautorelease_pool.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string_number_conversions.h"
 #include "base/test/test_file_util.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/url_request_mock_util.h"
@@ -26,9 +24,12 @@
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/logging_chrome.h"
 #include "chrome/common/main_function_params.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_type.h"
@@ -40,36 +41,17 @@
 #include "net/test/test_server.h"
 #include "sandbox/src/dep.h"
 
-#if defined(OS_WIN)
-#include "chrome/browser/views/frame/browser_view.h"
-#endif
-
-#if defined(OS_LINUX)
-#include "base/environment.h"
-#include "base/singleton.h"
-#include "chrome/browser/renderer_host/render_sandbox_host_linux.h"
-#include "chrome/browser/zygote_host_linux.h"
-
-namespace {
-
-// A helper class to do Linux-only initialization only once per process.
-class LinuxHostInit {
- public:
-  LinuxHostInit() {
-    RenderSandboxHostLinux* shost = Singleton<RenderSandboxHostLinux>::get();
-    shost->Init("");
-    ZygoteHost* zhost = Singleton<ZygoteHost>::get();
-    zhost->Init("");
-  }
-  ~LinuxHostInit() {}
-};
-
-}  // namespace
-#endif
-
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #endif  // defined(OS_CHROMEOS)
+
+#if defined(OS_MACOSX)
+#include "base/mac_util.h"
+#endif
+
+#if defined(OS_WIN)
+#include "chrome/browser/views/frame/browser_view.h"
+#endif
 
 namespace {
 
@@ -95,12 +77,32 @@ static const char kBrowserTestType[] = "browser";
 
 InProcessBrowserTest::InProcessBrowserTest()
     : browser_(NULL),
-      test_server_(net::TestServer::TYPE_HTTP,
-                   FilePath(FILE_PATH_LITERAL("chrome/test/data"))),
       show_window_(false),
       dom_automation_enabled_(false),
       tab_closeable_state_watcher_enabled_(false),
       original_single_process_(false) {
+#if defined(OS_MACOSX)
+  mac_util::SetOverrideAmIBundled(true);
+#endif
+
+  // Before we run the browser, we have to hack the path to the exe to match
+  // what it would be if Chrome was running, because it is used to fork renderer
+  // processes, on Linux at least (failure to do so will cause a browser_test to
+  // be run instead of a renderer).
+  FilePath chrome_path;
+  CHECK(PathService::Get(base::FILE_EXE, &chrome_path));
+  chrome_path = chrome_path.DirName();
+#if defined(OS_WIN)
+  chrome_path = chrome_path.Append(chrome::kBrowserProcessExecutablePath);
+#elif defined(OS_POSIX)
+  chrome_path = chrome_path.Append(
+      WideToASCII(chrome::kBrowserProcessExecutablePath));
+#endif
+  CHECK(PathService::Override(base::FILE_EXE, chrome_path));
+
+  test_server_.reset(new net::TestServer(
+      net::TestServer::TYPE_HTTP,
+      FilePath(FILE_PATH_LITERAL("chrome/test/data"))));
 }
 
 InProcessBrowserTest::~InProcessBrowserTest() {
@@ -115,17 +117,9 @@ void InProcessBrowserTest::SetUp() {
   CommandLine* command_line = CommandLine::ForCurrentProcessMutable();
   original_command_line_.reset(new CommandLine(*command_line));
 
-  // Update the information about user data directory location before calling
-  // BrowserMain().  In some cases there will be no --user-data-dir switch (for
-  // example, when debugging).  If there is no switch, do nothing.
-  FilePath user_data_dir =
-      command_line->GetSwitchValuePath(switches::kUserDataDir);
-  if (user_data_dir.empty()) {
-    // TODO(rohitrao): Create a ScopedTempDir here if people have problems.
-    LOG(ERROR) << "InProcessBrowserTest is using the default user data dir.";
-  } else {
-    ASSERT_TRUE(test_launcher_utils::OverrideUserDataDir(user_data_dir));
-  }
+  // Create a temporary user data directory if required.
+  ASSERT_TRUE(CreateUserDataDirectory())
+      << "Could not create user data directory.";
 
   // The unit test suite creates a testingbrowser, but we want the real thing.
   // Delete the current one. We'll install the testing one in TearDown.
@@ -134,7 +128,8 @@ void InProcessBrowserTest::SetUp() {
 
   // Allow subclasses the opportunity to make changes to the default user data
   // dir before running any tests.
-  SetUpUserDataDirectory();
+  ASSERT_TRUE(SetUpUserDataDirectory())
+      << "Could not set up user data directory.";
 
   // Don't delete the resources when BrowserMain returns. Many ui classes
   // cache SkBitmaps in a static field so that if we delete the resource
@@ -144,61 +139,22 @@ void InProcessBrowserTest::SetUp() {
   // Allow subclasses the opportunity to make changes to the command line before
   // running any tests.
   SetUpCommandLine(command_line);
+  // Add command line arguments that are used by all InProcessBrowserTests.
+  PrepareTestCommandLine(command_line);
 
-#if defined(OS_WIN)
-  // Hide windows on show.
-  if (!command_line->HasSwitch(kUnitTestShowWindows) && !show_window_)
-    BrowserView::SetShowState(SW_HIDE);
-#endif
-
-  if (dom_automation_enabled_)
-    command_line->AppendSwitch(switches::kDomAutomationController);
-
-  command_line->AppendSwitchPath(switches::kUserDataDir, user_data_dir);
-
-  // This is a Browser test.
-  command_line->AppendSwitchASCII(switches::kTestType, kBrowserTestType);
-
-  // Single-process mode is not set in BrowserMain so it needs to be processed
-  // explicitly.
+  // Save the single process mode state before it was reset in this test. This
+  // state will be recovered in TearDown(). Single-process mode is not set in
+  // BrowserMain so it needs to be processed explicitly.
   original_single_process_ = RenderProcessHost::run_renderer_in_process();
   if (command_line->HasSwitch(switches::kSingleProcess))
     RenderProcessHost::set_run_renderer_in_process(true);
 
-#if defined(OS_WIN)
-  // The Windows sandbox requires that the browser and child processes are the
-  // same binary.  So we launch browser_process.exe which loads chrome.dll
-  command_line->AppendSwitchPath(switches::kBrowserSubprocessPath,
-                                 command_line->GetProgram());
-#else
-  // Explicitly set the path of the binary used for child processes, otherwise
-  // they'll try to use browser_tests which doesn't contain ChromeMain.
-  FilePath subprocess_path;
-  PathService::Get(base::FILE_EXE, &subprocess_path);
-  subprocess_path = subprocess_path.DirName();
-  subprocess_path = subprocess_path.AppendASCII(WideToASCII(
-      chrome::kBrowserProcessExecutablePath));
-#if defined(OS_MACOSX)
-  // Recreate the real environment, run the helper within the app bundle.
-  subprocess_path = subprocess_path.DirName().DirName();
-  DCHECK_EQ(subprocess_path.BaseName().value(), "Contents");
-  subprocess_path =
-      subprocess_path.Append("Versions").Append(chrome::kChromeVersion);
-  subprocess_path =
-      subprocess_path.Append(chrome::kHelperProcessExecutablePath);
-#endif
-  command_line->AppendSwitchPath(switches::kBrowserSubprocessPath,
-                                 subprocess_path);
-#endif
-
-  // If ncecessary, disable TabCloseableStateWatcher.
-  if (!tab_closeable_state_watcher_enabled_)
-    command_line->AppendSwitch(switches::kDisableTabCloseableStateWatcher);
-
-  test_launcher_utils::PrepareBrowserCommandLineForTests(command_line);
-
 #if defined(OS_CHROMEOS)
   chromeos::CrosLibrary::Get()->GetTestApi()->SetUseStubImpl();
+
+  // Make sure that the log directory exists.
+  FilePath log_dir = logging::GetSessionLogFile(*command_line).DirName();
+  file_util::CreateDirectory(log_dir);
 #endif  // defined(OS_CHROMEOS)
 
   SandboxInitWrapper sandbox_wrapper;
@@ -222,29 +178,70 @@ void InProcessBrowserTest::SetUp() {
 
   SetUpInProcessBrowserTestFixture();
 
-  // Before we run the browser, we have to hack the path to the exe to match
-  // what it would be if Chrome was running, because it is used to fork renderer
-  // processes, on Linux at least (failure to do so will cause a browser_test to
-  // be run instead of a renderer).
-  FilePath chrome_path;
-  CHECK(PathService::Get(base::FILE_EXE, &chrome_path));
-  chrome_path = chrome_path.DirName();
-#if defined(OS_WIN)
-  chrome_path = chrome_path.Append(chrome::kBrowserProcessExecutablePath);
-#elif defined(OS_POSIX)
-  chrome_path = chrome_path.Append(
-      WideToASCII(chrome::kBrowserProcessExecutablePath));
-#endif
-  CHECK(PathService::Override(base::FILE_EXE, chrome_path));
-
-#if defined(OS_LINUX)
-  // Initialize the RenderSandbox and Zygote hosts. Apparently they get used
-  // for InProcessBrowserTest, and this is not the normal browser startup path.
-  Singleton<LinuxHostInit>::get();
-#endif
-
   BrowserMain(params);
   TearDownInProcessBrowserTestFixture();
+}
+
+void InProcessBrowserTest::PrepareTestCommandLine(
+    CommandLine* command_line) {
+  // Propagate commandline settings from test_launcher_utils.
+  test_launcher_utils::PrepareBrowserCommandLineForTests(command_line);
+
+#if defined(OS_WIN)
+  // Hide windows on show.
+  if (!command_line->HasSwitch(kUnitTestShowWindows) && !show_window_)
+    BrowserView::SetShowState(SW_HIDE);
+#endif
+
+  if (dom_automation_enabled_)
+    command_line->AppendSwitch(switches::kDomAutomationController);
+
+  // This is a Browser test.
+  command_line->AppendSwitchASCII(switches::kTestType, kBrowserTestType);
+
+#if defined(OS_WIN)
+  // The Windows sandbox requires that the browser and child processes are the
+  // same binary.  So we launch browser_process.exe which loads chrome.dll
+  command_line->AppendSwitchPath(switches::kBrowserSubprocessPath,
+                                 command_line->GetProgram());
+#else
+  // Explicitly set the path of the binary used for child processes, otherwise
+  // they'll try to use browser_tests which doesn't contain ChromeMain.
+  FilePath subprocess_path;
+  PathService::Get(base::FILE_EXE, &subprocess_path);
+#if defined(OS_MACOSX)
+  // Recreate the real environment, run the helper within the app bundle.
+  subprocess_path = subprocess_path.DirName().DirName();
+  DCHECK_EQ(subprocess_path.BaseName().value(), "Contents");
+  subprocess_path =
+      subprocess_path.Append("Versions").Append(chrome::kChromeVersion);
+  subprocess_path =
+      subprocess_path.Append(chrome::kHelperProcessExecutablePath);
+#endif
+  command_line->AppendSwitchPath(switches::kBrowserSubprocessPath,
+                                 subprocess_path);
+#endif
+
+  // If ncecessary, disable TabCloseableStateWatcher.
+  if (!tab_closeable_state_watcher_enabled_)
+    command_line->AppendSwitch(switches::kDisableTabCloseableStateWatcher);
+}
+
+bool InProcessBrowserTest::CreateUserDataDirectory() {
+  CommandLine* command_line = CommandLine::ForCurrentProcessMutable();
+  FilePath user_data_dir =
+      command_line->GetSwitchValuePath(switches::kUserDataDir);
+  if (user_data_dir.empty()) {
+    if (temp_user_data_dir_.CreateUniqueTempDir() &&
+        temp_user_data_dir_.IsValid()) {
+      user_data_dir = temp_user_data_dir_.path();
+    } else {
+      LOG(ERROR) << "Could not create temporary user data directory \""
+                 << temp_user_data_dir_.path().value() << "\".";
+      return false;
+    }
+  }
+  return test_launcher_utils::OverrideUserDataDir(user_data_dir);
 }
 
 void InProcessBrowserTest::TearDown() {
@@ -260,6 +257,24 @@ void InProcessBrowserTest::TearDown() {
 
   *CommandLine::ForCurrentProcessMutable() = *original_command_line_;
   RenderProcessHost::set_run_renderer_in_process(original_single_process_);
+}
+
+void InProcessBrowserTest::AddTabAtIndexToBrowser(
+    Browser* browser,
+    int index,
+    const GURL& url,
+    PageTransition::Type transition) {
+  browser::NavigateParams params(browser, url, transition);
+  params.tabstrip_index = index;
+  params.disposition = NEW_FOREGROUND_TAB;
+  browser::Navigate(&params);
+}
+
+void InProcessBrowserTest::AddTabAtIndex(
+    int index,
+    const GURL& url,
+    PageTransition::Type transition) {
+  AddTabAtIndexToBrowser(browser(), index, url, transition);
 }
 
 // Creates a browser with a single tab (about:blank), waits for the tab to
@@ -291,7 +306,7 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
   // deallocation via an autorelease pool (such as browser window closure and
   // browser shutdown). To avoid this, the following pool is recycled after each
   // time code is directly executed.
-  base::ScopedNSAutoreleasePool pool;
+  base::mac::ScopedNSAutoreleasePool pool;
 
   // Pump startup related events.
   MessageLoopForUI::current()->RunAllPending();

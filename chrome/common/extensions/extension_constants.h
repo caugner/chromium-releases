@@ -24,6 +24,7 @@ namespace extension_manifest_keys {
   extern const char* kDescription;
   extern const char* kDevToolsPage;
   extern const char* kExcludeGlobs;
+  extern const char* kHomepageURL;
   extern const char* kIcons;
   extern const char* kIncognito;
   extern const char* kIncludeGlobs;
@@ -37,6 +38,7 @@ namespace extension_manifest_keys {
   extern const char* kMatches;
   extern const char* kMinimumChromeVersion;
   extern const char* kName;
+  extern const char* kOmnibox;
   extern const char* kOmniboxKeyword;
   extern const char* kOptionsPage;
   extern const char* kPageAction;
@@ -66,7 +68,6 @@ namespace extension_manifest_keys {
   extern const char* kType;
   extern const char* kUpdateURL;
   extern const char* kVersion;
-  extern const char* kWebLaunchUrl;
   extern const char* kWebURLs;
 }  // namespace extension_manifest_keys
 
@@ -108,6 +109,7 @@ namespace extension_manifest_errors {
   extern const char* kInvalidDevToolsPage;
   extern const char* kInvalidGlob;
   extern const char* kInvalidGlobList;
+  extern const char* kInvalidHomepageURL;
   extern const char* kInvalidIconPath;
   extern const char* kInvalidIcons;
   extern const char* kInvalidIncognitoBehavior;
@@ -174,7 +176,6 @@ namespace extension_manifest_errors {
   extern const char* kManifestUnreadable;
   extern const char* kMissingFile;
   extern const char* kMultipleOverrides;
-  extern const char* kOmniboxExperimental;
   extern const char* kOneUISurfaceOnly;
   extern const char* kReservedMessageFound;
   extern const char* kThemesCannotContainExtensions;
@@ -188,11 +189,6 @@ namespace extension_urls {
   // The greatest common prefixes of the main extensions gallery's browse and
   // download URLs.
   extern const char* kGalleryBrowsePrefix;
-  extern const char* kGalleryDownloadPrefix;
-
-  // The update urls used by gallery/webstore extensions.
-  extern const char* kGalleryUpdateHttpUrl;
-  extern const char* kGalleryUpdateHttpsUrl;
 
   // Same thing for the "minigallery". The minigallery is the temporary static
   // themes gallery that we put up when we launched themes.
@@ -236,6 +232,19 @@ namespace extension_misc {
     LAUNCH_WINDOW,
     LAUNCH_PANEL,
     LAUNCH_TAB
+  };
+
+  // The name of the apps promo histogram.
+  extern const char* kAppsPromoHistogram;
+
+  // The buckets used in the apps promo histogram.
+  enum AppsPromoBuckets {
+    PROMO_LAUNCH_APP,
+    PROMO_LAUNCH_WEB_STORE,
+    PROMO_CLOSE,
+    PROMO_EXPIRE,
+    PROMO_SEEN,
+    PROMO_BUCKET_BOUNDARY
   };
 }  // extension_misc
 

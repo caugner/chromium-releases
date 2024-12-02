@@ -16,11 +16,11 @@
 #include "chrome/browser/autofill/autofill_type.h"
 #include "chrome/browser/autofill/field_types.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/webdata/autofill_entry.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/live_sync/live_sync_test.h"
@@ -168,7 +168,8 @@ class LiveAutofillSyncTest : public LiveSyncTest {
                                  (*i).name(),
                                  (*i).value(),
                                  string16(),
-                                 0));
+                                 0,
+                                 false));
     }
 
     WaitableEvent done_event(false, false);
@@ -271,20 +272,20 @@ class LiveAutofillSyncTest : public LiveSyncTest {
     for (size_t i = 0; i < profiles.size(); ++i) {
       const AutoFillProfile* p = profiles[i];
       if (!expected_profiles_map.count(p->Label())) {
-        LOG(INFO) << "Label " << p->Label() << " not in expected";
+        VLOG(1) << "Label " << p->Label() << " not in expected";
         return false;
       }
       AutoFillProfile* expected_profile = &expected_profiles_map[p->Label()];
-      expected_profile->set_unique_id(p->unique_id());
+      expected_profile->set_guid(p->guid());
       if (*expected_profile != *p) {
-        LOG(INFO) << "Profile mismatch";
+        VLOG(1) << "Profile mismatch";
         return false;
       }
       expected_profiles_map.erase(p->Label());
     }
 
     if (expected_profiles_map.size()) {
-      LOG(INFO) << "Labels in expected but not supplied";
+      VLOG(1) << "Labels in expected but not supplied";
       return false;
     }
 

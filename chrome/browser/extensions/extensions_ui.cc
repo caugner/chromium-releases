@@ -9,12 +9,12 @@
 #include "base/base64.h"
 #include "base/callback.h"
 #include "base/file_util.h"
+#include "base/singleton.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/thread.h"
 #include "base/version.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/debugger/devtools_manager.h"
@@ -36,6 +36,7 @@
 #include "chrome/browser/tab_contents/background_contents.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_icon_set.h"
@@ -58,8 +59,7 @@
 
 namespace {
 
-bool ShouldShowExtension(Extension* extension) {
-
+bool ShouldShowExtension(const Extension* extension) {
   // Don't show themes since this page's UI isn't really useful for themes.
   if (extension->is_theme())
     return false;
@@ -146,7 +146,8 @@ void ExtensionsUIHTMLSource::StartDataRequest(const std::string& path,
   localized_strings.SetString("allowFileAccess",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_ALLOW_FILE_ACCESS));
   localized_strings.SetString("incognitoWarning",
-      l10n_util::GetStringUTF16(IDS_EXTENSIONS_INCOGNITO_WARNING));
+      l10n_util::GetStringFUTF16(IDS_EXTENSIONS_INCOGNITO_WARNING,
+                                 l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
   localized_strings.SetString("reload",
       l10n_util::GetStringUTF16(IDS_EXTENSIONS_RELOAD));
   localized_strings.SetString("uninstall",
@@ -168,6 +169,8 @@ void ExtensionsUIHTMLSource::StartDataRequest(const std::string& path,
       l10n_util::GetStringUTF16(IDS_OK));
   localized_strings.SetString("cancelButton",
       l10n_util::GetStringUTF16(IDS_CANCEL));
+  localized_strings.SetString("showButton",
+      l10n_util::GetStringUTF16(IDS_EXTENSIONS_SHOW_BUTTON));
 
   SetFontAndTextDirection(&localized_strings);
 
@@ -310,7 +313,9 @@ void ExtensionsDOMHandler::RegisterMessages() {
   dom_ui_->RegisterMessageCallback("uninstall",
       NewCallback(this, &ExtensionsDOMHandler::HandleUninstallMessage));
   dom_ui_->RegisterMessageCallback("options",
-    NewCallback(this, &ExtensionsDOMHandler::HandleOptionsMessage));
+      NewCallback(this, &ExtensionsDOMHandler::HandleOptionsMessage));
+  dom_ui_->RegisterMessageCallback("showButton",
+      NewCallback(this, &ExtensionsDOMHandler::HandleShowButtonMessage));
   dom_ui_->RegisterMessageCallback("load",
       NewCallback(this, &ExtensionsDOMHandler::HandleLoadMessage));
   dom_ui_->RegisterMessageCallback("pack",
@@ -403,10 +408,13 @@ void ExtensionsDOMHandler::OnIconsLoaded(DictionaryValue* json) {
   registrar_.Add(this,
       NotificationType::BACKGROUND_CONTENTS_DELETED,
       NotificationService::AllSources());
+  registrar_.Add(this,
+      NotificationType::EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED,
+      NotificationService::AllSources());
 }
 
 ExtensionResource ExtensionsDOMHandler::PickExtensionIcon(
-    Extension* extension) {
+    const Extension* extension) {
   return extension->GetIconResource(Extension::EXTENSION_ICON_MEDIUM,
                                     ExtensionIconSet::MATCH_BIGGER);
 }
@@ -458,7 +466,7 @@ void ExtensionsDOMHandler::HandleEnableMessage(const ListValue* args) {
   if (enable_str == "true") {
     ExtensionPrefs* prefs = extensions_service_->extension_prefs();
     if (prefs->DidExtensionEscalatePermissions(extension_id)) {
-      Extension* extension =
+      const Extension* extension =
           extensions_service_->GetExtensionById(extension_id, true);
       ShowExtensionDisabledDialog(extensions_service_,
                                   dom_ui_->GetProfile(), extension);
@@ -475,8 +483,8 @@ void ExtensionsDOMHandler::HandleEnableIncognitoMessage(const ListValue* args) {
   std::string extension_id, enable_str;
   CHECK(args->GetString(0, &extension_id));
   CHECK(args->GetString(1, &enable_str));
-  Extension* extension = extensions_service_->GetExtensionById(extension_id,
-                                                               true);
+  const Extension* extension =
+      extensions_service_->GetExtensionById(extension_id, true);
   DCHECK(extension);
 
   // Flipping the incognito bit will generate unload/load notifications for the
@@ -500,15 +508,15 @@ void ExtensionsDOMHandler::HandleAllowFileAccessMessage(const ListValue* args) {
   std::string extension_id, allow_str;
   CHECK(args->GetString(0, &extension_id));
   CHECK(args->GetString(1, &allow_str));
-  Extension* extension = extensions_service_->GetExtensionById(extension_id,
-                                                               true);
+  const Extension* extension =
+      extensions_service_->GetExtensionById(extension_id, true);
   DCHECK(extension);
 
   extensions_service_->SetAllowFileAccess(extension, allow_str == "true");
 }
 
 void ExtensionsDOMHandler::HandleUninstallMessage(const ListValue* args) {
-  Extension* extension = GetExtension(args);
+  const Extension* extension = GetExtension(args);
   if (!extension)
     return;
 
@@ -526,7 +534,7 @@ void ExtensionsDOMHandler::InstallUIProceed() {
 
   // The extension can be uninstalled in another window while the UI was
   // showing. Do nothing in that case.
-  Extension* extension =
+  const Extension* extension =
       extensions_service_->GetExtensionById(extension_id_prompting_, true);
   if (!extension)
     return;
@@ -541,11 +549,16 @@ void ExtensionsDOMHandler::InstallUIAbort() {
 }
 
 void ExtensionsDOMHandler::HandleOptionsMessage(const ListValue* args) {
-  Extension* extension = GetExtension(args);
+  const Extension* extension = GetExtension(args);
   if (!extension || extension->options_url().is_empty())
     return;
   dom_ui_->GetProfile()->GetExtensionProcessManager()->OpenOptionsPage(
       extension, NULL);
+}
+
+void ExtensionsDOMHandler::HandleShowButtonMessage(const ListValue* args) {
+  const Extension* extension = GetExtension(args);
+  extensions_service_->SetBrowserActionVisibility(extension, true);
 }
 
 void ExtensionsDOMHandler::HandleLoadMessage(const ListValue* args) {
@@ -695,6 +708,7 @@ void ExtensionsDOMHandler::Observe(NotificationType type,
     case NotificationType::EXTENSION_FUNCTION_DISPATCHER_DESTROYED:
     case NotificationType::NAV_ENTRY_COMMITTED:
     case NotificationType::BACKGROUND_CONTENTS_NAVIGATED:
+    case NotificationType::EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED:
       MaybeUpdateAfterNotification();
       break;
     default:
@@ -702,7 +716,7 @@ void ExtensionsDOMHandler::Observe(NotificationType type,
   }
 }
 
-Extension* ExtensionsDOMHandler::GetExtension(const ListValue* args) {
+const Extension* ExtensionsDOMHandler::GetExtension(const ListValue* args) {
   std::string extension_id = WideToASCII(ExtractStringValue(args));
   CHECK(!extension_id.empty());
   return extensions_service_->GetExtensionById(extension_id, true);
@@ -799,6 +813,9 @@ DictionaryValue* ExtensionsDOMHandler::CreateExtensionDetailValue(
   if (!extension->options_url().is_empty())
     extension_data->SetString("options_url", extension->options_url().spec());
 
+  if (service && !service->GetBrowserActionVisibility(extension))
+    extension_data->SetBoolean("enable_show_button", true);
+
   // Add list of content_script detail DictionaryValues.
   ListValue *content_script_list = new ListValue();
   UserScriptList content_scripts = extension->content_scripts();
@@ -839,13 +856,13 @@ DictionaryValue* ExtensionsDOMHandler::CreateExtensionDetailValue(
   extension_data->Set("views", views);
   extension_data->SetBoolean("hasPopupAction",
       extension->browser_action() || extension->page_action());
-  extension_data->SetString("galleryUrl", extension->GalleryUrl().spec());
+  extension_data->SetString("homepageUrl", extension->GetHomepageURL().spec());
 
   return extension_data;
 }
 
 std::vector<ExtensionPage> ExtensionsDOMHandler::GetActivePagesForExtension(
-    Extension* extension) {
+    const Extension* extension) {
   std::vector<ExtensionPage> result;
 
   // Get the extension process's active views.
@@ -871,7 +888,7 @@ std::vector<ExtensionPage> ExtensionsDOMHandler::GetActivePagesForExtension(
 
 void ExtensionsDOMHandler::GetActivePagesForExtensionProcess(
     RenderProcessHost* process,
-    Extension* extension,
+    const Extension* extension,
     std::vector<ExtensionPage> *result) {
   if (!process)
     return;

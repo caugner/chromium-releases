@@ -13,12 +13,12 @@
 #include "base/process_util.h"
 #include "base/scoped_handle.h"
 #include "base/win_util.h"
-#include "chrome/browser/browser_init.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extensions_startup.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
+#include "chrome/browser/ui/browser_init.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -243,7 +243,7 @@ LRESULT ProcessSingleton::OnCopyData(HWND hwnd, const COPYDATASTRUCT* cds) {
   if (msg.substr(0, first_null) == L"START") {
     // Another instance is starting parse the command line & do what it would
     // have done.
-    LOG(INFO) << "Handling STARTUP request from another process";
+    VLOG(1) << "Handling STARTUP request from another process";
     const std::wstring::size_type second_null =
       msg.find_first_of(L'\0', first_null + 1);
     if (second_null == std::wstring::npos ||

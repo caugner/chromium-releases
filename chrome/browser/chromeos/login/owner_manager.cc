@@ -9,7 +9,10 @@
 
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_thread.h"
+#include "chrome/browser/chromeos/boot_times_loader.h"
+#include "chrome/browser/chromeos/login/signed_settings_temp_storage.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
 
@@ -24,8 +27,9 @@ OwnerManager::OwnerManager()
 OwnerManager::~OwnerManager() {}
 
 void OwnerManager::LoadOwnerKey() {
+  BootTimesLoader::Get()->AddLoginTimeMarker("LoadOwnerKeyStart", false);
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  LOG(INFO) << "Loading owner key";
+  VLOG(1) << "Loading owner key";
   NotificationType result = NotificationType::OWNER_KEY_FETCH_ATTEMPT_SUCCEEDED;
 
   // If |public_key_| isn't empty, we already have the key, so don't
@@ -47,7 +51,7 @@ void OwnerManager::LoadOwnerKey() {
 
 void OwnerManager::GenerateKeysAndExportPublic() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  LOG(INFO) << "Generating key pair";
+  VLOG(1) << "Generating key pair";
 
   private_key_.reset(utils_->GenerateKeyPair());
 
@@ -69,7 +73,7 @@ void OwnerManager::GenerateKeysAndExportPublic() {
 }
 
 void OwnerManager::ExportKey() {
-  LOG(INFO) << "Exporting public key";
+  VLOG(1) << "Exporting public key";
   if (!utils_->ExportPublicKeyViaDbus(private_key_.get(), this)) {
     private_key_.reset(NULL);
     BrowserThread::PostTask(
@@ -79,10 +83,11 @@ void OwnerManager::ExportKey() {
                           NotificationType::OWNER_KEY_FETCH_ATTEMPT_FAILED,
                           NotificationService::NoDetails()));
   }
+  BootTimesLoader::Get()->AddLoginTimeMarker("ExportKeyEnd", false);
 }
 
 void OwnerManager::OnComplete(bool value) {
-  LOG(INFO) << "Export public key attempt: " << (value ? "success" : "fail");
+  VLOG(1) << "Export public key attempt: " << (value ? "success" : "fail");
   NotificationType result = NotificationType::OWNER_KEY_FETCH_ATTEMPT_SUCCEEDED;
   if (!value)
     result = NotificationType::OWNER_KEY_FETCH_ATTEMPT_FAILED;
@@ -95,7 +100,13 @@ void OwnerManager::OnComplete(bool value) {
                         &OwnerManager::SendNotification,
                         result,
                         NotificationService::NoDetails()));
-
+  // We've stored some settings in transient storage
+  // before owner has been assigned.
+  // Now owner is assigned and key is generated and we should persist
+  // those settings into signed storage.
+  if (g_browser_process && g_browser_process->local_state()) {
+    SignedSettingsTempStorage::Finalize(g_browser_process->local_state());
+  }
 }
 
 bool OwnerManager::EnsurePublicKey() {
@@ -118,6 +129,7 @@ bool OwnerManager::EnsurePrivateKey() {
 void OwnerManager::Sign(const BrowserThread::ID thread_id,
                         const std::string& data,
                         Delegate* d) {
+  BootTimesLoader::Get()->AddLoginTimeMarker("SignStart", false);
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   // If it's not the case that we can get both keys...
@@ -127,10 +139,11 @@ void OwnerManager::Sign(const BrowserThread::ID thread_id,
         NewRunnableMethod(this,
                           &OwnerManager::CallDelegate,
                           d, KEY_UNAVAILABLE, std::vector<uint8>()));
+    BootTimesLoader::Get()->AddLoginTimeMarker("SignEnd", false);
     return;
   }
 
-  LOG(INFO) << "Starting signing attempt";
+  VLOG(1) << "Starting signing attempt";
   KeyOpCode return_code = SUCCESS;
   std::vector<uint8> signature;
   if (!utils_->Sign(data, &signature, private_key_.get())) {
@@ -142,12 +155,14 @@ void OwnerManager::Sign(const BrowserThread::ID thread_id,
       NewRunnableMethod(this,
                         &OwnerManager::CallDelegate,
                         d, return_code, signature));
+  BootTimesLoader::Get()->AddLoginTimeMarker("SignEnd", false);
 }
 
 void OwnerManager::Verify(const BrowserThread::ID thread_id,
                           const std::string& data,
                           const std::vector<uint8>& signature,
                           Delegate* d) {
+  BootTimesLoader::Get()->AddLoginTimeMarker("VerifyStart", false);
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   if (!EnsurePublicKey()) {
@@ -156,10 +171,11 @@ void OwnerManager::Verify(const BrowserThread::ID thread_id,
         NewRunnableMethod(this,
                           &OwnerManager::CallDelegate,
                           d, KEY_UNAVAILABLE, std::vector<uint8>()));
+    BootTimesLoader::Get()->AddLoginTimeMarker("VerifyEnd", false);
     return;
   }
 
-  LOG(INFO) << "Starting verify attempt";
+  VLOG(1) << "Starting verify attempt";
   KeyOpCode return_code = SUCCESS;
   if (!utils_->Verify(data, signature, public_key_)) {
     return_code = OPERATION_FAILED;
@@ -169,6 +185,7 @@ void OwnerManager::Verify(const BrowserThread::ID thread_id,
       NewRunnableMethod(this,
                         &OwnerManager::CallDelegate,
                         d, return_code, std::vector<uint8>()));
+  BootTimesLoader::Get()->AddLoginTimeMarker("VerifyEnd", false);
 }
 
 void OwnerManager::SendNotification(NotificationType type,

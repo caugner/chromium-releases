@@ -46,6 +46,7 @@ NPError CreateInstanceInPaintTest::SetWindow(NPWindow* pNPWindow) {
           WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS | WS_VISIBLE ,
           0, 0, 100, 100, parent, 0, GetModuleHandle(NULL), 0);
       DCHECK(window_);
+      // TODO: this property leaks.
       ::SetProp(window_, L"Plugin_Instance", this);
     }
   } else if (test_id() == "2") {
@@ -63,6 +64,7 @@ LRESULT CALLBACK CreateInstanceInPaintTest::WindowProc(
         reinterpret_cast<CreateInstanceInPaintTest*>
             (::GetProp(window, L"Plugin_Instance"));
     if (this_instance->test_id() == "1" && !this_instance->created_) {
+      ::RemoveProp(window, L"Plugin_Instance");
       this_instance->created_ = true;
       this_instance->HostFunctions()->geturlnotify(
           this_instance->id(), "javascript:CreateNewInstance()", NULL,

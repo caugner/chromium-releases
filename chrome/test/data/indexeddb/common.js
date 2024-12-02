@@ -1,3 +1,7 @@
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 function debug(message)
 {
   document.getElementById('status').innerHTML += '<br/>' + message;
@@ -22,9 +26,19 @@ function getLog()
   return "" + document.getElementById('status').innerHTML;
 }
 
+function unexpectedAbortCallback()
+{
+  fail('unexpectedAbortCallback');
+}
+
 function unexpectedSuccessCallback()
 {
   fail('unexpectedSuccessCallback');
+}
+
+function unexpectedCompleteCallback()
+{
+  fail('unexpectedCompleteCallback');
 }
 
 function unexpectedErrorCallback()
@@ -34,9 +48,9 @@ function unexpectedErrorCallback()
 
 function deleteAllObjectStores(db)
 {
-  objectStores = db.objectStores;
-  for (var i = 0; i < objectStores.length; ++i)
-    db.removeObjectStore(objectStores[i]);
+  objectStoreNames = db.objectStoreNames;
+  for (var i = 0; i < objectStoreNames.length; ++i)
+    db.deleteObjectStore(objectStoreNames[i]);
 }
 
 // The following functions are based on
@@ -83,7 +97,7 @@ function shouldBe(_a, _b)
   else if (typeof(_av) == typeof(_bv))
     fail(_a + " should be " + _bv + ". Was " + stringify(_av) + ".");
   else
-    fail(_a + " should be " + _bv + " (of type " + typeof _bv + "). " + 
+    fail(_a + " should be " + _bv + " (of type " + typeof _bv + "). " +
          "Was " + _av + " (of type " + typeof _av + ").");
 }
 

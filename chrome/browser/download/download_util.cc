@@ -20,10 +20,12 @@
 #include "base/singleton.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "base/sys_string_conversions.h"
+#include "base/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/browser.h"
+#include "base/win/windows_version.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_thread.h"
@@ -39,6 +41,7 @@
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/tab_contents/infobar_delegate.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/time_format.h"
@@ -70,9 +73,8 @@
 #if defined(OS_WIN)
 #include "app/os_exchange_data_provider_win.h"
 #include "app/win_util.h"
-#include "base/base_drag_source.h"
-#include "base/registry.h"
-#include "base/scoped_comptr_win.h"
+#include "app/win/drag_source.h"
+#include "base/win/scoped_comptr.h"
 #include "base/win_util.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/views/frame/browser_view.h"
@@ -83,6 +85,13 @@ namespace download_util {
 // How many times to cycle the complete animation. This should be an odd number
 // so that the animation ends faded out.
 static const int kCompleteAnimationCycles = 5;
+
+// The maximum number of 'uniquified' files we will try to create.
+// This is used when the filename we're trying to download is already in use,
+// so we create a new unique filename by appending " (nnn)" before the
+// extension, where 1 <= nnn <= kMaxUniqueFiles.
+// Also used by code that cleans up said files.
+static const int kMaxUniqueFiles = 100;
 
 // Download temporary file creation --------------------------------------------
 
@@ -150,8 +159,13 @@ void GenerateExtension(const FilePath& file_name,
     extension.assign(default_extension);
 #endif
 
-  if (extension.empty())
+  if (extension.empty()) {
+    // The GetPreferredExtensionForMimeType call will end up going to disk.  Do
+    // this on another thread to avoid slowing the IO thread.
+    // http://crbug.com/61827
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
     net::GetPreferredExtensionForMimeType(mime_type, &extension);
+  }
 
   generated_extension->swap(extension);
 }
@@ -216,52 +230,32 @@ void OpenChromeExtension(Profile* profile,
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(download_item.is_extension_install());
 
-  // We don't support extensions in OTR mode.
   ExtensionsService* service = profile->GetExtensionsService();
-  if (service) {
-    NotificationService* nservice = NotificationService::current();
-    GURL nonconst_download_url = download_item.url();
-    nservice->Notify(NotificationType::EXTENSION_READY_FOR_INSTALL,
-                     Source<DownloadManager>(download_manager),
-                     Details<GURL>(&nonconst_download_url));
+  CHECK(service);
+  NotificationService* nservice = NotificationService::current();
+  GURL nonconst_download_url = download_item.url();
+  nservice->Notify(NotificationType::EXTENSION_READY_FOR_INSTALL,
+                   Source<DownloadManager>(download_manager),
+                   Details<GURL>(&nonconst_download_url));
 
-    scoped_refptr<CrxInstaller> installer(
-        new CrxInstaller(service->install_directory(),
-                         service,
-                         new ExtensionInstallUI(profile)));
-    installer->set_delete_source(true);
+  scoped_refptr<CrxInstaller> installer(
+      new CrxInstaller(service, new ExtensionInstallUI(profile)));
+  installer->set_delete_source(true);
 
-    if (UserScript::HasUserScriptFileExtension(download_item.url())) {
-      installer->InstallUserScript(download_item.full_path(),
-                                   download_item.url());
-    } else {
-      bool is_gallery_download = service->IsDownloadFromGallery(
-          download_item.url(), download_item.referrer_url());
-      installer->set_original_mime_type(download_item.original_mime_type());
-      installer->set_apps_require_extension_mime_type(true);
-      installer->set_allow_privilege_increase(true);
-      installer->set_original_url(download_item.url());
-      installer->set_is_gallery_install(is_gallery_download);
-      installer->InstallCrx(download_item.full_path());
-      installer->set_allow_silent_install(is_gallery_download);
-    }
-  } else {
-    TabContents* contents = NULL;
-    // Get last active normal browser of profile.
-    Browser* last_active =
-        BrowserList::FindBrowserWithType(profile, Browser::TYPE_NORMAL, true);
-    if (last_active)
-      contents = last_active->GetSelectedTabContents();
-    if (contents) {
-      contents->AddInfoBar(
-          new SimpleAlertInfoBarDelegate(contents,
-              l10n_util::GetStringUTF16(
-                  IDS_EXTENSION_INCOGNITO_INSTALL_INFOBAR_LABEL),
-              ResourceBundle::GetSharedInstance().GetBitmapNamed(
-                  IDR_INFOBAR_PLUGIN_INSTALL),
-              true));
-    }
+  if (UserScript::HasUserScriptFileExtension(download_item.url())) {
+    installer->InstallUserScript(download_item.full_path(),
+                                 download_item.url());
+    return;
   }
+
+  bool is_gallery_download = service->IsDownloadFromGallery(
+      download_item.url(), download_item.referrer_url());
+  installer->set_original_mime_type(download_item.original_mime_type());
+  installer->set_apps_require_extension_mime_type(true);
+  installer->set_original_url(download_item.url());
+  installer->set_is_gallery_install(is_gallery_download);
+  installer->InstallCrx(download_item.full_path());
+  installer->set_allow_silent_install(is_gallery_download);
 }
 
 // Download progress painting --------------------------------------------------
@@ -442,8 +436,8 @@ void DragDownload(const DownloadItem* download,
   OSExchangeData data;
 
   if (icon) {
-    drag_utils::CreateDragImageForFile(download->GetFileName().value(), icon,
-                                       &data);
+    drag_utils::CreateDragImageForFile(
+        download->GetFileNameToReportUser().value(), icon, &data);
   }
 
   const FilePath full_path = download->full_path();
@@ -456,11 +450,11 @@ void DragDownload(const DownloadItem* download,
   // Add URL so that we can load supported files when dragged to TabContents.
   if (net::IsSupportedMimeType(mime_type)) {
     data.SetURL(GURL(WideToUTF8(full_path.ToWStringHack())),
-                     download->GetFileName().ToWStringHack());
+                     download->GetFileNameToReportUser().ToWStringHack());
   }
 
 #if defined(OS_WIN)
-  scoped_refptr<BaseDragSource> drag_source(new BaseDragSource);
+  scoped_refptr<app::win::DragSource> drag_source(new app::win::DragSource);
 
   // Run the drag and drop loop
   DWORD effects;
@@ -496,10 +490,10 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
       WideToUTF16Hack(base::TimeFormatShortDate(download->start_time())));
   file_value->SetInteger("id", id);
   file_value->SetString("file_path",
-      WideToUTF16Hack(download->full_path().ToWStringHack()));
+      WideToUTF16Hack(download->GetTargetFilePath().ToWStringHack()));
   // Keep file names as LTR.
   string16 file_name = WideToUTF16Hack(
-      download->GetFileName().ToWStringHack());
+      download->GetFileNameToReportUser().ToWStringHack());
   file_name = base::i18n::GetDisplayStringInLTRDirectionality(file_name);
   file_value->SetString("file_name", file_name);
   file_value->SetString("url", download->url().spec());
@@ -547,35 +541,26 @@ std::wstring GetProgressStatusText(DownloadItem* download) {
 
   // Adjust both strings for the locale direction since we don't yet know which
   // string we'll end up using for constructing the final progress string.
-  std::wstring amount_localized;
-  if (base::i18n::AdjustStringForLocaleDirection(amount, &amount_localized)) {
-    amount.assign(amount_localized);
-    received_size.assign(amount_localized);
-  }
+  base::i18n::AdjustStringForLocaleDirection(&amount);
 
   if (total) {
     amount_units = GetByteDisplayUnits(total);
     std::wstring total_text =
         UTF16ToWideHack(FormatBytes(total, amount_units, true));
-    std::wstring total_text_localized;
-    if (base::i18n::AdjustStringForLocaleDirection(total_text,
-                                                   &total_text_localized))
-      total_text.assign(total_text_localized);
+    base::i18n::AdjustStringForLocaleDirection(&total_text);
 
+    base::i18n::AdjustStringForLocaleDirection(&received_size);
     amount = l10n_util::GetStringF(IDS_DOWNLOAD_TAB_PROGRESS_SIZE,
                                    received_size,
                                    total_text);
   } else {
     amount.assign(received_size);
   }
-  amount_units = GetByteDisplayUnits(download->CurrentSpeed());
-  std::wstring speed_text =
-      UTF16ToWideHack(FormatSpeed(download->CurrentSpeed(), amount_units,
-                                  true));
-  std::wstring speed_text_localized;
-  if (base::i18n::AdjustStringForLocaleDirection(speed_text,
-                                                 &speed_text_localized))
-    speed_text.assign(speed_text_localized);
+  int64 current_speed = download->CurrentSpeed();
+  amount_units = GetByteDisplayUnits(current_speed);
+  std::wstring speed_text = UTF16ToWideHack(FormatSpeed(current_speed,
+                                                        amount_units, true));
+  base::i18n::AdjustStringForLocaleDirection(&speed_text);
 
   base::TimeDelta remaining;
   string16 time_remaining;
@@ -585,6 +570,7 @@ std::wstring GetProgressStatusText(DownloadItem* download) {
     time_remaining = TimeFormat::TimeRemaining(remaining);
 
   if (time_remaining.empty()) {
+    base::i18n::AdjustStringForLocaleDirection(&amount);
     return l10n_util::GetStringF(IDS_DOWNLOAD_TAB_PROGRESS_STATUS_TIME_UNKNOWN,
                                  speed_text, amount);
   }
@@ -598,20 +584,20 @@ void UpdateAppIconDownloadProgress(int download_count,
                                    float progress) {
 #if defined(OS_WIN)
   // Taskbar progress bar is only supported on Win7.
-  if (win_util::GetWinVersion() < win_util::WINVERSION_WIN7)
+  if (base::win::GetVersion() < base::win::VERSION_WIN7)
     return;
 
-  ScopedComPtr<ITaskbarList3> taskbar;
+  base::win::ScopedComPtr<ITaskbarList3> taskbar;
   HRESULT result = taskbar.CreateInstance(CLSID_TaskbarList, NULL,
                                           CLSCTX_INPROC_SERVER);
   if (FAILED(result)) {
-    LOG(INFO) << "failed creating a TaskbarList object: " << result;
+    VLOG(1) << "Failed creating a TaskbarList object: " << result;
     return;
   }
 
   result = taskbar->HrInit();
   if (FAILED(result)) {
-    LOG(ERROR) << "failed initializing an ITaskbarList3 interface.";
+    LOG(ERROR) << "Failed initializing an ITaskbarList3 interface.";
     return;
   }
 
@@ -640,13 +626,11 @@ void AppendNumberToPath(FilePath* path, int number) {
 // unique. If |path| does not exist, 0 is returned.  If it fails to find such
 // a number, -1 is returned.
 int GetUniquePathNumber(const FilePath& path) {
-  const int kMaxAttempts = 100;
-
   if (!file_util::PathExists(path))
     return 0;
 
   FilePath new_path;
-  for (int count = 1; count <= kMaxAttempts; ++count) {
+  for (int count = 1; count <= kMaxUniqueFiles; ++count) {
     new_path = FilePath(path);
     AppendNumberToPath(&new_path, count);
 
@@ -688,14 +672,12 @@ void CancelDownloadRequest(ResourceDispatcherHost* rdh,
 }
 
 int GetUniquePathNumberWithCrDownload(const FilePath& path) {
-  const int kMaxAttempts = 100;
-
   if (!file_util::PathExists(path) &&
       !file_util::PathExists(GetCrDownloadPath(path)))
     return 0;
 
   FilePath new_path;
-  for (int count = 1; count <= kMaxAttempts; ++count) {
+  for (int count = 1; count <= kMaxUniqueFiles; ++count) {
     new_path = FilePath(path);
     AppendNumberToPath(&new_path, count);
 
@@ -707,10 +689,33 @@ int GetUniquePathNumberWithCrDownload(const FilePath& path) {
   return -1;
 }
 
+namespace {
+
+// NOTE: If index is 0, deletes files that do not have the " (nnn)" appended.
+void DeleteUniqueDownloadFile(const FilePath& path, int index) {
+  FilePath new_path(path);
+  if (index > 0)
+    AppendNumberToPath(&new_path, index);
+  file_util::Delete(new_path, false);
+}
+
+}
+
+void EraseUniqueDownloadFiles(const FilePath& path) {
+  FilePath cr_path = GetCrDownloadPath(path);
+
+  for (int index = 0; index <= kMaxUniqueFiles; ++index) {
+    DeleteUniqueDownloadFile(path, index);
+    DeleteUniqueDownloadFile(cr_path, index);
+  }
+}
+
 FilePath GetCrDownloadPath(const FilePath& suggested_path) {
   FilePath::StringType file_name;
-  SStringPrintf(&file_name, PRFilePathLiteral FILE_PATH_LITERAL(".crdownload"),
-                suggested_path.value().c_str());
+  base::SStringPrintf(
+      &file_name,
+      PRFilePathLiteral FILE_PATH_LITERAL(".crdownload"),
+      suggested_path.value().c_str());
   return FilePath(file_name);
 }
 

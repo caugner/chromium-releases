@@ -1,6 +1,6 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "media/tools/player_wtl/movie.h"
 
@@ -19,7 +19,7 @@ using media::FFmpegAudioDecoder;
 using media::FFmpegDemuxer;
 using media::FFmpegVideoDecoder;
 using media::FileDataSource;
-using media::FilterFactoryCollection;
+using media::MediaFilterCollection;
 using media::PipelineImpl;
 
 namespace media {
@@ -53,28 +53,26 @@ bool Movie::Open(const wchar_t* url, WtlVideoRenderer* video_renderer) {
     Close();
   }
 
-  // Create our filter factories.
-  scoped_refptr<FilterFactoryCollection> factories =
-      new FilterFactoryCollection();
-  factories->AddFactory(FileDataSource::CreateFactory());
-  factories->AddFactory(FFmpegAudioDecoder::CreateFactory());
-  factories->AddFactory(FFmpegDemuxer::CreateFilterFactory());
-  factories->AddFactory(FFmpegVideoDecoder::CreateFactory());
+  // Create filter collection.
+  scoped_ptr<MediaFilterCollection> collection(new MediaFilterCollection());
+  collection->AddDataSource(new FileDataSource());
+  collection->AddAudioDecoder(new FFmpegAudioDecoder());
+  collection->AddDemuxer(new FFmpegDemuxer());
+  collection->AddVideoDecoder(new FFmpegVideoDecoder(NULL));
 
   if (enable_audio_) {
-    factories->AddFactory(AudioRendererImpl::CreateFilterFactory());
+    collection->AddAudioRenderer(new AudioRendererImpl());
   } else {
-    factories->AddFactory(media::NullAudioRenderer::CreateFilterFactory());
+    collection->AddAudioRenderer(new media::NullAudioRenderer());
   }
-  factories->AddFactory(
-      new media::InstanceFilterFactory<WtlVideoRenderer>(video_renderer));
+  collection->AddVideoRenderer(video_renderer);
 
   thread_.reset(new base::Thread("PipelineThread"));
   thread_->Start();
   pipeline_ = new PipelineImpl(thread_->message_loop());
 
   // Create and start our pipeline.
-  pipeline_->Start(factories, WideToUTF8(std::wstring(url)), NULL);
+  pipeline_->Start(collection.release(), WideToUTF8(std::wstring(url)), NULL);
   while (true) {
     PlatformThread::Sleep(100);
     if (pipeline_->IsInitialized())

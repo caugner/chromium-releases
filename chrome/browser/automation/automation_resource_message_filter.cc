@@ -4,8 +4,8 @@
 
 #include "chrome/browser/automation/automation_resource_message_filter.h"
 
-#include "base/histogram.h"
 #include "base/path_service.h"
+#include "base/metrics/histogram.h"
 #include "base/stl_util-inl.h"
 #include "chrome/browser/automation/url_request_automation_job.h"
 #include "chrome/browser/browser_thread.h"
@@ -15,8 +15,8 @@
 #include "chrome/browser/net/url_request_slow_download_job.h"
 #include "chrome/browser/net/url_request_slow_http_job.h"
 #include "chrome/browser/renderer_host/resource_message_filter.h"
+#include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/test/automation/automation_messages.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request_filter.h"
@@ -45,7 +45,7 @@ class AutomationCookieStore : public net::CookieStore {
   }
 
   virtual ~AutomationCookieStore() {
-    DLOG(INFO) << "In " << __FUNCTION__;
+    DVLOG(1) << "In " << __FUNCTION__;
   }
 
   // CookieStore implementation.
@@ -82,6 +82,26 @@ class AutomationCookieStore : public net::CookieStore {
   DISALLOW_COPY_AND_ASSIGN(AutomationCookieStore);
 };
 
+AutomationResourceMessageFilter::AutomationDetails::AutomationDetails()
+    : tab_handle(0),
+      ref_count(1),
+      is_pending_render_view(false) {
+}
+
+AutomationResourceMessageFilter::AutomationDetails::AutomationDetails(
+    int tab,
+    AutomationResourceMessageFilter* flt,
+    bool pending_view)
+    : tab_handle(tab), ref_count(1), filter(flt),
+      is_pending_render_view(pending_view) {
+}
+
+AutomationResourceMessageFilter::AutomationDetails::~AutomationDetails() {}
+
+struct AutomationResourceMessageFilter::CookieCompletionInfo {
+  net::CompletionCallback* completion_callback;
+  scoped_refptr<net::CookieStore> cookie_store;
+};
 
 AutomationResourceMessageFilter::AutomationResourceMessageFilter()
     : channel_(NULL) {
@@ -144,6 +164,12 @@ bool AutomationResourceMessageFilter::OnMessageReceived(
         job->OnMessage(message);
         return true;
       }
+    } else {
+      // This could occur if the request was stopped from Chrome which would
+      // delete it from the request map. If we receive data for this request
+      // from the host we should ignore it.
+      LOG(ERROR) << "Failed to find request id:" << request_id;
+      return true;
     }
   }
 
@@ -226,7 +252,11 @@ bool AutomationResourceMessageFilter::RegisterRenderView(
       BrowserThread::IO, FROM_HERE,
       NewRunnableFunction(
           AutomationResourceMessageFilter::RegisterRenderViewInIOThread,
-          renderer_pid, renderer_id, tab_handle, filter, pending_view));
+          renderer_pid,
+          renderer_id,
+          tab_handle,
+          make_scoped_refptr(filter),
+          pending_view));
   return true;
 }
 
@@ -251,7 +281,10 @@ bool AutomationResourceMessageFilter::ResumePendingRenderView(
       BrowserThread::IO, FROM_HERE,
       NewRunnableFunction(
           AutomationResourceMessageFilter::ResumePendingRenderViewInIOThread,
-          renderer_pid, renderer_id, tab_handle, filter));
+          renderer_pid,
+          renderer_id,
+          tab_handle,
+          make_scoped_refptr(filter)));
   return true;
 }
 
@@ -261,8 +294,8 @@ void AutomationResourceMessageFilter::RegisterRenderViewInIOThread(
     bool pending_view) {
   RendererId renderer_key(renderer_pid, renderer_id);
 
-  scoped_refptr<net::CookieStore> cookie_store =
-      new AutomationCookieStore(filter, tab_handle);
+  scoped_refptr<net::CookieStore> cookie_store(
+      new AutomationCookieStore(filter, tab_handle));
 
   RenderViewMap::iterator automation_details_iter(
       filtered_render_views_.Get().find(renderer_key));
@@ -285,7 +318,7 @@ void AutomationResourceMessageFilter::UnRegisterRenderViewInIOThread(
                                                    renderer_id)));
 
   if (automation_details_iter == filtered_render_views_.Get().end()) {
-    LOG(INFO) << "UnRegisterRenderViewInIOThread: already unregistered";
+    VLOG(1) << "UnRegisterRenderViewInIOThread: already unregistered";
     return;
   }
 
@@ -317,8 +350,8 @@ bool AutomationResourceMessageFilter::ResumePendingRenderViewInIOThread(
 
   DCHECK(automation_details_iter->second.is_pending_render_view);
 
-  scoped_refptr<net::CookieStore> cookie_store =
-      new AutomationCookieStore(filter, tab_handle);
+  scoped_refptr<net::CookieStore> cookie_store(
+      new AutomationCookieStore(filter, tab_handle));
 
   AutomationResourceMessageFilter* old_filter =
       automation_details_iter->second.filter;
@@ -390,7 +423,7 @@ void AutomationResourceMessageFilter::OnGetFilteredInetHitCount(
 void AutomationResourceMessageFilter::OnRecordHistograms(
     const std::vector<std::string>& histogram_list) {
   for (size_t index = 0; index < histogram_list.size(); ++index) {
-    Histogram::DeserializeHistogramInfo(histogram_list[index]);
+    base::Histogram::DeserializeHistogramInfo(histogram_list[index]);
   }
 }
 

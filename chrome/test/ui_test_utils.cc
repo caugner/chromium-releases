@@ -15,7 +15,6 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/automation/ui_controls.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/dom_operation_notification_details.h"
@@ -27,6 +26,7 @@
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/notification_type.h"
@@ -243,7 +243,7 @@ class FindInPageNotificationObserver : public NotificationObserver {
           number_of_matches_ = find_details->number_of_matches();
           MessageLoopForUI::current()->Quit();
         } else {
-          DLOG(INFO) << "Ignoring, since we only care about the final message";
+          DVLOG(1) << "Ignoring, since we only care about the final message";
         }
       }
     } else {
@@ -339,6 +339,12 @@ bool ExecuteJavaScriptHelper(RenderViewHost* render_view_host,
 
   result->reset(result_val);
   return true;
+}
+
+void Checkpoint(const char* message, const base::TimeTicks& start_time) {
+  LOG(INFO) << message << " : "
+            << (base::TimeTicks::Now() - start_time).InMilliseconds()
+            << " ms" << std::flush;
 }
 
 }  // namespace
@@ -605,10 +611,14 @@ bool SendKeyPressSync(const Browser* browser,
                       bool shift,
                       bool alt,
                       bool command) {
+  base::TimeTicks start_time = base::TimeTicks::Now();
+  Checkpoint("SendKeyPressSync", start_time);
+
   gfx::NativeWindow window = NULL;
   if (!GetNativeWindow(browser, &window))
     return false;
 
+  Checkpoint("SendKeyPressNotifyWhenDone", start_time);
   if (!ui_controls::SendKeyPressNotifyWhenDone(
           window, key, control, shift, alt, command,
           new MessageLoop::QuitTask())) {
@@ -618,7 +628,9 @@ bool SendKeyPressSync(const Browser* browser,
   // Run the message loop. It'll stop running when either the key was received
   // or the test timed out (in which case testing::Test::HasFatalFailure should
   // be set).
+  Checkpoint("Running loop", start_time);
   RunMessageLoop();
+  Checkpoint("Check if HasFatalFailure", start_time);
   return !testing::Test::HasFatalFailure();
 }
 

@@ -196,12 +196,13 @@ void WebPluginDelegateStub::OnInit(const PluginMsg_Init_Params& params,
   }
 }
 
-void WebPluginDelegateStub::OnWillSendRequest(int id, const GURL& url) {
+void WebPluginDelegateStub::OnWillSendRequest(int id, const GURL& url,
+                                              int http_status_code) {
   WebPluginResourceClient* client = webplugin_->GetResourceClient(id);
   if (!client)
     return;
 
-  client->WillSendRequest(url);
+  client->WillSendRequest(url, http_status_code);
 }
 
 void WebPluginDelegateStub::OnDidReceiveResponse(
@@ -429,11 +430,7 @@ void WebPluginDelegateStub::CreateSharedBuffer(
     uint32 size,
     base::SharedMemory* shared_buf,
     base::SharedMemoryHandle* remote_handle) {
-  if (!shared_buf->Create(std::string(), false, false, size)) {
-    NOTREACHED();
-    return;
-  }
-  if (!shared_buf->Map(size)) {
+  if (!shared_buf->CreateAndMapAnonymous(size)) {
     NOTREACHED();
     shared_buf->Close();
     return;

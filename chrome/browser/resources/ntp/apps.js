@@ -6,53 +6,85 @@ var MAX_APPS_PER_ROW = [];
 MAX_APPS_PER_ROW[LayoutMode.SMALL] = 4;
 MAX_APPS_PER_ROW[LayoutMode.NORMAL] = 6;
 
+// The URL prefix used in the app link 'ping' attributes.
+var PING_APP_LAUNCH_PREFIX = 'record-app-launch';
+
+// The URL prefix used in the webstore link 'ping' attributes.
+var PING_WEBSTORE_LAUNCH_PREFIX = 'record-webstore-launch';
+
 function getAppsCallback(data) {
   logEvent('received apps');
+
+  // In the case of prefchange-triggered updates, we don't receive this flag.
+  // Just leave it set as it was before in that case.
+  if ('showPromo' in data)
+    apps.showPromo = data.showPromo;
+
   var appsSection = $('apps');
   var appsSectionContent = $('apps-content');
   var appsMiniview = appsSection.getElementsByClassName('miniview')[0];
   var appsPromo = $('apps-promo');
-  var webStoreEntry;
+  var appsPromoPing = PING_WEBSTORE_LAUNCH_PREFIX + '+' + apps.showPromo;
+  var webStoreEntry, webStoreMiniEntry;
+
+  // Hide menu options that are not supported on the OS or windowing system.
+
+  // The "Launch as Window" menu option.
+  $('apps-launch-type-window-menu-item').style.display =
+      (data.disableAppWindowLaunch ? 'none' : 'inline');
+
+  // The "Create App Shortcut" menu option.
+  $('apps-create-shortcut-command-menu-item').style.display =
+      (data.disableCreateAppShortcut ? 'none' : 'inline');
 
   appsMiniview.textContent = '';
   appsSectionContent.textContent = '';
 
   data.apps.sort(function(a,b) {
-    return a.app_launch_index - b.app_launch_index
+    return a.app_launch_index - b.app_launch_index;
   });
 
   clearClosedMenu(apps.menu);
-  if (data.apps.length == 0) {
+  data.apps.forEach(function(app) {
+    appsSectionContent.appendChild(apps.createElement(app));
+  });
+
+  webStoreEntry = apps.createWebStoreElement();
+  webStoreEntry.querySelector('a').setAttribute('ping', appsPromoPing);
+  appsSectionContent.appendChild(webStoreEntry);
+
+  data.apps.slice(0, MAX_MINIVIEW_ITEMS).forEach(function(app) {
+    appsMiniview.appendChild(apps.createMiniviewElement(app));
+    addClosedMenuEntryWithLink(apps.menu, apps.createClosedMenuElement(app));
+  });
+  if (data.apps.length < MAX_MINIVIEW_ITEMS) {
+    webStoreMiniEntry = apps.createWebStoreMiniElement();
+    webStoreEntry.querySelector('a').setAttribute('ping', appsPromoPing);
+    appsMiniview.appendChild(webStoreMiniEntry);
+    addClosedMenuEntryWithLink(apps.menu,
+                               apps.createWebStoreClosedMenuElement());
+  }
+
+  if (!data.showLauncher || (shownSections & MINIMIZED_APPS)) {
     appsSection.classList.add('disabled');
-    layoutSections();
   } else {
-    data.apps.forEach(function(app) {
-      appsSectionContent.appendChild(apps.createElement(app));
-    });
-
-    webStoreEntry = apps.createWebStoreElement();
-    appsSectionContent.appendChild(webStoreEntry);
-
-    data.apps.slice(0, MAX_MINIVIEW_ITEMS).forEach(function(app) {
-      appsMiniview.appendChild(apps.createMiniviewElement(app));
-      addClosedMenuEntryWithLink(apps.menu, apps.createClosedMenuElement(app));
-    });
-
-    if (!(shownSections & MINIMIZED_APPS)) {
-      appsSection.classList.remove('disabled');
-    }
+    appsSection.classList.remove('disabled');
   }
   addClosedMenuFooter(apps.menu, 'apps', MINIMIZED_APPS, Section.APPS);
 
   apps.loaded = true;
-  if (data.showPromo)
+  if (apps.showPromo)
     document.documentElement.classList.add('apps-promo-visible');
   else
     document.documentElement.classList.remove('apps-promo-visible');
+
+  var appsPromoLink = $('apps-promo-link');
+  if (appsPromoLink)
+    appsPromoLink.setAttribute('ping', appsPromoPing);
   maybeDoneLoading();
 
-  if (data.apps.length > 0 && isDoneLoading()) {
-    if (!data.showPromo && data.apps.length >= MAX_APPS_PER_ROW[layoutMode])
+  if (isDoneLoading()) {
+    if (!apps.showPromo && data.apps.length >= MAX_APPS_PER_ROW[layoutMode])
       webStoreEntry.classList.add('loner');
     else
       webStoreEntry.classList.remove('loner');
@@ -84,11 +116,6 @@ var apps = (function() {
     a.href = app['launch_url'];
 
     return div;
-  }
-
-  function createContextMenu(app) {
-    var menu = new cr.ui.Menu;
-    var button = document.createElement(button);
   }
 
   function launchApp(appId) {
@@ -139,10 +166,11 @@ var apps = (function() {
   var LaunchType = {
     LAUNCH_PINNED: 0,
     LAUNCH_REGULAR: 1,
-    LAUNCH_FULLSCREEN: 2
+    LAUNCH_FULLSCREEN: 2,
+    LAUNCH_WINDOW: 3
   };
 
-  // Keep in sync with LaunchContainer in extension.h
+  // Keep in sync with LaunchContainer in extension_constants.h
   var LaunchContainer = {
     LAUNCH_WINDOW: 0,
     LAUNCH_PANEL: 1,
@@ -163,17 +191,23 @@ var apps = (function() {
         $('apps-launch-command').label = app['name'];
         $('apps-options-command').canExecuteChange();
 
-        var appLinkSel = '.app a[app-id=' + app['id'] + ']';
-        var launchType =
-            el.querySelector(appLinkSel).getAttribute('launch-type');
+        var launchTypeEl;
+        if (el.getAttribute('app-id') === app['id']) {
+          launchTypeEl = el;
+        } else {
+          appLinkSel = 'a[app-id=' + app['id'] + ']';
+          launchTypeEl = el.querySelector(appLinkSel);
+        }
 
+        var launchType = launchTypeEl.getAttribute('launch-type');
         var launchContainer = app['launch_container'];
         var isPanel = launchContainer == LaunchContainer.LAUNCH_PANEL;
 
         // Update the commands related to the launch type.
         var launchTypeIds = ['apps-launch-type-pinned',
                              'apps-launch-type-regular',
-                             'apps-launch-type-fullscreen'];
+                             'apps-launch-type-fullscreen',
+                             'apps-launch-type-window'];
         launchTypeIds.forEach(function(id) {
           var command = $(id);
           command.disabled = isPanel;
@@ -201,9 +235,13 @@ var apps = (function() {
       case 'apps-uninstall-command':
         chrome.send('uninstallApp', [currentApp['id']]);
         break;
+      case 'apps-create-shortcut-command':
+        chrome.send('createAppShortcut', [currentApp['id']]);
+        break;
       case 'apps-launch-type-pinned':
       case 'apps-launch-type-regular':
       case 'apps-launch-type-fullscreen':
+      case 'apps-launch-type-window':
         chrome.send('setLaunchType',
             [currentApp['id'], e.command.getAttribute('launch-type')]);
         break;
@@ -227,11 +265,14 @@ var apps = (function() {
 
     menu: $('apps-menu'),
 
+    showPromo: false,
+
     createElement: function(app) {
       var div = createElement(app);
       var a = div.firstChild;
 
       a.onclick = handleClick;
+      a.setAttribute('ping', PING_APP_LAUNCH_PREFIX + '+' + this.showPromo);
       a.style.backgroundImage = url(app['icon_big']);
       if (hashParams['app-id'] == app['id']) {
         div.setAttribute('new', 'new');
@@ -252,13 +293,6 @@ var apps = (function() {
           document.documentElement.setAttribute("install-animation-enabled",
                                                 "false");
         });
-
-        // Make sure apps is de-minimized...
-        setSectionVisible('apps', Section.APPS, true, MINIMIZED_APPS);
-
-        // ...and expanded.
-        if ($('apps').classList.contains('hidden'))
-          toggleSectionVisibilityAndAnimate('APPS');
       }
 
       var settingsButton = div.appendChild(new cr.ui.ContextMenuButton);
@@ -278,6 +312,7 @@ var apps = (function() {
       a.textContent = app['name'];
       a.href = app['launch_url'];
       a.onclick = handleClick;
+      a.setAttribute('ping', PING_APP_LAUNCH_PREFIX + '+' + this.showPromo);
       a.style.backgroundImage = url(app['icon_small']);
       a.className = 'item';
       span.appendChild(a);
@@ -293,8 +328,12 @@ var apps = (function() {
       a.textContent = app['name'];
       a.href = app['launch_url'];
       a.onclick = handleClick;
+      a.setAttribute('ping', PING_APP_LAUNCH_PREFIX + '+' + this.showPromo);
       a.style.backgroundImage = url(app['icon_small']);
       a.className = 'item';
+
+      addContextMenu(a, app);
+
       return a;
     },
 
@@ -306,6 +345,21 @@ var apps = (function() {
       });
       elm.setAttribute('app-id', 'web-store-entry');
       return elm;
+    },
+
+    createWebStoreMiniElement: function() {
+      var span = document.createElement('span');
+      span.appendChild(this.createWebStoreClosedMenuElement());
+      return span;
+    },
+
+    createWebStoreClosedMenuElement: function() {
+      var a = document.createElement('a');
+      a.textContent = localStrings.getString('web_store_title');
+      a.href = localStrings.getString('web_store_url');
+      a.style.backgroundImage = url('chrome://theme/IDR_PRODUCT_LOGO_16');
+      a.className = 'item';
+      return a;
     }
   };
 })();

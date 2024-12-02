@@ -8,10 +8,12 @@
 
 #include "base/file_path.h"
 #include "base/logging.h"
+#include "base/mac/scoped_cftyperef.h"
 #include "base/message_loop.h"
-#include "base/scoped_cftyperef.h"
 #include "base/scoped_nsobject.h"
 #include "base/sys_string_conversions.h"
+
+using base::mac::ScopedCFTypeRef;
 
 namespace {
 
@@ -78,7 +80,7 @@ bool WasLaunchedAsLoginItem() {
 // representing the current application. If such an item is found, returns
 // retained reference to it. Caller is responsible for releasing the reference.
 LSSharedFileListItemRef GetLoginItemForApp() {
-  scoped_cftyperef<LSSharedFileListRef> login_items(LSSharedFileListCreate(
+  ScopedCFTypeRef<LSSharedFileListRef> login_items(LSSharedFileListCreate(
       NULL, kLSSharedFileListSessionLoginItems, NULL));
 
   if (!login_items.get()) {
@@ -98,7 +100,7 @@ LSSharedFileListItemRef GetLoginItemForApp() {
     CFURLRef item_url_ref = NULL;
 
     if (LSSharedFileListItemResolve(item, 0, &item_url_ref, NULL) == noErr) {
-      scoped_cftyperef<CFURLRef> item_url(item_url_ref);
+      ScopedCFTypeRef<CFURLRef> item_url(item_url_ref);
       if (CFEqual(item_url, url)) {
         CFRetain(item);
         return item;
@@ -119,7 +121,7 @@ static NSString* kLSSharedFileListLoginItemHidden =
 #endif
 
 bool IsHiddenLoginItem(LSSharedFileListItemRef item) {
-  scoped_cftyperef<CFBooleanRef> hidden(reinterpret_cast<CFBooleanRef>(
+  ScopedCFTypeRef<CFBooleanRef> hidden(reinterpret_cast<CFBooleanRef>(
       LSSharedFileListItemCopyProperty(item,
           reinterpret_cast<CFStringRef>(kLSSharedFileListLoginItemHidden))));
 
@@ -131,7 +133,7 @@ bool IsHiddenLoginItem(LSSharedFileListItemRef item) {
 namespace mac_util {
 
 std::string PathFromFSRef(const FSRef& ref) {
-  scoped_cftyperef<CFURLRef> url(
+  ScopedCFTypeRef<CFURLRef> url(
       CFURLCreateFromFSRef(kCFAllocatorDefault, &ref));
   NSString *path_string = [(NSURL *)url.get() path];
   return [path_string fileSystemRepresentation];
@@ -143,8 +145,14 @@ bool FSRefFromPath(const std::string& path, FSRef* ref) {
   return status == noErr;
 }
 
+static bool g_override_am_i_bundled = false;
+static bool g_override_am_i_bundled_value = false;
+
 // Adapted from http://developer.apple.com/carbon/tipsandtricks.html#AmIBundled
-bool AmIBundled() {
+static bool UncachedAmIBundled() {
+  if (g_override_am_i_bundled)
+    return g_override_am_i_bundled_value;
+
   ProcessSerialNumber psn = {0, kCurrentProcess};
 
   FSRef fsref;
@@ -163,6 +171,23 @@ bool AmIBundled() {
   }
 
   return info.nodeFlags & kFSNodeIsDirectoryMask;
+}
+
+bool AmIBundled() {
+  // If the return value is not cached, this function will return different
+  // values depending on when it's called. This confuses some client code, see
+  // http://crbug.com/63183 .
+  static bool result = UncachedAmIBundled();
+  DCHECK_EQ(result, UncachedAmIBundled())
+      << "The return value of AmIBundled() changed. This will confuse tests. "
+      << "Call SetAmIBundled() override manually if your test binary "
+      << "delay-loads the framework.";
+  return result;
+}
+
+void SetOverrideAmIBundled(bool value) {
+  g_override_am_i_bundled = true;
+  g_override_am_i_bundled_value = value;
 }
 
 bool IsBackgroundOnlyProcess() {
@@ -217,16 +242,26 @@ OSType CreatorCodeForApplication() {
   return CreatorCodeForCFBundleRef(bundle);
 }
 
-bool GetUserDirectory(NSSearchPathDirectory directory, FilePath* result) {
+bool GetSearchPathDirectory(NSSearchPathDirectory directory,
+                            NSSearchPathDomainMask domain_mask,
+                            FilePath* result) {
   DCHECK(result);
   NSArray* dirs =
-      NSSearchPathForDirectoriesInDomains(directory, NSUserDomainMask, YES);
+      NSSearchPathForDirectoriesInDomains(directory, domain_mask, YES);
   if ([dirs count] < 1) {
     return false;
   }
   NSString* path = [dirs objectAtIndex:0];
   *result = FilePath([path fileSystemRepresentation]);
   return true;
+}
+
+bool GetLocalDirectory(NSSearchPathDirectory directory, FilePath* result) {
+  return GetSearchPathDirectory(directory, NSLocalDomainMask, result);
+}
+
+bool GetUserDirectory(NSSearchPathDirectory directory, FilePath* result) {
+  return GetSearchPathDirectory(directory, NSUserDomainMask, result);
 }
 
 FilePath GetUserLibraryPath() {
@@ -455,9 +490,9 @@ CFTypeRef GetValueFromDictionary(CFDictionaryRef dict,
     return value;
 
   if (CFGetTypeID(value) != expected_type) {
-    scoped_cftyperef<CFStringRef> expected_type_ref(
+    ScopedCFTypeRef<CFStringRef> expected_type_ref(
         CFCopyTypeIDDescription(expected_type));
-    scoped_cftyperef<CFStringRef> actual_type_ref(
+    ScopedCFTypeRef<CFStringRef> actual_type_ref(
         CFCopyTypeIDDescription(CFGetTypeID(value)));
     LOG(WARNING) << "Expected value for key "
                  << base::SysCFStringRefToUTF8(key)
@@ -569,7 +604,7 @@ void SetProcessName(CFStringRef process_name) {
 CGImageRef CopyNSImageToCGImage(NSImage* image) {
   // This is based loosely on http://www.cocoadev.com/index.pl?CGImageRef .
   NSSize size = [image size];
-  scoped_cftyperef<CGContextRef> context(
+  ScopedCFTypeRef<CGContextRef> context(
       CGBitmapContextCreate(NULL,  // Allow CG to allocate memory.
                             size.width,
                             size.height,
@@ -595,7 +630,7 @@ CGImageRef CopyNSImageToCGImage(NSImage* image) {
 }
 
 bool CheckLoginItemStatus(bool* is_hidden) {
-  scoped_cftyperef<LSSharedFileListItemRef> item(GetLoginItemForApp());
+  ScopedCFTypeRef<LSSharedFileListItemRef> item(GetLoginItemForApp());
   if (!item.get())
     return false;
 
@@ -606,12 +641,12 @@ bool CheckLoginItemStatus(bool* is_hidden) {
 }
 
 void AddToLoginItems(bool hide_on_startup) {
-  scoped_cftyperef<LSSharedFileListItemRef> item(GetLoginItemForApp());
+  ScopedCFTypeRef<LSSharedFileListItemRef> item(GetLoginItemForApp());
   if (item.get() && (IsHiddenLoginItem(item) == hide_on_startup)) {
     return;  // Already is a login item with required hide flag.
   }
 
-  scoped_cftyperef<LSSharedFileListRef> login_items(LSSharedFileListCreate(
+  ScopedCFTypeRef<LSSharedFileListRef> login_items(LSSharedFileListCreate(
       NULL, kLSSharedFileListSessionLoginItems, NULL));
 
   if (!login_items.get()) {
@@ -632,7 +667,7 @@ void AddToLoginItems(bool hide_on_startup) {
         dictionaryWithObject:[NSNumber numberWithBool:hide]
                       forKey:(NSString*)kLSSharedFileListLoginItemHidden];
 
-  scoped_cftyperef<LSSharedFileListItemRef> new_item;
+  ScopedCFTypeRef<LSSharedFileListItemRef> new_item;
   new_item.reset(LSSharedFileListInsertItemURL(
       login_items, kLSSharedFileListItemLast, NULL, NULL,
       reinterpret_cast<CFURLRef>(url),
@@ -644,11 +679,11 @@ void AddToLoginItems(bool hide_on_startup) {
 }
 
 void RemoveFromLoginItems() {
-  scoped_cftyperef<LSSharedFileListItemRef> item(GetLoginItemForApp());
+  ScopedCFTypeRef<LSSharedFileListItemRef> item(GetLoginItemForApp());
   if (!item.get())
     return;
 
-  scoped_cftyperef<LSSharedFileListRef> login_items(LSSharedFileListCreate(
+  ScopedCFTypeRef<LSSharedFileListRef> login_items(LSSharedFileListCreate(
       NULL, kLSSharedFileListSessionLoginItems, NULL));
 
   if (!login_items.get()) {
@@ -663,7 +698,7 @@ bool WasLaunchedAsHiddenLoginItem() {
   if (!WasLaunchedAsLoginItem())
     return false;
 
-  scoped_cftyperef<LSSharedFileListItemRef> item(GetLoginItemForApp());
+  ScopedCFTypeRef<LSSharedFileListItemRef> item(GetLoginItemForApp());
   if (!item.get()) {
     LOG(ERROR) << "Process launched at Login but can't access Login Item List.";
     return false;

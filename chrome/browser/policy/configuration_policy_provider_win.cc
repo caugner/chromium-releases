@@ -10,7 +10,6 @@
 
 #include "base/logging.h"
 #include "base/object_watcher.h"
-#include "base/registry.h"
 #include "base/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/string_piece.h"
@@ -18,9 +17,38 @@
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "base/win/registry.h"
 #include "chrome/common/policy_constants.h"
 
+using base::win::RegKey;
+
 namespace policy {
+
+namespace {
+
+bool ReadRegistryStringValue(RegKey* key, const string16& name,
+                             string16* result) {
+  DWORD value_size = 0;
+  DWORD key_type = 0;
+  scoped_array<uint8> buffer;
+
+  if (!key->ReadValue(name.c_str(), 0, &value_size, &key_type))
+    return false;
+  if (key_type != REG_SZ)
+    return false;
+
+  // According to the Microsoft documentation, the string
+  // buffer may not be explicitly 0-terminated. Allocate a
+  // slightly larger buffer and pre-fill to zeros to guarantee
+  // the 0-termination.
+  buffer.reset(new uint8[value_size + 2]);
+  memset(buffer.get(), 0, value_size + 2);
+  key->ReadValue(name.c_str(), buffer.get(), &value_size, NULL);
+  result->assign(reinterpret_cast<const wchar_t*>(buffer.get()));
+  return true;
+}
+
+}  // namespace
 
 // Period at which to run the reload task in case the group policy change
 // watchers fail.
@@ -117,7 +145,9 @@ void ConfigurationPolicyProviderWin::GroupPolicyChangeWatcher::
 void ConfigurationPolicyProviderWin::GroupPolicyChangeWatcher::
     OnObjectSignaled(HANDLE object) {
   DCHECK(object == user_policy_changed_event_.handle() ||
-         object == machine_policy_changed_event_.handle());
+         object == machine_policy_changed_event_.handle())
+      << "unexpected object signaled policy reload, obj = "
+      << std::showbase << std::hex << object;
   Reload();
 }
 
@@ -128,8 +158,8 @@ void ConfigurationPolicyProviderWin::GroupPolicyChangeWatcher::
 }
 
 ConfigurationPolicyProviderWin::ConfigurationPolicyProviderWin(
-    const StaticPolicyValueMap& policy_map)
-    : ConfigurationPolicyProvider(policy_map) {
+    const PolicyDefinitionList* policy_list)
+    : ConfigurationPolicyProvider(policy_list) {
   watcher_ = new GroupPolicyChangeWatcher(this->AsWeakPtr(),
                                           kReloadIntervalMinutes);
   watcher_->Start();
@@ -140,7 +170,7 @@ ConfigurationPolicyProviderWin::~ConfigurationPolicyProviderWin() {
 }
 
 bool ConfigurationPolicyProviderWin::GetRegistryPolicyString(
-    const string16& name, string16* result) {
+    const string16& name, string16* result) const {
   string16 path = string16(kRegistrySubKey);
   RegKey policy_key;
   // First try the global policy.
@@ -155,30 +185,8 @@ bool ConfigurationPolicyProviderWin::GetRegistryPolicyString(
   return ReadRegistryStringValue(&policy_key, name, result);
 }
 
-bool ConfigurationPolicyProviderWin::ReadRegistryStringValue(
-    RegKey* key, const string16& name, string16* result) {
-  DWORD value_size = 0;
-  DWORD key_type = 0;
-  scoped_array<uint8> buffer;
-
-  if (!key->ReadValue(name.c_str(), 0, &value_size, &key_type))
-    return false;
-  if (key_type != REG_SZ)
-    return false;
-
-  // According to the Microsoft documentation, the string
-  // buffer may not be explicitly 0-terminated. Allocate a
-  // slightly larger buffer and pre-fill to zeros to guarantee
-  // the 0-termination.
-  buffer.reset(new uint8[value_size + 2]);
-  memset(buffer.get(), 0, value_size + 2);
-  key->ReadValue(name.c_str(), buffer.get(), &value_size, NULL);
-  result->assign(reinterpret_cast<const wchar_t*>(buffer.get()));
-  return true;
-}
-
 bool ConfigurationPolicyProviderWin::GetRegistryPolicyStringList(
-    const string16& key, ListValue* result) {
+    const string16& key, ListValue* result) const {
   string16 path = string16(kRegistrySubKey);
   path += ASCIIToUTF16("\\") + key;
   RegKey policy_key;
@@ -198,7 +206,7 @@ bool ConfigurationPolicyProviderWin::GetRegistryPolicyStringList(
 }
 
 bool ConfigurationPolicyProviderWin::GetRegistryPolicyBoolean(
-    const string16& value_name, bool* result) {
+    const string16& value_name, bool* result) const {
   DWORD value;
   RegKey hkcu_policy_key(HKEY_LOCAL_MACHINE, kRegistrySubKey, KEY_READ);
   if (hkcu_policy_key.ReadValueDW(value_name.c_str(), &value)) {
@@ -215,7 +223,7 @@ bool ConfigurationPolicyProviderWin::GetRegistryPolicyBoolean(
 }
 
 bool ConfigurationPolicyProviderWin::GetRegistryPolicyInteger(
-    const string16& value_name, uint32* result) {
+    const string16& value_name, uint32* result) const {
   DWORD value;
   RegKey hkcu_policy_key(HKEY_LOCAL_MACHINE, kRegistrySubKey, KEY_READ);
   if (hkcu_policy_key.ReadValueDW(value_name.c_str(), &value)) {
@@ -232,10 +240,10 @@ bool ConfigurationPolicyProviderWin::GetRegistryPolicyInteger(
 }
 
 bool ConfigurationPolicyProviderWin::Provide(
-    ConfigurationPolicyStore* store) {
-  const PolicyValueMap& mapping(policy_value_map());
-  for (PolicyValueMap::const_iterator current = mapping.begin();
-       current != mapping.end(); ++current) {
+    ConfigurationPolicyStoreInterface* store) {
+  const PolicyDefinitionList* policy_list(policy_definition_list());
+  for (const PolicyDefinitionList::Entry* current = policy_list->begin;
+       current != policy_list->end; ++current) {
     std::wstring name = UTF8ToWide(current->name);
     switch (current->value_type) {
       case Value::TYPE_STRING: {

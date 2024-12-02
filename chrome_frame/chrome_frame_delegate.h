@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 
 #include "base/file_path.h"
 #include "base/lock.h"
-#include "chrome/test/automation/automation_messages.h"
+#include "chrome/common/automation_messages.h"
 #include "ipc/ipc_message.h"
 
 // A common interface supported by all the browser specific ChromeFrame
@@ -108,7 +108,7 @@ class ChromeFrameDelegateImpl : public ChromeFrameDelegate {
                                         const std::string& target) {}
   virtual void OnHandleContextMenu(int tab_handle, HANDLE menu_handle,
                                    int align_flags,
-                                   const IPC::ContextMenuParams& params) {}
+                                   const IPC::MiniContextMenuParams& params) {}
   virtual void OnRequestStart(int tab_handle, int request_id,
                               const IPC::AutomationURLRequest& request) {}
   virtual void OnRequestRead(int tab_handle, int request_id,
@@ -149,7 +149,7 @@ template <class T> class TaskMarshallerThroughWindowsMessages
       PushTask(task);
       this_ptr->PostMessage(MSG_EXECUTE_TASK, reinterpret_cast<WPARAM>(task));
     } else {
-      DLOG(INFO) << "Dropping MSG_EXECUTE_TASK message for destroyed window.";
+      DVLOG(1) << "Dropping MSG_EXECUTE_TASK message for destroyed window.";
       delete task;
     }
   }
@@ -161,8 +161,9 @@ template <class T> class TaskMarshallerThroughWindowsMessages
 
   void DeleteAllPendingTasks() {
     AutoLock lock(lock_);
-    DLOG_IF(INFO, !pending_tasks_.empty()) << "Destroying " <<
-      pending_tasks_.size() << "  pending tasks";
+    DVLOG_IF(1, !pending_tasks_.empty()) << "Destroying "
+                                         << pending_tasks_.size()
+                                         << " pending tasks";
     while (!pending_tasks_.empty()) {
       Task* task = pending_tasks_.front();
       pending_tasks_.pop();

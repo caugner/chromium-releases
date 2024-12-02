@@ -10,9 +10,11 @@
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/extensions/extension_devtools_events.h"
 #include "chrome/browser/extensions/extension_devtools_manager.h"
+#include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/common/devtools_messages.h"
 
 ExtensionDevToolsBridge::ExtensionDevToolsBridge(int tab_id,
@@ -35,7 +37,7 @@ bool ExtensionDevToolsBridge::RegisterAsDevToolsClientHost() {
 
   Browser* browser;
   TabStripModel* tab_strip;
-  TabContents* contents;
+  TabContentsWrapper* contents;
   int tab_index;
   if (ExtensionTabUtil::GetTabById(tab_id_, profile_, true,
                                    &browser, &tab_strip,
@@ -65,7 +67,7 @@ void ExtensionDevToolsBridge::InspectedTabClosing() {
   // TODO(knorton): Remove this event in favor of the standard tabs.onRemoved
   // event in extensions.
   std::string json("[{}]");
-  profile_->GetExtensionMessageService()->DispatchEventToRenderers(
+  profile_->GetExtensionEventRouter()->DispatchEventToRenderers(
       on_tab_close_event_name_, json, profile_, GURL());
 
   // This may result in this object being destroyed.
@@ -83,7 +85,7 @@ void ExtensionDevToolsBridge::OnDispatchToAPU(const std::string& data) {
   DCHECK_EQ(MessageLoop::current()->type(), MessageLoop::TYPE_UI);
 
   std::string json = base::StringPrintf("[%s]", data.c_str());
-  profile_->GetExtensionMessageService()->DispatchEventToRenderers(
+  profile_->GetExtensionEventRouter()->DispatchEventToRenderers(
       on_page_event_name_, json, profile_, GURL());
 }
 

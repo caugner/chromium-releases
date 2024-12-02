@@ -9,7 +9,7 @@
 #include "media/base/seekable_buffer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace {
+namespace media {
 
 class SeekableBufferTest : public testing::Test {
  public:
@@ -25,7 +25,7 @@ class SeekableBufferTest : public testing::Test {
     // Setup seed.
     size_t seed = static_cast<int32>(base::Time::Now().ToInternalValue());
     srand(seed);
-    LOG(INFO) << "Random seed: " << seed;
+    VLOG(1) << "Random seed: " << seed;
 
     // Creates a test data.
     for (size_t i = 0; i < kDataSize; i++)
@@ -225,7 +225,7 @@ TEST_F(SeekableBufferTest, SeekBackward) {
 TEST_F(SeekableBufferTest, GetCurrentChunk) {
   const size_t kSeekSize = kWriteSize / 3;
 
-  scoped_refptr<media::DataBuffer> buffer = new media::DataBuffer(kWriteSize);
+  scoped_refptr<media::DataBuffer> buffer(new media::DataBuffer(kWriteSize));
   memcpy(buffer->GetWritableData(), data_, kWriteSize);
   buffer->SetDataSize(kWriteSize);
 
@@ -291,9 +291,6 @@ TEST_F(SeekableBufferTest, AllMethods) {
 
 
 TEST_F(SeekableBufferTest, GetTime) {
-  const base::TimeDelta kInvalidTimestamp =
-      media::StreamSample::kInvalidTimestamp;
-
   const struct {
     int64 first_time_useconds;
     int64 duration_useconds;
@@ -301,15 +298,15 @@ TEST_F(SeekableBufferTest, GetTime) {
     int64 expected_time;
   } tests[] = {
     // Timestamps of 0 are treated as garbage.
-    { 0, 1000000, 0, kInvalidTimestamp.ToInternalValue() },
-    { 0, 4000000, 0, kInvalidTimestamp.ToInternalValue() },
-    { 0, 8000000, 0, kInvalidTimestamp.ToInternalValue() },
-    { 0, 1000000, 4, kInvalidTimestamp.ToInternalValue() },
-    { 0, 4000000, 4, kInvalidTimestamp.ToInternalValue() },
-    { 0, 8000000, 4, kInvalidTimestamp.ToInternalValue() },
-    { 0, 1000000, kWriteSize, kInvalidTimestamp.ToInternalValue() },
-    { 0, 4000000, kWriteSize, kInvalidTimestamp.ToInternalValue() },
-    { 0, 8000000, kWriteSize, kInvalidTimestamp.ToInternalValue() },
+    { 0, 1000000, 0, kNoTimestamp.ToInternalValue() },
+    { 0, 4000000, 0, kNoTimestamp.ToInternalValue() },
+    { 0, 8000000, 0, kNoTimestamp.ToInternalValue() },
+    { 0, 1000000, 4, kNoTimestamp.ToInternalValue() },
+    { 0, 4000000, 4, kNoTimestamp.ToInternalValue() },
+    { 0, 8000000, 4, kNoTimestamp.ToInternalValue() },
+    { 0, 1000000, kWriteSize, kNoTimestamp.ToInternalValue() },
+    { 0, 4000000, kWriteSize, kNoTimestamp.ToInternalValue() },
+    { 0, 8000000, kWriteSize, kNoTimestamp.ToInternalValue() },
     { 5, 1000000, 0, 5 },
     { 5, 4000000, 0, 5 },
     { 5, 8000000, 0, 5 },
@@ -321,11 +318,11 @@ TEST_F(SeekableBufferTest, GetTime) {
     { 5, 8000000, kWriteSize, 8000005 },
   };
 
-  // current_time() must initially return kInvalidTimestamp.
-  EXPECT_EQ(kInvalidTimestamp.ToInternalValue(),
+  // current_time() must initially return kNoTimestamp.
+  EXPECT_EQ(kNoTimestamp.ToInternalValue(),
             buffer_.current_time().ToInternalValue());
 
-  scoped_refptr<media::DataBuffer> buffer = new media::DataBuffer(kWriteSize);
+  scoped_refptr<media::DataBuffer> buffer(new media::DataBuffer(kWriteSize));
   memcpy(buffer->GetWritableData(), data_, kWriteSize);
   buffer->SetDataSize(kWriteSize);
 
@@ -348,4 +345,4 @@ TEST_F(SeekableBufferTest, GetTime) {
   }
 }
 
-}  // namespace
+}  // namespace media

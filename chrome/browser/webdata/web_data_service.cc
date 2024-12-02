@@ -34,11 +34,16 @@ using base::Time;
 using webkit_glue::FormField;
 using webkit_glue::PasswordForm;
 
-WDAppImagesResult::WDAppImagesResult() : has_all_images(false) {
+WDAppImagesResult::WDAppImagesResult() : has_all_images(false) {}
+
+WDAppImagesResult::~WDAppImagesResult() {}
+
+WDKeywordsResult::WDKeywordsResult()
+  : default_search_provider_id(0),
+    builtin_keyword_version(0) {
 }
 
-WDAppImagesResult::~WDAppImagesResult() {
-}
+WDKeywordsResult::~WDKeywordsResult() {}
 
 WebDataService::WebDataService()
   : is_running_(false),
@@ -386,33 +391,33 @@ void WebDataService::RemoveFormValueForElementName(
                         request));
 }
 
-void WebDataService::AddAutoFillProfile(const AutoFillProfile& profile) {
+void WebDataService::AddAutoFillProfileGUID(const AutoFillProfile& profile) {
   GenericRequest<AutoFillProfile>* request =
       new GenericRequest<AutoFillProfile>(
           this, GetNextRequestHandle(), NULL, profile);
   RegisterRequest(request);
   ScheduleTask(NewRunnableMethod(this,
-                                 &WebDataService::AddAutoFillProfileImpl,
+                                 &WebDataService::AddAutoFillProfileGUIDImpl,
                                  request));
 }
 
-void WebDataService::UpdateAutoFillProfile(const AutoFillProfile& profile) {
+void WebDataService::UpdateAutoFillProfileGUID(const AutoFillProfile& profile) {
   GenericRequest<AutoFillProfile>* request =
       new GenericRequest<AutoFillProfile>(
           this, GetNextRequestHandle(), NULL, profile);
   RegisterRequest(request);
   ScheduleTask(NewRunnableMethod(this,
-                                 &WebDataService::UpdateAutoFillProfileImpl,
+                                 &WebDataService::UpdateAutoFillProfileGUIDImpl,
                                  request));
 }
 
-void WebDataService::RemoveAutoFillProfile(int profile_id) {
-  GenericRequest<int>* request =
-      new GenericRequest<int>(
-          this, GetNextRequestHandle(), NULL, profile_id);
+void WebDataService::RemoveAutoFillProfileGUID(const std::string& guid) {
+  GenericRequest<std::string>* request =
+      new GenericRequest<std::string>(
+          this, GetNextRequestHandle(), NULL, guid);
   RegisterRequest(request);
   ScheduleTask(NewRunnableMethod(this,
-                                 &WebDataService::RemoveAutoFillProfileImpl,
+                                 &WebDataService::RemoveAutoFillProfileGUIDImpl,
                                  request));
 }
 
@@ -428,33 +433,33 @@ WebDataService::Handle WebDataService::GetAutoFillProfiles(
   return request->GetHandle();
 }
 
-void WebDataService::AddCreditCard(const CreditCard& creditcard) {
+void WebDataService::AddCreditCardGUID(const CreditCard& credit_card) {
   GenericRequest<CreditCard>* request =
       new GenericRequest<CreditCard>(
-          this, GetNextRequestHandle(), NULL, creditcard);
+          this, GetNextRequestHandle(), NULL, credit_card);
   RegisterRequest(request);
   ScheduleTask(NewRunnableMethod(this,
-                                 &WebDataService::AddCreditCardImpl,
+                                 &WebDataService::AddCreditCardGUIDImpl,
                                  request));
 }
 
-void WebDataService::UpdateCreditCard(const CreditCard& creditcard) {
+void WebDataService::UpdateCreditCardGUID(const CreditCard& credit_card) {
   GenericRequest<CreditCard>* request =
       new GenericRequest<CreditCard>(
-          this, GetNextRequestHandle(), NULL, creditcard);
+          this, GetNextRequestHandle(), NULL, credit_card);
   RegisterRequest(request);
   ScheduleTask(NewRunnableMethod(this,
-                                 &WebDataService::UpdateCreditCardImpl,
+                                 &WebDataService::UpdateCreditCardGUIDImpl,
                                  request));
 }
 
-void WebDataService::RemoveCreditCard(int creditcard_id) {
-  GenericRequest<int>* request =
-      new GenericRequest<int>(
-          this, GetNextRequestHandle(), NULL, creditcard_id);
+void WebDataService::RemoveCreditCardGUID(const std::string& guid) {
+  GenericRequest<std::string>* request =
+      new GenericRequest<std::string>(
+          this, GetNextRequestHandle(), NULL, guid);
   RegisterRequest(request);
   ScheduleTask(NewRunnableMethod(this,
-                                 &WebDataService::RemoveCreditCardImpl,
+                                 &WebDataService::RemoveCreditCardGUIDImpl,
                                  request));
 }
 
@@ -468,6 +473,22 @@ WebDataService::Handle WebDataService::GetCreditCards(
                         &WebDataService::GetCreditCardsImpl,
                         request));
   return request->GetHandle();
+}
+
+void WebDataService::RemoveAutoFillProfilesAndCreditCardsModifiedBetween(
+    const Time& delete_begin,
+    const Time& delete_end) {
+  GenericRequest2<Time, Time>* request =
+      new GenericRequest2<Time, Time>(this,
+                                      GetNextRequestHandle(),
+                                      NULL,
+                                      delete_begin,
+                                      delete_end);
+  RegisterRequest(request);
+  ScheduleTask(NewRunnableMethod(
+      this,
+      &WebDataService::RemoveAutoFillProfilesAndCreditCardsModifiedBetweenImpl,
+      request));
 }
 
 WebDataService::~WebDataService() {
@@ -649,8 +670,10 @@ void WebDataService::RemoveKeywordImpl(
 void WebDataService::UpdateKeywordImpl(GenericRequest<TemplateURL>* request) {
   InitializeDatabaseIfNecessary();
   if (db_ && !request->IsCancelled()) {
-    if (!db_->UpdateKeyword(request->GetArgument()))
+    if (!db_->UpdateKeyword(request->GetArgument())) {
       NOTREACHED();
+      return;
+    }
     ScheduleCommit();
   }
   request->RequestComplete();
@@ -673,8 +696,10 @@ void WebDataService::SetDefaultSearchProviderImpl(
     GenericRequest<TemplateURLID>* request) {
   InitializeDatabaseIfNecessary();
   if (db_ && !request->IsCancelled()) {
-    if (!db_->SetDefaultSearchProviderID(request->GetArgument()))
+    if (!db_->SetDefaultSearchProviderID(request->GetArgument())) {
       NOTREACHED();
+      return;
+    }
     ScheduleCommit();
   }
   request->RequestComplete();
@@ -684,8 +709,10 @@ void WebDataService::SetBuiltinKeywordVersionImpl(
     GenericRequest<int>* request) {
   InitializeDatabaseIfNecessary();
   if (db_ && !request->IsCancelled()) {
-    if (!db_->SetBuitinKeywordVersion(request->GetArgument()))
+    if (!db_->SetBuitinKeywordVersion(request->GetArgument())) {
       NOTREACHED();
+      return;
+    }
     ScheduleCommit();
   }
   request->RequestComplete();
@@ -881,8 +908,10 @@ void WebDataService::AddFormElementsImpl(
   const std::vector<FormField>& form_fields = request->GetArgument();
   if (db_ && !request->IsCancelled()) {
     AutofillChangeList changes;
-    if (!db_->AddFormFieldValues(form_fields, &changes))
+    if (!db_->AddFormFieldValues(form_fields, &changes)) {
       NOTREACHED();
+      return;
+    }
     request->SetResult(
         new WDResult<AutofillChangeList>(AUTOFILL_CHANGES, changes));
     ScheduleCommit();
@@ -962,7 +991,7 @@ void WebDataService::RemoveFormValueForElementNameImpl(
   request->RequestComplete();
 }
 
-void WebDataService::AddAutoFillProfileImpl(
+void WebDataService::AddAutoFillProfileGUIDImpl(
     GenericRequest<AutoFillProfile>* request) {
   InitializeDatabaseIfNecessary();
   if (db_ && !request->IsCancelled()) {
@@ -973,68 +1002,114 @@ void WebDataService::AddAutoFillProfileImpl(
     }
     ScheduleCommit();
 
-    AutofillProfileChange change(AutofillProfileChange::ADD,
-                                 profile.Label(), &profile, string16());
+    // Send GUID-based notification.
+    AutofillProfileChangeGUID change(AutofillProfileChangeGUID::ADD,
+                                     profile.guid(), &profile);
+    NotificationService::current()->Notify(
+        NotificationType::AUTOFILL_PROFILE_CHANGED_GUID,
+        Source<WebDataService>(this),
+        Details<AutofillProfileChangeGUID>(&change));
+
+    // TODO(dhollowa): Remove labels.  http://crbug.com/58813
+    // Send out old Label-based notification until sync can switch over to
+    // GUID-based notifications.
+    AutofillProfileChange deprecated_change(AutofillProfileChange::ADD,
+                                            profile.Label(),
+                                            &profile,
+                                            string16());
     NotificationService::current()->Notify(
         NotificationType::AUTOFILL_PROFILE_CHANGED,
         Source<WebDataService>(this),
-        Details<AutofillProfileChange>(&change));
+        Details<AutofillProfileChange>(&deprecated_change));
   }
   request->RequestComplete();
 }
 
-void WebDataService::UpdateAutoFillProfileImpl(
+void WebDataService::UpdateAutoFillProfileGUIDImpl(
     GenericRequest<AutoFillProfile>* request) {
   InitializeDatabaseIfNecessary();
   if (db_ && !request->IsCancelled()) {
     const AutoFillProfile& profile = request->GetArgument();
-    // The AUTOFILL_PROFILE_CHANGED contract for an update requires that we
-    // send along the label of the un-updated profile, to detect label
-    // changes separately.  So first, we query for the existing profile.
-    AutoFillProfile* old_profile_ptr = NULL;
-    if (!db_->GetAutoFillProfileForID(profile.unique_id(), &old_profile_ptr))
-      NOTREACHED();
-    if (old_profile_ptr) {
-      scoped_ptr<AutoFillProfile> old_profile(old_profile_ptr);
-      if (!db_->UpdateAutoFillProfile(profile))
-        NOTREACHED();
-      ScheduleCommit();
 
-      AutofillProfileChange change(AutofillProfileChange::UPDATE,
-                                   profile.Label(), &profile,
-                                   old_profile->Label());
-      NotificationService::current()->Notify(
-          NotificationType::AUTOFILL_PROFILE_CHANGED,
-          Source<WebDataService>(this),
-          Details<AutofillProfileChange>(&change));
+    // TODO(dhollowa): Remove labels.  http://crbug.com/58813
+    // Send out old Label-based notification until sync can switch over to
+    // GUID-based notifications.
+    // Only perform the update if the profile exists.  It is currently
+    // valid to try to update a missing profile.  We simply drop the write and
+    // the caller will detect this on the next refresh.
+    AutoFillProfile* original_profile = NULL;
+    if (!db_->GetAutoFillProfileForGUID(profile.guid(), &original_profile)) {
+      request->RequestComplete();
+      return;
     }
+    scoped_ptr<AutoFillProfile> scoped_profile(original_profile);
+
+    if (!db_->UpdateAutoFillProfile(profile)) {
+      NOTREACHED();
+      return;
+    }
+    ScheduleCommit();
+
+    // Send GUID-based notification.
+    AutofillProfileChangeGUID change(AutofillProfileChangeGUID::UPDATE,
+                                     profile.guid(), &profile);
+    NotificationService::current()->Notify(
+        NotificationType::AUTOFILL_PROFILE_CHANGED_GUID,
+        Source<WebDataService>(this),
+        Details<AutofillProfileChangeGUID>(&change));
+
+    // TODO(dhollowa): Remove labels.  http://crbug.com/58813
+    // Send old Label-based notification.
+    AutofillProfileChange deprecated_change(AutofillProfileChange::UPDATE,
+                                            profile.Label(), &profile,
+                                            original_profile->Label());
+    NotificationService::current()->Notify(
+        NotificationType::AUTOFILL_PROFILE_CHANGED,
+        Source<WebDataService>(this),
+        Details<AutofillProfileChange>(&deprecated_change));
   }
   request->RequestComplete();
 }
 
-void WebDataService::RemoveAutoFillProfileImpl(
-    GenericRequest<int>* request) {
+void WebDataService::RemoveAutoFillProfileGUIDImpl(
+    GenericRequest<std::string>* request) {
   InitializeDatabaseIfNecessary();
   if (db_ && !request->IsCancelled()) {
-    int profile_id = request->GetArgument();
+    std::string guid = request->GetArgument();
+
+    // TODO(dhollowa): Remove labels.  http://crbug.com/58813
+    // Send out old Label-based notification until sync can switch over to
+    // GUID-based notifications.
     AutoFillProfile* profile = NULL;
-    if (!db_->GetAutoFillProfileForID(profile_id, &profile))
+    if (!db_->GetAutoFillProfileForGUID(guid, &profile)) {
       NOTREACHED();
-
-    if (profile) {
-      scoped_ptr<AutoFillProfile> dead_profile(profile);
-      if (!db_->RemoveAutoFillProfile(profile_id))
-        NOTREACHED();
-      ScheduleCommit();
-
-      AutofillProfileChange change(AutofillProfileChange::REMOVE,
-                                   dead_profile->Label(),
-                                   NULL, string16());
-      NotificationService::current()->Notify(
-          NotificationType::AUTOFILL_PROFILE_CHANGED,
-          Source<WebDataService>(this),
-          Details<AutofillProfileChange>(&change));
+      return;
     }
+    scoped_ptr<AutoFillProfile> scoped_profile(profile);
+
+    if (!db_->RemoveAutoFillProfile(guid)) {
+      NOTREACHED();
+      return;
+    }
+    ScheduleCommit();
+
+    // Send GUID-based notification.
+    AutofillProfileChangeGUID change(AutofillProfileChangeGUID::REMOVE,
+                                     guid, NULL);
+    NotificationService::current()->Notify(
+        NotificationType::AUTOFILL_PROFILE_CHANGED_GUID,
+        Source<WebDataService>(this),
+        Details<AutofillProfileChangeGUID>(&change));
+
+    // TODO(dhollowa): Remove labels.  http://crbug.com/58813
+    // Send old Label-based notification.
+    AutofillProfileChange deprecated_change(AutofillProfileChange::REMOVE,
+                                            scoped_profile->Label(),
+                                            NULL, string16());
+    NotificationService::current()->Notify(
+        NotificationType::AUTOFILL_PROFILE_CHANGED,
+        Source<WebDataService>(this),
+        Details<AutofillProfileChange>(&deprecated_change));
   }
   request->RequestComplete();
 }
@@ -1051,67 +1126,78 @@ void WebDataService::GetAutoFillProfilesImpl(WebDataRequest* request) {
   request->RequestComplete();
 }
 
-void WebDataService::AddCreditCardImpl(
+void WebDataService::AddCreditCardGUIDImpl(
     GenericRequest<CreditCard>* request) {
   InitializeDatabaseIfNecessary();
   if (db_ && !request->IsCancelled()) {
-    const CreditCard& creditcard = request->GetArgument();
-    if (!db_->AddCreditCard(creditcard))
+    const CreditCard& credit_card = request->GetArgument();
+    if (!db_->AddCreditCard(credit_card)) {
       NOTREACHED();
-    ScheduleCommit();
-
-    AutofillCreditCardChange change(AutofillCreditCardChange::ADD,
-        creditcard.Label(), &creditcard);
-    NotificationService::current()->Notify(
-        NotificationType::AUTOFILL_CREDIT_CARD_CHANGED,
-        Source<WebDataService>(this),
-        Details<AutofillCreditCardChange>(&change));
-  }
-  request->RequestComplete();
-}
-
-void WebDataService::UpdateCreditCardImpl(
-    GenericRequest<CreditCard>* request) {
-  InitializeDatabaseIfNecessary();
-  if (db_ && !request->IsCancelled()) {
-    const CreditCard& creditcard = request->GetArgument();
-    if (!db_->UpdateCreditCard(creditcard))
-      NOTREACHED();
-    ScheduleCommit();
-
-    AutofillCreditCardChange change(AutofillCreditCardChange::UPDATE,
-        creditcard.Label(), &creditcard);
-    NotificationService::current()->Notify(
-        NotificationType::AUTOFILL_CREDIT_CARD_CHANGED,
-        Source<WebDataService>(this),
-        Details<AutofillCreditCardChange>(&change));
-  }
-  request->RequestComplete();
-}
-
-void WebDataService::RemoveCreditCardImpl(
-    GenericRequest<int>* request) {
-  InitializeDatabaseIfNecessary();
-  if (db_ && !request->IsCancelled()) {
-    int creditcard_id = request->GetArgument();
-    CreditCard* dead_card_ptr = NULL;
-    if (!db_->GetCreditCardForID(creditcard_id, &dead_card_ptr))
-      NOTREACHED();
-
-    scoped_ptr<CreditCard> dead_card(dead_card_ptr);
-    if (!db_->RemoveCreditCard(creditcard_id))
-      NOTREACHED();
-
-    ScheduleCommit();
-
-    if (dead_card.get()) {
-      AutofillCreditCardChange change(AutofillCreditCardChange::REMOVE,
-                                      dead_card->Label(), NULL);
-      NotificationService::current()->Notify(
-          NotificationType::AUTOFILL_CREDIT_CARD_CHANGED,
-          Source<WebDataService>(this),
-          Details<AutofillCreditCardChange>(&change));
+      return;
     }
+    ScheduleCommit();
+
+    // Send GUID-based notification.
+    AutofillCreditCardChangeGUID change(AutofillCreditCardChangeGUID::ADD,
+                                        credit_card.guid(), &credit_card);
+    NotificationService::current()->Notify(
+        NotificationType::AUTOFILL_CREDIT_CARD_CHANGED_GUID,
+        Source<WebDataService>(this),
+        Details<AutofillCreditCardChangeGUID>(&change));
+  }
+  request->RequestComplete();
+}
+
+void WebDataService::UpdateCreditCardGUIDImpl(
+    GenericRequest<CreditCard>* request) {
+  InitializeDatabaseIfNecessary();
+  if (db_ && !request->IsCancelled()) {
+    const CreditCard& credit_card = request->GetArgument();
+
+    // It is currently valid to try to update a missing profile.  We simply drop
+    // the write and the caller will detect this on the next refresh.
+    CreditCard* original_credit_card = NULL;
+    if (!db_->GetCreditCardForGUID(credit_card.guid(), &original_credit_card)) {
+      request->RequestComplete();
+      return;
+    }
+    scoped_ptr<CreditCard> scoped_credit_card(original_credit_card);
+
+    if (!db_->UpdateCreditCard(credit_card)) {
+      NOTREACHED();
+      return;
+    }
+    ScheduleCommit();
+
+    // Send GUID-based notification.
+    AutofillCreditCardChangeGUID change(AutofillCreditCardChangeGUID::UPDATE,
+                                        credit_card.guid(), &credit_card);
+    NotificationService::current()->Notify(
+        NotificationType::AUTOFILL_CREDIT_CARD_CHANGED_GUID,
+        Source<WebDataService>(this),
+        Details<AutofillCreditCardChangeGUID>(&change));
+  }
+  request->RequestComplete();
+}
+
+void WebDataService::RemoveCreditCardGUIDImpl(
+    GenericRequest<std::string>* request) {
+  InitializeDatabaseIfNecessary();
+  if (db_ && !request->IsCancelled()) {
+    std::string guid = request->GetArgument();
+    if (!db_->RemoveCreditCard(guid)) {
+      NOTREACHED();
+      return;
+    }
+    ScheduleCommit();
+
+    // Send GUID-based notification.
+    AutofillCreditCardChangeGUID change(AutofillCreditCardChangeGUID::REMOVE,
+                                        guid, NULL);
+    NotificationService::current()->Notify(
+        NotificationType::AUTOFILL_CREDIT_CARD_CHANGED_GUID,
+        Source<WebDataService>(this),
+        Details<AutofillCreditCardChangeGUID>(&change));
   }
   request->RequestComplete();
 }
@@ -1119,11 +1205,26 @@ void WebDataService::RemoveCreditCardImpl(
 void WebDataService::GetCreditCardsImpl(WebDataRequest* request) {
   InitializeDatabaseIfNecessary();
   if (db_ && !request->IsCancelled()) {
-    std::vector<CreditCard*> creditcards;
-    db_->GetCreditCards(&creditcards);
+    std::vector<CreditCard*> credit_cards;
+    db_->GetCreditCards(&credit_cards);
     request->SetResult(
         new WDResult<std::vector<CreditCard*> >(AUTOFILL_CREDITCARDS_RESULT,
-                                                creditcards));
+                                                credit_cards));
+  }
+  request->RequestComplete();
+}
+
+void WebDataService::RemoveAutoFillProfilesAndCreditCardsModifiedBetweenImpl(
+    GenericRequest2<Time, Time>* request) {
+  InitializeDatabaseIfNecessary();
+  if (db_ && !request->IsCancelled()) {
+    if (db_->RemoveAutoFillProfilesAndCreditCardsModifiedBetween(
+            request->GetArgument1(),
+            request->GetArgument2())) {
+      // Note: It is the caller's responsibility to post notifications for any
+      // changes, e.g. by calling the Refresh() method of PersonalDataManager.
+      ScheduleCommit();
+    }
   }
   request->RequestComplete();
 }

@@ -20,7 +20,7 @@ TabStripModelObserverBridge::~TabStripModelObserverBridge() {
   model_->RemoveObserver(this);
 }
 
-void TabStripModelObserverBridge::TabInsertedAt(TabContents* contents,
+void TabStripModelObserverBridge::TabInsertedAt(TabContentsWrapper* contents,
                                                 int index,
                                                 bool foreground) {
   if ([controller_ respondsToSelector:
@@ -31,7 +31,8 @@ void TabStripModelObserverBridge::TabInsertedAt(TabContents* contents,
   }
 }
 
-void TabStripModelObserverBridge::TabClosingAt(TabContents* contents,
+void TabStripModelObserverBridge::TabClosingAt(TabStripModel* tab_strip_model,
+                                               TabContentsWrapper* contents,
                                                int index) {
   if ([controller_ respondsToSelector:
           @selector(tabClosingWithContents:atIndex:)]) {
@@ -39,7 +40,7 @@ void TabStripModelObserverBridge::TabClosingAt(TabContents* contents,
   }
 }
 
-void TabStripModelObserverBridge::TabDetachedAt(TabContents* contents,
+void TabStripModelObserverBridge::TabDetachedAt(TabContentsWrapper* contents,
                                                 int index) {
   if ([controller_ respondsToSelector:
           @selector(tabDetachedWithContents:atIndex:)]) {
@@ -47,10 +48,11 @@ void TabStripModelObserverBridge::TabDetachedAt(TabContents* contents,
   }
 }
 
-void TabStripModelObserverBridge::TabSelectedAt(TabContents* old_contents,
-                                                TabContents* new_contents,
-                                                int index,
-                                                bool user_gesture) {
+void TabStripModelObserverBridge::TabSelectedAt(
+    TabContentsWrapper* old_contents,
+    TabContentsWrapper* new_contents,
+    int index,
+    bool user_gesture) {
   if ([controller_ respondsToSelector:
           @selector(selectTabWithContents:previousContents:atIndex:
                     userGesture:)]) {
@@ -61,7 +63,7 @@ void TabStripModelObserverBridge::TabSelectedAt(TabContents* old_contents,
   }
 }
 
-void TabStripModelObserverBridge::TabMoved(TabContents* contents,
+void TabStripModelObserverBridge::TabMoved(TabContentsWrapper* contents,
                                            int from_index,
                                            int to_index) {
   if ([controller_ respondsToSelector:
@@ -72,7 +74,7 @@ void TabStripModelObserverBridge::TabMoved(TabContents* contents,
   }
 }
 
-void TabStripModelObserverBridge::TabChangedAt(TabContents* contents,
+void TabStripModelObserverBridge::TabChangedAt(TabContentsWrapper* contents,
                                                int index,
                                                TabChangeType change_type) {
   if ([controller_ respondsToSelector:
@@ -83,9 +85,10 @@ void TabStripModelObserverBridge::TabChangedAt(TabContents* contents,
   }
 }
 
-void TabStripModelObserverBridge::TabReplacedAt(TabContents* old_contents,
-                                                TabContents* new_contents,
-                                                int index) {
+void TabStripModelObserverBridge::TabReplacedAt(
+    TabContentsWrapper* old_contents,
+    TabContentsWrapper* new_contents,
+    int index) {
   if ([controller_ respondsToSelector:
           @selector(tabReplacedWithContents:previousContents:atIndex:)]) {
     [controller_ tabReplacedWithContents:new_contents
@@ -96,8 +99,8 @@ void TabStripModelObserverBridge::TabReplacedAt(TabContents* old_contents,
   }
 }
 
-void TabStripModelObserverBridge::TabMiniStateChanged(TabContents* contents,
-                                                      int index) {
+void TabStripModelObserverBridge::TabMiniStateChanged(
+    TabContentsWrapper* contents, int index) {
   if ([controller_ respondsToSelector:
           @selector(tabMiniStateChangedWithContents:atIndex:)]) {
     [controller_ tabMiniStateChangedWithContents:contents atIndex:index];

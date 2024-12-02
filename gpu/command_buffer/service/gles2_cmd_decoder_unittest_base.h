@@ -6,7 +6,7 @@
 #define GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_UNITTEST_BASE_H_
 
 #include "app/gfx/gl/gl_context_stub.h"
-#include "app/gfx/gl/gl_mock.h"
+#include "gpu/command_buffer/common/gl_mock.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/buffer_manager.h"
@@ -49,6 +49,7 @@ class GLES2DecoderTestBase : public testing::Test {
   static const GLint kMaxVertexUniformVectors = 128;
 
   static const GLuint kServiceAttrib0BufferId = 801;
+  static const GLuint kServiceFixedAttribBufferId = 802;
 
   static const GLuint kServiceBufferId = 301;
   static const GLuint kServiceFramebufferId = 302;
@@ -131,32 +132,32 @@ class GLES2DecoderTestBase : public testing::Test {
   }
 
   IdAllocator* GetIdAllocator(GLuint namespace_id) {
-    return group_.GetIdAllocator(namespace_id);
+    return group_->GetIdAllocator(namespace_id);
   }
 
   BufferManager::BufferInfo* GetBufferInfo(GLuint service_id) {
-    return group_.buffer_manager()->GetBufferInfo(service_id);
+    return group_->buffer_manager()->GetBufferInfo(service_id);
   }
 
   FramebufferManager::FramebufferInfo* GetFramebufferInfo(GLuint service_id) {
-    return group_.framebuffer_manager()->GetFramebufferInfo(service_id);
+    return group_->framebuffer_manager()->GetFramebufferInfo(service_id);
   }
 
   RenderbufferManager::RenderbufferInfo* GetRenderbufferInfo(
       GLuint service_id) {
-    return group_.renderbuffer_manager()->GetRenderbufferInfo(service_id);
+    return group_->renderbuffer_manager()->GetRenderbufferInfo(service_id);
   }
 
   TextureManager::TextureInfo* GetTextureInfo(GLuint service_id) {
-    return group_.texture_manager()->GetTextureInfo(service_id);
+    return group_->texture_manager()->GetTextureInfo(service_id);
   }
 
   ShaderManager::ShaderInfo* GetShaderInfo(GLuint service_id) {
-    return group_.shader_manager()->GetShaderInfo(service_id);
+    return group_->shader_manager()->GetShaderInfo(service_id);
   }
 
   ProgramManager::ProgramInfo* GetProgramInfo(GLuint service_id) {
-    return group_.program_manager()->GetProgramInfo(service_id);
+    return group_->program_manager()->GetProgramInfo(service_id);
   }
 
   void DoCreateShader(GLenum shader_type, GLuint client_id, GLuint service_id);
@@ -166,7 +167,7 @@ class GLES2DecoderTestBase : public testing::Test {
   void InitDecoder(const char* extensions);
 
   const ContextGroup& group() const {
-    return group_;
+    return *group_.get();
   }
 
   struct AttribInfo {
@@ -294,7 +295,7 @@ class GLES2DecoderTestBase : public testing::Test {
   };
 
   scoped_ptr< ::testing::StrictMock<MockCommandBufferEngine> > engine_;
-  ContextGroup group_;
+  ContextGroup::Ref group_;
 };
 
 class GLES2DecoderWithShaderTestBase : public GLES2DecoderTestBase {

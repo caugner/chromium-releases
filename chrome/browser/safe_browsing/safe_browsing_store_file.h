@@ -127,11 +127,12 @@ class SafeBrowsingStoreFile : public SafeBrowsingStore {
   virtual bool BeginChunk();
   virtual bool WriteAddPrefix(int32 chunk_id, SBPrefix prefix);
   virtual bool WriteAddHash(int32 chunk_id,
-                            base::Time receive_time, SBFullHash full_hash);
+                            base::Time receive_time,
+                            const SBFullHash& full_hash);
   virtual bool WriteSubPrefix(int32 chunk_id,
                               int32 add_chunk_id, SBPrefix prefix);
   virtual bool WriteSubHash(int32 chunk_id, int32 add_chunk_id,
-                            SBFullHash full_hash);
+                            const SBFullHash& full_hash);
   virtual bool FinishChunk();
 
   virtual bool BeginUpdate();
@@ -179,14 +180,26 @@ class SafeBrowsingStoreFile : public SafeBrowsingStore {
     FORMAT_EVENT_SQLITE_DELETED,
     FORMAT_EVENT_SQLITE_DELETE_FAILED,
 
-    // Histogram space is determined by the max.  If this is exceeded,
-    // simply start a new histogram.
-    FORMAT_EVENT_MAX = 50
+    // Found and deleted (or failed to delete) the ancient "Safe
+    // Browsing" file.
+    FORMAT_EVENT_DELETED_ORIGINAL,
+    FORMAT_EVENT_DELETED_ORIGINAL_FAILED,
+
+    // Memory space for histograms is determined by the max.  ALWAYS
+    // ADD NEW VALUES BEFORE THIS ONE.
+    FORMAT_EVENT_MAX
   };
 
   // Helper to record an event related to format conversion from
   // SQLite to file.
   static void RecordFormatEvent(FormatEventType event_type);
+
+  // Some very lucky users have an original-format file still in their
+  // profile.  Check for it and delete, recording a histogram for the
+  // result (no histogram for not-found).  Logically this
+  // would make more sense at the SafeBrowsingDatabase level, but
+  // practically speaking that code doesn't touch files directly.
+  static void CheckForOriginalAndDelete(const FilePath& filename);
 
   // Close all files and clear all buffers.
   bool Close();

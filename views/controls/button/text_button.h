@@ -109,6 +109,10 @@ class TextButton : public CustomButton {
 
   void set_prefix_type(PrefixType type) { prefix_type_ = type; }
 
+  void set_icon_text_spacing(int icon_text_spacing) {
+    icon_text_spacing_ = icon_text_spacing;
+  }
+
   // Sets the icon.
   void SetIcon(const SkBitmap& icon);
   void SetHoverIcon(const SkBitmap& icon);
@@ -134,10 +138,14 @@ class TextButton : public CustomButton {
 
   void set_max_width(int max_width) { max_width_ = max_width; }
   void SetFont(const gfx::Font& font);
+  // Return the font used by this button.
+  gfx::Font font() const { return font_; }
+
   void SetEnabledColor(SkColor color);
   void SetDisabledColor(SkColor color);
   void SetHighlightColor(SkColor color);
   void SetHoverColor(SkColor color);
+  void SetTextHaloColor(SkColor color);
   void SetNormalHasBorder(bool normal_has_border);
   // Sets whether or not to show the hot and pushed states for the button icon
   // (if present) in addition to the normal state.  Defaults to true.
@@ -203,6 +211,10 @@ class TextButton : public CustomButton {
   SkColor color_highlight_;
   SkColor color_hover_;
 
+  // An optional halo around text.
+  SkColor text_halo_color_;
+  bool has_text_halo_;
+
   // An icon displayed with the text.
   SkBitmap icon_;
 
@@ -225,6 +237,9 @@ class TextButton : public CustomButton {
   bool show_multiple_icon_states_;
 
   PrefixType prefix_type_;
+
+  // Space between icon and text.
+  int icon_text_spacing_;
 
   DISALLOW_COPY_AND_ASSIGN(TextButton);
 };

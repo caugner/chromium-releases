@@ -1,7 +1,7 @@
 <!DOCTYPE HTML>
 <html
     i18n-values="dir:textdirection;
-                 enable-background-mode:enable-background-mode"
+                 enable-cloud-print-proxy:enable-cloud-print-proxy"
     id="t">
 <head>
 <meta charset="utf-8">
@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="dom_ui.css">
 <link rel="stylesheet" href="options/options_page.css">
 <link rel="stylesheet" href="options/add_startup_page_overlay.css">
+<link rel="stylesheet" href="options/advanced_options.css">
 <link rel="stylesheet" href="options/alert_overlay.css">
 <link rel="stylesheet" href="options/autofill_edit_address_overlay.css">
 <link rel="stylesheet" href="options/autofill_edit_creditcard_overlay.css">
@@ -28,11 +29,13 @@
 <link rel="stylesheet" href="options/import_data_overlay.css">
 <link rel="stylesheet" href="options/search_engine_manager.css">
 <link rel="stylesheet" href="options/subpages_tab_controls.css">
+<link rel="stylesheet" href="options/zippy.css">
 <if expr="pp_ifdef('chromeos')">
   <link rel="stylesheet" href="options/about_page.css">
   <link rel="stylesheet" href="options/chromeos_accounts_options_page.css">
   <link rel="stylesheet" href="options/chromeos_internet_options_page.css">
   <link rel="stylesheet" href="options/chromeos_language_options.css">
+  <link rel="stylesheet" href="options/chromeos_proxy.css">
 </if>
 
 <if expr="not pp_ifdef('win32') and not pp_ifdef('darwin')">
@@ -60,6 +63,7 @@
 <script src="options/options_page.js"></script>
 <if expr="pp_ifdef('chromeos')">
   <script src="options/about_page.js"></script>
+  <script src="options/chromeos_cellular_plan_element.js"></script>
   <script src="options/chromeos_internet_network_element.js"></script>
   <script src="options/chromeos_internet_options.js"></script>
   <script src="options/chromeos_language_add_language_overlay.js"></script>
@@ -112,13 +116,17 @@
 <script src="options/cookies_view.js"></script>
 <script src="options/edit_search_engine_overlay.js"></script>
 <script src="options/font_settings.js"></script>
+<script src="options/font_settings_ui.js"></script>
 <script src="options/import_data_overlay.js"></script>
+<script src="options/instant_confirm_overlay.js"></script>
 <script src="options/passwords_exceptions.js"></script>
 <script src="options/passwords_exceptions_list.js"></script>
 <script src="options/personal_options.js"></script>
 <script src="options/search_engine_manager.js"></script>
 <script src="options/search_engine_manager_engine_list.js"></script>
+<script src="options/search_page.js"></script>
 <script src="options/sync_options.js"></script>
+<script src="options/zippy.js"></script>
 <script>
 
 var AddStartupPageOverlay = options.AddStartupPageOverlay;
@@ -134,11 +142,13 @@ var CookiesView = options.CookiesView;
 var EditSearchEngineOverlay = options.EditSearchEngineOverlay;
 var FontSettings = options.FontSettings;
 var ImportDataOverlay = options.ImportDataOverlay;
+var InstantConfirmOverlay = options.InstantConfirmOverlay;
 var OptionsPage = options.OptionsPage;
 var PasswordsExceptions = options.PasswordsExceptions;
 var PersonalOptions = options.PersonalOptions;
 var Preferences = options.Preferences;
 var SearchEngineManager = options.SearchEngineManager;
+var SearchPage = options.SearchPage;
 var ProxyOptions = options.ProxyOptions;
 var SyncOptions = options.SyncOptions;
 
@@ -154,24 +164,57 @@ function load() {
 
   localStrings = new LocalStrings();
 
+  OptionsPage.register(SearchPage.getInstance());
+
   if (cr.isChromeOS) {
-    OptionsPage.registerSubPage(AboutPage.getInstance());
     OptionsPage.register(SystemOptions.getInstance());
+    OptionsPage.registerSubPage(AboutPage.getInstance(),
+                                SystemOptions.getInstance());
+    OptionsPage.registerSubPage(LanguageOptions.getInstance(),
+                                SystemOptions.getInstance());
+    OptionsPage.registerSubPage(
+        new OptionsPage('languageChewing',
+                        localStrings.getString('languageChewingPage'),
+                        'languageChewingPage'),
+        SystemOptions.getInstance());
+    OptionsPage.registerSubPage(
+        new OptionsPage('languageHangul',
+                        localStrings.getString('languageHangulPage'),
+                        'languageHangulPage'),
+        SystemOptions.getInstance());
+    OptionsPage.registerSubPage(
+        new OptionsPage('languageMozc',
+                        localStrings.getString('languageMozcPage'),
+                        'languageMozcPage'),
+        SystemOptions.getInstance());
+    OptionsPage.registerSubPage(
+        new OptionsPage('languagePinyin',
+                        localStrings.getString('languagePinyinPage'),
+                        'languagePinyinPage'),
+        SystemOptions.getInstance());
     OptionsPage.register(InternetOptions.getInstance());
   }
 
   OptionsPage.register(BrowserOptions.getInstance());
+  OptionsPage.registerSubPage(SearchEngineManager.getInstance(),
+                              BrowserOptions.getInstance());
   OptionsPage.register(PersonalOptions.getInstance());
+  OptionsPage.registerSubPage(AutoFillOptions.getInstance(),
+                              PersonalOptions.getInstance());
+  OptionsPage.registerSubPage(PasswordsExceptions.getInstance(),
+                              PersonalOptions.getInstance());
+  OptionsPage.registerSubPage(SyncOptions.getInstance(),
+                              PersonalOptions.getInstance());
   OptionsPage.register(AdvancedOptions.getInstance());
-  OptionsPage.registerSubPage(AutoFillOptions.getInstance());
-  OptionsPage.registerSubPage(ContentSettings.getInstance());
-  OptionsPage.registerSubPage(CookiesView.getInstance());
-  OptionsPage.registerSubPage(FontSettings.getInstance());
-  OptionsPage.registerSubPage(PasswordsExceptions.getInstance());
-  OptionsPage.registerSubPage(SearchEngineManager.getInstance());
-  OptionsPage.registerSubPage(SyncOptions.getInstance());
+  OptionsPage.registerSubPage(ContentSettings.getInstance(),
+                              AdvancedOptions.getInstance());
+  OptionsPage.registerSubPage(CookiesView.getInstance(),
+                              AdvancedOptions.getInstance());
+  OptionsPage.registerSubPage(FontSettings.getInstance(),
+                              AdvancedOptions.getInstance());
   if (!cr.isWindows && !cr.isMac) {
-    OptionsPage.registerSubPage(CertificateManager.getInstance());
+    OptionsPage.registerSubPage(CertificateManager.getInstance(),
+                                AdvancedOptions.getInstance());
     OptionsPage.registerOverlay(CertificateRestoreOverlay.getInstance());
     OptionsPage.registerOverlay(CertificateBackupOverlay.getInstance());
     OptionsPage.registerOverlay(CertificateEditCaTrustOverlay.getInstance());
@@ -184,31 +227,12 @@ function load() {
   OptionsPage.registerOverlay(ClearBrowserDataOverlay.getInstance());
   OptionsPage.registerOverlay(EditSearchEngineOverlay.getInstance());
   OptionsPage.registerOverlay(ImportDataOverlay.getInstance());
+  OptionsPage.registerOverlay(InstantConfirmOverlay.getInstance());
 
   if (cr.isChromeOS) {
     OptionsPage.register(AccountsOptions.getInstance());
-    var labsOptions = new OptionsPage('labs',
-                                      localStrings.getString('labsPage'),
-                                      'labsPage');
-    OptionsPage.register(labsOptions);
-    OptionsPage.registerSubPage(LanguageOptions.getInstance());
-    OptionsPage.registerSubPage(new OptionsPage(
-        'languageChewing',
-        localStrings.getString('languageChewingPage'),
-        'languageChewingPage'));
-    OptionsPage.registerSubPage(new OptionsPage(
-        'languageHangul',
-        localStrings.getString('languageHangulPage'),
-        'languageHangulPage'));
-    OptionsPage.registerSubPage(new OptionsPage(
-        'languageMozc',
-        localStrings.getString('languageMozcPage'),
-        'languageMozcPage'));
-    OptionsPage.registerSubPage(new OptionsPage(
-        'languagePinyin',
-        localStrings.getString('languagePinyinPage'),
-        'languagePinyinPage'));
-    OptionsPage.registerSubPage(ProxyOptions.getInstance());
+    OptionsPage.registerSubPage(ProxyOptions.getInstance(),
+                                InternetOptions.getInstance());
     OptionsPage.registerOverlay(new OptionsPage(
         'detailsInternetPage',
         'detailsInternetPage',
@@ -251,6 +275,8 @@ function load() {
   // Allow platform specific CSS rules.
   if (cr.isMac)
     document.documentElement.setAttribute('os', 'mac');
+  if (cr.isViews)
+    document.documentElement.setAttribute('toolkit', 'views');
 
   var end = new Date();
   var total = end - start;
@@ -276,6 +302,7 @@ window.onpopstate = function(e) {
   <include src="options/clear_browser_data_overlay.html">
   <include src="options/edit_search_engine_overlay.html">
   <include src="options/import_data_overlay.html">
+  <include src="options/instant_confirm_overlay.html">
   <if expr="pp_ifdef('chromeos')">
      <include src="options/chromeos_language_add_language_overlay.html">
      <include
@@ -294,42 +321,50 @@ window.onpopstate = function(e) {
      <h1 id="settings-title" i18n-content="title"></h1>
      <ul id="navbar">
      </ul>
-     <hr/>
-     <ul id="subpagesnav">
-     </ul>
   </div>
   <div id="mainview">
      <div class="hidden" id="managed-prefs-banner">
        <span id="managed-prefs-icon"></span>
-       <span i18n-content="managedPrefsBannerText"></span>
+       <span id="managed-prefs-text"
+             i18n-content="managedPrefsBannerText"></span>
      </div>
      <div id="mainview-content">
+       <!-- Start main pages -->
+       <!-- Please keep the main pages in desired order of display.  This will
+            allow search results to display in the desired order. -->
+       <include src="options/search_page.html">
        <if expr="pp_ifdef('chromeos')">
-         <include src="options/about_page.html">
          <include src="options/chromeos_system_options.html">
          <include src="options/chromeos_internet_options.html">
-         <include src="options/chromeos_language_options.html">
-         <include src="options/chromeos_language_chewing_options.html">
-         <include src="options/chromeos_language_hangul_options.html">
-         <include src="options/chromeos_language_mozc_options.html">
-         <include src="options/chromeos_language_pinyin_options.html">
-         <include src="options/chromeos_labs.html">
          <include src="options/chromeos_accounts_options.html">
-         <include src="options/chromeos_proxy.html">
        </if>
-       <if expr="not pp_ifdef('win32') and not pp_ifdef('darwin')">
-         <include src="options/certificate_manager.html">
-       </if>
-       <include src="options/advanced_options.html">
-       <include src="options/autofill_options.html">
        <include src="options/browser_options.html">
-       <include src="options/content_settings.html">
-       <include src="options/cookies_view.html">
-       <include src="options/font_settings.html">
-       <include src="options/passwords_exceptions.html">
        <include src="options/personal_options.html">
-       <include src="options/search_engine_manager.html">
-       <include src="options/sync_options.html">
+       <include src="options/advanced_options.html">
+       <!-- End main pages -->
+       <div id="subpage-sheet-container" class="hidden">
+         <div id="subpage-sheet">
+           <if expr="pp_ifdef('chromeos')">
+             <include src="options/about_page.html">
+             <include src="options/chromeos_language_options.html">
+             <include src="options/chromeos_language_chewing_options.html">
+             <include src="options/chromeos_language_hangul_options.html">
+             <include src="options/chromeos_language_mozc_options.html">
+             <include src="options/chromeos_language_pinyin_options.html">
+             <include src="options/chromeos_proxy.html">
+           </if>
+           <if expr="not pp_ifdef('win32') and not pp_ifdef('darwin')">
+             <include src="options/certificate_manager.html">
+           </if>
+           <include src="options/autofill_options.html">
+           <include src="options/content_settings.html">
+           <include src="options/cookies_view.html">
+           <include src="options/font_settings.html">
+           <include src="options/passwords_exceptions.html">
+           <include src="options/search_engine_manager.html">
+           <include src="options/sync_options.html">
+         </div>
+       </div>
      </div>
   </div>
 </div>
@@ -345,6 +380,8 @@ cr.ui.decorate('input[pref][type=text]', options.PrefTextField);
 cr.ui.decorate('input[pref][type=url]', options.PrefTextField);
 cr.ui.decorate('#contentSettingsPage input[type=radio]',
     options.ContentSettingsRadio);
+cr.ui.decorate('#fontSettingsMinimumSizeSelector',
+    options.MinimumFontSizeSelect);
 console.log('in bottom script');
 </script>
 </body>

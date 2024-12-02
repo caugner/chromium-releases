@@ -38,13 +38,6 @@ WebString RendererWebIDBDatabaseImpl::name() const {
   return result;
 }
 
-WebString RendererWebIDBDatabaseImpl::description() const {
-  string16 result;
-  RenderThread::current()->Send(
-      new ViewHostMsg_IDBDatabaseDescription(idb_database_id_, &result));
-  return result;
-}
-
 WebString RendererWebIDBDatabaseImpl::version() const {
   string16 result;
   RenderThread::current()->Send(
@@ -52,10 +45,10 @@ WebString RendererWebIDBDatabaseImpl::version() const {
   return result;
 }
 
-WebDOMStringList RendererWebIDBDatabaseImpl::objectStores() const {
+WebDOMStringList RendererWebIDBDatabaseImpl::objectStoreNames() const {
   std::vector<string16> result;
   RenderThread::current()->Send(
-      new ViewHostMsg_IDBDatabaseObjectStores(idb_database_id_, &result));
+      new ViewHostMsg_IDBDatabaseObjectStoreNames(idb_database_id_, &result));
   WebDOMStringList webResult;
   for (std::vector<string16>::const_iterator it = result.begin();
        it != result.end(); ++it) {
@@ -110,15 +103,17 @@ WebKit::WebIDBTransaction* RendererWebIDBDatabaseImpl::transaction(
     unsigned short mode,
     unsigned long timeout,
     WebExceptionCode& ec) {
-  std::vector<string16> object_stores(names.length());
-  for (unsigned int i = 0; i < names.length(); ++i) {
+  std::vector<string16> object_stores;
+  object_stores.reserve(names.length());
+  for (unsigned int i = 0; i < names.length(); ++i)
     object_stores.push_back(names.item(i));
-  }
 
   int transaction_id;
   RenderThread::current()->Send(
       new ViewHostMsg_IDBDatabaseTransaction(
           idb_database_id_, object_stores, mode,
           timeout, &transaction_id, &ec));
+  if (!transaction_id)
+    return NULL;
   return new RendererWebIDBTransactionImpl(transaction_id);
 }

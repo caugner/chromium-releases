@@ -10,10 +10,12 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
+#include "base/lock.h"
+#include "base/metrics/histogram.h"
+#include "base/openssl_util.h"
+#include "base/singleton.h"
 #include "net/base/cert_verifier.h"
-#include "base/histogram.h"
 #include "net/base/net_errors.h"
-#include "net/base/openssl_util.h"
 #include "net/base/ssl_connection_status_flags.h"
 #include "net/base/ssl_info.h"
 
@@ -31,15 +33,8 @@ namespace {
 #endif
 
 const size_t kMaxRecvBufferSize = 4096;
-
-void MaybeLogSSLError() {
-  int error_num;
-  while ((error_num = ERR_get_error()) != 0) {
-    char buf[128];  // this buffer must be at least 120 chars long.
-    ERR_error_string_n(error_num, buf, arraysize(buf));
-    DVLOG(1) << "SSL error " << error_num << ": " << buf;
-  }
-}
+const int kSessionCacheTimeoutSeconds = 60 * 60;
+const size_t kSessionCacheMaxEntires = 1024;
 
 int MapOpenSSLError(int err) {
   switch (err) {
@@ -48,21 +43,170 @@ int MapOpenSSLError(int err) {
       return ERR_IO_PENDING;
     case SSL_ERROR_SYSCALL:
       DVLOG(1) << "OpenSSL SYSCALL error, errno " << errno;
-      MaybeLogSSLError();
       return ERR_SSL_PROTOCOL_ERROR;
     default:
       // TODO(joth): Implement full mapping.
       LOG(WARNING) << "Unknown OpenSSL error " << err;
-      MaybeLogSSLError();
       return ERR_SSL_PROTOCOL_ERROR;
   }
 }
+
+// We do certificate verification after handshake, so we disable the default
+// by registering a no-op verify function.
+int NoOpVerifyCallback(X509_STORE_CTX*, void *) {
+  DVLOG(3) << "skipping cert verify";
+  return 1;
+}
+
+// OpenSSL manages a cache of SSL_SESSION, this class provides the application
+// side policy for that cache about session re-use: we retain one session per
+// unique HostPortPair.
+class SSLSessionCache {
+ public:
+  SSLSessionCache() {}
+
+  void OnSessionAdded(const HostPortPair& host_and_port, SSL_SESSION* session) {
+    // Declare the session cleaner-upper before the lock, so any call into
+    // OpenSSL to free the session will happen after the lock is released.
+    base::ScopedOpenSSL<SSL_SESSION, SSL_SESSION_free> session_to_free;
+    AutoLock lock(lock_);
+
+    DCHECK_EQ(0U, session_map_.count(session));
+    std::pair<HostPortMap::iterator, bool> res =
+        host_port_map_.insert(std::make_pair(host_and_port, session));
+    if (!res.second) {  // Already exists: replace old entry.
+      session_to_free.reset(res.first->second);
+      session_map_.erase(session_to_free.get());
+      res.first->second = session;
+    }
+    DVLOG(2) << "Adding session " << session << " => "
+             << host_and_port.ToString() << ", new entry = " << res.second;
+    DCHECK(host_port_map_[host_and_port] == session);
+    session_map_[session] = res.first;
+    DCHECK_EQ(host_port_map_.size(), session_map_.size());
+    DCHECK_LE(host_port_map_.size(), kSessionCacheMaxEntires);
+  }
+
+  void OnSessionRemoved(SSL_SESSION* session) {
+    // Declare the session cleaner-upper before the lock, so any call into
+    // OpenSSL to free the session will happen after the lock is released.
+    base::ScopedOpenSSL<SSL_SESSION, SSL_SESSION_free> session_to_free;
+    AutoLock lock(lock_);
+
+    SessionMap::iterator it = session_map_.find(session);
+    if (it == session_map_.end())
+      return;
+    DVLOG(2) << "Remove session " << session << " => "
+             << it->second->first.ToString();
+    DCHECK(it->second->second == session);
+    host_port_map_.erase(it->second);
+    session_map_.erase(it);
+    session_to_free.reset(session);
+    DCHECK_EQ(host_port_map_.size(), session_map_.size());
+  }
+
+  // Looks up the host:port in the cache, and if a session is found it is added
+  // to |ssl|, returning true on success.
+  bool SetSSLSession(SSL* ssl, const HostPortPair& host_and_port) {
+    AutoLock lock(lock_);
+    HostPortMap::iterator it = host_port_map_.find(host_and_port);
+    if (it == host_port_map_.end())
+      return false;
+    DVLOG(2) << "Lookup session: " << it->second << " => "
+             << host_and_port.ToString();
+    SSL_SESSION* session = it->second;
+    DCHECK(session);
+    DCHECK(session_map_[session] == it);
+    // Ideally we'd release |lock_| before calling into OpenSSL here, however
+    // that opens a small risk |session| will go out of scope before it is used.
+    // Alternatively we would take a temporary local refcount on |session|,
+    // except OpenSSL does not provide a public API for adding a ref (c.f.
+    // SSL_SESSION_free which decrements the ref).
+    return SSL_set_session(ssl, session) == 1;
+  }
+
+ private:
+  // A pair of maps to allow bi-directional lookups between host:port and an
+  // associated seesion.
+  // TODO(joth): When client certificates are implemented we should key the
+  // cache on the client certificate used in addition to the host-port pair.
+  typedef std::map<HostPortPair, SSL_SESSION*> HostPortMap;
+  typedef std::map<SSL_SESSION*, HostPortMap::iterator> SessionMap;
+  HostPortMap host_port_map_;
+  SessionMap session_map_;
+
+  // Protects access to both the above maps.
+  Lock lock_;
+
+  DISALLOW_COPY_AND_ASSIGN(SSLSessionCache);
+};
+
+class SSLContext {
+ public:
+  static SSLContext* Get() { return Singleton<SSLContext>::get(); }
+  SSL_CTX* ssl_ctx() { return ssl_ctx_.get(); }
+  SSLSessionCache* session_cache() { return &session_cache_; }
+
+  SSLClientSocketOpenSSL* GetClientSocketFromSSL(SSL* ssl) {
+    DCHECK(ssl);
+    SSLClientSocketOpenSSL* socket = static_cast<SSLClientSocketOpenSSL*>(
+        SSL_get_ex_data(ssl, ssl_socket_data_index_));
+    DCHECK(socket);
+    return socket;
+  }
+
+  bool SetClientSocketForSSL(SSL* ssl, SSLClientSocketOpenSSL* socket) {
+    return SSL_set_ex_data(ssl, ssl_socket_data_index_, socket) != 0;
+  }
+
+ private:
+  friend struct DefaultSingletonTraits<SSLContext>;
+
+  SSLContext() {
+    base::EnsureOpenSSLInit();
+    ssl_socket_data_index_ = SSL_get_ex_new_index(0, 0, 0, 0, 0);
+    DCHECK_NE(ssl_socket_data_index_, -1);
+    ssl_ctx_.reset(SSL_CTX_new(SSLv23_client_method()));
+    SSL_CTX_set_cert_verify_callback(ssl_ctx_.get(), NoOpVerifyCallback, NULL);
+    SSL_CTX_set_session_cache_mode(ssl_ctx_.get(), SSL_SESS_CACHE_CLIENT);
+    SSL_CTX_sess_set_new_cb(ssl_ctx_.get(), NewSessionCallbackStatic);
+    SSL_CTX_sess_set_remove_cb(ssl_ctx_.get(), RemoveSessionCallbackStatic);
+    SSL_CTX_set_timeout(ssl_ctx_.get(), kSessionCacheTimeoutSeconds);
+    SSL_CTX_sess_set_cache_size(ssl_ctx_.get(), kSessionCacheMaxEntires);
+  }
+
+  static int NewSessionCallbackStatic(SSL* ssl, SSL_SESSION* session) {
+    return Get()->NewSessionCallback(ssl, session);
+  }
+
+  int NewSessionCallback(SSL* ssl, SSL_SESSION* session) {
+    SSLClientSocketOpenSSL* socket = GetClientSocketFromSSL(ssl);
+    session_cache_.OnSessionAdded(socket->host_and_port(), session);
+    return 1;  // 1 => We took ownership of |session|.
+  }
+
+  static void RemoveSessionCallbackStatic(SSL_CTX* ctx, SSL_SESSION* session) {
+    return Get()->RemoveSessionCallback(ctx, session);
+  }
+
+  void RemoveSessionCallback(SSL_CTX* ctx, SSL_SESSION* session) {
+    DCHECK(ctx == ssl_ctx());
+    session_cache_.OnSessionRemoved(session);
+  }
+
+  // This is the index used with SSL_get_ex_data to retrieve the owner
+  // SSLClientSocketOpenSSL object from an SSL instance.
+  int ssl_socket_data_index_;
+
+  base::ScopedOpenSSL<SSL_CTX, SSL_CTX_free> ssl_ctx_;
+  SSLSessionCache session_cache_;
+};
 
 }  // namespace
 
 SSLClientSocketOpenSSL::SSLClientSocketOpenSSL(
     ClientSocketHandle* transport_socket,
-    const std::string& hostname,
+    const HostPortPair& host_and_port,
     const SSLConfig& ssl_config)
     : ALLOW_THIS_IN_INITIALIZER_LIST(buffer_send_callback_(
           this, &SSLClientSocketOpenSSL::BufferSendComplete)),
@@ -73,15 +217,16 @@ SSLClientSocketOpenSSL::SSLClientSocketOpenSSL(
       user_connect_callback_(NULL),
       user_read_callback_(NULL),
       user_write_callback_(NULL),
+      completed_handshake_(false),
       client_auth_cert_needed_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(handshake_io_callback_(
           this, &SSLClientSocketOpenSSL::OnHandshakeIOComplete)),
       ssl_(NULL),
       transport_bio_(NULL),
       transport_(transport_socket),
-      hostname_(hostname),
+      host_and_port_(host_and_port),
       ssl_config_(ssl_config),
-      completed_handshake_(false),
+      trying_cached_session_(false),
       net_log_(transport_socket->socket()->NetLog()) {
 }
 
@@ -93,23 +238,23 @@ bool SSLClientSocketOpenSSL::Init() {
   DCHECK(!ssl_);
   DCHECK(!transport_bio_);
 
-  ssl_ = SSL_new(GetOpenSSLInitSingleton()->ssl_ctx());
-  if (!ssl_) {
-    MaybeLogSSLError();
-    return false;
-  }
+  SSLContext* context = SSLContext::Get();
+  base::OpenSSLErrStackTracer err_tracer(FROM_HERE);
 
-  if (!SSL_set_tlsext_host_name(ssl_, hostname_.c_str())) {
-    MaybeLogSSLError();
+  ssl_ = SSL_new(context->ssl_ctx());
+  if (!ssl_ || !context->SetClientSocketForSSL(ssl_, this))
     return false;
-  }
+
+  if (!SSL_set_tlsext_host_name(ssl_, host_and_port_.host().c_str()))
+    return false;
+
+  trying_cached_session_ =
+      context->session_cache()->SetSSLSession(ssl_, host_and_port_);
 
   BIO* ssl_bio = NULL;
-  // TODO(joth): Provide explicit write buffer sizes, rather than use defaults?
-  if (!BIO_new_bio_pair(&ssl_bio, 0, &transport_bio_, 0)) {
-    MaybeLogSSLError();
+  // 0 => use default buffer sizes.
+  if (!BIO_new_bio_pair(&ssl_bio, 0, &transport_bio_, 0))
     return false;
-  }
   DCHECK(ssl_bio);
   DCHECK(transport_bio_);
 
@@ -263,11 +408,11 @@ void SSLClientSocketOpenSSL::Disconnect() {
   user_write_buf_        = NULL;
   user_write_buf_len_    = 0;
 
-  client_certs_.clear();
-  client_auth_cert_needed_ = false;
-
   server_cert_verify_result_.Reset();
   completed_handshake_ = false;
+
+  client_certs_.clear();
+  client_auth_cert_needed_ = false;
 }
 
 int SSLClientSocketOpenSSL::DoHandshakeLoop(int last_io_result) {
@@ -313,10 +458,16 @@ int SSLClientSocketOpenSSL::DoHandshakeLoop(int last_io_result) {
 }
 
 int SSLClientSocketOpenSSL::DoHandshake() {
+  base::OpenSSLErrStackTracer err_tracer(FROM_HERE);
   int net_error = net::OK;
   int rv = SSL_do_handshake(ssl_);
 
   if (rv == 1) {
+    if (trying_cached_session_ && logging::DEBUG_MODE) {
+      DVLOG(2) << "Result of session reuse for " << host_and_port_.ToString()
+               << " is: " << (SSL_session_reused(ssl_) ? "Success" : "Fail");
+    }
+
     // SSL handshake is completed.  Let's verify the certificate.
     const bool got_cert = !!UpdateServerCert();
     DCHECK(got_cert);
@@ -332,7 +483,6 @@ int SSLClientSocketOpenSSL::DoHandshake() {
       LOG(ERROR) << "handshake failed; returned " << rv
                  << ", SSL error code " << ssl_error
                  << ", net_error " << net_error;
-      MaybeLogSSLError();
     }
   }
   return net_error;
@@ -348,7 +498,7 @@ int SSLClientSocketOpenSSL::DoVerifyCert(int result) {
   if (ssl_config_.verify_ev_cert)
     flags |= X509Certificate::VERIFY_EV_CERT;
   verifier_.reset(new CertVerifier);
-  return verifier_->Verify(server_cert_, hostname_, flags,
+  return verifier_->Verify(server_cert_, host_and_port_.host(), flags,
                            &server_cert_verify_result_,
                            &handshake_io_callback_);
 }
@@ -372,39 +522,21 @@ int SSLClientSocketOpenSSL::DoVerifyCertComplete(int result) {
   // the cert in the allowed_bad_certs vector.
   if (IsCertificateError(result) &&
       ssl_config_.IsAllowedBadCert(server_cert_)) {
-    LOG(INFO) << "accepting bad SSL certificate, as user told us to";
+    VLOG(1) << "accepting bad SSL certificate, as user told us to";
     result = OK;
   }
 
   completed_handshake_ = true;
-  // The NSS version has a comment that we may not need this call because it is
-  // now harmless to have a session with a bad cert.
-  // This may or may not apply here, but let's invalidate it anyway.
-  InvalidateSessionIfBadCertificate();
   // Exit DoHandshakeLoop and return the result to the caller to Connect.
   DCHECK_EQ(STATE_NONE, next_handshake_state_);
   return result;
-}
-
-void SSLClientSocketOpenSSL::InvalidateSessionIfBadCertificate() {
-  if (UpdateServerCert() != NULL &&
-      ssl_config_.IsAllowedBadCert(server_cert_)) {
-    // Remove from session cache but don't clear this connection.
-    // TODO(joth): This should be a no-op until we enable session caching,
-    // see SSL_CTX_set_session_cache_mode(SSL_SESS_CACHE_CLIENT).
-    SSL_SESSION* session = SSL_get_session(ssl_);
-    LOG_IF(ERROR, session) << "Connection has a session?? " << session;
-    int rv = SSL_CTX_remove_session(GetOpenSSLInitSingleton()->ssl_ctx(),
-                                    session);
-    LOG_IF(ERROR, rv) << "Session was cached?? " << rv;
-  }
 }
 
 X509Certificate* SSLClientSocketOpenSSL::UpdateServerCert() {
   if (server_cert_)
     return server_cert_;
 
-  ScopedSSL<X509, X509_free> cert(SSL_get_peer_certificate(ssl_));
+  base::ScopedOpenSSL<X509, X509_free> cert(SSL_get_peer_certificate(ssl_));
   if (!cert.get()) {
     LOG(WARNING) << "SSL_get_peer_certificate returned NULL";
     return NULL;
@@ -631,6 +763,14 @@ bool SSLClientSocketOpenSSL::WasEverUsed() const {
   return false;
 }
 
+bool SSLClientSocketOpenSSL::UsingTCPFastOpen() const {
+  if (transport_.get() && transport_->socket())
+    return transport_->socket()->UsingTCPFastOpen();
+
+  NOTREACHED();
+  return false;
+}
+
 // Socket methods
 
 int SSLClientSocketOpenSSL::Read(IOBuffer* buf,
@@ -706,6 +846,7 @@ bool SSLClientSocketOpenSSL::SetSendBufferSize(int32 size) {
 }
 
 int SSLClientSocketOpenSSL::DoPayloadRead() {
+  base::OpenSSLErrStackTracer err_tracer(FROM_HERE);
   int rv = SSL_read(ssl_, user_read_buf_->data(), user_read_buf_len_);
   // We don't need to invalidate the non-client-authenticated SSL session
   // because the server will renegotiate anyway.
@@ -720,6 +861,7 @@ int SSLClientSocketOpenSSL::DoPayloadRead() {
 }
 
 int SSLClientSocketOpenSSL::DoPayloadWrite() {
+  base::OpenSSLErrStackTracer err_tracer(FROM_HERE);
   int rv = SSL_write(ssl_, user_write_buf_->data(), user_write_buf_len_);
 
   if (rv >= 0)

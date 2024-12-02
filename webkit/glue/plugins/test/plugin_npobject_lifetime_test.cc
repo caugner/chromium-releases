@@ -27,6 +27,7 @@ NPError NPObjectLifetimeTest::SetWindow(NPWindow* pNPWindow) {
 
   HWND window_handle = reinterpret_cast<HWND>(pNPWindow->window);
   if (!::GetProp(window_handle, L"Plugin_Instance")) {
+    // TODO: this propery leaks.
     ::SetProp(window_handle, L"Plugin_Instance", this);
     // We attempt to retreive the NPObject for the plugin instance identified
     // by the NPObjectLifetimeTestInstance2 class as it may not have been
@@ -45,6 +46,8 @@ void CALLBACK NPObjectLifetimeTest::TimerProc(
       reinterpret_cast<NPObjectLifetimeTest*>
           (::GetProp(window, L"Plugin_Instance"));
   KillTimer(window, this_instance->timer_id_);
+  ::RemoveProp(window,  L"Plugin_Instance");
+
   this_instance->timer_id_ = 0;
 
   this_instance->other_plugin_instance_object_ =

@@ -13,12 +13,12 @@
 #include <ios>
 
 #include "base/command_line.h"
-#include "base/debug_util.h"
-#include "base/histogram.h"
+#include "base/debug/stack_trace.h"
 #include "base/logging.h"
-#include "base/scoped_handle_win.h"
+#include "base/metrics/histogram.h"
 #include "base/scoped_ptr.h"
-#include "base/win_util.h"
+#include "base/win/scoped_handle.h"
+#include "base/win/windows_version.h"
 
 // userenv.dll is required for CreateEnvironmentBlock().
 #pragma comment(lib, "userenv.lib")
@@ -40,14 +40,13 @@ LPTOP_LEVEL_EXCEPTION_FILTER g_previous_filter = NULL;
 // Prints the exception call stack.
 // This is the unit tests exception filter.
 long WINAPI StackDumpExceptionFilter(EXCEPTION_POINTERS* info) {
-  StackTrace(info).PrintBacktrace();
+  debug::StackTrace(info).PrintBacktrace();
   if (g_previous_filter)
     return g_previous_filter(info);
   return EXCEPTION_CONTINUE_SEARCH;
 }
 
 // Connects back to a console if available.
-// Only necessary on Windows, no-op on other platforms.
 void AttachToConsole() {
   if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
     unsigned int result = GetLastError();
@@ -119,6 +118,18 @@ bool OpenPrivilegedProcessHandle(ProcessId pid, ProcessHandle* handle) {
   return true;
 }
 
+bool OpenProcessHandleWithAccess(ProcessId pid,
+                                 uint32 access_flags,
+                                 ProcessHandle* handle) {
+  ProcessHandle result = OpenProcess(access_flags, FALSE, pid);
+
+  if (result == INVALID_HANDLE_VALUE)
+    return false;
+
+  *handle = result;
+  return true;
+}
+
 void CloseProcessHandle(ProcessHandle process) {
   CloseHandle(process);
 }
@@ -144,7 +155,7 @@ bool GetProcessIntegrityLevel(ProcessHandle process, IntegrityLevel *level) {
   if (!level)
     return false;
 
-  if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA)
+  if (win::GetVersion() < base::win::VERSION_VISTA)
     return false;
 
   HANDLE process_token;
@@ -152,7 +163,7 @@ bool GetProcessIntegrityLevel(ProcessHandle process, IntegrityLevel *level) {
       &process_token))
     return false;
 
-  ScopedHandle scoped_process_token(process_token);
+  win::ScopedHandle scoped_process_token(process_token);
 
   DWORD token_info_length = 0;
   if (GetTokenInformation(process_token, TokenIntegrityLevel, NULL, 0,
@@ -315,8 +326,8 @@ bool GetAppOutput(const CommandLine& cl, std::string* output) {
   }
 
   // Ensure we don't leak the handles.
-  ScopedHandle scoped_out_read(out_read);
-  ScopedHandle scoped_out_write(out_write);
+  win::ScopedHandle scoped_out_read(out_read);
+  win::ScopedHandle scoped_out_write(out_write);
 
   // Ensure the read handle to the pipe for STDOUT is not inherited.
   if (!SetHandleInformation(out_read, HANDLE_FLAG_INHERIT, 0)) {

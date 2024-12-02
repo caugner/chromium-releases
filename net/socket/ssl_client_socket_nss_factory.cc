@@ -4,11 +4,8 @@
 
 #include "net/socket/client_socket_factory.h"
 
-#include "build/build_config.h"
 #include "net/socket/ssl_client_socket_nss.h"
-#if defined(OS_WIN)
-#include "net/socket/ssl_client_socket_win.h"
-#endif
+#include "net/socket/ssl_host_info.h"
 
 // This file is only used on platforms where NSS is not the system SSL
 // library.  When compiled, this file is the only object module that pulls
@@ -19,17 +16,13 @@ namespace net {
 
 SSLClientSocket* SSLClientSocketNSSFactory(
     ClientSocketHandle* transport_socket,
-    const std::string& hostname,
-    const SSLConfig& ssl_config) {
-  // TODO(wtc): SSLClientSocketNSS can't do SSL client authentication using
-  // CryptoAPI yet (http://crbug.com/37560), so we fall back on
-  // SSLClientSocketWin.
-#if defined(OS_WIN)
-  if (ssl_config.send_client_cert)
-    return new SSLClientSocketWin(transport_socket, hostname, ssl_config);
-#endif
-
-  return new SSLClientSocketNSS(transport_socket, hostname, ssl_config);
+    const HostPortPair& host_and_port,
+    const SSLConfig& ssl_config,
+    SSLHostInfo* ssl_host_info,
+    DnsCertProvenanceChecker* dns_cert_checker) {
+  scoped_ptr<SSLHostInfo> shi(ssl_host_info);
+  return new SSLClientSocketNSS(transport_socket, host_and_port, ssl_config,
+                                shi.release(), dns_cert_checker);
 }
 
 }  // namespace net

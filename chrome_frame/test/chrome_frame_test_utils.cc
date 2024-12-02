@@ -14,13 +14,15 @@
 #include "base/file_version_info.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/registry.h"   // to find IE and firefox
 #include "base/scoped_handle.h"
 #include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/win_util.h"
+#include "base/win/registry.h"
+#include "base/win/windows_version.h"
+#include "ceee/ie/common/ceee_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
@@ -115,7 +117,8 @@ std::wstring GetExecutableAppPath(const std::wstring& file) {
       L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\";
 
   std::wstring app_path;
-  RegKey key(HKEY_LOCAL_MACHINE, (kAppPathsKey + file).c_str(), KEY_READ);
+  base::win::RegKey key(HKEY_LOCAL_MACHINE, (kAppPathsKey + file).c_str(),
+                        KEY_READ);
   if (key.Handle()) {
     key.ReadValue(NULL, &app_path);
   }
@@ -128,7 +131,7 @@ std::wstring FormatCommandForApp(const std::wstring& exe_name,
   std::wstring reg_path(
       base::StringPrintf(L"Applications\\%ls\\shell\\open\\command",
                          exe_name.c_str()));
-  RegKey key(HKEY_CLASSES_ROOT, reg_path.c_str(), KEY_READ);
+  base::win::RegKey key(HKEY_CLASSES_ROOT, reg_path.c_str(), KEY_READ);
 
   std::wstring command;
   if (key.Handle()) {
@@ -224,11 +227,10 @@ base::ProcessHandle LaunchIEOnVista(const std::wstring& url) {
 }
 
 base::ProcessHandle LaunchIE(const std::wstring& url) {
-  if (win_util::GetWinVersion() >= win_util::WINVERSION_VISTA) {
+  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
     return LaunchIEOnVista(url);
-  } else {
-    return LaunchExecutable(kIEImageName, url);
   }
+  return LaunchExecutable(kIEImageName, url);
 }
 
 int CloseAllIEWindows() {
@@ -372,7 +374,7 @@ HRESULT LaunchIEAsComServer(IWebBrowser2** web_browser) {
   // This causes the IWebBrowser2 interface which is returned to be useless,
   // i.e it does not receive any events, etc. Our workaround for this is
   // to impersonate a low integrity token and then launch IE.
-  if (win_util::GetWinVersion() == win_util::WINVERSION_VISTA &&
+  if (base::win::GetVersion() == base::win::VERSION_VISTA &&
       GetInstalledIEVersion() == IE_7) {
     // Create medium integrity browser that will launch IE broker.
     ScopedComPtr<IWebBrowser2> medium_integrity_browser;
@@ -397,6 +399,7 @@ HRESULT LaunchIEAsComServer(IWebBrowser2** web_browser) {
   return hr;
 }
 
+// TODO(joi@chromium.org) Could share this code with chrome_frame_plugin.h
 FilePath GetProfilePath(const std::wstring& profile_name) {
   FilePath profile_path;
   chrome::GetChromeFrameUserDataDirectory(&profile_path);
@@ -429,17 +432,18 @@ IEVersion GetInstalledIEVersion() {
   return IE_UNSUPPORTED;
 }
 
+// TODO(joi@chromium.org) Could share this code with chrome_frame_plugin.h
 FilePath GetProfilePathForIE() {
   FilePath profile_path;
   // Browsers without IDeleteBrowsingHistory in non-priv mode
   // have their profiles moved into "Temporary Internet Files".
   // The code below basically retrieves the version of IE and computes
   // the profile directory accordingly.
-  if (GetInstalledIEVersion() >= IE_8) {
-    profile_path = GetProfilePath(kIEProfileName);
-  } else {
+  if (GetInstalledIEVersion() <= IE_7 && !ceee_util::IsIeCeeeRegistered()) {
     profile_path = GetIETemporaryFilesFolder();
     profile_path = profile_path.Append(L"Google Chrome Frame");
+  } else {
+    profile_path = GetProfilePath(kIEProfileName);
   }
   return profile_path;
 }
@@ -450,6 +454,14 @@ FilePath GetTestDataFolder() {
   test_dir = test_dir.Append(FILE_PATH_LITERAL("chrome_frame"))
       .Append(FILE_PATH_LITERAL("test"))
       .Append(FILE_PATH_LITERAL("data"));
+  return test_dir;
+}
+
+FilePath GetSeleniumTestFolder() {
+  FilePath test_dir;
+  PathService::Get(base::DIR_SOURCE_ROOT, &test_dir);
+  test_dir = test_dir.Append(FILE_PATH_LITERAL("data"))
+      .Append(FILE_PATH_LITERAL("selenium_core"));
   return test_dir;
 }
 
@@ -553,8 +565,8 @@ bool DetectRunningCrashService(int timeout_ms) {
 
 base::ProcessHandle StartCrashService() {
   if (DetectRunningCrashService(kCrashServiceStartupTimeoutMs)) {
-    DLOG(INFO) << "crash_service.exe is already running. We will use the "
-               << "existing process and leave it running after tests complete.";
+    DVLOG(1) << "crash_service.exe is already running. We will use the "
+                "existing process and leave it running after tests complete.";
     return NULL;
   }
 
@@ -566,7 +578,7 @@ base::ProcessHandle StartCrashService() {
 
   base::ProcessHandle crash_service = NULL;
 
-  DLOG(INFO) << "Starting crash_service.exe so you know if a test crashes!";
+  DVLOG(1) << "Starting crash_service.exe so you know if a test crashes!";
 
   FilePath crash_service_path = exe_dir.AppendASCII("crash_service.exe");
   if (!base::LaunchApp(crash_service_path.value(), false, false,
@@ -578,13 +590,13 @@ base::ProcessHandle StartCrashService() {
   base::Time start = base::Time::Now();
 
   if (DetectRunningCrashService(kCrashServiceStartupTimeoutMs)) {
-    DLOG(INFO) << "crash_service.exe is ready for clients in "
-               << (base::Time::Now() - start).InMilliseconds() << "ms.";
+    DVLOG(1) << "crash_service.exe is ready for clients in "
+             << (base::Time::Now() - start).InMilliseconds() << " ms.";
     return crash_service;
   } else {
     DLOG(ERROR) << "crash_service.exe failed to accept client connections "
-                << "within " << kCrashServiceStartupTimeoutMs << "ms. "
-                << "Terminating it now.";
+                   "within " << kCrashServiceStartupTimeoutMs << " ms. "
+                   "Terminating it now.";
 
     // First check to see if it's even still running just to minimize the
     // likelihood of spurious error messages from KillProcess.

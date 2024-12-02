@@ -23,12 +23,6 @@
 // and then remove this.
 #include "base/stringprintf.h"
 
-#ifdef RLZ_WIN_LIB_RLZ_LIB_H_
-// TODO(tfarina): Fix the rlz library to include this instead and remove
-// this include.
-#include "base/string_split.h"
-#endif  // RLZ_WIN_LIB_RLZ_LIB_H_
-
 // Safe standard library wrappers for all platforms.
 
 namespace base {
@@ -121,6 +115,36 @@ size_t wcslcpy(wchar_t* dst, const wchar_t* src, size_t dst_size);
 //
 // This function is intended to be called from base::vswprintf.
 bool IsWprintfFormatPortable(const wchar_t* format);
+
+// ASCII-specific tolower.  The standard library's tolower is locale sensitive,
+// so we don't want to use it here.
+template <class Char> inline Char ToLowerASCII(Char c) {
+  return (c >= 'A' && c <= 'Z') ? (c + ('a' - 'A')) : c;
+}
+
+// ASCII-specific toupper.  The standard library's toupper is locale sensitive,
+// so we don't want to use it here.
+template <class Char> inline Char ToUpperASCII(Char c) {
+  return (c >= 'a' && c <= 'z') ? (c + ('A' - 'a')) : c;
+}
+
+// Function objects to aid in comparing/searching strings.
+
+template<typename Char> struct CaseInsensitiveCompare {
+ public:
+  bool operator()(Char x, Char y) const {
+    // TODO(darin): Do we really want to do locale sensitive comparisons here?
+    // See http://crbug.com/24917
+    return tolower(x) == tolower(y);
+  }
+};
+
+template<typename Char> struct CaseInsensitiveCompareASCII {
+ public:
+  bool operator()(Char x, Char y) const {
+    return ToLowerASCII(x) == ToLowerASCII(y);
+  }
+};
 
 }  // namespace base
 
@@ -258,23 +282,16 @@ bool WideToLatin1(const std::wstring& wide, std::string* latin1);
 // to have the maximum 'discriminating' power from other encodings. If
 // there's a use case for just checking the structural validity, we have to
 // add a new function for that.
-bool IsString8Bit(const std::wstring& str);
 bool IsStringUTF8(const std::string& str);
 bool IsStringASCII(const std::wstring& str);
 bool IsStringASCII(const base::StringPiece& str);
 bool IsStringASCII(const string16& str);
 
-// ASCII-specific tolower.  The standard library's tolower is locale sensitive,
-// so we don't want to use it here.
-template <class Char> inline Char ToLowerASCII(Char c) {
-  return (c >= 'A' && c <= 'Z') ? (c + ('a' - 'A')) : c;
-}
-
 // Converts the elements of the given string.  This version uses a pointer to
 // clearly differentiate it from the non-pointer variant.
 template <class str> inline void StringToLowerASCII(str* s) {
   for (typename str::iterator i = s->begin(); i != s->end(); ++i)
-    *i = ToLowerASCII(*i);
+    *i = base::ToLowerASCII(*i);
 }
 
 template <class str> inline str StringToLowerASCII(const str& s) {
@@ -284,17 +301,11 @@ template <class str> inline str StringToLowerASCII(const str& s) {
   return output;
 }
 
-// ASCII-specific toupper.  The standard library's toupper is locale sensitive,
-// so we don't want to use it here.
-template <class Char> inline Char ToUpperASCII(Char c) {
-  return (c >= 'a' && c <= 'z') ? (c + ('A' - 'a')) : c;
-}
-
 // Converts the elements of the given string.  This version uses a pointer to
 // clearly differentiate it from the non-pointer variant.
 template <class str> inline void StringToUpperASCII(str* s) {
   for (typename str::iterator i = s->begin(); i != s->end(); ++i)
-    *i = ToUpperASCII(*i);
+    *i = base::ToUpperASCII(*i);
 }
 
 template <class str> inline str StringToUpperASCII(const str& s) {
@@ -475,24 +486,6 @@ inline typename string_type::value_type* WriteInto(string_type* str,
 
 //-----------------------------------------------------------------------------
 
-// Function objects to aid in comparing/searching strings.
-
-template<typename Char> struct CaseInsensitiveCompare {
- public:
-  bool operator()(Char x, Char y) const {
-    // TODO(darin): Do we really want to do locale sensitive comparisons here?
-    // See http://crbug.com/24917
-    return tolower(x) == tolower(y);
-  }
-};
-
-template<typename Char> struct CaseInsensitiveCompareASCII {
- public:
-  bool operator()(Char x, Char y) const {
-    return ToLowerASCII(x) == ToLowerASCII(y);
-  }
-};
-
 // Splits a string into its fields delimited by any of the characters in
 // |delimiters|.  Each field is added to the |tokens| vector.  Returns the
 // number of tokens found.
@@ -510,24 +503,8 @@ size_t Tokenize(const base::StringPiece& str,
                 std::vector<base::StringPiece>* tokens);
 
 // Does the opposite of SplitString().
-std::wstring JoinString(const std::vector<std::wstring>& parts, wchar_t s);
 string16 JoinString(const std::vector<string16>& parts, char16 s);
 std::string JoinString(const std::vector<std::string>& parts, char s);
-
-// WARNING: this uses whitespace as defined by the HTML5 spec. If you need
-// a function similar to this but want to trim all types of whitespace, then
-// factor this out into a function that takes a string containing the characters
-// that are treated as whitespace.
-//
-// Splits the string along whitespace (where whitespace is the five space
-// characters defined by HTML 5). Each contiguous block of non-whitespace
-// characters is added to result.
-void SplitStringAlongWhitespace(const std::wstring& str,
-                                std::vector<std::wstring>* result);
-void SplitStringAlongWhitespace(const string16& str,
-                                std::vector<string16>* result);
-void SplitStringAlongWhitespace(const std::string& str,
-                                std::vector<std::string>* result);
 
 // Replace $1-$2-$3..$9 in the format string with |a|-|b|-|c|..|i| respectively.
 // Additionally, any number of consecutive '$' characters is replaced by that

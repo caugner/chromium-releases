@@ -7,6 +7,7 @@
 #include "base/basictypes.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
+#include "base/message_loop_proxy.h"
 #include "base/ref_counted.h"
 #include "base/scoped_callback_factory.h"
 #include "base/scoped_ptr.h"
@@ -209,8 +210,8 @@ class FileSystemPathManagerTest : public testing::Test {
 
   FilePath data_path() { return data_dir_->path(); }
   FilePath file_system_path() {
-    return data_dir_->path().Append(
-        FileSystemPathManager::kFileSystemDirectory);
+    return FileSystemPathManager::GetFileSystemCommonRootDirectory(
+        data_dir_->path());
   }
 
  private:

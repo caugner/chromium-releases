@@ -15,6 +15,7 @@
     </script>
     <script type="text/javascript" src="js/api_page_generator.js"></script>
     <script type="text/javascript" src="js/bootstrap.js"></script>
+    <script type="text/javascript" src="js/sidebar.js"></script>
   <title>Packaging - Google Chrome Extensions - Google Code</title></head>
   <body>  <div id="gc-container" class="labs">
       <div id="devModeWarning">
@@ -94,7 +95,7 @@
               <div>
               </div>
             </div>
-          </dl>         
+          </dl>
         </div>
       </div> <!-- /SUBTEMPLATES -->
 
@@ -165,10 +166,10 @@
                   <li><a href="browserAction.html">Browser Actions</a></li>
                   <li><a href="contextMenus.html">Context Menus</a></li>
                   <li><a href="notifications.html">Desktop Notifications</a></li>
+                  <li><a href="omnibox.html">Omnibox</a></li>
                   <li><a href="options.html">Options Pages</a></li>
                   <li><a href="override.html">Override Pages</a></li>
                   <li><a href="pageAction.html">Page Actions</a></li>
-                  <li><a href="themes.html">Themes</a></li>
                 </ul>
               </li>
               <li>Browser Interaction
@@ -202,6 +203,7 @@
               </li>
             </ul>
           </li>
+          <li><h2><a href="apps.html">Packaged Apps</a></h2></li>
           <li><h2><a href="tutorials.html">Tutorials</a></h2>
             <ul>
               <li><a href="tut_debugging.html">Debugging</a></li>
@@ -215,16 +217,27 @@
                 <ul>
                   <li><a href="manifest.html">Manifest Files</a></li>
                   <li><a href="match_patterns.html">Match Patterns</a></li>
-                  <!-- <li>Packages (.crx)</li> -->
                 </ul>
               </li>
+              <li><a href="permission_warnings.html">Permission Warnings</a></li>
               <li><a href="api_index.html">chrome.* APIs</a></li>
               <li><a href="api_other.html">Other APIs</a></li>
             </ul>
           </li>
-         <li><h2><a href="samples.html">Samples</a></h2></li>
+          <li><h2><a href="samples.html">Samples</a></h2></li>
+          <div class="line"> </div>
+          <li><h2>More</h2>
+            <ul>
+              <li><a href="http://code.google.com/chrome/webstore/docs/index.html">Chrome Web Store</a></li>
+              <li><a href="http://code.google.com/chrome/apps/docs/developers_guide.html">Hosted Apps</a></li>
+              <li><a href="themes.html">Themes</a></li>
+            </ul>
+          </li>
         </ul>
       </div>
+      <script>
+        initToggles();
+      </script>
 
     <div class="g-unit" id="gc-pagecontent">
       <div id="pageTitle">
@@ -256,7 +269,7 @@
                 </li>
               </ol>
             </li><li>
-              <a href="#ruby">Ruby script</a>
+              <a href="#H2-3">Package format and scripts</a>
               <ol>
                 <li style="display: none; ">
                   <a>h3Name</a>
@@ -325,7 +338,7 @@ for example, <code>myextension.crx</code>.
 <b>Note:</b>
 You might not need to package your extension.
 If you publish your extension using the
-<a href="https://chrome.google.com/extensions">gallery</a>,
+<a href="https://chrome.google.com/webstore/developer/dashboard">Chrome Developer Dashboard</a>,
 then the only reason to create your own <code>.crx</code> file
 would be to distribute a non-public version —
 for example, to alpha testers.
@@ -391,8 +404,8 @@ You'll need it later if you want to do any of the following:
 </p>
 <ul>
 <li><a href="#update">Update</a> the extension</li>
-<li>Upload the extension to the
-<a href="https://chrome.google.com/extensions">Extensions Gallery</a> </li>
+<li>Upload the extension using the
+<a href="https://chrome.google.com/webstore/developer/dashboard">Chrome Developer Dashboard</a></li>
 </ul>
 
 <p>
@@ -464,18 +477,12 @@ To suppress the dialog,
 add <code>--no-message-box</code> to the command.
 </p>
 
-<h2 id="ruby">Ruby script</h2>
-
+<a name="H2-3"></a><h2>Package format and scripts</h2>
 <p>
-You can also use a Ruby script to create packages.
-See the following page for details:
+For more information on the format, as well as pointers to scripts you can use
+to create <code>.crx</code> files, see <a href="crx.html">CRX package format</a>.
 </p>
-
-<blockquote>
-<a href="http://github.com/Constellation/crxmake">github: crxmake</a>
-
-
-</blockquote></div>
+</div>
 
         <!-- API PAGE -->
         <div class="apiPage" style="display: none; ">
@@ -642,7 +649,7 @@ See the following page for details:
   <a rel="license" href="http://code.google.com/google_bsd_license.html">BSD License</a>.
   </p>
   <p>
-  ©2010 Google
+  ©2011 Google
   </p>
 
 <!-- begin analytics -->

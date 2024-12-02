@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,7 @@ TEST(ExtensionFromUserScript, Basic) {
                        .AppendASCII("user_script_basic.user.js");
 
   std::string error;
-  scoped_ptr<Extension> extension(ConvertUserScriptToExtension(
+  scoped_refptr<Extension> extension(ConvertUserScriptToExtension(
       test_file, GURL("http://www.google.com/foo"), &error));
 
   ASSERT_TRUE(extension.get());
@@ -49,6 +49,9 @@ TEST(ExtensionFromUserScript, Basic) {
       extension->path().Append(script.js_scripts()[0].relative_path())));
   EXPECT_TRUE(file_util::PathExists(
       extension->path().Append(Extension::kManifestFilename)));
+
+  // Cleanup
+  file_util::Delete(extension->path(), true);
 }
 
 TEST(ExtensionFromUserScript, NoMetdata) {
@@ -58,7 +61,7 @@ TEST(ExtensionFromUserScript, NoMetdata) {
                        .AppendASCII("user_script_no_metadata.user.js");
 
   std::string error;
-  scoped_ptr<Extension> extension(ConvertUserScriptToExtension(
+  scoped_refptr<Extension> extension(ConvertUserScriptToExtension(
       test_file, GURL("http://www.google.com/foo/bar.user.js?monkey"), &error));
 
   ASSERT_TRUE(extension.get());
@@ -85,4 +88,7 @@ TEST(ExtensionFromUserScript, NoMetdata) {
       extension->path().Append(script.js_scripts()[0].relative_path())));
   EXPECT_TRUE(file_util::PathExists(
       extension->path().Append(Extension::kManifestFilename)));
+
+  // Cleanup
+  file_util::Delete(extension->path(), true);
 }

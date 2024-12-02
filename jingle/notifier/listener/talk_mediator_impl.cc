@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,10 +13,12 @@
 namespace notifier {
 
 TalkMediatorImpl::TalkMediatorImpl(
-    MediatorThread* mediator_thread, bool invalidate_xmpp_auth_token)
+    MediatorThread* mediator_thread, bool invalidate_xmpp_auth_token,
+    bool allow_insecure_connection)
     : delegate_(NULL),
       mediator_thread_(mediator_thread),
-      invalidate_xmpp_auth_token_(invalidate_xmpp_auth_token) {
+      invalidate_xmpp_auth_token_(invalidate_xmpp_auth_token),
+      allow_insecure_connection_(allow_insecure_connection) {
   DCHECK(non_thread_safe_.CalledOnValidThread());
   mediator_thread_->Start();
   state_.started = 1;
@@ -90,6 +92,10 @@ bool TalkMediatorImpl::SetAuthToken(const std::string& email,
   xmpp_settings_.set_auth_cookie(invalidate_xmpp_auth_token_ ?
                                  token + "bogus" : token);
   xmpp_settings_.set_token_service(token_service);
+  if (allow_insecure_connection_) {
+    xmpp_settings_.set_allow_plain(true);
+    xmpp_settings_.set_use_tls(false);
+  }
 
   state_.initialized = 1;
   return true;
@@ -100,7 +106,7 @@ void TalkMediatorImpl::AddSubscribedServiceUrl(
   DCHECK(non_thread_safe_.CalledOnValidThread());
   subscribed_services_list_.push_back(service_url);
   if (state_.logged_in) {
-    LOG(INFO) << "Resubscribing for updates, a new service got added";
+    VLOG(1) << "Resubscribing for updates, a new service got added";
     mediator_thread_->SubscribeForUpdates(subscribed_services_list_);
   }
 }
@@ -111,14 +117,14 @@ void TalkMediatorImpl::OnConnectionStateChange(bool logged_in) {
   state_.logging_in = 0;
   state_.logged_in = logged_in;
   if (logged_in) {
-    LOG(INFO) << "P2P: Logged in.";
+    VLOG(1) << "P2P: Logged in.";
     // ListenForUpdates enables the ListenTask.  This is done before
     // SubscribeForUpdates.
     mediator_thread_->ListenForUpdates();
     // Now subscribe for updates to all the services we are interested in
     mediator_thread_->SubscribeForUpdates(subscribed_services_list_);
   } else {
-    LOG(INFO) << "P2P: Logged off.";
+    VLOG(1) << "P2P: Logged off.";
     OnSubscriptionStateChange(false);
   }
 }
@@ -126,28 +132,25 @@ void TalkMediatorImpl::OnConnectionStateChange(bool logged_in) {
 void TalkMediatorImpl::OnSubscriptionStateChange(bool subscribed) {
   DCHECK(non_thread_safe_.CalledOnValidThread());
   state_.subscribed = subscribed;
-  LOG(INFO) << "P2P: " << (subscribed ? "subscribed" : "unsubscribed");
-  if (delegate_) {
+  VLOG(1) << "P2P: " << (subscribed ? "subscribed" : "unsubscribed");
+  if (delegate_)
     delegate_->OnNotificationStateChange(subscribed);
-  }
 }
 
 void TalkMediatorImpl::OnIncomingNotification(
     const IncomingNotificationData& notification_data) {
   DCHECK(non_thread_safe_.CalledOnValidThread());
-  LOG(INFO) << "P2P: Updates are available on the server.";
-  if (delegate_) {
+  VLOG(1) << "P2P: Updates are available on the server.";
+  if (delegate_)
     delegate_->OnIncomingNotification(notification_data);
-  }
 }
 
 void TalkMediatorImpl::OnOutgoingNotification() {
   DCHECK(non_thread_safe_.CalledOnValidThread());
-  LOG(INFO) <<
-      "P2P: Peers were notified that updates are available on the server.";
-  if (delegate_) {
+  VLOG(1) << "P2P: Peers were notified that updates are available on the "
+             "server.";
+  if (delegate_)
     delegate_->OnOutgoingNotification();
-  }
 }
 
 }  // namespace notifier

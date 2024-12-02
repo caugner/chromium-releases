@@ -171,7 +171,7 @@ void MockAppCacheStorage::ProcessLoadCache(
 
 void MockAppCacheStorage::ProcessLoadOrCreateGroup(
     const GURL& manifest_url, scoped_refptr<DelegateReference> delegate_ref) {
-  scoped_refptr<AppCacheGroup> group = working_set_.GetGroup(manifest_url);
+  scoped_refptr<AppCacheGroup> group(working_set_.GetGroup(manifest_url));
 
   // Newly created groups are not put in the stored_groups collection
   // until StoreGroupAndNewestCache is called.
@@ -212,6 +212,7 @@ void MockAppCacheStorage::ProcessStoreGroupAndNewestCache(
 namespace {
 
 struct FoundCandidate {
+  GURL url;
   AppCacheEntry entry;
   int64 cache_id;
   GURL manifest_url;
@@ -228,7 +229,8 @@ void MockAppCacheStorage::ProcessFindResponseForMainRequest(
     simulate_find_main_resource_ = false;
     if (delegate_ref->delegate) {
       delegate_ref->delegate->OnMainResponseFound(
-          url, simulated_found_entry_, simulated_found_fallback_entry_,
+          url, simulated_found_entry_,
+          simulated_found_fallback_url_, simulated_found_fallback_entry_,
           simulated_found_cache_id_, simulated_found_manifest_url_, false);
     }
     return;
@@ -283,6 +285,7 @@ void MockAppCacheStorage::ProcessFindResponseForMainRequest(
     bool is_in_use = IsCacheStored(cache) && !cache->HasOneRef();
 
     if (found_entry.has_response_id()) {
+      found_candidate.url = url;
       found_candidate.entry = found_entry;
       found_candidate.cache_id = cache->cache_id();
       found_candidate.manifest_url = group->manifest_url();
@@ -313,6 +316,8 @@ void MockAppCacheStorage::ProcessFindResponseForMainRequest(
       }
 
       if (take_new_candidate) {
+        found_fallback_candidate.url =
+            cache->GetFallbackEntryUrl(found_fallback_namespace);
         found_fallback_candidate.entry = found_fallback_entry;
         found_fallback_candidate.cache_id = cache->cache_id();
         found_fallback_candidate.manifest_url = group->manifest_url();
@@ -325,7 +330,7 @@ void MockAppCacheStorage::ProcessFindResponseForMainRequest(
   // Found a direct hit.
   if (found_candidate.entry.has_response_id()) {
     delegate_ref->delegate->OnMainResponseFound(
-        url, found_candidate.entry, AppCacheEntry(),
+        url, found_candidate.entry, GURL(), AppCacheEntry(),
         found_candidate.cache_id, found_candidate.manifest_url, false);
     return;
   }
@@ -333,7 +338,9 @@ void MockAppCacheStorage::ProcessFindResponseForMainRequest(
   // Found a fallback namespace.
   if (found_fallback_candidate.entry.has_response_id()) {
     delegate_ref->delegate->OnMainResponseFound(
-        url, AppCacheEntry(), found_fallback_candidate.entry,
+        url, AppCacheEntry(),
+        found_fallback_candidate.url,
+        found_fallback_candidate.entry,
         found_fallback_candidate.cache_id,
         found_fallback_candidate.manifest_url, false);
     return;
@@ -341,7 +348,7 @@ void MockAppCacheStorage::ProcessFindResponseForMainRequest(
 
   // Didn't find anything.
   delegate_ref->delegate->OnMainResponseFound(
-      url, AppCacheEntry(), AppCacheEntry(), kNoCacheId, GURL(), false);
+      url, AppCacheEntry(), GURL(), AppCacheEntry(), kNoCacheId, GURL(), false);
 }
 
 void MockAppCacheStorage::ProcessMakeGroupObsolete(
@@ -390,8 +397,10 @@ void MockAppCacheStorage::RunOnePendingTask() {
 
 void MockAppCacheStorage::AddStoredCache(AppCache* cache) {
   int64 cache_id = cache->cache_id();
-  if (stored_caches_.find(cache_id) == stored_caches_.end())
-    stored_caches_.insert(StoredCacheMap::value_type(cache_id, cache));
+  if (stored_caches_.find(cache_id) == stored_caches_.end()) {
+    stored_caches_.insert(
+        StoredCacheMap::value_type(cache_id, make_scoped_refptr(cache)));
+  }
 }
 
 void MockAppCacheStorage::RemoveStoredCache(AppCache* cache) {
@@ -411,8 +420,10 @@ void MockAppCacheStorage::RemoveStoredCaches(
 
 void MockAppCacheStorage::AddStoredGroup(AppCacheGroup* group) {
   const GURL& url = group->manifest_url();
-  if (stored_groups_.find(url) == stored_groups_.end())
-    stored_groups_.insert(StoredGroupMap::value_type(url, group));
+  if (stored_groups_.find(url) == stored_groups_.end()) {
+    stored_groups_.insert(
+        StoredGroupMap::value_type(url, make_scoped_refptr(group)));
+  }
 }
 
 void MockAppCacheStorage::RemoveStoredGroup(AppCacheGroup* group) {

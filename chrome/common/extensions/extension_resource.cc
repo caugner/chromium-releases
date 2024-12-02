@@ -6,10 +6,7 @@
 
 #include "base/file_util.h"
 #include "base/logging.h"
-
-PlatformThreadId ExtensionResource::file_thread_id_ = 0;
-
-bool ExtensionResource::check_for_file_thread_ = false;
+#include "base/thread_restrictions.h"
 
 ExtensionResource::ExtensionResource() {
 }
@@ -22,7 +19,7 @@ ExtensionResource::ExtensionResource(const std::string& extension_id,
       relative_path_(relative_path) {
 }
 
-const FilePath& ExtensionResource::GetFilePathOnAnyThreadHack() const {
+const FilePath& ExtensionResource::GetFilePath() const {
   if (extension_root_.empty() || relative_path_.empty()) {
     DCHECK(full_resource_path_.empty());
     return full_resource_path_;
@@ -33,17 +30,12 @@ const FilePath& ExtensionResource::GetFilePathOnAnyThreadHack() const {
     return full_resource_path_;
 
   full_resource_path_ =
-      GetFilePathOnAnyThreadHack(extension_root_, relative_path_);
+      GetFilePath(extension_root_, relative_path_);
   return full_resource_path_;
 }
 
-const FilePath& ExtensionResource::GetFilePath() const {
-  ExtensionResource::CheckFileAccessFromFileThread();
-  return GetFilePathOnAnyThreadHack();
-}
-
 // static
-FilePath ExtensionResource::GetFilePathOnAnyThreadHack(
+FilePath ExtensionResource::GetFilePath(
     const FilePath& extension_root, const FilePath& relative_path) {
   // We need to resolve the parent references in the extension_root
   // path on its own because IsParent doesn't like parent references.
@@ -67,19 +59,6 @@ FilePath ExtensionResource::GetFilePathOnAnyThreadHack(
   }
 
   return FilePath();
-}
-
-// static
-FilePath ExtensionResource::GetFilePath(
-    const FilePath& extension_root, const FilePath& relative_path) {
-  CheckFileAccessFromFileThread();
-  return GetFilePathOnAnyThreadHack(extension_root, relative_path);
-}
-
-// static
-void ExtensionResource::CheckFileAccessFromFileThread() {
-  DCHECK(!check_for_file_thread_ ||
-         file_thread_id_ == PlatformThread::CurrentId());
 }
 
 // Unit-testing helpers.

@@ -48,8 +48,8 @@
 
 #include "base/basictypes.h"
 #include "base/format_macros.h"
-#include "base/histogram.h"
 #include "base/logging.h"
+#include "base/metrics/histogram.h"
 #include "base/scoped_ptr.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
@@ -58,13 +58,6 @@
 #include "googleurl/src/url_canon.h"
 #include "net/base/net_util.h"
 #include "net/base/registry_controlled_domain.h"
-
-// #define COOKIE_LOGGING_ENABLED
-#ifdef COOKIE_LOGGING_ENABLED
-#define COOKIE_DLOG(severity) DLOG_IF(INFO, 1)
-#else
-#define COOKIE_DLOG(severity) DLOG_IF(INFO, 0)
-#endif
 
 using base::Time;
 using base::TimeDelta;
@@ -96,6 +89,13 @@ struct OrderByCreationTimeDesc {
     return a->second->CreationDate() > b->second->CreationDate();
   }
 };
+
+// Constants for use in VLOG
+const int kVlogPerCookieMonster = 1;
+const int kVlogPeriodic = 3;
+const int kVlogGarbageCollection = 5;
+const int kVlogSetCookies = 7;
+const int kVlogGetCookies = 9;
 
 }  // namespace
 
@@ -148,49 +148,49 @@ CookieMonster::~CookieMonster() {
 // initialization is based are included in comments below.
 void CookieMonster::InitializeHistograms() {
   // From UMA_HISTOGRAM_CUSTOM_COUNTS
-  histogram_expiration_duration_minutes_ = Histogram::FactoryGet(
+  histogram_expiration_duration_minutes_ = base::Histogram::FactoryGet(
       "Cookie.ExpirationDurationMinutes",
       1, kMinutesInTenYears, 50,
-      Histogram::kUmaTargetedHistogramFlag);
-  histogram_between_access_interval_minutes_ = Histogram::FactoryGet(
+      base::Histogram::kUmaTargetedHistogramFlag);
+  histogram_between_access_interval_minutes_ = base::Histogram::FactoryGet(
       "Cookie.BetweenAccessIntervalMinutes",
       1, kMinutesInTenYears, 50,
-      Histogram::kUmaTargetedHistogramFlag);
-  histogram_evicted_last_access_minutes_ = Histogram::FactoryGet(
+      base::Histogram::kUmaTargetedHistogramFlag);
+  histogram_evicted_last_access_minutes_ = base::Histogram::FactoryGet(
       "Cookie.EvictedLastAccessMinutes",
       1, kMinutesInTenYears, 50,
-      Histogram::kUmaTargetedHistogramFlag);
-  histogram_count_ = Histogram::FactoryGet(
+      base::Histogram::kUmaTargetedHistogramFlag);
+  histogram_count_ = base::Histogram::FactoryGet(
       "Cookie.Count", 1, 4000, 50,
-      Histogram::kUmaTargetedHistogramFlag);
-  histogram_domain_count_ = Histogram::FactoryGet(
+      base::Histogram::kUmaTargetedHistogramFlag);
+  histogram_domain_count_ = base::Histogram::FactoryGet(
       "Cookie.DomainCount", 1, 4000, 50,
-      Histogram::kUmaTargetedHistogramFlag);
-  histogram_etldp1_count_ = Histogram::FactoryGet(
+      base::Histogram::kUmaTargetedHistogramFlag);
+  histogram_etldp1_count_ = base::Histogram::FactoryGet(
       "Cookie.Etldp1Count", 1, 4000, 50,
-      Histogram::kUmaTargetedHistogramFlag);
-  histogram_domain_per_etldp1_count_ = Histogram::FactoryGet(
+      base::Histogram::kUmaTargetedHistogramFlag);
+  histogram_domain_per_etldp1_count_ = base::Histogram::FactoryGet(
       "Cookie.DomainPerEtldp1Count", 1, 4000, 50,
-      Histogram::kUmaTargetedHistogramFlag);
+      base::Histogram::kUmaTargetedHistogramFlag);
 
   // From UMA_HISTOGRAM_COUNTS_10000 & UMA_HISTOGRAM_CUSTOM_COUNTS
-  histogram_number_duplicate_db_cookies_ = Histogram::FactoryGet(
+  histogram_number_duplicate_db_cookies_ = base::Histogram::FactoryGet(
       "Net.NumDuplicateCookiesInDb", 1, 10000, 50,
-      Histogram::kUmaTargetedHistogramFlag);
+      base::Histogram::kUmaTargetedHistogramFlag);
 
   // From UMA_HISTOGRAM_ENUMERATION
-  histogram_cookie_deletion_cause_ = LinearHistogram::FactoryGet(
+  histogram_cookie_deletion_cause_ = base::LinearHistogram::FactoryGet(
       "Cookie.DeletionCause", 1,
       DELETE_COOKIE_LAST_ENTRY - 1, DELETE_COOKIE_LAST_ENTRY,
-      Histogram::kUmaTargetedHistogramFlag);
+      base::Histogram::kUmaTargetedHistogramFlag);
 
   // From UMA_HISTOGRAM_{CUSTOM_,}TIMES
-  histogram_time_get_ = Histogram::FactoryTimeGet("Cookie.TimeGet",
+  histogram_time_get_ = base::Histogram::FactoryTimeGet("Cookie.TimeGet",
       base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(1),
-      50, Histogram::kUmaTargetedHistogramFlag);
-  histogram_time_load_ = Histogram::FactoryTimeGet("Cookie.TimeLoad",
+      50, base::Histogram::kUmaTargetedHistogramFlag);
+  histogram_time_load_ = base::Histogram::FactoryTimeGet("Cookie.TimeLoad",
       base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(1),
-      50, Histogram::kUmaTargetedHistogramFlag);
+      50, base::Histogram::kUmaTargetedHistogramFlag);
 }
 
 void CookieMonster::InitStore() {
@@ -692,12 +692,8 @@ static std::string CanonPath(const GURL& url,
   return CanonPathWithString(url, path_string);
 }
 
-static Time CanonExpiration(const CookieMonster::ParsedCookie& pc,
-                            const Time& current,
-                            const CookieOptions& options) {
-  if (options.force_session())
-    return Time();
-
+static Time CanonExpirationInternal(const CookieMonster::ParsedCookie& pc,
+                                    const Time& current) {
   // First, try the Max-Age attribute.
   uint64 max_age = 0;
   if (pc.HasMaxAge() &&
@@ -718,6 +714,21 @@ static Time CanonExpiration(const CookieMonster::ParsedCookie& pc,
   return Time();
 }
 
+static Time CanonExpiration(const CookieMonster::ParsedCookie& pc,
+                            const Time& current,
+                            const CookieOptions& options) {
+  Time expiration_time = CanonExpirationInternal(pc, current);
+
+  if (options.force_session()) {
+    // Only override the expiry  adte if it's in the future. If the expiry date
+    // is before the creation date, the cookie is supposed to be deleted.
+    if (expiration_time.is_null() || expiration_time > current)
+      return Time();
+  }
+
+  return expiration_time;
+}
+
 bool CookieMonster::HasCookieableScheme(const GURL& url) {
   lock_.AssertAcquired();
 
@@ -731,7 +742,8 @@ bool CookieMonster::HasCookieableScheme(const GURL& url) {
   }
 
   // The scheme didn't match any in our whitelist.
-  COOKIE_DLOG(WARNING) << "Unsupported cookie scheme: " << url.scheme();
+  VLOG(kVlogPerCookieMonster) << "WARNING: Unsupported cookie scheme: "
+                              << url.scheme();
   return false;
 }
 
@@ -754,7 +766,7 @@ bool CookieMonster::SetCookieWithCreationTimeAndOptions(
     const CookieOptions& options) {
   lock_.AssertAcquired();
 
-  COOKIE_DLOG(INFO) << "SetCookie() line: " << cookie_line;
+  VLOG(kVlogSetCookies) << "SetCookie() line: " << cookie_line;
 
   Time creation_time = creation_time_or_null;
   if (creation_time.is_null()) {
@@ -766,12 +778,12 @@ bool CookieMonster::SetCookieWithCreationTimeAndOptions(
   ParsedCookie pc(cookie_line);
 
   if (!pc.IsValid()) {
-    COOKIE_DLOG(WARNING) << "Couldn't parse cookie";
+    VLOG(kVlogSetCookies) << "WARNING: Couldn't parse cookie";
     return false;
   }
 
   if (options.exclude_httponly() && pc.IsHttpOnly()) {
-    COOKIE_DLOG(INFO) << "SetCookie() not setting httponly cookie";
+    VLOG(kVlogSetCookies) << "SetCookie() not setting httponly cookie";
     return false;
   }
 
@@ -792,7 +804,7 @@ bool CookieMonster::SetCookieWithCreationTimeAndOptions(
                                !cookie_expires.is_null(), cookie_expires));
 
   if (!cc.get()) {
-    COOKIE_DLOG(WARNING) << "Failed to allocate CanonicalCookie";
+    VLOG(kVlogSetCookies) << "WARNING: Failed to allocate CanonicalCookie";
     return false;
   }
   return SetCanonicalCookie(&cc, creation_time, options);
@@ -846,12 +858,12 @@ bool CookieMonster::SetCanonicalCookie(scoped_ptr<CanonicalCookie>* cc,
                                        const CookieOptions& options) {
   const std::string key(GetKey((*cc)->Domain()));
   if (DeleteAnyEquivalentCookie(key, **cc, options.exclude_httponly())) {
-    COOKIE_DLOG(INFO) << "SetCookie() not clobbering httponly cookie";
+    VLOG(kVlogSetCookies) << "SetCookie() not clobbering httponly cookie";
     return false;
   }
 
-  COOKIE_DLOG(INFO) << "SetCookie() key: " << key
-                    << " cc: " << (*cc)->DebugString();
+  VLOG(kVlogSetCookies) << "SetCookie() key: " << key << " cc: "
+                        << (*cc)->DebugString();
 
   // Realize that we might be setting an expired cookie, and the only point
   // was to delete the cookie which we've already done.
@@ -914,7 +926,7 @@ void CookieMonster::InternalDeleteCookie(CookieMap::iterator it,
     histogram_cookie_deletion_cause_->Add(deletion_cause);
 
   CanonicalCookie* cc = it->second;
-  COOKIE_DLOG(INFO) << "InternalDeleteCookie() cc: " << cc->DebugString();
+  VLOG(kVlogSetCookies) << "InternalDeleteCookie() cc: " << cc->DebugString();
 
   if (cc->IsPersistent() && store_ && sync_to_store)
     store_->DeleteCookie(*cc);
@@ -981,7 +993,8 @@ static bool FindLeastRecentlyAccessed(
     std::vector<CookieMonster::CookieMap::iterator>* cookie_its) {
   DCHECK_LE(num_purge, num_max);
   if (cookie_its->size() > num_max) {
-    COOKIE_DLOG(INFO) << "FindLeastRecentlyAccessed() Deep Garbage Collect.";
+    VLOG(kVlogGarbageCollection)
+        << "FindLeastRecentlyAccessed() Deep Garbage Collect.";
     num_purge += cookie_its->size() - num_max;
     DCHECK_GT(cookie_its->size(), num_purge);
 
@@ -1004,7 +1017,8 @@ int CookieMonster::GarbageCollectDeleteList(
   int num_deleted = 0;
   for (std::vector<CookieMap::iterator>::iterator it = cookie_its.begin();
        it != cookie_its.end(); it++) {
-    if ((*it)->second->LastAccessDate() < keep_accessed_after) {
+    if (keep_accessed_after.is_null() ||
+        (*it)->second->LastAccessDate() < keep_accessed_after) {
       histogram_evicted_last_access_minutes_->Add(
           (current - (*it)->second->LastAccessDate()).InMinutes());
       InternalDeleteCookie((*it), true, cause);
@@ -1027,7 +1041,7 @@ int CookieMonster::GarbageCollect(const Time& current,
 
   // Collect garbage for this key.
   if (cookies_.count(key) > kDomainMaxCookies) {
-    COOKIE_DLOG(INFO) << "GarbageCollect() key: " << key;
+    VLOG(kVlogGarbageCollection) << "GarbageCollect() key: " << key;
 
     std::vector<CookieMap::iterator> cookie_its;
     num_deleted += GarbageCollectExpired(
@@ -1050,7 +1064,7 @@ int CookieMonster::GarbageCollect(const Time& current,
       num_deleted +=
           GarbageCollectDeleteList(
               current,
-              Time::Now(),
+              Time(),
               DELETE_COOKIE_EVICTED_DOMAIN_POST_SAFE,
               cookie_its);
     }
@@ -1063,7 +1077,7 @@ int CookieMonster::GarbageCollect(const Time& current,
       (expiry_and_key_scheme_ == EKS_DISCARD_RECENT_AND_PURGE_DOMAIN ||
        earliest_access_time_ <
        Time::Now() - TimeDelta::FromDays(kSafeFromGlobalPurgeDays))) {
-    COOKIE_DLOG(INFO) << "GarbageCollect() everything";
+    VLOG(kVlogGarbageCollection) << "GarbageCollect() everything";
     std::vector<CookieMap::iterator> cookie_its;
     base::Time oldest_left;
     num_deleted += GarbageCollectExpired(
@@ -1074,7 +1088,7 @@ int CookieMonster::GarbageCollect(const Time& current,
       Time oldest_safe_cookie(
           expiry_and_key_scheme_ == EKS_KEEP_RECENT_AND_PURGE_ETLDP1 ?
               (Time::Now() - TimeDelta::FromDays(kSafeFromGlobalPurgeDays)) :
-              Time::Now());
+              Time());                  // Null time == ignore access time.
       int num_evicted = GarbageCollectDeleteList(
           current,
           oldest_safe_cookie,
@@ -1266,7 +1280,7 @@ std::string CookieMonster::GetCookiesWithOptions(const GURL& url,
 
   histogram_time_get_->AddTime(TimeTicks::Now() - start_time);
 
-  COOKIE_DLOG(INFO) << "GetCookies() result: " << cookie_line;
+  VLOG(kVlogGetCookies) << "GetCookies() result: " << cookie_line;
 
   return cookie_line;
 }
@@ -1504,9 +1518,9 @@ void CookieMonster::RecordPeriodicStats(const base::Time& current_time) {
     it_key = its_cookies.second;
   }
 
-  DLOG(INFO) << "Time for recording cookie stats (us): "
-             << (TimeTicks::Now() - beginning_of_time).InMicroseconds()
-             << std::endl;
+  VLOG(kVlogPeriodic)
+      << "Time for recording cookie stats (us): "
+      << (TimeTicks::Now() - beginning_of_time).InMicroseconds();
 
   last_statistic_record_time_ = current_time;
 }
@@ -1521,7 +1535,7 @@ CookieMonster::ParsedCookie::ParsedCookie(const std::string& cookie_line)
       httponly_index_(0) {
 
   if (cookie_line.size() > kMaxCookieSize) {
-    LOG(INFO) << "Not parsing cookie, too large: " << cookie_line.size();
+    VLOG(1) << "Not parsing cookie, too large: " << cookie_line.size();
     return;
   }
 

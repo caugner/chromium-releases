@@ -58,7 +58,7 @@ class BloomFilter : public base::RefCountedThreadSafe<BloomFilter> {
 
   // Force a maximum size on the bloom filter to avoid using too much memory
   // (in bytes).
-  static const int kBloomFilterMaxSize = 2 * 1024 * 1024;
+  static const int kBloomFilterMaxSize = 3 * 1024 * 1024;
 
   // Use the above constants to calculate an appropriate size to pass
   // to the BloomFilter constructor based on the intended |key_count|.
@@ -74,6 +74,25 @@ class BloomFilter : public base::RefCountedThreadSafe<BloomFilter> {
 
   static const int kNumHashKeys = 20;
   static const int kFileVersion = 1;
+
+  // Enumerate failures for histogramming purposes.  DO NOT CHANGE THE
+  // ORDERING OF THESE VALUES.
+  enum FailureType {
+    FAILURE_FILTER_READ_OPEN,
+    FAILURE_FILTER_READ_VERSION,
+    FAILURE_FILTER_READ_NUM_KEYS,
+    FAILURE_FILTER_READ_KEY,
+    FAILURE_FILTER_READ_DATA_MINSIZE,
+    FAILURE_FILTER_READ_DATA_MAXSIZE,
+    FAILURE_FILTER_READ_DATA_SHORT,
+    FAILURE_FILTER_READ_DATA,
+
+    // Memory space for histograms is determined by the max.  ALWAYS
+    // ADD NEW VALUES BEFORE THIS ONE.
+    FAILURE_FILTER_MAX
+  };
+
+  static void RecordFailure(FailureType failure_type);
 
   ~BloomFilter();
 

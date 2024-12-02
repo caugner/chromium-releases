@@ -21,6 +21,15 @@ bool GetDefaultUserDataDirectory(FilePath* result);
 // CF and Google Chrome want to share the same binaries.
 bool GetChromeFrameUserDataDirectory(FilePath* result);
 
+// Get the path to the user's cache directory.  This is normally the
+// same as the profile directory, but on Linux it can also be
+// $XDG_CACHE_HOME and on Mac it can be under ~/Library/Caches.
+// Note that the Chrome cache directories are actually subdirectories
+// of this directory, with names like "Cache" and "Media Cache".
+// This will always fill in |result| with a directory, sometimes
+// just |profile_dir|.
+void GetUserCacheDirectory(const FilePath& profile_dir, FilePath* result);
+
 // Get the path to the user's documents directory.
 bool GetUserDocumentsDirectory(FilePath* result);
 
@@ -55,6 +64,10 @@ void SetOverrideVersionedDirectory(const FilePath* path);
 // framework are things that also depend on the framework, such as the helper
 // app bundle.
 FilePath GetFrameworkBundlePath();
+
+// Get the local library directory.
+bool GetLocalLibraryDirectory(FilePath* result);
+
 #endif  // OS_MACOSX
 
 }  // namespace chrome

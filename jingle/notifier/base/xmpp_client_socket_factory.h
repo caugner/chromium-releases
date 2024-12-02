@@ -9,6 +9,12 @@
 
 #include "net/socket/client_socket_factory.h"
 
+namespace net {
+class DnsCertProvenanceChecker;
+class HostPortPair;
+class SSLHostInfo;
+}
+
 namespace notifier {
 
 class XmppClientSocketFactory : public net::ClientSocketFactory {
@@ -25,8 +31,10 @@ class XmppClientSocketFactory : public net::ClientSocketFactory {
       const net::AddressList& addresses, net::NetLog* net_log,
       const net::NetLog::Source& source);
   virtual net::SSLClientSocket* CreateSSLClientSocket(
-      net::ClientSocketHandle* transport_socket, const std::string& hostname,
-      const net::SSLConfig& ssl_config);
+      net::ClientSocketHandle* transport_socket,
+      const net::HostPortPair& host_and_port, const net::SSLConfig& ssl_config,
+      net::SSLHostInfo* ssl_host_info,
+      net::DnsCertProvenanceChecker* dns_cert_checker);
 
  private:
   net::ClientSocketFactory* const client_socket_factory_;

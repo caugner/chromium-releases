@@ -15,11 +15,12 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/oobe_progress_bar.h"
+#include "chrome/browser/chromeos/login/proxy_settings_dialog.h"
 #include "chrome/browser/chromeos/login/rounded_rect_painter.h"
+#include "chrome/browser/chromeos/login/shutdown_button.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/status/clock_menu_button.h"
-#include "chrome/browser/chromeos/status/feedback_menu_button.h"
-#include "chrome/browser/chromeos/status/language_menu_button.h"
+#include "chrome/browser/chromeos/status/input_method_menu_button.h"
 #include "chrome/browser/chromeos/status/network_menu_button.h"
 #include "chrome/browser/chromeos/status/status_area_view.h"
 #include "chrome/browser/chromeos/wm_ipc.h"
@@ -28,6 +29,7 @@
 #include "chrome/browser/views/dom_view.h"
 #include "cros/chromeos_wm_ipc_enums.h"
 #include "googleurl/src/gurl.h"
+#include "gfx/gtk_util.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -44,6 +46,27 @@
 using views::WidgetGtk;
 
 namespace {
+
+const SkColor kVersionColor = 0xff5c739f;
+
+// Returns the corresponding step id for step constant.
+int GetStepId(size_t step) {
+  switch (step) {
+    case chromeos::BackgroundView::SELECT_NETWORK:
+      return IDS_OOBE_SELECT_NETWORK;
+    case chromeos::BackgroundView::EULA:
+      return IDS_OOBE_EULA;
+    case chromeos::BackgroundView::SIGNIN:
+      return IDS_OOBE_SIGNIN;
+    case chromeos::BackgroundView::REGISTRATION:
+      return IDS_OOBE_REGISTRATION;
+    case chromeos::BackgroundView::PICTURE:
+      return IDS_OOBE_PICTURE;
+    default:
+      NOTREACHED();
+      return 0;
+  }
+}
 
 // The same as TextButton but switches cursor to hand cursor when mouse
 // is over the button.
@@ -62,7 +85,7 @@ class TextButtonWithHandCursorOver : public views::TextButton {
     if (!IsEnabled()) {
       return NULL;
     }
-    return gdk_cursor_new(GDK_HAND2);
+    return gfx::GetCursor(GDK_HAND2);
   }
 
  private:
@@ -92,9 +115,13 @@ BackgroundView::BackgroundView()
       os_version_label_(NULL),
       boot_times_label_(NULL),
       progress_bar_(NULL),
-      go_incognito_button_(NULL),
+      shutdown_button_(NULL),
       did_paint_(false),
-      delegate_(NULL),
+#if defined(OFFICIAL_BUILD)
+      is_official_build_(true),
+#else
+      is_official_build_(false),
+#endif
       background_area_(NULL) {
 }
 
@@ -110,6 +137,22 @@ void BackgroundView::Init(const GURL& background_url) {
     background_area_->Init(profile, NULL);
     background_area_->SetVisible(false);
     background_area_->LoadURL(background_url);
+  }
+}
+
+void BackgroundView::EnableShutdownButton(bool enable) {
+  if (enable) {
+    if (shutdown_button_)
+      return;
+    shutdown_button_ = new ShutdownButton();
+    shutdown_button_->Init();
+    AddChildView(shutdown_button_);
+  } else {
+    if (!shutdown_button_)
+      return;
+    delete shutdown_button_;
+    shutdown_button_ = NULL;
+    SchedulePaint();
   }
 }
 
@@ -143,6 +186,10 @@ void BackgroundView::SetStatusAreaVisible(bool visible) {
   status_area_->SetVisible(visible);
 }
 
+void BackgroundView::SetStatusAreaEnabled(bool enable) {
+  status_area_->EnableButtons(enable);
+}
+
 void BackgroundView::SetOobeProgressBarVisible(bool visible) {
   if (!progress_bar_ && visible)
     InitProgressBar();
@@ -156,24 +203,9 @@ bool BackgroundView::IsOobeProgressBarVisible() {
 }
 
 void BackgroundView::SetOobeProgress(LoginStep step) {
-  DCHECK(step <= PICTURE);
+  DCHECK(step < STEPS_COUNT);
   if (progress_bar_)
-    progress_bar_->SetProgress(step);
-}
-
-// Toggles GoIncognito button visibility.
-void BackgroundView::SetGoIncognitoButtonVisible(bool visible,
-                                                 Delegate *delegate) {
-  // Set delegate to handle button pressing.
-  delegate_ = delegate;
-  bool currently_visible =
-      go_incognito_button_ && go_incognito_button_->IsVisible();
-  if (currently_visible != visible) {
-    if (!go_incognito_button_) {
-      InitGoIncognitoButton();
-    }
-    go_incognito_button_->SetVisible(visible);
-  }
+    progress_bar_->SetStep(GetStepId(step));
 }
 
 void BackgroundView::ShowScreenSaver() {
@@ -196,17 +228,6 @@ bool BackgroundView::ScreenSaverEnabled() {
   return background_area_ != NULL;
 }
 
-void BackgroundView::OnOwnerChanged() {
-  delegate_ = NULL;
-  if (go_incognito_button_) {
-    // BackgroundView is passed among multiple controllers, so they should
-    // explicitly enable "Go incognito" button if needed.
-    RemoveChildView(go_incognito_button_);
-    delete go_incognito_button_;
-    go_incognito_button_ = NULL;
-  }
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // BackgroundView protected:
 
@@ -220,14 +241,12 @@ void BackgroundView::Paint(gfx::Canvas* canvas) {
 
 void BackgroundView::Layout() {
   const int kCornerPadding = 5;
-  const int kInfoLeftPadding = 60;
-  const int kInfoBottomPadding = 10;
+  const int kInfoLeftPadding = 15;
+  const int kInfoBottomPadding = 15;
   const int kInfoBetweenLinesPadding = 4;
   const int kProgressBarBottomPadding = 20;
   const int kProgressBarWidth = 750;
   const int kProgressBarHeight = 70;
-  const int kGoIncognitoButtonBottomPadding = 12;
-  const int kGoIncognitoButtonRightPadding = 12;
   gfx::Size status_area_size = status_area_->GetPreferredSize();
   status_area_->SetBounds(
       width() - status_area_size.width() - kCornerPadding,
@@ -235,19 +254,21 @@ void BackgroundView::Layout() {
       status_area_size.width(),
       status_area_size.height());
   gfx::Size version_size = os_version_label_->GetPreferredSize();
+  int os_version_y = height() - version_size.height() - kInfoBottomPadding;
+  if (!is_official_build_)
+    os_version_y -= version_size.height() - kInfoBetweenLinesPadding;
   os_version_label_->SetBounds(
       kInfoLeftPadding,
-      height() -
-          ((2 * version_size.height()) +
-          kInfoBottomPadding +
-          kInfoBetweenLinesPadding),
+      os_version_y,
       width() - 2 * kInfoLeftPadding,
       version_size.height());
-  boot_times_label_->SetBounds(
-      kInfoLeftPadding,
-      height() - (version_size.height() + kInfoBottomPadding),
-      width() - 2 * kCornerPadding,
-      version_size.height());
+  if (!is_official_build_) {
+    boot_times_label_->SetBounds(
+        kInfoLeftPadding,
+        height() - (version_size.height() + kInfoBottomPadding),
+        width() - 2 * kInfoLeftPadding,
+        version_size.height());
+  }
   if (progress_bar_) {
     progress_bar_->SetBounds(
         (width() - kProgressBarWidth) / 2,
@@ -255,25 +276,14 @@ void BackgroundView::Layout() {
         kProgressBarWidth,
         kProgressBarHeight);
   }
-  if (go_incognito_button_) {
-    gfx::Size go_button_size = go_incognito_button_->GetPreferredSize();
-    go_incognito_button_->SetBounds(
-          width() - go_button_size.width()- kGoIncognitoButtonRightPadding,
-          height() - go_button_size.height() - kGoIncognitoButtonBottomPadding,
-          go_button_size.width(),
-          go_button_size.height());
+  if (shutdown_button_) {
+    shutdown_button_->LayoutIn(this);
   }
   if (background_area_)
     background_area_->SetBounds(this->bounds());
 }
 
 void BackgroundView::ChildPreferredSizeChanged(View* child) {
-  Layout();
-  SchedulePaint();
-}
-
-void BackgroundView::OnLocaleChanged() {
-  UpdateLocalizedStrings();
   Layout();
   SchedulePaint();
 }
@@ -285,17 +295,24 @@ gfx::NativeWindow BackgroundView::GetNativeWindow() const {
 
 bool BackgroundView::ShouldOpenButtonOptions(
     const views::View* button_view) const {
+  if (button_view == status_area_->network_view()) {
+    return true;
+  }
   if (button_view == status_area_->clock_view() ||
-      button_view == status_area_->feedback_view() ||
-      button_view == status_area_->language_view() ||
-      button_view == status_area_->network_view()) {
+      button_view == status_area_->input_method_view()) {
     return false;
   }
   return true;
 }
 
-void BackgroundView::OpenButtonOptions(const views::View* button_view) const {
-  // TODO(avayvod): Add some dialog for options or remove them completely.
+void BackgroundView::OpenButtonOptions(const views::View* button_view) {
+  if (button_view == status_area_->network_view()) {
+    if (proxy_settings_dialog_.get() == NULL) {
+      proxy_settings_dialog_.reset(new ProxySettingsDialog(
+          this, GetNativeWindow()));
+    }
+    proxy_settings_dialog_->Show();
+  }
 }
 
 bool BackgroundView::IsBrowserMode() const {
@@ -306,14 +323,10 @@ bool BackgroundView::IsScreenLockerMode() const {
   return false;
 }
 
-void BackgroundView::ButtonPressed(views::Button* sender,
-                                   const views::Event& event) {
-  if (sender == go_incognito_button_) {
-    DCHECK(delegate_);
-    if (delegate_) {
-      delegate_->OnGoIncognitoButton();
-    }
-  }
+// Overridden from LoginHtmlDialog::Delegate:
+void BackgroundView::OnLocaleChanged() {
+  // Proxy settings dialog contains localized strings.
+  proxy_settings_dialog_.reset();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -323,13 +336,10 @@ void BackgroundView::InitStatusArea() {
   DCHECK(status_area_ == NULL);
   status_area_ = new StatusAreaView(this);
   status_area_->Init();
-  // Feedback button shoudn't be visible on OOBE/login/screen lock.
-  status_area_->feedback_view()->SetVisible(false);
   AddChildView(status_area_);
 }
 
 void BackgroundView::InitInfoLabels() {
-  const SkColor kVersionColor = 0xff8eb1f4;
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
 
   os_version_label_ = new views::Label();
@@ -337,17 +347,26 @@ void BackgroundView::InitInfoLabels() {
   os_version_label_->SetColor(kVersionColor);
   os_version_label_->SetFont(rb.GetFont(ResourceBundle::SmallFont));
   AddChildView(os_version_label_);
-  boot_times_label_ = new views::Label();
-  boot_times_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
-  boot_times_label_->SetColor(kVersionColor);
-  boot_times_label_->SetFont(rb.GetFont(ResourceBundle::SmallFont));
-  AddChildView(boot_times_label_);
+  if (!is_official_build_) {
+    boot_times_label_ = new views::Label();
+    boot_times_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+    boot_times_label_->SetColor(kVersionColor);
+    boot_times_label_->SetFont(rb.GetFont(ResourceBundle::SmallFont));
+    AddChildView(boot_times_label_);
+  }
 
   if (CrosLibrary::Get()->EnsureLoaded()) {
     version_loader_.GetVersion(
-        &version_consumer_, NewCallback(this, &BackgroundView::OnVersion));
-    boot_times_loader_.GetBootTimes(
-        &boot_times_consumer_, NewCallback(this, &BackgroundView::OnBootTimes));
+        &version_consumer_,
+        NewCallback(this, &BackgroundView::OnVersion),
+        is_official_build_?
+            VersionLoader::VERSION_SHORT_WITH_DATE :
+            VersionLoader::VERSION_FULL);
+    if (!is_official_build_) {
+      boot_times_loader_.GetBootTimes(
+          &boot_times_consumer_,
+          NewCallback(this, &BackgroundView::OnBootTimes));
+    }
   } else {
     os_version_label_->SetText(
         ASCIIToWide(CrosLibrary::Get()->load_error_string()));
@@ -356,63 +375,18 @@ void BackgroundView::InitInfoLabels() {
 
 void BackgroundView::InitProgressBar() {
   std::vector<int> steps;
-  steps.push_back(IDS_OOBE_SELECT_NETWORK);
+  steps.push_back(GetStepId(SELECT_NETWORK));
 #if defined(OFFICIAL_BUILD)
-  steps.push_back(IDS_OOBE_EULA);
+  steps.push_back(GetStepId(EULA));
 #endif
-  steps.push_back(IDS_OOBE_SIGNIN);
+  steps.push_back(GetStepId(SIGNIN));
 #if defined(OFFICIAL_BUILD)
   if (WizardController::IsRegisterScreenDefined())
-    steps.push_back(IDS_OOBE_REGISTRATION);
+    steps.push_back(GetStepId(REGISTRATION));
 #endif
-  steps.push_back(IDS_OOBE_PICTURE);
+  steps.push_back(GetStepId(PICTURE));
   progress_bar_ = new OobeProgressBar(steps);
   AddChildView(progress_bar_);
-}
-
-void BackgroundView::InitGoIncognitoButton() {
-  SkColor kButtonColor = 0xFF4F6985;
-  SkColor kStrokeColor = 0xFF657A91;
-  int kStrokeWidth = 1;
-  int kVerticalPadding = 8;
-  int kHorizontalPadding = 12;
-  int kCornerRadius = 4;
-
-  go_incognito_button_ =
-      new TextButtonWithHandCursorOver(this, std::wstring());
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  go_incognito_button_->SetIcon(*rb.GetBitmapNamed(IDR_INCOGNITO_GUY));
-  go_incognito_button_->SetFocusable(true);
-  // Set label colors.
-  go_incognito_button_->SetEnabledColor(SK_ColorWHITE);
-  go_incognito_button_->SetDisabledColor(SK_ColorWHITE);
-  go_incognito_button_->SetHighlightColor(SK_ColorWHITE);
-  go_incognito_button_->SetHoverColor(SK_ColorWHITE);
-  // Disable throbbing and make border always visible.
-  go_incognito_button_->SetAnimationDuration(0);
-  go_incognito_button_->SetNormalHasBorder(true);
-  // Setup round shapes.
-  go_incognito_button_->set_background(
-      CreateRoundedBackground(
-          kCornerRadius, kStrokeWidth, kButtonColor, kStrokeColor));
-
-  go_incognito_button_->set_border(
-      views::Border::CreateEmptyBorder(kVerticalPadding,
-                                       kHorizontalPadding,
-                                       kVerticalPadding,
-                                       kHorizontalPadding));
-  // Set button text.
-  UpdateLocalizedStrings();
-  // Enable and add to the views hierarchy.
-  go_incognito_button_->SetEnabled(true);
-  AddChildView(go_incognito_button_);
-}
-
-void BackgroundView::UpdateLocalizedStrings() {
-  if (go_incognito_button_) {
-    go_incognito_button_->SetText(
-        UTF8ToWide(l10n_util::GetStringUTF8(IDS_GO_INCOGNITO_BUTTON)));
-  }
 }
 
 void BackgroundView::UpdateWindowType() {
@@ -427,23 +401,25 @@ void BackgroundView::UpdateWindowType() {
 void BackgroundView::OnVersion(
     VersionLoader::Handle handle, std::string version) {
   // TODO(jungshik): Is string concatenation OK here?
-  std::string version_text = l10n_util::GetStringUTF8(IDS_PRODUCT_NAME);
+  std::string version_text = l10n_util::GetStringUTF8(IDS_PRODUCT_OS_NAME);
   version_text += ' ';
   version_text += l10n_util::GetStringUTF8(IDS_VERSION_FIELD_PREFIX);
   version_text += ' ';
   version_text += version;
+
+  // Workaround over incorrect width calculation in old fonts.
+  // TODO(glotov): remove the following line when new fonts are used.
+  version_text += ' ';
   os_version_label_->SetText(UTF8ToWide(version_text));
 }
 
 void BackgroundView::OnBootTimes(
     BootTimesLoader::Handle handle, BootTimesLoader::BootTimes boot_times) {
-  // TODO(davemoore) if we decide to keep these times visible we will need
-  // to localize the strings.
   const char* kBootTimesNoChromeExec =
-      "Boot took %.2f seconds (firmware %.2fs, kernel %.2fs, system %.2fs)";
+      "Non-firmware boot took %.2f seconds (kernel %.2fs, system %.2fs)";
   const char* kBootTimesChromeExec =
-      "Boot took %.2f seconds "
-      "(firmware %.2fs, kernel %.2fs, system %.2fs, chrome %.2fs)";
+      "Non-firmware boot took %.2f seconds "
+      "(kernel %.2fs, system %.2fs, chrome %.2fs)";
   std::string boot_times_text;
 
   if (boot_times.chrome > 0) {
@@ -451,7 +427,6 @@ void BackgroundView::OnBootTimes(
         base::StringPrintf(
             kBootTimesChromeExec,
             boot_times.total,
-            boot_times.firmware,
             boot_times.pre_startup,
             boot_times.system,
             boot_times.chrome);
@@ -460,7 +435,6 @@ void BackgroundView::OnBootTimes(
         base::StringPrintf(
             kBootTimesNoChromeExec,
             boot_times.total,
-            boot_times.firmware,
             boot_times.pre_startup,
             boot_times.system);
   }

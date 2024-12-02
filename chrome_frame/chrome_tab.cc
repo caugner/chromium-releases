@@ -17,12 +17,12 @@
 #include "base/logging.h"
 #include "base/logging_win.h"
 #include "base/path_service.h"
-#include "base/registry.h"
 #include "base/string_number_conversions.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
-#include "base/win_util.h"
+#include "base/win/registry.h"
+#include "base/win/windows_version.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/google_update_settings.h"
@@ -39,6 +39,8 @@
 #include "chrome_frame/resource.h"
 #include "chrome_frame/utils.h"
 #include "googleurl/src/url_util.h"
+
+using base::win::RegKey;
 
 namespace {
 // This function has the side effect of initializing an unprotected
@@ -210,26 +212,25 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance,
     logging::InitLogging(NULL, logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
                         logging::LOCK_LOG_FILE, logging::DELETE_OLD_LOG_FILE);
 
-    if (!DllRedirector::RegisterAsFirstCFModule()) {
-      // We are not the first ones in, get the module who registered first.
-      HMODULE original_module = DllRedirector::GetFirstCFModule();
-      DCHECK(original_module != NULL)
-          << "Could not get first CF module handle.";
-      HMODULE this_module = reinterpret_cast<HMODULE>(&__ImageBase);
-      if (original_module != this_module) {
-        // Someone else was here first, try and get a pointer to their
-        // DllGetClassObject export:
-        g_dll_get_class_object_redir_ptr =
-            DllRedirector::GetDllGetClassObjectPtr(original_module);
-        DCHECK(g_dll_get_class_object_redir_ptr != NULL)
-            << "Found CF module with no DllGetClassObject export.";
-      }
+    DllRedirector* dll_redirector = Singleton<DllRedirector>::get();
+    DCHECK(dll_redirector);
+
+    if (!dll_redirector->RegisterAsFirstCFModule()) {
+      // Someone else was here first, try and get a pointer to their
+      // DllGetClassObject export:
+      g_dll_get_class_object_redir_ptr =
+          dll_redirector->GetDllGetClassObjectPtr();
+      DCHECK(g_dll_get_class_object_redir_ptr != NULL)
+          << "Found CF module with no DllGetClassObject export.";
     }
 
     // Enable ETW logging.
     logging::LogEventProvider::Initialize(kChromeFrameProvider);
   } else if (reason == DLL_PROCESS_DETACH) {
-    DllRedirector::UnregisterAsFirstCFModule();
+    DllRedirector* dll_redirector = Singleton<DllRedirector>::get();
+    DCHECK(dll_redirector);
+
+    dll_redirector->UnregisterAsFirstCFModule();
     g_patch_helper.UnpatchIfNeeded();
     delete g_exit_manager;
     g_exit_manager = NULL;
@@ -300,32 +301,45 @@ HRESULT RefreshElevationPolicy() {
 // The idea here is to try this out on chrome frame dev channel
 // and see if it produces a significant drift in startup numbers.
 HRESULT SetupRunOnce() {
-  if (win_util::GetWinVersion() >= win_util::WINVERSION_VISTA)
-    return S_OK;
+  HRESULT result = E_FAIL;
 
   std::wstring channel_name;
-  if (!GoogleUpdateSettings::GetChromeChannel(true, &channel_name) ||
-      (0 != lstrcmpiW(L"dev", channel_name.c_str()))) {
-    return S_OK;
-  }
+  if (base::win::GetVersion() < base::win::VERSION_VISTA &&
+      GoogleUpdateSettings::GetChromeChannel(true, &channel_name)) {
+    std::transform(channel_name.begin(), channel_name.end(),
+                   channel_name.begin(), tolower);
+    // Use this only for the dev channel and CEEE channels.
+    if (channel_name.find(L"dev") != std::wstring::npos ||
+        channel_name.find(L"ceee") != std::wstring::npos) {
 
-  HKEY hive = HKEY_CURRENT_USER;
-  if (IsSystemProcess()) {
-    // For system installs, our updates will be running as SYSTEM which
-    // makes writing to a RunOnce key under HKCU not so terribly useful.
-    hive = HKEY_LOCAL_MACHINE;
-  }
+      HKEY hive = HKEY_CURRENT_USER;
+      if (IsSystemProcess()) {
+        // For system installs, our updates will be running as SYSTEM which
+        // makes writing to a RunOnce key under HKCU not so terribly useful.
+        hive = HKEY_LOCAL_MACHINE;
+      }
 
-  RegKey run_once;
-  if (run_once.Create(hive, kRunOnce, KEY_READ | KEY_WRITE)) {
-    CommandLine run_once_command(chrome_launcher::GetChromeExecutablePath());
-    run_once_command.AppendSwitchASCII(switches::kAutomationClientChannelID,
+      RegKey run_once;
+      if (run_once.Create(hive, kRunOnce, KEY_READ | KEY_WRITE)) {
+        CommandLine run_once_cmd(chrome_launcher::GetChromeExecutablePath());
+        run_once_cmd.AppendSwitchASCII(switches::kAutomationClientChannelID,
                                        "0");
-    run_once_command.AppendSwitch(switches::kChromeFrame);
-    run_once.WriteValue(L"A", run_once_command.command_line_string().c_str());
+        run_once_cmd.AppendSwitch(switches::kChromeFrame);
+        if (run_once.WriteValue(L"A",
+                                run_once_cmd.command_line_string().c_str())) {
+          result = S_OK;
+        }
+      }
+    } else {
+      result = S_FALSE;
+    }
+  } else {
+    // We're on a non-XP version of Windows or on a stable channel. Nothing
+    // needs doing.
+    result = S_FALSE;
   }
 
-  return S_OK;
+  return result;
 }
 
 // Helper method called for user-level installs where we don't have admin
@@ -497,7 +511,7 @@ STDAPI DllRegisterServer() {
                 BHO_CLSID | BHO_REGISTRATION;
 
   if (UtilIsPersistentNPAPIMarkerSet()) {
-    flags |= IDR_CHROMEFRAME_NPAPI;
+    flags |= NPAPI_PLUGIN;
   }
 
   HRESULT hr = CustomRegistration(flags, TRUE, true);
@@ -520,7 +534,7 @@ STDAPI DllRegisterUserServer() {
                 BHO_CLSID | BHO_REGISTRATION;
 
   if (UtilIsPersistentNPAPIMarkerSet()) {
-    flags |= IDR_CHROMEFRAME_NPAPI;
+    flags |= NPAPI_PLUGIN;
   }
 
   HRESULT hr = CustomRegistration(flags, TRUE, false);
@@ -699,7 +713,7 @@ static bool SetOrDeleteMimeHandlerKey(bool set, HKEY root_key) {
 bool RegisterSecuredMimeHandler(bool enable, bool is_system) {
   if (!is_system) {
     return SetOrDeleteMimeHandlerKey(enable, HKEY_CURRENT_USER);
-  } else if (win_util::GetWinVersion() < win_util::WINVERSION_VISTA) {
+  } else if (base::win::GetVersion() < base::win::VERSION_VISTA) {
     return SetOrDeleteMimeHandlerKey(enable, HKEY_LOCAL_MACHINE);
   }
 

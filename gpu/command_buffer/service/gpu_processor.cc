@@ -12,12 +12,17 @@ using ::base::SharedMemory;
 
 namespace gpu {
 
-GPUProcessor::GPUProcessor(CommandBuffer* command_buffer)
+GPUProcessor::GPUProcessor(CommandBuffer* command_buffer,
+                           gles2::ContextGroup* group)
     : command_buffer_(command_buffer),
       commands_per_update_(100),
+#if defined(OS_MACOSX)
+      swap_buffers_count_(0),
+      acknowledged_swap_buffers_count_(0),
+#endif
       method_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   DCHECK(command_buffer);
-  decoder_.reset(gles2::GLES2Decoder::Create(&group_));
+  decoder_.reset(gles2::GLES2Decoder::Create(group));
   decoder_->set_engine(this);
 }
 
@@ -27,6 +32,10 @@ GPUProcessor::GPUProcessor(CommandBuffer* command_buffer,
                            int commands_per_update)
     : command_buffer_(command_buffer),
       commands_per_update_(commands_per_update),
+#if defined(OS_MACOSX)
+      swap_buffers_count_(0),
+      acknowledged_swap_buffers_count_(0),
+#endif
       method_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   DCHECK(command_buffer);
   decoder_.reset(decoder);
@@ -39,6 +48,7 @@ GPUProcessor::~GPUProcessor() {
 
 bool GPUProcessor::InitializeCommon(gfx::GLContext* context,
                                     const gfx::Size& size,
+                                    const char* allowed_extensions,
                                     const std::vector<int32>& attribs,
                                     gles2::GLES2Decoder* parent_decoder,
                                     uint32 parent_texture_id) {
@@ -58,16 +68,10 @@ bool GPUProcessor::InitializeCommon(gfx::GLContext* context,
                                     decoder_.get()));
   }
 
-  if (!group_.Initialize(NULL)) {
-    LOG(ERROR) << "GPUProcessor::InitializeCommon failed because group "
-               << "failed to initialize.";
-    Destroy();
-    return false;
-  }
-
   // Initialize the decoder with either the view or pbuffer GLContext.
   if (!decoder_->Initialize(context,
                             size,
+                            allowed_extensions,
                             attribs,
                             parent_decoder,
                             parent_texture_id)) {
@@ -88,10 +92,14 @@ void GPUProcessor::DestroyCommon() {
     decoder_.reset();
   }
 
-  group_.Destroy(have_context);
-
   parser_.reset();
 }
+
+#if defined(OS_MACOSX)
+namespace {
+const unsigned int kMaxOutstandingSwapBuffersCallsPerOnscreenContext = 1;
+}
+#endif
 
 void GPUProcessor::ProcessCommands() {
   CommandBuffer::State state = command_buffer_->GetState();
@@ -108,6 +116,19 @@ void GPUProcessor::ProcessCommands() {
 
   parser_->set_put(state.put_offset);
 
+#if defined(OS_MACOSX)
+  bool do_rate_limiting = surface_.get() != NULL;
+  // Don't swamp the browser process with SwapBuffers calls it can't handle.
+  if (do_rate_limiting &&
+      swap_buffers_count_ - acknowledged_swap_buffers_count_ >=
+      kMaxOutstandingSwapBuffersCallsPerOnscreenContext) {
+    // Stop doing work on this command buffer. In the GPU process,
+    // receipt of the GpuMsg_AcceleratedSurfaceBuffersSwappedACK
+    // message causes ProcessCommands to be scheduled again.
+    return;
+  }
+#endif
+
   int commands_processed = 0;
   while (commands_processed < commands_per_update_ && !parser_->IsEmpty()) {
     error::Error error = parser_->ProcessCommand();
@@ -121,10 +142,14 @@ void GPUProcessor::ProcessCommands() {
   command_buffer_->SetGetOffset(static_cast<int32>(parser_->get()));
 
   if (!parser_->IsEmpty()) {
-    MessageLoop::current()->PostTask(
-        FROM_HERE,
-        method_factory_.NewRunnableMethod(&GPUProcessor::ProcessCommands));
+    ScheduleProcessCommands();
   }
+}
+
+void GPUProcessor::ScheduleProcessCommands() {
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      method_factory_.NewRunnableMethod(&GPUProcessor::ProcessCommands));
 }
 
 Buffer GPUProcessor::GetSharedMemoryBuffer(int32 shm_id) {
@@ -149,6 +174,10 @@ int32 GPUProcessor::GetGetOffset() {
 
 void GPUProcessor::ResizeOffscreenFrameBuffer(const gfx::Size& size) {
   decoder_->ResizeOffscreenFrameBuffer(size);
+}
+
+void GPUProcessor::SetResizeCallback(Callback1<gfx::Size>::Type* callback) {
+  decoder_->SetResizeCallback(callback);
 }
 
 void GPUProcessor::SetSwapBuffersCallback(

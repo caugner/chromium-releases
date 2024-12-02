@@ -15,9 +15,10 @@
 
 #include "base/scoped_nsobject.h"
 #include "base/scoped_ptr.h"
-#import "chrome/browser/cocoa/bookmark_bar_controller.h"
-#import "chrome/browser/cocoa/bookmark_bubble_controller.h"
+#import "chrome/browser/cocoa/bookmarks/bookmark_bar_controller.h"
+#import "chrome/browser/cocoa/bookmarks/bookmark_bubble_controller.h"
 #import "chrome/browser/cocoa/browser_command_executor.h"
+#import "chrome/browser/cocoa/tab_contents_controller.h"
 #import "chrome/browser/cocoa/tab_strip_controller.h"
 #import "chrome/browser/cocoa/tab_window_controller.h"
 #import "chrome/browser/cocoa/themed_window.h"
@@ -52,6 +53,7 @@ class TabContents;
                       BookmarkBarControllerDelegate,
                       BrowserCommandExecutor,
                       ViewResizer,
+                      TabContentsControllerDelegate,
                       TabStripControllerDelegate> {
  @private
   // The ordering of these members is important as it determines the order in
@@ -170,10 +172,6 @@ class TabContents;
 // Sets whether or not the current page in the frontmost tab is bookmarked.
 - (void)setStarredState:(BOOL)isStarred;
 
-// Return the rect, in WebKit coordinates (flipped), of the window's grow box
-// in the coordinate system of the content area of the currently selected tab.
-- (NSRect)selectedTabGrowBoxRect;
-
 // Called to tell the selected tab to update its loading state.
 // |force| is set if the update is due to changing tabs, as opposed to
 // the page-load finishing.  See comment in reload_button.h.
@@ -217,7 +215,7 @@ class TabContents;
 
 // Executes the command in the context of the current browser.
 // |command| is an integer value containing one of the constants defined in the
-// "chrome/app/chrome_dll_resource.h" file.
+// "chrome/app/chrome_command_ids.h" file.
 - (void)executeCommand:(int)command;
 
 // Delegate method for the status bubble to query its base frame.
@@ -236,6 +234,8 @@ class TabContents;
 // Closes the tab sheet |window| and potentially shows the next sheet in the
 // tab's sheet queue.
 - (void)removeConstrainedWindow:(ConstrainedWindowMac*)window;
+// Returns NO if constrained windows cannot be attached to this window.
+- (BOOL)canAttachConstrainedWindow;
 
 // Shows or hides the docked web inspector depending on |contents|'s state.
 - (void)updateDevToolsForContents:(TabContents*)contents;
@@ -264,6 +264,11 @@ class TabContents;
 // Shows or hides the Instant preview contents.
 - (void)showInstant:(TabContents*)previewContents;
 - (void)hideInstant;
+
+// Returns the frame, in Cocoa (unflipped) screen coordinates, of the area where
+// Instant results are.  If Instant is not showing, returns the frame of where
+// it would be.
+- (NSRect)instantFrame;
 
 // Called when the Add Search Engine dialog is closed.
 - (void)sheetDidEnd:(NSWindow*)sheet

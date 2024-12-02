@@ -157,11 +157,11 @@ std::wstring DumpFrameScrollPosition(WebFrame* web_frame, bool recursive) {
 
   if (offset.width() > 0 || offset.height() > 0) {
     if (web_frame->parent()) {
-      StringAppendF(&result, L"frame '%ls' ", UTF16ToWide(
+      base::StringAppendF(&result, L"frame '%ls' ", UTF16ToWide(
           web_frame->name()).c_str());
     }
-    StringAppendF(&result, L"scrolled to %d,%d\n",
-                  offset.width(), offset.height());
+    base::StringAppendF(&result, L"scrolled to %d,%d\n",
+                        offset.width(), offset.height());
   }
 
   if (recursive) {
@@ -420,16 +420,6 @@ WebCanvas* ToWebCanvas(skia::PlatformCanvas* canvas) {
 
 int GetGlyphPageCount() {
   return WebGlyphCache::pageCount();
-}
-
-bool g_enable_media_cache = false;
-
-bool IsMediaCacheEnabled() {
-  return g_enable_media_cache;
-}
-
-void SetMediaCacheEnabled(bool enabled) {
-  g_enable_media_cache = enabled;
 }
 
 } // namespace webkit_glue

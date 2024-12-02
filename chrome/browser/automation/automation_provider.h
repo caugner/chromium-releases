@@ -17,15 +17,16 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/observer_list.h"
 #include "base/scoped_ptr.h"
 #include "base/string16.h"
 #include "chrome/browser/autofill/field_types.h"
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
+#include "chrome/common/automation_constants.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/notification_observer.h"
-#include "chrome/test/automation/automation_constants.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_channel.h"
 #if defined(OS_WIN)
@@ -82,14 +83,22 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
 
   Profile* profile() const { return profile_; }
 
-  // Establishes a connection to an automation client, if present.
-  // An AutomationProxy should be established (probably in a different process)
-  // before calling this.
-  void ConnectToChannel(const std::string& channel_id);
+  // Initializes a channel for a connection to an AutomationProxy.
+  // If channel_id starts with kNamedInterfacePrefix, it will act
+  // as a server, create a named IPC socket with channel_id as its
+  // path, and will listen on the socket for incoming connections.
+  // If channel_id does not, it will act as a client and establish
+  // a connection on its primary IPC channel. See ipc/ipc_channel_posix.cc
+  // for more information about kPrimaryIPCChannel.
+  bool InitializeChannel(const std::string& channel_id) WARN_UNUSED_RESULT;
 
   // Sets the number of tabs that we expect; when this number of tabs has
   // loaded, an AutomationMsg_InitialLoadsComplete message is sent.
   void SetExpectedTabCount(size_t expected_tabs);
+
+  // Called when the inital set of tabs has finished loading.
+  // Call SetExpectedTabCount(0) to set this to true immediately.
+  void OnInitialLoadsComplete();
 
   // Add a listener for navigation status notification. Currently only
   // navigation completion is observed; when the |number_of_navigations|
@@ -138,6 +147,7 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
 
   // IPC implementations
   virtual bool Send(IPC::Message* msg);
+  virtual void OnChannelConnected(int pid);
   virtual void OnMessageReceived(const IPC::Message& msg);
   virtual void OnChannelError();
 
@@ -150,7 +160,7 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   // Adds the extension passed in to the extension tracker, and returns
   // the associated handle. If the tracker already contains the extension,
   // the handle is simply returned.
-  int AddExtension(Extension* extension);
+  int AddExtension(const Extension* extension);
 
 #if defined(OS_WIN)
   // Adds the external tab passed in to the tab tracker.
@@ -174,6 +184,13 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   // to the tab is also returned. Returns NULL in case of failure or if the tab
   // is not of the TabContents type.
   TabContents* GetTabContentsForHandle(int handle, NavigationController** tab);
+
+  // Returns the protocol version which typically is the module version.
+  virtual std::string GetProtocolVersion();
+
+  // Returns the associated view for the tab handle passed in.
+  // Returns NULL on failure.
+  RenderViewHost* GetViewForTab(int tab_handle);
 
   scoped_ptr<AutomationAutocompleteEditTracker> autocomplete_edit_tracker_;
   scoped_ptr<AutomationBrowserTracker> browser_tracker_;
@@ -208,6 +225,9 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
       bool match_case,
       bool find_next,
       IPC::Message* reply_message);
+
+  scoped_refptr<AutomationResourceMessageFilter>
+      automation_resource_message_filter_;
 
  private:
   void OnUnhandledMessage();
@@ -311,21 +331,17 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
                             IPC::Message* reply_message);
 #endif
 
-  // Returns the associated view for the tab handle passed in.
-  // Returns NULL on failure.
-  RenderViewHost* GetViewForTab(int tab_handle);
-
   // Returns the extension for the given handle. Returns NULL if there is
   // no extension for the handle.
-  Extension* GetExtension(int extension_handle);
+  const Extension* GetExtension(int extension_handle);
 
   // Returns the extension for the given handle, if the handle is valid and
   // the associated extension is enabled. Returns NULL otherwise.
-  Extension* GetEnabledExtension(int extension_handle);
+  const Extension* GetEnabledExtension(int extension_handle);
 
   // Returns the extension for the given handle, if the handle is valid and
   // the associated extension is disabled. Returns NULL otherwise.
-  Extension* GetDisabledExtension(int extension_handle);
+  const Extension* GetDisabledExtension(int extension_handle);
 
   // Method called by the popup menu tracker when a popup menu is opened.
   void NotifyPopupMenuOpened();
@@ -351,14 +367,16 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
   void CreateExternalTab(const IPC::ExternalTabSettings& settings,
                          gfx::NativeWindow* tab_container_window,
                          gfx::NativeWindow* tab_window,
-                         int* tab_handle);
+                         int* tab_handle,
+                         int* session_id);
 
   void ConnectExternalTab(uint64 cookie,
                           bool allow,
                           gfx::NativeWindow parent_window,
                           gfx::NativeWindow* tab_container_window,
                           gfx::NativeWindow* tab_window,
-                          int* tab_handle);
+                          int* tab_handle,
+                          int* session_id);
 
   void NavigateInExternalTab(
       int handle, const GURL& url, const GURL& referrer,
@@ -397,8 +415,12 @@ class AutomationProvider : public base::RefCounted<AutomationProvider>,
       extension_test_result_observer_;
   scoped_ptr<AutomationExtensionTracker> extension_tracker_;
   PortContainerMap port_containers_;
-  scoped_refptr<AutomationResourceMessageFilter>
-      automation_resource_message_filter_;
+
+  // True iff connected to an AutomationProxy.
+  bool is_connected_;
+
+  // True iff browser finished loading initial set of tabs.
+  bool initial_loads_complete_;
 
   DISALLOW_COPY_AND_ASSIGN(AutomationProvider);
 };

@@ -3,7 +3,8 @@
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/service/test_helper.h"
-#include "app/gfx/gl/gl_mock.h"
+
+#include "gpu/command_buffer/common/gl_mock.h"
 #include "gpu/command_buffer/common/types.h"
 #include "gpu/GLES2/gles2_command_buffer.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -29,6 +30,7 @@ const GLuint TestHelper::kServiceBlackTextureCubemapId;
 const GLuint TestHelper::kServiceDefaultTexture2dId;
 const GLuint TestHelper::kServiceDefaultTextureCubemapId;
 
+const GLint TestHelper::kMaxRenderbufferSize;
 const GLint TestHelper::kMaxTextureSize;
 const GLint TestHelper::kMaxCubeMapTextureSize;
 const GLint TestHelper::kNumVertexAttribs;
@@ -95,6 +97,9 @@ void TestHelper::SetupContextGroupInitExpectations(
 
   SetupFeatureInfoInitExpectations(gl, extensions);
 
+  EXPECT_CALL(*gl, GetIntegerv(GL_MAX_RENDERBUFFER_SIZE, _))
+      .WillOnce(SetArgumentPointee<1>(kMaxRenderbufferSize))
+      .RetiresOnSaturation();
   EXPECT_CALL(*gl, GetIntegerv(GL_MAX_VERTEX_ATTRIBS, _))
       .WillOnce(SetArgumentPointee<1>(kNumVertexAttribs))
       .RetiresOnSaturation();

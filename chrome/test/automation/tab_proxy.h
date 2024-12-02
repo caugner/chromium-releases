@@ -18,9 +18,9 @@
 #include "base/compiler_specific.h"
 #include "base/observer_list.h"
 #include "chrome/browser/download/save_package.h"
-#include "chrome/browser/tab_contents/navigation_entry.h"
-#include "chrome/browser/tab_contents/security_style.h"
-#include "chrome/test/automation/automation_constants.h"
+#include "chrome/common/automation_constants.h"
+#include "chrome/common/page_type.h"
+#include "chrome/common/security_style.h"
 #include "chrome/test/automation/automation_handle_tracker.h"
 #include "chrome/test/automation/dom_element_proxy.h"
 #include "chrome/test/automation/javascript_execution_controller.h"
@@ -57,8 +57,7 @@ class TabProxy : public AutomationResourceProxy,
 
   TabProxy(AutomationMessageSender* sender,
            AutomationHandleTracker* tracker,
-           int handle)
-    : AutomationResourceProxy(tracker, sender, handle) {}
+           int handle);
 
   // Gets the current url of the tab.
   bool GetCurrentURL(GURL* url) const WARN_UNUSED_RESULT;
@@ -324,7 +323,7 @@ class TabProxy : public AutomationResourceProxy,
 
   // Returns the type of the page currently showing (normal, interstitial,
   // error).
-  bool GetPageType(NavigationEntry::PageType* page_type) WARN_UNUSED_RESULT;
+  bool GetPageType(PageType* page_type) WARN_UNUSED_RESULT;
 
   // Simulates the user action on the SSL blocking page.  if |proceed| is true,
   // this is equivalent to clicking the 'Proceed' button, if false to 'Take me
@@ -376,6 +375,13 @@ class TabProxy : public AutomationResourceProxy,
   // Uses the specified encoding to override encoding of the page in the tab.
   bool OverrideEncoding(const std::string& encoding) WARN_UNUSED_RESULT;
 
+  // Loads all blocked plug-ins on the page.
+  bool LoadBlockedPlugins() WARN_UNUSED_RESULT;
+
+  // Captures the entire page and saves as a PNG at the given path. Returns
+  // true on success.
+  bool CaptureEntirePageAsPNG(const FilePath& path) WARN_UNUSED_RESULT;
+
 #if defined(OS_WIN)
   // Resizes the tab window.
   // The parent_window parameter allows a parent to be specified for the window
@@ -410,7 +416,7 @@ class TabProxy : public AutomationResourceProxy,
   void OnMessageReceived(const IPC::Message& message);
   void OnChannelError();
  protected:
-  virtual ~TabProxy() {}
+  virtual ~TabProxy();
 
   // Override JavaScriptExecutionController methods.
   // Executes |script| and gets the response JSON. Returns true on success.

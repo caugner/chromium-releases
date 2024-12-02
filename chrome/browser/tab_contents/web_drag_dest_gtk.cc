@@ -9,11 +9,12 @@
 #include "app/gtk_dnd_util.h"
 #include "base/file_path.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/bookmarks/bookmark_drag_data.h"
+#include "chrome/browser/bookmarks/bookmark_node_data.h"
 #include "chrome/browser/gtk/bookmark_utils_gtk.h"
 #include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/common/url_constants.h"
 #include "net/base/net_util.h"
 
 using WebKit::WebDragOperation;
@@ -27,11 +28,11 @@ namespace {
 // gtk_dnd_util::CHROME_BOOKMARK_ITEM. See
 // bookmark_utils::WriteBookmarksToSelection() for details.
 // For Views, bookmark drag data is encoded in the same format, and
-// associated with a custom format. See BookmarkDragData::Write() for
+// associated with a custom format. See BookmarkNodeData::Write() for
 // details.
 GdkAtom GetBookmarkTargetAtom() {
 #if defined(TOOLKIT_VIEWS)
-  return BookmarkDragData::GetBookmarkCustomFormat();
+  return BookmarkNodeData::GetBookmarkCustomFormat();
 #else
   return gtk_dnd_util::GetAtomForTarget(gtk_dnd_util::CHROME_BOOKMARK_ITEM);
 #endif
@@ -74,7 +75,7 @@ WebDragDestGtk::~WebDragDestGtk() {
 void WebDragDestGtk::UpdateDragStatus(WebDragOperation operation) {
   if (context_) {
     is_drop_target_ = operation != WebDragOperationNone;
-    gdk_drag_status(context_, gtk_dnd_util::WebDragOpToGdkDragAction(operation),
+    gdk_drag_status(context_, gtk_util::WebDragOpToGdkDragAction(operation),
                     drag_over_time_);
   }
 }
@@ -125,7 +126,7 @@ gboolean WebDragDestGtk::OnDragMotion(GtkWidget* sender,
         DragTargetDragOver(
             gtk_util::ClientPoint(widget_),
             gtk_util::ScreenPoint(widget_),
-            gtk_dnd_util::GdkDragActionToWebDragOp(context->actions));
+            gtk_util::GdkDragActionToWebDragOp(context->actions));
     if (tab_contents_->GetBookmarkDragDelegate())
       tab_contents_->GetBookmarkDragDelegate()->OnDragOver(bookmark_drag_data_);
     drag_over_time_ = time;
@@ -169,8 +170,10 @@ void WebDragDestGtk::OnDragDataReceived(
           // dragging files. To avoid exposing file system paths to web content,
           // file URLs are never set as the URL content for the drop.
           // TODO(estade): Can the filenames have a non-UTF8 encoding?
+          GURL url(*uri_iter);
           FilePath file_path;
-          if (net::FileURLToFilePath(GURL(*uri_iter), &file_path)) {
+          if (url.SchemeIs(chrome::kFileScheme) &&
+              net::FileURLToFilePath(url, &file_path)) {
             drop_data_->filenames.push_back(UTF8ToUTF16(file_path.value()));
             // This is a hack. Some file managers also populate text/plain with
             // a file URL when dragging files, so we clear it to avoid exposing
@@ -178,7 +181,7 @@ void WebDragDestGtk::OnDragDataReceived(
             drop_data_->plain_text.clear();
           } else if (!drop_data_->url.is_valid()) {
             // Also set the first non-file URL as the URL content for the drop.
-            drop_data_->url = GURL(*uri_iter);
+            drop_data_->url = url;
           }
         }
         g_strfreev(uris);
@@ -233,7 +236,7 @@ void WebDragDestGtk::OnDragDataReceived(
         DragTargetDragEnter(*drop_data_.get(),
             gtk_util::ClientPoint(widget_),
             gtk_util::ScreenPoint(widget_),
-            gtk_dnd_util::GdkDragActionToWebDragOp(context->actions));
+            gtk_util::GdkDragActionToWebDragOp(context->actions));
 
     // This is non-null if tab_contents_ is showing an ExtensionDOMUI with
     // support for (at the moment experimental) drag and drop extensions.

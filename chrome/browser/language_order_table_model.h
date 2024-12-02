@@ -18,6 +18,8 @@ class LanguageOrderTableModel : public TableModel {
  public:
   LanguageOrderTableModel();
 
+  virtual ~LanguageOrderTableModel();
+
   // Set Language List.
   void SetAcceptLanguagesString(const std::string& language_list);
 
@@ -38,7 +40,7 @@ class LanguageOrderTableModel : public TableModel {
   void MoveUp(int index);
 
   // Returns the set of languagess this model contains.
-  std::string GetLanguageList() { return VectorToList(languages_); }
+  std::string GetLanguageList();
 
   // TableModel overrides:
   virtual int RowCount();
@@ -46,13 +48,6 @@ class LanguageOrderTableModel : public TableModel {
   virtual void SetObserver(TableModelObserver* observer);
 
  private:
-  // This method converts a comma separated list to a vector of strings.
-  void ListToVector(const std::string& list,
-                    std::vector<std::string>* vector);
-
-  // This method returns a comma separated string given a string vector.
-  std::string VectorToList(const std::vector<std::string>& vector);
-
   // Set of entries we're showing.
   std::vector<std::string> languages_;
   std::string comma_separated_language_list_;

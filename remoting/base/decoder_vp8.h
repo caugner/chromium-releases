@@ -14,37 +14,28 @@ namespace remoting {
 class DecoderVp8 : public Decoder {
  public:
   DecoderVp8();
-  ~DecoderVp8();
+  virtual ~DecoderVp8();
 
   // Decoder implementations.
-  virtual bool BeginDecode(scoped_refptr<media::VideoFrame> frame,
-                           UpdatedRects* update_rects,
-                           Task* partial_decode_done,
-                           Task* decode_done);
-  virtual bool PartialDecode(ChromotingHostMessage* message);
-  virtual void EndDecode();
+  virtual void Initialize(scoped_refptr<media::VideoFrame> frame);
+  virtual DecodeResult DecodePacket(const VideoPacket* packet);
+  virtual void GetUpdatedRects(UpdatedRects* rects);
+  virtual bool IsReadyForData();
+  virtual void Reset();
+  virtual VideoPacketFormat::Encoding Encoding();
 
  private:
-  bool HandleBeginRect(ChromotingHostMessage* message);
-  bool HandleRectData(ChromotingHostMessage* message);
-  bool HandleEndRect(ChromotingHostMessage* message);
+  enum State {
+    kUninitialized,
+    kReady,
+    kError,
+  };
 
   // The internal state of the decoder.
   State state_;
 
-  // Keeps track of the updating rect.
-  int rect_x_;
-  int rect_y_;
-  int rect_width_;
-  int rect_height_;
-
-  // Tasks to call when decode is done.
-  scoped_ptr<Task> partial_decode_done_;
-  scoped_ptr<Task> decode_done_;
-
   // The video frame to write to.
   scoped_refptr<media::VideoFrame> frame_;
-  UpdatedRects* updated_rects_;
 
   vpx_codec_ctx_t* codec_;
 

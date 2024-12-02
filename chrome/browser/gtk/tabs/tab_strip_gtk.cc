@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "app/animation_delegate.h"
 #include "app/gtk_dnd_util.h"
 #include "app/resource_bundle.h"
 #include "app/slide_animation.h"
@@ -19,8 +20,11 @@
 #include "chrome/browser/gtk/tabs/dragged_tab_controller_gtk.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/browser/tab_contents_wrapper.h"
 #include "chrome/browser/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/themes/browser_theme_provider.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/notification_type.h"
 #include "gfx/gtk_util.h"
@@ -810,10 +814,10 @@ void TabStripGtk::UpdateLoadingAnimations() {
       --index;
     } else {
       TabRendererGtk::AnimationState state;
-      TabContents* contents = model_->GetTabContentsAt(index);
-      if (!contents || !contents->is_loading()) {
+      TabContentsWrapper* contents = model_->GetTabContentsAt(index);
+      if (!contents || !contents->tab_contents()->is_loading()) {
         state = TabGtk::ANIMATION_NONE;
-      } else if (contents->waiting_for_response()) {
+      } else if (contents->tab_contents()->waiting_for_response()) {
         state = TabGtk::ANIMATION_WAITING;
       } else {
         state = TabGtk::ANIMATION_LOADING;
@@ -922,7 +926,7 @@ GtkWidget* TabStripGtk::GetWidgetForViewID(ViewID view_id) {
 ////////////////////////////////////////////////////////////////////////////////
 // TabStripGtk, TabStripModelObserver implementation:
 
-void TabStripGtk::TabInsertedAt(TabContents* contents,
+void TabStripGtk::TabInsertedAt(TabContentsWrapper* contents,
                                 int index,
                                 bool foreground) {
   DCHECK(contents);
@@ -937,7 +941,8 @@ void TabStripGtk::TabInsertedAt(TabContents* contents,
   // has the Tab already constructed and we can just insert it into our list
   // again.
   if (IsDragSessionActive()) {
-    tab = drag_controller_->GetDragSourceTabForContents(contents);
+    tab = drag_controller_->GetDragSourceTabForContents(
+        contents->tab_contents());
     if (tab) {
       // If the Tab was detached, it would have been animated closed but not
       // removed, so we need to reset this property.
@@ -961,7 +966,7 @@ void TabStripGtk::TabInsertedAt(TabContents* contents,
   if (!contains_tab) {
     TabData d = { tab, gfx::Rect() };
     tab_data_.insert(tab_data_.begin() + index, d);
-    tab->UpdateData(contents, model_->IsAppTab(index), false);
+    tab->UpdateData(contents->tab_contents(), model_->IsAppTab(index), false);
   }
   tab->set_mini(model_->IsMiniTab(index));
   tab->set_app(model_->IsAppTab(index));
@@ -982,17 +987,17 @@ void TabStripGtk::TabInsertedAt(TabContents* contents,
   }
 }
 
-void TabStripGtk::TabDetachedAt(TabContents* contents, int index) {
+void TabStripGtk::TabDetachedAt(TabContentsWrapper* contents, int index) {
   GenerateIdealBounds();
-  StartRemoveTabAnimation(index, contents);
+  StartRemoveTabAnimation(index, contents->tab_contents());
   // Have to do this _after_ calling StartRemoveTabAnimation, so that any
   // previous remove is completed fully and index is valid in sync with the
   // model index.
   GetTabAt(index)->set_closing(true);
 }
 
-void TabStripGtk::TabSelectedAt(TabContents* old_contents,
-                                TabContents* new_contents,
+void TabStripGtk::TabSelectedAt(TabContentsWrapper* old_contents,
+                                TabContentsWrapper* new_contents,
                                 int index,
                                 bool user_gesture) {
   DCHECK(index >= 0 && index < static_cast<int>(GetTabCount()));
@@ -1012,7 +1017,7 @@ void TabStripGtk::TabSelectedAt(TabContents* old_contents,
   }
 }
 
-void TabStripGtk::TabMoved(TabContents* contents,
+void TabStripGtk::TabMoved(TabContentsWrapper* contents,
                            int from_index,
                            int to_index) {
   gfx::Rect start_bounds = GetIdealBounds(from_index);
@@ -1026,7 +1031,7 @@ void TabStripGtk::TabMoved(TabContents* contents,
   StartMoveTabAnimation(from_index, to_index);
 }
 
-void TabStripGtk::TabChangedAt(TabContents* contents, int index,
+void TabStripGtk::TabChangedAt(TabContentsWrapper* contents, int index,
                                TabChangeType change_type) {
   // Index is in terms of the model. Need to make sure we adjust that index in
   // case we have an animation going.
@@ -1037,19 +1042,23 @@ void TabStripGtk::TabChangedAt(TabContents* contents, int index,
     // We'll receive another notification of the change asynchronously.
     return;
   }
-  tab->UpdateData(contents,
+  tab->UpdateData(contents->tab_contents(),
                   model_->IsAppTab(index),
                   change_type == LOADING_ONLY);
   tab->UpdateFromModel();
 }
 
-void TabStripGtk::TabReplacedAt(TabContents* old_contents,
-                                TabContents* new_contents,
+void TabStripGtk::TabReplacedAt(TabContentsWrapper* old_contents,
+                                TabContentsWrapper* new_contents,
                                 int index) {
   TabChangedAt(new_contents, index, ALL);
 }
 
-void TabStripGtk::TabMiniStateChanged(TabContents* contents, int index) {
+void TabStripGtk::TabMiniStateChanged(TabContentsWrapper* contents, int index) {
+  // Don't do anything if we've already picked up the change from TabMoved.
+  if (GetTabAt(index)->mini() == model_->IsMiniTab(index))
+    return;
+
   GetTabAt(index)->set_mini(model_->IsMiniTab(index));
   // Don't animate if the window isn't visible yet. The window won't be visible
   // when dragging a mini-tab to a new window.
@@ -1061,7 +1070,8 @@ void TabStripGtk::TabMiniStateChanged(TabContents* contents, int index) {
   }
 }
 
-void TabStripGtk::TabBlockedStateChanged(TabContents* contents, int index) {
+void TabStripGtk::TabBlockedStateChanged(TabContentsWrapper* contents,
+                                         int index) {
   GetTabAt(index)->SetBlocked(model_->IsTabBlocked(index));
 }
 
@@ -1608,19 +1618,18 @@ bool TabStripGtk::CompleteDrop(guchar* data) {
   if (!url.is_valid())
     return false;
 
+  browser::NavigateParams params(window()->browser(), url,
+                                 PageTransition::LINK);
+  params.tabstrip_index = drop_index;
+
   if (drop_before) {
-    // Insert a new tab.
-    TabContents* contents =
-        model_->delegate()->CreateTabContentsForURL(
-            url, GURL(), model_->profile(), PageTransition::TYPED, false,
-            NULL);
-    model_->AddTabContents(contents, drop_index, PageTransition::GENERATED,
-                           TabStripModel::ADD_SELECTED);
+    params.disposition = NEW_FOREGROUND_TAB;
   } else {
-    model_->GetTabContentsAt(drop_index)->controller().LoadURL(
-        url, GURL(), PageTransition::GENERATED);
-    model_->SelectTabContentsAt(drop_index, true);
+    params.disposition = CURRENT_TAB;
+    params.source_contents = model_->GetTabContentsAt(drop_index);
   }
+
+  browser::Navigate(&params);
 
   return true;
 }
@@ -1970,19 +1979,9 @@ void TabStripGtk::OnNewTabClicked(GtkWidget* widget) {
       if (!gtk_util::URLFromPrimarySelection(model_->profile(), &url))
         return;
 
-      TabContents* contents =
-          model_->delegate()->CreateTabContentsForURL(
-              url,
-              GURL(),  // referrer
-              model_->profile(),
-              PageTransition::TYPED,
-              false,   // defer_load
-              NULL);   // instance
-      model_->AddTabContents(
-          contents,
-          -1,     // index
-          PageTransition::TYPED,
-          TabStripModel::ADD_SELECTED);
+      Browser* browser = window_->browser();
+      DCHECK(browser);
+      browser->AddSelectedTabWithURL(url, PageTransition::TYPED);
       break;
     }
     default:
@@ -2007,7 +2006,8 @@ bool TabStripGtk::CanPaintOnlyFavIcons(const GdkRectangle* rects,
   for (int r = 0; r < num_rects; ++r) {
     while (t < GetTabCount()) {
       TabGtk* tab = GetTabAt(t);
-      if (GdkRectMatchesTabFavIconBounds(rects[r], tab)) {
+      if (GdkRectMatchesTabFavIconBounds(rects[r], tab) &&
+          tab->ShouldShowIcon()) {
         tabs_to_paint->push_back(t);
         ++t;
         break;

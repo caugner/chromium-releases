@@ -15,6 +15,7 @@
 #include "chrome/browser/chromeos/wm_ipc.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"
 #include "views/controls/button/button.h"
 #include "views/controls/textfield/textfield.h"
 #include "views/widget/widget_delegate.h"
@@ -49,6 +50,7 @@ class UserController : public views::ButtonListener,
     virtual void ActivateWizard(const std::string& screen_name) = 0;
     virtual void RemoveUser(UserController* source) = 0;
     virtual void AddStartUrl(const GURL& start_url) = 0;
+    virtual void SetStatusAreaEnabled(bool enable) = 0;
 
     // Selects user entry with specified |index|.
     // Does nothing if current user is already selected.
@@ -57,8 +59,8 @@ class UserController : public views::ButtonListener,
     virtual ~Delegate() {}
   };
 
-  // Creates a UserController representing new user or bwsi login.
-  UserController(Delegate* delegate, bool is_bwsi);
+  // Creates a UserController representing new user or guest login.
+  UserController(Delegate* delegate, bool is_guest);
 
   // Creates a UserController for the specified user.
   UserController(Delegate* delegate, const UserManager::User& user);
@@ -77,7 +79,7 @@ class UserController : public views::ButtonListener,
   int user_index() const { return user_index_; }
   bool is_user_selected() const { return is_user_selected_; }
   bool is_new_user() const { return is_new_user_; }
-  bool is_bwsi() const { return is_bwsi_; }
+  bool is_guest() const { return is_guest_; }
   NewUserView* new_user_view() const { return new_user_view_; }
 
   const UserManager::User& user() const { return user_; }
@@ -127,6 +129,9 @@ class UserController : public views::ButtonListener,
   }
   virtual void ClearErrors();
   virtual void NavigateAway();
+  virtual void SetStatusAreaEnabled(bool enable) {
+    delegate_->SetStatusAreaEnabled(enable);
+  }
 
   // UserView::Delegate implementation:
   virtual void OnRemoveUser();
@@ -142,8 +147,11 @@ class UserController : public views::ButtonListener,
 
   // Max size needed when an entry is not selected.
   static const int kUnselectedSize;
+  static const int kNewUserUnselectedSize;
 
  private:
+  FRIEND_TEST(UserControllerTest, GetNameTooltip);
+
   // Invoked when the user wants to login. Forwards the call to the delegate.
   void Login();
 
@@ -154,11 +162,13 @@ class UserController : public views::ButtonListener,
                             chromeos::WmIpcWindowType type,
                             views::View* contents_view);
   views::WidgetGtk* CreateControlsWindow(int index,
-                                         int* height,
-                                         bool need_browse_without_signin);
+                                         int* width, int* height,
+                                         bool need_guest_link);
   views::WidgetGtk* CreateImageWindow(int index);
   views::WidgetGtk* CreateLabelWindow(int index, WmIpcWindowType type);
-  void CreateBorderWindow(int index, int total_user_count, int controls_height);
+  void CreateBorderWindow(int index,
+                          int total_user_count,
+                          int controls_width, int controls_height);
 
   // Sets specified image on the image window. If image's size is less than
   // 75% of window size, image size is preserved to avoid blur. Otherwise,
@@ -181,14 +191,17 @@ class UserController : public views::ButtonListener,
   // Is this the new user pod?
   const bool is_new_user_;
 
-  // Is this the bwsi pod?
-  const bool is_bwsi_;
+  // Is this the guest pod?
+  const bool is_guest_;
+
+  // Is this user the owner?
+  const bool is_owner_;
 
   // Should we show tooltips above user image and label to help distinguish
   // users with the same display name.
   bool show_name_tooltip_;
 
-  // If is_new_user_ and is_bwsi_ are false, this is the user being shown.
+  // If is_new_user_ and is_guest_ are false, this is the user being shown.
   UserManager::User user_;
 
   Delegate* delegate_;

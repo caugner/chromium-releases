@@ -135,7 +135,7 @@ PlatformFontGtk::PlatformFontGtk(NativeFont native_font) {
     // font_size_ is treated as scaled (see comment in GetPangoScaleFactor). If
     // we get here the font size is absolute though, and we need to invert the
     // scale so that when scaled in the rest of this class everything lines up.
-    size /= PlatformFontGtk::GetPangoScaleFactor();
+    size /= GetPangoScaleFactor();
   }
 
   // Find best match font for |family_name| to make sure we can get
@@ -221,7 +221,8 @@ int PlatformFontGtk::GetAverageCharacterWidth() const {
 
 int PlatformFontGtk::GetStringWidth(const std::wstring& text) const {
   int width = 0, height = 0;
-  CanvasSkia::SizeStringInt(text, Font(const_cast<PlatformFontGtk*>(this)),
+  CanvasSkia::SizeStringInt(WideToUTF16Hack(text),
+                            Font(const_cast<PlatformFontGtk*>(this)),
                             &width, &height, gfx::Canvas::NO_ELLIPSIS);
   return width;
 }
@@ -350,7 +351,7 @@ void PlatformFontGtk::PaintSetup(SkPaint* paint) const {
   paint->setAntiAlias(false);
   paint->setSubpixelText(false);
   paint->setTextSize(
-      SkFloatToScalar(font_size_ * PlatformFontGtk::GetPangoScaleFactor()));
+      SkFloatToScalar(font_size_ * GetPangoScaleFactor()));
   paint->setTypeface(typeface_);
   paint->setFakeBoldText((gfx::Font::BOLD & style_) && !typeface_->isBold());
   paint->setTextSkewX((gfx::Font::ITALIC & style_) && !typeface_->isItalic() ?

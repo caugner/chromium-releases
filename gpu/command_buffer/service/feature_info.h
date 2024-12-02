@@ -16,23 +16,25 @@ class FeatureInfo {
  public:
   struct FeatureFlags {
     FeatureFlags()
-        : ext_framebuffer_multisample(false),
+        : chromium_framebuffer_multisample(false),
           oes_standard_derivatives(false),
           npot_ok(false),
           enable_texture_float_linear(false),
-          enable_texture_half_float_linear(false) {
+          enable_texture_half_float_linear(false),
+          chromium_webglsl(false) {
     }
 
-    bool ext_framebuffer_multisample;
+    bool chromium_framebuffer_multisample;
     bool oes_standard_derivatives;
     bool npot_ok;
     bool enable_texture_float_linear;
     bool enable_texture_half_float_linear;
+    bool chromium_webglsl;
   };
 
   FeatureInfo();
 
-  // If allowed features = NULL, all features are allowed. Otherwise
+  // If allowed features = NULL or "*", all features are allowed. Otherwise
   // only features that match the strings in allowed_features are allowed.
   bool Initialize(const char* allowed_features);
 

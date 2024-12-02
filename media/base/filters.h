@@ -41,19 +41,7 @@ class Buffer;
 class Decoder;
 class DemuxerStream;
 class FilterHost;
-class WritableBuffer;
-
-// Identifies the type of filter implementation.  Used in conjunction with some
-// template wizardry to enforce strongly typed operations.  More or less a
-// knock off of MSVC's __uuidof() operator.
-enum FilterType {
-  FILTER_DATA_SOURCE,
-  FILTER_DEMUXER,
-  FILTER_AUDIO_DECODER,
-  FILTER_VIDEO_DECODER,
-  FILTER_AUDIO_RENDERER,
-  FILTER_VIDEO_RENDERER
-};
+class MediaFilter;
 
 // Used for completing asynchronous methods.
 typedef Callback0::Type FilterCallback;
@@ -62,6 +50,9 @@ class MediaFilter : public base::RefCountedThreadSafe<MediaFilter> {
  public:
   MediaFilter();
 
+  // Return the major mime type for this filter.
+  virtual const char* major_mime_type() const;
+
   // Sets the private member |host_|. This is the first method called by
   // the FilterHost after a filter is created.  The host holds a strong
   // reference to the filter.  The reference held by the host is guaranteed
@@ -69,6 +60,12 @@ class MediaFilter : public base::RefCountedThreadSafe<MediaFilter> {
   virtual void set_host(FilterHost* host);
 
   virtual FilterHost* host();
+
+  // Indicates whether this filter requires a message loop to operate.
+  virtual bool requires_message_loop() const;
+
+  // The name to associate with this filter's message loop.
+  virtual const char* message_loop_name() const;
 
   // Sets the private member |message_loop_|, which is used by filters for
   // processing asynchronous tasks and maintaining synchronized access to
@@ -126,28 +123,16 @@ class MediaFilter : public base::RefCountedThreadSafe<MediaFilter> {
   DISALLOW_COPY_AND_ASSIGN(MediaFilter);
 };
 
-
 class DataSource : public MediaFilter {
  public:
   typedef Callback1<size_t>::Type ReadCallback;
   static const size_t kReadError = static_cast<size_t>(-1);
 
-  static FilterType filter_type() {
-    return FILTER_DATA_SOURCE;
-  }
-
-  static bool IsMediaFormatSupported(const MediaFormat& media_format) {
-    std::string mime_type;
-    return (media_format.GetAsString(MediaFormat::kMimeType, &mime_type) &&
-            mime_type == mime_type::kURL);
-  }
+  virtual bool IsUrlSupported(const std::string& url);
 
   // Initialize a DataSource for the given URL, executing the callback upon
   // completion.
   virtual void Initialize(const std::string& url, FilterCallback* callback) = 0;
-
-  // Returns the MediaFormat for this filter.
-  virtual const MediaFormat& media_format() = 0;
 
   // Reads |size| bytes from |position| into |data|. And when the read is done
   // or failed, |read_callback| is called with the number of bytes read or
@@ -169,15 +154,8 @@ class DataSource : public MediaFilter {
 
 class Demuxer : public MediaFilter {
  public:
-  static FilterType filter_type() {
-    return FILTER_DEMUXER;
-  }
-
-  static bool IsMediaFormatSupported(const MediaFormat& media_format) {
-    std::string mime_type;
-    return (media_format.GetAsString(MediaFormat::kMimeType, &mime_type) &&
-            mime_type == mime_type::kApplicationOctetStream);
-  }
+  virtual bool requires_message_loop() const;
+  virtual const char* message_loop_name() const;
 
   // Initialize a Demuxer with the given DataSource, executing the callback upon
   // completion.
@@ -194,9 +172,6 @@ class Demuxer : public MediaFilter {
 
 class DemuxerStream : public base::RefCountedThreadSafe<DemuxerStream> {
  public:
-  // Returns the MediaFormat for this filter.
-  virtual const MediaFormat& media_format() = 0;
-
   // Schedules a read.  When the |read_callback| is called, the downstream
   // filter takes ownership of the buffer by AddRef()'ing the buffer.
   //
@@ -213,6 +188,9 @@ class DemuxerStream : public base::RefCountedThreadSafe<DemuxerStream> {
     *interface_out = reinterpret_cast<Interface*>(i);
     return (NULL != i);
   };
+
+  // Returns the media format of this stream.
+  virtual const MediaFormat& media_format() = 0;
 
   virtual void EnableBitstreamConverter() = 0;
 
@@ -232,20 +210,14 @@ class DemuxerStream : public base::RefCountedThreadSafe<DemuxerStream> {
 
 class VideoDecoder : public MediaFilter {
  public:
-  static FilterType filter_type() {
-    return FILTER_VIDEO_DECODER;
-  }
+  virtual const char* major_mime_type() const;
+  virtual bool requires_message_loop() const;
+  virtual const char* message_loop_name() const;
 
-  static const char* major_mime_type() {
-    return mime_type::kMajorTypeVideo;
-  }
 
   // Initialize a VideoDecoder with the given DemuxerStream, executing the
   // callback upon completion.
   virtual void Initialize(DemuxerStream* stream, FilterCallback* callback) = 0;
-
-  // Returns the MediaFormat for this filter.
-  virtual const MediaFormat& media_format() = 0;
 
   // |set_fill_buffer_done_callback| install permanent callback from downstream
   // filter (i.e. Renderer). The callback is used to deliver video frames at
@@ -263,12 +235,18 @@ class VideoDecoder : public MediaFilter {
   // Indicate whether decoder provides its own output buffers
   virtual bool ProvidesBuffer() = 0;
 
+  // Returns the media format produced by this decoder.
+  virtual const MediaFormat& media_format() = 0;
+
  protected:
   // A video frame is ready to be consumed. This method invoke
   // |consume_video_frame_callback_| internally.
   void VideoFrameReady(scoped_refptr<VideoFrame> frame) {
     consume_video_frame_callback_->Run(frame);
   }
+
+  VideoDecoder();
+  virtual ~VideoDecoder();
 
  private:
   scoped_ptr<ConsumeVideoFrameCallback> consume_video_frame_callback_;
@@ -277,20 +255,13 @@ class VideoDecoder : public MediaFilter {
 
 class AudioDecoder : public MediaFilter {
  public:
-  static FilterType filter_type() {
-    return FILTER_AUDIO_DECODER;
-  }
-
-  static const char* major_mime_type() {
-    return mime_type::kMajorTypeAudio;
-  }
+  virtual const char* major_mime_type() const;
+  virtual bool requires_message_loop() const;
+  virtual const char* message_loop_name() const;
 
   // Initialize a AudioDecoder with the given DemuxerStream, executing the
   // callback upon completion.
   virtual void Initialize(DemuxerStream* stream, FilterCallback* callback) = 0;
-
-  // Returns the MediaFormat for this filter.
-  virtual const MediaFormat& media_format() = 0;
 
   // |set_fill_buffer_done_callback| install permanent callback from downstream
   // filter (i.e. Renderer). The callback is used to deliver buffers at
@@ -309,6 +280,13 @@ class AudioDecoder : public MediaFilter {
   // We could also pass empty pointer here to let decoder provide buffers pool.
   virtual void ProduceAudioSamples(scoped_refptr<Buffer> buffer) = 0;
 
+  // Returns the media format produced by this decoder.
+  virtual const MediaFormat& media_format() = 0;
+
+ protected:
+  AudioDecoder();
+  ~AudioDecoder();
+
  private:
   scoped_ptr<ConsumeAudioSamplesCallback> consume_audio_samples_callback_;
 };
@@ -316,13 +294,7 @@ class AudioDecoder : public MediaFilter {
 
 class VideoRenderer : public MediaFilter {
  public:
-  static FilterType filter_type() {
-    return FILTER_VIDEO_RENDERER;
-  }
-
-  static const char* major_mime_type() {
-    return mime_type::kMajorTypeVideo;
-  }
+  virtual const char* major_mime_type() const;
 
   // Initialize a VideoRenderer with the given VideoDecoder, executing the
   // callback upon completion.
@@ -336,13 +308,7 @@ class VideoRenderer : public MediaFilter {
 
 class AudioRenderer : public MediaFilter {
  public:
-  static FilterType filter_type() {
-    return FILTER_AUDIO_RENDERER;
-  }
-
-  static const char* major_mime_type() {
-    return mime_type::kMajorTypeAudio;
-  }
+  virtual const char* major_mime_type() const;
 
   // Initialize a AudioRenderer with the given AudioDecoder, executing the
   // callback upon completion.

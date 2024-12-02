@@ -10,17 +10,18 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/field_trial.h"
+#include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/metrics/field_trial.h"
+#include "base/metrics/stats_table.h"
 #include "base/nullable_string16.h"
 #include "base/process_util.h"
+#include "base/scoped_callback_factory.h"
 #include "base/shared_memory.h"
-#include "base/stats_table.h"
 #include "base/string_util.h"
 #include "base/task.h"
 #include "base/thread_local.h"
-#include "base/trace_event.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/appcache/appcache_dispatcher.h"
@@ -65,7 +66,10 @@
 #include "chrome/renderer/renderer_histogram_snapshots.h"
 #include "chrome/renderer/renderer_webidbfactory_impl.h"
 #include "chrome/renderer/renderer_webkitclient_impl.h"
+#include "chrome/renderer/safe_browsing/phishing_classifier_delegate.h"
+#include "chrome/renderer/safe_browsing/scorer.h"
 #include "chrome/renderer/search_extension.h"
+#include "chrome/renderer/searchbox_extension.h"
 #include "chrome/renderer/spellchecker/spellcheck.h"
 #include "chrome/renderer/user_script_slave.h"
 #include "ipc/ipc_channel_handle.h"
@@ -154,10 +158,10 @@ class SuicideOnChannelErrorFilter : public IPC::ChannelProxy::MessageFilter {
     // stopgap, to avoid leaking due to not releasing Breakpad properly.
     // TODO(viettrungluu): Investigate why this is being called.
     if (IsCrashReporterEnabled()) {
-      LOG(INFO) << "Cleaning up Breakpad.";
+      VLOG(1) << "Cleaning up Breakpad.";
       DestructCrashReporter();
     } else {
-      LOG(INFO) << "Breakpad not enabled; no clean-up needed.";
+      VLOG(1) << "Breakpad not enabled; no clean-up needed.";
     }
 #endif  // OS_MACOSX
 
@@ -214,9 +218,26 @@ class RenderViewZoomer : public RenderViewVisitor {
   DISALLOW_COPY_AND_ASSIGN(RenderViewZoomer);
 };
 
-bool IsSpeechInputEnabled(const CommandLine& command_line) {
-  return !command_line.HasSwitch(switches::kDisableSpeechInput);
-}
+class RenderViewPhishingScorerSetter : public RenderViewVisitor {
+ public:
+  explicit RenderViewPhishingScorerSetter(const safe_browsing::Scorer* scorer)
+      : scorer_(scorer) {
+  }
+
+  virtual bool Visit(RenderView* render_view) {
+    safe_browsing::PhishingClassifierDelegate* delegate =
+        render_view->phishing_classifier_delegate();
+    if (delegate)
+      delegate->SetPhishingScorer(scorer_);
+    return true;
+  }
+
+ private:
+  const safe_browsing::Scorer* scorer_;
+
+  DISALLOW_COPY_AND_ASSIGN(RenderViewPhishingScorerSetter);
+};
+
 }  // namespace
 
 // When we run plugins in process, we actually run them on the render thread,
@@ -247,6 +268,7 @@ void RenderThread::Init() {
   is_extension_process_ = type_str == switches::kExtensionProcess ||
       CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess);
   is_incognito_process_ = false;
+  is_speech_input_enabled_ = false;
   suspend_webkit_shared_timer_ = true;
   notify_webkit_of_modal_loop_ = true;
   plugin_refresh_allowed_ = true;
@@ -256,6 +278,7 @@ void RenderThread::Init() {
   idle_notification_delay_in_s_ = is_extension_process_ ?
       kInitialExtensionIdleHandlerDelayS : kInitialIdleHandlerDelayS;
   task_factory_.reset(new ScopedRunnableMethodFactory<RenderThread>(this));
+  callback_factory_.reset(new base::ScopedCallbackFactory<RenderThread>(this));
 
   visited_link_slave_.reset(new VisitedLinkSlave());
   user_script_slave_.reset(new UserScriptSlave());
@@ -283,8 +306,8 @@ void RenderThread::Init() {
   // channel is established in time, EstablishGpuChannelSync will not block when
   // it is later called. Delays by a fixed period of time to avoid loading the
   // GPU immediately in an attempt to not slow startup time.
-  scoped_refptr<FieldTrial> prelaunch_trial(
-      new FieldTrial("PrelaunchGpuProcessExperiment", 100));
+  scoped_refptr<base::FieldTrial> prelaunch_trial(
+      new base::FieldTrial("PrelaunchGpuProcessExperiment", 100));
   int prelaunch_group = prelaunch_trial->AppendGroup("prelaunch_gpu_process",
                                                      kPrelauchGpuPercentage);
   if (prelaunch_group == prelaunch_trial->group() ||
@@ -348,15 +371,16 @@ int32 RenderThread::RoutingIDForCurrentContext() {
 }
 
 bool RenderThread::Send(IPC::Message* msg) {
-  // Certain synchronous messages can result in an app-modal cookie prompt.
+  // Certain synchronous messages cannot always be processed synchronously by
+  // the browser, e.g., Chrome frame communicating with the embedding browser.
   // This could cause a complete hang of Chrome if a windowed plug-in is trying
   // to communicate with the renderer thread since the browser's UI thread
   // could be stuck (within a Windows API call) trying to synchronously
   // communicate with the plug-in.  The remedy is to pump messages on this
-  // thread while the cookie prompt is showing.  This creates an opportunity
-  // for re-entrancy into WebKit, so we need to take care to disable callbacks,
-  // timers, and pending network loads that could trigger such callbacks.
-
+  // thread while the browser is processing this request. This creates an
+  // opportunity for re-entrancy into WebKit, so we need to take care to disable
+  // callbacks, timers, and pending network loads that could trigger such
+  // callbacks.
   bool pumping_events = false, may_show_cookie_prompt = false;
   if (msg->is_sync()) {
     if (msg->is_caller_pumping_messages()) {
@@ -365,6 +389,7 @@ bool RenderThread::Send(IPC::Message* msg) {
       switch (msg->type()) {
         case ViewHostMsg_GetCookies::ID:
         case ViewHostMsg_GetRawCookies::ID:
+        case ViewHostMsg_CookiesEnabled::ID:
         case ViewHostMsg_DOMStorageSetItem::ID:
         case ViewHostMsg_SyncLoad::ID:
         case ViewHostMsg_AllowDatabase::ID:
@@ -551,12 +576,6 @@ void RenderThread::OnExtensionSetHostPermissions(
   ExtensionProcessBindings::SetHostPermissions(extension_url, permissions);
 }
 
-void RenderThread::OnExtensionSetIncognitoEnabled(
-    const std::string& extension_id, bool enabled, bool incognito_split_mode) {
-  ExtensionProcessBindings::SetIncognitoEnabled(extension_id, enabled,
-                                                incognito_split_mode);
-}
-
 void RenderThread::OnDOMStorageEvent(
     const ViewMsg_DOMStorageEvent_Params& params) {
   if (!dom_storage_event_dispatcher_.get())
@@ -617,8 +636,6 @@ void RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
                         OnExtensionSetAPIPermissions)
     IPC_MESSAGE_HANDLER(ViewMsg_Extension_SetHostPermissions,
                         OnExtensionSetHostPermissions)
-    IPC_MESSAGE_HANDLER(ViewMsg_Extension_ExtensionSetIncognitoEnabled,
-                        OnExtensionSetIncognitoEnabled)
     IPC_MESSAGE_HANDLER(ViewMsg_DOMStorageEvent,
                         OnDOMStorageEvent)
 #if defined(IPC_MESSAGE_LOG_ENABLED)
@@ -633,7 +650,14 @@ void RenderThread::OnControlMessageReceived(const IPC::Message& msg) {
                         OnSpellCheckEnableAutoSpellCorrect)
     IPC_MESSAGE_HANDLER(ViewMsg_GpuChannelEstablished, OnGpuChannelEstablished)
     IPC_MESSAGE_HANDLER(ViewMsg_SetPhishingModel, OnSetPhishingModel)
+    IPC_MESSAGE_HANDLER(ViewMsg_SpeechInput_SetFeatureEnabled,
+                        OnSetSpeechInputEnabled)
   IPC_END_MESSAGE_MAP()
+}
+
+void RenderThread::OnSetSpeechInputEnabled(bool enabled) {
+  DCHECK(!webkit_client_.get());
+  is_speech_input_enabled_ = enabled;
 }
 
 void RenderThread::OnSetNextPageID(int32 next_page_id) {
@@ -772,12 +796,12 @@ void RenderThread::EstablishGpuChannel() {
   if (gpu_channel_.get()) {
     // Do nothing if we already have a GPU channel or are already
     // establishing one.
-    if (gpu_channel_->state() == GpuChannelHost::UNCONNECTED ||
-        gpu_channel_->state() == GpuChannelHost::CONNECTED)
+    if (gpu_channel_->state() == GpuChannelHost::kUnconnected ||
+        gpu_channel_->state() == GpuChannelHost::kConnected)
       return;
 
     // Recreate the channel if it has been lost.
-    if (gpu_channel_->state() == GpuChannelHost::LOST)
+    if (gpu_channel_->state() == GpuChannelHost::kLost)
       gpu_channel_ = NULL;
   }
 
@@ -798,7 +822,7 @@ GpuChannelHost* RenderThread::GetGpuChannel() {
   if (!gpu_channel_.get())
     return NULL;
 
-  if (gpu_channel_->state() != GpuChannelHost::CONNECTED)
+  if (gpu_channel_->state() != GpuChannelHost::kConnected)
     return NULL;
 
   return gpu_channel_.get();
@@ -808,8 +832,8 @@ static void* CreateHistogram(
     const char *name, int min, int max, size_t buckets) {
   if (min <= 0)
     min = 1;
-  scoped_refptr<Histogram> histogram = Histogram::FactoryGet(
-      name, min, max, buckets, Histogram::kUmaTargetedHistogramFlag);
+  scoped_refptr<base::Histogram> histogram = base::Histogram::FactoryGet(
+      name, min, max, buckets, base::Histogram::kUmaTargetedHistogramFlag);
   // We'll end up leaking these histograms, unless there is some code hiding in
   // there to do the dec-ref.
   // TODO(jar): Handle reference counting in webkit glue.
@@ -818,7 +842,7 @@ static void* CreateHistogram(
 }
 
 static void AddHistogramSample(void* hist, int sample) {
-  Histogram* histogram = static_cast<Histogram *>(hist);
+  base::Histogram* histogram = static_cast<base::Histogram*>(hist);
   histogram->Add(sample);
 }
 
@@ -834,7 +858,7 @@ void RenderThread::EnsureWebKitInitialized() {
         this, &RenderThread::IdleHandler);
   }
 
-  v8::V8::SetCounterFunction(StatsTable::FindLocation);
+  v8::V8::SetCounterFunction(base::StatsTable::FindLocation);
   v8::V8::SetCreateHistogramFunction(CreateHistogram);
   v8::V8::SetAddHistogramSampleFunction(AddHistogramSample);
 
@@ -861,6 +885,7 @@ void RenderThread::EnsureWebKitInitialized() {
   RegisterExtension(extensions_v8::LoadTimesExtension::Get(), false);
   RegisterExtension(extensions_v8::ChromeAppExtension::Get(), false);
   RegisterExtension(extensions_v8::ExternalExtension::Get(), false);
+  RegisterExtension(extensions_v8::SearchBoxExtension::Get(), false);
   v8::Extension* search_extension = extensions_v8::SearchExtension::Get();
   // search_extension is null if not enabled.
   if (search_extension)
@@ -912,12 +937,13 @@ void RenderThread::EnsureWebKitInitialized() {
       !command_line.HasSwitch(switches::kDisableSessionStorage));
 
   WebRuntimeFeatures::enableIndexedDatabase(
-      !command_line.HasSwitch(switches::kDisableIndexedDatabase));
+      command_line.HasSwitch(switches::kEnableIndexedDatabase));
 
   WebRuntimeFeatures::enableGeolocation(
       !command_line.HasSwitch(switches::kDisableGeolocation));
 
   WebRuntimeFeatures::enableWebGL(
+      !command_line.HasSwitch(switches::kDisable3DAPIs) &&
       !command_line.HasSwitch(switches::kDisableExperimentalWebGL));
 
   WebRuntimeFeatures::enablePushState(true);
@@ -931,7 +957,7 @@ void RenderThread::EnsureWebKitInitialized() {
   WebRuntimeFeatures::enableDeviceOrientation(
       !command_line.HasSwitch(switches::kDisableDeviceOrientation));
 
-  WebRuntimeFeatures::enableSpeechInput(IsSpeechInputEnabled(command_line));
+  WebRuntimeFeatures::enableSpeechInput(is_speech_input_enabled_);
 
   WebRuntimeFeatures::enableFileSystem(
       !command_line.HasSwitch(switches::kDisableFileSystem));
@@ -974,12 +1000,12 @@ void RenderThread::ScheduleIdleHandler(double initial_delay_s) {
       this, &RenderThread::IdleHandler);
 }
 
-void RenderThread::OnExtensionMessageInvoke(const std::string& function_name,
+void RenderThread::OnExtensionMessageInvoke(const std::string& extension_id,
+                                            const std::string& function_name,
                                             const ListValue& args,
-                                            bool cross_incognito,
                                             const GURL& event_url) {
   RendererExtensionBindings::Invoke(
-      function_name, args, NULL, cross_incognito, event_url);
+      extension_id, function_name, args, NULL, event_url);
 
   // Reset the idle handler each time there's any activity like event or message
   // dispatch, for which Invoke is the chokepoint.
@@ -1073,8 +1099,20 @@ void RenderThread::OnGpuChannelEstablished(
 }
 
 void RenderThread::OnSetPhishingModel(IPC::PlatformFileForTransit model_file) {
-  // TODO(bryner): create a Scorer from the model file, and propagate it to the
-  // RenderViews so that they can create PhishingClassifiers.
+  safe_browsing::Scorer::CreateFromFile(
+      IPC::PlatformFileForTransitToPlatformFile(model_file),
+      GetFileThreadMessageLoopProxy(),
+      callback_factory_->NewCallback(&RenderThread::PhishingScorerCreated));
+}
+
+void RenderThread::PhishingScorerCreated(safe_browsing::Scorer* scorer) {
+  if (!scorer) {
+    DLOG(ERROR) << "Unable to create a PhishingScorer - corrupt model?";
+    return;
+  }
+  phishing_scorer_.reset(scorer);
+  RenderViewPhishingScorerSetter setter(phishing_scorer_.get());
+  RenderView::ForEach(&setter);
 }
 
 scoped_refptr<base::MessageLoopProxy>

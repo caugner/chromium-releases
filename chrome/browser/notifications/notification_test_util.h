@@ -6,17 +6,44 @@
 #define CHROME_BROWSER_NOTIFICATIONS_NOTIFICATION_TEST_UTIL_H_
 #pragma once
 
+#include <string>
+
 #include "chrome/browser/notifications/notification_object_proxy.h"
 #include "chrome/browser/notifications/balloon.h"
 #include "gfx/size.h"
 
-// Mock implementation of Javascript object proxy which logs events that
-// would have been fired on it. |Logger| class must static "log()" method.
-template<class Logger>
-class LoggingNotificationProxyBase : public NotificationObjectProxy {
+// NotificationDelegate which does nothing, useful for testing when
+// the notification events are not important.
+class MockNotificationDelegate : public NotificationDelegate {
  public:
-  LoggingNotificationProxyBase() :
-      NotificationObjectProxy(0, 0, 0, false) {}
+  explicit MockNotificationDelegate(const std::string& id) : id_(id) {}
+  virtual ~MockNotificationDelegate() {}
+
+  // NotificationDelegate interface.
+  virtual void Display() {}
+  virtual void Error() {}
+  virtual void Close(bool by_user) {}
+  virtual void Click() {}
+  virtual std::string id() const { return id_; }
+
+ private:
+  std::string id_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockNotificationDelegate);
+};
+
+// Mock implementation of Javascript object proxy which logs events that
+// would have been fired on it.  Useful for tests where the sequence of
+// notification events needs to be verified.
+//
+// |Logger| class provided in template must implement method
+// static void log(string);
+template<class Logger>
+class LoggingNotificationDelegate : public NotificationDelegate {
+ public:
+  explicit LoggingNotificationDelegate(std::string id)
+      : notification_id_(id) {
+  }
 
   // NotificationObjectProxy override
   virtual void Display() {
@@ -25,12 +52,22 @@ class LoggingNotificationProxyBase : public NotificationObjectProxy {
   virtual void Error() {
     Logger::log("notification error\n");
   }
+  virtual void Click() {
+    Logger::log("notification clicked\n");
+  }
   virtual void Close(bool by_user) {
     if (by_user)
       Logger::log("notification closed by user\n");
     else
       Logger::log("notification closed by script\n");
   }
+  virtual std::string id() const {
+    return notification_id_;
+  }
+ private:
+  std::string notification_id_;
+
+  DISALLOW_COPY_AND_ASSIGN(LoggingNotificationDelegate);
 };
 
 // Test version of a balloon view which doesn't do anything

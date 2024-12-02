@@ -16,8 +16,8 @@
 #include <string>
 
 #include "base/callback.h"
-#include "media/base/factory.h"
 #include "media/base/filters.h"
+#include "media/base/media_filter_collection.h"
 #include "media/base/video_frame.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -101,6 +101,7 @@ class MockDataSource : public DataSource {
   MOCK_METHOD0(OnAudioRendererDisabled, void());
 
   // DataSource implementation.
+  MOCK_METHOD1(IsUrlSupported, bool(const std::string& url));
   MOCK_METHOD2(Initialize, void(const std::string& url,
                                 FilterCallback* callback));
   MOCK_METHOD0(media_format, const MediaFormat&());
@@ -262,12 +263,11 @@ class MockAudioRenderer : public AudioRenderer {
 };
 
 // FilterFactory that returns canned instances of mock filters.  You can set
-// expectations on the filters and then pass the factory into a pipeline.
-class MockFilterFactory : public FilterFactory {
+// expectations on the filters and then pass the collection into a pipeline.
+class MockFilterCollection {
  public:
-  MockFilterFactory()
-      : creation_successful_(true),
-        data_source_(new MockDataSource()),
+  MockFilterCollection()
+      : data_source_(new MockDataSource()),
         demuxer_(new MockDemuxer()),
         video_decoder_(new MockVideoDecoder()),
         audio_decoder_(new MockAudioDecoder()),
@@ -275,12 +275,7 @@ class MockFilterFactory : public FilterFactory {
         audio_renderer_(new MockAudioRenderer()) {
   }
 
-  virtual ~MockFilterFactory() {}
-
-  // Controls whether the Create() method is successful or not.
-  void set_creation_successful(bool creation_successful) {
-    creation_successful_ = creation_successful;
-  }
+  virtual ~MockFilterCollection() {}
 
   // Mock accessors.
   MockDataSource* data_source() const { return data_source_; }
@@ -290,33 +285,25 @@ class MockFilterFactory : public FilterFactory {
   MockVideoRenderer* video_renderer() const { return video_renderer_; }
   MockAudioRenderer* audio_renderer() const { return audio_renderer_; }
 
- protected:
-  MediaFilter* Create(FilterType filter_type, const MediaFormat& media_format) {
-    if (!creation_successful_) {
-      return NULL;
-    }
+  MediaFilterCollection* filter_collection() const {
+    return filter_collection(true);
+  }
 
-    switch (filter_type) {
-      case FILTER_DATA_SOURCE:
-        return data_source_;
-      case FILTER_DEMUXER:
-        return demuxer_;
-      case FILTER_VIDEO_DECODER:
-        return video_decoder_;
-      case FILTER_AUDIO_DECODER:
-        return audio_decoder_;
-      case FILTER_VIDEO_RENDERER:
-        return video_renderer_;
-      case FILTER_AUDIO_RENDERER:
-        return audio_renderer_;
-      default:
-        NOTREACHED() << "Unknown filter type: " << filter_type;
+  MediaFilterCollection* filter_collection(bool include_data_source) const {
+    MediaFilterCollection* collection = new MediaFilterCollection();
+
+    if (include_data_source) {
+      collection->AddDataSource(data_source_);
     }
-    return NULL;
+    collection->AddDemuxer(demuxer_);
+    collection->AddVideoDecoder(video_decoder_);
+    collection->AddAudioDecoder(audio_decoder_);
+    collection->AddVideoRenderer(video_renderer_);
+    collection->AddAudioRenderer(audio_renderer_);
+    return collection;
   }
 
  private:
-  bool creation_successful_;
   scoped_refptr<MockDataSource> data_source_;
   scoped_refptr<MockDemuxer> demuxer_;
   scoped_refptr<MockVideoDecoder> video_decoder_;
@@ -324,7 +311,7 @@ class MockFilterFactory : public FilterFactory {
   scoped_refptr<MockVideoRenderer> video_renderer_;
   scoped_refptr<MockAudioRenderer> audio_renderer_;
 
-  DISALLOW_COPY_AND_ASSIGN(MockFilterFactory);
+  DISALLOW_COPY_AND_ASSIGN(MockFilterCollection);
 };
 
 // Helper gmock function that immediately executes and destroys the

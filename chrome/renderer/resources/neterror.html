@@ -5,29 +5,55 @@
 </title>
 <style>
 body {
-  background-color: #fff;
-  color: #000;
   font-family: Helvetica, Arial, sans-serif;
-  font-size: 83%;
-  line-height: 120%;
-  max-width: 35em;
-  padding: 0.5em 1em;
+  margin: 0;
+  background-color: #CCC;
 }
-li {
-  padding-bottom: .3em;
+html[high-color-depth] body {
+  background: -webkit-gradient(linear, 0% 0%, 0% 100%, from(#CCC), to(#AAA));
+  background-attachment: fixed;
+}
+#cell {
+  padding: 40px;
+}
+#box {
+  width: 80%;
+  min-width: 200px;
+  max-width: 750px;
+  background-color: white;
+  color: black;
+  font-size: 10pt;
+  line-height: 18px;
+  -webkit-box-shadow: 2px 5px 12px #555;
+  border-radius: 5px;
+  margin: auto;
+  padding: 20px;
 }
 ul {
-  margin: .5em 0 0;
+  margin: 0;
   padding-bottom: 0;
 }
+li {
+  padding-top: 2px;
+}
 h1 {
-  font-size: 1.5em;
-  margin-bottom: 1.5em;
+  font-size: 18pt;
+  line-height: 30px;
+  margin: 0;
+}
+h1 img {
+  float: right;
+  border: 0;
+  margin-top: -4px;
+  -webkit-margin-start: 20px;
+}
+html[dir=rtl] h1 img {
+  float: left;
 }
 h2 {
-  font-size: 1em;
+  font-size: 10pt;
   font-weight: bold;
-  margin: 0 0 .5em;
+  margin: 0;
   padding: 0;
 }
 a {
@@ -40,87 +66,82 @@ a:visited {
   color: #551a8b;
 }
 #errorSummary, #suggestions, #search {
-  margin-bottom: 2.5em;
+  -webkit-margin-start: 3px;
+  margin-top: 15px;
 }
-#zipInfo {
-  padding-left: 16px;
-  overflow: hidden;
-  -webkit-transition: height .1s ease-out;
+#errorDetails {
+  color: #777;
+  -webkit-margin-start: 3px;
+  margin-top: 30px;
 }
-#plus {
-  border: 0;
-  cursor: pointer;
-  vertical-align: baseline;
-}
-#details {
-  background-color: #e0e0e0;
-  max-width: 30em;
-  padding: 1em;
-}
-#errorDetails.hide-details #plus {
-  display: inline;
-}
-#errorDetails.show-details #plus {
-  display: none;
-}
-#errorDetails.hide-details #minus {
-  display: none;
-}
-#errorDetails.show-details #minus {
-  display: inline;
-}
-#errorDetails.hide-details #zipInfo {
-  height: 0 !important;
+.failedUrl {
+  word-wrap: break-word;
 }
 </style>
-<script>
-function toggleDiv() {
-  var elt = document.getElementById('errorDetails');
-  elt.className = (elt.className == 'show-details') ? 'hide-details'
-                                                    : 'show-details';
-
-  if (elt.className == 'show-details') {
-    zipInfo.style.height = zipInfo.offsetHeight + 'px';
-  } else {
-    zipInfo.style.height = 'auto';
-  }
-}
-</script>
 </head>
 
+<script>
+/**
+ * Sets the classes of elements to match their jscontent values.
+ * Elements without jscontent values are ignored.
+ *
+ * This allows styles to be applied to nested elements from
+ * within GRD files.  To work on these elements, this must be
+ * called after jscontent substitution.
+ */
+function setJsContentElementClasses() {
+  var elements = document.querySelectorAll('[jscontent]');
+  for (var i = 0; i < elements.length; ++i) {
+    elements[i].className = elements[i].getAttribute('jscontent');
+  }
+}
+
+document.addEventListener('DOMContentLoaded',
+                          setJsContentElementClasses,
+                          false);
+
+if (window.screen.colorDepth >= 24)
+  document.documentElement.setAttribute('high-color-depth', '');
+</script>
+
 <body id="t">
+<div id="cell">
+ <div id="box">
+  <h1>
+   <img src="../../app/theme/%DISTRIBUTION%/product_logo.png" />
+   <span i18n-content="heading"></span>
+  </h1>
 
-<h1 i18n-content="heading"></h1>
+  <div id="errorSummary" jsselect="summary">
+   <span jsvalues=".innerHTML:msg"></span>
+  </div>
 
-<div id="errorSummary" jsselect="summary">
- <p jsvalues=".innerHTML:msg"></p>
-</div>
+  <div id="suggestions" jsdisplay="suggestionsHeading">
+   <h2 i18n-content="suggestionsHeading"></h2>
+   <ul>
+    <li jsselect="suggestionsReload">
+      <span jsvalues=".innerHTML:msg"></span>
+    </li>
+    <li jsselect="suggestionsHomepage">
+      <span jscontent="suggestionsHomepageMsg"></span>
+      <a jscontent="hostName" jsvalues="href:homePage"></a>
+    </li>
+    <li jsselect="suggestionsFirewallConfig">
+      <span jsvalues=".innerHTML:msg"></span>
+    </li>
+    <li jsselect="suggestionsProxyConfig">
+      <span jsvalues=".innerHTML:msg"></span>
+    </li>
+    <li jsselect="suggestionsProxyDisable">
+      <span jsvalues=".innerHTML:msg"></span>
+    </li>
+    <li jsselect="suggestionsLearnMore">
+      <span jsvalues=".innerHTML:msg"></span>
+    </li>
+   </ul>
+  </div>
 
-<div id="suggestions">
- <h2 i18n-content="suggestionsHeading"></h2>
- <ul>
-  <li jsselect="suggestionsReload">
-    <span jsvalues=".innerHTML:msg"></span>
-  </li>
-  <li jsselect="suggestionsHomepage">
-    <span jscontent="suggestionsHomepageMsg"></span>
-    <a jscontent="hostName" jsvalues="href:homePage"></a>
-  </li>
-  <li jsselect="suggestionsLearnMore">
-    <span jsvalues=".innerHTML:msg"></span>
-  </li>
- </ul>
-</div>
-
-<div id="errorDetails" class="hide-details">
- <a href="javascript:void(0);" style="text-decoration:none" onclick="toggleDiv()">
-  <img id="plus" src="../../browser/resources/shared/images/plus.png">
-  <img id="minus" src="../../browser/resources/shared/images/minus.png">
-  <span id="errorExpander" i18n-content="detailsLink" style="text-decoration:underline"></span>
- </a>
- <div id="zipInfo">
-  <p i18n-content="detailsHeading"></p>
-  <div id="details" i18n-content="details"></div>
+  <div id="errorDetails" jsselect="details" jscontent="$this"></div>
  </div>
 </div>
 </body>

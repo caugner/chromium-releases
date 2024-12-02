@@ -8,11 +8,12 @@
 #include "app/gfx/gl/gl_implementation.h"
 #include "app/surface/io_surface_support_mac.h"
 #include "base/logging.h"
-#include "base/scoped_cftyperef.h"
+#include "base/mac/scoped_cftyperef.h"
 #include "gfx/rect.h"
 
 AcceleratedSurface::AcceleratedSurface()
-    : allocate_fbo_(false),
+    : io_surface_id_(0),
+      allocate_fbo_(false),
       texture_(0),
       fbo_(0),
       depth_stencil_renderbuffer_(0) {
@@ -110,7 +111,7 @@ static void AddBooleanValue(CFMutableDictionaryRef dictionary,
 static void AddIntegerValue(CFMutableDictionaryRef dictionary,
                             const CFStringRef key,
                             int32 value) {
-  scoped_cftyperef<CFNumberRef> number(
+  base::mac::ScopedCFTypeRef<CFNumberRef> number(
       CFNumberCreate(NULL, kCFNumberSInt32Type, &value));
   CFDictionaryAddValue(dictionary, key, number.get());
 }
@@ -123,6 +124,8 @@ void AcceleratedSurface::AllocateRenderBuffers(GLenum target,
     glBindTexture(target, texture_);
     glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     // Generate and bind the framebuffer object.
     glGenFramebuffersEXT(1, &fbo_);
     glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, fbo_);
@@ -219,11 +222,13 @@ uint64 AcceleratedSurface::SetSurfaceSize(const gfx::Size& size) {
     glBindTexture(target, texture_);
     glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   }
 
   // Allocate a new IOSurface, which is the GPU resource that can be
   // shared across processes.
-  scoped_cftyperef<CFMutableDictionaryRef> properties;
+  base::mac::ScopedCFTypeRef<CFMutableDictionaryRef> properties;
   properties.reset(CFDictionaryCreateMutable(kCFAllocatorDefault,
                                              0,
                                              &kCFTypeDictionaryKeyCallBacks,
@@ -266,7 +271,12 @@ uint64 AcceleratedSurface::SetSurfaceSize(const gfx::Size& size) {
   // make our IOSurfaces global and send back their identifiers. On
   // the browser process side the identifier is reconstituted into an
   // IOSurface for on-screen rendering.
-  return io_surface_support->IOSurfaceGetID(io_surface_);
+  io_surface_id_ = io_surface_support->IOSurfaceGetID(io_surface_);
+  return io_surface_id_;
+}
+
+uint64 AcceleratedSurface::GetSurfaceId() {
+  return io_surface_id_;
 }
 
 TransportDIB::Handle AcceleratedSurface::SetTransportDIBSize(

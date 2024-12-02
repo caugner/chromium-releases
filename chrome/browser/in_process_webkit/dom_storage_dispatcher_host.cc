@@ -5,7 +5,7 @@
 #include "chrome/browser/in_process_webkit/dom_storage_dispatcher_host.h"
 
 #include "base/nullable_string16.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/in_process_webkit/dom_storage_area.h"
 #include "chrome/browser/in_process_webkit/dom_storage_context.h"
 #include "chrome/browser/in_process_webkit/dom_storage_namespace.h"
@@ -153,7 +153,8 @@ void DOMStorageDispatcherHost::OnStorageAreaId(int64 namespace_id,
       resource_message_filter_->GetRequestContextForURL(GURL(origin));
   BrowserThread::PostTask(BrowserThread::WEBKIT, FROM_HERE, NewRunnableMethod(
       this, &DOMStorageDispatcherHost::OnStorageAreaIdWebKit, namespace_id,
-      origin, reply_msg, url_request_context->host_content_settings_map()));
+      origin, reply_msg,
+      make_scoped_refptr(url_request_context->host_content_settings_map())));
 }
 
 void DOMStorageDispatcherHost::OnStorageAreaIdWebKit(

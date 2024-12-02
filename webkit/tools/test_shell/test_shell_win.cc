@@ -11,6 +11,7 @@
 #include <shlwapi.h>
 
 #include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "base/file_util.h"
 #include "base/memory_debug.h"
 #include "base/message_loop.h"
@@ -19,7 +20,6 @@
 #include "base/stack_container.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
-#include "base/trace_event.h"
 #include "base/utf_string_conversions.h"
 #include "base/win_util.h"
 #include "breakpad/src/client/windows/handler/exception_handler.h"
@@ -426,10 +426,12 @@ void TestShell::TestFinished() {
     return;  // reached when running under test_shell_tests
 
   test_is_pending_ = false;
-  HWND hwnd = *(TestShell::windowList()->begin());
-  TestShell* shell =
-      static_cast<TestShell*>(win_util::GetWindowUserData(hwnd));
-  TestShell::Dump(shell);
+  if (dump_when_finished_) {
+    HWND hwnd = *(TestShell::windowList()->begin());
+    TestShell* shell =
+        static_cast<TestShell*>(win_util::GetWindowUserData(hwnd));
+    TestShell::Dump(shell);
+  }
 
   UINT_PTR timer_id = reinterpret_cast<UINT_PTR>(this);
   KillTimer(mainWnd(), timer_id);
@@ -804,10 +806,6 @@ base::StringPiece GetDataResource(int resource_id) {
 
 HCURSOR LoadCursor(int cursor_id) {
   return NULL;
-}
-
-void GetPlugins(bool refresh, std::vector<WebPluginInfo>* plugins) {
-  NPAPI::PluginList::Singleton()->GetPlugins(refresh, plugins);
 }
 
 bool EnsureFontLoaded(HFONT font) {

@@ -46,6 +46,8 @@ class ChromeFrameNPAPI
     PLUGIN_PROPERTY_READYSTATE,
     PLUGIN_PROPERTY_ONPRIVATEMESSAGE,
     PLUGIN_PROPERTY_USECHROMENETWORK,
+    PLUGIN_PROPERTY_ONCLOSE,
+    PLUGIN_PROPERTY_SESSIONID,
     PLUGIN_PROPERTY_COUNT  // must be last
   } PluginPropertyId;
 
@@ -127,7 +129,8 @@ END_MSG_MAP()
   static void InitializeIdentifiers();
 
   bool PreProcessContextMenu(HMENU menu);
-  bool HandleContextMenuCommand(UINT cmd, const IPC::ContextMenuParams& params);
+  bool HandleContextMenuCommand(UINT cmd,
+                                const IPC::MiniContextMenuParams& params);
  protected:
   // Handler for accelerator messages passed on from the hosted chrome
   // instance.
@@ -150,6 +153,7 @@ END_MSG_MAP()
   virtual void OnGetEnabledExtensionsComplete(
       void* user_data,
       const std::vector<FilePath>& extension_directories);
+  virtual void OnCloseTab(int tab_handle);
 
  private:
   void SubscribeToFocusEvents();
@@ -318,6 +322,7 @@ END_MSG_MAP()
   ScopedNpObject<NPObject> onerror_handler_;
   ScopedNpObject<NPObject> onmessage_handler_;
   ScopedNpObject<NPObject> onprivatemessage_handler_;
+  ScopedNpObject<NPObject> onclose_handler_;
 
   // As a workaround for a problem in Opera we cache the window object.
   // The problem stems from two things: window messages aren't always removed

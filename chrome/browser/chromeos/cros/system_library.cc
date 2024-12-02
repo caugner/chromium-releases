@@ -19,7 +19,7 @@ class SystemLibraryImpl : public SystemLibrary {
     // Get Statistics
     UpdateMachineStatistics();
     // Get Timezone
-    std::string id = "US/Pacific";
+    std::string id = "America/Los_Angeles";
     if (CrosLibrary::Get()->EnsureLoaded()) {
       std::string timezone_id = chromeos::GetTimezoneID();
       if (timezone_id.empty()) {
@@ -32,7 +32,7 @@ class SystemLibraryImpl : public SystemLibrary {
         icu::TimeZone::createTimeZone(icu::UnicodeString::fromUTF8(id));
     timezone_.reset(timezone);
     icu::TimeZone::setDefault(*timezone);
-    LOG(INFO) << "Timezone is " << id;
+    VLOG(1) << "Timezone is " << id;
   }
 
   void AddObserver(Observer* observer) {
@@ -54,7 +54,7 @@ class SystemLibraryImpl : public SystemLibrary {
       timezone->getID(unicode);
       std::string id;
       UTF16ToUTF8(unicode.getBuffer(), unicode.length(), &id);
-      LOG(INFO) << "Setting timezone to " << id;
+      VLOG(1) << "Setting timezone to " << id;
       chromeos::SetTimezoneID(id);
     }
     icu::TimeZone::setDefault(*timezone);

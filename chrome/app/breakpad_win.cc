@@ -16,12 +16,12 @@
 #include "base/environment.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
-#include "base/registry.h"
 #include "base/scoped_ptr.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/win_util.h"
+#include "base/win/registry.h"
 #include "breakpad/src/client/windows/handler/exception_handler.h"
 #include "chrome/app/hard_error_handler_win.h"
 #include "chrome/common/child_process_logging.h"
@@ -97,10 +97,16 @@ google_breakpad::CustomClientInfo* GetCustomInfo(const std::wstring& dll_path,
   std::wstring version, product;
   if (version_info.get()) {
     // Get the information from the file.
-    product = version_info->product_short_name();
     version = version_info->product_version();
     if (!version_info->is_official_build())
       version.append(L"-devel");
+
+    const CommandLine& command = *CommandLine::ForCurrentProcess();
+    if (command.HasSwitch(switches::kChromeFrame)) {
+      product = L"ChromeFrame";
+    } else {
+      product = version_info->product_short_name();
+    }
   } else {
     // No version info found. Make up the values.
      product = L"Chrome";
@@ -409,7 +415,7 @@ bool ShowRestartDialogIfCrashed(bool* exit_now) {
   // The CHROME_RESTART var contains the dialog strings separated by '|'.
   // See PrepareRestartOnCrashEnviroment() function for details.
   std::vector<std::wstring> dlg_strings;
-  SplitString(restart_data, L'|', &dlg_strings);
+  base::SplitString(restart_data, L'|', &dlg_strings);
   delete[] restart_data;
   if (dlg_strings.size() < 3)
     return true;
@@ -432,13 +438,15 @@ bool ShowRestartDialogIfCrashed(bool* exit_now) {
 static bool MetricsReportingControlledByPolicy(bool* result) {
   std::wstring key_name = UTF8ToWide(policy::key::kMetricsReportingEnabled);
   DWORD value;
-  RegKey hkcu_policy_key(HKEY_LOCAL_MACHINE, policy::kRegistrySubKey, KEY_READ);
+  base::win::RegKey hkcu_policy_key(HKEY_LOCAL_MACHINE,
+                                    policy::kRegistrySubKey, KEY_READ);
   if (hkcu_policy_key.ReadValueDW(key_name.c_str(), &value)) {
     *result = value != 0;
     return true;
   }
 
-  RegKey hklm_policy_key(HKEY_CURRENT_USER, policy::kRegistrySubKey, KEY_READ);
+  base::win::RegKey hklm_policy_key(HKEY_CURRENT_USER,
+                                    policy::kRegistrySubKey, KEY_READ);
   if (hklm_policy_key.ReadValueDW(key_name.c_str(), &value)) {
     *result = value != 0;
     return true;

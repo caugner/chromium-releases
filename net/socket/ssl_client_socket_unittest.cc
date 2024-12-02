@@ -66,24 +66,17 @@ TEST_F(SSLClientSocketTest, Connect) {
   EXPECT_EQ(net::OK, rv);
 
   scoped_ptr<net::SSLClientSocket> sock(
-      socket_factory_->CreateSSLClientSocket(transport,
-          test_server.host_port_pair().host(), kDefaultSSLConfig));
+      socket_factory_->CreateSSLClientSocket(
+          transport, test_server.host_port_pair(), kDefaultSSLConfig, NULL));
 
   EXPECT_FALSE(sock->IsConnected());
 
   rv = sock->Connect(&callback);
   EXPECT_TRUE(net::LogContainsBeginEvent(
       log.entries(), 5, net::NetLog::TYPE_SSL_CONNECT));
-  if (rv != net::OK) {
-    ASSERT_EQ(net::ERR_IO_PENDING, rv);
-    EXPECT_FALSE(sock->IsConnected());
-    EXPECT_FALSE(net::LogContainsEndEvent(
-        log.entries(), -1, net::NetLog::TYPE_SSL_CONNECT));
-
+  if (rv == net::ERR_IO_PENDING)
     rv = callback.WaitForResult();
-    EXPECT_EQ(net::OK, rv);
-  }
-
+  EXPECT_EQ(net::OK, rv);
   EXPECT_TRUE(sock->IsConnected());
   EXPECT_TRUE(LogContainsSSLConnectEndEvent(log.entries(), -1));
 
@@ -92,8 +85,9 @@ TEST_F(SSLClientSocketTest, Connect) {
 }
 
 TEST_F(SSLClientSocketTest, ConnectExpired) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTPS_EXPIRED_CERTIFICATE,
-                              FilePath());
+  net::TestServer::HTTPSOptions https_options(
+      net::TestServer::HTTPSOptions::CERT_EXPIRED);
+  net::TestServer test_server(https_options, FilePath());
   ASSERT_TRUE(test_server.Start());
 
   net::AddressList addr;
@@ -109,33 +103,30 @@ TEST_F(SSLClientSocketTest, ConnectExpired) {
   EXPECT_EQ(net::OK, rv);
 
   scoped_ptr<net::SSLClientSocket> sock(
-      socket_factory_->CreateSSLClientSocket(transport,
-          test_server.host_port_pair().host(), kDefaultSSLConfig));
+      socket_factory_->CreateSSLClientSocket(
+          transport, test_server.host_port_pair(), kDefaultSSLConfig, NULL));
 
   EXPECT_FALSE(sock->IsConnected());
 
   rv = sock->Connect(&callback);
   EXPECT_TRUE(net::LogContainsBeginEvent(
       log.entries(), 5, net::NetLog::TYPE_SSL_CONNECT));
-  if (rv != net::OK) {
-    ASSERT_EQ(net::ERR_IO_PENDING, rv);
-    EXPECT_FALSE(sock->IsConnected());
-    EXPECT_FALSE(net::LogContainsEndEvent(
-        log.entries(), -1, net::NetLog::TYPE_SSL_CONNECT));
-
+  if (rv == net::ERR_IO_PENDING)
     rv = callback.WaitForResult();
-    EXPECT_EQ(net::ERR_CERT_DATE_INVALID, rv);
-  }
 
-  // We cannot test sock->IsConnected(), as the NSS implementation disconnects
-  // the socket when it encounters an error, whereas other implementations
-  // leave it connected.
+  EXPECT_EQ(net::ERR_CERT_DATE_INVALID, rv);
+
+  // Rather than testing whether or not the underlying socket is connected,
+  // test that the handshake has finished. This is because it may be
+  // desirable to disconnect the socket before showing a user prompt, since
+  // the user may take indefinitely long to respond.
   EXPECT_TRUE(LogContainsSSLConnectEndEvent(log.entries(), -1));
 }
 
 TEST_F(SSLClientSocketTest, ConnectMismatched) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTPS_MISMATCHED_HOSTNAME,
-                              FilePath());
+  net::TestServer::HTTPSOptions https_options(
+      net::TestServer::HTTPSOptions::CERT_MISMATCHED_NAME);
+  net::TestServer test_server(https_options, FilePath());
   ASSERT_TRUE(test_server.Start());
 
   net::AddressList addr;
@@ -151,8 +142,8 @@ TEST_F(SSLClientSocketTest, ConnectMismatched) {
   EXPECT_EQ(net::OK, rv);
 
   scoped_ptr<net::SSLClientSocket> sock(
-      socket_factory_->CreateSSLClientSocket(transport,
-          test_server.host_port_pair().host(), kDefaultSSLConfig));
+      socket_factory_->CreateSSLClientSocket(
+          transport, test_server.host_port_pair(), kDefaultSSLConfig, NULL));
 
   EXPECT_FALSE(sock->IsConnected());
 
@@ -160,27 +151,25 @@ TEST_F(SSLClientSocketTest, ConnectMismatched) {
 
   EXPECT_TRUE(net::LogContainsBeginEvent(
       log.entries(), 5, net::NetLog::TYPE_SSL_CONNECT));
-  if (rv != net::ERR_CERT_COMMON_NAME_INVALID) {
-    ASSERT_EQ(net::ERR_IO_PENDING, rv);
-    EXPECT_FALSE(sock->IsConnected());
-    EXPECT_FALSE(net::LogContainsEndEvent(
-        log.entries(), -1, net::NetLog::TYPE_SSL_CONNECT));
-
+  if (rv == net::ERR_IO_PENDING)
     rv = callback.WaitForResult();
-    EXPECT_EQ(net::ERR_CERT_COMMON_NAME_INVALID, rv);
-  }
 
-  // We cannot test sock->IsConnected(), as the NSS implementation disconnects
-  // the socket when it encounters an error, whereas other implementations
-  // leave it connected.
+  EXPECT_EQ(net::ERR_CERT_COMMON_NAME_INVALID, rv);
+
+  // Rather than testing whether or not the underlying socket is connected,
+  // test that the handshake has finished. This is because it may be
+  // desirable to disconnect the socket before showing a user prompt, since
+  // the user may take indefinitely long to respond.
   EXPECT_TRUE(LogContainsSSLConnectEndEvent(log.entries(), -1));
 }
 
 // Attempt to connect to a page which requests a client certificate. It should
 // return an error code on connect.
+// Flaky: http://crbug.com/54445
 TEST_F(SSLClientSocketTest, FLAKY_ConnectClientAuthCertRequested) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTPS_CLIENT_AUTH,
-                              FilePath());
+  net::TestServer::HTTPSOptions https_options;
+  https_options.request_client_certificate = true;
+  net::TestServer test_server(https_options, FilePath());
   ASSERT_TRUE(test_server.Start());
 
   net::AddressList addr;
@@ -196,28 +185,19 @@ TEST_F(SSLClientSocketTest, FLAKY_ConnectClientAuthCertRequested) {
   EXPECT_EQ(net::OK, rv);
 
   scoped_ptr<net::SSLClientSocket> sock(
-      socket_factory_->CreateSSLClientSocket(transport,
-          test_server.host_port_pair().host(), kDefaultSSLConfig));
+      socket_factory_->CreateSSLClientSocket(
+          transport, test_server.host_port_pair(), kDefaultSSLConfig, NULL));
 
   EXPECT_FALSE(sock->IsConnected());
 
   rv = sock->Connect(&callback);
   EXPECT_TRUE(net::LogContainsBeginEvent(
       log.entries(), 5, net::NetLog::TYPE_SSL_CONNECT));
-  if (rv != net::ERR_SSL_CLIENT_AUTH_CERT_NEEDED) {
-    ASSERT_EQ(net::ERR_IO_PENDING, rv);
-    EXPECT_FALSE(sock->IsConnected());
-    EXPECT_FALSE(net::LogContainsEndEvent(
-        log.entries(), -1, net::NetLog::TYPE_SSL_CONNECT));
-
+  if (rv == net::ERR_IO_PENDING)
     rv = callback.WaitForResult();
-    EXPECT_EQ(net::ERR_SSL_CLIENT_AUTH_CERT_NEEDED, rv);
-  }
 
-  // We cannot test sock->IsConnected(), as the NSS implementation disconnects
-  // the socket when it encounters an error, whereas other implementations
-  // leave it connected.
-  EXPECT_TRUE(LogContainsSSLConnectEndEvent(log.entries(), -1));
+  EXPECT_EQ(net::ERR_SSL_CLIENT_AUTH_CERT_NEEDED, rv);
+  EXPECT_FALSE(sock->IsConnected());
 }
 
 // Connect to a server requesting optional client authentication. Send it a
@@ -225,8 +205,9 @@ TEST_F(SSLClientSocketTest, FLAKY_ConnectClientAuthCertRequested) {
 //
 // TODO(davidben): Also test providing an actual certificate.
 TEST_F(SSLClientSocketTest, ConnectClientAuthSendNullCert) {
-  net::TestServer test_server(net::TestServer::TYPE_HTTPS_CLIENT_AUTH,
-                              FilePath());
+  net::TestServer::HTTPSOptions https_options;
+  https_options.request_client_certificate = true;
+  net::TestServer test_server(https_options, FilePath());
   ASSERT_TRUE(test_server.Start());
 
   net::AddressList addr;
@@ -246,8 +227,8 @@ TEST_F(SSLClientSocketTest, ConnectClientAuthSendNullCert) {
   ssl_config.client_cert = NULL;
 
   scoped_ptr<net::SSLClientSocket> sock(
-      socket_factory_->CreateSSLClientSocket(transport,
-          test_server.host_port_pair().host(), ssl_config));
+      socket_factory_->CreateSSLClientSocket(
+          transport, test_server.host_port_pair(), ssl_config, NULL));
 
   EXPECT_FALSE(sock->IsConnected());
 
@@ -256,16 +237,10 @@ TEST_F(SSLClientSocketTest, ConnectClientAuthSendNullCert) {
   rv = sock->Connect(&callback);
   EXPECT_TRUE(net::LogContainsBeginEvent(
       log.entries(), 5, net::NetLog::TYPE_SSL_CONNECT));
-  if (rv != net::OK) {
-    ASSERT_EQ(net::ERR_IO_PENDING, rv);
-    EXPECT_FALSE(sock->IsConnected());
-    EXPECT_FALSE(net::LogContainsEndEvent(
-        log.entries(), -1, net::NetLog::TYPE_SSL_CONNECT));
-
+  if (rv == net::ERR_IO_PENDING)
     rv = callback.WaitForResult();
-    EXPECT_EQ(net::OK, rv);
-  }
 
+  EXPECT_EQ(net::OK, rv);
   EXPECT_TRUE(sock->IsConnected());
   EXPECT_TRUE(LogContainsSSLConnectEndEvent(log.entries(), -1));
 
@@ -295,22 +270,17 @@ TEST_F(SSLClientSocketTest, Read) {
 
   scoped_ptr<net::SSLClientSocket> sock(
       socket_factory_->CreateSSLClientSocket(
-          transport,
-          test_server.host_port_pair().host(),
-          kDefaultSSLConfig));
+          transport, test_server.host_port_pair(), kDefaultSSLConfig, NULL));
 
   rv = sock->Connect(&callback);
-  if (rv != net::OK) {
-    ASSERT_EQ(net::ERR_IO_PENDING, rv);
-
+  if (rv == net::ERR_IO_PENDING)
     rv = callback.WaitForResult();
-    EXPECT_EQ(net::OK, rv);
-  }
+  EXPECT_EQ(net::OK, rv);
   EXPECT_TRUE(sock->IsConnected());
 
   const char request_text[] = "GET / HTTP/1.0\r\n\r\n";
-  scoped_refptr<net::IOBuffer> request_buffer =
-      new net::IOBuffer(arraysize(request_text) - 1);
+  scoped_refptr<net::IOBuffer> request_buffer(
+      new net::IOBuffer(arraysize(request_text) - 1));
   memcpy(request_buffer->data(), request_text, arraysize(request_text) - 1);
 
   rv = sock->Write(request_buffer, arraysize(request_text) - 1, &callback);
@@ -320,7 +290,7 @@ TEST_F(SSLClientSocketTest, Read) {
     rv = callback.WaitForResult();
   EXPECT_EQ(static_cast<int>(arraysize(request_text) - 1), rv);
 
-  scoped_refptr<net::IOBuffer> buf = new net::IOBuffer(4096);
+  scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(4096));
   for (;;) {
     rv = sock->Read(buf, 4096, &callback);
     EXPECT_TRUE(rv >= 0 || rv == net::ERR_IO_PENDING);
@@ -355,21 +325,16 @@ TEST_F(SSLClientSocketTest, Read_FullDuplex) {
 
   scoped_ptr<net::SSLClientSocket> sock(
       socket_factory_->CreateSSLClientSocket(
-          transport,
-          test_server.host_port_pair().host(),
-          kDefaultSSLConfig));
+          transport, test_server.host_port_pair(), kDefaultSSLConfig, NULL));
 
   rv = sock->Connect(&callback);
-  if (rv != net::OK) {
-    ASSERT_EQ(net::ERR_IO_PENDING, rv);
-
+  if (rv == net::ERR_IO_PENDING)
     rv = callback.WaitForResult();
-    EXPECT_EQ(net::OK, rv);
-  }
+  EXPECT_EQ(net::OK, rv);
   EXPECT_TRUE(sock->IsConnected());
 
   // Issue a "hanging" Read first.
-  scoped_refptr<net::IOBuffer> buf = new net::IOBuffer(4096);
+  scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(4096));
   rv = sock->Read(buf, 4096, &callback);
   // We haven't written the request, so there should be no response yet.
   ASSERT_EQ(net::ERR_IO_PENDING, rv);
@@ -382,8 +347,8 @@ TEST_F(SSLClientSocketTest, Read_FullDuplex) {
   for (int i = 0; i < 3800; ++i)
     request_text.push_back('*');
   request_text.append("\r\n\r\n");
-  scoped_refptr<net::IOBuffer> request_buffer =
-      new net::StringIOBuffer(request_text);
+  scoped_refptr<net::IOBuffer> request_buffer(
+      new net::StringIOBuffer(request_text));
 
   rv = sock->Write(request_buffer, request_text.size(), &callback2);
   EXPECT_TRUE(rv >= 0 || rv == net::ERR_IO_PENDING);
@@ -413,20 +378,17 @@ TEST_F(SSLClientSocketTest, Read_SmallChunks) {
   EXPECT_EQ(net::OK, rv);
 
   scoped_ptr<net::SSLClientSocket> sock(
-      socket_factory_->CreateSSLClientSocket(transport,
-          test_server.host_port_pair().host(), kDefaultSSLConfig));
+      socket_factory_->CreateSSLClientSocket(
+          transport, test_server.host_port_pair(), kDefaultSSLConfig, NULL));
 
   rv = sock->Connect(&callback);
-  if (rv != net::OK) {
-    ASSERT_EQ(net::ERR_IO_PENDING, rv);
-
+  if (rv == net::ERR_IO_PENDING)
     rv = callback.WaitForResult();
-    EXPECT_EQ(net::OK, rv);
-  }
+  EXPECT_EQ(net::OK, rv);
 
   const char request_text[] = "GET / HTTP/1.0\r\n\r\n";
-  scoped_refptr<net::IOBuffer> request_buffer =
-      new net::IOBuffer(arraysize(request_text) - 1);
+  scoped_refptr<net::IOBuffer> request_buffer(
+      new net::IOBuffer(arraysize(request_text) - 1));
   memcpy(request_buffer->data(), request_text, arraysize(request_text) - 1);
 
   rv = sock->Write(request_buffer, arraysize(request_text) - 1, &callback);
@@ -436,7 +398,7 @@ TEST_F(SSLClientSocketTest, Read_SmallChunks) {
     rv = callback.WaitForResult();
   EXPECT_EQ(static_cast<int>(arraysize(request_text) - 1), rv);
 
-  scoped_refptr<net::IOBuffer> buf = new net::IOBuffer(1);
+  scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(1));
   for (;;) {
     rv = sock->Read(buf, 1, &callback);
     EXPECT_TRUE(rv >= 0 || rv == net::ERR_IO_PENDING);
@@ -466,20 +428,17 @@ TEST_F(SSLClientSocketTest, Read_Interrupted) {
   EXPECT_EQ(net::OK, rv);
 
   scoped_ptr<net::SSLClientSocket> sock(
-      socket_factory_->CreateSSLClientSocket(transport,
-          test_server.host_port_pair().host(), kDefaultSSLConfig));
+      socket_factory_->CreateSSLClientSocket(
+          transport, test_server.host_port_pair(), kDefaultSSLConfig, NULL));
 
   rv = sock->Connect(&callback);
-  if (rv != net::OK) {
-    ASSERT_EQ(net::ERR_IO_PENDING, rv);
-
+  if (rv == net::ERR_IO_PENDING)
     rv = callback.WaitForResult();
-    EXPECT_EQ(net::OK, rv);
-  }
+  EXPECT_EQ(net::OK, rv);
 
   const char request_text[] = "GET / HTTP/1.0\r\n\r\n";
-  scoped_refptr<net::IOBuffer> request_buffer =
-      new net::IOBuffer(arraysize(request_text) - 1);
+  scoped_refptr<net::IOBuffer> request_buffer(
+      new net::IOBuffer(arraysize(request_text) - 1));
   memcpy(request_buffer->data(), request_text, arraysize(request_text) - 1);
 
   rv = sock->Write(request_buffer, arraysize(request_text) - 1, &callback);
@@ -490,7 +449,7 @@ TEST_F(SSLClientSocketTest, Read_Interrupted) {
   EXPECT_EQ(static_cast<int>(arraysize(request_text) - 1), rv);
 
   // Do a partial read and then exit.  This test should not crash!
-  scoped_refptr<net::IOBuffer> buf = new net::IOBuffer(512);
+  scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(512));
   rv = sock->Read(buf, 512, &callback);
   EXPECT_TRUE(rv > 0 || rv == net::ERR_IO_PENDING);
 
@@ -540,8 +499,82 @@ TEST_F(SSLClientSocketTest, PrematureApplicationData) {
 
   scoped_ptr<net::SSLClientSocket> sock(
       socket_factory_->CreateSSLClientSocket(
-          transport, test_server.host_port_pair().host(), kDefaultSSLConfig));
+          transport, test_server.host_port_pair(), kDefaultSSLConfig, NULL));
 
   rv = sock->Connect(&callback);
   EXPECT_EQ(net::ERR_SSL_PROTOCOL_ERROR, rv);
+}
+
+#if defined(USE_OPENSSL)
+// TODO(rsleevi): Not implemented for Schannel or OpenSSL. Schannel is
+// controlled by the SSL client socket factory, rather than a define, so it
+// cannot be conditionally disabled here. As Schannel is only used when
+// performing client authentication, it will not be tested here.
+#define MAYBE_CipherSuiteDisables DISABLED_CipherSuiteDisables
+#else
+#define MAYBE_CipherSuiteDisables CipherSuiteDisables
+#endif
+TEST_F(SSLClientSocketTest, MAYBE_CipherSuiteDisables) {
+  // Rather than exhaustively disabling every RC4 ciphersuite defined at
+  // http://www.iana.org/assignments/tls-parameters/tls-parameters.xml,
+  // only disabling those cipher suites that the test server actually
+  // implements.
+  const uint16 kCiphersToDisable[] = {
+    0x0005,  // TLS_RSA_WITH_RC4_128_SHA
+  };
+
+  net::TestServer::HTTPSOptions https_options;
+  // Enable only RC4 on the test server.
+  https_options.bulk_ciphers =
+      net::TestServer::HTTPSOptions::BULK_CIPHER_RC4;
+  net::TestServer test_server(https_options, FilePath());
+  ASSERT_TRUE(test_server.Start());
+
+  net::AddressList addr;
+  ASSERT_TRUE(test_server.GetAddressList(&addr));
+
+  TestCompletionCallback callback;
+  net::CapturingNetLog log(net::CapturingNetLog::kUnbounded);
+  net::ClientSocket* transport = new net::TCPClientSocket(
+      addr, &log, net::NetLog::Source());
+  int rv = transport->Connect(&callback);
+  if (rv == net::ERR_IO_PENDING)
+    rv = callback.WaitForResult();
+  EXPECT_EQ(net::OK, rv);
+
+  net::SSLConfig ssl_config;
+  for (size_t i = 0; i < arraysize(kCiphersToDisable); ++i)
+    ssl_config.disabled_cipher_suites.push_back(kCiphersToDisable[i]);
+
+  scoped_ptr<net::SSLClientSocket> sock(
+      socket_factory_->CreateSSLClientSocket(
+          transport, test_server.host_port_pair(), ssl_config, NULL));
+
+  EXPECT_FALSE(sock->IsConnected());
+
+  rv = sock->Connect(&callback);
+  EXPECT_TRUE(net::LogContainsBeginEvent(
+      log.entries(), 5, net::NetLog::TYPE_SSL_CONNECT));
+
+  // NSS has special handling that maps a handshake_failure alert received
+  // immediately after a client_hello to be a mismatched cipher suite error,
+  // leading to ERR_SSL_VERSION_OR_CIPHER_MISMATCH. When using OpenSSL or
+  // Secure Transport (OS X), the handshake_failure is bubbled up without any
+  // interpretation, leading to ERR_SSL_PROTOCOL_ERROR. Either way, a failure
+  // indicates that no cipher suite was negotiated with the test server.
+  if (rv == net::ERR_IO_PENDING)
+    rv = callback.WaitForResult();
+  EXPECT_TRUE(rv == net::ERR_SSL_VERSION_OR_CIPHER_MISMATCH ||
+              rv == net::ERR_SSL_PROTOCOL_ERROR);
+  // The exact ordering differs between SSLClientSocketNSS (which issues an
+  // extra read) and SSLClientSocketMac (which does not). Just make sure the
+  // error appears somewhere in the log.
+  net::ExpectLogContainsSomewhere(log.entries(), 0,
+                                  net::NetLog::TYPE_SSL_HANDSHAKE_ERROR,
+                                  net::NetLog::PHASE_NONE);
+
+  // We cannot test sock->IsConnected(), as the NSS implementation disconnects
+  // the socket when it encounters an error, whereas other implementations
+  // leave it connected.
+  EXPECT_TRUE(LogContainsSSLConnectEndEvent(log.entries(), -1));
 }

@@ -26,13 +26,13 @@
 #include "views/widget/root_view.h"
 #include "views/widget/tooltip_manager_gtk.h"
 #include "views/widget/widget_delegate.h"
+#include "views/widget/widget_utils.h"
 #include "views/window/window_gtk.h"
 
 namespace {
 
 // g_object data keys to associate a WidgetGtk object to a GtkWidget.
 const char* kWidgetKey = "__VIEWS_WIDGET__";
-const wchar_t* kWidgetWideKey = L"__VIEWS_WIDGET__";
 // A g_object data key to associate a CompositePainter object to a GtkWidget.
 const char* kCompositePainterKey = "__VIEWS_COMPOSITE_PAINTER__";
 // A g_object data key to associate the flag whether or not the widget
@@ -803,17 +803,16 @@ const Window* WidgetGtk::GetWindow() const {
   return GetWindowImpl(widget_);
 }
 
-void WidgetGtk::SetNativeWindowProperty(const std::wstring& name,
-                                        void* value) {
-  g_object_set_data(G_OBJECT(widget_), WideToUTF8(name).c_str(), value);
+void WidgetGtk::SetNativeWindowProperty(const char* name, void* value) {
+  g_object_set_data(G_OBJECT(widget_), name, value);
 }
 
-void* WidgetGtk::GetNativeWindowProperty(const std::wstring& name) {
-  return g_object_get_data(G_OBJECT(widget_), WideToUTF8(name).c_str());
+void* WidgetGtk::GetNativeWindowProperty(const char* name) {
+  return g_object_get_data(G_OBJECT(widget_), name);
 }
 
 ThemeProvider* WidgetGtk::GetThemeProvider() const {
-  return default_theme_provider_.get();
+  return GetWidgetThemeProvider(this);
 }
 
 ThemeProvider* WidgetGtk::GetDefaultThemeProvider() const {
@@ -908,9 +907,6 @@ bool WidgetGtk::HandleKeyboardEvent(GdkEventKey* event) {
   return handled;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// WidgetGtk, protected:
-
 // static
 int WidgetGtk::GetFlagsForEventButton(const GdkEventButton& event) {
   int flags = Event::GetFlagsFromGdkState(event.state);
@@ -932,6 +928,9 @@ int WidgetGtk::GetFlagsForEventButton(const GdkEventButton& event) {
     flags |= MouseEvent::EF_IS_DOUBLE_CLICK;
   return flags;
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// WidgetGtk, protected:
 
 void WidgetGtk::OnSizeRequest(GtkWidget* widget, GtkRequisition* requisition) {
   // Do only return the preferred size for child windows. GtkWindow interprets
@@ -962,7 +961,8 @@ gboolean WidgetGtk::OnPaint(GtkWidget* widget, GdkEventExpose* event) {
   if (transparent_ && type_ == TYPE_CHILD) {
     // Clear the background before drawing any view and native components.
     DrawTransparentBackground(widget, event);
-    if (!CompositePainter::IsComposited(widget_)) {
+    if (!CompositePainter::IsComposited(widget_) &&
+        gdk_screen_is_composited(gdk_screen_get_default())) {
       // Let the parent draw the content only after something is drawn on
       // the widget.
       CompositePainter::SetComposited(widget_);
@@ -1489,7 +1489,7 @@ void WidgetGtk::CreateGtkWidget(GtkWidget* parent, const gfx::Rect& bounds) {
   }
   // Setting the WidgetKey property to widget_, which is used by
   // GetWidgetFromNativeWindow.
-  SetNativeWindowProperty(kWidgetWideKey, this);
+  SetNativeWindowProperty(kWidgetKey, this);
 }
 
 void WidgetGtk::ConfigureWidgetForTransparentBackground(GtkWidget* parent) {

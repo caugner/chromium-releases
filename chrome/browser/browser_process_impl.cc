@@ -30,6 +30,7 @@
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/icon_manager.h"
 #include "chrome/browser/in_process_webkit/dom_storage_context.h"
+#include "chrome/browser/in_process_webkit/indexed_db_context.h"
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/metrics/metrics_service.h"
@@ -41,6 +42,7 @@
 #include "chrome/browser/plugin_updater.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/print_job_manager.h"
+#include "chrome/browser/printing/print_preview_tab_controller.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
@@ -434,6 +436,14 @@ printing::PrintJobManager* BrowserProcessImpl::print_job_manager() {
   return print_job_manager_.get();
 }
 
+printing::PrintPreviewTabController*
+    BrowserProcessImpl::print_preview_tab_controller() {
+  DCHECK(CalledOnValidThread());
+  if (!print_preview_tab_controller_.get())
+    CreatePrintPreviewTabController();
+  return print_preview_tab_controller_.get();
+}
+
 GoogleURLTracker* BrowserProcessImpl::google_url_tracker() {
   DCHECK(CalledOnValidThread());
   if (!google_url_tracker_.get())
@@ -496,6 +506,7 @@ void BrowserProcessImpl::ClearLocalState(const FilePath& profile_path) {
   SQLitePersistentCookieStore::ClearLocalState(profile_path.Append(
       chrome::kCookieFilename));
   DOMStorageContext::ClearLocalState(profile_path, chrome::kExtensionScheme);
+  IndexedDBContext::ClearLocalState(profile_path, chrome::kExtensionScheme);
   webkit_database::DatabaseTracker::ClearLocalState(profile_path);
   ChromeAppCacheService::ClearLocalState(profile_path);
 }
@@ -555,7 +566,7 @@ void BrowserProcessImpl::CreateIOThread() {
   background_x11_thread_.swap(background_x11_thread);
 #endif
 
-  scoped_ptr<IOThread> thread(new IOThread);
+  scoped_ptr<IOThread> thread(new IOThread(local_state()));
   base::Thread::Options options;
   options.message_loop_type = MessageLoop::TYPE_IO;
   if (!thread->StartWithOptions(options))
@@ -580,12 +591,6 @@ void BrowserProcessImpl::CreateFileThread() {
   if (!thread->StartWithOptions(options))
     return;
   file_thread_.swap(thread);
-
-  // ExtensionResource is in chrome/common, so it cannot depend on
-  // chrome/browser, which means it cannot lookup what the File thread is.
-  // We therefore store the thread ID from here so we can validate the proper
-  // thread usage in the ExtensionResource class.
-  ExtensionResource::set_file_thread_id(file_thread_->thread_id());
 }
 
 void BrowserProcessImpl::CreateDBThread() {
@@ -615,7 +620,7 @@ void BrowserProcessImpl::CreateCacheThread() {
   created_cache_thread_ = true;
 
   scoped_ptr<base::Thread> thread(
-      new BrowserProcessSubThread(BrowserThread::CACHE));
+      new BrowserThread(BrowserThread::CACHE));
   base::Thread::Options options;
   options.message_loop_type = MessageLoop::TYPE_IO;
   if (!thread->StartWithOptions(options))
@@ -703,6 +708,11 @@ void BrowserProcessImpl::CreateNotificationUIManager() {
 void BrowserProcessImpl::CreateTabCloseableStateWatcher() {
   DCHECK(tab_closeable_state_watcher_.get() == NULL);
   tab_closeable_state_watcher_.reset(TabCloseableStateWatcher::Create());
+}
+
+void BrowserProcessImpl::CreatePrintPreviewTabController() {
+  DCHECK(print_preview_tab_controller_.get() == NULL);
+  print_preview_tab_controller_ = new printing::PrintPreviewTabController();
 }
 
 // The BrowserProcess object must outlive the file thread so we use traits

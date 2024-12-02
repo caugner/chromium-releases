@@ -80,12 +80,12 @@ GL_APICALL void         GL_APIENTRY glCopyTexSubImage2D (GLenumTextureTarget tar
 GL_APICALL GLuint       GL_APIENTRY glCreateProgram (void);
 GL_APICALL GLuint       GL_APIENTRY glCreateShader (GLenumShaderType type);
 GL_APICALL void         GL_APIENTRY glCullFace (GLenumFaceType mode);
-GL_APICALL void         GL_APIENTRY glDeleteBuffers (GLsizei n, const GLuint* buffers);
-GL_APICALL void         GL_APIENTRY glDeleteFramebuffers (GLsizei n, const GLuint* framebuffers);
+GL_APICALL void         GL_APIENTRY glDeleteBuffers (GLsizeiNotNegative n, const GLuint* buffers);
+GL_APICALL void         GL_APIENTRY glDeleteFramebuffers (GLsizeiNotNegative n, const GLuint* framebuffers);
 GL_APICALL void         GL_APIENTRY glDeleteProgram (GLidProgram program);
-GL_APICALL void         GL_APIENTRY glDeleteRenderbuffers (GLsizei n, const GLuint* renderbuffers);
+GL_APICALL void         GL_APIENTRY glDeleteRenderbuffers (GLsizeiNotNegative n, const GLuint* renderbuffers);
 GL_APICALL void         GL_APIENTRY glDeleteShader (GLidShader shader);
-GL_APICALL void         GL_APIENTRY glDeleteTextures (GLsizei n, const GLuint* textures);
+GL_APICALL void         GL_APIENTRY glDeleteTextures (GLsizeiNotNegative n, const GLuint* textures);
 GL_APICALL void         GL_APIENTRY glDepthFunc (GLenumCmpFunction func);
 GL_APICALL void         GL_APIENTRY glDepthMask (GLboolean flag);
 GL_APICALL void         GL_APIENTRY glDepthRangef (GLclampf zNear, GLclampf zFar);
@@ -101,14 +101,14 @@ GL_APICALL void         GL_APIENTRY glFlush (void);
 GL_APICALL void         GL_APIENTRY glFramebufferRenderbuffer (GLenumFrameBufferTarget target, GLenumAttachment attachment, GLenumRenderBufferTarget renderbuffertarget, GLidRenderbuffer renderbuffer);
 GL_APICALL void         GL_APIENTRY glFramebufferTexture2D (GLenumFrameBufferTarget target, GLenumAttachment attachment, GLenumTextureTarget textarget, GLidTexture texture, GLint level);
 GL_APICALL void         GL_APIENTRY glFrontFace (GLenumFaceMode mode);
-GL_APICALL void         GL_APIENTRY glGenBuffers (GLsizei n, GLuint* buffers);
+GL_APICALL void         GL_APIENTRY glGenBuffers (GLsizeiNotNegative n, GLuint* buffers);
 GL_APICALL void         GL_APIENTRY glGenerateMipmap (GLenumTextureBindTarget target);
-GL_APICALL void         GL_APIENTRY glGenFramebuffers (GLsizei n, GLuint* framebuffers);
-GL_APICALL void         GL_APIENTRY glGenRenderbuffers (GLsizei n, GLuint* renderbuffers);
-GL_APICALL void         GL_APIENTRY glGenTextures (GLsizei n, GLuint* textures);
-GL_APICALL void         GL_APIENTRY glGetActiveAttrib (GLidProgram program, GLuint index, GLsizei bufsize, GLsizei* length, GLint* size, GLenum* type, char* name);
-GL_APICALL void         GL_APIENTRY glGetActiveUniform (GLidProgram program, GLuint index, GLsizei bufsize, GLsizei* length, GLint* size, GLenum* type, char* name);
-GL_APICALL void         GL_APIENTRY glGetAttachedShaders (GLidProgram program, GLsizei maxcount, GLsizei* count, GLuint* shaders);
+GL_APICALL void         GL_APIENTRY glGenFramebuffers (GLsizeiNotNegative n, GLuint* framebuffers);
+GL_APICALL void         GL_APIENTRY glGenRenderbuffers (GLsizeiNotNegative n, GLuint* renderbuffers);
+GL_APICALL void         GL_APIENTRY glGenTextures (GLsizeiNotNegative n, GLuint* textures);
+GL_APICALL void         GL_APIENTRY glGetActiveAttrib (GLidProgram program, GLuint index, GLsizeiNotNegative bufsize, GLsizei* length, GLint* size, GLenum* type, char* name);
+GL_APICALL void         GL_APIENTRY glGetActiveUniform (GLidProgram program, GLuint index, GLsizeiNotNegative bufsize, GLsizei* length, GLint* size, GLenum* type, char* name);
+GL_APICALL void         GL_APIENTRY glGetAttachedShaders (GLidProgram program, GLsizeiNotNegative maxcount, GLsizei* count, GLuint* shaders);
 GL_APICALL GLint        GL_APIENTRY glGetAttribLocation (GLidProgram program, const char* name);
 GL_APICALL void         GL_APIENTRY glGetBooleanv (GLenumGLState pname, GLboolean* params);
 GL_APICALL void         GL_APIENTRY glGetBufferParameteriv (GLenumBufferTarget target, GLenumBufferParameter pname, GLint* params);
@@ -117,12 +117,12 @@ GL_APICALL void         GL_APIENTRY glGetFloatv (GLenumGLState pname, GLfloat* p
 GL_APICALL void         GL_APIENTRY glGetFramebufferAttachmentParameteriv (GLenumFrameBufferTarget target, GLenumAttachment attachment, GLenumFrameBufferParameter pname, GLint* params);
 GL_APICALL void         GL_APIENTRY glGetIntegerv (GLenumGLState pname, GLint* params);
 GL_APICALL void         GL_APIENTRY glGetProgramiv (GLidProgram program, GLenumProgramParameter pname, GLint* params);
-GL_APICALL void         GL_APIENTRY glGetProgramInfoLog (GLidProgram program, GLsizei bufsize, GLsizei* length, char* infolog);
+GL_APICALL void         GL_APIENTRY glGetProgramInfoLog (GLidProgram program, GLsizeiNotNegative bufsize, GLsizei* length, char* infolog);
 GL_APICALL void         GL_APIENTRY glGetRenderbufferParameteriv (GLenumRenderBufferTarget target, GLenumRenderBufferParameter pname, GLint* params);
 GL_APICALL void         GL_APIENTRY glGetShaderiv (GLidShader shader, GLenumShaderParameter pname, GLint* params);
-GL_APICALL void         GL_APIENTRY glGetShaderInfoLog (GLidShader shader, GLsizei bufsize, GLsizei* length, char* infolog);
+GL_APICALL void         GL_APIENTRY glGetShaderInfoLog (GLidShader shader, GLsizeiNotNegative bufsize, GLsizei* length, char* infolog);
 GL_APICALL void         GL_APIENTRY glGetShaderPrecisionFormat (GLenumShaderType shadertype, GLenumShaderPrecision precisiontype, GLint* range, GLint* precision);
-GL_APICALL void         GL_APIENTRY glGetShaderSource (GLidShader shader, GLsizei bufsize, GLsizei* length, char* source);
+GL_APICALL void         GL_APIENTRY glGetShaderSource (GLidShader shader, GLsizeiNotNegative bufsize, GLsizei* length, char* source);
 GL_APICALL const GLubyte* GL_APIENTRY glGetString (GLenumStringType name);
 GL_APICALL void         GL_APIENTRY glGetTexParameterfv (GLenumTextureTarget target, GLenumTextureParameter pname, GLfloat* params);
 GL_APICALL void         GL_APIENTRY glGetTexParameteriv (GLenumTextureTarget target, GLenumTextureParameter pname, GLint* params);
@@ -149,8 +149,8 @@ GL_APICALL void         GL_APIENTRY glReleaseShaderCompiler (void);
 GL_APICALL void         GL_APIENTRY glRenderbufferStorage (GLenumRenderBufferTarget target, GLenumRenderBufferFormat internalformat, GLsizei width, GLsizei height);
 GL_APICALL void         GL_APIENTRY glSampleCoverage (GLclampf value, GLboolean invert);
 GL_APICALL void         GL_APIENTRY glScissor (GLint x, GLint y, GLsizei width, GLsizei height);
-GL_APICALL void         GL_APIENTRY glShaderBinary (GLsizei n, const GLuint* shaders, GLenum binaryformat, const void* binary, GLsizei length);
-GL_APICALL void         GL_APIENTRY glShaderSource (GLidShader shader, GLsizei count, const char** str, const GLint* length);
+GL_APICALL void         GL_APIENTRY glShaderBinary (GLsizeiNotNegative n, const GLuint* shaders, GLenum binaryformat, const void* binary, GLsizeiNotNegative length);
+GL_APICALL void         GL_APIENTRY glShaderSource (GLidShader shader, GLsizeiNotNegative count, const char** str, const GLint* length);
 GL_APICALL void         GL_APIENTRY glStencilFunc (GLenumCmpFunction func, GLint ref, GLuint mask);
 GL_APICALL void         GL_APIENTRY glStencilFuncSeparate (GLenumFaceType face, GLenumCmpFunction func, GLint ref, GLuint mask);
 GL_APICALL void         GL_APIENTRY glStencilMask (GLuint mask);
@@ -164,24 +164,24 @@ GL_APICALL void         GL_APIENTRY glTexParameteri (GLenumTextureBindTarget tar
 GL_APICALL void         GL_APIENTRY glTexParameteriv (GLenumTextureBindTarget target, GLenumTextureParameter pname, const GLint* params);
 GL_APICALL void         GL_APIENTRY glTexSubImage2D (GLenumTextureTarget target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenumTextureFormat format, GLenumPixelType type, const void* pixels);
 GL_APICALL void         GL_APIENTRY glUniform1f (GLint location, GLfloat x);
-GL_APICALL void         GL_APIENTRY glUniform1fv (GLint location, GLsizei count, const GLfloat* v);
+GL_APICALL void         GL_APIENTRY glUniform1fv (GLint location, GLsizeiNotNegative count, const GLfloat* v);
 GL_APICALL void         GL_APIENTRY glUniform1i (GLint location, GLint x);
-GL_APICALL void         GL_APIENTRY glUniform1iv (GLint location, GLsizei count, const GLint* v);
+GL_APICALL void         GL_APIENTRY glUniform1iv (GLint location, GLsizeiNotNegative count, const GLint* v);
 GL_APICALL void         GL_APIENTRY glUniform2f (GLint location, GLfloat x, GLfloat y);
-GL_APICALL void         GL_APIENTRY glUniform2fv (GLint location, GLsizei count, const GLfloat* v);
+GL_APICALL void         GL_APIENTRY glUniform2fv (GLint location, GLsizeiNotNegative count, const GLfloat* v);
 GL_APICALL void         GL_APIENTRY glUniform2i (GLint location, GLint x, GLint y);
-GL_APICALL void         GL_APIENTRY glUniform2iv (GLint location, GLsizei count, const GLint* v);
+GL_APICALL void         GL_APIENTRY glUniform2iv (GLint location, GLsizeiNotNegative count, const GLint* v);
 GL_APICALL void         GL_APIENTRY glUniform3f (GLint location, GLfloat x, GLfloat y, GLfloat z);
-GL_APICALL void         GL_APIENTRY glUniform3fv (GLint location, GLsizei count, const GLfloat* v);
+GL_APICALL void         GL_APIENTRY glUniform3fv (GLint location, GLsizeiNotNegative count, const GLfloat* v);
 GL_APICALL void         GL_APIENTRY glUniform3i (GLint location, GLint x, GLint y, GLint z);
-GL_APICALL void         GL_APIENTRY glUniform3iv (GLint location, GLsizei count, const GLint* v);
+GL_APICALL void         GL_APIENTRY glUniform3iv (GLint location, GLsizeiNotNegative count, const GLint* v);
 GL_APICALL void         GL_APIENTRY glUniform4f (GLint location, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
-GL_APICALL void         GL_APIENTRY glUniform4fv (GLint location, GLsizei count, const GLfloat* v);
+GL_APICALL void         GL_APIENTRY glUniform4fv (GLint location, GLsizeiNotNegative count, const GLfloat* v);
 GL_APICALL void         GL_APIENTRY glUniform4i (GLint location, GLint x, GLint y, GLint z, GLint w);
-GL_APICALL void         GL_APIENTRY glUniform4iv (GLint location, GLsizei count, const GLint* v);
-GL_APICALL void         GL_APIENTRY glUniformMatrix2fv (GLint location, GLsizei count, GLbooleanFalseOnly transpose, const GLfloat* value);
-GL_APICALL void         GL_APIENTRY glUniformMatrix3fv (GLint location, GLsizei count, GLbooleanFalseOnly transpose, const GLfloat* value);
-GL_APICALL void         GL_APIENTRY glUniformMatrix4fv (GLint location, GLsizei count, GLbooleanFalseOnly transpose, const GLfloat* value);
+GL_APICALL void         GL_APIENTRY glUniform4iv (GLint location, GLsizeiNotNegative count, const GLint* v);
+GL_APICALL void         GL_APIENTRY glUniformMatrix2fv (GLint location, GLsizeiNotNegative count, GLbooleanFalseOnly transpose, const GLfloat* value);
+GL_APICALL void         GL_APIENTRY glUniformMatrix3fv (GLint location, GLsizeiNotNegative count, GLbooleanFalseOnly transpose, const GLfloat* value);
+GL_APICALL void         GL_APIENTRY glUniformMatrix4fv (GLint location, GLsizeiNotNegative count, GLbooleanFalseOnly transpose, const GLfloat* value);
 GL_APICALL void         GL_APIENTRY glUseProgram (GLidZeroProgram program);
 GL_APICALL void         GL_APIENTRY glValidateProgram (GLidProgram program);
 GL_APICALL void         GL_APIENTRY glVertexAttrib1f (GLuint indx, GLfloat x);
@@ -198,16 +198,17 @@ GL_APICALL void         GL_APIENTRY glBlitFramebufferEXT (GLint srcX0, GLint src
 GL_APICALL void         GL_APIENTRY glRenderbufferStorageMultisampleEXT (GLenumRenderBufferTarget target, GLsizei samples, GLenumRenderBufferFormat internalformat, GLsizei width, GLsizei height);
 // Non-GL commands.
 GL_APICALL void         GL_APIENTRY glSwapBuffers (void);
-GL_APICALL GLuint       GL_APIENTRY glGetMaxValueInBuffer (GLidBuffer buffer_id, GLsizei count, GLenumGetMaxIndexType type, GLuint offset);
-GL_APICALL void         GL_APIENTRY glGenSharedIds (GLuint namespace_id, GLuint id_offset, GLsizei n, GLuint* ids);
-GL_APICALL void         GL_APIENTRY glDeleteSharedIds (GLuint namespace_id, GLsizei n, const GLuint* ids);
-GL_APICALL void         GL_APIENTRY glRegisterSharedIds (GLuint namespace_id, GLsizei n, const GLuint* ids);
-GL_APICALL GLboolean    GL_APIENTRY glCommandBufferEnable (const char* feature);
-GL_APICALL void*        GL_APIENTRY glMapBufferSubData (GLuint target, GLintptr offset, GLsizeiptr size, GLenum access);
-GL_APICALL void         GL_APIENTRY glUnmapBufferSubData (const void* mem);
-GL_APICALL void*        GL_APIENTRY glMapTexSubImage2D (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, GLenum access);
-GL_APICALL void         GL_APIENTRY glUnmapTexSubImage2D (const void* mem);
-GL_APICALL void         GL_APIENTRY glCopyTextureToParentTexture (GLidBindTexture client_child_id, GLidBindTexture client_parent_id);
+GL_APICALL GLuint       GL_APIENTRY glGetMaxValueInBufferCHROMIUM (GLidBuffer buffer_id, GLsizei count, GLenumGetMaxIndexType type, GLuint offset);
+GL_APICALL void         GL_APIENTRY glGenSharedIdsCHROMIUM (GLuint namespace_id, GLuint id_offset, GLsizeiNotNegative n, GLuint* ids);
+GL_APICALL void         GL_APIENTRY glDeleteSharedIdsCHROMIUM (GLuint namespace_id, GLsizeiNotNegative n, const GLuint* ids);
+GL_APICALL void         GL_APIENTRY glRegisterSharedIdsCHROMIUM (GLuint namespace_id, GLsizeiNotNegative n, const GLuint* ids);
+GL_APICALL GLboolean    GL_APIENTRY glCommandBufferEnableCHROMIUM (const char* feature);
+GL_APICALL void*        GL_APIENTRY glMapBufferSubDataCHROMIUM (GLuint target, GLintptr offset, GLsizeiptr size, GLenum access);
+GL_APICALL void         GL_APIENTRY glUnmapBufferSubDataCHROMIUM (const void* mem);
+GL_APICALL void*        GL_APIENTRY glMapTexSubImage2DCHROMIUM (GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, GLenum access);
+GL_APICALL void         GL_APIENTRY glUnmapTexSubImage2DCHROMIUM (const void* mem);
+GL_APICALL void         GL_APIENTRY glCopyTextureToParentTextureCHROMIUM (GLidBindTexture client_child_id, GLidBindTexture client_parent_id);
+GL_APICALL void         GL_APIENTRY glResizeCHROMIUM (GLuint width, GLuint height);
 """
 
 # This is the list of all commmands that will be generated and their Id.
@@ -398,16 +399,17 @@ _CMD_ID_TABLE = {
   'ShaderSourceBucket':                                        435,
   'ShaderBinary':                                              436,
   'ReleaseShaderCompiler':                                     437,
-  'GetMaxValueInBuffer':                                       438,
-  'GenSharedIds':                                              439,
-  'DeleteSharedIds':                                           440,
-  'RegisterSharedIds':                                         441,
-  'CommandBufferEnable':                                       442,
+  'GetMaxValueInBufferCHROMIUM':                               438,
+  'GenSharedIdsCHROMIUM':                                      439,
+  'DeleteSharedIdsCHROMIUM':                                   440,
+  'RegisterSharedIdsCHROMIUM':                                 441,
+  'CommandBufferEnableCHROMIUM':                               442,
   'CompressedTexImage2DBucket':                                443,
   'CompressedTexSubImage2DBucket':                             444,
   'RenderbufferStorageMultisampleEXT':                         445,
   'BlitFramebufferEXT':                                        446,
-  'CopyTextureToParentTexture':                                447,
+  'CopyTextureToParentTextureCHROMIUM':                        447,
+  'ResizeCHROMIUM':                                            448,
 }
 
 # This is a list of enum names and their valid values. It is used to map
@@ -1068,6 +1070,7 @@ _FUNCTION_INFO = {
   'BlitFramebufferEXT': {
     'decoder_func': 'DoBlitFramebufferEXT',
     'unit_test': False,
+    'extension': True,
   },
   'BufferData': {'type': 'Manual', 'immediate': True},
   'BufferSubData': {'type': 'Data', 'decoder_func': 'DoBufferSubData'},
@@ -1084,13 +1087,15 @@ _FUNCTION_INFO = {
   },
   'ColorMask': {'decoder_func': 'DoColorMask'},
   'ClearStencil': {'decoder_func': 'DoClearStencil'},
-  'CommandBufferEnable': {
+  'CommandBufferEnableCHROMIUM': {
     'type': 'Custom',
     'immediate': False,
-    'decoder_func': 'DoCommandBufferEnable',
+    'decoder_func': 'DoCommandBufferEnableCHROMIUM',
     'expectation': False,
     'cmd_args': 'GLuint bucket_id, GLint* result',
     'result': ['GLint'],
+    'extension': True,
+    'chromium': True,
   },
   'CompileShader': {'decoder_func': 'DoCompileShader', 'unit_test': False},
   'CompressedTexImage2D': {
@@ -1127,12 +1132,14 @@ _FUNCTION_INFO = {
     'gl_test_func': 'glDeleteRenderbuffersEXT',
   },
   'DeleteShader': {'type': 'Delete', 'decoder_func': 'DoDeleteShader'},
-  'DeleteSharedIds': {
+  'DeleteSharedIdsCHROMIUM': {
     'type': 'Custom',
-    'decoder_func': 'DoDeleteSharedIds',
+    'decoder_func': 'DoDeleteSharedIdsCHROMIUM',
     'impl_func': False,
     'expectation': False,
     'immediate': False,
+    'extension': True,
+    'chromium': True,
   },
   'DeleteTextures': {'type': 'DELn'},
   'DepthRangef': {'decoder_func': 'glDepthRange'},
@@ -1179,12 +1186,14 @@ _FUNCTION_INFO = {
   'GenFramebuffers': {'type': 'GENn', 'gl_test_func': 'glGenFramebuffersEXT'},
   'GenRenderbuffers': {'type': 'GENn', 'gl_test_func': 'glGenRenderbuffersEXT'},
   'GenTextures': {'type': 'GENn', 'gl_test_func': 'glGenTextures'},
-  'GenSharedIds': {
+  'GenSharedIdsCHROMIUM': {
     'type': 'Custom',
-    'decoder_func': 'DoGenSharedIds',
+    'decoder_func': 'DoGenSharedIdsCHROMIUM',
     'impl_func': False,
     'expectation': False,
     'immediate': False,
+    'extension': True,
+    'chromium': True,
   },
   'GetActiveAttrib': {
     'type': 'Custom',
@@ -1255,11 +1264,13 @@ _FUNCTION_INFO = {
     'result': ['SizedResult<GLint>'],
     'decoder_func': 'DoGetIntegerv',
   },
-  'GetMaxValueInBuffer': {
+  'GetMaxValueInBufferCHROMIUM': {
     'type': 'Is',
-    'decoder_func': 'DoGetMaxValueInBuffer',
+    'decoder_func': 'DoGetMaxValueInBufferCHROMIUM',
     'result': ['GLuint'],
     'unit_test': False,
+    'extension': True,
+    'chromium': True,
   },
   'GetProgramiv': {
     'type': 'GETn',
@@ -1382,8 +1393,16 @@ _FUNCTION_INFO = {
     'expectation': False,
   },
   'LinkProgram': {'decoder_func': 'DoLinkProgram'},
-  'MapBufferSubData': {'gen_cmd': False},
-  'MapTexSubImage2D': {'gen_cmd': False},
+  'MapBufferSubDataCHROMIUM': {
+    'gen_cmd': False,
+    'extension': True,
+    'chromium': True,
+  },
+  'MapTexSubImage2DCHROMIUM': {
+    'gen_cmd': False,
+    'extension': True,
+    'chromium': True,
+  },
   'PixelStorei': {'type': 'Manual'},
   'RenderbufferStorage': {
     'decoder_func': 'DoRenderbufferStorage',
@@ -1395,6 +1414,7 @@ _FUNCTION_INFO = {
     'gl_test_func': 'glRenderbufferStorageMultisampleEXT',
     'expectation': False,
     'unit_test': False,
+    'extension': True,
   },
   'ReadPixels': {
     'cmd_comment':
@@ -1410,12 +1430,14 @@ _FUNCTION_INFO = {
         'uint32 result_shm_id, uint32 result_shm_offset',
     'result': ['uint32'],
   },
-  'RegisterSharedIds': {
+  'RegisterSharedIdsCHROMIUM': {
     'type': 'Custom',
-    'decoder_func': 'DoRegisterSharedIds',
+    'decoder_func': 'DoRegisterSharedIdsCHROMIUM',
     'impl_func': False,
     'expectation': False,
     'immediate': False,
+    'extension': True,
+    'chromium': True,
   },
   'ReleaseShaderCompiler': {
     'decoder_func': 'DoReleaseShaderCompiler',
@@ -1500,8 +1522,16 @@ _FUNCTION_INFO = {
   'UniformMatrix2fv': {'type': 'PUTn', 'data_type': 'GLfloat', 'count': 4},
   'UniformMatrix3fv': {'type': 'PUTn', 'data_type': 'GLfloat', 'count': 9},
   'UniformMatrix4fv': {'type': 'PUTn', 'data_type': 'GLfloat', 'count': 16},
-  'UnmapBufferSubData': {'gen_cmd': False},
-  'UnmapTexSubImage2D': {'gen_cmd': False},
+  'UnmapBufferSubDataCHROMIUM': {
+    'gen_cmd': False,
+    'extension': True,
+    'chromium': True,
+    },
+  'UnmapTexSubImage2DCHROMIUM': {
+    'gen_cmd': False,
+    'extension': True,
+    'chromium': True,
+  },
   'UseProgram': {'decoder_func': 'DoUseProgram', 'unit_test': False},
   'ValidateProgram': {'decoder_func': 'DoValidateProgram'},
   'VertexAttrib1f': {'decoder_func': 'DoVertexAttrib1f'},
@@ -1537,9 +1567,17 @@ _FUNCTION_INFO = {
       'cmd_args': 'GLuint indx, GLint size, GLenum type, GLboolean normalized, '
                   'GLsizei stride, GLuint offset',
   },
-  'CopyTextureToParentTexture': {
-      'decoder_func': 'DoCopyTextureToParentTexture',
-      'unit_test': False
+  'CopyTextureToParentTextureCHROMIUM': {
+      'decoder_func': 'DoCopyTextureToParentTextureCHROMIUM',
+      'unit_test': False,
+      'extension': True,
+      'chromium': True,
+  },
+  'ResizeCHROMIUM': {
+      'decoder_func': 'DoResizeCHROMIUM',
+      'unit_test': False,
+      'extension': True,
+      'chromium': True,
   },
 }
 
@@ -2551,24 +2589,23 @@ class GENnHandler(TypeHandler):
 
   def WriteGLES2ImplementationHeader(self, func, file):
     """Overrriden from TypeHandler."""
-    code = """%(return_type)s %(name)s(%(typed_args)s) {
-  if (%(count_name)s < 0) {
-    SetGLError(GL_INVALID_VALUE, "gl%(name)s: n < 0");
-    return;
-  }
-  %(resource_type)s_id_handler_->MakeIds(0, %(args)s);
-  helper_->%(name)sImmediate(%(args)s);
-}
-
-"""
-    file.Write(code % {
+    args = {
         'return_type': func.return_type,
         'name': func.original_name,
         'typed_args': func.MakeTypedOriginalArgString(""),
         'args': func.MakeOriginalArgString(""),
         'resource_type': func.name[3:-1].lower(),
         'count_name': func.GetOriginalArgs()[0].name,
-      })
+      }
+    file.Write("%(return_type)s %(name)s(%(typed_args)s) {\n" % args)
+    for arg in func.GetOriginalArgs():
+      arg.WriteClientSideValidationCode(file, func)
+    code = """  %(resource_type)s_id_handler_->MakeIds(0, %(args)s);
+  helper_->%(name)sImmediate(%(args)s);
+}
+
+"""
+    file.Write(code % args)
 
   def WriteServiceUnitTest(self, func, file):
     """Overrriden from TypeHandler."""
@@ -2789,6 +2826,8 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
     file.Write("%s %s(%s) {\n" %
                (func.return_type, func.original_name,
                 func.MakeTypedOriginalArgString("")))
+    for arg in func.GetOriginalArgs():
+      arg.WriteClientSideValidationCode(file, func)
     file.Write("  GLuint client_id;\n")
     file.Write("  program_and_shader_id_handler_->MakeIds(0, 1, &client_id);\n")
     file.Write("  helper_->%s(%s);\n" %
@@ -2813,6 +2852,8 @@ class DeleteHandler(TypeHandler):
     file.Write("%s %s(%s) {\n" %
                (func.return_type, func.original_name,
                 func.MakeTypedOriginalArgString("")))
+    for arg in func.GetOriginalArgs():
+      arg.WriteClientSideValidationCode(file, func)
     file.Write("  program_and_shader_id_handler_->FreeIds(1, &%s);\n" %
                func.GetOriginalArgs()[-1].name)
     file.Write("  helper_->%s(%s);\n" %
@@ -2919,24 +2960,23 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs) {
     """Overrriden from TypeHandler."""
     impl_decl = func.GetInfo('impl_decl')
     if impl_decl == None or impl_decl == True:
-      code = """%(return_type)s %(name)s(%(typed_args)s) {
-  if (%(count_name)s < 0) {
-    SetGLError(GL_INVALID_VALUE, "gl%(name)s: n < 0");
-    return;
-  }
-  %(resource_type)s_id_handler_->FreeIds(%(args)s);
-  helper_->%(name)sImmediate(%(args)s);
-}
-
-"""
-      file.Write(code % {
+      args = {
           'return_type': func.return_type,
           'name': func.original_name,
           'typed_args': func.MakeTypedOriginalArgString(""),
           'args': func.MakeOriginalArgString(""),
           'resource_type': func.name[6:-1].lower(),
           'count_name': func.GetOriginalArgs()[0].name,
-        })
+        }
+      file.Write("%(return_type)s %(name)s(%(typed_args)s) {\n" % args)
+      for arg in func.GetOriginalArgs():
+        arg.WriteClientSideValidationCode(file, func)
+      code = """%(resource_type)s_id_handler_->FreeIds(%(args)s);
+  helper_->%(name)sImmediate(%(args)s);
+}
+
+"""
+      file.Write(code % args)
 
   def WriteImmediateCmdComputeSize(self, func, file):
     """Overrriden from TypeHandler."""
@@ -3096,6 +3136,8 @@ class GETnHandler(TypeHandler):
       file.Write("%s %s(%s) {\n" %
                  (func.return_type, func.original_name,
                   func.MakeTypedOriginalArgString("")))
+      for arg in func.GetOriginalArgs():
+        arg.WriteClientSideValidationCode(file, func)
       all_but_last_args = func.GetOriginalArgs()[:-1]
       arg_string = (
           ", ".join(["%s" % arg.name for arg in all_but_last_args]))
@@ -3239,6 +3281,8 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
     file.Write("%s %s(%s) {\n" %
                (func.return_type, func.original_name,
                 func.MakeTypedOriginalArgString("")))
+    for arg in func.GetOriginalArgs():
+      arg.WriteClientSideValidationCode(file, func)
     file.Write("  helper_->%sImmediate(%s);\n" %
                (func.name, func.MakeOriginalArgString("")))
     file.Write("}\n")
@@ -3403,7 +3447,7 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
   def WriteGetDataSizeCode(self, func, file):
     """Overrriden from TypeHandler."""
     code = """  uint32 data_size;
-  if (!ComputeDataSize(1, sizeof(%s), %d, &data_size)) {
+  if (!ComputeDataSize(count, sizeof(%s), %d, &data_size)) {
     return error::kOutOfBounds;
   }
 """
@@ -3418,6 +3462,8 @@ TEST_F(%(test_name)s, %(name)sInvalidArgs%(arg_index)d_%(value_index)d) {
     file.Write("%s %s(%s) {\n" %
                (func.return_type, func.original_name,
                 func.MakeTypedOriginalArgString("")))
+    for arg in func.GetOriginalArgs():
+      arg.WriteClientSideValidationCode(file, func)
     file.Write("  helper_->%sImmediate(%s);\n" %
                (func.name, func.MakeOriginalArgString("")))
     file.Write("}\n")
@@ -4036,6 +4082,27 @@ class SizeArgument(Argument):
                (func.original_name, self.name))
     file.Write("    return;\n")
     file.Write("  }\n")
+
+
+class SizeNotNegativeArgument(SizeArgument):
+  """class for GLsizeiNotNegative. It's NEVER allowed to be negative"""
+
+  def __init__(self, name, type):
+    SizeArgument.__init__(self, name, "GLsizei")
+
+  def GetInvalidArg(self, offset, index):
+    """overridden from SizeArgument."""
+    return ("-1", "kOutOfBounds", "GL_NO_ERROR")
+
+  def WriteValidationCode(self, file, func):
+    """overridden from SizeArgument."""
+    pass
+    #file.Write("  if (%s < 0) {\n" % self.name)
+    #file.Write("    SetGLError(GL_INVALID_VALUE, \"gl%s: %s < 0\");\n" %
+    #           (func.original_name, self.name))
+    #file.Write("    return error::kNoError;\n")
+    #file.Write("  }\n")
+
 
 class EnumBaseArgument(Argument):
   """Base class for EnumArgument, IntArgument and BoolArgument"""
@@ -4737,6 +4804,8 @@ def CreateArg(arg_string):
   elif (arg_parts[0].startswith('GLint') and len(arg_parts[0]) > 5 and
         arg_parts[0] != "GLintptr"):
     return IntArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
+  elif arg_parts[0].startswith('GLsizeiNotNegative'):
+    return SizeNotNegativeArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
   elif arg_parts[0].startswith('GLsize'):
     return SizeArgument(arg_parts[-1], " ".join(arg_parts[0:-1]))
   else:
@@ -5128,23 +5197,23 @@ class GLGenerator(object):
         filename,
         "// This interface is used to access common and lite profile OpenGL ES "
         "2.0\n// functions.\n",
-        2)
+        3)
 
-    file.Write("#include \"../GLES2/khrplatform.h\"\n\n")
+    file.Write("#include \"ppapi/GLES2/khrplatform.h\"\n\n")
 
-    file.Write("#define PPB_OPENGLES_INTERFACE \"PPB_OpenGLES;2.0\"\n\n")
+    file.Write("#define PPB_OPENGLES_DEV_INTERFACE \"PPB_OpenGLES(Dev);2.0\"\n\n")
 
     for (k, v) in _GL_TYPES.iteritems():
       file.Write("typedef %s %s;\n" % (v, k))
 
-    file.Write("\ntypedef struct _ppb_OpenGLES {\n")
+    file.Write("\nstruct PPB_OpenGLES_Dev {\n")
     for func in self.original_functions:
-      if func.name[-3:] == "EXT":
+      if func.GetInfo('extension'):
         continue
       file.Write("  %s (*%s)(%s);\n" %
                  (func.return_type, func.name,
                   func.MakeTypedOriginalArgString("")))
-    file.Write("} PPB_OpenGLES;\n\n")
+    file.Write("};\n\n")
 
     file.Close()
 
@@ -5158,13 +5227,13 @@ class GLGenerator(object):
     file.Write("#include \"webkit/glue/plugins/pepper_graphics_3d.h\"\n\n")
 
     file.Write("#include \"gpu/command_buffer/client/gles2_implementation.h\"")
-    file.Write("\n#include \"third_party/ppapi/c/ppb_opengles.h\"\n\n")
+    file.Write("\n#include \"ppapi/c/dev/ppb_opengles_dev.h\"\n\n")
 
     file.Write("namespace pepper {\n\n")
     file.Write("namespace {\n\n")
 
     for func in self.original_functions:
-      if func.name[-3:] == "EXT":
+      if func.GetInfo('extension'):
         continue
       file.Write("%s %s(%s) {\n" %
                  (func.return_type, func.name,
@@ -5177,18 +5246,18 @@ class GLGenerator(object):
                   func.MakeOriginalArgString("")))
       file.Write("}\n")
 
-    file.Write("\nconst PPB_OpenGLES ppb_opengles = {\n")
+    file.Write("\nconst struct PPB_OpenGLES_Dev ppb_opengles = {\n")
 
     file.Write("  &")
     file.Write(",\n  &".join(
-      f.name for f in self.original_functions if f.name[-3:] != "EXT"))
+      f.name for f in self.original_functions if not f.GetInfo('extension')))
     file.Write("\n")
 
     file.Write("};\n\n")
     file.Write("}  // namespace\n")
 
     file.Write("""
-const PPB_OpenGLES* Graphics3D::GetOpenGLESInterface() {
+const PPB_OpenGLES_Dev* Graphics3D::GetOpenGLESInterface() {
   return &ppb_opengles;
 }
 
@@ -5211,7 +5280,7 @@ def main(argv):
       help="generate a docs friendly version of the command formats.")
   parser.add_option(
       "--alternate-mode", type="choice",
-      choices=("ppapi", "chrome_ppapi", "ppapi_gles2"),
+      choices=("ppapi", "chrome_ppapi"),
       help="generate files for other projects. \"ppapi\" must be run from the "
       "directory containing the ppapi directory, and will generate ppapi "
       "bindings. \"chrome_ppapi\" must be run from chrome src directory and "
@@ -5226,7 +5295,7 @@ def main(argv):
   gen.ParseGLH("common/GLES2/gl2.h")
 
   if options.alternate_mode == "ppapi":
-    gen.WritePepperGLES2Interface("ppapi/c/ppb_opengles.h")
+    gen.WritePepperGLES2Interface("ppapi/c/dev/ppb_opengles_dev.h")
 
   elif options.alternate_mode == "chrome_ppapi":
     gen.WritePepperGLES2Implementation(

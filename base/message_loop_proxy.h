@@ -16,7 +16,8 @@ struct MessageLoopProxyTraits;
 
 // This class provides a thread-safe refcounted interface to the Post* methods
 // of a message loop. This class can outlive the target message loop. You can
-// obtain a MessageLoopProxy via Thread::message_loop_proxy().
+// obtain a MessageLoopProxy via Thread::message_loop_proxy() or
+// MessageLoopProxy::CreateForCurrentThread().
 class MessageLoopProxy
     : public base::RefCountedThreadSafe<MessageLoopProxy,
                                         MessageLoopProxyTraits> {
@@ -64,11 +65,11 @@ class MessageLoopProxy
 
   // Called when the proxy is about to be deleted. Subclasses can override this
   // to provide deletion on specific threads.
-  virtual void OnDestruct();
+  virtual void OnDestruct() const;
 };
 
 struct MessageLoopProxyTraits {
-  static void Destruct(MessageLoopProxy* proxy) {
+  static void Destruct(const MessageLoopProxy* proxy) {
     proxy->OnDestruct();
   }
 };

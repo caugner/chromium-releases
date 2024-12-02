@@ -31,8 +31,6 @@ const string16 kSSNSeparators = ASCIIToUTF16(" -");
 bool IsSSN(const string16& text) {
   string16 number_string;
   RemoveChars(text, kSSNSeparators.c_str(), &number_string);
-  if (number_string.length() != 9 || !IsStringASCII(number_string))
-    return false;
 
   // A SSN is of the form AAA-GG-SSSS (A = area number, G = group number, S =
   // serial number). The validation we do here is simply checking if the area,
@@ -42,13 +40,13 @@ bool IsSSN(const string16& text) {
   // See: http://www.socialsecurity.gov/history/ssn/geocard.html
   //      http://www.socialsecurity.gov/employer/stateweb.htm
   //      http://www.socialsecurity.gov/employer/ssnvhighgroup.htm
-
-  string16 area_string = number_string.substr(0, 3);
-  string16 group_string = number_string.substr(3, 2);
-  string16 serial_string = number_string.substr(5, 4);
+  if (number_string.length() != 9 || !IsStringASCII(number_string))
+    return false;
 
   int area;
-  if (!base::StringToInt(area_string, &area))
+  if (!base::StringToInt(number_string.begin(),
+                         number_string.begin() + 3,
+                         &area))
     return false;
   if (area < 1 ||
       area == 666 ||
@@ -57,11 +55,15 @@ bool IsSSN(const string16& text) {
     return false;
 
   int group;
-  if (!base::StringToInt(group_string, &group) || group == 0)
+  if (!base::StringToInt(number_string.begin() + 3,
+                         number_string.begin() + 5,
+                         &group) || group == 0)
     return false;
 
   int serial;
-  if (!base::StringToInt(serial_string, &serial) || serial == 0)
+  if (!base::StringToInt(number_string.begin() + 5,
+                         number_string.begin() + 9,
+                         &serial) || serial == 0)
     return false;
 
   return true;
@@ -71,8 +73,7 @@ bool IsSSN(const string16& text) {
 
 AutocompleteHistoryManager::AutocompleteHistoryManager(
     TabContents* tab_contents) : tab_contents_(tab_contents),
-                                 pending_query_handle_(0),
-                                 query_id_(0) {
+                                 pending_query_handle_(0) {
   DCHECK(tab_contents);
 
   profile_ = tab_contents_->profile();
@@ -92,17 +93,17 @@ void AutocompleteHistoryManager::FormSubmitted(const FormData& form) {
   StoreFormEntriesInWebDatabase(form);
 }
 
-bool AutocompleteHistoryManager::GetAutocompleteSuggestions(
-    int query_id, const string16& name, const string16& prefix) {
-  if (!*autofill_enabled_)
-    return false;
+void AutocompleteHistoryManager::GetAutocompleteSuggestions(
+    const string16& name, const string16& prefix) {
+  if (!*autofill_enabled_) {
+    SendSuggestions(NULL);
+    return;
+  }
 
   CancelPendingQuery();
 
-  query_id_ = query_id;
   pending_query_handle_ = web_data_service_->GetFormValuesForElementName(
       name, prefix, kMaxAutocompleteMenuItems, this);
-  return true;
 }
 
 void AutocompleteHistoryManager::RemoveAutocompleteEntry(
@@ -128,8 +129,7 @@ AutocompleteHistoryManager::AutocompleteHistoryManager(
     Profile* profile, WebDataService* wds) : tab_contents_(NULL),
                                              profile_(profile),
                                              web_data_service_(wds),
-                                             pending_query_handle_(0),
-                                             query_id_(0) {
+                                             pending_query_handle_(0) {
   autofill_enabled_.Init(
       prefs::kAutoFillEnabled, profile_->GetPrefs(), NULL);
 }
@@ -185,10 +185,8 @@ void AutocompleteHistoryManager::SendSuggestions(const WDTypedResult* result) {
     DCHECK(result->GetType() == AUTOFILL_VALUE_RESULT);
     const WDResult<std::vector<string16> >* autofill_result =
         static_cast<const WDResult<std::vector<string16> >*>(result);
-    host->AutocompleteSuggestionsReturned(
-        query_id_, autofill_result->GetValue());
+    host->AutocompleteSuggestionsReturned(autofill_result->GetValue());
   } else {
-    host->AutocompleteSuggestionsReturned(
-        query_id_, std::vector<string16>());
+    host->AutocompleteSuggestionsReturned(std::vector<string16>());
   }
 }

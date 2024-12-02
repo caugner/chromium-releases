@@ -15,7 +15,6 @@ class WebKitContext;
 
 namespace WebKit {
 class WebIDBFactory;
-class WebSecurityOrigin;
 }
 
 class IndexedDBContext {
@@ -31,17 +30,19 @@ class IndexedDBContext {
   // The indexed db file extension.
   static const FilePath::CharType kIndexedDBExtension[];
 
-  // Get the file name of the indexed db file for the given origin and database
-  // name.
-  FilePath GetIndexedDBFilePath(const string16& database_name,
-                                const WebKit::WebSecurityOrigin& origin) const;
+  // Get the file name of the indexed db file for the given origin.
+  FilePath GetIndexedDBFilePath(const string16& origin_id) const;
 
-  // Splits an indexed database file name into a security origin and a
-  // database name.
-  static bool SplitIndexedDBFileName(
-      const FilePath& file_name,
-      std::string* database_name,
-      WebKit::WebSecurityOrigin* security_origin);
+  // Deletes all idb files except for those on the url scheme
+  // |url_scheme_to_be_skipped|.
+  static void ClearLocalState(const FilePath& profile_path,
+                              const char* url_scheme_to_be_skipped);
+
+  // Deletes a single indexed db file.
+  void DeleteIndexedDBFile(const FilePath& file_path);
+
+  // Deletes all indexed db files for the given origin.
+  void DeleteIndexedDBForOrigin(const string16& origin_id);
 
  private:
   scoped_ptr<WebKit::WebIDBFactory> idb_factory_;

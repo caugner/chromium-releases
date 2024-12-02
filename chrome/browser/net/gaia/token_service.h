@@ -42,7 +42,7 @@
 #include "base/scoped_ptr.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/net/gaia/gaia_auth_consumer.h"
-#include "chrome/common/net/gaia/gaia_authenticator2.h"
+#include "chrome/common/net/gaia/gaia_auth_fetcher.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
@@ -173,12 +173,12 @@ class TokenService : public GaiaAuthConsumer,
   GaiaAuthConsumer::ClientLoginResult credentials_;
 
   // Size of array of services (must be defined here).
-  static const int kNumServices = 2;
+  static const int kNumServices = 4;
   // List of services that we're performing operations for.
   static const char* kServices[kNumServices];
   // A bunch of fetchers suitable for token issuing. We don't care about
   // the ordering, nor do we care which is for which service.
-  scoped_ptr<GaiaAuthenticator2> fetchers_[kNumServices];
+  scoped_ptr<GaiaAuthFetcher> fetchers_[kNumServices];
   // Map from service to token.
   std::map<std::string, std::string> token_map_;
 

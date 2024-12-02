@@ -14,7 +14,7 @@
 #include "base/string_number_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/browser_thread.h"
 #include "chrome/browser/dom_ui/ntp_resource_cache.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/favicon_service.h"
@@ -27,6 +27,7 @@
 #include "chrome/browser/host_content_settings_map.h"
 #include "chrome/browser/in_process_webkit/webkit_context.h"
 #include "chrome/browser/net/gaia/token_service.h"
+#include "chrome/browser/net/pref_proxy_config_service.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/search_engines/template_url_fetcher.h"
@@ -39,6 +40,7 @@
 #include "chrome/common/notification_service.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/testing_pref_service.h"
+#include "chrome/test/ui_test_utils.h"
 #include "net/base/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_unittest.h"
@@ -122,7 +124,7 @@ class TestURLRequestContextGetter : public URLRequestContextGetter {
       context_ = new TestURLRequestContext();
     return context_.get();
   }
-  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() {
+  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() const {
     return BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
   }
 
@@ -147,7 +149,7 @@ class TestExtensionURLRequestContextGetter : public URLRequestContextGetter {
       context_ = new TestExtensionURLRequestContext();
     return context_.get();
   }
-  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() {
+  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() const {
     return BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
   }
 
@@ -194,17 +196,17 @@ TestingProfile::~TestingProfile() {
       NotificationType::PROFILE_DESTROYED,
       Source<Profile>(this),
       NotificationService::NoDetails());
+  DestroyTopSites();
   DestroyHistoryService();
   // FaviconService depends on HistoryServce so destroying it later.
   DestroyFaviconService();
   DestroyWebDataService();
-  if (top_sites_.get())
-    top_sites_->ClearProfile();
-  history::TopSites::DeleteTopSites(top_sites_);
   if (extensions_service_.get()) {
     extensions_service_->DestroyingProfile();
     extensions_service_ = NULL;
   }
+  if (pref_proxy_config_tracker_.get())
+    pref_proxy_config_tracker_->DetachFromPrefService();
 }
 
 void TestingProfile::CreateFaviconService() {
@@ -213,11 +215,7 @@ void TestingProfile::CreateFaviconService() {
 }
 
 void TestingProfile::CreateHistoryService(bool delete_file, bool no_db) {
-  if (history_service_.get())
-    history_service_->Cleanup();
-
-  history_service_ = NULL;
-
+  DestroyHistoryService();
   if (delete_file) {
     FilePath path = GetPath();
     path = path.Append(chrome::kHistoryFilename);
@@ -225,12 +223,6 @@ void TestingProfile::CreateHistoryService(bool delete_file, bool no_db) {
   }
   history_service_ = new HistoryService(this);
   history_service_->Init(GetPath(), bookmark_bar_model_.get(), no_db);
-}
-
-void TestingProfile::DestroyFaviconService() {
-  if (!favicon_service_.get())
-    return;
-  favicon_service_ = NULL;
 }
 
 void TestingProfile::DestroyHistoryService() {
@@ -252,6 +244,31 @@ void TestingProfile::DestroyHistoryService() {
   // test.
   MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask);
   MessageLoop::current()->Run();
+}
+
+void TestingProfile::CreateTopSites() {
+  DestroyTopSites();
+  top_sites_ = new history::TopSites(this);
+  FilePath file_name = temp_dir_.path().Append(chrome::kTopSitesFilename);
+  top_sites_->Init(file_name);
+}
+
+void TestingProfile::DestroyTopSites() {
+  if (top_sites_.get()) {
+    top_sites_->Shutdown();
+    top_sites_ = NULL;
+    // TopSites::Shutdown schedules some tasks (from TopSitesBackend) that need
+    // to be run to properly shutdown. Run all pending tasks now. This is
+    // normally handled by browser_process shutdown.
+    if (MessageLoop::current())
+      MessageLoop::current()->RunAllPending();
+  }
+}
+
+void TestingProfile::DestroyFaviconService() {
+  if (!favicon_service_.get())
+    return;
+  favicon_service_ = NULL;
 }
 
 void TestingProfile::CreateBookmarkModel(bool delete_file) {
@@ -301,6 +318,12 @@ void TestingProfile::BlockUntilBookmarkModelLoaded() {
   MessageLoop::current()->Run();
   bookmark_bar_model_->RemoveObserver(&observer);
   DCHECK(bookmark_bar_model_->IsLoaded());
+}
+
+void TestingProfile::BlockUntilTopSitesLoaded() {
+  if (!GetHistoryService(Profile::EXPLICIT_ACCESS))
+    GetTopSites()->HistoryLoaded();
+  ui_test_utils::WaitForNotification(NotificationType::TOP_SITES_LOADED);
 }
 
 void TestingProfile::CreateTemplateURLFetcher() {
@@ -392,12 +415,7 @@ PrefService* TestingProfile::GetPrefs() {
 }
 
 history::TopSites* TestingProfile::GetTopSites() {
-  if (!top_sites_.get()) {
-    top_sites_ = new history::TopSites(this);
-    FilePath file_name = temp_dir_.path().AppendASCII("TopSites.db");
-    top_sites_->Init(file_name);
-  }
-  return top_sites_;
+  return top_sites_.get();
 }
 
 URLRequestContextGetter* TestingProfile::GetRequestContext() {
@@ -472,6 +490,13 @@ DesktopNotificationService* TestingProfile::GetDesktopNotificationService() {
         this, NULL));
   }
   return desktop_notification_service_.get();
+}
+
+PrefProxyConfigTracker* TestingProfile::GetProxyConfigTracker() {
+  if (!pref_proxy_config_tracker_)
+    pref_proxy_config_tracker_ = new PrefProxyConfigTracker(GetPrefs());
+
+  return pref_proxy_config_tracker_;
 }
 
 void TestingProfile::BlockUntilHistoryProcessesPendingRequests() {

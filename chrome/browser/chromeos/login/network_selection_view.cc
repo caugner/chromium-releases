@@ -15,6 +15,7 @@
 #include "chrome/browser/chromeos/login/keyboard_switch_menu.h"
 #include "chrome/browser/chromeos/login/language_switch_menu.h"
 #include "chrome/browser/chromeos/login/network_screen_delegate.h"
+#include "chrome/browser/chromeos/login/proxy_settings_dialog.h"
 #include "chrome/browser/chromeos/login/rounded_rect_painter.h"
 #include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
 #include "chrome/browser/chromeos/status/network_dropdown_button.h"
@@ -22,7 +23,6 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
-#include "views/controls/button/native_button.h"
 #include "views/controls/label.h"
 #include "views/controls/throbber.h"
 #include "views/fill_layout.h"
@@ -78,11 +78,19 @@ const int kMenuWidthOffset = 6;
 
 const SkColor kWelcomeColor = 0xFFCDD3D6;
 
-// Hints for size of proxy settings dialog.
-static const int kProxySettingsDialogReasonableWidth = 700;
-static const int kProxySettingsDialogReasonableHeight = 460;
-static const int kProxySettingsDialogReasonableWidthRatio = 0.4;
-static const int kProxySettingsDialogReasonableHeightRatio = 0.4;
+// Initializes menu button default properties.
+static void InitMenuButtonProperties(views::MenuButton* menu_button) {
+  menu_button->SetFocusable(true);
+  menu_button->SetNormalHasBorder(true);
+  menu_button->SetEnabledColor(SK_ColorBLACK);
+  menu_button->SetHighlightColor(SK_ColorBLACK);
+  menu_button->SetHoverColor(SK_ColorBLACK);
+  menu_button->set_animate_on_state_change(false);
+  // Menu is positioned by bottom right corner of the MenuButton.
+  menu_button->set_menu_offset(kMenuHorizontalOffset, kMenuVerticalOffset);
+  chromeos::CorrectMenuButtonFontSize(menu_button);
+}
+
 }  // namespace
 
 namespace chromeos {
@@ -109,14 +117,14 @@ class NetworkControlReportOnActivate : public NetworkDropdownButton {
 };
 
 // MenuButton with custom processing on focus events.
-class NotifyingMenuButton : public views::MenuButton {
+class NotifyingMenuButton : public DropDownButton {
  public:
   NotifyingMenuButton(views::ButtonListener* listener,
                       const std::wstring& text,
                       views::ViewMenuDelegate* menu_delegate,
                       bool show_menu_marker,
                       NetworkScreenDelegate* delegate)
-      : MenuButton(listener, text, menu_delegate, show_menu_marker),
+      : DropDownButton(listener, text, menu_delegate, show_menu_marker),
         delegate_(delegate) {}
 
   // Overridden from View:
@@ -250,9 +258,7 @@ void NetworkSelectionView::InitLayout() {
                         GridLayout::FIXED, dropdown_width, dropdown_width);
   column_set->AddPaddingColumn(1, kPaddingColumnWidth);
 
-  const int h_padding = 30/*(screen_size.width() - 2 * kBorderSize -
-      connecting_network_label_->GetPreferredSize().width() -
-      throbber_->GetPreferredSize().width()) / 2*/;
+  const int h_padding = 30;
   column_set = contents_layout->AddColumnSet(THROBBER_ROW);
   column_set->AddPaddingColumn(1, h_padding);
   column_set->AddColumn(GridLayout::TRAILING, GridLayout::CENTER, 0,
@@ -278,8 +284,8 @@ void NetworkSelectionView::Init() {
       views::Background::CreateBackgroundPainter(true, painter));
 
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  gfx::Font welcome_label_font =
-      rb.GetFont(ResourceBundle::LargeFont).DeriveFont(0, gfx::Font::BOLD);
+  gfx::Font welcome_label_font = rb.GetFont(ResourceBundle::LargeFont).
+      DeriveFont(kWelcomeTitleFontDelta, gfx::Font::BOLD);
 
   welcome_label_ = new views::Label();
   welcome_label_->SetColor(kWelcomeColor);
@@ -291,24 +297,15 @@ void NetworkSelectionView::Init() {
 
   languages_menubutton_ = new NotifyingMenuButton(
       NULL, std::wstring(), delegate_->language_switch_menu(), true, delegate_);
-  languages_menubutton_->SetFocusable(true);
-  languages_menubutton_->SetNormalHasBorder(true);
-  languages_menubutton_->set_animate_on_state_change(false);
-  // Menu is positioned by bottom right corner of the MenuButton.
-  languages_menubutton_->set_menu_offset(kMenuHorizontalOffset,
-                                         kMenuVerticalOffset);
+  InitMenuButtonProperties(languages_menubutton_);
 
   select_keyboard_label_ = new views::Label();
   select_keyboard_label_->SetFont(rb.GetFont(ResourceBundle::MediumFont));
 
-  keyboards_menubutton_ = new views::MenuButton(
+  keyboards_menubutton_ = new DropDownButton(
       NULL /* listener */, L"", delegate_->keyboard_switch_menu(),
       true /* show_menu_marker */);
-  keyboards_menubutton_->SetFocusable(true);
-  keyboards_menubutton_->SetNormalHasBorder(true);
-  keyboards_menubutton_->set_animate_on_state_change(false);
-  keyboards_menubutton_->set_menu_offset(kMenuHorizontalOffset,
-                                         kMenuVerticalOffset);
+  InitMenuButtonProperties(keyboards_menubutton_);
 
   select_network_label_ = new views::Label();
   select_network_label_->SetFont(rb.GetFont(ResourceBundle::MediumFont));
@@ -316,12 +313,7 @@ void NetworkSelectionView::Init() {
   network_dropdown_ = new NetworkControlReportOnActivate(false,
                                                          GetNativeWindow(),
                                                          delegate_);
-
-  network_dropdown_->set_menu_offset(kMenuHorizontalOffset,
-                                     kMenuVerticalOffset);
-  network_dropdown_->SetNormalHasBorder(true);
-  network_dropdown_->SetFocusable(true);
-  network_dropdown_->set_animate_on_state_change(false);
+  InitMenuButtonProperties(network_dropdown_);
 
   connecting_network_label_ = new views::Label();
   connecting_network_label_->SetFont(rb.GetFont(ResourceBundle::MediumFont));
@@ -331,6 +323,8 @@ void NetworkSelectionView::Init() {
   proxy_settings_link_->SetController(this);
   proxy_settings_link_->SetVisible(true);
   proxy_settings_link_->SetFocusable(true);
+  proxy_settings_link_->SetNormalColor(login::kLinkColor);
+  proxy_settings_link_->SetHighlightedColor(login::kLinkColor);
 
   UpdateLocalizedStrings();
 }
@@ -340,8 +334,7 @@ void NetworkSelectionView::UpdateLocalizedStrings() {
       delegate_->language_switch_menu()->GetCurrentLocaleName());
   keyboards_menubutton_->SetText(
       delegate_->keyboard_switch_menu()->GetCurrentKeyboardName());
-  welcome_label_->SetText(l10n_util::GetStringF(IDS_NETWORK_SELECTION_TITLE,
-                          l10n_util::GetString(IDS_PRODUCT_OS_NAME)));
+  welcome_label_->SetText(l10n_util::GetString(IDS_NETWORK_SELECTION_TITLE));
   select_language_label_->SetText(
       l10n_util::GetString(IDS_LANGUAGE_SELECTION_SELECT));
   select_keyboard_label_->SetText(
@@ -435,28 +428,11 @@ bool NetworkSelectionView::IsContinueEnabled() const {
 // views::LinkController implementation:
 
 void NetworkSelectionView::LinkActivated(views::Link* source, int) {
+  delegate_->ClearErrors();
   if (source == proxy_settings_link_) {
     if (!proxy_settings_dialog_.get()) {
-      static const char kProxySettingsURL[] =
-          "chrome://settings/proxy?menu=off";
-      proxy_settings_dialog_.reset(new LoginHtmlDialog(
-          this,
-          GetNativeWindow(),
-          std::wstring(),
-          GURL(kProxySettingsURL),
-          LoginHtmlDialog::STYLE_BUBBLE));
-      gfx::Rect screen_bounds(chromeos::CalculateScreenBounds(gfx::Size()));
-      proxy_settings_dialog_->SetDialogSize(
-          std::min(
-              screen_bounds.width(),
-              std::max(kProxySettingsDialogReasonableWidth, static_cast<int>(
-                  kProxySettingsDialogReasonableWidthRatio *
-                      screen_bounds.width()))),
-          std::min(
-              screen_bounds.height(),
-              std::max(kProxySettingsDialogReasonableHeight, static_cast<int>(
-                  kProxySettingsDialogReasonableHeightRatio *
-                      screen_bounds.height()))));
+      proxy_settings_dialog_.reset(
+          new ProxySettingsDialog(this, GetNativeWindow()));
     }
     proxy_settings_dialog_->Show();
   }
@@ -470,7 +446,7 @@ void NetworkSelectionView::RecreateNativeControls() {
   // sized so delete and recreate the button on text update.
   bool is_continue_enabled = IsContinueEnabled();
   delete continue_button_;
-  continue_button_ = new views::NativeButton(
+  continue_button_ = new login::WideButton(
       delegate_,
       l10n_util::GetString(IDS_NETWORK_SELECTION_CONTINUE_BUTTON));
   continue_button_->SetEnabled(is_continue_enabled);

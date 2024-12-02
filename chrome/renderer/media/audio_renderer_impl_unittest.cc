@@ -29,7 +29,7 @@ class AudioRendererImplTest : public ::testing::Test {
     filter_->message_loop_ = message_loop_.get();
 
     // Create temporary shared memory.
-    CHECK(shared_mem_.Create("", false, false, kSize));
+    CHECK(shared_mem_.CreateAnonymous(kSize));
 
     // Setup expectations for initialization.
     EXPECT_CALL(callback_, OnFilterCallback());
@@ -127,8 +127,8 @@ TEST_F(AudioRendererImplTest, Stop) {
   renderer_->OnVolume(0.5);
 
   // It's possible that the upstream decoder replies right after being stopped.
-  scoped_refptr<media::Buffer> buffer = new media::DataBuffer(kSize);
-  renderer_->OnReadComplete(buffer);
+  scoped_refptr<media::Buffer> buffer(new media::DataBuffer(kSize));
+  renderer_->ConsumeAudioSamples(buffer);
 }
 
 TEST_F(AudioRendererImplTest, DestroyedMessageLoop_SetPlaybackRate) {
@@ -149,11 +149,11 @@ TEST_F(AudioRendererImplTest, DestroyedMessageLoop_SetVolume) {
   renderer_->Stop(stop_callback_.NewCallback());
 }
 
-TEST_F(AudioRendererImplTest, DestroyedMessageLoop_OnReadComplete) {
+TEST_F(AudioRendererImplTest, DestroyedMessageLoop_ConsumeAudioSamples) {
   // Kill the message loop and verify OnReadComplete() still works.
   message_loop_.reset();
-  scoped_refptr<media::Buffer> buffer = new media::DataBuffer(kSize);
-  renderer_->OnReadComplete(buffer);
+  scoped_refptr<media::Buffer> buffer(new media::DataBuffer(kSize));
+  renderer_->ConsumeAudioSamples(buffer);
   EXPECT_CALL(stop_callback_, OnFilterCallback());
   renderer_->Stop(stop_callback_.NewCallback());
 }

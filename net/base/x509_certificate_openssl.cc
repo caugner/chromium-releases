@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,22 +13,27 @@
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
 
+#include "base/openssl_util.h"
 #include "base/pickle.h"
+#include "base/singleton.h"
 #include "base/string_number_conversions.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/cert_verify_result.h"
 #include "net/base/net_errors.h"
-#include "net/base/openssl_util.h"
+#include "net/base/x509_openssl_util.h"
 
 namespace net {
+
+namespace nxou = net::x509_openssl_util;
 
 namespace {
 
 void CreateOSCertHandlesFromPKCS7Bytes(
     const char* data, int length,
     X509Certificate::OSCertHandles* handles) {
+  base::EnsureOpenSSLInit();
   const unsigned char* der_data = reinterpret_cast<const unsigned char*>(data);
-  ScopedSSL<PKCS7, PKCS7_free> pkcs7_cert(
+  base::ScopedOpenSSL<PKCS7, PKCS7_free> pkcs7_cert(
       d2i_PKCS7(NULL, &der_data, length));
   if (!pkcs7_cert.get())
     return;
@@ -50,39 +55,13 @@ void CreateOSCertHandlesFromPKCS7Bytes(
   }
 }
 
-bool ParsePrincipalFieldInternal(X509_NAME* name,
-                                 int index,
-                                 std::string* field) {
-  ASN1_STRING* data =
-      X509_NAME_ENTRY_get_data(X509_NAME_get_entry(name, index));
-  if (!data)
-    return false;
-
-  unsigned char* buf = NULL;
-  int len = ASN1_STRING_to_UTF8(&buf, data);
-  if (len <= 0)
-    return false;
-
-  field->assign(reinterpret_cast<const char*>(buf), len);
-  OPENSSL_free(buf);
-  return true;
-}
-
-void ParsePrincipalField(X509_NAME* name, int nid, std::string* field) {
-  int index = X509_NAME_get_index_by_NID(name, nid, -1);
-  if (index < 0)
-    return;
-
-  ParsePrincipalFieldInternal(name, index, field);
-}
-
-void ParsePrincipalFields(X509_NAME* name,
+void ParsePrincipalValues(X509_NAME* name,
                           int nid,
                           std::vector<std::string>* fields) {
   for (int index = -1;
        (index = X509_NAME_get_index_by_NID(name, nid, index)) != -1;) {
     std::string field;
-    if (!ParsePrincipalFieldInternal(name, index, &field))
+    if (!nxou::ParsePrincipalValueByIndex(name, index, &field))
       break;
     fields->push_back(field);
   }
@@ -94,58 +73,23 @@ void ParsePrincipal(X509Certificate::OSCertHandle cert,
   if (!x509_name)
     return;
 
-  ParsePrincipalFields(x509_name, NID_streetAddress,
+  ParsePrincipalValues(x509_name, NID_streetAddress,
                        &principal->street_addresses);
-  ParsePrincipalFields(x509_name, NID_organizationName,
+  ParsePrincipalValues(x509_name, NID_organizationName,
                        &principal->organization_names);
-  ParsePrincipalFields(x509_name, NID_organizationalUnitName,
+  ParsePrincipalValues(x509_name, NID_organizationalUnitName,
                        &principal->organization_unit_names);
-  ParsePrincipalFields(x509_name, NID_domainComponent,
+  ParsePrincipalValues(x509_name, NID_domainComponent,
                        &principal->domain_components);
 
-  ParsePrincipalField(x509_name, NID_commonName, &principal->common_name);
-  ParsePrincipalField(x509_name, NID_localityName, &principal->locality_name);
-  ParsePrincipalField(x509_name, NID_stateOrProvinceName,
-                      &principal->state_or_province_name);
-  ParsePrincipalField(x509_name, NID_countryName, &principal->country_name);
-}
-
-void ParseDate(ASN1_TIME* x509_time, base::Time* time) {
-  if (!x509_time ||
-      (x509_time->type != V_ASN1_UTCTIME &&
-       x509_time->type != V_ASN1_GENERALIZEDTIME))
-    return;
-
-  std::string str_date(reinterpret_cast<char*>(x509_time->data),
-                       x509_time->length);
-  // UTCTime: YYMMDDHHMMSSZ
-  // GeneralizedTime: YYYYMMDDHHMMSSZ
-  size_t year_length = x509_time->type == V_ASN1_UTCTIME ? 2 : 4;
-  size_t fields_offset = x509_time->type == V_ASN1_UTCTIME ? 0 : 2;
-
-  if (str_date.length() < 11 + year_length)
-    return;
-
-  base::Time::Exploded exploded = {0};
-  bool valid = base::StringToInt(str_date.substr(0, year_length),
-                                 &exploded.year);
-  if (valid && year_length == 2)
-    exploded.year += exploded.year < 50 ? 2000 : 1900;
-
-  valid &= base::StringToInt(str_date.substr(2 + fields_offset, 2),
-                             &exploded.month);
-  valid &= base::StringToInt(str_date.substr(4 + fields_offset, 2),
-                             &exploded.day_of_month);
-  valid &= base::StringToInt(str_date.substr(6 + fields_offset, 2),
-                             &exploded.hour);
-  valid &= base::StringToInt(str_date.substr(8 + fields_offset, 2),
-                             &exploded.minute);
-  valid &= base::StringToInt(str_date.substr(10 + fields_offset, 2),
-                             &exploded.second);
-
-  DCHECK(valid);
-
-  *time = base::Time::FromUTCExploded(exploded);
+  nxou::ParsePrincipalValueByNID(x509_name, NID_commonName,
+                                 &principal->common_name);
+  nxou::ParsePrincipalValueByNID(x509_name, NID_localityName,
+                                 &principal->locality_name);
+  nxou::ParsePrincipalValueByNID(x509_name, NID_stateOrProvinceName,
+                                 &principal->state_or_province_name);
+  nxou::ParsePrincipalValueByNID(x509_name, NID_countryName,
+                                 &principal->country_name);
 }
 
 void ParseSubjectAltNames(X509Certificate::OSCertHandle cert,
@@ -155,7 +99,7 @@ void ParseSubjectAltNames(X509Certificate::OSCertHandle cert,
   if (!alt_name_ext)
     return;
 
-  ScopedSSL<GENERAL_NAMES, GENERAL_NAMES_free> alt_names(
+  base::ScopedOpenSSL<GENERAL_NAMES, GENERAL_NAMES_free> alt_names(
       reinterpret_cast<GENERAL_NAMES*>(X509V3_EXT_d2i(alt_name_ext)));
   if (!alt_names.get())
     return;
@@ -245,6 +189,96 @@ void sk_X509_free_fn(STACK_OF(X509)* st) {
   sk_X509_free(st);
 }
 
+struct DERCache {
+  unsigned char* data;
+  int data_length;
+};
+
+void DERCache_free(void* parent, void* ptr, CRYPTO_EX_DATA* ad, int idx,
+                   long argl, void* argp) {
+  DERCache* der_cache = static_cast<DERCache*>(ptr);
+  if (!der_cache)
+      return;
+  if (der_cache->data)
+      OPENSSL_free(der_cache->data);
+  OPENSSL_free(der_cache);
+}
+
+class X509InitSingleton {
+ public:
+  static X509InitSingleton* Get() {
+    // We allow the X509 store to leak, because it is used from a non-joinable
+    // worker that is not stopped on shutdown, hence may still be using
+    // OpenSSL library after the AtExit runner has completed.
+    return Singleton<X509InitSingleton,
+                     LeakySingletonTraits<X509InitSingleton> >::get();
+  }
+  int der_cache_ex_index() const { return der_cache_ex_index_; }
+  X509_STORE* store() const { return store_.get(); }
+
+ private:
+  friend struct DefaultSingletonTraits<X509InitSingleton>;
+  X509InitSingleton()
+      :   der_cache_ex_index_((base::EnsureOpenSSLInit(),
+                               X509_get_ex_new_index(0, 0, 0, 0,
+                                                     DERCache_free))),
+        store_(X509_STORE_new()) {
+    DCHECK_NE(der_cache_ex_index_, -1);
+    X509_STORE_set_default_paths(store_.get());
+    // TODO(joth): Enable CRL (see X509_STORE_set_flags(X509_V_FLAG_CRL_CHECK)).
+  }
+
+  int der_cache_ex_index_;
+  base::ScopedOpenSSL<X509_STORE, X509_STORE_free> store_;
+
+  DISALLOW_COPY_AND_ASSIGN(X509InitSingleton);
+};
+
+// Takes ownership of |data| (which must have been allocated by OpenSSL).
+DERCache* SetDERCache(X509Certificate::OSCertHandle cert,
+                      int x509_der_cache_index,
+                      unsigned char* data,
+                      int data_length) {
+  DERCache* internal_cache = static_cast<DERCache*>(
+      OPENSSL_malloc(sizeof(*internal_cache)));
+  if (!internal_cache) {
+    // We took ownership of |data|, so we must free if we can't add it to
+    // |cert|.
+    OPENSSL_free(data);
+    return NULL;
+  }
+
+  internal_cache->data = data;
+  internal_cache->data_length = data_length;
+  X509_set_ex_data(cert, x509_der_cache_index, internal_cache);
+  return internal_cache;
+}
+
+// Returns true if |der_cache| points to valid data, false otherwise.
+// (note: the DER-encoded data in |der_cache| is owned by |cert|, callers should
+// not free it).
+bool GetDERAndCacheIfNeeded(X509Certificate::OSCertHandle cert,
+                            DERCache* der_cache) {
+  int x509_der_cache_index = X509InitSingleton::Get()->der_cache_ex_index();
+
+  // Re-encoding the DER data via i2d_X509 is an expensive operation, but it's
+  // necessary for comparing two certificates. We re-encode at most once per
+  // certificate and cache the data within the X509 cert using X509_set_ex_data.
+  DERCache* internal_cache = static_cast<DERCache*>(
+      X509_get_ex_data(cert, x509_der_cache_index));
+  if (!internal_cache) {
+    unsigned char* data = NULL;
+    int data_length = i2d_X509(cert, &data);
+    if (data_length <= 0 || !data)
+      return false;
+    internal_cache = SetDERCache(cert, x509_der_cache_index, data, data_length);
+    if (!internal_cache)
+      return false;
+  }
+  *der_cache = *internal_cache;
+  return true;
+}
+
 }  // namespace
 
 // static
@@ -269,11 +303,12 @@ void X509Certificate::FreeOSCertHandle(OSCertHandle cert_handle) {
 }
 
 void X509Certificate::Initialize() {
+  base::EnsureOpenSSLInit();
   fingerprint_ = CalculateFingerprint(cert_handle_);
   ParsePrincipal(cert_handle_, X509_get_subject_name(cert_handle_), &subject_);
   ParsePrincipal(cert_handle_, X509_get_issuer_name(cert_handle_), &issuer_);
-  ParseDate(X509_get_notBefore(cert_handle_), &valid_start_);
-  ParseDate(X509_get_notAfter(cert_handle_), &valid_expiry_);
+  nxou::ParseDate(X509_get_notBefore(cert_handle_), &valid_start_);
+  nxou::ParseDate(X509_get_notAfter(cert_handle_), &valid_expiry_);
 }
 
 SHA1Fingerprint X509Certificate::CalculateFingerprint(OSCertHandle cert) {
@@ -290,8 +325,11 @@ X509Certificate::OSCertHandle X509Certificate::CreateOSCertHandleFromBytes(
     const char* data, int length) {
   if (length < 0)
     return NULL;
+  base::EnsureOpenSSLInit();
   const unsigned char* d2i_data =
       reinterpret_cast<const unsigned char*>(data);
+  // Don't cache this data via SetDERCache as this wire format may be not be
+  // identical from the i2d_X509 roundtrip.
   X509* cert = d2i_X509(NULL, &d2i_data, length);
   return cert;
 }
@@ -323,6 +361,7 @@ X509Certificate::OSCertHandles X509Certificate::CreateOSCertHandlesFromBytes(
   return results;
 }
 
+// static
 X509Certificate* X509Certificate::CreateFromPickle(const Pickle& pickle,
                                                    void** pickle_iter) {
   const char* data;
@@ -334,13 +373,12 @@ X509Certificate* X509Certificate::CreateFromPickle(const Pickle& pickle,
 }
 
 void X509Certificate::Persist(Pickle* pickle) {
-  unsigned char* data = NULL;
-  int data_length = i2d_X509(cert_handle_, &data);
-  if (data_length <= 0 || !data)
-     return;
+  DERCache der_cache;
+  if (!GetDERAndCacheIfNeeded(cert_handle_, &der_cache))
+      return;
 
-  pickle->WriteData(reinterpret_cast<const char*>(data), data_length);
-  OPENSSL_free(data);
+  pickle->WriteData(reinterpret_cast<const char*>(der_cache.data),
+                    der_cache.data_length);
 }
 
 void X509Certificate::GetDNSNames(std::vector<std::string>* dns_names) const {
@@ -352,14 +390,29 @@ void X509Certificate::GetDNSNames(std::vector<std::string>* dns_names) const {
     dns_names->push_back(subject_.common_name);
 }
 
+// static
+X509_STORE* X509Certificate::cert_store() {
+  return X509InitSingleton::Get()->store();
+}
+
 int X509Certificate::Verify(const std::string& hostname,
                             int flags,
                             CertVerifyResult* verify_result) const {
   verify_result->Reset();
 
-  ScopedSSL<X509_STORE_CTX, X509_STORE_CTX_free> ctx(X509_STORE_CTX_new());
+  // TODO(joth): We should fetch the subjectAltNames directly rather than via
+  // GetDNSNames, so we can apply special handling for IP addresses vs DNS
+  // names, etc. See http://crbug.com/62973.
+  std::vector<std::string> cert_names;
+  GetDNSNames(&cert_names);
+  if (!x509_openssl_util::VerifyHostname(hostname, cert_names))
+    verify_result->cert_status |= CERT_STATUS_COMMON_NAME_INVALID;
 
-  ScopedSSL<STACK_OF(X509), sk_X509_free_fn> intermediates(sk_X509_new_null());
+  base::ScopedOpenSSL<X509_STORE_CTX, X509_STORE_CTX_free> ctx(
+      X509_STORE_CTX_new());
+
+  base::ScopedOpenSSL<STACK_OF(X509), sk_X509_free_fn> intermediates(
+      sk_X509_new_null());
   if (!intermediates.get())
     return ERR_OUT_OF_MEMORY;
 
@@ -368,8 +421,7 @@ int X509Certificate::Verify(const std::string& hostname,
     if (!sk_X509_push(intermediates.get(), *it))
       return ERR_OUT_OF_MEMORY;
   }
-  int rv = X509_STORE_CTX_init(ctx.get(),
-                               GetOpenSSLInitSingleton()->x509_store(),
+  int rv = X509_STORE_CTX_init(ctx.get(), cert_store(),
                                cert_handle_, intermediates.get());
   CHECK_EQ(1, rv);
 
@@ -395,27 +447,15 @@ bool X509Certificate::IsSameOSCert(X509Certificate::OSCertHandle a,
   if (a == b)
     return true;
 
-  // TODO(bulach): re-encoding the certificate is an expensive operation.
-  // Consider 'tagging' each X509* we create using X509_set_ex_data, storing the
-  // original DER data in an index. Then, when comparing two handles, see if
-  // X509_get_ex_data() returns the DER form.
-  unsigned char* data_a = NULL;
-  int data_length_a = i2d_X509(a, &data_a);
-  if (data_length_a <= 0 || !data_a)
-    return false;
+  // X509_cmp only checks the fingerprint, but we want to compare the whole
+  // DER data. Encoding it from OSCertHandle is an expensive operation, so we
+  // cache the DER (if not already cached via X509_set_ex_data).
+  DERCache der_cache_a, der_cache_b;
 
-  bool ret = true;
-  unsigned char* data_b = NULL;
-  int data_length_b = i2d_X509(b, &data_b);
-  if (data_length_b <= 0 || !data_b)
-     ret = false;
-
-  ret = ret && data_length_a == data_length_b;
-  ret = ret && memcmp(data_a, data_b, data_length_a) == 0;
-
-  OPENSSL_free(data_a);
-  OPENSSL_free(data_b);
-  return ret;
+  return GetDERAndCacheIfNeeded(a, &der_cache_a) &&
+      GetDERAndCacheIfNeeded(b, &der_cache_b) &&
+      der_cache_a.data_length == der_cache_b.data_length &&
+      memcmp(der_cache_a.data, der_cache_b.data, der_cache_a.data_length) == 0;
 }
 
 } // namespace net

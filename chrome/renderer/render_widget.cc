@@ -7,8 +7,8 @@
 #include "app/surface/transport_dib.h"
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/histogram.h"
 #include "base/message_loop.h"
+#include "base/metrics/histogram.h"
 #include "base/scoped_ptr.h"
 #include "build/build_config.h"
 #include "chrome/common/chrome_switches.h"
@@ -75,7 +75,7 @@ RenderWidget::RenderWidget(RenderThreadBase* render_thread,
       popup_type_(popup_type),
       pending_window_rect_count_(0),
       suppress_next_char_events_(false),
-      is_gpu_rendering_active_(false) {
+      is_accelerated_compositing_active_(false) {
   RenderProcess::current()->AddRefProcess();
   DCHECK(render_thread_);
 }
@@ -94,8 +94,8 @@ RenderWidget* RenderWidget::Create(int32 opener_id,
                                    RenderThreadBase* render_thread,
                                    WebKit::WebPopupType popup_type) {
   DCHECK(opener_id != MSG_ROUTING_NONE);
-  scoped_refptr<RenderWidget> widget = new RenderWidget(render_thread,
-                                                        popup_type);
+  scoped_refptr<RenderWidget> widget(new RenderWidget(render_thread,
+                                                        popup_type));
   widget->Init(opener_id);  // adds reference
   return widget;
 }
@@ -103,7 +103,7 @@ RenderWidget* RenderWidget::Create(int32 opener_id,
 // static
 WebWidget* RenderWidget::CreateWebWidget(RenderWidget* render_widget) {
   switch (render_widget->popup_type_) {
-    case WebKit::WebPopupTypeNone: // Nothing to create.
+    case WebKit::WebPopupTypeNone:  // Nothing to create.
       break;
     case WebKit::WebPopupTypeSelect:
     case WebKit::WebPopupTypeSuggestion:
@@ -114,22 +114,11 @@ WebWidget* RenderWidget::CreateWebWidget(RenderWidget* render_widget) {
   return NULL;
 }
 
-void RenderWidget::ConfigureAsExternalPopupMenu(const WebPopupMenuInfo& info) {
-  popup_params_.reset(new ViewHostMsg_ShowPopup_Params);
-  popup_params_->item_height = info.itemHeight;
-  popup_params_->item_font_size = info.itemFontSize;
-  popup_params_->selected_item = info.selectedIndex;
-  for (size_t i = 0; i < info.items.size(); ++i)
-    popup_params_->popup_items.push_back(WebMenuItem(info.items[i]));
-  popup_params_->right_aligned = info.rightAligned;
-}
-
 void RenderWidget::Init(int32 opener_id) {
   DoInit(opener_id,
          RenderWidget::CreateWebWidget(this),
          new ViewHostMsg_CreateWidget(opener_id, popup_type_, &routing_id_));
 }
-
 
 void RenderWidget::DoInit(int32 opener_id,
                           WebWidget* web_widget,
@@ -170,8 +159,6 @@ IPC_DEFINE_MESSAGE_MAP(RenderWidget)
   IPC_MESSAGE_HANDLER(ViewMsg_WasHidden, OnWasHidden)
   IPC_MESSAGE_HANDLER(ViewMsg_WasRestored, OnWasRestored)
   IPC_MESSAGE_HANDLER(ViewMsg_UpdateRect_ACK, OnUpdateRectAck)
-  IPC_MESSAGE_HANDLER(ViewMsg_CreateVideo_ACK, OnCreateVideoAck)
-  IPC_MESSAGE_HANDLER(ViewMsg_UpdateVideo_ACK, OnUpdateVideoAck)
   IPC_MESSAGE_HANDLER(ViewMsg_HandleInputEvent, OnHandleInputEvent)
   IPC_MESSAGE_HANDLER(ViewMsg_MouseCaptureLost, OnMouseCaptureLost)
   IPC_MESSAGE_HANDLER(ViewMsg_SetFocus, OnSetFocus)
@@ -234,15 +221,19 @@ void RenderWidget::OnResize(const gfx::Size& new_size,
   if (!webwidget_)
     return;
 
+  // We shouldn't be asked to resize to our current size.
+  DCHECK(size_ != new_size || resizer_rect_ != resizer_rect);
+
   // Remember the rect where the resize corner will be drawn.
   resizer_rect_ = resizer_rect;
+
+  if (size_ == new_size)
+    return;
 
   // TODO(darin): We should not need to reset this here.
   SetHidden(false);
   needs_repainting_on_restore_ = false;
 
-  // We shouldn't be asked to resize to our current size.
-  DCHECK(size_ != new_size);
   size_ = new_size;
 
   // We should not be sent a Resize message if we have not ACK'd the previous
@@ -255,7 +246,7 @@ void RenderWidget::OnResize(const gfx::Size& new_size,
   // an ACK if we are resized to a non-empty rect.
   webwidget_->resize(new_size);
   if (!new_size.IsEmpty()) {
-    if (!webwidget_->isAcceleratedCompositingActive()) {
+    if (!is_accelerated_compositing_active_) {
       // Resize should have caused an invalidation of the entire view.
       DCHECK(paint_aggregator_.HasPendingUpdate());
     }
@@ -287,7 +278,7 @@ void RenderWidget::OnWasRestored(bool needs_repainting) {
   set_next_paint_is_restore_ack();
 
   // Generate a full repaint.
-  if (!webwidget_->isAcceleratedCompositingActive()) {
+  if (!is_accelerated_compositing_active_) {
     didInvalidateRect(gfx::Rect(size_.width(), size_.height()));
   } else {
     scheduleComposite();
@@ -315,14 +306,6 @@ void RenderWidget::OnUpdateRectAck() {
 
   // Continue painting if necessary...
   CallDoDeferredUpdate();
-}
-
-void RenderWidget::OnCreateVideoAck(int32 video_id) {
-  // TODO(scherkus): handle CreateVideo_ACK with a message filter.
-}
-
-void RenderWidget::OnUpdateVideoAck(int32 video_id) {
-  // TODO(scherkus): handle UpdateVideo_ACK with a message filter.
 }
 
 void RenderWidget::OnHandleInputEvent(const IPC::Message& message) {
@@ -482,21 +465,6 @@ void RenderWidget::DoDeferredUpdate() {
   // GpuRenderingActivated message.
   webwidget_->layout();
 
-  // If we are using accelerated compositing then all the drawing
-  // to the associated window happens directly from the gpu process and the
-  // browser process shouldn't do any drawing.
-  // TODO(vangelis): Currently the accelerated compositing path relies on
-  // invalidating parts of the page so that we get a request to redraw.
-  // This needs to change to a model where the compositor updates the
-  // contents of the page independently and the browser process gets no
-  // longer involved.
-  if (webwidget_->isAcceleratedCompositingActive() !=
-      is_gpu_rendering_active_) {
-    is_gpu_rendering_active_ = webwidget_->isAcceleratedCompositingActive();
-    Send(new ViewHostMsg_GpuRenderingActivated(
-        routing_id_, is_gpu_rendering_active_));
-  }
-
   // OK, save the pending update to a local since painting may cause more
   // invalidation.  Some WebCore rendering objects only layout when painted.
   PaintAggregator::PendingUpdate update = paint_aggregator_.GetPendingUpdate();
@@ -512,13 +480,13 @@ void RenderWidget::DoDeferredUpdate() {
   std::vector<gfx::Rect> copy_rects;
   gfx::Rect optimized_copy_rect, optimized_copy_location;
   if (update.scroll_rect.IsEmpty() &&
-      !is_gpu_rendering_active_ &&
+      !is_accelerated_compositing_active_ &&
       GetBitmapForOptimizedPluginPaint(bounds, &dib, &optimized_copy_location,
                                        &optimized_copy_rect)) {
     bounds = optimized_copy_location;
     copy_rects.push_back(optimized_copy_rect);
     dib_id = dib->id();
-  } else if (!is_gpu_rendering_active_) {
+  } else if (!is_accelerated_compositing_active_) {
     // Compute a buffer for painting and cache it.
     scoped_ptr<skia::PlatformCanvas> canvas(
         RenderProcess::current()->GetDrawingCanvas(&current_paint_buf_,
@@ -555,8 +523,7 @@ void RenderWidget::DoDeferredUpdate() {
     dib_id = current_paint_buf_->id();
   } else {  // Accelerated compositing path
     // Begin painting.
-    bool finish = next_paint_is_resize_ack();
-    webwidget_->composite(finish);
+    webwidget_->composite(false);
   }
 
   // sending an ack to browser process that the paint is complete...
@@ -565,7 +532,7 @@ void RenderWidget::DoDeferredUpdate() {
   params.bitmap_rect = bounds;
   params.dx = update.scroll_delta.x();
   params.dy = update.scroll_delta.y();
-  if (is_gpu_rendering_active_) {
+  if (is_accelerated_compositing_active_) {
     // If painting is done via the gpu process then we clear out all damage
     // rects to save the browser process from doing unecessary work.
     params.scroll_rect = gfx::Rect();
@@ -575,6 +542,7 @@ void RenderWidget::DoDeferredUpdate() {
     params.copy_rects.swap(copy_rects);  // TODO(darin): clip to bounds?
   }
   params.view_size = size_;
+  params.resizer_rect = resizer_rect_;
   params.plugin_window_moves.swap(plugin_window_moves_);
   params.flags = next_paint_flags_;
 
@@ -592,15 +560,8 @@ void RenderWidget::DoDeferredUpdate() {
 // WebWidgetClient
 
 void RenderWidget::didInvalidateRect(const WebRect& rect) {
-  if (webwidget_->isAcceleratedCompositingActive()) {
-    // Drop invalidates on the floor when we are in compositing mode.
-    // TODO(nduca): Stop WebViewImpl from sending invalidates in the first
-    // place.
-    if (!(rect.x == 0 && rect.y == 0 &&
-          rect.width == 1 && rect.height == 1)) {
-      return;
-    }
-  }
+  DCHECK(!is_accelerated_compositing_active_ ||
+    (rect.x == 0 && rect.y == 0 && rect.width == 1 && rect.height == 1));
 
   // We only want one pending DoDeferredUpdate call at any time...
   bool update_pending = paint_aggregator_.HasPendingUpdate();
@@ -633,7 +594,7 @@ void RenderWidget::didInvalidateRect(const WebRect& rect) {
 void RenderWidget::didScrollRect(int dx, int dy, const WebRect& clip_rect) {
   // Drop scrolls on the floor when we are in compositing mode.
   // TODO(nduca): stop WebViewImpl from sending scrolls in the first place.
-  if (webwidget_->isAcceleratedCompositingActive())
+  if (is_accelerated_compositing_active_)
     return;
 
   // We only want one pending DoDeferredUpdate call at any time...
@@ -664,6 +625,12 @@ void RenderWidget::didScrollRect(int dx, int dy, const WebRect& clip_rect) {
       this, &RenderWidget::CallDoDeferredUpdate));
 }
 
+void RenderWidget::didActivateAcceleratedCompositing(bool active) {
+  is_accelerated_compositing_active_ = active;
+  Send(new ViewHostMsg_DidActivateAcceleratedCompositing(
+    routing_id_, is_accelerated_compositing_active_));
+}
+
 void RenderWidget::scheduleComposite() {
   // TODO(nduca): replace with something a little less hacky.  The reason this
   // hack is still used is because the Invalidate-DoDeferredUpdate loop
@@ -671,7 +638,7 @@ void RenderWidget::scheduleComposite() {
   // important for the accelerated compositing case. The option of simply
   // duplicating all that code is less desirable than "faking out" the
   // invalidation path using a magical damage rect.
-  didInvalidateRect(WebRect(0,0,1,1));
+  didInvalidateRect(WebRect(0, 0, 1, 1));
 }
 
 void RenderWidget::didChangeCursor(const WebCursorInfo& cursor_info) {
@@ -697,20 +664,15 @@ void RenderWidget::show(WebNavigationPolicy) {
   DCHECK(routing_id_ != MSG_ROUTING_NONE);
   DCHECK(opener_id_ != MSG_ROUTING_NONE);
 
-  if (!did_show_) {
-    did_show_ = true;
-    // NOTE: initial_pos_ may still have its default values at this point, but
-    // that's okay.  It'll be ignored if as_popup is false, or the browser
-    // process will impose a default position otherwise.
-    if (popup_params_.get()) {
-      popup_params_->bounds = initial_pos_;
-      Send(new ViewHostMsg_ShowPopup(routing_id_, *popup_params_));
-      popup_params_.reset();
-    } else {
-      Send(new ViewHostMsg_ShowWidget(opener_id_, routing_id_, initial_pos_));
-    }
-    SetPendingWindowRect(initial_pos_);
-  }
+  if (did_show_)
+    return;
+
+  did_show_ = true;
+  // NOTE: initial_pos_ may still have its default values at this point, but
+  // that's okay.  It'll be ignored if as_popup is false, or the browser
+  // process will impose a default position otherwise.
+  Send(new ViewHostMsg_ShowWidget(opener_id_, routing_id_, initial_pos_));
+  SetPendingWindowRect(initial_pos_);
 }
 
 void RenderWidget::didFocus() {
@@ -819,8 +781,17 @@ void RenderWidget::OnMsgPaintAtSize(const TransportDIB::Handle& dib_handle,
                                     int tag,
                                     const gfx::Size& page_size,
                                     const gfx::Size& desired_size) {
-  if (!webwidget_ || dib_handle == TransportDIB::DefaultHandleValue())
+  if (!webwidget_ || !TransportDIB::is_valid(dib_handle)) {
+    if (TransportDIB::is_valid(dib_handle)) {
+      // Close our unused handle.
+#if defined(OS_WIN)
+      ::CloseHandle(dib_handle);
+#elif defined(OS_MACOSX)
+      base::SharedMemory::CloseHandle(dib_handle);
+#endif
+    }
     return;
+  }
 
   if (page_size.IsEmpty() || desired_size.IsEmpty()) {
     // If one of these is empty, then we just return the dib we were
@@ -831,11 +802,8 @@ void RenderWidget::OnMsgPaintAtSize(const TransportDIB::Handle& dib_handle,
 
   // Map the given DIB ID into this process, and unmap it at the end
   // of this function.
-  scoped_ptr<TransportDIB> paint_at_size_buffer(TransportDIB::Map(dib_handle));
-
-  DCHECK(paint_at_size_buffer.get());
-  if (!paint_at_size_buffer.get())
-    return;
+  scoped_ptr<TransportDIB> paint_at_size_buffer(
+      TransportDIB::CreateWithHandle(dib_handle));
 
   gfx::Size canvas_size = page_size;
   float x_scale = static_cast<float>(desired_size.width()) /
@@ -889,7 +857,7 @@ void RenderWidget::OnMsgRepaint(const gfx::Size& size_to_paint) {
     return;
 
   set_next_paint_is_repaint_ack();
-  if (webwidget_->isAcceleratedCompositingActive()) {
+  if (is_accelerated_compositing_active_) {
     scheduleComposite();
   } else {
     gfx::Rect repaint_rect(size_to_paint.width(), size_to_paint.height());

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,8 @@
 
 #include "base/basictypes.h"
 #include "base/ref_counted.h"
-#include "base/scoped_comptr_win.h"
-#include "base/scoped_bstr_win.h"
+#include "base/win/scoped_comptr.h"
+#include "base/win/scoped_bstr.h"
 #include "googleurl/src/gurl.h"
 #include "chrome_frame/chrome_frame_delegate.h"
 #include "chrome_frame/http_negotiate.h"
@@ -57,18 +57,15 @@ class ProtData;
 // but delegate simply the QI.
 class ProtocolSinkWrap
     : public CComObjectRootEx<CComMultiThreadModel>,
-      public IServiceProvider,
-      public UserAgentAddOn,  // implements IHttpNegotiate
       public IInternetProtocolSink {
  public:
 
 BEGIN_COM_MAP(ProtocolSinkWrap)
-  COM_INTERFACE_ENTRY(IServiceProvider)
   COM_INTERFACE_ENTRY(IInternetProtocolSink)
   COM_INTERFACE_BLIND_DELEGATE()
 END_COM_MAP()
 
-  static ScopedComPtr<IInternetProtocolSink> CreateNewSink(
+  static base::win::ScopedComPtr<IInternetProtocolSink> CreateNewSink(
       IInternetProtocolSink* sink, ProtData* prot_data);
 
   // Apparently this has to be public, to satisfy COM_INTERFACE_BLIND_DELEGATE
@@ -87,16 +84,9 @@ END_COM_MAP()
   STDMETHOD(ReportData)(DWORD flags, ULONG progress, ULONG max_progress);
   STDMETHOD(ReportResult)(HRESULT result, DWORD error, LPCWSTR result_text);
 
-  // IServiceProvider - return our HttpNegotiate or forward to delegate
-  STDMETHOD(QueryService)(REFGUID guidService, REFIID riid, void** ppvObject);
-
-  // Helpers.
-  HRESULT ObtainHttpNegotiate();
-  HRESULT ObtainServiceProvider();
-
   // Remember original sink
-  ScopedComPtr<IInternetProtocolSink> delegate_;
-  ScopedComPtr<IServiceProvider> delegate_service_provider_;
+  base::win::ScopedComPtr<IInternetProtocolSink> delegate_;
+  base::win::ScopedComPtr<IServiceProvider> delegate_service_provider_;
   scoped_refptr<ProtData> prot_data_;
   DISALLOW_COPY_AND_ASSIGN(ProtocolSinkWrap);
 };
@@ -149,7 +139,7 @@ class ProtData : public base::RefCounted<ProtData> {
   InternetProtocol_Read_Fn read_fun_;
 
   // What BINDSTATUS_MIMETYPEAVAILABLE and Co. tells us.
-  ScopedBstr suggested_mime_type_;
+  base::win::ScopedBstr suggested_mime_type_;
   // At least one of the following has been received:
   // BINDSTATUS_MIMETYPEAVAILABLE,
   // MIMESTATUS_VERIFIEDMIMETYPEAVAILABLE

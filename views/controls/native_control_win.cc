@@ -7,15 +7,16 @@
 #include <windowsx.h>
 
 #include "app/l10n_util_win.h"
+#include "app/view_prop.h"
 #include "base/logging.h"
 #include "base/win_util.h"
 #include "views/focus/focus_manager.h"
 
+using app::ViewProp;
+
 namespace views {
 
-// static
-const wchar_t* NativeControlWin::kNativeControlWinKey =
-    L"__NATIVE_CONTROL_WIN__";
+static const char* const kNativeControlWinKey = "__NATIVE_CONTROL_WIN__";
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeControlWin, public:
@@ -34,8 +35,10 @@ NativeControlWin::~NativeControlWin() {
   }
 }
 
-bool NativeControlWin::ProcessMessage(UINT message, WPARAM w_param,
-                                      LPARAM l_param, LRESULT* result) {
+bool NativeControlWin::ProcessMessage(UINT message,
+                                      WPARAM w_param,
+                                      LPARAM l_param,
+                                      LRESULT* result) {
   switch (message) {
     case WM_CONTEXTMENU:
       ShowContextMenu(gfx::Point(GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)));
@@ -129,8 +132,8 @@ void NativeControlWin::ShowContextMenu(const gfx::Point& location) {
 void NativeControlWin::NativeControlCreated(HWND native_control) {
   // Associate this object with the control's HWND so that WidgetWin can find
   // this object when it receives messages from it.
-  // Note that we never unset this property. We don't have to.
-  SetProp(native_control, kNativeControlWinKey, this);
+  props_.push_back(new ViewProp(native_control, kNativeControlWinKey, this));
+  props_.push_back(ChildWindowMessageProcessor::Register(native_control, this));
 
   // Subclass so we get WM_KEYDOWN and WM_SETFOCUS messages.
   original_wndproc_ =
@@ -194,8 +197,8 @@ LRESULT NativeControlWin::NativeControlWndProc(HWND window,
                                                UINT message,
                                                WPARAM w_param,
                                                LPARAM l_param) {
-  NativeControlWin* native_control =
-      static_cast<NativeControlWin*>(GetProp(window, kNativeControlWinKey));
+  NativeControlWin* native_control = reinterpret_cast<NativeControlWin*>(
+      ViewProp::GetValue(window, kNativeControlWinKey));
   DCHECK(native_control);
 
   if (message == WM_KEYDOWN &&
@@ -210,6 +213,7 @@ LRESULT NativeControlWin::NativeControlWndProc(HWND window,
       NOTREACHED();
     }
   } else if (message == WM_DESTROY) {
+    native_control->props_.reset();
     win_util::SetWindowProc(window, native_control->original_wndproc_);
   }
 

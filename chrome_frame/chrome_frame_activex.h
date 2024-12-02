@@ -43,6 +43,7 @@ DECLARE_REGISTRY_RESOURCEID(IDR_CHROMEFRAME_ACTIVEX)
 BEGIN_COM_MAP(ChromeFrameActivex)
   COM_INTERFACE_ENTRY(IObjectWithSite)
   COM_INTERFACE_ENTRY(IObjectSafety)
+  COM_INTERFACE_ENTRY(IPersist)
   COM_INTERFACE_ENTRY(IPersistPropertyBag)
   COM_INTERFACE_ENTRY_CHAIN(Base)
 END_COM_MAP()
@@ -103,6 +104,10 @@ END_MSG_MAP()
       void* user_data,
       const std::vector<FilePath>& extension_directories);
   virtual void OnChannelError();
+
+  // Separated to static function for unit testing this logic more easily.
+  static bool ShouldShowVersionMismatchDialog(bool is_privileged,
+                                              IOleClientSite* client_site);
 
  private:
   LRESULT OnCreate(UINT message, WPARAM wparam, LPARAM lparam,

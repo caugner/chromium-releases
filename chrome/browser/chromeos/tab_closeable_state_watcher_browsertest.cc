@@ -6,13 +6,13 @@
 
 #include "base/file_path.h"
 #include "chrome/browser/app_modal_dialog.h"
-#include "chrome/browser/browser.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/native_app_modal_dialog.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/ui_test_utils.h"
@@ -37,9 +37,7 @@ class TabCloseableStateWatcherTest : public InProcessBrowserTest {
  protected:
   // Wrapper for Browser::AddTabWithURL
   void AddTabWithURL(Browser* browser, const GURL& url) {
-    Browser::AddTabWithURLParams params(url, PageTransition::TYPED);
-    params.index = 0;
-    browser->AddTabWithURL(&params);
+    AddTabAtIndexToBrowser(browser, 0, url, PageTransition::TYPED);
     // Wait for page to finish loading.
     ui_test_utils::WaitForNavigation(
         &browser->GetSelectedTabContents()->controller());
@@ -104,7 +102,8 @@ class NewTabObserver : public TabStripModelObserver {
   }
 
  private:
-  virtual void TabInsertedAt(TabContents* contents, int index,
+  virtual void TabInsertedAt(TabContentsWrapper* contents,
+                             int index,
                              bool foreground) {
     MessageLoopForUI::current()->Quit();
   }

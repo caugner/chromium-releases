@@ -145,6 +145,10 @@ class WidgetFullscreenContainer : public pepper::FullscreenContainer {
     widget_->didInvalidateRect(rect);
   }
 
+  virtual void ScrollRect(int dx, int dy, const WebKit::WebRect& rect) {
+    widget_->didScrollRect(dx, dy, rect);
+  }
+
   virtual void Destroy() {
     widget_->SendClose();
   }
@@ -162,8 +166,8 @@ RenderWidgetFullscreenPepper* RenderWidgetFullscreenPepper::Create(
     int32 opener_id, RenderThreadBase* render_thread,
     pepper::PluginInstance* plugin) {
   DCHECK_NE(MSG_ROUTING_NONE, opener_id);
-  scoped_refptr<RenderWidgetFullscreenPepper> widget =
-      new RenderWidgetFullscreenPepper(render_thread, plugin);
+  scoped_refptr<RenderWidgetFullscreenPepper> widget(
+      new RenderWidgetFullscreenPepper(render_thread, plugin));
   widget->Init(opener_id);
   return widget.release();
 }

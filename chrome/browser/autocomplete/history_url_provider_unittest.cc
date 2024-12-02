@@ -7,6 +7,7 @@
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/browser_thread.h"
 #include "chrome/browser/history/history.h"
@@ -153,7 +154,7 @@ void HistoryURLProviderTest::SetUpImpl(bool no_db) {
   profile_->CreateHistoryService(true, no_db);
   history_service_ = profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
 
-  autocomplete_ = new HistoryURLProvider(this, profile_.get(), L"en-US,en,ko");
+  autocomplete_ = new HistoryURLProvider(this, profile_.get(), "en-US,en,ko");
 
   FillData();
 }
@@ -188,7 +189,7 @@ void HistoryURLProviderTest::RunTest(const std::wstring text,
                                      const std::string* expected_urls,
                                      size_t num_results) {
   AutocompleteInput input(text, desired_tld, prevent_inline_autocomplete,
-                          false, false);
+                          false, true, false);
   autocomplete_->Start(input, false);
   if (!autocomplete_->done())
     MessageLoop::current()->Run();
@@ -202,7 +203,7 @@ void HistoryURLProviderTest::RunTest(const std::wstring text,
 
 void HistoryURLProviderTest::RunAdjustOffsetTest(const std::wstring text,
                                                  size_t expected_offset) {
-  AutocompleteInput input(text, std::wstring(), false, false, false);
+  AutocompleteInput input(text, std::wstring(), false, false, true, false);
   autocomplete_->Start(input, false);
   if (!autocomplete_->done())
     MessageLoop::current()->Run();
