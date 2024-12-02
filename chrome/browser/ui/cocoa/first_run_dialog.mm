@@ -10,7 +10,7 @@
 #include "base/memory/ref_counted.h"
 #import "base/memory/scoped_nsobject.h"
 #include "base/message_loop.h"
-#include "base/sys_string_conversions.h"
+#include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/first_run/first_run_dialog.h"
 #include "chrome/browser/profiles/profile.h"
@@ -78,7 +78,9 @@ void FirstRunShowBridge::ShowDialog() {
 FirstRunShowBridge::~FirstRunShowBridge() {}
 
 // Show the first run UI.
-void ShowFirstRun(Profile* profile) {
+// Returns true if the first run dialog was shown.
+bool ShowFirstRun(Profile* profile) {
+  bool dialog_shown = false;
 #if defined(GOOGLE_CHROME_BUILD)
   // The purpose of the dialog is to ask the user to enable stats and crash
   // reporting. This setting may be controlled through configuration management
@@ -93,6 +95,7 @@ void ShowFirstRun(Profile* profile) {
         [[FirstRunDialogController alloc] init]);
 
     [dialog.get() showWindow:nil];
+    dialog_shown = true;
 
     // If the dialog asked the user to opt-in for stats and crash reporting,
     // record the decision and enable the crash reporter if appropriate.
@@ -129,6 +132,8 @@ void ShowFirstRun(Profile* profile) {
     first_run::SetShowFirstRunBubblePref(first_run::FIRST_RUN_BUBBLE_SHOW);
   }
   first_run::SetShouldShowWelcomePage();
+
+  return dialog_shown;
 }
 
 // True when the stats checkbox should be checked by default. This is only
@@ -142,8 +147,8 @@ bool StatsCheckboxDefault() {
 
 namespace first_run {
 
-void ShowFirstRunDialog(Profile* profile) {
-  ShowFirstRun(profile);
+bool ShowFirstRunDialog(Profile* profile) {
+  return ShowFirstRun(profile);
 }
 
 }  // namespace first_run

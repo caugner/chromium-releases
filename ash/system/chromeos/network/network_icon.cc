@@ -640,8 +640,8 @@ gfx::ImageSkia GetImageForDisconnectedNetwork(IconType icon_type,
   return GetDisconnectedImage(network_type, icon_type);
 }
 
-string16 GetLabelForNetwork(const chromeos::NetworkState* network,
-                            IconType icon_type) {
+base::string16 GetLabelForNetwork(const chromeos::NetworkState* network,
+                                  IconType icon_type) {
   DCHECK(network);
   std::string activation_state = network->activation_state();
   if (icon_type == ICON_TYPE_LIST) {
@@ -692,8 +692,8 @@ int GetCellularUninitializedMsg() {
   static int s_uninitialized_msg(0);
 
   NetworkStateHandler* handler = NetworkStateHandler::Get();
-  if (handler->TechnologyUninitialized(
-          NetworkStateHandler::kMatchTypeMobile)) {
+  if (handler->GetTechnologyState(NetworkStateHandler::kMatchTypeMobile)
+      == NetworkStateHandler::TECHNOLOGY_UNINITIALIZED) {
     s_uninitialized_msg = IDS_ASH_STATUS_TRAY_INITIALIZING_CELLULAR;
     s_uninitialized_state_time = base::Time::Now();
     return s_uninitialized_msg;

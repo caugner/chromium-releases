@@ -23,7 +23,6 @@
 #include "base/utf_string_conversions.h"
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/windows_version.h"
-#include "base/win/wrapped_window_proc.h"
 #include "remoting/base/auto_thread.h"
 #include "remoting/base/scoped_sc_handle_win.h"
 #include "remoting/base/stoppable.h"
@@ -48,10 +47,6 @@ namespace remoting {
 namespace {
 
 const char kIoThreadName[] = "I/O thread";
-
-// A window class for the session change notifications window.
-const wchar_t kSessionNotificationWindowClass[] =
-  L"Chromoting_SessionNotificationWindow";
 
 // Command line switches:
 
@@ -281,8 +276,8 @@ void HostService::CreateLauncher(
     scoped_refptr<AutoThreadTaskRunner> task_runner) {
   // Launch the I/O thread.
   scoped_refptr<AutoThreadTaskRunner> io_task_runner =
-      AutoThread::CreateWithType(kIoThreadName, task_runner,
-                                 MessageLoop::TYPE_IO);
+      AutoThread::CreateWithType(
+          kIoThreadName, task_runner, base::MessageLoop::TYPE_IO);
   if (!io_task_runner) {
     LOG(FATAL) << "Failed to start the I/O thread";
     return;
@@ -335,7 +330,7 @@ int HostService::RunAsService() {
 }
 
 void HostService::RunAsServiceImpl() {
-  MessageLoop message_loop(MessageLoop::TYPE_UI);
+  base::MessageLoop message_loop(base::MessageLoop::TYPE_UI);
   base::RunLoop run_loop;
   main_task_runner_ = message_loop.message_loop_proxy();
 
@@ -389,7 +384,7 @@ void HostService::RunAsServiceImpl() {
 }
 
 int HostService::RunInConsole() {
-  MessageLoop message_loop(MessageLoop::TYPE_UI);
+  base::MessageLoop message_loop(base::MessageLoop::TYPE_UI);
   base::RunLoop run_loop;
   main_task_runner_ = message_loop.message_loop_proxy();
 
@@ -411,32 +406,15 @@ int HostService::RunInConsole() {
   }
 
   // Create a window for receiving session change notifications.
-  HWND window = NULL;
-  WNDCLASSEX window_class;
-  base::win::InitializeWindowClass(
-      kSessionNotificationWindowClass,
-      &base::win::WrappedWindowProc<SessionChangeNotificationProc>,
-      0, 0, 0, NULL, NULL, NULL, NULL, NULL,
-      &window_class);
-  HINSTANCE instance = window_class.hInstance;
-  ATOM atom = RegisterClassExW(&window_class);
-  if (atom == 0) {
+  win::MessageWindow window;
+  if (!window.Create(this)) {
     LOG_GETLASTERROR(ERROR)
-        << "Failed to register the window class '"
-        << kSessionNotificationWindowClass << "'";
-    goto cleanup;
-  }
-
-  window = CreateWindowW(MAKEINTATOM(atom), 0, 0, 0, 0, 0, 0, HWND_MESSAGE, 0,
-                         instance, 0);
-  if (window == NULL) {
-    LOG_GETLASTERROR(ERROR)
-        << "Failed to creat the session notificationwindow";
+        << "Failed to create the session notification window";
     goto cleanup;
   }
 
   // Subscribe to session change notifications.
-  if (WTSRegisterSessionNotification(window,
+  if (WTSRegisterSessionNotification(window.hwnd(),
                                      NOTIFY_FOR_ALL_SESSIONS) != FALSE) {
     CreateLauncher(scoped_refptr<AutoThreadTaskRunner>(
         new AutoThreadTaskRunner(main_task_runner_,
@@ -448,25 +426,28 @@ int HostService::RunInConsole() {
     // Release the control handler.
     stopped_event_.Signal();
 
-    WTSUnRegisterSessionNotification(window);
+    WTSUnRegisterSessionNotification(window.hwnd());
     result = kSuccessExitCode;
   }
 
 cleanup:
-  if (window != NULL) {
-    DestroyWindow(window);
-  }
-
-  if (atom != 0) {
-    UnregisterClass(MAKEINTATOM(atom), instance);
-  }
-
   // Unsubscribe from console events. Ignore the exit code. There is nothing
   // we can do about it now and the program is about to exit anyway. Even if
   // it crashes nothing is going to be broken because of it.
   SetConsoleCtrlHandler(&HostService::ConsoleControlHandler, FALSE);
 
   return result;
+}
+
+bool HostService::HandleMessage(
+    HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam, LRESULT* result) {
+  if (message == WM_WTSSESSION_CHANGE) {
+    OnSessionChange(wparam, lparam);
+    *result = 0;
+    return true;
+  }
+
+  return false;
 }
 
 // static
@@ -526,23 +507,6 @@ VOID WINAPI HostService::ServiceMain(DWORD argc, WCHAR* argv[]) {
   // Release the control handler and notify the main thread that it can exit
   // now.
   self->stopped_event_.Signal();
-}
-
-// static
-LRESULT CALLBACK HostService::SessionChangeNotificationProc(HWND hwnd,
-                                                            UINT message,
-                                                            WPARAM wparam,
-                                                            LPARAM lparam) {
-  switch (message) {
-    case WM_WTSSESSION_CHANGE: {
-      HostService* self = HostService::GetInstance();
-      self->OnSessionChange(wparam, lparam);
-      return 0;
-    }
-
-    default:
-      return DefWindowProc(hwnd, message, wparam, lparam);
-  }
 }
 
 int DaemonProcessMain() {

@@ -56,6 +56,9 @@ bool Textfield::IsViewsTextfieldEnabled() {
     return false;
   if (command_line->HasSwitch(switches::kEnableViewsTextfield))
     return true;
+  // The new dialog style cannot host native Windows textfield controls.
+  if (command_line->HasSwitch(switches::kEnableNewDialogStyle))
+    return true;
   return false;
 #endif
   return true;
@@ -119,8 +122,8 @@ TextfieldController* Textfield::GetController() const {
 }
 
 void Textfield::SetReadOnly(bool read_only) {
+  // Update read-only without changing the focusable state (or active, etc.).
   read_only_ = read_only;
-  set_focusable(!read_only);
   if (native_wrapper_) {
     native_wrapper_->UpdateReadOnly();
     native_wrapper_->UpdateTextColor();
@@ -439,6 +442,10 @@ void Textfield::SetAccessibleName(const string16& name) {
 
 void Textfield::ExecuteCommand(int command_id) {
   native_wrapper_->ExecuteTextCommand(command_id);
+}
+
+bool Textfield::HasTextBeingDragged() {
+  return native_wrapper_->HasTextBeingDragged();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

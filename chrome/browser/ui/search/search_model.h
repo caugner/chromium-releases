@@ -9,9 +9,6 @@
 #include "base/observer_list.h"
 #include "chrome/common/search_types.h"
 
-namespace chrome {
-namespace search {
-
 class SearchModelObserver;
 
 // An observable model for UI components that care about search model state
@@ -20,13 +17,17 @@ class SearchModel {
  public:
   struct State {
     State() : top_bars_visible(true) {}
+    State(const SearchMode& mode, bool top_bars_visible)
+        : mode(mode),
+          top_bars_visible(top_bars_visible) {}
 
     bool operator==(const State& rhs) const {
       return mode == rhs.mode && top_bars_visible == rhs.top_bars_visible;
     }
 
     // The display mode of UI elements such as the toolbar, the tab strip, etc.
-    Mode mode;
+    SearchMode mode;
+
     // The visibility of top bars such as bookmark and info bars.
     bool top_bars_visible;
   };
@@ -46,10 +47,10 @@ class SearchModel {
   const State& state() const { return state_; }
 
   // Change the mode.  Change notifications are sent to observers.
-  void SetMode(const Mode& mode);
+  void SetMode(const SearchMode& mode);
 
   // Get the active mode.
-  const Mode& mode() const { return state_.mode; }
+  const SearchMode& mode() const { return state_.mode; }
 
   // Set visibility of top bars.  Change notifications are sent to observers.
   void SetTopBarsVisible(bool visible);
@@ -70,8 +71,5 @@ class SearchModel {
 
   DISALLOW_COPY_AND_ASSIGN(SearchModel);
 };
-
-}  // namespace search
-}  // namespace chrome
 
 #endif  // CHROME_BROWSER_UI_SEARCH_SEARCH_MODEL_H_

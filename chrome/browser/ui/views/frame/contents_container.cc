@@ -78,12 +78,15 @@ class ShadowView : public views::View {
 
 }  // namespace
 
-ContentsContainer::ContentsContainer(views::WebView* active)
+ContentsContainer::ContentsContainer(views::WebView* active,
+                                     views::View* browser_view)
     : active_(active),
+      browser_view_(browser_view),
       overlay_(NULL),
       overlay_web_contents_(NULL),
       draw_drop_shadow_(false),
       active_top_margin_(0),
+      overlay_top_margin_(0),
       overlay_height_(100),
       overlay_height_units_(INSTANT_SIZE_PERCENT) {
   AddChildView(active_);
@@ -169,6 +172,17 @@ void ContentsContainer::SetOverlay(views::WebView* overlay,
 #endif  // !defined(OS_WIN)
   }
 
+  // If |overlay_|'s height has shrunk and |active_top_margin_| was used to
+  // preserve |active_|'s origin in BrowserViewLayout::Layout(), we need to re-
+  // determine if its origin still needs to be preserved.  The origin is
+  // preserved if overlay is taller than total height of hidden bookmark and
+  // info bars.  In this case, force a re-layout of BrowserView.
+  bool layout_browser_view = false;
+  if (overlay_ && active_top_margin_ > 0 && units == INSTANT_SIZE_PIXELS &&
+      height > 0 && height < overlay_height_) {
+    layout_browser_view = true;
+  }
+
   overlay_height_ = height;
   overlay_height_units_ = units;
   draw_drop_shadow_ = draw_drop_shadow;
@@ -197,7 +211,10 @@ void ContentsContainer::SetOverlay(views::WebView* overlay,
     shadow_view_.reset();
   }
 
-  Layout();
+  if (layout_browser_view)
+    browser_view_->Layout();  // This will trigger |this| Layout.
+  else
+    Layout();
 }
 
 void ContentsContainer::MaybeStackOverlayAtTop() {
@@ -218,14 +235,25 @@ void ContentsContainer::MaybeStackOverlayAtTop() {
   Layout();
 }
 
-void ContentsContainer::SetActiveTopMargin(int margin) {
+bool ContentsContainer::SetActiveTopMargin(int margin) {
   if (active_top_margin_ == margin)
-    return;
+    return false;
 
   active_top_margin_ = margin;
   // Make sure we layout next time around. We need this in case our bounds
   // haven't changed.
   InvalidateLayout();
+  return true;
+}
+
+bool ContentsContainer::SetOverlayTopMargin(int margin) {
+  if (overlay_top_margin_ == margin)
+    return false;
+  overlay_top_margin_ = margin;
+  // Make sure we layout next time around. We need this in case our bounds
+  // haven't changed.
+  InvalidateLayout();
+  return true;
 }
 
 gfx::Rect ContentsContainer::GetOverlayBounds() const {
@@ -234,12 +262,17 @@ gfx::Rect ContentsContainer::GetOverlayBounds() const {
   return gfx::Rect(screen_loc, size());
 }
 
-bool ContentsContainer::IsOverlayFullHeight(
+bool ContentsContainer::WillOverlayBeFullHeight(
     int overlay_height,
     InstantSizeUnits overlay_height_units) const {
   int height_in_pixels = OverlayHeightInPixels(height(), overlay_height,
                                                overlay_height_units);
   return height_in_pixels == height();
+}
+
+bool ContentsContainer::IsOverlayFullHeight() const {
+  return overlay_ && overlay_height_ == 100 &&
+      overlay_height_units_ == INSTANT_SIZE_PERCENT;
 }
 
 void ContentsContainer::Layout() {
@@ -249,13 +282,17 @@ void ContentsContainer::Layout() {
   active_->SetBounds(0, content_y, width(), content_height);
 
   if (overlay_) {
-    overlay_->SetBounds(0, 0, width(),
-                        OverlayHeightInPixels(height(), overlay_height_,
-                                              overlay_height_units_));
+    int target_overlay_height =
+        OverlayHeightInPixels(height(), overlay_height_, overlay_height_units_);
+    // Ensure the overlay doesn't extend outside this container view.
+    int overlay_height =
+        std::min(height() - overlay_top_margin_, target_overlay_height);
+    overlay_->SetBounds(0, overlay_top_margin_,
+                        width(), std::max(0, overlay_height));
     if (draw_drop_shadow_) {
 #if !defined(OS_WIN)
       DCHECK(shadow_view_.get() && shadow_view_->parent());
-      shadow_view_->SetBounds(0, overlay_->bounds().height(), width(),
+      shadow_view_->SetBounds(0, overlay_->bounds().bottom(), width(),
                               shadow_view_->GetPreferredSize().height());
 #endif  // !defined(OS_WIN)
     }

@@ -37,15 +37,7 @@ using WebKit::WebNode;
 using WebKit::WebString;
 using WebKit::WebVector;
 
-using autofill::ClearPreviewedFormWithElement;
-using autofill::ClickElement;
-using autofill::FillForm;
-using autofill::FindFormAndFieldForInputElement;
-using autofill::FillFormIncludingNonFocusableElements;
-using autofill::FormWithElementIsAutofilled;
-using autofill::FormCache;
-using autofill::PreviewForm;
-using autofill::WebFormControlElementToFormField;
+namespace autofill {
 
 class FormAutofillTest : public ChromeRenderViewTest {
  public:
@@ -218,7 +210,7 @@ TEST_F(FormAutofillTest, WebFormControlElementToFormFieldAutofilled) {
 // We should be able to extract a radio or a checkbox field that has been
 // autofilled.
 TEST_F(FormAutofillTest, WebFormControlElementToClickableFormField) {
-  LoadHTML("<INPUT type=\"checkbox\" id=\"checkbox\" value=\"mail\"/>"
+  LoadHTML("<INPUT type=\"checkbox\" id=\"checkbox\" value=\"mail\" checked/>"
            "<INPUT type=\"radio\" id=\"radio\" value=\"male\"/>");
 
   WebFrame* frame = GetMainFrame();
@@ -236,6 +228,7 @@ TEST_F(FormAutofillTest, WebFormControlElementToClickableFormField) {
   expected.form_control_type = "checkbox";
   expected.is_autofilled = true;
   expected.is_checkable = true;
+  expected.is_checked = true;
   EXPECT_FORM_FIELD_DATA_EQUALS(expected, result);
 
   web_element = frame->document().getElementById("radio");
@@ -247,6 +240,7 @@ TEST_F(FormAutofillTest, WebFormControlElementToClickableFormField) {
   expected.form_control_type = "radio";
   expected.is_autofilled = true;
   expected.is_checkable = true;
+  expected.is_checked = false;
   EXPECT_FORM_FIELD_DATA_EQUALS(expected, result);
 }
 
@@ -618,6 +612,44 @@ TEST_F(FormAutofillTest, ExtractFormsTooFewFields) {
   std::vector<FormData> forms;
   form_cache.ExtractForms(*web_frame, &forms);
   EXPECT_EQ(0U, forms.size());
+}
+
+// We should not report additional forms for empty forms.
+TEST_F(FormAutofillTest, ExtractFormsSkippedForms) {
+  LoadHTML("<FORM name=\"TestForm\" action=\"http://cnn.com\" method=\"post\">"
+           "  <INPUT type=\"text\" id=\"firstname\" value=\"John\"/>"
+           "  <INPUT type=\"text\" id=\"lastname\" value=\"Smith\"/>"
+           "</FORM>");
+
+  WebFrame* web_frame = GetMainFrame();
+  ASSERT_NE(static_cast<WebFrame*>(NULL), web_frame);
+
+  FormCache form_cache;
+  std::vector<FormData> forms;
+  bool has_skipped_forms = form_cache.ExtractFormsAndFormElements(*web_frame,
+                                                               3,
+                                                               &forms,
+                                                               NULL);
+  EXPECT_EQ(0U, forms.size());
+  EXPECT_TRUE(has_skipped_forms);
+}
+
+// We should not report additional forms for empty forms.
+TEST_F(FormAutofillTest, ExtractFormsNoFields) {
+  LoadHTML("<FORM name=\"TestForm\" action=\"http://cnn.com\" method=\"post\">"
+           "</FORM>");
+
+  WebFrame* web_frame = GetMainFrame();
+  ASSERT_NE(static_cast<WebFrame*>(NULL), web_frame);
+
+  FormCache form_cache;
+  std::vector<FormData> forms;
+  bool has_skipped_forms = form_cache.ExtractFormsAndFormElements(*web_frame,
+                                                               3,
+                                                               &forms,
+                                                               NULL);
+  EXPECT_EQ(0U, forms.size());
+  EXPECT_FALSE(has_skipped_forms);
 }
 
 // We should not extract a form if it has too few fillable fields.
@@ -3070,3 +3102,5 @@ TEST_F(FormAutofillTest, SelectOneAsText) {
   expected.max_length = 0;
   EXPECT_FORM_FIELD_DATA_EQUALS(expected, fields[2]);
 }
+
+}  // namespace autofill

@@ -37,7 +37,9 @@ NSBox* CreateBorderView() {
   return border_view;
 }
 
-}
+}  // namespace
+
+namespace autofill {
 
 AutofillPopupViewBridge::AutofillPopupViewBridge(
     AutofillPopupController* controller)
@@ -105,6 +107,13 @@ void AutofillPopupViewBridge::UpdateBoundsAndRedrawPopup() {
     // Popup is above the element which initiated it.
     frame.origin.y += kBorderWidth;
   }
+  if (controller_->popup_bounds().x() == controller_->element_bounds().x()) {
+    // Popup is anchored to the left of the element which initiated it.
+    frame.origin.x += kBorderWidth;
+  } else {
+    // Popup is anhored to the right of the element which initiated it.
+    frame.origin.x -= kBorderWidth;
+  }
 
   // TODO(isherman): The view should support scrolling if the popup gets too
   // big to fit on the screen.
@@ -115,3 +124,5 @@ AutofillPopupView* AutofillPopupView::Create(
     AutofillPopupController* controller) {
   return new AutofillPopupViewBridge(controller);
 }
+
+}  // namespace autofill

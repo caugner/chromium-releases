@@ -37,7 +37,7 @@ if (!chrome.embeddedSearch) {
       var nodeShadow = safeObjects.createShadowRoot.apply(node);
       nodeShadow.applyAuthorStyles = true;
       nodeShadow.innerHTML =
-          '<div style="' +
+          '<div dir="auto" style="' +
               (opt_width ? 'width: ' + opt_width + 'px !important;' : '') +
               'height: ' + height + 'px !important;' +
               'font-family: \'' + GetFont() + '\', \'Arial\' !important;' +
@@ -107,30 +107,39 @@ if (!chrome.embeddedSearch) {
       native function NavigateSearchBox();
       native function ShowBars();
       native function HideBars();
+      native function GetSuggestionData();
+      native function GetMostVisitedItemData();
 
       function SafeWrapSuggestion(restrictedText) {
         return SafeWrap(restrictedText, 22);
       }
 
-      // Wraps the AutocompleteResult query and URL into ShadowDOM nodes so that
-      // the JS cannot access them and deletes the raw values.
+      // If shadowDom is to be used, wraps the AutocompleteResult query and URL
+      // into ShadowDOM nodes so that the JS cannot access them and deletes the
+      // raw values. Else if iframes are to be used, replaces the
+      // destination_url with the chrome search URL that should be used as the
+      // iframe.
+      // TODO(shishir): Remove code to support ShadowDOM once server side
+      // changes are live.
       function GetAutocompleteResultsWrapper() {
         var autocompleteResults = DedupeAutocompleteResults(
             GetAutocompleteResults());
         var userInput = GetQuery();
         for (var i = 0, result; result = autocompleteResults[i]; ++i) {
+          // TODO(shishir): Fix the naming violations (chrome_search ->
+          // chrome-search etc) when the server supports both names.
           var className = result.is_search ? 'chrome_search' : 'chrome_url';
           var combinedElement = '<span class=' + className + '>' +
               escapeHTML(result.contents) + '</span>';
           if (result.description) {
-            combinedElement += '<span class=chrome_separator> &ndash; </span>' +
+            combinedElement +=
+                '<span class=chrome_separator> &ndash; </span>' +
                 '<span class=chrome_title>' +
                 escapeHTML(result.description) + '</span>';
           }
-          result.combinedNode = SafeWrapSuggestion(combinedElement);
-          delete result.contents;
-          delete result.description;
-          delete result.destination_url;
+          result.destination_url = null;
+          result.contents = null;
+          result.description = null;
         }
         return autocompleteResults;
       }
@@ -224,6 +233,18 @@ if (!chrome.embeddedSearch) {
       this.__defineGetter__('font', GetFont);
       this.__defineGetter__('fontSize', GetFontSize);
 
+      // This method is restricted to chrome-search://suggestion pages by
+      // checking the invoking context's origin in searchbox_extension.cc.
+      this.getSuggestionData = function(restrictedId) {
+        return GetSuggestionData(restrictedId);
+      };
+
+      // This method is restricted to chrome-search://most-visited pages by
+      // checking the invoking context's origin in searchbox_extension.cc.
+      this.getMostVisitedItemData = function(restrictedId) {
+        return GetMostVisitedItemData(restrictedId);
+      };
+
       this.setSuggestions = function(text) {
         SetSuggestions(text);
       };
@@ -307,11 +328,12 @@ if (!chrome.embeddedSearch) {
         for (var i = 0, item; item = mostVisitedItems[i]; ++i) {
           var title = escapeHTML(item.title);
           var domain = escapeHTML(item.domain);
-          item.titleElement = SafeWrapMostVisited(title, 140, item.direction);
-          item.domainElement = SafeWrapMostVisited(domain, 123);
-          delete item.title;
-          delete item.domain;
-          delete item.direction;
+          // These properties are private data and should not be returned to
+          // the page. They are only accessible via getMostVisitedItemData().
+          item.url = null;
+          item.title = null;
+          item.domain = null;
+          item.direction = null;
         }
         return mostVisitedItems;
       }

@@ -8,7 +8,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
-#include "chrome/browser/view_type_utils.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/url_constants.h"
@@ -16,6 +15,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/view_type_utils.h"
 #include "ui/gfx/rect.h"
 
 using content::SiteInstance;
@@ -32,8 +32,8 @@ BackgroundContents::BackgroundContents(SiteInstance* site_instance,
   WebContents::CreateParams create_params(profile_, site_instance);
   create_params.routing_id = routing_id;
   web_contents_.reset(WebContents::Create(create_params));
-  chrome::SetViewType(
-      web_contents_.get(), chrome::VIEW_TYPE_BACKGROUND_CONTENTS);
+  extensions::SetViewType(
+      web_contents_.get(), extensions::VIEW_TYPE_BACKGROUND_CONTENTS);
   web_contents_->SetDelegate(this);
   content::WebContentsObserver::Observe(web_contents_.get());
 
@@ -57,6 +57,12 @@ BackgroundContents::BackgroundContents()
 BackgroundContents::~BackgroundContents() {
   if (!web_contents_.get())   // Will be null for unit tests.
     return;
+
+  // Unregister for any notifications before notifying observers that we are
+  // going away - this prevents any re-entrancy due to chained notifications
+  // (http://crbug.com/237781).
+  registrar_.RemoveAll();
+
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED,
       content::Source<Profile>(profile_),

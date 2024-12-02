@@ -41,8 +41,8 @@ function FileListBannerController(
   util.storage.onChanged.addListener(this.onStorageChange_.bind(this));
   this.welcomeHeaderCounter_ = WELCOME_HEADER_COUNTER_LIMIT;
   this.warningDismissedCounter_ = 0;
-  util.storage.sync.get([WELCOME_HEADER_COUNTER_KEY, WARNING_DISMISSED_KEY],
-                          function(values) {
+  util.storage.local.get([WELCOME_HEADER_COUNTER_KEY, WARNING_DISMISSED_KEY],
+                         function(values) {
     this.welcomeHeaderCounter_ =
         parseInt(values[WELCOME_HEADER_COUNTER_KEY]) || 0;
     this.warningDismissedCounter_ =
@@ -586,12 +586,6 @@ FileListBannerController.prototype.ensureDriveUnmountedPanelInitialized_ =
   var loading = create(panel, 'div', 'loading', str('DRIVE_LOADING'));
   var spinnerBox = create(loading, 'div', 'spinner-box');
   create(spinnerBox, 'div', 'spinner');
-  var progress = create(panel, 'div', 'progress');
-  chrome.fileBrowserPrivate.onDocumentFeedFetched.addListener(
-      function(fileCount) {
-        progress.textContent = strf('DRIVE_LOADING_PROGRESS', fileCount);
-      });
-
   create(panel, 'div', 'error', str('DRIVE_CANNOT_REACH'));
 
   var retryButton = create(panel, 'button', 'retry', str('DRIVE_RETRY'));

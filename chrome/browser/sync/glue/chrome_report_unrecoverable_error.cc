@@ -15,7 +15,7 @@
 
 namespace browser_sync {
 
-static const double kErrorUploadRatio = 0.0;
+static const double kErrorUploadRatio = 0.00;
 void ChromeReportUnrecoverableError() {
   // TODO(lipalani): Add this for other platforms as well.
 #if defined(OS_WIN)

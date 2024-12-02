@@ -54,7 +54,32 @@ function makeApiCall() {
   setCompleted('makeApiCall');
 }
 
+// Makes an API call that has a custom binding.
+function makeSpecialApiCalls() {
+  var url = chrome.extension.getURL("image/cat.jpg");
+  var noparam = chrome.extension.getViews();
+  setCompleted('makeSpecialApiCalls');
+}
+
+// Checks that we don't double-log calls that go through setHandleRequest
+// *and* the ExtensionFunction machinery.
+function checkNoDoubleLogging() {
+  chrome.omnibox.setDefaultSuggestion({description: 'hello world'});
+  setCompleted('checkNoDoubleLogging');
+}
+
+// Check whether we log calls to chrome.app.*;
+function checkAppCalls() {
+  chrome.app.getDetails();
+  setCompleted('chrome.app.getDetails()');
+  var b = chrome.app.isInstalled;
+  setCompleted('chrome.app.isInstalled');
+  var c = chrome.app.installState();
+  setCompleted('chrome.app.installState()');
+}
+
 // Makes an API call that the extension doesn't have permission for.
+// Don't add the management permission or this test won't test the code path.
 function makeBlockedApiCall() {
   try {
     var all_extensions = chrome.management.getAll();
@@ -131,18 +156,38 @@ function doWebRequestModifications() {
   // Install a webRequest handler that will add an HTTP header to the outgoing
   // request for the main page.
   function doModifyHeaders(details) {
+    var response = {};
+
     var headers = details.requestHeaders;
     if (headers === undefined) {
       headers = [];
     }
     headers.push({'name': 'X-Test-Activity-Log-Send',
                   'value': 'Present'});
-    return {'requestHeaders': headers};
+    response['requestHeaders'] = headers;
+
+    headers = details.responseHeaders;
+    if (headers === undefined) {
+      headers = [];
+    }
+    headers = headers.filter(
+        function(x) {return x["name"] != "Cache-Control"});
+    headers.push({'name': 'X-Test-Response-Header',
+                  'value': 'Inserted'});
+    headers.push({'name': 'Set-Cookie',
+                  'value': 'ActivityLog=InsertedCookie'});
+    response['responseHeaders'] = headers;
+
+    return response;
   }
   chrome.webRequest.onBeforeSendHeaders.addListener(
       doModifyHeaders,
       {'urls': ['http://*/*'], 'types': ['main_frame']},
       ['blocking', 'requestHeaders']);
+  chrome.webRequest.onHeadersReceived.addListener(
+      doModifyHeaders,
+      {'urls': ['http://*/*'], 'types': ['main_frame']},
+      ['blocking', 'responseHeaders']);
 
   // Open a tab, then close it when it has finished loading--this should give
   // the webRequest handler a chance to run.
@@ -160,16 +205,81 @@ function doWebRequestModifications() {
   window.open('http://www.google.co.uk');
 }
 
+function getSetObjectProperties() {
+  chrome.tabs.onUpdated.addListener(
+    function getTabProperties(tabId, changeInfo, tab) {
+      if (changeInfo['status'] === "complete"
+          && tab.url.match(/google\.dk/g)) {
+        console.log(tab.id + " " + tab.index + " " + tab.url);
+        tab.index = 3333333333333333333;
+        chrome.tabs.remove(tabId);
+        chrome.tabs.onUpdated.removeListener(getTabProperties);
+        setCompleted('getSetObjectProperties');
+      }
+    }
+  );
+  window.open('http://www.google.dk');
+}
+
+function callObjectMethod() {
+  var storageArea = chrome.storage.sync;
+  storageArea.clear();
+  setCompleted('callObjectMethod()');
+}
+
+function sendMessageToCS() {
+  chrome.tabs.onUpdated.addListener(
+    function messageCS(tabId, changeInfo, tab) {
+      if (changeInfo['status'] === "complete"
+          && tab.url.match(/google\.com\.bo/g)) {
+        chrome.tabs.sendMessage(tabId, "hellooooo!");
+        chrome.tabs.remove(tabId);
+        chrome.tabs.onUpdated.removeListener(messageCS);
+        setCompleted('sendMessageToCS');
+      }
+    }
+  );
+  window.open('http://www.google.com.bo');
+}
+
+function sendMessageToSelf() {
+  chrome.runtime.sendMessage("hello hello");
+  setCompleted('sendMessageToSelf');
+}
+
+function sendMessageToOther() {
+  chrome.runtime.sendMessage("ocacnieaapoflmkebkeaidpgfngocapl",
+                             "knock knock",
+                             function response() {
+                               console.log("who's there?");
+                             });
+  setCompleted('sendMessageToOther');
+}
+
+function connectToOther() {
+  chrome.runtime.connect("ocacnieaapoflmkebkeaidpgfngocapl");
+  setCompleted('connectToOther');
+}
+
 // REGISTER YOUR TESTS HERE
 // Attach the tests to buttons.
 function setupEvents() {
   $('api_call').addEventListener('click', makeApiCall);
+  $('special_call').addEventListener('click', makeSpecialApiCalls);
   $('blocked_call').addEventListener('click', makeBlockedApiCall);
   $('inject_cs').addEventListener('click', injectContentScript);
   $('inject_blob').addEventListener('click', injectScriptBlob);
   $('background_xhr').addEventListener('click', doBackgroundXHR);
   $('cs_xhr').addEventListener('click', doContentScriptXHR);
   $('webrequest').addEventListener('click', doWebRequestModifications);
+  $('double').addEventListener('click', checkNoDoubleLogging);
+  $('app_bindings').addEventListener('click', checkAppCalls);
+  $('object_properties').addEventListener('click', getSetObjectProperties);
+  $('object_methods').addEventListener('click', callObjectMethod);
+  $('message_cs').addEventListener('click', sendMessageToCS);
+  $('message_self').addEventListener('click', sendMessageToSelf);
+  $('message_other').addEventListener('click', sendMessageToOther);
+  $('connect_other').addEventListener('click', connectToOther);
 
   completed = 0;
   total = document.getElementsByTagName('button').length;

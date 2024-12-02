@@ -227,15 +227,16 @@ void FramePainter::Init(views::Widget* frame,
       rb.GetImageNamed(IDR_AURA_WINDOW_HEADER_SHADE_RIGHT).ToImageSkia();
 
   window_ = frame->GetNativeWindow();
-  // Ensure we get resize cursors for a few pixels outside our bounds.
-  window_->SetHitTestBoundsOverrideOuter(
-      gfx::Insets(-kResizeOutsideBoundsSize, -kResizeOutsideBoundsSize,
-                  -kResizeOutsideBoundsSize, -kResizeOutsideBoundsSize),
+  gfx::Insets mouse_insets = gfx::Insets(-kResizeOutsideBoundsSize,
+                                         -kResizeOutsideBoundsSize,
+                                         -kResizeOutsideBoundsSize,
+                                         -kResizeOutsideBoundsSize);
+  gfx::Insets touch_insets = mouse_insets.Scale(
       kResizeOutsideBoundsScaleForTouch);
+  // Ensure we get resize cursors for a few pixels outside our bounds.
+  window_->SetHitTestBoundsOverrideOuter(mouse_insets, touch_insets);
   // Ensure we get resize cursors just inside our bounds as well.
-  window_->set_hit_test_bounds_override_inner(
-      gfx::Insets(kResizeInsideBoundsSize, kResizeInsideBoundsSize,
-                  kResizeInsideBoundsSize, kResizeInsideBoundsSize));
+  window_->set_hit_test_bounds_override_inner(mouse_insets);
 
   // Watch for maximize/restore/fullscreen state changes.  Observer removes
   // itself in OnWindowDestroying() below, or in the destructor if we go away
@@ -673,7 +674,7 @@ void FramePainter::OnWindowBoundsChanged(aura::Window* window,
 
   // TODO(sky): this isn't quite right. What we really want is a method that
   // returns bounds ignoring transforms on certain windows (such as workspaces).
-  if (!frame_->IsMaximized() &&
+  if ((!frame_->IsMaximized() && !frame_->IsFullscreen()) &&
       ((old_bounds.y() == 0 && new_bounds.y() != 0) ||
        (old_bounds.y() != 0 && new_bounds.y() == 0))) {
     SchedulePaintForHeader();
@@ -752,11 +753,12 @@ int FramePainter::GetHeaderOpacity(HeaderMode header_mode,
   if (theme_frame_overlay)
     return kFullyOpaque;
 
-  // Maximized windows with workspaces are totally transparent, except:
+  // Maximized and fullscreen windows with workspaces are totally transparent,
+  // except:
   // - For windows whose workspace is not tracked by the workspace code (which
   //   are used for tab dragging).
   // - When the user is cycling through workspaces.
-  if (frame_->IsMaximized() &&
+  if ((frame_->IsMaximized() || frame_->IsFullscreen()) &&
       GetTrackedByWorkspace(frame_->GetNativeWindow()) &&
       !IsCyclingThroughWorkspaces()) {
     return 0;

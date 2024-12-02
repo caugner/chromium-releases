@@ -8,13 +8,6 @@
 
 cr.define('login', function() {
   /**
-   * Pod width. 170px Pod + 10px padding + 10px margin on both sides.
-   * @type {number}
-   * @const
-   */
-  var POD_WIDTH = 170 + 2 * (10 + 10);
-
-  /**
    * Number of displayed columns depending on user pod count.
    * @type {Array.<number>}
    * @const
@@ -55,7 +48,7 @@ cr.define('login', function() {
    * @type {number}
    * @const
    */
-  var HELP_TOPIC_PUBLIC_SESSION = 3017014;
+  var HELP_TOPIC_PUBLIC_SESSION = 3041033;
 
   /**
    * Oauth token status. These must match UserManager::OAuthTokenStatus.
@@ -255,6 +248,14 @@ cr.define('login', function() {
     },
 
     /**
+     * Gets user type icon area.
+     * @type {!HTMLInputElement}
+     */
+    get userTypeIconAreaElement() {
+      return this.querySelector('.user-type-icon-area');
+    },
+
+    /**
      * Gets action box menu.
      * @type {!HTMLInputElement}
      */
@@ -323,6 +324,7 @@ cr.define('login', function() {
       this.passwordElement.setAttribute('aria-label', loadTimeData.getStringF(
           'passwordFieldAccessibleName', this.user_.emailAddress));
       this.signinButtonElement.hidden = !needSignin;
+      this.userTypeIconAreaElement.hidden = !this.user_.locallyManagedUser;
     },
 
     /**
@@ -469,6 +471,8 @@ cr.define('login', function() {
     handleActionAreaButtonClick_: function(e) {
       if (this.parentNode.disabled)
         return;
+      console.error('Action area clicked: ' + !this.isActionBoxMenuActive +
+                    ' at ' + e.x + ', ' + e.y);
       this.isActionBoxMenuActive = !this.isActionBoxMenuActive;
     },
 
@@ -482,8 +486,11 @@ cr.define('login', function() {
       switch (e.keyIdentifier) {
         case 'Enter':
         case 'U+0020':  // Space
-          if (this.parentNode.focusedPod_ && !this.isActionBoxMenuActive)
+          if (this.parentNode.focusedPod_ && !this.isActionBoxMenuActive) {
+            console.error('Action area keyed: ' + !this.isActionBoxMenuActive +
+                          ' at ' + e.x + ', ' + e.y);
             this.isActionBoxMenuActive = true;
+          }
           e.stopPropagation();
           break;
         case 'Up':
@@ -980,6 +987,9 @@ cr.define('login', function() {
       this.removeEventListener('mouseout', this.deferredResizeListener_);
       this.columns = columns;
       this.rows = rows;
+      if (this.parentNode == Oobe.getInstance().currentScreen) {
+        Oobe.getInstance().updateScreenSize(this.parentNode);
+      }
     },
 
     /**
@@ -1187,6 +1197,9 @@ cr.define('login', function() {
     handleClick_: function(e) {
       if (this.disabled)
         return;
+
+      console.error('Document clicked at ' + e.x + ', ' + e.y +
+                    ', pod: ' + findAncestorByClass(e.target, 'pod'));
 
       // Clear all menus if the click is outside pod menu and its
       // button area.

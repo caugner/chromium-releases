@@ -18,7 +18,7 @@ namespace forwarder2 {
 
 DeviceController::DeviceController(int exit_notifier_fd)
     : exit_notifier_fd_(exit_notifier_fd) {
-  kickstart_adb_socket_.set_exit_notifier_fd(exit_notifier_fd);
+  kickstart_adb_socket_.AddEventFd(exit_notifier_fd);
 }
 
 DeviceController::~DeviceController() {
@@ -46,8 +46,7 @@ void DeviceController::KillAllListeners() {
 }
 
 bool DeviceController::Init(const std::string& adb_unix_socket) {
-  if (!kickstart_adb_socket_.BindUnix(adb_unix_socket,
-                                      true /* abstract */)) {
+  if (!kickstart_adb_socket_.BindUnix(adb_unix_socket)) {
     LOG(ERROR) << "Could not BindAndListen DeviceController socket on port "
                << adb_unix_socket << ": " << safe_strerror(errno);
     return false;
@@ -61,7 +60,7 @@ void DeviceController::Start() {
     CleanUpDeadListeners();
     scoped_ptr<Socket> socket(new Socket);
     if (!kickstart_adb_socket_.Accept(socket.get())) {
-      if (!kickstart_adb_socket_.exited()) {
+      if (!kickstart_adb_socket_.DidReceiveEvent()) {
         LOG(ERROR) << "Could not Accept DeviceController socket: "
                    << safe_strerror(errno);
       } else {
@@ -70,7 +69,7 @@ void DeviceController::Start() {
       break;
     }
     // So that |socket| doesn't block on read if it has notifications.
-    socket->set_exit_notifier_fd(exit_notifier_fd_);
+    socket->AddEventFd(exit_notifier_fd_);
     int port;
     command::Type command;
     if (!ReadCommand(socket.get(), &port, &command)) {

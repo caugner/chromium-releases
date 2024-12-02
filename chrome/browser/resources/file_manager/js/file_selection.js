@@ -13,6 +13,7 @@
  */
 function FileSelection(fileManager, indexes) {
   this.fileManager_ = fileManager;
+  this.computeBytesSequence_ = 0;
   this.indexes = indexes;
   this.entries = [];
   this.urls = [];
@@ -23,7 +24,6 @@ function FileSelection(fileManager, indexes) {
   this.showBytes = false;
   this.allDriveFilesPresent = false,
   this.iconType = null;
-  this.cancelled_ = false;
   this.bytesKnown = false;
 
   // Synchronously compute what we can.
@@ -83,35 +83,41 @@ FileSelection.prototype.createTasks = function(callback) {
 /**
  * Computes the total size of selected files.
  *
- * @param {function} callback The callback.
+ * @param {function} callback Completion callback. Not called when cancelled,
+ *     or a new call has been invoked in the meantime.
  */
 FileSelection.prototype.computeBytes = function(callback) {
   if (this.entries.length == 0) {
     this.bytesKnown = true;
+    this.showBytes = false;
     this.bytes = 0;
     return;
   }
 
-  var countdown = this.entries.length;
+  var computeBytesSequence = ++this.computeBytesSequence_;
   var pendingMetadataCount = 0;
 
   var maybeDone = function() {
-    if (countdown == 0 && pendingMetadataCount == 0 && !this.cancelled_) {
+    if (pendingMetadataCount == 0) {
       this.bytesKnown = true;
       callback();
     }
   }.bind(this);
 
-  var onProps = function(filesystem) {
-    this.bytes += filesystem.size;
+  var onProps = function(properties) {
+    // Ignore if the call got cancelled, or there is another new one fired.
+    if (computeBytesSequence != this.computeBytesSequence_)
+      return;
+
+    // It may happen that the metadata is not available because a file has been
+    // deleted in the meantime.
+    if (properties)
+      this.bytes += properties.size;
     pendingMetadataCount--;
     maybeDone();
   }.bind(this);
 
   for (var index = 0; index < this.entries.length; index++) {
-    if (this.cancelled_)
-      break;
-
     var entry = this.entries[index];
     if (entry.isFile) {
       this.showBytes |= !FileType.isHosted(entry);
@@ -121,21 +127,20 @@ FileSelection.prototype.computeBytes = function(callback) {
       // Don't compute the directory size as it's expensive.
       // crbug.com/179073.
       this.showBytes = false;
-      countdown = 0;
       break;
     }
-    countdown--;
   }
   maybeDone();
 };
 
 /**
- * Cancels any async computation.
+ * Cancels any async computation by increasing the sequence number. Results
+ * of any previous call to computeBytes() will be discarded.
  *
  * @private
  */
 FileSelection.prototype.cancelComputing_ = function() {
-  this.cancelled_ = true;
+  this.computeBytesSequence_++;
 };
 
 /**
@@ -211,7 +216,7 @@ FileSelectionHandler.prototype.onFileSelectionChanged = function(event) {
     this.selectionUpdateTimer_ = null;
   }
 
-  if (!indexes.length) {
+  if (!util.platform.newUI() && !indexes.length) {
     this.updatePreviewPanelVisibility_();
     this.updatePreviewPanelText_();
     this.fileManager_.updateContextMenuActionItems(null, false);
@@ -312,6 +317,10 @@ FileSelectionHandler.prototype.updatePreviewPanelVisibility_ = function() {
   var panel = this.previewPanel_;
   var state = panel.getAttribute('visibility');
   var mustBeVisible = (this.selection.totalCount > 0);
+  if (util.platform.newUI()) {
+    mustBeVisible = (this.selection.totalCount > 0 ||
+        !PathUtil.isRootPath(this.fileManager_.getCurrentDirectory()));
+  }
   var self = this;
   var fm = this.fileManager_;
 
@@ -372,9 +381,19 @@ FileSelectionHandler.prototype.isPreviewPanelVisibile_ = function() {
  */
 FileSelectionHandler.prototype.updatePreviewPanelText_ = function() {
   var selection = this.selection;
-  if (selection.totalCount == 0) {
-    // We dont want to change the string during preview panel animating away.
-    return;
+  if (!util.platform.newUI()) {
+    if (selection.totalCount == 0) {
+      // We dont want to change the string during preview panel animating
+      return;
+    }
+  } else {
+    if (selection.totalCount <= 1) {
+      // Hides the preview text if zero or one file is selected. We shows a
+      // breadcrumb list instead on the preview panel.
+      this.hideCalculating_();
+      this.previewText_.textContent = '';
+      return;
+    }
   }
 
   var text = '';
@@ -473,7 +492,20 @@ FileSelectionHandler.prototype.updateFileSelectionAsync = function(selection) {
   // Update the UI.
   var wasVisible = this.isPreviewPanelVisibile_();
   this.updatePreviewPanelVisibility_();
-  this.updateSearchBreadcrumbs_();
+
+  if (util.platform.newUI() && selection.totalCount == 0) {
+    var path = this.fileManager_.getCurrentDirectory();
+    // Hides the breadcrumbs list on the root path.
+    if (PathUtil.isRootPath(path))
+      this.updatePreviewPanelBreadcrumbs_(null);
+    else
+      this.updatePreviewPanelBreadcrumbs_(path);
+    var entry = this.fileManager_.getCurrentDirectoryEntry();
+    this.showPreviewThumbnails_([entry]);
+    this.updatePreviewPanelText_();
+    return;
+  }
+
   this.fileManager_.updateContextMenuActionItems(null, false);
   if (!wasVisible && this.selection.totalCount == 1) {
     var list = this.fileManager_.getCurrentList();
@@ -485,28 +517,49 @@ FileSelectionHandler.prototype.updateFileSelectionAsync = function(selection) {
   for (var i = 0; i < commands.length; i++)
     commands[i].canExecuteChange();
 
-  // Update the summary information.
-  var onBytes = function() {
-    if (this.selection != selection) return;
+  if (!util.platform.newUI()) {
+    this.updateSearchBreadcrumbs_();
+    // Update the summary information.
+    var onBytes = function() {
+      if (this.selection != selection) return;
+      this.updatePreviewPanelText_();
+    }.bind(this);
+    selection.computeBytes(onBytes);
     this.updatePreviewPanelText_();
-  }.bind(this);
-  selection.computeBytes(onBytes);
-  this.updatePreviewPanelText_();
+  } else {
+    if (selection.totalCount == 1) {
+      // Shows the breadcrumb list.
+      var firstEntry = selection.entries[0];
+      this.updatePreviewPanelBreadcrumbs_(firstEntry.fullPath);
+      this.updatePreviewPanelText_();
+    } else {
+      this.updatePreviewPanelBreadcrumbs_(null);
+
+      // Update the summary information.
+      var onBytes = function() {
+        if (this.selection != selection) return;
+        this.updatePreviewPanelText_();
+      }.bind(this);
+      selection.computeBytes(onBytes);
+      this.updatePreviewPanelText_();
+    }
+  }
 
   // Inform tests it's OK to click buttons now.
   chrome.test.sendMessage('selection-change-complete');
 
   // Show thumbnails.
-  this.showPreviewThumbnails_(selection);
+  this.showPreviewThumbnails_(selection.entries);
 };
 
 /**
  * Renders preview thumbnails in preview panel.
  *
- * @param {FileSelection} selection The selection object.
+ * @param {Array.<FileEntry>} entries The entries of selected object.
  * @private
  */
-FileSelectionHandler.prototype.showPreviewThumbnails_ = function(selection) {
+FileSelectionHandler.prototype.showPreviewThumbnails_ = function(entries) {
+  var selection = this.selection;
   var thumbnails = [];
   var thumbnailCount = 0;
   var thumbnailLoaded = -1;
@@ -550,8 +603,8 @@ FileSelectionHandler.prototype.showPreviewThumbnails_ = function(selection) {
   };
 
   var doc = this.fileManager_.document_;
-  for (var i = 0; i < selection.entries.length; i++) {
-    var entry = selection.entries[i];
+  for (var i = 0; i < entries.length; i++) {
+    var entry = entries[i];
 
     if (thumbnailCount < FileSelectionHandler.MAX_PREVIEW_THUMBNAIL_COUNT) {
       var box = doc.createElement('div');
@@ -607,7 +660,20 @@ FileSelectionHandler.prototype.renderThumbnail_ = function(entry, callback) {
 };
 
 /**
- * Updates the search breadcrumbs.
+ * Updates the breadcrumbs in the preview panel.
+ *
+ * @param {?string} path Path to be shown in the breadcrumbs list
+ * @private
+ */
+FileSelectionHandler.prototype.updatePreviewPanelBreadcrumbs_ = function(path) {
+  if (!path)
+    this.searchBreadcrumbs_.hide();
+  else
+    this.searchBreadcrumbs_.show(PathUtil.getRootPath(path), path);
+};
+
+/**
+ * Updates the search breadcrumbs. This method should not be used in the new ui.
  *
  * @private
  */

@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "base/callback_forward.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
@@ -56,6 +57,14 @@ class CHROMEOS_EXPORT NetworkStateHandler
   typedef std::vector<ManagedState*> ManagedStateList;
   typedef std::vector<const NetworkState*> NetworkStateList;
 
+  enum TechnologyState {
+    TECHNOLOGY_UNAVAILABLE,
+    TECHNOLOGY_AVAILABLE,
+    TECHNOLOGY_UNINITIALIZED,
+    TECHNOLOGY_ENABLING,
+    TECHNOLOGY_ENABLED
+  };
+
   virtual ~NetworkStateHandler();
 
   // Sets the global instance. Must be called before any calls to Get().
@@ -74,11 +83,12 @@ class CHROMEOS_EXPORT NetworkStateHandler
   void AddObserver(NetworkStateHandlerObserver* observer);
   void RemoveObserver(NetworkStateHandlerObserver* observer);
 
-  // Returns true if technology for |type| is available/ enabled/uninitialized.
-  // kMatchTypeMobile (only) is also supported.
-  bool TechnologyAvailable(const std::string& type) const;
-  bool TechnologyEnabled(const std::string& type) const;
-  bool TechnologyUninitialized(const std::string& type) const;
+  // Returns the state for technology |type|. kMatchTypeMobile (only) is
+  // also supported.
+  TechnologyState GetTechnologyState(const std::string& type) const;
+  bool IsTechnologyEnabled(const std::string& type) const {
+    return GetTechnologyState(type) == TECHNOLOGY_ENABLED;
+  }
 
   // Asynchronously sets the technology enabled property for |type|.
   // kMatchTypeMobile (only) is also supported.
@@ -139,6 +149,14 @@ class CHROMEOS_EXPORT NetworkStateHandler
   // list, which will trigger the appropriate observer calls.
   void RequestScan() const;
 
+  // Request a scan if not scanning and run |callback| when the Scanning state
+  // for any Device matching |type| completes.
+  void WaitForScan(const std::string& type, const base::Closure& callback);
+
+  // Request a network scan then signal Shill to connect to the best available
+  // networks when completed.
+  void ConnectToBestWifiNetwork();
+
   // Set the user initiated connecting network.
   void SetConnectingNetwork(const std::string& service_path);
 
@@ -164,6 +182,10 @@ class CHROMEOS_EXPORT NetworkStateHandler
   virtual void UpdateManagedList(ManagedState::ManagedType type,
                                  const base::ListValue& entries) OVERRIDE;
 
+  // The list of profiles changed (i.e. a user has logged in). Re-request
+  // properties for all services since they may have changed.
+  virtual void ProfileListChanged() OVERRIDE;
+
   // Parses the properties for the network service or device. Mostly calls
   // managed->PropertyChanged(key, value) for each dictionary entry.
   virtual void UpdateManagedStateProperties(
@@ -176,11 +198,6 @@ class CHROMEOS_EXPORT NetworkStateHandler
       const std::string& service_path,
       const std::string& key,
       const base::Value& value) OVERRIDE;
-
-  // Sets the IP Address for the network associated with |service_path|.
-  virtual void UpdateNetworkServiceIPAddress(
-      const std::string& service_path,
-      const std::string& ip_address) OVERRIDE;
 
   // Called by ShillPropertyHandler when a watched device property changes.
   virtual void UpdateDeviceProperty(
@@ -203,6 +220,8 @@ class CHROMEOS_EXPORT NetworkStateHandler
   void InitShillPropertyHandler();
 
  private:
+  typedef std::list<base::Closure> ScanCallbackList;
+  typedef std::map<std::string, ScanCallbackList> ScanCompleteCallbackMap;
   friend class NetworkStateHandlerTest;
   FRIEND_TEST_ALL_PREFIXES(NetworkStateHandlerTest, NetworkStateHandlerStub);
 
@@ -231,6 +250,12 @@ class CHROMEOS_EXPORT NetworkStateHandler
   // Notifies observers and updates connecting_network_.
   void NetworkPropertiesUpdated(const NetworkState* network);
 
+  // Called whenever Device.Scanning state transitions to false.
+  void ScanCompleted(const std::string& type);
+
+  // Returns the technology type for |type|.
+  std::string GetTechnologyForType(const std::string& type) const;
+
   // Shill property handler instance, owned by this class.
   scoped_ptr<internal::ShillPropertyHandler> shill_property_handler_;
 
@@ -249,6 +274,9 @@ class CHROMEOS_EXPORT NetworkStateHandler
   // changes to something other than Connecting (after observers are notified).
   // TODO(stevenjb): Move this to NetworkConfigurationHandler.
   std::string connecting_network_;
+
+  // Callbacks to run when a scan for the technology type completes.
+  ScanCompleteCallbackMap scan_complete_callbacks_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkStateHandler);
 };

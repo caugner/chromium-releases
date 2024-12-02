@@ -14,6 +14,7 @@
 #include "ash/system/tray/system_tray_notifier.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_item_more.h"
+#include "ash/system/tray/tray_popup_label_button.h"
 #include "base/command_line.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
@@ -70,7 +71,7 @@ class VpnDefaultView : public TrayItemMore,
   void Update() {
     if (UseNewNetworkHandlers()) {
       gfx::ImageSkia image;
-      string16 label;
+      base::string16 label;
       bool animating = false;
       GetNetworkStateHandlerImageAndLabel(&image, &label, &animating);
       if (animating)
@@ -97,7 +98,7 @@ class VpnDefaultView : public TrayItemMore,
 
  private:
   void GetNetworkStateHandlerImageAndLabel(gfx::ImageSkia* image,
-                                           string16* label,
+                                           base::string16* label,
                                            bool* animating) {
     NetworkStateHandler* handler = NetworkStateHandler::Get();
     const NetworkState* vpn = handler->FirstNetworkByType(
@@ -309,9 +310,9 @@ void TrayVPN::OnNetworkRefresh(const NetworkIconInfo& info) {
 void TrayVPN::SetNetworkMessage(NetworkTrayDelegate* delegate,
                                    MessageType message_type,
                                    NetworkType network_type,
-                                   const string16& title,
-                                   const string16& message,
-                                   const std::vector<string16>& links) {
+                                   const base::string16& title,
+                                   const base::string16& message,
+                                   const std::vector<base::string16>& links) {
 }
 
 void TrayVPN::ClearNetworkMessage(MessageType message_type) {

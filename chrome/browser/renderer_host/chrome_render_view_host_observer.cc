@@ -88,12 +88,20 @@ void ChromeRenderViewHostObserver::InitRenderViewForExtensions() {
   content::RenderProcessHost* process = render_view_host()->GetProcess();
 
   // Some extensions use chrome:// URLs.
+  // This is a temporary solution. Replace it with access to chrome-static://
+  // once it is implemented. See: crbug.com/226927.
   Manifest::Type type = extension->GetType();
   if (type == Manifest::TYPE_EXTENSION ||
-      type == Manifest::TYPE_LEGACY_PACKAGED_APP) {
+      type == Manifest::TYPE_LEGACY_PACKAGED_APP ||
+      (type == Manifest::TYPE_PLATFORM_APP &&
+       extension->location() == Manifest::COMPONENT)) {
     ChildProcessSecurityPolicy::GetInstance()->GrantScheme(
         process->GetID(), chrome::kChromeUIScheme);
+  }
 
+  // Some extensions use file:// URLs.
+  if (type == Manifest::TYPE_EXTENSION ||
+      type == Manifest::TYPE_LEGACY_PACKAGED_APP) {
     if (extensions::ExtensionSystem::Get(profile_)->extension_service()->
             extension_prefs()->AllowFileAccess(extension->id())) {
       ChildProcessSecurityPolicy::GetInstance()->GrantScheme(
@@ -119,6 +127,7 @@ void ChromeRenderViewHostObserver::InitRenderViewForExtensions() {
 
     case Manifest::TYPE_UNKNOWN:
     case Manifest::TYPE_THEME:
+    case Manifest::TYPE_SHARED_MODULE:
       break;
   }
 }
@@ -160,7 +169,7 @@ void ChromeRenderViewHostObserver::RemoveRenderViewHostForExtensions(
 
 void ChromeRenderViewHostObserver::OnFocusedNodeTouched(bool editable) {
   if (editable) {
-#if defined(OS_WIN)
+#if defined(OS_WIN) && defined(USE_AURA)
     base::win::DisplayVirtualKeyboard();
 #endif
     content::NotificationService::current()->Notify(
@@ -168,7 +177,7 @@ void ChromeRenderViewHostObserver::OnFocusedNodeTouched(bool editable) {
         content::Source<RenderViewHost>(render_view_host()),
         content::Details<bool>(&editable));
   } else {
-#if defined(OS_WIN)
+#if defined(OS_WIN) && defined(USE_AURA)
     base::win::DismissVirtualKeyboard();
 #endif
   }

@@ -25,10 +25,6 @@ const int kBottomInset = 7;
 const int kRightInset = 2;
 }  // namespace
 
-namespace first_run {
-void ShowFirstRunDialog(Profile* profile) {}
-}  // namespace first_run
-
 // static
 FirstRunBubble* FirstRunBubble::ShowBubble(Browser* browser,
                                            views::View* anchor_view) {
@@ -82,7 +78,7 @@ FirstRunBubble::FirstRunBubble(Browser* browser, views::View* anchor_view)
     : views::BubbleDelegateView(anchor_view, views::BubbleBorder::TOP_LEFT),
       browser_(browser) {
   // Compensate for built-in vertical padding in the anchor view's image.
-  set_anchor_insets(
+  set_anchor_view_insets(
       gfx::Insets(kAnchorVerticalInset, 0, kAnchorVerticalInset, 0));
 }
 

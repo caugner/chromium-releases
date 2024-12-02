@@ -21,6 +21,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/child_process_host.h"
+#include "google_apis/gaia/gaia_switches.h"
 #include "ui/base/ui_base_switches.h"
 
 using content::BrowserThread;
@@ -126,10 +127,13 @@ void ServiceProcessControl::Launch(const base::Closure& success_task,
                               switches::kServiceProcess);
 
   static const char* const kSwitchesToCopy[] = {
+    switches::kCloudPrintServiceURL,
     switches::kCloudPrintSetupProxy,
     switches::kEnableLogging,
+    switches::kIgnoreUrlFetcherCertRequests,
     switches::kLang,
     switches::kLoggingLevel,
+    switches::kLsoHost,
     switches::kNoServiceAutorun,
     switches::kUserDataDir,
     switches::kV,

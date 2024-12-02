@@ -8,6 +8,7 @@
 #include "ui/base/events/event.h"
 #include "ui/base/range/range.h"
 #include "ui/gfx/render_text.h"
+#include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/layout/grid_layout.h"
@@ -16,7 +17,16 @@
 namespace views {
 namespace examples {
 
-TextfieldExample::TextfieldExample() : ExampleBase("Textfield") {
+TextfieldExample::TextfieldExample()
+   : ExampleBase("Textfield"),
+     name_(NULL),
+     password_(NULL),
+     read_only_(NULL),
+     show_password_(NULL),
+     clear_all_(NULL),
+     append_(NULL),
+     set_(NULL),
+     set_style_(NULL) {
 }
 
 TextfieldExample::~TextfieldExample() {
@@ -26,11 +36,14 @@ void TextfieldExample::CreateExampleView(View* container) {
   name_ = new Textfield();
   password_ = new Textfield(Textfield::STYLE_OBSCURED);
   password_->set_placeholder_text(ASCIIToUTF16("password"));
-  show_password_ = new TextButton(this, ASCIIToUTF16("Show password"));
-  clear_all_ = new TextButton(this, ASCIIToUTF16("Clear All"));
-  append_ = new TextButton(this, ASCIIToUTF16("Append"));
-  set_ = new TextButton(this, ASCIIToUTF16("Set"));
-  set_style_ = new TextButton(this, ASCIIToUTF16("Set Styles"));
+  read_only_ = new Textfield();
+  read_only_->SetReadOnly(true);
+  read_only_->SetText(ASCIIToUTF16("read only"));
+  show_password_ = new LabelButton(this, ASCIIToUTF16("Show password"));
+  clear_all_ = new LabelButton(this, ASCIIToUTF16("Clear All"));
+  append_ = new LabelButton(this, ASCIIToUTF16("Append"));
+  set_ = new LabelButton(this, ASCIIToUTF16("Set"));
+  set_style_ = new LabelButton(this, ASCIIToUTF16("Set Styles"));
   name_->SetController(this);
   password_->SetController(this);
 
@@ -49,6 +62,9 @@ void TextfieldExample::CreateExampleView(View* container) {
   layout->AddView(new Label(ASCIIToUTF16("Password:")));
   layout->AddView(password_);
   layout->StartRow(0, 0);
+  layout->AddView(new Label(ASCIIToUTF16("Read Only:")));
+  layout->AddView(read_only_);
+  layout->StartRow(0, 0);
   layout->AddView(show_password_);
   layout->StartRow(0, 0);
   layout->AddView(clear_all_);
@@ -66,6 +82,8 @@ void TextfieldExample::ContentsChanged(Textfield* sender,
     PrintStatus("Name [%s]", UTF16ToUTF8(new_contents).c_str());
   } else if (sender == password_) {
     PrintStatus("Password [%s]", UTF16ToUTF8(new_contents).c_str());
+  } else if (sender == read_only_) {
+    PrintStatus("Read Only [%s]", UTF16ToUTF8(new_contents).c_str());
   }
 }
 
@@ -87,10 +105,15 @@ void TextfieldExample::ButtonPressed(Button* sender, const ui::Event& event) {
     string16 empty;
     name_->SetText(empty);
     password_->SetText(empty);
+    read_only_->SetText(empty);
   } else if (sender == append_) {
     name_->AppendText(ASCIIToUTF16("[append]"));
+    password_->AppendText(ASCIIToUTF16("[append]"));
+    read_only_->AppendText(ASCIIToUTF16("[append]"));
   } else if (sender == set_) {
     name_->SetText(ASCIIToUTF16("[set]"));
+    password_->SetText(ASCIIToUTF16("[set]"));
+    read_only_->SetText(ASCIIToUTF16("[set]"));
   } else if (sender == set_style_) {
     if (!name_->text().empty()) {
       name_->SetColor(SK_ColorGREEN);

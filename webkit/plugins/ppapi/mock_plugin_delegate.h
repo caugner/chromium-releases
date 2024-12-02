@@ -24,11 +24,11 @@ class MockPluginDelegate : public PluginDelegate {
   virtual void PluginRequestedCancelComposition(PluginInstance* instance);
   virtual void PluginSelectionChanged(PluginInstance* instance);
   virtual void SimulateImeSetComposition(
-      const string16& text,
+      const base::string16& text,
       const std::vector<WebKit::WebCompositionUnderline>& underlines,
       int selection_start,
       int selection_end);
-  virtual void SimulateImeConfirmComposition(const string16& text);
+  virtual void SimulateImeConfirmComposition(const base::string16& text);
   virtual void PluginCrashed(PluginInstance* instance);
   virtual void InstanceCreated(PluginInstance* instance);
   virtual void InstanceDeleted(PluginInstance* instance);
@@ -47,6 +47,7 @@ class MockPluginDelegate : public PluginDelegate {
       int32 command_buffer_route_id);
   virtual PlatformVideoCapture* CreateVideoCapture(
       const std::string& device_id,
+      const GURL& document_url,
       PlatformVideoCaptureEventHandler* handler);
   virtual uint32_t GetAudioHardwareOutputSampleRate();
   virtual uint32_t GetAudioHardwareOutputBufferSize();
@@ -56,6 +57,7 @@ class MockPluginDelegate : public PluginDelegate {
       PlatformAudioOutputClient* client);
   virtual PlatformAudioInput* CreateAudioInput(
       const std::string& device_id,
+      const GURL& document_url,
       uint32_t sample_rate,
       uint32_t sample_count,
       PlatformAudioInputClient* client);
@@ -71,6 +73,12 @@ class MockPluginDelegate : public PluginDelegate {
       const GURL& path,
       int flags,
       const AsyncOpenFileSystemURLCallback& callback);
+  virtual bool IsFileSystemOpened(PP_Instance instance,
+                                  PP_Resource resource) const;
+  virtual PP_FileSystemType GetFileSystemType(PP_Instance instance,
+                                              PP_Resource resource) const;
+  virtual GURL GetFileSystemRootUrl(PP_Instance instance,
+                                    PP_Resource resource) const;
   virtual bool OpenFileSystem(
       const GURL& origin_url,
       fileapi::FileSystemType type,
@@ -82,6 +90,9 @@ class MockPluginDelegate : public PluginDelegate {
       fileapi::FileSystemCallbackDispatcher* dispatcher);
   virtual bool Query(const GURL& path,
                      fileapi::FileSystemCallbackDispatcher* dispatcher);
+  virtual bool ReadDirectoryEntries(
+      const GURL& path,
+      fileapi::FileSystemCallbackDispatcher* dispatcher);
   virtual bool Touch(const GURL& path,
                      const base::Time& last_access_time,
                      const base::Time& last_modified_time,
@@ -171,6 +182,7 @@ class MockPluginDelegate : public PluginDelegate {
       base::PlatformFile handle,
       base::ProcessId target_process_id,
       bool should_close_source) const;
+  virtual bool IsRunningInProcess(PP_Instance instance) const;
 };
 
 }  // namespace ppapi

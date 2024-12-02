@@ -220,8 +220,13 @@ TEST_F(SSLConfigServiceManagerPrefTest, BadDisabledCipherSuites) {
   EXPECT_EQ(0x0005, config.disabled_cipher_suites[1]);
 }
 
-// Test that without command-line settings for minimum and maximum SSL
-// versions, SSL 3.0 ~ default_version_max() are enabled.
+// Test that
+// * without command-line settings for minimum and maximum SSL versions,
+//   SSL 3.0 ~ default_version_max() are enabled;
+// * without --enable-unrestricted-ssl3-fallback,
+//   |unrestricted_ssl3_fallback_enabled| is false.
+// TODO(thaidn): |unrestricted_ssl3_fallback_enabled| is true by default
+// temporarily until we have fixed deployment issues.
 TEST_F(SSLConfigServiceManagerPrefTest, NoCommandLinePrefs) {
   scoped_refptr<TestingPrefStore> local_state_store(new TestingPrefStore());
 
@@ -245,10 +250,13 @@ TEST_F(SSLConfigServiceManagerPrefTest, NoCommandLinePrefs) {
   EXPECT_EQ(net::SSL_PROTOCOL_VERSION_SSL3, ssl_config.version_min);
   EXPECT_EQ(net::SSLConfigService::default_version_max(),
             ssl_config.version_max);
+  EXPECT_TRUE(ssl_config.unrestricted_ssl3_fallback_enabled);
 
   // The settings should not be added to the local_state.
   EXPECT_FALSE(local_state->HasPrefPath(prefs::kSSLVersionMin));
   EXPECT_FALSE(local_state->HasPrefPath(prefs::kSSLVersionMax));
+  EXPECT_FALSE(local_state->HasPrefPath(
+      prefs::kEnableUnrestrictedSSL3Fallback));
 
   // Explicitly double-check the settings are not in the preference store.
   std::string version_min_str;
@@ -257,6 +265,10 @@ TEST_F(SSLConfigServiceManagerPrefTest, NoCommandLinePrefs) {
                                             &version_min_str));
   EXPECT_FALSE(local_state_store->GetString(prefs::kSSLVersionMax,
                                             &version_max_str));
+  bool unrestricted_ssl3_fallback_enabled;
+  EXPECT_FALSE(local_state_store->GetBoolean(
+      prefs::kEnableUnrestrictedSSL3Fallback,
+      &unrestricted_ssl3_fallback_enabled));
 }
 
 // Test that command-line settings for minimum and maximum SSL versions are
@@ -267,6 +279,7 @@ TEST_F(SSLConfigServiceManagerPrefTest, CommandLinePrefs) {
   CommandLine command_line(CommandLine::NO_PROGRAM);
   command_line.AppendSwitchASCII(switches::kSSLVersionMin, "tls1");
   command_line.AppendSwitchASCII(switches::kSSLVersionMax, "ssl3");
+  command_line.AppendSwitch(switches::kEnableUnrestrictedSSL3Fallback);
 
   PrefServiceMockBuilder builder;
   builder.WithUserPrefs(local_state_store.get());
@@ -287,6 +300,7 @@ TEST_F(SSLConfigServiceManagerPrefTest, CommandLinePrefs) {
   // Command-line flags should be respected.
   EXPECT_EQ(net::SSL_PROTOCOL_VERSION_TLS1, ssl_config.version_min);
   EXPECT_EQ(net::SSL_PROTOCOL_VERSION_SSL3, ssl_config.version_max);
+  EXPECT_TRUE(ssl_config.unrestricted_ssl3_fallback_enabled);
 
   // Explicitly double-check the settings are not in the preference store.
   const PrefService::Preference* version_min_pref =
@@ -297,10 +311,18 @@ TEST_F(SSLConfigServiceManagerPrefTest, CommandLinePrefs) {
       local_state->FindPreference(prefs::kSSLVersionMax);
   EXPECT_FALSE(version_max_pref->IsUserModifiable());
 
+  const PrefService::Preference* ssl3_fallback_pref =
+      local_state->FindPreference(prefs::kEnableUnrestrictedSSL3Fallback);
+  EXPECT_FALSE(ssl3_fallback_pref->IsUserModifiable());
+
   std::string version_min_str;
   std::string version_max_str;
   EXPECT_FALSE(local_state_store->GetString(prefs::kSSLVersionMin,
                                             &version_min_str));
   EXPECT_FALSE(local_state_store->GetString(prefs::kSSLVersionMax,
                                             &version_max_str));
+  bool unrestricted_ssl3_fallback_enabled;
+  EXPECT_FALSE(local_state_store->GetBoolean(
+      prefs::kEnableUnrestrictedSSL3Fallback,
+      &unrestricted_ssl3_fallback_enabled));
 }

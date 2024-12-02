@@ -9,12 +9,15 @@ var tabId;
 var debuggee;
 var protocolVersion = "1.0";
 
+var SILENT_FLAG_REQUIRED = "Cannot attach to this target unless " +
+    "'silent-debugger-extension-api' flag is enabled.";
+
 chrome.test.runTests([
 
   function attachMalformedVersion() {
     chrome.tabs.getSelected(null, function(tab) {
-      chrome.debugger.attach({tabId: tab.id}, "malformed-version",
-          fail("Requested protocol version is not supported: malformed-version."));
+      chrome.debugger.attach({tabId: tab.id}, "malformed-version", fail(
+          "Requested protocol version is not supported: malformed-version."));
     });
   },
 
@@ -106,10 +109,60 @@ chrome.test.runTests([
         fail("No tab with given id " + missingDebuggee.tabId + "."));
   },
 
-  function attachToExtensionWithNoSilentFlag() {
-    debuggeeExtension = {extensionId: "foo"};
+  function attachToOwnBackgroundPageWithNoSilentFlag() {
+    var ownExtensionId = chrome.extension.getURL('').split('/')[2];
+    var debuggeeExtension = {extensionId: ownExtensionId};
     chrome.debugger.attach(debuggeeExtension, protocolVersion,
-        fail("Cannot attach to an extension unless " +
-            "'silent-debugger-extension-api' flag is enabled."));
+        fail(SILENT_FLAG_REQUIRED));
+  },
+
+  function discoverOwnBackgroundPageWithNoSilentFlag() {
+    chrome.debugger.getTargets(function(targets) {
+      var target = targets.filter(
+          function(target) { return target.type == 'background_page'})[0];
+      if (target) {
+        chrome.debugger.attach({targetId: target.id}, protocolVersion,
+            fail(SILENT_FLAG_REQUIRED));
+      } else {
+        chrome.test.succeed();
+      }
+    });
+  },
+
+  function createAndDiscoverTab() {
+    function onUpdated() {
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+      chrome.debugger.getTargets(function(targets) {
+        var page = targets.filter(
+            function(t) {
+              return t.type == 'page' && t.title == 'Test page';
+            })[0];
+        if (page) {
+          chrome.debugger.attach(
+              {targetId: page.id}, protocolVersion, pass());
+        } else {
+          chrome.test.fail("Cannot discover a newly created tab");
+        }
+      });
+    }
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.create({url: "inspected.html"});
+  },
+
+  function discoverWorker() {
+    var workerPort = new SharedWorker("worker.js").port;
+    workerPort.onmessage = function() {
+      chrome.debugger.getTargets(function(targets) {
+        var page = targets.filter(
+            function(t) { return t.type == 'worker' })[0];
+        if (page) {
+          chrome.debugger.attach({targetId: page.id}, protocolVersion,
+              fail(SILENT_FLAG_REQUIRED));
+        } else {
+          chrome.test.fail("Cannot discover a newly created worker");
+        }
+      });
+    };
+    workerPort.start();
   }
 ]);
