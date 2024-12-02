@@ -5,13 +5,20 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [8, 218, 70, 26]
-      ],
-      "paintInvalidationClients": [
-        "LayoutTableCell TD id='secondRowSpan'",
-        "LayoutTableCell TD",
-        "LayoutTableRow TR class='bla'"
+      "paintInvalidations": [
+        {
+          "object": "LayoutTableRow TR class='bla'",
+          "rect": [8, 218, 70, 12],
+          "reason": "style change"
+        },
+        {
+          "object": "LayoutTableCell TD",
+          "reason": "full"
+        },
+        {
+          "object": "LayoutTableCell TD id='secondRowSpan'",
+          "reason": "full"
+        }
       ]
     }
   ]

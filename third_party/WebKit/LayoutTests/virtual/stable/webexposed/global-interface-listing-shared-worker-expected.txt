@@ -11,6 +11,9 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     getter type
 [Worker]     method constructor
 [Worker]     method slice
+[Worker] interface ByteLengthQueuingStrategy
+[Worker]     method constructor
+[Worker]     method size
 [Worker] interface Cache
 [Worker]     attribute @@toStringTag
 [Worker]     method add
@@ -35,6 +38,9 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     getter reason
 [Worker]     getter wasClean
 [Worker]     method constructor
+[Worker] interface CountQueuingStrategy
+[Worker]     method constructor
+[Worker]     method size
 [Worker] interface Crypto
 [Worker]     attribute @@toStringTag
 [Worker]     getter subtle
@@ -325,6 +331,7 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     getter upper
 [Worker]     getter upperOpen
 [Worker]     method constructor
+[Worker]     method includes
 [Worker] interface IDBObjectStore
 [Worker]     attribute @@toStringTag
 [Worker]     getter autoIncrement
@@ -391,6 +398,7 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     attribute @@toStringTag
 [Worker]     getter height
 [Worker]     getter width
+[Worker]     method close
 [Worker]     method constructor
 [Worker] interface ImageData
 [Worker]     attribute @@toStringTag
@@ -444,6 +452,12 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     setter onclose
 [Worker]     setter onerror
 [Worker]     setter onshow
+[Worker] interface PerformanceObserverEntryList
+[Worker]     attribute @@toStringTag
+[Worker]     method constructor
+[Worker]     method getEntries
+[Worker]     method getEntriesByName
+[Worker]     method getEntriesByType
 [Worker] interface PermissionStatus : EventTarget
 [Worker]     attribute @@toStringTag
 [Worker]     getter onchange
@@ -465,15 +479,12 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     getter promise
 [Worker]     getter reason
 [Worker]     method constructor
-[Worker] interface ReadableByteStream
-[Worker]     attribute @@toStringTag
-[Worker]     method cancel
-[Worker]     method constructor
-[Worker]     method getReader
 [Worker] interface ReadableStream
+[Worker]     getter locked
 [Worker]     method cancel
 [Worker]     method constructor
 [Worker]     method getReader
+[Worker]     method tee
 [Worker] interface Request
 [Worker]     attribute @@toStringTag
 [Worker]     getter bodyUsed
@@ -484,6 +495,7 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     getter mode
 [Worker]     getter redirect
 [Worker]     getter referrer
+[Worker]     getter referrerPolicy
 [Worker]     getter url
 [Worker]     method arrayBuffer
 [Worker]     method blob
@@ -622,7 +634,6 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     setter onopen
 [Worker] interface WorkerGlobalScope : EventTarget
 [Worker]     attribute @@toStringTag
-[Worker]     getter console
 [Worker]     getter crypto
 [Worker]     getter indexedDB
 [Worker]     getter location
@@ -637,14 +648,12 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     method btoa
 [Worker]     method clearInterval
 [Worker]     method clearTimeout
-[Worker]     method close
 [Worker]     method constructor
 [Worker]     method createImageBitmap
 [Worker]     method fetch
 [Worker]     method importScripts
 [Worker]     method setInterval
 [Worker]     method setTimeout
-[Worker]     setter console
 [Worker]     setter onerror
 [Worker]     setter onrejectionhandled
 [Worker]     setter onunhandledrejection
@@ -786,6 +795,7 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     getter upper
 [Worker]     getter upperOpen
 [Worker]     method constructor
+[Worker]     method includes
 [Worker] interface webkitIDBObjectStore
 [Worker]     attribute @@toStringTag
 [Worker]     getter autoIncrement
@@ -835,9 +845,12 @@ Starting worker: resources/global-interface-listing.js
 [Worker]     setter oncomplete
 [Worker]     setter onerror
 [Worker] [GLOBAL OBJECT]
+[Worker]     attribute console
+[Worker]     attribute internals
 [Worker]     getter caches
 [Worker]     getter name
 [Worker]     getter onconnect
+[Worker]     method close
 [Worker]     method gc
 [Worker]     method webkitRequestFileSystem
 [Worker]     method webkitRequestFileSystemSync

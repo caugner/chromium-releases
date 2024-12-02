@@ -5,21 +5,63 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [11, 35, 74, 19],
-        [11, 11, 55, 19],
-        [11, 11, 51, 19]
-      ],
-      "paintInvalidationClients": [
-        "LayoutBlockFlow HTML",
-        "LayoutBlockFlow BODY",
-        "LayoutTable TABLE",
-        "LayoutTableCell TD id='firstCell'",
-        "LayoutText #text",
-        "InlineTextBox 'First cell'",
-        "LayoutTableCell TD id='secondCell'",
-        "LayoutText #text",
-        "InlineTextBox 'Second cell'"
+      "paintInvalidations": [
+        {
+          "object": "LayoutText #text",
+          "rect": [11, 35, 74, 19],
+          "reason": "selection"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [11, 11, 55, 19],
+          "reason": "selection"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [82, 35, 3, 19],
+          "reason": "incremental"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [63, 11, 3, 19],
+          "reason": "incremental"
+        },
+        {
+          "object": "InlineTextBox 'First cell'",
+          "reason": "incremental"
+        },
+        {
+          "object": "InlineTextBox 'First cell'",
+          "reason": "selection"
+        },
+        {
+          "object": "InlineTextBox 'Second cell'",
+          "reason": "incremental"
+        },
+        {
+          "object": "InlineTextBox 'Second cell'",
+          "reason": "selection"
+        },
+        {
+          "object": "LayoutBlockFlow BODY",
+          "reason": "selection"
+        },
+        {
+          "object": "LayoutBlockFlow HTML",
+          "reason": "selection"
+        },
+        {
+          "object": "LayoutTable TABLE",
+          "reason": "selection"
+        },
+        {
+          "object": "LayoutTableCell TD id='firstCell'",
+          "reason": "selection"
+        },
+        {
+          "object": "LayoutTableCell TD id='secondCell'",
+          "reason": "selection"
+        }
       ]
     }
   ]

@@ -5,14 +5,24 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [185, 201, 18, 173]
-      ],
-      "paintInvalidationClients": [
-        "LayoutBlockFlow (positioned) DIV id='test'",
-        "LayoutBlockFlow DIV",
-        "LayoutText #text",
-        "InlineTextBox 'Some text in vertical mode'"
+      "paintInvalidations": [
+        {
+          "object": "LayoutText #text",
+          "rect": [185, 201, 18, 173],
+          "reason": "selection"
+        },
+        {
+          "object": "InlineTextBox 'Some text in vertical mode'",
+          "reason": "selection"
+        },
+        {
+          "object": "LayoutBlockFlow (positioned) DIV id='test'",
+          "reason": "selection"
+        },
+        {
+          "object": "LayoutBlockFlow DIV",
+          "reason": "selection"
+        }
       ]
     }
   ]

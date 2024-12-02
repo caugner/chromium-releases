@@ -5,32 +5,77 @@
       "bounds": [785, 742],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [58, 241, 489, 537],
-        [58, 142, 489, 537],
-        [8, 191, 769, 642],
-        [8, 191, 769, 642],
-        [8, 92, 769, 642],
-        [8, 92, 769, 642],
-        [8, 92, 769, 99],
-        [8, 92, 732, 94],
-        [0, 742, 785, 99],
-        [0, 0, 785, 841],
-        [0, 0, 785, 742]
-      ],
-      "paintInvalidationClients": [
-        "LayoutIFrame IFRAME id='iframe'",
-        "InlineBox",
-        "LayoutText #text",
-        "RootInlineBox",
-        "LayoutBlockFlow (anonymous)",
-        "LayoutView #document",
-        "LayoutBlockFlow HTML",
-        "LayoutBlockFlow (relative positioned) DIV class='relative'",
-        "LayoutBlockFlow (relative positioned) DIV class='relative paddingTop'",
-        "RootInlineBox",
-        "LayoutImage IMG",
-        "LayoutText #text"
+      "paintInvalidations": [
+        {
+          "object": "LayoutBlockFlow HTML",
+          "rect": [0, 0, 785, 841],
+          "reason": "forced by layout"
+        },
+        {
+          "object": "LayoutView #document",
+          "rect": [0, 742, 785, 99],
+          "reason": "incremental"
+        },
+        {
+          "object": "LayoutBlockFlow (relative positioned) DIV class='relative paddingTop'",
+          "rect": [8, 191, 769, 642],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutBlockFlow (relative positioned) DIV class='relative'",
+          "rect": [8, 191, 769, 642],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutBlockFlow (relative positioned) DIV class='relative paddingTop'",
+          "rect": [8, 92, 769, 642],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutBlockFlow (relative positioned) DIV class='relative'",
+          "rect": [8, 92, 769, 642],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutBlockFlow (anonymous)",
+          "rect": [8, 92, 769, 99],
+          "reason": "layoutObject removal"
+        },
+        {
+          "object": "LayoutIFrame IFRAME id='iframe'",
+          "rect": [8, 92, 732, 94],
+          "reason": "layoutObject removal"
+        },
+        {
+          "object": "LayoutImage IMG",
+          "rect": [58, 241, 489, 537],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutImage IMG",
+          "rect": [58, 142, 489, 537],
+          "reason": "bounds change"
+        },
+        {
+          "object": "InlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "LayoutText #text",
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutText #text",
+          "reason": "layoutObject removal"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        }
       ]
     }
   ]

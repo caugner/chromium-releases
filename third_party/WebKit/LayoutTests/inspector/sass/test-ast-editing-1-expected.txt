@@ -19,9 +19,10 @@ div {
 Running: testSetPropertyValue
 div {
     /* This is a regular comment */
-    color:NEW-VALUE;
-    /* position:NEW-VALUE; */
-    display:NEW-VALUE}
+    color: NEW-VALUE;
+    /* position: NEW-VALUE; */
+    display: NEW-VALUE
+}
 
 
 Running: testDisableProperties
@@ -58,8 +59,8 @@ div {
 
 Running: testInsertFirstProperty
 div {
-    /* This is a regular comment */
     NEW-NAME: NEW-VALUE;
+    /* This is a regular comment */
     color: red;
     /* position: absolute; */
     display: block
@@ -101,11 +102,11 @@ div {
 
 Running: testPrependMultipleProperties
 div {
-    /* This is a regular comment */
     TRAILING-1: VALUE;
     TRAILING-2: VALUE;
     TRAILING-3: VALUE;
     TRAILING-4: VALUE;
+    /* This is a regular comment */
     color: red;
     /* position: absolute; */
     display: block
@@ -124,7 +125,7 @@ div {
 Running: testComplexChange
 div {
     /* This is a regular comment */
-    color:CHANGED;
+    color: CHANGED;
     /* position: absolute; */
     CHANGED: block
 ;

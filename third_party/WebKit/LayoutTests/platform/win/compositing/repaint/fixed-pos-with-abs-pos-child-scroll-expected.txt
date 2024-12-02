@@ -6,15 +6,71 @@ Hi!
       "bounds": [785, 4021],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [425, 980, 360, 90],
-        [425, 980, 360, 90],
-        [425, 980, 22, 17],
-        [425, 980, 22, 17],
-        [425, 480, 360, 90],
-        [425, 480, 360, 90],
-        [425, 480, 22, 17],
-        [425, 480, 22, 17]
+      "paintInvalidations": [
+        {
+          "object": "LayoutBlockFlow (positioned) DIV id='abs'",
+          "rect": [425, 980, 360, 90],
+          "reason": "subtree"
+        },
+        {
+          "object": "LayoutBlockFlow (positioned) DIV id='abs'",
+          "rect": [425, 980, 360, 90],
+          "reason": "subtree"
+        },
+        {
+          "object": "LayoutBlockFlow (positioned) DIV id='abs'",
+          "rect": [425, 480, 360, 90],
+          "reason": "subtree"
+        },
+        {
+          "object": "LayoutBlockFlow (positioned) DIV id='abs'",
+          "rect": [425, 480, 360, 90],
+          "reason": "subtree"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [425, 980, 22, 17],
+          "reason": "subtree"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [425, 980, 22, 17],
+          "reason": "subtree"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [425, 480, 22, 17],
+          "reason": "subtree"
+        },
+        {
+          "object": "LayoutText #text",
+          "rect": [425, 480, 22, 17],
+          "reason": "subtree"
+        },
+        {
+          "object": "InlineTextBox 'Hi!'",
+          "reason": "subtree"
+        },
+        {
+          "object": "InlineTextBox 'Hi!'",
+          "reason": "subtree"
+        },
+        {
+          "object": "LayoutBlockFlow (positioned) DIV id='fixed'",
+          "reason": "subtree"
+        },
+        {
+          "object": "LayoutBlockFlow (positioned) DIV id='fixed'",
+          "reason": "subtree"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        }
       ]
     }
   ]

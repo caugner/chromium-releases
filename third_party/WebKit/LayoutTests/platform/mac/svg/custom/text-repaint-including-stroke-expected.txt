@@ -5,22 +5,53 @@
       "bounds": [800, 600],
       "contentsOpaque": true,
       "drawsContent": true,
-      "repaintRects": [
-        [80, 0, 551, 118],
-        [80, 0, 551, 118],
-        [80, 0, 551, 118],
-        [30, 0, 404, 60],
-        [30, 0, 404, 60],
-        [30, 0, 404, 60]
-      ],
-      "paintInvalidationClients": [
-        "RootInlineBox",
-        "InlineTextBox 'Repaint me!'",
-        "LayoutSVGRoot svg",
-        "LayoutSVGText text id='bounce'",
-        "RootInlineBox",
-        "LayoutSVGInlineText #text",
-        "InlineTextBox 'Repaint me!'"
+      "paintInvalidations": [
+        {
+          "object": "LayoutSVGInlineText #text",
+          "rect": [80, 0, 551, 118],
+          "reason": "style change"
+        },
+        {
+          "object": "LayoutSVGRoot svg",
+          "rect": [80, 0, 551, 118],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutSVGText text id='bounce'",
+          "rect": [80, 0, 551, 118],
+          "reason": "full"
+        },
+        {
+          "object": "LayoutSVGInlineText #text",
+          "rect": [30, 0, 404, 60],
+          "reason": "style change"
+        },
+        {
+          "object": "LayoutSVGRoot svg",
+          "rect": [30, 0, 404, 60],
+          "reason": "bounds change"
+        },
+        {
+          "object": "LayoutSVGText text id='bounce'",
+          "rect": [30, 0, 404, 60],
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Repaint me!'",
+          "reason": "full"
+        },
+        {
+          "object": "InlineTextBox 'Repaint me!'",
+          "reason": "style change"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        },
+        {
+          "object": "RootInlineBox",
+          "reason": "full"
+        }
       ]
     }
   ]

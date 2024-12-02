@@ -24,12 +24,15 @@ import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.os.PowerManager;
 import android.os.Process;
+import android.os.UserManager;
 import android.provider.Settings;
 import android.view.View;
 import android.view.ViewGroup.MarginLayoutParams;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.TextView;
+
+import java.lang.reflect.Method;
 
 /**
  * Utility class to use new APIs that were added after ICS (API level 14).
@@ -70,6 +73,14 @@ public class ApiCompatibilityUtils {
      */
     public static boolean isPrintingSupported() {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT;
+    }
+
+    /**
+     * @return True if the running version of the Android supports elevation. Elevation of a view
+     * determines the visual appearance of its shadow.
+     */
+    public static boolean isElevationSupported() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP;
     }
 
     /**
@@ -280,6 +291,17 @@ public class ApiCompatibilityUtils {
         }
     }
 
+    /**
+     * Set elevation if supported.
+     */
+    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
+    public static boolean setElevation(View view, float elevationValue) {
+        if (!isElevationSupported()) return false;
+
+        view.setElevation(elevationValue);
+        return true;
+    }
+
     private static class FinishAndRemoveTaskWithRetry implements Runnable {
         private static final long RETRY_DELAY_MS = 500;
         private static final long MAX_TRY_COUNT = 3;
@@ -478,5 +500,27 @@ public class ApiCompatibilityUtils {
         } else {
             view.setTextAppearance(view.getContext(), id);
         }
+    }
+
+    /**
+     * @param context The Android context, used to retrieve the UserManager system service.
+     * @return Whether the device is running in demo mode.
+     */
+    public static boolean isDemoUser(Context context) {
+        // UserManager#isDemoUser() is only available in Android versions greater than N.
+        if (!BuildInfo.isGreaterThanN()) return false;
+
+        try {
+            UserManager userManager = (UserManager) context.getSystemService(Context.USER_SERVICE);
+            Method isDemoUserMethod = UserManager.class.getMethod("isDemoUser");
+            boolean isDemoUser = (boolean) isDemoUserMethod.invoke(userManager);
+            return isDemoUser;
+        } catch (RuntimeException e) {
+            // Ignore to avoid crashing on startup.
+        } catch (Exception e) {
+            // Ignore.
+        }
+
+        return false;
     }
 }
