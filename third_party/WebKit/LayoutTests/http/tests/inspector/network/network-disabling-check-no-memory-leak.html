@@ -8,22 +8,17 @@ function test()
     InspectorTest.recordNetwork();
     InspectorTest.makeSimpleXHR("GET", "resources/resource.php", true, step2);
 
-    function step2()
+    async function step2()
     {
-        InspectorTest.NetworkAgent.disable(step3);
-    }
-
-    function step3()
-    {
+        await InspectorTest.NetworkAgent.disable();
         var request1 = InspectorTest.networkRequests().pop();
         request1.requestContent().then(step4);
     }
 
-    function step4()
+    function step4(content)
     {
-        var request1 = InspectorTest.networkRequests().pop();
-        InspectorTest.addResult("resource.content after disabling network domain: " + request1.content);
-        InspectorTest.NetworkAgent.enable(step5);
+        InspectorTest.addResult("resource.content after disabling network domain: " + content);
+        InspectorTest.NetworkAgent.enable().then(step5);
     }
 
     function step5()

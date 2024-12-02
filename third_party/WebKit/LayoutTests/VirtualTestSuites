@@ -2,8 +2,7 @@
   {
     "prefix": "color_space",
     "base": "fast/canvas/color-space",
-    "args": ["--enable-color-correct-rendering",
-             "--enable-true-color-rendering"]
+    "args": ["--enable-blink-features=ColorCanvasExtensions"]
   },
   {
     "prefix": "gpu",
@@ -74,6 +73,11 @@
     "args": ["--force-gpu-rasterization"]
   },
   {
+    "prefix": "exotic-color-space",
+    "base": "images",
+    "args": ["--force-color-profile=color-spin-gamma24"]
+  },
+  {
     "prefix": "stable",
     "base": "webexposed",
     "args": ["--stable-release-mode"]
@@ -109,14 +113,9 @@
     "args": ["--stable-release-mode"]
   },
   {
-    "prefix": "disable-spinvalidation",
-    "base": "compositing",
-    "args": ["--disable-slimming-paint-invalidation"]
-  },
-  {
-    "prefix": "disable-spinvalidation",
-    "base": "paint",
-    "args": ["--disable-slimming-paint-invalidation"]
+    "prefix": "off-main-thread-fetch",
+    "base": "external/wpt/html/browsers/offline/appcache/workers",
+    "args": ["--enable-features=OffMainThreadFetch"]
   },
   {
     "prefix": "off-main-thread-fetch",
@@ -166,7 +165,7 @@
   {
     "prefix": "origin-trials-runtimeflags-disabled",
     "base": "http/tests/origin_trials/webexposed",
-    "args": ["--disable-blink-features=BudgetQuery,ForeignFetch,InstalledApp,LinkServiceWorker,LongTaskObserver,SetRootScroller,WebUSB,WebVR,WebShare"]
+    "args": ["--disable-origin-trial-controlled-blink-features"]
   },
   {
     "prefix": "android",
@@ -175,8 +174,16 @@
              "--enable-fixed-position-compositing", "--enable-prefer-compositing-to-lcd-text",
              "--enable-composited-scrolling-for-frames", "--enable-gesture-tap-highlight", "--enable-pinch",
              "--force-overlay-fullscreen-video", "--enable-overscroll-notifications",
-             "--enable-fixed-layout", "--enable-viewport", "--disable-canvas-aa",
-             "--disable-composited-antialiasing"]
+             "--enable-viewport", "--disable-canvas-aa", "--disable-composited-antialiasing"]
+  },
+  {
+    "prefix": "android",
+    "base": "fast/rootscroller",
+    "args": ["--enable-features=OverlayScrollbar", "--enable-threaded-compositing",
+             "--enable-fixed-position-compositing", "--enable-prefer-compositing-to-lcd-text",
+             "--enable-composited-scrolling-for-frames", "--enable-gesture-tap-highlight", "--enable-pinch",
+             "--force-overlay-fullscreen-video", "--enable-overscroll-notifications",
+             "--enable-viewport", "--disable-canvas-aa", "--disable-composited-antialiasing"]
   },
   {
     "prefix": "media-gpu-accelerated",
@@ -206,7 +213,7 @@
   {
     "prefix": "without-smil",
     "base": "svg/animations/exposed",
-    "args": ["--disable-blink-features=smil"]
+    "args": ["--disable-blink-features=SMIL"]
   },
   {
     "prefix": "linux-subpixel",
@@ -226,6 +233,11 @@
   {
     "prefix": "rootlayerscrolls",
     "base": "fast/scrolling",
+    "args": ["--root-layer-scrolls"]
+  },
+  {
+    "prefix": "rootlayerscrolls",
+    "base": "fast/rootscroller",
     "args": ["--root-layer-scrolls"]
   },
   {
@@ -372,6 +384,11 @@
     "args": ["--enable-features=WebAssembly"]
   },
   {
+    "prefix": "enable_wasm",
+    "base": "external/wpt/wasm",
+    "args": ["--enable-features=WebAssembly"]
+  },
+  {
     "prefix": "enable_wasm_streaming",
     "base": "http/tests/wasm_streaming",
     "args": ["--enable-features=WebAssemblyStreaming"]
@@ -390,6 +407,26 @@
     "prefix": "service-worker-navigation-preload-disabled",
     "base": "http/tests/serviceworker/webexposed",
     "args": ["--disable-features=ServiceWorkerNavigationPreload"]
+  },
+  {
+    "prefix": "service-worker-script-streaming",
+    "base": "external/wpt/service-workers",
+    "args": ["--enable-features=ServiceWorkerScriptStreaming"]
+  },
+  {
+    "prefix": "service-worker-script-streaming",
+    "base": "http/tests/serviceworker",
+    "args": ["--enable-features=ServiceWorkerScriptStreaming"]
+  },
+  {
+    "prefix": "service-worker-script-streaming",
+    "base": "http/tests/fetch/serviceworker",
+    "args": ["--enable-features=ServiceWorkerScriptStreaming"]
+  },
+  {
+    "prefix": "service-worker-script-streaming",
+    "base": "http/tests/fetch/serviceworker-proxied",
+    "args": ["--enable-features=ServiceWorkerScriptStreaming"]
   },
   {
     "prefix": "layout_ng",
@@ -437,6 +474,11 @@
     "args": ["--enable-blink-features=LayoutNG"]
   },
   {
+    "prefix": "layout_ng",
+    "base": "overflow",
+    "args": ["--enable-blink-features=LayoutNG"]
+  },
+  {
     "prefix": "feature-policy",
     "base": "http/tests/feature-policy",
     "args": ["--enable-blink-features=FeaturePolicy"]
@@ -449,22 +491,17 @@
   {
     "prefix": "mojo-localstorage",
     "base": "external/wpt/webstorage",
-    "args": ["--mojo-local-storage"]
+    "args": ["--disable-mojo-local-storage"]
   },
   {
     "prefix": "mojo-localstorage",
     "base": "storage/domstorage/localstorage",
-    "args": ["--mojo-local-storage"]
+    "args": ["--disable-mojo-local-storage"]
   },
   {
     "prefix": "print_browser",
     "base": "print_testharness",
     "args": ["--enable-print-browser"]
-  },
-  {
-    "prefix": "experimental-canvas-features",
-    "base": "fast/canvas-experimental",
-    "args": ["--enable-experimental-canvas-features"]
   },
   {
     "prefix": "new-remote-playback-pipeline",
@@ -475,5 +512,30 @@
     "prefix": "new-remote-playback-pipeline",
     "base": "media/controls",
     "args": ["--enable-features=NewRemotePlaybackPipeline"]
+  },
+  {
+    "prefix": "new-remote-playback-pipeline",
+    "base": "external/wpt/remote-playback",
+    "args": ["--enable-features=NewRemotePlaybackPipeline"]
+  },
+  {
+    "prefix": "new-remote-playback-pipeline",
+    "base": "http/tests/media/controls",
+    "args": ["--enable-features=NewRemotePlaybackPipeline"]
+  },
+  {
+    "prefix": "high-contrast-mode",
+    "base": "paint/high-contrast-mode/image-filter-all",
+    "args": ["--blink-settings=highContrastMode=3,highContrastImagePolicy=0"]
+  },
+  {
+    "prefix": "high-contrast-mode",
+    "base": "paint/high-contrast-mode/image-filter-none",
+    "args": ["--blink-settings=highContrastMode=3,highContrastImagePolicy=1"]
+  },
+  {
+    "prefix": "outofblink-cors",
+    "base": "webexposed",
+    "args": ["--enable-blink-features=OutOfBlinkCORS"]
   }
 ]

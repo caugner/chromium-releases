@@ -23,6 +23,14 @@
         testRunner.setCanOpenWindows();
         testRunner.setCloseRemainingWindowsWhenComplete(true);
         testRunner.setDumpJavaScriptDialogs(false);
+
+        // fetch-event-referrer-policy.https.html intentiontially loads mixed
+        // content in order to test the referrer policy, so
+        // WebKitAllowRunningInsecureContent must be set to true or else the
+        // load would be blocked.
+        if (document.URL.indexOf("service-workers/service-worker/fetch-event-referrer-policy.https.html") >= 0) {
+            testRunner.overridePreference('WebKitAllowRunningInsecureContent', true);
+        }
     }
 
     // Disable the default output of testharness.js.  The default output formats
@@ -78,9 +86,11 @@
 
     function isWPTManualTest() {
         var path = location.pathname;
-        if (location.hostname == 'web-platform.test' && path.endsWith('-manual.html'))
+        if (location.hostname == 'web-platform.test'
+            && /.*-manual(\.https)?\.html$/.test(path)) {
             return true;
-        return /\/external\/wpt\/.*-manual\.html$/.test(path);
+        }
+        return /\/external\/wpt\/.*-manual(\.https)?\.html$/.test(path);
     }
 
     // Returns a directory part relative to WPT root and a basename part of the
@@ -113,13 +123,16 @@
         }
 
         var src;
-        if (pathAndBase.startsWith('/fullscreen/')) {
-            // Fullscreen tests all use the same automation script.
+        if (pathAndBase.startsWith('/fullscreen/')
+            || pathAndBase.startsWith('/webusb/')) {
+            // Fullscreen tests all use the same automation script and WebUSB
+            // tests borrow it.
             src = automationPath + '/fullscreen/auto-click.js';
         } else if (pathAndBase.startsWith('/pointerevents/')
                    || pathAndBase.startsWith('/uievents/')
                    || pathAndBase.startsWith('/pointerlock/')
-                   || pathAndBase.startsWith('/html/')) {
+                   || pathAndBase.startsWith('/html/')
+                   || pathAndBase.startsWith('/input-events/')) {
             // Per-test automation scripts.
             src = automationPath + pathAndBase + '-automation.js';
         } else {
@@ -267,5 +280,4 @@
             window.addEventListener('load', done);
         }
     });
-
 })();

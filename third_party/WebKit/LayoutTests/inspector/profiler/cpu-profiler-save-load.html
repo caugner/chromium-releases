@@ -42,36 +42,34 @@ function test()
     InspectorTest.runProfilerTestSuite([
         function testSave(next)
         {
-            function waitForTempFile(view)
-            {
-                InspectorTest.addSniffer(view._profileHeader, "_writeToTempFile", saveProfileToFile.bind(this, view._profileHeader));
-            }
             function saveProfileToFile(profile)
             {
                 Bindings.FileOutputStream = function() { }
                 Bindings.FileOutputStream.prototype = {
-                    open: function(fileName, callback)
+                    open: async function(fileName)
                     {
                         file.name = fileName;
                         if (fileName.endsWith(".cpuprofile")) {
                             InspectorTest.addResult("PASS: open was called with extension '.cpuprofile'");
-                            callback(true);
+                            return true;
                         } else {
                             InspectorTest.addResult("FAILED: open was called with wrong extension. fileName: '" + fileName + "'");
                             next();
                         }
                     },
 
-                    write: function(data, callback)
+                    write: function(data)
                     {
-                        file._appendData(data);
-                        if (data.length) {
-                            InspectorTest.addResult("PASS: write was called with data length more than zero");
-                            callback(this);
-                        } else {
-                            InspectorTest.addResult("FAILED: write was called with zero data length");
-                            next();
-                        }
+                        return new Promise(resolve => {
+                            file._appendData(data);
+                            if (data.length) {
+                                InspectorTest.addResult("PASS: write was called with data length more than zero");
+                                resolve();
+                            } else {
+                                InspectorTest.addResult("FAILED: write was called with zero data length");
+                                next();
+                            }
+                        });
                     },
 
                     close: function()
@@ -84,7 +82,7 @@ function test()
                 profile.saveToFile();
             }
             InspectorTest.showProfileWhenAdded("manual");
-            InspectorTest.waitUntilProfileViewIsShown("manual", waitForTempFile.bind(this));
+            InspectorTest.waitUntilProfileViewIsShown("manual", view => saveProfileToFile(view._profileHeader));
             InspectorTest.evaluateInPage("pageFunction()", function done() {});
         },
 
@@ -106,13 +104,12 @@ function test()
             var profileName = file.name.substr(0, file.name.length - ".cpuprofile".length);
             InspectorTest.waitUntilProfileViewIsShown(profileName, checkLoadedContent);
             profilesPanel._loadFromFile(file);
-            var onTransferFinished = Profiler.CPUProfileHeader.prototype.onTransferFinished;
-            Profiler.CPUProfileHeader.prototype.onTransferFinished = function()
-            {
+            InspectorTest.addSniffer(Profiler.CPUProfileHeader.prototype, "updateStatus", function(statusText) {
+                if (!statusText.startsWith("Parsing"))
+                    return;
                 loadedProfileData = this._jsonifiedProfile;
-                onTransferFinished.call(this);
-                UI.panels.js_profiler.showProfile(this);
-            }
+                setTimeout(() => UI.panels.js_profiler.showProfile(this), 0);
+            }, true);
         }
 
     ]);

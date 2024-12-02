@@ -5,25 +5,24 @@
 <script src="../network-test.js"></script>
 
 <script>
-var test = function()
+async function test()
 {
-    InspectorTest.NetworkAgent.setCacheDisabled(true, sendCSSRequest);
+    await InspectorTest.NetworkAgent.setCacheDisabled(true);
 
-    function sendCSSRequest()
-    {
-        InspectorTest.makeSimpleXHR("GET", "resources/initiator.css", false, sendBinaryRequest);
-    }
+    InspectorTest.makeSimpleXHR("GET", "resources/initiator.css", false, sendBinaryRequest);
 
     function sendBinaryRequest()
     {
         InspectorTest.makeSimpleXHR("GET", "resources/binary.data", false, makeHAR);
     }
 
-    function makeHAR()
+    async function makeHAR()
     {
-        var writer = new Network.HARWriter();
         var stream = new InspectorTest.StringOutputStream(onSaved);
-        writer.write(stream, InspectorTest.networkRequests(), new Common.Progress());
+        var progress = new Common.Progress();
+        await Network.HARWriter.write(stream, InspectorTest.networkRequests(), progress);
+        progress.done();
+        stream.close();
     }
 
     function dumpContent(content)
@@ -34,10 +33,8 @@ var test = function()
         }
         var propertyNames = Object.keys(content);
         propertyNames.sort();
-        for (var i = 0; i < propertyNames.length; ++i) {
-            var prop = propertyNames[i];
-            InspectorTest.addResult("    " + prop + ": " + JSON.stringify(content[prop]));
-        }
+        for (var prop of propertyNames)
+            InspectorTest.addResult(`    ${prop}: ` + JSON.stringify(content[prop]));
     }
 
     function onSaved(data)
@@ -57,12 +54,9 @@ var test = function()
 
     function findEntry(har, regexp)
     {
-        var entries = har.log.entries;
-        for (var i = 0; i < entries.length; ++i) {
-             var entry = entries[i];
-             if (regexp.test(entry.request.url))
-                 return entry;
-        }
+        var entry = har.log.entries.find(entry => regexp.test(entry.request.url));
+        if (entry)
+            return entry;
         InspectorTest.addResult("FAIL: can't find resource for " + regexp);
         return null;
     }
