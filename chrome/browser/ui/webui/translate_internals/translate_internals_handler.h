@@ -2,13 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_UI_WEBUI_TRANSLATE_INTERNALS_HANDLER_H_
-#define CHROME_BROWSER_UI_WEBUI_TRANSLATE_INTERNALS_HANDLER_H_
+#ifndef CHROME_BROWSER_UI_WEBUI_TRANSLATE_INTERNALS_TRANSLATE_INTERNALS_HANDLER_H_
+#define CHROME_BROWSER_UI_WEBUI_TRANSLATE_INTERNALS_TRANSLATE_INTERNALS_HANDLER_H_
 
 #include <string>
 
+#include "chrome/browser/translate/translate_manager.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "webkit/plugins/webplugininfo.h"
+
+struct LanguageDetectionDetails;
+struct TranslateErrorDetails;
+struct TranslateEventDetails;
 
 namespace base {
 class DictionaryValue;
@@ -17,13 +22,22 @@ class Value;
 }
 
 // The handler class for TranslateInternals page operations.
-class TranslateInternalsHandler : public content::WebUIMessageHandler {
+class TranslateInternalsHandler : public content::WebUIMessageHandler,
+                                  public TranslateManager::Observer {
  public:
-  TranslateInternalsHandler() {}
-  virtual ~TranslateInternalsHandler() {}
+  TranslateInternalsHandler();
+  virtual ~TranslateInternalsHandler();
 
   // content::WebUIMessageHandler methods:
   virtual void RegisterMessages() OVERRIDE;
+
+  // TranslateManager::Observer methods:
+  virtual void OnLanguageDetection(
+      const LanguageDetectionDetails& details) OVERRIDE;
+  virtual void OnTranslateError(
+      const TranslateErrorDetails& details) OVERRIDE;
+  virtual void OnTranslateEvent(
+      const TranslateEventDetails& details) OVERRIDE;
 
  private:
   // Handles the Javascript message 'removePrefItem'. This message is sent
@@ -42,7 +56,10 @@ class TranslateInternalsHandler : public content::WebUIMessageHandler {
   // Sends the current preference to Javascript.
   void SendPrefsToJs();
 
+  // Sends the languages currently supported by the server to JavaScript.
+  void SendSupportedLanguagesToJs();
+
   DISALLOW_COPY_AND_ASSIGN(TranslateInternalsHandler);
 };
 
-#endif  // CHROME_BROWSER_UI_WEBUI_TRANSLATE_INTERNALS_HANDLER_H_
+#endif  // CHROME_BROWSER_UI_WEBUI_TRANSLATE_INTERNALS_TRANSLATE_INTERNALS_HANDLER_H_

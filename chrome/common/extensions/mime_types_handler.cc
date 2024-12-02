@@ -5,9 +5,9 @@
 #include "chrome/common/extensions/mime_types_handler.h"
 
 #include "base/logging.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
@@ -86,7 +86,7 @@ MimeTypesHandlerParser::~MimeTypesHandlerParser() {
 
 bool MimeTypesHandlerParser::Parse(extensions::Extension* extension,
                                    string16* error) {
-  const ListValue* mime_types_value = NULL;
+  const base::ListValue* mime_types_value = NULL;
   if (!extension->manifest()->GetList(keys::kMIMETypes,
                                       &mime_types_value)) {
     *error = ASCIIToUTF16(errors::kInvalidMimeTypesHandler);

@@ -41,10 +41,6 @@ class BrowserPolicyConnector;
 class PolicyService;
 };
 
-#if defined(OS_WIN) && defined(USE_AURA)
-class MetroViewerProcessHost;
-#endif
-
 #if defined(OS_MACOSX)
 class AppShimHostManager;
 #endif
@@ -87,9 +83,7 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual extensions::EventRouterForwarder*
         extension_event_router_forwarder() OVERRIDE;
   virtual NotificationUIManager* notification_ui_manager() OVERRIDE;
-#if defined(ENABLE_MESSAGE_CENTER)
   virtual message_center::MessageCenter* message_center() OVERRIDE;
-#endif
   virtual policy::BrowserPolicyConnector* browser_policy_connector() OVERRIDE;
   virtual policy::PolicyService* policy_service() OVERRIDE;
   virtual IconManager* icon_manager() OVERRIDE;
@@ -98,7 +92,6 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual RenderWidgetSnapshotTaker* GetRenderWidgetSnapshotTaker() OVERRIDE;
   virtual AutomationProviderList* GetAutomationProviderList() OVERRIDE;
   virtual void CreateDevToolsHttpProtocolHandler(
-      Profile* profile,
       chrome::HostDesktopType host_desktop_type,
       const std::string& ip,
       int port,
@@ -134,11 +127,9 @@ class BrowserProcessImpl : public BrowserProcess,
   virtual BookmarkPromptController* bookmark_prompt_controller() OVERRIDE;
   virtual chrome::MediaFileSystemRegistry*
       media_file_system_registry() OVERRIDE;
-  virtual void PlatformSpecificCommandLineProcessing(
-      const CommandLine& command_line) OVERRIDE;
   virtual bool created_local_state() const OVERRIDE;
-#if defined(OS_WIN) && defined(USE_AURA)
-  virtual void OnMetroViewerProcessTerminated() OVERRIDE;
+#if defined(ENABLE_WEBRTC)
+  virtual WebRtcLogUploader* webrtc_log_uploader() OVERRIDE;
 #endif
 
   static void RegisterPrefs(PrefRegistrySimple* registry);
@@ -160,7 +151,6 @@ class BrowserProcessImpl : public BrowserProcess,
   void CreateStatusTray();
   void CreateBackgroundModeManager();
 
-  void ApplyDisabledSchemesPolicy();
   void ApplyAllowCrossOriginAuthPromptPolicy();
   void ApplyDefaultBrowserPolicy();
 
@@ -294,14 +284,6 @@ class BrowserProcessImpl : public BrowserProcess,
   scoped_refptr<PluginsResourceService> plugins_resource_service_;
 #endif
 
-#if defined(OS_WIN) && defined(USE_AURA)
-  void PerformInitForWindowsAura(const CommandLine& command_line);
-
-  // Hosts the channel for the Windows 8 metro viewer process which runs in
-  // the ASH environment.
-  scoped_ptr<MetroViewerProcessHost> metro_viewer_process_host_;
-#endif
-
 #if defined(OS_MACOSX)
   // Hosts the IPC channel factory that App Shims connect to on Mac.
   scoped_ptr<AppShimHostManager> app_shim_host_manager_;
@@ -312,6 +294,11 @@ class BrowserProcessImpl : public BrowserProcess,
   // TODO(eroman): Remove this when done debugging 113031. This tracks
   // the callstack which released the final module reference count.
   base::debug::StackTrace release_last_reference_callstack_;
+
+#if defined(ENABLE_WEBRTC)
+  // Lazily initialized.
+  scoped_ptr<WebRtcLogUploader> webrtc_log_uploader_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(BrowserProcessImpl);
 };

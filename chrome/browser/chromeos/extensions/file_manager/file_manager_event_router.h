@@ -10,10 +10,11 @@
 
 #include "base/files/file_path_watcher.h"
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/chromeos/drive/drive_system_service.h"
+#include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_system_observer.h"
+#include "chrome/browser/chromeos/drive/job_list.h"
 #include "chrome/browser/chromeos/net/connectivity_state_helper_observer.h"
-#include "chrome/browser/google_apis/drive_service_interface.h"
+#include "chrome/browser/drive/drive_service_interface.h"
 #include "chromeos/disks/disk_mount_manager.h"
 
 class FileManagerNotifications;
@@ -25,10 +26,10 @@ class Profile;
 class FileManagerEventRouter
     : public chromeos::disks::DiskMountManager::Observer,
       public chromeos::ConnectivityStateHelperObserver,
-      public drive::DriveSystemServiceObserver,
+      public drive::DriveIntegrationServiceObserver,
       public drive::FileSystemObserver,
       public drive::JobListObserver,
-      public google_apis::DriveServiceObserver {
+      public drive::DriveServiceObserver {
  public:
   // Interface that should keep track of the system state in regards to system
   // suspend and resume events.
@@ -108,7 +109,7 @@ class FileManagerEventRouter
   virtual void OnDirectoryChanged(
       const base::FilePath& directory_path) OVERRIDE;
 
-  // drive::DriveSystemServiceObserver overrides.
+  // drive::DriveIntegrationServiceObserver overrides.
   virtual void OnFileSystemMounted() OVERRIDE;
   virtual void OnFileSystemBeingUnmounted() OVERRIDE;
 

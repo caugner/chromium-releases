@@ -8,7 +8,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_registry_simple.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
 #include "chrome/browser/policy/mock_configuration_policy_provider.h"
@@ -23,12 +23,10 @@
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/user_prefs/pref_registry_syncable.h"
-#include "content/public/test/test_browser_thread.h"
 #include "content/public/test/web_contents_tester.h"
 #include "ui/base/test/data/resource.h"
-#include "webkit/glue/webpreferences.h"
+#include "webkit/common/webpreferences.h"
 
-using content::BrowserThread;
 using content::WebContentsTester;
 
 TEST(ChromePrefServiceTest, UpdateCommandLinePrefStore) {
@@ -87,7 +85,7 @@ class ChromePrefServiceUserFilePrefsTest : public testing::Test {
   // The path to the directory where the test data is stored.
   base::FilePath data_dir_;
   // A message loop that we can use as the file thread message loop.
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
 };
 
 // Verifies that ListValue and DictionaryValue pref with non emtpy default
@@ -100,10 +98,11 @@ TEST_F(ChromePrefServiceUserFilePrefsTest, PreserveEmptyValue) {
       pref_file));
 
   PrefServiceMockBuilder builder;
-  builder.WithUserFilePrefs(pref_file, message_loop_.message_loop_proxy());
+  builder.WithUserFilePrefs(pref_file,
+                            message_loop_.message_loop_proxy().get());
   scoped_refptr<user_prefs::PrefRegistrySyncable> registry(
       new user_prefs::PrefRegistrySyncable);
-  scoped_ptr<PrefServiceSyncable> prefs(builder.CreateSyncable(registry));
+  scoped_ptr<PrefServiceSyncable> prefs(builder.CreateSyncable(registry.get()));
 
   // Register testing prefs.
   registry->RegisterListPref("list",
@@ -144,10 +143,6 @@ TEST_F(ChromePrefServiceUserFilePrefsTest, PreserveEmptyValue) {
 
 class ChromePrefServiceWebKitPrefs : public ChromeRenderViewHostTestHarness {
  protected:
-  ChromePrefServiceWebKitPrefs()
-      : ui_thread_(BrowserThread::UI, &message_loop_) {
-  }
-
   virtual void SetUp() {
     ChromeRenderViewHostTestHarness::SetUp();
 
@@ -172,9 +167,6 @@ class ChromePrefServiceWebKitPrefs : public ChromeRenderViewHostTestHarness {
     pref_services->SetUserPref("webkit.webprefs.foo",
                                Value::CreateStringValue("bar"));
   }
-
- private:
-  content::TestBrowserThread ui_thread_;
 };
 
 // Tests to see that webkit preferences are properly loaded and copied over

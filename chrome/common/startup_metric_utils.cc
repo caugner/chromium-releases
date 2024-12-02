@@ -4,7 +4,7 @@
 
 #include "chrome/common/startup_metric_utils.h"
 
-#include "base/hash_tables.h"
+#include "base/containers/hash_tables.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_base.h"
@@ -94,15 +94,6 @@ void OnBrowserStartupComplete(bool is_first_run) {
         "Startup.BrowserMessageLoopStartTimeFromMainEntry",
         startup_time_from_main_entry);
   }
-
-  // Create another histogram that records the exact number for use by
-  // performance tests.
-  int64 startup_time_from_main_entry_ms =
-      startup_time_from_main_entry.InMilliseconds();
-  HISTOGRAM_ENUMERATION(
-      "Startup.BrowserMessageLoopStartTimeFromMainEntry_Exact",
-      startup_time_from_main_entry_ms,
-      startup_time_from_main_entry_ms);
 
   // Record histograms for the subsystem times for startups > 10 seconds.
   const base::TimeDelta kTenSeconds = base::TimeDelta::FromSeconds(10);

@@ -4,8 +4,6 @@
 
 {
   'variables': {
-    # TODO(dmaclach): can we pick this up some other way? Right now it's
-    # duplicated from chrome.gyp
     'chromium_code': 1,
 
     'variables': {
@@ -21,7 +19,6 @@
 
     'remoting_multi_process%': '<(remoting_multi_process)',
     'remoting_rdp_session%': 1,
-    'remoting_use_apps_v2%': 0,
 
     # The |major|, |build| and |patch| versions are inherited from Chrome.
     # Since Chrome's |minor| version is always '0', we replace it with a
@@ -174,6 +171,7 @@
       'webapp/wcs_sandbox.html',
     ],
     'remoting_webapp_js_files': [
+      'webapp/butter_bar.js',
       'webapp/client_plugin.js',
       'webapp/client_plugin_async.js',
       'webapp/client_screen.js',
@@ -188,9 +186,9 @@
       'webapp/format_iq.js',
       'webapp/host.js',
       'webapp/host_controller.js',
+      'webapp/host_dispatcher.js',
       'webapp/host_list.js',
       'webapp/host_native_messaging.js',
-      'webapp/host_plugin_wrapper.js',
       'webapp/host_screen.js',
       'webapp/host_session.js',
       'webapp/host_settings.js',
@@ -202,14 +200,12 @@
       'webapp/oauth2.js',
       'webapp/oauth2_callback.js',
       'webapp/plugin_settings.js',
-      'webapp/xhr_proxy.js',
       'webapp/remoting.js',
-      'webapp/session_connector.js',
       'webapp/server_log_entry.js',
+      'webapp/session_connector.js',
       'webapp/stats_accumulator.js',
-      'webapp/storage.js',
-      'webapp/survey.js',
       'webapp/third_party_host_permissions.js',
+      'webapp/xhr_proxy.js',
       'webapp/third_party_token_fetcher.js',
       'webapp/toolbar.js',
       'webapp/ui_mode.js',
@@ -298,8 +294,8 @@
             'remoting_protocol',
             '../crypto/crypto.gyp:crypto',
             '../google_apis/google_apis.gyp:google_apis',
-            '../media/media.gyp:media',
             '../ipc/ipc.gyp:ipc',
+            '../third_party/webrtc/modules/modules.gyp:desktop_capture',
           ],
           'defines': [
             'VERSION=<(version_full)',
@@ -326,6 +322,8 @@
             'host/chromoting_host_context.h',
             'host/chromoting_messages.cc',
             'host/chromoting_messages.h',
+            'host/chromoting_param_traits.cc',
+            'host/chromoting_param_traits.h',
             'host/client_session.cc',
             'host/client_session.h',
             'host/client_session_control.h',
@@ -339,6 +337,7 @@
             'host/constants_mac.h',
             'host/continue_window.cc',
             'host/continue_window.h',
+            'host/continue_window_aura.cc',
             'host/continue_window_gtk.cc',
             'host/continue_window_mac.mm',
             'host/continue_window_win.cc',
@@ -350,6 +349,7 @@
             'host/desktop_session_connector.h',
             'host/desktop_session_proxy.cc',
             'host/desktop_session_proxy.h',
+            'host/disconnect_window_aura.cc',
             'host/disconnect_window_gtk.cc',
             'host/disconnect_window_mac.h',
             'host/disconnect_window_mac.mm',
@@ -358,13 +358,11 @@
             'host/dns_blackhole_checker.h',
             'host/heartbeat_sender.cc',
             'host/heartbeat_sender.h',
-            'host/host_change_notification_listener.cc', 
+            'host/host_change_notification_listener.cc',
             'host/host_change_notification_listener.h',
             'host/host_config.cc',
             'host/host_config.h',
             'host/host_exit_codes.h',
-            'host/host_port_allocator.cc',
-            'host/host_port_allocator.h',
             'host/host_secret.cc',
             'host/host_secret.h',
             'host/host_status_monitor.h',
@@ -390,6 +388,9 @@
             'host/ipc_input_injector.h',
             'host/ipc_screen_controls.cc',
             'host/ipc_screen_controls.h',
+            'host/ipc_util.h',
+            'host/ipc_util_posix.cc',
+            'host/ipc_util_win.cc',
             'host/ipc_video_frame_capturer.cc',
             'host/ipc_video_frame_capturer.h',
             'host/it2me_desktop_environment.cc',
@@ -412,7 +413,11 @@
             'host/me2me_desktop_environment.h',
             'host/mouse_clamping_filter.cc',
             'host/mouse_clamping_filter.h',
-            'host/network_settings.h',
+            'host/pairing_registry_delegate.h',
+            'host/pairing_registry_delegate_linux.cc',
+            'host/pairing_registry_delegate_linux.h',
+            'host/pairing_registry_delegate_mac.cc',
+            'host/pairing_registry_delegate_win.cc',
             'host/pam_authorization_factory_posix.cc',
             'host/pam_authorization_factory_posix.h',
             'host/pin_hash.cc',
@@ -456,10 +461,10 @@
             'host/video_scheduler.h',
             'host/vlog_net_log.cc',
             'host/vlog_net_log.h',
+            'host/win/com_security.cc',
+            'host/win/com_security.h',
             'host/win/launch_process_with_token.cc',
             'host/win/launch_process_with_token.h',
-            'host/win/message_window.cc',
-            'host/win/message_window.h',
             'host/win/omaha.cc',
             'host/win/omaha.h',
             'host/win/rdp_client.cc',
@@ -479,16 +484,15 @@
             'host/win/wts_terminal_observer.h',
           ],
           'conditions': [
-            ['toolkit_uses_gtk==1', {
+            ['OS=="linux"', {
               'dependencies': [
+                # Always use GTK on Linux, even for Aura builds.
+                #
+                # TODO(lambroslambrou): Once the DisconnectWindow and
+                # ContinueWindow classes have been implemented for Aura,
+                # remove this dependency.
                 '../build/linux/system.gyp:gtk',
               ],
-            }, {  # else toolkit_uses_gtk!=1
-              'sources!': [
-                '*_gtk.cc',
-              ],
-            }],
-            ['OS=="linux"', {
               'link_settings': {
                 'libraries': [
                   '-lX11',
@@ -496,9 +500,15 @@
                   '-lXfixes',
                   '-lXtst',
                   '-lXi',
+                  '-lXrandr',
                   '-lpam',
                 ],
               },
+            }, {  # else OS != "linux"
+              'sources!': [
+                'host/continue_window_aura.cc',
+                'host/disconnect_window_aura.cc',
+              ],
             }],
             ['OS=="mac"', {
               'sources': [
@@ -548,8 +558,8 @@
           'dependencies': [
             '../base/base.gyp:base',
             '../base/base.gyp:base_i18n',
-            '../media/media.gyp:media',
             '../net/net.gyp:net',
+            '../third_party/webrtc/modules/modules.gyp:desktop_capture',
             'remoting_base',
             'remoting_breakpad',
             'remoting_host',
@@ -562,8 +572,6 @@
           ],
           'sources': [
             'host/curtain_mode.h',
-            'host/curtaining_host_observer.h',
-            'host/curtaining_host_observer.cc',
             'host/curtain_mode_linux.cc',
             'host/curtain_mode_mac.cc',
             'host/curtain_mode_win.cc',
@@ -591,6 +599,13 @@
           'sources': [
             'host/keygen_main.cc',
           ],
+          'conditions': [
+            ['OS=="linux" and linux_use_tcmalloc==1', {
+              'dependencies': [
+                '../base/allocator/allocator.gyp:allocator',
+              ],
+            }],
+          ],
         },  # end of target 'remoting_host_keygen'
 
         {
@@ -602,19 +617,30 @@
             '../google_apis/google_apis.gyp:google_apis',
             'remoting_host',
           ],
+          'defines': [
+            'VERSION=<(version_full)',
+          ],
           'sources': [
             'host/setup/daemon_controller.h',
             'host/setup/daemon_controller_linux.cc',
-            'host/setup/daemon_controller_mac.cc',
+            'host/setup/daemon_controller_mac.mm',
             'host/setup/daemon_controller_win.cc',
             'host/setup/daemon_installer_win.cc',
             'host/setup/daemon_installer_win.h',
             'host/setup/host_starter.cc',
             'host/setup/host_starter.h',
+            'host/setup/native_messaging_host.cc',
+            'host/setup/native_messaging_host.h',
+            'host/setup/native_messaging_reader.cc',
+            'host/setup/native_messaging_reader.h',
+            'host/setup/native_messaging_writer.cc',
+            'host/setup/native_messaging_writer.h',
             'host/setup/oauth_helper.cc',
             'host/setup/oauth_helper.h',
             'host/setup/pin_validator.cc',
             'host/setup/pin_validator.h',
+            'host/setup/test_util.cc',
+            'host/setup/test_util.h',
             'host/setup/win/auth_code_getter.cc',
             'host/setup/win/auth_code_getter.h',
           ],
@@ -725,11 +751,14 @@
             'VERSION=<(version_full)',
           ],
           'sources': [
-            'host/setup/native_messaging_host.cc',
-            'host/setup/native_messaging_reader.cc',
-            'host/setup/native_messaging_reader.h',
-            'host/setup/native_messaging_writer.cc',
-            'host/setup/native_messaging_writer.h',
+            'host/setup/native_messaging_host_main.cc',
+          ],
+          'conditions': [
+            ['OS=="linux" and linux_use_tcmalloc==1', {
+              'dependencies': [
+                '../base/allocator/allocator.gyp:allocator',
+              ],
+            }],
           ],
         },  # end of target 'remoting_native_messaging_host'
       ],  # end of 'targets'
@@ -746,6 +775,7 @@
               '<!(echo <(deb_filename) | sed -e "s/.deb$/.changes/")',
               '<(PRODUCT_DIR)/remoting_me2me_host.debug',
               '<(PRODUCT_DIR)/remoting_start_host.debug',
+              '<(PRODUCT_DIR)/remoting_native_messaging_host.debug',
             ]
           },
           'targets': [
@@ -781,6 +811,7 @@
               'dependencies': [
                 'remoting_me2me_host',
                 'remoting_start_host',
+                'remoting_native_messaging_host',
               ],
               'actions': [
                 {
@@ -815,8 +846,8 @@
           'dependencies': [
             '../base/base.gyp:base',
             '../base/base.gyp:base_i18n',
-            '../media/media.gyp:media',
             '../net/net.gyp:net',
+            '../third_party/webrtc/modules/modules.gyp:desktop_capture',
             'remoting_base',
             'remoting_breakpad',
             'remoting_host',
@@ -867,9 +898,30 @@
                       ],
                     },
                   ],
+                  'dependencies': [
+                    '../breakpad/breakpad.gyp:dump_syms',
+                  ],
+                  'postbuilds': [
+                    {
+                      'postbuild_name': 'Dump Symbols',
+                      'variables': {
+                        'dump_product_syms_path':
+                            'scripts/mac/dump_product_syms',
+                      },
+                      'action': [
+                        '<(dump_product_syms_path)',
+                        '<(version_full)',
+                      ],
+                    },  # end of postbuild 'dump_symbols'
+                  ],  # end of 'postbuilds'
                 }],  # mac_breakpad==1
               ],  # conditions
             }],  # OS=mac
+            ['OS=="linux" and linux_use_tcmalloc==1', {
+              'dependencies': [
+                '../base/allocator/allocator.gyp:allocator',
+              ],
+            }],  # OS=linux
           ],  # end of 'conditions'
         },  # end of target 'remoting_me2me_host'
 
@@ -923,6 +975,13 @@
           ],
           'sources': [
             'host/setup/start_host.cc',
+          ],
+          'conditions': [
+            ['linux_use_tcmalloc==1', {
+              'dependencies': [
+                '../base/allocator/allocator.gyp:allocator',
+              ],
+            }],
           ],
         },  # end of target 'remoting_start_host'
       ],  # end of 'targets'
@@ -1129,38 +1188,6 @@
           ],  # conditions
         },  # end of target 'remoting_host_prefpane'
       ],  # end of 'targets'
-      'conditions': [
-        ['mac_breakpad==1', {
-          'targets': [
-            {
-              'target_name': 'remoting_mac_symbols',
-              'type': 'none',
-              'dependencies': [
-                '../breakpad/breakpad.gyp:dump_syms',
-                'remoting_me2me_host',
-              ],
-              'actions': [
-                {
-                  'action_name': 'dump_symbols',
-                  'inputs': [
-                    '<(DEPTH)/remoting/scripts/mac/dump_product_syms',
-                    '<(PRODUCT_DIR)/dump_syms',
-                    '<(PRODUCT_DIR)/remoting_me2me_host.app',
-                  ],
-                  'outputs': [
-                    '<(PRODUCT_DIR)/remoting_me2me_host.app-<(version_full)-<(target_arch).breakpad',
-                  ],
-                  'action': [
-                    '<@(_inputs)',
-                    '<@(_outputs)',
-                  ],
-                  'message': 'Dumping breakpad symbols to <(_outputs)',
-                },  # end of action 'dump_symbols'
-              ],  # end of 'actions'
-            },  # end of target 'remoting_mac_symbols'
-          ],  # end of 'targets'
-        }],  # 'mac_breakpad==1'
-      ],  # end of 'conditions'
     }],  # 'OS=="mac"'
 
     ['OS=="win"', {
@@ -1390,8 +1417,8 @@
             '../base/base.gyp:base_static',
             '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
             '../ipc/ipc.gyp:ipc',
-            '../media/media.gyp:media',
             '../net/net.gyp:net',
+            '../third_party/webrtc/modules/modules.gyp:desktop_capture',
             'remoting_base',
             'remoting_breakpad',
             'remoting_host',
@@ -1403,6 +1430,7 @@
             'remoting_me2me_host_static',
             'remoting_protocol',
             'remoting_version_resources',
+            '../third_party/webrtc/modules/modules.gyp:desktop_capture',
           ],
           'sources': [
             '<(SHARED_INTERMEDIATE_DIR)/remoting/host/chromoting_lib.rc',
@@ -1422,8 +1450,6 @@
             'host/desktop_session.h',
             'host/desktop_session_agent.cc',
             'host/desktop_session_agent.h',
-            'host/desktop_session_agent_posix.cc',
-            'host/desktop_session_agent_win.cc',
             'host/desktop_session_win.cc',
             'host/desktop_session_win.h',
             'host/host_exit_codes.h',
@@ -1454,8 +1480,6 @@
             'host/win/unprivileged_process_delegate.h',
             'host/win/worker_process_launcher.cc',
             'host/win/worker_process_launcher.h',
-            'host/win/wts_console_session_process_driver.cc',
-            'host/win/wts_console_session_process_driver.h',
             'host/win/wts_session_process_delegate.cc',
             'host/win/wts_session_process_delegate.h',
             'host/worker_process_ipc_delegate.h',
@@ -1812,7 +1836,6 @@
             'BRANDING=<(branding)',
             'DAEMON_CONTROLLER_CLSID={<(daemon_controller_clsid)}',
             'RDP_DESKTOP_SESSION_CLSID={<(rdp_desktop_session_clsid)}',
-            'REMOTING_MULTI_PROCESS=<(remoting_multi_process)',
             'VERSION=<(version_full)',
           ],
           'generated_files': [
@@ -1909,10 +1932,10 @@
         'remoting_base',
         'remoting_client',
         'remoting_jingle_glue',
-        '../media/media.gyp:media',
         '../net/net.gyp:net',
         '../ppapi/ppapi.gyp:ppapi_cpp_objects',
         '../skia/skia.gyp:skia',
+        '../third_party/webrtc/modules/modules.gyp:desktop_capture',
       ],
       'sources': [
         'client/plugin/chromoting_instance.cc',
@@ -1939,8 +1962,8 @@
         'client/plugin/pepper_view.h',
         'client/plugin/pepper_util.cc',
         'client/plugin/pepper_util.h',
-        'client/plugin/pepper_xmpp_proxy.cc',
-        'client/plugin/pepper_xmpp_proxy.h',
+        'client/plugin/pepper_signal_strategy.cc',
+        'client/plugin/pepper_signal_strategy.h',
       ],
     },  # end of target 'remoting_client_plugin'
 
@@ -1998,6 +2021,15 @@
     {
       'target_name': 'remoting_webapp',
       'type': 'none',
+      'variables': {
+        'remoting_webapp_patch_files': [
+          'webapp/appsv2.patch',
+        ],
+        'remoting_webapp_apps_v2_js_files': [
+          'webapp/background.js',
+          'webapp/identity.js',
+        ],
+      },
       'dependencies': [
         'remoting_resources',
         'remoting_host_plugin',
@@ -2006,13 +2038,12 @@
         'webapp/build-webapp.py',
         '<(remoting_version_path)',
         '<(chrome_version_path)',
-        '<@(remoting_webapp_patch_files)',
+        '<@(remoting_webapp_apps_v2_js_files)',
         '<@(remoting_webapp_files)',
         '<@(remoting_webapp_js_files)',
-        '<@(remoting_webapp_apps_v2_js_files)',
         '<@(remoting_webapp_locale_files)',
+        '<@(remoting_webapp_patch_files)',
       ],
-
       'conditions': [
         ['enable_remoting_host==1', {
           'variables': {
@@ -2031,30 +2062,7 @@
             'remoting_host_plugin_manifest',
           ],
         }],
-        ['remoting_use_apps_v2==1', {
-          'variables': {
-            'remoting_webapp_patch_files': [
-              'webapp/appsv2.patch',
-            ],
-            'remoting_webapp_apps_v2_js_files': [
-              'webapp/background.js',
-              'webapp/identity.js',
-            ],
-          },
-        }, {
-          'variables': {
-            'remoting_webapp_patch_files': [],
-            'remoting_webapp_apps_v2_js_files': [],
-          },
-        }],
       ],
-
-      # Can't use a 'copies' because we need to manipulate
-      # the manifest file to get the right plugin name.
-      # Also we need to move the plugin into the me2mom
-      # folder, which means 2 copies, and gyp doesn't
-      # seem to guarantee the ordering of 2 copies statements
-      # when the actual project is generated.
       'actions': [
         {
           'action_name': 'Build Remoting WebApp',
@@ -2062,12 +2070,10 @@
           'zip_path': '<(PRODUCT_DIR)/remoting-webapp.zip',
           'inputs': [
             'webapp/build-webapp.py',
-            '<(remoting_version_path)',
             '<(chrome_version_path)',
-            '<@(remoting_webapp_patch_files)',
+            '<(remoting_version_path)',
             '<@(remoting_webapp_files)',
             '<@(remoting_webapp_js_files)',
-            '<@(remoting_webapp_apps_v2_js_files)',
             '<@(remoting_webapp_locale_files)',
           ],
           'conditions': [
@@ -2091,14 +2097,67 @@
             '<(plugin_path)',
             '<@(remoting_webapp_files)',
             '<@(remoting_webapp_js_files)',
-            '<@(remoting_webapp_apps_v2_js_files)',
             '--locales',
             '<@(remoting_webapp_locale_files)',
-            '--patches',
-            '<@(remoting_webapp_patch_files)',
           ],
           'msvs_cygwin_shell': 1,
         },
+      ],
+      'target_conditions': [
+        # We cannot currently build the appsv2 version of WebApp on Windows as
+        # there isn't a version of the "patch" tool available on windows. We
+        # should remove this condition when we remove the reliance on the 'patch'.
+
+        # We define this in a 'target_conditions' section because 'plugin_path'
+        # is defined in a 'conditions' section so its value is not available
+        # when gyp processes the 'actions' in a 'conditions" section.
+        ['OS != "win"', {
+          'actions': [
+            {
+              'action_name': 'Build Remoting WebApp V2',
+              'output_dir': '<(PRODUCT_DIR)/remoting/remoting.webapp.v2',
+              'zip_path': '<(PRODUCT_DIR)/remoting-webapp.v2.zip',
+              'inputs': [
+                'webapp/build-webapp.py',
+                '<(chrome_version_path)',
+                '<(remoting_version_path)',
+                '<@(remoting_webapp_apps_v2_js_files)',
+                '<@(remoting_webapp_files)',
+                '<@(remoting_webapp_js_files)',
+                '<@(remoting_webapp_locale_files)',
+                '<@(remoting_webapp_patch_files)',
+              ],
+              'conditions': [
+                ['enable_remoting_host==1', {
+                  'inputs': [
+                    '<(plugin_path)',
+                  ],
+                }],
+              ],
+              'outputs': [
+                '<(_output_dir)',
+                '<(_zip_path)',
+              ],
+              'action': [
+                'python', 'webapp/build-webapp.py',
+                '<(buildtype)',
+                '<(version_full)',
+                '<(host_plugin_mime_type)',
+                '<(_output_dir)',
+                '<(_zip_path)',
+                '<(plugin_path)',
+                '<@(remoting_webapp_apps_v2_js_files)',
+                '<@(remoting_webapp_files)',
+                '<@(remoting_webapp_js_files)',
+                '--locales',
+                '<@(remoting_webapp_locale_files)',
+                '--patches',
+                '<@(remoting_webapp_patch_files)',
+              ],
+              'msvs_cygwin_shell': 1,
+            },
+          ],
+        }],
       ],
     }, # end of target 'remoting_webapp'
 
@@ -2111,6 +2170,7 @@
         'sources': [
           'base/resources_unittest.cc',
           'host/plugin/host_script_object.cc',
+          'webapp/butter_bar.js',
           'webapp/client_screen.js',
           'webapp/error.js',
           'webapp/host_list.js',
@@ -2233,10 +2293,10 @@
         '../third_party/speex/speex.gyp:libspeex',
         '../media/media.gyp:media',
         '../media/media.gyp:shared_memory_support',
-        '../media/media.gyp:yuv_convert',
         'remoting_jingle_glue',
         'remoting_resources',
         'proto/chromotocol.gyp:chromotocol_proto_lib',
+        '../third_party/webrtc/modules/modules.gyp:desktop_capture',
       ],
       'export_dependent_settings': [
         '../base/base.gyp:base',
@@ -2273,8 +2333,6 @@
         'base/running_average.h',
         'base/socket_reader.cc',
         'base/socket_reader.h',
-        'base/stoppable.cc',
-        'base/stoppable.h',
         'base/typed_buffer.h',
         'base/util.cc',
         'base/util.h',
@@ -2370,16 +2428,16 @@
         '../third_party/libjingle/libjingle.gyp:libjingle',
       ],
       'sources': [
+        'jingle_glue/chromium_port_allocator.cc',
+        'jingle_glue/chromium_port_allocator.h',
         'jingle_glue/chromium_socket_factory.cc',
         'jingle_glue/chromium_socket_factory.h',
         'jingle_glue/iq_sender.cc',
         'jingle_glue/iq_sender.h',
-        'jingle_glue/javascript_signal_strategy.cc',
-        'jingle_glue/javascript_signal_strategy.h',
         'jingle_glue/jingle_info_request.cc',
         'jingle_glue/jingle_info_request.h',
+        'jingle_glue/network_settings.h',
         'jingle_glue/signal_strategy.h',
-        'jingle_glue/xmpp_proxy.h',
         'jingle_glue/xmpp_signal_strategy.cc',
         'jingle_glue/xmpp_signal_strategy.h',
       ],
@@ -2472,6 +2530,14 @@
         'protocol/negotiating_client_authenticator.h',
         'protocol/negotiating_host_authenticator.cc',
         'protocol/negotiating_host_authenticator.h',
+        'protocol/pairing_authenticator_base.cc',
+        'protocol/pairing_authenticator_base.h',
+        'protocol/pairing_client_authenticator.cc',
+        'protocol/pairing_client_authenticator.h',
+        'protocol/pairing_host_authenticator.cc',
+        'protocol/pairing_host_authenticator.h',
+        'protocol/pairing_registry.cc',
+        'protocol/pairing_registry.h',
         'protocol/protobuf_video_reader.cc',
         'protocol/protobuf_video_reader.h',
         'protocol/protobuf_video_writer.cc',
@@ -2513,8 +2579,6 @@
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:test_support_base',
         '../ipc/ipc.gyp:ipc',
-        '../media/media.gyp:media',
-        '../media/media.gyp:media_test_support',
         '../net/net.gyp:net_test_support',
         '../ppapi/ppapi.gyp:ppapi_cpp',
         '../testing/gmock.gyp:gmock',
@@ -2530,6 +2594,7 @@
         'remoting_jingle_glue',
         'remoting_protocol',
         'remoting_resources',
+        '../third_party/webrtc/modules/modules.gyp:desktop_capture',
       ],
       'defines': [
         'VERSION=<(version_full)',
@@ -2579,8 +2644,6 @@
         'host/desktop_session.h',
         'host/desktop_session_agent.cc',
         'host/desktop_session_agent.h',
-        'host/desktop_session_agent_posix.cc',
-        'host/desktop_session_agent_win.cc',
         'host/heartbeat_sender_unittest.cc',
         'host/host_change_notification_listener_unittest.cc',
         'host/host_mock_objects.cc',
@@ -2591,6 +2654,7 @@
         'host/linux/x_server_clipboard_unittest.cc',
         'host/local_input_monitor_unittest.cc',
         'host/log_to_server_unittest.cc',
+        'host/pairing_registry_delegate_linux_unittest.cc',
         'host/pin_hash_unittest.cc',
         'host/policy_hack/fake_policy_watcher.cc',
         'host/policy_hack/fake_policy_watcher.h',
@@ -2600,13 +2664,17 @@
         'host/register_support_host_request_unittest.cc',
         'host/remote_input_filter_unittest.cc',
         'host/resizing_host_observer_unittest.cc',
+        'host/screen_capturer_fake.cc',
+        'host/screen_capturer_fake.h',
         'host/screen_resolution_unittest.cc',
         'host/server_log_entry_unittest.cc',
+        'host/setup/native_messaging_host_unittest.cc',
+        'host/setup/native_messaging_reader_unittest.cc',
+        'host/setup/native_messaging_writer_unittest.cc',
         'host/setup/oauth_helper_unittest.cc',
         'host/setup/pin_validator_unittest.cc',
         'host/token_validator_factory_impl_unittest.cc',
         'host/video_scheduler_unittest.cc',
-        'host/win/message_window_unittest.cc',
         'host/win/rdp_client_unittest.cc',
         'host/win/worker_process_launcher.cc',
         'host/win/worker_process_launcher.h',
@@ -2639,6 +2707,7 @@
         'protocol/message_reader_unittest.cc',
         'protocol/mouse_input_filter_unittest.cc',
         'protocol/negotiating_authenticator_unittest.cc',
+        'protocol/pairing_registry_unittest.cc',
         'protocol/ppapi_module_stub.cc',
         'protocol/protocol_mock_objects.cc',
         'protocol/protocol_mock_objects.h',

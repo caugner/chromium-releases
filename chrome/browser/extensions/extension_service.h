@@ -5,7 +5,6 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_SERVICE_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_SERVICE_H_
 
-#include <list>
 #include <map>
 #include <set>
 #include <string>
@@ -17,7 +16,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/extensions/app_sync_bundle.h"
 #include "chrome/browser/extensions/blacklist.h"
 #include "chrome/browser/extensions/extension_function_histogram_value.h"
@@ -38,6 +37,7 @@
 #include "chrome/common/extensions/manifest.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "extensions/common/one_shot_event.h"
 #include "sync/api/string_ordinal.h"
 #include "sync/api/sync_change.h"
 #include "sync/api/syncable_service.h"
@@ -66,7 +66,7 @@ class ExtensionSystem;
 class ExtensionUpdater;
 class PendingExtensionManager;
 class SettingsFrontend;
-}
+}  // namespace extensions
 
 namespace syncer {
 class SyncErrorFactory;
@@ -76,11 +76,6 @@ class SyncErrorFactory;
 // various classes have on ExtensionService. This allows easy mocking.
 class ExtensionServiceInterface : public syncer::SyncableService {
  public:
-  // A function that returns true if the given extension should be
-  // included and false if it should be filtered out.  Identical to
-  // PendingExtensionInfo::ShouldAllowInstallPredicate.
-  typedef bool (*ExtensionFilter)(const extensions::Extension&);
-
   virtual ~ExtensionServiceInterface() {}
   virtual const ExtensionSet* extensions() const = 0;
   virtual const ExtensionSet* disabled_extensions() const = 0;
@@ -139,10 +134,6 @@ class ExtensionService
       public content::NotificationObserver,
       public extensions::Blacklist::Observer {
  public:
-  // The name of the directory inside the profile where extensions are
-  // installed to.
-  static const char kInstallDirectoryName[];
-
   // If auto-updates are turned on, default to running every 5 hours.
   static const int kDefaultUpdateFrequencySeconds = 60 * 60 * 5;
 
@@ -198,7 +189,8 @@ class ExtensionService
                    extensions::ExtensionPrefs* extension_prefs,
                    extensions::Blacklist* blacklist,
                    bool autoupdate_enabled,
-                   bool extensions_enabled);
+                   bool extensions_enabled,
+                   extensions::OneShotEvent* ready);
 
   virtual ~ExtensionService();
 
@@ -266,15 +258,6 @@ class ExtensionService
   // Initialize and start all installed extensions.
   void Init();
 
-  // To delay some initialization until after import has finished, register
-  // for the notification.
-  // TODO(yoz): remove InitEventRoutersAterImport.
-  void InitEventRoutersAfterImport();
-  void RegisterForImportFinished();
-
-  // Complete some initialization after being notified that import has finished.
-  void InitAfterImport();
-
   // Start up the extension event routers.
   void InitEventRouters();
 
@@ -330,9 +313,6 @@ class ExtensionService
   // currently has any window showing.
   void ReloadExtension(const std::string& extension_id);
 
-  // Reloads an extension and sends it the onRestarted() event.
-  void RestartExtension(const std::string& extension_id);
-
   // Uninstalls the specified extension. Callers should only call this method
   // with extensions that exist. |external_uninstall| is a magical parameter
   // that is only used to send information to ExtensionPrefs, which external
@@ -364,6 +344,9 @@ class ExtensionService
   // cannot be disabled, does nothing.
   virtual void DisableExtension(const std::string& extension_id,
       extensions::Extension::DisableReason disable_reason);
+
+  // Disable non-builtin and non-managed extensions.
+  void DisableUserExtensions();
 
   // Updates the |extension|'s granted permissions lists to include all
   // permissions in the |extension|'s manifest and re-enables the
@@ -421,8 +404,23 @@ class ExtensionService
   virtual void AddComponentExtension(const extensions::Extension* extension)
       OVERRIDE;
 
-  // Launch an extension the next time it is loaded.
-  void ScheduleLaunchOnLoad(const std::string& extension_id);
+  enum ImportStatus {
+   IMPORT_STATUS_OK,
+   IMPORT_STATUS_UNSATISFIED,
+   IMPORT_STATUS_UNRECOVERABLE
+  };
+
+  // Checks an extension's shared module imports to see if they are satisfied.
+  // If they are not, this function adds the dependencies to the pending install
+  // list if |extension| came from the webstore.
+  ImportStatus SatisfyImports(const extensions::Extension* extension);
+
+  // Returns a set of extensions that import a given extension.
+  scoped_ptr<const ExtensionSet> GetDependentExtensions(
+      const extensions::Extension* extension);
+
+  // Uninstalls shared modules that were only referenced by |extension|.
+  void PruneSharedModulesOnUninstall(const extensions::Extension* extension);
 
   // Informs the service that an extension's files are in place for loading.
   //
@@ -433,6 +431,9 @@ class ExtensionService
       const syncer::StringOrdinal& page_ordinal,
       bool has_requirement_errors,
       bool wait_for_idle);
+
+  // Checks for delayed installation for all pending installs.
+  void MaybeFinishDelayedInstallations();
 
   // Similar to FinishInstallation, but first checks if there still is an update
   // pending for the extension, and makes sure the extension is still idle.
@@ -694,16 +695,7 @@ class ExtensionService
   };
   typedef std::map<std::string, ExtensionRuntimeData> ExtensionRuntimeDataMap;
 
-  struct NaClModuleInfo {
-    NaClModuleInfo();
-    ~NaClModuleInfo();
-
-    GURL url;
-    std::string mime_type;
-  };
-  typedef std::list<NaClModuleInfo> NaClModuleInfoList;
-
-  // Sets the ready_ flag and sends a notification to the listeners.
+  // Signals *ready_ and sends a notification to the listeners.
   void SetReadyAndNotifyListeners();
 
   // Return true if the sync type of |extension| matches |type|.
@@ -720,13 +712,6 @@ class ExtensionService
   bool ProcessExtensionSyncDataHelper(
       const extensions::ExtensionSyncData& extension_sync_data,
       syncer::ModelType type);
-
-  // Events to be fired after an extension is reloaded.
-  enum PostReloadEvents {
-    EVENT_NONE = 0,
-    EVENT_LAUNCHED = 1 << 0,
-    EVENT_RESTARTED = 1 << 1,
-  };
 
   // Adds the given extension to the list of terminated extensions if
   // it is not already there and unloads it.
@@ -754,11 +739,6 @@ class ExtensionService
   // Common helper to finish installing the given extension.
   void FinishInstallation(const extensions::Extension* extension);
 
-  // Reloads |extension_id| and then dispatches to it the PostReloadEvents
-  // indicated by |events|.
-  void ReloadExtensionWithEvents(const std::string& extension_id,
-                                int events);
-
   // Updates the |extension|'s active permission set to include only permissions
   // currently requested by the extension and all the permissions required by
   // the extension.
@@ -769,39 +749,8 @@ class ExtensionService
   void CheckPermissionsIncrease(const extensions::Extension* extension,
                                 bool is_upgrade);
 
-  // Returns true if the app with id |extension_id| has any shell windows open.
-  bool HasShellWindows(const std::string& extension_id);
-
   // Helper that updates the active extension list used for crash reporting.
   void UpdateActiveExtensionsInCrashReporter();
-
-  // We implement some Pepper plug-ins using NaCl to take advantage of NaCl's
-  // strong sandbox. Typically, these NaCl modules are stored in extensions
-  // and registered here. Not all NaCl modules need to register for a MIME
-  // type, just the ones that are responsible for rendering a particular MIME
-  // type, like application/pdf. Note: We only register NaCl modules in the
-  // browser process.
-  void RegisterNaClModule(const GURL& url, const std::string& mime_type);
-  void UnregisterNaClModule(const GURL& url);
-
-  // Call UpdatePluginListWithNaClModules() after registering or unregistering
-  // a NaCl module to see those changes reflected in the PluginList.
-  void UpdatePluginListWithNaClModules();
-
-  NaClModuleInfoList::iterator FindNaClModule(const GURL& url);
-
-  // Performs tasks requested to occur after |extension| loads.
-  void DoPostLoadTasks(const extensions::Extension* extension);
-
-  // Launches the platform app associated with |extension_host|.
-  static void LaunchApplication(extensions::ExtensionHost* extension_host);
-
-  // Dispatches a restart event to the platform app associated with
-  // |extension_host|.
-  static void RestartApplication(
-      std::vector<extensions::app_file_handler_util::SavedFileEntry>
-          file_entries,
-      extensions::ExtensionHost* extension_host);
 
   // Helper to inspect an ExtensionHost after it has been loaded.
   void InspectExtensionHost(extensions::ExtensionHost* host);
@@ -833,9 +782,12 @@ class ExtensionService
   void ManageBlacklist(const std::set<std::string>& old_blacklisted_ids,
                        const std::set<std::string>& new_blacklisted_ids);
 
-  // Controls if installs are delayed. See comment for |installs_delayed_|.
-  void set_installs_delayed(bool value) { installs_delayed_ = value; }
-  bool installs_delayed() const { return installs_delayed_; }
+  // Controls if installs are delayed. See comment for
+  // |installs_delayed_for_gc_|.
+  void set_installs_delayed_for_gc(bool value) {
+    installs_delayed_for_gc_ = value;
+  }
+  bool installs_delayed_for_gc() const { return installs_delayed_for_gc_; }
 
   // The normal profile associated with this ExtensionService.
   Profile* profile_;
@@ -867,13 +819,8 @@ class ExtensionService
   // they can easily be un-blacklisted.
   ExtensionSet blacklisted_extensions_;
 
-  // The list of extension updates that have had their installs delayed because
-  // they are waiting for idle.
-  ExtensionSet delayed_updates_for_idle_;
-
-  // The list of extension installs delayed by |installs_delayed_|.
-  // This is a disjoint set from |delayed_updates_for_idle_|. Extensions in
-  // the |delayed_installs_| do not need to wait for idle.
+  // The list of extension installs delayed for various reasons.  The reason
+  // for delayed install is stored in ExtensionPrefs.
   ExtensionSet delayed_installs_;
 
   // Hold the set of pending extensions.
@@ -898,9 +845,8 @@ class ExtensionService
   // Used by dispatchers to limit API quota for individual extensions.
   ExtensionsQuotaService quota_service_;
 
-  // Record that Init() has been called, and chrome::EXTENSIONS_READY
-  // has fired.
-  bool ready_;
+  // Signaled when all extensions are loaded.
+  extensions::OneShotEvent* const ready_;
 
   // Our extension updater, if updates are turned on.
   scoped_ptr<extensions::ExtensionUpdater> updater_;
@@ -921,17 +867,6 @@ class ExtensionService
   // reloaded.
   typedef std::map<std::string, std::string> OrphanedDevTools;
   OrphanedDevTools orphaned_dev_tools_;
-
-  // Maps extension ids to a bitmask that indicates which events should be
-  // dispatched to the extension when it is loaded.
-  std::map<std::string, int> on_load_events_;
-
-  // Maps extension ids to vectors of saved file entries that the extension
-  // should be given access to on restart.
-  typedef std::map<std::string,
-      std::vector<extensions::app_file_handler_util::SavedFileEntry> >
-          SavedFileEntryMap;
-  SavedFileEntryMap on_restart_file_entries_;
 
   content::NotificationRegistrar registrar_;
   PrefChangeRegistrar pref_change_registrar_;
@@ -966,18 +901,16 @@ class ExtensionService
   // decide to abort.
   bool browser_terminating_;
 
-  // Set to true to delay all new extension installations. Acts as a lock
-  // to allow background processing of tasks such as garbage collection of
-  // on-disk state without needing to worry about race conditions caused
-  // by extension installation and reinstallation.
-  bool installs_delayed_;
+  // Set to true to delay all new extension installations. Acts as a lock to
+  // allow background processing of garbage collection of on-disk state without
+  // needing to worry about race conditions caused by extension installation and
+  // reinstallation.
+  bool installs_delayed_for_gc_;
 
   // Set to true if this is the first time this ExtensionService has run.
   // Used for specially handling external extensions that are installed the
   // first time.
   bool is_first_run_;
-
-  NaClModuleInfoList nacl_module_list_;
 
   extensions::AppSyncBundle app_sync_bundle_;
   extensions::ExtensionSyncBundle extension_sync_bundle_;

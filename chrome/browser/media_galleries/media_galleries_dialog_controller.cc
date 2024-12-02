@@ -4,15 +4,14 @@
 
 #include "chrome/browser/media_galleries/media_galleries_dialog_controller.h"
 
-#include "base/i18n/time_formatting.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/media_galleries/media_file_system_registry.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/storage_monitor/media_storage_util.h"
 #include "chrome/browser/storage_monitor/storage_info.h"
+#include "chrome/browser/storage_monitor/storage_monitor.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
@@ -20,25 +19,13 @@
 #include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/text/bytes_formatting.h"
 
 using extensions::Extension;
 
 namespace chrome {
 
 namespace {
-
-bool IsAttachedDevice(const std::string& device_id) {
-  if (!MediaStorageUtil::IsRemovableDevice(device_id))
-    return false;
-
-  std::vector<StorageInfo> removable_storages =
-      StorageMonitor::GetInstance()->GetAttachedStorage();
-  for (size_t i = 0; i < removable_storages.size(); ++i) {
-    if (removable_storages[i].device_id == device_id)
-      return true;
-  }
-  return false;
-}
 
 // Comparator for sorting GalleryPermissionsVector -- sorts
 // allowed galleries low, and then sorts by absolute path.
@@ -62,17 +49,24 @@ MediaGalleriesDialogController::MediaGalleriesDialogController(
       : web_contents_(web_contents),
         extension_(&extension),
         on_finish_(on_finish) {
+  // Passing unretained pointer is safe, since the dialog controller
+  // is self-deleting, and so won't be deleted until it can be shown
+  // and then closed.
+  StorageMonitor::GetInstance()->EnsureInitialized(base::Bind(
+      &MediaGalleriesDialogController::OnStorageMonitorInitialized,
+      base::Unretained(this)));
+}
+
+void MediaGalleriesDialogController::OnStorageMonitorInitialized() {
   MediaFileSystemRegistry* registry =
       g_browser_process->media_file_system_registry();
   preferences_ = registry->GetPreferences(
-      Profile::FromBrowserContext(web_contents->GetBrowserContext()));
+      Profile::FromBrowserContext(web_contents_->GetBrowserContext()));
   InitializePermissions();
 
   dialog_.reset(MediaGalleriesDialog::Create(this));
 
-  StorageMonitor* monitor = StorageMonitor::GetInstance();
-  if (monitor)
-    monitor->AddObserver(this);
+  StorageMonitor::GetInstance()->AddObserver(this);
 
   preferences_->AddGalleryChangeObserver(this);
 }
@@ -83,76 +77,11 @@ MediaGalleriesDialogController::MediaGalleriesDialogController()
       preferences_(NULL) {}
 
 MediaGalleriesDialogController::~MediaGalleriesDialogController() {
-  StorageMonitor* monitor = StorageMonitor::GetInstance();
-  if (monitor)
-    monitor->RemoveObserver(this);
+  if (chrome::StorageMonitor::GetInstance())
+    StorageMonitor::GetInstance()->RemoveObserver(this);
 
   if (select_folder_dialog_.get())
     select_folder_dialog_->ListenerDestroyed();
-}
-
-// static
-string16 MediaGalleriesDialogController::GetGalleryDisplayName(
-    const MediaGalleryPrefInfo& gallery) {
-  string16 name = gallery.display_name;
-  if (IsAttachedDevice(gallery.device_id)) {
-    name += ASCIIToUTF16(" ");
-    name +=
-        l10n_util::GetStringUTF16(IDS_MEDIA_GALLERIES_DIALOG_DEVICE_ATTACHED);
-  }
-  return name;
-}
-
-// static
-string16 MediaGalleriesDialogController::GetGalleryDisplayNameNoAttachment(
-    const MediaGalleryPrefInfo& gallery) {
-  string16 name = gallery.display_name;
-  if (name.empty())
-    name = gallery.volume_label;
-  if (name.empty()) {
-    name = MediaStorageUtil::GetDisplayNameForDevice(
-      gallery.total_size_in_bytes,
-      MediaStorageUtil::GetFullProductName(UTF16ToUTF8(gallery.vendor_name),
-                                           UTF16ToUTF8(gallery.model_name)));
-  }
-
-  return name;
-}
-
-// static
-string16 MediaGalleriesDialogController::GetGalleryTooltip(
-    const MediaGalleryPrefInfo& gallery) {
-  return gallery.AbsolutePath().LossyDisplayName();
-}
-
-// static
-bool MediaGalleriesDialogController::GetGalleryAttached(
-    const MediaGalleryPrefInfo& gallery) {
-  return !MediaStorageUtil::IsRemovableDevice(gallery.device_id) ||
-         IsAttachedDevice(gallery.device_id);
-}
-
-// static
-string16 MediaGalleriesDialogController::GetGalleryAdditionalDetails(
-    const MediaGalleryPrefInfo& gallery) {
-  string16 attached;
-  if (MediaStorageUtil::IsRemovableDevice(gallery.device_id)) {
-    if (IsAttachedDevice(gallery.device_id)) {
-      attached = l10n_util::GetStringUTF16(
-          IDS_MEDIA_GALLERIES_DIALOG_DEVICE_ATTACHED);
-    } else if (!gallery.last_attach_time.is_null()) {
-      attached = l10n_util::GetStringFUTF16(
-          IDS_MEDIA_GALLERIES_LAST_ATTACHED,
-          base::TimeFormatShortDateNumeric(gallery.last_attach_time));
-    } else {
-      attached = l10n_util::GetStringUTF16(
-          IDS_MEDIA_GALLERIES_DIALOG_DEVICE_NOT_ATTACHED);
-    }
-  }
-
-  // TODO(gbillock): This is a placeholder. Need to actually get the
-  // right text here.
-  return attached;
 }
 
 string16 MediaGalleriesDialogController::GetHeader() const {
@@ -192,15 +121,15 @@ void MediaGalleriesDialogController::FillPermissions(
     const {
   for (KnownGalleryPermissions::const_iterator iter = known_galleries_.begin();
        iter != known_galleries_.end(); ++iter) {
-    if ((attached && GetGalleryAttached(iter->second.pref_info)) ||
-        (!attached && !GetGalleryAttached(iter->second.pref_info))) {
+    if ((attached && iter->second.pref_info.IsGalleryAvailable()) ||
+        (!attached && !iter->second.pref_info.IsGalleryAvailable())) {
       permissions->push_back(iter->second);
     }
   }
   for (GalleryPermissionsVector::const_iterator iter = new_galleries_.begin();
        iter != new_galleries_.end(); ++iter) {
-    if ((attached && GetGalleryAttached(iter->pref_info)) ||
-        (!attached && !GetGalleryAttached(iter->pref_info))) {
+    if ((attached && iter->pref_info.IsGalleryAvailable()) ||
+        (!attached && !iter->pref_info.IsGalleryAvailable())) {
       permissions->push_back(*iter);
     }
   }
@@ -324,16 +253,17 @@ void MediaGalleriesDialogController::FileSelected(const base::FilePath& path,
 
 void MediaGalleriesDialogController::OnRemovableStorageAttached(
     const StorageInfo& info) {
-  UpdateGalleriesOnDeviceEvent(info.device_id);
+  UpdateGalleriesOnDeviceEvent(info.device_id());
 }
 
 void MediaGalleriesDialogController::OnRemovableStorageDetached(
     const StorageInfo& info) {
-  UpdateGalleriesOnDeviceEvent(info.device_id);
+  UpdateGalleriesOnDeviceEvent(info.device_id());
 }
 
 void MediaGalleriesDialogController::OnGalleryChanged(
-    MediaGalleriesPreferences* pref, const std::string& extension_id) {
+    MediaGalleriesPreferences* pref, const std::string& extension_id,
+    MediaGalleryPrefId /* pref_id */, bool /* has_permission */) {
   DCHECK_EQ(preferences_, pref);
   if (extension_id.empty() || extension_id == extension_->id())
     UpdateGalleriesOnPreferencesEvent();
@@ -378,8 +308,10 @@ void MediaGalleriesDialogController::SavePermissions() {
 
     // TODO(gbillock): Should be adding volume metadata during FileSelected.
     const MediaGalleryPrefInfo& gallery = iter->pref_info;
-    MediaGalleryPrefId id = preferences_->AddGalleryWithName(
-        gallery.device_id, gallery.display_name, gallery.path, true);
+    MediaGalleryPrefId id = preferences_->AddGallery(
+        gallery.device_id, gallery.path, true,
+        gallery.volume_label, gallery.vendor_name, gallery.model_name,
+        gallery.total_size_in_bytes, gallery.last_attach_time);
     preferences_->SetGalleryPermissionForExtension(*extension_, id, true);
   }
 }

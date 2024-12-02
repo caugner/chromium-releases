@@ -6,7 +6,6 @@
 #define CHROME_BROWSER_UI_VIEWS_EXTENSIONS_NATIVE_APP_WINDOW_VIEWS_H_
 
 #include "base/observer_list.h"
-#include "chrome/browser/ui/base_window.h"
 #include "chrome/browser/ui/extensions/native_app_window.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -54,19 +53,22 @@ class NativeAppWindowViews : public NativeAppWindow,
   void InitializePanelWindow(const ShellWindow::CreateParams& create_params);
   void OnViewWasResized();
 
+  bool ShouldUseChromeStyleFrame() const;
+
 #if defined(OS_WIN)
   void OnShortcutInfoLoaded(
       const ShellIntegration::ShortcutInfo& shortcut_info);
   HWND GetNativeAppWindowHWND() const;
 #endif
 
-  // BaseWindow implementation.
+  // ui::BaseWindow implementation.
   virtual bool IsActive() const OVERRIDE;
   virtual bool IsMaximized() const OVERRIDE;
   virtual bool IsMinimized() const OVERRIDE;
   virtual bool IsFullscreen() const OVERRIDE;
   virtual gfx::NativeWindow GetNativeWindow() OVERRIDE;
   virtual gfx::Rect GetRestoredBounds() const OVERRIDE;
+  virtual ui::WindowShowState GetRestoredState() const OVERRIDE;
   virtual gfx::Rect GetBounds() const OVERRIDE;
   virtual void Show() OVERRIDE;
   virtual void ShowInactive() OVERRIDE;
@@ -115,9 +117,8 @@ class NativeAppWindowViews : public NativeAppWindow,
 
   // views::View implementation.
   virtual void Layout() OVERRIDE;
-  virtual void ViewHierarchyChanged(bool is_add,
-                                    views::View* parent,
-                                    views::View* child) OVERRIDE;
+  virtual void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) OVERRIDE;
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual gfx::Size GetMinimumSize() OVERRIDE;
   virtual gfx::Size GetMaximumSize() OVERRIDE;
@@ -127,6 +128,7 @@ class NativeAppWindowViews : public NativeAppWindow,
   // NativeAppWindow implementation.
   virtual void SetFullscreen(bool fullscreen) OVERRIDE;
   virtual bool IsFullscreenOrPending() const OVERRIDE;
+  virtual bool IsDetached() const OVERRIDE;
   virtual void UpdateWindowIcon() OVERRIDE;
   virtual void UpdateWindowTitle() OVERRIDE;
   virtual void UpdateDraggableRegions(
@@ -136,12 +138,13 @@ class NativeAppWindowViews : public NativeAppWindow,
   virtual void RenderViewHostChanged() OVERRIDE;
   virtual gfx::Insets GetFrameInsets() const OVERRIDE;
 
-  // WebContentsModalDialogHost implementation.
+  // web_modal::WebContentsModalDialogHost implementation.
+  virtual gfx::NativeView GetHostView() const OVERRIDE;
   virtual gfx::Point GetDialogPosition(const gfx::Size& size) OVERRIDE;
   virtual void AddObserver(
-      WebContentsModalDialogHostObserver* observer) OVERRIDE;
+      web_modal::WebContentsModalDialogHostObserver* observer) OVERRIDE;
   virtual void RemoveObserver(
-      WebContentsModalDialogHostObserver* observer) OVERRIDE;
+      web_modal::WebContentsModalDialogHostObserver* observer) OVERRIDE;
 
   Profile* profile() { return shell_window_->profile(); }
   content::WebContents* web_contents() {
@@ -172,7 +175,7 @@ class NativeAppWindowViews : public NativeAppWindow,
 
   base::WeakPtrFactory<NativeAppWindowViews> weak_ptr_factory_;
 
-  ObserverList<WebContentsModalDialogHostObserver> observer_list_;
+  ObserverList<web_modal::WebContentsModalDialogHostObserver> observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeAppWindowViews);
 };

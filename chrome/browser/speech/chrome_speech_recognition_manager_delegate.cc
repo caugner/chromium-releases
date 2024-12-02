@@ -9,9 +9,9 @@
 
 #include "base/bind.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -417,9 +417,6 @@ void ChromeSpeechRecognitionManagerDelegate::OnRecognitionError(
         case content::SPEECH_AUDIO_ERROR_DETAILS_NO_MIC:
           error_message_id = IDS_SPEECH_INPUT_NO_MIC;
           break;
-        case content::SPEECH_AUDIO_ERROR_DETAILS_IN_USE:
-          error_message_id = IDS_SPEECH_INPUT_MIC_IN_USE;
-          break;
         default:
           error_message_id = IDS_SPEECH_INPUT_MIC_ERROR;
           break;
@@ -549,7 +546,8 @@ void ChromeSpeechRecognitionManagerDelegate::CheckRenderViewType(
   // Right now the extension popup closes and dismisses immediately on user
   // click.
   if (view_type == extensions::VIEW_TYPE_TAB_CONTENTS ||
-      view_type == extensions::VIEW_TYPE_APP_SHELL) {
+      view_type == extensions::VIEW_TYPE_APP_SHELL ||
+      view_type == extensions::VIEW_TYPE_VIRTUAL_KEYBOARD) {
     // If it is a tab, we can show the speech input bubble or ask for
     // permission.
 

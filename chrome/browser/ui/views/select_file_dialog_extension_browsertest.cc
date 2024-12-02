@@ -9,8 +9,8 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
+#include "base/strings/utf_string_conversions.h"  // ASCIIToUTF16
 #include "base/threading/platform_thread.h"
-#include "base/utf_string_conversions.h"  // ASCIIToUTF16
 #include "build/build_config.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -28,7 +28,7 @@
 #include "content/public/test/test_utils.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 #include "ui/shell_dialogs/selected_file_info.h"
-#include "webkit/fileapi/external_mount_points.h"
+#include "webkit/browser/fileapi/external_mount_points.h"
 
 using content::BrowserContext;
 

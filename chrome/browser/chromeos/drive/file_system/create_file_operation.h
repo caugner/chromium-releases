@@ -6,39 +6,46 @@
 #define CHROME_BROWSER_CHROMEOS_DRIVE_FILE_SYSTEM_CREATE_FILE_OPERATION_H_
 
 #include "base/basictypes.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/chromeos/drive/resource_metadata.h"
+#include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/google_apis/gdata_errorcode.h"
 
 namespace base {
 class FilePath;
-}
+class SequencedTaskRunner;
+}  // namespace base
 
 namespace google_apis {
 class ResourceEntry;
-}
+}  // namespace google_apis
 
 namespace drive {
 
-class FileSystemInterface;
+namespace internal {
+class FileCache;
+class ResourceMetadata;
+}  // namespace internal
+
+struct EntryInfoPairResult;
 class JobScheduler;
 class ResourceEntry;
 
 namespace file_system {
 
+class OperationObserver;
+
 // This class encapsulates the drive CreateFile function.  It is responsible for
 // sending the request to the drive API, then updating the local state and
 // metadata to reflect the new state.
-//
-// TODO(kinaba): crbug.com/236771 remove dependency to FileSystemInterface.
 class CreateFileOperation {
  public:
-  CreateFileOperation(
-      JobScheduler* job_scheduler,
-      FileSystemInterface* file_system,
-      internal::ResourceMetadata* metadata,
-      scoped_refptr<base::SequencedTaskRunner> blocking_task_runner);
+  CreateFileOperation(base::SequencedTaskRunner* blocking_task_runner,
+                      OperationObserver* observer,
+                      JobScheduler* scheduler,
+                      internal::ResourceMetadata* metadata,
+                      internal::FileCache* cache);
   ~CreateFileOperation();
 
   // Creates an empty file at |file_path| in the remote server. When the file
@@ -51,28 +58,30 @@ class CreateFileOperation {
                   const FileOperationCallback& callback);
 
  private:
-  void CreateFileAfterGetEntryInfo(const base::FilePath& file_path,
-                                   bool is_exclusive,
-                                   const FileOperationCallback& callback,
-                                   scoped_ptr<EntryInfoPairResult> pair_result);
+  // Part of CreateFile(). Called after the precondition check is completed.
+  void CreateFileAfterCheckPreCondition(const base::FilePath& file_path,
+                                        const FileOperationCallback& callback,
+                                        std::string* parent_resource_id,
+                                        std::string* mime_type,
+                                        FileError error);
 
-  void CreateFileAfterGetMimeType(const base::FilePath& file_path,
-                                  const std::string& parent_resource_id,
-                                  const FileOperationCallback& callback,
-                                  const std::string* content_type,
-                                  bool got_content_type);
-
+  // Part of CreateFile(). Called after the server side file creation is
+  // completed.
   void CreateFileAfterUpload(
       const FileOperationCallback& callback,
       google_apis::GDataErrorCode error,
-      const base::FilePath& drive_path,
-      const base::FilePath& local_path,
       scoped_ptr<google_apis::ResourceEntry> resource_entry);
 
-  JobScheduler* job_scheduler_;
-  FileSystemInterface* file_system_;
-  internal::ResourceMetadata* metadata_;
+  // Part of CreateFile(). Called after the updating local state is completed.
+  void CreateFileAfterUpdateLocalState(const FileOperationCallback& callback,
+                                       base::FilePath* file_path,
+                                       FileError error);
+
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
+  OperationObserver* observer_;
+  JobScheduler* scheduler_;
+  internal::ResourceMetadata* metadata_;
+  internal::FileCache* cache_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate the weak pointers before any other members are destroyed.

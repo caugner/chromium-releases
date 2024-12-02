@@ -22,33 +22,59 @@ namespace events {
 const char kOnEvent[] = "tts.onEvent";
 };  // namespace events
 
-namespace {
-
 const char *TtsEventTypeToString(TtsEventType event_type) {
   switch (event_type) {
-  case TTS_EVENT_START:
-    return constants::kEventTypeStart;
-  case TTS_EVENT_END:
-    return constants::kEventTypeEnd;
-  case TTS_EVENT_WORD:
-    return constants::kEventTypeWord;
-  case TTS_EVENT_SENTENCE:
-    return constants::kEventTypeSentence;
-  case TTS_EVENT_MARKER:
-    return constants::kEventTypeMarker;
-  case TTS_EVENT_INTERRUPTED:
-    return constants::kEventTypeInterrupted;
-  case TTS_EVENT_CANCELLED:
-    return constants::kEventTypeCancelled;
-  case TTS_EVENT_ERROR:
-    return constants::kEventTypeError;
-  default:
-    NOTREACHED();
-    return "";
+    case TTS_EVENT_START:
+      return constants::kEventTypeStart;
+    case TTS_EVENT_END:
+      return constants::kEventTypeEnd;
+    case TTS_EVENT_WORD:
+      return constants::kEventTypeWord;
+    case TTS_EVENT_SENTENCE:
+      return constants::kEventTypeSentence;
+    case TTS_EVENT_MARKER:
+      return constants::kEventTypeMarker;
+    case TTS_EVENT_INTERRUPTED:
+      return constants::kEventTypeInterrupted;
+    case TTS_EVENT_CANCELLED:
+      return constants::kEventTypeCancelled;
+    case TTS_EVENT_ERROR:
+      return constants::kEventTypeError;
+    case TTS_EVENT_PAUSE:
+      return constants::kEventTypePause;
+    case TTS_EVENT_RESUME:
+      return constants::kEventTypeResume;
+    default:
+      NOTREACHED();
+      return constants::kEventTypeError;
   }
 }
 
-}  // anonymous namespace
+TtsEventType TtsEventTypeFromString(const std::string& str) {
+  if (str == constants::kEventTypeStart)
+    return TTS_EVENT_START;
+  if (str == constants::kEventTypeEnd)
+    return TTS_EVENT_END;
+  if (str == constants::kEventTypeWord)
+    return TTS_EVENT_WORD;
+  if (str == constants::kEventTypeSentence)
+    return TTS_EVENT_SENTENCE;
+  if (str == constants::kEventTypeMarker)
+    return TTS_EVENT_MARKER;
+  if (str == constants::kEventTypeInterrupted)
+    return TTS_EVENT_INTERRUPTED;
+  if (str == constants::kEventTypeCancelled)
+    return TTS_EVENT_CANCELLED;
+  if (str == constants::kEventTypeError)
+    return TTS_EVENT_ERROR;
+  if (str == constants::kEventTypePause)
+    return TTS_EVENT_PAUSE;
+  if (str == constants::kEventTypeResume)
+    return TTS_EVENT_RESUME;
+
+  NOTREACHED();
+  return TTS_EVENT_ERROR;
+}
 
 namespace extensions {
 
@@ -69,15 +95,14 @@ void TtsExtensionEventHandler::OnTtsEvent(Utterance* utterance,
   if (utterance->src_id() < 0)
     return;
 
-  std::string event_type_string = TtsEventTypeToString(event_type);
-  const std::set<std::string>& desired_event_types =
+  const std::set<TtsEventType>& desired_event_types =
       utterance->desired_event_types();
   if (desired_event_types.size() > 0 &&
-      desired_event_types.find(event_type_string) ==
-      desired_event_types.end()) {
+      desired_event_types.find(event_type) == desired_event_types.end()) {
     return;
   }
 
+  const char *event_type_string = TtsEventTypeToString(event_type);
   scoped_ptr<DictionaryValue> details(new DictionaryValue());
   if (char_index >= 0)
     details->SetInteger(constants::kCharIndexKey, char_index);
@@ -132,13 +157,18 @@ bool TtsSpeakFunction::RunImpl() {
     return false;
   }
 
-  std::string gender;
+  std::string gender_str;
+  TtsGenderType gender;
   if (options->HasKey(constants::kGenderKey))
     EXTENSION_FUNCTION_VALIDATE(
-        options->GetString(constants::kGenderKey, &gender));
-  if (!gender.empty() &&
-      gender != constants::kGenderFemale &&
-      gender != constants::kGenderMale) {
+        options->GetString(constants::kGenderKey, &gender_str));
+  if (gender_str == constants::kGenderMale) {
+    gender = TTS_GENDER_MALE;
+  } else if (gender_str == constants::kGenderFemale) {
+    gender = TTS_GENDER_FEMALE;
+  } else if (gender_str.empty()) {
+    gender = TTS_GENDER_NONE;
+  } else {
     error_ = constants::kErrorInvalidGender;
     return false;
   }
@@ -179,27 +209,27 @@ bool TtsSpeakFunction::RunImpl() {
         options->GetBoolean(constants::kEnqueueKey, &can_enqueue));
   }
 
-  std::set<std::string> required_event_types;
+  std::set<TtsEventType> required_event_types;
   if (options->HasKey(constants::kRequiredEventTypesKey)) {
     ListValue* list;
     EXTENSION_FUNCTION_VALIDATE(
         options->GetList(constants::kRequiredEventTypesKey, &list));
     for (size_t i = 0; i < list->GetSize(); ++i) {
       std::string event_type;
-      if (!list->GetString(i, &event_type))
-        required_event_types.insert(event_type);
+      if (list->GetString(i, &event_type))
+        required_event_types.insert(TtsEventTypeFromString(event_type.c_str()));
     }
   }
 
-  std::set<std::string> desired_event_types;
+  std::set<TtsEventType> desired_event_types;
   if (options->HasKey(constants::kDesiredEventTypesKey)) {
     ListValue* list;
     EXTENSION_FUNCTION_VALIDATE(
         options->GetList(constants::kDesiredEventTypesKey, &list));
     for (size_t i = 0; i < list->GetSize(); ++i) {
       std::string event_type;
-      if (!list->GetString(i, &event_type))
-        desired_event_types.insert(event_type);
+      if (list->GetString(i, &event_type))
+        desired_event_types.insert(TtsEventTypeFromString(event_type.c_str()));
     }
   }
 
@@ -252,6 +282,16 @@ bool TtsStopSpeakingFunction::RunImpl() {
   return true;
 }
 
+bool TtsPauseFunction::RunImpl() {
+  TtsController::GetInstance()->Pause();
+  return true;
+}
+
+bool TtsResumeFunction::RunImpl() {
+  TtsController::GetInstance()->Resume();
+  return true;
+}
+
 bool TtsIsSpeakingFunction::RunImpl() {
   SetResult(Value::CreateBooleanValue(
       TtsController::GetInstance()->IsSpeaking()));
@@ -269,14 +309,19 @@ bool TtsGetVoicesFunction::RunImpl() {
     result_voice->SetString(constants::kVoiceNameKey, voice.name);
     if (!voice.lang.empty())
       result_voice->SetString(constants::kLangKey, voice.lang);
-    if (!voice.gender.empty())
-      result_voice->SetString(constants::kGenderKey, voice.gender);
+    if (voice.gender == TTS_GENDER_MALE)
+      result_voice->SetString(constants::kGenderKey, constants::kGenderMale);
+    else if (voice.gender == TTS_GENDER_FEMALE)
+      result_voice->SetString(constants::kGenderKey, constants::kGenderFemale);
     if (!voice.extension_id.empty())
       result_voice->SetString(constants::kExtensionIdKey, voice.extension_id);
 
     ListValue* event_types = new ListValue();
-    for (size_t j = 0; j < voice.events.size(); ++j)
-      event_types->Append(Value::CreateStringValue(voice.events[j]));
+    for (std::set<TtsEventType>::iterator iter = voice.events.begin();
+         iter != voice.events.end(); ++iter) {
+      const char* event_name_constant = TtsEventTypeToString(*iter);
+      event_types->Append(Value::CreateStringValue(event_name_constant));
+    }
     result_voice->Set(constants::kEventTypesKey, event_types);
 
     result_voices->Append(result_voice);
@@ -299,6 +344,8 @@ TtsAPI::TtsAPI(Profile* profile) {
   registry->RegisterFunction<TtsIsSpeakingFunction>();
   registry->RegisterFunction<TtsSpeakFunction>();
   registry->RegisterFunction<TtsStopSpeakingFunction>();
+  registry->RegisterFunction<TtsPauseFunction>();
+  registry->RegisterFunction<TtsResumeFunction>();
 }
 
 TtsAPI::~TtsAPI() {

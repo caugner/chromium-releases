@@ -10,22 +10,22 @@
 #include "base/environment.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
+#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/i18n/time_formatting.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/rand_util.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/ui/view_ids.h"
-#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/common/url_constants.h"
@@ -35,6 +35,7 @@
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/reliability/automated_ui_tests.h"
 #include "chrome/test/ui/ui_test.h"
+#include "components/breakpad/common/breakpad_paths.h"
 #include "googleurl/src/gurl.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 
@@ -299,7 +300,7 @@ void AutomatedUITest::RunAutomatedUITest() {
         // Try and start up again.
         CloseBrowserAndServer();
         LaunchBrowserAndServer();
-        set_active_browser(automation()->GetBrowserWindow(0));
+        set_active_browser(automation()->GetBrowserWindow(0).get());
         if (DidCrash(true)) {
           no_errors = false;
           // We crashed again, so skip to the end of the this command.
@@ -410,7 +411,7 @@ bool AutomatedUITest::DoAction(const std::string& action) {
   } else if (LowerCaseEqualsASCII(action, "javascriptconsole")) {
     did_complete_action = JavaScriptConsole();
   } else if (LowerCaseEqualsASCII(action, "navigate")) {
-    std::string url = chrome::kAboutBlankURL;
+    std::string url = content::kAboutBlankURL;
     if (init_reader_.NodeAttribute("url", &url)) {
       xml_writer_.AddAttribute("url", url);
     }
@@ -766,14 +767,14 @@ void AutomatedUITest::LogInfoMessage(const std::string& info) {
 base::FilePath AutomatedUITest::GetMostRecentCrashDump() {
   base::FilePath crash_dump_path;
   base::FilePath most_recent_file_name;
-  PathService::Get(chrome::DIR_CRASH_DUMPS, &crash_dump_path);
+  PathService::Get(breakpad::DIR_CRASH_DUMPS, &crash_dump_path);
   base::Time most_recent_file_time;
 
   bool first_file = true;
 
-  file_util::FileEnumerator enumerator(crash_dump_path,
-                                       false,  // not recursive
-                                       file_util::FileEnumerator::FILES);
+  base::FileEnumerator enumerator(crash_dump_path,
+                                  false,  // not recursive
+                                  base::FileEnumerator::FILES);
   for (base::FilePath path = enumerator.Next(); !path.value().empty();
        path = enumerator.Next()) {
     base::PlatformFileInfo file_info;

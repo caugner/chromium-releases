@@ -22,6 +22,8 @@
 #include "content/public/browser/notification_source.h"
 
 #if defined(TOOLKIT_GTK)
+#include "base/environment.h"
+#include "base/nix/xdg_util.h"
 #include "ui/base/x/x11_util.h"
 #endif
 
@@ -144,10 +146,21 @@ bool PanelManager::ShouldUsePanels(const std::string& extension_id) {
 
 // static
 bool PanelManager::IsPanelStackingEnabled() {
-#if defined(OS_WIN) || defined(OS_MACOSX)
   return true;
+}
+
+// static
+bool PanelManager::CanUseSystemMinimize() {
+#if defined(TOOLKIT_GTK)
+  static base::nix::DesktopEnvironment desktop_env =
+      base::nix::DESKTOP_ENVIRONMENT_OTHER;
+  if (desktop_env == base::nix::DESKTOP_ENVIRONMENT_OTHER) {
+    scoped_ptr<base::Environment> env(base::Environment::Create());
+    desktop_env = base::nix::GetDesktopEnvironment(env.get());
+  }
+  return desktop_env != base::nix::DESKTOP_ENVIRONMENT_UNITY;
 #else
-  return false;
+  return true;
 #endif
 }
 
@@ -193,7 +206,12 @@ void PanelManager::OnFullScreenModeChanged(bool is_full_screen) {
   std::vector<Panel*> all_panels = panels();
   for (std::vector<Panel*>::const_iterator iter = all_panels.begin();
        iter != all_panels.end(); ++iter) {
-    (*iter)->FullScreenModeChanged(is_full_screen);
+    Panel* panel = *iter;
+    PanelCollection* panel_collection = panel->collection();
+    // When the panel is not always on top, there is no need to hide/show
+    // the panel in response to entering/leaving full-screen mode.
+    if (panel_collection && panel_collection->UsesAlwaysOnTopPanels())
+      panel->FullScreenModeChanged(is_full_screen);
   }
 }
 
@@ -257,7 +275,7 @@ Panel* PanelManager::CreatePanel(const std::string& app_name,
       adjusted_requested_bounds);
   bounds.AdjustToFit(work_area);
 
-  panel->Initialize(url, bounds);
+  panel->Initialize(url, bounds, collection->UsesAlwaysOnTopPanels());
 
   // Auto resizable feature is enabled only if no initial size is requested.
   if (auto_sizing_enabled() && requested_bounds.width() == 0 &&
@@ -475,6 +493,7 @@ void PanelManager::MovePanelToCollection(
 
   target_collection->AddPanel(panel, positioning_mask);
   target_collection->UpdatePanelOnCollectionChange(panel);
+  panel->SetAlwaysOnTop(target_collection->UsesAlwaysOnTopPanels());
 }
 
 bool PanelManager::ShouldBringUpTitlebars(int mouse_x, int mouse_y) const {

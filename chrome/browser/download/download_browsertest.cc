@@ -13,11 +13,11 @@
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_split.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/sys_info.h"
 #include "base/test/test_file_util.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/common/cancelable_request.h"
@@ -30,8 +30,8 @@
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_shelf.h"
+#include "chrome/browser/download/download_target_determiner.h"
 #include "chrome/browser/download/download_test_file_activity_observer.h"
-#include "chrome/browser/download/download_util.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
@@ -78,7 +78,7 @@
 #include "content/test/net/url_request_slow_download_job.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "webkit/plugins/npapi/mock_plugin_list.h"
@@ -123,7 +123,7 @@ class CreatedObserver : public content::DownloadManager::Observer {
                                  content::DownloadItem* item) OVERRIDE {
     DCHECK_EQ(manager_, manager);
     if (waiting_)
-      MessageLoopForUI::current()->Quit();
+      base::MessageLoopForUI::current()->Quit();
   }
 
   content::DownloadManager* manager_;
@@ -147,7 +147,7 @@ class PercentWaiter : public content::DownloadItem::Observer {
   }
 
   bool WaitForFinished() {
-    if (item_->IsComplete()) {
+    if (item_->GetState() == DownloadItem::COMPLETE) {
       return item_->PercentComplete() == 100;
     }
     waiting_ = true;
@@ -161,14 +161,14 @@ class PercentWaiter : public content::DownloadItem::Observer {
     DCHECK_EQ(item_, item);
     if (!error_ &&
         ((prev_percent_ > item_->PercentComplete()) ||
-         (item_->IsComplete() &&
+         (item_->GetState() == DownloadItem::COMPLETE &&
           (item_->PercentComplete() != 100)))) {
       error_ = true;
       if (waiting_)
-        MessageLoopForUI::current()->Quit();
+        base::MessageLoopForUI::current()->Quit();
     }
-    if (item_->IsComplete() && waiting_)
-      MessageLoopForUI::current()->Quit();
+    if (item_->GetState() == DownloadItem::COMPLETE && waiting_)
+      base::MessageLoopForUI::current()->Quit();
   }
 
   virtual void OnDownloadDestroyed(content::DownloadItem* item) OVERRIDE {
@@ -220,7 +220,7 @@ class DownloadsHistoryDataCollector {
       scoped_ptr<std::vector<history::DownloadRow> > entries) {
     result_valid_ = true;
     results_ = entries.Pass();
-    MessageLoopForUI::current()->Quit();
+    base::MessageLoopForUI::current()->Quit();
   }
 
   Profile* profile_;
@@ -246,7 +246,7 @@ class MockAbortExtensionInstallPrompt : public ExtensionInstallPrompt {
       const Extension* extension,
       const ShowDialogCallback& show_dialog_callback) OVERRIDE {
     delegate->InstallUIAbort(true);
-    MessageLoopForUI::current()->Quit();
+    base::MessageLoopForUI::current()->Quit();
   }
 
   virtual void OnInstallSuccess(const Extension* extension,
@@ -349,7 +349,7 @@ class HistoryObserver : public DownloadHistory::Observer {
 
     seen_stored_ = true;
     if (waiting_)
-      MessageLoopForUI::current()->Quit();
+      base::MessageLoopForUI::current()->Quit();
   }
 
   virtual void OnDownloadHistoryDestroyed() OVERRIDE {
@@ -478,6 +478,9 @@ class DownloadTest : public InProcessBrowserTest {
 
     browser->profile()->GetPrefs()->SetFilePath(
         prefs::kDownloadDefaultDirectory,
+        downloads_directory_.path());
+    browser->profile()->GetPrefs()->SetFilePath(
+        prefs::kSaveFileDefaultDirectory,
         downloads_directory_.path());
 
     return true;
@@ -1007,7 +1010,7 @@ class DownloadTest : public InProcessBrowserTest {
     if (URLRequestSlowDownloadJob::NumberOutstandingRequests())
       *result = false;
     BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE, MessageLoop::QuitClosure());
+        BrowserThread::UI, FROM_HERE, base::MessageLoop::QuitClosure());
   }
 
   // Location of the test data.
@@ -1174,10 +1177,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadResourceThrottleCancels) {
 
   // Try to start the download via Javascript and wait for the corresponding
   // load stop event.
-  content::TestNavigationObserver observer(
-      content::Source<content::NavigationController>(
-          &web_contents->GetController()),
-      1);
+  content::TestNavigationObserver observer(web_contents);
   bool download_assempted;
   ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
       browser()->tab_strip_model()->GetActiveWebContents(),
@@ -1186,8 +1186,8 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadResourceThrottleCancels) {
   ASSERT_TRUE(download_assempted);
   observer.WaitForObservation(
       base::Bind(&content::RunMessageLoop),
-      base::Bind(&MessageLoop::Quit,
-                 base::Unretained(MessageLoopForUI::current())));
+      base::Bind(&base::MessageLoop::Quit,
+                 base::Unretained(base::MessageLoopForUI::current())));
 
   // Check that we did not download the file.
   base::FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
@@ -1381,9 +1381,9 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_IncognitoRegular) {
   GetDownloads(browser(), &download_items);
   ASSERT_EQ(1UL, download_items.size());
   ASSERT_EQ(base::FilePath(FILE_PATH_LITERAL("a_zip_file.zip")),
-            download_items[0]->GetFullPath().BaseName());
-  ASSERT_TRUE(file_util::PathExists(download_items[0]->GetFullPath()));
-  EXPECT_TRUE(VerifyFile(download_items[0]->GetFullPath(),
+            download_items[0]->GetTargetFilePath().BaseName());
+  ASSERT_TRUE(file_util::PathExists(download_items[0]->GetTargetFilePath()));
+  EXPECT_TRUE(VerifyFile(download_items[0]->GetTargetFilePath(),
                          original_contents, origin_file_size));
 
   // Setup an incognito window.
@@ -1394,6 +1394,9 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_IncognitoRegular) {
   EXPECT_EQ(2, window_count);
   incognito->profile()->GetPrefs()->SetFilePath(
       prefs::kDownloadDefaultDirectory,
+      GetDownloadsDirectory());
+  incognito->profile()->GetPrefs()->SetFilePath(
+      prefs::kSaveFileDefaultDirectory,
       GetDownloadsDirectory());
 
   download_items.clear();
@@ -1410,9 +1413,9 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_IncognitoRegular) {
   GetDownloads(incognito, &download_items);
   ASSERT_EQ(1UL, download_items.size());
   ASSERT_EQ(base::FilePath(FILE_PATH_LITERAL("a_zip_file (1).zip")),
-            download_items[0]->GetFullPath().BaseName());
-  ASSERT_TRUE(file_util::PathExists(download_items[0]->GetFullPath()));
-  EXPECT_TRUE(VerifyFile(download_items[0]->GetFullPath(),
+            download_items[0]->GetTargetFilePath().BaseName());
+  ASSERT_TRUE(file_util::PathExists(download_items[0]->GetTargetFilePath()));
+  EXPECT_TRUE(VerifyFile(download_items[0]->GetTargetFilePath(),
                          original_contents, origin_file_size));
 }
 
@@ -1685,7 +1688,8 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadHistoryCheck) {
   // slow download job.
   history::DownloadRow& row(downloads_in_database->at(0));
   EXPECT_EQ(DestinationFile(browser(), file), row.target_path);
-  EXPECT_EQ(download_util::GetCrDownloadPath(DestinationFile(browser(), file)),
+  EXPECT_EQ(DownloadTargetDeterminer::GetCrDownloadPath(
+                DestinationFile(browser(), file)),
             row.current_path);
   ASSERT_EQ(2u, row.url_chain.size());
   EXPECT_EQ(redirect_url.spec(), row.url_chain[0].spec());
@@ -1715,12 +1719,11 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadHistoryCheck) {
       browser()->profile()).WaitForDownloadInfo(&downloads_in_database));
   ASSERT_EQ(1u, downloads_in_database->size());
 
-  // Confirm history storage is what you expect for a completed
-  // slow download job.
+  // Confirm history storage is what you expect for an interrupted slow download
+  // job. The download isn't continuable, so there's no intermediate file.
   history::DownloadRow& row1(downloads_in_database->at(0));
   EXPECT_EQ(DestinationFile(browser(), file), row1.target_path);
-  EXPECT_EQ(download_util::GetCrDownloadPath(DestinationFile(browser(), file)),
-            row1.current_path);
+  EXPECT_TRUE(row1.current_path.empty());
   ASSERT_EQ(2u, row1.url_chain.size());
   EXPECT_EQ(redirect_url.spec(), row1.url_chain[0].spec());
   EXPECT_EQ(download_url.spec(), row1.url_chain[1].spec());
@@ -1770,7 +1773,8 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadHistoryDangerCheck) {
   // dangerous file.
   history::DownloadRow& row(downloads_in_database->at(0));
   EXPECT_EQ(DestinationFile(browser(), file), row.target_path);
-  EXPECT_NE(download_util::GetCrDownloadPath(DestinationFile(browser(), file)),
+  EXPECT_NE(DownloadTargetDeterminer::GetCrDownloadPath(
+                DestinationFile(browser(), file)),
             row.current_path);
   EXPECT_EQ(content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE, row.danger_type);
   EXPECT_LE(start, row.start_time);
@@ -1781,7 +1785,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadHistoryDangerCheck) {
   std::vector<DownloadItem*> downloads;
   DownloadManagerForBrowser(browser())->GetAllDownloads(&downloads);
   ASSERT_EQ(1u, downloads.size());
-  downloads[0]->DangerousDownloadValidated();
+  downloads[0]->ValidateDangerousDownload();
   download_observer->WaitForFinished();
 
   // Get history details and confirm it's what you expect.
@@ -1832,6 +1836,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, MAYBE_DownloadTest_History) {
   ASSERT_EQ(1UL, downloads.size());
   DownloadItem* item = downloads[0];
   ASSERT_EQ(file.value(), item->GetFullPath().BaseName().value());
+  ASSERT_EQ(file.value(), item->GetTargetFilePath().BaseName().value());
   ASSERT_EQ(download_url, item->GetURL());
 }
 
@@ -2631,7 +2636,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, LoadURLExternallyReferrerPolicy) {
             download_items[0]->GetOriginalUrl());
 
   // Check that the file contains the expected referrer.
-  base::FilePath file(download_items[0]->GetFullPath());
+  base::FilePath file(download_items[0]->GetTargetFilePath());
   std::string expected_contents = test_server()->GetURL(std::string()).spec();
   ASSERT_TRUE(VerifyFile(file, expected_contents, expected_contents.length()));
 }
@@ -2640,8 +2645,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, HiddenDownload) {
   base::FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
   GURL url(URLRequestMockHTTPJob::GetMockUrl(file));
 
-  scoped_refptr<DownloadManager> download_manager =
-      DownloadManagerForBrowser(browser());
+  DownloadManager* download_manager = DownloadManagerForBrowser(browser());
   scoped_ptr<content::DownloadTestObserver> observer(
       new content::DownloadTestObserverTerminal(
           download_manager,
@@ -2723,14 +2727,15 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_Renaming) {
     EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
     content::DownloadItem* item = manager->GetDownload(index);
     ASSERT_TRUE(item);
-    ASSERT_TRUE(item->IsComplete());
-    base::FilePath full_path(item->GetFullPath());
+    ASSERT_EQ(DownloadItem::COMPLETE, item->GetState());
+    base::FilePath target_path(item->GetTargetFilePath());
     EXPECT_EQ(std::string("a_zip_file") +
         (index == 0 ? std::string(".zip") :
                       base::StringPrintf(" (%d).zip", index)),
-              full_path.BaseName().AsUTF8Unsafe());
-    ASSERT_TRUE(file_util::PathExists(full_path));
-    ASSERT_TRUE(VerifyFile(full_path, origin_contents, origin_contents.size()));
+              target_path.BaseName().AsUTF8Unsafe());
+    ASSERT_TRUE(file_util::PathExists(target_path));
+    ASSERT_TRUE(VerifyFile(target_path, origin_contents,
+                           origin_contents.size()));
   }
 }
 
@@ -2796,7 +2801,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_CrazyFilenames) {
     EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
     GetDownloads(browser(), &download_items);
     ASSERT_EQ(1UL, download_items.size());
-    base::FilePath downloaded(download_items[0]->GetFullPath());
+    base::FilePath downloaded(download_items[0]->GetTargetFilePath());
     download_items[0]->Remove();
     download_items.clear();
     ASSERT_TRUE(CheckDownloadFullPaths(
@@ -2821,7 +2826,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_Remove) {
   EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
   GetDownloads(browser(), &download_items);
   ASSERT_EQ(1UL, download_items.size());
-  base::FilePath downloaded(download_items[0]->GetFullPath());
+  base::FilePath downloaded(download_items[0]->GetTargetFilePath());
 
   // Remove the DownloadItem but not the file, then check that the file still
   // exists.
@@ -2840,14 +2845,14 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_PauseResumeCancel) {
   ASSERT_TRUE(download_item);
   ASSERT_FALSE(download_item->GetTargetFilePath().empty());
   EXPECT_FALSE(download_item->IsPaused());
-  EXPECT_FALSE(download_item->IsCancelled());
+  EXPECT_NE(DownloadItem::CANCELLED, download_item->GetState());
   download_item->Pause();
   EXPECT_TRUE(download_item->IsPaused());
   download_item->Resume();
   EXPECT_FALSE(download_item->IsPaused());
-  EXPECT_FALSE(download_item->IsCancelled());
+  EXPECT_NE(DownloadItem::CANCELLED, download_item->GetState());
   download_item->Cancel(true);
-  EXPECT_TRUE(download_item->IsCancelled());
+  EXPECT_EQ(DownloadItem::CANCELLED, download_item->GetState());
 }
 
 // The Mac downloaded files quarantine feature is implemented by the
@@ -2855,8 +2860,16 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_PauseResumeCancel) {
 // quarantining files on Mac because it is not a cocoa app.
 // TODO(benjhayden) test the equivalents on other platforms.
 
-// Test downloading a huge file and that PercentComplete is monotonic.
-IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_PercentComplete) {
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(ARCH_CPU_ARM_FAMILY)
+// Timing out on ARM linux: http://crbug.com/238459
+#define MAYBE_DownloadTest_PercentComplete DISABLED_DownloadTest_PercentComplete
+#elif defined(OS_MACOSX)
+// Disable on mac: http://crbug.com/238831
+#define MAYBE_DownloadTest_PercentComplete DISABLED_DownloadTest_PercentComplete
+#else
+#define MAYBE_DownloadTest_PercentComplete DownloadTest_PercentComplete
+#endif
+IN_PROC_BROWSER_TEST_F(DownloadTest, MAYBE_DownloadTest_PercentComplete) {
   // Write a huge file.
   base::FilePath file_path(DestinationFile(
       browser(), base::FilePath(FILE_PATH_LITERAL("DownloadTest_BigZip.zip"))));
@@ -2905,17 +2918,18 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_PercentComplete) {
   EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
 
   // Check that the file downloaded correctly.
-  ASSERT_TRUE(file_util::PathExists(download_items[0]->GetFullPath()));
+  ASSERT_TRUE(file_util::PathExists(download_items[0]->GetTargetFilePath()));
   int64 downloaded_size = 0;
   ASSERT_TRUE(file_util::GetFileSize(
-      download_items[0]->GetFullPath(), &downloaded_size));
+      download_items[0]->GetTargetFilePath(), &downloaded_size));
 #if defined(OS_WIN)
   ASSERT_EQ(1, downloaded_size);
 #else
   ASSERT_EQ(size + 1, downloaded_size);
 #endif
   ASSERT_TRUE(file_util::DieFileDie(file_path, false));
-  ASSERT_TRUE(file_util::DieFileDie(download_items[0]->GetFullPath(), false));
+  ASSERT_TRUE(file_util::DieFileDie(download_items[0]->GetTargetFilePath(),
+                                    false));
 }
 
 IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_DenyDanger) {
@@ -2930,4 +2944,30 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_DenyDanger) {
   EXPECT_EQ(1u, observer->NumDownloadsSeenInState(DownloadItem::CANCELLED));
   EXPECT_EQ(1u, observer->NumDangerousDownloadsSeen());
   EXPECT_FALSE(browser()->window()->IsDownloadShelfVisible());
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadPrefs_SaveFilePath) {
+  DownloadPrefs* on_prefs = DownloadServiceFactory::GetForProfile(
+      browser()->profile())->GetDownloadManagerDelegate()->download_prefs();
+  DownloadPrefs* off_prefs = DownloadServiceFactory::GetForProfile(
+      browser()->profile()->GetOffTheRecordProfile())
+    ->GetDownloadManagerDelegate()->download_prefs();
+  base::FilePath dir(on_prefs->SaveFilePath());
+  EXPECT_EQ(dir.value(), off_prefs->SaveFilePath().value());
+
+  on_prefs->SetSaveFilePath(dir.AppendASCII("on"));
+  EXPECT_EQ(dir.AppendASCII("on").value(), on_prefs->SaveFilePath().value());
+  EXPECT_EQ(dir.AppendASCII("on").value(), off_prefs->SaveFilePath().value());
+
+  on_prefs->SetSaveFilePath(dir);
+  EXPECT_EQ(dir.value(), on_prefs->SaveFilePath().value());
+  EXPECT_EQ(dir.value(), off_prefs->SaveFilePath().value());
+
+  off_prefs->SetSaveFilePath(dir.AppendASCII("off"));
+  EXPECT_EQ(dir.value(), on_prefs->SaveFilePath().value());
+  EXPECT_EQ(dir.AppendASCII("off").value(), off_prefs->SaveFilePath().value());
+
+  on_prefs->SetSaveFilePath(dir.AppendASCII("on"));
+  EXPECT_EQ(dir.AppendASCII("on").value(), on_prefs->SaveFilePath().value());
+  EXPECT_EQ(dir.AppendASCII("off").value(), off_prefs->SaveFilePath().value());
 }

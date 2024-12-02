@@ -9,10 +9,10 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/mock_password_store.h"
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
@@ -77,17 +77,13 @@ ACTION_P(AcquireSyncTransaction, password_test_service) {
   DVLOG(1) << "Sync transaction acquired.";
 }
 
-static void QuitMessageLoop() {
-  MessageLoop::current()->Quit();
-}
-
 class NullPasswordStore : public MockPasswordStore {
  public:
   NullPasswordStore() {}
 
-  static scoped_refptr<RefcountedProfileKeyedService> Build(
+  static scoped_refptr<RefcountedBrowserContextKeyedService> Build(
       content::BrowserContext* profile) {
-    return scoped_refptr<RefcountedProfileKeyedService>();
+    return scoped_refptr<RefcountedBrowserContextKeyedService>();
   }
 
  protected:
@@ -108,16 +104,6 @@ class PasswordTestProfileSyncService : public TestProfileSyncService {
 
   virtual ~PasswordTestProfileSyncService() {}
 
-  virtual void OnPassphraseRequired(
-      syncer::PassphraseRequiredReason reason,
-      const sync_pb::EncryptedData& pending_keys) OVERRIDE {
-    // We purposely don't let passphrase_required_reason_ get set here, in order
-    // to let the datatype manager get blocked later (at which point we then
-    // set the encryption passphrase).
-    // On a normal client, we would have initialized the cryptographer with the
-    // login credentials.
-  }
-
   virtual void OnPassphraseAccepted() OVERRIDE {
     if (!callback_.is_null())
       callback_.Run();
@@ -125,11 +111,7 @@ class PasswordTestProfileSyncService : public TestProfileSyncService {
     TestProfileSyncService::OnPassphraseAccepted();
   }
 
-  virtual void OnConfigureBlocked() OVERRIDE {
-    QuitMessageLoop();
-  }
-
-  static ProfileKeyedService* Build(content::BrowserContext* context) {
+  static BrowserContextKeyedService* Build(content::BrowserContext* context) {
     Profile* profile = static_cast<Profile*>(context);
     SigninManagerBase* signin =
         SigninManagerFactory::GetForProfile(profile);
@@ -171,18 +153,20 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
 
   virtual void SetUp() {
     AbstractProfileSyncServiceTest::SetUp();
-    profile_.CreateRequestContext();
+    profile_.reset(new ProfileMock);
+    profile_->CreateRequestContext();
     password_store_ = static_cast<MockPasswordStore*>(
         PasswordStoreFactory::GetInstance()->SetTestingFactoryAndUse(
-            &profile_, MockPasswordStore::Build).get());
+            profile_.get(), MockPasswordStore::Build).get());
   }
 
   virtual void TearDown() {
-    if (password_store_)
+    if (password_store_.get())
       password_store_->ShutdownOnUIThread();
       ProfileSyncServiceFactory::GetInstance()->SetTestingFactory(
-          &profile_, NULL);
-      profile_.ResetRequestContext();
+          profile_.get(), NULL);
+      profile_->ResetRequestContext();
+      profile_.reset();
       AbstractProfileSyncServiceTest::TearDown();
   }
 
@@ -202,16 +186,18 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
                         const base::Closure& node_callback) {
     if (!sync_service_) {
       SigninManagerBase* signin =
-          SigninManagerFactory::GetForProfile(&profile_);
+          SigninManagerFactory::GetForProfile(profile_.get());
       signin->SetAuthenticatedUsername("test_user");
       token_service_ = static_cast<TokenService*>(
           TokenServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-              &profile_, BuildTokenService));
+              profile_.get(), BuildTokenService));
+      ProfileOAuth2TokenServiceFactory::GetInstance()->SetTestingFactory(
+          profile_.get(), FakeOAuth2TokenService::BuildTokenService);
 
       PasswordTestProfileSyncService* sync =
           static_cast<PasswordTestProfileSyncService*>(
               ProfileSyncServiceFactory::GetInstance()->
-                  SetTestingFactoryAndUse(&profile_,
+                  SetTestingFactoryAndUse(profile_.get(),
                       &PasswordTestProfileSyncService::Build));
       sync->set_backend_init_callback(root_callback);
       sync->set_passphrase_accept_callback(node_callback);
@@ -223,37 +209,38 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
       sync_service_->ChangePreferredDataTypes(preferred_types);
       PasswordDataTypeController* data_type_controller =
           new PasswordDataTypeController(sync_service_->factory(),
-                                         &profile_,
+                                         profile_.get(),
                                          sync_service_);
       ProfileSyncComponentsFactoryMock* components =
           sync_service_->components_factory_mock();
-      if (password_store_) {
-        EXPECT_CALL(*components, CreatePasswordSyncComponents(_, _, _)).
-            Times(AtLeast(1)).  // Can be more if we hit NEEDS_CRYPTO.
-            WillRepeatedly(MakePasswordSyncComponents(sync_service_,
-                                                      password_store_.get(),
-                                                      data_type_controller));
+      if (password_store_.get()) {
+        EXPECT_CALL(*components, CreatePasswordSyncComponents(_, _, _))
+            .Times(AtLeast(1)).  // Can be more if we hit NEEDS_CRYPTO.
+            WillRepeatedly(MakePasswordSyncComponents(
+                sync_service_, password_store_.get(), data_type_controller));
       } else {
         // When the password store is unavailable, password sync components must
         // not be created.
         EXPECT_CALL(*components, CreatePasswordSyncComponents(_, _, _))
             .Times(0);
       }
-      EXPECT_CALL(*components, CreateDataTypeManager(_, _, _, _, _)).
+      EXPECT_CALL(*components, CreateDataTypeManager(_, _, _, _, _, _)).
           WillOnce(ReturnNewDataTypeManager());
 
       // We need tokens to get the tests going
+      token_service_->IssueAuthTokenForTest(
+          GaiaConstants::kGaiaOAuth2LoginRefreshToken, "oauth2_login_token");
       token_service_->IssueAuthTokenForTest(
           GaiaConstants::kSyncService, "token");
 
       sync_service_->RegisterDataTypeController(data_type_controller);
       sync_service_->Initialize();
-      MessageLoop::current()->Run();
+      base::MessageLoop::current()->Run();
       FlushLastDBTask();
 
       sync_service_->SetEncryptionPassphrase("foo",
                                              ProfileSyncService::IMPLICIT);
-      MessageLoop::current()->Run();
+      base::MessageLoop::current()->Run();
     }
   }
 
@@ -320,13 +307,13 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
   }
 
   void SetIdleChangeProcessorExpectations() {
-    EXPECT_CALL(*password_store_, AddLoginImpl(_)).Times(0);
-    EXPECT_CALL(*password_store_, UpdateLoginImpl(_)).Times(0);
-    EXPECT_CALL(*password_store_, RemoveLoginImpl(_)).Times(0);
+    EXPECT_CALL(*password_store_.get(), AddLoginImpl(_)).Times(0);
+    EXPECT_CALL(*password_store_.get(), UpdateLoginImpl(_)).Times(0);
+    EXPECT_CALL(*password_store_.get(), RemoveLoginImpl(_)).Times(0);
   }
 
   content::MockNotificationObserver observer_;
-  ProfileMock profile_;
+  scoped_ptr<ProfileMock> profile_;
   scoped_refptr<MockPasswordStore> password_store_;
   content::NotificationRegistrar registrar_;
 };
@@ -368,18 +355,18 @@ TEST_F(ProfileSyncServicePasswordTest, MAYBE_FailModelAssociation) {
 TEST_F(ProfileSyncServicePasswordTest, MAYBE_FailPasswordStoreLoad) {
   password_store_ = static_cast<NullPasswordStore*>(
       PasswordStoreFactory::GetInstance()->SetTestingFactoryAndUse(
-          &profile_, NullPasswordStore::Build).get());
+          profile_.get(), NullPasswordStore::Build).get());
   StartSyncService(base::Closure(), base::Closure());
   EXPECT_FALSE(sync_service_->HasUnrecoverableError());
   syncer::ModelTypeSet failed_types =
-      sync_service_->failed_datatypes_handler().GetFailedTypes();
+      sync_service_->failed_data_types_handler().GetFailedTypes();
   EXPECT_TRUE(failed_types.Equals(syncer::ModelTypeSet(syncer::PASSWORDS)));
 }
 
 TEST_F(ProfileSyncServicePasswordTest, MAYBE_EmptyNativeEmptySync) {
-  EXPECT_CALL(*password_store_, FillAutofillableLogins(_))
+  EXPECT_CALL(*password_store_.get(), FillAutofillableLogins(_))
       .WillOnce(Return(true));
-  EXPECT_CALL(*password_store_, FillBlacklistLogins(_))
+  EXPECT_CALL(*password_store_.get(), FillBlacklistLogins(_))
       .WillOnce(Return(true));
   SetIdleChangeProcessorExpectations();
   CreateRootHelper create_root(this, syncer::PASSWORDS);
@@ -407,9 +394,9 @@ TEST_F(ProfileSyncServicePasswordTest, MAYBE_HasNativeEntriesEmptySync) {
   new_form->blacklisted_by_user = false;
   forms.push_back(new_form);
   expected_forms.push_back(*new_form);
-  EXPECT_CALL(*password_store_, FillAutofillableLogins(_))
+  EXPECT_CALL(*password_store_.get(), FillAutofillableLogins(_))
       .WillOnce(DoAll(SetArgumentPointee<0>(forms), Return(true)));
-  EXPECT_CALL(*password_store_, FillBlacklistLogins(_))
+  EXPECT_CALL(*password_store_.get(), FillBlacklistLogins(_))
       .WillOnce(Return(true));
   SetIdleChangeProcessorExpectations();
   CreateRootHelper create_root(this, syncer::PASSWORDS);
@@ -460,9 +447,9 @@ TEST_F(ProfileSyncServicePasswordTest,
     expected_forms.push_back(*new_form);
   }
 
-  EXPECT_CALL(*password_store_, FillAutofillableLogins(_))
+  EXPECT_CALL(*password_store_.get(), FillAutofillableLogins(_))
       .WillOnce(DoAll(SetArgumentPointee<0>(forms), Return(true)));
-  EXPECT_CALL(*password_store_, FillBlacklistLogins(_))
+  EXPECT_CALL(*password_store_.get(), FillBlacklistLogins(_))
       .WillOnce(Return(true));
   SetIdleChangeProcessorExpectations();
   CreateRootHelper create_root(this, syncer::PASSWORDS);
@@ -515,10 +502,11 @@ TEST_F(ProfileSyncServicePasswordTest, MAYBE_HasNativeHasSyncNoMerge) {
     expected_forms.push_back(new_form);
   }
 
-  EXPECT_CALL(*password_store_, FillAutofillableLogins(_))
+  EXPECT_CALL(*password_store_.get(), FillAutofillableLogins(_))
       .WillOnce(DoAll(SetArgumentPointee<0>(native_forms), Return(true)));
-  EXPECT_CALL(*password_store_, FillBlacklistLogins(_)).WillOnce(Return(true));
-  EXPECT_CALL(*password_store_, AddLoginImpl(_)).Times(1);
+  EXPECT_CALL(*password_store_.get(), FillBlacklistLogins(_))
+      .WillOnce(Return(true));
+  EXPECT_CALL(*password_store_.get(), AddLoginImpl(_)).Times(1);
 
   CreateRootHelper create_root(this, syncer::PASSWORDS);
   StartSyncService(create_root.callback(),
@@ -575,14 +563,13 @@ TEST_F(ProfileSyncServicePasswordTest, MAYBE_EnsureNoTransactions) {
     expected_forms.push_back(new_form);
   }
 
-  EXPECT_CALL(*password_store_, FillAutofillableLogins(_))
+  EXPECT_CALL(*password_store_.get(), FillAutofillableLogins(_))
       .WillOnce(DoAll(SetArgumentPointee<0>(native_forms),
                       AcquireSyncTransaction(this),
                       Return(true)));
-  EXPECT_CALL(*password_store_, FillBlacklistLogins(_))
-      .WillOnce(DoAll(AcquireSyncTransaction(this),
-                      Return(true)));
-  EXPECT_CALL(*password_store_, AddLoginImpl(_))
+  EXPECT_CALL(*password_store_.get(), FillBlacklistLogins(_))
+      .WillOnce(DoAll(AcquireSyncTransaction(this), Return(true)));
+  EXPECT_CALL(*password_store_.get(), AddLoginImpl(_))
       .WillOnce(AcquireSyncTransaction(this));
 
   CreateRootHelper create_root(this, syncer::PASSWORDS);
@@ -653,10 +640,11 @@ TEST_F(ProfileSyncServicePasswordTest, MAYBE_HasNativeHasSyncMergeEntry) {
     expected_forms.push_back(new_form);
   }
 
-  EXPECT_CALL(*password_store_, FillAutofillableLogins(_))
+  EXPECT_CALL(*password_store_.get(), FillAutofillableLogins(_))
       .WillOnce(DoAll(SetArgumentPointee<0>(native_forms), Return(true)));
-  EXPECT_CALL(*password_store_, FillBlacklistLogins(_)).WillOnce(Return(true));
-  EXPECT_CALL(*password_store_, UpdateLoginImpl(_)).Times(1);
+  EXPECT_CALL(*password_store_.get(), FillBlacklistLogins(_))
+      .WillOnce(Return(true));
+  EXPECT_CALL(*password_store_.get(), UpdateLoginImpl(_)).Times(1);
 
   CreateRootHelper create_root(this, syncer::PASSWORDS);
   StartSyncService(create_root.callback(),

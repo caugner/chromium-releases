@@ -6,7 +6,7 @@
 #include "base/command_line.h"
 #include "base/i18n/icu_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
+#include "base/message_loop/message_loop.h"
 #include "third_party/skia/include/core/SkXfermode.h"
 #include "ui/aura/client/default_capture_client.h"
 #include "ui/aura/client/stacking_client.h"
@@ -19,12 +19,11 @@
 #include "ui/base/hit_test.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
-#include "ui/compositor/test/compositor_test_support.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/rect.h"
 
 #if defined(USE_X11)
-#include "base/message_pump_aurax11.h"
+#include "base/message_loop/message_pump_aurax11.h"
 #endif
 
 namespace {
@@ -110,7 +109,6 @@ class DemoStackingClient : public aura::client::StackingClient {
 int DemoMain() {
   // Create the message-loop here before creating the root window.
   base::MessageLoop message_loop(base::MessageLoop::TYPE_UI);
-  ui::CompositorTestSupport::Initialize();
   aura::Env::GetInstance();
   scoped_ptr<aura::TestScreen> test_screen(aura::TestScreen::Create());
   gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE, test_screen.get());
@@ -146,8 +144,6 @@ int DemoMain() {
 
   root_window->ShowRootWindow();
   base::MessageLoopForUI::current()->Run();
-
-  ui::CompositorTestSupport::Terminate();
 
   return 0;
 }

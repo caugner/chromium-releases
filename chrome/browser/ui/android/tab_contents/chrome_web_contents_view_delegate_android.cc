@@ -29,8 +29,7 @@ ChromeWebContentsViewDelegateAndroid::GetDragDestDelegate() {
 }
 
 void ChromeWebContentsViewDelegateAndroid::ShowContextMenu(
-    const content::ContextMenuParams& params,
-    content::ContextMenuSourceType type) {
+    const content::ContextMenuParams& params) {
   // Display paste pop-up only when selection is empty and editable.
   if (params.is_editable && params.selection_text.empty()) {
     content::ContentViewCore* content_view_core =
@@ -43,8 +42,11 @@ void ChromeWebContentsViewDelegateAndroid::ShowContextMenu(
   }
 
   TabAndroid* tab = TabAndroid::FromWebContents(web_contents_);
-  DCHECK(tab);
-  tab->ShowContextMenu(params);
+  // We may not have a Tab if we're running in Android WebView mode.
+  // TODO: The long term plan is to factor out the context menu code into
+  // a shared class and have WebView use a separate delegate.
+  if (tab)
+    tab->ShowContextMenu(params);
 }
 
 namespace chrome {

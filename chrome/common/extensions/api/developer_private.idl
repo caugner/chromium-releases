@@ -5,7 +5,6 @@
 // developerPrivate API.
 // This is a private API exposing developing and debugging functionalities for
 // apps and extensions.
-
 namespace developerPrivate {
 
   enum ItemType {
@@ -45,7 +44,7 @@ namespace developerPrivate {
     boolean allow_reload;
     boolean terminated;
     boolean allow_incognito;
-    DOMString icon;
+    DOMString icon_url;
 
     // Path of an unpacked extension.
     DOMString? path;
@@ -161,16 +160,10 @@ namespace developerPrivate {
     static void exportSyncfsFolderToLocalfs(DOMString folder_name,
                                             optional VoidCallback callback);
 
-    // Gets the list of projects along with the metadata.
-    static void getProjectsInfo(GetProjectsInfoCallback callback);
-
-    // Loads a given |project_name| into the syncfs.
-    static void loadProjectToSyncfs(DOMString project_name,
-                                    optional VoidCallback callback);
-
     // Loads the unpacked app / extension.
+    // |callback| called with itemId of the loaded item.
     static void loadProject(DOMString project_name,
-                            optional VoidCallback callback);
+                            PathCallback callback);
 
     // Open Dialog to browse to an entry.
     // |select_type| : Select a file or a folder.

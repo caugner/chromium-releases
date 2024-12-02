@@ -9,11 +9,11 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_paths.h"
@@ -33,10 +33,10 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "webkit/common/user_agent/user_agent_util.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/plugin_constants.h"
 #include "webkit/plugins/plugin_switches.h"
-#include "webkit/user_agent/user_agent_util.h"
 
 #include "flapper_version.h"  // In SHARED_INTERMEDIATE_DIR.
 #include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
@@ -49,13 +49,13 @@
 #include "chrome/common/chrome_sandbox_type_mac.h"
 #endif
 
-#if defined(WIDEVINE_CDM_AVAILABLE) && !defined(WIDEVINE_CDM_IS_COMPONENT)
+#if defined(WIDEVINE_CDM_AVAILABLE) && defined(ENABLE_PEPPER_CDMS) && \
+    !defined(WIDEVINE_CDM_IS_COMPONENT)
 #include "chrome/common/widevine_cdm_constants.h"
 #endif
 
 namespace {
 
-const char kPDFPluginName[] = "Chrome PDF Viewer";
 const char kPDFPluginMimeType[] = "application/pdf";
 const char kPDFPluginExtension[] = "pdf";
 const char kPDFPluginDescription[] = "Portable Document Format";
@@ -64,14 +64,17 @@ const char kPDFPluginPrintPreviewMimeType
 const uint32 kPDFPluginPermissions = ppapi::PERMISSION_PRIVATE |
                                      ppapi::PERMISSION_DEV;
 
-const char kNaClPluginName[] = "Native Client";
 const char kNaClPluginMimeType[] = "application/x-nacl";
-const char kNaClPluginExtension[] = "nexe";
+const char kNaClPluginExtension[] = "";
 const char kNaClPluginDescription[] = "Native Client Executable";
 const uint32 kNaClPluginPermissions = ppapi::PERMISSION_PRIVATE |
                                       ppapi::PERMISSION_DEV;
 
-const char kNaClOldPluginName[] = "Chrome NaCl";
+const char kPnaclPluginMimeType[] = "application/x-pnacl";
+const char kPnaclPluginExtension[] = "";
+const char kPnaclPluginDescription[] = "Portable Native Client Executable";
+const uint32 kPnaclPluginPermissions = ppapi::PERMISSION_PRIVATE |
+                                       ppapi::PERMISSION_DEV;
 
 const char kO3DPluginName[] = "Google Talk Plugin Video Accelerator";
 const char kO3DPluginMimeType[] ="application/vnd.o3d.auto";
@@ -137,7 +140,7 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
     if (skip_pdf_file_check || file_util::PathExists(path)) {
       content::PepperPluginInfo pdf;
       pdf.path = path;
-      pdf.name = kPDFPluginName;
+      pdf.name = chrome::ChromeContentClient::kPDFPluginName;
       webkit::WebPluginMimeType pdf_mime_type(kPDFPluginMimeType,
                                               kPDFPluginExtension,
                                               kPDFPluginDescription);
@@ -154,20 +157,28 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
     }
   }
 
-  // Handle the Native Client just like the PDF plugin. This means that it is
-  // enabled by default. This allows apps installed from the Chrome Web Store
-  // to use NaCl even if the command line switch isn't set. For other uses of
-  // NaCl we check for the command line switch.
+  // Handle Native Client just like the PDF plugin. This means that it is
+  // enabled by default for the non-portable case.  This allows apps installed
+  // from the Chrome Web Store to use NaCl even if the command line switch
+  // isn't set.  For other uses of NaCl we check for the command line switch.
+  // Specifically, Portable Native Client is only enabled by the command line
+  // switch.
   static bool skip_nacl_file_check = false;
   if (PathService::Get(chrome::FILE_NACL_PLUGIN, &path)) {
     if (skip_nacl_file_check || file_util::PathExists(path)) {
       content::PepperPluginInfo nacl;
       nacl.path = path;
-      nacl.name = kNaClPluginName;
+      nacl.name = chrome::ChromeContentClient::kNaClPluginName;
       webkit::WebPluginMimeType nacl_mime_type(kNaClPluginMimeType,
                                                kNaClPluginExtension,
                                                kNaClPluginDescription);
       nacl.mime_types.push_back(nacl_mime_type);
+      if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnablePnacl)) {
+        webkit::WebPluginMimeType pnacl_mime_type(kPnaclPluginMimeType,
+                                                  kPnaclPluginExtension,
+                                                  kPnaclPluginDescription);
+        nacl.mime_types.push_back(pnacl_mime_type);
+      }
       nacl.permissions = kNaClPluginPermissions;
       plugins->push_back(nacl);
 
@@ -234,7 +245,8 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
     }
   }
 
-#if defined(WIDEVINE_CDM_AVAILABLE) && !defined(WIDEVINE_CDM_IS_COMPONENT)
+#if defined(WIDEVINE_CDM_AVAILABLE) && defined(ENABLE_PEPPER_CDMS) && \
+    !defined(WIDEVINE_CDM_IS_COMPONENT)
   static bool skip_widevine_cdm_file_check = false;
   if (PathService::Get(chrome::FILE_WIDEVINE_CDM_ADAPTER, &path)) {
     if (skip_widevine_cdm_file_check || file_util::PathExists(path)) {
@@ -255,7 +267,7 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
       skip_widevine_cdm_file_check = true;
     }
   }
-#endif  // defined(WIDEVINE_CDM_AVAILABLE) &&
+#endif  // defined(WIDEVINE_CDM_AVAILABLE) && defined(ENABLE_PEPPER_CDMS) &&
         // !defined(WIDEVINE_CDM_IS_COMPONENT)
 
   // The Remoting Viewer plugin is built-in.
@@ -375,11 +387,6 @@ bool GetBundledPepperFlash(content::PepperPluginInfo* plugin) {
 
 namespace chrome {
 
-const char* const ChromeContentClient::kPDFPluginName = ::kPDFPluginName;
-const char* const ChromeContentClient::kNaClPluginName = ::kNaClPluginName;
-const char* const ChromeContentClient::kNaClOldPluginName =
-    ::kNaClOldPluginName;
-
 std::string ChromeContentClient::GetProductImpl() {
   chrome::VersionInfo version_info;
   std::string product("Chrome/");
@@ -391,7 +398,7 @@ void ChromeContentClient::SetActiveURL(const GURL& url) {
   child_process_logging::SetActiveURL(url);
 }
 
-void ChromeContentClient::SetGpuInfo(const content::GPUInfo& gpu_info) {
+void ChromeContentClient::SetGpuInfo(const gpu::GPUInfo& gpu_info) {
   child_process_logging::SetGpuInfo(gpu_info);
 }
 

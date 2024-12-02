@@ -7,11 +7,11 @@
 #include "base/compiler_specific.h"
 #include "base/i18n/time_formatting.h"
 #include "base/logging.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager_delegate.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
+#include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
@@ -32,6 +32,7 @@
 
 using content::BrowserThread;
 using content::WebContents;
+using web_modal::WebContentsModalDialogManager;
 
 namespace {
 
@@ -63,7 +64,7 @@ class CertificateSelectorTableModel : public ui::TableModel {
 CertificateSelectorTableModel::CertificateSelectorTableModel(
     net::SSLCertRequestInfo* cert_request_info) {
   for (size_t i = 0; i < cert_request_info->client_certs.size(); ++i) {
-    net::X509Certificate* cert = cert_request_info->client_certs[i];
+    net::X509Certificate* cert = cert_request_info->client_certs[i].get();
     string16 text = l10n_util::GetStringFUTF16(
         IDS_CERT_SELECTOR_TABLE_CERT_FORMAT,
         UTF8ToUTF16(cert->subject().GetDisplayName()),
@@ -160,7 +161,7 @@ net::X509Certificate* SSLClientCertificateSelector::GetSelectedCert() const {
   if (selected >= 0 &&
       selected < static_cast<int>(
           cert_request_info()->client_certs.size()))
-    return cert_request_info()->client_certs[selected];
+    return cert_request_info()->client_certs[selected].get();
   return NULL;
 }
 

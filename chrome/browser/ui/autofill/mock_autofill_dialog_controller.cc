@@ -3,11 +3,19 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/autofill/mock_autofill_dialog_controller.h"
+#include "testing/gmock/include/gmock/gmock.h"
 
 namespace autofill {
-MockAutofillDialogController::MockAutofillDialogController() {}
 
-MockAutofillDialogController::~MockAutofillDialogController() {}
+MockAutofillDialogController::MockAutofillDialogController() {
+  testing::DefaultValue<const DetailInputs&>::Set(default_inputs_);
+  testing::DefaultValue<ui::ComboboxModel*>::Set(NULL);
+}
+
+MockAutofillDialogController::~MockAutofillDialogController() {
+  testing::DefaultValue<ui::ComboboxModel*>::Clear();
+  testing::DefaultValue<const DetailInputs&>::Clear();
+}
 
 string16 MockAutofillDialogController::DialogTitle() const {
   return string16();
@@ -33,15 +41,7 @@ string16 MockAutofillDialogController::ConfirmButtonText() const {
   return string16();
 }
 
-string16 MockAutofillDialogController::CancelSignInText() const {
-  return string16();
-}
-
 string16 MockAutofillDialogController::SaveLocallyText() const {
-  return string16();
-}
-
-string16 MockAutofillDialogController::ProgressBarText() const {
   return string16();
 }
 
@@ -53,7 +53,9 @@ DialogSignedInState MockAutofillDialogController::SignedInState() const {
    return REQUIRES_RESPONSE;
 }
 
-bool MockAutofillDialogController::ShouldShowSpinner() const { return false; }
+bool MockAutofillDialogController::ShouldShowSpinner() const {
+  return false;
+}
 
 bool MockAutofillDialogController::ShouldOfferToSaveInChrome() const {
    return false;
@@ -63,11 +65,15 @@ gfx::Image MockAutofillDialogController::AccountChooserImage() {
   return gfx::Image();
 }
 
-bool MockAutofillDialogController::AutocheckoutIsRunning() const {
+bool MockAutofillDialogController::ShouldShowProgressBar() const {
   return false;
 }
 
-bool MockAutofillDialogController::HadAutocheckoutError() const {
+int MockAutofillDialogController::GetDialogButtons() const {
+  return ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL;
+}
+
+bool MockAutofillDialogController::ShouldShowDetailArea() const {
   return false;
 }
 
@@ -86,21 +92,6 @@ bool MockAutofillDialogController::SectionIsActive(
   return false;
 }
 
-const DetailInputs& MockAutofillDialogController::RequestedFieldsForSection(
-     DialogSection section) const {
-  return inputs_;
-}
-
-ui::ComboboxModel* MockAutofillDialogController::ComboboxModelForAutofillType(
-     AutofillFieldType type) {
-  return NULL;
-}
-
-ui::MenuModel* MockAutofillDialogController::MenuModelForSection(
-    DialogSection section) {
-  return NULL;
-}
-
 string16 MockAutofillDialogController::LabelForSection(
     DialogSection section) const {
   return string16();
@@ -112,8 +103,7 @@ SuggestionState MockAutofillDialogController::SuggestionStateForSection(
                          gfx::Font::NORMAL,
                          gfx::Image(),
                          string16(),
-                         gfx::Image(),
-                         false);
+                         gfx::Image());
 }
 
 void MockAutofillDialogController::EditClickedForSection(
@@ -127,44 +117,52 @@ gfx::Image MockAutofillDialogController::IconForField(
    return gfx::Image();
 }
 
-bool MockAutofillDialogController::InputIsValid(AutofillFieldType type,
-                                                const string16& value) const {
-  return false;
+string16 MockAutofillDialogController::InputValidityMessage(
+    DialogSection section,
+    AutofillFieldType type,
+    const string16& value) {
+  return string16();
 }
 
 ValidityData MockAutofillDialogController::InputsAreValid(
+     DialogSection section,
      const DetailOutputMap& inputs,
-     ValidationType validation_type) const {
+     ValidationType validation_type) {
   return ValidityData();
 }
 
 void MockAutofillDialogController::UserEditedOrActivatedInput(
+    DialogSection section,
     const DetailInput* input,
     gfx::NativeView parent_view,
     const gfx::Rect& content_bounds,
     const string16& field_contents,
-    bool was_edit) {
-}
+    bool was_edit) {}
 
 bool MockAutofillDialogController::HandleKeyPressEventInInput(
      const content::NativeWebKeyboardEvent& event) {
   return false;
 }
 
-void MockAutofillDialogController::FocusMoved() {
+void MockAutofillDialogController::FocusMoved() {}
+
+gfx::Image MockAutofillDialogController::SplashPageImage() const {
+  return gfx::Image();
 }
 
-void MockAutofillDialogController::ViewClosed() {
-}
+void MockAutofillDialogController::ViewClosed() {}
 
-std::vector<DialogNotification>
-    MockAutofillDialogController::CurrentNotifications() const {
+std::vector<DialogNotification> MockAutofillDialogController::
+    CurrentNotifications() {
   return std::vector<DialogNotification>();
 }
 
-void MockAutofillDialogController::StartSignInFlow() {}
+std::vector<DialogAutocheckoutStep> MockAutofillDialogController::
+    CurrentAutocheckoutSteps() const {
+  return std::vector<DialogAutocheckoutStep>();
+}
 
-void MockAutofillDialogController::EndSignInFlow() {}
+void MockAutofillDialogController::SignInLinkClicked() {}
 
 void MockAutofillDialogController::NotificationCheckboxStateChanged(
     DialogNotification::Type type,

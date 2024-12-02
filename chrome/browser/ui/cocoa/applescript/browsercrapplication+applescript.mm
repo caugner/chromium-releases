@@ -5,7 +5,7 @@
 #import "chrome/browser/ui/cocoa/applescript/browsercrapplication+applescript.h"
 
 #include "base/logging.h"
-#import "base/memory/scoped_nsobject.h"
+#import "base/mac/scoped_nsobject.h"
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -30,7 +30,7 @@
     if ((*browserIterator)->IsAttemptingToCloseBrowser())
       continue;
 
-    scoped_nsobject<WindowAppleScript> window(
+    base::scoped_nsobject<WindowAppleScript> window(
         [[WindowAppleScript alloc] initWithBrowser:*browserIterator]);
     [window setContainer:NSApp
                 property:AppleScript::kWindowsProperty];
@@ -79,7 +79,7 @@
   }
 
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(lastProfile);
-  if (!model->IsLoaded()) {
+  if (!model->loaded()) {
     AppleScript::SetError(AppleScript::errBookmarkModelLoad);
     return nil;
   }
@@ -102,7 +102,7 @@
   }
 
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(lastProfile);
-  if (!model->IsLoaded()) {
+  if (!model->loaded()) {
     AppleScript::SetError(AppleScript::errBookmarkModelLoad);
     return NULL;
   }

@@ -5,10 +5,10 @@
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 
 #include "ash/wm/user_activity_detector.h"
-#include "chrome/browser/chromeos/accessibility/accessibility_util.h"
-#include "chrome/browser/chromeos/input_method/input_method_configuration.h"
+#include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/login/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
+#include "chrome/browser/chromeos/login/user_adding_screen.h"
 #include "chrome/browser/chromeos/login/wallpaper_manager.h"
 #include "chrome/browser/chromeos/login/webui_login_view.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -46,6 +46,11 @@ WebUILoginDisplay::WebUILoginDisplay(LoginDisplay::Delegate* delegate)
       show_guest_(false),
       show_new_user_(false),
       webui_handler_(NULL) {
+}
+
+void WebUILoginDisplay::ClearAndEnablePassword() {
+  if (webui_handler_)
+      webui_handler_->ClearAndEnablePassword();
 }
 
 void WebUILoginDisplay::Init(const UserList& users,
@@ -104,17 +109,15 @@ void WebUILoginDisplay::SetUIEnabled(bool is_enabled) {
   // Allow this call only before user sign in or at lock screen.
   // If this call is made after new user signs in but login screen is still
   // around that would trigger a sign in extension refresh.
-  if (webui_handler_ && is_enabled &&
+  if (is_enabled &&
       (!UserManager::Get()->IsUserLoggedIn() ||
        ScreenLocker::default_screen_locker())) {
-    webui_handler_->ClearAndEnablePassword();
+    ClearAndEnablePassword();
   }
 
-  if (chromeos::LoginDisplayHostImpl::default_host()) {
-    chromeos::LoginDisplayHost* host =
-        chromeos::LoginDisplayHostImpl::default_host();
-    chromeos::WebUILoginView* login_view = host->GetWebUILoginView();
-    if (login_view)
+  if (chromeos::LoginDisplayHost* host =
+          chromeos::LoginDisplayHostImpl::default_host()) {
+    if (chromeos::WebUILoginView* login_view = host->GetWebUILoginView())
       login_view->SetUIEnabled(is_enabled);
   }
 }
@@ -153,7 +156,7 @@ void WebUILoginDisplay::ShowError(int error_msg_id,
       error_msg_id != IDS_LOGIN_ERROR_OWNER_REQUIRED) {
     // Display a warning if Caps Lock is on.
     input_method::InputMethodManager* ime_manager =
-        input_method::GetInputMethodManager();
+        input_method::InputMethodManager::Get();
     if (ime_manager->GetXKeyboard()->CapsLockIsEnabled()) {
       // TODO(ivankr): use a format string instead of concatenation.
       error_text += "\n" +
@@ -181,7 +184,7 @@ void WebUILoginDisplay::ShowError(int error_msg_id,
 
   webui_handler_->ShowError(login_attempts, error_text, help_link,
                             help_topic_id);
-  accessibility::MaybeSpeak(error_text);
+  AccessibilityManager::Get()->MaybeSpeak(error_text);
 }
 
 void WebUILoginDisplay::ShowErrorScreen(LoginDisplay::SigninError error_id) {
@@ -216,6 +219,14 @@ void WebUILoginDisplay::CancelPasswordChangedFlow() {
   DCHECK(delegate_);
   if (delegate_)
     delegate_->CancelPasswordChangedFlow();
+}
+
+void WebUILoginDisplay::CancelUserAdding() {
+  if (!UserAddingScreen::Get()->IsRunning()) {
+    LOG(ERROR) << "User adding screen not running.";
+    return;
+  }
+  UserAddingScreen::Get()->Cancel();
 }
 
 void WebUILoginDisplay::CreateAccount() {
@@ -288,9 +299,19 @@ void WebUILoginDisplay::ShowEnterpriseEnrollmentScreen() {
     delegate_->OnStartEnterpriseEnrollment();
 }
 
+void WebUILoginDisplay::ShowKioskEnableScreen() {
+  if (delegate_)
+    delegate_->OnStartKioskEnableScreen();
+}
+
 void WebUILoginDisplay::ShowResetScreen() {
   if (delegate_)
     delegate_->OnStartDeviceReset();
+}
+
+void WebUILoginDisplay::ShowKioskAutolaunchScreen() {
+  if (delegate_)
+    delegate_->OnStartKioskAutolaunchScreen();
 }
 
 void WebUILoginDisplay::ShowWrongHWIDScreen() {
@@ -308,11 +329,6 @@ void WebUILoginDisplay::ShowSigninScreenForCreds(
     const std::string& password) {
   if (webui_handler_)
     webui_handler_->ShowSigninScreenForCreds(username, password);
-}
-
-void WebUILoginDisplay::SetGaiaOriginForTesting(const std::string& arg) {
-  if (webui_handler_)
-    webui_handler_->SetGaiaOriginForTesting(arg);
 }
 
 const UserList& WebUILoginDisplay::GetUsers() const {

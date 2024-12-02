@@ -6,15 +6,14 @@
 
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
-#import "base/memory/scoped_nsobject.h"
-#include "base/utf_string_conversions.h"
+#import "base/mac/scoped_nsobject.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_options_menu_model.h"
 #include "chrome/browser/profiles/profile.h"
-#import "chrome/browser/ui/cocoa/menu_controller.h"
 #import "chrome/browser/ui/cocoa/notifications/balloon_view.h"
 #include "chrome/browser/ui/cocoa/notifications/balloon_view_host_mac.h"
 #include "content/public/browser/render_view_host.h"
@@ -22,6 +21,7 @@
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #import "ui/base/cocoa/hover_image_button.h"
+#import "ui/base/cocoa/menu_controller.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -63,13 +63,10 @@ const int kRightMargin = 2;
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   [optionsButton_ setDefaultImage:
       rb.GetNativeImageNamed(IDR_BALLOON_WRENCH).ToNSImage()];
-  [optionsButton_ setDefaultOpacity:1.0];
   [optionsButton_ setHoverImage:
       rb.GetNativeImageNamed(IDR_BALLOON_WRENCH_H).ToNSImage()];
-  [optionsButton_ setHoverOpacity:1.0];
   [optionsButton_ setPressedImage:
       rb.GetNativeImageNamed(IDR_BALLOON_WRENCH_P).ToNSImage()];
-  [optionsButton_ setPressedOpacity:1.0];
   [[optionsButton_ cell] setHighlightsBy:NSNoCellMask];
 
   NSString* sourceLabelText = l10n_util::GetNSStringF(

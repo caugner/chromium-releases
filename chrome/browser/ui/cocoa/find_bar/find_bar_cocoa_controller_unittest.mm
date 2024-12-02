@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
@@ -53,7 +53,7 @@ class FindBarCocoaControllerTest : public CocoaTest {
   }
 
  protected:
-  scoped_nsobject<FindBarCocoaController> controller_;
+  base::scoped_nsobject<FindBarCocoaController> controller_;
 };
 
 TEST_VIEW(FindBarCocoaControllerTest, [controller_ view])
@@ -110,7 +110,7 @@ TEST_F(FindBarCocoaControllerTest, ResultLabelUpdatesCorrectly) {
 }
 
 TEST_F(FindBarCocoaControllerTest, FindTextIsGlobal) {
-  scoped_nsobject<FindBarCocoaController> otherController(
+  base::scoped_nsobject<FindBarCocoaController> otherController(
       [[FindBarCocoaController alloc] initWithBrowser:nil]);
   [[test_window() contentView] addSubview:[otherController view]];
 

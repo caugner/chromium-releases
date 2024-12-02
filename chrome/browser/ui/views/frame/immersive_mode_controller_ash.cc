@@ -9,21 +9,20 @@
 #include "ash/wm/window_properties.h"
 #include "base/command_line.h"
 #include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
+#include "chrome/browser/ui/immersive_fullscreen_configuration.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
-#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/top_container_view.h"
-#include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
 #include "ui/aura/client/activation_client.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/capture_client.h"
+#include "ui/aura/client/cursor_client.h"
+#include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/env.h"
+#include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
-#include "ui/aura/window_observer.h"
-#include "ui/compositor/layer_animation_observer.h"
-#include "ui/compositor/scoped_layer_animation_settings.h"
-#include "ui/gfx/screen.h"
+#include "ui/base/animation/slide_animation.h"
 #include "ui/gfx/transform.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
@@ -32,10 +31,6 @@
 using views::View;
 
 namespace {
-
-// Time after which the edge trigger fires and top-chrome is revealed. This is
-// after the mouse stops moving.
-const int kTopEdgeRevealDelayMs = 200;
 
 // The slide open/closed animation looks better if it starts and ends just a
 // few pixels before the view goes completely off the screen, which reduces
@@ -48,7 +43,7 @@ const int kAnimationOffsetY = 3;
 const int kRevealSlowAnimationDurationMs = 400;
 const int kRevealFastAnimationDurationMs = 200;
 
-// How many pixels a gesture can start away from the TopContainerView when in
+// How many pixels a gesture can start away from |top_container_| when in
 // closed state and still be considered near it. This is needed to overcome
 // issues with poor location values near the edge of the display.
 const int kNearTopContainerDistance = 5;
@@ -145,10 +140,6 @@ class ImmersiveModeControllerAsh::AnchoredWidgetManager
   // Called when immersive mode has been enabled.
   void OnImmersiveModeEnabled();
 
-  const std::set<views::Widget*>& visible_anchored_widgets() const {
-    return visible_;
-  }
-
  private:
   // Updates |revealed_lock_| based on the visible anchored widgets.
   void UpdateRevealedLock();
@@ -184,10 +175,8 @@ ImmersiveModeControllerAsh::AnchoredWidgetManager::AnchoredWidgetManager(
 }
 
 ImmersiveModeControllerAsh::AnchoredWidgetManager::~AnchoredWidgetManager() {
-  for (std::map<views::Widget*, int>::iterator it = widgets_.begin();
-       it != widgets_.end(); ++it) {
-    RemoveAnchoredWidget(it->first);
-  }
+  while (!widgets_.empty())
+    RemoveAnchoredWidget(widgets_.begin()->first);
 }
 
 void ImmersiveModeControllerAsh::AnchoredWidgetManager::AddAnchoredWidget(
@@ -243,21 +232,10 @@ void ImmersiveModeControllerAsh::AnchoredWidgetManager::UpdateRevealedLock() {
   if (visible_.empty()) {
     revealed_lock_.reset();
   } else if (controller_->IsRevealed()) {
-    // It is hard to determine the required initial transforms and the required
-    // durations of the animations of |visible_| such that they appear to be
-    // anchored to the top-of-window views while the top-of-window views are
-    // animating. Skip to the end of the reveal animation instead.
-    // We do not query the controller's reveal state because we may be called
-    // as a result of LayoutBrowserRootView() in MaybeStartReveal() when
-    // |reveal_state_| is SLIDING_OPEN but no animation is running yet.
-    ui::Layer* top_container_layer =
-        controller_->browser_view_->top_container()->layer();
-    if (top_container_layer &&
-        top_container_layer->GetAnimator()->is_animating()) {
-      controller_->MaybeRevealWithoutAnimation();
-    }
-
     if (!revealed_lock_.get()) {
+      // CAUTION: Acquiring the lock results in a reentrant call to
+      // UpdateRevealedLock() when
+      // |ImmersiveModeControllerAsh::animations_disabled_for_test_| is true.
       revealed_lock_.reset(controller_->GetRevealedLock(
           ImmersiveModeController::ANIMATE_REVEAL_YES));
     }
@@ -270,12 +248,11 @@ void ImmersiveModeControllerAsh::AnchoredWidgetManager::UpdateWidgetBounds(
   if (!controller_->IsEnabled() || !widget->IsVisible())
     return;
 
-  gfx::Rect top_container_target_bounds =
-      controller_->browser_view_->top_container()->GetTargetBoundsInScreen();
+  gfx::Rect top_container_bounds =
+      controller_->top_container_->GetBoundsInScreen();
   gfx::Rect bounds(widget->GetWindowBoundsInScreen());
-  bounds.set_y(
-      top_container_target_bounds.bottom() + y_offset);
-   widget->SetBounds(bounds);
+  bounds.set_y(top_container_bounds.bottom() + y_offset);
+  widget->SetBounds(bounds);
 }
 
 void ImmersiveModeControllerAsh::AnchoredWidgetManager::OnWidgetDestroying(
@@ -301,55 +278,21 @@ void ImmersiveModeControllerAsh::AnchoredWidgetManager::
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// Observer to watch for window restore. views::Widget does not provide a hook
-// to observe for window restore, so do this at the Aura level.
-class ImmersiveModeControllerAsh::WindowObserver : public aura::WindowObserver {
- public:
-  explicit WindowObserver(ImmersiveModeControllerAsh* controller)
-      : controller_(controller) {
-    controller_->native_window_->AddObserver(this);
-  }
-
-  virtual ~WindowObserver() {
-    controller_->native_window_->RemoveObserver(this);
-  }
-
-  // aura::WindowObserver overrides:
-  virtual void OnWindowPropertyChanged(aura::Window* window,
-                                       const void* key,
-                                       intptr_t old) OVERRIDE {
-    using aura::client::kShowStateKey;
-    if (key == kShowStateKey) {
-      // Disable immersive mode when leaving the fullscreen state.
-      ui::WindowShowState show_state = static_cast<ui::WindowShowState>(
-          window->GetProperty(kShowStateKey));
-      if (controller_->IsEnabled() &&
-          show_state != ui::SHOW_STATE_FULLSCREEN &&
-          show_state != ui::SHOW_STATE_MINIMIZED) {
-        controller_->browser_view_->FullScreenStateChanged();
-      }
-      return;
-    }
-  }
-
- private:
-  ImmersiveModeControllerAsh* controller_;  // Not owned.
-
-  DISALLOW_COPY_AND_ASSIGN(WindowObserver);
-};
-
-////////////////////////////////////////////////////////////////////////////////
-
 ImmersiveModeControllerAsh::ImmersiveModeControllerAsh()
-    : browser_view_(NULL),
+    : delegate_(NULL),
+      widget_(NULL),
+      top_container_(NULL),
       observers_enabled_(false),
       enabled_(false),
       reveal_state_(CLOSED),
       revealed_lock_count_(0),
       tab_indicator_visibility_(TAB_INDICATORS_HIDE),
+      mouse_x_when_hit_top_(-1),
+      gesture_begun_(false),
       native_window_(NULL),
-      weak_ptr_factory_(this),
-      gesture_begun_(false) {
+      animation_(new ui::SlideAnimation(this)),
+      animations_disabled_for_test_(false),
+      weak_ptr_factory_(this) {
 }
 
 ImmersiveModeControllerAsh::~ImmersiveModeControllerAsh() {
@@ -376,16 +319,21 @@ void ImmersiveModeControllerAsh::UnlockRevealedState() {
   }
 }
 
-void ImmersiveModeControllerAsh::MaybeRevealWithoutAnimation() {
-  MaybeStartReveal(ANIMATE_NO);
+void ImmersiveModeControllerAsh::MaybeExitImmersiveFullscreen() {
+  if (ShouldExitImmersiveFullscreen())
+    delegate_->FullscreenStateChanged();
 }
 
-void ImmersiveModeControllerAsh::Init(BrowserView* browser_view) {
-  browser_view_ = browser_view;
+void ImmersiveModeControllerAsh::Init(
+    Delegate* delegate,
+    views::Widget* widget,
+    views::View* top_container) {
+  delegate_ = delegate;
+  widget_ = widget;
   // Browser view is detached from its widget during destruction. Cache the
   // window pointer so |this| can stop observing during destruction.
-  native_window_ = browser_view_->GetNativeWindow();
-  DCHECK(native_window_);
+  native_window_ = widget_->GetNativeWindow();
+  top_container_ = top_container;
 
   // Optionally allow the tab indicators to be hidden.
   if (CommandLine::ForCurrentProcess()->
@@ -397,7 +345,7 @@ void ImmersiveModeControllerAsh::Init(BrowserView* browser_view) {
 }
 
 void ImmersiveModeControllerAsh::SetEnabled(bool enabled) {
-  DCHECK(browser_view_) << "Must initialize before enabling";
+  DCHECK(native_window_) << "Must initialize before enabling";
   if (enabled_ == enabled)
     return;
   enabled_ = enabled;
@@ -419,9 +367,9 @@ void ImmersiveModeControllerAsh::SetEnabled(bool enabled) {
     // out |browser_view_|'s root view.
     MaybeStartReveal(ANIMATE_NO);
 
-    // Reset the mouse and the focus revealed locks so that they do not affect
-    // whether the top-of-window views are hidden.
-    mouse_revealed_lock_.reset();
+    // Reset the located event and the focus revealed locks so that they do not
+    // affect whether the top-of-window views are hidden.
+    located_event_revealed_lock_.reset();
     focus_revealed_lock_.reset();
 
     // Try doing the animation.
@@ -429,17 +377,17 @@ void ImmersiveModeControllerAsh::SetEnabled(bool enabled) {
 
     if (reveal_state_ == REVEALED) {
       // Reveal was unsuccessful. Reacquire the revealed locks if appropriate.
-      UpdateMouseRevealedLock(true);
+      UpdateLocatedEventRevealedLock(NULL);
       UpdateFocusRevealedLock();
     }
     anchored_widget_manager_->OnImmersiveModeEnabled();
   } else {
     // Stop cursor-at-top tracking.
-    top_timer_.Stop();
+    top_edge_hover_timer_.Stop();
     // Snap immediately to the closed state.
     reveal_state_ = CLOSED;
     EnablePaintToLayer(false);
-    browser_view_->tabstrip()->SetImmersiveStyle(false);
+    delegate_->SetImmersiveStyle(false);
 
     // Relayout the root view because disabling immersive fullscreen may have
     // changed the result of NonClientFrameView::GetBoundsForClientView().
@@ -463,12 +411,13 @@ bool ImmersiveModeControllerAsh::IsRevealed() const {
   return enabled_ && reveal_state_ != CLOSED;
 }
 
-void ImmersiveModeControllerAsh::MaybeStackViewAtTop() {
-  if (enabled_ && reveal_state_ != CLOSED) {
-    ui::Layer* reveal_layer = browser_view_->top_container()->layer();
-    if (reveal_layer)
-      reveal_layer->parent()->StackAtTop(reveal_layer);
-  }
+int ImmersiveModeControllerAsh::GetTopContainerVerticalOffset(
+    const gfx::Size& top_container_size) const {
+  if (!enabled_ || reveal_state_ == REVEALED || reveal_state_ == CLOSED)
+    return 0;
+
+  return animation_->CurrentValueBetween(
+      -top_container_size.height() + kAnimationOffsetY, 0);
 }
 
 ImmersiveRevealedLock* ImmersiveModeControllerAsh::GetRevealedLock(
@@ -491,6 +440,11 @@ void ImmersiveModeControllerAsh::OnTopContainerBoundsChanged() {
   anchored_widget_manager_->MaybeRepositionAnchoredWidgets();
 }
 
+void ImmersiveModeControllerAsh::OnFindBarVisibleBoundsChanged(
+    const gfx::Rect& new_visible_bounds_in_screen) {
+  find_bar_visible_bounds_in_screen_ = new_visible_bounds_in_screen;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Observers:
 
@@ -507,14 +461,15 @@ void ImmersiveModeControllerAsh::OnMouseEvent(ui::MouseEvent* event) {
   if (!enabled_)
     return;
 
+  // Counterintuitively, we can still get synthesized mouse moves when
+  // aura::client::CursorClient::IsMouseEventsEnabled() == false.
   if (event->flags() & ui::EF_IS_SYNTHESIZED)
     return;
 
-  // Handle ET_MOUSE_PRESSED and ET_MOUSE_RELEASED so that we get the updated
-  // mouse position ASAP once a nested message loop finishes running.
   if (event->type() != ui::ET_MOUSE_MOVED &&
       event->type() != ui::ET_MOUSE_PRESSED &&
-      event->type() != ui::ET_MOUSE_RELEASED) {
+      event->type() != ui::ET_MOUSE_RELEASED &&
+      event->type() != ui::ET_MOUSE_CAPTURE_CHANGED) {
     return;
   }
 
@@ -523,24 +478,25 @@ void ImmersiveModeControllerAsh::OnMouseEvent(ui::MouseEvent* event) {
   if (!views::Widget::GetWidgetForNativeWindow(native_window_)->IsActive())
     return;
 
-  if ((reveal_state_ == SLIDING_CLOSED || reveal_state_ == CLOSED) &&
-      event->root_location().y() == 0) {
-    // Start a reveal if the mouse touches the top of the screen and then stops
-    // moving for a little while. This mirrors the Ash launcher behavior.
-    top_timer_.Stop();
-    // Timer is stopped when |this| is destroyed, hence Unretained() is safe.
-    top_timer_.Start(
-        FROM_HERE,
-        base::TimeDelta::FromMilliseconds(kTopEdgeRevealDelayMs),
-        base::Bind(&ImmersiveModeControllerAsh::AcquireMouseRevealedLock,
-                   base::Unretained(this)));
-  } else {
-    // Cursor left the top edge or the top-of-window views are already revealed.
-    top_timer_.Stop();
-  }
+  // Mouse hover should not initiate revealing the top-of-window views while
+  // a window has mouse capture.
+  if (aura::client::GetCaptureWindow(native_window_))
+    return;
 
-  UpdateMouseRevealedLock(false);
-  // Pass along event for further handling.
+  if (IsRevealed())
+    UpdateLocatedEventRevealedLock(event);
+
+  // Trigger a reveal if the cursor pauses at the top of the screen for a
+  // while.
+  if (event->type() != ui::ET_MOUSE_CAPTURE_CHANGED)
+    UpdateTopEdgeHoverTimer(event);
+}
+
+void ImmersiveModeControllerAsh::OnTouchEvent(ui::TouchEvent* event) {
+  if (!enabled_ || event->type() != ui::ET_TOUCH_PRESSED)
+    return;
+
+  UpdateLocatedEventRevealedLock(event);
 }
 
 void ImmersiveModeControllerAsh::OnGestureEvent(ui::GestureEvent* event) {
@@ -554,26 +510,15 @@ void ImmersiveModeControllerAsh::OnGestureEvent(ui::GestureEvent* event) {
 
   switch (event->type()) {
     case ui::ET_GESTURE_SCROLL_BEGIN:
-      if (IsNearTopContainer(event->location())) {
+      if (ShouldHandleEvent(event->location())) {
         gesture_begun_ = true;
         event->SetHandled();
       }
       break;
     case ui::ET_GESTURE_SCROLL_UPDATE:
       if (gesture_begun_) {
-        SwipeType swipe_type = GetSwipeType(event);
-        if ((reveal_state_ == SLIDING_CLOSED || reveal_state_ == CLOSED) &&
-            swipe_type == SWIPE_OPEN) {
-          browser_view_->SetFocusToLocationBar(false);
+        if (UpdateRevealedLocksForSwipe(GetSwipeType(event)))
           event->SetHandled();
-        } else if ((reveal_state_ == SLIDING_OPEN ||
-                    reveal_state_ == REVEALED) &&
-                   swipe_type == SWIPE_CLOSE) {
-          views::FocusManager* focus_manager = browser_view_->GetFocusManager();
-          DCHECK(focus_manager);
-          focus_manager->ClearFocus();
-          event->SetHandled();
-        }
         gesture_begun_ = false;
       }
       break;
@@ -592,7 +537,7 @@ void ImmersiveModeControllerAsh::OnWillChangeFocus(views::View* focused_before,
 
 void ImmersiveModeControllerAsh::OnDidChangeFocus(views::View* focused_before,
                                                   views::View* focused_now) {
-  UpdateMouseRevealedLock(true);
+  UpdateLocatedEventRevealedLock(NULL);
   UpdateFocusRevealedLock();
 }
 
@@ -610,20 +555,79 @@ void ImmersiveModeControllerAsh::OnWidgetActivationChanged(
     bool active) {
   // Mouse hover should not initiate revealing the top-of-window views while
   // |native_window_| is inactive.
-  top_timer_.Stop();
+  top_edge_hover_timer_.Stop();
 
-  UpdateMouseRevealedLock(true);
+  UpdateLocatedEventRevealedLock(NULL);
   UpdateFocusRevealedLock();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Animation observer:
+// Animation delegate:
 
-void ImmersiveModeControllerAsh::OnImplicitAnimationsCompleted() {
-  if (reveal_state_ == SLIDING_OPEN)
-    OnSlideOpenAnimationCompleted();
-  else if (reveal_state_ == SLIDING_CLOSED)
+void ImmersiveModeControllerAsh::AnimationEnded(
+    const ui::Animation* animation) {
+  if (reveal_state_ == SLIDING_OPEN) {
+    // AnimationProgressed() is called immediately before AnimationEnded()
+    // and does a layout.
+    OnSlideOpenAnimationCompleted(LAYOUT_NO);
+  } else if (reveal_state_ == SLIDING_CLOSED) {
     OnSlideClosedAnimationCompleted();
+  }
+}
+
+void ImmersiveModeControllerAsh::AnimationProgressed(
+    const ui::Animation* animation) {
+  // Relayout. This will also move any views whose position depends on the
+  // top container position such as the find bar.
+  // We do not call LayoutBrowserRootView() here because we are not toggling
+  // the tab strip's immersive style so relaying out the non client view is not
+  // necessary.
+  top_container_->parent()->Layout();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// aura::WindowObserver overrides:
+void ImmersiveModeControllerAsh::OnWindowPropertyChanged(aura::Window* window,
+                                                         const void* key,
+                                                         intptr_t old) {
+  if (!enabled_)
+    return;
+
+  if (key == aura::client::kShowStateKey) {
+    // Disable immersive mode when the user exits fullscreen without going
+    // through FullscreenController::ToggleFullscreenMode(). This is the case
+    // if the user exits fullscreen via the restore button.
+    if (ShouldExitImmersiveFullscreen()) {
+      // Other "property change" observers may want to animate between the
+      // current visuals and the new window state. Do not alter the current
+      // visuals yet and post a task to exit immersive fullscreen instead.
+      base::MessageLoopForUI::current()->PostTask(
+          FROM_HERE,
+          base::Bind(&ImmersiveModeControllerAsh::MaybeExitImmersiveFullscreen,
+                     weak_ptr_factory_.GetWeakPtr()));
+    }
+
+    ui::WindowShowState show_state = native_window_->GetProperty(
+        aura::client::kShowStateKey);
+    if (show_state == ui::SHOW_STATE_FULLSCREEN &&
+        old == ui::SHOW_STATE_MINIMIZED) {
+      // Relayout in case there was a layout while the window show state was
+      // ui::SHOW_STATE_MINIMIZED.
+      LayoutBrowserRootView();
+    }
+  }
+}
+
+void ImmersiveModeControllerAsh::OnWindowAddedToRootWindow(
+    aura::Window* window) {
+  DCHECK_EQ(window, native_window_);
+  UpdatePreTargetHandler();
+}
+
+void ImmersiveModeControllerAsh::OnWindowRemovingFromRootWindow(
+    aura::Window* window) {
+  DCHECK_EQ(window, native_window_);
+  UpdatePreTargetHandler();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -639,13 +643,17 @@ void ImmersiveModeControllerAsh::SetForceHideTabIndicatorsForTest(bool force) {
 
 void ImmersiveModeControllerAsh::StartRevealForTest(bool hovered) {
   MaybeStartReveal(ANIMATE_NO);
-  MoveMouse(browser_view_->top_container(), hovered);
-  UpdateMouseRevealedLock(false);
+  MoveMouse(top_container_, hovered);
+  UpdateLocatedEventRevealedLock(NULL);
 }
 
 void ImmersiveModeControllerAsh::SetMouseHoveredForTest(bool hovered) {
-  MoveMouse(browser_view_->top_container(), hovered);
-  UpdateMouseRevealedLock(false);
+  MoveMouse(top_container_, hovered);
+  UpdateLocatedEventRevealedLock(NULL);
+}
+
+void ImmersiveModeControllerAsh::DisableAnimationsForTest() {
+  animations_disabled_for_test_ = true;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -672,70 +680,135 @@ void ImmersiveModeControllerAsh::EnableWindowObservers(bool enable) {
     focus_manager->RemoveFocusChangeListener(this);
   }
 
-  if (enable)
-    native_window_->AddPreTargetHandler(this);
-  else
-    native_window_->RemovePreTargetHandler(this);
+  UpdatePreTargetHandler();
 
-  // The window observer adds and removes itself from the native window.
-  window_observer_.reset(enable ? new WindowObserver(this) : NULL);
+  if (enable) {
+    native_window_->AddObserver(this);
+  } else {
+    native_window_->RemoveObserver(this);
+  }
 
   if (enable) {
     registrar_.Add(
         this,
         chrome::NOTIFICATION_FULLSCREEN_CHANGED,
         content::Source<FullscreenController>(
-            browser_view_->browser()->fullscreen_controller()));
+            delegate_->GetFullscreenController()));
   } else {
     registrar_.Remove(
         this,
         chrome::NOTIFICATION_FULLSCREEN_CHANGED,
         content::Source<FullscreenController>(
-            browser_view_->browser()->fullscreen_controller()));
+            delegate_->GetFullscreenController()));
   }
 
   if (!enable)
-    StopObservingImplicitAnimations();
+    animation_->Stop();
 }
 
-void ImmersiveModeControllerAsh::UpdateMouseRevealedLock(bool maybe_drag) {
-  if (!enabled_)
+void ImmersiveModeControllerAsh::UpdateTopEdgeHoverTimer(
+    ui::MouseEvent* event) {
+  DCHECK(enabled_);
+  // If the top-of-window views are already revealed or the cursor left the
+  // top edge we don't need to trigger based on a timer anymore.
+  if (reveal_state_ == SLIDING_OPEN ||
+      reveal_state_ == REVEALED ||
+      event->root_location().y() != 0) {
+    top_edge_hover_timer_.Stop();
+    return;
+  }
+  // The cursor is now at the top of the screen. Consider the cursor "not
+  // moving" even if it moves a little bit in x, because users don't have
+  // perfect pointing precision.
+  int mouse_x = event->root_location().x();
+  if (top_edge_hover_timer_.IsRunning() &&
+      abs(mouse_x - mouse_x_when_hit_top_) <=
+          ImmersiveFullscreenConfiguration::
+              immersive_mode_reveal_x_threshold_pixels())
     return;
 
-  // Hover cannot initiate a reveal when the top-of-window views are sliding
-  // closed or are closed. (With the exception of hovering at y = 0 which is
-  // handled in OnMouseEvent() ).
+  // Start the reveal if the cursor doesn't move for some amount of time.
+  mouse_x_when_hit_top_ = mouse_x;
+  top_edge_hover_timer_.Stop();
+  // Timer is stopped when |this| is destroyed, hence Unretained() is safe.
+  top_edge_hover_timer_.Start(
+      FROM_HERE,
+      base::TimeDelta::FromMilliseconds(
+          ImmersiveFullscreenConfiguration::immersive_mode_reveal_delay_ms()),
+      base::Bind(&ImmersiveModeControllerAsh::AcquireLocatedEventRevealedLock,
+                 base::Unretained(this)));
+}
+
+void ImmersiveModeControllerAsh::UpdateLocatedEventRevealedLock(
+    ui::LocatedEvent* event) {
+  if (!enabled_)
+    return;
+  DCHECK(!event || event->IsMouseEvent() || event->IsTouchEvent());
+
+  // Neither the mouse nor touch can initiate a reveal when the top-of-window
+  // views are sliding closed or are closed with the following exceptions:
+  // - Hovering at y = 0 which is handled in OnMouseEvent().
+  // - Doing a SWIPE_OPEN edge gesture which is handled in OnGestureEvent().
   if (reveal_state_ == SLIDING_CLOSED || reveal_state_ == CLOSED)
     return;
 
-  // Mouse hover should not keep the top-of-window views revealed if
+  // Neither the mouse nor touch should keep the top-of-window views revealed if
   // |native_window_| is not active.
   if (!views::Widget::GetWidgetForNativeWindow(native_window_)->IsActive()) {
-    mouse_revealed_lock_.reset();
+    located_event_revealed_lock_.reset();
     return;
   }
 
-  // If a window has capture, we may be in the middle of a drag. Delay updating
-  // the revealed lock till we get more specifics via OnMouseEvent().
-  if (maybe_drag && aura::client::GetCaptureWindow(native_window_))
+  // Ignore all events while a window has capture. This keeps the top-of-window
+  // views revealed during a drag.
+  if (aura::client::GetCaptureWindow(native_window_))
     return;
 
-  views::View* top_container = browser_view_->top_container();
-  gfx::Point cursor_pos = gfx::Screen::GetScreenFor(
-      native_window_)->GetCursorScreenPoint();
-  // Transform to the parent of |top_container|. This avoids problems with
-  // coordinate conversion while |top_container|'s layer has an animating
-  // transform and also works properly if |top_container| is not at 0, 0.
-  views::View::ConvertPointFromScreen(top_container->parent(), &cursor_pos);
-  if (top_container->bounds().Contains(cursor_pos))
-    AcquireMouseRevealedLock();
-  else
-    mouse_revealed_lock_.reset();
+  gfx::Point location_in_screen;
+  if (event && event->type() != ui::ET_MOUSE_CAPTURE_CHANGED) {
+    location_in_screen = event->location();
+    aura::Window* target = static_cast<aura::Window*>(event->target());
+    aura::client::ScreenPositionClient* screen_position_client =
+        aura::client::GetScreenPositionClient(target->GetRootWindow());
+    screen_position_client->ConvertPointToScreen(target, &location_in_screen);
+  } else {
+    aura::client::CursorClient* cursor_client = aura::client::GetCursorClient(
+        native_window_->GetRootWindow());
+    if (!cursor_client->IsMouseEventsEnabled()) {
+      // If mouse events are disabled, the user's last interaction was probably
+      // via touch. Do no do further processing in this case as there is no easy
+      // way of retrieving the position of the user's last touch.
+      return;
+    }
+    location_in_screen = aura::Env::GetInstance()->last_mouse_location();
+  }
+
+  gfx::Rect hit_bounds_in_screen = top_container_->GetBoundsInScreen();
+  gfx::Rect find_bar_hit_bounds_in_screen = find_bar_visible_bounds_in_screen_;
+
+  // Allow the cursor to move slightly off the top-of-window views before
+  // sliding closed. This helps when the user is attempting to click on the
+  // bookmark bar and overshoots slightly.
+  if (event && event->type() == ui::ET_MOUSE_MOVED) {
+    const int kBoundsOffsetY = 8;
+    hit_bounds_in_screen.Inset(0, 0, 0, -kBoundsOffsetY);
+    find_bar_hit_bounds_in_screen.Inset(0, 0, 0, -kBoundsOffsetY);
+  }
+
+  if (hit_bounds_in_screen.Contains(location_in_screen) ||
+      find_bar_hit_bounds_in_screen.Contains(location_in_screen)) {
+    AcquireLocatedEventRevealedLock();
+  } else {
+    located_event_revealed_lock_.reset();
+  }
 }
 
-void ImmersiveModeControllerAsh::AcquireMouseRevealedLock() {
-  if (!mouse_revealed_lock_.get())
-    mouse_revealed_lock_.reset(GetRevealedLock(ANIMATE_REVEAL_YES));
+void ImmersiveModeControllerAsh::AcquireLocatedEventRevealedLock() {
+  // CAUTION: Acquiring the lock results in a reentrant call to
+  // AcquireLocatedEventRevealedLock() when
+  // |ImmersiveModeControllerAsh::animations_disabled_for_test_| is true.
+  if (!located_event_revealed_lock_.get())
+    located_event_revealed_lock_.reset(GetRevealedLock(ANIMATE_REVEAL_YES));
 }
 
 void ImmersiveModeControllerAsh::UpdateFocusRevealedLock() {
@@ -747,7 +820,7 @@ void ImmersiveModeControllerAsh::UpdateFocusRevealedLock() {
       views::Widget::GetWidgetForNativeWindow(native_window_);
   if (widget->IsActive()) {
     views::View* focused_view = widget->GetFocusManager()->GetFocusedView();
-    if (browser_view_->top_container()->Contains(focused_view))
+    if (top_container_->Contains(focused_view))
       hold_lock = true;
   } else {
     // If the currently active window is not |native_window_|, the top-of-window
@@ -770,9 +843,44 @@ void ImmersiveModeControllerAsh::UpdateFocusRevealedLock() {
   }
 }
 
+bool ImmersiveModeControllerAsh::UpdateRevealedLocksForSwipe(
+    SwipeType swipe_type) {
+  if (!enabled_ || swipe_type == SWIPE_NONE)
+    return false;
+
+  // Swipes while |native_window_| is inactive should have been filtered out in
+  // OnGestureEvent().
+  DCHECK(views::Widget::GetWidgetForNativeWindow(native_window_)->IsActive());
+
+  if (reveal_state_ == SLIDING_CLOSED || reveal_state_ == CLOSED) {
+    if (swipe_type == SWIPE_OPEN && !located_event_revealed_lock_.get()) {
+      located_event_revealed_lock_.reset(GetRevealedLock(ANIMATE_REVEAL_YES));
+      return true;
+    }
+  } else {
+    if (swipe_type == SWIPE_CLOSE) {
+      // Attempt to end the reveal. If other code is holding onto a lock, the
+      // attempt will be unsuccessful.
+      located_event_revealed_lock_.reset();
+      focus_revealed_lock_.reset();
+
+      if (reveal_state_ == SLIDING_CLOSED || reveal_state_ == CLOSED)
+        return true;
+
+      // Ending the reveal was unsuccessful. Reaquire the locks if appropriate.
+      UpdateLocatedEventRevealedLock(NULL);
+      UpdateFocusRevealedLock();
+    }
+  }
+  return false;
+}
+
 void ImmersiveModeControllerAsh::UpdateUseMinimalChrome(Layout layout) {
-  bool in_tab_fullscreen = browser_view_->browser()->fullscreen_controller()->
-      IsFullscreenForTabOrPending();
+  // May be NULL in tests.
+  FullscreenController* fullscreen_controller =
+      delegate_->GetFullscreenController();
+  bool in_tab_fullscreen = fullscreen_controller ?
+      fullscreen_controller->IsFullscreenForTabOrPending() : false;
   bool use_minimal_chrome = !in_tab_fullscreen && enabled_;
   native_window_->SetProperty(ash::internal::kFullscreenUsesMinimalChromeKey,
                               use_minimal_chrome);
@@ -816,10 +924,11 @@ void ImmersiveModeControllerAsh::MaybeStartReveal(Animate animate) {
   if (!enabled_)
     return;
 
+  if (animations_disabled_for_test_)
+    animate = ANIMATE_NO;
+
   // Callers with ANIMATE_NO expect this function to synchronously reveal the
-  // top-of-window views. In particular, this property is used to terminate the
-  // reveal animation if an equivalent animation for the anchored widgets
-  // cannot be created.
+  // top-of-window views.
   if (reveal_state_ == REVEALED ||
       (reveal_state_ == SLIDING_OPEN && animate != ANIMATE_NO)) {
     return;
@@ -828,41 +937,39 @@ void ImmersiveModeControllerAsh::MaybeStartReveal(Animate animate) {
   RevealState previous_reveal_state = reveal_state_;
   reveal_state_ = SLIDING_OPEN;
   if (previous_reveal_state == CLOSED) {
-    // Turn on layer painting so we can smoothly animate.
+    // Turn on layer painting so that we can overlap the web contents.
     EnablePaintToLayer(true);
 
     // Ensure window caption buttons are updated and the view bounds are
-    // computed at normal (non-immersive-style) size.
-    browser_view_->tabstrip()->SetImmersiveStyle(false);
+    // computed at normal (non-immersive-style) size. The layout call moves the
+    // top-of-window views to their initial offscreen position for the
+    // animation.
+    delegate_->SetImmersiveStyle(false);
     LayoutBrowserRootView();
 
     // Do not do any more processing if LayoutBrowserView() changed
     // |reveal_state_|.
-    if (reveal_state_ != SLIDING_OPEN)
+    if (reveal_state_ != SLIDING_OPEN) {
+      if (reveal_state_ == REVEALED)
+        FOR_EACH_OBSERVER(Observer, observers_, OnImmersiveRevealStarted());
       return;
-
-    if (animate != ANIMATE_NO) {
-      // Now that we have a layer, move it to the initial offscreen position.
-      ui::Layer* layer = browser_view_->top_container()->layer();
-      gfx::Transform transform;
-      transform.Translate(0, -layer->bounds().height() + kAnimationOffsetY);
-      layer->SetTransform(transform);
-
-      typedef std::set<views::Widget*> WidgetSet;
-      const WidgetSet& visible_widgets =
-          anchored_widget_manager_->visible_anchored_widgets();
-      for (WidgetSet::const_iterator it = visible_widgets.begin();
-           it != visible_widgets.end(); ++it) {
-        (*it)->GetNativeWindow()->SetTransform(transform);
-      }
     }
   }
   // Slide in the reveal view.
-  DoAnimation(gfx::Transform(), GetAnimationDuration(animate));
+  if (animate == ANIMATE_NO) {
+    animation_->Reset(1);
+    OnSlideOpenAnimationCompleted(LAYOUT_YES);
+  } else {
+    animation_->SetSlideDuration(GetAnimationDuration(animate));
+    animation_->Show();
+  }
+
+   if (previous_reveal_state == CLOSED)
+     FOR_EACH_OBSERVER(Observer, observers_, OnImmersiveRevealStarted());
 }
 
 void ImmersiveModeControllerAsh::EnablePaintToLayer(bool enable) {
-  browser_view_->top_container()->SetPaintToLayer(enable);
+  top_container_->SetPaintToLayer(enable);
 
   // Views software compositing is not fully layer aware. If the bookmark bar
   // is detached while the top container layer slides on or off the screen,
@@ -871,7 +978,7 @@ void ImmersiveModeControllerAsh::EnablePaintToLayer(bool enable) {
   // Force the bookmark bar to paint to a layer so the views composite
   // properly. The infobar container does not need this treatment because
   // BrowserView::PaintChildren() always draws it last when it is visible.
-  BookmarkBarView* bookmark_bar = browser_view_->bookmark_bar();
+  BookmarkBarView* bookmark_bar = delegate_->GetBookmarkBar();
   if (!bookmark_bar)
     return;
   if (enable && bookmark_bar->IsDetached())
@@ -882,23 +989,29 @@ void ImmersiveModeControllerAsh::EnablePaintToLayer(bool enable) {
 
 void ImmersiveModeControllerAsh::LayoutBrowserRootView() {
   // Update the window caption buttons.
-  browser_view_->GetWidget()->non_client_view()->frame_view()->
-      ResetWindowControls();
-  browser_view_->frame()->GetRootView()->Layout();
+  widget_->non_client_view()->frame_view()->ResetWindowControls();
+  // Layout all views, including BrowserView.
+  widget_->GetRootView()->Layout();
 }
 
-void ImmersiveModeControllerAsh::OnSlideOpenAnimationCompleted() {
+void ImmersiveModeControllerAsh::OnSlideOpenAnimationCompleted(Layout layout) {
   DCHECK_EQ(SLIDING_OPEN, reveal_state_);
   reveal_state_ = REVEALED;
 
+  if (layout == LAYOUT_YES)
+    top_container_->parent()->Layout();
+
   // The user may not have moved the mouse since the reveal was initiated.
   // Update the revealed lock to reflect the mouse's current state.
-  UpdateMouseRevealedLock(true);
+  UpdateLocatedEventRevealedLock(NULL);
 }
 
 void ImmersiveModeControllerAsh::MaybeEndReveal(Animate animate) {
   if (!enabled_ || revealed_lock_count_ != 0)
     return;
+
+  if (animations_disabled_for_test_)
+    animate = ANIMATE_NO;
 
   // Callers with ANIMATE_NO expect this function to synchronously close the
   // top-of-window views.
@@ -907,9 +1020,6 @@ void ImmersiveModeControllerAsh::MaybeEndReveal(Animate animate) {
     return;
   }
 
-  // Visible anchored widgets keep the top-of-window views revealed.
-  DCHECK(anchored_widget_manager_->visible_anchored_widgets().empty());
-
   reveal_state_ = SLIDING_CLOSED;
   int duration_ms = GetAnimationDuration(animate);
   if (duration_ms > 0) {
@@ -917,13 +1027,10 @@ void ImmersiveModeControllerAsh::MaybeEndReveal(Animate animate) {
     // layers are available. This is a no-op for the top container.
     EnablePaintToLayer(true);
 
-    ui::Layer* top_container_layer = browser_view_->top_container()->layer();
-    gfx::Transform target_transform;
-    target_transform.Translate(0,
-        -top_container_layer->bounds().height() + kAnimationOffsetY);
-
-    DoAnimation(target_transform, duration_ms);
+    animation_->SetSlideDuration(duration_ms);
+    animation_->Hide();
   } else {
+    animation_->Reset(0);
     OnSlideClosedAnimationCompleted();
   }
 }
@@ -934,49 +1041,20 @@ void ImmersiveModeControllerAsh::OnSlideClosedAnimationCompleted() {
   // Layers aren't needed after animation completes.
   EnablePaintToLayer(false);
   // Update tabstrip for closed state.
-  browser_view_->tabstrip()->SetImmersiveStyle(true);
+  delegate_->SetImmersiveStyle(true);
   LayoutBrowserRootView();
 }
 
-void ImmersiveModeControllerAsh::DoAnimation(
-    const gfx::Transform& target_transform,
-    int duration_ms) {
-  StopObservingImplicitAnimations();
-  DoLayerAnimation(browser_view_->top_container()->layer(), target_transform,
-      duration_ms, this);
+bool ImmersiveModeControllerAsh::ShouldExitImmersiveFullscreen() const {
+  if (!native_window_)
+    return false;
 
-  typedef std::set<views::Widget*> WidgetSet;
-  const WidgetSet& visible_widgets =
-      anchored_widget_manager_->visible_anchored_widgets();
-  for (WidgetSet::const_iterator it = visible_widgets.begin();
-       it != visible_widgets.end(); ++it) {
-    // The anchored widget's bounds are set to the target bounds right when the
-    // animation starts. The transform is used to animate the widget's position.
-    // Using the target bounds allows us to "stay anchored" if other code
-    // changes the widget bounds in the middle of the animation. (This is the
-    // case if the fullscreen exit bubble type is changed during the immersive
-    // reveal animation).
-    DoLayerAnimation((*it)->GetNativeWindow()->layer(), gfx::Transform(),
-        duration_ms, NULL);
-  }
+  ui::WindowShowState show_state = static_cast<ui::WindowShowState>(
+      native_window_->GetProperty(aura::client::kShowStateKey));
+  return IsEnabled() &&
+      show_state != ui::SHOW_STATE_FULLSCREEN &&
+      show_state != ui::SHOW_STATE_MINIMIZED;
 }
-
-void ImmersiveModeControllerAsh::DoLayerAnimation(
-    ui::Layer* layer,
-    const gfx::Transform& target_transform,
-    int duration_ms,
-    ui::ImplicitAnimationObserver* observer) {
-  ui::ScopedLayerAnimationSettings settings(layer->GetAnimator());
-  settings.SetTweenType(ui::Tween::EASE_OUT);
-  settings.SetTransitionDuration(
-      base::TimeDelta::FromMilliseconds(duration_ms));
-  settings.SetPreemptionStrategy(
-      ui::LayerAnimator::IMMEDIATELY_ANIMATE_TO_NEW_TARGET);
-  if (observer)
-    settings.AddObserver(observer);
-  layer->SetTransform(target_transform);
-}
-
 
 ImmersiveModeControllerAsh::SwipeType ImmersiveModeControllerAsh::GetSwipeType(
     ui::GestureEvent* event) const {
@@ -993,10 +1071,31 @@ ImmersiveModeControllerAsh::SwipeType ImmersiveModeControllerAsh::GetSwipeType(
   return SWIPE_NONE;
 }
 
-bool ImmersiveModeControllerAsh::IsNearTopContainer(gfx::Point location) const {
-  gfx::Rect near_bounds =
-      browser_view_->top_container()->GetTargetBoundsInScreen();
+bool ImmersiveModeControllerAsh::ShouldHandleEvent(
+    const gfx::Point& location) const {
+  // All of the gestures that are of interest start in a region with left &
+  // right edges agreeing with |top_container_|. When CLOSED it is difficult to
+  // hit the bounds due to small size of the tab strip, so the hit target needs
+  // to be extended on the bottom, thus the inset call. Finally there may be a
+  // bezel sensor off screen logically above |top_container_| thus the test
+  // needs to include gestures starting above.
+  gfx::Rect near_bounds = top_container_->GetBoundsInScreen();
   if (reveal_state_ == CLOSED)
     near_bounds.Inset(gfx::Insets(0, 0, -kNearTopContainerDistance, 0));
-  return near_bounds.Contains(location);
+  return near_bounds.Contains(location) ||
+      ((location.y() < near_bounds.y()) &&
+       (location.x() >= near_bounds.x()) &&
+       (location.x() <= near_bounds.right()));
+}
+
+void ImmersiveModeControllerAsh::UpdatePreTargetHandler() {
+  if (!native_window_)
+    return;
+  aura::RootWindow* root_window = native_window_->GetRootWindow();
+  if (!root_window)
+    return;
+  if (observers_enabled_)
+    root_window->AddPreTargetHandler(this);
+  else
+    root_window->RemovePreTargetHandler(this);
 }

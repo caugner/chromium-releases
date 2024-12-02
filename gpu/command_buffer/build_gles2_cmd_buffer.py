@@ -342,11 +342,45 @@ _STATES = {
       },
     ],
   },
+  'Hint': {
+    'type': 'NamedParameter',
+    'func': 'Hint',
+    'states': [
+      {
+        'name': 'hint_generate_mipmap',
+        'type': 'GLenum',
+        'enum': 'GL_GENERATE_MIPMAP_HINT',
+        'default': 'GL_DONT_CARE'
+      },
+      {
+        'name': 'hint_fragment_shader_derivative',
+        'type': 'GLenum',
+        'enum': 'GL_FRAGMENT_SHADER_DERIVATIVE_HINT_OES',
+        'default': 'GL_DONT_CARE',
+        'extension_flag': 'oes_standard_derivatives'
+      }
+    ],
+  },
+  'PixelStore': {
+    'type': 'NamedParameter',
+    'func': 'PixelStorei',
+    'states': [
+      {
+        'name': 'pack_alignment',
+        'type': 'GLint',
+        'enum': 'GL_PACK_ALIGNMENT',
+        'default': '4'
+      },
+      {
+        'name': 'unpack_alignment',
+        'type': 'GLint',
+        'enum': 'GL_UNPACK_ALIGNMENT',
+        'default': '4'
+      }
+    ],
+  },
   # TODO: Consider implemenenting these states
-  # GL_GENERATE_MIPMAP_HINT
-  # GL_ACTIVE_TEXTURE,
-  # GL_PACK_ALIGNMENT,
-  # GL_UNPACK_ALIGNMENT
+  # GL_ACTIVE_TEXTURE
   'LineWidth': {
     'type': 'Normal',
     'func': 'LineWidth',
@@ -1306,6 +1340,32 @@ _FUNCTION_INFO = {
     'decoder_func': 'DoCopyTexSubImage2D',
     'defer_reads': True,
   },
+  'CreateImageCHROMIUM': {
+    'type': 'Manual',
+    'cmd_args': 'GLsizei width, GLsizei height, GLenum internalformat',
+    'result': ['GLuint'],
+    'client_test': False,
+    'gen_cmd': False,
+    'expectation': False,
+    'extension': True,
+    'chromium': True,
+  },
+  'DestroyImageCHROMIUM': {
+    'type': 'Manual',
+    'immediate': True,
+    'client_test': False,
+    'gen_cmd': False,
+    'extension': True,
+    'chromium': True,
+  },
+  'GetImageParameterivCHROMIUM': {
+    'type': 'Manual',
+    'client_test': False,
+    'gen_cmd': False,
+    'expectation': False,
+    'extension': True,
+    'chromium': True,
+  },
   'CreateProgram': {
     'type': 'Create',
     'client_test': False,
@@ -1363,7 +1423,10 @@ _FUNCTION_INFO = {
       '1': 'GL_INCR'
     },
   },
-  'Hint': {'decoder_func': 'DoHint'},
+  'Hint': {
+    'type': 'StateSetNamedParameter',
+    'state': 'Hint',
+  },
   'CullFace': {'type': 'StateSet', 'state': 'CullFace'},
   'FrontFace': {'type': 'StateSet', 'state': 'FrontFace'},
   'DepthFunc': {'type': 'StateSet', 'state': 'DepthFunc'},
@@ -1462,13 +1525,6 @@ _FUNCTION_INFO = {
   'Flush': {
     'impl_func': False,
     'decoder_func': 'DoFlush',
-  },
-  'ShallowFlushCHROMIUM': {
-    'impl_func': False,
-    'gen_cmd': False,
-    'extension': True,
-    'chromium': True,
-    'client_test': False,
   },
   'FramebufferRenderbuffer': {
     'decoder_func': 'DoFramebufferRenderbuffer',
@@ -1780,7 +1836,6 @@ _FUNCTION_INFO = {
     'extension': True,
     'chromium': True,
     'client_test': False,
-    'chromium': True,
   },
   'MapBufferSubDataCHROMIUM': {
     'gen_cmd': False,
@@ -1788,6 +1843,12 @@ _FUNCTION_INFO = {
     'chromium': True,
     'client_test': False,
     'pepper_interface': 'ChromiumMapSub',
+  },
+  'MapImageCHROMIUM': {
+    'gen_cmd': False,
+    'extension': True,
+    'chromium': True,
+    'client_test': False,
   },
   'MapTexSubImage2DCHROMIUM': {
     'gen_cmd': False,
@@ -1883,8 +1944,8 @@ _FUNCTION_INFO = {
     'expectation': False,
   },
   'SwapBuffers': {
-    'type': 'Custom',
     'impl_func': False,
+    'decoder_func': 'DoSwapBuffers',
     'unit_test': False,
     'client_test': False,
     'extension': True,
@@ -2015,7 +2076,6 @@ _FUNCTION_INFO = {
     'extension': True,
     'chromium': True,
     'client_test': False,
-    'chromium': True,
   },
   'UnmapBufferSubDataCHROMIUM': {
     'gen_cmd': False,
@@ -2023,6 +2083,12 @@ _FUNCTION_INFO = {
     'chromium': True,
     'client_test': False,
     'pepper_interface': 'ChromiumMapSub',
+  },
+  'UnmapImageCHROMIUM': {
+    'gen_cmd': False,
+    'extension': True,
+    'chromium': True,
+    'client_test': False,
   },
   'UnmapTexSubImage2DCHROMIUM': {
     'gen_cmd': False,
@@ -2288,6 +2354,20 @@ _FUNCTION_INFO = {
     'unit_test': False,
     'extension': True,
     'chromium': True,
+  },
+  'ShallowFinishCHROMIUM': {
+    'impl_func': False,
+    'gen_cmd': False,
+    'extension': True,
+    'chromium': True,
+    'client_test': False,
+  },
+  'ShallowFlushCHROMIUM': {
+    'impl_func': False,
+    'gen_cmd': False,
+    'extension': True,
+    'chromium': True,
+    'client_test': False,
   },
   'TraceBeginCHROMIUM': {
     'type': 'Custom',
@@ -3239,6 +3319,36 @@ class StateSetFrontBackHandler(TypeHandler):
     if not func.GetInfo("no_gl"):
       file.Write("    %s(%s);\n" %
                  (func.GetGLFunctionName(), func.MakeOriginalArgString("")))
+    file.Write("  }\n")
+
+
+class StateSetNamedParameter(TypeHandler):
+  """Handler for commands that set a state chosen with an enum parameter."""
+
+  def __init__(self):
+    TypeHandler.__init__(self)
+
+  def WriteHandlerImplementation(self, func, file):
+    """Overridden from TypeHandler."""
+    state_name = func.GetInfo('state')
+    state = _STATES[state_name]
+    states = state['states']
+    args = func.GetOriginalArgs()
+    num_args = len(args)
+    assert num_args == 2
+    file.Write("  switch (%s) {\n" % args[0].name)
+    for state in states:
+      file.Write("    case %s:\n" % state['enum'])
+      file.Write("      if (state_.%s != %s) {\n" %
+                 (state['name'], args[1].name))
+      file.Write("        state_.%s = %s;\n" % (state['name'], args[1].name))
+      if not func.GetInfo("no_gl"):
+        file.Write("        %s(%s);\n" %
+                   (func.GetGLFunctionName(), func.MakeOriginalArgString("")))
+      file.Write("      }\n")
+      file.Write("      break;\n")
+    file.Write("    default:\n")
+    file.Write("      NOTREACHED();\n")
     file.Write("  }\n")
 
 
@@ -6703,6 +6813,7 @@ class GLGenerator(object):
       'StateSetRGBAlpha': StateSetRGBAlphaHandler(),
       'StateSetFrontBack': StateSetFrontBackHandler(),
       'StateSetFrontBackSeparate': StateSetFrontBackSeparateHandler(),
+      'StateSetNamedParameter': StateSetNamedParameter(),
       'STRn': STRnHandler(),
       'Todo': TodoHandler(),
     }
@@ -6943,7 +7054,7 @@ bool %s::GetStateAs%s(
     GLenum pname, %s* params, GLsizei* num_written) const {
   switch (pname) {
 """ % (class_name, gl_type, gl_type))
-      for state_name in _STATES.keys():
+      for state_name in sorted(_STATES.keys()):
         state = _STATES[state_name]
         if 'enum' in state:
           file.Write("    case %s:\n" % state['enum'])
@@ -7022,6 +7133,13 @@ void ContextState::InitState() const {
           file.Write(
               "  gl%s(%s, %s);\n" %
               (state['func'], ('GL_FRONT', 'GL_BACK')[ndx], ", ".join(args)))
+      elif state['type'] == 'NamedParameter':
+        for item in state['states']:
+          if 'extension_flag' in item:
+            file.Write("  if (feature_info_->feature_flags().%s)\n  " %
+                       item['extension_flag'])
+          file.Write("  gl%s(%s, %s);\n" %
+                     (state['func'], item['enum'], item['name']))
       else:
         args = []
         for item in state['states']:
@@ -7187,6 +7305,15 @@ void GLES2DecoderTestBase::SetupInitStateExpectations() {
           file.Write(
               "  EXPECT_CALL(*gl_, %s(%s, %s))\n" %
               (state['func'], ('GL_FRONT', 'GL_BACK')[ndx], ", ".join(args)))
+          file.Write("      .Times(1)\n")
+          file.Write("      .RetiresOnSaturation();\n")
+      elif state['type'] == 'NamedParameter':
+        for item in state['states']:
+          if 'extension_flag' in item:
+            continue
+          file.Write(
+              "  EXPECT_CALL(*gl_, %s(%s, %s))\n" %
+              (state['func'], item['enum'], item['default']))
           file.Write("      .Times(1)\n")
           file.Write("      .RetiresOnSaturation();\n")
       else:
@@ -7602,6 +7729,8 @@ def main(argv):
       _ENUM_LISTS['GLState']['valid'].append(state['enum'])
     else:
       for item in state['states']:
+        if 'extension_flag' in item:
+          continue
         _ENUM_LISTS['GLState']['valid'].append(item['enum'])
   for capability in _CAPABILITY_FLAGS:
     _ENUM_LISTS['GLState']['valid'].append("GL_%s" % capability['name'].upper())

@@ -7,7 +7,7 @@
 #include "content/browser/geolocation/wifi_data_provider_chromeos.h"
 
 #include "base/bind.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chromeos/network/geolocation_handler.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -142,11 +142,11 @@ void WifiDataProviderChromeOs::ScheduleStart() {
 bool WifiDataProviderChromeOs::GetAccessPointData(
     WifiData::AccessPointDataSet* result) {
   chromeos::WifiAccessPointVector access_points;
-  if (!chromeos::GeolocationHandler::Get()->wifi_enabled())
+  if (!chromeos::NetworkHandler::Get()->geolocation_handler()->wifi_enabled())
     return false;
   int64 age_ms = 0;
-  if (!chromeos::GeolocationHandler::Get()->GetWifiAccessPoints(
-          &access_points, &age_ms)) {
+  if (!chromeos::NetworkHandler::Get()->geolocation_handler()->
+      GetWifiAccessPoints(&access_points, &age_ms)) {
     return false;
   }
   for (chromeos::WifiAccessPointVector::const_iterator i

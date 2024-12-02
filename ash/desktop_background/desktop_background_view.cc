@@ -17,7 +17,7 @@
 #include "ash/wm/property_util.h"
 #include "ash/wm/window_animations.h"
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "ui/aura/root_window.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/layer.h"
@@ -170,9 +170,11 @@ bool DesktopBackgroundView::OnMousePressed(const ui::MouseEvent& event) {
   return true;
 }
 
-void DesktopBackgroundView::ShowContextMenuForView(views::View* source,
-                                                   const gfx::Point& point) {
-  Shell::GetInstance()->ShowContextMenu(point);
+void DesktopBackgroundView::ShowContextMenuForView(
+    views::View* source,
+    const gfx::Point& point,
+    ui::MenuSourceType source_type) {
+  Shell::GetInstance()->ShowContextMenu(point, source_type);
 }
 
 views::Widget* CreateDesktopBackground(aura::RootWindow* root_window,
@@ -201,7 +203,7 @@ views::Widget* CreateDesktopBackground(aura::RootWindow* root_window,
   // 4. From an empty background, guest user logged in.
   if (wallpaper_delegate->ShouldShowInitialAnimation() ||
       root_window->GetProperty(kAnimatingDesktopController) ||
-      Shell::GetInstance()->session_state_delegate()->HasActiveUser()) {
+      Shell::GetInstance()->session_state_delegate()->NumberOfLoggedInUsers()) {
     views::corewm::SetWindowVisibilityAnimationTransition(
         desktop_widget->GetNativeView(), views::corewm::ANIMATE_SHOW);
   } else {

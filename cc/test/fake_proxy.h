@@ -5,7 +5,7 @@
 #ifndef CC_TEST_FAKE_PROXY_H_
 #define CC_TEST_FAKE_PROXY_H_
 
-#include "cc/base/thread.h"
+#include "base/single_thread_task_runner.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/proxy.h"
 
@@ -13,8 +13,10 @@ namespace cc {
 
 class FakeProxy : public Proxy {
  public:
-  explicit FakeProxy(scoped_ptr<Thread> impl_thread)
-      : Proxy(impl_thread.Pass()),
+  FakeProxy() : Proxy(NULL), layer_tree_host_(NULL) {}
+  explicit FakeProxy(
+      scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner)
+      : Proxy(impl_task_runner),
         layer_tree_host_(NULL) {}
 
   void SetLayerTreeHost(LayerTreeHost* host);
@@ -22,7 +24,7 @@ class FakeProxy : public Proxy {
   virtual bool CompositeAndReadback(void* pixels, gfx::Rect rect) OVERRIDE;
   virtual void FinishAllRendering() OVERRIDE {}
   virtual bool IsStarted() const OVERRIDE;
-  virtual void SetSurfaceReady() OVERRIDE {}
+  virtual void SetLayerTreeHostClientReady() OVERRIDE {}
   virtual void SetVisible(bool visible) OVERRIDE {}
   virtual void CreateAndInitializeOutputSurface() OVERRIDE;
   virtual const RendererCapabilities& GetRendererCapabilities() const OVERRIDE;

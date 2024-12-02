@@ -11,7 +11,7 @@
 
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/ui_export.h"
 
@@ -52,7 +52,7 @@ class ScopedPangoFontDescription {
 
 // Uses Pango to draw text onto |cr|. This is the public method for d
 void UI_EXPORT DrawTextOntoCairoSurface(cairo_t* cr,
-                                        const string16& text,
+                                        const base::string16& text,
                                         const gfx::Font& font,
                                         const gfx::Rect& bounds,
                                         const gfx::Rect& clip,
@@ -68,7 +68,7 @@ void UI_EXPORT DrawTextOntoCairoSurface(cairo_t* cr,
 // the |width| in PANGO_SCALE for RTL locale, the base |text_direction|,
 // alignment, ellipsis, word wrapping, resolution, etc.
 void SetupPangoLayout(PangoLayout* layout,
-                      const string16& text,
+                      const base::string16& text,
                       const gfx::Font& font,
                       int width,
                       base::i18n::TextDirection text_direction,
@@ -78,7 +78,7 @@ void SetupPangoLayout(PangoLayout* layout,
 // sets the font description based on |font_description|.
 void SetupPangoLayoutWithFontDescription(
     PangoLayout* layout,
-    const string16& text,
+    const base::string16& text,
     const std::string& font_description,
     int width,
     base::i18n::TextDirection text_direction,

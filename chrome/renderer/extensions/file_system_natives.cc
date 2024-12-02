@@ -9,33 +9,38 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/user_script_slave.h"
 #include "extensions/common/constants.h"
 #include "grit/renderer_resources.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebFileSystem.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebFileSystemType.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "webkit/fileapi/file_system_types.h"
-#include "webkit/fileapi/file_system_util.h"
+#include "third_party/WebKit/public/platform/WebFileSystem.h"
+#include "third_party/WebKit/public/platform/WebFileSystemType.h"
+#include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "webkit/common/fileapi/file_system_types.h"
+#include "webkit/common/fileapi/file_system_util.h"
 
 namespace extensions {
 
-FileSystemNatives::FileSystemNatives(v8::Handle<v8::Context> context)
+FileSystemNatives::FileSystemNatives(ChromeV8Context* context)
     : ObjectBackedNativeHandler(context) {
   RouteFunction("GetFileEntry",
       base::Bind(&FileSystemNatives::GetFileEntry, base::Unretained(this)));
   RouteFunction("GetIsolatedFileSystem",
       base::Bind(&FileSystemNatives::GetIsolatedFileSystem,
                  base::Unretained(this)));
+  RouteFunction("CrackIsolatedFileSystemName",
+      base::Bind(&FileSystemNatives::CrackIsolatedFileSystemName,
+                 base::Unretained(this)));
 }
 
-v8::Handle<v8::Value> FileSystemNatives::GetIsolatedFileSystem(
-    const v8::Arguments& args) {
+void FileSystemNatives::GetIsolatedFileSystem(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
   DCHECK(args.Length() == 1 || args.Length() == 2);
   DCHECK(args[0]->IsString());
   std::string file_system_id(*v8::String::Utf8Value(args[0]));
-  WebKit::WebFrame* webframe = WebKit::WebFrame::frameForContext(v8_context());
+  WebKit::WebFrame* webframe =
+      WebKit::WebFrame::frameForContext(context()->v8_context());
   DCHECK(webframe);
 
   GURL context_url =
@@ -58,14 +63,14 @@ v8::Handle<v8::Value> FileSystemNatives::GetIsolatedFileSystem(
       file_system_id,
       optional_root_name));
 
-  return webframe->createFileSystem(
+  args.GetReturnValue().Set(webframe->createFileSystem(
       WebKit::WebFileSystemTypeIsolated,
       WebKit::WebString::fromUTF8(name),
-      WebKit::WebString::fromUTF8(root));
+      WebKit::WebString::fromUTF8(root)));
 }
 
-v8::Handle<v8::Value> FileSystemNatives::GetFileEntry(
-    const v8::Arguments& args) {
+void FileSystemNatives::GetFileEntry(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
   DCHECK(args.Length() == 5);
   DCHECK(args[0]->IsString());
   std::string type_string = *v8::String::Utf8Value(args[0]->ToString());
@@ -73,7 +78,7 @@ v8::Handle<v8::Value> FileSystemNatives::GetFileEntry(
   bool is_valid_type = fileapi::GetFileSystemPublicType(type_string, &type);
   DCHECK(is_valid_type);
   if (is_valid_type == false) {
-    return v8::Undefined();
+    return;
   }
 
   DCHECK(args[1]->IsString());
@@ -88,14 +93,28 @@ v8::Handle<v8::Value> FileSystemNatives::GetFileEntry(
   DCHECK(args[4]->IsBoolean());
   bool is_directory = args[4]->BooleanValue();
 
-  WebKit::WebFrame* webframe = WebKit::WebFrame::frameForContext(v8_context());
+  WebKit::WebFrame* webframe =
+      WebKit::WebFrame::frameForContext(context()->v8_context());
   DCHECK(webframe);
-  return webframe->createFileEntry(
+  args.GetReturnValue().Set(webframe->createFileEntry(
       type,
       WebKit::WebString::fromUTF8(file_system_name),
       WebKit::WebString::fromUTF8(file_system_root_url),
       WebKit::WebString::fromUTF8(file_path_string),
-      is_directory);
+      is_directory));
+}
+
+void FileSystemNatives::CrackIsolatedFileSystemName(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
+  DCHECK_EQ(args.Length(), 1);
+  DCHECK(args[0]->IsString());
+  std::string filesystem_name = *v8::String::Utf8Value(args[0]->ToString());
+  std::string filesystem_id;
+  if (!fileapi::CrackIsolatedFileSystemName(filesystem_name, &filesystem_id))
+    return;
+
+  args.GetReturnValue().Set(
+      v8::String::New(filesystem_id.c_str(), filesystem_id.size()));
 }
 
 }  // namespace extensions

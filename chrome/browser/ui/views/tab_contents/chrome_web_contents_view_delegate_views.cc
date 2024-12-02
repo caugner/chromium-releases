@@ -9,8 +9,8 @@
 #include "chrome/browser/ui/tab_contents/chrome_web_contents_view_delegate.h"
 #include "chrome/browser/ui/views/sad_tab_view.h"
 #include "chrome/browser/ui/views/tab_contents/render_view_context_menu_views.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/common/chrome_switches.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -29,6 +29,8 @@
 #else
 #include "chrome/browser/ui/views/tab_contents/web_drag_bookmark_handler_win.h"
 #endif
+
+using web_modal::WebContentsModalDialogManager;
 
 ChromeWebContentsViewDelegateViews::ChromeWebContentsViewDelegateViews(
     content::WebContents* web_contents)
@@ -125,8 +127,7 @@ void ChromeWebContentsViewDelegateViews::RestoreFocus() {
 }
 
 void ChromeWebContentsViewDelegateViews::ShowContextMenu(
-    const content::ContextMenuParams& params,
-    content::ContextMenuSourceType type) {
+    const content::ContextMenuParams& params) {
   // Menus need a Widget to work. If we're not the active tab we won't
   // necessarily be in a widget.
   views::Widget* top_level_widget = GetTopLevelWidget();
@@ -162,8 +163,9 @@ void ChromeWebContentsViewDelegateViews::ShowContextMenu(
 
   // Enable recursive tasks on the message loop so we can get updates while
   // the context menu is being displayed.
-  MessageLoop::ScopedNestableTaskAllower allow(MessageLoop::current());
-  context_menu_->RunMenuAt(top_level_widget, screen_point, type);
+  base::MessageLoop::ScopedNestableTaskAllower allow(
+      base::MessageLoop::current());
+  context_menu_->RunMenuAt(top_level_widget, screen_point, params.source_type);
 }
 
 void ChromeWebContentsViewDelegateViews::SizeChanged(const gfx::Size& size) {

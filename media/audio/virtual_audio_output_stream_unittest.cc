@@ -5,7 +5,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/message_loop.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "media/audio/audio_manager.h"
@@ -27,10 +27,10 @@ const AudioParameters kParams(
 class MockVirtualAudioInputStream : public VirtualAudioInputStream {
  public:
   explicit MockVirtualAudioInputStream(
-      const scoped_refptr<base::MessageLoopProxy>& message_loop)
+      const scoped_refptr<base::MessageLoopProxy>& worker_loop)
       : VirtualAudioInputStream(
             kParams,
-            message_loop,
+            worker_loop,
             base::Bind(&base::DeletePointer<VirtualAudioInputStream>)) {}
   ~MockVirtualAudioInputStream() {}
 
@@ -85,10 +85,10 @@ TEST_F(VirtualAudioOutputStreamTest, StartStopStartStop) {
           base::IgnoreResult(&MockVirtualAudioInputStream::Open),
           base::Unretained(input_stream)));
 
-  VirtualAudioOutputStream* const output_stream =
-      new VirtualAudioOutputStream(
-          kParams, audio_message_loop(), input_stream,
-          base::Bind(&base::DeletePointer<VirtualAudioOutputStream>));
+  VirtualAudioOutputStream* const output_stream = new VirtualAudioOutputStream(
+      kParams,
+      input_stream,
+      base::Bind(&base::DeletePointer<VirtualAudioOutputStream>));
 
   EXPECT_CALL(*input_stream, AddOutputStream(output_stream, _))
       .Times(kCycles);

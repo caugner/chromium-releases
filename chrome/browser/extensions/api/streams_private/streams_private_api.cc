@@ -15,6 +15,9 @@
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/stream_handle.h"
 
 namespace keys = extension_input_module_constants;
@@ -46,14 +49,20 @@ StreamsPrivateAPI::~StreamsPrivateAPI() {
 void StreamsPrivateAPI::ExecuteMimeTypeHandler(
     const std::string& extension_id,
     const content::WebContents* web_contents,
-    scoped_ptr<content::StreamHandle> stream) {
+    scoped_ptr<content::StreamHandle> stream,
+    int64 expected_content_size) {
   // Create the event's arguments value.
-  scoped_ptr<ListValue> event_args(new ListValue());
+  scoped_ptr<base::ListValue> event_args(new base::ListValue());
   event_args->Append(new base::StringValue(stream->GetMimeType()));
   event_args->Append(new base::StringValue(stream->GetOriginalURL().spec()));
   event_args->Append(new base::StringValue(stream->GetURL().spec()));
   event_args->Append(
       new base::FundamentalValue(ExtensionTabUtil::GetTabId(web_contents)));
+
+  int size = -1;
+  if (expected_content_size <= INT_MAX)
+    size = expected_content_size;
+  event_args->Append(new base::FundamentalValue(size));
 
   scoped_ptr<Event> event(new Event(events::kOnExecuteMimeTypeHandler,
                                     event_args.Pass()));

@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/views/website_settings/website_settings_popup_view.h"
 
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -610,17 +610,17 @@ views::View* WebsiteSettingsPopupView::CreateConnectionTab() {
   pane->AddChildView(identity_info_content_);
 
   // Add connection section.
-  pane->AddChildView(new views::Separator());
+  pane->AddChildView(new views::Separator(views::Separator::HORIZONTAL));
   connection_info_content_ = new views::View();
   pane->AddChildView(connection_info_content_);
 
   // Add page info section.
-  pane->AddChildView(new views::Separator());
+  pane->AddChildView(new views::Separator(views::Separator::HORIZONTAL));
   page_info_content_ = new views::View();
   pane->AddChildView(page_info_content_);
 
   // Add help center link.
-  pane->AddChildView(new views::Separator());
+  pane->AddChildView(new views::Separator(views::Separator::HORIZONTAL));
   help_center_link_ = new views::Link(
       l10n_util::GetStringUTF16(IDS_PAGE_INFO_HELP_CENTER_LINK));
   help_center_link_->set_listener(this);

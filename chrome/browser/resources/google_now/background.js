@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// 'use strict'; TODO(vadimt): Uncomment once crbug.com/237617 is fixed.
+'use strict';
 
 /**
  * @fileoverview The event page for Google Now for Chrome implementation.
@@ -23,23 +23,17 @@
 // TODO(vadimt): Honor the flag the enables Google Now integration.
 // TODO(vadimt): Figure out the final values of the constants.
 // TODO(vadimt): Remove 'console' calls.
-// TODO(vadimt): Consider sending JS stacks for unexpected exceptions (including
-// ones from verify()), unfinished and infinite tasks, chrome.* API errors and
+// TODO(vadimt): Consider sending JS stacks for chrome.* API errors and
 // malformed server responses.
-
-// TODO(vadimt): Figure out the server name. Use it in the manifest and for
-// NOTIFICATION_CARDS_URL. Meanwhile, to use the feature, you need to manually
-// set the server name via local storage.
-/**
- * URL to retrieve notification cards.
- */
-var NOTIFICATION_CARDS_URL = localStorage['server_url'];
 
 /**
  * Standard response code for successful HTTP requests. This is the only success
  * code the server will send.
  */
 var HTTP_OK = 200;
+
+var HTTP_UNAUTHORIZED = 401;
+var HTTP_FORBIDDEN = 403;
 
 /**
  * Initial period for polling for Google Now Notifications cards to use when the
@@ -53,31 +47,43 @@ var INITIAL_POLLING_PERIOD_SECONDS = 5 * 60;  // 5 minutes
  */
 var MAXIMUM_POLLING_PERIOD_SECONDS = 60 * 60;  // 1 hour
 
-var UPDATE_NOTIFICATIONS_ALARM_NAME = 'UPDATE';
+/**
+ * Initial period for retrying the server request for dismissing cards.
+ */
+var INITIAL_RETRY_DISMISS_PERIOD_SECONDS = 60;  // 1 minute
 
 /**
- * Period for retrying the server request for dismissing cards.
+ * Maximum period for retrying the server request for dismissing cards.
  */
-var RETRY_DISMISS_PERIOD_SECONDS = 60;  // 1 minute
-
-var RETRY_DISMISS_ALARM_NAME = 'RETRY_DISMISS';
+var MAXIMUM_RETRY_DISMISS_PERIOD_SECONDS = 60 * 60;  // 1 hour
 
 /**
  * Time we keep dismissals after successful server dismiss requests.
  */
 var DISMISS_RETENTION_TIME_MS = 20 * 60 * 1000;  // 20 minutes
 
-var storage = chrome.storage.local;
-
 /**
  * Names for tasks that can be created by the extension.
  */
 var UPDATE_CARDS_TASK_NAME = 'update-cards';
 var DISMISS_CARD_TASK_NAME = 'dismiss-card';
-var CARD_CLICKED_TASK_NAME = 'card-clicked';
 var RETRY_DISMISS_TASK_NAME = 'retry-dismiss';
 
 var LOCATION_WATCH_NAME = 'location-watch';
+
+var WELCOME_TOAST_NOTIFICATION_ID = 'enable-now-toast';
+
+/**
+ * The indices of the buttons that are displayed on the welcome toast.
+ * @enum {number}
+ */
+var ToastButtonIndex = {YES: 0, NO: 1};
+
+/**
+ * The action that the user performed on the welcome toast.
+ * @enum {number}
+ */
+var ToastOptionResponse = {CHOSE_YES: 1, CHOSE_NO: 2};
 
 /**
  * Checks if a new task can't be scheduled when another task is already
@@ -109,9 +115,12 @@ function areTasksConflicting(newTaskName, scheduledTaskName) {
 var tasks = buildTaskManager(areTasksConflicting);
 
 // Add error processing to API calls.
+tasks.instrumentApiFunction(chrome.identity, 'getAuthToken', 1);
+tasks.instrumentApiFunction(chrome.identity, 'removeCachedAuthToken', 1);
 tasks.instrumentApiFunction(chrome.location.onLocationUpdate, 'addListener', 0);
 tasks.instrumentApiFunction(chrome.notifications, 'create', 2);
 tasks.instrumentApiFunction(chrome.notifications, 'update', 2);
+tasks.instrumentApiFunction(chrome.notifications, 'getAll', 0);
 tasks.instrumentApiFunction(
     chrome.notifications.onButtonClicked, 'addListener', 0);
 tasks.instrumentApiFunction(chrome.notifications.onClicked, 'addListener', 0);
@@ -120,6 +129,17 @@ tasks.instrumentApiFunction(chrome.runtime.onInstalled, 'addListener', 0);
 tasks.instrumentApiFunction(chrome.runtime.onStartup, 'addListener', 0);
 tasks.instrumentApiFunction(chrome.tabs, 'create', 1);
 tasks.instrumentApiFunction(storage, 'get', 1);
+
+var updateCardsAttempts = buildAttemptManager(
+    'cards-update',
+    requestLocation,
+    INITIAL_POLLING_PERIOD_SECONDS,
+    MAXIMUM_POLLING_PERIOD_SECONDS);
+var dismissalAttempts = buildAttemptManager(
+    'dismiss',
+    retryPendingDismissals,
+    INITIAL_RETRY_DISMISS_PERIOD_SECONDS,
+    MAXIMUM_RETRY_DISMISS_PERIOD_SECONDS);
 
 /**
  * Diagnostic event identifier.
@@ -131,7 +151,9 @@ var DiagnosticEvent = {
   CARDS_PARSE_SUCCESS: 2,
   DISMISS_REQUEST_TOTAL: 3,
   DISMISS_REQUEST_SUCCESS: 4,
-  EVENTS_TOTAL: 5  // EVENTS_TOTAL is not an event; all new events need to be
+  LOCATION_REQUEST: 5,
+  LOCATION_UPDATE: 6,
+  EVENTS_TOTAL: 7  // EVENTS_TOTAL is not an event; all new events need to be
                    // added before it.
 };
 
@@ -152,25 +174,66 @@ function recordEvent(event) {
 }
 
 /**
+ * Adds authorization behavior to the request.
+ * @param {XMLHttpRequest} request Server request.
+ * @param {function(boolean)} callbackBoolean Completion callback with 'success'
+ *     parameter.
+ */
+function setAuthorization(request, callbackBoolean) {
+  tasks.debugSetStepName('setAuthorization-getAuthToken');
+  chrome.identity.getAuthToken({interactive: false}, function(token) {
+    var errorMessage =
+        chrome.runtime.lastError && chrome.runtime.lastError.message;
+    console.log('setAuthorization: error=' + errorMessage +
+                ', token=' + (token && 'non-empty'));
+    if (chrome.runtime.lastError || !token) {
+      callbackBoolean(false);
+      return;
+    }
+
+    request.setRequestHeader('Authorization', 'Bearer ' + token);
+
+    // Instrument onloadend to remove stale auth tokens.
+    var originalOnLoadEnd = request.onloadend;
+    request.onloadend = tasks.wrapCallback(function(event) {
+      if (request.status == HTTP_FORBIDDEN ||
+          request.status == HTTP_UNAUTHORIZED) {
+        tasks.debugSetStepName('setAuthorization-removeCachedAuthToken');
+        chrome.identity.removeCachedAuthToken({token: token}, function() {
+          // After purging the token cache, call getAuthToken() again to let
+          // Chrome know about the problem with the token.
+          chrome.identity.getAuthToken({interactive: false}, function() {});
+          originalOnLoadEnd(event);
+        });
+      } else {
+        originalOnLoadEnd(event);
+      }
+    });
+
+    callbackBoolean(true);
+  });
+}
+
+/**
  * Shows a notification and remembers information associated with it.
  * @param {Object} card Google Now card represented as a set of parameters for
  *     showing a Chrome notification.
  * @param {Object} notificationsData Map from notification id to the data
  *     associated with a notification.
- * @param {number} previousVersion The version of the shown card with this id,
- *     if it exists, undefined otherwise.
+ * @param {number=} opt_previousVersion The version of the shown card with this
+ *     id, if it exists, undefined otherwise.
  */
-function showNotification(card, notificationsData, previousVersion) {
+function showNotification(card, notificationsData, opt_previousVersion) {
   console.log('showNotification ' + JSON.stringify(card) + ' ' +
-             previousVersion);
+             opt_previousVersion);
 
   if (typeof card.version != 'number') {
     console.error('card.version is not a number');
     // Fix card version.
-    card.version = previousVersion !== undefined ? previousVersion : 0;
+    card.version = opt_previousVersion !== undefined ? opt_previousVersion : 0;
   }
 
-  if (previousVersion !== card.version) {
+  if (opt_previousVersion !== card.version) {
     try {
       // Delete a notification with the specified id if it already exists, and
       // then create a notification.
@@ -242,68 +305,79 @@ function parseAndShowNotificationCards(response, callback) {
   }
 
   tasks.debugSetStepName('parseAndShowNotificationCards-storage-get');
-  storage.get(['activeNotifications', 'recentDismissals'], function(items) {
+  storage.get(['notificationsData', 'recentDismissals'], function(items) {
     console.log('parseAndShowNotificationCards-get ' + JSON.stringify(items));
+    items.notificationsData = items.notificationsData || {};
+    items.recentDismissals = items.recentDismissals || {};
 
-    // Build a set of non-expired recent dismissals. It will be used for
-    // client-side filtering of cards.
-    var updatedRecentDismissals = {};
-    var currentTimeMs = Date.now();
-    for (var notificationId in items.recentDismissals) {
-      if (currentTimeMs - items.recentDismissals[notificationId] <
-          DISMISS_RETENTION_TIME_MS) {
-        updatedRecentDismissals[notificationId] =
-            items.recentDismissals[notificationId];
+    tasks.debugSetStepName(
+        'parseAndShowNotificationCards-notifications-getAll');
+    chrome.notifications.getAll(function(notifications) {
+      console.log('parseAndShowNotificationCards-getAll ' +
+          JSON.stringify(notifications));
+      // TODO(vadimt): Figure out what to do when notifications are disabled for
+      // our extension.
+      notifications = notifications || {};
+
+      // Build a set of non-expired recent dismissals. It will be used for
+      // client-side filtering of cards.
+      var updatedRecentDismissals = {};
+      var currentTimeMs = Date.now();
+      for (var notificationId in items.recentDismissals) {
+        if (currentTimeMs - items.recentDismissals[notificationId] <
+            DISMISS_RETENTION_TIME_MS) {
+          updatedRecentDismissals[notificationId] =
+              items.recentDismissals[notificationId];
+        }
       }
-    }
 
-    // Mark existing notifications that received an update in this server
-    // response.
-    for (var i = 0; i < cards.length; ++i) {
-      var notificationId = cards[i].notificationId;
-      if (!(notificationId in updatedRecentDismissals) &&
-          notificationId in items.activeNotifications) {
-        items.activeNotifications[notificationId].hasUpdate = true;
+      // Mark existing notifications that received an update in this server
+      // response.
+      var updatedNotifications = {};
+
+      for (var i = 0; i < cards.length; ++i) {
+        var notificationId = cards[i].notificationId;
+        if (!(notificationId in updatedRecentDismissals) &&
+            notificationId in notifications) {
+          updatedNotifications[notificationId] = true;
+        }
       }
-    }
 
-    // Delete notifications that didn't receive an update.
-    for (var notificationId in items.activeNotifications) {
-      console.log('parseAndShowNotificationCards-delete-check ' +
-                  notificationId);
-      if (!items.activeNotifications[notificationId].hasUpdate) {
-        console.log('parseAndShowNotificationCards-delete ' + notificationId);
-        chrome.notifications.clear(
-            notificationId,
-            function() {});
+      // Delete notifications that didn't receive an update.
+      for (var notificationId in notifications) {
+        console.log('parseAndShowNotificationCards-delete-check ' +
+                    notificationId);
+        if (!(notificationId in updatedNotifications)) {
+          console.log('parseAndShowNotificationCards-delete ' + notificationId);
+          chrome.notifications.clear(
+              notificationId,
+              function() {});
+        }
       }
-    }
 
-    recordEvent(DiagnosticEvent.CARDS_PARSE_SUCCESS);
+      recordEvent(DiagnosticEvent.CARDS_PARSE_SUCCESS);
 
-    // Create/update notifications and store their new properties.
-    var notificationsData = {};
-    for (var i = 0; i < cards.length; ++i) {
-      var card = cards[i];
-      if (!(card.notificationId in updatedRecentDismissals)) {
-        var activeNotification = items.activeNotifications[card.notificationId];
-        showNotification(card,
-                         notificationsData,
-                         activeNotification && activeNotification.version);
+      // Create/update notifications and store their new properties.
+      var newNotificationsData = {};
+      for (var i = 0; i < cards.length; ++i) {
+        var card = cards[i];
+        if (!(card.notificationId in updatedRecentDismissals)) {
+          var notificationData = items.notificationsData[card.notificationId];
+          var previousVersion = notifications[card.notificationId] &&
+                                notificationData &&
+                                notificationData.previousVersion;
+          showNotification(card, newNotificationsData, previousVersion);
+        }
       }
-    }
 
-    scheduleNextUpdate(parsedResponse.expiration_timestamp_seconds);
+      updateCardsAttempts.start(parsedResponse.expiration_timestamp_seconds);
 
-    // Now that we got a valid response from the server, reset the retry period
-    // to the initial value. This retry period will be used the next time we
-    // fail to get the server-provided period.
-    storage.set({
-      retryDelaySeconds: INITIAL_POLLING_PERIOD_SECONDS,
-      activeNotifications: notificationsData,
-      recentDismissals: updatedRecentDismissals
+      storage.set({
+        notificationsData: newNotificationsData,
+        recentDismissals: updatedRecentDismissals
+      });
+      callback();
     });
-    callback();
   });
 }
 
@@ -315,6 +389,12 @@ function parseAndShowNotificationCards(response, callback) {
 function requestNotificationCards(position, callback) {
   console.log('requestNotificationCards ' + JSON.stringify(position) +
       ' from ' + NOTIFICATION_CARDS_URL);
+
+  if (!NOTIFICATION_CARDS_URL) {
+    callback();
+    return;
+  }
+
   recordEvent(DiagnosticEvent.REQUEST_FOR_CARDS_TOTAL);
 
   // TODO(vadimt): Should we use 'q' as the parameter name?
@@ -323,11 +403,9 @@ function requestNotificationCards(position, callback) {
       ',' + position.coords.longitude +
       ',' + position.coords.accuracy;
 
-  // TODO(vadimt): Figure out how to send user's identity to the server.
-  var request = new XMLHttpRequest();
+  var request = buildServerRequest('notifications');
 
-  request.responseType = 'text';
-  request.onloadend = tasks.wrapCallback(function(event) {
+  request.onloadend = function(event) {
     console.log('requestNotificationCards-onloadend ' + request.status);
     if (request.status == HTTP_OK) {
       recordEvent(DiagnosticEvent.REQUEST_FOR_CARDS_SUCCESS);
@@ -335,15 +413,16 @@ function requestNotificationCards(position, callback) {
     } else {
       callback();
     }
-  });
+  };
 
-  request.open(
-      'POST',
-      NOTIFICATION_CARDS_URL + '/notifications',
-      true);
-  request.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
-  tasks.debugSetStepName('requestNotificationCards-send-request');
-  request.send(requestParameters);
+  setAuthorization(request, function(success) {
+    if (success) {
+      tasks.debugSetStepName('requestNotificationCards-send-request');
+      request.send(requestParameters);
+    } else {
+      callback();
+    }
+  });
 }
 
 /**
@@ -351,6 +430,7 @@ function requestNotificationCards(position, callback) {
  */
 function requestLocation() {
   console.log('requestLocation');
+  recordEvent(DiagnosticEvent.LOCATION_REQUEST);
   // TODO(vadimt): Figure out location request options.
   chrome.location.watchLocation(LOCATION_WATCH_NAME, {});
 }
@@ -366,23 +446,7 @@ function updateNotificationsCards(position) {
       ' @' + new Date());
   tasks.add(UPDATE_CARDS_TASK_NAME, function(callback) {
     console.log('updateNotificationsCards-task-begin');
-    tasks.debugSetStepName('updateNotificationsCards-get-retryDelaySeconds');
-    storage.get('retryDelaySeconds', function(items) {
-      console.log('updateNotificationsCards-get-retryDelaySeconds ' +
-                  JSON.stringify(items));
-      // Immediately schedule the update after the current retry period. Then,
-      // we'll use update time from the server if available.
-      scheduleNextUpdate(items.retryDelaySeconds);
-
-      // TODO(vadimt): Consider interrupting waiting for the next update if we
-      // detect that the network conditions have changed. Also, decide whether
-      // the exponential backoff is needed both when we are offline and when
-      // there are failures on the server side.
-      var newRetryDelaySeconds =
-          Math.min(items.retryDelaySeconds * 2 * (1 + 0.2 * Math.random()),
-                   MAXIMUM_POLLING_PERIOD_SECONDS);
-      storage.set({retryDelaySeconds: newRetryDelaySeconds});
-
+    updateCardsAttempts.planForNext(function() {
       processPendingDismissals(function(success) {
         if (success) {
           // The cards are requested only if there are no unsent dismissals.
@@ -411,23 +475,23 @@ function requestCardDismissal(
   // Send a dismiss request to the server.
   var requestParameters = 'id=' + notificationId +
                           '&dismissalAge=' + (Date.now() - dismissalTimeMs);
-  var request = new XMLHttpRequest();
-  request.responseType = 'text';
-  request.onloadend = tasks.wrapCallback(function(event) {
+  var request = buildServerRequest('dismiss');
+  request.onloadend = function(event) {
     console.log('requestDismissingCard-onloadend ' + request.status);
     if (request.status == HTTP_OK)
       recordEvent(DiagnosticEvent.DISMISS_REQUEST_SUCCESS);
 
     callbackBoolean(request.status == HTTP_OK);
-  });
+  };
 
-  request.open(
-      'POST',
-      NOTIFICATION_CARDS_URL + '/dismiss',
-      true);
-  request.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
-  tasks.debugSetStepName('requestCardDismissal-send-request');
-  request.send(requestParameters);
+  setAuthorization(request, function(success) {
+    if (success) {
+      tasks.debugSetStepName('requestCardDismissal-send-request');
+      request.send(requestParameters);
+    } else {
+      callbackBoolean(false);
+    }
+  });
 }
 
 /**
@@ -440,6 +504,9 @@ function processPendingDismissals(callbackBoolean) {
   storage.get(['pendingDismissals', 'recentDismissals'], function(items) {
     console.log('processPendingDismissals-storage-get ' +
                 JSON.stringify(items));
+    items.pendingDismissals = items.pendingDismissals || [];
+    items.recentDismissals = items.recentDismissals || {};
+
     var dismissalsChanged = false;
 
     function onFinish(success) {
@@ -454,7 +521,7 @@ function processPendingDismissals(callbackBoolean) {
 
     function doProcessDismissals() {
       if (items.pendingDismissals.length == 0) {
-        chrome.alarms.clear(RETRY_DISMISS_ALARM_NAME);
+        dismissalAttempts.stop();
         onFinish(true);
         return;
       }
@@ -484,7 +551,9 @@ function processPendingDismissals(callbackBoolean) {
  */
 function retryPendingDismissals() {
   tasks.add(RETRY_DISMISS_TASK_NAME, function(callback) {
-    processPendingDismissals(function(success) { callback(); });
+    dismissalAttempts.planForNext(function() {
+      processPendingDismissals(function(success) { callback(); });
+     });
   });
 }
 
@@ -495,29 +564,54 @@ function retryPendingDismissals() {
  *     the clicked area from the button action URLs info.
  */
 function onNotificationClicked(notificationId, selector) {
-  tasks.add(CARD_CLICKED_TASK_NAME, function(callback) {
-    tasks.debugSetStepName('onNotificationClicked-get-activeNotifications');
-    storage.get('activeNotifications', function(items) {
-      var actionUrls = items.activeNotifications[notificationId].actionUrls;
-      if (typeof actionUrls != 'object') {
-        callback();
-        return;
-      }
+  storage.get('notificationsData', function(items) {
+    items.notificationsData = items.notificationsData || {};
 
-      var url = selector(actionUrls);
+    var notificationData = items.notificationsData[notificationId];
 
-      if (typeof url != 'string') {
-        callback();
-        return;
-      }
+    if (!notificationData) {
+      // 'notificationsData' in storage may not match the actual list of
+      // notifications.
+      return;
+    }
 
-      chrome.tabs.create({url: url}, function(tab) {
-        if (!tab)
-          chrome.windows.create({url: url});
-      });
-      callback();
+    var actionUrls = notificationData.actionUrls;
+    if (typeof actionUrls != 'object') {
+      return;
+    }
+
+    var url = selector(actionUrls);
+
+    if (typeof url != 'string')
+      return;
+
+    chrome.tabs.create({url: url}, function(tab) {
+      if (!tab)
+        chrome.windows.create({url: url});
     });
   });
+}
+
+/**
+ * Responds to a click of one of the buttons on the welcome toast.
+ * @param {number} buttonIndex The index of the button which was clicked.
+ */
+function onToastNotificationClicked(buttonIndex) {
+  if (buttonIndex == ToastButtonIndex.YES) {
+    chrome.metricsPrivate.recordUserAction('GoogleNow.WelcomeToastClickedYes');
+    storage.set({toastState: ToastOptionResponse.CHOSE_YES});
+
+    // TODO(zturner): Update chrome geolocation setting once the settings
+    // API is in place.
+    startPollingCards();
+  } else {
+    chrome.metricsPrivate.recordUserAction('GoogleNow.WelcomeToastClickedNo');
+    storage.set({toastState: ToastOptionResponse.CHOSE_NO});
+  }
+
+  chrome.notifications.clear(
+      WELCOME_TOAST_NOTIFICATION_ID,
+      function(wasCleared) {});
 }
 
 /**
@@ -529,18 +623,19 @@ function onNotificationClosed(notificationId, byUser) {
   if (!byUser)
     return;
 
+  if (notificationId == WELCOME_TOAST_NOTIFICATION_ID) {
+    // Even though they only closed the notification without clicking no, treat
+    // it as though they clicked No anwyay, and don't show the toast again.
+    chrome.metricsPrivate.recordUserAction('GoogleNow.WelcomeToastDismissed');
+    storage.set({toastState: ToastOptionResponse.CHOSE_NO});
+    return;
+  }
+
+  // At this point we are guaranteed that the notification is a now card.
   chrome.metricsPrivate.recordUserAction('GoogleNow.Dismissed');
 
   tasks.add(DISMISS_CARD_TASK_NAME, function(callback) {
-    // Schedule retrying dismissing until all dismissals go through.
-    // TODO(vadimt): Implement exponential backoff and unify it with getting
-    // cards.
-    var alarmInfo = {
-      delayInMinutes: RETRY_DISMISS_PERIOD_SECONDS / 60,
-      periodInMinutes: RETRY_DISMISS_PERIOD_SECONDS / 60
-    };
-
-    chrome.alarms.create(RETRY_DISMISS_ALARM_NAME, alarmInfo);
+    dismissalAttempts.start();
 
     // Deleting the notification in case it was re-added while this task was
     // scheduled, waiting for execution.
@@ -550,6 +645,8 @@ function onNotificationClosed(notificationId, byUser) {
 
     tasks.debugSetStepName('onNotificationClosed-get-pendingDismissals');
     storage.get('pendingDismissals', function(items) {
+      items.pendingDismissals = items.pendingDismissals || [];
+
       var dismissal = {
         notificationId: notificationId,
         time: Date.now()
@@ -562,44 +659,59 @@ function onNotificationClosed(notificationId, byUser) {
 }
 
 /**
- * Schedules next update for notification cards.
- * @param {int} delaySeconds Length of time in seconds after which the alarm
- *     event should fire.
+ * Initializes the polling system to start monitoring location and fetching
+ * cards.
  */
-function scheduleNextUpdate(delaySeconds) {
-  console.log('scheduleNextUpdate ' + delaySeconds);
-  // Schedule an alarm after the specified delay. 'periodInMinutes' is for the
-  // case when we fail to re-register the alarm.
-  var alarmInfo = {
-    delayInMinutes: delaySeconds / 60,
-    periodInMinutes: MAXIMUM_POLLING_PERIOD_SECONDS / 60
-  };
+function startPollingCards() {
+  // Create an update timer for a case when for some reason location request
+  // gets stuck.
+  updateCardsAttempts.start(MAXIMUM_POLLING_PERIOD_SECONDS);
 
-  chrome.alarms.create(UPDATE_NOTIFICATIONS_ALARM_NAME, alarmInfo);
+  requestLocation();
 }
 
 /**
  * Initializes the event page on install or on browser startup.
  */
 function initialize() {
-  var initialStorage = {
-    activeNotifications: {},
-    recentDismissals: {},
-    retryDelaySeconds: INITIAL_POLLING_PERIOD_SECONDS
+  storage.get('toastState', function(items) {
+    // The toast state might be undefined (e.g. not in storage yet) if this is
+    // the first time ever being prompted.
+
+    // TODO(zturner): Get the value of isGeolocationEnabled from the settings
+    // api and additionally make sure it is true.
+    if (!items.toastState) {
+      showWelcomeToast();
+    } else if (items.toastState == ToastOptionResponse.CHOSE_YES) {
+      startPollingCards();
+    }
+  });
+}
+
+/**
+ * Displays a toast to the user asking if they want to opt in to receiving
+ * Google Now cards.
+ */
+function showWelcomeToast() {
+  // TODO(zturner): Localize this once the component extension localization
+  // api is complete.
+  // TODO(zturner): Add icons.
+  var buttons = [{title: 'Yes'}, {title: 'No'}];
+  var options = {
+    type: 'basic',
+    title: 'Enable Google Now Cards',
+    message: 'Would you like to be shown Google Now cards?',
+    iconUrl: 'http://www.gstatic.com/googlenow/chrome/default.png',
+    priority: 2,
+    buttons: buttons
   };
-  storage.set(initialStorage);
-
-  // Create an update timer for a case when for some reason location request
-  // gets stuck.
-  scheduleNextUpdate(MAXIMUM_POLLING_PERIOD_SECONDS);
-
-  requestLocation();
+  chrome.notifications.create(WELCOME_TOAST_NOTIFICATION_ID, options,
+      function(notificationId) {});
 }
 
 chrome.runtime.onInstalled.addListener(function(details) {
   console.log('onInstalled ' + JSON.stringify(details));
   if (details.reason != 'chrome_update') {
-    storage.set({pendingDismissals: []});
     initialize();
   }
 });
@@ -607,13 +719,6 @@ chrome.runtime.onInstalled.addListener(function(details) {
 chrome.runtime.onStartup.addListener(function() {
   console.log('onStartup');
   initialize();
-});
-
-chrome.alarms.onAlarm.addListener(function(alarm) {
-  if (alarm.name == UPDATE_NOTIFICATIONS_ALARM_NAME)
-    requestLocation();
-  else if (alarm.name == RETRY_DISMISS_ALARM_NAME)
-    retryPendingDismissals();
 });
 
 chrome.notifications.onClicked.addListener(
@@ -626,16 +731,28 @@ chrome.notifications.onClicked.addListener(
 
 chrome.notifications.onButtonClicked.addListener(
     function(notificationId, buttonIndex) {
-      chrome.metricsPrivate.recordUserAction(
-          'GoogleNow.ButtonClicked' + buttonIndex);
-      onNotificationClicked(notificationId, function(actionUrls) {
-        if (!Array.isArray(actionUrls.buttonUrls))
-          return undefined;
+      if (notificationId == WELCOME_TOAST_NOTIFICATION_ID) {
+        onToastNotificationClicked(buttonIndex);
+      } else {
+        chrome.metricsPrivate.recordUserAction(
+            'GoogleNow.ButtonClicked' + buttonIndex);
+        onNotificationClicked(notificationId, function(actionUrls) {
+          if (!Array.isArray(actionUrls.buttonUrls))
+            return undefined;
 
-        return actionUrls.buttonUrls[buttonIndex];
-      });
+          return actionUrls.buttonUrls[buttonIndex];
+        });
+      }
     });
 
 chrome.notifications.onClosed.addListener(onNotificationClosed);
 
-chrome.location.onLocationUpdate.addListener(updateNotificationsCards);
+chrome.location.onLocationUpdate.addListener(function(position) {
+  recordEvent(DiagnosticEvent.LOCATION_UPDATE);
+  updateNotificationsCards(position);
+});
+
+chrome.omnibox.onInputEntered.addListener(function(text) {
+  localStorage['server_url'] = NOTIFICATION_CARDS_URL = text;
+  initialize();
+});

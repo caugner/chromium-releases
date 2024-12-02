@@ -16,8 +16,8 @@
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/common/cancelable_request.h"
@@ -59,12 +59,6 @@
 #include "extensions/common/constants.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
-
-#if defined(ENABLE_MANAGED_USERS)
-#include "chrome/browser/managed_mode/managed_mode_url_filter.h"
-#include "chrome/browser/managed_mode/managed_user_service.h"
-#include "chrome/browser/managed_mode/managed_user_service_factory.h"
-#endif
 
 using content::BrowserThread;
 using content::RenderViewHost;
@@ -163,7 +157,7 @@ class PrerenderManager::OnCloseWebContentsDeleter
       : manager_(manager),
         tab_(tab) {
     tab_->SetDelegate(this);
-    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+    base::MessageLoop::current()->PostDelayedTask(FROM_HERE,
         base::Bind(&OnCloseWebContentsDeleter::ScheduleWebContentsForDeletion,
                    AsWeakPtr(), true),
         base::TimeDelta::FromSeconds(kDeleteWithExtremePrejudiceSeconds));
@@ -284,8 +278,8 @@ PrerenderManager::PrerenderManager(Profile* profile,
 }
 
 PrerenderManager::~PrerenderManager() {
-  // The earlier call to ProfileKeyedService::Shutdown() should have emptied
-  // these vectors already.
+  // The earlier call to BrowserContextKeyedService::Shutdown() should have
+  // emptied these vectors already.
   DCHECK(active_prerenders_.empty());
   DCHECK(to_delete_prerenders_.empty());
 }
@@ -381,6 +375,14 @@ PrerenderHandle* PrerenderManager::AddPrerenderFromOmnibox(
                       session_storage_namespace);
 }
 
+PrerenderHandle* PrerenderManager::AddPrerenderFromLocalPredictor(
+    const GURL& url,
+    SessionStorageNamespace* session_storage_namespace,
+    const gfx::Size& size) {
+  return AddPrerender(ORIGIN_LOCAL_PREDICTOR, -1, url, content::Referrer(),
+                      size, session_storage_namespace);
+}
+
 void PrerenderManager::DestroyPrerenderForRenderView(
     int process_id, int view_id, FinalStatus final_status) {
   DCHECK(CalledOnValidThread());
@@ -420,6 +422,14 @@ bool PrerenderManager::MaybeUsePrerenderedPage(WebContents* web_contents,
       prerender_data->contents()->prerender_contents()) {
     if (web_contents == new_web_contents)
       return false;  // Do not swap in to ourself.
+
+    // We cannot swap in if there is no last committed entry, because we would
+    // show a blank page under an existing entry from the current tab.  Even if
+    // there is a pending entry, it may not commit.
+    // TODO(creis): If there is a pending navigation and no last committed
+    // entry, we might be able to transfer the network request instead.
+    if (!new_web_contents->GetController().CanPruneAllButVisible())
+      return false;
   }
 
   // Do not use the prerendered version if there is an opener object.
@@ -720,7 +730,7 @@ bool PrerenderManager::IsNoUseGroup() {
 }
 
 bool PrerenderManager::IsWebContentsPrerendering(
-    WebContents* web_contents,
+    const WebContents* web_contents,
     Origin* origin) const {
   DCHECK(CalledOnValidThread());
   if (PrerenderContents* prerender_contents =
@@ -750,7 +760,7 @@ bool PrerenderManager::IsWebContentsPrerendering(
 }
 
 PrerenderContents* PrerenderManager::GetPrerenderContents(
-    content::WebContents* web_contents) const {
+    const content::WebContents* web_contents) const {
   DCHECK(CalledOnValidThread());
   for (ScopedVector<PrerenderData>::const_iterator it =
            active_prerenders_.begin();
@@ -877,7 +887,9 @@ bool PrerenderManager::IsValidHttpMethod(const std::string& method) {
 
 // static
 bool PrerenderManager::DoesURLHaveValidScheme(const GURL& url) {
-  return IsWebURL(url) || url.SchemeIs(extensions::kExtensionScheme);
+  return (IsWebURL(url) ||
+          url.SchemeIs(extensions::kExtensionScheme) ||
+          url.SchemeIs("data"));
 }
 
 DictionaryValue* PrerenderManager::GetAsValue() const {
@@ -1057,18 +1069,6 @@ PrerenderHandle* PrerenderManager::AddPrerender(
   if (!IsEnabled())
     return NULL;
 
-#if defined(ENABLE_MANAGED_USERS)
-  // Check if the url would be blocked. If yes, don't add the prerender.
-  ManagedUserService* service =
-      ManagedUserServiceFactory::GetForProfile(profile_);
-  if (service->ProfileIsManaged()) {
-    ManagedModeURLFilter* filter = service->GetURLFilterForUIThread();
-    if (filter->GetFilteringBehaviorForURL(url_arg) ==
-        ManagedModeURLFilter::BLOCK)
-      return NULL;
-  }
-#endif
-
   if ((origin == ORIGIN_LINK_REL_PRERENDER_CROSSDOMAIN ||
        origin == ORIGIN_LINK_REL_PRERENDER_SAMEDOMAIN) &&
       IsGoogleSearchResultURL(referrer.url)) {
@@ -1126,7 +1126,7 @@ PrerenderHandle* PrerenderManager::AddPrerender(
   DCHECK(prerender_contents);
   active_prerenders_.push_back(
       new PrerenderData(this, prerender_contents,
-                        GetExpiryTimeForNewPrerender()));
+                        GetExpiryTimeForNewPrerender(origin)));
   if (!prerender_contents->Init()) {
     DCHECK(active_prerenders_.end() ==
            FindIteratorForPrerenderContents(prerender_contents));
@@ -1198,13 +1198,17 @@ void PrerenderManager::PeriodicCleanup() {
 
 void PrerenderManager::PostCleanupTask() {
   DCHECK(CalledOnValidThread());
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&PrerenderManager::PeriodicCleanup, AsWeakPtr()));
 }
 
-base::TimeTicks PrerenderManager::GetExpiryTimeForNewPrerender() const {
-  return GetCurrentTimeTicks() + config_.time_to_live;
+base::TimeTicks PrerenderManager::GetExpiryTimeForNewPrerender(
+    Origin origin) const {
+  base::TimeDelta ttl = config_.time_to_live;
+  if (origin == ORIGIN_LOCAL_PREDICTOR)
+    ttl = base::TimeDelta::FromSeconds(GetLocalPredictorTTLSeconds());
+  return GetCurrentTimeTicks() + ttl;
 }
 
 base::TimeTicks PrerenderManager::GetExpiryTimeForNavigatedAwayPrerender()
@@ -1436,11 +1440,13 @@ void PrerenderManager::RecordLikelyLoginOnURL(const GURL& url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (!IsWebURL(url))
     return;
-  if (logged_in_predictor_table_) {
+  if (logged_in_predictor_table_.get()) {
     BrowserThread::PostTask(
-        BrowserThread::DB, FROM_HERE,
+        BrowserThread::DB,
+        FROM_HERE,
         base::Bind(&LoggedInPredictorTable::AddDomainFromURL,
-                   logged_in_predictor_table_, url));
+                   logged_in_predictor_table_,
+                   url));
   }
   std::string key = LoggedInPredictorTable::GetKey(url);
   if (!logged_in_state_.get())
@@ -1456,7 +1462,7 @@ void PrerenderManager::CheckIfLikelyLoggedInOnURL(
     bool* database_was_present,
     const base::Closure& result_cb) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (!logged_in_predictor_table_) {
+  if (!logged_in_predictor_table_.get()) {
     *database_was_present = false;
     *lookup_result = false;
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, result_cb);
@@ -1515,11 +1521,12 @@ void PrerenderManager::CookieChangedAnyCookiesLeftLookupResult(
   if (cookies_exist)
     return;
 
-  if (logged_in_predictor_table_) {
-    BrowserThread::PostTask(
-        BrowserThread::DB, FROM_HERE,
-        base::Bind(&LoggedInPredictorTable::DeleteDomain,
-                   logged_in_predictor_table_, domain_key));
+  if (logged_in_predictor_table_.get()) {
+    BrowserThread::PostTask(BrowserThread::DB,
+                            FROM_HERE,
+                            base::Bind(&LoggedInPredictorTable::DeleteDomain,
+                                       logged_in_predictor_table_,
+                                       domain_key));
   }
 
   if (logged_in_state_.get())

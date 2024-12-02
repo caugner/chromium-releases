@@ -4,13 +4,21 @@
 
 #include "chrome/browser/favicon/favicon_util.h"
 
-#include "chrome/browser/history/history_types.h"
+#include "chrome/browser/favicon/favicon_types.h"
 #include "chrome/browser/history/select_favicon_frames.h"
 #include "content/public/browser/render_view_host.h"
 #include "googleurl/src/gurl.h"
+#include "skia/ext/image_operations.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/favicon_size.h"
 #include "ui/gfx/image/image_png_rep.h"
 #include "ui/gfx/image/image_skia.h"
+#include "webkit/glue/image_decoder.h"
+
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+#include "base/mac/mac_util.h"
+#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 
 namespace {
 
@@ -18,7 +26,7 @@ namespace {
 // |scale_factors| for which the image reps can be created without resizing
 // or decoding the bitmap data.
 std::vector<gfx::ImagePNGRep> SelectFaviconFramesFromPNGsWithoutResizing(
-    const std::vector<history::FaviconBitmapResult>& png_data,
+    const std::vector<chrome::FaviconBitmapResult>& png_data,
     const std::vector<ui::ScaleFactor>& scale_factors,
     int favicon_size) {
   std::vector<gfx::ImagePNGRep> png_reps;
@@ -101,8 +109,15 @@ std::vector<ui::ScaleFactor> FaviconUtil::GetFaviconScaleFactors() {
 }
 
 // static
+void FaviconUtil::SetFaviconColorSpace(gfx::Image* image) {
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+  image->SetSourceColorSpace(base::mac::GetSystemColorSpace());
+#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
+}
+
+// static
 gfx::Image FaviconUtil::SelectFaviconFramesFromPNGs(
-      const std::vector<history::FaviconBitmapResult>& png_data,
+      const std::vector<chrome::FaviconBitmapResult>& png_data,
       const std::vector<ui::ScaleFactor>& scale_factors,
       int favicon_size) {
   // Create image reps for as many scale factors as possible without resizing
@@ -183,4 +198,30 @@ size_t FaviconUtil::SelectBestFaviconFromBitmaps(
                             &selected_bitmap_indices, NULL);
   DCHECK_EQ(1u, selected_bitmap_indices.size());
   return selected_bitmap_indices[0];
+}
+
+// static
+bool FaviconUtil::ReencodeFavicon(const unsigned char* src_data,
+                                  size_t src_len,
+                                  std::vector<unsigned char>* png_data) {
+  // Decode the favicon using WebKit's image decoder.
+  webkit_glue::ImageDecoder decoder(
+      gfx::Size(gfx::kFaviconSize, gfx::kFaviconSize));
+  SkBitmap decoded = decoder.Decode(src_data, src_len);
+  if (decoded.empty())
+    return false;  // Unable to decode.
+
+  if (decoded.width() != gfx::kFaviconSize ||
+      decoded.height() != gfx::kFaviconSize) {
+    // The bitmap is not the correct size, re-sample.
+    int new_width = decoded.width();
+    int new_height = decoded.height();
+    gfx::CalculateFaviconTargetSize(&new_width, &new_height);
+    decoded = skia::ImageOperations::Resize(
+        decoded, skia::ImageOperations::RESIZE_LANCZOS3, new_width, new_height);
+  }
+
+  // Encode our bitmap as a PNG.
+  gfx::PNGCodec::EncodeBGRASkBitmap(decoded, false, png_data);
+  return true;
 }

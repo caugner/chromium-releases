@@ -5,7 +5,7 @@
 [
   {
     "namespace":"fileBrowserPrivate",
-    "nodoc": "true",
+    "description": "none",
     "types": [
       {
         "id": "FileBrowserTask",
@@ -98,21 +98,6 @@
             "type": "string",
             "optional": true,
             "description": "URL to the Drive thumbnail image for this file."
-          },
-          "contentUrl": {
-            "type": "string",
-            "optional": true,
-            "description": "Drive URL to the content for this file."
-          },
-          "editUrl": {
-            "type": "string",
-            "optional": true,
-            "description": "Drive edit URL for this file."
-          },
-          "shareUrl": {
-            "type": "string",
-            "optional": true,
-            "description": "Drive share URL for this file."
           },
           "isPinned": {
             "type": "boolean",
@@ -465,7 +450,7 @@
             "optional": true,
             "parameters": []
           }
-        ]        
+        ]
       },
       {
         "name": "getFileTasks",
@@ -562,8 +547,8 @@
         ]
       },
       {
-        "name": "requestLocalFileSystem",
-        "description": "Requests access to local file system",
+        "name": "requestFileSystem",
+        "description": "Requests access to the file system specially set up for Files.app. The filesystem has multiple mount points which provide access to the user's Downloadsfolder, removal media like SD cards, and Drive. See comments at CrosDiskMountPorivder for details.",
         "parameters": [
           {
             "name": "callback",
@@ -705,30 +690,6 @@
             "optional": true,
             "description": "Completion callback. $ref:runtime.lastError will be set if there was an error.",
             "parameters": []
-          }
-        ]
-      },
-      {
-        "name": "getFileLocations",
-        "description": "Get file locations",
-        "parameters": [
-          {
-            "name": "fileUrls",
-            "type": "array",
-            "description": "Array of file URLs to check.",
-            "items": { "type": "string" }
-          },
-          {
-            "name": "callback",
-            "type": "function",
-            "parameters": [
-              {
-                "name" : "locations",
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "An array of the file locations for the requested files, one entry for each file in fileUrls."
-              }
-            ]
           }
         ]
       },
@@ -1041,7 +1002,7 @@
               },
               "types": {
                 "type": "string",
-                "enum": ["EXCLUDE_DIRECTORIES", "SHARED_WITH_ME", "ALL"],
+                "enum": ["EXCLUDE_DIRECTORIES", "SHARED_WITH_ME", "OFFLINE", "ALL"],
                 "optional": true,
                 "description": "The type of entry that is needed. Default to ALL."
               },
@@ -1175,7 +1136,7 @@
           {
             "name": "callback",
             "type": "function",
-            "description": "Called back when the check is finished.", 
+            "description": "Called back when the check is finished.",
             "parameters": [
               {
                 "name": "result",
@@ -1194,6 +1155,17 @@
             "name": "url",
             "type": "string",
             "description": "Internal url to be opened."
+          }
+        ]
+      },
+      {
+        "name": "zoom",
+        "description": "Changes the zoom factor of the Files.app.",
+        "parameters": [
+          {
+            "name": "operation",
+            "type": "string",
+            "enum": ["in", "out", "reset"]
           }
         ]
       }

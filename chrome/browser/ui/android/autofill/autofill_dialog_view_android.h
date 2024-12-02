@@ -27,6 +27,9 @@ class AutofillDialogViewAndroid : public AutofillDialogView {
   virtual void UpdateNotificationArea() OVERRIDE;
   virtual void UpdateAccountChooser() OVERRIDE;
   virtual void UpdateButtonStrip() OVERRIDE;
+  virtual void UpdateDetailArea() OVERRIDE;
+  virtual void UpdateForErrors() OVERRIDE;
+  virtual void UpdateAutocheckoutStepsArea() OVERRIDE;
   virtual void UpdateSection(DialogSection section) OVERRIDE;
   virtual void FillSection(DialogSection section,
                            const DetailInput& originating_input) OVERRIDE;
@@ -38,6 +41,7 @@ class AutofillDialogViewAndroid : public AutofillDialogView {
   virtual void HideSignIn() OVERRIDE;
   virtual void UpdateProgressBar(double value) OVERRIDE;
   virtual void ModelChanged() OVERRIDE;
+  virtual void OnSignInResize(const gfx::Size& pref_size) OVERRIDE;
 
   // Java to C++ calls
   void ItemSelected(JNIEnv* env, jobject obj, jint section, jint index);
@@ -51,12 +55,13 @@ class AutofillDialogViewAndroid : public AutofillDialogView {
   void EditingCancel(JNIEnv* env, jobject obj, jint section);
   void EditedOrActivatedField(JNIEnv* env,
                               jobject obj,
+                              jint section,
                               jint detail_input,
                               jint view_android,
                               jstring value,
                               jboolean was_edit);
   base::android::ScopedJavaLocalRef<jstring> ValidateField(
-      JNIEnv* env, jobject obj, jint type, jstring value);
+      JNIEnv* env, jobject obj, jint section, jint type, jstring value);
   void ValidateSection(JNIEnv* env, jobject obj, jint section);
   void DialogSubmit(JNIEnv* env, jobject obj);
   void DialogCancel(JNIEnv* env, jobject obj);
@@ -92,8 +97,6 @@ class AutofillDialogViewAndroid : public AutofillDialogView {
                                                                 jobject obj);
   base::android::ScopedJavaLocalRef<jstring> GetLegalDocumentsText(JNIEnv* env,
                                                                    jobject obj);
-  base::android::ScopedJavaLocalRef<jstring> GetProgressBarText(JNIEnv* env,
-                                                                jobject obj);
   jboolean IsTheAddItem(JNIEnv* env, jobject obj, jint section, jint index);
 
   static bool RegisterAutofillDialogViewAndroid(JNIEnv* env);
@@ -111,8 +114,7 @@ class AutofillDialogViewAndroid : public AutofillDialogView {
 
   // Returns the list of available user accounts.
   std::vector<std::string> GetAvailableUserAccounts();
-  bool ValidateSection(DialogSection section,
-                       AutofillDialogController::ValidationType type);
+  bool ValidateSection(DialogSection section, ValidationType type);
 
   // Starts an automatic sign-in attempt for a given account.
   bool StartAutomaticSignIn(const std::string& username);

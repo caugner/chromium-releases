@@ -40,15 +40,15 @@
 #line 10 "effective_tld_names_unittest1.gperf"
 struct DomainRule {
   const char *name;
-  int type;  // 1: exception, 2: wildcard
+  int type;  // 1: exception, 2: wildcard, 4: private
 };
 
-#define TOTAL_KEYWORDS 8
+#define TOTAL_KEYWORDS 11
 #define MIN_WORD_LENGTH 1
 #define MAX_WORD_LENGTH 11
 #define MIN_HASH_VALUE 1
-#define MAX_HASH_VALUE 16
-/* maximum key range = 16, duplicates = 0 */
+#define MAX_HASH_VALUE 17
+/* maximum key range = 17, duplicates = 0 */
 
 class Perfect_Hash_Test1
 {
@@ -63,32 +63,32 @@ Perfect_Hash_Test1::hash (register const char *str, register unsigned int len)
 {
   static const unsigned char asso_values[] =
     {
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17,  0, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17,  0,  0,  0,
-      17,  5,  0, 17, 17, 17,  0, 17, 17,  0,
-      17,  0,  0, 17,  0, 17, 17, 17, 17, 17,
-      17, 17,  0, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17, 17, 17, 17, 17,
-      17, 17, 17, 17, 17, 17
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18,  0, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18,  0,  0,  0,
+      18,  5,  0, 18, 18,  0,  0, 18, 18,  0,
+       5,  0,  0, 18,  0, 18,  5, 18,  0, 18,
+      18, 18,  0, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18, 18, 18, 18, 18,
+      18, 18, 18, 18, 18, 18
     };
   register int hval = len;
 
@@ -146,18 +146,24 @@ Perfect_Hash_Test1::FindDomain (register const char *str, register unsigned int 
       {"ac.jp", 0},
 #line 17 "effective_tld_names_unittest1.gperf"
       {"bar.jp", 2},
+#line 23 "effective_tld_names_unittest1.gperf"
+      {"no", 0},
 #line 18 "effective_tld_names_unittest1.gperf"
       {"baz.bar.jp", 2},
 #line 20 "effective_tld_names_unittest1.gperf"
       {"bar.baz.com", 0},
+#line 24 "effective_tld_names_unittest1.gperf"
+      {"priv.no", 4},
 #line 19 "effective_tld_names_unittest1.gperf"
-      {"pref.bar.jp", 1}
+      {"pref.bar.jp", 1},
+#line 25 "effective_tld_names_unittest1.gperf"
+      {"private", 4}
     };
 
   static const signed char lookup[] =
     {
-      -1,  0,  1,  2, -1,  3,  4, -1, -1, -1,  5,  6, -1, -1,
-      -1, -1,  7
+      -1,  0,  1,  2, -1,  3,  4,  5, -1, -1,  6,  7,  8, -1,
+      -1, -1,  9, 10
     };
 
   if (len <= MAX_WORD_LENGTH && len >= MIN_WORD_LENGTH)
@@ -179,5 +185,5 @@ Perfect_Hash_Test1::FindDomain (register const char *str, register unsigned int 
     }
   return 0;
 }
-#line 23 "effective_tld_names_unittest1.gperf"
+#line 26 "effective_tld_names_unittest1.gperf"
 

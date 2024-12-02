@@ -20,8 +20,8 @@
 DiskCacheTest::DiskCacheTest() {
   CHECK(temp_dir_.CreateUniqueTempDir());
   cache_path_ = temp_dir_.path();
-  if (!MessageLoop::current())
-    message_loop_.reset(new MessageLoopForIO());
+  if (!base::MessageLoop::current())
+    message_loop_.reset(new base::MessageLoopForIO());
 }
 
 DiskCacheTest::~DiskCacheTest() {
@@ -256,7 +256,7 @@ void DiskCacheTestWithCache::InitDiskCache() {
 
   if (!cache_thread_.IsRunning()) {
     ASSERT_TRUE(cache_thread_.StartWithOptions(
-                    base::Thread::Options(MessageLoop::TYPE_IO, 0)));
+        base::Thread::Options(base::MessageLoop::TYPE_IO, 0)));
   }
   ASSERT_TRUE(cache_thread_.message_loop() != NULL);
 
@@ -266,15 +266,15 @@ void DiskCacheTestWithCache::InitDiskCache() {
 void DiskCacheTestWithCache::CreateBackend(uint32 flags, base::Thread* thread) {
   base::MessageLoopProxy* runner;
   if (use_current_thread_)
-    runner = base::MessageLoopProxy::current();
+    runner = base::MessageLoopProxy::current().get();
   else
-    runner = thread->message_loop_proxy();
+    runner = thread->message_loop_proxy().get();
 
   if (simple_cache_mode_) {
     net::TestCompletionCallback cb;
     disk_cache::SimpleBackendImpl* simple_backend =
-        new disk_cache::SimpleBackendImpl(cache_path_, size_, type_,
-                                          make_scoped_refptr(runner), NULL);
+        new disk_cache::SimpleBackendImpl(
+            cache_path_, size_, type_, make_scoped_refptr(runner).get(), NULL);
     int rv = simple_backend->Init(cb.callback());
     ASSERT_EQ(net::OK, cb.GetResult(rv));
     cache_ = simple_cache_impl_ = simple_backend;

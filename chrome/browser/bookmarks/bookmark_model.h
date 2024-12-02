@@ -13,12 +13,12 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/bookmarks/bookmark_service.h"
-#include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/common/cancelable_task_tracker.h"
+#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
@@ -31,17 +31,14 @@ class BookmarkLoadDetails;
 class BookmarkModel;
 class BookmarkModelObserver;
 class BookmarkStorage;
+struct BookmarkTitleMatch;
 class Profile;
 
 namespace base {
 class SequencedTaskRunner;
 }
 
-namespace bookmark_utils {
-struct TitleMatch;
-}
-
-namespace history {
+namespace chrome {
 struct FaviconImageResult;
 }
 
@@ -230,7 +227,7 @@ class BookmarkPermanentNode : public BookmarkNode {
 // BookmarkModelFactory.
 class BookmarkModel : public content::NotificationObserver,
                       public BookmarkService,
-                      public ProfileKeyedService {
+                      public BrowserContextKeyedService {
  public:
   explicit BookmarkModel(Profile* profile);
   virtual ~BookmarkModel();
@@ -244,8 +241,7 @@ class BookmarkModel : public content::NotificationObserver,
   void Load(const scoped_refptr<base::SequencedTaskRunner>& task_runner);
 
   // Returns true if the model finished loading.
-  // This is virtual so it can be mocked.
-  virtual bool IsLoaded() const;
+  bool loaded() const { return loaded_; }
 
   // Returns the root node. The 'bookmark bar' node and 'other' node are
   // children of the root node.
@@ -373,6 +369,13 @@ class BookmarkModel : public content::NotificationObserver,
   // BookmarkNodeChildrenReordered method.
   void SortChildren(const BookmarkNode* parent);
 
+  // Order the children of |parent| as specified in |ordered_nodes|.  This
+  // function should only be used to reorder the child nodes of |parent| and
+  // is not meant to move nodes between different parent. Notifies observers
+  // using the BookmarkNodeChildrenReordered method.
+  void ReorderChildren(const BookmarkNode* parent,
+                       const std::vector<BookmarkNode*>& ordered_nodes);
+
   // Sets the date when the folder was modified.
   void SetDateFolderModified(const BookmarkNode* node, const base::Time time);
 
@@ -384,7 +387,7 @@ class BookmarkModel : public content::NotificationObserver,
   void GetBookmarksWithTitlesMatching(
       const string16& text,
       size_t max_count,
-      std::vector<bookmark_utils::TitleMatch>* matches);
+      std::vector<BookmarkTitleMatch>* matches);
 
   // Sets the store to NULL, making it so the BookmarkModel does not persist
   // any changes to disk. This is only useful during testing to speed up
@@ -474,7 +477,7 @@ class BookmarkModel : public content::NotificationObserver,
   // Notification that a favicon has finished loading. If we can decode the
   // favicon, FaviconLoaded is invoked.
   void OnFaviconDataAvailable(BookmarkNode* node,
-                              const history::FaviconImageResult& image_result);
+                              const chrome::FaviconImageResult& image_result);
 
   // Invoked from the node to load the favicon. Requests the favicon from the
   // favicon service.

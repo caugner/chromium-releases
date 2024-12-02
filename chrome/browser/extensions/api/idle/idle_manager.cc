@@ -14,6 +14,8 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 
 namespace keys = extensions::idle_api_constants;
 
@@ -47,7 +49,7 @@ DefaultEventDelegate::~DefaultEventDelegate() {
 
 void DefaultEventDelegate::OnStateChanged(const std::string& extension_id,
                                           IdleState new_state) {
-  scoped_ptr<ListValue> args(new ListValue());
+  scoped_ptr<base::ListValue> args(new base::ListValue());
   args->Append(IdleManager::CreateIdleValue(new_state));
   scoped_ptr<Event> event(new Event(keys::kOnStateChanged, args.Pass()));
   event->restrict_to_profile = profile_;

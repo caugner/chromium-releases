@@ -422,9 +422,6 @@ class ResourceEntry : public CommonMetadata {
   // Returns true if |value| is NULL or it is parsed as int64 successfully.
   static bool ParseChangestamp(const base::Value* value, int64* result);
 
-  // Returns true if |file| has one of the hosted document extensions.
-  static bool HasHostedDocumentExtension(const base::FilePath& file);
-
   // The resource ID is used to identify a resource, which looks like:
   // file:d41d8cd98f00b204e9800998ecf8
   const std::string& resource_id() const { return resource_id_; }
@@ -441,7 +438,7 @@ class ResourceEntry : public CommonMetadata {
   const std::vector<std::string>& labels() const { return labels_; }
 
   // The URL to download a file content.
-  // Search for 'download_url' in gdata_wapi_operations.h for details.
+  // Search for 'download_url' in gdata_wapi_requests.h for details.
   const GURL& download_url() const { return content_.url(); }
 
   const std::string& content_mime_type() const { return content_.mime_type(); }
@@ -523,6 +520,10 @@ class ResourceEntry : public CommonMetadata {
   // value is KIND_OF_HOSTED_DOCUMENT | KIND_OF_GOOGLE_DOCUMENT.
   static int ClassifyEntryKind(DriveEntryKind kind);
 
+  // Classifies the EntryKind by the file extension of specific path. The
+  // returned value is a bitmask of EntryKindClass. See also ClassifyEntryKind.
+  static int ClassifyEntryKindByFileExtension(const base::FilePath& file);
+
   void set_resource_id(const std::string& resource_id) {
     resource_id_ = resource_id;
   }
@@ -557,7 +558,7 @@ class ResourceEntry : public CommonMetadata {
  private:
   friend class base::internal::RepeatedMessageConverter<ResourceEntry>;
   friend class ResourceList;
-  friend class ResumeUploadOperation;
+  friend class ResumeUploadRequest;
 
   // Fills the remaining fields where JSONValueConverter cannot catch.
   void FillRemainingFields();

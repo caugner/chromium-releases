@@ -16,10 +16,10 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/string_number_conversions.h"
-#include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
-#include "base/utf_string_conversions.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_export.h"
 #include "net/base/test_completion_callback.h"
@@ -138,8 +138,8 @@ bool CreateCache(const base::FilePath& path,
                  disk_cache::Backend** cache,
                  net::TestCompletionCallback* cb) {
   int size = 1024 * 1024;
-  disk_cache::BackendImpl* backend =
-      new disk_cache::BackendImpl(path, thread->message_loop_proxy(), NULL);
+  disk_cache::BackendImpl* backend = new disk_cache::BackendImpl(
+      path, thread->message_loop_proxy().get(), NULL);
   backend->SetMaxSize(size);
   backend->SetType(net::DISK_CACHE);
   backend->SetFlags(disk_cache::kNoRandom);
@@ -265,7 +265,7 @@ int LoadOperations(const base::FilePath& path, RankCrashes action,
 
   // Work with a tiny index table (16 entries).
   disk_cache::BackendImpl* cache = new disk_cache::BackendImpl(
-      path, 0xf, cache_thread->message_loop_proxy(), NULL);
+      path, 0xf, cache_thread->message_loop_proxy().get(), NULL);
   if (!cache || !cache->SetMaxSize(0x100000))
     return GENERIC;
 
@@ -319,7 +319,7 @@ int LoadOperations(const base::FilePath& path, RankCrashes action,
 
 // Main function on the child process.
 int SlaveCode(const base::FilePath& path, RankCrashes action) {
-  MessageLoopForIO message_loop;
+  base::MessageLoopForIO message_loop;
 
   base::FilePath full_path;
   if (!CreateTargetFolder(path, action, &full_path)) {
@@ -329,7 +329,7 @@ int SlaveCode(const base::FilePath& path, RankCrashes action) {
 
   base::Thread cache_thread("CacheThread");
   if (!cache_thread.StartWithOptions(
-          base::Thread::Options(MessageLoop::TYPE_IO, 0)))
+          base::Thread::Options(base::MessageLoop::TYPE_IO, 0)))
     return GENERIC;
 
   if (action <= disk_cache::INSERT_ONE_3)

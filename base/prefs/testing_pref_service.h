@@ -27,24 +27,24 @@ class TestingPrefServiceBase : public SuperPrefService {
 
   // Read the value of a preference from the managed layer. Returns NULL if the
   // preference is not defined at the managed layer.
-  const Value* GetManagedPref(const char* path) const;
+  const base::Value* GetManagedPref(const char* path) const;
 
   // Set a preference on the managed layer and fire observers if the preference
   // changed. Assumes ownership of |value|.
-  void SetManagedPref(const char* path, Value* value);
+  void SetManagedPref(const char* path, base::Value* value);
 
   // Clear the preference on the managed layer and fire observers if the
   // preference has been defined previously.
   void RemoveManagedPref(const char* path);
 
   // Similar to the above, but for user preferences.
-  const Value* GetUserPref(const char* path) const;
-  void SetUserPref(const char* path, Value* value);
+  const base::Value* GetUserPref(const char* path) const;
+  void SetUserPref(const char* path, base::Value* value);
   void RemoveUserPref(const char* path);
 
   // Similar to the above, but for recommended policy preferences.
-  const Value* GetRecommendedPref(const char* path) const;
-  void SetRecommendedPref(const char* path, Value* value);
+  const base::Value* GetRecommendedPref(const char* path) const;
+  void SetRecommendedPref(const char* path, base::Value* value);
   void RemoveRecommendedPref(const char* path);
 
   // Do-nothing implementation for TestingPrefService.
@@ -61,10 +61,12 @@ class TestingPrefServiceBase : public SuperPrefService {
  private:
   // Reads the value of the preference indicated by |path| from |pref_store|.
   // Returns NULL if the preference was not found.
-  const Value* GetPref(TestingPrefStore* pref_store, const char* path) const;
+  const base::Value* GetPref(TestingPrefStore* pref_store,
+                             const char* path) const;
 
   // Sets the value for |path| in |pref_store|.
-  void SetPref(TestingPrefStore* pref_store, const char* path, Value* value);
+  void SetPref(TestingPrefStore* pref_store, const char* path,
+               base::Value* value);
 
   // Removes the preference identified by |path| from |pref_store|.
   void RemovePref(TestingPrefStore* pref_store, const char* path);
@@ -109,49 +111,49 @@ TestingPrefServiceBase<
 }
 
 template<class SuperPrefService, class ConstructionPrefRegistry>
-const Value* TestingPrefServiceBase<
+const base::Value* TestingPrefServiceBase<
     SuperPrefService, ConstructionPrefRegistry>::GetManagedPref(
         const char* path) const {
-  return GetPref(managed_prefs_, path);
+  return GetPref(managed_prefs_.get(), path);
 }
 
 template<class SuperPrefService, class ConstructionPrefRegistry>
 void TestingPrefServiceBase<
     SuperPrefService, ConstructionPrefRegistry>::SetManagedPref(
-        const char* path, Value* value) {
-  SetPref(managed_prefs_, path, value);
+        const char* path, base::Value* value) {
+  SetPref(managed_prefs_.get(), path, value);
 }
 
 template<class SuperPrefService, class ConstructionPrefRegistry>
 void TestingPrefServiceBase<
     SuperPrefService, ConstructionPrefRegistry>::RemoveManagedPref(
         const char* path) {
-  RemovePref(managed_prefs_, path);
+  RemovePref(managed_prefs_.get(), path);
 }
 
 template<class SuperPrefService, class ConstructionPrefRegistry>
-const Value* TestingPrefServiceBase<
+const base::Value* TestingPrefServiceBase<
     SuperPrefService, ConstructionPrefRegistry>::GetUserPref(
         const char* path) const {
-  return GetPref(user_prefs_, path);
+  return GetPref(user_prefs_.get(), path);
 }
 
 template<class SuperPrefService, class ConstructionPrefRegistry>
 void TestingPrefServiceBase<
     SuperPrefService, ConstructionPrefRegistry>::SetUserPref(
-        const char* path, Value* value) {
-  SetPref(user_prefs_, path, value);
+        const char* path, base::Value* value) {
+  SetPref(user_prefs_.get(), path, value);
 }
 
 template<class SuperPrefService, class ConstructionPrefRegistry>
 void TestingPrefServiceBase<
     SuperPrefService, ConstructionPrefRegistry>::RemoveUserPref(
         const char* path) {
-  RemovePref(user_prefs_, path);
+  RemovePref(user_prefs_.get(), path);
 }
 
 template<class SuperPrefService, class ConstructionPrefRegistry>
-const Value* TestingPrefServiceBase<
+const base::Value* TestingPrefServiceBase<
     SuperPrefService, ConstructionPrefRegistry>::GetRecommendedPref(
         const char* path) const {
   return GetPref(recommended_prefs_, path);
@@ -160,29 +162,29 @@ const Value* TestingPrefServiceBase<
 template<class SuperPrefService, class ConstructionPrefRegistry>
 void TestingPrefServiceBase<
     SuperPrefService, ConstructionPrefRegistry>::SetRecommendedPref(
-        const char* path, Value* value) {
-  SetPref(recommended_prefs_, path, value);
+        const char* path, base::Value* value) {
+  SetPref(recommended_prefs_.get(), path, value);
 }
 
 template<class SuperPrefService, class ConstructionPrefRegistry>
 void TestingPrefServiceBase<
     SuperPrefService, ConstructionPrefRegistry>::RemoveRecommendedPref(
         const char* path) {
-  RemovePref(recommended_prefs_, path);
+  RemovePref(recommended_prefs_.get(), path);
 }
 
 template<class SuperPrefService, class ConstructionPrefRegistry>
-const Value* TestingPrefServiceBase<
+const base::Value* TestingPrefServiceBase<
     SuperPrefService, ConstructionPrefRegistry>::GetPref(
         TestingPrefStore* pref_store, const char* path) const {
-  const Value* res;
+  const base::Value* res;
   return pref_store->GetValue(path, &res) ? res : NULL;
 }
 
 template<class SuperPrefService, class ConstructionPrefRegistry>
 void TestingPrefServiceBase<
     SuperPrefService, ConstructionPrefRegistry>::SetPref(
-        TestingPrefStore* pref_store, const char* path, Value* value) {
+        TestingPrefStore* pref_store, const char* path, base::Value* value) {
   pref_store->SetValue(path, value);
 }
 

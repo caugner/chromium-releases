@@ -25,6 +25,10 @@ class TestShellDelegate : public ShellDelegate {
   TestShellDelegate();
   virtual ~TestShellDelegate();
 
+  void set_multi_profiles_enabled(bool multi_profiles_enabled) {
+    multi_profiles_enabled_ = multi_profiles_enabled;
+  }
+
   // Overridden from ShellDelegate:
   virtual bool IsFirstRunAfterBoot() const OVERRIDE;
   virtual bool IsMultiProfilesEnabled() const OVERRIDE;
@@ -38,7 +42,6 @@ class TestShellDelegate : public ShellDelegate {
   virtual void ToggleMaximized() OVERRIDE;
   virtual void OpenFileManager(bool as_dialog) OVERRIDE;
   virtual void OpenCrosh() OVERRIDE;
-  virtual void OpenMobileSetup(const std::string& service_path) OVERRIDE;
   virtual void RestoreTab() OVERRIDE;
   virtual void ShowKeyboardOverlay() OVERRIDE;
   virtual keyboard::KeyboardControllerProxy*
@@ -54,6 +57,8 @@ class TestShellDelegate : public ShellDelegate {
   virtual void SetMagnifierType(MagnifierType type) OVERRIDE;
   virtual bool IsMagnifierEnabled() const OVERRIDE;
   virtual MagnifierType GetMagnifierType() const OVERRIDE;
+  virtual void SetLargeCursorEnabled(bool enabled) OVERRIDE;
+  virtual bool IsLargeCursorEnabled() const OVERRIDE;
   virtual bool ShouldAlwaysShowAccessibilityMenu() const OVERRIDE;
   virtual void SilenceSpokenFeedback() const OVERRIDE;
   virtual app_list::AppListViewDelegate* CreateAppListViewDelegate() OVERRIDE;
@@ -87,7 +92,9 @@ class TestShellDelegate : public ShellDelegate {
   bool high_contrast_enabled_;
   bool screen_magnifier_enabled_;
   MagnifierType screen_magnifier_type_;
+  bool large_cursor_enabled_;
   int num_exit_requests_;
+  bool multi_profiles_enabled_;
 
   scoped_ptr<content::BrowserContext> current_browser_context_;
 

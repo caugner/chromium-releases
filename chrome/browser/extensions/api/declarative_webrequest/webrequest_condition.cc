@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/request_stage.h"
 #include "chrome/browser/extensions/api/declarative_webrequest/webrequest_condition_attribute.h"
@@ -27,7 +27,6 @@ const char kExpectedDictionary[] = "A condition has to be a dictionary.";
 const char kConditionWithoutInstanceType[] = "A condition had no instanceType";
 const char kExpectedOtherConditionType[] = "Expected a condition of type "
     "declarativeWebRequest.RequestMatcher";
-const char kUnknownConditionAttribute[] = "Unknown condition attribute '%s'";
 const char kInvalidTypeOfParamter[] = "Attribute '%s' has an invalid type";
 const char kConditionCannotBeFulfilled[] = "A condition can never be "
     "fulfilled because its attributes cannot all be tested at the "
@@ -115,9 +114,9 @@ bool WebRequestCondition::IsFulfilled(
 
 void WebRequestCondition::GetURLMatcherConditionSets(
     URLMatcherConditionSet::Vector* condition_sets) const {
-  if (url_matcher_conditions_)
+  if (url_matcher_conditions_.get())
     condition_sets->push_back(url_matcher_conditions_);
-  if (first_party_url_matcher_conditions_)
+  if (first_party_url_matcher_conditions_.get())
     condition_sets->push_back(first_party_url_matcher_conditions_);
 }
 
@@ -129,18 +128,18 @@ scoped_ptr<WebRequestCondition> WebRequestCondition::Create(
   const base::DictionaryValue* condition_dict = NULL;
   if (!condition.GetAsDictionary(&condition_dict)) {
     *error = kExpectedDictionary;
-    return scoped_ptr<WebRequestCondition>(NULL);
+    return scoped_ptr<WebRequestCondition>();
   }
 
   // Verify that we are dealing with a Condition whose type we understand.
   std::string instance_type;
   if (!condition_dict->GetString(keys::kInstanceTypeKey, &instance_type)) {
     *error = kConditionWithoutInstanceType;
-    return scoped_ptr<WebRequestCondition>(NULL);
+    return scoped_ptr<WebRequestCondition>();
   }
   if (instance_type != keys::kRequestMatcherType) {
     *error = kExpectedOtherConditionType;
-    return scoped_ptr<WebRequestCondition>(NULL);
+    return scoped_ptr<WebRequestCondition>();
   }
 
   WebRequestConditionAttributes attributes;
@@ -171,21 +170,17 @@ scoped_ptr<WebRequestCondition> WebRequestCondition::Create(
                   url_matcher_condition_factory, dict, ++g_next_id, error);
         }
       }
-    } else if (WebRequestConditionAttribute::IsKnownType(
-        condition_attribute_name)) {
-      scoped_ptr<WebRequestConditionAttribute> attribute =
+    } else {
+      scoped_refptr<const WebRequestConditionAttribute> attribute =
           WebRequestConditionAttribute::Create(
               condition_attribute_name,
               &condition_attribute_value,
               error);
       if (attribute.get())
-        attributes.push_back(make_linked_ptr(attribute.release()));
-    } else {
-      *error = base::StringPrintf(kUnknownConditionAttribute,
-                                  condition_attribute_name.c_str());
+        attributes.push_back(attribute);
     }
     if (!error->empty())
-      return scoped_ptr<WebRequestCondition>(NULL);
+      return scoped_ptr<WebRequestCondition>();
   }
 
   scoped_ptr<WebRequestCondition> result(
@@ -195,7 +190,7 @@ scoped_ptr<WebRequestCondition> WebRequestCondition::Create(
 
   if (!result->stages()) {
     *error = kConditionCannotBeFulfilled;
-    return scoped_ptr<WebRequestCondition>(NULL);
+    return scoped_ptr<WebRequestCondition>();
   }
 
   return result.Pass();

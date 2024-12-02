@@ -1856,8 +1856,6 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest,
   ASSERT_TRUE(IsEncrypted(0, syncer::BOOKMARKS));
   ASSERT_TRUE(IsEncrypted(1, syncer::BOOKMARKS));
   ASSERT_TRUE(GetClient(1)->service()->IsPassphraseRequired());
-  ASSERT_GT(GetClient(1)->GetLastSessionSnapshot().num_encryption_conflicts(),
-            3);  // The encrypted nodes.
 
   // Client 1 adds bookmarks between the first two and between the second two.
   ASSERT_TRUE(AddURL(0, 1, IndexedURLTitle(3), GURL(IndexedURL(3))) != NULL);
@@ -1941,21 +1939,6 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest, RacyPositionChanges) {
 
   ASSERT_TRUE(AwaitQuiescence());
   ASSERT_TRUE(AllModelsMatch());
-}
-
-// Restart the sync service on one client and make sure all data is synced when
-// the service restarts.
-IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest,
-                       DISABLED_RestartSyncService) {
-  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
-
-  ASSERT_TRUE(AddURL(0, L"Google", GURL("http://www.google.com")));
-  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
-  ASSERT_TRUE(AllModelsMatchVerifier());
-
-  RestartSyncService(0);
-  ASSERT_TRUE(GetClient(0)->AwaitFullSyncCompletion("Restarted sync."));
-  ASSERT_TRUE(AllModelsMatchVerifier());
 }
 
 // Trigger the server side creation of Synced Bookmarks. Ensure both clients

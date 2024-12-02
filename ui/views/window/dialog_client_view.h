@@ -60,9 +60,8 @@ class VIEWS_EXPORT DialogClientView : public ClientView,
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
   virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
-  virtual void ViewHierarchyChanged(bool is_add,
-                                    View* parent,
-                                    View* child) OVERRIDE;
+  virtual void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) OVERRIDE;
 
   // ButtonListener implementation:
   virtual void ButtonPressed(Button* sender, const ui::Event& event) OVERRIDE;
@@ -80,11 +79,18 @@ class VIEWS_EXPORT DialogClientView : public ClientView,
   // Creates and adds the footnote view, if supplied by the delegate.
   void CreateFootnoteView();
 
+  // View implementation.
+  virtual void ChildPreferredSizeChanged(View* child) OVERRIDE;
+  virtual void ChildVisibilityChanged(View* child) OVERRIDE;
+
  private:
   bool has_dialog_buttons() const { return ok_button_ || cancel_button_; }
 
   // Create a dialog button of the appropriate type.
   LabelButton* CreateDialogButton(ui::DialogButton type);
+
+  // Update |button|'s text and enabled state according to the delegate's state.
+  void UpdateButton(LabelButton* button, ui::DialogButton type);
 
   // Returns the height of the row containing the buttons and the extra view.
   int GetButtonsAndExtraViewRowHeight() const;

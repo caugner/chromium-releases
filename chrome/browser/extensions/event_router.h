@@ -12,7 +12,7 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/hash_tables.h"
+#include "base/containers/hash_tables.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/values.h"
@@ -50,6 +50,10 @@ class EventRouter : public content::NotificationObserver,
     USER_GESTURE_NOT_ENABLED = 2,
   };
 
+  // The pref key for the list of event names for which an extension has
+  // registered from its lazy background page.
+  static const char kRegisteredEvents[];
+
   // Observers register interest in events with a particular name and are
   // notified when a listener is added or removed for that |event_name|.
   class Observer {
@@ -67,7 +71,6 @@ class EventRouter : public content::NotificationObserver,
                             const std::string& extension_id,
                             const std::string& event_name,
                             scoped_ptr<base::ListValue> event_args,
-                            const GURL& event_url,
                             UserGestureState user_gesture,
                             const EventFilteringInfo& info);
 
@@ -127,6 +130,12 @@ class EventRouter : public content::NotificationObserver,
   bool ExtensionHasEventListener(const std::string& extension_id,
                                  const std::string& event_name);
 
+  // Return or set the list of events for which the given extension has
+  // registered.
+  std::set<std::string> GetRegisteredEvents(const std::string& extension_id);
+  void SetRegisteredEvents(const std::string& extension_id,
+                           const std::set<std::string>& events);
+
   // Broadcasts an event to every listener registered for that event.
   virtual void BroadcastEvent(scoped_ptr<Event> event);
 
@@ -156,7 +165,7 @@ class EventRouter : public content::NotificationObserver,
   static void LogExtensionEventMessage(void* profile_id,
                                        const std::string& extension_id,
                                        const std::string& event_name,
-                                       scoped_ptr<ListValue> event_args);
+                                       scoped_ptr<base::ListValue> event_args);
 
   // TODO(gdk): Document this.
   static void DispatchExtensionMessage(
@@ -165,7 +174,6 @@ class EventRouter : public content::NotificationObserver,
       const std::string& extension_id,
       const std::string& event_name,
       base::ListValue* event_args,
-      const GURL& event_url,
       UserGestureState user_gesture,
       const extensions::EventFilteringInfo& info);
 
@@ -215,10 +223,34 @@ class EventRouter : public content::NotificationObserver,
       const Extension* extension,
       const linked_ptr<Event>& event);
 
+  // Returns true if registered events are from this version of Chrome. Else,
+  // clear them, and return false.
+  bool CheckRegisteredEventsUpToDate();
+
+  // Adds a filter to an event.
+  void AddFilterToEvent(const std::string& event_name,
+                        const std::string& extension_id,
+                        const base::DictionaryValue* filter);
+
+  // Removes a filter from an event.
+  void RemoveFilterFromEvent(const std::string& event_name,
+                             const std::string& extension_id,
+                             const base::DictionaryValue* filter);
+
+  // Returns the dictionary of event filters that the given extension has
+  // registered.
+  const base::DictionaryValue* GetFilteredEvents(
+      const std::string& extension_id);
+
   // Track of the number of dispatched events that have not yet sent an
   // ACK from the renderer.
   void IncrementInFlightEvents(Profile* profile,
                                const Extension* extension);
+
+  // static
+  static void IncrementInFlightEventsOnUI(
+      void* profile_id,
+      const std::string& extension_id);
 
   void DispatchPendingEvent(const linked_ptr<Event>& event,
                             ExtensionHost* host);

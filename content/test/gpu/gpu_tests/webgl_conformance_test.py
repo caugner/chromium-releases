@@ -51,8 +51,8 @@ class WebGLConformanceTest(page_test.PageTest):
   def __init__(self):
     super(WebGLConformanceTest, self).__init__('ValidatePage')
 
-  def CreatePageSet(self, options):
-    tests = WebGLConformanceTest._ParseTests('00_test_list.txt')
+  def CreatePageSet(self, _, options):
+    tests = WebGLConformanceTest._ParseTests('00_test_list.txt', '1.0.1')
 
     page_set_dict = {
       'description': 'Executes WebGL conformance tests',
@@ -78,7 +78,12 @@ class WebGLConformanceTest(page_test.PageTest):
     if _DidWebGLTestSucceed(tab):
       results.AddSuccess(page)
     else:
-      results.AddFailure(page, _WebGLTestMessages(tab), None)
+      results.AddFailureMessage(page, _WebGLTestMessages(tab))
+
+  def CustomizeBrowserOptions(self, options):
+    options.AppendExtraBrowserArg('--enable-webgl')
+    options.AppendExtraBrowserArg(
+        '--disable-gesture-requirement-for-media-playback')
 
   @staticmethod
   def _ParseTests(path, version = None):
@@ -103,6 +108,7 @@ class WebGLConformanceTest(page_test.PageTest):
         line_tokens = line.split(' ')
 
         i = 0
+        min_version = None
         while i < len(line_tokens):
           token = line_tokens[i]
           if token == '--min-version':
@@ -110,7 +116,7 @@ class WebGLConformanceTest(page_test.PageTest):
             min_version = line_tokens[i]
           i += 1
 
-        if version and version < min_version:
+        if version and min_version and version < min_version:
           continue
 
         test_name = line_tokens[-1]

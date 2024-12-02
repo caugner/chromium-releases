@@ -7,10 +7,10 @@
 #import "chrome/browser/ui/cocoa/location_bar/keyword_hint_decoration.h"
 
 #include "base/logging.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "grit/theme_resources.h"
 #include "grit/generated_resources.h"
+#include "grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -51,7 +51,7 @@ KeywordHintDecoration::~KeywordHintDecoration() {
 NSImage* KeywordHintDecoration::GetHintImage() {
   if (!hint_image_) {
     hint_image_.reset(ResourceBundle::GetSharedInstance().
-        GetNativeImageNamed(IDR_LOCATION_BAR_KEYWORD_HINT_TAB).CopyNSImage());
+        GetNativeImageNamed(IDR_OMNIBOX_KEYWORD_HINT_TAB).CopyNSImage());
   }
   return hint_image_;
 }
@@ -82,8 +82,7 @@ void KeywordHintDecoration::SetKeyword(const string16& short_name,
   hint_suffix_.reset([TrimAndConvert(keyword_hint.substr(split)) retain]);
 }
 
-CGFloat KeywordHintDecoration::GetWidthForSpace(CGFloat width,
-                                                CGFloat text_width) {
+CGFloat KeywordHintDecoration::GetWidthForSpace(CGFloat width) {
   NSImage* image = GetHintImage();
   const CGFloat image_width = image ? [image size].width : 0.0;
 

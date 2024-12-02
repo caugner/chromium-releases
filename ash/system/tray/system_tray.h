@@ -6,7 +6,6 @@
 #define ASH_SYSTEM_TRAY_SYSTEM_TRAY_H_
 
 #include "ash/ash_export.h"
-#include "ash/system/power/power_supply_status.h"
 #include "ash/system/tray/system_tray_bubble.h"
 #include "ash/system/tray/tray_background_view.h"
 #include "ash/system/user/login_status.h"
@@ -32,7 +31,6 @@ class DriveObserver;
 class IMEObserver;
 class LocaleObserver;
 class LogoutButtonObserver;
-class PowerStatusObserver;
 class SystemTrayDelegate;
 class UpdateObserver;
 class UserObserver;
@@ -71,6 +69,9 @@ class ASH_EXPORT SystemTray : public internal::TrayBackgroundView,
 
   // Removes an existing tray item.
   void RemoveTrayItem(SystemTrayItem* item);
+
+  // Returns all tray items that has been added to system tray.
+  const std::vector<SystemTrayItem*>& GetTrayItems() const;
 
   // Shows the default view of all items.
   void ShowDefaultView(BubbleCreationType creation_type);
@@ -126,10 +127,12 @@ class ASH_EXPORT SystemTray : public internal::TrayBackgroundView,
   // Returns true if the mouse is inside the notification bubble.
   bool IsMouseInNotificationBubble() const;
 
+  // Closes system bubble and returns true if it did exist.
+  bool CloseSystemBubble() const;
+
   // Accessors for testing.
 
   // Returns true if the bubble exists.
-  bool CloseSystemBubbleForTest() const;
   bool CloseNotificationBubbleForTest() const;
 
   // Overridden from TrayBackgroundView.

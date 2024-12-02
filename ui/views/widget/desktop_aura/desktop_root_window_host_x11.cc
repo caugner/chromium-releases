@@ -8,9 +8,9 @@
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
 
-#include "base/message_pump_aurax11.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/message_loop/message_pump_aurax11.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/client/user_action_client.h"
 #include "ui/aura/focus_manager.h"
@@ -111,8 +111,7 @@ DesktopRootWindowHostX11::DesktopRootWindowHostX11(
       focus_when_shown_(false),
       current_cursor_(ui::kCursorNull),
       native_widget_delegate_(native_widget_delegate),
-      desktop_native_widget_aura_(desktop_native_widget_aura),
-      drop_handler_(NULL) {
+      desktop_native_widget_aura_(desktop_native_widget_aura) {
 }
 
 DesktopRootWindowHostX11::~DesktopRootWindowHostX11() {
@@ -240,7 +239,7 @@ aura::RootWindow* DesktopRootWindowHostX11::InitRootWindow(
   if (!params.child && params.parent)
     parent->AddTransientChild(content_window_);
 
-  native_widget_delegate_->OnNativeWidgetCreated();
+  native_widget_delegate_->OnNativeWidgetCreated(true);
 
   capture_client_.reset(new views::DesktopCaptureClient(root_window_));
   aura::client::SetCaptureClient(root_window_, capture_client_.get());
@@ -620,6 +619,10 @@ bool DesktopRootWindowHostX11::ShouldUseNativeFrame() {
 }
 
 void DesktopRootWindowHostX11::FrameTypeChanged() {
+  // Replace the frame and layout the contents. Even though we don't have a
+  // swapable glass frame like on Windows, we still replace the frame because
+  // the button assets don't update otherwise.
+  native_widget_delegate_->AsWidget()->non_client_view()->UpdateFrame(true);
 }
 
 NonClientFrameView* DesktopRootWindowHostX11::CreateNonClientFrameView() {
@@ -843,7 +846,8 @@ void DesktopRootWindowHostX11::OnCursorVisibilityChanged(bool show) {
 }
 
 void DesktopRootWindowHostX11::MoveCursorTo(const gfx::Point& location) {
-  NOTIMPLEMENTED();
+  XWarpPointer(xdisplay_, None, x_root_window_, 0, 0, 0, 0,
+               bounds_.x() + location.x(), bounds_.y() + location.y());
 }
 
 void DesktopRootWindowHostX11::SetFocusWhenShown(bool focus_when_shown) {
@@ -903,20 +907,6 @@ void DesktopRootWindowHostX11::OnDeviceScaleFactorChanged(
 }
 
 void DesktopRootWindowHostX11::PrepareForShutdown() {
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// DesktopRootWindowHostX11, ui::DesktopSelectionProviderAuraX11 implementation:
-
-void DesktopRootWindowHostX11::SetDropHandler(
-    ui::OSExchangeDataProviderAuraX11* handler) {
-  if (handler) {
-    DCHECK(!drop_handler_);
-    drop_handler_ = handler;
-  } else {
-    DCHECK(drop_handler_);
-    drop_handler_ = NULL;
-  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1045,6 +1035,15 @@ bool DesktopRootWindowHostX11::Dispatch(const base::NativeEvent& event) {
                     aura::client::UserActionClient::BACK :
                     aura::client::UserActionClient::FORWARD);
               }
+              break;
+            }
+          } else if (type == ui::ET_MOUSE_RELEASED) {
+            XIDeviceEvent* xievent =
+                static_cast<XIDeviceEvent*>(xev->xcookie.data);
+            int button = xievent->detail;
+            if (button == kBackMouseButton || button == kForwardMouseButton) {
+              // We've already passed the back/forward mouse down to the user
+              // action client; we want to swallow the corresponding release.
               break;
             }
           }
@@ -1184,8 +1183,7 @@ bool DesktopRootWindowHostX11::Dispatch(const base::NativeEvent& event) {
       break;
     }
     case SelectionNotify: {
-      if (drop_handler_)
-        drop_handler_->OnSelectionNotify(xev->xselection);
+      drag_drop_client_->OnSelectionNotify(xev->xselection);
       break;
     }
   }

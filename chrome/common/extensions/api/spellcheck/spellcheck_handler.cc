@@ -4,7 +4,7 @@
 
 #include "chrome/common/extensions/api/spellcheck/spellcheck_handler.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 
 namespace extensions {
@@ -25,7 +25,7 @@ SpellcheckHandler::~SpellcheckHandler() {
 }
 
 bool SpellcheckHandler::Parse(Extension* extension, string16* error) {
-  const DictionaryValue* spellcheck_value = NULL;
+  const base::DictionaryValue* spellcheck_value = NULL;
   if (!extension->manifest()->GetDictionary(keys::kSpellcheck,
                                             &spellcheck_value)) {
     *error = ASCIIToUTF16(errors::kInvalidSpellcheck);

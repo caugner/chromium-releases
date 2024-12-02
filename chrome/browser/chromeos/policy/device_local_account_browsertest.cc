@@ -7,7 +7,6 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
-#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/files/file_path.h"
@@ -16,21 +15,22 @@
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
+#include "chrome/browser/chromeos/login/login_display_host.h"
+#include "chrome/browser/chromeos/login/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/user.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/policy/device_policy_builder.h"
-#include "chrome/browser/chromeos/policy/enterprise_install_attributes.h"
+#include "chrome/browser/chromeos/policy/device_policy_cros_browser_test.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/policy/cloud/cloud_policy_constants.h"
 #include "chrome/browser/policy/cloud/policy_builder.h"
 #include "chrome/browser/policy/policy_service.h"
 #include "chrome/browser/policy/proto/chromeos/chrome_device_policy.pb.h"
-#include "chrome/browser/policy/proto/chromeos/install_attributes.pb.h"
 #include "chrome/browser/policy/test/local_policy_test_server.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/ui/browser.h"
@@ -45,13 +45,12 @@
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "chromeos/dbus/mock_dbus_thread_manager.h"
-#include "chromeos/dbus/mock_update_engine_client.h"
+#include "chromeos/dbus/fake_cryptohome_client.h"
+#include "chromeos/dbus/fake_session_manager_client.h"
+#include "chromeos/dbus/mock_dbus_thread_manager_without_gmock.h"
 #include "chromeos/dbus/session_manager_client.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -72,315 +71,16 @@ const char* kStartupURLs[] = {
   "chrome://about",
 };
 
-// Observes a specific notification type and quits the message loop once a
-// condition holds.
-class NotificationWatcher : public content::NotificationObserver {
- public:
-  // Callback invoked on notifications. Should return true when the condition
-  // that the caller is waiting for is satisfied.
-  typedef base::Callback<bool(void)> ConditionTestCallback;
-
-  explicit NotificationWatcher(int notification_type,
-                               const ConditionTestCallback& callback)
-      : type_(notification_type),
-        callback_(callback) {}
-
-  void Run() {
-    if (callback_.Run())
-      return;
-
-    content::NotificationRegistrar registrar;
-    registrar.Add(this, type_, content::NotificationService::AllSources());
-    run_loop_.Run();
-  }
-
-  // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
-    if (callback_.Run())
-      run_loop_.Quit();
-  }
-
- private:
-  int type_;
-  ConditionTestCallback callback_;
-  base::RunLoop run_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(NotificationWatcher);
-};
-
-// A fake implementation of session_manager. Accepts policy blobs to be set and
-// returns them unmodified.
-class FakeSessionManagerClient : public chromeos::SessionManagerClient {
- public:
-  FakeSessionManagerClient() {}
-  virtual ~FakeSessionManagerClient() {}
-
-  // SessionManagerClient:
-  virtual void AddObserver(Observer* observer) OVERRIDE {}
-  virtual void RemoveObserver(Observer* observer) OVERRIDE {}
-  virtual bool HasObserver(Observer* observer) OVERRIDE { return false; }
-  virtual void EmitLoginPromptReady() OVERRIDE {}
-  virtual void EmitLoginPromptVisible() OVERRIDE {}
-  virtual void RestartJob(int pid, const std::string& command_line) OVERRIDE {}
-  virtual void RestartEntd() OVERRIDE {}
-  virtual void StartSession(const std::string& user_email) OVERRIDE {}
-  virtual void StopSession() OVERRIDE {}
-  virtual void StartDeviceWipe() OVERRIDE {}
-  virtual void RequestLockScreen() OVERRIDE {}
-  virtual void NotifyLockScreenShown() OVERRIDE {}
-  virtual void RequestUnlockScreen() OVERRIDE {}
-  virtual void NotifyLockScreenDismissed() OVERRIDE {}
-  virtual void RetrieveDevicePolicy(
-      const RetrievePolicyCallback& callback) OVERRIDE {
-    MessageLoop::current()->PostTask(FROM_HERE,
-                                     base::Bind(callback, device_policy_));
-  }
-  virtual void RetrieveUserPolicy(
-      const RetrievePolicyCallback& callback) OVERRIDE {
-    MessageLoop::current()->PostTask(FROM_HERE,
-                                     base::Bind(callback, user_policy_));
-  }
-  virtual void RetrieveDeviceLocalAccountPolicy(
-      const std::string& account_id,
-      const RetrievePolicyCallback& callback) OVERRIDE {
-    MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(callback, device_local_account_policy_[account_id]));
-  }
-  virtual void StoreDevicePolicy(const std::string& policy_blob,
-                                 const StorePolicyCallback& callback) OVERRIDE {
-    device_policy_ = policy_blob;
-    MessageLoop::current()->PostTask(FROM_HERE, base::Bind(callback, true));
-  }
-  virtual void StoreUserPolicy(const std::string& policy_blob,
-                               const StorePolicyCallback& callback) OVERRIDE {
-    user_policy_ = policy_blob;
-    MessageLoop::current()->PostTask(FROM_HERE, base::Bind(callback, true));
-  }
-  virtual void StoreDeviceLocalAccountPolicy(
-      const std::string& account_id,
-      const std::string& policy_blob,
-      const StorePolicyCallback& callback) OVERRIDE {
-    device_local_account_policy_[account_id] = policy_blob;
-    MessageLoop::current()->PostTask(FROM_HERE, base::Bind(callback, true));
-  }
-
-  const std::string& device_policy() const {
-    return device_policy_;
-  }
-  void set_device_policy(const std::string& policy_blob) {
-    device_policy_ = policy_blob;
-  }
-
-  const std::string& user_policy() const {
-    return user_policy_;
-  }
-  void set_user_policy(const std::string& policy_blob) {
-    user_policy_ = policy_blob;
-  }
-
-  const std::string& device_local_account_policy(
-      const std::string& account_id) const {
-    std::map<std::string, std::string>::const_iterator entry =
-        device_local_account_policy_.find(account_id);
-    return entry != device_local_account_policy_.end() ? entry->second
-                                                       : EmptyString();
-  }
-  void set_device_local_account_policy(const std::string& account_id,
-                                       const std::string& policy_blob) {
-    device_local_account_policy_[account_id] = policy_blob;
-  }
-
- private:
-  std::string device_policy_;
-  std::string user_policy_;
-  std::map<std::string, std::string> device_local_account_policy_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeSessionManagerClient);
-};
-
-class FakeCryptohomeClient : public chromeos::CryptohomeClient {
- public:
-  using chromeos::CryptohomeClient::AsyncMethodCallback;
-  using chromeos::CryptohomeClient::AsyncCallStatusHandler;
-  using chromeos::CryptohomeClient::AsyncCallStatusWithDataHandler;
-
-  FakeCryptohomeClient() {}
-  virtual ~FakeCryptohomeClient() {}
-
-  virtual void SetAsyncCallStatusHandlers(
-      const AsyncCallStatusHandler& handler,
-      const AsyncCallStatusWithDataHandler& data_handler) OVERRIDE {
-    handler_ = handler;
-    data_handler_ = data_handler;
-  }
-  virtual void ResetAsyncCallStatusHandlers() OVERRIDE {
-    handler_.Reset();
-    data_handler_.Reset();
-  }
-  virtual void IsMounted(
-      const chromeos::BoolDBusMethodCallback& callback) OVERRIDE {}
-  virtual bool Unmount(bool* success) OVERRIDE {
-    *success = true;
-    return true;
-  }
-  virtual void AsyncCheckKey(const std::string& username,
-                             const std::string& key,
-                             const AsyncMethodCallback& callback) OVERRIDE {}
-  virtual void AsyncMigrateKey(const std::string& username,
-                               const std::string& from_key,
-                               const std::string& to_key,
-                               const AsyncMethodCallback& callback) OVERRIDE {}
-  virtual void AsyncRemove(const std::string& username,
-                           const AsyncMethodCallback& callback) OVERRIDE {}
-  virtual bool GetSystemSalt(std::vector<uint8>* salt) OVERRIDE {
-    const char kFakeSystemSalt[] = "fake_system_salt";
-    salt->assign(kFakeSystemSalt,
-                 kFakeSystemSalt + arraysize(kFakeSystemSalt) - 1);
-    return true;
-  }
-  virtual void GetSanitizedUsername(
-      const std::string& username,
-      const chromeos::StringDBusMethodCallback& callback) OVERRIDE {
-    MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(callback,
-                   chromeos::DBUS_METHOD_CALL_SUCCESS,
-                   username));
-    MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(data_handler_, 1, true, username));
-  }
-  virtual void AsyncMount(const std::string& username,
-                          const std::string& key,
-                          int flags,
-                          const AsyncMethodCallback& callback) OVERRIDE {
-    MessageLoop::current()->PostTask(FROM_HERE, base::Bind(callback, 1));
-    MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(handler_, 1, true, cryptohome::MOUNT_ERROR_NONE));
-  }
-  virtual void AsyncMountGuest(const AsyncMethodCallback& callback) OVERRIDE {}
-  virtual void TpmIsReady(
-      const chromeos::BoolDBusMethodCallback& callback) OVERRIDE {}
-  virtual void TpmIsEnabled(
-      const chromeos::BoolDBusMethodCallback& callback) OVERRIDE {}
-  virtual bool CallTpmIsEnabledAndBlock(bool* enabled) OVERRIDE {
-    return false;
-  }
-  virtual void TpmGetPassword(
-      const chromeos::StringDBusMethodCallback& callback) OVERRIDE {}
-  virtual void TpmIsOwned(
-      const chromeos::BoolDBusMethodCallback& kallback) OVERRIDE {}
-  virtual bool CallTpmIsOwnedAndBlock(bool* owned) OVERRIDE {
-    return false;
-  }
-  virtual void TpmIsBeingOwned(
-      const chromeos::BoolDBusMethodCallback& kallback) OVERRIDE {}
-  virtual bool CallTpmIsBeingOwnedAndBlock(bool* owning) OVERRIDE {
-    return false;
-  }
-  virtual void TpmCanAttemptOwnership(
-      const chromeos::VoidDBusMethodCallback& callback) OVERRIDE {}
-  virtual bool CallTpmClearStoredPasswordAndBlock() OVERRIDE {
-    return false;
-  }
-  virtual void TpmClearStoredPassword(
-      const chromeos::VoidDBusMethodCallback& kallback) OVERRIDE {}
-  virtual void Pkcs11IsTpmTokenReady(
-      const chromeos::BoolDBusMethodCallback& callback) OVERRIDE {}
-  virtual void Pkcs11GetTpmTokenInfo(
-      const Pkcs11GetTpmTokenInfoCallback& callback) OVERRIDE {}
-  virtual bool InstallAttributesGet(const std::string& name,
-                                    std::vector<uint8>* value,
-                                    bool* successful) OVERRIDE {
-    return false;
-  }
-  virtual bool InstallAttributesSet(const std::string& name,
-                                    const std::vector<uint8>& value,
-                                    bool* successful) OVERRIDE {
-    return false;
-  }
-  virtual bool InstallAttributesFinalize(bool* successful) OVERRIDE {
-    return false;
-  }
-  virtual void InstallAttributesIsReady(
-      const chromeos::BoolDBusMethodCallback& callback) OVERRIDE {}
-  virtual bool InstallAttributesIsInvalid(bool* is_invalid) OVERRIDE {
-    return true;
-  }
-  virtual bool InstallAttributesIsFirstInstall(
-      bool* is_first_install) OVERRIDE {
-    return false;
-  }
-  virtual void TpmAttestationIsPrepared(
-        const chromeos::BoolDBusMethodCallback& callback) OVERRIDE {}
-  virtual void TpmAttestationIsEnrolled(
-        const chromeos::BoolDBusMethodCallback& callback) OVERRIDE {}
-  virtual void AsyncTpmAttestationCreateEnrollRequest(
-      const AsyncMethodCallback& callback) OVERRIDE {}
-  virtual void AsyncTpmAttestationEnroll(
-      const std::string& pca_response,
-      const AsyncMethodCallback& callback) OVERRIDE {}
-  virtual void AsyncTpmAttestationCreateCertRequest(
-      int options,
-      const AsyncMethodCallback& callback) OVERRIDE {}
-  virtual void AsyncTpmAttestationFinishCertRequest(
-      const std::string& pca_response,
-      chromeos::attestation::AttestationKeyType key_type,
-      const std::string& key_name,
-      const AsyncMethodCallback& callback) OVERRIDE {}
-  virtual void TpmAttestationDoesKeyExist(
-      chromeos::attestation::AttestationKeyType key_type,
-      const std::string& key_name,
-      const chromeos::BoolDBusMethodCallback& callback) OVERRIDE {}
-  virtual void TpmAttestationGetCertificate(
-      chromeos::attestation::AttestationKeyType key_type,
-      const std::string& key_name,
-      const DataMethodCallback& callback) OVERRIDE {}
-  virtual void TpmAttestationGetPublicKey(
-      chromeos::attestation::AttestationKeyType key_type,
-      const std::string& key_name,
-      const DataMethodCallback& callback) OVERRIDE {}
-  virtual void TpmAttestationRegisterKey(
-      chromeos::attestation::AttestationKeyType key_type,
-      const std::string& key_name,
-      const AsyncMethodCallback& callback) OVERRIDE {}
-  virtual void TpmAttestationSignEnterpriseChallenge(
-      chromeos::attestation::AttestationKeyType key_type,
-      const std::string& key_name,
-      const std::string& domain,
-      const std::string& device_id,
-      chromeos::attestation::AttestationChallengeOptions options,
-      const std::string& challenge,
-      const AsyncMethodCallback& callback) OVERRIDE {}
-  virtual void TpmAttestationSignSimpleChallenge(
-      chromeos::attestation::AttestationKeyType key_type,
-      const std::string& key_name,
-      const std::string& challenge,
-      const AsyncMethodCallback& callback) OVERRIDE {}
-  virtual void TpmAttestationGetKeyPayload(
-      chromeos::attestation::AttestationKeyType key_type,
-      const std::string& key_name,
-      const DataMethodCallback& callback) OVERRIDE {}
-  virtual void TpmAttestationSetKeyPayload(
-      chromeos::attestation::AttestationKeyType key_type,
-      const std::string& key_name,
-      const std::string& payload,
-      const chromeos::BoolDBusMethodCallback& callback) OVERRIDE {}
-
- private:
-  AsyncCallStatusHandler handler_;
-  AsyncCallStatusWithDataHandler data_handler_;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeCryptohomeClient);
-};
-
 }  // namespace
 
 class DeviceLocalAccountTest : public InProcessBrowserTest {
  protected:
-  DeviceLocalAccountTest() {}
+  DeviceLocalAccountTest()
+      : user_id_1_(GenerateDeviceLocalAccountUserId(
+            kAccountId1, DeviceLocalAccount::TYPE_PUBLIC_SESSION)),
+        user_id_2_(GenerateDeviceLocalAccountUserId(
+            kAccountId2, DeviceLocalAccount::TYPE_PUBLIC_SESSION)) {}
+
   virtual ~DeviceLocalAccountTest() {}
 
   virtual void SetUp() OVERRIDE {
@@ -400,9 +100,6 @@ class DeviceLocalAccountTest : public InProcessBrowserTest {
     command_line->AppendSwitch(chromeos::switches::kLoginManager);
     command_line->AppendSwitch(chromeos::switches::kForceLoginManagerInTests);
     command_line->AppendSwitchASCII(
-        chromeos::switches::kLoginScreen,
-        chromeos::WizardController::kLoginScreenName);
-    command_line->AppendSwitchASCII(
         switches::kDeviceManagementUrl, test_server_.GetServiceURL().spec());
     command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile, "user");
   }
@@ -419,51 +116,23 @@ class DeviceLocalAccountTest : public InProcessBrowserTest {
     command_line->InitFromArgv(argv);
 
     // Mark the device enterprise-enrolled.
-    SetUpInstallAttributes();
-
-    SetUpPolicy();
+    DevicePolicyCrosBrowserTest::MarkAsEnterpriseOwned(&temp_dir_);
 
     // Redirect session_manager DBus calls to FakeSessionManagerClient.
-    chromeos::MockDBusThreadManager* dbus_thread_manager =
-        new chromeos::MockDBusThreadManager();
-    EXPECT_CALL(*dbus_thread_manager, GetSessionManagerClient())
-        .WillRepeatedly(Return(&session_manager_client_));
+    chromeos::MockDBusThreadManagerWithoutGMock* dbus_thread_manager =
+        new chromeos::MockDBusThreadManagerWithoutGMock();
+    session_manager_client_ =
+        dbus_thread_manager->fake_session_manager_client();
     chromeos::DBusThreadManager::InitializeForTesting(dbus_thread_manager);
 
-    // Mock out cryptohome mount calls to succeed immediately.
-    EXPECT_CALL(*dbus_thread_manager, GetCryptohomeClient())
-        .WillRepeatedly(Return(&cryptohome_client_));
+    SetUpPolicy();
   }
 
   virtual void CleanUpOnMainThread() OVERRIDE {
     // This shuts down the login UI.
-    MessageLoop::current()->PostTask(FROM_HERE,
-                                     base::Bind(&chrome::AttemptExit));
+    base::MessageLoop::current()->PostTask(FROM_HERE,
+                                           base::Bind(&chrome::AttemptExit));
     base::RunLoop().RunUntilIdle();
-  }
-
-  void SetUpInstallAttributes() {
-    cryptohome::SerializedInstallAttributes install_attrs_proto;
-    cryptohome::SerializedInstallAttributes::Attribute* attribute = NULL;
-
-    attribute = install_attrs_proto.add_attributes();
-    attribute->set_name(EnterpriseInstallAttributes::kAttrEnterpriseOwned);
-    attribute->set_value("true");
-
-    attribute = install_attrs_proto.add_attributes();
-    attribute->set_name(EnterpriseInstallAttributes::kAttrEnterpriseUser);
-    attribute->set_value(PolicyBuilder::kFakeUsername);
-
-    base::FilePath install_attrs_file =
-        temp_dir_.path().AppendASCII("install_attributes.pb");
-    const std::string install_attrs_blob(
-        install_attrs_proto.SerializeAsString());
-    ASSERT_EQ(static_cast<int>(install_attrs_blob.size()),
-              file_util::WriteFile(install_attrs_file,
-                                   install_attrs_blob.c_str(),
-                                   install_attrs_blob.size()));
-    ASSERT_TRUE(PathService::Override(chromeos::FILE_INSTALL_ATTRIBUTES,
-                                      install_attrs_file));
   }
 
   void SetUpPolicy() {
@@ -483,7 +152,7 @@ class DeviceLocalAccountTest : public InProcessBrowserTest {
     account2->set_type(
         em::DeviceLocalAccountInfoProto::ACCOUNT_TYPE_PUBLIC_SESSION);
     device_policy.Build();
-    session_manager_client_.set_device_policy(device_policy.GetBlob());
+    session_manager_client_->set_device_policy(device_policy.GetBlob());
     test_server_.UpdatePolicy(dm_protocol::kChromeDevicePolicyType,
                               std::string(), proto.SerializeAsString());
 
@@ -517,7 +186,7 @@ class DeviceLocalAccountTest : public InProcessBrowserTest {
     device_local_account_policy.payload().mutable_userdisplayname()->set_value(
         kDisplayName1);
     device_local_account_policy.Build();
-    session_manager_client_.set_device_local_account_policy(
+    session_manager_client_->set_device_local_account_policy(
         kAccountId1, device_local_account_policy.GetBlob());
     test_server_.UpdatePolicy(
         dm_protocol::kChromePublicAccountPolicyType, kAccountId1,
@@ -532,7 +201,7 @@ class DeviceLocalAccountTest : public InProcessBrowserTest {
 
     // Don't install policy for |kAccountId2| yet so initial download gets
     // test coverage.
-    ASSERT_TRUE(session_manager_client_.device_local_account_policy(
+    ASSERT_TRUE(session_manager_client_->device_local_account_policy(
         kAccountId2).empty());
   }
 
@@ -543,11 +212,13 @@ class DeviceLocalAccountTest : public InProcessBrowserTest {
     EXPECT_EQ(chromeos::User::USER_TYPE_PUBLIC_ACCOUNT, user->GetType());
   }
 
+  const std::string user_id_1_;
+  const std::string user_id_2_;
+
   LocalPolicyTestServer test_server_;
   base::ScopedTempDir temp_dir_;
 
-  FakeSessionManagerClient session_manager_client_;
-  FakeCryptohomeClient cryptohome_client_;
+  chromeos::FakeSessionManagerClient* session_manager_client_;
 };
 
 static bool IsKnownUser(const std::string& account_id) {
@@ -555,13 +226,15 @@ static bool IsKnownUser(const std::string& account_id) {
 }
 
 IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, LoginScreen) {
-  NotificationWatcher(chrome::NOTIFICATION_USER_LIST_CHANGED,
-                      base::Bind(&IsKnownUser, kAccountId1)).Run();
-  NotificationWatcher(chrome::NOTIFICATION_USER_LIST_CHANGED,
-                      base::Bind(&IsKnownUser, kAccountId2)).Run();
+  content::WindowedNotificationObserver(chrome::NOTIFICATION_USER_LIST_CHANGED,
+                                        base::Bind(&IsKnownUser, user_id_1_))
+      .Wait();
+  content::WindowedNotificationObserver(chrome::NOTIFICATION_USER_LIST_CHANGED,
+                                        base::Bind(&IsKnownUser, user_id_2_))
+      .Wait();
 
-  CheckPublicSessionPresent(kAccountId1);
-  CheckPublicSessionPresent(kAccountId2);
+  CheckPublicSessionPresent(user_id_1_);
+  CheckPublicSessionPresent(user_id_2_);
 }
 
 static bool DisplayNameMatches(const std::string& account_id,
@@ -575,9 +248,9 @@ static bool DisplayNameMatches(const std::string& account_id,
 }
 
 IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, DisplayName) {
-  NotificationWatcher(
+  content::WindowedNotificationObserver(
       chrome::NOTIFICATION_USER_LIST_CHANGED,
-      base::Bind(&DisplayNameMatches, kAccountId1, kDisplayName1)).Run();
+      base::Bind(&DisplayNameMatches, user_id_1_, kDisplayName1)).Wait();
 }
 
 IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, PolicyDownload) {
@@ -585,12 +258,12 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, PolicyDownload) {
   // sure it gets fetched from the server. Note that the test setup doesn't set
   // up policy for kAccountId2, so the presence of the display name can be used
   // as signal to indicate successful policy download.
-  NotificationWatcher(
+  content::WindowedNotificationObserver(
       chrome::NOTIFICATION_USER_LIST_CHANGED,
-      base::Bind(&DisplayNameMatches, kAccountId2, kDisplayName2)).Run();
+      base::Bind(&DisplayNameMatches, user_id_2_, kDisplayName2)).Wait();
 
   // Sanity check: The policy should be present now.
-  ASSERT_FALSE(session_manager_client_.device_local_account_policy(
+  ASSERT_FALSE(session_manager_client_->device_local_account_policy(
       kAccountId2).empty());
 }
 
@@ -600,10 +273,12 @@ static bool IsNotKnownUser(const std::string& account_id) {
 
 IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, DevicePolicyChange) {
   // Wait until the login screen is up.
-  NotificationWatcher(chrome::NOTIFICATION_USER_LIST_CHANGED,
-                      base::Bind(&IsKnownUser, kAccountId1)).Run();
-  NotificationWatcher(chrome::NOTIFICATION_USER_LIST_CHANGED,
-                      base::Bind(&IsKnownUser, kAccountId2)).Run();
+  content::WindowedNotificationObserver(chrome::NOTIFICATION_USER_LIST_CHANGED,
+                                        base::Bind(&IsKnownUser, user_id_1_))
+      .Wait();
+  content::WindowedNotificationObserver(chrome::NOTIFICATION_USER_LIST_CHANGED,
+                                        base::Bind(&IsKnownUser, user_id_2_))
+      .Wait();
 
   // Update policy to remove kAccountId2.
   em::ChromeDeviceSettingsProto policy;
@@ -619,8 +294,9 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, DevicePolicyChange) {
   g_browser_process->policy_service()->RefreshPolicies(base::Closure());
 
   // Make sure the second device-local account disappears.
-  NotificationWatcher(chrome::NOTIFICATION_USER_LIST_CHANGED,
-                      base::Bind(&IsNotKnownUser, kAccountId2)).Run();
+  content::WindowedNotificationObserver(
+      chrome::NOTIFICATION_USER_LIST_CHANGED,
+      base::Bind(&IsNotKnownUser, user_id_2_)).Wait();
 }
 
 static bool IsSessionStarted() {
@@ -631,18 +307,22 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, StartSession) {
   // This observes the display name becoming available as this indicates
   // device-local account policy is fully loaded, which is a prerequisite for
   // successful login.
-  NotificationWatcher(
+  content::WindowedNotificationObserver(
       chrome::NOTIFICATION_USER_LIST_CHANGED,
-      base::Bind(&DisplayNameMatches, kAccountId1, kDisplayName1)).Run();
+      base::Bind(&DisplayNameMatches, user_id_1_, kDisplayName1)).Wait();
 
+  chromeos::LoginDisplayHost* host =
+      chromeos::LoginDisplayHostImpl::default_host();
+  ASSERT_TRUE(host);
+  host->StartSignInScreen();
   chromeos::ExistingUserController* controller =
       chromeos::ExistingUserController::current_controller();
   ASSERT_TRUE(controller);
-  controller->LoginAsPublicAccount(kAccountId1);
+  controller->LoginAsPublicAccount(user_id_1_);
 
   // Wait for the session to start.
-  NotificationWatcher(chrome::NOTIFICATION_SESSION_STARTED,
-                      base::Bind(IsSessionStarted)).Run();
+  content::WindowedNotificationObserver(chrome::NOTIFICATION_SESSION_STARTED,
+                                        base::Bind(IsSessionStarted)).Wait();
 
   // Check that the startup pages specified in policy were opened.
   EXPECT_EQ(1U, chrome::GetTotalBrowserCount());

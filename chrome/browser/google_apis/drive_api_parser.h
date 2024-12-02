@@ -98,14 +98,14 @@ class AboutResource {
 };
 
 // DriveAppIcon represents an icon for Drive Application.
-// https://developers.google.com/drive/v2/reference/apps/list
+// https://developers.google.com/drive/v2/reference/apps
 class DriveAppIcon {
  public:
   enum IconCategory {
-    UNKNOWN,          // Uninitialized state
-    DOCUMENT,         // Document icon for various MIME types
-    APPLICATION,      // Application icon for various MIME types
-    SHARED_DOCUMENT,  // Icon for documents that are shared from other users.
+    UNKNOWN,          // Uninitialized state.
+    DOCUMENT,         // Icon for a file associated with the app.
+    APPLICATION,      // Icon for the application.
+    SHARED_DOCUMENT,  // Icon for a shared file associated with the app.
   };
 
   DriveAppIcon();
@@ -164,7 +164,7 @@ class DriveAppIcon {
 };
 
 // AppResource represents a Drive Application.
-// https://developers.google.com/drive/v2/reference/apps/list
+// https://developers.google.com/drive/v2/reference/apps
 class AppResource {
  public:
   ~AppResource();
@@ -453,6 +453,12 @@ class FileLabels {
 // https://developers.google.com/drive/v2/reference/files
 class FileResource {
  public:
+  // Link to open a file resource on a web app with |app_id|.
+  struct OpenWithLink {
+    std::string app_id;
+    GURL open_url;
+  };
+
   FileResource();
   ~FileResource();
 
@@ -541,6 +547,11 @@ class FileResource {
   // authentication.
   const GURL& web_content_link() const { return web_content_link_; }
 
+  // Returns the list of links to open the resource with a web app.
+  const std::vector<OpenWithLink>& open_with_links() const {
+    return open_with_links_;
+  }
+
   void set_file_id(const std::string& file_id) {
     file_id_ = file_id;
   }
@@ -625,6 +636,7 @@ class FileResource {
   ScopedVector<ParentReference> parents_;
   GURL thumbnail_link_;
   GURL web_content_link_;
+  std::vector<OpenWithLink> open_with_links_;
 
   DISALLOW_COPY_AND_ASSIGN(FileResource);
 };

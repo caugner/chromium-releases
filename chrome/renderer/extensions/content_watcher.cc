@@ -9,9 +9,9 @@
 #include "chrome/renderer/extensions/dispatcher.h"
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/render_view_visitor.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebView.h"
 
 namespace extensions {
 
@@ -20,9 +20,9 @@ namespace {
 class MutationHandler : public ChromeV8Extension {
  public:
   explicit MutationHandler(Dispatcher* dispatcher,
-                           v8::Handle<v8::Context> v8_context,
+                           ChromeV8Context* context,
                            base::WeakPtr<ContentWatcher> content_watcher)
-      : ChromeV8Extension(dispatcher, v8_context),
+      : ChromeV8Extension(dispatcher, context),
         content_watcher_(content_watcher) {
     RouteFunction("FrameMutated",
                   base::Bind(&MutationHandler::FrameMutated,
@@ -30,12 +30,11 @@ class MutationHandler : public ChromeV8Extension {
   }
 
  private:
-  v8::Handle<v8::Value> FrameMutated(const v8::Arguments& args) {
-    if (content_watcher_) {
+  void FrameMutated(const v8::FunctionCallbackInfo<v8::Value>& args) {
+    if (content_watcher_.get()) {
       content_watcher_->ScanAndNotify(
-          WebKit::WebFrame::frameForContext(v8_context()));
+          WebKit::WebFrame::frameForContext(context()->v8_context()));
     }
-    return v8::Undefined();
   }
 
   base::WeakPtr<ContentWatcher> content_watcher_;
@@ -49,9 +48,9 @@ ContentWatcher::ContentWatcher(Dispatcher* dispatcher)
 ContentWatcher::~ContentWatcher() {}
 
 scoped_ptr<NativeHandler> ContentWatcher::MakeNatives(
-    v8::Handle<v8::Context> v8_context) {
+    ChromeV8Context* context) {
   return scoped_ptr<NativeHandler>(new MutationHandler(
-      dispatcher_, v8_context, weak_ptr_factory_.GetWeakPtr()));
+      dispatcher_, context, weak_ptr_factory_.GetWeakPtr()));
 }
 
 void ContentWatcher::OnWatchPages(

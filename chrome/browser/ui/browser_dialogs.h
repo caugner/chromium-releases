@@ -5,15 +5,19 @@
 #ifndef CHROME_BROWSER_UI_BROWSER_DIALOGS_H_
 #define CHROME_BROWSER_UI_BROWSER_DIALOGS_H_
 
+#include "base/callback.h"
 #include "ipc/ipc_message.h"  // For IPC_MESSAGE_LOG_ENABLED.
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/native_widget_types.h"
 
 class Browser;
+class Profile;
 class SkBitmap;
 class TabModalConfirmDialogDelegate;
 
 namespace content {
 class BrowserContext;
+class ColorChooser;
 class WebContents;
 }
 
@@ -22,6 +26,7 @@ class Extension;
 }
 
 namespace ui {
+class ProfileSigninConfirmationDelegate;
 class WebDialogDelegate;
 }
 
@@ -63,15 +68,25 @@ void ShowExtensionInstalledBubble(const extensions::Extension* extension,
 void ShowHungRendererDialog(content::WebContents* contents);
 void HideHungRendererDialog(content::WebContents* contents);
 
-// Shows the Task Manager. If |highlight_background_resources| is set, the
-// backgroundpages will be shown. |browser| can be NULL when called from ASH.
-void ShowTaskManager(Browser* browser, bool highlight_background_resources);
+// Shows the Task Manager. |browser| can be NULL when called from Ash.
+void ShowTaskManager(Browser* browser);
 
 #if !defined(OS_MACOSX)
 // Shows the create web app shortcut dialog box.
 void ShowCreateWebAppShortcutsDialog(gfx::NativeWindow parent_window,
                                      content::WebContents* web_contents);
 #endif
+
+// Shows a color chooser that reports to the given WebContents.
+content::ColorChooser* ShowColorChooser(content::WebContents* web_contents,
+                                        SkColor initial_color);
+
+void ShowProfileSigninConfirmationDialog(
+    Browser* browser,
+    content::WebContents* web_contents,
+    Profile* profile,
+    const std::string& username,
+    ui::ProfileSigninConfirmationDelegate* delegate);
 
 }  // namespace chrome
 

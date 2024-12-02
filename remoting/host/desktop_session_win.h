@@ -7,16 +7,13 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/time.h"
 #include "base/timer.h"
 #include "base/win/scoped_handle.h"
 #include "ipc/ipc_platform_file.h"
 #include "remoting/host/desktop_session.h"
 #include "remoting/host/win/wts_terminal_observer.h"
 #include "remoting/host/worker_process_ipc_delegate.h"
-
-namespace net {
-class IPEndPoint;
-}  // namespace net
 
 namespace tracked_objects {
 class Location;
@@ -75,11 +72,14 @@ class DesktopSessionWin
   // Called when |session_attach_timer_| expires.
   void OnSessionAttachTimeout();
 
-  // Starts monitoring for session attach/detach events for |client_endpoint|.
-  void StartMonitoring(const net::IPEndPoint& client_endpoint);
+  // Starts monitoring for session attach/detach events for |terminal_id|.
+  void StartMonitoring(const std::string& terminal_id);
 
   // Stops monitoring for session attach/detach events.
   void StopMonitoring();
+
+  // Asks DaemonProcess to terminate this session.
+  void TerminateSession();
 
   // Injects a secure attention sequence into the session.
   virtual void InjectSas() = 0;
@@ -87,7 +87,7 @@ class DesktopSessionWin
   // WorkerProcessIpcDelegate implementation.
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void OnPermanentError() OVERRIDE;
+  virtual void OnPermanentError(int exit_code) OVERRIDE;
 
   // WtsTerminalObserver implementation.
   virtual void OnSessionAttached(uint32 session_id) OVERRIDE;
@@ -99,6 +99,9 @@ class DesktopSessionWin
 
   // Requests the desktop process to crash.
   void CrashDesktopProcess(const tracked_objects::Location& location);
+
+  // Reports time elapsed since previous event to the debug log.
+  void ReportElapsedTime(const std::string& event);
 
   // Task runner on which public methods of this class should be called.
   scoped_refptr<AutoThreadTaskRunner> caller_task_runner_;
@@ -121,6 +124,8 @@ class DesktopSessionWin
   // Used to report an error if the session attach notification does not arrives
   // for too long.
   base::OneShotTimer<DesktopSessionWin> session_attach_timer_;
+
+  base::Time last_timestamp_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopSessionWin);
 };

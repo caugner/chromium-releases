@@ -13,7 +13,7 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/captive_portal/captive_portal_service.h"
 #include "chrome/browser/captive_portal/captive_portal_service_factory.h"
 #include "chrome/browser/captive_portal/captive_portal_tab_helper.h"
@@ -290,7 +290,7 @@ void URLRequestTimeoutOnDemandJob::MaybeStopWaitingForJobsOnIOThread() {
     last_num_jobs_to_wait_for_ = num_jobs_to_wait_for_;
     num_jobs_to_wait_for_ = 0;
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            MessageLoop::QuitClosure());
+                            base::MessageLoop::QuitClosure());
   }
 }
 
@@ -579,7 +579,7 @@ void MultiNavigationObserver::Observe(
   if (waiting_for_navigation_ &&
       num_navigations_to_wait_for_ == num_navigations_) {
     waiting_for_navigation_ = false;
-    MessageLoopForUI::current()->Quit();
+    base::MessageLoopForUI::current()->Quit();
   }
 }
 
@@ -668,7 +668,7 @@ void FailLoadsAfterLoginObserver::Observe(
       tabs_needing_navigation_.size() ==
           tabs_navigated_to_final_destination_.size()) {
     waiting_for_navigation_ = false;
-    MessageLoopForUI::current()->Quit();
+    base::MessageLoopForUI::current()->Quit();
   }
 }
 
@@ -762,7 +762,7 @@ void CaptivePortalObserver::Observe(
   if (waiting_for_result_ &&
       num_results_to_wait_for_ == num_results_received_) {
     waiting_for_result_ = false;
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
   }
 }
 
@@ -2065,7 +2065,7 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, DISABLED_TwoWindows) {
                                         browser()->host_desktop_type()));
   // Navigate the new browser window so it'll be shown and we can pick the
   // active window.
-  ui_test_utils::NavigateToURL(browser2, GURL(chrome::kAboutBlankURL));
+  ui_test_utils::NavigateToURL(browser2, GURL(content::kAboutBlankURL));
 
   // Generally, |browser2| will be the active window.  However, if the
   // original browser window lost focus before creating the new one, such as

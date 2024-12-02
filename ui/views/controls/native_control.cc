@@ -208,9 +208,9 @@ void NativeControl::ValidateNativeControl() {
   }
 }
 
-void NativeControl::ViewHierarchyChanged(bool is_add, View *parent,
-                                         View *child) {
-  if (is_add && parent != this && !container_ && GetWidget()) {
+void NativeControl::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  if (details.is_add && details.parent != this && !container_ && GetWidget()) {
     ValidateNativeControl();
     Layout();
   }
@@ -269,10 +269,12 @@ void NativeControl::OnContextMenu(const POINT& location) {
   if (!context_menu_controller())
     return;
 
-  if (location.x == -1 && location.y == -1)
-    ShowContextMenu(GetKeyboardContextMenuLocation(), false);
-  else
-    ShowContextMenu(gfx::Point(location), true);
+  if (location.x == -1 && location.y == -1) {
+    ShowContextMenu(GetKeyboardContextMenuLocation(),
+                    ui::MENU_SOURCE_KEYBOARD);
+  } else {
+    ShowContextMenu(gfx::Point(location), ui::MENU_SOURCE_MOUSE);
+  }
 }
 
 void NativeControl::OnFocus() {

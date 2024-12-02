@@ -21,12 +21,12 @@
 #include "base/platform_file.h"
 #include "base/prefs/pref_member.h"
 #include "base/sequenced_task_runner_helpers.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/worker_pool.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
@@ -42,6 +42,7 @@
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/webui/extensions/extension_basic_info.h"
 #include "chrome/common/cancelable_task_tracker.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -60,6 +61,7 @@
 #include "grit/generated_resources.h"
 #include "grit/net_internals_resources.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_log_logger.h"
 #include "net/base/net_util.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/dns/host_cache.h"
@@ -102,11 +104,6 @@ namespace {
 // page.  All events that occur during this period are grouped together and
 // sent to the page at once, which reduces context switching and CPU usage.
 const int kNetLogEventDelayMilliseconds = 100;
-
-// about:net-internals will not even attempt to load a log dump when it
-// encounters a new version.  This should be incremented when significant
-// changes are made that will invalidate the old loading code.
-const int kLogFormatVersion = 1;
 
 // Returns the HostCache for |context|'s primary HostResolver, or NULL if
 // there is none.
@@ -669,7 +666,7 @@ class NetInternalsMessageHandler::IOThreadImpl
 NetInternalsMessageHandler::NetInternalsMessageHandler() {}
 
 NetInternalsMessageHandler::~NetInternalsMessageHandler() {
-  if (proxy_) {
+  if (proxy_.get()) {
     proxy_.get()->OnWebUIDeleted();
     // Notify the handler on the IO thread that the renderer is gone.
     BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
@@ -908,7 +905,7 @@ void NetInternalsMessageHandler::OnGetExtensionInfo(const ListValue* list) {
            it != extensions->end(); ++it) {
         DictionaryValue* extension_info = new DictionaryValue();
         bool enabled = extension_service->IsExtensionEnabled((*it)->id());
-        (*it)->GetBasicInfo(enabled, extension_info);
+        extensions::GetExtensionBasicInfo(it->get(), enabled, extension_info);
         extension_list->Append(extension_info);
       }
     }
@@ -928,7 +925,6 @@ NetInternalsMessageHandler::SystemLogsGetter::SystemLogsGetter(
     chromeos::system::SyslogsProvider* syslogs_provider)
     : handler_(handler),
       syslogs_provider_(syslogs_provider),
-      logs_(NULL),
       logs_received_(false),
       logs_requested_(false) {
   if (!syslogs_provider_)
@@ -1284,7 +1280,8 @@ void NetInternalsMessageHandler::IOThreadImpl::OnHSTSQuery(
       result->SetBoolean("result", found);
       if (found) {
         result->SetInteger("mode", static_cast<int>(state.upgrade_mode));
-        result->SetBoolean("subdomains", state.include_subdomains);
+        result->SetBoolean("sts_subdomains", state.sts_include_subdomains);
+        result->SetBoolean("pkp_subdomains", state.pkp_include_subdomains);
         result->SetString("domain", state.domain);
         result->SetDouble("expiry", state.upgrade_expiry.ToDoubleT());
         result->SetDouble("dynamic_spki_hashes_expiry",
@@ -1303,7 +1300,8 @@ void NetInternalsMessageHandler::IOThreadImpl::OnHSTSQuery(
 
 void NetInternalsMessageHandler::IOThreadImpl::OnHSTSAdd(
     const ListValue* list) {
-  // |list| should be: [<domain to query>, <include subdomains>, <cert pins>].
+  // |list| should be: [<domain to query>, <STS include subdomains>, <PKP
+  // include subdomains>, <key pins>].
   std::string domain;
   CHECK(list->GetString(0, &domain));
   if (!IsStringASCII(domain)) {
@@ -1311,10 +1309,12 @@ void NetInternalsMessageHandler::IOThreadImpl::OnHSTSAdd(
     // name.
     return;
   }
-  bool include_subdomains;
-  CHECK(list->GetBoolean(1, &include_subdomains));
+  bool sts_include_subdomains;
+  CHECK(list->GetBoolean(1, &sts_include_subdomains));
+  bool pkp_include_subdomains;
+  CHECK(list->GetBoolean(2, &pkp_include_subdomains));
   std::string hashes_str;
-  CHECK(list->GetString(2, &hashes_str));
+  CHECK(list->GetString(3, &hashes_str));
 
   net::TransportSecurityState* transport_security_state =
       GetMainContext()->transport_security_state();
@@ -1328,8 +1328,8 @@ void NetInternalsMessageHandler::IOThreadImpl::OnHSTSAdd(
       return;
   }
 
-  transport_security_state->AddHSTS(domain, expiry, include_subdomains);
-  transport_security_state->AddHPKP(domain, expiry, include_subdomains,
+  transport_security_state->AddHSTS(domain, expiry, sts_include_subdomains);
+  transport_security_state->AddHPKP(domain, expiry, pkp_include_subdomains,
                                     hashes);
 }
 
@@ -1751,7 +1751,7 @@ void NetInternalsMessageHandler::IOThreadImpl::SendJavascriptCommand(
     const std::string& command,
     Value* arg) {
   if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    if (handler_ && !was_webui_deleted_) {
+    if (handler_.get() && !was_webui_deleted_) {
       // We check |handler_| in case it was deleted on the UI thread earlier
       // while we were running on the IO thread.
       handler_->SendJavascriptCommand(command, arg);
@@ -1850,14 +1850,8 @@ void NetInternalsMessageHandler::IOThreadImpl::PrePopulateEventList() {
 
 // static
 Value* NetInternalsUI::GetConstants() {
-  DictionaryValue* constants_dict = new DictionaryValue();
-
-  // Version of the file format.
-  constants_dict->SetInteger("logFormatVersion", kLogFormatVersion);
-
-  // Add a dictionary with information on the relationship between event type
-  // enums and their symbolic names.
-  constants_dict->Set("logEventTypes", net::NetLog::GetEventTypesAsValue());
+  DictionaryValue* constants_dict = net::NetLogLogger::GetConstants();
+  DCHECK(constants_dict);
 
   // Add a dictionary with the version of the client and its command line
   // arguments.
@@ -1886,111 +1880,6 @@ Value* NetInternalsUI::GetConstants() {
     constants_dict->Set("clientInfo", dict);
   }
 
-  // Add a dictionary with information about the relationship between load flag
-  // enums and their symbolic names.
-  {
-    DictionaryValue* dict = new DictionaryValue();
-
-#define LOAD_FLAG(label, value) \
-    dict->SetInteger(# label, static_cast<int>(value));
-#include "net/base/load_flags_list.h"
-#undef LOAD_FLAG
-
-    constants_dict->Set("loadFlag", dict);
-  }
-
-  // Add a dictionary with information about the relationship between load state
-  // enums and their symbolic names.
-  {
-    DictionaryValue* dict = new DictionaryValue();
-
-#define LOAD_STATE(label) \
-    dict->SetInteger(# label, net::LOAD_STATE_ ## label);
-#include "net/base/load_states_list.h"
-#undef LOAD_STATE
-
-    constants_dict->Set("loadState", dict);
-  }
-
-  // Add information on the relationship between net error codes and their
-  // symbolic names.
-  {
-    DictionaryValue* dict = new DictionaryValue();
-
-#define NET_ERROR(label, value) \
-    dict->SetInteger(# label, static_cast<int>(value));
-#include "net/base/net_error_list.h"
-#undef NET_ERROR
-
-    constants_dict->Set("netError", dict);
-  }
-
-  // Information about the relationship between event phase enums and their
-  // symbolic names.
-  {
-    DictionaryValue* dict = new DictionaryValue();
-
-    dict->SetInteger("PHASE_BEGIN", net::NetLog::PHASE_BEGIN);
-    dict->SetInteger("PHASE_END", net::NetLog::PHASE_END);
-    dict->SetInteger("PHASE_NONE", net::NetLog::PHASE_NONE);
-
-    constants_dict->Set("logEventPhase", dict);
-  }
-
-  // Information about the relationship between source type enums and
-  // their symbolic names.
-  constants_dict->Set("logSourceType", net::NetLog::GetSourceTypesAsValue());
-
-  // Information about the relationship between LogLevel enums and their
-  // symbolic names.
-  {
-    DictionaryValue* dict = new DictionaryValue();
-
-    dict->SetInteger("LOG_ALL", net::NetLog::LOG_ALL);
-    dict->SetInteger("LOG_ALL_BUT_BYTES", net::NetLog::LOG_ALL_BUT_BYTES);
-    dict->SetInteger("LOG_BASIC", net::NetLog::LOG_BASIC);
-
-    constants_dict->Set("logLevelType", dict);
-  }
-
-  // Information about the relationship between address family enums and
-  // their symbolic names.
-  {
-    DictionaryValue* dict = new DictionaryValue();
-
-    dict->SetInteger("ADDRESS_FAMILY_UNSPECIFIED",
-                     net::ADDRESS_FAMILY_UNSPECIFIED);
-    dict->SetInteger("ADDRESS_FAMILY_IPV4",
-                     net::ADDRESS_FAMILY_IPV4);
-    dict->SetInteger("ADDRESS_FAMILY_IPV6",
-                     net::ADDRESS_FAMILY_IPV6);
-
-    constants_dict->Set("addressFamily", dict);
-  }
-
-  // Information about how the "time ticks" values we have given it relate to
-  // actual system times. (We used time ticks throughout since they are stable
-  // across system clock changes).
-  {
-    int64 cur_time_ms = (base::Time::Now() - base::Time()).InMilliseconds();
-
-    int64 cur_time_ticks_ms =
-        (base::TimeTicks::Now() - base::TimeTicks()).InMilliseconds();
-
-    // If we add this number to a time tick value, it gives the timestamp.
-    int64 tick_to_time_ms = cur_time_ms - cur_time_ticks_ms;
-
-    // Chrome on all platforms stores times using the Windows epoch
-    // (Jan 1 1601), but the javascript wants a unix epoch.
-    // TODO(eroman): Getting the timestamp relative to the unix epoch should
-    //               be part of the time library.
-    const int64 kUnixEpochMs = 11644473600000LL;
-    int64 tick_to_unix_time_ms = tick_to_time_ms - kUnixEpochMs;
-
-    // Pass it as a string, since it may be too large to fit in an integer.
-    constants_dict->SetString("timeTickOffset",
-                              base::Int64ToString(tick_to_unix_time_ms));
-  }
   return constants_dict;
 }
 

@@ -17,7 +17,7 @@ using content::BrowserThread;
 namespace {
 
 // Install predicate used by AddFromExternalUpdateUrl().
-bool AlwaysInstall(const extensions::Extension& extension) {
+bool AlwaysInstall(const extensions::Extension* extension) {
   return true;
 }
 
@@ -117,6 +117,26 @@ bool PendingExtensionManager::AddFromSync(
 
   return AddExtensionImpl(id, update_url, Version(), should_allow_install,
                           kIsFromSync, install_silently, kSyncLocation);
+}
+
+bool PendingExtensionManager::AddFromExtensionImport(
+    const std::string& id,
+    const GURL& update_url,
+    PendingExtensionInfo::ShouldAllowInstallPredicate should_allow_install) {
+  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (service_.GetInstalledExtension(id)) {
+    LOG(ERROR) << "Trying to add pending extension " << id
+               << " which already exists";
+    return false;
+  }
+
+  const bool kIsFromSync = false;
+  const bool kInstallSilently = true;
+  const Manifest::Location kManifestLocation = Manifest::INTERNAL;
+
+  return AddExtensionImpl(id, update_url, Version(), should_allow_install,
+                          kIsFromSync, kInstallSilently, kManifestLocation);
 }
 
 bool PendingExtensionManager::AddFromExternalUpdateUrl(

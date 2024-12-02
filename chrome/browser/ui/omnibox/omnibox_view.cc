@@ -7,9 +7,9 @@
 
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 
-#include "base/string_util.h"
-#include "base/string16.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string16.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "ui/base/clipboard/clipboard.h"
 
@@ -95,7 +95,8 @@ bool OmniboxView::IsEditingOrEmpty() const {
 int OmniboxView::GetIcon() const {
   if (IsEditingOrEmpty()) {
     return AutocompleteMatch::TypeToLocationBarIcon(model_.get() ?
-          model_->CurrentTextType() : AutocompleteMatch::URL_WHAT_YOU_TYPED);
+          model_->CurrentTextType() :
+              AutocompleteMatchType::URL_WHAT_YOU_TYPED);
   } else {
     return toolbar_model_->GetIcon();
   }
@@ -124,6 +125,19 @@ void OmniboxView::RevertAll() {
 void OmniboxView::CloseOmniboxPopup() {
   if (model_.get())
     model_->StopAutocomplete();
+}
+
+bool OmniboxView::IsImeShowingPopup() const {
+  // Default to claiming that the IME is not showing a popup, since hiding the
+  // omnibox dropdown is a bad user experience when we don't know for sure that
+  // we have to.
+  return false;
+}
+
+bool OmniboxView::IsIndicatingQueryRefinement() const {
+  // The default implementation always returns false.  Mobile ports can override
+  // this method and implement as needed.
+  return false;
 }
 
 OmniboxView::OmniboxView(Profile* profile,

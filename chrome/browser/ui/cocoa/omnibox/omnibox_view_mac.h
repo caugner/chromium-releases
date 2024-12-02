@@ -8,7 +8,7 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 
@@ -177,9 +177,6 @@ class OmniboxViewMac : public OmniboxView,
 
   // Was the delete key pressed with an empty selection at the end of the edit?
   bool delete_at_end_pressed_;
-
-  // The maximum/standard line height for the displayed text.
-  CGFloat line_height_;
 
   string16 suggest_text_;
 

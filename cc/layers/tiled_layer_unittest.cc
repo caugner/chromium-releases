@@ -52,12 +52,13 @@ class TiledLayerTest : public testing::Test {
         fake_layer_impl_tree_host_client_(FakeLayerTreeHostClient::DIRECT_3D),
         occlusion_(NULL) {
     settings_.max_partial_texture_updates = std::numeric_limits<size_t>::max();
+    settings_.layer_transforms_should_scale_layer_contents = true;
   }
 
   virtual void SetUp() {
     layer_tree_host_ = LayerTreeHost::Create(&fake_layer_impl_tree_host_client_,
                                              settings_,
-                                             scoped_ptr<Thread>(NULL));
+                                             NULL);
     proxy_ = layer_tree_host_->proxy();
     resource_manager_ = PrioritizedResourceManager::Create(proxy_);
     layer_tree_host_->InitializeOutputSurfaceIfNeeded();
@@ -97,7 +98,7 @@ class TiledLayerTest : public testing::Test {
     DCHECK(queue_);
     scoped_ptr<ResourceUpdateController> update_controller =
         ResourceUpdateController::Create(NULL,
-                                         proxy_->ImplThread(),
+                                         proxy_->ImplThreadTaskRunner(),
                                          queue_.Pass(),
                                          resource_provider_.get());
     update_controller->Finalize();
@@ -123,9 +124,9 @@ class TiledLayerTest : public testing::Test {
 
   void CalcDrawProps(const scoped_refptr<FakeTiledLayer>& layer1,
                      const scoped_refptr<FakeTiledLayer>& layer2) {
-    if (layer1 && !layer1->parent())
+    if (layer1.get() && !layer1->parent())
       layer_tree_host_->root_layer()->AddChild(layer1);
-    if (layer2 && !layer2->parent())
+    if (layer2.get() && !layer2->parent())
       layer_tree_host_->root_layer()->AddChild(layer2);
     if (occlusion_)
       occlusion_->SetRenderTarget(layer_tree_host_->root_layer());
@@ -134,11 +135,13 @@ class TiledLayerTest : public testing::Test {
     LayerTreeHostCommon::CalculateDrawProperties(
         layer_tree_host_->root_layer(),
         layer_tree_host_->device_viewport_size(),
+        gfx::Transform(),
         layer_tree_host_->device_scale_factor(),
         1.f,    // page_scale_factor
         NULL,
         layer_tree_host_->GetRendererCapabilities().max_texture_size,
         false,  // can_use_lcd_text
+        true,  // can_adjust_raster_scale
         &render_surface_layer_list);
   }
 
@@ -155,35 +158,35 @@ class TiledLayerTest : public testing::Test {
                      const scoped_ptr<FakeTiledLayerImpl>& layer_impl2) {
     // Get textures
     resource_manager_->ClearPriorities();
-    if (layer1)
+    if (layer1.get())
       layer1->SetTexturePriorities(priority_calculator_);
-    if (layer2)
+    if (layer2.get())
       layer2->SetTexturePriorities(priority_calculator_);
     resource_manager_->PrioritizeTextures();
 
     // Save paint properties
-    if (layer1)
+    if (layer1.get())
       layer1->SavePaintProperties();
-    if (layer2)
+    if (layer2.get())
       layer2->SavePaintProperties();
 
     // Update content
-    if (layer1)
+    if (layer1.get())
       layer1->Update(queue_.get(), occlusion_, NULL);
-    if (layer2)
+    if (layer2.get())
       layer2->Update(queue_.get(), occlusion_, NULL);
 
     bool needs_update = false;
-    if (layer1)
+    if (layer1.get())
       needs_update |= layer1->NeedsIdlePaint();
-    if (layer2)
+    if (layer2.get())
       needs_update |= layer2->NeedsIdlePaint();
 
     // Update textures and push.
     UpdateTextures();
-    if (layer1)
+    if (layer1.get())
       LayerPushPropertiesTo(layer1.get(), layer_impl1.get());
-    if (layer2)
+    if (layer2.get())
       LayerPushPropertiesTo(layer2.get(), layer_impl2.get());
 
     return needs_update;
@@ -1295,26 +1298,53 @@ TEST_F(TiledLayerTest, TilesPaintedWithOcclusionAndTransforms) {
 
 TEST_F(TiledLayerTest, TilesPaintedWithOcclusionAndScaling) {
   scoped_refptr<FakeTiledLayer> layer =
-      make_scoped_refptr(new FakeTiledLayer(resource_manager_.get()));
+      new FakeTiledLayer(resource_manager_.get());
   TestOcclusionTracker occluded;
   occlusion_ = &occluded;
+
+  scoped_refptr<FakeTiledLayer> scale_layer =
+      new FakeTiledLayer(resource_manager_.get());
+  gfx::Transform scale_transform;
+  scale_transform.Scale(2.0, 2.0);
+  scale_layer->SetTransform(scale_transform);
 
   // The tile size is 100x100.
 
   // This makes sure the painting works when the content space is scaled to
-  // a different layer space. In this case tiles are scaled to be 200x200
-  // pixels, which means none should be occluded.
+  // a different layer space.
   layer_tree_host_->SetViewportSize(gfx::Size(600, 600));
-  layer->SetBounds(gfx::Size(600, 600));
-  layer->SetRasterScale(0.5);
-  CalcDrawProps(layer);
-  EXPECT_FLOAT_EQ(layer->contents_scale_x(), layer->contents_scale_y());
-  gfx::Transform draw_transform;
-  double inv_scale_factor = 1 / layer->contents_scale_x();
-  draw_transform.Scale(inv_scale_factor, inv_scale_factor);
-  layer->draw_properties().target_space_transform = draw_transform;
-  layer->draw_properties().screen_space_transform = draw_transform;
+  layer->SetAnchorPoint(gfx::PointF());
+  layer->SetBounds(gfx::Size(300, 300));
+  scale_layer->AddChild(layer);
+  CalcDrawProps(scale_layer);
+  EXPECT_FLOAT_EQ(2.f, layer->contents_scale_x());
+  EXPECT_FLOAT_EQ(2.f, layer->contents_scale_y());
+  EXPECT_EQ(gfx::Size(600, 600).ToString(),
+            layer->content_bounds().ToString());
 
+  // No tiles are covered by the 300x50 occlusion.
+  occluded.SetOcclusion(gfx::Rect(200, 200, 300, 50));
+  layer->draw_properties().drawable_content_rect =
+      gfx::Rect(layer->bounds());
+  layer->draw_properties().visible_content_rect =
+      gfx::Rect(layer->content_bounds());
+  layer->InvalidateContentRect(gfx::Rect(0, 0, 600, 600));
+  layer->SetTexturePriorities(priority_calculator_);
+  resource_manager_->PrioritizeTextures();
+  layer->SavePaintProperties();
+  layer->Update(queue_.get(), &occluded, NULL);
+  int visible_tiles1 = 6 * 6;
+  EXPECT_EQ(visible_tiles1, layer->fake_layer_updater()->update_count());
+
+  EXPECT_NEAR(occluded.overdraw_metrics()->pixels_uploaded_opaque(), 0, 1);
+  EXPECT_NEAR(occluded.overdraw_metrics()->pixels_uploaded_translucent(),
+              visible_tiles1 * 100 * 100,
+              1);
+  EXPECT_EQ(0, occluded.overdraw_metrics()->tiles_culled_for_upload());
+
+  layer->fake_layer_updater()->ClearUpdateCount();
+
+  // The occlusion of 300x100 will be cover 3 tiles as tiles are 100x100 still.
   occluded.SetOcclusion(gfx::Rect(200, 200, 300, 100));
   layer->draw_properties().drawable_content_rect =
       gfx::Rect(layer->bounds());
@@ -1325,52 +1355,32 @@ TEST_F(TiledLayerTest, TilesPaintedWithOcclusionAndScaling) {
   resource_manager_->PrioritizeTextures();
   layer->SavePaintProperties();
   layer->Update(queue_.get(), &occluded, NULL);
-  // The content is half the size of the layer (so the number of tiles is
-  // fewer).  In this case, the content is 300x300, and since the tile size is
-  // 100, the number of tiles 3x3.
-  EXPECT_EQ(9, layer->fake_layer_updater()->update_count());
-
-  EXPECT_NEAR(occluded.overdraw_metrics()->pixels_uploaded_opaque(), 0, 1);
-  EXPECT_NEAR(
-      occluded.overdraw_metrics()->pixels_uploaded_translucent(), 90000, 1);
-  EXPECT_EQ(0, occluded.overdraw_metrics()->tiles_culled_for_upload());
-
-  layer->fake_layer_updater()->ClearUpdateCount();
-
-  // This makes sure the painting works when the content space is scaled to
-  // a different layer space. In this case the occluded region catches the
-  // blown up tiles.
-  occluded.SetOcclusion(gfx::Rect(200, 200, 300, 200));
-  layer->draw_properties().drawable_content_rect =
-      gfx::Rect(layer->bounds());
-  layer->draw_properties().visible_content_rect =
-      gfx::Rect(layer->content_bounds());
-  layer->InvalidateContentRect(gfx::Rect(0, 0, 600, 600));
-  layer->SetTexturePriorities(priority_calculator_);
-  resource_manager_->PrioritizeTextures();
-  layer->SavePaintProperties();
-  layer->Update(queue_.get(), &occluded, NULL);
-  EXPECT_EQ(9 - 1, layer->fake_layer_updater()->update_count());
+  int visible_tiles2 = 6 * 6 - 3;
+  EXPECT_EQ(visible_tiles2, layer->fake_layer_updater()->update_count());
 
   EXPECT_NEAR(occluded.overdraw_metrics()->pixels_uploaded_opaque(), 0, 1);
   EXPECT_NEAR(occluded.overdraw_metrics()->pixels_uploaded_translucent(),
-              90000 + 80000,
+              visible_tiles2 * 100 * 100 +
+              visible_tiles1 * 100 * 100,
               1);
-  EXPECT_EQ(1, occluded.overdraw_metrics()->tiles_culled_for_upload());
+  EXPECT_EQ(3, occluded.overdraw_metrics()->tiles_culled_for_upload());
 
   layer->fake_layer_updater()->ClearUpdateCount();
 
   // This makes sure content scaling and transforms work together.
+  // When the tiles are scaled down by half, they are 50x50 each in the
+  // screen.
   gfx::Transform screen_transform;
   screen_transform.Scale(0.5, 0.5);
   layer->draw_properties().screen_space_transform = screen_transform;
   layer->draw_properties().target_space_transform = screen_transform;
 
+  // An occlusion of 150x100 will cover 3*2 = 6 tiles.
   occluded.SetOcclusion(gfx::Rect(100, 100, 150, 100));
 
   gfx::Rect layer_bounds_rect(layer->bounds());
   layer->draw_properties().drawable_content_rect =
-      gfx::ToEnclosingRect(gfx::ScaleRect(layer_bounds_rect, 0.5));
+      gfx::ScaleToEnclosingRect(layer_bounds_rect, 0.5f);
   layer->draw_properties().visible_content_rect =
       gfx::Rect(layer->content_bounds());
   layer->InvalidateContentRect(gfx::Rect(0, 0, 600, 600));
@@ -1378,13 +1388,16 @@ TEST_F(TiledLayerTest, TilesPaintedWithOcclusionAndScaling) {
   resource_manager_->PrioritizeTextures();
   layer->SavePaintProperties();
   layer->Update(queue_.get(), &occluded, NULL);
-  EXPECT_EQ(9 - 1, layer->fake_layer_updater()->update_count());
+  int visible_tiles3 = 6 * 6 - 6;
+  EXPECT_EQ(visible_tiles3, layer->fake_layer_updater()->update_count());
 
   EXPECT_NEAR(occluded.overdraw_metrics()->pixels_uploaded_opaque(), 0, 1);
   EXPECT_NEAR(occluded.overdraw_metrics()->pixels_uploaded_translucent(),
-              90000 + 80000 + 80000,
+              visible_tiles3 * 100 * 100 +
+              visible_tiles2 * 100 * 100 +
+              visible_tiles1 * 100 * 100,
               1);
-  EXPECT_EQ(1 + 1, occluded.overdraw_metrics()->tiles_culled_for_upload());
+  EXPECT_EQ(6 + 3, occluded.overdraw_metrics()->tiles_culled_for_upload());
 }
 
 TEST_F(TiledLayerTest, VisibleContentOpaqueRegion) {
@@ -1753,7 +1766,8 @@ class UpdateTrackingTiledLayer : public FakeTiledLayer {
     tracking_layer_painter_ = painter.get();
     layer_updater_ =
         BitmapContentLayerUpdater::Create(painter.PassAs<LayerPainter>(),
-                                          &stats_instrumentation_);
+                                          &stats_instrumentation_,
+                                          0);
   }
 
   TrackingLayerPainter* tracking_layer_painter() const {

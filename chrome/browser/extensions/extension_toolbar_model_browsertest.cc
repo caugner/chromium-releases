@@ -58,7 +58,7 @@ class ExtensionToolbarModelTest : public ExtensionBrowserTest,
     for (extensions::ExtensionList::const_iterator i = toolbar_items.begin();
          i < toolbar_items.end(); ++i) {
       if (index-- == 0)
-        return *i;
+        return i->get();
     }
     return NULL;
   }
@@ -370,8 +370,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionToolbarModelTest, ReorderOnPrefChange) {
   extensions::ExtensionIdList new_order;
   new_order.push_back(id_c);
   new_order.push_back(id_b);
-  extensions::ExtensionSystem::Get(browser()->profile())
-      ->extension_prefs()->SetToolbarOrder(new_order);
+  extensions::ExtensionPrefs::Get(browser()->profile())->SetToolbarOrder(
+      new_order);
 
   // Verify order is changed.
   EXPECT_EQ(id_c, ExtensionAt(0)->id());

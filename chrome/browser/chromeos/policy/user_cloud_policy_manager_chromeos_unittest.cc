@@ -12,8 +12,8 @@
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/testing_pref_service.h"
 #include "base/run_loop.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/policy/user_cloud_policy_token_forwarder.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/policy/cloud/cloud_policy_constants.h"
@@ -24,6 +24,7 @@
 #include "chrome/browser/policy/mock_configuration_policy_provider.h"
 #include "chrome/browser/policy/proto/cloud/device_management_backend.pb.h"
 #include "chrome/browser/prefs/browser_prefs.h"
+#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/signin/token_service_factory.h"
 #include "chrome/common/chrome_constants.h"
@@ -85,7 +86,8 @@ class UserCloudPolicyManagerChromeOSTest : public testing::Test {
         new TestingProfileManager(TestingBrowserProcess::GetGlobal()));
     ASSERT_TRUE(profile_manager_->SetUp());
     profile_ = profile_manager_->CreateTestingProfile(
-        chrome::kInitialProfile, UTF8ToUTF16("testing_profile"), 0);
+        chrome::kInitialProfile, scoped_ptr<PrefServiceSyncable>(),
+        UTF8ToUTF16("testing_profile"), 0);
     signin_profile_ = profile_manager_->CreateTestingProfile("signin_profile");
     signin_profile_->set_incognito(true);
     // Usually the signin Profile and the main Profile are separate, but since
@@ -261,7 +263,7 @@ class UserCloudPolicyManagerChromeOSTest : public testing::Test {
   }
 
   // Required by the refresh scheduler that's created by the manager.
-  MessageLoop loop_;
+  base::MessageLoop loop_;
   content::TestBrowserThread ui_thread_;
   // Required to cleanup the URLRequestContextGetter of the |signin_profile_|.
   content::TestBrowserThread io_thread_;

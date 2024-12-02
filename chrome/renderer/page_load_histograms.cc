@@ -10,8 +10,8 @@
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "content/public/common/content_constants.h"
@@ -20,12 +20,12 @@
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/url_pattern.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebURLResponse.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebPerformance.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/public/platform/WebURLResponse.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebPerformance.h"
+#include "third_party/WebKit/public/web/WebView.h"
 
 using WebKit::WebDataSource;
 using WebKit::WebFrame;
@@ -409,45 +409,6 @@ void PageLoadHistograms::Dump(WebFrame* frame) {
                   begin_to_finish_doc);
     PLT_HISTOGRAM("PLT.BeginToFinish_ContentPrefetcherReferrer",
                   begin_to_finish_all_loads);
-  }
-
-  // Histograms to determine if SDCH has an impact.
-  // TODO(jar): Consider removing per-link load types and the enumeration.
-  static const bool use_sdch_histogram =
-      base::FieldTrialList::TrialExists("GlobalSdch");
-  if (use_sdch_histogram) {
-    UMA_HISTOGRAM_ENUMERATION(
-        base::FieldTrial::MakeName("PLT.LoadType", "GlobalSdch"),
-        load_type, DocumentState::kLoadTypeMax);
-    switch (load_type) {
-      case DocumentState::NORMAL_LOAD:
-        PLT_HISTOGRAM(base::FieldTrial::MakeName(
-            "PLT.BeginToFinish_NormalLoad", "GlobalSdch"),
-            begin_to_finish_all_loads);
-        break;
-      case DocumentState::LINK_LOAD_NORMAL:
-        PLT_HISTOGRAM(base::FieldTrial::MakeName(
-            "PLT.BeginToFinish_LinkLoadNormal", "GlobalSdch"),
-            begin_to_finish_all_loads);
-        break;
-      case DocumentState::LINK_LOAD_RELOAD:
-        PLT_HISTOGRAM(base::FieldTrial::MakeName(
-            "PLT.BeginToFinish_LinkLoadReload", "GlobalSdch"),
-            begin_to_finish_all_loads);
-        break;
-      case DocumentState::LINK_LOAD_CACHE_STALE_OK:
-        PLT_HISTOGRAM(base::FieldTrial::MakeName(
-            "PLT.BeginToFinish_LinkLoadStaleOk", "GlobalSdch"),
-            begin_to_finish_all_loads);
-        break;
-      case DocumentState::LINK_LOAD_CACHE_ONLY:
-        PLT_HISTOGRAM(base::FieldTrial::MakeName(
-            "PLT.BeginToFinish_LinkLoadCacheOnly", "GlobalSdch"),
-            begin_to_finish_all_loads);
-        break;
-      default:
-        break;
-    }
   }
 
   // TODO(mpcomplete): remove the extension-related histograms after we collect

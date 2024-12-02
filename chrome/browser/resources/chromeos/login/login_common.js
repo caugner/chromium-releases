@@ -14,6 +14,8 @@
 <include src="header_bar.js"></include>
 <include src="network_dropdown.js"></include>
 <include src="oobe_screen_reset.js"></include>
+<include src="oobe_screen_autolaunch.js"></include>
+<include src="oobe_screen_enable_kiosk.js"></include>
 <include src="oobe_screen_terms_of_service.js"></include>
 <include src="oobe_screen_user_image.js"></include>
 <include src="screen_account_picker.js"></include>
@@ -60,13 +62,6 @@ cr.define('cr.ui', function() {
    */
   Oobe.showScreen = function(screen) {
     Oobe.getInstance().showScreen(screen);
-  };
-
-  /**
-   * Shows the previous screen of workflow.
-   */
-  Oobe.goBack = function() {
-    Oobe.getInstance().goBack();
   };
 
   /**
@@ -214,6 +209,14 @@ cr.define('cr.ui', function() {
   };
 
   /**
+   * Updates the device requisition string shown in the requisition prompt.
+   * @param {string} requisition The device requisition.
+   */
+  Oobe.updateDeviceRequisition = function(requisition) {
+    Oobe.getInstance().updateDeviceRequisition(requisition);
+  };
+
+  /**
    * Enforces focus on user pod of locked user.
    */
   Oobe.forceLockedUserPodFocus = function() {
@@ -251,6 +254,13 @@ cr.define('cr.ui', function() {
    */
   Oobe.clearUserPodPassword = function() {
     DisplayManager.clearUserPodPassword();
+  };
+
+  /**
+   * Restores input focus to currently selected pod.
+   */
+  Oobe.refocusCurrentPod = function() {
+    DisplayManager.refocusCurrentPod();
   };
 
   // Export

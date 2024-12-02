@@ -14,6 +14,10 @@ class OmniboxViewWin;
 class Profile;
 class ToolbarModel;
 
+namespace gfx {
+class Font;
+}
+
 namespace views {
 class View;
 }
@@ -21,10 +25,8 @@ class View;
 // Return |view| as an OmniboxViewViews, or NULL if it is of a different type.
 OmniboxViewViews* GetOmniboxViewViews(OmniboxView* view);
 
-#if defined(OS_WIN) && !defined(USE_AURA)
 // Return |view| as an OmniboxViewWin, or NULL if it is of a different type.
 OmniboxViewWin* GetOmniboxViewWin(OmniboxView* view);
-#endif
 
 // Creates an OmniboxView of the appropriate type; Views or Win.
 OmniboxView* CreateOmniboxView(OmniboxEditController* controller,
@@ -32,6 +34,8 @@ OmniboxView* CreateOmniboxView(OmniboxEditController* controller,
                                Profile* profile,
                                CommandUpdater* command_updater,
                                bool popup_window_mode,
-                               LocationBarView* location_bar);
+                               LocationBarView* location_bar,
+                               const gfx::Font& font,
+                               int font_y_offset);
 
 #endif  // CHROME_BROWSER_UI_VIEWS_OMNIBOX_OMNIBOX_VIEWS_H_

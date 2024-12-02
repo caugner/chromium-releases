@@ -18,7 +18,6 @@
 #include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
-#include "chrome/browser/ui/base_window.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -31,6 +30,7 @@
 #include "chrome/browser/ui/views/extensions/extension_dialog.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
+#include "ui/base/base_window.h"
 #include "ui/shell_dialogs/selected_file_info.h"
 
 using content::BrowserThread;
@@ -65,7 +65,7 @@ PendingDialog* PendingDialog::GetInstance() {
 
 void PendingDialog::Add(int32 tab_id,
                          scoped_refptr<SelectFileDialogExtension> dialog) {
-  DCHECK(dialog);
+  DCHECK(dialog.get());
   if (map_.find(tab_id) == map_.end())
     map_.insert(std::make_pair(tab_id, dialog));
   else
@@ -109,7 +109,7 @@ SelectFileDialogExtension::SelectFileDialogExtension(
 }
 
 SelectFileDialogExtension::~SelectFileDialogExtension() {
-  if (extension_dialog_)
+  if (extension_dialog_.get())
     extension_dialog_->ObserverDestroyed();
 }
 
@@ -150,11 +150,12 @@ void SelectFileDialogExtension::ExtensionTerminated(
   // this time though this is broken because of some faulty wiring in
   // ExtensionProcessManager::CreateViewHost. Once that is fixed, remove this.
   if (profile_) {
-    MessageLoop::current()->PostTask(FROM_HERE,
+    base::MessageLoop::current()->PostTask(
+        FROM_HERE,
         base::Bind(&ExtensionService::ReloadExtension,
-            base::Unretained(extensions::ExtensionSystem::Get(profile_)->
-                extension_service()),
-        extension_id));
+                   base::Unretained(extensions::ExtensionSystem::Get(profile_)
+                                        ->extension_service()),
+                   extension_id));
   }
 
   dialog->Close();
@@ -167,7 +168,7 @@ void SelectFileDialogExtension::OnFileSelected(
     int index) {
   scoped_refptr<SelectFileDialogExtension> dialog =
       PendingDialog::GetInstance()->Find(tab_id);
-  if (!dialog)
+  if (!dialog.get())
     return;
   dialog->selection_type_ = SINGLE_FILE;
   dialog->selection_files_.clear();
@@ -181,7 +182,7 @@ void SelectFileDialogExtension::OnMultiFilesSelected(
     const std::vector<ui::SelectedFileInfo>& files) {
   scoped_refptr<SelectFileDialogExtension> dialog =
       PendingDialog::GetInstance()->Find(tab_id);
-  if (!dialog)
+  if (!dialog.get())
     return;
   dialog->selection_type_ = MULTIPLE_FILES;
   dialog->selection_files_ = files;
@@ -192,7 +193,7 @@ void SelectFileDialogExtension::OnMultiFilesSelected(
 void SelectFileDialogExtension::OnFileSelectionCanceled(int32 tab_id) {
   scoped_refptr<SelectFileDialogExtension> dialog =
       PendingDialog::GetInstance()->Find(tab_id);
-  if (!dialog)
+  if (!dialog.get())
     return;
   dialog->selection_type_ = CANCEL;
   dialog->selection_files_.clear();
@@ -200,7 +201,7 @@ void SelectFileDialogExtension::OnFileSelectionCanceled(int32 tab_id) {
 }
 
 content::RenderViewHost* SelectFileDialogExtension::GetRenderViewHost() {
-  if (extension_dialog_)
+  if (extension_dialog_.get())
     return extension_dialog_->host()->render_view_host();
   return NULL;
 }
@@ -254,7 +255,7 @@ void SelectFileDialogExtension::SelectFileImpl(
   }
 
   // The base window to associate the dialog with.
-  BaseWindow* base_window = NULL;
+  ui::BaseWindow* base_window = NULL;
 
   // The web contents to associate the dialog with.
   content::WebContents* web_contents = NULL;
@@ -325,6 +326,8 @@ void SelectFileDialogExtension::SelectFileImpl(
   }
 
   base::FilePath virtual_path;
+  base::FilePath fallback_path = profile_->last_selected_directory().Append(
+      default_dialog_path.BaseName());
   // If an absolute path is specified as the default path, convert it to the
   // virtual path in the file browser extension. Due to the current design,
   // an invalid temporal cache file path may passed as |default_dialog_path|
@@ -334,8 +337,7 @@ void SelectFileDialogExtension::SelectFileImpl(
       (file_manager_util::ConvertFileToRelativeFileSystemPath(
            profile_, kFileBrowserDomain, default_dialog_path, &virtual_path) ||
        file_manager_util::ConvertFileToRelativeFileSystemPath(
-           profile_, kFileBrowserDomain, profile_->last_selected_directory(),
-           &virtual_path))) {
+           profile_, kFileBrowserDomain, fallback_path, &virtual_path))) {
     virtual_path = base::FilePath("/").Append(virtual_path);
   } else {
     // If the path was relative, or failed to convert, just use the base name,
@@ -352,6 +354,8 @@ void SelectFileDialogExtension::SelectFileImpl(
   ExtensionDialog* dialog = ExtensionDialog::Show(file_browser_url,
       base_window, profile_, web_contents,
       kFileManagerWidth, kFileManagerHeight,
+      kFileManagerMinimumWidth,
+      kFileManagerMinimumHeight,
 #if defined(USE_AURA)
       file_manager_util::GetTitleFromType(type),
 #else
@@ -363,9 +367,6 @@ void SelectFileDialogExtension::SelectFileImpl(
     LOG(ERROR) << "Unable to create extension dialog";
     return;
   }
-
-  dialog->SetMinimumContentsSize(kFileManagerMinimumWidth,
-                                 kFileManagerMinimumHeight);
 
   // Connect our listener to FileDialogFunction's per-tab callbacks.
   AddPending(tab_id);

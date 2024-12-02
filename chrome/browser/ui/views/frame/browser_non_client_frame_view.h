@@ -5,9 +5,9 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_NON_CLIENT_FRAME_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_NON_CLIENT_FRAME_VIEW_H_
 
-#include "base/memory/scoped_ptr.h"
 #include "ui/views/window/non_client_view.h"
 
+class AvatarLabel;
 class AvatarMenuButton;
 class BrowserFrame;
 class BrowserView;
@@ -32,7 +32,9 @@ class BrowserNonClientFrameView : public views::NonClientFrameView {
   BrowserNonClientFrameView(BrowserFrame* frame, BrowserView* browser_view);
   virtual ~BrowserNonClientFrameView();
 
-  AvatarMenuButton* avatar_button() const { return avatar_button_.get(); }
+  AvatarMenuButton* avatar_button() const { return avatar_button_; }
+
+  AvatarLabel* avatar_label() const { return avatar_label_; }
 
   // Returns the bounds within which the TabStrip should be laid out.
   virtual gfx::Rect GetBoundsForTabStrip(views::View* tabstrip) const = 0;
@@ -51,6 +53,7 @@ class BrowserNonClientFrameView : public views::NonClientFrameView {
   // Overriden from views::View.
   virtual void VisibilityChanged(views::View* starting_from,
                                  bool is_visible) OVERRIDE;
+  virtual void OnThemeChanged() OVERRIDE;
 
  protected:
   BrowserView* browser_view() const { return browser_view_; }
@@ -68,7 +71,10 @@ class BrowserNonClientFrameView : public views::NonClientFrameView {
 
   // Menu button that displays that either the incognito icon or the profile
   // icon.  May be NULL for some frame styles.
-  scoped_ptr<AvatarMenuButton> avatar_button_;
+  AvatarMenuButton* avatar_button_;
+
+  // Avatar label that is used for a managed user.
+  AvatarLabel* avatar_label_;
 };
 
 namespace chrome {

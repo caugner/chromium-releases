@@ -16,9 +16,9 @@
 #include "base/prefs/pref_service.h"
 #include "base/prefs/testing_pref_service.h"
 #include "base/run_loop.h"
-#include "base/string16.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string16.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -116,7 +116,7 @@ static scoped_refptr<extensions::Extension> CreateExtension(
 class ProfileSigninConfirmationHelperTest : public testing::Test {
  public:
   ProfileSigninConfirmationHelperTest()
-      : ui_thread_(BrowserThread::UI, &message_loop_),
+      : ui_thread_(content::BrowserThread::UI, &message_loop_),
         user_prefs_(NULL),
         model_(NULL) {
   }
@@ -153,11 +153,11 @@ class ProfileSigninConfirmationHelperTest : public testing::Test {
     // TestExtensionSystem uses DeleteSoon, so we need to delete the profile
     // and then run the message queue to clean up.
     profile_.reset();
-    MessageLoop::current()->RunUntilIdle();
+    base::MessageLoop::current()->RunUntilIdle();
   }
 
  protected:
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   scoped_ptr<TestingProfile> profile_;
   TestingPrefStoreWithCustomReadError* user_prefs_;
@@ -203,25 +203,18 @@ TEST_F(ProfileSigninConfirmationHelperTest, PromptForNewProfile_Extensions) {
   scoped_refptr<extensions::Extension> webstore =
       CreateExtension("web store", extension_misc::kWebStoreAppId);
   extensions->extension_prefs()->AddGrantedPermissions(
-      webstore->id(),
-      make_scoped_refptr(new extensions::PermissionSet));
-  extensions->AddExtension(webstore);
-  EXPECT_FALSE(
-      GetCallbackResult(
-          base::Bind(
-              &ui::CheckShouldPromptForNewProfile,
-              profile_.get())));
+      webstore->id(), make_scoped_refptr(new extensions::PermissionSet).get());
+  extensions->AddExtension(webstore.get());
+  EXPECT_FALSE(GetCallbackResult(
+      base::Bind(&ui::CheckShouldPromptForNewProfile, profile_.get())));
 
   scoped_refptr<extensions::Extension> extension =
       CreateExtension("foo", std::string());
   extensions->extension_prefs()->AddGrantedPermissions(
-      extension->id(), make_scoped_refptr(new extensions::PermissionSet));
-  extensions->AddExtension(extension);
-  EXPECT_TRUE(
-      GetCallbackResult(
-          base::Bind(
-              &ui::CheckShouldPromptForNewProfile,
-              profile_.get())));
+      extension->id(), make_scoped_refptr(new extensions::PermissionSet).get());
+  extensions->AddExtension(extension.get());
+  EXPECT_TRUE(GetCallbackResult(
+      base::Bind(&ui::CheckShouldPromptForNewProfile, profile_.get())));
 }
 
 TEST_F(ProfileSigninConfirmationHelperTest, PromptForNewProfile_History) {

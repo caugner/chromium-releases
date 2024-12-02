@@ -129,11 +129,25 @@ class Dispatcher : public content::RenderProcessObserver {
   bool CheckContextAccessToExtensionAPI(
       const std::string& function_name, ChromeV8Context* context) const;
 
+  // Dispatches the event named |event_name| to all render views.
+  void DispatchEvent(const std::string& extension_id,
+                     const std::string& event_name) const;
+
+  // Shared implementation of the various MessageInvoke IPCs.
+  void InvokeModuleSystemMethod(
+      content::RenderView* render_view,
+      const std::string& extension_id,
+      const std::string& module_name,
+      const std::string& function_name,
+      const base::ListValue& args,
+      bool user_gesture);
+
  private:
   friend class RenderViewTest;
+  FRIEND_TEST_ALL_PREFIXES(RendererPermissionsPolicyDelegateTest,
+                           CannotScriptWebstore);
   typedef void (*BindingInstaller)(ModuleSystem* module_system,
-                                  v8::Handle<v8::Object> chrome,
-                                  v8::Handle<v8::Object> chrome_hidden);
+                                  v8::Handle<v8::Object> chrome);
 
   // RenderProcessObserver implementation:
   virtual bool OnControlMessageReceived(const IPC::Message& message) OVERRIDE;
@@ -142,9 +156,9 @@ class Dispatcher : public content::RenderProcessObserver {
 
   void OnSetChannel(int channel);
   void OnMessageInvoke(const std::string& extension_id,
+                       const std::string& module_name,
                        const std::string& function_name,
                        const base::ListValue& args,
-                       const GURL& event_url,
                        bool user_gesture);
   void OnDispatchOnConnect(int target_port_id,
                            const std::string& channel_name,
@@ -153,8 +167,11 @@ class Dispatcher : public content::RenderProcessObserver {
   void OnDeliverMessage(int target_port_id, const std::string& message);
   void OnDispatchOnDisconnect(int port_id, const std::string& error_message);
   void OnSetFunctionNames(const std::vector<std::string>& names);
+  void OnSetSystemFont(const std::string& font_family,
+                       const std::string& font_size);
   void OnLoaded(
       const std::vector<ExtensionMsg_Loaded_Params>& loaded_extensions);
+  void OnLoadedInternal(scoped_refptr<const Extension> extension);
   void OnUnloaded(const std::string& id);
   void OnSetScriptingWhitelist(
       const Extension::ScriptingWhitelist& extension_ids);
@@ -192,10 +209,20 @@ class Dispatcher : public content::RenderProcessObserver {
       const Extension* extension,
       const URLPatternSet& origins);
 
+  // Adds or removes bindings for every context belonging to |extension_id|, or
+  // or all contexts if |extension_id| is empty.
+  void AddOrRemoveBindings(const std::string& extension_id);
+
   void RegisterNativeHandlers(ModuleSystem* module_system,
                               ChromeV8Context* context);
-  void RegisterSchemaGeneratedBindings(ModuleSystem* module_system,
-                                       ChromeV8Context* context);
+  void AddOrRemoveBindingsForContext(ChromeV8Context* context);
+  void RegisterBinding(const std::string& api_name,
+                       ChromeV8Context* context);
+  void DeregisterBinding(const std::string& api_name, ChromeV8Context* context);
+  v8::Handle<v8::Object> GetOrCreateBindObjectIfAvailable(
+      const std::string& api_name,
+      std::string* bind_name,
+      ChromeV8Context* context);
 
   // Inserts static source code into |source_map_|.
   void PopulateSourceMap();
@@ -273,6 +300,10 @@ class Dispatcher : public content::RenderProcessObserver {
 
   // Sends API requests to the extension host.
   scoped_ptr<RequestSender> request_sender_;
+
+  // The platforms system font family and size;
+  std::string system_font_family_;
+  std::string system_font_size_;
 
   DISALLOW_COPY_AND_ASSIGN(Dispatcher);
 };

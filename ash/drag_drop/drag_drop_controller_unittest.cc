@@ -10,7 +10,7 @@
 #include "ash/test/ash_test_base.h"
 #include "base/command_line.h"
 #include "base/location.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/event_generator.h"
@@ -284,6 +284,32 @@ void DispatchGesture(ui::EventType gesture_type, gfx::Point location) {
       ui::GestureEventDetails(gesture_type, 0, 0),
       1);
   Shell::GetPrimaryRootWindow()->DispatchGestureEvent(&gesture_event);
+}
+
+bool IsGestureEventType(ui::EventType type) {
+  switch (type) {
+    case ui::ET_GESTURE_SCROLL_BEGIN:
+    case ui::ET_GESTURE_SCROLL_END:
+    case ui::ET_GESTURE_SCROLL_UPDATE:
+    case ui::ET_GESTURE_TAP:
+    case ui::ET_GESTURE_TAP_CANCEL:
+    case ui::ET_GESTURE_TAP_DOWN:
+    case ui::ET_GESTURE_BEGIN:
+    case ui::ET_GESTURE_END:
+    case ui::ET_GESTURE_TWO_FINGER_TAP:
+    case ui::ET_GESTURE_PINCH_BEGIN:
+    case ui::ET_GESTURE_PINCH_END:
+    case ui::ET_GESTURE_PINCH_UPDATE:
+    case ui::ET_GESTURE_LONG_PRESS:
+    case ui::ET_GESTURE_LONG_TAP:
+    case ui::ET_GESTURE_MULTIFINGER_SWIPE:
+    case ui::ET_SCROLL_FLING_CANCEL:
+    case ui::ET_SCROLL_FLING_START:
+      return true;
+    default:
+      break;
+  }
+  return false;
 }
 
 }  // namespace
@@ -986,16 +1012,12 @@ class DragImageWindowObserver : public aura::WindowObserver {
 
 }
 
-#if defined(OS_WIN)
-// Multiple displays are not supported on Windows Ash. http://crbug.com/165962
-#define MAYBE_DragCancelAcrossDisplays DISABLED_DragCancelAcrossDisplays
-#else
-#define MAYBE_DragCancelAcrossDisplays DragCancelAcrossDisplays
-#endif
-
 // Verifies the drag image moves back to the position where drag is started
 // across displays when drag is cancelled.
-TEST_F(DragDropControllerTest, MAYBE_DragCancelAcrossDisplays) {
+TEST_F(DragDropControllerTest, DragCancelAcrossDisplays) {
+  if (!SupportsMultipleDisplays())
+    return;
+
   UpdateDisplay("400x400,400x400");
   Shell::RootWindowList root_windows =
       Shell::GetInstance()->GetAllRootWindows();

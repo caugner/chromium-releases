@@ -15,8 +15,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "base/prefs/pref_service.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
@@ -155,7 +155,7 @@ class ShortcutsProviderTest : public testing::Test,
                std::vector<std::string> expected_urls,
                std::string expected_top_result);
 
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
 
@@ -225,7 +225,7 @@ void ShortcutsProviderTest::RunTest(const string16 text,
                                    std::string expected_top_result) {
   std::sort(expected_urls.begin(), expected_urls.end());
 
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   AutocompleteInput input(text, string16::npos, string16(), GURL(), false,
                           false, true, AutocompleteInput::ALL_MATCHES);
   provider_->Start(input, false);
@@ -573,37 +573,37 @@ TEST_F(ShortcutsProviderTest, CalculateScore) {
       spans_description, base::Time::Now(), 1);
 
   // Maximal score.
-  const int kMaxScore = ShortcutsProvider::CalculateScore(
+  const int kMaxScore = provider_->CalculateScore(
       ASCIIToUTF16("test"), shortcut);
 
   // Score decreases as percent of the match is decreased.
   int score_three_quarters =
-      ShortcutsProvider::CalculateScore(ASCIIToUTF16("tes"), shortcut);
+      provider_->CalculateScore(ASCIIToUTF16("tes"), shortcut);
   EXPECT_LT(score_three_quarters, kMaxScore);
   int score_one_half =
-      ShortcutsProvider::CalculateScore(ASCIIToUTF16("te"), shortcut);
+      provider_->CalculateScore(ASCIIToUTF16("te"), shortcut);
   EXPECT_LT(score_one_half, score_three_quarters);
   int score_one_quarter =
-      ShortcutsProvider::CalculateScore(ASCIIToUTF16("t"), shortcut);
+      provider_->CalculateScore(ASCIIToUTF16("t"), shortcut);
   EXPECT_LT(score_one_quarter, score_one_half);
 
   // Should decay with time - one week.
   shortcut.last_access_time = base::Time::Now() - base::TimeDelta::FromDays(7);
   int score_week_old =
-      ShortcutsProvider::CalculateScore(ASCIIToUTF16("test"), shortcut);
+      provider_->CalculateScore(ASCIIToUTF16("test"), shortcut);
   EXPECT_LT(score_week_old, kMaxScore);
 
   // Should decay more in two weeks.
   shortcut.last_access_time = base::Time::Now() - base::TimeDelta::FromDays(14);
   int score_two_weeks_old =
-      ShortcutsProvider::CalculateScore(ASCIIToUTF16("test"), shortcut);
+      provider_->CalculateScore(ASCIIToUTF16("test"), shortcut);
   EXPECT_LT(score_two_weeks_old, score_week_old);
 
   // But not if it was activly clicked on. 2 hits slow decaying power.
   shortcut.number_of_hits = 2;
   shortcut.last_access_time = base::Time::Now() - base::TimeDelta::FromDays(14);
   int score_popular_two_weeks_old =
-      ShortcutsProvider::CalculateScore(ASCIIToUTF16("test"), shortcut);
+      provider_->CalculateScore(ASCIIToUTF16("test"), shortcut);
   EXPECT_LT(score_two_weeks_old, score_popular_two_weeks_old);
   // But still decayed.
   EXPECT_LT(score_popular_two_weeks_old, kMaxScore);
@@ -612,7 +612,7 @@ TEST_F(ShortcutsProviderTest, CalculateScore) {
   shortcut.number_of_hits = 3;
   shortcut.last_access_time = base::Time::Now() - base::TimeDelta::FromDays(14);
   int score_more_popular_two_weeks_old =
-      ShortcutsProvider::CalculateScore(ASCIIToUTF16("test"), shortcut);
+      provider_->CalculateScore(ASCIIToUTF16("test"), shortcut);
   EXPECT_LT(score_two_weeks_old, score_more_popular_two_weeks_old);
   EXPECT_LT(score_popular_two_weeks_old, score_more_popular_two_weeks_old);
   // But still decayed.
@@ -645,8 +645,8 @@ TEST_F(ShortcutsProviderTest, DeleteMatch) {
   EXPECT_FALSE(backend_->shortcuts_map().end() ==
                backend_->shortcuts_map().find(ASCIIToUTF16("erase")));
 
-  AutocompleteMatch match(provider_, 1200, true,
-                          AutocompleteMatch::HISTORY_TITLE);
+  AutocompleteMatch match(
+      provider_.get(), 1200, true, AutocompleteMatchType::HISTORY_TITLE);
 
   match.destination_url = GURL(shortcuts_to_test_delete[0].url);
   match.contents = ASCIIToUTF16(shortcuts_to_test_delete[0].contents);

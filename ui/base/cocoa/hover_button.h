@@ -7,7 +7,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-#import "base/memory/scoped_nsobject.h"
+#import "base/mac/scoped_nsobject.h"
 #import "ui/base/cocoa/tracking_area.h"
 #import "ui/base/ui_export.h"
 
@@ -26,7 +26,7 @@ UI_EXPORT
   HoverState hoverState_;
 
  @private
-  // Tracking area for button mouseover states.
+  // Tracking area for button mouseover states. Nil if not enabled.
   ui::ScopedCrTrackingArea trackingArea_;
 }
 

@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 
 class GURL;
 class Profile;
@@ -65,6 +65,12 @@ bool IsQueryExtractionEnabled();
 // Returns whether the local-only version of Instant Extended API is enabled.
 bool IsLocalOnlyInstantExtendedAPIEnabled();
 
+// Extracts and returns search terms from |url|. Returns empty string if the URL
+// is not secure or doesn't have a search term replacement key.  Does not
+// consider IsQueryExtractionEnabled() and does not check for a privileged
+// process, so most callers should use GetSearchTerms() below instead.
+string16 GetSearchTermsFromURL(Profile* profile, const GURL& url);
+
 // Returns the search terms attached to a specific NavigationEntry, or empty
 // string otherwise. Does not consider IsQueryExtractionEnabled(), so most
 // callers should use GetSearchTerms() below instead.
@@ -95,13 +101,11 @@ bool NavEntryIsInstantNTP(const content::WebContents* contents,
 // Registers Instant-related user preferences. Called at startup.
 void RegisterInstantUserPrefs(user_prefs::PrefRegistrySyncable* registry);
 
-// Returns prefs::kInstantExtendedEnabled in extended mode;
-// prefs::kInstantEnabled otherwise.
-const char* GetInstantPrefName();
-
-// Sets the default value of prefs::kInstantExtendedEnabled, based on field
-// trials and the current value of prefs::kInstantEnabled.
+// Sets the default value of prefs::kSearchInstantEnabled based on field trials.
 void SetInstantExtendedPrefDefault(Profile* profile);
+
+// Returns whether the Instant checkbox in chrome://settings/ should be shown.
+bool IsInstantCheckboxVisible();
 
 // Returns whether the Instant checkbox in chrome://settings/ should be enabled
 // (i.e., toggleable). This returns true iff prefs::kSearchSuggestEnabled is
@@ -112,6 +116,9 @@ bool IsInstantCheckboxEnabled(Profile* profile);
 // (i.e., with a tick mark). This returns true iff IsInstantCheckboxEnabled()
 // and the pref indicated by GetInstantPrefName() is set to true.
 bool IsInstantCheckboxChecked(Profile* profile);
+
+// Returns the label for the Instant checkbox in chrome://settings/.
+string16 GetInstantCheckboxLabel(Profile* profile);
 
 // Returns the Instant URL of the default search engine. Returns an empty GURL
 // if the engine doesn't have an Instant URL, or if it shouldn't be used (say
@@ -141,6 +148,12 @@ bool IsInstantEnabled(Profile* profile);
 // to always show the remote NTP on browser startup.
 bool ShouldPreferRemoteNTPOnStartup();
 
+// Should the Instant NTP be preloaded if local-only InstantExtended is enabled.
+bool ShouldPreloadLocalOnlyNTP();
+
+// Returns true if the Instant NTP should be shown and false if not.
+bool ShouldShowInstantNTP();
+
 // Returns true if |my_url| matches |other_url|.
 bool MatchesOriginAndPath(const GURL& my_url, const GURL& other_url);
 
@@ -166,12 +179,21 @@ bool IsPrivilegedURLForInstant(const GURL& url);
 // InstantLoader.
 int GetInstantLoaderStalenessTimeoutSec();
 
+// Returns true if |contents| corresponds to an Instant overlay.
+bool IsInstantOverlay(const content::WebContents* contents);
+
+// Returns true if |contents| corresponds to a preloaded instant extended NTP.
+bool IsPreloadedInstantExtendedNTP(const content::WebContents* contents);
+
 // -----------------------------------------------------
 // The following APIs are exposed for use in tests only.
 // -----------------------------------------------------
 
 // Forces the Instant Extended API to be enabled for tests.
 void EnableInstantExtendedAPIForTesting();
+
+// Forces the Instant Extended API to be disabled for tests.
+void DisableInstantExtendedAPIForTesting();
 
 // Type for a collection of experiment configuration parameters.
 typedef std::vector<std::pair<std::string, std::string> > FieldTrialFlags;

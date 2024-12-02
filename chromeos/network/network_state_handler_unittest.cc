@@ -29,10 +29,10 @@ void ErrorCallbackFunction(const std::string& error_name,
   LOG(ERROR) << "Shill Error: " << error_name << " : " << error_message;
 }
 
-const std::string kShillManagerClientStubDefaultService = "stub_ethernet";
-const std::string kShillManagerClientStubDefaultWireless = "stub_wifi1";
-const std::string kShillManagerClientStubWireless2 = "stub_wifi2";
-const std::string kShillManagerClientStubCellular = "stub_cellular";
+const std::string kShillManagerClientStubDefaultService = "eth1";
+const std::string kShillManagerClientStubDefaultWireless = "wifi1";
+const std::string kShillManagerClientStubWireless2 = "wifi2";
+const std::string kShillManagerClientStubCellular = "cellular1";
 
 using chromeos::NetworkState;
 using chromeos::NetworkStateHandler;
@@ -135,8 +135,9 @@ class NetworkStateHandlerTest : public testing::Test {
   }
 
   virtual void TearDown() OVERRIDE {
-    network_state_handler_.reset();
+    network_state_handler_->RemoveObserver(test_observer_.get(), FROM_HERE);
     test_observer_.reset();
+    network_state_handler_.reset();
     DBusThreadManager::Shutdown();
   }
 
@@ -144,7 +145,7 @@ class NetworkStateHandlerTest : public testing::Test {
     SetupDefaultShillState();
     network_state_handler_.reset(new NetworkStateHandler);
     test_observer_.reset(new TestObserver(network_state_handler_.get()));
-    network_state_handler_->AddObserver(test_observer_.get());
+    network_state_handler_->AddObserver(test_observer_.get(), FROM_HERE);
     network_state_handler_->InitShillPropertyHandler();
   }
 
@@ -181,7 +182,7 @@ class NetworkStateHandlerTest : public testing::Test {
                              add_to_watchlist);
   }
 
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   scoped_ptr<NetworkStateHandler> network_state_handler_;
   scoped_ptr<TestObserver> test_observer_;
 
@@ -262,38 +263,46 @@ TEST_F(NetworkStateHandlerTest, TechnologyState) {
 
 TEST_F(NetworkStateHandlerTest, ServicePropertyChanged) {
   // Set a service property.
-  const std::string eth0 = "stub_ethernet";
-  EXPECT_EQ("", network_state_handler_->GetNetworkState(eth0)->security());
-  EXPECT_EQ(1, test_observer_->PropertyUpdatesForService(eth0));
+  const std::string eth1 = kShillManagerClientStubDefaultService;
+  EXPECT_EQ("", network_state_handler_->GetNetworkState(eth1)->security());
+  EXPECT_EQ(1, test_observer_->PropertyUpdatesForService(eth1));
   base::StringValue security_value("TestSecurity");
   DBusThreadManager::Get()->GetShillServiceClient()->SetProperty(
-      dbus::ObjectPath(eth0),
+      dbus::ObjectPath(eth1),
       flimflam::kSecurityProperty, security_value,
       base::Bind(&base::DoNothing), base::Bind(&ErrorCallbackFunction));
   message_loop_.RunUntilIdle();
   EXPECT_EQ("TestSecurity",
-            network_state_handler_->GetNetworkState(eth0)->security());
-  EXPECT_EQ(2, test_observer_->PropertyUpdatesForService(eth0));
+            network_state_handler_->GetNetworkState(eth1)->security());
+  EXPECT_EQ(2, test_observer_->PropertyUpdatesForService(eth1));
+
+  // Changing a service to the existing value should not trigger an update.
+  DBusThreadManager::Get()->GetShillServiceClient()->SetProperty(
+      dbus::ObjectPath(eth1),
+      flimflam::kSecurityProperty, security_value,
+      base::Bind(&base::DoNothing), base::Bind(&ErrorCallbackFunction));
+  message_loop_.RunUntilIdle();
+  EXPECT_EQ(2, test_observer_->PropertyUpdatesForService(eth1));
 }
 
 TEST_F(NetworkStateHandlerTest, NetworkConnectionStateChanged) {
   // Change a network state.
   ShillServiceClient::TestInterface* service_test =
       DBusThreadManager::Get()->GetShillServiceClient()->GetTestInterface();
-  const std::string eth0 = "stub_ethernet";
+  const std::string eth1 = kShillManagerClientStubDefaultService;
   base::StringValue connection_state_idle_value(flimflam::kStateIdle);
-  service_test->SetServiceProperty(eth0, flimflam::kStateProperty,
+  service_test->SetServiceProperty(eth1, flimflam::kStateProperty,
                                    connection_state_idle_value);
   message_loop_.RunUntilIdle();
   EXPECT_EQ(flimflam::kStateIdle,
-            test_observer_->NetworkConnectionStateForService(eth0));
-  EXPECT_EQ(2, test_observer_->ConnectionStateChangesForService(eth0));
+            test_observer_->NetworkConnectionStateForService(eth1));
+  EXPECT_EQ(2, test_observer_->ConnectionStateChangesForService(eth1));
   // Confirm that changing the connection state to the same value does *not*
   // signal the observer.
-  service_test->SetServiceProperty(eth0, flimflam::kStateProperty,
+  service_test->SetServiceProperty(eth1, flimflam::kStateProperty,
                                    connection_state_idle_value);
   message_loop_.RunUntilIdle();
-  EXPECT_EQ(2, test_observer_->ConnectionStateChangesForService(eth0));
+  EXPECT_EQ(2, test_observer_->ConnectionStateChangesForService(eth1));
 }
 
 TEST_F(NetworkStateHandlerTest, DefaultServiceChanged) {
@@ -304,13 +313,13 @@ TEST_F(NetworkStateHandlerTest, DefaultServiceChanged) {
       DBusThreadManager::Get()->GetShillServiceClient()->GetTestInterface();
   ASSERT_TRUE(service_test);
 
-  // Change the default network by inserting wifi1 at the front of the list
-  // and changing the state of stub_ethernet to Idle.
-  const std::string wifi1 = "stub_wifi1";
-  manager_test->AddServiceAtIndex(wifi1, 0, true);
-  const std::string eth0 = "stub_ethernet";
+  // Change the default network by moving wifi1 to the front of the list
+  // and changing the state of eth1 to Idle.
+  const std::string wifi1 = kShillManagerClientStubDefaultWireless;
+  manager_test->MoveServiceToIndex(wifi1, 0, true);
+  const std::string eth1 = kShillManagerClientStubDefaultService;
   base::StringValue connection_state_idle_value(flimflam::kStateIdle);
-  service_test->SetServiceProperty(eth0, flimflam::kStateProperty,
+  service_test->SetServiceProperty(eth1, flimflam::kStateProperty,
                                    connection_state_idle_value);
   message_loop_.RunUntilIdle();
   EXPECT_EQ(wifi1, test_observer_->default_network());
@@ -336,6 +345,31 @@ TEST_F(NetworkStateHandlerTest, DefaultServiceChanged) {
       base::Bind(&base::DoNothing), base::Bind(&ErrorCallbackFunction));
   message_loop_.RunUntilIdle();
   EXPECT_EQ(3u, test_observer_->default_network_change_count());
+}
+
+TEST_F(NetworkStateHandlerTest, RequestUpdate) {
+  // Request an update for kShillManagerClientStubDefaultWireless.
+  EXPECT_EQ(1, test_observer_->PropertyUpdatesForService(
+      kShillManagerClientStubDefaultWireless));
+  EXPECT_TRUE(network_state_handler_->RequestUpdateForNetwork(
+      kShillManagerClientStubDefaultWireless));
+  message_loop_.RunUntilIdle();
+  EXPECT_EQ(2, test_observer_->PropertyUpdatesForService(
+      kShillManagerClientStubDefaultWireless));
+
+  // Request an update for all networks.
+  network_state_handler_->RequestUpdateForAllNetworks();
+  message_loop_.RunUntilIdle();
+  // kShillManagerClientStubDefaultWireless should now have 3 updates
+  EXPECT_EQ(3, test_observer_->PropertyUpdatesForService(
+      kShillManagerClientStubDefaultWireless));
+  // Other networks should have 2 updates (inital + request).
+  EXPECT_EQ(2, test_observer_->PropertyUpdatesForService(
+      kShillManagerClientStubDefaultService));
+  EXPECT_EQ(2, test_observer_->PropertyUpdatesForService(
+      kShillManagerClientStubWireless2));
+  EXPECT_EQ(2, test_observer_->PropertyUpdatesForService(
+      kShillManagerClientStubCellular));
 }
 
 }  // namespace chromeos

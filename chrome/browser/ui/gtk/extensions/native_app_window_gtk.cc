@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/gtk/extensions/native_app_window_gtk.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/gtk/extensions/extension_keybinding_registry_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
@@ -170,6 +170,12 @@ gfx::Rect NativeAppWindowGtk::GetRestoredBounds() const {
   return window_bounds;
 }
 
+ui::WindowShowState NativeAppWindowGtk::GetRestoredState() const {
+  if (IsMaximized())
+    return ui::SHOW_STATE_MAXIMIZED;
+  return ui::SHOW_STATE_NORMAL;
+}
+
 gfx::Rect NativeAppWindowGtk::GetBounds() const {
   gfx::Rect window_bounds = bounds_;
   window_bounds.Inset(-GetFrameInsets());
@@ -287,6 +293,11 @@ gfx::Insets NativeAppWindowGtk::GetFrameInsets() const {
       rect_with_decorations.width - current_width - left_inset);
 }
 
+gfx::NativeView NativeAppWindowGtk::GetHostView() const {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
 gfx::Point NativeAppWindowGtk::GetDialogPosition(const gfx::Size& size) {
   gint current_width = 0;
   gint current_height = 0;
@@ -296,12 +307,12 @@ gfx::Point NativeAppWindowGtk::GetDialogPosition(const gfx::Size& size) {
 }
 
 void NativeAppWindowGtk::AddObserver(
-    WebContentsModalDialogHostObserver* observer) {
+    web_modal::WebContentsModalDialogHostObserver* observer) {
   observer_list_.AddObserver(observer);
 }
 
 void NativeAppWindowGtk::RemoveObserver(
-    WebContentsModalDialogHostObserver* observer) {
+    web_modal::WebContentsModalDialogHostObserver* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
@@ -311,6 +322,8 @@ void NativeAppWindowGtk::ActiveWindowChanged(GdkWindow* active_window) {
     return;
 
   is_active_ = gtk_widget_get_window(GTK_WIDGET(window_)) == active_window;
+  if (is_active_)
+    shell_window_->OnNativeWindowActivated();
 }
 
 // Callback for the delete event.  This event is fired when the user tries to
@@ -355,7 +368,7 @@ void NativeAppWindowGtk::OnDebouncedBoundsChanged() {
   gtk_window_util::UpdateWindowPosition(this, &bounds_, &restored_bounds_);
   shell_window_->OnNativeWindowChanged();
 
-  FOR_EACH_OBSERVER(WebContentsModalDialogHostObserver,
+  FOR_EACH_OBSERVER(web_modal::WebContentsModalDialogHostObserver,
                     observer_list_,
                     OnPositionRequiresUpdate());
 }
@@ -483,6 +496,10 @@ void NativeAppWindowGtk::SetFullscreen(bool fullscreen) {
 
 bool NativeAppWindowGtk::IsFullscreenOrPending() const {
   return content_thinks_its_fullscreen_;
+}
+
+bool NativeAppWindowGtk::IsDetached() const {
+  return false;
 }
 
 void NativeAppWindowGtk::UpdateWindowIcon() {

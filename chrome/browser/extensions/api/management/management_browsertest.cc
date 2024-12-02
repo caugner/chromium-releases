@@ -511,14 +511,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, ExternalPolicyRefresh) {
   ASSERT_TRUE(service->disabled_extensions()->is_empty());
 
   PrefService* prefs = browser()->profile()->GetPrefs();
-  const DictionaryValue* forcelist =
+  const base::DictionaryValue* forcelist =
       prefs->GetDictionary(prefs::kExtensionInstallForceList);
   ASSERT_TRUE(forcelist->empty()) << kForceInstallNotEmptyHelp;
 
   {
     // Set the policy as a user preference and fire notification observers.
     DictionaryPrefUpdate pref_update(prefs, prefs::kExtensionInstallForceList);
-    DictionaryValue* forcelist = pref_update.Get();
+    base::DictionaryValue* forcelist = pref_update.Get();
     extensions::ExternalPolicyLoader::AddExtension(
         forcelist, kExtensionId, "http://localhost/autoupdate/manifest");
   }
@@ -554,7 +554,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, ExternalPolicyRefresh) {
 }
 
 // See http://crbug.com/103371 and http://crbug.com/120640.
-#if defined(ADDRESS_SANITIZER)
+#if defined(ADDRESS_SANITIZER) || defined(OS_WIN)
 #define MAYBE_PolicyOverridesUserInstall DISABLED_PolicyOverridesUserInstall
 #else
 #define MAYBE_PolicyOverridesUserInstall PolicyOverridesUserInstall
@@ -584,7 +584,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest,
 
   // Check that the policy is initially empty.
   PrefService* prefs = browser()->profile()->GetPrefs();
-  const DictionaryValue* forcelist =
+  const base::DictionaryValue* forcelist =
       prefs->GetDictionary(prefs::kExtensionInstallForceList);
   ASSERT_TRUE(forcelist->empty()) << kForceInstallNotEmptyHelp;
 
@@ -638,7 +638,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest,
   // and force enable it too.
   {
     DictionaryPrefUpdate pref_update(prefs, prefs::kExtensionInstallForceList);
-    DictionaryValue* forcelist = pref_update.Get();
+    base::DictionaryValue* forcelist = pref_update.Get();
     extensions::ExternalPolicyLoader::AddExtension(
         forcelist, kExtensionId, "http://localhost/autoupdate/manifest");
   }

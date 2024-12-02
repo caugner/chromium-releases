@@ -8,7 +8,7 @@
 #include <utility>
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "sql/statement.h"
@@ -40,7 +40,9 @@ string LoggedInPredictorTable::GetKey(const GURL& url) {
 // static
 string LoggedInPredictorTable::GetKeyFromDomain(const std::string& domain) {
   string effective_domain(
-      net::RegistryControlledDomainService::GetDomainAndRegistry(domain));
+      net::registry_controlled_domains::GetDomainAndRegistry(
+          domain,
+          net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES));
   if (effective_domain.empty())
     effective_domain = domain;
 

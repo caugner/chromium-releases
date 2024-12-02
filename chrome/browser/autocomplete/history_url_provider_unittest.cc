@@ -6,12 +6,11 @@
 
 #include <algorithm>
 
-#include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/browser/autocomplete/autocomplete_provider_listener.h"
@@ -24,13 +23,13 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
 using base::TimeDelta;
 
-using content::BrowserThread;
+using content::TestBrowserThreadBundle;
 
 struct TestURLInfo {
   const char* url;
@@ -134,9 +133,7 @@ class HistoryURLProviderTest : public testing::Test,
                                public AutocompleteProviderListener {
  public:
   HistoryURLProviderTest()
-      : ui_thread_(BrowserThread::UI, &message_loop_),
-        file_thread_(BrowserThread::FILE, &message_loop_),
-        sort_matches_(false) {
+      : sort_matches_(false) {
     HistoryQuickProvider::set_disabled(true);
   }
 
@@ -148,7 +145,7 @@ class HistoryURLProviderTest : public testing::Test,
   virtual void OnProviderUpdate(bool updated_matches) OVERRIDE;
 
  protected:
-  static ProfileKeyedService* CreateTemplateURLService(
+  static BrowserContextKeyedService* CreateTemplateURLService(
       content::BrowserContext* profile) {
     return new TemplateURLService(static_cast<Profile*>(profile));
   }
@@ -188,9 +185,7 @@ class HistoryURLProviderTest : public testing::Test,
 
   void RunAdjustOffsetTest(const string16 text, size_t expected_offset);
 
-  MessageLoopForUI message_loop_;
-  content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread file_thread_;
+  content::TestBrowserThreadBundle thread_bundle_;
   ACMatches matches_;
   scoped_ptr<TestingProfile> profile_;
   HistoryService* history_service_;
@@ -208,12 +203,16 @@ class HistoryURLProviderTestNoDB : public HistoryURLProviderTest {
 
 void HistoryURLProviderTest::OnProviderUpdate(bool updated_matches) {
   if (autocomplete_->done())
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
 }
 
 void HistoryURLProviderTest::SetUpImpl(bool no_db) {
   profile_.reset(new TestingProfile());
   profile_->CreateHistoryService(true, no_db);
+  if (!no_db) {
+    profile_->BlockUntilHistoryProcessesPendingRequests();
+    profile_->BlockUntilHistoryIndexIsRefreshed();
+  }
   history_service_ =
       HistoryServiceFactory::GetForProfile(profile_.get(),
                                            Profile::EXPLICIT_ACCESS);
@@ -267,7 +266,7 @@ void HistoryURLProviderTest::RunTest(
   *identified_input_type = input.type();
   autocomplete_->Start(input, false);
   if (!autocomplete_->done())
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
 
   matches_ = autocomplete_->matches();
   if (sort_matches_) {
@@ -293,7 +292,7 @@ void HistoryURLProviderTest::RunAdjustOffsetTest(const string16 text,
                           false, true, AutocompleteInput::ALL_MATCHES);
   autocomplete_->Start(input, false);
   if (!autocomplete_->done())
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
 
   matches_ = autocomplete_->matches();
   ASSERT_GE(matches_.size(), 1U) << "Input text: " << text;
@@ -425,7 +424,7 @@ TEST_F(HistoryURLProviderTest, CullRedirects) {
     {"http://redirects/B", 20},
     {"http://redirects/C", 10}
   };
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); i++) {
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); ++i) {
     history_service_->AddPageWithDetails(GURL(test_cases[i].url),
         UTF8ToUTF16("Title"), test_cases[i].count, test_cases[i].count,
         Time::Now(), false, history::SOURCE_BROWSED);
@@ -548,7 +547,7 @@ TEST_F(HistoryURLProviderTest, EmptyVisits) {
   int pandora_relevance = matches_[0].relevance;
 
   // Run the message loop. When |autocomplete_| finishes the loop is quit.
-  MessageLoop::current()->Run();
+  base::MessageLoop::current()->Run();
   EXPECT_TRUE(autocomplete_->done());
   matches_ = autocomplete_->matches();
   ASSERT_GT(matches_.size(), 0u);
@@ -576,7 +575,7 @@ TEST_F(HistoryURLProviderTest, DontAutocompleteOnTrailingWhitespace) {
                           AutocompleteInput::ALL_MATCHES);
   autocomplete_->Start(input, false);
   if (!autocomplete_->done())
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
 
   // None of the matches should attempt to autocomplete.
   matches_ = autocomplete_->matches();
@@ -744,7 +743,7 @@ TEST_F(HistoryURLProviderTest, CrashDueToFixup) {
                             AutocompleteInput::ALL_MATCHES);
     autocomplete_->Start(input, false);
     if (!autocomplete_->done())
-      MessageLoop::current()->Run();
+      base::MessageLoop::current()->Run();
   }
 }
 
@@ -772,7 +771,7 @@ TEST_F(HistoryURLProviderTest, CullSearchResults) {
     {"https://testsearch.com/?q=foobar", 20},
     {"http://foobar.com/", 10}
   };
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); i++) {
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); ++i) {
     history_service_->AddPageWithDetails(GURL(test_cases[i].url),
         UTF8ToUTF16("Title"), test_cases[i].count, test_cases[i].count,
         Time::Now(), false, history::SOURCE_BROWSED);
@@ -791,4 +790,84 @@ TEST_F(HistoryURLProviderTest, CullSearchResults) {
   };
   RunTest(ASCIIToUTF16("testsearch"), string16(), true,
       expected_when_searching_site, arraysize(expected_when_searching_site));
+}
+
+TEST_F(HistoryURLProviderTest, SuggestExactInput) {
+  const size_t npos = std::string::npos;
+  struct TestCase {
+    // Inputs:
+    const char* input;
+    bool trim_http;
+    // Expected Outputs:
+    const char* contents;
+    // Offsets of the ACMatchClassifications, terminated by npos.
+    size_t offsets[3];
+    // The index of the ACMatchClassification that should have the MATCH bit
+    // set, npos if no ACMatchClassification should have the MATCH bit set.
+    size_t match_classification_index;
+  } test_cases[] = {
+    { "http://www.somesite.com", false,
+      "http://www.somesite.com", {0, npos, npos}, 0 },
+    { "www.somesite.com", true,
+      "www.somesite.com", {0, npos, npos}, 0 },
+    { "www.somesite.com", false,
+      "http://www.somesite.com", {0, 7, npos}, 1 },
+    { "somesite.com", true,
+      "somesite.com", {0, npos, npos}, 0 },
+    { "somesite.com", false,
+      "http://somesite.com", {0, 7, npos}, 1 },
+    { "w", true,
+      "w", {0, npos, npos}, 0 },
+    { "w", false,
+      "http://w", {0, 7, npos}, 1 },
+    { "w.com", true,
+      "w.com", {0, npos, npos}, 0 },
+    { "w.com", false,
+      "http://w.com", {0, 7, npos}, 1 },
+    { "www.w.com", true,
+      "www.w.com", {0, npos, npos}, 0 },
+    { "www.w.com", false,
+      "http://www.w.com", {0, 7, npos}, 1 },
+    { "view-source:www.w.com/", true,
+      "view-source:www.w.com", {0, npos, npos}, npos },
+    { "view-source:www.w.com/", false,
+      "view-source:http://www.w.com", {0, npos, npos}, npos },
+    { "view-source:http://www.w.com/", false,
+      "view-source:http://www.w.com", {0, npos, npos}, 0 },
+    { "   view-source:", true,
+      "view-source:", {0, npos, npos}, 0 },
+    { "http:////////w.com", false,
+      "http://w.com", {0, npos, npos}, npos },
+    { "    http:////////www.w.com", false,
+      "http://www.w.com", {0, npos, npos}, npos },
+    { "http:a///www.w.com", false,
+      "http://a///www.w.com", {0, npos, npos}, npos },
+    { "mailto://a@b.com", true,
+      "mailto://a@b.com", {0, npos, npos}, 0 },
+    { "mailto://a@b.com", false,
+      "mailto://a@b.com", {0, npos, npos}, 0 },
+  };
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); ++i) {
+    SCOPED_TRACE(testing::Message() << "Index " << i << " input: "
+                                    << test_cases[i].input << ", trim_http: "
+                                    << test_cases[i].trim_http);
+
+    AutocompleteInput input(ASCIIToUTF16(test_cases[i].input), string16::npos,
+                            string16(), GURL("about:blank"),
+                            false, false, true, AutocompleteInput::ALL_MATCHES);
+    AutocompleteMatch match =
+        HistoryURLProvider::SuggestExactInput(autocomplete_, input,
+                                              test_cases[i].trim_http);
+    EXPECT_EQ(ASCIIToUTF16(test_cases[i].contents), match.contents);
+    for (size_t match_index = 0; match_index < match.contents_class.size();
+         ++match_index) {
+      EXPECT_EQ(test_cases[i].offsets[match_index],
+                match.contents_class[match_index].offset);
+      EXPECT_EQ(ACMatchClassification::URL |
+                (match_index == test_cases[i].match_classification_index ?
+                 ACMatchClassification::MATCH : 0),
+                match.contents_class[match_index].style);
+    }
+    EXPECT_EQ(npos, test_cases[i].offsets[match.contents_class.size()]);
+  }
 }

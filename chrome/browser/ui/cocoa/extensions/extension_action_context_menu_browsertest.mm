@@ -4,7 +4,6 @@
 
 #import "chrome/browser/ui/cocoa/extensions/extension_action_context_menu.h"
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/path_service.h"
@@ -65,7 +64,7 @@ public:
 
 IN_PROC_BROWSER_TEST_F(ExtensionActionContextMenuTest, BasicTest) {
   SetupPageAction();
-  scoped_nsobject<ExtensionActionContextMenu> menu;
+  base::scoped_nsobject<ExtensionActionContextMenu> menu;
   menu.reset([[ExtensionActionContextMenu alloc] initWithExtension:extension_
                                                            browser:browser()
                                                    extensionAction:action_]);
@@ -104,7 +103,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionActionContextMenuTest, BrowserAction) {
        new Browser(Browser::CreateParams(browser()->profile(),
                                          browser()->host_desktop_type())));
 
-  scoped_nsobject<ExtensionActionContextMenu> menu;
+  base::scoped_nsobject<ExtensionActionContextMenu> menu;
   menu.reset([[ExtensionActionContextMenu alloc]
       initWithExtension:extension_
                 browser:empty_browser
@@ -159,7 +158,7 @@ class DevToolsAttachedObserver {
 IN_PROC_BROWSER_TEST_F(
     ExtensionActionContextMenuTest, DISABLED_RunInspectPopup) {
   SetupPageAction();
-  scoped_nsobject<ExtensionActionContextMenu> menu;
+  base::scoped_nsobject<ExtensionActionContextMenu> menu;
   menu.reset([[ExtensionActionContextMenu alloc] initWithExtension:extension_
                                                            browser:browser()
                                                    extensionAction:action_]);

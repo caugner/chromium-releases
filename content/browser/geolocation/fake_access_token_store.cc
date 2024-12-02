@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 
 using base::MessageLoopProxy;
 using testing::_;
@@ -40,7 +40,7 @@ void FakeAccessTokenStore::NotifyDelegateTokensLoaded() {
 
 void FakeAccessTokenStore::DefaultLoadAccessTokens(
     const LoadAccessTokensCallbackType& callback) {
-  originating_message_loop_ = MessageLoopProxy::current();
+  originating_message_loop_ = MessageLoopProxy::current().get();
   callback_ = callback;
 }
 

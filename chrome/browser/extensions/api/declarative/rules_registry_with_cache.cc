@@ -8,9 +8,11 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "base/time.h"
+#include "base/values.h"
 #include "chrome/browser/extensions/extension_info_map.h"
+#include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/state_store.h"
@@ -42,6 +44,7 @@ std::vector<linked_ptr<extensions::RulesRegistry::Rule> > RulesFromValue(
   if (!value || !value->GetAsList(&list))
     return rules;
 
+  rules.reserve(list->GetSize());
   for (size_t i = 0; i < list->GetSize(); ++i) {
     const base::DictionaryValue* dict = NULL;
     if (!list->GetDictionary(i, &dict))
@@ -78,8 +81,7 @@ RulesRegistryWithCache::RulesRegistryWithCache(
     bool log_storage_init_delay,
     scoped_ptr<RuleStorageOnUI>* ui_part)
     : RulesRegistry(owner_thread, event_name),
-      ready_(false),
-      weak_ptr_factory_((profile) ? this : NULL),
+      weak_ptr_factory_(profile ? this : NULL),
       storage_on_ui_((profile
                           ? (new RuleStorageOnUI(profile,
                                                  GetDeclarativeRuleStorageKey(
@@ -89,7 +91,9 @@ RulesRegistryWithCache::RulesRegistryWithCache(
                                                  weak_ptr_factory_.GetWeakPtr(),
                                                  log_storage_init_delay))
                                 ->GetWeakPtr()
-                          : base::WeakPtr<RuleStorageOnUI>())) {
+                          : base::WeakPtr<RuleStorageOnUI>())),
+      process_changed_rules_requested_(profile ? NOT_SCHEDULED_FOR_PROCESSING
+                                               : NEVER_PROCESS) {
   if (!profile) {
     CHECK(!ui_part);
     return;
@@ -97,14 +101,7 @@ RulesRegistryWithCache::RulesRegistryWithCache(
 
   ui_part->reset(storage_on_ui_.get());
 
-  // After construction, |this| continues to live only on |owner_thread|.
-  weak_ptr_factory_.DetachFromThread();
-
   storage_on_ui_->Init();
-}
-
-void RulesRegistryWithCache::AddReadyCallback(const base::Closure& callback) {
-  ready_callbacks_.push_back(callback);
 }
 
 std::string RulesRegistryWithCache::AddRules(
@@ -134,7 +131,7 @@ std::string RulesRegistryWithCache::AddRules(
     rules_[key] = *i;
   }
 
-  ProcessChangedRules(extension_id);
+  MaybeProcessChangedRules(extension_id);
   return kSuccess;
 }
 
@@ -155,7 +152,7 @@ std::string RulesRegistryWithCache::RemoveRules(
     rules_.erase(lookup_key);
   }
 
-  ProcessChangedRules(extension_id);
+  MaybeProcessChangedRules(extension_id);
   return kSuccess;
 }
 
@@ -177,7 +174,7 @@ std::string RulesRegistryWithCache::RemoveAllRules(
       rules_.erase(key);
   }
 
-  ProcessChangedRules(extension_id);
+  MaybeProcessChangedRules(extension_id);
   return kSuccess;
 }
 
@@ -222,20 +219,15 @@ void RulesRegistryWithCache::OnExtensionUnloaded(
 RulesRegistryWithCache::~RulesRegistryWithCache() {
 }
 
-void RulesRegistryWithCache::OnReady(base::Time storage_init_time) {
+void RulesRegistryWithCache::MarkReady(base::Time storage_init_time) {
   DCHECK(content::BrowserThread::CurrentlyOn(owner_thread()));
-  DCHECK(!ready_);  // Avoid thread hopping, only call this once.
-
-  ready_ = true;
 
   if (!storage_init_time.is_null()) {
     UMA_HISTOGRAM_TIMES("Extensions.DeclarativeRulesStorageInitialization",
                         base::Time::Now() - storage_init_time);
   }
 
-  for (size_t i = 0; i < ready_callbacks_.size(); ++i)
-    ready_callbacks_[i].Run();
-  ready_callbacks_.clear();
+  ready_.Signal();
 }
 
 void RulesRegistryWithCache::DeserializeAndAddRules(
@@ -250,6 +242,8 @@ void RulesRegistryWithCache::ProcessChangedRules(
     const std::string& extension_id) {
   DCHECK(content::BrowserThread::CurrentlyOn(owner_thread()));
 
+  process_changed_rules_requested_ = NOT_SCHEDULED_FOR_PROCESSING;
+
   std::vector<linked_ptr<RulesRegistry::Rule> > new_rules;
   std::string error = GetAllRules(extension_id, &new_rules);
   DCHECK_EQ(std::string(), error);
@@ -262,7 +256,22 @@ void RulesRegistryWithCache::ProcessChangedRules(
                  base::Passed(RulesToValue(new_rules))));
 }
 
+void RulesRegistryWithCache::MaybeProcessChangedRules(
+    const std::string& extension_id) {
+  if (process_changed_rules_requested_ != NOT_SCHEDULED_FOR_PROCESSING)
+    return;
+
+  process_changed_rules_requested_ = SCHEDULED_FOR_PROCESSING;
+  ready_.Post(FROM_HERE,
+              base::Bind(&RulesRegistryWithCache::ProcessChangedRules,
+                         weak_ptr_factory_.GetWeakPtr(),
+                         extension_id));
+}
+
 // RulesRegistryWithCache::RuleStorageOnUI
+
+const char RulesRegistryWithCache::RuleStorageOnUI::kRulesStoredKey[] =
+    "has_declarative_rules";
 
 RulesRegistryWithCache::RuleStorageOnUI::RuleStorageOnUI(
     Profile* profile,
@@ -275,7 +284,7 @@ RulesRegistryWithCache::RuleStorageOnUI::RuleStorageOnUI(
       log_storage_init_delay_(log_storage_init_delay),
       registry_(registry),
       rules_registry_thread_(rules_registry_thread),
-      ready_state_(NOT_READY),
+      notified_registry_(false),
       weak_ptr_factory_(this) {}
 
 RulesRegistryWithCache::RuleStorageOnUI::~RuleStorageOnUI() {}
@@ -288,21 +297,18 @@ RulesRegistryWithCache::RuleStorageOnUI::~RuleStorageOnUI() {}
 void RulesRegistryWithCache::RuleStorageOnUI::Init() {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
-  extensions::StateStore* store = ExtensionSystem::Get(profile_)->rules_store();
+  ExtensionSystem& system = *ExtensionSystem::Get(profile_);
+  extensions::StateStore* store = system.rules_store();
   if (store)
     store->RegisterKey(storage_key_);
 
-  if (!profile_->IsOffTheRecord()) {
-    registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
-                    content::Source<Profile>(profile_));
-    registrar_.Add(this, chrome::NOTIFICATION_EXTENSIONS_READY,
-                    content::Source<Profile>(profile_));
-  } else {
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_EXTENSION_LOADED,
+                 content::Source<Profile>(profile_->GetOriginalProfile()));
+
+  if (profile_->IsOffTheRecord()) {
     log_storage_init_delay_ = false;
-    registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
-                   content::Source<Profile>(profile_->GetOriginalProfile()));
-    ExtensionService* extension_service =
-        extensions::ExtensionSystem::Get(profile_)->extension_service();
+    ExtensionService* extension_service = system.extension_service();
     DCHECK(extension_service->is_ready());
     const ExtensionSet* extensions = extension_service->extensions();
     for (ExtensionSet::const_iterator i = extensions->begin();
@@ -313,15 +319,10 @@ void RulesRegistryWithCache::RuleStorageOnUI::Init() {
           extension_service->IsIncognitoEnabled((*i)->id()))
         ReadFromStorage((*i)->id());
     }
-    // The extensions are already ready for the original profile.
-    ready_state_ = EXTENSIONS_READY;
-    // Init is called from the registry's constructor, and because CheckIfReady
-    // can post tasks for the not-yet-initialized registry to run, we need to
-    // postpone checking for being ready (=all rules loaded), on the registry's
-    // thread.
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(&RuleStorageOnUI::CheckIfReady, GetWeakPtr()));
   }
+
+  system.ready().Post(FROM_HERE,
+                      base::Bind(&RuleStorageOnUI::CheckIfReady, GetWeakPtr()));
 }
 
 void RulesRegistryWithCache::RuleStorageOnUI::WriteToStorage(
@@ -329,6 +330,14 @@ void RulesRegistryWithCache::RuleStorageOnUI::WriteToStorage(
     scoped_ptr<base::Value> value) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   if (!profile_)
+    return;
+
+  const base::ListValue* rules = NULL;
+  CHECK(value->GetAsList(&rules));
+  bool rules_stored_previously = GetDeclarativeRulesStored(extension_id);
+  bool store_rules = !rules->empty();
+  SetDeclarativeRulesStored(extension_id, store_rules);
+  if (!rules_stored_previously && !store_rules)
     return;
 
   StateStore* store = ExtensionSystem::Get(profile_)->rules_store();
@@ -341,40 +350,36 @@ void RulesRegistryWithCache::RuleStorageOnUI::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  if (type == chrome::NOTIFICATION_EXTENSION_LOADED) {
-    const extensions::Extension* extension =
-        content::Details<const extensions::Extension>(details).ptr();
-    // TODO(mpcomplete): This API check should generalize to any use of
-    // declarative rules, not just webRequest.
-    if (extension->HasAPIPermission(APIPermission::kDeclarativeContent) ||
-        extension->HasAPIPermission(APIPermission::kDeclarativeWebRequest)) {
-      ExtensionInfoMap* extension_info_map =
-          ExtensionSystem::Get(profile_)->info_map();
-      if (profile_->IsOffTheRecord() &&
-          !extension_info_map->IsIncognitoEnabled(extension->id())) {
-        // Ignore this extension.
-      } else {
-        ReadFromStorage(extension->id());
-      }
+  DCHECK(type == chrome::NOTIFICATION_EXTENSION_LOADED);
+
+  const extensions::Extension* extension =
+      content::Details<const extensions::Extension>(details).ptr();
+  // TODO(mpcomplete): This API check should generalize to any use of
+  // declarative rules, not just webRequest.
+  if (extension->HasAPIPermission(APIPermission::kDeclarativeContent) ||
+      extension->HasAPIPermission(APIPermission::kDeclarativeWebRequest)) {
+    ExtensionInfoMap* extension_info_map =
+        ExtensionSystem::Get(profile_)->info_map();
+    if (profile_->IsOffTheRecord() &&
+        !extension_info_map->IsIncognitoEnabled(extension->id())) {
+      // Ignore this extension.
+    } else {
+      ReadFromStorage(extension->id());
     }
-  } else if (type == chrome::NOTIFICATION_EXTENSIONS_READY) {
-    CHECK_EQ(NOT_READY, ready_state_);
-    ready_state_ = EXTENSIONS_READY;
-    CheckIfReady();
   }
 }
 
 void RulesRegistryWithCache::RuleStorageOnUI::CheckIfReady() {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  if (ready_state_ != EXTENSIONS_READY || !waiting_for_extensions_.empty())
+  if (notified_registry_ || !waiting_for_extensions_.empty())
     return;
 
   content::BrowserThread::PostTask(
       rules_registry_thread_,
       FROM_HERE,
       base::Bind(
-          &RulesRegistryWithCache::OnReady, registry_, storage_init_time_));
-  ready_state_ = NOTIFIED_READY;
+          &RulesRegistryWithCache::MarkReady, registry_, storage_init_time_));
+  notified_registry_ = true;
 }
 
 void RulesRegistryWithCache::RuleStorageOnUI::ReadFromStorage(
@@ -383,12 +388,19 @@ void RulesRegistryWithCache::RuleStorageOnUI::ReadFromStorage(
   if (!profile_)
     return;
 
+  if (log_storage_init_delay_ && storage_init_time_.is_null())
+    storage_init_time_ = base::Time::Now();
+
+  if (!GetDeclarativeRulesStored(extension_id)) {
+    ExtensionSystem::Get(profile_)->ready().Post(
+        FROM_HERE, base::Bind(&RuleStorageOnUI::CheckIfReady, GetWeakPtr()));
+    return;
+  }
+
   extensions::StateStore* store = ExtensionSystem::Get(profile_)->rules_store();
   if (!store)
     return;
   waiting_for_extensions_.insert(extension_id);
-  if (log_storage_init_delay_ && storage_init_time_.is_null())
-    storage_init_time_ = base::Time::Now();
   store->GetExtensionValue(extension_id,
                            storage_key_,
                            base::Bind(&RuleStorageOnUI::ReadFromStorageCallback,
@@ -410,7 +422,33 @@ void RulesRegistryWithCache::RuleStorageOnUI::ReadFromStorageCallback(
 
   waiting_for_extensions_.erase(extension_id);
 
-  CheckIfReady();
+  if (waiting_for_extensions_.empty())
+    ExtensionSystem::Get(profile_)->ready().Post(
+        FROM_HERE, base::Bind(&RuleStorageOnUI::CheckIfReady, GetWeakPtr()));
+}
+
+bool RulesRegistryWithCache::RuleStorageOnUI::GetDeclarativeRulesStored(
+    const std::string& extension_id) const {
+  CHECK(profile_);
+  const ExtensionScopedPrefs* extension_prefs = ExtensionPrefs::Get(profile_);
+
+  bool rules_stored = true;
+  if (extension_prefs->ReadPrefAsBoolean(
+          extension_id, kRulesStoredKey, &rules_stored))
+    return rules_stored;
+
+  // Safe default -- if we don't know that the rules are not stored, we force
+  // a read by returning true.
+  return true;
+}
+
+void RulesRegistryWithCache::RuleStorageOnUI::SetDeclarativeRulesStored(
+    const std::string& extension_id,
+    bool rules_stored) {
+  CHECK(profile_);
+  ExtensionScopedPrefs* extension_prefs = ExtensionPrefs::Get(profile_);
+  extension_prefs->UpdateExtensionPref(
+      extension_id, kRulesStoredKey, new base::FundamentalValue(rules_stored));
 }
 
 }  // namespace extensions

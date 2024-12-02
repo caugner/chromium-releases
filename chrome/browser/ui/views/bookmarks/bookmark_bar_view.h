@@ -75,6 +75,9 @@ class BookmarkBarView : public DetachableToolbarView,
   // Maximum size of buttons on the bookmark bar.
   static const int kMaxButtonWidth;
 
+  // Number of pixels the attached bookmark bar overlaps with the toolbar.
+  static const int kToolbarAttachedBookmarkBarOverlap;
+
   // |browser_view| can be NULL during tests.
   BookmarkBarView(Browser* browser, BrowserView* browser_view);
   virtual ~BookmarkBarView();
@@ -165,10 +168,8 @@ class BookmarkBarView : public DetachableToolbarView,
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual gfx::Size GetMinimumSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
-  virtual void ViewHierarchyChanged(bool
-                                    is_add,
-                                    View* parent,
-                                    View* child) OVERRIDE;
+  virtual void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) OVERRIDE;
   virtual void PaintChildren(gfx::Canvas* canvas) OVERRIDE;
   virtual bool GetDropFormats(
       int* formats,
@@ -179,10 +180,8 @@ class BookmarkBarView : public DetachableToolbarView,
   virtual int OnDragUpdated(const ui::DropTargetEvent& event) OVERRIDE;
   virtual void OnDragExited() OVERRIDE;
   virtual int OnPerformDrop(const ui::DropTargetEvent& event) OVERRIDE;
-  virtual void ShowContextMenu(const gfx::Point& p,
-                               bool is_mouse_gesture) OVERRIDE;
   virtual void OnThemeChanged() OVERRIDE;
-  virtual std::string GetClassName() const OVERRIDE;
+  virtual const char* GetClassName() const OVERRIDE;
 
   // AccessiblePaneView:
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
@@ -245,7 +244,8 @@ class BookmarkBarView : public DetachableToolbarView,
 
   // views::ContextMenuController:
   virtual void ShowContextMenuForView(views::View* source,
-                                      const gfx::Point& point) OVERRIDE;
+                                      const gfx::Point& point,
+                                      ui::MenuSourceType source_type) OVERRIDE;
 
  private:
   class ButtonSeparatorView;
@@ -371,9 +371,6 @@ class BookmarkBarView : public DetachableToolbarView,
 
   // Updates the visibility of the apps shortcut based on the pref value.
   void OnAppsPageShortcutVisibilityPrefChanged();
-
-  // Called when we know whether the app launcher is enabled.
-  void OnAppLauncherEnabledCompleted(bool app_launcher_enabled);
 
   // Needed to react to kShowAppsShortcutInBookmarkBar changes.
   PrefChangeRegistrar profile_pref_registrar_;

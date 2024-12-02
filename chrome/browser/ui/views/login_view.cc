@@ -8,7 +8,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/controls/label.h"
@@ -80,12 +80,12 @@ LoginView::LoginView(const string16& explanation,
   layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
 
   if (login_model_)
-    login_model_->SetObserver(this);
+    login_model_->AddObserver(this);
 }
 
 LoginView::~LoginView() {
   if (login_model_)
-    login_model_->SetObserver(NULL);
+    login_model_->RemoveObserver(this);
 }
 
 string16 LoginView::GetUsername() {
@@ -110,4 +110,9 @@ void LoginView::OnAutofillDataAvailable(const string16& username,
     password_field_->SetText(password);
     username_field_->SelectAll(true);
   }
+}
+
+void LoginView::OnLoginModelDestroying() {
+  login_model_->RemoveObserver(this);
+  login_model_ = NULL;
 }

@@ -16,6 +16,7 @@
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
+#include "chrome/browser/extensions/api/module/module.h"
 #include "chrome/browser/extensions/blacklist.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -301,7 +302,7 @@ void ExtensionUpdater::AddToDownloader(
   InProgressCheck& request = requests_in_progress_[request_id];
   for (ExtensionSet::const_iterator extension_iter = extensions->begin();
        extension_iter != extensions->end(); ++extension_iter) {
-    const Extension& extension = **extension_iter;
+    const Extension& extension = *extension_iter->get();
     if (!Manifest::IsAutoUpdateableLocation(extension.location())) {
       VLOG(2) << "Extension " << extension.id() << " is not auto updateable";
       continue;
@@ -544,7 +545,7 @@ bool ExtensionUpdater::GetPingDataForExtension(
 
 std::string ExtensionUpdater::GetUpdateUrlData(const std::string& id) {
   DCHECK(alive_);
-  return extension_prefs_->GetUpdateUrlData(id);
+  return extension::GetUpdateURLData(extension_prefs_, id);
 }
 
 bool ExtensionUpdater::IsExtensionPending(const std::string& id) {

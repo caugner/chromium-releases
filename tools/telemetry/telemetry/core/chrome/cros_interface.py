@@ -103,7 +103,11 @@ class CrOSInterface(object):
 
   def FormSSHCommandLine(self, args, extra_ssh_args=None):
     if self.local:
-      return args
+      # We run the command through the shell locally for consistency with
+      # how commands are run through SSH (crbug.com/239161). This work
+      # around will be unnecessary once we implement a persistent SSH
+      # connection to run remote commands (crbug.com/239607).
+      return ['sh', '-c', " ".join(args)]
 
     full_args = ['ssh',
                  '-o ForwardX11=no',
@@ -184,7 +188,13 @@ class CrOSInterface(object):
     return exists
 
   def PushFile(self, filename, remote_filename):
-    assert not self.local
+    if self.local:
+      args = ['cp', '-r', filename, remote_filename]
+      stdout, stderr = GetAllCmdOutput(args, quiet=True)
+      if stderr != '':
+        raise OSError('No such file or directory %s' % stderr)
+      return
+
     args = ['scp', '-r' ] + self._ssh_args
     if self._ssh_identity:
       args.extend(['-i', self._ssh_identity])
@@ -226,18 +236,19 @@ class CrOSInterface(object):
         return res
 
   def ListProcesses(self):
+    """Returns a tuple (pid, cmd, ppid) of all processes on the device."""
     stdout, stderr = self.RunCmdOnDevice([
         '/bin/ps', '--no-headers',
         '-A',
-        '-o', 'pid,args'], quiet=True)
-    assert stderr == ''
+        '-o', 'pid,ppid,args'], quiet=True)
+    assert stderr == '', stderr
     procs = []
     for l in stdout.split('\n'): # pylint: disable=E1103
       if l == '':
         continue
-      m = re.match('^\s*(\d+)\s+(.+)', l, re.DOTALL)
+      m = re.match('^\s*(\d+)\s+(\d+)\s+(.+)', l, re.DOTALL)
       assert m
-      procs.append(m.groups())
+      procs.append((int(m.group(1)), m.group(3), int(m.group(2))))
     logging.debug("ListProcesses(<predicate>)->[%i processes]" % len(procs))
     return procs
 
@@ -247,10 +258,10 @@ class CrOSInterface(object):
 
   def KillAllMatching(self, predicate):
     kills = ['kill', '-KILL']
-    for p in self.ListProcesses():
-      if predicate(p[1]):
-        logging.info('Killing %s', repr(p))
-        kills.append(p[0])
+    for pid, cmd, _ in self.ListProcesses():
+      if predicate(cmd):
+        logging.info('Killing %s, pid %d' % cmd, pid)
+        kills.append(pid)
     logging.debug("KillAllMatching(<predicate>)->%i" % (len(kills) - 2))
     if len(kills) > 2:
       self.RunCmdOnDevice(kills, quiet=True)
@@ -259,7 +270,7 @@ class CrOSInterface(object):
   def IsServiceRunning(self, service_name):
     stdout, stderr = self.RunCmdOnDevice([
         'status', service_name], quiet=True)
-    assert stderr == ''
+    assert stderr == '', stderr
     running = 'running, process' in stdout
     logging.debug("IsServiceRunning(%s)->%s" % (service_name, running))
     return running

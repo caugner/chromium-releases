@@ -14,7 +14,7 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/background/background_application_list_model.h"
 #include "chrome/browser/background/background_mode_manager.h"
@@ -835,7 +835,7 @@ void RecordLastRunAppBundlePath() {
   // nested message loop and commands dispatched during this operation cause
   // havoc.
   if (SessionRestore::IsRestoring(lastProfile) &&
-      MessageLoop::current()->IsNested())
+      base::MessageLoop::current()->IsNested())
     return;
 
   NSInteger tag = [sender tag];
@@ -928,7 +928,7 @@ void RecordLastRunAppBundlePath() {
       break;
     case IDC_TASK_MANAGER:
       content::RecordAction(UserMetricsAction("TaskManager"));
-      TaskManagerMac::Show(false);
+      TaskManagerMac::Show();
       break;
     case IDC_OPTIONS:
       [self showPreferences:sender];
@@ -967,7 +967,7 @@ void RecordLastRunAppBundlePath() {
 // dock icon and there are no open windows.  To match standard mac
 // behavior, we should open a new window.
 - (BOOL)applicationShouldHandleReopen:(NSApplication*)theApplication
-                    hasVisibleWindows:(BOOL)flag {
+                    hasVisibleWindows:(BOOL)hasVisibleWindows {
   // If the browser is currently trying to quit, don't do anything and return NO
   // to prevent AppKit from doing anything.
   // TODO(rohitrao): Remove this code when http://crbug.com/40861 is resolved.
@@ -978,7 +978,7 @@ void RecordLastRunAppBundlePath() {
   // cause AppKit to unminimize the most recently minimized window. If the
   // visible windows are panels or notifications, we still need to open a new
   // window.
-  if (flag) {
+  if (hasVisibleWindows) {
     for (chrome::BrowserIterator iter; !iter.done(); iter.Next()) {
       Browser* browser = *iter;
       if (browser->is_type_tabbed() || browser->is_type_popup())
@@ -1005,21 +1005,27 @@ void RecordLastRunAppBundlePath() {
   }
 
   // Platform apps don't use browser windows so don't do anything if there are
-  // visible windows.
+  // visible windows, otherwise, launch the browser with the same command line
+  // which should launch the app again.
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
-  if (flag && command_line.HasSwitch(switches::kAppId))
-    return YES;
+  if (command_line.HasSwitch(switches::kAppId)) {
+    if (hasVisibleWindows)
+      return YES;
+
+    {
+      base::AutoReset<bool> auto_reset_in_run(&g_is_opening_new_window, true);
+      int return_code;
+      StartupBrowserCreator browser_creator;
+      browser_creator.LaunchBrowser(
+          command_line, [self lastProfile], base::FilePath(),
+          chrome::startup::IS_NOT_PROCESS_STARTUP,
+          chrome::startup::IS_NOT_FIRST_RUN, &return_code);
+    }
+    return NO;
+  }
 
   // Otherwise open a new window.
-  {
-    base::AutoReset<bool> auto_reset_in_run(&g_is_opening_new_window, true);
-    int return_code;
-    StartupBrowserCreator browser_creator;
-    browser_creator.LaunchBrowser(
-        command_line, [self lastProfile], base::FilePath(),
-        chrome::startup::IS_NOT_PROCESS_STARTUP,
-        chrome::startup::IS_NOT_FIRST_RUN, &return_code);
-  }
+  CreateBrowser([self lastProfile]);
 
   // We've handled the reopen event, so return NO to tell AppKit not
   // to do anything.
@@ -1122,7 +1128,7 @@ void RecordLastRunAppBundlePath() {
   chrome::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
       chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
   StartupBrowserCreatorImpl launch(base::FilePath(), dummy, first_run);
-  launch.OpenURLsInBrowser(browser, false, urls);
+  launch.OpenURLsInBrowser(browser, false, urls, browser->host_desktop_type());
 }
 
 - (void)getUrl:(NSAppleEventDescriptor*)event
@@ -1220,7 +1226,7 @@ void RecordLastRunAppBundlePath() {
     [dockMenu addItem:[NSMenuItem separatorItem]];
 
   NSString* titleStr = l10n_util::GetNSStringWithFixup(IDS_NEW_WINDOW_MAC);
-  scoped_nsobject<NSMenuItem> item(
+  base::scoped_nsobject<NSMenuItem> item(
       [[NSMenuItem alloc] initWithTitle:titleStr
                                  action:@selector(commandFromDock:)
                           keyEquivalent:@""]);
@@ -1249,7 +1255,8 @@ void RecordLastRunAppBundlePath() {
       int position = 0;
       NSString* menuStr =
           l10n_util::GetNSStringWithFixup(IDS_BACKGROUND_APPS_MAC);
-      scoped_nsobject<NSMenu> appMenu([[NSMenu alloc] initWithTitle:menuStr]);
+      base::scoped_nsobject<NSMenu> appMenu(
+          [[NSMenu alloc] initWithTitle:menuStr]);
       for (extensions::ExtensionList::const_iterator cursor =
                applications.begin();
            cursor != applications.end();
@@ -1257,23 +1264,14 @@ void RecordLastRunAppBundlePath() {
         DCHECK_EQ(applications.GetPosition(*cursor), position);
         NSString* itemStr =
             base::SysUTF16ToNSString(UTF8ToUTF16((*cursor)->name()));
-        scoped_nsobject<NSMenuItem> appItem([[NSMenuItem alloc]
-            initWithTitle:itemStr
-                   action:@selector(executeApplication:)
-            keyEquivalent:@""]);
+        base::scoped_nsobject<NSMenuItem> appItem(
+            [[NSMenuItem alloc] initWithTitle:itemStr
+                                       action:@selector(executeApplication:)
+                                keyEquivalent:@""]);
         [appItem setTarget:self];
         [appItem setTag:position];
         [appMenu addItem:appItem];
       }
-
-      scoped_nsobject<NSMenuItem> appMenuItem([[NSMenuItem alloc]
-          initWithTitle:menuStr
-                 action:@selector(executeApplication:)
-          keyEquivalent:@""]);
-      [appMenuItem setTarget:self];
-      [appMenuItem setTag:IDC_VIEW_BACKGROUND_PAGES];
-      [appMenuItem setSubmenu:appMenu];
-      [dockMenu addItem:appMenuItem];
     }
   }
 

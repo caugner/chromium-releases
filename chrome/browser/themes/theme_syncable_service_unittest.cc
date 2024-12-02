@@ -107,7 +107,7 @@ class FakeThemeService : public ThemeService {
   }
 
   virtual string GetThemeID() const OVERRIDE {
-    if (theme_extension_)
+    if (theme_extension_.get())
       return theme_extension_->id();
     else
       return std::string();
@@ -132,7 +132,8 @@ class FakeThemeService : public ThemeService {
   bool is_dirty_;
 };
 
-ProfileKeyedService* BuildMockThemeService(content::BrowserContext* profile) {
+BrowserContextKeyedService* BuildMockThemeService(
+    content::BrowserContext* profile) {
   return new FakeThemeService;
 }
 
@@ -151,7 +152,7 @@ scoped_refptr<extensions::Extension> MakeThemeExtension(
       extensions::Extension::Create(
           extension_path, location, source,
           extensions::Extension::NO_FLAGS, &error);
-  EXPECT_TRUE(extension);
+  EXPECT_TRUE(extension.get());
   EXPECT_EQ("", error);
   return extension;
 }
@@ -161,9 +162,9 @@ scoped_refptr<extensions::Extension> MakeThemeExtension(
 class ThemeSyncableServiceTest : public testing::Test {
  protected:
   ThemeSyncableServiceTest()
-      : loop_(MessageLoop::TYPE_DEFAULT),
-        ui_thread_(BrowserThread::UI, &loop_),
-        file_thread_(BrowserThread::FILE, &loop_),
+      : loop_(base::MessageLoop::TYPE_DEFAULT),
+        ui_thread_(content::BrowserThread::UI, &loop_),
+        file_thread_(content::BrowserThread::FILE, &loop_),
         fake_theme_service_(NULL) {}
 
   virtual ~ThemeSyncableServiceTest() {}
@@ -205,7 +206,7 @@ class ThemeSyncableServiceTest : public testing::Test {
         new extensions::PermissionSet(empty_set, empty_extent, empty_extent);
     service->extension_prefs()->AddGrantedPermissions(
         theme_extension_->id(), permissions.get());
-    service->AddExtension(theme_extension_);
+    service->AddExtension(theme_extension_.get());
     ASSERT_EQ(1u, service->extensions()->size());
   }
 
@@ -233,7 +234,7 @@ class ThemeSyncableServiceTest : public testing::Test {
   }
 
   // Needed for setting up extension service.
-  MessageLoop loop_;
+  base::MessageLoop loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
 
@@ -388,8 +389,9 @@ TEST_F(ThemeSyncableServiceTest, UpdateThemeSpecificsFromCurrentTheme) {
   EXPECT_TRUE(theme_specifics.use_custom_theme());
   EXPECT_EQ(theme_extension_->id(), theme_specifics.custom_theme_id());
   EXPECT_EQ(theme_extension_->name(), theme_specifics.custom_theme_name());
-  EXPECT_EQ(extensions::ManifestURL::GetUpdateURL(theme_extension_).spec(),
-            theme_specifics.custom_theme_update_url());
+  EXPECT_EQ(
+      extensions::ManifestURL::GetUpdateURL(theme_extension_.get()).spec(),
+      theme_specifics.custom_theme_update_url());
 }
 
 TEST_F(ThemeSyncableServiceTest, GetAllSyncData) {
@@ -405,8 +407,9 @@ TEST_F(ThemeSyncableServiceTest, GetAllSyncData) {
   EXPECT_TRUE(theme_specifics.use_custom_theme());
   EXPECT_EQ(theme_extension_->id(), theme_specifics.custom_theme_id());
   EXPECT_EQ(theme_extension_->name(), theme_specifics.custom_theme_name());
-  EXPECT_EQ(extensions::ManifestURL::GetUpdateURL(theme_extension_).spec(),
-            theme_specifics.custom_theme_update_url());
+  EXPECT_EQ(
+      extensions::ManifestURL::GetUpdateURL(theme_extension_.get()).spec(),
+      theme_specifics.custom_theme_update_url());
 }
 
 TEST_F(ThemeSyncableServiceTest, ProcessSyncThemeChange) {
@@ -468,8 +471,9 @@ TEST_F(ThemeSyncableServiceTest, OnThemeChangeByUser) {
   EXPECT_TRUE(change_specifics.use_custom_theme());
   EXPECT_EQ(theme_extension_->id(), change_specifics.custom_theme_id());
   EXPECT_EQ(theme_extension_->name(), change_specifics.custom_theme_name());
-  EXPECT_EQ(extensions::ManifestURL::GetUpdateURL(theme_extension_).spec(),
-            change_specifics.custom_theme_update_url());
+  EXPECT_EQ(
+      extensions::ManifestURL::GetUpdateURL(theme_extension_.get()).spec(),
+      change_specifics.custom_theme_update_url());
 }
 
 TEST_F(ThemeSyncableServiceTest, StopSync) {

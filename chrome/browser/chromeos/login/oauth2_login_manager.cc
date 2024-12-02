@@ -7,7 +7,7 @@
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/profiles/profile.h"
@@ -54,8 +54,8 @@ void OAuth2LoginManager::RestoreSession(
     const std::string& oauth2_refresh_token,
     const std::string& auth_code) {
   // TODO(nkostylev): OAuth2LoginManager should support multi-profiles or
-  // should be refactored as ProfileKeyedService. For now we unsubscribe from
-  // TokenService notifications of a user that was previously active.
+  // should be refactored as BrowserContextKeyedService. For now we unsubscribe
+  // from TokenService notifications of a user that was previously active.
   // http://crbug.com/230342
   registrar_.RemoveAll();
   user_profile_ = user_profile;
@@ -141,7 +141,7 @@ void OAuth2LoginManager::FetchOAuth2Tokens() {
   // SID/LSID cookies through OAuthLogin call.
   if (restore_strategy_ == RESTORE_FROM_COOKIE_JAR) {
     oauth2_token_fetcher_.reset(
-        new OAuth2TokenFetcher(this, auth_request_context_));
+        new OAuth2TokenFetcher(this, auth_request_context_.get()));
     oauth2_token_fetcher_->StartExchangeFromCookies();
   } else if (restore_strategy_ == RESTORE_FROM_AUTH_CODE) {
     DCHECK(!auth_code_.empty());

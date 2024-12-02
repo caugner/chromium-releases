@@ -11,12 +11,12 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/utf_string_conversions.h"
-#include "chrome/browser/storage_monitor/media_storage_util.h"
 #include "chrome/browser/storage_monitor/mock_removable_storage_observer.h"
 #include "chrome/browser/storage_monitor/portable_device_watcher_win.h"
 #include "chrome/browser/storage_monitor/removable_device_constants.h"
+#include "chrome/browser/storage_monitor/storage_info.h"
 #include "chrome/browser/storage_monitor/storage_monitor_win.h"
 #include "chrome/browser/storage_monitor/test_portable_device_watcher_win.h"
 #include "chrome/browser/storage_monitor/test_storage_monitor_win.h"
@@ -54,14 +54,14 @@ class StorageMonitorWinTest : public testing::Test {
 
   // Injects a device attach or detach change (depending on the value of
   // |test_attach|) and tests that the appropriate handler is called.
-  void DoMTPDeviceTest(const string16& pnp_device_id, bool test_attach);
+  void DoMTPDeviceTest(const base::string16& pnp_device_id, bool test_attach);
 
   // Gets the MTP details of the storage specified by the |storage_device_id|.
   // On success, returns true and fills in |pnp_device_id| and
   // |storage_object_id|.
   bool GetMTPStorageInfo(const std::string& storage_device_id,
-                         string16* pnp_device_id,
-                         string16* storage_object_id);
+                         base::string16* pnp_device_id,
+                         base::string16* storage_object_id);
 
   scoped_ptr<TestStorageMonitorWin> monitor_;
 
@@ -71,7 +71,7 @@ class StorageMonitorWinTest : public testing::Test {
   MockRemovableStorageObserver observer_;
 
  private:
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
 };
@@ -98,7 +98,7 @@ void StorageMonitorWinTest::TearDown() {
   RunUntilIdle();
   monitor_->RemoveObserver(&observer_);
   volume_mount_watcher_->ShutdownWorkerPool();
-  monitor_.reset(NULL);
+  monitor_.reset();
 }
 
 void StorageMonitorWinTest::PreAttachDevices() {
@@ -151,7 +151,7 @@ void StorageMonitorWinTest::DoMassStorageDeviceAttachedTest(
   volume_broadcast.dbcv_unitmask = 0x0;
   volume_broadcast.dbcv_flags = 0x0;
 
-  int expect_attach_calls = 0;
+  int expect_attach_calls = observer_.attach_calls();
   for (DeviceIndices::const_iterator it = device_indices.begin();
        it != device_indices.end(); ++it) {
     volume_broadcast.dbcv_unitmask |= 0x1 << *it;
@@ -188,8 +188,8 @@ void StorageMonitorWinTest::DoMassStorageDevicesDetachedTest(
     StorageInfo info;
     ASSERT_TRUE(volume_mount_watcher_->GetDeviceInfo(
         VolumeMountWatcherWin::DriveNumberToFilePath(*it), &info));
-    if (MediaStorageUtil::IsRemovableDevice(info.device_id))
-      expect_detach_calls++;
+    if (StorageInfo::IsRemovableDevice(info.device_id()))
+      ++expect_detach_calls;
   }
   monitor_->InjectDeviceChange(DBT_DEVICEREMOVECOMPLETE,
                                reinterpret_cast<DWORD>(&volume_broadcast));
@@ -198,7 +198,7 @@ void StorageMonitorWinTest::DoMassStorageDevicesDetachedTest(
   EXPECT_EQ(expect_detach_calls, observer_.detach_calls());
 }
 
-void StorageMonitorWinTest::DoMTPDeviceTest(const string16& pnp_device_id,
+void StorageMonitorWinTest::DoMTPDeviceTest(const base::string16& pnp_device_id,
                                             bool test_attach) {
   GUID guidDevInterface = GUID_NULL;
   HRESULT hr = CLSIDFromString(kWPDDevInterfaceGUID, &guidDevInterface);
@@ -224,8 +224,8 @@ void StorageMonitorWinTest::DoMTPDeviceTest(const string16& pnp_device_id,
   for (PortableDeviceWatcherWin::StorageObjectIDs::const_iterator it =
        storage_object_ids.begin(); it != storage_object_ids.end(); ++it) {
     std::string unique_id;
-    string16 name;
-    string16 location;
+    base::string16 name;
+    base::string16 location;
     TestPortableDeviceWatcherWin::GetMTPStorageDetails(pnp_device_id, *it,
                                                        &location, &unique_id,
                                                        &name);
@@ -246,8 +246,8 @@ void StorageMonitorWinTest::DoMTPDeviceTest(const string16& pnp_device_id,
 
 bool StorageMonitorWinTest::GetMTPStorageInfo(
     const std::string& storage_device_id,
-    string16* pnp_device_id,
-    string16* storage_object_id) {
+    base::string16* pnp_device_id,
+    base::string16* storage_object_id) {
   return monitor_->GetMTPStorageInfoFromDeviceId(storage_device_id,
                                                  pnp_device_id,
                                                  storage_object_id);
@@ -269,10 +269,10 @@ TEST_F(StorageMonitorWinTest, DevicesAttached) {
   StorageInfo info;
   EXPECT_TRUE(monitor_->volume_mount_watcher()->GetDeviceInfo(
       base::FilePath(ASCIIToUTF16("F:\\")), &info));
-  EXPECT_EQ(ASCIIToUTF16("F:\\"), info.location);
+  EXPECT_EQ(ASCIIToUTF16("F:\\"), info.location());
   EXPECT_EQ("dcim:\\\\?\\Volume{F0000000-0000-0000-0000-000000000000}\\",
-            info.device_id);
-  EXPECT_EQ(ASCIIToUTF16("F:\\ Drive"), info.name);
+            info.device_id());
+  EXPECT_EQ(ASCIIToUTF16("F:\\ Drive"), info.storage_label());
 
   EXPECT_FALSE(monitor_->GetStorageInfoForPath(
       base::FilePath(ASCIIToUTF16("G:\\")), &info));
@@ -284,13 +284,14 @@ TEST_F(StorageMonitorWinTest, DevicesAttached) {
   StorageInfo info2;
   EXPECT_TRUE(monitor_->GetStorageInfoForPath(
       base::FilePath(ASCIIToUTF16("F:\\subdir\\sub")), &info2));
-  EXPECT_EQ(ASCIIToUTF16("F:\\ Drive"), info.name);
-  EXPECT_EQ(ASCIIToUTF16("F:\\ Drive"), info1.name);
-  EXPECT_EQ(ASCIIToUTF16("F:\\ Drive"), info2.name);
+  EXPECT_EQ(ASCIIToUTF16("F:\\ Drive"), info.storage_label());
+  EXPECT_EQ(ASCIIToUTF16("F:\\ Drive"), info1.storage_label());
+  EXPECT_EQ(ASCIIToUTF16("F:\\ Drive"), info2.storage_label());
 }
 
 TEST_F(StorageMonitorWinTest, PathMountDevices) {
   PreAttachDevices();
+  int init_storages = monitor_->GetAllAvailableStorages().size();
 
   volume_mount_watcher_->AddDeviceForTesting(
       base::FilePath(FILE_PATH_LITERAL("F:\\mount1")),
@@ -302,30 +303,31 @@ TEST_F(StorageMonitorWinTest, PathMountDevices) {
       base::FilePath(FILE_PATH_LITERAL("F:\\mount2")),
       "dcim:mount2", L"mount2", 100);
   RunUntilIdle();
-  EXPECT_EQ(9, monitor_->GetAttachedStorage().size());
+  EXPECT_EQ(init_storages + 3, monitor_->GetAllAvailableStorages().size());
 
   StorageInfo info;
   EXPECT_TRUE(monitor_->GetStorageInfoForPath(
       base::FilePath(ASCIIToUTF16("F:\\dir")), &info));
-  EXPECT_EQ(L"F:\\ Drive", info.name);
+  EXPECT_EQ(L"", info.name());
+  EXPECT_EQ(L"F:\\ Drive", info.storage_label());
   EXPECT_TRUE(monitor_->GetStorageInfoForPath(
       base::FilePath(ASCIIToUTF16("F:\\mount1")), &info));
-  EXPECT_EQ(L"mount1", info.name);
+  EXPECT_EQ(L"mount1", info.name());
   EXPECT_TRUE(monitor_->GetStorageInfoForPath(
       base::FilePath(ASCIIToUTF16("F:\\mount1\\dir")), &info));
-  EXPECT_EQ(L"mount1", info.name);
+  EXPECT_EQ(L"mount1", info.name());
   EXPECT_TRUE(monitor_->GetStorageInfoForPath(
       base::FilePath(ASCIIToUTF16("F:\\mount2\\dir")), &info));
-  EXPECT_EQ(L"mount2", info.name);
+  EXPECT_EQ(L"mount2", info.name());
   EXPECT_TRUE(monitor_->GetStorageInfoForPath(
       base::FilePath(ASCIIToUTF16("F:\\mount1\\subdir")), &info));
-  EXPECT_EQ(L"mount1subdir", info.name);
+  EXPECT_EQ(L"mount1subdir", info.name());
   EXPECT_TRUE(monitor_->GetStorageInfoForPath(
       base::FilePath(ASCIIToUTF16("F:\\mount1\\subdir\\dir")), &info));
-  EXPECT_EQ(L"mount1subdir", info.name);
+  EXPECT_EQ(L"mount1subdir", info.name());
   EXPECT_TRUE(monitor_->GetStorageInfoForPath(
       base::FilePath(ASCIIToUTF16("F:\\mount1\\subdir\\dir\\dir")), &info));
-  EXPECT_EQ(L"mount1subdir", info.name);
+  EXPECT_EQ(L"mount1subdir", info.name());
 }
 
 TEST_F(StorageMonitorWinTest, DevicesAttachedHighBoundary) {
@@ -431,7 +433,7 @@ TEST_F(StorageMonitorWinTest, DuplicateAttachCheckSuppressed) {
   volume_mount_watcher_->FlushWorkerPoolForTesting();
   RunUntilIdle();
 
-  std::vector<base::FilePath> checked_devices =
+  const std::vector<base::FilePath>& checked_devices =
       volume_mount_watcher_->devices_checked();
   ASSERT_EQ(1u, checked_devices.size());
   EXPECT_EQ(kAttachedDevicePath, checked_devices[0]);
@@ -443,7 +445,6 @@ TEST_F(StorageMonitorWinTest, DuplicateAttachCheckSuppressed) {
   volume_mount_watcher_->ReleaseDeviceCheck();
   RunUntilIdle();
 
-  checked_devices = volume_mount_watcher_->devices_checked();
   ASSERT_EQ(2u, checked_devices.size());
   EXPECT_EQ(kAttachedDevicePath, checked_devices[0]);
   EXPECT_EQ(kAttachedDevicePath, checked_devices[1]);
@@ -452,25 +453,26 @@ TEST_F(StorageMonitorWinTest, DuplicateAttachCheckSuppressed) {
 TEST_F(StorageMonitorWinTest, DeviceInfoForPath) {
   PreAttachDevices();
 
+  StorageInfo device_info;
   // An invalid path.
   EXPECT_FALSE(monitor_->GetStorageInfoForPath(base::FilePath(L"COM1:\\"),
-                                               NULL));
+                                               &device_info));
 
   // An unconnected removable device.
-  EXPECT_FALSE(monitor_->GetStorageInfoForPath(base::FilePath(L"E:\\"), NULL));
+  EXPECT_FALSE(monitor_->GetStorageInfoForPath(base::FilePath(L"E:\\"),
+                                               &device_info));
 
   // A connected removable device.
   base::FilePath removable_device(L"F:\\");
-  StorageInfo device_info;
   EXPECT_TRUE(monitor_->GetStorageInfoForPath(removable_device, &device_info));
 
   StorageInfo info;
   ASSERT_TRUE(volume_mount_watcher_->GetDeviceInfo(removable_device, &info));
-  EXPECT_TRUE(MediaStorageUtil::IsRemovableDevice(info.device_id));
-  EXPECT_EQ(info.device_id, device_info.device_id);
-  EXPECT_EQ(info.name, device_info.name);
-  EXPECT_EQ(info.location, device_info.location);
-  EXPECT_EQ(1000000, info.total_size_in_bytes);
+  EXPECT_TRUE(StorageInfo::IsRemovableDevice(info.device_id()));
+  EXPECT_EQ(info.device_id(), device_info.device_id());
+  EXPECT_EQ(info.name(), device_info.name());
+  EXPECT_EQ(info.location(), device_info.location());
+  EXPECT_EQ(1000000, info.total_size_in_bytes());
 
   // A fixed device.
   base::FilePath fixed_device(L"N:\\");
@@ -478,10 +480,10 @@ TEST_F(StorageMonitorWinTest, DeviceInfoForPath) {
 
   ASSERT_TRUE(volume_mount_watcher_->GetDeviceInfo(
       fixed_device, &info));
-  EXPECT_FALSE(MediaStorageUtil::IsRemovableDevice(info.device_id));
-  EXPECT_EQ(info.device_id, device_info.device_id);
-  EXPECT_EQ(info.name, device_info.name);
-  EXPECT_EQ(info.location, device_info.location);
+  EXPECT_FALSE(StorageInfo::IsRemovableDevice(info.device_id()));
+  EXPECT_EQ(info.device_id(), device_info.device_id());
+  EXPECT_EQ(info.name(), device_info.name());
+  EXPECT_EQ(info.location(), device_info.location());
 }
 
 // Test to verify basic MTP storage attach and detach notifications.
@@ -526,12 +528,13 @@ TEST_F(StorageMonitorWinTest, GetMTPStorageInfoFromDeviceId) {
   for (PortableDeviceWatcherWin::StorageObjects::const_iterator it =
            storage_objects.begin();
        it != storage_objects.end(); ++it) {
-    string16 pnp_device_id;
-    string16 storage_object_id;
+    base::string16 pnp_device_id;
+    base::string16 storage_object_id;
     ASSERT_TRUE(GetMTPStorageInfo(it->object_persistent_id, &pnp_device_id,
                                   &storage_object_id));
-    EXPECT_EQ(string16(TestPortableDeviceWatcherWin::kMTPDeviceWithValidInfo),
-              pnp_device_id);
+    base::string16 expected(
+        TestPortableDeviceWatcherWin::kMTPDeviceWithValidInfo);
+    EXPECT_EQ(expected, pnp_device_id);
     EXPECT_EQ(it->object_persistent_id,
               TestPortableDeviceWatcherWin::GetMTPStorageUniqueId(
                   pnp_device_id, storage_object_id));

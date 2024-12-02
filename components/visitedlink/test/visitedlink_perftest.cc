@@ -10,7 +10,7 @@
 #include "base/files/file_path.h"
 #include "base/perftimer.h"
 #include "base/shared_memory.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "base/test/test_file_util.h"
 #include "components/visitedlink/browser/visitedlink_master.h"
 #include "googleurl/src/gurl.h"
@@ -18,7 +18,7 @@
 
 using base::TimeDelta;
 
-namespace components {
+namespace visitedlink {
 
 namespace {
 
@@ -196,4 +196,4 @@ TEST_F(VisitedLink, TestLoad) {
                 hot_sum / hot_load_times.size(), "ms");
 }
 
-}  // namespace components
+}  // namespace visitedlink

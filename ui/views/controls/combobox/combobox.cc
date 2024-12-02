@@ -5,7 +5,7 @@
 #include "ui/views/controls/combobox/combobox.h"
 
 #include "base/logging.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/events/event.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -18,7 +18,7 @@
 namespace views {
 
 // static
-const char Combobox::kViewClassName[] = "views/Combobox";
+const char Combobox::kViewClassName[] = "Combobox";
 
 ////////////////////////////////////////////////////////////////////////////////
 // Combobox, public:
@@ -140,8 +140,9 @@ void Combobox::GetAccessibleState(ui::AccessibleViewState* state) {
   state->count = model_->GetItemCount();
 }
 
-void Combobox::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
-  if (is_add && !native_wrapper_ && GetWidget()) {
+void Combobox::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  if (details.is_add && !native_wrapper_ && GetWidget()) {
     // The native wrapper's lifetime will be managed by the view hierarchy after
     // we call AddChildView.
     native_wrapper_ = NativeComboboxWrapper::CreateWrapper(this);
@@ -155,7 +156,7 @@ void Combobox::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
   }
 }
 
-std::string Combobox::GetClassName() const {
+const char* Combobox::GetClassName() const {
   return kViewClassName;
 }
 

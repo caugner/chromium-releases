@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/logging.h"
 #include "ui/app_list/app_list_constants.h"
 #include "ui/app_list/pagination_model.h"
 #include "ui/app_list/views/app_list_main_view.h"
@@ -54,13 +55,12 @@ ContentsView::ContentsView(AppListMainView* app_list_main_view,
       kPageTransitionDurationInMs,
       kOverscrollPageTransitionDurationMs);
 
-  AppsGridView* apps_grid_view = new AppsGridView(app_list_main_view,
-                                                  pagination_model);
-  apps_grid_view->SetLayout(kPreferredIconDimension,
-                            kPreferredCols,
-                            kPreferredRows);
-  AddChildView(apps_grid_view);
-  view_model_->Add(apps_grid_view, kIndexAppsGrid);
+  apps_grid_view_ = new AppsGridView(app_list_main_view, pagination_model);
+  apps_grid_view_->SetLayout(kPreferredIconDimension,
+                             kPreferredCols,
+                             kPreferredRows);
+  AddChildView(apps_grid_view_);
+  view_model_->Add(apps_grid_view_, kIndexAppsGrid);
 
   SearchResultListView* search_results_view = new SearchResultListView(
       app_list_main_view);
@@ -79,6 +79,11 @@ void ContentsView::SetModel(AppListModel* model) {
     GetAppsGridView(view_model_.get())->SetModel(NULL);
     GetSearchResultListView(view_model_.get())->SetResults(NULL);
   }
+}
+
+void ContentsView::SetDragAndDropHostOfCurrentAppList(
+    app_list::ApplicationDragAndDropHost* drag_and_drop_host) {
+  apps_grid_view_->SetDragAndDropHostOfCurrentAppList(drag_and_drop_host);
 }
 
 void ContentsView::SetShowState(ShowState show_state) {
@@ -178,10 +183,16 @@ bool ContentsView::OnMouseWheel(const ui::MouseWheelEvent& event) {
   if (show_state_ != SHOW_APPS)
     return false;
 
-  if (abs(event.y_offset()) > kMinMouseWheelToSwitchPage) {
+  int offset;
+  if (abs(event.x_offset()) > abs(event.y_offset()))
+    offset = event.x_offset();
+  else
+    offset = event.y_offset();
+
+  if (abs(offset) > kMinMouseWheelToSwitchPage) {
     if (!pagination_model_->has_transition()) {
       pagination_model_->SelectPageRelative(
-          event.y_offset() > 0 ? -1 : 1, true);
+          offset > 0 ? -1 : 1, true);
     }
     return true;
   }
@@ -227,17 +238,24 @@ void ContentsView::OnGestureEvent(ui::GestureEvent* event) {
 
 void ContentsView::OnScrollEvent(ui::ScrollEvent* event) {
   if (show_state_ != SHOW_APPS ||
-      event->type() == ui::ET_SCROLL_FLING_CANCEL ||
-      abs(event->x_offset()) < kMinScrollToSwitchPage) {
+      event->type() == ui::ET_SCROLL_FLING_CANCEL) {
     return;
   }
 
-  if (!pagination_model_->has_transition()) {
-    pagination_model_->SelectPageRelative(event->x_offset() > 0 ? -1 : 1,
-                                          true);
+  float offset;
+  if (abs(event->x_offset()) > abs(event->y_offset()))
+    offset = event->x_offset();
+  else
+    offset = event->y_offset();
+
+  if (abs(offset) > kMinScrollToSwitchPage) {
+    if (!pagination_model_->has_transition()) {
+      pagination_model_->SelectPageRelative(offset > 0 ? -1 : 1,
+                                            true);
+    }
+    event->SetHandled();
+    event->StopPropagation();
   }
-  event->SetHandled();
-  event->StopPropagation();
 }
 
 }  // namespace app_list

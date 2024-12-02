@@ -10,11 +10,12 @@
 #include "ash/wm/window_cycle_controller.h"
 #include "ash/wm/window_util.h"
 #include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/json/json_writer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "base/synchronization/cancellation_flag.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/worker_pool.h"
@@ -26,14 +27,15 @@
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/image_decoder.h"
 #include "chrome/common/chrome_paths.h"
+#include "chromeos/login/login_state.h"
 #include "content/public/browser/browser_thread.h"
-#include "net/url_request/url_fetcher.h"
-#include "net/url_request/url_fetcher_delegate.h"
-#include "net/url_request/url_request_status.h"
 #include "googleurl/src/gurl.h"
 #include "grit/app_locale_settings.h"
 #include "grit/generated_resources.h"
 #include "grit/platform_locale_settings.h"
+#include "net/url_request/url_fetcher.h"
+#include "net/url_request/url_fetcher_delegate.h"
+#include "net/url_request/url_request_status.h"
 #include "ui/aura/window_observer.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/webui/web_ui_util.h"
@@ -235,11 +237,16 @@ class WallpaperFunctionBase::WallpaperDecoder : public ImageDecoder::Delegate {
 
   void Start(const std::string& image_data) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    image_decoder_ = new ImageDecoder(this, image_data,
-                                      ImageDecoder::ROBUST_JPEG_CODEC);
+
+    // This function can only be called after user login. It is fine to use
+    // unsafe image decoder here. Before user login, a robust jpeg decoder will
+    // be used.
+    CHECK(chromeos::LoginState::Get()->IsUserLoggedIn());
+    unsafe_image_decoder_ = new ImageDecoder(this, image_data,
+                                             ImageDecoder::DEFAULT_CODEC);
     scoped_refptr<base::MessageLoopProxy> task_runner =
         BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI);
-    image_decoder_->Start(task_runner);
+    unsafe_image_decoder_->Start(task_runner);
   }
 
   void Cancel() {
@@ -272,7 +279,7 @@ class WallpaperFunctionBase::WallpaperDecoder : public ImageDecoder::Delegate {
 
  private:
   scoped_refptr<WallpaperFunctionBase> function_;
-  scoped_refptr<ImageDecoder> image_decoder_;
+  scoped_refptr<ImageDecoder> unsafe_image_decoder_;
   base::CancellationFlag cancel_flag_;
 
   DISALLOW_COPY_AND_ASSIGN(WallpaperDecoder);
@@ -881,34 +888,20 @@ void WallpaperPrivateGetOfflineWallpaperListFunction::GetList(
   DCHECK(BrowserThread::GetBlockingPool()->IsRunningSequenceOnCurrentThread(
       sequence_token_));
   std::vector<std::string> file_list;
+  // TODO(bshe): This api function is only used for ONLINE wallpapers. Remove
+  // source.
   if (source == kOnlineSource) {
     base::FilePath wallpaper_dir;
     CHECK(PathService::Get(chrome::DIR_CHROMEOS_WALLPAPERS, &wallpaper_dir));
     if (file_util::DirectoryExists(wallpaper_dir)) {
-      file_util::FileEnumerator files(wallpaper_dir, false,
-                                      file_util::FileEnumerator::FILES);
+      base::FileEnumerator files(wallpaper_dir, false,
+                                 base::FileEnumerator::FILES);
       for (base::FilePath current = files.Next(); !current.empty();
            current = files.Next()) {
         std::string file_name = current.BaseName().RemoveExtension().value();
         // Do not add file name of small resolution wallpaper to the list.
         if (!EndsWith(file_name, chromeos::kSmallWallpaperSuffix, true))
           file_list.push_back(current.BaseName().value());
-      }
-    }
-  } else {
-    base::FilePath custom_thumbnails_dir = chromeos::WallpaperManager::Get()->
-        GetCustomWallpaperPath(chromeos::kThumbnailWallpaperSubDir, email, "");
-    if (file_util::DirectoryExists(custom_thumbnails_dir)) {
-      file_util::FileEnumerator files(custom_thumbnails_dir, false,
-                                      file_util::FileEnumerator::FILES);
-      std::set<std::string> file_name_set;
-      for (base::FilePath current = files.Next(); !current.empty();
-           current = files.Next()) {
-        file_name_set.insert(current.BaseName().value());
-      }
-      for (std::set<std::string>::reverse_iterator rit = file_name_set.rbegin();
-           rit != file_name_set.rend(); ++rit) {
-        file_list.push_back(*rit);
       }
     }
   }

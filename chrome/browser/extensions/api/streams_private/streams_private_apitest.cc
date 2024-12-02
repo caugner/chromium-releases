@@ -9,9 +9,6 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_system.h"
-#include "chrome/browser/google_apis/test_server/http_request.h"
-#include "chrome/browser/google_apis/test_server/http_response.h"
-#include "chrome/browser/google_apis/test_server/http_server.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -24,6 +21,9 @@
 #include "content/public/browser/resource_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/download_test_observer.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/test/embedded_test_server/http_request.h"
+#include "net/test/embedded_test_server/http_response.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using content::BrowserContext;
@@ -35,9 +35,10 @@ using content::ResourceController;
 using content::WebContents;
 using extensions::Event;
 using extensions::ExtensionSystem;
-using google_apis::test_server::HttpRequest;
-using google_apis::test_server::HttpResponse;
-using google_apis::test_server::HttpServer;
+using net::test_server::BasicHttpResponse;
+using net::test_server::HttpRequest;
+using net::test_server::HttpResponse;
+using net::test_server::EmbeddedTestServer;
 using testing::_;
 
 namespace {
@@ -45,40 +46,40 @@ namespace {
 // Test server's request handler.
 // Returns response that should be sent by the test server.
 scoped_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
-  scoped_ptr<HttpResponse> response(new HttpResponse());
+  scoped_ptr<BasicHttpResponse> response(new BasicHttpResponse());
 
   // For relative path "/doc_path.doc", return success response with MIME type
   // "application/msword".
   if (request.relative_url == "/doc_path.doc") {
-    response->set_code(google_apis::test_server::SUCCESS);
+    response->set_code(net::test_server::SUCCESS);
     response->set_content_type("application/msword");
-    return response.Pass();
+    return response.PassAs<HttpResponse>();
   }
 
   // For relative path "/test_path_attch.txt", return success response with
   // MIME type "plain/text" and content "txt content". Also, set content
   // disposition to be attachment.
   if (request.relative_url == "/text_path_attch.txt") {
-    response->set_code(google_apis::test_server::SUCCESS);
+    response->set_code(net::test_server::SUCCESS);
     response->set_content("txt content");
     response->set_content_type("plain/text");
     response->AddCustomHeader("Content-Disposition",
                               "attachment; filename=test_path.txt");
-    return response.Pass();
+    return response.PassAs<HttpResponse>();
   }
   // For relative path "/test_path_attch.txt", return success response with
   // MIME type "plain/text" and content "txt content".
   if (request.relative_url == "/text_path.txt") {
-    response->set_code(google_apis::test_server::SUCCESS);
+    response->set_code(net::test_server::SUCCESS);
     response->set_content("txt content");
     response->set_content_type("plain/text");
-    return response.Pass();
+    return response.PassAs<HttpResponse>();
   }
 
   // No other requests should be handled in the tests.
   EXPECT_TRUE(false) << "NOTREACHED!";
-  response->set_code(google_apis::test_server::NOT_FOUND);
-  return response.Pass();
+  response->set_code(net::test_server::NOT_FOUND);
+  return response.PassAs<HttpResponse>();
 }
 
 // Tests to verify that resources are correctly intercepted by
@@ -94,7 +95,7 @@ class StreamsPrivateApiTest : public ExtensionApiTest {
 
   virtual void SetUpOnMainThread() OVERRIDE {
     // Init test server.
-    test_server_.reset(new HttpServer(
+    test_server_.reset(new EmbeddedTestServer(
                            content::BrowserThread::GetMessageLoopProxyForThread(
                                content::BrowserThread::IO)));
     ASSERT_TRUE(test_server_->InitializeAndWaitUntilReady());
@@ -133,11 +134,12 @@ class StreamsPrivateApiTest : public ExtensionApiTest {
   // event with the "test/done" MIME type (unless the 'chrome.test.notifyFail'
   // has already been called).
   void SendDoneEvent() {
-    scoped_ptr<ListValue> event_args(new ListValue());
+    scoped_ptr<base::ListValue> event_args(new base::ListValue());
     event_args->Append(new base::StringValue("test/done"));
     event_args->Append(new base::StringValue("http://foo"));
     event_args->Append(new base::StringValue("blob://bar"));
     event_args->Append(new base::FundamentalValue(10));
+    event_args->Append(new base::FundamentalValue(20));
 
     scoped_ptr<Event> event(new Event(
         "streamsPrivate.onExecuteMimeTypeHandler", event_args.Pass()));
@@ -185,14 +187,14 @@ class StreamsPrivateApiTest : public ExtensionApiTest {
                                      DownloadManager* manager) {
     scoped_refptr<content::DownloadTestFlushObserver> flush_observer(
         new content::DownloadTestFlushObserver(manager));
-    download->Delete(DownloadItem::DELETE_DUE_TO_USER_DISCARD);
+    download->Remove();
     flush_observer->WaitForFlush();
   }
 
  protected:
   std::string test_extension_id_;
   // The HTTP server used in the tests.
-  scoped_ptr<HttpServer> test_server_;
+  scoped_ptr<EmbeddedTestServer> test_server_;
   base::ScopedTempDir downloads_dir_;
 };
 
@@ -208,7 +210,7 @@ IN_PROC_BROWSER_TEST_F(StreamsPrivateApiTest, Navigate) {
                                test_server_->GetURL("/doc_path.doc"));
 
   // Wait for the response from the test server.
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   // There should be no downloads started by the navigation.
   DownloadManager* download_manager = GetDownloadManager();

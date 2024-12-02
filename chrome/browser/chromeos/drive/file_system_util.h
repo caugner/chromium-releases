@@ -8,8 +8,6 @@
 #include <string>
 
 #include "base/callback_forward.h"
-#include "base/platform_file.h"
-#include "chrome/browser/chromeos/drive/drive.pb.h"
 #include "chrome/browser/chromeos/drive/file_errors.h"
 #include "chrome/browser/google_apis/gdata_errorcode.h"
 #include "googleurl/src/gurl.h"
@@ -18,6 +16,7 @@ class Profile;
 
 namespace base {
 class FilePath;
+struct PlatformFileInfo;
 }
 
 namespace fileapi {
@@ -27,25 +26,28 @@ class FileSystemURL;
 namespace drive {
 
 class PlatformFileInfoProto;
+class ResourceEntry;
 
 namespace util {
 
 // Path constants.
 
+// Name of the directory used to store metadata.
+const base::FilePath::CharType kMetadataDirectory[] = FILE_PATH_LITERAL("meta");
+
+// Name of the directory used to store cached files.
+const base::FilePath::CharType kCacheFileDirectory[] =
+    FILE_PATH_LITERAL("files");
+
+// Name of the directory used to store temporary files.
+const base::FilePath::CharType kTemporaryFileDirectory[] =
+    FILE_PATH_LITERAL("tmp");
+
 // The extension for dirty files. The file names look like
 // "<resource-id>.local".
 const base::FilePath::CharType kLocallyModifiedFileExtension[] =
     FILE_PATH_LITERAL("local");
-// The extension for mounted files. The file names look like
-// "<resource-id>.<md5>.mounted".
-const base::FilePath::CharType kMountedArchiveFileExtension[] =
-    FILE_PATH_LITERAL("mounted");
-const base::FilePath::CharType kWildCard[] =
-    FILE_PATH_LITERAL("*");
-// The path is used for creating a symlink in "pinned" directory for a file
-// which is not yet fetched.
-const base::FilePath::CharType kSymLinkToDevNull[] =
-    FILE_PATH_LITERAL("/dev/null");
+const base::FilePath::CharType kWildCard[] = FILE_PATH_LITERAL("*");
 
 // Special resource IDs introduced to manage pseudo directory tree locally.
 // These strings are supposed to be different from any resource ID used on the
@@ -68,20 +70,11 @@ const base::FilePath::CharType kDriveMyDriveRootDirName[] =
 const base::FilePath::CharType kDriveOtherDirName[] =
     FILE_PATH_LITERAL("other");
 
-const base::FilePath::CharType kDriveMyDriveRootPath[] =
-    FILE_PATH_LITERAL("drive/root");
-
-const base::FilePath::CharType kDriveOtherDirPath[] =
-    FILE_PATH_LITERAL("drive/other");
-
 // Returns the path of the top root of the pseudo tree.
 const base::FilePath& GetDriveGrandRootPath();
 
 // Returns the path of the directory representing "My Drive".
 const base::FilePath& GetDriveMyDriveRootPath();
-
-// Returns the path of the directory representing entries other than "My Drive".
-const base::FilePath& GetDriveOtherDirPath();
 
 // Returns the Drive mount point path, which looks like "/special/drive".
 const base::FilePath& GetDriveMountPointPath();
@@ -98,9 +91,6 @@ ResourceEntry CreateOtherDirEntry();
 
 // Returns the Drive mount path as string.
 const std::string& GetDriveMountPointPathAsString();
-
-// Returns the 'local' root of remote file system as "/special".
-const base::FilePath& GetSpecialRemoteRootPath();
 
 // Returns the gdata file resource url formatted as "drive:<path>"
 GURL FilePathToDriveURL(const base::FilePath& path);
@@ -141,33 +131,30 @@ std::string EscapeCacheFileName(const std::string& filename);
 // This is the inverse of EscapeCacheFileName.
 std::string UnescapeCacheFileName(const std::string& filename);
 
-// Escapes forward slashes from file names with magic unicode character
-// \u2215 pretty much looks the same in UI.
-std::string EscapeUtf8FileName(const std::string& input);
-
-// Extracts resource_id out of edit url.
-std::string ExtractResourceIdFromUrl(const GURL& url);
+// Converts the given string to a form suitable as a file name. Specifically,
+// - Normalizes in Unicode Normalization Form C.
+// - Replaces slashes '/' with \u2215 that pretty much looks the same in UI.
+// |input| must be a valid UTF-8 encoded string.
+std::string NormalizeFileName(const std::string& input);
 
 // Gets the cache root path (i.e. <user_profile_dir>/GCache/v1) from the
 // profile.
 base::FilePath GetCacheRootPath(Profile* profile);
 
-// Extracts resource_id, md5, and extra_extension from cache path.
-// Case 1: Pinned and outgoing symlinks only have resource_id.
-// Example: path="/user/GCache/v1/pinned/pdf:a1b2" =>
-//          resource_id="pdf:a1b2", md5="", extra_extension="";
-// Case 2: Normal files have both resource_id and md5.
+// Extracts resource_id and md5 from cache path.
 // Example: path="/user/GCache/v1/tmp/pdf:a1b2.01234567" =>
-//          resource_id="pdf:a1b2", md5="01234567", extra_extension="";
-// Case 3: Mounted files have all three parts.
-// Example: path="/user/GCache/v1/persistent/pdf:a1b2.01234567.mounted" =>
-//          resource_id="pdf:a1b2", md5="01234567", extra_extension="mounted".
+//          resource_id="pdf:a1b2", md5="01234567"
 void ParseCacheFilePath(const base::FilePath& path,
                         std::string* resource_id,
-                        std::string* md5,
-                        std::string* extra_extension);
+                        std::string* md5);
 
-// Callback type for PrepareWritablebase::FilePathAndRun.
+// Migrates cache files from old "persistent" and "tmp" directories to the new
+// "files" directory (see crbug.com/248905).
+// TODO(hashimoto): Remove this function at some point.
+void MigrateCacheFilesFromOldDirectories(
+    const base::FilePath& cache_root_directory);
+
+// Callback type for PrepareWritableFileAndRun.
 typedef base::Callback<void (FileError, const base::FilePath& path)>
     OpenFileCallback;
 
@@ -192,7 +179,7 @@ void PrepareWritableFileAndRun(Profile* profile,
 // If |directory| is not a Drive path, it won't check the existence and just
 // runs |callback|.
 //
-// Must be called from UI/IO thread.
+// Must be called from UI thread.
 void EnsureDirectoryExists(Profile* profile,
                            const base::FilePath& directory,
                            const FileOperationCallback& callback);
@@ -221,6 +208,24 @@ struct DestroyHelper {
       object->Destroy();
   }
 };
+
+// Creates a GDoc file with given values.
+//
+// GDoc files are used to represent hosted documents on local filesystems.
+// A GDoc file contains a JSON whose content is a URL to view the document and
+// a resource ID of the entry.
+bool CreateGDocFile(const base::FilePath& file_path,
+                    const GURL& url,
+                    const std::string& resource_id);
+
+// Returns true if |file_path| has a GDoc file extension. (e.g. ".gdoc")
+bool HasGDocFileExtension(const base::FilePath& file_path);
+
+// Reads URL from a GDoc file.
+GURL ReadUrlFromGDocFile(const base::FilePath& file_path);
+
+// Reads resource ID from a GDoc file.
+std::string ReadResourceIdFromGDocFile(const base::FilePath& file_path);
 
 }  // namespace util
 }  // namespace drive

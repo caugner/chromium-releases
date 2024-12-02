@@ -4,19 +4,19 @@
 
 #include "chrome/renderer/extensions/chrome_v8_extension.h"
 
-#include "base/logging.h"
 #include "base/lazy_instance.h"
-#include "base/stringprintf.h"
-#include "base/string_util.h"
+#include "base/logging.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "chrome/common/extensions/api/extension_api.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_set.h"
-#include "chrome/common/extensions/api/extension_api.h"
 #include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/dispatcher.h"
 #include "content/public/renderer/render_view.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebView.h"
 #include "ui/base/resource/resource_bundle.h"
 
 using WebKit::WebDocument;
@@ -26,7 +26,7 @@ using WebKit::WebView;
 namespace extensions {
 
 ChromeV8Extension::ChromeV8Extension(Dispatcher* dispatcher,
-                                     v8::Handle<v8::Context> context)
+                                     ChromeV8Context* context)
     : ObjectBackedNativeHandler(context),
       dispatcher_(dispatcher) {
   CHECK(dispatcher);
@@ -35,18 +35,12 @@ ChromeV8Extension::ChromeV8Extension(Dispatcher* dispatcher,
 ChromeV8Extension::~ChromeV8Extension() {
 }
 
-ChromeV8Context* ChromeV8Extension::GetContext() {
-  return dispatcher_->v8_context_set().GetByV8Context(v8_context());
-}
-
 content::RenderView* ChromeV8Extension::GetRenderView() {
-  ChromeV8Context* context = GetContext();
-  return context ? context->GetRenderView() : NULL;
+  return context() ? context()->GetRenderView() : NULL;
 }
 
 const Extension* ChromeV8Extension::GetExtensionForRenderView() {
-  ChromeV8Context* context = GetContext();
-  return context ? context->extension() : NULL;
+  return context() ? context()->extension() : NULL;
 }
 
 }  // namespace extensions

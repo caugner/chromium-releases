@@ -9,15 +9,16 @@
 #include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/platform_file.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
-#include "base/utf_string_conversions.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/component_updater/pnacl/pnacl_component_installer.h"
 #include "chrome/browser/extensions/extension_info_map.h"
-#include "chrome/browser/renderer_host/chrome_render_message_filter.h"
+#include "chrome/browser/nacl_host/nacl_browser.h"
+#include "chrome/browser/nacl_host/nacl_host_message_filter.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/extensions/extension.h"
-#include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/manifest_handlers/shared_module_info.h"
-#include "chrome/common/render_messages.h"
+#include "chrome/common/nacl_host_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/site_instance.h"
@@ -36,10 +37,10 @@ const char* kExpectedFilePrefix = "pnacl_public_";
 const size_t kMaxFileLength = 40;
 
 void NotifyRendererOfError(
-    ChromeRenderMessageFilter* chrome_render_message_filter,
+    NaClHostMessageFilter* nacl_host_message_filter,
     IPC::Message* reply_msg) {
   reply_msg->set_reply_error();
-  chrome_render_message_filter->Send(reply_msg);
+  nacl_host_message_filter->Send(reply_msg);
 }
 
 bool PnaclDoOpenFile(const base::FilePath& file_to_open,
@@ -57,21 +58,75 @@ bool PnaclDoOpenFile(const base::FilePath& file_to_open,
 }
 
 void DoOpenPnaclFile(
-    scoped_refptr<ChromeRenderMessageFilter> chrome_render_message_filter,
+    scoped_refptr<NaClHostMessageFilter> nacl_host_message_filter,
+    const std::string& filename,
+    IPC::Message* reply_msg);
+
+void PnaclCheckDone(
+    scoped_refptr<NaClHostMessageFilter> nacl_host_message_filter,
+    const std::string& filename,
+    IPC::Message* reply_msg,
+    bool success) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (!success) {
+    NotifyRendererOfError(nacl_host_message_filter, reply_msg);
+  } else {
+    if (!BrowserThread::PostBlockingPoolTask(
+            FROM_HERE,
+            base::Bind(&DoOpenPnaclFile,
+                       nacl_host_message_filter,
+                       filename,
+                       reply_msg))) {
+      NotifyRendererOfError(nacl_host_message_filter, reply_msg);
+    }
+  }
+}
+
+void TryInstallPnacl(
+    scoped_refptr<NaClHostMessageFilter> nacl_host_message_filter,
+    const std::string& filename,
+    IPC::Message* reply_msg) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  ComponentUpdateService* cus = g_browser_process->component_updater();
+  PnaclComponentInstaller* pci =
+      g_browser_process->pnacl_component_installer();
+  RequestFirstInstall(cus,
+                      pci,
+                      base::Bind(&PnaclCheckDone,
+                                 nacl_host_message_filter,
+                                 filename,
+                                 reply_msg));
+}
+
+void DoOpenPnaclFile(
+    scoped_refptr<NaClHostMessageFilter> nacl_host_message_filter,
     const std::string& filename,
     IPC::Message* reply_msg) {
   DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
   base::FilePath full_filepath;
 
+  // PNaCl must be installed.
+  base::FilePath pnacl_dir;
+  if (!PathService::Get(chrome::DIR_PNACL_COMPONENT, &pnacl_dir) ||
+      !file_util::PathExists(pnacl_dir)) {
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&TryInstallPnacl,
+                   nacl_host_message_filter,
+                   filename,
+                   reply_msg));
+    return;
+  }
+
   // Do some validation.
   if (!nacl_file_host::PnaclCanOpenFile(filename, &full_filepath)) {
-    NotifyRendererOfError(chrome_render_message_filter, reply_msg);
+    NotifyRendererOfError(nacl_host_message_filter.get(), reply_msg);
     return;
   }
 
   base::PlatformFile file_to_open;
   if (!PnaclDoOpenFile(full_filepath, &file_to_open)) {
-    NotifyRendererOfError(chrome_render_message_filter, reply_msg);
+    NotifyRendererOfError(nacl_host_message_filter.get(), reply_msg);
     return;
   }
 
@@ -79,25 +134,25 @@ void DoOpenPnaclFile(
   // Do any DuplicateHandle magic that is necessary first.
   IPC::PlatformFileForTransit target_desc =
       IPC::GetFileHandleForProcess(file_to_open,
-                                   chrome_render_message_filter->peer_handle(),
+                                   nacl_host_message_filter->peer_handle(),
                                    true /* Close source */);
   if (target_desc == IPC::InvalidPlatformFileForTransit()) {
-    NotifyRendererOfError(chrome_render_message_filter, reply_msg);
+    NotifyRendererOfError(nacl_host_message_filter.get(), reply_msg);
     return;
   }
-  ChromeViewHostMsg_GetReadonlyPnaclFD::WriteReplyParams(
+  NaClHostMsg_GetReadonlyPnaclFD::WriteReplyParams(
       reply_msg, target_desc);
-  chrome_render_message_filter->Send(reply_msg);
+  nacl_host_message_filter->Send(reply_msg);
 }
 
 void DoCreateTemporaryFile(
-    scoped_refptr<ChromeRenderMessageFilter> chrome_render_message_filter,
+    scoped_refptr<NaClHostMessageFilter> nacl_host_message_filter,
     IPC::Message* reply_msg) {
   DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
 
   base::FilePath file_path;
   if (!file_util::CreateTemporaryFile(&file_path)) {
-    NotifyRendererOfError(chrome_render_message_filter, reply_msg);
+    NotifyRendererOfError(nacl_host_message_filter.get(), reply_msg);
     return;
   }
 
@@ -110,7 +165,7 @@ void DoCreateTemporaryFile(
       NULL, &error);
 
   if (error != base::PLATFORM_FILE_OK) {
-    NotifyRendererOfError(chrome_render_message_filter, reply_msg);
+    NotifyRendererOfError(nacl_host_message_filter.get(), reply_msg);
     return;
   }
 
@@ -118,16 +173,39 @@ void DoCreateTemporaryFile(
   // Do any DuplicateHandle magic that is necessary first.
   IPC::PlatformFileForTransit target_desc =
       IPC::GetFileHandleForProcess(file_handle,
-                                   chrome_render_message_filter->peer_handle(),
+                                   nacl_host_message_filter->peer_handle(),
                                    true);
   if (target_desc == IPC::InvalidPlatformFileForTransit()) {
-    NotifyRendererOfError(chrome_render_message_filter, reply_msg);
+    NotifyRendererOfError(nacl_host_message_filter.get(), reply_msg);
     return;
   }
 
-  ChromeViewHostMsg_NaClCreateTemporaryFile::WriteReplyParams(
+  NaClHostMsg_NaClCreateTemporaryFile::WriteReplyParams(
       reply_msg, target_desc);
-  chrome_render_message_filter->Send(reply_msg);
+  nacl_host_message_filter->Send(reply_msg);
+}
+
+void DoRegisterOpenedNaClExecutableFile(
+    scoped_refptr<NaClHostMessageFilter> nacl_host_message_filter,
+    base::PlatformFile file,
+    base::FilePath file_path,
+    IPC::Message* reply_msg) {
+  // IO thread owns the NaClBrowser singleton.
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
+  NaClBrowser* nacl_browser = NaClBrowser::GetInstance();
+  uint64 file_token_lo = 0;
+  uint64 file_token_hi = 0;
+  nacl_browser->PutFilePath(file_path, &file_token_lo, &file_token_hi);
+
+  IPC::PlatformFileForTransit file_desc = IPC::GetFileHandleForProcess(
+      file,
+      nacl_host_message_filter->peer_handle(),
+      true /* close_source */);
+
+  NaClHostMsg_OpenNaClExecutable::WriteReplyParams(
+      reply_msg, file_desc, file_token_lo, file_token_hi);
+  nacl_host_message_filter->Send(reply_msg);
 }
 
 // Convert the file URL into a file path in the extension directory.
@@ -184,7 +262,7 @@ bool GetExtensionFilePath(
 // This function is security sensitive.  Be sure to check with a security
 // person before you modify it.
 void DoOpenNaClExecutableOnThreadPool(
-    scoped_refptr<ChromeRenderMessageFilter> chrome_render_message_filter,
+    scoped_refptr<NaClHostMessageFilter> nacl_host_message_filter,
     scoped_refptr<ExtensionInfoMap> extension_info_map,
     const GURL& file_url,
     IPC::Message* reply_msg) {
@@ -192,43 +270,25 @@ void DoOpenNaClExecutableOnThreadPool(
 
   base::FilePath file_path;
   if (!GetExtensionFilePath(extension_info_map, file_url, &file_path)) {
-    NotifyRendererOfError(chrome_render_message_filter, reply_msg);
+    NotifyRendererOfError(nacl_host_message_filter.get(), reply_msg);
     return;
   }
 
-  // Get a file descriptor. On Windows, we need 'GENERIC_EXECUTE' in order to
-  // memory map the executable.
-  // IMPORTANT: This file descriptor must not have write access - that could
-  // allow a sandbox escape.
-  base::PlatformFileError error_code;
-  base::PlatformFile file = base::CreatePlatformFile(
-      file_path,
-      base::PLATFORM_FILE_OPEN |
-          base::PLATFORM_FILE_READ |
-          base::PLATFORM_FILE_EXECUTE,  // Windows only flag.
-      NULL,
-      &error_code);
-  if (error_code != base::PLATFORM_FILE_OK) {
-    NotifyRendererOfError(chrome_render_message_filter, reply_msg);
+  base::PlatformFile file;
+  nacl::OpenNaClExecutableImpl(file_path, &file);
+  if (file != base::kInvalidPlatformFileValue) {
+    // This function is running on the blocking pool, but the path needs to be
+    // registered in a structure owned by the IO thread.
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(
+            &DoRegisterOpenedNaClExecutableFile,
+            nacl_host_message_filter,
+            file, file_path, reply_msg));
+  } else {
+    NotifyRendererOfError(nacl_host_message_filter.get(), reply_msg);
     return;
   }
-  // Check that the file does not reference a directory. Returning a descriptor
-  // to an extension directory could allow a sandbox escape.
-  base::PlatformFileInfo file_info;
-  if (!base::GetPlatformFileInfo(file, &file_info) || file_info.is_directory)
-  {
-    NotifyRendererOfError(chrome_render_message_filter, reply_msg);
-    return;
-  }
-
-  IPC::PlatformFileForTransit file_desc = IPC::GetFileHandleForProcess(
-      file,
-      chrome_render_message_filter->peer_handle(),
-      true /* close_source */);
-
-  ChromeViewHostMsg_OpenNaClExecutable::WriteReplyParams(
-      reply_msg, file_path, file_desc);
-  chrome_render_message_filter->Send(reply_msg);
 }
 
 }  // namespace
@@ -236,16 +296,16 @@ void DoOpenNaClExecutableOnThreadPool(
 namespace nacl_file_host {
 
 void GetReadonlyPnaclFd(
-    scoped_refptr<ChromeRenderMessageFilter> chrome_render_message_filter,
+    scoped_refptr<NaClHostMessageFilter> nacl_host_message_filter,
     const std::string& filename,
     IPC::Message* reply_msg) {
   if (!BrowserThread::PostBlockingPoolTask(
           FROM_HERE,
           base::Bind(&DoOpenPnaclFile,
-                     chrome_render_message_filter,
+                     nacl_host_message_filter,
                      filename,
                      reply_msg))) {
-    NotifyRendererOfError(chrome_render_message_filter, reply_msg);
+    NotifyRendererOfError(nacl_host_message_filter.get(), reply_msg);
   }
 }
 
@@ -283,19 +343,19 @@ bool PnaclCanOpenFile(const std::string& filename,
 }
 
 void CreateTemporaryFile(
-    scoped_refptr<ChromeRenderMessageFilter> chrome_render_message_filter,
+    scoped_refptr<NaClHostMessageFilter> nacl_host_message_filter,
     IPC::Message* reply_msg) {
   if (!BrowserThread::PostBlockingPoolTask(
       FROM_HERE,
       base::Bind(&DoCreateTemporaryFile,
-                 chrome_render_message_filter,
+                 nacl_host_message_filter,
                  reply_msg))) {
-    NotifyRendererOfError(chrome_render_message_filter, reply_msg);
+    NotifyRendererOfError(nacl_host_message_filter.get(), reply_msg);
   }
 }
 
 void OpenNaClExecutable(
-    scoped_refptr<ChromeRenderMessageFilter> chrome_render_message_filter,
+    scoped_refptr<NaClHostMessageFilter> nacl_host_message_filter,
     scoped_refptr<ExtensionInfoMap> extension_info_map,
     int render_view_id,
     const GURL& file_url,
@@ -305,7 +365,7 @@ void OpenNaClExecutable(
         BrowserThread::UI, FROM_HERE,
         base::Bind(
             &OpenNaClExecutable,
-            chrome_render_message_filter,
+            nacl_host_message_filter,
             extension_info_map,
             render_view_id, file_url, reply_msg));
     return;
@@ -315,16 +375,16 @@ void OpenNaClExecutable(
   // render view's site. Without these checks, apps could probe the extension
   // directory or run NaCl code from other extensions.
   content::RenderViewHost* rvh = content::RenderViewHost::FromID(
-      chrome_render_message_filter->render_process_id(), render_view_id);
+      nacl_host_message_filter->render_process_id(), render_view_id);
   if (!rvh) {
-    chrome_render_message_filter->BadMessageReceived();  // Kill the renderer.
+    nacl_host_message_filter->BadMessageReceived();  // Kill the renderer.
     return;
   }
   content::SiteInstance* site_instance = rvh->GetSiteInstance();
   if (!content::SiteInstance::IsSameWebSite(site_instance->GetBrowserContext(),
                                             site_instance->GetSiteURL(),
                                             file_url)) {
-    NotifyRendererOfError(chrome_render_message_filter, reply_msg);
+    NotifyRendererOfError(nacl_host_message_filter.get(), reply_msg);
     return;
   }
 
@@ -335,10 +395,10 @@ void OpenNaClExecutable(
       FROM_HERE,
       base::Bind(
           &DoOpenNaClExecutableOnThreadPool,
-          chrome_render_message_filter,
+          nacl_host_message_filter,
           extension_info_map,
           file_url, reply_msg))) {
-    NotifyRendererOfError(chrome_render_message_filter, reply_msg);
+    NotifyRendererOfError(nacl_host_message_filter.get(), reply_msg);
   }
 }
 

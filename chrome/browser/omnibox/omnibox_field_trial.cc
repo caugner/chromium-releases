@@ -7,9 +7,9 @@
 #include <string>
 
 #include "base/metrics/field_trial.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/common/metrics/metrics_util.h"
 #include "chrome/common/metrics/variations/variation_ids.h"
 #include "chrome/common/metrics/variations/variations_util.h"
@@ -18,12 +18,11 @@ namespace {
 
 // Field trial names.
 const char kDisallowInlineHQPFieldTrialName[] = "OmniboxDisallowInlineHQP";
-const char kHQPReplaceHUPAndNewScoringFieldTrialName[] =
-    "OmniboxReplaceHUPAndNewScoring";
 const char kHUPCullRedirectsFieldTrialName[] = "OmniboxHUPCullRedirects";
 const char kHUPCreateShorterMatchFieldTrialName[] =
     "OmniboxHUPCreateShorterMatch";
 const char kStopTimerFieldTrialName[] = "OmniboxStopTimer";
+const char kShortcutsScoringFieldTrialName[] = "OmniboxShortcutsScoring";
 
 // The autocomplete dynamic field trial name prefix.  Each field trial is
 // configured dynamically and is retrieved automatically by Chrome during
@@ -193,18 +192,6 @@ void OmniboxFieldTrial::GetActiveSuggestFieldTrialHashes(
   }
 }
 
-bool OmniboxFieldTrial::InHQPNewScoringExperimentGroup() {
-  return base::FieldTrialList::FindFullName(
-              kHQPReplaceHUPAndNewScoringFieldTrialName).find(
-              "NewScoring") != std::string::npos;
-}
-
-bool OmniboxFieldTrial::InHQPReplaceHUPScoringExperimentGroup() {
-  return base::FieldTrialList::FindFullName(
-              kHQPReplaceHUPAndNewScoringFieldTrialName).find(
-              "HQPReplaceHUP") != std::string::npos;
-}
-
 bool OmniboxFieldTrial::InHUPCullRedirectsFieldTrial() {
   return base::FieldTrialList::TrialExists(kHUPCullRedirectsFieldTrialName);
 }
@@ -253,4 +240,21 @@ bool OmniboxFieldTrial::InZeroSuggestFieldTrial() {
       return true;
   }
   return false;
+}
+
+// If the active group name starts with "MaxRelevance_", extract the
+// int that immediately following that, returning true on success.
+bool OmniboxFieldTrial::ShortcutsScoringMaxRelevance(int* max_relevance) {
+  std::string group_name =
+      base::FieldTrialList::FindFullName(kShortcutsScoringFieldTrialName);
+  const char kMaxRelevanceGroupPrefix[] = "MaxRelevance_";
+  if (!StartsWithASCII(group_name, kMaxRelevanceGroupPrefix, true))
+    return false;
+  if (!base::StringToInt(base::StringPiece(
+          group_name.substr(strlen(kMaxRelevanceGroupPrefix))),
+                         max_relevance)) {
+    LOG(WARNING) << "Malformed MaxRelevance string: " << group_name;
+    return false;
+  }
+  return true;
 }

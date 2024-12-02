@@ -33,8 +33,8 @@
 #include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_member.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/signin/signin_internals_util.h"
+#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 
 class CookieSettings;
 class ProfileIOData;
@@ -60,30 +60,22 @@ struct GoogleServiceSignoutDetails {
   std::string username;
 };
 
-class SigninManagerBase : public ProfileKeyedService {
+class SigninManagerBase : public BrowserContextKeyedService {
  public:
-  // Returns true if the username is allowed based on the policy string.
-  static bool IsAllowedUsername(const std::string& username,
-                                const std::string& policy);
-
   SigninManagerBase();
   virtual ~SigninManagerBase();
 
   // If user was signed in, load tokens from DB if available.
-  void Initialize(Profile* profile);
+  virtual void Initialize(Profile* profile, PrefService* local_state);
   bool IsInitialized() const;
 
-  // Returns true if the passed username is allowed by policy. Virtual for
-  // mocking in tests.
-  virtual bool IsAllowedUsername(const std::string& username) const;
-
   // Returns true if a signin to Chrome is allowed (by policy or pref).
-  bool IsSigninAllowed() const;
-
-  // Checks if signin is allowed for the profile that owns |io_data|. This must
-  // be invoked on the IO thread, and can be used to check if signin is enabled
-  // on that thread.
-  static bool IsSigninAllowedOnIOThread(ProfileIOData* io_data);
+  // TODO(tim): kSigninAllowed is defined for all platforms in pref_names.h.
+  // If kSigninAllowed pref was non-Chrome OS-only, this method wouldn't be
+  // needed, but as is we provide this method to let all interested code
+  // code query the value in one way, versus half using PrefService directly
+  // and the other half using SigninManager.
+  virtual bool IsSigninAllowed() const;
 
   // If a user has previously established a username and SignOut has not been
   // called, this will return the username.
@@ -96,12 +88,6 @@ class SigninManagerBase : public ProfileKeyedService {
   // (by platform / depending on StartBehavior). Bug 88109.
   void SetAuthenticatedUsername(const std::string& username);
 
-  // Sign a user out, removing the preference, erasing all keys
-  // associated with the user, and canceling all auth in progress.
-  // TODO(tim): Remove SignOut here, it belongs in the derived class.
-  // Bug 174927.
-  virtual void SignOut();
-
   // Returns true if there's a signin in progress.
   virtual bool AuthInProgress() const;
 
@@ -113,7 +99,7 @@ class SigninManagerBase : public ProfileKeyedService {
     return signin_global_error_.get();
   }
 
-  // ProfileKeyedService implementation.
+  // BrowserContextKeyedService implementation.
   virtual void Shutdown() OVERRIDE;
 
     // Methods to register or remove SigninDiagnosticObservers
@@ -125,6 +111,11 @@ class SigninManagerBase : public ProfileKeyedService {
  protected:
   // Lets different platforms initialize TokenService in their own way.
   virtual void InitTokenService();
+
+  // Used by subclass to clear authenticated_username_ instead of using
+  // SetAuthenticatedUsername, which enforces special preconditions due
+  // to the fact that it is part of the public API and called by clients.
+  void clear_authenticated_username();
 
   // Pointer to parent profile (protected so FakeSigninManager can access
   // it).
@@ -146,16 +137,6 @@ class SigninManagerBase : public ProfileKeyedService {
  private:
   friend class FakeSigninManagerBase;
   friend class FakeSigninManager;
-  void OnGoogleServicesUsernamePatternChanged();
-
-  void OnSigninAllowedPrefChanged();
-
-  // Helper object to listen for changes to signin preferences stored in non-
-  // profile-specific local prefs (like kGoogleServicesUsernamePattern).
-  PrefChangeRegistrar local_state_pref_registrar_;
-
-  // Helper object to listen for changes to the signin allowed preference.
-  BooleanPrefMember signin_allowed_;
 
   // Actual username after successful authentication.
   std::string authenticated_username_;

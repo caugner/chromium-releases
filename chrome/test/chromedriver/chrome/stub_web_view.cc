@@ -20,6 +20,10 @@ Status StubWebView::ConnectIfNecessary() {
   return Status(kOk);
 }
 
+Status StubWebView::HandleReceivedEvents() {
+  return Status(kOk);
+}
+
 Status StubWebView::Load(const std::string& url) {
   return Status(kOk);
 }
@@ -81,16 +85,13 @@ Status StubWebView::DeleteCookie(const std::string& name,
   return Status(kOk);
 }
 
-Status StubWebView::WaitForPendingNavigations(const std::string& frame_id) {
+Status StubWebView::WaitForPendingNavigations(const std::string& frame_id,
+                                              int timeout) {
   return Status(kOk);
 }
 
 Status StubWebView::IsPendingNavigation(const std::string& frame_id,
                                         bool* is_pending) {
-  return Status(kOk);
-}
-
-Status StubWebView::GetMainFrame(std::string* frame_id) {
   return Status(kOk);
 }
 

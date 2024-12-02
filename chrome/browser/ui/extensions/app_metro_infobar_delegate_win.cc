@@ -9,20 +9,19 @@
 #include "base/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/metro_utils/metro_chrome_win.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_service_win.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/host_desktop.h"
-#include "chrome/browser/ui/metro_chrome_win.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "grit/google_chrome_strings.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "win8/util/win8_util.h"
 
 namespace chrome {
@@ -39,11 +38,11 @@ void AppMetroInfoBarDelegateWin::Create(
       profile, chrome::HOST_DESKTOP_TYPE_NATIVE);
 
   // Create a new tab at about:blank, and add the infobar.
-  content::OpenURLParams params(
-      GURL(chrome::kAboutBlankURL),
-      content::Referrer(),
-      NEW_FOREGROUND_TAB,
-      content::PAGE_TRANSITION_LINK, false);
+  content::OpenURLParams params(GURL(content::kAboutBlankURL),
+                                content::Referrer(),
+                                NEW_FOREGROUND_TAB,
+                                content::PAGE_TRANSITION_LINK,
+                                false);
   content::WebContents* web_contents = browser->OpenURL(params);
   InfoBarService* info_bar_service =
       InfoBarService::FromWebContents(web_contents);
@@ -53,9 +52,8 @@ void AppMetroInfoBarDelegateWin::Create(
   // Use PostTask because we can get here in a COM SendMessage, and
   // ActivateApplication can not be sent nested (returns error
   // RPC_E_CANTCALLOUT_ININPUTSYNCCALL).
-  MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(base::IgnoreResult(chrome::ActivateMetroChrome)));
+  base::MessageLoop::current()->PostTask(
+      FROM_HERE, base::Bind(base::IgnoreResult(chrome::ActivateMetroChrome)));
 }
 
 AppMetroInfoBarDelegateWin::AppMetroInfoBarDelegateWin(
@@ -70,9 +68,8 @@ AppMetroInfoBarDelegateWin::AppMetroInfoBarDelegateWin(
 
 AppMetroInfoBarDelegateWin::~AppMetroInfoBarDelegateWin() {}
 
-gfx::Image* AppMetroInfoBarDelegateWin::GetIcon() const {
-  return &ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-      chrome::GetAppListIconResourceId());
+int AppMetroInfoBarDelegateWin::GetIconID() const {
+  return chrome::GetAppListIconResourceId();
 }
 
 string16 AppMetroInfoBarDelegateWin::GetMessageText() const {

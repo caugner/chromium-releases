@@ -187,7 +187,8 @@ class TabStrip : public views::View,
   virtual void AddSelectionFromAnchorTo(Tab* tab) OVERRIDE;
   virtual void CloseTab(Tab* tab, CloseTabSource source) OVERRIDE;
   virtual void ShowContextMenuForTab(Tab* tab,
-                                     const gfx::Point& p) OVERRIDE;
+                                     const gfx::Point& p,
+                                     ui::MenuSourceType source_type) OVERRIDE;
   virtual bool IsActiveTab(const Tab* tab) const OVERRIDE;
   virtual bool IsTabSelected(const Tab* tab) const OVERRIDE;
   virtual bool IsTabPinned(const Tab* tab) const OVERRIDE;
@@ -211,7 +212,7 @@ class TabStrip : public views::View,
   // views::View overrides:
   virtual void Layout() OVERRIDE;
   virtual void PaintChildren(gfx::Canvas* canvas) OVERRIDE;
-  virtual std::string GetClassName() const OVERRIDE;
+  virtual const char* GetClassName() const OVERRIDE;
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   // NOTE: the drag and drop methods are invoked from FrameView. This is done
   // to allow for a drop region that extends outside the bounds of the TabStrip.

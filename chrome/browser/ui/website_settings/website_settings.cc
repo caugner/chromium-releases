@@ -12,7 +12,7 @@
 #include "base/i18n/time_formatting.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browsing_data/browsing_data_cookie_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_database_helper.h"
@@ -419,12 +419,20 @@ void WebsiteSettings::Init(Profile* profile,
         (ssl.connection_status &
         net::SSL_CONNECTION_NO_RENEGOTIATION_EXTENSION) != 0;
     const char *key_exchange, *cipher, *mac;
-    net::SSLCipherSuiteToStrings(&key_exchange, &cipher, &mac, cipher_suite);
+    bool is_aead;
+    net::SSLCipherSuiteToStrings(
+        &key_exchange, &cipher, &mac, &is_aead, cipher_suite);
 
     site_connection_details_ += ASCIIToUTF16("\n\n");
-    site_connection_details_ += l10n_util::GetStringFUTF16(
-        IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTION_DETAILS,
-        ASCIIToUTF16(cipher), ASCIIToUTF16(mac), ASCIIToUTF16(key_exchange));
+    if (is_aead) {
+      site_connection_details_ += l10n_util::GetStringFUTF16(
+          IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTION_DETAILS_AEAD,
+          ASCIIToUTF16(cipher), ASCIIToUTF16(key_exchange));
+    } else {
+      site_connection_details_ += l10n_util::GetStringFUTF16(
+          IDS_PAGE_INFO_SECURITY_TAB_ENCRYPTION_DETAILS,
+          ASCIIToUTF16(cipher), ASCIIToUTF16(mac), ASCIIToUTF16(key_exchange));
+    }
 
     if (did_fallback) {
       // For now, only SSLv3 fallback will trigger a warning icon.
@@ -528,7 +536,9 @@ void WebsiteSettings::PresentSiteData() {
   // Add first party cookie and site data counts.
   WebsiteSettingsUI::CookieInfo cookie_info;
   std::string cookie_source =
-      net::RegistryControlledDomainService::GetDomainAndRegistry(site_url_);
+      net::registry_controlled_domains::GetDomainAndRegistry(
+          site_url_,
+          net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
   if (cookie_source.empty())
     cookie_source = site_url_.host();
   cookie_info.cookie_source = cookie_source;

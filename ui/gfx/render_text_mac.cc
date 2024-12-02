@@ -68,10 +68,9 @@ SelectionModel RenderTextMac::AdjacentWordSelectionModel(
   return SelectionModel();
 }
 
-void RenderTextMac::GetGlyphBounds(size_t index,
-                                   ui::Range* xspan,
-                                   int* height) {
+ui::Range RenderTextMac::GetGlyphBounds(size_t index) {
   // TODO(asvitkine): Implement this. http://crbug.com/131618
+  return ui::Range();
 }
 
 std::vector<Rect> RenderTextMac::GetSubstringBounds(const ui::Range& range) {
@@ -108,22 +107,26 @@ void RenderTextMac::EnsureLayout() {
   runs_valid_ = false;
 
   const Font& font = GetFont();
-  base::mac::ScopedCFTypeRef<CFStringRef> font_name_cf_string(
+  base::ScopedCFTypeRef<CFStringRef> font_name_cf_string(
       base::SysUTF8ToCFStringRef(font.GetFontName()));
-  base::mac::ScopedCFTypeRef<CTFontRef> ct_font(
+  base::ScopedCFTypeRef<CTFontRef> ct_font(
       CTFontCreateWithName(font_name_cf_string, font.GetFontSize(), NULL));
 
   const void* keys[] = { kCTFontAttributeName };
   const void* values[] = { ct_font };
-  base::mac::ScopedCFTypeRef<CFDictionaryRef> attributes(
-      CFDictionaryCreate(NULL, keys, values, arraysize(keys), NULL,
+  base::ScopedCFTypeRef<CFDictionaryRef> attributes(
+      CFDictionaryCreate(NULL,
+                         keys,
+                         values,
+                         arraysize(keys),
+                         NULL,
                          &kCFTypeDictionaryValueCallBacks));
 
-  base::mac::ScopedCFTypeRef<CFStringRef> cf_text(
+  base::ScopedCFTypeRef<CFStringRef> cf_text(
       base::SysUTF16ToCFStringRef(text()));
-  base::mac::ScopedCFTypeRef<CFAttributedStringRef> attr_text(
+  base::ScopedCFTypeRef<CFAttributedStringRef> attr_text(
       CFAttributedStringCreate(NULL, cf_text, attributes));
-  base::mac::ScopedCFTypeRef<CFMutableAttributedStringRef> attr_text_mutable(
+  base::ScopedCFTypeRef<CFMutableAttributedStringRef> attr_text_mutable(
       CFAttributedStringCreateMutableCopy(NULL, 0, attr_text));
 
   // TODO(asvitkine|msw): Respect GetTextDirection(), which may not match the
@@ -194,7 +197,7 @@ void RenderTextMac::ApplyStyles(CFMutableAttributedStringRef attr_string,
   for (size_t i = 0, end = 0; i < layout_text_length; i = end) {
     end = TextIndexToLayoutIndex(style.GetRange().end());
     const CFRange range = CFRangeMake(i, end - i);
-    base::mac::ScopedCFTypeRef<CGColorRef> foreground(
+    base::ScopedCFTypeRef<CGColorRef> foreground(
         gfx::CGColorCreateFromSkColor(style.color()));
     CFAttributedStringSetAttribute(attr_string, range,
         kCTForegroundColorAttributeName, foreground);
@@ -202,7 +205,7 @@ void RenderTextMac::ApplyStyles(CFMutableAttributedStringRef attr_string,
 
     if (style.style(UNDERLINE)) {
       CTUnderlineStyle value = kCTUnderlineStyleSingle;
-      base::mac::ScopedCFTypeRef<CFNumberRef> underline_value(
+      base::ScopedCFTypeRef<CFNumberRef> underline_value(
           CFNumberCreate(NULL, kCFNumberSInt32Type, &value));
       CFAttributedStringSetAttribute(attr_string, range,
                                      kCTUnderlineStyleAttributeName,
@@ -213,7 +216,7 @@ void RenderTextMac::ApplyStyles(CFMutableAttributedStringRef attr_string,
     const int traits = (style.style(BOLD) ? kCTFontBoldTrait : 0) |
                        (style.style(ITALIC) ? kCTFontItalicTrait : 0);
     if (traits != 0) {
-      base::mac::ScopedCFTypeRef<CTFontRef> styled_font(
+      base::ScopedCFTypeRef<CTFontRef> styled_font(
           CTFontCreateCopyWithSymbolicTraits(font, 0.0, NULL, traits, traits));
       // TODO(asvitkine): Handle |styled_font| == NULL case better.
       if (styled_font) {
@@ -236,6 +239,8 @@ void RenderTextMac::ComputeRuns() {
   CFArrayRef ct_runs = CTLineGetGlyphRuns(line_);
   const CFIndex ct_runs_count = CFArrayGetCount(ct_runs);
 
+  // TODO(asvitkine): Don't use GetTextOffset() until draw time, since it may be
+  // updated based on alignment changes without resetting the layout.
   gfx::Vector2d text_offset = GetTextOffset();
   // Skia will draw glyphs with respect to the baseline.
   text_offset += gfx::Vector2d(0, common_baseline_);
@@ -292,7 +297,7 @@ void RenderTextMac::ComputeRuns() {
     CTFontRef ct_font =
         base::mac::GetValueFromDictionary<CTFontRef>(attributes,
                                                      kCTFontAttributeName);
-    base::mac::ScopedCFTypeRef<CFStringRef> font_name_ref(
+    base::ScopedCFTypeRef<CFStringRef> font_name_ref(
         CTFontCopyFamilyName(ct_font));
     run->font_name = base::SysCFStringRefToUTF8(font_name_ref);
     run->text_size = CTFontGetSize(ct_font);

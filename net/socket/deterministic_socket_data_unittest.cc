@@ -68,7 +68,6 @@ class DeterministicSocketDataTest : public PlatformTest {
 
 DeterministicSocketDataTest::DeterministicSocketDataTest()
     : sock_(NULL),
-      data_(NULL),
       read_buf_(NULL),
       connect_data_(SYNCHRONOUS, OK),
       endpoint_("www.google.com", 443),
@@ -82,7 +81,7 @@ DeterministicSocketDataTest::DeterministicSocketDataTest()
 
 void DeterministicSocketDataTest::TearDown() {
   // Empty the current queue.
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   PlatformTest::TearDown();
 }
 
@@ -130,7 +129,7 @@ void DeterministicSocketDataTest::AssertAsyncReadEquals(const char* data,
 void DeterministicSocketDataTest::AssertReadReturns(const char* data,
                                                     int len, int rv) {
   read_buf_ = new IOBuffer(len);
-  ASSERT_EQ(rv, sock_->Read(read_buf_, len, read_callback_.callback()));
+  ASSERT_EQ(rv, sock_->Read(read_buf_.get(), len, read_callback_.callback()));
 }
 
 void DeterministicSocketDataTest::AssertReadBufferEquals(const char* data,
@@ -144,7 +143,7 @@ void DeterministicSocketDataTest::AssertSyncWriteEquals(const char* data,
   memcpy(buf->data(), data, len);
 
   // Issue the write, which will complete immediately
-  ASSERT_EQ(len, sock_->Write(buf, len, write_callback_.callback()));
+  ASSERT_EQ(len, sock_->Write(buf.get(), len, write_callback_.callback()));
 }
 
 void DeterministicSocketDataTest::AssertAsyncWriteEquals(const char* data,
@@ -165,23 +164,32 @@ void DeterministicSocketDataTest::AssertWriteReturns(const char* data,
   memcpy(buf->data(), data, len);
 
   // Issue the read, which will complete asynchronously
-  ASSERT_EQ(rv, sock_->Write(buf, len, write_callback_.callback()));
+  ASSERT_EQ(rv, sock_->Write(buf.get(), len, write_callback_.callback()));
 }
 
 void DeterministicSocketDataTest::ReentrantReadCallback(int len, int rv) {
   scoped_refptr<IOBuffer> read_buf(new IOBuffer(len));
-  EXPECT_EQ(len, sock_->Read(read_buf,  len,
-      base::Bind(&DeterministicSocketDataTest::ReentrantReadCallback,
-                 base::Unretained(this), len)));
+  EXPECT_EQ(len,
+            sock_->Read(
+                read_buf.get(),
+                len,
+                base::Bind(&DeterministicSocketDataTest::ReentrantReadCallback,
+                           base::Unretained(this),
+                           len)));
 }
 
 void DeterministicSocketDataTest::ReentrantWriteCallback(
     const char* data, int len, int rv) {
   scoped_refptr<IOBuffer> write_buf(new IOBuffer(len));
   memcpy(write_buf->data(), data, len);
-  EXPECT_EQ(len, sock_->Write(write_buf,  len,
-      base::Bind(&DeterministicSocketDataTest::ReentrantWriteCallback,
-                 base::Unretained(this), data, len)));
+  EXPECT_EQ(len,
+            sock_->Write(
+                write_buf.get(),
+                len,
+                base::Bind(&DeterministicSocketDataTest::ReentrantWriteCallback,
+                           base::Unretained(this),
+                           data,
+                           len)));
 }
 
 // ----------- Read
@@ -324,9 +332,13 @@ TEST_F(DeterministicSocketDataTest, SyncReadFromCompletionCallback) {
   data_->StopAfter(2);
 
   scoped_refptr<IOBuffer> read_buf(new IOBuffer(kLen1));
-  ASSERT_EQ(ERR_IO_PENDING, sock_->Read(read_buf, kLen1,
-      base::Bind(&DeterministicSocketDataTest::ReentrantReadCallback,
-                 base::Unretained(this), kLen2)));
+  ASSERT_EQ(ERR_IO_PENDING,
+            sock_->Read(
+                read_buf.get(),
+                kLen1,
+                base::Bind(&DeterministicSocketDataTest::ReentrantReadCallback,
+                           base::Unretained(this),
+                           kLen2)));
   data_->Run();
 }
 
@@ -465,9 +477,14 @@ TEST_F(DeterministicSocketDataTest, SyncWriteFromCompletionCallback) {
 
   scoped_refptr<IOBuffer> write_buf(new IOBuffer(kLen1));
   memcpy(write_buf->data(), kMsg1, kLen1);
-  ASSERT_EQ(ERR_IO_PENDING, sock_->Write(write_buf, kLen1,
-      base::Bind(&DeterministicSocketDataTest::ReentrantWriteCallback,
-                 base::Unretained(this), kMsg2, kLen2)));
+  ASSERT_EQ(ERR_IO_PENDING,
+            sock_->Write(
+                write_buf.get(),
+                kLen1,
+                base::Bind(&DeterministicSocketDataTest::ReentrantWriteCallback,
+                           base::Unretained(this),
+                           kMsg2,
+                           kLen2)));
   data_->Run();
 }
 

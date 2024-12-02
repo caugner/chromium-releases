@@ -6,6 +6,8 @@
 
 #include <limits>
 
+#include "cc/test/fake_tile_manager.h"
+
 namespace cc {
 
 class FakeInfinitePicturePileImpl : public PicturePileImpl {
@@ -23,16 +25,10 @@ class FakeInfinitePicturePileImpl : public PicturePileImpl {
 };
 
 FakePictureLayerTilingClient::FakePictureLayerTilingClient()
-    : tile_manager_(&tile_manager_client_,
-                    NULL,
-                    1,
-                    false,
-                    false,
-                    &stats_instrumentation_),
+    : tile_manager_(new FakeTileManager(&tile_manager_client_)),
       pile_(new FakeInfinitePicturePileImpl()),
       twin_tiling_(NULL),
-      allow_create_tile_(true) {
-}
+      allow_create_tile_(true) {}
 
 FakePictureLayerTilingClient::~FakePictureLayerTilingClient() {
 }
@@ -42,12 +38,13 @@ scoped_refptr<Tile> FakePictureLayerTilingClient::CreateTile(
     gfx::Rect rect) {
   if (!allow_create_tile_)
     return NULL;
-  return new Tile(&tile_manager_,
+  return new Tile(tile_manager_.get(),
                   pile_.get(),
                   tile_size_,
                   rect,
                   gfx::Rect(),
                   1,
+                  0,
                   0);
 }
 
@@ -56,7 +53,7 @@ void FakePictureLayerTilingClient::SetTileSize(gfx::Size tile_size) {
 }
 
 gfx::Size FakePictureLayerTilingClient::CalculateTileSize(
-    gfx::Size /* content_bounds */) {
+    gfx::Size /* content_bounds */) const {
   return tile_size_;
 }
 
@@ -69,7 +66,7 @@ const PictureLayerTiling* FakePictureLayerTilingClient::GetTwinTiling(
   return twin_tiling_;
 }
 
-bool FakePictureLayerTilingClient::TileHasText(Tile* tile) {
+bool FakePictureLayerTilingClient::TileMayHaveLCDText(Tile* tile) {
   if (text_rect_.IsEmpty())
     return false;
   return tile->content_rect().Intersects(text_rect_);

@@ -5,7 +5,7 @@
 #include "chrome/common/extensions/api/extension_action/browser_action_handler.h"
 
 #include "base/memory/scoped_ptr.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -25,7 +25,7 @@ BrowserActionHandler::~BrowserActionHandler() {
 
 bool BrowserActionHandler::Parse(Extension* extension,
                                  string16* error) {
-  const DictionaryValue* dict = NULL;
+  const base::DictionaryValue* dict = NULL;
   if (!extension->manifest()->GetDictionary(
           extension_manifest_keys::kBrowserAction, &dict)) {
     *error = ASCIIToUTF16(extension_manifest_errors::kInvalidBrowserAction);

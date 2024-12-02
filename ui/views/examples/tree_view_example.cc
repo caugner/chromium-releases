@@ -4,7 +4,7 @@
 
 #include "ui/views/examples/tree_view_example.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
@@ -123,14 +123,15 @@ bool TreeViewExample::CanEdit(TreeView* tree_view,
 }
 
 void TreeViewExample::ShowContextMenuForView(View* source,
-                                             const gfx::Point& point) {
+                                             const gfx::Point& point,
+                                             ui::MenuSourceType source_type) {
   ui::SimpleMenuModel context_menu_model(this);
   context_menu_model.AddItem(ID_EDIT, ASCIIToUTF16("Edit"));
   context_menu_model.AddItem(ID_REMOVE, ASCIIToUTF16("Remove"));
   context_menu_model.AddItem(ID_ADD, ASCIIToUTF16("Add"));
   context_menu_runner_.reset(new MenuRunner(&context_menu_model));
   if (context_menu_runner_->RunMenuAt(source->GetWidget(), NULL,
-      gfx::Rect(point, gfx::Size()), MenuItemView::TOPLEFT, 0) ==
+      gfx::Rect(point, gfx::Size()), MenuItemView::TOPLEFT, source_type, 0) ==
       MenuRunner::MENU_DELETED)
     return;
 }

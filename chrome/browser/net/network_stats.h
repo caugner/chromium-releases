@@ -11,7 +11,7 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/time.h"
 #include "chrome/browser/io_thread.h"
 #include "net/base/address_list.h"
@@ -20,9 +20,13 @@
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/test_data_stream.h"
-#include "net/dns/host_resolver.h"
 #include "net/proxy/proxy_info.h"
 #include "net/socket/socket.h"
+
+namespace net {
+class HostResolver;
+class SingleRequestHostResolver;
+}
 
 namespace chrome_browser_net {
 
@@ -326,6 +330,9 @@ class NetworkStats {
 
   // |has_proxy_server_| specifies if there is a proxy server or not.
   bool has_proxy_server_;
+
+  // HostResolver used to find the IP addresses.
+  scoped_ptr<net::SingleRequestHostResolver> resolver_;
 
   // HostResolver fills out the |addresses_| after host resolution is completed.
   net::AddressList addresses_;

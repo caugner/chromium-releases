@@ -10,15 +10,14 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/file_util.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/string_util.h"
 #include "base/strings/string_piece.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
@@ -236,7 +235,7 @@ void MobileSetupUIHTMLSource::StartDataRequest(
   if (!network || (!network->SupportsActivation() && !network->activated())) {
     LOG(WARNING) << "Can't find device to activate for service path " << path;
     scoped_refptr<base::RefCountedBytes> html_bytes(new base::RefCountedBytes);
-    callback.Run(html_bytes);
+    callback.Run(html_bytes.get());
     return;
   }
 

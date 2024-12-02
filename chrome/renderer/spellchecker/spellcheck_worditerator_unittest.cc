@@ -6,9 +6,9 @@
 #include <vector>
 
 #include "base/format_macros.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_split.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/renderer/spellchecker/spellcheck_worditerator.h"
 #include "testing/gtest/include/gtest/gtest.h"
 

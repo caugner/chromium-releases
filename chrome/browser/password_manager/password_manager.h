@@ -9,11 +9,12 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "base/observer_list.h"
 #include "base/prefs/pref_member.h"
 #include "base/stl_util.h"
 #include "chrome/browser/password_manager/password_form_manager.h"
 #include "chrome/browser/ui/login/login_model.h"
-#include "components/autofill/common/password_form_fill_data.h"
+#include "components/autofill/core/common/password_form_fill_data.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "content/public/common/password_form.h"
@@ -54,7 +55,8 @@ class PasswordManager : public LoginModel,
                         bool wait_for_username) const;
 
   // LoginModel implementation.
-  virtual void SetObserver(LoginModelObserver* observer) OVERRIDE;
+  virtual void AddObserver(LoginModelObserver* observer) OVERRIDE;
+  virtual void RemoveObserver(LoginModelObserver* observer) OVERRIDE;
 
   // Mark this form as having a generated password.
   void SetFormHasGeneratedPassword(const content::PasswordForm& form);
@@ -86,6 +88,23 @@ class PasswordManager : public LoginModel,
 
  private:
   friend class content::WebContentsUserData<PasswordManager>;
+
+  // Possibly set up FieldTrial for testing other possible usernames. This only
+  // happens if there are other_possible_usernames to be shown and the
+  // experiment hasn't already been initialized. We setup the experiment at
+  // such a late time because this experiment will only affect a small number
+  // of users so we want to include a larger fraction of these users than the
+  // normal 10%.
+  void PossiblyInitializeUsernamesExperiment(
+      const content::PasswordFormMap& matches) const;
+
+  // Returns true if we can show possible usernames to users in cases where
+  // the username for the form is ambigious.
+  bool OtherPossibleUsernamesEnabled() const;
+
+  // Returns true if we should show an infobar instead of automatically saving
+  // the password, based on inspecting the state of |provisional_save_manager_|.
+  bool ShouldShowSavePasswordInfoBar() const;
 
   // Note about how a PasswordFormManager can transition from
   // pending_login_managers_ to provisional_save_manager_ and the infobar.
@@ -121,6 +140,10 @@ class PasswordManager : public LoginModel,
   // Set to false to disable the password manager (will no longer ask if you
   // want to save passwords but will continue to fill passwords).
   BooleanPrefMember password_manager_enabled_;
+
+  // Observers to be notified of LoginModel events.  This is mutable to allow
+  // notification in const member functions.
+  mutable ObserverList<LoginModelObserver> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordManager);
 };

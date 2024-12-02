@@ -9,7 +9,7 @@
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 
 @interface NSWindow (UndocumentedAPI)
 // Normally, punching a hole in a window by painting a subview with a
@@ -56,7 +56,8 @@ NSComparisonResult OpaqueViewsOnTop(id view1, id view2, void* context) {
   // (This is an undocumented side-effect.) At that time, verify that any
   // OpaqueViews are z-ordered in the front, and enforce it if need be.
 
-  NSView* rootView = [[[self window] contentView] superview];
+  NSView* rootView = [self superview];
+  DCHECK_EQ((NSView*)nil, [rootView superview]);
   NSArray* subviews = [rootView subviews];
 
   // If a window has any opaques, it will have exactly two.
@@ -120,17 +121,21 @@ NSComparisonResult OpaqueViewsOnTop(id view1, id view2, void* context) {
       const CGFloat kTopEdgeInset = 16;
       const CGFloat kAlphaValueJustOpaqueEnough = 0.005;
 
-      scoped_nsobject<NSView> leftOpaque([[OpaqueView alloc] initWithFrame:
-          NSMakeRect(NSMinX(rootBounds), NSMinY(rootBounds),
-                     1, NSHeight(rootBounds) - kTopEdgeInset)]);
+      base::scoped_nsobject<NSView> leftOpaque([[OpaqueView alloc]
+          initWithFrame:NSMakeRect(NSMinX(rootBounds),
+                                   NSMinY(rootBounds),
+                                   1,
+                                   NSHeight(rootBounds) - kTopEdgeInset)]);
       [leftOpaque setAutoresizingMask:NSViewMaxXMargin |
                                       NSViewHeightSizable];
       [leftOpaque setAlphaValue:kAlphaValueJustOpaqueEnough];
       [rootView addSubview:leftOpaque];
 
-      scoped_nsobject<NSView> rightOpaque([[OpaqueView alloc] initWithFrame:
-          NSMakeRect(NSMaxX(rootBounds) - 1, NSMinY(rootBounds),
-                     1, NSHeight(rootBounds) - kTopEdgeInset)]);
+      base::scoped_nsobject<NSView> rightOpaque([[OpaqueView alloc]
+          initWithFrame:NSMakeRect(NSMaxX(rootBounds) - 1,
+                                   NSMinY(rootBounds),
+                                   1,
+                                   NSHeight(rootBounds) - kTopEdgeInset)]);
       [rightOpaque setAutoresizingMask:NSViewMinXMargin |
                                        NSViewHeightSizable];
       [rightOpaque setAlphaValue:kAlphaValueJustOpaqueEnough];

@@ -17,18 +17,19 @@
 #include "sync/api/sync_error_factory.h"
 #include "sync/protocol/sync.pb.h"
 #include "sync/protocol/synced_notification_specifics.pb.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
+#include "third_party/WebKit/public/web/WebTextDirection.h"
 
 namespace notifier {
+
+bool ChromeNotifierService::avoid_bitmap_fetching_for_test_ = false;
 
 ChromeNotifierService::ChromeNotifierService(Profile* profile,
                                              NotificationUIManager* manager)
     : profile_(profile), notification_manager_(manager) {}
 ChromeNotifierService::~ChromeNotifierService() {}
 
-// Methods from ProfileKeyedService.
-void ChromeNotifierService::Shutdown() {
-}
+// Methods from BrowserContextKeyedService.
+void ChromeNotifierService::Shutdown() {}
 
 // syncer::SyncableService implementation.
 
@@ -55,7 +56,12 @@ syncer::SyncMergeResult ChromeNotifierService::MergeDataAndStartSyncing(
     // Build a local notification object from the sync data.
     scoped_ptr<SyncedNotification> incoming(CreateNotificationFromSyncData(
         sync_data));
-    DCHECK(incoming.get());
+    if (!incoming) {
+      // TODO(petewil): Turn this into a NOTREACHED() call once we fix the
+      // underlying problem causing bad data.
+      LOG(WARNING) << "Badly formed sync data in incoming notification";
+      continue;
+    }
 
     // Process each incoming remote notification.
     const std::string& key = incoming->GetKey();
@@ -187,8 +193,15 @@ scoped_ptr<SyncedNotification>
   // Check for mandatory fields in the sync_data object.
   if (!specifics.has_coalesced_notification() ||
       !specifics.coalesced_notification().has_key() ||
-      !specifics.coalesced_notification().has_read_state())
+      !specifics.coalesced_notification().has_read_state()) {
+    DVLOG(1) << "Synced Notification missing mandatory fields "
+             << "has coalesced notification? "
+             << specifics.has_coalesced_notification()
+             << " has key? " << specifics.coalesced_notification().has_key()
+             << " has read state? "
+             << specifics.coalesced_notification().has_read_state();
     return scoped_ptr<SyncedNotification>();
+  }
 
   // TODO(petewil): Is this the right set?  Should I add more?
   bool is_well_formed_unread_notification =
@@ -203,8 +216,14 @@ scoped_ptr<SyncedNotification>
 
   // if the notification is poorly formed, return a null pointer
   if (!is_well_formed_unread_notification &&
-      !is_well_formed_dismissed_notification)
+      !is_well_formed_dismissed_notification) {
+    DVLOG(1) << "Synced Notification is not well formed."
+             << " unread well formed? "
+             << is_well_formed_unread_notification
+             << " dismissed well formed? "
+             << is_well_formed_dismissed_notification;
     return scoped_ptr<SyncedNotification>();
+  }
 
   // Create a new notification object based on the supplied sync_data.
   scoped_ptr<SyncedNotification> notification(
@@ -257,8 +276,19 @@ void ChromeNotifierService::Add(scoped_ptr<SyncedNotification> notification) {
   // Take ownership of the object and put it into our local storage.
   notification_data_.push_back(notification.release());
 
-  // Get the contained bitmaps, and show the notification once we have them.
-  notification_copy->Show(notification_manager_, this, profile_);
+  // Set up to fetch the bitmaps.
+  notification_copy->QueueBitmapFetchJobs(notification_manager_,
+                                          this,
+                                          profile_);
+
+  // Our tests cannot use the network for reliability reasons.
+  if (avoid_bitmap_fetching_for_test_) {
+    return;
+  }
+
+  // Start the bitmap fetching, Show() will be called when the last bitmap
+  // either arrives or times out.
+  notification_copy->StartBitmapFetch();
 }
 
 }  // namespace notifier

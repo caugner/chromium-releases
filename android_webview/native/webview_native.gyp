@@ -12,13 +12,16 @@
       'dependencies': [
         '../../base/base.gyp:base_static',
         '../../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+        '../../components/components.gyp:autofill_content_browser',
         '../../components/components.gyp:web_contents_delegate_android',
         '../../cc/cc.gyp:cc',
         '../../net/net.gyp:net',
         '../../skia/skia.gyp:skia',
         '../../ui/ui.gyp:ui',
-        '../../webkit/support/webkit_support.gyp:user_agent',
-        '../../webkit/support/webkit_support.gyp:webkit_storage',
+        '../../webkit/common/user_agent/webkit_user_agent.gyp:user_agent',
+        '../../webkit/support/webkit_support.gyp:glue_common',
+        '../../webkit/storage_browser.gyp:webkit_storage_browser',
+        '../../webkit/storage_common.gyp:webkit_storage_common',
         'android_webview_native_jni',
       ],
       'include_dirs': [

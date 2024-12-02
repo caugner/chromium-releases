@@ -7,17 +7,20 @@
 #include "base/i18n/rtl.h"
 #include "base/message_loop.h"
 #include "base/strings/string_split.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "ui/base/accessibility/accessible_view_state.h"
+#include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/controls/link.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/client_view.h"
+#include "ui/views/window/dialog_delegate.h"
 
 namespace {
 
@@ -66,8 +69,7 @@ MessageBoxView::InitParams::InitParams(const string16& message)
     : options(NO_OPTIONS),
       message(message),
       message_width(kDefaultMessageWidth),
-      inter_row_vertical_spacing(kRelatedControlVerticalSpacing),
-      clipboard_source_tag() {}
+      inter_row_vertical_spacing(kRelatedControlVerticalSpacing) {}
 
 MessageBoxView::InitParams::~InitParams() {
 }
@@ -76,6 +78,7 @@ MessageBoxView::MessageBoxView(const InitParams& params)
     : prompt_field_(NULL),
       icon_(NULL),
       checkbox_(NULL),
+      link_(NULL),
       message_width_(params.message_width) {
   Init(params);
 }
@@ -112,6 +115,23 @@ void MessageBoxView::SetCheckBoxSelected(bool selected) {
   checkbox_->SetChecked(selected);
 }
 
+void MessageBoxView::SetLink(const string16& text, LinkListener* listener) {
+  if (text.empty()) {
+    DCHECK(!listener);
+    delete link_;
+    link_ = NULL;
+  } else {
+    DCHECK(listener);
+    if (!link_) {
+      link_ = new Link();
+      link_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    }
+    link_->SetText(text);
+    link_->set_listener(listener);
+  }
+  ResetLayoutManager();
+}
+
 void MessageBoxView::GetAccessibleState(ui::AccessibleViewState* state) {
   state->role = ui::AccessibilityTypes::ROLE_ALERT;
 }
@@ -119,10 +139,9 @@ void MessageBoxView::GetAccessibleState(ui::AccessibleViewState* state) {
 ///////////////////////////////////////////////////////////////////////////////
 // MessageBoxView, View overrides:
 
-void MessageBoxView::ViewHierarchyChanged(bool is_add,
-                                          View* parent,
-                                          View* child) {
-  if (child == this && is_add) {
+void MessageBoxView::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  if (details.child == this && details.is_add) {
     if (prompt_field_)
       prompt_field_->SelectAll(true);
 
@@ -142,9 +161,7 @@ bool MessageBoxView::AcceleratorPressed(const ui::Accelerator& accelerator) {
   if (!clipboard)
     return false;
 
-  ui::ScopedClipboardWriter scw(clipboard,
-                                ui::Clipboard::BUFFER_STANDARD,
-                                source_tag_);
+  ui::ScopedClipboardWriter scw(clipboard, ui::Clipboard::BUFFER_STANDARD);
   string16 text = message_labels_[0]->text();
   for (size_t i = 1; i < message_labels_.size(); ++i)
     text += message_labels_[i]->text();
@@ -190,7 +207,6 @@ void MessageBoxView::Init(const InitParams& params) {
   }
 
   inter_row_vertical_spacing_ = params.inter_row_vertical_spacing;
-  source_tag_ = params.clipboard_source_tag;
 
   ResetLayoutManager();
 }
@@ -217,22 +233,10 @@ void MessageBoxView::ResetLayoutManager() {
   column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
                         GridLayout::FIXED, message_width_, 0);
 
-  // Column set for prompt Textfield, if one has been set.
-  const int textfield_column_view_set_id = 1;
-  if (prompt_field_) {
-    column_set = layout->AddColumnSet(textfield_column_view_set_id);
-    if (icon_) {
-      column_set->AddPaddingColumn(
-          0, icon_size.width() + kUnrelatedControlHorizontalSpacing);
-    }
-    column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
-                          GridLayout::USE_PREF, 0, 0);
-  }
-
-  // Column set for checkbox, if one has been set.
-  const int checkbox_column_view_set_id = 2;
-  if (checkbox_) {
-    column_set = layout->AddColumnSet(checkbox_column_view_set_id);
+  // Column set for extra elements, if any.
+  const int extra_column_view_set_id = 1;
+  if (prompt_field_ || checkbox_ || link_) {
+    column_set = layout->AddColumnSet(extra_column_view_set_id);
     if (icon_) {
       column_set->AddPaddingColumn(
           0, icon_size.width() + kUnrelatedControlHorizontalSpacing);
@@ -254,17 +258,21 @@ void MessageBoxView::ResetLayoutManager() {
 
   if (prompt_field_) {
     layout->AddPaddingRow(0, inter_row_vertical_spacing_);
-    layout->StartRow(0, textfield_column_view_set_id);
+    layout->StartRow(0, extra_column_view_set_id);
     layout->AddView(prompt_field_);
   }
 
   if (checkbox_) {
     layout->AddPaddingRow(0, inter_row_vertical_spacing_);
-    layout->StartRow(0, checkbox_column_view_set_id);
+    layout->StartRow(0, extra_column_view_set_id);
     layout->AddView(checkbox_);
   }
 
-  layout->AddPaddingRow(0, inter_row_vertical_spacing_);
+  if (link_) {
+    layout->AddPaddingRow(0, inter_row_vertical_spacing_);
+    layout->StartRow(0, extra_column_view_set_id);
+    layout->AddView(link_);
+  }
 }
 
 }  // namespace views

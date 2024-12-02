@@ -121,6 +121,9 @@ class TestSafeBrowsingDatabase :  public SafeBrowsingDatabase {
       std::vector<SBPrefix>* prefix_hits) OVERRIDE {
     return true;
   }
+  virtual bool ContainsSideEffectFreeWhitelistUrl(const GURL& url) OVERRIDE {
+    return true;
+  }
   virtual bool UpdateStarted(std::vector<SBListChunkRanges>* lists) OVERRIDE {
     ADD_FAILURE() << "Not implemented.";
     return false;
@@ -206,7 +209,8 @@ class TestSafeBrowsingDatabaseFactory : public SafeBrowsingDatabaseFactory {
       bool enable_download_protection,
       bool enable_client_side_whitelist,
       bool enable_download_whitelist,
-      bool enable_extension_blacklist) OVERRIDE {
+      bool enable_extension_blacklist,
+      bool enable_side_effect_free_whitelist) OVERRIDE {
     db_ = new TestSafeBrowsingDatabase();
     return db_;
   }
@@ -441,7 +445,7 @@ class SafeBrowsingServiceTest : public InProcessBrowserTest {
   // to wait for the SafeBrowsingService to finish loading/stopping.
   void WaitForIOThread() {
     scoped_refptr<base::ThreadTestHelper> io_helper(new base::ThreadTestHelper(
-        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
+        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO).get()));
     ASSERT_TRUE(io_helper->Run());
   }
 
@@ -593,7 +597,7 @@ class TestSBClient
   }
 
   void DownloadCheckDone() {
-    MessageLoopForUI::current()->Quit();
+    base::MessageLoopForUI::current()->Quit();
   }
 
   SBThreatType threat_type_;
@@ -814,7 +818,7 @@ class SafeBrowsingServiceShutdownTest : public SafeBrowsingServiceTest {
                                   Profile::CreateStatus status) {
     if (status == Profile::CREATE_STATUS_INITIALIZED) {
       profile2_ = profile;
-      MessageLoop::current()->Quit();
+      base::MessageLoop::current()->Quit();
     }
   }
 
@@ -957,7 +961,7 @@ class SafeBrowsingDatabaseManagerCookieTest : public InProcessBrowserTest {
 
   virtual void SetUpOnMainThread() OVERRIDE {
     sb_service_ = g_browser_process->safe_browsing_service();
-    ASSERT_TRUE(sb_service_ != NULL);
+    ASSERT_TRUE(sb_service_.get() != NULL);
   }
 
   virtual void CleanUpOnMainThread() OVERRIDE {
@@ -982,9 +986,10 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingDatabaseManagerCookieTest,
   content::WindowedNotificationObserver observer(
       chrome::NOTIFICATION_SAFE_BROWSING_UPDATE_COMPLETE,
       content::Source<SafeBrowsingDatabaseManager>(
-          sb_service_->database_manager()));
+          sb_service_->database_manager().get()));
   BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+      BrowserThread::IO,
+      FROM_HERE,
       base::Bind(&SafeBrowsingDatabaseManagerCookieTest::ForceUpdate, this));
   observer.Wait();
 }

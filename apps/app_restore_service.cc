@@ -4,25 +4,22 @@
 
 #include "apps/app_restore_service.h"
 
+#include "apps/app_lifetime_monitor_factory.h"
+#include "apps/app_restore_service_factory.h"
+#include "apps/saved_files_service.h"
 #include "chrome/browser/extensions/api/app_runtime/app_runtime_api.h"
-#include "chrome/browser/extensions/api/file_handlers/app_file_handler_util.h"
-#include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_host.h"
+#include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/platform_app_launcher.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_set.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 
 #if defined(OS_WIN)
 #include "win8/util/win8_util.h"
 #endif
 
-using extensions::AppEventRouter;
 using extensions::Extension;
 using extensions::ExtensionHost;
 using extensions::ExtensionPrefs;
@@ -46,15 +43,7 @@ bool AppRestoreService::ShouldRestoreApps(bool is_browser_restart) {
 
 AppRestoreService::AppRestoreService(Profile* profile)
     : profile_(profile) {
-  registrar_.Add(
-      this, chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
-      content::NotificationService::AllSources());
-  registrar_.Add(
-      this, chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED,
-      content::NotificationService::AllSources());
-  registrar_.Add(
-      this, chrome::NOTIFICATION_APP_TERMINATING,
-      content::NotificationService::AllSources());
+  StartObservingAppLifetime();
 }
 
 void AppRestoreService::HandleStartup(bool should_restore_apps) {
@@ -65,46 +54,60 @@ void AppRestoreService::HandleStartup(bool should_restore_apps) {
 
   for (ExtensionSet::const_iterator it = extensions->begin();
       it != extensions->end(); ++it) {
-    const Extension* extension = *it;
+    const Extension* extension = it->get();
     if (extension_prefs->IsExtensionRunning(extension->id())) {
-      std::vector<SavedFileEntry> file_entries;
-      extension_prefs->GetSavedFileEntries(extension->id(), &file_entries);
       RecordAppStop(extension->id());
-      if (should_restore_apps)
-        RestoreApp(*it, file_entries);
+      // If we are not restoring apps (e.g., because it is a clean restart), and
+      // the app does not have retain permission, explicitly clear the retained
+      // entries queue.
+      if (should_restore_apps) {
+        RestoreApp(it->get());
+      } else {
+        SavedFilesService::Get(profile_)->ClearQueueIfNoRetainPermission(
+            extension);
+      }
     }
   }
 }
 
-void AppRestoreService::Observe(int type,
-                                const content::NotificationSource& source,
-                                const content::NotificationDetails& details) {
-  switch (type) {
-    case chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING: {
-      ExtensionHost* host = content::Details<ExtensionHost>(details).ptr();
-      const Extension* extension = host->extension();
-      if (extension && extension->is_platform_app())
-        RecordAppStart(extension->id());
-      break;
-    }
-
-    case chrome::NOTIFICATION_EXTENSION_HOST_DESTROYED: {
-      ExtensionHost* host = content::Details<ExtensionHost>(details).ptr();
-      const Extension* extension = host->extension();
-      if (extension && extension->is_platform_app())
-        RecordAppStop(extension->id());
-      break;
-    }
-
-    case chrome::NOTIFICATION_APP_TERMINATING: {
-      // Stop listening to NOTIFICATION_EXTENSION_HOST_DESTROYED in particular
-      // as all extension hosts will be destroyed as a result of shutdown.
-      registrar_.RemoveAll();
-      break;
-    }
-  }
+bool AppRestoreService::IsAppRestorable(const std::string& extension_id) {
+  return extensions::ExtensionPrefs::Get(profile_) ->IsExtensionRunning(
+      extension_id);
 }
 
+// static
+AppRestoreService* AppRestoreService::Get(Profile* profile) {
+  return apps::AppRestoreServiceFactory::GetForProfile(profile);
+}
+
+void AppRestoreService::OnAppStart(Profile* profile,
+                                   const std::string& app_id) {
+  RecordAppStart(app_id);
+}
+
+void AppRestoreService::OnAppActivated(Profile* profile,
+                                       const std::string& app_id) {
+  RecordAppActiveState(app_id, true);
+}
+
+void AppRestoreService::OnAppDeactivated(Profile* profile,
+                                         const std::string& app_id) {
+  RecordAppActiveState(app_id, false);
+}
+
+void AppRestoreService::OnAppStop(Profile* profile, const std::string& app_id) {
+  RecordAppStop(app_id);
+}
+
+void AppRestoreService::OnChromeTerminating() {
+  // We want to preserve the state when the app begins terminating, so stop
+  // listening to app lifetime events.
+  StopObservingAppLifetime();
+}
+
+void AppRestoreService::Shutdown() {
+  StopObservingAppLifetime();
+}
 
 void AppRestoreService::RecordAppStart(const std::string& extension_id) {
   ExtensionPrefs* extension_prefs =
@@ -116,15 +119,39 @@ void AppRestoreService::RecordAppStop(const std::string& extension_id) {
   ExtensionPrefs* extension_prefs =
       ExtensionSystem::Get(profile_)->extension_service()->extension_prefs();
   extension_prefs->SetExtensionRunning(extension_id, false);
-  extension_prefs->ClearSavedFileEntries(extension_id);
 }
 
-void AppRestoreService::RestoreApp(
-    const Extension* extension,
-    const std::vector<SavedFileEntry>& file_entries) {
-  extensions::RestartPlatformAppWithFileEntries(profile_,
-                                                extension,
-                                                file_entries);
+void AppRestoreService::RecordAppActiveState(const std::string& id,
+                                             bool is_active) {
+  ExtensionService* extension_service =
+      ExtensionSystem::Get(profile_)->extension_service();
+  ExtensionPrefs* extension_prefs = extension_service->extension_prefs();
+
+  // If the extension isn't running then we will already have recorded whether
+  // it is active or not.
+  if (!extension_prefs->IsExtensionRunning(id))
+    return;
+
+  extension_prefs->SetIsActive(id, is_active);
+}
+
+void AppRestoreService::RestoreApp(const Extension* extension) {
+  extensions::RestartPlatformApp(profile_, extension);
+}
+
+void AppRestoreService::StartObservingAppLifetime() {
+  AppLifetimeMonitor* app_lifetime_monitor =
+      AppLifetimeMonitorFactory::GetForProfile(profile_);
+  DCHECK(app_lifetime_monitor);
+  app_lifetime_monitor->AddObserver(this);
+}
+
+void AppRestoreService::StopObservingAppLifetime() {
+  AppLifetimeMonitor* app_lifetime_monitor =
+      AppLifetimeMonitorFactory::GetForProfile(profile_);
+  // This might be NULL in tests.
+  if (app_lifetime_monitor)
+    app_lifetime_monitor->RemoveObserver(this);
 }
 
 }  // namespace apps

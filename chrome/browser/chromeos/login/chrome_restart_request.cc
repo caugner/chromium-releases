@@ -15,12 +15,13 @@
 #include "base/prefs/json_pref_store.h"
 #include "base/prefs/pref_service.h"
 #include "base/process_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_split.h"
+#include "base/strings/stringprintf.h"
 #include "base/timer.h"
 #include "base/values.h"
 #include "cc/base/switches.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -74,35 +75,34 @@ std::string DeriveCommandLine(const GURL& start_url,
       ::switches::kDisableAcceleratedPlugins,
       ::switches::kDisableAcceleratedVideoDecode,
       ::switches::kDisableBrowserPluginCompositing,
-      ::switches::kDisableEncryptedMedia,
       ::switches::kDisableForceCompositingMode,
       ::switches::kDisableGpuShaderDiskCache,
       ::switches::kDisableGpuWatchdog,
-      ::switches::kDisableLoginAnimations,
-      ::switches::kDisableOobeAnimation,
+      ::switches::kDisableLegacyEncryptedMedia,
       ::switches::kDisablePanelFitting,
       ::switches::kDisableSeccompFilterSandbox,
+      ::switches::kDisableSetuidSandbox,
       ::switches::kDisableThreadedCompositing,
       ::switches::kDisableTouchDragDrop,
       ::switches::kDisableTouchEditing,
+      ::switches::kDisableWebKitMediaSource,
       ::switches::kEnableAcceleratedOverflowScroll,
+      ::switches::kEnableBeginFrameScheduling,
+      ::switches::kEnableBrowserInputController,
       ::switches::kEnableCompositingForFixedPosition,
+      ::switches::kEnableEncryptedMedia,
       ::switches::kEnableGestureTapHighlight,
       ::switches::kDisableGestureTapHighlight,
       ::switches::kDisableGpuSandbox,
-      ::switches::kEnableGpuSandbox,
       ::switches::kEnableLogging,
       ::switches::kEnablePinch,
       ::switches::kEnableThreadedCompositing,
       ::switches::kEnableTouchDragDrop,
       ::switches::kEnableTouchEditing,
       ::switches::kEnableViewport,
-      ::switches::kEnableVsyncNotification,
       ::switches::kForceDeviceScaleFactor,
       ::switches::kGpuStartupDialog,
-      ::switches::kHasChromeOSDiamondKey,
-      ::switches::kHasChromeOSKeyboard,
-      ::switches::kNaturalScrollDefault,
+      ::switches::kMultiProfiles,
       ::switches::kNoSandbox,
       ::switches::kPpapiFlashArgs,
       ::switches::kPpapiFlashInProcess,
@@ -110,6 +110,9 @@ std::string DeriveCommandLine(const GURL& start_url,
       ::switches::kPpapiFlashVersion,
       ::switches::kPpapiInProcess,
       ::switches::kRendererStartupDialog,
+      ::switches::kEnableShareGroupAsyncTextureUpload,
+      ::switches::kTabCaptureUpscaleQuality,
+      ::switches::kTabCaptureDownscaleQuality,
 #if defined(USE_XI2_MT)
       ::switches::kTouchCalibration,
 #endif
@@ -126,11 +129,16 @@ std::string DeriveCommandLine(const GURL& start_url,
       ::switches::kUserDataDir,
       ::switches::kUseExynosVda,
       ::switches::kV,
+      ::switches::kEnableWebGLDraftExtensions,
+      ash::switches::kAshDefaultGuestWallpaperLarge,
+      ash::switches::kAshDefaultGuestWallpaperSmall,
+      ash::switches::kAshDefaultWallpaperLarge,
+      ash::switches::kAshDefaultWallpaperSmall,
+      ash::switches::kAshDisableNewAudioHandler,
+      ash::switches::kAshEnableAudioDeviceMenu,
+      ash::switches::kAshHostWindowBounds,
       ash::switches::kAshTouchHud,
       ash::switches::kAuraLegacyPowerButton,
-      ash::switches::kAshDisableNewAudioHandler,
-      ash::switches::kAshDisableNewNetworkStatusArea,
-      ash::switches::kAshEnableAudioDeviceMenu,
       // Please keep these in alphabetical order. Non-UI Compositor switches
       // here should also be added to
       // content/browser/renderer_host/render_process_host_impl.cc.
@@ -138,22 +146,18 @@ std::string DeriveCommandLine(const GURL& start_url,
       cc::switches::kCompositeToMailbox,
       cc::switches::kDisableColorEstimator,
       cc::switches::kDisableImplSidePainting,
-      cc::switches::kDisablePinchZoomScrollbars,
       cc::switches::kDisableThreadedAnimation,
-      cc::switches::kEnableCompositorFrameMessage,
       cc::switches::kEnableImplSidePainting,
       cc::switches::kEnablePartialSwap,
       cc::switches::kEnablePerTilePainting,
-      cc::switches::kEnablePinchZoomScrollbars,
-      cc::switches::kEnablePredictionBenchmarking,
-      cc::switches::kEnableRightAlignedScheduling,
+      cc::switches::kEnablePinchVirtualViewport,
       cc::switches::kEnableTopControlsPositionCalculation,
+      cc::switches::kForceDirectLayerDrawing,
       cc::switches::kLowResolutionContentsScaleFactor,
       cc::switches::kMaxTilesForInterestArea,
       cc::switches::kMaxUnusedResourceMemoryUsagePercentage,
       cc::switches::kNumRasterThreads,
       cc::switches::kShowCompositedLayerBorders,
-      cc::switches::kShowCompositedLayerTree,
       cc::switches::kShowFPSCounter,
       cc::switches::kShowNonOccludingRects,
       cc::switches::kShowOccludingRects,
@@ -162,13 +166,19 @@ std::string DeriveCommandLine(const GURL& start_url,
       cc::switches::kShowScreenSpaceRects,
       cc::switches::kShowSurfaceDamageRects,
       cc::switches::kSlowDownRasterScaleFactor,
-      cc::switches::kTraceAllRenderedFrames,
       cc::switches::kTraceOverdraw,
       cc::switches::kUIDisablePartialSwap,
       cc::switches::kUIEnablePerTilePainting,
+      cc::switches::kUseMapImage,
       chromeos::switches::kDbusStub,
+      chromeos::switches::kDisableLoginAnimations,
+      chromeos::switches::kDisableOobeAnimation,
+      chromeos::switches::kHasChromeOSDiamondKey,
+      chromeos::switches::kHasChromeOSKeyboard,
       chromeos::switches::kLoginProfile,
-      chromeos::switches::kEnableExperimentalBluetooth,
+      chromeos::switches::kNaturalScrollDefault,
+      chromeos::switches::kUseNewNetworkConfigurationHandlers,
+      chromeos::switches::kUseNewNetworkConnectionHandler,
       gfx::switches::kEnableBrowserTextSubpixelPositioning,
       gfx::switches::kEnableWebkitTextSubpixelPositioning,
       views::corewm::switches::kNoDropShadows,
@@ -311,7 +321,7 @@ std::string GetOffTheRecordCommandLine(
   otr_switches.SetString(switches::kGuestSession, std::string());
   otr_switches.SetString(::switches::kIncognito, std::string());
   otr_switches.SetString(::switches::kLoggingLevel, kGuestModeLoggingLevel);
-  otr_switches.SetString(switches::kLoginUser, kGuestUserName);
+  otr_switches.SetString(switches::kLoginUser, UserManager::kGuestUserName);
 
   // Override the home page.
   otr_switches.SetString(::switches::kHomePage,

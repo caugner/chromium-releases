@@ -6,22 +6,22 @@
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
-#include "base/json/json_file_value_serializer.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/drive_system_service.h"
+#include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_system.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/extensions/file_manager/file_browser_handler.h"
 #include "chrome/browser/chromeos/extensions/file_manager/file_handler_util.h"
 #include "chrome/browser/chromeos/media/media_player.h"
+#include "chrome/browser/extensions/api/file_handlers/app_file_handler_util.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -42,6 +42,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "chromeos/chromeos_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/storage_partition.h"
@@ -50,14 +51,15 @@
 #include "content/public/common/pepper_plugin_info.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
+#include "net/base/mime_util.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/screen.h"
-#include "webkit/fileapi/file_system_context.h"
-#include "webkit/fileapi/file_system_mount_point_provider.h"
-#include "webkit/fileapi/file_system_operation.h"
-#include "webkit/fileapi/file_system_url.h"
-#include "webkit/fileapi/file_system_util.h"
+#include "webkit/browser/fileapi/file_system_context.h"
+#include "webkit/browser/fileapi/file_system_mount_point_provider.h"
+#include "webkit/browser/fileapi/file_system_operation_runner.h"
+#include "webkit/browser/fileapi/file_system_url.h"
+#include "webkit/common/fileapi/file_system_util.h"
 #include "webkit/plugins/webplugininfo.h"
 
 using base::DictionaryValue;
@@ -66,12 +68,12 @@ using content::BrowserContext;
 using content::BrowserThread;
 using content::PluginService;
 using content::UserMetricsAction;
+using extensions::app_file_handler_util::FindFileHandlersForFiles;
+using extensions::app_file_handler_util::PathAndMimeTypeSet;
 using extensions::Extension;
-using file_handler_util::FileTaskExecutor;
 using fileapi::FileSystemURL;
 
-#define FILEBROWSER_EXTENSON_ID "hhaomjibdihmijegdhdafkllkbggdgoj"
-const char kFileBrowserDomain[] = FILEBROWSER_EXTENSON_ID;
+const char kFileBrowserDomain[] = "hhaomjibdihmijegdhdafkllkbggdgoj";
 
 const char kFileBrowserGalleryTaskId[] = "gallery";
 const char kFileBrowserMountArchiveTaskId[] = "mount-archive";
@@ -82,20 +84,6 @@ const char kVideoPlayerAppName[] = "videoplayer";
 
 namespace file_manager_util {
 namespace {
-
-#define FILEBROWSER_URL(PATH) \
-    ("chrome-extension://" FILEBROWSER_EXTENSON_ID "/" PATH)
-// This is the "well known" url for the file manager extension from
-// browser/resources/file_manager.  In the future we may provide a way to swap
-// out this file manager for an aftermarket part, but not yet.
-const char kFileBrowserExtensionUrl[] = FILEBROWSER_URL("");
-const char kBaseFileBrowserUrl[] = FILEBROWSER_URL("main.html");
-const char kBaseFileBrowserNewUIUrl[] = FILEBROWSER_URL("main_new_ui.html");
-const char kMediaPlayerUrl[] = FILEBROWSER_URL("mediaplayer.html");
-const char kVideoPlayerUrl[] = FILEBROWSER_URL("video_player.html");
-const char kActionChoiceUrl[] = FILEBROWSER_URL("action_choice.html");
-#undef FILEBROWSER_URL
-#undef FILEBROWSER_EXTENSON_ID
 
 const char kCRXExtension[] = ".crx";
 const char kPdfExtension[] = ".pdf";
@@ -109,11 +97,6 @@ const char* kBrowserSupportedExtensions[] = {
     ".mhtml", ".mht", ".svg"
 };
 
-// Keep in sync with 'open-hosted' task handler in the File Browser manifest.
-const char* kGDocsExtensions[] = {
-    ".gdoc", ".gsheet", ".gslides", ".gdraw", ".gtable", ".glink"
-};
-
 // List of all extensions we want to be shown in histogram that keep track of
 // files that were unsuccessfully tried to be opened.
 // The list has to be synced with histogram values.
@@ -123,18 +106,14 @@ const char* kUMATrackingExtensions[] = {
   ".mov", ".mpg", ".log"
 };
 
+// Returns a file manager URL for the given |path|.
+GURL GetFileManagerUrl(const char* path) {
+  return GURL(std::string("chrome-extension://") + kFileBrowserDomain + path);
+}
+
 bool IsSupportedBrowserExtension(const char* file_extension) {
   for (size_t i = 0; i < arraysize(kBrowserSupportedExtensions); i++) {
     if (base::strcasecmp(file_extension, kBrowserSupportedExtensions[i]) == 0) {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool IsSupportedGDocsExtension(const char* file_extension) {
-  for (size_t i = 0; i < arraysize(kGDocsExtensions); i++) {
-    if (base::strcasecmp(file_extension, kGDocsExtensions[i]) == 0) {
       return true;
     }
   }
@@ -265,60 +244,10 @@ void InstallCRX(Browser* browser, const base::FilePath& path) {
 void OnCRXDownloadCallback(Browser* browser,
                            drive::FileError error,
                            const base::FilePath& file,
-                           const std::string& unused_mime_type,
-                           drive::DriveFileType file_type) {
-  if (error != drive::FILE_ERROR_OK || file_type != drive::REGULAR_FILE)
+                           scoped_ptr<drive::ResourceEntry> entry) {
+  if (error != drive::FILE_ERROR_OK)
     return;
   InstallCRX(browser, file);
-}
-
-// TODO(mtomasz): Remove this when dropping support for the legacy Files.app.
-enum TAB_REUSE_MODE {
-  REUSE_ANY_FILE_MANAGER,
-  REUSE_SAME_PATH,
-  REUSE_NEVER
-};
-
-// TODO(mtomasz): Remove this when dropping support for the legacy Files.app.
-bool FileManagerTabExists(const base::FilePath& path, TAB_REUSE_MODE mode) {
-  if (mode == REUSE_NEVER)
-    return false;
-
-  // We always open full-tab File Manager via chrome://files URL, never
-  // chrome-extension://, so we only check against chrome://files
-  const GURL origin(chrome::kChromeUIFileManagerURL);
-  const std::string ref = std::string("/") + path.value();
-
-  // Check browser windows.
-  for (chrome::BrowserIterator it; !it.done(); it.Next()) {
-    Browser* browser = *it;
-    TabStripModel* tab_strip = browser->tab_strip_model();
-    for (int idx = 0; idx < tab_strip->count(); idx++) {
-      content::WebContents* web_contents = tab_strip->GetWebContentsAt(idx);
-      const GURL& url = web_contents->GetURL();
-      if (origin == url.GetOrigin()) {
-        if (mode == REUSE_ANY_FILE_MANAGER || ref == url.ref()) {
-          if (mode == REUSE_SAME_PATH && tab_strip->active_index() != idx) {
-            browser->window()->Show();
-            tab_strip->ActivateTabAt(idx, false);
-          }
-          return true;
-        }
-      }
-    }
-  }
-
-  return false;
-}
-
-bool IsFileManagerPackaged() {
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  return !command_line->HasSwitch(switches::kFileManagerLegacy);
-}
-
-bool IsFileManagerNewUI() {
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-  return !command_line->HasSwitch(switches::kFileManagerLegacyUI);
 }
 
 // Grants file system access to the file browser.
@@ -340,7 +269,8 @@ bool GrantFileSystemAccessToFileBrowser(Profile* profile) {
 void ExecuteHandler(Profile* profile,
                     std::string extension_id,
                     std::string action_id,
-                    const GURL& url) {
+                    const GURL& url,
+                    const std::string& task_type) {
   // If File Browser has not been open yet then it did not request access
   // to the file system. Do it now.
   if (!GrantFileSystemAccessToFileBrowser(profile))
@@ -356,69 +286,32 @@ void ExecuteHandler(Profile* profile,
   const GURL source_url = GetFileBrowserUrl();
   std::vector<FileSystemURL> urls;
   urls.push_back(file_system_context->CrackURL(url));
-  scoped_refptr<FileTaskExecutor> executor = FileTaskExecutor::Create(profile,
-      source_url, kFileBrowserDomain, 0 /* no tab id */, extension_id,
-      file_handler_util::kTaskFile, action_id);
-  executor->Execute(urls);
+
+  file_handler_util::ExecuteFileTask(
+      profile,
+      source_url,
+      kFileBrowserDomain,
+      0, // no tab id
+      extension_id,
+      task_type,
+      action_id,
+      urls,
+      file_handler_util::FileTaskFinishedCallback());
 }
 
-// The |mode| argument is only for legacy Files.app. Files.app V2 has the
-// reusing logic in background.js.
 void OpenFileBrowserImpl(const base::FilePath& path,
-                         TAB_REUSE_MODE mode,
                          const std::string& action_id) {
   content::RecordAction(UserMetricsAction("ShowFileBrowserFullTab"));
   Profile* profile = ProfileManager::GetDefaultProfileOrOffTheRecord();
 
-  if (IsFileManagerPackaged() && !path.value().empty()) {
-    GURL url;
-    if (!ConvertFileToFileSystemUrl(profile, path, kFileBrowserDomain, &url))
-      return;
-
-    // Some values of |action_id| are not listed in the manifest and are used
-    // to parametrize the behavior when opening the Files app window.
-    ExecuteHandler(profile, kFileBrowserDomain, action_id, url);
-    return;
-  }
-
-  if (FileManagerTabExists(path, mode))
+  GURL url;
+  if (!ConvertFileToFileSystemUrl(profile, path, kFileBrowserDomain, &url))
     return;
 
-  std::string url = chrome::kChromeUIFileManagerURL;
-  if (action_id.size()) {
-    DictionaryValue arg_value;
-    arg_value.SetString("action", action_id);
-    std::string query;
-    base::JSONWriter::Write(&arg_value, &query);
-    url += "?" +
-        net::EscapeUrlEncodedData(query,
-                                  false);  // Space to %20 instead of +.
-  }
-  if (!path.empty()) {
-    base::FilePath virtual_path;
-    if (!ConvertFileToRelativeFileSystemPath(profile, kFileBrowserDomain, path,
-                                             &virtual_path))
-      return;
-    url += "#/" +
-        net::EscapeUrlEncodedData(virtual_path.value(),
-                                  false);  // Space to %20 instead of +.
-  }
-
-  ExtensionService* service =
-      extensions::ExtensionSystem::Get(profile)->extension_service();
-  if (!service)
-    return;
-
-  const extensions::Extension* extension =
-      service->GetExtensionById(kFileBrowserDomain, false);
-  if (!extension)
-    return;
-
-  chrome::AppLaunchParams params(profile, extension,
-                                 extension_misc::LAUNCH_WINDOW,
-                                 NEW_FOREGROUND_TAB);
-  params.override_url = GURL(url);
-  chrome::OpenApplication(params);
+  // Some values of |action_id| are not listed in the manifest and are used
+  // to parametrize the behavior when opening the Files app window.
+  ExecuteHandler(profile, kFileBrowserDomain, action_id, url,
+                 file_handler_util::kTaskFile);
 }
 
 Browser* GetBrowserForUrl(GURL target_url) {
@@ -435,17 +328,70 @@ Browser* GetBrowserForUrl(GURL target_url) {
   return NULL;
 }
 
-bool ExecuteDefaultHandler(Profile* profile, const base::FilePath& path) {
-  GURL url;
-  if (!ConvertFileToFileSystemUrl(profile, path, kFileBrowserDomain, &url))
+bool ExecuteDefaultAppHandler(Profile* profile,
+                              const base::FilePath& path,
+                              const GURL& url,
+                              const std::string& mime_type,
+                              const std::string& default_task_id) {
+  ExtensionService* service = profile->GetExtensionService();
+  if (!service)
     return false;
 
-  const FileBrowserHandler* handler;
-  if (!file_handler_util::GetTaskForURLAndPath(profile, url, path, &handler))
-    return false;
+  PathAndMimeTypeSet files;
+  files.insert(std::make_pair(path, mime_type));
+  const extensions::FileHandlerInfo* first_handler = NULL;
+  const extensions::Extension* extension_for_first_handler = NULL;
 
-  std::string extension_id = handler->extension_id();
-  std::string action_id = handler->id();
+  // If we find the default handler, we execute it immediately, but otherwise,
+  // we remember the first handler, and if there was no default handler, simply
+  // execute the first one.
+  for (ExtensionSet::const_iterator iter = service->extensions()->begin();
+       iter != service->extensions()->end();
+       ++iter) {
+    const Extension* extension = *iter;
+
+    // We don't support using hosted apps to open files.
+    if (!extension->is_platform_app())
+      continue;
+
+    // We only support apps that specify "incognito: split" if in incognito
+    // mode.
+    if (profile->IsOffTheRecord() &&
+        !service->IsIncognitoEnabled(extension->id()))
+      continue;
+
+    typedef std::vector<const extensions::FileHandlerInfo*> FileHandlerList;
+    FileHandlerList file_handlers = FindFileHandlersForFiles(*extension, files);
+    for (FileHandlerList::iterator i = file_handlers.begin();
+         i != file_handlers.end(); ++i) {
+      const extensions::FileHandlerInfo* handler = *i;
+      std::string task_id = file_handler_util::MakeTaskID(extension->id(),
+          file_handler_util::kTaskApp, handler->id);
+      if (task_id == default_task_id) {
+        ExecuteHandler(profile, extension->id(), handler->id, url,
+                       file_handler_util::kTaskApp);
+        return true;
+
+      } else if (!first_handler) {
+        first_handler = handler;
+        extension_for_first_handler = extension;
+      }
+    }
+  }
+  if (first_handler) {
+    ExecuteHandler(profile, extension_for_first_handler->id(),
+                   first_handler->id, url, file_handler_util::kTaskApp);
+    return true;
+  }
+  return false;
+}
+
+bool ExecuteExtensionHandler(Profile* profile,
+                             const base::FilePath& path,
+                             const FileBrowserHandler& handler,
+                             const GURL& url) {
+  std::string extension_id = handler.extension_id();
+  std::string action_id = handler.id();
   Browser* browser = chrome::FindLastActiveWithProfile(profile,
       chrome::HOST_DESKTOP_TYPE_ASH);
 
@@ -455,64 +401,64 @@ bool ExecuteDefaultHandler(Profile* profile, const base::FilePath& path) {
     return true;
 
   if (extension_id == kFileBrowserDomain) {
-    if (IsFileManagerPackaged()) {
-      if (action_id == kFileBrowserGalleryTaskId ||
-          action_id == kFileBrowserMountArchiveTaskId ||
-          action_id == kFileBrowserPlayTaskId ||
-          action_id == kFileBrowserWatchTaskId) {
-        ExecuteHandler(profile, extension_id, action_id, url);
-        return true;
-      }
-      return ExecuteBuiltinHandler(browser, path, action_id);
-    }
-
-    // Only two of the built-in File Browser tasks require opening the File
-    // Browser tab.
     if (action_id == kFileBrowserGalleryTaskId ||
-        action_id == kFileBrowserMountArchiveTaskId) {
-      // Tab reuse currently does not work for these two tasks.
-      // |gallery| tries to put the file url into the tab url but it does not
-      // work on Chrome OS.
-      // |mount-archive| does not even try.
-      OpenFileBrowserImpl(path, REUSE_SAME_PATH, "");
+        action_id == kFileBrowserMountArchiveTaskId ||
+        action_id == kFileBrowserPlayTaskId ||
+        action_id == kFileBrowserWatchTaskId) {
+      ExecuteHandler(profile, extension_id, action_id, url,
+                     file_handler_util::kTaskFile);
       return true;
     }
     return ExecuteBuiltinHandler(browser, path, action_id);
   }
 
-  ExecuteHandler(profile, extension_id, action_id, url);
+  ExecuteHandler(profile, extension_id, action_id, url,
+                 file_handler_util::kTaskFile);
   return true;
 }
 
-// Reads JSON from a Google Docs file and extracts a document url. When the file
-// is not in GDoc format, returns a file URL for |file_path| as fallback.
+bool ExecuteDefaultHandler(Profile* profile, const base::FilePath& path) {
+  GURL url;
+  if (!ConvertFileToFileSystemUrl(profile, path, kFileBrowserDomain, &url))
+    return false;
+
+  std::string mime_type = GetMimeTypeForPath(path);
+  std::string default_task_id = file_handler_util::GetDefaultTaskIdFromPrefs(
+      profile, mime_type, path.Extension());
+  const FileBrowserHandler* handler;
+
+  // We choose the file handler from the following in decreasing priority or
+  // fail if none support the file type:
+  // 1. default extension
+  // 2. default app
+  // 3. a fallback handler (e.g. opening in the browser)
+  // 4. non-default app
+  // 5. non-default extension
+  // Note that there can be at most one of default extension and default app.
+  if (!file_handler_util::GetTaskForURLAndPath(profile, url, path, &handler)) {
+    return ExecuteDefaultAppHandler(
+        profile, path, url, mime_type, default_task_id);
+  }
+
+  std::string handler_task_id = file_handler_util::MakeTaskID(
+        handler->extension_id(), file_handler_util::kTaskFile, handler->id());
+  if (handler_task_id != default_task_id &&
+      !file_handler_util::IsFallbackTask(handler) &&
+      ExecuteDefaultAppHandler(
+          profile, path, url, mime_type, default_task_id)) {
+    return true;
+  }
+  return ExecuteExtensionHandler(profile, path, *handler, url);
+}
+
+// Reads the alternate URL from a GDoc file. When it fails, returns a file URL
+// for |file_path| as fallback.
+// Note that an alternate url is a URL to open a hosted document.
 GURL ReadUrlFromGDocOnBlockingPool(const base::FilePath& file_path) {
-  const int64 kMaxGDocSize = 4096;
-  int64 file_size = 0;
-  if (!file_util::GetFileSize(file_path, &file_size) ||
-      file_size > kMaxGDocSize) {
-    DLOG(INFO) << "File too large to be a GDoc file " << file_path.value();
-    return net::FilePathToFileURL(file_path);
-  }
-
-  JSONFileValueSerializer reader(file_path);
-  std::string error_message;
-  scoped_ptr<base::Value> root_value(reader.Deserialize(NULL, &error_message));
-  if (!root_value.get()) {
-    DLOG(INFO) << "Failed to parse " << file_path.value() << "as JSON."
-               << " error = " << error_message;
-    return net::FilePathToFileURL(file_path);
-  }
-
-  base::DictionaryValue* dictionary_value = NULL;
-  std::string edit_url_string;
-  if (!root_value->GetAsDictionary(&dictionary_value) ||
-      !dictionary_value->GetString("url", &edit_url_string)) {
-    DLOG(INFO) << "Non GDoc JSON in " << file_path.value();
-    return net::FilePathToFileURL(file_path);
-  }
-
-  return GURL(edit_url_string);
+  GURL url = drive::util::ReadUrlFromGDocFile(file_path);
+  if (url.is_empty())
+    url = net::FilePathToFileURL(file_path);
+  return url;
 }
 
 // Used to implement ViewItem().
@@ -523,7 +469,7 @@ void ContinueViewItem(Profile* profile,
 
   if (error == base::PLATFORM_FILE_OK) {
     // A directory exists at |path|. Open it with FileBrowser.
-    OpenFileBrowserImpl(path, REUSE_SAME_PATH, "open");
+    OpenFileBrowserImpl(path, "open");
   } else {
     if (!ExecuteDefaultHandler(profile, path))
       ShowWarningMessageBox(profile, path);
@@ -538,14 +484,8 @@ void CheckIfDirectoryExistsOnIOThread(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   fileapi::FileSystemURL file_system_url = file_system_context->CrackURL(url);
-  base::PlatformFileError error = base::PLATFORM_FILE_OK;
-  fileapi::FileSystemOperation* operation =
-      file_system_context->CreateFileSystemOperation(file_system_url, &error);
-  if (error != base::PLATFORM_FILE_OK) {
-    callback.Run(error);
-    return;
-  }
-  operation->DirectoryExists(file_system_url, callback);
+  file_system_context->operation_runner()->DirectoryExists(
+      file_system_url, callback);
 }
 
 // Checks if a directory exists at |url|.
@@ -566,38 +506,52 @@ void CheckIfDirectoryExists(
 }  // namespace
 
 GURL GetFileBrowserExtensionUrl() {
-  return GURL(kFileBrowserExtensionUrl);
+  return GetFileManagerUrl("/");
 }
 
 GURL GetFileBrowserUrl() {
-  return GURL(IsFileManagerNewUI() ? kBaseFileBrowserNewUIUrl :
-                                     kBaseFileBrowserUrl);
+  return GetFileManagerUrl("/main.html");
 }
 
 GURL GetMediaPlayerUrl() {
-  return GURL(kMediaPlayerUrl);
+  return GetFileManagerUrl("/mediaplayer.html");
 }
 
 GURL GetVideoPlayerUrl(const GURL& source_url) {
-  return GURL(kVideoPlayerUrl + std::string("?") + source_url.spec());
+  return GURL(GetFileManagerUrl("/video_player.html").spec() +
+              std::string("?") + source_url.spec());
+}
+
+GURL GetActionChoiceUrl(const base::FilePath& virtual_path,
+                        bool advanced_mode) {
+  std::string url = GetFileManagerUrl("/action_choice.html").spec();
+  if (advanced_mode)
+    url += "?advanced-mode";
+  url += "#/" + net::EscapeUrlEncodedData(virtual_path.value(),
+                                          false);  // Space to %20 instead of +.
+  return GURL(url);
+}
+
+GURL ConvertRelativePathToFileSystemUrl(const base::FilePath& relative_path,
+                                        const std::string& extension_id) {
+  GURL base_url = fileapi::GetFileSystemRootURI(
+      Extension::GetBaseURLFromExtensionId(extension_id),
+      fileapi::kFileSystemTypeExternal);
+  return GURL(base_url.spec() +
+              net::EscapeUrlEncodedData(relative_path.AsUTF8Unsafe(),
+                                        false));  // Space to %20 instead of +.
 }
 
 bool ConvertFileToFileSystemUrl(Profile* profile,
                                 const base::FilePath& full_file_path,
                                 const std::string& extension_id,
                                 GURL* url) {
-  GURL origin_url = Extension::GetBaseURLFromExtensionId(extension_id);
-  base::FilePath virtual_path;
+  base::FilePath relative_path;
   if (!ConvertFileToRelativeFileSystemPath(profile, extension_id,
-           full_file_path, &virtual_path)) {
+           full_file_path, &relative_path)) {
     return false;
   }
-
-  GURL base_url = fileapi::GetFileSystemRootURI(origin_url,
-      fileapi::kFileSystemTypeExternal);
-  *url = GURL(base_url.spec() +
-              net::EscapeUrlEncodedData(virtual_path.value(),
-                                        false));  // Space to %20 instead of +.
+  *url = ConvertRelativePathToFileSystemUrl(relative_path, extension_id);
   return true;
 }
 
@@ -612,7 +566,7 @@ bool ConvertFileToRelativeFileSystemPath(
   if (!service)
     return false;
 
-  // File browser APIs are ment to be used only from extension context, so the
+  // File browser APIs are meant to be used only from extension context, so the
   // extension's site is the one in whose file system context the virtual path
   // should be found.
   GURL site = service->GetSiteForExtensionId(extension_id);
@@ -721,7 +675,7 @@ string16 GetTitleFromType(ui::SelectFileDialog::Type dialog_type) {
 }
 
 void ViewRemovableDrive(const base::FilePath& path) {
-  OpenFileBrowserImpl(path, REUSE_ANY_FILE_MANAGER, "auto-open");
+  OpenFileBrowserImpl(path, "auto-open");
 }
 
 void OpenNewWindow(Profile* profile, const GURL& url) {
@@ -755,12 +709,7 @@ void OpenActionChoiceDialog(const base::FilePath& path, bool advanced_mode) {
   if (!ConvertFileToRelativeFileSystemPath(profile, kFileBrowserDomain, path,
                                            &virtual_path))
     return;
-  std::string url = kActionChoiceUrl;
-  if (advanced_mode)
-    url += "?advanced-mode";
-  url += "#/" + net::EscapeUrlEncodedData(virtual_path.value(),
-                                          false);  // Space to %20 instead of +.
-  GURL dialog_url(url);
+  GURL dialog_url = GetActionChoiceUrl(virtual_path, advanced_mode);
 
   const gfx::Size screen = ash::Shell::GetScreen()->GetPrimaryDisplay().size();
   const gfx::Rect bounds((screen.width() - kDialogWidth) / 2,
@@ -817,11 +766,7 @@ void ViewItem(const base::FilePath& path) {
 
 void ShowFileInFolder(const base::FilePath& path) {
   // This action changes the selection so we do not reuse existing tabs.
-  OpenFileBrowserImpl(path, REUSE_NEVER, "select");
-}
-
-void OpenFileBrowser() {
-  OpenFileBrowserImpl(base::FilePath(), REUSE_NEVER, "");
+  OpenFileBrowserImpl(path, "select");
 }
 
 bool ExecuteBuiltinHandler(Browser* browser, const base::FilePath& path,
@@ -844,7 +789,7 @@ bool ExecuteBuiltinHandler(Browser* browser, const base::FilePath& path,
     return true;
   }
 
-  if (IsSupportedGDocsExtension(file_extension.data())) {
+  if (drive::util::HasGDocFileExtension(path)) {
     if (drive::util::IsUnderDriveMountPoint(path)) {
       // The file is on Google Docs. Open with drive URL.
       GURL url = drive::util::FilePathToDriveURL(
@@ -862,47 +807,13 @@ bool ExecuteBuiltinHandler(Browser* browser, const base::FilePath& path,
     return true;
   }
 
-  if (!IsFileManagerPackaged()) {
-    if (internal_task_id == kFileBrowserPlayTaskId) {
-      GURL url;
-      if (!ConvertFileToFileSystemUrl(profile, path, kFileBrowserDomain, &url))
-        return false;
-      MediaPlayer* mediaplayer = MediaPlayer::GetInstance();
-      mediaplayer->PopupMediaPlayer();
-      mediaplayer->ForcePlayMediaURL(url);
-      return true;
-    }
-    if (internal_task_id == kFileBrowserWatchTaskId) {
-      GURL url;
-      if (!ConvertFileToFileSystemUrl(profile, path, kFileBrowserDomain, &url))
-        return false;
-
-      ExtensionService* service =
-        extensions::ExtensionSystem::Get(profile)->extension_service();
-      if (!service)
-        return false;
-
-      const extensions::Extension* extension =
-        service->GetExtensionById(kFileBrowserDomain, false);
-      if (!extension)
-        return false;
-
-      chrome::AppLaunchParams params(profile, extension,
-                                     extension_misc::LAUNCH_WINDOW,
-                                     NEW_FOREGROUND_TAB);
-      params.override_url = GetVideoPlayerUrl(url);
-      chrome::OpenApplication(params);
-      return true;
-    }
-  }
-
   if (IsCRXFile(file_extension.data())) {
     if (drive::util::IsUnderDriveMountPoint(path)) {
-      drive::DriveSystemService* system_service =
-          drive::DriveSystemServiceFactory::GetForProfile(profile);
-      if (!system_service)
+      drive::DriveIntegrationService* integration_service =
+          drive::DriveIntegrationServiceFactory::GetForProfile(profile);
+      if (!integration_service)
         return false;
-      system_service->file_system()->GetFileByPath(
+      integration_service->file_system()->GetFileByPath(
           drive::util::ExtractDrivePath(path),
           base::Bind(&OnCRXDownloadCallback, browser));
     } else {
@@ -928,6 +839,26 @@ bool ShouldBeOpenedWithPlugin(Profile* profile, const char* file_extension) {
   if (LowerCaseEqualsASCII(file_extension, kSwfExtension))
     return IsFlashPluginEnabled(profile);
   return false;
+}
+
+std::string GetMimeTypeForPath(const base::FilePath& file_path) {
+  const base::FilePath::StringType file_extension =
+      StringToLowerASCII(file_path.Extension());
+
+  // TODO(thorogood): Rearchitect this call so it can run on the File thread;
+  // GetMimeTypeFromFile requires this on Linux. Right now, we use
+  // Chrome-level knowledge only.
+  std::string mime_type;
+  if (file_extension.empty() ||
+      !net::GetWellKnownMimeTypeFromExtension(file_extension.substr(1),
+                                              &mime_type)) {
+    // If the file doesn't have an extension or its mime-type cannot be
+    // determined, then indicate that it has the empty mime-type. This will
+    // only be matched if the Web Intents accepts "*" or "*/*".
+    return "";
+  } else {
+    return mime_type;
+  }
 }
 
 }  // namespace file_manager_util

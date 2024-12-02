@@ -5,9 +5,9 @@
 #include <sys/socket.h>
 
 #include "base/bind.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/path_service.h"
+#include "base/posix/eintr_wrapper.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
@@ -108,7 +108,7 @@ class TestUnixSocketConnection {
     stat(socket_name_.value().c_str(), &socket_stat);
     EXPECT_TRUE(S_ISSOCK(socket_stat.st_mode));
     acceptor_.reset(new SocketAcceptor(server_listen_fd_,
-                                       worker_.message_loop_proxy()));
+                                       worker_.message_loop_proxy().get()));
     acceptor_->WaitUntilReady();
     return true;
   }

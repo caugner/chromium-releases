@@ -50,7 +50,7 @@ class BookmarkBarViewInstantExtendedTest : public BrowserWithTestWindowTest {
   }
 
  private:
-  static ProfileKeyedService* CreateTemplateURLService(
+  static BrowserContextKeyedService* CreateTemplateURLService(
       content::BrowserContext* profile) {
     return new TemplateURLService(static_cast<Profile*>(profile));
   }
@@ -74,7 +74,7 @@ TEST_F(BookmarkBarViewInstantExtendedTest, AppsShortcutVisibility) {
   // the app launcher is enabled.
   browser()->profile()->GetPrefs()->SetBoolean(
       prefs::kShowAppsShortcutInBookmarkBar, true);
-  if (apps::WasAppLauncherEnabled()) {
+  if (apps::IsAppLauncherEnabled()) {
     EXPECT_FALSE(bookmark_bar_view.apps_page_shortcut_->visible());
   } else {
     EXPECT_TRUE(bookmark_bar_view.apps_page_shortcut_->visible());

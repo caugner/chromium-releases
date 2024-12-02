@@ -3,7 +3,6 @@
 # found in the LICENSE file.
 
 import logging
-import traceback
 
 from branch_utility import BranchUtility
 from docs_server_utils import FormatKey
@@ -25,7 +24,7 @@ _STRING_CONSTANTS = {
 
 def _MakeChannelDict(channel_name):
   channel_dict = {
-    'channels': [{'name': name} for name in BranchUtility.GetAllBranchNames()],
+    'channels': [{'name': name} for name in BranchUtility.GetAllChannelNames()],
     'current': channel_name
   }
   for channel in channel_dict['channels']:
@@ -59,7 +58,8 @@ class TemplateDataSource(object):
                  compiled_fs_factory,
                  ref_resolver_factory,
                  public_template_path,
-                 private_template_path):
+                 private_template_path,
+                 base_path):
       self._branch_info = _MakeChannelDict(channel_name)
       self._api_data_source_factory = api_data_source_factory
       self._api_list_data_source_factory = api_list_data_source_factory
@@ -71,7 +71,7 @@ class TemplateDataSource(object):
       self._ref_resolver = ref_resolver_factory.Create()
       self._public_template_path = public_template_path
       self._private_template_path = private_template_path
-      self._static_resources = '/%s/static' % channel_name
+      self._static_resources = '%s/static' % base_path
 
     def _CreateTemplate(self, template_name, text):
       return Handlebar(self._ref_resolver.ResolveAllLinks(text))
@@ -119,7 +119,7 @@ class TemplateDataSource(object):
     from the TemplateDataSource with the |get| method.
     """
     template = self.GetTemplate(self._public_template_path, template_name)
-    if not template:
+    if template is None:
       return None
       # TODO error handling
     render_data = template.render({
@@ -132,6 +132,11 @@ class TemplateDataSource(object):
       'samples': self._samples_data_source,
       'static': self._static_resources,
       'apps_samples_url': url_constants.GITHUB_BASE,
+      # TODO(kalman): this is wrong, it's always getting from trunk, but meh
+      # it hardly ever shows up (only in the "cannot fetch samples" message).
+      # In fact I don't even know if it can show up anymore due the samples data
+      # being persisent. In any case, when the channel distinctions are gone
+      # this can go away, so, double meh.
       'extensions_samples_url': url_constants.EXTENSIONS_SAMPLES,
       'strings': _STRING_CONSTANTS,
       'true': True,
@@ -150,5 +155,4 @@ class TemplateDataSource(object):
       return self._cache.GetFromFile(
           '/'.join((base_path, FormatKey(template_name))))
     except FileNotFoundError as e:
-      logging.warning(traceback.format_exc())
       return None

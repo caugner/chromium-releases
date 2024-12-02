@@ -13,9 +13,9 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_path_override.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_constants.h"
 #include "content/public/test/test_browser_thread.h"
@@ -78,7 +78,7 @@ TEST(ShellIntegrationTest, GetExistingShortcutLocations) {
   base::FilePath kTemplateFilepath(kTemplateFilename);
   const char kNoDisplayDesktopFile[] = "[Desktop Entry]\nNoDisplay=true";
 
-  MessageLoop message_loop;
+  base::MessageLoop message_loop;
   content::TestBrowserThread file_thread(BrowserThread::FILE, &message_loop);
 
   // No existing shortcuts.
@@ -192,7 +192,7 @@ TEST(ShellIntegrationTest, GetExistingShortcutContents) {
   const char kTestData1[] = "a magical testing string";
   const char kTestData2[] = "a different testing string";
 
-  MessageLoop message_loop;
+  base::MessageLoop message_loop;
   content::TestBrowserThread file_thread(BrowserThread::FILE, &message_loop);
 
   // Test that it searches $XDG_DATA_HOME/applications.

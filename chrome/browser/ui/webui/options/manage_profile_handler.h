@@ -70,10 +70,6 @@ class ManageProfileHandler : public OptionsPageUIHandler {
   // ]
   void SetProfileNameAndIcon(const base::ListValue* args);
 
-  // Callback for the "deleteProfile" message. Deletes the given profile.
-  // |args| is of the form: [ {string} profileFilePath ]
-  void DeleteProfile(const base::ListValue* args);
-
 #if defined(ENABLE_SETTINGS_APP)
   // Callback for the "switchAppListProfile" message. Asks the
   // app_list_controller to change the profile registered for the AppList.
@@ -90,6 +86,11 @@ class ManageProfileHandler : public OptionsPageUIHandler {
   // the profile has shortcuts and gets the result in |OnHasProfileShortcuts()|.
   // |args| is of the form: [ {string} profileFilePath ]
   void RequestHasProfileShortcuts(const base::ListValue* args);
+
+  // Callback for the "requestSignedInText" message.
+  // Sends the text to be shown if the user is signed in, or an empty string
+  // if not. |args| is not used.
+  void RequestSignedInText(const base::ListValue* args);
 
   // Callback invoked from the profile manager indicating whether the profile
   // being edited has any desktop shortcuts.

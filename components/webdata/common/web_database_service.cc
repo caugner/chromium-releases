@@ -13,7 +13,6 @@
 
 using base::Bind;
 using base::FilePath;
-using content::BrowserThread;
 
 // Receives messages from the backend on the DB thread, posts them to
 // WebDatabaseService on the UI thread.
@@ -22,12 +21,12 @@ class WebDatabaseService::BackendDelegate :
  public:
   BackendDelegate(
       const base::WeakPtr<WebDatabaseService>& web_database_service)
-      : web_database_service_(web_database_service) {
+      : web_database_service_(web_database_service),
+        callback_thread_(base::MessageLoopProxy::current()) {
   }
 
   virtual void DBLoaded(sql::InitStatus status) OVERRIDE {
-    BrowserThread::PostTask(
-        BrowserThread::UI,
+    callback_thread_->PostTask(
         FROM_HERE,
         base::Bind(&WebDatabaseService::OnDatabaseLoadDone,
                    web_database_service_,
@@ -35,74 +34,88 @@ class WebDatabaseService::BackendDelegate :
   }
  private:
   const base::WeakPtr<WebDatabaseService> web_database_service_;
+  scoped_refptr<base::MessageLoopProxy> callback_thread_;
 };
 
 WebDatabaseService::WebDatabaseService(
-    const base::FilePath& path)
-    : path_(path),
-      weak_ptr_factory_(this) {
+    const base::FilePath& path,
+    const scoped_refptr<base::MessageLoopProxy>& ui_thread,
+    const scoped_refptr<base::MessageLoopProxy>& db_thread)
+    : base::RefCountedDeleteOnMessageLoop<WebDatabaseService>(ui_thread),
+      path_(path),
+      weak_ptr_factory_(this),
+      db_loaded_(false),
+      db_thread_(db_thread) {
   // WebDatabaseService should be instantiated on UI thread.
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(ui_thread->BelongsToCurrentThread());
   // WebDatabaseService requires DB thread if instantiated.
-  DCHECK(BrowserThread::IsWellKnownThread(BrowserThread::DB));
+  DCHECK(db_thread);
 }
 
 WebDatabaseService::~WebDatabaseService() {
 }
 
 void WebDatabaseService::AddTable(scoped_ptr<WebDatabaseTable> table) {
-  if (!wds_backend_) {
+  if (!wds_backend_.get()) {
     wds_backend_ = new WebDataServiceBackend(
-        path_, new BackendDelegate(weak_ptr_factory_.GetWeakPtr()));
+        path_, new BackendDelegate(weak_ptr_factory_.GetWeakPtr()),
+        db_thread_);
   }
   wds_backend_->AddTable(table.Pass());
 }
 
 void WebDatabaseService::LoadDatabase() {
-  DCHECK(wds_backend_);
+  DCHECK(wds_backend_.get());
 
-  BrowserThread::PostTask(
-      BrowserThread::DB,
+  db_thread_->PostTask(
       FROM_HERE,
       Bind(&WebDataServiceBackend::InitDatabase, wds_backend_));
 }
 
 void WebDatabaseService::UnloadDatabase() {
-  if (!wds_backend_)
+  db_loaded_ = false;
+  if (!wds_backend_.get())
     return;
-  BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
+  db_thread_->PostTask(FROM_HERE,
       Bind(&WebDataServiceBackend::ShutdownDatabase,
            wds_backend_, true));
 }
 
 void WebDatabaseService::ShutdownDatabase() {
-  if (!wds_backend_)
-    return;
+  db_loaded_ = false;
   weak_ptr_factory_.InvalidateWeakPtrs();
-  BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
+  loaded_callbacks_.clear();
+  error_callbacks_.clear();
+  if (!wds_backend_.get())
+    return;
+  db_thread_->PostTask(FROM_HERE,
       Bind(&WebDataServiceBackend::ShutdownDatabase,
            wds_backend_, false));
 }
 
 WebDatabase* WebDatabaseService::GetDatabaseOnDB() const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
-  if (!wds_backend_)
+  DCHECK(db_thread_->BelongsToCurrentThread());
+  if (!wds_backend_.get())
     return NULL;
   return wds_backend_->database();
+}
+
+scoped_refptr<WebDataServiceBackend> WebDatabaseService::GetBackend() const {
+  return wds_backend_;
 }
 
 void WebDatabaseService::ScheduleDBTask(
     const tracked_objects::Location& from_here,
     const WriteTask& task) {
-  if (!wds_backend_) {
+  if (!wds_backend_.get()) {
     NOTREACHED() << "Task scheduled after Shutdown()";
     return;
   }
 
   scoped_ptr<WebDataRequest> request(
-      new WebDataRequest(NULL, wds_backend_->request_manager()));
+      new WebDataRequest(NULL, wds_backend_->request_manager().get()));
 
-  BrowserThread::PostTask(BrowserThread::DB, from_here,
+  db_thread_->PostTask(from_here,
       Bind(&WebDataServiceBackend::DBWriteTaskWrapper, wds_backend_,
            task, base::Passed(&request)));
 }
@@ -114,16 +127,16 @@ WebDataServiceBase::Handle WebDatabaseService::ScheduleDBTaskWithResult(
   DCHECK(consumer);
   WebDataServiceBase::Handle handle = 0;
 
-  if (!wds_backend_) {
+  if (!wds_backend_.get()) {
     NOTREACHED() << "Task scheduled after Shutdown()";
     return handle;
   }
 
   scoped_ptr<WebDataRequest> request(
-      new WebDataRequest(consumer, wds_backend_->request_manager()));
+      new WebDataRequest(consumer, wds_backend_->request_manager().get()));
   handle = request->GetHandle();
 
-  BrowserThread::PostTask(BrowserThread::DB, from_here,
+  db_thread_->PostTask(from_here,
       Bind(&WebDataServiceBackend::DBReadTaskWrapper, wds_backend_,
            task, base::Passed(&request)));
 
@@ -131,29 +144,38 @@ WebDataServiceBase::Handle WebDatabaseService::ScheduleDBTaskWithResult(
 }
 
 void WebDatabaseService::CancelRequest(WebDataServiceBase::Handle h) {
-  if (!wds_backend_)
+  if (!wds_backend_.get())
     return;
   wds_backend_->request_manager()->CancelRequest(h);
 }
 
-void WebDatabaseService::AddObserver(WebDatabaseObserver* observer) {
-  observer_list_.AddObserver(observer);
+void WebDatabaseService::RegisterDBLoadedCallback(
+    const base::Callback<void(void)>& callback) {
+  loaded_callbacks_.push_back(callback);
 }
 
-void WebDatabaseService::RemoveObserver(WebDatabaseObserver* observer) {
-  observer_list_.RemoveObserver(observer);
+void WebDatabaseService::RegisterDBErrorCallback(
+    const base::Callback<void(sql::InitStatus)>& callback) {
+  error_callbacks_.push_back(callback);
 }
 
 void WebDatabaseService::OnDatabaseLoadDone(sql::InitStatus status) {
   if (status == sql::INIT_OK) {
-    // Notify that the database has been initialized.
-    FOR_EACH_OBSERVER(WebDatabaseObserver,
-                      observer_list_,
-                      WebDatabaseLoaded());
+    db_loaded_ = true;
+
+    for (size_t i = 0; i < loaded_callbacks_.size(); i++) {
+      if (!loaded_callbacks_[i].is_null())
+        loaded_callbacks_[i].Run();
+    }
+
+    loaded_callbacks_.clear();
   } else {
     // Notify that the database load failed.
-    FOR_EACH_OBSERVER(WebDatabaseObserver,
-                      observer_list_,
-                      WebDatabaseLoadFailed(status));
+    for (size_t i = 0; i < error_callbacks_.size(); i++) {
+      if (!error_callbacks_[i].is_null())
+        error_callbacks_[i].Run(status);
+    }
+
+    error_callbacks_.clear();
   }
 }

@@ -29,7 +29,8 @@ class MemoryMeasurement(page_measurement.PageMeasurement):
       h.Start(page, tab)
 
   def CustomizeBrowserOptions(self, options):
-    options.AppendExtraBrowserArg('--dom-automation')
+    options.AppendExtraBrowserArg('--enable-stats-collection-bindings')
+    options.AppendExtraBrowserArg('--enable-memory-benchmarking')
     # For a hard-coded set of Google pages (such as GMail), we produce custom
     # memory histograms (V8.Something_gmail) instead of the generic histograms
     # (V8.Something), if we detect that a renderer is only rendering this page
@@ -38,7 +39,11 @@ class MemoryMeasurement(page_measurement.PageMeasurement):
     # pages.
     options.AppendExtraBrowserArg('--disable-histogram-customizer')
     options.AppendExtraBrowserArg('--memory-metrics')
-    options.AppendExtraBrowserArg('--reduce-security-for-dom-automation-tests')
+
+    # Old commandline flags used for reference builds.
+    options.AppendExtraBrowserArg('--dom-automation')
+    options.AppendExtraBrowserArg(
+          '--reduce-security-for-dom-automation-tests')
 
   def CanRunForPage(self, page):
     return hasattr(page, 'stress_memory')
@@ -46,3 +51,15 @@ class MemoryMeasurement(page_measurement.PageMeasurement):
   def MeasurePage(self, page, tab, results):
     for h in self.histograms:
       h.GetValue(page, tab, results)
+
+    if tab.browser.is_profiler_active('tcmalloc-heap'):
+      # The tcmalloc_heap_profiler dumps files at regular
+      # intervals (~20 secs).
+      # This is a minor optimization to ensure it'll dump the last file when
+      # the test completes.
+      tab.ExecuteJavaScript("""
+        if (chrome && chrome.memoryBenchmarking) {
+          chrome.memoryBenchmarking.heapProfilerDump('final', 'renderer');
+          chrome.memoryBenchmarking.heapProfilerDump('final', 'browser');
+        }
+      """)

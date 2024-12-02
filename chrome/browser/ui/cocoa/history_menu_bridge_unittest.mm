@@ -7,11 +7,12 @@
 
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/common/cancelable_request.h"
+#include "chrome/browser/favicon/favicon_types.h"
 #include "chrome/browser/sessions/persistent_tab_restore_service.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #include "chrome/browser/ui/cocoa/history_menu_bridge.h"
@@ -41,7 +42,7 @@ class MockBridge : public HistoryMenuBridge {
   }
 
  private:
-  scoped_nsobject<NSMenu> menu_;
+  base::scoped_nsobject<NSMenu> menu_;
 };
 
 class HistoryMenuBridgeTest : public CocoaProfileTest {
@@ -107,7 +108,7 @@ class HistoryMenuBridgeTest : public CocoaProfileTest {
 
   void GotFaviconData(
       HistoryMenuBridge::HistoryItem* item,
-      const history::FaviconImageResult& image_result) {
+      const chrome::FaviconImageResult& image_result) {
     bridge_->GotFaviconData(item, image_result);
   }
 
@@ -351,7 +352,7 @@ TEST_F(HistoryMenuBridgeTest, GotFaviconData) {
   GetFaviconForHistoryItem(&item);
 
   // Pretend to be called back.
-  history::FaviconImageResult image_result;
+  chrome::FaviconImageResult image_result;
   image_result.image = gfx::Image::CreateFrom1xBitmap(bitmap);
   GotFaviconData(&item, image_result);
 

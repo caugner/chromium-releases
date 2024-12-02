@@ -7,16 +7,13 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "chromeos/chromeos_switches.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 
 #if defined(OS_CHROMEOS)
 #include "device/bluetooth/bluetooth_adapter_chromeos.h"
-#include "device/bluetooth/bluetooth_adapter_experimental_chromeos.h"
 #elif defined(OS_WIN)
 #include "device/bluetooth/bluetooth_adapter_win.h"
 #elif defined(OS_MACOSX)
@@ -47,7 +44,7 @@ base::LazyInstance<AdapterCallbackList> adapter_callbacks =
 
 void RunAdapterCallbacks() {
   CHECK(default_adapter.Get().get());
-  scoped_refptr<BluetoothAdapter> adapter(default_adapter.Get());
+  scoped_refptr<BluetoothAdapter> adapter(default_adapter.Get().get());
   for (std::vector<BluetoothAdapterFactory::AdapterCallback>::const_iterator
            iter = adapter_callbacks.Get().begin();
        iter != adapter_callbacks.Get().end();
@@ -77,16 +74,9 @@ bool BluetoothAdapterFactory::IsBluetoothAdapterAvailable() {
 void BluetoothAdapterFactory::GetAdapter(const AdapterCallback& callback) {
   if (!default_adapter.Get().get()) {
 #if defined(OS_CHROMEOS)
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
-        chromeos::switches::kEnableExperimentalBluetooth)) {
-      chromeos::BluetoothAdapterExperimentalChromeOS* new_adapter =
-          new chromeos::BluetoothAdapterExperimentalChromeOS();
-      default_adapter.Get() = new_adapter->weak_ptr_factory_.GetWeakPtr();
-    } else {
-      chromeos::BluetoothAdapterChromeOS* new_adapter =
-          new chromeos::BluetoothAdapterChromeOS();
-      default_adapter.Get() = new_adapter->weak_ptr_factory_.GetWeakPtr();
-    }
+    chromeos::BluetoothAdapterChromeOS* new_adapter =
+        new chromeos::BluetoothAdapterChromeOS();
+    default_adapter.Get() = new_adapter->weak_ptr_factory_.GetWeakPtr();
 #elif defined(OS_WIN)
     BluetoothAdapterWin* new_adapter = new BluetoothAdapterWin(
         base::Bind(&RunAdapterCallbacks));
@@ -100,7 +90,7 @@ void BluetoothAdapterFactory::GetAdapter(const AdapterCallback& callback) {
   }
 
   if (default_adapter.Get()->IsInitialized()) {
-    callback.Run(scoped_refptr<BluetoothAdapter>(default_adapter.Get()));
+    callback.Run(scoped_refptr<BluetoothAdapter>(default_adapter.Get().get()));
   } else {
     adapter_callbacks.Get().push_back(callback);
   }
@@ -108,7 +98,7 @@ void BluetoothAdapterFactory::GetAdapter(const AdapterCallback& callback) {
 
 // static
 scoped_refptr<BluetoothAdapter> BluetoothAdapterFactory::MaybeGetAdapter() {
-  return scoped_refptr<BluetoothAdapter>(default_adapter.Get());
+  return scoped_refptr<BluetoothAdapter>(default_adapter.Get().get());
 }
 
 }  // namespace device

@@ -8,6 +8,10 @@
 <include src="extension_list.js"></include>
 <include src="pack_extension_overlay.js"></include>
 
+<if expr="pp_ifdef('chromeos')">
+<include src="chromeos/kiosk_apps.js"></include>
+</if>
+
 // Used for observing function of the backend datasource for this page by
 // tests.
 var webuiResponded = false;
@@ -42,6 +46,8 @@ cr.define('extensions', function() {
     },
     // @inheritdoc
     doDrop: function(e) {
+      ExtensionSettings.showOverlay(null);
+
       // Only process files that look like extensions. Other files should
       // navigate the browser normally.
       if (!e.dataTransfer.files.length ||
@@ -50,7 +56,6 @@ cr.define('extensions', function() {
       }
 
       chrome.send('installDroppedFile');
-      ExtensionSettings.showOverlay(null);
       e.preventDefault();
     }
   };
@@ -87,16 +92,6 @@ cr.define('extensions', function() {
       $('dev-controls').addEventListener('webkitTransitionEnd',
           this.handleDevControlsTransitionEnd_.bind(this));
 
-      if (!cr.isChromeOS) {
-        $('unlock-button').addEventListener('click', function() {
-          chrome.send('setElevated', [true]);
-        });
-
-        $('lock-button').addEventListener('click', function() {
-          chrome.send('setElevated', [false]);
-        });
-      }
-
       // Set up the three dev mode buttons (load unpacked, pack and update).
       $('load-unpacked').addEventListener('click',
           this.handleLoadUnpackedExtension_.bind(this));
@@ -122,6 +117,19 @@ cr.define('extensions', function() {
       var extensionCommandsOverlay =
           extensions.ExtensionCommandsOverlay.getInstance();
       extensionCommandsOverlay.initializePage();
+
+      // Initialize the kiosk overlay.
+      if (cr.isChromeOS) {
+        var kioskOverlay = extensions.KioskAppsOverlay.getInstance();
+        kioskOverlay.initialize();
+
+        $('add-kiosk-app').addEventListener('click', function() {
+          ExtensionSettings.showOverlay($('kiosk-apps-page'));
+          kioskOverlay.didShowPage();
+        });
+
+        extensions.KioskDisableBailoutConfirm.getInstance().initialize();
+      }
 
       cr.ui.overlay.setupOverlay($('dropTargetOverlay'));
 
@@ -259,14 +267,12 @@ cr.define('extensions', function() {
     } else {
       pageDiv.classList.remove('profile-is-managed');
     }
-    if (extensionsData.profileIsManaged && !extensionsData.profileIsElevated) {
+    if (extensionsData.profileIsManaged) {
       pageDiv.classList.add('showing-banner');
-      pageDiv.classList.add('managed-user-locked');
       $('toggle-dev-on').disabled = true;
       marginTop += 45;
     } else {
       pageDiv.classList.remove('showing-banner');
-      pageDiv.classList.remove('managed-user-locked');
       $('toggle-dev-on').disabled = false;
     }
 

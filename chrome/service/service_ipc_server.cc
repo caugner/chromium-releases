@@ -25,9 +25,12 @@ bool ServiceIPCServer::Init() {
 
 void ServiceIPCServer::CreateChannel() {
   channel_.reset(NULL); // Tear down the existing channel, if any.
-  channel_.reset(new IPC::SyncChannel(channel_handle_,
-      IPC::Channel::MODE_NAMED_SERVER, this,
-      g_service_process->io_thread()->message_loop_proxy(), true,
+  channel_.reset(new IPC::SyncChannel(
+      channel_handle_,
+      IPC::Channel::MODE_NAMED_SERVER,
+      this,
+      g_service_process->io_thread()->message_loop_proxy().get(),
+      true,
       g_service_process->shutdown_event()));
   DCHECK(sync_message_filter_.get());
   channel_->AddFilter(sync_message_filter_.get());
@@ -89,8 +92,6 @@ bool ServiceIPCServer::OnMessageReceived(const IPC::Message& msg) {
   // again on subsequent connections.
   client_connected_ = true;
   IPC_BEGIN_MESSAGE_MAP(ServiceIPCServer, msg)
-    IPC_MESSAGE_HANDLER(ServiceMsg_EnableCloudPrintProxy,
-                        OnEnableCloudPrintProxy)
     IPC_MESSAGE_HANDLER(ServiceMsg_EnableCloudPrintProxyWithRobot,
                         OnEnableCloudPrintProxyWithRobot)
     IPC_MESSAGE_HANDLER(ServiceMsg_DisableCloudPrintProxy,
@@ -102,10 +103,6 @@ bool ServiceIPCServer::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
-}
-
-void ServiceIPCServer::OnEnableCloudPrintProxy(const std::string& lsid) {
-  g_service_process->GetCloudPrintProxy()->EnableForUser(lsid);
 }
 
 void ServiceIPCServer::OnEnableCloudPrintProxyWithRobot(

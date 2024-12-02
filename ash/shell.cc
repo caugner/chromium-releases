@@ -16,6 +16,7 @@
 #include "ash/display/display_controller.h"
 #include "ash/display/display_manager.h"
 #include "ash/display/event_transformation_handler.h"
+#include "ash/display/mirror_window_controller.h"
 #include "ash/display/mouse_cursor_event_filter.h"
 #include "ash/display/screen_position_controller.h"
 #include "ash/drag_drop/drag_drop_controller.h"
@@ -49,15 +50,15 @@
 #include "ash/wm/custom_frame_view_ash.h"
 #include "ash/wm/event_client_impl.h"
 #include "ash/wm/event_rewriter_event_filter.h"
+#include "ash/wm/lock_state_controller.h"
+#include "ash/wm/lock_state_controller_impl2.h"
 #include "ash/wm/overlay_event_filter.h"
 #include "ash/wm/power_button_controller.h"
 #include "ash/wm/property_util.h"
 #include "ash/wm/resize_shadow_controller.h"
 #include "ash/wm/root_window_layout_manager.h"
 #include "ash/wm/screen_dimmer.h"
-#include "ash/wm/session_state_controller.h"
 #include "ash/wm/session_state_controller_impl.h"
-#include "ash/wm/session_state_controller_impl2.h"
 #include "ash/wm/system_gesture_event_filter.h"
 #include "ash/wm/system_modal_container_event_filter.h"
 #include "ash/wm/system_modal_container_layout_manager.h"
@@ -99,7 +100,6 @@
 #include "ui/views/focus/focus_manager_factory.h"
 #include "ui/views/widget/native_widget_aura.h"
 #include "ui/views/widget/widget.h"
-#include "ui/views/window/dialog_delegate.h"
 
 #if !defined(OS_MACOSX)
 #include "ash/accelerators/accelerator_controller.h"
@@ -113,11 +113,11 @@
 #include "ash/display/display_error_dialog.h"
 #include "ash/display/output_configurator_animation.h"
 #include "base/chromeos/chromeos_version.h"
-#include "base/message_pump_aurax11.h"
+#include "base/message_loop/message_pump_aurax11.h"
 #include "chromeos/display/output_configurator.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/gpu_feature_type.h"
+#include "gpu/config/gpu_feature_type.h"
 #endif  // defined(OS_CHROMEOS)
 
 namespace ash {
@@ -211,6 +211,8 @@ Shell::Shell(ShellDelegate* delegate)
       simulate_modal_window_open_for_testing_(false) {
   DCHECK(delegate_.get());
   display_manager_.reset(new internal::DisplayManager);
+  mirror_window_controller_.reset(new internal::MirrorWindowController);
+
   ANNOTATE_LEAKING_OBJECT_PTR(screen_);  // see crbug.com/156466
   gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_ALTERNATE, screen_);
   if (!gfx::Screen::GetScreenByType(gfx::SCREEN_TYPE_NATIVE))
@@ -219,7 +221,7 @@ Shell::Shell(ShellDelegate* delegate)
 #if defined(OS_CHROMEOS) && defined(USE_X11)
   bool is_panel_fitting_disabled =
       content::GpuDataManager::GetInstance()->IsFeatureBlacklisted(
-          content::GPU_FEATURE_TYPE_PANEL_FITTING) ||
+          gpu::GPU_FEATURE_TYPE_PANEL_FITTING) ||
       CommandLine::ForCurrentProcess()->HasSwitch(
           ::switches::kDisablePanelFitting);
 
@@ -296,7 +298,9 @@ Shell::~Shell() {
   video_detector_.reset();
 
   power_button_controller_.reset();
-  session_state_controller_.reset();
+  lock_state_controller_.reset();
+
+  mirror_window_controller_.reset();
 
   // This also deletes all RootWindows. Note that we invoke Shutdown() on
   // DisplayController before resetting |display_controller_|, since destruction
@@ -414,18 +418,14 @@ std::vector<aura::Window*> Shell::GetContainersFromAllRootWindows(
 }
 
 // static
-bool Shell::IsLauncherPerDisplayEnabled() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  return !command_line->HasSwitch(switches::kAshDisableLauncherPerDisplay);
-}
-
-// static
 bool Shell::IsForcedMaximizeMode() {
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   return command_line->HasSwitch(switches::kForcedMaximizeMode);
 }
 
 void Shell::Init() {
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+
   delegate_->PreInit();
 #if defined(OS_CHROMEOS) && defined(USE_X11)
   output_configurator_animation_.reset(
@@ -439,6 +439,8 @@ void Shell::Init() {
     display_error_observer_.reset(new internal::DisplayErrorObserver());
     output_configurator_->AddObserver(display_error_observer_.get());
     output_configurator_->set_state_controller(display_change_observer_.get());
+    if (!command_line->HasSwitch(ash::switches::kAshDisableSoftwareMirroring))
+      output_configurator_->set_mirroring_controller(display_manager_.get());
     output_configurator_->Start();
     display_change_observer_->OnDisplayModeChanged();
   }
@@ -475,6 +477,7 @@ void Shell::Init() {
 
   screen_position_controller_.reset(new internal::ScreenPositionController);
   root_window_host_factory_.reset(delegate_->CreateRootWindowHostFactory());
+
   display_controller_->Start();
   display_controller_->InitPrimaryDisplay();
   aura::RootWindow* root_window = display_controller_->GetPrimaryRootWindow();
@@ -526,15 +529,13 @@ void Shell::Init() {
   root_window_controller->CreateSystemBackground(
       delegate_->IsFirstRunAfterBoot());
 
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-
   if (command_line->HasSwitch(ash::switches::kAshDisableNewLockAnimations))
-    session_state_controller_.reset(new SessionStateControllerImpl);
+    lock_state_controller_.reset(new SessionStateControllerImpl);
   else
-    session_state_controller_.reset(new SessionStateControllerImpl2);
+    lock_state_controller_.reset(new LockStateControllerImpl2);
   power_button_controller_.reset(new PowerButtonController(
-      session_state_controller_.get()));
-  AddShellObserver(session_state_controller_.get());
+      lock_state_controller_.get()));
+  AddShellObserver(lock_state_controller_.get());
 
   drag_drop_controller_.reset(new internal::DragDropController);
   mouse_cursor_filter_.reset(new internal::MouseCursorEventFilter());
@@ -620,9 +621,10 @@ void Shell::Init() {
   }
 }
 
-void Shell::ShowContextMenu(const gfx::Point& location_in_screen) {
+void Shell::ShowContextMenu(const gfx::Point& location_in_screen,
+                            ui::MenuSourceType source_type) {
   // No context menus if there is no session with an active user.
-  if (!session_state_delegate_->HasActiveUser())
+  if (!session_state_delegate_->NumberOfLoggedInUsers())
     return;
   // No context menus when screen is locked.
   if (session_state_delegate_->IsScreenLocked())
@@ -638,7 +640,7 @@ void Shell::ShowContextMenu(const gfx::Point& location_in_screen) {
   CHECK(rwc) << "root=" << root
              << ", location:" << location_in_screen.ToString();
   if (rwc)
-    rwc->ShowContextMenu(location_in_screen);
+    rwc->ShowContextMenu(location_in_screen, source_type);
 }
 
 void Shell::ToggleAppList(aura::Window* window) {
@@ -648,6 +650,13 @@ void Shell::ToggleAppList(aura::Window* window) {
   if (!app_list_controller_)
     app_list_controller_.reset(new internal::AppListController);
   app_list_controller_->SetVisible(!app_list_controller_->IsVisible(), window);
+}
+
+void Shell::SetDragAndDropHostOfCurrentAppList(
+    app_list::ApplicationDragAndDropHost* drag_and_drop_host) {
+  if (app_list_controller_.get())
+    app_list_controller_->SetDragAndDropHostOfCurrentAppList(
+        drag_and_drop_host);
 }
 
 bool Shell::GetAppListTargetVisibility() const {
@@ -679,8 +688,6 @@ bool Shell::IsSystemModalWindowOpen() const {
 
 views::NonClientFrameView* Shell::CreateDefaultNonClientFrameView(
     views::Widget* widget) {
-  if (views::DialogDelegate::UseNewStyle())
-    return views::DialogDelegate::CreateNewStyleFrameView(widget);
   // Use translucent-style window frames for dialogs.
   CustomFrameViewAsh* frame_view = new CustomFrameViewAsh;
   frame_view->Init(widget);
@@ -725,25 +732,17 @@ void Shell::OnLockStateChanged(bool locked) {
 }
 
 void Shell::CreateLauncher() {
-  if (IsLauncherPerDisplayEnabled()) {
-    RootWindowControllerList controllers = GetAllRootWindowControllers();
-    for (RootWindowControllerList::iterator iter = controllers.begin();
-         iter != controllers.end(); ++iter)
-      (*iter)->shelf()->CreateLauncher();
-  } else {
-    GetPrimaryRootWindowController()->shelf()->CreateLauncher();
-  }
+  RootWindowControllerList controllers = GetAllRootWindowControllers();
+  for (RootWindowControllerList::iterator iter = controllers.begin();
+       iter != controllers.end(); ++iter)
+    (*iter)->shelf()->CreateLauncher();
 }
 
 void Shell::ShowLauncher() {
-  if (IsLauncherPerDisplayEnabled()) {
-    RootWindowControllerList controllers = GetAllRootWindowControllers();
-    for (RootWindowControllerList::iterator iter = controllers.begin();
-         iter != controllers.end(); ++iter)
-      (*iter)->ShowLauncher();
-  } else {
-    GetPrimaryRootWindowController()->ShowLauncher();
-  }
+  RootWindowControllerList controllers = GetAllRootWindowControllers();
+  for (RootWindowControllerList::iterator iter = controllers.begin();
+       iter != controllers.end(); ++iter)
+    (*iter)->ShowLauncher();
 }
 
 void Shell::AddShellObserver(ShellObserver* observer) {
@@ -839,7 +838,11 @@ SystemTray* Shell::GetPrimarySystemTray() {
 
 LauncherDelegate* Shell::GetLauncherDelegate() {
   if (!launcher_delegate_) {
-    launcher_model_.reset(new LauncherModel);
+    if (!launcher_model_)
+      launcher_model_.reset(new LauncherModel);
+    // Attempt to create the Launcher. This may fail if the application is not
+    // ready to create it yet, in which case the app is responsible for calling
+    // ash::Shell::CreateLauncher() when ready.
     launcher_delegate_.reset(
         delegate_->CreateLauncherDelegate(launcher_model_.get()));
   }
@@ -856,8 +859,7 @@ void Shell::InitRootWindowForSecondaryDisplay(aura::RootWindow* root) {
   // screen.
   controller->CreateSystemBackground(false);
   InitRootWindowController(controller);
-  if (IsLauncherPerDisplayEnabled())
-    controller->InitForPrimaryDisplay();
+  controller->InitForPrimaryDisplay();
   controller->root_window_layout()->OnWindowResized();
   desktop_background_controller_->OnRootWindowAdded(root);
   high_contrast_controller_->OnRootWindowAdded(root);

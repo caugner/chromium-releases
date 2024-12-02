@@ -21,10 +21,10 @@
 #include "chrome/browser/ui/collected_cookies_infobar_delegate.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/browser/ui/views/cookie_info_view.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager_delegate.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
+#include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
@@ -45,6 +45,8 @@
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
+
+using web_modal::WebContentsModalDialogManager;
 
 namespace chrome {
 
@@ -158,10 +160,9 @@ class InfobarView : public views::View {
         width(), height() - views::kRelatedControlVerticalSpacing);
   }
 
-  virtual void ViewHierarchyChanged(bool is_add,
-                                    views::View* parent,
-                                    views::View* child) OVERRIDE {
-    if (is_add && child == this)
+  virtual void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) OVERRIDE {
+    if (details.is_add && details.child == this)
       Init();
   }
 
@@ -283,10 +284,9 @@ void CollectedCookiesViews::OnTreeViewSelectionChanged(
 ///////////////////////////////////////////////////////////////////////////////
 // CollectedCookiesViews, views::View overrides:
 
-void CollectedCookiesViews::ViewHierarchyChanged(bool is_add,
-                                                 views::View* parent,
-                                                 views::View* child) {
-  if (is_add && child == this)
+void CollectedCookiesViews::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  if (details.is_add && details.child == this)
     Init();
 }
 

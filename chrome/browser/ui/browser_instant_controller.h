@@ -13,14 +13,11 @@
 #include "chrome/browser/ui/search/instant_controller.h"
 #include "chrome/browser/ui/search/instant_unload_handler.h"
 #include "chrome/browser/ui/search/search_model_observer.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "ui/base/window_open_disposition.h"
 
 class Browser;
 struct InstantSuggestion;
 class Profile;
-class ThemeService;
 
 namespace content {
 class WebContents;
@@ -30,8 +27,7 @@ namespace gfx {
 class Rect;
 }
 
-class BrowserInstantController : public content::NotificationObserver,
-                                 public SearchModelObserver {
+class BrowserInstantController : public SearchModelObserver {
  public:
   explicit BrowserInstantController(Browser* browser);
   virtual ~BrowserInstantController();
@@ -50,7 +46,7 @@ class BrowserInstantController : public content::NotificationObserver,
 
   // Commits the current Instant, returning true on success. This is intended
   // for use from OpenCurrentURL.
-  bool OpenInstant(WindowOpenDisposition disposition);
+  bool OpenInstant(WindowOpenDisposition disposition, const GURL& url);
 
   // Returns the Profile associated with the Browser that owns this object.
   Profile* profile() const;
@@ -65,10 +61,6 @@ class BrowserInstantController : public content::NotificationObserver,
 
   // Invoked by |instant_| to autocomplete the |suggestion| into the omnibox.
   void SetInstantSuggestion(const InstantSuggestion& suggestion);
-
-  // Invoked by |instant_| to commit the omnibox's suggested text.
-  // Call-through to OmniboxEditModel::CommitSuggestedText.
-  void CommitSuggestedText(bool skip_inline_autocomplete);
 
   // Invoked by |instant_| to get the bounds that the overlay is placed at,
   // in screen coordinates.
@@ -92,9 +84,6 @@ class BrowserInstantController : public content::NotificationObserver,
   // Invoked by |browser_| when the active tab is about to be deactivated.
   void TabDeactivated(content::WebContents* contents);
 
-  // Invoked by |instant_| to update theme information for NTP.
-  void UpdateThemeInfo();
-
   // Invoked by the InstantController when it wants to open a URL.
   void OpenURL(const GURL& url,
                content::PageTransition transition,
@@ -102,6 +91,9 @@ class BrowserInstantController : public content::NotificationObserver,
 
   // Sets the stored omnibox bounds.
   void SetOmniboxBounds(const gfx::Rect& bounds);
+
+  // Notifies |instant_| to toggle voice search.
+  void ToggleVoiceSearch();
 
  private:
   // Sets the value of |instant_| based on value from profile. Invoked
@@ -111,14 +103,6 @@ class BrowserInstantController : public content::NotificationObserver,
   // Overridden from search::SearchModelObserver:
   virtual void ModelChanged(const SearchModel::State& old_state,
                             const SearchModel::State& new_state) OVERRIDE;
-
-  // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
-
-  // Helper for handling theme change.
-  void OnThemeChanged(ThemeService* theme_service);
 
   // Called when the default search provider changes. Revokes the searchbox API
   // privileges for any existing WebContents (that belong to the erstwhile
@@ -136,13 +120,7 @@ class BrowserInstantController : public content::NotificationObserver,
   InstantController instant_;
   InstantUnloadHandler instant_unload_handler_;
 
-  // Theme-related data for NTP overlay to adopt themes.
-  bool initialized_theme_info_;  // True if theme_info_ has been initialized.
-  ThemeBackgroundInfo theme_info_;
-
   PrefChangeRegistrar profile_pref_registrar_;
-
-  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserInstantController);
 };

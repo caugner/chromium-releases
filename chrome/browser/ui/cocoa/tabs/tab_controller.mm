@@ -10,13 +10,13 @@
 #include "base/mac/mac_util.h"
 #import "chrome/browser/themes/theme_properties.h"
 #import "chrome/browser/themes/theme_service.h"
-#import "chrome/browser/ui/cocoa/menu_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller_target.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
 #import "chrome/common/extensions/extension.h"
 #include "grit/generated_resources.h"
 #import "third_party/GTM/AppKit/GTMFadeTruncatingTextFieldCell.h"
+#import "ui/base/cocoa/menu_controller.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
 @implementation TabController
@@ -102,7 +102,7 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
     // Label.
     titleView_.reset([[NSTextField alloc] initWithFrame:titleFrame]);
     [titleView_ setAutoresizingMask:NSViewWidthSizable];
-    scoped_nsobject<GTMFadeTruncatingTextFieldCell> labelCell(
+    base::scoped_nsobject<GTMFadeTruncatingTextFieldCell> labelCell(
         [[GTMFadeTruncatingTextFieldCell alloc] initTextCell:@"Label"]);
     [labelCell setControlSize:NSSmallControlSize];
     CGFloat fontSize = [NSFont systemFontSizeForControlSize:NSSmallControlSize];
@@ -118,8 +118,10 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
     [closeButton_ setTarget:self];
     [closeButton_ setAction:@selector(closeTab:)];
 
-    scoped_nsobject<TabView> view([[TabView alloc] initWithFrame:
-        NSMakeRect(0, 0, 160, 25) controller:self closeButton:closeButton_]);
+    base::scoped_nsobject<TabView> view(
+        [[TabView alloc] initWithFrame:NSMakeRect(0, 0, 160, 25)
+                            controller:self
+                           closeButton:closeButton_]);
     [view setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
     [view addSubview:iconView_];
     [view addSubview:titleView_];

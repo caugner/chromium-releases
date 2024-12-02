@@ -9,14 +9,14 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/message_loop.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/base/upload_data_stream.h"
 #include "net/base/upload_file_element_reader.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/blob/blob_storage_controller.h"
+#include "webkit/browser/blob/blob_storage_controller.h"
 
 using webkit_blob::BlobData;
 using webkit_blob::BlobStorageController;
@@ -55,7 +55,7 @@ bool AreElementsEqual(const net::UploadElementReader& reader,
 }  // namespace
 
 TEST(ResourceRequestBodyTest, CreateUploadDataStreamWithoutBlob) {
-  MessageLoop message_loop;
+  base::MessageLoop message_loop;
   scoped_refptr<ResourceRequestBody> request_body = new ResourceRequestBody;
 
   const char kData[] = "123";
@@ -72,7 +72,7 @@ TEST(ResourceRequestBodyTest, CreateUploadDataStreamWithoutBlob) {
 
   scoped_ptr<net::UploadDataStream> upload(
       request_body->ResolveElementsAndCreateUploadDataStream(
-          NULL, NULL, base::MessageLoopProxy::current()));
+          NULL, NULL, base::MessageLoopProxy::current().get()));
 
   EXPECT_EQ(kIdentifier, upload->identifier());
   ASSERT_EQ(request_body->elements()->size(), upload->element_readers().size());
@@ -92,7 +92,7 @@ TEST(ResourceRequestBodyTest, CreateUploadDataStreamWithoutBlob) {
 }
 
 TEST(ResourceRequestBodyTest, ResolveBlobAndCreateUploadDataStream) {
-  MessageLoop message_loop;
+  base::MessageLoop message_loop;
   // Setup blob data for testing.
   base::Time time1, time2;
   base::Time::FromString("Tue, 15 Nov 1994, 12:45:26 GMT", &time1);
@@ -102,14 +102,14 @@ TEST(ResourceRequestBodyTest, ResolveBlobAndCreateUploadDataStream) {
   scoped_refptr<BlobData> blob_data(new BlobData());
 
   GURL blob_url0("blob://url_0");
-  blob_storage_controller.AddFinishedBlob(blob_url0, blob_data);
+  blob_storage_controller.AddFinishedBlob(blob_url0, blob_data.get());
 
   blob_data->AppendData("BlobData");
   blob_data->AppendFile(
       base::FilePath(FILE_PATH_LITERAL("BlobFile.txt")), 0, 20, time1);
 
   GURL blob_url1("blob://url_1");
-  blob_storage_controller.AddFinishedBlob(blob_url1, blob_data);
+  blob_storage_controller.AddFinishedBlob(blob_url1, blob_data.get());
 
   GURL blob_url2("blob://url_2");
   blob_storage_controller.CloneBlob(blob_url2, blob_url1);
@@ -144,7 +144,9 @@ TEST(ResourceRequestBodyTest, ResolveBlobAndCreateUploadDataStream) {
 
   scoped_ptr<net::UploadDataStream> upload(
       request_body->ResolveElementsAndCreateUploadDataStream(
-          &blob_storage_controller, NULL, base::MessageLoopProxy::current()));
+          &blob_storage_controller,
+          NULL,
+          base::MessageLoopProxy::current().get()));
 
   ASSERT_EQ(2U, upload->element_readers().size());
   EXPECT_TRUE(AreElementsEqual(*upload->element_readers()[0], upload_element1));
@@ -155,7 +157,7 @@ TEST(ResourceRequestBodyTest, ResolveBlobAndCreateUploadDataStream) {
   request_body->AppendBlob(blob_url0);
 
   upload.reset(request_body->ResolveElementsAndCreateUploadDataStream(
-      &blob_storage_controller, NULL, base::MessageLoopProxy::current()));
+      &blob_storage_controller, NULL, base::MessageLoopProxy::current().get()));
   ASSERT_EQ(0U, upload->element_readers().size());
 
   // Test having only one blob reference.
@@ -163,7 +165,7 @@ TEST(ResourceRequestBodyTest, ResolveBlobAndCreateUploadDataStream) {
   request_body->AppendBlob(blob_url1);
 
   upload.reset(request_body->ResolveElementsAndCreateUploadDataStream(
-      &blob_storage_controller, NULL, base::MessageLoopProxy::current()));
+      &blob_storage_controller, NULL, base::MessageLoopProxy::current().get()));
   ASSERT_EQ(2U, upload->element_readers().size());
   EXPECT_TRUE(AreElementsEqual(*upload->element_readers()[0], blob_element1));
   EXPECT_TRUE(AreElementsEqual(*upload->element_readers()[1], blob_element2));
@@ -178,7 +180,7 @@ TEST(ResourceRequestBodyTest, ResolveBlobAndCreateUploadDataStream) {
                                 upload_element2.expected_modification_time());
 
   upload.reset(request_body->ResolveElementsAndCreateUploadDataStream(
-      &blob_storage_controller, NULL, base::MessageLoopProxy::current()));
+      &blob_storage_controller, NULL, base::MessageLoopProxy::current().get()));
   ASSERT_EQ(4U, upload->element_readers().size());
   EXPECT_TRUE(AreElementsEqual(*upload->element_readers()[0], blob_element1));
   EXPECT_TRUE(AreElementsEqual(*upload->element_readers()[1], blob_element2));
@@ -195,7 +197,7 @@ TEST(ResourceRequestBodyTest, ResolveBlobAndCreateUploadDataStream) {
   request_body->AppendBlob(blob_url1);
 
   upload.reset(request_body->ResolveElementsAndCreateUploadDataStream(
-      &blob_storage_controller, NULL, base::MessageLoopProxy::current()));
+      &blob_storage_controller, NULL, base::MessageLoopProxy::current().get()));
   ASSERT_EQ(4U, upload->element_readers().size());
   EXPECT_TRUE(AreElementsEqual(*upload->element_readers()[0], upload_element1));
   EXPECT_TRUE(AreElementsEqual(*upload->element_readers()[1], upload_element2));
@@ -212,7 +214,7 @@ TEST(ResourceRequestBodyTest, ResolveBlobAndCreateUploadDataStream) {
                                 upload_element2.expected_modification_time());
 
   upload.reset(request_body->ResolveElementsAndCreateUploadDataStream(
-      &blob_storage_controller, NULL, base::MessageLoopProxy::current()));
+      &blob_storage_controller, NULL, base::MessageLoopProxy::current().get()));
   ASSERT_EQ(4U, upload->element_readers().size());
   EXPECT_TRUE(AreElementsEqual(*upload->element_readers()[0], upload_element1));
   EXPECT_TRUE(AreElementsEqual(*upload->element_readers()[1], blob_element1));
@@ -231,7 +233,7 @@ TEST(ResourceRequestBodyTest, ResolveBlobAndCreateUploadDataStream) {
                                 upload_element2.expected_modification_time());
 
   upload.reset(request_body->ResolveElementsAndCreateUploadDataStream(
-      &blob_storage_controller, NULL, base::MessageLoopProxy::current()));
+      &blob_storage_controller, NULL, base::MessageLoopProxy::current().get()));
   ASSERT_EQ(8U, upload->element_readers().size());
   EXPECT_TRUE(AreElementsEqual(*upload->element_readers()[0], blob_element1));
   EXPECT_TRUE(AreElementsEqual(*upload->element_readers()[1], blob_element2));

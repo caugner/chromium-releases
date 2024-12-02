@@ -12,7 +12,6 @@
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/interstitial_page_delegate.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
 #include "net/cert/cert_status_flags.h"
@@ -89,16 +88,6 @@ class MockInterstitialPageDelegate : public content::InterstitialPageDelegate {
 
 class CaptivePortalTabReloaderTest : public ChromeRenderViewHostTestHarness {
  public:
-  CaptivePortalTabReloaderTest()
-      : ui_thread_(content::BrowserThread::UI, &message_loop_),
-        file_user_blocking_thread_(content::BrowserThread::FILE_USER_BLOCKING,
-                                   &message_loop_),
-        io_thread_(content::BrowserThread::IO, &message_loop_) {
-  }
-
-  virtual ~CaptivePortalTabReloaderTest() {
-  }
-
   // testing::Test:
   virtual void SetUp() OVERRIDE {
     ChromeRenderViewHostTestHarness::SetUp();
@@ -118,10 +107,6 @@ class CaptivePortalTabReloaderTest : public ChromeRenderViewHostTestHarness {
   TestCaptivePortalTabReloader& tab_reloader() { return *tab_reloader_.get(); }
 
  private:
-  content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread file_user_blocking_thread_;
-  content::TestBrowserThread io_thread_;
-
   scoped_ptr<TestCaptivePortalTabReloader> tab_reloader_;
 };
 
@@ -135,7 +120,7 @@ TEST_F(CaptivePortalTabReloaderTest, InternetConnected) {
   EXPECT_TRUE(tab_reloader().TimerRunning());
 
   EXPECT_CALL(tab_reloader(), CheckForCaptivePortal()).Times(1);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_FALSE(tab_reloader().TimerRunning());
   EXPECT_EQ(CaptivePortalTabReloader::STATE_MAYBE_BROKEN_BY_PORTAL,
             tab_reloader().state());
@@ -183,7 +168,7 @@ TEST_F(CaptivePortalTabReloaderTest, NoResponse) {
   EXPECT_TRUE(tab_reloader().TimerRunning());
 
   EXPECT_CALL(tab_reloader(), CheckForCaptivePortal()).Times(1);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_FALSE(tab_reloader().TimerRunning());
   EXPECT_EQ(CaptivePortalTabReloader::STATE_MAYBE_BROKEN_BY_PORTAL,
             tab_reloader().state());
@@ -224,7 +209,7 @@ TEST_F(CaptivePortalTabReloaderTest, Login) {
   tab_reloader().OnLoadStart(true);
 
   EXPECT_CALL(tab_reloader(), CheckForCaptivePortal()).Times(1);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_FALSE(tab_reloader().TimerRunning());
   EXPECT_EQ(CaptivePortalTabReloader::STATE_MAYBE_BROKEN_BY_PORTAL,
             tab_reloader().state());
@@ -250,7 +235,7 @@ TEST_F(CaptivePortalTabReloaderTest, Login) {
             tab_reloader().state());
 
   EXPECT_CALL(tab_reloader(), ReloadTab()).Times(1);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(CaptivePortalTabReloader::STATE_NONE, tab_reloader().state());
 }
 
@@ -260,7 +245,7 @@ TEST_F(CaptivePortalTabReloaderTest, LoginLate) {
   tab_reloader().OnLoadStart(true);
 
   EXPECT_CALL(tab_reloader(), CheckForCaptivePortal()).Times(1);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_FALSE(tab_reloader().TimerRunning());
   EXPECT_EQ(CaptivePortalTabReloader::STATE_MAYBE_BROKEN_BY_PORTAL,
             tab_reloader().state());
@@ -376,7 +361,7 @@ TEST_F(CaptivePortalTabReloaderTest, SSLProtocolErrorAlreadyLoggedIn) {
   // The error page commits, which should trigger a reload.
   EXPECT_CALL(tab_reloader(), ReloadTab()).Times(1);
   tab_reloader().OnLoadCommitted(net::ERR_SSL_PROTOCOL_ERROR);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(CaptivePortalTabReloader::STATE_NONE, tab_reloader().state());
 }
 
@@ -387,7 +372,7 @@ TEST_F(CaptivePortalTabReloaderTest, AlreadyLoggedIn) {
   tab_reloader().OnLoadStart(true);
 
   EXPECT_CALL(tab_reloader(), CheckForCaptivePortal()).Times(1);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_FALSE(tab_reloader().TimerRunning());
   EXPECT_EQ(CaptivePortalTabReloader::STATE_MAYBE_BROKEN_BY_PORTAL,
             tab_reloader().state());
@@ -405,7 +390,7 @@ TEST_F(CaptivePortalTabReloaderTest, AlreadyLoggedIn) {
             tab_reloader().state());
 
   EXPECT_CALL(tab_reloader(), ReloadTab()).Times(1);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(CaptivePortalTabReloader::STATE_NONE, tab_reloader().state());
 }
 
@@ -429,7 +414,7 @@ TEST_F(CaptivePortalTabReloaderTest, AlreadyLoggedInBeforeTimerTriggers) {
             tab_reloader().state());
 
   EXPECT_CALL(tab_reloader(), ReloadTab()).Times(1);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(CaptivePortalTabReloader::STATE_NONE, tab_reloader().state());
 }
 
@@ -453,7 +438,7 @@ TEST_F(CaptivePortalTabReloaderTest, LoginWhileTimerRunning) {
             tab_reloader().state());
 
   EXPECT_CALL(tab_reloader(), ReloadTab()).Times(1);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(CaptivePortalTabReloader::STATE_NONE, tab_reloader().state());
 }
 
@@ -475,7 +460,7 @@ TEST_F(CaptivePortalTabReloaderTest, BehindPortalResultWhileTimerRunning) {
 
   // The rest proceeds as normal.
   EXPECT_CALL(tab_reloader(), CheckForCaptivePortal()).Times(1);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(CaptivePortalTabReloader::STATE_MAYBE_BROKEN_BY_PORTAL,
             tab_reloader().state());
 
@@ -500,7 +485,7 @@ TEST_F(CaptivePortalTabReloaderTest, BehindPortalResultWhileTimerRunning) {
             tab_reloader().state());
 
   EXPECT_CALL(tab_reloader(), ReloadTab()).Times(1);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(CaptivePortalTabReloader::STATE_NONE, tab_reloader().state());
 }
 
@@ -559,7 +544,7 @@ TEST_F(CaptivePortalTabReloaderTest, SSLCertErrorLogin) {
 TEST_F(CaptivePortalTabReloaderTest, HttpToHttpsRedirectInternetConnected) {
   tab_reloader().OnLoadStart(false);
   // There should be no captive portal check pending.
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   // HTTP to HTTPS redirect.
   tab_reloader().OnRedirect(true);
@@ -568,7 +553,7 @@ TEST_F(CaptivePortalTabReloaderTest, HttpToHttpsRedirectInternetConnected) {
   EXPECT_TRUE(tab_reloader().TimerRunning());
 
   EXPECT_CALL(tab_reloader(), CheckForCaptivePortal()).Times(1);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_FALSE(tab_reloader().TimerRunning());
   EXPECT_EQ(CaptivePortalTabReloader::STATE_MAYBE_BROKEN_BY_PORTAL,
             tab_reloader().state());
@@ -588,7 +573,7 @@ TEST_F(CaptivePortalTabReloaderTest, HttpToHttpsRedirectInternetConnected) {
 TEST_F(CaptivePortalTabReloaderTest, HttpToHttpsRedirectLogin) {
   tab_reloader().OnLoadStart(false);
   // There should be no captive portal check pending.
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   // HTTP to HTTPS redirect.
   tab_reloader().OnRedirect(true);
@@ -596,7 +581,7 @@ TEST_F(CaptivePortalTabReloaderTest, HttpToHttpsRedirectLogin) {
             tab_reloader().state());
 
   EXPECT_CALL(tab_reloader(), CheckForCaptivePortal()).Times(1);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_FALSE(tab_reloader().TimerRunning());
   EXPECT_EQ(CaptivePortalTabReloader::STATE_MAYBE_BROKEN_BY_PORTAL,
             tab_reloader().state());
@@ -622,7 +607,7 @@ TEST_F(CaptivePortalTabReloaderTest, HttpToHttpsRedirectLogin) {
             tab_reloader().state());
 
   EXPECT_CALL(tab_reloader(), ReloadTab()).Times(1);
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_EQ(CaptivePortalTabReloader::STATE_NONE, tab_reloader().state());
 }
 
@@ -638,7 +623,7 @@ TEST_F(CaptivePortalTabReloaderTest, HttpsToHttpRedirect) {
   EXPECT_FALSE(tab_reloader().TimerRunning());
 
   // There should be no captive portal check pending after the redirect.
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   // Logging in shouldn't do anything.
   tab_reloader().OnCaptivePortalResults(RESULT_BEHIND_CAPTIVE_PORTAL,
@@ -657,7 +642,7 @@ TEST_F(CaptivePortalTabReloaderTest, HttpsToHttpsRedirect) {
             tab_reloader().state());
   EXPECT_FALSE(tab_reloader().TimerRunning());
   // Nothing should happen.
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 }
 
 // Check that an HTTPS to HTTP to HTTPS redirect results in no timer running.
@@ -675,7 +660,7 @@ TEST_F(CaptivePortalTabReloaderTest, HttpsToHttpToHttpsRedirect) {
             tab_reloader().state());
   EXPECT_FALSE(tab_reloader().TimerRunning());
   // Nothing should happen.
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 }
 
 // Check that an HTTP to HTTP redirect results in the timer not running.
@@ -688,7 +673,7 @@ TEST_F(CaptivePortalTabReloaderTest, HttpToHttpRedirect) {
   EXPECT_FALSE(tab_reloader().TimerRunning());
 
   // There should be no captive portal check pending after the redirect.
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 
   // Logging in shouldn't do anything.
   tab_reloader().OnCaptivePortalResults(RESULT_BEHIND_CAPTIVE_PORTAL,

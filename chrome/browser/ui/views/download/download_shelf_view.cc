@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/logging.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/themes/theme_properties.h"
@@ -303,12 +303,11 @@ void DownloadShelfView::Layout() {
   }
 }
 
-void DownloadShelfView::ViewHierarchyChanged(bool is_add,
-                                             View* parent,
-                                             View* child) {
-  View::ViewHierarchyChanged(is_add, parent, child);
+void DownloadShelfView::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  View::ViewHierarchyChanged(details);
 
-  if (is_add && (child == this)) {
+  if (details.is_add && (details.child == this)) {
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     arrow_image_ = new views::ImageView();
     arrow_image_->SetImage(rb.GetImageSkiaNamed(IDR_DOWNLOADS_FAVICON));
@@ -404,7 +403,7 @@ void DownloadShelfView::DoShow() {
 void DownloadShelfView::DoClose(CloseReason reason) {
   int num_in_progress = 0;
   for (size_t i = 0; i < download_views_.size(); ++i) {
-    if (download_views_[i]->download()->IsInProgress())
+    if (download_views_[i]->download()->GetState() == DownloadItem::IN_PROGRESS)
       ++num_in_progress;
   }
   download_util::RecordShelfClose(download_views_.size(),
@@ -427,9 +426,10 @@ void DownloadShelfView::Closed() {
   size_t i = 0;
   while (i < download_views_.size()) {
     DownloadItem* download = download_views_[i]->download();
-    bool is_transfer_done = download->IsComplete() ||
-                            download->IsCancelled() ||
-                            download->IsInterrupted();
+    DownloadItem::DownloadState state = download->GetState();
+    bool is_transfer_done = state == DownloadItem::COMPLETE ||
+                            state == DownloadItem::CANCELLED ||
+                            state == DownloadItem::INTERRUPTED;
     if (is_transfer_done && !download->IsDangerous()) {
       RemoveDownloadView(download_views_[i]);
     } else {

@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -219,7 +219,7 @@ IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerTest, InstallFromHostedApp) {
                   .Set("web_url", kInstallUrl.spec())))
           .Set("manifest_version", 2))
       .Build();
-  ASSERT_TRUE(hosted_app);
+  ASSERT_TRUE(hosted_app.get());
 
   ExtensionService* extension_service =
       extensions::ExtensionSystem::Get(browser()->profile())->
@@ -357,8 +357,8 @@ IN_PROC_BROWSER_TEST_F(CommandLineWebstoreInstall, LimitedAccept) {
   command_line->AppendSwitchASCII(
       switches::kLimitedInstallFromWebstore, "2");
   helper.LimitedInstallFromWebstore(*command_line, browser()->profile(),
-      MessageLoop::QuitWhenIdleClosure());
-  MessageLoop::current()->Run();
+      base::MessageLoop::QuitWhenIdleClosure());
+  base::MessageLoop::current()->Run();
 
   EXPECT_TRUE(saw_install());
   EXPECT_EQ(0, browser_open_count());

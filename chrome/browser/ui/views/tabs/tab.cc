@@ -8,7 +8,7 @@
 
 #include "base/command_line.h"
 #include "base/debug/alias.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/browser.h"
@@ -432,7 +432,8 @@ Tab::ImageCacheEntry::~ImageCacheEntry() {}
 // Tab, statics:
 
 // static
-const char Tab::kViewClassName[] = "BrowserTab";
+const char Tab::kViewClassName[] = "Tab";
+
 // static
 Tab::TabImage Tab::tab_alpha_ = {0};
 Tab::TabImage Tab::tab_active_ = {0};
@@ -716,9 +717,10 @@ void Tab::ButtonPressed(views::Button* sender, const ui::Event& event) {
 // Tab, views::ContextMenuController overrides:
 
 void Tab::ShowContextMenuForView(views::View* source,
-                                     const gfx::Point& point) {
+                                 const gfx::Point& point,
+                                 ui::MenuSourceType source_type) {
   if (controller() && !closing())
-    controller()->ShowContextMenuForTab(this, point);
+    controller()->ShowContextMenuForTab(this, point, source_type);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -866,7 +868,7 @@ void Tab::OnThemeChanged() {
   LoadTabImages();
 }
 
-std::string Tab::GetClassName() const {
+const char* Tab::GetClassName() const {
   return kViewClassName;
 }
 
@@ -1107,18 +1109,23 @@ void Tab::PaintTab(gfx::Canvas* canvas) {
 }
 
 void Tab::PaintImmersiveTab(gfx::Canvas* canvas) {
+  // Use transparency for the draw-attention animation.
+  int alpha = (tab_animation_ && tab_animation_->is_animating())
+                  ? static_cast<int>(GetThrobValue() * 255)
+                  : 255;
+
   // Draw a gray rectangle to represent the tab. This works for mini-tabs as
   // well as regular ones. The active tab has a brigher bar.
   SkColor color =
       IsActive() ? kImmersiveActiveTabColor : kImmersiveInactiveTabColor;
   gfx::Rect bar_rect = GetImmersiveBarRect();
-  canvas->FillRect(bar_rect, color);
+  canvas->FillRect(bar_rect, SkColorSetA(color, alpha));
 
   // Paint network activity indicator.
   // TODO(jamescook): Replace this placeholder animation with a real one.
   // For now, let's go with a Cylon eye effect, but in blue.
   if (data().network_state != TabRendererData::NETWORK_STATE_NONE) {
-    const SkColor kEyeColor = SkColorSetRGB(71, 138, 217);
+    const SkColor kEyeColor = SkColorSetARGB(alpha, 71, 138, 217);
     int eye_width = bar_rect.width() / 3;
     int eye_offset = bar_rect.width() * immersive_loading_step_ /
         kImmersiveLoadingStepCount;

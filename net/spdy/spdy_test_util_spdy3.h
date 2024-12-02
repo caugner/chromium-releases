@@ -25,173 +25,13 @@ namespace net {
 
 namespace test_spdy3 {
 
-// Constructs a HeaderBlock for the given URL.
-scoped_ptr<SpdyHeaderBlock> ConstructGetHeaderBlock(base::StringPiece url);
-
-// Constructs a HeaderBlock for a POST request for the given URL.
-scoped_ptr<SpdyHeaderBlock> ConstructPostHeaderBlock(base::StringPiece url,
-                                                     int64 content_length);
-
-// Construct a SPDY frame. |spdy_version| must be kSpdyVersion3 or
-// kSpdyVersion4.
-//
-// TODO(akalin): Move this to a common area once the SpdyHeaderInfo
-// struct is shared between the SPDY2 and SPDY3 tests.
-SpdyFrame* ConstructSpdyFrameWithVersion(int spdy_version,
-                                         const SpdyHeaderInfo& header_info,
-                                         scoped_ptr<SpdyHeaderBlock> headers);
-
-// Construct a SPDY frame.
-SpdyFrame* ConstructSpdyFrame(const SpdyHeaderInfo& header_info,
-                              scoped_ptr<SpdyHeaderBlock> headers);
-
-// Construct a SPDY frame.
-// |extra_headers| are the extra header-value pairs, which typically
-// will vary the most between calls.
-// |tail| is any (relatively constant) header-value pairs to add.
-// Returns a SpdyFrame.
-SpdyFrame* ConstructSpdyFrame(const SpdyHeaderInfo& header_info,
-                              const char* const extra_headers[],
-                              int extra_header_count,
-                              const char* const tail[],
-                              int tail_header_count);
-
-// Construct a SPDY control frame. |spdy_version| must be
-// kSpdyVersion3 or kSpdyVersion4.
-//
-// TODO(akalin): Move this to a common area once
-// ConstructSpdyFrameWithVersion() is also moved.
-SpdyFrame* ConstructSpdyControlFrameWithVersion(
-    int spdy_version,
-    const char* const extra_headers[],
-    int extra_header_count,
-    bool compressed,
-    SpdyStreamId stream_id,
-    RequestPriority request_priority,
-    SpdyFrameType type,
-    SpdyControlFlags flags,
-    const char* const* kHeaders,
-    int kHeadersSize,
-    SpdyStreamId associated_stream_id);
-
-// Construct a generic SPDY control frame.
-SpdyFrame* ConstructSpdyControlFrame(const char* const extra_headers[],
-                                     int extra_header_count,
-                                     bool compressed,
-                                     int stream_id,
-                                     RequestPriority request_priority,
-                                     SpdyFrameType type,
-                                     SpdyControlFlags flags,
-                                     const char* const* kHeaders,
-                                     int kHeadersSize);
-SpdyFrame* ConstructSpdyControlFrame(const char* const extra_headers[],
-                                     int extra_header_count,
-                                     bool compressed,
-                                     SpdyStreamId stream_id,
-                                     RequestPriority request_priority,
-                                     SpdyFrameType type,
-                                     SpdyControlFlags flags,
-                                     const char* const* kHeaders,
-                                     int kHeadersSize,
-                                     SpdyStreamId associated_stream_id);
-
-// Construct an expected SPDY reply string.
-// |extra_headers| are the extra header-value pairs, which typically
-// will vary the most between calls.
-// |buffer| is the buffer we're filling in.
-// Returns the number of bytes written into |buffer|.
-int ConstructSpdyReplyString(const char* const extra_headers[],
-                             int extra_header_count,
-                             char* buffer,
-                             int buffer_length);
-
-// Construct an expected SPDY SETTINGS frame.
-// |settings| are the settings to set.
-// Returns the constructed frame.  The caller takes ownership of the frame.
-SpdyFrame* ConstructSpdySettings(const SettingsMap& settings);
-
-// Construct an expected SPDY CREDENTIAL frame.
-// |credential| is the credential to send.
-// Returns the constructed frame.  The caller takes ownership of the frame.
-SpdyFrame* ConstructSpdyCredential(const SpdyCredential& credential);
-
-// Construct a SPDY PING frame.
-// Returns the constructed frame.  The caller takes ownership of the frame.
-SpdyFrame* ConstructSpdyPing(uint32 ping_id);
-
-// Construct a SPDY GOAWAY frame with last_good_stream_id = 0.
-// Returns the constructed frame.  The caller takes ownership of the frame.
-SpdyFrame* ConstructSpdyGoAway();
-
-// Construct a SPDY GOAWAY frame with the specified last_good_stream_id.
-// Returns the constructed frame.  The caller takes ownership of the frame.
-SpdyFrame* ConstructSpdyGoAway(SpdyStreamId last_good_stream_id);
-
-// Construct a SPDY WINDOW_UPDATE frame.
-// Returns the constructed frame.  The caller takes ownership of the frame.
-SpdyFrame* ConstructSpdyWindowUpdate(SpdyStreamId, uint32 delta_window_size);
-
-// Construct a SPDY RST_STREAM frame.
-// Returns the constructed frame.  The caller takes ownership of the frame.
-SpdyFrame* ConstructSpdyRstStream(SpdyStreamId stream_id,
-                                  SpdyRstStreamStatus status);
-
-// Construct a single SPDY header entry, for validation.
-// |extra_headers| are the extra header-value pairs.
-// |buffer| is the buffer we're filling in.
-// |index| is the index of the header we want.
-// Returns the number of bytes written into |buffer|.
-int ConstructSpdyHeader(const char* const extra_headers[],
-                        int extra_header_count,
-                        char* buffer,
-                        int buffer_length,
-                        int index);
-
-// Constructs a standard SPDY GET SYN frame, optionally compressed
-// for the url |url|.
-// |extra_headers| are the extra header-value pairs, which typically
-// will vary the most between calls.
-// Returns a SpdyFrame.
-SpdyFrame* ConstructSpdyGet(const char* const url,
-                            bool compressed,
-                            SpdyStreamId stream_id,
-                            RequestPriority request_priority);
-
-// Constructs a standard SPDY GET SYN frame, optionally compressed.
-// |extra_headers| are the extra header-value pairs, which typically
-// will vary the most between calls.
-// Returns a SpdyFrame.
-SpdyFrame* ConstructSpdyGet(const char* const extra_headers[],
-                            int extra_header_count,
-                            bool compressed,
-                            int stream_id,
-                            RequestPriority request_priority);
-
-// Constructs a standard SPDY GET SYN frame, optionally compressed.
-// |extra_headers| are the extra header-value pairs, which typically
-// will vary the most between calls.  If |direct| is false, the
-// the full url will be used instead of simply the path.
-// Returns a SpdyFrame.
-SpdyFrame* ConstructSpdyGet(const char* const extra_headers[],
-                            int extra_header_count,
-                            bool compressed,
-                            int stream_id,
-                            RequestPriority request_priority,
-                            bool direct);
-
-// Constructs a standard SPDY SYN_STREAM frame for a CONNECT request.
-SpdyFrame* ConstructSpdyConnect(const char* const extra_headers[],
-                                int extra_header_count,
-                                int stream_id);
+// Can't find a function you're looking for?  ttuttle is migrating functions
+// from here into methods in the SpdyTestUtil class in spdy_test_common.h.
 
 // Constructs a standard SPDY push SYN frame.
 // |extra_headers| are the extra header-value pairs, which typically
 // will vary the most between calls.
 // Returns a SpdyFrame.
-SpdyFrame* ConstructSpdyPush(const char* const extra_headers[],
-                             int extra_header_count,
-                             int stream_id,
-                             int associated_stream_id);
 SpdyFrame* ConstructSpdyPush(const char* const extra_headers[],
                              int extra_header_count,
                              int stream_id,
@@ -204,9 +44,6 @@ SpdyFrame* ConstructSpdyPush(const char* const extra_headers[],
                              const char* url,
                              const char* status,
                              const char* location);
-SpdyFrame* ConstructSpdyPush(int stream_id,
-                             int associated_stream_id,
-                             const char* url);
 
 SpdyFrame* ConstructSpdyPushHeaders(int stream_id,
                                     const char* const extra_headers[],
@@ -250,7 +87,7 @@ SpdyFrame* ConstructSpdyPost(const char* url,
                              int extra_header_count);
 
 // Constructs a chunked transfer SPDY POST SYN frame.
-// |spdy_version| must be kSpdyVersion3 or kSpdyVersion4.
+// |spdy_version| must be SPDY3 or SPDY4.
 // |extra_headers| are the extra header-value pairs, which typically
 // will vary the most between calls.
 // Returns a SpdyFrame.
@@ -258,7 +95,7 @@ SpdyFrame* ConstructSpdyPost(const char* url,
 // TODO(akalin): Move this to a common area once
 // ConstructSpdyControlFrame() is also moved.
 SpdyFrame* ConstructChunkedSpdyPostWithVersion(
-    int spdy_version,
+    SpdyMajorVersion spdy_version,
     const char* const extra_headers[],
     int extra_header_count);
 
@@ -270,7 +107,7 @@ SpdyFrame* ConstructChunkedSpdyPost(const char* const extra_headers[],
                                     int extra_header_count);
 
 // Constructs a standard SPDY SYN_REPLY frame to match the SPDY POST.
-// |spdy_version| must be kSpdyVersion3 or kSpdyVersion4.
+// |spdy_version| must be SPDY3 or SPDY4.
 // |extra_headers| are the extra header-value pairs, which typically
 // will vary the most between calls.
 // Returns a SpdyFrame.
@@ -278,7 +115,7 @@ SpdyFrame* ConstructChunkedSpdyPost(const char* const extra_headers[],
 // TODO(akalin): Move this to a common area once
 // ConstructSpdyControlFrame() is also moved.
 SpdyFrame* ConstructSpdyPostSynReplyWithVersion(
-    int spdy_version,
+    SpdyMajorVersion spdy_version,
     const char* const extra_headers[],
     int extra_header_count);
 

@@ -9,23 +9,31 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
+#include "base/i18n/icu_string_conversions.h"
+#include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
-#include "base/message_loop_proxy.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/drive/drive.pb.h"
-#include "chrome/browser/chromeos/drive/drive_system_service.h"
+#include "chrome/browser/chromeos/drive/drive_integration_service.h"
 #include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/drive/file_write_helper.h"
+#include "chrome/browser/chromeos/drive/job_list.h"
+#include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/url_constants.h"
+#include "chromeos/chromeos_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/escape.h"
-#include "webkit/fileapi/file_system_url.h"
+#include "webkit/browser/fileapi/file_system_url.h"
 
 using content::BrowserThread;
 
@@ -34,15 +42,13 @@ namespace util {
 
 namespace {
 
-const char kDriveSpecialRootPath[] = "/special";
-
 const char kDriveMountPointPath[] = "/special/drive";
 
-const char kDriveMyDriveMountPointPath[] = "/special/drive/root";
+const base::FilePath::CharType kDriveMyDriveMountPointPath[] =
+    FILE_PATH_LITERAL("/special/drive/root");
 
-const base::FilePath::CharType* kDriveMountPointPathComponents[] = {
-  "/", "special", "drive"
-};
+const base::FilePath::CharType kDriveMyDriveRootPath[] =
+    FILE_PATH_LITERAL("drive/root");
 
 const base::FilePath::CharType kFileCacheVersionDir[] =
     FILE_PATH_LITERAL("v1");
@@ -50,42 +56,80 @@ const base::FilePath::CharType kFileCacheVersionDir[] =
 const char kSlash[] = "/";
 const char kEscapedSlash[] = "\xE2\x88\x95";
 
-const int kReadOnlyFilePermissions = base::PLATFORM_FILE_OPEN |
-                                     base::PLATFORM_FILE_READ |
-                                     base::PLATFORM_FILE_EXCLUSIVE_READ |
-                                     base::PLATFORM_FILE_ASYNC;
+const base::FilePath& GetDriveMyDriveMountPointPath() {
+  CR_DEFINE_STATIC_LOCAL(base::FilePath, drive_mydrive_mount_path,
+      (kDriveMyDriveMountPointPath));
+  return drive_mydrive_mount_path;
+}
 
 FileSystemInterface* GetFileSystem(Profile* profile) {
-  DriveSystemService* system_service =
-      DriveSystemServiceFactory::GetForProfile(profile);
-  return system_service ? system_service->file_system() : NULL;
+  DriveIntegrationService* integration_service =
+      DriveIntegrationServiceFactory::GetForProfile(profile);
+  return integration_service ? integration_service->file_system() : NULL;
 }
 
 FileWriteHelper* GetFileWriteHelper(Profile* profile) {
-  DriveSystemService* system_service =
-      DriveSystemServiceFactory::GetForProfile(profile);
-  return system_service ? system_service->file_write_helper() : NULL;
+  DriveIntegrationService* integration_service =
+      DriveIntegrationServiceFactory::GetForProfile(profile);
+  return integration_service ? integration_service->file_write_helper() : NULL;
+}
+
+std::string ReadStringFromGDocFile(const base::FilePath& file_path,
+                                   const std::string& key) {
+  const int64 kMaxGDocSize = 4096;
+  int64 file_size = 0;
+  if (!file_util::GetFileSize(file_path, &file_size) ||
+      file_size > kMaxGDocSize) {
+    DLOG(INFO) << "File too large to be a GDoc file " << file_path.value();
+    return std::string();
+  }
+
+  JSONFileValueSerializer reader(file_path);
+  std::string error_message;
+  scoped_ptr<base::Value> root_value(reader.Deserialize(NULL, &error_message));
+  if (!root_value) {
+    DLOG(INFO) << "Failed to parse " << file_path.value() << " as JSON."
+               << " error = " << error_message;
+    return std::string();
+  }
+
+  base::DictionaryValue* dictionary_value = NULL;
+  std::string result;
+  if (!root_value->GetAsDictionary(&dictionary_value) ||
+      !dictionary_value->GetString(key, &result)) {
+    DLOG(INFO) << "No value for the given key is stored in "
+               << file_path.value() << ". key = " << key;
+    return std::string();
+  }
+
+  return result;
+}
+
+// Moves all files under |directory_from| to |directory_to|.
+void MoveAllFilesFromDirectory(const base::FilePath& directory_from,
+                               const base::FilePath& directory_to) {
+  base::FileEnumerator enumerator(directory_from, false,  // not recursive
+                                  base::FileEnumerator::FILES);
+  for (base::FilePath file_from = enumerator.Next(); !file_from.empty();
+       file_from = enumerator.Next()) {
+    const base::FilePath file_to = directory_to.Append(file_from.BaseName());
+    if (!file_util::PathExists(file_to))  // Do not overwrite existing files.
+      file_util::Move(file_from, file_to);
+  }
 }
 
 }  // namespace
 
-
 const base::FilePath& GetDriveGrandRootPath() {
   CR_DEFINE_STATIC_LOCAL(base::FilePath, grand_root_path,
-      (base::FilePath::FromUTF8Unsafe(util::kDriveGrandRootDirName)));
+      (util::kDriveGrandRootDirName));
   return grand_root_path;
 }
 
 const base::FilePath& GetDriveMyDriveRootPath() {
   CR_DEFINE_STATIC_LOCAL(base::FilePath, drive_root_path,
-      (base::FilePath::FromUTF8Unsafe(util::kDriveMyDriveRootPath)));
+      (util::kDriveMyDriveRootPath));
   return drive_root_path;
-}
-
-const base::FilePath& GetDriveOtherDirPath() {
-  CR_DEFINE_STATIC_LOCAL(base::FilePath, other_root_path,
-      (base::FilePath::FromUTF8Unsafe(util::kDriveOtherDirPath)));
-  return other_root_path;
 }
 
 const base::FilePath& GetDriveMountPointPath() {
@@ -121,18 +165,6 @@ const std::string& GetDriveMountPointPathAsString() {
   CR_DEFINE_STATIC_LOCAL(std::string, drive_mount_path_string,
       (kDriveMountPointPath));
   return drive_mount_path_string;
-}
-
-const base::FilePath& GetSpecialRemoteRootPath() {
-  CR_DEFINE_STATIC_LOCAL(base::FilePath, drive_mount_path,
-      (base::FilePath::FromUTF8Unsafe(kDriveSpecialRootPath)));
-  return drive_mount_path;
-}
-
-const base::FilePath& GetDriveMyDriveMountPointPath() {
-  CR_DEFINE_STATIC_LOCAL(base::FilePath, drive_mydrive_mount_path,
-      (base::FilePath::FromUTF8Unsafe(kDriveMyDriveMountPointPath)));
-  return drive_mydrive_mount_path;
 }
 
 GURL FilePathToDriveURL(const base::FilePath& path) {
@@ -199,16 +231,9 @@ base::FilePath ExtractDrivePath(const base::FilePath& path) {
   if (!IsUnderDriveMountPoint(path))
     return base::FilePath();
 
-  std::vector<base::FilePath::StringType> components;
-  path.GetComponents(&components);
-
-  // -1 to include 'drive'.
-  base::FilePath extracted;
-  for (size_t i = arraysize(kDriveMountPointPathComponents) - 1;
-       i < components.size(); ++i) {
-    extracted = extracted.Append(components[i]);
-  }
-  return extracted;
+  base::FilePath drive_path = GetDriveGrandRootPath();
+  GetDriveMountPointPath().AppendRelativePath(path, &drive_path);
+  return drive_path;
 }
 
 base::FilePath ExtractDrivePathFromFileSystemUrl(
@@ -222,7 +247,7 @@ base::FilePath GetCacheRootPath(Profile* profile) {
   base::FilePath cache_base_path;
   chrome::GetUserCacheDirectory(profile->GetPath(), &cache_base_path);
   base::FilePath cache_root_path =
-      cache_base_path.Append(chrome::kDriveCacheDirname);
+      cache_base_path.Append(chromeos::kDriveCacheDirname);
   return cache_root_path.Append(kFileCacheVersionDir);
 }
 
@@ -254,52 +279,54 @@ std::string UnescapeCacheFileName(const std::string& filename) {
   return unescaped;
 }
 
-std::string EscapeUtf8FileName(const std::string& input) {
+std::string NormalizeFileName(const std::string& input) {
+  DCHECK(IsStringUTF8(input));
+
   std::string output;
-  if (ReplaceChars(input, kSlash, std::string(kEscapedSlash), &output))
-    return output;
-
-  return input;
-}
-
-std::string ExtractResourceIdFromUrl(const GURL& url) {
-  return net::UnescapeURLComponent(url.ExtractFileName(),
-                                   net::UnescapeRule::URL_SPECIAL_CHARS);
+  if (!base::ConvertToUtf8AndNormalize(input, base::kCodepageUTF8, &output))
+    output = input;
+  ReplaceChars(output, kSlash, std::string(kEscapedSlash), &output);
+  return output;
 }
 
 void ParseCacheFilePath(const base::FilePath& path,
                         std::string* resource_id,
-                        std::string* md5,
-                        std::string* extra_extension) {
+                        std::string* md5) {
   DCHECK(resource_id);
   DCHECK(md5);
-  DCHECK(extra_extension);
 
-  // Extract up to two extensions from the right.
+  // Extract up to one extension from the right.
   base::FilePath base_name = path.BaseName();
-  const int kNumExtensionsToExtract = 2;
-  std::vector<base::FilePath::StringType> extensions;
-  for (int i = 0; i < kNumExtensionsToExtract; ++i) {
-    base::FilePath::StringType extension = base_name.Extension();
-    if (!extension.empty()) {
-      // base::FilePath::Extension returns ".", so strip it.
-      extension = UnescapeCacheFileName(extension.substr(1));
-      base_name = base_name.RemoveExtension();
-      extensions.push_back(extension);
-    } else {
-      break;
-    }
+  base::FilePath::StringType extension = base_name.Extension();
+  if (!extension.empty()) {
+    // base::FilePath::Extension returns ".", so strip it.
+    extension = UnescapeCacheFileName(extension.substr(1));
+    base_name = base_name.RemoveExtension();
   }
 
   // The base_name here is already stripped of extensions in the loop above.
   *resource_id = UnescapeCacheFileName(base_name.value());
+  *md5 = extension;
+}
 
-  // Assign the extracted extensions to md5 and extra_extension.
-  int extension_count = extensions.size();
-  *md5 = (extension_count > 0) ? extensions[extension_count - 1] :
-                                 std::string();
-  *extra_extension = (extension_count > 1) ? extensions[extension_count - 2] :
-                                             std::string();
+void MigrateCacheFilesFromOldDirectories(
+    const base::FilePath& cache_root_directory) {
+  const base::FilePath persistent_directory =
+      cache_root_directory.AppendASCII("persistent");
+  const base::FilePath tmp_directory =
+      cache_root_directory.AppendASCII("tmp");
+  if (!file_util::PathExists(persistent_directory))
+    return;
+
+  const base::FilePath cache_file_directory =
+      cache_root_directory.Append(kCacheFileDirectory);
+
+  // Move all files inside "persistent" to "files".
+  MoveAllFilesFromDirectory(persistent_directory, cache_file_directory);
+  file_util::Delete(persistent_directory,  true /* recursive */);
+
+  // Move all files inside "tmp" to "files".
+  MoveAllFilesFromDirectory(tmp_directory, cache_file_directory);
 }
 
 void PrepareWritableFileAndRun(Profile* profile,
@@ -322,8 +349,7 @@ void PrepareWritableFileAndRun(Profile* profile,
 void EnsureDirectoryExists(Profile* profile,
                            const base::FilePath& directory,
                            const FileOperationCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI) ||
-         BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!callback.is_null());
   if (IsUnderDriveMountPoint(directory)) {
     FileSystemInterface* file_system = GetFileSystem(profile);
@@ -350,14 +376,12 @@ FileError GDataToFileError(google_apis::GDataErrorCode status) {
       return FILE_ERROR_ACCESS_DENIED;
     case google_apis::HTTP_NOT_FOUND:
       return FILE_ERROR_NOT_FOUND;
-    case google_apis::GDATA_PARSE_ERROR:
-    case google_apis::GDATA_FILE_ERROR:
+    case google_apis::HTTP_NOT_IMPLEMENTED:
+      return FILE_ERROR_INVALID_OPERATION;
+    case google_apis::GDATA_CANCELLED:
       return FILE_ERROR_ABORT;
     case google_apis::GDATA_NO_CONNECTION:
       return FILE_ERROR_NO_CONNECTION;
-    case google_apis::HTTP_SERVICE_UNAVAILABLE:
-    case google_apis::HTTP_INTERNAL_SERVER_ERROR:
-      return FILE_ERROR_THROTTLED;
     default:
       return FILE_ERROR_FAILED;
   }
@@ -389,6 +413,30 @@ void ConvertPlatformFileInfoToResourceEntry(
 }
 
 void EmptyFileOperationCallback(FileError error) {
+}
+
+bool CreateGDocFile(const base::FilePath& file_path,
+                    const GURL& url,
+                    const std::string& resource_id) {
+  std::string content = base::StringPrintf(
+      "{\"url\": \"%s\", \"resource_id\": \"%s\"}",
+      url.spec().c_str(), resource_id.c_str());
+  return file_util::WriteFile(file_path, content.data(), content.size()) ==
+      static_cast<int>(content.size());
+}
+
+bool HasGDocFileExtension(const base::FilePath& file_path) {
+  return google_apis::ResourceEntry::ClassifyEntryKindByFileExtension(
+      file_path) &
+      google_apis::ResourceEntry::KIND_OF_HOSTED_DOCUMENT;
+}
+
+GURL ReadUrlFromGDocFile(const base::FilePath& file_path) {
+  return GURL(ReadStringFromGDocFile(file_path, "url"));
+}
+
+std::string ReadResourceIdFromGDocFile(const base::FilePath& file_path) {
+  return ReadStringFromGDocFile(file_path, "resource_id");
 }
 
 }  // namespace util

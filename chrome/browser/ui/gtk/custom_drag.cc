@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/gtk/custom_drag.h"
 
 #include "base/files/file_path.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/gtk/bookmarks/bookmark_utils_gtk.h"
 #include "content/public/browser/download_item.h"
 #include "googleurl/src/gurl.h"
@@ -91,7 +91,7 @@ class DownloadItemDrag::DragData {
 DownloadItemDrag::DragData::DragData(const DownloadItem* item)
     : url_(net::FilePathToFileURL(item->GetTargetFilePath())),
       display_name_(item->GetFileNameToReportUser().LossyDisplayName()) {
-  DCHECK(item->IsComplete());
+  DCHECK_EQ(DownloadItem::COMPLETE, item->GetState());
 }
 
 void DownloadItemDrag::DragData::OnDragDataGet(GtkWidget* widget,

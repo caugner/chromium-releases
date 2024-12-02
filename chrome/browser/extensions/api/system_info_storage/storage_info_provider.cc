@@ -5,8 +5,8 @@
 #include "chrome/browser/extensions/api/system_info_storage/storage_info_provider.h"
 
 #include "base/stl_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/storage_monitor/storage_monitor.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -18,7 +18,7 @@ using api::experimental_system_info_storage::StorageUnitInfo;
 namespace systeminfo {
 
 const char kStorageTypeUnknown[] = "unknown";
-const char kStorageTypeHardDisk[] = "harddisk";
+const char kStorageTypeFixed[] = "fixed";
 const char kStorageTypeRemovable[] = "removable";
 
 }  // namespace systeminfo
@@ -60,9 +60,9 @@ void StorageInfoProvider::OnRemovableStorageAttached(
   // to keep the id persisting between device attachments, like
   // StorageMonitor does.
 #if defined(OS_POSIX)
-  std::string id = info.location;
+  std::string id = info.location();
 #elif defined(OS_WIN)
-  std::string id = UTF16ToUTF8(info.location);
+  std::string id = UTF16ToUTF8(info.location());
 #endif
   // Post a task to blocking pool for querying the information.
   BrowserThread::PostBlockingPoolTask(FROM_HERE,
@@ -88,9 +88,9 @@ void StorageInfoProvider::OnRemovableStorageDetached(
     const chrome::StorageInfo& info) {
   // TODO(hongbo): Use |info.device_id| instead. Same as the above.
 #if defined(OS_POSIX)
-  std::string id = info.location;
+  std::string id = info.location();
 #elif defined(OS_WIN)
-  std::string id = UTF16ToUTF8(info.location);
+  std::string id = UTF16ToUTF8(info.location());
 #endif
   observers_->Notify(&StorageInfoObserver::OnStorageDetached, id);
 }

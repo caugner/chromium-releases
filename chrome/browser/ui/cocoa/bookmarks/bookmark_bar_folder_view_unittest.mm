@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/memory/scoped_nsobject.h"
-#include "base/string16.h"
-#include "base/utf_string_conversions.h"
+#include "base/mac/scoped_nsobject.h"
+#include "base/strings/string16.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -133,9 +133,9 @@ class BookmarkBarFolderViewTest : public CocoaProfileTest {
     return [mock_button retain];
   }
 
-  scoped_nsobject<id> mock_controller_;
-  scoped_nsobject<BookmarkBarFolderView> view_;
-  scoped_nsobject<id> mock_button_;
+  base::scoped_nsobject<id> mock_controller_;
+  base::scoped_nsobject<BookmarkBarFolderView> view_;
+  base::scoped_nsobject<id> mock_button_;
 };
 
 TEST_F(BookmarkBarFolderViewTest, BookmarkButtonDragAndDrop) {

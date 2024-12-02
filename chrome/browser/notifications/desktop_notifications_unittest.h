@@ -96,7 +96,7 @@ class DesktopNotificationsTest : public testing::Test {
 
   // Create a message loop to allow notifications code to post tasks,
   // and a thread so that notifications code runs on the expected thread.
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
 
   // Local state mock.
@@ -117,8 +117,6 @@ class DesktopNotificationsTest : public testing::Test {
 #if defined(USE_ASH)
   content::RenderViewTest::RendererWebKitPlatformSupportImplNoSandbox
       webkit_platform_support_;
-
-  scoped_ptr<ActiveDesktopMonitor> active_desktop_monitor_;
 #endif
 
   // Contains the cumulative output of the unit test.

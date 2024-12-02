@@ -19,6 +19,7 @@ import os
 import sys
 
 from perf_tools import histogram_metric
+from perf_tools import memory_metrics
 from telemetry.core import util
 from telemetry.page import page_measurement
 
@@ -28,6 +29,16 @@ MEMORY_HISTOGRAMS = [
     {'name': 'V8.MemoryHeapSampleTotalUsed', 'units': 'kb'}]
 
 class PageCycler(page_measurement.PageMeasurement):
+  def __init__(self, *args, **kwargs):
+    super(PageCycler, self).__init__(*args, **kwargs)
+
+    with open(os.path.join(os.path.dirname(__file__),
+                           'page_cycler.js'), 'r') as f:
+      self._page_cycler_js = f.read()
+
+    self._memory_metrics = None
+    self._histograms = None
+
   def AddCommandLineOptions(self, parser):
     # The page cyclers should default to 10 iterations. In order to change the
     # default of an option, we must remove and re-add it.
@@ -36,169 +47,75 @@ class PageCycler(page_measurement.PageMeasurement):
     parser.remove_option('--pageset-repeat')
     parser.add_option(pageset_repeat_option)
 
-  def WillRunPageSet(self, tab, results):
-    # Avoid paying for a cross-renderer navigation on the first page on legacy
-    # page cyclers which use the filesystem.
-    if tab.browser.http_server:
-      tab.Navigate(tab.browser.http_server.UrlOf('nonexistent.html'))
+  def SetUpBrowser(self, browser):
+    self._memory_metrics = memory_metrics.MemoryMetrics()
+    self._memory_metrics.Start(browser)
 
-    with open(os.path.join(os.path.dirname(__file__),
-                           'page_cycler.js'), 'r') as f:
-      self.page_cycler_js = f.read()  # pylint: disable=W0201
-
-    # pylint: disable=W0201
-    self.start_commit_charge = tab.browser.memory_stats['SystemCommitCharge']
-
-    # pylint: disable=W0201
-    self.histograms = [histogram_metric.HistogramMetric(
+    self._histograms = [histogram_metric.HistogramMetric(
                            h, histogram_metric.RENDERER_HISTOGRAM)
                        for h in MEMORY_HISTOGRAMS]
 
+  def DidStartHTTPServer(self, tab):
+    # Avoid paying for a cross-renderer navigation on the first page on legacy
+    # page cyclers which use the filesystem.
+    tab.Navigate(tab.browser.http_server.UrlOf('nonexistent.html'))
+
   def WillNavigateToPage(self, page, tab):
-    page.script_to_evaluate_on_commit = self.page_cycler_js
+    page.script_to_evaluate_on_commit = self._page_cycler_js
 
   def DidNavigateToPage(self, page, tab):
-    for h in self.histograms:
+    for h in self._histograms:
       h.Start(page, tab)
 
   def CustomizeBrowserOptions(self, options):
-    options.AppendExtraBrowserArg('--dom-automation')
+    options.AppendExtraBrowserArg('--enable-stats-collection-bindings')
     options.AppendExtraBrowserArg('--js-flags=--expose_gc')
     options.AppendExtraBrowserArg('--no-sandbox')
-    # Temporarily enable threaded compositing on Mac on only some page sets.
-    # This malignancy is to diagnose an issue where the bots are experiencing
-    # a regression that isn't reproducing locally.
-    # TODO(ccameron): delete this
-    # http://crbug.com/180025
-    if sys.platform == 'darwin':
-      composited_page_sets = ('/bloat.json', '/moz.json', '/intl2.json')
-      if sys.argv[-1].endswith(composited_page_sets):
-        options.AppendExtraBrowserArg('--force-compositing-mode')
-        options.AppendExtraBrowserArg('--enable-threaded-compositing')
-      else:
-        options.AppendExtraBrowserArg('--disable-force-compositing-mode')
 
-  def MeasureMemory(self, tab, results):
-    memory = tab.browser.memory_stats
-    if not memory['Browser']:
-      return
+    # Old commandline flags used for reference builds.
+    options.AppendExtraBrowserArg('--dom-automation')
 
-    metric = 'resident_set_size'
-    if sys.platform == 'win32':
-      metric = 'working_set'
-
-    # Browser
-    if 'VM' in memory['Browser']:
-      results.AddSummary('vm_final_size_browser', 'bytes',
-                         memory['Browser']['VM'], data_type='unimportant')
-    if 'VMPeak' in memory['Browser']:
-      results.AddSummary('vm_peak_size_browser', 'bytes', memory['Browser']
-                         ['VMPeak'], data_type='unimportant')
-    if 'WorkingSetSize' in memory['Browser']:
-      results.AddSummary('vm_%s_final_size_browser' % metric, 'bytes',
-                         memory['Browser']['WorkingSetSize'],
-                         data_type='unimportant')
-    if 'WorkingSetSizePeak' in memory['Browser']:
-      results.AddSummary('%s_peak_size_browser' % metric, 'bytes',
-                         memory['Browser']['WorkingSetSizePeak'],
-                         data_type='unimportant')
-    if 'PrivateDirty' in memory['Browser']:
-      results.AddSummary('vm_private_dirty_final_browser', 'bytes',
-                         memory['Browser']['PrivateDirty'],
-                         data_type='unimportant')
-    if 'ProportionalSetSize' in memory['Browser']:
-      results.AddSummary('vm_proportional_set_size_final_browser', 'bytes',
-                         memory['Browser']['ProportionalSetSize'],
-                         data_type='unimportant')
-
-    # Renderer
-    if 'VM' in memory['Renderer']:
-      results.AddSummary('vm_final_size_renderer', 'bytes',
-                         memory['Renderer']['VM'], data_type='unimportant')
-    if 'VMPeak' in memory['Renderer']:
-      results.AddSummary('vm_peak_size_renderer', 'bytes',
-                         memory['Browser']['VMPeak'], data_type='unimportant')
-    if 'WorkingSetSize' in memory['Renderer']:
-      results.AddSummary('vm_%s_final_size_renderer' % metric, 'bytes',
-                         memory['Renderer']['WorkingSetSize'],
-                         data_type='unimportant')
-    if 'WorkingSetSizePeak' in memory['Renderer']:
-      results.AddSummary('%s_peak_size_renderer' % metric, 'bytes',
-                         memory['Browser']['WorkingSetSizePeak'],
-                         data_type='unimportant')
-    if 'PrivateDirty' in memory['Renderer']:
-      results.AddSummary('vm_private_dirty_final_renderer', 'bytes',
-                         memory['Renderer']['PrivateDirty'],
-                         data_type='unimportant')
-    if 'ProportionalSetSize' in memory['Renderer']:
-      results.AddSummary('vm_proportional_set_size_final_renderer', 'bytes',
-                         memory['Renderer']['ProportionalSetSize'],
-                         data_type='unimportant')
-
-    # Total
-    if 'VM' in memory['Browser'] and 'VM' in memory['Renderer']:
-      results.AddSummary('vm_final_size_total', 'bytes',
-                         memory['Browser']['VM'] + memory['Renderer']['VM'],
-                         data_type='unimportant')
-    if ('WorkingSetSize' in memory['Browser'] and
-        'WorkingSetSize' in memory['Renderer']):
-      results.AddSummary('vm_%s_final_size_total' % metric, 'bytes',
-                         memory['Browser']['WorkingSetSize'] +
-                         memory['Renderer']['WorkingSetSize'],
-                         data_type='unimportant')
-    if ('PrivateDirty' in memory['Browser'] and
-        'PrivateDirty' in memory['Renderer']):
-      results.AddSummary('vm_private_dirty_final_total', 'bytes',
-                         memory['Browser']['PrivateDirty'] +
-                         memory['Renderer']['PrivateDirty'],
-                         data_type='unimportant')
-    if ('ProportionalSetSize' in memory['Browser'] and
-        'ProportionalSetSize' in memory['Renderer']):
-      results.AddSummary('vm_proportional_set_size_final_total', 'bytes',
-                         memory['Browser']['ProportionalSetSize'] +
-                         memory['Renderer']['ProportionalSetSize'],
-                         data_type='unimportant')
-
-    results.AddSummary('commit_charge', 'kb',
-                       memory['SystemCommitCharge'] - self.start_commit_charge,
-                       data_type='unimportant')
-    results.AddSummary('processes', 'count', memory['ProcessCount'],
-                       data_type='unimportant')
+    # Temporarily disable typical_25 page set on mac.
+    if sys.platform == 'darwin' and sys.argv[-1].endswith('/typical_25.json'):
+      print 'typical_25 is currently disabled on mac. Skipping test.'
+      sys.exit(0)
 
   def MeasureIO(self, tab, results):
     io_stats = tab.browser.io_stats
     if not io_stats['Browser']:
       return
-    results.AddSummary('read_operations_browser', '', io_stats['Browser']
-                       ['ReadOperationCount'], data_type='unimportant')
-    results.AddSummary('write_operations_browser', '', io_stats['Browser']
-                       ['WriteOperationCount'],
-                       data_type='unimportant')
-    results.AddSummary('read_bytes_browser', 'kb',
-                       io_stats['Browser']['ReadTransferCount'] / 1024,
-                       data_type='unimportant')
-    results.AddSummary('write_bytes_browser', 'kb',
-                       io_stats['Browser']['WriteTransferCount'] / 1024,
-                       data_type='unimportant')
-    results.AddSummary('read_operations_renderer', '',
-                       io_stats['Renderer']['ReadOperationCount'],
-                       data_type='unimportant')
-    results.AddSummary('write_operations_renderer', '',
-                       io_stats['Renderer']['WriteOperationCount'],
-                       data_type='unimportant')
-    results.AddSummary('read_bytes_renderer', 'kb',
-                       io_stats['Renderer']['ReadTransferCount'] / 1024,
-                       data_type='unimportant')
-    results.AddSummary('write_bytes_renderer', 'kb',
-                       io_stats['Renderer']['WriteTransferCount'] / 1024,
-                       data_type='unimportant')
+
+    def AddSummariesForProcessType(process_type_io, process_type_trace):
+      if 'ReadOperationCount' in io_stats[process_type_io]:
+        results.AddSummary('read_operations_' + process_type_trace, '',
+                           io_stats[process_type_io]
+                           ['ReadOperationCount'],
+                           data_type='unimportant')
+      if 'WriteOperationCount' in io_stats[process_type_io]:
+        results.AddSummary('write_operations_' + process_type_trace, '',
+                           io_stats[process_type_io]
+                           ['WriteOperationCount'],
+                           data_type='unimportant')
+      if 'ReadTransferCount' in io_stats[process_type_io]:
+        results.AddSummary('read_bytes_' + process_type_trace, 'kb',
+                           io_stats[process_type_io]
+                           ['ReadTransferCount'] / 1024,
+                           data_type='unimportant')
+      if 'WriteTransferCount' in io_stats[process_type_io]:
+        results.AddSummary('write_bytes_' + process_type_trace, 'kb',
+                           io_stats[process_type_io]
+                           ['WriteTransferCount'] / 1024,
+                           data_type='unimportant')
+    AddSummariesForProcessType('Browser', 'browser')
+    AddSummariesForProcessType('Renderer', 'renderer')
+    AddSummariesForProcessType('Gpu', 'gpu')
 
   def MeasurePage(self, page, tab, results):
     def _IsDone():
       return bool(tab.EvaluateJavaScript('__pc_load_time'))
-    util.WaitFor(_IsDone, 1200)
+    util.WaitFor(_IsDone, 60)
 
-    for h in self.histograms:
+    for h in self._histograms:
       h.GetValue(page, tab, results)
 
     results.Add('page_load_time', 'ms',
@@ -206,5 +123,5 @@ class PageCycler(page_measurement.PageMeasurement):
                 chart_name='times')
 
   def DidRunPageSet(self, tab, results):
-    self.MeasureMemory(tab, results)
+    self._memory_metrics.StopAndGetResults(tab.browser, results)
     self.MeasureIO(tab, results)

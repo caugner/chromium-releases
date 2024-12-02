@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_DOWNLOAD_CHROME_DOWNLOAD_MANAGER_DELEGATE_H_
 
 #include "base/compiler_specific.h"
-#include "base/hash_tables.h"
+#include "base/containers/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/download/download_path_reservation_tracker.h"
@@ -53,8 +53,6 @@ class ChromeDownloadManagerDelegate
  public:
   explicit ChromeDownloadManagerDelegate(Profile* profile);
 
-  static void RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry);
-
   // Should be called before the first call to ShouldCompleteDownload() to
   // disable SafeBrowsing checks for |item|.
   static void DisableSafeBrowsing(content::DownloadItem* item);
@@ -92,10 +90,6 @@ class ChromeDownloadManagerDelegate
       content::DownloadItem* download,
       const content::CheckForFileExistenceCallback& callback) OVERRIDE;
 
-  // Clears the last directory chosen by the user in response to a file chooser
-  // prompt. Called when clearing recent history.
-  void ClearLastDownloadPath();
-
   DownloadPrefs* download_prefs() { return download_prefs_.get(); }
 
  protected:
@@ -104,7 +98,7 @@ class ChromeDownloadManagerDelegate
 
   // So that test classes that inherit from this for override purposes
   // can call back into the DownloadManager.
-  scoped_refptr<content::DownloadManager> download_manager_;
+  content::DownloadManager* download_manager_;
 
   virtual safe_browsing::DownloadProtectionService*
       GetDownloadProtectionService();
@@ -132,11 +126,6 @@ class ChromeDownloadManagerDelegate
       content::DownloadItem* download,
       const base::FilePath& suggested_virtual_path,
       const CheckDownloadUrlCallback& callback) OVERRIDE;
-
-  // Callback invoked by the DownloadFilePicker after PromptUserForDownloadPath.
-  void OnDownloadPathSelected(
-      const DownloadTargetDeterminerDelegate::FileSelectedCallback& callback,
-      const base::FilePath& virtual_path);
 
  private:
   friend class base::RefCountedThreadSafe<ChromeDownloadManagerDelegate>;
@@ -169,10 +158,6 @@ class ChromeDownloadManagerDelegate
   CrxInstallerMap crx_installers_;
 
   content::NotificationRegistrar registrar_;
-
-  // The directory most recently chosen by the user in response to a Save As
-  // dialog for a regular download.
-  base::FilePath last_download_path_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeDownloadManagerDelegate);
 };

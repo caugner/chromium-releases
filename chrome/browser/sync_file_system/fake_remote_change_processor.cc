@@ -7,10 +7,10 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
-#include "base/message_loop_proxy.h"
-#include "webkit/fileapi/file_system_url.h"
-#include "webkit/fileapi/syncable/file_change.h"
-#include "webkit/fileapi/syncable/sync_file_metadata.h"
+#include "base/message_loop/message_loop_proxy.h"
+#include "webkit/browser/fileapi/file_system_url.h"
+#include "webkit/browser/fileapi/syncable/file_change.h"
+#include "webkit/browser/fileapi/syncable/sync_file_metadata.h"
 
 namespace sync_file_system {
 
@@ -22,7 +22,6 @@ FakeRemoteChangeProcessor::~FakeRemoteChangeProcessor() {
 
 void FakeRemoteChangeProcessor::PrepareForProcessRemoteChange(
     const fileapi::FileSystemURL& url,
-    const std::string& service_name,
     const PrepareChangeCallback& callback) {
   SyncFileMetadata local_metadata;
 

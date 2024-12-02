@@ -36,7 +36,9 @@ class ServiceIPCServer : public IPC::Listener, public IPC::Sender {
 
   // Safe to call on any thread, as long as it's guaranteed that the thread's
   // lifetime is less than the main thread.
-  IPC::SyncMessageFilter* sync_message_filter() { return sync_message_filter_; }
+  IPC::SyncMessageFilter* sync_message_filter() {
+    return sync_message_filter_.get();
+  }
 
   bool is_client_connected() const { return client_connected_; }
 
@@ -50,7 +52,6 @@ class ServiceIPCServer : public IPC::Listener, public IPC::Sender {
   virtual void OnChannelError() OVERRIDE;
 
   // IPC message handlers.
-  void OnEnableCloudPrintProxy(const std::string& lsid);
   void OnEnableCloudPrintProxyWithRobot(
       const std::string& robot_auth_code,
       const std::string& robot_email,

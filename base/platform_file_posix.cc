@@ -11,9 +11,10 @@
 
 #include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/metrics/sparse_histogram.h"
 #include "base/posix/eintr_wrapper.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/utf_string_conversions.h"
 
 #if defined(OS_ANDROID)
 #include "base/os_compat_android.h"
@@ -80,12 +81,18 @@ PlatformFile CreatePlatformFileUnsafe(const FilePath& name,
     open_flags |= O_WRONLY;
   } else if (!(flags & PLATFORM_FILE_READ) &&
              !(flags & PLATFORM_FILE_WRITE_ATTRIBUTES) &&
+             !(flags & PLATFORM_FILE_APPEND) &&
              !(flags & PLATFORM_FILE_OPEN_ALWAYS)) {
     NOTREACHED();
   }
 
   if (flags & PLATFORM_FILE_TERMINAL_DEVICE)
     open_flags |= O_NOCTTY | O_NDELAY;
+
+  if (flags & PLATFORM_FILE_APPEND && flags & PLATFORM_FILE_READ)
+    open_flags |= O_APPEND | O_RDWR;
+  else if (flags & PLATFORM_FILE_APPEND)
+    open_flags |= O_APPEND | O_WRONLY;
 
   COMPILE_ASSERT(O_RDONLY == 0, O_RDONLY_must_equal_zero);
 
@@ -122,39 +129,8 @@ PlatformFile CreatePlatformFileUnsafe(const FilePath& name,
   if (error) {
     if (descriptor >= 0)
       *error = PLATFORM_FILE_OK;
-    else {
-      switch (errno) {
-        case EACCES:
-        case EISDIR:
-        case EROFS:
-        case EPERM:
-          *error = PLATFORM_FILE_ERROR_ACCESS_DENIED;
-          break;
-        case ETXTBSY:
-          *error = PLATFORM_FILE_ERROR_IN_USE;
-          break;
-        case EEXIST:
-          *error = PLATFORM_FILE_ERROR_EXISTS;
-          break;
-        case ENOENT:
-          *error = PLATFORM_FILE_ERROR_NOT_FOUND;
-          break;
-        case EMFILE:
-          *error = PLATFORM_FILE_ERROR_TOO_MANY_OPENED;
-          break;
-        case ENOMEM:
-          *error = PLATFORM_FILE_ERROR_NO_MEMORY;
-          break;
-        case ENOSPC:
-          *error = PLATFORM_FILE_ERROR_NO_SPACE;
-          break;
-        case ENOTDIR:
-          *error = PLATFORM_FILE_ERROR_NOT_A_DIRECTORY;
-          break;
-        default:
-          *error = PLATFORM_FILE_ERROR_FAILED;
-      }
-    }
+    else
+      *error = ErrnoToPlatformFileError(errno);
   }
 
   return descriptor;
@@ -237,6 +213,10 @@ int ReadPlatformFileCurPosNoBestEffort(PlatformFile file,
 int WritePlatformFile(PlatformFile file, int64 offset,
                       const char* data, int size) {
   base::ThreadRestrictions::AssertIOAllowed();
+
+  if (fcntl(file, F_GETFL) & O_APPEND)
+    return WritePlatformFileAtCurrentPos(file, data, size);
+
   if (file < 0 || size < 0)
     return -1;
 
@@ -333,6 +313,36 @@ bool GetPlatformFileInfo(PlatformFile file, PlatformFileInfo* info) {
   info->last_accessed = base::Time::FromTimeT(file_info.st_atime);
   info->creation_time = base::Time::FromTimeT(file_info.st_ctime);
   return true;
+}
+
+PlatformFileError ErrnoToPlatformFileError(int saved_errno) {
+  switch (saved_errno) {
+    case EACCES:
+    case EISDIR:
+    case EROFS:
+    case EPERM:
+      return PLATFORM_FILE_ERROR_ACCESS_DENIED;
+    case ETXTBSY:
+      return PLATFORM_FILE_ERROR_IN_USE;
+    case EEXIST:
+      return PLATFORM_FILE_ERROR_EXISTS;
+    case ENOENT:
+      return PLATFORM_FILE_ERROR_NOT_FOUND;
+    case EMFILE:
+      return PLATFORM_FILE_ERROR_TOO_MANY_OPENED;
+    case ENOMEM:
+      return PLATFORM_FILE_ERROR_NO_MEMORY;
+    case ENOSPC:
+      return PLATFORM_FILE_ERROR_NO_SPACE;
+    case ENOTDIR:
+      return PLATFORM_FILE_ERROR_NOT_A_DIRECTORY;
+    default:
+#if !defined(OS_NACL)  // NaCl build has no metrics code.
+      UMA_HISTOGRAM_SPARSE_SLOWLY("PlatformFile.UnknownErrors.Posix",
+                                  saved_errno);
+#endif
+      return PLATFORM_FILE_ERROR_FAILED;
+  }
 }
 
 }  // namespace base

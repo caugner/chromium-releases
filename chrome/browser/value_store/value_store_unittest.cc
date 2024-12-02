@@ -5,7 +5,6 @@
 #include "chrome/browser/value_store/value_store_unittest.h"
 
 #include "base/json/json_writer.h"
-#include "base/file_util.h"
 #include "base/values.h"
 
 using content::BrowserThread;
@@ -132,8 +131,8 @@ ValueStoreTest::ValueStoreTest()
       dict3_(new DictionaryValue()),
       dict12_(new DictionaryValue()),
       dict123_(new DictionaryValue()),
-      ui_thread_(BrowserThread::UI, MessageLoop::current()),
-      file_thread_(BrowserThread::FILE, MessageLoop::current()) {
+      ui_thread_(BrowserThread::UI, base::MessageLoop::current()),
+      file_thread_(BrowserThread::FILE, base::MessageLoop::current()) {
   val1_.reset(Value::CreateStringValue(key1_ + "Value"));
   val2_.reset(Value::CreateStringValue(key2_ + "Value"));
   val3_.reset(Value::CreateStringValue(key3_ + "Value"));

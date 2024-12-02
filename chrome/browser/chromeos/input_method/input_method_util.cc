@@ -12,9 +12,9 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
 #include "base/strings/string_split.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chromeos/ime/component_extension_ime_manager.h"
 #include "chromeos/ime/extension_ime_util.h"
 #include "chromeos/ime/input_method_delegate.h"
@@ -42,9 +42,6 @@ const struct {
   // To distinguish from "xkb:gb::eng"
   { "xkb:gb:dvorak:eng", "DV" },
   // To distinguish from "xkb:jp::jpn"
-  { "mozc", "\xe3\x81\x82" },  // U+3042, Japanese Hiragana letter A in UTF-8.
-  { "mozc-dv", "\xe3\x81\x82" },
-  { "mozc-jp", "\xe3\x81\x82" },
   // TODO(nona): Make following variables configurable. http://crbug.com/232260.
   { "_comp_ime_fpfbhcjppmaeaijcidgiibchfbnhbeljnacl_mozc_us", "\xe3\x81\x82" },
   { "_comp_ime_fpfbhcjppmaeaijcidgiibchfbnhbeljnacl_mozc_jp", "\xe3\x81\x82" },
@@ -52,10 +49,22 @@ const struct {
   { "_comp_ime_bbaiamgfapehflhememkfglaehiobjnknacl_mozc_jp", "\xe3\x81\x82" },
   // For simplified Chinese input methods
   { "pinyin", "\xe6\x8b\xbc" },  // U+62FC
+  { "_comp_ime_cpgalbafkoofkjmaeonnfijgpfennjjnzh-t-i0-pinyin",
+    "\xe6\x8b\xbc" },
+  { "_comp_ime_nmblnjkfdkabgdofidlkienfnnbjhnabzh-t-i0-pinyin",
+    "\xe6\x8b\xbc" },
   { "pinyin-dv", "\xe6\x8b\xbc" },
   // For traditional Chinese input methods
   { "mozc-chewing", "\xe9\x85\xb7" },  // U+9177
+  { "_comp_ime_ekbifjdfhkmdeeajnolmgdlmkllopefizh-hant-t-i0-und",
+    "\xe9\x85\xb7" },  // U+9177
+  { "_comp_ime_goedamlknlnjaengojinmfgpmdjmkooozh-hant-t-i0-und",
+    "\xe9\x85\xb7" },  // U+9177
   { "m17n:zh:cangjie", "\xe5\x80\x89" },  // U+5009
+  { "_comp_ime_aeebooiibjahgpgmhkeocbeekccfknbjzh-hant-t-i0-cangjie-1987",
+    "\xe5\x80\x89" },  // U+5009
+  { "_comp_ime_gjhclobljhjhgoebiipblnmdodbmpdgdzh-hant-t-i0-cangjie-1987",
+    "\xe5\x80\x89" },  // U+5009
   { "m17n:zh:quick", "\xe9\x80\x9f" },  // U+901F
   // For Hangul input method.
   { "mozc-hangul", "\xed\x95\x9c" },  // U+D55C
@@ -75,13 +84,22 @@ const struct {
 } kMappingImeIdToMediumLenNameResourceId[] = {
   { "m17n:zh:cangjie", IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_TRADITIONAL },
   { "m17n:zh:quick", IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_TRADITIONAL },
-  { "mozc", IDS_LANGUAGES_MEDIUM_LEN_NAME_JAPANESE },
   { "mozc-chewing", IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_TRADITIONAL },
-  { "mozc-dv", IDS_LANGUAGES_MEDIUM_LEN_NAME_JAPANESE },
   { "mozc-hangul", IDS_LANGUAGES_MEDIUM_LEN_NAME_KOREAN },
-  { "mozc-jp", IDS_LANGUAGES_MEDIUM_LEN_NAME_JAPANESE },
   { "pinyin", IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_SIMPLIFIED },
   { "pinyin-dv", IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_SIMPLIFIED },
+  { "_comp_ime_cpgalbafkoofkjmaeonnfijgpfennjjnzh-t-i0-pinyin",
+    IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_SIMPLIFIED},
+  { "_comp_ime_nmblnjkfdkabgdofidlkienfnnbjhnabzh-t-i0-pinyin",
+    IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_SIMPLIFIED },
+  { "_comp_ime_ekbifjdfhkmdeeajnolmgdlmkllopefizh-hant-t-i0-und",
+    IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_TRADITIONAL },
+  { "_comp_ime_goedamlknlnjaengojinmfgpmdjmkooozh-hant-t-i0-und",
+    IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_TRADITIONAL },
+  { "_comp_ime_aeebooiibjahgpgmhkeocbeekccfknbjzh-hant-t-i0-cangjie-1987",
+    IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_TRADITIONAL },
+  { "_comp_ime_gjhclobljhjhgoebiipblnmdodbmpdgdzh-hant-t-i0-cangjie-1987",
+    IDS_LANGUAGES_MEDIUM_LEN_NAME_CHINESE_TRADITIONAL },
 };
 const size_t kMappingImeIdToMediumLenNameResourceIdLen =
     ARRAYSIZE_UNSAFE(kMappingImeIdToMediumLenNameResourceId);
@@ -97,6 +115,11 @@ const struct {
 } kDefaultInputMethodRecommendation[] = {
   { "ja", "us", "_comp_ime_fpfbhcjppmaeaijcidgiibchfbnhbeljnacl_mozc_us" },
   { "ja", "jp", "_comp_ime_fpfbhcjppmaeaijcidgiibchfbnhbeljnacl_mozc_jp" },
+  { "zh-CN", "us", "_comp_ime_nmblnjkfdkabgdofidlkienfnnbjhnabzh-t-i0-pinyin" },
+  { "zh-TW", "us",
+    "_comp_ime_goedamlknlnjaengojinmfgpmdjmkooozh-hant-t-i0-und" },
+  { "th", "us", "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_th" },
+  { "vi", "us", "_comp_ime_jhffeifommiaekmbkkjlpmilogcfdohpvkd_vi_tcvn" },
 };
 
 }  // namespace
@@ -113,15 +136,6 @@ const struct EnglishToResouceId {
   const char* english_string_from_ibus;
   int resource_id;
 } kEnglishToResourceIdArray[] = {
-  // For ibus-mozc.
-  { "Direct input", IDS_STATUSBAR_IME_JAPANESE_IME_STATUS_DIRECT_INPUT },
-  { "Hiragana", IDS_STATUSBAR_IME_JAPANESE_IME_STATUS_HIRAGANA },
-  { "Katakana", IDS_STATUSBAR_IME_JAPANESE_IME_STATUS_KATAKANA },
-  { "Half width katakana",  // small k is not a typo.
-    IDS_STATUSBAR_IME_JAPANESE_IME_STATUS_HALF_WIDTH_KATAKANA },
-  { "Latin", IDS_STATUSBAR_IME_JAPANESE_IME_STATUS_LATIN },
-  { "Wide Latin", IDS_STATUSBAR_IME_JAPANESE_IME_STATUS_WIDE_LATIN },
-
   // For ibus-mozc-hangul
   { "Hanja mode", IDS_STATUSBAR_IME_KOREAN_HANJA_INPUT_MODE },
   { "Hangul mode", IDS_STATUSBAR_IME_KOREAN_HANGUL_INPUT_MODE },
@@ -199,21 +213,6 @@ const struct EnglishToResouceId {
   { "pinyin", IDS_OPTIONS_SETTINGS_LANGUAGES_PINYIN_INPUT_METHOD },
   { "pinyin-dv",
     IDS_OPTIONS_SETTINGS_LANGUAGES_PINYIN_DV_INPUT_METHOD },
-#if defined(GOOGLE_CHROME_BUILD)
-  { "mozc",
-    IDS_OPTIONS_SETTINGS_LANGUAGES_JAPANESE_GOOGLE_US_INPUT_METHOD },
-  { "mozc-dv",
-    IDS_OPTIONS_SETTINGS_LANGUAGES_JAPANESE_GOOGLE_US_DV_INPUT_METHOD },
-  { "mozc-jp",
-    IDS_OPTIONS_SETTINGS_LANGUAGES_JAPANESE_GOOGLE_JP_INPUT_METHOD },
-#else
-  { "mozc",
-    IDS_OPTIONS_SETTINGS_LANGUAGES_JAPANESE_MOZC_US_INPUT_METHOD },
-  { "mozc-dv",
-    IDS_OPTIONS_SETTINGS_LANGUAGES_JAPANESE_MOZC_US_DV_INPUT_METHOD },
-  { "mozc-jp",
-    IDS_OPTIONS_SETTINGS_LANGUAGES_JAPANESE_MOZC_JP_INPUT_METHOD },
-#endif  // if defined(GOOGLE_CHROME_BUILD)
   { "zinnia-japanese",
     IDS_OPTIONS_SETTINGS_LANGUAGES_JAPANESE_HANDWRITING_INPUT_METHOD },
   { "mozc-hangul", IDS_OPTIONS_SETTINGS_LANGUAGES_KOREAN_INPUT_METHOD },
@@ -232,6 +231,7 @@ const struct EnglishToResouceId {
   { "xkb:br::por", IDS_STATUSBAR_LAYOUT_BRAZIL },
   { "xkb:rs::srp", IDS_STATUSBAR_LAYOUT_SERBIA },
   { "xkb:cz::cze", IDS_STATUSBAR_LAYOUT_CZECHIA },
+  { "xkb:cz:qwerty:cze", IDS_STATUSBAR_LAYOUT_CZECHIA_QWERTY },
   { "xkb:us:dvorak:eng", IDS_STATUSBAR_LAYOUT_USA_DVORAK },
   { "xkb:us:colemak:eng", IDS_STATUSBAR_LAYOUT_USA_COLEMAK },
   { "xkb:ro::rum", IDS_STATUSBAR_LAYOUT_ROMANIA },
@@ -269,6 +269,11 @@ const struct EnglishToResouceId {
   { "xkb:il::heb", IDS_STATUSBAR_LAYOUT_ISRAEL },
   { "xkb:kr:kr104:kor", IDS_STATUSBAR_LAYOUT_KOREA_104 },
   { "xkb:is::ice", IDS_STATUSBAR_LAYOUT_ICELANDIC },
+  { "xkb:ca:multix:fra", IDS_STATUSBAR_LAYOUT_CANADIAN_MULTILINGUAL },
+  { "xkb:by::bel", IDS_STATUSBAR_LAYOUT_BELARUSIAN },
+  { "xkb:am:phonetic:arm", IDS_STATUSBAR_LAYOUT_ARMENIAN_PHONETIC },
+  { "xkb:ge::geo", IDS_STATUSBAR_LAYOUT_GEORGIAN },
+  { "xkb:mn::mon", IDS_STATUSBAR_LAYOUT_MONGOLIAN },
 
   { "english-m", IDS_STATUSBAR_LAYOUT_USA_MYSTERY },
 };
@@ -426,7 +431,8 @@ string16 InputMethodUtil::GetInputMethodShortName(
 
   if (text.empty()) {
     const size_t kMaxLanguageNameLen = 2;
-    const std::string language_code = input_method.language_code();
+    DCHECK(!input_method.language_codes().empty());
+    const std::string language_code = input_method.language_codes().at(0);
     text = StringToUpperASCII(UTF8ToUTF16(language_code)).substr(
         0, kMaxLanguageNameLen);
   }
@@ -465,7 +471,8 @@ string16 InputMethodUtil::GetInputMethodLongName(
   // Indic languages: they share "Standard Input Method".
   const string16 standard_input_method_text = delegate_->GetLocalizedString(
       IDS_OPTIONS_SETTINGS_LANGUAGES_M17N_STANDARD_INPUT_METHOD);
-  const std::string language_code = input_method.language_code();
+  DCHECK(!input_method.language_codes().empty());
+  const std::string language_code = input_method.language_codes().at(0);
 
   string16 text = TranslateString(input_method.id());
   if (text == standard_input_method_text ||
@@ -615,7 +622,8 @@ void InputMethodUtil::GetLanguageCodesFromInputMethodIds(
       DVLOG(1) << "Unknown input method ID: " << input_method_ids[i];
       continue;
     }
-    const std::string language_code = input_method->language_code();
+    DCHECK(!input_method->language_codes().empty());
+    const std::string language_code = input_method->language_codes().at(0);
     // Add it if it's not already present.
     if (std::count(out_language_codes->begin(), out_language_codes->end(),
                    language_code) == 0) {
@@ -641,7 +649,8 @@ void InputMethodUtil::SetComponentExtensions(
   component_extension_ime_id_to_descriptor_.clear();
   for (size_t i = 0; i < imes.size(); ++i) {
     const InputMethodDescriptor& input_method = imes.at(i);
-    const std::string language_code = input_method.language_code();
+    DCHECK(!input_method.language_codes().empty());
+    const std::string language_code = input_method.language_codes().at(0);
     id_to_language_code_.insert(
         std::make_pair(input_method.id(), language_code));
     id_to_descriptor_.insert(
@@ -652,11 +661,13 @@ void InputMethodUtil::SetComponentExtensions(
 InputMethodDescriptor InputMethodUtil::GetFallbackInputMethodDescriptor() {
   std::vector<std::string> layouts;
   layouts.push_back("us");
+  std::vector<std::string> languages;
+  languages.push_back("en-US");
   return InputMethodDescriptor("xkb:us::eng",
                                "",
                                layouts,
-                               "en-US",
-                               "");  // options page, not available.
+                               languages,
+                               GURL());  // options page, not available.
 }
 
 void InputMethodUtil::ReloadInternalMaps() {
@@ -674,12 +685,15 @@ void InputMethodUtil::ReloadInternalMaps() {
   for (size_t i = 0; i < supported_input_methods_->size(); ++i) {
     const InputMethodDescriptor& input_method =
         supported_input_methods_->at(i);
-    const std::string language_code = input_method.language_code();
-    language_code_to_ids_.insert(
-        std::make_pair(language_code, input_method.id()));
-    // Remember the pairs.
-    id_to_language_code_.insert(
-        std::make_pair(input_method.id(), language_code));
+    const std::vector<std::string>& language_codes =
+        input_method.language_codes();
+    for (size_t i = 0; i < language_codes.size(); ++i) {
+      language_code_to_ids_.insert(
+          std::make_pair(language_codes[i], input_method.id()));
+      // Remember the pairs.
+      id_to_language_code_.insert(
+          std::make_pair(input_method.id(), language_codes[i]));
+    }
     id_to_descriptor_.insert(
         std::make_pair(input_method.id(), input_method));
     if (IsKeyboardLayout(input_method.id())) {

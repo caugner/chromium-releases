@@ -9,14 +9,14 @@
 #include "chrome/browser/extensions/extension_sorting.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_set.h"
+#include "chrome/common/extensions/sync_helper.h"
 #include "sync/api/sync_change_processor.h"
 #include "sync/api/sync_error_factory.h"
 
 namespace extensions {
 
 AppSyncBundle::AppSyncBundle(ExtensionService* extension_service)
-    : extension_service_(extension_service),
-      sync_processor_(NULL) {}
+    : extension_service_(extension_service) {}
 
 AppSyncBundle::~AppSyncBundle() {}
 
@@ -120,8 +120,7 @@ void AppSyncBundle::AddPendingApp(const std::string& id,
 }
 
 bool AppSyncBundle::HandlesApp(const Extension& extension) const {
-  return sync_processor_ != NULL &&
-      extension.GetSyncType() == Extension::SYNC_TYPE_APP;
+  return sync_processor_ != NULL && sync_helper::IsSyncableApp(&extension);
 }
 
 std::vector<AppSyncData> AppSyncBundle::GetPendingData() const {
@@ -141,7 +140,7 @@ void AppSyncBundle::GetAppSyncDataListHelper(
     std::vector<AppSyncData>* sync_data_list) const {
   for (ExtensionSet::const_iterator it = extensions.begin();
        it != extensions.end(); ++it) {
-    const Extension& extension = **it;
+    const Extension& extension = *it->get();
     // If we have pending app data for this app, then this
     // version is out of date.  We'll sync back the version we got from
     // sync.

@@ -10,7 +10,7 @@
 #include "base/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
@@ -19,17 +19,19 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/singleton_tabs.h"
+#include "chrome/browser/ui/sync/sync_promo_ui.h"
 #include "chrome/browser/ui/views/browser_action_view.h"
 #include "chrome/browser/ui/views/browser_actions_container.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
-#include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/api/extension_action/action_info.h"
 #include "chrome/common/extensions/api/omnibox/omnibox_handler.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/sync_helper.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -132,7 +134,7 @@ class InstalledBubbleContent : public views::View,
     bool has_keybinding = GetKeybinding(&command);
     string16 key;  // Keyboard shortcut or keyword to display in the bubble.
 
-    if (extension->GetSyncType() == Extension::SYNC_TYPE_EXTENSION &&
+    if (extensions::sync_helper::IsSyncableExtension(extension) &&
         SyncPromoUI::ShouldShowSyncPromo(browser->profile()))
       flavors_ |= SIGN_IN_PROMO;
 
@@ -261,7 +263,7 @@ class InstalledBubbleContent : public views::View,
       configure_url += chrome::kExtensionConfigureCommandsSubPage;
     } else if (source == sign_in_link_) {
       configure_url = SyncPromoUI::GetSyncPromoURL(
-          GURL(), SyncPromoUI::SOURCE_EXTENSION_INSTALL_BUBBLE, false).spec();
+          SyncPromoUI::SOURCE_EXTENSION_INSTALL_BUBBLE, false).spec();
     } else {
       NOTREACHED();
       return;
@@ -578,7 +580,7 @@ void ExtensionInstalledBubble::Observe(
     if (extension == extension_) {
       animation_wait_retries_ = 0;
       // PostTask to ourself to allow all EXTENSION_LOADED Observers to run.
-      MessageLoopForUI::current()->PostTask(
+      base::MessageLoopForUI::current()->PostTask(
           FROM_HERE,
           base::Bind(&ExtensionInstalledBubble::ShowInternal,
                      weak_factory_.GetWeakPtr()));
@@ -586,8 +588,11 @@ void ExtensionInstalledBubble::Observe(
   } else if (type == chrome::NOTIFICATION_EXTENSION_UNLOADED) {
     const Extension* extension =
         content::Details<extensions::UnloadedExtensionInfo>(details)->extension;
-    if (extension == extension_)
+    if (extension == extension_) {
+      // Extension is going away, make sure ShowInternal won't be called.
+      weak_factory_.InvalidateWeakPtrs();
       extension_ = NULL;
+    }
   } else if (type == chrome::NOTIFICATION_BROWSER_CLOSING) {
     delete this;
   } else {
@@ -608,7 +613,7 @@ void ExtensionInstalledBubble::ShowInternal() {
         animation_wait_retries_++ < kAnimationWaitMaxRetry) {
       // We don't know where the view will be until the container has stopped
       // animating, so check back in a little while.
-      MessageLoopForUI::current()->PostDelayedTask(
+      base::MessageLoopForUI::current()->PostDelayedTask(
           FROM_HERE,
           base::Bind(&ExtensionInstalledBubble::ShowInternal,
                      weak_factory_.GetWeakPtr()),
@@ -649,6 +654,15 @@ void ExtensionInstalledBubble::ShowInternal() {
   SetLayoutManager(new views::FillLayout());
   AddChildView(
       new InstalledBubbleContent(browser_, extension_, type_, &icon_, this));
+
+  // If we are in immersive fullscreen, reveal the top-of-window views
+  // (omnibox, toolbar) so that the view the bubble is anchored to is visible.
+  // We do not need to hold onto the lock because ImmersiveModeController will
+  // keep the top-of-window views revealed as long as the popup is active.
+  // TODO(pkotwicz): Move logic to ImmersiveModeController.
+  scoped_ptr<ImmersiveRevealedLock> immersive_reveal_lock(
+      browser_view->immersive_mode_controller()->GetRevealedLock(
+          ImmersiveModeController::ANIMATE_REVEAL_NO));
   views::BubbleDelegateView::CreateBubble(this);
 
   // The bubble widget is now the parent and owner of |this| and takes care of

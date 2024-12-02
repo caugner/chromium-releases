@@ -6,7 +6,6 @@
 
 #include "cc/animation/keyframed_animation_curve.h"
 #include "cc/base/math_util.h"
-#include "cc/base/thread.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/resources/layer_painter.h"
 #include "cc/test/animation_test_common.h"
@@ -41,7 +40,7 @@ class MockLayerTreeHost : public LayerTreeHost {
  public:
   explicit MockLayerTreeHost(LayerTreeHostClient* client)
       : LayerTreeHost(client, LayerTreeSettings()) {
-    Initialize(scoped_ptr<Thread>(NULL));
+    Initialize(NULL);
   }
 
   MOCK_METHOD0(SetNeedsCommit, void());
@@ -144,7 +143,7 @@ class LayerTest : public testing::Test {
 
 TEST_F(LayerTest, BasicCreateAndDestroy) {
   scoped_refptr<Layer> test_layer = Layer::Create();
-  ASSERT_TRUE(test_layer);
+  ASSERT_TRUE(test_layer.get());
 
   EXPECT_CALL(*layer_tree_host_, SetNeedsCommit()).Times(0);
   test_layer->SetLayerTreeHost(layer_tree_host_.get());
@@ -297,32 +296,6 @@ TEST_F(LayerTest, ReplaceChildWithNewChild) {
   EXPECT_FALSE(child4->NeedsDisplayForTesting());
 
   ASSERT_EQ(static_cast<size_t>(3), parent_->children().size());
-  EXPECT_EQ(child1_, parent_->children()[0]);
-  EXPECT_EQ(child4, parent_->children()[1]);
-  EXPECT_EQ(child3_, parent_->children()[2]);
-  EXPECT_EQ(parent_.get(), child4->parent());
-
-  EXPECT_FALSE(child2_->parent());
-}
-
-TEST_F(LayerTest, ReplaceChildWithNewChildAutomaticRasterScale) {
-  CreateSimpleTestTree();
-  scoped_refptr<Layer> child4 = Layer::Create();
-  EXPECT_SET_NEEDS_COMMIT(1, child1_->SetAutomaticallyComputeRasterScale(true));
-  EXPECT_SET_NEEDS_COMMIT(1, child2_->SetAutomaticallyComputeRasterScale(true));
-  EXPECT_SET_NEEDS_COMMIT(1, child3_->SetAutomaticallyComputeRasterScale(true));
-
-  EXPECT_FALSE(child4->parent());
-
-  EXPECT_SET_NEEDS_FULL_TREE_SYNC(
-      AtLeast(1), parent_->ReplaceChild(child2_.get(), child4));
-  EXPECT_FALSE(parent_->NeedsDisplayForTesting());
-  EXPECT_FALSE(child1_->NeedsDisplayForTesting());
-  EXPECT_FALSE(child2_->NeedsDisplayForTesting());
-  EXPECT_FALSE(child3_->NeedsDisplayForTesting());
-  EXPECT_FALSE(child4->NeedsDisplayForTesting());
-
-  ASSERT_EQ(3U, parent_->children().size());
   EXPECT_EQ(child1_, parent_->children()[0]);
   EXPECT_EQ(child4, parent_->children()[1]);
   EXPECT_EQ(child3_, parent_->children()[2]);
@@ -555,6 +528,7 @@ TEST_F(LayerTest, CheckPropertyChangeCausesCorrectBehavior) {
   EXPECT_SET_NEEDS_COMMIT(1, test_layer->SetDrawCheckerboardForMissingTiles(
       !test_layer->DrawCheckerboardForMissingTiles()));
   EXPECT_SET_NEEDS_COMMIT(1, test_layer->SetForceRenderSurface(true));
+  EXPECT_SET_NEEDS_COMMIT(1, test_layer->SetHideLayerAndSubtree(true));
 
   EXPECT_SET_NEEDS_FULL_TREE_SYNC(1, test_layer->SetMaskLayer(
       dummy_layer1.get()));
@@ -760,15 +734,11 @@ class LayerTreeHostFactory {
       : client_(FakeLayerTreeHostClient::DIRECT_3D) {}
 
   scoped_ptr<LayerTreeHost> Create() {
-    return LayerTreeHost::Create(&client_,
-                                 LayerTreeSettings(),
-                                 scoped_ptr<Thread>(NULL)).Pass();
+    return LayerTreeHost::Create(&client_, LayerTreeSettings(), NULL).Pass();
   }
 
   scoped_ptr<LayerTreeHost> Create(LayerTreeSettings settings) {
-    return LayerTreeHost::Create(&client_,
-                                 settings,
-                                 scoped_ptr<Thread>(NULL)).Pass();
+    return LayerTreeHost::Create(&client_, settings, NULL).Pass();
   }
 
  private:
@@ -1000,6 +970,37 @@ TEST(LayerLayerTreeHostTest, ShouldNotAddAnimationWithoutAnimationRegistrar) {
   // Case 3: with a LayerTreeHost where accelerated animation is disabled, the
   // animation should be rejected.
   EXPECT_FALSE(AddTestAnimation(layer.get()));
+}
+
+TEST_F(LayerTest, SafeOpaqueBackgroundColor) {
+  LayerTreeHostFactory factory;
+  scoped_ptr<LayerTreeHost> layer_tree_host = factory.Create();
+
+  scoped_refptr<Layer> layer = Layer::Create();
+  layer_tree_host->SetRootLayer(layer);
+
+  for (int contents_opaque = 0; contents_opaque < 2; ++contents_opaque) {
+    for (int layer_opaque = 0; layer_opaque < 2; ++layer_opaque) {
+      for (int host_opaque = 0; host_opaque < 2; ++host_opaque) {
+        layer->SetContentsOpaque(!!contents_opaque);
+        layer->SetBackgroundColor(layer_opaque ? SK_ColorRED
+                                               : SK_ColorTRANSPARENT);
+        layer_tree_host->set_background_color(
+            host_opaque ? SK_ColorRED : SK_ColorTRANSPARENT);
+
+        SkColor safe_color = layer->SafeOpaqueBackgroundColor();
+        if (contents_opaque) {
+          EXPECT_EQ(SkColorGetA(safe_color), 255u)
+              << "Flags: " << contents_opaque << ", " << layer_opaque << ", "
+              << host_opaque << "\n";
+        } else {
+          EXPECT_NE(SkColorGetA(safe_color), 255u)
+              << "Flags: " << contents_opaque << ", " << layer_opaque << ", "
+              << host_opaque << "\n";
+        }
+      }
+    }
+  }
 }
 
 }  // namespace

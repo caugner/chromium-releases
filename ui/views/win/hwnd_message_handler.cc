@@ -14,6 +14,7 @@
 #include "ui/base/events/event_utils.h"
 #include "ui/base/gestures/gesture_sequence.h"
 #include "ui/base/keycodes/keyboard_code_conversion_win.h"
+#include "ui/base/win/dpi.h"
 #include "ui/base/win/hwnd_util.h"
 #include "ui/base/win/mouse_wheel_util.h"
 #include "ui/base/win/shell.h"
@@ -30,6 +31,7 @@
 #include "ui/views/widget/monitor_win.h"
 #include "ui/views/widget/native_widget_win.h"
 #include "ui/views/widget/widget_hwnd_utils.h"
+#include "ui/views/win/appbar.h"
 #include "ui/views/win/fullscreen_handler.h"
 #include "ui/views/win/hwnd_message_handler_delegate.h"
 #include "ui/views/win/scoped_fullscreen_visibility.h"
@@ -388,7 +390,8 @@ HWNDMessageHandler::HWNDMessageHandler(HWNDMessageHandlerDelegate* delegate)
       layered_alpha_(255),
       paint_layered_window_factory_(this),
       can_update_layered_window_(true),
-      is_first_nccalc_(true) {
+      is_first_nccalc_(true),
+      autohide_factory_(this) {
 }
 
 HWNDMessageHandler::~HWNDMessageHandler() {
@@ -521,12 +524,13 @@ void HWNDMessageHandler::GetWindowPlacement(
   }
 }
 
-void HWNDMessageHandler::SetBounds(const gfx::Rect& bounds) {
+void HWNDMessageHandler::SetBounds(const gfx::Rect& bounds_in_pixels) {
   LONG style = GetWindowLong(hwnd(), GWL_STYLE);
   if (style & WS_MAXIMIZE)
     SetWindowLong(hwnd(), GWL_STYLE, style & ~WS_MAXIMIZE);
-  SetWindowPos(hwnd(), NULL, bounds.x(), bounds.y(), bounds.width(),
-               bounds.height(), SWP_NOACTIVATE | SWP_NOZORDER);
+  SetWindowPos(hwnd(), NULL, bounds_in_pixels.x(), bounds_in_pixels.y(),
+               bounds_in_pixels.width(), bounds_in_pixels.height(),
+               SWP_NOACTIVATE | SWP_NOZORDER);
 }
 
 void HWNDMessageHandler::SetSize(const gfx::Size& size) {
@@ -903,6 +907,23 @@ void HWNDMessageHandler::DidProcessEvent(const base::NativeEvent& event) {
 ////////////////////////////////////////////////////////////////////////////////
 // HWNDMessageHandler, private:
 
+int HWNDMessageHandler::GetAppbarAutohideEdges(HMONITOR monitor) {
+  autohide_factory_.InvalidateWeakPtrs();
+  return Appbar::instance()->GetAutohideEdges(
+      monitor,
+      base::Bind(&HWNDMessageHandler::OnAppbarAutohideEdgesChanged,
+                 autohide_factory_.GetWeakPtr()));
+}
+
+void HWNDMessageHandler::OnAppbarAutohideEdgesChanged() {
+  // This triggers querying WM_NCCALCSIZE again.
+  RECT client;
+  GetWindowRect(hwnd(), &client);
+  SetWindowPos(hwnd(), NULL, client.left, client.top,
+               client.right - client.left, client.bottom - client.top,
+               SWP_FRAMECHANGED);
+}
+
 void HWNDMessageHandler::SetInitialFocus() {
   if (!(GetWindowLong(hwnd(), GWL_EXSTYLE) & WS_EX_TRANSPARENT) &&
       !(GetWindowLong(hwnd(), GWL_EXSTYLE) & WS_EX_NOACTIVATE)) {
@@ -1160,8 +1181,13 @@ void HWNDMessageHandler::RedrawLayeredWindowContents() {
 
   // We need to clip to the dirty rect ourselves.
   layered_window_contents_->sk_canvas()->save(SkCanvas::kClip_SaveFlag);
+  double scale = ui::win::GetDeviceScaleFactor();
+  layered_window_contents_->sk_canvas()->scale(
+      SkScalar(scale),SkScalar(scale));
   layered_window_contents_->ClipRect(invalid_rect_);
   delegate_->PaintLayeredWindow(layered_window_contents_.get());
+  layered_window_contents_->sk_canvas()->scale(
+      SkScalar(1.0/scale),SkScalar(1.0/scale));
   layered_window_contents_->sk_canvas()->restore();
 
   RECT wr;
@@ -1246,10 +1272,6 @@ LRESULT HWNDMessageHandler::OnCreate(CREATESTRUCT* create_struct) {
               WM_CHANGEUISTATE,
               MAKELPARAM(UIS_CLEAR, UISF_HIDEFOCUS),
               0);
-
-  // Bug 964884: detach the IME attached to this window.
-  // We should attach IMEs only when we need to input CJK strings.
-  ImmAssociateContextEx(hwnd(), NULL, 0);
 
   if (remove_standard_frame_) {
     SetWindowLong(hwnd(), GWL_STYLE,
@@ -1535,7 +1557,17 @@ void HWNDMessageHandler::OnMoving(UINT param, const RECT* new_bounds) {
   delegate_->HandleMove();
 }
 
-LRESULT HWNDMessageHandler::OnNCActivate(BOOL active) {
+LRESULT HWNDMessageHandler::OnNCActivate(UINT message,
+                                         WPARAM w_param,
+                                         LPARAM l_param) {
+  // Per MSDN, w_param is either TRUE or FALSE. However, MSDN also hints that:
+  // "If the window is minimized when this message is received, the application
+  // should pass the message to the DefWindowProc function."
+  // It is found out that the high word of w_param might be set when the window
+  // is minimized or restored. To handle this, w_param's high word should be
+  // cleared before it is converted to BOOL.
+  BOOL active = static_cast<BOOL>(LOWORD(w_param));
+
   if (delegate_->CanActivate())
     delegate_->HandleActivationChanged(!!active);
 
@@ -1636,9 +1668,10 @@ LRESULT HWNDMessageHandler::OnNCCalcSize(BOOL mode, LPARAM l_param) {
         return 0;
       }
     }
-    if (GetTopmostAutoHideTaskbarForEdge(ABE_LEFT, monitor))
+    const int autohide_edges = GetAppbarAutohideEdges(monitor);
+    if (autohide_edges & Appbar::EDGE_LEFT)
       client_rect->left += kAutoHideTaskbarThicknessPx;
-    if (GetTopmostAutoHideTaskbarForEdge(ABE_TOP, monitor)) {
+    if (autohide_edges & Appbar::EDGE_TOP) {
       if (!delegate_->IsUsingCustomFrame()) {
         // Tricky bit.  Due to a bug in DwmDefWindowProc()'s handling of
         // WM_NCHITTEST, having any nonclient area atop the window causes the
@@ -1654,9 +1687,9 @@ LRESULT HWNDMessageHandler::OnNCCalcSize(BOOL mode, LPARAM l_param) {
         client_rect->top += kAutoHideTaskbarThicknessPx;
       }
     }
-    if (GetTopmostAutoHideTaskbarForEdge(ABE_RIGHT, monitor))
+    if (autohide_edges & Appbar::EDGE_RIGHT)
       client_rect->right -= kAutoHideTaskbarThicknessPx;
-    if (GetTopmostAutoHideTaskbarForEdge(ABE_BOTTOM, monitor))
+    if (autohide_edges & Appbar::EDGE_BOTTOM)
       client_rect->bottom -= kAutoHideTaskbarThicknessPx;
 
     // We cannot return WVR_REDRAW when there is nonclient area, or Windows
@@ -2002,8 +2035,10 @@ LRESULT HWNDMessageHandler::OnTouchEvent(UINT message,
 #if defined(USE_AURA)
       if (touch_event_type != ui::ET_UNKNOWN) {
         POINT point;
-        point.x = TOUCH_COORD_TO_PIXEL(input[i].x);
-        point.y = TOUCH_COORD_TO_PIXEL(input[i].y);
+        point.x = TOUCH_COORD_TO_PIXEL(input[i].x) /
+            ui::win::GetUndocumentedDPIScale();
+        point.y = TOUCH_COORD_TO_PIXEL(input[i].y) /
+            ui::win::GetUndocumentedDPIScale();
 
         ScreenToClient(hwnd(), &point);
 

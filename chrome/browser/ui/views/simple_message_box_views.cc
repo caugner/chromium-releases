@@ -10,6 +10,7 @@
 #include "base/message_loop.h"
 #include "base/run_loop.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/ui/views/constrained_window_views.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/native_widget_types.h"
@@ -33,7 +34,7 @@ namespace {
 // destroyed before a box in an outer-loop. So to avoid this, ref-counting is
 // used so that the SimpleMessageBoxViews gets deleted at the right time.
 class SimpleMessageBoxViews : public views::DialogDelegate,
-                              public MessageLoop::Dispatcher,
+                              public base::MessageLoop::Dispatcher,
                               public base::RefCounted<SimpleMessageBoxViews> {
  public:
   SimpleMessageBoxViews(const string16& title,
@@ -175,11 +176,7 @@ MessageBoxResult ShowMessageBox(gfx::NativeWindow parent,
                                 MessageBoxType type) {
   scoped_refptr<SimpleMessageBoxViews> dialog(
       new SimpleMessageBoxViews(title, message, type));
-
-  if (parent)
-    views::Widget::CreateWindowWithParent(dialog, parent)->Show();
-  else
-    views::Widget::CreateWindow(dialog)->Show();
+  CreateBrowserModalDialogViews(dialog.get(), parent)->Show();
 
 #if defined(USE_AURA)
   // Use the widget's window itself so that the message loop
@@ -187,11 +184,12 @@ MessageBoxResult ShowMessageBox(gfx::NativeWindow parent,
   // |Cancel| or |Accept|.
   aura::Window* anchor = parent ?
       parent : dialog->GetWidget()->GetNativeWindow();
-  aura::client::GetDispatcherClient(anchor->GetRootWindow())->
-      RunWithDispatcher(dialog, anchor, true);
+  aura::client::GetDispatcherClient(anchor->GetRootWindow())
+      ->RunWithDispatcher(dialog.get(), anchor, true);
 #else
   {
-    MessageLoop::ScopedNestableTaskAllower allow(MessageLoopForUI::current());
+    base::MessageLoop::ScopedNestableTaskAllower allow(
+        base::MessageLoopForUI::current());
     base::RunLoop run_loop(dialog);
     run_loop.Run();
   }

@@ -32,7 +32,7 @@ bool GLContextNSView::Initialize(GLSurface* surface,
   attributes.push_back(NSOpenGLPFADoubleBuffer);
   attributes.push_back(0);
 
-  scoped_nsobject<NSOpenGLPixelFormat> pixel_format;
+  base::scoped_nsobject<NSOpenGLPixelFormat> pixel_format;
   pixel_format.reset([[NSOpenGLPixelFormat alloc]
                          initWithAttributes:&attributes.front()]);
   if (!pixel_format) {
@@ -64,7 +64,7 @@ bool GLContextNSView::MakeCurrent(GLSurface* surface) {
     [context_ setView:view];
   [context_ makeCurrentContext];
 
-  SetCurrent(this, surface);
+  SetCurrent(surface);
 
   if (!surface->OnMakeCurrent(this)) {
     LOG(ERROR) << "Unable to make gl context current.";

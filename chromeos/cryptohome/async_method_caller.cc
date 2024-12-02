@@ -5,9 +5,9 @@
 #include "chromeos/cryptohome/async_method_caller.h"
 
 #include "base/bind.h"
-#include "base/hash_tables.h"
+#include "base/containers/hash_tables.h"
 #include "base/location.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 
@@ -68,6 +68,18 @@ class AsyncMethodCallerImpl : public AsyncMethodCaller {
             weak_ptr_factory_.GetWeakPtr(),
             callback,
             "Couldn't initiate async mount of cryptohome."));
+  }
+
+  virtual void AsyncAddKey(const std::string& user_email,
+                           const std::string& passhash,
+                           const std::string& new_passhash,
+                           Callback callback) OVERRIDE {
+    DBusThreadManager::Get()->GetCryptohomeClient()->
+        AsyncAddKey(user_email, passhash, new_passhash, base::Bind(
+            &AsyncMethodCallerImpl::RegisterAsyncCallback,
+            weak_ptr_factory_.GetWeakPtr(),
+            callback,
+            "Couldn't initiate async key addition."));
   }
 
   virtual void AsyncMountGuest(Callback callback) OVERRIDE {

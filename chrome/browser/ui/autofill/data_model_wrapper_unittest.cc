@@ -4,12 +4,15 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_models.h"
 #include "chrome/browser/ui/autofill/data_model_wrapper.h"
-#include "components/autofill/browser/credit_card.h"
-#include "components/autofill/browser/field_types.h"
-#include "components/autofill/browser/wallet/wallet_items.h"
-#include "components/autofill/browser/wallet/wallet_test_util.h"
+#include "components/autofill/content/browser/wallet/wallet_items.h"
+#include "components/autofill/content/browser/wallet/wallet_test_util.h"
+#include "components/autofill/core/browser/autofill_common_test.h"
+#include "components/autofill/core/browser/autofill_profile.h"
+#include "components/autofill/core/browser/credit_card.h"
+#include "components/autofill/core/browser/field_types.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace autofill {
@@ -26,8 +29,29 @@ TEST(AutofillCreditCardWrapperTest, GetInfoCreditCardExpMonth) {
 
 TEST(AutofillCreditCardWrapperTest, GetDisplayTextEmptyWhenExpired) {
   CreditCard card;
+  card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("1"));
+  card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("2010"));
+  card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("4111111111111111"));
   AutofillCreditCardWrapper wrapper(&card);
   EXPECT_TRUE(wrapper.GetDisplayText().empty());
+}
+
+TEST(AutofillCreditCardWrapperTest, GetDisplayTextEmptyWhenInvalid) {
+  CreditCard card;
+  card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("12"));
+  card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("9999"));
+  card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("41111"));
+  AutofillCreditCardWrapper wrapper(&card);
+  EXPECT_TRUE(wrapper.GetDisplayText().empty());
+}
+
+TEST(AutofillCreditCardWrapperTest, GetDisplayTextNotEmptyWhenValid) {
+  CreditCard card;
+  card.SetRawInfo(CREDIT_CARD_EXP_MONTH, ASCIIToUTF16("12"));
+  card.SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, ASCIIToUTF16("9999"));
+  card.SetRawInfo(CREDIT_CARD_NUMBER, ASCIIToUTF16("4111111111111111"));
+  AutofillCreditCardWrapper wrapper(&card);
+  EXPECT_FALSE(wrapper.GetDisplayText().empty());
 }
 
 TEST(WalletInstrumentWrapperTest, GetInfoCreditCardExpMonth) {
@@ -49,4 +73,24 @@ TEST(WalletInstrumentWrapperTest, GetDisplayTextEmptyWhenExpired) {
   EXPECT_TRUE(wrapper.GetDisplayText().empty());
 }
 
-}  // autofill
+TEST(DataModelWrapperTest, GetDisplayTextEmptyWithoutPhone) {
+  scoped_ptr<wallet::WalletItems::MaskedInstrument> instrument(
+      wallet::GetTestMaskedInstrument());
+
+  WalletInstrumentWrapper instrument_wrapper(instrument.get());
+  ASSERT_FALSE(instrument_wrapper.GetDisplayText().empty());
+
+  WalletAddressWrapper address_wrapper(&instrument->address());
+  ASSERT_FALSE(address_wrapper.GetDisplayText().empty());
+
+  const_cast<wallet::Address*>(&instrument->address())->set_phone_number(
+      string16());
+
+  ASSERT_TRUE(instrument_wrapper.GetInfo(PHONE_HOME_WHOLE_NUMBER).empty());
+  EXPECT_TRUE(instrument_wrapper.GetDisplayText().empty());
+
+  ASSERT_TRUE(address_wrapper.GetInfo(PHONE_HOME_WHOLE_NUMBER).empty());
+  EXPECT_TRUE(address_wrapper.GetDisplayText().empty());
+}
+
+}  // namespace autofill

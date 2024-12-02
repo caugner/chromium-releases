@@ -5,10 +5,11 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_nsobject.h"
-#include "base/utf_string_conversions.h"
-#import "chrome/browser/ui/cocoa/task_manager_mac.h"
+#include "base/mac/scoped_nsobject.h"
+#include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/task_manager/resource_provider.h"
 #import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
+#import "chrome/browser/ui/cocoa/task_manager_mac.h"
 #include "grit/generated_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #import "testing/gtest_mac.h"
@@ -17,7 +18,7 @@
 
 namespace {
 
-class TestResource : public TaskManager::Resource {
+class TestResource : public task_manager::Resource {
  public:
   TestResource(const string16& title, pid_t pid) : title_(title), pid_(pid) {}
   virtual string16 GetTitle() const OVERRIDE { return title_; }
@@ -46,7 +47,7 @@ class TaskManagerWindowControllerTest : public CocoaTest {
 // Test creation, to ensure nothing leaks or crashes.
 TEST_F(TaskManagerWindowControllerTest, Init) {
   TaskManager task_manager;
-  TaskManagerMac* bridge(new TaskManagerMac(&task_manager, false));
+  TaskManagerMac* bridge(new TaskManagerMac(&task_manager));
   TaskManagerWindowController* controller = bridge->cocoa_controller();
 
   // Releases the controller, which in turn deletes |bridge|.
@@ -64,7 +65,7 @@ TEST_F(TaskManagerWindowControllerTest, Sort) {
   task_manager.AddResource(&resource2);
   task_manager.AddResource(&resource3);  // Will be in the same group as 2.
 
-  TaskManagerMac* bridge(new TaskManagerMac(&task_manager, false));
+  TaskManagerMac* bridge(new TaskManagerMac(&task_manager));
   TaskManagerWindowController* controller = bridge->cocoa_controller();
   NSTableView* table = [controller tableView];
   ASSERT_EQ(3, [controller numberOfRowsInTableView:table]);
@@ -97,7 +98,7 @@ TEST_F(TaskManagerWindowControllerTest, SelectionAdaptsToSorting) {
   task_manager.AddResource(&resource1);
   task_manager.AddResource(&resource2);
 
-  TaskManagerMac* bridge(new TaskManagerMac(&task_manager, false));
+  TaskManagerMac* bridge(new TaskManagerMac(&task_manager));
   TaskManagerWindowController* controller = bridge->cocoa_controller();
   NSTableView* table = [controller tableView];
   ASSERT_EQ(2, [controller numberOfRowsInTableView:table]);

@@ -30,8 +30,9 @@ class WebContentsViewAndroid : public WebContentsViewPort,
   void SetContentViewCore(ContentViewCoreImpl* content_view_core);
 
 #if defined(GOOGLE_TV)
-  void RequestExternalVideoSurface(int player_id);
-  void NotifyGeometryChange(int player_id, const gfx::RectF& rect);
+  void NotifyExternalSurface(int player_id,
+                             bool is_request,
+                             const gfx::RectF& rect);
 #endif
 
   // WebContentsView implementation --------------------------------------------
@@ -62,8 +63,7 @@ class WebContentsViewAndroid : public WebContentsViewPort,
   virtual void SetOverscrollControllerEnabled(bool enabled) OVERRIDE;
 
   // Backend implementation of RenderViewHostDelegateView.
-  virtual void ShowContextMenu(const ContextMenuParams& params,
-                               ContextMenuSourceType type) OVERRIDE;
+  virtual void ShowContextMenu(const ContextMenuParams& params) OVERRIDE;
   virtual void ShowPopupMenu(const gfx::Rect& bounds,
                              int item_height,
                              double item_font_size,

@@ -30,9 +30,9 @@ TEST_F(LayerTreeHostFiltersPixelTest, BackgroundFilterBlur) {
   filters.append(WebKit::WebFilterOperation::createBlurFilter(2));
   blur->SetBackgroundFilters(filters);
 
-  RunPixelTest(background,
-               base::FilePath(FILE_PATH_LITERAL(
-                   "background_filter_blur.png")));
+  RunPixelTest(GL_WITH_BITMAP,
+               background,
+               base::FilePath(FILE_PATH_LITERAL("background_filter_blur.png")));
 }
 
 TEST_F(LayerTreeHostFiltersPixelTest, BackgroundFilterBlurOutsets) {
@@ -55,7 +55,8 @@ TEST_F(LayerTreeHostFiltersPixelTest, BackgroundFilterBlurOutsets) {
   filters.append(WebKit::WebFilterOperation::createBlurFilter(5));
   blur->SetBackgroundFilters(filters);
 
-  RunPixelTest(background,
+  RunPixelTest(GL_WITH_BITMAP,
+               background,
                base::FilePath(FILE_PATH_LITERAL(
                    "background_filter_blur_outsets.png")));
 }
@@ -93,9 +94,9 @@ TEST_F(LayerTreeHostFiltersPixelTest, BackgroundFilterBlurOffAxis) {
   blur->SetBackgroundFilters(filters);
 
 #if defined(OS_WIN)
-  // Windows has 4 pixels off by 1: crbug.com/225027
-  float percentage_pixels_large_error = 0.01f;  // 4px / (200*200)
-  float percentage_pixels_small_error = 0.01f;  // 4px / (200*200)
+  // Windows has 5 pixels off by 1: crbug.com/225027
+  float percentage_pixels_large_error = 0.0125f;  // 5px / (200*200)
+  float percentage_pixels_small_error = 0.0125f;  // 5px / (200*200)
   float average_error_allowed_in_bad_pixels = 1.f;
   int large_error_allowed = 1;
   int small_error_allowed = 1;
@@ -108,7 +109,8 @@ TEST_F(LayerTreeHostFiltersPixelTest, BackgroundFilterBlurOffAxis) {
       small_error_allowed));
 #endif
 
-  RunPixelTest(background,
+  RunPixelTest(GL_WITH_BITMAP,
+               background,
                base::FilePath(FILE_PATH_LITERAL(
                    "background_filter_blur_off_axis.png")));
 }

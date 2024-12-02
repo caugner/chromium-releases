@@ -26,6 +26,11 @@ struct WhitelistedComponentExtensionIME {
   const char* id;
   const char* path;
 } whitelisted_component_extension[] = {
+  {
+    // ChromeOS Keyboards extension.
+    "jhffeifommiaekmbkkjlpmilogcfdohp",
+    "/usr/share/chromeos-assets/input_methods/keyboard_layouts",
+  },
 #if defined(OFFICIAL_BUILD)
   {
     // Official Google Japanese Input.
@@ -33,11 +38,46 @@ struct WhitelistedComponentExtensionIME {
     "/usr/share/chromeos-assets/input_methods/nacl_mozc",
   },
   {
+    // Google Chinese Input (zhuyin)
+    "goedamlknlnjaengojinmfgpmdjmkooo",
+    "/usr/share/chromeos-assets/input_methods/zhuyin",
+  },
+  {
+    // Google Chinese Input (pinyin)
+    "nmblnjkfdkabgdofidlkienfnnbjhnab",
+    "/usr/share/chromeos-assets/input_methods/pinyin",
+  },
+  {
+    // Google Chinese Input (cangjie)
+    "gjhclobljhjhgoebiipblnmdodbmpdgd",
+    "/usr/share/chromeos-assets/input_methods/cangjie",
+  },
+  {
+    // Google Chinese Input (wubi)
+    "jcffnbbngddhenhcnebafkbdomehdhpd",
+    "/usr/share/chromeos-assets/input_methods/wubi",
+  },
+  {
     // Google input tools.
     "gjaehgfemfahhmlgpdfknkhdnemmolop",
     "/usr/share/chromeos-assets/input_methods/input_tools",
   },
 #else
+  {
+    // Open-sourced Pinyin Chinese Input Method.
+    "cpgalbafkoofkjmaeonnfijgpfennjjn",
+    "/usr/share/chromeos-assets/input_methods/pinyin",
+  },
+  {
+    // Open-sourced Zhuyin Chinese Input Method.
+    "ekbifjdfhkmdeeajnolmgdlmkllopefi",
+    "/usr/share/chromeos-assets/input_methods/zhuyin",
+  },
+  {
+    // Open-sourced Cangjie Chinese Input Method.
+    "aeebooiibjahgpgmhkeocbeekccfknbj",
+    "/usr/share/chromeos-assets/input_methods/cangjie",
+  },
   {
     // Open-sourced Mozc Japanese Input.
     "bbaiamgfapehflhememkfglaehiobjnk",
@@ -112,17 +152,10 @@ void ComponentExtensionIMEManagerImpl::InitializeAsync(
   DCHECK(!is_initialized_);
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  // We have to call extension_l10n_util::LocalizeExtension to localize each
-  // extension on FILE thread. However it calls non-thread safe function
-  // l10n_util::GetAvailableLocales internally. Thus, to avoid race condition,
-  // call GetAvailableLocales here to initialize internal state of its function.
-  // TODO(nona): Remove this once crbug.com/233241 is fixed.
-  l10n_util::GetAvailableLocales();
-
   std::vector<ComponentExtensionIME>* component_extension_ime_list
       = new std::vector<ComponentExtensionIME>;
-  BrowserThread::PostTaskAndReply(
-      BrowserThread::FILE,
+  content::BrowserThread::PostTaskAndReply(
+      content::BrowserThread::FILE,
       FROM_HERE,
       base::Bind(&ComponentExtensionIMEManagerImpl::ReadComponentExtensionsInfo,
                  base::Unretained(component_extension_ime_list)),
@@ -185,7 +218,7 @@ bool ComponentExtensionIMEManagerImpl::ReadExtensionInfo(
       url_string);
   if (!url.is_valid())
     return false;
-  out->options_page_url = url.spec();
+  out->options_page_url = url;
   return true;
 }
 

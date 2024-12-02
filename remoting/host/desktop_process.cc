@@ -13,7 +13,7 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "remoting/base/auto_thread.h"
 #include "remoting/base/auto_thread_task_runner.h"
@@ -36,7 +36,7 @@ DesktopProcess::DesktopProcess(
 
 DesktopProcess::~DesktopProcess() {
   DCHECK(!daemon_channel_);
-  DCHECK(!desktop_agent_);
+  DCHECK(!desktop_agent_.get());
 }
 
 DesktopEnvironmentFactory& DesktopProcess::desktop_environment_factory() {
@@ -79,7 +79,7 @@ void DesktopProcess::OnChannelConnected(int32 peer_pid) {
 void DesktopProcess::OnChannelError() {
   // Shutdown the desktop process.
   daemon_channel_.reset();
-  if (desktop_agent_) {
+  if (desktop_agent_.get()) {
     desktop_agent_->Stop();
     desktop_agent_ = NULL;
   }
@@ -122,11 +122,11 @@ bool DesktopProcess::Start(
       AutoThread::Create("Video capture thread", caller_task_runner_);
 
   // Create a desktop agent.
-  desktop_agent_ = DesktopSessionAgent::Create(audio_task_runner,
-                                               caller_task_runner_,
-                                               input_task_runner_,
-                                               io_task_runner,
-                                               video_capture_task_runner);
+  desktop_agent_ = new DesktopSessionAgent(audio_task_runner,
+                                           caller_task_runner_,
+                                           input_task_runner_,
+                                           io_task_runner,
+                                           video_capture_task_runner);
 
   // Start the agent and create an IPC channel to talk to it.
   IPC::PlatformFileForTransit desktop_pipe;
@@ -142,7 +142,7 @@ bool DesktopProcess::Start(
   daemon_channel_.reset(new IPC::ChannelProxy(daemon_channel_name_,
                                               IPC::Channel::MODE_CLIENT,
                                               this,
-                                              io_task_runner));
+                                              io_task_runner.get()));
 
   // Pass |desktop_pipe| to the daemon.
   daemon_channel_->Send(

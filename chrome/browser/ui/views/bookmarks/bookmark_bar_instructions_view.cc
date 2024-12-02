@@ -6,7 +6,7 @@
 
 #include <algorithm>
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar_instructions_delegate.h"
@@ -91,10 +91,9 @@ void BookmarkBarInstructionsView::OnThemeChanged() {
   UpdateColors();
 }
 
-void BookmarkBarInstructionsView::ViewHierarchyChanged(bool is_add,
-                                                       views::View* parent,
-                                                       views::View* child) {
-  if (!updated_colors_ && is_add && GetWidget())
+void BookmarkBarInstructionsView::ViewHierarchyChanged(
+    const ViewHierarchyChangedDetails& details) {
+  if (!updated_colors_ && details.is_add && GetWidget())
     UpdateColors();
 }
 
@@ -110,7 +109,8 @@ void BookmarkBarInstructionsView::LinkClicked(views::Link* source,
 
 void BookmarkBarInstructionsView::ShowContextMenuForView(
     views::View* source,
-    const gfx::Point& point) {
+    const gfx::Point& point,
+    ui::MenuSourceType source_type) {
   // Do nothing here, we don't want to show the Bookmarks context menu when
   // the user right clicks on the "Import bookmarks now" link.
 }

@@ -26,10 +26,10 @@ void AddMenuItem(NSMenu *menu, id target, SEL selector, NSString* title,
     return;
   }
 
-  scoped_nsobject<NSMenuItem> item([[NSMenuItem alloc]
-    initWithTitle:title
-           action:selector
-    keyEquivalent:@""]);
+  base::scoped_nsobject<NSMenuItem> item(
+      [[NSMenuItem alloc] initWithTitle:title
+                                 action:selector
+                          keyEquivalent:@""]);
   [item setTag:tag];
   [menu addItem:item];
   [item setTarget:target];
@@ -63,7 +63,7 @@ void AddMenuItem(NSMenu *menu, id target, SEL selector, NSString* title,
         gfx::SkColorToCalibratedNSColor(chrome_style::GetLinkColor())];
 
     popup_.reset([[MenuButton alloc] initWithFrame:NSZeroRect]);
-    scoped_nsobject<DownArrowPopupMenuCell> popupCell(
+    base::scoped_nsobject<DownArrowPopupMenuCell> popupCell(
         [[DownArrowPopupMenuCell alloc] initTextCell:@""]);
     [popup_ setCell:popupCell];
 
@@ -75,7 +75,7 @@ void AddMenuItem(NSMenu *menu, id target, SEL selector, NSString* title,
     [popupCell setImage:popupImage
         forButtonState:image_button_cell::kDefaultState];
 
-    scoped_nsobject<NSMenu> menu([[NSMenu alloc] initWithTitle:@""]);
+    base::scoped_nsobject<NSMenu> menu([[NSMenu alloc] initWithTitle:@""]);
     [menu setAutoenablesItems:NO];
     [popup_ setAttachedMenu:menu];
 
@@ -92,7 +92,7 @@ void AddMenuItem(NSMenu *menu, id target, SEL selector, NSString* title,
 }
 
 - (void)linkClicked:(id)sender {
-  controller_->StartSignInFlow();
+  controller_->SignInLinkClicked();
 }
 
 - (void)update {
@@ -103,6 +103,10 @@ void AddMenuItem(NSMenu *menu, id target, SEL selector, NSString* title,
   NSString* popupTitle =
       base::SysUTF16ToNSString(controller_->AccountChooserText());
   [popup_ setTitle:popupTitle];
+
+  NSString* linkTitle =
+      base::SysUTF16ToNSString(controller_->SignInLinkText());
+  [link_ setTitle:linkTitle];
 
   // populate menu
   NSMenu* accountMenu = [popup_ attachedMenu];
@@ -140,8 +144,7 @@ void AddMenuItem(NSMenu *menu, id target, SEL selector, NSString* title,
 
   [icon_ setFrameSize:[[icon_ image] size]];
   frame.origin.x -= NSWidth([icon_ frame]) + kAroundTextPadding;
-  frame.size.width = NSWidth([icon_ frame]);
-  [icon_ setFrame:frame];
+  [icon_ setFrameOrigin:frame.origin];
 }
 
 @end

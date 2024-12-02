@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/views/website_settings/permission_selector_view.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/website_settings/website_settings_ui.h"
 #include "grit/generated_resources.h"
 #include "ui/base/accessibility/accessible_view_state.h"
@@ -136,6 +136,7 @@ void PermissionMenuButton::OnMenuButtonClicked(View* source,
           this,
           gfx::Rect(p, gfx::Size()),
           views::MenuItemView::TOPLEFT,
+          ui::MENU_SOURCE_NONE,
           views::MenuRunner::HAS_MNEMONICS) == views::MenuRunner::MENU_DELETED)
     return;
 }

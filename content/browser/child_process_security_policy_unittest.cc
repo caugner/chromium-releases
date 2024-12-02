@@ -59,7 +59,13 @@ class ChildProcessSecurityPolicyTest : public testing::Test {
 
     // Claim to always handle chrome:// URLs because the CPSP's notion of
     // allowing WebUI bindings is hard-wired to this particular scheme.
-    test_browser_client_.AddScheme("chrome");
+    test_browser_client_.AddScheme(chrome::kChromeUIScheme);
+
+    // Claim to always handle file:// URLs like the browser would.
+    // net::URLRequest::IsHandledURL() no longer claims support for default
+    // protocols as this is the responsibility of the browser (which is
+    // responsible for adding the appropriate ProtocolHandler).
+    test_browser_client_.AddScheme(chrome::kFileScheme);
   }
 
   virtual void TearDown() {
@@ -102,30 +108,13 @@ TEST_F(ChildProcessSecurityPolicyTest, IsPseudoSchemeTest) {
 
   EXPECT_TRUE(p->IsPseudoScheme(chrome::kAboutScheme));
   EXPECT_TRUE(p->IsPseudoScheme(chrome::kJavaScriptScheme));
-  EXPECT_TRUE(p->IsPseudoScheme(chrome::kViewSourceScheme));
+  EXPECT_TRUE(p->IsPseudoScheme(kViewSourceScheme));
 
   EXPECT_FALSE(p->IsPseudoScheme("registered-pseudo-scheme"));
   p->RegisterPseudoScheme("registered-pseudo-scheme");
   EXPECT_TRUE(p->IsPseudoScheme("registered-pseudo-scheme"));
 
   EXPECT_FALSE(p->IsPseudoScheme(chrome::kChromeUIScheme));
-}
-
-TEST_F(ChildProcessSecurityPolicyTest, IsDisabledSchemeTest) {
-  ChildProcessSecurityPolicyImpl* p =
-      ChildProcessSecurityPolicyImpl::GetInstance();
-
-  EXPECT_FALSE(p->IsDisabledScheme("evil-scheme"));
-  std::set<std::string> disabled_set;
-  disabled_set.insert("evil-scheme");
-  p->RegisterDisabledSchemes(disabled_set);
-  EXPECT_TRUE(p->IsDisabledScheme("evil-scheme"));
-  EXPECT_FALSE(p->IsDisabledScheme("good-scheme"));
-
-  disabled_set.clear();
-  p->RegisterDisabledSchemes(disabled_set);
-  EXPECT_FALSE(p->IsDisabledScheme("evil-scheme"));
-  EXPECT_FALSE(p->IsDisabledScheme("good-scheme"));
 }
 
 TEST_F(ChildProcessSecurityPolicyTest, StandardSchemesTest) {
@@ -228,17 +217,6 @@ TEST_F(ChildProcessSecurityPolicyTest, CanServiceCommandsTest) {
   EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL("file:///etc/passwd")));
   p->GrantRequestURL(kRendererID, GURL("file:///etc/passwd"));
   EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL("file:///etc/passwd")));
-
-  EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL("evil-scheme:/path")));
-  std::set<std::string> disabled_set;
-  disabled_set.insert("evil-scheme");
-  p->RegisterDisabledSchemes(disabled_set);
-  EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL("http://www.google.com")));
-  EXPECT_FALSE(p->CanRequestURL(kRendererID, GURL("evil-scheme:/path")));
-  disabled_set.clear();
-  p->RegisterDisabledSchemes(disabled_set);
-  EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL("http://www.google.com")));
-  EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL("evil-scheme:/path")));
 
   // We should forget our state if we repeat a renderer id.
   p->Remove(kRendererID);

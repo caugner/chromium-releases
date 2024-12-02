@@ -7,14 +7,12 @@
 #include "base/mac/cocoa_protocols.h"
 #include "base/mac/mac_util.h"
 #include "base/strings/sys_string_conversions.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/balloon_notification_ui_manager.h"
-
-#if defined(ENABLE_MESSAGE_CENTER)
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/notifications/message_center_notification_manager.h"
+#include "chrome/browser/profiles/profile.h"
 #include "ui/message_center/message_center_util.h"
-#endif
 
 @class NSUserNotificationCenter;
 
@@ -100,14 +98,12 @@ NotificationUIManagerMac::ControllerNotification::~ControllerNotification() {
 
 // static
 NotificationUIManager* NotificationUIManager::Create(PrefService* local_state) {
-#if defined(ENABLE_MESSAGE_CENTER)
   // TODO(rsesek): Remove this function and merge it with the one in
   // notification_ui_manager.cc.
   if (DelegatesToMessageCenter()) {
     return new MessageCenterNotificationManager(
-        g_browser_process->message_center());
+        g_browser_process->message_center(), local_state);
   }
-#endif
 
   BalloonNotificationUIManager* balloon_manager = NULL;
   if (base::mac::IsOSMountainLionOrLater())
@@ -149,7 +145,7 @@ void NotificationUIManagerMac::Add(const Notification& notification,
     ns_notification.subtitle =
         base::SysUTF16ToNSString(notification.display_source());
     ns_notification.informativeText =
-        base::SysUTF16ToNSString(notification.body());
+        base::SysUTF16ToNSString(notification.message());
     ns_notification.userInfo =
         [NSDictionary dictionaryWithObject:base::SysUTF8ToNSString(
             notification.notification_id())
@@ -164,6 +160,25 @@ void NotificationUIManagerMac::Add(const Notification& notification,
 
     [GetNotificationCenter() deliverNotification:ns_notification];
   }
+}
+
+std::set<std::string>
+NotificationUIManagerMac::GetAllIdsByProfileAndSourceOrigin(
+    Profile* profile, const GURL& source_origin) {
+  std::set<std::string> notification_ids =
+      BalloonNotificationUIManager::GetAllIdsByProfileAndSourceOrigin(
+          profile, source_origin);
+
+  for (NotificationMap::iterator it = notification_map_.begin();
+       it != notification_map_.end(); ++it) {
+    ControllerNotification* controller_notification = it->second;
+    Notification* model = controller_notification->model;
+    if (model->origin_url() == source_origin &&
+        profile->IsSameProfile(controller_notification->profile)) {
+      notification_ids.insert(model->notification_id());
+    }
+  }
+  return notification_ids;
 }
 
 bool NotificationUIManagerMac::CancelById(const std::string& notification_id) {

@@ -12,15 +12,15 @@
 #include "base/logging.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chromeos/network/network_state.h"
+#include "chromeos/network/network_state_handler.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/url_request/url_fetcher.h"
 
@@ -46,8 +46,6 @@ const char kInitialStartPageAttr[] = "initial_start_page";
 const char kSupportPageAttr[] = "support_page";
 
 const char kAcceptedManifestVersion[] = "1.0";
-
-const char kHardwareClass[] = "hardware_class";
 
 // Path to OEM partner startup customization manifest.
 const char kStartupCustomizationManifestPath[] =
@@ -175,7 +173,8 @@ void StartupCustomizationDocument::Init(
     root_->GetString(kRegistrationUrlAttr, &registration_url_);
 
     std::string hwid;
-    if (statistics_provider->GetMachineStatistic(kHardwareClass, &hwid)) {
+    if (statistics_provider->GetMachineStatistic(
+            chromeos::system::kHardwareClass, &hwid)) {
       ListValue* hwid_list = NULL;
       if (root_->GetList(kHwidMapAttr, &hwid_list)) {
         for (size_t i = 0; i < hwid_list->GetSize(); ++i) {
@@ -310,8 +309,10 @@ void ServicesCustomizationDocument::OnURLFetchComplete(
     source->GetResponseAsString(&data);
     LoadManifestFromString(data);
   } else {
-    NetworkLibrary* network = CrosLibrary::Get()->GetNetworkLibrary();
-    if (!network->Connected() && num_retries_ < kMaxFetchRetries) {
+    const NetworkState* default_network =
+        NetworkHandler::Get()->network_state_handler()->DefaultNetwork();
+    if (default_network && default_network->IsConnectedState() &&
+        num_retries_ < kMaxFetchRetries) {
       num_retries_++;
       retry_timer_.Start(FROM_HERE,
                          base::TimeDelta::FromSeconds(kRetriesDelayInSec),

@@ -6,8 +6,8 @@ import json
 import logging
 import operator
 
-from appengine_wrappers import GetAppVersion
-from object_store_creator import ObjectStoreCreator
+from appengine_url_fetcher import AppEngineUrlFetcher
+import url_constants
 
 class ChannelInfo(object):
   def __init__(self, channel, branch, version):
@@ -16,21 +16,34 @@ class ChannelInfo(object):
     self.version = version
 
 class BranchUtility(object):
-  def __init__(self, fetch_url, fetcher, object_store=None):
-    self._fetch_url = fetch_url
+  def __init__(self, fetch_url, history_url, fetcher, object_store_creator):
     self._fetcher = fetcher
-    if object_store is None:
-      object_store = (ObjectStoreCreator.SharedFactory(GetAppVersion())
-          .Create(BranchUtility).Create())
-    self._object_store = object_store
+    # BranchUtility is obviously cross-channel, so set the channel to None.
+    self._branch_object_store = object_store_creator.Create(BranchUtility,
+                                                            category='branch',
+                                                            channel=None)
+    self._version_object_store = object_store_creator.Create(BranchUtility,
+                                                             category='version',
+                                                             channel=None)
+    self._fetch_result = self._fetcher.FetchAsync(fetch_url)
+    self._history_result = self._fetcher.FetchAsync(history_url)
 
   @staticmethod
-  def GetAllBranchNames():
-    return ['stable', 'beta', 'dev', 'trunk']
+  def GetAllChannelNames():
+    return ('stable', 'beta', 'dev', 'trunk')
 
-  def GetAllBranchNumbers(self):
-    return [(branch, self.GetBranchNumberForChannelName(branch))
-            for branch in BranchUtility.GetAllBranchNames()]
+  @staticmethod
+  def NewestChannel(channels):
+    for channel in reversed(BranchUtility.GetAllChannelNames()):
+      if channel in channels:
+        return channel
+
+  @staticmethod
+  def Create(object_store_creator):
+    return BranchUtility(url_constants.OMAHA_PROXY_URL,
+                         url_constants.OMAHA_DEV_HISTORY,
+                         AppEngineUrlFetcher(),
+                         object_store_creator)
 
   @staticmethod
   def SplitChannelNameFromPath(path):
@@ -46,9 +59,27 @@ class BranchUtility(object):
       return (first, second)
     return (None, path)
 
-  def GetBranchNumberForChannelName(self, channel_name):
-    """Returns the branch number for a channel name.
-    """
+  def GetAllBranchNumbers(self):
+    return ((channel, self.GetChannelInfo(channel).branch)
+            for channel in BranchUtility.GetAllChannelNames())
+
+  def GetAllVersionNumbers(self):
+    return (self.GetChannelInfo(channel).version
+            for channel in BranchUtility.GetAllChannelNames())
+
+  def GetAllChannelInfo(self):
+    return (self.GetChannelInfo(channel)
+            for channel in BranchUtility.GetAllChannelNames())
+
+
+  def GetChannelInfo(self, channel):
+    return ChannelInfo(channel,
+                       self._ExtractFromVersionJson(channel, 'branch'),
+                       self._ExtractFromVersionJson(channel, 'version'))
+
+  def _ExtractFromVersionJson(self, channel_name, data_type):
+    '''Returns the branch or version number for a channel name.
+    '''
     if channel_name == 'trunk':
       return 'trunk'
 

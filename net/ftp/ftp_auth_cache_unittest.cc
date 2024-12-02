@@ -4,9 +4,9 @@
 
 #include "net/ftp/ftp_auth_cache.h"
 
-#include "base/string_number_conversions.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/auth.h"
 #include "testing/gtest/include/gtest/gtest.h"

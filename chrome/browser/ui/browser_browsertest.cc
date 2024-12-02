@@ -8,8 +8,8 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/sys_info.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/command_updater.h"
@@ -47,6 +47,8 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
+#include "chrome/common/translate/language_detection_details.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -55,6 +57,7 @@
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/interstitial_page_delegate.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -69,7 +72,7 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/dns/mock_host_resolver.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_MACOSX)
@@ -182,14 +185,15 @@ class InterstitialObserver : public content::WebContentsObserver {
   DISALLOW_COPY_AND_ASSIGN(InterstitialObserver);
 };
 
-class TransfersAllRedirectsContentBrowserClient
+// Causes the browser to swap processes on a redirect to an HTTPS URL.
+class TransferHttpsRedirectsContentBrowserClient
     : public chrome::ChromeContentBrowserClient {
  public:
   virtual bool ShouldSwapProcessesForRedirect(
       content::ResourceContext* resource_context,
       const GURL& current_url,
       const GURL& new_url) OVERRIDE {
-    return true;
+    return new_url.SchemeIs(chrome::kHttpsScheme);
   }
 };
 
@@ -202,7 +206,7 @@ void CloseWindowCallback(Browser* browser) {
 // menu.
 void RunCloseWithAppMenuCallback(Browser* browser) {
   // ShowAppMenu is modal under views. Schedule a task that closes the window.
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE, base::Bind(&CloseWindowCallback, browser));
   chrome::ShowAppMenu(browser);
 }
@@ -259,7 +263,7 @@ class BrowserTest : public ExtensionBrowserTest {
     for (ExtensionSet::const_iterator it = extensions->begin();
          it != extensions->end(); ++it) {
       if ((*it)->name() == "App Test")
-        return *it;
+        return it->get();
     }
     NOTREACHED();
     return NULL;
@@ -375,10 +379,12 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, ReloadThenCancelBeforeUnload) {
                                   ASCIIToUTF16("onbeforeunload=null;"));
 }
 
-// Tests that a cross-process redirect will only cause the beforeunload
-// handler to run once.
-IN_PROC_BROWSER_TEST_F(BrowserTest, SingleBeforeUnloadAfterRedirect) {
-  // Create HTTP and HTTPS servers for cross-site transition.
+// Ensure that a transferred cross-process navigation does not generate
+// DidStopLoading events until the navigation commits.  If it did, then
+// ui_test_utils::NavigateToURL would proceed before the URL had committed.
+// http://crbug.com/243957.
+IN_PROC_BROWSER_TEST_F(BrowserTest, NoStopDuringTransferUntilCommit) {
+  // Create HTTP and HTTPS servers for a cross-site transition.
   ASSERT_TRUE(test_server()->Start());
   net::SpawnedTestServer https_test_server(net::SpawnedTestServer::TYPE_HTTPS,
                                            net::SpawnedTestServer::kLocalhost,
@@ -386,8 +392,43 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, SingleBeforeUnloadAfterRedirect) {
   ASSERT_TRUE(https_test_server.Start());
 
   // Temporarily replace ContentBrowserClient with one that will cause a
-  // process swap on all redirects.
-  TransfersAllRedirectsContentBrowserClient new_client;
+  // process swap on all redirects to HTTPS URLs.
+  TransferHttpsRedirectsContentBrowserClient new_client;
+  content::ContentBrowserClient* old_client =
+      SetBrowserClientForTesting(&new_client);
+
+  GURL init_url(test_server()->GetURL("files/title1.html"));
+  ui_test_utils::NavigateToURL(browser(), init_url);
+
+  // Navigate to a same-site page that redirects, causing a transfer.
+  GURL dest_url(https_test_server.GetURL("files/title2.html"));
+  GURL redirect_url(test_server()->GetURL("server-redirect?" +
+      dest_url.spec()));
+  ui_test_utils::NavigateToURL(browser(), redirect_url);
+
+  // We should immediately see the new committed entry.
+  WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
+  EXPECT_FALSE(contents->GetController().GetPendingEntry());
+  EXPECT_EQ(dest_url,
+            contents->GetController().GetLastCommittedEntry()->GetURL());
+
+  // Restore previous browser client.
+  SetBrowserClientForTesting(old_client);
+}
+
+// Tests that a cross-process redirect will only cause the beforeunload
+// handler to run once.
+IN_PROC_BROWSER_TEST_F(BrowserTest, SingleBeforeUnloadAfterRedirect) {
+  // Create HTTP and HTTPS servers for a cross-site transition.
+  ASSERT_TRUE(test_server()->Start());
+  net::SpawnedTestServer https_test_server(net::SpawnedTestServer::TYPE_HTTPS,
+                                           net::SpawnedTestServer::kLocalhost,
+                                           base::FilePath(kDocRoot));
+  ASSERT_TRUE(https_test_server.Start());
+
+  // Temporarily replace ContentBrowserClient with one that will cause a
+  // process swap on all redirects to HTTPS URLs.
+  TransferHttpsRedirectsContentBrowserClient new_client;
   content::ContentBrowserClient* old_client =
       SetBrowserClientForTesting(&new_client);
 
@@ -537,8 +578,9 @@ class BeforeUnloadAtQuitWithTwoWindows : public InProcessBrowserTest {
 
     // Run the application event loop to completion, which will cycle the
     // native MessagePump on all platforms.
-    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->PostTask(FROM_HERE,
+                                           base::MessageLoop::QuitClosure());
+    base::MessageLoop::current()->Run();
 
     // Take care of any remaining Cocoa work.
     CycleRunLoops();
@@ -851,7 +893,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, CommandCreateAppShortcutInvalid) {
   ui_test_utils::NavigateToURL(browser(), downloads_url);
   EXPECT_FALSE(command_updater->IsCommandEnabled(IDC_CREATE_SHORTCUTS));
 
-  GURL blank_url(chrome::kAboutBlankURL);
+  GURL blank_url(content::kAboutBlankURL);
   ui_test_utils::NavigateToURL(browser(), blank_url);
   EXPECT_FALSE(command_updater->IsCommandEnabled(IDC_CREATE_SHORTCUTS));
 }
@@ -1038,7 +1080,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, AppIdSwitch) {
 IN_PROC_BROWSER_TEST_F(BrowserTest, PageLanguageDetection) {
   ASSERT_TRUE(test_server()->Start());
 
-  std::string lang;
+  //std::string lang;
+  LanguageDetectionDetails details;
 
   // Open a new tab with a page in English.
   AddTabAtIndex(0, GURL(test_server()->GetURL("files/english_page.html")),
@@ -1050,27 +1093,29 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, PageLanguageDetection) {
       TranslateTabHelper::FromWebContents(current_web_contents);
   content::Source<WebContents> source(current_web_contents);
 
-  ui_test_utils::WindowedNotificationObserverWithDetails<std::string>
+  ui_test_utils::WindowedNotificationObserverWithDetails<
+    LanguageDetectionDetails>
       en_language_detected_signal(chrome::NOTIFICATION_TAB_LANGUAGE_DETERMINED,
                                   source);
   EXPECT_EQ("", translate_tab_helper->language_state().original_language());
   en_language_detected_signal.Wait();
   EXPECT_TRUE(en_language_detected_signal.GetDetailsFor(
-        source.map_key(), &lang));
-  EXPECT_EQ("en", lang);
+        source.map_key(), &details));
+  EXPECT_EQ("en", details.adopted_language);
   EXPECT_EQ("en", translate_tab_helper->language_state().original_language());
 
   // Now navigate to a page in French.
-  ui_test_utils::WindowedNotificationObserverWithDetails<std::string>
+  ui_test_utils::WindowedNotificationObserverWithDetails<
+    LanguageDetectionDetails>
       fr_language_detected_signal(chrome::NOTIFICATION_TAB_LANGUAGE_DETERMINED,
                                   source);
   ui_test_utils::NavigateToURL(
       browser(), GURL(test_server()->GetURL("files/french_page.html")));
   fr_language_detected_signal.Wait();
-  lang.clear();
+  details.adopted_language.clear();
   EXPECT_TRUE(fr_language_detected_signal.GetDetailsFor(
-        source.map_key(), &lang));
-  EXPECT_EQ("fr", lang);
+        source.map_key(), &details));
+  EXPECT_EQ("fr", details.adopted_language);
   EXPECT_EQ("fr", translate_tab_helper->language_state().original_language());
 }
 
@@ -1108,7 +1153,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, RestorePinnedTabs) {
 
   // Add a pinned non-app tab.
   chrome::NewTab(browser());
-  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kAboutBlankURL));
+  ui_test_utils::NavigateToURL(browser(), GURL(content::kAboutBlankURL));
   model->SetTabPinned(2, true);
 
   // Write out the pinned tabs.
@@ -1120,7 +1165,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, RestorePinnedTabs) {
       chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
   StartupBrowserCreatorImpl launch(base::FilePath(), dummy, first_run);
   launch.profile_ = browser()->profile();
-  launch.ProcessStartupURLs(std::vector<GURL>());
+  launch.ProcessStartupURLs(std::vector<GURL>(),
+                            browser()->host_desktop_type());
 
   // The launch should have created a new browser.
   ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile(),
@@ -1171,7 +1217,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_CloseWithAppMenuOpen) {
     return;
 
   // We need a message loop running for menus on windows.
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE, base::Bind(&RunCloseWithAppMenuCallback, browser()));
 }
 
@@ -1195,7 +1241,8 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OpenAppWindowLikeNtp) {
   ASSERT_TRUE(extensions::TabHelper::FromWebContents(app_window));
   EXPECT_FALSE(
       extensions::TabHelper::FromWebContents(app_window)->extension_app());
-  EXPECT_EQ(extension_app->GetFullLaunchURL(), app_window->GetURL());
+  EXPECT_EQ(extensions::AppLaunchInfo::GetFullLaunchURL(extension_app),
+            app_window->GetURL());
 
   // The launch should have created a new browser.
   ASSERT_EQ(2u, chrome::GetBrowserCount(browser()->profile(),
@@ -1252,7 +1299,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_StartMinimized) {
 // Makes sure the forward button is disabled immediately when navigating
 // forward to a slow-to-commit page.
 IN_PROC_BROWSER_TEST_F(BrowserTest, ForwardDisabledOnForward) {
-  GURL blank_url(chrome::kAboutBlankURL);
+  GURL blank_url(content::kAboutBlankURL);
   ui_test_utils::NavigateToURL(browser(), blank_url);
 
   ui_test_utils::NavigateToURL(
@@ -1309,8 +1356,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, DisableMenuItemsWhenIncognitoIsForced) {
 
   // Create a new browser.
   Browser* new_browser =
-      new Browser(Browser::CreateParams(browser()->profile(),
-                                        browser()->host_desktop_type()));
+      new Browser(Browser::CreateParams(
+          browser()->profile()->GetOffTheRecordProfile(),
+          browser()->host_desktop_type()));
   CommandUpdater* new_command_updater =
       new_browser->command_controller()->command_updater();
   // It should have Bookmarks & Settings commands disabled by default.
@@ -1662,7 +1710,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest2, NoTabsInPopups) {
   EXPECT_EQ(1, app_browser->tab_strip_model()->count());
 
   // Now try opening another tab in the app browser.
-  AddTabWithURLParams params2(GURL(chrome::kAboutBlankURL),
+  AddTabWithURLParams params2(GURL(content::kAboutBlankURL),
                               content::PAGE_TRANSITION_TYPED);
   app_browser->AddTabWithURL(&params2);
   EXPECT_EQ(app_browser, params2.target);
@@ -1680,7 +1728,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest2, NoTabsInPopups) {
   EXPECT_EQ(1, app_popup_browser->tab_strip_model()->count());
 
   // Now try opening another tab in the app popup browser.
-  AddTabWithURLParams params3(GURL(chrome::kAboutBlankURL),
+  AddTabWithURLParams params3(GURL(content::kAboutBlankURL),
                               content::PAGE_TRANSITION_TYPED);
   app_popup_browser->AddTabWithURL(&params3);
   EXPECT_EQ(app_popup_browser, params3.target);
@@ -1722,9 +1770,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, FullscreenBookmarkBar) {
 #if defined(OS_MACOSX)
   EXPECT_EQ(BookmarkBar::SHOW, browser()->bookmark_bar_state());
 #elif defined(OS_CHROMEOS)
-  // TODO(jamescook): If immersive fullscreen is enabled by default, test
-  // for BookmarkBar::SHOW.
-  EXPECT_EQ(BookmarkBar::HIDDEN, browser()->bookmark_bar_state());
+  // TODO(jamescook): If immersive fullscreen is disabled by default, test
+  // for BookmarkBar::HIDDEN.
+  EXPECT_EQ(BookmarkBar::SHOW, browser()->bookmark_bar_state());
 #else
   EXPECT_EQ(BookmarkBar::HIDDEN, browser()->bookmark_bar_state());
 #endif
@@ -1976,11 +2024,7 @@ class ClickModifierTest : public InProcessBrowserTest {
     if (disposition == CURRENT_TAB) {
       content::WebContents* web_contents =
           browser->tab_strip_model()->GetActiveWebContents();
-      NavigationController* controller =
-          web_contents ? &web_contents->GetController() : NULL;
-      content::TestNavigationObserver same_tab_observer(
-          content::Source<NavigationController>(controller),
-          1);
+      content::TestNavigationObserver same_tab_observer(web_contents);
       SimulateMouseClick(web_contents, modifiers, button);
       base::RunLoop run_loop;
       same_tab_observer.WaitForObservation(

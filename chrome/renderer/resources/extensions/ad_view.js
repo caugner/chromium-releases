@@ -10,19 +10,16 @@
 // TODO(rpaquay): This file is currently very similar to "web_view.js". Do we
 //                want to refactor to extract common pieces?
 
-var adViewCustom = require('adViewCustom');
-var chrome = requireNative('chrome').GetChrome();
-var forEach = require('utils').forEach;
+var process = requireNative('process');
 var watchForTag = require('tagWatcher').watchForTag;
 
 /**
- * Define "allowCustomAdNetworks" function such that it returns "true" if the
- * "adViewCustom" module was injected. This is so that the
+ * Define "allowCustomAdNetworks" function such that the
  * "kEnableAdviewSrcAttribute" flag is respected.
  */
-var allowCustomAdNetworks = (function(allow){
-  return function() { return Boolean(allow); }
-})(adViewCustom ? adViewCustom.enabled : false);
+function allowCustomAdNetworks() {
+  return process.HasSwitch('enable-adview-src-attribute');
+}
 
 /**
  * List of attribute names to "blindly" sync between <adview> tag and internal
@@ -97,7 +94,7 @@ var AD_VIEW_AD_NETWORKS_WHITELIST = [
  */
 function getAdNetworkInfo(name) {
   var result = null;
-  forEach(AD_VIEW_AD_NETWORKS_WHITELIST, function(i, item) {
+  $Array.forEach(AD_VIEW_AD_NETWORKS_WHITELIST, function(item) {
     if (item.name === name)
       result = item;
   });
@@ -127,10 +124,12 @@ function AdView(adviewNode) {
 AdView.prototype.createBrowserPluginNode_ = function() {
   var browserPluginNode = document.createElement('object');
   browserPluginNode.type = 'application/browser-plugin';
+  // TODO(fsamuel): Change this to 'adview' once AdViewGuest is ready.
+  browserPluginNode.setAttribute('api', 'webview');
   // The <object> node fills in the <adview> container.
   browserPluginNode.style.width = '100%';
   browserPluginNode.style.height = '100%';
-  forEach(AD_VIEW_ATTRIBUTES, function(i, attributeName) {
+  $Array.forEach(AD_VIEW_ATTRIBUTES, function(attributeName) {
     // Only copy attributes that have been assigned values, rather than copying
     // a series of undefined attributes to BrowserPlugin.
     if (this.adviewNode_.hasAttribute(attributeName)) {
@@ -146,7 +145,7 @@ AdView.prototype.createBrowserPluginNode_ = function() {
  * @private
  */
 AdView.prototype.setupCustomAttributes_ = function() {
-  forEach(AD_VIEW_CUSTOM_ATTRIBUTES, function(i, attributeInfo) {
+  $Array.forEach(AD_VIEW_CUSTOM_ATTRIBUTES, function(attributeInfo) {
     if (attributeInfo.onMutation) {
       attributeInfo.onMutation(this);
     }
@@ -160,9 +159,9 @@ AdView.prototype.setupAdviewNodeMethods_ = function() {
   // this.browserPluginNode_[apiMethod] are not necessarily defined immediately
   // after the shadow object is appended to the shadow root.
   var self = this;
-  forEach(AD_VIEW_API_METHODS, function(i, apiMethod) {
+  $Array.forEach(AD_VIEW_API_METHODS, function(apiMethod) {
     self.adviewNode_[apiMethod] = function(var_args) {
-      return self.browserPluginNode_[apiMethod].apply(
+      return $Function.apply(self.browserPluginNode_[apiMethod],
         self.browserPluginNode_, arguments);
     };
   }, this);
@@ -174,11 +173,11 @@ AdView.prototype.setupAdviewNodeMethods_ = function() {
 AdView.prototype.setupAdviewNodeObservers_ = function() {
   // Map attribute modifications on the <adview> tag to property changes in
   // the underlying <object> node.
-  var handleMutation = function(i, mutation) {
+  var handleMutation = $Function.bind(function(mutation) {
     this.handleAdviewAttributeMutation_(mutation);
-  }.bind(this);
+  }, this);
   var observer = new WebKitMutationObserver(function(mutations) {
-    forEach(mutations, handleMutation);
+    $Array.forEach(mutations, handleMutation);
   });
   observer.observe(
       this.adviewNode_,
@@ -191,11 +190,11 @@ AdView.prototype.setupAdviewNodeObservers_ = function() {
  * @private
  */
 AdView.prototype.setupAdviewNodeCustomObservers_ = function() {
-  var handleMutation = function(i, mutation) {
+  var handleMutation = $Function.bind(function(mutation) {
     this.handleAdviewCustomAttributeMutation_(mutation);
-  }.bind(this);
+  }, this);
   var observer = new WebKitMutationObserver(function(mutations) {
-    forEach(mutations, handleMutation);
+    $Array.forEach(mutations, handleMutation);
   });
   var customAttributeNames =
     AD_VIEW_CUSTOM_ATTRIBUTES.map(function(item) { return item.name; });
@@ -208,11 +207,11 @@ AdView.prototype.setupAdviewNodeCustomObservers_ = function() {
  * @private
  */
 AdView.prototype.setupBrowserPluginNodeObservers_ = function() {
-  var handleMutation = function(i, mutation) {
+  var handleMutation = $Function.bind(function(mutation) {
     this.handleBrowserPluginAttributeMutation_(mutation);
-  }.bind(this);
+  }, this);
   var objectObserver = new WebKitMutationObserver(function(mutations) {
-    forEach(mutations, handleMutation);
+    $Array.forEach(mutations, handleMutation);
   });
   objectObserver.observe(
       this.browserPluginNode_,
@@ -225,7 +224,7 @@ AdView.prototype.setupBrowserPluginNodeObservers_ = function() {
 AdView.prototype.setupAdviewNodeProperties_ = function() {
   var browserPluginNode = this.browserPluginNode_;
   // Expose getters and setters for the attributes.
-  forEach(AD_VIEW_ATTRIBUTES, function(i, attributeName) {
+  $Array.forEach(AD_VIEW_ATTRIBUTES, function(attributeName) {
     Object.defineProperty(this.adviewNode_, attributeName, {
       get: function() {
         return browserPluginNode[attributeName];
@@ -239,7 +238,7 @@ AdView.prototype.setupAdviewNodeProperties_ = function() {
 
   // Expose getters and setters for the custom attributes.
   var adviewNode = this.adviewNode_;
-  forEach(AD_VIEW_CUSTOM_ATTRIBUTES, function(i, attributeInfo) {
+  $Array.forEach(AD_VIEW_CUSTOM_ATTRIBUTES, function(attributeInfo) {
     if (attributeInfo.isProperty()) {
       var attributeName = attributeInfo.name;
       Object.defineProperty(this.adviewNode_, attributeName, {
@@ -295,10 +294,10 @@ AdView.prototype.handleAdviewAttributeMutation_ = function(mutation) {
  * @private
  */
 AdView.prototype.handleAdviewCustomAttributeMutation_ = function(mutation) {
-  forEach(AD_VIEW_CUSTOM_ATTRIBUTES, function(i, item) {
+  $Array.forEach(AD_VIEW_CUSTOM_ATTRIBUTES, function(item) {
     if (mutation.attributeName.toUpperCase() == item.name.toUpperCase()) {
       if (item.onMutation) {
-        item.onMutation.bind(item)(this, mutation);
+        $Function.bind(item.onMutation, item)(this, mutation);
       }
     }
   }, this);
@@ -447,7 +446,7 @@ AdView.prototype.setupEvent_ = function(eventname, attribs) {
   this.browserPluginNode_.addEventListener(internalname, function(e) {
     var evt = new Event(eventname, { bubbles: true });
     var detail = e.detail ? JSON.parse(e.detail) : {};
-    forEach(attribs, function(i, attribName) {
+    $Array.forEach(attribs, function(attribName) {
       evt[attribName] = detail[attribName];
     });
     adviewNode.dispatchEvent(evt);

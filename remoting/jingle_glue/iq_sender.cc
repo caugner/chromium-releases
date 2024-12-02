@@ -9,7 +9,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/single_thread_task_runner.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/time.h"
 #include "remoting/jingle_glue/signal_strategy.h"
@@ -46,7 +46,7 @@ scoped_ptr<IqRequest> IqSender::SendIq(scoped_ptr<buzz::XmlElement> stanza,
   std::string id = signal_strategy_->GetNextId();
   stanza->AddAttr(buzz::QN_ID, id);
   if (!signal_strategy_->SendStanza(stanza.Pass())) {
-    return scoped_ptr<IqRequest>(NULL);
+    return scoped_ptr<IqRequest>();
   }
   DCHECK(requests_.find(id) == requests_.end());
   scoped_ptr<IqRequest> request(new IqRequest(this, callback, addressee));

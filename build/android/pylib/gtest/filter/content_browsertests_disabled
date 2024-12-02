@@ -18,28 +18,6 @@ OffTheRecordClipboardTest.ClearContentData
 GpuPixelBrowserTest.*
 FileSystemBrowserTestWithLowQuota.QuotaTest
 ChildProcessSecurityPolicyInProcessBrowserTest.NoLeak
-AudioLayoutTest.AudioDataUrl
-AudioLayoutTest.AudioConstructor
-AudioLayoutTest.AudioConstructorPreload
-AudioLayoutTest.AudioConstructorSrc
-AudioLayoutTest.AudioOnlyVideoIntrinsicSize
-MediaLayoutTest.VideoNoAutoplayTest
-MediaLayoutTest.VideoAutoplayTest
-MediaLayoutTest.VideoLoopTest
-WorkerLayoutTest.SharedWorkerFastConstructor
-WorkerLayoutTest.SharedWorkerFastContextGC
-WorkerLayoutTest.SharedWorkerFastException
-WorkerLayoutTest.SharedWorkerFastGC
-WorkerLayoutTest.SharedWorkerFastInIframe
-WorkerLayoutTest.SharedWorkerFastLocation
-WorkerLayoutTest.SharedWorkerFastName
-WorkerLayoutTest.SharedWorkerFastNavigator
-WorkerLayoutTest.SharedWorkerFastReplaceGlobalConstructor
-WorkerLayoutTest.SharedWorkerFastReplaceSelf
-WorkerLayoutTest.SharedWorkerFastScriptError
-WorkerLayoutTest.SharedWorkerFastShared
-WorkerLayoutTest.SharedWorkerFastSimple
-WorkerXHRHttpLayoutTest.Tests
 
 # Needs to start the test server before
 # BrowserTestBase::SetUpCommandLine is called, but on Android
@@ -69,6 +47,10 @@ PasswordFormConversionUtilsTest.InvalidWebFormElementToPasswordForm
 RenderViewHostManagerTest.*
 
 # http://crbug.com/215894
+DownloadContentTest.CancelInterruptedDownload
+DownloadContentTest.CancelResumingDownload
+DownloadContentTest.RemoveDownload
+DownloadContentTest.RemoveResumingDownload
 DownloadContentTest.ResumeInterruptedDownload
 DownloadContentTest.ResumeInterruptedDownloadNoRange
 DownloadContentTest.ResumeInterruptedDownloadNoVerifiers
@@ -76,16 +58,38 @@ DownloadContentTest.ResumeInterruptedDownloadBadPrecondition
 DownloadContentTest.ResumeWithDeletedFile
 
 # http://crbug.com/181069
-WebrtcBrowserTest.*
+WebrtcBrowserTest.CanSetupVideoCall
+WebrtcBrowserTest.CanSetupAudioAndVideoCall
+WebrtcBrowserTest.CanSetupAudioAndVideoCallWithoutMsidAndBundle
+WebrtcBrowserTest.CallWithDataOnly
+WebrtcBrowserTest.CallWithDataAndMedia
+WebrtcBrowserTest.CanMakeEmptyCallThenAddStreamsAndRenegotiate
+WebrtcBrowserTest.CallWithNewVideoMediaStream
+WebrtcBrowserTest.GetAudioAndVideoStreamAndClone
+WebrtcBrowserTest.GetAudioAndVideoStreamAndStop
+WebrtcBrowserTest.GetVideoStreamAndStop
+WebRTCInternalsBrowserTest.WithRealPeerConnectionCall
+
+# http://crbug.com/175683
+WebrtcBrowserTest.CallWithDataAndLaterAddMedia
 
 # http://crbug.com/224134
 RenderWidgetHostBrowserTest.GetSnapshotFromRendererTest
 
 # http://crbug.com/233118
-FileSystemLayoutTest.*
 IndexedDBBrowserTest.*
-IndexedDBLayoutTest.*
+IndexedDBBrowserTestWithMissingSSTFile.DestroyTest
 IndexedDBBrowserTestWithVersion0Schema.MigrationTest
 IndexedDBBrowserTestWithVersion123456Schema.DestroyTest
 IndexedDBBrowserTestWithVersion987654SSVData.DestroyTest
-BlobLayoutTest.XhrResponseBlob
+
+BookmarkletTest.NonEmptyResult
+MediaSourceTest.Playback_AudioOnly_WebM
+MediaSourceTest.Playback_VideoAudio_WebM
+MediaSourceTest.Playback_VideoOnly_WebM
+
+# http://crbug.com/248796
+ResourceFetcherTests.ResourceFetcher404
+ResourceFetcherTests.ResourceFetcherDeletedInCallback
+ResourceFetcherTests.ResourceFetcherTimeout
+ResourceFetcherTests.ResourceFetcherDownload

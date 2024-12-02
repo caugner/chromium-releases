@@ -35,8 +35,8 @@
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/sha1.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/sys_byteorder.h"
 #include "chrome/browser/chromeos/web_socket_proxy_helper.h"
 #include "chrome/browser/internal_auth.h"
@@ -54,6 +54,7 @@
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/cert/cert_verifier.h"
+#include "net/http/transport_security_state.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/ssl_client_socket.h"
@@ -437,7 +438,7 @@ class Conn {
   DISALLOW_COPY_AND_ASSIGN(Conn);
 };
 
-class SSLChan : public MessageLoopForIO::Watcher {
+class SSLChan : public base::MessageLoopForIO::Watcher {
  public:
   static void Start(const net::AddressList& address_list,
                     const net::HostPortPair& host_port_pair,
@@ -460,7 +461,7 @@ class SSLChan : public MessageLoopForIO::Watcher {
    public:
     DerivedIOBufferWithSize(net::IOBuffer* host, int size)
         : IOBufferWithSize(host->data(), size), host_(host) {
-      DCHECK(host_);
+      DCHECK(host_.get());
       DCHECK(host_->data());
     }
 
@@ -482,11 +483,11 @@ class SSLChan : public MessageLoopForIO::Watcher {
 
     // Obtains IOBuffer to add new data to back.
     net::IOBufferWithSize* GetIOBufferToFill() {
-      if (back_ == NULL) {
+      if (back_.get() == NULL) {
         if (storage_.size() >= kNumBuffersLimit)
           return NULL;
         storage_.push_back(new net::IOBufferWithSize(buf_size_));
-        back_ = new net::DrainableIOBuffer(storage_.back(), buf_size_);
+        back_ = new net::DrainableIOBuffer(storage_.back().get(), buf_size_);
       }
       return new DerivedIOBufferWithSize(
           back_.get(), back_->BytesRemaining());
@@ -494,20 +495,21 @@ class SSLChan : public MessageLoopForIO::Watcher {
 
     // Obtains IOBuffer with some data from front.
     net::IOBufferWithSize* GetIOBufferToProcess() {
-      if (front_ == NULL) {
+      if (front_.get() == NULL) {
         if (storage_.empty())
           return NULL;
-        front_ = new net::DrainableIOBuffer(storage_.front(), buf_size_);
+        front_ = new net::DrainableIOBuffer(storage_.front().get(), buf_size_);
       }
-      int front_capacity = (storage_.size() == 1 && back_) ?
-          back_->BytesConsumed() : buf_size_;
+      int front_capacity =
+          (storage_.size() == 1 && back_.get()) ? back_->BytesConsumed()
+                                                : buf_size_;
       return new DerivedIOBufferWithSize(
           front_.get(), front_capacity - front_->BytesConsumed());
     }
 
     // Records number of bytes as added to back.
     void DidFill(int bytes) {
-      DCHECK(back_);
+      DCHECK(back_.get());
       back_->DidConsume(bytes);
       if (back_->BytesRemaining() == 0)
         back_ = NULL;
@@ -515,7 +517,7 @@ class SSLChan : public MessageLoopForIO::Watcher {
 
     // Pops number of bytes from front.
     void DidProcess(int bytes) {
-      DCHECK(front_);
+      DCHECK(front_.get());
       front_->DidConsume(bytes);
       if (front_->BytesRemaining() == 0) {
         storage_.pop_front();
@@ -584,8 +586,8 @@ class SSLChan : public MessageLoopForIO::Watcher {
           inbound_stream_.GetIOBufferToProcess()
       };
       for (int i = arraysize(buf); i--;) {
-        if (buf[i] && buf[i]->size() > 0) {
-          MessageLoop::current()->PostTask(
+        if (buf[i].get() && buf[i]->size() > 0) {
+          base::MessageLoop::current()->PostTask(
               FROM_HERE,
               base::Bind(&SSLChan::Proceed, weak_factory_.GetWeakPtr()));
           return;
@@ -596,7 +598,7 @@ class SSLChan : public MessageLoopForIO::Watcher {
         socket_->Disconnect();
         socket_.reset();
       }
-      MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+      base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
     }
   }
 
@@ -617,6 +619,9 @@ class SSLChan : public MessageLoopForIO::Watcher {
     if (!cert_verifier_.get())
       cert_verifier_.reset(net::CertVerifier::CreateDefault());
     ssl_context.cert_verifier = cert_verifier_.get();
+    if (!transport_security_state_.get())
+      transport_security_state_.reset(new net::TransportSecurityState);
+    ssl_context.transport_security_state = transport_security_state_.get();
     socket_.reset(factory->CreateSSLClientSocket(
         handle, host_port_pair_, ssl_config_, ssl_context));
     if (!socket_.get()) {
@@ -639,11 +644,11 @@ class SSLChan : public MessageLoopForIO::Watcher {
     is_socket_write_pending_ = false;
     is_read_pipe_blocked_ = false;
     is_write_pipe_blocked_ = false;
-    MessageLoopForIO::current()->WatchFileDescriptor(
-        read_pipe_, false, MessageLoopForIO::WATCH_READ,
+    base::MessageLoopForIO::current()->WatchFileDescriptor(
+        read_pipe_, false, base::MessageLoopForIO::WATCH_READ,
         &read_pipe_controller_, this);
-    MessageLoopForIO::current()->WatchFileDescriptor(
-        write_pipe_, false, MessageLoopForIO::WATCH_WRITE,
+    base::MessageLoopForIO::current()->WatchFileDescriptor(
+        write_pipe_, false, base::MessageLoopForIO::WATCH_WRITE,
         &write_pipe_controller_, this);
     phase_ = PHASE_RUNNING;
     Proceed();
@@ -700,15 +705,15 @@ class SSLChan : public MessageLoopForIO::Watcher {
       if (!is_read_pipe_blocked_ && phase_ == PHASE_RUNNING) {
         scoped_refptr<net::IOBufferWithSize> buf =
             outbound_stream_.GetIOBufferToFill();
-        if (buf && buf->size() > 0) {
+        if (buf.get() && buf->size() > 0) {
           int rv = read(read_pipe_, buf->data(), buf->size());
           if (rv > 0) {
             outbound_stream_.DidFill(rv);
             proceed = true;
           } else if (rv == -1 && errno == EAGAIN) {
             is_read_pipe_blocked_ = true;
-            MessageLoopForIO::current()->WatchFileDescriptor(
-                read_pipe_, false, MessageLoopForIO::WATCH_READ,
+            base::MessageLoopForIO::current()->WatchFileDescriptor(
+                read_pipe_, false, base::MessageLoopForIO::WATCH_READ,
                 &read_pipe_controller_, this);
           } else if (rv == 0) {
             Shut(0);
@@ -722,13 +727,14 @@ class SSLChan : public MessageLoopForIO::Watcher {
       if (!is_socket_read_pending_ && phase_ == PHASE_RUNNING) {
         scoped_refptr<net::IOBufferWithSize> buf =
             inbound_stream_.GetIOBufferToFill();
-        if (buf && buf->size() > 0) {
+        if (buf.get() && buf->size() > 0) {
           int rv = socket_->Read(
-              buf, buf->size(),
+              buf.get(),
+              buf->size(),
               base::Bind(&SSLChan::OnSocketRead, base::Unretained(this)));
           is_socket_read_pending_ = true;
           if (rv != net::ERR_IO_PENDING) {
-            MessageLoop::current()->PostTask(
+            base::MessageLoop::current()->PostTask(
                 FROM_HERE, base::Bind(&SSLChan::OnSocketRead,
                                       weak_factory_.GetWeakPtr(), rv));
           }
@@ -737,13 +743,14 @@ class SSLChan : public MessageLoopForIO::Watcher {
       if (!is_socket_write_pending_) {
         scoped_refptr<net::IOBufferWithSize> buf =
             outbound_stream_.GetIOBufferToProcess();
-        if (buf && buf->size() > 0) {
+        if (buf.get() && buf->size() > 0) {
           int rv = socket_->Write(
-              buf, buf->size(),
+              buf.get(),
+              buf->size(),
               base::Bind(&SSLChan::OnSocketWrite, base::Unretained(this)));
           is_socket_write_pending_ = true;
           if (rv != net::ERR_IO_PENDING) {
-            MessageLoop::current()->PostTask(
+            base::MessageLoop::current()->PostTask(
                 FROM_HERE, base::Bind(&SSLChan::OnSocketWrite,
                                       weak_factory_.GetWeakPtr(), rv));
           }
@@ -754,15 +761,15 @@ class SSLChan : public MessageLoopForIO::Watcher {
       if (!is_write_pipe_blocked_) {
         scoped_refptr<net::IOBufferWithSize> buf =
             inbound_stream_.GetIOBufferToProcess();
-        if (buf && buf->size() > 0) {
+        if (buf.get() && buf->size() > 0) {
           int rv = write(write_pipe_, buf->data(), buf->size());
           if (rv > 0) {
             inbound_stream_.DidProcess(rv);
             proceed = true;
           } else if (rv == -1 && errno == EAGAIN) {
             is_write_pipe_blocked_ = true;
-            MessageLoopForIO::current()->WatchFileDescriptor(
-                write_pipe_, false, MessageLoopForIO::WATCH_WRITE,
+            base::MessageLoopForIO::current()->WatchFileDescriptor(
+                write_pipe_, false, base::MessageLoopForIO::WATCH_WRITE,
                 &write_pipe_controller_, this);
           } else {
             DCHECK_LE(rv, 0);
@@ -781,6 +788,7 @@ class SSLChan : public MessageLoopForIO::Watcher {
   scoped_ptr<net::StreamSocket> socket_;
   net::HostPortPair host_port_pair_;
   scoped_ptr<net::CertVerifier> cert_verifier_;
+  scoped_ptr<net::TransportSecurityState> transport_security_state_;
   net::SSLConfig ssl_config_;
   IOBufferQueue inbound_stream_;
   IOBufferQueue outbound_stream_;
@@ -791,8 +799,8 @@ class SSLChan : public MessageLoopForIO::Watcher {
   bool is_read_pipe_blocked_;
   bool is_write_pipe_blocked_;
   base::WeakPtrFactory<SSLChan> weak_factory_;
-  MessageLoopForIO::FileDescriptorWatcher read_pipe_controller_;
-  MessageLoopForIO::FileDescriptorWatcher write_pipe_controller_;
+  base::MessageLoopForIO::FileDescriptorWatcher read_pipe_controller_;
+  base::MessageLoopForIO::FileDescriptorWatcher write_pipe_controller_;
 
   friend class base::DeleteHelper<SSLChan>;
   DISALLOW_COPY_AND_ASSIGN(SSLChan);

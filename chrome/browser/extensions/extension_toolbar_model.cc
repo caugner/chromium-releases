@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/extension_toolbar_model.h"
 
 #include "base/prefs/pref_service.h"
+#include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 #include "chrome/browser/extensions/browser_event_router.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
@@ -182,6 +183,10 @@ void ExtensionToolbarModel::Observe(
   if (type == chrome::NOTIFICATION_EXTENSION_UNLOADED) {
     extension = content::Details<extensions::UnloadedExtensionInfo>(
         details)->extension;
+  } else if (type ==
+      chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED) {
+    extension = service_->GetExtensionById(
+        *content::Details<const std::string>(details).ptr(), true);
   } else {
     extension = content::Details<const Extension>(details).ptr();
   }
@@ -193,18 +198,22 @@ void ExtensionToolbarModel::Observe(
       if (toolbar_items_[i].get() == extension)
         return;  // Already exists.
     }
-    if (service_->extension_prefs()->GetBrowserActionVisibility(extension))
+    if (extensions::ExtensionActionAPI::GetBrowserActionVisibility(
+            service_->extension_prefs(), extension->id())) {
       AddExtension(extension);
+    }
   } else if (type == chrome::NOTIFICATION_EXTENSION_UNLOADED) {
     RemoveExtension(extension);
   } else if (type == chrome::NOTIFICATION_EXTENSION_UNINSTALLED) {
     UninstalledExtension(extension);
   } else if (type ==
       chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED) {
-    if (service_->extension_prefs()->GetBrowserActionVisibility(extension))
+    if (extensions::ExtensionActionAPI::GetBrowserActionVisibility(
+            service_->extension_prefs(), extension->id())) {
       AddExtension(extension);
-    else
+    } else {
       RemoveExtension(extension);
+    }
   } else {
     NOTREACHED() << "Received unexpected notification";
   }
@@ -325,11 +334,13 @@ void ExtensionToolbarModel::Populate(
   // Create the lists.
   for (ExtensionSet::const_iterator it = service_->extensions()->begin();
        it != service_->extensions()->end(); ++it) {
-    const Extension* extension = *it;
+    const Extension* extension = it->get();
     if (!extension_action_manager->GetBrowserAction(*extension))
       continue;
-    if (!service_->extension_prefs()->GetBrowserActionVisibility(extension))
+    if (!extensions::ExtensionActionAPI::GetBrowserActionVisibility(
+            service_->extension_prefs(), extension->id())) {
       continue;
+    }
 
     extensions::ExtensionIdList::const_iterator pos =
         std::find(positions.begin(), positions.end(), extension->id());
@@ -341,8 +352,8 @@ void ExtensionToolbarModel::Populate(
 
   // Erase current icons.
   for (size_t i = 0; i < toolbar_items_.size(); i++) {
-    FOR_EACH_OBSERVER(Observer, observers_,
-                      BrowserActionRemoved(toolbar_items_[i]));
+    FOR_EACH_OBSERVER(
+        Observer, observers_, BrowserActionRemoved(toolbar_items_[i].get()));
   }
   toolbar_items_.clear();
 
@@ -356,7 +367,7 @@ void ExtensionToolbarModel::Populate(
     // syncing NPAPI-containing extensions, so if one of those is not actually
     // synced, we'll get a NULL in the list.  This sort of case can also happen
     // if some error prevents an extension from loading.
-    if (*iter != NULL)
+    if (iter->get() != NULL)
       toolbar_items_.push_back(*iter);
   }
   toolbar_items_.insert(toolbar_items_.end(), unsorted.begin(),
@@ -364,8 +375,8 @@ void ExtensionToolbarModel::Populate(
 
   // Inform observers.
   for (size_t i = 0; i < toolbar_items_.size(); i++) {
-    FOR_EACH_OBSERVER(Observer, observers_,
-                      BrowserActionAdded(toolbar_items_[i], i));
+    FOR_EACH_OBSERVER(
+        Observer, observers_, BrowserActionAdded(toolbar_items_[i].get(), i));
   }
 }
 

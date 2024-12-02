@@ -5,7 +5,6 @@
 #include "chromeos/dbus/shill_manager_client_stub.h"
 
 #include "base/bind.h"
-#include "base/chromeos/chromeos_version.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "base/values.h"
@@ -29,17 +28,17 @@ namespace {
 // Used to compare values for finding entries to erase in a ListValue.
 // (ListValue only implements a const_iterator version of Find).
 struct ValueEquals {
-  explicit ValueEquals(const Value* first) : first_(first) {}
-  bool operator()(const Value* second) const {
+  explicit ValueEquals(const base::Value* first) : first_(first) {}
+  bool operator()(const base::Value* second) const {
     return first_->Equals(second);
   }
-  const Value* first_;
+  const base::Value* first_;
 };
 
 }  // namespace
 
 ShillManagerClientStub::ShillManagerClientStub()
-: weak_ptr_factory_(this) {
+    : weak_ptr_factory_(this) {
   SetDefaultProperties();
 }
 
@@ -61,7 +60,7 @@ void ShillManagerClientStub::GetProperties(
     const DictionaryValueCallback& callback) {
   if (callback.is_null())
     return;
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE, base::Bind(
           &ShillManagerClientStub::PassStubProperties,
           weak_ptr_factory_.GetWeakPtr(),
@@ -76,7 +75,7 @@ void ShillManagerClientStub::GetNetworksForGeolocation(
     const DictionaryValueCallback& callback) {
   if (callback.is_null())
     return;
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE, base::Bind(
           &ShillManagerClientStub::PassStubGeoNetworks,
           weak_ptr_factory_.GetWeakPtr(),
@@ -88,9 +87,10 @@ void ShillManagerClientStub::SetProperty(const std::string& name,
                                          const base::Closure& callback,
                                          const ErrorCallback& error_callback) {
   stub_properties_.SetWithoutPathExpansion(name, value.DeepCopy());
+  CallNotifyObserversPropertyChanged(name, 0);
   if (callback.is_null())
     return;
-  MessageLoop::current()->PostTask(FROM_HERE, callback);
+  base::MessageLoop::current()->PostTask(FROM_HERE, callback);
 }
 
 void ShillManagerClientStub::RequestScan(const std::string& type,
@@ -114,7 +114,7 @@ void ShillManagerClientStub::RequestScan(const std::string& type,
       chromeos::switches::kEnableStubInteractive)) {
     scan_duration_seconds = 0;
   }
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&ShillManagerClientStub::ScanCompleted,
                  weak_ptr_factory_.GetWeakPtr(), device_path, callback),
@@ -129,8 +129,8 @@ void ShillManagerClientStub::EnableTechnology(
   if (!stub_properties_.GetListWithoutPathExpansion(
       flimflam::kEnabledTechnologiesProperty, &enabled_list)) {
     if (!error_callback.is_null()) {
-      MessageLoop::current()->PostTask(FROM_HERE, callback);
-      MessageLoop::current()->PostTask(
+      base::MessageLoop::current()->PostTask(FROM_HERE, callback);
+      base::MessageLoop::current()->PostTask(
           FROM_HERE,
           base::Bind(error_callback, "StubError", "Property not found"));
     }
@@ -139,7 +139,7 @@ void ShillManagerClientStub::EnableTechnology(
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kEnableStubInteractive)) {
     const int kEnableTechnologyDelaySeconds = 3;
-    MessageLoop::current()->PostDelayedTask(
+    base::MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&ShillManagerClientStub::SetTechnologyEnabled,
                    weak_ptr_factory_.GetWeakPtr(), type, callback, true),
@@ -157,7 +157,7 @@ void ShillManagerClientStub::DisableTechnology(
   if (!stub_properties_.GetListWithoutPathExpansion(
       flimflam::kEnabledTechnologiesProperty, &enabled_list)) {
     if (!error_callback.is_null()) {
-      MessageLoop::current()->PostTask(
+      base::MessageLoop::current()->PostTask(
           FROM_HERE,
           base::Bind(error_callback, "StubError", "Property not found"));
     }
@@ -166,7 +166,7 @@ void ShillManagerClientStub::DisableTechnology(
   if (CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kEnableStubInteractive)) {
     const int kDisableTechnologyDelaySeconds = 3;
-    MessageLoop::current()->PostDelayedTask(
+    base::MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&ShillManagerClientStub::SetTechnologyEnabled,
                    weak_ptr_factory_.GetWeakPtr(), type, callback, false),
@@ -180,9 +180,6 @@ void ShillManagerClientStub::ConfigureService(
     const base::DictionaryValue& properties,
     const ObjectPathCallback& callback,
     const ErrorCallback& error_callback) {
-  if (callback.is_null())
-    return;
-
   ShillServiceClient::TestInterface* service_client =
       DBusThreadManager::Get()->GetShillServiceClient()->GetTestInterface();
 
@@ -190,10 +187,13 @@ void ShillManagerClientStub::ConfigureService(
   std::string type;
   if (!properties.GetString(flimflam::kGuidProperty, &guid) ||
       !properties.GetString(flimflam::kTypeProperty, &type)) {
+    LOG(ERROR) << "ConfigureService requies GUID and Type to be defined";
     // If the properties aren't filled out completely, then just return an empty
     // object path.
-    MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(callback, dbus::ObjectPath()));
+    if (!callback.is_null()) {
+      base::MessageLoop::current()->PostTask(
+          FROM_HERE, base::Bind(callback, dbus::ObjectPath()));
+    }
     return;
   }
 
@@ -231,8 +231,10 @@ void ShillManagerClientStub::ConfigureService(
       DBusThreadManager::Get()->GetShillProfileClient()->GetTestInterface();
   profile_test->AddService(service_path);
 
-  MessageLoop::current()->PostTask(
-      FROM_HERE, base::Bind(callback, dbus::ObjectPath(service_path)));
+  if (!callback.is_null()) {
+    base::MessageLoop::current()->PostTask(
+        FROM_HERE, base::Bind(callback, dbus::ObjectPath(service_path)));
+  }
 }
 
 void ShillManagerClientStub::ConfigureServiceForProfile(
@@ -254,7 +256,7 @@ void ShillManagerClientStub::GetService(
     const ErrorCallback& error_callback) {
   if (callback.is_null())
     return;
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE, base::Bind(callback, dbus::ObjectPath()));
 }
 
@@ -264,7 +266,7 @@ void ShillManagerClientStub::VerifyDestination(
     const ErrorCallback& error_callback) {
   if (callback.is_null())
     return;
-  MessageLoop::current()->PostTask(FROM_HERE, base::Bind(callback, true));
+  base::MessageLoop::current()->PostTask(FROM_HERE, base::Bind(callback, true));
 }
 
 void ShillManagerClientStub::VerifyAndEncryptCredentials(
@@ -274,7 +276,7 @@ void ShillManagerClientStub::VerifyAndEncryptCredentials(
     const ErrorCallback& error_callback) {
   if (callback.is_null())
     return;
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE, base::Bind(callback, "encrypted_credentials"));
 }
 
@@ -285,7 +287,7 @@ void ShillManagerClientStub::VerifyAndEncryptData(
     const ErrorCallback& error_callback) {
   if (callback.is_null())
     return;
-  MessageLoop::current()->PostTask(FROM_HERE,
+  base::MessageLoop::current()->PostTask(FROM_HERE,
                                    base::Bind(callback, "encrypted_data"));
 }
 
@@ -316,52 +318,8 @@ void ShillManagerClientStub::RemoveDevice(const std::string& device_path) {
 }
 
 void ShillManagerClientStub::ClearDevices() {
-  stub_properties_.Remove(flimflam::kDevicesProperty, NULL);
-}
-
-void ShillManagerClientStub::ClearServices() {
-  stub_properties_.Remove(flimflam::kServicesProperty, NULL);
-  stub_properties_.Remove(flimflam::kServiceWatchListProperty, NULL);
-}
-
-void ShillManagerClientStub::AddService(const std::string& service_path,
-                                        bool add_to_watch_list) {
-  if (GetListProperty(flimflam::kServicesProperty)->AppendIfNotPresent(
-      base::Value::CreateStringValue(service_path))) {
-    CallNotifyObserversPropertyChanged(flimflam::kServicesProperty, 0);
-  }
-  if (add_to_watch_list)
-    AddServiceToWatchList(service_path);
-}
-
-void ShillManagerClientStub::AddServiceAtIndex(const std::string& service_path,
-                                               size_t index,
-                                               bool add_to_watch_list) {
-  base::StringValue path_value(service_path);
-  base::ListValue* service_list =
-      GetListProperty(flimflam::kServicesProperty);
-  base::ListValue::iterator iter =
-      std::find_if(service_list->begin(), service_list->end(),
-                   ValueEquals(&path_value));
-  if (iter != service_list->end())
-    service_list->Erase(iter, NULL);
-  service_list->Insert(index, path_value.DeepCopy());
-  CallNotifyObserversPropertyChanged(flimflam::kServicesProperty, 0);
-  if (add_to_watch_list)
-    AddServiceToWatchList(service_path);
-}
-
-void ShillManagerClientStub::RemoveService(const std::string& service_path) {
-  base::StringValue service_path_value(service_path);
-  if (GetListProperty(flimflam::kServicesProperty)->Remove(
-      service_path_value, NULL)) {
-    CallNotifyObserversPropertyChanged(flimflam::kServicesProperty, 0);
-  }
-  if (GetListProperty(flimflam::kServiceWatchListProperty)->Remove(
-      service_path_value, NULL)) {
-    CallNotifyObserversPropertyChanged(
-        flimflam::kServiceWatchListProperty, 0);
-  }
+  GetListProperty(flimflam::kDevicesProperty)->Clear();
+  CallNotifyObserversPropertyChanged(flimflam::kDevicesProperty, 0);
 }
 
 void ShillManagerClientStub::AddTechnology(const std::string& type,
@@ -414,6 +372,57 @@ void ShillManagerClientStub::ClearProperties() {
   stub_properties_.Clear();
 }
 
+void ShillManagerClientStub::MoveServiceToIndex(
+    const std::string& service_path,
+    size_t index,
+    bool add_to_watch_list) {
+  base::StringValue path_value(service_path);
+  base::ListValue* service_list = GetListProperty(flimflam::kServicesProperty);
+  base::ListValue::iterator iter =
+      std::find_if(service_list->begin(), service_list->end(),
+                   ValueEquals(&path_value));
+  if (iter == service_list->end()) {
+    LOG(ERROR) << "Service not found to move: " << service_path;
+    return;
+  }
+  service_list->Erase(iter, NULL);
+  service_list->Insert(index, path_value.DeepCopy());
+  CallNotifyObserversPropertyChanged(flimflam::kServicesProperty, 0);
+  if (add_to_watch_list)
+    AddServiceToWatchList(service_path);
+}
+
+void ShillManagerClientStub::AddManagerService(const std::string& service_path,
+                                               bool add_to_watch_list) {
+  if (GetListProperty(flimflam::kServicesProperty)->AppendIfNotPresent(
+      base::Value::CreateStringValue(service_path))) {
+    CallNotifyObserversPropertyChanged(flimflam::kServicesProperty, 0);
+  }
+  if (add_to_watch_list)
+    AddServiceToWatchList(service_path);
+}
+
+void ShillManagerClientStub::RemoveManagerService(
+    const std::string& service_path) {
+  base::StringValue service_path_value(service_path);
+  if (GetListProperty(flimflam::kServicesProperty)->Remove(
+      service_path_value, NULL)) {
+    CallNotifyObserversPropertyChanged(flimflam::kServicesProperty, 0);
+  }
+  if (GetListProperty(flimflam::kServiceWatchListProperty)->Remove(
+      service_path_value, NULL)) {
+    CallNotifyObserversPropertyChanged(
+        flimflam::kServiceWatchListProperty, 0);
+  }
+}
+
+void ShillManagerClientStub::ClearManagerServices() {
+  GetListProperty(flimflam::kServicesProperty)->Clear();
+  GetListProperty(flimflam::kServiceWatchListProperty)->Clear();
+  CallNotifyObserversPropertyChanged(flimflam::kServicesProperty, 0);
+  CallNotifyObserversPropertyChanged(flimflam::kServiceWatchListProperty, 0);
+}
+
 void ShillManagerClientStub::AddGeoNetwork(
     const std::string& technology,
     const base::DictionaryValue& network) {
@@ -426,14 +435,23 @@ void ShillManagerClientStub::AddGeoNetwork(
   list_value->Append(network.DeepCopy());
 }
 
+void ShillManagerClientStub::AddProfile(const std::string& profile_path) {
+  const char* key = flimflam::kProfilesProperty;
+  if (GetListProperty(key)->AppendIfNotPresent(
+          new base::StringValue(profile_path))) {
+    CallNotifyObserversPropertyChanged(key, 0);
+  }
+}
+
 void ShillManagerClientStub::AddServiceToWatchList(
     const std::string& service_path) {
-  if (GetListProperty(
-      flimflam::kServiceWatchListProperty)->AppendIfNotPresent(
-          base::Value::CreateStringValue(service_path))) {
-    CallNotifyObserversPropertyChanged(
-        flimflam::kServiceWatchListProperty, 0);
-  }
+  // Remove and insert the service, moving it to the front of the watch list.
+  GetListProperty(flimflam::kServiceWatchListProperty)->Remove(
+      base::StringValue(service_path), NULL);
+  GetListProperty(flimflam::kServiceWatchListProperty)->Insert(
+      0, base::Value::CreateStringValue(service_path));
+  CallNotifyObserversPropertyChanged(
+      flimflam::kServiceWatchListProperty, 0);
 }
 
 void ShillManagerClientStub::SetDefaultProperties() {
@@ -468,12 +486,6 @@ void ShillManagerClientStub::PassStubGeoNetworks(
 void ShillManagerClientStub::CallNotifyObserversPropertyChanged(
     const std::string& property,
     int delay_ms) {
-  // Don't actually delay unless we're interactive.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-      chromeos::switches::kEnableStubInteractive)) {
-    delay_ms = 0;
-  }
-
   // Avoid unnecessary delayed task if we have no observers (e.g. during
   // initial setup).
   if (observer_list_.size() == 0)
@@ -482,7 +494,7 @@ void ShillManagerClientStub::CallNotifyObserversPropertyChanged(
           chromeos::switches::kEnableStubInteractive)) {
     delay_ms = 0;
   }
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&ShillManagerClientStub::NotifyObserversPropertyChanged,
                  weak_ptr_factory_.GetWeakPtr(),
@@ -550,7 +562,7 @@ void ShillManagerClientStub::SetTechnologyEnabled(
   CallNotifyObserversPropertyChanged(
       flimflam::kEnabledTechnologiesProperty, 0 /* already delayed */);
   if (!callback.is_null())
-    MessageLoop::current()->PostTask(FROM_HERE, callback);
+    base::MessageLoop::current()->PostTask(FROM_HERE, callback);
   // May affect available services
   CallNotifyObserversPropertyChanged(flimflam::kServicesProperty, 0);
   CallNotifyObserversPropertyChanged(flimflam::kServiceWatchListProperty, 0);
@@ -597,7 +609,7 @@ void ShillManagerClientStub::ScanCompleted(const std::string& device_path,
   CallNotifyObserversPropertyChanged(flimflam::kServiceWatchListProperty,
                                      0);
   if (!callback.is_null())
-    MessageLoop::current()->PostTask(FROM_HERE, callback);
+    base::MessageLoop::current()->PostTask(FROM_HERE, callback);
 }
 
 }  // namespace chromeos

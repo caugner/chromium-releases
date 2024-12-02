@@ -10,18 +10,21 @@
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/guid.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/path_service.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_checker.h"
 #include "base/timer.h"
-#include "base/utf_string_conversions.h"
+#include "base/win/scoped_bstr.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_handle.h"
+#include "base/win/windows_version.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_platform_file.h"
-#include "net/base/ip_endpoint.h"
 #include "remoting/base/auto_thread_task_runner.h"
 // MIDL-generated declarations and definitions.
 #include "remoting/host/chromoting_lib.h"
@@ -123,7 +126,7 @@ class RdpSession : public DesktopSessionWin {
   bool Initialize(const ScreenResolution& resolution);
 
   // Mirrors IRdpDesktopSessionEventHandler.
-  void OnRdpConnected(const net::IPEndPoint& client_endpoint);
+  void OnRdpConnected();
   void OnRdpClosed();
 
  protected:
@@ -147,7 +150,7 @@ class RdpSession : public DesktopSessionWin {
     STDMETHOD(QueryInterface)(REFIID riid, void** ppv) OVERRIDE;
 
     // IRdpDesktopSessionEventHandler interface.
-    STDMETHOD(OnRdpConnected)(byte* client_endpoint, long length) OVERRIDE;
+    STDMETHOD(OnRdpConnected)() OVERRIDE;
     STDMETHOD(OnRdpClosed)() OVERRIDE;
 
    private:
@@ -165,6 +168,9 @@ class RdpSession : public DesktopSessionWin {
   // Used to create an RDP desktop session.
   base::win::ScopedComPtr<IRdpDesktopSession> rdp_desktop_session_;
 
+  // Used to match |rdp_desktop_session_| with the session it is attached to.
+  std::string terminal_id_;
+
   base::WeakPtrFactory<RdpSession> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(RdpSession);
@@ -178,7 +184,7 @@ ConsoleSession::ConsoleSession(
     WtsTerminalMonitor* monitor)
     : DesktopSessionWin(caller_task_runner, io_task_runner, daemon_process, id,
                         monitor) {
-  StartMonitoring(net::IPEndPoint());
+  StartMonitoring(WtsTerminalMonitor::kConsole);
 }
 
 ConsoleSession::~ConsoleSession() {
@@ -225,26 +231,22 @@ bool RdpSession::Initialize(const ScreenResolution& resolution) {
     return false;
   }
 
-  // DaemonProcess::CreateDesktopSession() verifies that the resolution is
-  // valid.
-  DCHECK(resolution.IsValid());
-
   ScreenResolution local_resolution = resolution;
 
   // If the screen resolution is not specified, use the default screen
   // resolution.
   if (local_resolution.IsEmpty()) {
-    local_resolution.dimensions_.set(kDefaultRdpScreenWidth,
-                                     kDefaultRdpScreenHeight);
-    local_resolution.dpi_.set(kDefaultRdpDpi, kDefaultRdpDpi);
+    local_resolution = ScreenResolution(
+        webrtc::DesktopSize(kDefaultRdpScreenWidth, kDefaultRdpScreenHeight),
+        webrtc::DesktopVector(kDefaultRdpDpi, kDefaultRdpDpi));
   }
 
   // Get the screen dimensions assuming the default DPI.
-  SkISize host_size = local_resolution.ScaleDimensionsToDpi(
-      SkIPoint::Make(kDefaultRdpDpi, kDefaultRdpDpi));
+  webrtc::DesktopSize host_size = local_resolution.ScaleDimensionsToDpi(
+      webrtc::DesktopVector(kDefaultRdpDpi, kDefaultRdpDpi));
 
   // Make sure that the host resolution is within the limits supported by RDP.
-  host_size = SkISize::Make(
+  host_size = webrtc::DesktopSize(
       std::min(kMaxRdpScreenWidth,
                std::max(kMinRdpScreenWidth, host_size.width())),
       std::min(kMaxRdpScreenHeight,
@@ -253,8 +255,11 @@ bool RdpSession::Initialize(const ScreenResolution& resolution) {
   // Create an RDP session.
   base::win::ScopedComPtr<IRdpDesktopSessionEventHandler> event_handler(
       new EventHandler(weak_factory_.GetWeakPtr()));
+  terminal_id_ = base::GenerateGUID();
+  base::win::ScopedBstr terminal_id(UTF8ToUTF16(terminal_id_).c_str());
   result = rdp_desktop_session_->Connect(host_size.width(),
                                          host_size.height(),
+                                         terminal_id,
                                          event_handler);
   if (FAILED(result)) {
     LOG(ERROR) << "RdpSession::Create() failed, 0x"
@@ -265,17 +270,17 @@ bool RdpSession::Initialize(const ScreenResolution& resolution) {
   return true;
 }
 
-void RdpSession::OnRdpConnected(const net::IPEndPoint& client_endpoint) {
+void RdpSession::OnRdpConnected() {
   DCHECK(caller_task_runner()->BelongsToCurrentThread());
 
   StopMonitoring();
-  StartMonitoring(client_endpoint);
+  StartMonitoring(terminal_id_);
 }
 
 void RdpSession::OnRdpClosed() {
   DCHECK(caller_task_runner()->BelongsToCurrentThread());
 
-  OnPermanentError();
+  TerminateSession();
 }
 
 void RdpSession::SetScreenResolution(const ScreenResolution& resolution) {
@@ -289,9 +294,7 @@ void RdpSession::SetScreenResolution(const ScreenResolution& resolution) {
 void RdpSession::InjectSas() {
   DCHECK(caller_task_runner()->BelongsToCurrentThread());
 
-  // TODO(alexeypa): implement SAS injection for RDP sessions here.
-  // See http://crbug.com/137696.
-  NOTIMPLEMENTED();
+  rdp_desktop_session_->InjectSas();
 }
 
 RdpSession::EventHandler::EventHandler(
@@ -338,23 +341,12 @@ STDMETHODIMP RdpSession::EventHandler::QueryInterface(REFIID riid, void** ppv) {
   return E_NOINTERFACE;
 }
 
-STDMETHODIMP RdpSession::EventHandler::OnRdpConnected(
-    byte* client_endpoint,
-    long length) {
+STDMETHODIMP RdpSession::EventHandler::OnRdpConnected() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  if (!desktop_session_)
-    return S_OK;
+  if (desktop_session_)
+    desktop_session_->OnRdpConnected();
 
-  net::IPEndPoint endpoint;
-  if (!endpoint.FromSockAddr(reinterpret_cast<sockaddr*>(client_endpoint),
-                             length)) {
-    LOG(ERROR) << "Failed to parse the endpoint passed to OnRdpConnected().";
-    OnRdpClosed();
-    return S_OK;
-  }
-
-  desktop_session_->OnRdpConnected(endpoint);
   return S_OK;
 }
 
@@ -414,6 +406,8 @@ DesktopSessionWin::DesktopSessionWin(
       monitor_(monitor),
       monitoring_notifications_(false) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  ReportElapsedTime("created");
 }
 
 DesktopSessionWin::~DesktopSessionWin() {
@@ -427,27 +421,30 @@ void DesktopSessionWin::OnSessionAttachTimeout() {
 
   LOG(ERROR) << "Session attach notification didn't arrived within "
              << kSessionAttachTimeoutSeconds << " seconds.";
-  OnPermanentError();
+  TerminateSession();
 }
 
-void DesktopSessionWin::StartMonitoring(
-    const net::IPEndPoint& client_endpoint) {
+void DesktopSessionWin::StartMonitoring(const std::string& terminal_id) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
   DCHECK(!monitoring_notifications_);
   DCHECK(!session_attach_timer_.IsRunning());
+
+  ReportElapsedTime("started monitoring");
 
   session_attach_timer_.Start(
       FROM_HERE, base::TimeDelta::FromSeconds(kSessionAttachTimeoutSeconds),
       this, &DesktopSessionWin::OnSessionAttachTimeout);
 
   monitoring_notifications_ = true;
-  monitor_->AddWtsTerminalObserver(client_endpoint, this);
+  monitor_->AddWtsTerminalObserver(terminal_id, this);
 }
 
 void DesktopSessionWin::StopMonitoring() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
   if (monitoring_notifications_) {
+    ReportElapsedTime("stopped monitoring");
+
     monitoring_notifications_ = false;
     monitor_->RemoveWtsTerminalObserver(this);
   }
@@ -456,8 +453,19 @@ void DesktopSessionWin::StopMonitoring() {
   OnSessionDetached();
 }
 
+void DesktopSessionWin::TerminateSession() {
+  DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  StopMonitoring();
+
+  // This call will delete |this| so it should be at the very end of the method.
+  daemon_process()->CloseDesktopSession(id());
+}
+
 void DesktopSessionWin::OnChannelConnected(int32 peer_pid) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
+
+  ReportElapsedTime("channel connected");
 
   // Obtain the handle of the desktop process. It will be passed to the network
   // process to use to duplicate handles of shared memory objects from
@@ -491,13 +499,10 @@ bool DesktopSessionWin::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-void DesktopSessionWin::OnPermanentError() {
+void DesktopSessionWin::OnPermanentError(int exit_code) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  StopMonitoring();
-
-  // This call will delete |this| so it should be at the very end of the method.
-  daemon_process()->CloseDesktopSession(id());
+  TerminateSession();
 }
 
 void DesktopSessionWin::OnSessionAttached(uint32 session_id) {
@@ -505,10 +510,23 @@ void DesktopSessionWin::OnSessionAttached(uint32 session_id) {
   DCHECK(!launcher_);
   DCHECK(monitoring_notifications_);
 
-  // Get the name of the executable the desktop process will run.
+  ReportElapsedTime("attached");
+
+  // Launch elevated on Win8 to be able to inject Alt+Tab.
+  bool launch_elevated = base::win::GetVersion() >= base::win::VERSION_WIN8;
+
+  // Get the name of the executable to run. |kDesktopBinaryName| specifies
+  // uiAccess="true" in it's manifest.
   base::FilePath desktop_binary;
-  if (!GetInstalledBinaryPath(kDesktopBinaryName, &desktop_binary)) {
-    OnPermanentError();
+  bool result;
+  if (launch_elevated) {
+    result = GetInstalledBinaryPath(kDesktopBinaryName, &desktop_binary);
+  } else {
+    result = GetInstalledBinaryPath(kHostBinaryName, &desktop_binary);
+  }
+
+  if (!result) {
+    TerminateSession();
     return;
   }
 
@@ -523,13 +541,17 @@ void DesktopSessionWin::OnSessionAttached(uint32 session_id) {
 
   // Create a delegate capable of launching a process in a different session.
   scoped_ptr<WtsSessionProcessDelegate> delegate(
-      new WtsSessionProcessDelegate(
-          caller_task_runner_, io_task_runner_, target.Pass(), session_id, true,
-          WideToUTF8(kDaemonIpcSecurityDescriptor)));
+      new WtsSessionProcessDelegate(io_task_runner_,
+                                    target.Pass(),
+                                    launch_elevated,
+                                    WideToUTF8(kDaemonIpcSecurityDescriptor)));
+  if (!delegate->Initialize(session_id)) {
+    TerminateSession();
+    return;
+  }
 
   // Create a launcher for the desktop process, using the per-session delegate.
-  launcher_.reset(new WorkerProcessLauncher(
-      caller_task_runner_, delegate.Pass(), this));
+  launcher_.reset(new WorkerProcessLauncher(delegate.Pass(), this));
 }
 
 void DesktopSessionWin::OnSessionDetached() {
@@ -538,6 +560,8 @@ void DesktopSessionWin::OnSessionDetached() {
   launcher_.reset();
 
   if (monitoring_notifications_) {
+    ReportElapsedTime("detached");
+
     session_attach_timer_.Start(
         FROM_HERE, base::TimeDelta::FromSeconds(kSessionAttachTimeoutSeconds),
         this, &DesktopSessionWin::OnSessionAttachTimeout);
@@ -558,6 +582,29 @@ void DesktopSessionWin::CrashDesktopProcess(
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
   launcher_->Crash(location);
+}
+
+void DesktopSessionWin::ReportElapsedTime(const std::string& event) {
+  base::Time now = base::Time::Now();
+
+  std::string passed;
+  if (!last_timestamp_.is_null()) {
+    passed = base::StringPrintf(", %.2fs passed",
+                                (now - last_timestamp_).InSecondsF());
+  }
+
+  base::Time::Exploded exploded;
+  now.LocalExplode(&exploded);
+  VLOG(1) << base::StringPrintf("session(%d): %s at %02d:%02d:%02d.%03d%s",
+                                id(),
+                                event.c_str(),
+                                exploded.hour,
+                                exploded.minute,
+                                exploded.second,
+                                exploded.millisecond,
+                                passed.c_str());
+
+  last_timestamp_ = now;
 }
 
 }  // namespace remoting

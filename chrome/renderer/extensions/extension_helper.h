@@ -14,7 +14,7 @@
 #include "content/public/renderer/render_view_observer.h"
 #include "content/public/renderer/render_view_observer_tracker.h"
 #include "extensions/common/view_type.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebURLResponse.h"
+#include "third_party/WebKit/public/platform/WebURLResponse.h"
 
 class GURL;
 class SkBitmap;
@@ -25,11 +25,6 @@ struct WebApplicationInfo;
 namespace base {
 class DictionaryValue;
 class ListValue;
-}
-
-namespace webkit_glue {
-class ResourceFetcher;
-class ImageResourceFetcher;
 }
 
 namespace extensions {
@@ -76,9 +71,9 @@ class ExtensionHelper
                            const base::ListValue& response,
                            const std::string& error);
   void OnExtensionMessageInvoke(const std::string& extension_id,
+                                const std::string& module_name,
                                 const std::string& function_name,
                                 const base::ListValue& args,
-                                const GURL& event_url,
                                 bool user_gesture);
   void OnExtensionDispatchOnConnect(
       int target_port_id,
@@ -104,14 +99,6 @@ class ExtensionHelper
   // via application definition. The in-progress web app is stored here while
   // its manifest and icons are downloaded.
   scoped_ptr<WebApplicationInfo> pending_app_info_;
-
-  // Used to download the application definition file.
-  scoped_ptr<webkit_glue::ResourceFetcher> app_definition_fetcher_;
-
-  // Used to download the icons for an application.
-  typedef std::vector<linked_ptr<webkit_glue::ImageResourceFetcher> >
-      ImageResourceFetcherList;
-  ImageResourceFetcherList app_icon_fetchers_;
 
   // The number of app icon requests outstanding. When this reaches zero, we're
   // done processing an app definition file.

@@ -15,7 +15,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/process_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
@@ -75,9 +75,13 @@ class TraceEventTestFixture : public testing::Test {
   }
 
   void BeginTrace() {
+    BeginSpecificTrace("*");
+  }
+
+  void BeginSpecificTrace(const std::string& filter) {
     event_watch_notification_ = 0;
     notifications_received_ = 0;
-    TraceLog::GetInstance()->SetEnabled(CategoryFilter("*"),
+    TraceLog::GetInstance()->SetEnabled(CategoryFilter(filter),
                                         TraceLog::RECORD_UNTIL_FULL);
   }
 
@@ -815,10 +819,10 @@ TEST_F(TraceEventTestFixture, DataCaptured) {
 }
 
 class MockEnabledStateChangedObserver :
-      public base::debug::TraceLog::EnabledStateChangedObserver {
+      public base::debug::TraceLog::EnabledStateObserver {
  public:
-  MOCK_METHOD0(OnTraceLogWillEnable, void());
-  MOCK_METHOD0(OnTraceLogWillDisable, void());
+  MOCK_METHOD0(OnTraceLogEnabled, void());
+  MOCK_METHOD0(OnTraceLogDisabled, void());
 };
 
 TEST_F(TraceEventTestFixture, EnabledObserverFiresOnEnable) {
@@ -827,11 +831,12 @@ TEST_F(TraceEventTestFixture, EnabledObserverFiresOnEnable) {
   MockEnabledStateChangedObserver observer;
   TraceLog::GetInstance()->AddEnabledStateObserver(&observer);
 
-  EXPECT_CALL(observer, OnTraceLogWillEnable())
+  EXPECT_CALL(observer, OnTraceLogEnabled())
       .Times(1);
   TraceLog::GetInstance()->SetEnabled(CategoryFilter("*"),
                                       TraceLog::RECORD_UNTIL_FULL);
   testing::Mock::VerifyAndClear(&observer);
+  EXPECT_TRUE(TraceLog::GetInstance()->IsEnabled());
 
   // Cleanup.
   TraceLog::GetInstance()->RemoveEnabledStateObserver(&observer);
@@ -847,13 +852,14 @@ TEST_F(TraceEventTestFixture, EnabledObserverDoesntFireOnSecondEnable) {
   testing::StrictMock<MockEnabledStateChangedObserver> observer;
   TraceLog::GetInstance()->AddEnabledStateObserver(&observer);
 
-  EXPECT_CALL(observer, OnTraceLogWillEnable())
+  EXPECT_CALL(observer, OnTraceLogEnabled())
       .Times(0);
-  EXPECT_CALL(observer, OnTraceLogWillDisable())
+  EXPECT_CALL(observer, OnTraceLogDisabled())
       .Times(0);
   TraceLog::GetInstance()->SetEnabled(CategoryFilter("*"),
                                       TraceLog::RECORD_UNTIL_FULL);
   testing::Mock::VerifyAndClear(&observer);
+  EXPECT_TRUE(TraceLog::GetInstance()->IsEnabled());
 
   // Cleanup.
   TraceLog::GetInstance()->RemoveEnabledStateObserver(&observer);
@@ -871,9 +877,9 @@ TEST_F(TraceEventTestFixture, EnabledObserverDoesntFireOnNestedDisable) {
   testing::StrictMock<MockEnabledStateChangedObserver> observer;
   TraceLog::GetInstance()->AddEnabledStateObserver(&observer);
 
-  EXPECT_CALL(observer, OnTraceLogWillEnable())
+  EXPECT_CALL(observer, OnTraceLogEnabled())
       .Times(0);
-  EXPECT_CALL(observer, OnTraceLogWillDisable())
+  EXPECT_CALL(observer, OnTraceLogDisabled())
       .Times(0);
   TraceLog::GetInstance()->SetDisabled();
   testing::Mock::VerifyAndClear(&observer);
@@ -892,7 +898,7 @@ TEST_F(TraceEventTestFixture, EnabledObserverFiresOnDisable) {
   MockEnabledStateChangedObserver observer;
   TraceLog::GetInstance()->AddEnabledStateObserver(&observer);
 
-  EXPECT_CALL(observer, OnTraceLogWillDisable())
+  EXPECT_CALL(observer, OnTraceLogDisabled())
       .Times(1);
   TraceLog::GetInstance()->SetDisabled();
   testing::Mock::VerifyAndClear(&observer);
@@ -900,6 +906,100 @@ TEST_F(TraceEventTestFixture, EnabledObserverFiresOnDisable) {
   // Cleanup.
   TraceLog::GetInstance()->RemoveEnabledStateObserver(&observer);
 }
+
+// Tests the IsEnabled() state of TraceLog changes before callbacks.
+class AfterStateChangeEnabledStateObserver
+    : public base::debug::TraceLog::EnabledStateObserver {
+ public:
+  AfterStateChangeEnabledStateObserver() {}
+  virtual ~AfterStateChangeEnabledStateObserver() {}
+
+  // base::debug::TraceLog::EnabledStateObserver overrides:
+  virtual void OnTraceLogEnabled() OVERRIDE {
+    EXPECT_TRUE(TraceLog::GetInstance()->IsEnabled());
+  }
+
+  virtual void OnTraceLogDisabled() OVERRIDE {
+    EXPECT_FALSE(TraceLog::GetInstance()->IsEnabled());
+  }
+};
+
+TEST_F(TraceEventTestFixture, ObserversFireAfterStateChange) {
+  ManualTestSetUp();
+
+  AfterStateChangeEnabledStateObserver observer;
+  TraceLog::GetInstance()->AddEnabledStateObserver(&observer);
+
+  TraceLog::GetInstance()->SetEnabled(CategoryFilter("*"),
+                                      TraceLog::RECORD_UNTIL_FULL);
+  EXPECT_TRUE(TraceLog::GetInstance()->IsEnabled());
+
+  TraceLog::GetInstance()->SetDisabled();
+  EXPECT_FALSE(TraceLog::GetInstance()->IsEnabled());
+
+  TraceLog::GetInstance()->RemoveEnabledStateObserver(&observer);
+}
+
+// Tests that a state observer can remove itself during a callback.
+class SelfRemovingEnabledStateObserver
+    : public base::debug::TraceLog::EnabledStateObserver {
+ public:
+  SelfRemovingEnabledStateObserver() {}
+  virtual ~SelfRemovingEnabledStateObserver() {}
+
+  // base::debug::TraceLog::EnabledStateObserver overrides:
+  virtual void OnTraceLogEnabled() OVERRIDE {}
+
+  virtual void OnTraceLogDisabled() OVERRIDE {
+    TraceLog::GetInstance()->RemoveEnabledStateObserver(this);
+  }
+};
+
+TEST_F(TraceEventTestFixture, SelfRemovingObserver) {
+  ManualTestSetUp();
+  ASSERT_EQ(0u, TraceLog::GetInstance()->GetObserverCountForTest());
+
+  SelfRemovingEnabledStateObserver observer;
+  TraceLog::GetInstance()->AddEnabledStateObserver(&observer);
+  EXPECT_EQ(1u, TraceLog::GetInstance()->GetObserverCountForTest());
+
+  TraceLog::GetInstance()->SetEnabled(CategoryFilter("*"),
+                                      TraceLog::RECORD_UNTIL_FULL);
+  TraceLog::GetInstance()->SetDisabled();
+  // The observer removed itself on disable.
+  EXPECT_EQ(0u, TraceLog::GetInstance()->GetObserverCountForTest());
+}
+
+bool IsNewTrace() {
+  bool is_new_trace;
+  TRACE_EVENT_IS_NEW_TRACE(&is_new_trace);
+  return is_new_trace;
+}
+
+TEST_F(TraceEventTestFixture, NewTraceRecording) {
+  ManualTestSetUp();
+  ASSERT_FALSE(IsNewTrace());
+  TraceLog::GetInstance()->SetEnabled(CategoryFilter("*"),
+                                      TraceLog::RECORD_UNTIL_FULL);
+  // First call to IsNewTrace() should succeed. But, the second shouldn't.
+  ASSERT_TRUE(IsNewTrace());
+  ASSERT_FALSE(IsNewTrace());
+  EndTraceAndFlush();
+
+  // IsNewTrace() should definitely be false now.
+  ASSERT_FALSE(IsNewTrace());
+
+  // Start another trace. IsNewTrace() should become true again, briefly, as
+  // before.
+  TraceLog::GetInstance()->SetEnabled(CategoryFilter("*"),
+                                      TraceLog::RECORD_UNTIL_FULL);
+  ASSERT_TRUE(IsNewTrace());
+  ASSERT_FALSE(IsNewTrace());
+
+  // Cleanup.
+  EndTraceAndFlush();
+}
+
 
 // Test that categories work.
 TEST_F(TraceEventTestFixture, Categories) {
@@ -915,6 +1015,8 @@ TEST_F(TraceEventTestFixture, Categories) {
   // Category groups containing more than one category.
   TRACE_EVENT_INSTANT0("c5,c6", "name", TRACE_EVENT_SCOPE_THREAD);
   TRACE_EVENT_INSTANT0("c7,c8", "name", TRACE_EVENT_SCOPE_THREAD);
+  TRACE_EVENT_INSTANT0(TRACE_DISABLED_BY_DEFAULT("c9"), "name",
+                       TRACE_EVENT_SCOPE_THREAD);
 
   EndTraceAndFlush();
   std::vector<std::string> cat_groups;
@@ -931,6 +1033,9 @@ TEST_F(TraceEventTestFixture, Categories) {
                         cat_groups.end(), "c5,c6") != cat_groups.end());
   EXPECT_TRUE(std::find(cat_groups.begin(),
                         cat_groups.end(), "c7,c8") != cat_groups.end());
+  EXPECT_TRUE(std::find(cat_groups.begin(),
+                        cat_groups.end(),
+                        "disabled-by-default-c9") != cat_groups.end());
   // Make sure metadata isn't returned.
   EXPECT_TRUE(std::find(cat_groups.begin(),
                         cat_groups.end(), "__metadata") == cat_groups.end());
@@ -1384,6 +1489,38 @@ TEST_F(TraceEventTestFixture, ThreadNameChanges) {
   EXPECT_EQ(expected_name, tmp);
 }
 
+// Test that the disabled trace categories are included/excluded from the
+// trace output correctly.
+TEST_F(TraceEventTestFixture, DisabledCategories) {
+  ManualTestSetUp();
+
+  BeginTrace();
+  TRACE_EVENT_INSTANT0(TRACE_DISABLED_BY_DEFAULT("cc"), "first",
+                       TRACE_EVENT_SCOPE_THREAD);
+  TRACE_EVENT_INSTANT0("included", "first", TRACE_EVENT_SCOPE_THREAD);
+  EndTraceAndFlush();
+  {
+    const DictionaryValue* item = NULL;
+    ListValue& trace_parsed = trace_parsed_;
+    EXPECT_NOT_FIND_("disabled-by-default-cc");
+    EXPECT_FIND_("included");
+  }
+  Clear();
+
+  BeginSpecificTrace("disabled-by-default-cc");
+  TRACE_EVENT_INSTANT0(TRACE_DISABLED_BY_DEFAULT("cc"), "second",
+                       TRACE_EVENT_SCOPE_THREAD);
+  TRACE_EVENT_INSTANT0("other_included", "second", TRACE_EVENT_SCOPE_THREAD);
+  EndTraceAndFlush();
+
+  {
+    const DictionaryValue* item = NULL;
+    ListValue& trace_parsed = trace_parsed_;
+    EXPECT_FIND_("disabled-by-default-cc");
+    EXPECT_FIND_("other_included");
+  }
+}
+
 // Test trace calls made after tracing singleton shut down.
 //
 // The singleton is destroyed by our base::AtExitManager, but there can be
@@ -1594,9 +1731,12 @@ TEST_F(TraceEventTestFixture, TraceCategoriesAfterNestedEnable) {
   trace_log->SetEnabled(CategoryFilter("foo2"), TraceLog::RECORD_UNTIL_FULL);
   EXPECT_TRUE(*trace_log->GetCategoryGroupEnabled("foo2"));
   EXPECT_FALSE(*trace_log->GetCategoryGroupEnabled("baz"));
+  // The "" becomes the default catergory set when applied.
   trace_log->SetEnabled(CategoryFilter(""), TraceLog::RECORD_UNTIL_FULL);
   EXPECT_TRUE(*trace_log->GetCategoryGroupEnabled("foo"));
   EXPECT_TRUE(*trace_log->GetCategoryGroupEnabled("baz"));
+  EXPECT_STREQ("-*Debug,-*Test",
+               trace_log->GetCurrentCategoryFilter().ToString().c_str());
   trace_log->SetDisabled();
   trace_log->SetDisabled();
   trace_log->SetDisabled();
@@ -1610,7 +1750,23 @@ TEST_F(TraceEventTestFixture, TraceCategoriesAfterNestedEnable) {
   trace_log->SetEnabled(CategoryFilter("moo"), TraceLog::RECORD_UNTIL_FULL);
   EXPECT_TRUE(*trace_log->GetCategoryGroupEnabled("baz"));
   EXPECT_TRUE(*trace_log->GetCategoryGroupEnabled("moo"));
-  EXPECT_TRUE(*trace_log->GetCategoryGroupEnabled("foo"));
+  EXPECT_FALSE(*trace_log->GetCategoryGroupEnabled("foo"));
+  EXPECT_STREQ("-foo,-bar",
+               trace_log->GetCurrentCategoryFilter().ToString().c_str());
+  trace_log->SetDisabled();
+  trace_log->SetDisabled();
+
+  // Make sure disabled categories aren't cleared if we set in the second.
+  trace_log->SetEnabled(CategoryFilter("disabled-by-default-cc,foo"),
+                        TraceLog::RECORD_UNTIL_FULL);
+  EXPECT_FALSE(*trace_log->GetCategoryGroupEnabled("bar"));
+  trace_log->SetEnabled(CategoryFilter("disabled-by-default-gpu"),
+                        TraceLog::RECORD_UNTIL_FULL);
+  EXPECT_TRUE(*trace_log->GetCategoryGroupEnabled("disabled-by-default-cc"));
+  EXPECT_TRUE(*trace_log->GetCategoryGroupEnabled("disabled-by-default-gpu"));
+  EXPECT_TRUE(*trace_log->GetCategoryGroupEnabled("bar"));
+  EXPECT_STREQ("disabled-by-default-cc,disabled-by-default-gpu",
+               trace_log->GetCurrentCategoryFilter().ToString().c_str());
   trace_log->SetDisabled();
   trace_log->SetDisabled();
 }
@@ -1625,8 +1781,15 @@ TEST_F(TraceEventTestFixture, TraceOptionsParsing) {
             TraceLog::TraceOptionsFromString("record-until-full"));
   EXPECT_EQ(TraceLog::RECORD_CONTINUOUSLY,
             TraceLog::TraceOptionsFromString("record-continuously"));
+  EXPECT_EQ(TraceLog::RECORD_UNTIL_FULL | TraceLog::ENABLE_SAMPLING,
+            TraceLog::TraceOptionsFromString("enable-sampling"));
+  EXPECT_EQ(TraceLog::RECORD_CONTINUOUSLY | TraceLog::ENABLE_SAMPLING,
+            TraceLog::TraceOptionsFromString(
+                "record-continuously,enable-sampling"));
 }
 
+// Not supported in split dll build. http://crbug.com/237249
+#if !defined(CHROME_SPLIT_DLL)
 TEST_F(TraceEventTestFixture, TraceSampling) {
   ManualTestSetUp();
 
@@ -1650,6 +1813,7 @@ TEST_F(TraceEventTestFixture, TraceSampling) {
   EXPECT_TRUE(FindNamePhase("Stuff", "P"));
   EXPECT_TRUE(FindNamePhase("Things", "P"));
 }
+#endif  // !CHROME_SPLIT_DLL
 
 class MyData : public base::debug::ConvertableToTraceFormat {
  public:
@@ -1678,8 +1842,26 @@ TEST_F(TraceEventTestFixture, ConvertableTypes) {
                "data1", data1.PassAs<base::debug::ConvertableToTraceFormat>(),
                "data2", data2.PassAs<base::debug::ConvertableToTraceFormat>());
 
+
+  scoped_ptr<MyData> convertData1(new MyData());
+  scoped_ptr<MyData> convertData2(new MyData());
+  TRACE_EVENT2(
+      "foo",
+      "string_first",
+      "str",
+      "string value 1",
+      "convert",
+      convertData1.PassAs<base::debug::ConvertableToTraceFormat>());
+  TRACE_EVENT2(
+      "foo",
+      "string_second",
+      "convert",
+      convertData2.PassAs<base::debug::ConvertableToTraceFormat>(),
+      "str",
+      "string value 2");
   EndTraceAndFlush();
 
+  // One arg version.
   DictionaryValue* dict = FindNamePhase("bar", "B");
   ASSERT_TRUE(dict);
 
@@ -1696,8 +1878,10 @@ TEST_F(TraceEventTestFixture, ConvertableTypes) {
   EXPECT_TRUE(convertable_dict->GetInteger("foo", &foo_val));
   EXPECT_EQ(1, foo_val);
 
+  // Two arg version.
   dict = FindNamePhase("baz", "B");
   ASSERT_TRUE(dict);
+
   args_dict = NULL;
   dict->GetDictionary("args", &args_dict);
   ASSERT_TRUE(args_dict);
@@ -1711,8 +1895,45 @@ TEST_F(TraceEventTestFixture, ConvertableTypes) {
   convertable_dict = NULL;
   EXPECT_TRUE(args_dict->Get("data2", &value));
   ASSERT_TRUE(value->GetAsDictionary(&convertable_dict));
-}
 
+  // Convertable with other types.
+  dict = FindNamePhase("string_first", "B");
+  ASSERT_TRUE(dict);
+
+  args_dict = NULL;
+  dict->GetDictionary("args", &args_dict);
+  ASSERT_TRUE(args_dict);
+
+  std::string str_value;
+  EXPECT_TRUE(args_dict->GetString("str", &str_value));
+  EXPECT_STREQ("string value 1", str_value.c_str());
+
+  value = NULL;
+  convertable_dict = NULL;
+  foo_val = 0;
+  EXPECT_TRUE(args_dict->Get("convert", &value));
+  ASSERT_TRUE(value->GetAsDictionary(&convertable_dict));
+  EXPECT_TRUE(convertable_dict->GetInteger("foo", &foo_val));
+  EXPECT_EQ(1, foo_val);
+
+  dict = FindNamePhase("string_second", "B");
+  ASSERT_TRUE(dict);
+
+  args_dict = NULL;
+  dict->GetDictionary("args", &args_dict);
+  ASSERT_TRUE(args_dict);
+
+  EXPECT_TRUE(args_dict->GetString("str", &str_value));
+  EXPECT_STREQ("string value 2", str_value.c_str());
+
+  value = NULL;
+  convertable_dict = NULL;
+  foo_val = 0;
+  EXPECT_TRUE(args_dict->Get("convert", &value));
+  ASSERT_TRUE(value->GetAsDictionary(&convertable_dict));
+  EXPECT_TRUE(convertable_dict->GetInteger("foo", &foo_val));
+  EXPECT_EQ(1, foo_val);
+}
 
 class TraceEventCallbackTest : public TraceEventTestFixture {
  public:
@@ -1790,6 +2011,8 @@ TEST_F(TraceEventTestFixture, CategoryFilter) {
   std::string category_filter_str = default_cf.ToString();
   EXPECT_STREQ("-*Debug,-*Test", category_filter_str.c_str());
   EXPECT_TRUE(default_cf.IsCategoryGroupEnabled("not-excluded-category"));
+  EXPECT_FALSE(
+      default_cf.IsCategoryGroupEnabled("disabled-by-default-category"));
   EXPECT_FALSE(default_cf.IsCategoryGroupEnabled("Category1,CategoryDebug"));
   EXPECT_FALSE(default_cf.IsCategoryGroupEnabled("CategoryDebug,Category1"));
   EXPECT_FALSE(default_cf.IsCategoryGroupEnabled("CategoryTest,Category2"));
@@ -1819,14 +2042,13 @@ TEST_F(TraceEventTestFixture, CategoryFilter) {
 
   cf.Merge(default_cf);
   category_filter_str = cf.ToString();
-  EXPECT_STREQ("included,inc_pattern*,-excluded,-exc_pattern*,-*Debug,-*Test",
+  EXPECT_STREQ("-excluded,-exc_pattern*,-*Debug,-*Test",
                 category_filter_str.c_str());
   cf.Clear();
-  EXPECT_FALSE(cf.HasIncludedPatterns());
 
   CategoryFilter reconstructed_cf(category_filter_str);
   category_filter_str = reconstructed_cf.ToString();
-  EXPECT_STREQ("included,inc_pattern*,-excluded,-exc_pattern*,-*Debug,-*Test",
+  EXPECT_STREQ("-excluded,-exc_pattern*,-*Debug,-*Test",
                category_filter_str.c_str());
 
   // One included category.
@@ -1838,6 +2060,25 @@ TEST_F(TraceEventTestFixture, CategoryFilter) {
   CategoryFilter one_exc_cf("-only_exc_cat");
   category_filter_str = one_exc_cf.ToString();
   EXPECT_STREQ("-only_exc_cat", category_filter_str.c_str());
+
+  // Enabling a disabled- category does not require all categories to be traced
+  // to be included.
+  CategoryFilter disabled_cat("disabled-by-default-cc,-excluded");
+  EXPECT_STREQ("disabled-by-default-cc,-excluded",
+               disabled_cat.ToString().c_str());
+  EXPECT_TRUE(disabled_cat.IsCategoryGroupEnabled("disabled-by-default-cc"));
+  EXPECT_TRUE(disabled_cat.IsCategoryGroupEnabled("some_other_group"));
+  EXPECT_FALSE(disabled_cat.IsCategoryGroupEnabled("excluded"));
+
+  // Enabled a disabled- category and also including makes all categories to
+  // be traced require including.
+  CategoryFilter disabled_inc_cat("disabled-by-default-cc,included");
+  EXPECT_STREQ("included,disabled-by-default-cc",
+               disabled_inc_cat.ToString().c_str());
+  EXPECT_TRUE(
+      disabled_inc_cat.IsCategoryGroupEnabled("disabled-by-default-cc"));
+  EXPECT_TRUE(disabled_inc_cat.IsCategoryGroupEnabled("included"));
+  EXPECT_FALSE(disabled_inc_cat.IsCategoryGroupEnabled("other_included"));
 
   // Test that IsEmptyOrContainsLeadingOrTrailingWhitespace actually catches
   // categories that are explicitly forbiden.

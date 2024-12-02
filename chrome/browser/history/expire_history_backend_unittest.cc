@@ -14,8 +14,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
-#include "base/string16.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string16.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/history/archived_database.h"
@@ -71,10 +71,11 @@ class ExpireHistoryTest : public testing::Test,
   void AddExampleSourceData(const GURL& url, URLID* id);
 
   // Returns true if the given favicon/thumanil has an entry in the DB.
-  bool HasFavicon(FaviconID favicon_id);
+  bool HasFavicon(chrome::FaviconID favicon_id);
   bool HasThumbnail(URLID url_id);
 
-  FaviconID GetFavicon(const GURL& page_url, IconType icon_type);
+  chrome::FaviconID GetFavicon(const GURL& page_url,
+                               chrome::IconType icon_type);
 
   // Returns the number of text matches for the given URL in the example data
   // added by AddExampleData.
@@ -104,7 +105,7 @@ class ExpireHistoryTest : public testing::Test,
 
   BookmarkModel bookmark_model_;
 
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread db_thread_;
 
@@ -133,7 +134,7 @@ class ExpireHistoryTest : public testing::Test,
 
     base::FilePath history_name = path().Append(kHistoryFile);
     main_db_.reset(new HistoryDatabase);
-    if (main_db_->Init(history_name, NULL) != sql::INIT_OK)
+    if (main_db_->Init(history_name) != sql::INIT_OK)
       main_db_.reset();
 
     base::FilePath archived_name = path().Append(kArchivedHistoryFile);
@@ -179,6 +180,10 @@ class ExpireHistoryTest : public testing::Test,
     // store them so we can tell that the correct notifications were sent.
     notifications_.push_back(std::make_pair(type, details_deleted));
   }
+  virtual void NotifySyncURLsDeleted(
+      bool all_history,
+      bool archived,
+      URLRows* rows) OVERRIDE {}
 };
 
 // The example data consists of 4 visits. The middle two visits are to the
@@ -188,13 +193,13 @@ class ExpireHistoryTest : public testing::Test,
 // (with the one in the middle) when it picks the proper threshold time.
 //
 // Each visit has indexed data, each URL has thumbnail. The first two URLs will
-// share the same favicon, while the last one will have a unique favicon. The
+// share the same avicon, while the last one will have a unique favicon. The
 // second visit for the middle URL is typed.
 //
 // The IDs of the added URLs, and the times of the four added visits will be
 // added to the given arrays.
 void ExpireHistoryTest::AddExampleData(URLID url_ids[3], Time visit_times[4]) {
-  if (!main_db_.get() || !text_db_.get())
+  if (!main_db_.get() || !text_db_)
     return;
 
   // Four times for each visit.
@@ -205,10 +210,10 @@ void ExpireHistoryTest::AddExampleData(URLID url_ids[3], Time visit_times[4]) {
 
   // Two favicons. The first two URLs will share the same one, while the last
   // one will have a unique favicon.
-  FaviconID favicon1 = thumb_db_->AddFavicon(GURL("http://favicon/url1"),
-      FAVICON, GetDefaultFaviconSizes());
-  FaviconID favicon2 = thumb_db_->AddFavicon(GURL("http://favicon/url2"),
-      FAVICON, GetDefaultFaviconSizes());
+  chrome::FaviconID favicon1 = thumb_db_->AddFavicon(
+      GURL("http://favicon/url1"), chrome::FAVICON, GetDefaultFaviconSizes());
+  chrome::FaviconID favicon2 = thumb_db_->AddFavicon(
+      GURL("http://favicon/url2"), chrome::FAVICON, GetDefaultFaviconSizes());
 
   // Three URLs.
   URLRow url_row1(GURL("http://www.google.com/1"));
@@ -288,7 +293,7 @@ void ExpireHistoryTest::AddExampleData(URLID url_ids[3], Time visit_times[4]) {
 }
 
 void ExpireHistoryTest::AddExampleSourceData(const GURL& url, URLID* id) {
-  if (!main_db_.get())
+  if (!main_db_)
     return;
 
   Time last_visit_time = Time::Now();
@@ -317,14 +322,14 @@ void ExpireHistoryTest::AddExampleSourceData(const GURL& url, URLID* id) {
   main_db_->AddVisit(&visit_row4, SOURCE_FIREFOX_IMPORTED);
 }
 
-bool ExpireHistoryTest::HasFavicon(FaviconID favicon_id) {
+bool ExpireHistoryTest::HasFavicon(chrome::FaviconID favicon_id) {
   if (!thumb_db_.get() || favicon_id == 0)
     return false;
   return thumb_db_->GetFaviconHeader(favicon_id, NULL, NULL, NULL);
 }
 
-FaviconID ExpireHistoryTest::GetFavicon(const GURL& page_url,
-                                        IconType icon_type) {
+chrome::FaviconID ExpireHistoryTest::GetFavicon(const GURL& page_url,
+                                                chrome::IconType icon_type) {
   std::vector<IconMapping> icon_mappings;
   if (thumb_db_->GetIconMappingsForPageURL(page_url, icon_type,
                                            &icon_mappings)) {
@@ -345,7 +350,7 @@ bool ExpireHistoryTest::HasThumbnail(URLID url_id) {
 }
 
 int ExpireHistoryTest::CountTextMatchesForURL(const GURL& url) {
-  if (!text_db_.get())
+  if (!text_db_)
     return 0;
 
   // "body" should match all pages in the example data.
@@ -404,13 +409,13 @@ void ExpireHistoryTest::EnsureURLInfoGone(const URLRow& row) {
 TEST_F(ExpireHistoryTest, DeleteFaviconsIfPossible) {
   // Add a favicon record.
   const GURL favicon_url("http://www.google.com/favicon.ico");
-  FaviconID icon_id = thumb_db_->AddFavicon(favicon_url, FAVICON,
-      GetDefaultFaviconSizes());
+  chrome::FaviconID icon_id = thumb_db_->AddFavicon(
+      favicon_url, chrome::FAVICON, GetDefaultFaviconSizes());
   EXPECT_TRUE(icon_id);
   EXPECT_TRUE(HasFavicon(icon_id));
 
   // The favicon should be deletable with no users.
-  std::set<FaviconID> favicon_set;
+  std::set<chrome::FaviconID> favicon_set;
   std::set<GURL> expired_favicons;
   favicon_set.insert(icon_id);
   expirer_.DeleteFaviconsIfPossible(favicon_set, &expired_favicons);
@@ -419,8 +424,8 @@ TEST_F(ExpireHistoryTest, DeleteFaviconsIfPossible) {
   EXPECT_EQ(1U, expired_favicons.count(favicon_url));
 
   // Add back the favicon.
-  icon_id = thumb_db_->AddFavicon(favicon_url, TOUCH_ICON,
-      GetDefaultFaviconSizes());
+  icon_id = thumb_db_->AddFavicon(
+      favicon_url, chrome::TOUCH_ICON, GetDefaultFaviconSizes());
   EXPECT_TRUE(icon_id);
   EXPECT_TRUE(HasFavicon(icon_id));
 
@@ -458,7 +463,7 @@ TEST_F(ExpireHistoryTest, DISABLED_DeleteURLAndFavicon) {
   // Verify things are the way we expect with a URL row, favicon, thumbnail.
   URLRow last_row;
   ASSERT_TRUE(main_db_->GetURLRow(url_ids[2], &last_row));
-  FaviconID favicon_id = GetFavicon(last_row.url(), FAVICON);
+  chrome::FaviconID favicon_id = GetFavicon(last_row.url(), chrome::FAVICON);
   EXPECT_TRUE(HasFavicon(favicon_id));
   // TODO(sky): fix this, see comment in HasThumbnail.
   // EXPECT_TRUE(HasThumbnail(url_ids[2]));
@@ -508,7 +513,7 @@ TEST_F(ExpireHistoryTest, DISABLED_DeleteURLAndFavicon) {
 
   // All the normal data + the favicon should be gone.
   EnsureURLInfoGone(last_row);
-  EXPECT_FALSE(GetFavicon(last_row.url(), FAVICON));
+  EXPECT_FALSE(GetFavicon(last_row.url(), chrome::FAVICON));
   EXPECT_FALSE(HasFavicon(favicon_id));
 }
 
@@ -522,7 +527,7 @@ TEST_F(ExpireHistoryTest, DeleteURLWithoutFavicon) {
   // Verify things are the way we expect with a URL row, favicon, thumbnail.
   URLRow last_row;
   ASSERT_TRUE(main_db_->GetURLRow(url_ids[1], &last_row));
-  FaviconID favicon_id = GetFavicon(last_row.url(), FAVICON);
+  chrome::FaviconID favicon_id = GetFavicon(last_row.url(), chrome::FAVICON);
   EXPECT_TRUE(HasFavicon(favicon_id));
   // TODO(sky): fix this, see comment in HasThumbnail.
   // EXPECT_TRUE(HasThumbnail(url_ids[1]));
@@ -560,7 +565,7 @@ TEST_F(ExpireHistoryTest, DontDeleteStarredURL) {
   ASSERT_TRUE(main_db_->GetRowForURL(url, &url_row));
 
   // And the favicon should exist.
-  FaviconID favicon_id = GetFavicon(url_row.url(), FAVICON);
+  chrome::FaviconID favicon_id = GetFavicon(url_row.url(), chrome::FAVICON);
   EXPECT_TRUE(HasFavicon(favicon_id));
 
   // But there should be no fts.
@@ -593,13 +598,13 @@ TEST_F(ExpireHistoryTest, DeleteURLs) {
   // Verify things are the way we expect with URL rows, favicons,
   // thumbnails.
   URLRow rows[3];
-  FaviconID favicon_ids[3];
+  chrome::FaviconID favicon_ids[3];
   std::vector<GURL> urls;
   // Push back a bogus URL (which shouldn't change anything).
   urls.push_back(GURL());
   for (size_t i = 0; i < arraysize(rows); ++i) {
     ASSERT_TRUE(main_db_->GetURLRow(url_ids[i], &rows[i]));
-    favicon_ids[i] = GetFavicon(rows[i].url(), FAVICON);
+    favicon_ids[i] = GetFavicon(rows[i].url(), chrome::FAVICON);
     EXPECT_TRUE(HasFavicon(favicon_ids[i]));
     // TODO(sky): fix this, see comment in HasThumbnail.
     // EXPECT_TRUE(HasThumbnail(url_ids[i]));
@@ -667,13 +672,13 @@ TEST_F(ExpireHistoryTest, FlushRecentURLsUnstarred) {
   EXPECT_EQ(0, temp_row.typed_count());
 
   // Verify that the middle URL's favicon and thumbnail is still there.
-  FaviconID favicon_id = GetFavicon(url_row1.url(), FAVICON);
+  chrome::FaviconID favicon_id = GetFavicon(url_row1.url(), chrome::FAVICON);
   EXPECT_TRUE(HasFavicon(favicon_id));
   // TODO(sky): fix this, see comment in HasThumbnail.
   // EXPECT_TRUE(HasThumbnail(url_row1.id()));
 
   // Verify that the last URL was deleted.
-  FaviconID favicon_id2 = GetFavicon(url_row2.url(), FAVICON);
+  chrome::FaviconID favicon_id2 = GetFavicon(url_row2.url(), chrome::FAVICON);
   EnsureURLInfoGone(url_row2);
   EXPECT_FALSE(HasFavicon(favicon_id2));
 }
@@ -725,13 +730,13 @@ TEST_F(ExpireHistoryTest, FlushURLsForTimes) {
   EXPECT_EQ(0, temp_row.typed_count());
 
   // Verify that the middle URL's favicon and thumbnail is still there.
-  FaviconID favicon_id = GetFavicon(url_row1.url(), FAVICON);
+  chrome::FaviconID favicon_id = GetFavicon(url_row1.url(), chrome::FAVICON);
   EXPECT_TRUE(HasFavicon(favicon_id));
   // TODO(sky): fix this, see comment in HasThumbnail.
   // EXPECT_TRUE(HasThumbnail(url_row1.id()));
 
   // Verify that the last URL was deleted.
-  FaviconID favicon_id2 = GetFavicon(url_row2.url(), FAVICON);
+  chrome::FaviconID favicon_id2 = GetFavicon(url_row2.url(), chrome::FAVICON);
   EnsureURLInfoGone(url_row2);
   EXPECT_FALSE(HasFavicon(favicon_id2));
 }
@@ -784,7 +789,7 @@ TEST_F(ExpireHistoryTest, FlushRecentURLsUnstarredRestricted) {
   EXPECT_EQ(0, temp_row.typed_count());
 
   // Verify that the middle URL's favicon and thumbnail is still there.
-  FaviconID favicon_id = GetFavicon(url_row1.url(), FAVICON);
+  chrome::FaviconID favicon_id = GetFavicon(url_row1.url(), chrome::FAVICON);
   EXPECT_TRUE(HasFavicon(favicon_id));
   // TODO(sky): fix this, see comment in HasThumbnail.
   // EXPECT_TRUE(HasThumbnail(url_row1.id()));
@@ -833,11 +838,11 @@ TEST_F(ExpireHistoryTest, FlushRecentURLsStarred) {
   // that may have been updated since the time threshold. Since the URL still
   // exists in history, this should not be a privacy problem, we only update
   // the visit counts in this case for consistency anyway.
-  FaviconID favicon_id = GetFavicon(url_row1.url(), FAVICON);
+  chrome::FaviconID favicon_id = GetFavicon(url_row1.url(), chrome::FAVICON);
   EXPECT_TRUE(HasFavicon(favicon_id));
   // TODO(sky): fix this, see comment in HasThumbnail.
   // EXPECT_TRUE(HasThumbnail(new_url_row1.id()));
-  favicon_id = GetFavicon(url_row1.url(), FAVICON);
+  favicon_id = GetFavicon(url_row1.url(), chrome::FAVICON);
   EXPECT_TRUE(HasFavicon(favicon_id));
   // TODO(sky): fix this, see comment in HasThumbnail.
   // EXPECT_TRUE(HasThumbnail(new_url_row2.id()));

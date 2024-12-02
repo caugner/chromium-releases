@@ -4,7 +4,7 @@
 
 #include "chrome/renderer/translate/translate_helper.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/common/chrome_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -28,27 +28,6 @@ TEST_F(TranslateHelperTest, LanguageCodeTypoCorrection) {
   language = std::string("JA-jp");
   TranslateHelper::CorrectLanguageCodeTypo(&language);
   EXPECT_EQ("ja-JP", language);
-}
-
-// Tests that synonym language code is converted to one used in supporting list.
-TEST_F(TranslateHelperTest, LanguageCodeSynonyms) {
-  std::string language;
-
-  language = std::string("nb");
-  TranslateHelper::ConvertLanguageCodeSynonym(&language);
-  EXPECT_EQ("no", language);
-
-  language = std::string("he");
-  TranslateHelper::ConvertLanguageCodeSynonym(&language);
-  EXPECT_EQ("iw", language);
-
-  language = std::string("jv");
-  TranslateHelper::ConvertLanguageCodeSynonym(&language);
-  EXPECT_EQ("jw", language);
-
-  language = std::string("fil");
-  TranslateHelper::ConvertLanguageCodeSynonym(&language);
-  EXPECT_EQ("tl", language);
 }
 
 // Tests that invalid language code is reset to empty string.
@@ -79,6 +58,24 @@ TEST_F(TranslateHelperTest, ResetInvalidLanguageCode) {
   EXPECT_TRUE(language.empty());
 }
 
+// Tests that similar language table works.
+TEST_F(TranslateHelperTest, SimilarLanguageCode) {
+  EXPECT_TRUE(TranslateHelper::IsSameOrSimilarLanguages("en", "en"));
+  EXPECT_FALSE(TranslateHelper::IsSameOrSimilarLanguages("en", "ja"));
+  EXPECT_TRUE(TranslateHelper::IsSameOrSimilarLanguages("bs", "hr"));
+  EXPECT_TRUE(TranslateHelper::IsSameOrSimilarLanguages("sr-ME", "sr"));
+}
+
+// Tests that well-known languages which often have wrong server configuration
+// are handles.
+TEST_F(TranslateHelperTest, WellKnownWrongConfiguration) {
+  EXPECT_TRUE(TranslateHelper::MaybeServerWrongConfiguration("en", "ja"));
+  EXPECT_TRUE(TranslateHelper::MaybeServerWrongConfiguration("en-US", "ja"));
+  EXPECT_TRUE(TranslateHelper::MaybeServerWrongConfiguration("en", "zh-CN"));
+  EXPECT_FALSE(TranslateHelper::MaybeServerWrongConfiguration("ja", "en"));
+  EXPECT_FALSE(TranslateHelper::MaybeServerWrongConfiguration("en", "he"));
+}
+
 // Tests that the language meta tag providing wrong information is ignored by
 // TranslateHelper due to disagreement between meta tag and CLD.
 TEST_F(TranslateHelperTest, CLDDisagreeWithWrongLanguageCode) {
@@ -87,9 +84,15 @@ TEST_F(TranslateHelperTest, CLDDisagreeWithWrongLanguageCode) {
       "<body>This is a page apparently written in English. Even though "
       "content-language is provided, the value will be ignored if the value "
       "is suspicious.</body></html>");
+  std::string cld_language;
+  bool is_cld_reliable;
   std::string language =
-      TranslateHelper::DeterminePageLanguage(std::string("ja"), contents);
+      TranslateHelper::DeterminePageLanguage(std::string("ja"), std::string(),
+                                             contents, &cld_language,
+                                             &is_cld_reliable);
   EXPECT_EQ(chrome::kUnknownLanguageCode, language);
+  EXPECT_EQ("en", cld_language);
+  EXPECT_TRUE(is_cld_reliable);
 }
 
 // Tests that the language meta tag providing "en-US" style information is
@@ -100,9 +103,15 @@ TEST_F(TranslateHelperTest, CLDAgreeWithLanguageCodeHavingCountryCode) {
       "<body>This is a page apparently written in English. Even though "
       "content-language is provided, the value will be ignored if the value "
       "is suspicious.</body></html>");
+  std::string cld_language;
+  bool is_cld_reliable;
   std::string language =
-      TranslateHelper::DeterminePageLanguage(std::string("en-US"), contents);
+      TranslateHelper::DeterminePageLanguage(std::string("en-US"),
+                                             std::string(), contents,
+                                             &cld_language, &is_cld_reliable);
   EXPECT_EQ("en-US", language);
+  EXPECT_EQ("en", cld_language);
+  EXPECT_TRUE(is_cld_reliable);
 }
 
 // Tests that the language meta tag providing wrong information is ignored and
@@ -113,7 +122,33 @@ TEST_F(TranslateHelperTest, InvalidLanguageMetaTagProviding) {
       "<body>This is a page apparently written in English. Even though "
       "content-language is provided, the value will be ignored and CLD's"
       " language will be adopted if the value is invalid.</body></html>");
+  std::string cld_language;
+  bool is_cld_reliable;
   std::string language =
-      TranslateHelper::DeterminePageLanguage(std::string("utf-8"), contents);
+      TranslateHelper::DeterminePageLanguage(std::string("utf-8"),
+                                             std::string(), contents,
+                                             &cld_language, &is_cld_reliable);
   EXPECT_EQ("en", language);
+  EXPECT_EQ("en", cld_language);
+  EXPECT_TRUE(is_cld_reliable);
+}
+
+// Tests that the language meta tag providing wrong information is ignored
+// because of valid html lang attribute.
+TEST_F(TranslateHelperTest, AdoptHtmlLang) {
+  string16 contents = ASCIIToUTF16(
+      "<html lang='en'><head><meta http-equiv='Content-Language' content='ja'>"
+      "</head><body>This is a page apparently written in English. Even though "
+      "content-language is provided, the value will be ignored if the value "
+      "is suspicious.</body></html>");
+  std::string cld_language;
+  bool is_cld_reliable;
+  std::string language =
+      TranslateHelper::DeterminePageLanguage(std::string("ja"),
+                                             std::string("en"),
+                                             contents, &cld_language,
+                                             &is_cld_reliable);
+  EXPECT_EQ("en", language);
+  EXPECT_EQ("en", cld_language);
+  EXPECT_TRUE(is_cld_reliable);
 }

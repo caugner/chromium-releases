@@ -11,9 +11,9 @@
 #include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "courgette/courgette.h"
 #include "courgette/streams.h"
 #include "courgette/third_party/bsdiff.h"
@@ -133,6 +133,11 @@ bool Supported(const base::FilePath& input_file) {
 
     case courgette::EXE_ELF_32_X86:
       format = "ELF 32 X86";
+      result = true;
+      break;
+
+    case courgette::EXE_ELF_32_ARM:
+      format = "ELF 32 ARM";
       result = true;
       break;
   }
@@ -419,12 +424,10 @@ int main(int argc, const char* argv[]) {
   CommandLine::Init(argc, argv);
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
 
-  (void)logging::InitLogging(
-      FILE_PATH_LITERAL("courgette.log"),
-      logging::LOG_TO_BOTH_FILE_AND_SYSTEM_DEBUG_LOG,
-      logging::LOCK_LOG_FILE,
-      logging::APPEND_TO_OLD_LOG_FILE,
-      logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
+  logging::LoggingSettings settings;
+  settings.logging_dest = logging::LOG_TO_ALL;
+  settings.log_file = FILE_PATH_LITERAL("courgette.log");
+  (void)logging::InitLogging(settings);
   logging::SetMinLogLevel(logging::LOG_VERBOSE);
 
   bool cmd_sup = command_line.HasSwitch("supported");

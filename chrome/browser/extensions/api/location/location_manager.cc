@@ -4,11 +4,21 @@
 
 #include "chrome/browser/extensions/api/location/location_manager.h"
 
+#include "base/bind.h"
+#include "base/lazy_instance.h"
 #include "chrome/browser/extensions/event_router.h"
 #include "chrome/browser/extensions/extension_system.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/api/location.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
-#include "content/browser/geolocation/geolocation_provider.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/geolocation_provider.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
+#include "content/public/common/geoposition.h"
+
+using content::BrowserThread;
 
 // TODO(vadimt): Add tests.
 namespace extensions {
@@ -18,14 +28,23 @@ namespace location = api::location;
 // Request created by chrome.location.watchLocation() call.
 // Lives in the IO thread, except for the constructor.
 class LocationRequest
-    : public content::GeolocationObserver,
-      public base::RefCountedThreadSafe<LocationRequest,
+    : public base::RefCountedThreadSafe<LocationRequest,
                                         BrowserThread::DeleteOnIOThread> {
  public:
   LocationRequest(
       const base::WeakPtr<LocationManager>& location_manager,
       const std::string& extension_id,
       const std::string& request_name);
+
+  // Finishes the necessary setup for this object.
+  // Call this method immediately after taking a strong reference
+  // to this object.
+  //
+  // Ideally, we would do this at construction time, but currently
+  // our refcount starts at zero. BrowserThread::PostTask will take a ref
+  // and potentially release it before we are done, destroying us in the
+  // constructor.
+  void Initialize();
 
   const std::string& request_name() const { return request_name_; }
 
@@ -34,15 +53,13 @@ class LocationRequest
 
  private:
   friend class base::DeleteHelper<LocationRequest>;
-  friend struct content::BrowserThread::DeleteOnThread<
-      content::BrowserThread::IO>;
+  friend struct BrowserThread::DeleteOnThread<BrowserThread::IO>;
 
   virtual ~LocationRequest();
 
   void AddObserverOnIOThread();
 
-  // GeolocationObserver
-  virtual void OnLocationUpdate(const content::Geoposition& position) OVERRIDE;
+  void OnLocationUpdate(const content::Geoposition& position);
 
   // Request name.
   const std::string request_name_;
@@ -52,6 +69,8 @@ class LocationRequest
 
   // Owning location manager.
   const base::WeakPtr<LocationManager> location_manager_;
+
+  content::GeolocationProvider::LocationUpdateCallback callback_;
 
   DISALLOW_COPY_AND_ASSIGN(LocationRequest);
 };
@@ -65,6 +84,12 @@ LocationRequest::LocationRequest(
       location_manager_(location_manager) {
   // TODO(vadimt): use request_info.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+}
+
+void LocationRequest::Initialize() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  callback_ = base::Bind(&LocationRequest::OnLocationUpdate,
+                         base::Unretained(this));
 
   BrowserThread::PostTask(
       BrowserThread::IO,
@@ -75,22 +100,23 @@ LocationRequest::LocationRequest(
 
 void LocationRequest::GrantPermission() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  content::GeolocationProvider::GetInstance()->OnPermissionGranted();
+  content::GeolocationProvider::GetInstance()->UserDidOptIntoLocationServices();
 }
 
 LocationRequest::~LocationRequest() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  content::GeolocationProvider::GetInstance()->RemoveObserver(this);
+  content::GeolocationProvider::GetInstance()->RemoveLocationUpdateCallback(
+      callback_);
 }
 
 void LocationRequest::AddObserverOnIOThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  content::GeolocationObserverOptions options(true);
   // TODO(vadimt): This can get a location cached by GeolocationProvider,
   // contrary to the API definition which says that creating a location watch
   // will get new location.
-  content::GeolocationProvider::GetInstance()->AddObserver(this, options);
+  content::GeolocationProvider::GetInstance()->AddLocationUpdateCallback(
+      callback_, true);
 }
 
 void LocationRequest::OnLocationUpdate(const content::Geoposition& position) {
@@ -108,8 +134,6 @@ void LocationRequest::OnLocationUpdate(const content::Geoposition& position) {
 
 LocationManager::LocationManager(Profile* profile)
     : profile_(profile) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
                  content::Source<Profile>(profile_));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
@@ -122,49 +146,34 @@ void LocationManager::AddLocationRequest(const std::string& extension_id,
   // TODO(vadimt): Consider resuming requests after restarting the browser.
 
   // Override any old request with the same name.
-  LocationRequestIterator old_location_request =
-      GetLocationRequestIterator(extension_id, request_name);
-  if (old_location_request.first != location_requests_.end())
-    RemoveLocationRequestIterator(old_location_request);
+  RemoveLocationRequest(extension_id, request_name);
 
   LocationRequestPointer location_request = new LocationRequest(AsWeakPtr(),
                                                                 extension_id,
                                                                 request_name);
-  location_requests_[extension_id].push_back(location_request);
+  location_request->Initialize();
+  location_requests_.insert(
+      LocationRequestMap::value_type(extension_id, location_request));
 }
 
 void LocationManager::RemoveLocationRequest(const std::string& extension_id,
                                             const std::string& name) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  LocationRequestIterator it = GetLocationRequestIterator(extension_id, name);
-  if (it.first == location_requests_.end())
-    return;
+  std::pair<LocationRequestMap::iterator, LocationRequestMap::iterator>
+      extension_range = location_requests_.equal_range(extension_id);
 
-  RemoveLocationRequestIterator(it);
+  for (LocationRequestMap::iterator it = extension_range.first;
+       it != extension_range.second;
+       ++it) {
+    if (it->second->request_name() == name) {
+      location_requests_.erase(it);
+      return;
+    }
+  }
 }
 
 LocationManager::~LocationManager() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-}
-
-LocationManager::LocationRequestIterator
-    LocationManager::GetLocationRequestIterator(
-        const std::string& extension_id,
-        const std::string& name) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  LocationRequestMap::iterator list = location_requests_.find(extension_id);
-  if (list == location_requests_.end())
-    return make_pair(location_requests_.end(), LocationRequestList::iterator());
-
-  for (LocationRequestList::iterator it = list->second.begin();
-       it != list->second.end(); ++it) {
-    if ((*it)->request_name() == name)
-      return make_pair(list, it);
-  }
-
-  return make_pair(location_requests_.end(), LocationRequestList::iterator());
 }
 
 void LocationManager::GeopositionToApiCoordinates(
@@ -185,23 +194,13 @@ void LocationManager::GeopositionToApiCoordinates(
     coordinates->speed.reset(new double(position.speed));
 }
 
-void LocationManager::RemoveLocationRequestIterator(
-    const LocationRequestIterator& iter) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  LocationRequestList& list = iter.first->second;
-  list.erase(iter.second);
-  if (list.empty())
-    location_requests_.erase(iter.first);
-}
-
 void LocationManager::SendLocationUpdate(
     const std::string& extension_id,
     const std::string& request_name,
     const content::Geoposition& position) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  scoped_ptr<ListValue> args(new ListValue());
+  scoped_ptr<base::ListValue> args(new base::ListValue());
   std::string event_name;
 
   if (position.Validate() &&
@@ -258,6 +257,19 @@ void LocationManager::Observe(int type,
       NOTREACHED();
       break;
   }
+}
+
+static base::LazyInstance<ProfileKeyedAPIFactory<LocationManager> >
+g_factory = LAZY_INSTANCE_INITIALIZER;
+
+// static
+ProfileKeyedAPIFactory<LocationManager>* LocationManager::GetFactoryInstance() {
+  return &g_factory.Get();
+}
+
+ // static
+LocationManager* LocationManager::Get(Profile* profile) {
+  return ProfileKeyedAPIFactory<LocationManager>::GetForProfile(profile);
 }
 
 }  // namespace extensions

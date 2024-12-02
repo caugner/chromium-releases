@@ -7,13 +7,12 @@
 #include <map>
 
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/bundle_installer.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/image_loader.h"
@@ -32,6 +31,7 @@
 #include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "chrome/common/extensions/permissions/permission_set.h"
+#include "chrome/common/extensions/permissions/permissions_data.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
@@ -85,7 +85,7 @@ static const int kAcceptButtonIds[ExtensionInstallPrompt::NUM_PROMPT_TYPES] = {
   IDS_EXTENSION_PROMPT_RE_ENABLE_BUTTON,
   IDS_EXTENSION_PROMPT_PERMISSIONS_BUTTON,
   0,  // External installs use different strings for extensions/apps.
-  0,
+  IDS_EXTENSION_PROMPT_PERMISSIONS_CLEAR_RETAINED_FILES_BUTTON,
 };
 static const int kAbortButtonIds[ExtensionInstallPrompt::NUM_PROMPT_TYPES] = {
   0,  // These all use the platform's default cancel label.
@@ -151,7 +151,7 @@ bool AutoConfirmPrompt(ExtensionInstallPrompt::Delegate* delegate) {
   // the real implementations it's highly likely the message loop will be
   // pumping a few times before the user clicks accept or cancel.
   if (value == "accept") {
-    MessageLoop::current()->PostTask(
+    base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&ExtensionInstallPrompt::Delegate::InstallUIProceed,
                    base::Unretained(delegate)));
@@ -159,7 +159,7 @@ bool AutoConfirmPrompt(ExtensionInstallPrompt::Delegate* delegate) {
   }
 
   if (value == "cancel") {
-    MessageLoop::current()->PostTask(
+    base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&ExtensionInstallPrompt::Delegate::InstallUIAbort,
                    base::Unretained(delegate),
@@ -266,11 +266,22 @@ string16 ExtensionInstallPrompt::Prompt::GetHeading() const {
 }
 
 int ExtensionInstallPrompt::Prompt::GetDialogButtons() const {
+  if (type_ == POST_INSTALL_PERMISSIONS_PROMPT &&
+      ShouldDisplayRevokeFilesButton()) {
+    return kButtons[type_] | ui::DIALOG_BUTTON_OK;
+  }
+
   return kButtons[type_];
 }
 
 bool ExtensionInstallPrompt::Prompt::HasAcceptButtonLabel() const {
-  return kAcceptButtonIds[type_] > 0;
+  if (kAcceptButtonIds[type_] == 0)
+    return false;
+
+  if (type_ == POST_INSTALL_PERMISSIONS_PROMPT)
+    return ShouldDisplayRevokeFilesButton();
+
+  return true;
 }
 
 string16 ExtensionInstallPrompt::Prompt::GetAcceptButtonLabel() const {
@@ -302,6 +313,14 @@ string16 ExtensionInstallPrompt::Prompt::GetPermissionsHeading() const {
 
 string16 ExtensionInstallPrompt::Prompt::GetOAuthHeading() const {
   return l10n_util::GetStringFUTF16(kOAuthHeaderIds[type_], oauth_user_name_);
+}
+
+string16 ExtensionInstallPrompt::Prompt::GetRetainedFilesHeading() const {
+  return l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_RETAINED_FILES);
+}
+
+bool ExtensionInstallPrompt::Prompt::ShouldShowPermissions() const {
+  return GetPermissionCount() > 0 || type_ == POST_INSTALL_PERMISSIONS_PROMPT;
 }
 
 void ExtensionInstallPrompt::Prompt::AppendRatingStars(
@@ -366,6 +385,19 @@ const IssueAdviceInfoEntry& ExtensionInstallPrompt::Prompt::GetOAuthIssue(
   return oauth_issue_advice_[index];
 }
 
+size_t ExtensionInstallPrompt::Prompt::GetRetainedFileCount() const {
+  return retained_files_.size();
+}
+
+string16 ExtensionInstallPrompt::Prompt::GetRetainedFile(size_t index) const {
+  CHECK_LT(index, retained_files_.size());
+  return base::UTF8ToUTF16(retained_files_[index].AsUTF8Unsafe());
+}
+
+bool ExtensionInstallPrompt::Prompt::ShouldDisplayRevokeFilesButton() const {
+  return !retained_files_.empty();
+}
+
 ExtensionInstallPrompt::ShowParams::ShowParams(content::WebContents* contents)
     : parent_web_contents(contents),
       parent_window(NativeWindowForWebContents(contents)),
@@ -414,7 +446,7 @@ scoped_refptr<Extension>
 ExtensionInstallPrompt::ExtensionInstallPrompt(
     content::WebContents* contents)
     : record_oauth2_grant_(false),
-      ui_loop_(MessageLoop::current()),
+      ui_loop_(base::MessageLoop::current()),
       extension_(NULL),
       install_ui_(ExtensionInstallUI::Create(ProfileForWebContents(contents))),
       show_params_(contents),
@@ -428,7 +460,7 @@ ExtensionInstallPrompt::ExtensionInstallPrompt(
     gfx::NativeWindow native_window,
     content::PageNavigator* navigator)
     : record_oauth2_grant_(false),
-      ui_loop_(MessageLoop::current()),
+      ui_loop_(base::MessageLoop::current()),
       extension_(NULL),
       install_ui_(ExtensionInstallUI::Create(profile)),
       show_params_(native_window, navigator),
@@ -443,7 +475,7 @@ ExtensionInstallPrompt::~ExtensionInstallPrompt() {
 void ExtensionInstallPrompt::ConfirmBundleInstall(
     extensions::BundleInstaller* bundle,
     const PermissionSet* permissions) {
-  DCHECK(ui_loop_ == MessageLoop::current());
+  DCHECK(ui_loop_ == base::MessageLoop::current());
   bundle_ = bundle;
   permissions_ = permissions;
   delegate_ = bundle;
@@ -457,7 +489,7 @@ void ExtensionInstallPrompt::ConfirmStandaloneInstall(
     const Extension* extension,
     SkBitmap* icon,
     const ExtensionInstallPrompt::Prompt& prompt) {
-  DCHECK(ui_loop_ == MessageLoop::current());
+  DCHECK(ui_loop_ == base::MessageLoop::current());
   extension_ = extension;
   permissions_ = extension->GetActivePermissions();
   delegate_ = delegate;
@@ -483,7 +515,7 @@ void ExtensionInstallPrompt::ConfirmInstall(
     Delegate* delegate,
     const Extension* extension,
     const ShowDialogCallback& show_dialog_callback) {
-  DCHECK(ui_loop_ == MessageLoop::current());
+  DCHECK(ui_loop_ == base::MessageLoop::current());
   extension_ = extension;
   permissions_ = extension->GetActivePermissions();
   delegate_ = delegate;
@@ -510,7 +542,7 @@ void ExtensionInstallPrompt::ConfirmInstall(
 
 void ExtensionInstallPrompt::ConfirmReEnable(Delegate* delegate,
                                              const Extension* extension) {
-  DCHECK(ui_loop_ == MessageLoop::current());
+  DCHECK(ui_loop_ == base::MessageLoop::current());
   extension_ = extension;
   permissions_ = extension->GetActivePermissions();
   delegate_ = delegate;
@@ -523,7 +555,7 @@ void ExtensionInstallPrompt::ConfirmExternalInstall(
     Delegate* delegate,
     const Extension* extension,
     const ShowDialogCallback& show_dialog_callback) {
-  DCHECK(ui_loop_ == MessageLoop::current());
+  DCHECK(ui_loop_ == base::MessageLoop::current());
   extension_ = extension;
   permissions_ = extension->GetActivePermissions();
   delegate_ = delegate;
@@ -537,7 +569,7 @@ void ExtensionInstallPrompt::ConfirmPermissions(
     Delegate* delegate,
     const Extension* extension,
     const PermissionSet* permissions) {
-  DCHECK(ui_loop_ == MessageLoop::current());
+  DCHECK(ui_loop_ == base::MessageLoop::current());
   extension_ = extension;
   permissions_ = permissions;
   delegate_ = delegate;
@@ -550,7 +582,7 @@ void ExtensionInstallPrompt::ConfirmIssueAdvice(
     Delegate* delegate,
     const Extension* extension,
     const IssueAdviceInfo& issue_advice) {
-  DCHECK(ui_loop_ == MessageLoop::current());
+  DCHECK(ui_loop_ == base::MessageLoop::current());
   extension_ = extension;
   delegate_ = delegate;
   prompt_.set_type(PERMISSIONS_PROMPT);
@@ -561,11 +593,14 @@ void ExtensionInstallPrompt::ConfirmIssueAdvice(
   LoadImageIfNeeded();
 }
 
-void ExtensionInstallPrompt::ReviewPermissions(Delegate* delegate,
-                                               const Extension* extension) {
-  DCHECK(ui_loop_ == MessageLoop::current());
+void ExtensionInstallPrompt::ReviewPermissions(
+    Delegate* delegate,
+    const Extension* extension,
+    const std::vector<base::FilePath>& retained_file_paths) {
+  DCHECK(ui_loop_ == base::MessageLoop::current());
   extension_ = extension;
   permissions_ = extension->GetActivePermissions();
+  prompt_.set_retained_files(retained_file_paths);
   delegate_ = delegate;
   prompt_.set_type(POST_INSTALL_PERMISSIONS_PROMPT);
 
@@ -678,8 +713,10 @@ void ExtensionInstallPrompt::OnMintTokenFailure(
 }
 
 void ExtensionInstallPrompt::ShowConfirmation() {
-  if (permissions_ &&
-      (!extension_ || !extension_->ShouldSkipPermissionWarnings())) {
+  if (permissions_.get() &&
+      (!extension_ ||
+       !extensions::PermissionsData::ShouldSkipPermissionWarnings(
+           extension_))) {
     Manifest::Type extension_type = extension_ ?
         extension_->GetType() : Manifest::TYPE_UNKNOWN;
     prompt_.SetPermissions(permissions_->GetWarningMessages(extension_type));

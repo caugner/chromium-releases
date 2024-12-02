@@ -14,7 +14,7 @@
 #include "base/debug/leak_annotations.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "crypto/nss_util.h"
 #include "crypto/nss_util_internal.h"
 #include "crypto/scoped_nss_types.h"
@@ -78,6 +78,22 @@ RSAPrivateKey* RSAPrivateKey::CreateSensitiveFromPrivateKeyInfo(
   return CreateFromPrivateKeyInfoWithParams(input,
                                             PR_TRUE /* permanent */,
                                             PR_TRUE /* sensitive */);
+}
+
+// static
+RSAPrivateKey* RSAPrivateKey::CreateFromKey(SECKEYPrivateKey* key) {
+  DCHECK(key);
+  if (SECKEY_GetPrivateKeyType(key) != rsaKey)
+    return NULL;
+  RSAPrivateKey* copy = new RSAPrivateKey();
+  copy->key_ = SECKEY_CopyPrivateKey(key);
+  copy->public_key_ = SECKEY_ConvertToPublicKey(key);
+  if (!copy->key_ || !copy->public_key_) {
+    NOTREACHED();
+    delete copy;
+    return NULL;
+  }
+  return copy;
 }
 
 // static
@@ -190,7 +206,8 @@ RSAPrivateKey* RSAPrivateKey::CreateWithParams(uint16 num_bits,
 
   scoped_ptr<RSAPrivateKey> result(new RSAPrivateKey);
 
-  ScopedPK11Slot slot(GetPrivateNSSKeySlot());
+  ScopedPK11Slot slot(permanent ? GetPrivateNSSKeySlot() :
+                      PK11_GetInternalSlot());
   if (!slot.get())
     return NULL;
 
@@ -220,7 +237,8 @@ RSAPrivateKey* RSAPrivateKey::CreateFromPrivateKeyInfoWithParams(
 
   scoped_ptr<RSAPrivateKey> result(new RSAPrivateKey);
 
-  ScopedPK11Slot slot(GetPrivateNSSKeySlot());
+  ScopedPK11Slot slot(permanent ? GetPrivateNSSKeySlot() :
+                      PK11_GetInternalSlot());
   if (!slot.get())
     return NULL;
 

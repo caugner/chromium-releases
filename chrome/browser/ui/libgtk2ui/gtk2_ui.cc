@@ -7,6 +7,7 @@
 #include <set>
 
 #include "base/command_line.h"
+#include "base/environment.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/nix/mime_util_xdg.h"
@@ -98,6 +99,8 @@ const int kThemeImages[] = {
 // A list of icons used in the autocomplete view that should be tinted to the
 // current gtk theme selection color so they stand out against the GtkEntry's
 // base color.
+// TODO(erg): Decide what to do about other icons that appear in the omnibox,
+// e.g. content settings icons.
 const int kAutocompleteImages[] = {
   IDR_OMNIBOX_EXTENSION_APP,
   IDR_OMNIBOX_HTTP,
@@ -108,9 +111,6 @@ const int kAutocompleteImages[] = {
   IDR_OMNIBOX_STAR_DARK,
   IDR_OMNIBOX_TTS,
   IDR_OMNIBOX_TTS_DARK,
-  IDR_GEOLOCATION_ALLOWED_LOCATIONBAR_ICON,
-  IDR_GEOLOCATION_DENIED_LOCATIONBAR_ICON,
-  IDR_REGISTER_PROTOCOL_HANDLER_LOCATIONBAR_ICON,
 };
 
 // This table converts button ids into a pair of gtk-stock id and state.
@@ -343,8 +343,30 @@ bool Gtk2UI::GetColor(int id, SkColor* color) const {
   return false;
 }
 
+bool Gtk2UI::HasCustomImage(int id) const {
+  return IsOverridableImage(id);
+}
+
 ui::NativeTheme* Gtk2UI::GetNativeTheme() const {
   return NativeThemeGtk2::instance();
+}
+
+bool Gtk2UI::GetDefaultUsesSystemTheme() const {
+  scoped_ptr<base::Environment> env(base::Environment::Create());
+
+  switch (base::nix::GetDesktopEnvironment(env.get())) {
+    case base::nix::DESKTOP_ENVIRONMENT_GNOME:
+    case base::nix::DESKTOP_ENVIRONMENT_UNITY:
+    case base::nix::DESKTOP_ENVIRONMENT_XFCE:
+      return true;
+    case base::nix::DESKTOP_ENVIRONMENT_KDE3:
+    case base::nix::DESKTOP_ENVIRONMENT_KDE4:
+    case base::nix::DESKTOP_ENVIRONMENT_OTHER:
+      return false;
+  }
+  // Unless GetDesktopEnvironment() badly misbehaves, this should never happen.
+  NOTREACHED();
+  return false;
 }
 
 ui::SelectFileDialog* Gtk2UI::CreateSelectFileDialog(
@@ -707,14 +729,13 @@ SkBitmap Gtk2UI::GenerateGtkThemeBitmap(int id) const {
     // instead should tint based on the foreground text entry color in GTK+
     // mode because some themes that try to be dark *and* light have very
     // different colors between the omnibox and the normal background area.
+    // TODO(erg): Decide what to do about other icons that appear in the
+    // omnibox, e.g. content settings icons.
     case IDR_OMNIBOX_EXTENSION_APP:
     case IDR_OMNIBOX_HTTP:
     case IDR_OMNIBOX_SEARCH:
     case IDR_OMNIBOX_STAR:
-    case IDR_OMNIBOX_TTS:
-    case IDR_GEOLOCATION_ALLOWED_LOCATIONBAR_ICON:
-    case IDR_GEOLOCATION_DENIED_LOCATIONBAR_ICON:
-    case IDR_REGISTER_PROTOCOL_HANDLER_LOCATIONBAR_ICON: {
+    case IDR_OMNIBOX_TTS: {
       return GenerateTintedIcon(id, entry_tint_);
     }
     // In GTK mode, the dark versions of the omnibox icons only ever appear in

@@ -9,9 +9,9 @@
 #include "base/format_macros.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -37,7 +37,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/test/browser_test_utils.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 
 #if defined(TOOLKIT_VIEWS)
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -48,7 +48,7 @@
 #if defined(OS_WIN)
 #include <windows.h>
 #include <Psapi.h>
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #endif
 
 using content::InterstitialPage;
@@ -140,9 +140,10 @@ bool ChromeInForeground() {
 void CheckFocus(Browser* browser, ViewID id, const base::Time& timeout) {
   if (ui_test_utils::IsViewFocused(browser, id) ||
       base::Time::Now() > timeout) {
-    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+    base::MessageLoop::current()->PostTask(FROM_HERE,
+                                           base::MessageLoop::QuitClosure());
   } else {
-    MessageLoop::current()->PostDelayedTask(
+    base::MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&CheckFocus, browser, id, timeout),
         base::TimeDelta::FromMilliseconds(10));
@@ -162,7 +163,7 @@ class BrowserFocusTest : public InProcessBrowserTest {
   bool WaitForFocusChange(ViewID vid) {
     const base::Time timeout = base::Time::Now() +
         base::TimeDelta::FromMilliseconds(kFocusChangeTimeoutMs);
-    MessageLoop::current()->PostDelayedTask(
+    base::MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&CheckFocus, browser(), vid, timeout),
         base::TimeDelta::FromMilliseconds(100));
@@ -218,9 +219,9 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_ClickingMovesFocus) {
 #if defined(OS_POSIX)
   // It seems we have to wait a little bit for the widgets to spin up before
   // we can start clicking on them.
-  MessageLoop::current()->PostDelayedTask(
+  base::MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      MessageLoop::QuitClosure(),
+      base::MessageLoop::QuitClosure(),
       base::TimeDelta::FromMilliseconds(kActionDelayMs));
   content::RunMessageLoop();
 #endif  // defined(OS_POSIX)
@@ -625,9 +626,10 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversalOnInterstitial) {
       browser()->tab_strip_model()->GetActiveWebContents(),
       true, GURL("http://interstitial.com"));
   // Give some time for the interstitial to show.
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-                                          MessageLoop::QuitClosure(),
-                                          base::TimeDelta::FromSeconds(1));
+  base::MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::MessageLoop::QuitClosure(),
+      base::TimeDelta::FromSeconds(1));
   content::RunMessageLoop();
 
   chrome::FocusLocationBar(browser());
@@ -746,9 +748,10 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_InterstitialFocus) {
       browser()->tab_strip_model()->GetActiveWebContents(),
       true, GURL("http://interstitial.com"));
   // Give some time for the interstitial to show.
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-                                          MessageLoop::QuitClosure(),
-                                          base::TimeDelta::FromSeconds(1));
+  base::MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::MessageLoop::QuitClosure(),
+      base::TimeDelta::FromSeconds(1));
   content::RunMessageLoop();
 
   // The interstitial should have focus now.
@@ -840,7 +843,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_TabInitialFocus) {
   EXPECT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER));
 
   // Open about:blank, focus should be on the location bar.
-  chrome::AddSelectedTabWithURL(browser(), GURL(chrome::kAboutBlankURL),
+  chrome::AddSelectedTabWithURL(browser(), GURL(content::kAboutBlankURL),
                                 content::PAGE_TRANSITION_LINK);
   ASSERT_NO_FATAL_FAILURE(content::WaitForLoadStop(
       browser()->tab_strip_model()->GetActiveWebContents()));

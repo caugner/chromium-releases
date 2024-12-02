@@ -4,7 +4,6 @@
 
 #include "chrome/browser/extensions/extension_function.h"
 
-#include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
@@ -21,12 +20,9 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
-#include "content/public/browser/user_metrics.h"
-#include "content/public/common/result_codes.h"
 
 using content::BrowserThread;
 using content::RenderViewHost;
-using content::UserMetricsAction;
 
 // static
 void ExtensionFunctionDeleteTraits::Destruct(const ExtensionFunction* x) {
@@ -59,10 +55,8 @@ ExtensionFunction::ExtensionFunction()
       has_callback_(false),
       include_incognito_(false),
       user_gesture_(false),
-      args_(NULL),
       bad_message_(false),
-      histogram_value_(extensions::functions::UNKNOWN) {
-}
+      histogram_value_(extensions::functions::UNKNOWN) {}
 
 ExtensionFunction::~ExtensionFunction() {
 }
@@ -94,7 +88,7 @@ void ExtensionFunction::SetResult(base::Value* result) {
   results_->Append(result);
 }
 
-const ListValue* ExtensionFunction::GetResultList() {
+const base::ListValue* ExtensionFunction::GetResultList() {
   return results_.get();
 }
 
@@ -123,39 +117,26 @@ bool ExtensionFunction::HasOptionalArgument(size_t index) {
   return args_->Get(index, &value) && !value->IsType(Value::TYPE_NULL);
 }
 
-void ExtensionFunction::SendResponseImpl(base::ProcessHandle process,
-                                         IPC::Sender* ipc_sender,
-                                         int routing_id,
-                                         bool success) {
-  DCHECK(ipc_sender);
+void ExtensionFunction::SendResponseImpl(bool success) {
+  DCHECK(!response_callback_.is_null());
+
+  ResponseType type = success ? SUCCEEDED : FAILED;
   if (bad_message_) {
-    HandleBadMessage(process);
-    return;
+    type = BAD_MESSAGE;
+    LOG(ERROR) << "Bad extension message " << name_;
   }
 
   // If results were never set, we send an empty argument list.
   if (!results_)
-    results_.reset(new ListValue());
+    results_.reset(new base::ListValue());
 
-  ipc_sender->Send(new ExtensionMsg_Response(
-      routing_id, request_id_, success, *results_, GetError()));
+  response_callback_.Run(type, *results_, GetError());
 }
 
-void ExtensionFunction::HandleBadMessage(base::ProcessHandle process) {
-  LOG(ERROR) << "bad extension message " << name_ << " : terminating renderer.";
-  if (content::RenderProcessHost::run_renderer_in_process()) {
-    // In single process mode it is better if we don't suicide but just crash.
-    CHECK(false);
-  } else {
-    NOTREACHED();
-    content::RecordAction(UserMetricsAction("BadMessageTerminate_EFD"));
-    if (process)
-      base::KillProcess(process, content::RESULT_CODE_KILLED_BAD_MESSAGE,
-                        false);
-  }
-}
 UIThreadExtensionFunction::UIThreadExtensionFunction()
-    : render_view_host_(NULL), profile_(NULL), delegate_(NULL) {
+    : render_view_host_(NULL),
+      profile_(NULL),
+      delegate_(NULL) {
 }
 
 UIThreadExtensionFunction::~UIThreadExtensionFunction() {
@@ -268,17 +249,10 @@ bool UIThreadExtensionFunction::CanOperateOnWindow(
 }
 
 void UIThreadExtensionFunction::SendResponse(bool success) {
-  if (delegate_) {
+  if (delegate_)
     delegate_->OnSendResponse(this, success, bad_message_);
-  } else {
-    if (!render_view_host_ || !dispatcher())
-      return;
-
-    SendResponseImpl(render_view_host_->GetProcess()->GetHandle(),
-                     render_view_host_,
-                     render_view_host_->GetRoutingID(),
-                     success);
-  }
+  else
+    SendResponseImpl(success);
 }
 
 void UIThreadExtensionFunction::WriteToConsole(
@@ -289,7 +263,7 @@ void UIThreadExtensionFunction::WriteToConsole(
 }
 
 IOThreadExtensionFunction::IOThreadExtensionFunction()
-    : routing_id_(-1) {
+    : routing_id_(MSG_ROUTING_NONE) {
 }
 
 IOThreadExtensionFunction::~IOThreadExtensionFunction() {
@@ -305,11 +279,7 @@ void IOThreadExtensionFunction::Destruct() const {
 }
 
 void IOThreadExtensionFunction::SendResponse(bool success) {
-  if (!ipc_sender())
-    return;
-
-  SendResponseImpl(ipc_sender()->peer_handle(),
-                   ipc_sender(), routing_id_, success);
+  SendResponseImpl(success);
 }
 
 AsyncExtensionFunction::AsyncExtensionFunction() {

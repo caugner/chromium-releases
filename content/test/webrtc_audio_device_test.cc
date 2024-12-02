@@ -180,7 +180,6 @@ void WebRTCAudioDeviceTest::TearDown() {
   mock_process_.reset();
   media_stream_manager_.reset();
   mirroring_manager_.reset();
-  audio_manager_.reset();
   RendererWebKitPlatformSupportImpl::SetSandboxEnabledForTesting(
       sandbox_was_enabled_);
 }
@@ -232,6 +231,8 @@ void WebRTCAudioDeviceTest::UninitializeIOThread() {
 #if defined(OS_WIN)
   initialize_com_.reset();
 #endif
+
+  audio_manager_.reset();
 }
 
 void WebRTCAudioDeviceTest::CreateChannel(const char* name) {
@@ -240,11 +241,12 @@ void WebRTCAudioDeviceTest::CreateChannel(const char* name) {
   static const int kRenderProcessId = 1;
   audio_render_host_ = new AudioRendererHost(
       kRenderProcessId, audio_manager_.get(), mirroring_manager_.get(),
-      media_internals_.get());
+      media_internals_.get(), media_stream_manager_.get());
   audio_render_host_->OnChannelConnected(base::GetCurrentProcId());
 
   audio_input_renderer_host_ = new AudioInputRendererHost(
-      audio_manager_.get(), media_stream_manager_.get());
+      audio_manager_.get(), media_stream_manager_.get(),
+      mirroring_manager_.get());
   audio_input_renderer_host_->OnChannelConnected(base::GetCurrentProcId());
 
   channel_.reset(new IPC::Channel(name, IPC::Channel::MODE_SERVER, this));
@@ -285,13 +287,13 @@ bool WebRTCAudioDeviceTest::OnMessageReceived(const IPC::Message& message) {
       return true;
   }
 
-  if (audio_render_host_) {
+  if (audio_render_host_.get()) {
     bool message_was_ok = false;
     if (audio_render_host_->OnMessageReceived(message, &message_was_ok))
       return true;
   }
 
-  if (audio_input_renderer_host_) {
+  if (audio_input_renderer_host_.get()) {
     bool message_was_ok = false;
     if (audio_input_renderer_host_->OnMessageReceived(message, &message_was_ok))
       return true;
@@ -313,12 +315,12 @@ bool WebRTCAudioDeviceTest::OnMessageReceived(const IPC::Message& message) {
 // Posts a final task to the IO message loop and waits for completion.
 void WebRTCAudioDeviceTest::WaitForIOThreadCompletion() {
   WaitForMessageLoopCompletion(
-      ChildProcess::current()->io_message_loop()->message_loop_proxy());
+      ChildProcess::current()->io_message_loop()->message_loop_proxy().get());
 }
 
 void WebRTCAudioDeviceTest::WaitForAudioManagerCompletion() {
   if (audio_manager_)
-    WaitForMessageLoopCompletion(audio_manager_->GetMessageLoop());
+    WaitForMessageLoopCompletion(audio_manager_->GetMessageLoop().get());
 }
 
 void WebRTCAudioDeviceTest::WaitForMessageLoopCompletion(

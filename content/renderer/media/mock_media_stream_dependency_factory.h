@@ -106,34 +106,6 @@ class MockLocalVideoTrack : public webrtc::VideoTrackInterface {
   webrtc::ObserverInterface* observer_;
 };
 
-class MockLocalAudioTrack : public webrtc::AudioTrackInterface {
- public:
-  explicit MockLocalAudioTrack(const std::string& id)
-    : enabled_(false),
-      id_(id),
-      state_(MediaStreamTrackInterface::kLive),
-      observer_(NULL) {
-  }
-  virtual std::string kind() const OVERRIDE;
-  virtual std::string id() const OVERRIDE;
-  virtual bool enabled() const OVERRIDE;
-  virtual TrackState state() const OVERRIDE;
-  virtual bool set_enabled(bool enable) OVERRIDE;
-  virtual bool set_state(TrackState new_state) OVERRIDE;
-  virtual void RegisterObserver(webrtc::ObserverInterface* observer) OVERRIDE;
-  virtual void UnregisterObserver(webrtc::ObserverInterface* observer) OVERRIDE;
-  virtual webrtc::AudioSourceInterface* GetSource() const OVERRIDE;
-
- protected:
-  virtual ~MockLocalAudioTrack() {}
-
- private:
-  bool enabled_;
-  std::string id_;
-  TrackState state_;
-  webrtc::ObserverInterface* observer_;
-};
-
 // A mock factory for creating different objects for
 // RTC MediaStreams and PeerConnections.
 class MockMediaStreamDependencyFactory : public MediaStreamDependencyFactory {
@@ -181,8 +153,8 @@ class MockMediaStreamDependencyFactory : public MediaStreamDependencyFactory {
   virtual bool EnsurePeerConnectionFactory() OVERRIDE;
   virtual bool PeerConnectionFactoryCreated() OVERRIDE;
 
-  MockAudioSource* last_audio_source() { return last_audio_source_; }
-  MockVideoSource* last_video_source() { return last_video_source_; }
+  MockAudioSource* last_audio_source() { return last_audio_source_.get(); }
+  MockVideoSource* last_video_source() { return last_video_source_.get(); }
 
  private:
   bool mock_pc_factory_created_;

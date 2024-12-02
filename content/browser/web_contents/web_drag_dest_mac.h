@@ -5,9 +5,9 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "content/common/content_export.h"
-#include "webkit/glue/webdropdata.h"
+#include "webkit/common/webdropdata.h"
 
 
 namespace content {
@@ -41,6 +41,9 @@ CONTENT_EXPORT
 
   // The data for the current drag, or NULL if none is in progress.
   scoped_ptr<WebDropData> dropData_;
+
+  // True if the drag has been canceled.
+  bool canceled_;
 }
 
 // |contents| is the WebContentsImpl representing this tab, used to communicate

@@ -9,9 +9,9 @@
 #include "ash/system/tray/system_tray_delegate.h"
 #include "base/i18n/rtl.h"
 #include "base/metrics/histogram.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_piece.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
@@ -171,7 +171,7 @@ void OfflineLoadPage::CommandReceived(const std::string& cmd) {
   }
   // TODO(oshima): record action for metrics.
   if (command == "open_network_settings") {
-    ash::Shell::GetInstance()->system_tray_delegate()->ShowNetworkSettings();
+    ash::Shell::GetInstance()->system_tray_delegate()->ShowNetworkSettings("");
   } else {
     LOG(WARNING) << "Unknown command:" << cmd;
   }

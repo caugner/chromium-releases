@@ -5,73 +5,29 @@
 #ifndef ASH_TEST_TEST_METRO_VIEWER_PROCESS_HOST_H_
 #define ASH_TEST_TEST_METRO_VIEWER_PROCESS_HOST_H_
 
-#include <string>
-
 #include "base/memory/scoped_ptr.h"
-#include "base/synchronization/waitable_event.h"
-#include "base/threading/non_thread_safe.h"
-#include "base/threading/thread.h"
-#include "ipc/ipc_channel_proxy.h"
-#include "ipc/ipc_listener.h"
-#include "ipc/ipc_sender.h"
-#include "ui/gfx/native_widget_types.h"
+#include "win8/viewer/metro_viewer_process_host.h"
 
 class AcceleratedSurface;
 
 namespace ash {
 namespace test {
 
-class TestMetroViewerProcessHost : public IPC::Listener,
-                                   public IPC::Sender,
-                                   public base::NonThreadSafe {
+class TestMetroViewerProcessHost : public win8::MetroViewerProcessHost {
  public:
-  explicit TestMetroViewerProcessHost(const std::string& ipc_channel_name);
+  TestMetroViewerProcessHost(base::SingleThreadTaskRunner* ipc_task_runner);
   virtual ~TestMetroViewerProcessHost();
-
-  // Launches the viewer process associated with the given |app_user_model_id|
-  // and blocks until that viewer process connects or until a timeout is
-  // reached. Returns true if the viewer process connects before the timeout is
-  // reached.
-  bool LaunchViewerAndWaitForConnection(
-      const base::string16& app_user_model_id);
-
-  // IPC::Sender implementation:
-  virtual bool Send(IPC::Message* msg) OVERRIDE;
-
-  // IPC::Listener implementation:
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void OnChannelError() OVERRIDE;
 
   bool closed_unexpectedly() { return closed_unexpectedly_; }
 
  private:
-  void OnSetTargetSurface(gfx::NativeViewId target_surface);
+  // win8::MetroViewerProcessHost implementation
+  virtual void OnChannelError() OVERRIDE;
+  virtual void OnSetTargetSurface(gfx::NativeViewId target_surface) OVERRIDE;
+  virtual void OnOpenURL(const string16& url) OVERRIDE;
+  virtual void OnHandleSearchRequest(const string16& search_string) OVERRIDE;
 
-  void NotifyChannelConnected();
-
-  // Inner message filter used to handle connection event on the IPC channel
-  // proxy's background thread. This prevents consumers of
-  // TestMetroViewerProcessHost from having to pump messages on their own
-  // message loop.
-  class InternalMessageFilter : public IPC::ChannelProxy::MessageFilter {
-   public:
-    InternalMessageFilter(TestMetroViewerProcessHost* owner);
-
-    // IPC::ChannelProxy::MessageFilter implementation.
-    virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
-
-   private:
-    TestMetroViewerProcessHost* owner_;
-    DISALLOW_COPY_AND_ASSIGN(InternalMessageFilter);
-  };
-
-  // Members related to the IPC channel. Note that the order is important
-  // here as ipc_thread_ should be destroyed after channel_.
-  base::Thread ipc_thread_;
-  scoped_ptr<IPC::ChannelProxy> channel_;
-  base::WaitableEvent channel_connected_event_;
-
-  scoped_ptr<AcceleratedSurface> backing_surface;
+  scoped_ptr<AcceleratedSurface> backing_surface_;
 
   bool closed_unexpectedly_;
 

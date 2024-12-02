@@ -6,14 +6,6 @@
 
 namespace message_center {
 
-#if !defined(TOOLKIT_VIEWS)
-NotifierSettingsDelegate* ShowSettings(NotifierSettingsProvider* provider,
-                                       gfx::NativeView context) {
-  NOTIMPLEMENTED();
-  return NULL;
-}
-#endif
-
 Notifier::Notifier(const std::string& id,
                    const string16& name,
                    bool enabled)

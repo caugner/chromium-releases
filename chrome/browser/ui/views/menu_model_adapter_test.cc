@@ -3,12 +3,12 @@
 // found in the LICENSE file.
 
 #include "base/callback.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/test/base/interactive_test_utils.h"
-#include "chrome/test/base/ui_controls.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/base/view_event_test_base.h"
 #include "ui/base/models/menu_model.h"
+#include "ui/base/test/ui_controls.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/controls/menu/menu_controller.h"
@@ -240,6 +240,7 @@ class MenuModelAdapterTest : public ViewEventTestBase,
         button_,
         bounds,
         views::MenuItemView::TOPLEFT,
+        ui::MENU_SOURCE_NONE,
         views::MenuRunner::HAS_MNEMONICS));
   }
 
@@ -270,9 +271,8 @@ class MenuModelAdapterTest : public ViewEventTestBase,
 
     menu_model_adapter_.BuildMenu(menu_);
 
-    MessageLoopForUI::current()->PostTask(
-        FROM_HERE,
-        CreateEventTask(this, &MenuModelAdapterTest::Step3));
+    base::MessageLoopForUI::current()->PostTask(
+        FROM_HERE, CreateEventTask(this, &MenuModelAdapterTest::Step3));
   }
 
   // Verify that the submenu MenuModel received the close callback

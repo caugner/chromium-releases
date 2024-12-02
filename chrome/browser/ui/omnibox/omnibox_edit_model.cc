@@ -10,14 +10,13 @@
 #include "base/format_macros.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/autocomplete/autocomplete_input.h"
-#include "chrome/browser/autocomplete/autocomplete_log.h"
 #include "chrome/browser/autocomplete/autocomplete_provider.h"
 #include "chrome/browser/autocomplete/extension_app_provider.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
@@ -29,6 +28,7 @@
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/omnibox/omnibox_log.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor_factory.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
@@ -122,13 +122,13 @@ OmniboxEditModel::OmniboxEditModel(OmniboxView* view,
                                    OmniboxEditController* controller,
                                    Profile* profile)
     : view_(view),
-      popup_(NULL),
       controller_(controller),
       focus_state_(OMNIBOX_FOCUS_NONE),
       user_input_in_progress_(false),
       just_deleted_text_(false),
       has_temporary_text_(false),
       is_temporary_text_set_by_instant_(false),
+      selected_instant_autocomplete_match_index_(OmniboxPopupModel::kNoMatch),
       is_instant_temporary_text_a_search_query_(false),
       paste_state_(NONE),
       control_key_state_(UP),
@@ -184,9 +184,17 @@ void OmniboxEditModel::RestoreState(const State& state) {
   }
 }
 
-AutocompleteMatch OmniboxEditModel::CurrentMatch() {
-  AutocompleteMatch match;
-  GetInfoForCurrentText(&match, NULL);
+AutocompleteMatch OmniboxEditModel::CurrentMatch(
+    GURL* alternate_nav_url) const {
+  // If we have a valid match use it. Otherwise get one for the current text.
+  AutocompleteMatch match = omnibox_controller_->current_match();
+
+  if (!match.destination_url.is_valid()) {
+    GetInfoForCurrentText(&match, alternate_nav_url);
+  } else if (alternate_nav_url) {
+    *alternate_nav_url = AutocompleteResult::ComputeAlternateNavUrl(
+        autocomplete_controller()->input(), match);
+  }
   return match;
 }
 
@@ -205,7 +213,8 @@ bool OmniboxEditModel::UpdatePermanentText(const string16& new_permanent_text) {
   string16 instant_suggestion = view_->GetInstantSuggestion();
   const bool visibly_changed_permanent_text =
       (permanent_text_ != new_permanent_text) &&
-      (!user_input_in_progress_ || !has_focus()) &&
+      (!has_focus() ||
+       (!user_input_in_progress_ && !popup_model()->IsOpen())) &&
       (instant_suggestion.empty() ||
        new_permanent_text != user_text_ + instant_suggestion);
 
@@ -220,78 +229,33 @@ GURL OmniboxEditModel::PermanentURL() {
 void OmniboxEditModel::SetUserText(const string16& text) {
   SetInputInProgress(true);
   InternalSetUserText(text);
+  omnibox_controller_->InvalidateCurrentMatch();
   paste_state_ = NONE;
   has_temporary_text_ = false;
   is_temporary_text_set_by_instant_ = false;
+  selected_instant_autocomplete_match_index_ = OmniboxPopupModel::kNoMatch;
   is_instant_temporary_text_a_search_query_ = false;
-}
-
-void OmniboxEditModel::FinalizeInstantQuery(const string16& input_text,
-                                            const InstantSuggestion& suggestion,
-                                            bool skip_inline_autocomplete) {
-  if (skip_inline_autocomplete) {
-    const string16 final_text = input_text + suggestion.text;
-    view_->OnBeforePossibleChange();
-    view_->SetWindowTextAndCaretPos(final_text, final_text.length(), false,
-        false);
-    view_->OnAfterPossibleChange();
-  } else if (popup_->IsOpen()) {
-    SearchProvider* search_provider =
-        autocomplete_controller()->search_provider();
-    // There may be no providers during testing; guard against that.
-    if (search_provider)
-      search_provider->FinalizeInstantQuery(input_text, suggestion);
-  }
 }
 
 void OmniboxEditModel::SetInstantSuggestion(
     const InstantSuggestion& suggestion) {
-  switch (suggestion.behavior) {
-    case INSTANT_COMPLETE_NOW:
-      view_->SetInstantSuggestion(string16());
-      if (!suggestion.text.empty())
-        FinalizeInstantQuery(view_->GetText(), suggestion, false);
-      break;
-
-    case INSTANT_COMPLETE_NEVER: {
-      DCHECK_EQ(INSTANT_SUGGESTION_SEARCH, suggestion.type);
-      view_->SetInstantSuggestion(suggestion.text);
-      autocomplete_controller()->search_provider()->ClearInstantSuggestion();
-      break;
-    }
-
-    case INSTANT_COMPLETE_REPLACE: {
-      const bool save_original_selection = !has_temporary_text_;
-      view_->SetInstantSuggestion(string16());
-      has_temporary_text_ = true;
-      is_temporary_text_set_by_instant_ = true;
-      is_instant_temporary_text_a_search_query_ =
-          suggestion.type == INSTANT_SUGGESTION_SEARCH;
-      // Instant suggestions are never a keyword.
-      keyword_ = string16();
-      is_keyword_hint_ = false;
-      view_->OnTemporaryTextMaybeChanged(suggestion.text,
-                                         save_original_selection, true);
-      break;
-    }
-  }
+// Should only get called for the HTML popup.
+#if defined(HTML_INSTANT_EXTENDED_POPUP)
+  omnibox_controller_->SetInstantSuggestion(suggestion);
+#endif
 }
 
-bool OmniboxEditModel::CommitSuggestedText(bool skip_inline_autocomplete) {
-  if (!controller_->GetInstant())
-    return false;
-
+bool OmniboxEditModel::CommitSuggestedText() {
   const string16 suggestion = view_->GetInstantSuggestion();
   if (suggestion.empty())
     return false;
 
   // Assume that the gray text we are committing is a search suggestion.
-  FinalizeInstantQuery(view_->GetText(),
-                       InstantSuggestion(suggestion,
-                                         INSTANT_COMPLETE_NOW,
-                                         INSTANT_SUGGESTION_SEARCH,
-                                         string16()),
-                       skip_inline_autocomplete);
+  const string16 final_text = view_->GetText() + suggestion;
+  view_->OnBeforePossibleChange();
+  view_->SetWindowTextAndCaretPos(final_text, final_text.length(), false,
+      false);
+  view_->OnAfterPossibleChange();
   return true;
 }
 
@@ -300,7 +264,7 @@ void OmniboxEditModel::OnChanged() {
   // never actually use it.  This avoids running the autocomplete providers (and
   // any systems they then spin up) during startup.
   const AutocompleteMatch& current_match = user_input_in_progress_ ?
-      CurrentMatch() : AutocompleteMatch();
+      CurrentMatch(NULL) : AutocompleteMatch();
 
   AutocompleteActionPredictor::Action recommended_action =
       AutocompleteActionPredictor::ACTION_NONE;
@@ -323,12 +287,26 @@ void OmniboxEditModel::OnChanged() {
                             recommended_action,
                             AutocompleteActionPredictor::LAST_PREDICT_ACTION);
 
-  if (!DoInstant(current_match)) {
+  // Do not perform instant if we're currently reverting or the change is the
+  // result of an INSTANT_COMPLETE_REPLACE instant suggestion.
+  bool performed_instant = false;
+  if (!in_revert_ && !is_temporary_text_set_by_instant_) {
+    size_t start, end;
+    view_->GetSelectionBounds(&start, &end);
+    string16 user_text = DisplayTextFromUserText(user_text_);
+    performed_instant = omnibox_controller_->DoInstant(
+        current_match, user_text, view_->GetText(), start, end,
+        user_input_in_progress_, in_escape_handler_,
+        view_->DeleteAtEndPressed() || just_deleted_text_,
+        KeywordIsSelected());
+  }
+
+  if (!performed_instant) {
     // Hide any suggestions we might be showing.
     view_->SetInstantSuggestion(string16());
 
     // No need to wait any longer for Instant.
-    FinalizeInstantQuery(string16(), InstantSuggestion(), false);
+    omnibox_controller_->FinalizeInstantQuery(string16(), InstantSuggestion());
   }
 
   switch (recommended_action) {
@@ -344,7 +322,7 @@ void OmniboxEditModel::OnChanged() {
         delegate_->DoPrerender(current_match);
       break;
     case AutocompleteActionPredictor::ACTION_PRECONNECT:
-      DoPreconnect(current_match);
+      omnibox_controller_->DoPreconnect(current_match);
       break;
     case AutocompleteActionPredictor::ACTION_NONE:
       break;
@@ -356,9 +334,7 @@ void OmniboxEditModel::OnChanged() {
 void OmniboxEditModel::GetDataForURLExport(GURL* url,
                                            string16* title,
                                            gfx::Image* favicon) {
-  AutocompleteMatch match;
-  GetInfoForCurrentText(&match, NULL);
-  *url = match.destination_url;
+  *url = CurrentMatch(NULL).destination_url;
   if (*url == URLFixerUpper::FixupURL(UTF16ToUTF8(permanent_text_),
                                       std::string())) {
     *title = controller_->GetTitle();
@@ -366,30 +342,8 @@ void OmniboxEditModel::GetDataForURLExport(GURL* url,
   }
 }
 
-bool OmniboxEditModel::UseVerbatimInstant() {
-#if defined(OS_MACOSX)
-  // TODO(suzhe): Fix Mac port to display Instant suggest in a separated NSView,
-  // so that we can display Instant suggest along with composition text.
-  const AutocompleteInput& input = autocomplete_controller()->input();
-  if (input.prevent_inline_autocomplete())
-    return true;
-#endif
-
-  // The value of input.prevent_inline_autocomplete() is determined by the
-  // following conditions:
-  // 1. If the caret is at the end of the text.
-  // 2. If it's in IME composition mode.
-  // We send the caret position to Instant (so it can determine #1 itself), and
-  // we use a separated widget for displaying the Instant suggest (so it doesn't
-  // interfere with #2). So, we don't need to care about the value of
-  // input.prevent_inline_autocomplete() here.
-  return view_->DeleteAtEndPressed() || popup_->selected_line() != 0 ||
-      just_deleted_text_;
-}
-
 bool OmniboxEditModel::CurrentTextIsURL() const {
-  if (view_->toolbar_model()->GetSearchTermsType() !=
-      ToolbarModel::NO_SEARCH_TERMS)
+  if (view_->toolbar_model()->WouldReplaceSearchURLWithSearchTerms())
     return false;
 
   // If current text is not composed of replaced search terms and
@@ -400,15 +354,11 @@ bool OmniboxEditModel::CurrentTextIsURL() const {
   if (!user_input_in_progress_)
     return true;
 
-  AutocompleteMatch match;
-  GetInfoForCurrentText(&match, NULL);
-  return !AutocompleteMatch::IsSearchType(match.type);
+  return !AutocompleteMatch::IsSearchType(CurrentMatch(NULL).type);
 }
 
 AutocompleteMatch::Type OmniboxEditModel::CurrentTextType() const {
-  AutocompleteMatch match;
-  GetInfoForCurrentText(&match, NULL);
-  return match.type;
+  return CurrentMatch(NULL).type;
 }
 
 void OmniboxEditModel::AdjustTextForCopy(int sel_min,
@@ -421,8 +371,7 @@ void OmniboxEditModel::AdjustTextForCopy(int sel_min,
   // Do not adjust if selection did not start at the beginning of the field, or
   // if the URL was replaced by search terms.
   if ((sel_min != 0) ||
-      (view_->toolbar_model()->GetSearchTermsType() !=
-          ToolbarModel::NO_SEARCH_TERMS))
+      view_->toolbar_model()->WouldReplaceSearchURLWithSearchTerms())
     return;
 
   if (!user_input_in_progress_ && is_all_selected) {
@@ -473,7 +422,7 @@ void OmniboxEditModel::SetInputInProgress(bool in_progress) {
   controller_->OnInputInProgress(in_progress);
 
   delegate_->NotifySearchTabHelper(user_input_in_progress_, !in_revert_,
-                                   popup_->IsOpen(), user_text_.empty());
+                                   popup_model()->IsOpen(), user_text_.empty());
 }
 
 void OmniboxEditModel::Revert() {
@@ -484,6 +433,7 @@ void OmniboxEditModel::Revert() {
   is_keyword_hint_ = false;
   has_temporary_text_ = false;
   is_temporary_text_set_by_instant_ = false;
+  selected_instant_autocomplete_match_index_ = OmniboxPopupModel::kNoMatch;
   is_instant_temporary_text_a_search_query_ = false;
   view_->SetWindowTextAndCaretPos(permanent_text_,
                                   has_focus() ? permanent_text_.length() : 0,
@@ -497,11 +447,6 @@ void OmniboxEditModel::Revert() {
 void OmniboxEditModel::StartAutocomplete(
     bool has_selected_text,
     bool prevent_inline_autocomplete) const {
-  ClearPopupKeywordMode();
-
-  bool keyword_is_selected = KeywordIsSelected();
-  popup_->SetHoveredLine(OmniboxPopupModel::kNoMatch);
-
   size_t cursor_position;
   if (inline_autocomplete_text_.empty()) {
     // Cursor position is equivalent to the current selection's end.
@@ -527,28 +472,20 @@ void OmniboxEditModel::StartAutocomplete(
     cursor_position = user_text_.length();
   }
 
-  InstantController* instant = controller_->GetInstant();
-  if (instant) {
-    instant->OnAutocompleteStart();
-    // If the embedded page for InstantExtended is fetching its own suggestions,
-    // suppress search suggestions from SearchProvider. We still need
-    // SearchProvider to run for FinalizeInstantQuery.
-    // TODO(dcblack): Once we are done refactoring the omnibox so we don't need
-    // to use FinalizeInstantQuery anymore, we can take out this check and
-    // remove this provider from kInstantExtendedOmniboxProviders.
-    if (instant->WillFetchCompletions())
-      autocomplete_controller()->search_provider()->SuppressSearchSuggestions();
-  }
-
-  // We don't explicitly clear OmniboxPopupModel::manually_selected_match, as
-  // Start ends up invoking OmniboxPopupModel::OnResultChanged which clears it.
-  autocomplete_controller()->Start(AutocompleteInput(
-      user_text_, cursor_position, string16(), GURL(),
+  GURL current_url =
+      (delegate_->CurrentPageExists() && view_->IsIndicatingQueryRefinement()) ?
+      delegate_->GetURL() : GURL();
+  bool keyword_is_selected = KeywordIsSelected();
+  omnibox_controller_->StartAutocomplete(
+      user_text_,
+      cursor_position,
+      current_url,
       prevent_inline_autocomplete || just_deleted_text_ ||
       (has_selected_text && inline_autocomplete_text_.empty()) ||
-      (paste_state_ != NONE), keyword_is_selected,
+      (paste_state_ != NONE),
+      keyword_is_selected,
       keyword_is_selected || allow_exact_keyword_match_,
-      AutocompleteInput::ALL_MATCHES));
+      controller_->GetOmniboxBounds().x());
 }
 
 void OmniboxEditModel::StopAutocomplete() {
@@ -583,9 +520,8 @@ bool OmniboxEditModel::IsPasteAndSearch(const string16& text) const {
 void OmniboxEditModel::AcceptInput(WindowOpenDisposition disposition,
                                    bool for_drop) {
   // Get the URL and transition type for the selected entry.
-  AutocompleteMatch match;
   GURL alternate_nav_url;
-  GetInfoForCurrentText(&match, &alternate_nav_url);
+  AutocompleteMatch match = CurrentMatch(&alternate_nav_url);
 
   // If CTRL is down it means the user wants to append ".com" to the text he
   // typed. If we can successfully generate a URL_WHAT_YOU_TYPED match doing
@@ -655,31 +591,49 @@ void OmniboxEditModel::OpenMatch(const AutocompleteMatch& match,
                                  size_t index) {
   // We only care about cases where there is a selection (i.e. the popup is
   // open).
-  if (popup_->IsOpen()) {
+  if (popup_model()->IsOpen()) {
     const base::TimeTicks& now(base::TimeTicks::Now());
+    base::TimeDelta elapsed_time_since_user_first_modified_omnibox(
+        now - time_user_first_modified_omnibox_);
+    base::TimeDelta elapsed_time_since_last_change_to_default_match(
+        now - autocomplete_controller()->last_time_default_match_changed());
+    // These elapsed times don't really make sense for ZeroSuggest matches
+    // (because the user does not modify the omnibox for ZeroSuggest), so for
+    // those we set the elapsed times to something that will be ignored by
+    // metrics_log.cc.
+    if (match.provider &&
+        match.provider->type() == AutocompleteProvider::TYPE_ZERO_SUGGEST) {
+      elapsed_time_since_user_first_modified_omnibox =
+          base::TimeDelta::FromMilliseconds(-1);
+      elapsed_time_since_last_change_to_default_match =
+          base::TimeDelta::FromMilliseconds(-1);
+    }
     // TODO(sreeram): Handle is_temporary_text_set_by_instant_ correctly.
-    AutocompleteLog log(
+    OmniboxLog log(
         autocomplete_controller()->input().text(),
         just_deleted_text_,
         autocomplete_controller()->input().type(),
-        popup_->selected_line(),
+        popup_model()->selected_line(),
         -1,  // don't yet know tab ID; set later if appropriate
         delegate_->CurrentPageExists() ? ClassifyPage(delegate_->GetURL()) :
             metrics::OmniboxEventProto_PageClassification_OTHER,
-        now - time_user_first_modified_omnibox_,
+        elapsed_time_since_user_first_modified_omnibox,
         string16::npos,  // completed_length; possibly set later
-        now - autocomplete_controller()->last_time_default_match_changed(),
+        elapsed_time_since_last_change_to_default_match,
         result());
-    DCHECK(user_input_in_progress_ ||
-           match.provider->type() == AutocompleteProvider::TYPE_ZERO_SUGGEST)
+
+    DCHECK(user_input_in_progress_ || (match.provider &&
+           match.provider->type() == AutocompleteProvider::TYPE_ZERO_SUGGEST))
         << "We didn't get here through the expected series of calls. "
         << "time_user_first_modified_omnibox_ is not set correctly and other "
-        << "things may be wrong. Match provider: " << match.provider->GetName();
+        << "things may be wrong. Match provider: "
+        << (match.provider ? match.provider->GetName() : "NULL");
     DCHECK(log.elapsed_time_since_user_first_modified_omnibox >=
            log.elapsed_time_since_last_change_to_default_match)
         << "We should've got the notification that the user modified the "
         << "omnibox text at same time or before the most recent time the "
         << "default match changed.";
+
     if (index != OmniboxPopupModel::kNoMatch)
       log.selected_index = index;
     if (match.inline_autocomplete_offset != string16::npos) {
@@ -699,7 +653,7 @@ void OmniboxEditModel::OpenMatch(const AutocompleteMatch& match,
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_OMNIBOX_OPENED_URL,
         content::Source<Profile>(profile_),
-        content::Details<AutocompleteLog>(&log));
+        content::Details<OmniboxLog>(&log));
     HISTOGRAM_ENUMERATION("Omnibox.EventCount", 1, 2);
   }
 
@@ -708,16 +662,14 @@ void OmniboxEditModel::OpenMatch(const AutocompleteMatch& match,
     if (match.transition == content::PAGE_TRANSITION_KEYWORD) {
       // The user is using a non-substituting keyword or is explicitly in
       // keyword mode.
-
-      AutocompleteMatch current_match;
-      GetInfoForCurrentText(&current_match, NULL);
       const AutocompleteMatch& match = (index == OmniboxPopupModel::kNoMatch) ?
-          current_match : result().match_at(index);
+          CurrentMatch(NULL) : result().match_at(index);
 
       // Don't increment usage count for extension keywords.
       if (delegate_->ProcessExtensionKeyword(template_url, match,
                                              disposition)) {
-        view_->RevertAll();
+        if (disposition != NEW_BACKGROUND_TAB)
+          view_->RevertAll();
         return;
       }
 
@@ -745,7 +697,7 @@ void OmniboxEditModel::OpenMatch(const AutocompleteMatch& match,
     view_->RevertAll();  // Revert the box to its unedited state
   }
 
-  if (match.type == AutocompleteMatch::EXTENSION_APP) {
+  if (match.type == AutocompleteMatchType::EXTENSION_APP) {
     ExtensionAppProvider::LaunchAppFromOmnibox(match, profile_, disposition);
   } else {
     base::TimeDelta query_formulation_time =
@@ -753,6 +705,16 @@ void OmniboxEditModel::OpenMatch(const AutocompleteMatch& match,
     const GURL destination_url = autocomplete_controller()->
         GetDestinationURL(match, query_formulation_time);
 
+    // Track whether the destination URL sends us to a search results page
+    // using the default search provider.
+    TemplateURL* default_provider =
+        TemplateURLServiceFactory::GetForProfile(profile_)->
+            GetDefaultSearchProvider();
+    if (default_provider && default_provider->IsSearchURL(destination_url))
+      content::RecordAction(UserMetricsAction(
+          "OmniboxDestinationURLMatchesDefaultSearchProvider"));
+
+#if defined(HTML_INSTANT_EXTENDED_POPUP)
     // If running with instant, notify the instant controller that a navigation
     // is about to take place if we are navigating to a URL. This can be
     // determined by inspecting the transition type. To ensure that this is only
@@ -760,10 +722,11 @@ void OmniboxEditModel::OpenMatch(const AutocompleteMatch& match,
     // is the same heuristic used by BrowserInstantController::OpenInstant
     if (match.transition == content::PAGE_TRANSITION_TYPED &&
         disposition == CURRENT_TAB) {
-      InstantController* instant = controller_->GetInstant();
+      InstantController* instant = GetInstantController();
       if (instant)
         instant->OmniboxNavigateToURL();
     }
+#endif
 
     // This calls RevertAll again.
     base::AutoReset<bool> tmp(&in_revert_, true);
@@ -781,8 +744,8 @@ bool OmniboxEditModel::AcceptKeyword(EnteredKeywordModeMethod entered_method) {
   autocomplete_controller()->Stop(false);
   is_keyword_hint_ = false;
 
-  if (popup_->IsOpen())
-    popup_->SetSelectedLineState(OmniboxPopupModel::KEYWORD);
+  if (popup_model()->IsOpen())
+    popup_model()->SetSelectedLineState(OmniboxPopupModel::KEYWORD);
   else
     StartAutocomplete(false, true);
 
@@ -792,9 +755,10 @@ bool OmniboxEditModel::AcceptKeyword(EnteredKeywordModeMethod entered_method) {
   bool save_original_selection = !has_temporary_text_;
   has_temporary_text_ = true;
   is_temporary_text_set_by_instant_ = false;
+  selected_instant_autocomplete_match_index_ = OmniboxPopupModel::kNoMatch;
   is_instant_temporary_text_a_search_query_ = false;
   view_->OnTemporaryTextMaybeChanged(
-      DisplayTextFromUserText(CurrentMatch().fill_into_edit),
+      DisplayTextFromUserText(CurrentMatch(NULL).fill_into_edit),
       save_original_selection, true);
 
   content::RecordAction(UserMetricsAction("AcceptedKeywordHint"));
@@ -804,15 +768,26 @@ bool OmniboxEditModel::AcceptKeyword(EnteredKeywordModeMethod entered_method) {
   return true;
 }
 
+void OmniboxEditModel::AcceptTemporaryTextAsUserText() {
+  InternalSetUserText(UserTextFromDisplayText(view_->GetText()));
+  has_temporary_text_ = false;
+  is_temporary_text_set_by_instant_ = false;
+  selected_instant_autocomplete_match_index_ = OmniboxPopupModel::kNoMatch;
+  is_instant_temporary_text_a_search_query_ = false;
+  OnPopupBoundsChanged(gfx::Rect());
+  delegate_->NotifySearchTabHelper(user_input_in_progress_, !in_revert_,
+                                   popup_model()->IsOpen(), user_text_.empty());
+}
+
 void OmniboxEditModel::ClearKeyword(const string16& visible_text) {
   autocomplete_controller()->Stop(false);
-  ClearPopupKeywordMode();
+  omnibox_controller_->ClearPopupKeywordMode();
 
   const string16 window_text(keyword_ + visible_text);
 
   // Only reset the result if the edit text has changed since the
   // keyword was accepted, or if the popup is closed.
-  if (just_deleted_text_ || !visible_text.empty() || !popup_->IsOpen()) {
+  if (just_deleted_text_ || !visible_text.empty() || !popup_model()->IsOpen()) {
     view_->OnBeforePossibleChange();
     view_->SetWindowTextAndCaretPos(window_text.c_str(), keyword_.length(),
         false, false);
@@ -827,10 +802,6 @@ void OmniboxEditModel::ClearKeyword(const string16& visible_text) {
     view_->SetWindowTextAndCaretPos(window_text.c_str(), keyword_.length(),
         false, true);
   }
-}
-
-const AutocompleteResult& OmniboxEditModel::result() const {
-  return autocomplete_controller()->result();
 }
 
 void OmniboxEditModel::OnSetFocus(bool control_down) {
@@ -848,11 +819,11 @@ void OmniboxEditModel::OnSetFocus(bool control_down) {
     // the actual underlying current URL, e.g. if we're on the NTP and the
     // |permanent_text_| is empty.
     autocomplete_controller()->StartZeroSuggest(delegate_->GetURL(),
-                                                user_text_);
+                                                permanent_text_);
   }
 
   delegate_->NotifySearchTabHelper(user_input_in_progress_, !in_revert_,
-                                   popup_->IsOpen(), user_text_.empty());
+                                   popup_model()->IsOpen(), user_text_.empty());
 }
 
 void OmniboxEditModel::SetCaretVisibility(bool visible) {
@@ -864,7 +835,7 @@ void OmniboxEditModel::SetCaretVisibility(bool visible) {
 }
 
 void OmniboxEditModel::OnWillKillFocus(gfx::NativeView view_gaining_focus) {
-  InstantController* instant = controller_->GetInstant();
+  InstantController* instant = GetInstantController();
   if (instant) {
     instant->OmniboxFocusChanged(OMNIBOX_FOCUS_NONE,
                                  OMNIBOX_FOCUS_CHANGE_EXPLICIT,
@@ -874,7 +845,7 @@ void OmniboxEditModel::OnWillKillFocus(gfx::NativeView view_gaining_focus) {
   // TODO(jered): Rip this out along with StartZeroSuggest.
   autocomplete_controller()->StopZeroSuggest();
   delegate_->NotifySearchTabHelper(user_input_in_progress_, !in_revert_,
-                                   popup_->IsOpen(), user_text_.empty());
+                                   popup_model()->IsOpen(), user_text_.empty());
 }
 
 void OmniboxEditModel::OnKillFocus() {
@@ -888,9 +859,7 @@ void OmniboxEditModel::OnKillFocus() {
 
 bool OmniboxEditModel::OnEscapeKeyPressed() {
   if (has_temporary_text_) {
-    AutocompleteMatch match;
-    GetInfoForCurrentText(&match, NULL);
-    if (match.destination_url != original_url_) {
+    if (CurrentMatch(NULL).destination_url != original_url_) {
       RevertTemporaryText(true);
       return true;
     }
@@ -924,30 +893,13 @@ bool OmniboxEditModel::OnEscapeKeyPressed() {
 }
 
 void OmniboxEditModel::OnControlKeyChanged(bool pressed) {
-  // Don't change anything unless the key state is actually toggling.
-  if (pressed == (control_key_state_ == UP)) {
-    ControlKeyState old_state = control_key_state_;
-    control_key_state_ = pressed ? DOWN_WITHOUT_CHANGE : UP;
-    if ((control_key_state_ == DOWN_WITHOUT_CHANGE) && has_temporary_text_) {
-      // Arrowing down and then hitting control accepts the temporary text as
-      // the input text.
-      InternalSetUserText(UserTextFromDisplayText(view_->GetText()));
-      has_temporary_text_ = false;
-      is_temporary_text_set_by_instant_ = false;
-      is_instant_temporary_text_a_search_query_ = false;
-    }
-    if ((old_state != DOWN_WITH_CHANGE) && popup_->IsOpen()) {
-      // Autocomplete history provider results may change, so refresh the
-      // popup.  This will force user_input_in_progress_ to true, but if the
-      // popup is open, that should have already been the case.
-      view_->UpdatePopup();
-    }
-  }
+  // TODO(beaudoin): Remove this function entirely and all the code that calls
+  // it.
 }
 
 void OmniboxEditModel::OnUpOrDownKeyPressed(int count) {
   // NOTE: This purposefully doesn't trigger any code that resets paste_state_.
-  if (!popup_->IsOpen()) {
+  if (!popup_model()->IsOpen()) {
     if (!query_in_progress()) {
       // The popup is neither open nor working on a query already.  So, start an
       // autocomplete query for the current text.  This also sets
@@ -965,17 +917,20 @@ void OmniboxEditModel::OnUpOrDownKeyPressed(int count) {
       // should force it to open immediately.
     }
   } else {
-    InstantController* instant = controller_->GetInstant();
+#if defined(HTML_INSTANT_EXTENDED_POPUP)
+    InstantController* instant = GetInstantController();
     if (instant && instant->OnUpOrDownKeyPressed(count)) {
       // If Instant handles the key press, it's showing a list of suggestions
       // that it's stepping through. In that case, our popup model is
       // irrelevant, so don't process the key press ourselves. However, do stop
       // the autocomplete system from changing the results.
       autocomplete_controller()->Stop(false);
-    } else {
+    } else
+#endif
+    {
       // The popup is open, so the user should be able to interact with it
       // normally.
-      popup_->Move(count);
+      popup_model()->Move(count);
     }
   }
 }
@@ -985,6 +940,9 @@ void OmniboxEditModel::OnPopupDataChanged(
     GURL* destination_for_temporary_text_change,
     const string16& keyword,
     bool is_keyword_hint) {
+  // The popup changed its data, the match in the controller is no longer valid.
+  omnibox_controller_->InvalidateCurrentMatch();
+
   // Update keyword/hint-related local state.
   bool keyword_state_changed = (keyword_ != keyword) ||
       ((is_keyword_hint_ != is_keyword_hint) && !keyword.empty());
@@ -1003,6 +961,7 @@ void OmniboxEditModel::OnPopupDataChanged(
       // Save the original selection and URL so it can be reverted later.
       has_temporary_text_ = true;
       is_temporary_text_set_by_instant_ = false;
+      selected_instant_autocomplete_match_index_ = OmniboxPopupModel::kNoMatch;
       is_instant_temporary_text_a_search_query_ = false;
       original_url_ = *destination_for_temporary_text_change;
       inline_autocomplete_text_.clear();
@@ -1025,6 +984,7 @@ void OmniboxEditModel::OnPopupDataChanged(
   bool call_controller_onchanged = true;
   inline_autocomplete_text_ = text;
 
+  string16 user_text = user_input_in_progress_ ? user_text_ : permanent_text_;
   if (keyword_state_changed && KeywordIsSelected()) {
     // If we reach here, the user most likely entered keyword mode by inserting
     // a space between a keyword name and a search string (as pressing space or
@@ -1041,11 +1001,11 @@ void OmniboxEditModel::OnPopupDataChanged(
     // temporary text back to a default match that's a keyword search, but in
     // that case the RevertTemporaryText() call below will reset the caret or
     // selection correctly so the caret positioning we do here won't matter.
-    view_->SetWindowTextAndCaretPos(DisplayTextFromUserText(user_text_), 0,
+    view_->SetWindowTextAndCaretPos(DisplayTextFromUserText(user_text), 0,
                                                             false, false);
   } else if (view_->OnInlineAutocompleteTextMaybeChanged(
-             DisplayTextFromUserText(user_text_ + inline_autocomplete_text_),
-             DisplayTextFromUserText(user_text_).length())) {
+             DisplayTextFromUserText(user_text + inline_autocomplete_text_),
+             DisplayTextFromUserText(user_text).length())) {
     call_controller_onchanged = false;
   }
 
@@ -1096,7 +1056,7 @@ bool OmniboxEditModel::OnAfterPossibleChange(const string16& old_text,
   if ((text_differs || selection_differs) &&
       (control_key_state_ == DOWN_WITHOUT_CHANGE)) {
     control_key_state_ = DOWN_WITH_CHANGE;
-    if (!text_differs && !popup_->IsOpen())
+    if (!text_differs && !popup_model()->IsOpen())
       return false;  // Don't open the popup for no reason.
   } else if (!user_text_changed) {
     return false;
@@ -1109,6 +1069,7 @@ bool OmniboxEditModel::OnAfterPossibleChange(const string16& old_text,
     InternalSetUserText(UserTextFromDisplayText(new_text));
     has_temporary_text_ = false;
     is_temporary_text_set_by_instant_ = false;
+    selected_instant_autocomplete_match_index_ = OmniboxPopupModel::kNoMatch;
     is_instant_temporary_text_a_search_query_ = false;
 
     // Track when the user has deleted text so we won't allow inline
@@ -1161,64 +1122,46 @@ bool OmniboxEditModel::OnAfterPossibleChange(const string16& old_text,
            MaybeAcceptKeywordBySpace(user_text_));
 }
 
-void OmniboxEditModel::OnPopupBoundsChanged(const gfx::Rect& bounds) {
-  InstantController* instant = controller_->GetInstant();
-  if (instant)
-    instant->SetPopupBounds(bounds);
-}
+void OmniboxEditModel::OnCurrentMatchChanged(bool is_temporary_set_by_instant) {
+  has_temporary_text_ = is_temporary_set_by_instant;
+  is_temporary_text_set_by_instant_ = is_temporary_set_by_instant;
 
-void OmniboxEditModel::OnResultChanged(bool default_match_changed) {
-  const bool was_open = popup_->IsOpen();
-  if (default_match_changed) {
-    string16 inline_autocomplete_text;
+  const AutocompleteMatch& match = omnibox_controller_->current_match();
+
+  if (is_temporary_set_by_instant) {
+    view_->OnTemporaryTextMaybeChanged(
+        DisplayTextFromUserText(match.fill_into_edit), !has_temporary_text_,
+        false);
+  } else {
+    // We store |keyword| and |is_keyword_hint| in temporary variables since
+    // OnPopupDataChanged use their previous state to detect changes.
     string16 keyword;
-    bool is_keyword_hint = false;
-    const AutocompleteResult& result = this->result();
-    const AutocompleteResult::const_iterator match(result.default_match());
-    if (match != result.end()) {
-      if ((match->inline_autocomplete_offset != string16::npos) &&
-          (match->inline_autocomplete_offset <
-           match->fill_into_edit.length())) {
-        inline_autocomplete_text =
-            match->fill_into_edit.substr(match->inline_autocomplete_offset);
-      }
-
-      if (!prerender::IsOmniboxEnabled(profile_))
-        DoPreconnect(*match);
-
-      // We could prefetch the alternate nav URL, if any, but because there
-      // can be many of these as a user types an initial series of characters,
-      // the OS DNS cache could suffer eviction problems for minimal gain.
-
-      match->GetKeywordUIState(profile_, &keyword, &is_keyword_hint);
+    bool is_keyword_hint;
+    match.GetKeywordUIState(profile_, &keyword, &is_keyword_hint);
+    string16 inline_autocomplete_text;
+    if (match.inline_autocomplete_offset < match.fill_into_edit.length()) {
+      // We have blue text, go through OnPopupDataChanged.
+      // TODO(beaudoin): Merge OnPopupDataChanged with this method once the
+      // popup handling has completely migrated to omnibox_controller.
+      inline_autocomplete_text =
+          match.fill_into_edit.substr(match.inline_autocomplete_offset);
     }
-
-    popup_->OnResultChanged();
+    popup_model()->OnResultChanged();
     OnPopupDataChanged(inline_autocomplete_text, NULL, keyword,
                        is_keyword_hint);
-  } else {
-    popup_->OnResultChanged();
   }
+}
 
-  if (popup_->IsOpen()) {
-    OnPopupBoundsChanged(popup_->view()->GetTargetBounds());
+void OmniboxEditModel::OnGrayTextChanged() {
+  view_->SetInstantSuggestion(omnibox_controller_->gray_suggestion());
+}
 
-    InstantController* instant = controller_->GetInstant();
-    if (instant && !in_revert_) {
-      instant->HandleAutocompleteResults(
-          *autocomplete_controller()->providers());
-    }
-  } else if (was_open) {
-    // Accepts the temporary text as the user text, because it makes little
-    // sense to have temporary text when the popup is closed.
-    InternalSetUserText(UserTextFromDisplayText(view_->GetText()));
-    has_temporary_text_ = false;
-    is_temporary_text_set_by_instant_ = false;
-    is_instant_temporary_text_a_search_query_ = false;
-    OnPopupBoundsChanged(gfx::Rect());
-    delegate_->NotifySearchTabHelper(user_input_in_progress_, !in_revert_,
-                                     popup_->IsOpen(), user_text_.empty());
-  }
+string16 OmniboxEditModel::GetViewText() const {
+  return view_->GetText();
+}
+
+InstantController* OmniboxEditModel::GetInstantController() const {
+  return controller_->GetInstant();
 }
 
 bool OmniboxEditModel::query_in_progress() const {
@@ -1236,9 +1179,7 @@ bool OmniboxEditModel::KeywordIsSelected() const {
 }
 
 void OmniboxEditModel::ClearPopupKeywordMode() const {
-  if (popup_->IsOpen() &&
-      popup_->selected_line_state() == OmniboxPopupModel::KEYWORD)
-    popup_->SetSelectedLineState(OmniboxPopupModel::NORMAL);
+  omnibox_controller_->ClearPopupKeywordMode();
 }
 
 string16 OmniboxEditModel::DisplayTextFromUserText(const string16& text) const {
@@ -1255,8 +1196,7 @@ void OmniboxEditModel::GetInfoForCurrentText(AutocompleteMatch* match,
   DCHECK(match != NULL);
 
   if (!user_input_in_progress_ &&
-      view_->toolbar_model()->GetSearchTermsType() !=
-          ToolbarModel::NO_SEARCH_TERMS) {
+      view_->toolbar_model()->WouldReplaceSearchURLWithSearchTerms()) {
     // Any time the user hits enter on the unchanged omnibox, we should reload.
     // When we're not extracting search terms, AcceptInput() will take care of
     // this (see code referring to PAGE_TRANSITION_RELOAD there), but when we're
@@ -1267,50 +1207,61 @@ void OmniboxEditModel::GetInfoForCurrentText(AutocompleteMatch* match,
     // just getting a "search what you typed" URL from
     // SearchProvider::CreateSearchSuggestion(), since the user may be in a
     // non-default search mode such as image search.
-    match->type = AutocompleteMatch::SEARCH_WHAT_YOU_TYPED;
+    match->type = AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED;
     match->destination_url =
         delegate_->GetNavigationController().GetVisibleEntry()->GetURL();
     match->transition = content::PAGE_TRANSITION_RELOAD;
+#if defined(HTML_INSTANT_EXTENDED_POPUP)
   } else if (is_temporary_text_set_by_instant_) {
     // If there's temporary text and it has been set by Instant, we won't find
     // it in the popup model, so create the match based on the type Instant told
     // us (SWYT for queries and UWYT for URLs). We do this instead of
     // classifying the text ourselves because the text may look like a URL, but
     // Instant may expect it to be a search (e.g.: a query for "amazon.com").
-    const string16& text = view_->GetText();
-    AutocompleteInput input(text, string16::npos, string16(), GURL(), false,
-                            false, false, AutocompleteInput::BEST_MATCH);
-    // Only the destination_url and the transition of the match will be be used
-    // (to either navigate to the URL or let Instant commit its preview). The
-    // match won't be used for logging, displaying in the dropdown, etc. So,
-    // it's okay to pass in mostly bogus params (such as relevance = 0).
-    // TODO(sreeram): Always using NO_SUGGESTIONS_AVAILABLE is wrong when
-    // Instant is using the local fallback overlay. Fix.
-    if (is_instant_temporary_text_a_search_query_) {
-      const TemplateURL* default_provider =
-          TemplateURLServiceFactory::GetForProfile(profile_)->
-              GetDefaultSearchProvider();
-      if (default_provider && default_provider->SupportsReplacement()) {
-        *match = SearchProvider::CreateSearchSuggestion(profile_,
-            autocomplete_controller()->search_provider(), input, text, text, 0,
-            AutocompleteMatch::SEARCH_WHAT_YOU_TYPED,
-            TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, false,
-            default_provider->keyword());
-      } else {
-        // Can't create a new search match. Leave |match| as is, with an
-        // invalid destination_url. This shouldn't ever happen. For example,
-        // even if a group policy update in the midst of interacting with
-        // Instant leaves us without a valid search provider, Instant should've
-        // observed the update and reset |is_temporary_text_set_by_instant_|,
-        // so we still shouldn't get here. However, as protection against the
-        // unknowns and Instant regressions, we simply return an invalid match
-        // instead of crashing (hence no DCHECK).
-      }
+    if (selected_instant_autocomplete_match_index_ !=
+            OmniboxPopupModel::kNoMatch) {
+      // Great, we know the exact match struct. Just use that.
+      const AutocompleteResult& result = this->result();
+      *match = result.match_at(selected_instant_autocomplete_match_index_);
     } else {
-      *match = HistoryURLProvider::SuggestExactInput(
-        autocomplete_controller()->history_url_provider(), input, false);
+      const string16& text = view_->GetText();
+      AutocompleteInput input(text, string16::npos, string16(), GURL(), false,
+                              false, false, AutocompleteInput::BEST_MATCH);
+      // Only the destination_url and the transition of the match will be be
+      // used (to either navigate to the URL or let Instant commit its preview).
+      // The match won't be used for logging, displaying in the dropdown, etc.
+      // So, it's okay to pass in mostly bogus params (such as relevance = 0).
+      // TODO(sreeram): Always using NO_SUGGESTIONS_AVAILABLE is wrong when
+      // Instant is using the local fallback overlay. Fix.
+      if (is_instant_temporary_text_a_search_query_) {
+        const TemplateURL* default_provider =
+            TemplateURLServiceFactory::GetForProfile(profile_)->
+                GetDefaultSearchProvider();
+        if (default_provider && default_provider->SupportsReplacement()) {
+          *match = SearchProvider::CreateSearchSuggestion(profile_,
+              autocomplete_controller()->search_provider(), input, text, text,
+              0, AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED,
+              TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, false,
+              default_provider->keyword(),
+              controller_->GetOmniboxBounds().x());
+        } else {
+          // Can't create a new search match. Leave |match| as is, with an
+          // invalid destination_url. This shouldn't ever happen. For example,
+          // even if a group policy update in the midst of interacting with
+          // Instant leaves us without a valid search provider, Instant
+          // should've observed the update and reset
+          // |is_temporary_text_set_by_instant_|, so we still shouldn't get
+          // here. However, as protection against the unknowns and Instant
+          // regressions, we simply return an invalid match instead of crashing
+          // (hence no DCHECK).
+        }
+      } else {
+        *match = HistoryURLProvider::SuggestExactInput(
+            autocomplete_controller()->history_url_provider(), input, false);
+      }
     }
-  } else if (popup_->IsOpen() || query_in_progress()) {
+#endif
+  } else if (popup_model()->IsOpen() || query_in_progress()) {
     if (query_in_progress()) {
       // It's technically possible for |result| to be empty if no provider
       // returns a synchronous result but the query has not completed
@@ -1324,10 +1275,10 @@ void OmniboxEditModel::GetInfoForCurrentText(AutocompleteMatch* match,
       // If there are no results, the popup should be closed, so we shouldn't
       // have gotten here.
       CHECK(!result().empty());
-      CHECK(popup_->selected_line() < result().size());
-      *match = result().match_at(popup_->selected_line());
+      CHECK(popup_model()->selected_line() < result().size());
+      *match = result().match_at(popup_model()->selected_line());
     }
-    if (alternate_nav_url && popup_->manually_selected_match().empty())
+    if (alternate_nav_url && popup_model()->manually_selected_match().empty())
       *alternate_nav_url = result().alternate_nav_url();
   } else {
     AutocompleteClassifierFactory::GetForProfile(profile_)->Classify(
@@ -1340,20 +1291,25 @@ void OmniboxEditModel::RevertTemporaryText(bool revert_popup) {
   // The user typed something, then selected a different item.  Restore the
   // text they typed and change back to the default item.
   // NOTE: This purposefully does not reset paste_state_.
+#if defined(HTML_INSTANT_EXTENDED_POPUP)
   bool notify_instant = is_temporary_text_set_by_instant_;
+#endif
   just_deleted_text_ = false;
   has_temporary_text_ = false;
   is_temporary_text_set_by_instant_ = false;
+  selected_instant_autocomplete_match_index_ = OmniboxPopupModel::kNoMatch;
   is_instant_temporary_text_a_search_query_ = false;
 
-  InstantController* instant = controller_->GetInstant();
+#if defined(HTML_INSTANT_EXTENDED_POPUP)
+  InstantController* instant = GetInstantController();
   if (instant && notify_instant) {
-    // Normally, popup_->ResetToDefaultMatch() will cause the view text to be
-    // updated. In Instant Extended mode however, the popup_ is not used, so it
-    // won't do anything. So, update the view ourselves. Even if Instant is not
-    // in extended mode (i.e., it's enabled in non-extended mode, or disabled
-    // altogether), this is okay to do, since the call to
-    // popup_->ResetToDefaultMatch() will just override whatever we do here.
+    // Normally, popup_model()->ResetToDefaultMatch() will cause the view text
+    // to be updated. In Instant Extended mode however, the popup_model() is
+    // not used, so it won't do anything. So, update the view ourselves. Even
+    // if Instant is not in extended mode (i.e., it's enabled in non-extended
+    // mode, or disabled altogether), this is okay to do, since the call to
+    // popup_model()->ResetToDefaultMatch() will just override whatever we do
+    // here.
     //
     // The two "false" arguments make sure that our shenanigans don't cause any
     // previously saved selection to be erased nor OnChanged() to be called.
@@ -1364,8 +1320,9 @@ void OmniboxEditModel::RevertTemporaryText(bool revert_popup) {
                       user_text_,
                       user_text_ + inline_autocomplete_text_);
   }
+#endif
   if (revert_popup)
-    popup_->ResetToDefaultMatch();
+    popup_model()->ResetToDefaultMatch();
   view_->OnRevertTemporaryText();
 }
 
@@ -1410,52 +1367,6 @@ bool OmniboxEditModel::CreatedKeywordSearchByInsertingSpaceInMiddle(
           GetKeywordForText(keyword).empty();
 }
 
-bool OmniboxEditModel::DoInstant(const AutocompleteMatch& match) {
-  InstantController* instant = controller_->GetInstant();
-  if (!instant || in_revert_)
-    return false;
-
-  // Don't call Update() if the change is the result of an
-  // INSTANT_COMPLETE_REPLACE instant suggestion.
-  if (is_temporary_text_set_by_instant_)
-    return false;
-
-  // The two pieces of text we want to send Instant, viz., what the user has
-  // typed, and the full omnibox text including any inline autocompletion.
-  string16 user_text = has_temporary_text_ ?
-      match.fill_into_edit : DisplayTextFromUserText(user_text_);
-  string16 full_text = view_->GetText();
-
-  // Remove "?" if we're in forced query mode.
-  AutocompleteInput::RemoveForcedQueryStringIfNecessary(
-      autocomplete_controller()->input().type(), &user_text);
-  AutocompleteInput::RemoveForcedQueryStringIfNecessary(
-      autocomplete_controller()->input().type(), &full_text);
-
-  size_t start, end;
-  view_->GetSelectionBounds(&start, &end);
-
-  return instant->Update(match, user_text, full_text, start, end,
-      UseVerbatimInstant(), user_input_in_progress_, popup_->IsOpen(),
-      in_escape_handler_, KeywordIsSelected());
-}
-
-void OmniboxEditModel::DoPreconnect(const AutocompleteMatch& match) {
-  if (!match.destination_url.SchemeIs(extensions::kExtensionScheme)) {
-    // Warm up DNS Prefetch cache, or preconnect to a search service.
-    UMA_HISTOGRAM_ENUMERATION("Autocomplete.MatchType", match.type,
-                              AutocompleteMatch::NUM_TYPES);
-    if (profile_->GetNetworkPredictor()) {
-      profile_->GetNetworkPredictor()->AnticipateOmniboxUrl(
-          match.destination_url,
-          AutocompleteActionPredictor::IsPreconnectable(match));
-    }
-    // We could prefetch the alternate nav URL, if any, but because there
-    // can be many of these as a user types an initial series of characters,
-    // the OS DNS cache could suffer eviction problems for minimal gain.
-  }
-}
-
 //  static
 bool OmniboxEditModel::IsSpaceCharForAcceptingKeyword(wchar_t c) {
   switch (c) {
@@ -1474,7 +1385,7 @@ metrics::OmniboxEventProto::PageClassification
   const std::string& url = gurl.spec();
   if (url == chrome::kChromeUINewTabURL)
     return metrics::OmniboxEventProto_PageClassification_NEW_TAB_PAGE;
-  if (url == chrome::kAboutBlankURL)
+  if (url == content::kAboutBlankURL)
     return metrics::OmniboxEventProto_PageClassification_BLANK;
   if (url == profile()->GetPrefs()->GetString(prefs::kHomePage))
     return metrics::OmniboxEventProto_PageClassification_HOMEPAGE;
@@ -1495,7 +1406,7 @@ void OmniboxEditModel::SetFocusState(OmniboxFocusState state,
   if (state == focus_state_)
     return;
 
-  InstantController* instant = controller_->GetInstant();
+  InstantController* instant = GetInstantController();
   if (instant)
     instant->OmniboxFocusChanged(state, reason, NULL);
 

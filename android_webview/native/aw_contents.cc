@@ -6,10 +6,9 @@
 
 #include "android_webview/browser/aw_browser_context.h"
 #include "android_webview/browser/aw_browser_main_parts.h"
-#include "android_webview/browser/browser_view_renderer_impl.h"
 #include "android_webview/browser/gpu_memory_buffer_impl.h"
+#include "android_webview/browser/in_process_view_renderer.h"
 #include "android_webview/browser/net_disk_cache_remover.h"
-#include "android_webview/browser/renderer_host/aw_render_view_host_ext.h"
 #include "android_webview/browser/renderer_host/aw_resource_dispatcher_host_delegate.h"
 #include "android_webview/common/aw_hit_test_data.h"
 #include "android_webview/native/aw_browser_dependency_factory.h"
@@ -23,12 +22,16 @@
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
+#include "base/atomicops.h"
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/message_loop.h"
 #include "base/pickle.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/supports_user_data.h"
+#include "components/autofill/content/browser/autofill_driver_impl.h"
+#include "components/autofill/core/browser/autofill_manager.h"
+#include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/browser_thread.h"
@@ -40,11 +43,14 @@
 #include "content/public/common/ssl_status.h"
 #include "jni/AwContents_jni.h"
 #include "net/cert/x509_certificate.h"
+#include "ui/base/l10n/l10n_util_android.h"
 #include "ui/gfx/android/java_bitmap.h"
 
 struct AwDrawSWFunctionTable;
 struct AwDrawGLFunctionTable;
 
+using autofill::AutofillDriverImpl;
+using autofill::AutofillManager;
 using base::android::AttachCurrentThread;
 using base::android::ConvertJavaStringToUTF16;
 using base::android::ConvertJavaStringToUTF8;
@@ -53,7 +59,7 @@ using base::android::ConvertUTF8ToJavaString;
 using base::android::JavaRef;
 using base::android::ScopedJavaGlobalRef;
 using base::android::ScopedJavaLocalRef;
-using components::InterceptNavigationDelegate;
+using navigation_interception::InterceptNavigationDelegate;
 using content::BrowserThread;
 using content::ContentViewCore;
 using content::WebContents;
@@ -74,7 +80,11 @@ namespace android_webview {
 
 namespace {
 
-static JavaBrowserViewRendererHelper java_renderer_helper;
+JavaBrowserViewRendererHelper* java_renderer_helper() {
+  static JavaBrowserViewRendererHelper* g_instance
+      = new JavaBrowserViewRendererHelper;
+  return g_instance;
+}
 
 const void* kAwContentsUserDataKey = &kAwContentsUserDataKey;
 
@@ -93,6 +103,8 @@ class AwContentsUserData : public base::SupportsUserData::Data {
  private:
   AwContents* contents_;
 };
+
+base::subtle::Atomic32 g_instance_count = 0;
 
 }  // namespace
 
@@ -113,43 +125,86 @@ AwContents* AwContents::FromID(int render_process_id, int render_view_id) {
   return FromWebContents(web_contents);
 }
 
-AwContents::AwContents(JNIEnv* env,
-                       jobject obj,
-                       jobject web_contents_delegate,
-                       jobject contents_client_bridge)
-    : java_ref_(env, obj),
-      web_contents_delegate_(
-          new AwWebContentsDelegate(env, web_contents_delegate)),
-      contents_client_bridge_(
-          new AwContentsClientBridge(env, contents_client_bridge)),
+AwContents::AwContents(scoped_ptr<WebContents> web_contents)
+    : web_contents_(web_contents.Pass()),
       browser_view_renderer_(
-          BrowserViewRendererImpl::Create(this, &java_renderer_helper)) {
-  android_webview::AwBrowserDependencyFactory* dependency_factory =
-      android_webview::AwBrowserDependencyFactory::GetInstance();
-
-  // TODO(joth): rather than create and set the WebContents here, expose the
-  // factory method to java side and have that orchestrate the construction
-  // order.
-  SetWebContents(dependency_factory->CreateWebContents());
-}
-
-void AwContents::SetWebContents(content::WebContents* web_contents) {
-  web_contents_.reset(web_contents);
-  if (find_helper_.get()) {
-    find_helper_->SetListener(NULL);
-  }
+          new InProcessViewRenderer(this, java_renderer_helper(),
+                                    web_contents_.get())) {
+  base::subtle::NoBarrier_AtomicIncrement(&g_instance_count, 1);
   icon_helper_.reset(new IconHelper(web_contents_.get()));
   icon_helper_->SetListener(this);
   web_contents_->SetUserData(kAwContentsUserDataKey,
                              new AwContentsUserData(this));
-  AwContentsClientBridgeBase::Associate(web_contents_.get(),
-                                        contents_client_bridge_.get());
-  web_contents_->SetDelegate(web_contents_delegate_.get());
-  render_view_host_ext_.reset(new AwRenderViewHostExt(web_contents_.get()));
+  render_view_host_ext_.reset(
+      new AwRenderViewHostExt(this, web_contents_.get()));
+
+  AwAutofillManagerDelegate* autofill_manager_delegate =
+      AwAutofillManagerDelegate::FromWebContents(web_contents_.get());
+  if (autofill_manager_delegate)
+    InitAutofillIfNecessary(autofill_manager_delegate->GetSaveFormData());
 }
 
-void AwContents::SetWebContents(JNIEnv* env, jobject obj, jint new_wc) {
-  SetWebContents(reinterpret_cast<content::WebContents*>(new_wc));
+void AwContents::SetJavaPeers(JNIEnv* env,
+                              jobject obj,
+                              jobject aw_contents,
+                              jobject web_contents_delegate,
+                              jobject contents_client_bridge,
+                              jobject io_thread_client,
+                              jobject intercept_navigation_delegate) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  // The |aw_content| param is technically spurious as it duplicates |obj| but
+  // is passed over anyway to make the binding more explicit.
+  java_ref_ = JavaObjectWeakGlobalRef(env, aw_contents);
+
+  web_contents_delegate_.reset(
+      new AwWebContentsDelegate(env, web_contents_delegate));
+  web_contents_->SetDelegate(web_contents_delegate_.get());
+
+  contents_client_bridge_.reset(
+      new AwContentsClientBridge(env, contents_client_bridge));
+  AwContentsClientBridgeBase::Associate(web_contents_.get(),
+                                        contents_client_bridge_.get());
+
+  AwContentsIoThreadClientImpl::Associate(
+      web_contents_.get(), ScopedJavaLocalRef<jobject>(env, io_thread_client));
+  int child_id = web_contents_->GetRenderProcessHost()->GetID();
+  int route_id = web_contents_->GetRoutingID();
+  AwResourceDispatcherHostDelegate::OnIoThreadClientReady(child_id, route_id);
+
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  InterceptNavigationDelegate::Associate(
+      web_contents_.get(),
+      make_scoped_ptr(new InterceptNavigationDelegate(
+          env, intercept_navigation_delegate)));
+}
+
+void AwContents::SetSaveFormData(bool enabled) {
+  InitAutofillIfNecessary(enabled);
+  // We need to check for the existence, since autofill_manager_delegate
+  // may not be created when the setting is false.
+  if (AutofillDriverImpl::FromWebContents(web_contents_.get())) {
+    AwAutofillManagerDelegate::FromWebContents(web_contents_.get())->
+        SetSaveFormData(enabled);
+  }
+}
+
+void AwContents::InitAutofillIfNecessary(bool enabled) {
+  // Do not initialize if the feature is not enabled.
+  if (!enabled)
+    return;
+  // Check if the autofill manager already exists.
+  content::WebContents* web_contents = web_contents_.get();
+  if (AutofillDriverImpl::FromWebContents(web_contents))
+    return;
+
+  AwBrowserContext::FromWebContents(web_contents)->
+      CreateUserPrefServiceIfNecessary();
+  AwAutofillManagerDelegate::CreateForWebContents(web_contents);
+  AutofillDriverImpl::CreateForWebContentsAndDelegate(
+      web_contents,
+      AwAutofillManagerDelegate::FromWebContents(web_contents),
+      l10n_util::GetDefaultLocale(),
+      AutofillManager::DISABLE_AUTOFILL_DOWNLOAD_MANAGER);
 }
 
 AwContents::~AwContents() {
@@ -159,38 +214,45 @@ AwContents::~AwContents() {
     find_helper_->SetListener(NULL);
   if (icon_helper_.get())
     icon_helper_->SetListener(NULL);
+  base::subtle::NoBarrier_AtomicIncrement(&g_instance_count, -1);
 }
 
 jint AwContents::GetWebContents(JNIEnv* env, jobject obj) {
+  DCHECK(web_contents_);
   return reinterpret_cast<jint>(web_contents_.get());
-}
-
-void AwContents::DidInitializeContentViewCore(JNIEnv* env, jobject obj,
-                                              jint content_view_core) {
-  ContentViewCore* core = reinterpret_cast<ContentViewCore*>(content_view_core);
-  DCHECK(core == ContentViewCore::FromWebContents(web_contents_.get()));
-  browser_view_renderer_->SetContents(core);
 }
 
 void AwContents::Destroy(JNIEnv* env, jobject obj) {
   delete this;
 }
 
-// static
-void SetAwDrawSWFunctionTable(JNIEnv* env, jclass, jint function_table) {
-  BrowserViewRendererImpl::SetAwDrawSWFunctionTable(
+static jint Init(JNIEnv* env, jclass, jobject browser_context) {
+  // TODO(joth): Use |browser_context| to get the native BrowserContext, rather
+  // than hard-code the default instance lookup here.
+  scoped_ptr<WebContents> web_contents(content::WebContents::Create(
+      content::WebContents::CreateParams(AwBrowserContext::GetDefault())));
+  // Return an 'uninitialized' instance; most work is deferred until the
+  // subsequent SetJavaPeers() call.
+  return reinterpret_cast<jint>(new AwContents(web_contents.Pass()));
+}
+
+static void SetAwDrawSWFunctionTable(JNIEnv* env, jclass, jint function_table) {
+  BrowserViewRenderer::SetAwDrawSWFunctionTable(
       reinterpret_cast<AwDrawSWFunctionTable*>(function_table));
 }
 
-// static
-void SetAwDrawGLFunctionTable(JNIEnv* env, jclass, jint function_table) {
+static void SetAwDrawGLFunctionTable(JNIEnv* env, jclass, jint function_table) {
   GpuMemoryBufferImpl::SetAwDrawGLFunctionTable(
       reinterpret_cast<AwDrawGLFunctionTable*>(function_table));
 }
 
-// static
-jint GetAwDrawGLFunction(JNIEnv* env, jclass) {
+static jint GetAwDrawGLFunction(JNIEnv* env, jclass) {
   return reinterpret_cast<jint>(&DrawGLFunction);
+}
+
+// static
+jint GetNativeInstanceCount(JNIEnv* env, jclass) {
+  return base::subtle::NoBarrier_Load(&g_instance_count);
 }
 
 jint AwContents::GetAwDrawGLViewContext(JNIEnv* env, jobject obj) {
@@ -258,24 +320,6 @@ bool AwContents::OnReceivedHttpAuthRequest(const JavaRef<jobject>& handler,
   return true;
 }
 
-void AwContents::SetIoThreadClient(JNIEnv* env, jobject obj, jobject client) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  AwContentsIoThreadClientImpl::Associate(
-      web_contents_.get(), ScopedJavaLocalRef<jobject>(env, client));
-  int child_id = web_contents_->GetRenderProcessHost()->GetID();
-  int route_id = web_contents_->GetRoutingID();
-  AwResourceDispatcherHostDelegate::OnIoThreadClientReady(child_id, route_id);
-}
-
-void AwContents::SetInterceptNavigationDelegate(JNIEnv* env,
-                                                jobject obj,
-                                                jobject delegate) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  InterceptNavigationDelegate::Associate(
-      web_contents_.get(),
-      make_scoped_ptr(new InterceptNavigationDelegate(env, delegate)));
-}
-
 void AwContents::AddVisitedLinks(JNIEnv* env,
                                    jobject obj,
                                    jobjectArray jvisited_links) {
@@ -293,15 +337,6 @@ void AwContents::AddVisitedLinks(JNIEnv* env,
 
   AwBrowserContext::FromWebContents(web_contents_.get())
       ->AddVisitedURLs(visited_link_gurls);
-}
-
-static jint Init(JNIEnv* env,
-                 jobject obj,
-                 jobject web_contents_delegate,
-                 jobject contents_client_bridge) {
-  AwContents* tab = new AwContents(env, obj, web_contents_delegate,
-      contents_client_bridge);
-  return reinterpret_cast<jint>(tab);
 }
 
 bool RegisterAwContents(JNIEnv* env) {
@@ -467,18 +502,26 @@ void AwContents::OnReceivedTouchIconUrl(const std::string& url,
       env, obj.obj(), ConvertUTF8ToJavaString(env, url).obj(), precomposed);
 }
 
-void AwContents::Invalidate() {
+bool AwContents::RequestDrawGL(jobject canvas) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
-  if (!obj.is_null())
-    Java_AwContents_invalidate(env, obj.obj());
+  if (obj.is_null())
+    return false;
+  return Java_AwContents_requestDrawGL(env, obj.obj(), canvas);
 }
 
-void AwContents::OnNewPicture(const JavaRef<jobject>& picture) {
+void AwContents::PostInvalidate() {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (!obj.is_null())
-    Java_AwContents_onNewPicture(env, obj.obj(), picture.obj());
+    Java_AwContents_postInvalidateOnAnimation(env, obj.obj());
+}
+
+void AwContents::OnNewPicture() {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (!obj.is_null())
+    Java_AwContents_onNewPicture(env, obj.obj());
 }
 
 base::android::ScopedJavaLocalRef<jbyteArray>
@@ -545,10 +588,8 @@ void AwContents::OnSizeChanged(JNIEnv* env, jobject obj,
   browser_view_renderer_->OnSizeChanged(w, h);
 }
 
-void AwContents::SetWindowViewVisibility(JNIEnv* env, jobject obj,
-                                         bool window_visible,
-                                         bool view_visible) {
-  browser_view_renderer_->OnVisibilityChanged(window_visible, view_visible);
+void AwContents::SetVisibility(JNIEnv* env, jobject obj, bool visible) {
+  browser_view_renderer_->OnVisibilityChanged(visible);
 }
 
 void AwContents::OnAttachedToWindow(JNIEnv* env, jobject obj, int w, int h) {
@@ -589,20 +630,23 @@ jboolean AwContents::RestoreFromOpaqueState(
   return RestoreFromPickle(&iterator, web_contents_.get());
 }
 
-bool AwContents::DrawSW(JNIEnv* env,
+bool AwContents::OnDraw(JNIEnv* env,
                         jobject obj,
                         jobject canvas,
-                        jint clip_x,
-                        jint clip_y,
-                        jint clip_w,
-                        jint clip_h) {
-  return browser_view_renderer_->DrawSW(
-      canvas, gfx::Rect(clip_x, clip_y, clip_w, clip_h));
-}
-
-void AwContents::SetScrollForHWFrame(JNIEnv* env, jobject obj,
-                                     int scroll_x, int scroll_y) {
-  browser_view_renderer_->SetScrollForHWFrame(scroll_x, scroll_y);
+                        jboolean is_hardware_accelerated,
+                        jint scroll_x,
+                        jint scroll_y,
+                        jint clip_left,
+                        jint clip_top,
+                        jint clip_right,
+                        jint clip_bottom) {
+  return browser_view_renderer_->OnDraw(canvas,
+                                        is_hardware_accelerated,
+                                        gfx::Vector2d(scroll_x, scroll_y),
+                                        gfx::Rect(clip_left,
+                                                  clip_top,
+                                                  clip_right - clip_left,
+                                                  clip_bottom - clip_top));
 }
 
 void AwContents::SetPendingWebContentsForPopup(
@@ -614,14 +658,14 @@ void AwContents::SetPendingWebContentsForPopup(
     base::MessageLoop::current()->DeleteSoon(FROM_HERE, pending.release());
     return;
   }
-  pending_contents_ = pending.Pass();
+  pending_contents_.reset(new AwContents(pending.Pass()));
 }
 
 void AwContents::FocusFirstNode(JNIEnv* env, jobject obj) {
   web_contents_->FocusThroughTabTraversal(false);
 }
 
-jint AwContents::ReleasePopupWebContents(JNIEnv* env, jobject obj) {
+jint AwContents::ReleasePopupAwContents(JNIEnv* env, jobject obj) {
   return reinterpret_cast<jint>(pending_contents_.release());
 }
 
@@ -636,6 +680,24 @@ gfx::Point AwContents::GetLocationOnScreen() {
       Java_AwContents_getLocationOnScreen(env, obj.obj()).obj(),
       &location);
   return gfx::Point(location[0], location[1]);
+}
+
+void AwContents::ScrollContainerViewTo(gfx::Vector2d new_value) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return;
+  Java_AwContents_scrollContainerViewTo(
+      env, obj.obj(), new_value.x(), new_value.y());
+}
+
+
+void AwContents::SetDipScale(JNIEnv* env, jobject obj, jfloat dipScale) {
+  browser_view_renderer_->SetDipScale(dipScale);
+}
+
+void AwContents::ScrollTo(JNIEnv* env, jobject obj, jint xPix, jint yPix) {
+  browser_view_renderer_->ScrollTo(gfx::Vector2d(xPix, yPix));
 }
 
 void AwContents::OnPageScaleFactorChanged(float page_scale_factor) {
@@ -653,17 +715,8 @@ ScopedJavaLocalRef<jobject> AwContents::CapturePicture(JNIEnv* env,
 
 void AwContents::EnableOnNewPicture(JNIEnv* env,
                                     jobject obj,
-                                    jboolean enabled,
-                                    jboolean invalidation_only) {
-  BrowserViewRenderer::OnNewPictureMode mode =
-      BrowserViewRenderer::kOnNewPictureDisabled;
-  if (enabled) {
-    mode = invalidation_only ?
-        BrowserViewRenderer::kOnNewPictureInvalidationOnly :
-        BrowserViewRenderer::kOnNewPictureEnabled;
-  }
-
-  browser_view_renderer_->EnableOnNewPicture(mode);
+                                    jboolean enabled) {
+  browser_view_renderer_->EnableOnNewPicture(enabled);
 }
 
 }  // namespace android_webview

@@ -22,10 +22,6 @@ void RegisterBrowserPrefs(PrefRegistrySimple* registry) {
 
 void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(
-      prefs::kHomePageChanged,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
       prefs::kHomePageIsNewTabPage,
       true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
@@ -98,10 +94,6 @@ void RegisterBrowserUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
       false,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 #endif
-  registry->RegisterBooleanPref(
-      prefs::kShowOmniboxSearchHint,
-      true,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterBooleanPref(
       prefs::kWebAppCreateOnDesktop,
       true,

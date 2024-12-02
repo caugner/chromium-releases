@@ -29,6 +29,7 @@
 #include "net/cert/mock_cert_verifier.h"
 #include "net/cert/test_root_certs.h"
 #include "net/dns/host_resolver.h"
+#include "net/http/transport_security_state.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/socket_test_util.h"
@@ -37,7 +38,7 @@
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_config_service.h"
 #include "net/test/cert_test_util.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
@@ -93,9 +94,11 @@ class SSLClientSocketOpenSSLClientAuthTest : public PlatformTest {
  public:
   SSLClientSocketOpenSSLClientAuthTest()
       : socket_factory_(net::ClientSocketFactory::GetDefaultFactory()),
-        cert_verifier_(new net::MockCertVerifier) {
+        cert_verifier_(new net::MockCertVerifier),
+        transport_security_state_(new net::TransportSecurityState) {
     cert_verifier_->set_default_result(net::OK);
     context_.cert_verifier = cert_verifier_.get();
+    context_.transport_security_state = transport_security_state_.get();
     key_store_ = net::OpenSSLClientKeyStore::GetInstance();
   }
 
@@ -185,6 +188,7 @@ class SSLClientSocketOpenSSLClientAuthTest : public PlatformTest {
 
   ClientSocketFactory* socket_factory_;
   scoped_ptr<MockCertVerifier> cert_verifier_;
+  scoped_ptr<TransportSecurityState> transport_security_state_;
   SSLClientSocketContext context_;
   OpenSSLClientKeyStore* key_store_;
   scoped_ptr<SpawnedTestServer> test_server_;

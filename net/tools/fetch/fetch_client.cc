@@ -11,8 +11,8 @@
 #include "base/lazy_instance.h"
 #include "base/message_loop.h"
 #include "base/metrics/stats_counters.h"
-#include "base/string_number_conversions.h"
-#include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -26,6 +26,7 @@
 #include "net/http/http_request_info.h"
 #include "net/http/http_server_properties_impl.h"
 #include "net/http/http_transaction.h"
+#include "net/http/transport_security_state.h"
 #include "net/proxy/proxy_service.h"
 #include "net/ssl/ssl_config_service_defaults.h"
 
@@ -44,7 +45,7 @@ class Driver {
   void ClientStarted() { clients_++; }
   void ClientStopped() {
     if (!--clients_) {
-      MessageLoop::current()->Quit();
+      base::MessageLoop::current()->Quit();
     }
   }
 
@@ -140,12 +141,14 @@ int main(int argc, char** argv) {
   bool use_cache = parsed_command_line.HasSwitch("use-cache");
 
   // Do work here.
-  MessageLoop loop(MessageLoop::TYPE_IO);
+  base::MessageLoop loop(base::MessageLoop::TYPE_IO);
 
   scoped_ptr<net::HostResolver> host_resolver(
       net::HostResolver::CreateDefaultResolver(NULL));
   scoped_ptr<net::CertVerifier> cert_verifier(
       net::CertVerifier::CreateDefault());
+  scoped_ptr<net::TransportSecurityState> transport_security_state(
+      new net::TransportSecurityState);
   scoped_ptr<net::ProxyService> proxy_service(
       net::ProxyService::CreateDirect());
   scoped_refptr<net::SSLConfigService> ssl_config_service(
@@ -158,18 +161,19 @@ int main(int argc, char** argv) {
   net::HttpNetworkSession::Params session_params;
   session_params.host_resolver = host_resolver.get();
   session_params.cert_verifier = cert_verifier.get();
+  session_params.transport_security_state = transport_security_state.get();
   session_params.proxy_service = proxy_service.get();
   session_params.http_auth_handler_factory = http_auth_handler_factory.get();
   session_params.http_server_properties = &http_server_properties;
-  session_params.ssl_config_service = ssl_config_service;
+  session_params.ssl_config_service = ssl_config_service.get();
 
   scoped_refptr<net::HttpNetworkSession> network_session(
       new net::HttpNetworkSession(session_params));
   if (use_cache) {
-    factory = new net::HttpCache(network_session,
+    factory = new net::HttpCache(network_session.get(),
                                  net::HttpCache::DefaultBackend::InMemory(0));
   } else {
-    factory = new net::HttpNetworkLayer(network_session);
+    factory = new net::HttpNetworkLayer(network_session.get());
   }
 
   {
@@ -180,7 +184,7 @@ int main(int argc, char** argv) {
     for (int i = 0; i < client_limit; i++)
       clients[i] = new Client(factory, url);
 
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
   }
 
   // Print Statistics here.

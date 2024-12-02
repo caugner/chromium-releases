@@ -8,28 +8,21 @@
 #include <string>
 #include <vector>
 
-#include "chrome/browser/profiles/profile_keyed_service.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "apps/app_lifetime_monitor.h"
+#include "chrome/browser/extensions/shell_window_registry.h"
+#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 
 namespace extensions {
 class Extension;
-
-namespace app_file_handler_util {
-struct SavedFileEntry;
-}
-
 }
 
 class Profile;
 
-using extensions::app_file_handler_util::SavedFileEntry;
-
 namespace apps {
 
 // Tracks what apps need to be restarted when the browser restarts.
-class AppRestoreService : public ProfileKeyedService,
-                          public content::NotificationObserver {
+class AppRestoreService : public BrowserContextKeyedService,
+                          public AppLifetimeMonitor::Observer {
  public:
   // Returns true if apps should be restored on the current platform, given
   // whether this new browser process launched due to a restart.
@@ -41,19 +34,34 @@ class AppRestoreService : public ProfileKeyedService,
   // from apps to prevent them being restarted in subsequent restarts.
   void HandleStartup(bool should_restore_apps);
 
+  // Returns whether this extension is running or, at startup, whether it was
+  // running when Chrome was last terminated.
+  bool IsAppRestorable(const std::string& extension_id);
+
+  static AppRestoreService* Get(Profile* profile);
+
  private:
-  // content::NotificationObserver.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  // AppLifetimeMonitor::Observer.
+  virtual void OnAppStart(Profile* profile, const std::string& app_id) OVERRIDE;
+  virtual void OnAppActivated(Profile* profile,
+                              const std::string& app_id) OVERRIDE;
+  virtual void OnAppDeactivated(Profile* profile,
+                                const std::string& app_id) OVERRIDE;
+  virtual void OnAppStop(Profile* profile, const std::string& app_id) OVERRIDE;
+  virtual void OnChromeTerminating() OVERRIDE;
+
+  // BrowserContextKeyedService.
+  virtual void Shutdown() OVERRIDE;
 
   void RecordAppStart(const std::string& extension_id);
   void RecordAppStop(const std::string& extension_id);
-  void RestoreApp(
-      const extensions::Extension* extension,
-      const std::vector<SavedFileEntry>& file_entries);
+  void RecordAppActiveState(const std::string& id, bool is_active);
 
-  content::NotificationRegistrar registrar_;
+  void RestoreApp(const extensions::Extension* extension);
+
+  void StartObservingAppLifetime();
+  void StopObservingAppLifetime();
+
   Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(AppRestoreService);

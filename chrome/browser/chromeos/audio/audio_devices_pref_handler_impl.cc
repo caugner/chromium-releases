@@ -4,6 +4,8 @@
 
 #include "chrome/browser/chromeos/audio/audio_devices_pref_handler_impl.h"
 
+#include <algorithm>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
@@ -13,67 +15,62 @@
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/audio/audio_device.h"
 #include "chromeos/audio/cras_audio_handler.h"
-
-namespace chromeos {
 
 namespace {
 
-// Default value for the volume pref, as a percent in the range [0.0, 100.0].
-const double kDefaultVolumePercent = 75.0;
+std::string GetDeviceIdString(const chromeos::AudioDevice& device) {
+  return device.display_name + " : " +
+         base::Uint64ToString(device.id & static_cast<uint64>(0xffffffff));
+}
 
-// Values used for muted preference.
-const int kPrefMuteOff = 0;
-const int kPrefMuteOn = 1;
+}
 
-}  // namespace
+namespace chromeos {
 
-double AudioDevicesPrefHandlerImpl::GetOutputVolumeValue() {
-  if (!CrasAudioHandler::IsInitialized())
-    return kDefaultVolumePercent;
-
+double AudioDevicesPrefHandlerImpl::GetVolumeGainValue(
+    const AudioDevice& device) {
   UpdateDevicesVolumePref();
-  std::string active_device_id = base::Uint64ToString(
-      CrasAudioHandler::Get()->GetActiveOutputNode());
-  if (!device_volume_settings_->HasKey(active_device_id))
-    MigrateDeviceVolumeSettings(active_device_id);
-  double volume = kDefaultVolumePercent;
-  device_volume_settings_->GetDouble(active_device_id, &volume);
+
+  std::string device_id_str = GetDeviceIdString(device);
+  if (!device_volume_settings_->HasKey(device_id_str))
+    MigrateDeviceVolumeSettings(device_id_str);
+
+  double volume = kDefaultVolumeGainPercent;
+  device_volume_settings_->GetDouble(device_id_str, &volume);
+
   return volume;
 }
 
-void AudioDevicesPrefHandlerImpl::SetOutputVolumeValue(double volume_percent) {
-  std::string active_device_id = base::Uint64ToString(
-      CrasAudioHandler::Get()->GetActiveOutputNode());
-  if (volume_percent > 100.0)
-    volume_percent = 100.0;
-  if (volume_percent < 0.0)
-    volume_percent = 0.0;
-  device_volume_settings_->SetDouble(active_device_id, volume_percent);
+void AudioDevicesPrefHandlerImpl::SetVolumeGainValue(
+    const AudioDevice& device, double value) {
+  value = std::min(std::max(value, 0.0), 100.0);
+  device_volume_settings_->SetDouble(GetDeviceIdString(device), value);
+
   SaveDevicesVolumePref();
 }
 
-bool AudioDevicesPrefHandlerImpl::GetOutputMuteValue() {
-  if (!CrasAudioHandler::IsInitialized())
-    return false;
+bool AudioDevicesPrefHandlerImpl::GetMuteValue(const AudioDevice& device) {
+  UpdateDevicesMutePref();
 
-  UpdateDevicesVolumePref();
-  std::string active_device_id = base::Uint64ToString(
-      CrasAudioHandler::Get()->GetActiveOutputNode());
-  if (!device_mute_settings_->HasKey(active_device_id))
-    MigrateDeviceMuteSettings(active_device_id);
+  std::string device_id_str = GetDeviceIdString(device);
+  if (!device_mute_settings_->HasKey(device_id_str))
+    MigrateDeviceMuteSettings(device_id_str);
+
   int mute = kPrefMuteOff;
-  device_mute_settings_->GetInteger(active_device_id, &mute);
+  device_mute_settings_->GetInteger(device_id_str, &mute);
+
   return (mute == kPrefMuteOn);
 }
 
-void AudioDevicesPrefHandlerImpl::SetOutputMuteValue(bool mute) {
-  std::string active_device_id = base::Uint64ToString(
-      CrasAudioHandler::Get()->GetActiveOutputNode());
-  device_mute_settings_->SetBoolean(active_device_id,
-                                   mute ? kPrefMuteOn : kPrefMuteOff);
-  SaveDevicesVolumePref();
+void AudioDevicesPrefHandlerImpl::SetMuteValue(const AudioDevice& device,
+                                               bool mute) {
+  device_mute_settings_->SetInteger(GetDeviceIdString(device),
+                                    mute ? kPrefMuteOn : kPrefMuteOff);
+  SaveDevicesMutePref();
 }
+
 
 bool AudioDevicesPrefHandlerImpl::GetAudioCaptureAllowedValue() {
   return local_state_->GetBoolean(prefs::kAudioCaptureAllowed);
@@ -129,7 +126,7 @@ void AudioDevicesPrefHandlerImpl::SaveDevicesMutePref() {
   while (!it.IsAtEnd()) {
     int mute = kPrefMuteOff;
     it.value().GetAsInteger(&mute);
-    dict_update->Set(it.key(), new base::FundamentalValue(mute));
+    dict_update->SetInteger(it.key(), mute);
     it.Advance();
   }
 }
@@ -146,9 +143,9 @@ void AudioDevicesPrefHandlerImpl::SaveDevicesVolumePref() {
                                    prefs::kAudioDevicesVolumePercent);
   base::DictionaryValue::Iterator it(*device_volume_settings_);
   while (!it.IsAtEnd()) {
-    double volume = kDefaultVolumePercent;
+    double volume = kDefaultVolumeGainPercent;
     it.value().GetAsDouble(&volume);
-    dict_update->Set(it.key(), new base::FundamentalValue(volume));
+    dict_update->SetDouble(it.key(), volume);
     it.Advance();
   }
 }

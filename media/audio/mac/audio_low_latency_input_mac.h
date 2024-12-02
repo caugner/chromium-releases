@@ -42,8 +42,8 @@
 #include "base/atomicops.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
+#include "media/audio/agc_audio_stream.h"
 #include "media/audio/audio_io.h"
-#include "media/audio/audio_input_stream_impl.h"
 #include "media/audio/audio_parameters.h"
 #include "media/base/seekable_buffer.h"
 
@@ -52,7 +52,7 @@ namespace media {
 class AudioManagerMac;
 class DataBuffer;
 
-class AUAudioInputStream : public AudioInputStreamImpl {
+class AUAudioInputStream : public AgcAudioStream<AudioInputStream> {
  public:
   // The ctor takes all the usual parameters, plus |manager| which is the
   // the audio manager who is creating this object.
@@ -142,6 +142,9 @@ class AUAudioInputStream : public AudioInputStreamImpl {
 
   // Fixed capture hardware latency in frames.
   double hardware_latency_frames_;
+
+  // Delay due to the FIFO in bytes.
+  int fifo_delay_bytes_;
 
   // The number of channels in each frame of audio data, which is used
   // when querying the volume of each channel.

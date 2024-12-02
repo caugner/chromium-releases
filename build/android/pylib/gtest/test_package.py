@@ -144,6 +144,7 @@ class TestPackage(object):
     # to output the CRASHED marker when a crash happens.
     re_crash = re.compile('\[ CRASHED      \](.*)\r\n')
 
+    log = ''
     try:
       while True:
         full_test_name = None
@@ -156,19 +157,20 @@ class TestPackage(object):
         else:  # re_run
           full_test_name = p.match.group(1).replace('\r', '')
           found = p.expect([re_ok, re_fail, re_crash], timeout=self.timeout)
+          log = p.before.replace('\r', '')
           if found == 0:  # re_ok
             if full_test_name == p.match.group(1).replace('\r', ''):
               results.AddResult(base_test_result.BaseTestResult(
                   full_test_name, base_test_result.ResultType.PASS,
-                  log=p.before))
+                  log=log))
           elif found == 2:  # re_crash
             results.AddResult(base_test_result.BaseTestResult(
                 full_test_name, base_test_result.ResultType.CRASH,
-                log=p.before))
+                log=log))
             break
           else:  # re_fail
             results.AddResult(base_test_result.BaseTestResult(
-                full_test_name, base_test_result.ResultType.FAIL, log=p.before))
+                full_test_name, base_test_result.ResultType.FAIL, log=log))
     except pexpect.EOF:
       logging.error('Test terminated - EOF')
       # We're here because either the device went offline, or the test harness
@@ -178,13 +180,15 @@ class TestPackage(object):
                                              self.device)
       if full_test_name:
         results.AddResult(base_test_result.BaseTestResult(
-            full_test_name, base_test_result.ResultType.CRASH, log=p.before))
+            full_test_name, base_test_result.ResultType.CRASH,
+            log=p.before.replace('\r', '')))
     except pexpect.TIMEOUT:
       logging.error('Test terminated after %d second timeout.',
                     self.timeout)
       if full_test_name:
         results.AddResult(base_test_result.BaseTestResult(
-            full_test_name, base_test_result.ResultType.TIMEOUT, log=p.before))
+            full_test_name, base_test_result.ResultType.TIMEOUT,
+            log=p.before.replace('\r', '')))
     finally:
       p.close()
 

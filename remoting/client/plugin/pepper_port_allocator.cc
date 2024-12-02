@@ -5,7 +5,7 @@
 #include "remoting/client/plugin/pepper_port_allocator.h"
 
 #include "base/bind.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "net/base/net_util.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/cpp/completion_callback.h"
@@ -155,7 +155,7 @@ void PepperPortAllocatorSession::ResolveStunServerAddress() {
 
   PP_HostResolver_Private_Hint hint;
   hint.flags = 0;
-  hint.family = PP_NETADDRESSFAMILY_IPV4;
+  hint.family = PP_NETADDRESSFAMILY_PRIVATE_IPV4;
   int result = stun_address_resolver_.Resolve(
       hostname, port, hint,
       PpCompletionCallback(base::Bind(

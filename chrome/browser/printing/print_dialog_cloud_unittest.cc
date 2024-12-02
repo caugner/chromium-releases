@@ -15,8 +15,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
 #include "chrome/common/chrome_paths.h"
@@ -235,7 +235,7 @@ class CloudPrintDataSenderTest : public testing::Test {
   scoped_refptr<CloudPrintDataSender> print_data_sender_;
   scoped_ptr<MockCloudPrintDataSenderHelper> mock_helper_;
 
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
   content::TestBrowserThread file_thread_;
   content::TestBrowserThread io_thread_;
 };
@@ -253,7 +253,7 @@ TEST_F(CloudPrintDataSenderTest, CanSend) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&CloudPrintDataSender::SendPrintData, print_data_sender));
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 }
 
 TEST_F(CloudPrintDataSenderTest, NoData) {
@@ -264,7 +264,7 @@ TEST_F(CloudPrintDataSenderTest, NoData) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&CloudPrintDataSender::SendPrintData, print_data_sender));
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 }
 
 TEST_F(CloudPrintDataSenderTest, EmptyData) {
@@ -277,7 +277,7 @@ TEST_F(CloudPrintDataSenderTest, EmptyData) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&CloudPrintDataSender::SendPrintData, print_data_sender));
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
 }
 
 // Testing for CloudPrintFlowHandler needs a mock
@@ -312,11 +312,11 @@ class CloudPrintWebDialogDelegateTest : public testing::Test {
 
   virtual void TearDown() {
     delegate_.reset();
-    if (mock_flow_handler_)
+    if (mock_flow_handler_.get())
       delete mock_flow_handler_.get();
   }
 
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   base::WeakPtr<MockCloudPrintFlowHandler> mock_flow_handler_;
   scoped_ptr<CloudPrintWebDialogDelegate> delegate_;

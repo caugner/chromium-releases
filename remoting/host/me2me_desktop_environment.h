@@ -9,6 +9,7 @@
 
 namespace remoting {
 
+class CurtainMode;
 class HostWindow;
 class LocalInputMonitor;
 
@@ -20,18 +21,28 @@ class Me2MeDesktopEnvironment : public BasicDesktopEnvironment {
 
   // DesktopEnvironment interface.
   virtual scoped_ptr<ScreenControls> CreateScreenControls() OVERRIDE;
-  virtual scoped_ptr<media::ScreenCapturer> CreateVideoCapturer() OVERRIDE;
+  virtual scoped_ptr<webrtc::ScreenCapturer> CreateVideoCapturer() OVERRIDE;
+  virtual std::string GetCapabilities() const OVERRIDE;
 
  protected:
   friend class Me2MeDesktopEnvironmentFactory;
   Me2MeDesktopEnvironment(
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
+
+  // Initializes security features of the desktop environment (the curtain mode
+  // and in-session UI).
+  bool InitializeSecurity(
       base::WeakPtr<ClientSessionControl> client_session_control,
-      const UiStrings& ui_strings);
+      const UiStrings& ui_strings,
+      bool curtain_enabled);
 
  private:
+  // "Curtains" the session making sure it is disconnected from the local
+  // console.
+  scoped_ptr<CurtainMode> curtain_;
+
   // Presents the disconnect window to the local user.
   scoped_ptr<HostWindow> disconnect_window_;
 
@@ -54,8 +65,15 @@ class Me2MeDesktopEnvironmentFactory : public BasicDesktopEnvironmentFactory {
   // DesktopEnvironmentFactory interface.
   virtual scoped_ptr<DesktopEnvironment> Create(
       base::WeakPtr<ClientSessionControl> client_session_control) OVERRIDE;
+  virtual void SetEnableCurtaining(bool enable) OVERRIDE;
+
+ protected:
+  bool curtain_enabled() const { return curtain_enabled_; }
 
  private:
+  // True if curtain mode is enabled.
+  bool curtain_enabled_;
+
   DISALLOW_COPY_AND_ASSIGN(Me2MeDesktopEnvironmentFactory);
 };
 

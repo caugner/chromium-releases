@@ -40,14 +40,19 @@ void SimulateConnectionFailure(sessions::SyncSession* session,
 
 void SimulateSuccess(sessions::SyncSession* session,
                      SyncerStep begin, SyncerStep end) {
+  const sync_pb::GetUpdatesCallerInfo::GetUpdatesSource source =
+      session->source().updates_source;
   ASSERT_EQ(0U, session->status_controller().num_server_changes_remaining());
   switch(end) {
     case SYNCER_END:
       session->mutable_status_controller()->set_commit_result(SYNCER_OK);
-      // Fall through.
+      session->mutable_status_controller()->set_last_get_key_result(SYNCER_OK);
+      session->mutable_status_controller()->set_last_download_updates_result(
+          SYNCER_OK);
+      break;
     case APPLY_UPDATES:
-      DCHECK_EQ(end == APPLY_UPDATES, session->source().updates_source ==
-                sync_pb::GetUpdatesCallerInfo::RECONFIGURATION);
+      DCHECK(source == sync_pb::GetUpdatesCallerInfo::RECONFIGURATION
+             || source == sync_pb::GetUpdatesCallerInfo::PERIODIC);
       session->mutable_status_controller()->set_last_get_key_result(SYNCER_OK);
       session->mutable_status_controller()->set_last_download_updates_result(
           SYNCER_OK);
@@ -61,7 +66,16 @@ void SimulateThrottledImpl(sessions::SyncSession* session,
     const base::TimeDelta& delta) {
   session->mutable_status_controller()->set_last_download_updates_result(
       SERVER_RETURN_THROTTLED);
-  session->delegate()->OnSilencedUntil(base::TimeTicks::Now() + delta);
+  session->delegate()->OnThrottled(delta);
+}
+
+void SimulateTypesThrottledImpl(
+    sessions::SyncSession* session,
+    ModelTypeSet types,
+    const base::TimeDelta& delta) {
+  session->mutable_status_controller()->set_last_download_updates_result(
+      SERVER_RETURN_THROTTLED);
+  session->delegate()->OnTypesThrottled(types, delta);
 }
 
 void SimulatePollIntervalUpdateImpl(sessions::SyncSession* session,

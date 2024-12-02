@@ -18,7 +18,7 @@ from telemetry.core.chrome import extension_dict_backend
 from telemetry.core.chrome import tab_list_backend
 from telemetry.core.chrome import tracing_backend
 from telemetry.core.chrome import misc_web_contents_backend
-from telemetry.test import options_for_unittests
+from telemetry.unittest import options_for_unittests
 
 class ExtensionsNotSupportedException(Exception):
   pass
@@ -102,9 +102,7 @@ class BrowserBackend(object):
 
     extensions = [extension.local_path for extension in
                   self.options.extensions_to_load if not extension.is_component]
-    # join extension paths with ';' rather than ',' due
-    # to a tokenization issue with dbus-send
-    extension_str = ';'.join(extensions)
+    extension_str = ','.join(extensions)
     if len(extensions) > 0:
       args.append('--load-extension=%s' % extension_str)
 
@@ -113,6 +111,10 @@ class BrowserBackend(object):
     component_extension_str = ','.join(component_extensions)
     if len(component_extensions) > 0:
       args.append('--load-component-extension=%s' % component_extension_str)
+
+    if self.options.no_proxy_server:
+      args.append('--no-proxy-server')
+
     return args
 
   @property
@@ -133,11 +135,22 @@ class BrowserBackend(object):
       raise exceptions.BrowserGoneException()
 
     def AllExtensionsLoaded():
+      # Extension pages are loaded from an about:blank page,
+      # so we need to check that the document URL is the extension
+      # page in addition to the ready state.
+      extension_ready_js = """
+          document.URL.lastIndexOf('chrome-extension://%s/', 0) == 0 &&
+          (document.readyState == 'complete' ||
+           document.readyState == 'interactive')
+      """
       for e in self.options.extensions_to_load:
         if not e.extension_id in self._extension_dict_backend:
           return False
         extension_object = self._extension_dict_backend[e.extension_id]
-        extension_object.WaitForDocumentReadyStateToBeInteractiveOrBetter()
+        res = extension_object.EvaluateJavaScript(
+            extension_ready_js % e.extension_id)
+        if not res:
+          return False
       return True
     if self._supports_extensions:
       util.WaitFor(AllExtensionsLoaded, timeout=30)
@@ -188,16 +201,33 @@ class BrowserBackend(object):
   def supports_tracing(self):
     return self.is_content_shell or self._chrome_branch_number >= 1385
 
-  def StartTracing(self):
+  def StartTracing(self, custom_categories=None):
+    """ custom_categories is an optional string containing a list of
+    comma separated categories that will be traced instead of the
+    default category set.  Example: use
+    "webkit,cc,disabled-by-default-cc.debug" to trace only those three
+    event categories.
+    """
     if self._tracing_backend is None:
       self._tracing_backend = tracing_backend.TracingBackend(self._port)
-    self._tracing_backend.BeginTracing()
+    self._tracing_backend.BeginTracing(custom_categories)
 
   def StopTracing(self):
     self._tracing_backend.EndTracing()
 
   def GetTraceResultAndReset(self):
     return self._tracing_backend.GetTraceResultAndReset()
+
+  def GetProcessName(self, cmd_line):
+    """Returns a user-friendly name for the process of the given |cmd_line|."""
+    if 'nacl_helper_bootstrap' in cmd_line:
+      return 'nacl_helper_bootstrap'
+    if ':sandboxed_process' in cmd_line:
+      return 'renderer'
+    m = re.match(r'.* --type=([^\s]*) .*', cmd_line)
+    if not m:
+      return 'browser'
+    return m.group(1)
 
   def GetRemotePort(self, _):
     return util.GetAvailableLocalPort()

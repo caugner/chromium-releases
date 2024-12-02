@@ -18,6 +18,7 @@ namespace remoting {
 namespace protocol {
 
 class Capabilities;
+class PairingResponse;
 
 class ClientStub : public ClipboardStub,
                    public CursorShapeStub {
@@ -27,6 +28,9 @@ class ClientStub : public ClipboardStub,
 
   // Passes the set of capabilities supported by the host to the client.
   virtual void SetCapabilities(const Capabilities& capabilities) = 0;
+
+  // Passes a pairing response message to the client.
+  virtual void SetPairingResponse(const PairingResponse& pairing_response) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ClientStub);

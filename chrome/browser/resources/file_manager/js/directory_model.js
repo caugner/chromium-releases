@@ -67,9 +67,8 @@ DirectoryModel.fakeDriveEntry_ = {
 
 /**
  * Fake entry representing a psuedo directory, which contains Drive files
- * available offline. This entry works as a trigger to start a search using
- * DirectoryContentsDriveOffline. specialSearch() must be called to start a
- * special search.
+ * available offline. This entry works as a trigger to start a search for
+ * offline files.
  * @type {Object}
  * @const
  * @private
@@ -109,15 +108,15 @@ DirectoryModel.fakeDriveRecentEntry_ = {
 
 /**
  * List of fake entries for special searches.
- * TODO(haruki): Add the entry for "Recent".
- * TODO(hirono): Bring back the entry for "Offline". http://crbug.com/238545
  *
  * @type {Array.<Object>}
  * @const
  */
-DirectoryModel.FAKE_DRIVE_SPECIAL_SEARCH_ENTRIES =
-    [DirectoryModel.fakeDriveSharedWithMeEntry_,
-     DirectoryModel.fakeDriveRecentEntry_];
+DirectoryModel.FAKE_DRIVE_SPECIAL_SEARCH_ENTRIES = [
+  DirectoryModel.fakeDriveSharedWithMeEntry_,
+  DirectoryModel.fakeDriveRecentEntry_,
+  DirectoryModel.fakeDriveOfflineEntry_
+];
 
 /**
  * DirectoryModel extends cr.EventTarget.
@@ -687,8 +686,13 @@ DirectoryModel.prototype.renameEntry = function(entry, newName,
   var currentDirPath = this.getCurrentDirPath();
   var onSuccess = function(newEntry) {
     this.currentDirContents_.prefetchMetadata([newEntry], function() {
-      // Do not change anything or call the callback if current
-      // directory changed.
+      // If the current directory is the old entry, then quietly change to the
+      // new one.
+      if (entry.fullPath == this.getCurrentDirPath())
+        this.changeDirectory(newEntry.fullPath);
+
+      // Update selection and call the success callback if still in the same
+      // directory as while started renaming.
       if (currentDirPath != this.getCurrentDirPath())
         return;
 
@@ -799,12 +803,13 @@ DirectoryModel.prototype.changeDirectory = function(path, opt_errorCallback) {
 /**
  * Resolves absolute directory path. Handles Drive stub. If the drive is
  * mounting, callbacks will be called after the mount is completed.
+ *
  * @param {string} path Path to the directory.
  * @param {function(DirectoryEntry} successCallback Success callback.
  * @param {function(FileError} errorCallback Error callback.
  */
-DirectoryModel.prototype.resolveDirectory = function(path, successCallback,
-                                                     errorCallback) {
+DirectoryModel.prototype.resolveDirectory = function(
+    path, successCallback, errorCallback) {
   if (PathUtil.getRootType(path) == RootType.DRIVE) {
     var driveStatus = this.volumeManager_.getDriveStatus();
     if (!this.isDriveMounted() &&
@@ -822,8 +827,24 @@ DirectoryModel.prototype.resolveDirectory = function(path, successCallback,
     return;
   }
 
+  var onError = function(error) {
+    // Handle the special case, when in offline mode, and there are no cached
+    // contents on the C++ side. In such case, let's display the stub.
+    // The INVALID_STATE_ERR error code is returned from the drive filesystem
+    // in such situation.
+    //
+    // TODO(mtomasz, hashimoto): Consider rewriting this logic.
+    //     crbug.com/253464.
+    if (PathUtil.getRootType(path) == RootType.DRIVE &&
+        error.code == FileError.INVALID_STATE_ERR) {
+      successCallback(DirectoryModel.fakeDriveEntry_);
+      return;
+    }
+    errorCallback(error);
+  }.bind(this);
+
   this.root_.getDirectory(path, {create: false},
-                          successCallback, errorCallback);
+                          successCallback, onError);
 };
 
 /**
@@ -1065,15 +1086,6 @@ DirectoryModel.prototype.resolveRoots_ = function(callback) {
     archives: null,
     removables: null
   };
-  if (!util.platform.newUI()) {
-    groups = {
-      drive: null,
-      driveSpecialSearchRoots: null,
-      downloads: null,
-      archives: null,
-      removables: null
-    };
-  }
   var self = this;
 
   metrics.startInterval('Load.Roots');
@@ -1119,16 +1131,10 @@ DirectoryModel.prototype.resolveRoots_ = function(callback) {
                      append.bind(this, 'removables'));
 
   if (this.driveEnabled_) {
-    if (!util.platform.newUI()) {
-      groups.driveSpecialSearchRoots = this.showSpecialSearchRoots_ ?
-          DirectoryModel.FAKE_DRIVE_SPECIAL_SEARCH_ENTRIES : [];
-    }
     // Use a fake instead to return a list as fast as possible.
     groups.drive = [DirectoryModel.fakeDriveEntry_];
     done();
   } else {
-    if (!util.platform.newUI())
-      groups.driveSpecialSearchRoots = [];
     groups.drive = [];
     done();
   }
@@ -1363,38 +1369,33 @@ DirectoryModel.prototype.specialSearch = function(path, opt_query) {
     }
 
     var specialSearchType = PathUtil.getRootType(path);
-    var newDirContents;
+    var searchOption;
     var dirEntry;
     if (specialSearchType == RootType.DRIVE_OFFLINE) {
-      newDirContents = new DirectoryContentsDriveOffline(
-          this.currentFileListContext_,
-          driveRoot,
-          DirectoryModel.fakeDriveOfflineEntry_,
-          query);
       dirEntry = DirectoryModel.fakeDriveOfflineEntry_;
+      searchOption =
+          DirectoryContentsDriveSearchMetadata.SearchType.SEARCH_OFFLINE;
     } else if (specialSearchType == RootType.DRIVE_SHARED_WITH_ME) {
-      newDirContents = new DirectoryContentsDriveSearchMetadata(
-          this.currentFileListContext_,
-          driveRoot,
-          DirectoryModel.fakeDriveSharedWithMeEntry_,
-          query,
-          DirectoryContentsDriveSearchMetadata.
-              SearchType.SEARCH_SHARED_WITH_ME);
       dirEntry = DirectoryModel.fakeDriveSharedWithMeEntry_;
+      searchOption =
+          DirectoryContentsDriveSearchMetadata.SearchType.SEARCH_SHARED_WITH_ME;
     } else if (specialSearchType == RootType.DRIVE_RECENT) {
-      newDirContents = new DirectoryContentsDriveSearchMetadata(
-          this.currentFileListContext_,
-          driveRoot,
-          DirectoryModel.fakeDriveRecentEntry_,
-          query,
-          DirectoryContentsDriveSearchMetadata.SearchType.SEARCH_RECENT_FILES);
       dirEntry = DirectoryModel.fakeDriveRecentEntry_;
+      searchOption =
+          DirectoryContentsDriveSearchMetadata.SearchType.SEARCH_RECENT_FILES;
+
     } else {
       // Unknown path.
       this.changeDirectory(thid.getDefaultDirectory());
       return;
     }
 
+    var newDirContents = new DirectoryContentsDriveSearchMetadata(
+        this.currentFileListContext_,
+        driveRoot,
+        dirEntry,
+        query,
+        searchOption);
     var previous = this.currentDirContents_.getDirectoryEntry();
     this.clearAndScan_(newDirContents);
 

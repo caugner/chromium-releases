@@ -14,13 +14,12 @@
 #include "base/json/json_reader.h"
 #include "base/message_loop.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
-#include "chrome/browser/printing/cloud_print/cloud_print_setup_flow.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/service/service_process_control.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -78,15 +77,6 @@ bool CloudPrintProxyService::EnforceCloudPrintConnectorPolicyAndQuit() {
   return false;
 }
 
-void CloudPrintProxyService::EnableForUser(const std::string& lsid,
-                                           const std::string& email) {
-  if (profile_->GetPrefs()->GetBoolean(prefs::kCloudPrintProxyEnabled)) {
-    InvokeServiceTask(
-        base::Bind(&CloudPrintProxyService::EnableCloudPrintProxy,
-                   weak_factory_.GetWeakPtr(), lsid, email));
-  }
-}
-
 void CloudPrintProxyService::EnableForUserWithRobot(
     const std::string& robot_auth_code,
     const std::string& robot_email,
@@ -114,22 +104,18 @@ bool CloudPrintProxyService::ApplyCloudPrintConnectorPolicy() {
       DisableForUser();
       profile_->GetPrefs()->SetString(prefs::kCloudPrintEmail, std::string());
       if (enforcing_connector_policy_) {
-        MessageLoop::current()->PostTask(
+        base::MessageLoop::current()->PostTask(
             FROM_HERE,
             base::Bind(&CloudPrintProxyService::RefreshCloudPrintProxyStatus,
                        weak_factory_.GetWeakPtr()));
       }
       return false;
     } else if (enforcing_connector_policy_) {
-      MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+      base::MessageLoop::current()->PostTask(FROM_HERE,
+                                             base::MessageLoop::QuitClosure());
     }
   }
   return true;
-}
-
-void CloudPrintProxyService::OnCloudPrintSetupClosed() {
-  MessageLoop::current()->PostTask(FROM_HERE,
-                                   base::Bind(&chrome::EndKeepAlive));
 }
 
 void CloudPrintProxyService::GetPrintersAvalibleForRegistration(
@@ -153,7 +139,7 @@ void CloudPrintProxyService::GetPrintersAvalibleForRegistration(
     printing::PrinterList printer_list;
     scoped_refptr<printing::PrintBackend> backend(
         printing::PrintBackend::CreateInstance(NULL));
-    if (backend)
+    if (backend.get())
       backend->EnumeratePrinters(&printer_list);
     for (size_t i = 0; i < printer_list.size(); ++i)
       printers->push_back(printer_list[i].printer_name);
@@ -169,15 +155,6 @@ void CloudPrintProxyService::RefreshCloudPrintProxyStatus() {
                   base::Unretained(this));
   // GetCloudPrintProxyInfo takes ownership of callback.
   process_control->GetCloudPrintProxyInfo(callback);
-}
-
-void CloudPrintProxyService::EnableCloudPrintProxy(const std::string& lsid,
-                                                   const std::string& email) {
-  ServiceProcessControl* process_control = GetServiceProcessControl();
-  DCHECK(process_control->IsConnected());
-  process_control->Send(new ServiceMsg_EnableCloudPrintProxy(lsid));
-  // Assume the IPC worked.
-  profile_->GetPrefs()->SetString(prefs::kCloudPrintEmail, email);
 }
 
 void CloudPrintProxyService::EnableCloudPrintProxyWithRobot(

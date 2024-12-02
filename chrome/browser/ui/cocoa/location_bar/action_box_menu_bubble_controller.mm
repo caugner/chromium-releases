@@ -10,7 +10,6 @@
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/extensions/extension_icon_image.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
-#import "chrome/browser/ui/cocoa/event_utils.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/info_bubble_window.h"
 #include "chrome/browser/ui/toolbar/action_box_menu_model.h"
@@ -22,6 +21,7 @@
 #include "grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
+#import "ui/base/cocoa/cocoa_event_utils.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
@@ -100,7 +100,7 @@ class ExtensionIconLoaderBridge : public extensions::IconImage::Observer {
   // Use an arbitrary height because it will reflect the size of the content.
   NSRect contentRect = NSMakeRect(0, 0, kBubbleMinWidth, 150);
   // Create an empty window into which content is placed.
-  scoped_nsobject<InfoBubbleWindow> window(
+  base::scoped_nsobject<InfoBubbleWindow> window(
       [[InfoBubbleWindow alloc] initWithContentRect:contentRect
                                           styleMask:NSBorderlessWindowMask
                                             backing:NSBackingStoreBuffered
@@ -143,7 +143,7 @@ class ExtensionIconLoaderBridge : public extensions::IconImage::Observer {
       activateWindowForController:[[self parentWindow] windowController]];
   size_t modelIndex = [sender modelIndex];
   DCHECK(model_.get());
-  int eventFlags = event_utils::EventFlagsFromNSEvent([NSApp currentEvent]);
+  int eventFlags = ui::EventFlagsFromNSEvent([NSApp currentEvent]);
   model_->ActivatedAt(modelIndex, eventFlags);
 }
 
@@ -160,7 +160,7 @@ class ExtensionIconLoaderBridge : public extensions::IconImage::Observer {
   CGFloat yOffset = kVerticalPadding;
 
   // Keep track of a potential separator to resize it when we know the width.
-  scoped_nsobject<NSBox> separatorView;
+  base::scoped_nsobject<NSBox> separatorView;
 
   // Loop over the items in reverse, constructing the menu items.
   CGFloat width = kBubbleMinWidth;
@@ -183,11 +183,10 @@ class ExtensionIconLoaderBridge : public extensions::IconImage::Observer {
     } else {
       // Create the item controller. Autorelease it because it will be owned
       // by the |items_| array.
-      scoped_nsobject<ActionBoxMenuItemController> itemController(
-          [[ActionBoxMenuItemController alloc]
-              initWithModelIndex:i
-                  menuController:self
-                         profile:profile_]);
+      base::scoped_nsobject<ActionBoxMenuItemController> itemController(
+          [[ActionBoxMenuItemController alloc] initWithModelIndex:i
+                                                   menuController:self
+                                                          profile:profile_]);
 
       // Adjust the name field to fit the string.
       [GTMUILocalizerAndLayoutTweaker sizeToFitView:[itemController nameField]];

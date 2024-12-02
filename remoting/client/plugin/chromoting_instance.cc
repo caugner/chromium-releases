@@ -13,10 +13,9 @@
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_split.h"
+#include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
-#include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "base/values.h"
 #include "googleurl/src/gurl.h"
@@ -38,7 +37,7 @@
 #include "remoting/client/plugin/pepper_port_allocator.h"
 #include "remoting/client/plugin/pepper_token_fetcher.h"
 #include "remoting/client/plugin/pepper_view.h"
-#include "remoting/client/plugin/pepper_xmpp_proxy.h"
+#include "remoting/client/plugin/pepper_signal_strategy.h"
 #include "remoting/client/rectangle_update_decoder.h"
 #include "remoting/protocol/connection_to_host.h"
 #include "remoting/protocol/host_stub.h"
@@ -64,6 +63,10 @@ const int kPerfStatsIntervalMs = 1000;
 
 // URL scheme used by Chrome apps and extensions.
 const char kChromeExtensionUrlScheme[] = "chrome-extension";
+
+// Maximum width and height of a mouse cursor supported by PPAPI.
+const int kMaxCursorWidth = 32;
+const int kMaxCursorHeight = 32;
 
 std::string ConnectionStateToString(protocol::ConnectionToHost::State state) {
   // Values returned by this function must match the
@@ -141,10 +144,10 @@ logging::LogMessageHandlerFunction g_logging_old_handler = NULL;
 const char ChromotingInstance::kApiFeatures[] =
     "highQualityScaling injectKeyEvent sendClipboardItem remapKey trapKey "
     "notifyClientDimensions notifyClientResolution pauseVideo pauseAudio "
-    "asyncPin thirdPartyAuth";
+    "asyncPin thirdPartyAuth pinlessAuth";
 
 const char ChromotingInstance::kRequestedCapabilities[] = "";
-const char ChromotingInstance::kSupportedCapabilities[] = "";
+const char ChromotingInstance::kSupportedCapabilities[] = "desktopShape";
 
 bool ChromotingInstance::ParseAuthMethods(const std::string& auth_methods_str,
                                           ClientConfig* config) {
@@ -168,9 +171,8 @@ bool ChromotingInstance::ParseAuthMethods(const std::string& auth_methods_str,
 ChromotingInstance::ChromotingInstance(PP_Instance pp_instance)
     : pp::Instance(pp_instance),
       initialized_(false),
-      plugin_task_runner_(
-          new PluginThreadTaskRunner(&plugin_thread_delegate_)),
-      context_(plugin_task_runner_),
+      plugin_task_runner_(new PluginThreadTaskRunner(&plugin_thread_delegate_)),
+      context_(plugin_task_runner_.get()),
       input_tracker_(&mouse_input_filter_),
 #if defined(OS_MACOSX)
       // On Mac we need an extra filter to inject missing keyup events.
@@ -210,12 +212,9 @@ ChromotingInstance::~ChromotingInstance() {
   // PepperView must be destroyed before the client.
   view_.reset();
 
-  if (client_.get()) {
-    client_->Stop(base::Bind(&PluginThreadTaskRunner::Quit,
-                  plugin_task_runner_));
-  } else {
-    plugin_task_runner_->Quit();
-  }
+  client_.reset();
+
+  plugin_task_runner_->Quit();
 
   // Ensure that nothing touches the plugin thread delegate after this point.
   plugin_task_runner_->DetachAndRunShutdownLoop();
@@ -290,6 +289,8 @@ void ChromotingInstance::HandleMessage(const pp::Var& message) {
       LOG(ERROR) << "Invalid connect() data.";
       return;
     }
+    data->GetString("clientPairingId", &config.client_pairing_id);
+    data->GetString("clientPairedSecret", &config.client_paired_secret);
     if (use_async_pin_dialog_) {
       config.fetch_secret_callback =
           base::Bind(&ChromotingInstance::FetchSecretFromDialog,
@@ -425,6 +426,13 @@ void ChromotingInstance::HandleMessage(const pp::Var& message) {
       return;
     }
     OnThirdPartyTokenFetched(token, shared_secret);
+  } else if (method == "requestPairing") {
+    std::string client_name;
+    if (!data->GetString("clientName", &client_name)) {
+      LOG(ERROR) << "Invalid requestPairing";
+      return;
+    }
+    RequestPairing(client_name);
   }
 }
 
@@ -461,6 +469,28 @@ void ChromotingInstance::SetDesktopSize(const SkISize& size,
   PostChromotingMessage("onDesktopSize", data.Pass());
 }
 
+void ChromotingInstance::SetDesktopShape(const SkRegion& shape) {
+  if (desktop_shape_ && shape == *desktop_shape_)
+    return;
+
+  desktop_shape_.reset(new SkRegion(shape));
+
+  scoped_ptr<base::ListValue> rects_value(new base::ListValue());
+  for (SkRegion::Iterator i(shape); !i.done(); i.next()) {
+    SkIRect rect = i.rect();
+    scoped_ptr<base::ListValue> rect_value(new base::ListValue());
+    rect_value->AppendInteger(rect.x());
+    rect_value->AppendInteger(rect.y());
+    rect_value->AppendInteger(rect.width());
+    rect_value->AppendInteger(rect.height());
+    rects_value->Append(rect_value.release());
+  }
+
+  scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
+  data->Set("rects", rects_value.release());
+  PostChromotingMessage("onDesktopShape", data.Pass());
+}
+
 void ChromotingInstance::OnConnectionState(
     protocol::ConnectionToHost::State state,
     protocol::ErrorCode error) {
@@ -478,7 +508,7 @@ void ChromotingInstance::FetchThirdPartyToken(
   // Once the Session object calls this function, it won't continue the
   // authentication until the callback is called (or connection is canceled).
   // So, it's impossible to reach this with a callback already registered.
-  DCHECK(!pepper_token_fetcher_);
+  DCHECK(!pepper_token_fetcher_.get());
   pepper_token_fetcher_ = pepper_token_fetcher;
   scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
   data->SetString("tokenUrl", token_url.spec());
@@ -499,7 +529,16 @@ void ChromotingInstance::SetCapabilities(const std::string& capabilities) {
   PostChromotingMessage("setCapabilities", data.Pass());
 }
 
+void ChromotingInstance::SetPairingResponse(
+    const protocol::PairingResponse& pairing_response) {
+  scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
+  data->SetString("clientId", pairing_response.client_id());
+  data->SetString("sharedSecret", pairing_response.shared_secret());
+  PostChromotingMessage("pairingResponse", data.Pass());
+}
+
 void ChromotingInstance::FetchSecretFromDialog(
+    bool pairing_supported,
     const protocol::SecretFetchedCallback& secret_fetched_callback) {
   // Once the Session object calls this function, it won't continue the
   // authentication until the callback is called (or connection is canceled).
@@ -507,11 +546,13 @@ void ChromotingInstance::FetchSecretFromDialog(
   DCHECK(secret_fetched_callback_.is_null());
   secret_fetched_callback_ = secret_fetched_callback;
   scoped_ptr<base::DictionaryValue> data(new base::DictionaryValue());
+  data->SetBoolean("pairingSupported", pairing_supported);
   PostChromotingMessage("fetchPin", data.Pass());
 }
 
 void ChromotingInstance::FetchSecretFromString(
     const std::string& shared_secret,
+    bool pairing_supported,
     const protocol::SecretFetchedCallback& secret_fetched_callback) {
   secret_fetched_callback.Run(shared_secret);
 }
@@ -555,13 +596,12 @@ void ChromotingInstance::SetCursorShape(
   int width = cursor_shape.width();
   int height = cursor_shape.height();
 
-  if (width < 0 || height < 0) {
-    return;
-  }
-
-  if (width > 32 || height > 32) {
-    VLOG(2) << "Cursor too large for SetCursor: "
-            << width << "x" << height << " > 32x32";
+  // Verify that |width| and |height| are within sane limits. Otherwise integer
+  // overflow can occur while calculating |cursor_total_bytes| below.
+  if (width <= 0 || width > (SHRT_MAX / 2) ||
+      height <= 0 || height > (SHRT_MAX / 2)) {
+    VLOG(2) << "Cursor dimensions are out of bounds for SetCursor: "
+            << width << "x" << height;
     return;
   }
 
@@ -582,16 +622,40 @@ void ChromotingInstance::SetCursorShape(
   int hotspot_x = cursor_shape.hotspot_x();
   int hotspot_y = cursor_shape.hotspot_y();
 
-  pp::ImageData cursor_image(this, PP_IMAGEDATAFORMAT_BGRA_PREMUL,
-                             pp::Size(width, height), false);
-
   int bytes_per_row = width * kBytesPerPixel;
   const uint8* src_row_data = reinterpret_cast<const uint8*>(
       cursor_shape.data().data());
+  int stride = bytes_per_row;
+
+  // If the cursor exceeds the size permitted by PPAPI then crop it, keeping
+  // the hotspot as close to the center of the new cursor shape as possible.
+  if (height > kMaxCursorHeight) {
+    int y = hotspot_y - (kMaxCursorHeight / 2);
+    y = std::max(y, 0);
+    y = std::min(y, height - kMaxCursorHeight);
+
+    src_row_data += stride * y;
+    height = kMaxCursorHeight;
+    hotspot_y -= y;
+  }
+  if (width > kMaxCursorWidth) {
+    int x = hotspot_x - (kMaxCursorWidth / 2);
+    x = std::max(x, 0);
+    x = std::min(x, height - kMaxCursorWidth);
+
+    src_row_data += x * kBytesPerPixel;
+    width = kMaxCursorWidth;
+    bytes_per_row = width * kBytesPerPixel;
+    hotspot_x -= x;
+  }
+
+  pp::ImageData cursor_image(this, PP_IMAGEDATAFORMAT_BGRA_PREMUL,
+                             pp::Size(width, height), false);
+
   uint8* dst_row_data = reinterpret_cast<uint8*>(cursor_image.data());
   for (int row = 0; row < height; row++) {
     memcpy(dst_row_data, src_row_data, bytes_per_row);
-    src_row_data += bytes_per_row;
+    src_row_data += stride;
     dst_row_data += cursor_image.stride();
   }
 
@@ -634,10 +698,10 @@ void ChromotingInstance::Connect(const ClientConfig& config) {
   LOG(INFO) << "Connecting to " << config.host_jid
             << ". Local jid: " << config.local_jid << ".";
 
-  // Setup the XMPP Proxy.
-  xmpp_proxy_ = new PepperXmppProxy(
-      base::Bind(&ChromotingInstance::SendOutgoingIq, AsWeakPtr()),
-      plugin_task_runner_, context_.main_task_runner());
+  // Setup the PepperSignalStrategy.
+  signal_strategy_.reset(new PepperSignalStrategy(
+      config.local_jid,
+      base::Bind(&ChromotingInstance::SendOutgoingIq, AsWeakPtr())));
 
   scoped_ptr<cricket::HttpPortAllocatorBase> port_allocator(
       PepperPortAllocator::Create(this));
@@ -645,7 +709,7 @@ void ChromotingInstance::Connect(const ClientConfig& config) {
       new protocol::LibjingleTransportFactory(port_allocator.Pass(), false));
 
   // Kick off the connection.
-  client_->Start(xmpp_proxy_, transport_factory.Pass());
+  client_->Start(signal_strategy_.get(), transport_factory.Pass());
 
   // Start timer that periodically sends perf stats.
   plugin_task_runner_->PostDelayedTask(
@@ -660,14 +724,8 @@ void ChromotingInstance::Disconnect() {
   view_.reset();
 
   LOG(INFO) << "Disconnecting from host.";
-  if (client_.get()) {
-    // TODO(sergeyu): Should we disconnect asynchronously?
-    base::WaitableEvent done_event(true, false);
-    client_->Stop(base::Bind(&base::WaitableEvent::Signal,
-                             base::Unretained(&done_event)));
-    done_event.Wait();
-    client_.reset();
-  }
+
+  client_.reset();
 
   // Disconnect the input pipeline and teardown the connection.
   mouse_input_filter_.set_input_stub(NULL);
@@ -677,8 +735,8 @@ void ChromotingInstance::Disconnect() {
 void ChromotingInstance::OnIncomingIq(const std::string& iq) {
   // Just ignore the message if it's received before Connect() is called. It's
   // likely to be a leftover from a previous session, so it's safe to ignore it.
-  if (xmpp_proxy_)
-    xmpp_proxy_->OnIq(iq);
+  if (signal_strategy_)
+    signal_strategy_->OnIncomingMessage(iq);
 }
 
 void ChromotingInstance::ReleaseAllKeys() {
@@ -762,12 +820,21 @@ void ChromotingInstance::OnPinFetched(const std::string& pin) {
 void ChromotingInstance::OnThirdPartyTokenFetched(
     const std::string& token,
     const std::string& shared_secret) {
-  if (pepper_token_fetcher_) {
+  if (pepper_token_fetcher_.get()) {
     pepper_token_fetcher_->OnTokenFetched(token, shared_secret);
     pepper_token_fetcher_.reset();
   } else {
     LOG(WARNING) << "Ignored OnThirdPartyTokenFetched without a pending fetch.";
   }
+}
+
+void ChromotingInstance::RequestPairing(const std::string& client_name) {
+  if (!IsConnected()) {
+    return;
+  }
+  protocol::PairingRequest pairing_request;
+  pairing_request.set_client_name(client_name);
+  host_connection_->host_stub()->RequestPairing(pairing_request);
 }
 
 ChromotingStats* ChromotingInstance::GetStats() {

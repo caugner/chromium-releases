@@ -12,6 +12,7 @@
 
 @dynamic textColor;
 @synthesize underlineOnHover = underlineOnHover_;
+@synthesize shouldUnderline = shouldUnderline_;
 
 + (NSColor*)defaultTextColor {
   return [NSColor blueColor];
@@ -19,7 +20,7 @@
 
 + (NSButton*)buttonWithString:(NSString*)string {
   NSButton* button = [[[NSButton alloc] initWithFrame:NSZeroRect] autorelease];
-  scoped_nsobject<HyperlinkButtonCell> cell(
+  base::scoped_nsobject<HyperlinkButtonCell> cell(
       [[HyperlinkButtonCell alloc] initTextCell:string]);
   [cell setAlignment:NSLeftTextAlignment];
   [button setCell:cell.get()];
@@ -56,6 +57,7 @@
 - (void)customizeButtonCell {
   [self setBordered:NO];
   [self setTextColor:[HyperlinkButtonCell defaultTextColor]];
+  [self setShouldUnderline:YES];
 
   CGFloat fontSize = [NSFont systemFontSizeForControlSize:[self controlSize]];
   NSFont* font = [NSFont controlContentFontOfSize:fontSize];
@@ -77,11 +79,12 @@
 // Creates the NSDictionary of attributes for the attributed string.
 - (NSDictionary*)linkAttributes {
   NSUInteger underlineMask = NSNoUnderlineStyle;
-  if (!underlineOnHover_ || (mouseIsInside_ && [self isEnabled]))
+  if (shouldUnderline_ &&
+      (!underlineOnHover_ || (mouseIsInside_ && [self isEnabled])))
     underlineMask = NSUnderlinePatternSolid | NSUnderlineStyleSingle;
 
-  scoped_nsobject<NSMutableParagraphStyle> paragraphStyle(
-    [[NSParagraphStyle defaultParagraphStyle] mutableCopy]);
+  base::scoped_nsobject<NSMutableParagraphStyle> paragraphStyle(
+      [[NSParagraphStyle defaultParagraphStyle] mutableCopy]);
   [paragraphStyle setAlignment:[self alignment]];
   [paragraphStyle setLineBreakMode:[self lineBreakMode]];
 

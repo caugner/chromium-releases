@@ -32,7 +32,7 @@ const int kWaitForUIThreadSeconds = 10;
 
 int BrowserX11ErrorHandler(Display* d, XErrorEvent* error) {
   if (!g_in_x11_io_error_handler)
-    MessageLoop::current()->PostTask(
+    base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&ui::LogErrorEventDescription, d, *error));
   return 0;
@@ -96,7 +96,12 @@ int DoUninstallTasks(bool chrome_still_running) {
   return content::RESULT_CODE_NORMAL_EXIT;
 }
 
-void SetBrowserX11ErrorHandlers() {
+void SetBrowserX11ErrorHandlersPreEarlyInitialization() {
+  // Use default error handlers during startup.
+  ui::SetX11ErrorHandlers(NULL, NULL);
+}
+
+void SetBrowserX11ErrorHandlersPostMainMessageLoopStart() {
   // Set up error handlers to make sure profile gets written if X server
   // goes away.
   ui::SetX11ErrorHandlers(BrowserX11ErrorHandler, BrowserX11IOErrorHandler);

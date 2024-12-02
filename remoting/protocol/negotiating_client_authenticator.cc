@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/strings/string_split.h"
 #include "remoting/protocol/channel_authenticator.h"
+#include "remoting/protocol/pairing_client_authenticator.h"
 #include "remoting/protocol/v2_authenticator.h"
 #include "third_party/libjingle/source/talk/xmllite/xmlelement.h"
 
@@ -19,11 +20,15 @@ namespace remoting {
 namespace protocol {
 
 NegotiatingClientAuthenticator::NegotiatingClientAuthenticator(
+    const std::string& client_pairing_id,
+    const std::string& shared_secret,
     const std::string& authentication_tag,
     const FetchSecretCallback& fetch_secret_callback,
     scoped_ptr<ThirdPartyClientAuthenticator::TokenFetcher> token_fetcher,
     const std::vector<AuthenticationMethod>& methods)
     : NegotiatingAuthenticatorBase(MESSAGE_READY),
+      client_pairing_id_(client_pairing_id),
+      shared_secret_(shared_secret),
       authentication_tag_(authentication_tag),
       fetch_secret_callback_(fetch_secret_callback),
       token_fetcher_(token_fetcher.Pass()),
@@ -62,11 +67,13 @@ void NegotiatingClientAuthenticator::ProcessMessage(
     current_method_ = method;
     method_set_by_host_ = true;
     state_ = PROCESSING_MESSAGE;
+
     // Copy the message since the authenticator may process it asynchronously.
-    CreateAuthenticator(WAITING_MESSAGE, base::Bind(
+    base::Closure callback = base::Bind(
         &NegotiatingAuthenticatorBase::ProcessMessageInternal,
         base::Unretained(this), base::Owned(new buzz::XmlElement(*message)),
-        resume_callback));
+        resume_callback);
+    CreateAuthenticatorForCurrentMethod(WAITING_MESSAGE, callback);
     return;
   }
   ProcessMessageInternal(message, resume_callback);
@@ -74,14 +81,21 @@ void NegotiatingClientAuthenticator::ProcessMessage(
 
 scoped_ptr<buzz::XmlElement> NegotiatingClientAuthenticator::GetNextMessage() {
   DCHECK_EQ(state(), MESSAGE_READY);
+
   // This is the first message to the host, send a list of supported methods.
   if (!current_method_.is_valid()) {
-    // We currently send just an empty message with the supported list, but, in
-    // the future, the client may optimistically pick a method and send its
-    // first message, along with the supported methods. If the host doesn't
-    // support that method, it is free to ignore this first message and pick a
-    // different method from the supported list.
-    scoped_ptr<buzz::XmlElement> result = CreateEmptyAuthenticatorMessage();
+    // If no authentication method has been chosen, see if we can optimistically
+    // choose one.
+    scoped_ptr<buzz::XmlElement> result;
+    CreatePreferredAuthenticator();
+    if (current_authenticator_) {
+      DCHECK(current_authenticator_->state() == MESSAGE_READY);
+      result = GetNextMessageInternal();
+    } else {
+      result = CreateEmptyAuthenticatorMessage();
+    }
+
+    // Include a list of supported methods.
     std::stringstream supported_methods(std::stringstream::out);
     for (std::vector<AuthenticationMethod>::iterator it = methods_.begin();
          it != methods_.end(); ++it) {
@@ -96,7 +110,7 @@ scoped_ptr<buzz::XmlElement> NegotiatingClientAuthenticator::GetNextMessage() {
   return GetNextMessageInternal();
 }
 
-void NegotiatingClientAuthenticator::CreateAuthenticator(
+void NegotiatingClientAuthenticator::CreateAuthenticatorForCurrentMethod(
     Authenticator::State preferred_initial_state,
     const base::Closure& resume_callback) {
   DCHECK(current_method_.is_valid());
@@ -109,9 +123,27 @@ void NegotiatingClientAuthenticator::CreateAuthenticator(
         token_fetcher_.Pass()));
     resume_callback.Run();
   } else {
-    fetch_secret_callback_.Run(base::Bind(
+    DCHECK(current_method_.type() == AuthenticationMethod::SPAKE2 ||
+           current_method_.type() == AuthenticationMethod::SPAKE2_PAIR);
+    bool pairing_supported =
+        (current_method_.type() == AuthenticationMethod::SPAKE2_PAIR);
+    SecretFetchedCallback callback = base::Bind(
         &NegotiatingClientAuthenticator::CreateV2AuthenticatorWithSecret,
-        weak_factory_.GetWeakPtr(), preferred_initial_state, resume_callback));
+        weak_factory_.GetWeakPtr(), preferred_initial_state, resume_callback);
+    fetch_secret_callback_.Run(pairing_supported, callback);
+  }
+}
+
+void NegotiatingClientAuthenticator::CreatePreferredAuthenticator() {
+  if (!client_pairing_id_.empty() && !shared_secret_.empty() &&
+      std::find(methods_.begin(), methods_.end(),
+                AuthenticationMethod::Spake2Pair()) != methods_.end()) {
+    // If the client specified a pairing id and shared secret, then create a
+    // PairingAuthenticator.
+    current_authenticator_.reset(new PairingClientAuthenticator(
+        client_pairing_id_, shared_secret_, fetch_secret_callback_,
+        authentication_tag_));
+    current_method_ = AuthenticationMethod::Spake2Pair();
   }
 }
 

@@ -8,7 +8,6 @@
 
 #include "base/logging.h"
 #include "base/stl_util.h"
-#include "chromeos/dbus/bluetooth_property.h"
 #include "chromeos/dbus/fake_bluetooth_device_client.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
@@ -21,9 +20,9 @@ namespace chromeos {
 
 FakeBluetoothInputClient::Properties::Properties(
     const PropertyChangedCallback& callback)
-    : ExperimentalBluetoothInputClient::Properties(
+    : BluetoothInputClient::Properties(
           NULL,
-          bluetooth_input::kExperimentalBluetoothInputInterface,
+          bluetooth_input::kBluetoothInputInterface,
           callback) {
 }
 
@@ -96,7 +95,7 @@ void FakeBluetoothInputClient::AddInputDevice(
 
   properties_map_[object_path] = properties;
 
-  FOR_EACH_OBSERVER(ExperimentalBluetoothInputClient::Observer, observers_,
+  FOR_EACH_OBSERVER(BluetoothInputClient::Observer, observers_,
                     InputAdded(object_path));
 }
 
@@ -107,7 +106,7 @@ void FakeBluetoothInputClient::RemoveInputDevice(
   if (it == properties_map_.end())
     return;
 
-  FOR_EACH_OBSERVER(ExperimentalBluetoothInputClient::Observer, observers_,
+  FOR_EACH_OBSERVER(BluetoothInputClient::Observer, observers_,
                     InputRemoved(object_path));
 
   delete it->second;
@@ -117,7 +116,7 @@ void FakeBluetoothInputClient::RemoveInputDevice(
 void FakeBluetoothInputClient::OnPropertyChanged(
     const dbus::ObjectPath& object_path,
     const std::string& property_name) {
-  FOR_EACH_OBSERVER(ExperimentalBluetoothInputClient::Observer, observers_,
+  FOR_EACH_OBSERVER(BluetoothInputClient::Observer, observers_,
                     InputPropertyChanged(object_path, property_name));
 }
 

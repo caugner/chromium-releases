@@ -8,16 +8,16 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
+#include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/cros_settings_names.h"
 #include "chrome/browser/chromeos/settings/device_settings_cache.h"
@@ -25,9 +25,10 @@
 #include "chrome/browser/policy/cloud/cloud_policy_constants.h"
 #include "chrome/browser/policy/proto/cloud/device_management_backend.pb.h"
 #include "chrome/browser/ui/options/options_util.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/google_update_settings.h"
+#include "chromeos/chromeos_switches.h"
 
+using google::protobuf::RepeatedField;
 using google::protobuf::RepeatedPtrField;
 
 namespace em = enterprise_management;
@@ -46,8 +47,10 @@ const char* kKnownSettings[] = {
   kAccountsPrefDeviceLocalAccountAutoLoginId,
   kAccountsPrefEphemeralUsersEnabled,
   kAccountsPrefShowUserNamesOnSignIn,
+  kAccountsPrefSupervisedUsersEnabled,
   kAccountsPrefUsers,
   kAllowRedeemChromeOsRegistrationOffers,
+  kAllowedConnectionTypesForUpdate,
   kAppPack,
   kDeviceAttestationEnabled,
   kDeviceOwner,
@@ -62,12 +65,12 @@ const char* kKnownSettings[] = {
   kReportDeviceVersionInfo,
   kScreenSaverExtensionId,
   kScreenSaverTimeout,
-  kSettingProxyEverywhere,
   kSignedDataRoamingEnabled,
   kStartUpFlags,
   kStartUpUrls,
   kStatsReportingPref,
   kSystemTimezonePolicy,
+  kUpdateDisabled,
   kVariationsRestrictParameter,
 };
 
@@ -144,7 +147,6 @@ void DeviceSettingsProvider::OwnershipStatusChanged() {
   if (new_ownership_status == DeviceSettingsService::OWNERSHIP_TAKEN &&
       ownership_status_ == DeviceSettingsService::OWNERSHIP_NONE &&
       device_settings_service_->HasPrivateOwnerKey()) {
-
     // There shouldn't be any pending writes, since the cache writes are all
     // immediate.
     DCHECK(!store_callback_factory_.HasWeakPtrs());
@@ -299,17 +301,6 @@ void DeviceSettingsProvider::SetInPolicy() {
     else
       NOTREACHED();
     ApplyRoamingSetting(roaming_value);
-  } else if (prop == kSettingProxyEverywhere) {
-    // TODO(cmasone): NOTIMPLEMENTED() once http://crosbug.com/13052 is fixed.
-    std::string proxy_value;
-    if (value->GetAsString(&proxy_value)) {
-      bool success =
-          device_settings_.mutable_device_proxy_settings()->ParseFromString(
-              proxy_value);
-      DCHECK(success);
-    } else {
-      NOTREACHED();
-    }
   } else if (prop == kReleaseChannel) {
     em::ReleaseChannelProto* release_channel =
         device_settings_.mutable_release_channel();
@@ -376,16 +367,17 @@ void DeviceSettingsProvider::SetInPolicy() {
   } else {
     // The remaining settings don't support Set(), since they are not
     // intended to be customizable by the user:
+    //   kAccountsPrefSupervisedUsersEnabled
     //   kAppPack
     //   kDeviceAttestationEnabled
     //   kDeviceOwner
     //   kIdleLogoutTimeout
     //   kIdleLogoutWarningDuration
     //   kReleaseChannelDelegated
-    //   kReportDeviceVersionInfo
     //   kReportDeviceActivityTimes
     //   kReportDeviceBootMode
     //   kReportDeviceLocation
+    //   kReportDeviceVersionInfo
     //   kScreenSaverExtensionId
     //   kScreenSaverTimeout
     //   kStartUpUrls
@@ -458,6 +450,11 @@ void DeviceSettingsProvider::DecodeLoginPolicies(
       policy.ephemeral_users_enabled().has_ephemeral_users_enabled() &&
       policy.ephemeral_users_enabled().ephemeral_users_enabled());
 
+  new_values_cache->SetBoolean(
+      kAccountsPrefSupervisedUsersEnabled,
+      policy.has_supervised_users_settings() &&
+      policy.supervised_users_settings().supervised_users_enabled());
+
   base::ListValue* list = new base::ListValue();
   const em::UserWhitelistProto& whitelist_proto = policy.user_whitelist();
   const RepeatedPtrField<std::string>& whitelist =
@@ -495,13 +492,14 @@ void DeviceSettingsProvider::DecodeLoginPolicies(
               kAccountsPrefDeviceLocalAccountsKeyKioskAppUpdateURL,
               entry->kiosk_app().update_url());
         }
-      } else if (entry->has_id()) {
+      } else if (entry->has_deprecated_public_session_id()) {
         // Deprecated public session specification.
         entry_dict->SetStringWithoutPathExpansion(
-            kAccountsPrefDeviceLocalAccountsKeyId, entry->id());
+            kAccountsPrefDeviceLocalAccountsKeyId,
+            entry->deprecated_public_session_id());
         entry_dict->SetIntegerWithoutPathExpansion(
             kAccountsPrefDeviceLocalAccountsKeyType,
-            DEVICE_LOCAL_ACCOUNT_TYPE_PUBLIC_SESSION);
+            policy::DeviceLocalAccount::TYPE_PUBLIC_SESSION);
       }
       account_list->Append(entry_dict.release());
     }
@@ -609,13 +607,27 @@ void DeviceSettingsProvider::DecodeNetworkPolicies(
       policy.has_data_roaming_enabled() &&
       policy.data_roaming_enabled().has_data_roaming_enabled() &&
       policy.data_roaming_enabled().data_roaming_enabled());
+}
 
-  // TODO(cmasone): NOTIMPLEMENTED() once http://crosbug.com/13052 is fixed.
-  std::string serialized;
-  if (policy.has_device_proxy_settings() &&
-      policy.device_proxy_settings().SerializeToString(&serialized)) {
-    new_values_cache->SetString(kSettingProxyEverywhere, serialized);
+void DeviceSettingsProvider::DecodeAutoUpdatePolicies(
+    const em::ChromeDeviceSettingsProto& policy,
+    PrefValueMap* new_values_cache) const {
+  if (!policy.has_auto_update_settings())
+    return;
+  const em::AutoUpdateSettingsProto& au_settings_proto =
+      policy.auto_update_settings();
+  if (au_settings_proto.has_update_disabled()) {
+    new_values_cache->SetBoolean(kUpdateDisabled,
+                                 au_settings_proto.update_disabled());
   }
+  const RepeatedField<int>& allowed_connection_types =
+      au_settings_proto.allowed_connection_types();
+  base::ListValue* list = new base::ListValue();
+  for (RepeatedField<int>::const_iterator i = allowed_connection_types.begin(),
+           e = allowed_connection_types.end(); i != e; ++i) {
+    list->Append(new base::FundamentalValue(*i));
+  }
+  new_values_cache->SetValue(kAllowedConnectionTypesForUpdate, list);
 }
 
 void DeviceSettingsProvider::DecodeReportingPolicies(
@@ -713,6 +725,7 @@ void DeviceSettingsProvider::UpdateValuesCache(
   DecodeLoginPolicies(settings, &new_values_cache);
   DecodeKioskPolicies(settings, &new_values_cache);
   DecodeNetworkPolicies(settings, &new_values_cache);
+  DecodeAutoUpdatePolicies(settings, &new_values_cache);
   DecodeReportingPolicies(settings, &new_values_cache);
   DecodeGenericPolicies(settings, &new_values_cache);
 

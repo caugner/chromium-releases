@@ -21,6 +21,8 @@
 #include "native_client/src/trusted/desc/nacl_desc_io.h"
 #include "native_client/src/trusted/desc/nacl_desc_sync_socket.h"
 #include "native_client/src/trusted/desc/nacl_desc_wrapper.h"
+#include "native_client/src/trusted/service_runtime/include/sys/fcntl.h"
+#include "ppapi/c/ppb_file_io.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/serialized_handle.h"
 
@@ -92,6 +94,28 @@ NaClDesc* MakeNaClDescCustom(NaClIPCAdapter* adapter) {
 
 void DeleteChannel(IPC::Channel* channel) {
   delete channel;
+}
+
+// Translates Pepper's read/write open flags into NaCl's ones. The other open
+// flags are discarded. If neither of the read/write flags is specified, just
+// returns NACL_ABI_O_RDONLY as a safe fallback.
+int TranslatePepperFileReadWriteOpenFlags(int32_t pp_open_flags) {
+  int nacl_open_flag;
+  if ((pp_open_flags & (PP_FILEOPENFLAG_READ | PP_FILEOPENFLAG_WRITE)) ==
+      (PP_FILEOPENFLAG_READ | PP_FILEOPENFLAG_WRITE)) {
+    nacl_open_flag = NACL_ABI_O_RDWR;
+  } else if (pp_open_flags & PP_FILEOPENFLAG_READ) {
+    nacl_open_flag = NACL_ABI_O_RDONLY;
+  } else if (pp_open_flags & PP_FILEOPENFLAG_WRITE) {
+    nacl_open_flag = NACL_ABI_O_WRONLY;
+  } else {
+    DLOG(WARNING) << "PP_FILEOPENFLAG_READ and/or PP_FILEOPENFLAG_WRITE "
+                  << "should be specified.";
+    // NACL_ABI_O_RDONLY == 0, so make this ambiguous case readonly as a safe
+    // fallback.
+    nacl_open_flag = NACL_ABI_O_RDONLY;
+  }
+  return nacl_open_flag;
 }
 
 class NaClDescWrapper {
@@ -393,7 +417,7 @@ bool NaClIPCAdapter::OnMessageReceived(const IPC::Message& msg) {
           IPC::ChannelHandle channel_handle =
               IPC::Channel::GenerateVerifiedChannelID("nacl");
           scoped_refptr<NaClIPCAdapter> ipc_adapter(
-              new NaClIPCAdapter(channel_handle, task_runner_));
+              new NaClIPCAdapter(channel_handle, task_runner_.get()));
           ipc_adapter->ConnectChannel();
 #if defined(OS_POSIX)
           channel_handle.socket = base::FileDescriptor(
@@ -409,13 +433,13 @@ bool NaClIPCAdapter::OnMessageReceived(const IPC::Message& msg) {
           break;
         }
         case ppapi::proxy::SerializedHandle::FILE:
-          nacl_desc.reset(new NaClDescWrapper(NaClDescIoDescMakeFromHandle(
+          nacl_desc.reset(new NaClDescWrapper(NaClDescIoDescFromHandleAllocCtor(
 #if defined(OS_WIN)
-              iter->descriptor()
+              iter->descriptor(),
 #else
-              iter->descriptor().fd
+              iter->descriptor().fd,
 #endif
-          )));
+              TranslatePepperFileReadWriteOpenFlags(iter->open_flag()))));
           break;
         case ppapi::proxy::SerializedHandle::INVALID: {
           // Nothing to do. TODO(dmichael): Should we log this? Or is it
@@ -553,4 +577,8 @@ void NaClIPCAdapter::SaveMessage(const IPC::Message& msg,
 
   rewritten_msg->SetData(header, msg.payload(), msg.payload_size());
   locked_data_.to_be_received_.push(rewritten_msg);
+}
+
+int TranslatePepperFileReadWriteOpenFlagsForTesting(int32_t pp_open_flags) {
+  return TranslatePepperFileReadWriteOpenFlags(pp_open_flags);
 }

@@ -5,9 +5,9 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/geolocation/geolocation_settings_state.h"
@@ -31,7 +31,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/base/net_util.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 
 using content::DomOperationNotificationDetails;
 using content::NavigationController;
@@ -116,7 +116,7 @@ void IFrameLoader::Observe(int type,
     javascript_completed_ = true;
   }
   if (javascript_completed_ && navigation_completed_)
-    MessageLoopForUI::current()->Quit();
+    base::MessageLoopForUI::current()->Quit();
 }
 
 
@@ -175,7 +175,7 @@ void GeolocationNotificationObserver::Observe(
     const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_ADDED) {
     infobar_ = content::Details<InfoBarAddedDetails>(details).ptr();
-    ASSERT_TRUE(infobar_->GetIcon());
+    ASSERT_FALSE(infobar_->GetIcon().IsEmpty());
     ASSERT_TRUE(infobar_->AsConfirmInfoBarDelegate());
   } else if (type == content::NOTIFICATION_DOM_OPERATION_RESPONSE) {
     content::Details<DomOperationNotificationDetails> dom_op_details(details);
@@ -194,9 +194,9 @@ void GeolocationNotificationObserver::Observe(
   // We're either waiting for just the inforbar, or for both a javascript
   // prompt and response.
   if (wait_for_infobar_ && infobar_)
-    MessageLoopForUI::current()->Quit();
+    base::MessageLoopForUI::current()->Quit();
   else if (navigation_completed_ && !javascript_response_.empty())
-    MessageLoopForUI::current()->Quit();
+    base::MessageLoopForUI::current()->Quit();
 }
 
 void GeolocationNotificationObserver::AddWatchAndWaitForNotification(

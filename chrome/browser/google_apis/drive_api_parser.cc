@@ -10,9 +10,9 @@
 #include "base/files/file_path.h"
 #include "base/json/json_value_converter.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
+#include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "chrome/browser/google_apis/time_util.h"
@@ -30,6 +30,34 @@ namespace {
 // TODO(mukai): make it return false in case of invalid |url_string|.
 bool GetGURLFromString(const base::StringPiece& url_string, GURL* result) {
   *result = GURL(url_string.as_string());
+  return true;
+}
+
+// Converts |value| to |result|. The key of |value| is app_id, and its value
+// is URL to open the resource on the web app.
+bool GetOpenWithLinksFromDictionaryValue(
+    const base::Value* value,
+    std::vector<FileResource::OpenWithLink>* result) {
+  DCHECK(value);
+  DCHECK(result);
+
+  const base::DictionaryValue* dictionary_value;
+  if (!value->GetAsDictionary(&dictionary_value))
+    return false;
+
+  result->reserve(dictionary_value->size());
+  for (DictionaryValue::Iterator iter(*dictionary_value);
+       !iter.IsAtEnd(); iter.Advance()) {
+    std::string string_value;
+    if (!iter.value().GetAsString(&string_value))
+      return false;
+
+    FileResource::OpenWithLink open_with_link;
+    open_with_link.app_id = iter.key();
+    open_with_link.open_url = GURL(string_value);
+    result->push_back(open_with_link);
+  }
+
   return true;
 }
 
@@ -104,6 +132,7 @@ const char kEmbedLink[] = "embedLink";
 const char kParents[] = "parents";
 const char kThumbnailLink[] = "thumbnailLink";
 const char kWebContentLink[] = "webContentLink";
+const char kOpenWithLinks[] = "openWithLinks";
 const char kLabels[] = "labels";
 // These 5 flags are defined under |labels|.
 const char kLabelStarred[] = "starred";
@@ -194,7 +223,7 @@ scoped_ptr<AboutResource> AboutResource::CreateFrom(const base::Value& value) {
   scoped_ptr<AboutResource> resource(new AboutResource());
   if (!IsResourceKindExpected(value, kAboutKind) || !resource->Parse(value)) {
     LOG(ERROR) << "Unable to create: Invalid About resource JSON!";
-    return scoped_ptr<AboutResource>(NULL);
+    return scoped_ptr<AboutResource>();
   }
   return resource.Pass();
 }
@@ -261,7 +290,7 @@ scoped_ptr<DriveAppIcon> DriveAppIcon::CreateFrom(const base::Value& value) {
   scoped_ptr<DriveAppIcon> resource(new DriveAppIcon());
   if (!resource->Parse(value)) {
     LOG(ERROR) << "Unable to create: Invalid DriveAppIcon JSON!";
-    return scoped_ptr<DriveAppIcon>(NULL);
+    return scoped_ptr<DriveAppIcon>();
   }
   return resource.Pass();
 }
@@ -355,7 +384,7 @@ scoped_ptr<AppResource> AppResource::CreateFrom(const base::Value& value) {
   scoped_ptr<AppResource> resource(new AppResource());
   if (!IsResourceKindExpected(value, kAppKind) || !resource->Parse(value)) {
     LOG(ERROR) << "Unable to create: Invalid AppResource JSON!";
-    return scoped_ptr<AppResource>(NULL);
+    return scoped_ptr<AppResource>();
   }
   return resource.Pass();
 }
@@ -437,7 +466,7 @@ scoped_ptr<AppList> AppList::CreateFrom(const base::Value& value) {
   scoped_ptr<AppList> resource(new AppList());
   if (!IsResourceKindExpected(value, kAppListKind) || !resource->Parse(value)) {
     LOG(ERROR) << "Unable to create: Invalid AppList JSON!";
-    return scoped_ptr<AppList>(NULL);
+    return scoped_ptr<AppList>();
   }
   return resource.Pass();
 }
@@ -495,7 +524,7 @@ ParentReference::CreateFrom(const base::Value& value) {
   if (!IsResourceKindExpected(value, kParentReferenceKind) ||
       !reference->Parse(value)) {
     LOG(ERROR) << "Unable to create: Invalid ParentRefernce JSON!";
-    return scoped_ptr<ParentReference>(NULL);
+    return scoped_ptr<ParentReference>();
   }
   return reference.Pass();
 }
@@ -570,6 +599,10 @@ void FileResource::RegisterJSONConverter(
   converter->RegisterCustomField<GURL>(kWebContentLink,
                                        &FileResource::web_content_link_,
                                        GetGURLFromString);
+  converter->RegisterCustomValueField<std::vector<OpenWithLink> >(
+      kOpenWithLinks,
+      &FileResource::open_with_links_,
+      GetOpenWithLinksFromDictionaryValue);
 }
 
 // static
@@ -577,7 +610,7 @@ scoped_ptr<FileResource> FileResource::CreateFrom(const base::Value& value) {
   scoped_ptr<FileResource> resource(new FileResource());
   if (!IsResourceKindExpected(value, kFileKind) || !resource->Parse(value)) {
     LOG(ERROR) << "Unable to create: Invalid FileResource JSON!";
-    return scoped_ptr<FileResource>(NULL);
+    return scoped_ptr<FileResource>();
   }
   return resource.Pass();
 }
@@ -642,7 +675,7 @@ scoped_ptr<FileList> FileList::CreateFrom(const base::Value& value) {
   scoped_ptr<FileList> resource(new FileList());
   if (!HasFileListKind(value) || !resource->Parse(value)) {
     LOG(ERROR) << "Unable to create: Invalid FileList JSON!";
-    return scoped_ptr<FileList>(NULL);
+    return scoped_ptr<FileList>();
   }
   return resource.Pass();
 }
@@ -680,7 +713,7 @@ ChangeResource::CreateFrom(const base::Value& value) {
   scoped_ptr<ChangeResource> resource(new ChangeResource());
   if (!IsResourceKindExpected(value, kChangeKind) || !resource->Parse(value)) {
     LOG(ERROR) << "Unable to create: Invalid ChangeResource JSON!";
-    return scoped_ptr<ChangeResource>(NULL);
+    return scoped_ptr<ChangeResource>();
   }
   return resource.Pass();
 }
@@ -726,7 +759,7 @@ scoped_ptr<ChangeList> ChangeList::CreateFrom(const base::Value& value) {
   scoped_ptr<ChangeList> resource(new ChangeList());
   if (!HasChangeListKind(value) || !resource->Parse(value)) {
     LOG(ERROR) << "Unable to create: Invalid ChangeList JSON!";
-    return scoped_ptr<ChangeList>(NULL);
+    return scoped_ptr<ChangeList>();
   }
   return resource.Pass();
 }
@@ -768,7 +801,7 @@ scoped_ptr<FileLabels> FileLabels::CreateFrom(const base::Value& value) {
   scoped_ptr<FileLabels> resource(new FileLabels());
   if (!resource->Parse(value)) {
     LOG(ERROR) << "Unable to create: Invalid FileLabels JSON!";
-    return scoped_ptr<FileLabels>(NULL);
+    return scoped_ptr<FileLabels>();
   }
   return resource.Pass();
 }

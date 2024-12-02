@@ -21,8 +21,9 @@ const int kFixedColumns = 4;
 const int kItemsPerPage = kFixedRows * kFixedColumns;
 
 // Padding space in pixels for fixed layout.
+const CGFloat kGridTopPadding = 1;
 const CGFloat kLeftRightPadding = 16;
-const CGFloat kTopPadding = 30;
+const CGFloat kScrollerPadding = 16;
 
 // Preferred tile size when showing in fixed layout. These should be even
 // numbers to ensure that if they are grown 50% they remain integers.
@@ -33,11 +34,15 @@ const CGFloat kViewWidth =
     kFixedColumns * kPreferredTileWidth + 2 * kLeftRightPadding;
 const CGFloat kViewHeight = kFixedRows * kPreferredTileHeight;
 
+const NSTimeInterval kScrollWhileDraggingDelay = 1.0;
 NSTimeInterval g_scroll_duration = 0.18;
 
 }  // namespace
 
 @interface AppsGridController ()
+
+- (void)scrollToPageWithTimer:(size_t)targetPage;
+- (void)onTimer:(NSTimer*)theTimer;
 
 // Cancel a currently running scroll animation.
 - (void)cancelScrollAnimation;
@@ -59,7 +64,7 @@ NSTimeInterval g_scroll_duration = 0.18;
 // Update the model in full, and rebuild subviews.
 - (void)modelUpdated;
 
-// Return the button selected in first page with a selection.
+// Return the button of the selected item.
 - (NSButton*)selectedButton;
 
 // The scroll view holding the grid pages.
@@ -73,9 +78,18 @@ NSTimeInterval g_scroll_duration = 0.18;
 - (void)updatePageContent:(size_t)pageIndex
                resetModel:(BOOL)resetModel;
 
-// Bridged method for ui::ListModelObserver.
+// Bridged methods for ui::ListModelObserver.
 - (void)listItemsAdded:(size_t)start
                  count:(size_t)count;
+
+- (void)listItemsRemoved:(size_t)start
+                   count:(size_t)count;
+
+- (void)listItemMovedFromIndex:(size_t)fromIndex
+                  toModelIndex:(size_t)toIndex;
+
+// Moves the selection by |indexDelta| items.
+- (BOOL)moveSelectionByDelta:(int)indexDelta;
 
 @end
 
@@ -88,10 +102,17 @@ class AppsGridDelegateBridge : public ui::ListModelObserver {
  private:
   // Overridden from ui::ListModelObserver:
   virtual void ListItemsAdded(size_t start, size_t count) OVERRIDE {
-    [parent_ listItemsAdded:start count:count];
+    [parent_ listItemsAdded:start
+                      count:count];
   }
-  virtual void ListItemsRemoved(size_t start, size_t count) OVERRIDE {}
-  virtual void ListItemMoved(size_t index, size_t target_index) OVERRIDE {}
+  virtual void ListItemsRemoved(size_t start, size_t count) OVERRIDE {
+    [parent_ listItemsRemoved:start
+                        count:count];
+  }
+  virtual void ListItemMoved(size_t index, size_t target_index) OVERRIDE {
+    [parent_ listItemMovedFromIndex:index
+                       toModelIndex:target_index];
+  }
   virtual void ListItemsChanged(size_t start, size_t count) OVERRIDE {
     NOTREACHED();
   }
@@ -103,10 +124,27 @@ class AppsGridDelegateBridge : public ui::ListModelObserver {
 
 }  // namespace app_list
 
+@interface PageContainerView : NSView;
+@end
+
+// The container view needs to flip coordinates so that it is laid out
+// correctly whether or not there is a horizontal scrollbar.
+@implementation PageContainerView
+
+- (BOOL)isFlipped {
+  return YES;
+}
+
+@end
+
 @implementation AppsGridController
 
 + (void)setScrollAnimationDuration:(NSTimeInterval)duration {
   g_scroll_duration = duration;
+}
+
++ (CGFloat)scrollerPadding {
+  return kScrollerPadding;
 }
 
 @synthesize paginationObserver = paginationObserver_;
@@ -204,12 +242,78 @@ class AppsGridDelegateBridge : public ui::ListModelObserver {
     return;
   }
 
+  // Clear any selection on the current page (unless it has been removed).
+  if (visiblePage_ < [pages_ count]) {
+    [[self collectionViewAtPageIndex:visiblePage_]
+        setSelectionIndexes:[NSIndexSet indexSet]];
+  }
+
   newOrigin.x = pageIndex * kViewWidth;
   [NSAnimationContext beginGrouping];
   [[NSAnimationContext currentContext] setDuration:g_scroll_duration];
   [[clipView animator] setBoundsOrigin:newOrigin];
   [NSAnimationContext endGrouping];
   animatingScroll_ = YES;
+  targetScrollPage_ = pageIndex;
+  [self cancelScrollTimer];
+}
+
+- (void)maybeChangePageForPoint:(NSPoint)locationInWindow {
+  NSPoint pointInView = [[self view] convertPoint:locationInWindow
+                                         fromView:nil];
+  // Check if the point is outside the view on the left or right.
+  if (pointInView.x <= 0 || pointInView.x >= NSWidth([[self view] bounds])) {
+    size_t targetPage = visiblePage_;
+    if (pointInView.x <= 0)
+      targetPage -= targetPage != 0 ? 1 : 0;
+    else
+      targetPage += targetPage < [pages_ count] - 1 ? 1 : 0;
+    [self scrollToPageWithTimer:targetPage];
+    return;
+  }
+
+  if (paginationObserver_) {
+    NSInteger segment =
+        [paginationObserver_ pagerSegmentAtLocation:locationInWindow];
+    if (segment >= 0 && static_cast<size_t>(segment) != targetScrollPage_) {
+      [self scrollToPageWithTimer:segment];
+      return;
+    }
+  }
+
+  // Otherwise the point may have moved back into the view.
+  [self cancelScrollTimer];
+}
+
+- (void)cancelScrollTimer {
+  scheduledScrollPage_ = targetScrollPage_;
+  [scrollWhileDraggingTimer_ invalidate];
+}
+
+- (void)scrollToPageWithTimer:(size_t)targetPage {
+  if (targetPage == targetScrollPage_) {
+    [self cancelScrollTimer];
+    return;
+  }
+
+  if (targetPage == scheduledScrollPage_)
+    return;
+
+  scheduledScrollPage_ = targetPage;
+  [scrollWhileDraggingTimer_ invalidate];
+  scrollWhileDraggingTimer_.reset(
+      [[NSTimer scheduledTimerWithTimeInterval:kScrollWhileDraggingDelay
+                                        target:self
+                                      selector:@selector(onTimer:)
+                                      userInfo:nil
+                                       repeats:NO] retain]);
+}
+
+- (void)onTimer:(NSTimer*)theTimer {
+  if (scheduledScrollPage_ == targetScrollPage_)
+    return;  // Already animating scroll.
+
+  [self scrollToPage:scheduledScrollPage_];
 }
 
 - (void)cancelScrollAnimation {
@@ -236,11 +340,12 @@ class AppsGridDelegateBridge : public ui::ListModelObserver {
 }
 
 - (void)loadAndSetView {
-  scoped_nsobject<NSView> pagesContainer(
-      [[NSView alloc] initWithFrame:NSZeroRect]);
+  base::scoped_nsobject<PageContainerView> pagesContainer(
+      [[PageContainerView alloc] initWithFrame:NSZeroRect]);
 
-  NSRect scrollFrame = NSMakeRect(0, 0, kViewWidth, kViewHeight + kTopPadding);
-  scoped_nsobject<ScrollViewWithNoScrollbars> scrollView(
+  NSRect scrollFrame = NSMakeRect(0, kGridTopPadding, kViewWidth,
+                                  kViewHeight + kScrollerPadding);
+  base::scoped_nsobject<ScrollViewWithNoScrollbars> scrollView(
       [[ScrollViewWithNoScrollbars alloc] initWithFrame:scrollFrame]);
   [scrollView setBorderType:NSNoBorder];
   [scrollView setLineScroll:kViewWidth];
@@ -259,16 +364,15 @@ class AppsGridDelegateBridge : public ui::ListModelObserver {
 }
 
 - (void)boundsDidChange:(NSNotification*)notification {
-  if ([self nearestPageIndex] == visiblePage_)
+  size_t newPage = [self nearestPageIndex];
+  if (newPage == visiblePage_) {
+    [paginationObserver_ pageVisibilityChanged];
     return;
-
-  // Clear any selection on the previous page (unless it has been removed).
-  if (visiblePage_ < [pages_ count]) {
-    [[self collectionViewAtPageIndex:visiblePage_]
-        setSelectionIndexes:[NSIndexSet indexSet]];
   }
-  visiblePage_ = [self nearestPageIndex];
-  [paginationObserver_ selectedPageChanged:visiblePage_];
+
+  visiblePage_ = newPage;
+  [paginationObserver_ selectedPageChanged:newPage];
+  [paginationObserver_ pageVisibilityChanged];
 }
 
 - (void)onItemClicked:(id)sender {
@@ -299,22 +403,24 @@ class AppsGridDelegateBridge : public ui::ListModelObserver {
   } else {
     [self updatePages:0];
   }
+  [self scrollToPage:0];
+}
+
+- (NSUInteger)selectedItemIndex {
+  NSCollectionView* page = [self collectionViewAtPageIndex:visiblePage_];
+  NSUInteger indexOnPage = [[page selectionIndexes] firstIndex];
+  if (indexOnPage == NSNotFound)
+    return NSNotFound;
+
+  return indexOnPage + visiblePage_ * kItemsPerPage;
 }
 
 - (NSButton*)selectedButton {
-  NSIndexSet* selection = nil;
-  size_t pageIndex = 0;
-  for (; pageIndex < [self pageCount]; ++pageIndex) {
-    selection = [[self collectionViewAtPageIndex:pageIndex] selectionIndexes];
-    if ([selection count] > 0)
-      break;
-  }
-
-  if (pageIndex == [self pageCount])
+  NSUInteger index = [self selectedItemIndex];
+  if (index == NSNotFound)
     return nil;
 
-  return [[self itemAtPageIndex:pageIndex
-                    indexInPage:[selection firstIndex]] button];
+  return [[self itemAtIndex:index] button];
 }
 
 - (NSScrollView*)gridScrollView {
@@ -391,9 +497,10 @@ class AppsGridDelegateBridge : public ui::ListModelObserver {
   }
 }
 
-- (void)moveItemForDrag:(size_t)fromIndex
-            toItemIndex:(size_t)toIndex {
-  scoped_nsobject<NSValue> item([[items_ objectAtIndex:fromIndex] retain]);
+- (void)moveItemInView:(size_t)fromIndex
+           toItemIndex:(size_t)toIndex {
+  base::scoped_nsobject<NSValue> item(
+      [[items_ objectAtIndex:fromIndex] retain]);
   [items_ removeObjectAtIndex:fromIndex];
   [items_ insertObject:item
                atIndex:toIndex];
@@ -413,7 +520,6 @@ class AppsGridDelegateBridge : public ui::ListModelObserver {
     [self updatePageContent:i
                  resetModel:YES];
   }
-  [[[self itemAtIndex:toIndex] button] setHidden:YES];
 }
 
 // Compare with views implementation in AppsGridView::MoveItemInModel().
@@ -432,6 +538,10 @@ class AppsGridDelegateBridge : public ui::ListModelObserver {
   return dragManager_;
 }
 
+- (size_t)scheduledScrollPage {
+  return scheduledScrollPage_;
+}
+
 - (void)listItemsAdded:(size_t)start
                  count:(size_t)count {
   // Cancel any drag, to ensure the model stays consistent.
@@ -444,6 +554,134 @@ class AppsGridDelegateBridge : public ui::ListModelObserver {
   }
 
   [self updatePages:start];
+}
+
+- (void)listItemsRemoved:(size_t)start
+                   count:(size_t)count {
+  [dragManager_ cancelDrag];
+
+  // Clear the models explicitly to avoid surprises from autorelease.
+  for (size_t i = start; i < start + count; ++i)
+    [[self itemAtIndex:i] setModel:NULL];
+
+  [items_ removeObjectsInRange:NSMakeRange(start, count)];
+  [self updatePages:start];
+}
+
+- (void)listItemMovedFromIndex:(size_t)fromIndex
+                  toModelIndex:(size_t)toIndex {
+  [dragManager_ cancelDrag];
+  [self moveItemInView:fromIndex
+           toItemIndex:toIndex];
+}
+
+- (CGFloat)visiblePortionOfPage:(int)page {
+  CGFloat scrollOffsetOfPage =
+      NSMinX([[[self gridScrollView] contentView] bounds]) / kViewWidth - page;
+  if (scrollOffsetOfPage <= -1.0 || scrollOffsetOfPage >= 1.0)
+    return 0.0;
+
+  if (scrollOffsetOfPage <= 0.0)
+    return scrollOffsetOfPage + 1.0;
+
+  return -1.0 + scrollOffsetOfPage;
+}
+
+- (void)onPagerClicked:(AppListPagerView*)sender {
+  int selectedSegment = [sender selectedSegment];
+  if (selectedSegment < 0)
+    return;  // No selection.
+
+  int pageIndex = [[sender cell] tagForSegment:selectedSegment];
+  if (pageIndex >= 0)
+    [self scrollToPage:pageIndex];
+}
+
+- (BOOL)moveSelectionByDelta:(int)indexDelta {
+  if (indexDelta == 0)
+    return NO;
+
+  NSUInteger oldIndex = [self selectedItemIndex];
+
+  // If nothing is currently selected, select the first item on the page.
+  if (oldIndex == NSNotFound) {
+    [self selectItemAtIndex:visiblePage_ * kItemsPerPage];
+    return YES;
+  }
+
+  // Can't select a negative index.
+  if (indexDelta < 0 && static_cast<NSUInteger>(-indexDelta) > oldIndex)
+    return NO;
+
+  // Can't select an index greater or equal to the number of items.
+  if (oldIndex + indexDelta >= [items_ count]) {
+    if (visiblePage_ == [pages_ count] - 1)
+      return NO;
+
+    // If we're not on the last page, then select the last item.
+    [self selectItemAtIndex:[items_ count] - 1];
+    return YES;
+  }
+
+  [self selectItemAtIndex:oldIndex + indexDelta];
+  return YES;
+}
+
+- (void)selectItemAtIndex:(NSUInteger)index {
+  if (index >= [items_ count])
+    return;
+
+  if (index / kItemsPerPage != visiblePage_)
+    [self scrollToPage:index / kItemsPerPage];
+
+  [[self itemAtIndex:index] setSelected:YES];
+}
+
+- (BOOL)handleCommandBySelector:(SEL)command {
+  if (command == @selector(insertNewline:) ||
+      command == @selector(insertLineBreak:)) {
+    [self activateSelection];
+    return YES;
+  }
+
+  NSUInteger oldIndex = [self selectedItemIndex];
+  // If nothing is currently selected, select the first item on the page.
+  if (oldIndex == NSNotFound) {
+    [self selectItemAtIndex:visiblePage_ * kItemsPerPage];
+    return YES;
+  }
+
+  if (command == @selector(moveLeft:)) {
+    return oldIndex % kFixedColumns == 0 ?
+        [self moveSelectionByDelta:-kItemsPerPage + kFixedColumns - 1] :
+        [self moveSelectionByDelta:-1];
+  }
+
+  if (command == @selector(moveRight:)) {
+    return oldIndex % kFixedColumns == kFixedColumns - 1 ?
+        [self moveSelectionByDelta:+kItemsPerPage - kFixedColumns + 1] :
+        [self moveSelectionByDelta:1];
+  }
+
+  if (command == @selector(moveUp:)) {
+    return oldIndex / kFixedColumns % kFixedRows == 0 ?
+        NO : [self moveSelectionByDelta:-kFixedColumns];
+  }
+
+  if (command == @selector(moveDown:)) {
+    return oldIndex / kFixedColumns % kFixedRows == kFixedRows - 1 ?
+        NO : [self moveSelectionByDelta:kFixedColumns];
+  }
+
+  if (command == @selector(pageUp:) ||
+      command == @selector(scrollPageUp:))
+    return [self moveSelectionByDelta:-kItemsPerPage];
+
+  if (command == @selector(pageDown:) ||
+      command == @selector(scrollPageDown:))
+    return [self moveSelectionByDelta:kItemsPerPage];
+
+  return NO;
 }
 
 @end

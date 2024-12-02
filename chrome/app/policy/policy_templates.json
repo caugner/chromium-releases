@@ -72,7 +72,7 @@
 #   numbers can be any string that does not contain ':' or '-' characters.
 #
 #   Currently supported product names:
-#       'chrome_frame', 'chrome_os'
+#       'chrome_frame', 'chrome_os', 'android',
 #       'chrome.win', 'chrome.linux', 'chrome.mac', 'chrome.*'
 #     For example if 'chrome.*:5-10' is specified for a policy, then it should
 #     be read as:
@@ -112,7 +112,7 @@
 #   persistent IDs for all fields (but not for groups!) are needed. These are
 #   specified by the 'id' keys of each policy. NEVER CHANGE EXISTING IDs,
 #   because doing so would break the deployed wire format!
-#   For your editing convenience: highest ID currently used: 207
+#   For your editing convenience: highest ID currently used: 221
 #
 # Placeholders:
 #   The following placeholder strings are automatically substituted:
@@ -325,10 +325,13 @@
         'dynamic_refresh': True,
         'per_profile': False,
       },
-      'example_value': ['file', 'mailto'],
+      'deprecated': True,
+      'example_value': ['file', 'https'],
       'id': 85,
       'caption': '''Disable URL protocol schemes''',
-      'desc': '''Disables the listed protocol schemes in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+      'desc': '''This policy is deprecated, please use URLBlacklist instead.
+
+      Disables the listed protocol schemes in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
 
       URLs using a scheme from this list will not load and can not be navigated to.
 
@@ -661,7 +664,7 @@
 
       If you disable this setting, Safe Browsing is never active.
 
-      If you enable or disable this setting, users cannot change or override this setting in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+      If you enable or disable this setting, users cannot change or override the "Enable phishing and malware protection" setting in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
 
       If this policy is left not set, this will be enabled but the user will be able to change it.''',
     },
@@ -698,7 +701,7 @@
           'name': 'PasswordManagerEnabled',
           'type': 'main',
           'schema': { 'type': 'boolean' },
-          'supported_on': ['chrome.*:8-', 'chrome_os:0.11-'],
+          'supported_on': ['chrome.*:8-', 'chrome_os:0.11-', 'android:30-'],
           'features': {
             'can_be_recommended': True,
             'dynamic_refresh': True,
@@ -873,7 +876,7 @@
       'name': 'SigninAllowed',
       'type': 'main',
       'schema': { 'type': 'boolean' },
-      'supported_on': ['chrome.*:26-'],
+      'supported_on': ['chrome.*:27-'],
       'features': {
         'dynamic_refresh': True,
         'per_profile': True,
@@ -995,7 +998,7 @@
       'name': 'ClearSiteDataOnExit',
       'type': 'main',
       'schema': { 'type': 'boolean' },
-      'supported_on': ['chrome.*:11-', 'chrome_os:0.11-'],
+      'supported_on': ['chrome.*:11-28', 'chrome_os:0.11-0.28'],
       'features': {
         'can_be_recommended': True,
         'dynamic_refresh': True,
@@ -1005,13 +1008,7 @@
       'example_value': True,
       'id': 65,
       'caption': '''Clear site data on browser shutdown (deprecated)''',
-      'desc': '''This policy is an override for the "Clear cookies and other site data when I close my browser" content settings option that <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> supported prior to version 21.
-
-      This policy exists only for backward-compatibility and will go away in the future. The recommended way to clear site data on exit on version 21 and later is to configure the DefaultCookiesSetting policy to session-only.
-
-      If this policy is enabled it will be translated to the appropriate policy setting for the DefaultCookiesSetting policy, setting it to session-only if the DefaultCookiesSetting policy is not configured or set to Allow.
-
-      If this policy is disabled or left unconfigured the policy for storing site data is determined by the DefaultCookiesSetting policy.''',
+      'desc': '''This policy has been retired as of <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> version 29.''',
       'label': '''Clear site data on browser shutdown (deprecated)''',
     },
     {
@@ -2586,7 +2583,8 @@
       'name': 'InstantEnabled',
       'type': 'main',
       'schema': { 'type': 'boolean' },
-      'supported_on': ['chrome.*:11-', 'chrome_os:0.11-'],
+      'supported_on': ['chrome.*:11-28', 'chrome_os:0.11-0.28'],
+      'deprecated': True,
       'features': {
         'can_be_recommended': True,
         'dynamic_refresh': True,
@@ -2603,7 +2601,9 @@
 
       If you enable or disable this setting, users cannot change or override this setting.
 
-      If this setting is left not set the user can decide to use this function or not.''',
+      If this setting is left not set the user can decide to use this function or not.
+
+      This setting has been removed from Chrome 29 and higher versions.''',
     },
     {
       'name': 'TranslateEnabled',
@@ -2890,7 +2890,7 @@
       'name': 'HideWebStorePromo',
       'type': 'main',
       'schema': { 'type': 'boolean' },
-      'supported_on': ['chrome.*:15-21', 'chrome_os:0.15-21'],
+      'supported_on': ['chrome.*:15-21', 'chrome_os:0.15-0.21'],
       'deprecated': True,
       'features': {
         'dynamic_refresh': False,
@@ -2909,7 +2909,7 @@
         'type': 'array',
         'items': { 'type': 'string' },
       },
-      'supported_on': ['chrome.*:15-', 'chrome_os:0.15-'],
+      'supported_on': ['chrome.*:15-', 'chrome_os:0.15-', 'android:30-'],
       'features': {
         'dynamic_refresh': True,
         'per_profile': True,
@@ -2938,7 +2938,7 @@
         'type': 'array',
         'items': { 'type': 'string' },
       },
-      'supported_on': ['chrome.*:15-', 'chrome_os:0.15-'],
+      'supported_on': ['chrome.*:15-', 'chrome_os:0.15-', 'android:30-'],
       'features': {
         'dynamic_refresh': True,
         'per_profile': True,
@@ -3008,7 +3008,7 @@
       'name': 'EnterpriseWebStoreURL',
       'type': 'string',
       'schema': { 'type': 'string' },
-      'supported_on': ['chrome.*:17-', 'chrome_os:0.17-'],
+      'supported_on': ['chrome.*:17-28', 'chrome_os:0.17-0.28'],
       'features': {
         'dynamic_refresh': True,
         'per_profile': True,
@@ -3016,18 +3016,14 @@
       'deprecated': True,
       'example_value': 'http://company-intranet/chromeapps',
       'id': 112,
-      'caption': '''Enterprise web store URL''',
-      'desc': '''Specifies the URL for the enterprise web store. When this setting is enabled, an app will appear on the new tab page which, when clicked, will take the user to the specified URL. To actually allow extension installation from the configured website, the ExtensionInstallSources policy must be configured to allow installation from the appropriate extension download URLs. If this policy is set, the EnterpriseWebStoreName setting should also be set.
-
-      If this setting is disabled, no enterprise web store app will appear on the new tab page.
-
-      This setting is deprecated as of version 27 and will be removed for future versions. The recommended way to set up organization-hosted extension/app collections is to include the site hosting the CRX packages in ExtensionInstallSources and put direct download links to the packages on a web page. A launcher for that web page can be created using the ExtensionInstallForcelist policy.''',
+      'caption': '''Enterprise web store URL (deprecated)''',
+      'desc': '''This setting has been retired as of <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> version 29. The recommended way to set up organization-hosted extension/app collections is to include the site hosting the CRX packages in ExtensionInstallSources and put direct download links to the packages on a web page. A launcher for that web page can be created using the ExtensionInstallForcelist policy.''',
     },
     {
       'name': 'EnterpriseWebStoreName',
       'type': 'string',
       'schema': { 'type': 'string' },
-      'supported_on': ['chrome.*:17-', 'chrome_os:0.17-'],
+      'supported_on': ['chrome.*:17-28', 'chrome_os:0.17-0.28'],
       'features': {
         'dynamic_refresh': True,
         'per_profile': True,
@@ -3035,12 +3031,8 @@
       'deprecated': True,
       'example_value': 'WidgCo Chrome Apps',
       'id': 113,
-      'caption': '''Enterprise web store name''',
-      'desc': '''The name of the enterprise web store, which will appear underneath the app icon on the new tab page. This setting has no effect if EnterpriseWebStoreURL is not set.
-
-      If this setting is disabled, the enterprise web store app (if it exists) will be labeled with its URL.
-
-      This setting is deprecated as of version 27 and will be removed for future versions. The recommended way to set up organization-hosted extension/app collections is to include the site hosting the CRX packages in ExtensionInstallSources and put direct download links to the packages on a web page. A launcher for that web page can be created using the ExtensionInstallForcelist policy.''',
+      'caption': '''Enterprise web store name (deprecated)''',
+      'desc': '''This setting has been retired as of <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> version 29. The recommended way to set up organization-hosted extension/app collections is to include the site hosting the CRX packages in ExtensionInstallSources and put direct download links to the packages on a web page. A launcher for that web page can be created using the ExtensionInstallForcelist policy.''',
     },
     {
       'name': 'EnableOriginBoundCerts',
@@ -3797,10 +3789,35 @@
       'caption': '''Allow or deny audio capture''',
       'desc': '''Allow or deny audio capture.
 
-      When this policy is disabled, audio capture will not be available.  If enabled, audio capture will always be allowed.
-      If the policy is not configured (default), the user will be prompted for audio capture device access.
+      If enabled or not configured (default), the user will be prompted for
+      audio capture access except for URLs configured in the
+      AudioCaptureAllowedUrls list which will be granted access without prompting.
+
+      When this policy is disabled, the user will never be prompted and audio
+      capture only be available to URLs configured in AudioCaptureAllowedUrls.
 
       This policy affects all types of audio inputs and not only the built-in microphone.''',
+    },
+    {
+      'name': 'AudioCaptureAllowedUrls',
+      'type': 'list',
+      'schema': {
+        'type': 'array',
+        'items': { 'type': 'string' },
+      },
+      'supported_on': ['chrome.*:29-', 'chrome_os:0.29-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': ['http://www.example.com/', 'http://[*.]example.edu/'],
+      'id': 208,
+      'caption': '''URLs that will be granted access to audio capture devices without prompt.''',
+      'desc': '''Patterns in this list will be matched against the security
+      origin of the requesting URL.  If a match is found, access to audio
+      capture devices will be granted without prompt.
+
+      NOTE: This policy is currently only supported when running in Kiosk mode.''',
     },
     {
       'name': 'VideoCaptureAllowed',
@@ -3809,17 +3826,42 @@
       'supported_on': ['chrome.*:25-', 'chrome_os:0.25-'],
       'features': {
         'dynamic_refresh': True,
-        'per_profile': False,
+        'per_profile': True,
       },
       'example_value': False,
       'id': 167,
       'caption': '''Allow or deny video capture''',
       'desc': '''Allow or deny video capture.
 
-      When this policy is disabled, video capture devices will not be available.  If enabled, video capture will always be allowed.
-      If the policy is not configured (default), the user will be prompted for video device access.
+      If enabled or not configured (default), the user will be prompted for
+      video capture access except for URLs configured in the
+      VideoCaptureAllowedUrls list which will be granted access without prompting.
+
+      When this policy is disabled, the user will never be prompted and video
+      capture only be available to URLs configured in VideoCaptureAllowedUrls.
 
       This policy affects all types of video inputs and not only the built-in camera.''',
+    },
+    {
+      'name': 'VideoCaptureAllowedUrls',
+      'type': 'list',
+      'schema': {
+        'type': 'array',
+        'items': { 'type': 'string' },
+      },
+      'supported_on': ['chrome.*:29-', 'chrome_os:0.29-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': ['http://www.example.com/', 'http://[*.]example.edu/'],
+      'id': 209,
+      'caption': '''URLs that will be granted access to video capture devices without prompt.''',
+      'desc': '''Patterns in this list will be matched against the security
+      origin of the requesting URL.  If a match is found, access to audio
+      capture devices will be granted without prompt.
+
+      NOTE: This policy is currently only supported when running in Kiosk mode.''',
     },
     {
       'name': 'DisableScreenshots',
@@ -4334,21 +4376,36 @@
           'name': 'PresentationIdleDelayScale',
           'type': 'int',
           'schema': { 'type': 'integer' },
-          'supported_on': ['chrome_os:26-'],
+          'supported_on': ['chrome_os:26-28'],
+          'features': {
+            'dynamic_refresh': True,
+            'per_profile': False,
+          },
+          'deprecated': True,
+          'example_value': 200,
+          'id': 184,
+          'caption': '''Percentage by which to scale the idle delay in presentation mode (deprecated)''',
+          'desc': '''This policy has been retired as of <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> version 29. Please use the PresentationScreenDimDelayScale policy instead.''',
+        },
+        {
+          'name': 'PresentationScreenDimDelayScale',
+          'type': 'int',
+          'schema': { 'type': 'integer' },
+          'supported_on': ['chrome_os:29-'],
           'features': {
             'dynamic_refresh': True,
             'per_profile': False,
           },
           'example_value': 200,
-          'id': 184,
-          'caption': '''Percentage by which to scale the idle delay in presentation mode''',
-          'desc': '''Specifies the percentage by which the idle delay is scaled when the device is in presentation mode.
+          'id': 220,
+          'caption': '''Percentage by which to scale the screen dim delay in presentation mode''',
+          'desc': '''Specifies the percentage by which the screen dim delay is scaled when the device is in presentation mode.
 
-          If this policy is set, it specifies the percentage by which the idle delay is scaled when the device is in presentation mode. When the idle delay is scaled, the screen dimming, screen off and screen lock delays get adjusted to maintain the same distances from the idle delay as originally configured.
+          If this policy is set, it specifies the percentage by which the screen dim delay is scaled when the device is in presentation mode. When the screen dim delay is scaled, the screen off, screen lock and idle delays get adjusted to maintain the same distances from the screen dim delay as originally configured.
 
           If this policy is unset, a default scale factor is used.
 
-          The scale factor must be 100% or more. Values that would make the idle delay in presentation mode shorter than the regular idle delay are not allowed.''',
+          The scale factor must be 100% or more. Values that would make the screen dim delay in presentation mode shorter than the regular screen dim delay are not allowed.''',
         },
         {
           'name': 'AllowScreenWakeLocks',
@@ -4367,6 +4424,26 @@
           If this policy is set to true or left not set, screen wake locks will be honored for power management.
 
           If this policy is set to false, screen wake lock requests will get ignored.''',
+        },
+        {
+          'name': 'UserActivityScreenDimDelayScale',
+          'type': 'int',
+          'schema': { 'type': 'integer' },
+          'supported_on': ['chrome_os:29-'],
+          'features': {
+            'dynamic_refresh': True,
+            'per_profile': False,
+          },
+          'example_value': 200,
+          'id': 210,
+          'caption': '''Percentage by which to scale the screen dim delay if the user becomes active after dimming''',
+          'desc': '''Specifies the percentage by which the screen dim delay is scaled when user activity is observed while the screen is dimmed or soon after the screen has been turned off.
+
+          If this policy is set, it specifies the percentage by which the screen dim delay is scaled when user activity is observed while the screen is dimmed or soon after the screen has been turned off. When the dim delay is scaled, the screen off, screen lock and idle delays get adjusted to maintain the same distances from the screen dim delay as originally configured.
+
+          If this policy is unset, a default scale factor is used.
+
+          The scale factor must be 100% or more.''',
         },
       ],
     },
@@ -4437,6 +4514,212 @@
 
           If this policy is left unset, Accessibility options will not appear in the system tray menu, but the user can cause the Accessibility options to appear via the Settings page.'''
         },
+        {
+          'name': 'LargeCursorEnabled',
+          'type': 'main',
+          'schema': { 'type': 'boolean' },
+          'supported_on': ['chrome_os:29-'],
+          'features': {
+            'can_be_recommended': True,
+            'dynamic_refresh': True,
+            'per_profile': True,
+          },
+          'example_value': True,
+          'id': 211,
+          'caption': '''Enable large cursor''',
+          'desc': '''Enable the large cursor accessibility feature.
+
+          If this policy is set to true, the large cursor will always be enabled.
+
+          If this policy is set to false, the large cursor will always be disabled.
+
+          If you set this policy, users cannot change or override it.
+
+          If this policy is left unset, the large cursor is disabled initially but can be enabled by the user anytime.'''
+        },
+        {
+          'name': 'SpokenFeedbackEnabled',
+          'type': 'main',
+          'schema': { 'type': 'boolean' },
+          'supported_on': ['chrome_os:29-'],
+          'features': {
+            'can_be_recommended': True,
+            'dynamic_refresh': True,
+            'per_profile': True,
+          },
+          'example_value': True,
+          'id': 212,
+          'caption': '''Enable spoken feedback''',
+          'desc': '''Enable the spoken feedback accessibility feature.
+
+          If this policy is set to true, spoken feedback will always be enabled.
+
+          If this policy is set to false, spoken feedback will always be disabled.
+
+          If you set this policy, users cannot change or override it.
+
+          If this policy is left unset, spoken feedback is disabled initially but can be enabled by the user anytime.'''
+        },
+        {
+          'name': 'HighContrastEnabled',
+          'type': 'main',
+          'schema': { 'type': 'boolean' },
+          'supported_on': ['chrome_os:29-'],
+          'features': {
+            'can_be_recommended': True,
+            'dynamic_refresh': True,
+            'per_profile': True,
+          },
+          'example_value': True,
+          'id': 213,
+          'caption': '''Enable high contrast mode''',
+          'desc': '''Enable the high contrast mode accessibility feature.
+
+          If this policy is set to true, high contrast mode will always be enabled.
+
+          If this policy is set to false, high contrast mode will always be disabled.
+
+          If you set this policy, users cannot change or override it.
+
+          If this policy is left unset, high contrast mode is disabled initially but can be enabled by the user anytime.'''
+        },
+        {
+          'name': 'ScreenMagnifierType',
+          'type': 'int-enum',
+          'schema': {
+            'type': 'integer',
+            'enum': [ 0, 1 ],
+          },
+          'items': [
+            {
+              'name': 'None',
+              'value': 0,
+              'caption': '''Screen magnifier disabled''',
+            },
+            {
+              'name': 'Full-screen',
+              'value': 1,
+              'caption': '''Full-screen magnifier enabled''',
+            },
+          ],
+          'supported_on': ['chrome_os:29-'],
+          'features': {
+            'can_be_recommended': True,
+            'dynamic_refresh': True,
+            'per_profile': True,
+          },
+          'example_value': 1,
+          'id': 214,
+          'caption': '''Set screen magnifier type''',
+          'desc': '''Set the type of screen magnifier that is enabled.
+
+          If this policy is set, it controls the type of screen magnifier that is enabled. Setting the policy to "None" disables the screen magnifier.
+
+          If you set this policy, users cannot change or override it.
+
+          If this policy is left unset, the screen magnifier is disabled initially but can be enabled by the user anytime.''',
+        },
+        {
+          'name': 'DeviceLoginScreenDefaultLargeCursorEnabled',
+          'type': 'main',
+          'schema': { 'type': 'boolean' },
+          'supported_on': ['chrome_os:29-'],
+          'device_only': True,
+          'features': {
+            'dynamic_refresh': True,
+          },
+          'example_value': True,
+          'id': 215,
+          'caption': '''Set default state of the large cursor on the login screen''',
+          'desc': '''Set the default state of the large cursor accessibility feature on the login screen.
+
+          If this policy is set to true, the large cursor will be enabled when the login screen is shown.
+
+          If this policy is set to false, the large cursor will be disabled when the login screen is shown.
+
+          If you set this policy, users can temporarily override it by enabling or disabling the large cursor. However, the user's choice is not persistent and the default is restored whenever the login screen is shown anew or the user remains idle on the login screen for a minute.
+
+          If this policy is left unset, the large cursor is disabled when the login screen is first shown. Users can enable or disable the large cursor anytime and its status on the login screen is persisted between users.''',
+        },
+        {
+          'name': 'DeviceLoginScreenDefaultSpokenFeedbackEnabled',
+          'type': 'main',
+          'schema': { 'type': 'boolean' },
+          'supported_on': ['chrome_os:29-'],
+          'device_only': True,
+          'features': {
+            'dynamic_refresh': True,
+          },
+          'example_value': True,
+          'id': 216,
+          'caption': '''Set the default state of spoken feedback on the login screen''',
+          'desc': '''Set the default state of the spoken feedback accessibility feature on the login screen.
+
+          If this policy is set to true, spoken feedback will be enabled when the login screen is shown.
+
+          If this policy is set to false, spoken feedback will be disabled when the login screen is shown.
+
+          If you set this policy, users can temporarily override it by enabling or disabling spoken feedback. However, the user's choice is not persistent and the default is restored whenever the login screen is shown anew or the user remains idle on the login screen for a minute.
+
+          If this policy is left unset, spoken feedback is disabled when the login screen is first shown. Users can enable or disable spoken feedback anytime and its status on the login screen is persisted between users.''',
+        },
+        {
+          'name': 'DeviceLoginScreenDefaultHighContrastEnabled',
+          'type': 'main',
+          'schema': { 'type': 'boolean' },
+          'supported_on': ['chrome_os:29-'],
+          'device_only': True,
+          'features': {
+            'dynamic_refresh': True,
+          },
+          'example_value': True,
+          'id': 217,
+          'caption': '''Set the default state of high contrast mode on the login screen''',
+          'desc': '''Set the default state of the high contrast mode accessibility feature on the login screen.
+
+          If this policy is set to true, high contrast mode will be enabled when the login screen is shown.
+
+          If this policy is set to false, high contrast mode will be disabled when the login screen is shown.
+
+          If you set this policy, users can temporarily override it by enabling or disabling high contrast mode. However, the user's choice is not persistent and the default is restored whenever the login screen is shown anew or the user remains idle on the login screen for a minute.
+
+          If this policy is left unset, high contrast mode is disabled when the login screen is first shown. Users can enable or disable high contrast mode anytime and its status on the login screen is persisted between users.''',
+        },
+        {
+          'name': 'DeviceLoginScreenDefaultScreenMagnifierType',
+          'type': 'int-enum',
+          'schema': {
+            'type': 'integer',
+            'enum': [ 0, 1 ],
+          },
+          'items': [
+            {
+              'name': 'None',
+              'value': 0,
+              'caption': '''Screen magnifier disabled''',
+            },
+            {
+              'name': 'Full-screen',
+              'value': 1,
+              'caption': '''Full-screen magnifier enabled''',
+            },
+          ],
+          'supported_on': ['chrome_os:29-'],
+          'device_only': True,
+          'features': {
+            'dynamic_refresh': True,
+          },
+          'example_value': 1,
+          'id': 218,
+          'caption': '''Set the default screen magnifier type enabled on the login screen''',
+          'desc': '''Set the default type of screen magnifier that is enabled on the login screen.
+
+          If this policy is set, it controls the type of screen magnifier that is enabled when the login screen is shown. Setting the policy to "None" disables the screen magnifier.
+
+          If you set this policy, users can temporarily override it by enabling or disabling the screen magnifier. However, the user's choice is not persistent and the default is restored whenever the login screen is shown anew or the user remains idle on the login screen for a minute.
+
+          If this policy is left unset, the screen magnifier is disabled when the login screen is first shown. Users can enable or disable the screen magnifier anytime and its status on the login screen is persisted between users.''',
+        },
       ],
     },
     {
@@ -4478,7 +4761,7 @@
       'name': 'UptimeLimit',
       'type': 'int',
       'schema': { 'type': 'integer' },
-      'supported_on': ['chrome_os:27-'],
+      'supported_on': ['chrome_os:29-'],
       'device_only': True,
       'features': {
         'dynamic_refresh': True,
@@ -4494,7 +4777,9 @@
 
       If you set this policy, users cannot change or override it.
 
-      An automatic reboot is scheduled at the selected time but may be delayed on the device by up to 24 hours, e.g. if a user is currently using the device or an app/extension has requested reboots to be inhibited temporarily.
+      An automatic reboot is scheduled at the selected time but may be delayed on the device by up to 24 hours if a user is currently using the device.
+
+      Note: Currently, automatic reboots are only enabled while the login screen is being shown or a kiosk app session is in progress. This will change in the future and the policy will always apply, regardless of whether a session of any particular type is in progress or not.
 
       The policy value should be specified in seconds. Values are clamped to be at least 3600 (one hour).''',
     },
@@ -4502,7 +4787,7 @@
       'name': 'RebootAfterUpdate',
       'type': 'main',
       'schema': { 'type': 'boolean' },
-      'supported_on': ['chrome_os:27-'],
+      'supported_on': ['chrome_os:29-'],
       'device_only': True,
       'features': {
         'dynamic_refresh': True,
@@ -4512,11 +4797,13 @@
       'caption': '''Automatically reboot after update''',
       'desc': '''Schedule an automatic reboot after a <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> update has been applied.
 
-      When this policy is set to true, an automatic reboot is scheduled when a <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> update has been applied and a reboot is required to complete the update process. The reboot is scheduled immediately but may be delayed on the device by up to 24 hours, e.g. if a user is currently using the device or an app/extension has requested reboots to be inhibited temporarily.
+      When this policy is set to true, an automatic reboot is scheduled when a <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> update has been applied and a reboot is required to complete the update process. The reboot is scheduled immediately but may be delayed on the device by up to 24 hours if a user is currently using the device.
 
       When this policy is set to false, no automatic reboot is scheduled after applying a <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> update. The update process is completed when the user next reboots the device.
 
-      If you set this policy, users cannot change or override it.''',
+      If you set this policy, users cannot change or override it.
+
+      Note: Currently, automatic reboots are only enabled while the login screen is being shown or a kiosk app session is in progress. This will change in the future and the policy will always apply, regardless of whether a session of any particular type is in progress or not.''',
     },
     {
       'name': 'VariationsRestrictParameter',
@@ -4618,6 +4905,19 @@
       ],
     },
     {
+      'name': 'SuppressChromeFrameTurndownPrompt',
+      'caption': '''Suppress the <ph name="PRODUCT_FRAME_NAME">$3<ex>Google Chrome Frame</ex></ph> turndown prompt''',
+      'desc': '''Suppresses the turndown prompt that appears when a site is rendered by <ph name="PRODUCT_FRAME_NAME">$3<ex>Google Chrome Frame</ex></ph>.''',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome_frame:29-'],
+      'features': {
+        'dynamic_refresh': False,
+      },
+      'example_value': True,
+      'id': 221,
+    },
+    {
       'name': 'LocallyManagedUsers',
       'type': 'group',
       'caption': '''Locally managed users settings''',
@@ -4709,6 +5009,24 @@
           'desc': '''A dictionary mapping URLs to a boolean flag specifying whether access to the host should be allowed (true) or blocked (false).
 
           This policy is for internal use by Chrome itself.''',
+        },
+        {
+          'name': 'SupervisedUsersEnabled',
+          'type': 'main',
+          'schema': { 'type': 'boolean' },
+          'supported_on': ['chrome_os:29-'],
+          'device_only': True,
+          'features': {
+            'dynamic_refresh': False,
+          },
+          'example_value': True,
+          'id': 219,
+          'caption': '''Enable supervised users.''',
+          'desc': '''If set to true, it is possible to create and log in as a supervised user.
+
+          If set to false or not configured, supervised users creation and login will be disabled. All existing supervised users will be hidden.
+
+          NOTE: The default behavior for consumer and enterprise devices differs: on consumer devices supervised users are enabled by default, but on enterprice devices they aren't.'''
         },
       ],
     },

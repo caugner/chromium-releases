@@ -8,14 +8,15 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/cocoa/constrained_window/constrained_window_alert.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::testing::NiceMock;
 using ::testing::Return;
 using ::testing::ReturnRef;
+using web_modal::WebContentsModalDialogManager;
 
 namespace chrome {
 
@@ -43,7 +44,7 @@ IN_PROC_BROWSER_TEST_F(MediaGalleriesDialogBrowserTest, Close) {
   scoped_ptr<MediaGalleriesDialogCocoa> dialog(
       static_cast<MediaGalleriesDialogCocoa*>(
           MediaGalleriesDialog::Create(&controller)));
-  scoped_nsobject<NSWindow> window([[dialog->alert_ window] retain]);
+  base::scoped_nsobject<NSWindow> window([[dialog->alert_ window] retain]);
   EXPECT_TRUE([window isVisible]);
 
   WebContentsModalDialogManager* web_contents_modal_dialog_manager =

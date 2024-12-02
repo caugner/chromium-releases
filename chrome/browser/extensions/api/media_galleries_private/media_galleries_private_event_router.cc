@@ -8,7 +8,7 @@
 
 #include <map>
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/event_router.h"
@@ -38,16 +38,15 @@ MediaGalleriesPrivateEventRouter::MediaGalleriesPrivateEventRouter(
     : profile_(profile) {
   DCHECK(profile_);
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  chrome::StorageMonitor* monitor = chrome::StorageMonitor::GetInstance();
-  if (monitor)
-    monitor->AddObserver(this);
+  chrome::StorageMonitor::GetInstance()->AddObserver(this);
 }
 
 MediaGalleriesPrivateEventRouter::~MediaGalleriesPrivateEventRouter() {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-  chrome::StorageMonitor* monitor = chrome::StorageMonitor::GetInstance();
-  if (monitor)
-    monitor->RemoveObserver(this);
+  // TODO(gbillock): Remove this check once we have destruction order
+  // fixed up for profile services and the storage monitor.
+  if (chrome::StorageMonitor::GetInstance())
+    chrome::StorageMonitor::GetInstance()->RemoveObserver(this);
 }
 
 void MediaGalleriesPrivateEventRouter::OnGalleryChanged(
@@ -63,7 +62,7 @@ void MediaGalleriesPrivateEventRouter::OnGalleryChanged(
        it != extension_ids.end(); ++it) {
     GalleryChangeDetails details;
     details.gallery_id = gallery_id;
-    scoped_ptr<ListValue> args(new ListValue());
+    scoped_ptr<base::ListValue> args(new base::ListValue());
     args->Append(details.ToValue().release());
     scoped_ptr<extensions::Event> event(new extensions::Event(
         event_names::kOnGalleryChangedEventName,
@@ -88,8 +87,8 @@ void MediaGalleriesPrivateEventRouter::OnRemovableStorageAttached(
     return;
 
   DeviceAttachmentDetails details;
-  details.device_name = UTF16ToUTF8(info.name);
-  details.device_id = GetTransientIdForDeviceId(info.device_id);
+  details.device_name = UTF16ToUTF8(info.name());
+  details.device_id = GetTransientIdForDeviceId(info.device_id());
 
   scoped_ptr<base::ListValue> args(new base::ListValue());
   args->Append(details.ToValue().release());
@@ -105,9 +104,9 @@ void MediaGalleriesPrivateEventRouter::OnRemovableStorageDetached(
     return;
 
   DeviceDetachmentDetails details;
-  details.device_id = GetTransientIdForDeviceId(info.device_id);
+  details.device_id = GetTransientIdForDeviceId(info.device_id());
 
-  scoped_ptr<base::ListValue> args(new ListValue());
+  scoped_ptr<base::ListValue> args(new base::ListValue());
   args->Append(details.ToValue().release());
   DispatchEvent(event_names::kOnDetachEventName, args.Pass());
 }

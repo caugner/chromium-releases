@@ -74,7 +74,9 @@
             'enable_wexit_time_destructors': 1,
           },
           'dependencies': [
-            '<@(chromium_dependencies)',
+            '<@(chromium_browser_dependencies)',
+            '<@(chromium_child_dependencies)',
+            '../content/content.gyp:content_worker',
             'app/policy/cloud_policy_codegen.gyp:policy',
           ],
           'conditions': [
@@ -104,7 +106,6 @@
                 'chrome_resources.gyp:chrome_resources',
                 'chrome_version_resources',
                 '../chrome/chrome_resources.gyp:chrome_unscaled_resources',
-                '../content/content.gyp:content_worker',
                 '../crypto/crypto.gyp:crypto',
                 '../printing/printing.gyp:printing',
                 '../net/net.gyp:net_resources',
@@ -151,12 +152,6 @@
               ],
               'include_dirs': [
                 '<(DEPTH)/third_party/wtl/include',
-              ],
-              'defines': [
-                'CHROME_DLL',
-                'BROWSER_DLL',
-                'RENDERER_DLL',
-                'PLUGIN_DLL',
               ],
               'configurations': {
                 'Debug_Base': {
@@ -237,6 +232,17 @@
             ['OS=="mac" and component=="shared_library"', {
               'xcode_settings': { 'OTHER_LDFLAGS': [ '-Wl,-ObjC' ], },
             }],
+            ['chrome_split_dll', {
+              'sources': [
+                # See comment in .cc for explanation.
+                'split_dll_fake_entry.cc',
+              ],
+              'msvs_settings': {
+                'VCLinkerTool': {
+                  'AdditionalOptions': ['/splitlink'],
+                },
+              }
+            }],
             ['OS=="mac"', {
               'xcode_settings': {
                 # Define the order of symbols within the framework.  This
@@ -297,7 +303,7 @@
               ],  # conditions
             }],  # OS=="mac"
           ],  # conditions
-        },  # target chrome_dll
+        },  # target chrome_main_dll
       ],  # targets
     }],  # OS=="mac" or OS=="win"
     ['OS=="win"', {

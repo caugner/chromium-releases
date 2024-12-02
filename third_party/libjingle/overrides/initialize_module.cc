@@ -6,6 +6,7 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
+#include "init_webrtc.h"
 #include "talk/base/basictypes.h"
 #include "talk/media/webrtc/webrtcmediaengine.h"
 
@@ -19,14 +20,7 @@
 #define ALLOC_EXPORT __attribute__((visibility("default")))
 #endif
 
-typedef cricket::MediaEngineInterface* (*CreateWebRtcMediaEngineFunction)(
-    webrtc::AudioDeviceModule* adm,
-    webrtc::AudioDeviceModule* adm_sc,
-    cricket::WebRtcVideoDecoderFactory* decoder_factory);
-typedef void (*DestroyWebRtcMediaEngineFunction)(
-    cricket::MediaEngineInterface* media_engine);
-
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
 // These are used by our new/delete overrides in
 // allocator_shim/allocator_proxy.cc
 AllocateFunction g_alloc = NULL;
@@ -36,7 +30,9 @@ DellocateFunction g_dealloc = NULL;
 // Forward declare of the libjingle internal factory and destroy methods for the
 // WebRTC media engine.
 cricket::MediaEngineInterface* CreateWebRtcMediaEngine(
-    webrtc::AudioDeviceModule* adm, webrtc::AudioDeviceModule* adm_sc,
+    webrtc::AudioDeviceModule* adm,
+    webrtc::AudioDeviceModule* adm_sc,
+    cricket::WebRtcVideoEncoderFactory* encoder_factory,
     cricket::WebRtcVideoDecoderFactory* decoder_factory);
 
 void DestroyWebRtcMediaEngine(cricket::MediaEngineInterface* media_engine);
@@ -48,13 +44,16 @@ extern "C" {
 // Called from init_webrtc.cc.
 ALLOC_EXPORT
 bool InitializeModule(const CommandLine& command_line,
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
                       AllocateFunction alloc,
                       DellocateFunction dealloc,
 #endif
+                      logging::LogMessageHandlerFunction log_handler,
+                      webrtc::GetCategoryEnabledPtr trace_get_category_enabled,
+                      webrtc::AddTraceEventPtr trace_add_trace_event,
                       CreateWebRtcMediaEngineFunction* create_media_engine,
                       DestroyWebRtcMediaEngineFunction* destroy_media_engine) {
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
   g_alloc = alloc;
   g_dealloc = dealloc;
 #endif
@@ -68,12 +67,14 @@ bool InitializeModule(const CommandLine& command_line,
     // done the equivalent thing via the GetCommandLine() API.
     CommandLine::ForCurrentProcess()->AppendArguments(command_line, true);
 #endif
-    logging::InitLogging(
-        FILE_PATH_LITERAL("libpeerconnection.log"),
-        logging::LOG_TO_BOTH_FILE_AND_SYSTEM_DEBUG_LOG,
-        logging::LOCK_LOG_FILE,
-        logging::APPEND_TO_OLD_LOG_FILE,
-        logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
+    logging::LoggingSettings settings;
+    settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
+    logging::InitLogging(settings);
+
+    // Override the log message handler to forward logs to chrome's handler.
+    logging::SetLogMessageHandler(log_handler);
+    webrtc::SetupEventTracer(trace_get_category_enabled,
+                             trace_add_trace_event);
   }
 
   return true;

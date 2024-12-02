@@ -4,11 +4,10 @@
 
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/message_loop.h"
 #include "base/prefs/pref_service.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -48,7 +47,7 @@ class FileSelectionUser : public ui::SelectFileDialog::Listener {
         this, new ChromeSelectFilePolicy(NULL));
 
     const base::FilePath file_path;
-    const string16 title=string16();
+    const string16 title = string16();
 
     file_selection_initialisation_in_progress = true;
     select_file_dialog_->SelectFile(ui::SelectFileDialog::SELECT_OPEN_FILE,
@@ -64,7 +63,7 @@ class FileSelectionUser : public ui::SelectFileDialog::Listener {
 
   // ui::SelectFileDialog::Listener implementation.
   virtual void FileSelected(const base::FilePath& path,
-                            int index, void* params) OVERRIDE{
+                            int index, void* params) OVERRIDE {
     ASSERT_FALSE(file_selection_initialisation_in_progress);
   }
   virtual void MultiFilesSelected(
@@ -89,7 +88,7 @@ typedef testing::Test ChromeSelectFilePolicyTest;
 // Tests if SelectFileDialog::SelectFile returns asynchronously with
 // file-selection dialogs disabled by policy.
 TEST_F(ChromeSelectFilePolicyTest, MAYBE_ExpectAsynchronousListenerCall) {
-  MessageLoopForUI message_loop;
+  base::MessageLoopForUI message_loop;
   content::TestBrowserThread ui_thread(BrowserThread::UI, &message_loop);
 
   ScopedTestingLocalState local_state(

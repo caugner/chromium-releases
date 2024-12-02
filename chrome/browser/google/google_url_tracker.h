@@ -14,7 +14,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/google/google_url_tracker_map_entry.h"
-#include "chrome/browser/profiles/profile_keyed_service.h"
+#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/network_change_notifier.h"
 #include "net/url_request/url_fetcher.h"
@@ -43,7 +43,7 @@ class NavigationController;
 // RequestServerCheck().
 class GoogleURLTracker : public net::URLFetcherDelegate,
                          public net::NetworkChangeNotifier::IPAddressObserver,
-                         public ProfileKeyedService {
+                         public BrowserContextKeyedService {
  public:
   // The contents of the Details for a NOTIFICATION_GOOGLE_URL_UPDATED.
   typedef std::pair<GURL, GURL> UpdatedDetails;
@@ -71,13 +71,15 @@ class GoogleURLTracker : public net::URLFetcherDelegate,
   static GURL GoogleURL(Profile* profile);
 
   // Requests that the tracker perform a server check to update the Google URL
-  // as necessary.  This will happen at most once per network change, not
-  // sooner than five seconds after startup (checks requested before that time
-  // will occur then; checks requested afterwards will occur immediately, if
-  // no other checks have been made during this run).
+  // as necessary.  If |force| is false, this will happen at most once per
+  // network change, not sooner than five seconds after startup (checks
+  // requested before that time will occur then; checks requested afterwards
+  // will occur immediately, if no other checks have been made during this run).
+  // If |force| is true, and the tracker has already performed any requested
+  // check, it will check again.
   //
   // When |profile| is NULL or a testing profile, this function does nothing.
-  static void RequestServerCheck(Profile* profile);
+  static void RequestServerCheck(Profile* profile, bool force);
 
   // Notifies the tracker that the user has started a Google search.
   // If prompting is necessary, we then listen for the subsequent pending
@@ -134,7 +136,7 @@ class GoogleURLTracker : public net::URLFetcherDelegate,
   // NetworkChangeNotifier::IPAddressObserver:
   virtual void OnIPAddressChanged() OVERRIDE;
 
-  // ProfileKeyedService:
+  // BrowserContextKeyedService:
   virtual void Shutdown() OVERRIDE;
 
   // Registers consumer interest in getting an updated URL from the server.

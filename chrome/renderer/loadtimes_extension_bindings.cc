@@ -8,7 +8,8 @@
 
 #include "base/time.h"
 #include "content/public/renderer/document_state.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "net/http/http_response_info.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
 #include "v8/include/v8.h"
 
 using WebKit::WebDataSource;
@@ -95,7 +96,7 @@ class LoadTimesExtensionWrapper : public v8::Extension {
     return kTransitionOther;
   }
 
-  static v8::Handle<v8::Value> GetLoadTimes(const v8::Arguments& args) {
+  static void GetLoadTimes(const v8::FunctionCallbackInfo<v8::Value>& args) {
     WebFrame* frame = WebFrame::frameForCurrentContext();
     if (frame) {
       WebDataSource* data_source = frame->dataSource();
@@ -135,20 +136,26 @@ class LoadTimesExtensionWrapper : public v8::Extension {
         load_times->Set(
             v8::String::New("wasNpnNegotiated"),
             v8::Boolean::New(document_state->was_npn_negotiated()));
-         load_times->Set(
+        load_times->Set(
             v8::String::New("npnNegotiatedProtocol"),
             v8::String::New(document_state->npn_negotiated_protocol().c_str()));
         load_times->Set(
             v8::String::New("wasAlternateProtocolAvailable"),
             v8::Boolean::New(
                 document_state->was_alternate_protocol_available()));
-        return load_times;
+        load_times->Set(
+            v8::String::New("connectionInfo"),
+            v8::String::New(
+                net::HttpResponseInfo::ConnectionInfoToString(
+                    document_state->connection_info()).c_str()));
+        args.GetReturnValue().Set(load_times);
+        return;
       }
     }
-    return v8::Null();
+    args.GetReturnValue().SetNull();
   }
 
-  static v8::Handle<v8::Value> GetCSI(const v8::Arguments& args) {
+  static void GetCSI(const v8::FunctionCallbackInfo<v8::Value>& args) {
     WebFrame* frame = WebFrame::frameForCurrentContext();
     if (frame) {
       WebDataSource* data_source = frame->dataSource();
@@ -176,10 +183,12 @@ class LoadTimesExtensionWrapper : public v8::Extension {
             v8::Number::New(
                 GetCSITransitionType(data_source->navigationType())));
 
-        return csi;
+        args.GetReturnValue().Set(csi);
+        return;
       }
     }
-    return v8::Null();
+    args.GetReturnValue().SetNull();
+    return;
   }
 };
 

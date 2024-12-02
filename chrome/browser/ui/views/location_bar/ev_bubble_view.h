@@ -13,10 +13,11 @@ class LocationBarView;
 // EVBubbleView displays the EV Bubble in the LocationBarView.
 class EVBubbleView : public IconLabelBubbleView {
  public:
-  EVBubbleView(const int background_images[],
-               int contained_image,
-               SkColor color,
-               LocationBarView* location_bar);
+  EVBubbleView(const gfx::Font& font,
+               int font_y_offset,
+               SkColor text_color,
+               SkColor parent_background_color,
+               LocationBarView* parent);
   virtual ~EVBubbleView();
 
   // Overridden from View.
@@ -30,7 +31,7 @@ class EVBubbleView : public IconLabelBubbleView {
  private:
   PageInfoHelper page_info_helper_;
 
-  DISALLOW_IMPLICIT_CONSTRUCTORS(EVBubbleView);
+  DISALLOW_COPY_AND_ASSIGN(EVBubbleView);
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_EV_BUBBLE_VIEW_H_

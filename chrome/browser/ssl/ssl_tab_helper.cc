@@ -10,7 +10,7 @@
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
@@ -34,7 +34,6 @@
 #include "net/base/net_errors.h"
 #include "net/cert/x509_certificate.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 
 
 // SSLCertResultInfoBarDelegate -----------------------------------------------
@@ -59,7 +58,7 @@ class SSLCertResultInfoBarDelegate : public ConfirmInfoBarDelegate {
   virtual ~SSLCertResultInfoBarDelegate();
 
   // ConfirmInfoBarDelegate:
-  virtual gfx::Image* GetIcon() const OVERRIDE;
+  virtual int GetIconID() const OVERRIDE;
   virtual Type GetInfoBarType() const OVERRIDE;
   virtual string16 GetMessageText() const OVERRIDE;
   virtual int GetButtons() const OVERRIDE;
@@ -97,10 +96,9 @@ SSLCertResultInfoBarDelegate::SSLCertResultInfoBarDelegate(
 SSLCertResultInfoBarDelegate::~SSLCertResultInfoBarDelegate() {
 }
 
-gfx::Image* SSLCertResultInfoBarDelegate::GetIcon() const {
+int SSLCertResultInfoBarDelegate::GetIconID() const {
   // TODO(davidben): use a more appropriate icon.
-  return &ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-      IDR_INFOBAR_SAVE_PASSWORD);
+  return IDR_INFOBAR_SAVE_PASSWORD;
 }
 
 InfoBarDelegate::Type SSLCertResultInfoBarDelegate::GetInfoBarType() const {
@@ -122,10 +120,9 @@ string16 SSLCertResultInfoBarDelegate::GetButtonLabel(
 }
 
 bool SSLCertResultInfoBarDelegate::Accept() {
-  ShowCertificateViewer(
-      web_contents(),
-      web_contents()->GetView()->GetTopLevelNativeWindow(),
-      cert_);
+  ShowCertificateViewer(web_contents(),
+                        web_contents()->GetView()->GetTopLevelNativeWindow(),
+                        cert_.get());
   return false;  // Hiding the infobar just as the dialog opens looks weird.
 }
 
@@ -219,7 +216,7 @@ void SSLTabHelper::ShowClientCertificateRequestDialog(
 
 void SSLTabHelper::OnVerifyClientCertificateError(
     scoped_refptr<SSLAddCertHandler> handler, int error_code) {
-  SSLAddCertData* add_cert_data = GetAddCertData(handler);
+  SSLAddCertData* add_cert_data = GetAddCertData(handler.get());
   // Display an infobar with the error message.
   // TODO(davidben): Display a more user-friendly error string.
   add_cert_data->ShowInfoBar(
@@ -236,7 +233,7 @@ void SSLTabHelper::AskToAddClientCertificate(
 
 void SSLTabHelper::OnAddClientCertificateSuccess(
     scoped_refptr<SSLAddCertHandler> handler) {
-  SSLAddCertData* add_cert_data = GetAddCertData(handler);
+  SSLAddCertData* add_cert_data = GetAddCertData(handler.get());
   // Display an infobar to inform the user.
   net::X509Certificate* cert = handler->cert();
   // TODO(evanm): GetDisplayName should return UTF-16.
@@ -248,7 +245,7 @@ void SSLTabHelper::OnAddClientCertificateSuccess(
 
 void SSLTabHelper::OnAddClientCertificateError(
     scoped_refptr<SSLAddCertHandler> handler, int error_code) {
-  SSLAddCertData* add_cert_data = GetAddCertData(handler);
+  SSLAddCertData* add_cert_data = GetAddCertData(handler.get());
   // Display an infobar with the error message.
   // TODO(davidben): Display a more user-friendly error string.
   add_cert_data->ShowInfoBar(

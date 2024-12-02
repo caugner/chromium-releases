@@ -10,9 +10,9 @@
 #include "ash/shell_window_ids.h"
 #include "ash/wm/property_util.h"
 #include "base/json/json_string_value_serializer.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkXfermode.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
@@ -36,7 +36,7 @@
 #include <X11/extensions/XInput2.h>
 #include <X11/Xlib.h>
 
-#include "ui/base/x/valuators.h"
+#include "ui/base/x/device_data_manager.h"
 #endif
 
 namespace ash {
@@ -88,11 +88,11 @@ int GetTrackingId(const ui::TouchEvent& event) {
   if (!event.HasNativeEvent())
     return 0;
 #if defined(USE_XI2_MT)
-  ui::ValuatorTracker* valuators = ui::ValuatorTracker::GetInstance();
-  float tracking_id;
-  if (valuators->ExtractValuator(*event.native_event(),
-                                 ui::ValuatorTracker::VAL_TRACKING_ID,
-                                 &tracking_id)) {
+  ui::DeviceDataManager* manager = ui::DeviceDataManager::GetInstance();
+  double tracking_id;
+  if (manager->GetEventData(*event.native_event(),
+                            ui::DeviceDataManager::DT_TOUCH_TRACKING_ID,
+                            &tracking_id)) {
     return static_cast<int>(tracking_id);
   }
 #endif

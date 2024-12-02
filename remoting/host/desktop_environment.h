@@ -17,9 +17,9 @@ namespace base {
 class SingleThreadTaskRunner;
 }  // namespace base
 
-namespace media {
+namespace webrtc {
 class ScreenCapturer;
-}  // namespace media
+}  // namespace webrtc
 
 namespace remoting {
 
@@ -39,7 +39,7 @@ class DesktopEnvironment {
   virtual scoped_ptr<AudioCapturer> CreateAudioCapturer() = 0;
   virtual scoped_ptr<InputInjector> CreateInputInjector() = 0;
   virtual scoped_ptr<ScreenControls> CreateScreenControls() = 0;
-  virtual scoped_ptr<media::ScreenCapturer> CreateVideoCapturer() = 0;
+  virtual scoped_ptr<webrtc::ScreenCapturer> CreateVideoCapturer() = 0;
 
   // Returns the set of all capabilities supported by |this|.
   virtual std::string GetCapabilities() const = 0;
@@ -54,10 +54,15 @@ class DesktopEnvironmentFactory {
  public:
   virtual ~DesktopEnvironmentFactory() {}
 
-  // Creates an instance of |DesktopEnvironment|. |client_session_control| must
-  // outlive |this|.
+  // Creates an instance of |DesktopEnvironment|. Returns a NULL pointer if
+  // the desktop environment could not be created for any reason (if the curtain
+  // failed to active for instance). |client_session_control| must outlive
+  // the created desktop environment.
   virtual scoped_ptr<DesktopEnvironment> Create(
       base::WeakPtr<ClientSessionControl> client_session_control) = 0;
+
+  // Enables or disables the curtain mode.
+  virtual void SetEnableCurtaining(bool enable) {}
 
   // Returns |true| if created |DesktopEnvironment| instances support audio
   // capture.

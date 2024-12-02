@@ -18,7 +18,6 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_folder_target.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_cocoa_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
-#import "chrome/browser/ui/cocoa/event_utils.h"
 #include "ui/base/theme_provider.h"
 
 using bookmarks::kBookmarkBarMenuCornerRadius;
@@ -1693,8 +1692,8 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
   return y;
 }
 
-- (ui::ThemeProvider*)themeProvider {
-  return [parentController_ themeProvider];
+- (ThemeService*)themeService {
+  return [parentController_ themeService];
 }
 
 - (void)childFolderWillShow:(id<BookmarkButtonControllerProtocol>)child {

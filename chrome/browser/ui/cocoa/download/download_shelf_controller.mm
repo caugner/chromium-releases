@@ -239,7 +239,8 @@ const NSSize kHoverCloseButtonDefaultSize = { 18, 18 };
   if (!show) {
     int numInProgress = 0;
     for (NSUInteger i = 0; i < [downloadItemControllers_ count]; ++i) {
-      if ([[downloadItemControllers_ objectAtIndex:i]download]->IsInProgress())
+      DownloadItem* item = [[downloadItemControllers_ objectAtIndex:i]download];
+      if (item->GetState() == DownloadItem::IN_PROGRESS)
         ++numInProgress;
     }
     download_util::RecordShelfClose(
@@ -299,7 +300,7 @@ const NSSize kHoverCloseButtonDefaultSize = { 18, 18 };
 
 - (void)addDownloadItem:(DownloadItem*)downloadItem {
   DCHECK([NSThread isMainThread]);
-  scoped_nsobject<DownloadItemController> controller(
+  base::scoped_nsobject<DownloadItemController> controller(
       [[DownloadItemController alloc] initWithDownload:downloadItem
                                                  shelf:self
                                              navigator:navigator_]);
@@ -371,9 +372,10 @@ const NSSize kHoverCloseButtonDefaultSize = { 18, 18 };
     DownloadItemController* itemController =
         [downloadItemControllers_ objectAtIndex:i];
     DownloadItem* download = [itemController download];
-    bool isTransferDone = download->IsComplete() ||
-                          download->IsCancelled() ||
-                          download->IsInterrupted();
+    DownloadItem::DownloadState state = download->GetState();
+    bool isTransferDone = state == DownloadItem::COMPLETE ||
+                          state == DownloadItem::CANCELLED ||
+                          state == DownloadItem::INTERRUPTED;
     if (isTransferDone && !download->IsDangerous()) {
       [self removeDownload:itemController
             isShelfClosing:YES];

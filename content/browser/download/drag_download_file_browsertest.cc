@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "content/browser/download/download_file_factory.h"
@@ -95,16 +94,19 @@ IN_PROC_BROWSER_TEST_F(DragDownloadFileTest, DragDownloadFileTest_NetError) {
       "download-test.lib"))));
   Referrer referrer;
   std::string referrer_encoding;
-  DragDownloadFile* file = new DragDownloadFile(
-      name, scoped_ptr<net::FileStream>(NULL), url, referrer,
-      referrer_encoding, shell()->web_contents());
+  DragDownloadFile* file = new DragDownloadFile(name,
+                                                scoped_ptr<net::FileStream>(),
+                                                url,
+                                                referrer,
+                                                referrer_encoding,
+                                                shell()->web_contents());
   scoped_refptr<MockDownloadFileObserver> observer(
       new MockDownloadFileObserver());
-  EXPECT_CALL(*observer, OnDownloadAborted()).WillOnce(InvokeWithoutArgs(
-      this, &DragDownloadFileTest::Succeed));
-  ON_CALL(*observer, OnDownloadCompleted(_)).WillByDefault(InvokeWithoutArgs(
-      this, &DragDownloadFileTest::FailFast));
-  file->Start(observer);
+  EXPECT_CALL(*observer.get(), OnDownloadAborted())
+      .WillOnce(InvokeWithoutArgs(this, &DragDownloadFileTest::Succeed));
+  ON_CALL(*observer.get(), OnDownloadCompleted(_))
+      .WillByDefault(InvokeWithoutArgs(this, &DragDownloadFileTest::FailFast));
+  file->Start(observer.get());
   RunMessageLoop();
 }
 
@@ -122,11 +124,11 @@ IN_PROC_BROWSER_TEST_F(DragDownloadFileTest, DragDownloadFileTest_Complete) {
       referrer_encoding, shell()->web_contents());
   scoped_refptr<MockDownloadFileObserver> observer(
       new MockDownloadFileObserver());
-  EXPECT_CALL(*observer, OnDownloadCompleted(_)).WillOnce(InvokeWithoutArgs(
-      this, &DragDownloadFileTest::Succeed));
-  ON_CALL(*observer, OnDownloadAborted()).WillByDefault(InvokeWithoutArgs(
-      this, &DragDownloadFileTest::FailFast));
-  file->Start(observer);
+  EXPECT_CALL(*observer.get(), OnDownloadCompleted(_))
+      .WillOnce(InvokeWithoutArgs(this, &DragDownloadFileTest::Succeed));
+  ON_CALL(*observer.get(), OnDownloadAborted())
+      .WillByDefault(InvokeWithoutArgs(this, &DragDownloadFileTest::FailFast));
+  file->Start(observer.get());
   RunMessageLoop();
 }
 

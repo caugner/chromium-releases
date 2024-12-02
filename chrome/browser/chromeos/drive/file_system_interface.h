@@ -13,24 +13,13 @@
 #include "chrome/browser/chromeos/drive/file_cache.h"
 #include "chrome/browser/chromeos/drive/file_system_metadata.h"
 #include "chrome/browser/chromeos/drive/resource_metadata.h"
-#include "chrome/browser/google_apis/gdata_wapi_operations.h"
-
-namespace google_apis {
-class ResourceEntry;
-}
+#include "chrome/browser/google_apis/base_requests.h"
 
 namespace drive {
 
 class FileSystemObserver;
 
 typedef std::vector<ResourceEntry> ResourceEntryVector;
-
-// File type on the drive file system can be either a regular file or
-// a hosted document.
-enum DriveFileType {
-  REGULAR_FILE,
-  HOSTED_DOCUMENT,
-};
 
 // Information about search result returned by Search Async callback.
 // This is data needed to create a file system entry that will be used by file
@@ -77,8 +66,7 @@ typedef std::vector<MetadataSearchResult> MetadataSearchResultVector;
 // Used to get files from the file system.
 typedef base::Callback<void(FileError error,
                             const base::FilePath& file_path,
-                            const std::string& mime_type,
-                            DriveFileType file_type)> GetFileCallback;
+                            scoped_ptr<ResourceEntry> entry)> GetFileCallback;
 
 // Used to get file content from the file system.
 // If the file content is available in local cache, |local_file| is filled with
@@ -107,7 +95,7 @@ typedef base::Callback<void(FileError error,
 // If |error| is not FILE_ERROR_OK, |result_paths| is empty.
 typedef base::Callback<void(
     FileError error,
-    const GURL& next_feed,
+    const GURL& next_url,
     scoped_ptr<std::vector<SearchResultInfo> > result_paths)> SearchCallback;
 
 // Callback for SearchMetadata(). On success, |error| is FILE_ERROR_OK, and
@@ -134,10 +122,12 @@ typedef base::Callback<void(const FileSystemMetadata&)>
 enum ContextType {
   USER_INITIATED,
   BACKGROUND,
+  // Indicates the number of values of this enum.
+  NUM_CONTEXT_TYPES,
 };
 
-struct DriveClientContext {
-  explicit DriveClientContext(ContextType in_type) : type(in_type) {}
+struct ClientContext {
+  explicit ClientContext(ContextType in_type) : type(in_type) {}
   ContextType type;
 };
 
@@ -146,12 +136,14 @@ struct DriveClientContext {
 // SEARCH_METADATA_EXCLUDE_HOSTED_DOCUMENTS excludes the hosted documents.
 // SEARCH_METADATA_EXCLUDE_DIRECTORIES excludes the directories from the result.
 // SEARCH_METADATA_SHARED_WITH_ME targets only "shared-with-me" entries.
-// TODO(haruki): Add option for offline.
+// SEARCH_METADATA_OFFLINE targets only "offline" entries. This option can not
+// be used with other options.
 enum SearchMetadataOptions {
   SEARCH_METADATA_ALL = 0,
   SEARCH_METADATA_EXCLUDE_HOSTED_DOCUMENTS = 1,
   SEARCH_METADATA_EXCLUDE_DIRECTORIES = 1 << 1,
   SEARCH_METADATA_SHARED_WITH_ME = 1 << 2,
+  SEARCH_METADATA_OFFLINE = 1 << 3,
 };
 
 // Drive file system abstraction layer.
@@ -175,9 +167,9 @@ class FileSystemInterface {
   // does not initiate content refreshing.
   //
   // |callback| must not be null.
-  virtual void GetEntryInfoByResourceId(
+  virtual void GetResourceEntryById(
       const std::string& resource_id,
-      const GetEntryInfoWithFilePathCallback& callback) = 0;
+      const GetResourceEntryCallback& callback) = 0;
 
   // Initiates transfer of |remote_src_file_path| to |local_dest_file_path|.
   // |remote_src_file_path| is the virtual source path on the Drive file system.
@@ -267,8 +259,6 @@ class FileSystemInterface {
   // needs to be present in in-memory representation of the file system that
   // in order to be removed.
   //
-  // TODO(satorux): is_recursive is not supported yet. crbug.com/138282
-  //
   // |callback| must not be null.
   virtual void Remove(const base::FilePath& file_path,
                       bool is_recursive,
@@ -294,6 +284,18 @@ class FileSystemInterface {
   virtual void CreateFile(const base::FilePath& file_path,
                           bool is_exclusive,
                           const FileOperationCallback& callback) = 0;
+
+  // Touches the file at |file_path| by updating the timestamp to
+  // |last_access_time| and |last_modified_time|.
+  // Upon completion, invokes |callback|.
+  // Note that, differently from unix touch command, this doesn't create a file
+  // if the target file doesn't exist.
+  //
+  // |last_access_time|, |last_modified_time| and |callback| must not be null.
+  virtual void TouchFile(const base::FilePath& file_path,
+                         const base::Time& last_access_time,
+                         const base::Time& last_modified_time,
+                         const FileOperationCallback& callback) = 0;
 
   // Pins a file at |file_path|.
   //
@@ -323,7 +325,7 @@ class FileSystemInterface {
   // |get_content_callback| may be null.
   virtual void GetFileByResourceId(
       const std::string& resource_id,
-      const DriveClientContext& context,
+      const ClientContext& context,
       const GetFileCallback& get_file_callback,
       const google_apis::GetContentCallback& get_content_callback) = 0;
 
@@ -354,15 +356,16 @@ class FileSystemInterface {
   // |callback| must not be null.
   virtual void UpdateFileByResourceId(
       const std::string& resource_id,
-      const DriveClientContext& context,
+      const ClientContext& context,
       const FileOperationCallback& callback) = 0;
 
   // Finds an entry (a file or a directory) by |file_path|. This call will also
   // retrieve and refresh file system content from server and disk cache.
   //
   // |callback| must not be null.
-  virtual void GetEntryInfoByPath(const base::FilePath& file_path,
-                                  const GetEntryInfoCallback& callback) = 0;
+  virtual void GetResourceEntryByPath(
+      const base::FilePath& file_path,
+      const GetResourceEntryCallback& callback) = 0;
 
   // Finds and reads a directory by |file_path|. This call will also retrieve
   // and refresh file system content from server and disk cache.
@@ -392,13 +395,13 @@ class FileSystemInterface {
                                 const FileOperationCallback& callback) = 0;
 
   // Does server side content search for |search_query|.
-  // If |next_feed| is set, this is the feed url that will be fetched.
+  // If |next_url| is set, this is the search result url that will be fetched.
   // Search results will be returned as a list of results' |SearchResultInfo|
   // structs, which contains file's path and is_directory flag.
   //
   // |callback| must not be null.
   virtual void Search(const std::string& search_query,
-                      const GURL& next_feed,
+                      const GURL& next_url,
                       const SearchCallback& callback) = 0;
 
   // Searches the local resource metadata, and returns the entries
@@ -409,23 +412,13 @@ class FileSystemInterface {
   // on the preference. |callback| must not be null. Must be called on UI
   // thread. Empty |query| matches any base name. i.e. returns everything.
   virtual void SearchMetadata(const std::string& query,
-                              int  options,
+                              int options,
                               int at_most_num_matches,
                               const SearchMetadataCallback& callback) = 0;
 
   // Fetches the user's Account Metadata to find out current quota information
   // and returns it to the callback.
   virtual void GetAvailableSpace(const GetAvailableSpaceCallback& callback) = 0;
-
-  // Adds a file entry from |doc_entry|, and modifies the cache state.
-  // Adds a new file entry, and store its content from |file_content_path| into
-  // the cache.
-  //
-  // |callback| must not be null.
-  // TODO(kinaba): move to an internal operation class. http://crbug.com/236771.
-  virtual void AddUploadedFile(scoped_ptr<google_apis::ResourceEntry> doc_entry,
-                               const base::FilePath& file_content_path,
-                               const FileOperationCallback& callback) = 0;
 
   // Returns miscellaneous metadata of the file system like the largest
   // timestamp. Used in chrome:drive-internals. |callback| must not be null.
@@ -449,22 +442,14 @@ class FileSystemInterface {
   // Gets the cache entry for file corresponding to |resource_id| and |md5|
   // and runs |callback| with true and the found entry if the entry exists
   // in the cache map. Otherwise, runs |callback| with false.
-  // |md5| can be empty if only matching |resource_id| is desired, which may
-  // happen when looking for pinned entries where symlinks' filenames have no
-  // extension and hence no md5.
+  // |md5| can be empty if only matching |resource_id| is desired.
   // |callback| must not be null.
   virtual void GetCacheEntryByResourceId(
       const std::string& resource_id,
       const std::string& md5,
       const GetCacheEntryCallback& callback) = 0;
 
-  // Iterates all files in the cache and calls |iteration_callback| for each
-  // file. |completion_callback| is run upon completion.
-  // Neither |iteration_callback| nor |completion_callback| must be null.
-  virtual void IterateCache(const CacheIterateCallback& iteration_callback,
-                            const base::Closure& completion_callback) = 0;
-
-  // Reloads the file system feeds from the server.
+  // Reloads the resource metadata from the server.
   virtual void Reload() = 0;
 };
 

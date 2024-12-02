@@ -6,9 +6,9 @@
 
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -36,7 +36,7 @@ void ExternalProtocolHandler::RunExternalProtocolDialog(
 
 @implementation ExternalProtocolDialogController
 - (id)initWithGURL:(const GURL*)url {
-  DCHECK_EQ(MessageLoop::TYPE_UI, MessageLoop::current()->type());
+  DCHECK_EQ(base::MessageLoop::TYPE_UI, base::MessageLoop::current()->type());
 
   if (!(self = [super init]))
     return nil;

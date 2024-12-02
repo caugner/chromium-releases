@@ -23,6 +23,7 @@
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/extensions/permissions/api_permission.h"
+#include "chrome/common/extensions/permissions/permissions_data.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/favicon_status.h"
 #include "content/public/browser/navigation_entry.h"
@@ -98,10 +99,10 @@ DictionaryValue* ExtensionTabUtil::CreateTabValue(
   return result;
 }
 
-ListValue* ExtensionTabUtil::CreateTabList(
+base::ListValue* ExtensionTabUtil::CreateTabList(
     const Browser* browser,
     const Extension* extension) {
-  ListValue* tab_list = new ListValue();
+  base::ListValue* tab_list = new base::ListValue();
   TabStripModel* tab_strip = browser->tab_strip_model();
   for (int i = 0; i < tab_strip->count(); ++i) {
     tab_list->Append(CreateTabValue(tab_strip->GetWebContentsAt(i),
@@ -165,8 +166,10 @@ DictionaryValue* ExtensionTabUtil::CreateTabValue(
 void ExtensionTabUtil::ScrubTabValueForExtension(const WebContents* contents,
                                                  const Extension* extension,
                                                  DictionaryValue* tab_info) {
-  bool has_permission = extension && extension->HasAPIPermissionForTab(
-      GetTabId(contents), APIPermission::kTab);
+  bool has_permission =
+      extension &&
+      extensions::PermissionsData::HasAPIPermissionForTab(
+          extension, GetTabId(contents), APIPermission::kTab);
 
   if (!has_permission) {
     tab_info->Remove(keys::kUrlKey, NULL);

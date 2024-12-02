@@ -6,12 +6,13 @@
 
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/rtl.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/supports_user_data.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/download/download_crx_util.h"
+#include "chrome/browser/safe_browsing/download_feedback_service.h"
 #include "chrome/common/time_format.h"
 #include "content/public/browser/download_danger_type.h"
 #include "content/public/browser/download_interrupt_reasons.h"
@@ -393,13 +394,21 @@ bool DownloadItemModel::IsMalicious() const {
   return false;
 }
 
+bool DownloadItemModel::ShouldAllowDownloadFeedback() const {
+  if (!IsDangerous())
+    return false;
+  return safe_browsing::DownloadFeedbackService::IsEnabledForDownload(
+      *download_);
+}
+
 bool DownloadItemModel::ShouldRemoveFromShelfWhenComplete() const {
   // If the download was already opened automatically, it should be removed.
   if (download_->GetAutoOpened())
     return true;
 
   // If the download is interrupted or cancelled, it should not be removed.
-  if (download_->IsInterrupted() || download_->IsCancelled())
+  DownloadItem::DownloadState state = download_->GetState();
+  if (state == DownloadItem::INTERRUPTED || state == DownloadItem::CANCELLED)
     return false;
 
   // If the download is dangerous or malicious, we should display a warning on
@@ -466,7 +475,7 @@ string16 DownloadItemModel::GetProgressSizesString() const {
 }
 
 string16 DownloadItemModel::GetInProgressStatusString() const {
-  DCHECK(download_->IsInProgress());
+  DCHECK_EQ(DownloadItem::IN_PROGRESS, download_->GetState());
 
   TimeDelta time_remaining;
   // time_remaining is only known if the download isn't paused.

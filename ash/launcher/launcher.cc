@@ -61,14 +61,16 @@ Launcher::~Launcher() {
 
 // static
 Launcher* Launcher::ForPrimaryDisplay() {
-  return internal::RootWindowController::ForLauncher(
-      Shell::GetPrimaryRootWindow())->shelf()->launcher();
+  ShelfWidget* shelf_widget = internal::RootWindowController::ForLauncher(
+      Shell::GetPrimaryRootWindow())->shelf();
+  return shelf_widget ? shelf_widget->launcher() : NULL;
 }
 
 // static
 Launcher* Launcher::ForWindow(aura::Window* window) {
-  return internal::RootWindowController::ForLauncher(window)->
-      shelf()->launcher();
+  ShelfWidget* shelf_widget =
+    internal::RootWindowController::ForLauncher(window)->shelf();
+  return shelf_widget ? shelf_widget->launcher() : NULL;
 }
 
 void Launcher::SetAlignment(ShelfAlignment alignment) {
@@ -80,9 +82,6 @@ void Launcher::SetAlignment(ShelfAlignment alignment) {
 gfx::Rect Launcher::GetScreenBoundsOfItemIconForWindow(aura::Window* window) {
   LauncherID id = delegate_->GetIDByWindow(window);
   gfx::Rect bounds(launcher_view_->GetIdealBoundsOfItemIcon(id));
-  if (bounds.IsEmpty())
-    return bounds;
-
   gfx::Point screen_origin;
   views::View::ConvertPointToScreen(launcher_view_, &screen_origin);
   return gfx::Rect(screen_origin.x() + bounds.x(),
@@ -106,20 +105,6 @@ void Launcher::ActivateLauncherItem(int index) {
                      ui::VKEY_UNKNOWN,  // The actual key gets ignored.
                      ui::EF_NONE,
                      false);
-  // TODO(skuhne): Remove this temporary fix once M28 is out and CL 11596003
-  // has landed. Note that all unit tests which use this function need to remove
-  // the "kChromeItemOffset" as well.
-  // Note: The index gets only decremented for the per app instance of the
-  // launcher. The old per browser launcher does not get impacted here.
-  if (delegate_->IsPerAppLauncher() && --index <= 0) {
-    LauncherItem item;
-    // Create a fake launcher item with an invalid ID so that
-    // our ChromeLauncherControllerPerApp can handle it accordingly. This is
-    // only a temporary fix until CL 11596003 has landed.
-    item.id = ash::kAppIdForBrowserSwitching;
-    delegate_->ItemSelected(item, event);
-    return;
-  }
 
   const ash::LauncherItems& items =
       launcher_view_->model()->items();
@@ -145,10 +130,6 @@ bool Launcher::IsShowingMenu() const {
   return launcher_view_->IsShowingMenu();
 }
 
-void Launcher::ShowContextMenu(const gfx::Point& location) {
-  launcher_view_->ShowContextMenu(location, false);
-}
-
 bool Launcher::IsShowingOverflowBubble() const {
   return launcher_view_->IsShowingOverflowBubble();
 }
@@ -165,18 +146,17 @@ views::View* Launcher::GetAppListButtonView() const {
   return launcher_view_->GetAppListButtonView();
 }
 
-void Launcher::SwitchToWindow(int window_index) {
+void Launcher::LaunchAppIndexAt(int item_index) {
   LauncherModel* launcher_model = launcher_view_->model();
   const LauncherItems& items = launcher_model->items();
   int item_count = launcher_model->item_count();
-  int indexes_left = window_index >= 0 ? window_index : item_count;
+  int indexes_left = item_index >= 0 ? item_index : item_count;
   int found_index = -1;
 
   // Iterating until we have hit the index we are interested in which
   // is true once indexes_left becomes negative.
   for (int i = 0; i < item_count && indexes_left >= 0; i++) {
-    if (items[i].type != TYPE_APP_LIST &&
-        items[i].type != TYPE_BROWSER_SHORTCUT) {
+    if (items[i].type != TYPE_APP_LIST) {
       found_index = i;
       indexes_left--;
     }
@@ -185,7 +165,7 @@ void Launcher::SwitchToWindow(int window_index) {
   // There are two ways how found_index can be valid: a.) the nth item was
   // found (which is true when indexes_left is -1) or b.) the last item was
   // requested (which is true when index was passed in as a negative number).
-  if (found_index >= 0 && (indexes_left == -1 || window_index < 0) &&
+  if (found_index >= 0 && (indexes_left == -1 || item_index < 0) &&
       (delegate_->IsPerAppLauncher() ||
        (items[found_index].status == ash::STATUS_RUNNING ||
         items[found_index].status == ash::STATUS_CLOSED))) {

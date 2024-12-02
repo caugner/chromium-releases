@@ -111,6 +111,12 @@ void SyncPrefs::RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
       std::string(),
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 
+  // Keeps track whether server experiments have been switched on for that user.
+  registry->RegisterBooleanPref(
+      prefs::kSyncFaviconsEnabled,
+      false,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+
   // We will start prompting people about new data types after the launch of
   // SESSIONS - all previously launched data types are treated as if they are
   // already acknowledged.
@@ -130,13 +136,6 @@ void SyncPrefs::RegisterUserPrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterListPref(prefs::kSyncAcknowledgedSyncTypes,
                              syncer::ModelTypeSetToValue(model_set),
                              user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-}
-
-// static
-bool SyncPrefs::IsSyncAccessibleOnIOThread(ProfileIOData* io_data) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
-  return ProfileSyncService::IsSyncEnabled() &&
-         !io_data->sync_disabled()->GetValue();
 }
 
 void SyncPrefs::AddSyncPrefObserver(SyncPrefObserver* sync_pref_observer) {
@@ -351,6 +350,8 @@ const char* SyncPrefs::GetPrefNameForDataType(syncer::ModelType data_type) {
       return prefs::kSyncTabs;
     case syncer::PRIORITY_PREFERENCES:
       return prefs::kSyncPriorityPreferences;
+    case syncer::MANAGED_USERS:
+      return prefs::kSyncManagedUsers;
     default:
       break;
   }
@@ -430,6 +431,8 @@ void SyncPrefs::RegisterPrefGroups() {
   pref_groups_[syncer::PROXY_TABS].Put(syncer::SESSIONS);
   pref_groups_[syncer::PROXY_TABS].Put(syncer::FAVICON_IMAGES);
   pref_groups_[syncer::PROXY_TABS].Put(syncer::FAVICON_TRACKING);
+
+  pref_groups_[syncer::MANAGED_USER_SETTINGS].Put(syncer::SESSIONS);
 
   // TODO(zea): put favicons in the bookmarks group as well once it handles
   // those favicons.

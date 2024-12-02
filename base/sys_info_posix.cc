@@ -13,8 +13,8 @@
 #include "base/basictypes.h"
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
-#include "base/utf_string_conversions.h"
 
 #if defined(OS_ANDROID)
 #include <sys/vfs.h>
@@ -61,7 +61,7 @@ std::string SysInfo::OperatingSystemName() {
 }
 #endif
 
-#if !defined(OS_MACOSX)
+#if !defined(OS_MACOSX) && !defined(OS_ANDROID)
 // static
 std::string SysInfo::OperatingSystemVersion() {
   struct utsname info;

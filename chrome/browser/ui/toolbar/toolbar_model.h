@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "googleurl/src/gurl.h"
 
 namespace net {
@@ -27,20 +27,6 @@ class ToolbarModel {
 #define DEFINE_TOOLBAR_MODEL_SECURITY_LEVEL(name,value)  name = value,
 #include "chrome/browser/ui/toolbar/toolbar_model_security_level_list.h"
 #undef DEFINE_TOOLBAR_MODEL_SECURITY_LEVEL
-  };
-
-  // If search URLs may be displayed as search terms, these are the types of
-  // search terms that may be extracted from the URL.  See comments on GetText()
-  // and GetSearchTermsType().
-  enum SearchTermsType {
-    // There are no search terms.
-    NO_SEARCH_TERMS,
-    // There are regular search terms.
-    NORMAL_SEARCH_TERMS,
-    // There are search terms that require a more prominent UI. For example,
-    // if the search term looks like a URL then it should be clear to the user
-    // that a search term is being displayed.
-    URL_LIKE_SEARCH_TERMS,
   };
 
   virtual ~ToolbarModel() {}
@@ -64,12 +50,9 @@ class ToolbarModel {
   // Returns the URL of the current navigation entry.
   virtual GURL GetURL() const = 0;
 
-  // This indicates the type of search terms returned by a call to
-  // GetText(true).
-  virtual SearchTermsType GetSearchTermsType() const = 0;
-
-  // Setter for whether extraction of URL like search terms is allowed.
-  virtual void SetSupportsExtractionOfURLLikeSearchTerms(bool value) = 0;
+  // Returns true if a call to GetText(true) would successfully replace the URL
+  // with search terms.
+  virtual bool WouldReplaceSearchURLWithSearchTerms() const = 0;
 
   // Returns the security level that the toolbar should display.
   virtual SecurityLevel GetSecurityLevel() const = 0;

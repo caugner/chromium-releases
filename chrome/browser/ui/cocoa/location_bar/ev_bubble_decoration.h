@@ -34,7 +34,7 @@ class EVBubbleDecoration : public BubbleDecoration {
   NSPoint GetBubblePointInFrame(NSRect frame);
 
   // Implement |LocationBarDecoration|.
-  virtual CGFloat GetWidthForSpace(CGFloat width, CGFloat text_width) OVERRIDE;
+  virtual CGFloat GetWidthForSpace(CGFloat width) OVERRIDE;
   virtual bool IsDraggable() OVERRIDE;
   virtual NSPasteboard* GetDragPasteboard() OVERRIDE;
   virtual NSImage* GetDragImage() OVERRIDE;
@@ -44,7 +44,7 @@ class EVBubbleDecoration : public BubbleDecoration {
 
  private:
   // The real label.  BubbleDecoration's label may be elided.
-  scoped_nsobject<NSString> full_label_;
+  base::scoped_nsobject<NSString> full_label_;
 
   LocationIconDecoration* location_icon_;  // weak, owned by location bar.
 

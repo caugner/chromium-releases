@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "base/debug/trace_event.h"
 #include "base/memory/singleton.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/gtk/accelerators_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_input_event_box.h"
@@ -42,11 +42,11 @@ class TabGtk::TabGtkObserverHelper {
  public:
   explicit TabGtkObserverHelper(TabGtk* tab)
       : tab_(tab) {
-    MessageLoopForUI::current()->AddObserver(tab_);
+    base::MessageLoopForUI::current()->AddObserver(tab_);
   }
 
   ~TabGtkObserverHelper() {
-    MessageLoopForUI::current()->RemoveObserver(tab_);
+    base::MessageLoopForUI::current()->RemoveObserver(tab_);
   }
 
  private:
@@ -197,7 +197,7 @@ gboolean TabGtk::OnDragButtonReleased(GtkWidget* widget,
   // get a follow up event to tell us the drag has finished (either a
   // drag-failed or a drag-end).  So we post a task to manually end the drag.
   // If GTK+ does send the drag-failed or drag-end event, we cancel the task.
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&TabGtk::EndDrag, drag_end_factory_.GetWeakPtr(), false));
   return TRUE;
@@ -349,7 +349,7 @@ void TabGtk::EndDrag(bool canceled) {
   // We must let gtk clean up after we handle the drag operation, otherwise
   // there will be outstanding references to the drag widget when we try to
   // destroy it.
-  MessageLoop::current()->PostTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&TabGtk::DestroyDragWidget, destroy_factory_.GetWeakPtr()));
 

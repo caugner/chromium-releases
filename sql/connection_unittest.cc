@@ -8,6 +8,7 @@
 #include "sql/connection.h"
 #include "sql/meta_table.h"
 #include "sql/statement.h"
+#include "sql/test/scoped_error_ignorer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/sqlite/sqlite3.h"
 
@@ -134,6 +135,19 @@ TEST_F(SQLConnectionTest, Rollback) {
   db().RollbackTransaction();
   EXPECT_FALSE(db().CommitTransaction());
   EXPECT_TRUE(db().BeginTransaction());
+}
+
+// Test the scoped error ignorer by attempting to insert a duplicate
+// value into an index.
+TEST_F(SQLConnectionTest, ScopedIgnoreError) {
+  const char* kCreateSql = "CREATE TABLE foo (id INTEGER UNIQUE)";
+  ASSERT_TRUE(db().Execute(kCreateSql));
+  ASSERT_TRUE(db().Execute("INSERT INTO foo (id) VALUES (12)"));
+
+  sql::ScopedErrorIgnorer ignore_errors;
+  ignore_errors.IgnoreError(SQLITE_CONSTRAINT);
+  ASSERT_FALSE(db().Execute("INSERT INTO foo (id) VALUES (12)"));
+  ASSERT_TRUE(ignore_errors.CheckIgnoredErrors());
 }
 
 // Test that sql::Connection::Raze() results in a database without the
@@ -397,3 +411,18 @@ TEST_F(SQLConnectionTest, SetTempDirForSQL) {
   ASSERT_TRUE(meta_table.Init(&db(), 4, 4));
 }
 #endif
+
+TEST_F(SQLConnectionTest, Delete) {
+  EXPECT_TRUE(db().Execute("CREATE TABLE x (x)"));
+  db().Close();
+
+  // Should have both a main database file and a journal file because
+  // of journal_mode PERSIST.
+  base::FilePath journal(db_path().value() + FILE_PATH_LITERAL("-journal"));
+  ASSERT_TRUE(file_util::PathExists(db_path()));
+  ASSERT_TRUE(file_util::PathExists(journal));
+
+  sql::Connection::Delete(db_path());
+  EXPECT_FALSE(file_util::PathExists(db_path()));
+  EXPECT_FALSE(file_util::PathExists(journal));
+}

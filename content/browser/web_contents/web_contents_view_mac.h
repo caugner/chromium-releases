@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "base/memory/scoped_nsobject.h"
+#include "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/common/content_export.h"
 #include "content/common/drag_event_source_info.h"
@@ -38,8 +38,8 @@ CONTENT_EXPORT
 @interface WebContentsViewCocoa : BaseView {
  @private
   content::WebContentsViewMac* webContentsView_;  // WEAK; owns us
-  scoped_nsobject<WebDragSource> dragSource_;
-  scoped_nsobject<WebDragDest> dragDest_;
+  base::scoped_nsobject<WebDragSource> dragSource_;
+  base::scoped_nsobject<WebDragDest> dragDest_;
   BOOL mouseDownCanMoveWindow_;
 }
 
@@ -79,6 +79,7 @@ class WebContentsViewMac : public WebContentsViewPort,
   virtual WebDropData* GetDropData() const OVERRIDE;
   virtual gfx::Rect GetViewBounds() const OVERRIDE;
   virtual void SetAllowOverlappingViews(bool overlapping) OVERRIDE;
+  virtual bool GetAllowOverlappingViews() const OVERRIDE;
 
   // WebContentsViewPort implementation ----------------------------------------
   virtual void CreateView(
@@ -95,8 +96,7 @@ class WebContentsViewMac : public WebContentsViewPort,
   virtual void CloseTabAfterEventTracking() OVERRIDE;
 
   // Backend implementation of RenderViewHostDelegateView.
-  virtual void ShowContextMenu(const ContextMenuParams& params,
-                               ContextMenuSourceType type) OVERRIDE;
+  virtual void ShowContextMenu(const ContextMenuParams& params) OVERRIDE;
   virtual void ShowPopupMenu(const gfx::Rect& bounds,
                              int item_height,
                              double item_font_size,
@@ -125,11 +125,11 @@ class WebContentsViewMac : public WebContentsViewPort,
   WebContentsImpl* web_contents_;
 
   // The Cocoa NSView that lives in the view hierarchy.
-  scoped_nsobject<WebContentsViewCocoa> cocoa_view_;
+  base::scoped_nsobject<WebContentsViewCocoa> cocoa_view_;
 
   // Keeps track of which NSView has focus so we can restore the focus when
   // focus returns.
-  scoped_nsobject<FocusTracker> focus_tracker_;
+  base::scoped_nsobject<FocusTracker> focus_tracker_;
 
   // Our optional delegate.
   scoped_ptr<WebContentsViewDelegate> delegate_;

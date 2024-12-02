@@ -15,12 +15,12 @@
 #include <vsstyle.h>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "base/win/scoped_comptr.h"
-#include "ui/base/models/simple_menu_model.h"
 #include "ui/base/ime/win/tsf_event_router.h"
-#include "ui/gfx/insets.h"
+#include "ui/base/models/simple_menu_model.h"
 #include "ui/base/win/extra_sdk_defines.h"
+#include "ui/gfx/insets.h"
 #include "ui/views/controls/textfield/native_textfield_wrapper.h"
 
 namespace views {
@@ -59,13 +59,12 @@ class NativeTextfieldWin
   virtual string16 GetText() const OVERRIDE;
   virtual void UpdateText() OVERRIDE;
   virtual void AppendText(const string16& text) OVERRIDE;
-  virtual void ReplaceSelection(const string16& text) OVERRIDE;
+  virtual void InsertOrReplaceText(const string16& text) OVERRIDE;
   virtual base::i18n::TextDirection GetTextDirection() const OVERRIDE;
   virtual string16 GetSelectedText() const OVERRIDE;
   virtual void SelectAll(bool reversed) OVERRIDE;
   virtual void ClearSelection() OVERRIDE;
   virtual void UpdateBorder() OVERRIDE;
-  virtual void UpdateBorderColor() OVERRIDE;
   virtual void UpdateTextColor() OVERRIDE;
   virtual void UpdateBackgroundColor() OVERRIDE;
   virtual void UpdateReadOnly() OVERRIDE;
@@ -75,6 +74,7 @@ class NativeTextfieldWin
   virtual gfx::Insets CalculateInsets() OVERRIDE;
   virtual void UpdateHorizontalMargins() OVERRIDE;
   virtual void UpdateVerticalMargins() OVERRIDE;
+  virtual void UpdateVerticalAlignment() OVERRIDE;
   virtual bool SetFocus() OVERRIDE;
   virtual View* GetView() OVERRIDE;
   virtual gfx::NativeView GetTestingHandle() const OVERRIDE;

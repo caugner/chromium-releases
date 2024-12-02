@@ -31,10 +31,10 @@
 #include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_member.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_keyed_service.h"
 #include "chrome/browser/signin/signin_internals_util.h"
 #include "chrome/browser/signin/signin_manager_base.h"
 #include "chrome/browser/signin/ubertoken_fetcher.h"
+#include "components/browser_context_keyed_service/browser_context_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "google_apis/gaia/gaia_auth_consumer.h"
@@ -73,6 +73,10 @@ class SigninManager : public SigninManagerBase,
   explicit SigninManager(scoped_ptr<SigninManagerDelegate> delegate);
   virtual ~SigninManager();
 
+  // Returns true if the username is allowed based on the policy string.
+  static bool IsUsernameAllowedByPolicy(const std::string& username,
+                                        const std::string& policy);
+
   // Attempt to sign in this user with ClientLogin. If successful, set a
   // preference indicating the signed in user and send out a notification,
   // then start fetching tokens for the user.
@@ -110,13 +114,24 @@ class SigninManager : public SigninManagerBase,
 
   // Sign a user out, removing the preference, erasing all keys
   // associated with the user, and canceling all auth in progress.
-  virtual void SignOut() OVERRIDE;
+  virtual void SignOut();
+
+  // On platforms where SigninManager is responsible for dealing with
+  // invalid username policy updates, we need to check this during
+  // initialization and sign the user out.
+  virtual void Initialize(Profile* profile, PrefService* local_state) OVERRIDE;
 
   // Invoked from an OAuthTokenFetchedCallback to complete user signin.
   virtual void CompletePendingSignin();
 
   // Returns true if there's a signin in progress.
   virtual bool AuthInProgress() const OVERRIDE;
+
+  virtual bool IsSigninAllowed() const OVERRIDE;
+
+  // Returns true if the passed username is allowed by policy. Virtual for
+  // mocking in tests.
+  virtual bool IsAllowedUsername(const std::string& username) const;
 
   // If an authentication is in progress, return the username being
   // authenticated. Returns an empty string if no auth is in progress.
@@ -160,13 +175,17 @@ class SigninManager : public SigninManagerBase,
   // ignored).
   bool IsSignoutProhibited() const;
 
+  // Checks if signin is allowed for the profile that owns |io_data|. This must
+  // be invoked on the IO thread, and can be used to check if signin is enabled
+  // on that thread.
+  static bool IsSigninAllowedOnIOThread(ProfileIOData* io_data);
+
   // Allows the SigninManager to track the privileged signin process
   // identified by |process_id| so that we can later ask (via IsSigninProcess)
   // if it is safe to sign the user in from the current context (see
   // OneClickSigninHelper).  All of this tracking state is reset once the
   // renderer process terminates.
   void SetSigninProcess(int process_id);
-  void ClearSigninProcess();
   bool IsSigninProcess(int process_id) const;
   bool HasSigninProcess() const;
 
@@ -224,6 +243,9 @@ class SigninManager : public SigninManagerBase,
   // token.
   void RevokeOAuthLoginToken();
 
+  void OnSigninAllowedPrefChanged();
+  void OnGoogleServicesUsernamePatternChanged();
+
   // ClientLogin identity.
   std::string possibly_invalid_username_;
   std::string password_;  // This is kept empty whenever possible.
@@ -268,6 +290,13 @@ class SigninManager : public SigninManagerBase,
   OAuthTokenFetchedCallback oauth_token_fetched_callback_;
 
   scoped_ptr<SigninManagerDelegate> delegate_;
+
+  // Helper object to listen for changes to signin preferences stored in non-
+  // profile-specific local prefs (like kGoogleServicesUsernamePattern).
+  PrefChangeRegistrar local_state_pref_registrar_;
+
+  // Helper object to listen for changes to the signin allowed preference.
+  BooleanPrefMember signin_allowed_;
 
   DISALLOW_COPY_AND_ASSIGN(SigninManager);
 };

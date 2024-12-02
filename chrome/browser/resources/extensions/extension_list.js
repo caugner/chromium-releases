@@ -105,6 +105,9 @@ cr.define('options', function() {
       var version = node.querySelector('.extension-version');
       version.textContent = extension.version;
 
+      var locationText = node.querySelector('.location-text');
+      locationText.textContent = extension.locationText;
+
       var description = node.querySelector('.extension-description span');
       description.textContent = extension.description;
 
@@ -160,23 +163,6 @@ cr.define('options', function() {
         chrome.send('extensionSettingsPermissions', [extension.id]);
         e.preventDefault();
       });
-
-      if (extension.allow_activity) {
-        var activity = node.querySelector('.activity-link');
-        activity.addEventListener('click', function(e) {
-          chrome.send('navigateToUrl', [
-            'chrome://extension-activity?extensionId=' + extension.id,
-            '_blank',
-            e.button,
-            e.altKey,
-            e.ctrlKey,
-            e.metaKey,
-            e.shiftKey
-          ]);
-          e.preventDefault();
-        });
-        activity.hidden = false;
-      }
 
       // The 'View in Web Store/View Web Site' link.
       if (extension.homepageUrl) {

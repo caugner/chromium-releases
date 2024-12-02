@@ -13,7 +13,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
-#include "chrome/test/base/ui_controls.h"
+#include "ui/base/test/ui_controls.h"
 
 namespace ui_test_utils {
 
@@ -48,7 +48,7 @@ void ClickOnView(const Browser* browser, ViewID vid) {
       view,
       ui_controls::LEFT,
       ui_controls::DOWN | ui_controls::UP,
-      MessageLoop::QuitClosure());
+      base::MessageLoop::QuitClosure());
   content::RunMessageLoop();
 }
 

@@ -5,8 +5,8 @@
 #include "chrome/browser/themes/theme_properties.h"
 
 #include "base/memory/scoped_ptr.h"
-#include "base/string_util.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "chrome/browser/themes/browser_theme_pack.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
@@ -30,6 +30,9 @@ const SkColor kDefaultColorFrameInactive = SkColorSetRGB(161, 182, 228);
 const SkColor kDefaultColorFrameIncognito = SkColorSetRGB(83, 106, 139);
 const SkColor kDefaultColorFrameIncognitoInactive =
     SkColorSetRGB(126, 139, 156);
+const SkColor kDefaultColorFrameManagedUser = SkColorSetRGB(165, 197, 225);
+const SkColor kDefaultColorFrameManagedUserInactive =
+    SkColorSetRGB(180, 225, 247);
 #if defined(OS_MACOSX)
 const SkColor kDefaultColorToolbar = SkColorSetRGB(230, 230, 230);
 #else
@@ -117,7 +120,6 @@ const int kToolbarButtonIDs[] = {
   IDR_HOME, IDR_HOME_H, IDR_HOME_P,
   IDR_RELOAD, IDR_RELOAD_H, IDR_RELOAD_P,
   IDR_STOP, IDR_STOP_D, IDR_STOP_H, IDR_STOP_P,
-  IDR_LOCATIONBG_C, IDR_LOCATIONBG_L, IDR_LOCATIONBG_R,
   IDR_BROWSER_ACTIONS_OVERFLOW, IDR_BROWSER_ACTIONS_OVERFLOW_H,
   IDR_BROWSER_ACTIONS_OVERFLOW_P,
   IDR_TOOLS, IDR_TOOLS_H, IDR_TOOLS_P,
@@ -250,6 +252,10 @@ SkColor ThemeProperties::GetDefaultColor(int id) {
       return kDefaultColorFrameIncognito;
     case COLOR_FRAME_INCOGNITO_INACTIVE:
       return kDefaultColorFrameIncognitoInactive;
+    case COLOR_FRAME_MANAGED_USER:
+      return kDefaultColorFrameManagedUser;
+    case COLOR_FRAME_MANAGED_USER_INACTIVE:
+      return kDefaultColorFrameManagedUserInactive;
     case COLOR_TOOLBAR:
       return kDefaultColorToolbar;
     case COLOR_TAB_TEXT:

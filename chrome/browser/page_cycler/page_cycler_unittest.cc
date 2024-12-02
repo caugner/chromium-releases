@@ -5,10 +5,10 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/prefs/testing_pref_service.h"
-#include "base/string_util.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/page_cycler/page_cycler.h"
@@ -35,7 +35,7 @@ using file_util::PathExists;
 namespace {
 const int kFrameID = 1;
 const bool kIsMainFrame = true;
-const GURL kAboutURL = GURL(chrome::kAboutBlankURL);
+const GURL kAboutURL = GURL(content::kAboutBlankURL);
 }  // namespace
 
 class MockPageCycler : public PageCycler {

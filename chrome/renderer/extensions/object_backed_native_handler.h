@@ -12,16 +12,18 @@
 #include "base/memory/linked_ptr.h"
 #include "chrome/renderer/extensions/native_handler.h"
 #include "chrome/renderer/extensions/scoped_persistent.h"
+#include "chrome/renderer/extensions/unsafe_persistent.h"
 #include "v8/include/v8.h"
 
 namespace extensions {
+class ChromeV8Context;
 
 // An ObjectBackedNativeHandler is a factory for JS objects with functions on
 // them that map to native C++ functions. Subclasses should call RouteFunction()
 // in their constructor to define functions on the created JS objects.
 class ObjectBackedNativeHandler : public NativeHandler {
  public:
-  explicit ObjectBackedNativeHandler(v8::Handle<v8::Context> context);
+  explicit ObjectBackedNativeHandler(ChromeV8Context* context);
   virtual ~ObjectBackedNativeHandler();
 
   // Create an object with bindings to the native functions defined through
@@ -29,7 +31,7 @@ class ObjectBackedNativeHandler : public NativeHandler {
   virtual v8::Handle<v8::Object> NewInstance() OVERRIDE;
 
  protected:
-  typedef base::Callback<v8::Handle<v8::Value>(const v8::Arguments&)>
+  typedef base::Callback<void(const v8::FunctionCallbackInfo<v8::Value>&)>
       HandlerFunction;
 
   // Installs a new 'route' from |name| to |handler_function|. This means that
@@ -38,14 +40,14 @@ class ObjectBackedNativeHandler : public NativeHandler {
   void RouteFunction(const std::string& name,
                      const HandlerFunction& handler_function);
 
-  v8::Handle<v8::Context> v8_context() { return v8_context_.get(); }
+  ChromeV8Context* context() { return context_; }
 
   virtual void Invalidate() OVERRIDE;
 
  private:
   // Callback for RouteFunction which routes the V8 call to the correct
   // base::Bound callback.
-  static v8::Handle<v8::Value> Router(const v8::Arguments& args);
+  static void Router(const v8::FunctionCallbackInfo<v8::Value>& args);
 
   // When RouteFunction is called we create a v8::Object to hold the data we
   // need when handling it in Router() - this is the base::Bound function to
@@ -60,18 +62,22 @@ class ObjectBackedNativeHandler : public NativeHandler {
   // So, we use v8::Objects here to hold that data, effectively refcounting
   // the data. When |this| is destroyed we remove the base::Bound function from
   // the object to indicate that it shoudn't be called.
-  typedef std::vector<v8::Persistent<v8::Object> > RouterData;
+  //
+  // Storing UnsafePersistents is safe here, because the corresponding
+  // Persistent handle is created in RouteFunction(), and it keeps the data
+  // pointed by the UnsafePersistent alive. It's not made weak or disposed, and
+  // nobody else has access to it. The Persistent is then disposed in
+  // Invalidate().
+  typedef std::vector<UnsafePersistent<v8::Object> > RouterData;
   RouterData router_data_;
 
-  // TODO(kalman): Just pass around a ChromeV8Context. It already has a
-  // persistent handle to this context.
-  ScopedPersistent<v8::Context> v8_context_;
+  ChromeV8Context* context_;
 
   ScopedPersistent<v8::ObjectTemplate> object_template_;
 
   DISALLOW_COPY_AND_ASSIGN(ObjectBackedNativeHandler);
 };
 
-}  // extensions
+}  // namespace extensions
 
 #endif  // CHROME_RENDERER_EXTENSIONS_OBJECT_BACKED_NATIVE_HANDLER_H_

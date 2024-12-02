@@ -6,7 +6,7 @@
 
 #include "base/i18n/case_conversion.h"
 #include "base/stl_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "grit/ui_resources.h"
 #include "grit/ui_strings.h"
 #include "ui/base/accessibility/accessible_view_state.h"
@@ -83,7 +83,7 @@ int MenuItemView::item_right_margin_;
 int MenuItemView::pref_menu_height_;
 
 // static
-const char MenuItemView::kViewClassName[] = "views/MenuItemView";
+const char MenuItemView::kViewClassName[] = "MenuItemView";
 
 MenuItemView::MenuItemView(MenuDelegate* delegate)
     : delegate_(delegate),
@@ -612,7 +612,7 @@ MenuItemView::~MenuItemView() {
   STLDeleteElements(&removed_items_);
 }
 
-std::string MenuItemView::GetClassName() const {
+const char* MenuItemView::GetClassName() const {
   return kViewClassName;
 }
 
@@ -783,12 +783,14 @@ void MenuItemView::PaintButton(gfx::Canvas* canvas, PaintButtonMode mode) {
                                                &override_color)) {
     canvas->DrawColor(override_color);
   } else if (render_selection) {
-    // TODO(erg): The following doesn't actually get the focused menu item
-    // background for times when we want to match the native OS.
     gfx::Rect item_bounds(0, 0, width(), height());
     AdjustBoundsForRTLUI(&item_bounds);
-    CommonThemePaintMenuItemBackground(canvas->sk_canvas(),
-        ui::NativeTheme::kHovered, item_bounds);
+
+    native_theme->Paint(canvas->sk_canvas(),
+                        ui::NativeTheme::kMenuItemBackground,
+                        ui::NativeTheme::kHovered,
+                        item_bounds,
+                        ui::NativeTheme::ExtraParams());
   }
 
   // Render the check.
@@ -886,7 +888,7 @@ void MenuItemView::PaintAccelerator(gfx::Canvas* canvas,
       font,
       GetNativeTheme()->GetSystemColor(render_selection ?
           ui::NativeTheme::kColorId_SelectedMenuItemForegroundColor :
-          ui::NativeTheme::kColorId_TextButtonDisabledColor),
+          ui::NativeTheme::kColorId_ButtonDisabledColor),
       accel_bounds.x(),
       accel_bounds.y(),
       accel_bounds.width(),

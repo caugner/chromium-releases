@@ -13,9 +13,9 @@ class CompiledFileSystem(object):
   class Factory(object):
     """A class to build a CompiledFileSystem backed by |file_system|.
     """
-    def __init__(self, file_system, object_store_creator_factory):
+    def __init__(self, file_system, object_store_creator):
       self._file_system = file_system
-      self._object_store_creator_factory = object_store_creator_factory
+      self._object_store_creator = object_store_creator
 
     def Create(self, populate_function, cls, category=None):
       """Create a CompiledFileSystem that populates the cache by calling
@@ -29,13 +29,13 @@ class CompiledFileSystem(object):
       full_name = cls.__name__
       if category is not None:
         full_name = '%s/%s' % (full_name, category)
-      object_store_creator = self._object_store_creator_factory.Create(
-          CompiledFileSystem)
-      return CompiledFileSystem(
-          self._file_system,
-          populate_function,
-          object_store_creator.Create(category='%s/file' % full_name),
-          object_store_creator.Create(category='%s/list' % full_name))
+      def create_object_store(category):
+        return self._object_store_creator.Create(
+            CompiledFileSystem, category='%s/%s' % (full_name, category))
+      return CompiledFileSystem(self._file_system,
+                                populate_function,
+                                create_object_store('file'),
+                                create_object_store('list'))
 
     def CreateIdentity(self, cls):
       '''Handy helper to get or create the identity compiled file system.
@@ -93,3 +93,17 @@ class CompiledFileSystem(object):
     cache_data = self._populate_function(path, self._RecursiveList(path))
     self._list_object_store.Set(path, _CacheEntry(cache_data, version))
     return cache_data
+
+  def StatFile(self, path):
+    cache_entry = self._file_object_store.Get(path).Get()
+    if cache_entry is not None:
+      return cache_entry.version
+    return self._file_system.Stat(path).version
+
+  def StatFileListing(self, path):
+    if not path.endswith('/'):
+      path += '/'
+    cache_entry = self._list_object_store.Get(path).Get()
+    if cache_entry is not None:
+      return cache_entry.version
+    return self._file_system.Stat(path).version

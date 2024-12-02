@@ -40,9 +40,11 @@ class AshKeyboardControllerProxy
   // keyboard::KeyboardControllerProxy overrides
   virtual content::BrowserContext* GetBrowserContext() OVERRIDE;
   virtual ui::InputMethod* GetInputMethod() OVERRIDE;
+  virtual void RequestAudioInput(content::WebContents* web_contents,
+      const content::MediaStreamRequest& request,
+      const content::MediaResponseCallback& callback) OVERRIDE;
   virtual void SetupWebContents(content::WebContents* contents) OVERRIDE;
-  virtual void OnKeyboardBoundsChanged(
-      const gfx::Rect& keyboard_bounds) OVERRIDE;
+  virtual void ShowKeyboardContainer(aura::Window* container) OVERRIDE;
 
   // ExtensionFunctionDispatcher::Delegate overrides
   virtual extensions::WindowController* GetExtensionWindowController() const

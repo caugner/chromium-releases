@@ -7,15 +7,15 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_piece.h"
+#include "base/strings/stringprintf.h"
 #include "chrome/common/chrome_paths.h"
 
 namespace {
 
 // |args| are passed through the various JavaScript logging functions such as
 // console.log. Returns a string appropriate for logging with LOG(severity).
-std::string LogArgs2String(const v8::Arguments& args) {
+std::string LogArgs2String(const v8::FunctionCallbackInfo<v8::Value>& args) {
   std::string message;
   bool first = true;
   for (int i = 0; i < args.Length(); i++) {
@@ -45,7 +45,9 @@ base::FilePath gen_test_data_directory;
 
 }  // namespace
 
-V8UnitTest::V8UnitTest() {
+V8UnitTest::V8UnitTest()
+    : isolate_(v8::Isolate::GetCurrent()),
+      handle_scope_(isolate_) {
   InitPathsAndLibraries();
 }
 
@@ -88,11 +90,13 @@ bool V8UnitTest::RunJavascriptTestF(
   if (!ExecuteJavascriptLibraries())
     return false;
 
-  v8::Context::Scope context_scope(context_);
-  v8::HandleScope handle_scope;
+  v8::Context::Scope context_scope(isolate_, context_);
+  v8::HandleScope handle_scope(isolate_);
+  v8::Local<v8::Context> context =
+      v8::Local<v8::Context>::New(isolate_, context_);
 
   v8::Handle<v8::Value> functionProperty =
-      context_->Global()->Get(v8::String::New("runTest"));
+      context->Global()->Get(v8::String::New("runTest"));
   EXPECT_FALSE(functionProperty.IsEmpty());
   if (::testing::Test::HasNonfatalFailure())
     return false;
@@ -112,7 +116,7 @@ bool V8UnitTest::RunJavascriptTestF(
   };
 
   v8::TryCatch try_catch;
-  v8::Handle<v8::Value> result = function->Call(context_->Global(), 3, args);
+  v8::Handle<v8::Value> result = function->Call(context->Global(), 3, args);
   // The test fails if an exception was thrown.
   EXPECT_FALSE(result.IsEmpty());
   if (::testing::Test::HasNonfatalFailure())
@@ -174,20 +178,21 @@ void V8UnitTest::SetUp() {
   console->Set(v8::String::New("error"),
                v8::FunctionTemplate::New(&V8UnitTest::Error));
 
-  context_ = v8::Context::New(NULL, global);
+  context_.Reset(isolate_, v8::Context::New(isolate_, NULL, global));
 }
 
 void V8UnitTest::SetGlobalStringVar(const std::string& var_name,
                                     const std::string& value) {
-  v8::Context::Scope context_scope(context_);
-  context_->Global()->Set(v8::String::New(var_name.c_str(), var_name.length()),
-                          v8::String::New(value.c_str(), value.length()));
+  v8::Context::Scope context_scope(isolate_, context_);
+  v8::Local<v8::Context>::New(isolate_, context_)->Global()
+      ->Set(v8::String::New(var_name.c_str(), var_name.length()),
+            v8::String::New(value.c_str(), value.length()));
 }
 
 void V8UnitTest::ExecuteScriptInContext(const base::StringPiece& script_source,
                                         const base::StringPiece& script_name) {
-  v8::Context::Scope context_scope(context_);
-  v8::HandleScope handle_scope;
+  v8::Context::Scope context_scope(isolate_, context_);
+  v8::HandleScope handle_scope(isolate_);
   v8::Handle<v8::String> source = v8::String::New(script_source.data(),
                                                   script_source.size());
   v8::Handle<v8::String> name = v8::String::New(script_name.data(),
@@ -225,58 +230,57 @@ std::string V8UnitTest::ExceptionToString(const v8::TryCatch& try_catch) {
 }
 
 void V8UnitTest::TestFunction(const std::string& function_name) {
-  v8::Context::Scope context_scope(context_);
-  v8::HandleScope handle_scope;
+  v8::Context::Scope context_scope(isolate_, context_);
+  v8::HandleScope handle_scope(isolate_);
+  v8::Local<v8::Context> context =
+      v8::Local<v8::Context>::New(isolate_, context_);
 
   v8::Handle<v8::Value> functionProperty =
-      context_->Global()->Get(v8::String::New(function_name.c_str()));
+      context->Global()->Get(v8::String::New(function_name.c_str()));
   ASSERT_FALSE(functionProperty.IsEmpty());
   ASSERT_TRUE(functionProperty->IsFunction());
   v8::Handle<v8::Function> function =
       v8::Handle<v8::Function>::Cast(functionProperty);
 
   v8::TryCatch try_catch;
-  v8::Handle<v8::Value> result = function->Call(context_->Global(), 0, NULL);
+  v8::Handle<v8::Value> result = function->Call(context->Global(), 0, NULL);
   // The test fails if an exception was thrown.
   if (result.IsEmpty())
     FAIL() << ExceptionToString(try_catch);
 }
 
 // static
-v8::Handle<v8::Value> V8UnitTest::Log(const v8::Arguments& args) {
+void V8UnitTest::Log(const v8::FunctionCallbackInfo<v8::Value>& args) {
   LOG(INFO) << LogArgs2String(args);
-  return v8::Undefined();
 }
 
-v8::Handle<v8::Value> V8UnitTest::Error(const v8::Arguments& args) {
+void V8UnitTest::Error(const v8::FunctionCallbackInfo<v8::Value>& args) {
   had_errors = true;
   LOG(ERROR) << LogArgs2String(args);
-  return v8::Undefined();
 }
 
-v8::Handle<v8::Value> V8UnitTest::ChromeSend(const v8::Arguments& args) {
+void V8UnitTest::ChromeSend(const v8::FunctionCallbackInfo<v8::Value>& args) {
   v8::HandleScope handle_scope;
   // We expect to receive 2 args: ("testResult", [ok, message]). However,
   // chrome.send may pass only one. Therefore we need to ensure we have at least
   // 1, then ensure that the first is "testResult" before checking again for 2.
   EXPECT_LE(1, args.Length());
   if (::testing::Test::HasNonfatalFailure())
-    return v8::Undefined();
+    return;
   v8::String::Utf8Value message(args[0]);
   EXPECT_EQ("testResult", std::string(*message, message.length()));
   if (::testing::Test::HasNonfatalFailure())
-    return v8::Undefined();
+    return;
   EXPECT_EQ(2, args.Length());
   if (::testing::Test::HasNonfatalFailure())
-    return v8::Undefined();
+    return;
   v8::Handle<v8::Array> testResult(args[1].As<v8::Array>());
   EXPECT_EQ(2U, testResult->Length());
   if (::testing::Test::HasNonfatalFailure())
-    return v8::Undefined();
+    return;
   testResult_ok = testResult->Get(0)->BooleanValue();
   if (!testResult_ok) {
     v8::String::Utf8Value message(testResult->Get(1));
     LOG(ERROR) << *message;
   }
-  return v8::Undefined();
 }

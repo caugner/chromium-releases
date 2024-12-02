@@ -17,7 +17,6 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/common/referrer.h"
-#include "webkit/glue/webkit_glue.h"
 
 using content::BrowserThread;
 using content::NavigationEntry;
@@ -116,8 +115,9 @@ void BaseSessionService::ScheduleCommand(SessionCommand* command) {
 void BaseSessionService::StartSaveTimer() {
   // Don't start a timer when testing (profile == NULL or
   // MessageLoop::current() is NULL).
-  if (MessageLoop::current() && profile() && !weak_factory_.HasWeakPtrs()) {
-    MessageLoop::current()->PostDelayedTask(
+  if (base::MessageLoop::current() && profile() &&
+      !weak_factory_.HasWeakPtrs()) {
+    base::MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&BaseSessionService::Save, weak_factory_.GetWeakPtr()),
         base::TimeDelta::FromMilliseconds(kSaveDelayMS));

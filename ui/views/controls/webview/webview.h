@@ -81,19 +81,18 @@ class WEBVIEW_EXPORT WebView : public View,
   void SetPreferredSize(const gfx::Size& preferred_size);
 
   // Overridden from View:
-  virtual std::string GetClassName() const OVERRIDE;
+  virtual const char* GetClassName() const OVERRIDE;
 
   // Overridden from AccessibleWebView:
-  virtual gfx::NativeViewAccessible AccessibleObjectFromChildId(long child_id)
-      OVERRIDE;
+  virtual gfx::NativeViewAccessible AccessibleObjectFromChildId(
+      long child_id) OVERRIDE;
   virtual View* AsView() OVERRIDE;
 
  private:
   // Overridden from View:
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
-  virtual void ViewHierarchyChanged(bool is_add,
-                                    View* parent,
-                                    View* child) OVERRIDE;
+  virtual void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) OVERRIDE;
   virtual bool SkipDefaultKeyEventProcessing(
       const ui::KeyEvent& event) OVERRIDE;
   virtual bool IsFocusable() const OVERRIDE;

@@ -2,13 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/stringprintf.h"
+#include "base/basictypes.h"
+#if defined(OS_MACOSX)
+#include "base/mac/mac_util.h"
+#endif
+#include "base/strings/stringprintf.h"
 #include "base/win/windows_version.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_test_message_listener.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/feature_switch.h"
@@ -70,18 +75,45 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, ApiTestsAudio) {
                                   "api_tests_audio.html")) << message_;
 }
 
-// TODO(miu): Disabled until the two most-likely sources of the "flaky timeouts"
-// are resolved: 1) http://crbug.com/177163 and 2) http://crbug.com/174519.
-// See http://crbug.com/174640.
-IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, DISABLED_EndToEnd) {
+// http://crbug.com/177163 -- for OS_WIN debug build flakiness
+// http://crbug.com/251863 -- for OS_LINUX (non-Aura) debug build flakiness
+#if defined(OS_WIN) && !defined(NDEBUG)
+#define MAYBE_EndToEnd DISABLED_EndToEnd
+#elif defined(OS_LINUX) && !defined(USE_AURA) && !defined(NDEBUG)
+#define MAYBE_EndToEnd DISABLED_EndToEnd
+#else
+#define MAYBE_EndToEnd EndToEnd
+#endif
+IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_EndToEnd) {
   extensions::FeatureSwitch::ScopedOverride tab_capture(
       extensions::FeatureSwitch::tab_capture(), true);
+
+#if defined(OS_WIN)
+  // TODO(justinlin): Disabled for WinXP due to timeout issues.
+  if (base::win::GetVersion() < base::win::VERSION_VISTA) {
+    return;
+  }
+#endif
+#if defined(OS_MACOSX)
+  // TODO(miu): Disabled for Mac OS X 10.6 due to timeout issues.
+  // http://crbug.com/174640
+  if (base::mac::IsOSSnowLeopard())
+    return;
+#endif
+
+  AddExtensionToCommandLineWhitelist();
   ASSERT_TRUE(RunExtensionSubtest("tab_capture/experimental",
                                   "end_to_end.html")) << message_;
 }
 
+// http://crbug.com/177163
+#if defined(OS_WIN) && !defined(NDEBUG)
+#define MAYBE_GetUserMediaTest DISABLED_GetUserMediaTest
+#else
+#define MAYBE_GetUserMediaTest GetUserMediaTest
+#endif
 // Test that we can't get tabCapture streams using GetUserMedia directly.
-IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, GetUserMediaTest) {
+IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_GetUserMediaTest) {
   ExtensionTestMessageListener listener("ready", true);
 
   ASSERT_TRUE(RunExtensionSubtest("tab_capture/experimental",
@@ -105,9 +137,15 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, GetUserMediaTest) {
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
+// http://crbug.com/177163
+#if defined(OS_WIN) && !defined(NDEBUG)
+#define MAYBE_ActiveTabPermission DISABLED_ActiveTabPermission
+#else
+#define MAYBE_ActiveTabPermission ActiveTabPermission
+#endif
 // Make sure tabCapture.capture only works if the tab has been granted
 // permission via an extension icon click or the extension is whitelisted.
-IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, ActiveTabPermission) {
+IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_ActiveTabPermission) {
   ExtensionTestMessageListener before_open_tab("ready1", true);
   ExtensionTestMessageListener before_grant_permission("ready2", true);
   ExtensionTestMessageListener before_open_new_tab("ready3", true);
@@ -145,6 +183,57 @@ IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, ActiveTabPermission) {
   EXPECT_TRUE(before_whitelist_extension.WaitUntilSatisfied());
   AddExtensionToCommandLineWhitelist();
   before_whitelist_extension.Reply("");
+
+  ResultCatcher catcher;
+  catcher.RestrictToProfile(browser()->profile());
+  EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
+}
+
+// http://crbug.com/177163
+#if defined(OS_WIN) && !defined(NDEBUG)
+#define MAYBE_FullscreenEvents DISABLED_FullscreenEvents
+#elif defined(USE_AURA) || defined(OS_MACOSX)
+// These don't always fire fullscreen events when run in tests. Tested manually.
+#define MAYBE_FullscreenEvents DISABLED_FullscreenEvents
+#elif defined(OS_LINUX) && defined(NDEBUG)
+// Flaky to get out of fullscreen in tests. Tested manually.
+#define MAYBE_FullscreenEvents DISABLED_FullscreenEvents
+#else
+#define MAYBE_FullscreenEvents FullscreenEvents
+#endif
+IN_PROC_BROWSER_TEST_F(TabCaptureApiTest, MAYBE_FullscreenEvents) {
+#if defined(OS_WIN)
+  // TODO(justinlin): Disabled for WinXP due to timeout issues.
+  if (base::win::GetVersion() < base::win::VERSION_VISTA) {
+    return;
+  }
+#endif
+
+  AddExtensionToCommandLineWhitelist();
+
+  content::OpenURLParams params(GURL("chrome://version"),
+                                content::Referrer(),
+                                CURRENT_TAB,
+                                content::PAGE_TRANSITION_LINK, false);
+  content::WebContents* web_contents = browser()->OpenURL(params);
+
+  ExtensionTestMessageListener listeners_setup("ready1", true);
+  ExtensionTestMessageListener fullscreen_entered("ready2", true);
+
+  ASSERT_TRUE(RunExtensionSubtest("tab_capture/experimental",
+                                  "fullscreen_test.html")) << message_;
+  EXPECT_TRUE(listeners_setup.WaitUntilSatisfied());
+
+  // Toggle fullscreen after setting up listeners.
+  browser()->fullscreen_controller()->ToggleFullscreenModeForTab(web_contents,
+                                                                 true);
+  listeners_setup.Reply("");
+
+  // Toggle again after JS should have the event.
+  EXPECT_TRUE(fullscreen_entered.WaitUntilSatisfied());
+  browser()->fullscreen_controller()->ToggleFullscreenModeForTab(web_contents,
+                                                                 false);
+  fullscreen_entered.Reply("");
 
   ResultCatcher catcher;
   catcher.RestrictToProfile(browser()->profile());

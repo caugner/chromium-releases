@@ -110,8 +110,6 @@ using content::WebContents;
   if (devToolsWindow_ == newDevToolsWindow) {
     if (!newDevToolsWindow ||
         (newDevToolsWindow->dock_side() == dockSide_)) {
-      if (newDevToolsWindow)
-        [self updateDevToolsSplitPosition];
       return;
     }
   }
@@ -161,15 +159,15 @@ using content::WebContents;
   [devToolsView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
 
   NSRect containerRect = NSMakeRect(0, 0, 100, 100);
-  scoped_nsobject<NSView> devToolsContainerView(
+  base::scoped_nsobject<NSView> devToolsContainerView(
       [[NSView alloc] initWithFrame:containerRect]);
   [devToolsContainerView addSubview:devToolsView];
   [splitView_ addSubview:devToolsContainerView];
-  [self updateDevToolsViewFrame];
 
   BOOL isVertical = devToolsWindow_->dock_side() == DEVTOOLS_DOCK_SIDE_RIGHT;
   [splitView_ setVertical:isVertical];
   [self updateDevToolsSplitPosition];
+  [self updateDevToolsViewFrame];
 }
 
 - (void)hideDevToolsContainer {

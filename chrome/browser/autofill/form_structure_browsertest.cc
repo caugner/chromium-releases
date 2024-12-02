@@ -5,15 +5,16 @@
 #include <vector>
 
 #include "base/files/file_path.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/autofill/browser/autofill_manager.h"
-#include "components/autofill/browser/data_driven_test.h"
-#include "components/autofill/browser/form_structure.h"
+#include "components/autofill/content/browser/autofill_driver_impl.h"
+#include "components/autofill/core/browser/autofill_manager.h"
+#include "components/autofill/core/browser/data_driven_test.h"
+#include "components/autofill/core/browser/form_structure.h"
 #include "googleurl/src/gurl.h"
 
 namespace autofill {
@@ -59,8 +60,10 @@ void FormStructureBrowserTest::GenerateResults(const std::string& input,
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::NavigateToURL(browser(),
                                                        HTMLToDataURI(input)));
 
-  AutofillManager* autofill_manager = AutofillManager::FromWebContents(
+  AutofillDriverImpl* autofill_driver = AutofillDriverImpl::FromWebContents(
       browser()->tab_strip_model()->GetActiveWebContents());
+  ASSERT_NE(static_cast<AutofillDriverImpl*>(NULL), autofill_driver);
+  AutofillManager* autofill_manager = autofill_driver->autofill_manager();
   ASSERT_NE(static_cast<AutofillManager*>(NULL), autofill_manager);
   std::vector<FormStructure*> forms = autofill_manager->form_structures_.get();
   *output = FormStructureBrowserTest::FormStructuresToString(forms);

@@ -80,33 +80,29 @@ class FakeClient : public GpuMemoryManagerClient {
 
   // This will create a client with no surface
   FakeClient(GpuMemoryManager* memmgr, GpuMemoryManagerClient* share_group)
-      : memmgr_(memmgr)
-      , total_gpu_memory_(0)
-      , share_group_(share_group)
-      , memory_tracker_(NULL)
-      , tracking_group_(NULL) {
+      : memmgr_(memmgr),
+        total_gpu_memory_(0),
+        share_group_(share_group),
+        memory_tracker_(NULL) {
     if (!share_group_) {
       memory_tracker_ = new FakeMemoryTracker();
       tracking_group_.reset(
-          memmgr_->CreateTrackingGroup(0, memory_tracker_));
+          memmgr_->CreateTrackingGroup(0, memory_tracker_.get()));
     }
     client_state_.reset(memmgr_->CreateClientState(this, false, true));
   }
 
   // This will create a client with a surface
-  FakeClient(GpuMemoryManager* memmgr,
-             int32 surface_id,
-             bool visible)
-      : memmgr_(memmgr)
-      , total_gpu_memory_(0)
-      , share_group_(NULL)
-      , memory_tracker_(NULL)
-      , tracking_group_(NULL) {
+  FakeClient(GpuMemoryManager* memmgr, int32 surface_id, bool visible)
+      : memmgr_(memmgr),
+        total_gpu_memory_(0),
+        share_group_(NULL),
+        memory_tracker_(NULL) {
     memory_tracker_ = new FakeMemoryTracker();
     tracking_group_.reset(
-        memmgr_->CreateTrackingGroup(0, memory_tracker_));
-    client_state_.reset(memmgr_->CreateClientState(
-        this, surface_id != 0, visible));
+        memmgr_->CreateTrackingGroup(0, memory_tracker_.get()));
+    client_state_.reset(
+        memmgr_->CreateClientState(this, surface_id != 0, visible));
   }
 
   virtual ~FakeClient() {

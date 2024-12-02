@@ -12,8 +12,8 @@
 #include "base/android/jni_string.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/android/provider/blocking_ui_thread_async_request.h"
 #include "chrome/browser/android/provider/bookmark_model_observer_task.h"
 #include "chrome/browser/android/provider/run_on_ui_thread_blocking.h"
@@ -667,14 +667,14 @@ class BookmarkIconFetchTask : public FaviconServiceTask {
       : FaviconServiceTask(favicon_service, profile,
                            cancelable_consumer, cancelable_tracker) {}
 
-  history::FaviconBitmapResult Run(const GURL& url) {
+  chrome::FaviconBitmapResult Run(const GURL& url) {
     RunAsyncRequestOnUIThreadBlocking(
         base::Bind(&FaviconService::GetRawFaviconForURL,
                    base::Unretained(service()),
                    FaviconService::FaviconForURLParams(
                        profile(),
                        url,
-                       history::FAVICON | history::TOUCH_ICON,
+                       chrome::FAVICON | chrome::TOUCH_ICON,
                        gfx::kFaviconSize),
                    ui::GetMaxScaleFactor(),
                    base::Bind(
@@ -685,12 +685,12 @@ class BookmarkIconFetchTask : public FaviconServiceTask {
   }
 
  private:
-  void OnFaviconRetrieved(const history::FaviconBitmapResult& bitmap_result) {
+  void OnFaviconRetrieved(const chrome::FaviconBitmapResult& bitmap_result) {
     result_ = bitmap_result;
     RequestCompleted();
   }
 
-  history::FaviconBitmapResult result_;
+  chrome::FaviconBitmapResult result_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkIconFetchTask);
 };
@@ -1549,7 +1549,7 @@ ScopedJavaLocalRef<jbyteArray> ChromeBrowserProvider::GetFaviconOrTouchIcon(
                                      profile_,
                                      &favicon_consumer_,
                                      &cancelable_task_tracker_);
-  history::FaviconBitmapResult bitmap_result = favicon_task.Run(url);
+  chrome::FaviconBitmapResult bitmap_result = favicon_task.Run(url);
 
   if (!bitmap_result.is_valid() || !bitmap_result.bitmap_data.get())
     return ScopedJavaLocalRef<jbyteArray>();

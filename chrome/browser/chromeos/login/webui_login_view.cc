@@ -10,10 +10,9 @@
 #include "base/callback.h"
 #include "base/debug/trace_event.h"
 #include "base/i18n/rtl.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_util.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/login/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/proxy_settings_dialog.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
@@ -21,14 +20,15 @@
 #include "chrome/browser/media/media_stream_infobar_delegate.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/password_manager/password_manager_delegate_impl.h"
-#include "chrome/browser/platform_util.h"
 #include "chrome/browser/renderer_preferences_util.h"
-#include "chrome/browser/ui/web_contents_modal_dialog_manager.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/render_messages.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
+#include "chromeos/network/network_state.h"
+#include "chromeos/network/network_state_handler.h"
+#include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_view_host_observer.h"
@@ -45,16 +45,20 @@
 using content::NativeWebKeyboardEvent;
 using content::RenderViewHost;
 using content::WebContents;
+using web_modal::WebContentsModalDialogManager;
 
 namespace {
 
 // These strings must be kept in sync with handleAccelerator() in oobe.js.
 const char kAccelNameCancel[] = "cancel";
 const char kAccelNameEnrollment[] = "enrollment";
+const char kAccelNameKioskEnable[] = "kiosk_enable";
 const char kAccelNameVersion[] = "version";
 const char kAccelNameReset[] = "reset";
 const char kAccelNameLeft[] = "left";
 const char kAccelNameRight[] = "right";
+const char kAccelNameDeviceRequisition[] = "device_requisition";
+const char kAccelNameDeviceRequisitionRemora[] = "device_requisition_remora";
 
 // Observes IPC messages from the FrameSniffer and notifies JS if error
 // appears.
@@ -149,12 +153,18 @@ WebUILoginView::WebUILoginView()
   registrar_.Add(this,
                  chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE,
                  content::NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN,
+                 content::NotificationService::AllSources());
 
   accel_map_[ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_NONE)] =
       kAccelNameCancel;
   accel_map_[ui::Accelerator(ui::VKEY_E,
                              ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN)] =
       kAccelNameEnrollment;
+  accel_map_[ui::Accelerator(ui::VKEY_K,
+                             ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN)] =
+      kAccelNameKioskEnable;
   accel_map_[ui::Accelerator(ui::VKEY_V, ui::EF_ALT_DOWN)] =
       kAccelNameVersion;
   accel_map_[ui::Accelerator(ui::VKEY_R,
@@ -166,6 +176,13 @@ WebUILoginView::WebUILoginView()
 
   accel_map_[ui::Accelerator(ui::VKEY_RIGHT, ui::EF_NONE)] =
       kAccelNameRight;
+
+  accel_map_[ui::Accelerator(
+      ui::VKEY_D, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN)] =
+      kAccelNameDeviceRequisition;
+  accel_map_[
+      ui::Accelerator(ui::VKEY_H, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN)] =
+      kAccelNameDeviceRequisitionRemora;
 
   for (AccelMap::iterator i(accel_map_.begin()); i != accel_map_.end(); ++i)
     AddAccelerator(i->first);
@@ -208,30 +225,14 @@ void WebUILoginView::Init(views::Widget* login_window) {
                  content::Source<WebContents>(web_contents));
 }
 
-std::string WebUILoginView::GetClassName() const {
+const char* WebUILoginView::GetClassName() const {
   return kViewClassName;
 }
 
-void WebUILoginView::SetWebContentsBlocked(
-    content::WebContents* web_contents,
-    bool blocked) {
-  // RenderViewHost may be NULL during shutdown.
-  content::RenderViewHost* host = web_contents->GetRenderViewHost();
-  if (host) {
-    host->Send(new ChromeViewMsg_SetVisuallyDeemphasized(
-               host->GetRoutingID(), blocked));
-  }
-}
-
-WebContentsModalDialogHost*
+web_modal::WebContentsModalDialogHost*
     WebUILoginView::GetWebContentsModalDialogHost() {
   return this;
 }
-
-bool WebUILoginView::IsWebContentsVisible(content::WebContents* web_contents) {
-  return platform_util::IsVisible(web_contents->GetView()->GetNativeView());
-}
-
 
 gfx::NativeView WebUILoginView::GetHostView() const {
   return GetWidget()->GetNativeView();
@@ -245,13 +246,13 @@ gfx::Point WebUILoginView::GetDialogPosition(const gfx::Size& size) {
 }
 
 void WebUILoginView::AddObserver(
-    WebContentsModalDialogHostObserver* observer) {
+    web_modal::WebContentsModalDialogHostObserver* observer) {
   if (observer && !observer_list_.HasObserver(observer))
     observer_list_.AddObserver(observer);
 }
 
 void WebUILoginView::RemoveObserver(
-    WebContentsModalDialogHostObserver* observer) {
+    web_modal::WebContentsModalDialogHostObserver* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
@@ -308,8 +309,14 @@ content::WebContents* WebUILoginView::GetWebContents() {
 }
 
 void WebUILoginView::OpenProxySettings() {
+  const NetworkState* network =
+      NetworkHandler::Get()->network_state_handler()->DefaultNetwork();
+  if (!network) {
+    LOG(ERROR) << "No default network found!";
+    return;
+  }
   ProxySettingsDialog* dialog =
-      new ProxySettingsDialog(NULL, GetNativeWindow());
+      new ProxySettingsDialog(*network, NULL, GetNativeWindow());
   dialog->Show();
 }
 
@@ -342,7 +349,7 @@ void WebUILoginView::Layout() {
   DCHECK(webui_login_);
   webui_login_->SetBoundsRect(bounds());
 
-  FOR_EACH_OBSERVER(WebContentsModalDialogHostObserver,
+  FOR_EACH_OBSERVER(web_modal::WebContentsModalDialogHostObserver,
                     observer_list_,
                     OnPositionRequiresUpdate());
 }
@@ -366,7 +373,8 @@ void WebUILoginView::Observe(int type,
                              const content::NotificationSource& source,
                              const content::NotificationDetails& details) {
   switch (type) {
-    case chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE: {
+    case chrome::NOTIFICATION_LOGIN_WEBUI_VISIBLE:
+    case chrome::NOTIFICATION_LOGIN_NETWORK_ERROR_SHOWN: {
       OnLoginPromptVisible();
       registrar_.RemoveAll();
       break;
@@ -446,12 +454,13 @@ void WebUILoginView::RequestMediaAccessPermission(
 void WebUILoginView::OnLoginPromptVisible() {
   // If we're hidden than will generate this signal once we're shown.
   if (is_hidden_ || login_prompt_visible_handled_) {
-    LOG(INFO) << "Login WebUI >> not emitting signal, hidden: " << is_hidden_;
+    LOG(WARNING) << "Login WebUI >> not emitting signal, hidden: "
+                 << is_hidden_;
     return;
   }
   TRACE_EVENT0("chromeos", "WebUILoginView::OnLoginPromoptVisible");
   if (should_emit_login_prompt_visible_) {
-    LOG(INFO) << "Login WebUI >> login-prompt-visible";
+    LOG(WARNING) << "Login WebUI >> login-prompt-visible";
     chromeos::DBusThreadManager::Get()->GetSessionManagerClient()->
         EmitLoginPromptVisible();
   }

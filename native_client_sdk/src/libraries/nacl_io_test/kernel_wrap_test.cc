@@ -81,6 +81,10 @@ class KernelWrapTest : public ::testing::Test {
       .WillOnce(Return(0))
       .WillOnce(Return(1))
       .WillOnce(Return(2));
+    // And will call mount / and /dev.
+    EXPECT_CALL(mock, mount(_, _, _, _, _))
+      .WillOnce(Return(0))
+      .WillOnce(Return(0));
 
     ki_init(&mock);
   }
@@ -134,6 +138,11 @@ TEST_F(KernelWrapTest, fstat) {
   struct stat out_statbuf;
   fstat(234, &out_statbuf);
   EXPECT_THAT(&in_statbuf, IsEqualToStatbuf(&out_statbuf));
+}
+
+TEST_F(KernelWrapTest, ftruncate) {
+  EXPECT_CALL(mock, ftruncate(456, 0)).Times(1);
+  ftruncate(456, 0);
 }
 
 TEST_F(KernelWrapTest, fsync) {

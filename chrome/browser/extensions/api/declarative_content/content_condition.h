@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "base/hash_tables.h"
+#include "base/containers/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
@@ -81,14 +81,14 @@ class ContentCondition {
   // If this Condition has a url filter, appends it to |condition_sets|.
   void GetURLMatcherConditionSets(
       URLMatcherConditionSet::Vector* condition_sets) const {
-    if (url_matcher_conditions_)
+    if (url_matcher_conditions_.get())
       condition_sets->push_back(url_matcher_conditions_);
   }
 
   // True if GetURLMatcherConditionSets would append anything to its
   // argument.
   bool has_url_matcher_condition_set() const {
-    return url_matcher_conditions_ != NULL;
+    return url_matcher_conditions_.get() != NULL;
   }
 
   // Returns the CSS selectors required to match by this condition.

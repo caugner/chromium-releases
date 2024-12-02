@@ -5,15 +5,13 @@
 #import "chrome/browser/ui/cocoa/find_bar/find_bar_text_field_cell.h"
 
 #include "base/logging.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
-
-const CGFloat kBaselineAdjust = 1.0;
 
 // How far to offset the keyword token into the field.
 const NSInteger kResultsXOffset = 3;
@@ -40,8 +38,12 @@ CGFloat WidthForResults(NSAttributedString* resultsString) {
 
 @implementation FindBarTextFieldCell
 
-- (CGFloat)baselineAdjust {
-  return kBaselineAdjust;
+- (CGFloat)topTextFrameOffset {
+  return 1.0;
+}
+
+- (CGFloat)bottomTextFrameOffset {
+  return 1.0;
 }
 
 - (CGFloat)cornerRadius {
@@ -55,7 +57,7 @@ CGFloat WidthForResults(NSAttributedString* resultsString) {
 // Convenience for the attributes used in the right-justified info
 // cells.  Sets the background color to red if |foundMatches| is YES.
 - (NSDictionary*)resultsAttributes:(BOOL)foundMatches {
-  scoped_nsobject<NSMutableParagraphStyle> style(
+  base::scoped_nsobject<NSMutableParagraphStyle> style(
       [[NSMutableParagraphStyle alloc] init]);
   [style setAlignment:NSRightTextAlignment];
 

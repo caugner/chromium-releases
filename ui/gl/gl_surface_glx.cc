@@ -20,7 +20,7 @@ extern "C" {
 #include "base/threading/non_thread_safe.h"
 #include "base/threading/thread.h"
 #include "base/time.h"
-#include "third_party/mesa/MesaLib/include/GL/osmesa.h"
+#include "third_party/mesa/src/include/GL/osmesa.h"
 #include "ui/base/x/x11_util.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_implementation.h"
@@ -123,8 +123,7 @@ class SGIVideoSyncThread
   DISALLOW_COPY_AND_ASSIGN(SGIVideoSyncThread);
 };
 
-class SGIVideoSyncProviderThreadShim
-    : public base::SupportsWeakPtr<SGIVideoSyncProviderThreadShim> {
+class SGIVideoSyncProviderThreadShim {
  public:
   explicit SGIVideoSyncProviderThreadShim(XID window)
       : window_(window),
@@ -135,6 +134,13 @@ class SGIVideoSyncProviderThreadShim
     // This ensures that creation of |window_| has occured when this shim
     // is executing in the same process as the call to create |window_|.
     XSync(g_display, False);
+  }
+
+  virtual ~SGIVideoSyncProviderThreadShim() {
+    if (context_) {
+      glXDestroyContext(display_, context_);
+      context_ = NULL;
+    }
   }
 
   base::CancellationFlag* cancel_vsync_flag() {
@@ -174,14 +180,6 @@ class SGIVideoSyncProviderThreadShim
     DCHECK(NULL != context_);
   }
 
-  void Destroy() {
-    if (context_) {
-      glXDestroyContext(display_, context_);
-      context_ = NULL;
-    }
-    delete this;
-  }
-
   void GetVSyncParameters(const VSyncProvider::UpdateVSyncCallback& callback) {
     base::TimeTicks now;
     {
@@ -215,9 +213,6 @@ class SGIVideoSyncProviderThreadShim
   // the sandbox goes up.
   friend class gfx::GLSurfaceGLX;
 
-  virtual ~SGIVideoSyncProviderThreadShim() {
-  }
-
   static Display* display_;
 
   XID window_;
@@ -237,15 +232,13 @@ class SGIVideoSyncVSyncProvider
  public:
   explicit SGIVideoSyncVSyncProvider(gfx::AcceleratedWidget window)
       : vsync_thread_(SGIVideoSyncThread::Create()),
-        shim_((new SGIVideoSyncProviderThreadShim(window))->AsWeakPtr()),
+        shim_(new SGIVideoSyncProviderThreadShim(window)),
         cancel_vsync_flag_(shim_->cancel_vsync_flag()),
         vsync_lock_(shim_->vsync_lock()) {
-    // The WeakPtr is bound to the SGIVideoSyncThread. We only use it for
-    // PostTask.
-    shim_->DetachFromThread();
     vsync_thread_->message_loop()->PostTask(
         FROM_HERE,
-        base::Bind(&SGIVideoSyncProviderThreadShim::Initialize, shim_));
+        base::Bind(&SGIVideoSyncProviderThreadShim::Initialize,
+                   base::Unretained(shim_.get())));
   }
 
   virtual ~SGIVideoSyncVSyncProvider() {
@@ -253,9 +246,11 @@ class SGIVideoSyncVSyncProvider
       base::AutoLock locked(*vsync_lock_);
       cancel_vsync_flag_->Set();
     }
-    vsync_thread_->message_loop()->PostTask(
+
+    // Hand-off |shim_| to be deleted on the |vsync_thread_|.
+    vsync_thread_->message_loop()->DeleteSoon(
         FROM_HERE,
-        base::Bind(&SGIVideoSyncProviderThreadShim::Destroy, shim_));
+        shim_.release());
   }
 
   virtual void GetVSyncParameters(
@@ -267,7 +262,8 @@ class SGIVideoSyncVSyncProvider
       vsync_thread_->message_loop()->PostTask(
           FROM_HERE,
           base::Bind(&SGIVideoSyncProviderThreadShim::GetVSyncParameters,
-                     shim_, base::Bind(
+                     base::Unretained(shim_.get()),
+                     base::Bind(
                          &SGIVideoSyncVSyncProvider::PendingCallbackRunner,
                          AsWeakPtr())));
     }
@@ -282,7 +278,9 @@ class SGIVideoSyncVSyncProvider
   }
 
   scoped_refptr<SGIVideoSyncThread> vsync_thread_;
-  base::WeakPtr<SGIVideoSyncProviderThreadShim> shim_;
+
+  // Thread shim through which the sync provider is accessed on |vsync_thread_|.
+  scoped_ptr<SGIVideoSyncProviderThreadShim> shim_;
 
   scoped_ptr<VSyncProvider::UpdateVSyncCallback> pending_callback_;
 
@@ -310,6 +308,9 @@ bool GLSurfaceGLX::InitializeOneOff() {
   static bool initialized = false;
   if (initialized)
     return true;
+
+  // http://crbug.com/245466
+  setenv("force_s3tc_enable", "true", 1);
 
   // SGIVideoSyncProviderShim (if instantiated) will issue X commands on
   // it's own thread.
@@ -413,11 +414,6 @@ void NativeViewGLSurfaceGLX::Destroy() {
 }
 
 bool NativeViewGLSurfaceGLX::Resize(const gfx::Size& size) {
-  // On Intel drivers, the frame buffer won't be resize until the next swap. If
-  // we only do PostSubBuffer, then we're stuck in the old size. Force a swap
-  // now.
-  if (gfx::g_driver_glx.ext.b_GLX_MESA_copy_sub_buffer && size_ != size)
-    SwapBuffers();
   size_ = size;
   return true;
 }

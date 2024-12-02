@@ -14,8 +14,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/token_service_factory.h"
@@ -249,9 +249,9 @@ class ProfileSyncServiceSessionTest
 
     // Pump messages posted by the sync core thread (which may end up
     // posting on the IO thread).
-    MessageLoop::current()->RunUntilIdle();
+    base::MessageLoop::current()->RunUntilIdle();
     io_thread_.Stop();
-    MessageLoop::current()->RunUntilIdle();
+    base::MessageLoop::current()->RunUntilIdle();
     BrowserWithTestWindowTest::TearDown();
   }
 
@@ -262,6 +262,8 @@ class ProfileSyncServiceSessionTest
     SigninManagerBase* signin =
         SigninManagerFactory::GetForProfile(profile());
     signin->SetAuthenticatedUsername("test_user");
+    ProfileOAuth2TokenServiceFactory::GetInstance()->SetTestingFactory(
+        profile(), FakeOAuth2TokenService::BuildTokenService);
     ProfileSyncComponentsFactoryMock* factory =
         new ProfileSyncComponentsFactoryMock();
     sync_service_.reset(new FakeProfileSyncService(
@@ -287,13 +289,15 @@ class ProfileSyncServiceSessionTest
     EXPECT_CALL(*factory, CreateSessionSyncComponents(_, _)).
         WillOnce(Return(ProfileSyncComponentsFactory::SyncComponents(
             model_associator_, change_processor_)));
-    EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _, _)).
+    EXPECT_CALL(*factory, CreateDataTypeManager(_, _, _, _, _, _)).
         WillOnce(ReturnNewDataTypeManager());
 
     TokenServiceFactory::GetForProfile(profile())->IssueAuthTokenForTest(
+        GaiaConstants::kGaiaOAuth2LoginRefreshToken, "oauth2_login_token");
+    TokenServiceFactory::GetForProfile(profile())->IssueAuthTokenForTest(
         GaiaConstants::kSyncService, "token");
     sync_service_->Initialize();
-    MessageLoop::current()->Run();
+    base::MessageLoop::current()->Run();
     return true;
   }
 
@@ -1200,7 +1204,7 @@ TEST_F(ProfileSyncServiceSessionTest, Favicons) {
   // Update associator.
   model_associator_->AssociateForeignSpecifics(meta, base::Time());
   model_associator_->AssociateForeignSpecifics(tab, base::Time());
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   ASSERT_FALSE(model_associator_->GetSyncedFaviconForPageURL(url, &favicon));
 
   // Now add a favicon.
@@ -1208,7 +1212,7 @@ TEST_F(ProfileSyncServiceSessionTest, Favicons) {
   tab.mutable_tab()->set_favicon_type(sync_pb::SessionTab::TYPE_WEB_FAVICON);
   tab.mutable_tab()->set_favicon("data");
   model_associator_->AssociateForeignSpecifics(tab, base::Time());
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   ASSERT_TRUE(model_associator_->GetSyncedFaviconForPageURL(url, &favicon));
   ASSERT_TRUE(CompareMemoryToString("data", favicon));
 
@@ -1219,7 +1223,7 @@ TEST_F(ProfileSyncServiceSessionTest, Favicons) {
   tab.mutable_tab()->clear_favicon_type();
   tab.mutable_tab()->clear_favicon();
   model_associator_->AssociateForeignSpecifics(tab, base::Time());
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   ASSERT_TRUE(model_associator_->GetSyncedFaviconForPageURL(url, &favicon));
 }
 

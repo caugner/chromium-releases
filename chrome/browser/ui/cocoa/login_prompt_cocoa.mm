@@ -6,11 +6,11 @@
 
 #include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
-#include "base/memory/scoped_nsobject.h"
-#include "base/string16.h"
-#include "base/string_util.h"
+#include "base/mac/scoped_nsobject.h"
+#include "base/strings/string16.h"
+#include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #import "chrome/browser/ui/cocoa/constrained_window/constrained_window_custom_sheet.h"
@@ -50,6 +50,7 @@ class LoginHandlerMac : public LoginHandler,
     [sheet_controller_ autofillLogin:base::SysUTF16ToNSString(username)
                             password:base::SysUTF16ToNSString(password)];
   }
+  virtual void OnLoginModelDestroying() OVERRIDE {}
 
   // LoginHandler:
   virtual void BuildViewForPasswordManager(
@@ -72,7 +73,7 @@ class LoginHandlerMac : public LoginHandler,
     WebContents* requesting_contents = GetWebContentsForLogin();
     DCHECK(requesting_contents);
 
-    scoped_nsobject<CustomConstrainedWindowSheet> sheet(
+    base::scoped_nsobject<CustomConstrainedWindowSheet> sheet(
         [[CustomConstrainedWindowSheet alloc]
             initWithCustomWindow:[sheet_controller_ window]]);
     constrained_window_.reset(new ConstrainedWindowMac(
@@ -120,7 +121,7 @@ class LoginHandlerMac : public LoginHandler,
   }
 
   // The Cocoa controller of the GUI.
-  scoped_nsobject<LoginHandlerSheet> sheet_controller_;
+  base::scoped_nsobject<LoginHandlerSheet> sheet_controller_;
 
   scoped_ptr<ConstrainedWindowMac> constrained_window_;
 

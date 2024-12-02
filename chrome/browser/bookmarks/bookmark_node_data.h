@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/files/file_path.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "googleurl/src/gurl.h"
 
 #if defined(TOOLKIT_VIEWS)
@@ -57,7 +57,7 @@ struct BookmarkNodeData {
     // Children, only used for non-URL nodes.
     std::vector<Element> children;
 
-    int64 id() { return id_; }
+    int64 id() const { return id_; }
 
    private:
     friend struct BookmarkNodeData;
@@ -70,11 +70,10 @@ struct BookmarkNodeData {
     int64 id_;
   };
 
-  BookmarkNodeData();
+  // The MIME type for the clipboard format for BookmarkNodeData.
+  static const char* kClipboardFormatString;
 
-#if defined(TOOLKIT_VIEWS)
-  static ui::OSExchangeData::CustomFormat GetBookmarkCustomFormat();
-#endif
+  BookmarkNodeData();
 
   // Created a BookmarkNodeData populated from the arguments.
   explicit BookmarkNodeData(const BookmarkNode* node);
@@ -82,21 +81,26 @@ struct BookmarkNodeData {
 
   ~BookmarkNodeData();
 
+#if defined(TOOLKIT_VIEWS)
+  static const ui::OSExchangeData::CustomFormat& GetBookmarkCustomFormat();
+#endif
+
+  static bool ClipboardContainsBookmarks();
+
   // Reads bookmarks from the given vector.
   bool ReadFromVector(const std::vector<const BookmarkNode*>& nodes);
 
   // Creates a single-bookmark DragData from url/title pair.
   bool ReadFromTuple(const GURL& url, const string16& title);
 
-  // Writes elements to the clipboard. If |profile| is not NULL, this will write
-  // the profile path to the pickled data. A NULL |profile| indicates that the
-  // data is not associated with a particular profile.
-  void WriteToClipboard(Profile* profile) const;
+  // Writes elements to the clipboard.
+  void WriteToClipboard() const;
 
   // Reads bookmarks from the general copy/paste clipboard. Prefers data
   // written via WriteToClipboard but will also attempt to read a plain
   // bookmark.
   bool ReadFromClipboard();
+
 #if defined(OS_MACOSX)
   // Reads bookmarks that are being dragged from the drag and drop
   // pasteboard.
@@ -153,11 +157,6 @@ struct BookmarkNodeData {
 
   // The actual elements written to the clipboard.
   std::vector<Element> elements;
-
-  // The MIME type for the clipboard format for BookmarkNodeData.
-  static const char* kClipboardFormatString;
-
-  static bool ClipboardContainsBookmarks();
 
  private:
   // Path of the profile we originated from.

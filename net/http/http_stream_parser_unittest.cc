@@ -8,8 +8,8 @@
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_piece.h"
+#include "base/strings/stringprintf.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -125,8 +125,12 @@ TEST(HttpStreamParser, ShouldMergeRequestHeadersAndBody_FileBody) {
   ASSERT_TRUE(file_util::CreateTemporaryFileInDir(temp_dir.path(),
                                                   &temp_file_path));
 
-  element_readers.push_back(new UploadFileElementReader(
-      base::MessageLoopProxy::current(), temp_file_path, 0, 0, base::Time()));
+  element_readers.push_back(
+      new UploadFileElementReader(base::MessageLoopProxy::current().get(),
+                                  temp_file_path,
+                                  0,
+                                  0,
+                                  base::Time()));
 
   scoped_ptr<UploadDataStream> body(new UploadDataStream(&element_readers, 0));
   TestCompletionCallback callback;
@@ -208,7 +212,7 @@ TEST(HttpStreamParser, AsyncChunkAndAsyncSocket) {
 
   scoped_ptr<DeterministicMockTCPClientSocket> transport(
       new DeterministicMockTCPClientSocket(NULL, &data));
-  data.set_socket(transport->AsWeakPtr());
+  data.set_delegate(transport->AsWeakPtr());
 
   TestCompletionCallback callback;
   int rv = transport->Connect(callback.callback());
@@ -225,8 +229,8 @@ TEST(HttpStreamParser, AsyncChunkAndAsyncSocket) {
   request_info.upload_data_stream = &upload_stream;
 
   scoped_refptr<GrowableIOBuffer> read_buffer(new GrowableIOBuffer);
-  HttpStreamParser parser(socket_handle.get(), &request_info, read_buffer,
-                          BoundNetLog());
+  HttpStreamParser parser(
+      socket_handle.get(), &request_info, read_buffer.get(), BoundNetLog());
 
   HttpRequestHeaders request_headers;
   request_headers.SetHeader("Host", "localhost");
@@ -292,7 +296,8 @@ TEST(HttpStreamParser, AsyncChunkAndAsyncSocket) {
 
   // Finally, attempt to read the response body.
   scoped_refptr<IOBuffer> body_buffer(new IOBuffer(kBodySize));
-  rv = parser.ReadResponseBody(body_buffer, kBodySize, callback.callback());
+  rv = parser.ReadResponseBody(
+      body_buffer.get(), kBodySize, callback.callback());
   ASSERT_EQ(ERR_IO_PENDING, rv);
   data.RunFor(1);
 
@@ -362,7 +367,7 @@ TEST(HttpStreamParser, TruncatedHeaders) {
 
       scoped_ptr<DeterministicMockTCPClientSocket> transport(
           new DeterministicMockTCPClientSocket(NULL, &data));
-      data.set_socket(transport->AsWeakPtr());
+      data.set_delegate(transport->AsWeakPtr());
 
       TestCompletionCallback callback;
       int rv = transport->Connect(callback.callback());
@@ -382,8 +387,8 @@ TEST(HttpStreamParser, TruncatedHeaders) {
       request_info.load_flags = LOAD_NORMAL;
 
       scoped_refptr<GrowableIOBuffer> read_buffer(new GrowableIOBuffer);
-      HttpStreamParser parser(socket_handle.get(), &request_info, read_buffer,
-                              BoundNetLog());
+      HttpStreamParser parser(
+          socket_handle.get(), &request_info, read_buffer.get(), BoundNetLog());
 
       HttpRequestHeaders request_headers;
       HttpResponseInfo response_info;
@@ -400,7 +405,7 @@ TEST(HttpStreamParser, TruncatedHeaders) {
           EXPECT_EQ(ERR_CONNECTION_CLOSED, rv);
           EXPECT_TRUE(response_info.headers.get());
         } else {
-          EXPECT_EQ(ERR_HEADERS_TRUNCATED, rv);
+          EXPECT_EQ(ERR_RESPONSE_HEADERS_TRUNCATED, rv);
           EXPECT_FALSE(response_info.headers.get());
         }
       }

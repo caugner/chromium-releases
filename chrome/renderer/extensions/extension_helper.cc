@@ -10,7 +10,7 @@
 #include "base/json/json_string_value_serializer.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/render_messages.h"
@@ -21,17 +21,16 @@
 #include "chrome/renderer/extensions/miscellaneous_bindings.h"
 #include "chrome/renderer/extensions/user_script_scheduler.h"
 #include "chrome/renderer/extensions/user_script_slave.h"
+#include "chrome/renderer/web_apps.h"
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/render_view_visitor.h"
 #include "extensions/common/constants.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebScopedUserGesture.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
-#include "webkit/glue/image_resource_fetcher.h"
-#include "webkit/glue/resource_fetcher.h"
+#include "third_party/WebKit/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/public/web/WebConsoleMessage.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebScopedUserGesture.h"
+#include "third_party/WebKit/public/web/WebView.h"
 
 using content::ConsoleMessageLevel;
 using WebKit::WebConsoleMessage;
@@ -40,8 +39,6 @@ using WebKit::WebFrame;
 using WebKit::WebURLRequest;
 using WebKit::WebScopedUserGesture;
 using WebKit::WebView;
-using webkit_glue::ImageResourceFetcher;
-using webkit_glue::ResourceFetcher;
 
 namespace extensions {
 
@@ -234,13 +231,6 @@ void ExtensionHelper::FrameDetached(WebFrame* frame) {
 }
 
 void ExtensionHelper::DidCreateDataSource(WebFrame* frame, WebDataSource* ds) {
-  // If there are any app-related fetches in progress, they can be cancelled now
-  // since we have navigated away from the page that created them.
-  if (!frame->parent()) {
-    app_icon_fetchers_.clear();
-    app_definition_fetcher_.reset(NULL);
-  }
-
   // Check first if we created a scheduler for the frame, since this function
   // gets called for navigations within the document.
   if (g_schedulers.Get().count(frame))
@@ -260,17 +250,13 @@ void ExtensionHelper::OnExtensionResponse(int request_id,
 }
 
 void ExtensionHelper::OnExtensionMessageInvoke(const std::string& extension_id,
+                                               const std::string& module_name,
                                                const std::string& function_name,
                                                const base::ListValue& args,
-                                               const GURL& event_url,
                                                bool user_gesture) {
-  scoped_ptr<WebScopedUserGesture> web_user_gesture;
-  if (user_gesture) {
-    web_user_gesture.reset(new WebScopedUserGesture);
-  }
-
-  dispatcher_->v8_context_set().DispatchChromeHiddenMethod(
-      extension_id, function_name, args, render_view(), event_url);
+  dispatcher_->InvokeModuleSystemMethod(
+      render_view(), extension_id, module_name, function_name, args,
+      user_gesture);
 }
 
 void ExtensionHelper::OnExtensionDispatchOnConnect(
@@ -374,7 +360,8 @@ void ExtensionHelper::OnAppWindowClosed() {
       dispatcher_->v8_context_set().GetByV8Context(script_context);
   if (!chrome_v8_context)
     return;
-  chrome_v8_context->CallChromeHiddenMethod("OnAppWindowClosed", 0, NULL, NULL);
+  chrome_v8_context->module_system()->CallModuleMethod(
+      "app.window", "onAppWindowClosed");
 }
 
 }  // namespace extensions

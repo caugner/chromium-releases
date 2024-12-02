@@ -9,6 +9,7 @@
 #include "base/message_loop.h"
 #include "chrome/common/extensions/extension_manifest_constants.h"
 #include "chrome/common/extensions/extension_messages.h"
+#include "chrome/common/extensions/permissions/permissions_data.h"
 #include "chrome/renderer/chrome_render_process_observer.h"
 #include "chrome/renderer/extensions/dispatcher.h"
 #include "chrome/renderer/extensions/dom_activity_logger.h"
@@ -18,11 +19,11 @@
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/v8_value_converter.h"
 #include "extensions/common/error_utils.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/public/platform/WebString.h"
+#include "third_party/WebKit/public/platform/WebVector.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebView.h"
 #include "v8/include/v8.h"
 
 namespace {
@@ -78,18 +79,18 @@ void UserScriptScheduler::DidFinishDocumentLoad() {
   current_location_ = UserScript::DOCUMENT_END;
   MaybeRun();
   // Schedule a run for DOCUMENT_IDLE
-  MessageLoop::current()->PostDelayedTask(
-      FROM_HERE, base::Bind(&UserScriptScheduler::IdleTimeout,
-                            weak_factory_.GetWeakPtr()),
+  base::MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&UserScriptScheduler::IdleTimeout, weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromMilliseconds(kUserScriptIdleTimeoutMs));
 }
 
 void UserScriptScheduler::DidFinishLoad() {
   current_location_ = UserScript::DOCUMENT_IDLE;
   // Ensure that running scripts does not keep any progress UI running.
-  MessageLoop::current()->PostTask(
-      FROM_HERE, base::Bind(&UserScriptScheduler::MaybeRun,
-                            weak_factory_.GetWeakPtr()));
+  base::MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&UserScriptScheduler::MaybeRun, weak_factory_.GetWeakPtr()));
 }
 
 void UserScriptScheduler::DidStartProvisionalLoad() {
@@ -179,11 +180,14 @@ void UserScriptScheduler::ExecuteCodeImpl(
       // For child frames, we just skip ones the extension doesn't have access
       // to and carry on.
       if (!params.is_web_view &&
-          !extension->CanExecuteScriptOnPage(child_frame->document().url(),
-                                             frame_->document().url(),
-                                             extension_helper->tab_id(),
-                                             NULL,
-                                             NULL)) {
+          !PermissionsData::CanExecuteScriptOnPage(
+              extension,
+              child_frame->document().url(),
+              frame_->document().url(),
+              extension_helper->tab_id(),
+              NULL,
+              -1,
+              NULL)) {
         if (child_frame->parent()) {
           continue;
         } else {

@@ -15,13 +15,13 @@
 #include "base/metrics/histogram.h"
 #include "base/process.h"
 #include "base/process_util.h"
-#include "base/string16.h"
-#include "base/string_util.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part_chromeos.h"
@@ -34,8 +34,8 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "chromeos/chromeos_switches.h"
 #include "chromeos/memory/low_memory_listener.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -173,7 +173,8 @@ OomPriorityManager::OomPriorityManager()
       discard_count_(0),
       recent_tab_discard_(false) {
   // We only need the low memory observer if we want to discard tabs.
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoDiscardTabs))
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kNoDiscardTabs))
     low_memory_listener_.reset(new LowMemoryListener(this));
 
   registrar_.Add(this,

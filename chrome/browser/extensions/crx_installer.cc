@@ -14,12 +14,12 @@
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/sequenced_task_runner.h"
-#include "base/string_util.h"
-#include "base/stringprintf.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "base/version.h"
 #include "chrome/browser/extensions/convert_user_script.h"
 #include "chrome/browser/extensions/convert_web_app.h"
@@ -41,6 +41,8 @@
 #include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/manifest_handlers/icons_handler.h"
 #include "chrome/common/extensions/manifest_handlers/shared_module_info.h"
+#include "chrome/common/extensions/manifest_url_handler.h"
+#include "chrome/common/extensions/user_script.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/resource_dispatcher_host.h"
@@ -143,14 +145,13 @@ void CrxInstaller::InstallCrx(const base::FilePath& source_file) {
   source_file_ = source_file;
 
   scoped_refptr<SandboxedUnpacker> unpacker(
-      new SandboxedUnpacker(
-          source_file,
-          content::ResourceDispatcherHost::Get() != NULL,
-          install_source_,
-          creation_flags_,
-          install_directory_,
-          installer_task_runner_,
-          this));
+      new SandboxedUnpacker(source_file,
+                            content::ResourceDispatcherHost::Get() != NULL,
+                            install_source_,
+                            creation_flags_,
+                            install_directory_,
+                            installer_task_runner_.get(),
+                            this));
 
   if (!installer_task_runner_->PostTask(
           FROM_HERE,
@@ -175,12 +176,12 @@ void CrxInstaller::ConvertUserScriptOnFileThread() {
   string16 error;
   scoped_refptr<Extension> extension = ConvertUserScriptToExtension(
       source_file_, download_url_, install_directory_, &error);
-  if (!extension) {
+  if (!extension.get()) {
     ReportFailureFromFileThread(CrxInstallerError(error));
     return;
   }
 
-  OnUnpackSuccess(extension->path(), extension->path(), NULL, extension);
+  OnUnpackSuccess(extension->path(), extension->path(), NULL, extension.get());
 }
 
 void CrxInstaller::InstallWebApp(const WebApplicationInfo& web_app) {
@@ -199,7 +200,7 @@ void CrxInstaller::ConvertWebAppOnFileThread(
   string16 error;
   scoped_refptr<Extension> extension(
       ConvertWebAppToExtension(web_app, base::Time::Now(), install_directory));
-  if (!extension) {
+  if (!extension.get()) {
     // Validation should have stopped any potential errors before getting here.
     NOTREACHED() << "Could not convert web app to extension.";
     return;
@@ -207,7 +208,7 @@ void CrxInstaller::ConvertWebAppOnFileThread(
 
   // TODO(aa): conversion data gets lost here :(
 
-  OnUnpackSuccess(extension->path(), extension->path(), NULL, extension);
+  OnUnpackSuccess(extension->path(), extension->path(), NULL, extension.get());
 }
 
 CrxInstallerError CrxInstaller::AllowInstall(const Extension* extension) {
@@ -310,7 +311,7 @@ CrxInstallerError CrxInstaller::AllowInstall(const Extension* extension) {
       // For apps with a gallery update URL, require that they be installed
       // from the gallery.
       // TODO(erikkay) Apply this rule for paid extensions and themes as well.
-      if (extension->UpdatesFromGallery()) {
+      if (ManifestURL::UpdatesFromGallery(extension)) {
         return CrxInstallerError(
             l10n_util::GetStringFUTF16(
                 IDS_EXTENSION_DISALLOW_NON_DOWNLOADED_GALLERY_INSTALLS,
@@ -385,7 +386,7 @@ void CrxInstaller::OnUnpackSuccess(const base::FilePath& temp_dir,
   }
 
   if (client_) {
-    IconsInfo::DecodeIcon(installer_.extension(),
+    IconsInfo::DecodeIcon(installer_.extension().get(),
                           extension_misc::EXTENSION_ICON_LARGE,
                           ExtensionIconSet::MATCH_BIGGER,
                           &install_icon_);
@@ -399,7 +400,7 @@ void CrxInstaller::OnUnpackSuccess(const base::FilePath& temp_dir,
 
 void CrxInstaller::CheckImportsAndRequirements() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  ExtensionService* service = service_weak_;
+  ExtensionService* service = service_weak_.get();
   if (!service || service->browser_terminating())
     return;
 
@@ -411,17 +412,8 @@ void CrxInstaller::CheckImportsAndRequirements() {
       Version version_required(i->minimum_version);
       const Extension* imported_module =
           service->GetExtensionById(i->extension_id, true);
-      if (!imported_module ||
-          (version_required.IsValid() &&
-           imported_module->version()->CompareTo(version_required) < 0)) {
-        ReportFailureFromUIThread(
-            CrxInstallerError(l10n_util::GetStringFUTF16(
-                IDS_EXTENSION_INSTALL_DEPENDENCY_NOT_FOUND,
-                ASCIIToUTF16(i->extension_id),
-                ASCIIToUTF16(i->minimum_version))));
-        return;
-      }
-      if (!SharedModuleInfo::IsSharedModule(imported_module)) {
+      if (imported_module &&
+          !SharedModuleInfo::IsSharedModule(imported_module)) {
         ReportFailureFromUIThread(
             CrxInstallerError(l10n_util::GetStringFUTF16(
                 IDS_EXTENSION_INSTALL_DEPENDENCY_NOT_SHARED_MODULE,
@@ -445,31 +437,12 @@ void CrxInstaller::OnRequirementsChecked(
     }
     has_requirement_errors_ = true;
   }
-
-#if defined(ENABLE_MANAGED_USERS) && !defined(OS_CHROMEOS)
-  // Extensions which should be installed by policy are installed without
-  // using the ExtensionInstallPrompt. In that case, |client_| is NULL.
-  if (!client_) {
-    // Automatically set authorization
-    installer_.OnAuthorizationResult(
-        base::Bind(&CrxInstaller::ConfirmInstall, this),
-        true);
-    return;
-  }
-  // |parent_web_contents| could be NULL when the client is instantiated from
-  // ExtensionEnableFlow, but that code path does not lead to here. Also they
-  // are NULL in some tests.
-  installer_.ShowPassphraseDialog(
-      client_->parent_web_contents(),
-      base::Bind(&CrxInstaller::ConfirmInstall, this));
-#else
   ConfirmInstall();
-#endif
 }
 
 void CrxInstaller::ConfirmInstall() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  ExtensionService* service = service_weak_;
+  ExtensionService* service = service_weak_.get();
   if (!service || service->browser_terminating())
     return;
 
@@ -517,7 +490,7 @@ void CrxInstaller::ConfirmInstall() {
 void CrxInstaller::InstallUIProceed() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  ExtensionService* service = service_weak_;
+  ExtensionService* service = service_weak_.get();
   if (!service || service->browser_terminating())
     return;
 
@@ -613,7 +586,7 @@ void CrxInstaller::CompleteInstall() {
       version_dir,
       install_source_,
       extension()->creation_flags() | Extension::REQUIRE_KEY,
-      &error));
+      &error).get());
 
   if (extension()) {
     ReportSuccessFromFileThread();
@@ -678,7 +651,7 @@ void CrxInstaller::ReportSuccessFromFileThread() {
 void CrxInstaller::ReportSuccessFromUIThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (!service_weak_ || service_weak_->browser_terminating())
+  if (!service_weak_.get() || service_weak_->browser_terminating())
     return;
 
   if (!update_from_settings_page_) {
@@ -776,7 +749,7 @@ void CrxInstaller::CleanupTempFiles() {
 void CrxInstaller::CheckUpdateFromSettingsPage() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  ExtensionService* service = service_weak_;
+  ExtensionService* service = service_weak_.get();
   if (!service || service->browser_terminating())
     return;
 
@@ -797,7 +770,7 @@ void CrxInstaller::CheckUpdateFromSettingsPage() {
 void CrxInstaller::ConfirmReEnable() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  ExtensionService* service = service_weak_;
+  ExtensionService* service = service_weak_.get();
   if (!service || service->browser_terminating())
     return;
 

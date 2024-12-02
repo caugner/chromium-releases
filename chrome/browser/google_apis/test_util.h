@@ -14,31 +14,27 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/template_util.h"
-#include "chrome/browser/google_apis/base_operations.h"
+#include "chrome/browser/google_apis/base_requests.h"
 #include "chrome/browser/google_apis/gdata_errorcode.h"
+#include "chrome/browser/google_apis/task_util.h"
 
 class GURL;
 
 namespace base {
 class FilePath;
+class RunLoop;
 class Value;
 }
 
-namespace google_apis {
-
-class AboutResource;
-class AccountMetadata;
-class AppList;
-class AuthenticatedOperationInterface;
-class ResourceEntry;
-class ResourceList;
-struct UploadRangeResponse;
-
+namespace net {
 namespace test_server {
-struct HttpRequest;
+class BasicHttpResponse;
 class HttpResponse;
+struct HttpRequest;
+}
 }
 
+namespace google_apis {
 namespace test_util {
 
 // Runs a task posted to the blocking pool, including subsequent tasks posted
@@ -50,8 +46,15 @@ namespace test_util {
 // repeatedly.
 void RunBlockingPoolTask();
 
-// Runs the closure, and then quits the current MessageLoop.
-void RunAndQuit(const base::Closure& closure);
+// Runs the closure, and then quits the |run_loop|.
+void RunAndQuit(base::RunLoop* run_loop, const base::Closure& closure);
+
+// Returns callback which runs the given |callback| and then quits |run_loop|.
+template<typename CallbackType>
+CallbackType CreateQuitCallback(base::RunLoop* run_loop,
+                                const CallbackType& callback) {
+  return CreateComposedCallback(base::Bind(&RunAndQuit, run_loop), callback);
+}
 
 // Removes |prefix| from |input| and stores the result in |output|. Returns
 // true if the prefix is removed.
@@ -87,23 +90,17 @@ bool CreateFileOfSpecifiedSize(const base::FilePath& temp_dir,
 scoped_ptr<base::Value> LoadJSONFile(const std::string& relative_path);
 
 // Returns a HttpResponse created from the given file path.
-scoped_ptr<test_server::HttpResponse> CreateHttpResponseFromFile(
+scoped_ptr<net::test_server::BasicHttpResponse> CreateHttpResponseFromFile(
     const base::FilePath& file_path);
-
-// Does nothing for ReAuthenticateCallback(). This function should be used
-// if it is not expected to reach this method as there won't be any
-// authentication failures in the test.
-void DoNothingForReAuthenticateCallback(
-    AuthenticatedOperationInterface* operation);
 
 // Handles a request for downloading a file. Reads a file from the test
 // directory and returns the content. Also, copies the |request| to the memory
 // pointed by |out_request|.
 // |base_url| must be set to the server's base url.
-scoped_ptr<test_server::HttpResponse> HandleDownloadRequest(
+scoped_ptr<net::test_server::HttpResponse> HandleDownloadFileRequest(
     const GURL& base_url,
-    test_server::HttpRequest* out_request,
-    const test_server::HttpRequest& request);
+    net::test_server::HttpRequest* out_request,
+    const net::test_server::HttpRequest& request);
 
 // Returns true if |json_data| is not NULL and equals to the content in
 // |expected_json_file_path|. The failure reason will be logged into LOG(ERROR)
@@ -164,7 +161,7 @@ template<typename T> struct InTypeHelper<false, T> {
   typedef T InType;
 };
 
-// Simulates the std::move operation in C++11. We use pointer here for argument,
+// Simulates the std::move function in C++11. We use pointer here for argument,
 // instead of rvalue reference.
 template<bool IsMovable, typename T> struct MoveHelper {
   static const T& Move(const T* in) { return *in; }
@@ -291,7 +288,7 @@ void AppendProgressCallbackResult(std::vector<ProgressInfo>* progress_values,
                                   int64 progress,
                                   int64 total);
 
-// Helpeer utility for recording the content via GetContentCallback.
+// Helper utility for recording the content via GetContentCallback.
 class TestGetContentCallback {
  public:
   TestGetContentCallback();

@@ -20,21 +20,7 @@
 #include "google_apis/gaia/oauth2_access_token_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 
-namespace {
-
-// Maximum number of retries in fetching an OAuth2 access token.
-const int kMaxFetchRetryNum = 5;
-
-// Returns an exponential backoff in milliseconds including randomness less than
-// 1000 ms when retrying fetching an OAuth2 access token.
-int64 ComputeExponentialBackOffMilliseconds(int retry_num) {
-  DCHECK(retry_num < kMaxFetchRetryNum);
-  int64 exponential_backoff_in_seconds = 1 << retry_num;
-  // Returns a backoff with randomness < 1000ms
-  return (exponential_backoff_in_seconds + base::RandDouble()) * 1000;
-}
-
-}  // namespace
+int OAuth2TokenService::max_fetch_retry_num_ = 5;
 
 OAuth2TokenService::RequestImpl::RequestImpl(
     OAuth2TokenService::Consumer* consumer)
@@ -119,7 +105,9 @@ class OAuth2TokenService::Fetcher : public OAuth2AccessTokenConsumer {
           base::WeakPtr<RequestImpl> waiting_request);
   void Start();
   void InformWaitingRequests();
+  void InformWaitingRequestsAndDelete();
   static bool ShouldRetry(const GoogleServiceAuthError& error);
+  int64 ComputeExponentialBackOffMilliseconds(int retry_num);
 
   // |oauth2_token_service_| remains valid for the life of this Fetcher, since
   // this Fetcher is destructed in the dtor of the OAuth2TokenService or is
@@ -171,7 +159,7 @@ OAuth2TokenService::Fetcher::Fetcher(
       retry_number_(0),
       error_(GoogleServiceAuthError::SERVICE_UNAVAILABLE) {
   DCHECK(oauth2_token_service_);
-  DCHECK(getter_);
+  DCHECK(getter_.get());
   DCHECK(refresh_token_.length());
   waiting_requests_.push_back(waiting_request);
 }
@@ -183,7 +171,7 @@ OAuth2TokenService::Fetcher::~Fetcher() {
 }
 
 void OAuth2TokenService::Fetcher::Start() {
-  fetcher_.reset(new OAuth2AccessTokenFetcher(this, getter_));
+  fetcher_.reset(new OAuth2AccessTokenFetcher(this, getter_.get()));
   fetcher_->Start(GaiaUrls::GetInstance()->oauth2_chrome_client_id(),
                   GaiaUrls::GetInstance()->oauth2_chrome_client_secret(),
                   refresh_token_,
@@ -209,18 +197,14 @@ void OAuth2TokenService::Fetcher::OnGetTokenSuccess(
                                             scopes_,
                                             access_token_,
                                             expiration_date_);
-  // Deregisters itself from the service to prevent more waiting requests to
-  // be added when it calls back the waiting requests.
-  oauth2_token_service_->OnFetchComplete(this);
-  InformWaitingRequests();
-  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  InformWaitingRequestsAndDelete();
 }
 
 void OAuth2TokenService::Fetcher::OnGetTokenFailure(
     const GoogleServiceAuthError& error) {
   fetcher_.reset();
 
-  if (ShouldRetry(error) && retry_number_ < kMaxFetchRetryNum) {
+  if (ShouldRetry(error) && retry_number_ < max_fetch_retry_num_) {
     int64 backoff = ComputeExponentialBackOffMilliseconds(retry_number_);
     ++retry_number_;
     retry_timer_.Stop();
@@ -231,14 +215,18 @@ void OAuth2TokenService::Fetcher::OnGetTokenFailure(
     return;
   }
 
-  // Fetch completes.
   error_ = error;
+  InformWaitingRequestsAndDelete();
+}
 
-  // Deregisters itself from the service to prevent more waiting requests to be
-  // added when it calls back the waiting requests.
-  oauth2_token_service_->OnFetchComplete(this);
-  InformWaitingRequests();
-  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+// Returns an exponential backoff in milliseconds including randomness less than
+// 1000 ms when retrying fetching an OAuth2 access token.
+int64 OAuth2TokenService::Fetcher::ComputeExponentialBackOffMilliseconds(
+    int retry_num) {
+  DCHECK(retry_num < max_fetch_retry_num_);
+  int64 exponential_backoff_in_seconds = 1 << retry_num;
+  // Returns a backoff with randomness < 1000ms
+  return (exponential_backoff_in_seconds + base::RandDouble()) * 1000;
 }
 
 // static
@@ -255,10 +243,18 @@ void OAuth2TokenService::Fetcher::InformWaitingRequests() {
       waiting_requests_.begin();
   for (; iter != waiting_requests_.end(); ++iter) {
     base::WeakPtr<RequestImpl> waiting_request = *iter;
-    if (waiting_request)
+    if (waiting_request.get())
       waiting_request->InformConsumer(error_, access_token_, expiration_date_);
   }
   waiting_requests_.clear();
+}
+
+void OAuth2TokenService::Fetcher::InformWaitingRequestsAndDelete() {
+  // Deregisters itself from the service to prevent more waiting requests to
+  // be added when it calls back the waiting requests.
+  oauth2_token_service_->OnFetchComplete(this);
+  InformWaitingRequests();
+  base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
 void OAuth2TokenService::Fetcher::AddWaitingRequest(
@@ -303,18 +299,6 @@ bool OAuth2TokenService::RefreshTokenIsAvailable() {
   return !GetRefreshToken().empty();
 }
 
-// static
-void OAuth2TokenService::InformConsumer(
-    base::WeakPtr<OAuth2TokenService::RequestImpl> request,
-    const GoogleServiceAuthError& error,
-    const std::string& access_token,
-    const base::Time& expiration_date) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
-
-  if (request)
-    request->InformConsumer(error, access_token, expiration_date);
-}
-
 scoped_ptr<OAuth2TokenService::Request> OAuth2TokenService::StartRequest(
     const OAuth2TokenService::ScopeSet& scopes,
     OAuth2TokenService::Consumer* consumer) {
@@ -324,8 +308,8 @@ scoped_ptr<OAuth2TokenService::Request> OAuth2TokenService::StartRequest(
 
   std::string refresh_token = GetRefreshToken();
   if (refresh_token.empty()) {
-    MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
-        &OAuth2TokenService::InformConsumer,
+    base::MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
+        &RequestImpl::InformConsumer,
         request->AsWeakPtr(),
         GoogleServiceAuthError(
             GoogleServiceAuthError::USER_NOT_SIGNED_UP),
@@ -337,9 +321,9 @@ scoped_ptr<OAuth2TokenService::Request> OAuth2TokenService::StartRequest(
   if (HasCacheEntry(scopes))
     return StartCacheLookupRequest(scopes, consumer);
 
-  // Makes sure there is a pending fetcher for |scopes| and |refresh_token|.
-  // Adds |request| to the waiting request list of this fetcher so |request|
-  // will be called back when this fetcher finishes fetching.
+  // If there is already a pending fetcher for |scopes| and |refresh_token|,
+  // simply register this |request| for those results rather than starting
+  // a new fetcher.
   FetchParameters fetch_parameters = std::make_pair(refresh_token, scopes);
   std::map<FetchParameters, Fetcher*>::iterator iter =
       pending_fetchers_.find(fetch_parameters);
@@ -347,9 +331,13 @@ scoped_ptr<OAuth2TokenService::Request> OAuth2TokenService::StartRequest(
     iter->second->AddWaitingRequest(request->AsWeakPtr());
     return request.PassAs<Request>();
   }
-  pending_fetchers_[fetch_parameters] = Fetcher::CreateAndStart(
-      this, request_context_getter_, refresh_token, scopes,
-      request->AsWeakPtr());
+
+  pending_fetchers_[fetch_parameters] =
+      Fetcher::CreateAndStart(this,
+                              request_context_getter_.get(),
+                              refresh_token,
+                              scopes,
+                              request->AsWeakPtr());
   return request.PassAs<Request>();
 }
 
@@ -360,8 +348,8 @@ scoped_ptr<OAuth2TokenService::Request>
   CHECK(HasCacheEntry(scopes));
   const CacheEntry* cache_entry = GetCacheEntry(scopes);
   scoped_ptr<RequestImpl> request(new RequestImpl(consumer));
-  MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
-      &OAuth2TokenService::InformConsumer,
+  base::MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
+      &RequestImpl::InformConsumer,
       request->AsWeakPtr(),
       GoogleServiceAuthError(GoogleServiceAuthError::NONE),
       cache_entry->access_token,
@@ -440,7 +428,7 @@ bool OAuth2TokenService::RemoveCacheEntry(
     const std::string& token_to_remove) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   TokenCache::iterator token_iterator = token_cache_.find(scopes);
-  if (token_iterator == token_cache_.end() &&
+  if (token_iterator != token_cache_.end() &&
       token_iterator->second.access_token == token_to_remove) {
     token_cache_.erase(token_iterator);
     return true;
@@ -471,4 +459,10 @@ void OAuth2TokenService::ClearCache() {
 
 int OAuth2TokenService::cache_size_for_testing() const {
   return token_cache_.size();
+}
+
+void OAuth2TokenService::set_max_authorization_token_fetch_retries_for_testing(
+    int max_retries) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  max_fetch_retry_num_ = max_retries;
 }

@@ -19,7 +19,7 @@ namespace {
 class BufferedWriteStreamSocketTest : public testing::Test {
  public:
   void Finish() {
-    MessageLoop::current()->RunUntilIdle();
+    base::MessageLoop::current()->RunUntilIdle();
     EXPECT_TRUE(data_->at_read_eof());
     EXPECT_TRUE(data_->at_write_eof());
   }
@@ -32,7 +32,7 @@ class BufferedWriteStreamSocketTest : public testing::Test {
     }
     DeterministicMockTCPClientSocket* wrapped_socket =
         new DeterministicMockTCPClientSocket(net_log_.net_log(), data_.get());
-    data_->set_socket(wrapped_socket->AsWeakPtr());
+    data_->set_delegate(wrapped_socket->AsWeakPtr());
     socket_.reset(new BufferedWriteStreamSocket(wrapped_socket));
     socket_->Connect(callback_.callback());
   }
@@ -86,7 +86,7 @@ TEST_F(BufferedWriteStreamSocketTest, WriteWhileBlocked) {
   };
   Initialize(writes, arraysize(writes));
   TestWrite("abc");
-  MessageLoop::current()->RunUntilIdle();
+  base::MessageLoop::current()->RunUntilIdle();
   TestWrite("def");
   data_->RunFor(1);
   TestWrite("ghi");

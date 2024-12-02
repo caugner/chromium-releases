@@ -18,6 +18,8 @@
 #include "cc/test/render_pass_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkDevice.h"
 
 namespace cc {
 namespace {
@@ -26,9 +28,10 @@ class SoftwareRendererTest : public testing::Test, public RendererClient {
  public:
   SoftwareRendererTest() : should_clear_root_render_pass_(true) {}
 
-  void InitializeRenderer() {
+  void InitializeRenderer(
+      scoped_ptr<SoftwareOutputDevice> software_output_device) {
     output_surface_ = FakeOutputSurface::CreateSoftware(
-        make_scoped_ptr(new SoftwareOutputDevice));
+        software_output_device.Pass());
     resource_provider_ = ResourceProvider::Create(output_surface_.get(), 0);
     renderer_ = SoftwareRenderer::Create(
         this, output_surface_.get(), resource_provider());
@@ -40,8 +43,8 @@ class SoftwareRendererTest : public testing::Test, public RendererClient {
 
   SoftwareRenderer* renderer() const { return renderer_.get(); }
 
-  void set_viewport_size(gfx::Size viewport_size) {
-    viewport_size_ = viewport_size;
+  void set_viewport(gfx::Rect viewport) {
+    viewport_ = viewport;
   }
 
   void set_should_clear_root_render_pass(bool clear_root_render_pass) {
@@ -49,8 +52,11 @@ class SoftwareRendererTest : public testing::Test, public RendererClient {
   }
 
   // RendererClient implementation.
-  virtual gfx::Size DeviceViewportSize() const OVERRIDE {
-    return viewport_size_;
+  virtual gfx::Rect DeviceViewport() const OVERRIDE {
+    return viewport_;
+  }
+  virtual float DeviceScaleFactor() const OVERRIDE {
+    return 1.f;
   }
   virtual const LayerTreeSettings& Settings() const OVERRIDE {
     return settings_;
@@ -75,22 +81,19 @@ class SoftwareRendererTest : public testing::Test, public RendererClient {
   scoped_ptr<FakeOutputSurface> output_surface_;
   scoped_ptr<ResourceProvider> resource_provider_;
   scoped_ptr<SoftwareRenderer> renderer_;
-  gfx::Size viewport_size_;
+  gfx::Rect viewport_;
   LayerTreeSettings settings_;
   bool should_clear_root_render_pass_;
 };
 
 TEST_F(SoftwareRendererTest, SolidColorQuad) {
   gfx::Size outer_size(100, 100);
-#if !defined(OS_ANDROID)
-  int outer_pixels = outer_size.width() * outer_size.height();
-#endif
   gfx::Size inner_size(98, 98);
   gfx::Rect outer_rect(outer_size);
   gfx::Rect inner_rect(gfx::Point(1, 1), inner_size);
-  set_viewport_size(outer_size);
+  set_viewport(gfx::Rect(outer_size));
 
-  InitializeRenderer();
+  InitializeRenderer(make_scoped_ptr(new SoftwareOutputDevice));
 
   scoped_ptr<SharedQuadState> shared_quad_state = SharedQuadState::Create();
   shared_quad_state->SetAll(
@@ -111,31 +114,28 @@ TEST_F(SoftwareRendererTest, SolidColorQuad) {
   list.push_back(root_render_pass.PassAs<RenderPass>());
   renderer()->DrawFrame(&list);
 
-  scoped_ptr<SkColor[]> pixels(new SkColor[DeviceViewportSize().width() *
-      DeviceViewportSize().height()]);
-  renderer()->GetFramebufferPixels(pixels.get(), outer_rect);
+  SkBitmap output;
+  output.setConfig(SkBitmap::kARGB_8888_Config,
+                   DeviceViewport().width(),
+                   DeviceViewport().height());
+  output.allocPixels();
+  renderer()->GetFramebufferPixels(output.getPixels(), outer_rect);
 
-// FIXME: This fails on Android. Endianness maybe?
-// Yellow: expects 0xFFFFFF00, was 0xFF00FFFF on android.
-// Cyan:   expects 0xFF00FFFF, was 0xFFFFFF00 on android.
-// http://crbug.com/154528
-#if !defined(OS_ANDROID)
-  EXPECT_EQ(SK_ColorYELLOW, pixels[0]);
-  EXPECT_EQ(SK_ColorYELLOW, pixels[outer_pixels - 1]);
-  EXPECT_EQ(SK_ColorCYAN, pixels[outer_size.width() + 1]);
-  EXPECT_EQ(SK_ColorCYAN, pixels[outer_pixels - outer_size.width() - 2]);
-#endif
+  EXPECT_EQ(SK_ColorYELLOW, output.getColor(0, 0));
+  EXPECT_EQ(SK_ColorYELLOW,
+            output.getColor(outer_size.width() - 1, outer_size.height() - 1));
+  EXPECT_EQ(SK_ColorCYAN, output.getColor(1, 1));
+  EXPECT_EQ(SK_ColorCYAN,
+            output.getColor(inner_size.width() - 1, inner_size.height() - 1));
 }
 
 TEST_F(SoftwareRendererTest, TileQuad) {
   gfx::Size outer_size(100, 100);
-  int outer_pixels = outer_size.width() * outer_size.height();
   gfx::Size inner_size(98, 98);
-  int inner_pixels = inner_size.width() * inner_size.height();
   gfx::Rect outer_rect(outer_size);
   gfx::Rect inner_rect(gfx::Point(1, 1), inner_size);
-  set_viewport_size(outer_size);
-  InitializeRenderer();
+  set_viewport(gfx::Rect(outer_size));
+  InitializeRenderer(make_scoped_ptr(new SoftwareOutputDevice));
 
   ResourceProvider::ResourceId resource_yellow =
       resource_provider()->CreateResource(
@@ -144,28 +144,31 @@ TEST_F(SoftwareRendererTest, TileQuad) {
       resource_provider()->CreateResource(
           inner_size, GL_RGBA, ResourceProvider::TextureUsageAny);
 
-  SkColor yellow = SK_ColorYELLOW;
-  SkColor cyan = SK_ColorCYAN;
-  scoped_ptr<SkColor[]> yellow_pixels(new SkColor[outer_pixels]);
-  scoped_ptr<SkColor[]> cyan_pixels(new SkColor[inner_pixels]);
-  for (int i = 0; i < outer_pixels; i++)
-    yellow_pixels[i] = yellow;
-  for (int i = 0; i < inner_pixels; i++)
-    cyan_pixels[i] = cyan;
+  SkBitmap yellow_tile;
+  yellow_tile.setConfig(
+      SkBitmap::kARGB_8888_Config, outer_size.width(), outer_size.height());
+  yellow_tile.allocPixels();
+  yellow_tile.eraseColor(SK_ColorYELLOW);
+
+  SkBitmap cyan_tile;
+  cyan_tile.setConfig(
+      SkBitmap::kARGB_8888_Config, inner_size.width(), inner_size.height());
+  cyan_tile.allocPixels();
+  cyan_tile.eraseColor(SK_ColorCYAN);
 
   resource_provider()->SetPixels(
       resource_yellow,
-      reinterpret_cast<uint8_t*>(yellow_pixels.get()),
+      static_cast<uint8_t*>(yellow_tile.getPixels()),
       gfx::Rect(outer_size),
       gfx::Rect(outer_size),
       gfx::Vector2d());
   resource_provider()->SetPixels(resource_cyan,
-                                 reinterpret_cast<uint8_t*>(cyan_pixels.get()),
+                                 static_cast<uint8_t*>(cyan_tile.getPixels()),
                                  gfx::Rect(inner_size),
                                  gfx::Rect(inner_size),
                                  gfx::Vector2d());
 
-  gfx::Rect root_rect = gfx::Rect(DeviceViewportSize());
+  gfx::Rect root_rect = DeviceViewport();
 
   scoped_ptr<SharedQuadState> shared_quad_state = SharedQuadState::Create();
   shared_quad_state->SetAll(
@@ -197,25 +200,34 @@ TEST_F(SoftwareRendererTest, TileQuad) {
   list.push_back(root_render_pass.PassAs<RenderPass>());
   renderer()->DrawFrame(&list);
 
-  scoped_ptr<SkColor[]> pixels(new SkColor[DeviceViewportSize().width() *
-      DeviceViewportSize().height()]);
-  renderer()->GetFramebufferPixels(pixels.get(), outer_rect);
+  SkBitmap output;
+  output.setConfig(SkBitmap::kARGB_8888_Config,
+                   DeviceViewport().width(),
+                   DeviceViewport().height());
+  output.allocPixels();
+  renderer()->GetFramebufferPixels(output.getPixels(), outer_rect);
 
-  EXPECT_EQ(SK_ColorYELLOW, pixels[0]);
-  EXPECT_EQ(SK_ColorYELLOW, pixels[outer_pixels - 1]);
-  EXPECT_EQ(SK_ColorCYAN, pixels[outer_size.width() + 1]);
-  EXPECT_EQ(SK_ColorCYAN, pixels[outer_pixels - outer_size.width() - 2]);
+  EXPECT_EQ(SK_ColorYELLOW, output.getColor(0, 0));
+  EXPECT_EQ(SK_ColorYELLOW,
+            output.getColor(outer_size.width() - 1, outer_size.height() - 1));
+  EXPECT_EQ(SK_ColorCYAN, output.getColor(1, 1));
+  EXPECT_EQ(SK_ColorCYAN,
+            output.getColor(inner_size.width() - 1, inner_size.height() - 1));
 }
 
 TEST_F(SoftwareRendererTest, ShouldClearRootRenderPass) {
   gfx::Rect viewport_rect(0, 0, 100, 100);
-  size_t viewport_pixels = viewport_rect.width() * viewport_rect.height();
-  set_viewport_size(viewport_rect.size());
+  set_viewport(viewport_rect);
   set_should_clear_root_render_pass(false);
-  InitializeRenderer();
+  InitializeRenderer(make_scoped_ptr(new SoftwareOutputDevice));
 
   RenderPassList list;
-  scoped_ptr<SkColor[]> pixels(new SkColor[viewport_pixels]);
+
+  SkBitmap output;
+  output.setConfig(SkBitmap::kARGB_8888_Config,
+                   viewport_rect.width(),
+                   viewport_rect.height());
+  output.allocPixels();
 
   // Draw a fullscreen green quad in a first frame.
   RenderPass::Id root_clear_pass_id(1, 0);
@@ -225,10 +237,11 @@ TEST_F(SoftwareRendererTest, ShouldClearRootRenderPass) {
 
   renderer()->DecideRenderPassAllocationsForFrame(list);
   renderer()->DrawFrame(&list);
-  renderer()->GetFramebufferPixels(pixels.get(), viewport_rect);
+  renderer()->GetFramebufferPixels(output.getPixels(), viewport_rect);
 
-  EXPECT_EQ(SK_ColorGREEN, pixels[0]);
-  EXPECT_EQ(SK_ColorGREEN, pixels[viewport_pixels - 1]);
+  EXPECT_EQ(SK_ColorGREEN, output.getColor(0, 0));
+  EXPECT_EQ(SK_ColorGREEN,
+      output.getColor(viewport_rect.width() - 1, viewport_rect.height() - 1));
 
   list.clear();
 
@@ -243,18 +256,17 @@ TEST_F(SoftwareRendererTest, ShouldClearRootRenderPass) {
 
   renderer()->DecideRenderPassAllocationsForFrame(list);
   renderer()->DrawFrame(&list);
-  renderer()->GetFramebufferPixels(pixels.get(), viewport_rect);
+  renderer()->GetFramebufferPixels(output.getPixels(), viewport_rect);
 
   // If we didn't clear, the borders should still be green.
-  EXPECT_EQ(SK_ColorGREEN, pixels[0]);
-  EXPECT_EQ(SK_ColorGREEN, pixels[viewport_pixels - 1]);
+  EXPECT_EQ(SK_ColorGREEN, output.getColor(0, 0));
+  EXPECT_EQ(SK_ColorGREEN,
+      output.getColor(viewport_rect.width() - 1, viewport_rect.height() - 1));
 
-  EXPECT_EQ(
-      SK_ColorMAGENTA,
-      pixels[smaller_rect.y() * viewport_rect.width() + smaller_rect.x()]);
   EXPECT_EQ(SK_ColorMAGENTA,
-            pixels[(smaller_rect.bottom() - 1) * viewport_rect.width() +
-                smaller_rect.right() - 1]);
+            output.getColor(smaller_rect.x(), smaller_rect.y()));
+  EXPECT_EQ(SK_ColorMAGENTA,
+      output.getColor(smaller_rect.right() - 1, smaller_rect.bottom() - 1));
 }
 
 }  // namespace

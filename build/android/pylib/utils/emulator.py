@@ -33,6 +33,8 @@ import run_command
 # Android API level
 API_TARGET = 'android-%s' % constants.ANDROID_SDK_VERSION
 
+# SD card size
+SDCARD_SIZE = '512M'
 
 class EmulatorLaunchException(Exception):
   """Emulator failed to launch."""
@@ -202,6 +204,7 @@ class Emulator(object):
         '--name', self.avd_name,
         '--abi', abi_option,
         '--target', API_TARGET,
+        '--sdcard', SDCARD_SIZE,
         '--force',
     ]
     avd_cmd_str = ' '.join(avd_command)
@@ -214,7 +217,7 @@ class Emulator(object):
     avd_process.expect('Created AVD \'%s\'' % self.avd_name)
 
     # Setup test device as default Galaxy Nexus AVD
-    avd_config_dir = os.path.join(constants.CHROME_DIR, 'build', 'android',
+    avd_config_dir = os.path.join(constants.DIR_SOURCE_ROOT, 'build', 'android',
                                   'avd_configs')
     avd_config_ini = os.path.join(avd_config_dir,
                                   'AVD_for_Galaxy_Nexus_by_Google_%s.avd' %

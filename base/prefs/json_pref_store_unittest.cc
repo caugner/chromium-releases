@@ -10,11 +10,11 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -59,9 +59,8 @@ class JsonPrefStoreTest : public testing::Test {
 TEST_F(JsonPrefStoreTest, NonExistentFile) {
   base::FilePath bogus_input_file = data_dir_.AppendASCII("read.txt");
   ASSERT_FALSE(file_util::PathExists(bogus_input_file));
-  scoped_refptr<JsonPrefStore> pref_store =
-      new JsonPrefStore(
-          bogus_input_file, message_loop_.message_loop_proxy());
+  scoped_refptr<JsonPrefStore> pref_store = new JsonPrefStore(
+      bogus_input_file, message_loop_.message_loop_proxy().get());
   EXPECT_EQ(PersistentPrefStore::PREF_READ_ERROR_NO_FILE,
             pref_store->ReadPrefs());
   EXPECT_FALSE(pref_store->ReadOnly());
@@ -73,8 +72,7 @@ TEST_F(JsonPrefStoreTest, InvalidFile) {
   base::FilePath invalid_file = temp_dir_.path().AppendASCII("invalid.json");
   ASSERT_TRUE(file_util::CopyFile(invalid_file_original, invalid_file));
   scoped_refptr<JsonPrefStore> pref_store =
-      new JsonPrefStore(
-          invalid_file, message_loop_.message_loop_proxy());
+      new JsonPrefStore(invalid_file, message_loop_.message_loop_proxy().get());
   EXPECT_EQ(PersistentPrefStore::PREF_READ_ERROR_JSON_PARSE,
             pref_store->ReadPrefs());
   EXPECT_FALSE(pref_store->ReadOnly());
@@ -161,8 +159,7 @@ TEST_F(JsonPrefStoreTest, Basic) {
   base::FilePath input_file = temp_dir_.path().AppendASCII("write.json");
   ASSERT_TRUE(file_util::PathExists(input_file));
   scoped_refptr<JsonPrefStore> pref_store =
-      new JsonPrefStore(
-          input_file, message_loop_.message_loop_proxy());
+      new JsonPrefStore(input_file, message_loop_.message_loop_proxy().get());
   ASSERT_EQ(PersistentPrefStore::PREF_READ_ERROR_NONE, pref_store->ReadPrefs());
   ASSERT_FALSE(pref_store->ReadOnly());
 
@@ -176,9 +173,8 @@ TEST_F(JsonPrefStoreTest, Basic) {
   //   }
   // }
 
-  RunBasicJsonPrefStoreTest(pref_store,
-                            input_file,
-                            data_dir_.AppendASCII("write.golden.json"));
+  RunBasicJsonPrefStoreTest(
+      pref_store.get(), input_file, data_dir_.AppendASCII("write.golden.json"));
 }
 
 TEST_F(JsonPrefStoreTest, BasicAsync) {
@@ -189,8 +185,7 @@ TEST_F(JsonPrefStoreTest, BasicAsync) {
   base::FilePath input_file = temp_dir_.path().AppendASCII("write.json");
   ASSERT_TRUE(file_util::PathExists(input_file));
   scoped_refptr<JsonPrefStore> pref_store =
-      new JsonPrefStore(
-          input_file, message_loop_.message_loop_proxy());
+      new JsonPrefStore(input_file, message_loop_.message_loop_proxy().get());
 
   {
     MockPrefStoreObserver mock_observer;
@@ -218,18 +213,16 @@ TEST_F(JsonPrefStoreTest, BasicAsync) {
   //   }
   // }
 
-  RunBasicJsonPrefStoreTest(pref_store,
-                            input_file,
-                            data_dir_.AppendASCII("write.golden.json"));
+  RunBasicJsonPrefStoreTest(
+      pref_store.get(), input_file, data_dir_.AppendASCII("write.golden.json"));
 }
 
 // Tests asynchronous reading of the file when there is no file.
 TEST_F(JsonPrefStoreTest, AsyncNonExistingFile) {
   base::FilePath bogus_input_file = data_dir_.AppendASCII("read.txt");
   ASSERT_FALSE(file_util::PathExists(bogus_input_file));
-  scoped_refptr<JsonPrefStore> pref_store =
-      new JsonPrefStore(
-          bogus_input_file, message_loop_.message_loop_proxy());
+  scoped_refptr<JsonPrefStore> pref_store = new JsonPrefStore(
+      bogus_input_file, message_loop_.message_loop_proxy().get());
   MockPrefStoreObserver mock_observer;
   pref_store->AddObserver(&mock_observer);
 
@@ -255,8 +248,7 @@ TEST_F(JsonPrefStoreTest, NeedsEmptyValue) {
   // Test that the persistent value can be loaded.
   ASSERT_TRUE(file_util::PathExists(pref_file));
   scoped_refptr<JsonPrefStore> pref_store =
-      new JsonPrefStore(
-          pref_file, message_loop_.message_loop_proxy());
+      new JsonPrefStore(pref_file, message_loop_.message_loop_proxy().get());
   ASSERT_EQ(PersistentPrefStore::PREF_READ_ERROR_NONE, pref_store->ReadPrefs());
   ASSERT_FALSE(pref_store->ReadOnly());
 

@@ -13,10 +13,10 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_result.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/history/history_database.h"
@@ -32,6 +32,7 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/common/autocomplete_match_type.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -265,8 +266,12 @@ void HistoryQuickProvider::DoAutocomplete() {
              !autocomplete_input_.parts().ref.is_nonempty()) {
           // Not visited, but we've seen the host before.
           will_have_url_what_you_typed_match_first = true;
-          if (net::RegistryControlledDomainService::GetRegistryLength(
-              host, false) == 0) {
+          const size_t registry_length =
+              net::registry_controlled_domains::GetRegistryLength(
+                  host,
+                  net::registry_controlled_domains::EXCLUDE_UNKNOWN_REGISTRIES,
+                  net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
+          if (registry_length == 0) {
             // Known intranet hosts get one score.
             url_what_you_typed_match_score =
                 HistoryURLProvider::kScoreForUnvisitedIntranetResult;
@@ -329,8 +334,8 @@ AutocompleteMatch HistoryQuickProvider::QuickMatchToACMatch(
     int score) {
   const history::URLRow& info = history_match.url_info;
   AutocompleteMatch match(this, score, !!info.visit_count(),
-      history_match.url_matches.empty() ?
-          AutocompleteMatch::HISTORY_TITLE : AutocompleteMatch::HISTORY_URL);
+      history_match.url_matches.empty() ? AutocompleteMatchType::HISTORY_TITLE :
+          AutocompleteMatchType::HISTORY_URL);
   match.typed_count = info.typed_count();
   match.destination_url = info.url();
   DCHECK(match.destination_url.is_valid());

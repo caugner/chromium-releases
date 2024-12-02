@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/prefs/pref_service.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "chrome/browser/google/google_url_tracker_factory.h"
 #include "chrome/browser/google/google_url_tracker_infobar_delegate.h"
 #include "chrome/browser/google/google_url_tracker_navigation_helper.h"
@@ -61,7 +61,7 @@ GoogleURLTracker::GoogleURLTracker(
   // "wakes up", we do nothing at all.
   if (mode == NORMAL_MODE) {
     static const int kStartFetchDelayMS = 5000;
-    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+    base::MessageLoop::current()->PostDelayedTask(FROM_HERE,
         base::Bind(&GoogleURLTracker::FinishSleep,
                    weak_ptr_factory_.GetWeakPtr()),
         base::TimeDelta::FromMilliseconds(kStartFetchDelayMS));
@@ -82,10 +82,15 @@ GURL GoogleURLTracker::GoogleURL(Profile* profile) {
 }
 
 // static
-void GoogleURLTracker::RequestServerCheck(Profile* profile) {
+void GoogleURLTracker::RequestServerCheck(Profile* profile, bool force) {
   GoogleURLTracker* tracker = GoogleURLTrackerFactory::GetForProfile(profile);
-  if (tracker)
+  // If the tracker already has a fetcher, SetNeedToFetch() is unnecessary, and
+  // changing |already_fetched_| is wrong.
+  if (tracker && !tracker->fetcher_) {
+    if (force)
+      tracker->already_fetched_ = false;
     tracker->SetNeedToFetch();
+  }
 }
 
 // static

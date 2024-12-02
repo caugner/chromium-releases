@@ -16,8 +16,8 @@
 #include "ash/system/status_area_widget.h"
 #include "ash/system/web_notification/web_notification_tray.h"
 #include "base/bind.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
@@ -347,18 +347,24 @@ void WindowTypeLauncher::ButtonPressed(views::Button* sender,
                                             base::TimeDelta::FromSeconds(5));
 
   } else if (sender == show_web_notification_) {
+    scoped_ptr<message_center::Notification> notification;
+    notification.reset(new message_center::Notification(
+        message_center::NOTIFICATION_TYPE_SIMPLE,
+        "id0",
+        ASCIIToUTF16("Test Shell Web Notification"),
+        ASCIIToUTF16("Notification message body."),
+        gfx::Image(),
+        ASCIIToUTF16("www.testshell.org"),
+        "" /* extension id */,
+        message_center::RichNotificationData(),
+        NULL /* delegate */));
+
     ash::Shell::GetPrimaryRootWindowController()->shelf()->status_area_widget()
-        ->web_notification_tray()->message_center()->AddNotification(
-            message_center::NOTIFICATION_TYPE_SIMPLE,
-            "id0",
-            ASCIIToUTF16("Test Shell Web Notification"),
-            ASCIIToUTF16("Notification message body."),
-            ASCIIToUTF16("www.testshell.org"),
-            "" /* extension id */,
-            NULL /* optional_fields */);
+        ->web_notification_tray()->message_center()
+        ->AddNotification(notification.Pass());
   }
 #if !defined(OS_MACOSX)
-  else if (sender == examples_button_) {
+      else if (sender == examples_button_) {
     views::examples::ShowExamplesWindowWithContent(
         views::examples::DO_NOTHING_ON_CLOSE,
         ash::Shell::GetInstance()->browser_context());
@@ -382,8 +388,10 @@ void WindowTypeLauncher::ExecuteCommand(int id, int event_flags) {
 #endif  // !defined(OS_MACOSX)
 
 #if !defined(OS_MACOSX)
-void WindowTypeLauncher::ShowContextMenuForView(views::View* source,
-                                                const gfx::Point& point) {
+void WindowTypeLauncher::ShowContextMenuForView(
+    views::View* source,
+    const gfx::Point& point,
+    ui::MenuSourceType source_type) {
   MenuItemView* root = new MenuItemView(this);
   root->AppendMenuItem(COMMAND_NEW_WINDOW,
                        ASCIIToUTF16("New Window"),
@@ -393,8 +401,10 @@ void WindowTypeLauncher::ShowContextMenuForView(views::View* source,
                        MenuItemView::NORMAL);
   // MenuRunner takes ownership of root.
   menu_runner_.reset(new MenuRunner(root));
-  if (menu_runner_->RunMenuAt(GetWidget(), NULL, gfx::Rect(point, gfx::Size()),
+  if (menu_runner_->RunMenuAt(GetWidget(), NULL,
+        gfx::Rect(point, gfx::Size()),
         MenuItemView::TOPLEFT,
+        source_type,
         MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU) ==
         MenuRunner::MENU_DELETED)
     return;

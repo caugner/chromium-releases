@@ -10,7 +10,7 @@
 #include "base/prefs/pref_service.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -35,7 +35,7 @@ IntranetRedirectDetector::IntranetRedirectDetector()
   // browser is starting up, and if so, come back later", but there is currently
   // no function to do this.
   static const int kStartFetchDelaySeconds = 7;
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
+  base::MessageLoop::current()->PostDelayedTask(FROM_HERE,
       base::Bind(&IntranetRedirectDetector::FinishSleep,
                  weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromSeconds(kStartFetchDelaySeconds));
@@ -120,8 +120,10 @@ void IntranetRedirectDetector::OnURLFetchComplete(
       resulting_origins_.push_back(origin);
       return;
     }
-    if (net::RegistryControlledDomainService::SameDomainOrHost(
-        resulting_origins_.front(), origin)) {
+    if (net::registry_controlled_domains::SameDomainOrHost(
+        resulting_origins_.front(),
+        origin,
+        net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES)) {
       redirect_origin_ = origin;
       if (!fetchers_.empty()) {
         // Cancel remaining fetch, we don't need it.
@@ -135,8 +137,12 @@ void IntranetRedirectDetector::OnURLFetchComplete(
       return;
     }
     DCHECK(resulting_origins_.size() == 2);
-    redirect_origin_ = net::RegistryControlledDomainService::SameDomainOrHost(
-        resulting_origins_.back(), origin) ? origin : GURL();
+    const bool same_domain_or_host =
+        net::registry_controlled_domains::SameDomainOrHost(
+            resulting_origins_.back(),
+            origin,
+            net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);
+    redirect_origin_ = same_domain_or_host ? origin : GURL();
   }
 
   g_browser_process->local_state()->SetString(
@@ -153,7 +159,7 @@ void IntranetRedirectDetector::OnIPAddressChanged() {
   // delay this a little bit.
   in_sleep_ = true;
   static const int kNetworkSwitchDelayMS = 1000;
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
+  base::MessageLoop::current()->PostDelayedTask(FROM_HERE,
       base::Bind(&IntranetRedirectDetector::FinishSleep,
                  weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromMilliseconds(kNetworkSwitchDelayMS));

@@ -7,9 +7,9 @@
 #include <string>
 
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
-#include "base/string_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "media/base/data_buffer.h"
 #include "media/base/media_log.h"
 #include "media/base/test_helpers.h"
@@ -2795,6 +2795,34 @@ TEST_F(SourceBufferStreamTest, SameTimestamp_Audio_Invalid_1) {
   stream_.reset(new SourceBufferStream(config, LogCB()));
   Seek(0);
   NewSegmentAppend_ExpectFailure("0K 30 30K 60");
+}
+
+// If seeking past any existing range and the seek is pending
+// because no data has been provided for that position,
+// the stream position can be considered as the end of stream.
+TEST_F(SourceBufferStreamTest, EndSelected_During_PendingSeek) {
+  // Append 15 buffers at positions 0 through 14.
+  NewSegmentAppend(0, 15);
+
+  Seek(20);
+  EXPECT_TRUE(stream_->IsSeekPending());
+  stream_->EndOfStream();
+  EXPECT_FALSE(stream_->IsSeekPending());
+}
+
+// If there is a pending seek between 2 existing ranges,
+// the end of the stream has not been reached.
+TEST_F(SourceBufferStreamTest, EndNotSelected_During_PendingSeek) {
+  // Append:
+  // - 10 buffers at positions 0 through 9.
+  // - 10 buffers at positions 30 through 39
+  NewSegmentAppend(0, 10);
+  NewSegmentAppend(30, 10);
+
+  Seek(20);
+  EXPECT_TRUE(stream_->IsSeekPending());
+  stream_->EndOfStream();
+  EXPECT_TRUE(stream_->IsSeekPending());
 }
 
 // TODO(vrk): Add unit tests where keyframes are unaligned between streams.

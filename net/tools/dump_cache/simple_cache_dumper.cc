@@ -9,7 +9,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/message_loop_proxy.h"
+#include "base/message_loop/message_loop_proxy.h"
 #include "base/threading/thread.h"
 #include "net/base/cache_type.h"
 #include "net/base/io_buffer.h"
@@ -40,13 +40,13 @@ SimpleCacheDumper::~SimpleCacheDumper() {
 }
 
 int SimpleCacheDumper::Run() {
-  MessageLoopForIO main_message_loop;
+  base::MessageLoopForIO main_message_loop;
 
   LOG(INFO) << "Reading cache from: " << input_path_.value();
   LOG(INFO) << "Writing cache to: " << output_path_.value();
 
   if (!cache_thread_->StartWithOptions(
-          base::Thread::Options(MessageLoop::TYPE_IO, 0))) {
+          base::Thread::Options(base::MessageLoop::TYPE_IO, 0))) {
     LOG(ERROR) << "Unable to start thread";
     return ERR_UNEXPECTED;
   }
@@ -125,9 +125,15 @@ int SimpleCacheDumper::DoCreateCache() {
   DCHECK(!cache_);
   state_ = STATE_CREATE_CACHE_COMPLETE;
   return disk_cache::CreateCacheBackend(
-      DISK_CACHE, CACHE_BACKEND_DEFAULT, input_path_, 0, false,
-      cache_thread_->message_loop_proxy(),
-      NULL, &cache_, io_callback_);
+      DISK_CACHE,
+      CACHE_BACKEND_DEFAULT,
+      input_path_,
+      0,
+      false,
+      cache_thread_->message_loop_proxy().get(),
+      NULL,
+      &cache_,
+      io_callback_);
 }
 
 int SimpleCacheDumper::DoCreateCacheComplete(int rv) {
@@ -183,7 +189,7 @@ int SimpleCacheDumper::DoReadHeaders() {
   state_ = STATE_READ_HEADERS_COMPLETE;
   int32 size = src_entry_->GetDataSize(0);
   buf_ = new IOBufferWithSize(size);
-  return src_entry_->ReadData(0, 0, buf_, size, io_callback_);
+  return src_entry_->ReadData(0, 0, buf_.get(), size, io_callback_);
 }
 
 int SimpleCacheDumper::DoReadHeadersComplete(int rv) {
@@ -195,8 +201,8 @@ int SimpleCacheDumper::DoReadHeadersComplete(int rv) {
 }
 
 int SimpleCacheDumper::DoWriteHeaders() {
-  int rv = writer_->WriteEntry(dst_entry_, 0, 0, buf_, buf_->size(),
-                               io_callback_);
+  int rv = writer_->WriteEntry(
+      dst_entry_, 0, 0, buf_.get(), buf_->size(), io_callback_);
   if (rv == 0)
     return ERR_FAILED;
 
@@ -222,7 +228,7 @@ int SimpleCacheDumper::DoReadBody() {
     return OK;
   }
   buf_ = new IOBufferWithSize(size);
-  return src_entry_->ReadData(1, 0, buf_, size, io_callback_);
+  return src_entry_->ReadData(1, 0, buf_.get(), size, io_callback_);
 }
 
 int SimpleCacheDumper::DoReadBodyComplete(int rv) {
@@ -234,8 +240,8 @@ int SimpleCacheDumper::DoReadBodyComplete(int rv) {
 }
 
 int SimpleCacheDumper::DoWriteBody() {
-  int rv = writer_->WriteEntry(dst_entry_, 1, 0, buf_, buf_->size(),
-                               io_callback_);
+  int rv = writer_->WriteEntry(
+      dst_entry_, 1, 0, buf_.get(), buf_->size(), io_callback_);
   if (rv == 0)
     return ERR_FAILED;
 
@@ -263,7 +269,7 @@ void SimpleCacheDumper::OnIOComplete(int rv) {
     rv_ = rv;
     delete cache_;
     cache_ = NULL;
-    MessageLoop::current()->Quit();
+    base::MessageLoop::current()->Quit();
   }
 }
 

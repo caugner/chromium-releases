@@ -5,16 +5,17 @@
 #ifndef CHROMEOS_DBUS_SESSION_MANAGER_CLIENT_H_
 #define CHROMEOS_DBUS_SESSION_MANAGER_CLIENT_H_
 
+#include <map>
+#include <string>
+
 #include "base/callback.h"
 #include "base/observer_list.h"
 #include "chromeos/chromeos_export.h"
 #include "chromeos/dbus/dbus_client_implementation_type.h"
 
-#include <string>
-
 namespace dbus {
 class Bus;
-}  // namespace
+}  // namespace dbus
 
 namespace chromeos {
 
@@ -89,7 +90,26 @@ class CHROMEOS_EXPORT SessionManagerClient {
   // Notifies that the lock screen is dismissed.
   virtual void NotifyLockScreenDismissed() = 0;
 
-  // Used for RetrieveDevicePolicy, RetrieveUserPolicy and
+  // Map that is used to describe the set of active user sessions where |key|
+  // is user_id and |value| is user_id_hash.
+  typedef std::map<std::string, std::string> ActiveSessionsMap;
+
+  // The ActiveSessionsCallback is used for the RetrieveActiveSessions()
+  // method. It receives |sessions| argument where the keys are user_ids for
+  // all users that are currently active and |success| argument which indicates
+  // whether or not the request succeded.
+  typedef base::Callback<void(const ActiveSessionsMap& sessions,
+                              bool success)> ActiveSessionsCallback;
+
+  // Enumerates active user sessions. Usually Chrome naturally keeps track of
+  // active users when they are added into current session. When Chrome is
+  // restarted after crash by session_manager it only receives user_id and
+  // user_id_hash for one user. This method is used to retrieve list of all
+  // active users.
+  virtual void RetrieveActiveSessions(
+      const ActiveSessionsCallback& callback) = 0;
+
+  // Used for RetrieveDevicePolicy, RetrievePolicyForUser and
   // RetrieveDeviceLocalAccountPolicy. Takes a serialized protocol buffer as
   // string.  Upon success, we will pass a protobuf to the callback.  On
   // failure, we will pass "".
@@ -99,10 +119,12 @@ class CHROMEOS_EXPORT SessionManagerClient {
   // completion of the retrieve attempt, we will call the provided callback.
   virtual void RetrieveDevicePolicy(const RetrievePolicyCallback& callback) = 0;
 
-  // Fetches the user policy blob stored by the session manager for the
-  // currently signed-in user.  Upon completion of the retrieve attempt, we will
-  // call the provided callback.
-  virtual void RetrieveUserPolicy(const RetrievePolicyCallback& callback) = 0;
+  // Fetches the user policy blob stored by the session manager for the given
+  // |username|. Upon completion of the retrieve attempt, we will call the
+  // provided callback.
+  virtual void RetrievePolicyForUser(
+      const std::string& username,
+      const RetrievePolicyCallback& callback) = 0;
 
   // Fetches the policy blob associated with the specified device-local account
   // from session manager.  |callback| is invoked up on completion.
@@ -110,7 +132,7 @@ class CHROMEOS_EXPORT SessionManagerClient {
       const std::string& account_id,
       const RetrievePolicyCallback& callback) = 0;
 
-  // Used for StoreDevicePolicy, StoreUserPolicy and
+  // Used for StoreDevicePolicy, StorePolicyForUser and
   // StoreDeviceLocalAccountPolicy. Takes a boolean indicating whether the
   // operation was successful or not.
   typedef base::Callback<void(bool)> StorePolicyCallback;
@@ -120,11 +142,14 @@ class CHROMEOS_EXPORT SessionManagerClient {
   virtual void StoreDevicePolicy(const std::string& policy_blob,
                                  const StorePolicyCallback& callback) = 0;
 
-  // Attempts to asynchronously store |policy_blob| as user policy for the
-  // currently signed-in user.  Upon completion of the store attempt, we will
-  // call callback.
-  virtual void StoreUserPolicy(const std::string& policy_blob,
-                               const StorePolicyCallback& callback) = 0;
+  // Attempts to asynchronously store |policy_blob| as user policy for the given
+  // |username|. Upon completion of the store attempt, we will call callback.
+  // The |policy_key| argument is not sent to the session manager, but is used
+  // by the stub implementation to enable policy validation on desktop builds.
+  virtual void StorePolicyForUser(const std::string& username,
+                                  const std::string& policy_blob,
+                                  const std::string& policy_key,
+                                  const StorePolicyCallback& callback) = 0;
 
   // Sends a request to store a policy blob for the specified device-local
   // account. The result of the operation is reported through |callback|.
@@ -132,6 +157,11 @@ class CHROMEOS_EXPORT SessionManagerClient {
       const std::string& account_id,
       const std::string& policy_blob,
       const StorePolicyCallback& callback) = 0;
+
+  // Sets the flags to be applied next time by the session manager when Chrome
+  // is restarted inside an already started session for a particular user.
+  virtual void SetFlagsForUser(const std::string& username,
+                               const std::vector<std::string>& flags) = 0;
 
   // Creates the instance.
   static SessionManagerClient* Create(DBusClientImplementationType type,

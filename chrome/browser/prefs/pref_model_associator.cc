@@ -10,7 +10,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -415,6 +415,10 @@ Value* PrefModelAssociator::ReadPreferenceSpecifics(
   }
   *name = preference.name();
   return value.release();
+}
+
+bool PrefModelAssociator::IsPrefSynced(const std::string& name) const {
+  return synced_preferences_.find(name) != synced_preferences_.end();
 }
 
 std::set<std::string> PrefModelAssociator::registered_preferences() const {

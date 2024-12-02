@@ -6,8 +6,8 @@
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "base/test/test_switches.h"
 #include "base/test/trace_event_analyzer.h"
 #include "base/threading/platform_thread.h"
@@ -25,10 +25,10 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
-#include "content/test/gpu/gpu_test_config.h"
+#include "gpu/config/gpu_test_config.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/public/web/WebInputEvent.h"
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
@@ -99,9 +99,9 @@ const int kInputsPerFrame = 16;
 const int kClearColorGreen = 137;
 const int kMouseY = 5;
 
-// Don't analyze begin frames that may be inaccurate. Latencies can be as high
+// Don't analyze start frames that may be inaccurate. Latencies can be as high
 // as 5 frames or so, so skip the first 6 frames to get more accurate results.
-const int kIgnoreBeginFrames = 6;
+const int kIgnoreStartFrames = 6;
 // Don't analyze end frames that may be inaccurate.
 const int kIgnoreEndFrames = 4;
 // Minimum frames to produce an answer.
@@ -258,7 +258,7 @@ void LatencyTest::RunTest(const std::vector<int>& behaviors) {
   // without multisampling. Since the Latency test does not depend much on the
   // GPU, let's just skip testing on Intel since the data is redundant with
   // other non-Intel bots.
-  GPUTestBotConfig test_bot;
+  gpu::GPUTestBotConfig test_bot;
   test_bot.LoadCurrentConfig(NULL);
   const std::vector<uint32>& gpu_vendor = test_bot.gpu_vendor();
 #if defined(OS_LINUX)
@@ -371,14 +371,14 @@ void LatencyTest::RunTest(const std::vector<int>& behaviors) {
     if (mode_ == kWebGLThread) {
       // Print vsync info when in threaded mode.
       Query query_vsync =
-          Query::EventNameIs("CCThreadProxy::onVSyncParametersChanged") &&
-          Query::EventHasNumberArg("monotonicTimebase") &&
-          Query::EventHasNumberArg("intervalInSeconds");
+          Query::EventNameIs("OutputSurface::OnVSyncParametersChanged") &&
+          Query::EventHasNumberArg("timebase") &&
+          Query::EventHasNumberArg("interval");
 
       const TraceEvent* vsync_info = analyzer_->FindFirstOf(query_vsync);
       if (vsync_info) {
-        double timebase = vsync_info->GetKnownArgAsDouble("monotonicTimebase");
-        double interval = vsync_info->GetKnownArgAsDouble("intervalInSeconds");
+        double timebase = vsync_info->GetKnownArgAsDouble("timebase");
+        double interval = vsync_info->GetKnownArgAsDouble("interval");
         printf("VSync scheduling: timebase = %f; interval = %f\n",
                timebase, interval);
       }
@@ -478,7 +478,7 @@ double LatencyTest::CalculateLatency() {
       ++swap_count;
       // Don't analyze first few swaps, because they are filling the rendering
       // pipeline and may be unstable.
-      if (swap_count > kIgnoreBeginFrames) {
+      if (swap_count > kIgnoreStartFrames) {
         // First, find the beginning of this swap.
         size_t begin_swap_pos = 0;
         EXPECT_TRUE(FindLastOf(events, query_begin_swaps_, end_swap_pos,

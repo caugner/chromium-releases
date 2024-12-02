@@ -9,6 +9,8 @@
 #include "base/time.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
+#include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
@@ -52,8 +54,16 @@ int MockRenderProcessHost::GetNextRoutingID() {
   return ++prev_routing_id;
 }
 
-void MockRenderProcessHost::SimulateSwapOutACK(
-    const ViewMsg_SwapOut_Params& params) {
+void MockRenderProcessHost::AddRoute(
+    int32 routing_id,
+    IPC::Listener* listener) {
+  listeners_.AddWithID(listener, routing_id);
+}
+
+void MockRenderProcessHost::RemoveRoute(int32 routing_id) {
+  DCHECK(listeners_.Lookup(routing_id) != NULL);
+  listeners_.Remove(routing_id);
+  Cleanup();
 }
 
 bool MockRenderProcessHost::WaitForBackingStoreMsg(
@@ -115,25 +125,29 @@ bool MockRenderProcessHost::Send(IPC::Message* msg) {
   return true;
 }
 
-TransportDIB* MockRenderProcessHost::GetTransportDIB(TransportDIB::Id dib_id) {
-  if (transport_dib_)
-    return transport_dib_;
+TransportDIB* MockRenderProcessHost::MapTransportDIB(TransportDIB::Id dib_id) {
 #if defined(OS_WIN)
   HANDLE duped;
   DuplicateHandle(GetCurrentProcess(), dib_id.handle, GetCurrentProcess(),
                   &duped, 0, TRUE, DUPLICATE_SAME_ACCESS);
-  transport_dib_ = TransportDIB::Map(duped);
-#elif defined(OS_MACOSX)
-  // On Mac, TransportDIBs are always created in the browser, so we cannot map
-  // one from a dib_id.
-  transport_dib_ = TransportDIB::Create(100 * 100 * 4, 0);
+  return TransportDIB::Map(duped);
+#elif defined(TOOLKIT_GTK)
+  return TransportDIB::Map(dib_id.shmkey);
 #elif defined(OS_ANDROID)
   // On Android, Handles and Ids are the same underlying type.
-  transport_dib_ = TransportDIB::Map(dib_id);
-#elif defined(OS_POSIX)
-  transport_dib_ = TransportDIB::Map(dib_id.shmkey);
+  return TransportDIB::Map(dib_id);
+#else
+  // On POSIX, TransportDIBs are always created in the browser, so we cannot map
+  // one from a dib_id.
+  return TransportDIB::Create(100 * 100 * 4, 0);
 #endif
+}
 
+TransportDIB* MockRenderProcessHost::GetTransportDIB(TransportDIB::Id dib_id) {
+  if (transport_dib_)
+    return transport_dib_;
+
+  transport_dib_ = MapTransportDIB(dib_id);
   return transport_dib_;
 }
 
@@ -152,18 +166,8 @@ bool MockRenderProcessHost::IgnoreInputEvents() const {
   return false;
 }
 
-void MockRenderProcessHost::Attach(RenderWidgetHost* host,
-                                   int routing_id) {
-  render_widget_hosts_.AddWithID(host, routing_id);
-}
-
-void MockRenderProcessHost::Release(int routing_id) {
-  render_widget_hosts_.Remove(routing_id);
-  Cleanup();
-}
-
 void MockRenderProcessHost::Cleanup() {
-  if (render_widget_hosts_.IsEmpty()) {
+  if (listeners_.IsEmpty()) {
     NotificationService::current()->Notify(
         NOTIFICATION_RENDERER_PROCESS_TERMINATED,
         Source<RenderProcessHost>(this),
@@ -186,11 +190,6 @@ bool MockRenderProcessHost::SuddenTerminationAllowed() const {
   return true;
 }
 
-RenderWidgetHost* MockRenderProcessHost::GetRenderWidgetHostByID(
-    int routing_id) {
-  return render_widget_hosts_.Lookup(routing_id);
-}
-
 BrowserContext* MockRenderProcessHost::GetBrowserContext() const {
   return browser_context_;
 }
@@ -205,8 +204,30 @@ IPC::ChannelProxy* MockRenderProcessHost::GetChannel() {
   return NULL;
 }
 
+int MockRenderProcessHost::GetActiveViewCount() {
+  int num_active_views = 0;
+  RenderWidgetHost::List widgets = RenderWidgetHost::GetRenderWidgetHosts();
+  for (size_t i = 0; i < widgets.size(); ++i) {
+    // Count only RenderWidgetHosts in this process.
+    if (widgets[i]->GetProcess()->GetID() != GetID())
+      continue;
+
+    // All RenderWidgetHosts are swapped in.
+    if (!widgets[i]->IsRenderView()) {
+      num_active_views++;
+      continue;
+    }
+
+    // Don't count swapped out views.
+    RenderViewHost* rvh = RenderViewHost::From(widgets[i]);
+    if (!static_cast<RenderViewHostImpl*>(rvh)->is_swapped_out())
+      num_active_views++;
+  }
+  return num_active_views;
+}
+
 bool MockRenderProcessHost::FastShutdownForPageCount(size_t count) {
-  if (render_widget_hosts_.size() == count)
+  if (static_cast<size_t>(GetActiveViewCount()) == count)
     return FastShutdownIfPossible();
   return false;
 }
@@ -221,12 +242,11 @@ void MockRenderProcessHost::SurfaceUpdated(int32 surface_id) {
 void MockRenderProcessHost::ResumeRequestsForView(int route_id) {
 }
 
-RenderProcessHost::RenderWidgetHostsIterator
-    MockRenderProcessHost::GetRenderWidgetHostsIterator() {
-  return RenderWidgetHostsIterator(&render_widget_hosts_);
-}
 
 bool MockRenderProcessHost::OnMessageReceived(const IPC::Message& msg) {
+  IPC::Listener* listener = listeners_.Lookup(msg.routing_id());
+  if (listener)
+    return listener->OnMessageReceived(msg);
   return false;
 }
 
@@ -245,7 +265,8 @@ MockRenderProcessHostFactory::~MockRenderProcessHostFactory() {
 }
 
 RenderProcessHost* MockRenderProcessHostFactory::CreateRenderProcessHost(
-    BrowserContext* browser_context) const {
+    BrowserContext* browser_context,
+    SiteInstance* site_instance) const {
   MockRenderProcessHost* host = new MockRenderProcessHost(browser_context);
   if (host) {
     processes_.push_back(host);

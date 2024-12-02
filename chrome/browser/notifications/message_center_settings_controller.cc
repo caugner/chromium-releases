@@ -7,11 +7,13 @@
 #include <algorithm>
 
 #include "base/i18n/string_compare.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/app_icon_loader_impl.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
+#include "chrome/browser/favicon/favicon_types.h"
+#include "chrome/browser/history/history_types.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -23,7 +25,12 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
-#include "ui/message_center/message_center_constants.h"
+#include "ui/message_center/message_center_style.h"
+
+#if defined(USE_ASH)
+#include "ash/shell.h"
+#include "ash/system/web_notification/web_notification_tray.h"
+#endif
 
 using message_center::Notifier;
 
@@ -48,16 +55,20 @@ bool SimpleCompareNotifiers(Notifier* n1, Notifier* n2) {
 
 }  // namespace
 
-MessageCenterSettingsController::MessageCenterSettingsController()
-    : delegate_(NULL) {
+MessageCenterSettingsController::MessageCenterSettingsController() {
 }
 
 MessageCenterSettingsController::~MessageCenterSettingsController() {
 }
 
-void MessageCenterSettingsController::ShowSettingsDialog(
-    gfx::NativeView context) {
-  delegate_ = message_center::ShowSettings(this, context);
+void MessageCenterSettingsController::AddObserver(
+    message_center::NotifierSettingsObserver* observer) {
+  observers_.AddObserver(observer);
+}
+
+void MessageCenterSettingsController::RemoveObserver(
+    message_center::NotifierSettingsObserver* observer) {
+  observers_.RemoveObserver(observer);
 }
 
 void MessageCenterSettingsController::GetNotifierList(
@@ -85,9 +96,9 @@ void MessageCenterSettingsController::GetNotifierList(
       profile, extension_misc::EXTENSION_ICON_SMALL, this));
   for (ExtensionSet::const_iterator iter = extension_set->begin();
        iter != extension_set->end(); ++iter) {
-    const extensions::Extension* extension = *iter;
+    const extensions::Extension* extension = iter->get();
     if (!extension->HasAPIPermission(
-      extensions::APIPermission::kNotification)) {
+            extensions::APIPermission::kNotification)) {
       continue;
     }
 
@@ -126,7 +137,7 @@ void MessageCenterSettingsController::GetNotifierList(
         notification_service->GetContentSetting(url) == CONTENT_SETTING_ALLOW));
     patterns_[name] = iter->primary_pattern;
     FaviconService::FaviconForURLParams favicon_params(
-        profile, url, history::FAVICON | history::TOUCH_ICON,
+        profile, url, chrome::FAVICON | chrome::TOUCH_ICON,
         message_center::kSettingsIconSize);
     // Note that favicon service obtains the favicon from history. This means
     // that it will fail to obtain the image if there are no history data for
@@ -209,7 +220,6 @@ void MessageCenterSettingsController::SetNotifierEnabled(
 }
 
 void MessageCenterSettingsController::OnNotifierSettingsClosing() {
-  delegate_ = NULL;
   DCHECK(favicon_tracker_.get());
   favicon_tracker_->TryCancelAll();
   patterns_.clear();
@@ -217,16 +227,16 @@ void MessageCenterSettingsController::OnNotifierSettingsClosing() {
 
 void MessageCenterSettingsController::OnFaviconLoaded(
     const GURL& url,
-    const history::FaviconImageResult& favicon_result) {
-  if (!delegate_)
-    return;
-  delegate_->UpdateFavicon(url, favicon_result.image);
+    const chrome::FaviconImageResult& favicon_result) {
+  FOR_EACH_OBSERVER(message_center::NotifierSettingsObserver,
+                    observers_,
+                    UpdateFavicon(url, favicon_result.image));
 }
 
 
 void MessageCenterSettingsController::SetAppImage(const std::string& id,
                                                   const gfx::ImageSkia& image) {
-  if (!delegate_)
-    return;
-  delegate_->UpdateIconImage(id, gfx::Image(image) );
+  FOR_EACH_OBSERVER(message_center::NotifierSettingsObserver,
+                    observers_,
+                    UpdateIconImage(id, gfx::Image(image)));
 }

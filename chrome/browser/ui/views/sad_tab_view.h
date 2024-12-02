@@ -49,9 +49,6 @@ class SadTabView : public chrome::SadTab,
 
  protected:
   // Overridden from views::View:
-  virtual void ViewHierarchyChanged(bool is_add,
-                                    views::View* parent,
-                                    views::View* child) OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
 
  private:

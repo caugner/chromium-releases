@@ -194,11 +194,16 @@ class PnaclPackaging(object):
   package_base = os.path.dirname(__file__)
   # The extension system's manifest.json.
   manifest_template = J(package_base, 'pnacl_manifest_template.json')
-  # Pnacl-specific info
-  pnacl_template = J(package_base, 'pnacl_info_template.json')
+
+  # Pnacl-specific info - set from the command line.
+  pnacl_template = None
 
   # Agreed-upon name for pnacl-specific info.
   pnacl_json = 'pnacl.json'
+
+  @staticmethod
+  def SetPnaclInfoTemplatePath(path):
+    PnaclPackaging.pnacl_template = path
 
   @staticmethod
   def GenerateManifests(target_dir, version, arch, web_accessible,
@@ -361,7 +366,7 @@ def GeneratePrivateKey(options):
                                    [],
                                    False)
   CRXGen.RunCRXGen(options.chrome_path, ext_dir)
-  shutil.copy2(J(tempdir, 'dummy_extension.pem'),
+  shutil.copy(J(tempdir, 'dummy_extension.pem'),
                PnaclDirs.OutputDir())
   shutil.rmtree(tempdir)
   logging.info('\n<<< Fresh key is now in %s/dummy_extension.pem >>>\n' %
@@ -392,7 +397,7 @@ def BuildArchCRXForComponentUpdater(version_quad, arch, lib_overrides,
   if arch in lib_overrides:
     for override in lib_overrides[arch]:
       logging.info('Copying override %s to %s' % (override, target_dir))
-      shutil.copy2(override, target_dir)
+      shutil.copy(override, target_dir)
 
   # Skip the CRX generation if we are only building the unpacked version
   # for commandline testing.
@@ -507,7 +512,7 @@ def CopyFlattenDirsAndPrefix(src_dir, arch, dest_dir):
       assert (f == os.path.basename(f))
       full_name = J(root, f)
       target_name = UseWhitelistedChars(f, arch)
-      shutil.copy2(full_name, J(dest_dir, target_name))
+      shutil.copy(full_name, J(dest_dir, target_name))
 
 
 def BuildArchForInstaller(version_quad, arch, lib_overrides, options):
@@ -532,7 +537,7 @@ def BuildArchForInstaller(version_quad, arch, lib_overrides, options):
     for override in lib_overrides[arch]:
       override_base = os.path.basename(override)
       target_name = UseWhitelistedChars(override_base, arch)
-      shutil.copy2(override, J(target_dir, target_name))
+      shutil.copy(override, J(target_dir, target_name))
 
 
 def BuildInstallerStyle(version_quad, lib_overrides, options):
@@ -582,6 +587,9 @@ def Main():
   parser.add_option('-g', '--generate_key',
                     action='store_true', dest='gen_key',
                     help='Generate a fresh private key, and exit.')
+  parser.add_option('--info_template_path',
+                    dest='info_template_path', default=None,
+                    help='Path of the info template file')
   parser.add_option('-C', '--chrome_path', dest='chrome_path',
                     help='Location of chrome.')
   parser.add_option('-v', '--verbose', dest='verbose', default=False,
@@ -606,6 +614,9 @@ def Main():
   if options.gen_key:
     GeneratePrivateKey(options)
     return 0
+
+  if options.info_template_path:
+    PnaclPackaging.SetPnaclInfoTemplatePath(options.info_template_path)
 
   lib_overrides = {}
   for o in options.lib_overrides:

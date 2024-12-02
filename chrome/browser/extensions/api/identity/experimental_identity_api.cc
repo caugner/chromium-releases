@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "base/stringprintf.h"
+#include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/extensions/api/identity/identity_api.h"
@@ -139,7 +139,14 @@ void ExperimentalIdentityGetAuthTokenFunction::StartMintTokenFlow(
     StartGaiaRequest(OAuth2MintTokenFlow::MODE_MINT_TOKEN_NO_FORCE);
   } else {
     DCHECK(type == IdentityMintRequestQueue::MINT_TYPE_INTERACTIVE);
-    install_ui_.reset(new ExtensionInstallPrompt(GetAssociatedWebContents()));
+
+    // GetAssociatedWebContents() could be NULL and this would trigger a CHECK
+    // in the ExtensionInstallPrompt UI. Passing a valid Profile so that the
+    // icon is loaded and avoid the CHECK failure.
+    install_ui_.reset(
+        GetAssociatedWebContents()
+            ? new ExtensionInstallPrompt(GetAssociatedWebContents())
+            : new ExtensionInstallPrompt(profile(), NULL, NULL));
     ShowOAuthApprovalDialog(issue_advice_);
   }
 }
@@ -221,6 +228,12 @@ void ExperimentalIdentityGetAuthTokenFunction::ShowOAuthApprovalDialog(
 OAuth2MintTokenFlow*
 ExperimentalIdentityGetAuthTokenFunction::CreateMintTokenFlow(
     OAuth2MintTokenFlow::Mode mode) {
+#if defined(OS_CHROMEOS)
+  // Always force minting token for ChromeOS kiosk app.
+  if (chrome::IsRunningInForcedAppMode())
+    mode = OAuth2MintTokenFlow::MODE_MINT_TOKEN_FORCE;
+#endif
+
   const OAuth2Info& oauth2_info = OAuth2Info::GetOAuth2Info(GetExtension());
   OAuth2MintTokenFlow* mint_token_flow =
       new OAuth2MintTokenFlow(
@@ -255,7 +268,10 @@ ExperimentalIdentityLaunchWebAuthFlowFunction::
     ExperimentalIdentityLaunchWebAuthFlowFunction() {}
 
 ExperimentalIdentityLaunchWebAuthFlowFunction::
-    ~ExperimentalIdentityLaunchWebAuthFlowFunction() {}
+    ~ExperimentalIdentityLaunchWebAuthFlowFunction() {
+  if (auth_flow_)
+    auth_flow_.release()->DetachDelegateAndDelete();
+}
 
 bool ExperimentalIdentityLaunchWebAuthFlowFunction::RunImpl() {
   if (profile()->IsOffTheRecord()) {
@@ -269,9 +285,9 @@ bool ExperimentalIdentityLaunchWebAuthFlowFunction::RunImpl() {
   const identity_exp::ExperimentalWebAuthFlowDetails& details = params->details;
 
   GURL auth_url(params->details.url);
-  WebAuthFlow::Mode mode =
+  ExperimentalWebAuthFlow::Mode mode =
       params->details.interactive && *params->details.interactive ?
-      WebAuthFlow::INTERACTIVE : WebAuthFlow::SILENT;
+      ExperimentalWebAuthFlow::INTERACTIVE : ExperimentalWebAuthFlow::SILENT;
 
   // Set up acceptable target URLs. (Includes chrome-extension scheme
   // for this version of the API.)
@@ -294,7 +310,7 @@ bool ExperimentalIdentityLaunchWebAuthFlowFunction::RunImpl() {
   Browser* current_browser = this->GetCurrentBrowser();
   chrome::HostDesktopType host_desktop_type = current_browser ?
       current_browser->host_desktop_type() : chrome::GetActiveDesktop();
-  auth_flow_.reset(new WebAuthFlow(
+  auth_flow_.reset(new ExperimentalWebAuthFlow(
       this, profile(), auth_url, mode, initial_bounds,
       host_desktop_type));
   auth_flow_->Start();
@@ -320,12 +336,12 @@ void ExperimentalIdentityLaunchWebAuthFlowFunction::
 }
 
 void ExperimentalIdentityLaunchWebAuthFlowFunction::OnAuthFlowFailure(
-    WebAuthFlow::Failure failure) {
+    ExperimentalWebAuthFlow::Failure failure) {
   switch (failure) {
-    case WebAuthFlow::WINDOW_CLOSED:
+    case ExperimentalWebAuthFlow::WINDOW_CLOSED:
       error_ = identity_constants::kUserRejected;
       break;
-    case WebAuthFlow::INTERACTION_REQUIRED:
+    case ExperimentalWebAuthFlow::INTERACTION_REQUIRED:
       error_ = identity_constants::kInteractionRequired;
       break;
     default:

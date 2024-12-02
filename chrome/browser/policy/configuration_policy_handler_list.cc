@@ -18,6 +18,7 @@
 #include "policy/policy_constants.h"
 
 #if defined(OS_CHROMEOS)
+#include "ash/magnifier/magnifier_constants.h"
 #include "chrome/browser/chromeos/policy/configuration_policy_handler_chromeos.h"
 #endif  // defined(OS_CHROMEOS)
 
@@ -60,9 +61,6 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kDisableSpdy,
     prefs::kDisableSpdy,
     Value::TYPE_BOOLEAN },
-  { key::kDisabledSchemes,
-    prefs::kDisabledSchemes,
-    Value::TYPE_LIST },
   { key::kSafeBrowsingEnabled,
     prefs::kSafeBrowsingEnabled,
     Value::TYPE_BOOLEAN },
@@ -225,9 +223,6 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kDevicePolicyRefreshRate,
     prefs::kDevicePolicyRefreshRate,
     Value::TYPE_INTEGER },
-  { key::kInstantEnabled,
-    prefs::kInstantEnabled,
-    Value::TYPE_BOOLEAN },
   { key::kDefaultBrowserSettingEnabled,
     prefs::kDefaultBrowserSettingEnabled,
     Value::TYPE_BOOLEAN },
@@ -288,18 +283,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kMaxConnectionsPerProxy,
     prefs::kMaxConnectionsPerProxy,
     Value::TYPE_INTEGER },
-  { key::kURLBlacklist,
-    prefs::kUrlBlacklist,
-    Value::TYPE_LIST },
   { key::kURLWhitelist,
     prefs::kUrlWhitelist,
     Value::TYPE_LIST },
-  { key::kEnterpriseWebStoreURL,
-    prefs::kEnterpriseWebStoreURL,
-    Value::TYPE_STRING },
-  { key::kEnterpriseWebStoreName,
-    prefs::kEnterpriseWebStoreName,
-    Value::TYPE_STRING },
   { key::kEnableMemoryInfo,
     prefs::kEnableMemoryInfo,
     Value::TYPE_BOOLEAN },
@@ -324,6 +310,12 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kVideoCaptureAllowed,
     prefs::kVideoCaptureAllowed,
     Value::TYPE_BOOLEAN },
+  { key::kAudioCaptureAllowedUrls,
+    prefs::kAudioCaptureAllowedUrls,
+    Value::TYPE_LIST },
+  { key::kVideoCaptureAllowedUrls,
+    prefs::kVideoCaptureAllowedUrls,
+    Value::TYPE_LIST },
   { key::kHideWebStoreIcon,
     prefs::kHideWebStoreIcon,
     Value::TYPE_BOOLEAN },
@@ -383,6 +375,24 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kShowAccessibilityOptionsInSystemTrayMenu,
     prefs::kShouldAlwaysShowAccessibilityMenu,
     Value::TYPE_BOOLEAN },
+  { key::kLargeCursorEnabled,
+    prefs::kLargeCursorEnabled,
+    Value::TYPE_BOOLEAN },
+  { key::kSpokenFeedbackEnabled,
+    prefs::kSpokenFeedbackEnabled,
+    Value::TYPE_BOOLEAN },
+  { key::kHighContrastEnabled,
+    prefs::kHighContrastEnabled,
+    Value::TYPE_BOOLEAN },
+  { key::kDeviceLoginScreenDefaultLargeCursorEnabled,
+    NULL,
+    Value::TYPE_BOOLEAN },
+  { key::kDeviceLoginScreenDefaultSpokenFeedbackEnabled,
+    NULL,
+    Value::TYPE_BOOLEAN },
+  { key::kDeviceLoginScreenDefaultHighContrastEnabled,
+    NULL,
+    Value::TYPE_BOOLEAN },
   { key::kRebootAfterUpdate,
     prefs::kRebootAfterUpdate,
     Value::TYPE_BOOLEAN },
@@ -419,15 +429,14 @@ ConfigurationPolicyHandlerList::ConfigurationPolicyHandlerList() {
   }
 
   handlers_.push_back(new AutofillPolicyHandler());
-  handlers_.push_back(new ClearSiteDataOnExitPolicyHandler());
   handlers_.push_back(new DefaultSearchPolicyHandler());
-  handlers_.push_back(new DiskCacheDirPolicyHandler());
   handlers_.push_back(new FileSelectionDialogsHandler());
   handlers_.push_back(new IncognitoModePolicyHandler());
   handlers_.push_back(new JavascriptPolicyHandler());
   handlers_.push_back(new ProxyPolicyHandler());
   handlers_.push_back(new RestoreOnStartupPolicyHandler());
   handlers_.push_back(new SyncPolicyHandler());
+  handlers_.push_back(new URLBlacklistPolicyHandler());
 
   handlers_.push_back(
       new ExtensionListPolicyHandler(key::kExtensionInstallWhitelist,
@@ -454,15 +463,17 @@ ConfigurationPolicyHandlerList::ConfigurationPolicyHandlerList() {
                                      false));
 #endif  // defined(OS_CHROMEOS)
 
-#if !defined(OS_CHROMEOS)
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
+  handlers_.push_back(new DiskCacheDirPolicyHandler());
   handlers_.push_back(new DownloadDirPolicyHandler());
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !defined(OS_CHROMEOS) && !defined(OS_ANDROID)
 
 #if defined(OS_CHROMEOS)
   handlers_.push_back(
       NetworkConfigurationPolicyHandler::CreateForDevicePolicy());
   handlers_.push_back(NetworkConfigurationPolicyHandler::CreateForUserPolicy());
   handlers_.push_back(new PinnedLauncherAppsPolicyHandler());
+  handlers_.push_back(new ScreenMagnifierPolicyHandler());
 
   handlers_.push_back(
       new IntRangePolicyHandler(
@@ -526,12 +537,21 @@ ConfigurationPolicyHandlerList::ConfigurationPolicyHandlerList() {
           0, 3, false));
   handlers_.push_back(
       new IntPercentageToDoublePolicyHandler(
-          key::kPresentationIdleDelayScale,
-          prefs::kPowerPresentationIdleDelayFactor,
+          key::kPresentationScreenDimDelayScale,
+          prefs::kPowerPresentationScreenDimDelayFactor,
+          100, INT_MAX, true));
+  handlers_.push_back(
+      new IntPercentageToDoublePolicyHandler(
+          key::kUserActivityScreenDimDelayScale,
+          prefs::kPowerUserActivityScreenDimDelayFactor,
           100, INT_MAX, true));
   handlers_.push_back(new IntRangePolicyHandler(key::kUptimeLimit,
                                                 prefs::kUptimeLimit,
                                                 3600, INT_MAX, true));
+  handlers_.push_back(new IntRangePolicyHandler(
+      key::kDeviceLoginScreenDefaultScreenMagnifierType,
+      NULL,
+      0, ash::MAGNIFIER_FULL, false));
 #endif  // defined(OS_CHROMEOS)
 }
 

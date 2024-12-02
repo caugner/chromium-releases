@@ -10,7 +10,7 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/event_names.h"
 #include "chrome/browser/extensions/event_router.h"
@@ -43,12 +43,12 @@ namespace extensions {
 // Base class for tests.
 class MenuManagerTest : public testing::Test {
  public:
-  MenuManagerTest() : ui_thread_(BrowserThread::UI, &message_loop_),
-                      file_thread_(BrowserThread::FILE, &message_loop_),
-                      manager_(&profile_),
-                      prefs_(message_loop_.message_loop_proxy()),
-                      next_id_(1) {
-  }
+  MenuManagerTest()
+      : ui_thread_(BrowserThread::UI, &message_loop_),
+        file_thread_(BrowserThread::FILE, &message_loop_),
+        manager_(&profile_),
+        prefs_(message_loop_.message_loop_proxy().get()),
+        next_id_(1) {}
 
   virtual void TearDown() OVERRIDE {
     prefs_.pref_service()->CommitPendingWrite();
@@ -79,12 +79,12 @@ class MenuManagerTest : public testing::Test {
   Extension* AddExtension(std::string name) {
     scoped_refptr<Extension> extension = prefs_.AddExtension(name);
     extensions_.push_back(extension);
-    return extension;
+    return extension.get();
   }
 
  protected:
   TestingProfile profile_;
-  MessageLoopForUI message_loop_;
+  base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
 
@@ -214,13 +214,13 @@ TEST_F(MenuManagerTest, PopulateFromValue) {
   int contexts_value = 0;
   ASSERT_TRUE(contexts.ToValue()->GetAsInteger(&contexts_value));
 
-  ListValue* document_url_patterns(new ListValue());
+  base::ListValue* document_url_patterns(new base::ListValue());
   document_url_patterns->Append(
       Value::CreateStringValue("http://www.google.com/*"));
   document_url_patterns->Append(
       Value::CreateStringValue("http://www.reddit.com/*"));
 
-  ListValue* target_url_patterns(new ListValue());
+  base::ListValue* target_url_patterns(new base::ListValue());
   target_url_patterns->Append(
       Value::CreateStringValue("http://www.yahoo.com/*"));
   target_url_patterns->Append(
@@ -489,7 +489,7 @@ class MockExtensionSystem : public TestExtensionSystem {
   DISALLOW_COPY_AND_ASSIGN(MockExtensionSystem);
 };
 
-ProfileKeyedService* BuildMockExtensionSystem(
+BrowserContextKeyedService* BuildMockExtensionSystem(
     content::BrowserContext* profile) {
   return new MockExtensionSystem(static_cast<Profile*>(profile));
 }

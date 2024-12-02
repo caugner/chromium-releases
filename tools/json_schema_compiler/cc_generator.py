@@ -42,7 +42,7 @@ class _Generator(object):
       .Append()
       .Append(self._util_cc_helper.GetIncludePath())
       .Append('#include "base/logging.h"')
-      .Append('#include "base/string_number_conversions.h"')
+      .Append('#include "base/strings/string_number_conversions.h"')
       .Append('#include "%s/%s.h"' %
           (self._namespace.source_file_dir, self._namespace.unix_name))
       .Cblock(self._type_helper.GenerateIncludes(include_soft=True))
@@ -188,7 +188,7 @@ class _Generator(object):
     if type_.property_type == PropertyType.CHOICES:
       for choice in type_.choices:
         value_type = cpp_util.GetValueType(self._type_helper.FollowRef(choice))
-        (c.Sblock('if (value.IsType(%s)) {' % value_type)
+        (c.Sblock('if (value.IsType(base::%s)) {' % value_type)
             .Concat(self._GeneratePopulateVariableFromValue(
                 choice,
                 '(&value)',
@@ -384,6 +384,11 @@ class _Generator(object):
 
     # TODO(kalman): use function.unix_name not Classname.
     function_namespace = cpp_util.Classname(function.name)
+    """Windows has a #define for SendMessage, so to avoid any issues, we need
+    to not use the name.
+    """
+    if function_namespace == 'SendMessage':
+      function_namespace = 'PassMessage'
     (c.Append('namespace %s {' % function_namespace)
       .Append()
     )
@@ -640,7 +645,7 @@ class _Generator(object):
                                                     dst_var,
                                                     failure_value))
     elif underlying_type.property_type == PropertyType.BINARY:
-      (c.Append('if (!%(src_var)s->IsType(%(value_type)s))')
+      (c.Append('if (!%(src_var)s->IsType(base::%(value_type)s))')
         .Append('  return %(failure_value)s;')
         .Append('const base::BinaryValue* binary_value =')
         .Append('    static_cast<const base::BinaryValue*>(%(src_var)s);')

@@ -7,9 +7,9 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/json/string_escape.h"
-#include "base/string_util.h"
 #include "base/strings/string_piece.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/prerender_messages.h"
 #include "chrome/common/render_messages.h"
@@ -22,26 +22,24 @@
 #include "grit/generated_resources.h"
 #include "grit/renderer_resources.h"
 #include "grit/webkit_strings.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebData.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebPoint.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebVector.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebMenuItemInfo.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptSource.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "third_party/WebKit/public/platform/WebData.h"
+#include "third_party/WebKit/public/platform/WebPoint.h"
+#include "third_party/WebKit/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/public/platform/WebVector.h"
+#include "third_party/WebKit/public/web/WebContextMenuData.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebElement.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "third_party/WebKit/public/web/WebMenuItemInfo.h"
+#include "third_party/WebKit/public/web/WebPluginContainer.h"
+#include "third_party/WebKit/public/web/WebScriptSource.h"
+#include "third_party/WebKit/public/web/WebView.h"
 #include "third_party/re2/re2/re2.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/webui/jstemplate_builder.h"
-#include "webkit/glue/webpreferences.h"
 #include "webkit/plugins/npapi/plugin_list.h"
-#include "webkit/plugins/webview_plugin.h"
 
 #if defined(ENABLE_MOBILE_YOUTUBE_PLUGIN)
 #include "webkit/plugins/plugin_constants.h"
@@ -65,7 +63,6 @@ using WebKit::WebScriptSource;
 using WebKit::WebString;
 using WebKit::WebURLRequest;
 using WebKit::WebVector;
-using webkit::WebViewPlugin;
 using webkit_glue::CppArgumentList;
 using webkit_glue::CppVariant;
 
@@ -106,7 +103,7 @@ PluginPlaceholder* PluginPlaceholder::CreateMissingPlugin(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_BLOCKED_PLUGIN_HTML));
 
-  DictionaryValue values;
+  base::DictionaryValue values;
 #if defined(ENABLE_PLUGIN_INSTALLATION)
   values.SetString("message", l10n_util::GetStringUTF8(IDS_PLUGIN_SEARCHING));
 #else
@@ -131,7 +128,7 @@ PluginPlaceholder* PluginPlaceholder::CreateMissingPlugin(
 PluginPlaceholder* PluginPlaceholder::CreateErrorPlugin(
     RenderView* render_view,
     const base::FilePath& file_path) {
-  DictionaryValue values;
+  base::DictionaryValue values;
   values.SetString("message",
                    l10n_util::GetStringUTF8(IDS_PLUGIN_INITIALIZATION_ERROR));
 
@@ -161,7 +158,7 @@ PluginPlaceholder* PluginPlaceholder::CreateBlockedPlugin(
     const string16& name,
     int template_id,
     const string16& message) {
-  DictionaryValue values;
+  base::DictionaryValue values;
   values.SetString("message", message);
   values.SetString("name", name);
   values.SetString("hide", l10n_util::GetStringUTF8(IDS_PLUGIN_HIDE));
@@ -192,7 +189,7 @@ PluginPlaceholder* PluginPlaceholder::CreateMobileYoutubePlugin(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_MOBILE_YOUTUBE_PLUGIN_HTML));
 
-  DictionaryValue values;
+  base::DictionaryValue values;
   values.SetString("video_id", GetYoutubeVideoId(params));
   std::string html_data = webui::GetI18nTemplateHtml(template_html, &values);
 

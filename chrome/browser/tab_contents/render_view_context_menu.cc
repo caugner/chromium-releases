@@ -8,15 +8,16 @@
 #include <set>
 #include <utility>
 
+#include "apps/app_load_service.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_member.h"
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
@@ -39,6 +40,8 @@
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
+#include "chrome/browser/search/instant_extended_context_menu_observer.h"
+#include "chrome/browser/search/search.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -79,21 +82,18 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_restriction.h"
 #include "content/public/common/ssl_status.h"
+#include "content/public/common/url_utils.h"
 #include "extensions/browser/view_type_utils.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebMediaPlayerAction.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginAction.h"
+#include "third_party/WebKit/public/web/WebContextMenuData.h"
+#include "third_party/WebKit/public/web/WebMediaPlayerAction.h"
+#include "third_party/WebKit/public/web/WebPluginAction.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/text/text_elider.h"
 #include "ui/gfx/favicon_size.h"
-#include "webkit/glue/webmenuitem.h"
-
-#ifdef FILE_MANAGER_EXTENSION
-#include "chrome/browser/chromeos/extensions/file_manager/file_manager_util.h"
-#endif
+#include "webkit/common/webmenuitem.h"
 
 using WebKit::WebContextMenuData;
 using WebKit::WebMediaPlayerAction;
@@ -348,19 +348,6 @@ void AddCustomItemsToMenu(const std::vector<WebMenuItem>& items,
   }
 }
 
-bool ShouldShowTranslateItem(const GURL& page_url) {
-  if (page_url.SchemeIs("chrome"))
-    return false;
-
-#ifdef FILE_MANAGER_EXTENSION
-  if (page_url.SchemeIs("chrome-extension") &&
-      page_url.DomainIs(kFileBrowserDomain))
-    return false;
-#endif
-
-  return true;
-}
-
 void DevToolsInspectElementAt(RenderViewHost* rvh, int x, int y) {
   DevToolsWindow::InspectElement(rvh, x, y);
 }
@@ -403,7 +390,12 @@ RenderViewContextMenu::RenderViewContextMenu(
       speech_input_submenu_model_(this),
       protocol_handler_submenu_model_(this),
       protocol_handler_registry_(
-          ProtocolHandlerRegistryFactory::GetForProfile(profile_)) {
+          ProtocolHandlerRegistryFactory::GetForProfile(profile_)),
+      command_executed_(false),
+      is_guest_(false) {
+  RenderViewHost* rvh = source_web_contents_->GetRenderViewHost();
+  if (rvh && rvh->GetProcess()->IsGuest())
+    is_guest_ = true;
 }
 
 RenderViewContextMenu::~RenderViewContextMenu() {
@@ -506,35 +498,39 @@ void RenderViewContextMenu::AppendAllExtensionItems() {
     return;  // In unit-tests, we may not have an ExtensionService.
   MenuManager* menu_manager = service->menu_manager();
 
-  // Get a list of extension id's that have context menu items, and sort it by
-  // the extension's name.
+  string16 printable_selection_text = PrintableSelectionText();
+  EscapeAmpersands(&printable_selection_text);
+
+  // Get a list of extension id's that have context menu items, and sort by the
+  // top level context menu title of the extension.
   std::set<std::string> ids = menu_manager->ExtensionIds();
-  std::vector<std::pair<std::string, std::string> > sorted_ids;
+  std::vector<base::string16> sorted_menu_titles;
+  std::map<base::string16, std::string> map_ids;
   for (std::set<std::string>::iterator i = ids.begin(); i != ids.end(); ++i) {
     const Extension* extension = service->GetExtensionById(*i, false);
     // Platform apps have their context menus created directly in
     // AppendPlatformAppItems.
-    if (extension && !extension->is_platform_app())
-      sorted_ids.push_back(
-          std::pair<std::string, std::string>(extension->name(), *i));
+    if (extension && !extension->is_platform_app()) {
+      base::string16 menu_title = extension_items_.GetTopLevelContextMenuTitle(
+          *i, printable_selection_text);
+      map_ids[menu_title] = *i;
+      sorted_menu_titles.push_back(menu_title);
+    }
   }
-  // TODO(asargent) - See if this works properly for i18n names (bug 32363).
-  std::sort(sorted_ids.begin(), sorted_ids.end());
-
-  if (sorted_ids.empty())
+  if (sorted_menu_titles.empty())
     return;
+
+  const std::string app_locale = g_browser_process->GetApplicationLocale();
+  l10n_util::SortStrings16(app_locale, &sorted_menu_titles);
 
   int index = 0;
   base::TimeTicks begin = base::TimeTicks::Now();
-  std::vector<std::pair<std::string, std::string> >::const_iterator i;
-  for (i = sorted_ids.begin();
-       i != sorted_ids.end(); ++i) {
-    string16 printable_selection_text = PrintableSelectionText();
-    EscapeAmpersands(&printable_selection_text);
-
-    extension_items_.AppendExtensionItems(i->second, printable_selection_text,
+  for (size_t i = 0; i < sorted_menu_titles.size(); ++i) {
+    const std::string& id = map_ids[sorted_menu_titles[i]];
+    extension_items_.AppendExtensionItems(id, printable_selection_text,
                                           &index);
   }
+
   UMA_HISTOGRAM_TIMES("Extensions.ContextMenus_BuildTime",
                       base::TimeTicks::Now() - begin);
   UMA_HISTOGRAM_COUNTS("Extensions.ContextMenus_ItemCount", index);
@@ -580,6 +576,7 @@ void RenderViewContextMenu::InitMenu() {
   if (params_.media_type == WebContextMenuData::MediaTypeNone &&
       !has_link &&
       !params_.is_editable &&
+      !is_guest_ &&
       !has_selection) {
     if (!params_.page_url.is_empty()) {
       bool is_devtools = IsDevToolsURL(params_.page_url);
@@ -599,7 +596,8 @@ void RenderViewContextMenu::InitMenu() {
     }
   }
 
-  if (has_link) {
+  // Do not show link related items for guest.
+  if (has_link && !is_guest_) {
     AppendLinkItems();
     if (params_.media_type != WebContextMenuData::MediaTypeNone)
       menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
@@ -631,7 +629,7 @@ void RenderViewContextMenu::InitMenu() {
   else if (has_selection)
     AppendCopyItem();
 
-  if (has_selection) {
+  if (!is_guest_ && has_selection) {
     AppendSearchProvider();
     if (!IsDevToolsURL(params_.page_url))
       AppendPrintItem();
@@ -642,11 +640,19 @@ void RenderViewContextMenu::InitMenu() {
 
   AppendDeveloperItems();
 
-  if (!print_preview_menu_observer_.get()) {
-    print_preview_menu_observer_.reset(
-        new PrintPreviewContextMenuObserver(source_web_contents_));
+  if (!is_guest_) {
+    if (!print_preview_menu_observer_.get()) {
+      print_preview_menu_observer_.reset(
+          new PrintPreviewContextMenuObserver(source_web_contents_));
+    }
+    if (!instant_extended_observer_.get()) {
+      instant_extended_observer_.reset(
+          new InstantExtendedContextMenuObserver(source_web_contents_));
+    }
+
+    observers_.AddObserver(print_preview_menu_observer_.get());
+    observers_.AddObserver(instant_extended_observer_.get());
   }
-  observers_.AddObserver(print_preview_menu_observer_.get());
 }
 
 const Extension* RenderViewContextMenu::GetExtension() const {
@@ -727,12 +733,15 @@ void RenderViewContextMenu::AppendPanelItems() {
 
   bool has_selection = !params_.selection_text.empty();
 
+  // Checking link should take precedence before checking selection since on Mac
+  // right-clicking a link will also make it selected.
+  if (params_.unfiltered_link_url.is_valid())
+    AppendLinkItems();
+
   if (params_.is_editable)
     AppendEditableItems();
   else if (has_selection)
     AppendCopyItem();
-  else if (params_.unfiltered_link_url.is_valid())
-    AppendLinkItems();
 
   // Only add extension items from this extension.
   int index = 0;
@@ -914,7 +923,7 @@ void RenderViewContextMenu::AppendPageItems() {
                                   IDS_CONTENT_CONTEXT_SAVEPAGEAS);
   menu_model_.AddItemWithStringId(IDC_PRINT, IDS_CONTENT_CONTEXT_PRINT);
 
-  if (ShouldShowTranslateItem(params_.page_url)) {
+  if (TranslateManager::IsTranslatableURL(params_.page_url)) {
     std::string locale = g_browser_process->GetApplicationLocale();
     locale = TranslateManager::GetLanguageCode(locale);
     string16 language = l10n_util::GetDisplayNameForLocale(locale, locale,
@@ -1206,20 +1215,15 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       // target languages are identical.  This is to give a way to user to
       // translate a page that might contains text fragments in a different
       // language.
-      return !!(params_.edit_flags & WebContextMenuData::CanTranslate) &&
-             translate_tab_helper->language_state().page_translatable() &&
+      return ((params_.edit_flags & WebContextMenuData::CanTranslate) != 0) &&
              !original_lang.empty() &&  // Did we receive the page language yet?
-             // Only allow translating languages we explitly support and the
-             // unknown language (in which case the page language is detected on
-             // the server side).
-             (original_lang == chrome::kUnknownLanguageCode ||
-                 TranslateManager::IsSupportedLanguage(original_lang)) &&
              !translate_tab_helper->language_state().IsPageTranslated() &&
              !source_web_contents_->GetInterstitialPage() &&
-             TranslateManager::IsTranslatableURL(params_.page_url) &&
              // There are some application locales which can't be used as a
              // target language for translation.
-             TranslateManager::IsSupportedLanguage(target_lang);
+             TranslateManager::IsSupportedLanguage(target_lang) &&
+             // Disable on the Instant Extended NTP.
+             !chrome::IsInstantNTP(source_web_contents_);
     }
 
     case IDC_CONTENT_CONTEXT_OPENLINKNEWTAB:
@@ -1334,7 +1338,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       // different (like having "view-source:" on the front).
       NavigationEntry* active_entry =
           source_web_contents_->GetController().GetActiveEntry();
-      return download_util::IsSavableURL(
+      return content::IsSavableURL(
           (active_entry) ? active_entry->GetURL() : GURL());
     }
 
@@ -1461,6 +1465,7 @@ bool RenderViewContextMenu::IsCommandIdChecked(int id) const {
 }
 
 void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
+  command_executed_ = true;
   // If this command is is added by one of our observers, we dispatch it to the
   // observer.
   ObserverListBase<RenderViewContextMenuObserver>::Iterator it(observers_);
@@ -1709,8 +1714,8 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       DCHECK(platform_app);
       DCHECK(platform_app->is_platform_app());
 
-      extensions::ExtensionSystem::Get(profile_)->extension_service()->
-          RestartExtension(platform_app->id());
+      apps::AppLoadService::Get(profile_)->RestartApplication(
+          platform_app->id());
       break;
     }
 
@@ -1789,7 +1794,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 
     case IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE:
       source_web_contents_->ViewFrameSource(params_.frame_url,
-                                            params_.frame_content_state);
+                                            params_.frame_page_state);
       break;
 
     case IDC_CONTENT_CONTEXT_VIEWFRAMEINFO: {
@@ -1961,6 +1966,12 @@ void RenderViewContextMenu::MenuClosed(ui::SimpleMenuModel* source) {
       chrome::NOTIFICATION_RENDER_VIEW_CONTEXT_MENU_CLOSED,
       content::Source<RenderViewContextMenu>(this),
       content::NotificationService::NoDetails());
+
+  if (!command_executed_) {
+    FOR_EACH_OBSERVER(RenderViewContextMenuObserver,
+                      observers_,
+                      OnMenuCancel());
+  }
 }
 
 bool RenderViewContextMenu::IsDevCommandEnabled(int id) const {
@@ -2036,8 +2047,7 @@ void RenderViewContextMenu::WriteURLToClipboard(const GURL& url) {
   chrome_common_net::WriteURLToClipboard(
       url,
       profile_->GetPrefs()->GetString(prefs::kAcceptLanguages),
-      ui::Clipboard::GetForCurrentThread(),
-      content::BrowserContext::GetMarkerForOffTheRecordContext(profile_));
+      ui::Clipboard::GetForCurrentThread());
 }
 
 void RenderViewContextMenu::MediaPlayerActionAt(

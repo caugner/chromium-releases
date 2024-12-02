@@ -7,7 +7,7 @@
 #include <algorithm>
 #include "base/auto_reset.h"
 #include "base/logging.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/panels/detached_panel_collection.h"
 #include "chrome/browser/ui/panels/display_settings_provider.h"
 #include "chrome/browser/ui/panels/native_panel_stack_window.h"
@@ -173,13 +173,22 @@ gfx::Rect StackedPanelCollection::GetEnclosingBounds() const {
 
 int StackedPanelCollection::MinimizePanelsForSpace(int needed_space) {
   int available_space = GetCurrentAvailableBottomSpace();
+
+  // Only the most recently active panel might be active.
+  Panel* active_panel = NULL;
+  if (!most_recently_active_panels_.empty()) {
+    Panel* most_recently_active_panel = most_recently_active_panels_.front();
+    if (most_recently_active_panel->IsActive())
+      active_panel = most_recently_active_panel;
+  }
+
   for (Panels::const_reverse_iterator iter =
            most_recently_active_panels_.rbegin();
        iter != most_recently_active_panels_.rend() &&
            available_space < needed_space;
        ++iter) {
     Panel* current_panel = *iter;
-    if (!current_panel->IsActive() && !IsPanelMinimized(current_panel)) {
+    if (current_panel != active_panel && !IsPanelMinimized(current_panel)) {
       available_space +=
           current_panel->GetBounds().height() - panel::kTitlebarHeight;
       MinimizePanel(current_panel);
@@ -452,7 +461,7 @@ void StackedPanelCollection::OnRestoreButtonClicked(
 
 bool StackedPanelCollection::CanShowMinimizeButton(const Panel* panel) const {
   // Only the top panel in the stack shows the minimize button.
-  return panel == top_panel();
+  return PanelManager::CanUseSystemMinimize() && panel == top_panel();
 }
 
 bool StackedPanelCollection::CanShowRestoreButton(const Panel* panel) const {
@@ -461,6 +470,10 @@ bool StackedPanelCollection::CanShowRestoreButton(const Panel* panel) const {
 
 bool StackedPanelCollection::IsPanelMinimized(const Panel* panel) const {
   return panel->expansion_state() != Panel::EXPANDED;
+}
+
+bool StackedPanelCollection::UsesAlwaysOnTopPanels() const {
+  return false;
 }
 
 void StackedPanelCollection::SavePanelPlacement(Panel* panel) {
@@ -605,7 +618,6 @@ void StackedPanelCollection::UpdatePanelOnCollectionChange(Panel* panel) {
   panel->set_attention_mode(
       static_cast<Panel::AttentionMode>(Panel::USE_PANEL_ATTENTION |
                                         Panel::USE_SYSTEM_ATTENTION));
-  panel->SetAlwaysOnTop(false);
   panel->ShowShadow(false);
   panel->EnableResizeByMouse(true);
   panel->UpdateMinimizeRestoreButtonVisibility();
@@ -631,17 +643,16 @@ void StackedPanelCollection::OnPanelActiveStateChanged(Panel* panel) {
   if (!panel->IsActive())
     return;
 
+  // Move the panel to the front if not yet.
   Panels::iterator iter = std::find(most_recently_active_panels_.begin(),
       most_recently_active_panels_.end(), panel);
   DCHECK(iter != most_recently_active_panels_.end());
+  if (iter != most_recently_active_panels_.begin()) {
+    most_recently_active_panels_.erase(iter);
+    most_recently_active_panels_.push_front(panel);
+  }
 
-  // If the panel is already in the front, nothing to do.
-  if (iter == most_recently_active_panels_.begin())
-    return;
-
-  // Move the panel to the front.
-  most_recently_active_panels_.erase(iter);
-  most_recently_active_panels_.push_front(panel);
+  GetStackWindowForPanel(panel)->OnPanelActivated(panel);
 }
 
 gfx::Rect StackedPanelCollection::GetInitialPanelBounds(
@@ -756,7 +767,8 @@ int StackedPanelCollection::GetMaximiumAvailableBottomSpace() const {
   for (Panels::const_iterator iter = panels_.begin();
        iter != panels_.end(); iter++) {
     Panel* panel = *iter;
-    if (panel->IsActive())
+    // Only the most recently active panel might be active.
+    if (iter == panels_.begin() && panel->IsActive())
       bottom += panel->GetBounds().height();
     else
       bottom += panel::kTitlebarHeight;

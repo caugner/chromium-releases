@@ -12,7 +12,7 @@
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "grit/app_locale_settings.h"
 #include "grit/ui_strings.h"
 #include "third_party/icu/public/common/unicode/uchar.h"
@@ -54,9 +54,6 @@
 
 namespace {
 
-// Default "system" color for text cursor.
-const SkColor kDefaultCursorColor = SK_ColorBLACK;
-
 void ConvertRectToScreen(const views::View* src, gfx::Rect* r) {
   DCHECK(src);
 
@@ -83,8 +80,7 @@ NativeTextfieldViews::NativeTextfieldViews(Textfield* parent)
       skip_input_method_cancel_composition_(false),
       initiating_drag_(false),
       cursor_timer_(this),
-      aggregated_clicks_(0),
-      touch_selection_controller_(NULL) {
+      aggregated_clicks_(0) {
   set_border(text_border_);
 
 #if defined(OS_CHROMEOS)
@@ -137,8 +133,21 @@ bool NativeTextfieldViews::OnMouseDragged(const ui::MouseEvent& event) {
   // TODO: Remove once NativeTextfield implementations are consolidated to
   // Textfield.
   if (!textfield_->OnMouseDragged(event)) {
-    if (MoveCursorTo(event.location(), true))
-      SchedulePaint();
+    MoveCursorTo(event.location(), true);
+    if (aggregated_clicks_ == 1) {
+      model_->SelectWord();
+      // Expand the selection so the initially selected word remains selected.
+      ui::Range selection = GetRenderText()->selection();
+      const size_t min = std::min(selection.GetMin(),
+                                  double_click_word_.GetMin());
+      const size_t max = std::max(selection.GetMax(),
+                                  double_click_word_.GetMax());
+      const bool reversed = selection.is_reversed();
+      selection.set_start(reversed ? max : min);
+      selection.set_end(reversed ? min : max);
+      model_->SelectRange(selection);
+    }
+    SchedulePaint();
   }
   OnAfterUserAction();
   return true;
@@ -209,6 +218,7 @@ void NativeTextfieldViews::OnGestureEvent(ui::GestureEvent* event) {
         if (touch_selection_controller_.get())
           event->SetHandled();
       } else if (switches::IsTouchDragDropEnabled()) {
+        initiating_drag_ = true;
         touch_selection_controller_.reset();
       } else {
         if (!touch_selection_controller_.get())
@@ -412,9 +422,9 @@ bool NativeTextfieldViews::DrawsHandles() {
   return false;
 }
 
-void NativeTextfieldViews::OpenContextMenu(const gfx::Point anchor) {
+void NativeTextfieldViews::OpenContextMenu(const gfx::Point& anchor) {
   touch_selection_controller_.reset();
-  ShowContextMenu(anchor, false);
+  ShowContextMenu(anchor, ui::MENU_SOURCE_TOUCH_EDIT_MENU);
 }
 
 gfx::NativeCursor NativeTextfieldViews::GetCursor(const ui::MouseEvent& event) {
@@ -432,11 +442,14 @@ gfx::NativeCursor NativeTextfieldViews::GetCursor(const ui::MouseEvent& event) {
 
 /////////////////////////////////////////////////////////////////
 // NativeTextfieldViews, ContextMenuController overrides:
-void NativeTextfieldViews::ShowContextMenuForView(View* source,
-                                                  const gfx::Point& point) {
+void NativeTextfieldViews::ShowContextMenuForView(
+    View* source,
+    const gfx::Point& point,
+    ui::MenuSourceType source_type) {
   UpdateContextMenu();
   if (context_menu_runner_->RunMenuAt(GetWidget(), NULL,
           gfx::Rect(point, gfx::Size()), views::MenuItemView::TOPLEFT,
+          source_type,
           MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU) ==
       MenuRunner::MENU_DELETED)
     return;
@@ -505,10 +518,10 @@ void NativeTextfieldViews::AppendText(const string16& text) {
   SchedulePaint();
 }
 
-void NativeTextfieldViews::ReplaceSelection(const string16& text) {
-  if (text.empty() && !model_->HasSelection())
+void NativeTextfieldViews::InsertOrReplaceText(const string16& text) {
+  if (text.empty())
     return;
-  model_->ReplaceText(text);
+  model_->InsertText(text);
   OnCaretBoundsChanged();
   SchedulePaint();
 }
@@ -534,23 +547,16 @@ void NativeTextfieldViews::ClearSelection() {
 }
 
 void NativeTextfieldViews::UpdateBorder() {
-  if (textfield_->draw_border()) {
-    gfx::Insets insets = GetInsets();
-    textfield_->SetHorizontalMargins(insets.left(), insets.right());
-    textfield_->SetVerticalMargins(insets.top(), insets.bottom());
-  } else {
-    textfield_->SetHorizontalMargins(0, 0);
-    textfield_->SetVerticalMargins(0, 0);
-  }
-}
-
-void NativeTextfieldViews::UpdateBorderColor() {
-  if (textfield_->use_default_border_color())
-    text_border_->UseDefaultColor();
-  else
-    text_border_->SetColor(textfield_->border_color());
-
-  SchedulePaint();
+  // By default, if a caller calls Textfield::RemoveBorder() and does not set
+  // any explicit margins, they should get zero margins.  But also call
+  // UpdateXXXMargins() so we respect any explicitly-set margins.
+  //
+  // NOTE: If someday Textfield supports toggling |draw_border_| back on, we'll
+  // need to update this conditional to set the insets to their default values.
+  if (!textfield_->draw_border())
+    text_border_->SetInsets(0, 0, 0, 0);
+  UpdateHorizontalMargins();
+  UpdateVerticalMargins();
 }
 
 void NativeTextfieldViews::UpdateTextColor() {
@@ -601,7 +607,6 @@ void NativeTextfieldViews::UpdateHorizontalMargins() {
   if (!textfield_->GetHorizontalMargins(&left, &right))
     return;
   gfx::Insets inset = GetInsets();
-
   text_border_->SetInsets(inset.top(), left, inset.bottom(), right);
   OnBoundsChanged(GetBounds());
 }
@@ -613,6 +618,11 @@ void NativeTextfieldViews::UpdateVerticalMargins() {
   gfx::Insets inset = GetInsets();
   text_border_->SetInsets(top, inset.left(), bottom, inset.right());
   OnBoundsChanged(GetBounds());
+}
+
+void NativeTextfieldViews::UpdateVerticalAlignment() {
+  GetRenderText()->SetVerticalAlignment(textfield_->vertical_alignment());
+  SchedulePaint();
 }
 
 bool NativeTextfieldViews::SetFocus() {
@@ -932,6 +942,31 @@ void NativeTextfieldViews::InsertChar(char16 ch, int flags) {
 
   UpdateAfterChange(true, true);
   OnAfterUserAction();
+
+  if (textfield_->IsObscured()) {
+    const base::TimeDelta& reveal_duration =
+        textfield_->obscured_reveal_duration();
+    if (reveal_duration != base::TimeDelta()) {
+      const size_t change_offset = model_->GetCursorPosition();
+      DCHECK_GT(change_offset, 0u);
+      RevealObscuredChar(change_offset - 1, reveal_duration);
+    }
+  }
+}
+
+gfx::NativeWindow NativeTextfieldViews::GetAttachedWindow() const {
+  // Imagine the following hierarchy.
+  //   [NativeWidget A] - FocusManager
+  //     [View]
+  //     [NativeWidget B]
+  //       [View]
+  //         [View X]
+  // An important thing is that [NativeWidget A] owns Win32 input focus even
+  // when [View X] is logically focused by FocusManager. As a result, an Win32
+  // IME may want to interact with the native view of [NativeWidget A] rather
+  // than that of [NativeWidget B]. This is why we need to call
+  // GetTopLevelWidget() here.
+  return GetWidget()->GetTopLevelWidget()->GetNativeView();
 }
 
 ui::TextInputType NativeTextfieldViews::GetTextInputType() const {
@@ -1058,9 +1093,14 @@ bool NativeTextfieldViews::ChangeTextDirectionAndLayoutAlignment(
 void NativeTextfieldViews::ExtendSelectionAndDelete(
     size_t before,
     size_t after) {
-  // TODO(horo): implement this method if it is required.
-  // http://crbug.com/149155
-  NOTIMPLEMENTED();
+  ui::Range range = GetSelectedRange();
+  DCHECK_GE(range.start(), before);
+
+  range.set_start(range.start() - before);
+  range.set_end(range.end() + after);
+  ui::Range text_range;
+  if (GetTextRange(&text_range) && text_range.Contains(range))
+    DeleteRange(range);
 }
 
 void NativeTextfieldViews::EnsureCaretInRect(const gfx::Rect& rect) {
@@ -1086,7 +1126,7 @@ void NativeTextfieldViews::UpdateColorsFromTheme(const ui::NativeTheme* theme) {
   UpdateTextColor();
   UpdateBackgroundColor();
   gfx::RenderText* render_text = GetRenderText();
-  render_text->set_cursor_color(kDefaultCursorColor);
+  render_text->set_cursor_color(textfield_->GetTextColor());
   render_text->set_selection_color(theme->GetSystemColor(
       ui::NativeTheme::kColorId_TextfieldSelectionColor));
   render_text->set_selection_background_focused_color(theme->GetSystemColor(
@@ -1372,13 +1412,9 @@ bool NativeTextfieldViews::Paste() {
     string16 new_text = GetTextForDisplay(GetText());
     model_->SetText(new_text);
 
-    // Calls TextfieldController::ContentsChanged() explicitly if the paste
-    // action did not change the content at all. See http://crbug.com/79002
-    if (new_text == original_text) {
-      TextfieldController* controller = textfield_->GetController();
-      if (controller)
-        controller->ContentsChanged(textfield_, textfield_->text());
-    }
+    TextfieldController* controller = textfield_->GetController();
+    if (controller)
+      controller->OnAfterPaste();
   }
   return success;
 }
@@ -1417,6 +1453,7 @@ void NativeTextfieldViews::HandleMousePressEvent(const ui::MouseEvent& event) {
     case 1:
       MoveCursorTo(event.location(), false);
       model_->SelectWord();
+      double_click_word_ = GetRenderText()->selection();
       OnCaretBoundsChanged();
       break;
     case 2:
@@ -1457,9 +1494,23 @@ void NativeTextfieldViews::CreateTouchSelectionControllerAndNotifyIt() {
 void NativeTextfieldViews::PlatformGestureEventHandling(
     const ui::GestureEvent* event) {
 #if defined(OS_WIN) && defined(USE_AURA)
-  if (event->type() == ui::ET_GESTURE_TAP_DOWN && !textfield_->read_only())
+  if (event->type() == ui::ET_GESTURE_TAP && !textfield_->read_only())
     base::win::DisplayVirtualKeyboard();
 #endif
+}
+
+void NativeTextfieldViews::RevealObscuredChar(int index,
+                                              const base::TimeDelta& duration) {
+  GetRenderText()->SetObscuredRevealIndex(index);
+  SchedulePaint();
+
+  if (index != -1) {
+    obscured_reveal_timer_.Start(
+        FROM_HERE,
+        duration,
+        base::Bind(&NativeTextfieldViews::RevealObscuredChar,
+                   base::Unretained(this), -1, base::TimeDelta()));
+  }
 }
 
 }  // namespace views

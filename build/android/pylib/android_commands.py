@@ -27,7 +27,7 @@ except:
   pexpect = None
 
 sys.path.append(os.path.join(
-    constants.CHROME_DIR, 'third_party', 'android_testrunner'))
+    constants.DIR_SOURCE_ROOT, 'third_party', 'android_testrunner'))
 import adb_interface
 import am_instrument_parser
 import errors
@@ -78,7 +78,8 @@ def GetEmulators():
     emulator-5558   device
   """
   re_device = re.compile('^emulator-[0-9]+', re.MULTILINE)
-  devices = re_device.findall(cmd_helper.GetCmdOutput(['adb', 'devices']))
+  devices = re_device.findall(cmd_helper.GetCmdOutput([constants.ADB_PATH,
+                                                       'devices']))
   return devices
 
 
@@ -104,7 +105,8 @@ def GetAttachedDevices():
     emulator-5554   offline
   """
   re_device = re.compile('^([a-zA-Z0-9_:.-]+)\tdevice$', re.MULTILINE)
-  devices = re_device.findall(cmd_helper.GetCmdOutput(['adb', 'devices']))
+  devices = re_device.findall(cmd_helper.GetCmdOutput([constants.ADB_PATH,
+                                                       'devices']))
   preferred_device = os.environ.get('ANDROID_SERIAL')
   if preferred_device in devices:
     devices.remove(preferred_device)
@@ -176,8 +178,10 @@ def _ComputeFileListHash(md5sum_output):
 
 def _HasAdbPushSucceeded(command_output):
   """Returns whether adb push has succeeded from the provided output."""
+  # TODO(frankf): We should look at the return code instead of the command
+  # output for many of the commands in this file.
   if not command_output:
-    return False
+    return True
   # Success looks like this: "3035 KB/s (12512056 bytes in 4.025s)"
   # Errors look like this: "failed to copy  ... "
   if not re.search('^[0-9]', command_output.splitlines()[-1]):
@@ -205,6 +209,10 @@ class AndroidCommands(object):
   """
 
   def __init__(self, device=None):
+    adb_dir = os.path.dirname(constants.ADB_PATH)
+    if adb_dir and adb_dir not in os.environ['PATH'].split(os.pathsep):
+      # Required by third_party/android_testrunner to call directly 'adb'.
+      os.environ['PATH'] += os.pathsep + adb_dir
     self._adb = adb_interface.AdbInterface()
     if device:
       self._adb.SetTargetSerial(device)
@@ -213,7 +221,9 @@ class AndroidCommands(object):
     self.logcat_process = None
     self._logcat_tmpoutfile = None
     self._pushed_files = []
-    self._device_utc_offset = self.RunShellCommand('date +%z')[0]
+    self._device_utc_offset = None
+    self._potential_push_size = 0
+    self._actual_push_size = 0
     self._md5sum_build_dir = ''
     self._external_storage = ''
     self._util_wrapper = ''
@@ -386,7 +396,8 @@ class AndroidCommands(object):
           return install_status
       except errors.WaitForResponseTimedOutError:
         print '@@@STEP_WARNINGS@@@'
-        logging.info('Timeout on installing %s' % apk_path)
+        logging.info('Timeout on installing %s on device %s', apk_path,
+                     self._device)
 
       if reboots_left <= 0:
         raise Exception('Install failure')
@@ -408,12 +419,12 @@ class AndroidCommands(object):
 
   def KillAdbServer(self):
     """Kill adb server."""
-    adb_cmd = ['adb', 'kill-server']
+    adb_cmd = [constants.ADB_PATH, 'kill-server']
     return cmd_helper.RunCmd(adb_cmd)
 
   def StartAdbServer(self):
     """Start adb server."""
-    adb_cmd = ['adb', 'start-server']
+    adb_cmd = [constants.ADB_PATH, 'start-server']
     return cmd_helper.RunCmd(adb_cmd)
 
   def WaitForSystemBootCompleted(self, wait_time):
@@ -654,6 +665,24 @@ class AndroidCommands(object):
     """
     self.RunShellCommand('am force-stop ' + package)
 
+  def GetApplicationPath(self, package):
+    """Get the installed apk path on the device for the given package.
+
+    Args:
+      package: Name of the package.
+
+    Returns:
+      Path to the apk on the device if it exists, None otherwise.
+    """
+    pm_path_output  = self.RunShellCommand('pm path ' + package)
+    # The path output contains anything if and only if the package
+    # exists.
+    if pm_path_output:
+      # pm_path_output is of the form: "package:/path/to/foo.apk"
+      return pm_path_output[0].split(':')[1]
+    else:
+      return None
+
   def ClearApplicationState(self, package):
     """Closes and clears all state for the given |package|."""
     # Check that the package exists before clearing it. Necessary because
@@ -661,7 +690,6 @@ class AndroidCommands(object):
     pm_path_output  = self.RunShellCommand('pm path ' + package)
     # The path output only contains anything if and only if the package exists.
     if pm_path_output:
-      self.CloseApplication(package)
       self.RunShellCommand('pm clear ' + package)
 
   def SendKeyEvent(self, keycode):
@@ -672,9 +700,18 @@ class AndroidCommands(object):
     """
     self.RunShellCommand('input keyevent %d' % keycode)
 
-  def CheckMd5Sum(self, local_path, device_path):
-    assert os.path.exists(local_path), 'Local path not found %s' % local_path
+  def CheckMd5Sum(self, local_path, device_path, ignore_paths=False):
+    """Compares the md5sum of a local path against a device path.
 
+    Args:
+      local_path: Path (file or directory) on the host.
+      device_path: Path on the device.
+      ignore_paths: If False, both the md5sum and the relative paths/names of
+          files must match. If True, only the md5sum must match.
+
+    Returns:
+      True if the md5sums match.
+    """
     if not self._md5sum_build_dir:
       default_build_type = os.environ.get('BUILD_TYPE', 'Debug')
       build_dir = '%s/%s/' % (
@@ -688,7 +725,6 @@ class AndroidCommands(object):
       assert _HasAdbPushSucceeded(self._adb.SendCommand(command))
       self._md5sum_build_dir = build_dir
 
-    self._pushed_files.append(device_path)
     hashes_on_device = _ComputeFileListHash(
         self.RunShellCommand(MD5SUM_LD_LIBRARY_PATH + ' ' + self._util_wrapper +
             ' ' + MD5SUM_DEVICE_PATH + ' ' + device_path))
@@ -696,6 +732,10 @@ class AndroidCommands(object):
     md5sum_output = cmd_helper.GetCmdOutput(
         ['%s/md5sum_bin_host' % self._md5sum_build_dir, local_path])
     hashes_on_host = _ComputeFileListHash(md5sum_output.splitlines())
+
+    if ignore_paths:
+      hashes_on_device = [h.split()[0] for h in hashes_on_device]
+      hashes_on_host = [h.split()[0] for h in hashes_on_host]
 
     return hashes_on_device == hashes_on_host
 
@@ -707,9 +747,15 @@ class AndroidCommands(object):
 
     All pushed files can be removed by calling RemovePushedFiles().
     """
+    assert os.path.exists(local_path), 'Local path not found %s' % local_path
+    size = int(cmd_helper.GetCmdOutput(['du', '-sb', local_path]).split()[0])
+    self._pushed_files.append(device_path)
+    self._potential_push_size += size
+
     if self.CheckMd5Sum(local_path, device_path):
       return
 
+    self._actual_push_size += size
     # They don't match, so remove everything first and then create it.
     if os.path.isdir(local_path):
       self.RunShellCommand('rm -r %s' % device_path, timeout_time=2 * 60)
@@ -722,6 +768,15 @@ class AndroidCommands(object):
     output = self._adb.SendCommand(push_command, timeout_time=30 * 60)
     assert _HasAdbPushSucceeded(output)
 
+  def GetPushSizeInfo(self):
+    """Get total size of pushes to the device done via PushIfNeeded()
+
+    Returns:
+      A tuple:
+        1. Total size of push requests to PushIfNeeded (MB)
+        2. Total size that was actually pushed (MB)
+    """
+    return (self._potential_push_size, self._actual_push_size)
 
   def GetFileContents(self, filename, log_result=False):
     """Gets contents from the file specified by |filename|."""
@@ -809,7 +864,12 @@ class AndroidCommands(object):
                          '(?P<filename>[^\s]+)$')
     return _GetFilesFromRecursiveLsOutput(
         path, self.RunShellCommand('ls -lR %s' % path), re_file,
-        self._device_utc_offset)
+        self.GetUtcOffset())
+
+  def GetUtcOffset(self):
+    if not self._device_utc_offset:
+      self._device_utc_offset = self.RunShellCommand('date +%z')[0]
+    return self._device_utc_offset
 
   def SetJavaAssertsEnabled(self, enable):
     """Sets or removes the device java assertions property.
@@ -859,8 +919,17 @@ class AndroidCommands(object):
     assert build_type
     return build_type
 
+  def GetDescription(self):
+    """Returns the description of the system.
+
+    For example, "yakju-userdebug 4.1 JRN54F 364167 dev-keys".
+    """
+    description = self.RunShellCommand('getprop ro.build.description')[0]
+    assert description
+    return description
+
   def GetProductModel(self):
-    """Returns the namve of the product model (e.g. "Galaxy Nexus") """
+    """Returns the name of the product model (e.g. "Galaxy Nexus") """
     model = self.RunShellCommand('getprop ro.product.model')[0]
     assert model
     return model
@@ -889,7 +958,8 @@ class AndroidCommands(object):
 
     # Spawn logcat and syncronize with it.
     for _ in range(4):
-      self._logcat = pexpect.spawn('adb', args, timeout=10, logfile=logfile)
+      self._logcat = pexpect.spawn(constants.ADB_PATH, args, timeout=10,
+                                   logfile=logfile)
       self.RunShellCommand('log startup_sync')
       if self._logcat.expect(['startup_sync', pexpect.EOF,
                               pexpect.TIMEOUT]) == 0:
@@ -958,7 +1028,7 @@ class AndroidCommands(object):
         logging.critical('Found EOF in adb logcat. Restarting...')
         # Rerun spawn with original arguments. Note that self._logcat.args[0] is
         # the path of adb, so we don't want it in the arguments.
-        self._logcat = pexpect.spawn('adb',
+        self._logcat = pexpect.spawn(constants.ADB_PATH,
                                      self._logcat.args[1:],
                                      timeout=self._logcat.timeout,
                                      logfile=self._logcat.logfile)

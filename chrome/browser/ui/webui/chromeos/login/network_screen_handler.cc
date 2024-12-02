@@ -4,12 +4,11 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/network_screen_handler.h"
 
-#include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/language_switch_menu.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
@@ -155,13 +154,13 @@ void NetworkScreenHandler::HandleOnLanguageChanged(const std::string& locale) {
 }
 
 void NetworkScreenHandler::HandleOnInputMethodChanged(const std::string& id) {
-  input_method::GetInputMethodManager()->ChangeInputMethod(id);
+  input_method::InputMethodManager::Get()->ChangeInputMethod(id);
 }
 
 ListValue* NetworkScreenHandler::GetLanguageList() {
   const std::string app_locale = g_browser_process->GetApplicationLocale();
   input_method::InputMethodManager* manager =
-      input_method::GetInputMethodManager();
+      input_method::InputMethodManager::Get();
   // GetSupportedInputMethods() never returns NULL.
   scoped_ptr<input_method::InputMethodDescriptors> descriptors(
       manager->GetSupportedInputMethods());
@@ -194,7 +193,7 @@ ListValue* NetworkScreenHandler::GetLanguageList() {
 ListValue* NetworkScreenHandler::GetInputMethods() {
   ListValue* input_methods_list = new ListValue;
   input_method::InputMethodManager* manager =
-      input_method::GetInputMethodManager();
+      input_method::InputMethodManager::Get();
   input_method::InputMethodUtil* util = manager->GetInputMethodUtil();
   scoped_ptr<input_method::InputMethodDescriptors> input_methods(
       manager->GetActiveInputMethods());

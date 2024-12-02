@@ -6,7 +6,7 @@
 
 #include "base/file_util.h"
 #include "base/json/json_string_value_serializer.h"
-#include "base/string_util.h"
+#include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -152,6 +152,12 @@ void FeedbackData::FeedbackPageDataComplete() {
 }
 
 #if defined(OS_CHROMEOS)
+void FeedbackData::set_sys_info(
+    scoped_ptr<chromeos::SystemLogsResponse> sys_info) {
+  if (sys_info.get())
+    CompressSyslogs(sys_info.Pass());
+}
+
 void FeedbackData::CompressSyslogs(
     scoped_ptr<chromeos::SystemLogsResponse> sys_info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));

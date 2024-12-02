@@ -4,7 +4,7 @@
 
 #include "chrome/browser/extensions/api/storage/settings_backend.h"
 
-#include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/logging.h"
 #include "chrome/browser/extensions/api/storage/settings_sync_processor.h"
 #include "chrome/browser/extensions/api/storage/settings_sync_util.h"
@@ -19,14 +19,19 @@ namespace extensions {
 SettingsBackend::SettingsBackend(
     const scoped_refptr<SettingsStorageFactory>& storage_factory,
     const base::FilePath& base_path,
+    syncer::ModelType sync_type,
+    const syncer::SyncableService::StartSyncFlare& flare,
     const SettingsStorageQuotaEnforcer::Limits& quota,
     const scoped_refptr<SettingsObserverList>& observers)
     : storage_factory_(storage_factory),
       base_path_(base_path),
       quota_(quota),
       observers_(observers),
-      sync_type_(syncer::UNSPECIFIED) {
+      sync_type_(sync_type),
+      flare_(flare) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK(sync_type_ == syncer::EXTENSION_SETTINGS ||
+         sync_type_ == syncer::APP_SETTINGS);
 }
 
 SettingsBackend::~SettingsBackend() {
@@ -36,12 +41,13 @@ SettingsBackend::~SettingsBackend() {
 ValueStore* SettingsBackend::GetStorage(
     const std::string& extension_id) const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  DictionaryValue empty;
+  base::DictionaryValue empty;
   return GetOrCreateStorageWithSyncData(extension_id, empty);
 }
 
 SyncableSettingsStorage* SettingsBackend::GetOrCreateStorageWithSyncData(
-    const std::string& extension_id, const DictionaryValue& sync_data) const {
+    const std::string& extension_id,
+    const base::DictionaryValue& sync_data) const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
 
   StorageObjMap::iterator maybe_storage = storage_objs_.find(extension_id);
@@ -70,6 +76,11 @@ SyncableSettingsStorage* SettingsBackend::GetOrCreateStorageWithSyncData(
             CreateSettingsSyncProcessor(extension_id).Pass());
     if (error.IsSet())
       syncable_storage.get()->StopSyncing();
+  } else {
+    // Tell sync to try and start soon, because syncable changes to sync_type_
+    // have started happening. This will cause sync to call us back
+    // asynchronously via MergeDataAndStartSyncing as soon as possible.
+    flare_.Run(sync_type_);
   }
 
   return syncable_storage.get();
@@ -105,13 +116,10 @@ std::set<std::string> SettingsBackend::GetKnownExtensionIDs() const {
   }
 
   // Leveldb databases are directories inside base_path_.
-  file_util::FileEnumerator::FindInfo find_info;
-  file_util::FileEnumerator extension_dirs(
-      base_path_, false, file_util::FileEnumerator::DIRECTORIES);
+  base::FileEnumerator extension_dirs(
+      base_path_, false, base::FileEnumerator::DIRECTORIES);
   while (!extension_dirs.Next().empty()) {
-    extension_dirs.GetFindInfo(&find_info);
-    base::FilePath extension_dir(
-        file_util::FileEnumerator::GetFilename(find_info));
+    base::FilePath extension_dir = extension_dirs.GetInfo().GetName();
     DCHECK(!extension_dir.IsAbsolute());
     // Extension IDs are created as std::strings so they *should* be ASCII.
     std::string maybe_as_ascii(extension_dir.MaybeAsASCII());
@@ -125,10 +133,10 @@ std::set<std::string> SettingsBackend::GetKnownExtensionIDs() const {
 
 static void AddAllSyncData(
     const std::string& extension_id,
-    const DictionaryValue& src,
+    const base::DictionaryValue& src,
     syncer::ModelType type,
     syncer::SyncDataList* dst) {
-  for (DictionaryValue::Iterator it(src); !it.IsAtEnd(); it.Advance()) {
+  for (base::DictionaryValue::Iterator it(src); !it.IsAtEnd(); it.Advance()) {
     dst->push_back(settings_sync_util::CreateData(
         extension_id, it.key(), it.value(), type));
   }
@@ -168,26 +176,24 @@ syncer::SyncMergeResult SettingsBackend::MergeDataAndStartSyncing(
     scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
     scoped_ptr<syncer::SyncErrorFactory> sync_error_factory) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  DCHECK(type == syncer::EXTENSION_SETTINGS ||
-         type == syncer::APP_SETTINGS);
-  DCHECK_EQ(sync_type_, syncer::UNSPECIFIED);
+  DCHECK_EQ(sync_type_, type);
   DCHECK(!sync_processor_.get());
   DCHECK(sync_processor.get());
   DCHECK(sync_error_factory.get());
 
-  sync_type_ = type;
   sync_processor_ = sync_processor.Pass();
   sync_error_factory_ = sync_error_factory.Pass();
 
   // Group the initial sync data by extension id.
-  std::map<std::string, linked_ptr<DictionaryValue> > grouped_sync_data;
+  std::map<std::string, linked_ptr<base::DictionaryValue> > grouped_sync_data;
   for (syncer::SyncDataList::const_iterator it = initial_sync_data.begin();
       it != initial_sync_data.end(); ++it) {
     SettingSyncData data(*it);
-    linked_ptr<DictionaryValue> sync_data =
+    linked_ptr<base::DictionaryValue> sync_data =
         grouped_sync_data[data.extension_id()];
     if (!sync_data.get()) {
-      sync_data = linked_ptr<DictionaryValue>(new DictionaryValue());
+      sync_data = linked_ptr<base::DictionaryValue>(
+          new base::DictionaryValue());
       grouped_sync_data[data.extension_id()] = sync_data;
     }
     DCHECK(!sync_data->HasKey(data.key())) <<
@@ -199,7 +205,7 @@ syncer::SyncMergeResult SettingsBackend::MergeDataAndStartSyncing(
   // the future will start being synced as part of the creation process.
   for (StorageObjMap::iterator it = storage_objs_.begin();
       it != storage_objs_.end(); ++it) {
-    std::map<std::string, linked_ptr<DictionaryValue> >::iterator
+    std::map<std::string, linked_ptr<base::DictionaryValue> >::iterator
         maybe_sync_data = grouped_sync_data.find(it->first);
     syncer::SyncError error;
     if (maybe_sync_data != grouped_sync_data.end()) {
@@ -208,7 +214,7 @@ syncer::SyncMergeResult SettingsBackend::MergeDataAndStartSyncing(
           CreateSettingsSyncProcessor(it->first).Pass());
       grouped_sync_data.erase(it->first);
     } else {
-      DictionaryValue empty;
+      base::DictionaryValue empty;
       error = it->second->StartSyncing(
           empty,
           CreateSettingsSyncProcessor(it->first).Pass());
@@ -220,7 +226,7 @@ syncer::SyncMergeResult SettingsBackend::MergeDataAndStartSyncing(
   // Eagerly create and init the rest of the storage areas that have sync data.
   // Under normal circumstances (i.e. not first-time sync) this will be all of
   // them.
-  for (std::map<std::string, linked_ptr<DictionaryValue> >::iterator it =
+  for (std::map<std::string, linked_ptr<base::DictionaryValue> >::iterator it =
       grouped_sync_data.begin(); it != grouped_sync_data.end(); ++it) {
     GetOrCreateStorageWithSyncData(it->first, *it->second);
   }
@@ -243,7 +249,7 @@ syncer::SyncError SettingsBackend::ProcessSyncChanges(
   }
 
   // Create any storage areas that don't exist yet but have sync data.
-  DictionaryValue empty;
+  base::DictionaryValue empty;
   for (std::map<std::string, SettingSyncDataList>::iterator
       it = grouped_sync_data.begin(); it != grouped_sync_data.end(); ++it) {
     SyncableSettingsStorage* storage =
@@ -260,7 +266,7 @@ void SettingsBackend::StopSyncing(syncer::ModelType type) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   DCHECK(type == syncer::EXTENSION_SETTINGS ||
          type == syncer::APP_SETTINGS);
-  DCHECK(sync_type_ == type || sync_type_ == syncer::UNSPECIFIED);
+  DCHECK_EQ(sync_type_, type);
 
   for (StorageObjMap::iterator it = storage_objs_.begin();
       it != storage_objs_.end(); ++it) {
@@ -269,7 +275,6 @@ void SettingsBackend::StopSyncing(syncer::ModelType type) {
     it->second->StopSyncing();
   }
 
-  sync_type_ = syncer::UNSPECIFIED;
   sync_processor_.reset();
   sync_error_factory_.reset();
 }

@@ -3,9 +3,10 @@
 // found in the LICENSE file.
 
 #include "base/strings/string_number_conversions.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/media_galleries/media_galleries_dialog_controller_mock.h"
-#include "chrome/browser/storage_monitor/media_storage_util.h"
+#include "chrome/browser/storage_monitor/storage_info.h"
+#include "chrome/browser/storage_monitor/test_storage_monitor.h"
 #include "chrome/browser/ui/gtk/extensions/media_galleries_dialog_gtk.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -23,8 +24,8 @@ MediaGalleryPrefInfo MakePrefInfoForTesting(MediaGalleryPrefId id) {
   MediaGalleryPrefInfo gallery;
   gallery.pref_id = id;
   gallery.device_id =
-      MediaStorageUtil::MakeDeviceId(MediaStorageUtil::FIXED_MASS_STORAGE,
-                                     base::Int64ToString(id));
+      StorageInfo::MakeDeviceId(StorageInfo::FIXED_MASS_STORAGE,
+                                base::Int64ToString(id));
   gallery.display_name = ASCIIToUTF16("Display Name");
   return gallery;
 }
@@ -32,6 +33,8 @@ MediaGalleryPrefInfo MakePrefInfoForTesting(MediaGalleryPrefId id) {
 }  // namespace
 
 class MediaGalleriesDialogTest : public testing::Test {
+ private:
+  test::TestStorageMonitor test_storage_monitor_;
 };
 
 // Tests that checkboxes are initialized according to the contents of

@@ -126,12 +126,12 @@ EGLSurface Display::CreateWindowSurface(EGLConfig config,
   decoder_->set_engine(gpu_scheduler_.get());
   gfx::Size size(create_offscreen_width_, create_offscreen_height_);
   if (create_offscreen_) {
-    gl_surface_ = gfx::GLSurface::CreateOffscreenGLSurface(false, size);
+    gl_surface_ = gfx::GLSurface::CreateOffscreenGLSurface(size);
     create_offscreen_ = false;
     create_offscreen_width_ = 0;
     create_offscreen_height_ = 0;
   } else {
-    gl_surface_ = gfx::GLSurface::CreateViewGLSurface(false, win);
+    gl_surface_ = gfx::GLSurface::CreateViewGLSurface(win);
   }
   if (!gl_surface_.get())
     return EGL_NO_SURFACE;
@@ -142,7 +142,7 @@ EGLSurface Display::CreateWindowSurface(EGLConfig config,
   if (!gl_context_.get())
     return EGL_NO_SURFACE;
 
-  gl_context_->MakeCurrent(gl_surface_);
+  gl_context_->MakeCurrent(gl_surface_.get());
 
   EGLint depth_size = 0;
   EGLint alpha_size = 0;
@@ -230,7 +230,8 @@ EGLContext Display::CreateContext(EGLConfig config,
       NULL,
       transfer_buffer_.get(),
       share_resources,
-      true));
+      true,
+      NULL));
 
   if (!context_->Initialize(
       kTransferBufferSize,

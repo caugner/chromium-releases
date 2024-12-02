@@ -6,20 +6,25 @@
 
 #include "base/callback.h"
 #include "base/lazy_instance.h"
+#include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/common/gpu/image_transport_surface.h"
-#include "content/renderer/devtools/devtools_client.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
-#include "content/renderer/renderer_webapplicationcachehost_impl.h"
 #include "content/renderer/renderer_webkitplatformsupport_impl.h"
-#include "third_party/WebKit/Source/Platform/chromium/public/WebGamepads.h"
-#include "third_party/WebKit/Tools/DumpRenderTree/chromium/TestRunner/public/WebTestProxy.h"
+#include "third_party/WebKit/public/platform/WebGamepads.h"
+#include "third_party/WebKit/public/testing/WebTestProxy.h"
 
 #if defined(OS_WIN) && !defined(USE_AURA)
 #include "content/browser/web_contents/web_contents_drag_win.h"
 #endif
 
+#if defined(OS_MACOSX)
+#include "content/browser/renderer_host/popup_menu_helper_mac.h"
+#endif
+
 using WebKit::WebGamepads;
+using WebKit::WebRect;
+using WebKit::WebSize;
 using WebTestRunner::WebTestProxy;
 using WebTestRunner::WebTestProxyBase;
 
@@ -54,27 +59,23 @@ void SetMockGamepads(const WebGamepads& pads) {
   RendererWebKitPlatformSupportImpl::SetMockGamepadsForTesting(pads);
 }
 
-void DisableAppCacheLogging() {
-  RendererWebApplicationCacheHostImpl::DisableLoggingForTesting();
+void EnableRendererLayoutTestMode() {
+  RenderThreadImpl::current()->set_layout_test_mode(true);
 }
 
-void EnableDevToolsFrontendTesting() {
-  DevToolsClient::EnableDevToolsFrontendTesting();
+void EnableBrowserLayoutTestMode() {
+#if defined(OS_MACOSX)
+  ImageTransportSurface::SetAllowOSMesaForTesting(true);
+  PopupMenuHelper::DontShowPopupMenuForTesting();
+#elif defined(OS_WIN) && !defined(USE_AURA)
+  WebContentsDragWin::DisableDragDropForTesting();
+#endif
+  RenderWidgetHostImpl::DisableResizeAckCheckForTesting();
 }
 
 int GetLocalSessionHistoryLength(RenderView* render_view) {
   return static_cast<RenderViewImpl*>(render_view)
       ->GetLocalSessionHistoryLengthForTesting();
-}
-
-void SetAllowOSMesaImageTransportForTesting() {
-#if defined(OS_MACOSX)
-  ImageTransportSurface::SetAllowOSMesaForTesting(true);
-#endif
-}
-
-void DoNotSendFocusEvents() {
-  RenderThreadImpl::current()->set_should_send_focus_ipcs(false);
 }
 
 void SyncNavigationState(RenderView* render_view) {
@@ -86,17 +87,13 @@ void SetFocusAndActivate(RenderView* render_view, bool enable) {
       ->SetFocusAndActivateForTesting(enable);
 }
 
-void EnableShortCircuitSizeUpdates() {
-  RenderThreadImpl::current()->set_short_circuit_size_updates(true);
-}
-
 void ForceResizeRenderView(RenderView* render_view,
-                           const WebKit::WebSize& new_size) {
-  static_cast<RenderViewImpl*>(render_view)->didAutoResize(new_size);
-}
-
-void DisableNavigationErrorPages() {
-  RenderThreadImpl::current()->set_skip_error_pages(true);
+                           const WebSize& new_size) {
+  RenderViewImpl* render_view_impl = static_cast<RenderViewImpl*>(render_view);
+  render_view_impl->setWindowRect(WebRect(render_view_impl->rootWindowRect().x,
+                                          render_view_impl->rootWindowRect().y,
+                                          new_size.width,
+                                          new_size.height));
 }
 
 void SetDeviceScaleFactor(RenderView* render_view, float factor) {
@@ -104,10 +101,20 @@ void SetDeviceScaleFactor(RenderView* render_view, float factor) {
       ->SetDeviceScaleFactorForTesting(factor);
 }
 
-void DisableSystemDragDrop() {
-#if defined(OS_WIN) && !defined(USE_AURA)
-  WebContentsDragWin::DisableDragDropForTesting();
-#endif
+void EnableAutoResizeMode(RenderView* render_view,
+                          const WebSize& min_size,
+                          const WebSize& max_size) {
+  static_cast<RenderViewImpl*>(render_view)
+      ->EnableAutoResizeForTesting(min_size, max_size);
+}
+
+void DisableAutoResizeMode(RenderView* render_view, const WebSize& new_size) {
+  static_cast<RenderViewImpl*>(render_view)
+      ->DisableAutoResizeForTesting(new_size);
+}
+
+scoped_refptr<base::MessageLoopProxy> GetMediaThreadMessageLoopProxy() {
+  return RenderThreadImpl::current()->GetMediaThreadMessageLoopProxy();
 }
 
 }  // namespace content

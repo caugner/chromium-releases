@@ -24,12 +24,11 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/file_util.h"
 #include "base/files/file_path.h"
 #include "base/process_util.h"
-#include "base/string16.h"
-#include "base/string_util.h"
+#include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/time.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_com_initializer.h"
@@ -629,7 +628,6 @@ BOOL __stdcall CanOfferReactivation(const wchar_t* brand_code,
   // values in HKEY_CURRENT_USER, and we only want to look at the logged-in
   // user's HKCU, not the admin user's HKCU.
   if (shell_mode == GCAPI_INVOKED_STANDARD_SHELL) {
-
     if (!IsChromeInstalled(HKEY_LOCAL_MACHINE) &&
         !IsChromeInstalled(HKEY_CURRENT_USER)) {
       if (error_code)

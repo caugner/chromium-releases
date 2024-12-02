@@ -3,10 +3,15 @@
 // found in the LICENSE file.
 
 #include "base/environment.h"
+#include "base/file_util.h"
+#include "base/files/file_path.h"
+#include "base/path_service.h"
+#include "base/strings/stringprintf.h"
 #include "base/test/test_timeouts.h"
 #include "content/renderer/media/webrtc_audio_capturer.h"
 #include "content/renderer/media/webrtc_audio_device_impl.h"
 #include "content/renderer/media/webrtc_audio_renderer.h"
+#include "content/renderer/media/webrtc_local_audio_track.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/test/webrtc_audio_device_test.h"
 #include "media/audio/audio_manager_base.h"
@@ -14,6 +19,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/webrtc/voice_engine/include/voe_audio_processing.h"
 #include "third_party/webrtc/voice_engine/include/voe_base.h"
+#include "third_party/webrtc/voice_engine/include/voe_codec.h"
 #include "third_party/webrtc/voice_engine/include/voe_external_media.h"
 #include "third_party/webrtc/voice_engine/include/voe_file.h"
 #include "third_party/webrtc/voice_engine/include/voe_network.h"
@@ -23,6 +29,7 @@
 #endif
 
 using media::AudioParameters;
+using media::CHANNEL_LAYOUT_STEREO;
 using testing::_;
 using testing::AnyNumber;
 using testing::InvokeWithoutArgs;
@@ -35,6 +42,12 @@ namespace {
 
 const int kRenderViewId = 1;
 
+// The number of packers that RunWebRtcLoopbackTimeTest() uses for measurement.
+const int kNumberOfPacketsForLoopbackTest = 100;
+
+// The hardware latency we feed to WebRtc.
+const int kHardwareLatencyInMs = 50;
+
 scoped_ptr<media::AudioHardwareConfig> CreateRealHardwareConfig(
     media::AudioManager* manager) {
   const AudioParameters output_parameters =
@@ -42,6 +55,7 @@ scoped_ptr<media::AudioHardwareConfig> CreateRealHardwareConfig(
   const AudioParameters input_parameters =
       manager->GetInputStreamParameters(
           media::AudioManagerBase::kDefaultDeviceId);
+
   return make_scoped_ptr(new media::AudioHardwareConfig(
       input_parameters, output_parameters));
 }
@@ -92,7 +106,7 @@ bool HardwareSampleRatesAreValid() {
 // HardwareSampleRatesAreValid() has been called and returned true.
 bool InitializeCapturer(WebRtcAudioDeviceImpl* webrtc_audio_device) {
   // Access the capturer owned and created by the audio device.
-  WebRtcAudioCapturer* capturer = webrtc_audio_device->capturer();
+  WebRtcAudioCapturer* capturer = webrtc_audio_device->capturer().get();
   if (!capturer)
     return false;
 
@@ -110,7 +124,6 @@ bool InitializeCapturer(WebRtcAudioDeviceImpl* webrtc_audio_device) {
   return true;
 }
 
-
 class WebRTCMediaProcessImpl : public webrtc::VoEMediaProcess {
  public:
   explicit WebRTCMediaProcessImpl(base::WaitableEvent* event)
@@ -124,12 +137,12 @@ class WebRTCMediaProcessImpl : public webrtc::VoEMediaProcess {
   virtual ~WebRTCMediaProcessImpl() {}
 
   // TODO(henrika): Refactor in WebRTC and convert to Chrome coding style.
-  virtual void Process(const int channel,
-                       const webrtc::ProcessingTypes type,
+  virtual void Process(int channel,
+                       webrtc::ProcessingTypes type,
                        int16_t audio_10ms[],
-                       const int length,
-                       const int sampling_freq,
-                       const bool is_stereo) OVERRIDE {
+                       int length,
+                       int sampling_freq,
+                       bool is_stereo) OVERRIDE {
     base::AutoLock auto_lock(lock_);
     channel_id_ = channel;
     type_ = type;
@@ -173,7 +186,199 @@ class WebRTCMediaProcessImpl : public webrtc::VoEMediaProcess {
   DISALLOW_COPY_AND_ASSIGN(WebRTCMediaProcessImpl);
 };
 
-}  // end namespace
+class MockWebRtcAudioCapturerSink : public WebRtcAudioCapturerSink {
+ public:
+  explicit MockWebRtcAudioCapturerSink(base::WaitableEvent* event)
+      : event_(event) {
+    DCHECK(event_);
+  }
+  virtual ~MockWebRtcAudioCapturerSink() {}
+
+  // WebRtcAudioCapturerSink implementation.
+  virtual void CaptureData(const int16* audio_data,
+                           int number_of_channels,
+                           int number_of_frames,
+                           int audio_delay_milliseconds,
+                           double volume) OVERRIDE {
+    // Signal that a callback has been received.
+    event_->Signal();
+  }
+
+  // Set the format for the capture audio parameters.
+  virtual void SetCaptureFormat(
+      const media::AudioParameters& params) OVERRIDE {}
+
+ private:
+   base::WaitableEvent* event_;
+
+   DISALLOW_COPY_AND_ASSIGN(MockWebRtcAudioCapturerSink);
+};
+
+class MockWebRtcAudioRendererSource : public WebRtcAudioRendererSource {
+ public:
+  explicit MockWebRtcAudioRendererSource(base::WaitableEvent* event)
+      : event_(event) {
+    DCHECK(event_);
+  }
+  virtual ~MockWebRtcAudioRendererSource() {}
+
+  // WebRtcAudioRendererSource implementation.
+  virtual void RenderData(uint8* audio_data,
+                          int number_of_channels,
+                          int number_of_frames,
+                          int audio_delay_milliseconds) OVERRIDE {
+    // Signal that a callback has been received.
+    // Initialize the memory to zero to avoid uninitialized warning from
+    // Valgrind.
+    memset(audio_data, 0,
+           sizeof(int16) * number_of_channels * number_of_frames);
+    event_->Signal();
+  }
+
+  virtual void SetRenderFormat(const media::AudioParameters& params) OVERRIDE {
+  }
+
+  virtual void RemoveAudioRenderer(WebRtcAudioRenderer* renderer) OVERRIDE {};
+
+ private:
+   base::WaitableEvent* event_;
+
+   DISALLOW_COPY_AND_ASSIGN(MockWebRtcAudioRendererSource);
+};
+
+// Prints numerical information to stdout in a controlled format so we can plot
+// the result.
+void PrintPerfResultMs(const char* graph, const char* trace, float time_ms) {
+  std::string times;
+  base::StringAppendF(&times, "%.2f,", time_ms);
+  std::string result = base::StringPrintf(
+      "%sRESULT %s%s: %s= %s%s%s %s\n", "*", graph, "",
+      trace,  "[", times.c_str(), "]", "ms");
+
+  fflush(stdout);
+  printf("%s", result.c_str());
+  fflush(stdout);
+}
+
+void ReadDataFromSpeechFile(char* data, int length) {
+  base::FilePath data_file;
+  CHECK(PathService::Get(base::DIR_SOURCE_ROOT, &data_file));
+  data_file =
+      data_file.Append(FILE_PATH_LITERAL("media"))
+               .Append(FILE_PATH_LITERAL("test"))
+               .Append(FILE_PATH_LITERAL("data"))
+               .Append(FILE_PATH_LITERAL("speech_16b_stereo_48kHz.raw"));
+  DCHECK(file_util::PathExists(data_file));
+  int64 data_file_size64 = 0;
+  DCHECK(file_util::GetFileSize(data_file, &data_file_size64));
+  EXPECT_EQ(length, file_util::ReadFile(data_file, data, length));
+  DCHECK(data_file_size64 > length);
+}
+
+void SetChannelCodec(webrtc::VoiceEngine* engine, int channel) {
+  // TODO(xians): move the codec as an input param to this function, and add
+  // tests for different codecs, also add support to Android and IOS.
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  webrtc::CodecInst isac;
+  strcpy(isac.plname, "ISAC");
+  isac.pltype = 104;
+  isac.pacsize = 960;
+  isac.plfreq = 32000;
+  isac.channels = 1;
+  isac.rate = -1;
+  ScopedWebRTCPtr<webrtc::VoECodec> codec(engine);
+  EXPECT_EQ(0, codec->SetRecPayloadType(channel, isac));
+  EXPECT_EQ(0, codec->SetSendCodec(channel, isac));
+#endif
+}
+
+// Returns the time in millisecond for sending packets to WebRtc for encoding,
+// signal processing, decoding and receiving them back.
+int RunWebRtcLoopbackTimeTest(media::AudioManager* manager,
+                              bool enable_apm) {
+  scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
+      new WebRtcAudioDeviceImpl());
+  WebRTCAutoDelete<webrtc::VoiceEngine> engine(webrtc::VoiceEngine::Create());
+  EXPECT_TRUE(engine.valid());
+  ScopedWebRTCPtr<webrtc::VoEBase> base(engine.get());
+  EXPECT_TRUE(base.valid());
+  int err = base->Init(webrtc_audio_device.get());
+  EXPECT_EQ(0, err);
+
+  // We use SetCaptureFormat() and SetRenderFormat() to configure the audio
+  // parameters so that this test can run on machine without hardware device.
+  const media::AudioParameters params = media::AudioParameters(
+      media::AudioParameters::AUDIO_PCM_LOW_LATENCY, CHANNEL_LAYOUT_STEREO,
+      48000, 2, 480);
+  WebRtcAudioCapturerSink* capturer_sink =
+      static_cast<WebRtcAudioCapturerSink*>(webrtc_audio_device.get());
+  capturer_sink->SetCaptureFormat(params);
+  WebRtcAudioRendererSource* renderer_source =
+      static_cast<WebRtcAudioRendererSource*>(webrtc_audio_device.get());
+  renderer_source->SetRenderFormat(params);
+
+  // Turn on/off all the signal processing components like AGC, AEC and NS.
+  ScopedWebRTCPtr<webrtc::VoEAudioProcessing> audio_processing(engine.get());
+  EXPECT_TRUE(audio_processing.valid());
+  audio_processing->SetAgcStatus(enable_apm);
+  audio_processing->SetNsStatus(enable_apm);
+  audio_processing->SetEcStatus(enable_apm);
+
+  // Create a voice channel for the WebRtc.
+  int channel = base->CreateChannel();
+  EXPECT_NE(-1, channel);
+  SetChannelCodec(engine.get(), channel);
+
+  // Use our fake network transmission and start playout and recording.
+  ScopedWebRTCPtr<webrtc::VoENetwork> network(engine.get());
+  EXPECT_TRUE(network.valid());
+  scoped_ptr<WebRTCTransportImpl> transport(
+      new WebRTCTransportImpl(network.get()));
+  EXPECT_EQ(0, network->RegisterExternalTransport(channel, *transport.get()));
+  EXPECT_EQ(0, base->StartPlayout(channel));
+  EXPECT_EQ(0, base->StartSend(channel));
+
+  // Read speech data from a speech test file.
+  const int num_input_channels = webrtc_audio_device->input_channels();
+  const int input_packet_size = webrtc_audio_device->input_buffer_size() * 2 *
+      num_input_channels;
+  const int num_output_channels = webrtc_audio_device->output_channels();
+  const int output_packet_size = webrtc_audio_device->output_buffer_size() * 2 *
+      num_output_channels;
+  const size_t length = input_packet_size * kNumberOfPacketsForLoopbackTest;
+  scoped_ptr<char[]> capture_data(new char[length]);
+  ReadDataFromSpeechFile(capture_data.get(), length);
+
+  // Start the timer.
+  scoped_ptr<uint8[]> buffer(new uint8[output_packet_size]);
+  base::Time start_time = base::Time::Now();
+  int delay = 0;
+  for (int j = 0; j < kNumberOfPacketsForLoopbackTest; ++j) {
+    // Sending fake capture data to WebRtc.
+    capturer_sink->CaptureData(
+        reinterpret_cast<int16*>(capture_data.get() + input_packet_size * j),
+        num_input_channels, webrtc_audio_device->input_buffer_size(),
+        kHardwareLatencyInMs, 1.0);
+
+    // Receiving data from WebRtc.
+    renderer_source->RenderData(
+        reinterpret_cast<uint8*>(buffer.get()),
+        num_output_channels, webrtc_audio_device->output_buffer_size(),
+        kHardwareLatencyInMs + delay);
+    delay = (base::Time::Now() - start_time).InMilliseconds();
+  }
+
+  int latency = (base::Time::Now() - start_time).InMilliseconds();
+
+  EXPECT_EQ(0, base->StopSend(channel));
+  EXPECT_EQ(0, base->StopPlayout(channel));
+  EXPECT_EQ(0, base->DeleteChannel(channel));
+  EXPECT_EQ(0, base->Terminate());
+
+  return latency;
+}
+
+}  // namespace
 
 // Trivial test which verifies that one part of the test harness
 // (HardwareSampleRatesAreValid()) works as intended for all supported
@@ -254,7 +459,7 @@ TEST_F(WebRTCAudioDeviceTest, Construct) {
   ASSERT_TRUE(engine.valid());
 
   ScopedWebRTCPtr<webrtc::VoEBase> base(engine.get());
-  int err = base->Init(webrtc_audio_device);
+  int err = base->Init(webrtc_audio_device.get());
   EXPECT_TRUE(InitializeCapturer(webrtc_audio_device.get()));
   EXPECT_EQ(0, err);
   EXPECT_EQ(0, base->Terminate());
@@ -293,14 +498,14 @@ TEST_F(WebRTCAudioDeviceTest, DISABLED_StartPlayout) {
       new WebRtcAudioRenderer(kRenderViewId);
   scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
       new WebRtcAudioDeviceImpl());
-  EXPECT_TRUE(webrtc_audio_device->SetAudioRenderer(renderer));
+  EXPECT_TRUE(webrtc_audio_device->SetAudioRenderer(renderer.get()));
 
   WebRTCAutoDelete<webrtc::VoiceEngine> engine(webrtc::VoiceEngine::Create());
   ASSERT_TRUE(engine.valid());
 
   ScopedWebRTCPtr<webrtc::VoEBase> base(engine.get());
   ASSERT_TRUE(base.valid());
-  int err = base->Init(webrtc_audio_device);
+  int err = base->Init(webrtc_audio_device.get());
   ASSERT_EQ(0, err);
 
   int ch = base->CreateChannel();
@@ -378,11 +583,18 @@ TEST_F(WebRTCAudioDeviceTest, MAYBE_StartRecording) {
 
   ScopedWebRTCPtr<webrtc::VoEBase> base(engine.get());
   ASSERT_TRUE(base.valid());
-  int err = base->Init(webrtc_audio_device);
+  int err = base->Init(webrtc_audio_device.get());
   ASSERT_EQ(0, err);
 
   EXPECT_TRUE(InitializeCapturer(webrtc_audio_device.get()));
-  webrtc_audio_device->capturer()->Start();
+
+  // Create and start a local audio track. Starting the audio track will connect
+  // the audio track to the capturer and also start the source of the capturer.
+  scoped_refptr<WebRtcLocalAudioTrack> local_audio_track(
+      WebRtcLocalAudioTrack::Create(std::string(),
+                                    webrtc_audio_device->capturer(),
+                                    NULL));
+  local_audio_track->Start();
 
   int ch = base->CreateChannel();
   EXPECT_NE(-1, ch);
@@ -419,7 +631,7 @@ TEST_F(WebRTCAudioDeviceTest, MAYBE_StartRecording) {
       ch, webrtc::kRecordingPerChannel));
   EXPECT_EQ(0, base->StopSend(ch));
 
-  webrtc_audio_device->capturer()->Stop();
+  local_audio_track->Stop();
   EXPECT_EQ(0, base->DeleteChannel(ch));
   EXPECT_EQ(0, base->Terminate());
 }
@@ -456,14 +668,14 @@ TEST_F(WebRTCAudioDeviceTest, DISABLED_PlayLocalFile) {
       new WebRtcAudioRenderer(kRenderViewId);
   scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
       new WebRtcAudioDeviceImpl());
-  EXPECT_TRUE(webrtc_audio_device->SetAudioRenderer(renderer));
+  EXPECT_TRUE(webrtc_audio_device->SetAudioRenderer(renderer.get()));
 
   WebRTCAutoDelete<webrtc::VoiceEngine> engine(webrtc::VoiceEngine::Create());
   ASSERT_TRUE(engine.valid());
 
   ScopedWebRTCPtr<webrtc::VoEBase> base(engine.get());
   ASSERT_TRUE(base.valid());
-  int err = base->Init(webrtc_audio_device);
+  int err = base->Init(webrtc_audio_device.get());
   ASSERT_EQ(0, err);
 
   int ch = base->CreateChannel();
@@ -534,18 +746,24 @@ TEST_F(WebRTCAudioDeviceTest, MAYBE_FullDuplexAudioWithAGC) {
       new WebRtcAudioRenderer(kRenderViewId);
   scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
       new WebRtcAudioDeviceImpl());
-  EXPECT_TRUE(webrtc_audio_device->SetAudioRenderer(renderer));
+  EXPECT_TRUE(webrtc_audio_device->SetAudioRenderer(renderer.get()));
 
   WebRTCAutoDelete<webrtc::VoiceEngine> engine(webrtc::VoiceEngine::Create());
   ASSERT_TRUE(engine.valid());
 
   ScopedWebRTCPtr<webrtc::VoEBase> base(engine.get());
   ASSERT_TRUE(base.valid());
-  int err = base->Init(webrtc_audio_device);
+  int err = base->Init(webrtc_audio_device.get());
   ASSERT_EQ(0, err);
 
   EXPECT_TRUE(InitializeCapturer(webrtc_audio_device.get()));
-  webrtc_audio_device->capturer()->Start();
+  // Create and start a local audio track. Starting the audio track will connect
+  // the audio track to the capturer and also start the source of the capturer.
+  scoped_refptr<WebRtcLocalAudioTrack> local_audio_track(
+      WebRtcLocalAudioTrack::Create(std::string(),
+                                    webrtc_audio_device->capturer(),
+                                    NULL));
+  local_audio_track->Start();
 
   ScopedWebRTCPtr<webrtc::VoEAudioProcessing> audio_processing(engine.get());
   ASSERT_TRUE(audio_processing.valid());
@@ -581,13 +799,137 @@ TEST_F(WebRTCAudioDeviceTest, MAYBE_FullDuplexAudioWithAGC) {
                                 base::TimeDelta::FromSeconds(2));
   message_loop_.Run();
 
-  webrtc_audio_device->capturer()->Stop();
+  local_audio_track->Stop();
   renderer->Stop();
   EXPECT_EQ(0, base->StopSend(ch));
   EXPECT_EQ(0, base->StopPlayout(ch));
 
   EXPECT_EQ(0, base->DeleteChannel(ch));
   EXPECT_EQ(0, base->Terminate());
+}
+
+// Test times out on bots, see http://crbug.com/247447
+TEST_F(WebRTCAudioDeviceTest, DISABLED_WebRtcRecordingSetupTime) {
+  if (!has_input_devices_) {
+    LOG(WARNING) << "Missing audio capture devices.";
+    return;
+  }
+
+  scoped_ptr<media::AudioHardwareConfig> config =
+      CreateRealHardwareConfig(audio_manager_.get());
+  SetAudioHardwareConfig(config.get());
+
+  if (!HardwareSampleRatesAreValid())
+    return;
+
+  scoped_refptr<WebRtcAudioDeviceImpl> webrtc_audio_device(
+      new WebRtcAudioDeviceImpl());
+
+  WebRTCAutoDelete<webrtc::VoiceEngine> engine(webrtc::VoiceEngine::Create());
+  ASSERT_TRUE(engine.valid());
+
+  ScopedWebRTCPtr<webrtc::VoEBase> base(engine.get());
+  ASSERT_TRUE(base.valid());
+  int err = base->Init(webrtc_audio_device.get());
+  ASSERT_EQ(0, err);
+
+  EXPECT_TRUE(InitializeCapturer(webrtc_audio_device.get()));
+  // Create and start a local audio track. Starting the audio track will connect
+  // the audio track to the capturer and also start the source of the capturer.
+  scoped_refptr<WebRtcLocalAudioTrack> local_audio_track(
+      WebRtcLocalAudioTrack::Create(std::string(),
+                                    webrtc_audio_device->capturer(),
+                                    NULL));
+  local_audio_track->Start();
+
+  base::WaitableEvent event(false, false);
+  scoped_ptr<MockWebRtcAudioCapturerSink> capturer_sink(
+      new MockWebRtcAudioCapturerSink(&event));
+  WebRtcAudioCapturer* capturer = webrtc_audio_device->capturer().get();
+  capturer->AddSink(capturer_sink.get());
+
+  int ch = base->CreateChannel();
+  EXPECT_NE(-1, ch);
+
+  base::Time start_time = base::Time::Now();
+  EXPECT_EQ(0, base->StartSend(ch));
+
+  EXPECT_TRUE(event.TimedWait(TestTimeouts::action_timeout()));
+  int delay = (base::Time::Now() - start_time).InMilliseconds();
+  PrintPerfResultMs("webrtc_recording_setup_c", "t", delay);
+
+  capturer->RemoveSink(capturer_sink.get());
+  local_audio_track->Stop();
+  EXPECT_EQ(0, base->StopSend(ch));
+  EXPECT_EQ(0, base->DeleteChannel(ch));
+  EXPECT_EQ(0, base->Terminate());
+}
+
+TEST_F(WebRTCAudioDeviceTest, WebRtcPlayoutSetupTime) {
+  if (!has_output_devices_) {
+    LOG(WARNING) << "No output device detected.";
+    return;
+  }
+
+  scoped_ptr<media::AudioHardwareConfig> config =
+      CreateRealHardwareConfig(audio_manager_.get());
+  SetAudioHardwareConfig(config.get());
+
+  if (!HardwareSampleRatesAreValid())
+    return;
+
+  EXPECT_CALL(media_observer(),
+              OnSetAudioStreamStatus(_, 1, _)).Times(AnyNumber());
+  EXPECT_CALL(media_observer(),
+              OnSetAudioStreamPlaying(_, 1, true));
+  EXPECT_CALL(media_observer(),
+              OnDeleteAudioStream(_, 1)).Times(AnyNumber());
+
+  base::WaitableEvent event(false, false);
+  scoped_ptr<MockWebRtcAudioRendererSource> renderer_source(
+      new MockWebRtcAudioRendererSource(&event));
+  scoped_refptr<WebRtcAudioRenderer> renderer =
+      new WebRtcAudioRenderer(kRenderViewId);
+  renderer->Initialize(renderer_source.get());
+
+  // Start the timer and playout.
+  base::Time start_time = base::Time::Now();
+  renderer->Play();
+  EXPECT_TRUE(event.TimedWait(TestTimeouts::action_timeout()));
+  int delay = (base::Time::Now() - start_time).InMilliseconds();
+  PrintPerfResultMs("webrtc_playout_setup_c", "t", delay);
+
+  renderer->Stop();
+}
+
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(ARCH_CPU_ARM_FAMILY)
+// Timing out on ARM linux bot: http://crbug.com/238490
+#define MAYBE_WebRtcLoopbackTimeWithoutSignalProcessing \
+        DISABLED_WebRtcLoopbackTimeWithoutSignalProcessing
+#else
+#define MAYBE_WebRtcLoopbackTimeWithoutSignalProcessing \
+        WebRtcLoopbackTimeWithoutSignalProcessing
+#endif
+
+TEST_F(WebRTCAudioDeviceTest, MAYBE_WebRtcLoopbackTimeWithoutSignalProcessing) {
+  int latency = RunWebRtcLoopbackTimeTest(audio_manager_.get(), false);
+  PrintPerfResultMs("webrtc_loopback_without_sigal_processing (100 packets)",
+                    "t", latency);
+}
+
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(ARCH_CPU_ARM_FAMILY)
+// Timing out on ARM linux bot: http://crbug.com/238490
+#define MAYBE_WebRtcLoopbackTimeWithSignalProcessing \
+        DISABLED_WebRtcLoopbackTimeWithSignalProcessing
+#else
+#define MAYBE_WebRtcLoopbackTimeWithSignalProcessing \
+        WebRtcLoopbackTimeWithSignalProcessing
+#endif
+
+TEST_F(WebRTCAudioDeviceTest, MAYBE_WebRtcLoopbackTimeWithSignalProcessing) {
+  int latency = RunWebRtcLoopbackTimeTest(audio_manager_.get(), true);
+  PrintPerfResultMs("webrtc_loopback_with_signal_processing (100 packets)",
+                    "t", latency);
 }
 
 }  // namespace content

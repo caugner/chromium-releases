@@ -7,7 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/observer_list.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "ui/app_list/app_list_export.h"
 
 namespace app_list {
@@ -24,11 +24,11 @@ class APP_LIST_EXPORT SigninDelegate {
   virtual void OpenLearnMore() = 0;
   virtual void OpenSettings() = 0;
 
-  virtual string16 GetSigninHeading() = 0;
-  virtual string16 GetSigninText() = 0;
-  virtual string16 GetSigninButtonText() = 0;
-  virtual string16 GetLearnMoreLinkText() = 0;
-  virtual string16 GetSettingsLinkText() = 0;
+  virtual base::string16 GetSigninHeading() = 0;
+  virtual base::string16 GetSigninText() = 0;
+  virtual base::string16 GetSigninButtonText() = 0;
+  virtual base::string16 GetLearnMoreLinkText() = 0;
+  virtual base::string16 GetSettingsLinkText() = 0;
 
   void AddObserver(SigninDelegateObserver* observer);
   void RemoveObserver(SigninDelegateObserver* observer);

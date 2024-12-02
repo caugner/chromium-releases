@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/views/browser_action_view.h"
 
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
@@ -141,21 +141,21 @@ void BrowserActionButton::Destroy() {
 
   if (context_menu_) {
     context_menu_->Cancel();
-    MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+    base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
   } else {
     delete this;
   }
 }
 
 void BrowserActionButton::ViewHierarchyChanged(
-    bool is_add, View* parent, View* child) {
-
-  if (is_add && !called_registered_extension_command_ && GetFocusManager()) {
+    const ViewHierarchyChangedDetails& details) {
+  if (details.is_add && !called_registered_extension_command_ &&
+      GetFocusManager()) {
     MaybeRegisterExtensionCommand();
     called_registered_extension_command_ = true;
   }
 
-  MenuButton::ViewHierarchyChanged(is_add, parent, child);
+  MenuButton::ViewHierarchyChanged(details);
 }
 
 bool BrowserActionButton::CanHandleAccelerators() const {
@@ -175,8 +175,10 @@ void BrowserActionButton::ButtonPressed(views::Button* sender,
   delegate_->OnBrowserActionExecuted(this);
 }
 
-void BrowserActionButton::ShowContextMenuForView(View* source,
-                                                 const gfx::Point& point) {
+void BrowserActionButton::ShowContextMenuForView(
+    View* source,
+    const gfx::Point& point,
+    ui::MenuSourceType source_type) {
   if (!extension()->ShowConfigureContextMenus())
     return;
 
@@ -191,8 +193,8 @@ void BrowserActionButton::ShowContextMenuForView(View* source,
   gfx::Point screen_loc;
   views::View::ConvertPointToScreen(this, &screen_loc);
   if (menu_runner_->RunMenuAt(GetWidget(), NULL, gfx::Rect(screen_loc, size()),
-          views::MenuItemView::TOPLEFT, views::MenuRunner::HAS_MNEMONICS |
-          views::MenuRunner::CONTEXT_MENU) ==
+          views::MenuItemView::TOPLEFT, source_type,
+          views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU) ==
       views::MenuRunner::MENU_DELETED) {
     return;
   }
@@ -316,7 +318,7 @@ bool BrowserActionButton::OnMousePressed(const ui::MouseEvent& event) {
     // See comments in MenuButton::Activate() as to why this is needed.
     SetMouseHandler(NULL);
 
-    ShowContextMenu(gfx::Point(), true);
+    ShowContextMenu(gfx::Point(), ui::MENU_SOURCE_MOUSE);
   }
   return false;
 }
@@ -407,5 +409,6 @@ void BrowserActionButton::MaybeUnregisterExtensionCommand(bool only_if_active) {
           &browser_action_command,
           NULL)) {
     GetFocusManager()->UnregisterAccelerator(*keybinding_.get(), this);
+    keybinding_.reset(NULL);
   }
 }

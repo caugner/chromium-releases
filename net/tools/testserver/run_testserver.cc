@@ -9,9 +9,9 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/test/test_timeouts.h"
-#include "base/utf_string_conversions.h"
-#include "net/test/spawned_test_server.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 
 static void PrintUsage() {
   printf("run_testserver --doc-root=relpath\n"
@@ -22,18 +22,16 @@ static void PrintUsage() {
 
 int main(int argc, const char* argv[]) {
   base::AtExitManager at_exit_manager;
-  MessageLoopForIO message_loop;
+  base::MessageLoopForIO message_loop;
 
   // Process command line
   CommandLine::Init(argc, argv);
   CommandLine* command_line = CommandLine::ForCurrentProcess();
 
-  if (!logging::InitLogging(
-          FILE_PATH_LITERAL("testserver.log"),
-          logging::LOG_TO_BOTH_FILE_AND_SYSTEM_DEBUG_LOG,
-          logging::LOCK_LOG_FILE,
-          logging::APPEND_TO_OLD_LOG_FILE,
-          logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS)) {
+  logging::LoggingSettings settings;
+  settings.logging_dest = logging::LOG_TO_ALL;
+  settings.log_file = FILE_PATH_LITERAL("testserver.log");
+  if (!logging::InitLogging(settings)) {
     printf("Error: could not initialize logging. Exiting.\n");
     return -1;
   }

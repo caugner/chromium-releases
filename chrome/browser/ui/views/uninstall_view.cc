@@ -164,7 +164,7 @@ string16 UninstallView::GetItemAt(int index) {
 namespace chrome {
 
 int ShowUninstallBrowserPrompt(bool show_delete_profile) {
-  DCHECK_EQ(MessageLoop::TYPE_UI, MessageLoop::current()->type());
+  DCHECK_EQ(base::MessageLoop::TYPE_UI, base::MessageLoop::current()->type());
   int result = content::RESULT_CODE_NORMAL_EXIT;
   views::AcceleratorHandler accelerator_handler;
 
@@ -181,7 +181,7 @@ int ShowUninstallBrowserPrompt(bool show_delete_profile) {
   UninstallView* view = new UninstallView(&result,
                                           run_loop.QuitClosure(),
                                           show_delete_profile);
-  views::Widget::CreateWindow(view)->Show();
+  views::DialogDelegate::CreateDialogWidget(view, NULL, NULL)->Show();
   run_loop.Run();
   return result;
 }

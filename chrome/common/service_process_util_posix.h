@@ -35,8 +35,7 @@ class WaitableEvent;
 // Watches for |kTerminateMessage| to be written to the file descriptor it is
 // watching. When it reads |kTerminateMessage|, it performs |terminate_task_|.
 // Used here to monitor the socket listening to g_signal_socket.
-class ServiceProcessTerminateMonitor
-    : public MessageLoopForIO::Watcher {
+class ServiceProcessTerminateMonitor : public base::MessageLoopForIO::Watcher {
  public:
 
   enum {
@@ -69,7 +68,7 @@ struct ServiceProcessState::StateData
 #if defined(OS_MACOSX)
   bool WatchExecutable();
 
-  base::mac::ScopedCFTypeRef<CFDictionaryRef> launchd_conf_;
+  base::ScopedCFTypeRef<CFDictionaryRef> launchd_conf_;
   base::FilePathWatcher executable_watcher_;
 #endif  // OS_MACOSX
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
@@ -77,7 +76,7 @@ struct ServiceProcessState::StateData
   scoped_ptr<MultiProcessLock> running_lock_;
 #endif
   scoped_ptr<ServiceProcessTerminateMonitor> terminate_monitor_;
-  MessageLoopForIO::FileDescriptorWatcher watcher_;
+  base::MessageLoopForIO::FileDescriptorWatcher watcher_;
   int sockets_[2];
   struct sigaction old_action_;
   bool set_action_;

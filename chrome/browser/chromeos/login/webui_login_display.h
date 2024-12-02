@@ -28,6 +28,7 @@ class WebUILoginDisplay : public LoginDisplay,
   virtual ~WebUILoginDisplay();
 
   // LoginDisplay implementation:
+  virtual void ClearAndEnablePassword() OVERRIDE;
   virtual void Init(const UserList& users,
                     bool show_guest,
                     bool show_users,
@@ -53,6 +54,7 @@ class WebUILoginDisplay : public LoginDisplay,
 
   // SigninScreenHandlerDelegate implementation:
   virtual void CancelPasswordChangedFlow() OVERRIDE;
+  virtual void CancelUserAdding() OVERRIDE;
   virtual void CreateAccount() OVERRIDE;
   virtual void CompleteLogin(const UserContext& user_context) OVERRIDE;
   virtual void Login(const UserContext& user_context) OVERRIDE;
@@ -66,13 +68,14 @@ class WebUILoginDisplay : public LoginDisplay,
   virtual void RemoveUser(const std::string& username) OVERRIDE;
   virtual void ResyncUserData() OVERRIDE;
   virtual void ShowEnterpriseEnrollmentScreen() OVERRIDE;
+  virtual void ShowKioskEnableScreen() OVERRIDE;
   virtual void ShowResetScreen() OVERRIDE;
+  virtual void ShowKioskAutolaunchScreen() OVERRIDE;
   virtual void ShowWrongHWIDScreen() OVERRIDE;
   virtual void SetWebUIHandler(
       LoginDisplayWebUIHandler* webui_handler) OVERRIDE;
   virtual void ShowSigninScreenForCreds(const std::string& username,
                                         const std::string& password);
-  virtual void SetGaiaOriginForTesting(const std::string& arg);
   virtual const UserList& GetUsers() const OVERRIDE;
   virtual bool IsShowGuest() const OVERRIDE;
   virtual bool IsShowUsers() const OVERRIDE;

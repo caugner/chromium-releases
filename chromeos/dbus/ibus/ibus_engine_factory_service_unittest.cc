@@ -39,7 +39,7 @@ class SynchronousCreateEngineHandler {
 class AsynchronousCreateEngineHandler {
  public:
   AsynchronousCreateEngineHandler(const dbus::ObjectPath& path,
-                                  MessageLoop* message_loop)
+                                  base::MessageLoop* message_loop)
       : path_(path),
         message_loop_(message_loop) {}
 
@@ -49,7 +49,7 @@ class AsynchronousCreateEngineHandler {
 
  private:
   dbus::ObjectPath path_;
-  MessageLoop* message_loop_;
+  base::MessageLoop* message_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(AsynchronousCreateEngineHandler);
 };
@@ -94,25 +94,24 @@ class IBusEngineFactoryServiceTest : public testing::Test {
         mock_bus_.get(),
         dbus::ObjectPath(ibus::engine_factory::kServicePath));
 
-    EXPECT_CALL(*mock_bus_,
-                GetExportedObject(dbus::ObjectPath(
-                    ibus::engine_factory::kServicePath)))
+    EXPECT_CALL(
+        *mock_bus_.get(),
+        GetExportedObject(dbus::ObjectPath(ibus::engine_factory::kServicePath)))
         .WillOnce(Return(mock_exported_object_.get()));
 
-    EXPECT_CALL(*mock_bus_, AssertOnOriginThread())
+    EXPECT_CALL(*mock_bus_.get(), AssertOnOriginThread())
         .WillRepeatedly(Return());
 
-    EXPECT_CALL(*mock_exported_object_, ExportMethod(
-        ibus::engine_factory::kServiceInterface,
-        ibus::engine_factory::kCreateEngineMethod,
-        _,
-        _))
+    EXPECT_CALL(*mock_exported_object_.get(),
+                ExportMethod(ibus::engine_factory::kServiceInterface,
+                             ibus::engine_factory::kCreateEngineMethod,
+                             _,
+                             _))
         .WillRepeatedly(
-            Invoke(this, &IBusEngineFactoryServiceTest::OnMethodExported));
+             Invoke(this, &IBusEngineFactoryServiceTest::OnMethodExported));
 
     service_.reset(IBusEngineFactoryService::Create(
-        mock_bus_,
-        REAL_DBUS_CLIENT_IMPLEMENTATION));
+        mock_bus_.get(), REAL_DBUS_CLIENT_IMPLEMENTATION));
   }
 
  protected:
@@ -126,7 +125,7 @@ class IBusEngineFactoryServiceTest : public testing::Test {
   std::map<std::string, dbus::ExportedObject::MethodCallCallback>
       method_exported_map_;
   // A message loop to emulate asynchronous behavior.
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
 
  private:
   // Used to implement the method call exportation.

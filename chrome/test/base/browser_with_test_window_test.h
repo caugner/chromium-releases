@@ -99,7 +99,7 @@ class BrowserWithTestWindowTest : public testing::Test {
 
   TestingProfile* GetProfile() { return profile_.get(); }
 
-  MessageLoopForUI* message_loop() { return &ui_loop_; }
+  base::MessageLoop* message_loop() { return &ui_loop_; }
 
   BrowserWindow* release_browser_window() WARN_UNUSED_RESULT {
     return window_.release();
@@ -142,7 +142,7 @@ class BrowserWithTestWindowTest : public testing::Test {
 
  private:
   // We need to create a MessageLoop, otherwise a bunch of things fails.
-  MessageLoopForUI ui_loop_;
+  base::MessageLoopForUI ui_loop_;
   base::ShadowingAtExitManager at_exit_manager_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread db_thread_;

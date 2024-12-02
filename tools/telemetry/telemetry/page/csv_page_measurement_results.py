@@ -1,13 +1,15 @@
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+import csv
+
 from telemetry.page import page_measurement_results
 
 class CsvPageMeasurementResults(
     page_measurement_results.PageMeasurementResults):
-  def __init__(self, results_writer, output_after_every_page):
+  def __init__(self, output_stream, output_after_every_page):
     super(CsvPageMeasurementResults, self).__init__()
-    self._results_writer = results_writer
+    self._results_writer = csv.writer(output_stream)
     self._did_output_header = False
     self._header_names_written_to_writer = None
     self._output_after_every_page = output_after_every_page
@@ -27,13 +29,13 @@ class CsvPageMeasurementResults(
 
     super(CsvPageMeasurementResults, self).DidMeasurePage()
 
-  def PrintSummary(self, trace_tag):
+  def PrintSummary(self):
     if not self._output_after_every_page:
       self._OutputHeader()
       for page_values in self.page_results:
         self._OutputValuesForPage(page_values)
 
-    super(CsvPageMeasurementResults, self).PrintSummary(trace_tag)
+    super(CsvPageMeasurementResults, self).PrintSummary()
 
   def _ValidateOutputNamesForCurrentPage(self):
     assert self._did_output_header

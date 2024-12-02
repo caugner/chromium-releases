@@ -13,13 +13,12 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "sync/engine/model_changing_syncer_command.h"
-#include "sync/engine/throttled_data_type_tracker.h"
 #include "sync/engine/traffic_recorder.h"
 #include "sync/internal_api/public/engine/model_safe_worker.h"
 #include "sync/sessions/debug_info_getter.h"
 #include "sync/sessions/sync_session.h"
 #include "sync/sessions/sync_session_context.h"
-#include "sync/syncable/syncable_mock.h"
+#include "sync/syncable/directory.h"
 #include "sync/test/engine/fake_model_worker.h"
 #include "sync/test/engine/mock_connection_manager.h"
 #include "sync/test/engine/test_directory_setter_upper.h"
@@ -44,16 +43,17 @@ class MockDebugInfoGetter : public sessions::DebugInfoGetter {
 class SyncerCommandTestBase : public testing::Test,
                               public sessions::SyncSession::Delegate {
  public:
-  enum UseMockDirectory {
-    USE_MOCK_DIRECTORY
-  };
-
   // SyncSession::Delegate implementation.
-  virtual void OnSilencedUntil(
-      const base::TimeTicks& silenced_until) OVERRIDE {
+  virtual void OnThrottled(
+      const base::TimeDelta& throttle_duration) OVERRIDE {
     FAIL() << "Should not get silenced.";
   }
-  virtual bool IsSyncingCurrentlySilenced() OVERRIDE {
+  virtual void OnTypesThrottled(
+      ModelTypeSet types,
+      const base::TimeDelta& throttle_duration) OVERRIDE {
+    FAIL() << "Should not get silenced.";
+  }
+  virtual bool IsCurrentlyThrottled() OVERRIDE {
     return false;
   }
   virtual void OnReceivedLongPollIntervalUpdate(
@@ -68,6 +68,9 @@ class SyncerCommandTestBase : public testing::Test,
       const base::TimeDelta& new_delay) OVERRIDE {
     FAIL() << "Should not get sessions commit delay.";
   }
+  virtual void OnReceivedClientInvalidationHintBufferSize(int size) OVERRIDE {
+    FAIL() << "Should not get hint buffer size.";
+  }
   virtual void OnShouldStopSyncingPermanently() OVERRIDE {
     FAIL() << "Shouldn't be called.";
   }
@@ -80,7 +83,7 @@ class SyncerCommandTestBase : public testing::Test,
     std::vector<ModelSafeWorker*> workers;
     std::vector<scoped_refptr<ModelSafeWorker> >::iterator it;
     for (it = workers_.begin(); it != workers_.end(); ++it)
-      workers.push_back(*it);
+      workers.push_back(it->get());
     return workers;
   }
   void GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out) {
@@ -107,9 +110,16 @@ class SyncerCommandTestBase : public testing::Test,
 
   // Create a session with the provided source.
   sessions::SyncSession* session(const sessions::SyncSourceInfo& source) {
-    if (!session_) {
+    // These sources require a valid nudge tracker.
+    DCHECK_NE(sync_pb::GetUpdatesCallerInfo::LOCAL, source.updates_source);
+    DCHECK_NE(sync_pb::GetUpdatesCallerInfo::NOTIFICATION,
+              source.updates_source);
+    DCHECK_NE(sync_pb::GetUpdatesCallerInfo::DATATYPE_REFRESH,
+              source.updates_source);
+    if (!session_.get()) {
       std::vector<ModelSafeWorker*> workers = GetWorkers();
-      session_.reset(new sessions::SyncSession(context(), delegate(), source));
+      session_.reset(
+          sessions::SyncSession::Build(context(), delegate(), source));
     }
     return session_.get();
   }
@@ -119,11 +129,9 @@ class SyncerCommandTestBase : public testing::Test,
   }
 
   void ResetContext() {
-    throttled_data_type_tracker_.reset(new ThrottledDataTypeTracker(NULL));
     context_.reset(new sessions::SyncSessionContext(
             mock_server_.get(), directory(),
             GetWorkers(), &extensions_activity_monitor_,
-            throttled_data_type_tracker_.get(),
             std::vector<SyncEngineEventListener*>(),
             &mock_debug_info_getter_,
             &traffic_recorder_,
@@ -194,7 +202,7 @@ class SyncerCommandTestBase : public testing::Test,
   }
 
  private:
-  MessageLoop message_loop_;
+  base::MessageLoop message_loop_;
   scoped_ptr<sessions::SyncSessionContext> context_;
   scoped_ptr<MockConnectionManager> mock_server_;
   scoped_ptr<sessions::SyncSession> session_;
@@ -202,7 +210,6 @@ class SyncerCommandTestBase : public testing::Test,
   ModelSafeRoutingInfo routing_info_;
   NiceMock<MockDebugInfoGetter> mock_debug_info_getter_;
   FakeExtensionsActivityMonitor extensions_activity_monitor_;
-  scoped_ptr<ThrottledDataTypeTracker> throttled_data_type_tracker_;
   TrafficRecorder traffic_recorder_;
   DISALLOW_COPY_AND_ASSIGN(SyncerCommandTestBase);
 };
@@ -215,22 +222,6 @@ class SyncerCommandTest : public SyncerCommandTestBase {
 
  private:
   TestDirectorySetterUpper dir_maker_;
-};
-
-class MockDirectorySyncerCommandTest : public SyncerCommandTestBase {
- public:
-  MockDirectorySyncerCommandTest();
-  virtual ~MockDirectorySyncerCommandTest();
-  virtual syncable::Directory* directory() OVERRIDE;
-
-  syncable::MockDirectory* mock_directory() {
-    return static_cast<syncable::MockDirectory*>(directory());
-  }
-
-  virtual void SetUp() OVERRIDE;
-
-  TestUnrecoverableErrorHandler handler_;
-  syncable::MockDirectory mock_directory_;
 };
 
 }  // namespace syncer

@@ -16,8 +16,8 @@
 #include "base/mac/mac_util.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/password_manager/login_database.h"
 #include "chrome/browser/password_manager/password_store_change.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -935,7 +935,7 @@ void PasswordStoreMac::GetAutofillableLoginsImpl(GetLoginsRequest* request) {
 
 bool PasswordStoreMac::FillAutofillableLogins(
          std::vector<PasswordForm*>* forms) {
-  DCHECK(thread_->message_loop() == MessageLoop::current());
+  DCHECK(thread_->message_loop() == base::MessageLoop::current());
 
   std::vector<PasswordForm*> database_forms;
   login_metadata_db_->GetAutofillableLogins(&database_forms);
@@ -954,7 +954,7 @@ bool PasswordStoreMac::FillAutofillableLogins(
 
 bool PasswordStoreMac::FillBlacklistLogins(
          std::vector<PasswordForm*>* forms) {
-  DCHECK(thread_->message_loop() == MessageLoop::current());
+  DCHECK(thread_->message_loop() == base::MessageLoop::current());
   return login_metadata_db_->GetBlacklistLogins(forms);
 }
 

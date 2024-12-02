@@ -5,20 +5,21 @@
 #include "net/tools/quic/quic_in_memory_cache.h"
 
 #include "base/file_util.h"
+#include "base/files/file_enumerator.h"
 #include "base/stl_util.h"
 
 using base::FilePath;
 using base::StringPiece;
-using file_util::FileEnumerator;
 using std::string;
 
 // Specifies the directory used during QuicInMemoryCache
 // construction to seed the cache. Cache directory can be
 // generated using `wget -p --save-headers <url>
-string FLAGS_quic_in_memory_cache_dir;
 
 namespace net {
 namespace tools {
+
+std::string FLAGS_quic_in_memory_cache_dir = "/tmp/quic-data";
 
 namespace {
 
@@ -85,7 +86,16 @@ QuicInMemoryCache* QuicInMemoryCache::GetInstance() {
 
 const QuicInMemoryCache::Response* QuicInMemoryCache::GetResponse(
     const BalsaHeaders& request_headers) const {
-  ResponseMap::const_iterator it = responses_.find(GetKey(request_headers));
+  string key = GetKey(request_headers);
+  StringPiece url(key);
+  // Removing the leading https:// or http://.
+  if (StringPieceUtils::StartsWithIgnoreCase(url, "https://")) {
+    url.remove_prefix(8);
+  } else if (StringPieceUtils::StartsWithIgnoreCase(url, "http://")) {
+    url.remove_prefix(7);
+  }
+
+  ResponseMap::const_iterator it = responses_.find(url.as_string());
   if (it == responses_.end()) {
     return NULL;
   }
@@ -119,9 +129,9 @@ QuicInMemoryCache::QuicInMemoryCache() {
             << FLAGS_quic_in_memory_cache_dir;
 
   FilePath directory(FLAGS_quic_in_memory_cache_dir);
-  FileEnumerator file_list(directory,
-                           true,
-                           FileEnumerator::FILES);
+  base::FileEnumerator file_list(directory,
+                                 true,
+                                 base::FileEnumerator::FILES);
 
   FilePath file = file_list.Next();
   while (!file.empty()) {
@@ -164,7 +174,9 @@ QuicInMemoryCache::QuicInMemoryCache() {
       response_headers.RemoveAllOfHeader("X-Original-Url");
       // Remove the protocol so that the string is of the form host + path,
       // which is parsed properly below.
-      if (StringPieceUtils::StartsWithIgnoreCase(base, "http://")) {
+      if (StringPieceUtils::StartsWithIgnoreCase(base, "https://")) {
+        base.remove_prefix(8);
+      } else if (StringPieceUtils::StartsWithIgnoreCase(base, "http://")) {
         base.remove_prefix(7);
       }
     }

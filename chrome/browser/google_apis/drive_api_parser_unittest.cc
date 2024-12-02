@@ -4,22 +4,12 @@
 
 #include "chrome/browser/google_apis/drive_api_parser.h"
 
-#include "base/file_util.h"
-#include "base/files/file_path.h"
-#include "base/json/json_file_value_serializer.h"
-#include "base/path_service.h"
-#include "base/string16.h"
 #include "base/time.h"
-#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/google_apis/gdata_wapi_parser.h"
 #include "chrome/browser/google_apis/test_util.h"
 #include "chrome/browser/google_apis/time_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-using base::Value;
-using base::DictionaryValue;
-using base::ListValue;
 
 namespace google_apis {
 
@@ -29,11 +19,11 @@ namespace google_apis {
 // Test about resource parsing.
 TEST(DriveAPIParserTest, AboutResourceParser) {
   std::string error;
-  scoped_ptr<Value> document = test_util::LoadJSONFile(
+  scoped_ptr<base::Value> document = test_util::LoadJSONFile(
       "chromeos/drive/about.json");
   ASSERT_TRUE(document.get());
 
-  ASSERT_EQ(Value::TYPE_DICTIONARY, document->GetType());
+  ASSERT_EQ(base::Value::TYPE_DICTIONARY, document->GetType());
   scoped_ptr<AboutResource> resource(new AboutResource());
   EXPECT_TRUE(resource->Parse(*document));
 
@@ -65,11 +55,11 @@ TEST(DriveAPIParserTest, AboutResourceFromAccountMetadata) {
 // Test app list parsing.
 TEST(DriveAPIParserTest, AppListParser) {
   std::string error;
-  scoped_ptr<Value> document = test_util::LoadJSONFile(
+  scoped_ptr<base::Value> document = test_util::LoadJSONFile(
       "chromeos/drive/applist.json");
   ASSERT_TRUE(document.get());
 
-  ASSERT_EQ(Value::TYPE_DICTIONARY, document->GetType());
+  ASSERT_EQ(base::Value::TYPE_DICTIONARY, document->GetType());
   scoped_ptr<AppList> applist(new AppList);
   EXPECT_TRUE(applist->Parse(*document));
 
@@ -243,11 +233,11 @@ TEST(DriveAPIParserTest, AppListFromAccountMetadata) {
 // Test file list parsing.
 TEST(DriveAPIParserTest, FileListParser) {
   std::string error;
-  scoped_ptr<Value> document = test_util::LoadJSONFile(
+  scoped_ptr<base::Value> document = test_util::LoadJSONFile(
       "chromeos/drive/filelist.json");
   ASSERT_TRUE(document.get());
 
-  ASSERT_EQ(Value::TYPE_DICTIONARY, document->GetType());
+  ASSERT_EQ(base::Value::TYPE_DICTIONARY, document->GetType());
   scoped_ptr<FileList> filelist(new FileList);
   EXPECT_TRUE(filelist->Parse(*document));
 
@@ -310,6 +300,10 @@ TEST(DriveAPIParserTest, FileListParser) {
   EXPECT_EQ(GURL("https://docs.google.com/uc?"
                  "id=0B4v7G8yEYAWHUmRrU2lMS2hLABC&export=download"),
             file1.web_content_link());
+  ASSERT_EQ(1U, file1.open_with_links().size());
+  EXPECT_EQ("1234567890", file1.open_with_links()[0].app_id);
+  EXPECT_EQ(GURL("http://open_with_link/url"),
+            file1.open_with_links()[0].open_url);
 
   // Check file 2 (a Google Document)
   const FileResource& file2 = *filelist->items()[1];
@@ -337,6 +331,7 @@ TEST(DriveAPIParserTest, FileListParser) {
                  "id=1Pc8jzfU1ErbN_eucMMqdqzY3eBm0v8sxXm_1CtLxABC&"
                  "v=3&s=AMedNnoAAAAAUBJyB0g8HbxZaLRnlztxefZPS24LiXYZ&sz=s220"),
             file2.thumbnail_link());
+  EXPECT_EQ(0U, file2.open_with_links().size());
 
   // Check file 3 (a folder)
   const FileResource& file3 = *filelist->items()[2];
@@ -348,16 +343,17 @@ TEST(DriveAPIParserTest, FileListParser) {
   ASSERT_EQ(1U, file3.parents().size());
   EXPECT_EQ("0AIv7G8yEYAWHUk9ABC", file3.parents()[0]->file_id());
   EXPECT_TRUE(file3.parents()[0]->is_root());
+  EXPECT_EQ(0U, file3.open_with_links().size());
 }
 
 // Test change list parsing.
 TEST(DriveAPIParserTest, ChangeListParser) {
   std::string error;
-  scoped_ptr<Value> document =
+  scoped_ptr<base::Value> document =
       test_util::LoadJSONFile("chromeos/drive/changelist.json");
   ASSERT_TRUE(document.get());
 
-  ASSERT_EQ(Value::TYPE_DICTIONARY, document->GetType());
+  ASSERT_EQ(base::Value::TYPE_DICTIONARY, document->GetType());
   scoped_ptr<ChangeList> changelist(new ChangeList);
   EXPECT_TRUE(changelist->Parse(*document));
 

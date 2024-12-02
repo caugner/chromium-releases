@@ -9,6 +9,7 @@ import unittest
 
 from branch_utility import BranchUtility
 from fake_url_fetcher import FakeUrlFetcher
+from object_store_creator import ObjectStoreCreator
 
 class BranchUtilityTest(unittest.TestCase):
   def setUp(self):
@@ -16,7 +17,7 @@ class BranchUtilityTest(unittest.TestCase):
         os.path.join('branch_utility', 'first.json'),
         os.path.join('branch_utility', 'second.json'),
         FakeUrlFetcher(os.path.join(sys.path[0], 'test_data')),
-        object_store=TestObjectStore('test'))
+        ObjectStoreCreator.ForTest())
 
   def testSplitChannelNameFromPath(self):
     self.assertEquals(('stable', 'extensions/stuff.html'),
@@ -44,15 +45,23 @@ class BranchUtilityTest(unittest.TestCase):
                       self._branch_util.SplitChannelNameFromPath(
                       'stuff.html'))
 
-  def testGetBranchNumberForChannelName(self):
-    self.assertEquals('1145',
-                      self._branch_util.GetBranchNumberForChannelName('dev'))
-    self.assertEquals('1084',
-                      self._branch_util.GetBranchNumberForChannelName('beta'))
-    self.assertEquals('1084',
-                      self._branch_util.GetBranchNumberForChannelName('stable'))
+  def testNewestChannel(self):
     self.assertEquals('trunk',
-                      self._branch_util.GetBranchNumberForChannelName('trunk'))
+        self._branch_util.NewestChannel(('trunk', 'dev', 'beta', 'stable')))
+    self.assertEquals('trunk',
+        self._branch_util.NewestChannel(('stable', 'beta', 'dev', 'trunk')))
+    self.assertEquals('dev',
+        self._branch_util.NewestChannel(('stable', 'beta', 'dev')))
+    self.assertEquals('dev',
+        self._branch_util.NewestChannel(('dev', 'beta', 'stable')))
+    self.assertEquals('beta',
+        self._branch_util.NewestChannel(('beta', 'stable')))
+    self.assertEquals('beta',
+        self._branch_util.NewestChannel(('stable', 'beta')))
+    self.assertEquals('stable', self._branch_util.NewestChannel(('stable',)))
+    self.assertEquals('beta', self._branch_util.NewestChannel(('beta',)))
+    self.assertEquals('dev', self._branch_util.NewestChannel(('dev',)))
+    self.assertEquals('trunk', self._branch_util.NewestChannel(('trunk',)))
 
   def testGetChannelInfo(self):
     self.assertEquals('trunk',

@@ -10,7 +10,7 @@
 #include "base/basictypes.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "base/string16.h"
+#include "base/strings/string16.h"
 #include "chrome/browser/importer/importer_type.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -39,6 +39,10 @@ struct SourceProfile {
   base::FilePath source_path;
   base::FilePath app_path;
   uint16 services_supported;  // Bitmask of ImportItem.
+  // The application locale. Stored because we can only access it from the UI
+  // thread on the browser process. This is only used by the Firefox importer.
+  std::string locale;
+
   // The URLRequestContextGetter is only used for Google Toolbar.
   scoped_refptr<net::URLRequestContextGetter> request_context_getter;
 };

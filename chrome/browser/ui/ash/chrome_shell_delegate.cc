@@ -16,7 +16,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/prefs/pref_service.h"
-#include "base/utf_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/extensions/shell_window_registry.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
@@ -29,7 +29,6 @@
 #include "chrome/browser/ui/ash/ash_keyboard_controller_proxy.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/launcher_context_menu.h"
-#include "chrome/browser/ui/ash/session_state_delegate.h"
 #include "chrome/browser/ui/ash/user_action_handler.h"
 #include "chrome/browser/ui/ash/window_positioner.h"
 #include "chrome/browser/ui/browser.h"
@@ -39,7 +38,7 @@
 #include "chrome/browser/ui/extensions/native_app_window.h"
 #include "chrome/browser/ui/extensions/shell_window.h"
 #include "chrome/browser/ui/host_desktop.h"
-#include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
+#include "chrome/browser/ui/immersive_fullscreen_configuration.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/time_format.h"
@@ -160,12 +159,31 @@ void ChromeShellDelegate::ToggleFullscreen() {
   bool is_fullscreen = ash::wm::IsWindowFullscreen(window);
 
   // Windows which cannot be maximized should not be fullscreened.
-  if (is_fullscreen && !ash::wm::CanMaximizeWindow(window))
+  if (!is_fullscreen && !ash::wm::CanMaximizeWindow(window))
     return;
 
   Browser* browser = chrome::FindBrowserWithWindow(window);
   if (browser) {
-    chrome::ToggleFullscreenMode(browser);
+    // If a window is fullscreen, exit fullscreen.
+    if (is_fullscreen) {
+      chrome::ToggleFullscreenMode(browser);
+      return;
+    }
+
+    // AppNonClientFrameViewAsh shows only the window controls and no other
+    // window decorations which is pretty close to fullscreen. Put v1 apps
+    // into maximized mode instead of fullscreen to avoid showing the ugly
+    // fullscreen exit bubble.
+#if defined(OS_WIN)
+    if (browser->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_NATIVE) {
+      chrome::ToggleFullscreenMode(browser);
+      return;
+    }
+#endif  // OS_WIN
+    if (browser->is_app() && browser->app_type() != Browser::APP_TYPE_CHILD)
+      ash::wm::ToggleMaximizedWindow(window);
+    else
+      chrome::ToggleFullscreenMode(browser);
     return;
   }
 
@@ -185,13 +203,6 @@ void ChromeShellDelegate::ToggleMaximized() {
   aura::Window* window = ash::wm::GetActiveWindow();
   if (!window)
     return;
-
-  // TODO(pkotwicz): If immersive mode replaces fullscreen, bind fullscreen to
-  // F4 and find a different key binding for maximize.
-  if (chrome::UseImmersiveFullscreen()) {
-    ToggleFullscreen();
-    return;
-  }
 
   // Get out of fullscreen when in fullscreen mode.
   if (ash::wm::IsWindowFullscreen(window)) {
@@ -227,7 +238,7 @@ void ChromeShellDelegate::RestoreTab() {
 }
 
 void ChromeShellDelegate::ShowTaskManager() {
-  chrome::OpenTaskManager(NULL, false);
+  chrome::OpenTaskManager(NULL);
 }
 
 content::BrowserContext* ChromeShellDelegate::GetCurrentBrowserContext() {
@@ -245,6 +256,10 @@ app_list::AppListViewDelegate*
 
 ash::LauncherDelegate* ChromeShellDelegate::CreateLauncherDelegate(
     ash::LauncherModel* model) {
+  // Defer Launcher creation until DefaultProfile is created.
+  if (!ProfileManager::IsGetDefaultProfileAllowed())
+    return NULL;
+
   // TODO(oshima): This is currently broken with multiple launchers.
   // Refactor so that there is just one launcher delegate in the
   // shell.
@@ -253,10 +268,6 @@ ash::LauncherDelegate* ChromeShellDelegate::CreateLauncherDelegate(
     launcher_delegate_->Init();
   }
   return launcher_delegate_;
-}
-
-ash::SessionStateDelegate* ChromeShellDelegate::CreateSessionStateDelegate() {
-  return new SessionStateDelegate;
 }
 
 aura::client::UserActionClient* ChromeShellDelegate::CreateUserActionClient() {
@@ -311,6 +322,12 @@ void ChromeShellDelegate::RecordUserMetricsAction(
       break;
     case ash::UMA_ACCEL_PREVWINDOW_TAB:
       content::RecordAction(content::UserMetricsAction("Accel_PrevWindow_Tab"));
+      break;
+    case ash::UMA_ACCEL_EXIT_FIRST_Q:
+      content::RecordAction(content::UserMetricsAction("Accel_Exit_First_Q"));
+      break;
+    case ash::UMA_ACCEL_EXIT_SECOND_Q:
+      content::RecordAction(content::UserMetricsAction("Accel_Exit_Second_Q"));
       break;
     case ash::UMA_ACCEL_SEARCH_LWIN:
       content::RecordAction(content::UserMetricsAction("Accel_Search_LWin"));

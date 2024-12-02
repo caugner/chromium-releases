@@ -11,7 +11,7 @@
 #include <string>
 
 #include "base/logging.h"
-#include "base/string_number_conversions.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "chromeos/network/onc/onc_constants.h"
 #include "chromeos/network/onc/onc_test_utils.h"
@@ -140,7 +140,8 @@ class ONCCertificateImporterTest : public testing::Test {
     bool ok = true;
     net::CertificateList certs = ListCertsInSlot();
     for (size_t i = 0; i < certs.size(); ++i) {
-      if (!net::NSSCertDatabase::GetInstance()->DeleteCertAndKey(certs[i]))
+      if (!net::NSSCertDatabase::GetInstance()->DeleteCertAndKey(certs[i]
+                                                                     .get()))
         ok = false;
     }
     return ok;
