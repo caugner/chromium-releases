@@ -10,6 +10,8 @@
 
 #include "ipc/ipc_channel_proxy.h"
 
+struct DevToolsMessageData;
+
 // DevToolsAgentFilter is registered as an IPC filter in order to be able to
 // dispatch messages while on the IO thread. The reason for that is that while
 // debugging, Render thread is being held by the v8 and hence no messages
@@ -22,17 +24,28 @@ class DevToolsAgentFilter : public IPC::ChannelProxy::MessageFilter {
   DevToolsAgentFilter();
   virtual ~DevToolsAgentFilter();
 
+  static void SendRpcMessage(const DevToolsMessageData& data);
+
  private:
   // IPC::ChannelProxy::MessageFilter override. Called on IO thread.
   virtual bool OnMessageReceived(const IPC::Message& message);
+
+  virtual void OnFilterAdded(IPC::Channel* channel) { channel_ = channel; }
 
   static void DispatchMessageLoop();
 
   // OnDebuggerCommand will be executed in the IO thread so that we can
   // handle debug messages even when v8 is stopped.
   void OnDebuggerCommand(const std::string& command);
+  void OnDebuggerPauseScript();
+  void OnRpcMessage(const DevToolsMessageData& data);
 
-  int current_routing_id_;
+  bool message_handled_;
+
+  // Made static to allow DevToolsAgent to use it for replying directly
+  // from IO thread.
+  static int current_routing_id_;
+  static IPC::Channel* channel_;
 
   DISALLOW_COPY_AND_ASSIGN(DevToolsAgentFilter);
 };

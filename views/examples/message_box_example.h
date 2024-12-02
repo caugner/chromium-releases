@@ -11,23 +11,27 @@
 #include "views/controls/message_box_view.h"
 #include "views/controls/tabbed_pane/tabbed_pane.h"
 #include "views/examples/example_base.h"
+#include "views/grid_layout.h"
 
 namespace examples {
 
-// A MessageBoxView example. This tests some of checkbox features
-// as well.
-class MessageBoxExample : protected ExampleBase, private views::ButtonListener {
+// A MessageBoxView example. This tests some of checkbox features as well.
+class MessageBoxExample : public ExampleBase,
+                          public views::ButtonListener {
  public:
-  MessageBoxExample(views::TabbedPane* tabbed_pane, views::Label* message)
-      : ExampleBase(message),
-        message_box_view_(
-            new MessageBoxView(0, L"Message Box Message", L"Default Prompt")),
-        ALLOW_THIS_IN_INITIALIZER_LIST(
-            status_(new views::TextButton(this, L"Show Status"))),
-        ALLOW_THIS_IN_INITIALIZER_LIST(
-            toggle_(new views::TextButton(this, L"Toggle Checkbox"))) {
-    views::View* container = new views::View();
-    tabbed_pane->AddTab(L"Message Box View", container);
+  explicit MessageBoxExample(ExamplesMain* main) : ExampleBase(main) {}
+
+  virtual ~MessageBoxExample() {}
+
+  virtual std::wstring GetExampleTitle() {
+    return L"Message Box View";
+  }
+
+  virtual void CreateExampleView(views::View* container) {
+    message_box_view_ =
+        new MessageBoxView(0, L"Message Box Message", L"Default Prompt");
+    status_ = new views::TextButton(this, L"Show Status");
+    toggle_ = new views::TextButton(this, L"Toggle Checkbox");
 
     views::GridLayout* layout = new views::GridLayout(container);
     container->SetLayoutManager(layout);
@@ -53,8 +57,6 @@ class MessageBoxExample : protected ExampleBase, private views::ButtonListener {
     layout->AddView(status_);
     layout->AddView(toggle_);
   }
-
-  virtual ~MessageBoxExample() {}
 
  private:
   // ButtonListener overrides.

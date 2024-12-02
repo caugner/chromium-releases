@@ -18,14 +18,14 @@
 #include "base/path_service.h"
 #include "base/string16.h"
 #include "base/string_piece.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "grit/test_shell_resources.h"
 #include "grit/webkit_resources.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
-#include "webkit/api/public/WebFrame.h"
-#include "webkit/api/public/WebPoint.h"
-#include "webkit/api/public/WebView.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPoint.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/plugins/plugin_list.h"
 #include "webkit/glue/resource_loader_bridge.h"
 #include "webkit/glue/webkit_glue.h"
@@ -126,7 +126,7 @@ gboolean ShowWebInspectorActivated(GtkWidget* widget, TestShell* shell) {
 GtkWidget* AddMenuEntry(GtkWidget* menu_widget, const char* text,
                         GCallback callback, TestShell* shell) {
   GtkWidget* entry = gtk_menu_item_new_with_label(text);
-  g_signal_connect(G_OBJECT(entry), "activate", callback, shell);
+  g_signal_connect(entry, "activate", callback, shell);
   gtk_menu_shell_append(GTK_MENU_SHELL(menu_widget), entry);
   return entry;
 }
@@ -181,114 +181,118 @@ void TestShell::InitializeTestShell(bool layout_test_mode) {
   // We have fontconfig parse a config file from our resources file. This
   // sets a number of aliases ("sans"->"Arial" etc), but doesn't include any
   // font directories.
-
-  // fontconfig only knows how to load font config configs from a file name, so
-  // we write to a temp file.
-  base::StringPiece font_config_xml;
-  g_resource_data_pack->Get(IDR_LINUX_FONT_CONFIG, &font_config_xml);
-  FilePath fontconfig_path;
-  if (!file_util::CreateTemporaryFile(&fontconfig_path)) {
-    LOG(FATAL) << "failed to create temp font config file";
-  }
-  if (-1 == file_util::WriteFile(fontconfig_path,
-                                 font_config_xml.data(),
-                                 font_config_xml.length())) {
-    LOG(FATAL) << "failed to write temp font config file";
-  }
-
-  FcInit();
-
-  FcConfig* fontcfg = FcConfigCreate();
-  if (!FcConfigParseAndLoad(fontcfg, FilePathAsFcChar(fontconfig_path),
-                            true)) {
-    LOG(FATAL) << "Failed to parse fontconfig config file";
-  }
-  // We can delete the temp file after font config has parsed it.
-  file_util::Delete(fontconfig_path, false);
-
-  // This is the list of fonts that fontconfig will know about. It will try its
-  // best to match based only on the fonts here in. The paths are where these
-  // fonts are found on our Ubuntu boxes.
-  static const char *const fonts[] = {
-    "/usr/share/fonts/truetype/msttcorefonts/Arial.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold_Italic.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Arial_Italic.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Comic_Sans_MS.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Comic_Sans_MS_Bold.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Courier_New.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Courier_New_Bold.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Courier_New_Bold_Italic.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Courier_New_Italic.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Georgia.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Georgia_Bold.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Georgia_Bold_Italic.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Georgia_Italic.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Impact.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Trebuchet_MS.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Trebuchet_MS_Bold.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Trebuchet_MS_Bold_Italic.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Trebuchet_MS_Italic.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman_Bold.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman_Bold_Italic.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman_Italic.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Verdana.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Verdana_Bold.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Verdana_Bold_Italic.ttf",
-    "/usr/share/fonts/truetype/msttcorefonts/Verdana_Italic.ttf",
-    "/usr/share/fonts/truetype/ttf-indic-fonts-core/lohit_ta.ttf",
-    "/usr/share/fonts/truetype/ttf-indic-fonts-core/lohit_pa.ttf",
-    "/usr/share/fonts/truetype/ttf-indic-fonts-core/MuktiNarrow.ttf",
-  };
-  for (size_t i = 0; i < arraysize(fonts); ++i) {
-    if (access(fonts[i], R_OK)) {
-      LOG(FATAL) << "You are missing " << fonts[i] << ". "
-                 << "Try installing msttcorefonts. Also see "
-                 << "http://code.google.com/p/chromium/wiki/"
-                 << "LinuxBuildInstructions";
+  if (layout_test_mode) {
+    // fontconfig only knows how to load font config configs from a
+    // file name, so we write to a temp file.
+    base::StringPiece font_config_xml;
+    g_resource_data_pack->GetStringPiece(IDR_LINUX_FONT_CONFIG,
+                                         &font_config_xml);
+    FilePath fontconfig_path;
+    if (!file_util::CreateTemporaryFile(&fontconfig_path)) {
+      LOG(FATAL) << "failed to create temp font config file";
     }
-    if (!FcConfigAppFontAddFile(fontcfg, (FcChar8 *) fonts[i]))
-      LOG(FATAL) << "Failed to load font " << fonts[i];
-  }
-
-  // We special case these fonts because they're only needed in a few layout tests.
-  static const char* const optional_fonts[] = {
-    "/usr/share/fonts/truetype/ttf-lucida/LucidaSansRegular.ttf",
-    "/usr/share/fonts/truetype/kochi/kochi-gothic.ttf",
-    "/usr/share/fonts/truetype/kochi/kochi-mincho.ttf",
-    "/usr/share/fonts/truetype/ttf-dejavu/DejaVuSans.ttf",
-  };
-  for (size_t i = 0; i < arraysize(optional_fonts); ++i) {
-    const char* font = optional_fonts[i];
-    if (access(font, R_OK) < 0) {
-      LOG(WARNING) << "You are missing " << font << ". "
-                   << "Without this, some layout tests will fail."
-                   << "It's not a major problem.  See the build instructions "
-                   << "for more information on where to get all the data.";
-    } else {
-      if (!FcConfigAppFontAddFile(fontcfg, (FcChar8 *) font))
-        LOG(FATAL) << "Failed to load font " << font;
+    if (-1 == file_util::WriteFile(fontconfig_path,
+                                   font_config_xml.data(),
+                                   font_config_xml.length())) {
+      LOG(FATAL) << "failed to write temp font config file";
     }
-  }
 
-  // Also load the layout-test-specific "Ahem" font.
-  base::StringPiece ahem_font;
-  g_resource_data_pack->Get(IDR_AHEM_FONT, &ahem_font);
-  g_ahem_path = new FilePath;
-  if (!file_util::CreateTemporaryFile(g_ahem_path)) {
-    LOG(FATAL) << "failed to create temp ahem font";
-  }
-  if (-1 == file_util::WriteFile(*g_ahem_path, ahem_font.data(),
-                                 ahem_font.length())) {
-    LOG(FATAL) << "failed to write temp ahem font";
-  }
-  if (!FcConfigAppFontAddFile(fontcfg, FilePathAsFcChar(*g_ahem_path))) {
-    LOG(FATAL) << "Failed to load font " << g_ahem_path->value().c_str();
-  }
+    FcInit();
 
-  if (!FcConfigSetCurrent(fontcfg))
-    LOG(FATAL) << "Failed to set the default font configuration";
+    FcConfig* fontcfg = FcConfigCreate();
+    if (!FcConfigParseAndLoad(fontcfg, FilePathAsFcChar(fontconfig_path),
+                              true)) {
+      LOG(FATAL) << "Failed to parse fontconfig config file";
+    }
+    // We can delete the temp file after font config has parsed it.
+    file_util::Delete(fontconfig_path, false);
+
+    // This is the list of fonts that fontconfig will know about. It
+    // will try its best to match based only on the fonts here in. The
+    // paths are where these fonts are found on our Ubuntu boxes.
+    static const char *const fonts[] = {
+      "/usr/share/fonts/truetype/kochi/kochi-gothic.ttf",
+      "/usr/share/fonts/truetype/kochi/kochi-mincho.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Arial.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Arial_Bold_Italic.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Arial_Italic.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Comic_Sans_MS.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Comic_Sans_MS_Bold.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Courier_New.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Courier_New_Bold.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Courier_New_Bold_Italic.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Courier_New_Italic.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Georgia.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Georgia_Bold.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Georgia_Bold_Italic.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Georgia_Italic.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Impact.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Trebuchet_MS.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Trebuchet_MS_Bold.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Trebuchet_MS_Bold_Italic.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Trebuchet_MS_Italic.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman_Bold.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman_Bold_Italic.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman_Italic.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Verdana.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Verdana_Bold.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Verdana_Bold_Italic.ttf",
+      "/usr/share/fonts/truetype/msttcorefonts/Verdana_Italic.ttf",
+      // The DejaVuSans font is used by the LayoutTests/css2.1 tests
+      "/usr/share/fonts/truetype/ttf-dejavu/DejaVuSans.ttf",
+      "/usr/share/fonts/truetype/ttf-indic-fonts-core/lohit_ta.ttf",
+      "/usr/share/fonts/truetype/ttf-indic-fonts-core/lohit_pa.ttf",
+      "/usr/share/fonts/truetype/ttf-indic-fonts-core/MuktiNarrow.ttf",
+    };
+    for (size_t i = 0; i < arraysize(fonts); ++i) {
+      if (access(fonts[i], R_OK)) {
+        LOG(FATAL) << "You are missing " << fonts[i] << ". "
+                   << "Try installing msttcorefonts. Also see "
+                   << "http://code.google.com/p/chromium/wiki/"
+                   << "LinuxBuildInstructions";
+      }
+      if (!FcConfigAppFontAddFile(fontcfg, (FcChar8 *) fonts[i]))
+        LOG(FATAL) << "Failed to load font " << fonts[i];
+    }
+
+    // We special case these fonts because they're only needed in a
+    // few layout tests.
+    static const char* const optional_fonts[] = {
+      "/usr/share/fonts/truetype/ttf-lucida/LucidaSansRegular.ttf",
+    };
+    for (size_t i = 0; i < arraysize(optional_fonts); ++i) {
+      const char* font = optional_fonts[i];
+      if (access(font, R_OK) < 0) {
+        LOG(WARNING) << "You are missing " << font << ". "
+                     << "Without this, some layout tests will fail. "
+                     << "To get LucidaSansRegular, install sun-java6-fonts.  "
+                     << "FYI, this will also install a somewhat hefty JRE :)";
+      } else {
+        if (!FcConfigAppFontAddFile(fontcfg, (FcChar8 *) font))
+          LOG(FATAL) << "Failed to load font " << font;
+      }
+    }
+
+    // Also load the layout-test-specific "Ahem" font.
+    base::StringPiece ahem_font;
+    g_resource_data_pack->GetStringPiece(IDR_AHEM_FONT, &ahem_font);
+    g_ahem_path = new FilePath;
+    if (!file_util::CreateTemporaryFile(g_ahem_path)) {
+      LOG(FATAL) << "failed to create temp ahem font";
+    }
+    if (-1 == file_util::WriteFile(*g_ahem_path, ahem_font.data(),
+                                   ahem_font.length())) {
+      LOG(FATAL) << "failed to write temp ahem font";
+    }
+    if (!FcConfigAppFontAddFile(fontcfg, FilePathAsFcChar(*g_ahem_path))) {
+      LOG(FATAL) << "Failed to load font " << g_ahem_path->value().c_str();
+    }
+
+    if (!FcConfigSetCurrent(fontcfg))
+      LOG(FATAL) << "Failed to set the default font configuration";
+  }
 
   // Install an signal handler so we clean up after ourselves.
   signal(SIGINT, TerminationSignalHandler);
@@ -316,6 +320,10 @@ void TestShell::PlatformCleanUp() {
   }
 }
 
+void TestShell::EnableUIControl(UIControl control, bool is_enabled) {
+  // TODO(darin): Implement me.
+}
+
 bool TestShell::Initialize(const GURL& starting_url) {
   m_mainWnd = GTK_WINDOW(gtk_window_new(GTK_WINDOW_TOPLEVEL));
   gtk_window_set_title(m_mainWnd, "Test Shell");
@@ -339,22 +347,22 @@ bool TestShell::Initialize(const GURL& starting_url) {
   gtk_toolbar_set_style(GTK_TOOLBAR(toolbar), GTK_TOOLBAR_ICONS);
 
   GtkToolItem* back = gtk_tool_button_new_from_stock(GTK_STOCK_GO_BACK);
-  g_signal_connect(G_OBJECT(back), "clicked",
+  g_signal_connect(back, "clicked",
                    G_CALLBACK(BackButtonClicked), this);
   gtk_toolbar_insert(GTK_TOOLBAR(toolbar), back, -1 /* append */);
 
   GtkToolItem* forward = gtk_tool_button_new_from_stock(GTK_STOCK_GO_FORWARD);
-  g_signal_connect(G_OBJECT(forward), "clicked",
+  g_signal_connect(forward, "clicked",
                    G_CALLBACK(ForwardButtonClicked), this);
   gtk_toolbar_insert(GTK_TOOLBAR(toolbar), forward, -1 /* append */);
 
   GtkToolItem* reload = gtk_tool_button_new_from_stock(GTK_STOCK_REFRESH);
-  g_signal_connect(G_OBJECT(reload), "clicked",
+  g_signal_connect(reload, "clicked",
                    G_CALLBACK(ReloadButtonClicked), this);
   gtk_toolbar_insert(GTK_TOOLBAR(toolbar), reload, -1 /* append */);
 
   GtkToolItem* stop = gtk_tool_button_new_from_stock(GTK_STOCK_STOP);
-  g_signal_connect(G_OBJECT(stop), "clicked",
+  g_signal_connect(stop, "clicked",
                    G_CALLBACK(StopButtonClicked), this);
   gtk_toolbar_insert(GTK_TOOLBAR(toolbar), stop, -1 /* append */);
 
@@ -426,7 +434,7 @@ void TestShell::SizeTo(int width, int height) {
 
 static void AlarmHandler(int signatl) {
   // If the alarm alarmed, kill the process since we have a really bad hang.
-  puts("#TEST_TIMED_OUT\n");
+  puts("\n#TEST_TIMED_OUT\n");
   puts("#EOF\n");
   fflush(stdout);
   TestShell::ShutdownTestShell();
@@ -617,7 +625,7 @@ std::string TestShell::RewriteLocalUrl(const std::string& url) {
     FilePath replace_path;
     PathService::Get(base::DIR_SOURCE_ROOT, &replace_path);
     replace_path = replace_path.Append(
-        "webkit/data/layout_tests/LayoutTests/");
+        "third_party/WebKit/LayoutTests/");
     new_url = std::string("file://") + replace_path.value() +
         url.substr(kPrefixLen);
   }
@@ -637,7 +645,7 @@ void TestShell::ShowStartupDebuggingDialog() {
 // static
 base::StringPiece TestShell::NetResourceProvider(int key) {
   base::StringPiece res;
-  g_resource_data_pack->Get(key, &res);
+  g_resource_data_pack->GetStringPiece(key, &res);
   return res;
 }
 
@@ -647,7 +655,7 @@ namespace webkit_glue {
 
 string16 GetLocalizedString(int message_id) {
   base::StringPiece res;
-  if (!g_resource_data_pack->Get(message_id, &res)) {
+  if (!g_resource_data_pack->GetStringPiece(message_id, &res)) {
     LOG(FATAL) << "failed to load webkit string with id " << message_id;
   }
 

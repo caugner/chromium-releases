@@ -1,9 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "webkit/tools/test_shell/simple_appcache_system.h"
 
+#include "base/callback.h"
 #include "base/lock.h"
 #include "base/task.h"
 #include "base/waitable_event.h"
@@ -16,7 +17,34 @@ using WebKit::WebApplicationCacheHostClient;
 using appcache::WebApplicationCacheHostImpl;
 using appcache::AppCacheBackendImpl;
 using appcache::AppCacheInterceptor;
+using appcache::AppCacheThread;
 
+namespace appcache {
+
+// An impl of AppCacheThread we need to provide to the appcache lib.
+
+bool AppCacheThread::PostTask(
+    int id,
+    const tracked_objects::Location& from_here,
+    Task* task) {
+  if (SimpleAppCacheSystem::thread_provider()) {
+    return SimpleAppCacheSystem::thread_provider()->PostTask(
+        id, from_here, task);
+  }
+  scoped_ptr<Task> task_ptr(task);
+  MessageLoop* loop = SimpleAppCacheSystem::GetMessageLoop(id);
+  if (loop)
+    loop->PostTask(from_here, task_ptr.release());
+  return loop ? true : false;
+}
+
+bool AppCacheThread::CurrentlyOn(int id) {
+  if (SimpleAppCacheSystem::thread_provider())
+    return SimpleAppCacheSystem::thread_provider()->CurrentlyOn(id);
+  return MessageLoop::current() == SimpleAppCacheSystem::GetMessageLoop(id);
+}
+
+}  // namespace appcache
 
 // SimpleFrontendProxy --------------------------------------------------------
 // Proxies method calls from the backend IO thread to the frontend UI thread.
@@ -71,7 +99,13 @@ class SimpleFrontendProxy
       NOTREACHED();
   }
 
+  virtual void OnContentBlocked(int host_id) {}
+
  private:
+  friend class base::RefCountedThreadSafe<SimpleFrontendProxy>;
+
+  ~SimpleFrontendProxy() {}
+
   SimpleAppCacheSystem* system_;
 };
 
@@ -215,6 +249,10 @@ class SimpleBackendProxy
   }
 
  private:
+  friend class base::RefCountedThreadSafe<SimpleBackendProxy>;
+
+  ~SimpleBackendProxy() {}
+
   SimpleAppCacheSystem* system_;
   base::WaitableEvent event_;
   bool bool_result_;
@@ -239,21 +277,36 @@ SimpleAppCacheSystem::SimpleAppCacheSystem()
           backend_proxy_(new SimpleBackendProxy(this))),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           frontend_proxy_(new SimpleFrontendProxy(this))),
-      backend_impl_(NULL), service_(NULL) {
+      backend_impl_(NULL), service_(NULL), db_thread_("AppCacheDBThread"),
+      thread_provider_(NULL) {
   DCHECK(!instance_);
   instance_ = this;
+}
+
+static void SignalEvent(base::WaitableEvent* event) {
+  event->Signal();
 }
 
 SimpleAppCacheSystem::~SimpleAppCacheSystem() {
   DCHECK(!io_message_loop_ && !backend_impl_ && !service_);
   frontend_proxy_->clear_appcache_system();  // in case a task is in transit
   instance_ = NULL;
+
+  if (db_thread_.IsRunning()) {
+    // We pump a task thru the db thread to ensure any tasks previously
+    // scheduled on that thread have been performed prior to return.
+    base::WaitableEvent event(false, false);
+    db_thread_.message_loop()->PostTask(FROM_HERE,
+        NewRunnableFunction(&SignalEvent, &event));
+    event.Wait();
+  }
 }
 
 void SimpleAppCacheSystem::InitOnUIThread(
     const FilePath& cache_directory) {
   DCHECK(!ui_message_loop_);
-  DCHECK(!cache_directory.empty());
+  // TODO(michaeln): provide a cache_thread message loop
+  AppCacheThread::Init(DB_THREAD_ID, IO_THREAD_ID, NULL);
   ui_message_loop_ = MessageLoop::current();
   cache_directory_ = cache_directory;
 }
@@ -265,6 +318,9 @@ void SimpleAppCacheSystem::InitOnIOThread(URLRequestContext* request_context) {
   DCHECK(!io_message_loop_);
   io_message_loop_ = MessageLoop::current();
   io_message_loop_->AddDestructionObserver(this);
+
+  if (!db_thread_.IsRunning())
+    db_thread_.Start();
 
   // Recreate and initialize per each IO thread.
   service_ = new appcache::AppCacheService();
@@ -313,11 +369,11 @@ void SimpleAppCacheSystem::WillDestroyCurrentMessageLoop() {
   DCHECK(is_io_thread());
   DCHECK(backend_impl_->hosts().empty());
 
-  io_message_loop_ = NULL;
   delete backend_impl_;
   delete service_;
   backend_impl_ = NULL;
   service_ = NULL;
+  io_message_loop_ = NULL;
 
   // Just in case the main thread is waiting on it.
   backend_proxy_->SignalEvent();

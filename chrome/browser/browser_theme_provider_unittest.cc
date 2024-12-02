@@ -3,7 +3,10 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/browser_theme_provider.h"
+
 #include "testing/gtest/include/gtest/gtest.h"
+#include "base/values.h"
+#include "base/json/json_reader.h"
 
 TEST(BrowserThemeProviderTest, AlignmentConversion) {
   // Verify that we get out what we put in.

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/keyboard_codes.h"
 #include "base/logging.h"
+#include "views/controls/native/native_view_host.h"
 #include "views/controls/tabbed_pane/native_tabbed_pane_wrapper.h"
 
 namespace views {
@@ -113,6 +114,18 @@ void TabbedPane::Focus() {
   else
     View::Focus();  // Will focus the RootView window (so we still get keyboard
                     // messages).
+}
+
+void TabbedPane::PaintFocusBorder(gfx::Canvas* canvas) {
+  if (NativeViewHost::kRenderNativeControlFocus)
+    View::PaintFocusBorder(canvas);
+}
+
+bool TabbedPane::GetAccessibleRole(AccessibilityTypes::Role* role) {
+  DCHECK(role);
+
+  *role = AccessibilityTypes::ROLE_PAGETABLIST;
+  return true;
 }
 
 }  // namespace views

@@ -1,10 +1,12 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "webkit/glue/plugins/plugin_list.h"
+
 #include <tchar.h>
 
-#include "webkit/glue/plugins/plugin_list.h"
+#include <set>
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
@@ -86,7 +88,7 @@ void GetPluginsInRegistryDirectory(
 
     std::wstring path;
     if (key.ReadValue(kRegistryPath, &path))
-      plugin_dirs->insert(FilePath(path).DirName());
+      plugin_dirs->insert(FilePath(path));
   }
 }
 
@@ -115,11 +117,6 @@ void GetFirefoxDirectory(std::set<FilePath>* plugin_dirs) {
   for (unsigned int i = 0; i < paths.size(); ++i) {
     plugin_dirs->insert(paths[i].Append(L"plugins"));
   }
-
-  GetPluginsInRegistryDirectory(
-      HKEY_CURRENT_USER, kRegistryMozillaPlugins, plugin_dirs);
-  GetPluginsInRegistryDirectory(
-      HKEY_LOCAL_MACHINE, kRegistryMozillaPlugins, plugin_dirs);
 
   FilePath firefox_app_data_plugin_path;
   if (PathService::Get(base::DIR_APP_DATA, &firefox_app_data_plugin_path)) {
@@ -193,7 +190,6 @@ void GetJavaDirectory(std::set<FilePath>* plugin_dirs) {
     //    value under the Java version key.
     std::wstring java_plugin_directory;
     if (java_key.ReadValue(kRegistryJavaHome, &java_plugin_directory)) {
-
       // 4. The new plugin resides under the 'bin/new_plugin'
       //    subdirectory.
       DCHECK(!java_plugin_directory.empty());
@@ -206,10 +202,9 @@ void GetJavaDirectory(std::set<FilePath>* plugin_dirs) {
   }
 }
 
-}
+}  // anonymous namespace
 
-namespace NPAPI
-{
+namespace NPAPI {
 
 void PluginList::PlatformInit() {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
@@ -244,7 +239,8 @@ void PluginList::GetPluginDirectories(std::vector<FilePath>* plugin_dirs) {
 }
 
 void PluginList::LoadPluginsFromDir(const FilePath &path,
-                                    std::vector<WebPluginInfo>* plugins) {
+                                    std::vector<WebPluginInfo>* plugins,
+                                    std::set<FilePath>* visited_plugins) {
   WIN32_FIND_DATA find_file_data;
   HANDLE find_handle;
 
@@ -260,11 +256,29 @@ void PluginList::LoadPluginsFromDir(const FilePath &path,
     if (!(find_file_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
       FilePath filename = path.Append(find_file_data.cFileName);
       LoadPlugin(filename, plugins);
+      visited_plugins->insert(filename);
     }
   } while (FindNextFile(find_handle, &find_file_data) != 0);
 
   DCHECK(GetLastError() == ERROR_NO_MORE_FILES);
   FindClose(find_handle);
+}
+
+void PluginList::LoadPluginsFromRegistry(
+    std::vector<WebPluginInfo>* plugins,
+    std::set<FilePath>* visited_plugins) {
+  std::set<FilePath> plugin_dirs;
+
+  GetPluginsInRegistryDirectory(
+      HKEY_CURRENT_USER, kRegistryMozillaPlugins, &plugin_dirs);
+  GetPluginsInRegistryDirectory(
+      HKEY_LOCAL_MACHINE, kRegistryMozillaPlugins, &plugin_dirs);
+
+  for (std::set<FilePath>::iterator i = plugin_dirs.begin();
+       i != plugin_dirs.end(); ++i) {
+    LoadPlugin(*i, plugins);
+    visited_plugins->insert(*i);
+  }
 }
 
 // Compares Windows style version strings (i.e. 1,2,3,4).  Returns true if b's
@@ -317,6 +331,21 @@ bool PluginList::ShouldLoadPlugin(const WebPluginInfo& info,
   if (filename == kWanWangProtocolHandlerPlugin)
     return false;
 
+  // We only work with newer versions of the Java plugin which use NPAPI only
+  // and don't depend on XPCOM.
+  if (filename == kJavaPlugin1 || filename == kJavaPlugin2) {
+    std::vector<std::wstring> ver;
+    SplitString(info.version, '.', &ver);
+    int major, minor, update;
+    if (ver.size() == 4 &&
+        StringToInt(ver[0], &major) &&
+        StringToInt(ver[1], &minor) &&
+        StringToInt(ver[2], &update)) {
+      if (major == 6 && minor == 0 && update < 120)
+        return false;  // Java SE6 Update 11 or older.
+    }
+  }
+
   // Special WMP handling
 
   // If both the new and old WMP plugins exist, only load the new one.
@@ -340,4 +369,4 @@ bool PluginList::ShouldLoadPlugin(const WebPluginInfo& info,
   return true;
 }
 
-} // namespace NPAPI
+}  // namespace NPAPI

@@ -1,3 +1,7 @@
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #include <dirent.h>
 #include <map>
 
@@ -16,13 +20,24 @@ SecureMem::Args* Sandbox::getSecureMem() {
   if (!secureMemPool_.empty()) {
     SecureMem::Args* rc = secureMemPool_.back();
     secureMemPool_.pop_back();
+    memset(rc->scratchPage, 0, sizeof(rc->scratchPage));
     return rc;
   }
   return NULL;
 }
 
-void Sandbox::trustedProcess(int parentProc, int processFdPub, int sandboxFd,
+void Sandbox::trustedProcess(int parentMapsFd, int processFdPub, int sandboxFd,
                              int cloneFd, SecureMem::Args* secureArena) {
+  // The trusted process doesn't have access to TLS. Zero out the segment
+  // registers so that we can later test that we are in the trusted process.
+  #if defined(__x86_64__)
+  asm volatile("mov %0, %%gs\n" : : "r"(0));
+  #elif defined(__i386__)
+  asm volatile("mov %0, %%fs\n" : : "r"(0));
+  #else
+  #error Unsupported target platform
+  #endif
+
   std::map<long long, struct Thread> threads;
   SysCalls  sys;
   long long cookie               = 0;
@@ -99,7 +114,7 @@ newThreadCreated:
 
     // Dispatch system call to handler function. Treat both exit() and clone()
     // specially.
-    if (syscallTable[header.sysnum].trustedProcess(parentProc,
+    if (syscallTable[header.sysnum].trustedProcess(parentMapsFd,
                                                    sandboxFd,
                                                    currentThread->fdPub,
                                                    currentThread->fd,
@@ -117,7 +132,7 @@ newThreadCreated:
   }
 }
 
-void Sandbox::initializeProtectedMap(int fd) {
+int Sandbox::initializeProtectedMap(int fd) {
   int mapsFd;
   if (!getFd(fd, &mapsFd, NULL, NULL, NULL)) {
  maps_failure:
@@ -152,8 +167,6 @@ void Sandbox::initializeProtectedMap(int fd) {
     }
     truncated = strchr(line, '\n') == NULL;
   }
-  SysCalls sys;
-  NOINTR_SYS(sys.close(mapsFd));
 
   // Prevent low address memory allocations. Some buggy kernels allow those
   if (protectedMap_[0] < (64 << 10)) {
@@ -161,9 +174,12 @@ void Sandbox::initializeProtectedMap(int fd) {
   }
 
   // Let the sandbox know that we are done parsing the memory map.
+  SysCalls sys;
   if (write(sys, fd, &mapsFd, sizeof(mapsFd)) != sizeof(mapsFd)) {
     goto maps_failure;
   }
+
+  return mapsFd;
 }
 
 SecureMem::Args* Sandbox::createTrustedProcess(int processFdPub, int sandboxFd,
@@ -189,13 +205,6 @@ SecureMem::Args* Sandbox::createTrustedProcess(int processFdPub, int sandboxFd,
   syscall_mutex_ = 0x80000000;
 
 
-  // Hold on to a file handle in the parent's process directory. We can use
-  // this later to reliably tell if the parent died.
-  int parentProc               = open("/proc/self/", O_RDONLY|O_DIRECTORY);
-  if (parentProc < 0) {
-    die("Failed to access /proc/self");
-  }
-
   // Create a trusted process that can evaluate system call parameters and
   // decide whether a system call should execute. This process runs outside of
   // the seccomp sandbox. It communicates with the sandbox'd process through
@@ -211,7 +220,7 @@ SecureMem::Args* Sandbox::createTrustedProcess(int processFdPub, int sandboxFd,
       // If we don't know the list of our open file handles, just try closing
       // all valid ones.
       for (int fd = sysconf(_SC_OPEN_MAX); --fd > 2; ) {
-        if (fd != parentProc && fd != sandboxFd && fd != cloneFd) {
+        if (fd != sandboxFd && fd != cloneFd) {
           close(fd);
         }
       }
@@ -224,8 +233,7 @@ SecureMem::Args* Sandbox::createTrustedProcess(int processFdPub, int sandboxFd,
           continue;
         int fd                 = atoi(res->d_name);
         if (fd > 2 &&
-            fd != parentProc && fd != sandboxFd && fd != cloneFd &&
-            fd != dirfd(dir)) {
+            fd != sandboxFd && fd != cloneFd && fd != dirfd(dir)) {
           close(fd);
         }
       }
@@ -241,15 +249,15 @@ SecureMem::Args* Sandbox::createTrustedProcess(int processFdPub, int sandboxFd,
       #endif
     }
 
-    initializeProtectedMap(sandboxFd);
-    trustedProcess(parentProc, processFdPub, sandboxFd, cloneFd, secureArena);
+    int parentMapsFd           = initializeProtectedMap(sandboxFd);
+    trustedProcess(parentMapsFd, processFdPub, sandboxFd,
+                   cloneFd, secureArena);
     die();
   }
 
   // We are still in the untrusted code. Deny access to restricted resources.
   mprotect(secureArena, 8192*kMaxThreads, PROT_NONE);
   mprotect(&syscall_mutex_, 4096, PROT_NONE);
-  close(parentProc);
   close(sandboxFd);
 
   return secureArena;

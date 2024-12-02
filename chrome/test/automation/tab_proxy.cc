@@ -77,13 +77,6 @@ AutomationMsg_NavigationResponseValues TabProxy::NavigateToURL(
 AutomationMsg_NavigationResponseValues
     TabProxy::NavigateToURLBlockUntilNavigationsComplete(
         const GURL& url, int number_of_navigations) {
-  return NavigateToURLWithTimeout(url, number_of_navigations, base::kNoTimeout,
-                                  NULL);
-}
-
-AutomationMsg_NavigationResponseValues TabProxy::NavigateToURLWithTimeout(
-    const GURL& url, int number_of_navigations, uint32 timeout_ms,
-    bool* is_timeout) {
   if (!is_valid())
     return AUTOMATION_MSG_NAVIGATION_ERROR;
 
@@ -93,15 +86,11 @@ AutomationMsg_NavigationResponseValues TabProxy::NavigateToURLWithTimeout(
   if (number_of_navigations == 1) {
     // TODO(phajdan.jr): Remove when the reference build gets updated.
     // This is only for backwards compatibility.
-    sender_->SendWithTimeout(
-        new AutomationMsg_NavigateToURL(
-            0, handle_, url, &navigate_response),
-            timeout_ms, is_timeout);
+    sender_->Send(new AutomationMsg_NavigateToURL(0, handle_, url,
+                                                  &navigate_response));
   } else {
-    sender_->SendWithTimeout(
-        new AutomationMsg_NavigateToURLBlockUntilNavigationsComplete(
-            0, handle_, url, number_of_navigations, &navigate_response),
-            timeout_ms, is_timeout);
+    sender_->Send(new AutomationMsg_NavigateToURLBlockUntilNavigationsComplete(
+        0, handle_, url, number_of_navigations, &navigate_response));
   }
 
   return navigate_response;
@@ -352,8 +341,17 @@ bool TabProxy::ExecuteAndExtractValue(const std::wstring& frame_xpath,
   json.append("]");
 
   JSONStringValueSerializer deserializer(json);
-  *value = deserializer.Deserialize(NULL);
+  *value = deserializer.Deserialize(NULL, NULL);
   return *value != NULL;
+}
+
+bool TabProxy::SetEnableExtensionAutomation(
+    const std::vector<std::string>& functions_enabled) {
+  if (!is_valid())
+    return false;
+
+  return sender_->Send(new AutomationMsg_SetEnableExtensionAutomation(
+      0, handle_, functions_enabled));
 }
 
 bool TabProxy::GetConstrainedWindowCount(int* count) const {
@@ -461,15 +459,17 @@ bool TabProxy::GetDownloadDirectory(FilePath* directory) {
                                                            directory));
 }
 
-bool TabProxy::ShowInterstitialPage(const std::string& html_text,
-                                    int timeout_ms) {
+bool TabProxy::ShowInterstitialPage(const std::string& html_text) {
   if (!is_valid())
     return false;
 
   AutomationMsg_NavigationResponseValues result =
       AUTOMATION_MSG_NAVIGATION_ERROR;
-  sender_->SendWithTimeout(new AutomationMsg_ShowInterstitialPage(
-      0, handle_, html_text, &result), timeout_ms, NULL);
+  if (!sender_->Send(new AutomationMsg_ShowInterstitialPage(
+                         0, handle_, html_text, &result))) {
+    return false;
+  }
+
   return result == AUTOMATION_MSG_NAVIGATION_SUCCESS;
 }
 
@@ -507,11 +507,12 @@ bool TabProxy::ProcessUnhandledAccelerator(const MSG& msg) {
 }
 #endif  // defined(OS_WIN)
 
-bool TabProxy::SetInitialFocus(bool reverse) {
+bool TabProxy::SetInitialFocus(bool reverse, bool restore_focus_to_view) {
   if (!is_valid())
     return false;
   return sender_->Send(
-      new AutomationMsg_SetInitialFocus(0, handle_, reverse));
+      new AutomationMsg_SetInitialFocus(0, handle_, reverse,
+                                        restore_focus_to_view));
   // This message expects no response
 }
 
@@ -602,22 +603,34 @@ void TabProxy::HandleMessageFromExternalHost(const std::string& message,
   DCHECK(succeeded);
 }
 
-bool TabProxy::GetSSLInfoBarCount(int* count) {
+bool TabProxy::GetInfoBarCount(int* count) {
   if (!is_valid())
     return false;
 
-  return sender_->Send(new AutomationMsg_GetSSLInfoBarCount(0, handle_,
-                                                            count));
+  return sender_->Send(new AutomationMsg_GetInfoBarCount(0, handle_, count));
 }
 
-bool TabProxy::ClickSSLInfoBarLink(int info_bar_index,
-                                   bool wait_for_navigation) {
+bool TabProxy::WaitForInfoBarCount(int target_count, int wait_timeout) {
+  int intervals = std::min(wait_timeout/automation::kSleepTime, 1);
+  for (int i = 0; i < intervals; ++i) {
+    PlatformThread::Sleep(automation::kSleepTime);
+    int new_count = -1;
+    if (!GetInfoBarCount(&new_count))
+      return false;
+    if (target_count == new_count)
+      return true;
+  }
+  return false;
+}
+
+bool TabProxy::ClickInfoBarAccept(int info_bar_index,
+                                  bool wait_for_navigation) {
   if (!is_valid())
     return false;
 
   AutomationMsg_NavigationResponseValues result =
       AUTOMATION_MSG_NAVIGATION_ERROR;
-  sender_->Send(new AutomationMsg_ClickSSLInfoBarLink(
+  sender_->Send(new AutomationMsg_ClickInfoBarAccept(
       0, handle_, info_bar_index, wait_for_navigation, &result));
   return result == AUTOMATION_MSG_NAVIGATION_SUCCESS ||
       result == AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED;
@@ -669,7 +682,6 @@ bool TabProxy::OverrideEncoding(const std::string& encoding) {
 void TabProxy::Reposition(HWND window, HWND window_insert_after, int left,
                           int top, int width, int height, int flags,
                           HWND parent_window) {
-
   IPC::Reposition_Params params = {0};
   params.window = window;
   params.window_insert_after = window_insert_after;
@@ -686,6 +698,10 @@ void TabProxy::Reposition(HWND window, HWND window_insert_after, int left,
 void TabProxy::SendContextMenuCommand(int selected_command) {
   sender_->Send(new AutomationMsg_ForwardContextMenuCommandToChrome(
       0, handle_, selected_command));
+}
+
+void TabProxy::OnHostMoved() {
+  sender_->Send(new AutomationMsg_BrowserMove(0, handle_));
 }
 #endif  // defined(OS_WIN)
 
@@ -713,6 +729,10 @@ void TabProxy::StopAsync() {
   sender_->Send(new AutomationMsg_StopAsync(0, handle_));
 }
 
+void TabProxy::SaveAsAsync() {
+  sender_->Send(new AutomationMsg_SaveAsAsync(0, handle_));
+}
+
 void TabProxy::AddObserver(TabProxyDelegate* observer) {
   AutoLock lock(list_lock_);
   observers_list_.AddObserver(observer);
@@ -728,4 +748,9 @@ void TabProxy::OnMessageReceived(const IPC::Message& message) {
   AutoLock lock(list_lock_);
   FOR_EACH_OBSERVER(TabProxyDelegate, observers_list_,
                     OnMessageReceived(this, message));
+}
+
+void TabProxy::OnChannelError() {
+  AutoLock lock(list_lock_);
+  FOR_EACH_OBSERVER(TabProxyDelegate, observers_list_, OnChannelError(this));
 }

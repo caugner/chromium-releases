@@ -1,10 +1,10 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/base/mock_ffmpeg.h"
 #include "media/base/mock_filters.h"
-#include "media/filters/ffmpeg_common.h"
+#include "media/ffmpeg/ffmpeg_common.h"
 #include "media/filters/ffmpeg_glue.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -35,10 +35,20 @@ class MockProtocol : public FFmpegURLProtocol {
 class FFmpegGlueTest : public ::testing::Test {
  public:
   FFmpegGlueTest() {
-    MockFFmpeg::set(&mock_ffmpeg_);
   }
 
-  virtual ~FFmpegGlueTest() {
+  virtual void SetUp() {
+    MockFFmpeg::set(&mock_ffmpeg_);
+
+    // Singleton should initialize FFmpeg.
+    CHECK(FFmpegGlue::get());
+
+    // Assign our static copy of URLProtocol for the rest of the tests.
+    protocol_ = MockFFmpeg::protocol();
+    CHECK(protocol_);
+  }
+
+  virtual void TearDown() {
     MockFFmpeg::set(NULL);
   }
 
@@ -67,13 +77,6 @@ class FFmpegGlueTest : public ::testing::Test {
 URLProtocol* FFmpegGlueTest::protocol_ = NULL;
 
 TEST_F(FFmpegGlueTest, InitializeFFmpeg) {
-  // Singleton should initialize FFmpeg.
-  FFmpegGlue* glue = FFmpegGlue::get();
-  EXPECT_TRUE(glue);
-
-  // Assign our static copy of URLProtocol for the rest of the tests.
-  protocol_ = MockFFmpeg::protocol();
-
   // Make sure URLProtocol was filled out correctly.
   EXPECT_STREQ("http", protocol_->name);
   EXPECT_TRUE(protocol_->url_close);

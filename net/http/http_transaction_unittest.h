@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <string>
 
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
@@ -33,6 +34,10 @@ enum {
   TEST_MODE_SYNC_NET_READ  = 1 << 1,
   TEST_MODE_SYNC_CACHE_START = 1 << 2,
   TEST_MODE_SYNC_CACHE_READ  = 1 << 3,
+  TEST_MODE_SYNC_CACHE_WRITE  = 1 << 4,
+  TEST_MODE_SYNC_ALL = TEST_MODE_SYNC_NET_START | TEST_MODE_SYNC_NET_READ |
+                       TEST_MODE_SYNC_CACHE_START | TEST_MODE_SYNC_CACHE_READ |
+                       TEST_MODE_SYNC_CACHE_WRITE
 };
 
 typedef void (*MockTransactionHandler)(const net::HttpRequestInfo* request,
@@ -114,9 +119,10 @@ class TestTransactionConsumer : public CallbackRunner< Tuple1<int> > {
   ~TestTransactionConsumer() {
   }
 
-  void Start(const net::HttpRequestInfo* request, net::LoadLog* load_log) {
+  void Start(const net::HttpRequestInfo* request,
+             const net::BoundNetLog& net_log) {
     state_ = STARTING;
-    int result = trans_->Start(request, this, load_log);
+    int result = trans_->Start(request, this, net_log);
     if (result != net::ERR_IO_PENDING)
       DidStart(result);
   }
@@ -207,7 +213,7 @@ class MockNetworkTransaction : public net::HttpTransaction {
 
   virtual int Start(const net::HttpRequestInfo* request,
                     net::CompletionCallback* callback,
-                    net::LoadLog* load_log) {
+                    const net::BoundNetLog& net_log) {
     const MockTransaction* t = FindMockTransaction(request->url);
     if (!t)
       return net::ERR_FAILED;
@@ -277,6 +283,8 @@ class MockNetworkTransaction : public net::HttpTransaction {
     CallbackLater(callback, num);
     return net::ERR_IO_PENDING;
   }
+
+  virtual void StopCaching() {}
 
   virtual const net::HttpResponseInfo* GetResponseInfo() const {
     return &response_;

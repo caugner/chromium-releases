@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,16 @@
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/gtk/gtk_chrome_link_button.h"
+#include "chrome/browser/gtk/gtk_util.h"
+#include "chrome/browser/importer/importer_data_types.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/shell_integration.h"
-#include "chrome/common/gtk_util.h"
 #include "chrome/common/platform_util.h"
 #include "chrome/installer/util/google_update_settings.h"
+#include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "grit/google_chrome_strings.h"
 #include "grit/locale_settings.h"
 
 #if defined(USE_LINUX_BREAKPAD)
@@ -36,7 +38,7 @@ bool FirstRunDialog::Show(Profile* profile,
   // but that spins a nested message loop and hoses us.  :(
   // http://code.google.com/p/chromium/issues/detail?id=12552
   // Instead, run a loop and extract the response manually.
-  g_signal_connect(G_OBJECT(first_run->dialog_), "response",
+  g_signal_connect(first_run->dialog_, "response",
                    G_CALLBACK(HandleOnResponseDialog), first_run);
   gtk_widget_show_all(first_run->dialog_);
   MessageLoop::current()->Run();
@@ -60,16 +62,19 @@ FirstRunDialog::FirstRunDialog(Profile* profile, int& response)
       l10n_util::GetStringUTF8(IDS_FIRSTRUN_DLG_OK).c_str(),
       GTK_STOCK_APPLY, GTK_RESPONSE_ACCEPT);
 
+  // Normally we would do the following:
+  //   gtk_widget_realize(dialog_);
+  //   gtk_util::SetWindowSizeFromResources(GTK_WINDOW(dialog_),
+  //                                        IDS_FIRSTRUN_DIALOG_WIDTH_CHARS,
+  //                                        -1,
+  //                                        false);  // resizable
+  // But because the first run dialog has extra widgets in Windows, the
+  // resources specify a dialog that is way too big.  So instead in just this
+  // one case we let GTK size the dialog itself and just mark it non-resizable
+  // manually:
   gtk_window_set_resizable(GTK_WINDOW(dialog_), FALSE);
 
-  gtk_widget_realize(dialog_);
-  int width, height;
-  gtk_util::GetWidgetSizeFromResources(dialog_,
-                                       IDS_FIRSTRUN_DIALOG_WIDTH_CHARS,
-                                       IDS_FIRSTRUN_DIALOG_HEIGHT_LINES,
-                                       &width, &height);
-  gtk_window_set_default_size(GTK_WINDOW(dialog_), width, height);
-  g_signal_connect(G_OBJECT(dialog_), "delete-event",
+  g_signal_connect(dialog_, "delete-event",
                    G_CALLBACK(gtk_widget_hide_on_delete), NULL);
 
   GtkWidget* content_area = GTK_DIALOG(dialog_)->vbox;
@@ -165,7 +170,8 @@ void FirstRunDialog::OnDialogResponse(GtkWidget* widget, int response) {
       const ProfileInfo& source_profile =
           importer_host_->GetSourceProfileInfoAt(
           gtk_combo_box_get_active(GTK_COMBO_BOX(import_profile_)));
-      int items = SEARCH_ENGINES + HISTORY + FAVORITES + HOME_PAGE + PASSWORDS;
+      int items = importer::SEARCH_ENGINES + importer::HISTORY +
+          importer::FAVORITES + importer::HOME_PAGE + importer::PASSWORDS;
       // TODO(port): Should we do the actual import in a new process like
       // Windows?
       StartImportingWithUI(GTK_WINDOW(dialog_), items, importer_host_.get(),

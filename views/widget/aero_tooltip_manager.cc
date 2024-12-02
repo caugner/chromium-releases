@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,8 @@
 #include <shlobj.h>
 
 #include "app/l10n_util_win.h"
-#include "base/gfx/point.h"
 #include "base/message_loop.h"
+#include "gfx/point.h"
 
 namespace views {
 
@@ -33,11 +33,16 @@ void AeroTooltipManager::OnMouse(UINT u_msg, WPARAM w_param, LPARAM l_param) {
 
   if (u_msg == WM_MOUSEMOVE || u_msg == WM_NCMOUSEMOVE) {
     gfx::Point mouse_pos(l_param);
-    if (last_mouse_x_ != mouse_pos.x() || last_mouse_y_ != mouse_pos.y()) {
-      last_mouse_x_ = mouse_pos.x();
-      last_mouse_y_ = mouse_pos.y();
+    if (u_msg == WM_NCMOUSEMOVE) {
+      // NC message coordinates are in screen coordinates.
+      POINT temp = mouse_pos.ToPOINT();
+      ::MapWindowPoints(HWND_DESKTOP, GetParent(), &temp, 1);
+      mouse_pos.SetPoint(temp.x, temp.y);
+    }
+    if (last_mouse_pos_ != mouse_pos) {
+      last_mouse_pos_ = mouse_pos;
       HideKeyboardTooltip();
-      UpdateTooltip(mouse_pos.x(), mouse_pos.y());
+      UpdateTooltip(mouse_pos);
     }
 
     // Delay opening of the tooltip just in case the user moves their
@@ -47,7 +52,8 @@ void AeroTooltipManager::OnMouse(UINT u_msg, WPARAM w_param, LPARAM l_param) {
       initial_delay_ = static_cast<int>(
           ::SendMessage(tooltip_hwnd_, TTM_GETDELAYTIME, TTDT_INITIAL, 0));
     }
-    initial_timer_ = new InitialTimer(this, initial_delay_);
+    initial_timer_ = new InitialTimer(this);
+    initial_timer_->Start(initial_delay_);
   } else {
     // Hide the tooltip and cancel any timers.
     ::SendMessage(tooltip_hwnd_, TTM_POP, 0, 0);
@@ -57,7 +63,7 @@ void AeroTooltipManager::OnMouse(UINT u_msg, WPARAM w_param, LPARAM l_param) {
 }
 
 void AeroTooltipManager::OnMouseLeave() {
-  last_mouse_x_ = last_mouse_y_ = -1;
+  last_mouse_pos_.SetPoint(-1, -1);
   UpdateTooltip();
 }
 
@@ -92,9 +98,7 @@ void AeroTooltipManager::Init() {
 void AeroTooltipManager::OnTimer() {
   initial_timer_ = NULL;
 
-  POINT pt;
-  pt.x = last_mouse_x_;
-  pt.y = last_mouse_y_;
+  POINT pt = last_mouse_pos_.ToPOINT();
   ::ClientToScreen(GetParent(), &pt);
 
   // Set the position and visibility.
@@ -108,8 +112,11 @@ void AeroTooltipManager::OnTimer() {
 ///////////////////////////////////////////////////////////////////////////////
 // AeroTooltipManager::InitialTimer
 
-AeroTooltipManager::InitialTimer::InitialTimer(AeroTooltipManager* manager,
-                                               int time) : manager_(manager) {
+AeroTooltipManager::InitialTimer::InitialTimer(AeroTooltipManager* manager)
+    : manager_(manager) {
+}
+
+void AeroTooltipManager::InitialTimer::Start(int time) {
   MessageLoop::current()->PostDelayedTask(FROM_HERE, NewRunnableMethod(
       this, &InitialTimer::Execute), time);
 }

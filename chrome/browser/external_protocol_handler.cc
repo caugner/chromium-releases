@@ -14,8 +14,8 @@
 #include "base/thread.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/browser_process_impl.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/common/platform_util.h"
-#include "chrome/common/pref_service.h"
 #include "chrome/common/pref_names.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
@@ -145,15 +145,11 @@ void ExternalProtocolHandler::LaunchUrl(const GURL& url,
   g_accept_requests = false;
 
   if (block_state == UNKNOWN) {
-#if defined(OS_WIN) || defined(TOOLKIT_GTK) || defined(OS_MACOSX)
     // Ask the user if they want to allow the protocol. This will call
     // LaunchUrlWithoutSecurityCheck if the user decides to accept the protocol.
     RunExternalProtocolDialog(escaped_url,
                               render_process_host_id,
                               tab_contents_id);
-#endif
-    // For now, allow only whitelisted protocols to fire on Linux/Views.
-    // See http://crbug.com/23853 .
     return;
   }
 

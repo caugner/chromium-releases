@@ -5,7 +5,7 @@
 #ifndef VIEWS_CONTROLS_BUTTON_TEXT_BUTTON_H_
 #define VIEWS_CONTROLS_BUTTON_TEXT_BUTTON_H_
 
-#include "app/gfx/font.h"
+#include "gfx/font.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "views/border.h"
@@ -36,7 +36,7 @@ class TextButtonBorder : public Border {
   // Returns the insets for the border.
   virtual void GetInsets(gfx::Insets* insets) const;
 
- private:
+ protected:
   // Images
   struct MBBImageSet {
     SkBitmap* top_left;
@@ -52,6 +52,10 @@ class TextButtonBorder : public Border {
   MBBImageSet hot_set_;
   MBBImageSet pushed_set_;
 
+  virtual void Paint(const View& view, gfx::Canvas* canvas,
+      const MBBImageSet& set) const;
+
+ private:
   DISALLOW_COPY_AND_ASSIGN(TextButtonBorder);
 };
 
@@ -87,6 +91,19 @@ class TextButton : public CustomButton {
   // Sets the icon.
   void SetIcon(const SkBitmap& icon);
   SkBitmap icon() const { return icon_; }
+  void SetHoverIcon(const SkBitmap& icon);
+  SkBitmap icon_hover() const { return icon_hover_; }
+
+  // Meanings are reversed for right-to-left layouts.
+  enum IconPlacement {
+    ICON_ON_LEFT,
+    ICON_ON_RIGHT
+  };
+
+  IconPlacement icon_placement() { return icon_placement_; }
+  void set_icon_placement(IconPlacement icon_placement) {
+    icon_placement_ = icon_placement;
+  }
 
   // TextButton remembers the maximum display size of the text passed to
   // SetText. This method resets the cached maximum display size to the
@@ -98,6 +115,8 @@ class TextButton : public CustomButton {
   void SetEnabledColor(SkColor color);
   void SetDisabledColor(SkColor color);
   void SetHighlightColor(SkColor color);
+  void SetHoverColor(SkColor color);
+  void SetNormalHasBorder(bool normal_has_border);
 
   // Paint the button into the specified canvas. If |for_drag| is true, the
   // function paints a drag image representation into the canvas.
@@ -112,6 +131,7 @@ class TextButton : public CustomButton {
   static const SkColor kEnabledColor;
   static const SkColor kHighlightColor;
   static const SkColor kDisabledColor;
+  static const SkColor kHoverColor;
 
  protected:
   virtual bool OnMousePressed(const MouseEvent& e);
@@ -135,6 +155,9 @@ class TextButton : public CustomButton {
   // The alignment of the text string within the button.
   TextAlignment alignment_;
 
+  // The position of the icon.
+  IconPlacement icon_placement_;
+
   // The font used to paint the text.
   gfx::Font font_;
 
@@ -145,13 +168,21 @@ class TextButton : public CustomButton {
   SkColor color_enabled_;
   SkColor color_disabled_;
   SkColor color_highlight_;
+  SkColor color_hover_;
 
   // An icon displayed with the text.
   SkBitmap icon_;
 
+  // An optional different version of the icon for hover state.
+  SkBitmap icon_hover_;
+  bool has_hover_icon_;
+
   // The width of the button will never be larger than this value. A value <= 0
   // indicates the width is not constrained.
   int max_width_;
+
+  // This is true if normal state has a border frame; default is false.
+  bool normal_has_border_;
 
   DISALLOW_COPY_AND_ASSIGN(TextButton);
 };

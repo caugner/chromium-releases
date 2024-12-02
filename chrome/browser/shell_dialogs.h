@@ -8,10 +8,10 @@
 #include <string>
 #include <vector>
 
-#include "app/gfx/native_widget_types.h"
 #include "base/file_path.h"
 #include "base/ref_counted.h"
 #include "base/string16.h"
+#include "gfx/native_widget_types.h"
 
 namespace gfx {
 class Font;
@@ -41,8 +41,6 @@ class SelectFileDialog
     SELECT_OPEN_MULTI_FILE
   };
 
-  virtual ~SelectFileDialog() {}
-
   // An interface implemented by a Listener object wishing to know about the
   // the result of the Select File/Folder action. These callbacks must be
   // re-entrant.
@@ -58,12 +56,12 @@ class SelectFileDialog
     // Notifies the Listener that many files have been selected. The
     // files are in |files|. |params| is contextual passed to SelectFile.
     virtual void MultiFilesSelected(
-      const std::vector<FilePath>& files, void* params) {};
+      const std::vector<FilePath>& files, void* params) {}
 
     // Notifies the Listener that the file/folder selection was aborted (via
     // the  user canceling or closing the selection dialog box, for example).
     // |params| is contextual passed to SelectFile.
-    virtual void FileSelectionCanceled(void* params) {};
+    virtual void FileSelectionCanceled(void* params) {}
   };
 
   // Creates a dialog box helper. This object is ref-counted, but the returned
@@ -117,14 +115,18 @@ class SelectFileDialog
                           const FilePath::StringType& default_extension,
                           gfx::NativeWindow owning_window,
                           void* params) = 0;
+
+ protected:
+  friend class base::RefCountedThreadSafe<SelectFileDialog>;
+
+  virtual ~SelectFileDialog() {}
 };
 
 // Shows a dialog box for selecting a font.
 class SelectFontDialog
-    : public base::RefCountedThreadSafe<SelectFileDialog>,
+    : public base::RefCountedThreadSafe<SelectFontDialog>,
       public BaseShellDialog {
  public:
-  virtual ~SelectFontDialog() {}
 
   // An interface implemented by a Listener object wishing to know about the
   // the result of the Select Font action. These callbacks must be
@@ -133,13 +135,13 @@ class SelectFontDialog
    public:
     // Notifies the Listener that a font selection has been made. The font
     // details are supplied in |font|. |params| is contextual passed to
-    // SelectFile.
+    // SelectFont.
     virtual void FontSelected(const gfx::Font& font, void* params) = 0;
 
     // Notifies the Listener that the font selection was aborted (via the user
     // canceling or closing the selection dialog box, for example). |params| is
-    // contextual passed to SelectFile.
-    virtual void FontSelectionCanceled(void* params) {};
+    // contextual passed to SelectFont.
+    virtual void FontSelectionCanceled(void* params) {}
   };
 
   // Creates a dialog box helper. This object is ref-counted, but the returned
@@ -167,6 +169,11 @@ class SelectFontDialog
                           void* params,
                           const std::wstring& font_name,
                           int font_size) = 0;
+
+ protected:
+  friend class base::RefCountedThreadSafe<SelectFontDialog>;
+
+  virtual ~SelectFontDialog() {}
 };
 
 #endif  // CHROME_BROWSER_SHELL_DIALOGS_H_

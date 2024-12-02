@@ -276,8 +276,8 @@ int SQLStatement::prepare(sqlite3* db, const char* sql, int sql_len) {
   DCHECK(!stmt_);
   int rv = sqlite3_prepare_v2(db, sql, sql_len, &stmt_, NULL);
   if (rv != SQLITE_OK) {
-   SQLErrorHandler* error_handler = GetErrorHandlerFactory()->Make();
-   return error_handler->HandleError(rv, db_handle());
+    SQLErrorHandler* error_handler = GetErrorHandlerFactory()->Make();
+    return error_handler->HandleError(rv, db);
   }
   return rv;
 }
@@ -473,6 +473,20 @@ std::string SQLStatement::column_string(int index) {
 const char16* SQLStatement::column_text16(int index) {
   DCHECK(stmt_);
   return static_cast<const char16*>(sqlite3_column_text16(stmt_, index));
+}
+
+bool SQLStatement::column_string16(int index, string16* str) {
+  DCHECK(stmt_);
+  DCHECK(str);
+  const char* s = column_text(index);
+  str->assign(s ? UTF8ToUTF16(s) : string16());
+  return (s != NULL);
+}
+
+string16 SQLStatement::column_string16(int index) {
+  string16 str;
+  column_string16(index, &str);
+  return str;
 }
 
 bool SQLStatement::column_wstring(int index, std::wstring* str) {

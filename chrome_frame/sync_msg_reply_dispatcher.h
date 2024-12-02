@@ -7,6 +7,7 @@
 
 #include <deque>
 
+#include "base/callback.h"
 #include "base/lock.h"
 #include "ipc/ipc_channel_proxy.h"
 
@@ -51,12 +52,12 @@ class SyncMessageReplyDispatcher : public IPC::ChannelProxy::MessageFilter {
  protected:
   struct MessageSent {
     MessageSent() {}
-    MessageSent(int id, uint16 type, void* callback, void* key)
+    MessageSent(int id, uint32 type, void* callback, void* key)
       : id(id), callback(callback), type(type), key(key) {}
     int id;
     void* callback;
     void* key;
-    uint16 type;
+    uint32 type;
   };
 
   typedef std::deque<MessageSent> PendingSyncMessageQueue;

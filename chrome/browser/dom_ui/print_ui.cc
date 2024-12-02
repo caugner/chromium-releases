@@ -7,9 +7,10 @@
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/message_loop.h"
+#include "base/singleton.h"
 #include "base/thread.h"
 #include "base/values.h"
-#include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
 
@@ -26,10 +27,12 @@ PrintUI::PrintUI(TabContents* contents) : DOMUI(contents) {
   PrintUIHTMLSource* html_source = new PrintUIHTMLSource();
 
   // Set up the print:url source.
-  g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
-      NewRunnableMethod(&chrome_url_data_manager,
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(
+          Singleton<ChromeURLDataManager>::get(),
           &ChromeURLDataManager::AddDataSource,
-          html_source));
+          make_scoped_refptr(html_source)));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -43,6 +46,7 @@ PrintUIHTMLSource::PrintUIHTMLSource()
 }
 
 void PrintUIHTMLSource::StartDataRequest(const std::string& path,
+                                         bool is_off_the_record,
                                          int request_id) {
   // Setup a dictionary so that the html page could read the values.
   DictionaryValue localized_strings;

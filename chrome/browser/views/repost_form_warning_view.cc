@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "app/message_box_flags.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
+#include "chrome/browser/repost_form_warning_controller.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/notification_service.h"
@@ -20,7 +21,7 @@ namespace browser {
 // Declared in browser_dialogs.h so others don't have to depend on our header.
 void ShowRepostFormWarningDialog(gfx::NativeWindow parent_window,
                                  TabContents* tab_contents) {
-  new RepostFormWarningView(parent_window, &tab_contents->controller());
+  new RepostFormWarningView(parent_window, tab_contents);
 }
 
 }  // namespace browser
@@ -30,19 +31,14 @@ void ShowRepostFormWarningDialog(gfx::NativeWindow parent_window,
 
 RepostFormWarningView::RepostFormWarningView(
     gfx::NativeWindow parent_window,
-    NavigationController* navigation_controller)
-      : navigation_controller_(navigation_controller),
+    TabContents* tab_contents)
+      : controller_(new RepostFormWarningController(tab_contents)),
         message_box_view_(NULL) {
   message_box_view_ = new MessageBoxView(
       MessageBoxFlags::kIsConfirmMessageBox,
       l10n_util::GetString(IDS_HTTP_POST_WARNING),
-      L"");
-  views::Window::CreateChromeWindow(parent_window, gfx::Rect(), this)->Show();
-
-  registrar_.Add(this, NotificationType::LOAD_START,
-                 Source<NavigationController>(navigation_controller_));
-  registrar_.Add(this, NotificationType::TAB_CLOSING,
-                 Source<NavigationController>(navigation_controller_));
+      std::wstring());
+  controller_->Show(this);
 }
 
 RepostFormWarningView::~RepostFormWarningView() {
@@ -60,46 +56,27 @@ std::wstring RepostFormWarningView::GetDialogButtonLabel(
   if (button == MessageBoxFlags::DIALOGBUTTON_OK)
     return l10n_util::GetString(IDS_HTTP_POST_WARNING_RESEND);
   if (button == MessageBoxFlags::DIALOGBUTTON_CANCEL)
-    return l10n_util::GetString(IDS_HTTP_POST_WARNING_CANCEL);
-  return L"";
+    return l10n_util::GetString(IDS_CANCEL);
+  return std::wstring();
 }
-
-void RepostFormWarningView::DeleteDelegate() {
-  delete this;
-}
-
-bool RepostFormWarningView::Cancel() {
-  return true;
-}
-
-bool RepostFormWarningView::Accept() {
-  if (navigation_controller_)
-    navigation_controller_->Reload(false);
-  return true;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// RepostFormWarningView, views::WindowDelegate implementation:
 
 views::View* RepostFormWarningView::GetContentsView() {
   return message_box_view_;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// RepostFormWarningView, private:
+bool RepostFormWarningView::Cancel() {
+  controller_->Cancel();
+  return true;
+}
 
-void RepostFormWarningView::Observe(NotificationType type,
-                                    const NotificationSource& source,
-                                    const NotificationDetails& details) {
-  // Close the dialog if we load a page (because reloading might not apply to
-  // the same page anymore) or if the tab is closed, because then we won't have
-  // a navigation controller anymore.
-  if (window() && navigation_controller_ &&
-      (type == NotificationType::LOAD_START ||
-       type == NotificationType::TAB_CLOSING)) {
-    DCHECK_EQ(Source<NavigationController>(source).ptr(),
-              navigation_controller_);
-    navigation_controller_ = NULL;
-    window()->Close();
-  }
+bool RepostFormWarningView::Accept() {
+  controller_->Continue();
+  return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// RepostFormWarningView, RepostFormWarning implementation:
+
+void RepostFormWarningView::DeleteDelegate() {
+  delete this;
 }

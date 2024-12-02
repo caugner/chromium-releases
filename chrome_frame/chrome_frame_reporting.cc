@@ -11,9 +11,12 @@
 #include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome_frame/chrome_frame_reporting.h"
+#include "chrome_frame/exception_barrier.h"
+#include "chrome_frame/utils.h"
 
 // Well known SID for the system principal.
 const wchar_t kSystemPrincipalSid[] = L"S-1-5-18";
+const wchar_t kChromePipeName[] = L"\\\\.\\pipe\\ChromeCrashServices";
 
 // Returns the custom info structure based on the dll in parameter
 google_breakpad::CustomClientInfo* GetCustomInfo(const wchar_t* dll_path) {
@@ -46,18 +49,35 @@ google_breakpad::CustomClientInfo* GetCustomInfo(const wchar_t* dll_path) {
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 bool InitializeCrashReporting() {
+  // In headless mode we want crashes to be reported back.
+  bool always_take_dump = IsHeadlessMode();
   // We want to use the Google Update crash reporting. We need to check if the
   // user allows it first.
-  if (!GoogleUpdateSettings::GetCollectStatsConsent())
-    return true;
+  if (!always_take_dump && !GoogleUpdateSettings::GetCollectStatsConsent())
+      return true;
 
-  // Build the pipe name. It can be either:
-  // System-wide install: "NamedPipe\GoogleCrashServices\S-1-5-18"
-  // Per-user install: "NamedPipe\GoogleCrashServices\<user SID>"
+  // If we got here, we want to report crashes, so make sure all
+  // ExceptionBarrierBase instances do so.
+  ExceptionBarrierConfig::set_enabled(true);
+
+  // Get the alternate dump directory. We use the temp path.
+  FilePath temp_directory;
+  if (!file_util::GetTempDir(&temp_directory) || temp_directory.empty()) {
+    return false;
+  }
+
   wchar_t dll_path[MAX_PATH * 2] = {0};
   GetModuleFileName(reinterpret_cast<HMODULE>(&__ImageBase), dll_path,
                     arraysize(dll_path));
 
+  if (always_take_dump) {
+    return InitializeVectoredCrashReportingWithPipeName(true, kChromePipeName,
+      temp_directory.value(), GetCustomInfo(dll_path));
+  }
+
+  // Build the pipe name. It can be either:
+  // System-wide install: "NamedPipe\GoogleCrashServices\S-1-5-18"
+  // Per-user install: "NamedPipe\GoogleCrashServices\<user SID>"
   std::wstring user_sid;
   if (InstallUtil::IsPerUserInstall(dll_path)) {
     if (!win_util::GetUserSidString(&user_sid)) {
@@ -67,16 +87,11 @@ bool InitializeCrashReporting() {
     user_sid = kSystemPrincipalSid;
   }
 
-  // Get the alternate dump directory. We use the temp path.
-  FilePath temp_directory;
-  if (!file_util::GetTempDir(&temp_directory) || temp_directory.empty()) {
-    return false;
-  }
-
   return InitializeVectoredCrashReporting(false, user_sid.c_str(),
       temp_directory.value(), GetCustomInfo(dll_path));
 }
 
 bool ShutdownCrashReporting() {
+  ExceptionBarrierConfig::set_enabled(false);
   return ShutdownVectoredCrashReporting();
 }

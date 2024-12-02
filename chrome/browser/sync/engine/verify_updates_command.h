@@ -7,10 +7,10 @@
 
 #include "base/basictypes.h"
 
-#include "chrome/browser/sync/engine/syncer_command.h"
-#include "chrome/browser/sync/engine/syncer_session.h"
+#include "chrome/browser/sync/engine/model_safe_worker.h"
+#include "chrome/browser/sync/engine/model_changing_syncer_command.h"
 #include "chrome/browser/sync/engine/syncproto.h"
-#include "chrome/browser/sync/util/sync_types.h"
+#include "chrome/browser/sync/engine/syncer_types.h"
 
 namespace syncable {
 class WriteTransaction;
@@ -19,16 +19,23 @@ class WriteTransaction;
 namespace browser_sync {
 
 // Verifies the response from a GetUpdates request. All invalid updates will be
-// noted in the SyncerSession after this command is executed.
-class VerifyUpdatesCommand : public SyncerCommand {
+// noted in the SyncSession after this command is executed.
+class VerifyUpdatesCommand : public ModelChangingSyncerCommand {
  public:
   VerifyUpdatesCommand();
   virtual ~VerifyUpdatesCommand();
-  virtual void ExecuteImpl(SyncerSession* session);
 
-  VerifyResult VerifyUpdate(syncable::WriteTransaction* trans,
-                            const SyncEntity& entry);
+  // SyncerCommand implementation.
+  virtual void ModelChangingExecuteImpl(sessions::SyncSession* session);
+
  private:
+  struct VerifyUpdateResult {
+    VerifyResult value;
+    ModelSafeGroup placement;
+  };
+  VerifyUpdateResult VerifyUpdate(syncable::WriteTransaction* trans,
+                                  const SyncEntity& entry,
+                                  const ModelSafeRoutingInfo& routes);
   DISALLOW_COPY_AND_ASSIGN(VerifyUpdatesCommand);
 };
 

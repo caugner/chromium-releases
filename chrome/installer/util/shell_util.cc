@@ -94,7 +94,8 @@ class RegistryEntry {
     entries->push_front(new RegistryEntry(ShellUtil::kRegRegisteredApplications,
         app_name, capabilities));
     entries->push_front(new RegistryEntry(
-        capabilities, L"ApplicationDescription", dist->GetApplicationName()));
+        capabilities, L"ApplicationDescription",
+        dist->GetLongAppDescription()));
     entries->push_front(new RegistryEntry(
         capabilities, L"ApplicationIcon", icon_path));
     entries->push_front(new RegistryEntry(
@@ -168,8 +169,8 @@ class RegistryEntry {
     // start->Internet shortcut.
     std::wstring start_menu(ShellUtil::kRegStartMenuInternet);
     BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-    entries->push_front(new RegistryEntry(start_menu,
-                                          dist->GetApplicationName()));
+    std::wstring app_name = dist->GetApplicationName() + suffix;
+    entries->push_front(new RegistryEntry(start_menu, app_name));
     return true;
   }
 
@@ -301,8 +302,7 @@ bool ElevateAndRegisterChrome(const std::wstring& chrome_exe,
         HKEY_CURRENT_USER : HKEY_LOCAL_MACHINE;
     RegKey key(reg_root, dist->GetUninstallRegPath().c_str());
     key.ReadValue(installer_util::kUninstallStringField, &exe_path);
-    CommandLine command_line(L"");
-    command_line.ParseFromString(exe_path);
+    CommandLine command_line = CommandLine::FromString(exe_path);
     exe_path = command_line.program();
   }
   if (file_util::PathExists(FilePath::FromWStringHack(exe_path))) {
@@ -314,6 +314,13 @@ bool ElevateAndRegisterChrome(const std::wstring& chrome_exe,
       params.append(installer_util::switches::kRegisterChromeBrowserSuffix);
       params.append(L"=\"" + suffix + L"\"");
     }
+
+    CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
+    if (browser_command_line.HasSwitch(switches::kChromeFrame)) {
+      params.append(L" --");
+      params.append(installer_util::switches::kChromeFrame);
+    }
+
     DWORD ret_val = 0;
     InstallUtil::ExecuteExeAsAdmin(exe_path, params, &ret_val);
     if (ret_val == 0)
@@ -504,7 +511,7 @@ std::wstring ShellUtil::GetChromeShellOpenCmd(const std::wstring& chrome_exe) {
 bool ShellUtil::GetChromeShortcutName(std::wstring* shortcut, bool alternate) {
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   shortcut->assign(alternate ? dist->GetAlternateApplicationName() :
-                               dist->GetApplicationName());
+                               dist->GetAppShortCutName());
   shortcut->append(L".lnk");
   return true;
 }
@@ -520,7 +527,7 @@ bool ShellUtil::GetDesktopPath(bool system_level, std::wstring* path) {
 }
 
 bool ShellUtil::GetQuickLaunchPath(bool system_level, std::wstring* path) {
-  const static wchar_t* kQuickLaunchPath =
+  static const wchar_t* kQuickLaunchPath =
       L"Microsoft\\Internet Explorer\\Quick Launch";
   wchar_t qlaunch[MAX_PATH];
   if (system_level) {
@@ -593,6 +600,9 @@ bool ShellUtil::GetUserSpecificDefaultBrowserSuffix(std::wstring* entry) {
 bool ShellUtil::MakeChromeDefault(int shell_change,
                                   const std::wstring& chrome_exe,
                                   bool elevate_if_not_admin) {
+  if (!BrowserDistribution::GetDistribution()->CanSetAsDefault())
+    return false;
+
   ShellUtil::RegisterChromeBrowser(chrome_exe, L"", elevate_if_not_admin);
 
   bool ret = true;
@@ -650,6 +660,9 @@ bool ShellUtil::MakeChromeDefault(int shell_change,
 bool ShellUtil::RegisterChromeBrowser(const std::wstring& chrome_exe,
                                       const std::wstring& unique_suffix,
                                       bool elevate_if_not_admin) {
+  if (!BrowserDistribution::GetDistribution()->CanSetAsDefault())
+    return false;
+
   // First figure out we need to append a suffix to the registry entries to
   // make them unique.
   std::wstring suffix;
@@ -753,22 +766,23 @@ bool ShellUtil::UpdateChromeShortcut(const std::wstring& chrome_exe,
                                      bool create_new) {
   std::wstring chrome_path = file_util::GetDirectoryFromPath(chrome_exe);
 
+  FilePath prefs_path(chrome_path);
+  prefs_path = prefs_path.AppendASCII(installer_util::kDefaultMasterPrefs);
+  scoped_ptr<DictionaryValue> prefs(
+      installer_util::ParseDistributionPreferences(prefs_path));
+  int icon_index = 0;
+  installer_util::GetDistroIntegerPreference(prefs.get(),
+      installer_util::master_preferences::kChromeShortcutIconIndex,
+      &icon_index);
   if (create_new) {
-    FilePath prefs_path(chrome_path);
-    prefs_path = prefs_path.Append(installer_util::kDefaultMasterPrefs);
-    scoped_ptr<DictionaryValue> prefs(
-        installer_util::ParseDistributionPreferences(prefs_path));
-    int icon_index = 0;
-    installer_util::GetDistroIntegerPreference(prefs.get(),
-        installer_util::master_preferences::kChromeShortcutIconIndex,
-        &icon_index);
     return file_util::CreateShortcutLink(chrome_exe.c_str(),      // target
                                          shortcut.c_str(),        // shortcut
                                          chrome_path.c_str(),     // working dir
                                          NULL,                    // arguments
                                          description.c_str(),     // description
                                          chrome_exe.c_str(),      // icon file
-                                         icon_index);             // icon index
+                                         icon_index,              // icon index
+                                         chrome::kBrowserAppID);  // app id
   } else {
     return file_util::UpdateShortcutLink(chrome_exe.c_str(),      // target
                                          shortcut.c_str(),        // shortcut
@@ -776,6 +790,7 @@ bool ShellUtil::UpdateChromeShortcut(const std::wstring& chrome_exe,
                                          NULL,                    // arguments
                                          description.c_str(),     // description
                                          chrome_exe.c_str(),      // icon file
-                                         0);                      // icon index
+                                         icon_index,              // icon index
+                                         chrome::kBrowserAppID);  // app id
   }
 }

@@ -9,6 +9,7 @@
 
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/renderer_host/resource_handler.h"
+#include "chrome/common/resource_response.h"
 #include "net/base/io_buffer.h"
 
 // Used to complete a synchronous resource request in response to resource load
@@ -18,20 +19,25 @@ class SyncResourceHandler : public ResourceHandler {
   SyncResourceHandler(ResourceDispatcherHost::Receiver* receiver,
                       const GURL& url,
                       IPC::Message* result_message);
-  ~SyncResourceHandler();
 
+  bool OnUploadProgress(int request_id, uint64 position, uint64 size);
   bool OnRequestRedirected(int request_id, const GURL& new_url,
                            ResourceResponse* response, bool* defer);
   bool OnResponseStarted(int request_id, ResourceResponse* response);
+  bool OnWillStart(int request_id, const GURL& url, bool* defer);
   bool OnWillRead(int request_id, net::IOBuffer** buf, int* buf_size,
                   int min_size);
   bool OnReadCompleted(int request_id, int* bytes_read);
   bool OnResponseCompleted(int request_id,
                            const URLRequestStatus& status,
                            const std::string& security_info);
+  void OnRequestClosed();
 
  private:
   enum { kReadBufSize = 3840 };
+
+  ~SyncResourceHandler();
+
   scoped_refptr<net::IOBuffer> read_buffer_;
 
   SyncLoadResult result_;

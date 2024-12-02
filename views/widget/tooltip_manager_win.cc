@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,14 @@
 #include <windowsx.h>
 #include <limits>
 
-#include "app/gfx/font.h"
 #include "app/l10n_util.h"
 #include "app/l10n_util_win.h"
 #include "app/win_util.h"
+#include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "gfx/font.h"
+#include "views/screen.h"
 #include "views/view.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
@@ -57,10 +59,19 @@ const std::wstring& TooltipManager::GetLineSeparator() {
   return *separator;
 }
 
+// static
+int TooltipManager::GetMaxWidth(int x, int y) {
+  gfx::Rect monitor_bounds =
+      Screen::GetMonitorAreaNearestPoint(gfx::Point(x, y));
+  // Allow the tooltip to be almost as wide as the screen.
+  // Otherwise, we would truncate important text, since we're not word-wrapping
+  // the text onto multiple lines.
+  return monitor_bounds.width() == 0 ? 800 : monitor_bounds.width() - 30;
+}
+
 TooltipManagerWin::TooltipManagerWin(Widget* widget)
     : widget_(widget),
-      last_mouse_x_(-1),
-      last_mouse_y_(-1),
+      last_mouse_pos_(-1,-1),
       tooltip_showing_(false),
       last_tooltip_view_(NULL),
       last_view_out_of_sync_(false),
@@ -124,7 +135,7 @@ void TooltipManagerWin::UpdateTooltip() {
 
 void TooltipManagerWin::TooltipTextChanged(View* view) {
   if (view == last_tooltip_view_)
-    UpdateTooltip(last_mouse_x_, last_mouse_y_);
+    UpdateTooltip(last_mouse_pos_);
 }
 
 LRESULT TooltipManagerWin::OnNotify(int w_param,
@@ -137,8 +148,7 @@ LRESULT TooltipManagerWin::OnNotify(int w_param,
         if (last_view_out_of_sync_) {
           // View under the mouse is out of sync, determine it now.
           RootView* root_view = widget_->GetRootView();
-          last_tooltip_view_ = root_view->GetViewForPoint(
-              gfx::Point(last_mouse_x_, last_mouse_y_));
+          last_tooltip_view_ = root_view->GetViewForPoint(last_mouse_pos_);
           last_view_out_of_sync_ = false;
         }
         // Tooltip control is asking for the tooltip to display.
@@ -153,21 +163,20 @@ LRESULT TooltipManagerWin::OnNotify(int w_param,
         if (last_tooltip_view_ != NULL) {
           tooltip_text_.clear();
           // Mouse is over a View, ask the View for it's tooltip.
-          gfx::Point view_loc(last_mouse_x_, last_mouse_y_);
+          gfx::Point view_loc = last_mouse_pos_;
           View::ConvertPointToView(widget_->GetRootView(),
                                    last_tooltip_view_, &view_loc);
-          if (last_tooltip_view_->GetTooltipText(view_loc.x(), view_loc.y(),
-                                                 &tooltip_text_) &&
+          if (last_tooltip_view_->GetTooltipText(view_loc, &tooltip_text_) &&
               !tooltip_text_.empty()) {
             // View has a valid tip, copy it into TOOLTIPINFO.
             clipped_text_ = tooltip_text_;
-            gfx::Point screen_loc(last_mouse_x_, last_mouse_y_);
+            gfx::Point screen_loc = last_mouse_pos_;
             View::ConvertPointToScreen(widget_->GetRootView(), &screen_loc);
             TrimTooltipToFit(&clipped_text_, &tooltip_width_, &line_count_,
                              screen_loc.x(), screen_loc.y());
             // Adjust the clipped tooltip text for locale direction.
-            l10n_util::AdjustStringForLocaleDirection(clipped_text_,
-                                                      &clipped_text_);
+            base::i18n::AdjustStringForLocaleDirection(clipped_text_,
+                                                       &clipped_text_);
             tooltip_info->lpszText = const_cast<WCHAR*>(clipped_text_.c_str());
           } else {
             tooltip_text_.clear();
@@ -187,11 +196,10 @@ LRESULT TooltipManagerWin::OnNotify(int w_param,
         gfx::Point text_origin;
         if (tooltip_height_ == 0)
           tooltip_height_ = CalcTooltipHeight();
-        gfx::Point view_loc(last_mouse_x_, last_mouse_y_);
+        gfx::Point view_loc = last_mouse_pos_;
         View::ConvertPointToView(widget_->GetRootView(),
                                  last_tooltip_view_, &view_loc);
-        if (last_tooltip_view_->GetTooltipTextOrigin(
-              view_loc.x(), view_loc.y(), &text_origin) &&
+        if (last_tooltip_view_->GetTooltipTextOrigin(view_loc, &text_origin) &&
             SetTooltipPosition(text_origin.x(), text_origin.y())) {
           // Return true, otherwise the rectangle we specified is ignored.
           return TRUE;
@@ -261,9 +269,9 @@ int TooltipManagerWin::CalcTooltipHeight() {
   return height + tooltip_margin.top + tooltip_margin.bottom;
 }
 
-void TooltipManagerWin::UpdateTooltip(int x, int y) {
+void TooltipManagerWin::UpdateTooltip(const gfx::Point& mouse_pos) {
   RootView* root_view = widget_->GetRootView();
-  View* view = root_view->GetViewForPoint(gfx::Point(x, y));
+  View* view = root_view->GetViewForPoint(mouse_pos);
   if (view != last_tooltip_view_) {
     // NOTE: This *must* be sent regardless of the visibility of the tooltip.
     // It triggers Windows to ask for the tooltip again.
@@ -272,11 +280,11 @@ void TooltipManagerWin::UpdateTooltip(int x, int y) {
   } else if (last_tooltip_view_ != NULL) {
     // Tooltip is showing, and mouse is over the same view. See if the tooltip
     // text has changed.
-    gfx::Point view_point(x, y);
+    gfx::Point view_point = mouse_pos;
     View::ConvertPointToView(root_view, last_tooltip_view_, &view_point);
     std::wstring new_tooltip_text;
-    bool has_tooltip_text = last_tooltip_view_->GetTooltipText(
-        view_point.x(), view_point.y(), &new_tooltip_text);
+    bool has_tooltip_text =
+        last_tooltip_view_->GetTooltipText(view_point, &new_tooltip_text);
     if (!has_tooltip_text || (new_tooltip_text != tooltip_text_)) {
       // The text has changed, hide the popup.
       SendMessage(tooltip_hwnd_, TTM_POP, 0, 0);
@@ -289,22 +297,19 @@ void TooltipManagerWin::UpdateTooltip(int x, int y) {
 }
 
 void TooltipManagerWin::OnMouse(UINT u_msg, WPARAM w_param, LPARAM l_param) {
-  int x = GET_X_LPARAM(l_param);
-  int y = GET_Y_LPARAM(l_param);
+  gfx::Point mouse_pos(l_param);
 
   if (u_msg >= WM_NCMOUSEMOVE && u_msg <= WM_NCXBUTTONDBLCLK) {
     // NC message coordinates are in screen coordinates.
-    gfx::Rect frame_bounds;
-    widget_->GetBounds(&frame_bounds, true);
-    x -= frame_bounds.x();
-    y -= frame_bounds.y();
+    POINT temp = mouse_pos.ToPOINT();
+    ::MapWindowPoints(HWND_DESKTOP, GetParent(), &temp, 1);
+    mouse_pos.SetPoint(temp.x, temp.y);
   }
 
-  if (u_msg != WM_MOUSEMOVE || last_mouse_x_ != x || last_mouse_y_ != y) {
-    last_mouse_x_ = x;
-    last_mouse_y_ = y;
+  if (u_msg != WM_MOUSEMOVE || last_mouse_pos_ != mouse_pos) {
+    last_mouse_pos_ = mouse_pos;
     HideKeyboardTooltip();
-    UpdateTooltip(x, y);
+    UpdateTooltip(mouse_pos);
   }
   // Forward the message onto the tooltip.
   MSG msg;
@@ -322,7 +327,7 @@ void TooltipManagerWin::ShowKeyboardTooltip(View* focused_view) {
   }
   HideKeyboardTooltip();
   std::wstring tooltip_text;
-  if (!focused_view->GetTooltipText(0, 0, &tooltip_text))
+  if (!focused_view->GetTooltipText(gfx::Point(), &tooltip_text))
     return;
   gfx::Rect focused_bounds = focused_view->bounds();
   gfx::Point screen_point;

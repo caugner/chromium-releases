@@ -49,6 +49,7 @@
 #include <set>
 #include <string>
 
+#include "base/callback.h"
 #include "base/hash_tables.h"
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/icon_loader.h"
@@ -119,4 +120,4 @@ class IconManager : public IconLoader::Delegate,
   DISALLOW_COPY_AND_ASSIGN(IconManager);
 };
 
-#endif  // #ifndef CHROME_BROWSER_ICON_MANAGER_H_
+#endif  // CHROME_BROWSER_ICON_MANAGER_H_

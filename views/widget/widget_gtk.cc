@@ -1,17 +1,27 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "views/widget/widget_gtk.h"
 
+#include <gdk/gdk.h>
+#include <gdk/gdkx.h>
+#include <X11/extensions/shape.h>
+
+#include <set>
+#include <vector>
+
 #include "app/drag_drop_types.h"
-#include "app/gfx/path.h"
 #include "app/os_exchange_data.h"
 #include "app/os_exchange_data_provider_gtk.h"
+#include "base/auto_reset.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
+#include "gfx/path.h"
 #include "views/widget/default_theme_provider.h"
 #include "views/widget/drop_target_gtk.h"
+#include "views/widget/gtk_views_fixed.h"
 #include "views/widget/root_view.h"
 #include "views/widget/tooltip_manager_gtk.h"
 #include "views/window/window_gtk.h"
@@ -24,7 +34,11 @@ namespace views {
 // drag-leave that GTK generates.
 class WidgetGtk::DropObserver : public MessageLoopForUI::Observer {
  public:
-  DropObserver() { }
+  DropObserver() {}
+
+  static DropObserver* Get() {
+    return Singleton<DropObserver>::get();
+  }
 
   virtual void WillProcessEvent(GdkEvent* event) {
     if (event->type == GDK_DROP_START) {
@@ -49,6 +63,9 @@ class WidgetGtk::DropObserver : public MessageLoopForUI::Observer {
   DISALLOW_COPY_AND_ASSIGN(DropObserver);
 };
 
+static const char* kWidgetKey = "__VIEWS_WIDGET__";
+static const wchar_t* kWidgetWideKey = L"__VIEWS_WIDGET__";
+
 // Returns the position of a widget on screen.
 static void GetWidgetPositionOnScreen(GtkWidget* widget, int* x, int *y) {
   // First get the root window.
@@ -56,7 +73,12 @@ static void GetWidgetPositionOnScreen(GtkWidget* widget, int* x, int *y) {
   while (root && !GTK_IS_WINDOW(root)) {
     root = gtk_widget_get_parent(root);
   }
-  DCHECK(root);
+  if (!root) {
+    // If root is null we're not parented. Return 0x0 and assume the caller will
+    // query again when we're parented.
+    *x = *y = 0;
+    return;
+  }
   // Translate the coordinate from widget to root window.
   gtk_widget_translate_coordinates(widget, root, 0, 0, x, y);
   // Then adjust the position with the position of the root window.
@@ -64,28 +86,6 @@ static void GetWidgetPositionOnScreen(GtkWidget* widget, int* x, int *y) {
   gtk_window_get_position(GTK_WINDOW(root), &window_x, &window_y);
   *x += window_x;
   *y += window_y;
-}
-
-// Returns the view::Event::flags for a GdkEventButton.
-static int GetFlagsForEventButton(const GdkEventButton& event) {
-  int flags = Event::GetFlagsFromGdkState(event.state);
-  switch (event.button) {
-    case 1:
-      flags |= Event::EF_LEFT_BUTTON_DOWN;
-      break;
-    case 2:
-      flags |= Event::EF_MIDDLE_BUTTON_DOWN;
-      break;
-    case 3:
-      flags |= Event::EF_RIGHT_BUTTON_DOWN;
-      break;
-    default:
-      // We only deal with 1-3.
-      break;
-  }
-  if (event.type == GDK_2BUTTON_PRESS)
-    flags |= MouseEvent::EF_IS_DOUBLE_CLICK;
-  return flags;
 }
 
 // static
@@ -105,18 +105,23 @@ WidgetGtk::WidgetGtk(Type type)
       ALLOW_THIS_IN_INITIALIZER_LIST(close_widget_factory_(this)),
       delete_on_destroy_(true),
       transparent_(false),
+      ignore_events_(false),
       ignore_drag_leave_(false),
       opacity_(255),
       drag_data_(NULL),
       in_paint_now_(false),
       is_active_(false),
-      transient_to_parent_(false) {
+      transient_to_parent_(false),
+      got_initial_focus_in_(false),
+      has_focus_(false),
+      delegate_(NULL),
+      always_on_top_(false) {
   static bool installed_message_loop_observer = false;
   if (!installed_message_loop_observer) {
     installed_message_loop_observer = true;
     MessageLoopForUI* loop = MessageLoopForUI::current();
     if (loop)
-      loop->AddObserver(new DropObserver());
+      loop->AddObserver(DropObserver::Get());
   }
 
   if (type_ != TYPE_CHILD)
@@ -124,12 +129,13 @@ WidgetGtk::WidgetGtk(Type type)
 }
 
 WidgetGtk::~WidgetGtk() {
+  DCHECK(delete_on_destroy_ || widget_ == NULL);
   if (type_ != TYPE_CHILD)
     ActiveWindowWatcherX::RemoveObserver(this);
   MessageLoopForUI::current()->RemoveObserver(this);
 }
 
-GtkWindow* WidgetGtk::GetTransientParent() {
+GtkWindow* WidgetGtk::GetTransientParent() const {
   return (type_ != TYPE_CHILD && widget_) ?
       gtk_window_get_transient_for(GTK_WINDOW(widget_)) : NULL;
 }
@@ -141,8 +147,10 @@ bool WidgetGtk::MakeTransparent() {
 
   if (!gdk_screen_is_composited(gdk_screen_get_default())) {
     // Transparency is only supported for compositing window managers.
-    DLOG(WARNING) << "compositing not supported";
-    return false;
+    // NOTE: there's a race during ChromeOS startup such that X might think
+    // compositing isn't supported. We ignore it if the wm says compositing
+    // isn't supported.
+    DLOG(WARNING) << "compositing not supported; allowing anyway";
   }
 
   if (!gdk_screen_get_rgba_colormap(gdk_screen_get_default())) {
@@ -154,6 +162,15 @@ bool WidgetGtk::MakeTransparent() {
   return true;
 }
 
+bool WidgetGtk::MakeIgnoreEvents() {
+  // Transparency can only be enabled for windows/popups and only if we haven't
+  // realized the widget.
+  DCHECK(!widget_ && type_ != TYPE_CHILD);
+
+  ignore_events_ = true;
+  return true;
+}
+
 void WidgetGtk::AddChild(GtkWidget* child) {
   gtk_container_add(GTK_CONTAINER(window_contents_), child);
 }
@@ -162,8 +179,10 @@ void WidgetGtk::RemoveChild(GtkWidget* child) {
   // We can be called after the contents widget has been destroyed, e.g. any
   // NativeViewHost not removed from the view hierarchy before the window is
   // closed.
-  if (GTK_IS_CONTAINER(window_contents_))
+  if (GTK_IS_CONTAINER(window_contents_)) {
     gtk_container_remove(GTK_CONTAINER(window_contents_), child);
+    gtk_views_fixed_set_use_allocated_size(child, false);
+  }
 }
 
 void WidgetGtk::ReparentChild(GtkWidget* child) {
@@ -172,9 +191,8 @@ void WidgetGtk::ReparentChild(GtkWidget* child) {
 
 void WidgetGtk::PositionChild(GtkWidget* child, int x, int y, int w, int h) {
   GtkAllocation alloc = { x, y, w, h };
-  // For some reason we need to do both of these to size a widget.
   gtk_widget_size_allocate(child, &alloc);
-  gtk_widget_set_size_request(child, w, h);
+  gtk_views_fixed_set_use_allocated_size(child, true);
   gtk_fixed_move(GTK_FIXED(window_contents_), child, x, y);
 }
 
@@ -183,12 +201,25 @@ void WidgetGtk::DoDrag(const OSExchangeData& data, int operation) {
       static_cast<const OSExchangeDataProviderGtk&>(data.provider());
   GtkTargetList* targets = data_provider.GetTargetList();
   GdkEvent* current_event = gtk_get_current_event();
-  DCHECK(current_event);
-  gtk_drag_begin(window_contents_, targets,
-                 static_cast<GdkDragAction>(
-                     DragDropTypes::DragOperationToGdkDragAction(operation)),
-                 1, current_event);
-  gdk_event_free(current_event);
+  const OSExchangeDataProviderGtk& provider(
+      static_cast<const OSExchangeDataProviderGtk&>(data.provider()));
+
+  GdkDragContext* context = gtk_drag_begin(
+      window_contents_,
+      targets,
+      static_cast<GdkDragAction>(
+          DragDropTypes::DragOperationToGdkDragAction(operation)),
+      1,
+      current_event);
+
+  // Set the drag image if one was supplied.
+  if (provider.drag_image())
+    gtk_drag_set_icon_pixbuf(context,
+                             provider.drag_image(),
+                             provider.cursor_offset().x(),
+                             provider.cursor_offset().y());
+  if (current_event)
+    gdk_event_free(current_event);
   gtk_target_list_unref(targets);
 
   drag_data_ = &data_provider;
@@ -198,6 +229,39 @@ void WidgetGtk::DoDrag(const OSExchangeData& data, int operation) {
 
   drag_data_ = NULL;
 }
+
+void WidgetGtk::SetFocusTraversableParent(FocusTraversable* parent) {
+  root_view_->SetFocusTraversableParent(parent);
+}
+
+void WidgetGtk::SetFocusTraversableParentView(View* parent_view) {
+  root_view_->SetFocusTraversableParentView(parent_view);
+}
+
+// static
+WidgetGtk* WidgetGtk::GetViewForNative(GtkWidget* widget) {
+  return static_cast<WidgetGtk*>(GetWidgetFromNativeView(widget));
+}
+
+// static
+WindowGtk* WidgetGtk::GetWindowForNative(GtkWidget* widget) {
+  gpointer user_data = g_object_get_data(G_OBJECT(widget), "chrome-window");
+  return static_cast<WindowGtk*>(user_data);
+}
+
+void WidgetGtk::ResetDropTarget() {
+  ignore_drag_leave_ = false;
+  drop_target_.reset(NULL);
+}
+
+// static
+RootView* WidgetGtk::GetRootViewForWidget(GtkWidget* widget) {
+  gpointer user_data = g_object_get_data(G_OBJECT(widget), "root-view");
+  return static_cast<RootView*>(user_data);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// WidgetGtk, ActiveWindowWatcherX::Observer implementation:
 
 void WidgetGtk::ActiveWindowChanged(GdkWindow* active_window) {
   if (!GetNativeView())
@@ -220,9 +284,6 @@ void WidgetGtk::ActiveWindowChanged(GdkWindow* active_window) {
     IsActiveChanged();
 }
 
-void WidgetGtk::IsActiveChanged() {
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // WidgetGtk, Widget implementation:
 
@@ -233,10 +294,7 @@ void WidgetGtk::Init(GtkWidget* parent,
   // Force creation of the RootView if it hasn't been created yet.
   GetRootView();
 
-  // TODO(sky): nuke this once toolkit_views becomes chromeos.
-#if !defined(CHROMEOS_TRANSITIONAL)
   default_theme_provider_.reset(new DefaultThemeProvider());
-#endif
 
   // Make container here.
   CreateGtkWidget(parent, bounds);
@@ -262,72 +320,80 @@ void WidgetGtk::Init(GtkWidget* parent,
 
   MessageLoopForUI::current()->AddObserver(this);
 
-  // TODO(beng): make these take this rather than NULL.
   g_signal_connect_after(G_OBJECT(window_contents_), "size_allocate",
-                         G_CALLBACK(CallSizeAllocate), NULL);
-  g_signal_connect(G_OBJECT(window_contents_), "expose_event",
-                   G_CALLBACK(CallPaint), NULL);
-  g_signal_connect(G_OBJECT(window_contents_), "enter_notify_event",
-                   G_CALLBACK(CallEnterNotify), NULL);
-  g_signal_connect(G_OBJECT(window_contents_), "leave_notify_event",
-                   G_CALLBACK(CallLeaveNotify), NULL);
-  g_signal_connect(G_OBJECT(window_contents_), "motion_notify_event",
-                   G_CALLBACK(CallMotionNotify), NULL);
-  g_signal_connect(G_OBJECT(window_contents_), "button_press_event",
-                   G_CALLBACK(CallButtonPress), NULL);
-  g_signal_connect(G_OBJECT(window_contents_), "button_release_event",
-                   G_CALLBACK(CallButtonRelease), NULL);
-  g_signal_connect(G_OBJECT(window_contents_), "grab_broken_event",
-                   G_CALLBACK(CallGrabBrokeEvent), NULL);
-  g_signal_connect(G_OBJECT(window_contents_), "grab_notify",
-                   G_CALLBACK(CallGrabNotify), NULL);
-  g_signal_connect(G_OBJECT(window_contents_), "key_press_event",
-                   G_CALLBACK(CallKeyPress), NULL);
-  g_signal_connect(G_OBJECT(window_contents_), "key_release_event",
-                   G_CALLBACK(CallKeyRelease), NULL);
-  g_signal_connect(G_OBJECT(window_contents_), "scroll_event",
-                   G_CALLBACK(CallScroll), NULL);
-  g_signal_connect(G_OBJECT(window_contents_), "visibility_notify_event",
-                   G_CALLBACK(CallVisibilityNotify), NULL);
+                         G_CALLBACK(&OnSizeAllocateThunk), this);
+  g_signal_connect(window_contents_, "expose_event",
+                   G_CALLBACK(&OnPaintThunk), this);
+  g_signal_connect(window_contents_, "enter_notify_event",
+                   G_CALLBACK(&OnEnterNotifyThunk), this);
+  g_signal_connect(window_contents_, "leave_notify_event",
+                   G_CALLBACK(&OnLeaveNotifyThunk), this);
+  g_signal_connect(window_contents_, "motion_notify_event",
+                   G_CALLBACK(&OnMotionNotifyThunk), this);
+  g_signal_connect(window_contents_, "button_press_event",
+                   G_CALLBACK(&OnButtonPressThunk), this);
+  g_signal_connect(window_contents_, "button_release_event",
+                   G_CALLBACK(&OnButtonReleaseThunk), this);
+  g_signal_connect(window_contents_, "grab_broken_event",
+                   G_CALLBACK(&OnGrabBrokeEventThunk), this);
+  g_signal_connect(window_contents_, "grab_notify",
+                   G_CALLBACK(&OnGrabNotifyThunk), this);
+  g_signal_connect(window_contents_, "scroll_event",
+                   G_CALLBACK(&OnScrollThunk), this);
+  g_signal_connect(window_contents_, "visibility_notify_event",
+                   G_CALLBACK(&OnVisibilityNotifyThunk), this);
 
   // In order to receive notification when the window is no longer the front
   // window, we need to install these on the widget.
   // NOTE: this doesn't work with focus follows mouse.
-  g_signal_connect(G_OBJECT(widget_), "focus_in_event",
-                   G_CALLBACK(CallFocusIn), NULL);
-  g_signal_connect(G_OBJECT(widget_), "focus_out_event",
-                   G_CALLBACK(CallFocusOut), NULL);
-  g_signal_connect(G_OBJECT(widget_), "destroy",
-                   G_CALLBACK(CallDestroy), NULL);
+  g_signal_connect(widget_, "focus_in_event",
+                   G_CALLBACK(&OnFocusInThunk), this);
+  g_signal_connect(widget_, "focus_out_event",
+                   G_CALLBACK(&OnFocusOutThunk), this);
+  g_signal_connect(widget_, "destroy",
+                   G_CALLBACK(&OnDestroyThunk), this);
+  g_signal_connect(widget_, "show",
+                   G_CALLBACK(&OnShowThunk), this);
+  g_signal_connect(widget_, "hide",
+                   G_CALLBACK(&OnHideThunk), this);
+
+  // Views/FocusManager (re)sets the focus to the root window,
+  // so we need to connect signal handlers to the gtk window.
+  // See views::Views::Focus and views::FocusManager::ClearNativeFocus
+  // for more details.
+  g_signal_connect(widget_, "key_press_event",
+                   G_CALLBACK(&OnKeyPressThunk), this);
+  g_signal_connect(widget_, "key_release_event",
+                   G_CALLBACK(&OnKeyReleaseThunk), this);
   if (transparent_) {
-    g_signal_connect(G_OBJECT(widget_), "expose_event",
-                     G_CALLBACK(CallWindowPaint), this);
+    g_signal_connect(widget_, "expose_event",
+                     G_CALLBACK(&OnWindowPaintThunk), this);
   }
 
   // Drag and drop.
   gtk_drag_dest_set(window_contents_, static_cast<GtkDestDefaults>(0),
                     NULL, 0, GDK_ACTION_COPY);
-  g_signal_connect(G_OBJECT(window_contents_), "drag_motion",
-                   G_CALLBACK(CallDragMotion), this);
-  g_signal_connect(G_OBJECT(window_contents_), "drag_data_received",
-                   G_CALLBACK(CallDragDataReceived), this);
-  g_signal_connect(G_OBJECT(window_contents_), "drag_drop",
-                   G_CALLBACK(CallDragDrop), this);
-  g_signal_connect(G_OBJECT(window_contents_), "drag_leave",
-                   G_CALLBACK(CallDragLeave), this);
-  g_signal_connect(G_OBJECT(window_contents_), "drag_data_get",
-                   G_CALLBACK(CallDragDataGet), this);
-  g_signal_connect(G_OBJECT(window_contents_), "drag_end",
-                   G_CALLBACK(CallDragEnd), this);
-  g_signal_connect(G_OBJECT(window_contents_), "drag_failed",
-                   G_CALLBACK(CallDragFailed), this);
+  g_signal_connect(window_contents_, "drag_motion",
+                   G_CALLBACK(&OnDragMotionThunk), this);
+  g_signal_connect(window_contents_, "drag_data_received",
+                   G_CALLBACK(&OnDragDataReceivedThunk), this);
+  g_signal_connect(window_contents_, "drag_drop",
+                   G_CALLBACK(&OnDragDropThunk), this);
+  g_signal_connect(window_contents_, "drag_leave",
+                   G_CALLBACK(&OnDragLeaveThunk), this);
+  g_signal_connect(window_contents_, "drag_data_get",
+                   G_CALLBACK(&OnDragDataGetThunk), this);
+  g_signal_connect(window_contents_, "drag_end",
+                   G_CALLBACK(&OnDragEndThunk), this);
+  g_signal_connect(window_contents_, "drag_failed",
+                   G_CALLBACK(&OnDragFailedThunk), this);
 
   tooltip_manager_.reset(new TooltipManagerGtk(this));
 
   // Register for tooltips.
   g_object_set(G_OBJECT(window_contents_), "has-tooltip", TRUE, NULL);
-  g_signal_connect(G_OBJECT(window_contents_), "query_tooltip",
-                   G_CALLBACK(CallQueryTooltip), this);
+  g_signal_connect(window_contents_, "query_tooltip",
+                   G_CALLBACK(&OnQueryTooltipThunk), this);
 
   if (type_ == TYPE_CHILD) {
     if (parent) {
@@ -342,12 +408,24 @@ void WidgetGtk::Init(GtkWidget* parent,
   }
 }
 
+WidgetDelegate* WidgetGtk::GetWidgetDelegate() {
+  return delegate_;
+}
+
+void WidgetGtk::SetWidgetDelegate(WidgetDelegate* delegate) {
+  delegate_ = delegate;
+}
+
 void WidgetGtk::SetContentsView(View* view) {
   root_view_->SetContentsView(view);
 }
 
 void WidgetGtk::GetBounds(gfx::Rect* out, bool including_frame) const {
-  DCHECK(widget_);
+  if (!widget_) {
+    // Due to timing we can get a request for the bounds after Close.
+    *out = gfx::Rect(gfx::Point(0, 0), size_);
+    return;
+  }
 
   int x = 0, y = 0, w, h;
   if (GTK_IS_WINDOW(widget_)) {
@@ -378,17 +456,25 @@ void WidgetGtk::SetBounds(const gfx::Rect& bounds) {
     GtkWindow* gtk_window = GTK_WINDOW(widget_);
     // TODO: this may need to set an initial size if not showing.
     // TODO: need to constrain based on screen size.
-    gtk_window_resize(gtk_window, bounds.width(), bounds.height());
+    if (!bounds.IsEmpty()) {
+      gtk_window_resize(gtk_window, bounds.width(), bounds.height());
+    }
     gtk_window_move(gtk_window, bounds.x(), bounds.y());
   }
 }
 
-void WidgetGtk::SetShape(const gfx::Path& shape) {
+void WidgetGtk::MoveAbove(Widget* widget) {
   DCHECK(widget_);
   DCHECK(widget_->window);
+  // TODO(oshima): gdk_window_restack is not available in gtk2.0, so
+  // we're simply raising the window to the top. We should switch to
+  // gdk_window_restack when we upgrade gtk to 2.18 or up.
+  gdk_window_raise(widget_->window);
+}
 
-  gdk_window_shape_combine_region(widget_->window, NULL, 0, 0);
-  GdkRegion* region = shape.CreateGdkRegion();
+void WidgetGtk::SetShape(gfx::NativeRegion region) {
+  DCHECK(widget_);
+  DCHECK(widget_->window);
   gdk_window_shape_combine_region(widget_->window, region, 0, 0);
   gdk_region_destroy(region);
 }
@@ -408,18 +494,26 @@ void WidgetGtk::Close() {
 }
 
 void WidgetGtk::CloseNow() {
-  if (widget_)
+  if (widget_) {
     gtk_widget_destroy(widget_);
+    widget_ = NULL;
+  }
 }
 
 void WidgetGtk::Show() {
-  if (widget_)
+  if (widget_) {
     gtk_widget_show(widget_);
+    if (widget_->window)
+      gdk_window_raise(widget_->window);
+  }
 }
 
 void WidgetGtk::Hide() {
-  if (widget_)
+  if (widget_) {
     gtk_widget_hide(widget_);
+    if (widget_->window)
+      gdk_window_lower(widget_->window);
+  }
 }
 
 gfx::NativeView WidgetGtk::GetNativeView() const {
@@ -431,9 +525,8 @@ void WidgetGtk::PaintNow(const gfx::Rect& update_rect) {
     gtk_widget_queue_draw_area(widget_, update_rect.x(), update_rect.y(),
                                update_rect.width(), update_rect.height());
     // Force the paint to occur now.
-    in_paint_now_ = true;
+    AutoReset auto_reset_in_paint_now(&in_paint_now_, true);
     gdk_window_process_updates(widget_->window, true);
-    in_paint_now_ = false;
   }
 }
 
@@ -444,6 +537,13 @@ void WidgetGtk::SetOpacity(unsigned char opacity) {
     gdk_window_set_opacity(widget_->window, static_cast<gdouble>(opacity) /
                            static_cast<gdouble>(255));
   }
+}
+
+void WidgetGtk::SetAlwaysOnTop(bool on_top) {
+  DCHECK(type_ != TYPE_CHILD);
+  always_on_top_ = on_top;
+  if (widget_)
+    gtk_window_set_keep_above(GTK_WINDOW(widget_), on_top);
 }
 
 RootView* WidgetGtk::GetRootView() {
@@ -482,7 +582,7 @@ TooltipManager* WidgetGtk::GetTooltipManager() {
   return tooltip_manager_.get();
 }
 
-bool WidgetGtk::GetAccelerator(int cmd_id, Accelerator* accelerator) {
+bool WidgetGtk::GetAccelerator(int cmd_id, menus::Accelerator* accelerator) {
   NOTIMPLEMENTED();
   return false;
 }
@@ -495,7 +595,20 @@ const Window* WidgetGtk::GetWindow() const {
   return GetWindowImpl(widget_);
 }
 
+void WidgetGtk::SetNativeWindowProperty(const std::wstring& name,
+                                        void* value) {
+  g_object_set_data(G_OBJECT(widget_), WideToUTF8(name).c_str(), value);
+}
+
+void* WidgetGtk::GetNativeWindowProperty(const std::wstring& name) {
+  return g_object_get_data(G_OBJECT(widget_), WideToUTF8(name).c_str());
+}
+
 ThemeProvider* WidgetGtk::GetThemeProvider() const {
+  return default_theme_provider_.get();
+}
+
+ThemeProvider* WidgetGtk::GetDefaultThemeProvider() const {
   return default_theme_provider_.get();
 }
 
@@ -518,6 +631,12 @@ void WidgetGtk::ViewHierarchyChanged(bool is_add, View *parent,
     drop_target_->ResetTargetViewIfEquals(child);
 }
 
+bool WidgetGtk::ContainsNativeView(gfx::NativeView native_view) {
+  // TODO(port)  See implementation in WidgetWin::ContainsNativeView.
+  NOTREACHED() << "WidgetGtk::ContainsNativeView is not implemented.";
+  return false;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // WidgetGtk, MessageLoopForUI::Observer implementation:
 
@@ -530,7 +649,7 @@ void WidgetGtk::DidProcessEvent(GdkEvent* event) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// FocusTraversable
+// WidgetGtk, FocusTraversable implementation:
 
 View* WidgetGtk::FindNextFocusableView(
     View* starting_view, bool reverse, Direction direction,
@@ -551,10 +670,6 @@ FocusTraversable* WidgetGtk::GetFocusTraversableParent() {
   return NULL;
 }
 
-void WidgetGtk::SetFocusTraversableParent(FocusTraversable* parent) {
-  root_view_->SetFocusTraversableParent(parent);
-}
-
 View* WidgetGtk::GetFocusTraversableParentView() {
   // We are a proxy to the root view, so we should be bypassed when traversing
   // up and as a result this should not be called.
@@ -562,12 +677,422 @@ View* WidgetGtk::GetFocusTraversableParentView() {
   return NULL;
 }
 
-void WidgetGtk::SetFocusTraversableParentView(View* parent_view) {
-  root_view_->SetFocusTraversableParentView(parent_view);
+////////////////////////////////////////////////////////////////////////////////
+// WidgetGtk, protected:
+
+// static
+int WidgetGtk::GetFlagsForEventButton(const GdkEventButton& event) {
+  int flags = Event::GetFlagsFromGdkState(event.state);
+  switch (event.button) {
+    case 1:
+      flags |= Event::EF_LEFT_BUTTON_DOWN;
+      break;
+    case 2:
+      flags |= Event::EF_MIDDLE_BUTTON_DOWN;
+      break;
+    case 3:
+      flags |= Event::EF_RIGHT_BUTTON_DOWN;
+      break;
+    default:
+      // We only deal with 1-3.
+      break;
+  }
+  if (event.type == GDK_2BUTTON_PRESS)
+    flags |= MouseEvent::EF_IS_DOUBLE_CLICK;
+  return flags;
+}
+
+void WidgetGtk::OnSizeAllocate(GtkWidget* widget, GtkAllocation* allocation) {
+  // See comment next to size_ as to why we do this. Also note, it's tempting
+  // to put this in the static method so subclasses don't need to worry about
+  // it, but if a subclasses needs to set a shape then they need to always
+  // reset the shape in this method regardless of whether the size changed.
+  gfx::Size new_size(allocation->width, allocation->height);
+  if (new_size == size_)
+    return;
+  size_ = new_size;
+  root_view_->SetBounds(0, 0, allocation->width, allocation->height);
+  root_view_->SchedulePaint();
+}
+
+gboolean WidgetGtk::OnPaint(GtkWidget* widget, GdkEventExpose* event) {
+  root_view_->OnPaint(event);
+  return false;  // False indicates other widgets should get the event as well.
+}
+
+void WidgetGtk::OnDragDataGet(GtkWidget* widget,
+                              GdkDragContext* context,
+                              GtkSelectionData* data,
+                              guint info,
+                              guint time) {
+  if (!drag_data_) {
+    NOTREACHED();
+    return;
+  }
+  drag_data_->WriteFormatToSelection(info, data);
+}
+
+void WidgetGtk::OnDragDataReceived(GtkWidget* widget,
+                                   GdkDragContext* context,
+                                   gint x,
+                                   gint y,
+                                   GtkSelectionData* data,
+                                   guint info,
+                                   guint time) {
+  if (drop_target_.get())
+    drop_target_->OnDragDataReceived(context, x, y, data, info, time);
+}
+
+gboolean WidgetGtk::OnDragDrop(GtkWidget* widget,
+                               GdkDragContext* context,
+                               gint x,
+                               gint y,
+                               guint time) {
+  if (drop_target_.get()) {
+    return drop_target_->OnDragDrop(context, x, y, time);
+  }
+  return FALSE;
+}
+
+void WidgetGtk::OnDragEnd(GtkWidget* widget, GdkDragContext* context) {
+  if (!drag_data_) {
+    // This indicates we didn't start a drag operation, and should never
+    // happen.
+    NOTREACHED();
+    return;
+  }
+  // Quit the nested message loop we spawned in DoDrag.
+  MessageLoop::current()->Quit();
+}
+
+gboolean WidgetGtk::OnDragFailed(GtkWidget* widget,
+                                 GdkDragContext* context,
+                                 GtkDragResult result) {
+  return FALSE;
+}
+
+void WidgetGtk::OnDragLeave(GtkWidget* widget,
+                            GdkDragContext* context,
+                            guint time) {
+  if (ignore_drag_leave_) {
+    ignore_drag_leave_ = false;
+    return;
+  }
+  if (drop_target_.get()) {
+    drop_target_->OnDragLeave(context, time);
+    drop_target_.reset(NULL);
+  }
+}
+
+gboolean WidgetGtk::OnDragMotion(GtkWidget* widget,
+                                 GdkDragContext* context,
+                                 gint x,
+                                 gint y,
+                                 guint time) {
+  if (!drop_target_.get())
+    drop_target_.reset(new DropTargetGtk(GetRootView(), context));
+  return drop_target_->OnDragMotion(context, x, y, time);
+}
+
+gboolean WidgetGtk::OnEnterNotify(GtkWidget* widget, GdkEventCrossing* event) {
+  if (last_mouse_event_was_move_ && last_mouse_move_x_ == event->x_root &&
+      last_mouse_move_y_ == event->y_root) {
+    // Don't generate a mouse event for the same location as the last.
+    return false;
+  }
+
+  if (!last_mouse_event_was_move_ && !is_mouse_down_) {
+    // When a mouse button is pressed gtk generates a leave, enter, press.
+    // RootView expects to get a mouse move before a press, otherwise enter is
+    // not set. So we generate a move here.
+    last_mouse_move_x_ = event->x_root;
+    last_mouse_move_y_ = event->y_root;
+    last_mouse_event_was_move_ = true;
+
+    int x = 0, y = 0;
+    GetContainedWidgetEventCoordinates(event, &x, &y);
+
+    // If this event is the result of pressing a button then one of the button
+    // modifiers is set. Unset it as we're compensating for the leave generated
+    // when you press a button.
+    int flags = (Event::GetFlagsFromGdkState(event->state) &
+                 ~(Event::EF_LEFT_BUTTON_DOWN |
+                   Event::EF_MIDDLE_BUTTON_DOWN |
+                   Event::EF_RIGHT_BUTTON_DOWN));
+    MouseEvent mouse_move(Event::ET_MOUSE_MOVED, x, y, flags);
+    root_view_->OnMouseMoved(mouse_move);
+  }
+
+  return false;
+}
+
+gboolean WidgetGtk::OnLeaveNotify(GtkWidget* widget, GdkEventCrossing* event) {
+  last_mouse_event_was_move_ = false;
+  if (!has_capture_ && !is_mouse_down_)
+    root_view_->ProcessOnMouseExited();
+  return false;
+}
+
+gboolean WidgetGtk::OnMotionNotify(GtkWidget* widget, GdkEventMotion* event) {
+  int x = 0, y = 0;
+  GetContainedWidgetEventCoordinates(event, &x, &y);
+
+  if (has_capture_ && is_mouse_down_) {
+    last_mouse_event_was_move_ = false;
+    int flags = Event::GetFlagsFromGdkState(event->state);
+    MouseEvent mouse_drag(Event::ET_MOUSE_DRAGGED, x, y, flags);
+    root_view_->OnMouseDragged(mouse_drag);
+    return true;
+  }
+  gfx::Point screen_loc(event->x_root, event->y_root);
+  if (last_mouse_event_was_move_ && last_mouse_move_x_ == screen_loc.x() &&
+      last_mouse_move_y_ == screen_loc.y()) {
+    // Don't generate a mouse event for the same location as the last.
+    return true;
+  }
+  last_mouse_move_x_ = screen_loc.x();
+  last_mouse_move_y_ = screen_loc.y();
+  last_mouse_event_was_move_ = true;
+  int flags = Event::GetFlagsFromGdkState(event->state);
+  MouseEvent mouse_move(Event::ET_MOUSE_MOVED, x, y, flags);
+  root_view_->OnMouseMoved(mouse_move);
+  return true;
+}
+
+gboolean WidgetGtk::OnButtonPress(GtkWidget* widget, GdkEventButton* event) {
+  return ProcessMousePressed(event);
+}
+
+gboolean WidgetGtk::OnButtonRelease(GtkWidget* widget, GdkEventButton* event) {
+  ProcessMouseReleased(event);
+  return true;
+}
+
+gboolean WidgetGtk::OnScroll(GtkWidget* widget, GdkEventScroll* event) {
+  return ProcessScroll(event);
+}
+
+gboolean WidgetGtk::OnFocusIn(GtkWidget* widget, GdkEventFocus* event) {
+  if (has_focus_)
+    return false;  // This is the second focus-in event in a row, ignore it.
+  has_focus_ = true;
+
+  if (type_ == TYPE_CHILD)
+    return false;
+
+  // See description of got_initial_focus_in_ for details on this.
+  if (!got_initial_focus_in_) {
+    got_initial_focus_in_ = true;
+    SetInitialFocus();
+  } else {
+    focus_manager_->RestoreFocusedView();
+  }
+  return false;
+}
+
+gboolean WidgetGtk::OnFocusOut(GtkWidget* widget, GdkEventFocus* event) {
+  if (!has_focus_)
+    return false;  // This is the second focus-out event in a row, ignore it.
+  has_focus_ = false;
+
+  if (type_ == TYPE_CHILD)
+    return false;
+
+  // The top-level window lost focus, store the focused view.
+  focus_manager_->StoreFocusedView();
+  return false;
+}
+
+gboolean WidgetGtk::OnKeyPress(GtkWidget* widget, GdkEventKey* event) {
+  KeyEvent key_event(event);
+  return root_view_->ProcessKeyEvent(key_event);
+}
+
+gboolean WidgetGtk::OnKeyRelease(GtkWidget* widget, GdkEventKey* event) {
+  KeyEvent key_event(event);
+  return root_view_->ProcessKeyEvent(key_event);
+}
+
+gboolean WidgetGtk::OnQueryTooltip(GtkWidget* widget,
+                                   gint x,
+                                   gint y,
+                                   gboolean keyboard_mode,
+                                   GtkTooltip* tooltip) {
+  return tooltip_manager_->ShowTooltip(x, y, keyboard_mode, tooltip);
+}
+
+gboolean WidgetGtk::OnVisibilityNotify(GtkWidget* widget,
+                                       GdkEventVisibility* event) {
+  return false;
+}
+
+gboolean WidgetGtk::OnGrabBrokeEvent(GtkWidget* widget, GdkEvent* event) {
+  HandleGrabBroke();
+  return false;  // To let other widgets get the event.
+}
+
+void WidgetGtk::OnGrabNotify(GtkWidget* widget, gboolean was_grabbed) {
+  gtk_grab_remove(window_contents_);
+  HandleGrabBroke();
+}
+
+void WidgetGtk::OnDestroy(GtkWidget* object) {
+  // Note that this handler is hooked to GtkObject::destroy.
+  widget_ = window_contents_ = NULL;
+  if (delete_on_destroy_) {
+    // Delays the deletion of this WidgetGtk as we want its children to have
+    // access to it when destroyed.
+    MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  }
+}
+
+void WidgetGtk::OnShow(GtkWidget* widget) {
+}
+
+void WidgetGtk::OnHide(GtkWidget* widget) {
+}
+
+void WidgetGtk::DoGrab() {
+  has_capture_ = true;
+  gtk_grab_add(window_contents_);
+}
+
+void WidgetGtk::ReleaseGrab() {
+  if (has_capture_) {
+    has_capture_ = false;
+    gtk_grab_remove(window_contents_);
+  }
+}
+
+// static
+void WidgetGtk::SetWindowForNative(GtkWidget* widget, WindowGtk* window) {
+  g_object_set_data(G_OBJECT(widget), "chrome-window", window);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// TODO(beng): organize into sections:
+// WidgetGtk, private:
+
+RootView* WidgetGtk::CreateRootView() {
+  return new RootView(this);
+}
+
+gboolean WidgetGtk::OnWindowPaint(GtkWidget* widget, GdkEventExpose* event) {
+  // NOTE: for reasons I don't understand this code is never hit. It should
+  // be hit when transparent_, but we never get the expose-event for the
+  // window in this case, even though a stand alone test case triggers it. I'm
+  // leaving it in just in case.
+
+  // Fill the background totally transparent. We don't need to paint the root
+  // view here as that is done by OnPaint.
+  DCHECK(transparent_);
+  int width, height;
+  gtk_window_get_size(GTK_WINDOW(widget), &width, &height);
+  cairo_t* cr = gdk_cairo_create(widget->window);
+  cairo_set_operator(cr, CAIRO_OPERATOR_SOURCE);
+  cairo_set_source_rgba(cr, 0, 0, 0, 0);
+  cairo_rectangle(cr, 0, 0, width, height);
+  cairo_fill(cr);
+  cairo_destroy(cr);
+  return false;
+}
+
+bool WidgetGtk::ProcessMousePressed(GdkEventButton* event) {
+  if (event->type == GDK_2BUTTON_PRESS || event->type == GDK_3BUTTON_PRESS) {
+    // The sequence for double clicks is press, release, press, 2press, release.
+    // This means that at the time we get the second 'press' we don't know
+    // whether it corresponds to a double click or not. For now we're completely
+    // ignoring the 2press/3press events as they are duplicate. To make this
+    // work right we need to write our own code that detects if the press is a
+    // double/triple. For now we're completely punting, which means we always
+    // get single clicks.
+    // TODO: fix this.
+    return true;
+  }
+
+  // An event may come from a contained widget which has its own gdk window.
+  // Translate it to the widget's coordinates.
+  int x, y;
+  GetContainedWidgetEventCoordinates(event, &x, &y);
+  last_mouse_event_was_move_ = false;
+  MouseEvent mouse_pressed(Event::ET_MOUSE_PRESSED, x, y,
+                           GetFlagsForEventButton(*event));
+
+  if (root_view_->OnMousePressed(mouse_pressed)) {
+    is_mouse_down_ = true;
+    if (!has_capture_)
+      DoGrab();
+    return true;
+  }
+
+  // Returns true to consume the event when widget is not transparent.
+  return !transparent_;
+}
+
+void WidgetGtk::ProcessMouseReleased(GdkEventButton* event) {
+  int x = 0, y = 0;
+  GetContainedWidgetEventCoordinates(event, &x, &y);
+
+  last_mouse_event_was_move_ = false;
+  MouseEvent mouse_up(Event::ET_MOUSE_RELEASED, x, y,
+                      GetFlagsForEventButton(*event));
+  // Release the capture first, that way we don't get confused if
+  // OnMouseReleased blocks.
+  if (has_capture_ && ReleaseCaptureOnMouseReleased())
+    ReleaseGrab();
+  is_mouse_down_ = false;
+  // GTK generates a mouse release at the end of dnd. We need to ignore it.
+  if (!drag_data_)
+    root_view_->OnMouseReleased(mouse_up, false);
+}
+
+bool WidgetGtk::ProcessScroll(GdkEventScroll* event) {
+  // An event may come from a contained widget which has its own gdk window.
+  // Translate it to the widget's coordinates.
+  int x = 0, y = 0;
+  GetContainedWidgetEventCoordinates(event, &x, &y);
+  int flags = Event::GetFlagsFromGdkState(event->state);
+  int increment = 0;
+  bool is_horizontal = true;
+  switch (event->direction) {
+    case GDK_SCROLL_UP:
+      increment = -1;
+      is_horizontal = false;
+      break;
+    case GDK_SCROLL_DOWN:
+      increment = 1;
+      is_horizontal = false;
+      break;
+    case GDK_SCROLL_LEFT:
+      increment = -1;
+      is_horizontal = true;
+      break;
+    case GDK_SCROLL_RIGHT:
+      increment = 1;
+      is_horizontal = false;
+      break;
+  }
+  increment *= is_horizontal ? root_view_->width() / 5 :
+      root_view_->height() / 5;
+  MouseWheelEvent wheel_event(increment, x, y, flags);
+  return root_view_->ProcessMouseWheelEvent(wheel_event);
+}
+
+// static
+void WidgetGtk::SetRootViewForWidget(GtkWidget* widget, RootView* root_view) {
+  g_object_set_data(G_OBJECT(widget), "root-view", root_view);
+}
+
+// static
+Window* WidgetGtk::GetWindowImpl(GtkWidget* widget) {
+  GtkWidget* parent = widget;
+  while (parent) {
+    WidgetGtk* widget_gtk = GetViewForNative(parent);
+    if (widget_gtk && widget_gtk->is_window_)
+      return static_cast<WindowGtk*>(widget_gtk);
+    parent = gtk_widget_get_parent(parent);
+  }
+  return NULL;
+}
 
 void WidgetGtk::CreateGtkWidget(GtkWidget* parent, const gfx::Rect& bounds) {
   // We turn off double buffering for two reasons:
@@ -578,21 +1103,23 @@ void WidgetGtk::CreateGtkWidget(GtkWidget* parent, const gfx::Rect& bounds) {
   //    that if we use GTK's double buffering and we tried to expand the dirty
   //    region, it wouldn't get painted.
   if (type_ == TYPE_CHILD) {
-    window_contents_ = widget_ = gtk_fixed_new();
+    window_contents_ = widget_ = gtk_views_fixed_new();
+    gtk_widget_set_name(widget_, "views-gtkwidget-child-fixed");
     GTK_WIDGET_UNSET_FLAGS(widget_, GTK_DOUBLE_BUFFERED);
     gtk_fixed_set_has_window(GTK_FIXED(widget_), true);
     if (!parent && !null_parent_) {
       GtkWidget* popup = gtk_window_new(GTK_WINDOW_POPUP);
       null_parent_ = gtk_fixed_new();
+      gtk_widget_set_name(widget_, "views-gtkwidget-null-parent");
       gtk_container_add(GTK_CONTAINER(popup), null_parent_);
       gtk_widget_realize(null_parent_);
     }
     gtk_container_add(GTK_CONTAINER(parent ? parent : null_parent_), widget_);
-    SetViewForNative(widget_, this);
   } else {
     widget_ = gtk_window_new(
         (type_ == TYPE_WINDOW || type_ == TYPE_DECORATED_WINDOW) ?
         GTK_WINDOW_TOPLEVEL : GTK_WINDOW_POPUP);
+    gtk_widget_set_name(widget_, "views-gtkwidget-window");
     if (transient_to_parent_)
       gtk_window_set_transient_for(GTK_WINDOW(widget_), GTK_WINDOW(parent));
     GTK_WIDGET_UNSET_FLAGS(widget_, GTK_DOUBLE_BUFFERED);
@@ -610,557 +1137,31 @@ void WidgetGtk::CreateGtkWidget(GtkWidget* parent, const gfx::Rect& bounds) {
       gtk_window_set_position(GTK_WINDOW(widget_), GTK_WIN_POS_NONE);
     }
     SetWindowForNative(widget_, static_cast<WindowGtk*>(this));
-    SetViewForNative(widget_, this);
 
-    window_contents_ = gtk_fixed_new();
+    window_contents_ = gtk_views_fixed_new();
+    gtk_widget_set_name(window_contents_, "views-gtkwidget-window-fixed");
     GTK_WIDGET_UNSET_FLAGS(window_contents_, GTK_DOUBLE_BUFFERED);
     gtk_fixed_set_has_window(GTK_FIXED(window_contents_), true);
     gtk_container_add(GTK_CONTAINER(widget_), window_contents_);
     gtk_widget_show(window_contents_);
-    SetViewForNative(window_contents_, this);
+    g_object_set_data(G_OBJECT(window_contents_), kWidgetKey,
+                      static_cast<Widget*>(this));
 
     if (transparent_)
       ConfigureWidgetForTransparentBackground();
+
+    if (ignore_events_)
+      ConfigureWidgetForIgnoreEvents();
+
+    SetAlwaysOnTop(always_on_top_);
   }
 
   // The widget needs to be realized before handlers like size-allocate can
   // function properly.
   gtk_widget_realize(widget_);
-}
 
-void WidgetGtk::OnSizeAllocate(GtkWidget* widget, GtkAllocation* allocation) {
-  // See comment next to size_ as to why we do this. Also note, it's tempting
-  // to put this in the static method so subclasses don't need to worry about
-  // it, but if a subclasses needs to set a shape then they need to always
-  // reset the shape in this method regardless of whether the size changed.
-  gfx::Size new_size(allocation->width, allocation->height);
-  if (new_size == size_)
-    return;
-
-  size_ = new_size;
-  root_view_->SetBounds(0, 0, allocation->width, allocation->height);
-  root_view_->SchedulePaint();
-}
-
-gboolean WidgetGtk::OnMotionNotify(GtkWidget* widget, GdkEventMotion* event) {
-  if (has_capture_ && is_mouse_down_) {
-    last_mouse_event_was_move_ = false;
-    int flags = Event::GetFlagsFromGdkState(event->state);
-    if (event->state & GDK_BUTTON1_MASK)
-      flags |= Event::EF_LEFT_BUTTON_DOWN;
-    if (event->state & GDK_BUTTON2_MASK)
-      flags |= Event::EF_MIDDLE_BUTTON_DOWN;
-    if (event->state & GDK_BUTTON3_MASK)
-      flags |= Event::EF_RIGHT_BUTTON_DOWN;
-    MouseEvent mouse_drag(Event::ET_MOUSE_DRAGGED, event->x, event->y, flags);
-    root_view_->OnMouseDragged(mouse_drag);
-    return true;
-  }
-  gfx::Point screen_loc(event->x_root, event->y_root);
-  if (last_mouse_event_was_move_ && last_mouse_move_x_ == screen_loc.x() &&
-      last_mouse_move_y_ == screen_loc.y()) {
-    // Don't generate a mouse event for the same location as the last.
-    return false;
-  }
-  last_mouse_move_x_ = screen_loc.x();
-  last_mouse_move_y_ = screen_loc.y();
-  last_mouse_event_was_move_ = true;
-  int flags = Event::GetFlagsFromGdkState(event->state);
-  if (event->state & GDK_BUTTON1_MASK)
-    flags |= Event::EF_LEFT_BUTTON_DOWN;
-  if (event->state & GDK_BUTTON2_MASK)
-    flags |= Event::EF_MIDDLE_BUTTON_DOWN;
-  if (event->state & GDK_BUTTON3_MASK)
-    flags |= Event::EF_RIGHT_BUTTON_DOWN;
-  MouseEvent mouse_move(Event::ET_MOUSE_MOVED, event->x, event->y, flags);
-  root_view_->OnMouseMoved(mouse_move);
-  return true;
-}
-
-gboolean WidgetGtk::OnButtonPress(GtkWidget* widget, GdkEventButton* event) {
-  ProcessMousePressed(event);
-  return true;
-}
-
-gboolean WidgetGtk::OnButtonRelease(GtkWidget* widget, GdkEventButton* event) {
-  ProcessMouseReleased(event);
-  return true;
-}
-
-gboolean WidgetGtk::OnFocusIn(GtkWidget* widget, GdkEventFocus* event) {
-  if (type_ == TYPE_CHILD)
-    return false;
-
-  // The top-level window got focus, restore the last focused view.
-  focus_manager_->RestoreFocusedView();
-  return false;
-}
-
-gboolean WidgetGtk::OnFocusOut(GtkWidget* widget, GdkEventFocus* event) {
-  if (type_ == TYPE_CHILD)
-    return false;
-
-  // The top-level window lost focus, store the focused view.
-  focus_manager_->StoreFocusedView();
-  return false;
-}
-
-void WidgetGtk::OnPaint(GtkWidget* widget, GdkEventExpose* event) {
-  root_view_->OnPaint(event);
-}
-
-void WidgetGtk::OnDragDataGet(GdkDragContext* context,
-                              GtkSelectionData* data,
-                              guint info,
-                              guint time) {
-  if (!drag_data_) {
-    NOTREACHED();
-    return;
-  }
-  drag_data_->WriteFormatToSelection(info, data);
-}
-
-void WidgetGtk::OnDragDataReceived(GdkDragContext* context,
-                                   gint x,
-                                   gint y,
-                                   GtkSelectionData* data,
-                                   guint info,
-                                   guint time) {
-  if (drop_target_.get())
-    drop_target_->OnDragDataReceived(context, x, y, data, info, time);
-}
-
-gboolean WidgetGtk::OnDragDrop(GdkDragContext* context,
-                               gint x,
-                               gint y,
-                               guint time) {
-  if (drop_target_.get()) {
-    return drop_target_->OnDragDrop(context, x, y, time);
-  }
-  return FALSE;
-}
-
-void WidgetGtk::OnDragEnd(GdkDragContext* context) {
-  if (!drag_data_) {
-    // This indicates we didn't start a drag operation, and should never
-    // happen.
-    NOTREACHED();
-    return;
-  }
-  // Quit the nested message loop we spawned in DoDrag.
-  MessageLoop::current()->Quit();
-}
-
-gboolean WidgetGtk::OnDragFailed(GdkDragContext* context,
-                                 GtkDragResult result) {
-  return FALSE;
-}
-
-void WidgetGtk::OnDragLeave(GdkDragContext* context,
-                            guint time) {
-  if (ignore_drag_leave_) {
-    ignore_drag_leave_ = false;
-    return;
-  }
-  if (drop_target_.get()) {
-    drop_target_->OnDragLeave(context, time);
-    drop_target_.reset(NULL);
-  }
-}
-
-gboolean WidgetGtk::OnDragMotion(GdkDragContext* context,
-                                 gint x,
-                                 gint y,
-                                 guint time) {
-  if (!drop_target_.get())
-    drop_target_.reset(new DropTargetGtk(GetRootView(), context));
-  return drop_target_->OnDragMotion(context, x, y, time);
-}
-
-gboolean WidgetGtk::OnEnterNotify(GtkWidget* widget, GdkEventCrossing* event) {
-  return false;
-}
-
-gboolean WidgetGtk::OnLeaveNotify(GtkWidget* widget, GdkEventCrossing* event) {
-  last_mouse_event_was_move_ = false;
-  if (!has_capture_ && !is_mouse_down_)
-    root_view_->ProcessOnMouseExited();
-  return false;
-}
-
-gboolean WidgetGtk::OnKeyPress(GtkWidget* widget, GdkEventKey* event) {
-  KeyEvent key_event(event);
-  return root_view_->ProcessKeyEvent(key_event);
-}
-
-gboolean WidgetGtk::OnKeyRelease(GtkWidget* widget, GdkEventKey* event) {
-  KeyEvent key_event(event);
-  return root_view_->ProcessKeyEvent(key_event);
-}
-
-gboolean WidgetGtk::OnQueryTooltip(gint x,
-                                   gint y,
-                                   gboolean keyboard_mode,
-                                   GtkTooltip* tooltip) {
-  return tooltip_manager_->ShowTooltip(x, y, keyboard_mode, tooltip);
-}
-
-gboolean WidgetGtk::OnGrabBrokeEvent(GtkWidget* widget, GdkEvent* event) {
-  HandleGrabBroke();
-  return false;  // To let other widgets get the event.
-}
-
-void WidgetGtk::OnGrabNotify(GtkWidget* widget, gboolean was_grabbed) {
-  gtk_grab_remove(window_contents_);
-  HandleGrabBroke();
-}
-
-void WidgetGtk::OnDestroy() {
-  widget_ = window_contents_ = NULL;
-  if (delete_on_destroy_) {
-    // Delays the deletion of this WidgetGtk as we want its children to have
-    // access to it when destroyed.
-    MessageLoop::current()->DeleteSoon(FROM_HERE, this);
-  }
-}
-
-void WidgetGtk::DoGrab() {
-  has_capture_ = true;
-  gtk_grab_add(window_contents_);
-}
-
-void WidgetGtk::ReleaseGrab() {
-  if (has_capture_) {
-    has_capture_ = false;
-    gtk_grab_remove(window_contents_);
-  }
-}
-
-// static
-WindowGtk* WidgetGtk::GetWindowForNative(GtkWidget* widget) {
-  gpointer user_data = g_object_get_data(G_OBJECT(widget), "chrome-window");
-  return static_cast<WindowGtk*>(user_data);
-}
-
-// static
-void WidgetGtk::SetWindowForNative(GtkWidget* widget, WindowGtk* window) {
-  g_object_set_data(G_OBJECT(widget), "chrome-window", window);
-}
-
-RootView* WidgetGtk::CreateRootView() {
-  return new RootView(this);
-}
-
-void WidgetGtk::OnWindowPaint(GtkWidget* widget, GdkEventExpose* event) {
-  // NOTE: for reasons I don't understand this code is never hit. It should
-  // be hit when transparent_, but we never get the expose-event for the
-  // window in this case, even though a stand alone test case triggers it. I'm
-  // leaving it in just in case.
-
-  // Fill the background totally transparent. We don't need to paint the root
-  // view here as that is done by OnPaint.
-  DCHECK(transparent_);
-  int width, height;
-  gtk_window_get_size(GTK_WINDOW (widget), &width, &height);
-  cairo_t* cr = gdk_cairo_create(widget->window);
-  cairo_set_operator (cr, CAIRO_OPERATOR_SOURCE);
-  cairo_set_source_rgba(cr, 0, 0, 0, 0);
-  cairo_rectangle(cr, 0, 0, width, height);
-  cairo_fill(cr);
-}
-
-bool WidgetGtk::ProcessMousePressed(GdkEventButton* event) {
-  if (event->type == GDK_2BUTTON_PRESS || event->type == GDK_3BUTTON_PRESS) {
-    // The sequence for double clicks is press, release, press, 2press, release.
-    // This means that at the time we get the second 'press' we don't know
-    // whether it corresponds to a double click or not. For now we're completely
-    // ignoring the 2press/3press events as they are duplicate. To make this
-    // work right we need to write our own code that detects if the press is a
-    // double/triple. For now we're completely punting, which means we always
-    // get single clicks.
-    // TODO: fix this.
-    return true;
-  }
-
-  last_mouse_event_was_move_ = false;
-  MouseEvent mouse_pressed(Event::ET_MOUSE_PRESSED, event->x, event->y,
-                           GetFlagsForEventButton(*event));
-  if (root_view_->OnMousePressed(mouse_pressed)) {
-    is_mouse_down_ = true;
-    if (!has_capture_)
-      DoGrab();
-    return true;
-  }
-
-  return false;
-}
-
-void WidgetGtk::ProcessMouseReleased(GdkEventButton* event) {
-  last_mouse_event_was_move_ = false;
-  MouseEvent mouse_up(Event::ET_MOUSE_RELEASED, event->x, event->y,
-                      GetFlagsForEventButton(*event));
-  // Release the capture first, that way we don't get confused if
-  // OnMouseReleased blocks.
-
-  if (has_capture_ && ReleaseCaptureOnMouseReleased())
-    ReleaseGrab();
-  is_mouse_down_ = false;
-  // GTK generates a mouse release at the end of dnd. We need to ignore it.
-  if (!drag_data_)
-    root_view_->OnMouseReleased(mouse_up, false);
-}
-
-// static
-WidgetGtk* WidgetGtk::GetViewForNative(GtkWidget* widget) {
-  gpointer user_data = g_object_get_data(G_OBJECT(widget), "chrome-views");
-  return static_cast<WidgetGtk*>(user_data);
-}
-
-void WidgetGtk::ResetDropTarget() {
-  ignore_drag_leave_ = false;
-  drop_target_.reset(NULL);
-}
-
-// static
-void WidgetGtk::SetViewForNative(GtkWidget* widget, WidgetGtk* view) {
-  g_object_set_data(G_OBJECT(widget), "chrome-views", view);
-}
-
-// static
-RootView* WidgetGtk::GetRootViewForWidget(GtkWidget* widget) {
-  gpointer user_data = g_object_get_data(G_OBJECT(widget), "root-view");
-  return static_cast<RootView*>(user_data);
-}
-
-// static
-void WidgetGtk::SetRootViewForWidget(GtkWidget* widget, RootView* root_view) {
-  g_object_set_data(G_OBJECT(widget), "root-view", root_view);
-}
-
-// static
-void WidgetGtk::CallSizeAllocate(GtkWidget* widget, GtkAllocation* allocation) {
-  WidgetGtk* widget_gtk = GetViewForNative(widget);
-  if (!widget_gtk)
-    return;
-
-  widget_gtk->OnSizeAllocate(widget, allocation);
-}
-
-// static
-gboolean WidgetGtk::CallPaint(GtkWidget* widget, GdkEventExpose* event) {
-  WidgetGtk* widget_gtk = GetViewForNative(widget);
-  if (widget_gtk)
-    widget_gtk->OnPaint(widget, event);
-  return false;  // False indicates other widgets should get the event as well.
-}
-
-// static
-gboolean WidgetGtk::CallWindowPaint(GtkWidget* widget,
-                                    GdkEventExpose* event,
-                                    WidgetGtk* widget_gtk) {
-  widget_gtk->OnWindowPaint(widget, event);
-  return false;  // False indicates other widgets should get the event as well.
-}
-
-// static
-void WidgetGtk::CallDragDataGet(GtkWidget* widget,
-                                GdkDragContext* context,
-                                GtkSelectionData* data,
-                                guint info,
-                                guint time,
-                                WidgetGtk* host) {
-  host->OnDragDataGet(context, data, info, time);
-}
-
-// static
-void WidgetGtk::CallDragDataReceived(GtkWidget* widget,
-                                     GdkDragContext* context,
-                                     gint x,
-                                     gint y,
-                                     GtkSelectionData* data,
-                                     guint info,
-                                     guint time,
-                                     WidgetGtk* host) {
-  return host->OnDragDataReceived(context, x, y, data, info, time);
-}
-
-// static
-gboolean WidgetGtk::CallDragDrop(GtkWidget* widget,
-                                 GdkDragContext* context,
-                                 gint x,
-                                 gint y,
-                                 guint time,
-                                 WidgetGtk* host) {
-  return host->OnDragDrop(context, x, y, time);
-}
-
-// static
-void WidgetGtk::CallDragEnd(GtkWidget* widget,
-                            GdkDragContext* context,
-                            WidgetGtk* host) {
-  host->OnDragEnd(context);
-}
-
-// static
-gboolean WidgetGtk::CallDragFailed(GtkWidget* widget,
-                                   GdkDragContext* context,
-                                   GtkDragResult result,
-                                   WidgetGtk* host) {
-  return host->OnDragFailed(context, result);
-}
-
-// static
-void WidgetGtk::CallDragLeave(GtkWidget* widget,
-                              GdkDragContext* context,
-                              guint time,
-                              WidgetGtk* host) {
-  host->OnDragLeave(context, time);
-}
-
-// static
-gboolean WidgetGtk::CallDragMotion(GtkWidget* widget,
-                                   GdkDragContext* context,
-                                   gint x,
-                                   gint y,
-                                   guint time,
-                                   WidgetGtk* host) {
-  return host->OnDragMotion(context, x, y, time);
-}
-
-gboolean WidgetGtk::CallEnterNotify(GtkWidget* widget, GdkEventCrossing* event) {
-  WidgetGtk* widget_gtk = GetViewForNative(widget);
-  if (!widget_gtk)
-    return false;
-
-  return widget_gtk->OnEnterNotify(widget, event);
-}
-
-gboolean WidgetGtk::CallLeaveNotify(GtkWidget* widget, GdkEventCrossing* event) {
-  WidgetGtk* widget_gtk = GetViewForNative(widget);
-  if (!widget_gtk)
-    return false;
-
-  return widget_gtk->OnLeaveNotify(widget, event);
-}
-
-gboolean WidgetGtk::CallMotionNotify(GtkWidget* widget, GdkEventMotion* event) {
-  WidgetGtk* widget_gtk = GetViewForNative(widget);
-  if (!widget_gtk)
-    return false;
-
-  return widget_gtk->OnMotionNotify(widget, event);
-}
-
-gboolean WidgetGtk::CallButtonPress(GtkWidget* widget, GdkEventButton* event) {
-  WidgetGtk* widget_gtk = GetViewForNative(widget);
-  if (!widget_gtk)
-    return false;
-
-  return widget_gtk->OnButtonPress(widget, event);
-}
-
-gboolean WidgetGtk::CallButtonRelease(GtkWidget* widget, GdkEventButton* event) {
-  WidgetGtk* widget_gtk = GetViewForNative(widget);
-  if (!widget_gtk)
-    return false;
-
-  return widget_gtk->OnButtonRelease(widget, event);
-}
-
-gboolean WidgetGtk::CallFocusIn(GtkWidget* widget, GdkEventFocus* event) {
-  WidgetGtk* widget_gtk = GetViewForNative(widget);
-  if (!widget_gtk)
-    return false;
-
-  return widget_gtk->OnFocusIn(widget, event);
-}
-
-gboolean WidgetGtk::CallFocusOut(GtkWidget* widget, GdkEventFocus* event) {
-  WidgetGtk* widget_gtk = GetViewForNative(widget);
-  if (!widget_gtk)
-    return false;
-
-  return widget_gtk->OnFocusOut(widget, event);
-}
-
-gboolean WidgetGtk::CallKeyPress(GtkWidget* widget, GdkEventKey* event) {
-  WidgetGtk* widget_gtk = GetViewForNative(widget);
-  if (!widget_gtk)
-    return false;
-
-  return widget_gtk->OnKeyPress(widget, event);
-}
-
-gboolean WidgetGtk::CallKeyRelease(GtkWidget* widget, GdkEventKey* event) {
-  WidgetGtk* widget_gtk = GetViewForNative(widget);
-  if (!widget_gtk)
-    return false;
-
-  return widget_gtk->OnKeyRelease(widget, event);
-}
-
-// static
-gboolean WidgetGtk::CallQueryTooltip(GtkWidget* widget,
-                                     gint x,
-                                     gint y,
-                                     gboolean keyboard_mode,
-                                     GtkTooltip* tooltip,
-                                     WidgetGtk* host) {
-  return host->OnQueryTooltip(x, y, keyboard_mode, tooltip);
-}
-
-gboolean WidgetGtk::CallScroll(GtkWidget* widget, GdkEventScroll* event) {
-  WidgetGtk* widget_gtk = GetViewForNative(widget);
-  if (!widget_gtk)
-    return false;
-
-  return widget_gtk->OnScroll(widget, event);
-}
-
-gboolean WidgetGtk::CallVisibilityNotify(GtkWidget* widget,
-                                         GdkEventVisibility* event) {
-  WidgetGtk* widget_gtk = GetViewForNative(widget);
-  if (!widget_gtk)
-    return false;
-
-  return widget_gtk->OnVisibilityNotify(widget, event);
-}
-
-// static
-gboolean WidgetGtk::CallGrabBrokeEvent(GtkWidget* widget, GdkEvent* event) {
-  WidgetGtk* widget_gtk = GetViewForNative(widget);
-  if (!widget_gtk)
-    return false;
-
-  return widget_gtk->OnGrabBrokeEvent(widget, event);
-}
-
-// static
-void WidgetGtk::CallGrabNotify(GtkWidget* widget, gboolean was_grabbed) {
-  WidgetGtk* widget_gtk = GetViewForNative(widget);
-  if (!widget_gtk)
-    return;
-
-  return widget_gtk->OnGrabNotify(widget, was_grabbed);
-}
-
-// static
-void WidgetGtk::CallDestroy(GtkObject* object) {
-  WidgetGtk* widget_gtk = GetViewForNative(GTK_WIDGET(object));
-  if (widget_gtk)
-    widget_gtk->OnDestroy();
-}
-
-// static
-Window* WidgetGtk::GetWindowImpl(GtkWidget* widget) {
-  GtkWidget* parent = widget;
-  while (parent) {
-    WidgetGtk* widget_gtk = GetViewForNative(parent);
-    if (widget_gtk && widget_gtk->is_window_)
-      return static_cast<WindowGtk*>(widget_gtk);
-    parent = gtk_widget_get_parent(parent);
-  }
-  return NULL;
+  // Associate this object with the widget.
+  SetNativeWindowProperty(kWidgetWideKey, this);
 }
 
 void WidgetGtk::ConfigureWidgetForTransparentBackground() {
@@ -1191,6 +1192,26 @@ void WidgetGtk::ConfigureWidgetForTransparentBackground() {
   gdk_window_set_back_pixmap(window_contents_->window, NULL, FALSE);
 }
 
+void WidgetGtk::ConfigureWidgetForIgnoreEvents() {
+  gtk_widget_realize(widget_);
+  GdkWindow* gdk_window = widget_->window;
+  Display* display = GDK_WINDOW_XDISPLAY(gdk_window);
+  XID win = GDK_WINDOW_XID(gdk_window);
+
+  // This sets the clickable area to be empty, allowing all events to be
+  // passed to any windows behind this one.
+  XShapeCombineRectangles(
+      display,
+      win,
+      ShapeInput,
+      0,  // x offset
+      0,  // y offset
+      NULL,  // rectangles
+      0,  // num rectangles
+      ShapeSet,
+      0);
+}
+
 void WidgetGtk::HandleGrabBroke() {
   if (has_capture_) {
     if (is_mouse_down_)
@@ -1205,11 +1226,97 @@ void WidgetGtk::HandleGrabBroke() {
 // Widget, public:
 
 // static
-Widget* Widget::CreateTransparentPopupWidget(bool delete_on_destroy) {
+Widget* Widget::CreatePopupWidget(TransparencyParam transparent,
+                                  EventsParam accept_events,
+                                  DeleteParam delete_on_destroy,
+                                  MirroringParam mirror_in_rtl) {
   WidgetGtk* popup = new WidgetGtk(WidgetGtk::TYPE_POPUP);
-  popup->set_delete_on_destroy(delete_on_destroy);
-  popup->MakeTransparent();
+  popup->set_delete_on_destroy(delete_on_destroy == DeleteOnDestroy);
+  if (transparent == Transparent)
+    popup->MakeTransparent();
+  if (accept_events == NotAcceptEvents)
+    popup->MakeIgnoreEvents();
   return popup;
+}
+
+// Callback from gtk_container_foreach. Locates the first root view of widget
+// or one of it's descendants.
+static void RootViewLocatorCallback(GtkWidget* widget,
+                                    gpointer root_view_p) {
+  RootView** root_view = static_cast<RootView**>(root_view_p);
+  if (!*root_view) {
+    *root_view = WidgetGtk::GetRootViewForWidget(widget);
+    if (!*root_view && GTK_IS_CONTAINER(widget)) {
+      // gtk_container_foreach only iterates over children, not all descendants,
+      // so we have to recurse here to get all descendants.
+      gtk_container_foreach(GTK_CONTAINER(widget), RootViewLocatorCallback,
+                            root_view_p);
+    }
+  }
+}
+
+// static
+RootView* Widget::FindRootView(GtkWindow* window) {
+  RootView* root_view = WidgetGtk::GetRootViewForWidget(GTK_WIDGET(window));
+  if (root_view)
+    return root_view;
+
+  // Enumerate all children and check if they have a RootView.
+  gtk_container_foreach(GTK_CONTAINER(window), RootViewLocatorCallback,
+                        static_cast<gpointer>(&root_view));
+  return root_view;
+}
+
+static void AllRootViewsLocatorCallback(GtkWidget* widget,
+                                        gpointer root_view_p) {
+  std::set<RootView*>* root_views_set =
+      reinterpret_cast<std::set<RootView*>*>(root_view_p);
+  RootView *root_view = WidgetGtk::GetRootViewForWidget(widget);
+  if (!root_view && GTK_IS_CONTAINER(widget)) {
+    // gtk_container_foreach only iterates over children, not all descendants,
+    // so we have to recurse here to get all descendants.
+    gtk_container_foreach(GTK_CONTAINER(widget), AllRootViewsLocatorCallback,
+        root_view_p);
+  } else {
+    if (root_view)
+      root_views_set->insert(root_view);
+  }
+}
+
+// static
+void Widget::FindAllRootViews(GtkWindow* window,
+                              std::vector<RootView*>* root_views) {
+  RootView* root_view = WidgetGtk::GetRootViewForWidget(GTK_WIDGET(window));
+  if (root_view)
+    root_views->push_back(root_view);
+
+  std::set<RootView*> root_views_set;
+
+  // Enumerate all children and check if they have a RootView.
+  gtk_container_foreach(GTK_CONTAINER(window), AllRootViewsLocatorCallback,
+      reinterpret_cast<gpointer>(&root_views_set));
+  root_views->clear();
+  root_views->reserve(root_views_set.size());
+  for (std::set<RootView*>::iterator it = root_views_set.begin();
+      it != root_views_set.end();
+      ++it)
+    root_views->push_back(*it);
+}
+
+// static
+Widget* Widget::GetWidgetFromNativeView(gfx::NativeView native_view) {
+  gpointer raw_widget = g_object_get_data(G_OBJECT(native_view), kWidgetKey);
+  if (raw_widget)
+    return reinterpret_cast<Widget*>(raw_widget);
+  return NULL;
+}
+
+// static
+Widget* Widget::GetWidgetFromNativeWindow(gfx::NativeWindow native_window) {
+  gpointer raw_widget = g_object_get_data(G_OBJECT(native_window), kWidgetKey);
+  if (raw_widget)
+    return reinterpret_cast<Widget*>(raw_widget);
+  return NULL;
 }
 
 }  // namespace views

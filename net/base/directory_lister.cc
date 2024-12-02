@@ -41,13 +41,21 @@ class DirectoryDataEvent : public Task {
 // comparison function on the filenames for sorting in the user's locale.
 static bool CompareFindInfo(const file_util::FileEnumerator::FindInfo& a,
                             const file_util::FileEnumerator::FindInfo& b) {
-#if defined(OS_WIN)
-  return file_util::LocaleAwareCompareFilenames(FilePath(a.cFileName),
-                                                FilePath(b.cFileName));
-#elif defined(OS_POSIX)
-  return file_util::LocaleAwareCompareFilenames(FilePath(a.filename),
-                                                FilePath(b.filename));
-#endif
+  // Parent directory before all else.
+  if (file_util::IsDotDot(file_util::FileEnumerator::GetFilename(a)))
+    return true;
+  if (file_util::IsDotDot(file_util::FileEnumerator::GetFilename(b)))
+    return false;
+
+  // Directories before regular files.
+  bool a_is_directory = file_util::FileEnumerator::IsDirectory(a);
+  bool b_is_directory = file_util::FileEnumerator::IsDirectory(b);
+  if (a_is_directory != b_is_directory)
+    return a_is_directory;
+
+  return file_util::LocaleAwareCompareFilenames(
+      file_util::FileEnumerator::GetFilename(a),
+      file_util::FileEnumerator::GetFilename(b));
 }
 
 DirectoryLister::DirectoryLister(const FilePath& dir,
@@ -55,8 +63,7 @@ DirectoryLister::DirectoryLister(const FilePath& dir,
     : dir_(dir),
       delegate_(delegate),
       message_loop_(NULL),
-      thread_(kNullThreadHandle),
-      canceled_(false) {
+      thread_(kNullThreadHandle) {
   DCHECK(!dir.value().empty());
 }
 
@@ -84,7 +91,7 @@ bool DirectoryLister::Start() {
 }
 
 void DirectoryLister::Cancel() {
-  canceled_ = true;
+  canceled_.Set();
 
   if (thread_) {
     PlatformThread::Join(thread_);
@@ -108,7 +115,7 @@ void DirectoryLister::ThreadMain() {
           file_util::FileEnumerator::DIRECTORIES |
           file_util::FileEnumerator::INCLUDE_DOT_DOT));
 
-  while (!canceled_ && !(file_enum.Next().value().empty())) {
+  while (!canceled_.IsSet() && !(file_enum.Next().value().empty())) {
     e->data.push_back(file_util::FileEnumerator::FindInfo());
     file_enum.GetFindInfo(&e->data[e->data.size() - 1]);
 
@@ -143,14 +150,14 @@ void DirectoryLister::OnReceivedData(
   // need to null check it during each iteration of the loop.  Similarly, it is
   // necessary to check the canceled_ flag to avoid sending data to a delegate
   // who doesn't want anymore.
-  for (int i = 0; !canceled_ && delegate_ && i < count; ++i)
+  for (int i = 0; !canceled_.IsSet() && delegate_ && i < count; ++i)
     delegate_->OnListFile(data[i]);
 }
 
 void DirectoryLister::OnDone(int error) {
-  // If canceled, we need to report some kind of error, but don't overwrite the
-  // error condition if it is already set.
-  if (!error && canceled_)
+  // If canceled is set, we need to report some kind of error,
+  // but don't overwrite the error condition if it is already set.
+  if (!error && canceled_.IsSet())
     error = net::ERR_ABORTED;
 
   if (delegate_)

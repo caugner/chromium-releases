@@ -7,12 +7,14 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/stl_util-inl.h"
-#include "base/string_util.h"
 #include "base/task.h"
 #include "base/thread.h"
+#include "base/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/download/download_util.h"
+#include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
 #include "chrome/browser/tab_contents/tab_util.h"
@@ -56,7 +58,7 @@ class DownloadFileUpdateTask : public Task {
 // DownloadFile implementation -------------------------------------------------
 
 DownloadFile::DownloadFile(const DownloadCreateInfo* info)
-    : file_(NULL),
+    : file_stream_(info->save_info.file_stream),
       source_url_(info->url),
       referrer_url_(info->referrer_url),
       id_(info->download_id),
@@ -64,8 +66,11 @@ DownloadFile::DownloadFile(const DownloadCreateInfo* info)
       render_view_id_(info->render_view_id),
       request_id_(info->request_id),
       bytes_so_far_(0),
+      full_path_(info->save_info.file_path),
       path_renamed_(false),
-      in_progress_(true) {
+      in_progress_(true),
+      dont_sleep_(true),
+      save_info_(info->save_info) {
 }
 
 DownloadFile::~DownloadFile() {
@@ -73,15 +78,16 @@ DownloadFile::~DownloadFile() {
 }
 
 bool DownloadFile::Initialize() {
-  if (file_util::CreateTemporaryFile(&full_path_))
-    return Open("wb");
+  if (!full_path_.empty() ||
+      download_util::CreateTemporaryFileForDownload(&full_path_))
+    return Open();
   return false;
 }
 
 bool DownloadFile::AppendDataToFile(const char* data, int data_len) {
-  if (file_) {
+  if (file_stream_.get()) {
     // FIXME bug 595247: handle errors on file writes.
-    size_t written = fwrite(data, 1, data_len, file_);
+    size_t written = file_stream_->Write(data, data_len, NULL);
     bytes_so_far_ += written;
     return true;
   }
@@ -90,11 +96,24 @@ bool DownloadFile::AppendDataToFile(const char* data, int data_len) {
 
 void DownloadFile::Cancel() {
   Close();
-  file_util::Delete(full_path_, false);
+  if (!full_path_.empty())
+    file_util::Delete(full_path_, false);
 }
 
 // The UI has provided us with our finalized name.
 bool DownloadFile::Rename(const FilePath& new_path) {
+  // If the new path is same as the old one, there is no need to perform the
+  // following renaming logic.
+  if (new_path == full_path_) {
+    path_renamed_ = true;
+
+    // Don't close the file if we're not done (finished or canceled).
+    if (!in_progress_)
+      Close();
+
+    return true;
+  }
+
   Close();
 
 #if defined(OS_WIN)
@@ -104,10 +123,25 @@ bool DownloadFile::Rename(const FilePath& new_path) {
   if (!file_util::RenameFileAndResetSecurityDescriptor(full_path_, new_path))
     return false;
 #elif defined(OS_POSIX)
-  // TODO(estade): Move() falls back to copying and deleting when a simple
-  // rename fails. Copying sucks for large downloads. crbug.com/8737
-  if (!file_util::Move(full_path_, new_path))
+  {
+    // Similarly, on Unix, we're moving a temp file created with permissions
+    // 600 to |new_path|. Here, we try to fix up the destination file with
+    // appropriate permissions.
+    struct stat st;
+    // First check the file existence and create an empty file if it doesn't
+    // exist.
+    if (!file_util::PathExists(new_path))
+      file_util::WriteFile(new_path, "", 0);
+    bool stat_succeeded = (stat(new_path.value().c_str(), &st) == 0);
+
+    // TODO(estade): Move() falls back to copying and deleting when a simple
+    // rename fails. Copying sucks for large downloads. crbug.com/8737
+    if (!file_util::Move(full_path_, new_path))
       return false;
+
+    if (stat_succeeded)
+      chmod(new_path.value().c_str(), st.st_mode);
+  }
 #endif
 
   full_path_ = new_path;
@@ -117,23 +151,35 @@ bool DownloadFile::Rename(const FilePath& new_path) {
   if (!in_progress_)
     return true;
 
-  if (!Open("a+b"))
+  if (!Open())
     return false;
+
+  // Move to the end of the new file.
+  if (file_stream_->Seek(net::FROM_END, 0) < 0)
+    return false;
+
   return true;
 }
 
 void DownloadFile::Close() {
-  if (file_) {
-    file_util::CloseFile(file_);
-    file_ = NULL;
+  if (file_stream_.get()) {
+    file_stream_->Close();
+    file_stream_.reset();
   }
 }
 
-bool DownloadFile::Open(const char* open_mode) {
+bool DownloadFile::Open() {
   DCHECK(!full_path_.empty());
-  file_ = file_util::OpenFile(full_path_, open_mode);
-  if (!file_) {
-    return false;
+
+  // Create a new file steram if it is not provided.
+  if (!file_stream_.get()) {
+    file_stream_.reset(new net::FileStream);
+    if (file_stream_->Open(full_path_,
+                          base::PLATFORM_FILE_OPEN_ALWAYS |
+                              base::PLATFORM_FILE_WRITE) != net::OK) {
+      file_stream_.reset();
+      return false;
+    }
   }
 
 #if defined(OS_WIN)
@@ -157,12 +203,8 @@ void DownloadFile::AnnotateWithSourceInformation() {
 
 // DownloadFileManager implementation ------------------------------------------
 
-DownloadFileManager::DownloadFileManager(MessageLoop* ui_loop,
-                                         ResourceDispatcherHost* rdh)
+DownloadFileManager::DownloadFileManager(ResourceDispatcherHost* rdh)
     : next_id_(0),
-      ui_loop_(ui_loop),
-      file_loop_(NULL),
-      io_loop_(NULL),
       resource_dispatcher_host_(rdh) {
 }
 
@@ -172,24 +214,19 @@ DownloadFileManager::~DownloadFileManager() {
   ui_progress_.clear();
 }
 
-void DownloadFileManager::Initialize() {
-  io_loop_ = g_browser_process->io_thread()->message_loop();
-  file_loop_ = g_browser_process->file_thread()->message_loop();
-}
-
 // Called during the browser shutdown process to clean up any state (open files,
 // timers) that live on the download_thread_.
 void DownloadFileManager::Shutdown() {
-  DCHECK(MessageLoop::current() == ui_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   StopUpdateTimer();
-  file_loop_->PostTask(FROM_HERE,
-      NewRunnableMethod(this,
-                        &DownloadFileManager::OnShutdown));
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
+      NewRunnableMethod(this, &DownloadFileManager::OnShutdown));
 }
 
 // Cease download thread operations.
 void DownloadFileManager::OnShutdown() {
-  DCHECK(MessageLoop::current() == file_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
   // Delete any partial downloads during shutdown.
   for (DownloadFileMap::iterator it = downloads_.begin();
        it != downloads_.end(); ++it) {
@@ -209,7 +246,7 @@ DownloadFile* DownloadFileManager::LookupDownload(int id) {
 
 // The UI progress is updated on the file thread and removed on the UI thread.
 void DownloadFileManager::RemoveDownloadFromUIProgress(int id) {
-  DCHECK(MessageLoop::current() == ui_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   AutoLock lock(progress_lock_);
   if (ui_progress_.find(id) != ui_progress_.end())
     ui_progress_.erase(id);
@@ -218,7 +255,7 @@ void DownloadFileManager::RemoveDownloadFromUIProgress(int id) {
 // Throttle updates to the UI thread by only posting update notifications at a
 // regularly controlled interval.
 void DownloadFileManager::StartUpdateTimer() {
-  DCHECK(MessageLoop::current() == ui_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   if (!update_timer_.IsRunning()) {
     update_timer_.Start(base::TimeDelta::FromMilliseconds(kUpdatePeriodMs),
                         this, &DownloadFileManager::UpdateInProgressDownloads);
@@ -226,14 +263,14 @@ void DownloadFileManager::StartUpdateTimer() {
 }
 
 void DownloadFileManager::StopUpdateTimer() {
-  DCHECK(MessageLoop::current() == ui_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   update_timer_.Stop();
 }
 
 // Called on the IO thread once the ResourceDispatcherHost has decided that a
 // request is a download.
 int DownloadFileManager::GetNextId() {
-  DCHECK(MessageLoop::current() == io_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   return next_id_++;
 }
 
@@ -243,7 +280,7 @@ int DownloadFileManager::GetNextId() {
 // to create a DownloadFile, then passes 'info' to the UI thread where it is
 // finally consumed and deleted.
 void DownloadFileManager::StartDownload(DownloadCreateInfo* info) {
-  DCHECK(MessageLoop::current() == file_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
   DCHECK(info);
 
   DownloadFile* download = new DownloadFile(info);
@@ -252,8 +289,10 @@ void DownloadFileManager::StartDownload(DownloadCreateInfo* info) {
     // about this download so we have to clean up 'info'. We need to get back
     // to the IO thread to cancel the network request and CancelDownloadRequest
     // on the UI thread is the safe way to do that.
-    ui_loop_->PostTask(FROM_HERE,
-        NewRunnableFunction(&DownloadManager::CancelDownloadRequest,
+    ChromeThread::PostTask(
+        ChromeThread::IO, FROM_HERE,
+        NewRunnableFunction(&DownloadManager::OnCancelDownloadRequest,
+                            resource_dispatcher_host_,
                             info->child_id,
                             info->request_id));
     delete info;
@@ -269,10 +308,9 @@ void DownloadFileManager::StartDownload(DownloadCreateInfo* info) {
     ui_progress_[info->download_id] = info->received_bytes;
   }
 
-  ui_loop_->PostTask(FROM_HERE,
-      NewRunnableMethod(this,
-                        &DownloadFileManager::OnStartDownload,
-                        info));
+  ChromeThread::PostTask(
+      ChromeThread::UI, FROM_HERE,
+      NewRunnableMethod(this, &DownloadFileManager::OnStartDownload, info));
 }
 
 // We don't forward an update to the UI thread here, since we want to throttle
@@ -281,7 +319,7 @@ void DownloadFileManager::StartDownload(DownloadCreateInfo* info) {
 // thread gets the cancel message: we just delete the data since the
 // DownloadFile has been deleted.
 void DownloadFileManager::UpdateDownload(int id, DownloadBuffer* buffer) {
-  DCHECK(MessageLoop::current() == file_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
   std::vector<DownloadBuffer::Contents> contents;
   {
     AutoLock auto_lock(buffer->lock);
@@ -304,18 +342,18 @@ void DownloadFileManager::UpdateDownload(int id, DownloadBuffer* buffer) {
 }
 
 void DownloadFileManager::DownloadFinished(int id, DownloadBuffer* buffer) {
-  DCHECK(MessageLoop::current() == file_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
   delete buffer;
   DownloadFileMap::iterator it = downloads_.find(id);
   if (it != downloads_.end()) {
     DownloadFile* download = it->second;
     download->set_in_progress(false);
 
-    ui_loop_->PostTask(FROM_HERE,
-        NewRunnableMethod(this,
-                          &DownloadFileManager::OnDownloadFinished,
-                          id,
-                          download->bytes_so_far()));
+    ChromeThread::PostTask(
+        ChromeThread::UI, FROM_HERE,
+        NewRunnableMethod(
+            this, &DownloadFileManager::OnDownloadFinished,
+            id, download->bytes_so_far()));
 
     // We need to keep the download around until the UI thread has finalized
     // the name.
@@ -326,15 +364,16 @@ void DownloadFileManager::DownloadFinished(int id, DownloadBuffer* buffer) {
   }
 
   if (downloads_.empty())
-    ui_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &DownloadFileManager::StopUpdateTimer));
+    ChromeThread::PostTask(
+      ChromeThread::UI, FROM_HERE,
+      NewRunnableMethod(this, &DownloadFileManager::StopUpdateTimer));
 }
 
 // This method will be sent via a user action, or shutdown on the UI thread, and
 // run on the download thread. Since this message has been sent from the UI
 // thread, the download may have already completed and won't exist in our map.
 void DownloadFileManager::CancelDownload(int id) {
-  DCHECK(MessageLoop::current() == file_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
   DownloadFileMap::iterator it = downloads_.find(id);
   if (it != downloads_.end()) {
     DownloadFile* download = it->second;
@@ -342,10 +381,11 @@ void DownloadFileManager::CancelDownload(int id) {
 
     download->Cancel();
 
-    ui_loop_->PostTask(FROM_HERE,
-        NewRunnableMethod(this,
-                          &DownloadFileManager::RemoveDownloadFromUIProgress,
-                          download->id()));
+    ChromeThread::PostTask(
+        ChromeThread::UI, FROM_HERE,
+        NewRunnableMethod(
+            this, &DownloadFileManager::RemoveDownloadFromUIProgress,
+            download->id()));
 
     if (download->path_renamed()) {
       downloads_.erase(it);
@@ -353,15 +393,17 @@ void DownloadFileManager::CancelDownload(int id) {
     }
   }
 
-  if (downloads_.empty())
-    ui_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &DownloadFileManager::StopUpdateTimer));
+  if (downloads_.empty()) {
+    ChromeThread::PostTask(
+      ChromeThread::UI, FROM_HERE,
+      NewRunnableMethod(this, &DownloadFileManager::StopUpdateTimer));
+  }
 }
 
 // Our periodic timer has fired so send the UI thread updates on all in progress
 // downloads.
 void DownloadFileManager::UpdateInProgressDownloads() {
-  DCHECK(MessageLoop::current() == ui_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   AutoLock lock(progress_lock_);
   ProgressMap::iterator it = ui_progress_.begin();
   for (; it != ui_progress_.end(); ++it) {
@@ -379,11 +421,16 @@ void DownloadFileManager::UpdateInProgressDownloads() {
 // TODO(paulg): When implementing download restart via the Downloads tab,
 //              there will be no 'render_process_id' or 'render_view_id'.
 void DownloadFileManager::OnStartDownload(DownloadCreateInfo* info) {
-  DCHECK(MessageLoop::current() == ui_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   DownloadManager* manager = DownloadManagerFromRenderIds(info->child_id,
                                                           info->render_view_id);
   if (!manager) {
-    DownloadManager::CancelDownloadRequest(info->child_id, info->request_id);
+    ChromeThread::PostTask(
+        ChromeThread::IO, FROM_HERE,
+        NewRunnableFunction(&DownloadManager::OnCancelDownloadRequest,
+                            resource_dispatcher_host_,
+                            info->child_id,
+                            info->request_id));
     delete info;
     return;
   }
@@ -414,7 +461,7 @@ void DownloadFileManager::OnStartDownload(DownloadCreateInfo* info) {
 // tracking entries.
 void DownloadFileManager::OnDownloadFinished(int id,
                                              int64 bytes_so_far) {
-  DCHECK(MessageLoop::current() == ui_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   DownloadManager* manager = LookupManager(id);
   if (manager)
     manager->DownloadFinished(id, bytes_so_far);
@@ -422,28 +469,31 @@ void DownloadFileManager::OnDownloadFinished(int id,
   RemoveDownloadFromUIProgress(id);
 }
 
-void DownloadFileManager::DownloadUrl(const GURL& url,
-                                      const GURL& referrer,
-                                      int render_process_host_id,
-                                      int render_view_id,
-                                      URLRequestContext* request_context) {
-  DCHECK(MessageLoop::current() == ui_loop_);
-  base::Thread* thread = g_browser_process->io_thread();
-  if (thread) {
-    thread->message_loop()->PostTask(FROM_HERE,
+void DownloadFileManager::DownloadUrl(
+    const GURL& url,
+    const GURL& referrer,
+    const std::string& referrer_charset,
+    const DownloadSaveInfo& save_info,
+    int render_process_host_id,
+    int render_view_id,
+    URLRequestContextGetter* request_context_getter) {
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+  ChromeThread::PostTask(
+        ChromeThread::IO, FROM_HERE,
         NewRunnableMethod(this,
                           &DownloadFileManager::OnDownloadUrl,
                           url,
                           referrer,
+                          referrer_charset,
+                          save_info,
                           render_process_host_id,
                           render_view_id,
-                          request_context));
-  }
+                          request_context_getter));
 }
 
 // Relate a download ID to its owning DownloadManager.
 DownloadManager* DownloadFileManager::LookupManager(int download_id) {
-  DCHECK(MessageLoop::current() == ui_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   DownloadManagerMap::iterator it = managers_.find(download_id);
   if (it != managers_.end())
     return it->second;
@@ -455,7 +505,7 @@ DownloadManager* DownloadFileManager::LookupManager(int download_id) {
 // one download (id) and remove it from the set, and remove the set if it
 // becomes empty.
 void DownloadFileManager::RemoveDownload(int id, DownloadManager* manager) {
-  DCHECK(MessageLoop::current() == ui_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   if (manager) {
     RequestMap::iterator it = requests_.find(manager);
     if (it != requests_.end()) {
@@ -493,7 +543,7 @@ DownloadManager* DownloadFileManager::DownloadManagerFromRenderIds(
 
 // Called by DownloadManagers in their destructor, and only on the UI thread.
 void DownloadFileManager::RemoveDownloadManager(DownloadManager* manager) {
-  DCHECK(MessageLoop::current() == ui_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
   DCHECK(manager);
   RequestMap::iterator it = requests_.find(manager);
   if (it == requests_.end())
@@ -516,17 +566,25 @@ void DownloadFileManager::RemoveDownloadManager(DownloadManager* manager) {
 // Notifications from the UI thread and run on the IO thread
 
 // Initiate a request for URL to be downloaded.
-void DownloadFileManager::OnDownloadUrl(const GURL& url,
-                                        const GURL& referrer,
-                                        int render_process_host_id,
-                                        int render_view_id,
-                                        URLRequestContext* request_context) {
-  DCHECK(MessageLoop::current() == io_loop_);
+void DownloadFileManager::OnDownloadUrl(
+    const GURL& url,
+    const GURL& referrer,
+    const std::string& referrer_charset,
+    const DownloadSaveInfo& save_info,
+    int render_process_host_id,
+    int render_view_id,
+    URLRequestContextGetter* request_context_getter) {
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+
+  URLRequestContext* context = request_context_getter->GetURLRequestContext();
+  context->set_referrer_charset(referrer_charset);
+
   resource_dispatcher_host_->BeginDownload(url,
                                            referrer,
+                                           save_info,
                                            render_process_host_id,
                                            render_view_id,
-                                           request_context);
+                                           context);
 }
 
 // Actions from the UI thread and run on the download thread
@@ -536,7 +594,7 @@ void DownloadFileManager::OnDownloadUrl(const GURL& url,
 // TODO(paulg): File 'stat' operations.
 #if !defined(OS_MACOSX)
 void DownloadFileManager::OnShowDownloadInShell(const FilePath& full_path) {
-  DCHECK(MessageLoop::current() == file_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
   platform_util::ShowItemInFolder(full_path);
 }
 #endif
@@ -548,7 +606,7 @@ void DownloadFileManager::OnShowDownloadInShell(const FilePath& full_path) {
 void DownloadFileManager::OnOpenDownloadInShell(const FilePath& full_path,
                                                 const GURL& url,
                                                 gfx::NativeView parent_window) {
-  DCHECK(MessageLoop::current() == file_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
 #if defined(OS_WIN)
   if (NULL != parent_window) {
     win_util::SaferOpenItemViaShell(parent_window, L"", full_path,
@@ -566,7 +624,7 @@ void DownloadFileManager::OnOpenDownloadInShell(const FilePath& full_path,
 void DownloadFileManager::OnFinalDownloadName(int id,
                                               const FilePath& full_path,
                                               DownloadManager* manager) {
-  DCHECK(MessageLoop::current() == file_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
   DownloadFileMap::iterator it = downloads_.find(id);
   if (it == downloads_.end())
     return;
@@ -580,24 +638,25 @@ void DownloadFileManager::OnFinalDownloadName(int id,
     // http://crbug.com/13120 for details.
     download->AnnotateWithSourceInformation();
 #endif
-    ui_loop_->PostTask(FROM_HERE,
-        NewRunnableMethod(manager,
-                          &DownloadManager::DownloadRenamedToFinalName,
-                          id,
-                          full_path));
+    ChromeThread::PostTask(
+        ChromeThread::UI, FROM_HERE,
+        NewRunnableMethod(
+            manager, &DownloadManager::DownloadRenamedToFinalName, id,
+            full_path));
   } else {
     // Error. Between the time the UI thread generated 'full_path' to the time
     // this code runs, something happened that prevents us from renaming.
     DownloadManagerMap::iterator dmit = managers_.find(download->id());
     if (dmit != managers_.end()) {
       DownloadManager* dlm = dmit->second;
-      ui_loop_->PostTask(FROM_HERE,
-          NewRunnableMethod(dlm,
-                            &DownloadManager::DownloadCancelled,
-                            id));
+      ChromeThread::PostTask(
+          ChromeThread::UI, FROM_HERE,
+          NewRunnableMethod(dlm, &DownloadManager::DownloadCancelled, id));
     } else {
-      ui_loop_->PostTask(FROM_HERE,
-          NewRunnableFunction(&DownloadManager::CancelDownloadRequest,
+      ChromeThread::PostTask(
+          ChromeThread::IO, FROM_HERE,
+          NewRunnableFunction(&DownloadManager::OnCancelDownloadRequest,
+                              resource_dispatcher_host_,
                               download->child_id(),
                               download->request_id()));
     }
@@ -610,9 +669,11 @@ void DownloadFileManager::OnFinalDownloadName(int id,
     delete download;
   }
 
-  if (downloads_.empty())
-    ui_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &DownloadFileManager::StopUpdateTimer));
+  if (downloads_.empty()) {
+    ChromeThread::PostTask(
+      ChromeThread::UI, FROM_HERE,
+      NewRunnableMethod(this, &DownloadFileManager::StopUpdateTimer));
+  }
 }
 
 // static

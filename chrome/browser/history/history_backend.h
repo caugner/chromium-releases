@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,9 +52,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
    public:
     virtual ~Delegate() {}
 
-    // Called when the database is from a future version of the product and can
-    // not be used.
-    virtual void NotifyTooNew() = 0;
+    // Called when the database cannot be read correctly for some reason.
+    virtual void NotifyProfileError(int message_id) = 0;
 
     // Sets the in-memory history backend. The in-memory backend is created by
     // the main backend. For non-unit tests, this happens on the background
@@ -95,12 +94,12 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                  Delegate* delegate,
                  BookmarkService* bookmark_service);
 
-  ~HistoryBackend();
-
   // Must be called after creation but before any objects are created. If this
   // fails, all other functions will fail as well. (Since this runs on another
   // thread, we don't bother returning failure.)
-  void Init();
+  //
+  // |force_fail| can be set during unittests to unconditionally fail to init.
+  void Init(bool force_fail);
 
   // Notification that the history system is shutting down. This will break
   // the refs owned by the delegate and any pending transaction so it will
@@ -113,8 +112,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Navigation ----------------------------------------------------------------
 
   void AddPage(scoped_refptr<HistoryAddPageArgs> request);
-  void SetPageTitle(const GURL& url, const std::wstring& title);
-  void AddPageWithDetails(const URLRow& info);
+  virtual void SetPageTitle(const GURL& url, const std::wstring& title);
 
   // Indexing ------------------------------------------------------------------
 
@@ -192,7 +190,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                         const GURL& page_url);
   void SetFavIcon(const GURL& page_url,
                   const GURL& icon_url,
-                  scoped_refptr<RefCountedBytes> data);
+                  scoped_refptr<RefCountedMemory> data);
   void UpdateFavIconMappingAndFetch(scoped_refptr<GetFavIconRequest> request,
                                     const GURL& page_url,
                                     const GURL& icon_url);
@@ -240,12 +238,21 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   void ProcessDBTask(scoped_refptr<HistoryDBTaskRequest> request);
 
+  virtual bool GetAllTypedURLs(std::vector<history::URLRow>* urls);
+
+  virtual bool UpdateURL(const URLID id, const history::URLRow& url);
+
+  virtual bool GetURL(const GURL& url, history::URLRow* url_row);
+
   // Deleting ------------------------------------------------------------------
 
-  void DeleteURL(const GURL& url);
+  virtual void DeleteURLs(const std::vector<GURL>& urls);
+
+  virtual void DeleteURL(const GURL& url);
 
   // Calls ExpireHistoryBackend::ExpireHistoryBetween and commits the change.
   void ExpireHistoryBetween(scoped_refptr<ExpireHistoryRequest> request,
+                            const std::set<GURL>& restrict_urls,
                             base::Time begin_time,
                             base::Time end_time);
 
@@ -272,12 +279,17 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   ExpireHistoryBackend* expire_backend() { return &expirer_; }
 #endif
 
+ protected:
+  virtual ~HistoryBackend();
+
  private:
+  friend class base::RefCountedThreadSafe<HistoryBackend>;
   friend class CommitLaterTask;  // The commit task needs to call Commit().
   friend class HistoryTest;  // So the unit tests can poke our innards.
   FRIEND_TEST(HistoryBackendTest, DeleteAll);
   FRIEND_TEST(HistoryBackendTest, ImportedFaviconsTest);
   FRIEND_TEST(HistoryBackendTest, URLsNoLongerBookmarked);
+  FRIEND_TEST(HistoryBackendTest, StripUsernamePasswordTest);
   friend class ::TestingProfile;
 
   // Computes the name of the specified database on disk.

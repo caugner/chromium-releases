@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "chrome/browser/importer/importer.h"
 #include "chrome/browser/first_run.h"
 #include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/installer/util/browser_distribution.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -27,9 +28,10 @@ FirstRunCustomizeView::FirstRunCustomizeView(Profile* profile,
                                              bool default_browser_checked,
                                              bool homepage_defined,
                                              int import_items,
-                                             int dont_import_items)
+                                             int dont_import_items,
+                                             bool search_engine_experiment)
     : FirstRunViewBase(profile, homepage_defined, import_items,
-                       dont_import_items),
+                       dont_import_items, search_engine_experiment),
       main_label_(NULL),
       import_cbox_(NULL),
       import_from_combo_(NULL),
@@ -45,7 +47,8 @@ FirstRunCustomizeView::FirstRunCustomizeView(Profile* profile,
   // the customize view, so that the user selection isn't lost when you uncheck
   // and then open the Customize dialog. Therefore, we propagate the selection
   // status of the default browser here.
-  default_browser_->SetChecked(default_browser_checked);
+  if (default_browser_)
+    default_browser_->SetChecked(default_browser_checked);
 }
 
 FirstRunCustomizeView::~FirstRunCustomizeView() {
@@ -165,6 +168,9 @@ void FirstRunCustomizeView::ButtonPressed(
     // Disable the import combobox if the user unchecks the checkbox.
     import_from_combo_->SetEnabled(import_cbox_->checked());
   }
+
+  // Call the function of the base class to update its buttons.
+  FirstRunViewBase::ButtonPressed(sender, event);
 }
 
 int FirstRunCustomizeView::GetItemCount() {
@@ -194,31 +200,36 @@ bool FirstRunCustomizeView::Accept() {
   quick_shortcut_cbox_->SetEnabled(false);
 
   if (desktop_shortcut_cbox_->checked()) {
-    UserMetrics::RecordAction(L"FirstRunCustom_Do_DesktopShortcut", profile_);
+    UserMetrics::RecordAction(
+            UserMetricsAction("FirstRunCustom_Do_DesktopShortcut"), profile_);
     CreateDesktopShortcut();
   }
   if (quick_shortcut_cbox_->checked()) {
-    UserMetrics::RecordAction(L"FirstRunCustom_Do_QuickLShortcut", profile_);
+    UserMetrics::RecordAction(
+            UserMetricsAction("FirstRunCustom_Do_QuickLShortcut"), profile_);
     CreateQuickLaunchShortcut();
   }
   if (!import_cbox_->checked()) {
-    UserMetrics::RecordAction(L"FirstRunCustom_No_Import", profile_);
+    UserMetrics::RecordAction(UserMetricsAction("FirstRunCustom_No_Import"),
+                              profile_);
   } else {
     int browser_selected = import_from_combo_->selected_item();
     FirstRun::ImportSettings(profile_,
         importer_host_->GetSourceProfileInfoAt(browser_selected).browser_type,
         GetImportItems(), window()->GetNativeWindow());
   }
-  if (default_browser_->checked())
+  if (default_browser_ && default_browser_->checked())
     SetDefaultBrowser();
 
-  if (customize_observer_)
+  // The customize observer is responsible for shutting down the startup
+  // message loop.
+  if (customize_observer_) {
     customize_observer_->CustomizeAccepted();
-
-  // Exit the message loop we were started with so that startup can continue.
-  MessageLoop::current()->Quit();
-
-  FirstRunComplete();
+  } else {
+    // Exit the message loop we were started with so that startup can continue.
+    MessageLoop::current()->Quit();
+    FirstRunComplete();
+  }
   return true;
 }
 

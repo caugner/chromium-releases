@@ -9,10 +9,12 @@
 
 namespace google_update {
 
-extern const wchar_t kChromeGuid[];
 // Strictly speaking Google Update doesn't care about this GUID but it is still
 // related to install as it is used by MSI to identify Gears.
 extern const wchar_t kGearsUpgradeCode[];
+
+// The GUID Google Update uses to keep track of Chrome upgrades.
+extern const wchar_t kChromeUpgradeCode[];
 
 extern const wchar_t kRegPathClients[];
 
@@ -28,6 +30,8 @@ extern const wchar_t kRegClientField[];
 extern const wchar_t kRegDidRunField[];
 extern const wchar_t kRegLangField[];
 extern const wchar_t kRegLastCheckedField[];
+extern const wchar_t kRegMetricsId[];
+extern const wchar_t kRegMSIField[];
 extern const wchar_t kRegNameField[];
 extern const wchar_t kRegOldVersionField[];
 extern const wchar_t kRegRenameCmdField[];
@@ -38,6 +42,14 @@ extern const wchar_t kRegReferralField[];
 extern const wchar_t kRegEULAAceptedField[];
 
 extern const wchar_t kEnvProductVersionKey[];
+
+// last time that chrome ran in the Time internal format.
+extern const wchar_t kRegLastRunTimeField[];
+
+// How often to check if the persistent instance of Chrome needs to restart
+// to install an update.
+extern const int kUpdateCheckInvervalHours;
+
 }  // namespace google_update
 
 #endif  // CHROME_INSTALLER_UTIL_GOOGLE_UPDATE_CONSTANTS_H_

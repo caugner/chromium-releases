@@ -1,6 +1,6 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #ifndef WEBKIT_GLUE_MEDIA_BUFFERED_DATA_SOURCE_H_
 #define WEBKIT_GLUE_MEDIA_BUFFERED_DATA_SOURCE_H_
@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/lock.h"
 #include "base/scoped_ptr.h"
 #include "base/timer.h"
@@ -47,7 +48,6 @@ class BufferedResourceLoader :
       const GURL& url,
       int64 first_byte_position,
       int64 last_byte_position);
-  virtual ~BufferedResourceLoader();
 
   // Start the resource loading with the specified URL and range.
   // This method operates in asynchronous mode. Once there's a response from the
@@ -110,21 +110,28 @@ class BufferedResourceLoader :
   virtual void OnUploadProgress(uint64 position, uint64 size) {}
   virtual bool OnReceivedRedirect(
       const GURL& new_url,
-      const webkit_glue::ResourceLoaderBridge::ResponseInfo& info);
+      const webkit_glue::ResourceLoaderBridge::ResponseInfo& info,
+      bool* has_new_first_party_for_cookies,
+      GURL* new_first_party_for_cookies);
   virtual void OnReceivedResponse(
       const webkit_glue::ResourceLoaderBridge::ResponseInfo& info,
       bool content_filtered);
   virtual void OnReceivedData(const char* data, int len);
   virtual void OnCompletedRequest(const URLRequestStatus& status,
       const std::string& security_info);
-  std::string GetURLForDebugging() { return url_.spec(); }
+  GURL GetURLForDebugging() const { return url_; }
 
  protected:
+  friend class base::RefCountedThreadSafe<BufferedResourceLoader>;
+
   // An empty constructor so mock classes can be constructed.
   BufferedResourceLoader() {
   }
 
+  virtual ~BufferedResourceLoader();
+
  private:
+
   // Defer the resource loading if the buffer is full.
   void EnableDeferIfNeeded();
 
@@ -215,6 +222,10 @@ class BufferedDataSource : public media::DataSource {
         webkit_glue::MediaResourceLoaderBridgeFactory*>(
         message_loop, bridge_factory);
   }
+
+  // media::FilterFactoryImpl2 implementation.
+  static bool IsMediaFormatSupported(
+      const media::MediaFormat& media_format);
 
   // media::MediaFilter implementation.
   virtual void Initialize(const std::string& url,

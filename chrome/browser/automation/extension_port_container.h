@@ -56,13 +56,15 @@ class ExtensionPortContainer : public IPC::Message::Sender {
                int process_id,
                int routing_id,
                int connection_id,
-               const std::string& channel_name);
+               const std::string& channel_name,
+               const std::string& tab_json);
 
   // Sends a connect response to the external port.
   void SendConnectionResponse(int connection_id, int port_id);
 
   void OnExtensionMessageInvoke(const std::string& function_name,
-                                const ListValue& args);
+                                const ListValue& args,
+                                bool requires_incognito_access);
   void OnExtensionHandleMessage(const std::string& message, int source_port_id);
   void OnExtensionPortDisconnected(int source_port_id);
 

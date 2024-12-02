@@ -18,7 +18,7 @@ namespace webkit_glue {
 
 class PasswordFormDomManager {
  public:
-  typedef std::map<std::wstring, std::wstring> LoginCollection;
+  typedef std::map<string16, string16> LoginCollection;
 
   // Structure used for autofilling password forms.
   // basic_data identifies the HTML form on the page and preferred username/
@@ -41,7 +41,7 @@ class PasswordFormDomManager {
   // custom metadata to DOM nodes, so we have to do this every time an event
   // happens with a given form and compare against previously Create'd forms
   // to identify..which sucks.
-  static PasswordForm* CreatePasswordForm(const WebKit::WebForm& form);
+  static PasswordForm* CreatePasswordForm(const WebKit::WebFormElement& form);
 
   // Create a FillData structure in preparation for autofilling a form,
   // from basic_data identifying which form to fill, and a collection of

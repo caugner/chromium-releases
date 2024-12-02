@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,10 @@
 
 #include <gtk/gtk.h>
 
-#include "app/gfx/gtk_util.h"
 #include "base/logging.h"
+#include "gfx/gtk_util.h"
 #include "webkit/glue/plugins/gtk_plugin_container.h"
-#include "webkit/glue/webplugin.h"
+#include "webkit/glue/plugins/webplugin.h"
 
 GtkWidget* GtkPluginContainerManager::CreatePluginContainer(
     gfx::PluginWindowHandle id) {
@@ -28,11 +28,11 @@ GtkWidget* GtkPluginContainerManager::CreatePluginContainer(
   //
   // Note, the RealizeCallback relies on the plugin_window_to_widget_map_ to
   // have the mapping.
-  g_signal_connect(G_OBJECT(widget), "realize",
+  g_signal_connect(widget, "realize",
                    G_CALLBACK(RealizeCallback), this);
 
   // Don't destroy the widget when the plug is removed.
-  g_signal_connect(G_OBJECT(widget), "plug-removed",
+  g_signal_connect(widget, "plug-removed",
                    G_CALLBACK(gtk_true), NULL);
 
   gtk_container_add(GTK_CONTAINER(host_widget_), widget);
@@ -59,14 +59,17 @@ void GtkPluginContainerManager::MovePluginContainer(
     return;
 
   DCHECK(!GTK_WIDGET_NO_WINDOW(widget));
-  DCHECK(GTK_WIDGET_REALIZED(widget));
 
   if (!move.visible) {
     gtk_widget_hide(widget);
     return;
-  } else {
-    gtk_widget_show(widget);
   }
+
+  DCHECK(GTK_WIDGET_REALIZED(widget));
+  gtk_widget_show(widget);
+
+  if (!move.rects_valid)
+    return;
 
   GdkRectangle clip_rect = move.clip_rect.ToGdkRectangle();
   GdkRegion* clip_region = gdk_region_rectangle(&clip_rect);

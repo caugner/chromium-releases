@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,14 @@
 
 #include <vector>
 
-#include "app/gfx/native_widget_types.h"
+#include "app/menus/simple_menu_model.h"
 #include "base/basictypes.h"
-#include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_model_observer.h"
+#include "gfx/native_widget_types.h"
 
 class Browser;
 class PageNavigator;
+class Profile;
 
 // An interface implemented by an object that performs actions on the actual
 // menu for the controller.
@@ -23,16 +25,17 @@ class BookmarkContextMenuControllerDelegate {
   // Closes the bookmark context menu.
   virtual void CloseMenu() = 0;
 
-  // Methods that add items to the underlying menu.
-  virtual void AddItem(int command_id) = 0;
-  virtual void AddItemWithStringId(int command_id, int string_id) = 0;
-  virtual void AddSeparator() = 0;
-  virtual void AddCheckboxItem(int command_id) = 0;
+  // Sent before any command from the menu is executed.
+  virtual void WillExecuteCommand() {}
+
+  // Sent after any command from the menu is executed.
+  virtual void DidExecuteCommand() {}
 };
 
 // BookmarkContextMenuController creates and manages state for the context menu
 // shown for any bookmark item.
-class BookmarkContextMenuController : public BookmarkModelObserver {
+class BookmarkContextMenuController : public BookmarkModelObserver,
+                                      public menus::SimpleMenuModel::Delegate {
  public:
   // Used to configure what the context menu shows.
   enum ConfigurationType {
@@ -67,15 +70,35 @@ class BookmarkContextMenuController : public BookmarkModelObserver {
 
   void BuildMenu();
 
-  void ExecuteCommand(int id);
-  bool IsItemChecked(int id) const;
-  bool IsCommandEnabled(int id) const;
+  menus::SimpleMenuModel* menu_model() {
+    return menu_model_.get();
+  }
+
+
+  // menus::SimpleMenuModel::Delegate implementation:
+  virtual bool IsCommandIdChecked(int command_id) const;
+  virtual bool IsCommandIdEnabled(int command_id) const;
+  virtual bool GetAcceleratorForCommandId(
+      int command_id,
+      menus::Accelerator* accelerator) {
+    return false;
+  }
+  virtual void ExecuteCommand(int command_id);
 
   // Accessors:
   Profile* profile() const { return profile_; }
   PageNavigator* navigator() const { return navigator_; }
 
  private:
+  // Adds a IDS_* style command to the menu.
+  void AddItem(int id);
+  // Adds a IDS_* style command to the menu with a different localized string.
+  void AddItem(int id, int localization_id);
+  // Adds a separator to the menu.
+  void AddSeparator();
+  // Adds a checkable item to the menu.
+  void AddCheckboxItem(int id);
+
   // BookmarkModelObserver methods. Any change to the model results in closing
   // the menu.
   virtual void Loaded(BookmarkModel* model) {}
@@ -102,16 +125,8 @@ class BookmarkContextMenuController : public BookmarkModelObserver {
   // Invoked from the various bookmark model observer methods. Closes the menu.
   void ModelChanged();
 
-  // Removes the observer from the model and NULLs out model_.
-  BookmarkModel* RemoveModelObserver();
-
   // Returns true if selection_ has at least one bookmark of type url.
   bool HasURLs() const;
-
-  // Returns the parent for newly created folders/bookmarks. If selection_
-  // has one element and it is a folder, selection_[0] is returned, otherwise
-  // parent_ is returned.
-  const BookmarkNode* GetParentForNewNodes() const;
 
   gfx::NativeWindow parent_window_;
   BookmarkContextMenuControllerDelegate* delegate_;
@@ -121,6 +136,7 @@ class BookmarkContextMenuController : public BookmarkModelObserver {
   std::vector<const BookmarkNode*> selection_;
   ConfigurationType configuration_;
   BookmarkModel* model_;
+  scoped_ptr<menus::SimpleMenuModel> menu_model_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkContextMenuController);
 };

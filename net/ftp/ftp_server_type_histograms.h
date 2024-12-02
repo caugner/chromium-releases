@@ -6,10 +6,7 @@
 #define NET_FTP_FTP_SERVER_TYPE_HISTOGRAMS_H_
 
 // The UpdateFtpServerTypeHistograms function collects statistics related
-// to the types of FTP servers that our users are encountering.  The
-// information will help us decide for what servers we can safely drop support.
-// The parsing code for each type of server is very complex, which poses a
-// security risk. In fact, in current shape it's a disaster waiting to happen.
+// to the types of FTP servers that our users are encountering.
 
 namespace net {
 
@@ -19,14 +16,14 @@ enum FtpServerType {
   // connecting to isn't an FTP server), or a broken server.
   SERVER_UNKNOWN = 0,
 
-  SERVER_LSL = 1,   // Server using /bin/ls -l and variants.
-  SERVER_DLS = 2,   // Server using /bin/dls.
-  SERVER_EPLF = 3,  // Server using EPLF format.
-  SERVER_DOS = 4,   // WinNT server configured for old style listing.
-  SERVER_VMS = 5,   // VMS (including variants).
-  SERVER_CMS = 6,   // IBM VM/CMS, VM/ESA, z/VM formats.
-  SERVER_OS2 = 7,   // OS/2 FTP Server.
-  SERVER_W16 = 8,   // win16 hosts: SuperTCP or NetManage Chameleon.
+  // Types 1-8 are RESERVED (were earlier used for listings recognized by
+  // Mozilla's ParseFTPList code).
+
+  SERVER_LS = 9,        // Server using /bin/ls -l listing style.
+  SERVER_WINDOWS = 10,  // Server using Windows listing style.
+  SERVER_VMS = 11,      // Server using VMS listing style.
+  SERVER_NETWARE = 12,  // Server using Netware listing style.
+  SERVER_MLSD = 13,     // Server using MLSD listing (RFC-3659).
 
   NUM_OF_SERVER_TYPES
 };

@@ -10,7 +10,7 @@
 #include "base/basictypes.h"
 #include "base/id_map.h"
 #include "base/hash_tables.h"
-#include "webkit/api/public/WebNotification.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebNotification.h"
 
 namespace WebKit {
 class WebNotificationPermissionCallback;
@@ -35,6 +35,9 @@ class ActiveNotificationTracker {
   void OnPermissionRequestComplete(int id);
   WebKit::WebNotificationPermissionCallback* GetCallback(int id);
 
+  // Clears out all active notifications.  Useful on page navigation.
+  void Clear();
+
  private:
   typedef std::map<WebKit::WebNotification, int> ReverseTable;
 
@@ -47,4 +50,3 @@ class ActiveNotificationTracker {
 };
 
 #endif  // CHROME_COMMON_DESKTOP_NOTIFICATIONS_ACTIVE_NOTIFICATION_TRACKER_H_
-

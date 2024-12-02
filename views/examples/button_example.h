@@ -7,28 +7,38 @@
 
 #include "base/string_util.h"
 #include "views/controls/button/text_button.h"
-#include "views/controls/tabbed_pane/tabbed_pane.h"
 #include "views/examples/example_base.h"
+#include "views/fill_layout.h"
+#include "views/view.h"
 
 namespace examples {
 
 // ButtonExample simply counts the number of clicks.
-class ButtonExample : protected ExampleBase, private views::ButtonListener {
+class ButtonExample : public ExampleBase, public views::ButtonListener {
  public:
-  ButtonExample(views::TabbedPane* tabbed_pane, views::Label* message)
-      : ExampleBase(message),
-        count_(0) {
-    views::TextButton* button = new views::TextButton(this, L"Button");
-    tabbed_pane->AddTab(L"Text Button", button);
+  explicit ButtonExample(ExamplesMain* main) : ExampleBase(main), count_(0) {
+    button_ = new views::TextButton(this, L"Button");
   }
 
   virtual ~ButtonExample() {}
+
+  virtual std::wstring GetExampleTitle() {
+    return L"Text Button";
+  }
+
+  virtual void CreateExampleView(views::View* container) {
+    container->SetLayoutManager(new views::FillLayout);
+    container->AddChildView(button_);
+  }
 
  private:
   // ButtonListner implementation.
   virtual void ButtonPressed(views::Button* sender, const views::Event& event) {
     PrintStatus(L"Pressed! count:%d", ++count_);
   }
+
+  // The only control in this test.
+  views::TextButton* button_;
 
   // The number of times the button is pressed.
   int count_;

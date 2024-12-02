@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,14 +7,18 @@
 #include <algorithm>
 
 #include "app/drag_drop_types.h"
-#include "app/gfx/canvas.h"
 #include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "gfx/canvas.h"
 #include "views/fill_layout.h"
 #include "views/focus/view_storage.h"
 #include "views/widget/widget.h"
 #include "views/window/window.h"
+
+#if defined(OS_LINUX)
+#include "views/widget/widget_gtk.h"
+#endif  // defined(OS_LINUX)
 
 namespace views {
 
@@ -135,10 +139,6 @@ void RootView::SchedulePaint() {
   View::SchedulePaint();
 }
 
-void RootView::SchedulePaint(int x, int y, int w, int h) {
-  View::SchedulePaint();
-}
-
 #ifndef NDEBUG
 // Sets the value of RootView's |is_processing_paint_| member to true as long
 // as ProcessPaint is being called. Sets it to |false| when it returns.
@@ -155,7 +155,7 @@ class ScopedProcessingPaint {
  private:
   bool* is_processing_paint_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(ScopedProcessingPaint);
+  DISALLOW_COPY_AND_ASSIGN(ScopedProcessingPaint);
 };
 #endif
 
@@ -412,7 +412,7 @@ void RootView::UpdateCursor(const MouseEvent& e) {
   if (v && v != this) {
     gfx::Point l(e.location());
     View::ConvertPointToView(this, v, &l);
-    cursor = v->GetCursorForPoint(e.GetType(), l.x(), l.y());
+    cursor = v->GetCursorForPoint(e.GetType(), l);
   }
   SetActiveCursor(cursor);
 }
@@ -477,7 +477,7 @@ void RootView::OnMouseMoved(const MouseEvent& e) {
     mouse_move_handler_->OnMouseMoved(moved_event);
 
     gfx::NativeCursor cursor = mouse_move_handler_->GetCursorForPoint(
-        moved_event.GetType(), moved_event.x(), moved_event.y());
+        moved_event.GetType(), moved_event.location());
     SetActiveCursor(cursor);
   } else if (mouse_move_handler_ != NULL) {
     MouseEvent exited_event(Event::ET_MOUSE_EXITED, 0, 0, 0);
@@ -559,7 +559,7 @@ View* RootView::FindNextFocusableView(View* starting_view,
   if (!starting_view) {
     // Default to the first/last child
     starting_view = reverse ? GetChildViewAt(GetChildViewCount() - 1) :
-                              GetChildViewAt(0) ;
+                              GetChildViewAt(0);
     // If there was no starting view, then the one we select is a potential
     // focus candidate.
     check_starting_view = true;
@@ -764,6 +764,11 @@ void RootView::SetFocusTraversableParentView(View* view) {
   focus_traversable_parent_view_ = view;
 }
 
+void RootView::NotifyNativeViewHierarchyChanged(bool attached,
+                                                gfx::NativeView native_view) {
+  PropagateNativeViewHierarchyChanged(attached, native_view, this);
+}
+
 // static
 View* RootView::FindSelectedViewForGroup(View* view) {
   if (view->IsGroupFocusTraversable() ||
@@ -793,8 +798,7 @@ bool RootView::ProcessKeyEvent(const KeyEvent& event) {
   // keyboard.
   if (v && v->IsEnabled() && ((event.GetKeyCode() == base::VKEY_APPS) ||
      (event.GetKeyCode() == base::VKEY_F10 && event.IsShiftDown()))) {
-    gfx::Point screen_loc = v->GetKeyboardContextMenuLocation();
-    v->ShowContextMenu(screen_loc.x(), screen_loc.y(), false);
+    v->ShowContextMenu(v->GetKeyboardContextMenuLocation(), false);
     return true;
   }
   for (; v && v != this && !consumed; v = v->GetParent()) {
@@ -904,18 +908,6 @@ bool RootView::GetAccessibleRole(AccessibilityTypes::Role* role) {
   return true;
 }
 
-bool RootView::GetAccessibleName(std::wstring* name) {
-  if (!accessible_name_.empty()) {
-    *name = accessible_name_;
-    return true;
-  }
-  return false;
-}
-
-void RootView::SetAccessibleName(const std::wstring& name) {
-  accessible_name_.assign(name);
-}
-
 View* RootView::GetDragView() {
   return drag_view_;
 }
@@ -929,7 +921,8 @@ void RootView::SetActiveCursor(gfx::NativeCursor cursor) {
     previous_cursor_ = NULL;
   }
 #elif defined(OS_LINUX)
-  gfx::NativeView native_view = GetWidget()->GetNativeView();
+  gfx::NativeView native_view =
+      static_cast<WidgetGtk*>(GetWidget())->window_contents();
   if (!native_view)
     return;
   gdk_window_set_cursor(native_view->window, cursor);

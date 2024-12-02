@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,8 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/string16.h"
-#include "base/task.h"
 #include "chrome/common/page_transition_types.h"
 
 class DictionaryValue;
@@ -42,6 +42,7 @@ class DOMUI {
   // Called from TabContents.
   virtual void ProcessDOMUIMessage(const std::string& message,
                                    const Value* content,
+                                   const GURL& source_url,
                                    int request_id,
                                    bool has_callback);
 
@@ -89,11 +90,11 @@ class DOMUI {
 
   // Returns the transition type that should be used for link clicks on this
   // DOM UI. This will default to LINK but may be overridden.
-  const PageTransition::Type link_transition_type() const {
+  PageTransition::Type link_transition_type() const {
     return link_transition_type_;
   }
 
-  const int bindings() const {
+  int bindings() const {
     return bindings_;
   }
 
@@ -111,7 +112,7 @@ class DOMUI {
 
   ThemeProvider* GetThemeProvider() const;
 
-  TabContents* tab_contents() { return tab_contents_; }
+  TabContents* tab_contents() const { return tab_contents_; }
 
   Profile* GetProfile();
 

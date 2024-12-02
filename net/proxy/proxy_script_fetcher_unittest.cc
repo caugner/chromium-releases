@@ -1,4 +1,4 @@
-// Copyright (c) 2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,15 +32,19 @@ class RequestContext : public URLRequestContext {
  public:
   RequestContext() {
     net::ProxyConfig no_proxy;
-    host_resolver_ = net::CreateSystemHostResolver();
+    host_resolver_ = net::CreateSystemHostResolver(NULL);
     proxy_service_ = net::ProxyService::CreateFixed(no_proxy);
     ssl_config_service_ = new net::SSLConfigServiceDefaults;
 
     http_transaction_factory_ =
-        new net::HttpCache(net::HttpNetworkLayer::CreateFactory(
-            host_resolver_, proxy_service_, ssl_config_service_),
+        new net::HttpCache(
+            net::HttpNetworkLayer::CreateFactory(
+                NULL, host_resolver_, proxy_service_, ssl_config_service_,
+                NULL),
             disk_cache::CreateInMemoryCacheBackend(0));
   }
+
+ private:
   ~RequestContext() {
     delete http_transaction_factory_;
   }
@@ -193,8 +197,7 @@ TEST_F(ProxyScriptFetcherTest, NoCache) {
   }
 
   // Now kill the HTTP server.
-  server->SendQuit();
-  EXPECT_TRUE(server->WaitToFinish(20000));
+  EXPECT_TRUE(server->Stop());  // Verify it shutdown synchronously.
   server = NULL;
 
   // Try to fetch the file again -- if should fail, since the server is not

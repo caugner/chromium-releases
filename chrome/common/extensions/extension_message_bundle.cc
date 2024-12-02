@@ -5,11 +5,22 @@
 #include "chrome/common/extensions/extension_message_bundle.h"
 
 #include <string>
+#include <vector>
 
+#include "app/l10n_util.h"
 #include "base/hash_tables.h"
+#include "base/i18n/rtl.h"
+#include "base/linked_ptr.h"
 #include "base/scoped_ptr.h"
-#include "base/string_util.h"
+#include "base/singleton.h"
+#include "base/stl_util-inl.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_error_utils.h"
+#include "chrome/common/extensions/extension_l10n_util.h"
+
+namespace errors = extension_manifest_errors;
 
 const wchar_t* ExtensionMessageBundle::kContentKey = L"content";
 const wchar_t* ExtensionMessageBundle::kMessageKey = L"message";
@@ -20,9 +31,18 @@ const char* ExtensionMessageBundle::kPlaceholderEnd = "$";
 const char* ExtensionMessageBundle::kMessageBegin = "__MSG_";
 const char* ExtensionMessageBundle::kMessageEnd = "__";
 
-const char* ExtensionMessageBundle::kExtensionName = "chrome_extension_name";
-const char* ExtensionMessageBundle::kExtensionDescription =
-  "chrome_extension_description";
+// Reserved messages names.
+const char* ExtensionMessageBundle::kUILocaleKey = "@@ui_locale";
+const char* ExtensionMessageBundle::kBidiDirectionKey = "@@bidi_dir";
+const char* ExtensionMessageBundle::kBidiReversedDirectionKey =
+    "@@bidi_reversed_dir";
+const char* ExtensionMessageBundle::kBidiStartEdgeKey = "@@bidi_start_edge";
+const char* ExtensionMessageBundle::kBidiEndEdgeKey = "@@bidi_end_edge";
+const char* ExtensionMessageBundle::kExtensionIdKey = "@@extension_id";
+
+// Reserved messages values.
+const char* ExtensionMessageBundle::kBidiLeftEdgeValue = "left";
+const char* ExtensionMessageBundle::kBidiRightEdgeValue = "right";
 
 // Formats message in case we encounter a bad formed key in the JSON object.
 // Returns false and sets |error| to actual error message.
@@ -34,52 +54,73 @@ static bool BadKeyMessage(const std::string& name, std::string* error) {
 
 // static
 ExtensionMessageBundle* ExtensionMessageBundle::Create(
-    const DictionaryValue& default_locale_catalog,
-    const DictionaryValue& current_locale_catalog,
+    const CatalogVector& locale_catalogs,
     std::string* error) {
   scoped_ptr<ExtensionMessageBundle> message_bundle(
       new ExtensionMessageBundle);
-  if (!message_bundle->Init(default_locale_catalog,
-                             current_locale_catalog,
-                             error))
+  if (!message_bundle->Init(locale_catalogs, error))
     return NULL;
 
   return message_bundle.release();
 }
 
-bool ExtensionMessageBundle::Init(const DictionaryValue& default_locale_catalog,
-                                  const DictionaryValue& current_locale_catalog,
+bool ExtensionMessageBundle::Init(const CatalogVector& locale_catalogs,
                                   std::string* error) {
   dictionary_.clear();
 
-  // Create a single dictionary out of default and current_locale catalogs.
-  // If message is missing from current_locale catalog, we take one from default
-  // catalog.
-  DictionaryValue::key_iterator key_it = current_locale_catalog.begin_keys();
-  for (; key_it != current_locale_catalog.end_keys(); ++key_it) {
-    std::string key(StringToLowerASCII(WideToUTF8(*key_it)));
-    if (!IsValidName(*key_it))
-      return BadKeyMessage(key, error);
-    std::string value;
-    if (!GetMessageValue(*key_it, current_locale_catalog, &value, error))
-      return false;
-    // Keys are not case-sensitive.
-    dictionary_[key] = value;
+  for (CatalogVector::const_reverse_iterator it = locale_catalogs.rbegin();
+       it != locale_catalogs.rend(); ++it) {
+    DictionaryValue* catalog = (*it).get();
+    for (DictionaryValue::key_iterator key_it = catalog->begin_keys();
+         key_it != catalog->end_keys(); ++key_it) {
+      std::string key(StringToLowerASCII(WideToUTF8(*key_it)));
+      if (!IsValidName(*key_it))
+        return BadKeyMessage(key, error);
+      std::string value;
+      if (!GetMessageValue(*key_it, *catalog, &value, error))
+        return false;
+      // Keys are not case-sensitive.
+      dictionary_[key] = value;
+    }
   }
 
-  key_it = default_locale_catalog.begin_keys();
-  for (; key_it != default_locale_catalog.end_keys(); ++key_it) {
-    std::string key(StringToLowerASCII(WideToUTF8(*key_it)));
-    if (!IsValidName(*key_it))
-      return BadKeyMessage(key, error);
-    // Add only messages that are not provided by app_catalog.
-    if (dictionary_.find(key) != dictionary_.end())
-      continue;
-    std::string value;
-    if (!GetMessageValue(*key_it, default_locale_catalog, &value, error))
+  if (!AppendReservedMessagesForLocale(
+      extension_l10n_util::CurrentLocaleOrDefault(), error))
+    return false;
+
+  return true;
+}
+
+bool ExtensionMessageBundle::AppendReservedMessagesForLocale(
+    const std::string& app_locale, std::string* error) {
+  SubstitutionMap append_messages;
+  append_messages[kUILocaleKey] = app_locale;
+
+  // Calling base::i18n::GetTextDirection on non-UI threads doesn't seems safe,
+  // so we use GetTextDirectionForLocale instead.
+  if (base::i18n::GetTextDirectionForLocale(app_locale.c_str()) ==
+      base::i18n::RIGHT_TO_LEFT) {
+    append_messages[kBidiDirectionKey] = "rtl";
+    append_messages[kBidiReversedDirectionKey] = "ltr";
+    append_messages[kBidiStartEdgeKey] = kBidiRightEdgeValue;
+    append_messages[kBidiEndEdgeKey] = kBidiLeftEdgeValue;
+  } else {
+    append_messages[kBidiDirectionKey] = "ltr";
+    append_messages[kBidiReversedDirectionKey] = "rtl";
+    append_messages[kBidiStartEdgeKey] = kBidiLeftEdgeValue;
+    append_messages[kBidiEndEdgeKey] = kBidiRightEdgeValue;
+  }
+
+  // Add all reserved messages to the dictionary, but check for collisions.
+  SubstitutionMap::iterator it = append_messages.begin();
+  for (; it != append_messages.end(); ++it) {
+    if (ContainsKey(dictionary_, it->first)) {
+      *error = ExtensionErrorUtils::FormatErrorMessage(
+          errors::kReservedMessageFound, it->first);
       return false;
-    // Keys are not case-sensitive.
-    dictionary_[key] = value;
+    } else {
+      dictionary_[it->first] = it->second;
+    }
   }
 
   return true;
@@ -92,7 +133,7 @@ bool ExtensionMessageBundle::GetMessageValue(const std::wstring& wkey,
   std::string key(WideToUTF8(wkey));
   // Get the top level tree for given key (name part).
   DictionaryValue* name_tree;
-  if (!catalog.GetDictionary(wkey, &name_tree)) {
+  if (!catalog.GetDictionaryWithoutPathExpansion(wkey, &name_tree)) {
     *error = StringPrintf("Not a valid tree for key %s.", key.c_str());
     return false;
   }
@@ -133,13 +174,13 @@ bool ExtensionMessageBundle::GetPlaceholders(const DictionaryValue& name_tree,
   }
 
   for (DictionaryValue::key_iterator key_it = placeholders_tree->begin_keys();
-       key_it != placeholders_tree->end_keys();
-       ++key_it) {
+       key_it != placeholders_tree->end_keys(); ++key_it) {
     DictionaryValue* placeholder;
     std::string content_key = WideToUTF8(*key_it);
     if (!IsValidName(*key_it))
       return BadKeyMessage(content_key, error);
-    if (!placeholders_tree->GetDictionary(*key_it, &placeholder)) {
+    if (!placeholders_tree->GetDictionaryWithoutPathExpansion(*key_it,
+                                                              &placeholder)) {
       *error = StringPrintf("Invalid placeholder %s for key %s",
                             content_key.c_str(),
                             name_key.c_str());
@@ -171,7 +212,13 @@ bool ExtensionMessageBundle::ReplacePlaceholders(
 
 bool ExtensionMessageBundle::ReplaceMessages(std::string* text,
                                              std::string* error) const {
-  return ReplaceVariables(dictionary_, kMessageBegin, kMessageEnd, text, error);
+  return ReplaceMessagesWithExternalDictionary(dictionary_, text, error);
+}
+
+// static
+bool ExtensionMessageBundle::ReplaceMessagesWithExternalDictionary(
+    const SubstitutionMap& dictionary, std::string* text, std::string* error) {
+  return ReplaceVariables(dictionary, kMessageBegin, kMessageEnd, text, error);
 }
 
 // static
@@ -227,21 +274,6 @@ bool ExtensionMessageBundle::ReplaceVariables(
   return true;
 }
 
-// static
-template <typename str>
-bool ExtensionMessageBundle::IsValidName(const str& name) {
-  if (name.empty())
-    return false;
-
-  for (typename str::const_iterator it = name.begin(); it != name.end(); ++it) {
-    // Allow only ascii 0-9, a-z, A-Z, and _ in the name.
-    if (!IsAsciiAlpha(*it) && !IsAsciiDigit(*it) && *it != '_')
-      return false;
-  }
-
-  return true;
-}
-
 // Dictionary interface.
 
 std::string ExtensionMessageBundle::GetL10nMessage(
@@ -259,4 +291,23 @@ std::string ExtensionMessageBundle::GetL10nMessage(
   }
 
   return "";
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//
+// Renderer helper functions.
+//
+///////////////////////////////////////////////////////////////////////////////
+
+ExtensionToL10nMessagesMap* GetExtensionToL10nMessagesMap() {
+  return &Singleton<ExtensionToMessagesMap>()->messages_map;
+}
+
+L10nMessagesMap* GetL10nMessagesMap(const std::string extension_id) {
+  ExtensionToL10nMessagesMap::iterator it =
+      Singleton<ExtensionToMessagesMap>()->messages_map.find(extension_id);
+  if (it != Singleton<ExtensionToMessagesMap>()->messages_map.end())
+    return &(it->second);
+
+  return NULL;
 }

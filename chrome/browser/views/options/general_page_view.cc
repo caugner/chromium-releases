@@ -1,13 +1,13 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/views/options/general_page_view.h"
 
 #include "app/combobox_model.h"
-#include "app/gfx/codec/png_codec.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/callback.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser.h"
@@ -16,6 +16,7 @@
 #include "chrome/browser/favicon_service.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/session_startup_pref.h"
 #include "chrome/browser/search_engines/template_url.h"
@@ -25,8 +26,9 @@
 #include "chrome/browser/views/options/options_group_view.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/installer/util/browser_distribution.h"
+#include "gfx/codec/png_codec.h"
 #include "grit/app_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -105,7 +107,7 @@ class CustomHomePagesTableModel : public TableModel {
   // fav_icon_handle matches handle and notifies the observer of the change.
   void OnGotFavIcon(FaviconService::Handle handle,
                     bool know_fav_icon,
-                    scoped_refptr<RefCountedBytes> image_data,
+                    scoped_refptr<RefCountedMemory> image_data,
                     bool is_expired,
                     GURL icon_url);
 
@@ -154,7 +156,6 @@ void CustomHomePagesTableModel::Add(int index, const GURL& url) {
   DCHECK(index >= 0 && index <= RowCount());
   entries_.insert(entries_.begin() + static_cast<size_t>(index), Entry());
   entries_[index].url = url;
-  LoadFavIcon(&(entries_[index]));
   if (observer_)
     observer_->OnItemsAdded(index, 1);
 }
@@ -229,18 +230,18 @@ void CustomHomePagesTableModel::LoadFavIcon(Entry* entry) {
 void CustomHomePagesTableModel::OnGotFavIcon(
     FaviconService::Handle handle,
     bool know_fav_icon,
-    scoped_refptr<RefCountedBytes> image_data,
+    scoped_refptr<RefCountedMemory> image_data,
     bool is_expired,
     GURL icon_url) {
   int entry_index;
   Entry* entry = GetEntryByLoadHandle(handle, &entry_index);
   DCHECK(entry);
   entry->fav_icon_handle = 0;
-  if (know_fav_icon && image_data.get() && !image_data->data.empty()) {
+  if (know_fav_icon && image_data.get() && image_data->size()) {
     int width, height;
     std::vector<unsigned char> decoded_data;
-    if (gfx::PNGCodec::Decode(&image_data->data.front(),
-                              image_data->data.size(),
+    if (gfx::PNGCodec::Decode(image_data->front(),
+                              image_data->size(),
                               gfx::PNGCodec::FORMAT_BGRA, &decoded_data,
                               &width, &height)) {
       entry->icon.setConfig(SkBitmap::kARGB_8888_Config, width, height);
@@ -435,13 +436,13 @@ void GeneralPageView::ButtonPressed(
       sender == startup_custom_radio_) {
     SaveStartupPref();
     if (sender == startup_homepage_radio_) {
-      UserMetricsRecordAction(L"Options_Startup_Homepage",
+      UserMetricsRecordAction(UserMetricsAction("Options_Startup_Homepage"),
                               profile()->GetPrefs());
     } else if (sender == startup_last_session_radio_) {
-      UserMetricsRecordAction(L"Options_Startup_LastSession",
+      UserMetricsRecordAction(UserMetricsAction("Options_Startup_LastSession"),
                               profile()->GetPrefs());
     } else if (sender == startup_custom_radio_) {
-      UserMetricsRecordAction(L"Options_Startup_Custom",
+      UserMetricsRecordAction(UserMetricsAction("Options_Startup_Custom"),
                               profile()->GetPrefs());
     }
   } else if (sender == startup_add_custom_page_button_) {
@@ -451,33 +452,37 @@ void GeneralPageView::ButtonPressed(
   } else if (sender == startup_use_current_page_button_) {
     SetStartupURLToCurrentPage();
   } else if (sender == homepage_use_newtab_radio_) {
-    UserMetricsRecordAction(L"Options_Homepage_UseNewTab",
+    UserMetricsRecordAction(UserMetricsAction("Options_Homepage_UseNewTab"),
                             profile()->GetPrefs());
     SetHomepage(GetNewTabUIURLString());
     EnableHomepageURLField(false);
   } else if (sender == homepage_use_url_radio_) {
-    UserMetricsRecordAction(L"Options_Homepage_UseURL",
+    UserMetricsRecordAction(UserMetricsAction("Options_Homepage_UseURL"),
                             profile()->GetPrefs());
     SetHomepage(homepage_use_url_textfield_->text());
     EnableHomepageURLField(true);
   } else if (sender == homepage_show_home_button_checkbox_) {
     bool show_button = homepage_show_home_button_checkbox_->checked();
     if (show_button) {
-      UserMetricsRecordAction(L"Options_Homepage_ShowHomeButton",
-                              profile()->GetPrefs());
+      UserMetricsRecordAction(
+                        UserMetricsAction("Options_Homepage_ShowHomeButton"),
+                        profile()->GetPrefs());
     } else {
-      UserMetricsRecordAction(L"Options_Homepage_HideHomeButton",
-                              profile()->GetPrefs());
+      UserMetricsRecordAction(
+                        UserMetricsAction("Options_Homepage_HideHomeButton"),
+                        profile()->GetPrefs());
     }
     show_home_button_.SetValue(show_button);
   } else if (sender == default_browser_use_as_default_button_) {
     default_browser_worker_->StartSetAsDefaultBrowser();
-    UserMetricsRecordAction(L"Options_SetAsDefaultBrowser", NULL);
+    UserMetricsRecordAction(UserMetricsAction("Options_SetAsDefaultBrowser"),
+                            NULL);
     // If the user made Chrome the default browser, then he/she arguably wants
     // to be notified when that changes.
     profile()->GetPrefs()->SetBoolean(prefs::kCheckDefaultBrowser, true);
   } else if (sender == default_search_manage_engines_button_) {
-    UserMetricsRecordAction(L"Options_ManageSearchEngines", NULL);
+    UserMetricsRecordAction(UserMetricsAction("Options_ManageSearchEngines"),
+                            NULL);
     KeywordEditorView::Show(profile());
   }
 }
@@ -489,7 +494,8 @@ void GeneralPageView::ItemChanged(views::Combobox* combobox,
                                   int prev_index, int new_index) {
   if (combobox == default_search_engine_combobox_) {
     SetDefaultSearchProvider();
-    UserMetricsRecordAction(L"Options_SearchEngineChanged", NULL);
+    UserMetricsRecordAction(UserMetricsAction("Options_SearchEngineChanged"),
+                            NULL);
   }
 }
 
@@ -502,10 +508,10 @@ void GeneralPageView::ContentsChanged(views::Textfield* sender,
     // If the text field contains a valid URL, sync it to prefs. We run it
     // through the fixer upper to allow input like "google.com" to be converted
     // to something valid ("http://google.com").
-    std::wstring url_string = URLFixerUpper::FixupURL(
-        homepage_use_url_textfield_->text(), std::wstring());
+    std::string url_string = URLFixerUpper::FixupURL(
+        UTF16ToUTF8(homepage_use_url_textfield_->text()), std::string());
     if (GURL(url_string).is_valid())
-      SetHomepage(url_string);
+      SetHomepage(UTF8ToWide(url_string));
   }
 }
 
@@ -544,10 +550,12 @@ void GeneralPageView::InitControlLayout() {
   layout->AddView(default_search_group_);
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
 
+#if !defined(OS_CHROMEOS)
   layout->StartRow(0, single_column_view_set_id);
   InitDefaultBrowserGroup();
   layout->AddView(default_browser_group_);
   layout->AddPaddingRow(0, kRelatedControlVerticalSpacing);
+#endif
 
   // Register pref observers that update the controls when a pref changes.
   profile()->GetPrefs()->AddPrefObserver(prefs::kRestoreOnStartup, this);
@@ -647,6 +655,7 @@ void GeneralPageView::SetDefaultBrowserUIState(
     ShellIntegration::DefaultBrowserUIState state) {
   bool button_enabled = state == ShellIntegration::STATE_NOT_DEFAULT;
   default_browser_use_as_default_button_->SetEnabled(button_enabled);
+  default_browser_use_as_default_button_->SetNeedElevation(true);
   if (state == ShellIntegration::STATE_IS_DEFAULT) {
     default_browser_status_label_->SetText(
       l10n_util::GetStringF(IDS_OPTIONS_DEFAULTBROWSER_DEFAULT,
@@ -666,6 +675,15 @@ void GeneralPageView::SetDefaultBrowserUIState(
     default_browser_status_label_->SetColor(kNotDefaultBrowserLabelColor);
     Layout();
   }
+}
+
+void GeneralPageView::SetDefaultBrowserUIStateForSxS() {
+  default_browser_use_as_default_button_->SetEnabled(false);
+  default_browser_status_label_->SetText(
+    l10n_util::GetStringF(IDS_OPTIONS_DEFAULTBROWSER_SXS,
+                          l10n_util::GetString(IDS_PRODUCT_NAME)));
+  default_browser_status_label_->SetColor(kNotDefaultBrowserLabelColor);
+  Layout();
 }
 
 void GeneralPageView::InitStartupGroup() {
@@ -756,7 +774,7 @@ void GeneralPageView::InitStartupGroup() {
 
   startup_group_ = new OptionsGroupView(
       contents, l10n_util::GetString(IDS_OPTIONS_STARTUP_GROUP_NAME),
-      EmptyWString(), true);
+      std::wstring(), true);
 }
 
 void GeneralPageView::InitHomepageGroup() {
@@ -808,7 +826,7 @@ void GeneralPageView::InitHomepageGroup() {
 
   homepage_group_ = new OptionsGroupView(
       contents, l10n_util::GetString(IDS_OPTIONS_HOMEPAGE_GROUP_NAME),
-      EmptyWString(), true);
+      std::wstring(), true);
 }
 
 
@@ -844,7 +862,7 @@ void GeneralPageView::InitDefaultSearchGroup() {
 
   default_search_group_ = new OptionsGroupView(
       contents, l10n_util::GetString(IDS_OPTIONS_DEFAULTSEARCH_GROUP_NAME),
-      EmptyWString(), true);
+      std::wstring(), true);
 }
 
 void GeneralPageView::InitDefaultBrowserGroup() {
@@ -877,9 +895,12 @@ void GeneralPageView::InitDefaultBrowserGroup() {
 
   default_browser_group_ = new OptionsGroupView(
       contents, l10n_util::GetString(IDS_OPTIONS_DEFAULTBROWSER_GROUP_NAME),
-      EmptyWString(), false);
+      std::wstring(), false);
 
-  default_browser_worker_->StartCheckDefaultBrowser();
+  if (BrowserDistribution::GetDistribution()->CanSetAsDefault())
+    default_browser_worker_->StartCheckDefaultBrowser();
+  else
+    SetDefaultBrowserUIStateForSxS();
 }
 
 void GeneralPageView::SaveStartupPref() {
@@ -897,7 +918,7 @@ void GeneralPageView::SaveStartupPref() {
 }
 
 void GeneralPageView::AddURLToStartupURLs() {
-  UrlPicker* dialog = new UrlPicker(this, profile(), false);
+  UrlPicker* dialog = new UrlPicker(this, profile());
   dialog->Show(GetWindow()->GetNativeWindow());
 }
 

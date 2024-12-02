@@ -1,17 +1,27 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/process_util.h"
 
+#include <fcntl.h>
+#include <io.h>
 #include <windows.h>
-#include <winternl.h>
+#include <userenv.h>
 #include <psapi.h>
 
+#include <ios>
+
+#include "base/debug_util.h"
 #include "base/histogram.h"
 #include "base/logging.h"
 #include "base/scoped_handle_win.h"
 #include "base/scoped_ptr.h"
+
+// userenv.dll is required for CreateEnvironmentBlock().
+#pragma comment(lib, "userenv.lib")
+
+namespace base {
 
 namespace {
 
@@ -21,9 +31,54 @@ const int PAGESIZE_KB = 4;
 // HeapSetInformation function pointer.
 typedef BOOL (WINAPI* HeapSetFn)(HANDLE, HEAP_INFORMATION_CLASS, PVOID, SIZE_T);
 
-}  // namespace
+// Previous unhandled filter. Will be called if not NULL when we intercept an
+// exception. Only used in unit tests.
+LPTOP_LEVEL_EXCEPTION_FILTER g_previous_filter = NULL;
 
-namespace base {
+// Prints the exception call stack.
+// This is the unit tests exception filter.
+long WINAPI StackDumpExceptionFilter(EXCEPTION_POINTERS* info) {
+  StackTrace(info).PrintBacktrace();
+  if (g_previous_filter)
+    return g_previous_filter(info);
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+// Connects back to a console if available.
+// Only necessary on Windows, no-op on other platforms.
+void AttachToConsole() {
+  if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
+    unsigned int result = GetLastError();
+    // Was probably already attached.
+    if (result == ERROR_ACCESS_DENIED)
+      return;
+
+    if (result == ERROR_INVALID_HANDLE || result == ERROR_INVALID_HANDLE) {
+      // TODO(maruel): Walk up the process chain if deemed necessary.
+    }
+    // Continue even if the function call fails.
+    AllocConsole();
+  }
+  // http://support.microsoft.com/kb/105305
+  int raw_out = _open_osfhandle(
+      reinterpret_cast<intptr_t>(GetStdHandle(STD_OUTPUT_HANDLE)), _O_TEXT);
+  *stdout = *_fdopen(raw_out, "w");
+  setvbuf(stdout, NULL, _IONBF, 0);
+
+  int raw_err = _open_osfhandle(
+      reinterpret_cast<intptr_t>(GetStdHandle(STD_ERROR_HANDLE)), _O_TEXT);
+  *stderr = *_fdopen(raw_err, "w");
+  setvbuf(stderr, NULL, _IONBF, 0);
+
+  int raw_in = _open_osfhandle(
+      reinterpret_cast<intptr_t>(GetStdHandle(STD_INPUT_HANDLE)), _O_TEXT);
+  *stdin = *_fdopen(raw_in, "r");
+  setvbuf(stdin, NULL, _IONBF, 0);
+  // Fix all cout, wcout, cin, wcin, cerr, wcerr, clog and wclog.
+  std::ios::sync_with_stdio();
+}
+
+}  // namespace
 
 ProcessId GetCurrentProcId() {
   return ::GetCurrentProcessId();
@@ -66,65 +121,6 @@ void CloseProcessHandle(ProcessHandle process) {
   CloseHandle(process);
 }
 
-// Helper for GetProcId()
-bool GetProcIdViaGetProcessId(ProcessHandle process, DWORD* id) {
-  // Dynamically get a pointer to GetProcessId().
-  typedef DWORD (WINAPI *GetProcessIdFunction)(HANDLE);
-  static GetProcessIdFunction GetProcessIdPtr = NULL;
-  static bool initialize_get_process_id = true;
-  if (initialize_get_process_id) {
-    initialize_get_process_id = false;
-    HMODULE kernel32_handle = GetModuleHandle(L"kernel32.dll");
-    if (!kernel32_handle) {
-      NOTREACHED();
-      return false;
-    }
-    GetProcessIdPtr = reinterpret_cast<GetProcessIdFunction>(GetProcAddress(
-        kernel32_handle, "GetProcessId"));
-  }
-  if (!GetProcessIdPtr)
-    return false;
-  // Ask for the process ID.
-  *id = (*GetProcessIdPtr)(process);
-  return true;
-}
-
-// Helper for GetProcId()
-bool GetProcIdViaNtQueryInformationProcess(ProcessHandle process, DWORD* id) {
-  // Dynamically get a pointer to NtQueryInformationProcess().
-  typedef NTSTATUS (WINAPI *NtQueryInformationProcessFunction)(
-      HANDLE, PROCESSINFOCLASS, PVOID, ULONG, PULONG);
-  static NtQueryInformationProcessFunction NtQueryInformationProcessPtr = NULL;
-  static bool initialize_query_information_process = true;
-  if (initialize_query_information_process) {
-    initialize_query_information_process = false;
-    // According to nsylvain, ntdll.dll is guaranteed to be loaded, even though
-    // the Windows docs seem to imply that you should LoadLibrary() it.
-    HMODULE ntdll_handle = GetModuleHandle(L"ntdll.dll");
-    if (!ntdll_handle) {
-      NOTREACHED();
-      return false;
-    }
-    NtQueryInformationProcessPtr =
-        reinterpret_cast<NtQueryInformationProcessFunction>(GetProcAddress(
-            ntdll_handle, "NtQueryInformationProcess"));
-  }
-  if (!NtQueryInformationProcessPtr)
-    return false;
-  // Ask for the process ID.
-  PROCESS_BASIC_INFORMATION info;
-  ULONG bytes_returned;
-  NTSTATUS status = (*NtQueryInformationProcessPtr)(process,
-                                                    ProcessBasicInformation,
-                                                    &info, sizeof info,
-                                                    &bytes_returned);
-  if (!SUCCEEDED(status) || (bytes_returned != (sizeof info)))
-    return false;
-
-  *id = static_cast<DWORD>(info.UniqueProcessId);
-  return true;
-}
-
 ProcessId GetProcId(ProcessHandle process) {
   // Get a handle to |process| that has PROCESS_QUERY_INFORMATION rights.
   HANDLE current_process = GetCurrentProcess();
@@ -132,15 +128,9 @@ ProcessId GetProcId(ProcessHandle process) {
   if (DuplicateHandle(current_process, process, current_process,
                       &process_with_query_rights, PROCESS_QUERY_INFORMATION,
                       false, 0)) {
-    // Try to use GetProcessId(), if it exists.  Fall back on
-    // NtQueryInformationProcess() otherwise (< Win XP SP1).
-    DWORD id;
-    bool success =
-        GetProcIdViaGetProcessId(process_with_query_rights, &id) ||
-        GetProcIdViaNtQueryInformationProcess(process_with_query_rights, &id);
+    DWORD id = GetProcessId(process_with_query_rights);
     CloseHandle(process_with_query_rights);
-    if (success)
-      return id;
+    return id;
   }
 
   // We're screwed.
@@ -168,6 +158,49 @@ bool LaunchApp(const std::wstring& cmdline,
     WaitForSingleObject(process_info.hProcess, INFINITE);
 
   // If the caller wants the process handle, we won't close it.
+  if (process_handle) {
+    *process_handle = process_info.hProcess;
+  } else {
+    CloseHandle(process_info.hProcess);
+  }
+  return true;
+}
+
+bool LaunchAppAsUser(UserTokenHandle token, const std::wstring& cmdline,
+                     bool start_hidden, ProcessHandle* process_handle) {
+  return LaunchAppAsUser(token, cmdline, start_hidden, process_handle, false);
+}
+
+bool LaunchAppAsUser(UserTokenHandle token, const std::wstring& cmdline,
+                     bool start_hidden, ProcessHandle* process_handle,
+                     bool empty_desktop_name) {
+  STARTUPINFO startup_info = {0};
+  startup_info.cb = sizeof(startup_info);
+  if (empty_desktop_name)
+    startup_info.lpDesktop = L"";
+  PROCESS_INFORMATION process_info;
+  if (start_hidden) {
+    startup_info.dwFlags = STARTF_USESHOWWINDOW;
+    startup_info.wShowWindow = SW_HIDE;
+  }
+  DWORD flags = CREATE_UNICODE_ENVIRONMENT;
+  void* enviroment_block = NULL;
+
+  if (!CreateEnvironmentBlock(&enviroment_block, token, FALSE))
+    return false;
+
+  BOOL launched =
+      CreateProcessAsUser(token, NULL, const_cast<wchar_t*>(cmdline.c_str()),
+                          NULL, NULL, FALSE, flags, enviroment_block,
+                          NULL, &startup_info, &process_info);
+
+  DestroyEnvironmentBlock(enviroment_block);
+
+  if (!launched)
+    return false;
+
+  CloseHandle(process_info.hThread);
+
   if (process_handle) {
     *process_handle = process_info.hProcess;
   } else {
@@ -285,23 +318,37 @@ bool KillProcess(ProcessHandle process, int exit_code, bool wait) {
 bool DidProcessCrash(bool* child_exited, ProcessHandle handle) {
   DWORD exitcode = 0;
 
-  if (child_exited)
-    *child_exited = true;  // On Windows it an error to call this function if
-                           // the child hasn't already exited.
   if (!::GetExitCodeProcess(handle, &exitcode)) {
     NOTREACHED();
+    // Assume the child has exited.
+    if (child_exited)
+      *child_exited = true;
     return false;
   }
   if (exitcode == STILL_ACTIVE) {
-    // The process is likely not dead or it used 0x103 as exit code.
+    DWORD wait_result = WaitForSingleObject(handle, 0);
+    if (wait_result == WAIT_TIMEOUT) {
+      if (child_exited)
+        *child_exited = false;
+      return false;
+    }
+
+    DCHECK_EQ(WAIT_OBJECT_0, wait_result);
+
+    // Strange, the process used 0x103 (STILL_ACTIVE) as exit code.
     NOTREACHED();
+
     return false;
   }
+
+  // We're sure the child has exited.
+  if (child_exited)
+    *child_exited = true;
 
   // Warning, this is not generic code; it heavily depends on the way
   // the rest of the code kills a process.
 
-  if (exitcode == PROCESS_END_NORMAL_TERMINATON ||
+  if (exitcode == PROCESS_END_NORMAL_TERMINATION ||
       exitcode == PROCESS_END_KILLED_BY_USER ||
       exitcode == PROCESS_END_PROCESS_WAS_HUNG ||
       exitcode == 0xC0000354 ||     // STATUS_DEBUGGER_INACTIVE.
@@ -311,46 +358,28 @@ bool DidProcessCrash(bool* child_exited, ProcessHandle handle) {
   }
 
   // All other exit codes indicate crashes.
-
-  // TODO(jar): Remove histogramming code when UMA stats are consistent with
-  // other crash metrics.
-  // Histogram the low order 3 nibbles for UMA
-  const int kLeastValue = 0;
-  const int kMaxValue = 0xFFF;
-  const int kBucketCount = kMaxValue - kLeastValue + 1;
-  static LinearHistogram least_significant_histogram("ExitCodes.LSNibbles",
-      kLeastValue + 1, kMaxValue, kBucketCount);
-  least_significant_histogram.SetFlags(kUmaTargetedHistogramFlag |
-                                       LinearHistogram::kHexRangePrintingFlag);
-  least_significant_histogram.Add(exitcode & 0xFFF);
-
-  // Histogram the high order 3 nibbles
-  static LinearHistogram most_significant_histogram("ExitCodes.MSNibbles",
-      kLeastValue + 1, kMaxValue, kBucketCount);
-  most_significant_histogram.SetFlags(kUmaTargetedHistogramFlag |
-                                      LinearHistogram::kHexRangePrintingFlag);
-  // Avoid passing in negative numbers by shifting data into low end of dword.
-  most_significant_histogram.Add((exitcode >> 20) & 0xFFF);
-
-  // Histogram the middle order 2 nibbles
-  static LinearHistogram mid_significant_histogram("ExitCodes.MidNibbles",
-      1, 0xFF, 0x100);
-  mid_significant_histogram.SetFlags(kUmaTargetedHistogramFlag |
-                                      LinearHistogram::kHexRangePrintingFlag);
-  mid_significant_histogram.Add((exitcode >> 12) & 0xFF);
-
   return true;
 }
 
 bool WaitForExitCode(ProcessHandle handle, int* exit_code) {
-  ScopedHandle closer(handle);  // Ensure that we always close the handle.
-  if (::WaitForSingleObject(handle, INFINITE) != WAIT_OBJECT_0) {
-    NOTREACHED();
+  bool success = WaitForExitCodeWithTimeout(handle, exit_code, INFINITE);
+  if (!success)
+    CloseProcessHandle(handle);
+  return success;
+}
+
+bool WaitForExitCodeWithTimeout(ProcessHandle handle, int* exit_code,
+                                int64 timeout_milliseconds) {
+  if (::WaitForSingleObject(handle, timeout_milliseconds) != WAIT_OBJECT_0)
     return false;
-  }
   DWORD temp_code;  // Don't clobber out-parameters in case of failure.
   if (!::GetExitCodeProcess(handle, &temp_code))
     return false;
+
+  // Only close the handle on success, to give the caller a chance to forcefully
+  // terminate the process if he wants to.
+  CloseProcessHandle(handle);
+
   *exit_code = temp_code;
   return true;
 }
@@ -650,7 +679,7 @@ static uint64 FileTimeToUTC(const FILETIME& ftime) {
   return li.QuadPart;
 }
 
-int ProcessMetrics::GetCPUUsage() {
+double ProcessMetrics::GetCPUUsage() {
   FILETIME now;
   FILETIME creation_time;
   FILETIME exit_time;
@@ -693,7 +722,7 @@ int ProcessMetrics::GetCPUUsage() {
   return cpu;
 }
 
-bool ProcessMetrics::GetIOCounters(IO_COUNTERS* io_counters) const {
+bool ProcessMetrics::GetIOCounters(base::IoCounters* io_counters) const {
   return GetProcessIoCounters(process_, io_counters) != FALSE;
 }
 
@@ -763,8 +792,55 @@ void EnableTerminationOnHeapCorruption() {
   HeapSetInformation(NULL, HeapEnableTerminationOnCorruption, NULL, 0);
 }
 
+bool EnableInProcessStackDumping() {
+  // Add stack dumping support on exception on windows. Similar to OS_POSIX
+  // signal() handling in process_util_posix.cc.
+  g_previous_filter = SetUnhandledExceptionFilter(&StackDumpExceptionFilter);
+  AttachToConsole();
+  return true;
+}
+
 void RaiseProcessToHighPriority() {
   SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
+}
+
+// GetPerformanceInfo is not available on WIN2K.  So we'll
+// load it on-the-fly.
+const wchar_t kPsapiDllName[] = L"psapi.dll";
+typedef BOOL (WINAPI *GetPerformanceInfoFunction) (
+    PPERFORMANCE_INFORMATION pPerformanceInformation,
+    DWORD cb);
+
+// Beware of races if called concurrently from multiple threads.
+static BOOL InternalGetPerformanceInfo(
+    PPERFORMANCE_INFORMATION pPerformanceInformation, DWORD cb) {
+  static GetPerformanceInfoFunction GetPerformanceInfo_func = NULL;
+  if (!GetPerformanceInfo_func) {
+    HMODULE psapi_dll = ::GetModuleHandle(kPsapiDllName);
+    if (psapi_dll)
+      GetPerformanceInfo_func = reinterpret_cast<GetPerformanceInfoFunction>(
+          GetProcAddress(psapi_dll, "GetPerformanceInfo"));
+
+    if (!GetPerformanceInfo_func) {
+      // The function could be loaded!
+      memset(pPerformanceInformation, 0, cb);
+      return FALSE;
+    }
+  }
+  return GetPerformanceInfo_func(pPerformanceInformation, cb);
+}
+
+size_t GetSystemCommitCharge() {
+  // Get the System Page Size.
+  SYSTEM_INFO system_info;
+  GetSystemInfo(&system_info);
+
+  PERFORMANCE_INFORMATION info;
+  if (!InternalGetPerformanceInfo(&info, sizeof(info))) {
+    LOG(ERROR) << "Failed to fetch internal performance info.";
+    return 0;
+  }
+  return (info.CommitTotal * system_info.dwPageSize) / 1024;
 }
 
 }  // namespace base

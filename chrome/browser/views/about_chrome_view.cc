@@ -4,17 +4,18 @@
 
 #include "chrome/browser/views/about_chrome_view.h"
 
-#include "app/gfx/canvas.h"
-#include "app/gfx/color_utils.h"
-#include "base/i18n/word_iterator.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/callback.h"
 #include "base/file_version_info.h"
-#include "base/string_util.h"
+#include "base/i18n/rtl.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/platform_util.h"
 #include "chrome/common/url_constants.h"
+#include "gfx/canvas.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -22,6 +23,7 @@
 #include "views/controls/textfield/textfield.h"
 #include "views/controls/throbber.h"
 #include "views/standard_layout.h"
+#include "views/view_text_utils.h"
 #include "views/widget/widget.h"
 #include "views/window/window.h"
 #include "webkit/glue/webkit_glue.h"
@@ -29,6 +31,7 @@
 #if defined(OS_WIN)
 #include <commdlg.h>
 
+#include "base/registry.h"
 #include "base/win_util.h"
 #include "chrome/browser/views/restart_message_box.h"
 #include "chrome/installer/util/install_util.h"
@@ -83,6 +86,9 @@ AboutChromeView::AboutChromeView(Profile* profile)
       about_dlg_background_logo_(NULL),
       about_title_label_(NULL),
       version_label_(NULL),
+#if defined(OS_CHROMEOS)
+      os_version_label_(NULL),
+#endif
       copyright_label_(NULL),
       main_text_label_(NULL),
       main_text_label_height_(0),
@@ -93,11 +99,15 @@ AboutChromeView::AboutChromeView(Profile* profile)
       chromium_url_appears_first_(true),
       text_direction_is_rtl_(false) {
   DCHECK(profile);
+#if defined(OS_CHROMEOS)
+  loader_.GetVersion(&consumer_,
+      NewCallback(this, &AboutChromeView::OnOSVersion));
+#endif
   Init();
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_CHROMEOS)
   google_updater_ = new GoogleUpdate();
-  google_updater_->AddStatusChangeListener(this);
+  google_updater_->set_status_listener(this);
 #endif
 
   if (kBackgroundBmp == NULL) {
@@ -107,17 +117,16 @@ AboutChromeView::AboutChromeView(Profile* profile)
 }
 
 AboutChromeView::~AboutChromeView() {
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_CHROMEOS)
   // The Google Updater will hold a pointer to us until it reports status, so we
   // need to let it know that we will no longer be listening.
   if (google_updater_)
-    google_updater_->RemoveStatusChangeListener();
+    google_updater_->set_status_listener(NULL);
 #endif
 }
 
 void AboutChromeView::Init() {
-  text_direction_is_rtl_ =
-      l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT;
+  text_direction_is_rtl_ = base::i18n::IsRTL();
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
 
   scoped_ptr<FileVersionInfo> version_info(
@@ -128,32 +137,39 @@ void AboutChromeView::Init() {
   }
 
   current_version_ = version_info->file_version();
+
+  string16 version_modifier = platform_util::GetVersionStringModifier();
+  if (version_modifier.length()) {
+    version_details_ += L" ";
+    version_details_ += UTF16ToWide(version_modifier);
+  }
+
 #if !defined(GOOGLE_CHROME_BUILD)
-  current_version_ += L" (";
-  current_version_ += version_info->last_change();
-  current_version_ += L")";
+  version_details_ += L" (";
+  version_details_ += version_info->last_change();
+  version_details_ += L")";
 #endif
 
   // Views we will add to the *parent* of this dialog, since it will display
   // next to the buttons which we don't draw ourselves.
   throbber_.reset(new views::Throbber(50, true));
-  throbber_->SetParentOwned(false);
+  throbber_->set_parent_owned(false);
   throbber_->SetVisible(false);
 
   SkBitmap* success_image = rb.GetBitmapNamed(IDR_UPDATE_UPTODATE);
   success_indicator_.SetImage(*success_image);
-  success_indicator_.SetParentOwned(false);
+  success_indicator_.set_parent_owned(false);
 
   SkBitmap* update_available_image = rb.GetBitmapNamed(IDR_UPDATE_AVAILABLE);
   update_available_indicator_.SetImage(*update_available_image);
-  update_available_indicator_.SetParentOwned(false);
+  update_available_indicator_.set_parent_owned(false);
 
   SkBitmap* timeout_image = rb.GetBitmapNamed(IDR_UPDATE_FAIL);
   timeout_indicator_.SetImage(*timeout_image);
-  timeout_indicator_.SetParentOwned(false);
+  timeout_indicator_.set_parent_owned(false);
 
   update_label_.SetVisible(false);
-  update_label_.SetParentOwned(false);
+  update_label_.set_parent_owned(false);
 
   // Regular view controls we draw by ourself. First, we add the background
   // image for the dialog. We have two different background bitmaps, one for
@@ -173,20 +189,31 @@ void AboutChromeView::Init() {
   about_title_label_ = new views::Label(
       l10n_util::GetString(IDS_PRODUCT_NAME));
   about_title_label_->SetFont(ResourceBundle::GetSharedInstance().GetFont(
-      ResourceBundle::BaseFont).DeriveFont(18, gfx::Font::BOLD));
+      ResourceBundle::BaseFont).DeriveFont(18));
   about_title_label_->SetColor(SK_ColorBLACK);
   AddChildView(about_title_label_);
 
   // This is a text field so people can copy the version number from the dialog.
   version_label_ = new views::Textfield();
-  version_label_->SetText(WideToUTF16Hack(current_version_));
+  version_label_->SetText(WideToUTF16Hack(current_version_ + version_details_));
   version_label_->SetReadOnly(true);
   version_label_->RemoveBorder();
   version_label_->SetTextColor(SK_ColorBLACK);
   version_label_->SetBackgroundColor(SK_ColorWHITE);
   version_label_->SetFont(ResourceBundle::GetSharedInstance().GetFont(
-      ResourceBundle::BaseFont).DeriveFont(0, gfx::Font::BOLD));
+      ResourceBundle::BaseFont));
   AddChildView(version_label_);
+
+#if defined(OS_CHROMEOS)
+  os_version_label_ = new views::Textfield();
+  os_version_label_->SetReadOnly(true);
+  os_version_label_->RemoveBorder();
+  os_version_label_->SetTextColor(SK_ColorBLACK);
+  os_version_label_->SetBackgroundColor(SK_ColorWHITE);
+  os_version_label_->SetFont(ResourceBundle::GetSharedInstance().GetFont(
+      ResourceBundle::BaseFont));
+  AddChildView(os_version_label_);
+#endif
 
   // The copyright URL portion of the main label.
   copyright_label_ = new views::Label(
@@ -250,8 +277,10 @@ void AboutChromeView::Init() {
   // Add up the height of the various elements on the page.
   int height = about_background_logo->height() +
                kRelatedControlVerticalSpacing +
-               font.height() +                // Copyright line.
-               dummy_text.GetHeightForWidth(  // Main label.
+               // Copyright line.
+               font.height() +
+               // Main label.
+               dummy_text.GetHeightForWidth(
                    dialog_dimensions_.width() - (2 * kPanelHorizMargin)) +
                kRelatedControlVerticalSpacing;
 
@@ -310,6 +339,18 @@ void AboutChromeView::Layout() {
                                 kRelatedControlVerticalSpacing,
                             kVersionFieldWidth,
                             sz.height());
+
+#if defined(OS_CHROMEOS)
+  // Then we have the version number right below it.
+  sz = os_version_label_->GetPreferredSize();
+  os_version_label_->SetBounds(
+      kPanelHorizMargin,
+      version_label_->y() +
+          version_label_->height() +
+          kRelatedControlVerticalSpacing,
+      kVersionFieldWidth,
+      sz.height());
+#endif
 
   // For the width of the main text label we want to use up the whole panel
   // width and remaining height, minus a little margin on each side.
@@ -397,14 +438,17 @@ void AboutChromeView::Paint(gfx::Canvas* canvas) {
   // if we need to wrap.
   gfx::Size position;
   // Draw the first text chunk and position the Chromium url.
-  DrawTextAndPositionUrl(canvas, main_label_chunk1_, link1,
-                         rect1, &position, label_bounds, font);
+  view_text_utils::DrawTextAndPositionUrl(canvas, main_text_label_,
+      main_label_chunk1_, link1, rect1, &position, text_direction_is_rtl_,
+      label_bounds, font);
   // Draw the second text chunk and position the Open Source url.
-  DrawTextAndPositionUrl(canvas, main_label_chunk2_, link2,
-                         rect2, &position, label_bounds, font);
+  view_text_utils::DrawTextAndPositionUrl(canvas, main_text_label_,
+      main_label_chunk2_, link2, rect2, &position, text_direction_is_rtl_,
+      label_bounds, font);
   // Draw the third text chunk (which has no URL associated with it).
-  DrawTextAndPositionUrl(canvas, main_label_chunk3_, NULL, NULL, &position,
-                         label_bounds, font);
+  view_text_utils::DrawTextAndPositionUrl(canvas, main_text_label_,
+      main_label_chunk3_, NULL, NULL, &position, text_direction_is_rtl_,
+      label_bounds, font);
 
 #if defined(GOOGLE_CHROME_BUILD)
   // Insert a line break and some whitespace.
@@ -412,12 +456,13 @@ void AboutChromeView::Paint(gfx::Canvas* canvas) {
   position.Enlarge(0, font.height() + kRelatedControlVerticalSpacing);
 
   // And now the Terms of Service and position the TOS url.
-  DrawTextAndPositionUrl(canvas, main_label_chunk4_, terms_of_service_url_,
-                         &terms_of_service_url_rect_, &position, label_bounds,
-                         font);
+  view_text_utils::DrawTextAndPositionUrl(canvas, main_text_label_,
+      main_label_chunk4_, terms_of_service_url_, &terms_of_service_url_rect_,
+      &position, text_direction_is_rtl_, label_bounds, font);
   // The last text chunk doesn't have a URL associated with it.
-  DrawTextAndPositionUrl(canvas, main_label_chunk5_, NULL, NULL, &position,
-                         label_bounds, font);
+  view_text_utils::DrawTextAndPositionUrl(canvas, main_text_label_,
+       main_label_chunk5_, NULL, NULL, &position, text_direction_is_rtl_,
+       label_bounds, font);
 
   // Position the TOS URL within the main label.
   terms_of_service_url_->SetBounds(terms_of_service_url_rect_.x(),
@@ -442,145 +487,6 @@ void AboutChromeView::Paint(gfx::Canvas* canvas) {
   main_text_label_height_ = position.height() + font.height();
 }
 
-void AboutChromeView::DrawTextAndPositionUrl(gfx::Canvas* canvas,
-                                             const std::wstring& text,
-                                             views::Link* link,
-                                             gfx::Rect* rect,
-                                             gfx::Size* position,
-                                             const gfx::Rect& bounds,
-                                             const gfx::Font& font) {
-  DCHECK(canvas && position);
-
-  // What we get passed in as |text| is potentially a mix of LTR and RTL "runs"
-  // (a run is a sequence of words that share the same directionality). We
-  // initialize a bidirectional ICU line iterator and split the text into runs
-  // that are either strictly LTR or strictly RTL (and do not contain a mix).
-  l10n_util::BiDiLineIterator bidi_line;
-  if (!bidi_line.Open(text.c_str(), true, false))
-    return;
-
-  // Iterate over each run and draw it.
-  int run_start = 0;
-  int run_end = 0;
-  const int runs = bidi_line.CountRuns();
-  for (int run = 0; run < runs; ++run) {
-    UBiDiLevel level = 0;
-    bidi_line.GetLogicalRun(run_start, &run_end, &level);
-    std::wstring fragment = StringSubRange(text, run_start, run_end);
-
-    // A flag that tells us whether we found LTR text inside RTL text.
-    bool ltr_inside_rtl_text =
-        ((level & 1) == UBIDI_LTR) && text_direction_is_rtl_;
-
-    // Draw the text chunk contained in |fragment|. |position| is relative to
-    // the top left corner of the label we draw inside (also when drawing RTL).
-    DrawTextStartingFrom(canvas, fragment, position, bounds, font,
-                         ltr_inside_rtl_text);
-
-    run_start = run_end;  // Advance over what we just drew.
-  }
-
-  // If the caller is interested in placing a link after this text blurb, we
-  // figure out here where to place it.
-  if (link && rect) {
-    gfx::Size sz = link->GetPreferredSize();
-    gfx::Insets insets = link->GetInsets();
-    WrapIfWordDoesntFit(sz.width(), font.height(), position, bounds);
-    *rect = gfx::Rect(position->width(), position->height() - insets.top(),
-                      sz.width(), sz.height());
-
-    // Go from relative pixel coordinates (within the label we are drawing on)
-    // to absolute pixel coordinates (relative to the top left corner of the
-    // dialog content).
-    rect->Offset(bounds.x(), bounds.y());
-    // And leave some space to draw the link in.
-    position->Enlarge(sz.width(), 0);
-  }
-}
-
-void AboutChromeView::DrawTextStartingFrom(gfx::Canvas* canvas,
-                                           const std::wstring& text,
-                                           gfx::Size* position,
-                                           const gfx::Rect& bounds,
-                                           const gfx::Font& font,
-                                           bool ltr_within_rtl) {
-#if defined(OS_WIN)
-  const SkColor text_color = color_utils::GetSysSkColor(COLOR_WINDOWTEXT);
-#else
-  // TODO(beng): source from theme provider.
-  const SkColor text_color = SK_ColorBLACK;
-#endif
-
-  // Iterate through line breaking opportunities (which in English would be
-  // spaces and such. This tells us where to wrap.
-  WordIterator iter(text, WordIterator::BREAK_LINE);
-  if (!iter.Init())
-    return;
-
-  int flags = (text_direction_is_rtl_ ?
-                   gfx::Canvas::TEXT_ALIGN_RIGHT :
-                   gfx::Canvas::TEXT_ALIGN_LEFT) |
-              gfx::Canvas::MULTI_LINE |
-              gfx::Canvas::HIDE_PREFIX;
-
-  // Iterate over each word in the text, or put in a more locale-neutral way:
-  // iterate to the next line breaking opportunity.
-  while (iter.Advance()) {
-    // Get the word and figure out the dimensions.
-    std::wstring word;
-    if (!ltr_within_rtl)
-      word = iter.GetWord();  // Get the next word.
-    else
-      word = text;  // Draw the whole text at once.
-
-    int w = font.GetStringWidth(word), h = font.height();
-    canvas->SizeStringInt(word, font, &w, &h, flags);
-
-    // If we exceed the boundaries, we need to wrap.
-    WrapIfWordDoesntFit(w, font.height(), position, bounds);
-
-    int x = main_text_label_->MirroredXCoordinateInsideView(position->width()) +
-            bounds.x();
-    if (text_direction_is_rtl_) {
-      x -= w;
-      // When drawing LTR strings inside RTL text we need to make sure we draw
-      // the trailing space (if one exists after the LTR text) on the left of
-      // the LTR string.
-      if (ltr_within_rtl && word[word.size() - 1] == L' ') {
-        int space_w = font.GetStringWidth(L" "), space_h = font.height();
-        canvas->SizeStringInt(L" ", font, &space_w, &space_h, flags);
-        x += space_w;
-      }
-    }
-    int y = position->height() + bounds.y();
-
-    // Draw the text on the screen (mirrored, if RTL run).
-    canvas->DrawStringInt(word, font, text_color, x, y, w, h, flags);
-
-    if (word.size() > 0 && word[word.size() - 1] == L'\x0a') {
-      // When we come across '\n', we move to the beginning of the next line.
-      position->set_width(0);
-      position->Enlarge(0, font.height());
-    } else {
-      // Otherwise, we advance position to the next word.
-      position->Enlarge(w, 0);
-    }
-
-    if (ltr_within_rtl)
-      break;  // LTR within RTL is drawn as one unit, so we are done.
-  }
-}
-
-void AboutChromeView::WrapIfWordDoesntFit(int word_width,
-                                          int font_height,
-                                          gfx::Size* position,
-                                          const gfx::Rect& bounds) {
-  if (position->width() + word_width > bounds.right()) {
-    position->set_width(0);
-    position->Enlarge(0, font_height);
-  }
-}
-
 void AboutChromeView::ViewHierarchyChanged(bool is_add,
                                            views::View* parent,
                                            views::View* child) {
@@ -600,7 +506,7 @@ void AboutChromeView::ViewHierarchyChanged(bool is_add,
       parent->AddChildView(&timeout_indicator_);
       timeout_indicator_.SetVisible(false);
 
-#if defined (OS_WIN)
+#if defined(OS_WIN)
       // On-demand updates for Chrome don't work in Vista RTM when UAC is turned
       // off. So, in this case we just want the About box to not mention
       // on-demand updates. Silent updates (in the background) should still
@@ -617,6 +523,10 @@ void AboutChromeView::ViewHierarchyChanged(bool is_add,
         // CheckForUpdate(false, ...) means don't upgrade yet.
         google_updater_->CheckForUpdate(false, window());
       }
+#elif defined(OS_CHROMEOS)
+      UpdateStatus(UPGRADE_CHECK_STARTED, GOOGLE_UPDATE_NO_ERROR);
+      // CheckForUpdate(false, ...) means don't upgrade yet.
+      google_updater_->CheckForUpdate(false, window());
 #endif
     } else {
       parent->RemoveChildView(&update_label_);
@@ -691,7 +601,7 @@ std::wstring AboutChromeView::GetWindowTitle() const {
 }
 
 bool AboutChromeView::Accept() {
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_CHROMEOS)
   UpdateStatus(UPGRADE_STARTED, GOOGLE_UPDATE_NO_ERROR);
 
   // The Upgrade button isn't available until we have received notification
@@ -699,7 +609,7 @@ bool AboutChromeView::Accept() {
   // null-ed out.
   DCHECK(!google_updater_);
   google_updater_ = new GoogleUpdate();
-  google_updater_->AddStatusChangeListener(this);
+  google_updater_->set_status_listener(this);
   // CheckForUpdate(true,...) means perform the upgrade if new version found.
   google_updater_->CheckForUpdate(true, window());
 #endif
@@ -720,17 +630,29 @@ void AboutChromeView::LinkActivated(views::Link* source,
   if (source == terms_of_service_url_)
     url = GURL(chrome::kAboutTermsURL);
   else if (source == chromium_url_)
-    url = GURL(WideToUTF16Hack(l10n_util::GetString(IDS_CHROMIUM_PROJECT_URL)));
+    url = GURL(l10n_util::GetStringUTF16(IDS_CHROMIUM_PROJECT_URL));
   else if (source == open_source_url_)
     url = GURL(chrome::kAboutCreditsURL);
   else
     NOTREACHED() << "Unknown link source";
 
   Browser* browser = BrowserList::GetLastActive();
+#if defined(OS_CHROMEOS)
+  browser->OpenURL(url, GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
+#else
   browser->OpenURL(url, GURL(), NEW_WINDOW, PageTransition::LINK);
+#endif
 }
 
-#if defined(OS_WIN)
+#if defined(OS_CHROMEOS)
+void AboutChromeView::OnOSVersion(
+    chromeos::VersionLoader::Handle handle,
+    std::string version) {
+  os_version_label_->SetText(UTF8ToUTF16(version));
+}
+#endif
+
+#if defined(OS_WIN) || defined(OS_CHROMEOS)
 ////////////////////////////////////////////////////////////////////////////////
 // AboutChromeView, GoogleUpdateStatusListener implementation:
 
@@ -745,13 +667,12 @@ void AboutChromeView::OnReportResults(GoogleUpdateUpgradeResult result,
   new_version_available_ = version;
   UpdateStatus(result, error_code);
 }
-
 ////////////////////////////////////////////////////////////////////////////////
 // AboutChromeView, private:
 
 void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
                                    GoogleUpdateErrorCode error_code) {
-#if !defined(GOOGLE_CHROME_BUILD)
+#if !defined(GOOGLE_CHROME_BUILD) && !defined(OS_CHROMEOS)
   // For Chromium builds it would show an error message.
   // But it looks weird because in fact there is no error,
   // just the update server is not available for non-official builds.
@@ -765,19 +686,21 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
 
   switch (result) {
     case UPGRADE_STARTED:
-      UserMetrics::RecordAction(L"Upgrade_Started", profile_);
+      UserMetrics::RecordAction(UserMetricsAction("Upgrade_Started"), profile_);
       check_button_status_ = CHECKBUTTON_DISABLED;
       show_throbber = true;
       update_label_.SetText(l10n_util::GetString(IDS_UPGRADE_STARTED));
       break;
     case UPGRADE_CHECK_STARTED:
-      UserMetrics::RecordAction(L"UpgradeCheck_Started", profile_);
+      UserMetrics::RecordAction(UserMetricsAction("UpgradeCheck_Started"),
+                                profile_);
       check_button_status_ = CHECKBUTTON_HIDDEN;
       show_throbber = true;
       update_label_.SetText(l10n_util::GetString(IDS_UPGRADE_CHECK_STARTED));
       break;
     case UPGRADE_IS_AVAILABLE:
-      UserMetrics::RecordAction(L"UpgradeCheck_UpgradeIsAvailable", profile_);
+      UserMetrics::RecordAction(
+          UserMetricsAction("UpgradeCheck_UpgradeIsAvailable"), profile_);
       check_button_status_ = CHECKBUTTON_ENABLED;
       update_label_.SetText(
           l10n_util::GetStringF(IDS_UPGRADE_AVAILABLE,
@@ -785,6 +708,12 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
       show_update_available_indicator = true;
       break;
     case UPGRADE_ALREADY_UP_TO_DATE: {
+      // The extra version check is necessary on Windows because the application
+      // may be already up to date on disk though the running app is still
+      // out of date. Chrome OS doesn't quite have this issue since the
+      // OS/App are updated together. If a newer version of the OS has been
+      // staged then UPGRADE_SUCESSFUL will be returned.
+#if defined(OS_WIN)
       // Google Update reported that Chrome is up-to-date. Now make sure that we
       // are running the latest version and if not, notify the user by falling
       // into the next case of UPGRADE_SUCCESSFUL.
@@ -794,27 +723,33 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
           installer::Version::GetVersionFromString(current_version_));
       if (!installed_version.get() ||
           !installed_version->IsHigherThan(running_version.get())) {
-        UserMetrics::RecordAction(L"UpgradeCheck_AlreadyUpToDate", profile_);
+#endif
+        UserMetrics::RecordAction(
+            UserMetricsAction("UpgradeCheck_AlreadyUpToDate"), profile_);
         check_button_status_ = CHECKBUTTON_HIDDEN;
         std::wstring update_label_text =
             l10n_util::GetStringF(IDS_UPGRADE_ALREADY_UP_TO_DATE,
                                   l10n_util::GetString(IDS_PRODUCT_NAME),
                                   current_version_);
-        if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) {
+        if (base::i18n::IsRTL()) {
           update_label_text.push_back(
-              static_cast<wchar_t>(l10n_util::kLeftToRightMark));
+              static_cast<wchar_t>(base::i18n::kLeftToRightMark));
         }
         update_label_.SetText(update_label_text);
         show_success_indicator = true;
         break;
+#if defined(OS_WIN)
       }
+#endif
       // No break here as we want to notify user about upgrade if there is one.
     }
     case UPGRADE_SUCCESSFUL: {
       if (result == UPGRADE_ALREADY_UP_TO_DATE)
-        UserMetrics::RecordAction(L"UpgradeCheck_AlreadyUpgraded", profile_);
+        UserMetrics::RecordAction(
+            UserMetricsAction("UpgradeCheck_AlreadyUpgraded"), profile_);
       else
-        UserMetrics::RecordAction(L"UpgradeCheck_Upgraded", profile_);
+        UserMetrics::RecordAction(UserMetricsAction("UpgradeCheck_Upgraded"),
+                                  profile_);
       check_button_status_ = CHECKBUTTON_HIDDEN;
       const std::wstring& update_string = new_version_available_.empty()
           ? l10n_util::GetStringF(IDS_UPGRADE_SUCCESSFUL_NOVERSION,
@@ -824,11 +759,16 @@ void AboutChromeView::UpdateStatus(GoogleUpdateUpgradeResult result,
                                   new_version_available_);
       update_label_.SetText(update_string);
       show_success_indicator = true;
+      // TODO (seanparent) : Need to see if this code needs to change to
+      // force a machine restart.
+#if defined(OS_WIN)
       RestartMessageBox::ShowMessageBox(window()->GetNativeWindow());
+#endif
       break;
     }
     case UPGRADE_ERROR:
-      UserMetrics::RecordAction(L"UpgradeCheck_Error", profile_);
+      UserMetrics::RecordAction(UserMetricsAction("UpgradeCheck_Error"),
+                                profile_);
       check_button_status_ = CHECKBUTTON_HIDDEN;
       update_label_.SetText(l10n_util::GetStringF(IDS_UPGRADE_ERROR,
                                                   IntToWString(error_code)));

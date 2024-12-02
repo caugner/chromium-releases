@@ -6,8 +6,8 @@
 
 #include <stdlib.h>
 
+#include <algorithm>  // for max()
 #include <limits>
-#include <string>
 
 //------------------------------------------------------------------------------
 
@@ -181,7 +181,7 @@ bool Pickle::ReadInt64(void** iter, int64* result) const {
   return true;
 }
 
-bool Pickle::ReadIntPtr(void** iter, intptr_t* result) const {
+bool Pickle::ReadUInt64(void** iter, uint64* result) const {
   DCHECK(iter);
   if (!*iter)
     *iter = const_cast<char*>(payload());
@@ -249,6 +249,9 @@ bool Pickle::ReadString16(void** iter, string16* result) const {
 bool Pickle::ReadBytes(void** iter, const char** data, int length) const {
   DCHECK(iter);
   DCHECK(data);
+  *data = 0;
+  if (!*iter)
+    *iter = const_cast<char*>(payload());
 
   if (!IteratorHasRoomFor(*iter, length))
     return false;
@@ -263,6 +266,8 @@ bool Pickle::ReadData(void** iter, const char** data, int* length) const {
   DCHECK(iter);
   DCHECK(data);
   DCHECK(length);
+  *length = 0;
+  *data = 0;
 
   if (!ReadLength(iter, length))
     return false;
@@ -355,7 +360,7 @@ char* Pickle::BeginWriteData(int length) {
 }
 
 void Pickle::TrimWriteData(int new_length) {
-  DCHECK(variable_buffer_offset_ != 0);
+  DCHECK_NE(variable_buffer_offset_, 0U);
 
   // Fetch the the variable buffer size
   int* cur_length = reinterpret_cast<int*>(
@@ -374,7 +379,7 @@ void Pickle::TrimWriteData(int new_length) {
 bool Pickle::Resize(size_t new_capacity) {
   new_capacity = AlignInt(new_capacity, kPayloadUnit);
 
-  CHECK(capacity_ != kCapacityReadOnly);
+  CHECK_NE(capacity_, kCapacityReadOnly);
   void* p = realloc(header_, new_capacity);
   if (!p)
     return false;

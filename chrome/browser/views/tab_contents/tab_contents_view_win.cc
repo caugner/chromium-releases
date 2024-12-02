@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,11 @@
 
 #include <windows.h>
 
-#include "app/gfx/canvas_paint.h"
 #include "app/os_exchange_data.h"
-#include "app/os_exchange_data_provider_win.h"
+#include "base/file_path.h"
 #include "base/keyboard_codes.h"
 #include "base/time.h"
 #include "base/win_util.h"
-#include "chrome/browser/bookmarks/bookmark_drag_data.h"
 #include "chrome/browser/browser.h"  // TODO(beng): this dependency is awful.
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_request_manager.h"
@@ -23,15 +21,14 @@
 #include "chrome/browser/tab_contents/interstitial_page.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
-#include "chrome/browser/tab_contents/web_drag_source.h"
-#include "chrome/browser/tab_contents/web_drop_target.h"
+#include "chrome/browser/tab_contents/web_drop_target_win.h"
 #include "chrome/browser/views/sad_tab_view.h"
 #include "chrome/browser/views/tab_contents/render_view_context_menu_win.h"
-#include "chrome/common/url_constants.h"
-#include "net/base/net_util.h"
+#include "chrome/browser/views/tab_contents/tab_contents_drag_win.h"
+#include "gfx/canvas_paint.h"
 #include "views/focus/view_storage.h"
+#include "views/screen.h"
 #include "views/widget/root_view.h"
-#include "webkit/glue/webdropdata.h"
 
 using WebKit::WebDragOperation;
 using WebKit::WebDragOperationNone;
@@ -45,9 +42,9 @@ TabContentsView* TabContentsView::Create(TabContents* tab_contents) {
 
 TabContentsViewWin::TabContentsViewWin(TabContents* tab_contents)
     : TabContentsView(tab_contents),
-      ignore_next_char_event_(false),
       focus_manager_(NULL),
-      close_tab_after_drag_ends_(false) {
+      close_tab_after_drag_ends_(false),
+      sad_tab_(NULL) {
   last_focused_view_storage_id_ =
       views::ViewStorage::GetSharedInstance()->CreateStorageID();
 }
@@ -60,8 +57,6 @@ TabContentsViewWin::~TabContentsViewWin() {
   views::ViewStorage* view_storage = views::ViewStorage::GetSharedInstance();
   if (view_storage->RetrieveView(last_focused_view_storage_id_) != NULL)
     view_storage->RemoveView(last_focused_view_storage_id_);
-
-  DCHECK(!drag_source_.get());
 }
 
 void TabContentsViewWin::Unparent() {
@@ -97,9 +92,15 @@ RenderWidgetHostView* TabContentsViewWin::CreateViewForWidget(
     return render_widget_host->view();
   }
 
+  // If we were showing sad tab, remove it now.
+  if (sad_tab_ != NULL) {
+    SetContentsView(new views::View());
+    sad_tab_ = NULL;
+  }
+
   RenderWidgetHostViewWin* view =
       new RenderWidgetHostViewWin(render_widget_host);
-  view->Create(GetNativeView());
+  view->CreateWnd(GetNativeView());
   view->ShowWindow(SW_SHOW);
   return view;
 }
@@ -109,9 +110,10 @@ gfx::NativeView TabContentsViewWin::GetNativeView() const {
 }
 
 gfx::NativeView TabContentsViewWin::GetContentNativeView() const {
-  if (!tab_contents()->render_widget_host_view())
+  RenderWidgetHostView* rwhv = tab_contents()->GetRenderWidgetHostView();
+  if (!rwhv)
     return NULL;
-  return tab_contents()->render_widget_host_view()->GetNativeView();
+  return rwhv->GetNativeView();
 }
 
 gfx::NativeWindow TabContentsViewWin::GetTopLevelNativeWindow() const {
@@ -123,69 +125,15 @@ void TabContentsViewWin::GetContainerBounds(gfx::Rect* out) const {
 }
 
 void TabContentsViewWin::StartDragging(const WebDropData& drop_data,
-                                       WebDragOperationsMask ops) {
-  OSExchangeData data;
+                                       WebDragOperationsMask ops,
+                                       const SkBitmap& image,
+                                       const gfx::Point& image_offset) {
+  drag_handler_ = new TabContentsDragWin(this);
+  // TODO(estade): make use of |image| and |image_offset|.
+  drag_handler_->StartDragging(drop_data, ops);
+}
 
-  // TODO(tc): Generate an appropriate drag image.
-
-  // We set the file contents before the URL because the URL also sets file
-  // contents (to a .URL shortcut).  We want to prefer file content data over a
-  // shortcut so we add it first.
-  if (!drop_data.file_contents.empty()) {
-    // Images without ALT text will only have a file extension so we need to
-    // synthesize one from the provided extension and URL.
-    FilePath file_name(drop_data.file_description_filename);
-    file_name = file_name.BaseName().RemoveExtension();
-    if (file_name.value().empty()) {
-      // Retrieve the name from the URL.
-      std::wstring fn = net::GetSuggestedFilename(drop_data.url, "", "", L"");
-      if ((fn.size() + drop_data.file_extension.size() + 1) > MAX_PATH)
-        fn = fn.substr(0, MAX_PATH - drop_data.file_extension.size() - 2);
-      file_name = FilePath::FromWStringHack(fn);
-    }
-    file_name = file_name.ReplaceExtension(drop_data.file_extension);
-    data.SetFileContents(file_name.value(), drop_data.file_contents);
-  }
-  if (!drop_data.text_html.empty())
-    data.SetHtml(drop_data.text_html, drop_data.html_base_url);
-  if (drop_data.url.is_valid()) {
-    if (drop_data.url.SchemeIs(chrome::kJavaScriptScheme)) {
-      // We don't want to allow javascript URLs to be dragged to the desktop,
-      // but we do want to allow them to be added to the bookmarks bar
-      // (bookmarklets). So we create a fake bookmark entry (BookmarkDragData
-      // object) which explorer.exe cannot handle, and write the entry to data.
-      BookmarkDragData::Element bm_elt;
-      bm_elt.is_url = true;
-      bm_elt.url = drop_data.url;
-      bm_elt.title = drop_data.url_title;
-
-      BookmarkDragData bm_drag_data;
-      bm_drag_data.elements.push_back(bm_elt);
-
-      // Pass in NULL as the profile so that the bookmark always adds the url
-      // rather than trying to move an existing url.
-      bm_drag_data.Write(NULL, &data);
-    } else {
-      data.SetURL(drop_data.url, drop_data.url_title);
-    }
-  }
-  if (!drop_data.plain_text.empty())
-    data.SetString(drop_data.plain_text);
-
-  drag_source_ = new WebDragSource(GetNativeView(), tab_contents());
-
-  DWORD effects;
-
-  // We need to enable recursive tasks on the message loop so we can get
-  // updates while in the system DoDragDrop loop.
-  bool old_state = MessageLoop::current()->NestableTasksAllowed();
-  MessageLoop::current()->SetNestableTasksAllowed(true);
-  DoDragDrop(OSExchangeDataProviderWin::GetIDataObject(data), drag_source_,
-             DROPEFFECT_COPY | DROPEFFECT_LINK, &effects);
-  // TODO(snej): Use 'ops' param instead of hardcoding dropeffects
-  MessageLoop::current()->SetNestableTasksAllowed(old_state);
-
-  drag_source_ = NULL;
+void TabContentsViewWin::EndDragging() {
   if (close_tab_after_drag_ends_) {
     close_tab_timer_.Start(base::TimeDelta::FromMilliseconds(0), this,
                            &TabContentsViewWin::CloseTab);
@@ -193,6 +141,8 @@ void TabContentsViewWin::StartDragging(const WebDropData& drop_data,
 
   if (tab_contents()->render_view_host())
     tab_contents()->render_view_host()->DragSourceSystemDragEnded();
+
+  drag_handler_ = NULL;
 }
 
 void TabContentsViewWin::OnDestroy() {
@@ -209,7 +159,7 @@ void TabContentsViewWin::SetPageTitle(const std::wstring& title) {
     // TODO(brettw) this call seems messy the way it reaches into the widget
     // view, and I'm not sure it's necessary. Maybe we should just remove it.
     ::SetWindowText(
-        tab_contents()->render_widget_host_view()->GetNativeView(),
+        tab_contents()->GetRenderWidgetHostView()->GetNativeView(),
         title.c_str());
   }
 }
@@ -224,7 +174,11 @@ void TabContentsViewWin::OnTabCrashed() {
 
 void TabContentsViewWin::SizeContents(const gfx::Size& size) {
   // TODO(brettw) this is a hack and should be removed. See tab_contents_view.h.
-  WasSized(size);
+
+  // Set new window size. It will fire OnWindowPosChanged and we will do
+  // the rest in WasSized.
+  UINT swp_flags = SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE;
+  SetWindowPos(NULL, 0, 0, size.width(), size.height(), swp_flags);
 }
 
 void TabContentsViewWin::Focus() {
@@ -236,12 +190,12 @@ void TabContentsViewWin::Focus() {
     return;
   }
 
-  if (tab_contents()->is_crashed() && sad_tab_.get()) {
+  if (tab_contents()->is_crashed() && sad_tab_ != NULL) {
     sad_tab_->RequestFocus();
     return;
   }
 
-  RenderWidgetHostView* rwhv = tab_contents()->render_widget_host_view();
+  RenderWidgetHostView* rwhv = tab_contents()->GetRenderWidgetHostView();
   if (rwhv) {
     ::SetFocus(rwhv->GetNativeView());
     return;
@@ -253,7 +207,7 @@ void TabContentsViewWin::Focus() {
 
 void TabContentsViewWin::SetInitialFocus() {
   if (tab_contents()->FocusLocationBarByDefault())
-    tab_contents()->delegate()->SetFocusToLocationBar();
+    tab_contents()->SetFocusToLocationBar(false);
   else
     Focus();
 }
@@ -318,20 +272,20 @@ void TabContentsViewWin::RestoreFocus() {
 }
 
 bool TabContentsViewWin::IsDoingDrag() const {
-  return drag_source_.get() != NULL;
+  return drag_handler_.get() != NULL;
 }
 
 void TabContentsViewWin::CancelDragAndCloseTab() {
   DCHECK(IsDoingDrag());
   // We can't close the tab while we're in the drag and
-  // |drag_source_->CancelDrag()| is async.  Instead, set a flag to cancel
+  // |drag_handler_->CancelDrag()| is async.  Instead, set a flag to cancel
   // the drag and when the drag nested message loop ends, close the tab.
-  drag_source_->CancelDrag();
+  drag_handler_->CancelDrag();
   close_tab_after_drag_ends_ = true;
 }
 
 void TabContentsViewWin::UpdateDragCursor(WebDragOperation operation) {
-  drop_target_->set_is_drop_target(operation != WebDragOperationNone);
+  drop_target_->set_drag_cursor(operation);
 }
 
 void TabContentsViewWin::GotFocus() {
@@ -349,63 +303,6 @@ void TabContentsViewWin::TakeFocus(bool reverse) {
     if (focus_manager)
       focus_manager->AdvanceFocus(reverse);
   }
-}
-
-void TabContentsViewWin::HandleKeyboardEvent(
-    const NativeWebKeyboardEvent& event) {
-  // Previous calls to TranslateMessage can generate CHAR events as well as
-  // RAW_KEY_DOWN events, even if the latter triggered an accelerator.  In these
-  // cases, we discard the CHAR events.
-  if (event.type == WebInputEvent::Char && ignore_next_char_event_) {
-    ignore_next_char_event_ = false;
-    return;
-  }
-  ignore_next_char_event_ = false;
-
-  // The renderer returned a keyboard event it did not process. This may be
-  // a keyboard shortcut that we have to process.
-  if (event.type == WebInputEvent::RawKeyDown) {
-    views::FocusManager* focus_manager =
-        views::FocusManager::GetFocusManagerForNativeView(GetNativeView());
-    // We may not have a focus_manager at this point (if the tab has been
-    // switched by the time this message returned).
-    if (focus_manager) {
-      views::Accelerator accelerator(
-          win_util::WinToKeyboardCode(event.windowsKeyCode),
-          (event.modifiers & WebInputEvent::ShiftKey) ==
-              WebInputEvent::ShiftKey,
-          (event.modifiers & WebInputEvent::ControlKey) ==
-              WebInputEvent::ControlKey,
-          (event.modifiers & WebInputEvent::AltKey) ==
-              WebInputEvent::AltKey);
-
-      // This is tricky: we want to set ignore_next_char_event_ if
-      // ProcessAccelerator returns true. But ProcessAccelerator might delete
-      // |this| if the accelerator is a "close tab" one. So we speculatively
-      // set the flag and fix it if no event was handled.
-      ignore_next_char_event_ = true;
-      if (focus_manager->ProcessAccelerator(accelerator)) {
-        // DANGER: |this| could be deleted now!
-        return;
-      } else {
-        // ProcessAccelerator didn't handle the accelerator, so we know both
-        // that |this| is still valid, and that we didn't want to set the flag.
-        ignore_next_char_event_ = false;
-      }
-    }
-  }
-
-  if (tab_contents()->delegate() &&
-      tab_contents()->delegate()->HandleKeyboardEvent(event)) {
-    return;
-  }
-
-  // Any unhandled keyboard/character messages should be defproced.
-  // This allows stuff like Alt+F4, etc to work correctly.
-  DefWindowProc(event.os_event.hwnd,
-                event.os_event.message,
-                event.os_event.wParam,
-                event.os_event.lParam);
 }
 
 views::FocusManager* TabContentsViewWin::GetFocusManager() {
@@ -456,12 +353,17 @@ void TabContentsViewWin::OnMouseLeave() {
   // Let our delegate know that the mouse moved (useful for resetting status
   // bubble state).
   if (tab_contents()->delegate())
-    tab_contents()->delegate()->ContentsMouseEvent(tab_contents(), false);
+    tab_contents()->delegate()->ContentsMouseEvent(
+        tab_contents(), views::Screen::GetCursorScreenPoint(), false);
   SetMsgHandled(FALSE);
 }
 
 LRESULT TabContentsViewWin::OnMouseRange(UINT msg,
                                          WPARAM w_param, LPARAM l_param) {
+  if (tab_contents()->is_crashed() && sad_tab_ != NULL) {
+    return WidgetWin::OnMouseRange(msg, w_param, l_param);
+  }
+
   switch (msg) {
     case WM_LBUTTONDOWN:
     case WM_MBUTTONDOWN:
@@ -474,9 +376,9 @@ LRESULT TabContentsViewWin::OnMouseRange(UINT msg,
     case WM_MOUSEMOVE:
       // Let our delegate know that the mouse moved (useful for resetting status
       // bubble state).
-      if (tab_contents()->delegate()) {
-        tab_contents()->delegate()->ContentsMouseEvent(tab_contents(), true);
-      }
+      if (tab_contents()->delegate())
+        tab_contents()->delegate()->ContentsMouseEvent(
+            tab_contents(), views::Screen::GetCursorScreenPoint(), true);
       break;
     default:
       break;
@@ -488,8 +390,10 @@ LRESULT TabContentsViewWin::OnMouseRange(UINT msg,
 void TabContentsViewWin::OnPaint(HDC junk_dc) {
   if (tab_contents()->render_view_host() &&
       !tab_contents()->render_view_host()->IsRenderViewLive()) {
-    if (!sad_tab_.get())
-      sad_tab_.reset(new SadTabView);
+    if (sad_tab_ == NULL) {
+      sad_tab_ = new SadTabView(tab_contents());
+      SetContentsView(sad_tab_);
+    }
     CRect cr;
     GetClientRect(&cr);
     sad_tab_->SetBounds(gfx::Rect(cr));
@@ -554,7 +458,12 @@ void TabContentsViewWin::OnWindowPosChanged(WINDOWPOS* window_pos) {
 }
 
 void TabContentsViewWin::OnSize(UINT param, const CSize& size) {
-  WidgetWin::OnSize(param, size);
+  // NOTE: Because TabContentsViewWin handles OnWindowPosChanged without calling
+  // DefWindowProc, OnSize is NOT called on window resize. This handler
+  // is called only once when the window is created.
+
+  // Don't call base class OnSize to avoid useless layout for 0x0 size.
+  // We will get OnWindowPosChanged later and layout root view in WasSized.
 
   // Hack for thinkpad touchpad driver.
   // Set fake scrollbars so that we can get scroll messages,
@@ -605,15 +514,17 @@ void TabContentsViewWin::WasShown() {
 }
 
 void TabContentsViewWin::WasSized(const gfx::Size& size) {
-  UINT swp_flags = SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE;
-  SetWindowPos(NULL, 0, 0, size.width(), size.height(), swp_flags);
   if (tab_contents()->interstitial_page())
     tab_contents()->interstitial_page()->SetSize(size);
-  if (tab_contents()->render_widget_host_view())
-    tab_contents()->render_widget_host_view()->SetSize(size);
+  RenderWidgetHostView* rwhv = tab_contents()->GetRenderWidgetHostView();
+  if (rwhv)
+    rwhv->SetSize(size);
 
-  // TODO(brettw) this function can probably be moved to this class.
-  tab_contents()->RepositionSupressedPopupsToFit();
+  // We have to layout root view here because we handle OnWindowPosChanged
+  // without calling DefWindowProc (it sends OnSize and OnMove) so we don't
+  // receive OnSize. For performance reasons call SetBounds instead of
+  // LayoutRootView, we actually don't need paint event and we know new size.
+  GetRootView()->SetBounds(0, 0, size.width(), size.height());
 }
 
 bool TabContentsViewWin::ScrollZoom(int scroll_type) {

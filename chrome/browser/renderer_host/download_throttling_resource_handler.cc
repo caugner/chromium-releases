@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,10 @@
 
 #include "base/logging.h"
 #include "chrome/browser/renderer_host/download_resource_handler.h"
+#include "chrome/browser/renderer_host/resource_dispatcher_host.h"
+#include "chrome/common/resource_response.h"
 #include "net/base/io_buffer.h"
+#include "net/base/mime_sniffer.h"
 
 DownloadThrottlingResourceHandler::DownloadThrottlingResourceHandler(
     ResourceDispatcherHost* host,
@@ -63,6 +66,14 @@ bool DownloadThrottlingResourceHandler::OnResponseStarted(
   return true;
 }
 
+bool DownloadThrottlingResourceHandler::OnWillStart(int request_id,
+                                                    const GURL& url,
+                                                    bool* defer) {
+  if (download_handler_.get())
+    return download_handler_->OnWillStart(request_id, url, defer);
+  return true;
+}
+
 bool DownloadThrottlingResourceHandler::OnWillRead(int request_id,
                                                    net::IOBuffer** buf,
                                                    int* buf_size,
@@ -73,8 +84,11 @@ bool DownloadThrottlingResourceHandler::OnWillRead(int request_id,
   // We should only have this invoked once, as such we only deal with one
   // tmp buffer.
   DCHECK(!tmp_buffer_.get());
+  // If the caller passed a negative |min_size| then chose an appropriate
+  // default. The BufferedResourceHandler requires this to be at least 2 times
+  // the size required for mime detection.
   if (min_size < 0)
-    min_size = 1024;
+    min_size = 2 * net::kMaxBytesToSniff;
   tmp_buffer_ = new net::IOBuffer(min_size);
   *buf = tmp_buffer_.get();
   // TODO(willchan): Remove after debugging bug 16371.
@@ -123,6 +137,11 @@ bool DownloadThrottlingResourceHandler::OnResponseCompleted(
   return true;
 }
 
+void DownloadThrottlingResourceHandler::OnRequestClosed() {
+  if (download_handler_.get())
+    download_handler_->OnRequestClosed();
+}
+
 void DownloadThrottlingResourceHandler::CancelDownload() {
   host_->CancelRequest(render_process_host_id_, request_id_, false);
 }
@@ -137,7 +156,8 @@ void DownloadThrottlingResourceHandler::ContinueDownload() {
                                   url_,
                                   host_->download_file_manager(),
                                   request_,
-                                  false);
+                                  false,
+                                  DownloadSaveInfo());
   if (response_.get())
     download_handler_->OnResponseStarted(request_id_, response_.get());
 
@@ -146,6 +166,10 @@ void DownloadThrottlingResourceHandler::ContinueDownload() {
 
   // And let the request continue.
   host_->PauseRequest(render_process_host_id_, request_id_, false);
+}
+
+int DownloadThrottlingResourceHandler::GetRequestId() {
+  return request_id_;
 }
 
 void DownloadThrottlingResourceHandler::CopyTmpBufferToDownloadHandler() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,10 +9,19 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/sys_string_conversions.h"
+#include "chrome/browser/history/history_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/file_test_utils.h"
 #include "chrome/browser/importer/importer_bridge.h"
 #include "testing/platform_test.h"
+
+using importer::COOKIES;
+using importer::FAVORITES;
+using importer::HISTORY;
+using importer::HOME_PAGE;
+using importer::NONE;
+using importer::PASSWORDS;
+using importer::SEARCH_ENGINES;
 
 // In order to test the Safari import functionality effectively, we store a
 // simulated Library directory containing dummy data files in the same
@@ -107,7 +116,6 @@ TEST_F(SafariImporterTest, BookmarkImport) {
       EXPECT_EQ(entry.title, kImportedBookmarksData[i].title);
     }
   }
-
 }
 
 TEST_F(SafariImporterTest, FavIconImport) {
@@ -148,25 +156,15 @@ TEST_F(SafariImporterTest, FavIconImport) {
 TEST_F(SafariImporterTest, CanImport) {
   uint16 items = NONE;
   EXPECT_TRUE(SafariImporter::CanImport(GetTestSafariLibraryPath(), &items));
-  // We can't check the exact value of items because the HOME_PAGE bit depends
-  // on the defaults of the current machine.
-  EXPECT_EQ(items & HISTORY, HISTORY);
-  EXPECT_EQ(items & FAVORITES, FAVORITES);
+  EXPECT_EQ(items, HISTORY | FAVORITES);
   EXPECT_EQ(items & COOKIES, NONE);
   EXPECT_EQ(items & PASSWORDS, NONE);
   EXPECT_EQ(items & SEARCH_ENGINES, NONE);
+  EXPECT_EQ(items & HOME_PAGE, NONE);
 
   // Check that we don't import anything from a bogus library directory.
   FilePath fake_library_dir;
   file_util::CreateNewTempDirectory("FakeSafariLibrary", &fake_library_dir);
   FileAutoDeleter deleter(fake_library_dir);
-
-  // Despite the fact that we're pointing to an empty library directory,
-  // CanImport may still return true on systems where the Safari defaults
-  // are defined. This means that we can't make assumptions about the return
-  // value here.
-  SafariImporter::CanImport(fake_library_dir, &items);
-  EXPECT_EQ(items & ~HOME_PAGE, NONE); // See comment above about HOME_PAGE.
-
-
+  EXPECT_FALSE(SafariImporter::CanImport(fake_library_dir, &items));
 }

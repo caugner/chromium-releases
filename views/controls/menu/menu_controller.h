@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,7 @@ class OSExchangeData;
 namespace views {
 
 class DropTargetEvent;
+class MenuButton;
 class MenuHostRootView;
 class MouseEvent;
 class SubmenuView;
@@ -44,6 +45,7 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   // block, the selected item is returned. If the menu does not block this
   // returns NULL immediately.
   MenuItemView* Run(gfx::NativeWindow parent,
+                    MenuButton* button,
                     MenuItemView* root,
                     const gfx::Rect& bounds,
                     MenuItemView::AnchorPosition position,
@@ -96,6 +98,18 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   void OnDragExitedScrollButton(SubmenuView* source);
 
  private:
+  // Enumeration of how the menu should exit.
+  enum ExitType {
+    // Don't exit.
+    EXIT_NONE,
+
+    // All menus, including nested, should be exited.
+    EXIT_ALL,
+
+    // Only the outermost menu should be exited.
+    EXIT_OUTERMOST
+  };
+
   class MenuScrollTask;
 
   // Tracks selection information.
@@ -182,9 +196,14 @@ class MenuController : public MessageLoopForUI::Dispatcher {
 
   ~MenuController();
 
+  void UpdateInitialLocation(const gfx::Rect& bounds,
+                             MenuItemView::AnchorPosition position);
+
   // Invoked when the user accepts the selected item. This is only used
   // when blocking. This schedules the loop to quit.
   void Accept(MenuItemView* item, int mouse_event_flags);
+
+  bool ShowSiblingMenu(SubmenuView* source, const MouseEvent& e);
 
   // Closes all menus, including any menus of nested invocations of Run.
   void CloseAllNestedMenus();
@@ -235,6 +254,14 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   // If item has a submenu, it is opened. This does NOT update the selection
   // in anyway.
   void OpenMenu(MenuItemView* item);
+
+  // Implementation of OpenMenu. If |show| is true, this invokes show on the
+  // menu, otherwise Reposition is invoked.
+  void OpenMenuImpl(MenuItemView* item, bool show);
+
+  // Invoked when the children of a menu change and the menu is showing.
+  // This closes any submenus and resizes the submenu.
+  void MenuChildrenChanged(MenuItemView* item);
 
   // Builds the paths of the two menu items into the two paths, and
   // sets first_diff_at to the location of the first difference between the
@@ -310,8 +337,8 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   // If true, we're showing.
   bool showing_;
 
-  // If true, all nested run loops should be exited.
-  bool exit_all_;
+  // Indicates what to exit.
+  ExitType exit_type_;
 
   // Whether we did a capture. We do a capture only if we're blocking and
   // the mouse was down when Run.
@@ -330,7 +357,7 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   MenuItemView* result_;
 
   // The mouse event flags when the user clicked on a menu. Is 0 if the
-  // user did not use the mousee to select the menu.
+  // user did not use the mouse to select the menu.
   int result_mouse_event_flags_;
 
   // If not empty, it means we're nested. When Run is invoked from within
@@ -359,14 +386,12 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   bool possible_drag_;
 
   // Location the mouse was pressed at. Used to detect d&d.
-  int press_x_;
-  int press_y_;
+  gfx::Point press_pt_;
 
   // We get a slew of drag updated messages as the mouse is over us. To avoid
   // continually processing whether we can drop, we cache the coordinates.
   bool valid_drop_coordinates_;
-  int drop_x_;
-  int drop_y_;
+  gfx::Point drop_pt_;
   int last_drop_operation_;
 
   // If true, we're in the middle of invoking ShowAt on a submenu.
@@ -375,6 +400,8 @@ class MenuController : public MessageLoopForUI::Dispatcher {
   // Task for scrolling the menu. If non-null indicates a scroll is currently
   // underway.
   scoped_ptr<MenuScrollTask> scroll_task_;
+
+  MenuButton* menu_button_;
 
   DISALLOW_COPY_AND_ASSIGN(MenuController);
 };

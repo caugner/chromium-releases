@@ -22,11 +22,16 @@ import sys
 
 
 ARCHIVE_DIR = "installer_archive"
-ARCHIVE_FILE = "chrome.7z"     # uncompresed full archive file
+
+# suffix to uncompresed full archive file, appended to options.output_name
+ARCHIVE_SUFFIX = ".7z"
 BSDIFF_EXEC = "bsdiff.exe"
 CHROME_DIR = "Chrome-bin"
-CHROME_PATCH_FILE_PREFIX = "chrome_patch"
-COMPRESSED_ARCHIVE_FILE = "chrome.packed.7z"   # compressed full archive file
+CHROME_PATCH_FILE_SUFFIX = "_patch"  # prefixed by options.output_name
+
+# compressed full archive suffix, will be prefixed by options.output_name
+COMPRESSED_ARCHIVE_SUFFIX = ".packed.7z"
+
 COMPRESSED_FILE_EXT = ".packed.7z"     # extension of patch archive file
 COURGETTE_EXEC = "courgette.exe"
 MINI_INSTALLER_INPUT_FILE = "packed_files.txt"
@@ -86,6 +91,12 @@ def CopyAllFilesToStagingDir(config, distribution, staging_dir, output_dir):
     CopySectionFilesToStagingDir(config, distribution.upper(),
                                  staging_dir, output_dir)
 
+def IsChromeFrameFile(file):
+  for cf_file in ['npchrome_frame', 'chrome_launcher']:
+    if file.lower().find(cf_file) != -1:
+      return True
+  return False
+
 def CopySectionFilesToStagingDir(config, section, staging_dir, output_dir):
   """Copies installer archive files specified in section to staging dir.
   This method copies reads section from config file and copies all the files
@@ -99,7 +110,16 @@ def CopySectionFilesToStagingDir(config, section, staging_dir, output_dir):
     if not os.path.exists(dst):
       os.makedirs(dst)
     for file in glob.glob(os.path.join(output_dir, option)):
-      shutil.copy(file, dst)
+      if IsChromeFrameFile(file):
+        try:
+          shutil.copy(file, dst)
+        except IOError:
+          # TODO(robertshield): Temporary hack to work around problems building
+          # Chrome Frame binaries on non-Chrome Frame builders. Remove this
+          # asap.
+          print 'Error attempting to copy ' + file + ' to ' + dst
+      else:
+        shutil.copy(file, dst)
 
 def GenerateDiffPatch(options, orig_file, new_file, patch_file):
   if (options.diff_algorithm == "COURGETTE"):
@@ -121,7 +141,7 @@ def GetPrevVersion(output_dir, temp_dir, last_chrome_installer):
 
   lzma_exec = GetLZMAExec(options.output_dir)
   prev_archive_file = os.path.join(options.last_chrome_installer,
-                                   ARCHIVE_FILE)
+                                   options.output_name + ARCHIVE_SUFFIX)
   cmd = '%s x -o"%s" "%s" Chrome-bin/*/gears.dll' % (lzma_exec, temp_dir,
                                                        prev_archive_file)
   RunSystemCommand(cmd)
@@ -132,12 +152,14 @@ def MakeStagingDirectories(output_dir):
   """Creates a staging path for installer archive. If directory exists already,
   deletes the existing directory.
   """
-  file_path = os.path.join(output_dir, ARCHIVE_DIR)
+  prefixed_archive_dir = (options.archive_prefix or "") + ARCHIVE_DIR
+  file_path = os.path.join(output_dir, prefixed_archive_dir)
   if os.path.exists(file_path):
     shutil.rmtree(file_path)
   os.makedirs(file_path)
 
-  temp_file_path = os.path.join(output_dir, TEMP_ARCHIVE_DIR)
+  prefixed_temp_archive_dir = (options.archive_prefix or "") + TEMP_ARCHIVE_DIR
+  temp_file_path = os.path.join(output_dir, prefixed_temp_archive_dir)
   if os.path.exists(temp_file_path):
     shutil.rmtree(temp_file_path)
   os.makedirs(temp_file_path)
@@ -165,7 +187,8 @@ def CreateArchiveFile(options, staging_dir, current_version, prev_version):
   """
   # First create an uncompressed archive file for the current build (chrome.7z)
   lzma_exec = GetLZMAExec(options.output_dir)
-  archive_file = os.path.join(options.output_dir, ARCHIVE_FILE)
+  archive_file = os.path.join(options.output_dir,
+                              options.output_name + ARCHIVE_SUFFIX)
   cmd = '%s a -t7z "%s" "%s" -mx0' % (lzma_exec, archive_file,
                                       os.path.join(staging_dir, CHROME_DIR))
   # There doesnt seem to be any way in 7za.exe to override existing file so
@@ -179,18 +202,19 @@ def CreateArchiveFile(options, staging_dir, current_version, prev_version):
   # If we are generating a patch, run bsdiff against previous build and
   # compress the resulting patch file. If this is not a patch just compress the
   # uncompressed archive file.
+  patch_name_prefix = options.output_name + CHROME_PATCH_FILE_SUFFIX
   if options.last_chrome_installer:
     prev_archive_file = os.path.join(options.last_chrome_installer,
-                                     ARCHIVE_FILE)
-    patch_file = os.path.join(options.output_dir, CHROME_PATCH_FILE_PREFIX +
+                                     options.output_name + ARCHIVE_SUFFIX)
+    patch_file = os.path.join(options.output_dir, patch_name_prefix +
                                                   PATCH_FILE_EXT)
     GenerateDiffPatch(options, prev_archive_file, archive_file, patch_file)
-    compressed_archive_file = CHROME_PATCH_FILE_PREFIX + '_' + \
+    compressed_archive_file = patch_name_prefix + '_' + \
                               current_version + '_from_' + prev_version + \
                               COMPRESSED_FILE_EXT
     orig_file = patch_file
   else:
-    compressed_archive_file = COMPRESSED_ARCHIVE_FILE
+    compressed_archive_file = options.output_name + COMPRESSED_ARCHIVE_SUFFIX
     orig_file = archive_file
 
   compressed_archive_file_path = os.path.join(options.output_dir,
@@ -298,11 +322,16 @@ if '__main__' == __name__:
            'specifies the directory that contains base versions of ' +
            'setup.exe, courgette.exe (if --diff_algorithm is COURGETTE) ' +
            '& chrome.7z.')
+  option_parser.add_option('-p', '--archive_prefix',
+      help='Specifies a prefix to the archive path. Useful if building ' +
+           'multiple installer archives.')
   option_parser.add_option('-f', '--setup_exe_format', default='COMPRESSED',
       help='How setup.exe should be included {COMPRESSED|DIFF|FULL}.')
   option_parser.add_option('-a', '--diff_algorithm', default='BSDIFF',
       help='Diff algorithm to use when generating differential patches ' +
            '{BSDIFF|COURGETTE}.')
+  option_parser.add_option('-n', '--output_name', default='chrome',
+      help='Name used to prefix names of generated archives.')
 
   options, args = option_parser.parse_args()
   print sys.argv

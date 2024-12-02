@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "app/gfx/codec/jpeg_codec.h"
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
@@ -11,6 +10,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/tools/profiles/thumbnail-inl.h"
+#include "gfx/codec/jpeg_codec.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -69,7 +69,7 @@ class ThumbnailDatabaseTest : public testing::Test {
 
 TEST_F(ThumbnailDatabaseTest, AddDelete) {
   ThumbnailDatabase db;
-  ASSERT_TRUE(db.Init(file_name_, NULL) == INIT_OK);
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_name_, NULL));
 
   // Add one page & verify it got added.
   ThumbnailScore boring(kBoringness, true, true);
@@ -112,7 +112,7 @@ TEST_F(ThumbnailDatabaseTest, AddDelete) {
 TEST_F(ThumbnailDatabaseTest, UseLessBoringThumbnails) {
   ThumbnailDatabase db;
   Time now = Time::Now();
-  ASSERT_TRUE(db.Init(file_name_, NULL) == INIT_OK);
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_name_, NULL));
 
   // Add one page & verify it got added.
   ThumbnailScore boring(kBoringness, true, true);
@@ -146,7 +146,7 @@ TEST_F(ThumbnailDatabaseTest, UseLessBoringThumbnails) {
 TEST_F(ThumbnailDatabaseTest, UseAtTopThumbnails) {
   ThumbnailDatabase db;
   Time now = Time::Now();
-  ASSERT_TRUE(db.Init(file_name_, NULL) == INIT_OK);
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_name_, NULL));
 
   // Add one page & verify it got added. Note that it doesn't have
   // |good_clipping| and isn't |at_top|.
@@ -222,7 +222,7 @@ TEST_F(ThumbnailDatabaseTest, ThumbnailTimeDegradation) {
   const double kBaseBoringness = 0.305;
   const double kWorseBoringness = 0.345;
 
-  ASSERT_TRUE(db.Init(file_name_, NULL) == INIT_OK);
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_name_, NULL));
 
   // add one page & verify it got added.
   ThumbnailScore base_boringness(kBaseBoringness, true, true, kFiveHoursAgo);
@@ -261,7 +261,7 @@ TEST_F(ThumbnailDatabaseTest, NeverAcceptTotallyBoringThumbnail) {
   // thumbnail is totally boring.
   ThumbnailDatabase db;
   Time now = Time::Now();
-  ASSERT_TRUE(db.Init(file_name_, NULL) == INIT_OK);
+  ASSERT_EQ(sql::INIT_OK, db.Init(file_name_, NULL));
 
   std::vector<unsigned char> jpeg_data;
   ThumbnailScore score_out;

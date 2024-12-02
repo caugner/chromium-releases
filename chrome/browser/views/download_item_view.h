@@ -18,7 +18,6 @@
 
 #include <string>
 
-#include "app/gfx/font.h"
 #include "app/slide_animation.h"
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
@@ -27,6 +26,7 @@
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/icon_manager.h"
+#include "gfx/font.h"
 #include "views/event.h"
 #include "views/controls/button/button.h"
 #include "views/view.h"
@@ -52,6 +52,7 @@ class DownloadItemView : public views::ButtonListener,
 
   // DownloadObserver method
   virtual void OnDownloadUpdated(DownloadItem* download);
+  virtual void OnDownloadFileCompleted(DownloadItem* download) { }
   virtual void OnDownloadOpened(DownloadItem* download);
 
   // View overrides
@@ -246,7 +247,7 @@ class DownloadItemView : public views::ButtonListener,
   ScopedRunnableMethodFactory<DownloadItemView> reenable_method_factory_;
 
   // The currently running download context menu.
-  DownloadShelfContextMenuWin* active_menu_;
+  scoped_ptr<DownloadShelfContextMenuWin> context_menu_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadItemView);
 };

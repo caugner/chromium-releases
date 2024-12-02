@@ -4,12 +4,10 @@
 
 #include "app/resource_bundle.h"
 
-#include "app/gfx/codec/png_codec.h"
-#include "app/gfx/font.h"
 #include "base/logging.h"
 #include "base/string_piece.h"
-#include "net/base/file_stream.h"
-#include "net/base/net_errors.h"
+#include "gfx/codec/png_codec.h"
+#include "gfx/font.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 ResourceBundle* ResourceBundle::g_shared_instance_ = NULL;
@@ -21,6 +19,10 @@ const SkColor ResourceBundle::frame_color =
      SkColorSetRGB(77, 139, 217);
 const SkColor ResourceBundle::frame_color_inactive =
      SkColorSetRGB(184, 209, 240);
+const SkColor ResourceBundle::frame_color_app_panel =
+     SK_ColorWHITE;
+const SkColor ResourceBundle::frame_color_app_panel_inactive =
+     SK_ColorWHITE;
 const SkColor ResourceBundle::frame_color_incognito =
      SkColorSetRGB(83, 106, 139);
 const SkColor ResourceBundle::frame_color_incognito_inactive =
@@ -31,11 +33,12 @@ const SkColor ResourceBundle::toolbar_separator_color =
      SkColorSetRGB(182, 186, 192);
 
 /* static */
-void ResourceBundle::InitSharedInstance(const std::wstring& pref_locale) {
+std::string ResourceBundle::InitSharedInstance(
+    const std::wstring& pref_locale) {
   DCHECK(g_shared_instance_ == NULL) << "ResourceBundle initialized twice";
   g_shared_instance_ = new ResourceBundle();
 
-  g_shared_instance_->LoadResources(pref_locale);
+  return g_shared_instance_->LoadResources(pref_locale);
 }
 
 /* static */
@@ -55,8 +58,7 @@ ResourceBundle& ResourceBundle::GetSharedInstance() {
 
 ResourceBundle::ResourceBundle()
     : resources_data_(NULL),
-      locale_resources_data_(NULL),
-      theme_data_(NULL) {
+      locale_resources_data_(NULL) {
 }
 
 void ResourceBundle::FreeImages() {
@@ -69,40 +71,26 @@ void ResourceBundle::FreeImages() {
 
 /* static */
 SkBitmap* ResourceBundle::LoadBitmap(DataHandle data_handle, int resource_id) {
-  std::vector<unsigned char> png_data;
-
   scoped_refptr<RefCountedMemory> memory(
       LoadResourceBytes(data_handle, resource_id));
   if (!memory)
     return NULL;
 
-  // Decode the PNG.
-  int image_width;
-  int image_height;
-  if (!gfx::PNGCodec::Decode(
-          memory->front(), memory->size(),
-          gfx::PNGCodec::FORMAT_BGRA,
-          &png_data, &image_width, &image_height)) {
-    NOTREACHED() << "Unable to decode image resource " << resource_id;
+  SkBitmap bitmap;
+  if (!gfx::PNGCodec::Decode(memory->front(), memory->size(), &bitmap)) {
+    NOTREACHED() << "Unable to decode theme image resource " << resource_id;
     return NULL;
   }
 
-  return gfx::PNGCodec::CreateSkBitmapFromBGRAFormat(png_data,
-                                                     image_width,
-                                                     image_height);
+  return new SkBitmap(bitmap);
 }
 
 std::string ResourceBundle::GetDataResource(int resource_id) {
   return GetRawDataResource(resource_id).as_string();
 }
 
-RefCountedStaticMemory* ResourceBundle::LoadImageResourceBytes(
-    int resource_id) {
-  return LoadResourceBytes(theme_data_, resource_id);
-}
-
 RefCountedStaticMemory* ResourceBundle::LoadDataResourceBytes(
-    int resource_id) {
+    int resource_id) const {
   return LoadResourceBytes(resources_data_, resource_id);
 }
 
@@ -117,15 +105,10 @@ SkBitmap* ResourceBundle::GetBitmapNamed(int resource_id) {
 
   scoped_ptr<SkBitmap> bitmap;
 
-  if (theme_data_)
-    bitmap.reset(LoadBitmap(theme_data_, resource_id));
+  bitmap.reset(LoadBitmap(resources_data_, resource_id));
 
-  // If we did not find the bitmap in the theme DLL, try the current one.
-  if (!bitmap.get())
-    bitmap.reset(LoadBitmap(resources_data_, resource_id));
-
-  // We loaded successfully.  Cache the Skia version of the bitmap.
   if (bitmap.get()) {
+    // We loaded successfully.  Cache the Skia version of the bitmap.
     AutoLock lock_scope(lock_);
 
     // Another thread raced us, and has already cached the skia image.
@@ -160,21 +143,16 @@ void ResourceBundle::LoadFontsIfNecessary() {
   AutoLock lock_scope(lock_);
   if (!base_font_.get()) {
     base_font_.reset(new gfx::Font());
-#if defined(OS_LINUX) && defined(TOOLKIT_VIEWS)
-    // Toolkit views needs a less gigantor base font to more correctly match
-    // metrics for the bitmap-based UI.
-    *base_font_ = base_font_->DeriveFont(-1);
-#endif
+
+    bold_font_.reset(new gfx::Font());
+    *bold_font_ =
+        base_font_->DeriveFont(0, base_font_->style() | gfx::Font::BOLD);
 
     small_font_.reset(new gfx::Font());
     *small_font_ = base_font_->DeriveFont(-2);
 
     medium_font_.reset(new gfx::Font());
-#if defined(OS_LINUX) && defined(TOOLKIT_VIEWS)
-    *medium_font_ = base_font_->DeriveFont(2);
-#else
     *medium_font_ = base_font_->DeriveFont(3);
-#endif
 
     medium_bold_font_.reset(new gfx::Font());
     *medium_bold_font_ =
@@ -185,9 +163,11 @@ void ResourceBundle::LoadFontsIfNecessary() {
   }
 }
 
-gfx::Font ResourceBundle::GetFont(FontStyle style) {
+const gfx::Font& ResourceBundle::GetFont(FontStyle style) {
   LoadFontsIfNecessary();
   switch (style) {
+    case BoldFont:
+      return *bold_font_;
     case SmallFont:
       return *small_font_;
     case MediumFont:

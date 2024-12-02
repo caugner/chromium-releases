@@ -4,13 +4,14 @@
 
 #include "views/widget/widget_win.h"
 
-#include "app/gfx/canvas.h"
-#include "app/gfx/native_theme_win.h"
-#include "app/gfx/path.h"
 #include "app/l10n_util_win.h"
+#include "app/system_monitor.h"
 #include "app/win_util.h"
 #include "base/string_util.h"
 #include "base/win_util.h"
+#include "gfx/canvas.h"
+#include "gfx/native_theme_win.h"
+#include "gfx/path.h"
 #include "views/accessibility/view_accessibility.h"
 #include "views/controls/native_control_win.h"
 #include "views/focus/focus_util_win.h"
@@ -19,12 +20,14 @@
 #include "views/widget/default_theme_provider.h"
 #include "views/widget/drop_target_win.h"
 #include "views/widget/root_view.h"
+#include "views/widget/widget_delegate.h"
 #include "views/window/window_win.h"
 
 namespace views {
 
 // Property used to link the HWND to its RootView.
 static const wchar_t* const kRootViewWindowProperty = L"__ROOT_VIEW__";
+static const wchar_t* kWidgetKey = L"__VIEWS_WIDGET__";
 
 bool SetRootViewForHWND(HWND hwnd, RootView* root_view) {
   return SetProp(hwnd, kRootViewWindowProperty, root_view) ? true : false;
@@ -53,11 +56,55 @@ WidgetWin::WidgetWin()
       last_mouse_event_was_move_(false),
       is_mouse_down_(false),
       is_window_(false),
-      restore_focus_when_enabled_(false) {
+      restore_focus_when_enabled_(false),
+      delegate_(NULL) {
 }
 
 WidgetWin::~WidgetWin() {
-  MessageLoopForUI::current()->RemoveObserver(this);
+}
+
+// static
+WidgetWin* WidgetWin::GetWidget(HWND hwnd) {
+  return reinterpret_cast<WidgetWin*>(win_util::GetWindowUserData(hwnd));
+}
+
+// static
+WidgetWin* WidgetWin::GetRootWidget(HWND hwnd) {
+  // First, check if the top-level window is a Widget.
+  HWND root = ::GetAncestor(hwnd, GA_ROOT);
+  if (!root)
+    return NULL;
+
+  WidgetWin* widget = WidgetWin::GetWidget(root);
+  if (widget)
+    return widget;
+
+  // Second, try to locate the last Widget window in the parent hierarchy.
+  HWND parent_hwnd = hwnd;
+  WidgetWin* parent_widget;
+  do {
+    parent_widget = WidgetWin::GetWidget(parent_hwnd);
+    if (parent_widget) {
+      widget = parent_widget;
+      parent_hwnd = ::GetAncestor(parent_hwnd, GA_PARENT);
+    }
+  } while (parent_hwnd != NULL && parent_widget != NULL);
+
+  return widget;
+}
+
+void WidgetWin::SetUseLayeredBuffer(bool use_layered_buffer) {
+  if (use_layered_buffer_ == use_layered_buffer)
+    return;
+
+  use_layered_buffer_ = use_layered_buffer;
+  if (!hwnd())
+    return;
+
+  if (use_layered_buffer_)
+    LayoutRootView();
+  else
+    contents_.reset(NULL);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -82,8 +129,13 @@ void WidgetWin::Init(gfx::NativeView parent, const gfx::Rect& bounds) {
 
   drop_target_ = new DropTargetWin(root_view_.get());
 
-  if ((window_style() & WS_CHILD) == 0) {
-    // Top-level widgets get a FocusManager.
+  if ((window_style() & WS_CHILD) == 0 ||
+      (WidgetWin::GetRootWidget(parent) == NULL &&
+          parent != GetDesktopWindow())) {
+    // Top-level widgets and child widgets who do not have a top-level widget
+    // ancestor get a FocusManager. Child widgets parented to the desktop do not
+    // get a FocusManager because parenting to the desktop is the technique used
+    // to intentionally exclude a widget from the FocusManager hierarchy.
     focus_manager_.reset(new FocusManager(this));
   }
 
@@ -113,6 +165,14 @@ void WidgetWin::Init(gfx::NativeView parent, const gfx::Rect& bounds) {
   ImmAssociateContextEx(hwnd(), NULL, 0);
 }
 
+WidgetDelegate* WidgetWin::GetWidgetDelegate() {
+  return delegate_;
+}
+
+void WidgetWin::SetWidgetDelegate(WidgetDelegate* delegate) {
+  delegate_ = delegate;
+}
+
 void WidgetWin::SetContentsView(View* view) {
   root_view_->SetContentsView(view);
 }
@@ -137,8 +197,15 @@ void WidgetWin::SetBounds(const gfx::Rect& bounds) {
                SWP_NOACTIVATE | SWP_NOZORDER);
 }
 
-void WidgetWin::SetShape(const gfx::Path& shape) {
-  SetWindowRgn(shape.CreateHRGN(), TRUE);
+void WidgetWin::MoveAbove(Widget* other) {
+  gfx::Rect bounds;
+  GetBounds(&bounds, false);
+  SetWindowPos(other->GetNativeView(), bounds.x(), bounds.y(),
+               bounds.width(), bounds.height(), SWP_NOACTIVATE);
+}
+
+void WidgetWin::SetShape(gfx::NativeRegion region) {
+  SetWindowRgn(region, TRUE);
 }
 
 void WidgetWin::Close() {
@@ -252,6 +319,13 @@ void WidgetWin::SetOpacity(unsigned char opacity) {
   layered_alpha_ = static_cast<BYTE>(opacity);
 }
 
+void WidgetWin::SetAlwaysOnTop(bool on_top) {
+  if (on_top)
+    set_window_ex_style(window_ex_style() | WS_EX_TOPMOST);
+  else
+    set_window_ex_style(window_ex_style() & ~WS_EX_TOPMOST);
+}
+
 RootView* WidgetWin::GetRootView() {
   if (!root_view_.get()) {
     // First time the root view is being asked for, create it now.
@@ -261,8 +335,7 @@ RootView* WidgetWin::GetRootView() {
 }
 
 Widget* WidgetWin::GetRootWidget() const {
-  return reinterpret_cast<WidgetWin*>(
-      win_util::GetWindowUserData(GetAncestor(hwnd(), GA_ROOT)));
+  return GetRootWidget(hwnd());
 }
 
 bool WidgetWin::IsVisible() const {
@@ -273,6 +346,10 @@ bool WidgetWin::IsActive() const {
   return win_util::IsWindowActive(hwnd());
 }
 
+TooltipManager* WidgetWin::GetTooltipManager() {
+  return tooltip_manager_.get();
+}
+
 void WidgetWin::GenerateMousePressedForView(View* view,
                                             const gfx::Point& point) {
   gfx::Point point_in_widget(point);
@@ -281,8 +358,28 @@ void WidgetWin::GenerateMousePressedForView(View* view,
   ProcessMousePressed(point_in_widget.ToPOINT(), MK_LBUTTON, false, false);
 }
 
-TooltipManager* WidgetWin::GetTooltipManager() {
-  return tooltip_manager_.get();
+bool WidgetWin::GetAccelerator(int cmd_id, menus::Accelerator* accelerator) {
+  return false;
+}
+
+Window* WidgetWin::GetWindow() {
+  return GetWindowImpl(hwnd());
+}
+
+const Window* WidgetWin::GetWindow() const {
+  return GetWindowImpl(hwnd());
+}
+
+void WidgetWin::SetNativeWindowProperty(const std::wstring& name,
+                                        void* value) {
+  if (value)
+    SetProp(hwnd(), name.c_str(), value);
+  else
+    RemoveProp(hwnd(), name.c_str());
+}
+
+void* WidgetWin::GetNativeWindowProperty(const std::wstring& name) {
+  return GetProp(hwnd(), name.c_str());
 }
 
 ThemeProvider* WidgetWin::GetThemeProvider() const {
@@ -301,12 +398,8 @@ ThemeProvider* WidgetWin::GetThemeProvider() const {
   return default_theme_provider_.get();
 }
 
-Window* WidgetWin::GetWindow() {
-  return GetWindowImpl(hwnd());
-}
-
-const Window* WidgetWin::GetWindow() const {
-  return GetWindowImpl(hwnd());
+ThemeProvider* WidgetWin::GetDefaultThemeProvider() const {
+  return default_theme_provider_.get();
 }
 
 FocusManager* WidgetWin::GetFocusManager() {
@@ -328,54 +421,26 @@ void WidgetWin::ViewHierarchyChanged(bool is_add, View *parent,
     drop_target_->ResetTargetViewIfEquals(child);
 }
 
-bool WidgetWin::GetAccelerator(int cmd_id, Accelerator* accelerator) {
-  return false;
-}
 
-void WidgetWin::SetUseLayeredBuffer(bool use_layered_buffer) {
-  if (use_layered_buffer_ == use_layered_buffer)
-    return;
+bool WidgetWin::ContainsNativeView(gfx::NativeView native_view) {
+  if (hwnd() == native_view)
+    return true;
 
-  use_layered_buffer_ = use_layered_buffer;
-  if (!hwnd())
-    return;
-
-  if (use_layered_buffer_) {
-    // Force creation of the buffer at the right size.
-    RECT wr;
-    GetWindowRect(&wr);
-    ChangeSize(0, CSize(wr.right - wr.left, wr.bottom - wr.top));
-  } else {
-    contents_.reset(NULL);
+  // Traverse the set of parents of the given view to determine if native_view
+  // is a descendant of this window.
+  HWND parent_window = ::GetParent(native_view);
+  HWND previous_child = native_view;
+  while (parent_window && parent_window != previous_child) {
+    if (hwnd() == parent_window)
+      return true;
+    previous_child = parent_window;
+    parent_window = ::GetParent(parent_window);
   }
-}
 
-static BOOL CALLBACK EnumChildProc(HWND hwnd, LPARAM l_param) {
-  RootView* root_view =
-    reinterpret_cast<RootView*>(GetProp(hwnd, kRootViewWindowProperty));
-  if (root_view) {
-    *reinterpret_cast<RootView**>(l_param) = root_view;
-    return FALSE;  // Stop enumerating.
-  }
-  return TRUE;  // Keep enumerating.
-}
-
-// static
-RootView* WidgetWin::FindRootView(HWND hwnd) {
-  RootView* root_view =
-    reinterpret_cast<RootView*>(GetProp(hwnd, kRootViewWindowProperty));
-  if (root_view)
-    return root_view;
-
-  // Enumerate all children and check if they have a RootView.
-  EnumChildWindows(hwnd, EnumChildProc, reinterpret_cast<LPARAM>(&root_view));
-
-  return root_view;
-}
-
-// static
-WidgetWin* WidgetWin::GetWidget(HWND hwnd) {
-  return reinterpret_cast<WidgetWin*>(win_util::GetWindowUserData(hwnd));
+  // A views::NativeViewHost may contain the given native view, without it being
+  // an ancestor of hwnd(), so traverse the views::View hierarchy looking for
+  // such views.
+  return GetRootView()->ContainsNativeView(native_view);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -465,16 +530,26 @@ void WidgetWin::OnCommand(UINT notification_code, int command_id, HWND window) {
 }
 
 LRESULT WidgetWin::OnCreate(CREATESTRUCT* create_struct) {
+  // Widget::GetWidgetFromNativeView expects the contents of this property
+  // to be of type Widget, so the cast is necessary.
+  SetNativeWindowProperty(kWidgetKey, static_cast<Widget*>(this));
   return 0;
 }
 
 void WidgetWin::OnDestroy() {
+  SetNativeWindowProperty(kWidgetKey, NULL);
+
   if (drop_target_.get()) {
     RevokeDragDrop(hwnd());
     drop_target_ = NULL;
   }
 
   RemoveProp(hwnd(), kRootViewWindowProperty);
+}
+
+void WidgetWin::OnDisplayChange(UINT bits_per_pixel, CSize screen_size) {
+  if (GetWidgetDelegate())
+    GetWidgetDelegate()->DisplayChanged();
 }
 
 LRESULT WidgetWin::OnDwmCompositionChanged(UINT msg,
@@ -583,6 +658,13 @@ void WidgetWin::OnKeyUp(TCHAR c, UINT rep_cnt, UINT flags) {
     root_view = root_view_.get();
 
   SetMsgHandled(root_view->ProcessKeyEvent(event));
+}
+
+void WidgetWin::OnKillFocus(HWND focused_window) {
+  GetFocusManager()->GetWidgetFocusManager()->OnWidgetFocusEvent(
+      this->GetNativeView(),
+      focused_window);
+  SetMsgHandled(FALSE);
 }
 
 // TODO(pkasting): ORing the pressed/released button into the flags is _wrong_.
@@ -763,7 +845,7 @@ void WidgetWin::OnPaint(HDC dc) {
 }
 
 LRESULT WidgetWin::OnPowerBroadcast(DWORD power_event, DWORD data) {
-  base::SystemMonitor* monitor = base::SystemMonitor::Get();
+  SystemMonitor* monitor = SystemMonitor::Get();
   if (monitor)
     monitor->ProcessWmPowerBroadcastMessage(power_event);
   SetMsgHandled(FALSE);
@@ -790,6 +872,9 @@ LRESULT WidgetWin::OnReflectedMessage(UINT msg,
 }
 
 void WidgetWin::OnSetFocus(HWND focused_window) {
+  GetFocusManager()->GetWidgetFocusManager()->OnWidgetFocusEvent(
+      focused_window,
+      this->GetNativeView());
   SetMsgHandled(FALSE);
 }
 
@@ -808,7 +893,7 @@ void WidgetWin::OnSettingChange(UINT flags, const wchar_t* section) {
 }
 
 void WidgetWin::OnSize(UINT param, const CSize& size) {
-  ChangeSize(param, size);
+  LayoutRootView();
 }
 
 void WidgetWin::OnSysCommand(UINT notification_code, CPoint click) {
@@ -834,6 +919,16 @@ void WidgetWin::OnWindowPosChanging(WINDOWPOS* window_pos) {
 
 void WidgetWin::OnWindowPosChanged(WINDOWPOS* window_pos) {
   SetMsgHandled(FALSE);
+}
+
+gfx::Size WidgetWin::GetRootViewSize() const {
+  CRect rect;
+  if (use_layered_buffer_)
+    GetWindowRect(&rect);
+  else
+    GetClientRect(&rect);
+
+  return gfx::Size(rect.Width(), rect.Height());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -951,22 +1046,19 @@ void WidgetWin::ProcessMouseExited() {
   active_mouse_tracking_flags_ = 0;
 }
 
-void WidgetWin::ChangeSize(UINT size_param, const CSize& size) {
-  CRect rect;
-  if (use_layered_buffer_) {
-    GetWindowRect(&rect);
-    SizeContents(rect);
-  } else {
-    GetClientRect(&rect);
-  }
+void WidgetWin::LayoutRootView() {
+  gfx::Size size(GetRootViewSize());
+
+  if (use_layered_buffer_)
+    SizeContents(size);
 
   // Resizing changes the size of the view hierarchy and thus forces a
   // complete relayout.
-  root_view_->SetBounds(0, 0, rect.Width(), rect.Height());
+  root_view_->SetBounds(0, 0, size.width(), size.height());
   root_view_->SchedulePaint();
 
   if (use_layered_buffer_)
-    PaintNow(gfx::Rect(rect));
+    PaintNow(gfx::Rect(0, 0, size.width(), size.height()));
 }
 
 bool WidgetWin::ReleaseCaptureOnMouseReleased() {
@@ -995,9 +1087,9 @@ Window* WidgetWin::GetWindowImpl(HWND hwnd) {
   return NULL;
 }
 
-void WidgetWin::SizeContents(const CRect& window_rect) {
-  contents_.reset(new gfx::Canvas(window_rect.Width(),
-                                  window_rect.Height(),
+void WidgetWin::SizeContents(const gfx::Size& window_size) {
+  contents_.reset(new gfx::Canvas(window_size.width(),
+                                  window_size.height(),
                                   false));
 }
 
@@ -1105,8 +1197,10 @@ LRESULT WidgetWin::OnWndProc(UINT message, WPARAM w_param, LPARAM l_param) {
   // Otherwise we handle everything else.
   if (!ProcessWindowMessage(window, message, w_param, l_param, result))
     result = DefWindowProc(window, message, w_param, l_param);
-  if (message == WM_NCDESTROY)
+  if (message == WM_NCDESTROY) {
+    MessageLoopForUI::current()->RemoveObserver(this);
     OnFinalMessage(window);
+  }
   if (message == WM_ACTIVATE)
     PostProcessActivateMessage(this, LOWORD(w_param));
   if (message == WM_ENABLE && restore_focus_when_enabled_) {
@@ -1150,14 +1244,94 @@ void WidgetWin::PostProcessActivateMessage(WidgetWin* widget,
 // Widget, public:
 
 // static
-Widget* Widget::CreateTransparentPopupWidget(bool delete_on_destroy) {
+Widget* Widget::CreatePopupWidget(TransparencyParam transparent,
+                                  EventsParam accept_events,
+                                  DeleteParam delete_on_destroy,
+                                  MirroringParam mirror_in_rtl) {
   WidgetWin* popup = new WidgetWin;
+  DWORD ex_style = WS_EX_TOOLWINDOW;
+  if (mirror_in_rtl == MirrorOriginInRTL)
+    ex_style |= l10n_util::GetExtendedTooltipStyles();
+  if (transparent == Transparent)
+    ex_style |= WS_EX_LAYERED;
+  if (accept_events != AcceptEvents)
+    ex_style |= WS_EX_TRANSPARENT;
   popup->set_window_style(WS_POPUP);
-  popup->set_window_ex_style(WS_EX_LAYERED | WS_EX_TOOLWINDOW |
-                             WS_EX_TRANSPARENT |
-                             l10n_util::GetExtendedTooltipStyles());
-  popup->set_delete_on_destroy(delete_on_destroy);
+  popup->set_window_ex_style(ex_style);
+  popup->set_delete_on_destroy(delete_on_destroy == DeleteOnDestroy);
   return popup;
+}
+
+static BOOL CALLBACK EnumChildProc(HWND hwnd, LPARAM l_param) {
+  RootView* root_view =
+      reinterpret_cast<RootView*>(GetProp(hwnd, kRootViewWindowProperty));
+  if (root_view) {
+    *reinterpret_cast<RootView**>(l_param) = root_view;
+    return FALSE;  // Stop enumerating.
+  }
+  return TRUE;  // Keep enumerating.
+}
+
+// static
+RootView* Widget::FindRootView(HWND hwnd) {
+  RootView* root_view =
+      reinterpret_cast<RootView*>(GetProp(hwnd, kRootViewWindowProperty));
+  if (root_view)
+    return root_view;
+
+  // Enumerate all children and check if they have a RootView.
+  EnumChildWindows(hwnd, EnumChildProc, reinterpret_cast<LPARAM>(&root_view));
+
+  return root_view;
+}
+
+// Enumerate child windows as they could have RootView distinct from
+// the HWND's root view.
+BOOL CALLBACK EnumAllRootViewsChildProc(HWND hwnd, LPARAM l_param) {
+  RootView* root_view =
+      reinterpret_cast<RootView*>(GetProp(hwnd, kRootViewWindowProperty));
+  if (root_view) {
+    std::set<RootView*>* root_views_set =
+        reinterpret_cast<std::set<RootView*>*>(l_param);
+    root_views_set->insert(root_view);
+  }
+  return TRUE;  // Keep enumerating.
+}
+
+void Widget::FindAllRootViews(HWND window,
+                              std::vector<RootView*>* root_views) {
+  RootView* root_view =
+      reinterpret_cast<RootView*>(GetProp(window, kRootViewWindowProperty));
+  std::set<RootView*> root_views_set;
+  if (root_view)
+    root_views_set.insert(root_view);
+  // Enumerate all children and check if they have a RootView.
+  EnumChildWindows(window, EnumAllRootViewsChildProc,
+      reinterpret_cast<LPARAM>(&root_views_set));
+  root_views->clear();
+  root_views->reserve(root_views_set.size());
+  for (std::set<RootView*>::iterator it = root_views_set.begin();
+      it != root_views_set.end();
+      ++it)
+    root_views->push_back(*it);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Widget, public:
+
+// static
+Widget* Widget::GetWidgetFromNativeView(gfx::NativeView native_view) {
+  if (IsWindow(native_view)) {
+    HANDLE raw_widget = GetProp(native_view, kWidgetKey);
+    if (raw_widget)
+      return reinterpret_cast<Widget*>(raw_widget);
+  }
+  return NULL;
+}
+
+// static
+Widget* Widget::GetWidgetFromNativeWindow(gfx::NativeWindow native_window) {
+  return Widget::GetWidgetFromNativeView(native_window);
 }
 
 }  // namespace views

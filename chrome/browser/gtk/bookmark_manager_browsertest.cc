@@ -7,6 +7,7 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/browser.h"
+#include "chrome/browser/browser_window.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/gtk/bookmark_manager_gtk.h"
 #include "chrome/test/in_process_browser_test.h"

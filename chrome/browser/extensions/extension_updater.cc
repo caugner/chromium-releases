@@ -11,25 +11,31 @@
 #include "base/file_util.h"
 #include "base/file_version_info.h"
 #include "base/rand_util.h"
-#include "base/scoped_vector.h"
 #include "base/sha2.h"
+#include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/thread.h"
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/utility_process_host.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_error_reporter.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_status.h"
+
+#if defined(OS_WIN)
+#include "base/registry.h"
+#elif defined(OS_MACOSX)
+#include "base/sys_string_conversions.h"
+#endif
 
 using base::RandDouble;
 using base::RandInt;
@@ -38,6 +44,11 @@ using base::TimeDelta;
 using prefs::kExtensionBlacklistUpdateVersion;
 using prefs::kLastExtensionsUpdateCheck;
 using prefs::kNextExtensionsUpdateCheck;
+
+// The default URL to fall back to if an extension doesn't have an
+// update URL.
+const char kDefaultUpdateURL[] =
+    "http://clients2.google.com/service/update2/crx";
 
 // NOTE: HTTPS is used here to ensure the response from omaha can be trusted.
 // The response contains a url for fetching the blacklist and a hash value
@@ -56,19 +67,223 @@ const int kStartupWaitSeconds = 60 * 5;
 static const int kMinUpdateFrequencySeconds = 30;
 static const int kMaxUpdateFrequencySeconds = 60 * 60 * 24 * 7;  // 7 days
 
+// Maximum length of an extension manifest update check url, since it is a GET
+// request. We want to stay under 2K because of proxies, etc.
+static const int kExtensionsManifestMaxURLSize = 2000;
+
+
+// The format for request parameters in update checks is:
+//
+//   ?x=EXT1_INFO&x=EXT2_INFO
+//
+// where EXT1_INFO and EXT2_INFO are url-encoded strings of the form:
+//
+//   id=EXTENSION_ID&v=VERSION&uc
+//
+// Additionally, we may include the parameter ping=PING_DATA where PING_DATA
+// looks like r=DAYS for extensions in the Chrome extensions gallery. This value
+// will be present at most once every 24 hours, and indicate the number of days
+// since the last time it was present in an update check.
+//
+// So for two extensions like:
+//   Extension 1- id:aaaa version:1.1
+//   Extension 2- id:bbbb version:2.0
+//
+// the full update url would be:
+//   http://somehost/path?x=id%3Daaaa%26v%3D1.1%26uc&x=id%3Dbbbb%26v%3D2.0%26uc
+//
+// (Note that '=' is %3D and '&' is %26 when urlencoded.)
+bool ManifestFetchData::AddExtension(std::string id, std::string version,
+                                     int days) {
+  if (extension_ids_.find(id) != extension_ids_.end()) {
+    NOTREACHED() << "Duplicate extension id " << id;
+    return false;
+  }
+
+  // Compute the string we'd append onto the full_url_, and see if it fits.
+  std::vector<std::string> parts;
+  parts.push_back("id=" + id);
+  parts.push_back("v=" + version);
+  parts.push_back("uc");
+
+  if (ShouldPing(days)) {
+    parts.push_back("ping=" + EscapeQueryParamValue("r=" + IntToString(days),
+                                                    true));
+  }
+
+  std::string extra = full_url_.has_query() ? "&" : "?";
+  extra += "x=" + EscapeQueryParamValue(JoinString(parts, '&'), true);
+
+  // Check against our max url size, exempting the first extension added.
+  int new_size = full_url_.possibly_invalid_spec().size() + extra.size();
+  if (extension_ids_.size() > 0 && new_size > kExtensionsManifestMaxURLSize) {
+    UMA_HISTOGRAM_PERCENTAGE("Extensions.UpdateCheckHitUrlSizeLimit", 1);
+    return false;
+  }
+  UMA_HISTOGRAM_PERCENTAGE("Extensions.UpdateCheckHitUrlSizeLimit", 0);
+
+  // We have room so go ahead and add the extension.
+  extension_ids_.insert(id);
+  ping_days_[id] = days;
+  full_url_ = GURL(full_url_.possibly_invalid_spec() + extra);
+  return true;
+}
+
+bool ManifestFetchData::DidPing(std::string extension_id) const {
+  std::map<std::string, int>::const_iterator i = ping_days_.find(extension_id);
+  if (i != ping_days_.end()) {
+    return ShouldPing(i->second);
+  }
+  return false;
+}
+
+bool ManifestFetchData::ShouldPing(int days) const {
+  return base_url_.DomainIs("google.com") &&
+         (days == kNeverPinged || days > 0);
+}
+
+namespace {
+
+// Calculates the value to use for the ping days parameter.
+static int CalculatePingDays(const Time& last_ping_day) {
+  int days = ManifestFetchData::kNeverPinged;
+  if (!last_ping_day.is_null()) {
+    days = (Time::Now() - last_ping_day).InDays();
+  }
+  return days;
+}
+
+}  // namespace
+
+ManifestFetchesBuilder::ManifestFetchesBuilder(
+    ExtensionUpdateService* service) : service_(service) {
+  DCHECK(service_);
+}
+
+void ManifestFetchesBuilder::AddExtension(const Extension& extension) {
+  AddExtensionData(extension.location(),
+                   extension.id(),
+                   *extension.version(),
+                   extension.converted_from_user_script(),
+                   extension.IsTheme(),
+                   extension.update_url());
+}
+
+void ManifestFetchesBuilder::AddPendingExtension(
+    const std::string& id,
+    const PendingExtensionInfo& info) {
+  AddExtensionData(Extension::INTERNAL, id, info.version,
+                   false, info.is_theme, info.update_url);
+}
+
+void ManifestFetchesBuilder::ReportStats() const {
+  UMA_HISTOGRAM_COUNTS_100("Extensions.UpdateCheckExtensions",
+                           url_stats_.google_url_count +
+                           url_stats_.other_url_count -
+                           url_stats_.theme_count);
+  UMA_HISTOGRAM_COUNTS_100("Extensions.UpdateCheckTheme",
+                           url_stats_.theme_count);
+  UMA_HISTOGRAM_COUNTS_100("Extensions.UpdateCheckGoogleUrl",
+                           url_stats_.google_url_count);
+  UMA_HISTOGRAM_COUNTS_100("Extensions.UpdateCheckOtherUrl",
+                           url_stats_.other_url_count);
+  UMA_HISTOGRAM_COUNTS_100("Extensions.UpdateCheckNoUrl",
+                           url_stats_.no_url_count);
+}
+
+std::vector<ManifestFetchData*> ManifestFetchesBuilder::GetFetches() {
+  std::vector<ManifestFetchData*> fetches;
+  fetches.reserve(fetches_.size());
+  for (std::multimap<GURL, ManifestFetchData*>::iterator it =
+           fetches_.begin(); it != fetches_.end(); ++it) {
+    fetches.push_back(it->second);
+  }
+  fetches_.clear();
+  url_stats_ = URLStats();
+  return fetches;
+}
+
+void ManifestFetchesBuilder::AddExtensionData(
+    Extension::Location location,
+    const std::string& id,
+    const Version& version,
+    bool converted_from_user_script,
+    bool is_theme,
+    GURL update_url) {
+  // Only internal and external extensions can be autoupdated.
+  if (location != Extension::INTERNAL &&
+      !Extension::IsExternalLocation(location)) {
+    return;
+  }
+
+  // Skip extensions with non-empty invalid update URLs.
+  if (!update_url.is_empty() && !update_url.is_valid()) {
+    LOG(WARNING) << "Extension " << id << " has invalid update url "
+                 << update_url;
+    return;
+  }
+
+  // Skip extensions with empty IDs.
+  if (id.empty()) {
+    LOG(WARNING) << "Found extension with empty ID";
+    return;
+  }
+
+  // Skip extensions with empty update URLs converted from user
+  // scripts.
+  if (converted_from_user_script && update_url.is_empty()) {
+    return;
+  }
+
+  if (update_url.DomainIs("google.com")) {
+    url_stats_.google_url_count++;
+  } else if (update_url.is_empty()) {
+    url_stats_.no_url_count++;
+    // Fill in default update URL.
+    update_url = GURL(kDefaultUpdateURL);
+  } else {
+    url_stats_.other_url_count++;
+  }
+
+  if (is_theme) {
+    url_stats_.theme_count++;
+  }
+
+  DCHECK(!update_url.is_empty());
+  DCHECK(update_url.is_valid());
+
+  ManifestFetchData* fetch = NULL;
+  std::multimap<GURL, ManifestFetchData*>::iterator existing_iter =
+      fetches_.find(update_url);
+
+  // Find or create a ManifestFetchData to add this extension to.
+  int ping_days = CalculatePingDays(service_->LastPingDay(id));
+  while (existing_iter != fetches_.end()) {
+    if (existing_iter->second->AddExtension(id, version.GetString(),
+                                            ping_days)) {
+      fetch = existing_iter->second;
+      break;
+    }
+    existing_iter++;
+  }
+  if (!fetch) {
+    fetch = new ManifestFetchData(update_url);
+    fetches_.insert(std::pair<GURL, ManifestFetchData*>(update_url, fetch));
+    bool added = fetch->AddExtension(id, version.GetString(), ping_days);
+    DCHECK(added);
+  }
+}
+
 // A utility class to do file handling on the file I/O thread.
 class ExtensionUpdaterFileHandler
     : public base::RefCountedThreadSafe<ExtensionUpdaterFileHandler> {
  public:
-  ExtensionUpdaterFileHandler(MessageLoop* updater_loop,
-                              MessageLoop* file_io_loop)
-      : updater_loop_(updater_loop), file_io_loop_(file_io_loop) {}
-
   // Writes crx file data into a tempfile, and calls back the updater.
   void WriteTempFile(const std::string& extension_id, const std::string& data,
+                     const GURL& download_url,
                      scoped_refptr<ExtensionUpdater> updater) {
     // Make sure we're running in the right thread.
-    DCHECK(MessageLoop::current() == file_io_loop_);
+    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
 
     FilePath path;
     if (!file_util::CreateTemporaryFile(&path)) {
@@ -86,47 +301,36 @@ class ExtensionUpdaterFileHandler
 
     // The ExtensionUpdater is now responsible for cleaning up the temp file
     // from disk.
-    updater_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-        updater.get(), &ExtensionUpdater::OnCRXFileWritten, extension_id,
-        path));
+    ChromeThread::PostTask(
+        ChromeThread::UI, FROM_HERE,
+        NewRunnableMethod(
+            updater.get(), &ExtensionUpdater::OnCRXFileWritten, extension_id,
+            path, download_url));
   }
 
   void DeleteFile(const FilePath& path) {
-    DCHECK(MessageLoop::current() == file_io_loop_);
+    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::FILE));
     if (!file_util::Delete(path, false)) {
       LOG(WARNING) << "Failed to delete temp file " << path.value();
     }
   }
 
  private:
-  // The MessageLoop we use to call back the ExtensionUpdater.
-  MessageLoop* updater_loop_;
+  friend class base::RefCountedThreadSafe<ExtensionUpdaterFileHandler>;
 
-  // The MessageLoop we should be operating on for file operations.
-  MessageLoop* file_io_loop_;
+  ~ExtensionUpdaterFileHandler() {}
 };
-
 
 ExtensionUpdater::ExtensionUpdater(ExtensionUpdateService* service,
                                    PrefService* prefs,
-                                   int frequency_seconds,
-                                   MessageLoop* file_io_loop,
-                                   MessageLoop* io_loop)
+                                   int frequency_seconds)
     : service_(service), frequency_seconds_(frequency_seconds),
-      file_io_loop_(file_io_loop), io_loop_(io_loop), prefs_(prefs),
-      file_handler_(new ExtensionUpdaterFileHandler(MessageLoop::current(),
-                                                    file_io_loop_)),
+      prefs_(prefs), file_handler_(new ExtensionUpdaterFileHandler()),
       blacklist_checks_enabled_(true) {
   Init();
 }
 
 void ExtensionUpdater::Init() {
-  // Unless we're in a unit test, expect that the file_io_loop_ is on the
-  // browser file thread.
-  if (g_browser_process->file_thread() != NULL) {
-    DCHECK(file_io_loop_ == g_browser_process->file_thread()->message_loop());
-  }
-
   DCHECK_GE(frequency_seconds_, 5);
   DCHECK(frequency_seconds_ <= kMaxUpdateFrequencySeconds);
 #ifdef NDEBUG
@@ -136,16 +340,18 @@ void ExtensionUpdater::Init() {
   frequency_seconds_ = std::min(frequency_seconds_, kMaxUpdateFrequencySeconds);
 }
 
-ExtensionUpdater::~ExtensionUpdater() {}
+ExtensionUpdater::~ExtensionUpdater() {
+  STLDeleteElements(&manifests_pending_);
+}
 
 static void EnsureInt64PrefRegistered(PrefService* prefs,
                                       const wchar_t name[]) {
-  if (!prefs->IsPrefRegistered(name))
+  if (!prefs->FindPreference(name))
     prefs->RegisterInt64Pref(name, 0);
 }
 
 static void EnsureBlacklistVersionPrefRegistered(PrefService* prefs) {
-  if (!prefs->IsPrefRegistered(kExtensionBlacklistUpdateVersion))
+  if (!prefs->FindPreference(kExtensionBlacklistUpdateVersion))
     prefs->RegisterStringPref(kExtensionBlacklistUpdateVersion, L"0");
 }
 
@@ -225,77 +431,72 @@ void ExtensionUpdater::OnURLFetchComplete(
 // Utility class to handle doing xml parsing in a sandboxed utility process.
 class SafeManifestParser : public UtilityProcessHost::Client {
  public:
-  SafeManifestParser(const std::string& xml, ExtensionUpdater* updater,
-                     MessageLoop* updater_loop, MessageLoop* io_loop)
-      : xml_(xml), updater_loop_(updater_loop), io_loop_(io_loop),
-        updater_(updater) {
+  // Takes ownership of |fetch_data|.
+  SafeManifestParser(const std::string& xml, ManifestFetchData* fetch_data,
+                     ExtensionUpdater* updater)
+      : xml_(xml), updater_(updater) {
+    fetch_data_.reset(fetch_data);
   }
-
-  ~SafeManifestParser() {}
 
   // Posts a task over to the IO loop to start the parsing of xml_ in a
   // utility process.
   void Start() {
-    DCHECK(MessageLoop::current() == updater_loop_);
-    io_loop_->PostTask(FROM_HERE,
-        NewRunnableMethod(this, &SafeManifestParser::ParseInSandbox,
+    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+    ChromeThread::PostTask(
+        ChromeThread::IO, FROM_HERE,
+        NewRunnableMethod(
+            this, &SafeManifestParser::ParseInSandbox,
             g_browser_process->resource_dispatcher_host()));
   }
 
   // Creates the sandboxed utility process and tells it to start parsing.
   void ParseInSandbox(ResourceDispatcherHost* rdh) {
-    DCHECK(MessageLoop::current() == io_loop_);
+    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
     // TODO(asargent) we shouldn't need to do this branch here - instead
     // UtilityProcessHost should handle it for us. (http://crbug.com/19192)
     bool use_utility_process = rdh &&
         !CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess);
-
-#if defined(OS_POSIX)
-    // TODO(port): Don't use a utility process on linux (crbug.com/22703) or
-    // MacOS (crbug.com/8102) until problems related to autoupdate are fixed.
-    use_utility_process = false;
-#endif
-
     if (use_utility_process) {
       UtilityProcessHost* host = new UtilityProcessHost(
-          rdh, this, updater_loop_);
+          rdh, this, ChromeThread::UI);
       host->StartUpdateManifestParse(xml_);
     } else {
       UpdateManifest manifest;
       if (manifest.Parse(xml_)) {
-        updater_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-            &SafeManifestParser::OnParseUpdateManifestSucceeded,
-            manifest.results()));
+        ChromeThread::PostTask(
+            ChromeThread::UI, FROM_HERE,
+            NewRunnableMethod(
+                this, &SafeManifestParser::OnParseUpdateManifestSucceeded,
+                manifest.results()));
       } else {
-        updater_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-            &SafeManifestParser::OnParseUpdateManifestFailed,
-            manifest.errors()));
+        ChromeThread::PostTask(
+            ChromeThread::UI, FROM_HERE,
+            NewRunnableMethod(
+                this, &SafeManifestParser::OnParseUpdateManifestFailed,
+                manifest.errors()));
       }
     }
   }
 
   // Callback from the utility process when parsing succeeded.
   virtual void OnParseUpdateManifestSucceeded(
-      const UpdateManifest::ResultList& list) {
-    DCHECK(MessageLoop::current() == updater_loop_);
-    updater_->HandleManifestResults(list);
+      const UpdateManifest::Results& results) {
+    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
+    updater_->HandleManifestResults(*fetch_data_, results);
   }
 
   // Callback from the utility process when parsing failed.
   virtual void OnParseUpdateManifestFailed(const std::string& error_message) {
-    DCHECK(MessageLoop::current() == updater_loop_);
+    DCHECK(ChromeThread::CurrentlyOn(ChromeThread::UI));
     LOG(WARNING) << "Error parsing update manifest:\n" << error_message;
   }
 
  private:
+  ~SafeManifestParser() {}
+
   const std::string& xml_;
-
-  // The MessageLoop we use to call back the ExtensionUpdater.
-  MessageLoop* updater_loop_;
-
-  // The MessageLoop where we create the utility process.
-  MessageLoop* io_loop_;
+  scoped_ptr<ManifestFetchData> fetch_data_;
 
   scoped_refptr<ExtensionUpdater> updater_;
 };
@@ -308,31 +509,56 @@ void ExtensionUpdater::OnManifestFetchComplete(const GURL& url,
   // We want to try parsing the manifest, and if it indicates updates are
   // available, we want to fire off requests to fetch those updates.
   if (status.status() == URLRequestStatus::SUCCESS && response_code == 200) {
-    scoped_refptr<SafeManifestParser>  safe_parser =
-        new SafeManifestParser(data, this, MessageLoop::current(), io_loop_);
+    scoped_refptr<SafeManifestParser> safe_parser =
+        new SafeManifestParser(data, current_manifest_fetch_.release(), this);
     safe_parser->Start();
   } else {
     // TODO(asargent) Do exponential backoff here. (http://crbug.com/12546).
-    LOG(INFO) << "Failed to fetch manifst '" << url.possibly_invalid_spec() <<
+    LOG(INFO) << "Failed to fetch manifest '" << url.possibly_invalid_spec() <<
         "' response code:" << response_code;
   }
   manifest_fetcher_.reset();
+  current_manifest_fetch_.reset();
 
   // If we have any pending manifest requests, fire off the next one.
   if (!manifests_pending_.empty()) {
-    GURL url = manifests_pending_.front();
+    ManifestFetchData* manifest_fetch = manifests_pending_.front();
     manifests_pending_.pop_front();
-    StartUpdateCheck(url);
+    StartUpdateCheck(manifest_fetch);
   }
 }
 
 void ExtensionUpdater::HandleManifestResults(
-    const UpdateManifest::ResultList& results) {
-  std::vector<int> updates = DetermineUpdates(results);
+    const ManifestFetchData& fetch_data,
+    const UpdateManifest::Results& results) {
+
+  // Examine the parsed manifest and kick off fetches of any new crx files.
+  std::vector<int> updates = DetermineUpdates(fetch_data, results);
   for (size_t i = 0; i < updates.size(); i++) {
-    const UpdateManifest::Result* update = &(results.at(updates[i]));
+    const UpdateManifest::Result* update = &(results.list.at(updates[i]));
     FetchUpdatedExtension(update->extension_id, update->crx_url,
         update->package_hash, update->version);
+  }
+
+  // If the manifest response included a <daystart> element, we want to save
+  // that value for any extensions which had sent ping_days in the request.
+  if (fetch_data.base_url().DomainIs("google.com") &&
+      results.daystart_elapsed_seconds >= 0) {
+    Time daystart =
+      Time::Now() - TimeDelta::FromSeconds(results.daystart_elapsed_seconds);
+
+    const std::set<std::string>& extension_ids = fetch_data.extension_ids();
+    std::set<std::string>::const_iterator i;
+    for (i = extension_ids.begin(); i != extension_ids.end(); i++) {
+      bool did_ping = fetch_data.DidPing(*i);
+      if (did_ping) {
+        if (*i == kBlacklistAppID) {
+          service_->SetBlacklistLastPingDay(daystart);
+        } else if (service_->GetExtensionById(*i, true) != NULL) {
+          service_->SetLastPingDay(*i, daystart);
+        }
+      }
+    }
   }
 }
 
@@ -364,20 +590,19 @@ void ExtensionUpdater::OnCRXFetchComplete(const GURL& url,
                                           const URLRequestStatus& status,
                                           int response_code,
                                           const std::string& data) {
-  if (url != current_extension_fetch_.url) {
-    LOG(ERROR) << "Called with unexpected url:'" << url.spec()
-               << "' expected:'" << current_extension_fetch_.url.spec() << "'";
-    NOTREACHED();
-  } else if (status.status() == URLRequestStatus::SUCCESS &&
+  if (status.status() == URLRequestStatus::SUCCESS &&
              response_code == 200) {
     if (current_extension_fetch_.id == kBlacklistAppID) {
       ProcessBlacklist(data);
     } else {
       // Successfully fetched - now write crx to a file so we can have the
       // ExtensionsService install it.
-      file_io_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-        file_handler_.get(), &ExtensionUpdaterFileHandler::WriteTempFile,
-        current_extension_fetch_.id, data, this));
+      ChromeThread::PostTask(
+          ChromeThread::FILE, FROM_HERE,
+          NewRunnableMethod(
+              file_handler_.get(), &ExtensionUpdaterFileHandler::WriteTempFile,
+              current_extension_fetch_.id, data, url,
+              make_scoped_refptr(this)));
     }
   } else {
     // TODO(asargent) do things like exponential backoff, handling
@@ -398,58 +623,18 @@ void ExtensionUpdater::OnCRXFetchComplete(const GURL& url,
 }
 
 void ExtensionUpdater::OnCRXFileWritten(const std::string& id,
-                                        const FilePath& path) {
-  service_->UpdateExtension(id, path);
+                                        const FilePath& path,
+                                        const GURL& download_url) {
+  service_->UpdateExtension(id, path, download_url);
 }
 
 void ExtensionUpdater::OnExtensionInstallFinished(const FilePath& path,
                                                   Extension* extension) {
   // Have the file_handler_ delete the temp file on the file I/O thread.
-  file_io_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-    file_handler_.get(), &ExtensionUpdaterFileHandler::DeleteFile, path));
-}
-
-
-// Helper function for building up request parameters in update check urls. It
-// appends information about one extension to a request parameter string. The
-// format for request parameters in update checks is:
-//
-//   ?x=EXT1_INFO&x=EXT2_INFO
-//
-// where EXT1_INFO and EXT2_INFO are url-encoded strings of the form:
-//
-//   id=EXTENSION_ID&v=VERSION&uc
-//
-// So for two extensions like:
-//   Extension 1- id:aaaa version:1.1
-//   Extension 2- id:bbbb version:2.0
-//
-// the full update url would be:
-//   http://somehost/path?x=id%3Daaaa%26v%3D1.1%26uc&x=id%3Dbbbb%26v%3D2.0%26uc
-//
-// (Note that '=' is %3D and '&' is %26 when urlencoded.)
-//
-// Again, this function would just append one extension's worth of data, e.g.
-// "x=id%3Daaaa%26v%3D1.1%26uc"
-void AppendExtensionInfo(std::string* str, const Extension& extension) {
-    const Version* version = extension.version();
-    DCHECK(version);
-    std::vector<std::string> parts;
-
-    // Push extension id, version, and uc (indicates an update check to Omaha).
-    parts.push_back("id=" + extension.id());
-    parts.push_back("v=" + version->GetString());
-    parts.push_back("uc");
-
-    str->append("x=" + EscapeQueryParamValue(JoinString(parts, '&')));
-}
-
-// Creates a blacklist update url.
-GURL ExtensionUpdater::GetBlacklistUpdateUrl(const std::wstring& version) {
-  std::string blklist_info = StringPrintf("id=%s&v=%s&uc", kBlacklistAppID,
-      WideToASCII(version).c_str());
-  return GURL(StringPrintf("%s?x=%s", kBlacklistUpdateUrl,
-                           EscapeQueryParamValue(blklist_info).c_str()));
+  ChromeThread::PostTask(
+      ChromeThread::FILE, FROM_HERE,
+      NewRunnableMethod(
+          file_handler_.get(), &ExtensionUpdaterFileHandler::DeleteFile, path));
 }
 
 void ExtensionUpdater::ScheduleNextCheck(const TimeDelta& target_delay) {
@@ -474,6 +659,21 @@ void ExtensionUpdater::ScheduleNextCheck(const TimeDelta& target_delay) {
 void ExtensionUpdater::TimerFired() {
   CheckNow();
 
+  // If the user has overridden the update frequency, don't bother reporting
+  // this.
+  if (frequency_seconds_ == ExtensionsService::kDefaultUpdateFrequencySeconds) {
+    Time last = Time::FromInternalValue(prefs_->GetInt64(
+        kLastExtensionsUpdateCheck));
+    if (last.ToInternalValue() != 0) {
+      // Use counts rather than time so we can use minutes rather than millis.
+      UMA_HISTOGRAM_CUSTOM_COUNTS("Extensions.UpdateCheckGap",
+          (Time::Now() - last).InMinutes(),
+          base::TimeDelta::FromSeconds(kStartupWaitSeconds).InMinutes(),
+          base::TimeDelta::FromDays(40).InMinutes(),
+          50);  // 50 buckets seems to be the default.
+    }
+  }
+
   // Save the last check time, and schedule the next check.
   int64 now = Time::Now().ToInternalValue();
   prefs_->SetInt64(kLastExtensionsUpdateCheck, now);
@@ -481,48 +681,48 @@ void ExtensionUpdater::TimerFired() {
 }
 
 void ExtensionUpdater::CheckNow() {
-  // Generate a set of update urls for loaded extensions.
-  std::set<GURL> urls;
-
-  if (blacklist_checks_enabled_) {
-    urls.insert(GetBlacklistUpdateUrl(
-        prefs_->GetString(kExtensionBlacklistUpdateVersion)));
-  }
+  ManifestFetchesBuilder fetches_builder(service_);
 
   const ExtensionList* extensions = service_->extensions();
   for (ExtensionList::const_iterator iter = extensions->begin();
        iter != extensions->end(); ++iter) {
-    Extension* extension = (*iter);
-    const GURL& update_url = extension->update_url();
-    if (update_url.is_empty() || extension->id().empty()) {
-      continue;
-    }
-
-    DCHECK(update_url.is_valid());
-    DCHECK(!update_url.has_ref());
-
-    // Append extension information to the url.
-    std::string full_url_string = update_url.spec();
-    full_url_string.append(update_url.has_query() ? "&" : "?");
-    AppendExtensionInfo(&full_url_string, *extension);
-
-    GURL full_url(full_url_string);
-    if (!full_url.is_valid()) {
-      LOG(ERROR) << "invalid url: " << full_url.possibly_invalid_spec();
-      NOTREACHED();
-    } else {
-      urls.insert(full_url);
-    }
+    fetches_builder.AddExtension(**iter);
   }
-  // Now do an update check for each url we found.
-  for (std::set<GURL>::iterator iter = urls.begin(); iter != urls.end();
-       ++iter) {
+
+  const PendingExtensionMap& pending_extensions =
+      service_->pending_extensions();
+  for (PendingExtensionMap::const_iterator iter = pending_extensions.begin();
+       iter != pending_extensions.end(); ++iter) {
+    fetches_builder.AddPendingExtension(iter->first, iter->second);
+  }
+
+  fetches_builder.ReportStats();
+
+  std::vector<ManifestFetchData*> fetches(fetches_builder.GetFetches());
+
+  // Start a fetch of the blacklist if needed.
+  if (blacklist_checks_enabled_ && service_->HasInstalledExtensions()) {
+    ManifestFetchData* blacklist_fetch =
+        new ManifestFetchData(GURL(kBlacklistUpdateUrl));
+    std::wstring version = prefs_->GetString(kExtensionBlacklistUpdateVersion);
+    int ping_days = CalculatePingDays(service_->BlacklistLastPingDay());
+    blacklist_fetch->AddExtension(kBlacklistAppID, WideToASCII(version),
+                                  ping_days);
+    StartUpdateCheck(blacklist_fetch);
+  }
+
+  // Now start fetching regular extension updates
+  for (std::vector<ManifestFetchData*>::const_iterator it = fetches.begin();
+       it != fetches.end(); ++it) {
     // StartUpdateCheck makes sure the url isn't already downloading or
-    // scheduled, so we don't need to check before calling it.
-    StartUpdateCheck(*iter);
+    // scheduled, so we don't need to check before calling it. Ownership of
+    // fetch is transferred here.
+    StartUpdateCheck(*it);
   }
+  // We don't want to use fetches after this since StartUpdateCheck()
+  // takes ownership of its argument.
+  fetches.clear();
 }
-
 
 bool ExtensionUpdater::GetExistingVersion(const std::string& id,
                                           std::string* version) {
@@ -531,7 +731,13 @@ bool ExtensionUpdater::GetExistingVersion(const std::string& id,
       WideToASCII(prefs_->GetString(kExtensionBlacklistUpdateVersion));
     return true;
   }
-  Extension* extension = service_->GetExtensionById(id);
+  PendingExtensionMap::const_iterator it =
+      service_->pending_extensions().find(id);
+  if (it != service_->pending_extensions().end()) {
+    *version = it->second.version.GetString();
+    return true;
+  }
+  Extension* extension = service_->GetExtensionById(id, false);
   if (!extension) {
     return false;
   }
@@ -540,21 +746,23 @@ bool ExtensionUpdater::GetExistingVersion(const std::string& id,
 }
 
 std::vector<int> ExtensionUpdater::DetermineUpdates(
-    const std::vector<UpdateManifest::Result>& possible_updates) {
-
+    const ManifestFetchData& fetch_data,
+    const UpdateManifest::Results& possible_updates) {
   std::vector<int> result;
 
   // This will only get set if one of possible_updates specifies
   // browser_min_version.
   scoped_ptr<Version> browser_version;
 
-  for (size_t i = 0; i < possible_updates.size(); i++) {
-    const UpdateManifest::Result* update = &possible_updates[i];
+  for (size_t i = 0; i < possible_updates.list.size(); i++) {
+    const UpdateManifest::Result* update = &possible_updates.list[i];
+
+    if (!fetch_data.Includes(update->extension_id))
+      continue;
 
     std::string version;
-    if (!GetExistingVersion(update->extension_id, &version)) {
+    if (!GetExistingVersion(update->extension_id, &version))
       continue;
-    }
 
     // If the update version is the same or older than what's already installed,
     // we don't want it.
@@ -597,19 +805,28 @@ std::vector<int> ExtensionUpdater::DetermineUpdates(
   return result;
 }
 
-void ExtensionUpdater::StartUpdateCheck(const GURL& url) {
-  if (std::find(manifests_pending_.begin(), manifests_pending_.end(), url) !=
-      manifests_pending_.end()) {
-    return;  // already scheduled
+void ExtensionUpdater::StartUpdateCheck(ManifestFetchData* fetch_data) {
+  std::deque<ManifestFetchData*>::const_iterator i;
+  for (i = manifests_pending_.begin(); i != manifests_pending_.end(); i++) {
+    if (fetch_data->full_url() == (*i)->full_url()) {
+      // This url is already scheduled to be fetched.
+      delete fetch_data;
+      return;
+    }
   }
 
   if (manifest_fetcher_.get() != NULL) {
-    if (manifest_fetcher_->url() != url) {
-      manifests_pending_.push_back(url);
+    if (manifest_fetcher_->url() != fetch_data->full_url()) {
+      manifests_pending_.push_back(fetch_data);
     }
   } else {
+    UMA_HISTOGRAM_COUNTS("Extensions.UpdateCheckUrlLength",
+        fetch_data->full_url().possibly_invalid_spec().length());
+
+    current_manifest_fetch_.reset(fetch_data);
     manifest_fetcher_.reset(
-        URLFetcher::Create(kManifestFetcherId, url, URLFetcher::GET, this));
+        URLFetcher::Create(kManifestFetcherId, fetch_data->full_url(),
+                           URLFetcher::GET, this));
     manifest_fetcher_->set_request_context(Profile::GetDefaultRequestContext());
     manifest_fetcher_->set_load_flags(net::LOAD_DO_NOT_SEND_COOKIES |
                                       net::LOAD_DO_NOT_SAVE_COOKIES);

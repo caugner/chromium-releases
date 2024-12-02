@@ -8,6 +8,7 @@
 
 #include "app/l10n_util.h"
 #include "base/atomicops.h"
+#include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/process_util.h"
 #include "base/rand_util.h"
@@ -54,8 +55,10 @@ std::wstring ChildProcessInfo::GetTypeNameInEnglish(
       return L"Zygote";
     case SANDBOX_HELPER_PROCESS:
       return L"Sandbox helper";
-    case NACL_PROCESS:
+    case NACL_LOADER_PROCESS:
       return L"Native Client module";
+    case NACL_BROKER_PROCESS:
+      return L"Native Client broker";
     case UNKNOWN_PROCESS:
       default:
       DCHECK(false) << "Unknown child process type!";
@@ -77,8 +80,10 @@ std::wstring ChildProcessInfo::GetLocalizedTitle() const {
     message_id = IDS_TASK_MANAGER_UTILITY_PREFIX;
   } else if (type_ == ChildProcessInfo::PROFILE_IMPORT_PROCESS) {
     message_id = IDS_TASK_MANAGER_PROFILE_IMPORT_PREFIX;
-  } else if (type_ == ChildProcessInfo::NACL_PROCESS) {
+  } else if (type_ == ChildProcessInfo::NACL_LOADER_PROCESS) {
     message_id = IDS_TASK_MANAGER_NACL_PREFIX;
+  } else if (type_ == ChildProcessInfo::NACL_BROKER_PROCESS) {
+    message_id = IDS_TASK_MANAGER_NACL_BROKER_PREFIX;
   } else {
     DCHECK(false) << "Need localized name for child process type.";
     return title;
@@ -88,7 +93,7 @@ std::wstring ChildProcessInfo::GetLocalizedTitle() const {
   // to avoid the wrong concatenation result similar to "!Yahoo! Mail: the
   // best web-based Email: NIGULP", in which "NIGULP" stands for the Hebrew
   // or Arabic word for "plugin".
-  l10n_util::AdjustStringForLocaleDirection(title, &title);
+  base::i18n::AdjustStringForLocaleDirection(title, &title);
   return l10n_util::GetStringF(message_id, title);
 }
 
@@ -106,7 +111,7 @@ std::string ChildProcessInfo::GenerateRandomChannelID(void* instance) {
   // parent browser process, an identifier for the child instance, and a random
   // component. We use a random component so that a hacked child process can't
   // cause denial of service by causing future named pipe creation to fail.
-  return StringPrintf("%d.%x.%d",
+  return StringPrintf("%d.%p.%d",
                       base::GetCurrentProcId(), instance,
                       base::RandInt(0, std::numeric_limits<int>::max()));
 }

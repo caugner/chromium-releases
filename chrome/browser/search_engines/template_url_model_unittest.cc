@@ -1,15 +1,15 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/file_util.h"
+#include "base/callback.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
-#include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/common/pref_service.h"
+#include "base/thread.h"
+#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/history/history_notifications.h"
+#include "chrome/browser/webdata/web_database.h"
 #include "chrome/test/testing_profile.h"
-#include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
@@ -34,9 +34,12 @@ class QuitTask2 : public Task {
 // Subclass the TestingProfile so that it can return a WebDataService.
 class TemplateURLModelTestingProfile : public TestingProfile {
  public:
-  TemplateURLModelTestingProfile() : TestingProfile() { }
+  TemplateURLModelTestingProfile() : TestingProfile() {}
 
   void SetUp() {
+    db_thread_.reset(new ChromeThread(ChromeThread::DB));
+    db_thread_->Start();
+
     // Name a subdirectory of the temp directory.
     ASSERT_TRUE(PathService::Get(base::DIR_TEMP, &test_dir_));
     test_dir_ = test_dir_.AppendASCII("TemplateURLModelTest");
@@ -53,6 +56,12 @@ class TemplateURLModelTestingProfile : public TestingProfile {
   void TearDown() {
     // Clean up the test directory.
     service_->Shutdown();
+    // Note that we must ensure the DB thread is stopped after WDS
+    // shutdown (so it can commit pending transactions) but before
+    // deleting the test profile directory, otherwise we may not be
+    // able to delete it due to an open transaction.
+    db_thread_->Stop();
+
     ASSERT_TRUE(file_util::Delete(test_dir_, true));
     ASSERT_FALSE(file_util::PathExists(test_dir_));
   }
@@ -64,6 +73,7 @@ class TemplateURLModelTestingProfile : public TestingProfile {
  private:
   scoped_refptr<WebDataService> service_;
   FilePath test_dir_;
+  scoped_ptr<ChromeThread> db_thread_;
 };
 
 // Trivial subclass of TemplateURLModel that records the last invocation of
@@ -90,13 +100,14 @@ class TestingTemplateURLModel : public TemplateURLModel {
  private:
   std::wstring search_term_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(TestingTemplateURLModel);
+  DISALLOW_COPY_AND_ASSIGN(TestingTemplateURLModel);
 };
 
 class TemplateURLModelTest : public testing::Test,
                              public TemplateURLModelObserver {
  public:
-  TemplateURLModelTest() : changed_count_(0) {
+  TemplateURLModelTest() : ui_thread_(ChromeThread::UI, &message_loop_),
+                           changed_count_(0) {
   }
 
   virtual void SetUp() {
@@ -145,10 +156,9 @@ class TemplateURLModelTest : public testing::Test,
   // Blocks the caller until the service has finished servicing all pending
   // requests.
   void BlockTillServiceProcessesRequests() {
-    // Schedule a task on the background thread that is processed after all
-    // pending requests on the background thread.
-    profile_->GetWebDataService(Profile::EXPLICIT_ACCESS)->thread()->
-        message_loop()->PostTask(FROM_HERE, new QuitTask2());
+    // Schedule a task on the DB thread that is processed after all
+    // pending requests on the DB thread.
+    ChromeThread::PostTask(ChromeThread::DB, FROM_HERE, new QuitTask2());
     // Run the current message loop. QuitTask2, when run, invokes Quit,
     // which unblocks this.
     MessageLoop::current()->Run();
@@ -194,6 +204,9 @@ class TemplateURLModelTest : public testing::Test,
   }
 
   MessageLoopForUI message_loop_;
+  // Needed to make the DeleteOnUIThread trait of WebDataService work
+  // properly.
+  ChromeThread ui_thread_;
   scoped_ptr<TemplateURLModelTestingProfile> profile_;
   scoped_ptr<TestingTemplateURLModel> model_;
   int changed_count_;
@@ -659,7 +672,7 @@ struct QueryHistoryCallbackImpl {
 // KEYWORD visits.
 TEST_F(TemplateURLModelTest, GenerateVisitOnKeyword) {
   VerifyLoad();
-  profile_->CreateHistoryService(true);
+  profile_->CreateHistoryService(true, false);
 
   // Create a keyword.
   TemplateURL* t_url = AddKeywordWithDate(
@@ -693,4 +706,69 @@ TEST_F(TemplateURLModelTest, GenerateVisitOnKeyword) {
   ASSERT_EQ(1U, callback.visits.size());
   EXPECT_EQ(PageTransition::KEYWORD_GENERATED,
             PageTransition::StripQualifier(callback.visits[0].transition));
+}
+
+// Make sure that MergeEnginesFromPrepopulateData() deletes prepopulated engines
+// that no longer exist in the prepopulate data.
+TEST_F(TemplateURLModelTest, MergeDeletesUnusedProviders) {
+  VerifyLoad();
+
+  // Create an URL that appears to have been prepopulated but won't be in the
+  // current data.
+  TemplateURL* t_url = new TemplateURL();
+  t_url->SetURL(L"http://www.unittest.com/", 0, 0);
+  t_url->set_keyword(L"unittest");
+  t_url->set_short_name(L"unittest");
+  t_url->set_safe_for_autoreplace(true);
+  GURL favicon_url("http://favicon.url");
+  t_url->SetFavIconURL(favicon_url);
+  t_url->set_date_created(Time::FromTimeT(100));
+  t_url->set_prepopulate_id(999999);
+
+  // Make a few copies now, since as we add each to the model it takes ownership
+  // of them and deletes them when finished.
+  TemplateURL* t_url2 = new TemplateURL(*t_url);
+  TemplateURL* t_url3 = new TemplateURL(*t_url);
+
+  // Ensure that merging clears this engine.
+  model_->Add(t_url);
+  EXPECT_EQ(t_url, model_->GetTemplateURLForKeyword(L"unittest"));
+  model_->MergeEnginesFromPrepopulateData();
+  ASSERT_TRUE(model_->GetTemplateURLForKeyword(L"unittest") == NULL);
+
+  // Ensure that merging won't clear it if the user has edited it.
+  t_url2->set_safe_for_autoreplace(false);
+  model_->Add(t_url2);
+  ASSERT_EQ(t_url2, model_->GetTemplateURLForKeyword(L"unittest"));
+  model_->MergeEnginesFromPrepopulateData();
+  ASSERT_FALSE(model_->GetTemplateURLForKeyword(L"unittest") == NULL);
+  model_->Remove(t_url2);
+
+  // Ensure that merging won't clear it if it's the default engine.
+  model_->Add(t_url3);
+  ASSERT_EQ(t_url3, model_->GetTemplateURLForKeyword(L"unittest"));
+  model_->SetDefaultSearchProvider(t_url3);
+  ASSERT_EQ(t_url3, model_->GetDefaultSearchProvider());
+  model_->MergeEnginesFromPrepopulateData();
+  ASSERT_EQ(t_url3, model_->GetTemplateURLForKeyword(L"unittest"));
+  ASSERT_EQ(t_url3, model_->GetDefaultSearchProvider());
+  // Don't remove |t_url3|; we'd need to make it non-default first, and why
+  // bother when the model shutdown will clean it up for us.
+}
+
+// Simulates failing to load the webdb and makes sure the default search
+// provider is valid.
+TEST_F(TemplateURLModelTest, FailedInit) {
+  VerifyLoad();
+
+  model_.reset(NULL);
+
+  profile_->GetWebDataService(Profile::EXPLICIT_ACCESS)->UnloadDatabase();
+  profile_->GetWebDataService(Profile::EXPLICIT_ACCESS)->set_failed_init(true);
+
+  ResetModel(false);
+  model_->Load();
+  BlockTillServiceProcessesRequests();
+
+  ASSERT_TRUE(model_->GetDefaultSearchProvider());
 }

@@ -6,20 +6,19 @@
 
 #include <gtk/gtk.h>
 
-#include "app/gfx/gtk_util.h"
 #include "app/gtk_dnd_util.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/string_util.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
-#include "chrome/browser/gtk/bookmark_context_menu_gtk.h"
 #include "chrome/browser/gtk/bookmark_utils_gtk.h"
 #include "chrome/browser/gtk/gtk_chrome_button.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/gtk/menu_gtk.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/page_navigator.h"
-#include "chrome/common/gtk_util.h"
+#include "gfx/gtk_util.h"
 #include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -57,26 +56,7 @@ void* AsVoid(const BookmarkNode* node) {
 // to whichever menu last had them. (Assuming that menu is still showing.)
 // The event mask in this function is taken from gtkmenu.c.
 void OnContextMenuHide(GtkWidget* context_menu, GtkWidget* grab_menu) {
-  guint time = gtk_get_current_event_time();
-
-  if (GTK_WIDGET_VISIBLE(grab_menu)) {
-    if (!gdk_pointer_grab(grab_menu->window, TRUE,
-                          GdkEventMask(
-                          GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK |
-                          GDK_ENTER_NOTIFY_MASK | GDK_LEAVE_NOTIFY_MASK |
-                          GDK_POINTER_MOTION_MASK), NULL, NULL, time) == 0) {
-      g_object_unref(grab_menu);
-      return;
-    }
-    if (!gdk_keyboard_grab(grab_menu->window, TRUE, time) == 0) {
-      gdk_display_pointer_ungrab(gdk_drawable_get_display(grab_menu->window),
-                                 time);
-      g_object_unref(grab_menu);
-      return;
-    }
-    gtk_grab_add(grab_menu);
-  }
-
+  gtk_util::GrabAllInput(grab_menu);
   // Match the ref we took when connecting this signal.
   g_object_unref(grab_menu);
 }
@@ -101,14 +81,11 @@ BookmarkMenuController::BookmarkMenuController(Browser* browser,
   menu_ = gtk_menu_new();
   BuildMenu(node, start_child_index, menu_);
   g_signal_connect(menu_, "hide",
-                   G_CALLBACK(OnMenuHidden), this);
+                   G_CALLBACK(OnMenuHiddenThunk), this);
   gtk_widget_show_all(menu_);
 }
 
 BookmarkMenuController::~BookmarkMenuController() {
-
-  if (context_menu_.get())
-    context_menu_->DelegateDestroyed();
   profile_->GetBookmarkModel()->RemoveObserver(this);
   gtk_menu_popdown(GTK_MENU(menu_));
 }
@@ -121,7 +98,7 @@ void BookmarkMenuController::Popup(GtkWidget* widget, gint button_type,
   gtk_chrome_button_set_paint_state(GTK_CHROME_BUTTON(widget),
                                     GTK_STATE_ACTIVE);
   gtk_menu_popup(GTK_MENU(menu_), NULL, NULL,
-                 &MenuGtk::MenuPositionFunc,
+                 &MenuGtk::WidgetMenuPositionFunc,
                  widget, button_type, timestamp);
 }
 
@@ -141,6 +118,10 @@ void BookmarkMenuController::WillExecuteCommand() {
   gtk_menu_popdown(GTK_MENU(menu_));
 }
 
+void BookmarkMenuController::CloseMenu() {
+  context_menu_->Cancel();
+}
+
 void BookmarkMenuController::NavigateToMenuItem(
     GtkWidget* menu_item,
     WindowOpenDisposition disposition) {
@@ -157,8 +138,8 @@ void BookmarkMenuController::BuildMenu(const BookmarkNode* parent,
   DCHECK(!parent->GetChildCount() ||
          start_child_index < parent->GetChildCount());
 
-  g_signal_connect(G_OBJECT(menu), "button-press-event",
-                   G_CALLBACK(OnButtonPressed), this);
+  g_signal_connect(menu, "button-press-event",
+                   G_CALLBACK(OnButtonPressedThunk), this);
 
   for (int i = start_child_index; i < parent->GetChildCount(); ++i) {
     const BookmarkNode* node = parent->GetChild(i);
@@ -173,11 +154,11 @@ void BookmarkMenuController::BuildMenu(const BookmarkNode* parent,
     SetImageMenuItem(menu_item, node, profile_->GetBookmarkModel());
     gtk_util::SetAlwaysShowImage(menu_item);
 
+    g_signal_connect(menu_item, "button-release-event",
+                     G_CALLBACK(OnButtonReleasedThunk), this);
     if (node->is_url()) {
-      g_signal_connect(G_OBJECT(menu_item), "activate",
-                       G_CALLBACK(OnMenuItemActivated), this);
-      g_signal_connect(G_OBJECT(menu_item), "button-release-event",
-                       G_CALLBACK(OnButtonReleased), this);
+      g_signal_connect(menu_item, "activate",
+                       G_CALLBACK(OnMenuItemActivatedThunk), this);
     } else if (node->is_folder()) {
       GtkWidget* submenu = gtk_menu_new();
       BuildMenu(node, 0, submenu);
@@ -186,16 +167,26 @@ void BookmarkMenuController::BuildMenu(const BookmarkNode* parent,
       NOTREACHED();
     }
 
-    gtk_drag_source_set(menu_item, GDK_BUTTON1_MASK,
-                        NULL, 0, GDK_ACTION_MOVE);
-    GtkDndUtil::SetSourceTargetListFromCodeMask(
-        menu_item, GtkDndUtil::CHROME_BOOKMARK_ITEM);
-    g_signal_connect(G_OBJECT(menu_item), "drag-begin",
-                     G_CALLBACK(&OnMenuItemDragBegin), this);
-    g_signal_connect(G_OBJECT(menu_item), "drag-end",
-                     G_CALLBACK(&OnMenuItemDragEnd), this);
-    g_signal_connect(G_OBJECT(menu_item), "drag-data-get",
-                     G_CALLBACK(&OnMenuItemDragGet), this);
+    gtk_drag_source_set(menu_item, GDK_BUTTON1_MASK, NULL, 0,
+        static_cast<GdkDragAction>(GDK_ACTION_COPY | GDK_ACTION_LINK));
+    int target_mask = gtk_dnd_util::CHROME_BOOKMARK_ITEM;
+    if (node->is_url())
+      target_mask |= gtk_dnd_util::TEXT_URI_LIST | gtk_dnd_util::NETSCAPE_URL;
+    gtk_dnd_util::SetSourceTargetListFromCodeMask(menu_item, target_mask);
+    g_signal_connect(menu_item, "drag-begin",
+                     G_CALLBACK(OnMenuItemDragBeginThunk), this);
+    g_signal_connect(menu_item, "drag-end",
+                     G_CALLBACK(OnMenuItemDragEndThunk), this);
+    g_signal_connect(menu_item, "drag-data-get",
+                     G_CALLBACK(OnMenuItemDragGetThunk), this);
+
+    // It is important to connect to this signal after setting up the drag
+    // source because we only want to stifle the menu's default handler and
+    // not the handler that the drag source uses.
+    if (node->is_folder()) {
+      g_signal_connect(menu_item, "button-press-event",
+                       G_CALLBACK(OnFolderButtonPressedThunk), this);
+    }
 
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), menu_item);
     node_to_menu_widget_map_[node] = menu_item;
@@ -210,20 +201,17 @@ void BookmarkMenuController::BuildMenu(const BookmarkNode* parent,
   }
 }
 
-// static
 gboolean BookmarkMenuController::OnButtonPressed(
     GtkWidget* sender,
-    GdkEventButton* event,
-    BookmarkMenuController* controller) {
-  controller->ignore_button_release_ = false;
+    GdkEventButton* event) {
+  ignore_button_release_ = false;
   GtkMenuShell* menu_shell = GTK_MENU_SHELL(sender);
 
   if (event->button == 3) {
     // If the cursor is outside our bounds, pass this event up to the parent.
     if (!gtk_util::WidgetContainsCursor(sender)) {
       if (menu_shell->parent_menu_shell) {
-        return OnButtonPressed(menu_shell->parent_menu_shell, event,
-                               controller);
+        return OnButtonPressed(menu_shell->parent_menu_shell, event);
       } else {
         // We are the top level menu; we can propagate no further.
         return FALSE;
@@ -249,84 +237,92 @@ gboolean BookmarkMenuController::OnButtonPressed(
     std::vector<const BookmarkNode*> nodes;
     if (node)
       nodes.push_back(node);
-    controller->context_menu_.reset(
-        new BookmarkContextMenuGtk(
-            controller->parent_window_, controller->profile_,
-            controller->browser_, controller->page_navigator_, parent, nodes,
-            BookmarkContextMenuGtk::BOOKMARK_BAR, controller));
+    context_menu_controller_.reset(
+        new BookmarkContextMenuController(
+            parent_window_, this, profile_,
+            page_navigator_, parent, nodes,
+            BookmarkContextMenuController::BOOKMARK_BAR));
+    context_menu_.reset(
+        new MenuGtk(NULL, context_menu_controller_->menu_model()));
 
     // Our bookmark folder menu loses the grab to the context menu. When the
     // context menu is hidden, re-assert our grab.
     GtkWidget* grabbing_menu = gtk_grab_get_current();
     g_object_ref(grabbing_menu);
-    g_signal_connect(controller->context_menu_->menu(), "hide",
+    g_signal_connect(context_menu_->widget(), "hide",
                      G_CALLBACK(OnContextMenuHide), grabbing_menu);
 
-    controller->context_menu_->PopupAsContext(event->time);
+    context_menu_->PopupAsContext(event->time);
     return TRUE;
   }
 
   return FALSE;
 }
 
-// static
 gboolean BookmarkMenuController::OnButtonReleased(
     GtkWidget* sender,
-    GdkEventButton* event,
-    BookmarkMenuController* controller) {
-  if (controller->ignore_button_release_) {
+    GdkEventButton* event) {
+  if (ignore_button_release_) {
     // Don't handle this message; it was a drag.
-    controller->ignore_button_release_ = false;
+    ignore_button_release_ = false;
     return FALSE;
   }
 
-  // Releasing either button 1 or 2 should trigger the bookmark menu.
-  if (event->button == 1 || event->button == 2) {
-    WindowOpenDisposition disposition =
-        event_utils::DispositionFromEventFlags(event->state);
-    controller->NavigateToMenuItem(sender, disposition);
+  // Releasing either button 1 or 2 should trigger the bookmark.
+  if (!gtk_menu_item_get_submenu(GTK_MENU_ITEM(sender))) {
+    // The menu item is a link node.
+    if (event->button == 1 || event->button == 2) {
+      WindowOpenDisposition disposition =
+          event_utils::DispositionFromEventFlags(event->state);
+      NavigateToMenuItem(sender, disposition);
 
-    // We need to manually dismiss the popup menu because we're overriding
-    // button-release-event.
-    gtk_menu_popdown(GTK_MENU(controller->menu_));
-    return TRUE;
+      // We need to manually dismiss the popup menu because we're overriding
+      // button-release-event.
+      gtk_menu_popdown(GTK_MENU(menu_));
+      return TRUE;
+    }
+  } else {
+    // The menu item is a folder node.
+    if (event->button == 1) {
+      gtk_menu_popup(GTK_MENU(gtk_menu_item_get_submenu(GTK_MENU_ITEM(sender))),
+                     sender->parent, sender, NULL, NULL,
+                     event->button, event->time);
+    }
   }
 
   return FALSE;
 }
 
-// static
-void BookmarkMenuController::OnMenuHidden(GtkWidget* menu,
-    BookmarkMenuController* controller) {
-  if (controller->triggering_widget_) {
-    gtk_chrome_button_unset_paint_state(
-        GTK_CHROME_BUTTON(controller->triggering_widget_));
-  }
+gboolean BookmarkMenuController::OnFolderButtonPressed(
+    GtkWidget* sender, GdkEventButton* event) {
+  // The button press may start a drag; don't let the default handler run.
+  if (event->button == 1)
+    return TRUE;
+  return FALSE;
 }
 
-// static
-void BookmarkMenuController::OnMenuItemActivated(
-    GtkMenuItem* menu_item, BookmarkMenuController* controller) {
-  controller->NavigateToMenuItem(GTK_WIDGET(menu_item), CURRENT_TAB);
+void BookmarkMenuController::OnMenuHidden(GtkWidget* menu) {
+  if (triggering_widget_)
+    gtk_chrome_button_unset_paint_state(GTK_CHROME_BUTTON(triggering_widget_));
 }
 
-// static
-void BookmarkMenuController::OnMenuItemDragBegin(
-    GtkWidget* menu_item,
-    GdkDragContext* drag_context,
-    BookmarkMenuController* controller) {
+void BookmarkMenuController::OnMenuItemActivated(GtkWidget* menu_item) {
+  NavigateToMenuItem(menu_item, CURRENT_TAB);
+}
+
+void BookmarkMenuController::OnMenuItemDragBegin(GtkWidget* menu_item,
+                                                 GdkDragContext* drag_context) {
   // The parent menu item might be removed during the drag. Ref it so |button|
   // won't get destroyed.
   g_object_ref(menu_item->parent);
 
   // Signal to any future OnButtonReleased calls that we're dragging instead of
   // pressing.
-  controller->ignore_button_release_ = true;
+  ignore_button_release_ = true;
 
   const BookmarkNode* node = bookmark_utils::BookmarkNodeForWidget(menu_item);
   GtkWidget* window = bookmark_utils::GetDragRepresentation(
-      node, controller->model_,
-      GtkThemeProvider::GetFrom(controller->profile_));
+      node, model_, GtkThemeProvider::GetFrom(profile_));
   gint x, y;
   gtk_widget_get_pointer(menu_item, &x, &y);
   gtk_drag_set_icon_widget(drag_context, window, x, y);
@@ -335,22 +331,17 @@ void BookmarkMenuController::OnMenuItemDragBegin(
   gtk_widget_hide(menu_item);
 }
 
-// static
-void BookmarkMenuController::OnMenuItemDragEnd(
-    GtkWidget* menu_item,
-    GdkDragContext* drag_context,
-    BookmarkMenuController* controller) {
+void BookmarkMenuController::OnMenuItemDragEnd(GtkWidget* menu_item,
+                                               GdkDragContext* drag_context) {
   gtk_widget_show(menu_item);
   g_object_unref(menu_item->parent);
 }
 
-// static
 void BookmarkMenuController::OnMenuItemDragGet(
     GtkWidget* widget, GdkDragContext* context,
     GtkSelectionData* selection_data,
-    guint target_type, guint time,
-    BookmarkMenuController* controller) {
+    guint target_type, guint time) {
   const BookmarkNode* node = bookmark_utils::BookmarkNodeForWidget(widget);
   bookmark_utils::WriteBookmarkToSelection(node, selection_data, target_type,
-                                           controller->profile_);
+                                           profile_);
 }

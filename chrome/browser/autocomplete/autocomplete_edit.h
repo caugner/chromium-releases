@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,6 +47,9 @@ class AutocompleteEditController {
   // the edit is guaranteed to be showing the permanent text.
   virtual void OnInputInProgress(bool in_progress) = 0;
 
+  // Called whenever the autocomplete edit is losing focus.
+  virtual void OnKillFocus() = 0;
+
   // Called whenever the autocomplete edit gets focused.
   virtual void OnSetFocus() = 0;
 
@@ -55,6 +58,9 @@ class AutocompleteEditController {
 
   // Returns the title of the current page.
   virtual std::wstring GetTitle() const = 0;
+
+ protected:
+  virtual ~AutocompleteEditController() {}
 };
 
 class AutocompleteEditModel : public NotificationObserver {
@@ -98,7 +104,7 @@ class AutocompleteEditModel : public NotificationObserver {
   AutocompleteEditModel(AutocompleteEditView* view,
                         AutocompleteEditController* controller,
                         Profile* profile);
-  ~AutocompleteEditModel();
+  ~AutocompleteEditModel() {}
 
   void SetPopupModel(AutocompletePopupModel* popup_model);
 
@@ -330,18 +336,6 @@ class AutocompleteEditModel : public NotificationObserver {
   GURL GetURLForCurrentText(PageTransition::Type* transition,
                             bool* is_history_what_you_typed_match,
                             GURL* alternate_nav_url) const;
-
-  // Performs a query for only the synchronously available matches for the
-  // current input, sets |transition|, |is_history_what_you_typed_match|, and
-  // |alternate_nav_url| (if applicable) based on the default match, and returns
-  // its url. |transition|, |is_history_what_you_typed_match| and/or
-  // |alternate_nav_url| may be null, in which case they are not updated.
-  //
-  // If there are no matches for the input, leaves the outparams unset and
-  // returns the empty string.
-  GURL URLsForDefaultMatch(PageTransition::Type* transition,
-                           bool* is_history_what_you_typed_match,
-                           GURL* alternate_nav_url) const;
 
   AutocompleteEditView* view_;
 

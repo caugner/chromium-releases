@@ -5,7 +5,7 @@
 #ifndef VIEWS_WINDOW_WINDOW_H_
 #define VIEWS_WINDOW_WINDOW_H_
 
-#include "app/gfx/native_widget_types.h"
+#include "gfx/native_widget_types.h"
 
 namespace gfx {
 class Font;
@@ -119,6 +119,10 @@ class Window {
   // Accessors for fullscreen state.
   virtual void SetFullscreen(bool fullscreen) = 0;
   virtual bool IsFullscreen() const = 0;
+
+  // Sets whether or not the window should show its frame as a "transient drag
+  // frame" - slightly transparent and without the standard window controls.
+  virtual void SetUseDragFrame(bool use_drag_frame) = 0;
 
   // Returns true if the Window is considered to be an "app window" - i.e.
   // any window which when it is the last of its type closed causes the

@@ -5,65 +5,48 @@
 #include "chrome/browser/language_combobox_model.h"
 
 #include "app/l10n_util.h"
-#include "base/string_util.h"
+#include "base/i18n/rtl.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/user_metrics.h"
-#include "chrome/common/pref_service.h"
+#include "chrome/browser/pref_service.h"
 #include "grit/generated_resources.h"
 #include "unicode/uloc.h"
 
 ///////////////////////////////////////////////////////////////////////////////
-// LanguageComboboxModel used to populate a combobox with native names
-// corresponding to the language code (e.g. English (United States) for en-US)
+// LanguageList used to enumerate native names corresponding to the
+// language code (e.g. English (United States) for en-US)
 //
 
-LanguageComboboxModel::LanguageComboboxModel()
-    : profile_(NULL) {
+LanguageList::LanguageList() {
   // Enumerate the languages we know about.
   const std::vector<std::string>& locale_codes =
       l10n_util::GetAvailableLocales();
   InitNativeNames(locale_codes);
 }
 
-LanguageComboboxModel::LanguageComboboxModel(
-    Profile* profile, const std::vector<std::string>& locale_codes)
-    : profile_(profile) {
+LanguageList::LanguageList(
+    const std::vector<std::string>& locale_codes) {
   InitNativeNames(locale_codes);
 }
 
-void LanguageComboboxModel::InitNativeNames(
+void LanguageList::InitNativeNames(
     const std::vector<std::string>& locale_codes) {
   const std::string app_locale = g_browser_process->GetApplicationLocale();
   for (size_t i = 0; i < locale_codes.size(); ++i) {
     std::string locale_code_str = locale_codes[i];
     const char* locale_code = locale_codes[i].c_str();
 
-    // Internally, we use the language code of zh-CN and zh-TW, but we want the
-    // display names to be Chinese (Simplified) and Chinese (Traditional).  To
-    // do that, we use zh-hans and zh-hant when using ICU's
-    // uloc_getDisplayName.
-    if (locale_code_str == "zh-CN") {
-      locale_code = "zh-hans";
-    } else if (locale_code_str == "zh-TW") {
-      locale_code = "zh-hant";
-    }
+    // TODO(jungshik): Even though these strings are used for the UI,
+    // the old code does not add an RTL mark for RTL locales. Make sure
+    // that it's ok without that.
+    string16 name_in_current_ui =
+        l10n_util::GetDisplayNameForLocale(locale_code, app_locale, false);
+    string16 name_native =
+        l10n_util::GetDisplayNameForLocale(locale_code, locale_code, false);
 
-    UErrorCode error = U_ZERO_ERROR;
-    const int buffer_size = 1024;
-    string16 name_local;
-    int actual_size = uloc_getDisplayName(locale_code, app_locale.c_str(),
-        WriteInto(&name_local, buffer_size + 1), buffer_size, &error);
-    DCHECK(U_SUCCESS(error));
-    name_local.resize(actual_size);
-
-    string16 name_native;
-    actual_size = uloc_getDisplayName(locale_code, locale_code,
-        WriteInto(&name_native, buffer_size + 1), buffer_size, &error);
-    DCHECK(U_SUCCESS(error));
-    name_native.resize(actual_size);
-
-    locale_names_.push_back(UTF16ToWideHack(name_local));
-    native_names_[UTF16ToWideHack(name_local)] = LocaleData(
+    locale_names_.push_back(UTF16ToWideHack(name_in_current_ui));
+    native_names_[UTF16ToWideHack(name_in_current_ui)] = LocaleData(
         UTF16ToWideHack(name_native), locale_codes[i]);
   }
 
@@ -72,12 +55,23 @@ void LanguageComboboxModel::InitNativeNames(
                          &locale_names_);
 }
 
+void LanguageList::CopySpecifiedLanguagesUp(const std::string& locale_codes) {
+  DCHECK(!locale_names_.empty());
+  std::vector<std::string> locale_codes_vector;
+  SplitString(locale_codes, ',', &locale_codes_vector);
+  for (size_t i = 0; i != locale_codes_vector.size(); i++) {
+    const int locale_index = GetIndexFromLocale(locale_codes_vector[i]);
+    CHECK_NE(locale_index, -1);
+    locale_names_.insert(locale_names_.begin(), locale_names_[locale_index]);
+  }
+}
+
 // Overridden from ComboboxModel:
-int LanguageComboboxModel::GetItemCount() {
+int LanguageList::get_languages_count() const {
   return static_cast<int>(locale_names_.size());
 }
 
-std::wstring LanguageComboboxModel::GetItemAt(int index) {
+std::wstring LanguageList::GetLanguageNameAt(int index) const {
   DCHECK(static_cast<int>(locale_names_.size()) > index);
   LocaleDataMap::const_iterator it =
       native_names_.find(locale_names_[index]);
@@ -93,16 +87,16 @@ std::wstring LanguageComboboxModel::GetItemAt(int index) {
   // parentheses or languages appearing in the wrong order.
   std::wstring locale_name_localized;
   std::wstring locale_name;
-  if (l10n_util::AdjustStringForLocaleDirection(locale_names_[index],
-                                                &locale_name_localized))
+  if (base::i18n::AdjustStringForLocaleDirection(locale_names_[index],
+                                                 &locale_name_localized))
     locale_name.assign(locale_name_localized);
   else
     locale_name.assign(locale_names_[index]);
 
   std::wstring native_name_localized;
   std::wstring native_name;
-  if (l10n_util::AdjustStringForLocaleDirection(it->second.native_name,
-                                                &native_name_localized))
+  if (base::i18n::AdjustStringForLocaleDirection(it->second.native_name,
+                                                 &native_name_localized))
     native_name.assign(native_name_localized);
   else
     native_name.assign(it->second.native_name);
@@ -113,7 +107,7 @@ std::wstring LanguageComboboxModel::GetItemAt(int index) {
   std::wstring formatted_item;
   SStringPrintf(&formatted_item, L"%ls - %ls", locale_name.c_str(),
                 native_name.c_str());
-  if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT)
+  if (base::i18n::IsRTL())
     // Somehow combo box (even with LAYOUTRTL flag) doesn't get this
     // right so we add RTL BDO (U+202E) to set the direction
     // explicitly.
@@ -122,7 +116,7 @@ std::wstring LanguageComboboxModel::GetItemAt(int index) {
 }
 
 // Return the locale for the given index.  E.g., may return pt-BR.
-std::string LanguageComboboxModel::GetLocaleFromIndex(int index) {
+std::string LanguageList::GetLocaleFromIndex(int index) const {
   DCHECK(static_cast<int>(locale_names_.size()) > index);
   LocaleDataMap::const_iterator it =
       native_names_.find(locale_names_[index]);
@@ -131,7 +125,7 @@ std::string LanguageComboboxModel::GetLocaleFromIndex(int index) {
   return it->second.locale_code;
 }
 
-int LanguageComboboxModel::GetIndexFromLocale(const std::string& locale) {
+int LanguageList::GetIndexFromLocale(const std::string& locale) const {
   for (size_t i = 0; i < locale_names_.size(); ++i) {
     LocaleDataMap::const_iterator it =
         native_names_.find(locale_names_[i]);
@@ -140,6 +134,20 @@ int LanguageComboboxModel::GetIndexFromLocale(const std::string& locale) {
       return static_cast<int>(i);
   }
   return -1;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// LanguageComboboxModel used to populate a combobox with native names
+//
+
+LanguageComboboxModel::LanguageComboboxModel()
+    : profile_(NULL) {
+}
+
+LanguageComboboxModel::LanguageComboboxModel(
+    Profile* profile, const std::vector<std::string>& locale_codes)
+    : LanguageList(locale_codes),
+      profile_(profile) {
 }
 
 // Returns the index of the language currently specified in the user's

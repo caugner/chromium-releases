@@ -1,8 +1,19 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // This file contains the list of network errors.
+
+//
+// Ranges:
+//     0- 99 System related errors
+//   100-199 Connection related errors
+//   200-299 Certificate errors
+//   300-399 HTTP errors
+//   400-499 Cache errors
+//   500-599 ?
+//   600-699 FTP errors
+//
 
 // An asynchronous IO operation is not yet complete.  This usually does not
 // indicate a fatal error.  Typically this error will be generated as a
@@ -46,6 +57,10 @@ NET_ERROR(INSUFFICIENT_RESOURCES, -12)
 
 // Memory allocation failed.
 NET_ERROR(OUT_OF_MEMORY, -13)
+
+// The file upload failed because the file's modification time was different
+// from the expectation.
+NET_ERROR(UPLOAD_FILE_CHANGED, -14)
 
 // A connection was closed (corresponding to a TCP FIN).
 NET_ERROR(CONNECTION_CLOSED, -100)
@@ -112,6 +127,26 @@ NET_ERROR(BAD_SSL_CLIENT_AUTH_CERT, -117)
 // A connection attempt timed out.
 NET_ERROR(CONNECTION_TIMED_OUT, -118)
 
+// There are too many pending DNS resolves, so a request in the queue was
+// aborted.
+NET_ERROR(HOST_RESOLVER_QUEUE_TOO_LARGE, -119)
+
+// Failed establishing a connection to the SOCKS proxy server for a target host.
+NET_ERROR(SOCKS_CONNECTION_FAILED, -120)
+
+// The SOCKS proxy server failed establishing connection to the target host
+// because that host is unreachable.
+NET_ERROR(SOCKS_CONNECTION_HOST_UNREACHABLE, -121)
+
+// Error number -122 is available for use.
+
+// The peer sent an SSL no_renegotiation alert message.
+NET_ERROR(SSL_NO_RENEGOTIATION, -123)
+
+// Winsock sometimes reports more data written than passed.  This is probably
+// due to a broken LSP.
+NET_ERROR(WINSOCK_UNEXPECTED_WRITTEN_BYTES, -124)
+
 // Certificate error codes
 //
 // The values of certificate error codes must be consecutive.
@@ -163,6 +198,8 @@ NET_ERROR(CERT_AUTHORITY_INVALID, -202)
 //
 // MSDN describes this error as follows:
 //   "The SSL certificate contains errors."
+// NOTE: It's unclear how this differs from ERR_CERT_INVALID. For consistency,
+// use that code instead of this one from now on.
 //
 NET_ERROR(CERT_CONTAINS_ERRORS, -203)
 
@@ -267,6 +304,31 @@ NET_ERROR(CONTENT_DECODING_FAILED, -330)
 // is suspended.
 NET_ERROR(NETWORK_IO_SUSPENDED, -331)
 
+// FLIP data received without receiving a SYN_REPLY on the stream.
+NET_ERROR(SYN_REPLY_NOT_RECEIVED, -332)
+
+// Converting the response to target encoding failed.
+NET_ERROR(ENCODING_CONVERSION_FAILED, -333)
+
+// The server sent an FTP directory listing in a format we do not understand.
+NET_ERROR(UNRECOGNIZED_FTP_DIRECTORY_LISTING_FORMAT, -334)
+
+// Attempted use of an unknown SPDY stream id.
+NET_ERROR(INVALID_SPDY_STREAM, -335)
+
+// There are no supported proxies in the provided list.
+NET_ERROR(NO_SUPPORTED_PROXIES, -336)
+
+// There is a SPDY protocol framing error.
+NET_ERROR(SPDY_PROTOCOL_ERROR, -337)
+
+// Credentials could not be estalished during HTTP Authentication.
+NET_ERROR(INVALID_AUTH_CREDENTIALS, -338)
+
+// An HTTP Authentication scheme was tried which is not supported on this
+// machine.
+NET_ERROR(UNSUPPORTED_AUTH_SCHEME, -339)
+
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)
 
@@ -278,5 +340,28 @@ NET_ERROR(CACHE_READ_FAILURE, -401)
 // The operation is not supported for this entry.
 NET_ERROR(CACHE_OPERATION_NOT_SUPPORTED, -403)
 
+// The disk cache is unable to open this entry.
+NET_ERROR(CACHE_OPEN_FAILURE, -404)
+
+// The disk cache is unable to create this entry.
+NET_ERROR(CACHE_CREATE_FAILURE, -405)
+
+// Multiple transactions are racing to create disk cache entries. This is an
+// internal error returned from the HttpCache to the HttpCacheTransaction that
+// tells the transaction to restart the entry-creation logic because the state
+// of the cache has changed.
+NET_ERROR(CACHE_RACE, -406)
+
 // The server's response was insecure (e.g. there was a cert error).
 NET_ERROR(INSECURE_RESPONSE, -501)
+
+// The server responded to a <keygen> with a generated client cert that we
+// don't have the matching private key for.
+NET_ERROR(NO_PRIVATE_KEY_FOR_CERT, -502)
+
+// An error adding to the OS certificate database (e.g. OS X Keychain).
+NET_ERROR(ADD_USER_CERT_FAILED, -503)
+
+//
+// The FTP PASV command failed.
+NET_ERROR(FTP_PASV_COMMAND_FAILED, -600)

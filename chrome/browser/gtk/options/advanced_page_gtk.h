@@ -7,9 +7,10 @@
 
 #include <gtk/gtk.h>
 
+#include "app/gtk_signal.h"
 #include "chrome/browser/gtk/options/advanced_contents_gtk.h"
 #include "chrome/browser/options_page_base.h"
-#include "chrome/common/pref_member.h"
+#include "chrome/browser/pref_member.h"
 
 class Profile;
 
@@ -26,12 +27,10 @@ class AdvancedPageGtk : public OptionsPageBase {
   void Init();
 
   // Callback for reset to default button.
-  static void OnResetToDefaultsClicked(GtkButton* button,
-                                       AdvancedPageGtk* advanced_page);
+  CHROMEGTK_CALLBACK_0(AdvancedPageGtk, void, OnResetToDefaultsClicked);
 
   // Callback for reset to default confirmation dialog.
-  static void OnResetToDefaultsResponse(GtkDialog* dialog, int response_id,
-                                        AdvancedPageGtk* advanced_page);
+  CHROMEGTK_CALLBACK_1(AdvancedPageGtk, void, OnResetToDefaultsResponse, int);
 
   // The contents of the scroll box.
   AdvancedContentsGtk advanced_contents_;

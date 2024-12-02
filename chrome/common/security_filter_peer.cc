@@ -4,11 +4,11 @@
 
 #include "chrome/common/security_filter_peer.h"
 
-#include "app/gfx/codec/png_codec.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
-#include "base/gfx/size.h"
 #include "base/string_util.h"
+#include "gfx/codec/png_codec.h"
+#include "gfx/size.h"
 #include "grit/generated_resources.h"
 #include "grit/renderer_resources.h"
 #include "net/base/net_errors.h"
@@ -92,11 +92,11 @@ SecurityFilterPeer* SecurityFilterPeer::CreateSecurityFilterPeerForFrame(
     webkit_glue::ResourceLoaderBridge::Peer* peer, int os_error) {
   // TODO(jcampan): use a different message when getting a phishing/malware
   // error.
-  std::wstring error_msg = l10n_util::GetString(IDS_UNSAFE_FRAME_MESSAGE);
   std::string html = StringPrintf(
-      "<html><body style='background-color:#990000;color:white;'>"
+      "<html><meta charset='UTF-8'>"
+      "<body style='background-color:#990000;color:white;'>"
       "%s</body></html>",
-      WideToUTF8(error_msg).c_str());
+      l10n_util::GetStringUTF8(IDS_UNSAFE_FRAME_MESSAGE).c_str());
   return new ReplaceContentPeer(NULL, peer, "text/html", html);
 }
 
@@ -106,7 +106,9 @@ void SecurityFilterPeer::OnUploadProgress(uint64 position, uint64 size) {
 
 bool SecurityFilterPeer::OnReceivedRedirect(
     const GURL& new_url,
-    const webkit_glue::ResourceLoaderBridge::ResponseInfo& info) {
+    const webkit_glue::ResourceLoaderBridge::ResponseInfo& info,
+    bool* has_new_first_party_for_cookies,
+    GURL* new_first_party_for_cookies) {
   NOTREACHED();
   return false;
 }
@@ -126,7 +128,7 @@ void SecurityFilterPeer::OnCompletedRequest(const URLRequestStatus& status,
   NOTREACHED();
 }
 
-std::string SecurityFilterPeer::GetURLForDebugging() {
+GURL SecurityFilterPeer::GetURLForDebugging() const {
   return original_peer_->GetURLForDebugging();
 }
 

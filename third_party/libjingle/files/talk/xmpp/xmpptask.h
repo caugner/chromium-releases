@@ -77,7 +77,7 @@ class XmppTask :
   std::string task_id() const { return id_; }
   void set_task_id(std::string id) { id_ = id; }
 
-#ifdef _DEBUG
+#if !defined(NDEBUG)
   void set_debug_force_timeout(const bool f) { debug_force_timeout_ = f; }
 #endif
 
@@ -103,8 +103,8 @@ class XmppTask :
 
   bool MatchRequestIq(const XmlElement* stanza, const std::string& type, 
                       const QName& qn);
-  XmlElement *MakeIqResult(const XmlElement* query);
-  XmlElement *MakeIq(const std::string& type,
+  static XmlElement *MakeIqResult(const XmlElement* query);
+  static XmlElement *MakeIq(const std::string& type,
     const Jid& to, const std::string task_id);
 
   // Returns true if the task is under the specified rate limit and updates the
@@ -120,7 +120,7 @@ private:
   scoped_ptr<XmlElement> next_stanza_;
   std::string id_;
 
-#ifdef _DEBUG
+#if !defined(NDEBUG)
   bool debug_force_timeout_;
 #endif                         
 };

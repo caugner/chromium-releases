@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,22 +8,28 @@
 #include <map>
 #include <vector>
 
-#include "base/basictypes.h"
+#include "app/sql/init_status.h"
+#include "base/file_path.h"
 #include "base/lock.h"
-#include "base/message_loop.h"
 #include "base/ref_counted.h"
-#include "base/scoped_vector.h"
-#include "base/thread.h"
-#include "chrome/browser/webdata/web_database.h"
-#include "webkit/glue/autofill_form.h"
+#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/search_engines/template_url.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "webkit/glue/form_field.h"
 
+class AutofillChange;
+class AutoFillProfile;
+class CreditCard;
 #if defined(OS_WIN)
 struct IE7PasswordInfo;
 #endif
-class FilePath;
-class GURL;
-class ShutdownTask;
-class TemplateURL;
+class MessageLoop;
+class Task;
+class WebDatabase;
+
+namespace base {
+class Thread;
+}
 
 namespace webkit_glue {
 struct PasswordForm;
@@ -49,16 +55,23 @@ struct PasswordForm;
 // Result types
 //
 typedef enum {
-  BOOL_RESULT = 1,       // WDResult<bool>
-  KEYWORDS_RESULT,       // WDResult<WDKeywordsResult>
-  INT64_RESULT,          // WDResult<int64>
-  PASSWORD_RESULT,       // WDResult<std::vector<PasswordForm*>>
+  BOOL_RESULT = 1,             // WDResult<bool>
+  KEYWORDS_RESULT,             // WDResult<WDKeywordsResult>
+  INT64_RESULT,                // WDResult<int64>
+  PASSWORD_RESULT,             // WDResult<std::vector<PasswordForm*>>
 #if defined(OS_WIN)
-  PASSWORD_IE7_RESULT,   // WDResult<IE7PasswordInfo>
+  PASSWORD_IE7_RESULT,         // WDResult<IE7PasswordInfo>
 #endif
-  WEB_APP_IMAGES,        // WDResult<WDAppImagesResult>
-  AUTOFILL_VALUE_RESULT, // WDResult<std::vector<string16>>
+  WEB_APP_IMAGES,              // WDResult<WDAppImagesResult>
+  AUTOFILL_VALUE_RESULT,       // WDResult<std::vector<string16>>
+  AUTOFILL_CHANGES,            // WDResult<std::vector<AutofillChange>>
+  AUTOFILL_PROFILE_RESULT,     // WDResult<AutoFillProfile>
+  AUTOFILL_PROFILES_RESULT,     // WDResult<std::vector<AutoFillProfile*>>
+  AUTOFILL_CREDITCARD_RESULT,  // WDResult<CreditCard>
+  AUTOFILL_CREDITCARDS_RESULT  // WDResult<std::vector<CreditCard*>>
 } WDResultType;
+
+typedef std::vector<AutofillChange> AutofillChangeList;
 
 // Result from GetWebAppImages.
 struct WDAppImagesResult {
@@ -76,7 +89,7 @@ struct WDKeywordsResult {
   // Identifies the ID of the TemplateURL that is the default search. A value of
   // 0 indicates there is no default search provider.
   int64 default_search_provider_id;
-  // Version of the builin keywords. A value of 0 indicates a first run.
+  // Version of the built-in keywords. A value of 0 indicates a first run.
   int builtin_keyword_version;
 };
 
@@ -93,7 +106,7 @@ class WDTypedResult {
   }
 
  protected:
-  WDTypedResult(WDResultType type) : type_(type) {
+  explicit WDTypedResult(WDResultType type) : type_(type) {
   }
 
  private:
@@ -139,14 +152,15 @@ template <class T> class WDObjectResult : public WDTypedResult {
 
 class WebDataServiceConsumer;
 
-class WebDataService : public base::RefCountedThreadSafe<WebDataService> {
+class WebDataService
+    : public base::RefCountedThreadSafe<WebDataService,
+                                        ChromeThread::DeleteOnUIThread> {
  public:
 
   // All requests return an opaque handle of the following type.
   typedef int Handle;
 
   WebDataService();
-  ~WebDataService();
 
   // Initializes the web data service. Returns false on failure
   // Takes the path of the profile directory as its argument.
@@ -158,6 +172,10 @@ class WebDataService : public base::RefCountedThreadSafe<WebDataService> {
 
   // Returns false if Shutdown() has been called.
   bool IsRunning() const;
+
+  // Unloads the database without actually shutting down the service.  This can
+  // be used to temporarily reduce the browser process' memory footprint.
+  void UnloadDatabase();
 
   //////////////////////////////////////////////////////////////////////////////
   //
@@ -323,11 +341,11 @@ class WebDataService : public base::RefCountedThreadSafe<WebDataService> {
   void RemoveLogin(const webkit_glue::PasswordForm& form);
 
   // Removes all logins created in the specified daterange
-  void RemoveLoginsCreatedBetween(const base::Time delete_begin,
-                                  const base::Time delete_end);
+  void RemoveLoginsCreatedBetween(const base::Time& delete_begin,
+                                  const base::Time& delete_end);
 
   // Removes all logins created on or after the date passed in.
-  void RemoveLoginsCreatedAfter(const base::Time delete_begin);
+  void RemoveLoginsCreatedAfter(const base::Time& delete_begin);
 
   // Gets a list of password forms that match |form|.
   // |consumer| will be notified when the request is done. The result is of
@@ -375,8 +393,8 @@ class WebDataService : public base::RefCountedThreadSafe<WebDataService> {
   //////////////////////////////////////////////////////////////////////////////
 
   // Schedules a task to add form elements to the web database.
-  void AddAutofillFormElements(
-      const std::vector<webkit_glue::AutofillForm::Element>& elements);
+  void AddFormFieldValues(
+      const std::vector<webkit_glue::FormField>& elements);
 
   // Initiates the request for a vector of values which have been entered in
   // form input fields named |name|.  The method OnWebDataServiceRequestDone of
@@ -393,7 +411,49 @@ class WebDataService : public base::RefCountedThreadSafe<WebDataService> {
   void RemoveFormValueForElementName(const string16& name,
                                      const string16& value);
 
+  // Schedules a task to add an AutoFill profile to the web database.
+  void AddAutoFillProfile(const AutoFillProfile& profile);
+
+  // Schedules a task to update an AutoFill profile in the web database.
+  void UpdateAutoFillProfile(const AutoFillProfile& profile);
+
+  // Schedules a task to remove an AutoFill profile from the web database.
+  // |profile_id| is the unique ID of the profile to remove.
+  void RemoveAutoFillProfile(int profile_id);
+
+  // Initiates the request for all AutoFill profiles.  The method
+  // OnWebDataServiceRequestDone of |consumer| gets called when the request is
+  // finished, with the profiles included in the argument |result|.  The
+  // consumer owns the profiles.
+  Handle GetAutoFillProfiles(WebDataServiceConsumer* consumer);
+
+  // Schedules a task to add credit card to the web database.
+  void AddCreditCard(const CreditCard& creditcard);
+
+  // Schedules a task to update credit card in the web database.
+  void UpdateCreditCard(const CreditCard& creditcard);
+
+  // Schedules a task to remove a credit card from the web database.
+  // |creditcard_id| is the unique ID of the credit card to remove.
+  void RemoveCreditCard(int creditcard_id);
+
+  // Initiates the request for all credit cards.  The method
+  // OnWebDataServiceRequestDone of |consumer| gets called when the request is
+  // finished, with the credit cards included in the argument |result|.  The
+  // consumer owns the credit cards.
+  Handle GetCreditCards(WebDataServiceConsumer* consumer);
+
+  // Testing
+#ifdef UNIT_TEST
+  void set_failed_init(bool value) { failed_init_ = value; }
+#endif
+
+  virtual bool IsDatabaseLoaded();
+  virtual WebDatabase* GetDatabase();
+
  protected:
+  virtual ~WebDataService();
+
   friend class TemplateURLModelTest;
   friend class TemplateURLModelTestingProfile;
   friend class WebDataServiceTest;
@@ -414,13 +474,22 @@ class WebDataService : public base::RefCountedThreadSafe<WebDataService> {
   //
   //////////////////////////////////////////////////////////////////////////////
  private:
+  friend class base::RefCountedThreadSafe<WebDataService>;
+  friend class ChromeThread;
+  friend class DeleteTask<WebDataService>;
   friend class ShutdownTask;
 
   typedef GenericRequest2<std::vector<const TemplateURL*>,
                           std::vector<TemplateURL*> > SetKeywordsRequest;
 
-  // Initialize the database with the provided path.
-  void InitializeDatabase(const FilePath& path);
+  // Invoked on the main thread if initializing the db fails.
+  void DBInitFailed(sql::InitStatus init_status);
+
+  // Initialize the database, if it hasn't already been initialized.
+  void InitializeDatabaseIfNecessary();
+
+  // The notification method.
+  void NotifyDatabaseLoadedOnUIThread();
 
   // Commit any pending transaction and deletes the database.
   void ShutdownDatabase();
@@ -464,15 +533,26 @@ class WebDataService : public base::RefCountedThreadSafe<WebDataService> {
   // Autofill.
   //
   //////////////////////////////////////////////////////////////////////////////
-  void AddAutofillFormElementsImpl(
-      GenericRequest<std::vector<webkit_glue::AutofillForm::Element> >*
-          request);
+  void AddFormFieldValuesImpl(
+      GenericRequest<std::vector<webkit_glue::FormField> >* request);
   void GetFormValuesForElementNameImpl(WebDataRequest* request,
       const string16& name, const string16& prefix, int limit);
   void RemoveFormElementsAddedBetweenImpl(
       GenericRequest2<base::Time, base::Time>* request);
   void RemoveFormValueForElementNameImpl(
       GenericRequest2<string16, string16>* request);
+  void AddAutoFillProfileImpl(GenericRequest<AutoFillProfile>* request);
+  void UpdateAutoFillProfileImpl(GenericRequest<AutoFillProfile>* request);
+  void RemoveAutoFillProfileImpl(GenericRequest<int>* request);
+  void GetAutoFillProfileForLabelImpl(WebDataRequest* request,
+                                      const string16& label);
+  void GetAutoFillProfilesImpl(WebDataRequest* request);
+  void AddCreditCardImpl(GenericRequest<CreditCard>* request);
+  void UpdateCreditCardImpl(GenericRequest<CreditCard>* request);
+  void RemoveCreditCardImpl(GenericRequest<int>* request);
+  void GetCreditCardForLabelImpl(WebDataRequest* request,
+                                 const string16& label);
+  void GetCreditCardsImpl(WebDataRequest* request);
 
   //////////////////////////////////////////////////////////////////////////////
   //
@@ -480,17 +560,13 @@ class WebDataService : public base::RefCountedThreadSafe<WebDataService> {
   //
   //////////////////////////////////////////////////////////////////////////////
 
-  void SetWebAppImageImpl(GenericRequest2<GURL,SkBitmap>* request);
+  void SetWebAppImageImpl(GenericRequest2<GURL, SkBitmap>* request);
 
-  void SetWebAppHasAllImagesImpl(GenericRequest2<GURL,bool>* request);
+  void SetWebAppHasAllImagesImpl(GenericRequest2<GURL, bool>* request);
 
   void RemoveWebAppImpl(GenericRequest<GURL>* request);
 
   void GetWebAppImagesImpl(GenericRequest<GURL>* request);
-
-  base::Thread* thread() { return thread_; }
-
- private:
 
   // Schedule a task on our worker thread.
   void ScheduleTask(Task* t);
@@ -501,11 +577,18 @@ class WebDataService : public base::RefCountedThreadSafe<WebDataService> {
   // Return the next request handle.
   int GetNextRequestHandle();
 
-  // Our worker thread. All requests are processed from that thread.
-  base::Thread* thread_;
+  // True once initialization has started.
+  bool is_running_;
+
+  // The path with which to initialize the database.
+  FilePath path_;
 
   // Our database.
   WebDatabase* db_;
+
+  // Whether the database failed to initialize.  We use this to avoid
+  // continually trying to reinit.
+  bool failed_init_;
 
   // Whether we should commit the database.
   bool should_commit_;
@@ -518,6 +601,9 @@ class WebDataService : public base::RefCountedThreadSafe<WebDataService> {
 
   typedef std::map<Handle, WebDataRequest*> RequestMap;
   RequestMap pending_requests_;
+
+  // MessageLoop the WebDataService is created on.
+  MessageLoop* main_loop_;
 
   DISALLOW_EVIL_CONSTRUCTORS(WebDataService);
 };
@@ -539,6 +625,9 @@ class WebDataServiceConsumer {
   // not be opened. The result object is destroyed after this call.
   virtual void OnWebDataServiceRequestDone(WebDataService::Handle h,
                                            const WDTypedResult* result) = 0;
+
+ protected:
+  virtual ~WebDataServiceConsumer() {}
 };
 
 #endif  // CHROME_BROWSER_WEBDATA_WEB_DATA_SERVICE_H__

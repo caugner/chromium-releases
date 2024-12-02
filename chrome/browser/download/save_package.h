@@ -28,7 +28,7 @@ class MessageLoop;
 class PrefService;
 class Profile;
 class TabContents;
-class URLRequestContext;
+class URLRequestContextGetter;
 class TabContents;
 
 namespace base {
@@ -93,8 +93,6 @@ class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
               SavePackageType save_type,
               const FilePath& file_full_path,
               const FilePath& directory_full_path);
-
-  ~SavePackage();
 
   // Initialize the SavePackage. Returns true if it initializes properly.
   // Need to make sure that this method must be called in the UI thread because
@@ -197,9 +195,14 @@ class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
   virtual void FileSelectionCanceled(void* params);
 
  private:
+  friend class base::RefCountedThreadSafe<SavePackage>;
+
   // For testing only.
-  SavePackage(const FilePath& file_full_path,
+  SavePackage(TabContents* tab_contents,
+              const FilePath& file_full_path,
               const FilePath& directory_full_path);
+
+  ~SavePackage();
 
   // Notes from Init() above applies here as well.
   void InternalInit();
@@ -210,7 +213,7 @@ class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
   void DoSavingProcess();
 
   // Create a file name based on the response from the server.
-  bool GenerateFilename(const std::string& disposition,
+  bool GenerateFileName(const std::string& disposition,
                         const GURL& url,
                         bool need_html_ext,
                         FilePath::StringType* generated_name);
@@ -224,6 +227,10 @@ class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
 
   SaveItem* LookupItemInProcessBySaveId(int32 save_id);
   void PutInProgressItemToSavedMap(SaveItem* save_item);
+
+  // Retrieves the URL to be saved from tab_contents_ variable.
+  GURL GetUrlToBeSaved();
+
 
   typedef base::hash_map<std::string, SaveItem*> SaveUrlItemMap;
   // in_progress_items_ is map of all saving job in in-progress state.
@@ -249,11 +256,22 @@ class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
   // Helper function for preparing suggested name for the SaveAs Dialog. The
   // suggested name is determined by the web document's title.
   static FilePath GetSuggestedNameForSaveAs(const FilePath& name,
-                                            bool can_save_as_complete);
+      bool can_save_as_complete,
+      const FilePath::StringType& contents_mime_type);
 
-  // Ensure that the file name has a proper extension for HTML by adding ".htm"
+  // Ensures that the file name has a proper extension for HTML by adding ".htm"
   // if necessary.
   static FilePath EnsureHtmlExtension(const FilePath& name);
+
+  // Ensures that the file name has a proper extension for supported formats
+  // if necessary.
+  static FilePath EnsureMimeExtension(const FilePath& name,
+      const FilePath::StringType& contents_mime_type);
+
+  // Returns extension for supported MIME types (for example, for "text/plain"
+  // it returns "txt").
+  static const FilePath::CharType* ExtensionForMimeType(
+      const FilePath::StringType& contents_mime_type);
 
   typedef std::queue<SaveItem*> SaveItemQueue;
   // A queue for items we are about to start saving.
@@ -265,7 +283,7 @@ class SavePackage : public base::RefCountedThreadSafe<SavePackage>,
 
   // The request context which provides application-specific context for
   // URLRequest instances.
-  scoped_refptr<URLRequestContext> request_context_;
+  scoped_refptr<URLRequestContextGetter> request_context_getter_;
 
   // Non-owning pointer for handling file writing on the file thread.
   SaveFileManager* file_manager_;

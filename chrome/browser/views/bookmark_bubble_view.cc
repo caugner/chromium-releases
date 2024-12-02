@@ -4,8 +4,6 @@
 
 #include "chrome/browser/views/bookmark_bubble_view.h"
 
-#include "app/gfx/canvas.h"
-#include "app/gfx/color_utils.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/keyboard_codes.h"
@@ -18,6 +16,8 @@
 #include "chrome/browser/profile.h"
 #include "chrome/browser/views/info_bubble.h"
 #include "chrome/common/notification_service.h"
+#include "gfx/canvas.h"
+#include "gfx/color_utils.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "views/event.h"
@@ -242,12 +242,16 @@ void BookmarkBubbleView::Init() {
   edit_button_ = new NativeButton(
       this, l10n_util::GetString(IDS_BOOMARK_BUBBLE_OPTIONS));
 
-  close_button_ = new NativeButton(this, l10n_util::GetString(IDS_CLOSE));
+  close_button_ = new NativeButton(this, l10n_util::GetString(IDS_DONE));
   close_button_->SetIsDefault(true);
+
+  Label* combobox_label = new Label(
+      l10n_util::GetString(IDS_BOOMARK_BUBBLE_FOLDER_TEXT));
 
   parent_combobox_ = new Combobox(&parent_model_);
   parent_combobox_->SetSelectedItem(parent_model_.node_parent_index());
   parent_combobox_->set_listener(this);
+  parent_combobox_->SetAccessibleName(combobox_label->GetText());
 
   Label* title_label = new Label(l10n_util::GetString(
       newly_bookmarked_ ? IDS_BOOMARK_BUBBLE_PAGE_BOOKMARKED :
@@ -303,8 +307,7 @@ void BookmarkBubbleView::Init() {
   layout->AddPaddingRow(0, kRelatedControlSmallVerticalSpacing);
 
   layout->StartRow(0, 2);
-  layout->AddView(
-      new Label(l10n_util::GetString(IDS_BOOMARK_BUBBLE_FOLDER_TEXT)));
+  layout->AddView(combobox_label);
   layout->AddView(parent_combobox_);
   layout->AddPaddingRow(0, kRelatedControlSmallVerticalSpacing);
 
@@ -331,7 +334,8 @@ void BookmarkBubbleView::ButtonPressed(
 
 void BookmarkBubbleView::LinkActivated(Link* source, int event_flags) {
   DCHECK(source == remove_link_);
-  UserMetrics::RecordAction(L"BookmarkBubble_Unstar", profile_);
+  UserMetrics::RecordAction(UserMetricsAction("BookmarkBubble_Unstar"),
+                            profile_);
 
   // Set this so we remove the bookmark after the window closes.
   remove_bookmark_ = true;
@@ -344,7 +348,8 @@ void BookmarkBubbleView::ItemChanged(Combobox* combobox,
                                      int prev_index,
                                      int new_index) {
   if (new_index + 1 == parent_model_.GetItemCount()) {
-    UserMetrics::RecordAction(L"BookmarkBubble_EditFromCombobox", profile_);
+    UserMetrics::RecordAction(
+              UserMetricsAction("BookmarkBubble_EditFromCombobox"), profile_);
 
     ShowEditor();
     return;
@@ -381,7 +386,8 @@ void BookmarkBubbleView::Close() {
 
 void BookmarkBubbleView::HandleButtonPressed(views::Button* sender) {
   if (sender == edit_button_) {
-    UserMetrics::RecordAction(L"BookmarkBubble_Edit", profile_);
+    UserMetrics::RecordAction(UserMetricsAction("BookmarkBubble_Edit"),
+                              profile_);
     ShowEditor();
   } else {
     DCHECK(sender == close_button_);
@@ -436,8 +442,9 @@ void BookmarkBubbleView::ApplyEdits() {
     const std::wstring new_title = UTF16ToWide(title_tf_->text());
     if (new_title != node->GetTitle()) {
       model->SetTitle(node, new_title);
-      UserMetrics::RecordAction(L"BookmarkBubble_ChangeTitleInBubble",
-                                profile_);
+      UserMetrics::RecordAction(
+          UserMetricsAction("BookmarkBubble_ChangeTitleInBubble"),
+          profile_);
     }
     // Last index means 'Choose another folder...'
     if (parent_combobox_->selected_item() <
@@ -445,7 +452,8 @@ void BookmarkBubbleView::ApplyEdits() {
       const BookmarkNode* new_parent =
           parent_model_.GetNodeAt(parent_combobox_->selected_item());
       if (new_parent != node->GetParent()) {
-        UserMetrics::RecordAction(L"BookmarkBubble_ChangeParent", profile_);
+        UserMetrics::RecordAction(
+            UserMetricsAction("BookmarkBubble_ChangeParent"), profile_);
         model->Move(node, new_parent, new_parent->GetChildCount());
       }
     }

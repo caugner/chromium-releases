@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,18 +20,37 @@ namespace net {
 
 class ClientSocketFactory;
 
+class TCPSocketParams {
+ public:
+  TCPSocketParams(const std::string& host, int port, RequestPriority priority,
+                  const GURL& referrer, bool disable_resolver_cache)
+      :  destination_(host, port) {
+    // The referrer is used by the DNS prefetch system to correlate resolutions
+    // with the page that triggered them. It doesn't impact the actual addresses
+    // that we resolve to.
+    destination_.set_referrer(referrer);
+    destination_.set_priority(priority);
+    if (disable_resolver_cache)
+      destination_.set_allow_cached_response(false);
+  }
+
+  HostResolver::RequestInfo destination() const { return destination_; }
+
+ private:
+  HostResolver::RequestInfo destination_;
+};
+
 // TCPConnectJob handles the host resolution necessary for socket creation
 // and the tcp connect.
 class TCPConnectJob : public ConnectJob {
  public:
   TCPConnectJob(const std::string& group_name,
-                const HostResolver::RequestInfo& resolve_info,
-                const ClientSocketHandle* handle,
+                const TCPSocketParams& params,
                 base::TimeDelta timeout_duration,
                 ClientSocketFactory* client_socket_factory,
                 HostResolver* host_resolver,
                 Delegate* delegate,
-                LoadLog* load_log);
+                const BoundNetLog& net_log);
   virtual ~TCPConnectJob();
 
   // ConnectJob methods.
@@ -61,14 +80,17 @@ class TCPConnectJob : public ConnectJob {
   int DoTCPConnect();
   int DoTCPConnectComplete(int result);
 
-  const HostResolver::RequestInfo resolve_info_;
+  const TCPSocketParams params_;
   ClientSocketFactory* const client_socket_factory_;
   CompletionCallbackImpl<TCPConnectJob> callback_;
   SingleRequestHostResolver resolver_;
   AddressList addresses_;
   State next_state_;
 
-  // The time the Connect() method was called (if it got called).
+  // The time Connect() was called.
+  base::TimeTicks start_time_;
+
+  // The time the connect was started (after DNS finished).
   base::TimeTicks connect_start_time_;
 
   DISALLOW_COPY_AND_ASSIGN(TCPConnectJob);
@@ -76,19 +98,22 @@ class TCPConnectJob : public ConnectJob {
 
 class TCPClientSocketPool : public ClientSocketPool {
  public:
-  TCPClientSocketPool(int max_sockets,
-                      int max_sockets_per_group,
-                      HostResolver* host_resolver,
-                      ClientSocketFactory* client_socket_factory);
+  TCPClientSocketPool(
+      int max_sockets,
+      int max_sockets_per_group,
+      const std::string& name,
+      HostResolver* host_resolver,
+      ClientSocketFactory* client_socket_factory,
+      NetworkChangeNotifier* network_change_notifier);
 
   // ClientSocketPool methods:
 
   virtual int RequestSocket(const std::string& group_name,
                             const void* resolve_info,
-                            int priority,
+                            RequestPriority priority,
                             ClientSocketHandle* handle,
                             CompletionCallback* callback,
-                            LoadLog* load_log);
+                            const BoundNetLog& net_log);
 
   virtual void CancelRequest(const std::string& group_name,
                              const ClientSocketHandle* handle);
@@ -107,11 +132,17 @@ class TCPClientSocketPool : public ClientSocketPool {
   virtual LoadState GetLoadState(const std::string& group_name,
                                  const ClientSocketHandle* handle) const;
 
+  virtual base::TimeDelta ConnectionTimeout() const {
+    return base_.ConnectionTimeout();
+  }
+
+  virtual const std::string& name() const { return base_.name(); }
+
  protected:
   virtual ~TCPClientSocketPool();
 
  private:
-  typedef ClientSocketPoolBase<HostResolver::RequestInfo> PoolBase;
+  typedef ClientSocketPoolBase<TCPSocketParams> PoolBase;
 
   class TCPConnectJobFactory
       : public PoolBase::ConnectJobFactory {
@@ -129,7 +160,9 @@ class TCPClientSocketPool : public ClientSocketPool {
         const std::string& group_name,
         const PoolBase::Request& request,
         ConnectJob::Delegate* delegate,
-        LoadLog* load_log) const;
+        const BoundNetLog& net_log) const;
+
+    virtual base::TimeDelta ConnectionTimeout() const;
 
    private:
     ClientSocketFactory* const client_socket_factory_;
@@ -143,7 +176,7 @@ class TCPClientSocketPool : public ClientSocketPool {
   DISALLOW_COPY_AND_ASSIGN(TCPClientSocketPool);
 };
 
-REGISTER_SOCKET_PARAMS_FOR_POOL(TCPClientSocketPool, HostResolver::RequestInfo)
+REGISTER_SOCKET_PARAMS_FOR_POOL(TCPClientSocketPool, TCPSocketParams)
 
 }  // namespace net
 

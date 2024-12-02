@@ -27,43 +27,29 @@ bool GetDefaultUserDataDirectory(FilePath* result) {
   return success;
 }
 
-bool GetUserDocumentsDirectory(FilePath* result) {
+bool GetChromeFrameUserDataDirectory(FilePath* result) {
   bool success = false;
-  NSArray* docArray =
-      NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
-                                          NSUserDomainMask,
-                                          YES);
-  if ([docArray count] && result) {
-    *result = FilePath([[docArray objectAtIndex:0] fileSystemRepresentation]);
+  if (result && PathService::Get(base::DIR_APP_DATA, result)) {
+#if defined(GOOGLE_CHROME_BUILD)
+    *result = result->Append("Google").Append("Chrome Frame");
+#else
+    *result = result->Append("Chrome Frame");
+#endif
     success = true;
   }
   return success;
+}
+
+bool GetUserDocumentsDirectory(FilePath* result) {
+  return mac_util::GetUserDirectory(NSDocumentDirectory, result);
 }
 
 bool GetUserDownloadsDirectory(FilePath* result) {
-  bool success = false;
-  NSArray* docArray =
-      NSSearchPathForDirectoriesInDomains(NSDownloadsDirectory,
-                                          NSUserDomainMask,
-                                          YES);
-  if ([docArray count] && result) {
-    *result = FilePath([[docArray objectAtIndex:0] fileSystemRepresentation]);
-    success = true;
-  }
-  return success;
+  return mac_util::GetUserDirectory(NSDownloadsDirectory, result);
 }
 
 bool GetUserDesktop(FilePath* result) {
-  bool success = false;
-  NSArray* docArray =
-      NSSearchPathForDirectoriesInDomains(NSDesktopDirectory,
-                                          NSUserDomainMask,
-                                          YES);
-  if ([docArray count] && result) {
-    *result = FilePath([[docArray objectAtIndex:0] fileSystemRepresentation]);
-    success = true;
-  }
-  return success;
+  return mac_util::GetUserDirectory(NSDesktopDirectory, result);
 }
 
 FilePath GetVersionedDirectory() {

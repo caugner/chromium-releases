@@ -20,10 +20,7 @@ class ResourceDispatcherHost;
 class SandboxedExtensionUnpackerClient
     : public base::RefCountedThreadSafe<SandboxedExtensionUnpackerClient> {
  public:
-  virtual ~SandboxedExtensionUnpackerClient(){
-  }
-
-  // temp_dir - A temporary directoy containing the results of the extension
+  // temp_dir - A temporary directory containing the results of the extension
   // unpacking. The client is responsible for deleting this directory.
   //
   // extension_root - The path to the extension root inside of temp_dir.
@@ -34,6 +31,11 @@ class SandboxedExtensionUnpackerClient
                                const FilePath& extension_root,
                                Extension* extension) = 0;
   virtual void OnUnpackFailure(const std::string& error) = 0;
+
+ protected:
+  friend class base::RefCountedThreadSafe<SandboxedExtensionUnpackerClient>;
+
+  virtual ~SandboxedExtensionUnpackerClient() {}
 };
 
 // SandboxedExtensionUnpacker unpacks extensions from the CRX format into a
@@ -42,9 +44,9 @@ class SandboxedExtensionUnpackerClient
 // sources.
 //
 // Unpacking an extension using this class makes minor changes to its source,
-// such as transcoding all images to PNG and rewriting the manifest JSON. As
-// such, it should not be used when the output is not intended to be given back
-// to the author.
+// such as transcoding all images to PNG, parsing all message catalogs
+// and rewriting the manifest JSON. As such, it should not be used when the
+// output is not intended to be given back to the author.
 //
 //
 // Lifetime management:
@@ -94,12 +96,20 @@ class SandboxedExtensionUnpacker : public UtilityProcessHost::Client {
                              ResourceDispatcherHost* rdh,
                              SandboxedExtensionUnpackerClient* cilent);
 
+  const GURL& web_origin() const { return web_origin_; }
+  void set_web_origin(const GURL& val) {
+    web_origin_ = val;
+  }
+
   // Start unpacking the extension. The client is called with the results.
   void Start();
 
  private:
   class ProcessHostClient;
   friend class ProcessHostClient;
+  friend class SandboxedExtensionUnpackerTest;
+
+  ~SandboxedExtensionUnpacker() {}
 
   // Validates the signature of the extension and extract the key to
   // |public_key_|. Returns true if the signature validates, false otherwise.
@@ -123,15 +133,46 @@ class SandboxedExtensionUnpacker : public UtilityProcessHost::Client {
   void ReportFailure(const std::string& message);
   void ReportSuccess();
 
+  // Overwrites original manifest with safe result from utility process.
+  // Returns NULL on error. Caller owns the returned object.
+  DictionaryValue* RewriteManifestFile(const DictionaryValue& manifest);
+
+  // Overwrites original files with safe results from utility process.
+  // Reports error and returns false if it fails.
+  bool RewriteImageFiles();
+  bool RewriteCatalogFiles();
+
+  // The path to the CRX to unpack.
   FilePath crx_path_;
-  MessageLoop* file_loop_;
+
+  // Our client's thread. This is the thread we respond on.
+  ChromeThread::ID thread_identifier_;
+
+  // ResourceDispatcherHost to pass to the utility process.
   ResourceDispatcherHost* rdh_;
+
+  // Our client.
   scoped_refptr<SandboxedExtensionUnpackerClient> client_;
+
+  // A temporary directory to use for unpacking.
   ScopedTempDir temp_dir_;
+
+  // The root directory of the unpacked extension. This is a child of temp_dir_.
   FilePath extension_root_;
+
+  // Represents the extension we're unpacking.
   scoped_ptr<Extension> extension_;
+
+  // Whether we've received a response from the utility process yet.
   bool got_response_;
+
+  // The public key that was extracted from the CRX header.
   std::string public_key_;
+
+  // If the unpacked extension uses web content, its origin will be set to this
+  // value. This is used when an app is self-hosted. The only valid origin is
+  // the origin it is served from.
+  GURL web_origin_;
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_SANDBOXED_EXTENSION_UNPACKER_H_

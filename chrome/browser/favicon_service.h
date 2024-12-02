@@ -38,11 +38,11 @@ class FaviconService : public CancelableRequestProvider,
   // opposed to not knowing anything). |expired| will be set to true if we
   // refreshed the favicon "too long" ago and should be updated if the page
   // is visited again.
-  typedef Callback5<Handle,                          // handle
-                    bool,                            // know_favicon
-                    scoped_refptr<RefCountedBytes>,  // data
-                    bool,                            // expired
-                    GURL>::Type                      // url of the favicon
+  typedef Callback5<Handle,                           // handle
+                    bool,                             // know_favicon
+                    scoped_refptr<RefCountedMemory>,  // data
+                    bool,                             // expired
+                    GURL>::Type                       // url of the favicon
                     FaviconDataCallback;
 
   typedef CancelableRequest<FaviconDataCallback> GetFaviconRequest;
@@ -87,6 +87,10 @@ class FaviconService : public CancelableRequestProvider,
                   const std::vector<unsigned char>& image_data);
 
  private:
+  friend class base::RefCountedThreadSafe<FaviconService>;
+
+  ~FaviconService() {}
+
   Profile* profile_;
 
   // Helper to forward an empty result if we cannot get the history service.

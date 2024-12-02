@@ -6,13 +6,13 @@
 
 #include <vssym32.h>
 
-#include "app/gfx/canvas.h"
-#include "app/gfx/font.h"
-#include "app/gfx/native_theme_win.h"
 #include "app/l10n_util_win.h"
 #include "app/resource_bundle.h"
 #include "base/logging.h"
 #include "base/stl_util-inl.h"
+#include "gfx/canvas.h"
+#include "gfx/font.h"
+#include "gfx/native_theme_win.h"
 #include "views/controls/tabbed_pane/tabbed_pane.h"
 #include "views/fill_layout.h"
 #include "views/widget/root_view.h"
@@ -76,7 +76,7 @@ void NativeTabbedPaneWin::AddTabAtIndex(int index, const std::wstring& title,
                                         View* contents,
                                         bool select_if_first_tab) {
   DCHECK(index <= static_cast<int>(tab_views_.size()));
-  contents->SetParentOwned(false);
+  contents->set_parent_owned(false);
   tab_views_.insert(tab_views_.begin() + index, contents);
   tab_titles_.insert(tab_titles_.begin() + index, title);
 

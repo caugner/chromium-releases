@@ -9,7 +9,10 @@
 #ifndef BASE_DATA_PACK_H_
 #define BASE_DATA_PACK_H_
 
+#include <map>
+
 #include "base/basictypes.h"
+#include "base/ref_counted_memory.h"
 #include "base/scoped_ptr.h"
 
 namespace file_util {
@@ -32,7 +35,16 @@ class DataPack {
   // Get resource by id |resource_id|, filling in |data|.
   // The data is owned by the DataPack object and should not be modified.
   // Returns false if the resource id isn't found.
-  bool Get(uint32_t resource_id, StringPiece* data);
+  bool GetStringPiece(uint32 resource_id, StringPiece* data);
+
+  // Like GetStringPiece(), but returns a reference to memory. This interface
+  // is used for image data, while the StringPiece interface is usually used
+  // for localization strings.
+  RefCountedStaticMemory* GetStaticMemory(uint32 resource_id);
+
+  // Writes a pack file containing |resources| to |path|.
+  static bool WritePack(const FilePath& path,
+                        const std::map<uint32, StringPiece>& resources);
 
  private:
   // The memory-mapped data.

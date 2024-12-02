@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,10 +20,13 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/notification_service.h"
 
+class IOThread;
+
 class TestingBrowserProcess : public BrowserProcess {
  public:
   TestingBrowserProcess()
-      : shutdown_event_(new base::WaitableEvent(true, false)) {
+      : shutdown_event_(new base::WaitableEvent(true, false)),
+        app_locale_("en") {
   }
 
   virtual ~TestingBrowserProcess() {
@@ -40,7 +43,7 @@ class TestingBrowserProcess : public BrowserProcess {
     return NULL;
   }
 
-  virtual base::Thread* io_thread() {
+  virtual IOThread* io_thread() {
     return NULL;
   }
 
@@ -78,15 +81,6 @@ class TestingBrowserProcess : public BrowserProcess {
     return NULL;
   }
 
-#if defined(OS_WIN)
-  virtual sandbox::BrokerServices* broker_services() {
-    return NULL;
-  }
-
-  virtual void InitBrokerServices(sandbox::BrokerServices*) {
-  }
-#endif
-
   virtual DebuggerWrapper* debugger_wrapper() {
     return NULL;
   }
@@ -103,7 +97,19 @@ class TestingBrowserProcess : public BrowserProcess {
     return clipboard_.get();
   }
 
+  virtual NotificationUIManager* notification_ui_manager() {
+    return NULL;
+  }
+
+  virtual StatusTrayManager* status_tray_manager() {
+    return NULL;
+  }
+
   virtual GoogleURLTracker* google_url_tracker() {
+    return NULL;
+  }
+
+  virtual IntranetRedirectDetector* intranet_redirect_detector() {
     return NULL;
   }
 
@@ -130,10 +136,11 @@ class TestingBrowserProcess : public BrowserProcess {
   }
 
   virtual const std::string& GetApplicationLocale() {
-    static std::string* value = NULL;
-    if (!value)
-      value = new std::string("en");
-    return *value;
+    return app_locale_;
+  }
+
+  virtual void SetApplicationLocale(const std::string& app_locale) {
+    app_locale_ = app_locale;
   }
 
   virtual base::WaitableEvent* shutdown_event() {
@@ -141,6 +148,11 @@ class TestingBrowserProcess : public BrowserProcess {
   }
 
   virtual void CheckForInspectorFiles() {}
+
+#if defined(OS_WIN)
+  virtual void StartAutoupdateTimer() {}
+#endif  // OS_WIN
+
   virtual bool have_inspector_files() const { return true; }
 #if defined(IPC_MESSAGE_LOG_ENABLED)
   virtual void SetIPCLoggingEnabled(bool enable) {}
@@ -150,6 +162,7 @@ class TestingBrowserProcess : public BrowserProcess {
   NotificationService notification_service_;
   scoped_ptr<base::WaitableEvent> shutdown_event_;
   scoped_ptr<Clipboard> clipboard_;
+  std::string app_locale_;
 
   DISALLOW_COPY_AND_ASSIGN(TestingBrowserProcess);
 };

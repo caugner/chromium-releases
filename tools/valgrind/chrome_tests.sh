@@ -4,29 +4,22 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# Select the valgrind built by build-valgrind-for-chromium.sh by default,
-# but allow users to override this default without editing scripts and
-# without specifying a commandline option
-
-if test x"$CHROME_VALGRIND_BIN" = x
-then
-  # Figure out which valgrind is installed.  Use most recent one.
-  # See build-valgrind-for-chromium.sh and its history for these constants.
-  for SVNREV in '10880-redzone' '10880' '10771' '20090715'
-  do
-    CHROME_VALGRIND_BIN=/usr/local/valgrind-$SVNREV/bin
-    test -x $CHROME_VALGRIND_BIN/valgrind && break
-  done
-fi
-
-if ! test -x $CHROME_VALGRIND_BIN/valgrind
-then
-  echo "Could not find chromium's version of valgrind."
-  echo "Please run build-valgrind-for-chromium.sh or set CHROME_VALGRIND_BIN."
-  exit 1
-fi
-echo "Using ${CHROME_VALGRIND_BIN}/valgrind"
-PATH="${CHROME_VALGRIND_BIN}:$PATH"
+# Set up some paths and re-direct the arguments to chrome_tests.py
 
 export THISDIR=`dirname $0`
-PYTHONPATH=$THISDIR/../../webkit/tools/layout_tests/:$THISDIR/../purify:$THISDIR/../python "$THISDIR/chrome_tests.py" "$@"
+
+CHROME_VALGRIND=`sh $THISDIR/locate_valgrind.sh`
+if [ "$CHROME_VALGRIND" = "" ]
+then
+  # locate_valgrind.sh failed
+  exit 1
+fi
+echo "Using valgrind binaries from ${CHROME_VALGRIND}"
+
+PATH="${CHROME_VALGRIND}/bin:$PATH"
+# We need to set these variables to override default lib paths hard-coded into
+# Valgrind binary.
+export VALGRIND_LIB="$CHROME_VALGRIND/lib/valgrind"
+export VALGRIND_LIB_INNER="$CHROME_VALGRIND/lib/valgrind"
+
+PYTHONPATH=$THISDIR/../python "$THISDIR/chrome_tests.py" "$@"

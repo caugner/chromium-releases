@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,17 +13,19 @@
 #include "chrome/renderer/extensions/extension_process_bindings.h"
 #include "chrome/renderer/extensions/js_only_v8_extensions.h"
 #include "chrome/renderer/extensions/renderer_extension_bindings.h"
+#include "chrome/renderer/mock_render_process.h"
 #include "chrome/renderer/renderer_main_platform_delegate.h"
-#include "webkit/api/public/WebFrame.h"
-#include "webkit/api/public/WebInputEvent.h"
-#include "webkit/api/public/WebKit.h"
-#include "webkit/api/public/WebScriptController.h"
-#include "webkit/api/public/WebScriptSource.h"
-#include "webkit/api/public/WebURLRequest.h"
-#include "webkit/api/public/WebView.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebScriptController.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebScriptSource.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
 
 using WebKit::WebFrame;
+using WebKit::WebScriptController;
 using WebKit::WebScriptSource;
 using WebKit::WebString;
 using WebKit::WebURLRequest;
@@ -32,6 +34,12 @@ namespace {
 const int32 kRouteId = 5;
 const int32 kOpenerId = 7;
 }  // namespace
+
+RenderViewTest::RenderViewTest() {
+}
+
+RenderViewTest::~RenderViewTest() {
+}
 
 void RenderViewTest::ProcessPendingMessages() {
   msg_loop_.PostTask(FROM_HERE, new MessageLoop::QuitTask());
@@ -60,11 +68,7 @@ void RenderViewTest::LoadHTML(const char* html) {
 
 void RenderViewTest::SetUp() {
   sandbox_init_wrapper_.reset(new SandboxInitWrapper());
-#if defined(OS_WIN)
-  command_line_.reset(new CommandLine(std::wstring()));
-#elif defined(OS_POSIX)
-  command_line_.reset(new CommandLine(std::vector<std::string>()));
-#endif
+  command_line_.reset(new CommandLine(CommandLine::ARGUMENTS_ONLY));
   params_.reset(new MainFunctionParams(*command_line_, *sandbox_init_wrapper_,
                                        NULL));
   platform_.reset(new RendererMainPlatformDelegate(*params_));
@@ -74,12 +78,12 @@ void RenderViewTest::SetUp() {
   // hacky, but this is the world we live in...
   webkit_glue::SetJavaScriptFlags(L" --expose-gc");
   WebKit::initialize(&webkitclient_);
-  WebKit::registerExtension(BaseJsV8Extension::Get());
-  WebKit::registerExtension(JsonSchemaJsV8Extension::Get());
-  WebKit::registerExtension(EventBindings::Get());
-  WebKit::registerExtension(ExtensionApiTestV8Extension::Get());
-  WebKit::registerExtension(ExtensionProcessBindings::Get());
-  WebKit::registerExtension(RendererExtensionBindings::Get());
+  WebScriptController::registerExtension(BaseJsV8Extension::Get());
+  WebScriptController::registerExtension(JsonSchemaJsV8Extension::Get());
+  WebScriptController::registerExtension(EventBindings::Get());
+  WebScriptController::registerExtension(ExtensionApiTestV8Extension::Get());
+  WebScriptController::registerExtension(ExtensionProcessBindings::Get());
+  WebScriptController::registerExtension(RendererExtensionBindings::Get());
   EventBindings::SetRenderThread(&render_thread_);
 
   // TODO(aa): Should some of this go to some other inheriting class?
@@ -92,18 +96,20 @@ void RenderViewTest::SetUp() {
       Extension::kPermissionNames + Extension::kNumPermissions);
   ExtensionProcessBindings::SetAPIPermissions("", permissions);
 
-  mock_process_.reset(new MockProcess());
+  mock_process_.reset(new MockRenderProcess);
 
   render_thread_.set_routing_id(kRouteId);
 
   // This needs to pass the mock render thread to the view.
   view_ = RenderView::Create(&render_thread_, 0, kOpenerId,
                              RendererPreferences(), WebPreferences(),
-                             new SharedRenderViewCounter(0), kRouteId);
+                             new SharedRenderViewCounter(0), kRouteId,
+                             kInvalidSessionStorageNamespaceId);
 
   // Attach a pseudo keyboard device to this object.
   mock_keyboard_.reset(new MockKeyboard());
 }
+
 void RenderViewTest::TearDown() {
   // Try very hard to collect garbage before shutting down.
   GetMainFrame()->collectGarbage();

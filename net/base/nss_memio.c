@@ -11,7 +11,6 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #include <prerror.h>
 #include <prinit.h>
@@ -363,7 +362,7 @@ PRFileDesc *memio_CreateIOLayer(int bufsize)
 void memio_SetPeerName(PRFileDesc *fd, const PRNetAddr *peername)
 {
     PRFileDesc *memiofd = PR_GetIdentitiesLayer(fd, memio_identity);
-    struct PRFilePrivate *secret =  memiofd->secret;
+    struct PRFilePrivate *secret = memiofd->secret;
     secret->peername = *peername;
 }
 

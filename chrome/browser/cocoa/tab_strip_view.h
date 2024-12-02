@@ -7,12 +7,31 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "base/scoped_nsobject.h"
+#import "chrome/browser/cocoa/url_drop_target.h"
+
 // A view class that handles rendering the tab strip
 
-@interface TabStripView : NSView {
+@interface TabStripView : NSView<URLDropTarget> {
  @private
   NSTimeInterval lastMouseUp_;
+
+  // Handles being a drag-and-drop target.
+  scoped_nsobject<URLDropTargetHandler> dropHandler_;
+
+  // Weak; the following come from the nib.
+  NSButton* newTabButton_;
+
+  // Whether the drop-indicator arrow is shown, and if it is, the coordinate of
+  // its tip.
+  BOOL dropArrowShown_;
+  NSPoint dropArrowPosition_;
 }
+
+@property(assign, nonatomic) IBOutlet NSButton* newTabButton;
+@property(assign, nonatomic) BOOL dropArrowShown;
+@property(assign, nonatomic) NSPoint dropArrowPosition;
+
 @end
 
 #endif  // CHROME_BROWSER_COCOA_TAB_STRIP_VIEW_H_

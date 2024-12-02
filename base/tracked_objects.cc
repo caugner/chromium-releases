@@ -6,6 +6,7 @@
 
 #include <math.h>
 
+#include "base/format_macros.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 
@@ -16,6 +17,10 @@ namespace tracked_objects {
 // A TLS slot to the TrackRegistry for the current thread.
 // static
 TLSSlot ThreadData::tls_index_(base::LINKER_INITIALIZED);
+
+// A global state variable to prevent repeated initialization during tests.
+// static
+AutoTracking::State AutoTracking::state_ = AutoTracking::kNeverBeenRun;
 
 //------------------------------------------------------------------------------
 // Death data tallies durations when a death takes place.
@@ -61,7 +66,6 @@ void DeathData::Clear() {
 }
 
 //------------------------------------------------------------------------------
-
 BirthOnThread::BirthOnThread(const Location& location)
     : location_(location),
       birth_thread_(ThreadData::current()) { }
@@ -69,7 +73,7 @@ BirthOnThread::BirthOnThread(const Location& location)
 //------------------------------------------------------------------------------
 Births::Births(const Location& location)
     : BirthOnThread(location),
-      birth_count_(0) { }
+      birth_count_(1) { }
 
 //------------------------------------------------------------------------------
 // ThreadData maintains the central data for all births and death.
@@ -177,7 +181,36 @@ void ThreadData::WriteHTML(const std::string& query, std::string* output) {
 
   comparator.Clear();  // Delete tiebreaker_ instances.
 
-  output->append("</pre></body></html>");
+  output->append("</pre>");
+
+  const char* help_string = "The following are the keywords that can be used to"
+    "sort and aggregate the data, or to select data.<br><ul>"
+    "<li><b>count</b> Number of instances seen."
+    "<li><b>duration</b> Duration in ms from construction to descrution."
+    "<li><b>birth</b> Thread on which the task was constructed."
+    "<li><b>death</b> Thread on which the task was run and deleted."
+    "<li><b>file</b> File in which the task was contructed."
+    "<li><b>function</b> Function in which the task was constructed."
+    "<li><b>line</b> Line number of the file in which the task was constructed."
+    "</ul><br>"
+    "As examples:<ul>"
+    "<li><b>about:tasks/file</b> would sort the above data by file, and"
+    " aggregate data on a per-file basis."
+    "<li><b>about:tasks/file=Dns</b> would only list data for tasks constructed"
+    " in a file containing the text |Dns|."
+    "<li><b>about:tasks/birth/death</b> would sort the above list by birth"
+    " thread, and then by death thread, and would aggregate data for each pair"
+    " of lifetime events."
+    "</ul>"
+    " The data can be reset to zero (discarding all births, deaths, etc.) using"
+    " <b>about:tasks/reset</b>. The existing stats will be displayed, but the"
+    " internal stats will be set to zero, and start accumulating afresh. This"
+    " option is very helpful if you only wish to consider tasks created after"
+    " some point in time.<br><br>"
+    "If you wish to monitor Renderer events, be sure to run in --single-process"
+    " mode.";
+  output->append(help_string);
+  output->append("</body></html>");
 }
 
 // static
@@ -221,15 +254,17 @@ void ThreadData::WriteHTMLTotalAndSubtotals(
   }
 }
 
-Births* ThreadData::FindLifetime(const Location& location) {
+Births* ThreadData::TallyABirth(const Location& location) {
   if (!message_loop_)  // In case message loop wasn't yet around...
     message_loop_ = MessageLoop::current();  // Find it now.
 
   BirthMap::iterator it = birth_map_.find(location);
-  if (it != birth_map_.end())
+  if (it != birth_map_.end()) {
+    it->second->RecordBirth();
     return it->second;
-  Births* tracker = new Births(location);
+  }
 
+  Births* tracker = new Births(location);
   // Lock since the map may get relocated now, and other threads sometimes
   // snapshot it (but they lock before copying it).
   AutoLock lock(lock_);
@@ -266,7 +301,7 @@ const std::string ThreadData::ThreadName() const {
 
 // This may be called from another thread.
 void ThreadData::SnapshotBirthMap(BirthMap *output) const {
-  AutoLock lock(*const_cast<Lock*>(&lock_));
+  AutoLock lock(lock_);
   for (BirthMap::const_iterator it = birth_map_.begin();
        it != birth_map_.end(); ++it)
     (*output)[it->first] = it->second;
@@ -274,13 +309,34 @@ void ThreadData::SnapshotBirthMap(BirthMap *output) const {
 
 // This may be called from another thread.
 void ThreadData::SnapshotDeathMap(DeathMap *output) const {
-  AutoLock lock(*const_cast<Lock*>(&lock_));
+  AutoLock lock(lock_);
   for (DeathMap::const_iterator it = death_map_.begin();
        it != death_map_.end(); ++it)
     (*output)[it->first] = it->second;
 }
 
+// static
+void ThreadData::ResetAllThreadData() {
+  ThreadData* my_list = ThreadData::current()->first();
+
+  for (ThreadData* thread_data = my_list;
+       thread_data;
+       thread_data = thread_data->next())
+    thread_data->Reset();
+}
+
+void ThreadData::Reset() {
+  AutoLock lock(lock_);
+  for (DeathMap::iterator it = death_map_.begin();
+       it != death_map_.end(); ++it)
+    it->second.Clear();
+  for (BirthMap::iterator it = birth_map_.begin();
+       it != birth_map_.end(); ++it)
+    it->second->Clear();
+}
+
 #ifdef OS_WIN
+// TODO(jar): This should use condition variables, and be cross platform.
 void ThreadData::RunOnAllThreads(void (*function)()) {
   ThreadData* list = first();  // Get existing list.
 
@@ -296,8 +352,8 @@ void ThreadData::RunOnAllThreads(void (*function)()) {
   HANDLE completion_handle = CreateEvent(NULL, false, false, NULL);
   // Tell all other threads to run.
   for (size_t i = 0; i < message_loops.size(); ++i)
-    message_loops[i]->PostTask(FROM_HERE,
-        new RunTheStatic(function, completion_handle, counter));
+    message_loops[i]->PostTask(
+        FROM_HERE, new RunTheStatic(function, completion_handle, counter));
 
   // Also run Task on our thread.
   RunTheStatic local_task(function, completion_handle, counter);
@@ -394,7 +450,7 @@ void ThreadData::ShutdownDisablingFurtherTracking() {
 
 ThreadData::ThreadSafeDownCounter::ThreadSafeDownCounter(size_t count)
     : remaining_count_(count) {
-  DCHECK(remaining_count_ > 0);
+  DCHECK_GT(remaining_count_, 0u);
 }
 
 bool ThreadData::ThreadSafeDownCounter::LastCaller() {
@@ -466,6 +522,7 @@ void Snapshot::Add(const Snapshot& other) {
 DataCollector::DataCollector() {
   DCHECK(ThreadData::IsActive());
 
+  // Get an unchanging copy of a ThreadData list.
   ThreadData* my_list = ThreadData::current()->first();
 
   count_of_contributing_threads_ = 0;
@@ -477,6 +534,14 @@ DataCollector::DataCollector() {
 
   // Gather data serially.  A different constructor could be used to do in
   // parallel, and then invoke an OnCompletion task.
+  // This hackish approach *can* get some slighly corrupt tallies, as we are
+  // grabbing values without the protection of a lock, but it has the advantage
+  // of working even with threads that don't have message loops.  If a user
+  // sees any strangeness, they can always just run their stats gathering a
+  // second time.
+  // TODO(jar): Provide version that gathers stats safely via PostTask in all
+  // cases where thread_data supplies a message_loop to post to.  Be careful to
+  // handle message_loops that are destroyed!?!
   for (ThreadData* thread_data = my_list;
        thread_data;
        thread_data = thread_data->next()) {
@@ -551,22 +616,23 @@ void Aggregation::Write(std::string* output) const {
   if (locations_.size() == 1) {
     locations_.begin()->first.Write(true, true, output);
   } else {
-    StringAppendF(output, "%d Locations. ", locations_.size());
+    StringAppendF(output, "%" PRIuS " Locations. ", locations_.size());
     if (birth_files_.size() > 1)
-      StringAppendF(output, "%d Files. ", birth_files_.size());
+      StringAppendF(output, "%" PRIuS " Files. ", birth_files_.size());
     else
       StringAppendF(output, "All born in %s. ",
                     birth_files_.begin()->first.c_str());
   }
 
   if (birth_threads_.size() > 1)
-    StringAppendF(output, "%d BirthingThreads. ", birth_threads_.size());
+    StringAppendF(output, "%" PRIuS " BirthingThreads. ",
+                  birth_threads_.size());
   else
     StringAppendF(output, "All born on %s. ",
                   birth_threads_.begin()->first->ThreadName().c_str());
 
   if (death_threads_.size() > 1) {
-    StringAppendF(output, "%d DeathThreads. ", death_threads_.size());
+    StringAppendF(output, "%" PRIuS " DeathThreads. ", death_threads_.size());
   } else {
     if (death_threads_.begin()->first)
       StringAppendF(output, "All deleted on %s. ",
@@ -668,6 +734,8 @@ bool Comparator::operator()(const Snapshot& left,
       break;
 
     case AVERAGE_DURATION:
+      if (!left.count() || !right.count())
+        break;
       if (left.AverageMsDuration() != right.AverageMsDuration())
         return left.AverageMsDuration() > right.AverageMsDuration();
       break;
@@ -805,10 +873,13 @@ void Comparator::SetSubgroupTiebreaker(Selector selector) {
 }
 
 void Comparator::ParseKeyphrase(const std::string& key_phrase) {
-  static std::map<const std::string, Selector> key_map;
+  typedef std::map<const std::string, Selector> KeyMap;
+  static KeyMap key_map;
   static bool initialized = false;
   if (!initialized) {
     initialized = true;
+    // Sorting and aggretation keywords, which specify how to sort the data, or
+    // can specify a required match from the specified field in the record.
     key_map["count"]    = COUNT;
     key_map["duration"] = AVERAGE_DURATION;
     key_map["birth"]    = BIRTH_THREAD;
@@ -816,20 +887,31 @@ void Comparator::ParseKeyphrase(const std::string& key_phrase) {
     key_map["file"]     = BIRTH_FILE;
     key_map["function"] = BIRTH_FUNCTION;
     key_map["line"]     = BIRTH_LINE;
+
+    // Immediate commands that do not involve setting sort order.
+    key_map["reset"]     = RESET_ALL_DATA;
   }
 
   std::string required;
+  // Watch for: "sort_key=value" as we parse.
   size_t equal_offset = key_phrase.find('=', 0);
-  if (key_phrase.npos != equal_offset)
+  if (key_phrase.npos != equal_offset) {
+    // There is a value that must be matched for the data to display.
     required = key_phrase.substr(equal_offset + 1, key_phrase.npos);
+  }
   std::string keyword(key_phrase.substr(0, equal_offset));
   keyword = StringToLowerASCII(keyword);
-  if (key_map.end() == key_map.find(keyword))
-    return;
-  SetTiebreaker(key_map[keyword], required);
+  KeyMap::iterator it = key_map.find(keyword);
+  if (key_map.end() == it)
+    return;  // Unknown keyword.
+  if (it->second == RESET_ALL_DATA)
+    ThreadData::ResetAllThreadData();
+  else
+    SetTiebreaker(key_map[keyword], required);
 }
 
 bool Comparator::ParseQuery(const std::string& query) {
+  // Parse each keyphrase between consecutive slashes.
   for (size_t i = 0; i < query.size();) {
     size_t slash_offset = query.find('/', i);
     ParseKeyphrase(query.substr(i, slash_offset - i));

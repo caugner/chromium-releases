@@ -13,7 +13,6 @@
 #include "app/win/window_impl.h"
 #include "base/message_loop.h"
 #include "base/scoped_comptr_win.h"
-#include "base/system_monitor.h"
 #include "views/focus/focus_manager.h"
 #include "views/layout_manager.h"
 #include "views/widget/widget.h"
@@ -74,11 +73,11 @@ class WidgetWin : public app::WindowImpl,
   WidgetWin();
   virtual ~WidgetWin();
 
-  // Returns the RootView associated with the specified HWND (if any).
-  static RootView* FindRootView(HWND hwnd);
-
   // Returns the Widget associated with the specified HWND (if any).
   static WidgetWin* GetWidget(HWND hwnd);
+
+  // Returns the root Widget associated with the specified HWND (if any).
+  static WidgetWin* GetRootWidget(HWND hwnd);
 
   void set_delete_on_destroy(bool delete_on_destroy) {
     delete_on_destroy_ = delete_on_destroy;
@@ -123,6 +122,7 @@ class WidgetWin : public app::WindowImpl,
     MSG_WM_COMMAND(OnCommand)
     MSG_WM_CREATE(OnCreate)
     MSG_WM_DESTROY(OnDestroy)
+    MSG_WM_DISPLAYCHANGE(OnDisplayChange)
     MSG_WM_ERASEBKGND(OnEraseBkgnd)
     MSG_WM_ENDSESSION(OnEndSession)
     MSG_WM_ENTERSIZEMOVE(OnEnterSizeMove)
@@ -134,6 +134,7 @@ class WidgetWin : public app::WindowImpl,
     MSG_WM_INITMENUPOPUP(OnInitMenuPopup)
     MSG_WM_KEYDOWN(OnKeyDown)
     MSG_WM_KEYUP(OnKeyUp)
+    MSG_WM_KILLFOCUS(OnKillFocus)
     MSG_WM_SYSKEYDOWN(OnKeyDown)
     MSG_WM_SYSKEYUP(OnKeyUp)
     MSG_WM_LBUTTONDBLCLK(OnLButtonDblClk)
@@ -180,10 +181,13 @@ class WidgetWin : public app::WindowImpl,
 
   // Overridden from Widget:
   virtual void Init(gfx::NativeView parent, const gfx::Rect& bounds);
+  virtual WidgetDelegate* GetWidgetDelegate();
+  virtual void SetWidgetDelegate(WidgetDelegate* delegate);
   virtual void SetContentsView(View* view);
   virtual void GetBounds(gfx::Rect* out, bool including_frame) const;
   virtual void SetBounds(const gfx::Rect& bounds);
-  virtual void SetShape(const gfx::Path& shape);
+  virtual void MoveAbove(Widget* other);
+  virtual void SetShape(gfx::NativeRegion region);
   virtual void Close();
   virtual void CloseNow();
   virtual void Show();
@@ -191,20 +195,26 @@ class WidgetWin : public app::WindowImpl,
   virtual gfx::NativeView GetNativeView() const;
   virtual void PaintNow(const gfx::Rect& update_rect);
   virtual void SetOpacity(unsigned char opacity);
+  virtual void SetAlwaysOnTop(bool on_top);
   virtual RootView* GetRootView();
   virtual Widget* GetRootWidget() const;
   virtual bool IsVisible() const;
   virtual bool IsActive() const;
+  virtual TooltipManager* GetTooltipManager();
   virtual void GenerateMousePressedForView(View* view,
                                            const gfx::Point& point);
-  virtual TooltipManager* GetTooltipManager();
-  virtual ThemeProvider* GetThemeProvider() const;
+  virtual bool GetAccelerator(int cmd_id, menus::Accelerator* accelerator);
   virtual Window* GetWindow();
   virtual const Window* GetWindow() const;
+  virtual void SetNativeWindowProperty(const std::wstring& name,
+                                       void* value);
+  virtual void* GetNativeWindowProperty(const std::wstring& name);
+  virtual ThemeProvider* GetThemeProvider() const;
+  virtual ThemeProvider* GetDefaultThemeProvider() const;
   virtual FocusManager* GetFocusManager();
   virtual void ViewHierarchyChanged(bool is_add, View *parent,
                                     View *child);
-  virtual bool GetAccelerator(int cmd_id, Accelerator* accelerator);
+  virtual bool ContainsNativeView(gfx::NativeView native_view);
 
   // Overridden from MessageLoop::Observer:
   void WillProcessMessage(const MSG& msg);
@@ -318,6 +328,7 @@ class WidgetWin : public app::WindowImpl,
   // WARNING: If you override this be sure and invoke super, otherwise we'll
   // leak a few things.
   virtual void OnDestroy();
+  virtual void OnDisplayChange(UINT bits_per_pixel, CSize screen_size);
   virtual LRESULT OnDwmCompositionChanged(UINT msg,
                                           WPARAM w_param,
                                           LPARAM l_param);
@@ -333,6 +344,7 @@ class WidgetWin : public app::WindowImpl,
   virtual void OnInitMenuPopup(HMENU menu, UINT position, BOOL is_system_menu);
   virtual void OnKeyDown(TCHAR c, UINT rep_cnt, UINT flags);
   virtual void OnKeyUp(TCHAR c, UINT rep_cnt, UINT flags);
+  virtual void OnKillFocus(HWND focused_window);
   virtual void OnLButtonDblClk(UINT flags, const CPoint& point);
   virtual void OnLButtonDown(UINT flags, const CPoint& point);
   virtual void OnLButtonUp(UINT flags, const CPoint& point);
@@ -387,6 +399,9 @@ class WidgetWin : public app::WindowImpl,
   // behavior.
   virtual void OnFinalMessage(HWND window);
 
+  // Returns the size that the RootView should be set to in LayoutRootView().
+  virtual gfx::Size GetRootViewSize() const;
+
   // Start tracking all mouse events so that this window gets sent mouse leave
   // messages too.
   void TrackMouseEvents(DWORD mouse_tracking_flags);
@@ -403,8 +418,9 @@ class WidgetWin : public app::WindowImpl,
   void ProcessMouseMoved(const CPoint& point, UINT flags, bool is_nonclient);
   void ProcessMouseExited();
 
-  // Handles re-laying out content in response to a window size change.
-  virtual void ChangeSize(UINT size_param, const CSize& size);
+  // Lays out the root view to fit the appropriate area within the widget.
+  // Called when the window size or non client metrics change.
+  void LayoutRootView();
 
   // Returns whether capture should be released on mouse release. The default
   // is true.
@@ -451,7 +467,7 @@ class WidgetWin : public app::WindowImpl,
 
   // Resize the bitmap used to contain the contents of the layered window. This
   // recreates the entire bitmap.
-  void SizeContents(const CRect& window_rect);
+  void SizeContents(const gfx::Size& window_size);
 
   // Paint into a DIB and then update the layered window with its contents.
   void PaintLayeredWindow();
@@ -532,6 +548,10 @@ class WidgetWin : public app::WindowImpl,
   ScopedComPtr<IAccessible> accessibility_root_;
 
   scoped_ptr<DefaultThemeProvider> default_theme_provider_;
+
+  // Non owned pointer to optional delegate.  May be NULL if no delegate is
+  // being used.
+  WidgetDelegate* delegate_;
 };
 
 }  // namespace views

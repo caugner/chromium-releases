@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,9 @@
 
 #include "base/i18n/icu_string_conversions.h"
 #include "base/logging.h"
-#include "base/string_util.h"
+#include "base/string_piece.h"
+#include "base/utf_string_conversions.h"
+#include "base/utf_offset_string_conversions.h"
 
 namespace {
 
@@ -97,7 +99,7 @@ const char kUrlUnescape[128] = {
 //   0  1  2  3  4  5  6  7  8  9  :  ;  <  =  >  ?
      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0,
 //   @  A  B  C  D  E  F  G  H  I  J  K  L  M  N  O
-     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+     0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 //   P  Q  R  S  T  U  V  W  X  Y  Z  [  \  ]  ^  _
      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 //   `  a  b  c  d  e  f  g  h  i  j  k  l  m  n  o
@@ -106,8 +108,16 @@ const char kUrlUnescape[128] = {
      1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0
 };
 
-std::string UnescapeURLImpl(const std::string& escaped_text,
-                            UnescapeRule::Type rules) {
+template<typename STR>
+STR UnescapeURLImpl(const STR& escaped_text,
+                    UnescapeRule::Type rules,
+                    size_t* offset_for_adjustment) {
+  size_t offset_temp = string16::npos;
+  if (!offset_for_adjustment)
+    offset_for_adjustment = &offset_temp;
+  else if (*offset_for_adjustment >= escaped_text.length())
+    *offset_for_adjustment = string16::npos;
+
   // Do not unescape anything, return the |escaped_text| text.
   if (rules == UnescapeRule::NONE)
     return escaped_text;
@@ -115,13 +125,22 @@ std::string UnescapeURLImpl(const std::string& escaped_text,
   // The output of the unescaping is always smaller than the input, so we can
   // reserve the input size to make sure we have enough buffer and don't have
   // to allocate in the loop below.
-  std::string result;
+  STR result;
   result.reserve(escaped_text.length());
 
   for (size_t i = 0, max = escaped_text.size(); i < max; ++i) {
-    if (escaped_text[i] == '%' && i + 2 < max) {
-      const std::string::value_type most_sig_digit(escaped_text[i + 1]);
-      const std::string::value_type least_sig_digit(escaped_text[i + 2]);
+    if (static_cast<unsigned char>(escaped_text[i]) >= 128) {
+      // Non ASCII character, append as is.
+      result.push_back(escaped_text[i]);
+      continue;
+    }
+
+    char current_char = static_cast<char>(escaped_text[i]);
+    if (current_char == '%' && i + 2 < max) {
+      const typename STR::value_type most_sig_digit(
+          static_cast<typename STR::value_type>(escaped_text[i + 1]));
+      const typename STR::value_type least_sig_digit(
+          static_cast<typename STR::value_type>(escaped_text[i + 2]));
       if (IsHex(most_sig_digit) && IsHex(least_sig_digit)) {
         unsigned char value = HexToInt(most_sig_digit) * 16 +
             HexToInt(least_sig_digit);
@@ -136,8 +155,17 @@ std::string UnescapeURLImpl(const std::string& escaped_text,
              // Additionally allow control characters if requested.
              (value < ' ' && (rules & UnescapeRule::CONTROL_CHARS)))) {
           // Use the unescaped version of the character.
+          size_t length_before_append = result.length();
           result.push_back(value);
           i += 2;
+
+          // Adjust offset to match length change.
+          if (*offset_for_adjustment != std::string::npos) {
+            if (*offset_for_adjustment > (length_before_append + 2))
+              *offset_for_adjustment -= 2;
+            else if (*offset_for_adjustment > length_before_append)
+              *offset_for_adjustment = std::string::npos;
+          }
         } else {
           // Keep escaped. Append a percent and we'll get the following two
           // digits on the next loops through.
@@ -168,14 +196,15 @@ static const Charmap kQueryCharmap(
   0xffffffffL, 0xfc00987dL, 0x78000001L, 0xb8000001L,
   0xffffffffL, 0xffffffffL, 0xffffffffL, 0xffffffffL);
 
-std::string EscapeQueryParamValue(const std::string& text) {
-  return Escape(text, kQueryCharmap, true);
+std::string EscapeQueryParamValue(const std::string& text, bool use_plus) {
+  return Escape(text, kQueryCharmap, use_plus);
 }
 
 // Convert the string to a sequence of bytes and then % escape anything
 // except alphanumerics and !'()*-._~
-std::wstring EscapeQueryParamValueUTF8(const std::wstring& text) {
-  return UTF8ToWide(Escape(WideToUTF8(text), kQueryCharmap, true));
+std::wstring EscapeQueryParamValueUTF8(const std::wstring& text,
+                                       bool use_plus) {
+  return UTF8ToWide(Escape(WideToUTF8(text), kQueryCharmap, use_plus));
 }
 
 // non-printable, non-7bit, and (including space)  "#%:<>?[\]^`{|}
@@ -216,41 +245,54 @@ std::string EscapeExternalHandlerValue(const std::string& text) {
   return Escape(text, kExternalHandlerCharmap, false);
 }
 
-bool EscapeQueryParamValue(const std::wstring& text, const char* codepage,
-                           std::wstring* escaped) {
+bool EscapeQueryParamValue(const string16& text, const char* codepage,
+                           bool use_plus, string16* escaped) {
   // TODO(brettw) bug 1201094: this function should be removed, this "SKIP"
   // behavior is wrong when the character can't be encoded properly.
   std::string encoded;
-  if (!base::WideToCodepage(text, codepage,
-                            base::OnStringConversionError::SKIP, &encoded))
+  if (!base::UTF16ToCodepage(text, codepage,
+                             base::OnStringConversionError::SKIP, &encoded))
     return false;
 
-  // It's safe to use UTF8ToWide here because Escape should only return
-  // alphanumerics and !'()*-._~
-  escaped->assign(UTF8ToWide(Escape(encoded, kQueryCharmap, true)));
+  escaped->assign(UTF8ToUTF16(Escape(encoded, kQueryCharmap, use_plus)));
   return true;
 }
 
-std::wstring UnescapeAndDecodeURLComponent(const std::string& text,
-                                           const char* codepage,
-                                           UnescapeRule::Type rules) {
+string16 UnescapeAndDecodeUTF8URLComponent(const std::string& text,
+                                           UnescapeRule::Type rules,
+                                           size_t* offset_for_adjustment) {
   std::wstring result;
-  if (base::CodepageToWide(UnescapeURLImpl(text, rules), codepage,
-                           base::OnStringConversionError::FAIL, &result))
-    return result;          // Character set looks like it's valid.
-  return UTF8ToWide(text);  // Return the escaped version when it's not.
+  size_t original_offset = offset_for_adjustment ? *offset_for_adjustment : 0;
+  std::string unescaped_url(
+      UnescapeURLImpl(text, rules, offset_for_adjustment));
+  if (UTF8ToWideAndAdjustOffset(unescaped_url.data(), unescaped_url.length(),
+                                &result, offset_for_adjustment))
+    return WideToUTF16Hack(result);      // Character set looks like it's valid.
+
+  // Not valid.  Return the escaped version.  Undo our changes to
+  // |offset_for_adjustment| since we haven't changed the string after all.
+  if (offset_for_adjustment)
+    *offset_for_adjustment = original_offset;
+  return WideToUTF16Hack(UTF8ToWideAndAdjustOffset(text,
+                                                   offset_for_adjustment));
 }
 
 std::string UnescapeURLComponent(const std::string& escaped_text,
                                  UnescapeRule::Type rules) {
-  return UnescapeURLImpl(escaped_text, rules);
+  return UnescapeURLImpl(escaped_text, rules, NULL);
 }
+
+string16 UnescapeURLComponent(const string16& escaped_text,
+                              UnescapeRule::Type rules) {
+  return UnescapeURLImpl(escaped_text, rules, NULL);
+}
+
 
 template <class str>
 void AppendEscapedCharForHTMLImpl(typename str::value_type c, str* output) {
   static const struct {
     char key;
-    const char *replacement;
+    const char* replacement;
   } kCharsToEscape[] = {
     { '<', "&lt;" },
     { '>', "&gt;" },
@@ -275,7 +317,7 @@ void AppendEscapedCharForHTML(char c, std::string* output) {
   AppendEscapedCharForHTMLImpl(c, output);
 }
 
-void AppendEscapedCharForHTML(wchar_t c, std::wstring* output) {
+void AppendEscapedCharForHTML(wchar_t c, string16* output) {
   AppendEscapedCharForHTMLImpl(c, output);
 }
 
@@ -294,6 +336,41 @@ std::string EscapeForHTML(const std::string& input) {
   return EscapeForHTMLImpl(input);
 }
 
-std::wstring EscapeForHTML(const std::wstring& input) {
+string16 EscapeForHTML(const string16& input) {
   return EscapeForHTMLImpl(input);
+}
+
+string16 UnescapeForHTML(const string16& input) {
+  static const struct {
+    const wchar_t* ampersand_code;
+    const char replacement;
+  } kEscapeToChars[] = {
+    { L"&lt;", '<' },
+    { L"&gt;", '>' },
+    { L"&amp;", '&' },
+    { L"&quot;", '"' },
+    { L"&#39;", '\''},
+  };
+
+  if (input.find(WideToUTF16(L"&")) == std::string::npos)
+    return input;
+
+  string16 ampersand_chars[ARRAYSIZE_UNSAFE(kEscapeToChars)];
+  string16 text(input);
+  for (string16::iterator iter = text.begin(); iter != text.end(); ++iter) {
+    if (*iter == '&') {
+      // Potential ampersand encode char.
+      size_t index = iter - text.begin();
+      for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kEscapeToChars); i++) {
+        if (ampersand_chars[i].empty())
+          ampersand_chars[i] = WideToUTF16(kEscapeToChars[i].ampersand_code);
+        if (text.find(ampersand_chars[i], index) == index) {
+          text.replace(iter, iter + ampersand_chars[i].length(),
+                       1, kEscapeToChars[i].replacement);
+          break;
+        }
+      }
+    }
+  }
+  return text;
 }

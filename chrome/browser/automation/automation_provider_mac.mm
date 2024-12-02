@@ -5,9 +5,15 @@
 #include "chrome/browser/automation/automation_provider.h"
 
 #import <Cocoa/Cocoa.h>
-#include "base/gfx/point.h"
-#include "base/gfx/rect.h"
+
+#include "app/l10n_util.h"
+#include "app/l10n_util_mac.h"
+#include "base/sys_string_conversions.h"
+#include "chrome/browser/cocoa/tab_window_controller.h"
 #include "chrome/test/automation/automation_messages.h"
+#include "gfx/point.h"
+#include "gfx/rect.h"
+#include "grit/generated_resources.h"
 
 void AutomationProvider::SetWindowBounds(int handle, const gfx::Rect& bounds,
                                          bool* success) {
@@ -16,10 +22,11 @@ void AutomationProvider::SetWindowBounds(int handle, const gfx::Rect& bounds,
   if (window) {
     NSRect new_bounds = NSRectFromCGRect(bounds.ToCGRect());
 
-    // This is likely incorrect for a multiple-monitor setup; OK because this is
-    // used only for testing purposes.
-    new_bounds.origin.y = [[window screen] frame].size.height -
-        new_bounds.origin.y - new_bounds.size.height;
+    if ([[NSScreen screens] count] > 0) {
+      new_bounds.origin.y =
+          [[[NSScreen screens] objectAtIndex:0] frame].size.height -
+          new_bounds.origin.y - new_bounds.size.height;
+    }
 
     [window setFrame:new_bounds display:NO];
     *success = true;
@@ -59,23 +66,20 @@ void AutomationProvider::IsWindowMaximized(int handle, bool* is_maximized,
   NOTIMPLEMENTED();
 }
 
-void AutomationProvider::GetFocusedViewID(int handle, int* view_id) {
-  NOTIMPLEMENTED();
-}
-
 void AutomationProvider::PrintAsync(int tab_handle) {
   NOTIMPLEMENTED();
 }
 
-void AutomationProvider::SetInitialFocus(const IPC::Message& message,
-                                         int handle, bool reverse) {
+void AutomationProvider::OnMessageFromExternalHost(int handle,
+                                                   const std::string& message,
+                                                   const std::string& origin,
+                                                   const std::string& target) {
   NOTIMPLEMENTED();
 }
 
-void AutomationProvider::GetBookmarkBarVisibility(int handle, bool* visible,
-                                                  bool* animating) {
-  *visible = false;
-  *animating = false;
+void AutomationProvider::SetInitialFocus(const IPC::Message& message,
+                                         int handle, bool reverse,
+                                         bool restore_focus_to_view) {
   NOTIMPLEMENTED();
 }
 
@@ -98,4 +102,24 @@ void AutomationProvider::GetWindowBounds(int handle, gfx::Rect* bounds,
                                          bool* result) {
   *result = false;
   NOTIMPLEMENTED();
+}
+
+void AutomationProvider::GetWindowTitle(int handle, string16* text) {
+  gfx::NativeWindow window = window_tracker_->GetResource(handle);
+  NSString* title = nil;
+  if ([[window delegate] isKindOfClass:[TabWindowController class]]) {
+    TabWindowController* delegate =
+        reinterpret_cast<TabWindowController*>([window delegate]);
+    title = [delegate selectedTabTitle];
+  } else {
+    title = [window title];
+  }
+  // If we don't yet have a title, use "Untitled".
+  if (![title length]) {
+    text->assign(WideToUTF16(l10n_util::GetString(
+        IDS_BROWSER_WINDOW_MAC_TAB_UNTITLED)));
+    return;
+  }
+
+  text->assign(base::SysNSStringToUTF16(title));
 }

@@ -168,6 +168,9 @@ SkBitmap NSImageToSkBitmap(NSImage* image, NSSize size, bool is_opaque) {
 }
 
 NSImage* SkBitmapToNSImage(const SkBitmap& skiaBitmap) {
+  if (skiaBitmap.isNull())
+    return nil;
+
   // First convert SkBitmap to CGImageRef.
   CGImageRef cgimage = SkCreateCGImageRef(skiaBitmap);
 
@@ -177,7 +180,13 @@ NSImage* SkBitmapToNSImage(const SkBitmap& skiaBitmap) {
   CFRelease(cgimage);
   NSImage* image = [[[NSImage alloc] init] autorelease];
   [image addRepresentation:bitmap];
+  [image setSize:NSMakeSize(skiaBitmap.width(), skiaBitmap.height())];
   return image;
+}
+
+SkBitmap AppplicationIconAtSize(int size) {
+  NSImage* image = [NSImage imageNamed:@"NSApplicationIcon"];
+  return NSImageToSkBitmap(image, NSMakeSize(size, size), /* is_opaque=*/true);
 }
 
 }  // namespace gfx

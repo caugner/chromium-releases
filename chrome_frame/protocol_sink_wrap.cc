@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <htiframe.h>
+#include <mshtml.h>
 
 #include "chrome_frame/protocol_sink_wrap.h"
 
@@ -21,7 +22,6 @@
 #define BINDSTATUS_SERVER_MIMETYPEAVAILABLE 54
 #endif
 
-static const wchar_t* kChromeMimeType = L"application/chromepage";
 static const char kTextHtmlMimeType[] = "text/html";
 const wchar_t kUrlMonDllName[] = L"urlmon.dll";
 
@@ -64,15 +64,19 @@ CComAutoCriticalSection ProtocolSinkWrap::sink_map_lock_;
 ProtocolSinkWrap::ProtocolSinkWrap()
     : protocol_(NULL), renderer_type_(UNDETERMINED),
       buffer_size_(0), buffer_pos_(0), is_saved_result_(false),
-      result_code_(0), result_error_(0), report_data_recursiveness_(0) {
+      result_code_(0), result_error_(0), report_data_recursiveness_(0),
+      determining_renderer_type_(false) {
   memset(buffer_, 0, arraysize(buffer_));
 }
 
 ProtocolSinkWrap::~ProtocolSinkWrap() {
-  CComCritSecLock<CComAutoCriticalSection> lock(sink_map_lock_);
-  DCHECK(sink_map_.end() != sink_map_.find(protocol_));
-  sink_map_.erase(protocol_);
-  protocol_ = NULL;
+  // This object may be destroyed before Initialize is called.
+  if (protocol_ != NULL) {
+    CComCritSecLock<CComAutoCriticalSection> lock(sink_map_lock_);
+    DCHECK(sink_map_.end() != sink_map_.find(protocol_));
+    sink_map_.erase(protocol_);
+    protocol_ = NULL;
+  }
   DLOG(INFO) << "ProtocolSinkWrap: active sinks: " << sink_map_.size();
 }
 
@@ -244,6 +248,9 @@ STDMETHODIMP ProtocolSinkWrap::ReportProgress(ULONG status_code,
     LPCWSTR status_text) {
   DLOG(INFO) << "ProtocolSinkWrap::ReportProgress: Code:" << status_code <<
       " Text: " << (status_text ? status_text : L"");
+  if (!delegate_) {
+    return E_FAIL;
+  }
   if ((BINDSTATUS_MIMETYPEAVAILABLE == status_code) ||
       (BINDSTATUS_VERIFIEDMIMETYPEAVAILABLE == status_code)) {
     // If we have a MIMETYPE and that MIMETYPE is not "text/html". we don't
@@ -259,9 +266,10 @@ STDMETHODIMP ProtocolSinkWrap::ReportProgress(ULONG status_code,
     }
   }
 
-  HRESULT hr = E_FAIL;
-  if (delegate_)
+  HRESULT hr = S_OK;
+  if (delegate_ && renderer_type_ != CHROME) {
     hr = delegate_->ReportProgress(status_code, status_text);
+  }
   return hr;
 }
 
@@ -300,33 +308,7 @@ STDMETHODIMP ProtocolSinkWrap::ReportData(DWORD flags, ULONG progress,
 
   HRESULT hr = S_OK;
   if (is_undetermined()) {
-    HRESULT hr_read = S_OK;
-    while (hr_read == S_OK) {
-      ULONG size_read = 0;
-      hr_read = protocol_->Read(buffer_ + buffer_size_,
-          kMaxContentSniffLength - buffer_size_, &size_read);
-      buffer_size_ += size_read;
-
-      // Attempt to determine the renderer type if we have received
-      // sufficient data. Do not attempt this when we are called recursively.
-      if (report_data_recursiveness_ < 2 && (S_FALSE == hr_read) ||
-         (buffer_size_ >= kMaxContentSniffLength)) {
-        DetermineRendererType();
-        if (renderer_type() == CHROME) {
-          // Workaround for IE 8 and "nosniff". See:
-          // http://blogs.msdn.com/ie/archive/2008/09/02/ie8-security-part-vi-beta-2-update.aspx
-          delegate_->ReportProgress(
-              BINDSTATUS_SERVER_MIMETYPEAVAILABLE, kChromeMimeType);
-          // For IE < 8.
-          delegate_->ReportProgress(
-              BINDSTATUS_VERIFIEDMIMETYPEAVAILABLE, kChromeMimeType);
-
-          delegate_->ReportData(
-              BSCF_LASTDATANOTIFICATION | BSCF_DATAFULLYAVAILABLE, 0, 0);
-        }
-        break;
-      }
-    }
+    CheckAndReportChromeMimeTypeForRequest();
   }
 
   // we call original only if the renderer type is other
@@ -578,6 +560,55 @@ void ProtocolSinkWrap::DetermineRendererType() {
   }
 }
 
+HRESULT ProtocolSinkWrap::CheckAndReportChromeMimeTypeForRequest() {
+  if (!is_undetermined())
+    return S_OK;
+
+  // This function could get invoked recursively in the context of
+  // IInternetProtocol::Read. Check for the same and bail.
+  if (determining_renderer_type_)
+    return S_OK;
+
+  determining_renderer_type_ = true;
+
+  HRESULT hr_read = S_OK;
+  while (hr_read == S_OK) {
+    ULONG size_read = 0;
+    hr_read = protocol_->Read(buffer_ + buffer_size_,
+        kMaxContentSniffLength - buffer_size_, &size_read);
+    buffer_size_ += size_read;
+
+    // Attempt to determine the renderer type if we have received
+    // sufficient data. Do not attempt this when we are called recursively.
+    if (report_data_recursiveness_ < 2 && (S_FALSE == hr_read) ||
+       (buffer_size_ >= kMaxContentSniffLength)) {
+      DetermineRendererType();
+      if (renderer_type() == CHROME) {
+        // Workaround for IE 8 and "nosniff". See:
+        // http://blogs.msdn.com/ie/archive/2008/09/02/ie8-security-part-vi-beta-2-update.aspx
+        delegate_->ReportProgress(
+            BINDSTATUS_SERVER_MIMETYPEAVAILABLE, kChromeMimeType);
+        // For IE < 8.
+        delegate_->ReportProgress(
+            BINDSTATUS_MIMETYPEAVAILABLE, kChromeMimeType);
+
+        delegate_->ReportProgress(
+            BINDSTATUS_VERIFIEDMIMETYPEAVAILABLE, kChromeMimeType);
+
+        delegate_->ReportData(
+            BSCF_FIRSTDATANOTIFICATION, 0, 0);
+
+        delegate_->ReportData(
+            BSCF_LASTDATANOTIFICATION | BSCF_DATAFULLYAVAILABLE, 0, 0);
+      }
+      break;
+    }
+  }
+
+  determining_renderer_type_ = false;
+  return hr_read;
+}
+
 HRESULT ProtocolSinkWrap::OnReadImpl(void* buffer, ULONG size, ULONG* size_read,
     InternetProtocol_Read_Fn orig_read) {
   // We want to switch the renderer to chrome, we cannot return any
@@ -609,31 +640,27 @@ scoped_refptr<ProtocolSinkWrap> ProtocolSinkWrap::InstanceFromProtocol(
   return instance;
 }
 
-HRESULT ProtocolSinkWrap::WebBrowserFromProtocolSink(
-    IInternetProtocolSink* sink, IWebBrowser2** web_browser) {
-  // TODO(tommi): GUID_NULL doesn't work when loading from history.
-  //  asking for IID_IHttpNegotiate as the service id works, but
-  //  getting the IWebBrowser2 interface still doesn't work.
-  ScopedComPtr<IHttpNegotiate> http_negotiate;
-  HRESULT hr = DoQueryService(GUID_NULL, sink, http_negotiate.Receive());
-  if (http_negotiate)
-    hr = DoQueryService(IID_ITargetFrame2, http_negotiate, web_browser);
-
-  return hr;
-}
-
 ScopedComPtr<IInternetProtocolSink> ProtocolSinkWrap::MaybeWrapSink(
     IInternetProtocol* protocol, IInternetProtocolSink* prot_sink,
     const wchar_t* url) {
   ScopedComPtr<IInternetProtocolSink> sink_to_use(prot_sink);
-  ScopedComPtr<IWebBrowser2> web_browser;
-  WebBrowserFromProtocolSink(prot_sink, web_browser.Receive());
-  if (web_browser) {
+
+  // FYI: GUID_NULL doesn't work when the URL is being loaded from history.
+  // asking for IID_IHttpNegotiate as the service id works, but
+  // getting the IWebBrowser2 interface still doesn't work.
+  ScopedComPtr<IHttpNegotiate> http_negotiate;
+  HRESULT hr = DoQueryService(GUID_NULL, prot_sink, http_negotiate.Receive());
+
+  if (http_negotiate && !IsSubFrameRequest(http_negotiate)) {
     CComObject<ProtocolSinkWrap>* wrap = NULL;
     CComObject<ProtocolSinkWrap>::CreateInstance(&wrap);
     DCHECK(wrap);
-    if (wrap->Initialize(protocol, prot_sink, url)) {
-      sink_to_use = wrap;
+    if (wrap) {
+      wrap->AddRef();
+      if (wrap->Initialize(protocol, prot_sink, url)) {
+        sink_to_use = wrap;
+      }
+      wrap->Release();
     }
   }
 

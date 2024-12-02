@@ -4,7 +4,9 @@
 
 #include "chrome/common/native_web_keyboard_event.h"
 
-#include "webkit/api/public/gtk/WebInputEventFactory.h"
+#include <gdk/gdk.h>
+
+#include "third_party/WebKit/WebKit/chromium/public/gtk/WebInputEventFactory.h"
 
 using WebKit::WebInputEventFactory;
 
@@ -30,11 +32,13 @@ void FreeEvent(GdkEventKey* event) {
 
 
 NativeWebKeyboardEvent::NativeWebKeyboardEvent()
-    : os_event(NULL) {
+    : os_event(NULL),
+      skip_in_browser(false) {
 }
 
 NativeWebKeyboardEvent::NativeWebKeyboardEvent(const GdkEventKey* native_event)
-    : WebKeyboardEvent(WebInputEventFactory::keyboardEvent(native_event)) {
+    : WebKeyboardEvent(WebInputEventFactory::keyboardEvent(native_event)),
+      skip_in_browser(false) {
   CopyEventTo(native_event, &os_event);
 }
 
@@ -44,11 +48,14 @@ NativeWebKeyboardEvent::NativeWebKeyboardEvent(wchar_t character,
     : WebKeyboardEvent(WebInputEventFactory::keyboardEvent(character,
                                                            state,
                                                            time_stamp_seconds)),
-      os_event(NULL) {
+      os_event(NULL),
+      skip_in_browser(false) {
 }
 
 NativeWebKeyboardEvent::NativeWebKeyboardEvent(
-    const NativeWebKeyboardEvent& other) : WebKeyboardEvent(other) {
+    const NativeWebKeyboardEvent& other)
+    : WebKeyboardEvent(other),
+      skip_in_browser(other.skip_in_browser) {
   CopyEventTo(other.os_event, &os_event);
 }
 
@@ -58,6 +65,9 @@ NativeWebKeyboardEvent& NativeWebKeyboardEvent::operator=(
 
   FreeEvent(os_event);
   CopyEventTo(other.os_event, &os_event);
+
+  skip_in_browser = other.skip_in_browser;
+
   return *this;
 }
 

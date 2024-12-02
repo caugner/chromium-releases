@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,9 +14,9 @@
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_database.h"
 #include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "chrome/common/sqlite_utils.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
@@ -36,6 +36,7 @@ HistoryURLProviderParams::HistoryURLProviderParams(
       input(input),
       trim_http(trim_http),
       cancel(false),
+      failed(false),
       languages(languages) {
 }
 
@@ -67,9 +68,8 @@ void HistoryURLProvider::DeleteMatch(const AutocompleteMatch& match) {
   DCHECK(done_);
 
   // Delete the match from the history DB.
-  HistoryService* history_service =
-      profile_ ? profile_->GetHistoryService(Profile::EXPLICIT_ACCESS) :
-      history_service_;
+  HistoryService* const history_service =
+      profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
   GURL selected_url(match.destination_url);
   if (!history_service || !selected_url.is_valid()) {
     NOTREACHED() << "Can't delete requested URL";
@@ -103,8 +103,10 @@ void HistoryURLProvider::ExecuteWithDB(history::HistoryBackend* backend,
                                        history::URLDatabase* db,
                                        HistoryURLProviderParams* params) {
   // We may get called with a NULL database if it couldn't be properly
-  // initialized.  In this case we just say the query is complete.
-  if (db && !params->cancel) {
+  // initialized.
+  if (!db) {
+    params->failed = true;
+  } else if (!params->cancel) {
     TimeTicks beginning_time = TimeTicks::Now();
 
     DoAutocomplete(backend, db, params);
@@ -124,10 +126,21 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
                                         history::URLDatabase* db,
                                         HistoryURLProviderParams* params) {
   // Create a What You Typed match, which we'll need below.
+  //
+  // We display this to the user when there's a reasonable chance they actually
+  // care:
+  // * Their input can be opened as a URL, and
+  // * They hit ctrl-enter, or we parsed the input as a URL, or it starts with
+  //   an explicit "http:" or "https:".
+  // Otherwise, this is just low-quality noise.  In the cases where we've parsed
+  // as UNKNOWN, we'll still show an accidental search infobar if need be.
   bool have_what_you_typed_match =
       params->input.canonicalized_url().is_valid() &&
-      (params->input.type() != AutocompleteInput::UNKNOWN) &&
-      (params->input.type() != AutocompleteInput::QUERY);
+      (params->input.type() != AutocompleteInput::QUERY) &&
+      ((params->input.type() != AutocompleteInput::UNKNOWN) ||
+          !params->trim_http ||
+          url_util::FindAndCompareScheme(WideToUTF8(params->input.text()),
+                                         chrome::kHttpsScheme, NULL));
   AutocompleteMatch what_you_typed_match(SuggestExactInput(params->input,
                                                            params->trim_http));
 
@@ -138,7 +151,7 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
   for (Prefixes::const_iterator i(prefixes_.begin()); i != prefixes_.end();
        ++i) {
     if (params->cancel)
-      return;  // canceled in the middle of a query, give up
+      return;  // Canceled in the middle of a query, give up.
     // We only need max_matches results in the end, but before we get there we
     // need to promote lower-quality matches that are prefixes of
     // higher-quality matches, and remove lower-quality redirects.  So we ask
@@ -181,7 +194,7 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
       history_matches.empty() ||
       !PromoteMatchForInlineAutocomplete(params, history_matches.front())) {
     // Failed to promote any URLs for inline autocompletion.  Use the What You
-    // Typed match, if we have it and the input looked like a URL.
+    // Typed match, if we have it.
     first_match = 0;
     if (have_what_you_typed_match)
       params->matches.push_back(what_you_typed_match);
@@ -222,9 +235,14 @@ void HistoryURLProvider::QueryComplete(
   if (params->cancel)
     return;  // Already set done_ when we canceled, no need to set it again.
 
+  // Don't modify |matches_| if the query failed, since it might have a default
+  // match in it, whereas |params->matches| will be empty.
+  if (!params->failed) {
+    matches_.swap(params->matches);
+    UpdateStarredStateOfMatches();
+  }
+
   done_ = true;
-  matches_.swap(params->matches);
-  UpdateStarredStateOfMatches();
   listener_->OnProviderUpdate(true);
 }
 
@@ -609,16 +627,17 @@ void HistoryURLProvider::RunAutocompletePasses(
     matches_.push_back(SuggestExactInput(input, trim_http));
 
   // We'll need the history service to run both passes, so try to obtain it.
-  HistoryService* const history_service = profile_ ?
-      profile_->GetHistoryService(Profile::EXPLICIT_ACCESS) : history_service_;
+  HistoryService* const history_service =
+      profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
   if (!history_service)
     return;
 
   // Create the data structure for the autocomplete passes.  We'll save this off
   // onto the |params_| member for later deletion below if we need to run pass
   // 2.
-  const std::wstring& languages = profile_ ?
-      profile_->GetPrefs()->GetString(prefs::kAcceptLanguages) : std::wstring();
+  std::wstring languages(languages_);
+  if (languages.empty() && profile_)
+    languages = profile_->GetPrefs()->GetString(prefs::kAcceptLanguages);
   scoped_ptr<HistoryURLProviderParams> params(
       new HistoryURLProviderParams(input, trim_http, languages));
 
@@ -807,28 +826,47 @@ AutocompleteMatch HistoryURLProvider::HistoryMatchToACMatch(
       !!info.visit_count(), AutocompleteMatch::HISTORY_URL);
   match.destination_url = info.url();
   DCHECK(match.destination_url.is_valid());
+  size_t inline_autocomplete_offset =
+      history_match.input_location + params->input.text().length();
   match.fill_into_edit = net::FormatUrl(info.url(),
-      match_type == WHAT_YOU_TYPED ? std::wstring() : params->languages);
-  if (!params->input.prevent_inline_autocomplete()) {
-    match.inline_autocomplete_offset =
-        history_match.input_location + params->input.text().length();
-  }
+      match_type == WHAT_YOU_TYPED ? std::wstring() : params->languages, true,
+      UnescapeRule::SPACES, NULL, NULL, &inline_autocomplete_offset);
   size_t offset = 0;
   if (params->trim_http && !history_match.match_in_scheme) {
     offset = TrimHttpPrefix(&match.fill_into_edit);
-    if (match.inline_autocomplete_offset != std::wstring::npos) {
-      DCHECK(match.inline_autocomplete_offset >= offset);
-      match.inline_autocomplete_offset -= offset;
+    if (inline_autocomplete_offset != std::wstring::npos) {
+      DCHECK(inline_autocomplete_offset >= offset);
+      inline_autocomplete_offset -= offset;
     }
   }
+  if (!params->input.prevent_inline_autocomplete())
+    match.inline_autocomplete_offset = inline_autocomplete_offset;
   DCHECK((match.inline_autocomplete_offset == std::wstring::npos) ||
          (match.inline_autocomplete_offset <= match.fill_into_edit.length()));
 
-  match.contents = match.fill_into_edit;
-  AutocompleteMatch::ClassifyLocationInString(
-      history_match.input_location - offset, params->input.text().length(),
-      match.contents.length(), ACMatchClassification::URL,
-      &match.contents_class);
+  size_t match_start = history_match.input_location;
+  match.contents = net::FormatUrl(info.url(),
+      match_type == WHAT_YOU_TYPED ? std::wstring() : params->languages, true,
+      UnescapeRule::SPACES, NULL, NULL, &match_start);
+  if (offset) {
+    TrimHttpPrefix(&match.contents);
+    if (match_start != std::wstring::npos) {
+      DCHECK(match_start >= offset);
+      match_start -= offset;
+    }
+  }
+  if ((match_start != std::wstring::npos) &&
+      (inline_autocomplete_offset != std::wstring::npos) &&
+      (inline_autocomplete_offset != match_start)) {
+    DCHECK(inline_autocomplete_offset > match_start);
+    AutocompleteMatch::ClassifyLocationInString(match_start,
+        inline_autocomplete_offset - match_start, match.contents.length(),
+        ACMatchClassification::URL, &match.contents_class);
+  } else {
+    AutocompleteMatch::ClassifyLocationInString(std::wstring::npos, 0,
+        match.contents.length(), ACMatchClassification::URL,
+        &match.contents_class);
+  }
   match.description = info.title();
   AutocompleteMatch::ClassifyMatchInString(params->input.text(), info.title(),
                                            ACMatchClassification::NONE,

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,26 +6,34 @@
 
 #include <vector>
 
-#include "base/json_reader.h"
+#include "base/file_path.h"
+#include "base/json/json_reader.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser.h"
+#include "chrome/browser/browser_list.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
+#include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
+#include "chrome/test/automation/javascript_execution_controller.h"
 #if defined(TOOLKIT_VIEWS)
 #include "views/focus/accelerator_handler.h"
 #endif
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace ui_test_utils {
 
@@ -80,10 +88,11 @@ class NavigationNotificationObserver : public NotificationObserver {
 
 class DOMOperationObserver : public NotificationObserver {
  public:
-  explicit DOMOperationObserver(RenderViewHost* render_view_host) {
+  explicit DOMOperationObserver(RenderViewHost* render_view_host)
+      : did_respond_(false) {
     registrar_.Add(this, NotificationType::DOM_OPERATION_RESPONSE,
                    Source<RenderViewHost>(render_view_host));
-    RunMessageLoop();
+    ui_test_utils::RunMessageLoop();
   }
 
   virtual void Observe(NotificationType type,
@@ -92,7 +101,13 @@ class DOMOperationObserver : public NotificationObserver {
     DCHECK(type == NotificationType::DOM_OPERATION_RESPONSE);
     Details<DomOperationNotificationDetails> dom_op_details(details);
     response_ = dom_op_details->json();
+    did_respond_ = true;
     MessageLoopForUI::current()->Quit();
+  }
+
+  bool GetResponse(std::string* response) {
+    *response = response_;
+    return did_respond_;
   }
 
   std::string response() const { return response_; }
@@ -100,6 +115,7 @@ class DOMOperationObserver : public NotificationObserver {
  private:
   NotificationRegistrar registrar_;
   std::string response_;
+  bool did_respond_;
 
   DISALLOW_COPY_AND_ASSIGN(DOMOperationObserver);
 };
@@ -162,6 +178,7 @@ class DownloadsCompleteObserver : public DownloadManager::Observer,
     }
   }
 
+  virtual void OnDownloadFileCompleted(DownloadItem* download) { }
   virtual void OnDownloadOpened(DownloadItem* download) {}
 
   // DownloadManager::Observer
@@ -198,60 +215,30 @@ class DownloadsCompleteObserver : public DownloadManager::Observer,
   DISALLOW_COPY_AND_ASSIGN(DownloadsCompleteObserver);
 };
 
-// Used to block until an application modal dialog is shown.
-class AppModalDialogObserver : public NotificationObserver {
+class LanguageDetectionNotificationObserver : public NotificationObserver {
  public:
-  AppModalDialogObserver() : dialog_(NULL) {}
-
-  AppModalDialog* WaitForAppModalDialog() {
-    registrar_.Add(this, NotificationType::APP_MODAL_DIALOG_SHOWN,
-                   NotificationService::AllSources());
-    dialog_ = NULL;
-    ui_test_utils::RunMessageLoop();
-    DCHECK(dialog_);
-    return dialog_;
-  }
-
-  virtual void Observe(NotificationType type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
-    if (type == NotificationType::APP_MODAL_DIALOG_SHOWN) {
-      registrar_.Remove(this, NotificationType::APP_MODAL_DIALOG_SHOWN,
-                        NotificationService::AllSources());
-      dialog_ = Source<AppModalDialog>(source).ptr();
-      MessageLoopForUI::current()->Quit();
-    } else {
-      NOTREACHED();
-    }
-  }
-
- private:
-  NotificationRegistrar registrar_;
-
-  AppModalDialog* dialog_;
-
-  DISALLOW_COPY_AND_ASSIGN(AppModalDialogObserver);
-};
-
-template <class T>
-class SimpleNotificationObserver : public NotificationObserver {
- public:
-  SimpleNotificationObserver(NotificationType notification_type,
-                             T* source) {
-    registrar_.Add(this, notification_type, Source<T>(source));
+  explicit LanguageDetectionNotificationObserver(TabContents* tab) {
+    registrar_.Add(this, NotificationType::TAB_LANGUAGE_DETERMINED,
+                  Source<TabContents>(tab));
     ui_test_utils::RunMessageLoop();
   }
 
   virtual void Observe(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details) {
+    language_ = *(Details<std::string>(details).ptr());
     MessageLoopForUI::current()->Quit();
   }
 
+  std::string language() const {
+    return language_;
+  }
+
  private:
   NotificationRegistrar registrar_;
+  std::string language_;
 
-  DISALLOW_COPY_AND_ASSIGN(SimpleNotificationObserver);
+  DISALLOW_COPY_AND_ASSIGN(LanguageDetectionNotificationObserver);
 };
 
 class FindInPageNotificationObserver : public NotificationObserver {
@@ -305,6 +292,36 @@ class FindInPageNotificationObserver : public NotificationObserver {
   DISALLOW_COPY_AND_ASSIGN(FindInPageNotificationObserver);
 };
 
+class InProcessJavaScriptExecutionController
+    : public base::RefCounted<InProcessJavaScriptExecutionController>,
+      public JavaScriptExecutionController {
+ public:
+  explicit InProcessJavaScriptExecutionController(
+      RenderViewHost* render_view_host)
+      : render_view_host_(render_view_host) {}
+
+ protected:
+  // Executes |script| and sets the JSON response |json|.
+  bool ExecuteJavaScriptAndGetJSON(const std::string& script,
+                                   std::string* json) {
+    render_view_host_->ExecuteJavascriptInWebFrame(L"", UTF8ToWide(script));
+    DOMOperationObserver dom_op_observer(render_view_host_);
+    return dom_op_observer.GetResponse(json);
+  }
+
+  void FirstObjectAdded() {
+    AddRef();
+  }
+
+  void LastObjectRemoved() {
+    Release();
+  }
+
+ private:
+  // Weak pointer to the associated RenderViewHost.
+  RenderViewHost* render_view_host_;
+};
+
 }  // namespace
 
 void RunMessageLoop() {
@@ -320,6 +337,11 @@ void RunMessageLoop() {
   loop->Run();
 #endif
   loop->SetNestableTasksAllowed(did_allow_task_nesting);
+}
+
+void RunAllPendingInMessageLoop() {
+  MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+  ui_test_utils::RunMessageLoop();
 }
 
 bool GetCurrentTabTitle(const Browser* browser, string16* title) {
@@ -360,13 +382,35 @@ void WaitForNavigations(NavigationController* controller,
 }
 
 void WaitForNewTab(Browser* browser) {
-  SimpleNotificationObserver<Browser>
-      new_tab_observer(NotificationType::TAB_ADDED, browser);
+  TestNotificationObserver observer;
+  RegisterAndWait(&observer, NotificationType::TAB_ADDED,
+                  Source<Browser>(browser));
+}
+
+void WaitForBrowserActionUpdated(ExtensionAction* browser_action) {
+  TestNotificationObserver observer;
+  RegisterAndWait(&observer, NotificationType::EXTENSION_BROWSER_ACTION_UPDATED,
+                  Source<ExtensionAction>(browser_action));
 }
 
 void WaitForLoadStop(NavigationController* controller) {
-  SimpleNotificationObserver<NavigationController>
-      new_tab_observer(NotificationType::LOAD_STOP, controller);
+  TestNotificationObserver observer;
+  RegisterAndWait(&observer, NotificationType::LOAD_STOP,
+                  Source<NavigationController>(controller));
+}
+
+Browser* WaitForNewBrowser() {
+  TestNotificationObserver observer;
+  RegisterAndWait(&observer, NotificationType::BROWSER_WINDOW_READY,
+                  NotificationService::AllSources());
+  return Source<Browser>(observer.source()).ptr();
+}
+
+void OpenURLOffTheRecord(Profile* profile, const GURL& url) {
+  Browser::OpenURLOffTheRecord(profile, url);
+  Browser* browser = BrowserList::FindBrowserWithType(
+      profile->GetOffTheRecordProfile(), Browser::TYPE_NORMAL, false);
+  WaitForNavigations(&browser->GetSelectedTabContents()->controller(), 1);
 }
 
 void NavigateToURL(Browser* browser, const GURL& url) {
@@ -380,6 +424,15 @@ void NavigateToURLBlockUntilNavigationsComplete(Browser* browser,
       &browser->GetSelectedTabContents()->controller();
   browser->OpenURL(url, GURL(), CURRENT_TAB, PageTransition::TYPED);
   WaitForNavigations(controller, number_of_navigations);
+}
+
+DOMElementProxyRef GetActiveDOMDocument(Browser* browser) {
+  JavaScriptExecutionController* executor =
+      new InProcessJavaScriptExecutionController(
+          browser->GetSelectedTabContents()->render_view_host());
+  DOMElementProxy* main_doc = NULL;
+  executor->ExecuteJavaScriptAndParse("document;", &main_doc);
+  return main_doc;
 }
 
 Value* ExecuteJavaScript(RenderViewHost* render_view_host,
@@ -397,7 +450,7 @@ Value* ExecuteJavaScript(RenderViewHost* render_view_host,
   json.insert(0, "[");
   json.append("]");
 
-  scoped_ptr<Value> root_val(JSONReader::Read(json, true));
+  scoped_ptr<Value> root_val(base::JSONReader::Read(json, true));
   if (!root_val->IsType(Value::TYPE_LIST))
     return NULL;
 
@@ -449,12 +502,14 @@ bool ExecuteJavaScriptAndExtractString(RenderViewHost* render_view_host,
   return value->GetAsString(result);
 }
 
-GURL GetTestUrl(const std::wstring& dir, const std::wstring file) {
+FilePath GetTestFilePath(const FilePath& dir, const FilePath& file) {
   FilePath path;
   PathService::Get(chrome::DIR_TEST_DATA, &path);
-  path = path.Append(FilePath::FromWStringHack(dir));
-  path = path.Append(FilePath::FromWStringHack(file));
-  return net::FilePathToFileURL(path);
+  return path.Append(dir).Append(file);
+}
+
+GURL GetTestUrl(const FilePath& dir, const FilePath& file) {
+  return net::FilePathToFileURL(GetTestFilePath(dir, file));
 }
 
 void WaitForDownloadCount(DownloadManager* download_manager, size_t count) {
@@ -462,26 +517,35 @@ void WaitForDownloadCount(DownloadManager* download_manager, size_t count) {
 }
 
 AppModalDialog* WaitForAppModalDialog() {
-  AppModalDialogObserver observer;
-  return observer.WaitForAppModalDialog();
+  TestNotificationObserver observer;
+  RegisterAndWait(&observer, NotificationType::APP_MODAL_DIALOG_SHOWN,
+                  NotificationService::AllSources());
+  return Source<AppModalDialog>(observer.source()).ptr();
 }
 
 void CrashTab(TabContents* tab) {
   RenderProcessHost* rph = tab->render_view_host()->process();
-  base::KillProcess(rph->process().handle(), 0, false);
-  SimpleNotificationObserver<RenderProcessHost>
-      crash_observer(NotificationType::RENDERER_PROCESS_CLOSED, rph);
+  base::KillProcess(rph->GetHandle(), 0, false);
+  TestNotificationObserver observer;
+  RegisterAndWait(&observer, NotificationType::RENDERER_PROCESS_CLOSED,
+                  Source<RenderProcessHost>(rph));
 }
 
 void WaitForFocusChange(RenderViewHost* rvh) {
-  SimpleNotificationObserver<RenderViewHost>
-      focus_observer(NotificationType::FOCUS_CHANGED_IN_PAGE, rvh);
+  TestNotificationObserver observer;
+  RegisterAndWait(&observer, NotificationType::FOCUS_CHANGED_IN_PAGE,
+                  Source<RenderViewHost>(rvh));
 }
 
 void WaitForFocusInBrowser(Browser* browser) {
-  SimpleNotificationObserver<Browser>
-      focus_observer(NotificationType::FOCUS_RETURNED_TO_BROWSER,
-      browser);
+  TestNotificationObserver observer;
+  RegisterAndWait(&observer, NotificationType::FOCUS_RETURNED_TO_BROWSER,
+                  Source<Browser>(browser));
+}
+
+std::string WaitForLanguageDetection(TabContents* tab) {
+  LanguageDetectionNotificationObserver observer(tab);
+  return observer.language();
 }
 
 int FindInPage(TabContents* tab_contents, const string16& search_string,
@@ -493,14 +557,144 @@ int FindInPage(TabContents* tab_contents, const string16& search_string,
   return observer.number_of_matches();
 }
 
-void RegisterAndWait(NotificationType::Type type,
-                     NotificationObserver* observer,
-                     int64 timeout_ms) {
+void WaitForNotification(NotificationType::Type type) {
+  TestNotificationObserver observer;
+  RegisterAndWait(&observer, type, NotificationService::AllSources());
+}
+
+void RegisterAndWait(NotificationObserver* observer,
+                     NotificationType::Type type,
+                     const NotificationSource& source) {
   NotificationRegistrar registrar;
-  registrar.Add(observer, type, NotificationService::AllSources());
-  MessageLoop::current()->PostDelayedTask(
-      FROM_HERE, new MessageLoop::QuitTask, timeout_ms);
+  registrar.Add(observer, type, source);
   RunMessageLoop();
+}
+
+TimedMessageLoopRunner::TimedMessageLoopRunner()
+    : loop_(new MessageLoopForUI()),
+      owned_(true),
+      quit_loop_invoked_(false) {
+}
+
+TimedMessageLoopRunner::~TimedMessageLoopRunner() {
+  if (owned_)
+    delete loop_;
+}
+
+void TimedMessageLoopRunner::RunFor(int ms) {
+  QuitAfter(ms);
+  quit_loop_invoked_ = false;
+  loop_->Run();
+}
+
+void TimedMessageLoopRunner::Quit() {
+  quit_loop_invoked_ = true;
+  loop_->PostTask(FROM_HERE, new MessageLoop::QuitTask);
+}
+
+void TimedMessageLoopRunner::QuitAfter(int ms) {
+  quit_loop_invoked_ = true;
+  loop_->PostDelayedTask(FROM_HERE, new MessageLoop::QuitTask, ms);
+}
+
+namespace {
+
+void AppendToPythonPath(const FilePath& dir) {
+#if defined(OS_WIN)
+  const wchar_t kPythonPath[] = L"PYTHONPATH";
+  // TODO(ukai): handle longer PYTHONPATH variables.
+  wchar_t oldpath[4096];
+  if (::GetEnvironmentVariable(kPythonPath, oldpath, arraysize(oldpath)) == 0) {
+    ::SetEnvironmentVariableW(kPythonPath, dir.value().c_str());
+  } else if (!wcsstr(oldpath, dir.value().c_str())) {
+    std::wstring newpath(oldpath);
+    newpath.append(L":");
+    newpath.append(dir.value());
+    SetEnvironmentVariableW(kPythonPath, newpath.c_str());
+  }
+#elif defined(OS_POSIX)
+  const char kPythonPath[] = "PYTHONPATH";
+  const char* oldpath = getenv(kPythonPath);
+  if (!oldpath) {
+    setenv(kPythonPath, dir.value().c_str(), 1);
+  } else if (!strstr(oldpath, dir.value().c_str())) {
+    std::string newpath(oldpath);
+    newpath.append(":");
+    newpath.append(dir.value());
+    setenv(kPythonPath, newpath.c_str(), 1);
+  }
+#endif
+}
+
+}  // anonymous namespace
+
+TestWebSocketServer::TestWebSocketServer(const FilePath& root_directory) {
+  scoped_ptr<CommandLine> cmd_line(CreateWebSocketServerCommandLine());
+  cmd_line->AppendSwitchWithValue("server", "start");
+  cmd_line->AppendSwitch("register_cygwin");
+  cmd_line->AppendSwitchWithValue("root", root_directory.ToWStringHack());
+  temp_dir_.CreateUniqueTempDir();
+  websocket_pid_file_ = temp_dir_.path().AppendASCII("websocket.pid");
+  cmd_line->AppendSwitchWithValue("pidfile",
+                                  websocket_pid_file_.ToWStringHack());
+  SetPythonPath();
+  base::LaunchApp(*cmd_line.get(), true, false, NULL);
+}
+
+CommandLine* TestWebSocketServer::CreatePythonCommandLine() {
+#if defined(OS_WIN)
+  // Get path to python interpreter
+  FilePath python_runtime;
+  if (!PathService::Get(base::DIR_SOURCE_ROOT, &python_runtime))
+    return NULL;
+  python_runtime = python_runtime
+    .Append(FILE_PATH_LITERAL("third_party"))
+    .Append(FILE_PATH_LITERAL("python_24"))
+    .Append(FILE_PATH_LITERAL("python.exe"));
+  return new CommandLine(python_runtime);
+#elif defined(OS_POSIX)
+  return new CommandLine(FilePath("python"));
+#endif
+}
+
+void TestWebSocketServer::SetPythonPath() {
+  FilePath scripts_path;
+  PathService::Get(base::DIR_SOURCE_ROOT, &scripts_path);
+
+  scripts_path = scripts_path
+      .Append(FILE_PATH_LITERAL("third_party"))
+      .Append(FILE_PATH_LITERAL("WebKit"))
+      .Append(FILE_PATH_LITERAL("WebKitTools"))
+      .Append(FILE_PATH_LITERAL("Scripts"));
+  AppendToPythonPath(scripts_path);
+}
+
+CommandLine* TestWebSocketServer::CreateWebSocketServerCommandLine() {
+  FilePath src_path;
+  // Get to 'src' dir.
+  PathService::Get(base::DIR_SOURCE_ROOT, &src_path);
+
+  FilePath script_path(src_path);
+  script_path = script_path.AppendASCII("third_party");
+  script_path = script_path.AppendASCII("WebKit");
+  script_path = script_path.AppendASCII("WebKitTools");
+  script_path = script_path.AppendASCII("Scripts");
+  script_path = script_path.AppendASCII("webkitpy");
+  script_path = script_path.AppendASCII("layout_tests");
+  script_path = script_path.AppendASCII("port");
+  script_path = script_path.AppendASCII("websocket_server.py");
+
+  CommandLine* cmd_line = CreatePythonCommandLine();
+  cmd_line->AppendLooseValue(script_path.ToWStringHack());
+  return cmd_line;
+}
+
+TestWebSocketServer::~TestWebSocketServer() {
+  scoped_ptr<CommandLine> cmd_line(CreateWebSocketServerCommandLine());
+  cmd_line->AppendSwitchWithValue("server", "stop");
+  cmd_line->AppendSwitchWithValue("pidfile",
+                                  websocket_pid_file_.ToWStringHack());
+  base::LaunchApp(*cmd_line.get(), true, false, NULL);
 }
 
 }  // namespace ui_test_utils

@@ -8,7 +8,10 @@
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "chrome/browser/child_process_security_policy.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/renderer_host/resource_dispatcher_host.h"
+#include "chrome/browser/renderer_host/resource_dispatcher_host_request_info.h"
+#include "chrome/browser/renderer_host/resource_handler.h"
 #include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/render_messages.h"
 #include "net/base/net_errors.h"
@@ -18,6 +21,9 @@
 #include "net/url_request/url_request_test_job.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/appcache/appcache_interfaces.h"
+
+// TODO(eroman): Write unit tests for SafeBrowsing that exercise
+//               SafeBrowsingResourceHandler.
 
 namespace {
 
@@ -51,8 +57,10 @@ static int RequestIDForMessage(const IPC::Message& msg) {
   return request_id;
 }
 
-static ViewHostMsg_Resource_Request CreateResourceRequest(const char* method,
-                                                          const GURL& url) {
+static ViewHostMsg_Resource_Request CreateResourceRequest(
+    const char* method,
+    ResourceType::Type type,
+    const GURL& url) {
   ViewHostMsg_Resource_Request request;
   request.method = std::string(method);
   request.url = url;
@@ -62,9 +70,11 @@ static ViewHostMsg_Resource_Request CreateResourceRequest(const char* method,
   request.main_frame_origin = "null";
   request.load_flags = 0;
   request.origin_child_id = 0;
-  request.resource_type = ResourceType::SUB_RESOURCE;
+  request.resource_type = type;
   request.request_context = 0;
   request.appcache_host_id = appcache::kNoHostId;
+  request.host_renderer_id = -1;
+  request.host_render_view_id = -1;
   return request;
 }
 
@@ -118,7 +128,7 @@ void ResourceIPCAccumulator::GetClassifiedMessages(ClassifiedMessages* msgs) {
 // messages to go to the same place, which is why this forwards.
 class ForwardingReceiver : public ResourceDispatcherHost::Receiver {
  public:
-  ForwardingReceiver(ResourceDispatcherHost::Receiver* dest)
+  explicit ForwardingReceiver(ResourceDispatcherHost::Receiver* dest)
     : ResourceDispatcherHost::Receiver(dest->type(), -1),
       dest_(dest) {
     set_handle(dest->handle());
@@ -144,8 +154,11 @@ class ResourceDispatcherHostTest : public testing::Test,
                                    public ResourceDispatcherHost::Receiver {
  public:
   ResourceDispatcherHostTest()
-      : Receiver(ChildProcessInfo::RENDER_PROCESS, -1), host_(NULL),
-        old_factory_(NULL) {
+      : Receiver(ChildProcessInfo::RENDER_PROCESS, -1),
+        ui_thread_(ChromeThread::UI, &message_loop_),
+        io_thread_(ChromeThread::IO, &message_loop_),
+        old_factory_(NULL),
+        resource_type_(ResourceType::SUB_RESOURCE) {
     set_handle(base::GetCurrentProcessHandle());
   }
   // ResourceDispatcherHost::Receiver implementation
@@ -171,6 +184,7 @@ class ResourceDispatcherHostTest : public testing::Test,
                                         &ResourceDispatcherHostTest::Factory);
     EnsureTestSchemeIsAllowed();
   }
+
   virtual void TearDown() {
     URLRequest::RegisterProtocolFactory("test", NULL);
     if (!scheme_.empty())
@@ -178,6 +192,8 @@ class ResourceDispatcherHostTest : public testing::Test,
 
     DCHECK(test_fixture_ == this);
     test_fixture_ = NULL;
+
+    host_.Shutdown();
 
     ChildProcessSecurityPolicy::GetInstance()->Remove(0);
 
@@ -212,7 +228,7 @@ class ResourceDispatcherHostTest : public testing::Test,
     }
   }
 
-  // Set a particular response for any request from now on. To switch back to
+  // Sets a particular response for any request from now on. To switch back to
   // the default bahavior, pass an empty |headers|. |headers| should be raw-
   // formatted (NULLs instead of EOLs).
   void SetResponse(const std::string& headers, const std::string& data) {
@@ -220,7 +236,12 @@ class ResourceDispatcherHostTest : public testing::Test,
     response_data_ = data;
   }
 
-  // Intercept requests for the given protocol.
+  // Sets a particular resource type for any request from now on.
+  void SetResourceType(ResourceType::Type type) {
+    resource_type_ = type;
+  }
+
+  // Intercepts requests for the given protocol.
   void HandleScheme(const std::string& scheme) {
     DCHECK(scheme_.empty());
     DCHECK(!old_factory_);
@@ -241,12 +262,15 @@ class ResourceDispatcherHostTest : public testing::Test,
   }
 
   MessageLoopForIO message_loop_;
+  ChromeThread ui_thread_;
+  ChromeThread io_thread_;
   ResourceDispatcherHost host_;
   ResourceIPCAccumulator accum_;
   std::string response_headers_;
   std::string response_data_;
   std::string scheme_;
   URLRequest::ProtocolFactory* old_factory_;
+  ResourceType::Type resource_type_;
   static ResourceDispatcherHostTest* test_fixture_;
 };
 // Static.
@@ -263,7 +287,8 @@ void ResourceDispatcherHostTest::MakeTestRequest(
     int render_view_id,
     int request_id,
     const GURL& url) {
-  ViewHostMsg_Resource_Request request = CreateResourceRequest("GET", url);
+  ViewHostMsg_Resource_Request request =
+      CreateResourceRequest("GET", resource_type_, url);
   ViewHostMsg_RequestResource msg(render_view_id, request_id, request);
   bool msg_was_ok;
   host_.OnMessageReceived(msg, receiver, &msg_was_ok);
@@ -410,8 +435,8 @@ TEST_F(ResourceDispatcherHostTest, TestProcessCancel) {
   TestReceiver test_receiver;
 
   // request 1 goes to the test delegate
-  ViewHostMsg_Resource_Request request =
-      CreateResourceRequest("GET", URLRequestTestJob::test_url_1());
+  ViewHostMsg_Resource_Request request = CreateResourceRequest(
+      "GET", ResourceType::SUB_RESOURCE, URLRequestTestJob::test_url_1());
 
   EXPECT_EQ(0, host_.GetOutstandingRequestsMemoryCost(0));
 
@@ -872,4 +897,155 @@ TEST_F(ResourceDispatcherHostTest, MimeSniff204) {
   ResourceResponseHead response_head;
   GetResponseHead(msgs[0], &response_head);
   ASSERT_EQ("text/plain", response_head.mime_type);
+}
+
+// Tests for crbug.com/31266 (Non-2xx + application/octet-stream).
+TEST_F(ResourceDispatcherHostTest, ForbiddenDownload) {
+  EXPECT_EQ(0, host_.GetOutstandingRequestsMemoryCost(0));
+
+  std::string response("HTTP/1.1 403 Forbidden\n"
+                       "Content-disposition: attachment; filename=blah\n"
+                       "Content-type: application/octet-stream\n\n");
+  std::string raw_headers(net::HttpUtil::AssembleRawHeaders(response.data(),
+                                                            response.size()));
+  std::string response_data("<html><title>Test One</title></html>");
+  SetResponse(raw_headers, response_data);
+
+  // Only MAIN_FRAMEs can trigger a download.
+  SetResourceType(ResourceType::MAIN_FRAME);
+
+  HandleScheme("http");
+  MakeTestRequest(0, 1, GURL("http:bla"));
+
+  // Flush all pending requests.
+  while (URLRequestTestJob::ProcessOnePendingMessage());
+
+  EXPECT_EQ(0, host_.GetOutstandingRequestsMemoryCost(0));
+
+  // Sorts out all the messages we saw by request.
+  ResourceIPCAccumulator::ClassifiedMessages msgs;
+  accum_.GetClassifiedMessages(&msgs);
+
+  // We should have gotten one RequestComplete message.
+  ASSERT_EQ(1U, msgs[0].size());
+  EXPECT_EQ(ViewMsg_Resource_RequestComplete::ID, msgs[0][0].type());
+
+  // The RequestComplete message should have had status
+  // (CANCELED, ERR_FILE_NOT_FOUND).
+  int request_id;
+  URLRequestStatus status;
+
+  void* iter = NULL;
+  EXPECT_TRUE(IPC::ReadParam(&msgs[0][0], &iter, &request_id));
+  EXPECT_TRUE(IPC::ReadParam(&msgs[0][0], &iter, &status));
+
+  EXPECT_EQ(1, request_id);
+  EXPECT_EQ(URLRequestStatus::CANCELED, status.status());
+  EXPECT_EQ(net::ERR_FILE_NOT_FOUND, status.os_error());
+}
+
+class DummyResourceHandler : public ResourceHandler {
+ public:
+  DummyResourceHandler() {}
+
+  // Called as upload progress is made.
+  bool OnUploadProgress(int request_id, uint64 position, uint64 size) {
+    return true;
+  }
+
+  bool OnRequestRedirected(int request_id, const GURL& url,
+                           ResourceResponse* response, bool* defer) {
+    return true;
+  }
+
+  bool OnResponseStarted(int request_id, ResourceResponse* response) {
+    return true;
+  }
+
+  bool OnWillStart(int request_id, const GURL& url, bool* defer) {
+    return true;
+  }
+
+  bool OnWillRead(
+      int request_id, net::IOBuffer** buf, int* buf_size, int min_size) {
+    return true;
+  }
+
+  bool OnReadCompleted(int request_id, int* bytes_read) { return true; }
+
+  bool OnResponseCompleted(
+    int request_id, const URLRequestStatus& status, const std::string& info) {
+    return true;
+  }
+
+  void OnRequestClosed() {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(DummyResourceHandler);
+};
+
+class ApplyExtensionMessageFilterPolicyTest : public testing::Test {
+ protected:
+  void SetUp() {
+    url_.reset(new GURL(
+        "chrome-extension://behllobkkfkfnphdnhnkndlbkcpglgmj/popup.html"));
+    resource_type_ = ResourceType::STYLESHEET;
+    resource_handler_.reset(new DummyResourceHandler());
+    request_info_.reset(CreateNewResourceRequestInfo());
+  }
+
+  ResourceDispatcherHostRequestInfo* CreateNewResourceRequestInfo() {
+    return new ResourceDispatcherHostRequestInfo(
+        resource_handler_.get(), ChildProcessInfo::RENDER_PROCESS, 0, 0, 0,
+        "not important", "not important",
+        ResourceType::STYLESHEET, 0U, false, false, -1, -1);
+  }
+
+  scoped_ptr<GURL> url_;
+  ResourceType::Type resource_type_;
+  scoped_ptr<DummyResourceHandler> resource_handler_;
+  scoped_ptr<ResourceDispatcherHostRequestInfo> request_info_;
+};
+
+TEST_F(ApplyExtensionMessageFilterPolicyTest, WrongScheme) {
+  url_.reset(new GURL("html://behllobkkfkfnphdnhnkndlbkcpglgmj/popup.html"));
+  ResourceDispatcherHost::ApplyExtensionMessageFilterPolicy(
+      *url_, resource_type_, request_info_.get());
+
+  EXPECT_EQ(FilterPolicy::DONT_FILTER, request_info_->filter_policy());
+}
+
+TEST_F(ApplyExtensionMessageFilterPolicyTest, GoodScheme) {
+  ResourceDispatcherHost::ApplyExtensionMessageFilterPolicy(
+      *url_, resource_type_, request_info_.get());
+
+  EXPECT_EQ(FilterPolicy::FILTER_EXTENSION_MESSAGES,
+            request_info_->filter_policy());
+}
+
+TEST_F(ApplyExtensionMessageFilterPolicyTest, GoodSchemeWithSecurityFilter) {
+  request_info_->set_filter_policy(FilterPolicy::FILTER_ALL_EXCEPT_IMAGES);
+  ResourceDispatcherHost::ApplyExtensionMessageFilterPolicy(
+      *url_, resource_type_, request_info_.get());
+
+  EXPECT_EQ(FilterPolicy::FILTER_ALL_EXCEPT_IMAGES,
+            request_info_->filter_policy());
+}
+
+TEST_F(ApplyExtensionMessageFilterPolicyTest, GoodSchemeWrongResourceType) {
+  resource_type_ = ResourceType::MAIN_FRAME;
+  ResourceDispatcherHost::ApplyExtensionMessageFilterPolicy(
+      *url_, resource_type_, request_info_.get());
+
+  EXPECT_EQ(FilterPolicy::DONT_FILTER, request_info_->filter_policy());
+}
+
+TEST_F(ApplyExtensionMessageFilterPolicyTest, WrongSchemeResourceAndFilter) {
+  url_.reset(new GURL("html://behllobkkfkfnphdnhnkndlbkcpglgmj/popup.html"));
+  resource_type_ = ResourceType::MEDIA;
+  request_info_->set_filter_policy(FilterPolicy::FILTER_ALL);
+  ResourceDispatcherHost::ApplyExtensionMessageFilterPolicy(
+      *url_, resource_type_, request_info_.get());
+
+  EXPECT_EQ(FilterPolicy::FILTER_ALL, request_info_->filter_policy());
 }

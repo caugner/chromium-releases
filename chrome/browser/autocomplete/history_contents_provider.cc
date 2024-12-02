@@ -1,12 +1,14 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/autocomplete/history_contents_provider.h"
 
+#include "base/callback.h"
 #include "base/histogram.h"
 #include "base/string_util.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/history/query_parser.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/url_constants.h"
@@ -118,7 +120,6 @@ void HistoryContentsProvider::Start(const AutocompleteInput& input,
 
       history::QueryOptions options;
       options.SetRecentDayRange(kDaysToSearch);
-      options.most_recent_visit_only = true;
       options.max_count = kMaxMatchCount;
       history->QueryHistory(input.text(), options, &request_consumer_,
           NewCallback(this, &HistoryContentsProvider::QueryComplete));

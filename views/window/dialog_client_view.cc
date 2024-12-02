@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,20 +14,21 @@
 
 #include <algorithm>
 
-#include "app/gfx/canvas.h"
-#include "app/gfx/font.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/keyboard_codes.h"
+#include "gfx/canvas.h"
+#include "gfx/font.h"
 #include "grit/app_strings.h"
-#include "skia/ext/skia_utils_gtk.h"
 #include "views/controls/button/native_button.h"
 #include "views/standard_layout.h"
 #include "views/window/dialog_delegate.h"
 #include "views/window/window.h"
+
 #if defined(OS_WIN)
-#include "app/gfx/native_theme_win.h"
+#include "gfx/native_theme_win.h"
 #else
+#include "gfx/skia_utils_gtk.h"
 #include "views/window/hit_test.h"
 #include "views/widget/widget.h"
 #endif
@@ -110,7 +111,11 @@ DialogClientView::DialogClientView(Window* owner, View* contents_view)
       cancel_button_(NULL),
       default_button_(NULL),
       extra_view_(NULL),
-      accepted_(false) {
+      size_extra_view_height_to_buttons_(false),
+      accepted_(false),
+      listening_to_focus_(false),
+      saved_focus_manager_(NULL),
+      bottom_view_(NULL) {
   InitClass();
 }
 
@@ -235,6 +240,27 @@ void DialogClientView::CancelWindow() {
   Close();
 }
 
+void DialogClientView::SetBottomView(View* bottom_view) {
+  if (bottom_view_) {
+    RemoveChildView(bottom_view_);
+    delete bottom_view_;
+  }
+  bottom_view_ = bottom_view;
+  if (bottom_view_)
+    AddChildView(bottom_view_);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// DialogClientView, View overrides:
+
+void DialogClientView::NativeViewHierarchyChanged(bool attached,
+                                                  gfx::NativeView native_view,
+                                                  RootView* root_view) {
+  if (attached) {
+    UpdateFocusListener();
+  }
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // DialogClientView, ClientView overrides:
 
@@ -251,10 +277,11 @@ bool DialogClientView::CanClose() const {
 }
 
 void DialogClientView::WindowClosing() {
-  FocusManager* focus_manager = GetFocusManager();
-  DCHECK(focus_manager);
-  if (focus_manager)
-     focus_manager->RemoveFocusChangeListener(this);
+  if (listening_to_focus_) {
+    DCHECK(saved_focus_manager_);
+    if (saved_focus_manager_)
+       saved_focus_manager_->RemoveFocusChangeListener(this);
+  }
   ClientView::WindowClosing();
 }
 
@@ -274,7 +301,7 @@ void DialogClientView::Paint(gfx::Canvas* canvas) {
   GtkWidget* widget = GetWidget()->GetNativeView();
   if (GTK_IS_WINDOW(widget)) {
     GtkStyle* window_style = gtk_widget_get_style(widget);
-    canvas->FillRectInt(skia::GdkColorToSkColor(
+    canvas->FillRectInt(gfx::GdkColorToSkColor(
                             window_style->bg[GTK_STATE_NORMAL]),
                         0, 0, width(), height());
   }
@@ -290,6 +317,13 @@ void DialogClientView::PaintChildren(gfx::Canvas* canvas) {
 void DialogClientView::Layout() {
   if (has_dialog_buttons())
     LayoutDialogButtons();
+  if (bottom_view_) {
+    gfx::Rect bounds = GetLocalBounds(false);
+    gfx::Size pref = bottom_view_->GetPreferredSize();
+    bottom_view_->SetBounds(bounds.x(),
+        bounds.bottom() - pref.height() - kButtonVEdgeMargin,
+        bounds.width(), pref.height());
+  }
   LayoutContentsView();
 }
 
@@ -302,12 +336,7 @@ void DialogClientView::ViewHierarchyChanged(bool is_add, View* parent,
     ShowDialogButtons();
     ClientView::ViewHierarchyChanged(is_add, parent, child);
 
-    FocusManager* focus_manager = GetFocusManager();
-    // Listen for focus change events so we can update the default button.
-    DCHECK(focus_manager);  // bug #1291225: crash reports seem to indicate it
-                            // can be NULL.
-    if (focus_manager)
-      focus_manager->AddFocusChangeListener(this);
+    UpdateFocusListener();
 
     // The "extra view" must be created and installed after the contents view
     // has been inserted into the view hierarchy.
@@ -347,6 +376,10 @@ gfx::Size DialogClientView::GetPreferredSize() {
       width += 2 * kButtonHEdgeMargin;
       prefsize.set_width(std::max(prefsize.width(), width));
     }
+  }
+  if (bottom_view_) {
+    gfx::Size bottom_pref = bottom_view_->GetPreferredSize();
+    prefsize.Enlarge(0, bottom_pref.height() + kButtonVEdgeMargin);
   }
   prefsize.Enlarge(0, button_height);
   return prefsize;
@@ -428,40 +461,48 @@ int DialogClientView::GetButtonsHeight() const {
 }
 
 void DialogClientView::LayoutDialogButtons() {
+  gfx::Rect lb = GetLocalBounds(false);
   gfx::Rect extra_bounds;
+  int bottom_y = lb.bottom() - kButtonVEdgeMargin;
+  int button_height = 0;
+  if (bottom_view_) {
+    gfx::Size bottom_pref = bottom_view_->GetPreferredSize();
+    bottom_y -= bottom_pref.height() + kButtonVEdgeMargin + kButtonVEdgeMargin;
+  }
   if (cancel_button_) {
     gfx::Size ps = cancel_button_->GetPreferredSize();
-    gfx::Rect lb = GetLocalBounds(false);
     int button_width = std::max(
         GetButtonWidth(MessageBoxFlags::DIALOGBUTTON_CANCEL), ps.width());
     int button_x = lb.right() - button_width - kButtonHEdgeMargin;
-    int button_y = lb.bottom() - ps.height() - kButtonVEdgeMargin;
+    int button_y = bottom_y - ps.height();
     cancel_button_->SetBounds(button_x, button_y, button_width, ps.height());
     // The extra view bounds are dependent on this button.
     extra_bounds.set_width(std::max(0, cancel_button_->x()));
     extra_bounds.set_y(cancel_button_->y());
+    button_height = std::max(button_height, ps.height());
   }
   if (ok_button_) {
     gfx::Size ps = ok_button_->GetPreferredSize();
-    gfx::Rect lb = GetLocalBounds(false);
     int button_width = std::max(
         GetButtonWidth(MessageBoxFlags::DIALOGBUTTON_OK), ps.width());
     int ok_button_right = lb.right() - kButtonHEdgeMargin;
     if (cancel_button_)
       ok_button_right = cancel_button_->x() - kRelatedButtonHSpacing;
     int button_x = ok_button_right - button_width;
-    int button_y = lb.bottom() - ps.height() - kButtonVEdgeMargin;
+    int button_y = bottom_y - ps.height();
     ok_button_->SetBounds(button_x, button_y, ok_button_right - button_x,
                           ps.height());
     // The extra view bounds are dependent on this button.
     extra_bounds.set_width(std::max(0, ok_button_->x()));
     extra_bounds.set_y(ok_button_->y());
+    button_height = std::max(button_height, ps.height());
   }
   if (extra_view_) {
     gfx::Size ps = extra_view_->GetPreferredSize();
-    gfx::Rect lb = GetLocalBounds(false);
     extra_bounds.set_x(lb.x() + kButtonHEdgeMargin);
-    extra_bounds.set_height(ps.height());
+    int height = size_extra_view_height_to_buttons_ ?
+        std::max(ps.height(), button_height) : ps.height();
+    extra_bounds.set_height(height);
     extra_view_->SetBounds(extra_bounds);
   }
 }
@@ -479,6 +520,8 @@ void DialogClientView::CreateExtraView() {
     extra_view_ = extra_view;
     extra_view_->SetGroup(kButtonGroup);
     AddChildView(extra_view_);
+    size_extra_view_height_to_buttons_ =
+        GetDialogDelegate()->GetSizeExtraViewHeightToButtons();
   }
 }
 
@@ -486,6 +529,33 @@ DialogDelegate* DialogClientView::GetDialogDelegate() const {
   DialogDelegate* dd = window()->GetDelegate()->AsDialogDelegate();
   DCHECK(dd);
   return dd;
+}
+
+void DialogClientView::Close() {
+  window()->Close();
+  GetDialogDelegate()->OnClose();
+}
+
+void DialogClientView::UpdateFocusListener() {
+  FocusManager* focus_manager = GetFocusManager();
+  // Listen for focus change events so we can update the default button.
+  // focus_manager can be NULL when the dialog is created on un-shown view.
+  // We start listening for focus changes when the page is visible.
+  // Focus manager could also change if window host changes a parent.
+  if (listening_to_focus_) {
+    if (saved_focus_manager_ == focus_manager)
+      return;
+    DCHECK(saved_focus_manager_);
+    if (saved_focus_manager_)
+      saved_focus_manager_->RemoveFocusChangeListener(this);
+    listening_to_focus_ = false;
+  }
+  saved_focus_manager_ = focus_manager;
+  // Listen for focus change events so we can update the default button.
+  if (focus_manager) {
+    focus_manager->AddFocusChangeListener(this);
+    listening_to_focus_ = true;
+  }
 }
 
 // static
@@ -496,11 +566,6 @@ void DialogClientView::InitClass() {
     dialog_button_font_ = new gfx::Font(rb.GetFont(ResourceBundle::BaseFont));
     initialized = true;
   }
-}
-
-void DialogClientView::Close() {
-  window()->Close();
-  GetDialogDelegate()->OnClose();
 }
 
 }  // namespace views

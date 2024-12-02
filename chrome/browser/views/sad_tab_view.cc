@@ -4,13 +4,15 @@
 
 #include "chrome/browser/views/sad_tab_view.h"
 
-#include "app/gfx/canvas.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
-#include "base/gfx/size.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
+#include "gfx/canvas.h"
+#include "gfx/size.h"
+#include "gfx/skia_util.h"
 #include "grit/generated_resources.h"
+#include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
-#include "skia/ext/skia_utils.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 
 static const int kSadTabOffset = -64;
@@ -20,6 +22,7 @@ static const int kMessageBottomMargin = 20;
 static const float kMessageSize = 0.65f;
 static const SkColor kTitleColor = SK_ColorWHITE;
 static const SkColor kMessageColor = SK_ColorWHITE;
+static const SkColor kLinkColor = SK_ColorWHITE;
 static const SkColor kBackgroundColor = SkColorSetRGB(35, 48, 64);
 static const SkColor kBackgroundEndColor = SkColorSetRGB(35, 48, 64);
 
@@ -31,15 +34,27 @@ std::wstring SadTabView::title_;
 std::wstring SadTabView::message_;
 int SadTabView::title_width_;
 
-SadTabView::SadTabView() {
+SadTabView::SadTabView(TabContents* tab_contents)
+    : tab_contents_(tab_contents),
+      learn_more_link_(NULL) {
+  DCHECK(tab_contents);
+
   InitClass();
+
+  if (tab_contents != NULL) {
+    learn_more_link_ = new views::Link(l10n_util::GetString(IDS_LEARN_MORE));
+    learn_more_link_->SetFont(*message_font_);
+    learn_more_link_->SetNormalColor(kLinkColor);
+    learn_more_link_->SetController(this);
+    AddChildView(learn_more_link_);
+  }
 }
 
 void SadTabView::Paint(gfx::Canvas* canvas) {
   SkPaint paint;
-  paint.setShader(skia::CreateGradientShader(0, height(),
-                                             kBackgroundColor,
-                                             kBackgroundEndColor))->safeUnref();
+  paint.setShader(gfx::CreateGradientShader(0, height(),
+                                            kBackgroundColor,
+                                            kBackgroundEndColor))->safeUnref();
   paint.setStyle(SkPaint::kFill_Style);
   canvas->drawRectCoords(0, 0,
                          SkIntToScalar(width()), SkIntToScalar(height()),
@@ -56,6 +71,10 @@ void SadTabView::Paint(gfx::Canvas* canvas) {
                         message_bounds_.x(), message_bounds_.y(),
                         message_bounds_.width(), message_bounds_.height(),
                         gfx::Canvas::MULTI_LINE);
+
+  if (learn_more_link_ != NULL)
+    learn_more_link_->SetBounds(link_bounds_.x(), link_bounds_.y(),
+                                link_bounds_.width(), link_bounds_.height());
 }
 
 void SadTabView::Layout() {
@@ -78,6 +97,22 @@ void SadTabView::Layout() {
   int message_x = (width() - message_width) / 2;
   int message_y = title_bounds_.bottom() + kTitleMessageSpacing;
   message_bounds_.SetRect(message_x, message_y, message_width, message_height);
+
+  if (learn_more_link_ != NULL) {
+    gfx::Size sz = learn_more_link_->GetPreferredSize();
+    gfx::Insets insets = learn_more_link_->GetInsets();
+    link_bounds_.SetRect((width() - sz.width()) / 2,
+                         message_bounds_.bottom() + kTitleMessageSpacing -
+                         insets.top(), sz.width(), sz.height());
+  }
+}
+
+void SadTabView::LinkActivated(views::Link* source, int event_flags) {
+  if (tab_contents_ != NULL && source == learn_more_link_) {
+    string16 url = l10n_util::GetStringUTF16(IDS_CRASH_REASON_URL);
+    tab_contents_->OpenURL(GURL(url), GURL(), CURRENT_TAB,
+        PageTransition::LINK);
+  }
 }
 
 // static

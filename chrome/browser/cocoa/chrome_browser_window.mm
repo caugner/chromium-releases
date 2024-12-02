@@ -5,11 +5,19 @@
 #import "chrome/browser/cocoa/chrome_browser_window.h"
 
 #include "base/logging.h"
-#import "chrome/browser/cocoa/browser_window_controller.h"
+#include "chrome/browser/browser_theme_provider.h"
 #import "chrome/browser/cocoa/browser_frame_view.h"
+#import "chrome/browser/cocoa/browser_window_controller.h"
 #import "chrome/browser/cocoa/tab_strip_controller.h"
-#import "chrome/browser/renderer_host/render_widget_host_view_mac.h"
+#import "chrome/browser/cocoa/themed_window.h"
 #include "chrome/browser/global_keyboard_shortcuts_mac.h"
+#import "chrome/browser/renderer_host/render_widget_host_view_mac.h"
+
+namespace {
+  // Size of the gradient. Empirically determined so that the gradient looks
+  // like what the heuristic does when there are just a few tabs.
+  const CGFloat kWindowGradientHeight = 24.0;
+}
 
 // Our browser window does some interesting things to get the behaviors that
 // we want. We replace the standard window controls (zoom, close, miniaturize)
@@ -25,6 +33,27 @@
 @end
 
 @implementation ChromeBrowserWindow
+
+- (id)initWithContentRect:(NSRect)contentRect
+                styleMask:(NSUInteger)aStyle
+                  backing:(NSBackingStoreType)bufferingType
+                    defer:(BOOL)flag {
+  if ((self = [super initWithContentRect:contentRect
+                               styleMask:aStyle
+                                 backing:bufferingType
+                                   defer:flag])) {
+    if (aStyle & NSTexturedBackgroundWindowMask) {
+      // The following two calls fix http://www.crbug.com/25684 by preventing
+      // the window from recalculating the border thickness as the window is
+      // resized.
+      // This was causing the window tint to change for the default system theme
+      // when the window was being resized.
+      [self setAutorecalculatesContentBorderThickness:NO forEdge:NSMaxYEdge];
+      [self setContentBorderThickness:kWindowGradientHeight forEdge:NSMaxYEdge];
+    }
+  }
+  return self;
+}
 
 - (void)dealloc {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
@@ -54,7 +83,7 @@
     NSNotificationCenter* defaultCenter = [NSNotificationCenter defaultCenter];
     [defaultCenter addObserver:self
                       selector:@selector(themeDidChangeNotification:)
-                          name:kGTMThemeDidChangeNotification
+                          name:kBrowserThemeDidChangeNotification
                         object:nil];
 
     // Hook ourselves up to get notified if the user changes the system
@@ -85,7 +114,7 @@
     closeButton_ = [NSWindow standardWindowButton:NSWindowCloseButton
                                      forStyleMask:aStyle];
     NSRect closeButtonFrame = [closeButton_ frame];
-    CGFloat yOffset = [browserController isNormalWindow] ?
+    CGFloat yOffset = [browserController hasTabStrip] ?
         kChromeWindowButtonsWithTabStripOffsetFromTop :
         kChromeWindowButtonsWithoutTabStripOffsetFromTop;
     closeButtonFrame.origin =
@@ -195,6 +224,18 @@
                                        owner:self
                                     userInfo:nil]);
     [frameView addTrackingArea:widgetTrackingArea_];
+
+    // Check to see if the cursor is still in trackingRect.
+    NSPoint point = [self mouseLocationOutsideOfEventStream];
+    point = [[self contentView] convertPoint:point fromView:nil];
+    BOOL newEntered = NSPointInRect (point, trackingRect);
+    if (newEntered != entered_) {
+      // Buttons have moved, so update button state.
+      entered_ = newEntered;
+      [closeButton_ setNeedsDisplay];
+      [zoomButton_ setNeedsDisplay];
+      [miniaturizeButton_ setNeedsDisplay];
+    }
   }
 }
 
@@ -222,11 +263,9 @@
   [super resignMainWindow];
 }
 
+// Called after the current theme has changed.
 - (void)themeDidChangeNotification:(NSNotification*)aNotification {
-  GTMTheme* theme = [aNotification object];
-  if ([theme isEqual:[self gtm_theme]]) {
-    [[self frameView] setNeedsDisplay:YES];
-  }
+  [[self frameView] setNeedsDisplay:YES];
 }
 
 - (void)systemThemeDidChangeNotification:(NSNotification*)aNotification {
@@ -246,7 +285,8 @@
   if (![self isMainWindow]) {
     if ([event type] == NSLeftMouseDown) {
       NSView* frameView = [self frameView];
-      NSPoint mouse = [frameView convertPointFromBase:[event locationInWindow]];
+      NSPoint mouse = [frameView convertPoint:[event locationInWindow]
+                                     fromView:nil];
       if (NSPointInRect(mouse, [closeButton_ frame])) {
         [closeButton_ mouseDown:event];
         eventHandled = YES;
@@ -287,6 +327,41 @@
 
 -(BOOL)_isTitleHidden {
   return shouldHideTitle_;
+}
+
+// This method is called whenever a window is moved in order to ensure it fits
+// on the screen.  We cannot always handle resizes without breaking, so we
+// prevent frame constraining in those cases.
+- (NSRect)constrainFrameRect:(NSRect)frame toScreen:(NSScreen*)screen {
+  // Do not constrain the frame rect if our delegate says no.  In this case,
+  // return the original (unconstrained) frame.
+  id delegate = [self delegate];
+  if ([delegate respondsToSelector:@selector(shouldConstrainFrameRect)] &&
+      ![delegate shouldConstrainFrameRect])
+    return frame;
+
+  return [super constrainFrameRect:frame toScreen:screen];
+}
+
+- (ThemeProvider*)themeProvider {
+  id delegate = [self delegate];
+  if (![delegate respondsToSelector:@selector(themeProvider)])
+    return NULL;
+  return [delegate themeProvider];
+}
+
+- (ThemedWindowStyle)themedWindowStyle {
+  id delegate = [self delegate];
+  if (![delegate respondsToSelector:@selector(themedWindowStyle)])
+    return THEMED_NORMAL;
+  return [delegate themedWindowStyle];
+}
+
+- (NSPoint)themePatternPhase {
+  id delegate = [self delegate];
+  if (![delegate respondsToSelector:@selector(themePatternPhase)])
+    return NSMakePoint(0, 0);
+  return [delegate themePatternPhase];
 }
 
 @end

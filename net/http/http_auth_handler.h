@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,24 +8,27 @@
 #include <string>
 
 #include "base/ref_counted.h"
+#include "net/base/completion_callback.h"
 #include "net/http/http_auth.h"
 
 namespace net {
 
+class BoundNetLog;
+class HostResolver;
 class HttpRequestInfo;
 class ProxyInfo;
 
 // HttpAuthHandler is the interface for the authentication schemes
-// (basic, digest, ...)
-// The registry mapping auth-schemes to implementations is hardcoded in
-// HttpAuth::CreateAuthHandler().
+// (basic, digest, NTLM, Negotiate).
+// HttpAuthHandler objects are typically created by an HttpAuthHandlerFactory.
 class HttpAuthHandler : public base::RefCounted<HttpAuthHandler> {
  public:
-  virtual ~HttpAuthHandler() { }
-
-  // Initialize the handler by parsing a challenge string.
-  bool InitFromChallenge(std::string::const_iterator begin,
-                         std::string::const_iterator end,
+  // Initializes the handler using a challenge issued by a server.
+  // |challenge| must be non-NULL and have already tokenized the
+  // authentication scheme, but none of the tokens occuring after the
+  // authentication scheme. |target| and |origin| are both stored
+  // for later use, and are not part of the initial challenge.
+  bool InitFromChallenge(HttpAuth::ChallengeTokenizer* challenge,
                          HttpAuth::Target target,
                          const GURL& origin);
 
@@ -74,11 +77,47 @@ class HttpAuthHandler : public base::RefCounted<HttpAuthHandler> {
   // single-round schemes.
   virtual bool IsFinalRound() { return true; }
 
-  // Generate the Authorization header value.
-  virtual std::string GenerateCredentials(const std::wstring& username,
-                                          const std::wstring& password,
-                                          const HttpRequestInfo* request,
-                                          const ProxyInfo* proxy) = 0;
+  // Returns whether the default credentials may be used for the |origin| passed
+  // into |InitFromChallenge|. If true, the user does not need to be prompted
+  // for username and password to establish credentials.
+  // NOTE: SSO is a potential security risk.
+  // TODO(cbentzel): Add a pointer to Firefox documentation about risk.
+  virtual bool AllowsDefaultCredentials() { return false; }
+
+  // Returns whether the canonical DNS name for the origin host needs to be
+  // resolved. The Negotiate auth scheme typically uses the canonical DNS
+  // name when constructing the Kerberos SPN.
+  virtual bool NeedsCanonicalName() { return false; }
+
+  // TODO(cbentzel): Separate providing credentials from generating the
+  // authentication token in the API.
+
+  // Generates an authentication token.
+  // The return value is an error code. If the code is not |OK|, the value of
+  // |*auth_token| is unspecified.
+  // |auth_token| is a return value and must be non-NULL.
+  virtual int GenerateAuthToken(const std::wstring& username,
+                                const std::wstring& password,
+                                const HttpRequestInfo* request,
+                                const ProxyInfo* proxy,
+                                std::string* auth_token) = 0;
+
+  // Generates an authentication token using default credentials.
+  // The return value is an error code. If the code is not |OK|, the value of
+  // |*auth_token| is unspecified.
+  // |auth_token| is a return value and must be non-NULL.
+  // This should only be called if |SupportsDefaultCredentials| returns true.
+  virtual int GenerateDefaultAuthToken(const HttpRequestInfo* request,
+                                       const ProxyInfo* proxy,
+                                       std::string* auth_token) = 0;
+
+  // Resolves the canonical name for the |origin_| host. The canonical
+  // name is used by the Negotiate scheme to generate a valid Kerberos
+  // SPN.
+  // The return value is a net error code.
+  virtual int ResolveCanonicalName(HostResolver* host_resolver,
+                                   CompletionCallback* callback,
+                                   const BoundNetLog& net_log);
 
  protected:
   enum Property {
@@ -86,20 +125,26 @@ class HttpAuthHandler : public base::RefCounted<HttpAuthHandler> {
     IS_CONNECTION_BASED = 1 << 1,
   };
 
-  // Initialize the handler by parsing a challenge string.
+  friend class base::RefCounted<HttpAuthHandler>;
+
+  virtual ~HttpAuthHandler() { }
+
+  // Initializes the handler using a challenge issued by a server.
+  // |challenge| must be non-NULL and have already tokenized the
+  // authentication scheme, but none of the tokens occuring after the
+  // authentication scheme.
   // Implementations are expcted to initialize the following members:
   // scheme_, realm_, score_, properties_
-  virtual bool Init(std::string::const_iterator challenge_begin,
-                    std::string::const_iterator challenge_end) = 0;
+  virtual bool Init(HttpAuth::ChallengeTokenizer* challenge) = 0;
 
-  // The lowercase auth-scheme {"basic", "digest", "ntlm", ...}
+  // The lowercase auth-scheme {"basic", "digest", "ntlm", "negotiate"}
   std::string scheme_;
 
   // The realm.  Used by "basic" and "digest".
   std::string realm_;
 
   // The {scheme, host, port} for the authentication target.  Used by "ntlm"
-  // to construct the service principal name.
+  // and "negotiate" to construct the service principal name.
   GURL origin_;
 
   // The score for this challenge. Higher numbers are better.

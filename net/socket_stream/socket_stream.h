@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define NET_SOCKET_STREAM_SOCKET_STREAM_H_
 
 #include <deque>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -16,17 +17,31 @@
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
+#include "net/base/net_log.h"
+#include "net/base/net_errors.h"
+#include "net/http/http_auth.h"
+#include "net/http/http_auth_cache.h"
+#include "net/http/http_auth_handler.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/tcp_client_socket.h"
 #include "net/url_request/url_request_context.h"
 
 namespace net {
 
+class AuthChallengeInfo;
 class ClientSocketFactory;
 class HostResolver;
+class HttpAuthHandlerFactory;
 class SSLConfigService;
 class SingleRequestHostResolver;
+class SocketStreamMetrics;
 
+// SocketStream is used to implement Web Sockets.
+// It provides plain full-duplex stream with proxy and SSL support.
+// For proxy authentication, only basic mechanisum is supported.  It will try
+// authentication identity for proxy URL first.  If server requires proxy
+// authentication, it will try authentication identity for realm that server
+// requests.
 class SocketStream : public base::RefCountedThreadSafe<SocketStream> {
  public:
   // Derive from this class and add your own data members to associate extra
@@ -41,6 +56,11 @@ class SocketStream : public base::RefCountedThreadSafe<SocketStream> {
   class Delegate {
    public:
     virtual ~Delegate() {}
+
+    virtual int OnStartOpenConnection(SocketStream* socket,
+                                      CompletionCallback* callback) {
+      return OK;
+    }
 
     // Called when socket stream has been connected.  The socket stream accepts
     // at most |max_pending_send_allowed| so that a client of the socket stream
@@ -59,6 +79,20 @@ class SocketStream : public base::RefCountedThreadSafe<SocketStream> {
 
     // Called when the socket stream has been closed.
     virtual void OnClose(SocketStream* socket) = 0;
+
+    // Called when proxy authentication required.
+    // The delegate should call RestartWithAuth() if credential for |auth_info|
+    // is found in password database, or call Close() to close the connection.
+    virtual void OnAuthRequired(SocketStream* socket,
+                                AuthChallengeInfo* auth_info) {
+      // By default, no credential is available and close the connection.
+      socket->Close();
+    }
+
+    // Called when an error occured.
+    // This is only for error reporting to the delegate.
+    // |error| is net::Error.
+    virtual void OnError(const SocketStream* socket, int error) {}
   };
 
   SocketStream(const GURL& url, Delegate* delegate);
@@ -71,30 +105,40 @@ class SocketStream : public base::RefCountedThreadSafe<SocketStream> {
   void SetUserData(const void* key, UserData* data);
 
   const GURL& url() const { return url_; }
+  bool is_secure() const;
+  const AddressList& address_list() const { return addresses_; }
   Delegate* delegate() const { return delegate_; }
   int max_pending_send_allowed() const { return max_pending_send_allowed_; }
 
   URLRequestContext* context() const { return context_.get(); }
   void set_context(URLRequestContext* context);
 
+  BoundNetLog* net_log() { return &net_log_; }
+
   // Opens the connection on the IO thread.
   // Once the connection is established, calls delegate's OnConnected.
-  void Connect();
+  virtual void Connect();
 
   // Requests to send |len| bytes of |data| on the connection.
   // Returns true if |data| is buffered in the job.
   // Returns false if size of buffered data would exceeds
   // |max_pending_send_allowed_| and |data| is not sent at all.
-  bool SendData(const char* data, int len);
+  virtual bool SendData(const char* data, int len);
 
   // Requests to close the connection.
   // Once the connection is closed, calls delegate's OnClose.
-  void Close();
+  virtual void Close();
+
+  // Restarts with authentication info.
+  // Should be used for response of OnAuthRequired.
+  virtual void RestartWithAuth(
+      const std::wstring& username,
+      const std::wstring& password);
 
   // Detach delegate.  Call before delegate is deleted.
   // Once delegate is detached, close the socket stream and never call delegate
   // back.
-  void DetachDelegate();
+  virtual void DetachDelegate();
 
   // Sets an alternative HostResolver. For testing purposes only.
   void SetHostResolver(HostResolver* host_resolver);
@@ -103,22 +147,30 @@ class SocketStream : public base::RefCountedThreadSafe<SocketStream> {
   // |factory|.  For testing purposes only.
   void SetClientSocketFactory(ClientSocketFactory* factory);
 
+ protected:
+  friend class base::RefCountedThreadSafe<SocketStream>;
+  virtual ~SocketStream();
+
+  Delegate* delegate_;
+
  private:
   class RequestHeaders : public IOBuffer {
    public:
     RequestHeaders() : IOBuffer() {}
-    ~RequestHeaders() { data_ = NULL; }
 
     void SetDataOffset(size_t offset) {
       data_ = const_cast<char*>(headers_.data()) + offset;
     }
+
     std::string headers_;
+
+    private:
+     ~RequestHeaders() { data_ = NULL; }
   };
 
   class ResponseHeaders : public IOBuffer {
    public:
     ResponseHeaders() : IOBuffer() {}
-    ~ResponseHeaders() { data_ = NULL; }
 
     void SetDataOffset(size_t offset) { data_ = headers_.get() + offset; }
     char* headers() const { return headers_.get(); }
@@ -126,6 +178,8 @@ class SocketStream : public base::RefCountedThreadSafe<SocketStream> {
     void Realloc(size_t new_size);
 
    private:
+     ~ResponseHeaders() { data_ = NULL; }
+
     scoped_ptr_malloc<char> headers_;
   };
 
@@ -145,8 +199,9 @@ class SocketStream : public base::RefCountedThreadSafe<SocketStream> {
     STATE_SOCKS_CONNECT_COMPLETE,
     STATE_SSL_CONNECT,
     STATE_SSL_CONNECT_COMPLETE,
-    STATE_CONNECTION_ESTABLISHED,
-    STATE_READ_WRITE
+    STATE_READ_WRITE,
+    STATE_AUTH_REQUIRED,
+    STATE_CLOSE,
   };
 
   enum ProxyMode {
@@ -156,22 +211,27 @@ class SocketStream : public base::RefCountedThreadSafe<SocketStream> {
   };
 
   typedef std::deque< scoped_refptr<IOBufferWithSize> > PendingDataQueue;
-  friend class base::RefCountedThreadSafe<SocketStream>;
-  ~SocketStream();
 
-  // Finish the job.  Once finished, calls OnClose of delegate, and no more
+  friend class WebSocketThrottleTest;
+
+  // Copies the given addrinfo list in |addresses_|.
+  // Used for WebSocketThrottleTest.
+  void CopyAddrInfo(struct addrinfo* head);
+
+  // Finishes the job.
+  // Calls OnError and OnClose of delegate, and no more
   // notifications will be sent to delegate.
-  void Finish();
+  void Finish(int result);
 
-  void DidEstablishConnection();
-  void DidReceiveData(int result);
-  void DidSendData(int result);
+  int DidEstablishConnection();
+  int DidReceiveData(int result);
+  int DidSendData(int result);
 
   void OnIOCompleted(int result);
   void OnReadCompleted(int result);
   void OnWriteCompleted(int result);
 
-  int DoLoop(int result);
+  void DoLoop(int result);
 
   int DoResolveProxy();
   int DoResolveProxyComplete(int result);
@@ -189,14 +249,19 @@ class SocketStream : public base::RefCountedThreadSafe<SocketStream> {
   int DoSSLConnectComplete(int result);
   int DoReadWrite(int result);
 
+  GURL ProxyAuthOrigin() const;
+  int HandleAuthChallenge(const HttpResponseHeaders* headers);
+  void DoAuthRequired();
+  void DoRestartWithAuth();
+
   int HandleCertificateError(int result);
 
-  bool is_secure() const;
   SSLConfigService* ssl_config_service() const;
   ProxyService* proxy_service() const;
 
+  BoundNetLog net_log_;
+
   GURL url_;
-  Delegate* delegate_;
   int max_pending_send_allowed_;
   scoped_refptr<URLRequestContext> context_;
 
@@ -205,12 +270,19 @@ class SocketStream : public base::RefCountedThreadSafe<SocketStream> {
 
   State next_state_;
   scoped_refptr<HostResolver> host_resolver_;
+  HttpAuthHandlerFactory* http_auth_handler_factory_;
   ClientSocketFactory* factory_;
 
   ProxyMode proxy_mode_;
 
+  GURL proxy_url_;
   ProxyService::PacRequest* pac_request_;
   ProxyInfo proxy_info_;
+
+  HttpAuthCache auth_cache_;
+  scoped_refptr<HttpAuthHandler> auth_handler_;
+  HttpAuth::Identity auth_identity_;
+  scoped_refptr<AuthChallengeInfo> auth_info_;
 
   scoped_refptr<RequestHeaders> tunnel_request_headers_;
   size_t tunnel_request_headers_bytes_sent_;
@@ -245,6 +317,8 @@ class SocketStream : public base::RefCountedThreadSafe<SocketStream> {
   int write_buf_offset_;
   int write_buf_size_;
   PendingDataQueue pending_write_bufs_;
+
+  scoped_ptr<SocketStreamMetrics> metrics_;
 
   DISALLOW_COPY_AND_ASSIGN(SocketStream);
 };

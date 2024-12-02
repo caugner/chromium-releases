@@ -1,13 +1,18 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/callback.h"
+#include "base/command_line.h"
 #include "base/scoped_ptr.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/time.h"
 #include "media/base/filter_host.h"
-#include "media/filters/ffmpeg_common.h"
+#include "media/base/media_switches.h"
+#include "media/ffmpeg/ffmpeg_common.h"
+#include "media/ffmpeg/ffmpeg_util.h"
+#include "media/filters/bitstream_converter.h"
 #include "media/filters/ffmpeg_demuxer.h"
 #include "media/filters/ffmpeg_glue.h"
 
@@ -26,7 +31,6 @@ class AVPacketBuffer : public Buffer {
   }
 
   virtual ~AVPacketBuffer() {
-    av_free_packet(packet_.get());
   }
 
   // Buffer implementation.
@@ -39,7 +43,7 @@ class AVPacketBuffer : public Buffer {
   }
 
  private:
-  scoped_ptr<AVPacket> packet_;
+  scoped_ptr_malloc<AVPacket, ScopedPtrAVFreePacket> packet_;
 
   DISALLOW_COPY_AND_ASSIGN(AVPacketBuffer);
 };
@@ -61,10 +65,14 @@ FFmpegDemuxerStream::FFmpegDemuxerStream(FFmpegDemuxer* demuxer,
     case CODEC_TYPE_AUDIO:
       media_format_.SetAsString(MediaFormat::kMimeType,
                                 mime_type::kFFmpegAudio);
+      media_format_.SetAsInteger(MediaFormat::kFFmpegCodecID,
+                                 stream->codec->codec_id);
       break;
     case CODEC_TYPE_VIDEO:
       media_format_.SetAsString(MediaFormat::kMimeType,
                                 mime_type::kFFmpegVideo);
+      media_format_.SetAsInteger(MediaFormat::kFFmpegCodecID,
+                                 stream->codec->codec_id);
       break;
     default:
       NOTREACHED();
@@ -72,7 +80,7 @@ FFmpegDemuxerStream::FFmpegDemuxerStream(FFmpegDemuxer* demuxer,
   }
 
   // Calculate the duration.
-  duration_ = ConvertTimestamp(stream->duration);
+  duration_ = ConvertStreamTimestamp(stream->time_base, stream->duration);
 }
 
 FFmpegDemuxerStream::~FFmpegDemuxerStream() {
@@ -99,11 +107,19 @@ bool FFmpegDemuxerStream::HasPendingReads() {
 
 base::TimeDelta FFmpegDemuxerStream::EnqueuePacket(AVPacket* packet) {
   DCHECK_EQ(MessageLoop::current(), demuxer_->message_loop());
-  base::TimeDelta timestamp = ConvertTimestamp(packet->pts);
-  base::TimeDelta duration = ConvertTimestamp(packet->duration);
+  base::TimeDelta timestamp =
+      ConvertStreamTimestamp(stream_->time_base, packet->pts);
+  base::TimeDelta duration =
+      ConvertStreamTimestamp(stream_->time_base, packet->duration);
   if (stopped_) {
     NOTREACHED() << "Attempted to enqueue packet on a stopped stream";
     return timestamp;
+  }
+
+  // Convert if the packet if there is bitstream filter.
+  if (bitstream_converter_.get() &&
+      !bitstream_converter_->ConvertPacket(packet)) {
+    LOG(ERROR) << "Format converstion failed.";
   }
 
   // Enqueue the callback and attempt to satisfy a read immediately.
@@ -187,12 +203,18 @@ void FFmpegDemuxerStream::FulfillPendingRead() {
   read_callback->Run(buffer);
 }
 
-base::TimeDelta FFmpegDemuxerStream::ConvertTimestamp(int64 timestamp) {
+void FFmpegDemuxerStream::SetBitstreamConverter(
+    BitstreamConverter* converter) {
+  bitstream_converter_.reset(converter);
+}
+
+// static
+base::TimeDelta FFmpegDemuxerStream::ConvertStreamTimestamp(
+    const AVRational& time_base, int64 timestamp) {
   if (timestamp == static_cast<int64>(AV_NOPTS_VALUE))
     return StreamSample::kInvalidTimestamp;
-  AVRational time_base = { 1, base::Time::kMicrosecondsPerSecond };
-  int64 microseconds = av_rescale_q(timestamp, stream_->time_base, time_base);
-  return base::TimeDelta::FromMicroseconds(microseconds);
+
+  return ConvertTimestamp(time_base, timestamp);
 }
 
 //
@@ -213,7 +235,6 @@ FFmpegDemuxer::~FFmpegDemuxer() {
   // in the decoder filters. By reaching this point, all filters should have
   // stopped, so this is the only safe place to do the global clean up.
   // TODO(hclam): close the codecs in the corresponding decoders.
-  AutoLock auto_lock(FFmpegLock::get()->lock());
   if (!format_context_)
     return;
 
@@ -375,27 +396,49 @@ void FFmpegDemuxer::InitializeTask(DataSource* data_source,
   DCHECK(context);
   format_context_ = context;
 
-  // Serialize calls to av_find_stream_info().
-  {
-    AutoLock auto_lock(FFmpegLock::get()->lock());
-
-    // Fully initialize AVFormatContext by parsing the stream a little.
-    result = av_find_stream_info(format_context_);
-    if (result < 0) {
-      host()->SetError(DEMUXER_ERROR_COULD_NOT_PARSE);
-      callback->Run();
-      return;
-    }
+  // Fully initialize AVFormatContext by parsing the stream a little.
+  result = av_find_stream_info(format_context_);
+  if (result < 0) {
+    host()->SetError(DEMUXER_ERROR_COULD_NOT_PARSE);
+    callback->Run();
+    return;
   }
 
   // Create demuxer streams for all supported streams.
   base::TimeDelta max_duration;
   for (size_t i = 0; i < format_context_->nb_streams; ++i) {
-    CodecType codec_type = format_context_->streams[i]->codec->codec_type;
+    AVCodecContext* codec_context = format_context_->streams[i]->codec;
+    CodecType codec_type = codec_context->codec_type;
     if (codec_type == CODEC_TYPE_AUDIO || codec_type == CODEC_TYPE_VIDEO) {
       AVStream* stream = format_context_->streams[i];
       FFmpegDemuxerStream* demuxer_stream
           = new FFmpegDemuxerStream(this, stream);
+
+      // Initialize the bitstream if OpenMAX is enabled.
+      // TODO(hclam): Should be enabled by the decoder.
+      if (CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kEnableOpenMax)) {
+        // TODO(ajwong): Unittest this branch of the if statement.
+        // TODO(hclam): In addition to codec we should also check the container.
+        const char* filter_name = NULL;
+        if (stream->codec->codec_id == CODEC_ID_H264) {
+          filter_name = "h264_mp4toannexb";
+        } else if (stream->codec->codec_id == CODEC_ID_MPEG4) {
+          filter_name = "mpeg4video_es";
+        } else if (stream->codec->codec_id == CODEC_ID_WMV3) {
+          filter_name = "vc1_asftorcv";
+        } else if (stream->codec->codec_id == CODEC_ID_VC1) {
+          filter_name = "vc1_asftoannexg";
+        }
+
+        if (filter_name) {
+          BitstreamConverter* bitstream_converter =
+              new FFmpegBitstreamConverter(filter_name, codec_context);
+          CHECK(bitstream_converter->Initialize());
+          demuxer_stream->SetBitstreamConverter(bitstream_converter);
+        }
+      }
+
       DCHECK(demuxer_stream);
       streams_.push_back(demuxer_stream);
       packet_streams_.push_back(demuxer_stream);
@@ -409,7 +452,14 @@ void FFmpegDemuxer::InitializeTask(DataSource* data_source,
     callback->Run();
     return;
   }
-
+  if (format_context_->duration != static_cast<int64_t>(AV_NOPTS_VALUE)) {
+    // If there is a duration value in the container use that to find the
+    // maximum between it and the duration from A/V streams.
+    const AVRational av_time_base = {1, AV_TIME_BASE};
+    max_duration =
+        std::max(max_duration,
+                 ConvertTimestamp(av_time_base, format_context_->duration));
+  }
   // Good to go: set the duration and notify we're done initializing.
   host()->SetDuration(max_duration);
   callback->Run();
@@ -464,7 +514,7 @@ void FFmpegDemuxer::DemuxTask() {
   }
 
   // Allocate and read an AVPacket from the media.
-  scoped_ptr<AVPacket> packet(new AVPacket());
+  scoped_ptr_malloc<AVPacket, ScopedPtrAVFreePacket> packet(new AVPacket());
   int result = av_read_frame(format_context_, packet.get());
   if (result < 0) {
     // If we have reached the end of stream, tell the downstream filters about
@@ -481,17 +531,18 @@ void FFmpegDemuxer::DemuxTask() {
   DCHECK_LT(packet->stream_index, static_cast<int>(packet_streams_.size()));
   FFmpegDemuxerStream* demuxer_stream = packet_streams_[packet->stream_index];
   if (demuxer_stream) {
-    // If a packet is returned by FFmpeg's av_parser_parse2()
-    // the packet will reference an inner memory of FFmpeg.
-    // In this case, the packet's "destruct" member is NULL,
-    // and it MUST be duplicated.  Fixes issue with MP3.
-    av_dup_packet(packet.get());
-
     // Queue the packet with the appropriate stream.  The stream takes
     // ownership of the AVPacket.
-    current_timestamp_ = demuxer_stream->EnqueuePacket(packet.release());
-  } else {
-    av_free_packet(packet.get());
+    if (packet.get()) {
+      // If a packet is returned by FFmpeg's av_parser_parse2()
+      // the packet will reference an inner memory of FFmpeg.
+      // In this case, the packet's "destruct" member is NULL,
+      // and it MUST be duplicated. This fixes issue with MP3 and possibly
+      // other codecs.  It is safe to call this function even if the packet does
+      // not refer to inner memory from FFmpeg.
+      av_dup_packet(packet.get());
+      current_timestamp_ = demuxer_stream->EnqueuePacket(packet.release());
+    }
   }
 
   // Create a loop by posting another task.  This allows seek and message loop

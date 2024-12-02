@@ -49,9 +49,9 @@ void NativeControlGtk::VisibilityChanged(View* starting_from, bool is_visible) {
     if (native_view()) {
       // We destroy the child widget when we become invisible because of the
       // performance cost of maintaining widgets that aren't currently needed.
-      GtkWidget* widget = native_view();
       Detach();
-      gtk_widget_destroy(widget);
+      // Make sure that Detach destroyed the widget.
+      DCHECK(!native_view());
     }
   } else if (!native_view()) {
     if (GetWidget())
@@ -75,7 +75,7 @@ void NativeControlGtk::NativeControlCreated(GtkWidget* native_control) {
   gtk_widget_set_sensitive(native_view(), IsEnabled());
 
   // Listen for focus change event to update the FocusManager focused view.
-  g_signal_connect(G_OBJECT(native_control), "focus-in-event",
+  g_signal_connect(native_control, "focus-in-event",
                    G_CALLBACK(CallFocusIn), this);
 }
 

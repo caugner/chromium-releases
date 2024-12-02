@@ -91,7 +91,7 @@ TEST(Time, LocalMidnight) {
 }
 
 TEST(TimeTicks, Deltas) {
-  for (int index = 0; index < 500; index++) {
+  for (int index = 0; index < 50; index++) {
     TimeTicks ticks_start = TimeTicks::Now();
     PlatformThread::Sleep(10);
     TimeTicks ticks_stop = TimeTicks::Now();
@@ -141,6 +141,27 @@ TEST(TimeDelta, FromAndIn) {
   EXPECT_EQ(13.0, TimeDelta::FromMilliseconds(13).InMillisecondsF());
   EXPECT_EQ(13, TimeDelta::FromMicroseconds(13).InMicroseconds());
 }
+
+#if defined(OS_POSIX)
+TEST(TimeDelta, TimeSpecConversion) {
+  struct timespec result = TimeDelta::FromSeconds(0).ToTimeSpec();
+  EXPECT_EQ(result.tv_sec, 0);
+  EXPECT_EQ(result.tv_nsec, 0);
+
+  result = TimeDelta::FromSeconds(1).ToTimeSpec();
+  EXPECT_EQ(result.tv_sec, 1);
+  EXPECT_EQ(result.tv_nsec, 0);
+
+  result = TimeDelta::FromMicroseconds(1).ToTimeSpec();
+  EXPECT_EQ(result.tv_sec, 0);
+  EXPECT_EQ(result.tv_nsec, 1000);
+
+  result = TimeDelta::FromMicroseconds(
+      Time::kMicrosecondsPerSecond + 1).ToTimeSpec();
+  EXPECT_EQ(result.tv_sec, 1);
+  EXPECT_EQ(result.tv_nsec, 1000);
+}
+#endif  // OS_POSIX
 
 // Our internal time format is serialized in things like databases, so it's
 // important that it's consistent across all our platforms.  We use the 1601

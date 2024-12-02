@@ -9,13 +9,27 @@
 
 #include <string>
 
+#include "base/logging.h"
 #include "breakpad/src/client/windows/handler/exception_handler.h"
+
+extern google_breakpad::ExceptionHandler* g_breakpad;
+extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 bool InitializeVectoredCrashReporting(
     bool full_dump,
     const wchar_t* user_sid,
     const std::wstring& dump_path,
     google_breakpad::CustomClientInfo* client_info);
+
+bool InitializeVectoredCrashReportingWithPipeName(
+    bool full_dump,
+    const wchar_t* pipe_name,
+    const std::wstring& dump_path,
+    google_breakpad::CustomClientInfo* client_info);
+
 bool ShutdownVectoredCrashReporting();
+
+bool WriteMinidumpForException(EXCEPTION_POINTERS* p);
+
 
 #endif  // CHROME_FRAME_CRASH_REPORTING_CRASH_REPORT_H_

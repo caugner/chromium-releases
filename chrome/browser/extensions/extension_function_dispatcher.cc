@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,21 +6,40 @@
 
 #include "base/process_util.h"
 #include "base/singleton.h"
+#include "base/ref_counted.h"
 #include "base/values.h"
+#include "chrome/browser/browser.h"
+#include "chrome/browser/browser_list.h"
+#include "chrome/browser/browser_window.h"
+#include "chrome/browser/dom_ui/chrome_url_data_manager.h"
+#include "chrome/browser/dom_ui/dom_ui_favicon_source.h"
 #include "chrome/browser/extensions/execute_code_in_tab_function.h"
+#include "chrome/browser/extensions/extension_accessibility_api.h"
+#include "chrome/browser/extensions/extension_bookmark_manager_api.h"
 #include "chrome/browser/extensions/extension_bookmarks_module.h"
 #include "chrome/browser/extensions/extension_bookmarks_module_constants.h"
 #include "chrome/browser/extensions/extension_browser_actions_api.h"
+#include "chrome/browser/extensions/extension_clipboard_api.h"
+#include "chrome/browser/extensions/extension_context_menu_api.h"
+#include "chrome/browser/extensions/extension_dom_ui.h"
 #include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/extension_history_api.h"
+#include "chrome/browser/extensions/extension_idle_api.h"
 #include "chrome/browser/extensions/extension_i18n_api.h"
+#include "chrome/browser/extensions/extension_infobar_module.h"
 #include "chrome/browser/extensions/extension_message_service.h"
+#include "chrome/browser/extensions/extension_metrics_module.h"
 #include "chrome/browser/extensions/extension_page_actions_module.h"
 #include "chrome/browser/extensions/extension_page_actions_module_constants.h"
+#include "chrome/browser/extensions/extension_popup_api.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/extensions/extension_processes_api.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extension_tabs_module_constants.h"
 #include "chrome/browser/extensions/extension_test_api.h"
 #include "chrome/browser/extensions/extension_toolstrip_api.h"
+#include "chrome/browser/extensions/extensions_quota_service.h"
+#include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
@@ -105,19 +124,19 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<PageActionHideFunction>();
   RegisterFunction<PageActionSetIconFunction>();
   RegisterFunction<PageActionSetTitleFunction>();
-  RegisterFunction<PageActionSetBadgeBackgroundColorFunction>();
-  RegisterFunction<PageActionSetBadgeTextColorFunction>();
-  RegisterFunction<PageActionSetBadgeTextFunction>();
+  RegisterFunction<PageActionSetPopupFunction>();
 
   // Browser Actions.
   RegisterFunction<BrowserActionSetIconFunction>();
   RegisterFunction<BrowserActionSetTitleFunction>();
   RegisterFunction<BrowserActionSetBadgeTextFunction>();
   RegisterFunction<BrowserActionSetBadgeBackgroundColorFunction>();
+  RegisterFunction<BrowserActionSetPopupFunction>();
 
   // Bookmarks.
   RegisterFunction<GetBookmarksFunction>();
   RegisterFunction<GetBookmarkChildrenFunction>();
+  RegisterFunction<GetBookmarkRecentFunction>();
   RegisterFunction<GetBookmarkTreeFunction>();
   RegisterFunction<SearchBookmarksFunction>();
   RegisterFunction<RemoveBookmarkFunction>();
@@ -126,6 +145,33 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<MoveBookmarkFunction>();
   RegisterFunction<UpdateBookmarkFunction>();
 
+  // Infobars.
+  RegisterFunction<ShowInfoBarFunction>();
+
+  // BookmarkManager
+  RegisterFunction<CopyBookmarkManagerFunction>();
+  RegisterFunction<CutBookmarkManagerFunction>();
+  RegisterFunction<PasteBookmarkManagerFunction>();
+  RegisterFunction<CanPasteBookmarkManagerFunction>();
+  RegisterFunction<ImportBookmarksFunction>();
+  RegisterFunction<ExportBookmarksFunction>();
+  RegisterFunction<SortChildrenBookmarkManagerFunction>();
+  RegisterFunction<BookmarkManagerGetStringsFunction>();
+  RegisterFunction<StartDragBookmarkManagerFunction>();
+  RegisterFunction<DropBookmarkManagerFunction>();
+  RegisterFunction<GetSubtreeBookmarkManagerFunction>();
+
+  // History
+  RegisterFunction<AddUrlHistoryFunction>();
+  RegisterFunction<DeleteAllHistoryFunction>();
+  RegisterFunction<DeleteRangeHistoryFunction>();
+  RegisterFunction<DeleteUrlHistoryFunction>();
+  RegisterFunction<GetVisitsHistoryFunction>();
+  RegisterFunction<SearchHistoryFunction>();
+
+  // Idle
+  RegisterFunction<ExtensionIdleQueryStateFunction>();
+
   // Toolstrips.
   RegisterFunction<ToolstripExpandFunction>();
   RegisterFunction<ToolstripCollapseFunction>();
@@ -133,10 +179,42 @@ void FactoryRegistry::ResetFunctions() {
   // I18N.
   RegisterFunction<GetAcceptLanguagesFunction>();
 
+  // Popup API.
+  RegisterFunction<PopupShowFunction>();
+
+  // Processes.
+  RegisterFunction<GetProcessForTabFunction>();
+
+  // Metrics.
+  RegisterFunction<MetricsRecordUserActionFunction>();
+  RegisterFunction<MetricsRecordValueFunction>();
+  RegisterFunction<MetricsRecordPercentageFunction>();
+  RegisterFunction<MetricsRecordCountFunction>();
+  RegisterFunction<MetricsRecordSmallCountFunction>();
+  RegisterFunction<MetricsRecordMediumCountFunction>();
+  RegisterFunction<MetricsRecordTimeFunction>();
+  RegisterFunction<MetricsRecordMediumTimeFunction>();
+  RegisterFunction<MetricsRecordLongTimeFunction>();
+
   // Test.
   RegisterFunction<ExtensionTestPassFunction>();
   RegisterFunction<ExtensionTestFailFunction>();
   RegisterFunction<ExtensionTestLogFunction>();
+  RegisterFunction<ExtensionTestQuotaResetFunction>();
+  RegisterFunction<ExtensionTestCreateIncognitoTabFunction>();
+
+  // Accessibility.
+  RegisterFunction<GetFocusedControlFunction>();
+  RegisterFunction<SetAccessibilityEnabledFunction>();
+
+  // Clipboard.
+  RegisterFunction<ExecuteCopyClipboardFunction>();
+  RegisterFunction<ExecuteCutClipboardFunction>();
+  RegisterFunction<ExecutePasteClipboardFunction>();
+
+  // Context Menus.
+  RegisterFunction<CreateContextMenuFunction>();
+  RegisterFunction<RemoveContextMenuFunction>();
 }
 
 void FactoryRegistry::GetAllNames(std::vector<std::string>* names) {
@@ -189,19 +267,34 @@ std::set<ExtensionFunctionDispatcher*>*
   return &instances;
 }
 
+ExtensionFunctionDispatcher* ExtensionFunctionDispatcher::Create(
+    RenderViewHost* render_view_host,
+    Delegate* delegate,
+    const GURL& url) {
+  ExtensionsService* service =
+      render_view_host->process()->profile()->GetExtensionsService();
+  DCHECK(service);
+
+  Extension* extension = service->GetExtensionByURL(url);
+  if (extension)
+    return new ExtensionFunctionDispatcher(render_view_host, delegate,
+                                           extension, url);
+  else
+    return NULL;
+}
+
 ExtensionFunctionDispatcher::ExtensionFunctionDispatcher(
     RenderViewHost* render_view_host,
     Delegate* delegate,
+    Extension* extension,
     const GURL& url)
-  : render_view_host_(render_view_host),
+  : profile_(render_view_host->process()->profile()),
+    render_view_host_(render_view_host),
     delegate_(delegate),
     url_(url),
     ALLOW_THIS_IN_INITIALIZER_LIST(peer_(new Peer(this))) {
   // TODO(erikkay) should we do something for these errors in Release?
   DCHECK(url.SchemeIs(chrome::kExtensionScheme));
-
-  Extension* extension =
-      profile()->GetExtensionsService()->GetExtensionByURL(url);
   DCHECK(extension);
 
   all_instances()->insert(this);
@@ -211,6 +304,21 @@ ExtensionFunctionDispatcher::ExtensionFunctionDispatcher(
   epm->RegisterExtensionProcess(extension_id(),
                                 render_view_host->process()->id());
 
+  bool incognito_enabled =
+      profile()->GetExtensionsService()->IsIncognitoEnabled(extension);
+
+  // If the extension has permission to load chrome://favicon/ resources we need
+  // to make sure that the DOMUIFavIconSource is registered with the
+  // ChromeURLDataManager.
+  if (extension->HasHostPermission(GURL(chrome::kChromeUIFavIconURL))) {
+    DOMUIFavIconSource* favicon_source = new DOMUIFavIconSource(profile_);
+    ChromeThread::PostTask(
+        ChromeThread::IO, FROM_HERE,
+        NewRunnableMethod(Singleton<ChromeURLDataManager>::get(),
+                          &ChromeURLDataManager::AddDataSource,
+                          make_scoped_refptr(favicon_source)));
+  }
+
   // Update the extension permissions. Doing this each time we create an EFD
   // ensures that new processes are informed of permissions for newly installed
   // extensions.
@@ -218,42 +326,82 @@ ExtensionFunctionDispatcher::ExtensionFunctionDispatcher(
       extension->id(), extension->api_permissions()));
   render_view_host->Send(new ViewMsg_Extension_SetHostPermissions(
       extension->url(), extension->host_permissions()));
+  render_view_host->Send(new ViewMsg_Extension_ExtensionSetIncognitoEnabled(
+      extension->id(), incognito_enabled));
+
+  NotificationService::current()->Notify(
+      NotificationType::EXTENSION_FUNCTION_DISPATCHER_CREATED,
+      Source<Profile>(profile_),
+      Details<ExtensionFunctionDispatcher>(this));
 }
 
 ExtensionFunctionDispatcher::~ExtensionFunctionDispatcher() {
   all_instances()->erase(this);
   peer_->dispatcher_ = NULL;
+
+  NotificationService::current()->Notify(
+      NotificationType::EXTENSION_FUNCTION_DISPATCHER_DESTROYED,
+      Source<Profile>(profile_),
+      Details<ExtensionFunctionDispatcher>(this));
 }
 
-Browser* ExtensionFunctionDispatcher::GetBrowser() {
-  return delegate_->GetBrowser();
-}
+Browser* ExtensionFunctionDispatcher::GetCurrentBrowser(
+    bool include_incognito) {
+  Browser* browser = delegate_->GetBrowser();
 
-ExtensionHost* ExtensionFunctionDispatcher::GetExtensionHost() {
-  return delegate_->GetExtensionHost();
-}
+  // If the delegate has an associated browser and that browser is in the right
+  // incognito state, we can return it.
+  if (browser) {
+    if (include_incognito || !browser->profile()->IsOffTheRecord())
+      return browser;
+  }
 
-Extension* ExtensionFunctionDispatcher::GetExtension() {
-  ExtensionsService* service = profile()->GetExtensionsService();
-  DCHECK(service);
+  // Otherwise, try to default to a reasonable browser.
+  Profile* profile = render_view_host()->process()->profile();
 
-  Extension* extension = service->GetExtensionById(extension_id());
-  DCHECK(extension);
+  // Make sure we don't return an incognito browser without proper access.
+  if (!include_incognito)
+    profile = profile->GetOriginalProfile();
 
-  return extension;
+  browser = BrowserList::FindBrowserWithType(profile, Browser::TYPE_ANY,
+                                             include_incognito);
+
+  // NOTE(rafaelw): This can return NULL in some circumstances. In particular,
+  // a toolstrip or background_page onload chrome.tabs api call can make it
+  // into here before the browser is sufficiently initialized to return here.
+  // A similar situation may arise during shutdown.
+  // TODO(rafaelw): Delay creation of background_page until the browser
+  // is available. http://code.google.com/p/chromium/issues/detail?id=13284
+  return browser;
 }
 
 void ExtensionFunctionDispatcher::HandleRequest(const std::string& name,
                                                 const Value* args,
+                                                const GURL& source_url,
                                                 int request_id,
                                                 bool has_callback) {
   scoped_refptr<ExtensionFunction> function(
       FactoryRegistry::instance()->NewFunction(name));
   function->set_dispatcher_peer(peer_);
+  function->set_profile(profile_);
+  function->set_extension_id(extension_id());
   function->SetArgs(args);
+  function->set_source_url(source_url);
   function->set_request_id(request_id);
   function->set_has_callback(has_callback);
-  function->Run();
+  ExtensionsService* service = profile()->GetExtensionsService();
+  DCHECK(service);
+  Extension* extension = service->GetExtensionById(extension_id(), false);
+  DCHECK(extension);
+  function->set_include_incognito(service->IsIncognitoEnabled(extension));
+
+  ExtensionsQuotaService* quota = service->quota_service();
+  if (quota->Assess(extension_id(), function, args, base::TimeTicks::Now())) {
+    function->Run();
+  } else {
+    render_view_host_->SendExtensionResponse(function->request_id(), false,
+        std::string(), QuotaLimitHeuristic::kGenericOverQuotaError);
+  }
 }
 
 void ExtensionFunctionDispatcher::SendResponse(ExtensionFunction* function,
@@ -271,11 +419,11 @@ void ExtensionFunctionDispatcher::HandleBadMessage(ExtensionFunction* api) {
     CHECK(false);
   } else {
     NOTREACHED();
-    base::KillProcess(render_view_host_->process()->process().handle(),
+    base::KillProcess(render_view_host_->process()->GetHandle(),
                       ResultCodes::KILLED_BAD_MESSAGE, false);
   }
 }
 
 Profile* ExtensionFunctionDispatcher::profile() {
-  return render_view_host_->process()->profile();
+  return profile_;
 }

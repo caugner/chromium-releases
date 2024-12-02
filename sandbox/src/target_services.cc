@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -84,25 +84,22 @@ bool TargetServicesBase::TestIPCPing(int version) {
   if (NULL == memory) {
     return false;
   }
-
   SharedMemIPCClient ipc(memory);
   CrossCallReturn answer = {0};
 
   if (1 == version) {
     uint32 tick1 = ::GetTickCount();
-    uint32 cookie = 717111;
+    uint32 cookie = 717115;
     ResultCode code = CrossCall(ipc, IPC_PING1_TAG, cookie, &answer);
 
     if (SBOX_ALL_OK != code) {
       return false;
     }
-
     // We should get two extended returns values from the IPC, one is the
     // tick count on the broker and the other is the cookie times two.
     if ((answer.extended_count != 2)) {
       return false;
     }
-
     // We test the first extended answer to be within the bounds of the tick
     // count only if there was no tick count wraparound.
     uint32 tick2 = ::GetTickCount();
@@ -124,14 +121,12 @@ bool TargetServicesBase::TestIPCPing(int version) {
     if (SBOX_ALL_OK != code) {
       return false;
     }
-
     if (cookie != 717111 * 3) {
       return false;
     }
   } else {
     return false;
   }
-
   return true;
 }
 

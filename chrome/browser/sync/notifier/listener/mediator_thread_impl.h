@@ -20,6 +20,7 @@
 #ifndef CHROME_BROWSER_SYNC_NOTIFIER_LISTENER_MEDIATOR_THREAD_IMPL_H_
 #define CHROME_BROWSER_SYNC_NOTIFIER_LISTENER_MEDIATOR_THREAD_IMPL_H_
 
+#include "base/logging.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/sync/notifier/communicator/login.h"
 #include "chrome/browser/sync/notifier/communicator/login_failure.h"
@@ -33,11 +34,11 @@ class TaskPump;
 }  // namespace notifier
 
 namespace buzz {
-class buzz::XmppClient;
+class XmppClient;
 }  // namespace buzz
 
 namespace talk_base {
-class talk_base::SocketServer;
+class SocketServer;
 }  // namespace talk_base
 
 namespace browser_sync {
@@ -47,7 +48,8 @@ enum MEDIATOR_CMD {
   CMD_DISCONNECT,
   CMD_LISTEN_FOR_UPDATES,
   CMD_SEND_NOTIFICATION,
-  CMD_SUBSCRIBE_FOR_UPDATES
+  CMD_SUBSCRIBE_FOR_UPDATES,
+  CMD_PUMP_AUXILIARY_LOOPS,
 };
 
 // Used to pass authentication information from the mediator to the thread.
@@ -67,11 +69,12 @@ class MediatorThreadImpl
       public talk_base::MessageHandler,
       public talk_base::Thread {
  public:
-  MediatorThreadImpl();
+  explicit MediatorThreadImpl(NotificationMethod notification_method);
   virtual ~MediatorThreadImpl();
 
   // Start the thread.
   virtual void Start();
+  virtual void Stop();
   virtual void Run();
 
   // These are called from outside threads, by the talk mediator object.
@@ -93,6 +96,7 @@ class MediatorThreadImpl
   void DoListenForUpdates();
   void DoSendNotification();
   void DoStanzaLogging();
+  void PumpAuxiliaryLoops();
 
   // These handle messages indicating an event happened in the outside world.
   void OnUpdateListenerMessage();

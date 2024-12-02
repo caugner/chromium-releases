@@ -48,6 +48,8 @@ class EntryImpl : public Entry, public base::RefCounted<EntryImpl> {
   virtual int WriteSparseData(int64 offset, net::IOBuffer* buf, int buf_len,
                               net::CompletionCallback* completion_callback);
   virtual int GetAvailableRange(int64 offset, int len, int64* start);
+  virtual int GetAvailableRange(int64 offset, int len, int64* start,
+                                CompletionCallback* callback);
   virtual void CancelSparseIO();
   virtual int ReadyForSparseIO(net::CompletionCallback* completion_callback);
 
@@ -110,7 +112,7 @@ class EntryImpl : public Entry, public base::RefCounted<EntryImpl> {
   void SetTimes(base::Time last_used, base::Time last_modified);
 
   // Generates a histogram for the time spent working on this operation.
-  void ReportIOTime(Operation op, const base::Time& start);
+  void ReportIOTime(Operation op, const base::TimeTicks& start);
 
  private:
   enum {

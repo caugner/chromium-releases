@@ -5,41 +5,51 @@
 #ifndef CHROME_BROWSER_GTK_CREATE_APPLICATION_SHORTCUTS_DIALOG_GTK_H_
 #define CHROME_BROWSER_GTK_CREATE_APPLICATION_SHORTCUTS_DIALOG_GTK_H_
 
+#include "app/gtk_signal.h"
 #include "base/basictypes.h"
+#include "base/ref_counted.h"
 #include "base/string16.h"
+#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/shell_integration.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 typedef struct _GtkWidget GtkWidget;
 typedef struct _GtkWindow GtkWindow;
 
-class CreateApplicationShortcutsDialogGtk {
+class TabContents;
+
+class CreateApplicationShortcutsDialogGtk
+    : public base::RefCountedThreadSafe<CreateApplicationShortcutsDialogGtk,
+                                        ChromeThread::DeleteOnUIThread> {
  public:
-  // Displays the dialog box to create application shortcuts for |url| with
-  // |title|.
-  static void Show(GtkWindow* parent,
-                   const GURL& url,
-                   const string16& title,
-                   const SkBitmap& favicon);
+  // Displays the dialog box to create application shortcuts for |tab_contents|.
+  static void Show(GtkWindow* parent, TabContents* tab_contents);
 
  private:
+  friend class ChromeThread;
+  friend class DeleteTask<CreateApplicationShortcutsDialogGtk>;
+
   CreateApplicationShortcutsDialogGtk(GtkWindow* parent,
-                                      const GURL& url,
-                                      const string16& title,
-                                      const SkBitmap& favicon);
-  ~CreateApplicationShortcutsDialogGtk() { }
+                                      TabContents* tab_contents);
+  ~CreateApplicationShortcutsDialogGtk();
 
-  // Handler to respond to Ok and Cancel responses from the dialog.
-  static void HandleOnResponseDialog(GtkWidget* widget,
-      int response, CreateApplicationShortcutsDialogGtk* user_data) {
-    user_data->OnDialogResponse(widget, response);
-  }
+  CHROMEGTK_CALLBACK_1(CreateApplicationShortcutsDialogGtk, void,
+                       OnCreateDialogResponse, int);
 
-  void OnDialogResponse(GtkWidget* widget, int response);
+  CHROMEGTK_CALLBACK_1(CreateApplicationShortcutsDialogGtk, void,
+                       OnErrorDialogResponse, int);
+
+  void CreateDesktopShortcut(
+      const ShellIntegration::ShortcutInfo& shortcut_info);
+  void ShowErrorDialog();
 
   // UI elements.
   GtkWidget* desktop_checkbox_;
   GtkWidget* menu_checkbox_;
+
+  // TabContents for which the shortcut will be created.
+  TabContents* tab_contents_;
 
   // Target URL of the shortcut.
   GURL url_;
@@ -49,6 +59,12 @@ class CreateApplicationShortcutsDialogGtk {
 
   // The favicon of the tab contents, used to set the icon on the desktop.
   SkBitmap favicon_;
+
+  // Dialog box that allows the user to create an application shortcut.
+  GtkWidget* create_dialog_;
+
+  // Dialog box that shows the error message.
+  GtkWidget* error_dialog_;
 
   DISALLOW_COPY_AND_ASSIGN(CreateApplicationShortcutsDialogGtk);
 };

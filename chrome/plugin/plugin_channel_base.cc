@@ -1,10 +1,14 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/plugin/plugin_channel_base.h"
 
+#include <stack>
+
+#include "base/auto_reset.h"
 #include "base/hash_tables.h"
+#include "base/lazy_instance.h"
 #include "chrome/common/child_process.h"
 #include "ipc/ipc_sync_message.h"
 
@@ -17,6 +21,8 @@ typedef base::hash_map<std::string, scoped_refptr<PluginChannelBase> >
 
 static PluginChannelMap g_plugin_channels_;
 
+static base::LazyInstance<std::stack<scoped_refptr<PluginChannelBase> > >
+    lazy_plugin_channel_stack_(base::LINKER_INITIALIZED);
 
 PluginChannelBase* PluginChannelBase::GetChannel(
     const std::string& channel_name, IPC::Channel::Mode mode,
@@ -60,11 +66,15 @@ PluginChannelBase::PluginChannelBase()
       peer_pid_(0),
       in_remove_route_(false),
       channel_valid_(false),
-      in_dispatch_(0),
-      send_unblocking_only_during_dispatch_(false) {
+      in_unblock_dispatch_(0),
+      send_unblocking_only_during_unblock_dispatch_(false) {
 }
 
 PluginChannelBase::~PluginChannelBase() {
+}
+
+PluginChannelBase* PluginChannelBase::GetCurrentChannel() {
+  return lazy_plugin_channel_stack_.Pointer()->top();
 }
 
 void PluginChannelBase::CleanupChannels() {
@@ -85,6 +95,15 @@ void PluginChannelBase::CleanupChannels() {
   g_plugin_channels_.clear();
 }
 
+NPObjectBase* PluginChannelBase::GetNPObjectListenerForRoute(int route_id) {
+  ListenerMap::iterator iter = npobject_listeners_.find(route_id);
+  if (iter == npobject_listeners_.end()) {
+    DLOG(WARNING) << "Invalid route id passed in:" << route_id;
+    return NULL;
+  }
+  return iter->second;
+}
+
 bool PluginChannelBase::Init(MessageLoop* ipc_message_loop,
                              bool create_pipe_now) {
   channel_.reset(new IPC::SyncChannel(
@@ -100,7 +119,8 @@ bool PluginChannelBase::Send(IPC::Message* message) {
     return false;
   }
 
-  if (send_unblocking_only_during_dispatch_ && in_dispatch_ == 0 &&
+  if (send_unblocking_only_during_unblock_dispatch_ &&
+      in_unblock_dispatch_ == 0 &&
       message->is_sync()) {
     message->set_unblock(false);
   }
@@ -115,9 +135,11 @@ int PluginChannelBase::Count() {
 void PluginChannelBase::OnMessageReceived(const IPC::Message& message) {
   // This call might cause us to be deleted, so keep an extra reference to
   // ourself so that we can send the reply and decrement back in_dispatch_.
-  scoped_refptr<PluginChannelBase> me(this);
+  lazy_plugin_channel_stack_.Pointer()->push(
+      scoped_refptr<PluginChannelBase>(this));
 
-  in_dispatch_++;
+  if (message.should_unblock())
+    in_unblock_dispatch_++;
   if (message.routing_id() == MSG_ROUTING_CONTROL) {
     OnControlMessageReceived(message);
   } else {
@@ -130,7 +152,10 @@ void PluginChannelBase::OnMessageReceived(const IPC::Message& message) {
       Send(reply);
     }
   }
-  in_dispatch_--;
+  if (message.should_unblock())
+    in_unblock_dispatch_--;
+
+  lazy_plugin_channel_stack_.Pointer()->pop();
 }
 
 void PluginChannelBase::OnChannelConnected(int32 peer_pid) {
@@ -139,9 +164,9 @@ void PluginChannelBase::OnChannelConnected(int32 peer_pid) {
 
 void PluginChannelBase::AddRoute(int route_id,
                                  IPC::Channel::Listener* listener,
-                                 bool npobject) {
+                                 NPObjectBase* npobject) {
   if (npobject) {
-    npobject_listeners_[route_id] = listener;
+    npobject_listeners_[route_id] = npobject;
   } else {
     plugin_count_++;
   }
@@ -159,8 +184,11 @@ void PluginChannelBase::RemoveRoute(int route_id) {
     // If this RemoveRoute call from the NPObject is a result of us calling
     // OnChannelError below, don't call erase() here because that'll corrupt
     // the iterator below.
-    if (!in_remove_route_)
+    if (in_remove_route_) {
+      iter->second = NULL;
+    } else {
       npobject_listeners_.erase(iter);
+    }
 
     return;
   }
@@ -169,16 +197,19 @@ void PluginChannelBase::RemoveRoute(int route_id) {
   DCHECK(plugin_count_ >= 0);
 
   if (!plugin_count_) {
-    ListenerMap::iterator npobj_iter = npobject_listeners_.begin();
-    in_remove_route_ = true;
-    while (npobj_iter != npobject_listeners_.end()) {
-      npobj_iter->second->OnChannelError();
-      npobj_iter++;
+    AutoReset auto_reset_in_remove_route(&in_remove_route_, true);
+    for (ListenerMap::iterator npobj_iter = npobject_listeners_.begin();
+         npobj_iter != npobject_listeners_.end(); ++npobj_iter) {
+      if (npobj_iter->second) {
+        IPC::Channel::Listener* channel_listener =
+            npobj_iter->second->GetChannelListener();
+        DCHECK(channel_listener != NULL);
+        channel_listener->OnChannelError();
+      }
     }
-    in_remove_route_ = false;
 
-    PluginChannelMap::iterator iter = g_plugin_channels_.begin();
-    while (iter != g_plugin_channels_.end()) {
+    for (PluginChannelMap::iterator iter = g_plugin_channels_.begin();
+         iter != g_plugin_channels_.end(); ++iter) {
       if (iter->second == this) {
 #if defined(OS_POSIX)
         if (channel_valid()) {
@@ -188,8 +219,6 @@ void PluginChannelBase::RemoveRoute(int route_id) {
         g_plugin_channels_.erase(iter);
         return;
       }
-
-      iter++;
     }
 
     NOTREACHED();
@@ -208,8 +237,4 @@ void PluginChannelBase::OnChannelError() {
   }
 #endif
   channel_valid_ = false;
-}
-
-void PluginChannelBase::SendUnblockingOnlyDuringDispatch() {
-  send_unblocking_only_during_dispatch_ = true;
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,12 +23,13 @@
 #import "base/cocoa_protocols_mac.h"
 #include "base/scoped_nsobject.h"
 
+@class FastResizeView;
 @class TabStripView;
 @class TabView;
 
 @interface TabWindowController : NSWindowController<NSWindowDelegate> {
  @private
-  IBOutlet NSView* tabContentArea_;
+  IBOutlet FastResizeView* tabContentArea_;
   IBOutlet TabStripView* tabStripView_;
   NSWindow* overlayWindow_;  // Used during dragging for window opacity tricks
   NSView* cachedContentView_;  // Used during dragging for identifying which
@@ -38,15 +39,17 @@
   BOOL closeDeferred_;  // If YES, call performClose: in removeOverlay:.
 }
 @property(readonly, nonatomic) TabStripView* tabStripView;
-@property(readonly, nonatomic) NSView* tabContentArea;
+@property(readonly, nonatomic) FastResizeView* tabContentArea;
 
 // Used during tab dragging to turn on/off the overlay window when a tab
 // is torn off. If -deferPerformClose (below) is used, -removeOverlay will
 // cause the controller to be autoreleased before returning.
 - (void)showOverlay;
 - (void)removeOverlay;
-- (void)removeOverlayAfterDelay:(NSTimeInterval)delay;
 - (NSWindow*)overlayWindow;
+
+// Returns YES if it is ok to constrain the window's frame to fit the screen.
+- (BOOL)shouldConstrainFrameRect;
 
 // A collection of methods, stubbed out in this base class, that provide
 // the implementation of tab dragging based on whatever model is most
@@ -71,6 +74,14 @@
 // and restores the new tab button. Subclasses need to call the superclass
 // implementation.
 - (void)removePlaceholder;
+
+// The follow return YES if tab dragging/tab tearing (off the tab strip)/window
+// movement is currently allowed. Any number of things can choose to disable it,
+// such as pending animations. The default implementations always return YES.
+// Subclasses should override as appropriate.
+- (BOOL)tabDraggingAllowed;
+- (BOOL)tabTearingAllowed;
+- (BOOL)windowMovementAllowed;
 
 // Show or hide the new tab button. The button is hidden immediately, but
 // waits until the next call to |-layoutTabs| to show it again.
@@ -97,8 +108,14 @@
      fromController:(TabWindowController*)controller;
 
 // Number of tabs in the tab strip. Useful, for example, to know if we're
-// dragging the only tab in the window.
+// dragging the only tab in the window. This includes pinned tabs (both live
+// and not).
 - (NSInteger)numberOfTabs;
+
+// YES if there are tabs in the tab strip which have content, allowing for
+// the notion of tabs in the tab strip that are placeholders, or phantoms, but
+// currently have no content.
+- (BOOL)hasLiveTabs;
 
 // Return the view of the selected tab.
 - (NSView *)selectedTabView;
@@ -106,10 +123,9 @@
 // The title of the selected tab.
 - (NSString*)selectedTabTitle;
 
-// Called to check if we are a normal window (e.g. not a pop-up) and
-// want normal behavior (e.g. a tab strip).  Return YES if so.  The
-// default implementation returns YES.
-- (BOOL)isNormalWindow;
+// Called to check whether or not this controller's window has a tab strip (YES
+// if it does, NO otherwise). The default implementation returns YES.
+- (BOOL)hasTabStrip;
 
 // Get/set whether a particular tab is draggable between windows.
 - (BOOL)isTabDraggable:(NSView*)tabView;

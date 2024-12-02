@@ -18,6 +18,9 @@ class AutoUpdateTestRequestJob : public URLRequestTestJob {
     const std::string& response_data) : URLRequestTestJob(
     request, URLRequestTestJob::test_headers(), response_data, true) {}
   virtual int GetResponseCode() const { return 200; }
+
+ private:
+  ~AutoUpdateTestRequestJob() {}
 };
 
 
@@ -68,8 +71,7 @@ void AutoUpdateInterceptor::SetResponse(const std::string url,
 
 void AutoUpdateInterceptor::SetResponseOnIOThread(const std::string url,
                                                   const FilePath& path) {
-  MessageLoop* io_loop = ChromeThread::GetMessageLoop(ChromeThread::IO);
-  io_loop->PostTask(FROM_HERE,
-      NewRunnableMethod(this, &AutoUpdateInterceptor::SetResponse,
-      url, path));
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(this, &AutoUpdateInterceptor::SetResponse, url, path));
 }

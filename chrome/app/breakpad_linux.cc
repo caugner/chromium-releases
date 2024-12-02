@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,10 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/uio.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -22,18 +24,22 @@
 #include "base/path_service.h"
 #include "base/rand_util.h"
 #include "base/string_util.h"
-#include "breakpad/linux/directory_reader.h"
-#include "breakpad/linux/exception_handler.h"
-#include "breakpad/linux/linux_libc_support.h"
-#include "breakpad/linux/linux_syscall_support.h"
-#include "breakpad/linux/memory.h"
+#include "breakpad/src/client/linux/handler/exception_handler.h"
+#include "breakpad/src/client/linux/minidump_writer/directory_reader.h"
+#include "breakpad/src/common/linux/linux_libc_support.h"
+#include "breakpad/src/common/linux/linux_syscall_support.h"
+#include "breakpad/src/common/linux/memory.h"
 #include "chrome/common/chrome_descriptors.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/env_vars.h"
 #include "chrome/installer/util/google_update_settings.h"
 
 static const char kUploadURL[] =
     "https://clients2.google.com/cr/report";
+
+static bool is_crash_reporter_enabled = false;
+static uint64_t uptime = 0;
 
 // Writes the value |v| as 16 hex characters to the memory pointed at by
 // |output|.
@@ -44,6 +50,48 @@ static void write_uint64_hex(char* output, uint64_t v) {
     output[i] = hextable[v & 15];
     v >>= 4;
   }
+}
+
+// The following helper functions are for calculating uptime.
+
+// Converts a struct timeval to milliseconds.
+static uint64_t timeval_to_ms(struct timeval *tv) {
+  uint64_t ret = tv->tv_sec;  // Avoid overflow by explicitly using a uint64_t.
+  ret *= 1000;
+  ret += tv->tv_usec / 1000;
+  return ret;
+}
+
+// Converts a struct timeval to milliseconds.
+static uint64_t kernel_timeval_to_ms(struct kernel_timeval *tv) {
+  uint64_t ret = tv->tv_sec;  // Avoid overflow by explicitly using a uint64_t.
+  ret *= 1000;
+  ret += tv->tv_usec / 1000;
+  return ret;
+}
+
+// uint64_t version of my_int_len() from
+// breakpad/src/common/linux/linux_libc_support.h. Return the length of the
+// given, non-negative integer when expressed in base 10.
+static unsigned my_uint64_len(uint64_t i) {
+  if (!i)
+    return 1;
+
+  unsigned len = 0;
+  while (i) {
+    len++;
+    i /= 10;
+  }
+
+  return len;
+}
+
+// uint64_t version of my_itos() from
+// breakpad/src/common/linux/linux_libc_support.h. Convert a non-negative
+// integer to a string.
+static void my_uint64tos(char* output, uint64_t i, unsigned i_len) {
+  for (unsigned index = i_len; index; --index, i /= 10)
+    output[index - 1] = '0' + (i % 10);
 }
 
 pid_t HandleCrashDump(const BreakpadInfo& info) {
@@ -97,7 +145,7 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
 
     for (unsigned i = 0; i < 10; ++i) {
       uint64_t t;
-      read(ufd, &t, sizeof(t));
+      sys_read(ufd, &t, sizeof(t));
       write_uint64_hex(temp_file + sizeof(temp_file) - (16 + 1), t);
 
       fd = sys_open(temp_file, O_WRONLY | O_CREAT | O_EXCL, 0600);
@@ -151,12 +199,17 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
   //   1.2.3.4 \r\n (25, 26)
   //   BOUNDARY \r\n (27, 28)
   //
-  //   zero or more:
+  //   zero or one:
+  //   Content-Disposition: form-data; name="ptime" \r\n \r\n (0..4)
+  //   abcdef \r\n (5, 6)
+  //   BOUNDARY \r\n (7, 8)
+  //
+  //   zero or one:
   //   Content-Disposition: form-data; name="ptype" \r\n \r\n (0..4)
   //   abcdef \r\n (5, 6)
   //   BOUNDARY \r\n (7, 8)
   //
-  //   zero or more:
+  //   zero or one:
   //   Content-Disposition: form-data; name="lsb-release" \r\n \r\n (0..4)
   //   abcdef \r\n (5, 6)
   //   BOUNDARY \r\n (7, 8)
@@ -187,6 +240,7 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
   static const char content_type_msg[] =
       "Content-Type: application/octet-stream";
   static const char url_chunk_msg[] = "url-chunk-";
+  static const char process_time_msg[] = "ptime";
   static const char process_type_msg[] = "ptype";
   static const char distro_msg[] = "lsb-release";
 
@@ -261,6 +315,41 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
 
   sys_writev(fd, iov, 29);
 
+  if (uptime >= 0) {
+    struct kernel_timeval tv;
+    if (!sys_gettimeofday(&tv, NULL)) {
+      uint64_t time = kernel_timeval_to_ms(&tv);
+      if (time > uptime) {
+        time -= uptime;
+        char time_str[21];
+        const unsigned time_len = my_uint64_len(time);
+        my_uint64tos(time_str, time, time_len);
+
+        iov[0].iov_base = const_cast<char*>(form_data_msg);
+        iov[0].iov_len = sizeof(form_data_msg) - 1;
+        iov[1].iov_base = const_cast<char*>(process_time_msg);
+        iov[1].iov_len = sizeof(process_time_msg) - 1;
+        iov[2].iov_base = const_cast<char*>(quote_msg);
+        iov[2].iov_len = sizeof(quote_msg);
+        iov[3].iov_base = const_cast<char*>(rn);
+        iov[3].iov_len = sizeof(rn);
+        iov[4].iov_base = const_cast<char*>(rn);
+        iov[4].iov_len = sizeof(rn);
+
+        iov[5].iov_base = const_cast<char*>(time_str);
+        iov[5].iov_len = time_len;
+        iov[6].iov_base = const_cast<char*>(rn);
+        iov[6].iov_len = sizeof(rn);
+        iov[7].iov_base = mime_boundary;
+        iov[7].iov_len = sizeof(mime_boundary) - 1;
+        iov[8].iov_base = const_cast<char*>(rn);
+        iov[8].iov_len = sizeof(rn);
+
+        sys_writev(fd, iov, 9);
+      }
+    }
+  }
+
   if (info.process_type_length) {
     iov[0].iov_base = const_cast<char*>(form_data_msg);
     iov[0].iov_len = sizeof(form_data_msg) - 1;
@@ -309,6 +398,7 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
     sys_writev(fd, iov, 9);
   }
 
+  // For rendererers and plugins.
   if (info.crash_url_length) {
     unsigned i = 0, done = 0, crash_url_length = info.crash_url_length;
     static const unsigned kMaxCrashChunkSize = 64;
@@ -408,8 +498,8 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
   const pid_t child = sys_fork();
   if (!child) {
     // This code is called both when a browser is crashing (in which case,
-    // nothing really matters any more) and when a renderer crashes, in which
-    // case we need to continue.
+    // nothing really matters any more) and when a renderer/plugin crashes, in
+    // which case we need to continue.
     //
     // Since we are a multithreaded app, if we were just to fork(), we might
     // grab file descriptors which have just been created in another thread and
@@ -444,7 +534,8 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
     if (child) {
       sys_close(fds[1]);
       char id_buf[17];
-      const int len = HANDLE_EINTR(read(fds[0], id_buf, sizeof(id_buf) - 1));
+      const int len = HANDLE_EINTR(sys_read(fds[0], id_buf,
+                                   sizeof(id_buf) - 1));
       if (len > 0) {
         id_buf[len] = 0;
         static const char msg[] = "\nCrash dump id: ";
@@ -470,21 +561,22 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
       NULL,
     };
 
-    execv(kWgetBinary, const_cast<char**>(args));
+    execve(kWgetBinary, const_cast<char**>(args), environ);
     static const char msg[] = "Cannot upload crash dump: cannot exec "
                               "/usr/bin/wget\n";
     sys_write(2, msg, sizeof(msg) - 1);
     sys__exit(1);
   }
 
+  HANDLE_EINTR(sys_waitpid(child, NULL, 0));
   return child;
 }
 
-// This is defined in chrome/browser/google_update_settings_linux.cc, it's the
+// This is defined in chrome/browser/google_update_settings_posix.cc, it's the
 // static string containing the user's unique GUID. We send this in the crash
 // report.
 namespace google_update {
-extern std::string linux_guid;
+extern std::string posix_guid;
 }
 
 // This is defined in base/linux_util.cc, it's the static string containing the
@@ -520,8 +612,8 @@ static bool CrashDone(const char* dump_path,
   info.process_type_length = 7;
   info.crash_url = NULL;
   info.crash_url_length = 0;
-  info.guid = google_update::linux_guid.data();
-  info.guid_length = google_update::linux_guid.length();
+  info.guid = google_update::posix_guid.data();
+  info.guid_length = google_update::posix_guid.length();
   info.distro = base::linux_distro.data();
   info.distro_length = base::linux_distro.length();
   info.upload = upload;
@@ -547,6 +639,7 @@ static bool CrashDoneUpload(const char* dump_path,
 }
 
 void EnableCrashDumping(const bool unattended) {
+  is_crash_reporter_enabled = true;
   if (unattended) {
     FilePath dumps_path("/tmp");
     PathService::Get(chrome::DIR_CRASH_DUMPS, &dumps_path);
@@ -566,22 +659,23 @@ namespace child_process_logging {
 extern std::string active_url;
 }
 
+// Currently Non-Browser = Renderer and Plugins
 static bool
-RendererCrashHandler(const void* crash_context, size_t crash_context_size,
-             void* context) {
+NonBrowserCrashHandler(const void* crash_context, size_t crash_context_size,
+                       void* context) {
   const int fd = reinterpret_cast<intptr_t>(context);
   int fds[2];
-  socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
+  sys_socketpair(AF_UNIX, SOCK_STREAM, 0, fds);
   char guid[kGuidSize + 1] = {0};
   char crash_url[kMaxActiveURLSize + 1] = {0};
   char distro[kDistroSize + 1] = {0};
-  const size_t guid_len = std::min(google_update::linux_guid.size(),
+  const size_t guid_len = std::min(google_update::posix_guid.size(),
                                    kGuidSize);
   const size_t crash_url_len =
       std::min(child_process_logging::active_url.size(), kMaxActiveURLSize);
   const size_t distro_len =
       std::min(base::linux_distro.size(), kDistroSize);
-  memcpy(guid, google_update::linux_guid.data(), guid_len);
+  memcpy(guid, google_update::posix_guid.data(), guid_len);
   memcpy(crash_url, child_process_logging::active_url.data(), crash_url_len);
   memcpy(distro, base::linux_distro.data(), distro_len);
 
@@ -603,7 +697,7 @@ RendererCrashHandler(const void* crash_context, size_t crash_context_size,
   msg.msg_iov = iov;
   msg.msg_iovlen = 4;
   char cmsg[kControlMsgSize];
-  memset(cmsg, 0, kControlMsgSize);
+  my_memset(cmsg, 0, kControlMsgSize);
   msg.msg_control = cmsg;
   msg.msg_controllen = sizeof(cmsg);
 
@@ -622,13 +716,14 @@ RendererCrashHandler(const void* crash_context, size_t crash_context_size,
   return true;
 }
 
-void EnableRendererCrashDumping() {
+void EnableNonBrowserCrashDumping() {
   const int fd = Singleton<base::GlobalDescriptors>()->Get(kCrashDumpSignal);
+  is_crash_reporter_enabled = true;
   // We deliberately leak this object.
   google_breakpad::ExceptionHandler* handler =
       new google_breakpad::ExceptionHandler("" /* unused */, NULL, NULL,
                                             (void*) fd, true);
-  handler->set_crash_handler(RendererCrashHandler);
+  handler->set_crash_handler(NonBrowserCrashHandler);
 }
 
 void InitCrashReporter() {
@@ -636,16 +731,19 @@ void InitCrashReporter() {
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   const std::string process_type =
       parsed_command_line.GetSwitchValueASCII(switches::kProcessType);
-  const bool unattended = (getenv("CHROME_HEADLESS") != NULL);
+  const bool unattended = (getenv(env_vars::kHeadless) != NULL);
   if (process_type.empty()) {
     if (!(unattended || GoogleUpdateSettings::GetCollectStatsConsent()))
       return;
     EnableCrashDumping(unattended);
   } else if (process_type == switches::kRendererProcess ||
+             process_type == switches::kPluginProcess ||
              process_type == switches::kZygoteProcess) {
     // We might be chrooted in a zygote or renderer process so we cannot call
     // GetCollectStatsConsent because that needs access the the user's home
     // dir. Instead, we set a command line flag for these processes.
+    // Even though plugins are not chrooted, we share the same code path for
+    // simplicity.
     if (!parsed_command_line.HasSwitch(switches::kEnableCrashReporter))
       return;
     // Get the guid and linux distro from the command line switch.
@@ -653,11 +751,22 @@ void InitCrashReporter() {
         parsed_command_line.GetSwitchValue(switches::kEnableCrashReporter));
     size_t separator = switch_value.find(",");
     if (separator != std::string::npos) {
-      google_update::linux_guid = switch_value.substr(0, separator);
+      google_update::posix_guid = switch_value.substr(0, separator);
       base::linux_distro = switch_value.substr(separator + 1);
     } else {
-      google_update::linux_guid = switch_value;
+      google_update::posix_guid = switch_value;
     }
-    EnableRendererCrashDumping();
+    EnableNonBrowserCrashDumping();
   }
+
+  // Set the base process uptime value.
+  struct timeval tv;
+  if (!gettimeofday(&tv, NULL))
+    uptime = timeval_to_ms(&tv);
+  else
+    uptime = 0;
+}
+
+bool IsCrashReporterEnabled() {
+  return is_crash_reporter_enabled;
 }

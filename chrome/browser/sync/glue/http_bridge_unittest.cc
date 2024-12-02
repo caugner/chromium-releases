@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#if defined(BROWSER_SYNC)
-
 #include "base/thread.h"
+#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/net/test_url_fetcher_factory.h"
 #include "chrome/browser/sync/glue/http_bridge.h"
 #include "net/url_request/url_request_unittest.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -16,11 +16,25 @@ namespace {
 const wchar_t kDocRoot[] = L"chrome/test/data";
 }
 
+// Lazy getter for TestURLRequestContext instances.
+class TestURLRequestContextGetter : public URLRequestContextGetter {
+ public:
+  virtual URLRequestContext* GetURLRequestContext() {
+    if (!context_)
+      context_ = new TestURLRequestContext;
+    return context_;
+  }
+ private:
+  ~TestURLRequestContextGetter() {}
+
+  scoped_refptr<URLRequestContext> context_;
+};
+
 class HttpBridgeTest : public testing::Test {
  public:
   HttpBridgeTest()
-      : fake_default_request_context_(NULL),
-        io_thread_("HttpBridgeTest IO thread") {
+      : fake_default_request_context_getter_(NULL),
+        io_thread_(ChromeThread::IO) {
   }
 
   virtual void SetUp() {
@@ -30,47 +44,58 @@ class HttpBridgeTest : public testing::Test {
   }
 
   virtual void TearDown() {
-    io_thread_loop()->ReleaseSoon(FROM_HERE, fake_default_request_context_);
+    io_thread_loop()->ReleaseSoon(FROM_HERE,
+        fake_default_request_context_getter_);
     io_thread_.Stop();
-    fake_default_request_context_ = NULL;
+    fake_default_request_context_getter_ = NULL;
   }
 
   HttpBridge* BuildBridge() {
-    if (!fake_default_request_context_) {
-      fake_default_request_context_ = new TestURLRequestContext();
-      fake_default_request_context_->AddRef();
+    if (!fake_default_request_context_getter_) {
+      fake_default_request_context_getter_ = new TestURLRequestContextGetter();
+      fake_default_request_context_getter_->AddRef();
     }
     HttpBridge* bridge = new HttpBridge(
-        new HttpBridge::RequestContext(fake_default_request_context_),
-        io_thread_.message_loop());
-    bridge->use_io_loop_for_testing_ = true;
+        new HttpBridge::RequestContextGetter(
+            fake_default_request_context_getter_));
     return bridge;
   }
 
   MessageLoop* io_thread_loop() { return io_thread_.message_loop(); }
 
   // Note this is lazy created, so don't call this before your bridge.
-  TestURLRequestContext* GetTestRequestContext() {
-    return fake_default_request_context_;
+  TestURLRequestContextGetter* GetTestRequestContextGetter() {
+    return fake_default_request_context_getter_;
   }
 
  private:
   // A make-believe "default" request context, as would be returned by
   // Profile::GetDefaultRequestContext().  Created lazily by BuildBridge.
-  TestURLRequestContext* fake_default_request_context_;
+  TestURLRequestContextGetter* fake_default_request_context_getter_;
 
   // Separate thread for IO used by the HttpBridge.
-  base::Thread io_thread_;
+  ChromeThread io_thread_;
+
+};
+
+class DummyURLFetcher : public TestURLFetcher {
+ public:
+  DummyURLFetcher() : TestURLFetcher(GURL(), POST, NULL) {}
+
+  net::HttpResponseHeaders* response_headers() const {
+    return NULL;
+  }
 };
 
 // An HttpBridge that doesn't actually make network requests and just calls
 // back with dummy response info.
 class ShuntedHttpBridge : public HttpBridge {
  public:
-  ShuntedHttpBridge(URLRequestContext* baseline_context,
-                    MessageLoop* io_loop, HttpBridgeTest* test)
-      : HttpBridge(new HttpBridge::RequestContext(baseline_context),
-                   io_loop), test_(test) { }
+  ShuntedHttpBridge(URLRequestContextGetter* baseline_context_getter,
+                    HttpBridgeTest* test)
+      : HttpBridge(new HttpBridge::RequestContextGetter(
+                       baseline_context_getter)),
+                   test_(test) { }
  protected:
   virtual void MakeAsynchronousPost() {
     ASSERT_TRUE(MessageLoop::current() == test_->io_thread_loop());
@@ -80,13 +105,16 @@ class ShuntedHttpBridge : public HttpBridge {
         NewRunnableMethod(this, &ShuntedHttpBridge::CallOnURLFetchComplete));
   }
  private:
+  ~ShuntedHttpBridge() {}
+
   void CallOnURLFetchComplete() {
     ASSERT_TRUE(MessageLoop::current() == test_->io_thread_loop());
     // We return no cookies and a dummy content response.
     ResponseCookies cookies;
 
     std::string response_content = "success!";
-    OnURLFetchComplete(NULL, GURL("www.google.com"), URLRequestStatus(),
+    DummyURLFetcher fetcher;
+    OnURLFetchComplete(&fetcher, GURL("www.google.com"), URLRequestStatus(),
                        200, cookies, response_content);
   }
   HttpBridgeTest* test_;
@@ -94,19 +122,22 @@ class ShuntedHttpBridge : public HttpBridge {
 
 TEST_F(HttpBridgeTest, TestUsesSameHttpNetworkSession) {
   scoped_refptr<HttpBridge> http_bridge(this->BuildBridge());
-  EXPECT_TRUE(GetTestRequestContext());
+  EXPECT_TRUE(GetTestRequestContextGetter());
   net::HttpNetworkSession* test_session =
-      GetTestRequestContext()->http_transaction_factory()->GetSession();
+      GetTestRequestContextGetter()->GetURLRequestContext()->
+      http_transaction_factory()->GetSession();
   EXPECT_EQ(test_session,
-            http_bridge->GetRequestContext()->
+            http_bridge->GetRequestContextGetter()->
+                GetURLRequestContext()->
                 http_transaction_factory()->GetSession());
 }
 
 // Test the HttpBridge without actually making any network requests.
 TEST_F(HttpBridgeTest, TestMakeSynchronousPostShunted) {
-  scoped_refptr<TestURLRequestContext> ctx(new TestURLRequestContext());
+  scoped_refptr<URLRequestContextGetter> ctx_getter(
+      new TestURLRequestContextGetter());
   scoped_refptr<HttpBridge> http_bridge(new ShuntedHttpBridge(
-      ctx, io_thread_loop(), this));
+      ctx_getter, this));
   http_bridge->SetUserAgent("bob");
   http_bridge->SetURL("http://www.google.com", 9999);
   http_bridge->SetPostPayload("text/plain", 2, " ");
@@ -207,4 +238,26 @@ TEST_F(HttpBridgeTest, TestExtraRequestHeaders) {
   EXPECT_NE(std::string::npos, response.find(test_payload.c_str()));
 }
 
-#endif  // defined(BROWSER_SYNC)
+TEST_F(HttpBridgeTest, TestResponseHeader) {
+  scoped_refptr<HTTPTestServer> server =
+      HTTPTestServer::CreateServer(kDocRoot, NULL);
+  ASSERT_TRUE(NULL != server.get());
+  scoped_refptr<HttpBridge> http_bridge(BuildBridge());
+
+  GURL echo_header = server->TestServerPage("echoall");
+  http_bridge->SetURL(echo_header.spec().c_str(), echo_header.IntPort());
+
+  std::string test_payload = "###TEST PAYLOAD###";
+  http_bridge->SetPostPayload("text/html", test_payload.length() + 1,
+                              test_payload.c_str());
+
+  int os_error = 0;
+  int response_code = 0;
+  bool success = http_bridge->MakeSynchronousPost(&os_error, &response_code);
+  EXPECT_TRUE(success);
+  EXPECT_EQ(200, response_code);
+  EXPECT_EQ(0, os_error);
+
+  EXPECT_EQ(http_bridge->GetResponseHeaderValue("Content-type"), "text/html");
+  EXPECT_TRUE(http_bridge->GetResponseHeaderValue("invalid-header").empty());
+}

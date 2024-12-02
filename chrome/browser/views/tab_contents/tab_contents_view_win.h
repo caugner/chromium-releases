@@ -5,17 +5,22 @@
 #ifndef CHROME_BROWSER_VIEWS_TAB_CONTENTS_TAB_CONTENTS_VIEW_WIN_H_
 #define CHROME_BROWSER_VIEWS_TAB_CONTENTS_TAB_CONTENTS_VIEW_WIN_H_
 
-#include "base/gfx/size.h"
 #include "base/scoped_ptr.h"
 #include "base/timer.h"
 #include "chrome/browser/tab_contents/tab_contents_view.h"
+#include "gfx/size.h"
 #include "views/widget/widget_win.h"
 
 class RenderViewContextMenuWin;
 class SadTabView;
+class SkBitmap;
+class TabContentsDragWin;
 struct WebDropData;
 class WebDragSource;
 class WebDropTarget;
+namespace gfx {
+class Point;
+}
 
 // Windows-specific implementation of the TabContentsView. It is a HWND that
 // contains all of the contents of the tab and associated child views.
@@ -54,14 +59,19 @@ class TabContentsViewWin : public TabContentsView,
   // Backend implementation of RenderViewHostDelegate::View.
   virtual void ShowContextMenu(const ContextMenuParams& params);
   virtual void StartDragging(const WebDropData& drop_data,
-                             WebKit::WebDragOperationsMask operations);
+                             WebKit::WebDragOperationsMask operations,
+                             const SkBitmap& image,
+                             const gfx::Point& image_offset);
   virtual void UpdateDragCursor(WebKit::WebDragOperation operation);
   virtual void GotFocus();
   virtual void TakeFocus(bool reverse);
-  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
 
   // WidgetWin overridde.
   virtual views::FocusManager* GetFocusManager();
+
+  void EndDragging();
+
+  WebDropTarget* drop_target() const { return drop_target_.get(); }
 
  private:
   // A helper method for closing the tab.
@@ -107,10 +117,7 @@ class TabContentsViewWin : public TabContentsView,
 
   // Used to render the sad tab. This will be non-NULL only when the sad tab is
   // visible.
-  scoped_ptr<SadTabView> sad_tab_;
-
-  // Whether to ignore the next CHAR keyboard event.
-  bool ignore_next_char_event_;
+  SadTabView* sad_tab_;
 
   // The id used in the ViewStorage to store the last focused view.
   int last_focused_view_storage_id_;
@@ -122,17 +129,15 @@ class TabContentsViewWin : public TabContentsView,
   // accessible when unparented.
   views::FocusManager* focus_manager_;
 
-  // |drag_source_| is our callback interface passed to the system when we
-  // want to initiate a drag and drop operation.  We use it to tell if a
-  // drag operation is happening.
-  scoped_refptr<WebDragSource> drag_source_;
-
   // Set to true if we want to close the tab after the system drag operation
   // has finished.
   bool close_tab_after_drag_ends_;
 
   // Used to close the tab after the stack has unwound.
   base::OneShotTimer<TabContentsViewWin> close_tab_timer_;
+
+  // Used to handle the drag-and-drop.
+  scoped_refptr<TabContentsDragWin> drag_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(TabContentsViewWin);
 };

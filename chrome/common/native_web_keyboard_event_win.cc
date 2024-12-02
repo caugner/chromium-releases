@@ -4,19 +4,21 @@
 
 #include "chrome/common/native_web_keyboard_event.h"
 
-#include "webkit/api/public/win/WebInputEventFactory.h"
+#include "third_party/WebKit/WebKit/chromium/public/win/WebInputEventFactory.h"
 
 using WebKit::WebInputEventFactory;
 using WebKit::WebKeyboardEvent;
 
-NativeWebKeyboardEvent::NativeWebKeyboardEvent() {
+NativeWebKeyboardEvent::NativeWebKeyboardEvent()
+    : skip_in_browser(false) {
   memset(&os_event, 0, sizeof(os_event));
 }
 
 NativeWebKeyboardEvent::NativeWebKeyboardEvent(
     HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
     : WebKeyboardEvent(
-          WebInputEventFactory::keyboardEvent(hwnd, message, wparam, lparam)) {
+          WebInputEventFactory::keyboardEvent(hwnd, message, wparam, lparam)),
+      skip_in_browser(false) {
   os_event.hwnd = hwnd;
   os_event.message = message;
   os_event.wParam = wparam;
@@ -25,7 +27,8 @@ NativeWebKeyboardEvent::NativeWebKeyboardEvent(
 
 NativeWebKeyboardEvent::NativeWebKeyboardEvent(
     const NativeWebKeyboardEvent& other)
-    : WebKeyboardEvent(other) {
+    : WebKeyboardEvent(other),
+      skip_in_browser(other.skip_in_browser) {
   os_event.hwnd = other.os_event.hwnd;
   os_event.message = other.os_event.message;
   os_event.wParam = other.os_event.wParam;
@@ -40,6 +43,9 @@ NativeWebKeyboardEvent& NativeWebKeyboardEvent::operator=(
   os_event.message = other.os_event.message;
   os_event.wParam = other.os_event.wParam;
   os_event.lParam = other.os_event.lParam;
+
+  skip_in_browser = other.skip_in_browser;
+
   return *this;
 }
 

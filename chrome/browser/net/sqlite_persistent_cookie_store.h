@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,13 +17,11 @@
 #include "net/base/cookie_monster.h"
 
 class FilePath;
-class MessageLoop;
 
 class SQLitePersistentCookieStore
     : public net::CookieMonster::PersistentCookieStore {
  public:
-  SQLitePersistentCookieStore(const FilePath& path,
-                              MessageLoop* background_loop);
+  explicit SQLitePersistentCookieStore(const FilePath& path);
   ~SQLitePersistentCookieStore();
 
   virtual bool Load(std::vector<net::CookieMonster::KeyedCanonicalCookie>*);
@@ -34,6 +32,8 @@ class SQLitePersistentCookieStore
       const net::CookieMonster::CanonicalCookie&);
   virtual void DeleteCookie(const net::CookieMonster::CanonicalCookie&);
 
+  static void ClearLocalState(const FilePath& path);
+
  private:
   class Backend;
 
@@ -42,9 +42,6 @@ class SQLitePersistentCookieStore
 
   FilePath path_;
   scoped_refptr<Backend> backend_;
-
-  // Background MessageLoop on which to access the backend_;
-  MessageLoop* background_loop_;
 
   sql::MetaTable meta_table_;
 

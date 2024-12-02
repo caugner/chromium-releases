@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/file_util.h"
-#include "base/gfx/rect.h"
 #include "base/path_service.h"
 #include "base/perftimer.h"
 #include "base/string_util.h"
@@ -14,6 +13,7 @@
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/ui/ui_test.h"
+#include "gfx/rect.h"
 #include "net/base/net_util.h"
 
 using base::TimeDelta;
@@ -80,15 +80,17 @@ class NewTabUIStartupTest : public UITest {
       ASSERT_EQ(1, tab_count);
 
       // Hit ctl-t and wait for the tab to load.
-      window->ApplyAccelerator(IDC_NEW_TAB);
-      ASSERT_TRUE(window->WaitForTabCountToBecome(2, 5000));
+      ASSERT_TRUE(window->RunCommand(IDC_NEW_TAB));
+      ASSERT_TRUE(window->GetTabCount(&tab_count));
+      ASSERT_EQ(2, tab_count);
       int load_time;
       ASSERT_TRUE(automation()->WaitForInitialNewTabUILoad(&load_time));
 
       if (want_warm) {
         // Bring up a second tab, now that we've already shown one tab.
-        window->ApplyAccelerator(IDC_NEW_TAB);
-        ASSERT_TRUE(window->WaitForTabCountToBecome(3, 5000));
+        ASSERT_TRUE(window->RunCommand(IDC_NEW_TAB));
+        ASSERT_TRUE(window->GetTabCount(&tab_count));
+        ASSERT_EQ(3, tab_count);
         ASSERT_TRUE(automation()->WaitForInitialNewTabUILoad(&load_time));
       }
       timings[i] = TimeDelta::FromMilliseconds(load_time);
@@ -128,8 +130,9 @@ class NewTabUIStartupTest : public UITest {
       ASSERT_EQ(1, tab_count);
 
       // Hit ctl-t and wait for the tab to load.
-      window->ApplyAccelerator(IDC_NEW_TAB);
-      ASSERT_TRUE(window->WaitForTabCountToBecome(2, 5000));
+      ASSERT_TRUE(window->RunCommand(IDC_NEW_TAB));
+      ASSERT_TRUE(window->GetTabCount(&tab_count));
+      ASSERT_EQ(2, tab_count);
       int duration;
       ASSERT_TRUE(automation()->WaitForInitialNewTabUILoad(&duration));
 
@@ -157,14 +160,25 @@ class NewTabUIStartupTest : public UITest {
   }
 };
 
-// TODO(pamg): run these tests with a reference build?
+TEST_F(NewTabUIStartupTest, PerfRefCold) {
+  UseReferenceBuild();
+  RunStartupTest("tab_cold_ref", false /* cold */, true /* important */,
+                 UITest::DEFAULT_THEME);
+}
+
 TEST_F(NewTabUIStartupTest, PerfCold) {
   RunStartupTest("tab_cold", false /* cold */, true /* important */,
                  UITest::DEFAULT_THEME);
 }
 
-TEST_F(NewTabUIStartupTest, DISABLED_PerfWarm) {
-  RunStartupTest("tab_warm", true /* warm */, false /* not important */,
+TEST_F(NewTabUIStartupTest, PerfRefWarm) {
+  UseReferenceBuild();
+  RunStartupTest("tab_warm_ref", true /* warm */, true /* not important */,
+                 UITest::DEFAULT_THEME);
+}
+
+TEST_F(NewTabUIStartupTest, PerfWarm) {
+  RunStartupTest("tab_warm", true /* warm */, true /* not important */,
                  UITest::DEFAULT_THEME);
 }
 

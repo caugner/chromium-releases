@@ -11,6 +11,8 @@
 #include "chrome_frame/chrome_frame_automation.h"
 #include "chrome_frame/chrome_frame_plugin.h"
 #include "chrome_frame/test/http_server.h"
+#include "chrome_frame/test/chrome_frame_test_utils.h"
+#include "chrome_frame/utils.h"
 
 template <typename T>
 class AutomationMockDelegate
@@ -20,17 +22,33 @@ class AutomationMockDelegate
   AutomationMockDelegate(MessageLoop* caller_message_loop,
       int launch_timeout, bool perform_version_check,
       const std::wstring& profile_name,
-      const std::wstring& extra_chrome_arguments, bool incognito)
-      : caller_message_loop_(caller_message_loop), is_connected_(false) {
+      const std::wstring& extra_chrome_arguments, bool incognito,
+      bool is_widget_mode)
+      : caller_message_loop_(caller_message_loop), is_connected_(false),
+        navigation_result_(false) {
     test_server_.SetUp();
-    automation_client_.reset(new ChromeFrameAutomationClient);
-    automation_client_->Initialize(this, launch_timeout, perform_version_check,
-        profile_name, extra_chrome_arguments, incognito);
+
+    FilePath profile_path(
+        chrome_frame_test::GetProfilePath(profile_name));
+
+    automation_client_ = new ChromeFrameAutomationClient;
+    ChromeFrameLaunchParams clp = {
+      launch_timeout,
+      GURL(),
+      GURL(),
+      profile_path,
+      profile_name,
+      extra_chrome_arguments,
+      perform_version_check,
+      incognito,
+      is_widget_mode
+    };
+    automation_client_->Initialize(this, clp);
   }
   ~AutomationMockDelegate() {
     if (automation_client_.get()) {
       automation_client_->Uninitialize();
-      automation_client_.reset();
+      automation_client_ = NULL;
     }
     if (IsWindow())
       DestroyWindow();
@@ -41,7 +59,12 @@ class AutomationMockDelegate
   // Navigate external tab to the specified url through automation
   bool Navigate(const std::string& url) {
     url_ = GURL(url);
-    return automation_client_->InitiateNavigation(url, std::string(), false);
+    bool result = automation_client_->InitiateNavigation(url,
+                                                         std::string(),
+                                                         false);
+    if (!result)
+      OnLoadFailed(0, url);
+    return result;
   }
 
   // Navigate the external to a 'file://' url for unit test files
@@ -83,6 +106,7 @@ class AutomationMockDelegate
   }
 
   virtual void OnLoadFailed(int error_code, const std::string& url) {
+    navigation_result_ = false;
     QuitMessageLoop();
   }
 
@@ -123,7 +147,8 @@ class AutomationMockLaunch
   typedef AutomationMockDelegate<AutomationMockLaunch> Base;
   AutomationMockLaunch(MessageLoop* caller_message_loop,
                        int launch_timeout)
-      : Base(caller_message_loop, launch_timeout, true, L"", L"", false) {
+      : Base(caller_message_loop, launch_timeout, true, L"", L"", false,
+             false) {
   }
   virtual void OnAutomationServerReady() {
     Base::OnAutomationServerReady();
@@ -140,7 +165,8 @@ class AutomationMockNavigate
   typedef AutomationMockDelegate<AutomationMockNavigate> Base;
   AutomationMockNavigate(MessageLoop* caller_message_loop,
                          int launch_timeout)
-      : Base(caller_message_loop, launch_timeout, true, L"", L"", false) {
+      : Base(caller_message_loop, launch_timeout, true, L"", L"", false,
+             false) {
   }
   virtual void OnLoad(int tab_handle, const GURL& url) {
     Base::OnLoad(tab_handle, url);
@@ -154,7 +180,7 @@ class AutomationMockPostMessage
   typedef AutomationMockDelegate<AutomationMockPostMessage> Base;
   AutomationMockPostMessage(MessageLoop* caller_message_loop,
                             int launch_timeout)
-      : Base(caller_message_loop, launch_timeout, true, L"", L"", false),
+      : Base(caller_message_loop, launch_timeout, true, L"", L"", false, false),
         postmessage_result_(false) {}
   bool postmessage_result() const {
     return postmessage_result_;
@@ -182,7 +208,7 @@ class AutomationMockHostNetworkRequestStart
   typedef AutomationMockDelegate<AutomationMockHostNetworkRequestStart> Base;
   AutomationMockHostNetworkRequestStart(MessageLoop* caller_message_loop,
       int launch_timeout)
-      : Base(caller_message_loop, launch_timeout, true, L"", L"", false),
+      : Base(caller_message_loop, launch_timeout, true, L"", L"", false, false),
         request_start_result_(false) {
     if (automation()) {
       automation()->set_use_chrome_network(false);

@@ -6,7 +6,9 @@
 
 #include "app/l10n_util_mac.h"
 #include "base/message_loop.h"
+#include "base/string_util.h"
 #include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/external_protocol_handler.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -53,12 +55,18 @@ void ExternalProtocolHandler::RunExternalProtocolDialog(
       l10n_util::GetNSStringWithFixup(IDS_EXTERNAL_PROTOCOL_OK_BUTTON_TEXT)];
   [allowButton setKeyEquivalent:@""];  // disallow as default
   [alert_ addButtonWithTitle:
-      l10n_util::GetNSStringWithFixup(IDS_CANCEL)];
+      l10n_util::GetNSStringWithFixup(
+        IDS_EXTERNAL_PROTOCOL_CANCEL_BUTTON_TEXT)];
+
+  const int kMaxUrlWithoutSchemeSize = 256;
+  std::wstring elided_url_without_scheme;
+  ElideString(ASCIIToWide(url_.possibly_invalid_spec()),
+      kMaxUrlWithoutSchemeSize, &elided_url_without_scheme);
 
   NSString* urlString = l10n_util::GetNSStringFWithFixup(
       IDS_EXTERNAL_PROTOCOL_INFORMATION,
       ASCIIToUTF16(url_.scheme() + ":"),
-      ASCIIToUTF16(url_.possibly_invalid_spec()));
+      WideToUTF16(elided_url_without_scheme));
   NSString* appString = l10n_util::GetNSStringFWithFixup(
       IDS_EXTERNAL_PROTOCOL_APPLICATION_TO_LAUNCH,
       appName);
@@ -106,11 +114,8 @@ void ExternalProtocolHandler::RunExternalProtocolDialog(
       NOTREACHED();
   }
 
-  // Set the "don't warn me again" info if the protocol was allowed ("cancel"
-  // always means "make this dialog go away with no permanent effect" no matter
-  // what).
-  if ([[alert_ suppressionButton] state] == NSOnState &&
-      blockState == ExternalProtocolHandler::DONT_BLOCK) {
+  // Set the "don't warn me again" info.
+  if ([[alert_ suppressionButton] state] == NSOnState) {
     ExternalProtocolHandler::SetBlockState(UTF8ToWide(url_.scheme()),
                                            blockState);
   }

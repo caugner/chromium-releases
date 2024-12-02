@@ -52,6 +52,19 @@ TEST_F(SysInfoTest, OperatingSystemVersionNumbers) {
 }
 #endif
 
+TEST_F(SysInfoTest, GetPrimaryDisplayDimensions) {
+  // We aren't actually testing that it's correct, just that it's sane.
+  int width, height;
+  base::SysInfo::GetPrimaryDisplayDimensions(&width, &height);
+  EXPECT_GE(width, 10);
+  EXPECT_GE(height, 10);
+}
+
+TEST_F(SysInfoTest, DisplayCount) {
+  // We aren't actually testing that it's correct, just that it's sane.
+  EXPECT_GE(base::SysInfo::DisplayCount(), 1);
+}
+
 #if defined(OS_CHROMEOS)
 TEST_F(SysInfoTest, GoogleChromeOSVersionNumbers) {
   int32 os_major_version = -1;
@@ -64,9 +77,9 @@ TEST_F(SysInfoTest, GoogleChromeOSVersionNumbers) {
                                  &os_major_version,
                                  &os_minor_version,
                                  &os_bugfix_version);
-  EXPECT_EQ(os_major_version, 1);
-  EXPECT_EQ(os_minor_version, 2);
-  EXPECT_EQ(os_bugfix_version, 3);
+  EXPECT_EQ(1, os_major_version);
+  EXPECT_EQ(2, os_minor_version);
+  EXPECT_EQ(3, os_bugfix_version);
 }
 
 TEST_F(SysInfoTest, GoogleChromeOSVersionNumbersFirst) {
@@ -80,9 +93,9 @@ TEST_F(SysInfoTest, GoogleChromeOSVersionNumbersFirst) {
                                  &os_major_version,
                                  &os_minor_version,
                                  &os_bugfix_version);
-  EXPECT_EQ(os_major_version, 1);
-  EXPECT_EQ(os_minor_version, 2);
-  EXPECT_EQ(os_bugfix_version, 3);
+  EXPECT_EQ(1, os_major_version);
+  EXPECT_EQ(2, os_minor_version);
+  EXPECT_EQ(3, os_bugfix_version);
 }
 
 TEST_F(SysInfoTest, GoogleChromeOSNoVersionNumbers) {
@@ -94,9 +107,9 @@ TEST_F(SysInfoTest, GoogleChromeOSNoVersionNumbers) {
                                  &os_major_version,
                                  &os_minor_version,
                                  &os_bugfix_version);
-  EXPECT_EQ(os_major_version, -1);
-  EXPECT_EQ(os_minor_version, -1);
-  EXPECT_EQ(os_bugfix_version, -1);
+  EXPECT_EQ(-1, os_major_version);
+  EXPECT_EQ(-1, os_minor_version);
+  EXPECT_EQ(-1, os_bugfix_version);
 }
 
 #endif  // OS_CHROMEOS

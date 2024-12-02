@@ -1,14 +1,20 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_H_
 #define CHROME_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_H_
 
-#include "app/gfx/native_widget_types.h"
+#if defined(OS_MACOSX)
+#include <OpenGL/OpenGL.h>
+#endif
+
+#include "app/surface/transport_dib.h"
 #include "base/shared_memory.h"
+#include "gfx/native_widget_types.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "webkit/glue/webplugin.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPopupType.h"
+#include "webkit/glue/plugins/webplugin.h"
 
 namespace gfx {
 class Rect;
@@ -21,6 +27,7 @@ class Message;
 class BackingStore;
 class RenderProcessHost;
 class RenderWidgetHost;
+class VideoLayer;
 class WebCursor;
 struct WebMenuItem;
 
@@ -33,7 +40,7 @@ struct WebMenuItem;
 // changes.
 class RenderWidgetHostView {
  public:
-  virtual ~RenderWidgetHostView(){};
+  virtual ~RenderWidgetHostView() {}
 
   // Platform-specific creator. Use this to construct new RenderWidgetHostViews
   // rather than using RenderWidgetHostViewWin & friends.
@@ -46,6 +53,11 @@ class RenderWidgetHostView {
   // The RenderWidgetHost must already be created (because we can't know if it's
   // going to be a regular RenderWidgetHost or a RenderViewHost (a subclass).
   static RenderWidgetHostView* CreateViewForWidget(RenderWidgetHost* widget);
+
+  // Retrieves the RenderWidgetHostView corresponding to the specified
+  // |native_view|, or NULL if there is no such instance.
+  static RenderWidgetHostView* GetRenderWidgetHostViewFromNativeView(
+      gfx::NativeView native_view);
 
   // Perform all the initialization steps necessary for this object to represent
   // a popup (such as a <select> dropdown), then shows the popup at |pos|.
@@ -84,6 +96,9 @@ class RenderWidgetHostView {
   virtual void Show() = 0;
   virtual void Hide() = 0;
 
+  // Whether the view is showing.
+  virtual bool IsShowing() = 0;
+
   // Retrieve the bounds of the View, in screen coordinates.
   virtual gfx::Rect GetViewBounds() const = 0;
 
@@ -110,17 +125,21 @@ class RenderWidgetHostView {
   // (Worse, we might recursively call RenderWidgetHost::GetBackingStore().)
   // Thus implementers should generally paint as much of |rect| as possible
   // synchronously with as little overpainting as possible.
-  virtual void DidPaintRect(const gfx::Rect& rect) = 0;
+  virtual void DidPaintBackingStoreRects(
+      const std::vector<gfx::Rect>& rects) = 0;
 
   // Informs the view that a portion of the widget's backing store was scrolled
   // by dx pixels horizontally and dy pixels vertically. The view should copy
   // the exposed pixels from the backing store of the render widget (which has
   // already been scrolled) onto the screen.
-  virtual void DidScrollRect(
+  virtual void DidScrollBackingStoreRect(
       const gfx::Rect& rect, int dx, int dy) = 0;
 
   // Notifies the View that the renderer has ceased to exist.
   virtual void RenderViewGone() = 0;
+
+  // Notifies the View that the renderer will be delete soon.
+  virtual void WillDestroyRenderWidget(RenderWidgetHost* rwh) = 0;
 
   // Tells the View to destroy itself.
   virtual void Destroy() = 0;
@@ -130,19 +149,23 @@ class RenderWidgetHostView {
   virtual void SetTooltipText(const std::wstring& tooltip_text) = 0;
 
   // Notifies the View that the renderer text selection has changed.
-  virtual void SelectionChanged(const std::string& text) { };
+  virtual void SelectionChanged(const std::string& text) {}
 
   // Tells the View whether the context menu is showing. This is used on Linux
   // to suppress updates to webkit focus for the duration of the show.
-  virtual void ShowingContextMenu(bool showing) { }
+  virtual void ShowingContextMenu(bool showing) {}
 
   // Allocate a backing store for this view
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) = 0;
+
+  // Allocate a video layer for this view.
+  virtual VideoLayer* AllocVideoLayer(const gfx::Size& size) = 0;
 
 #if defined(OS_MACOSX)
   // Display a native control popup menu for WebKit.
   virtual void ShowPopupWithItems(gfx::Rect bounds,
                                   int item_height,
+                                  double item_font_size,
                                   int selected_item,
                                   const std::vector<WebMenuItem>& items) = 0;
 
@@ -154,6 +177,36 @@ class RenderWidgetHostView {
 
   // Set the view's active state (i.e., tint state of controls).
   virtual void SetActive(bool active) = 0;
+
+  // Notifies the view that its enclosing window has changed visibility
+  // (minimized/unminimized, app hidden/unhidden, etc).
+  // TODO(stuartmorgan): This is a temporary plugin-specific workaround for
+  // <http://crbug.com/34266>. Once that is fixed, this (and the corresponding
+  // message and renderer-side handling) can be removed in favor of using
+  // WasHidden/DidBecomeSelected.
+  virtual void SetWindowVisibility(bool visible) = 0;
+
+  // Informs the view that its containing window's frame changed.
+  virtual void WindowFrameChanged() = 0;
+
+  // Methods associated with GPU-accelerated plug-in instances.
+  virtual gfx::PluginWindowHandle AllocateFakePluginWindowHandle() = 0;
+  virtual void DestroyFakePluginWindowHandle(
+      gfx::PluginWindowHandle window) = 0;
+  virtual void AcceleratedSurfaceSetIOSurface(
+      gfx::PluginWindowHandle window,
+      int32 width,
+      int32 height,
+      uint64 io_surface_identifier) = 0;
+  virtual void AcceleratedSurfaceSetTransportDIB(
+      gfx::PluginWindowHandle window,
+      int32 width,
+      int32 height,
+      TransportDIB::Handle transport_dib) = 0;
+  virtual void AcceleratedSurfaceBuffersSwapped(
+      gfx::PluginWindowHandle window) = 0;
+  // Draws the current GPU-accelerated plug-in instances into the given context.
+  virtual void DrawAcceleratedSurfaceInstances(CGLContextObj context) = 0;
 #endif
 
 #if defined(OS_LINUX)
@@ -161,10 +214,14 @@ class RenderWidgetHostView {
   virtual void DestroyPluginContainer(gfx::PluginWindowHandle id) = 0;
 #endif
 
-  void set_activatable(bool activatable) {
-    activatable_ = activatable;
+  // Toggles visual muting of the render view area. This is on when a
+  // constrained window is showing.
+  virtual void SetVisuallyDeemphasized(bool deemphasized) = 0;
+
+  void set_popup_type(WebKit::WebPopupType popup_type) {
+    popup_type_ = popup_type;
   }
-  bool activatable() const { return activatable_; }
+  WebKit::WebPopupType popup_type() const { return popup_type_; }
 
   // Subclasses should override this method to do whatever is appropriate to set
   // the custom background for their platform.
@@ -173,13 +230,17 @@ class RenderWidgetHostView {
   }
   const SkBitmap& background() const { return background_; }
 
+  // Returns true if the native view, |native_view|, is contained within in the
+  // widget associated with this RenderWidgetHostView.
+  virtual bool ContainsNativeView(gfx::NativeView native_view) const = 0;
+
  protected:
   // Interface class only, do not construct.
-  RenderWidgetHostView() : activatable_(true) {}
+  RenderWidgetHostView() : popup_type_(WebKit::WebPopupTypeNone) {}
 
-  // Whether the window can be activated. Autocomplete popup windows for example
-  // cannot be activated.  Default is true.
-  bool activatable_;
+  // Whether this view is a popup and what kind of popup it is (select,
+  // autofill...).
+  WebKit::WebPopupType popup_type_;
 
   // A custom background to paint behind the web content. This will be tiled
   // horizontally. Can be null, in which case we fall back to painting white.

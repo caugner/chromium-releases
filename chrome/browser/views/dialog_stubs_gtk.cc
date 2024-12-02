@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,17 +18,11 @@
 #include "chrome/browser/gtk/repost_form_warning_gtk.h"
 #include "chrome/browser/gtk/task_manager_gtk.h"
 #include "chrome/browser/options_window.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/views/browser_dialogs.h"
 #include "views/widget/widget.h"
 
 namespace browser {
-
-void ShowBugReportView(views::Widget* parent,
-                       Profile* profile,
-                       TabContents* tab) {
-  // Bug report view hasn't been implemented on gtk yet.
-  NOTIMPLEMENTED();
-}
 
 void ShowClearBrowsingDataView(views::Widget* parent,
                                Profile* profile) {
@@ -49,18 +43,6 @@ void ShowImporterView(views::Widget* parent, Profile* profile) {
 
 void ShowBookmarkManagerView(Profile* profile) {
   BookmarkManagerGtk::Show(profile);
-}
-
-#if not defined(OS_CHROMEOS)
-void ShowAboutChromeView(gfx::NativeWindow parent, Profile* profile) {
-  ShowAboutDialogForProfile(parent, profile);
-}
-#endif
-
-void ShowHtmlDialogView(gfx::NativeWindow parent, Browser* browser,
-                        HtmlDialogUIDelegate* delegate) {
-  // Hasn't been implemented yet on linux.
-  NOTIMPLEMENTED();
 }
 
 void ShowPasswordsExceptionsWindowView(Profile* profile) {
@@ -89,8 +71,13 @@ void EditSearchEngine(gfx::NativeWindow parent,
 
 void ShowRepostFormWarningDialog(gfx::NativeWindow parent_window,
                                  TabContents* tab_contents) {
-  new RepostFormWarningGtk(GTK_WINDOW(parent_window),
-                           &tab_contents->controller());
+  new RepostFormWarningGtk(GTK_WINDOW(parent_window), tab_contents);
+}
+
+void ShowContentSettingsWindow(gfx::NativeWindow parent_window,
+                               ContentSettingsType content_type,
+                               Profile* profile) {
+  NOTIMPLEMENTED();
 }
 
 }  // namespace browser

@@ -7,7 +7,6 @@
 #include <atlbase.h>
 
 #include "app/app_paths.h"
-#include "app/gfx/font.h"
 #include "app/l10n_util.h"
 #include "base/debug_util.h"
 #include "base/file_util.h"
@@ -16,6 +15,7 @@
 #include "base/resource_util.h"
 #include "base/string_piece.h"
 #include "base/win_util.h"
+#include "gfx/font.h"
 
 namespace {
 
@@ -36,23 +36,20 @@ ResourceBundle::~ResourceBundle() {
     BOOL rv = FreeLibrary(locale_resources_data_);
     DCHECK(rv);
   }
-  if (theme_data_) {
-    BOOL rv = FreeLibrary(theme_data_);
-    DCHECK(rv);
-  }
 }
 
-void ResourceBundle::LoadResources(const std::wstring& pref_locale) {
-  // As a convenience, set resources_data_ to the current module.
-  resources_data_ = _AtlBaseModule.GetModuleInstance();
+std::string ResourceBundle::LoadResources(const std::wstring& pref_locale) {
+  // As a convenience, set resources_data_ to the current resource module.
+  resources_data_ = _AtlBaseModule.GetResourceInstance();
 
   DCHECK(NULL == locale_resources_data_) << "locale dll already loaded";
-  const FilePath& locale_path = GetLocaleFilePath(pref_locale);
+  std::string app_locale = l10n_util::GetApplicationLocale(pref_locale);
+  const FilePath& locale_path = GetLocaleFilePath(app_locale);
   if (locale_path.value().empty()) {
     // It's possible that there are no locale dlls found, in which case we just
     // return.
     NOTREACHED();
-    return;
+    return std::string();
   }
 
   // The dll should only have resources, not executable code.
@@ -60,29 +57,18 @@ void ResourceBundle::LoadResources(const std::wstring& pref_locale) {
                                          GetDataDllLoadFlags());
   DCHECK(locale_resources_data_ != NULL) <<
       "unable to load generated resources";
+  return app_locale;
 }
 
-FilePath ResourceBundle::GetLocaleFilePath(const std::wstring& pref_locale) {
+// static
+FilePath ResourceBundle::GetLocaleFilePath(const std::string& app_locale) {
   FilePath locale_path;
   PathService::Get(app::DIR_LOCALES, &locale_path);
 
-  const std::string app_locale = l10n_util::GetApplicationLocale(pref_locale);
   if (app_locale.empty())
     return FilePath();
 
   return locale_path.AppendASCII(app_locale + ".dll");
-}
-
-void ResourceBundle::LoadThemeResources() {
-  DCHECK(NULL == theme_data_) << "theme dll already loaded";
-  FilePath theme_data_path;
-  PathService::Get(app::DIR_THEMES, &theme_data_path);
-  theme_data_path = theme_data_path.AppendASCII("default.dll");
-
-  // The dll should only have resources, not executable code.
-  theme_data_ = LoadLibraryEx(theme_data_path.value().c_str(), NULL,
-                              GetDataDllLoadFlags());
-  DCHECK(theme_data_ != NULL) << "unable to load " << theme_data_path.value();
 }
 
 // static
@@ -100,7 +86,7 @@ RefCountedStaticMemory* ResourceBundle::LoadResourceBytes(
 }
 
 HICON ResourceBundle::LoadThemeIcon(int icon_id) {
-  return ::LoadIcon(theme_data_, MAKEINTRESOURCE(icon_id));
+  return ::LoadIcon(resources_data_, MAKEINTRESOURCE(icon_id));
 }
 
 base::StringPiece ResourceBundle::GetRawDataResource(int resource_id) {

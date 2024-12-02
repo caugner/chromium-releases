@@ -1,14 +1,14 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #ifndef CHROME_RENDERER_RENDERER_WEBSTORAGEAREA_IMPL_H_
 #define CHROME_RENDERER_RENDERER_WEBSTORAGEAREA_IMPL_H_
 
 #include "base/basictypes.h"
 #include "base/string16.h"
-#include "webkit/api/public/WebStorageArea.h"
-#include "webkit/api/public/WebString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebStorageArea.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
 
 class RendererWebStorageAreaImpl : public WebKit::WebStorageArea {
  public:
@@ -20,15 +20,18 @@ class RendererWebStorageAreaImpl : public WebKit::WebStorageArea {
   virtual unsigned length();
   virtual WebKit::WebString key(unsigned index);
   virtual WebKit::WebString getItem(const WebKit::WebString& key);
-  virtual void setItem(const WebKit::WebString& key,
-                       const WebKit::WebString& value,
-                       bool& quota_exception);
-  virtual void removeItem(const WebKit::WebString& key);
-  virtual void clear();
+  virtual void setItem(
+      const WebKit::WebString& key, const WebKit::WebString& value,
+      const WebKit::WebURL& url, WebStorageArea::Result& result,
+      WebKit::WebString& old_value, WebKit::WebFrame* web_view);
+  virtual void removeItem(
+      const WebKit::WebString& key, const WebKit::WebURL& url,
+      WebKit::WebString& old_value);
+  virtual void clear(const WebKit::WebURL& url, bool& cleared_something);
 
  private:
   // The ID we use for all IPC.
   int64 storage_area_id_;
 };
 
-#endif  // CHROME_RENDERER_WEBSTORAGEAREA_IMPL_H_
+#endif  // CHROME_RENDERER_RENDERER_WEBSTORAGEAREA_IMPL_H_

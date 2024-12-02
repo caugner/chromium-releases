@@ -1,7 +1,8 @@
-// Copyright (c) 2009 The Chromium Authos. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/callback.h"
 #include "base/scoped_ptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/appcache/appcache.h"
@@ -26,7 +27,9 @@ class AppCacheHostTest : public testing::Test {
    public:
     MockFrontend()
         : last_host_id_(-222), last_cache_id_(-222),
-          last_status_(appcache::OBSOLETE) {
+          last_status_(appcache::OBSOLETE),
+          last_status_changed_(appcache::OBSOLETE),
+          last_event_id_(appcache::OBSOLETE_EVENT) {
     }
 
     virtual void OnCacheSelected(int host_id, int64 cache_id ,
@@ -38,15 +41,22 @@ class AppCacheHostTest : public testing::Test {
 
     virtual void OnStatusChanged(const std::vector<int>& host_ids,
                                  appcache::Status status) {
+      last_status_changed_ = status;
     }
 
     virtual void OnEventRaised(const std::vector<int>& host_ids,
                                appcache::EventID event_id) {
+      last_event_id_ = event_id;
+    }
+
+    virtual void OnContentBlocked(int host_id) {
     }
 
     int last_host_id_;
     int64 last_cache_id_;
     appcache::Status last_status_;
+    appcache::Status last_status_changed_;
+    appcache::EventID last_event_id_;
   };
 
   void GetStatusCallback(Status status, void* param) {
@@ -116,7 +126,7 @@ TEST_F(AppCacheHostTest, SelectNoCache) {
   mock_frontend_.last_status_ = OBSOLETE;
 
   AppCacheHost host(1, &mock_frontend_, &service_);
-  host.SelectCache(GURL("http://whatever/"), kNoCacheId, GURL::EmptyGURL());
+  host.SelectCache(GURL("http://whatever/"), kNoCacheId, GURL());
 
   // We should have received an OnCacheSelected msg
   EXPECT_EQ(1, mock_frontend_.last_host_id_);
@@ -152,7 +162,6 @@ TEST_F(AppCacheHostTest, ForeignEntry) {
   EXPECT_EQ(NULL, host.associated_cache());
   EXPECT_FALSE(host.is_selection_pending());
 }
-
 
 TEST_F(AppCacheHostTest, FailedCacheLoad) {
   // Reset our mock frontend
@@ -230,7 +239,7 @@ TEST_F(AppCacheHostTest, SetSwappableCache) {
   EXPECT_FALSE(host.swappable_cache_.get());
 
   scoped_refptr<AppCacheGroup> group1 =
-      new AppCacheGroup(&service_, GURL::EmptyGURL());
+      new AppCacheGroup(&service_, GURL(), service_.storage()->NewGroupId());
   host.SetSwappableCache(group1);
   EXPECT_FALSE(host.swappable_cache_.get());
 
@@ -240,8 +249,15 @@ TEST_F(AppCacheHostTest, SetSwappableCache) {
   host.SetSwappableCache(group1);
   EXPECT_EQ(cache1, host.swappable_cache_.get());
 
+  mock_frontend_.last_host_id_ = -222;  // to verify we received OnCacheSelected
+
   host.AssociateCache(cache1);
   EXPECT_FALSE(host.swappable_cache_.get());  // was same as associated cache
+  EXPECT_EQ(appcache::IDLE, host.GetStatus());
+  // verify OnCacheSelected was called
+  EXPECT_EQ(host.host_id(), mock_frontend_.last_host_id_);
+  EXPECT_EQ(cache1->cache_id(), mock_frontend_.last_cache_id_);
+  EXPECT_EQ(appcache::IDLE, mock_frontend_.last_status_);
 
   AppCache* cache2 = new AppCache(&service_, 222);
   cache2->set_complete(true);
@@ -249,7 +265,8 @@ TEST_F(AppCacheHostTest, SetSwappableCache) {
   EXPECT_EQ(cache2, host.swappable_cache_.get());  // updated to newest
 
   scoped_refptr<AppCacheGroup> group2 =
-      new AppCacheGroup(&service_, GURL("http://foo.com"));
+      new AppCacheGroup(&service_, GURL("http://foo.com"),
+                        service_.storage()->NewGroupId());
   AppCache* cache3 = new AppCache(&service_, 333);
   cache3->set_complete(true);
   group2->AddCache(cache3);
@@ -283,7 +300,6 @@ TEST_F(AppCacheHostTest, SetSwappableCache) {
   EXPECT_FALSE(host.group_being_updated_);
   EXPECT_FALSE(host.swappable_cache_.get());  // group2 had no newest cache
 }
-// TODO(michaeln): Flesh these tests out more.
 
 }  // namespace appcache
 

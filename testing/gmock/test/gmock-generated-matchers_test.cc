@@ -68,6 +68,7 @@ using testing::Lt;
 using testing::MakeMatcher;
 using testing::Matcher;
 using testing::MatcherInterface;
+using testing::MatchResultListener;
 using testing::Ne;
 using testing::Not;
 using testing::Pointee;
@@ -136,6 +137,16 @@ TEST(ArgsTest, AcceptsDecreasingTemplateArgs) {
   EXPECT_THAT(t, Not(Args<2, 1>(Lt())));
 }
 
+// The MATCHER*() macros trigger warning C4100 (unreferenced formal
+// parameter) in MSVC with -W4.  Unfortunately they cannot be fixed in
+// the macro definition, as the warnings are generated when the macro
+// is expanded and macro expansion cannot contain #pragma.  Therefore
+// we suppress them here.
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable:4100)
+#endif
+
 MATCHER(SumIsZero, "") {
   return get<0>(arg) + get<1>(arg) + get<2>(arg) == 0;
 }
@@ -167,9 +178,7 @@ TEST(ArgsTest, CanMatchTupleByReference) {
 
 // Validates that arg is printed as str.
 MATCHER_P(PrintsAs, str, "") {
-  typedef GMOCK_REMOVE_CONST_(GMOCK_REMOVE_REFERENCE_(arg_type)) RawTuple;
-  return
-      testing::internal::UniversalPrinter<RawTuple>::PrintToString(arg) == str;
+  return testing::PrintToString(arg) == str;
 }
 
 TEST(ArgsTest, AcceptsTenTemplateArgs) {
@@ -202,29 +211,68 @@ TEST(ArgsTest, DescribesNegationCorrectly) {
             DescribeNegation(m));
 }
 
+TEST(ArgsTest, ExplainsMatchResultWithoutInnerExplanation) {
+  const Matcher<tuple<bool, int, int> > m = Args<1, 2>(Eq());
+  EXPECT_EQ("whose fields (#1, #2) are (42, 42)",
+            Explain(m, make_tuple(false, 42, 42)));
+  EXPECT_EQ("whose fields (#1, #2) are (42, 43)",
+            Explain(m, make_tuple(false, 42, 43)));
+}
+
+// For testing Args<>'s explanation.
+class LessThanMatcher : public MatcherInterface<tuple<char, int> > {
+ public:
+  virtual void DescribeTo(::std::ostream* os) const {}
+
+  virtual bool MatchAndExplain(tuple<char, int> value,
+                               MatchResultListener* listener) const {
+    const int diff = get<0>(value) - get<1>(value);
+    if (diff > 0) {
+      *listener << "where the first value is " << diff
+                << " more than the second";
+    }
+    return diff < 0;
+  }
+};
+
+Matcher<tuple<char, int> > LessThan() {
+  return MakeMatcher(new LessThanMatcher);
+}
+
+TEST(ArgsTest, ExplainsMatchResultWithInnerExplanation) {
+  const Matcher<tuple<char, int, int> > m = Args<0, 2>(LessThan());
+  EXPECT_EQ("whose fields (#0, #2) are ('a' (97), 42), "
+            "where the first value is 55 more than the second",
+            Explain(m, make_tuple('a', 42, 42)));
+  EXPECT_EQ("whose fields (#0, #2) are ('\\0', 43)",
+            Explain(m, make_tuple('\0', 42, 43)));
+}
+
 // For testing ExplainMatchResultTo().
 class GreaterThanMatcher : public MatcherInterface<int> {
  public:
   explicit GreaterThanMatcher(int rhs) : rhs_(rhs) {}
 
-  virtual bool Matches(int lhs) const { return lhs > rhs_; }
-
   virtual void DescribeTo(::std::ostream* os) const {
     *os << "is greater than " << rhs_;
   }
 
-  virtual void ExplainMatchResultTo(int lhs, ::std::ostream* os) const {
+  virtual bool MatchAndExplain(int lhs,
+                               MatchResultListener* listener) const {
     const int diff = lhs - rhs_;
     if (diff > 0) {
-      *os << "is " << diff << " more than " << rhs_;
+      *listener << "which is " << diff << " more than " << rhs_;
     } else if (diff == 0) {
-      *os << "is the same as " << rhs_;
+      *listener << "which is the same as " << rhs_;
     } else {
-      *os << "is " << -diff << " less than " << rhs_;
+      *listener << "which is " << -diff << " less than " << rhs_;
     }
+
+    return lhs > rhs_;
   }
+
  private:
-  const int rhs_;
+  int rhs_;
 };
 
 Matcher<int> GreaterThan(int n) {
@@ -243,32 +291,32 @@ TEST(ElementsAreTest, CanDescribeExpectingNoElement) {
 
 TEST(ElementsAreTest, CanDescribeExpectingOneElement) {
   Matcher<vector<int> > m = ElementsAre(Gt(5));
-  EXPECT_EQ("has 1 element that is greater than 5", Describe(m));
+  EXPECT_EQ("has 1 element that is > 5", Describe(m));
 }
 
 TEST(ElementsAreTest, CanDescribeExpectingManyElements) {
   Matcher<list<string> > m = ElementsAre(StrEq("one"), "two");
   EXPECT_EQ("has 2 elements where\n"
-            "element 0 is equal to \"one\",\n"
-            "element 1 is equal to \"two\"", Describe(m));
+            "element #0 is equal to \"one\",\n"
+            "element #1 is equal to \"two\"", Describe(m));
 }
 
 TEST(ElementsAreTest, CanDescribeNegationOfExpectingNoElement) {
   Matcher<vector<int> > m = ElementsAre();
-  EXPECT_EQ("is not empty", DescribeNegation(m));
+  EXPECT_EQ("isn't empty", DescribeNegation(m));
 }
 
 TEST(ElementsAreTest, CanDescribeNegationOfExpectingOneElment) {
   Matcher<const list<int>& > m = ElementsAre(Gt(5));
-  EXPECT_EQ("does not have 1 element, or\n"
-            "element 0 is not greater than 5", DescribeNegation(m));
+  EXPECT_EQ("doesn't have 1 element, or\n"
+            "element #0 isn't > 5", DescribeNegation(m));
 }
 
 TEST(ElementsAreTest, CanDescribeNegationOfExpectingManyElements) {
   Matcher<const list<string>& > m = ElementsAre("one", "two");
-  EXPECT_EQ("does not have 2 elements, or\n"
-            "element 0 is not equal to \"one\", or\n"
-            "element 1 is not equal to \"two\"", DescribeNegation(m));
+  EXPECT_EQ("doesn't have 2 elements, or\n"
+            "element #0 isn't equal to \"one\", or\n"
+            "element #1 isn't equal to \"two\"", DescribeNegation(m));
 }
 
 TEST(ElementsAreTest, DoesNotExplainTrivialMatch) {
@@ -286,8 +334,9 @@ TEST(ElementsAreTest, ExplainsNonTrivialMatch) {
 
   const int a[] = { 10, 0, 100 };
   vector<int> test_vector(a, a + GMOCK_ARRAY_SIZE_(a));
-  EXPECT_EQ("element 0 is 9 more than 1,\n"
-            "element 2 is 98 more than 2", Explain(m, test_vector));
+  EXPECT_EQ("whose element #0 matches, which is 9 more than 1,\n"
+            "and whose element #2 matches, which is 98 more than 2",
+            Explain(m, test_vector));
 }
 
 TEST(ElementsAreTest, CanExplainMismatchWrongSize) {
@@ -298,7 +347,7 @@ TEST(ElementsAreTest, CanExplainMismatchWrongSize) {
   EXPECT_EQ("", Explain(m, test_list));
 
   test_list.push_back(1);
-  EXPECT_EQ("has 1 element", Explain(m, test_list));
+  EXPECT_EQ("which has 1 element", Explain(m, test_list));
 }
 
 TEST(ElementsAreTest, CanExplainMismatchRightSize) {
@@ -307,10 +356,11 @@ TEST(ElementsAreTest, CanExplainMismatchRightSize) {
   vector<int> v;
   v.push_back(2);
   v.push_back(1);
-  EXPECT_EQ("element 0 doesn't match", Explain(m, v));
+  EXPECT_EQ("whose element #0 doesn't match", Explain(m, v));
 
   v[0] = 1;
-  EXPECT_EQ("element 1 doesn't match (is 4 less than 5)", Explain(m, v));
+  EXPECT_EQ("whose element #1 doesn't match, which is 4 less than 5",
+            Explain(m, v));
 }
 
 TEST(ElementsAreTest, MatchesOneElementVector) {
@@ -411,7 +461,7 @@ TEST(ElementsAreTest, WorksForNestedContainer) {
   };
 
   vector<list<char> > nested;
-  for (int i = 0; i < GMOCK_ARRAY_SIZE_(strings); i++) {
+  for (size_t i = 0; i < GMOCK_ARRAY_SIZE_(strings); i++) {
     nested.push_back(list<char>(strings[i], strings[i] + strlen(strings[i])));
   }
 
@@ -446,7 +496,12 @@ TEST(ElementsAreTest, WorksWithNativeArrayPassedByReference) {
 
 class NativeArrayPassedAsPointerAndSize {
  public:
+  NativeArrayPassedAsPointerAndSize() {}
+
   MOCK_METHOD2(Helper, void(int* array, int size));
+
+ private:
+  GTEST_DISALLOW_COPY_AND_ASSIGN_(NativeArrayPassedAsPointerAndSize);
 };
 
 TEST(ElementsAreTest, WorksWithNativeArrayPassedAsPointerAndSize) {
@@ -547,10 +602,51 @@ TEST(MatcherMacroTest, Works) {
   EXPECT_EQ("", Explain(m, 7));
 }
 
+// Tests explaining match result in a MATCHER* macro.
+
+MATCHER(IsEven2, "is even") {
+  if ((arg % 2) == 0) {
+    // Verifies that we can stream to result_listener, a listener
+    // supplied by the MATCHER macro implicitly.
+    *result_listener << "OK";
+    return true;
+  } else {
+    *result_listener << "% 2 == " << (arg % 2);
+    return false;
+  }
+}
+
+MATCHER_P2(EqSumOf, x, y, "") {
+  if (arg == (x + y)) {
+    *result_listener << "OK";
+    return true;
+  } else {
+    // Verifies that we can stream to the underlying stream of
+    // result_listener.
+    if (result_listener->stream() != NULL) {
+      *result_listener->stream() << "diff == " << (x + y - arg);
+    }
+    return false;
+  }
+}
+
+TEST(MatcherMacroTest, CanExplainMatchResult) {
+  const Matcher<int> m1 = IsEven2();
+  EXPECT_EQ("OK", Explain(m1, 4));
+  EXPECT_EQ("% 2 == 1", Explain(m1, 5));
+
+  const Matcher<int> m2 = EqSumOf(1, 2);
+  EXPECT_EQ("OK", Explain(m2, 3));
+  EXPECT_EQ("diff == -1", Explain(m2, 4));
+}
+
 // Tests that the description string supplied to MATCHER() must be
 // valid.
 
-MATCHER(HasBadDescription, "Invalid%") { return true; }
+MATCHER(HasBadDescription, "Invalid%") {
+  // Uses arg to suppress "unused parameter" warning.
+  return arg==arg;
+}
 
 TEST(MatcherMacroTest,
      CreatingMatcherWithBadDescriptionGeneratesNonfatalFailure) {
@@ -560,7 +656,7 @@ TEST(MatcherMacroTest,
       "use \"%%\" instead of \"%\" to print \"%\".");
 }
 
-MATCHER(HasGoodDescription, "good") { return true; }
+MATCHER(HasGoodDescription, "good") { return arg==arg; }
 
 TEST(MatcherMacroTest, AcceptsValidDescription) {
   const Matcher<int> m = HasGoodDescription();
@@ -642,7 +738,7 @@ TEST(MatcherPMacroTest,
 }
 
 
-MATCHER_P(HasGoodDescription1, n, "good %(n)s") { return true; }
+MATCHER_P(HasGoodDescription1, n, "good %(n)s") { return arg==arg; }
 
 TEST(MatcherPMacroTest, AcceptsValidDescription) {
   const Matcher<int> m = HasGoodDescription1(5);
@@ -709,7 +805,7 @@ TEST(MatcherPnMacroTest,
 
 MATCHER_P2(HasComplexDescription, foo, bar,
            "is as complex as %(foo)s %(bar)s (i.e. %(*)s or %%%(foo)s!)") {
-  return true;
+  return arg==arg;
 }
 
 TEST(MatcherPnMacroTest, AcceptsValidDescription) {
@@ -861,7 +957,7 @@ TEST(MatcherPnMacroTest, WorksForDifferentParameterTypes) {
 MATCHER_P2(EqConcat, prefix, suffix, "") {
   // The following lines promote the two parameters to desired types.
   std::string prefix_str(prefix);
-  char suffix_char(suffix);
+  char suffix_char = static_cast<char>(suffix);
   return arg == prefix_str + suffix_char;
 }
 
@@ -973,16 +1069,22 @@ TEST(ContainsTest, SetDoesNotMatchWhenElementIsNotInContainer) {
   EXPECT_THAT(c_string_set, Not(Contains(string("hello").c_str())));
 }
 
-TEST(ContainsTest, DescribesItselfCorrectly) {
+TEST(ContainsTest, ExplainsMatchResultCorrectly) {
   const int a[2] = { 1, 2 };
   Matcher<const int(&)[2]> m = Contains(2);
-  EXPECT_EQ("element 1 matches", Explain(m, a));
+  EXPECT_EQ("whose element #1 matches", Explain(m, a));
 
   m = Contains(3);
   EXPECT_EQ("", Explain(m, a));
+
+  m = Contains(GreaterThan(0));
+  EXPECT_EQ("whose element #0 matches, which is 1 more than 0", Explain(m, a));
+
+  m = Contains(GreaterThan(10));
+  EXPECT_EQ("", Explain(m, a));
 }
 
-TEST(ContainsTest, ExplainsMatchResultCorrectly) {
+TEST(ContainsTest, DescribesItselfCorrectly) {
   Matcher<vector<int> > m = Contains(1);
   EXPECT_EQ("contains at least one element that is equal to 1", Describe(m));
 
@@ -1042,5 +1144,9 @@ TEST(ContainsTest, WorksForTwoDimensionalNativeArray) {
   EXPECT_THAT(a, Not(Contains(ElementsAre(3, 4, 5))));
   EXPECT_THAT(a, Contains(Not(Contains(5))));
 }
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 }  // namespace

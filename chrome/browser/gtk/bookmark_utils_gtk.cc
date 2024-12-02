@@ -1,10 +1,9 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/gtk/bookmark_utils_gtk.h"
 
-#include "app/gfx/gtk_util.h"
 #include "app/gtk_dnd_util.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
@@ -15,8 +14,9 @@
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/gtk/gtk_chrome_button.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/profile.h"
-#include "chrome/common/gtk_util.h"
+#include "gfx/gtk_util.h"
 
 namespace {
 
@@ -124,6 +124,8 @@ void ConfigureButtonForNode(const BookmarkNode* node, BookmarkModel* model,
   std::string label_string = WideToUTF8(node->GetTitle());
   if (!label_string.empty()) {
     GtkWidget* label = gtk_label_new(label_string.c_str());
+    // Until we switch to vector graphics, force the font size.
+    gtk_util::ForceFontSizePixels(label, 13.4);  // 13.4px == 10pt @ 96dpi
 
     // Ellipsize long bookmark names.
     if (node != model->other_node()) {
@@ -198,6 +200,16 @@ void SetButtonTextColors(GtkWidget* label, GtkThemeProvider* provider) {
 
 // DnD-related -----------------------------------------------------------------
 
+int GetCodeMask(bool folder) {
+  int rv = gtk_dnd_util::CHROME_BOOKMARK_ITEM;
+  if (!folder) {
+    rv |= gtk_dnd_util::TEXT_URI_LIST |
+          gtk_dnd_util::TEXT_PLAIN |
+          gtk_dnd_util::NETSCAPE_URL;
+  }
+  return rv;
+}
+
 void WriteBookmarkToSelection(const BookmarkNode* node,
                               GtkSelectionData* selection_data,
                               guint target_type,
@@ -213,7 +225,7 @@ void WriteBookmarksToSelection(const std::vector<const BookmarkNode*>& nodes,
                                guint target_type,
                                Profile* profile) {
   switch (target_type) {
-    case GtkDndUtil::CHROME_BOOKMARK_ITEM: {
+    case gtk_dnd_util::CHROME_BOOKMARK_ITEM: {
       BookmarkDragData data(nodes);
       Pickle pickle;
       data.WriteToPickle(profile, &pickle);
@@ -224,7 +236,18 @@ void WriteBookmarksToSelection(const std::vector<const BookmarkNode*>& nodes,
                              pickle.size());
       break;
     }
-    case GtkDndUtil::TEXT_URI_LIST: {
+    case gtk_dnd_util::NETSCAPE_URL: {
+      // _NETSCAPE_URL format is URL + \n + title.
+      std::string utf8_text = nodes[0]->GetURL().spec() + "\n" + UTF16ToUTF8(
+          nodes[0]->GetTitleAsString16());
+      gtk_selection_data_set(selection_data,
+                             selection_data->target,
+                             kBitsInAByte,
+                             reinterpret_cast<const guchar*>(utf8_text.c_str()),
+                             utf8_text.length());
+      break;
+    }
+    case gtk_dnd_util::TEXT_URI_LIST: {
       gchar** uris = reinterpret_cast<gchar**>(malloc(sizeof(gchar*) *
                                                (nodes.size() + 1)));
       for (size_t i = 0; i < nodes.size(); ++i) {
@@ -242,6 +265,11 @@ void WriteBookmarksToSelection(const std::vector<const BookmarkNode*>& nodes,
       free(uris);
       break;
     }
+    case gtk_dnd_util::TEXT_PLAIN: {
+      gtk_selection_data_set_text(selection_data,
+                                  nodes[0]->GetURL().spec().c_str(), -1);
+      break;
+    }
     default: {
       DLOG(ERROR) << "Unsupported drag get type!";
     }
@@ -255,17 +283,19 @@ std::vector<const BookmarkNode*> GetNodesFromSelection(
     Profile* profile,
     gboolean* delete_selection_data,
     gboolean* dnd_success) {
-  *delete_selection_data = FALSE;
-  *dnd_success = FALSE;
+  if (delete_selection_data)
+    *delete_selection_data = FALSE;
+  if (dnd_success)
+    *dnd_success = FALSE;
 
-  if ((selection_data != NULL) && (selection_data->length >= 0)) {
-    if (context->action == GDK_ACTION_MOVE) {
+  if (selection_data && selection_data->length > 0) {
+    if (context && delete_selection_data && context->action == GDK_ACTION_MOVE)
       *delete_selection_data = TRUE;
-    }
 
     switch (target_type) {
-      case GtkDndUtil::CHROME_BOOKMARK_ITEM: {
-        *dnd_success = TRUE;
+      case gtk_dnd_util::CHROME_BOOKMARK_ITEM: {
+        if (dnd_success)
+          *dnd_success = TRUE;
         Pickle pickle(reinterpret_cast<char*>(selection_data->data),
                       selection_data->length);
         BookmarkDragData drag_data;
@@ -285,7 +315,7 @@ bool CreateNewBookmarkFromNamedUrl(GtkSelectionData* selection_data,
     BookmarkModel* model, const BookmarkNode* parent, int idx) {
   GURL url;
   string16 title;
-  if (!GtkDndUtil::ExtractNamedURL(selection_data, &url, &title))
+  if (!gtk_dnd_util::ExtractNamedURL(selection_data, &url, &title))
     return false;
 
   model->AddURL(parent, idx, UTF16ToWideHack(title), url);
@@ -295,7 +325,7 @@ bool CreateNewBookmarkFromNamedUrl(GtkSelectionData* selection_data,
 bool CreateNewBookmarksFromURIList(GtkSelectionData* selection_data,
     BookmarkModel* model, const BookmarkNode* parent, int idx) {
   std::vector<GURL> urls;
-  GtkDndUtil::ExtractURIList(selection_data, &urls);
+  gtk_dnd_util::ExtractURIList(selection_data, &urls);
   for (size_t i = 0; i < urls.size(); ++i) {
     std::string title = GetNameForURL(urls[i]);
     model->AddURL(parent, idx++, UTF8ToWide(title), urls[i]);

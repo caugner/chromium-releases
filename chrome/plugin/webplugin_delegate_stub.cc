@@ -18,8 +18,8 @@
 #include "third_party/npapi/bindings/npapi.h"
 #include "third_party/npapi/bindings/npruntime.h"
 #include "skia/ext/platform_device.h"
-#include "webkit/api/public/WebBindings.h"
-#include "webkit/api/public/WebCursorInfo.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebBindings.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCursorInfo.h"
 #include "webkit/glue/plugins/webplugin_delegate_impl.h"
 #include "webkit/glue/webcursor.h"
 
@@ -46,6 +46,22 @@ class FinishDestructionTask : public Task {
   WebPlugin* webplugin_;
 };
 
+#if defined(OS_MACOSX)
+namespace {
+
+void FocusNotifier(WebPluginDelegateImpl *instance) {
+  uint32 process_id = getpid();
+  uint32 instance_id = reinterpret_cast<uint32>(instance);
+  PluginThread* plugin_thread = PluginThread::current();
+  if (plugin_thread) {
+    plugin_thread->Send(
+        new PluginProcessHostMsg_PluginReceivedFocus(process_id, instance_id));
+  }
+}
+
+}
+#endif
+
 WebPluginDelegateStub::WebPluginDelegateStub(
     const std::string& mime_type, int instance_id, PluginChannel* channel) :
     mime_type_(mime_type),
@@ -59,7 +75,7 @@ WebPluginDelegateStub::WebPluginDelegateStub(
 
 WebPluginDelegateStub::~WebPluginDelegateStub() {
   in_destructor_ = true;
-  child_process_logging::ScopedActiveURLSetter url_setter(page_url_);
+  child_process_logging::SetActiveURL(page_url_);
 
   if (channel_->in_send()) {
     // The delegate or an npobject is in the callstack, so don't delete it
@@ -76,7 +92,7 @@ WebPluginDelegateStub::~WebPluginDelegateStub() {
 }
 
 void WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
-  child_process_logging::ScopedActiveURLSetter url_setter(page_url_);
+  child_process_logging::SetActiveURL(page_url_);
 
   // A plugin can execute a script to delete itself in any of its NPP methods.
   // Hold an extra reference to ourself so that if this does occur and we're
@@ -105,6 +121,12 @@ void WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(PluginMsg_UpdateGeometrySync, OnUpdateGeometry)
     IPC_MESSAGE_HANDLER(PluginMsg_SendJavaScriptStream,
                         OnSendJavaScriptStream)
+#if defined(OS_MACOSX)
+    IPC_MESSAGE_HANDLER(PluginMsg_SetWindowFocus, OnSetWindowFocus)
+    IPC_MESSAGE_HANDLER(PluginMsg_ContainerHidden, OnContainerHidden)
+    IPC_MESSAGE_HANDLER(PluginMsg_ContainerShown, OnContainerShown)
+    IPC_MESSAGE_HANDLER(PluginMsg_WindowFrameChanged, OnWindowFrameChanged)
+#endif
     IPC_MESSAGE_HANDLER(PluginMsg_DidReceiveManualResponse,
                         OnDidReceiveManualResponse)
     IPC_MESSAGE_HANDLER(PluginMsg_DidReceiveManualData, OnDidReceiveManualData)
@@ -114,6 +136,16 @@ void WebPluginDelegateStub::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(PluginMsg_InstallMissingPlugin, OnInstallMissingPlugin)
     IPC_MESSAGE_HANDLER(PluginMsg_HandleURLRequestReply,
                         OnHandleURLRequestReply)
+    IPC_MESSAGE_HANDLER(PluginMsg_HTTPRangeRequestReply,
+                        OnHTTPRangeRequestReply)
+    IPC_MESSAGE_HANDLER(PluginMsg_CreateCommandBuffer,
+                        OnCreateCommandBuffer)
+    IPC_MESSAGE_HANDLER(PluginMsg_DestroyCommandBuffer,
+                        OnDestroyCommandBuffer)
+#if defined(OS_MACOSX)
+    IPC_MESSAGE_HANDLER(PluginMsg_SetFakeAcceleratedSurfaceWindowHandle,
+                        OnSetFakeAcceleratedSurfaceWindowHandle)
+#endif
     IPC_MESSAGE_UNHANDLED_ERROR()
   IPC_END_MESSAGE_MAP()
 
@@ -128,7 +160,7 @@ bool WebPluginDelegateStub::Send(IPC::Message* msg) {
 void WebPluginDelegateStub::OnInit(const PluginMsg_Init_Params& params,
                                    bool* result) {
   page_url_ = params.page_url;
-  child_process_logging::ScopedActiveURLSetter url_setter(page_url_);
+  child_process_logging::SetActiveURL(page_url_);
 
   *result = false;
   if (params.arg_names.size() != params.arg_values.size()) {
@@ -154,7 +186,8 @@ void WebPluginDelegateStub::OnInit(const PluginMsg_Init_Params& params,
 #endif
 
   webplugin_ = new WebPluginProxy(
-      channel_, instance_id_, page_url_, params.containing_window);
+      channel_, instance_id_, page_url_, params.containing_window,
+      params.host_render_view_routing_id);
   delegate_ = WebPluginDelegateImpl::Create(path, mime_type_, parent);
   if (delegate_) {
     webplugin_->set_delegate(delegate_);
@@ -163,6 +196,12 @@ void WebPluginDelegateStub::OnInit(const PluginMsg_Init_Params& params,
                                     params.arg_values,
                                     webplugin_,
                                     params.load_manually);
+#if defined(OS_MACOSX)
+    delegate_->SetFocusNotifier(FocusNotifier);
+    delegate_->WindowFrameChanged(params.containing_window_frame,
+                                  params.containing_content_frame);
+    delegate_->SetWindowHasFocus(params.containing_window_has_focus);
+#endif
   }
 }
 
@@ -215,8 +254,8 @@ void WebPluginDelegateStub::OnDidFail(int id) {
 }
 
 void WebPluginDelegateStub::OnDidFinishLoadWithReason(
-    const GURL& url, int reason, intptr_t notify_data) {
-  delegate_->DidFinishLoadWithReason(url, reason, notify_data);
+    const GURL& url, int reason, int notify_id) {
+  delegate_->DidFinishLoadWithReason(url, reason, notify_id);
 }
 
 void WebPluginDelegateStub::OnSetFocus() {
@@ -241,7 +280,7 @@ void WebPluginDelegateStub::OnDidPaint() {
 }
 
 void WebPluginDelegateStub::OnPrint(base::SharedMemoryHandle* shared_memory,
-                                    size_t* size) {
+                                    uint32* size) {
 #if defined(OS_WIN)
   printing::NativeMetafile metafile;
   if (!metafile.CreateDc(NULL, NULL)) {
@@ -274,11 +313,16 @@ void WebPluginDelegateStub::OnUpdateGeometry(
     const PluginMsg_UpdateGeometry_Param& param) {
   webplugin_->UpdateGeometry(
       param.window_rect, param.clip_rect,
-      param.windowless_buffer, param.background_buffer);
+      param.windowless_buffer, param.background_buffer,
+      param.transparent
+#if defined(OS_MACOSX)
+      ,
+      param.ack_key
+#endif
+      );
 }
 
-void WebPluginDelegateStub::OnGetPluginScriptableObject(int* route_id,
-                                                        intptr_t* npobject_ptr) {
+void WebPluginDelegateStub::OnGetPluginScriptableObject(int* route_id) {
   NPObject* object = delegate_->GetPluginScriptableObject();
   if (!object) {
     *route_id = MSG_ROUTING_NONE;
@@ -286,7 +330,6 @@ void WebPluginDelegateStub::OnGetPluginScriptableObject(int* route_id,
   }
 
   *route_id = channel_->GenerateRouteID();
-  *npobject_ptr = reinterpret_cast<intptr_t>(object);
   // The stub will delete itself when the proxy tells it that it's released, or
   // otherwise when the channel is closed.
   new NPObjectStub(
@@ -300,11 +343,32 @@ void WebPluginDelegateStub::OnGetPluginScriptableObject(int* route_id,
 void WebPluginDelegateStub::OnSendJavaScriptStream(const GURL& url,
                                                    const std::string& result,
                                                    bool success,
-                                                   bool notify_needed,
-                                                   intptr_t notify_data) {
-  delegate_->SendJavaScriptStream(url, result, success, notify_needed,
-                                  notify_data);
+                                                   int notify_id) {
+  delegate_->SendJavaScriptStream(url, result, success, notify_id);
 }
+
+#if defined(OS_MACOSX)
+void WebPluginDelegateStub::OnSetWindowFocus(bool has_focus) {
+  delegate_->SetWindowHasFocus(has_focus);
+}
+
+void WebPluginDelegateStub::OnContainerHidden() {
+  delegate_->SetContainerVisibility(false);
+}
+
+void WebPluginDelegateStub::OnContainerShown(gfx::Rect window_frame,
+                                             gfx::Rect view_frame,
+                                             bool has_focus) {
+  delegate_->WindowFrameChanged(window_frame, view_frame);
+  delegate_->SetContainerVisibility(true);
+  delegate_->SetWindowHasFocus(has_focus);
+}
+
+void WebPluginDelegateStub::OnWindowFrameChanged(gfx::Rect window_frame,
+                                                 gfx::Rect view_frame) {
+  delegate_->WindowFrameChanged(window_frame, view_frame);
+}
+#endif  // OS_MACOSX
 
 void WebPluginDelegateStub::OnDidReceiveManualResponse(
     const GURL& url,
@@ -332,8 +396,27 @@ void WebPluginDelegateStub::OnInstallMissingPlugin() {
   delegate_->InstallMissingPlugin();
 }
 
+void WebPluginDelegateStub::OnCreateCommandBuffer(int* route_id) {
+#if defined(ENABLE_GPU)
+  command_buffer_stub_.reset(new CommandBufferStub(
+      channel_,
+      instance_id_,
+      delegate_->windowed_handle()));
+
+  *route_id = command_buffer_stub_->route_id();
+#else
+  *route_id = 0;
+#endif  // ENABLE_GPU
+}
+
+void WebPluginDelegateStub::OnDestroyCommandBuffer() {
+#if defined(ENABLE_GPU)
+  command_buffer_stub_.reset();
+#endif
+}
+
 void WebPluginDelegateStub::CreateSharedBuffer(
-    size_t size,
+    uint32 size,
     base::SharedMemory* shared_buf,
     base::SharedMemoryHandle* remote_handle) {
   if (!shared_buf->Create(std::wstring(), false, false, size)) {
@@ -364,11 +447,23 @@ void WebPluginDelegateStub::CreateSharedBuffer(
 }
 
 void WebPluginDelegateStub::OnHandleURLRequestReply(
-    const PluginMsg_URLRequestReply_Params& params) {
+    unsigned long resource_id, const GURL& url, int notify_id) {
   WebPluginResourceClient* resource_client =
-      delegate_->CreateResourceClient(params.resource_id, params.url,
-                                      params.notify_needed,
-                                      params.notify_data,
-                                      params.stream);
-  webplugin_->OnResourceCreated(params.resource_id, resource_client);
+      delegate_->CreateResourceClient(resource_id, url, notify_id);
+  webplugin_->OnResourceCreated(resource_id, resource_client);
 }
+
+void WebPluginDelegateStub::OnHTTPRangeRequestReply(
+    unsigned long resource_id, int range_request_id) {
+  WebPluginResourceClient* resource_client =
+      delegate_->CreateSeekableResourceClient(resource_id, range_request_id);
+  webplugin_->OnResourceCreated(resource_id, resource_client);
+}
+
+#if defined(OS_MACOSX)
+void WebPluginDelegateStub::OnSetFakeAcceleratedSurfaceWindowHandle(
+    gfx::PluginWindowHandle window) {
+  delegate_->set_windowed_handle(window);
+}
+#endif
+

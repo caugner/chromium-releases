@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,16 @@
 
 #include <algorithm>
 
-#include "app/gfx/canvas.h"
-#include "app/gfx/text_elider.h"
-#include "app/l10n_util.h"
 #include "app/animation.h"
+#include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "app/text_elider.h"
+#include "base/i18n/rtl.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser_theme_provider.h"
+#include "gfx/canvas.h"
+#include "gfx/point.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -26,6 +28,8 @@
 #include "views/widget/root_view.h"
 #include "views/widget/widget.h"
 #include "views/window/window.h"
+
+using views::Widget;
 
 // The alpha and color of the bubble's shadow.
 static const SkColor kShadowColor = SkColorSetARGB(30, 0, 0, 0);
@@ -416,7 +420,7 @@ void StatusBubbleViews::StatusView::Paint(gfx::Canvas* canvas) {
   // Draw highlight text and then the text body. In order to make sure the text
   // is aligned to the right on RTL UIs, we mirror the text bounds if the
   // locale is RTL.
-  int text_width = std::min(views::Label::GetFont().GetStringWidth(text_),
+  int text_width = std::min(views::Label::font().GetStringWidth(text_),
       width - (kShadowThickness * 2) - kTextPositionX - kTextHorizPadding);
   int text_height = height - (kShadowThickness * 2);
   gfx::Rect body_bounds(kShadowThickness + kTextPositionX,
@@ -434,7 +438,7 @@ void StatusBubbleViews::StatusView::Paint(gfx::Canvas* canvas) {
       (SkColorGetG(text_color) + SkColorGetR(toolbar_color)) / 2,
       (SkColorGetB(text_color) + SkColorGetR(toolbar_color)) / 2);
   canvas->DrawStringInt(text_,
-                        views::Label::GetFont(),
+                        views::Label::font(),
                         text_color,
                         body_bounds.x(),
                         body_bounds.y(),
@@ -462,7 +466,10 @@ StatusBubbleViews::~StatusBubbleViews() {
 
 void StatusBubbleViews::Init() {
   if (!popup_.get()) {
-    popup_.reset(views::Widget::CreateTransparentPopupWidget(false));
+    popup_.reset(Widget::CreatePopupWidget(Widget::Transparent,
+                                           Widget::NotAcceptEvents,
+                                           Widget::NotDeleteOnDestroy,
+                                           Widget::MirrorOriginInRTL));
     if (!view_)
       view_ = new StatusView(this, popup_.get(), frame_->GetThemeProvider());
     popup_->SetOpacity(0x00);
@@ -492,7 +499,7 @@ gfx::Size StatusBubbleViews::GetPreferredSize() {
 void StatusBubbleViews::SetBounds(int x, int y, int w, int h) {
   // If the UI layout is RTL, we need to mirror the position of the bubble
   // relative to the parent.
-  if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) {
+  if (base::i18n::IsRTL()) {
     gfx::Rect frame_bounds;
     frame_->GetBounds(&frame_bounds, false);
     int mirrored_x = frame_bounds.width() - x - w;
@@ -506,8 +513,14 @@ void StatusBubbleViews::SetBounds(int x, int y, int w, int h) {
 }
 
 void StatusBubbleViews::SetStatus(const std::wstring& status_text) {
+  if (size_.IsEmpty())
+    return;  // We have no bounds, don't attempt to show the popup.
+
   if (status_text_ == status_text)
     return;
+
+  if (!IsFrameVisible())
+    return;  // Don't show anything if the parent isn't visible.
 
   Init();
   status_text_ = status_text;
@@ -522,13 +535,17 @@ void StatusBubbleViews::SetStatus(const std::wstring& status_text) {
 }
 
 void StatusBubbleViews::SetURL(const GURL& url, const std::wstring& languages) {
+  if (size_.IsEmpty())
+    return;  // We have no bounds, don't attempt to show the popup.
+
   Init();
 
   // If we want to clear a displayed URL but there is a status still to
   // display, display that status instead.
   if (url.is_empty() && !status_text_.empty()) {
     url_text_ = std::wstring();
-    view_->SetText(status_text_);
+    if (IsFrameVisible())
+      view_->SetText(status_text_);
     return;
   }
 
@@ -537,16 +554,17 @@ void StatusBubbleViews::SetURL(const GURL& url, const std::wstring& languages) {
   popup_->GetBounds(&popup_bounds, true);
   int text_width = static_cast<int>(popup_bounds.width() -
       (kShadowThickness * 2) - kTextPositionX - kTextHorizPadding - 1);
-  url_text_ = gfx::ElideUrl(url, view_->Label::GetFont(), text_width,
+  url_text_ = gfx::ElideUrl(url, view_->Label::font(), text_width,
                             languages);
 
   // An URL is always treated as a left-to-right string. On right-to-left UIs
   // we need to explicitly mark the URL as LTR to make sure it is displayed
   // correctly.
-  if (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT &&
-      !url_text_.empty())
-    l10n_util::WrapStringWithLTRFormatting(&url_text_);
-  view_->SetText(url_text_);
+  if (base::i18n::IsRTL() && !url_text_.empty())
+    base::i18n::WrapStringWithLTRFormatting(&url_text_);
+
+  if (IsFrameVisible())
+    view_->SetText(url_text_);
 }
 
 void StatusBubbleViews::Hide() {
@@ -556,14 +574,18 @@ void StatusBubbleViews::Hide() {
     view_->Hide();
 }
 
-void StatusBubbleViews::MouseMoved() {
+void StatusBubbleViews::MouseMoved(const gfx::Point& location,
+                                   bool left_content) {
+  if (left_content)
+    return;
+
   if (view_) {
     view_->ResetTimer();
 
     if (view_->GetState() != StatusView::BUBBLE_HIDDEN &&
         view_->GetState() != StatusView::BUBBLE_HIDING_FADE &&
         view_->GetState() != StatusView::BUBBLE_HIDING_TIMER) {
-      AvoidMouse();
+      AvoidMouse(location);
     }
   }
 }
@@ -572,42 +594,40 @@ void StatusBubbleViews::UpdateDownloadShelfVisibility(bool visible) {
   download_shelf_is_visible_ = visible;
 }
 
-void StatusBubbleViews::AvoidMouse() {
+void StatusBubbleViews::AvoidMouse(const gfx::Point& location) {
   // Get the position of the frame.
   gfx::Point top_left;
   views::RootView* root = frame_->GetRootView();
   views::View::ConvertPointToScreen(root, &top_left);
   int window_width = root->GetLocalBounds(true).width();  // border included.
 
-  // Our status bubble is located in screen coordinates, so we should get
-  // those rather than attempting to reverse decode the web contents
-  // coordinates.
-  gfx::Point cursor_location = views::Screen::GetCursorScreenPoint();
-
   // Get the cursor position relative to the popup.
+  gfx::Point relative_location = location;
   if (view_->UILayoutIsRightToLeft()) {
     int top_right_x = top_left.x() + window_width;
-    cursor_location.set_x(top_right_x - cursor_location.x());
+    relative_location.set_x(top_right_x - relative_location.x());
   } else {
-    cursor_location.set_x(cursor_location.x() - (top_left.x() + position_.x()));
+    relative_location.set_x(
+        relative_location.x() - (top_left.x() + position_.x()));
   }
-  cursor_location.set_y(cursor_location.y() - (top_left.y() + position_.y()));
+  relative_location.set_y(
+      relative_location.y() - (top_left.y() + position_.y()));
 
   // If the mouse is in a position where we think it would move the
   // status bubble, figure out where and how the bubble should be moved.
-  if (cursor_location.y() > -kMousePadding &&
-      cursor_location.x() < size_.width() + kMousePadding) {
-    int offset = kMousePadding + cursor_location.y();
+  if (relative_location.y() > -kMousePadding &&
+      relative_location.x() < size_.width() + kMousePadding) {
+    int offset = kMousePadding + relative_location.y();
 
     // Make the movement non-linear.
     offset = offset * offset / kMousePadding;
 
     // When the mouse is entering from the right, we want the offset to be
     // scaled by how horizontally far away the cursor is from the bubble.
-    if (cursor_location.x() > size_.width()) {
+    if (relative_location.x() > size_.width()) {
       offset = static_cast<int>(static_cast<float>(offset) * (
           static_cast<float>(kMousePadding -
-              (cursor_location.x() - size_.width())) /
+              (relative_location.x() - size_.width())) /
           static_cast<float>(kMousePadding)));
     }
 
@@ -639,7 +659,7 @@ void StatusBubbleViews::AvoidMouse() {
       view_->SetStyle(StatusView::STYLE_STANDARD_RIGHT);
       offset_ = 0;
 
-      // Substract border width + bubble width.
+      // Subtract border width + bubble width.
       int right_position_x = window_width - (position_.x() + size_.width());
       popup_->SetBounds(gfx::Rect(top_left.x() + right_position_x,
                                   top_left.y() + position_.y(),
@@ -658,4 +678,12 @@ void StatusBubbleViews::AvoidMouse() {
                                 top_left.y() + position_.y(),
                                 size_.width(), size_.height()));
   }
+}
+
+bool StatusBubbleViews::IsFrameVisible() {
+  if (!frame_->IsVisible())
+    return false;
+
+  views::Window* window = frame_->GetWindow();
+  return !window || !window->IsMinimized();
 }

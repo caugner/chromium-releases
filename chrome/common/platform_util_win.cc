@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,14 +9,18 @@
 #include <shellapi.h>
 #include <shlobj.h>
 
-#include "app/gfx/native_widget_types.h"
 #include "app/win_util.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/path_service.h"
 #include "base/logging.h"
 #include "base/registry.h"
 #include "base/scoped_comptr_win.h"
 #include "base/string_util.h"
+#include "chrome/installer/util/google_update_settings.h"
+#include "chrome/installer/util/google_update_constants.h"
+#include "chrome/installer/util/install_util.h"
+#include "gfx/native_widget_types.h"
 #include "googleurl/src/gurl.h"
 
 namespace platform_util {
@@ -135,13 +139,6 @@ gfx::NativeWindow GetTopLevel(gfx::NativeView view) {
   return GetAncestor(view, GA_ROOT);
 }
 
-string16 GetWindowTitle(gfx::NativeWindow window_handle) {
-  std::wstring result;
-  int length = ::GetWindowTextLength(window_handle) + 1;
-  ::GetWindowText(window_handle, WriteInto(&result, length), length);
-  return WideToUTF16(result);
-}
-
 bool IsWindowActive(gfx::NativeWindow window) {
   return ::GetForegroundWindow() == window;
 }
@@ -149,6 +146,28 @@ bool IsWindowActive(gfx::NativeWindow window) {
 bool IsVisible(gfx::NativeView view) {
   // MSVC complains if we don't include != 0.
   return ::IsWindowVisible(view) != 0;
+}
+
+void SimpleErrorBox(gfx::NativeWindow parent,
+                    const string16& title,
+                    const string16& message) {
+  win_util::MessageBox(parent, message, title, MB_OK | MB_SETFOREGROUND);
+}
+
+string16 GetVersionStringModifier() {
+#if defined(GOOGLE_CHROME_BUILD)
+  FilePath module;
+  string16 channel;
+  if (PathService::Get(base::FILE_MODULE, &module)) {
+    bool is_system_install =
+        !InstallUtil::IsPerUserInstall(module.value().c_str());
+
+    GoogleUpdateSettings::GetChromeChannel(is_system_install, &channel);
+  }
+  return channel;
+#else
+  return string16();
+#endif
 }
 
 }  // namespace platform_util

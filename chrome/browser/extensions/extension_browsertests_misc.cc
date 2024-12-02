@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,18 +10,17 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
+#include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extensions_service.h"
 #include "chrome/browser/extensions/extension_updater.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/site_instance.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#if defined(TOOLKIT_GTK)
-#include "chrome/browser/gtk/extension_shelf_gtk.h"
-#else
+#if defined(TOOLKIT_VIEWS)
 #include "chrome/browser/views/extensions/extension_shelf.h"
-#endif  // defined(TOOLKIT_GTK)
-
 #include "chrome/browser/views/frame/browser_view.h"
+#endif
+
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_error_reporter.h"
 #include "chrome/common/notification_service.h"
@@ -29,16 +28,26 @@
 #include "chrome/test/ui_test_utils.h"
 #include "net/base/net_util.h"
 
-const std::wstring kSubscribePage =
-    L"files/extensions/samples/subscribe_page_action/subscribe.html";
+const std::string kSubscribePage = "/subscribe.html";
+const std::wstring kFeedPage = L"files/feeds/feed.html";
+const std::wstring kFeedPageMultiRel = L"files/feeds/feed_multi_rel.html";
+const std::wstring kNoFeedPage = L"files/feeds/no_feed.html";
 const std::wstring kValidFeed0 = L"files/feeds/feed_script.xml";
 const std::wstring kValidFeed1 = L"files/feeds/feed1.xml";
 const std::wstring kValidFeed2 = L"files/feeds/feed2.xml";
 const std::wstring kValidFeed3 = L"files/feeds/feed3.xml";
 const std::wstring kValidFeed4 = L"files/feeds/feed4.xml";
 const std::wstring kValidFeed5 = L"files/feeds/feed5.xml";
+const std::wstring kValidFeedNoLinks = L"files/feeds/feed_nolinks.xml";
 const std::wstring kInvalidFeed1 = L"files/feeds/feed_invalid1.xml";
 const std::wstring kInvalidFeed2 = L"files/feeds/feed_invalid2.xml";
+const std::wstring kLocalization =
+    L"files/extensions/browsertest/title_localized_pa/simple.html";
+const std::wstring kHashPageA =
+    L"files/extensions/api_test/page_action/hash_change/test_page_A.html";
+const std::wstring kHashPageAHash = kHashPageA + L"#asdf";
+const std::wstring kHashPageB =
+    L"files/extensions/api_test/page_action/hash_change/test_page_B.html";
 
 // Looks for an ExtensionHost whose URL has the given path component (including
 // leading slash).  Also verifies that the expected number of hosts are loaded.
@@ -58,6 +67,11 @@ static ExtensionHost* FindHostWithPath(ExtensionProcessManager* manager,
   EXPECT_EQ(expected_hosts, num_hosts);
   return host;
 }
+
+#if defined(OS_LINUX) && defined(TOOLKIT_VIEWS)
+// See http://crbug.com/30151.
+#define Toolstrip DISABLED_Toolstrip
+#endif
 
 // Tests that toolstrips initializes properly and can run basic extension js.
 IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, Toolstrip) {
@@ -79,24 +93,19 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, Toolstrip) {
       host->render_view_host(), L"", L"testTabsAPI()", &result);
   EXPECT_TRUE(result);
 
-#if defined(OS_WIN)
   // Test for compact language detection API. First navigate to a (static) html
   // file with a French sentence. Then, run the test API in toolstrip1.html to
   // actually call the language detection API through the existing extension,
   // and verify that the language returned is indeed French.
   FilePath language_url = extension_test_data_dir.AppendASCII(
       "french_sentence.html");
-  ui_test_utils::NavigateToURL(
-      browser(),
-      GURL(language_url.ToWStringHack()));
+  ui_test_utils::NavigateToURL(browser(), net::FilePathToFileURL(language_url));
 
   ui_test_utils::ExecuteJavaScriptAndExtractBool(
       host->render_view_host(), L"", L"testTabsLanguageAPI()", &result);
   EXPECT_TRUE(result);
-#endif
 }
 
-#if defined(OS_WIN)  // TODO(port) -- enable
 IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ExtensionViews) {
   FilePath extension_test_data_dir = test_data_dir_.AppendASCII("good").
       AppendASCII("Extensions").AppendASCII("behllobkkfkfnphdnhnkndlbkcpglgmj").
@@ -132,12 +141,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ExtensionViews) {
            "test_gettabs.html"));
   result = false;
   ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      host->render_view_host(), L"", L"testgetTabContentsesAPI()", &result);
+      host->render_view_host(), L"", L"testgetExtensionTabsAPI()", &result);
   EXPECT_TRUE(result);
 }
-#endif  // defined(OS_WIN)
 
-#if defined(OS_WIN)  // TODO(port) -- enable
+#if defined(TOOLKIT_VIEWS)
+// http://crbug.com/29897 - for other UI toolkits?
+
 // Tests that the ExtensionShelf initializes properly, notices that
 // an extension loaded and has a view available, and then sets that up
 // properly.
@@ -160,20 +170,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, Shelf) {
   EXPECT_EQ(shelf->GetChildViewCount(), 2);
   EXPECT_NE(shelf->GetPreferredSize().height(), 0);
 }
-#endif  // defined(OS_WIN)
-
-// Tests that installing and uninstalling extensions don't crash with an
-// incognito window open.
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, Incognito) {
-  // Open an incognito window to the extensions management page.  We just
-  // want to make sure that we don't crash while playing with extensions when
-  // this guy is around.
-  Browser::OpenURLOffTheRecord(browser()->profile(),
-                               GURL(chrome::kChromeUIExtensionsURL));
-
-  ASSERT_TRUE(InstallExtension(test_data_dir_.AppendASCII("good.crx"), 1));
-  UninstallExtension("ldnnhddmnhbkjipkidpdiheffobcpfmf");
-}
+#endif  // defined(TOOLKIT_VIEWS)
 
 // Tests that we can load extension pages into the tab area and they can call
 // extension APIs.
@@ -206,47 +203,69 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, TabContents) {
   EXPECT_TRUE(result);
 }
 
-#if defined(OS_WIN) || defined(OS_LINUX)
 // Tests that we can load page actions in the Omnibox.
 IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, PageAction) {
+  HTTPTestServer* server = StartHTTPServer();
+
+  // This page action will not show an icon, since it doesn't specify one but
+  // is included here to test for a crash (http://crbug.com/25562).
   ASSERT_TRUE(LoadExtension(
-      test_data_dir_.AppendASCII("samples")
-                    .AppendASCII("subscribe_page_action")));
+      test_data_dir_.AppendASCII("browsertest")
+                    .AppendASCII("crash_25562")));
+
+  ASSERT_TRUE(LoadExtension(
+      test_data_dir_.AppendASCII("subscribe_page_action")));
 
   ASSERT_TRUE(WaitForPageActionVisibilityChangeTo(0));
 
   // Navigate to the feed page.
-  FilePath test_dir;
-  PathService::Get(chrome::DIR_TEST_DATA, &test_dir);
-  FilePath feed = test_dir.AppendASCII("feeds")
-                          .AppendASCII("feed.html");
-
-  ui_test_utils::NavigateToURL(browser(), net::FilePathToFileURL(feed));
-
+  GURL feed_url = server->TestServerPageW(kFeedPage);
+  ui_test_utils::NavigateToURL(browser(), feed_url);
   // We should now have one page action ready to go in the LocationBar.
   ASSERT_TRUE(WaitForPageActionVisibilityChangeTo(1));
 
-  FilePath no_feed = test_dir.AppendASCII("feeds")
-                             .AppendASCII("nofeed.html");
-
+  // Navigate to a page with no feed.
+  GURL no_feed = server->TestServerPageW(kNoFeedPage);
+  ui_test_utils::NavigateToURL(browser(), no_feed);
   // Make sure the page action goes away.
-  ui_test_utils::NavigateToURL(browser(), net::FilePathToFileURL(no_feed));
+  ASSERT_TRUE(WaitForPageActionVisibilityChangeTo(0));
+}
+
+// Tests that we don't lose the page action icon on in-page navigations.
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, PageActionInPageNavigation) {
+  HTTPTestServer* server = StartHTTPServer();
+
+  FilePath extension_path(test_data_dir_.AppendASCII("api_test")
+                                        .AppendASCII("page_action")
+                                        .AppendASCII("hash_change"));
+  ASSERT_TRUE(LoadExtension(extension_path));
+
+  // Page action should become visible when we navigate here.
+  GURL feed_url = server->TestServerPageW(kHashPageA);
+  ui_test_utils::NavigateToURL(browser(), feed_url);
+  ASSERT_TRUE(WaitForPageActionVisibilityChangeTo(1));
+
+  // In-page navigation, page action should remain.
+  feed_url = server->TestServerPageW(kHashPageAHash);
+  ui_test_utils::NavigateToURL(browser(), feed_url);
+  ASSERT_TRUE(WaitForPageActionVisibilityChangeTo(1));
+
+  // Not an in-page navigation, page action should go away.
+  feed_url = server->TestServerPageW(kHashPageB);
+  ui_test_utils::NavigateToURL(browser(), feed_url);
   ASSERT_TRUE(WaitForPageActionVisibilityChangeTo(0));
 }
 
 // Tests that the location bar forgets about unloaded page actions.
 IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, UnloadPageAction) {
-  FilePath extension_path(test_data_dir_.AppendASCII("samples")
-                                        .AppendASCII("subscribe_page_action"));
+  HTTPTestServer* server = StartHTTPServer();
+
+  FilePath extension_path(test_data_dir_.AppendASCII("subscribe_page_action"));
   ASSERT_TRUE(LoadExtension(extension_path));
 
   // Navigation prompts the location bar to load page actions.
-  FilePath test_dir;
-  PathService::Get(chrome::DIR_TEST_DATA, &test_dir);
-  FilePath feed = test_dir.AppendASCII("feeds")
-                          .AppendASCII("feed.html");
-
-  ui_test_utils::NavigateToURL(browser(), net::FilePathToFileURL(feed));
+  GURL feed_url = server->TestServerPageW(kFeedPage);
+  ui_test_utils::NavigateToURL(browser(), feed_url);
   ASSERT_TRUE(WaitForPageActionCountChangeTo(1));
 
   UnloadExtension(last_loaded_extension_id_);
@@ -254,13 +273,89 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, UnloadPageAction) {
   // Make sure the page action goes away when it's unloaded.
   ASSERT_TRUE(WaitForPageActionCountChangeTo(0));
 }
-#endif  // defined(OS_WIN) || defined(OS_LINUX)
 
-GURL GetFeedUrl(HTTPTestServer* server, const std::wstring& feed_page) {
-  static GURL base_url = server->TestServerPageW(kSubscribePage);
+// Makes sure that the RSS detects RSS feed links, even when rel tag contains
+// more than just "alternate".
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, RSSMultiRelLink) {
+  HTTPTestServer* server = StartHTTPServer();
+
+  ASSERT_TRUE(LoadExtension(
+    test_data_dir_.AppendASCII("subscribe_page_action")));
+
+  ASSERT_TRUE(WaitForPageActionVisibilityChangeTo(0));
+
+  // Navigate to the feed page.
+  GURL feed_url = server->TestServerPageW(kFeedPageMultiRel);
+  ui_test_utils::NavigateToURL(browser(), feed_url);
+  // We should now have one page action ready to go in the LocationBar.
+  ASSERT_TRUE(WaitForPageActionVisibilityChangeTo(1));
+}
+
+// Tests that tooltips of a browser action icon can be specified using UTF8.
+// See http://crbug.com/25349.
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, TitleLocalizationBrowserAction) {
+  ExtensionsService* service = browser()->profile()->GetExtensionsService();
+  const size_t size_before = service->extensions()->size();
+  FilePath extension_path(test_data_dir_.AppendASCII("browsertest")
+                                        .AppendASCII("title_localized"));
+  ASSERT_TRUE(LoadExtension(extension_path));
+
+  ASSERT_EQ(size_before + 1, service->extensions()->size());
+  Extension* extension = service->extensions()->at(size_before);
+
+  EXPECT_STREQ(WideToUTF8(L"Hreggvi\u00F0ur: l10n browser action").c_str(),
+               extension->description().c_str());
+  EXPECT_STREQ(WideToUTF8(L"Hreggvi\u00F0ur is my name").c_str(),
+               extension->name().c_str());
+  int tab_id = ExtensionTabUtil::GetTabId(browser()->GetSelectedTabContents());
+  EXPECT_STREQ(WideToUTF8(L"Hreggvi\u00F0ur").c_str(),
+               extension->browser_action()->GetTitle(tab_id).c_str());
+}
+
+// Tests that tooltips of a page action icon can be specified using UTF8.
+// See http://crbug.com/25349.
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, TitleLocalizationPageAction) {
+  HTTPTestServer* server = StartHTTPServer();
+
+  ExtensionsService* service = browser()->profile()->GetExtensionsService();
+  const size_t size_before = service->extensions()->size();
+
+  FilePath extension_path(test_data_dir_.AppendASCII("browsertest")
+                                        .AppendASCII("title_localized_pa"));
+  ASSERT_TRUE(LoadExtension(extension_path));
+
+  // Any navigation prompts the location bar to load the page action.
+  GURL url = server->TestServerPageW(kLocalization);
+  ui_test_utils::NavigateToURL(browser(), url);
+  ASSERT_TRUE(WaitForPageActionVisibilityChangeTo(1));
+
+  ASSERT_EQ(size_before + 1, service->extensions()->size());
+  Extension* extension = service->extensions()->at(size_before);
+
+  EXPECT_STREQ(WideToUTF8(L"Hreggvi\u00F0ur: l10n page action").c_str(),
+               extension->description().c_str());
+  EXPECT_STREQ(WideToUTF8(L"Hreggvi\u00F0ur is my name").c_str(),
+               extension->name().c_str());
+  int tab_id = ExtensionTabUtil::GetTabId(browser()->GetSelectedTabContents());
+  EXPECT_STREQ(WideToUTF8(L"Hreggvi\u00F0ur").c_str(),
+               extension->page_action()->GetTitle(tab_id).c_str());
+}
+
+GURL GetFeedUrl(HTTPTestServer* server, const std::wstring& feed_page,
+                bool direct_url, std::string extension_id) {
   GURL feed_url = server->TestServerPageW(feed_page);
-  return GURL(base_url.spec() + std::string("?") + feed_url.spec() +
-         std::string("&synchronous"));
+  if (direct_url) {
+    // We navigate directly to the subscribe page for feeds where the feed
+    // sniffing won't work, in other words, as is the case for malformed feeds.
+    return GURL(std::string(chrome::kExtensionScheme) +
+        chrome::kStandardSchemeSeparator +
+        extension_id + std::string(kSubscribePage) + std::string("?") +
+        feed_url.spec() + std::string("&synchronous"));
+  } else {
+    // Navigate to the feed content (which will cause the extension to try to
+    // sniff the type and display the subscribe page in another tab.
+    return GURL(feed_url.spec());
+  }
 }
 
 static const wchar_t* jscript_feed_title =
@@ -288,173 +383,201 @@ static const wchar_t* jscript_error =
     L"    \"No error\""
     L");";
 
-void GetParsedFeedData(HTTPTestServer* server,
-                       const std::wstring& url,
-                       Browser* browser,
-                       const std::string& expected_feed_title,
-                       const std::string& expected_item_title,
-                       const std::string& expected_item_desc,
-                       const std::string& expected_error) {
-  std::string feed_title;
-  std::string item_title;
-  std::string item_desc;
+bool ValidatePageElement(TabContents* tab,
+                         const std::wstring& frame,
+                         const std::wstring& javascript,
+                         const std::string& expected_value) {
+  std::string returned_value;
   std::string error;
 
-  ui_test_utils::NavigateToURL(browser, GetFeedUrl(server, url));
+  if (!ui_test_utils::ExecuteJavaScriptAndExtractString(
+          tab->render_view_host(),
+          frame,
+          javascript, &returned_value))
+    return false;
 
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
-      browser->GetSelectedTabContents()->render_view_host(),
-      L"",  // Title is on the main page, all the rest is in the IFRAME.
-      jscript_feed_title, &feed_title));
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
-      browser->GetSelectedTabContents()->render_view_host(),
-      L"//html/body/div/iframe[1]",
-      jscript_anchor, &item_title));
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
-      browser->GetSelectedTabContents()->render_view_host(),
-      L"//html/body/div/iframe[1]",
-      jscript_desc, &item_desc));
-  ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
-      browser->GetSelectedTabContents()->render_view_host(),
-      L"//html/body/div/iframe[1]",
-      jscript_error, &error));
-
-  EXPECT_STREQ(expected_feed_title.c_str(), feed_title.c_str());
-  EXPECT_STREQ(expected_item_title.c_str(), item_title.c_str());
-  EXPECT_STREQ(expected_item_desc.c_str(), item_desc.c_str());
-  EXPECT_STREQ(expected_error.c_str(), error.c_str());
+  EXPECT_STREQ(expected_value.c_str(), returned_value.c_str());
+  return expected_value == returned_value;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, FLAKY_ParseFeedValidFeed1) {
-  HTTPTestServer* server = StartHTTPServer();
-  GetParsedFeedData(server, kValidFeed1, browser(),
-                    "Feed for 'MyFeedTitle'",
-                    "Title 1",
-                    "Desc",
-                    "No error");
+// Navigates to a feed page and, if |sniff_xml_type| is set, wait for the
+// extension to kick in, detect the feed and redirect to a feed preview page.
+// |sniff_xml_type| is generally set to true if the feed is sniffable and false
+// for invalid feeds.
+void NavigateToFeedAndValidate(HTTPTestServer* server,
+                               const std::wstring& url,
+                               Browser* browser,
+                               bool sniff_xml_type,
+                               const std::string& expected_feed_title,
+                               const std::string& expected_item_title,
+                               const std::string& expected_item_desc,
+                               const std::string& expected_error) {
+  if (sniff_xml_type) {
+    // TODO(finnur): Implement this is a non-flaky way.
+  }
+
+  ExtensionsService* service = browser->profile()->GetExtensionsService();
+  Extension* extension = service->extensions()->back();
+  std::string id = extension->id();
+
+  // Navigate to the subscribe page directly.
+  ui_test_utils::NavigateToURL(browser, GetFeedUrl(server, url, true, id));
+
+  TabContents* tab = browser->GetSelectedTabContents();
+  ASSERT_TRUE(ValidatePageElement(tab,
+                                  L"",
+                                  jscript_feed_title,
+                                  expected_feed_title));
+  ASSERT_TRUE(ValidatePageElement(tab,
+                                  L"//html/body/div/iframe[1]",
+                                  jscript_anchor,
+                                  expected_item_title));
+  ASSERT_TRUE(ValidatePageElement(tab,
+                                  L"//html/body/div/iframe[1]",
+                                  jscript_desc,
+                                  expected_item_desc));
+  ASSERT_TRUE(ValidatePageElement(tab,
+                                  L"//html/body/div/iframe[1]",
+                                  jscript_error,
+                                  expected_error));
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, FLAKY_ParseFeedValidFeed2) {
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ParseFeedValidFeed1) {
   HTTPTestServer* server = StartHTTPServer();
-  GetParsedFeedData(server, kValidFeed2, browser(),
-                    "Feed for 'MyFeed2'",
-                    "My item title1",
-                    "This is a summary.",
-                    "No error");
+
+  ASSERT_TRUE(LoadExtension(
+      test_data_dir_.AppendASCII("subscribe_page_action")));
+
+  NavigateToFeedAndValidate(server, kValidFeed1, browser(), true,
+                            "Feed for MyFeedTitle",
+                            "Title 1",
+                            "Desc",
+                            "No error");
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, FLAKY_ParseFeedValidFeed3) {
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ParseFeedValidFeed2) {
   HTTPTestServer* server = StartHTTPServer();
-  GetParsedFeedData(server, kValidFeed3, browser(),
-                    "Feed for 'Google Code buglist rss feed'",
-                    "My dear title",
-                    "My dear content",
-                    "No error");
+
+  ASSERT_TRUE(LoadExtension(
+      test_data_dir_.AppendASCII("subscribe_page_action")));
+
+  NavigateToFeedAndValidate(server, kValidFeed2, browser(), true,
+                            "Feed for MyFeed2",
+                            "My item title1",
+                            "This is a summary.",
+                            "No error");
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, FLAKY_ParseFeedValidFeed4) {
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ParseFeedValidFeed3) {
   HTTPTestServer* server = StartHTTPServer();
-  GetParsedFeedData(server, kValidFeed4, browser(),
-                    "Feed for 'Title chars <script> %23 stop'",
-                    "Title chars <script> %23 stop",
-                    "My dear content",
-                    "No error");
+
+  ASSERT_TRUE(LoadExtension(
+      test_data_dir_.AppendASCII("subscribe_page_action")));
+
+  NavigateToFeedAndValidate(server, kValidFeed3, browser(), true,
+                            "Feed for Google Code buglist rss feed",
+                            "My dear title",
+                            "My dear content",
+                            "No error");
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, FLAKY_ParseFeedValidFeed0) {
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ParseFeedValidFeed4) {
   HTTPTestServer* server = StartHTTPServer();
+
+  ASSERT_TRUE(LoadExtension(
+      test_data_dir_.AppendASCII("subscribe_page_action")));
+
+  NavigateToFeedAndValidate(server, kValidFeed4, browser(), true,
+                            "Feed for Title chars <script> %23 stop",
+                            "Title chars ",
+                            "My dear content",
+                            "No error");
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ParseFeedValidFeed0) {
+  HTTPTestServer* server = StartHTTPServer();
+
+  ASSERT_TRUE(LoadExtension(
+      test_data_dir_.AppendASCII("subscribe_page_action")));
+
   // Try a feed with a link with an onclick handler (before r27440 this would
   // trigger a NOTREACHED).
-  GetParsedFeedData(server, kValidFeed0, browser(),
-                    "Feed for 'MyFeedTitle'",
-                    "Title 1",
-                    "Desc VIDEO",
-                    "No error");
+  NavigateToFeedAndValidate(server, kValidFeed0, browser(), true,
+                            "Feed for MyFeedTitle",
+                            "Title 1",
+                            "Desc VIDEO",
+                            "No error");
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, FLAKY_ParseFeedValidFeed5) {
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ParseFeedValidFeed5) {
   HTTPTestServer* server = StartHTTPServer();
-  // Feed with valid but mostly empty xml.
-  GetParsedFeedData(server, kValidFeed5, browser(),
-                    "Feed for 'Unknown feed name'",
-                    "element 'anchor_0' not found",
-                    "element 'desc_0' not found",
-                    "This feed contains no entries.");
-}
 
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, FLAKY_ParseFeedInvalidFeed1) {
-  HTTPTestServer* server = StartHTTPServer();
-  // Try an empty feed.
-  GetParsedFeedData(server, kInvalidFeed1, browser(),
-                    "Feed for 'Unknown feed name'",
-                    "element 'anchor_0' not found",
-                    "element 'desc_0' not found",
-                    "Not a valid feed.");
-}
-
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, FLAKY_ParseFeedInvalidFeed2) {
-  HTTPTestServer* server = StartHTTPServer();
-  // Try a garbage feed.
-  GetParsedFeedData(server, kInvalidFeed2, browser(),
-                    "Feed for 'Unknown feed name'",
-                    "element 'anchor_0' not found",
-                    "element 'desc_0' not found",
-                    "Not a valid feed.");
-}
-
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, FLAKY_ParseFeedInvalidFeed3) {
-  HTTPTestServer* server = StartHTTPServer();
-  // Try a feed that doesn't exist.
-  GetParsedFeedData(server, L"foo.xml", browser(),
-                    "Feed for 'Unknown feed name'",
-                    "element 'anchor_0' not found",
-                    "element 'desc_0' not found",
-                    "Not a valid feed.");
-}
-
-#if defined(OS_WIN)  // TODO(port) - enable.
-// Tests that message passing between extensions and tabs works.
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, MessagingExtensionTab) {
   ASSERT_TRUE(LoadExtension(
-      test_data_dir_.AppendASCII("good").AppendASCII("Extensions")
-                    .AppendASCII("bjafgdebaacbbbecmhlhpofkepfkgcpa")
-                    .AppendASCII("1.0")));
+      test_data_dir_.AppendASCII("subscribe_page_action")));
 
-  // Get the ExtensionHost that is hosting our toolstrip page.
-  ExtensionProcessManager* manager =
-      browser()->profile()->GetExtensionProcessManager();
-  ExtensionHost* host = FindHostWithPath(manager, "/toolstrip.html", 1);
-
-  // Load the tab that will communicate with our toolstrip.
-  ui_test_utils::NavigateToURL(
-      browser(),
-      GURL("chrome-extension://bjafgdebaacbbbecmhlhpofkepfkgcpa/page.html"));
-
-  // Test extension->tab messaging.
-  bool result = false;
-  ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      host->render_view_host(), L"", L"testPostMessage()", &result);
-  EXPECT_TRUE(result);
-
-  // Test tab->extension messaging.
-  result = false;
-  ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      host->render_view_host(), L"", L"testPostMessageFromTab()", &result);
-  EXPECT_TRUE(result);
-
-  // Test disconnect event dispatch.
-  result = false;
-  ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      host->render_view_host(), L"", L"testDisconnect()", &result);
-  EXPECT_TRUE(result);
-
-  // Test disconnect is fired on tab close.
-  result = false;
-  ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      host->render_view_host(), L"", L"testDisconnectOnClose()", &result);
-  EXPECT_TRUE(result);
+  // Feed with valid but mostly empty xml.
+  NavigateToFeedAndValidate(server, kValidFeed5, browser(), true,
+                            "Feed for Unknown feed name",
+                            "element 'anchor_0' not found",
+                            "element 'desc_0' not found",
+                            "This feed contains no entries.");
 }
-#endif  // defined(OS_WIN)
+
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ParseFeedInvalidFeed1) {
+  HTTPTestServer* server = StartHTTPServer();
+
+  ASSERT_TRUE(LoadExtension(
+      test_data_dir_.AppendASCII("subscribe_page_action")));
+
+  // Try an empty feed.
+  NavigateToFeedAndValidate(server, kInvalidFeed1, browser(), false,
+                            "Feed for Unknown feed name",
+                            "element 'anchor_0' not found",
+                            "element 'desc_0' not found",
+                            "Not a valid feed.");
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ParseFeedInvalidFeed2) {
+  HTTPTestServer* server = StartHTTPServer();
+
+  ASSERT_TRUE(LoadExtension(
+      test_data_dir_.AppendASCII("subscribe_page_action")));
+
+  // Try a garbage feed.
+  NavigateToFeedAndValidate(server, kInvalidFeed2, browser(), false,
+                            "Feed for Unknown feed name",
+                            "element 'anchor_0' not found",
+                            "element 'desc_0' not found",
+                            "Not a valid feed.");
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ParseFeedInvalidFeed3) {
+  HTTPTestServer* server = StartHTTPServer();
+
+  ASSERT_TRUE(LoadExtension(
+      test_data_dir_.AppendASCII("subscribe_page_action")));
+
+  // Try a feed that doesn't exist.
+  NavigateToFeedAndValidate(server, L"foo.xml", browser(), false,
+                            "Feed for Unknown feed name",
+                            "element 'anchor_0' not found",
+                            "element 'desc_0' not found",
+                            "Not a valid feed.");
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, ParseFeedValidFeedNoLinks) {
+  HTTPTestServer* server = StartHTTPServer();
+
+  ASSERT_TRUE(LoadExtension(
+      test_data_dir_.AppendASCII("subscribe_page_action")));
+
+  // Valid feed but containing no links.
+  NavigateToFeedAndValidate(server, kValidFeedNoLinks, browser(), true,
+                            "Feed for MyFeedTitle",
+                            "Title with no link",
+                            "Desc",
+                            "No error");
+}
 
 // Tests that an error raised during an async function still fires
 // the callback, but sets chrome.extension.lastError.
@@ -471,145 +594,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, LastError) {
   ui_test_utils::ExecuteJavaScriptAndExtractBool(
       host->render_view_host(), L"", L"testLastError()", &result);
   EXPECT_TRUE(result);
-}
-
-#if defined(OS_WIN)  // TODO(port) - enable.
-// Tests that message passing between extensions and content scripts works.
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, MessagingContentScript) {
-  ASSERT_TRUE(LoadExtension(
-      test_data_dir_.AppendASCII("good").AppendASCII("Extensions")
-                    .AppendASCII("bjafgdebaacbbbecmhlhpofkepfkgcpa")
-                    .AppendASCII("1.0")));
-
-  UserScriptMaster* master = browser()->profile()->GetUserScriptMaster();
-  if (!master->ScriptsReady()) {
-    // Wait for UserScriptMaster to finish its scan.
-    NotificationRegistrar registrar;
-    registrar.Add(this, NotificationType::USER_SCRIPTS_UPDATED,
-                  NotificationService::AllSources());
-    ui_test_utils::RunMessageLoop();
-  }
-  ASSERT_TRUE(master->ScriptsReady());
-
-  // Get the ExtensionHost that is hosting our toolstrip page.
-  ExtensionProcessManager* manager =
-      browser()->profile()->GetExtensionProcessManager();
-  ExtensionHost* host = FindHostWithPath(manager, "/toolstrip.html", 1);
-
-  // Load the tab whose content script will communicate with our toolstrip.
-  FilePath test_file;
-  PathService::Get(chrome::DIR_TEST_DATA, &test_file);
-  test_file = test_file.AppendASCII("extensions")
-                       .AppendASCII("test_file.html");
-  ui_test_utils::NavigateToURL(browser(), net::FilePathToFileURL(test_file));
-
-  // Test extension->tab messaging.
-  bool result = false;
-  ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      host->render_view_host(), L"", L"testPostMessage()", &result);
-  EXPECT_TRUE(result);
-
-  // Test port naming
-  result = false;
-  ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      host->render_view_host(), L"", L"testPortName()", &result);
-  EXPECT_TRUE(result);
-
-  // Test tab->extension messaging.
-  result = false;
-  ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      host->render_view_host(), L"", L"testPostMessageFromTab()", &result);
-  EXPECT_TRUE(result);
-
-  // Test disconnect event dispatch.
-  result = false;
-  ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      host->render_view_host(), L"", L"testDisconnect()", &result);
-  EXPECT_TRUE(result);
-
-  // Test disconnect is fired on tab close.
-  result = false;
-  ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      host->render_view_host(), L"", L"testDisconnectOnClose()", &result);
-  EXPECT_TRUE(result);
-}
-#endif  // defined(OS_WIN)
-
-// TODO(mpcomplete): reenable after figuring it out.
-#if 0
-// Tests the process of updating an extension to one that requires higher
-// permissions.
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, UpdatePermissions) {
-  TabContents* contents = browser()->GetSelectedTabContents();
-  ASSERT_TRUE(contents);
-
-  // Install the initial version, which should happen just fine.
-  ASSERT_TRUE(InstallExtension(
-      test_data_dir_.AppendASCII("permissions-low-v1.crx"), 1));
-  DCHECK_EQ(0, contents->infobar_delegate_count());
-
-  // Upgrade to a version that wants more permissions. We should disable the
-  // extension and prompt the user to reenable.
-  ASSERT_TRUE(InstallExtension(
-      test_data_dir_.AppendASCII("permissions-high-v2.crx"), -1));
-  EXPECT_EQ(1, contents->infobar_delegate_count());
-
-  ExtensionsService* service = browser()->profile()->GetExtensionsService();
-  EXPECT_EQ(0u, service->extensions()->size());
-  ASSERT_EQ(1u, service->disabled_extensions()->size());
-
-  // Now try reenabling it, which should also dismiss the infobar.
-  service->EnableExtension(service->disabled_extensions()->at(0)->id());
-  EXPECT_EQ(0, contents->infobar_delegate_count());
-  EXPECT_EQ(1u, service->extensions()->size());
-  EXPECT_EQ(0u, service->disabled_extensions()->size());
-}
-#endif
-
-// Tests that we can uninstall a disabled extension.
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, UninstallDisabled) {
-  // Install and upgrade, so that we have a disabled extension.
-  ASSERT_TRUE(InstallExtension(
-      test_data_dir_.AppendASCII("permissions-low-v1.crx"), 1));
-  ASSERT_TRUE(UpdateExtension("pgdpcfcocojkjfbgpiianjngphoopgmo",
-      test_data_dir_.AppendASCII("permissions-high-v2.crx"), -1));
-
-  ExtensionsService* service = browser()->profile()->GetExtensionsService();
-  EXPECT_EQ(0u, service->extensions()->size());
-  ASSERT_EQ(1u, service->disabled_extensions()->size());
-
-  // Now try uninstalling it.
-  UninstallExtension(service->disabled_extensions()->at(0)->id());
-  EXPECT_EQ(0u, service->extensions()->size());
-  EXPECT_EQ(0u, service->disabled_extensions()->size());
-}
-
-// Tests that disabling and re-enabling an extension works.
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, DisableEnable) {
-  ExtensionsService* service = browser()->profile()->GetExtensionsService();
-  ExtensionProcessManager* manager =
-      browser()->profile()->GetExtensionProcessManager();
-
-  // Load an extension, expect the toolstrip to be available.
-  ASSERT_TRUE(LoadExtension(
-      test_data_dir_.AppendASCII("good").AppendASCII("Extensions")
-                    .AppendASCII("bjafgdebaacbbbecmhlhpofkepfkgcpa")
-                    .AppendASCII("1.0")));
-  EXPECT_EQ(1u, service->extensions()->size());
-  EXPECT_EQ(0u, service->disabled_extensions()->size());
-  EXPECT_TRUE(FindHostWithPath(manager, "/toolstrip.html", 1));
-
-  // After disabling, the toolstrip should go away.
-  service->DisableExtension("bjafgdebaacbbbecmhlhpofkepfkgcpa");
-  EXPECT_EQ(0u, service->extensions()->size());
-  EXPECT_EQ(1u, service->disabled_extensions()->size());
-  EXPECT_FALSE(FindHostWithPath(manager, "/toolstrip.html", 0));
-
-  // And bring it back.
-  service->EnableExtension("bjafgdebaacbbbecmhlhpofkepfkgcpa");
-  EXPECT_EQ(1u, service->extensions()->size());
-  EXPECT_EQ(0u, service->disabled_extensions()->size());
-  EXPECT_TRUE(FindHostWithPath(manager, "/toolstrip.html", 1));
 }
 
 // Helper function for common code shared by the 3 WindowOpen tests below.
@@ -689,11 +673,17 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WindowOpenNoPrivileges) {
   EXPECT_FALSE(result);
 }
 
+#if !defined(OS_WIN)
+// TODO(mpcomplete): http://crbug.com/29900 need cross platform plugin support.
+#define MAYBE_PluginLoadUnload DISABLED_PluginLoadUnload
+#else
+// TODO(mpcomplete): http://crbug.com/40588 reenable after fixing.
+#define MAYBE_PluginLoadUnload PluginLoadUnload
+#endif
+
 // Tests that a renderer's plugin list is properly updated when we load and
 // unload an extension that contains a plugin.
-// TODO(mpcomplete): need cross platform plugin support.
-#if defined(OS_WIN)
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, PluginLoadUnload) {
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, MAYBE_PluginLoadUnload) {
   FilePath extension_dir =
       test_data_dir_.AppendASCII("uitest").AppendASCII("plugins");
 
@@ -708,8 +698,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, PluginLoadUnload) {
   EXPECT_FALSE(result);
 
   ExtensionsService* service = browser()->profile()->GetExtensionsService();
+  const size_t size_before = service->extensions()->size();
   ASSERT_TRUE(LoadExtension(extension_dir));
-  EXPECT_EQ(1u, service->extensions()->size());
+  EXPECT_EQ(size_before + 1, service->extensions()->size());
   // Now the plugin should be in the cache, but we have to reload the page for
   // it to work.
   ui_test_utils::ExecuteJavaScriptAndExtractBool(
@@ -721,71 +712,25 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, PluginLoadUnload) {
       tab->render_view_host(), L"", L"testPluginWorks()", &result);
   EXPECT_TRUE(result);
 
-  EXPECT_EQ(1u, service->extensions()->size());
-  UnloadExtension(service->extensions()->at(0)->id());
-  EXPECT_EQ(0u, service->extensions()->size());
+  EXPECT_EQ(size_before + 1, service->extensions()->size());
+  UnloadExtension(service->extensions()->at(size_before)->id());
+  EXPECT_EQ(size_before, service->extensions()->size());
 
-  // Now the plugin should be out of the cache again, but existing pages will
-  // still work until we reload them.
-
-  ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      tab->render_view_host(), L"", L"testPluginWorks()", &result);
-  EXPECT_TRUE(result);
-  browser()->Reload();
-  ui_test_utils::WaitForNavigationInCurrentTab(browser());
+  // Now the plugin should be unloaded, and the page should be broken.
 
   ui_test_utils::ExecuteJavaScriptAndExtractBool(
       tab->render_view_host(), L"", L"testPluginWorks()", &result);
   EXPECT_FALSE(result);
-}
-#endif
 
-// Tests extension autoupdate.
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, AutoUpdate) {
-  FilePath basedir = test_data_dir_.AppendASCII("autoupdate");
-  // Note: This interceptor gets requests on the IO thread.
-  scoped_refptr<AutoUpdateInterceptor> interceptor(new AutoUpdateInterceptor());
-  URLFetcher::enable_interception_for_tests(true);
+  // If we reload the extension and page, it should work again.
 
-  interceptor->SetResponseOnIOThread("http://localhost/autoupdate/manifest",
-                                     basedir.AppendASCII("manifest_v2.xml"));
-  interceptor->SetResponseOnIOThread("http://localhost/autoupdate/v2.crx",
-                                     basedir.AppendASCII("v2.crx"));
-
-  // Install version 1 of the extension.
-  ASSERT_TRUE(InstallExtension(basedir.AppendASCII("v1.crx"), 1));
-  ExtensionsService* service = browser()->profile()->GetExtensionsService();
-  const ExtensionList* extensions = service->extensions();
-  ASSERT_EQ(1u, extensions->size());
-  ASSERT_EQ("ogjcoiohnmldgjemafoockdghcjciccf", extensions->at(0)->id());
-  ASSERT_EQ("1.0", extensions->at(0)->VersionString());
-
-  // We don't want autoupdate blacklist checks.
-  service->updater()->set_blacklist_checks_enabled(false);
-
-  // Run autoupdate and make sure version 2 of the extension was installed.
-  service->updater()->CheckNow();
-  ASSERT_TRUE(WaitForExtensionInstall());
-  extensions = service->extensions();
-  ASSERT_EQ(1u, extensions->size());
-  ASSERT_EQ("ogjcoiohnmldgjemafoockdghcjciccf", extensions->at(0)->id());
-  ASSERT_EQ("2.0", extensions->at(0)->VersionString());
-
-  // Now try doing an update to version 3, which has been incorrectly
-  // signed. This should fail.
-  interceptor->SetResponseOnIOThread("http://localhost/autoupdate/manifest",
-                                     basedir.AppendASCII("manifest_v3.xml"));
-  interceptor->SetResponseOnIOThread("http://localhost/autoupdate/v3.crx",
-                                     basedir.AppendASCII("v3.crx"));
-
-  service->updater()->CheckNow();
-  ASSERT_TRUE(WaitForExtensionInstallError());
-
-  // Make sure the extension state is the same as before.
-  extensions = service->extensions();
-  ASSERT_EQ(1u, extensions->size());
-  ASSERT_EQ("ogjcoiohnmldgjemafoockdghcjciccf", extensions->at(0)->id());
-  ASSERT_EQ("2.0", extensions->at(0)->VersionString());
+  ASSERT_TRUE(LoadExtension(extension_dir));
+  EXPECT_EQ(size_before + 1, service->extensions()->size());
+  browser()->Reload();
+  ui_test_utils::WaitForNavigationInCurrentTab(browser());
+  ui_test_utils::ExecuteJavaScriptAndExtractBool(
+      tab->render_view_host(), L"", L"testPluginWorks()", &result);
+  EXPECT_TRUE(result);
 }
 
 // Used to simulate a click on the first button named 'Options'.
@@ -801,7 +746,8 @@ static const wchar_t* jscript_click_option_button =
 // Test that an extension with an options page makes an 'Options' button appear
 // on chrome://extensions, and that clicking the button opens a new tab with the
 // extension's options page.
-IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, OptionsPage) {
+// Disabled.  See http://crbug.com/26948 for details.
+IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, DISABLED_OptionsPage) {
   // Install an extension with an options page.
   ASSERT_TRUE(InstallExtension(test_data_dir_.AppendASCII("options.crx"), 1));
   ExtensionsService* service = browser()->profile()->GetExtensionsService();
@@ -825,4 +771,3 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, OptionsPage) {
   EXPECT_EQ(extension->GetResourceURL("options.html"),
             tab_strip->GetTabContentsAt(1)->GetURL());
 }
-

@@ -8,6 +8,9 @@
 #include "chrome/browser/sync/engine/syncer_command.h"
 
 namespace browser_sync {
+namespace sessions {
+class SyncSession;
+}
 
 // An abstract SyncerCommand which dispatches its Execute step to the
 // model-safe worker thread.  Classes derived from ModelChangingSyncerCommand
@@ -25,22 +28,35 @@ class ModelChangingSyncerCommand : public SyncerCommand {
   virtual ~ModelChangingSyncerCommand() { }
 
   // SyncerCommand implementation. Sets work_session to session.
-  virtual void ExecuteImpl(SyncerSession* session);
+  virtual void ExecuteImpl(sessions::SyncSession* session);
 
   // wrapper so implementations don't worry about storing work_session
   void StartChangingModel() {
     ModelChangingExecuteImpl(work_session_);
   }
 
-  // Abstract method to be implemented by subclasses.
-  virtual void ModelChangingExecuteImpl(SyncerSession* session) = 0;
+  // Sometimes, a command has work to do that needs to touch global state
+  // belonging to multiple ModelSafeGroups, but in a way that is known to be
+  // safe.  This will be called once, prior to ModelChangingExecuteImpl,
+  // *without* a ModelSafeGroup restriction in place on the SyncSession.
+  // Returns true on success, false on failure.
+  // TODO(tim): Remove this (bug 36594).
+  virtual bool ModelNeutralExecuteImpl(sessions::SyncSession* session) {
+    return true;
+  }
+
+  // Abstract method to be implemented by subclasses to handle logic that
+  // operates on the model.  This is invoked with a SyncSession ModelSafeGroup
+  // restriction in place so that bits of state belonging to data types
+  // running on an unsafe thread are siloed away.
+  virtual void ModelChangingExecuteImpl(sessions::SyncSession* session) = 0;
 
  private:
   // ExecuteImpl is expected to be run by SyncerCommand to set work_session.
   // StartChangingModel is called to start this command running.
   // Implementations will implement ModelChangingExecuteImpl and not
   // worry about storing the session or setting it. They are given work_session.
-  SyncerSession* work_session_;
+  sessions::SyncSession* work_session_;
 
   DISALLOW_COPY_AND_ASSIGN(ModelChangingSyncerCommand);
 };

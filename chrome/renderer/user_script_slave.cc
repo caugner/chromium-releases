@@ -5,15 +5,22 @@
 #include "chrome/renderer/user_script_slave.h"
 
 #include "app/resource_bundle.h"
+#include "base/command_line.h"
 #include "base/histogram.h"
 #include "base/logging.h"
 #include "base/perftimer.h"
 #include "base/pickle.h"
 #include "base/shared_memory.h"
 #include "base/string_util.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/renderer/extension_groups.h"
+#include "chrome/renderer/render_thread.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/api/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebElement.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
 
 #include "grit/renderer_resources.h"
 
@@ -25,8 +32,11 @@ using WebKit::WebString;
 static const char kUserScriptHead[] = "(function (unsafeWindow) {\n";
 static const char kUserScriptTail[] = "\n})(window);";
 
-// Sets up the chrome.extension module.
-static const char kInitExtension[] = "chrome.initExtension('%s');";
+// Sets up the chrome.extension module. This may be run multiple times per
+// context, but the init method deletes itself after the first time.
+static const char kInitExtension[] =
+  "if (chrome.initExtension) chrome.initExtension('%s', true, %s);";
+
 
 int UserScriptSlave::GetIsolatedWorldId(const std::string& extension_id) {
   typedef std::map<std::string, int> IsolatedWorldMap;
@@ -49,26 +59,22 @@ int UserScriptSlave::GetIsolatedWorldId(const std::string& extension_id) {
 
 UserScriptSlave::UserScriptSlave()
     : shared_memory_(NULL),
-      script_deleter_(&scripts_),
-      user_script_start_line_(0) {
+      script_deleter_(&scripts_) {
   api_js_ = ResourceBundle::GetSharedInstance().GetRawDataResource(
                 IDR_GREASEMONKEY_API_JS);
+}
 
-  // Count the number of lines that will be injected before the user script.
-  base::StringPiece::size_type pos = 0;
-  while ((pos = api_js_.find('\n', pos)) != base::StringPiece::npos) {
-    user_script_start_line_++;
-    pos++;
+void UserScriptSlave::GetActiveExtensions(std::set<std::string>* extension_ids) {
+  for (size_t i = 0; i < scripts_.size(); ++i) {
+    DCHECK(!scripts_[i]->extension_id().empty());
+    extension_ids->insert(scripts_[i]->extension_id());
   }
-
-  // NOTE: There is actually one extra line in the injected script because the
-  // function header includes a newline as well. But WebKit expects the
-  // numbering to be one-based, not zero-based, so actually *not* accounting for
-  // this extra line ends us up with the right offset.
 }
 
 bool UserScriptSlave::UpdateScripts(base::SharedMemoryHandle shared_memory) {
   scripts_.clear();
+
+  bool only_inject_incognito = RenderThread::current()->is_incognito_process();
 
   // Create the shared memory object (read only).
   shared_memory_.reset(new base::SharedMemory(shared_memory, true));
@@ -117,6 +123,12 @@ bool UserScriptSlave::UpdateScripts(base::SharedMemoryHandle shared_memory) {
       script->css_scripts()[j].set_external_content(
           base::StringPiece(body, body_length));
     }
+
+    if (only_inject_incognito && !script->is_incognito_enabled()) {
+      // This script shouldn't run in an incognito tab.
+      delete script;
+      scripts_.pop_back();
+    }
   }
 
   return true;
@@ -126,15 +138,35 @@ bool UserScriptSlave::UpdateScripts(base::SharedMemoryHandle shared_memory) {
 void UserScriptSlave::InsertInitExtensionCode(
     std::vector<WebScriptSource>* sources, const std::string& extension_id) {
   DCHECK(sources);
-  sources->insert(sources->begin(),
-                  WebScriptSource(WebString::fromUTF8(
-                  StringPrintf(kInitExtension, extension_id.c_str()))));
+  bool incognito = RenderThread::current()->is_incognito_process();
+  sources->insert(sources->begin(), WebScriptSource(WebString::fromUTF8(
+      StringPrintf(kInitExtension, extension_id.c_str(),
+                   incognito ? "true" : "false"))));
 }
 
 bool UserScriptSlave::InjectScripts(WebFrame* frame,
                                     UserScript::RunLocation location) {
+  GURL frame_url = GURL(frame->url());
   // Don't bother if this is not a URL we inject script into.
-  if (!URLPattern::IsValidScheme(GURL(frame->url()).scheme()))
+  if (!URLPattern::IsValidScheme(frame_url.scheme()))
+    return true;
+
+  // Only inject user scripts into documents with an <html> tag as the root
+  // element. Note that WebCore fixes up html pages that lack a root HTML
+  // element so that they include one. Also, documents like text/plain and
+  // image/* are wrapped in a simple HTML document.
+  //
+  // Basically, this check filters out SVG documents and other types of XML
+  // documents.
+  if (frame->document().isNull() ||
+      frame->document().documentElement().isNull() ||
+      !frame->document().documentElement().hasTagName("html")) {
+      return true;
+  }
+
+  // Don't inject user scripts into the gallery itself.  This prevents
+  // a user script from removing the "report abuse" link, for example.
+  if (frame_url.host() == GURL(extension_urls::kGalleryBrowsePrefix).host())
     return true;
 
   PerfTimer timer;
@@ -144,6 +176,10 @@ bool UserScriptSlave::InjectScripts(WebFrame* frame,
   for (size_t i = 0; i < scripts_.size(); ++i) {
     std::vector<WebScriptSource> sources;
     UserScript* script = scripts_[i];
+
+    if (frame->parent() && !script->match_all_frames())
+      continue;  // Only match subframes if the script declared it wanted to.
+
     if (!script->MatchesUrl(frame->url()))
       continue;  // This frame doesn't match the script url pattern, skip it.
 
@@ -151,9 +187,11 @@ bool UserScriptSlave::InjectScripts(WebFrame* frame,
     if (location == UserScript::DOCUMENT_START) {
       num_css += script->css_scripts().size();
       for (size_t j = 0; j < script->css_scripts().size(); ++j) {
+        PerfTimer insert_timer;
         UserScript::File& file = script->css_scripts()[j];
         frame->insertStyleText(
             WebString::fromUTF8(file.GetContent().as_string()), WebString());
+        UMA_HISTOGRAM_TIMES("Extensions.InjectCssTime", insert_timer.Elapsed());
       }
     }
     if (script->run_location() == location) {
@@ -164,7 +202,7 @@ bool UserScriptSlave::InjectScripts(WebFrame* frame,
 
         // We add this dumb function wrapper for standalone user script to
         // emulate what Greasemonkey does.
-        if (script->is_standalone()) {
+        if (script->is_standalone() || script->emulate_greasemonkey()) {
           content.insert(0, kUserScriptHead);
           content += kUserScriptTail;
         }
@@ -176,20 +214,25 @@ bool UserScriptSlave::InjectScripts(WebFrame* frame,
     if (!sources.empty()) {
       int isolated_world_id = 0;
 
-      if (script->is_standalone()) {
-        // For standalone scripts, we try to emulate the Greasemonkey API.
+      // Emulate Greasemonkey API for scripts that were converted to extensions
+      // and "standalone" user scripts.
+      if (script->is_standalone() || script->emulate_greasemonkey()) {
         sources.insert(sources.begin(),
             WebScriptSource(WebString::fromUTF8(api_js_.as_string())));
-      } else {
-        // Setup chrome.self to contain an Extension object with the correct
-        // ID.
+      }
+
+      // Setup chrome.self to contain an Extension object with the correct
+      // ID.
+      if (!script->extension_id().empty()) {
         InsertInitExtensionCode(&sources, script->extension_id());
         isolated_world_id = GetIsolatedWorldId(script->extension_id());
       }
 
+      PerfTimer exec_timer;
       frame->executeScriptInIsolatedWorld(
           isolated_world_id, &sources.front(), sources.size(),
           EXTENSION_GROUP_CONTENT_SCRIPTS);
+      UMA_HISTOGRAM_TIMES("Extensions.InjectScriptTime", exec_timer.Elapsed());
     }
   }
 
@@ -197,13 +240,21 @@ bool UserScriptSlave::InjectScripts(WebFrame* frame,
   if (location == UserScript::DOCUMENT_START) {
     UMA_HISTOGRAM_COUNTS_100("Extensions.InjectStart_CssCount", num_css);
     UMA_HISTOGRAM_COUNTS_100("Extensions.InjectStart_ScriptCount", num_scripts);
-    UMA_HISTOGRAM_TIMES("Extensions.InjectStart_Time", timer.Elapsed());
-  } else {
+    if (num_css || num_scripts)
+      UMA_HISTOGRAM_TIMES("Extensions.InjectStart_Time", timer.Elapsed());
+  } else if (location == UserScript::DOCUMENT_END) {
     UMA_HISTOGRAM_COUNTS_100("Extensions.InjectEnd_ScriptCount", num_scripts);
-    UMA_HISTOGRAM_TIMES("Extensions.InjectEnd_Time", timer.Elapsed());
+    if (num_scripts)
+      UMA_HISTOGRAM_TIMES("Extensions.InjectEnd_Time", timer.Elapsed());
+  } else if (location == UserScript::DOCUMENT_IDLE) {
+    UMA_HISTOGRAM_COUNTS_100("Extensions.InjectIdle_ScriptCount", num_scripts);
+    if (num_scripts)
+      UMA_HISTOGRAM_TIMES("Extensions.InjectIdle_Time", timer.Elapsed());
+  } else {
+    NOTREACHED();
   }
 
   LOG(INFO) << "Injected " << num_scripts << " scripts and " << num_css <<
-      "css files into " << frame->url().spec().data();
+      " css files into " << frame->url().spec().data();
   return true;
 }

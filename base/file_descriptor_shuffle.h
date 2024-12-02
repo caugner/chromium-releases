@@ -37,6 +37,9 @@ class InjectionDelegate {
   virtual bool Move(int src, int dest) = 0;
   // Delete an element of the domain.
   virtual void Close(int fd) = 0;
+
+ protected:
+  virtual ~InjectionDelegate() {}
 };
 
 // An implementation of the InjectionDelegate interface using the file
@@ -66,11 +69,15 @@ typedef std::vector<InjectionArc> InjectiveMultimap;
 bool PerformInjectiveMultimap(const InjectiveMultimap& map,
                               InjectionDelegate* delegate);
 
-static inline bool ShuffleFileDescriptors(const InjectiveMultimap& map) {
+bool PerformInjectiveMultimapDestructive(InjectiveMultimap* map,
+                                         InjectionDelegate* delegate);
+
+// This function will not call malloc but will mutate |map|
+static inline bool ShuffleFileDescriptors(InjectiveMultimap* map) {
   FileDescriptorTableInjection delegate;
-  return PerformInjectiveMultimap(map, &delegate);
+  return PerformInjectiveMultimapDestructive(map, &delegate);
 }
 
 }  // namespace base
 
-#endif  // !BASE_FILE_DESCRIPTOR_SHUFFLE_H_
+#endif  // BASE_FILE_DESCRIPTOR_SHUFFLE_H_

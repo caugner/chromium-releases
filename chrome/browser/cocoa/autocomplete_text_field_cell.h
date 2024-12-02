@@ -1,30 +1,40 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import <Cocoa/Cocoa.h>
 
+#import "chrome/browser/cocoa/styled_text_field_cell.h"
+
 #include "base/scoped_nsobject.h"
+#include "chrome/browser/cocoa/location_bar_view_mac.h"
 
-// AutocompleteTextFieldCell customizes the look of the Omnibox text
-// field.  The border and focus ring are modified, as is the font
-// baseline.
+class ExtensionAction;
 
-// The cell also provides support for certain decorations to be
-// applied to the field.  These are the search hint ("Type to search"
-// on the right-hand side), the keyword hint ("Press [Tab] to search
-// Engine" on the right-hand side), and keyword mode ("Search Engine:"
-// in a button-like token on the left-hand side).
-//
-// The cell arranges the field-editor's placement via the standard
-// -editWithFrame:* and -selectWithFrame:* methods.  When the visible
-// decoration changes, the cell's look may change, and if the cell is
-// currently being edited the field editor will require adjustment.
-// The cell signals this requirement by returning YES for
-// -fieldEditorNeedsReset, which is used by AutocompleteTextField's
-// -resetFieldEditorFrameIfNeeded in testing if re-layout is needed.
+// Holds a |LocationBarImageView| and its current rect. Do not keep references
+// to this object, only use it directly after calling |-layedOutIcons:|.
+@interface AutocompleteTextFieldIcon : NSObject {
+  // The frame rect of |view_|.
+  NSRect rect_;
 
-@interface AutocompleteTextFieldCell : NSTextFieldCell {
+  // weak, owned by LocationBarViewMac.
+  LocationBarViewMac::LocationBarImageView* view_;
+}
+
+// Returns a new AutocompleteTextFieldIcon object.
++ (AutocompleteTextFieldIcon*)
+    iconWithRect:(NSRect)rect
+            view:(LocationBarViewMac::LocationBarImageView*)view;
+@property(assign, nonatomic) NSRect rect;
+@property(assign, nonatomic) LocationBarViewMac::LocationBarImageView* view;
+@end
+
+// AutocompleteTextFieldCell extends StyledTextFieldCell to provide support for
+// certain decorations to be applied to the field.  These are the search hint
+// ("Type to search" on the right-hand side), the keyword hint ("Press [Tab] to
+// search Engine" on the right-hand side), and keyword mode ("Search Engine:" in
+// a button-like token on the left-hand side).
+@interface AutocompleteTextFieldCell : StyledTextFieldCell {
  @private
   // Set if there is a string to display in a rounded rect on the
   // left-hand side of the field.  Exclusive WRT |hintString_|.
@@ -34,24 +44,19 @@
   // side of the field.  Exclusive WRT |keywordString_|;
   scoped_nsobject<NSAttributedString> hintString_;
 
-  // YES if the info cell has been changed in a way which would result
-  // in the cell needing to be laid out again.
-  BOOL fieldEditorNeedsReset_;
+  // View showing the state of the SSL connection. Owned by the location bar.
+  // Display is exclusive WRT the |hintString_| and |keywordString_|.
+  // This may be NULL during testing.
+  LocationBarViewMac::SecurityImageView* security_image_view_;
 
-  // Icon that represents the state of the SSL connection
-  scoped_nsobject<NSImage> hintIcon_;
+  // List of views showing visible Page Actions. Owned by the location bar.
+  // Display is exclusive WRT the |hintString_| and |keywordString_|.
+  // This may be NULL during testing.
+  LocationBarViewMac::PageActionViewList* page_action_views_;
 
-  // Optional text that appears to the right of the hint icon which
-  // appears only alongside the icon (i.e., it's possible to display a
-  // hintIcon without an hintIconLabel, but not vice-versa).
-  scoped_nsobject<NSAttributedString> hintIconLabel_;
+  // List of content blocked icons. This may be NULL during testing.
+  LocationBarViewMac::ContentSettingViews* content_setting_views_;
 }
-
-@property BOOL fieldEditorNeedsReset;
-
-// The following setup |keywordString_| or |hintString_| based on the
-// input, and set |fieldEditorNeedsReset_| if the layout of the field
-// changed.
 
 // Chooses |partialString| if |width| won't fit |fullString|.  Strings
 // must be non-nil.
@@ -72,19 +77,34 @@
              availableWidth:(CGFloat)width;
 - (void)clearKeywordAndHint;
 
-// Sets the hint icon and optional icon label. If |icon| is nil, the current
-// icon is cleared. If |label| is provided, |color| must be provided as well.
-- (void)setHintIcon:(NSImage*)icon label:(NSString*)label color:(NSColor*)color;
+- (void)setSecurityImageView:(LocationBarViewMac::SecurityImageView*)view;
+- (void)setPageActionViewList:(LocationBarViewMac::PageActionViewList*)list;
+- (void)setContentSettingViewsList:
+    (LocationBarViewMac::ContentSettingViews*)views;
 
-// Return the portion of the cell to show the text cursor over.
-- (NSRect)textCursorFrameForFrame:(NSRect)cellFrame;
+// Returns an array of the visible AutocompleteTextFieldIcon objects. Returns
+// only visible icons.
+- (NSArray*)layedOutIcons:(NSRect)cellFrame;
 
-// Return the portion of the cell to use for text display.  This
-// corresponds to the frame with our added decorations sliced off.
-- (NSRect)textFrameForFrame:(NSRect)cellFrame;
 
-// Return the portion of the cell to use for displaing the |hintIcon_|.
-- (NSRect)hintImageFrameForFrame:(NSRect)cellFrame;
+// Similar to |pageActionFrameForIndex:inFrame| but accepts an
+// ExtensionAction for when the index is not known.
+- (NSRect)pageActionFrameForExtensionAction:(ExtensionAction*)action
+                                    inFrame:(NSRect)cellFrame;
+
+// Returns the portion of the cell to use for displaying the Page Action icon
+// at the given index. May be NSZeroRect if the index's action is not visible.
+// This does a linear walk over all page actions, so do not call this in a loop
+// to get the position of all page actions. Use |-layedOutIcons:| instead in that
+// case.
+- (NSRect)pageActionFrameForIndex:(size_t)index inFrame:(NSRect)cellFrame;
+
+// Return the appropriate menu for any page actions under event.
+// Returns nil if no menu is present for the action, or if the event
+// is not over an action.
+- (NSMenu*)actionMenuForEvent:(NSEvent*)event
+                       inRect:(NSRect)cellFrame
+                       ofView:(NSView*)aView;
 
 @end
 
@@ -93,7 +113,13 @@
 
 @property(readonly) NSAttributedString* keywordString;
 @property(readonly) NSAttributedString* hintString;
-@property(readonly) NSImage* hintIcon;
 @property(readonly) NSAttributedString* hintIconLabel;
+
+// Returns the total number of installed Page Actions, visible or not.
+- (size_t)pageActionCount;
+
+// Returns the portion of the cell to use for displaying the security (SSL lock)
+// icon, leaving space for its label if any.
+- (NSRect)securityImageFrameForFrame:(NSRect)cellFrame;
 
 @end

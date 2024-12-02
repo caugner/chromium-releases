@@ -10,6 +10,7 @@
 #include "base/scoped_temp_dir.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -34,41 +35,49 @@ TEST(ExtensionResourceTest, CreateWithMissingResourceOnDisk) {
   relative_path = relative_path.AppendASCII("cira.js");
   ExtensionResource resource(root_path, relative_path);
 
+  // The path doesn't exist on disk, we will be returned an empty path.
   EXPECT_EQ(root_path.value(), resource.extension_root().value());
   EXPECT_EQ(relative_path.value(), resource.relative_path().value());
-  EXPECT_EQ(ToLower(root_path.Append(relative_path).value()),
-    ToLower(resource.GetFilePath().value()));
-
-  EXPECT_FALSE(resource.GetFilePath().empty());
+  EXPECT_TRUE(resource.GetFilePath().empty());
 }
 
-TEST(ExtensionResourceTest, CreateWithBothResourcesOnDisk) {
+TEST(ExtensionResourceTest, CreateWithAllResourcesOnDisk) {
   ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
+  // Create resource in the extension root.
   const char* filename = "res.ico";
   FilePath root_resource = temp.path().AppendASCII(filename);
   std::string data = "some foo";
-  ASSERT_TRUE(file_util::WriteFile(root_resource.AppendASCII(filename),
-      data.c_str(), data.length()));
+  ASSERT_TRUE(file_util::WriteFile(root_resource, data.c_str(), data.length()));
 
-  FilePath l10n_path = temp.path().AppendASCII(Extension::kLocaleFolder);
+  // Create l10n resources (for current locale and its parents).
+  FilePath l10n_path = temp.path().Append(Extension::kLocaleFolder);
   ASSERT_TRUE(file_util::CreateDirectory(l10n_path));
 
-  static std::string current_locale = l10n_util::GetApplicationLocale(L"");
-  std::replace(current_locale.begin(), current_locale.end(), '-', '_');
-  l10n_path = l10n_path.AppendASCII(current_locale);
-  ASSERT_TRUE(file_util::CreateDirectory(l10n_path));
-
-  ASSERT_TRUE(file_util::WriteFile(l10n_path.AppendASCII(filename),
-      data.c_str(), data.length()));
+  std::vector<std::string> locales;
+  extension_l10n_util::GetParentLocales(l10n_util::GetApplicationLocale(L""),
+                                        &locales);
+  ASSERT_FALSE(locales.empty());
+  for (size_t i = 0; i < locales.size(); i++) {
+    FilePath make_path;
+    make_path = l10n_path.AppendASCII(locales[i]);
+    ASSERT_TRUE(file_util::CreateDirectory(make_path));
+    ASSERT_TRUE(file_util::WriteFile(make_path.AppendASCII(filename),
+        data.c_str(), data.length()));
+  }
 
   FilePath path;
   ExtensionResource resource(temp.path(), FilePath().AppendASCII(filename));
   FilePath resolved_path = resource.GetFilePath();
 
-  EXPECT_EQ(ToLower(l10n_path.AppendASCII(filename).value()),
-            ToLower(resolved_path.value()));
+  FilePath expected_path;
+  // Expect default path only, since fallback logic is disabled.
+  // See http://crbug.com/27359.
+  expected_path = root_resource;
+  ASSERT_TRUE(file_util::AbsolutePath(&expected_path));
+
+  EXPECT_EQ(ToLower(expected_path.value()), ToLower(resolved_path.value()));
   EXPECT_EQ(ToLower(temp.path().value()),
             ToLower(resource.extension_root().value()));
   EXPECT_EQ(ToLower(FilePath().AppendASCII(filename).value()),

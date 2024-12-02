@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "app/gfx/native_widget_types.h"
 #include "base/shared_memory.h"
 #include "build/build_config.h"
+#include "gfx/native_widget_types.h"
 #include "ipc/ipc_message_macros.h"
 #include "webkit/glue/webcursor.h"
 
@@ -31,6 +31,10 @@ IPC_BEGIN_MESSAGES(PluginProcess)
   IPC_MESSAGE_CONTROL1(PluginProcessMsg_PluginMessage,
                        std::vector<uint8> /* opaque data */)
 
+  // Tells the plugin process to notify every connected renderer of the pending
+  // shutdown, so we don't mistake it for a crash.
+  IPC_MESSAGE_CONTROL0(PluginProcessMsg_NotifyRenderersOfPendingShutdown)
+
   // The following messages are used by all child processes, even though they
   // are listed under PluginProcess.  It seems overkill to define ChildProcess.
   // Tells the child process it should stop.
@@ -45,6 +49,14 @@ IPC_BEGIN_MESSAGES(PluginProcess)
   // Like above, this is used by all ChildProcesses.
   IPC_MESSAGE_CONTROL1(PluginProcessMsg_SetIPCLoggingEnabled,
                        bool /* on or off */)
+#endif
+
+#if defined(OS_MACOSX)
+  // Notifies a plugin process that keyboard focus has changed.  If another
+  // plugin instance has received focus, the instance IDs is passed as a
+  // parameter; if focus has been taken away from a plugin, 0 is passed.
+  IPC_MESSAGE_CONTROL1(PluginProcessMsg_PluginFocusNotify,
+                       uint32 /* instance ID */)
 #endif
 
 IPC_END_MESSAGES(PluginProcess)
@@ -113,8 +125,8 @@ IPC_BEGIN_MESSAGES(PluginProcessHost)
                       HWND /* caller window */)
 #endif
 
-#if defined(OS_LINUX)
-  // On Linux, the mapping between NativeViewId and X window ids
+#if defined(USE_X11)
+  // On X11, the mapping between NativeViewId and X window ids
   // is known only to the browser.  This message lets the plugin process
   // ask about a NativeViewId that was provided by the renderer.
   // It will get 0 back if it's a bogus input.
@@ -131,24 +143,31 @@ IPC_BEGIN_MESSAGES(PluginProcessHost)
 
   // Notifies the browser that the plugin has selected a window (i.e., brought
   // it to the front and wants it to have keyboard focus).
-  IPC_MESSAGE_CONTROL2(PluginProcessHostMsg_PluginSelectWindow,
+  IPC_MESSAGE_CONTROL3(PluginProcessHostMsg_PluginSelectWindow,
                        uint32 /* window ID */,
-                       gfx::Rect /* window rect */)
+                       gfx::Rect /* window rect */,
+                       bool /* modal */)
 
   // Notifies the browser that the plugin has shown a window.
-  IPC_MESSAGE_CONTROL2(PluginProcessHostMsg_PluginShowWindow,
+  IPC_MESSAGE_CONTROL3(PluginProcessHostMsg_PluginShowWindow,
                        uint32 /* window ID */,
-                       gfx::Rect /* window rect */)
+                       gfx::Rect /* window rect */,
+                       bool /* modal */)
 
   // Notifies the browser that the plugin has hidden a window.
   IPC_MESSAGE_CONTROL2(PluginProcessHostMsg_PluginHideWindow,
                        uint32 /* window ID */,
                        gfx::Rect /* window rect */)
 
-  // Notifies the browser that the plugin has disposed of a window.
-  IPC_MESSAGE_CONTROL2(PluginProcessHostMsg_PluginDisposeWindow,
-                       uint32 /* window ID */,
-                       gfx::Rect /* window rect */)
+  // Notifies the browser that a plugin instance has received keyboard focus.
+  IPC_MESSAGE_CONTROL2(PluginProcessHostMsg_PluginReceivedFocus,
+                       uint32 /* process ID */,
+                       uint32 /* instance ID */)
+
+  // Notifies the browser that a plugin instance has requested a cursor
+  // visibility change.
+  IPC_MESSAGE_CONTROL1(PluginProcessHostMsg_PluginSetCursorVisibility,
+                       bool /* cursor visibility */)
 #endif
 
 IPC_END_MESSAGES(PluginProcessHost)
@@ -189,16 +208,15 @@ IPC_BEGIN_MESSAGES(Plugin)
 
   IPC_SYNC_MESSAGE_ROUTED0_2(PluginMsg_Print,
                              base::SharedMemoryHandle /* shared_memory*/,
-                             size_t /* size */)
+                             uint32 /* size */)
 
-  IPC_SYNC_MESSAGE_ROUTED0_2(PluginMsg_GetPluginScriptableObject,
-                             int /* route_id */,
-                             intptr_t /* npobject_ptr */)
+  IPC_SYNC_MESSAGE_ROUTED0_1(PluginMsg_GetPluginScriptableObject,
+                             int /* route_id */)
 
-  IPC_SYNC_MESSAGE_ROUTED3_0(PluginMsg_DidFinishLoadWithReason,
-                             GURL /* url */,
-                             int /* reason */,
-                             intptr_t /* notify_data */)
+  IPC_MESSAGE_ROUTED3(PluginMsg_DidFinishLoadWithReason,
+                      GURL /* url */,
+                      int /* reason */,
+                      int /* notify_id */)
 
   // Updates the plugin location.
   IPC_MESSAGE_ROUTED1(PluginMsg_UpdateGeometry,
@@ -215,30 +233,45 @@ IPC_BEGIN_MESSAGES(Plugin)
                              bool /* handled */,
                              WebCursor /* cursor type*/)
 
+#if defined(OS_MACOSX)
+  IPC_MESSAGE_ROUTED1(PluginMsg_SetWindowFocus,
+                      bool /* has_focus */)
+
+  IPC_MESSAGE_ROUTED0(PluginMsg_ContainerHidden)
+
+  IPC_MESSAGE_ROUTED3(PluginMsg_ContainerShown,
+                      gfx::Rect /* window_frame */,
+                      gfx::Rect /* view_frame */,
+                      bool /* has_focus */)
+
+  IPC_MESSAGE_ROUTED2(PluginMsg_WindowFrameChanged,
+                      gfx::Rect /* window_frame */,
+                      gfx::Rect /* view_frame */)
+#endif
+
   IPC_SYNC_MESSAGE_ROUTED2_0(PluginMsg_WillSendRequest,
-                             int /* id */,
+                             unsigned long /* id */,
                              GURL /* url */)
 
   IPC_MESSAGE_ROUTED1(PluginMsg_DidReceiveResponse,
                       PluginMsg_DidReceiveResponseParams)
 
   IPC_MESSAGE_ROUTED3(PluginMsg_DidReceiveData,
-                      int /* id */,
+                      unsigned long /* id */,
                       std::vector<char> /* buffer */,
                       int /* data_offset */)
 
   IPC_MESSAGE_ROUTED1(PluginMsg_DidFinishLoading,
-                      int /* id */)
+                      unsigned long /* id */)
 
   IPC_MESSAGE_ROUTED1(PluginMsg_DidFail,
-                      int /* id */)
+                      unsigned long /* id */)
 
-  IPC_MESSAGE_ROUTED5(PluginMsg_SendJavaScriptStream,
+  IPC_MESSAGE_ROUTED4(PluginMsg_SendJavaScriptStream,
                       GURL /* url */,
                       std::string /* result */,
                       bool /* success */,
-                      bool /* notify required */,
-                      intptr_t /* notify data */)
+                      int /* notify_id */)
 
   IPC_MESSAGE_ROUTED2(PluginMsg_DidReceiveManualResponse,
                       GURL /* url */,
@@ -253,14 +286,34 @@ IPC_BEGIN_MESSAGES(Plugin)
 
   IPC_MESSAGE_ROUTED0(PluginMsg_InstallMissingPlugin)
 
-  IPC_SYNC_MESSAGE_ROUTED1_0(PluginMsg_HandleURLRequestReply,
-                             PluginMsg_URLRequestReply_Params)
+  IPC_MESSAGE_ROUTED3(PluginMsg_HandleURLRequestReply,
+                      unsigned long /* resource_id */,
+                      GURL /* url */,
+                      int /* notify_id */)
+
+  IPC_MESSAGE_ROUTED2(PluginMsg_HTTPRangeRequestReply,
+                      unsigned long /* resource_id */,
+                      int /* range_request_id */)
+
+  IPC_SYNC_MESSAGE_ROUTED0_1(PluginMsg_CreateCommandBuffer,
+                             int /* route_id */)
+
+  IPC_MESSAGE_ROUTED0(PluginMsg_DestroyCommandBuffer)
 
   IPC_MESSAGE_CONTROL1(PluginMsg_SignalModalDialogEvent,
                        gfx::NativeViewId /* containing_window */)
 
   IPC_MESSAGE_CONTROL1(PluginMsg_ResetModalDialogEvent,
                        gfx::NativeViewId /* containing_window */)
+
+#if defined(OS_MACOSX)
+  // This message, used only on 10.6 and later, transmits the "fake"
+  // window handle allocated by the browser on behalf of the renderer
+  // to the GPU plugin.
+  IPC_MESSAGE_ROUTED1(PluginMsg_SetFakeAcceleratedSurfaceWindowHandle,
+                      gfx::PluginWindowHandle /* window */)
+#endif
+
 IPC_END_MESSAGES(Plugin)
 
 
@@ -293,15 +346,13 @@ IPC_BEGIN_MESSAGES(PluginHost)
   IPC_MESSAGE_ROUTED1(PluginHostMsg_InvalidateRect,
                       gfx::Rect /* rect */)
 
-  IPC_SYNC_MESSAGE_ROUTED1_2(PluginHostMsg_GetWindowScriptNPObject,
+  IPC_SYNC_MESSAGE_ROUTED1_1(PluginHostMsg_GetWindowScriptNPObject,
                              int /* route id */,
-                             bool /* success */,
-                             intptr_t /* npobject_ptr */)
+                             bool /* success */)
 
-  IPC_SYNC_MESSAGE_ROUTED1_2(PluginHostMsg_GetPluginElement,
+  IPC_SYNC_MESSAGE_ROUTED1_1(PluginHostMsg_GetPluginElement,
                              int /* route id */,
-                             bool /* success */,
-                             intptr_t /* npobject_ptr */)
+                             bool /* success */)
 
   IPC_MESSAGE_ROUTED3(PluginHostMsg_SetCookie,
                       GURL /* url */,
@@ -342,16 +393,75 @@ IPC_BEGIN_MESSAGES(PluginHost)
 
   IPC_MESSAGE_ROUTED0(PluginHostMsg_CancelDocumentLoad)
 
-  IPC_MESSAGE_ROUTED5(PluginHostMsg_InitiateHTTPRangeRequest,
+  IPC_MESSAGE_ROUTED3(PluginHostMsg_InitiateHTTPRangeRequest,
                       std::string /* url */,
                       std::string /* range_info */,
-                      intptr_t    /* existing_stream */,
-                      bool        /* notify_needed */,
-                      intptr_t    /* notify_data */)
+                      int         /* range_request_id */)
 
   IPC_MESSAGE_ROUTED2(PluginHostMsg_DeferResourceLoading,
-                      int  /* resource_id */,
+                      unsigned long /* resource_id */,
                       bool /* defer */)
+
+  IPC_SYNC_MESSAGE_CONTROL1_0(PluginHostMsg_SetException,
+                              std::string /* message */)
+
+  IPC_MESSAGE_CONTROL0(PluginHostMsg_PluginShuttingDown)
+
+#if defined(OS_MACOSX)
+  IPC_MESSAGE_ROUTED1(PluginHostMsg_UpdateGeometry_ACK,
+                      int /* ack_key */)
+
+  // This message, used in Mac OS X 10.5 and earlier, is sent from the plug-in
+  // process to the renderer process to indicate that the plug-in allocated a
+  // new TransportDIB that holds the GPU's rendered image.  This information is
+  // then forwarded to the browser process via a similar message.
+  IPC_MESSAGE_ROUTED4(PluginHostMsg_AcceleratedSurfaceSetTransportDIB,
+                      gfx::PluginWindowHandle /* window */,
+                      int32 /* width */,
+                      int32 /* height */,
+                      TransportDIB::Handle /* handle to the TransportDIB */)
+
+  // Synthesize a fake window handle for the plug-in to identify the instance
+  // to the browser, allowing mapping to a surface for hardware accelleration
+  // of plug-in content. The browser generates the handle which is then set on
+  // the plug-in.
+  IPC_MESSAGE_ROUTED0(PluginHostMsg_BindFakePluginWindowHandle)
+
+  // This message, used only on 10.6 and later, is sent from the plug-in process
+  // to the renderer process to indicate that the plugin allocated a new
+  // IOSurface object of the given width and height. This information is then
+  // forwarded on to the browser process.
+  //
+  // NOTE: the original intent was to pass a mach port as the IOSurface
+  // identifier but it looks like that will be a lot of work. For now we pass an
+  // ID from IOSurfaceGetID.
+  IPC_MESSAGE_ROUTED4(PluginHostMsg_AcceleratedSurfaceSetIOSurface,
+                      gfx::PluginWindowHandle /* window */,
+                      int32 /* width */,
+                      int32 /* height */,
+                      uint64 /* identifier for IOSurface */)
+
+
+  // On the Mac, shared memory can't be allocated in the sandbox, so
+  // the TransportDIB used by the plug-in for rendering has to be allocated
+  // and managed by the browser.  This is a synchronous message, use with care.
+  IPC_SYNC_MESSAGE_ROUTED1_1(PluginHostMsg_AllocTransportDIB,
+                             size_t /* requested memory size */,
+                             TransportDIB::Handle /* output: DIB handle */)
+
+  // Since the browser keeps handles to the allocated transport DIBs, this
+  // message is sent to tell the browser that it may release them when the
+  // renderer is finished with them.
+  IPC_MESSAGE_ROUTED1(PluginHostMsg_FreeTransportDIB,
+                      TransportDIB::Id /* DIB id */)
+
+  // This message notifies the renderer process (and from there the
+  // browser process) that the plug-in swapped the buffers associated
+  // with the given "window", which should cause the browser to redraw
+  // the various plug-ins' contents.
+  IPC_MESSAGE_ROUTED1(PluginHostMsg_AcceleratedSurfaceBuffersSwapped,
+                      gfx::PluginWindowHandle /* window */)
+#endif
 
 IPC_END_MESSAGES(PluginHost)
 
@@ -407,8 +517,5 @@ IPC_BEGIN_MESSAGES(NPObject)
                              bool /* popups_allowed */,
                              NPVariant_Param /* result_param */,
                              bool /* result */)
-
-  IPC_SYNC_MESSAGE_ROUTED1_0(NPObjectMsg_SetException,
-                             std::string /* message */)
 
 IPC_END_MESSAGES(NPObject)

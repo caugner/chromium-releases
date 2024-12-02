@@ -16,6 +16,8 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser.h"
+#include "chrome/browser/browser_theme_provider.h"
+#include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/view_ids.h"
@@ -27,12 +29,12 @@ BookmarkMenuButton::BookmarkMenuButton(Browser* browser)
       browser_(browser),
       bookmark_drop_menu_(NULL),
       drop_operation_(0) {
+  // TODO(sky): if we keep this code, we need real icons, a11y support, and a
+  // tooltip.
   set_menu_delegate(this);
   SetID(VIEW_ID_BOOKMARK_MENU);
 
   ThemeProvider* tp = browser_->profile()->GetThemeProvider();
-  // TODO(sky): if we keep this code, we need real icons, a11y support, and a
-  // tooltip.
   SetIcon(*tp->GetBitmapNamed(IDR_MENU_BOOKMARK));
 }
 
@@ -126,6 +128,10 @@ void BookmarkMenuButton::RunMenu(views::View* source,
                                  gfx::NativeWindow hwnd,
                                  bool for_drop) {
   Profile* profile = browser_->profile();
+
+  UserMetrics::RecordAction(UserMetricsAction("BookmarkMenu_clicked"),
+                            profile);
+
   BookmarkMenuController* menu = new BookmarkMenuController(
       browser_, profile, browser_->GetSelectedTabContents(), hwnd,
       GetBookmarkModel()->GetBookmarkBarNode(), 0, true);
@@ -133,15 +139,11 @@ void BookmarkMenuButton::RunMenu(views::View* source,
   views::MenuItemView::AnchorPosition anchor = views::MenuItemView::TOPRIGHT;
   if (UILayoutIsRightToLeft())
     anchor = views::MenuItemView::TOPLEFT;
-  gfx::Point button_origin;
-  ConvertPointToScreen(this, &button_origin);
-  gfx::Rect menu_bounds(button_origin.x(), button_origin.y(), width(),
-                        height());
   if (for_drop) {
     bookmark_drop_menu_ = menu;
     bookmark_drop_menu_->set_observer(this);
   }
-  menu->RunMenuAt(menu_bounds, views::MenuItemView::TOPRIGHT, for_drop);
+  menu->RunMenuAt(this, views::MenuItemView::TOPRIGHT, for_drop);
 }
 
 BookmarkModel* BookmarkMenuButton::GetBookmarkModel() {

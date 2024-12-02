@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,39 +14,36 @@
 // The behavior of queuing events and replaying them can be disabled by a
 // layout test by setting eventSender.dragMode to false.
 
-// TODO(darin): This is very wrong.  We should not be including WebCore headers
-// directly like this!!
-#include "config.h"
-#include "KeyboardCodes.h"
-
-#undef LOG
-
 #include "webkit/tools/test_shell/event_sending_controller.h"
 
 #include <queue>
+#include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/string_util.h"
 #include "base/time.h"
-#include "webkit/api/public/WebDragData.h"
-#include "webkit/api/public/WebDragOperation.h"
-#include "webkit/api/public/WebPoint.h"
-#include "webkit/api/public/WebString.h"
-#include "webkit/api/public/WebView.h"
+#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDragData.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDragOperation.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebPoint.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebTouchPoint.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/tools/test_shell/test_shell.h"
+#include "webkit/tools/test_shell/test_webview_delegate.h"
 
 #if defined(OS_WIN)
-#include "webkit/api/public/win/WebInputEventFactory.h"
+#include "third_party/WebKit/WebKit/chromium/public/win/WebInputEventFactory.h"
 using WebKit::WebInputEventFactory;
 #endif
 
 // TODO(mpcomplete): layout before each event?
-// TODO(mpcomplete): do we need modifiers for mouse events?
 
 using base::Time;
 using base::TimeTicks;
@@ -56,11 +53,13 @@ using WebKit::WebDragData;
 using WebKit::WebInputEvent;
 using WebKit::WebKeyboardEvent;
 using WebKit::WebMouseEvent;
+using WebKit::WebMouseWheelEvent;
 using WebKit::WebPoint;
 using WebKit::WebString;
+using WebKit::WebTouchEvent;
+using WebKit::WebTouchPoint;
 using WebKit::WebView;
 
-TestShell* EventSendingController::shell_ = NULL;
 gfx::Point EventSendingController::last_mouse_pos_;
 WebMouseEvent::Button EventSendingController::pressed_button_ =
     WebMouseEvent::ButtonNone;
@@ -95,6 +94,8 @@ static WebDragOperation current_drag_effect;
 static WebDragOperationsMask current_drag_effects_allowed;
 static bool replaying_saved_events = false;
 static std::queue<SavedEvent> mouse_event_queue;
+static int touch_modifiers;
+static std::vector<WebTouchPoint> touch_points;
 
 // Time and place of the last mouse up event.
 static double last_click_time_sec = 0;
@@ -105,6 +106,10 @@ static int click_count = 0;
 // to register as a double or triple click
 static const double kMultiClickTimeSec = 1;
 static const int kMultiClickRadiusPixels = 5;
+
+// How much we should scroll per event - the value here is chosen to
+// match the WebKit impl and layout test results.
+static const float kScrollbarPixelsPerTick = 40.0f;
 
 inline bool outside_multiclick_radius(const gfx::Point &a, const gfx::Point &b) {
   return ((a.x() - b.x()) * (a.x() - b.x()) + (a.y() - b.y()) * (a.y() - b.y())) >
@@ -139,44 +144,115 @@ void InitMouseEvent(WebInputEvent::Type t, WebMouseEvent::Button b,
   e->clickCount = click_count;
 }
 
-void ApplyKeyModifier(const std::wstring& arg, WebKeyboardEvent* event) {
+// Returns true if the specified key is the system key.
+bool ApplyKeyModifier(const std::wstring& arg, WebInputEvent* event) {
+  bool system_key = false;
   const wchar_t* arg_string = arg.c_str();
-  if (!wcscmp(arg_string, L"ctrlKey")) {
+  if (!wcscmp(arg_string, L"ctrlKey")
+#if !defined(OS_MACOSX)
+      || !wcscmp(arg_string, L"addSelectionKey")
+#endif
+      ) {
     event->modifiers |= WebInputEvent::ControlKey;
-  } else if (!wcscmp(arg_string, L"shiftKey")) {
+  } else if (!wcscmp(arg_string, L"shiftKey")
+      || !wcscmp(arg_string, L"rangeSelectionKey")) {
     event->modifiers |= WebInputEvent::ShiftKey;
   } else if (!wcscmp(arg_string, L"altKey")) {
     event->modifiers |= WebInputEvent::AltKey;
-#if defined(OS_WIN)
-    event->isSystemKey = true;
+#if !defined(OS_MACOSX)
+    // On Windows all keys with Alt modifier will be marked as system key.
+    // We keep the same behavior on Linux and everywhere non-Mac, see:
+    // third_party/WebKit/WebKit/chromium/src/gtk/WebInputEventFactory.cpp
+    // If we want to change this behavior on Linux, this piece of code must be
+    // kept in sync with the related code in above file.
+    system_key = true;
 #endif
+#if defined(OS_MACOSX)
+  } else if (!wcscmp(arg_string, L"metaKey")
+      || !wcscmp(arg_string, L"addSelectionKey")) {
+    event->modifiers |= WebInputEvent::MetaKey;
+    // On Mac only command key presses are marked as system key.
+    // See the related code in:
+    // third_party/WebKit/WebKit/chromium/src/mac/WebInputEventFactory.cpp
+    // It must be kept in sync with the related code in above file.
+    system_key = true;
+#else
   } else if (!wcscmp(arg_string, L"metaKey")) {
     event->modifiers |= WebInputEvent::MetaKey;
+#endif
   }
+  return system_key;
 }
 
-void ApplyKeyModifiers(const CppVariant* arg, WebKeyboardEvent* event) {
+bool ApplyKeyModifiers(const CppVariant* arg, WebInputEvent* event) {
+  bool system_key = false;
   if (arg->isObject()) {
     std::vector<std::wstring> args = arg->ToStringVector();
     for (std::vector<std::wstring>::const_iterator i = args.begin();
          i != args.end(); ++i) {
-      ApplyKeyModifier(*i, event);
+      system_key |= ApplyKeyModifier(*i, event);
     }
   } else if (arg->isString()) {
-    ApplyKeyModifier(UTF8ToWide(arg->ToString()), event);
+    system_key = ApplyKeyModifier(UTF8ToWide(arg->ToString()), event);
   }
+  return system_key;
 }
+
+// Get the edit command corresponding to a keyboard event.
+// Returns true if the specified event corresponds to an edit command, the name
+// of the edit command will be stored in |*name|.
+bool GetEditCommand(const WebKeyboardEvent& event, std::string* name) {
+#if defined(OS_MACOSX)
+  // We only cares about Left,Right,Up,Down keys with Command or Command+Shift
+  // modifiers. These key events correspond to some special movement and
+  // selection editor commands, and was supposed to be handled in
+  // third_party/WebKit/WebKit/chromium/src/EditorClientImpl.cpp. But these keys
+  // will be marked as system key, which prevents them from being handled.
+  // Thus they must be handled specially.
+  if ((event.modifiers & ~WebKeyboardEvent::ShiftKey) !=
+      WebKeyboardEvent::MetaKey)
+    return false;
+
+  switch (event.windowsKeyCode) {
+    case base::VKEY_LEFT:
+      *name = "MoveToBeginningOfLine";
+      break;
+    case base::VKEY_RIGHT:
+      *name = "MoveToEndOfLine";
+      break;
+    case base::VKEY_UP:
+      *name = "MoveToBeginningOfDocument";
+      break;
+    case base::VKEY_DOWN:
+      *name = "MoveToEndOfDocument";
+      break;
+    default:
+      return false;
+  }
+
+  if (event.modifiers & WebKeyboardEvent::ShiftKey)
+    name->append("AndModifySelection");
+
+  return true;
+#else
+  return false;
+#endif
+}
+
+// Key event location code introduced in DOM Level 3.
+// See also: http://www.w3.org/TR/DOM-Level-3-Events/#events-keyboardevents
+enum KeyLocationCode {
+  DOM_KEY_LOCATION_STANDARD      = 0x00,
+  DOM_KEY_LOCATION_LEFT          = 0x01,
+  DOM_KEY_LOCATION_RIGHT         = 0x02,
+  DOM_KEY_LOCATION_NUMPAD        = 0x03
+};
 
 }  // anonymous namespace
 
 EventSendingController::EventSendingController(TestShell* shell)
-    : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
-  // Set static shell_ variable since we can't do it in an initializer list.
-  // We also need to be careful not to assign shell_ to new windows which are
-  // temporary.
-  if (NULL == shell_)
-    shell_ = shell;
-
+    : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
+      shell_(shell) {
   // Initialize the map that associates methods of this class with the names
   // they will use when called by JavaScript.  The actual binding of those
   // names to their methods will be done by calling BindToJavaScript() (defined
@@ -185,6 +261,7 @@ EventSendingController::EventSendingController(TestShell* shell)
   BindMethod("mouseUp", &EventSendingController::mouseUp);
   BindMethod("contextClick", &EventSendingController::contextClick);
   BindMethod("mouseMoveTo", &EventSendingController::mouseMoveTo);
+  BindMethod("mouseWheelTo", &EventSendingController::mouseWheelTo);
   BindMethod("leapForward", &EventSendingController::leapForward);
   BindMethod("keyDown", &EventSendingController::keyDown);
   BindMethod("dispatchMessage", &EventSendingController::dispatchMessage);
@@ -201,6 +278,16 @@ EventSendingController::EventSendingController(TestShell* shell)
              &EventSendingController::scheduleAsynchronousClick);
   BindMethod("beginDragWithFiles",
              &EventSendingController::beginDragWithFiles);
+  BindMethod("addTouchPoint", &EventSendingController::addTouchPoint);
+  BindMethod("cancelTouchPoint", &EventSendingController::cancelTouchPoint);
+  BindMethod("clearTouchPoints", &EventSendingController::clearTouchPoints);
+  BindMethod("releaseTouchPoint", &EventSendingController::releaseTouchPoint);
+  BindMethod("updateTouchPoint", &EventSendingController::updateTouchPoint);
+  BindMethod("setTouchModifier", &EventSendingController::setTouchModifier);
+  BindMethod("touchCancel", &EventSendingController::touchCancel);
+  BindMethod("touchEnd", &EventSendingController::touchEnd);
+  BindMethod("touchMove", &EventSendingController::touchMove);
+  BindMethod("touchStart", &EventSendingController::touchStart);
 
   // When set to true (the default value), we batch mouse move and mouse up
   // events so we can simulate drag & drop.
@@ -241,16 +328,15 @@ void EventSendingController::Reset() {
   click_count = 0;
   last_button_type_ = WebMouseEvent::ButtonNone;
   time_offset_ms = 0;
+  touch_modifiers = 0;
+  touch_points.clear();
 }
 
-// static
 WebView* EventSendingController::webview() {
   return shell_->webView();
 }
 
-// static
-void EventSendingController::DoDragDrop(const WebKit::WebPoint &event_pos,
-                                        const WebDragData& drag_data,
+void EventSendingController::DoDragDrop(const WebDragData& drag_data,
                                         WebDragOperationsMask mask) {
   WebMouseEvent event;
   InitMouseEvent(WebInputEvent::MouseDown, pressed_button_, last_mouse_pos_, &event);
@@ -322,6 +408,8 @@ void EventSendingController::mouseDown(
   pressed_button_ = button_type;
   InitMouseEvent(WebInputEvent::MouseDown, button_type,
                  last_mouse_pos_, &event);
+  if (args.size() >= 2 && (args[1].isObject() || args[1].isString()))
+    ApplyKeyModifiers(&(args[1]), &event);
   webview()->handleInputEvent(event);
 }
 
@@ -348,11 +436,12 @@ void EventSendingController::mouseUp(
     WebMouseEvent event;
     InitMouseEvent(WebInputEvent::MouseUp, button_type,
                    last_mouse_pos_, &event);
+    if (args.size() >= 2 && (args[1].isObject() || args[1].isString()))
+      ApplyKeyModifiers(&(args[1]), &event);
     DoMouseUp(event);
   }
 }
 
-// static
 void EventSendingController::DoMouseUp(const WebMouseEvent& e) {
   webview()->handleInputEvent(e);
 
@@ -365,7 +454,6 @@ void EventSendingController::DoMouseUp(const WebMouseEvent& e) {
     WebPoint client_point(e.x, e.y);
     WebPoint screen_point(e.globalX, e.globalY);
 
-    webview()->dragSourceMovedTo(client_point, screen_point);
     current_drag_effect = webview()->dragTargetDragOver(
         client_point, screen_point, current_drag_effects_allowed);
     if (current_drag_effect) {
@@ -406,7 +494,32 @@ void EventSendingController::mouseMoveTo(
   }
 }
 
-// static
+void EventSendingController::mouseWheelTo(
+    const CppArgumentList& args, CppVariant* result) {
+  result->SetNull();
+
+  if (args.size() >= 2 && args[0].isNumber() && args[1].isNumber()) {
+    // Force a layout here just to make sure every position has been
+    // determined before we send events (as well as all the other methods
+    // that send an event do). The layout test calling this
+    // (scrollbars/overflow-scrollbar-horizontal-wheel-scroll.html, only one
+    // for now) does not rely on this though.
+    webview()->layout();
+
+    int horizontal = args[0].ToInt32();
+    int vertical = args[1].ToInt32();
+
+    WebMouseWheelEvent event;
+    InitMouseEvent(WebInputEvent::MouseWheel, pressed_button_,
+                   last_mouse_pos_, &event);
+    event.wheelTicksX = static_cast<float>(horizontal);
+    event.wheelTicksY = static_cast<float>(vertical);
+    event.deltaX = -horizontal * kScrollbarPixelsPerTick;
+    event.deltaY = -vertical * kScrollbarPixelsPerTick;
+    webview()->handleInputEvent(event);
+  }
+}
+
 void EventSendingController::DoMouseMove(const WebMouseEvent& e) {
   last_mouse_pos_.SetPoint(e.x, e.y);
 
@@ -417,7 +530,6 @@ void EventSendingController::DoMouseMove(const WebMouseEvent& e) {
     WebPoint client_point(e.x, e.y);
     WebPoint screen_point(e.globalX, e.globalY);
 
-    webview()->dragSourceMovedTo(client_point, screen_point);
     current_drag_effect = webview()->dragTargetDragOver(
         client_point, screen_point, current_drag_effects_allowed);
   }
@@ -438,28 +550,29 @@ void EventSendingController::keyDown(
     // Convert \n -> VK_RETURN.  Some layout tests use \n to mean "Enter", when
     // Windows uses \r for "Enter".
     int code = 0;
+    int text = 0;
     bool needs_shift_key_modifier = false;
     if (L"\n" == code_str) {
       generate_char = true;
-      code = WebCore::VKEY_RETURN;
+      text = code = base::VKEY_RETURN;
     } else if (L"rightArrow" == code_str) {
-      code = WebCore::VKEY_RIGHT;
+      code = base::VKEY_RIGHT;
     } else if (L"downArrow" == code_str) {
-      code = WebCore::VKEY_DOWN;
+      code = base::VKEY_DOWN;
     } else if (L"leftArrow" == code_str) {
-      code = WebCore::VKEY_LEFT;
+      code = base::VKEY_LEFT;
     } else if (L"upArrow" == code_str) {
-      code = WebCore::VKEY_UP;
+      code = base::VKEY_UP;
     } else if (L"delete" == code_str) {
-      code = WebCore::VKEY_BACK;
+      code = base::VKEY_BACK;
     } else if (L"pageUp" == code_str) {
-      code = WebCore::VKEY_PRIOR;
+      code = base::VKEY_PRIOR;
     } else if (L"pageDown" == code_str) {
-      code = WebCore::VKEY_NEXT;
+      code = base::VKEY_NEXT;
     } else if (L"home" == code_str) {
-      code = WebCore::VKEY_HOME;
+      code = base::VKEY_HOME;
     } else if (L"end" == code_str) {
-      code = WebCore::VKEY_END;
+      code = base::VKEY_END;
     } else {
       // Compare the input string with the function-key names defined by the
       // DOM spec (i.e. "F1",...,"F24"). If the input string is a function-key
@@ -469,14 +582,16 @@ void EventSendingController::keyDown(
         function_key_name += L"F";
         function_key_name += IntToWString(i);
         if (function_key_name == code_str) {
-          code = WebCore::VKEY_F1 + (i - 1);
+          code = base::VKEY_F1 + (i - 1);
           break;
         }
       }
       if (!code) {
         DCHECK(code_str.length() == 1);
-        code = code_str[0];
+        text = code = code_str[0];
         needs_shift_key_modifier = NeedsShiftModifier(code);
+        if ((code & 0xFF) >= 'a' && (code & 0xFF) <= 'z')
+          code -= 'a' - 'A';
         generate_char = true;
       }
     }
@@ -486,42 +601,55 @@ void EventSendingController::keyDown(
     // On Windows, we might also need to generate a char event to mimic the
     // Windows event flow; on other platforms we create a merged event and test
     // the event flow that that platform provides.
-    WebKeyboardEvent event_down, event_up;
-#if defined(OS_WIN)
+    WebKeyboardEvent event_down, event_char, event_up;
     event_down.type = WebInputEvent::RawKeyDown;
-#else
-    event_down.type = WebInputEvent::KeyDown;
-#endif
     event_down.modifiers = 0;
     event_down.windowsKeyCode = code;
     if (generate_char) {
-      event_down.text[0] = code;
-      event_down.unmodifiedText[0] = code;
+      event_down.text[0] = text;
+      event_down.unmodifiedText[0] = text;
     }
     event_down.setKeyIdentifierFromWindowsKeyCode();
 
     if (args.size() >= 2 && (args[1].isObject() || args[1].isString()))
-      ApplyKeyModifiers(&(args[1]), &event_down);
+      event_down.isSystemKey = ApplyKeyModifiers(&(args[1]), &event_down);
 
     if (needs_shift_key_modifier)
       event_down.modifiers |= WebInputEvent::ShiftKey;
 
-    event_up = event_down;
+    // See if KeyLocation argument is given.
+    if (args.size() >= 3 && args[2].isNumber()) {
+      int location = args[2].ToInt32();
+      if (location == DOM_KEY_LOCATION_NUMPAD) {
+        event_down.modifiers |= WebInputEvent::IsKeyPad;
+      }
+    }
+
+    event_char = event_up = event_down;
     event_up.type = WebInputEvent::KeyUp;
     // EventSendingController.m forces a layout here, with at least one
     // test (fast\forms\focus-control-to-page.html) relying on this.
     webview()->layout();
 
+    // In the browser, if a keyboard event corresponds to an editor command,
+    // the command will be dispatched to the renderer just before dispatching
+    // the keyboard event, and then it will be executed in the
+    // RenderView::handleCurrentKeyboardEvent() method, which is called from
+    // third_party/WebKit/WebKit/chromium/src/EditorClientImpl.cpp.
+    // We just simulate the same behavior here.
+    std::string edit_command;
+    if (GetEditCommand(event_down, &edit_command))
+      shell_->delegate()->SetEditCommand(edit_command, "");
+
     webview()->handleInputEvent(event_down);
 
-#if defined(OS_WIN)
+    shell_->delegate()->ClearEditCommand();
+
     if (generate_char) {
-      WebKeyboardEvent event_char = event_down;
       event_char.type = WebInputEvent::Char;
       event_char.keyIdentifier[0] = '\0';
       webview()->handleInputEvent(event_char);
     }
-#endif
 
     webview()->handleInputEvent(event_up);
   }
@@ -590,25 +718,25 @@ void EventSendingController::DoLeapForward(int milliseconds) {
 // WebKit/WebView/WebView.mm)
 void EventSendingController::textZoomIn(
     const CppArgumentList& args, CppVariant* result) {
-  webview()->zoomIn(true);
+  webview()->setZoomLevel(true, webview()->zoomLevel() + 1);
   result->SetNull();
 }
 
 void EventSendingController::textZoomOut(
     const CppArgumentList& args, CppVariant* result) {
-  webview()->zoomOut(true);
+  webview()->setZoomLevel(true, webview()->zoomLevel() - 1);
   result->SetNull();
 }
 
 void EventSendingController::zoomPageIn(
     const CppArgumentList& args, CppVariant* result) {
-  webview()->zoomIn(false);
+  webview()->setZoomLevel(false, webview()->zoomLevel() + 1);
   result->SetNull();
 }
 
 void EventSendingController::zoomPageOut(
     const CppArgumentList& args, CppVariant* result) {
-  webview()->zoomOut(false);
+  webview()->setZoomLevel(false, webview()->zoomLevel() - 1);
   result->SetNull();
 }
 
@@ -705,6 +833,141 @@ void EventSendingController::beginDragWithFiles(
   pressed_button_ = WebMouseEvent::ButtonLeft;
 
   result->SetNull();
+}
+
+void EventSendingController::addTouchPoint(
+    const CppArgumentList& args, CppVariant* result) {
+  result->SetNull();
+
+  WebTouchPoint touch_point;
+  touch_point.state = WebTouchPoint::StatePressed;
+  touch_point.position = WebPoint(args[0].ToInt32(), args[1].ToInt32());
+  touch_point.id = touch_points.size();
+  touch_points.push_back(touch_point);
+}
+
+void EventSendingController::clearTouchPoints(
+    const CppArgumentList& args, CppVariant* result) {
+  result->SetNull();
+
+  touch_points.clear();
+}
+
+void EventSendingController::releaseTouchPoint(
+    const CppArgumentList& args, CppVariant* result) {
+  result->SetNull();
+
+  const unsigned int index = args[0].ToInt32();
+  if (index >= touch_points.size()) {
+    NOTREACHED() << "Invalid touch point index";
+  }
+
+  WebTouchPoint* touch_point = &touch_points[index];
+  touch_point->state = WebTouchPoint::StateReleased;
+}
+
+void EventSendingController::setTouchModifier(
+    const CppArgumentList& args, CppVariant* result) {
+  result->SetNull();
+
+  int mask = 0;
+  const std::string key_name = args[0].ToString();
+  if (key_name == "shift") {
+    mask = WebInputEvent::ShiftKey;
+  } else if (key_name == "alt") {
+    mask = WebInputEvent::AltKey;
+  } else if (key_name == "ctrl") {
+    mask = WebInputEvent::ControlKey;
+  } else if (key_name == "meta") {
+    mask = WebInputEvent::MetaKey;
+  }
+
+  if (args[1].ToBoolean() == true) {
+    touch_modifiers |= mask;
+  } else {
+    touch_modifiers &= ~mask;
+  }
+}
+
+void EventSendingController::updateTouchPoint(
+    const CppArgumentList& args, CppVariant* result) {
+  result->SetNull();
+
+  const unsigned int index = args[0].ToInt32();
+  if (index >= touch_points.size()) {
+    NOTREACHED() << "Invalid touch point index";
+  }
+
+  WebPoint position(args[1].ToInt32(), args[2].ToInt32());
+
+  WebTouchPoint* touch_point = &touch_points[index];
+  touch_point->state = WebTouchPoint::StateMoved;
+  touch_point->position = position;
+}
+
+void EventSendingController::cancelTouchPoint(
+    const CppArgumentList& args, CppVariant* result) {
+  result->SetNull();
+
+  const unsigned int index = args[0].ToInt32();
+  if (index >= touch_points.size()) {
+    NOTREACHED() << "Invalid touch point index";
+  }
+
+  WebTouchPoint* touch_point = &touch_points[index];
+  touch_point->state = WebTouchPoint::StateCancelled;
+}
+
+void EventSendingController::SendCurrentTouchEvent(
+    const WebInputEvent::Type type) {
+  if (static_cast<unsigned int>(WebTouchEvent::touchPointsLengthCap) <=
+      touch_points.size()) {
+    NOTREACHED() << "Too many touch points for event";
+  }
+
+  WebTouchEvent touch_event;
+  touch_event.type = type;
+  touch_event.modifiers = touch_modifiers;
+  touch_event.touchPointsLength = touch_points.size();
+  for (unsigned int i = 0; i < touch_points.size(); ++i) {
+    touch_event.touchPoints[i] = touch_points[i];
+  }
+  webview()->handleInputEvent(touch_event);
+
+  std::vector<WebTouchPoint>::iterator i = touch_points.begin();
+  while (i != touch_points.end()) {
+    WebTouchPoint* touch_point = &(*i);
+    if (touch_point->state == WebTouchPoint::StateReleased) {
+      i = touch_points.erase(i);
+    } else {
+      touch_point->state = WebTouchPoint::StateStationary;
+      ++i;
+    }
+  }
+}
+
+void EventSendingController::touchEnd(
+    const CppArgumentList& args, CppVariant* result) {
+  result->SetNull();
+  SendCurrentTouchEvent(WebInputEvent::TouchEnd);
+}
+
+void EventSendingController::touchMove(
+    const CppArgumentList& args, CppVariant* result) {
+  result->SetNull();
+  SendCurrentTouchEvent(WebInputEvent::TouchMove);
+}
+
+void EventSendingController::touchStart(
+    const CppArgumentList& args, CppVariant* result) {
+  result->SetNull();
+  SendCurrentTouchEvent(WebInputEvent::TouchStart);
+}
+
+void EventSendingController::touchCancel(
+    const CppArgumentList& args, CppVariant* result) {
+  result->SetNull();
+  SendCurrentTouchEvent(WebInputEvent::TouchCancel);
 }
 
 //

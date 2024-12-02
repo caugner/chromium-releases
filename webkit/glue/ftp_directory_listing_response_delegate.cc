@@ -10,13 +10,18 @@
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "base/time.h"
 #include "net/base/escape.h"
+#include "net/base/net_errors.h"
 #include "net/base/net_util.h"
+#include "net/ftp/ftp_directory_listing_parser.h"
 #include "net/ftp/ftp_server_type_histograms.h"
 #include "unicode/ucsdet.h"
-#include "webkit/api/public/WebURL.h"
-#include "webkit/api/public/WebURLLoaderClient.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLLoaderClient.h"
+
+using net::FtpDirectoryListingEntry;
 
 using WebKit::WebURLLoader;
 using WebKit::WebURLLoaderClient;
@@ -38,6 +43,7 @@ std::string DetectEncoding(const std::string& text) {
                  &status);
   const UCharsetMatch* match = ucsdet_detect(detector, &status);
   const char* encoding = ucsdet_getName(match, &status);
+  ucsdet_close(detector);
   // Should we check the quality of the match? A rather arbitrary number is
   // assigned by ICU and it's hard to come up with a lower limit.
   if (U_FAILURE(status))
@@ -61,53 +67,6 @@ string16 RawByteSequenceToFilename(const char* raw_filename,
   return filename;
 }
 
-void ExtractFullLinesFromBuffer(std::string* buffer,
-                                std::vector<std::string>* lines) {
-  int cut_pos = 0;
-  for (size_t i = 0; i < buffer->length(); i++) {
-    if ((*buffer)[i] != '\n')
-      continue;
-    size_t line_length = i - cut_pos;
-    if (line_length > 0 && (*buffer)[i - 1] == '\r')
-      line_length--;
-    lines->push_back(buffer->substr(cut_pos, line_length));
-    cut_pos = i + 1;
-  }
-  buffer->erase(0, cut_pos);
-}
-
-void LogFtpServerType(char server_type) {
-  switch (server_type) {
-    case 'E':
-      net::UpdateFtpServerTypeHistograms(net::SERVER_EPLF);
-      break;
-    case 'V':
-      net::UpdateFtpServerTypeHistograms(net::SERVER_VMS);
-      break;
-    case 'C':
-      net::UpdateFtpServerTypeHistograms(net::SERVER_CMS);
-      break;
-    case 'W':
-      net::UpdateFtpServerTypeHistograms(net::SERVER_DOS);
-      break;
-    case 'O':
-      net::UpdateFtpServerTypeHistograms(net::SERVER_OS2);
-      break;
-    case 'U':
-      net::UpdateFtpServerTypeHistograms(net::SERVER_LSL);
-      break;
-    case 'w':
-      net::UpdateFtpServerTypeHistograms(net::SERVER_W16);
-      break;
-    case 'D':
-      net::UpdateFtpServerTypeHistograms(net::SERVER_DLS);
-      break;
-    default:
-      net::UpdateFtpServerTypeHistograms(net::SERVER_UNKNOWN);
-      break;
-  }
-}
-
 }  // namespace
 
 namespace webkit_glue {
@@ -118,100 +77,35 @@ FtpDirectoryListingResponseDelegate::FtpDirectoryListingResponseDelegate(
     const WebURLResponse& response)
     : client_(client),
       loader_(loader),
-      original_response_(response) {
+      original_response_(response),
+      buffer_(base::Time::Now()),
+      updated_histograms_(false),
+      had_parsing_error_(false) {
   Init();
 }
 
 void FtpDirectoryListingResponseDelegate::OnReceivedData(const char* data,
                                                          int data_len) {
-  input_buffer_.append(data, data_len);
+  if (had_parsing_error_)
+    return;
 
-  // If all we've seen so far is ASCII, encoding_ is empty. Try to detect the
-  // encoding. We don't do the separate UTF-8 check here because the encoding
-  // detection with a longer chunk (as opposed to the relatively short path
-  // component of the url) is unlikely to mistake UTF-8 for a legacy encoding.
-  // If it turns out to be wrong, a separate UTF-8 check has to be added.
-  //
-  // TODO(jungshik): UTF-8 has to be 'enforced' without any heuristics when
-  // we're talking to an FTP server compliant to RFC 2640 (that is, its response
-  // to FEAT command includes 'UTF8').
-  // See http://wiki.filezilla-project.org/Character_Set
-  if (encoding_.empty())
-    encoding_ = DetectEncoding(input_buffer_);
-
-  std::vector<std::string> lines;
-  ExtractFullLinesFromBuffer(&input_buffer_, &lines);
-
-  for (std::vector<std::string>::const_iterator line = lines.begin();
-       line != lines.end(); ++line) {
-    struct net::list_result result;
-    int line_type = net::ParseFTPList(line->c_str(), &parse_state_, &result);
-
-    // The original code assumed months are in range 0-11 (PRExplodedTime),
-    // but our Time class expects a 1-12 range. Adjust it here, because
-    // the third-party parsing code uses bit-shifting on the month,
-    // and it'd be too easy to break that logic.
-    result.fe_time.month++;
-    DCHECK_LE(1, result.fe_time.month);
-    DCHECK_GE(12, result.fe_time.month);
-
-    int64 file_size;
-    switch (line_type) {
-      case 'd':  // Directory entry.
-        response_buffer_.append(net::GetDirectoryListingEntry(
-            RawByteSequenceToFilename(result.fe_fname, encoding_),
-            result.fe_fname, true, 0,
-            base::Time::FromLocalExploded(result.fe_time)));
-        break;
-      case 'f':  // File entry.
-        if (StringToInt64(result.fe_size, &file_size)) {
-          response_buffer_.append(net::GetDirectoryListingEntry(
-              RawByteSequenceToFilename(result.fe_fname, encoding_),
-              result.fe_fname, false, file_size,
-              base::Time::FromLocalExploded(result.fe_time)));
-        }
-        break;
-      case 'l': {  // Symlink entry.
-          std::string filename(result.fe_fname, result.fe_fnlen);
-
-          // Parsers for styles 'U' and 'W' handle " -> " themselves.
-          if (parse_state_.lstyle != 'U' && parse_state_.lstyle != 'W') {
-            std::string::size_type offset = filename.find(" -> ");
-            if (offset != std::string::npos)
-              filename = filename.substr(0, offset);
-          }
-
-          if (StringToInt64(result.fe_size, &file_size)) {
-            response_buffer_.append(net::GetDirectoryListingEntry(
-                RawByteSequenceToFilename(filename.c_str(), encoding_),
-                filename, false, file_size,
-                base::Time::FromLocalExploded(result.fe_time)));
-          }
-        }
-        break;
-      case '?':  // Junk entry.
-      case '"':  // Comment entry.
-        break;
-      default:
-        NOTREACHED();
-        break;
-    }
-  }
-
-  SendResponseBufferToClient();
+  if (buffer_.ConsumeData(data, data_len) == net::OK)
+    ProcessReceivedEntries();
+  else
+    had_parsing_error_ = true;
 }
 
 void FtpDirectoryListingResponseDelegate::OnCompletedRequest() {
-  SendResponseBufferToClient();
+  if (!had_parsing_error_ && buffer_.ProcessRemainingData() == net::OK)
+    ProcessReceivedEntries();
+  else
+    had_parsing_error_ = true;
 
-  // Only log the server type if we got enough data to reliably detect it.
-  if (parse_state_.parsed_one)
-    LogFtpServerType(parse_state_.lstyle);
+  if (had_parsing_error_)
+    SendDataToClient("<script>onListingParsingError();</script>\n");
 }
 
 void FtpDirectoryListingResponseDelegate::Init() {
-  memset(&parse_state_, 0, sizeof(parse_state_));
-
   GURL response_url(original_response_.url());
   UnescapeRule::Type unescape_rules = UnescapeRule::SPACES |
                                       UnescapeRule::URL_SPECIAL_CHARS;
@@ -234,25 +128,43 @@ void FtpDirectoryListingResponseDelegate::Init() {
       path_utf16 = WideToUTF16Hack(base::SysNativeMBToWide(unescaped_path));
   }
 
-  response_buffer_ = net::GetDirectoryListingHeader(path_utf16);
+  SendDataToClient(net::GetDirectoryListingHeader(path_utf16));
 
   // If this isn't top level directory (i.e. the path isn't "/",)
   // add a link to the parent directory.
   if (response_url.path().length() > 1) {
-    response_buffer_.append(
-        net::GetDirectoryListingEntry(ASCIIToUTF16(".."),
-                                      std::string(),
-                                      false, 0,
-                                      base::Time()));
+    SendDataToClient(net::GetDirectoryListingEntry(
+        ASCIIToUTF16(".."), std::string(), false, 0, base::Time()));
   }
 }
 
-void FtpDirectoryListingResponseDelegate::SendResponseBufferToClient() {
-  if (!response_buffer_.empty()) {
-    client_->didReceiveData(loader_, response_buffer_.data(),
-                            response_buffer_.length(), -1);
-    response_buffer_.clear();
+void FtpDirectoryListingResponseDelegate::ProcessReceivedEntries() {
+  if (!updated_histograms_ && buffer_.EntryAvailable()) {
+    // Only log the server type if we got enough data to reliably detect it.
+    net::UpdateFtpServerTypeHistograms(buffer_.GetServerType());
+    updated_histograms_ = true;
   }
+
+  while (buffer_.EntryAvailable()) {
+    FtpDirectoryListingEntry entry = buffer_.PopEntry();
+
+    // Skip the current and parent directory entries in the listing. Our header
+    // always includes them.
+    if (EqualsASCII(entry.name, ".") || EqualsASCII(entry.name, ".."))
+      continue;
+
+    bool is_directory = (entry.type == FtpDirectoryListingEntry::DIRECTORY);
+    int64 size = entry.size;
+    if (entry.type != FtpDirectoryListingEntry::FILE)
+      size = 0;
+    SendDataToClient(net::GetDirectoryListingEntry(
+        entry.name, std::string(), is_directory, size, entry.last_modified));
+  }
+}
+
+void FtpDirectoryListingResponseDelegate::SendDataToClient(
+    const std::string& data) {
+  client_->didReceiveData(loader_, data.data(), data.length());
 }
 
 }  // namespace webkit_glue

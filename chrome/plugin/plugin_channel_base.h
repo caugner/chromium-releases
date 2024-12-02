@@ -2,18 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_WEBKIT_GLUE_PLUGIN_CHANNEL_BASE_H_
-#define CHROME_WEBKIT_GLUE_PLUGIN_CHANNEL_BASE_H_
+#ifndef CHROME_PLUGIN_PLUGIN_CHANNEL_BASE_H_
+#define CHROME_PLUGIN_PLUGIN_CHANNEL_BASE_H_
 
 #include <string>
 
-#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
 #include "base/hash_tables.h"
 #include "base/message_loop.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "chrome/common/message_router.h"
+#include "chrome/plugin/npobject_base.h"
+#include "gfx/native_widget_types.h"
 #include "ipc/ipc_sync_channel.h"
 
 // Encapsulates an IPC channel between a renderer and a plugin process.
@@ -21,7 +22,6 @@ class PluginChannelBase : public IPC::Channel::Listener,
                           public IPC::Message::Sender,
                           public base::RefCountedThreadSafe<PluginChannelBase> {
  public:
-  virtual ~PluginChannelBase();
 
   // WebPlugin[Delegate] call these on construction and destruction to setup
   // the routing and manage lifetime of this object.  This is also called by
@@ -29,7 +29,8 @@ class PluginChannelBase : public IPC::Channel::Listener,
   // lifetime of this object (by passing true for npobject) because we don't
   // want a leak of an NPObject in a plugin to keep the channel around longer
   // than necessary.
-  void AddRoute(int route_id, IPC::Channel::Listener* listener, bool npobject);
+  void AddRoute(int route_id, IPC::Channel::Listener* listener,
+                NPObjectBase* npobject);
   void RemoveRoute(int route_id);
 
   // IPC::Message::Sender implementation:
@@ -50,10 +51,22 @@ class PluginChannelBase : public IPC::Channel::Listener,
     return channel_valid_;
   }
 
+  // Returns the most recent PluginChannelBase to have received a message
+  // in this process.
+  static PluginChannelBase* GetCurrentChannel();
+
   static void CleanupChannels();
+
+  // Returns the NPObjectBase object for the route id passed in.
+  // Returns NULL on failure.
+  NPObjectBase* GetNPObjectListenerForRoute(int route_id);
 
  protected:
   typedef PluginChannelBase* (*PluginChannelFactory)();
+
+  friend class base::RefCountedThreadSafe<PluginChannelBase>;
+
+  virtual ~PluginChannelBase();
 
   // Returns a PluginChannelBase derived object for the given channel name.
   // If an existing channel exists returns that object, otherwise creates a
@@ -81,9 +94,9 @@ class PluginChannelBase : public IPC::Channel::Listener,
   virtual void OnChannelConnected(int32 peer_pid);
   virtual void OnChannelError();
 
-  // If this is set, sync messages that are sent will only unblock the receiver
-  // if this channel is in the middle of a dispatch.
-  void SendUnblockingOnlyDuringDispatch();
+  void set_send_unblocking_only_during_unblock_dispatch() {
+      send_unblocking_only_during_unblock_dispatch_ = true;
+  }
 
   virtual bool Init(MessageLoop* ipc_message_loop, bool create_pipe_now);
 
@@ -100,7 +113,7 @@ class PluginChannelBase : public IPC::Channel::Listener,
 
   // Keep track of all the registered NPObjects proxies/stubs so that when the
   // channel is closed we can inform them.
-  typedef base::hash_map<int, IPC::Channel::Listener*> ListenerMap;
+  typedef base::hash_map<int, NPObjectBase*> ListenerMap;
   ListenerMap npobject_listeners_;
 
   // Used to implement message routing functionality to WebPlugin[Delegate]
@@ -111,15 +124,24 @@ class PluginChannelBase : public IPC::Channel::Listener,
   // error. This flag is used to indicate the same.
   bool channel_valid_;
 
-  // Track whether we're within a dispatch; works like a refcount, 0 when we're
-  // not.
-  int in_dispatch_;
+  // Track whether we're dispatching a message with the unblock flag; works like
+  // a refcount, 0 when we're not.
+  int in_unblock_dispatch_;
 
   // If true, sync messages will only be marked as unblocking if the channel is
-  // in the middle of dispatching a message.
-  bool send_unblocking_only_during_dispatch_;
+  // in the middle of dispatching an unblocking message.
+  // The plugin process wants to avoid setting the unblock flag on its sync
+  // messages unless necessary, since it can potentially introduce reentrancy
+  // into WebKit in ways that it doesn't expect (i.e. causing layoutout during
+  // paint).  However to avoid deadlock, we must ensure that any message that's
+  // sent as a result of a sync call from the renderer must unblock the
+  // renderer.  We additionally have to do this for async messages from the
+  // renderer that have the unblock flag set, since they could be followed by a
+  // sync message that won't get dispatched until the call to the renderer is
+  // complete.
+  bool send_unblocking_only_during_unblock_dispatch_;
 
   DISALLOW_COPY_AND_ASSIGN(PluginChannelBase);
 };
 
-#endif  // CHROME_WEBKIT_GLUE_PLUGIN_CHANNEL_BASE_H_
+#endif  // CHROME_PLUGIN_PLUGIN_CHANNEL_BASE_H_

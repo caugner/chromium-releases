@@ -5,10 +5,11 @@
 #include "views/controls/combobox/native_combobox_win.h"
 
 #include "app/combobox_model.h"
-#include "app/gfx/font.h"
-#include "app/gfx/native_theme_win.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "base/i18n/rtl.h"
+#include "gfx/font.h"
+#include "gfx/native_theme_win.h"
 #include "views/controls/combobox/combobox.h"
 #include "views/widget/widget.h"
 
@@ -52,7 +53,7 @@ void NativeComboboxWin::UpdateFromModel() {
     // text is displayed correctly in right-to-left UIs.
     std::wstring localized_text;
     const wchar_t* text_ptr = text.c_str();
-    if (l10n_util::AdjustStringForLocaleDirection(text, &localized_text))
+    if (base::i18n::AdjustStringForLocaleDirection(text, &localized_text))
       text_ptr = localized_text.c_str();
 
     SendMessage(native_view(), CB_ADDSTRING, 0,
@@ -174,6 +175,7 @@ void NativeComboboxWin::NativeControlCreated(HWND native_control) {
 
   UpdateFont();
   UpdateFromModel();
+  UpdateSelectedItem();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

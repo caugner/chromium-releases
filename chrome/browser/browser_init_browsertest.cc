@@ -6,6 +6,7 @@
 #include "chrome/browser/browser_init.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -46,13 +47,42 @@ IN_PROC_BROWSER_TEST_F(BrowserInitTest, OpenURLsPopup) {
   ASSERT_EQ(popup->type(), Browser::TYPE_POPUP);
   ASSERT_EQ(popup, observer.added_browser_);
 
-  CommandLine dummy((std::wstring()));
+  CommandLine dummy(CommandLine::ARGUMENTS_ONLY);
   BrowserInit::LaunchWithProfile launch(std::wstring(), dummy);
   // This should create a new window, but re-use the profile from |popup|. If
   // it used a NULL or invalid profile, it would crash.
   launch.OpenURLsInBrowser(popup, false, urls);
   ASSERT_NE(popup, observer.added_browser_);
   BrowserList::RemoveObserver(&observer);
+}
+
+// Test that we prevent openning potentially dangerous schemes from the
+// command line.
+// TODO(jschuh): FLAKY because the process doesn't have sufficient time
+// to start on most BuildBot runs and I don't want to add longer delays to
+// the test. I'll circle back and make this work properly when i get a chance.
+IN_PROC_BROWSER_TEST_F(BrowserInitTest, FLAKY_BlockBadURLs) {
+  const std::wstring testurlstr(L"http://localhost/");
+  const GURL testurl(WideToUTF16Hack(testurlstr));
+  CommandLine cmdline(CommandLine::ARGUMENTS_ONLY);
+  cmdline.AppendLooseValue(testurlstr);
+  cmdline.AppendLooseValue(std::wstring(L"javascript:alert('boo')"));
+  cmdline.AppendLooseValue(testurlstr);
+  cmdline.AppendLooseValue(std::wstring(L"view-source:http://localhost/"));
+
+  // This will pick up the current browser instance.
+  BrowserInit::LaunchWithProfile launch(std::wstring(), cmdline);
+  launch.Launch(browser()->profile(), false);
+
+  // Give the browser a chance to start first. FIXME(jschuh)
+  PlatformThread::Sleep(50);
+
+  // Skip about:blank in the first tab
+  for (int  i = 1; i < browser()->tab_count(); i++) {
+    const GURL &url = browser()->GetTabContentsAt(i)->GetURL();
+    ASSERT_EQ(url, testurl);
+  }
+  ASSERT_EQ(browser()->tab_count(), 3);
 }
 
 }  // namespace

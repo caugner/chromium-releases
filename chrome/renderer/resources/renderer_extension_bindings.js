@@ -17,11 +17,19 @@ var chrome = chrome || {};
   native function PortRelease(portId);
   native function PostMessage(portId, msg);
   native function GetChromeHidden();
+  native function GetL10nMessage();
 
   var chromeHidden = GetChromeHidden();
 
+  // The reserved channel name for the sendRequest API.
+  chromeHidden.kRequestChannel = "chrome.extension.sendRequest";
+
   // Map of port IDs to port object.
   var ports = {};
+
+  // Change even to odd and vice versa, to get the other side of a given
+  // channel.
+  function getOppositePortId(portId) { return portId ^ 1; }
 
   // Port object.  Represents a connection to another script context through
   // which messages can be passed.
@@ -59,19 +67,40 @@ var chrome = chrome || {};
     // close both.
     if (targetExtensionId != chromeHidden.extensionId)
       return;  // not for us
+    if (ports[getOppositePortId(portId)])
+      return;  // this channel was opened by us, so ignore it
 
-    // Determine whether this is coming from another extension, and use the
-    // right event.
-    var connectEvent = (sourceExtensionId == chromeHidden.extensionId ?
-        chrome.extension.onConnect : chrome.extension.onConnectExternal);
+    // Determine whether this is coming from another extension, so we can use
+    // the right event.
+    var isExternal = sourceExtensionId != chromeHidden.extensionId;
+
+    if (tab)
+      tab = chromeHidden.JSON.parse(tab);
+    var sender = {tab: tab, id: sourceExtensionId};
+
+    // Special case for sendRequest/onRequest.
+    if (channelName == chromeHidden.kRequestChannel) {
+      var requestEvent = (isExternal ?
+          chrome.extension.onRequestExternal : chrome.extension.onRequest);
+      if (requestEvent.hasListeners()) {
+        var port = chromeHidden.Port.createPort(portId, channelName);
+        port.onMessage.addListener(function(request) {
+          requestEvent.dispatch(request, sender, function(response) {
+            port.postMessage(response);
+          });
+        });
+      }
+      return;
+    }
+
+    var connectEvent = (isExternal ?
+        chrome.extension.onConnectExternal : chrome.extension.onConnect);
     if (connectEvent.hasListeners()) {
       var port = chromeHidden.Port.createPort(portId, channelName);
-      if (tab) {
-        tab = JSON.parse(tab);
-      }
-      port.sender = {tab: tab, id: sourceExtensionId};
+      port.sender = sender;
       // TODO(EXTENSIONS_DEPRECATED): port.tab is obsolete.
       port.tab = port.sender.tab;
+
       connectEvent.dispatch(port);
     }
   };
@@ -90,7 +119,7 @@ var chrome = chrome || {};
     var port = ports[portId];
     if (port) {
       if (msg) {
-        msg = JSON.parse(msg);
+        msg = chromeHidden.JSON.parse(msg);
       }
       port.onMessage.dispatch(msg, port);
     }
@@ -102,7 +131,7 @@ var chrome = chrome || {};
     // JSON.stringify doesn't support a root object which is undefined.
     if (msg === undefined)
       msg = null;
-    PostMessage(this.portId_, JSON.stringify(msg));
+    PostMessage(this.portId_, chromeHidden.JSON.stringify(msg));
   };
 
   // Disconnects the port from the other end.
@@ -113,19 +142,21 @@ var chrome = chrome || {};
 
   // This function is called on context initialization for both content scripts
   // and extension contexts.
-  chrome.initExtension = function(extensionId) {
+  chrome.initExtension = function(extensionId, warnOnPrivilegedApiAccess,
+                                  inIncognitoTab) {
     delete chrome.initExtension;
     chromeHidden.extensionId = extensionId;
 
     chrome.extension = chrome.extension || {};
-
-    // TODO(EXTENSIONS_DEPRECATED): chrome.self is obsolete.
-    // http://code.google.com/p/chromium/issues/detail?id=16356
     chrome.self = chrome.extension;
+
+    chrome.extension.inIncognitoTab = inIncognitoTab;
 
     // Events for when a message channel is opened to our extension.
     chrome.extension.onConnect = new chrome.Event();
     chrome.extension.onConnectExternal = new chrome.Event();
+    chrome.extension.onRequest = new chrome.Event();
+    chrome.extension.onRequestExternal = new chrome.Event();
 
     // Opens a message channel to the given target extension, or the current one
     // if unspecified.  Returns a Port for message passing.
@@ -144,10 +175,106 @@ var chrome = chrome || {};
       throw new Error("Error connecting to extension '" + targetId + "'");
     };
 
+    chrome.extension.sendRequest =
+        function(targetId_opt, request, responseCallback_opt) {
+      var targetId = extensionId;
+      var responseCallback = null;
+      var lastArg = arguments.length - 1;
+      if (typeof(arguments[lastArg]) == "function")
+        responseCallback = arguments[lastArg--];
+      request = arguments[lastArg--];
+      if (lastArg >= 0)
+        targetId = arguments[lastArg--];
+
+      var port = chrome.extension.connect(targetId,
+                                          {name: chromeHidden.kRequestChannel});
+      port.postMessage(request);
+      port.onMessage.addListener(function(response) {
+        if (responseCallback)
+          responseCallback(response);
+        port.disconnect();
+      });
+    };
+
     // Returns a resource URL that can be used to fetch a resource from this
     // extension.
     chrome.extension.getURL = function(path) {
       return "chrome-extension://" + extensionId + "/" + path;
     };
+
+    chrome.i18n = chrome.i18n || {};
+    chrome.i18n.getMessage = function(message_name, placeholders) {
+      return GetL10nMessage(message_name, placeholders, extensionId);
+    };
+
+    if (warnOnPrivilegedApiAccess) {
+      setupApiStubs();
+    }
   }
+
+  var notSupportedSuffix = " is not supported in content scripts. " +
+      "See the content scripts documentation for more details.";
+
+  // Setup to throw an error message when trying to access |name| on the chrome
+  // object. The |name| can be a dot-separated path.
+  function createStub(name) {
+    var module = chrome;
+    var parts = name.split(".");
+    for (var i = 0; i < parts.length - 1; i++) {
+      var nextPart = parts[i];
+      // Make sure an object at the path so far is defined.
+      module[nextPart] = module[nextPart] || {};
+      module = module[nextPart];
+    }
+    var finalPart = parts[parts.length-1];
+    module.__defineGetter__(finalPart, function() {
+      throw new Error("chrome." + name + notSupportedSuffix);
+    });
+  }
+
+  // Sets up stubs to throw a better error message for the common case of
+  // developers trying to call extension API's that aren't allowed to be
+  // called from content scripts.
+  function setupApiStubs() {
+    // TODO(asargent) It would be nice to eventually generate this
+    // programmatically from extension_api.json (there is already a browser test
+    // that should prevent it from getting stale).
+    var privileged = [
+      // Entire namespaces.
+      "bookmarks",
+      "browserAction",
+      "devtools",
+      "experimental.accessibility",
+      "experimental.bookmarkManager",
+      "experimental.clipboard",
+      "experimental.contextMenu",
+      "experimental.extension",
+      "experimental.idle",
+      "experimental.infobars",
+      "experimental.metrics",
+      "experimental.popup",
+      "experimental.processes",
+      "history",
+      "pageAction",
+      "pageActions",
+      "tabs",
+      "test",
+      "toolstrip",
+      "windows",
+
+      // Functions/events/properties within the extension namespace.
+      "extension.getBackgroundPage",
+      "extension.getExtensionTabs",
+      "extension.getToolstrips",
+      "extension.getViews",
+      "extension.lastError",
+      "extension.onConnectExternal",
+      "extension.onRequestExternal",
+      "i18n.getAcceptLanguages"
+    ];
+    for (var i = 0; i < privileged.length; i++) {
+      createStub(privileged[i]);
+    }
+  }
+
 })();

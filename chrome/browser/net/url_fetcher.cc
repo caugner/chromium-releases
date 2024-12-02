@@ -9,6 +9,8 @@
 #include "base/thread.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/net/url_fetcher_protect.h"
+#include "chrome/browser/net/url_request_context_getter.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/load_flags.h"
 #include "net/base/io_buffer.h"
@@ -52,6 +54,10 @@ class URLFetcher::Core
   URLFetcher::Delegate* delegate() const { return delegate_; }
 
  private:
+  friend class base::RefCountedThreadSafe<URLFetcher::Core>;
+
+  ~Core() {}
+
   // Wrapper functions that allow us to ensure actions happen on the right
   // thread.
   void StartURLRequest();
@@ -64,14 +70,13 @@ class URLFetcher::Core
   RequestType request_type_;         // What type of request is this?
   URLFetcher::Delegate* delegate_;   // Object to notify on completion
   MessageLoop* delegate_loop_;       // Message loop of the creating thread
-  MessageLoop* io_loop_;             // Message loop of the IO thread
   URLRequest* request_;              // The actual request this wraps
   int load_flags_;                   // Flags for the load operation
   int response_code_;                // HTTP status code for the request
   std::string data_;                 // Results of the request
   scoped_refptr<net::IOBuffer> buffer_;
                                      // Read buffer
-  scoped_refptr<URLRequestContext> request_context_;
+  scoped_refptr<URLRequestContextGetter> request_context_getter_;
                                      // Cookie/cache info for the request
   ResponseCookies cookies_;          // Response cookies
   std::string extra_request_headers_;// Extra headers for the request, if any
@@ -91,6 +96,9 @@ class URLFetcher::Core
   // specified by the protection manager, we'll give up.
   int num_retries_;
 
+  // True if the URLFetcher has been cancelled.
+  bool was_cancelled_;
+
   friend class URLFetcher;
   DISALLOW_COPY_AND_ASSIGN(Core);
 };
@@ -102,7 +110,8 @@ URLFetcher::URLFetcher(const GURL& url,
                        RequestType request_type,
                        Delegate* d)
     : ALLOW_THIS_IN_INITIALIZER_LIST(
-      core_(new Core(this, url, request_type, d))) {
+      core_(new Core(this, url, request_type, d))),
+      automatically_retry_on_5xx_(true) {
 }
 
 URLFetcher::~URLFetcher() {
@@ -125,35 +134,37 @@ URLFetcher::Core::Core(URLFetcher* fetcher,
       request_type_(request_type),
       delegate_(d),
       delegate_loop_(MessageLoop::current()),
-      io_loop_(ChromeThread::GetMessageLoop(ChromeThread::IO)),
       request_(NULL),
       load_flags_(net::LOAD_NORMAL),
       response_code_(-1),
       buffer_(new net::IOBuffer(kBufferSize)),
       protect_entry_(URLFetcherProtectManager::GetInstance()->Register(
           original_url_.host())),
-      num_retries_(0) {
+      num_retries_(0),
+      was_cancelled_(false) {
 }
 
 void URLFetcher::Core::Start() {
   DCHECK(delegate_loop_);
-  DCHECK(io_loop_);
-  DCHECK(request_context_) << "We need an URLRequestContext!";
-  io_loop_->PostDelayedTask(FROM_HERE, NewRunnableMethod(
-          this, &Core::StartURLRequest),
-      protect_entry_->UpdateBackoff(URLFetcherProtectEntry::SEND));
+  CHECK(request_context_getter_) << "We need an URLRequestContext!";
+  ChromeThread::PostDelayedTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(this, &Core::StartURLRequest),
+          protect_entry_->UpdateBackoff(URLFetcherProtectEntry::SEND));
 }
 
 void URLFetcher::Core::Stop() {
   DCHECK_EQ(MessageLoop::current(), delegate_loop_);
   delegate_ = NULL;
-  io_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-      this, &Core::CancelURLRequest));
+  fetcher_ = NULL;
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(this, &Core::CancelURLRequest));
 }
 
 void URLFetcher::Core::OnResponseStarted(URLRequest* request) {
   DCHECK(request == request_);
-  DCHECK(MessageLoop::current() == io_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   if (request_->status().is_success()) {
     response_code_ = request_->GetResponseCode();
     response_headers_ = request_->response_headers();
@@ -171,7 +182,7 @@ void URLFetcher::Core::OnResponseStarted(URLRequest* request) {
 
 void URLFetcher::Core::OnReadCompleted(URLRequest* request, int bytes_read) {
   DCHECK(request == request_);
-  DCHECK(MessageLoop::current() == io_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
   url_ = request->url();
 
@@ -194,7 +205,15 @@ void URLFetcher::Core::OnReadCompleted(URLRequest* request, int bytes_read) {
 }
 
 void URLFetcher::Core::StartURLRequest() {
-  DCHECK(MessageLoop::current() == io_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
+
+  if (was_cancelled_) {
+    // Since StartURLRequest() is posted as a *delayed* task, it may
+    // run after the URLFetcher was already stopped.
+    return;
+  }
+
+  CHECK(request_context_getter_);
   DCHECK(!request_);
 
   request_ = new URLRequest(original_url_, this);
@@ -203,7 +222,7 @@ void URLFetcher::Core::StartURLRequest() {
     flags = flags | net::LOAD_DISABLE_INTERCEPT;
   }
   request_->set_load_flags(flags);
-  request_->set_context(request_context_.get());
+  request_->set_context(request_context_getter_->GetURLRequestContext());
 
   switch (request_type_) {
     case GET:
@@ -237,7 +256,7 @@ void URLFetcher::Core::StartURLRequest() {
 }
 
 void URLFetcher::Core::CancelURLRequest() {
-  DCHECK(MessageLoop::current() == io_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   if (request_) {
     request_->Cancel();
     delete request_;
@@ -247,7 +266,8 @@ void URLFetcher::Core::CancelURLRequest() {
   // references to URLFetcher::Core at this point so it may take a while to
   // delete the object, but we cannot delay the destruction of the request
   // context.
-  request_context_ = NULL;
+  request_context_getter_ = NULL;
+  was_cancelled_ = true;
 }
 
 void URLFetcher::Core::OnCompletedURLRequest(const URLRequestStatus& status) {
@@ -257,14 +277,20 @@ void URLFetcher::Core::OnCompletedURLRequest(const URLRequestStatus& status) {
   if (response_code_ >= 500) {
     // When encountering a server error, we will send the request again
     // after backoff time.
-    const int64 wait =
+    int64 back_off_time =
         protect_entry_->UpdateBackoff(URLFetcherProtectEntry::FAILURE);
+    if (delegate_) {
+      fetcher_->backoff_delay_ =
+          base::TimeDelta::FromMilliseconds(back_off_time);
+    }
     ++num_retries_;
     // Restarts the request if we still need to notify the delegate.
     if (delegate_) {
-      if (num_retries_ <= protect_entry_->max_retries()) {
-        io_loop_->PostDelayedTask(FROM_HERE, NewRunnableMethod(
-            this, &Core::StartURLRequest), wait);
+      if (fetcher_->automatically_retry_on_5xx_ &&
+          num_retries_ <= protect_entry_->max_retries()) {
+        ChromeThread::PostDelayedTask(
+            ChromeThread::IO, FROM_HERE,
+            NewRunnableMethod(this, &Core::StartURLRequest), back_off_time);
       } else {
         delegate_->OnURLFetchComplete(fetcher_, url_, status, response_code_,
                                       cookies_, data_);
@@ -272,20 +298,22 @@ void URLFetcher::Core::OnCompletedURLRequest(const URLRequestStatus& status) {
     }
   } else {
     protect_entry_->UpdateBackoff(URLFetcherProtectEntry::SUCCESS);
-    if (delegate_)
+    if (delegate_) {
+      fetcher_->backoff_delay_ = base::TimeDelta();
       delegate_->OnURLFetchComplete(fetcher_, url_, status, response_code_,
                                     cookies_, data_);
+    }
   }
-}
-
-void URLFetcher::set_io_loop(MessageLoop* io_loop) {
-  core_->io_loop_ = io_loop;
 }
 
 void URLFetcher::set_upload_data(const std::string& upload_content_type,
                      const std::string& upload_content) {
   core_->upload_content_type_ = upload_content_type;
   core_->upload_content_ = upload_content;
+}
+
+const std::string& URLFetcher::upload_data() const {
+  return core_->upload_content_;
 }
 
 void URLFetcher::set_load_flags(int load_flags) {
@@ -301,8 +329,13 @@ void URLFetcher::set_extra_request_headers(
   core_->extra_request_headers_ = extra_request_headers;
 }
 
-void URLFetcher::set_request_context(URLRequestContext* request_context) {
-  core_->request_context_ = request_context;
+void URLFetcher::set_request_context(
+    URLRequestContextGetter* request_context_getter) {
+  core_->request_context_getter_ = request_context_getter;
+}
+
+void URLFetcher::set_automatcally_retry_on_5xx(bool retry) {
+  automatically_retry_on_5xx_ = retry;
 }
 
 net::HttpResponseHeaders* URLFetcher::response_headers() const {

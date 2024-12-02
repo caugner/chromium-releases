@@ -19,6 +19,12 @@ class NativeTextfieldGtk : public NativeControlGtk,
   explicit NativeTextfieldGtk(Textfield* parent);
   ~NativeTextfieldGtk();
 
+  // Returns the textfield this NativeTextfieldGtk wraps.
+  Textfield* textfield() const { return textfield_; }
+
+  // Returns the inner border of the entry.
+  static gfx::Insets GetEntryInnerBorder(GtkEntry* entry);
+
   // Overridden from NativeTextfieldWrapper:
   virtual string16 GetText() const;
   virtual void UpdateText();
@@ -31,12 +37,14 @@ class NativeTextfieldGtk : public NativeControlGtk,
   virtual void UpdateBackgroundColor();
   virtual void UpdateReadOnly();
   virtual void UpdateFont();
+  virtual void UpdateIsPassword();
   virtual void UpdateEnabled();
   virtual gfx::Insets CalculateInsets();
   virtual void SetHorizontalMargins(int left, int right);
   virtual void SetFocus();
   virtual View* GetView();
   virtual gfx::NativeView GetTestingHandle() const;
+  virtual bool IsIMEComposing() const;
 
   // Overridden from NativeControlGtk:
   virtual void CreateNativeControl();

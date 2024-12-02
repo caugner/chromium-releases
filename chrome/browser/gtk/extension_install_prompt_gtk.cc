@@ -4,16 +4,16 @@
 
 #include <gtk/gtk.h>
 
-#include "app/gfx/gtk_util.h"
 #include "app/l10n_util.h"
 #include "base/rand_util.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
-#include "chrome/browser/gtk/browser_window_gtk.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
-#include "chrome/common/gtk_util.h"
+#include "chrome/browser/gtk/browser_window_gtk.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/common/extensions/extension.h"
+#include "gfx/gtk_util.h"
 #include "grit/generated_resources.h"
 
 class Profile;
@@ -40,9 +40,9 @@ GtkWidget* MakeMarkupLabel(const char* format, const std::string& str) {
 void OnDialogResponse(GtkDialog* dialog, int response_id,
                       ExtensionInstallUI::Delegate* delegate) {
   if (response_id == GTK_RESPONSE_ACCEPT) {
-    delegate->ContinueInstall();
+    delegate->InstallUIProceed(false);
   } else {
-    delegate->AbortInstall();
+    delegate->InstallUIAbort();
   }
 
   gtk_widget_destroy(GTK_WIDGET(dialog));
@@ -51,15 +51,18 @@ void OnDialogResponse(GtkDialog* dialog, int response_id,
 void ShowInstallPromptDialog(GtkWindow* parent, SkBitmap* skia_icon,
                              Extension *extension,
                              ExtensionInstallUI::Delegate *delegate,
-                             const std::string& warning_text) {
+                             const string16& warning_text,
+                             ExtensionInstallUI::PromptType type) {
   // Build the dialog.
+  int title_id = ExtensionInstallUI::kTitleIds[type];
+  int button_id = ExtensionInstallUI::kButtonIds[type];
   GtkWidget* dialog = gtk_dialog_new_with_buttons(
-      l10n_util::GetStringUTF8(IDS_EXTENSION_PROMPT_TITLE).c_str(),
+      l10n_util::GetStringUTF8(title_id).c_str(),
       parent,
       GTK_DIALOG_MODAL,
       GTK_STOCK_CANCEL,
       GTK_RESPONSE_CLOSE,
-      "Install",
+      l10n_util::GetStringUTF8(button_id).c_str(),
       GTK_RESPONSE_ACCEPT,
       NULL);
   gtk_dialog_set_has_separator(GTK_DIALOG(dialog), FALSE);
@@ -74,21 +77,23 @@ void ShowInstallPromptDialog(GtkWindow* parent, SkBitmap* skia_icon,
   // Put Icon in the left column.
   GdkPixbuf* pixbuf = gfx::GdkPixbufFromSkBitmap(skia_icon);
   GtkWidget* icon = gtk_image_new_from_pixbuf(pixbuf);
+  g_object_unref(pixbuf);
   gtk_box_pack_start(GTK_BOX(icon_hbox), icon, TRUE, TRUE, 0);
 
   // Create a new vbox for the right column.
   GtkWidget* right_column_area = gtk_vbox_new(FALSE, 0);
   gtk_box_pack_start(GTK_BOX(icon_hbox), right_column_area, TRUE, TRUE, 0);
 
+  int heading_id = ExtensionInstallUI::kHeadingIds[type];
   std::string heading_text = WideToUTF8(l10n_util::GetStringF(
-      IDS_EXTENSION_PROMPT_HEADING, UTF8ToWide(extension->name())));
+      heading_id, UTF8ToWide(extension->name())));
   GtkWidget* heading_label = MakeMarkupLabel("<span weight=\"bold\">%s</span>",
                                              heading_text);
   gtk_misc_set_alignment(GTK_MISC(heading_label), 0.0, 0.5);
   gtk_label_set_selectable(GTK_LABEL(heading_label), TRUE);
   gtk_box_pack_start(GTK_BOX(right_column_area), heading_label, TRUE, TRUE, 0);
 
-  GtkWidget* warning_label = gtk_label_new(warning_text.c_str());
+  GtkWidget* warning_label = gtk_label_new(UTF16ToUTF8(warning_text).c_str());
   gtk_label_set_line_wrap(GTK_LABEL(warning_label), TRUE);
   gtk_widget_set_size_request(warning_label, kRightColumnWidth, -1);
   gtk_misc_set_alignment(GTK_MISC(warning_label), 0.0, 0.5);
@@ -102,23 +107,22 @@ void ShowInstallPromptDialog(GtkWindow* parent, SkBitmap* skia_icon,
 
 }  // namespace
 
-void ExtensionInstallUI::ShowExtensionInstallPrompt(
+void ExtensionInstallUI::ShowExtensionInstallUIPromptImpl(
     Profile* profile, Delegate* delegate, Extension* extension, SkBitmap* icon,
-    const std::wstring& warning_text) {
+    const string16& warning_text, ExtensionInstallUI::PromptType type) {
   Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
   if (!browser) {
-    delegate->ContinueInstall();
+    delegate->InstallUIAbort();
     return;
   }
 
   BrowserWindowGtk* browser_window = static_cast<BrowserWindowGtk*>(
       browser->window());
   if (!browser_window) {
-    delegate->AbortInstall();
+    delegate->InstallUIAbort();
     return;
   }
 
-  std::string warning_ascii = WideToASCII(warning_text);
-  ShowInstallPromptDialog(browser_window->window(), icon, extension, delegate,
-      warning_ascii);
+  ShowInstallPromptDialog(browser_window->window(), icon, extension,
+      delegate, warning_text, type);
 }

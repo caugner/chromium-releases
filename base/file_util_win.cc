@@ -1,10 +1,11 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/file_util.h"
 
 #include <windows.h>
+#include <propvarutil.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <time.h>
@@ -12,6 +13,7 @@
 
 #include "base/file_path.h"
 #include "base/logging.h"
+#include "base/scoped_comptr_win.h"
 #include "base/scoped_handle.h"
 #include "base/string_util.h"
 #include "base/time.h"
@@ -96,6 +98,15 @@ bool Delete(const FilePath& path, bool recursive) {
   return (err == 0 || err == ERROR_FILE_NOT_FOUND);
 }
 
+bool DeleteAfterReboot(const FilePath& path) {
+  if (path.value().length() >= MAX_PATH)
+    return false;
+
+  return MoveFileEx(path.value().c_str(), NULL,
+                    MOVEFILE_DELAY_UNTIL_REBOOT |
+                        MOVEFILE_REPLACE_EXISTING) != FALSE;
+}
+
 bool Move(const FilePath& from_path, const FilePath& to_path) {
   // NOTE: I suspect we could support longer paths, but that would involve
   // analyzing all our usage of files.
@@ -123,8 +134,11 @@ bool ReplaceFile(const FilePath& from_path, const FilePath& to_path) {
                                     FILE_ATTRIBUTE_NORMAL, NULL);
   if (target_file != INVALID_HANDLE_VALUE)
     ::CloseHandle(target_file);
-  return ::ReplaceFile(to_path.value().c_str(), from_path.value().c_str(),
-                       NULL, 0, NULL, NULL) ? true : false;
+  // When writing to a network share, we may not be able to change the ACLs.
+  // Ignore ACL errors then (REPLACEFILE_IGNORE_MERGE_ERRORS).
+  return ::ReplaceFile(to_path.value().c_str(),
+      from_path.value().c_str(), NULL,
+      REPLACEFILE_IGNORE_MERGE_ERRORS, NULL, NULL) ? true : false;
 }
 
 bool CopyFile(const FilePath& from_path, const FilePath& to_path) {
@@ -258,38 +272,32 @@ bool GetFileCreationLocalTime(const std::wstring& filename,
 
 bool ResolveShortcut(FilePath* path) {
   HRESULT result;
-  IShellLink *shell = NULL;
+  ScopedComPtr<IShellLink> i_shell_link;
   bool is_resolved = false;
 
   // Get pointer to the IShellLink interface
-  result = CoCreateInstance(CLSID_ShellLink, NULL,
-                            CLSCTX_INPROC_SERVER, IID_IShellLink,
-                            reinterpret_cast<LPVOID*>(&shell));
+  result = i_shell_link.CreateInstance(CLSID_ShellLink, NULL,
+                                       CLSCTX_INPROC_SERVER);
   if (SUCCEEDED(result)) {
-    IPersistFile *persist = NULL;
+    ScopedComPtr<IPersistFile> persist;
     // Query IShellLink for the IPersistFile interface
-    result = shell->QueryInterface(IID_IPersistFile,
-                                   reinterpret_cast<LPVOID*>(&persist));
+    result = persist.QueryFrom(i_shell_link);
     if (SUCCEEDED(result)) {
       WCHAR temp_path[MAX_PATH];
       // Load the shell link
       result = persist->Load(path->value().c_str(), STGM_READ);
       if (SUCCEEDED(result)) {
         // Try to find the target of a shortcut
-        result = shell->Resolve(0, SLR_NO_UI);
+        result = i_shell_link->Resolve(0, SLR_NO_UI);
         if (SUCCEEDED(result)) {
-          result = shell->GetPath(temp_path, MAX_PATH,
+          result = i_shell_link->GetPath(temp_path, MAX_PATH,
                                   NULL, SLGP_UNCPRIORITY);
           *path = FilePath(temp_path);
           is_resolved = true;
         }
       }
     }
-    if (persist)
-      persist->Release();
   }
-  if (shell)
-    shell->Release();
 
   return is_resolved;
 }
@@ -297,58 +305,50 @@ bool ResolveShortcut(FilePath* path) {
 bool CreateShortcutLink(const wchar_t *source, const wchar_t *destination,
                         const wchar_t *working_dir, const wchar_t *arguments,
                         const wchar_t *description, const wchar_t *icon,
-                        int icon_index) {
-  IShellLink *i_shell_link = NULL;
-  IPersistFile *i_persist_file = NULL;
+                        int icon_index, const wchar_t* app_id) {
+  // Length of arguments and description must be less than MAX_PATH.
+  DCHECK(lstrlen(arguments) < MAX_PATH);
+  DCHECK(lstrlen(description) < MAX_PATH);
+
+  ScopedComPtr<IShellLink> i_shell_link;
+  ScopedComPtr<IPersistFile> i_persist_file;
 
   // Get pointer to the IShellLink interface
-  HRESULT result = CoCreateInstance(CLSID_ShellLink, NULL,
-                                    CLSCTX_INPROC_SERVER, IID_IShellLink,
-                                    reinterpret_cast<LPVOID*>(&i_shell_link));
+  HRESULT result = i_shell_link.CreateInstance(CLSID_ShellLink, NULL,
+                                               CLSCTX_INPROC_SERVER);
   if (FAILED(result))
     return false;
 
   // Query IShellLink for the IPersistFile interface
-  result = i_shell_link->QueryInterface(IID_IPersistFile,
-      reinterpret_cast<LPVOID*>(&i_persist_file));
-  if (FAILED(result)) {
-    i_shell_link->Release();
+  result = i_persist_file.QueryFrom(i_shell_link);
+  if (FAILED(result))
     return false;
-  }
 
-  if (FAILED(i_shell_link->SetPath(source))) {
-    i_persist_file->Release();
-    i_shell_link->Release();
+  if (FAILED(i_shell_link->SetPath(source)))
     return false;
-  }
 
-  if (working_dir && FAILED(i_shell_link->SetWorkingDirectory(working_dir))) {
-    i_persist_file->Release();
-    i_shell_link->Release();
+  if (working_dir && FAILED(i_shell_link->SetWorkingDirectory(working_dir)))
     return false;
-  }
 
-  if (arguments && FAILED(i_shell_link->SetArguments(arguments))) {
-    i_persist_file->Release();
-    i_shell_link->Release();
+  if (arguments && FAILED(i_shell_link->SetArguments(arguments)))
     return false;
-  }
 
-  if (description && FAILED(i_shell_link->SetDescription(description))) {
-    i_persist_file->Release();
-    i_shell_link->Release();
+  if (description && FAILED(i_shell_link->SetDescription(description)))
     return false;
-  }
 
-  if (icon && FAILED(i_shell_link->SetIconLocation(icon, icon_index))) {
-    i_persist_file->Release();
-    i_shell_link->Release();
+  if (icon && FAILED(i_shell_link->SetIconLocation(icon, icon_index)))
     return false;
+
+  if (app_id && (win_util::GetWinVersion() >= win_util::WINVERSION_WIN7)) {
+    ScopedComPtr<IPropertyStore> property_store;
+    if (FAILED(property_store.QueryFrom(i_shell_link)))
+      return false;
+
+    if (!win_util::SetAppIdForPropertyStore(property_store, app_id))
+      return false;
   }
 
   result = i_persist_file->Save(destination, TRUE);
-  i_persist_file->Release();
-  i_shell_link->Release();
   return SUCCEEDED(result);
 }
 
@@ -356,61 +356,70 @@ bool CreateShortcutLink(const wchar_t *source, const wchar_t *destination,
 bool UpdateShortcutLink(const wchar_t *source, const wchar_t *destination,
                         const wchar_t *working_dir, const wchar_t *arguments,
                         const wchar_t *description, const wchar_t *icon,
-                        int icon_index) {
+                        int icon_index, const wchar_t* app_id) {
+  // Length of arguments and description must be less than MAX_PATH.
+  DCHECK(lstrlen(arguments) < MAX_PATH);
+  DCHECK(lstrlen(description) < MAX_PATH);
+
   // Get pointer to the IPersistFile interface and load existing link
-  IShellLink *i_shell_link = NULL;
-  if (FAILED(CoCreateInstance(CLSID_ShellLink, NULL,
-                              CLSCTX_INPROC_SERVER, IID_IShellLink,
-                              reinterpret_cast<LPVOID*>(&i_shell_link))))
+  ScopedComPtr<IShellLink> i_shell_link;
+  if (FAILED(i_shell_link.CreateInstance(CLSID_ShellLink, NULL,
+                                         CLSCTX_INPROC_SERVER)))
     return false;
 
-  IPersistFile *i_persist_file = NULL;
-  if (FAILED(i_shell_link->QueryInterface(
-      IID_IPersistFile, reinterpret_cast<LPVOID*>(&i_persist_file)))) {
-    i_shell_link->Release();
+  ScopedComPtr<IPersistFile> i_persist_file;
+  if (FAILED(i_persist_file.QueryFrom(i_shell_link)))
     return false;
-  }
 
-  if (FAILED(i_persist_file->Load(destination, 0))) {
-    i_persist_file->Release();
-    i_shell_link->Release();
+  if (FAILED(i_persist_file->Load(destination, STGM_READWRITE)))
     return false;
-  }
 
-  if (source && FAILED(i_shell_link->SetPath(source))) {
-    i_persist_file->Release();
-    i_shell_link->Release();
+  if (source && FAILED(i_shell_link->SetPath(source)))
     return false;
-  }
 
-  if (working_dir && FAILED(i_shell_link->SetWorkingDirectory(working_dir))) {
-    i_persist_file->Release();
-    i_shell_link->Release();
+  if (working_dir && FAILED(i_shell_link->SetWorkingDirectory(working_dir)))
     return false;
-  }
 
-  if (arguments && FAILED(i_shell_link->SetArguments(arguments))) {
-    i_persist_file->Release();
-    i_shell_link->Release();
+  if (arguments && FAILED(i_shell_link->SetArguments(arguments)))
     return false;
-  }
 
-  if (description && FAILED(i_shell_link->SetDescription(description))) {
-    i_persist_file->Release();
-    i_shell_link->Release();
+  if (description && FAILED(i_shell_link->SetDescription(description)))
     return false;
-  }
 
-  if (icon && FAILED(i_shell_link->SetIconLocation(icon, icon_index))) {
-    i_persist_file->Release();
-    i_shell_link->Release();
+  if (icon && FAILED(i_shell_link->SetIconLocation(icon, icon_index)))
     return false;
+
+  if (app_id && win_util::GetWinVersion() >= win_util::WINVERSION_WIN7) {
+    ScopedComPtr<IPropertyStore> property_store;
+    if (FAILED(property_store.QueryFrom(i_shell_link)))
+      return false;
+
+    if (!win_util::SetAppIdForPropertyStore(property_store, app_id))
+      return false;
   }
 
   HRESULT result = i_persist_file->Save(destination, TRUE);
-  i_persist_file->Release();
-  i_shell_link->Release();
   return SUCCEEDED(result);
+}
+
+bool TaskbarPinShortcutLink(const wchar_t* shortcut) {
+  // "Pin to taskbar" is only supported after Win7.
+  if (win_util::GetWinVersion() < win_util::WINVERSION_WIN7)
+    return false;
+
+  int result = reinterpret_cast<int>(ShellExecute(NULL, L"taskbarpin", shortcut,
+      NULL, NULL, 0));
+  return result > 32;
+}
+
+bool TaskbarUnpinShortcutLink(const wchar_t* shortcut) {
+  // "Unpin from taskbar" is only supported after Win7.
+  if (win_util::GetWinVersion() < win_util::WINVERSION_WIN7)
+    return false;
+
+  int result = reinterpret_cast<int>(ShellExecute(NULL, L"taskbarunpin",
+      shortcut, NULL, NULL, 0));
+  return result > 32;
 }
 
 bool IsDirectoryEmpty(const std::wstring& dir_path) {
@@ -474,12 +483,16 @@ bool CreateTemporaryFileInDir(const FilePath& dir,
                               FilePath* temp_file) {
   wchar_t temp_name[MAX_PATH + 1];
 
-  if (!GetTempFileName(dir.value().c_str(), L"", 0, temp_name))
-    return false;  // fail!
+  if (!GetTempFileName(dir.value().c_str(), L"", 0, temp_name)) {
+    PLOG(WARNING) << "Failed to get temporary file name in " << dir.value();
+    return false;
+  }
 
   DWORD path_len = GetLongPathName(temp_name, temp_name, MAX_PATH);
-  if (path_len > MAX_PATH + 1 || path_len == 0)
-    return false;  // fail!
+  if (path_len > MAX_PATH + 1 || path_len == 0) {
+    PLOG(WARNING) << "Failed to get long path name for " << temp_name;
+    return false;
+  }
 
   std::wstring temp_file_str;
   temp_file_str.assign(temp_name, path_len);
@@ -520,10 +533,49 @@ bool CreateNewTempDirectory(const FilePath::StringType& prefix,
 }
 
 bool CreateDirectory(const FilePath& full_path) {
-  if (DirectoryExists(full_path))
+  // If the path exists, we've succeeded if it's a directory, failed otherwise.
+  const wchar_t* full_path_str = full_path.value().c_str();
+  DWORD fileattr = ::GetFileAttributes(full_path_str);
+  if (fileattr != INVALID_FILE_ATTRIBUTES) {
+    if ((fileattr & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+      DLOG(INFO) << "CreateDirectory(" << full_path_str << "), " <<
+          "directory already exists.";
+      return true;
+    } else {
+      LOG(WARNING) << "CreateDirectory(" << full_path_str << "), " <<
+          "conflicts with existing file.";
+    }
+  }
+
+  // Invariant:  Path does not exist as file or directory.
+
+  // Attempt to create the parent recursively.  This will immediately return
+  // true if it already exists, otherwise will create all required parent
+  // directories starting with the highest-level missing parent.
+  FilePath parent_path(full_path.DirName());
+  if (parent_path.value() == full_path.value()) {
+    return false;
+  }
+  if (!CreateDirectory(parent_path)) {
+    DLOG(WARNING) << "Failed to create one of the parent directories.";
+    return false;
+  }
+
+  if (!::CreateDirectory(full_path_str, NULL)) {
+    DWORD error_code = ::GetLastError();
+    if (error_code == ERROR_ALREADY_EXISTS && DirectoryExists(full_path)) {
+      // This error code doesn't indicate whether we were racing with someone
+      // creating the same directory, or a file with the same path, therefore
+      // we check.
+      return true;
+    } else {
+      LOG(WARNING) << "Failed to create directory " << full_path_str <<
+          ", le=" << error_code;
+      return false;
+    }
+  } else {
     return true;
-  int err = SHCreateDirectoryEx(NULL, full_path.value().c_str(), NULL);
-  return err == ERROR_SUCCESS;
+  }
 }
 
 bool GetFileInfo(const FilePath& file_path, FileInfo* results) {
@@ -545,21 +597,23 @@ bool GetFileInfo(const FilePath& file_path, FileInfo* results) {
   return true;
 }
 
+bool SetLastModifiedTime(const FilePath& file_path, base::Time last_modified) {
+  FILETIME timestamp(last_modified.ToFileTime());
+  ScopedHandle file_handle(
+      CreateFile(file_path.value().c_str(), FILE_WRITE_ATTRIBUTES,
+                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                 OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL));
+  BOOL ret = SetFileTime(file_handle.Get(), NULL, &timestamp, &timestamp);
+  return ret != 0;
+}
+
 FILE* OpenFile(const FilePath& filename, const char* mode) {
   std::wstring w_mode = ASCIIToWide(std::string(mode));
-  FILE* file;
-  if (_wfopen_s(&file, filename.value().c_str(), w_mode.c_str()) != 0) {
-    return NULL;
-  }
-  return file;
+  return _wfsopen(filename.value().c_str(), w_mode.c_str(), _SH_DENYNO);
 }
 
 FILE* OpenFile(const std::string& filename, const char* mode) {
-  FILE* file;
-  if (fopen_s(&file, filename.c_str(), mode) != 0) {
-    return NULL;
-  }
-  return file;
+  return _fsopen(filename.c_str(), mode, _SH_DENYNO);
 }
 
 int ReadFile(const FilePath& filename, char* data, int size) {
@@ -703,6 +757,15 @@ void FileEnumerator::GetFindInfo(FindInfo* info) {
   memcpy(info, &find_data_, sizeof(*info));
 }
 
+bool FileEnumerator::IsDirectory(const FindInfo& info) {
+  return (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+}
+
+// static
+FilePath FileEnumerator::GetFilename(const FindInfo& find_info) {
+  return FilePath(find_info.cFileName);
+}
+
 FilePath FileEnumerator::Next() {
   if (!is_in_find_op_) {
     if (pending_paths_.empty())
@@ -715,7 +778,7 @@ FilePath FileEnumerator::Next() {
     // Start a new find operation.
     FilePath src = root_path_;
 
-    if (pattern_.value().empty())
+    if (pattern_.empty())
       src = src.Append(L"*");  // No pattern = match everything.
     else
       src = src.Append(pattern_);
@@ -739,7 +802,7 @@ FilePath FileEnumerator::Next() {
     // in the root search directory, but for those directories which were
     // matched, we want to enumerate all files inside them. This will happen
     // when the handle is empty.
-    pattern_ = FilePath();
+    pattern_ = FilePath::StringType();
 
     return Next();
   }
@@ -773,10 +836,7 @@ MemoryMappedFile::MemoryMappedFile()
       length_(INVALID_FILE_SIZE) {
 }
 
-bool MemoryMappedFile::MapFileToMemory(const FilePath& file_name) {
-  file_ = ::CreateFile(file_name.value().c_str(), GENERIC_READ,
-                       FILE_SHARE_READ, NULL, OPEN_EXISTING,
-                       FILE_ATTRIBUTE_NORMAL, NULL);
+bool MemoryMappedFile::MapFileToMemoryInternal() {
   if (file_ == INVALID_HANDLE_VALUE)
     return false;
 
@@ -784,8 +844,10 @@ bool MemoryMappedFile::MapFileToMemory(const FilePath& file_name) {
   if (length_ == INVALID_FILE_SIZE)
     return false;
 
+  // length_ value comes from GetFileSize() above. GetFileSize() returns DWORD,
+  // therefore the cast here is safe.
   file_mapping_ = ::CreateFileMapping(file_, NULL, PAGE_READONLY,
-                                      0, length_, NULL);
+                                      0, static_cast<DWORD>(length_), NULL);
   if (file_mapping_ == INVALID_HANDLE_VALUE)
     return false;
 
@@ -805,6 +867,13 @@ void MemoryMappedFile::CloseHandles() {
   data_ = NULL;
   file_mapping_ = file_ = INVALID_HANDLE_VALUE;
   length_ = INVALID_FILE_SIZE;
+}
+
+bool HasFileBeenModifiedSince(const FileEnumerator::FindInfo& find_info,
+                              const base::Time& cutoff_time) {
+  long result = CompareFileTime(&find_info.ftLastWriteTime,
+                                &cutoff_time.ToFileTime());
+  return result == 1 || result == 0;
 }
 
 }  // namespace file_util

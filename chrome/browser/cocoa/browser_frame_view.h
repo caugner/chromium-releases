@@ -49,4 +49,17 @@
 // check that everything is safe, and attempt to fallback gracefully if it is
 // not.
 @interface BrowserFrameView : NSView
+
+// Draws the window theme into the specified rect. Returns whether a theme was
+// drawn (whether incognito or full pattern theme; an overlay image doesn't
+// count).
++ (BOOL)drawWindowThemeInDirtyRect:(NSRect)dirtyRect
+                           forView:(NSView*)view
+                            bounds:(NSRect)bounds
+                            offset:(NSPoint)offset
+              forceBlackBackground:(BOOL)forceBlackBackground;
+
+// Gets the color to draw title text.
++ (NSColor*)titleColorForThemeView:(NSView*)view;
+
 @end

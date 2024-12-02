@@ -1,10 +1,11 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "base/scoped_ptr.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/renderer_host/audio_renderer_host.h"
 #include "chrome/common/render_messages.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -22,34 +23,31 @@ namespace {
 const int kInvalidId = -1;
 const int kProcessId = 100;
 const int kRouteId = 200;
-const int kBufferCapacity = 65536;
-const int kPacketSize = 16384;
+const uint32 kBufferCapacity = 65536;
+const uint32 kPacketSize = 16384;
 
 }  // namespace
 
 class MockAudioRendererHost : public AudioRendererHost {
  public:
-  MockAudioRendererHost(MessageLoop* loop)
-      : AudioRendererHost(loop) {
-  }
-
-  virtual ~MockAudioRendererHost() {
+  MockAudioRendererHost()
+      : AudioRendererHost() {
   }
 
   // A list of mock methods.
   MOCK_METHOD4(OnRequestPacket,
                void(int routing_id, int stream_id,
-                    size_t bytes_in_buffer, int64 message_timestamp));
+                    uint32 bytes_in_buffer, int64 message_timestamp));
 
   MOCK_METHOD3(OnStreamCreated,
                void(int routing_id, int stream_id, int length));
 
   MOCK_METHOD3(OnStreamStateChanged,
                void(int routing_id, int stream_id,
-                    ViewMsg_AudioStreamState state));
+                    const ViewMsg_AudioStreamState_Params& state));
 
-  MOCK_METHOD4(OnStreamVolume,
-               void(int routing_id, int stream_id, double left, double right));
+  MOCK_METHOD3(OnStreamVolume,
+               void(int routing_id, int stream_id, double volume));
 
   base::SharedMemory* shared_memory() { return shared_memory_.get(); }
 
@@ -77,15 +75,17 @@ class MockAudioRendererHost : public AudioRendererHost {
   }
 
  private:
+  virtual ~MockAudioRendererHost() {}
+
   // These handler methods do minimal things and delegate to the mock methods.
   void OnRequestPacket(const IPC::Message& msg, int stream_id,
-                       size_t bytes_in_buffer, int64 message_timestamp) {
+                       uint32 bytes_in_buffer, int64 message_timestamp) {
     OnRequestPacket(msg.routing_id(), stream_id, bytes_in_buffer,
                     message_timestamp);
   }
 
   void OnStreamCreated(const IPC::Message& msg, int stream_id,
-                       base::SharedMemoryHandle handle, int length) {
+                       base::SharedMemoryHandle handle, uint32 length) {
     // Maps the shared memory.
     shared_memory_.reset(new base::SharedMemory(handle, true));
     CHECK(shared_memory_->Map(length));
@@ -96,13 +96,12 @@ class MockAudioRendererHost : public AudioRendererHost {
   }
 
   void OnStreamStateChanged(const IPC::Message& msg, int stream_id,
-                            ViewMsg_AudioStreamState state) {
+                            const ViewMsg_AudioStreamState_Params& state) {
     OnStreamStateChanged(msg.routing_id(), stream_id, state);
   }
 
-  void OnStreamVolume(const IPC::Message& msg, int stream_id,
-                      double left, double right) {
-    OnStreamVolume(msg.routing_id(), stream_id, left, right);
+  void OnStreamVolume(const IPC::Message& msg, int stream_id, double volume) {
+    OnStreamVolume(msg.routing_id(), stream_id, volume);
   }
 
   scoped_ptr<base::SharedMemory> shared_memory_;
@@ -120,7 +119,8 @@ class AudioRendererHostTest : public testing::Test {
   virtual void SetUp() {
     // Create a message loop so AudioRendererHost can use it.
     message_loop_.reset(new MessageLoop(MessageLoop::TYPE_IO));
-    host_ = new MockAudioRendererHost(message_loop_.get());
+    io_thread_.reset(new ChromeThread(ChromeThread::IO, message_loop_.get()));
+    host_ = new MockAudioRendererHost();
   }
 
   virtual void TearDown() {
@@ -128,11 +128,13 @@ class AudioRendererHostTest : public testing::Test {
     // message_loop_.
     host_->Destroy();
 
+    // Release the reference to the mock object.
+    host_ = NULL;
+
     // We need to continue running message_loop_ to complete all destructions.
     message_loop_->RunAllPending();
 
-    // Release the reference to the mock object.
-    host_ = NULL;
+    io_thread_.reset();
   }
 
   AudioRendererHost::IPCAudioSource* CreateAudioStream(
@@ -159,7 +161,8 @@ class AudioRendererHostTest : public testing::Test {
             AudioManager::kAudioCDSampleRate,
             16,
             kPacketSize,
-            kBufferCapacity);
+            kBufferCapacity,
+            false);
     EXPECT_TRUE(source);
     EXPECT_EQ(kProcessId, source->process_id());
     EXPECT_EQ(kRouteId, source->route_id());
@@ -180,6 +183,7 @@ class AudioRendererHostTest : public testing::Test {
   scoped_ptr<MessageLoop> message_loop_;
 
  private:
+  scoped_ptr<ChromeThread> io_thread_;
   DISALLOW_COPY_AND_ASSIGN(AudioRendererHostTest);
 };
 
@@ -207,7 +211,7 @@ TEST_F(AudioRendererHostTest, MockStreamDataConversation) {
                       2 * kPacketSize + 3 * kStep, _));
   EXPECT_CALL(*host_,
       OnRequestPacket(kRouteId, current_stream_id_, 3 * kPacketSize, _));
-  ViewMsg_AudioStreamState state;
+  ViewMsg_AudioStreamState_Params state;
   EXPECT_CALL(*host_, OnStreamStateChanged(kRouteId, current_stream_id_, _))
       .WillOnce(SaveArg<2>(&state));
 
@@ -218,6 +222,6 @@ TEST_F(AudioRendererHostTest, MockStreamDataConversation) {
   source->NotifyPacketReady(kStep);
   source->NotifyPacketReady(kStep);
   source->Play();
-  EXPECT_EQ(ViewMsg_AudioStreamState::kPlaying, state.state);
+  EXPECT_EQ(ViewMsg_AudioStreamState_Params::kPlaying, state.state);
   source->Close();
 }

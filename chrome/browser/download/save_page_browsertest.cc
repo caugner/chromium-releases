@@ -16,8 +16,8 @@
 #include "chrome/test/ui_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if !defined(OS_MACOSX)
-// TODO(port): BUG16322
+namespace {
+
 static const FilePath::CharType* kTestDir = FILE_PATH_LITERAL("save_page");
 
 static const char* kAppendedExtension =
@@ -27,45 +27,20 @@ static const char* kAppendedExtension =
     ".html";
 #endif
 
-#endif  // !defined(OS_MACOSX)
-
-namespace {
-
-class SavePageFinishedObserver : public NotificationObserver {
- public:
-  SavePageFinishedObserver() {
-    registrar_.Add(this, NotificationType::SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
-                   NotificationService::AllSources());
-    ui_test_utils::RunMessageLoop();
-  }
-
-  GURL page_url() const { return page_url_; }
-
-  virtual void Observe(NotificationType type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
-    if (type == NotificationType::SAVE_PACKAGE_SUCCESSFULLY_FINISHED) {
-      page_url_ = *Details<GURL>(details).ptr();
-      MessageLoopForUI::current()->Quit();
-    } else {
-      NOTREACHED();
-    }
-  }
-
- private:
-  NotificationRegistrar registrar_;
-
-  GURL page_url_;
-
-  DISALLOW_COPY_AND_ASSIGN(SavePageFinishedObserver);
-};
-
 class SavePageBrowserTest : public InProcessBrowserTest {
  protected:
   void SetUp() {
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_dir_));
     ASSERT_TRUE(save_dir_.CreateUniqueTempDir());
     InProcessBrowserTest::SetUp();
+  }
+
+  GURL WaitForSavePackageToFinish() {
+    ui_test_utils::TestNotificationObserver observer;
+    ui_test_utils::RegisterAndWait(&observer,
+        NotificationType::SAVE_PACKAGE_SUCCESSFULLY_FINISHED,
+        NotificationService::AllSources());
+    return *Details<GURL>(observer.details()).ptr();
   }
 
   // Path to directory containing test data.
@@ -75,8 +50,6 @@ class SavePageBrowserTest : public InProcessBrowserTest {
   ScopedTempDir save_dir_;
 };
 
-#if !defined(OS_MACOSX)
-// TODO(port): BUG16322
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveHTMLOnly) {
   FilePath file_name(FILE_PATH_LITERAL("a.htm"));
   GURL url = URLRequestMockHTTPJob::GetMockUrl(
@@ -91,10 +64,40 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveHTMLOnly) {
   ASSERT_TRUE(current_tab->SavePage(full_file_name, dir,
                                     SavePackage::SAVE_AS_ONLY_HTML));
 
-  SavePageFinishedObserver observer;
+  EXPECT_EQ(url, WaitForSavePackageToFinish());
 
-  EXPECT_EQ(url, observer.page_url());
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
+  if (browser()->SupportsWindowFeature(Browser::FEATURE_DOWNLOADSHELF))
+    EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
+
+  EXPECT_TRUE(file_util::PathExists(full_file_name));
+  EXPECT_FALSE(file_util::PathExists(dir));
+  EXPECT_TRUE(file_util::ContentsEqual(
+      test_dir_.Append(FilePath(kTestDir)).Append(file_name),
+      full_file_name));
+}
+
+IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveViewSourceHTMLOnly) {
+  FilePath file_name(FILE_PATH_LITERAL("a.htm"));
+  GURL view_source_url = URLRequestMockHTTPJob::GetMockViewSourceUrl(
+      FilePath(kTestDir).Append(file_name));
+  GURL actual_page_url = URLRequestMockHTTPJob::GetMockUrl(
+      FilePath(kTestDir).Append(file_name));
+  ui_test_utils::NavigateToURL(browser(), view_source_url);
+
+  TabContents* current_tab = browser()->GetSelectedTabContents();
+  ASSERT_TRUE(current_tab);
+
+  FilePath full_file_name = save_dir_.path().Append(file_name);
+  FilePath dir = save_dir_.path().AppendASCII("a_files");
+
+  ASSERT_TRUE(current_tab->SavePage(full_file_name, dir,
+                                    SavePackage::SAVE_AS_ONLY_HTML));
+
+  EXPECT_EQ(actual_page_url, WaitForSavePackageToFinish());
+
+  if (browser()->SupportsWindowFeature(Browser::FEATURE_DOWNLOADSHELF))
+    EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
+
   EXPECT_TRUE(file_util::PathExists(full_file_name));
   EXPECT_FALSE(file_util::PathExists(dir));
   EXPECT_TRUE(file_util::ContentsEqual(
@@ -116,10 +119,11 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveCompleteHTML) {
   ASSERT_TRUE(current_tab->SavePage(full_file_name, dir,
                                     SavePackage::SAVE_AS_COMPLETE_HTML));
 
-  SavePageFinishedObserver observer;
+  EXPECT_EQ(url, WaitForSavePackageToFinish());
 
-  EXPECT_EQ(url, observer.page_url());
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
+  if (browser()->SupportsWindowFeature(Browser::FEATURE_DOWNLOADSHELF))
+    EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
+
   EXPECT_TRUE(file_util::PathExists(full_file_name));
   EXPECT_TRUE(file_util::PathExists(dir));
   EXPECT_TRUE(file_util::TextContentsEqual(
@@ -132,7 +136,6 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveCompleteHTML) {
       test_dir_.Append(FilePath(kTestDir)).AppendASCII("1.css"),
       dir.AppendASCII("1.css")));
 }
-#endif  // !defined(OS_MACOSX)
 
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, NoSave) {
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kAboutBlankURL));
@@ -140,8 +143,6 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, NoSave) {
   EXPECT_FALSE(browser()->command_updater()->IsCommandEnabled(IDC_SAVE_PAGE));
 }
 
-#if !defined(OS_MACOSX)
-// TODO(port): BUG16322
 IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, FileNameFromPageTitle) {
   FilePath file_name(FILE_PATH_LITERAL("b.htm"));
 
@@ -159,10 +160,12 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, FileNameFromPageTitle) {
 
   ASSERT_TRUE(current_tab->SavePage(full_file_name, dir,
                                     SavePackage::SAVE_AS_COMPLETE_HTML));
-  SavePageFinishedObserver observer;
 
-  EXPECT_EQ(url, observer.page_url());
-  EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
+  EXPECT_EQ(url, WaitForSavePackageToFinish());
+
+  if (browser()->SupportsWindowFeature(Browser::FEATURE_DOWNLOADSHELF))
+    EXPECT_TRUE(browser()->window()->IsDownloadShelfVisible());
+
   EXPECT_TRUE(file_util::PathExists(full_file_name));
   EXPECT_TRUE(file_util::PathExists(dir));
   EXPECT_TRUE(file_util::TextContentsEqual(
@@ -175,6 +178,5 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, FileNameFromPageTitle) {
       test_dir_.Append(FilePath(kTestDir)).AppendASCII("1.css"),
       dir.AppendASCII("1.css")));
 }
-#endif  // !defined(OS_MACOSX)
 
 }  // namespace

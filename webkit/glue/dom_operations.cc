@@ -1,46 +1,36 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
+#include <set>
 
 #include "base/compiler_specific.h"
-
-MSVC_PUSH_WARNING_LEVEL(0);
-#include "AnimationController.h"
-#include "FrameLoader.h"
-#include "FrameTree.h"
-#include "Document.h"
-#include "Element.h"
-#include "EventListener.h"
-#include "EventNames.h"
-#include "HTMLCollection.h"
-#include "HTMLElement.h"
-#include "HTMLFormElement.h"
-#include "HTMLFrameOwnerElement.h"
-#include "HTMLHeadElement.h"
-#include "HTMLInputElement.h"
-#include "HTMLLinkElement.h"
-#include "HTMLMetaElement.h"
-#include "HTMLOptionElement.h"
-#include "HTMLNames.h"
-#include "KURL.h"
-MSVC_POP_WARNING();
-#undef LOG
-
 #include "base/string_util.h"
-// TODO(yaar) Eventually should not depend on api/src.
-#include "webkit/api/src/DOMUtilitiesPrivate.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebAnimationController.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebElement.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFormElement.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebInputElement.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebNode.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebNodeCollection.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebNodeList.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebVector.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/dom_operations.h"
-#include "webkit/glue/dom_operations_private.h"
 #include "webkit/glue/form_data.h"
-#include "webkit/glue/glue_util.h"
-#include "webkit/glue/password_autocomplete_listener.h"
-#include "webkit/glue/webframe_impl.h"
-#include "webkit/glue/webview_impl.h"
+#include "webkit/glue/webpasswordautocompletelistener_impl.h"
 
-using WebCore::String;
+using WebKit::WebAnimationController;
+using WebKit::WebDocument;
+using WebKit::WebElement;
+using WebKit::WebFormElement;
 using WebKit::WebFrame;
+using WebKit::WebInputElement;
+using WebKit::WebNode;
+using WebKit::WebNodeCollection;
+using WebKit::WebNodeList;
+using WebKit::WebVector;
 using WebKit::WebView;
 
 namespace {
@@ -56,7 +46,7 @@ struct SavableResourcesUniqueCheck {
   std::set<GURL>* frames_set;
   // Collection of all frames we go through when getting all savable resource
   // links.
-  std::vector<WebFrameImpl*>* frames;
+  std::vector<WebFrame*>* frames;
 
   SavableResourcesUniqueCheck()
       : resources_set(NULL),
@@ -64,7 +54,7 @@ struct SavableResourcesUniqueCheck {
         frames(NULL) {}
 
   SavableResourcesUniqueCheck(std::set<GURL>* resources_set,
-      std::set<GURL>* frames_set, std::vector<WebFrameImpl*>* frames)
+      std::set<GURL>* frames_set, std::vector<WebFrame*>* frames)
       : resources_set(resources_set),
         frames_set(frames_set),
         frames(frames) {}
@@ -73,25 +63,28 @@ struct SavableResourcesUniqueCheck {
 // Get all savable resource links from current element. One element might
 // have more than one resource link. It is possible to have some links
 // in one CSS stylesheet.
-void GetSavableResourceLinkForElement(WebCore::Element* element,
-    WebCore::Document* current_doc, SavableResourcesUniqueCheck* unique_check,
+void GetSavableResourceLinkForElement(
+    const WebElement& element,
+    const WebDocument& current_doc,
+    SavableResourcesUniqueCheck* unique_check,
     webkit_glue::SavableResourcesResult* result) {
+
   // Handle frame and iframe tag.
-  bool is_frame_element;
-  WebFrameImpl* web_frame =
-      webkit_glue::GetWebFrameImplFromElement(element, &is_frame_element);
-  if (is_frame_element) {
-    if (web_frame)
-      unique_check->frames->push_back(web_frame);
+  if (element.hasTagName("iframe") ||
+      element.hasTagName("frame")) {
+    WebFrame* sub_frame = WebFrame::fromFrameOwnerElement(element);
+    if (sub_frame)
+      unique_check->frames->push_back(sub_frame);
     return;
   }
+
   // Check whether the node has sub resource URL or not.
-  const WebCore::AtomicString* value =
+  WebString value =
       webkit_glue::GetSubResourceLinkFromElement(element);
-  if (!value)
+  if (value.isNull())
     return;
   // Get absolute URL.
-  GURL u(webkit_glue::KURLToGURL(current_doc->completeURL((*value).string())));
+  GURL u = current_doc.completeURL(value);
   // ignore invalid URL
   if (!u.is_valid())
     return;
@@ -105,35 +98,25 @@ void GetSavableResourceLinkForElement(WebCore::Element* element,
     return;
   result->resources_list->push_back(u);
   // Insert referrer for above new resource link.
-  if (current_doc->frame()) {
-    GURL u(webkit_glue::KURLToGURL(
-        WebCore::KURL(WebCore::ParsedURLString,
-                      current_doc->frame()->loader()->outgoingReferrer())));
-    result->referrers_list->push_back(u);
-  } else {
-    // Insert blank referrer.
-    result->referrers_list->push_back(GURL());
-  }
+  result->referrers_list->push_back(GURL());
 }
 
 // Get all savable resource links from current WebFrameImpl object pointer.
-void GetAllSavableResourceLinksForFrame(WebFrameImpl* current_frame,
+void GetAllSavableResourceLinksForFrame(WebFrame* current_frame,
     SavableResourcesUniqueCheck* unique_check,
     webkit_glue::SavableResourcesResult* result,
     const char** savable_schemes) {
   // Get current frame's URL.
-  const WebCore::KURL& current_frame_kurl =
-      current_frame->frame()->loader()->url();
-  GURL current_frame_gurl(webkit_glue::KURLToGURL(current_frame_kurl));
+  GURL current_frame_url = current_frame->url();
 
   // If url of current frame is invalid, ignore it.
-  if (!current_frame_gurl.is_valid())
+  if (!current_frame_url.is_valid())
     return;
 
   // If url of current frame is not a savable protocol, ignore it.
   bool is_valid_protocol = false;
   for (int i = 0; savable_schemes[i] != NULL; ++i) {
-    if (current_frame_gurl.SchemeIs(savable_schemes[i])) {
+    if (current_frame_url.SchemeIs(savable_schemes[i])) {
       is_valid_protocol = true;
       break;
     }
@@ -142,35 +125,25 @@ void GetAllSavableResourceLinksForFrame(WebFrameImpl* current_frame,
     return;
 
   // If find same frame we have recorded, ignore it.
-  if (!unique_check->frames_set->insert(current_frame_gurl).second)
+  if (!unique_check->frames_set->insert(current_frame_url).second)
     return;
 
   // Get current using document.
-  WebCore::Document* current_doc = current_frame->frame()->document();
+  WebDocument current_doc = current_frame->document();
   // Go through all descent nodes.
-  PassRefPtr<WebCore::HTMLCollection> all = current_doc->all();
+  WebNodeCollection all = current_doc.all();
   // Go through all node in this frame.
-  for (WebCore::Node* node = all->firstItem(); node != NULL;
-       node = all->nextItem()) {
+  for (WebNode node = all.firstItem(); !node.isNull();
+       node = all.nextItem()) {
     // We only save HTML resources.
-    if (!node->isHTMLElement())
+    if (!node.isElementNode())
       continue;
-    WebCore::Element* element = static_cast<WebCore::Element*>(node);
+    WebElement element = node.toElement<WebElement>();
     GetSavableResourceLinkForElement(element,
                                      current_doc,
                                      unique_check,
                                      result);
   }
-}
-
-template <class HTMLNodeType>
-HTMLNodeType* CastHTMLElement(WebCore::Node* node,
-                              const WebCore::QualifiedName& name) {
-  if (node->isHTMLElement() &&
-      static_cast<typename WebCore::HTMLElement*>(node)->hasTagName(name)) {
-    return static_cast<HTMLNodeType*>(node);
-  }
-  return NULL;
 }
 
 }  // namespace
@@ -179,8 +152,8 @@ namespace webkit_glue {
 
 // Map element name to a list of pointers to corresponding elements to simplify
 // form filling.
-typedef std::map<std::wstring, RefPtr<WebCore::HTMLInputElement> >
-    FormElementRefMap;
+typedef std::map<string16, WebKit::WebInputElement >
+    FormInputElementMap;
 
 // Utility struct for form lookup and autofill. When we parse the DOM to lookup
 // a form, in addition to action and origin URL's we have to compare all
@@ -188,58 +161,47 @@ typedef std::map<std::wstring, RefPtr<WebCore::HTMLInputElement> >
 // to fill the form, the FindFormElements function stores the pointers
 // in a FormElements* result, referenced to ensure they are safe to use.
 struct FormElements {
-  RefPtr<WebCore::HTMLFormElement> form_element;
-  FormElementRefMap input_elements;
-  FormElements() : form_element(NULL) {
+  WebFormElement form_element;
+  FormInputElementMap input_elements;
+  FormElements() {
   }
 };
 
 typedef std::vector<FormElements*> FormElementsList;
 
 // Internal implementation of FillForm API.
-static bool FillFormImpl(FormElements* fe, const FormData& data, bool submit) {
-  if (!fe->form_element->autoComplete())
+static bool FillFormImpl(FormElements* fe, const FormData& data) {
+  if (!fe->form_element.autoComplete())
     return false;
 
-  std::map<std::wstring, std::wstring> data_map;
-  for (unsigned int i = 0; i < data.elements.size(); i++) {
-    data_map[data.elements[i]] = data.values[i];
+  std::map<string16, string16> data_map;
+  for (size_t i = 0; i < data.fields.size(); i++) {
+    data_map[data.fields[i].name()] = data.fields[i].value();
   }
 
-  bool submit_found = false;
-  for (FormElementRefMap::iterator it = fe->input_elements.begin();
+  for (FormInputElementMap::iterator it = fe->input_elements.begin();
        it != fe->input_elements.end(); ++it) {
-    if (it->first == data.submit) {
-      it->second->setActivatedSubmit(true);
-      submit_found = true;
+    if (!it->second.value().isEmpty())  // Don't overwrite pre-filled values.
       continue;
-    }
-    if (!it->second->value().isEmpty())  // Don't overwrite pre-filled values.
-      continue;
-    it->second->setValue(StdWStringToString(data_map[it->first]));
-    it->second->setAutofilled(true);
-    it->second->dispatchFormControlChangeEvent();
+    it->second.setValue(data_map[it->first]);
+    it->second.setAutofilled(true);
+    it->second.dispatchFormControlChangeEvent();
   }
 
-  if (submit && submit_found) {
-    fe->form_element->submit();
-    return true;
-  }
   return false;
 }
 
 // Helper to search the given form element for the specified input elements
 // in |data|, and add results to |result|.
-static bool FindFormInputElements(WebCore::HTMLFormElement* fe,
+static bool FindFormInputElements(WebFormElement* fe,
                                   const FormData& data,
                                   FormElements* result) {
-  Vector<RefPtr<WebCore::Node> > temp_elements;
   // Loop through the list of elements we need to find on the form in
   // order to autofill it. If we don't find any one of them, abort
   // processing this form; it can't be the right one.
-  for (size_t j = 0; j < data.elements.size(); j++, temp_elements.clear()) {
-    fe->getNamedElements(StdWStringToString(data.elements[j]),
-                                            temp_elements);
+  for (size_t j = 0; j < data.fields.size(); j++) {
+    WebVector<WebNode> temp_elements;
+    fe->getNamedElements(data.fields[j].name(), temp_elements);
     if (temp_elements.isEmpty()) {
       // We didn't find a required element. This is not the right form.
       // Make sure no input elements from a partially matched form
@@ -253,9 +215,8 @@ static bool FindFormInputElements(WebCore::HTMLFormElement* fe,
     // one suffices and if some function needs to deal with multiple
     // matching elements it can get at them through the FormElement*.
     // Note: This assignment adds a reference to the InputElement.
-    result->input_elements[data.elements[j]] =
-        WebKit::nodeToHTMLInputElement(temp_elements[0].get());
-    DCHECK(result->input_elements[data.elements[j]].get());
+    result->input_elements[data.fields[j].name()] =
+        temp_elements[0].toElement<WebInputElement>();
   }
   return true;
 }
@@ -273,35 +234,29 @@ static void FindFormElements(WebView* view,
   GURL::Replacements rep;
   rep.ClearQuery();
   rep.ClearRef();
-  WebFrameImpl* main_frame_impl = static_cast<WebFrameImpl*>(main_frame);
-  WebCore::Frame* frame = main_frame_impl->frame();
 
   // Loop through each frame.
-  for (WebCore::Frame* f = frame; f; f = f->tree()->traverseNext()) {
-    WebCore::Document* doc = f->document();
-    if (!doc->isHTMLDocument())
+  for (WebFrame* f = main_frame; f; f = f->traverseNext(false)) {
+    WebDocument doc = f->document();
+    if (!doc.isHTMLDocument())
       continue;
 
-    GURL full_origin(StringToStdString(doc->documentURI()));
+    GURL full_origin(f->url());
     if (data.origin != full_origin.ReplaceComponents(rep))
       continue;
 
-    WebCore::FrameLoader* loader = f->loader();
-    if (loader == NULL)
-      continue;
+    WebVector<WebFormElement> forms;
+    f->forms(forms);
 
-    PassRefPtr<WebCore::HTMLCollection> forms = doc->forms();
-    for (size_t i = 0; i < forms->length(); ++i) {
-      WebCore::HTMLFormElement* fe =
-          static_cast<WebCore::HTMLFormElement*>(forms->item(i));
-
+    for (size_t i = 0; i < forms.size(); ++i) {
+      WebFormElement fe = forms[i];
       // Action URL must match.
-      GURL full_action(KURLToGURL(loader->completeURL(fe->action())));
+      GURL full_action(f->completeURL(fe.action()));
       if (data.action != full_action.ReplaceComponents(rep))
         continue;
 
       scoped_ptr<FormElements> curr_elements(new FormElements);
-      if (!FindFormInputElements(fe, data, curr_elements.get()))
+      if (!FindFormInputElements(&fe, data, curr_elements.get()))
         continue;
 
       // We found the right element.
@@ -310,21 +265,6 @@ static void FindFormElements(WebView* view,
       results->push_back(curr_elements.release());
     }
   }
-}
-
-bool FillForm(WebView* view, const FormData& data) {
-  FormElementsList forms;
-  FindFormElements(view, data, &forms);
-  bool success = false;
-  if (!forms.empty())
-    success = FillFormImpl(forms[0], data, false);
-
-  // TODO(timsteele): Move STLDeleteElements to base/ and have FormElementsList
-  // use that.
-  FormElementsList::iterator iter;
-  for (iter = forms.begin(); iter != forms.end(); ++iter)
-    delete *iter;
-  return success;
 }
 
 void FillPasswordForm(WebView* view,
@@ -338,203 +278,69 @@ void FillPasswordForm(WebView* view,
     // FormElementsList use that.
     scoped_ptr<FormElements> form_elements(*iter);
 
-    // False param to FillFormByAction is so we don't auto-submit password
-    // forms. If wait_for_username is true, we don't want to initially fill
-    // the form until the user types in a valid username.
+    // If wait_for_username is true, we don't want to initially fill the form
+    // until the user types in a valid username.
     if (!data.wait_for_username)
-      FillFormImpl(form_elements.get(), data.basic_data, false);
+      FillFormImpl(form_elements.get(), data.basic_data);
 
     // Attach autocomplete listener to enable selecting alternate logins.
     // First, get pointers to username element.
-    WebCore::HTMLInputElement* username_element =
-        form_elements->input_elements[data.basic_data.elements[0]].get();
+    WebInputElement username_element =
+        form_elements->input_elements[data.basic_data.fields[0].name()];
 
     // Get pointer to password element. (We currently only support single
     // password forms).
-    WebCore::HTMLInputElement* password_element =
-        form_elements->input_elements[data.basic_data.elements[1]].get();
+    WebInputElement password_element =
+        form_elements->input_elements[data.basic_data.fields[1].name()];
 
-    WebFrameLoaderClient* frame_loader_client =
-        static_cast<WebFrameLoaderClient*>(username_element->document()->
-                                           frame()->loader()->client());
-    WebFrameImpl* webframe_impl = frame_loader_client->webframe();
-    webframe_impl->RegisterPasswordListener(
+    username_element.frame()->registerPasswordListener(
         username_element,
-        new PasswordAutocompleteListener(
-            new HTMLInputDelegate(username_element),
-            new HTMLInputDelegate(password_element),
+        new WebPasswordAutocompleteListenerImpl(
+            new WebInputElementDelegate(username_element),
+            new WebInputElementDelegate(password_element),
             data));
   }
 }
 
-WebCore::HTMLLinkElement* CastToHTMLLinkElement(WebCore::Node* node) {
-  return CastHTMLElement<WebCore::HTMLLinkElement>(node,
-      WebCore::HTMLNames::linkTag);
-}
-
-WebCore::HTMLMetaElement* CastToHTMLMetaElement(WebCore::Node* node) {
-  return CastHTMLElement<WebCore::HTMLMetaElement>(node,
-      WebCore::HTMLNames::metaTag);
-}
-
-WebCore::HTMLOptionElement* CastToHTMLOptionElement(WebCore::Node* node) {
-  return CastHTMLElement<WebCore::HTMLOptionElement>(node,
-      WebCore::HTMLNames::optionTag);
-}
-
-WebFrameImpl* GetWebFrameImplFromElement(WebCore::Element* element,
-                                         bool* is_frame_element) {
-  *is_frame_element = false;
-  if (element->hasTagName(WebCore::HTMLNames::iframeTag) ||
-      element->hasTagName(WebCore::HTMLNames::frameTag)) {
-    *is_frame_element = true;
-    if (element->isFrameOwnerElement()) {
-      // Check whether this frame has content.
-      WebCore::HTMLFrameOwnerElement* frame_element =
-          static_cast<WebCore::HTMLFrameOwnerElement*>(element);
-      WebCore::Frame* content_frame = frame_element->contentFrame();
-      return WebFrameImpl::FromFrame(content_frame);
+WebString GetSubResourceLinkFromElement(const WebElement& element) {
+  const char* attribute_name = NULL;
+  if (element.hasTagName("img") ||
+      element.hasTagName("script")) {
+    attribute_name = "src";
+  } else if (element.hasTagName("input")) {
+    const WebInputElement input = element.toConstElement<WebInputElement>();
+    if (input.inputType() == WebInputElement::Image) {
+      attribute_name = "src";
     }
-  }
-  return NULL;
-}
-
-const WebCore::AtomicString* GetSubResourceLinkFromElement(
-    const WebCore::Element* element) {
-  const WebCore::QualifiedName* attribute_name = NULL;
-  if (element->hasTagName(WebCore::HTMLNames::imgTag) ||
-      element->hasTagName(WebCore::HTMLNames::scriptTag) ||
-      element->hasTagName(WebCore::HTMLNames::linkTag)) {
-    // Get value.
-    if (element->hasTagName(WebCore::HTMLNames::linkTag)) {
+  } else if (element.hasTagName("body") ||
+             element.hasTagName("table") ||
+             element.hasTagName("tr") ||
+             element.hasTagName("td")) {
+    attribute_name = "background";
+  } else if (element.hasTagName("blockquote") ||
+             element.hasTagName("q") ||
+             element.hasTagName("del") ||
+             element.hasTagName("ins")) {
+    attribute_name = "cite";
+  } else if (element.hasTagName("link")) {
     // If the link element is not linked to css, ignore it.
-      const WebCore::HTMLLinkElement* link =
-          static_cast<const WebCore::HTMLLinkElement*>(element);
-      if (!link->sheet())
-        return NULL;
-      // TODO(jnd). Add support for extracting links of sub-resources which
+    if (LowerCaseEqualsASCII(element.getAttribute("type"), "text/css")) {
+      // TODO(jnd): Add support for extracting links of sub-resources which
       // are inside style-sheet such as @import, url(), etc.
       // See bug: http://b/issue?id=1111667.
-      attribute_name = &WebCore::HTMLNames::hrefAttr;
-    } else {
-      attribute_name = &WebCore::HTMLNames::srcAttr;
+      attribute_name = "href";
     }
-  } else if (element->hasTagName(WebCore::HTMLNames::inputTag)) {
-    const WebCore::HTMLInputElement* input =
-        static_cast<const WebCore::HTMLInputElement*>(element);
-    if (input->inputType() == WebCore::HTMLInputElement::IMAGE) {
-      attribute_name = &WebCore::HTMLNames::srcAttr;
-    }
-  } else if (element->hasTagName(WebCore::HTMLNames::bodyTag) ||
-             element->hasTagName(WebCore::HTMLNames::tableTag) ||
-             element->hasTagName(WebCore::HTMLNames::trTag) ||
-             element->hasTagName(WebCore::HTMLNames::tdTag)) {
-    attribute_name = &WebCore::HTMLNames::backgroundAttr;
-  } else if (element->hasTagName(WebCore::HTMLNames::blockquoteTag) ||
-             element->hasTagName(WebCore::HTMLNames::qTag) ||
-             element->hasTagName(WebCore::HTMLNames::delTag) ||
-             element->hasTagName(WebCore::HTMLNames::insTag)) {
-    attribute_name = &WebCore::HTMLNames::citeAttr;
   }
   if (!attribute_name)
-    return NULL;
-  const WebCore::AtomicString* value =
-      &element->getAttribute(*attribute_name);
+    return WebString();
+  WebString value = element.getAttribute(WebString::fromUTF8(attribute_name));
   // If value has content and not start with "javascript:" then return it,
   // otherwise return NULL.
-  if (value && !value->isEmpty() &&
-      !value->startsWith("javascript:", false))
+  if (!value.isNull() && !value.isEmpty() &&
+      !StartsWithASCII(value.utf8(), "javascript:", false))
     return value;
 
-  return NULL;
-}
-
-bool ElementHasLegalLinkAttribute(const WebCore::Element* element,
-                                  const WebCore::QualifiedName& attr_name) {
-  if (attr_name == WebCore::HTMLNames::srcAttr) {
-    // Check src attribute.
-    if (element->hasTagName(WebCore::HTMLNames::imgTag) ||
-        element->hasTagName(WebCore::HTMLNames::scriptTag) ||
-        element->hasTagName(WebCore::HTMLNames::iframeTag) ||
-        element->hasTagName(WebCore::HTMLNames::frameTag))
-      return true;
-    if (element->hasTagName(WebCore::HTMLNames::inputTag)) {
-      const WebCore::HTMLInputElement* input =
-          static_cast<const WebCore::HTMLInputElement*>(element);
-      if (input->inputType() == WebCore::HTMLInputElement::IMAGE)
-        return true;
-    }
-  } else if (attr_name == WebCore::HTMLNames::hrefAttr) {
-    // Check href attribute.
-    if (element->hasTagName(WebCore::HTMLNames::linkTag) ||
-        element->hasTagName(WebCore::HTMLNames::aTag) ||
-        element->hasTagName(WebCore::HTMLNames::areaTag))
-      return true;
-  } else if (attr_name == WebCore::HTMLNames::actionAttr) {
-    if (element->hasTagName(WebCore::HTMLNames::formTag))
-      return true;
-  } else if (attr_name == WebCore::HTMLNames::backgroundAttr) {
-    if (element->hasTagName(WebCore::HTMLNames::bodyTag) ||
-        element->hasTagName(WebCore::HTMLNames::tableTag) ||
-        element->hasTagName(WebCore::HTMLNames::trTag) ||
-        element->hasTagName(WebCore::HTMLNames::tdTag))
-      return true;
-  } else if (attr_name == WebCore::HTMLNames::citeAttr) {
-    if (element->hasTagName(WebCore::HTMLNames::blockquoteTag) ||
-        element->hasTagName(WebCore::HTMLNames::qTag) ||
-        element->hasTagName(WebCore::HTMLNames::delTag) ||
-        element->hasTagName(WebCore::HTMLNames::insTag))
-      return true;
-  } else if (attr_name == WebCore::HTMLNames::classidAttr ||
-             attr_name == WebCore::HTMLNames::dataAttr) {
-    if (element->hasTagName(WebCore::HTMLNames::objectTag))
-      return true;
-  } else if (attr_name == WebCore::HTMLNames::codebaseAttr) {
-    if (element->hasTagName(WebCore::HTMLNames::objectTag) ||
-        element->hasTagName(WebCore::HTMLNames::appletTag))
-      return true;
-  }
-  return false;
-}
-
-WebFrameImpl* GetWebFrameImplFromWebViewForSpecificURL(WebView* view,
-                                                       const GURL& page_url) {
-  WebFrame* main_frame = view->mainFrame();
-  if (!main_frame)
-    return NULL;
-  WebFrameImpl* main_frame_impl = static_cast<WebFrameImpl*>(main_frame);
-
-  std::vector<WebFrameImpl*> frames;
-  // First, process main frame.
-  frames.push_back(main_frame_impl);
-  // Collect all frames inside the specified frame.
-  for (int i = 0; i < static_cast<int>(frames.size()); ++i) {
-    WebFrameImpl* current_frame = frames[i];
-    // Get current using document.
-    WebCore::Document* current_doc = current_frame->frame()->document();
-    // Check whether current frame is target or not.
-    const WebCore::KURL& current_frame_kurl =
-        current_frame->frame()->loader()->url();
-    GURL current_frame_gurl(KURLToGURL(current_frame_kurl));
-    if (page_url == current_frame_gurl)
-      return current_frame;
-    // Go through sub-frames.
-    RefPtr<WebCore::HTMLCollection> all = current_doc->all();
-    for (WebCore::Node* node = all->firstItem(); node != NULL;
-         node = all->nextItem()) {
-      if (!node->isHTMLElement())
-        continue;
-      WebCore::Element* element = static_cast<WebCore::Element*>(node);
-      // Check frame tag and iframe tag.
-      bool is_frame_element;
-      WebFrameImpl* web_frame = GetWebFrameImplFromElement(
-          element, &is_frame_element);
-      if (is_frame_element && web_frame)
-        frames.push_back(web_frame);
-    }
-  }
-
-  return NULL;
+  return WebString();
 }
 
 // Get all savable resource links from current webview, include main
@@ -545,16 +351,15 @@ bool GetAllSavableResourceLinksForCurrentPage(WebView* view,
   WebFrame* main_frame = view->mainFrame();
   if (!main_frame)
     return false;
-  WebFrameImpl* main_frame_impl = static_cast<WebFrameImpl*>(main_frame);
 
   std::set<GURL> resources_set;
   std::set<GURL> frames_set;
-  std::vector<WebFrameImpl*> frames;
+  std::vector<WebFrame*> frames;
   SavableResourcesUniqueCheck unique_check(&resources_set,
                                            &frames_set,
                                            &frames);
 
-  GURL main_page_gurl(KURLToGURL(main_frame_impl->frame()->loader()->url()));
+  GURL main_page_gurl(main_frame->url());
 
   // Make sure we are saving same page between embedder and webkit.
   // If page has being navigated, embedder will get three empty vector,
@@ -563,7 +368,7 @@ bool GetAllSavableResourceLinksForCurrentPage(WebView* view,
     return true;
 
   // First, process main frame.
-  frames.push_back(main_frame_impl);
+  frames.push_back(main_frame);
 
   // Check all resource in this page, include sub-frame.
   for (int i = 0; i < static_cast<int>(frames.size()); ++i) {
@@ -587,7 +392,7 @@ bool GetAllSavableResourceLinksForCurrentPage(WebView* view,
 
 // Sizes a single size (the width or height) from a 'sizes' attribute. A size
 // matches must match the following regex: [1-9][0-9]*.
-static int ParseSingleIconSize(const std::wstring& text) {
+static int ParseSingleIconSize(const string16& text) {
   // Size must not start with 0, and be between 0 and 9.
   if (text.empty() || !(text[0] >= L'1' && text[0] <= L'9'))
     return 0;
@@ -597,7 +402,7 @@ static int ParseSingleIconSize(const std::wstring& text) {
       return 0;
   }
   int output;
-  if (!StringToInt(WideToUTF16Hack(text), &output))
+  if (!StringToInt(text, &output))
     return 0;
   return output;
 }
@@ -605,8 +410,8 @@ static int ParseSingleIconSize(const std::wstring& text) {
 // Parses an icon size. An icon size must match the following regex:
 // [1-9][0-9]*x[1-9][0-9]*.
 // If the input couldn't be parsed, a size with a width/height < 0 is returned.
-static gfx::Size ParseIconSize(const std::wstring& text) {
-  std::vector<std::wstring> sizes;
+static gfx::Size ParseIconSize(const string16& text) {
+  std::vector<string16> sizes;
   SplitStringDontTrim(text, L'x', &sizes);
   if (sizes.size() != 2)
     return gfx::Size();
@@ -615,14 +420,14 @@ static gfx::Size ParseIconSize(const std::wstring& text) {
                    ParseSingleIconSize(sizes[1]));
 }
 
-bool ParseIconSizes(const std::wstring& text,
+bool ParseIconSizes(const string16& text,
                     std::vector<gfx::Size>* sizes,
                     bool* is_any) {
   *is_any = false;
-  std::vector<std::wstring> size_strings;
+  std::vector<string16> size_strings;
   SplitStringAlongWhitespace(text, &size_strings);
   for (size_t i = 0; i < size_strings.size(); ++i) {
-    if (size_strings[i] == L"any") {
+    if (EqualsASCII(size_strings[i], "any")) {
       *is_any = true;
     } else {
       gfx::Size size = ParseIconSize(size_strings[i]);
@@ -638,24 +443,24 @@ bool ParseIconSizes(const std::wstring& text,
   return (*is_any || !sizes->empty());
 }
 
-static void AddInstallIcon(WebCore::HTMLLinkElement* link,
+static void AddInstallIcon(const WebElement& link,
                            std::vector<WebApplicationInfo::IconInfo>* icons) {
-  String href = link->href();
-  if (href.isEmpty() || href.isNull())
+  WebString href = link.getAttribute("href");
+  if (href.isNull() || href.isEmpty())
     return;
 
-  GURL url(webkit_glue::StringToStdString(href));
+  // Get complete url.
+  GURL url = link.document().completeURL(href);
   if (!url.is_valid())
     return;
 
-  const String sizes_attr = "sizes";
-  if (!link->hasAttribute(sizes_attr))
+  if (!link.hasAttribute("sizes"))
     return;
 
   bool is_any = false;
   std::vector<gfx::Size> icon_sizes;
-  if (!ParseIconSizes(webkit_glue::StringToStdWString(
-      link->getAttribute(sizes_attr)), &icon_sizes, &is_any) || is_any ||
+  if (!ParseIconSizes(link.getAttribute("sizes"), &icon_sizes, &is_any) ||
+      is_any ||
       icon_sizes.size() != 1) {
     return;
   }
@@ -670,40 +475,45 @@ void GetApplicationInfo(WebView* view, WebApplicationInfo* app_info) {
   WebFrame* main_frame = view->mainFrame();
   if (!main_frame)
     return;
-  WebFrameImpl* main_frame_impl = static_cast<WebFrameImpl*>(main_frame);
 
-  WebCore::HTMLHeadElement* head;
-  if (!main_frame_impl->frame() ||
-      !main_frame_impl->frame()->document() ||
-      !(head = main_frame_impl->frame()->document()->head())) {
+  WebDocument doc = main_frame->document();
+  if (doc.isNull())
     return;
-  }
-  WTF::PassRefPtr<WebCore::HTMLCollection> children = head->children();
-  for (unsigned i = 0; i < children->length(); ++i) {
-    WebCore::Node* child = children->item(i);
-    WebCore::HTMLLinkElement* link = CastHTMLElement<WebCore::HTMLLinkElement>(
-        child, WebCore::HTMLNames::linkTag);
-    if (link) {
-      if (link->isIcon())
-        AddInstallIcon(link, &app_info->icons);
-    } else {
-      WebCore::HTMLMetaElement* meta =
-          CastHTMLElement<WebCore::HTMLMetaElement>(
-              child, WebCore::HTMLNames::metaTag);
-      if (meta) {
-        if (meta->name() == String("application-name")) {
-          app_info->title = webkit_glue::StringToStdWString(meta->content());
-        } else if (meta->name() == String("description")) {
-          app_info->description =
-              webkit_glue::StringToStdWString(meta->content());
-        } else if (meta->name() == String("application-url")) {
-          std::string url = webkit_glue::StringToStdString(meta->content());
-          GURL main_url = main_frame->url();
-          app_info->app_url = main_url.is_valid() ?
-              main_url.Resolve(url) : GURL(url);
-          if (!app_info->app_url.is_valid())
-            app_info->app_url = GURL();
-        }
+
+  WebElement head = main_frame->document().head();
+  if (head.isNull())
+    return;
+
+  WebNodeList children = head.childNodes();
+  for (unsigned i = 0; i < children.length(); ++i) {
+    WebNode child = children.item(i);
+    if (!child.isElementNode())
+      continue;
+    WebElement elem = child.toElement<WebElement>();
+
+    if (elem.hasTagName("link")) {
+      std::string rel = elem.getAttribute("rel").utf8();
+      // "rel" attribute may use either "icon" or "shortcut icon".
+      // see also
+      //   <http://en.wikipedia.org/wiki/Favicon>
+      //   <http://dev.w3.org/html5/spec/Overview.html#rel-icon>
+      if (LowerCaseEqualsASCII(rel, "icon") ||
+          LowerCaseEqualsASCII(rel, "shortcut icon"))
+        AddInstallIcon(elem, &app_info->icons);
+    } else if (elem.hasTagName("meta") && elem.hasAttribute("name")) {
+      std::string name = elem.getAttribute("name").utf8();
+      WebString content = elem.getAttribute("content");
+      if (name == "application-name") {
+        app_info->title = content;
+      } else if (name == "description") {
+        app_info->description = content;
+      } else if (name == "application-url") {
+        std::string url = content.utf8();
+        GURL main_url = main_frame->url();
+        app_info->app_url = main_url.is_valid() ?
+            main_url.Resolve(url) : GURL(url);
+        if (!app_info->app_url.is_valid())
+          app_info->app_url = GURL();
       }
     }
   }
@@ -717,18 +527,16 @@ bool PauseAnimationAtTimeOnElementWithId(WebView* view,
   if (!web_frame)
     return false;
 
-  WebCore::Frame* frame = static_cast<WebFrameImpl*>(web_frame)->frame();
-  WebCore::AnimationController* controller = frame->animation();
+  WebAnimationController* controller = web_frame->animationController();
   if (!controller)
     return false;
 
-  WebCore::Element* element =
-      frame->document()->getElementById(StdStringToString(element_id));
-  if (!element)
+  WebElement element =
+    web_frame->document().getElementById(WebString::fromUTF8(element_id));
+  if (element.isNull())
     return false;
-
-  return controller->pauseAnimationAtTime(element->renderer(),
-                                          StdStringToString(animation_name),
+  return controller->pauseAnimationAtTime(element,
+                                          WebString::fromUTF8(animation_name),
                                           time);
 }
 
@@ -740,18 +548,16 @@ bool PauseTransitionAtTimeOnElementWithId(WebView* view,
   if (!web_frame)
     return false;
 
-  WebCore::Frame* frame = static_cast<WebFrameImpl*>(web_frame)->frame();
-  WebCore::AnimationController* controller = frame->animation();
+  WebAnimationController* controller = web_frame->animationController();
   if (!controller)
     return false;
 
-  WebCore::Element* element =
-      frame->document()->getElementById(StdStringToString(element_id));
-  if (!element)
+  WebElement element =
+      web_frame->document().getElementById(WebString::fromUTF8(element_id));
+  if (element.isNull())
     return false;
-
-  return controller->pauseTransitionAtTime(element->renderer(),
-                                           StdStringToString(property_name),
+  return controller->pauseTransitionAtTime(element,
+                                           WebString::fromUTF8(property_name),
                                            time);
 }
 
@@ -761,15 +567,13 @@ bool ElementDoesAutoCompleteForElementWithId(WebView* view,
   if (!web_frame)
     return false;
 
-  WebCore::Frame* frame = static_cast<WebFrameImpl*>(web_frame)->frame();
-  WebCore::Element* element =
-      frame->document()->getElementById(StdStringToString(element_id));
-  if (!element || !element->hasLocalName(WebCore::HTMLNames::inputTag))
+  WebElement element = web_frame->document().getElementById(
+      WebString::fromUTF8(element_id));
+  if (element.isNull() || !element.hasTagName("input"))
     return false;
 
-  WebCore::HTMLInputElement* input_element =
-      static_cast<WebCore::HTMLInputElement*>(element);
-  return input_element->autoComplete();
+  WebInputElement input_element = element.toElement<WebInputElement>();
+  return input_element.autoComplete();
 }
 
 int NumberOfActiveAnimations(WebView* view) {
@@ -777,13 +581,11 @@ int NumberOfActiveAnimations(WebView* view) {
   if (!web_frame)
     return -1;
 
-  WebCore::Frame* frame = static_cast<WebFrameImpl*>(web_frame)->frame();
-  WebCore::AnimationController* controller = frame->animation();
+  WebAnimationController* controller = web_frame->animationController();
   if (!controller)
     return -1;
 
   return controller->numberOfActiveAnimations();
 }
 
-
-} // webkit_glue
+}  // webkit_glue

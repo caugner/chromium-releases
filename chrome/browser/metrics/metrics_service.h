@@ -1,12 +1,12 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 // This file defines a service that collects information about the user
 // experience in order to help improve future versions of the app.
 
-#ifndef CHROME_BROWSER_METRICS_SERVICE_H_
-#define CHROME_BROWSER_METRICS_SERVICE_H_
+#ifndef CHROME_BROWSER_METRICS_METRICS_SERVICE_H_
+#define CHROME_BROWSER_METRICS_METRICS_SERVICE_H_
 
 #include <list>
 #include <map>
@@ -22,8 +22,12 @@
 #include "chrome/browser/net/url_fetcher.h"
 #include "chrome/common/child_process_info.h"
 #include "chrome/common/notification_registrar.h"
-#include "webkit/glue/webplugininfo.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
+#include "webkit/glue/plugins/webplugininfo.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/external_metrics.h"
+#endif
 
 class BookmarkModel;
 class BookmarkNode;
@@ -38,7 +42,7 @@ class TemplateURLModel;
 // reported to the UMA server on next launch.
 struct ChildProcessStats {
  public:
-  ChildProcessStats(ChildProcessInfo::ProcessType type)
+  explicit ChildProcessStats(ChildProcessInfo::ProcessType type)
       : process_launches(0),
         process_crashes(0),
         instances(0),
@@ -120,6 +124,15 @@ class MetricsService : public NotificationObserver,
   // at shutdown, but we can do it as we reduce the list as well.
   void StoreUnsentLogs();
 
+#if defined(OS_CHROMEOS)
+  // Start the external metrics service, which collects metrics from Chrome OS
+  // and passes them to UMA.
+  void StartExternalMetrics(Profile* profile);
+#endif
+
+  bool recording_active() const;
+  bool reporting_active() const;
+
  private:
   // The MetricsService has a lifecycle that is stored as a state.
   // See metrics_service.cc for description of this lifecycle.
@@ -151,7 +164,6 @@ class MetricsService : public NotificationObserver,
   // SetRecording(false) also forces a persistent save of logging state (if
   // anything has been recorded, or transmitted).
   void SetRecording(bool enabled);
-  bool recording_active() const;
 
   // Enable/disable transmission of accumulated logs and crash reports (dumps).
   // Return value "true" indicates setting was definitively set as requested).
@@ -162,7 +174,6 @@ class MetricsService : public NotificationObserver,
   // It is always possible to set this to at least one value, which matches the
   // current value reported by querying Google Update.
   void SetReporting(bool enabled);
-  bool reporting_active() const;
 
   // If in_idle is true, sets idle_since_last_transmission to true.
   // If in_idle is false and idle_since_last_transmission_ is true, sets
@@ -328,12 +339,11 @@ class MetricsService : public NotificationObserver,
   // Records a renderer process crash.
   void LogRendererCrash();
 
+  // Records an extension renderer process crash.
+  void LogExtensionRendererCrash();
+
   // Records a renderer process hang.
   void LogRendererHang();
-
-  // Records the desktop security status of a renderer in the sandbox at
-  // creation time.
-  void LogRendererInSandbox(bool on_sandbox_desktop);
 
   // Set the value in preferences for the number of bookmarks and folders
   // in node. The pref key for the number of bookmarks in num_bookmarks_key and
@@ -382,10 +392,6 @@ class MetricsService : public NotificationObserver,
   void LogLoadComplete(NotificationType type,
                        const NotificationSource& source,
                        const NotificationDetails& details);
-
-  // Adds a profile metric with the specified key/value pair.
-  void AddProfileMetric(Profile* profile, const std::wstring& key,
-                        int value);
 
   // Checks whether a notification can be logged.
   bool CanLogNotification(NotificationType type,
@@ -500,10 +506,15 @@ class MetricsService : public NotificationObserver,
   // Indicate that a timer for sending the next log has already been queued.
   bool timer_pending_;
 
+#if defined(OS_CHROMEOS)
+  // The external metric service is used to log ChromeOS UMA events.
+  scoped_refptr<chromeos::ExternalMetrics> external_metrics_;
+#endif
+
   FRIEND_TEST(MetricsServiceTest, ClientIdGeneratesAllZeroes);
   FRIEND_TEST(MetricsServiceTest, ClientIdGeneratesCorrectly);
   FRIEND_TEST(MetricsServiceTest, ClientIdCorrectlyFormatted);
   DISALLOW_COPY_AND_ASSIGN(MetricsService);
 };
 
-#endif  // CHROME_BROWSER_METRICS_SERVICE_H_
+#endif  // CHROME_BROWSER_METRICS_METRICS_SERVICE_H_

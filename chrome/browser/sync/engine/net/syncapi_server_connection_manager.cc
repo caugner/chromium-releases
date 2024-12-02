@@ -55,6 +55,9 @@ bool SyncAPIBridgedPost::Init(const char* path, const string& auth_token,
   else
     response->server_status = HttpResponse::SYNC_SERVER_ERROR;
 
+  response->update_client_auth_header =
+      http->GetResponseHeaderValue("Update-Client-Auth");
+
   // Write the content into our buffer.
   buffer_.assign(http->GetResponseContent(), http->GetResponseContentLength());
 
@@ -63,15 +66,6 @@ bool SyncAPIBridgedPost::Init(const char* path, const string& auth_token,
   return true;
 }
 
-SyncAPIServerConnectionManager::~SyncAPIServerConnectionManager() {
-  delete post_provider_factory_;
-}
-
-void SyncAPIServerConnectionManager::SetHttpPostProviderFactory(
-    HttpPostProviderFactory* factory) {
-  if (post_provider_factory_)
-    delete post_provider_factory_;
-  post_provider_factory_ = factory;
-}
+SyncAPIServerConnectionManager::~SyncAPIServerConnectionManager() {}
 
 }  // namespace sync_api

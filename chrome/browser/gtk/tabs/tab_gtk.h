@@ -28,6 +28,9 @@ class TabGtk : public TabRendererGtk,
     // Returns true if the specified Tab is selected.
     virtual bool IsTabSelected(const TabGtk* tab) const = 0;
 
+    // Returns true if the specified Tab is pinned.
+    virtual bool IsTabPinned(const TabGtk* tab) const = 0;
+
     // Returns true if the specified Tab is detached.
     virtual bool IsTabDetached(const TabGtk* tab) const = 0;
 
@@ -73,6 +76,9 @@ class TabGtk : public TabRendererGtk,
 
     // Returns the theme provider for icons and colors.
     virtual ThemeProvider* GetThemeProvider() = 0;
+
+   protected:
+    ~TabDelegate() {}
   };
 
   explicit TabGtk(TabDelegate* delegate);
@@ -92,11 +98,14 @@ class TabGtk : public TabRendererGtk,
   virtual bool IsVisible() const;
   virtual void SetVisible(bool visible) const;
   virtual void CloseButtonClicked();
-  virtual void UpdateData(TabContents* contents, bool loading_only);
+  virtual void UpdateData(TabContents* contents,
+                          bool phantom,
+                          bool loading_only);
   virtual void SetBounds(const gfx::Rect& bounds);
 
  private:
   class ContextMenuController;
+  class TabGtkObserverHelper;
   friend class ContextMenuController;
 
   // MessageLoop::Observer implementation:
@@ -121,6 +130,14 @@ class TabGtk : public TabRendererGtk,
   // data.
   static gboolean OnDragFailed(GtkWidget* widget, GdkDragContext* context,
                                GtkDragResult result, TabGtk* tab);
+
+  // When a drag is ending, a fake button release event is passed to the drag
+  // widget to fake letting go of the mouse button.  We need a callback for
+  // this event because it is the only way to catch drag end events when the
+  // user presses space or return.
+  static gboolean OnDragButtonReleased(GtkWidget* widget,
+                                       GdkEventButton* event,
+                                       TabGtk* tab);
 
   // Shows the context menu.
   void ShowContextMenu();
@@ -176,8 +193,18 @@ class TabGtk : public TabRendererGtk,
   // changes.
   int title_width_;
 
+  // Keep track of whether or not we have an observer.
+  scoped_ptr<TabGtkObserverHelper> observer_;
+
   // Used to destroy the drag widget after a return to the message loop.
   ScopedRunnableMethodFactory<TabGtk> destroy_factory_;
+
+  // Due to a bug in GTK+, we need to force the end of a drag when we get a
+  // mouse release event on the the dragged widget, otherwise, we don't know
+  // when the drag has ended when the user presses space or enter.  We queue
+  // a task to end the drag and only run it if GTK+ didn't send us the
+  // drag-failed event.
+  ScopedRunnableMethodFactory<TabGtk> drag_end_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TabGtk);
 };

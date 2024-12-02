@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,11 +13,12 @@
 
 #include <string>
 
-#include "app/gfx/native_widget_types.h"
 #include "chrome/common/page_transition_types.h"
+#include "gfx/native_widget_types.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class AutocompleteEditModel;
+class CommandUpdater;
 class GURL;
 class TabContents;
 
@@ -128,6 +129,12 @@ class AutocompleteEditView {
 
   // Returns the gfx::NativeView of the edit view.
   virtual gfx::NativeView GetNativeView() const = 0;
+
+  // Returns the command updater for this view.
+  virtual CommandUpdater* GetCommandUpdater() = 0;
+
+ protected:
+  virtual ~AutocompleteEditView() {}
 };
 
 #endif  // CHROME_BROWSER_AUTOCOMPLETE_AUTOCOMPLETE_EDIT_VIEW_H_

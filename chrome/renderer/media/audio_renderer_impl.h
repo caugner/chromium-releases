@@ -1,6 +1,6 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 //
 // Audio rendering unit utilizing audio output stream provided by browser
 // process through IPC.
@@ -100,11 +100,13 @@
 #include "media/base/factory.h"
 #include "media/base/filters.h"
 #include "media/filters/audio_renderer_base.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"
 
 class AudioMessageFilter;
 
 class AudioRendererImpl : public media::AudioRendererBase,
-                          public AudioMessageFilter::Delegate {
+                          public AudioMessageFilter::Delegate,
+                          public MessageLoop::DestructionObserver {
  public:
   // Methods called on render thread ------------------------------------------
   // Methods called during construction.
@@ -116,15 +118,19 @@ class AudioRendererImpl : public media::AudioRendererBase,
 
   // Methods called on IO thread ----------------------------------------------
   // AudioMessageFilter::Delegate methods, called by AudioMessageFilter.
-  void OnRequestPacket(size_t bytes_in_buffer,
+  void OnRequestPacket(uint32 bytes_in_buffer,
                        const base::Time& message_timestamp);
-  void OnStateChanged(ViewMsg_AudioStreamState state);
-  void OnCreated(base::SharedMemoryHandle handle, size_t length);
-  void OnVolume(double left, double right);
+  void OnStateChanged(const ViewMsg_AudioStreamState_Params& state);
+  void OnCreated(base::SharedMemoryHandle handle, uint32 length);
+  void OnLowLatencyCreated(base::SharedMemoryHandle handle,
+                           base::SyncSocket::Handle socket_handle,
+                           uint32 length);
+  void OnVolume(double volume);
 
   // Methods called on pipeline thread ----------------------------------------
   // media::MediaFilter implementation.
   virtual void SetPlaybackRate(float rate);
+  virtual void Seek(base::TimeDelta time, media::FilterCallback* callback);
 
   // media::AudioRenderer implementation.
   virtual void SetVolume(float volume);
@@ -142,6 +148,11 @@ class AudioRendererImpl : public media::AudioRendererBase,
   friend class media::FilterFactoryImpl1<AudioRendererImpl,
                                          AudioMessageFilter*>;
 
+  // For access to constructor and IO thread methods.
+  friend class AudioRendererImplTest;
+  FRIEND_TEST(AudioRendererImplTest, Stop);
+  FRIEND_TEST(AudioRendererImplTest, DestroyedMessageLoop_OnReadComplete);
+
   explicit AudioRendererImpl(AudioMessageFilter* filter);
   virtual ~AudioRendererImpl();
 
@@ -154,20 +165,24 @@ class AudioRendererImpl : public media::AudioRendererBase,
   // The following methods are tasks posted on the IO thread that needs to
   // be executed on that thread. They interact with AudioMessageFilter and
   // sends IPC messages on that thread.
-  void OnCreateStream(AudioManager::Format format, int channels,
-                      int sample_rate, int bits_per_sample,
-                      size_t packet_size, size_t buffer_capacity);
-  void OnPlay();
-  void OnPause();
-  void OnSetVolume(double left, double right);
-  void OnNotifyPacketReady();
-  void OnDestroy();
+  void CreateStreamTask(AudioManager::Format format, int channels,
+                        int sample_rate, int bits_per_sample,
+                        uint32 packet_size, uint32 buffer_capacity);
+  void PlayTask();
+  void PauseTask();
+  void SeekTask();
+  void SetVolumeTask(double volume);
+  void NotifyPacketReadyTask();
+  void DestroyTask();
+
+  // Called on IO thread when message loop is dying.
+  virtual void WillDestroyCurrentMessageLoop();
 
   // Information about the audio stream.
   int channels_;
   int sample_rate_;
   int sample_bits_;
-  size_t bytes_per_second_;
+  uint32 bytes_per_second_;
 
   scoped_refptr<AudioMessageFilter> filter_;
 
@@ -176,7 +191,7 @@ class AudioRendererImpl : public media::AudioRendererBase,
 
   // Memory shared by the browser process for audio buffer.
   scoped_ptr<base::SharedMemory> shared_memory_;
-  size_t shared_memory_size_;
+  uint32 shared_memory_size_;
 
   // Message loop for the IO thread.
   MessageLoop* io_loop_;
@@ -204,7 +219,7 @@ class AudioRendererImpl : public media::AudioRendererBase,
   bool prerolling_;
 
   // Remaining bytes for prerolling to complete.
-  size_t preroll_bytes_;
+  uint32 preroll_bytes_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioRendererImpl);
 };

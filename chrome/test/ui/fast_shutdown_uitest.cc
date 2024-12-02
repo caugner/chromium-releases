@@ -3,14 +3,16 @@
 // found in the LICENSE file.
 
 #include "app/message_box_flags.h"
-#include "base/gfx/rect.h"
+#include "base/file_path.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/view_ids.h"
-#include "chrome/test/ui/ui_test.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
+#include "chrome/test/ui/ui_test.h"
+#include "chrome/test/ui_test_utils.h"
+#include "gfx/rect.h"
 #include "views/event.h"
 
 class FastShutdown : public UITest {
@@ -26,8 +28,9 @@ TEST_F(FastShutdown, DISABLED_SlowTermination) {
   ASSERT_TRUE(window.get());
 
   // This page has an unload handler.
-  GURL url = GetTestUrl(L"fast_shutdown", L"on_unloader.html");
-  NavigateToURLBlockUntilNavigationsComplete(url, 1);
+  const FilePath dir(FILE_PATH_LITERAL("fast_shutdown"));
+  const FilePath file(FILE_PATH_LITERAL("on_unloader.html"));
+  NavigateToURL(ui_test_utils::GetTestUrl(dir, file));
   gfx::Rect bounds;
   ASSERT_TRUE(window->GetViewBounds(VIEW_ID_TAB_CONTAINER, &bounds, true));
   // This click will launch a popup which has a before unload handler.
@@ -41,6 +44,7 @@ TEST_F(FastShutdown, DISABLED_SlowTermination) {
   // Close the browser. We should launch the unload handler, which is an
   // alert().
   ASSERT_TRUE(browser->ApplyAccelerator(IDC_CLOSE_WINDOW));
-  ASSERT_TRUE(automation()->WaitForAppModalDialog(action_max_timeout_ms()));
-  automation()->ClickAppModalDialogButton(MessageBoxFlags::DIALOGBUTTON_OK);
+  ASSERT_TRUE(automation()->WaitForAppModalDialog());
+  ASSERT_TRUE(automation()->ClickAppModalDialogButton(
+                  MessageBoxFlags::DIALOGBUTTON_OK));
 }

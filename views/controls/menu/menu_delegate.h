@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,18 +12,19 @@
 #include "app/os_exchange_data.h"
 #include "base/logging.h"
 #include "views/controls/menu/controller.h"
+#include "views/controls/menu/menu_item_view.h"
 #include "views/event.h"
 
 namespace views {
 
 class DropTargetEvent;
-class MenuItemView;
+class MenuButton;
 
 // MenuDelegate --------------------------------------------------------------
 
 // Delegate for a menu. This class is used as part of MenuItemView, see it
 // for details.
-// TODO(sky): merge this with Menu2Model.
+// TODO(sky): merge this with menus::MenuModel.
 class MenuDelegate : Controller {
  public:
   // Used during drag and drop to indicate where the drop indicator should
@@ -58,14 +59,13 @@ class MenuDelegate : Controller {
   // user does the appropriate gesture to show a context menu. The id
   // identifies the id of the menu to show the context menu for.
   // is_mouse_gesture is true if this is the result of a mouse gesture.
-  // If this is not the result of a mouse gesture x/y is the recommended
-  // location to display the content menu at. In either case, x/y is in
+  // If this is not the result of a mouse gesture |p| is the recommended
+  // location to display the content menu at. In either case, |p| is in
   // screen coordinates.
   // Returns true if a context menu was displayed, otherwise false
   virtual bool ShowContextMenu(MenuItemView* source,
                                int id,
-                               int x,
-                               int y,
+                               const gfx::Point& p,
                                bool is_mouse_gesture) {
     return false;
   }
@@ -81,6 +81,15 @@ class MenuDelegate : Controller {
     return false;
   }
   virtual void ExecuteCommand(int id) {
+  }
+
+  // If nested menus are showing (nested menus occur when a menu shows a context
+  // menu) this is invoked to determine if all the menus should be closed when
+  // the user selects the menu with the command |id|. This returns true to
+  // indicate that all menus should be closed. Return false if only the
+  // context menu should be closed.
+  virtual bool ShouldCloseAllMenusOnExecute(int id) {
+    return true;
   }
 
   // Executes the specified command. mouse_event_flags give the flags of the
@@ -179,6 +188,19 @@ class MenuDelegate : Controller {
 
   // Notification that the user has highlighted the specified item.
   virtual void SelectionChanged(MenuItemView* menu) {
+  }
+
+  // If the user drags the mouse outside the bounds of the menu the delegate
+  // is queried for a sibling menu to show. If this returns non-null the
+  // current menu is hidden, and the menu returned from this method is shown.
+  //
+  // The delegate owns the returned menu, not the controller.
+  virtual MenuItemView* GetSiblingMenu(MenuItemView* menu,
+                                       const gfx::Point& screen_point,
+                                       MenuItemView::AnchorPosition* anchor,
+                                       bool* has_mnemonics,
+                                       MenuButton** button) {
+      return NULL;
   }
 };
 

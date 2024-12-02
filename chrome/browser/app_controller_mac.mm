@@ -1,10 +1,11 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/app_controller_mac.h"
 
 #include "app/l10n_util_mac.h"
+#include "base/auto_reset.h"
 #include "base/command_line.h"
 #include "base/mac_util.h"
 #include "base/message_loop.h"
@@ -16,51 +17,148 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/browser_window.h"
-#import "chrome/browser/chrome_application_mac.h"
+#include "chrome/browser/chrome_thread.h"
 #import "chrome/browser/cocoa/about_window_controller.h"
+#import "chrome/browser/cocoa/bookmark_manager_controller.h"
 #import "chrome/browser/cocoa/bookmark_menu_bridge.h"
 #import "chrome/browser/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/cocoa/browser_window_controller.h"
-#import "chrome/browser/cocoa/history_menu_bridge.h"
+#import "chrome/browser/cocoa/bug_report_window_controller.h"
 #import "chrome/browser/cocoa/clear_browsing_data_controller.h"
 #import "chrome/browser/cocoa/encoding_menu_controller_delegate_mac.h"
+#import "chrome/browser/cocoa/history_menu_bridge.h"
+#import "chrome/browser/cocoa/import_settings_dialog.h"
 #import "chrome/browser/cocoa/preferences_window_controller.h"
 #import "chrome/browser/cocoa/tab_strip_controller.h"
 #import "chrome/browser/cocoa/tab_window_controller.h"
+#include "chrome/browser/cocoa/task_manager_mac.h"
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/download/download_manager.h"
+#include "chrome/browser/metrics/user_metrics.h"
 #include "chrome/browser/options_window.h"
-#include "chrome/browser/sessions/tab_restore_service.h"
-#include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile_manager.h"
-#include "chrome/common/temp_scaffolding_stubs.h"
+#include "chrome/browser/sessions/tab_restore_service.h"
+#include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/sync_ui_util.h"
+#include "chrome/browser/sync/sync_ui_util_mac.h"
+#include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/common/app_mode_constants_mac.h"
+#include "chrome/common/chrome_paths_internal.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/notification_service.h"
+#include "chrome/common/pref_names.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "net/base/net_util.h"
 
-@interface AppController(PRIVATE)
+// 10.6 adds a public API for the Spotlight-backed search menu item in the Help
+// menu.  Provide the declaration so it can be called below when building with
+// the 10.5 SDK.
+#if !defined(MAC_OS_X_VERSION_10_6) || \
+    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_6
+@interface NSApplication (SnowLeopardSDKDeclarations)
+- (void)setHelpMenu:(NSMenu*)helpMenu;
+@end
+#endif
+
+namespace {
+
+// True while AppController is calling Browser::OpenEmptyWindow(). We need a
+// global flag here, analogue to BrowserInit::InProcessStartup() because
+// otherwise the SessionService will try to restore sessions when we make a new
+// window while there are no other active windows.
+bool g_is_opening_new_window = false;
+
+// Activates a browser window having the given profile (the last one active) if
+// possible and returns a pointer to the activate |Browser| or NULL if this was
+// not possible. If the last active browser is minimized (in particular, if
+// there are only minimized windows), it will unminimize it.
+Browser* ActivateBrowser(Profile* profile) {
+  Browser* browser = BrowserList::GetLastActiveWithProfile(profile);
+  if (browser)
+    browser->window()->Activate();
+  return browser;
+}
+
+// Creates an empty browser window with the given profile and returns a pointer
+// to the new |Browser|.
+Browser* CreateBrowser(Profile* profile) {
+  {
+    AutoReset auto_reset_in_run(&g_is_opening_new_window, true);
+    Browser::OpenEmptyWindow(profile);
+  }
+
+  Browser* browser = BrowserList::GetLastActive();
+  CHECK(browser);
+  return browser;
+}
+
+// Activates a browser window having the given profile (the last one active) if
+// possible or creates an empty one if necessary. Returns a pointer to the
+// activated/new |Browser|.
+Browser* ActivateOrCreateBrowser(Profile* profile) {
+  if (Browser* browser = ActivateBrowser(profile))
+    return browser;
+  return CreateBrowser(profile);
+}
+
+// This task synchronizes preferences (under "org.chromium.Chromium" or
+// "com.google.Chrome"), in particular, writes them out to disk.
+class PrefsSyncTask : public Task {
+ public:
+  PrefsSyncTask() {}
+  virtual ~PrefsSyncTask() {}
+  virtual void Run() {
+    if (!CFPreferencesAppSynchronize(app_mode::kAppPrefsID))
+      LOG(WARNING) << "Error recording application bundle path.";
+  }
+};
+
+// Record the location of the application bundle (containing the main framework)
+// from which Chromium was loaded. This is used by app mode shims to find
+// Chromium.
+void RecordLastRunAppBundlePath() {
+  // Going up three levels from |chrome::GetVersionedDirectory()| gives the
+  // real, user-visible app bundle directory. (The alternatives give either the
+  // framework's path or the initial app's path, which may be an app mode shim
+  // or a unit test.)
+  FilePath appBundlePath =
+      chrome::GetVersionedDirectory().DirName().DirName().DirName();
+  CFPreferencesSetAppValue(app_mode::kLastRunAppBundlePathPrefsKey,
+                           base::SysUTF8ToCFStringRef(appBundlePath.value()),
+                           app_mode::kAppPrefsID);
+
+  // Sync after a delay avoid I/O contention on startup; 1500 ms is plenty.
+  ChromeThread::PostDelayedTask(ChromeThread::FILE, FROM_HERE,
+                                new PrefsSyncTask(), 1500);
+}
+
+}  // anonymous namespace
+
+@interface AppController(Private)
 - (void)initMenuState;
-- (void)openURLs:(const std::vector<GURL>&)urls;
-- (void)openPendingURLs;
+- (void)handleQuitEvent:(NSAppleEventDescriptor*)event
+              withReply:(NSAppleEventDescriptor*)reply;
+- (void)openUrls:(const std::vector<GURL>&)urls;
 - (void)getUrl:(NSAppleEventDescriptor*)event
      withReply:(NSAppleEventDescriptor*)reply;
-- (void)openFiles:(NSAppleEventDescriptor*)event
-        withReply:(NSAppleEventDescriptor*)reply;
 - (void)windowLayeringDidChange:(NSNotification*)inNotification;
 - (BOOL)userWillWaitForInProgressDownloads:(int)downloadCount;
 - (BOOL)shouldQuitWithInProgressDownloads;
+- (void)showPreferencesWindow:(id)sender
+                         page:(OptionsPage)page
+                      profile:(Profile*)profile;
 @end
 
 @implementation AppController
+
+@synthesize startupComplete = startupComplete_;
 
 // This method is called very early in application startup (ie, before
 // the profile is loaded or any preferences have been registered). Defer any
 // user-data initialization until -applicationDidFinishLaunching:.
 - (void)awakeFromNib {
-  pendingURLs_.reset(new std::vector<GURL>());
-
   // We need to register the handlers early to catch events fired on launch.
   NSAppleEventManager* em = [NSAppleEventManager sharedAppleEventManager];
   [em setEventHandler:self
@@ -71,10 +169,6 @@
           andSelector:@selector(getUrl:withReply:)
         forEventClass:'WWW!'    // A particularly ancient AppleEvent that dates
            andEventID:'OURL'];  // back to the Spyglass days.
-  [em setEventHandler:self
-          andSelector:@selector(openFiles:withReply:)
-        forEventClass:kCoreEventClass
-           andEventID:kAEOpenDocuments];
 
   // Register for various window layering changes. We use these to update
   // various UI elements (command-key equivalents, etc) when the frontmost
@@ -125,36 +219,82 @@
   }
 }
 
-- (NSApplicationTerminateReply)applicationShouldTerminate:
-    (NSApplication *)sender {
-  // Check for in-progress downloads, and prompt the user if they really want to
-  // quit (and thus cancel the downloads).
-  if (![self shouldQuitWithInProgressDownloads])
-    return NSTerminateCancel;
+// (NSApplicationDelegate protocol) This is the Apple-approved place to override
+// the default handlers.
+- (void)applicationWillFinishLaunching:(NSNotification*)notification {
+  NSAppleEventManager* em = [NSAppleEventManager sharedAppleEventManager];
+  [em setEventHandler:self
+          andSelector:@selector(handleQuitEvent:withReply:)
+        forEventClass:kCoreEventClass
+           andEventID:kAEQuitApplication];
+}
 
-  return NSTerminateNow;
+// (NSApplicationDelegate protocol) Our mechanism for application termination
+// does not go through |-applicationShouldTerminate:|, so it should not be
+// called. In a release build, cancelling termination will prevent a crash (but
+// if things go really wrong, the user may have to force-terminate the
+// application).
+- (NSApplicationTerminateReply)applicationShouldTerminate:
+    (NSApplication*)sender {
+  NOTREACHED();
+  return NSTerminateCancel;
+}
+
+- (BOOL)tryToTerminateApplication:(NSApplication*)app {
+  // Check for in-process downloads, and prompt the user if they really want
+  // to quit (and thus cancel downloads). Only check if we're not already
+  // shutting down, else the user might be prompted multiple times if the
+  // download isn't stopped before terminate is called again.
+  if (!browser_shutdown::IsTryingToQuit() &&
+      ![self shouldQuitWithInProgressDownloads])
+    return NO;
+
+  // Set the state to "trying to quit", so that closing all browser windows will
+  // lead to termination.
+  browser_shutdown::SetTryingToQuit(true);
+
+  // TODO(viettrungluu): Remove Apple Event handlers here? (It's safe to leave
+  // them in, but I'm not sure about UX; we'd also want to disable other things
+  // though.) http://crbug.com/40861
+
+  if (!BrowserList::size())
+    return YES;
+
+  // Try to close all the windows.
+  BrowserList::CloseAllBrowsers(true);
+
+  return NO;
+}
+
+- (void)stopTryingToTerminateApplication:(NSApplication*)app {
+  if (browser_shutdown::IsTryingToQuit()) {
+    // Reset the "trying to quit" state, so that closing all browser windows
+    // will no longer lead to termination.
+    browser_shutdown::SetTryingToQuit(false);
+
+    // TODO(viettrungluu): Were we to remove Apple Event handlers above, we
+    // would have to reinstall them here. http://crbug.com/40861
+  }
 }
 
 // Called when the app is shutting down. Clean-up as appropriate.
-- (void)applicationWillTerminate:(NSNotification *)aNotification {
+- (void)applicationWillTerminate:(NSNotification*)aNotification {
   NSAppleEventManager* em = [NSAppleEventManager sharedAppleEventManager];
   [em removeEventHandlerForEventClass:kInternetEventClass
                            andEventID:kAEGetURL];
   [em removeEventHandlerForEventClass:'WWW!'
                            andEventID:'OURL'];
-  [em removeEventHandlerForEventClass:kCoreEventClass
-                           andEventID:kAEOpenDocuments];
 
-  // Close all the windows.
-  BrowserList::CloseAllBrowsers(true);
-
-  // On Windows, this is done in Browser::OnWindowClosing, but that's not
-  // appropriate on Mac since we don't shut down when we reach zero windows.
-  browser_shutdown::OnShutdownStarting(browser_shutdown::BROWSER_EXIT);
+  // There better be no browser windows left at this point.
+  CHECK_EQ(BrowserList::size(), 0u);
 
   // Release the reference to the browser process. Once all the browsers get
   // dealloc'd, it will stop the RunLoop and fall back into main().
   g_browser_process->ReleaseModule();
+
+  // Close these off if they have open windows.
+  [prefsController_ close];
+  [aboutController_ close];
 
   [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
@@ -226,8 +366,9 @@
 }
 
 // See if we have a window with tabs open, and adjust the key equivalents for
-// Close Tab/Close Window accordingly
+// Close Tab/Close Window accordingly.
 - (void)fixCloseMenuItemKeyEquivalents {
+  fileMenuUpdatePending_ = NO;
   TabWindowController* tabController = [self keyWindowTabController];
   if (!tabController && ![NSApp keyWindow]) {
     // There might be a small amount of time where there is no key window,
@@ -238,23 +379,36 @@
       (tabController && [tabController numberOfTabs] > 1);
   [self adjustCloseWindowMenuItemKeyEquivalent:windowWithMultipleTabs];
   [self adjustCloseTabMenuItemKeyEquivalent:windowWithMultipleTabs];
-  fileMenuUpdatePending_ = NO;
 }
 
 // Fix up the "close tab/close window" command-key equivalents. We do this
 // after a delay to ensure that window layer state has been set by the time
-// we do the enabling.
+// we do the enabling. This should only be called on the main thread, code that
+// calls this (even as a side-effect) from other threads needs to be fixed.
 - (void)delayedFixCloseMenuItemKeyEquivalents {
+  DCHECK([NSThread isMainThread]);
   if (!fileMenuUpdatePending_) {
     // The OS prefers keypresses to timers, so it's possible that a cmd-w
     // can sneak in before this timer fires. In order to prevent that from
     // having any bad consequences, just clear the keys combos altogether. They
     // will be reset when the timer eventually fires.
-    [self clearCloseMenuItemKeyEquivalents];
-    [self performSelector:@selector(fixCloseMenuItemKeyEquivalents)
-               withObject:nil
-               afterDelay:0];
-    fileMenuUpdatePending_ = YES;
+    if ([NSThread isMainThread]) {
+      fileMenuUpdatePending_ = YES;
+      [self clearCloseMenuItemKeyEquivalents];
+      [self performSelector:@selector(fixCloseMenuItemKeyEquivalents)
+                 withObject:nil
+                 afterDelay:0];
+    } else {
+      // This shouldn't be happening, but if it does, force it to the main
+      // thread to avoid dropping the update. Don't mess with
+      // |fileMenuUpdatePending_| as it's not expected to be threadsafe and
+      // there could be a race between the selector finishing and setting the
+      // flag.
+      [self
+          performSelectorOnMainThread:@selector(fixCloseMenuItemKeyEquivalents)
+                           withObject:nil
+                        waitUntilDone:NO];
+    }
   }
 }
 
@@ -262,10 +416,6 @@
 // update the UI based on the new main window.
 - (void)windowLayeringDidChange:(NSNotification*)notify {
   [self delayedFixCloseMenuItemKeyEquivalents];
-
-  // TODO(pinkerton): If we have other things here, such as inspector panels
-  // that follow the contents of the selected webpage, we would update those
-  // here.
 }
 
 // Called when the number of tabs changes in one of the browser windows. The
@@ -291,7 +441,7 @@
   CFPropertyListRef plist = CFPreferencesCopyAppValue(checkInterval, app);
   if (!plist) {
     const float fiveHoursInSeconds = 5.0 * 60.0 * 60.0;
-    NSNumber *value = [NSNumber numberWithFloat:fiveHoursInSeconds];
+    NSNumber* value = [NSNumber numberWithFloat:fiveHoursInSeconds];
     CFPreferencesSetAppValue(checkInterval, value, app);
     CFPreferencesAppSynchronize(app);
   }
@@ -318,12 +468,36 @@
   // call this from awakeFromNib.
   NSMenu* view_menu = [[[NSApp mainMenu] itemWithTag:IDC_VIEW_MENU] submenu];
   NSMenuItem* encoding_menu_item = [view_menu itemWithTag:IDC_ENCODING_MENU];
-  NSMenu *encoding_menu = [encoding_menu_item submenu];
+  NSMenu* encoding_menu = [encoding_menu_item submenu];
   EncodingMenuControllerDelegate::BuildEncodingMenu([self defaultProfile],
                                                     encoding_menu);
 
-  // Now that we're initialized we can open any URLs we've been holding onto.
-  [self openPendingURLs];
+  // Since Chrome is localized to more languages than the OS, tell Cocoa which
+  // menu is the Help so it can add the search item to it.
+  if (helpMenu_ && [NSApp respondsToSelector:@selector(setHelpMenu:)])
+    [NSApp setHelpMenu:helpMenu_];
+
+  // Record the path to the (browser) app bundle; this is used by the app mode
+  // shim.
+  RecordLastRunAppBundlePath();
+
+  startupComplete_ = YES;
+
+  // TODO(viettrungluu): This is very temporary, since this should be done "in"
+  // |BrowserMain()|, i.e., this list of startup URLs should be appended to the
+  // (probably-empty) list of URLs from the command line.
+  if (startupUrls_.size()) {
+    [self openUrls:startupUrls_];
+    [self clearStartupUrls];
+  }
+}
+
+// This is called after profiles have been loaded and preferences registered.
+// It is safe to access the default profile here.
+- (void)applicationDidBecomeActive:(NSNotification*)notify {
+  NotificationService::current()->Notify(NotificationType::APP_ACTIVATED,
+                                         NotificationService::AllSources(),
+                                         NotificationService::NoDetails());
 }
 
 // Helper function for populating and displaying the in progress downloads at
@@ -448,20 +622,35 @@
     NSInteger tag = [item tag];
     if (menuState_->SupportsCommand(tag)) {
       switch (tag) {
+        // The File Menu commands are not automatically disabled by Cocoa when a
+        // dialog sheet obscures the browser window, so we disable several of
+        // them here.  We don't need to include IDC_CLOSE_WINDOW, because
+        // app_controller is only activated when there are no key windows (see
+        // function comment).
         case IDC_RESTORE_TAB:
           enable = [self keyWindowIsMissingOrBlocked] && [self canRestoreTab];
           break;
-        // The File Menu commands are not automatically disabled by Cocoa when
-        // a dialog sheet obscures the browser window, so we disable them here.
-        // We don't need to include IDC_CLOSE_WINDOW, because app_controller
-        // is only activated when there are no key windows (see function
-        // comment).
         case IDC_OPEN_FILE:
-        case IDC_NEW_WINDOW:
         case IDC_NEW_TAB:
-        case IDC_NEW_INCOGNITO_WINDOW:
           enable = [self keyWindowIsMissingOrBlocked];
           break;
+        case IDC_SYNC_BOOKMARKS: {
+          Profile* defaultProfile = [self defaultProfile];
+          // The profile may be NULL during shutdown -- see
+          // http://code.google.com/p/chromium/issues/detail?id=43048 .
+          //
+          // TODO(akalin,viettrungluu): Figure out whether this method
+          // can be prevented from being called if defaultProfile is
+          // NULL.
+          if (!defaultProfile) {
+            LOG(WARNING)
+                << "NULL defaultProfile detected -- not doing anything";
+            break;
+          }
+          enable = ProfileSyncService::IsSyncEnabled();
+          sync_ui_util::UpdateSyncItem(item, enable, defaultProfile);
+          break;
+        }
         default:
           enable = menuState_->IsCommandEnabled(tag) ? YES : NO;
       }
@@ -478,18 +667,44 @@
   return enable;
 }
 
-// Called when the user picks a menu item when there are no key windows. Calls
-// through to the browser object to execute the command. This assumes that the
-// command is supported and doesn't check, otherwise it would have been disabled
-// in the UI in validateUserInterfaceItem:.
+// Called when the user picks a menu item when there are no key windows, or when
+// there is no foreground browser window. Calls through to the browser object to
+// execute the command. This assumes that the command is supported and doesn't
+// check, otherwise it should have been disabled in the UI in
+// |-validateUserInterfaceItem:|.
 - (void)commandDispatch:(id)sender {
   Profile* defaultProfile = [self defaultProfile];
+
+  // Handle the case where we're dispatching a command from a sender that's in a
+  // browser window. This means that the command came from a background window
+  // and is getting here because the foreground window is not a browser window.
+  if ([sender respondsToSelector:@selector(window)]) {
+    id delegate = [[sender window] windowController];
+    if ([delegate isKindOfClass:[BrowserWindowController class]]) {
+      [delegate commandDispatch:sender];
+      return;
+    }
+  }
 
   NSInteger tag = [sender tag];
   switch (tag) {
     case IDC_NEW_TAB:
+      // Create a new tab in an existing browser window (which we activate) if
+      // possible.
+      if (Browser* browser = ActivateBrowser(defaultProfile)) {
+        browser->ExecuteCommand(IDC_NEW_TAB);
+        break;
+      }
+      // Else fall through to create new window.
     case IDC_NEW_WINDOW:
-      Browser::OpenEmptyWindow(defaultProfile);
+      CreateBrowser(defaultProfile);
+      break;
+    case IDC_FOCUS_LOCATION:
+      ActivateOrCreateBrowser(defaultProfile)->
+          ExecuteCommand(IDC_FOCUS_LOCATION);
+      break;
+    case IDC_FOCUS_SEARCH:
+      ActivateOrCreateBrowser(defaultProfile)->ExecuteCommand(IDC_FOCUS_SEARCH);
       break;
     case IDC_NEW_INCOGNITO_WINDOW:
       Browser::OpenEmptyWindow(defaultProfile->GetOffTheRecordProfile());
@@ -498,18 +713,110 @@
       Browser::OpenWindowWithRestoredTabs(defaultProfile);
       break;
     case IDC_OPEN_FILE:
-      Browser::OpenEmptyWindow(defaultProfile);
-      BrowserList::GetLastActive()->
-          ExecuteCommandWithDisposition(IDC_OPEN_FILE, CURRENT_TAB);
+      CreateBrowser(defaultProfile)->ExecuteCommand(IDC_OPEN_FILE);
       break;
-    case IDC_CLEAR_BROWSING_DATA:
+    case IDC_CLEAR_BROWSING_DATA: {
       // There may not be a browser open, so use the default profile.
-      scoped_nsobject<ClearBrowsingDataController> controller(
-          [[ClearBrowsingDataController alloc]
-              initWithProfile:defaultProfile]);
+      [ClearBrowsingDataController
+          showClearBrowsingDialogForProfile:defaultProfile];
+      break;
+    }
+    case IDC_IMPORT_SETTINGS: {
+      UserMetrics::RecordAction(UserMetricsAction("Import_ShowDlg"),
+                                defaultProfile);
+      [ImportSettingsDialogController
+          showImportSettingsDialogForProfile:defaultProfile];
+      break;
+    }
+    case IDC_SHOW_BOOKMARK_MANAGER:
+      UserMetrics::RecordAction(UserMetricsAction("ShowBookmarkManager"),
+                                defaultProfile);
+      if (Browser* browser = ActivateBrowser(defaultProfile)) {
+        // Call through browser which takes care of opening a tab or the old
+        // bookmark manager window.
+        browser->OpenBookmarkManager();
+      } else {
+        // We have no browser window. Only create a window if we are using the
+        // new tabbed bookmark manager.
+        if (CommandLine::ForCurrentProcess()->HasSwitch(
+                switches::kDisableTabbedBookmarkManager)) {
+          [BookmarkManagerController showBookmarkManager:defaultProfile];
+        } else {
+          Browser::OpenBookmarkManagerWindow(defaultProfile);
+        }
+      }
+      break;
+    case IDC_SHOW_HISTORY:
+      if (Browser* browser = ActivateBrowser(defaultProfile))
+        browser->ShowHistoryTab();
+      else
+        Browser::OpenHistoryWindow(defaultProfile);
+      break;
+    case IDC_SHOW_DOWNLOADS:
+      if (Browser* browser = ActivateBrowser(defaultProfile))
+        browser->ShowDownloadsTab();
+      else
+        Browser::OpenDownloadsWindow(defaultProfile);
+      break;
+    case IDC_MANAGE_EXTENSIONS:
+      if (Browser* browser = ActivateBrowser(defaultProfile))
+        browser->ShowExtensionsTab();
+      else
+        Browser::OpenExtensionsWindow(defaultProfile);
+      break;
+    case IDC_HELP_PAGE:
+      if (Browser* browser = ActivateBrowser(defaultProfile))
+        browser->OpenHelpTab();
+      else
+        Browser::OpenHelpWindow(defaultProfile);
+      break;
+    case IDC_REPORT_BUG: {
+      Browser* browser = BrowserList::GetLastActive();
+      TabContents* currentTab =
+          browser ? browser->GetSelectedTabContents() : NULL;
+      BugReportWindowController* controller =
+          [[BugReportWindowController alloc]
+              initWithTabContents:currentTab
+                          profile:[self defaultProfile]];
       [controller runModalDialog];
       break;
-  };
+    }
+    case IDC_SYNC_BOOKMARKS:
+      // The profile may be NULL during shutdown -- see
+      // http://code.google.com/p/chromium/issues/detail?id=43048 .
+      //
+      // TODO(akalin,viettrungluu): Figure out whether this method can
+      // be prevented from being called if defaultProfile is NULL.
+      if (!defaultProfile) {
+        LOG(WARNING) << "NULL defaultProfile detected -- not doing anything";
+        break;
+      }
+      // TODO(akalin): Add a constant to denote starting sync from the
+      // main menu and use that instead of START_FROM_WRENCH.
+      sync_ui_util::OpenSyncMyBookmarksDialog(
+          defaultProfile, ProfileSyncService::START_FROM_WRENCH);
+      break;
+    case IDC_TASK_MANAGER:
+      UserMetrics::RecordAction(UserMetricsAction("TaskManager"),
+                                defaultProfile);
+      TaskManagerMac::Show();
+      break;
+  }
+}
+
+// Same as |-commandDispatch:|, but executes commands using a disposition
+// determined by the key flags. This will get called in the case where the
+// frontmost window is not a browser window, and the user has command-clicked
+// a button in a background browser window whose action is
+// |-commandDispatchUsingKeyModifiers:|
+- (void)commandDispatchUsingKeyModifiers:(id)sender {
+  DCHECK(sender);
+  if ([sender respondsToSelector:@selector(window)]) {
+    id delegate = [[sender window] windowController];
+    if ([delegate isKindOfClass:[BrowserWindowController class]]) {
+      [delegate commandDispatchUsingKeyModifiers:sender];
+    }
+  }
 }
 
 // NSApplication delegate method called when someone clicks on the
@@ -517,13 +824,22 @@
 // behavior, we should open a new window.
 - (BOOL)applicationShouldHandleReopen:(NSApplication*)theApplication
                     hasVisibleWindows:(BOOL)flag {
+  // If the browser is currently trying to quit, don't do anything and return NO
+  // to prevent AppKit from doing anything.
+  // TODO(rohitrao): Remove this code when http://crbug.com/40861 is resolved.
+  if (browser_shutdown::IsTryingToQuit())
+    return NO;
+
   // Don't do anything if there are visible windows.  This will cause
   // AppKit to unminimize the most recently minimized window.
   if (flag)
     return YES;
 
   // Otherwise open a new window.
-  Browser::OpenEmptyWindow([self defaultProfile]);
+  {
+    AutoReset auto_reset_in_run(&g_is_opening_new_window, true);
+    Browser::OpenEmptyWindow([self defaultProfile]);
+  }
 
   // We've handled the reopen event, so return NO to tell AppKit not
   // to do anything.
@@ -538,15 +854,33 @@
   menuState_->UpdateCommandEnabled(IDC_OPEN_FILE, true);
   menuState_->UpdateCommandEnabled(IDC_CLEAR_BROWSING_DATA, true);
   menuState_->UpdateCommandEnabled(IDC_RESTORE_TAB, false);
-  // TODO(pinkerton): ...more to come...
+  menuState_->UpdateCommandEnabled(IDC_FOCUS_LOCATION, true);
+  menuState_->UpdateCommandEnabled(IDC_FOCUS_SEARCH, true);
+  menuState_->UpdateCommandEnabled(IDC_SHOW_BOOKMARK_MANAGER, true);
+  menuState_->UpdateCommandEnabled(IDC_SHOW_HISTORY, true);
+  menuState_->UpdateCommandEnabled(IDC_SHOW_DOWNLOADS, true);
+  menuState_->UpdateCommandEnabled(IDC_MANAGE_EXTENSIONS, true);
+  menuState_->UpdateCommandEnabled(IDC_HELP_PAGE, true);
+  menuState_->UpdateCommandEnabled(IDC_IMPORT_SETTINGS, true);
+  menuState_->UpdateCommandEnabled(IDC_REPORT_BUG, true);
+  menuState_->UpdateCommandEnabled(IDC_SYNC_BOOKMARKS,
+                                   ProfileSyncService::IsSyncEnabled());
+  menuState_->UpdateCommandEnabled(IDC_TASK_MANAGER, true);
 }
 
 - (Profile*)defaultProfile {
   // TODO(jrg): Find a better way to get the "default" profile.
   if (g_browser_process->profile_manager())
-    return* g_browser_process->profile_manager()->begin();
+    return *g_browser_process->profile_manager()->begin();
 
   return NULL;
+}
+
+// (Private) Never call |-applicationShouldTerminate:|; just make everything go
+// through |-terminate:|.
+- (void)handleQuitEvent:(NSAppleEventDescriptor*)event
+              withReply:(NSAppleEventDescriptor*)reply {
+  [NSApp terminate:nil];
 }
 
 // Various methods to open URLs that we get in a native fashion. We use
@@ -554,10 +888,10 @@
 // the ProcessSingleton, and it calls BrowserInit. It's best to bottleneck the
 // openings through that for uniform handling.
 
-- (void)openURLs:(const std::vector<GURL>&)urls {
-  if (pendingURLs_.get()) {
-    // too early to open; save for later
-    pendingURLs_->insert(pendingURLs_->end(), urls.begin(), urls.end());
+- (void)openUrls:(const std::vector<GURL>&)urls {
+  // If the browser hasn't started yet, just queue up the URLs.
+  if (!startupComplete_) {
+    startupUrls_.insert(startupUrls_.end(), urls.begin(), urls.end());
     return;
   }
 
@@ -568,20 +902,9 @@
     browser->window()->Show();
   }
 
-  CommandLine dummy((std::wstring()));
+  CommandLine dummy(CommandLine::ARGUMENTS_ONLY);
   BrowserInit::LaunchWithProfile launch(std::wstring(), dummy);
   launch.OpenURLsInBrowser(browser, false, urls);
-}
-
-- (void)openPendingURLs {
-  // Since the existence of pendingURLs_ is a flag that it's too early to
-  // open URLs, we need to reset pendingURLs_.
-  std::vector<GURL> urls;
-  swap(urls, *pendingURLs_);
-  pendingURLs_.reset();
-
-  if (urls.size())
-    [self openURLs:urls];
 }
 
 - (void)getUrl:(NSAppleEventDescriptor*)event
@@ -593,103 +916,94 @@
   std::vector<GURL> gurlVector;
   gurlVector.push_back(gurl);
 
-  [self openURLs:gurlVector];
+  [self openUrls:gurlVector];
 }
 
-- (void)openFiles:(NSAppleEventDescriptor*)event
-        withReply:(NSAppleEventDescriptor*)reply {
-  // Ordinarily we'd use the NSApplication delegate method
-  // -application:openFiles:, but Cocoa tries to be smart and it sends files
-  // specified on the command line into that delegate method. That's too smart
-  // for us (our setup isn't done by the time Cocoa triggers the delegate method
-  // and we crash). Since all we want are files dropped on the app icon, and we
-  // have cross-platform code to handle the command-line files anyway, an Apple
-  // Event handler fits the bill just right.
-  NSAppleEventDescriptor* fileList =
-      [event paramDescriptorForKeyword:keyDirectObject];
-  if (!fileList)
-    return;
+- (void)application:(NSApplication*)sender
+          openFiles:(NSArray*)filenames {
   std::vector<GURL> gurlVector;
-
-  for (NSInteger i = 1; i <= [fileList numberOfItems]; ++i) {
-    NSAppleEventDescriptor* fileAliasDesc = [fileList descriptorAtIndex:i];
-    if (!fileAliasDesc)
-      continue;
-    NSAppleEventDescriptor* fileURLDesc =
-        [fileAliasDesc coerceToDescriptorType:typeFileURL];
-    if (!fileURLDesc)
-      continue;
-    NSData* fileURLData = [fileURLDesc data];
-    if (!fileURLData)
-      continue;
-    GURL gurl(std::string((char*)[fileURLData bytes], [fileURLData length]));
+  for (NSString* file in filenames) {
+    GURL gurl = net::FilePathToFileURL(FilePath(base::SysNSStringToUTF8(file)));
     gurlVector.push_back(gurl);
   }
+  if (!gurlVector.empty())
+    [self openUrls:gurlVector];
+  else
+    NOTREACHED() << "Nothing to open!";
 
-  [self openURLs:gurlVector];
+  [sender replyToOpenOrPrint:NSApplicationDelegateReplySuccess];
 }
 
 // Called when the preferences window is closed. We use this to release the
 // window controller.
-- (void)prefsWindowClosed:(NSNotification*)notify {
-  [[NSNotificationCenter defaultCenter]
-    removeObserver:self
-              name:kUserDoneEditingPrefsNotification
-            object:prefsController_.get()];
-  prefsController_.reset(NULL);
+- (void)prefsWindowClosed:(NSNotification*)notification {
+  NSWindow* window = [prefsController_ window];
+  DCHECK([notification object] == window);
+  NSNotificationCenter* defaultCenter = [NSNotificationCenter defaultCenter];
+  [defaultCenter removeObserver:self
+                           name:NSWindowWillCloseNotification
+                         object:window];
+  // PreferencesWindowControllers are autoreleased in
+  // -[PreferencesWindowController windowWillClose:].
+  prefsController_ = nil;
 }
 
 // Show the preferences window, or bring it to the front if it's already
 // visible.
 - (IBAction)showPreferences:(id)sender {
-  if (!prefsController_.get()) {
-    prefsController_.reset([[PreferencesWindowController alloc]
-                              initWithProfile:[self defaultProfile]]);
+  [self showPreferencesWindow:sender
+                         page:OPTIONS_PAGE_DEFAULT
+                      profile:[self defaultProfile]];
+}
+
+- (void)showPreferencesWindow:(id)sender
+                         page:(OptionsPage)page
+                      profile:(Profile*)profile {
+  if (prefsController_) {
+    [prefsController_ switchToPage:page animate:YES];
+  } else {
+    prefsController_ =
+        [[PreferencesWindowController alloc] initWithProfile:profile
+                                                 initialPage:page];
     // Watch for a notification of when it goes away so that we can destroy
     // the controller.
     [[NSNotificationCenter defaultCenter]
         addObserver:self
            selector:@selector(prefsWindowClosed:)
-               name:kUserDoneEditingPrefsNotification
-             object:prefsController_.get()];
+               name:NSWindowWillCloseNotification
+             object:[prefsController_ window]];
   }
   [prefsController_ showPreferences:sender];
 }
 
 // Called when the about window is closed. We use this to release the
 // window controller.
-- (void)aboutWindowClosed:(NSNotification*)notify {
+- (void)aboutWindowClosed:(NSNotification*)notification {
+  NSWindow* window = [aboutController_ window];
+  DCHECK(window == [notification object]);
   [[NSNotificationCenter defaultCenter]
-    removeObserver:self
-              name:kUserClosedAboutNotification
-            object:aboutController_.get()];
-  aboutController_.reset(NULL);
+      removeObserver:self
+                name:NSWindowWillCloseNotification
+              object:window];
+  // AboutWindowControllers are autoreleased in
+  // -[AboutWindowController windowWillClose:].
+  aboutController_ = nil;
 }
 
 - (IBAction)orderFrontStandardAboutPanel:(id)sender {
-  // Otherwise bring up our special dialog (e.g. with an auto-update button).
   if (!aboutController_) {
-    aboutController_.reset([[AboutWindowController alloc]
-                             initWithProfile:[self defaultProfile]]);
-    if (!aboutController_) {
-      // If we get here something is wacky.  I managed to do it when
-      // testing by explicitly forcing an auto-update to an older
-      // version then trying to open the about box again (missing
-      // nib).  This shouldn't be possible in general but let's try
-      // hard to not do nothing.
-      [NSApp orderFrontStandardAboutPanel:sender];
-      return;
-    }
+    aboutController_ =
+        [[AboutWindowController alloc] initWithProfile:[self defaultProfile]];
+
     // Watch for a notification of when it goes away so that we can destroy
     // the controller.
     [[NSNotificationCenter defaultCenter]
         addObserver:self
            selector:@selector(aboutWindowClosed:)
-               name:kUserClosedAboutNotification
-             object:aboutController_.get()];
+               name:NSWindowWillCloseNotification
+             object:[aboutController_ window]];
   }
-  if (![[aboutController_ window] isVisible])
-    [[aboutController_ window] center];
+
   [aboutController_ showWindow:self];
 }
 
@@ -721,13 +1035,30 @@
   return dockMenu;
 }
 
-@end
+- (const std::vector<GURL>&)startupUrls {
+  return startupUrls_;
+}
+
+- (void)clearStartupUrls {
+  startupUrls_.clear();
+}
+
+@end  // @implementation AppController
 
 //---------------------------------------------------------------------------
 
-// Stub for cross-platform method that isn't called on Mac OS X.
 void ShowOptionsWindow(OptionsPage page,
                        OptionsGroup highlight_group,
                        Profile* profile) {
-  NOTIMPLEMENTED();
+  // TODO(akalin): Use highlight_group.
+  AppController* appController = [NSApp delegate];
+  [appController showPreferencesWindow:nil page:page profile:profile];
 }
+
+namespace app_controller_mac {
+
+bool IsOpeningNewWindow() {
+  return g_is_opening_new_window;
+}
+
+}  // namespace app_controller_mac

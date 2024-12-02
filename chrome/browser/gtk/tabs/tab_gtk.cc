@@ -7,11 +7,18 @@
 #include <gdk/gdkkeysyms.h>
 
 #include "app/gtk_dnd_util.h"
-#include "app/gfx/path.h"
 #include "app/l10n_util.h"
+#include "app/menus/accelerator_gtk.h"
 #include "app/resource_bundle.h"
+#include "base/keyboard_codes_posix.h"
+#include "base/singleton.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/app/chrome_dll_resource.h"
+#include "chrome/browser/gtk/accelerators_gtk.h"
 #include "chrome/browser/gtk/menu_gtk.h"
 #include "chrome/browser/gtk/standard_menus.h"
+#include "chrome/browser/tab_menu_model.h"
+#include "gfx/path.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 
@@ -28,39 +35,12 @@ int GetTitleWidth(gfx::Font* font, std::wstring title) {
 
 }  // namespace
 
-class TabGtk::ContextMenuController : public MenuGtk::Delegate {
+class TabGtk::ContextMenuController : public menus::SimpleMenuModel::Delegate {
  public:
   explicit ContextMenuController(TabGtk* tab)
-      : tab_(tab) {
-    static const MenuCreateMaterial context_menu_blueprint[] = {
-        { MENU_NORMAL, TabStripModel::CommandNewTab, IDS_TAB_CXMENU_NEWTAB,
-            0, NULL, GDK_t, GDK_CONTROL_MASK, true },
-        { MENU_SEPARATOR },
-        { MENU_NORMAL, TabStripModel::CommandReload, IDS_TAB_CXMENU_RELOAD,
-            0, NULL, GDK_r, GDK_CONTROL_MASK, true },
-        { MENU_NORMAL, TabStripModel::CommandDuplicate,
-            IDS_TAB_CXMENU_DUPLICATE },
-        { MENU_CHECKBOX, TabStripModel::CommandTogglePinned,
-            IDS_TAB_CXMENU_PIN_TAB },
-        { MENU_SEPARATOR },
-        { MENU_NORMAL, TabStripModel::CommandCloseTab, IDS_TAB_CXMENU_CLOSETAB,
-            0, NULL, GDK_w, GDK_CONTROL_MASK, true },
-        { MENU_NORMAL, TabStripModel::CommandCloseOtherTabs,
-          IDS_TAB_CXMENU_CLOSEOTHERTABS },
-        { MENU_NORMAL, TabStripModel::CommandCloseTabsToRight,
-            IDS_TAB_CXMENU_CLOSETABSTORIGHT },
-        { MENU_NORMAL, TabStripModel::CommandCloseTabsOpenedBy,
-            IDS_TAB_CXMENU_CLOSETABSOPENEDBY },
-        { MENU_SEPARATOR },
-        { MENU_NORMAL, TabStripModel::CommandRestoreTab, IDS_RESTORE_TAB,
-            0, NULL, GDK_t, GDK_CONTROL_MASK | GDK_SHIFT_MASK, true },
-        { MENU_NORMAL, TabStripModel::CommandBookmarkAllTabs,
-            IDS_TAB_CXMENU_BOOKMARK_ALL_TABS, 0, NULL, GDK_d,
-            GDK_CONTROL_MASK | GDK_SHIFT_MASK, true },
-        { MENU_END },
-    };
-
-    menu_.reset(new MenuGtk(this, context_menu_blueprint, NULL));
+      : tab_(tab),
+        model_(this) {
+    menu_.reset(new MenuGtk(NULL, &model_));
   }
 
   virtual ~ContextMenuController() {}
@@ -75,25 +55,51 @@ class TabGtk::ContextMenuController : public MenuGtk::Delegate {
   }
 
  private:
-  // MenuGtk::Delegate implementation:
-  virtual bool IsCommandEnabled(int command_id) const {
-    if (!tab_)
-      return false;
-
-    return tab_->delegate()->IsCommandEnabledForTab(
-        static_cast<TabStripModel::ContextMenuCommand>(command_id), tab_);
-  }
-
-  virtual bool IsItemChecked(int command_id) const {
+  // Overridden from menus::SimpleMenuModel::Delegate:
+  virtual bool IsCommandIdChecked(int command_id) const {
     if (!tab_ || command_id != TabStripModel::CommandTogglePinned)
       return false;
-    return tab_->is_pinned();
+    return tab_->delegate()->IsTabPinned(tab_);
   }
+  virtual bool IsCommandIdEnabled(int command_id) const {
+    return tab_ && tab_->delegate()->IsCommandEnabledForTab(
+        static_cast<TabStripModel::ContextMenuCommand>(command_id),
+        tab_);
+  }
+  virtual bool GetAcceleratorForCommandId(
+      int command_id,
+      menus::Accelerator* accelerator) {
+    int browser_command = 0;
+    switch (command_id) {
+      case TabStripModel::CommandNewTab:
+        browser_command = IDC_NEW_TAB;
+        break;
+      case TabStripModel::CommandReload:
+        browser_command = IDC_RELOAD;
+        break;
+      case TabStripModel::CommandCloseTab:
+        browser_command = IDC_CLOSE_TAB;
+        break;
+      case TabStripModel::CommandRestoreTab:
+        browser_command = IDC_RESTORE_TAB;
+        break;
+      case TabStripModel::CommandBookmarkAllTabs:
+        browser_command = IDC_BOOKMARK_ALL_TABS;
+        break;
+      default:
+        return false;
+    }
 
+    const menus::AcceleratorGtk* accelerator_gtk =
+        Singleton<AcceleratorsGtk>()->GetPrimaryAcceleratorForCommand(
+            browser_command);
+    if (accelerator_gtk)
+      *accelerator = *accelerator_gtk;
+    return !!accelerator_gtk;
+  }
   virtual void ExecuteCommand(int command_id) {
     if (!tab_)
       return;
-
     tab_->delegate()->ExecuteCommandForTab(
         static_cast<TabStripModel::ContextMenuCommand>(command_id), tab_);
   }
@@ -105,7 +111,27 @@ class TabGtk::ContextMenuController : public MenuGtk::Delegate {
   // is canceled.
   TabGtk* tab_;
 
+  // The model.
+  TabMenuModel model_;
+
   DISALLOW_COPY_AND_ASSIGN(ContextMenuController);
+};
+
+class TabGtk::TabGtkObserverHelper {
+ public:
+  explicit TabGtkObserverHelper(TabGtk* tab)
+      : tab_(tab) {
+    MessageLoopForUI::current()->AddObserver(tab_);
+  }
+
+  ~TabGtkObserverHelper() {
+    MessageLoopForUI::current()->RemoveObserver(tab_);
+  }
+
+ private:
+  TabGtk* tab_;
+
+  DISALLOW_COPY_AND_ASSIGN(TabGtkObserverHelper);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -118,16 +144,17 @@ TabGtk::TabGtk(TabDelegate* delegate)
       last_mouse_down_(NULL),
       drag_widget_(NULL),
       title_width_(0),
-      ALLOW_THIS_IN_INITIALIZER_LIST(destroy_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(destroy_factory_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(drag_end_factory_(this)) {
   event_box_ = gtk_event_box_new();
   gtk_event_box_set_visible_window(GTK_EVENT_BOX(event_box_), FALSE);
-  g_signal_connect(G_OBJECT(event_box_), "button-press-event",
+  g_signal_connect(event_box_, "button-press-event",
                    G_CALLBACK(OnButtonPressEvent), this);
-  g_signal_connect(G_OBJECT(event_box_), "button-release-event",
+  g_signal_connect(event_box_, "button-release-event",
                    G_CALLBACK(OnButtonReleaseEvent), this);
-  g_signal_connect(G_OBJECT(event_box_), "enter-notify-event",
+  g_signal_connect(event_box_, "enter-notify-event",
                    G_CALLBACK(OnEnterNotifyEvent), this);
-  g_signal_connect(G_OBJECT(event_box_), "leave-notify-event",
+  g_signal_connect(event_box_, "leave-notify-event",
                    G_CALLBACK(OnLeaveNotifyEvent), this);
   gtk_widget_add_events(event_box_,
         GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK |
@@ -137,6 +164,14 @@ TabGtk::TabGtk(TabDelegate* delegate)
 }
 
 TabGtk::~TabGtk() {
+  if (drag_widget_) {
+    // Shadow the drag grab so the grab terminates. We could do this using any
+    // widget, |drag_widget_| is just convenient.
+    gtk_grab_add(drag_widget_);
+    gtk_grab_remove(drag_widget_);
+    DestroyDragWidget();
+  }
+
   if (menu_controller_.get()) {
     // The menu is showing. Close the menu.
     menu_controller_->Cancel();
@@ -161,12 +196,15 @@ gboolean TabGtk::OnButtonPressEvent(GtkWidget* widget, GdkEventButton* event,
     }
 
     // Hook into the message loop to handle dragging.
-    MessageLoopForUI::current()->AddObserver(tab);
+    tab->observer_.reset(new TabGtkObserverHelper(tab));
 
     // Store the button press event, used to initiate a drag.
     tab->last_mouse_down_ = gdk_event_copy(reinterpret_cast<GdkEvent*>(event));
   } else if (event->button == 3) {
-    tab->ShowContextMenu();
+    // Only show the context menu if the left mouse button isn't down (i.e.,
+    // the user might want to drag instead).
+    if (!tab->last_mouse_down_)
+      tab->ShowContextMenu();
   }
 
   return TRUE;
@@ -176,7 +214,7 @@ gboolean TabGtk::OnButtonPressEvent(GtkWidget* widget, GdkEventButton* event,
 gboolean TabGtk::OnButtonReleaseEvent(GtkWidget* widget, GdkEventButton* event,
                                       TabGtk* tab) {
   if (event->button == 1) {
-    MessageLoopForUI::current()->RemoveObserver(tab);
+    tab->observer_.reset();
 
     if (tab->last_mouse_down_) {
       gdk_event_free(tab->last_mouse_down_);
@@ -190,6 +228,16 @@ gboolean TabGtk::OnButtonReleaseEvent(GtkWidget* widget, GdkEventButton* event,
       event->x >= 0 && event->y >= 0 &&
       event->x < widget->allocation.width &&
       event->y < widget->allocation.height) {
+    // If the user is currently holding the left mouse button down but hasn't
+    // moved the mouse yet, a drag hasn't started yet.  In that case, clean up
+    // some state before closing the tab to avoid a crash.  Once the drag has
+    // started, we don't get the middle mouse click here.
+    if (tab->last_mouse_down_) {
+      DCHECK(!tab->drag_widget_);
+      tab->observer_.reset();
+      gdk_event_free(tab->last_mouse_down_);
+      tab->last_mouse_down_ = NULL;
+    }
     tab->delegate_->CloseTab(tab);
   }
 
@@ -202,6 +250,19 @@ gboolean TabGtk::OnDragFailed(GtkWidget* widget, GdkDragContext* context,
                               TabGtk* tab) {
   bool canceled = (result == GTK_DRAG_RESULT_USER_CANCELLED);
   tab->EndDrag(canceled);
+  return TRUE;
+}
+
+// static
+gboolean TabGtk::OnDragButtonReleased(GtkWidget* widget, GdkEventButton* button,
+                                      TabGtk* tab) {
+  // We always get this event when gtk is releasing the grab and ending the
+  // drag.  However, if the user ended the drag with space or enter, we don't
+  // get a follow up event to tell us the drag has finished (either a
+  // drag-failed or a drag-end).  So we post a task to manually end the drag.
+  // If GTK+ does send the drag-failed or drag-end event, we cancel the task.
+  MessageLoop::current()->PostTask(FROM_HERE,
+      tab->drag_end_factory_.NewRunnableMethod(&TabGtk::EndDrag, false));
   return TRUE;
 }
 
@@ -268,8 +329,10 @@ void TabGtk::CloseButtonClicked() {
   delegate_->CloseTab(this);
 }
 
-void TabGtk::UpdateData(TabContents* contents, bool loading_only) {
-  TabRendererGtk::UpdateData(contents, loading_only);
+void TabGtk::UpdateData(TabContents* contents,
+                        bool phantom,
+                        bool loading_only) {
+  TabRendererGtk::UpdateData(contents, phantom, loading_only);
   // Cache the title width so we don't recalculate it every time the tab is
   // resized.
   title_width_ = GetTitleWidth(title_font(), GetTitle());
@@ -306,9 +369,12 @@ void TabGtk::UpdateTooltipState() {
 }
 
 void TabGtk::CreateDragWidget() {
+  DCHECK(!drag_widget_);
   drag_widget_ = gtk_invisible_new();
   g_signal_connect(drag_widget_, "drag-failed",
                    G_CALLBACK(OnDragFailed), this);
+  g_signal_connect(drag_widget_, "button-release-event",
+                   G_CALLBACK(OnDragButtonReleased), this);
   g_signal_connect_after(drag_widget_, "drag-begin",
                          G_CALLBACK(OnDragBegin), this);
 }
@@ -323,9 +389,9 @@ void TabGtk::DestroyDragWidget() {
 void TabGtk::StartDragging(gfx::Point drag_offset) {
   CreateDragWidget();
 
-  GtkTargetList* list = GtkDndUtil::GetTargetListFromCodeMask(
-      GtkDndUtil::CHROME_TAB);
-  gtk_drag_begin(drag_widget_, list, GDK_ACTION_COPY,
+  GtkTargetList* list = gtk_dnd_util::GetTargetListFromCodeMask(
+      gtk_dnd_util::CHROME_TAB);
+  gtk_drag_begin(drag_widget_, list, GDK_ACTION_MOVE,
                  1,  // Drags are always initiated by the left button.
                  last_mouse_down_);
 
@@ -333,6 +399,10 @@ void TabGtk::StartDragging(gfx::Point drag_offset) {
 }
 
 void TabGtk::EndDrag(bool canceled) {
+  // Make sure we only run EndDrag once by canceling any tasks that want
+  // to call EndDrag.
+  drag_end_factory_.RevokeAll();
+
   // We must let gtk clean up after we handle the drag operation, otherwise
   // there will be outstanding references to the drag widget when we try to
   // destroy it.
@@ -348,5 +418,5 @@ void TabGtk::EndDrag(bool canceled) {
   // Clean up the drag helper, which is re-created on the next mouse press.
   delegate_->EndDrag(canceled);
 
-  MessageLoopForUI::current()->RemoveObserver(this);
+  observer_.reset();
 }

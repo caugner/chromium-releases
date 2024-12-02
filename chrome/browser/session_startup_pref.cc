@@ -4,11 +4,14 @@
 
 #include "chrome/browser/session_startup_pref.h"
 
-#include "base/string_util.h"
+#include <string>
+
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/defaults.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/scoped_pref_update.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 
 namespace {
 
@@ -62,6 +65,7 @@ void SessionStartupPref::SetStartupPref(PrefService* prefs,
   // Always save the URLs, that way the UI can remain consistent even if the
   // user changes the startup type pref.
   // Ownership of the ListValue retains with the pref service.
+  ScopedPrefUpdate update(prefs, prefs::kURLsToRestoreOnStartup);
   ListValue* url_pref_list =
       prefs->GetMutableList(prefs::kURLsToRestoreOnStartup);
   DCHECK(url_pref_list);

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 
 #include "app/gtk_dnd_util.h"
 #include "base/file_path.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "net/base/net_util.h"
 
 OSExchangeDataProviderGtk::OSExchangeDataProviderGtk(
@@ -16,15 +16,19 @@ OSExchangeDataProviderGtk::OSExchangeDataProviderGtk(
     const std::set<GdkAtom>& known_custom_formats)
     : known_formats_(known_formats),
       known_custom_formats_(known_custom_formats),
-      formats_(0) {
+      formats_(0),
+      drag_image_(NULL) {
 }
 
 OSExchangeDataProviderGtk::OSExchangeDataProviderGtk()
     : known_formats_(0),
-      formats_(0) {
+      formats_(0),
+      drag_image_(NULL) {
 }
 
 OSExchangeDataProviderGtk::~OSExchangeDataProviderGtk() {
+  if (drag_image_)
+    g_object_unref(drag_image_);
 }
 
 bool OSExchangeDataProviderGtk::HasDataForAllFormats(
@@ -50,7 +54,7 @@ GtkTargetList* OSExchangeDataProviderGtk::GetTargetList() const {
     gtk_target_list_add_uri_targets(targets, OSExchangeData::URL);
     gtk_target_list_add(
         targets,
-        GtkDndUtil::GetAtomForTarget(GtkDndUtil::CHROME_NAMED_URL),
+        gtk_dnd_util::GetAtomForTarget(gtk_dnd_util::CHROME_NAMED_URL),
         0,
         OSExchangeData::URL);
   }
@@ -84,7 +88,7 @@ void OSExchangeDataProviderGtk::WriteFormatToSelection(
     pickle.WriteString(url_.spec());
     gtk_selection_data_set(
         selection,
-        GtkDndUtil::GetAtomForTarget(GtkDndUtil::CHROME_NAMED_URL),
+        gtk_dnd_util::GetAtomForTarget(gtk_dnd_util::CHROME_NAMED_URL),
         8,
         reinterpret_cast<const guchar*>(pickle.data()),
         pickle.size());
@@ -216,6 +220,15 @@ bool OSExchangeDataProviderGtk::GetPlainTextURL(GURL* url) const {
   if (url)
     *url = test_url;
   return true;
+}
+
+void OSExchangeDataProviderGtk::SetDragImage(GdkPixbuf* drag_image,
+                                             const gfx::Point& cursor_offset) {
+  if (drag_image_)
+    g_object_unref(drag_image_);
+  g_object_ref(drag_image);
+  drag_image_ = drag_image;
+  cursor_offset_ = cursor_offset;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

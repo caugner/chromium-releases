@@ -44,6 +44,10 @@ class WindowProxy : public AutomationResourceProxy {
   // window, the top window is clicked.
   bool SimulateOSClick(const gfx::Point& click, int flags);
 
+  // Moves the mouse pointer this location at the OS level.  |location| is
+  // in the window's coordinates.
+  bool SimulateOSMouseMove(const gfx::Point& location);
+
   // Get the title of the top level window.
   bool GetWindowTitle(string16* text);
 
@@ -74,12 +78,6 @@ class WindowProxy : public AutomationResourceProxy {
   // of the screen, if false in the coordinates of the browser.
   bool GetViewBounds(int view_id, gfx::Rect* bounds, bool screen_coordinates);
 
-  // Like GetViewBounds except returns false if timeout occurs before view
-  // bounds are obtained, and sets is_timeout accordingly.
-  bool GetViewBoundsWithTimeout(int view_id, gfx::Rect* bounds,
-                                bool screen_coordinates, uint32 timeout_ms,
-                                bool* is_timeout);
-
   // Gets the position and size of the window. Returns true if setting the
   // bounds was successful.
   bool GetBounds(gfx::Rect* bounds);
@@ -91,6 +89,10 @@ class WindowProxy : public AutomationResourceProxy {
   // Gets the id of the view that currently has focus.  Returns true if the id
   // was retrieved.
   bool GetFocusedViewID(int* view_id);
+
+  // Waits until the focused view ID changes to something other than
+  // |old_view_id|. Returns true if the focused view ID did change.
+  bool WaitForFocusedViewIDToChange(int old_view_id, int* new_view_id);
 
   // Returns the browser this window corresponds to, or NULL if this window
   // is not a browser.  The caller owns the returned BrowserProxy.

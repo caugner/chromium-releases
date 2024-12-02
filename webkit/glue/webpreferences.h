@@ -38,6 +38,7 @@ struct WebPreferences {
   bool dom_paste_enabled;
   bool developer_extras_enabled;
   std::string inspector_settings;
+  bool site_specific_quirks_enabled;
   bool shrinks_standalone_images_to_fit;
   bool uses_universal_detector;
   bool text_areas_are_resizable;
@@ -48,19 +49,15 @@ struct WebPreferences {
   bool xss_auditor_enabled;
   bool local_storage_enabled;
   bool databases_enabled;
-  bool session_storage_enabled;
   bool application_cache_enabled;
   bool tabs_to_links;
 
-  // TODO(tc): User style sheets will not work in chrome because it tries to
-  // load the style sheet using a request without a frame.
   bool user_style_sheet_enabled;
   GURL user_style_sheet_location;
-
   bool allow_universal_access_from_file_urls;
-
+  bool allow_file_access_from_file_urls;
   bool experimental_webgl_enabled;
-  bool experimental_notifications_enabled;
+  bool show_composited_layer_borders;
 
   // We try to keep the default values the same as the default values in
   // chrome, except for the cases where it would require lots of extra work for
@@ -84,23 +81,24 @@ struct WebPreferences {
         plugins_enabled(true),
         dom_paste_enabled(false),  // enables execCommand("paste")
         developer_extras_enabled(false),  // Requires extra work by embedder
+        site_specific_quirks_enabled(false),
         shrinks_standalone_images_to_fit(true),
         uses_universal_detector(false),  // Disabled: page cycler regression
         text_areas_are_resizable(true),
         java_enabled(true),
         allow_scripts_to_close_windows(false),
         uses_page_cache(false),
-        remote_fonts_enabled(false),
+        remote_fonts_enabled(true),
         xss_auditor_enabled(false),
         local_storage_enabled(false),
         databases_enabled(false),
-        session_storage_enabled(false),
         application_cache_enabled(false),
         tabs_to_links(true),
         user_style_sheet_enabled(false),
         allow_universal_access_from_file_urls(false),
+        allow_file_access_from_file_urls(false),
         experimental_webgl_enabled(false),
-        experimental_notifications_enabled(false) {
+        show_composited_layer_borders(false) {
   }
 
   void Apply(WebKit::WebView* web_view) const;

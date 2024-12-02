@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_VIEWS_FRAME_BROWSER_ROOT_VIEW_H
-#define CHROME_BROWSER_VIEWS_FRAME_BROWSER_ROOT_VIEW_H
+#ifndef CHROME_BROWSER_VIEWS_FRAME_BROWSER_ROOT_VIEW_H_
+#define CHROME_BROWSER_VIEWS_FRAME_BROWSER_ROOT_VIEW_H_
 
 #include "views/widget/root_view.h"
 
 class BrowserView;
 class OSExchangeData;
-class TabStripWrapper;
+class BaseTabStrip;
 
 // RootView implementation used by BrowserFrame. This forwards drop events to
 // the TabStrip. Visually the tabstrip extends to the top of the frame, but in
@@ -41,14 +41,12 @@ class BrowserRootView : public views::RootView {
       const views::DropTargetEvent& event,
       const OSExchangeData& data);
 
-  TabStripWrapper* tabstrip() const;
+  inline BaseTabStrip* tabstrip() const;
 
-  // Returns true if |data| has string contents and the user can "paste and go"
-  // (see AutocompleteEditModel::CanPasteAndGo for details). If |url| is
-  // non-null and the user can "paste and go", |url| is set to the
-  // "paste and go" url.
-  bool GetPasteAndGoURL(const OSExchangeData& data,
-                        GURL* url);
+  // Returns true if |data| has string contents and the user can "paste and go".
+  // If |url| is non-NULL and the user can "paste and go", |url| is set to the
+  // desired destination.
+  bool GetPasteAndGoURL(const OSExchangeData& data, GURL* url);
 
   // The BrowserView.
   BrowserView* browser_view_;
@@ -61,4 +59,4 @@ class BrowserRootView : public views::RootView {
   DISALLOW_COPY_AND_ASSIGN(BrowserRootView);
 };
 
-#endif  // CHROME_BROWSER_VIEWS_FRAME_BROWSER_ROOT_VIEW_H
+#endif  // CHROME_BROWSER_VIEWS_FRAME_BROWSER_ROOT_VIEW_H_

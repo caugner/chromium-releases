@@ -14,6 +14,8 @@
 #include "net/base/cookie_store.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+namespace chromeos {
+
 typedef testing::Test ExternalCookieHandlerTest;
 
 static const std::string cookie1 = "coookie1\n";
@@ -29,10 +31,6 @@ class MockCookieStore : public net::CookieStore {
   }
   virtual ~MockCookieStore() {}
 
-  virtual bool SetCookie(const GURL& url, const std::string& cookie_line) {
-    EXPECT_TRUE(false);
-    return true;
-  }
   virtual bool SetCookieWithOptions(const GURL& url,
                                     const std::string& cookie_line,
                                     const net::CookieOptions& options) {
@@ -46,40 +44,18 @@ class MockCookieStore : public net::CookieStore {
     return has_cookie;
   }
 
-  virtual bool SetCookieWithCreationTime(const GURL& url,
-                                         const std::string& cookie_line,
-                                         const base::Time& creation_time) {
-    EXPECT_TRUE(false);
-    return true;
-  }
-  virtual bool SetCookieWithCreationTimeWithOptions(
-                                         const GURL& url,
-                                         const std::string& cookie_line,
-                                         const base::Time& creation_time,
-                                         const net::CookieOptions& options) {
-    EXPECT_TRUE(false);
-    return true;
-  }
-
-  virtual void SetCookies(const GURL& url,
-                          const std::vector<std::string>& cookies) {
-    EXPECT_TRUE(false);
-  }
-  virtual void SetCookiesWithOptions(const GURL& url,
-                                     const std::vector<std::string>& cookies,
-                                     const net::CookieOptions& options) {
-    EXPECT_TRUE(false);
-  }
-
-  virtual std::string GetCookies(const GURL& url) {
-    EXPECT_TRUE(false);
-    return std::string();
-  }
   virtual std::string GetCookiesWithOptions(const GURL& url,
                                             const net::CookieOptions& options) {
     EXPECT_TRUE(false);
     return std::string();
   }
+
+  virtual void DeleteCookie(const GURL& url,
+                            const std::string& cookie_name) {
+    EXPECT_TRUE(false);
+  }
+
+  virtual net::CookieMonster* GetCookieMonster() { return NULL; }
 
  private:
   std::set<std::string> cookies_;
@@ -151,3 +127,5 @@ TEST_F(ExternalCookieHandlerTest, SuccessfulSlowReadTest) {
   ExternalCookieHandler handler(reader);  // takes ownership.
   EXPECT_TRUE(handler.HandleCookies(cookie_store.get()));
 }
+
+}  // namespace chromeos

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,14 +17,21 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/string_util.h"
 #include "base/thread.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "base/waitable_event.h"
+#include "net/base/cookie_monster.h"
+#include "net/base/cookie_policy.h"
 #include "net/base/host_resolver.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_test_constants.h"
 #include "net/base/ssl_config_service_defaults.h"
+#include "net/disk_cache/disk_cache.h"
+#include "net/ftp/ftp_network_layer.h"
+#include "net/http/http_auth_handler_factory.h"
+#include "net/http/http_cache.h"
 #include "net/http/http_network_layer.h"
 #include "net/socket/ssl_test_util.h"
 #include "net/url_request/url_request.h"
@@ -40,33 +47,147 @@ const std::string kDefaultHostName("localhost");
 
 using base::TimeDelta;
 
-// This URLRequestContext does not use a local cache.
+//-----------------------------------------------------------------------------
+
+class TestCookiePolicy : public net::CookiePolicy {
+ public:
+  enum Options {
+    NO_GET_COOKIES = 1 << 0,
+    NO_SET_COOKIE  = 1 << 1,
+    ASYNC          = 1 << 2,
+    FORCE_SESSION  = 1 << 3,
+  };
+
+  explicit TestCookiePolicy(int options_bit_mask)
+      : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
+        options_(options_bit_mask),
+        callback_(NULL) {
+  }
+
+  virtual int CanGetCookies(const GURL& url, const GURL& first_party,
+                            net::CompletionCallback* callback) {
+    if ((options_ & ASYNC) && callback) {
+      callback_ = callback;
+      MessageLoop::current()->PostTask(FROM_HERE,
+          method_factory_.NewRunnableMethod(
+              &TestCookiePolicy::DoGetCookiesPolicy, url, first_party));
+      return net::ERR_IO_PENDING;
+    }
+
+    if (options_ & NO_GET_COOKIES)
+      return net::ERR_ACCESS_DENIED;
+
+    return net::OK;
+  }
+
+  virtual int CanSetCookie(const GURL& url, const GURL& first_party,
+                           const std::string& cookie_line,
+                           net::CompletionCallback* callback) {
+    if ((options_ & ASYNC) && callback) {
+      callback_ = callback;
+      MessageLoop::current()->PostTask(FROM_HERE,
+          method_factory_.NewRunnableMethod(
+              &TestCookiePolicy::DoSetCookiePolicy, url, first_party,
+              cookie_line));
+      return net::ERR_IO_PENDING;
+    }
+
+    if (options_ & NO_SET_COOKIE)
+      return net::ERR_ACCESS_DENIED;
+
+    if (options_ & FORCE_SESSION)
+      return net::OK_FOR_SESSION_ONLY;
+
+    return net::OK;
+  }
+
+ private:
+  void DoGetCookiesPolicy(const GURL& url, const GURL& first_party) {
+    int policy = CanGetCookies(url, first_party, NULL);
+
+    DCHECK(callback_);
+    net::CompletionCallback* callback = callback_;
+    callback_ = NULL;
+    callback->Run(policy);
+  }
+
+  void DoSetCookiePolicy(const GURL& url, const GURL& first_party,
+                         const std::string& cookie_line) {
+    int policy = CanSetCookie(url, first_party, cookie_line, NULL);
+
+    DCHECK(callback_);
+    net::CompletionCallback* callback = callback_;
+    callback_ = NULL;
+    callback->Run(policy);
+  }
+
+  ScopedRunnableMethodFactory<TestCookiePolicy> method_factory_;
+  int options_;
+  net::CompletionCallback* callback_;
+};
+
+//-----------------------------------------------------------------------------
+
 class TestURLRequestContext : public URLRequestContext {
  public:
   TestURLRequestContext() {
-    host_resolver_ = net::CreateSystemHostResolver();
+    host_resolver_ = net::CreateSystemHostResolver(NULL);
     proxy_service_ = net::ProxyService::CreateNull();
-    ssl_config_service_ = new net::SSLConfigServiceDefaults;
-    http_transaction_factory_ =
-        net::HttpNetworkLayer::CreateFactory(host_resolver_,
-            proxy_service_, ssl_config_service_);
+    Init();
   }
 
   explicit TestURLRequestContext(const std::string& proxy) {
-    host_resolver_ = net::CreateSystemHostResolver();
+    host_resolver_ = net::CreateSystemHostResolver(NULL);
     net::ProxyConfig proxy_config;
-    proxy_config.proxy_rules.ParseFromString(proxy);
+    proxy_config.proxy_rules().ParseFromString(proxy);
     proxy_service_ = net::ProxyService::CreateFixed(proxy_config);
-    ssl_config_service_ = new net::SSLConfigServiceDefaults;
-    http_transaction_factory_ =
-        net::HttpNetworkLayer::CreateFactory(host_resolver_,
-            proxy_service_, ssl_config_service_);
+    Init();
   }
 
+  void set_cookie_policy(net::CookiePolicy* policy) {
+    cookie_policy_ = policy;
+  }
+
+ protected:
   virtual ~TestURLRequestContext() {
+    delete ftp_transaction_factory_;
     delete http_transaction_factory_;
+    delete http_auth_handler_factory_;
+  }
+
+ private:
+  void Init() {
+    ftp_transaction_factory_ = new net::FtpNetworkLayer(host_resolver_);
+    ssl_config_service_ = new net::SSLConfigServiceDefaults;
+    http_auth_handler_factory_ = net::HttpAuthHandlerFactory::CreateDefault();
+    http_transaction_factory_ =
+        new net::HttpCache(
+          net::HttpNetworkLayer::CreateFactory(NULL, host_resolver_,
+                                               proxy_service_,
+                                               ssl_config_service_,
+                                               http_auth_handler_factory_),
+          disk_cache::CreateInMemoryCacheBackend(0));
+    // In-memory cookie store.
+    cookie_store_ = new net::CookieMonster(NULL, NULL);
+    accept_language_ = "en-us,fr";
+    accept_charset_ = "iso-8859-1,*,utf-8";
   }
 };
+
+// TODO(phajdan.jr): Migrate callers to the new name and remove the typedef.
+typedef TestURLRequestContext URLRequestTestContext;
+
+//-----------------------------------------------------------------------------
+
+class TestURLRequest : public URLRequest {
+ public:
+  TestURLRequest(const GURL& url, Delegate* delegate)
+      : URLRequest(url, delegate) {
+    set_context(new TestURLRequestContext());
+  }
+};
+
+//-----------------------------------------------------------------------------
 
 class TestDelegate : public URLRequest::Delegate {
  public:
@@ -75,12 +196,16 @@ class TestDelegate : public URLRequest::Delegate {
         cancel_in_rs_(false),
         cancel_in_rd_(false),
         cancel_in_rd_pending_(false),
+        cancel_in_getcookiesblocked_(false),
+        cancel_in_setcookieblocked_(false),
         quit_on_complete_(true),
         quit_on_redirect_(false),
         allow_certificate_errors_(false),
         response_started_count_(0),
         received_bytes_count_(0),
         received_redirect_count_(0),
+        blocked_get_cookies_count_(0),
+        blocked_set_cookie_count_(0),
         received_data_before_response_(false),
         request_failed_(false),
         have_certificate_errors_(false),
@@ -183,11 +308,29 @@ class TestDelegate : public URLRequest::Delegate {
       request->Cancel();
   }
 
+  virtual void OnGetCookiesBlocked(URLRequest* request) {
+    blocked_get_cookies_count_++;
+    if (cancel_in_getcookiesblocked_)
+      request->Cancel();
+  }
+
+  virtual void OnSetCookieBlocked(URLRequest* request) {
+    blocked_set_cookie_count_++;
+    if (cancel_in_setcookieblocked_)
+      request->Cancel();
+  }
+
   void set_cancel_in_received_redirect(bool val) { cancel_in_rr_ = val; }
   void set_cancel_in_response_started(bool val) { cancel_in_rs_ = val; }
   void set_cancel_in_received_data(bool val) { cancel_in_rd_ = val; }
   void set_cancel_in_received_data_pending(bool val) {
     cancel_in_rd_pending_ = val;
+  }
+  void set_cancel_in_get_cookies_blocked(bool val) {
+    cancel_in_getcookiesblocked_ = val;
+  }
+  void set_cancel_in_set_cookie_blocked(bool val) {
+    cancel_in_setcookieblocked_ = val;
   }
   void set_quit_on_complete(bool val) { quit_on_complete_ = val; }
   void set_quit_on_redirect(bool val) { quit_on_redirect_ = val; }
@@ -202,6 +345,8 @@ class TestDelegate : public URLRequest::Delegate {
   int bytes_received() const { return static_cast<int>(data_received_.size()); }
   int response_started_count() const { return response_started_count_; }
   int received_redirect_count() const { return received_redirect_count_; }
+  int blocked_get_cookies_count() const { return blocked_get_cookies_count_; }
+  int blocked_set_cookie_count() const { return blocked_set_cookie_count_; }
   bool received_data_before_response() const {
     return received_data_before_response_;
   }
@@ -215,6 +360,8 @@ class TestDelegate : public URLRequest::Delegate {
   bool cancel_in_rs_;
   bool cancel_in_rd_;
   bool cancel_in_rd_pending_;
+  bool cancel_in_getcookiesblocked_;
+  bool cancel_in_setcookieblocked_;
   bool quit_on_complete_;
   bool quit_on_redirect_;
   bool allow_certificate_errors_;
@@ -226,6 +373,8 @@ class TestDelegate : public URLRequest::Delegate {
   int response_started_count_;
   int received_bytes_count_;
   int received_redirect_count_;
+  int blocked_get_cookies_count_;
+  int blocked_set_cookie_count_;
   bool received_data_before_response_;
   bool request_failed_;
   bool have_certificate_errors_;
@@ -235,17 +384,17 @@ class TestDelegate : public URLRequest::Delegate {
   scoped_refptr<net::IOBuffer> buf_;
 };
 
+//-----------------------------------------------------------------------------
+
 // This object bounds the lifetime of an external python-based HTTP/FTP server
 // that can provide various responses useful for testing.
 class BaseTestServer : public base::RefCounted<BaseTestServer> {
  protected:
-  BaseTestServer() { }
+  BaseTestServer() {}
   BaseTestServer(int connection_attempts, int connection_timeout)
-      : launcher_(connection_attempts, connection_timeout) { }
+      : launcher_(connection_attempts, connection_timeout) {}
 
  public:
-  virtual ~BaseTestServer() { }
-
   void set_forking(bool forking) {
     launcher_.set_forking(forking);
   }
@@ -295,6 +444,9 @@ class BaseTestServer : public base::RefCounted<BaseTestServer> {
   }
 
  protected:
+  friend class base::RefCounted<BaseTestServer>;
+  virtual ~BaseTestServer() { }
+
   bool Start(net::TestServerLauncher::Protocol protocol,
              const std::string& host_name, int port,
              const FilePath& document_root,
@@ -345,6 +497,7 @@ class BaseTestServer : public base::RefCounted<BaseTestServer> {
   std::string port_str_;
 };
 
+//-----------------------------------------------------------------------------
 
 // HTTP
 class HTTPTestServer : public BaseTestServer {
@@ -355,6 +508,8 @@ class HTTPTestServer : public BaseTestServer {
   explicit HTTPTestServer(int connection_attempts, int connection_timeout)
       : BaseTestServer(connection_attempts, connection_timeout), loop_(NULL) {
   }
+
+  virtual ~HTTPTestServer() {}
 
  public:
   // Creates and returns a new HTTPTestServer. If |loop| is non-null, requests
@@ -379,14 +534,16 @@ class HTTPTestServer : public BaseTestServer {
       const std::wstring& document_root,
       const std::wstring& file_root_url,
       MessageLoop* loop) {
-    return CreateServerWithFileRootURL(document_root, file_root_url,
-                                       loop, 10, 1000);
+    return CreateServerWithFileRootURL(document_root, file_root_url, loop,
+                                       net::kDefaultTestConnectionAttempts,
+                                       net::kDefaultTestConnectionTimeout);
   }
 
   static scoped_refptr<HTTPTestServer> CreateForkingServer(
       const std::wstring& document_root) {
     scoped_refptr<HTTPTestServer> test_server =
-        new HTTPTestServer(10, 1000);
+        new HTTPTestServer(net::kDefaultTestConnectionAttempts,
+                           net::kDefaultTestConnectionTimeout);
     test_server->set_forking(true);
     FilePath no_cert;
     FilePath docroot = FilePath::FromWStringHack(document_root);
@@ -480,7 +637,7 @@ class HTTPTestServer : public BaseTestServer {
       retry_count--;
     }
     // Make sure we were successful in stopping the testserver.
-    DCHECK(retry_count > 0);
+    DCHECK_GT(retry_count, 0);
   }
 
   virtual std::string scheme() { return "http"; }
@@ -490,6 +647,8 @@ class HTTPTestServer : public BaseTestServer {
   // is used.
   MessageLoop* loop_;
 };
+
+//-----------------------------------------------------------------------------
 
 class HTTPSTestServer : public HTTPTestServer {
  protected:
@@ -560,13 +719,14 @@ class HTTPSTestServer : public HTTPTestServer {
     return test_server;
   }
 
-  virtual ~HTTPSTestServer() {
-  }
-
  protected:
   std::wstring cert_path_;
+
+ private:
+  virtual ~HTTPSTestServer() {}
 };
 
+//-----------------------------------------------------------------------------
 
 class FTPTestServer : public BaseTestServer {
  public:
@@ -600,6 +760,9 @@ class FTPTestServer : public BaseTestServer {
 
     return true;
   }
+
+ private:
+  ~FTPTestServer() {}
 };
 
 #endif  // NET_URL_REQUEST_URL_REQUEST_UNITTEST_H_

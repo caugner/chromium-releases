@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,37 +8,57 @@
 
 #include "app/l10n_util.h"
 #include "app/message_box_flags.h"
+#include "base/callback.h"
 #include "base/file_version_info.h"
-#include "base/json_reader.h"
+#include "base/json/json_reader.h"
+#include "base/json/json_writer.h"
 #include "base/keyboard_codes.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/process_util.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
 #include "base/thread.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/app_modal_dialog.h"
 #include "chrome/browser/app_modal_dialog_queue.h"
 #include "chrome/browser/automation/automation_extension_function.h"
+#include "chrome/browser/automation/automation_extension_tracker.h"
 #include "chrome/browser/automation/automation_provider_list.h"
 #include "chrome/browser/automation/automation_provider_observers.h"
 #include "chrome/browser/automation/extension_automation_constants.h"
 #include "chrome/browser/automation/extension_port_container.h"
 #include "chrome/browser/blocked_popup_container.h"
+#include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/bookmarks/bookmark_storage.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_window.h"
+#include "chrome/browser/browsing_data_remover.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/debugger/devtools_manager.h"
 #include "chrome/browser/download/download_manager.h"
 #include "chrome/browser/download/download_shelf.h"
+#include "chrome/browser/extensions/crx_installer.h"
+#include "chrome/browser/extensions/extension_browser_event_router.h"
+#include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_message_service.h"
+#include "chrome/browser/extensions/extension_tabs_module.h"
+#include "chrome/browser/extensions/extension_toolbar_model.h"
+#include "chrome/browser/extensions/extensions_service.h"
+#include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/find_bar.h"
 #include "chrome/browser/find_bar_controller.h"
 #include "chrome/browser/find_notification_details.h"
+#include "chrome/browser/host_content_settings_map.h"
+#include "chrome/browser/io_thread.h"
 #include "chrome/browser/location_bar.h"
 #include "chrome/browser/login_prompt.h"
+#include "chrome/browser/net/url_request_context_getter.h"
 #include "chrome/browser/net/url_request_mock_util.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile_manager.h"
 #include "chrome/browser/renderer_host/render_process_host.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
@@ -48,11 +68,12 @@
 #include "chrome/browser/tab_contents/tab_contents_view.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/json_value_serializer.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/platform_util.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/test/automation/automation_messages.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "net/proxy/proxy_service.h"
@@ -126,8 +147,10 @@ class ClickTask : public Task {
 AutomationProvider::AutomationProvider(Profile* profile)
     : redirect_query_(0),
       profile_(profile),
-      reply_message_(NULL) {
+      reply_message_(NULL),
+      popup_menu_waiter_(NULL) {
   browser_tracker_.reset(new AutomationBrowserTracker(this));
+  extension_tracker_.reset(new AutomationExtensionTracker(this));
   tab_tracker_.reset(new AutomationTabTracker(this));
   window_tracker_.reset(new AutomationWindowTracker(this));
   autocomplete_edit_tracker_.reset(
@@ -135,6 +158,9 @@ AutomationProvider::AutomationProvider(Profile* profile)
   new_tab_ui_load_observer_.reset(new NewTabUILoadObserver(this));
   dom_operation_observer_.reset(new DomOperationNotificationObserver(this));
   metric_event_duration_observer_.reset(new MetricEventDurationObserver());
+  extension_test_result_observer_.reset(
+      new ExtensionTestResultNotificationObserver(this));
+  g_browser_process->AddRefModule();
 }
 
 AutomationProvider::~AutomationProvider() {
@@ -147,6 +173,11 @@ AutomationProvider::~AutomationProvider() {
   NotificationObserver* observer;
   while ((observer = it.GetNext()) != NULL)
     delete observer;
+
+  if (channel_.get()) {
+    channel_->Close();
+  }
+  g_browser_process->ReleaseModule();
 }
 
 void AutomationProvider::ConnectToChannel(const std::string& channel_id) {
@@ -177,10 +208,11 @@ void AutomationProvider::SetExpectedTabCount(size_t expected_tabs) {
 
 NotificationObserver* AutomationProvider::AddNavigationStatusListener(
     NavigationController* tab, IPC::Message* reply_message,
-    int number_of_navigations) {
+    int number_of_navigations, bool include_current_navigation) {
   NotificationObserver* observer =
       new NavigationNotificationObserver(tab, this, reply_message,
-                                         number_of_navigations);
+                                         number_of_navigations,
+                                         include_current_navigation);
 
   notification_observer_list_.AddObserver(observer);
   return observer;
@@ -251,6 +283,34 @@ int AutomationProvider::GetIndexForNavigationController(
   return parent->GetIndexOfController(controller);
 }
 
+int AutomationProvider::AddExtension(Extension* extension) {
+  DCHECK(extension);
+  return extension_tracker_->Add(extension);
+}
+
+Extension* AutomationProvider::GetExtension(int extension_handle) {
+  return extension_tracker_->GetResource(extension_handle);
+}
+
+Extension* AutomationProvider::GetEnabledExtension(int extension_handle) {
+  Extension* extension = extension_tracker_->GetResource(extension_handle);
+  ExtensionsService* service = profile_->GetExtensionsService();
+  if (extension && service &&
+      service->GetExtensionById(extension->id(), false))
+    return extension;
+  return NULL;
+}
+
+Extension* AutomationProvider::GetDisabledExtension(int extension_handle) {
+  Extension* extension = extension_tracker_->GetResource(extension_handle);
+  ExtensionsService* service = profile_->GetExtensionsService();
+  if (extension && service &&
+      service->GetExtensionById(extension->id(), true) &&
+      !service->GetExtensionById(extension->id(), false))
+    return extension;
+  return NULL;
+}
+
 void AutomationProvider::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(AutomationProvider, message)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_CloseBrowser, CloseBrowser)
@@ -299,13 +359,13 @@ void AutomationProvider::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(AutomationMsg_SetWindowVisible, SetWindowVisible)
 #if !defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER(AutomationMsg_WindowClick, WindowSimulateClick)
+    IPC_MESSAGE_HANDLER(AutomationMsg_WindowMouseMove, WindowSimulateMouseMove)
     IPC_MESSAGE_HANDLER(AutomationMsg_WindowKeyPress, WindowSimulateKeyPress)
-#endif  // !defined(OS_MACOSX)
-#if defined(OS_WIN) || defined(OS_LINUX)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_WindowDrag,
                                     WindowSimulateDrag)
-#endif  // defined(OS_WIN) || defined(OS_LINUX)
+#endif
     IPC_MESSAGE_HANDLER(AutomationMsg_TabCount, GetTabCount)
+    IPC_MESSAGE_HANDLER(AutomationMsg_Type, GetType)
     IPC_MESSAGE_HANDLER(AutomationMsg_Tab, GetTab)
 #if defined(OS_WIN)
     IPC_MESSAGE_HANDLER(AutomationMsg_TabHWND, GetTabHWND)
@@ -315,6 +375,9 @@ void AutomationProvider::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(AutomationMsg_TabIndex, GetTabIndex)
     IPC_MESSAGE_HANDLER(AutomationMsg_TabURL, GetTabURL)
     IPC_MESSAGE_HANDLER(AutomationMsg_ShelfVisibility, GetShelfVisibility)
+    IPC_MESSAGE_HANDLER(AutomationMsg_IsFullscreen, IsFullscreen)
+    IPC_MESSAGE_HANDLER(AutomationMsg_IsFullscreenBubbleVisible,
+                        GetFullscreenBubbleVisibility)
     IPC_MESSAGE_HANDLER(AutomationMsg_HandleUnused, HandleUnused)
     IPC_MESSAGE_HANDLER(AutomationMsg_ApplyAccelerator, ApplyAccelerator)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_DomOperation,
@@ -329,6 +392,8 @@ void AutomationProvider::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(AutomationMsg_SetProxyConfig, SetProxyConfig);
     IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_OpenNewBrowserWindow,
                                     OpenNewBrowserWindow)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_OpenNewBrowserWindowOfType,
+                                    OpenNewBrowserWindowOfType)
     IPC_MESSAGE_HANDLER(AutomationMsg_WindowForBrowser, GetWindowForBrowser)
     IPC_MESSAGE_HANDLER(AutomationMsg_AutocompleteEditForBrowser,
                         GetAutocompleteEditForBrowser)
@@ -387,9 +452,27 @@ void AutomationProvider::OnMessageReceived(const IPC::Message& message) {
                         HandleFindWindowLocationRequest)
     IPC_MESSAGE_HANDLER(AutomationMsg_BookmarkBarVisibility,
                         GetBookmarkBarVisibility)
-    IPC_MESSAGE_HANDLER(AutomationMsg_GetSSLInfoBarCount, GetSSLInfoBarCount)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_ClickSSLInfoBarLink,
-                                    ClickSSLInfoBarLink)
+    IPC_MESSAGE_HANDLER(AutomationMsg_GetBookmarksAsJSON,
+                        GetBookmarksAsJSON)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_WaitForBookmarkModelToLoad,
+                                    WaitForBookmarkModelToLoad)
+    IPC_MESSAGE_HANDLER(AutomationMsg_AddBookmarkGroup,
+                        AddBookmarkGroup)
+    IPC_MESSAGE_HANDLER(AutomationMsg_AddBookmarkURL,
+                        AddBookmarkURL)
+    IPC_MESSAGE_HANDLER(AutomationMsg_ReparentBookmark,
+                        ReparentBookmark)
+    IPC_MESSAGE_HANDLER(AutomationMsg_SetBookmarkTitle,
+                        SetBookmarkTitle)
+    IPC_MESSAGE_HANDLER(AutomationMsg_SetBookmarkURL,
+                        SetBookmarkURL)
+    IPC_MESSAGE_HANDLER(AutomationMsg_RemoveBookmark,
+                        RemoveBookmark)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_SendJSONRequest,
+                                    SendJSONRequest)
+    IPC_MESSAGE_HANDLER(AutomationMsg_GetInfoBarCount, GetInfoBarCount)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_ClickInfoBarAccept,
+                                    ClickInfoBarAccept)
     IPC_MESSAGE_HANDLER(AutomationMsg_GetLastNavigationTime,
                         GetLastNavigationTime)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_WaitForNavigation,
@@ -410,8 +493,11 @@ void AutomationProvider::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(AutomationMsg_SavePackageShouldPromptUser,
                         SavePackageShouldPromptUser)
     IPC_MESSAGE_HANDLER(AutomationMsg_WindowTitle, GetWindowTitle)
+#if defined(OS_WIN)
+    // Depends on ExternalTabContainer, so Windows-only
     IPC_MESSAGE_HANDLER(AutomationMsg_SetEnableExtensionAutomation,
                         SetEnableExtensionAutomation)
+#endif
     IPC_MESSAGE_HANDLER(AutomationMsg_SetShelfVisibility, SetShelfVisibility)
     IPC_MESSAGE_HANDLER(AutomationMsg_BlockedPopupCount, GetBlockedPopupCount)
     IPC_MESSAGE_HANDLER(AutomationMsg_SelectAll, SelectAll)
@@ -436,6 +522,50 @@ void AutomationProvider::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(AutomationMsg_ConnectExternalTab, ConnectExternalTab)
 #endif
     IPC_MESSAGE_HANDLER(AutomationMsg_SetPageFontSize, OnSetPageFontSize)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_InstallExtension,
+                                    InstallExtension)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_LoadExpandedExtension,
+                                    LoadExpandedExtension)
+    IPC_MESSAGE_HANDLER(AutomationMsg_GetEnabledExtensions,
+                        GetEnabledExtensions)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_WaitForExtensionTestResult,
+                                    WaitForExtensionTestResult)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(
+        AutomationMsg_InstallExtensionAndGetHandle,
+        InstallExtensionAndGetHandle)
+    IPC_MESSAGE_HANDLER(AutomationMsg_UninstallExtension,
+                        UninstallExtension)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_EnableExtension,
+                                    EnableExtension)
+    IPC_MESSAGE_HANDLER(AutomationMsg_DisableExtension,
+                        DisableExtension)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(
+        AutomationMsg_ExecuteExtensionActionInActiveTabAsync,
+        ExecuteExtensionActionInActiveTabAsync)
+    IPC_MESSAGE_HANDLER(AutomationMsg_MoveExtensionBrowserAction,
+                        MoveExtensionBrowserAction)
+    IPC_MESSAGE_HANDLER(AutomationMsg_GetExtensionProperty,
+                        GetExtensionProperty)
+    IPC_MESSAGE_HANDLER(AutomationMsg_ShutdownSessionService,
+                        ShutdownSessionService)
+    IPC_MESSAGE_HANDLER(AutomationMsg_SaveAsAsync, SaveAsAsync)
+#if defined(OS_WIN)
+    IPC_MESSAGE_HANDLER(AutomationMsg_BrowserMove, OnBrowserMoved)
+#endif
+    IPC_MESSAGE_HANDLER(AutomationMsg_SetContentSetting, SetContentSetting)
+#if defined(OS_CHROMEOS)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_LoginWithUserAndPass,
+                                    LoginWithUserAndPass)
+#endif
+    IPC_MESSAGE_HANDLER(AutomationMsg_RemoveBrowsingData, RemoveBrowsingData)
+#if defined(TOOLKIT_VIEWS)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_WaitForFocusedViewIDToChange,
+                                    WaitForFocusedViewIDToChange)
+    IPC_MESSAGE_HANDLER(AutomationMsg_StartTrackingPopupMenus,
+                        StartTrackingPopupMenus)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_WaitForPopupMenuToOpen,
+                                    WaitForPopupMenuToOpen)
+#endif
   IPC_END_MESSAGE_MAP()
 }
 
@@ -496,7 +626,8 @@ void AutomationProvider::NavigateToURLBlockUntilNavigationsComplete(
     Browser* browser = FindAndActivateTab(tab);
 
     if (browser) {
-      AddNavigationStatusListener(tab, reply_message, number_of_navigations);
+      AddNavigationStatusListener(tab, reply_message, number_of_navigations,
+                                  false);
 
       // TODO(darin): avoid conversion to GURL
       browser->OpenURL(url, GURL(), CURRENT_TAB, PageTransition::TYPED);
@@ -534,7 +665,7 @@ void AutomationProvider::GoBack(int handle, IPC::Message* reply_message) {
     NavigationController* tab = tab_tracker_->GetResource(handle);
     Browser* browser = FindAndActivateTab(tab);
     if (browser && browser->command_updater()->IsCommandEnabled(IDC_BACK)) {
-      AddNavigationStatusListener(tab, reply_message, 1);
+      AddNavigationStatusListener(tab, reply_message, 1, false);
       browser->GoBack(CURRENT_TAB);
       return;
     }
@@ -550,7 +681,7 @@ void AutomationProvider::GoForward(int handle, IPC::Message* reply_message) {
     NavigationController* tab = tab_tracker_->GetResource(handle);
     Browser* browser = FindAndActivateTab(tab);
     if (browser && browser->command_updater()->IsCommandEnabled(IDC_FORWARD)) {
-      AddNavigationStatusListener(tab, reply_message, 1);
+      AddNavigationStatusListener(tab, reply_message, 1, false);
       browser->GoForward(CURRENT_TAB);
       return;
     }
@@ -566,7 +697,7 @@ void AutomationProvider::Reload(int handle, IPC::Message* reply_message) {
     NavigationController* tab = tab_tracker_->GetResource(handle);
     Browser* browser = FindAndActivateTab(tab);
     if (browser && browser->command_updater()->IsCommandEnabled(IDC_RELOAD)) {
-      AddNavigationStatusListener(tab, reply_message, 1);
+      AddNavigationStatusListener(tab, reply_message, 1, false);
       browser->Reload();
       return;
     }
@@ -590,7 +721,7 @@ void AutomationProvider::SetAuth(int tab_handle,
       // not strictly correct, because a navigation can require both proxy and
       // server auth, but it should be OK for now.
       LoginHandler* handler = iter->second;
-      AddNavigationStatusListener(tab, reply_message, 1);
+      AddNavigationStatusListener(tab, reply_message, 1, false);
       handler->SetAuth(username, password);
       return;
     }
@@ -610,7 +741,7 @@ void AutomationProvider::CancelAuth(int tab_handle,
     if (iter != login_handler_map_.end()) {
       // If auth is needed again after this, something is screwy.
       LoginHandler* handler = iter->second;
-      AddNavigationStatusListener(tab, reply_message, 1);
+      AddNavigationStatusListener(tab, reply_message, 1, false);
       handler->CancelAuth();
       return;
     }
@@ -719,6 +850,16 @@ void AutomationProvider::ClickAppModalDialogButton(int button, bool* success) {
   }
 }
 
+void AutomationProvider::ShutdownSessionService(int handle, bool* result) {
+  if (browser_tracker_->ContainsHandle(handle)) {
+    Browser* browser = browser_tracker_->GetResource(handle);
+    browser->profile()->ShutdownSessionService();
+    *result = true;
+  } else {
+    *result = false;
+  }
+}
+
 void AutomationProvider::GetBrowserWindow(int index, int* handle) {
   *handle = 0;
   if (index >= 0) {
@@ -733,7 +874,8 @@ void AutomationProvider::GetBrowserWindow(int index, int* handle) {
 void AutomationProvider::FindNormalBrowserWindow(int* handle) {
   *handle = 0;
   Browser* browser = BrowserList::FindBrowserWithType(profile_,
-                                                      Browser::TYPE_NORMAL);
+                                                      Browser::TYPE_NORMAL,
+                                                      false);
   if (browser)
     *handle = browser_tracker_->Add(browser);
 }
@@ -745,7 +887,7 @@ void AutomationProvider::GetLastActiveBrowserWindow(int* handle) {
     *handle = browser_tracker_->Add(browser);
 }
 
-#if defined(OS_LINUX) || defined(OS_MACOSX)
+#if defined(OS_POSIX)
 // TODO(estade): use this implementation for all platforms?
 void AutomationProvider::GetActiveWindow(int* handle) {
   gfx::NativeWindow window =
@@ -775,6 +917,7 @@ void AutomationProvider::ExecuteBrowserCommand(
     IDC_HOME,
     IDC_SELECT_NEXT_TAB,
     IDC_SELECT_PREVIOUS_TAB,
+    IDC_SHOW_BOOKMARK_MANAGER,
     IDC_SHOW_DOWNLOADS,
     IDC_SHOW_HISTORY,
   };
@@ -823,7 +966,7 @@ class InvokeTaskLaterTask : public Task {
   DISALLOW_COPY_AND_ASSIGN(InvokeTaskLaterTask);
 };
 
-#if defined(OS_WIN) || defined(OS_LINUX)
+#if !defined(OS_MACOSX)
 void AutomationProvider::WindowSimulateClick(const IPC::Message& message,
                                              int handle,
                                              const gfx::Point& click,
@@ -832,6 +975,13 @@ void AutomationProvider::WindowSimulateClick(const IPC::Message& message,
     ui_controls::SendMouseMoveNotifyWhenDone(click.x(), click.y(),
                                              new ClickTask(flags));
   }
+}
+
+void AutomationProvider::WindowSimulateMouseMove(const IPC::Message& message,
+                                                 int handle,
+                                                 const gfx::Point& location) {
+  if (window_tracker_->ContainsHandle(handle))
+    ui_controls::SendMouseMove(location.x(), location.y());
 }
 
 void AutomationProvider::WindowSimulateKeyPress(const IPC::Message& message,
@@ -851,7 +1001,7 @@ void AutomationProvider::WindowSimulateKeyPress(const IPC::Message& message,
                             ((flags & views::Event::EF_ALT_DOWN) ==
                               views::Event::EF_ALT_DOWN));
 }
-#endif  // defined(OS_WIN) || defined(OS_LINUX)
+#endif  // !defined(OS_MACOSX)
 
 void AutomationProvider::IsWindowActive(int handle, bool* success,
                                         bool* is_active) {
@@ -871,6 +1021,15 @@ void AutomationProvider::GetTabCount(int handle, int* tab_count) {
   if (browser_tracker_->ContainsHandle(handle)) {
     Browser* browser = browser_tracker_->GetResource(handle);
     *tab_count = browser->tab_count();
+  }
+}
+
+void AutomationProvider::GetType(int handle, int* type_as_int) {
+  *type_as_int = -1;  // -1 is the error code
+
+  if (browser_tracker_->ContainsHandle(handle)) {
+    Browser* browser = browser_tracker_->GetResource(handle);
+    *type_as_int = static_cast<int>(browser->type());
   }
 }
 
@@ -919,7 +1078,7 @@ void AutomationProvider::HandleUnused(const IPC::Message& message, int handle) {
 }
 
 void AutomationProvider::OnChannelError() {
-  LOG(ERROR) << "AutomationProxy went away, shutting down app.";
+  LOG(INFO) << "AutomationProxy went away, shutting down app.";
   AutomationProviderList::GetInstance()->RemoveProvider(this);
 }
 
@@ -933,12 +1092,10 @@ void AutomationProvider::OnRedirectQueryComplete(
   DCHECK(reply_message_ != NULL);
 
   std::vector<GURL> redirects_gurl;
+  reply_message_->WriteBool(success);
   if (success) {
-    reply_message_->WriteBool(true);
     for (size_t i = 0; i < redirects->size(); i++)
       redirects_gurl.push_back(redirects->at(i));
-  } else {
-    reply_message_->WriteInt(-1);  // Negative count indicates failure.
   }
 
   IPC::ParamTraits<std::vector<GURL> >::Write(reply_message_, redirects_gurl);
@@ -969,8 +1126,16 @@ void AutomationProvider::GetCookies(const GURL& url, int handle,
   *value_size = -1;
   if (url.is_valid() && tab_tracker_->ContainsHandle(handle)) {
     NavigationController* tab = tab_tracker_->GetResource(handle);
-    *value =
-        tab->profile()->GetRequestContext()->cookie_store()->GetCookies(url);
+
+    // Since we are running on the UI thread don't call GetURLRequestContext().
+    scoped_refptr<URLRequestContextGetter> request_context =
+        tab->tab_contents()->request_context();
+    if (!request_context.get())
+      request_context = tab->profile()->GetRequestContext();
+
+    net::CookieStore* cookie_store = request_context->GetCookieStore();
+
+    *value = cookie_store->GetCookies(url);
     *value_size = static_cast<int>(value->size());
   }
 }
@@ -983,8 +1148,17 @@ void AutomationProvider::SetCookie(const GURL& url,
 
   if (url.is_valid() && tab_tracker_->ContainsHandle(handle)) {
     NavigationController* tab = tab_tracker_->GetResource(handle);
-    URLRequestContext* context = tab->profile()->GetRequestContext();
-    if (context->cookie_store()->SetCookie(url, value))
+
+    scoped_refptr<URLRequestContextGetter> request_context =
+        tab->tab_contents()->request_context();
+    if (!request_context.get())
+      request_context = tab->profile()->GetRequestContext();
+
+    // Since we are running on the UI thread don't call GetURLRequestContext().
+    scoped_refptr<net::CookieStore> cookie_store =
+        request_context->GetCookieStore();
+
+    if (cookie_store->SetCookie(url, value))
       *response_value = 1;
   }
 }
@@ -1006,8 +1180,9 @@ void AutomationProvider::GetTabProcessID(int handle, int* process_id) {
     *process_id = 0;
     TabContents* tab_contents =
         tab_tracker_->GetResource(handle)->tab_contents();
-    if (tab_contents->process())
-      *process_id = tab_contents->process()->process().pid();
+    RenderProcessHost* rph = tab_contents->GetRenderProcessHost();
+    if (rph)
+      *process_id = base::GetProcId(rph->GetHandle());
   }
 }
 
@@ -1052,10 +1227,28 @@ void AutomationProvider::GetShelfVisibility(int handle, bool* visible) {
   *visible = false;
 
   if (browser_tracker_->ContainsHandle(handle)) {
+#if defined(OS_CHROMEOS)
+    // Chromium OS shows FileBrowse ui rather than download shelf. So we
+    // enumerate all browsers and look for a chrome://filebrowse... pop up.
+    for (BrowserList::const_iterator it = BrowserList::begin();
+         it != BrowserList::end(); ++it) {
+      if ((*it)->type() == Browser::TYPE_POPUP) {
+        const GURL& url =
+            (*it)->GetTabContentsAt((*it)->selected_index())->GetURL();
+
+        if (url.SchemeIs(chrome::kChromeUIScheme) &&
+            url.host() == chrome::kChromeUIFileBrowseHost) {
+          *visible = true;
+          break;
+        }
+      }
+    }
+#else
     Browser* browser = browser_tracker_->GetResource(handle);
     if (browser) {
       *visible = browser->window()->IsDownloadShelfVisible();
     }
+#endif
   }
 }
 
@@ -1071,6 +1264,26 @@ void AutomationProvider::SetShelfVisibility(int handle, bool visible) {
   }
 }
 
+void AutomationProvider::IsFullscreen(int handle, bool* visible) {
+  *visible = false;
+
+  if (browser_tracker_->ContainsHandle(handle)) {
+    Browser* browser = browser_tracker_->GetResource(handle);
+    if (browser)
+      *visible = browser->window()->IsFullscreen();
+  }
+}
+
+void AutomationProvider::GetFullscreenBubbleVisibility(int handle,
+                                                       bool* visible) {
+  *visible = false;
+
+  if (browser_tracker_->ContainsHandle(handle)) {
+    Browser* browser = browser_tracker_->GetResource(handle);
+    if (browser)
+      *visible = browser->window()->IsFullscreenBubbleVisible();
+  }
+}
 
 void AutomationProvider::GetConstrainedWindowCount(int handle, int* count) {
   *count = -1;  // -1 is the error code
@@ -1129,7 +1342,7 @@ void AutomationProvider::GetFindWindowVisibility(int handle, bool* visible) {
   Browser* browser = browser_tracker_->GetResource(handle);
   if (browser) {
     FindBarTesting* find_bar =
-        browser->find_bar()->find_bar()->GetFindBarTesting();
+        browser->GetFindBarController()->find_bar()->GetFindBarTesting();
     find_bar->GetFindBarWindowInfo(NULL, visible);
   }
 }
@@ -1141,12 +1354,328 @@ void AutomationProvider::HandleFindWindowLocationRequest(int handle, int* x,
   if (browser_tracker_->ContainsHandle(handle)) {
      Browser* browser = browser_tracker_->GetResource(handle);
      FindBarTesting* find_bar =
-       browser->find_bar()->find_bar()->GetFindBarTesting();
+       browser->GetFindBarController()->find_bar()->GetFindBarTesting();
      find_bar->GetFindBarWindowInfo(&position, &visible);
   }
 
   *x = position.x();
   *y = position.y();
+}
+
+// Bookmark bar visibility is based on the pref (e.g. is it in the toolbar).
+// Presence in the NTP is NOT considered visible by this call.
+void AutomationProvider::GetBookmarkBarVisibility(int handle,
+                                                  bool* visible,
+                                                  bool* animating) {
+  *visible = false;
+  *animating = false;
+
+  if (browser_tracker_->ContainsHandle(handle)) {
+    Browser* browser = browser_tracker_->GetResource(handle);
+    if (browser) {
+#if 0 // defined(TOOLKIT_VIEWS) && defined(OS_LINUX)
+      // IsBookmarkBarVisible() line looks correct but is not
+      // consistent across platforms.  Specifically, on Mac/Linux, it
+      // returns false if the bar is hidden in a pref (even if visible
+      // on the NTP).  On ChromeOS, it returned true if on NTP
+      // independent of the pref.  Making the code more consistent
+      // caused a perf bot regression on Windows (which shares views).
+      // See http://crbug.com/40225
+      *visible = browser->profile()->GetPrefs()->GetBoolean(
+          prefs::kShowBookmarkBar);
+#else
+      *visible = browser->window()->IsBookmarkBarVisible();
+#endif
+      *animating = browser->window()->IsBookmarkBarAnimating();
+    }
+  }
+}
+
+void AutomationProvider::GetBookmarksAsJSON(int handle,
+                                            std::string* bookmarks_as_json,
+                                            bool *success) {
+  *success = false;
+  if (browser_tracker_->ContainsHandle(handle)) {
+    Browser* browser = browser_tracker_->GetResource(handle);
+    if (browser) {
+      if (!browser->profile()->GetBookmarkModel()->IsLoaded()) {
+        return;
+      }
+      scoped_refptr<BookmarkStorage> storage = new BookmarkStorage(
+          browser->profile(),
+          browser->profile()->GetBookmarkModel());
+      *success = storage->SerializeData(bookmarks_as_json);
+    }
+  }
+}
+
+void AutomationProvider::WaitForBookmarkModelToLoad(
+    int handle,
+    IPC::Message* reply_message) {
+  if (browser_tracker_->ContainsHandle(handle)) {
+    Browser* browser = browser_tracker_->GetResource(handle);
+    BookmarkModel* model = browser->profile()->GetBookmarkModel();
+    if (model->IsLoaded()) {
+      AutomationMsg_WaitForBookmarkModelToLoad::WriteReplyParams(
+          reply_message, true);
+      Send(reply_message);
+    } else {
+      // The observer will delete itself when done.
+      new AutomationProviderBookmarkModelObserver(this, reply_message,
+                                                  model);
+    }
+  }
+}
+
+void AutomationProvider::AddBookmarkGroup(int handle,
+                                          int64 parent_id, int index,
+                                          std::wstring title,
+                                          bool* success) {
+  if (browser_tracker_->ContainsHandle(handle)) {
+    Browser* browser = browser_tracker_->GetResource(handle);
+    if (browser) {
+      BookmarkModel* model = browser->profile()->GetBookmarkModel();
+      if (!model->IsLoaded()) {
+        *success = false;
+        return;
+      }
+      const BookmarkNode* parent = model->GetNodeByID(parent_id);
+      DCHECK(parent);
+      if (parent) {
+        const BookmarkNode* child = model->AddGroup(parent, index,
+                                                    WideToUTF16(title));
+        DCHECK(child);
+        if (child)
+          *success = true;
+      }
+    }
+  }
+  *success = false;
+}
+
+void AutomationProvider::AddBookmarkURL(int handle,
+                                        int64 parent_id, int index,
+                                        std::wstring title, const GURL& url,
+                                        bool* success) {
+  if (browser_tracker_->ContainsHandle(handle)) {
+    Browser* browser = browser_tracker_->GetResource(handle);
+    if (browser) {
+      BookmarkModel* model = browser->profile()->GetBookmarkModel();
+      if (!model->IsLoaded()) {
+        *success = false;
+        return;
+      }
+      const BookmarkNode* parent = model->GetNodeByID(parent_id);
+      DCHECK(parent);
+      if (parent) {
+        const BookmarkNode* child = model->AddURL(parent, index,
+                                                  WideToUTF16(title), url);
+        DCHECK(child);
+        if (child)
+          *success = true;
+      }
+    }
+  }
+  *success = false;
+}
+
+void AutomationProvider::ReparentBookmark(int handle,
+                                          int64 id, int64 new_parent_id,
+                                          int index,
+                                          bool* success) {
+  if (browser_tracker_->ContainsHandle(handle)) {
+    Browser* browser = browser_tracker_->GetResource(handle);
+    if (browser) {
+      BookmarkModel* model = browser->profile()->GetBookmarkModel();
+      if (!model->IsLoaded()) {
+        *success = false;
+        return;
+      }
+      const BookmarkNode* node = model->GetNodeByID(id);
+      DCHECK(node);
+      const BookmarkNode* new_parent = model->GetNodeByID(new_parent_id);
+      DCHECK(new_parent);
+      if (node && new_parent) {
+        model->Move(node, new_parent, index);
+        *success = true;
+      }
+    }
+  }
+  *success = false;
+}
+
+void AutomationProvider::SetBookmarkTitle(int handle,
+                                          int64 id, std::wstring title,
+                                          bool* success) {
+  if (browser_tracker_->ContainsHandle(handle)) {
+    Browser* browser = browser_tracker_->GetResource(handle);
+    if (browser) {
+      BookmarkModel* model = browser->profile()->GetBookmarkModel();
+      if (!model->IsLoaded()) {
+        *success = false;
+        return;
+      }
+      const BookmarkNode* node = model->GetNodeByID(id);
+      DCHECK(node);
+      if (node) {
+        model->SetTitle(node, WideToUTF16(title));
+        *success = true;
+      }
+    }
+  }
+  *success = false;
+}
+
+void AutomationProvider::SetBookmarkURL(int handle,
+                                        int64 id, const GURL& url,
+                                        bool* success) {
+  if (browser_tracker_->ContainsHandle(handle)) {
+    Browser* browser = browser_tracker_->GetResource(handle);
+    if (browser) {
+      BookmarkModel* model = browser->profile()->GetBookmarkModel();
+      if (!model->IsLoaded()) {
+        *success = false;
+        return;
+      }
+      const BookmarkNode* node = model->GetNodeByID(id);
+      DCHECK(node);
+      if (node) {
+        model->SetURL(node, url);
+        *success = true;
+      }
+    }
+  }
+  *success = false;
+}
+
+void AutomationProvider::RemoveBookmark(int handle,
+                                        int64 id,
+                                        bool* success) {
+  if (browser_tracker_->ContainsHandle(handle)) {
+    Browser* browser = browser_tracker_->GetResource(handle);
+    if (browser) {
+      BookmarkModel* model = browser->profile()->GetBookmarkModel();
+      if (!model->IsLoaded()) {
+        *success = false;
+        return;
+      }
+      const BookmarkNode* node = model->GetNodeByID(id);
+      DCHECK(node);
+      if (node) {
+        const BookmarkNode* parent = node->GetParent();
+        DCHECK(parent);
+        model->Remove(parent, parent->IndexOfChild(node));
+        *success = true;
+      }
+    }
+  }
+  *success = false;
+}
+
+void AutomationProvider::WaitForDownloadsToComplete(
+    DictionaryValue* args,
+    IPC::Message* reply_message) {
+  std::string json_return;
+  bool reply_return = true;
+  AutomationProviderDownloadManagerObserver observer;
+  std::vector<DownloadItem*> downloads;
+
+  // Look for a quick return.
+  if (!profile_->HasCreatedDownloadManager()) {
+    json_return = "{'error': 'no download manager'}";
+    reply_return = false;
+  } else {
+    profile_->GetDownloadManager()->GetCurrentDownloads(&observer,
+                                                        FilePath());
+    downloads = observer.Downloads();
+    if (downloads.size() == 0) {
+      json_return = "{}";
+    }
+  }
+  if (!json_return.empty()) {
+    AutomationMsg_SendJSONRequest::WriteReplyParams(
+        reply_message, json_return, reply_return);
+    Send(reply_message);
+  }
+
+  // The observer owns itself.  When the last observed item pings, it
+  // deletes itself.
+  AutomationProviderDownloadItemObserver* item_observer =
+      new AutomationProviderDownloadItemObserver(
+          this, reply_message, downloads.size());
+  for (std::vector<DownloadItem*>::iterator i = downloads.begin();
+       i != downloads.end();
+       i++) {
+    (*i)->AddObserver(item_observer);
+  }
+}
+
+void AutomationProvider::SendJSONRequest(
+    int handle,
+    std::string json_request,
+    IPC::Message* reply_message) {
+  Browser* browser = NULL;
+  std::string error_string;
+  scoped_ptr<Value> values;
+
+  // Basic error checking.
+  if (browser_tracker_->ContainsHandle(handle)) {
+    browser = browser_tracker_->GetResource(handle);
+  }
+  if (!browser) {
+    error_string = "no browser object";
+  } else {
+    base::JSONReader reader;
+    std::string error;
+    values.reset(reader.ReadAndReturnError(json_request, true, NULL, &error));
+    if (!error.empty()) {
+      error_string = error;
+    }
+  }
+
+  // Make sure input is a dict with a string command.
+  std::string command;
+  DictionaryValue* dict_value = NULL;
+  if (error_string.empty()) {
+    if (values->GetType() != Value::TYPE_DICTIONARY) {
+      error_string = "not a dict or no command key in dict";
+    } else {
+      // Ownership remains with "values" variable.
+      dict_value = static_cast<DictionaryValue*>(values.get());
+      if (!dict_value->GetStringASCII(std::string("command"), &command)) {
+        error_string = "no command key in dict or not a string command";
+      }
+    }
+  }
+
+  if (error_string.empty()) {
+    // TODO(jrg): table of calls; async gets passed reply_message,
+    // sync methods gets passed an output json dict which we package
+    // up and send.  Right now we only have one.
+    if (command == "WaitForAllDownloadsToComplete") {
+      this->WaitForDownloadsToComplete(dict_value, reply_message);
+      return;
+    } else {
+      error_string = "unknown command";
+    }
+  }
+
+  // If we hit an error, return info.
+  // Return a dict of {'error', 'descriptive_string_for_error'}.
+  // Else return an empty dict.
+  std::string json_string;
+  bool success = true;
+  if (!error_string.empty()) {
+    scoped_ptr<DictionaryValue> dict(new DictionaryValue);
+    dict->SetString(L"error", error_string);
+    base::JSONWriter::Write(dict.get(), false, &json_string);
+    success = false;
+  } else {
+    json_string = "{}";
+  }
+  AutomationMsg_SendJSONRequest::WriteReplyParams(
+      reply_message, json_string, success);
+  Send(reply_message);
 }
 
 void AutomationProvider::HandleInspectElementRequest(
@@ -1175,17 +1704,18 @@ void AutomationProvider::ReceivedInspectElementResponse(int num_resources) {
 
 class SetProxyConfigTask : public Task {
  public:
-  explicit SetProxyConfigTask(net::ProxyService* proxy_service,
-                              const std::string& new_proxy_config)
-      : proxy_service_(proxy_service), proxy_config_(new_proxy_config) {}
+  SetProxyConfigTask(URLRequestContextGetter* request_context_getter,
+                     const std::string& new_proxy_config)
+      : request_context_getter_(request_context_getter),
+        proxy_config_(new_proxy_config) {}
   virtual void Run() {
     // First, deserialize the JSON string. If this fails, log and bail.
     JSONStringValueSerializer deserializer(proxy_config_);
-    std::string error_message;
-    scoped_ptr<Value> root(deserializer.Deserialize(&error_message));
+    std::string error_msg;
+    scoped_ptr<Value> root(deserializer.Deserialize(NULL, &error_msg));
     if (!root.get() || root->GetType() != Value::TYPE_DICTIONARY) {
       DLOG(WARNING) << "Received bad JSON string for ProxyConfig: "
-                    << error_message;
+                    << error_msg;
       return;
     }
 
@@ -1195,10 +1725,12 @@ class SetProxyConfigTask : public Task {
     net::ProxyConfig pc;
     PopulateProxyConfig(*dict.get(), &pc);
 
-    DCHECK(proxy_service_);
+    net::ProxyService* proxy_service =
+        request_context_getter_->GetURLRequestContext()->proxy_service();
+    DCHECK(proxy_service);
     scoped_ptr<net::ProxyConfigService> proxy_config_service(
         new net::ProxyConfigServiceFixed(pc));
-    proxy_service_->ResetConfigService(proxy_config_service.release());
+    proxy_service->ResetConfigService(proxy_config_service.release());
   }
 
   void PopulateProxyConfig(const DictionaryValue& dict, net::ProxyConfig* pc) {
@@ -1210,46 +1742,44 @@ class SetProxyConfigTask : public Task {
     }
     bool auto_config;
     if (dict.GetBoolean(automation::kJSONProxyAutoconfig, &auto_config)) {
-      pc->auto_detect = true;
+      pc->set_auto_detect(true);
     }
     std::string pac_url;
     if (dict.GetString(automation::kJSONProxyPacUrl, &pac_url)) {
-      pc->pac_url = GURL(pac_url);
+      pc->set_pac_url(GURL(pac_url));
     }
     std::string proxy_bypass_list;
     if (dict.GetString(automation::kJSONProxyBypassList, &proxy_bypass_list)) {
-      pc->ParseNoProxyList(proxy_bypass_list);
+      pc->proxy_rules().bypass_rules.ParseFromString(proxy_bypass_list);
     }
     std::string proxy_server;
     if (dict.GetString(automation::kJSONProxyServer, &proxy_server)) {
-      pc->proxy_rules.ParseFromString(proxy_server);
+      pc->proxy_rules().ParseFromString(proxy_server);
     }
   }
 
  private:
-  net::ProxyService* proxy_service_;
+  scoped_refptr<URLRequestContextGetter> request_context_getter_;
   std::string proxy_config_;
 };
 
 
 void AutomationProvider::SetProxyConfig(const std::string& new_proxy_config) {
-  URLRequestContext* context = Profile::GetDefaultRequestContext();
-  if (!context) {
+  URLRequestContextGetter* context_getter = Profile::GetDefaultRequestContext();
+  if (!context_getter) {
     FilePath user_data_dir;
     PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
     ProfileManager* profile_manager = g_browser_process->profile_manager();
     DCHECK(profile_manager);
     Profile* profile = profile_manager->GetDefaultProfile(user_data_dir);
     DCHECK(profile);
-    context = profile->GetRequestContext();
+    context_getter = profile->GetRequestContext();
   }
-  DCHECK(context);
-  // Every URLRequestContext should have a proxy service.
-  net::ProxyService* proxy_service = context->proxy_service();
-  DCHECK(proxy_service);
+  DCHECK(context_getter);
 
-  g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
-      new SetProxyConfigTask(proxy_service, new_proxy_config));
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      new SetProxyConfigTask(context_getter, new_proxy_config));
 }
 
 void AutomationProvider::GetDownloadDirectory(
@@ -1265,10 +1795,17 @@ void AutomationProvider::GetDownloadDirectory(
 
 void AutomationProvider::OpenNewBrowserWindow(bool show,
                                               IPC::Message* reply_message) {
+  OpenNewBrowserWindowOfType(static_cast<int>(Browser::TYPE_NORMAL), show,
+                             reply_message);
+}
+
+void AutomationProvider::OpenNewBrowserWindowOfType(
+    int type, bool show, IPC::Message* reply_message) {
   new BrowserOpenedNotificationObserver(this, reply_message);
   // We may have no current browser windows open so don't rely on
   // asking an existing browser to execute the IDC_NEWWINDOW command
-  Browser* browser = Browser::Create(profile_);
+  Browser* browser = new Browser(static_cast<Browser::Type>(type), profile_);
+  browser->CreateBrowserWindow();
   browser->AddBlankTab(true);
   if (show)
     browser->window()->Show();
@@ -1289,7 +1826,6 @@ void AutomationProvider::GetWindowForBrowser(int browser_handle,
   }
 }
 
-#if !defined(OS_MACOSX)
 void AutomationProvider::GetAutocompleteEditForBrowser(
     int browser_handle,
     bool* success,
@@ -1306,7 +1842,6 @@ void AutomationProvider::GetAutocompleteEditForBrowser(
     *success = true;
   }
 }
-#endif  // !defined(OS_MACOSX)
 
 void AutomationProvider::ShowInterstitialPage(int tab_handle,
                                               const std::string& html_text,
@@ -1315,7 +1850,7 @@ void AutomationProvider::ShowInterstitialPage(int tab_handle,
     NavigationController* controller = tab_tracker_->GetResource(tab_handle);
     TabContents* tab_contents = controller->tab_contents();
 
-    AddNavigationStatusListener(controller, reply_message, 1);
+    AddNavigationStatusListener(controller, reply_message, 1, false);
     AutomationInterstitialPage* interstitial =
         new AutomationInterstitialPage(tab_contents,
                                        GURL("about:interstitial"),
@@ -1464,7 +1999,7 @@ void AutomationProvider::ActionOnSSLBlockingPage(int handle, bool proceed,
           InterstitialPage::GetInterstitialPage(tab_contents);
       if (ssl_blocking_page) {
         if (proceed) {
-          AddNavigationStatusListener(tab, reply_message, 1);
+          AddNavigationStatusListener(tab, reply_message, 1, false);
           ssl_blocking_page->Proceed();
           return;
         }
@@ -1552,8 +2087,6 @@ void AutomationProvider::SavePage(int tab_handle,
   *success = true;
 }
 
-#if !defined(OS_MACOSX)
-// TODO(port): Enable these.
 void AutomationProvider::GetAutocompleteEditText(int autocomplete_edit_handle,
                                                  bool* success,
                                                  std::wstring* text) {
@@ -1604,6 +2137,7 @@ void AutomationProvider::AutocompleteEditIsQueryInProgress(
   }
 }
 
+#if !defined(OS_MACOSX)
 void AutomationProvider::OnMessageFromExternalHost(int handle,
                                                    const std::string& message,
                                                    const std::string& origin,
@@ -1648,7 +2182,7 @@ bool AutomationProvider::InterceptBrowserEventMessageFromExternalHost(
   // The message is a JSON-encoded array with two elements, both strings. The
   // first is the name of the event to dispatch.  The second is a JSON-encoding
   // of the arguments specific to that event.
-  scoped_ptr<Value> message_value(JSONReader::Read(message, false));
+  scoped_ptr<Value> message_value(base::JSONReader::Read(message, false));
   if (!message_value.get() || !message_value->IsType(Value::TYPE_LIST)) {
     LOG(WARNING) << "Invalid browser event specified through automation";
     return false;
@@ -1669,8 +2203,8 @@ bool AutomationProvider::InterceptBrowserEventMessageFromExternalHost(
   }
 
   if (profile()->GetExtensionMessageService()) {
-    profile()->GetExtensionMessageService()->
-        DispatchEventToRenderers(event_name.c_str(), json_args);
+    profile()->GetExtensionMessageService()->DispatchEventToRenderers(
+        event_name, json_args, profile()->IsOffTheRecord());
   }
 
   return true;
@@ -1730,7 +2264,7 @@ void TestingAutomationProvider::OnRemoveProvider() {
   AutomationProviderList::GetInstance()->RemoveProvider(this);
 }
 
-void AutomationProvider::GetSSLInfoBarCount(int handle, int* count) {
+void AutomationProvider::GetInfoBarCount(int handle, int* count) {
   *count = -1;  // -1 means error.
   if (tab_tracker_->ContainsHandle(handle)) {
     NavigationController* nav_controller = tab_tracker_->GetResource(handle);
@@ -1739,10 +2273,10 @@ void AutomationProvider::GetSSLInfoBarCount(int handle, int* count) {
   }
 }
 
-void AutomationProvider::ClickSSLInfoBarLink(int handle,
-                                             int info_bar_index,
-                                             bool wait_for_navigation,
-                                             IPC::Message* reply_message) {
+void AutomationProvider::ClickInfoBarAccept(int handle,
+                                            int info_bar_index,
+                                            bool wait_for_navigation,
+                                            IPC::Message* reply_message) {
   bool success = false;
   if (tab_tracker_->ContainsHandle(handle)) {
     NavigationController* nav_controller = tab_tracker_->GetResource(handle);
@@ -1750,7 +2284,7 @@ void AutomationProvider::ClickSSLInfoBarLink(int handle,
       int count = nav_controller->tab_contents()->infobar_delegate_count();
       if (info_bar_index >= 0 && info_bar_index < count) {
         if (wait_for_navigation) {
-          AddNavigationStatusListener(nav_controller, reply_message, 1);
+          AddNavigationStatusListener(nav_controller, reply_message, 1, false);
         }
         InfoBarDelegate* delegate =
             nav_controller->tab_contents()->GetInfoBarDelegateAt(
@@ -1768,7 +2302,7 @@ void AutomationProvider::ClickSSLInfoBarLink(int handle,
   // TODO(phajdan.jr): investgate whether the reply param (currently
   // AUTOMATION_MSG_NAVIGATION_ERROR) should depend on success.
   if (!wait_for_navigation || !success)
-    AutomationMsg_ClickSSLInfoBarLink::WriteReplyParams(
+    AutomationMsg_ClickInfoBarAccept::WriteReplyParams(
         reply_message, AUTOMATION_MSG_NAVIGATION_ERROR);
 }
 
@@ -1792,7 +2326,7 @@ void AutomationProvider::WaitForNavigation(int handle,
     return;
   }
 
-  AddNavigationStatusListener(controller, reply_message, 1);
+  AddNavigationStatusListener(controller, reply_message, 1, true);
 }
 
 void AutomationProvider::SetIntPreference(int handle,
@@ -1865,16 +2399,31 @@ void AutomationProvider::OverrideEncoding(int tab_handle,
 #if defined(OS_WIN)
   if (tab_tracker_->ContainsHandle(tab_handle)) {
     NavigationController* nav = tab_tracker_->GetResource(tab_handle);
+    if (!nav)
+      return;
     Browser* browser = FindAndActivateTab(nav);
-    DCHECK(browser);
 
-    if (browser->command_updater()->IsCommandEnabled(IDC_ENCODING_MENU)) {
+    // If the browser has UI, simulate what a user would do.
+    // Activate the tab and then click the encoding menu.
+    if (browser &&
+        browser->command_updater()->IsCommandEnabled(IDC_ENCODING_MENU)) {
       int selected_encoding_id =
           CharacterEncoding::GetCommandIdByCanonicalEncodingName(encoding_name);
       if (selected_encoding_id) {
         browser->OverrideEncoding(selected_encoding_id);
         *success = true;
       }
+    } else {
+      // There is no UI, Chrome probably runs as Chrome-Frame mode.
+      // Try to get TabContents and call its override_encoding method.
+      TabContents* contents = nav->tab_contents();
+      if (!contents)
+        return;
+      const std::string selected_encoding =
+          CharacterEncoding::GetCanonicalEncodingNameByAliasName(encoding_name);
+      if (selected_encoding.empty())
+        return;
+      contents->SetOverrideEncoding(selected_encoding);
     }
   }
 #else
@@ -1885,15 +2434,6 @@ void AutomationProvider::OverrideEncoding(int tab_handle,
 
 void AutomationProvider::SavePackageShouldPromptUser(bool should_prompt) {
   SavePackage::SetShouldPromptUser(should_prompt);
-}
-
-void AutomationProvider::SetEnableExtensionAutomation(bool automation_enabled) {
-  AutomationExtensionFunction::SetEnabled(automation_enabled);
-}
-
-void AutomationProvider::GetWindowTitle(int handle, string16* text) {
-  gfx::NativeWindow window = window_tracker_->GetResource(handle);
-  text->assign(platform_util::GetWindowTitle(window));
 }
 
 void AutomationProvider::GetBlockedPopupCount(int handle, int* count) {
@@ -1963,7 +2503,8 @@ void AutomationProvider::ReloadAsync(int tab_handle) {
       return;
     }
 
-    tab->Reload(false);
+    const bool check_for_repost = true;
+    tab->Reload(check_for_repost);
   }
 }
 
@@ -2002,6 +2543,14 @@ void AutomationProvider::OnSetPageFontSize(int tab_handle,
   }
 }
 
+void AutomationProvider::RemoveBrowsingData(int remove_mask) {
+  BrowsingDataRemover* remover;
+  remover = new BrowsingDataRemover(profile(),
+      BrowsingDataRemover::EVERYTHING,  // All time periods.
+      base::Time());
+  remover->Remove(remove_mask);
+  // BrowsingDataRemover deletes itself.
+}
 
 void AutomationProvider::WaitForBrowserWindowCountToBecome(
     int target_count, IPC::Message* reply_message) {
@@ -2035,7 +2584,8 @@ void AutomationProvider::GoBackBlockUntilNavigationsComplete(
     NavigationController* tab = tab_tracker_->GetResource(handle);
     Browser* browser = FindAndActivateTab(tab);
     if (browser && browser->command_updater()->IsCommandEnabled(IDC_BACK)) {
-      AddNavigationStatusListener(tab, reply_message, number_of_navigations);
+      AddNavigationStatusListener(tab, reply_message, number_of_navigations,
+                                  false);
       browser->GoBack(CURRENT_TAB);
       return;
     }
@@ -2052,7 +2602,8 @@ void AutomationProvider::GoForwardBlockUntilNavigationsComplete(
     NavigationController* tab = tab_tracker_->GetResource(handle);
     Browser* browser = FindAndActivateTab(tab);
     if (browser && browser->command_updater()->IsCommandEnabled(IDC_FORWARD)) {
-      AddNavigationStatusListener(tab, reply_message, number_of_navigations);
+      AddNavigationStatusListener(tab, reply_message, number_of_navigations,
+                                  false);
       browser->GoForward(CURRENT_TAB);
       return;
     }
@@ -2105,3 +2656,286 @@ void AutomationProvider::GetBrowserForWindow(int window_handle,
     }
   }
 }
+
+void AutomationProvider::InstallExtension(const FilePath& crx_path,
+                                          IPC::Message* reply_message) {
+  ExtensionsService* service = profile_->GetExtensionsService();
+  if (service) {
+    // The observer will delete itself when done.
+    new ExtensionInstallNotificationObserver(this,
+                                             AutomationMsg_InstallExtension::ID,
+                                             reply_message);
+
+    const FilePath& install_dir = service->install_directory();
+    scoped_refptr<CrxInstaller> installer(
+        new CrxInstaller(install_dir,
+                         service,
+                         NULL));  // silent install, no UI
+    installer->set_allow_privilege_increase(true);
+    installer->InstallCrx(crx_path);
+  } else {
+    AutomationMsg_InstallExtension::WriteReplyParams(
+        reply_message, AUTOMATION_MSG_EXTENSION_INSTALL_FAILED);
+    Send(reply_message);
+  }
+}
+
+void AutomationProvider::LoadExpandedExtension(
+    const FilePath& extension_dir,
+    IPC::Message* reply_message) {
+  if (profile_->GetExtensionsService()) {
+    // The observer will delete itself when done.
+    new ExtensionInstallNotificationObserver(
+        this,
+        AutomationMsg_LoadExpandedExtension::ID,
+        reply_message);
+
+    profile_->GetExtensionsService()->LoadExtension(extension_dir);
+  } else {
+    AutomationMsg_LoadExpandedExtension::WriteReplyParams(
+        reply_message, AUTOMATION_MSG_EXTENSION_INSTALL_FAILED);
+    Send(reply_message);
+  }
+}
+
+void AutomationProvider::GetEnabledExtensions(
+    std::vector<FilePath>* result) {
+  ExtensionsService* service = profile_->GetExtensionsService();
+  DCHECK(service);
+  if (service->extensions_enabled()) {
+    const ExtensionList* extensions = service->extensions();
+    DCHECK(extensions);
+    for (size_t i = 0; i < extensions->size(); ++i) {
+      Extension* extension = (*extensions)[i];
+      DCHECK(extension);
+      if (extension->location() == Extension::INTERNAL) {
+        result->push_back(extension->path());
+      }
+    }
+  }
+}
+
+void AutomationProvider::WaitForExtensionTestResult(
+    IPC::Message* reply_message) {
+  DCHECK(reply_message_ == NULL);
+  reply_message_ = reply_message;
+  // Call MaybeSendResult, because the result might have come in before
+  // we were waiting on it.
+  extension_test_result_observer_->MaybeSendResult();
+}
+
+void AutomationProvider::InstallExtensionAndGetHandle(
+    const FilePath& crx_path, IPC::Message* reply_message) {
+  ExtensionsService* service = profile_->GetExtensionsService();
+  ExtensionProcessManager* manager = profile_->GetExtensionProcessManager();
+  if (service && manager) {
+    // The observer will delete itself when done.
+    new ExtensionReadyNotificationObserver(
+        manager,
+        this,
+        AutomationMsg_InstallExtensionAndGetHandle::ID,
+        reply_message);
+
+    scoped_refptr<CrxInstaller> installer(
+        new CrxInstaller(service->install_directory(),
+                         service,
+                         NULL));  // silent install, no UI
+    installer->set_allow_privilege_increase(true);
+    installer->InstallCrx(crx_path);
+  } else {
+    AutomationMsg_InstallExtensionAndGetHandle::WriteReplyParams(
+        reply_message, 0);
+    Send(reply_message);
+  }
+}
+
+void AutomationProvider::UninstallExtension(int extension_handle,
+                                            bool* success) {
+  *success = false;
+  Extension* extension = GetExtension(extension_handle);
+  ExtensionsService* service = profile_->GetExtensionsService();
+  if (extension && service) {
+    ExtensionUnloadNotificationObserver observer;
+    service->UninstallExtension(extension->id(), false);
+    // The extension unload notification should have been sent synchronously
+    // with the uninstall. Just to be safe, check that it was received.
+    *success = observer.did_receive_unload_notification();
+  }
+}
+
+void AutomationProvider::EnableExtension(int extension_handle,
+                                         IPC::Message* reply_message) {
+  Extension* extension = GetDisabledExtension(extension_handle);
+  ExtensionsService* service = profile_->GetExtensionsService();
+  ExtensionProcessManager* manager = profile_->GetExtensionProcessManager();
+  // Only enable if this extension is disabled.
+  if (extension && service && manager) {
+    // The observer will delete itself when done.
+    new ExtensionReadyNotificationObserver(
+        manager,
+        this,
+        AutomationMsg_EnableExtension::ID,
+        reply_message);
+    service->EnableExtension(extension->id());
+  } else {
+    AutomationMsg_EnableExtension::WriteReplyParams(reply_message, false);
+    Send(reply_message);
+  }
+}
+
+void AutomationProvider::DisableExtension(int extension_handle,
+                                          bool* success) {
+  *success = false;
+  Extension* extension = GetEnabledExtension(extension_handle);
+  ExtensionsService* service = profile_->GetExtensionsService();
+  if (extension && service) {
+    ExtensionUnloadNotificationObserver observer;
+    service->DisableExtension(extension->id());
+    // The extension unload notification should have been sent synchronously
+    // with the disable. Just to be safe, check that it was received.
+    *success = observer.did_receive_unload_notification();
+  }
+}
+
+void AutomationProvider::ExecuteExtensionActionInActiveTabAsync(
+    int extension_handle, int browser_handle,
+    IPC::Message* reply_message) {
+  bool success = false;
+  Extension* extension = GetEnabledExtension(extension_handle);
+  ExtensionsService* service = profile_->GetExtensionsService();
+  ExtensionMessageService* message_service =
+      profile_->GetExtensionMessageService();
+  Browser* browser = browser_tracker_->GetResource(browser_handle);
+  if (extension && service && message_service && browser) {
+    int tab_id = ExtensionTabUtil::GetTabId(browser->GetSelectedTabContents());
+    if (extension->page_action()) {
+      ExtensionBrowserEventRouter::GetInstance()->PageActionExecuted(
+          browser->profile(), extension->id(), "action", tab_id, "", 1);
+      success = true;
+    } else if (extension->browser_action()) {
+      ExtensionBrowserEventRouter::GetInstance()->BrowserActionExecuted(
+          browser->profile(), extension->id(), browser);
+      success = true;
+    }
+  }
+  AutomationMsg_ExecuteExtensionActionInActiveTabAsync::WriteReplyParams(
+      reply_message, success);
+  Send(reply_message);
+}
+
+void AutomationProvider::MoveExtensionBrowserAction(
+    int extension_handle, int index, bool* success) {
+  *success = false;
+  Extension* extension = GetEnabledExtension(extension_handle);
+  ExtensionsService* service = profile_->GetExtensionsService();
+  if (extension && service) {
+    ExtensionToolbarModel* toolbar = service->toolbar_model();
+    if (toolbar) {
+      if (index >= 0 && index < static_cast<int>(toolbar->size())) {
+        toolbar->MoveBrowserAction(extension, index);
+        *success = true;
+      } else {
+        DLOG(WARNING) << "Attempted to move browser action to invalid index.";
+      }
+    }
+  }
+}
+
+void AutomationProvider::GetExtensionProperty(
+    int extension_handle,
+    AutomationMsg_ExtensionProperty type,
+    bool* success,
+    std::string* value) {
+  *success = false;
+  Extension* extension = GetExtension(extension_handle);
+  ExtensionsService* service = profile_->GetExtensionsService();
+  if (extension && service) {
+    ExtensionToolbarModel* toolbar = service->toolbar_model();
+    int found_index = -1;
+    int index = 0;
+    switch (type) {
+      case AUTOMATION_MSG_EXTENSION_ID:
+        *value = extension->id();
+        *success = true;
+        break;
+      case AUTOMATION_MSG_EXTENSION_NAME:
+        *value = extension->name();
+        *success = true;
+        break;
+      case AUTOMATION_MSG_EXTENSION_VERSION:
+        *value = extension->VersionString();
+        *success = true;
+        break;
+      case AUTOMATION_MSG_EXTENSION_BROWSER_ACTION_INDEX:
+        if (toolbar) {
+          for (ExtensionList::const_iterator iter = toolbar->begin();
+               iter != toolbar->end(); iter++) {
+            // Skip this extension if we are in incognito mode
+            // and it is not incognito-enabled.
+            if (profile_->IsOffTheRecord() &&
+                !service->IsIncognitoEnabled(*iter))
+              continue;
+            if (*iter == extension) {
+              found_index = index;
+              break;
+            }
+            index++;
+          }
+          *value = IntToString(found_index);
+          *success = true;
+        }
+        break;
+      default:
+        LOG(WARNING) << "Trying to get undefined extension property";
+        break;
+    }
+  }
+}
+
+void AutomationProvider::SaveAsAsync(int tab_handle) {
+  NavigationController* tab = NULL;
+  TabContents* tab_contents = GetTabContentsForHandle(tab_handle, &tab);
+  if (tab_contents)
+    tab_contents->OnSavePage();
+}
+
+void AutomationProvider::SetContentSetting(
+    int handle,
+    const std::string& host,
+    ContentSettingsType content_type,
+    ContentSetting setting,
+    bool* success) {
+  *success = false;
+  if (browser_tracker_->ContainsHandle(handle)) {
+    Browser* browser = browser_tracker_->GetResource(handle);
+    HostContentSettingsMap* map =
+        browser->profile()->GetHostContentSettingsMap();
+    if (host.empty()) {
+      map->SetDefaultContentSetting(content_type, setting);
+    } else {
+      map->SetContentSetting(HostContentSettingsMap::Pattern(host),
+                             content_type, setting);
+    }
+    *success = true;
+  }
+}
+
+#if !defined(TOOLKIT_VIEWS)
+void AutomationProvider::GetFocusedViewID(int handle, int* view_id) {
+  NOTIMPLEMENTED();
+};
+
+void AutomationProvider::WaitForFocusedViewIDToChange(
+    int handle, int previous_view_id, IPC::Message* reply_message) {
+  NOTIMPLEMENTED();
+}
+
+void AutomationProvider::StartTrackingPopupMenus(
+    int browser_handle, bool* success) {
+  NOTIMPLEMENTED();
+}
+
+void AutomationProvider::WaitForPopupMenuToOpen(IPC::Message* reply_message) {
+  NOTIMPLEMENTED();
+}
+#endif  // !defined(TOOLKIT_VIEWS)

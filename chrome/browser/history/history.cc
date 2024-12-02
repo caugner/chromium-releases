@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,6 +25,7 @@
 #include "chrome/browser/history/history.h"
 
 #include "app/l10n_util.h"
+#include "base/callback.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/ref_counted.h"
@@ -36,10 +37,10 @@
 #include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/history/download_types.h"
 #include "chrome/browser/history/history_backend.h"
+#include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/history/in_memory_database.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
-#include "chrome/browser/history/visit_log.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/visitedlink_master.h"
 #include "chrome/common/chrome_constants.h"
@@ -55,31 +56,7 @@ using history::HistoryBackend;
 
 namespace {
 
-// The history thread is intentionally not a ChromeThread because the
-// sync integration unit tests depend on being able to create more than one
-// history thread.
 static const char* kHistoryThreadName = "Chrome_HistoryThread";
-
-class ChromeHistoryThread : public base::Thread {
- public:
-  ChromeHistoryThread() : base::Thread(kHistoryThreadName) {}
-  virtual ~ChromeHistoryThread() {
-    // We cannot rely on our base class to call Stop() since we want our
-    // CleanUp function to run.
-    Stop();
-  }
- protected:
-  virtual void CleanUp() {
-    history::ClearVisitLog();
-  }
-  virtual void Run(MessageLoop* message_loop) {
-    // Allocate VisitLog on local stack so it will be saved in crash dump.
-    history::VisitLog visit_log;
-    history::InitVisitLog(&visit_log);
-    message_loop->Run();
-    history::ClearVisitLog();
-  }
-};
 
 }  // namespace
 
@@ -94,10 +71,10 @@ class HistoryService::BackendDelegate : public HistoryBackend::Delegate {
         message_loop_(MessageLoop::current()) {
   }
 
-  virtual void NotifyTooNew() {
+  virtual void NotifyProfileError(int message_id) {
     // Send the backend to the history service on the main thread.
     message_loop_->PostTask(FROM_HERE, NewRunnableMethod(history_service_.get(),
-        &HistoryService::NotifyTooNew));
+        &HistoryService::NotifyProfileError, message_id));
   }
 
   virtual void SetInMemoryBackend(
@@ -109,6 +86,13 @@ class HistoryService::BackendDelegate : public HistoryBackend::Delegate {
 
   virtual void BroadcastNotifications(NotificationType type,
                                       history::HistoryDetails* details) {
+    // Send the notification on the history thread.
+    if (NotificationService::current()) {
+      Details<history::HistoryDetails> det(details);
+      NotificationService::current()->Notify(type,
+                                             NotificationService::AllSources(),
+                                             det);
+    }
     // Send the notification to the history service on the main thread.
     message_loop_->PostTask(FROM_HERE, NewRunnableMethod(history_service_.get(),
         &HistoryService::BroadcastNotifications, type, details));
@@ -127,10 +111,15 @@ class HistoryService::BackendDelegate : public HistoryBackend::Delegate {
 // static
 const history::StarID HistoryService::kBookmarkBarID = 1;
 
+// The history thread is intentionally not a ChromeThread because the
+// sync integration unit tests depend on being able to create more than one
+// history thread.
 HistoryService::HistoryService()
-    : thread_(new ChromeHistoryThread()),
+    : thread_(new base::Thread(kHistoryThreadName)),
       profile_(NULL),
-      backend_loaded_(false) {
+      backend_loaded_(false),
+      bookmark_service_(NULL),
+      no_db_(false) {
   // Is NULL when running generate_profile.
   if (NotificationService::current()) {
     registrar_.Add(this, NotificationType::HISTORY_URLS_DELETED,
@@ -139,9 +128,11 @@ HistoryService::HistoryService()
 }
 
 HistoryService::HistoryService(Profile* profile)
-    : thread_(new ChromeHistoryThread()),
+    : thread_(new base::Thread(kHistoryThreadName)),
       profile_(profile),
-      backend_loaded_(false) {
+      backend_loaded_(false),
+      bookmark_service_(NULL),
+      no_db_(false) {
   registrar_.Add(this, NotificationType::HISTORY_URLS_DELETED,
                  Source<Profile>(profile_));
 }
@@ -149,21 +140,6 @@ HistoryService::HistoryService(Profile* profile)
 HistoryService::~HistoryService() {
   // Shutdown the backend. This does nothing if Cleanup was already invoked.
   Cleanup();
-}
-
-bool HistoryService::Init(const FilePath& history_dir,
-                          BookmarkService* bookmark_service) {
-  if (!thread_->Start()) {
-    Cleanup();
-    return false;
-  }
-
-  history_dir_ = history_dir;
-  bookmark_service_ = bookmark_service;
-
-  // Create the history backend.
-  LoadBackendIfNecessary();
-  return true;
 }
 
 bool HistoryService::BackendLoaded() {
@@ -464,7 +440,7 @@ void HistoryService::SetFavicon(const GURL& page_url,
 
   ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::SetFavIcon,
       page_url, icon_url,
-      scoped_refptr<RefCountedBytes>(new RefCountedBytes(image_data)));
+      scoped_refptr<RefCountedMemory>(new RefCountedBytes(image_data)));
 }
 
 void HistoryService::SetFaviconOutOfDateForPage(const GURL& page_url) {
@@ -620,6 +596,23 @@ void HistoryService::Observe(NotificationType type,
     visited_links->DeleteURLs(deleted_details->urls);
 }
 
+bool HistoryService::Init(const FilePath& history_dir,
+                          BookmarkService* bookmark_service,
+                          bool no_db) {
+  if (!thread_->Start()) {
+    Cleanup();
+    return false;
+  }
+
+  history_dir_ = history_dir;
+  bookmark_service_ = bookmark_service;
+  no_db_ = no_db;
+
+  // Create the history backend.
+  LoadBackendIfNecessary();
+  return true;
+}
+
 void HistoryService::ScheduleAutocomplete(HistoryURLProvider* provider,
                                           HistoryURLProviderParams* params) {
   ScheduleAndForget(PRIORITY_UI, &HistoryBackend::ScheduleAutocomplete,
@@ -666,10 +659,10 @@ void HistoryService::SetInMemoryBackend(
   in_memory_backend_->AttachToHistoryService(profile_);
 }
 
-void HistoryService::NotifyTooNew() {
+void HistoryService::NotifyProfileError(int message_id) {
   Source<HistoryService> source(this);
-  NotificationService::current()->Notify(NotificationType::HISTORY_TOO_NEW,
-      source, NotificationService::NoDetails());
+  NotificationService::current()->Notify(NotificationType::PROFILE_ERROR,
+                                         source, Details<int>(&message_id));
 }
 
 void HistoryService::DeleteURL(const GURL& url) {
@@ -678,14 +671,15 @@ void HistoryService::DeleteURL(const GURL& url) {
 }
 
 void HistoryService::ExpireHistoryBetween(
+    const std::set<GURL>& restrict_urls,
     Time begin_time, Time end_time,
     CancelableRequestConsumerBase* consumer,
     ExpireHistoryCallback* callback) {
 
   // We will update the visited links when we observe the delete notifications.
   Schedule(PRIORITY_UI, &HistoryBackend::ExpireHistoryBetween, consumer,
-                        new history::ExpireHistoryRequest(callback),
-                        begin_time, end_time);
+           new history::ExpireHistoryRequest(callback),
+           restrict_urls, begin_time, end_time);
 }
 
 void HistoryService::BroadcastNotifications(
@@ -722,7 +716,7 @@ void HistoryService::LoadBackendIfNecessary() {
                          bookmark_service_));
   history_backend_.swap(backend);
 
-  ScheduleAndForget(PRIORITY_UI, &HistoryBackend::Init);
+  ScheduleAndForget(PRIORITY_UI, &HistoryBackend::Init, no_db_);
 }
 
 void HistoryService::OnDBLoaded() {

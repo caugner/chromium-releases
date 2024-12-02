@@ -6,8 +6,8 @@
 #define WEBKIT_GLUE_WEBCURSOR_H_
 
 #include "base/basictypes.h"
-#include "base/gfx/point.h"
-#include "base/gfx/size.h"
+#include "gfx/point.h"
+#include "gfx/size.h"
 
 #include <vector>
 
@@ -16,16 +16,15 @@ typedef struct HINSTANCE__* HINSTANCE;
 typedef struct HICON__* HICON;
 typedef HICON HCURSOR;
 #elif defined(USE_X11)
-// GdkCursorType is an enum, which we can't forward-declare.  :(
-// If you work around this, be sure to fix webkit.gyp:glue to not put
-// GTK in the export_dependent_settings section!
-#include <gdk/gdkcursor.h>
+typedef struct _GdkCursor GdkCursor;
 #elif defined(OS_MACOSX)
 #ifdef __OBJC__
 @class NSCursor;
 #else
 class NSCursor;
 #endif
+typedef UInt32 ThemeCursor;
+struct Cursor;
 #endif
 
 class Pickle;
@@ -81,13 +80,24 @@ class WebCursor {
   // Return the stock GdkCursorType for this cursor, or GDK_CURSOR_IS_PIXMAP
   // if it's a custom cursor. Return GDK_LAST_CURSOR to indicate that the cursor
   // should be set to the system default.
-  GdkCursorType GetCursorType() const;
+  // Returns an int so we don't need to include GDK headers in this header file.
+  int GetCursorType() const;
 
   // Return a new GdkCursor* for this cursor.  Only valid if GetCursorType
   // returns GDK_CURSOR_IS_PIXMAP.
   GdkCursor* GetCustomCursor() const;
 #elif defined(OS_MACOSX)
+  // Gets an NSCursor* for this cursor.
   NSCursor* GetCursor() const;
+
+  // Initialize this from the given Carbon ThemeCursor.
+  void InitFromThemeCursor(ThemeCursor cursor);
+
+  // Initialize this from the given Carbon Cursor.
+  void InitFromCursor(const Cursor* cursor);
+
+  // Initialize this from the given Cocoa NSCursor.
+  void InitFromNSCursor(NSCursor* cursor);
 #endif
 
  private:

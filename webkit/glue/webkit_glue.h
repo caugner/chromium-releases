@@ -17,7 +17,7 @@
 #include "app/clipboard/clipboard.h"
 #include "base/file_path.h"
 #include "base/string16.h"
-#include "webkit/api/public/WebCanvas.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCanvas.h"
 
 class GURL;
 class SkBitmap;
@@ -57,6 +57,23 @@ std::wstring DumpFramesAsText(WebKit::WebFrame* web_frame, bool recursive);
 
 // Returns the renderer's description of its tree (its externalRepresentation).
 std::wstring DumpRenderer(WebKit::WebFrame* web_frame);
+
+// Fill the value of counter in the element specified by the id into
+// counter_value.  Return false when the specified id doesn't exist.
+bool CounterValueForElementById(WebKit::WebFrame* web_frame,
+                                const std::string& id,
+                                std::wstring* counter_value);
+
+// Returns the number of page where the specified element will be put.
+int PageNumberForElementById(WebKit::WebFrame* web_frame,
+                             const std::string& id,
+                             float page_width_in_pixels,
+                             float page_height_in_pixels);
+
+// Returns the number of pages to be printed.
+int NumberOfPages(WebKit::WebFrame* web_frame,
+                  float page_width_in_pixels,
+                  float page_height_in_pixels);
 
 // Returns a dump of the scroll position of the webframe.
 std::wstring DumpFrameScrollPosition(WebKit::WebFrame* web_frame, bool recursive);
@@ -184,14 +201,6 @@ void ClipboardReadHTML(Clipboard::Buffer buffer, string16* markup, GURL* url);
 // Returns true if successful, false otherwise.
 bool GetApplicationDirectory(FilePath* path);
 
-// Gets the URL where the inspector's HTML file resides. It must use the
-// protocol returned by GetUIResourceProtocol.
-GURL GetInspectorURL();
-
-// Gets the protocol that is used for all user interface resources, including
-// the Inspector. It must end with "-resource".
-std::string GetUIResourceProtocol();
-
 // Gets the directory where the launching executable resides on disk.
 // Path is an output parameter to receive the path.
 // Returns true if successful, false otherwise.
@@ -227,8 +236,8 @@ bool FindProxyForUrl(const GURL& url, std::string* proxy_list);
 // the form language-country (e.g., en-US or pt-BR).
 std::wstring GetWebKitLocale();
 
-// Close idle connections.  Used for debugging.
-void CloseIdleConnections();
+// Close current connections.  Used for debugging.
+void CloseCurrentConnections();
 
 // Enable or disable the disk cache.  Used for debugging.
 void SetCacheMode(bool enabled);

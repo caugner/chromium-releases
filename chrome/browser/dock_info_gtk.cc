@@ -6,13 +6,13 @@
 
 #include <gtk/gtk.h>
 
-#include "app/gfx/native_widget_types.h"
 #include "base/logging.h"
 #include "base/task.h"
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_window.h"
 #include "chrome/browser/gtk/browser_window_gtk.h"
-#include "chrome/common/gtk_util.h"
+#include "chrome/browser/gtk/gtk_util.h"
+#include "gfx/native_widget_types.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // BaseWindowFinder
@@ -193,12 +193,12 @@ GtkWindow* DockInfo::GetLocalProcessWindowAtPoint(
   if (factory_)
     return factory_->GetLocalProcessWindowAtPoint(screen_point, ignore);
 
-#if !defined(TOOLKIT_VIEWS)
+#if defined(OS_CHROMEOS) || defined(TOOLKIT_VIEWS)
+  return NULL;
+#else
   XID xid =
       LocalProcessWindowFinder::GetProcessWindowAtPoint(screen_point, ignore);
   return BrowserWindowGtk::GetBrowserWindowForXID(xid);
-#else
-  return NULL;
 #endif
 }
 

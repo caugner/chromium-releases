@@ -43,82 +43,48 @@
 #define NPAPI
 #endif
 
-#if defined(OS_LINUX)
+#if defined(__GNUC__) && __GNUC__ >= 4
+#define EXPORT __attribute__((visibility ("default")))
+#else
+#define EXPORT
+#endif
+
+#if defined(USE_X11)
 #include <X11/Xlib.h>
 #endif
 
-static void log(NPP instance, const char* format, ...)
-{
-    va_list args;
-    va_start(args, format);
-    char message[2048] = "PLUGIN: ";
-    vsprintf(message + strlen(message), format, args);
-    va_end(args);
-
-    NPObject* windowObject = 0;
-    NPError error = browser->getvalue(instance, NPNVWindowNPObject, &windowObject);
-    if (error != NPERR_NO_ERROR) {
-        fprintf(stderr, "Failed to retrieve window object while logging: %s\n", message);
-        return;
-    }
-
-    NPVariant consoleVariant;
-    if (!browser->getproperty(instance, windowObject, browser->getstringidentifier("console"), &consoleVariant)) {
-        fprintf(stderr, "Failed to retrieve console object while logging: %s\n", message);
-        browser->releaseobject(windowObject);
-        return;
-    }
-
-    NPObject* consoleObject = NPVARIANT_TO_OBJECT(consoleVariant);
-
-    NPVariant messageVariant;
-    STRINGZ_TO_NPVARIANT(message, messageVariant);
-
-    NPVariant result;
-    if (!browser->invoke(instance, consoleObject, browser->getstringidentifier("log"), &messageVariant, 1, &result)) {
-        fprintf(stderr, "Failed to invoke console.log while logging: %s\n", message);
-        browser->releaseobject(consoleObject);
-        browser->releaseobject(windowObject);
-        return;
-    }
-
-    browser->releasevariantvalue(&result);
-    browser->releaseobject(consoleObject);
-    browser->releaseobject(windowObject);
-}
-
 // Plugin entry points
 extern "C" {
-    NPError NPAPI NP_Initialize(NPNetscapeFuncs *browserFuncs
-#if defined(OS_LINUX)
+    EXPORT NPError NPAPI NP_Initialize(NPNetscapeFuncs *browserFuncs
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
                                 , NPPluginFuncs *pluginFuncs
 #endif
                                 );
-    NPError NPAPI NP_GetEntryPoints(NPPluginFuncs *pluginFuncs);
-    void NPAPI NP_Shutdown(void);
+    EXPORT NPError NPAPI NP_GetEntryPoints(NPPluginFuncs *pluginFuncs);
+    EXPORT void NPAPI NP_Shutdown(void);
 
-#if defined(OS_LINUX)
-    NPError NP_GetValue(NPP instance, NPPVariable variable, void *value);
-    const char* NP_GetMIMEDescription(void);
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+    EXPORT NPError NPAPI NP_GetValue(NPP instance, NPPVariable variable, void *value);
+    EXPORT const char* NPAPI NP_GetMIMEDescription(void);
 #endif
 }
 
 // Plugin entry points
-NPError NPAPI NP_Initialize(NPNetscapeFuncs *browserFuncs
-#if defined(OS_LINUX)
+EXPORT NPError NPAPI NP_Initialize(NPNetscapeFuncs *browserFuncs
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
                             , NPPluginFuncs *pluginFuncs
 #endif
 )
 {
     browser = browserFuncs;
-#if defined(OS_LINUX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
     return NP_GetEntryPoints(pluginFuncs);
 #else
     return NPERR_NO_ERROR;
 #endif
 }
 
-NPError NPAPI NP_GetEntryPoints(NPPluginFuncs *pluginFuncs)
+EXPORT NPError NPAPI NP_GetEntryPoints(NPPluginFuncs *pluginFuncs)
 {
     pluginFuncs->version = 11;
     pluginFuncs->size = sizeof(pluginFuncs);
@@ -139,7 +105,7 @@ NPError NPAPI NP_GetEntryPoints(NPPluginFuncs *pluginFuncs)
     return NPERR_NO_ERROR;
 }
 
-void NPAPI NP_Shutdown(void)
+EXPORT void NPAPI NP_Shutdown(void)
 {
 }
 
@@ -168,8 +134,14 @@ NPError NPP_New(NPMIMEType pluginType, NPP instance, uint16 mode, int16 argc, ch
                         fflush(stdout);
                     }
                 }
-            } else if (strcasecmp(argn[i], "cleardocumentduringnew") == 0)
+            } else if (strcasecmp(argn[i], "cleardocumentduringnew") == 0) {
                 executeScript(obj, "document.body.innerHTML = ''");
+            } else if (strcasecmp(argn[i], "testdocumentopenindestroystream") == 0) {
+                obj->testDocumentOpenInDestroyStream = TRUE;
+            } else if (strcasecmp(argn[i], "testwindowopen") == 0) {
+                obj->testWindowOpen = TRUE;
+            } else if (strcasecmp(argn[i], "src") == 0 && strstr(argv[i], "plugin-document-has-focus.pl"))
+                obj->testKeyboardFocusForPlugins = TRUE;
         }
 
         instance->pdata = obj;
@@ -211,7 +183,17 @@ NPError NPP_SetWindow(NPP instance, NPWindow *window)
         if (obj->logSetWindow) {
             log(instance, "NPP_SetWindow: %d %d", (int)window->width, (int)window->height);
             fflush(stdout);
-            obj->logSetWindow = false;
+            obj->logSetWindow = FALSE;
+        }
+
+        if (obj->testWindowOpen) {
+            testWindowOpen(instance);
+            obj->testWindowOpen = FALSE;
+        }
+
+        if (obj->testKeyboardFocusForPlugins) {
+            obj->eventLogging = true;
+            executeScript(obj, "eventSender.keyDown('A');");
         }
     }
 
@@ -257,6 +239,11 @@ NPError NPP_DestroyStream(NPP instance, NPStream *stream, NPReason reason)
 
     if (obj->onStreamDestroy)
         executeScript(obj, obj->onStreamDestroy);
+
+    if (obj->testDocumentOpenInDestroyStream) {
+        testDocumentOpen(instance);
+        obj->testDocumentOpenInDestroyStream = FALSE;
+    }
 
     return NPERR_NO_ERROR;
 }
@@ -311,17 +298,19 @@ int16 NPP_HandleEvent(NPP instance, void *event)
         case WM_RBUTTONDBLCLK:
             break;
         case WM_MOUSEMOVE:
-            log(instance, "adjustCursorEvent");
             break;
         case WM_KEYUP:
-            // TODO(tc): We need to convert evt->wParam from virtual-key code
-            // to key code.
-            log(instance, "NOTIMPLEMENTED: keyUp '%c'", ' ');
+            log(instance, "keyUp '%c'", MapVirtualKey(evt->wParam, MAPVK_VK_TO_CHAR));
+            if (obj->testKeyboardFocusForPlugins) {
+                obj->eventLogging = false;
+                obj->testKeyboardFocusForPlugins = FALSE;
+                executeScript(obj, "layoutTestController.notifyDone();");
+            }
+            break;
+        case WM_CHAR:
             break;
         case WM_KEYDOWN:
-            // TODO(tc): We need to convert evt->wParam from virtual-key code
-            // to key code.
-            log(instance, "NOTIMPLEMENTED: keyDown '%c'", ' ');
+            log(instance, "keyDown '%c'", MapVirtualKey(evt->wParam, MAPVK_VK_TO_CHAR));
             break;
         case WM_SETCURSOR:
             break;
@@ -337,7 +326,7 @@ int16 NPP_HandleEvent(NPP instance, void *event)
 
     fflush(stdout);
 
-#elif defined(OS_LINUX)
+#elif defined(USE_X11)
     XEvent* evt = static_cast<XEvent*>(event);
     XButtonPressedEvent* bpress_evt = reinterpret_cast<XButtonPressedEvent*>(evt);
     XButtonReleasedEvent* brelease_evt = reinterpret_cast<XButtonReleasedEvent*>(evt);
@@ -464,7 +453,7 @@ NPError NPP_GetValue(NPP instance, NPPVariable variable, void *value)
     NPError err = NPERR_NO_ERROR;
 
     switch (variable) {
-#if defined(OS_LINUX)
+#if defined(USE_X11)
         case NPPVpluginNameString:
             *((const char **)value) = "WebKit Test PlugIn";
             break;
@@ -497,13 +486,13 @@ NPError NPP_SetValue(NPP instance, NPNVariable variable, void *value)
     return NPERR_GENERIC_ERROR;
 }
 
-#if defined(OS_LINUX)
-NPError NP_GetValue(NPP instance, NPPVariable variable, void *value)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+EXPORT NPError NPAPI NP_GetValue(NPP instance, NPPVariable variable, void *value)
 {
     return NPP_GetValue(instance, variable, value);
 }
 
-const char* NP_GetMIMEDescription(void) {
+EXPORT const char* NPAPI NP_GetMIMEDescription(void) {
     // The layout test LayoutTests/fast/js/navigator-mimeTypes-length.html
     // asserts that the number of mimetypes handled by plugins should be
     // greater than the number of plugins.  This isn't true if we're

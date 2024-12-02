@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/observer_list.h"
@@ -137,7 +138,8 @@ class ObserverListThreadSafe
     for (it = observer_lists_.begin(); it != observer_lists_.end(); ++it) {
       MessageLoop* loop = (*it).first;
       ObserverList<ObserverType>* list = (*it).second;
-      loop->PostTask(FROM_HERE,
+      loop->PostTask(
+          FROM_HERE,
           NewRunnableMethod(this,
               &ObserverListThreadSafe<ObserverType>::
                  template NotifyWrapper<Method, Params>, list, method));

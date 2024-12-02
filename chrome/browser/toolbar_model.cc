@@ -1,30 +1,35 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/toolbar_model.h"
 
 #include "app/l10n_util.h"
+#include "chrome/browser/browser.h"
 #include "chrome/browser/cert_store.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/ssl/ssl_error_info.h"
 #include "chrome/browser/tab_contents/navigation_controller.h"
 #include "chrome/browser/tab_contents/navigation_entry.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "chrome/common/url_constants.h"
 #include "grit/generated_resources.h"
+#include "net/base/cert_status_flags.h"
 #include "net/base/net_util.h"
 
-ToolbarModel::ToolbarModel() : input_in_progress_(false) {
+ToolbarModel::ToolbarModel(Browser* browser)
+    : browser_(browser),
+      input_in_progress_(false) {
 }
 
 ToolbarModel::~ToolbarModel() {
 }
 
 // ToolbarModel Implementation.
-std::wstring ToolbarModel::GetText() {
+std::wstring ToolbarModel::GetText() const {
   GURL url(chrome::kAboutBlankURL);
   std::wstring languages;  // Empty if we don't have a |navigation_controller|.
 
@@ -41,10 +46,18 @@ std::wstring ToolbarModel::GetText() {
       url = entry->virtual_url();
     }
   }
-  return net::FormatUrl(url, languages, true, UnescapeRule::NORMAL, NULL, NULL);
+  if (url.spec().length() > chrome::kMaxURLDisplayChars) {
+    if (url.IsStandard()) {
+      url = url.GetOrigin();
+    } else {
+      url = GURL(url.scheme() + ":");
+    }
+  }
+  return net::FormatUrl(url, languages, true, UnescapeRule::NORMAL, NULL, NULL,
+                        NULL);
 }
 
-ToolbarModel::SecurityLevel ToolbarModel::GetSecurityLevel() {
+ToolbarModel::SecurityLevel ToolbarModel::GetSecurityLevel() const {
   if (input_in_progress_)  // When editing, assume no security style.
     return ToolbarModel::NORMAL;
 
@@ -72,12 +85,12 @@ ToolbarModel::SecurityLevel ToolbarModel::GetSecurityLevel() {
   }
 }
 
-ToolbarModel::SecurityLevel ToolbarModel::GetSchemeSecurityLevel() {
+ToolbarModel::SecurityLevel ToolbarModel::GetSchemeSecurityLevel() const {
   // For now, in sync with the security level.
   return GetSecurityLevel();
 }
 
-ToolbarModel::Icon ToolbarModel::GetIcon() {
+ToolbarModel::Icon ToolbarModel::GetIcon() const {
   if (input_in_progress_)
     return ToolbarModel::NO_ICON;
 
@@ -106,7 +119,7 @@ ToolbarModel::Icon ToolbarModel::GetIcon() {
   }
 }
 
-void ToolbarModel::GetIconHoverText(std::wstring* text) {
+void ToolbarModel::GetIconHoverText(std::wstring* text) const {
   DCHECK(text);
 
   NavigationController* navigation_controller = GetNavigationController();
@@ -121,9 +134,8 @@ void ToolbarModel::GetIconHoverText(std::wstring* text) {
   switch (ssl.security_style()) {
     case SECURITY_STYLE_AUTHENTICATED: {
       if (ssl.has_mixed_content()) {
-        SSLErrorInfo error_info =
-            SSLErrorInfo::CreateError(SSLErrorInfo::MIXED_CONTENTS,
-                                      NULL, GURL::EmptyGURL());
+        SSLErrorInfo error_info = SSLErrorInfo::CreateError(
+            SSLErrorInfo::MIXED_CONTENTS, NULL, GURL());
         text->assign(error_info.short_description());
       } else {
         DCHECK(entry->url().has_host());
@@ -149,8 +161,9 @@ void ToolbarModel::GetIconHoverText(std::wstring* text) {
   }
 }
 
-ToolbarModel::InfoTextType ToolbarModel::GetInfoText(std::wstring* text,
-                                                     std::wstring* tooltip) {
+ToolbarModel::InfoTextType ToolbarModel::GetInfoText(
+    std::wstring* text,
+    std::wstring* tooltip) const {
   DCHECK(text && tooltip);
   text->clear();
   tooltip->clear();
@@ -180,7 +193,16 @@ ToolbarModel::InfoTextType ToolbarModel::GetInfoText(std::wstring* text,
   return INFO_EV_TEXT;
 }
 
-void ToolbarModel::CreateErrorText(NavigationEntry* entry, std::wstring* text) {
+NavigationController* ToolbarModel::GetNavigationController() const {
+  // This |current_tab| can be NULL during the initialization of the
+  // toolbar during window creation (i.e. before any tabs have been added
+  // to the window).
+  TabContents* current_tab = browser_->GetSelectedTabContents();
+  return current_tab ? &current_tab->controller() : NULL;
+}
+
+void ToolbarModel::CreateErrorText(NavigationEntry* entry,
+                                   std::wstring* text) const {
   const NavigationEntry::SSLStatus& ssl = entry->ssl();
   std::vector<SSLErrorInfo> errors;
   SSLErrorInfo::GetErrorsForCertStatus(ssl.cert_id(),
@@ -189,11 +211,11 @@ void ToolbarModel::CreateErrorText(NavigationEntry* entry, std::wstring* text) {
                                        &errors);
   if (ssl.has_mixed_content()) {
     errors.push_back(SSLErrorInfo::CreateError(SSLErrorInfo::MIXED_CONTENTS,
-                                               NULL, GURL::EmptyGURL()));
+                                               NULL, GURL()));
   }
   if (ssl.has_unsafe_content()) {
     errors.push_back(SSLErrorInfo::CreateError(SSLErrorInfo::UNSAFE_CONTENTS,
-                                               NULL, GURL::EmptyGURL()));
+                                               NULL, GURL()));
   }
 
   int error_count = static_cast<int>(errors.size());

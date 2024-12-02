@@ -1,3 +1,7 @@
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 //{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ generated include file.
 // Used by test_shell.rc
@@ -12,6 +16,10 @@
 #define IDM_EXIT                  105
 #define IDM_DUMP_BODY_TEXT        110
 #define IDM_DUMP_RENDER_TREE      111
+#define IDM_ENABLE_IMAGES         114
+#define IDM_ENABLE_PLUGINS        115
+#define IDM_ENABLE_SCRIPTS        116
+#define IDM_SHOW_DEV_TOOLS        112
 #define IDI_TESTSHELL             107
 #define IDI_SMALL                 108
 #define IDC_TESTSHELL             109
@@ -33,6 +41,6 @@
 #define _APS_NEXT_RESOURCE_VALUE    129
 #define _APS_NEXT_COMMAND_VALUE        32771
 #define _APS_NEXT_CONTROL_VALUE        1000
-#define _APS_NEXT_SYMED_VALUE        114
+#define _APS_NEXT_SYMED_VALUE        117
 #endif
 #endif

@@ -15,10 +15,14 @@
 #include "net/base/completion_callback.h"
 #include "net/base/host_resolver.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_log.h"
 #include "net/socket/client_socket.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
 namespace net {
+
+class ClientSocketHandle;
+class BoundNetLog;
 
 // This ClientSocket is used to setup a SOCKSv5 handshake with a socks proxy.
 // Currently no SOCKSv5 authentication is supported.
@@ -29,9 +33,16 @@ class SOCKS5ClientSocket : public ClientSocket {
   //
   // |req_info| contains the hostname and port to which the socket above will
   // communicate to via the SOCKS layer.
+  //
+  // Although SOCKS 5 supports 3 different modes of addressing, we will
+  // always pass it a hostname. This means the DNS resolving is done
+  // proxy side.
+  SOCKS5ClientSocket(ClientSocketHandle* transport_socket,
+                     const HostResolver::RequestInfo& req_info);
+
+  // Deprecated constructor (http://crbug.com/37810) that takes a ClientSocket.
   SOCKS5ClientSocket(ClientSocket* transport_socket,
-                     const HostResolver::RequestInfo& req_info,
-                     HostResolver* host_resolver);
+                     const HostResolver::RequestInfo& req_info);
 
   // On destruction Disconnect() is called.
   virtual ~SOCKS5ClientSocket();
@@ -39,7 +50,7 @@ class SOCKS5ClientSocket : public ClientSocket {
   // ClientSocket methods:
 
   // Does the SOCKS handshake and completes the protocol.
-  virtual int Connect(CompletionCallback* callback);
+  virtual int Connect(CompletionCallback* callback, const BoundNetLog& net_log);
   virtual void Disconnect();
   virtual bool IsConnected() const;
   virtual bool IsConnectedAndIdle() const;
@@ -51,18 +62,10 @@ class SOCKS5ClientSocket : public ClientSocket {
   virtual bool SetReceiveBufferSize(int32 size);
   virtual bool SetSendBufferSize(int32 size);
 
-#if defined(OS_LINUX)
-  virtual int GetPeerName(struct sockaddr* name, socklen_t* namelen);
-#endif
+  virtual int GetPeerAddress(AddressList* address) const;
 
  private:
-  FRIEND_TEST(SOCKS5ClientSocketTest, IPv6Domain);
-  FRIEND_TEST(SOCKS5ClientSocketTest, FailedDNS);
-  FRIEND_TEST(SOCKS5ClientSocketTest, CompleteHandshake);
-
   enum State {
-    STATE_RESOLVE_HOST,
-    STATE_RESOLVE_HOST_COMPLETE,
     STATE_GREET_WRITE,
     STATE_GREET_WRITE_COMPLETE,
     STATE_GREET_READ,
@@ -74,12 +77,9 @@ class SOCKS5ClientSocket : public ClientSocket {
     STATE_NONE,
   };
 
-  // State of the SOCKSv5 handshake. Before host resolution all connections
-  // are kEndPointFailedDomain. If DNS lookup fails, we move to
-  // kEndPointFailedDomain, otherwise the IPv4/IPv6 address as resolved.
+  // Addressing type that can be specified in requests or responses.
   enum SocksEndPointAddressType {
-    kEndPointUnresolved,
-    kEndPointFailedDomain = 0x03,
+    kEndPointDomain = 0x03,
     kEndPointResolvedIPv4 = 0x01,
     kEndPointResolvedIPv6 = 0x04,
   };
@@ -95,8 +95,6 @@ class SOCKS5ClientSocket : public ClientSocket {
   void OnIOComplete(int result);
 
   int DoLoop(int last_io_result);
-  int DoResolveHost();
-  int DoResolveHostComplete(int result);
   int DoHandshakeRead();
   int DoHandshakeReadComplete(int result);
   int DoHandshakeWrite();
@@ -113,10 +111,9 @@ class SOCKS5ClientSocket : public ClientSocket {
   CompletionCallbackImpl<SOCKS5ClientSocket> io_callback_;
 
   // Stores the underlying socket.
-  scoped_ptr<ClientSocket> transport_;
+  scoped_ptr<ClientSocketHandle> transport_;
 
   State next_state_;
-  SocksEndPointAddressType address_type_;
 
   // Stores the callback to the layer above, called on completing Connect().
   CompletionCallback* user_callback_;
@@ -140,10 +137,9 @@ class SOCKS5ClientSocket : public ClientSocket {
 
   size_t read_header_size;
 
-  // Used to resolve the hostname to which the SOCKS proxy will connect.
-  SingleRequestHostResolver host_resolver_;
-  AddressList addresses_;
   HostResolver::RequestInfo host_request_info_;
+
+  BoundNetLog net_log_;
 
   DISALLOW_COPY_AND_ASSIGN(SOCKS5ClientSocket);
 };
@@ -151,4 +147,3 @@ class SOCKS5ClientSocket : public ClientSocket {
 }  // namespace net
 
 #endif  // NET_SOCKET_SOCKS5_CLIENT_SOCKET_H_
-

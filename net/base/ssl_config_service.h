@@ -57,6 +57,14 @@ struct SSLConfig {
 
   bool verify_ev_cert;  // True if we should verify the certificate for EV.
 
+  // The list of application level protocols supported. If set, this will
+  // enable Next Protocol Negotiation (if supported). This is a list of 8-bit
+  // length prefixed strings. The order of the protocols doesn't matter expect
+  // for one case: if the server supports Next Protocol Negotiation, but there
+  // is no overlap between the server's and client's protocol sets, then the
+  // first protocol in this list will be requested by the client.
+  std::string next_protos;
+
   scoped_refptr<X509Certificate> client_cert;
 };
 
@@ -66,8 +74,6 @@ struct SSLConfig {
 // live longer than the configuration preferences.
 class SSLConfigService : public base::RefCountedThreadSafe<SSLConfigService> {
  public:
-  virtual ~SSLConfigService() {}
-
   // Create an instance of SSLConfigService which retrieves the configuration
   // from the system SSL configuration, or an instance of
   // SSLConfigServiceDefaults if the current system does not have a system SSL
@@ -77,6 +83,11 @@ class SSLConfigService : public base::RefCountedThreadSafe<SSLConfigService> {
 
   // May not be thread-safe, should only be called on the IO thread.
   virtual void GetSSLConfig(SSLConfig* config) = 0;
+
+ protected:
+  friend class base::RefCountedThreadSafe<SSLConfigService>;
+
+  virtual ~SSLConfigService() {}
 };
 
 }  // namespace net

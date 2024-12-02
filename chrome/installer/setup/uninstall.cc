@@ -47,6 +47,8 @@ void CloseAllChromeProcesses() {
           (GetLastError() == ERROR_TIMEOUT)) {
         base::CleanupProcesses(installer_util::kChromeExe, 0,
                                ResultCodes::HUNG, NULL);
+        base::CleanupProcesses(installer_util::kNaClExe, 0,
+                               ResultCodes::HUNG, NULL);
         return;
       }
     }
@@ -56,6 +58,8 @@ void CloseAllChromeProcesses() {
   // chrome.exe. This check is just in case Chrome is ignoring WM_CLOSE
   // messages.
   base::CleanupProcesses(installer_util::kChromeExe, 15000,
+                         ResultCodes::HUNG, NULL);
+  base::CleanupProcesses(installer_util::kNaClExe, 15000,
                          ResultCodes::HUNG, NULL);
 }
 
@@ -110,11 +114,28 @@ void DeleteChromeShortcuts(bool system_uninstall) {
     LOG(ERROR) << "Failed to get location for shortcut.";
   } else {
     BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-    shortcut_path = shortcut_path.Append(dist->GetApplicationName());
+    shortcut_path = shortcut_path.Append(dist->GetAppShortCutName());
     LOG(INFO) << "Deleting shortcut " << shortcut_path.value();
     if (!file_util::Delete(shortcut_path, true))
       LOG(ERROR) << "Failed to delete folder: " << shortcut_path.value();
   }
+}
+
+bool ScheduleParentAndGrandparentForDeletion(const FilePath& path) {
+  FilePath parent_dir = path.DirName();
+  bool ret = ScheduleFileSystemEntityForDeletion(parent_dir.value().c_str());
+  if (!ret) {
+    LOG(ERROR) << "Failed to schedule parent dir for deletion: "
+               << parent_dir.value();
+  } else {
+    FilePath grandparent_dir(parent_dir.DirName());
+    ret = ScheduleFileSystemEntityForDeletion(grandparent_dir.value().c_str());
+    if (!ret) {
+      LOG(ERROR) << "Failed to schedule grandparent dir for deletion: "
+                 << grandparent_dir.value();
+    }
+  }
+  return ret;
 }
 
 // Deletes empty parent & empty grandparent dir of given path.
@@ -176,17 +197,28 @@ DeleteResult DeleteFilesAndFolders(const std::wstring& exe_path,
     file_util::Move(setup_exe_path, temp_file);
   }
 
-  // Move the browser's persisted local state
+  // Obtain the location of the user profile data. Chrome Frame needs to
+  // build this path manually since it doesn't use the Chrome default dir.
   FilePath user_local_state;
-  if (chrome::GetDefaultUserDataDirectory(&user_local_state)) {
+  bool got_local_state = false;
+  if (InstallUtil::IsChromeFrameProcess()) {
+    got_local_state =
+        chrome::GetChromeFrameUserDataDirectory(&user_local_state);
+  } else {
+    got_local_state = chrome::GetDefaultUserDataDirectory(&user_local_state);
+  }
+
+  // Move the browser's persisted local state
+  if (got_local_state) {
     FilePath user_local_file(
         user_local_state.Append(chrome::kLocalStateFilename));
-
     FilePath path = FilePath::FromWStringHack(*local_state_path);
     if (!file_util::CreateTemporaryFile(&path))
       LOG(ERROR) << "Failed to create temporary file for Local State.";
     else
       file_util::CopyFile(user_local_file, path);
+  } else {
+    LOG(ERROR) << "Could not retrieve user's profile directory.";
   }
 
   DeleteResult result = DELETE_SUCCEEDED;
@@ -194,40 +226,51 @@ DeleteResult DeleteFilesAndFolders(const std::wstring& exe_path,
   LOG(INFO) << "Deleting install path " << install_path;
   if (!file_util::Delete(install_path, true)) {
     LOG(ERROR) << "Failed to delete folder (1st try): " << install_path;
-#if defined(CHROME_FRAME_BUILD)
-    // We don't try killing Chrome processes for Chrome Frame builds since
-    // that is unlikely to help. Instead, schedule files for deletion and
-    // return a value that will trigger a reboot prompt.
-    ScheduleDirectoryForDeletion(install_path.c_str());
-    result = DELETE_REQUIRES_REBOOT;
-#else
-    // Try closing any running chrome processes and deleting files once again.
-    CloseAllChromeProcesses();
-    if (!file_util::Delete(install_path, true)) {
-      LOG(ERROR) << "Failed to delete folder (2nd try): " << install_path;
-      result = DELETE_FAILED;
+    if (InstallUtil::IsChromeFrameProcess()) {
+      // We don't try killing Chrome processes for Chrome Frame builds since
+      // that is unlikely to help. Instead, schedule files for deletion and
+      // return a value that will trigger a reboot prompt.
+      ScheduleDirectoryForDeletion(install_path.c_str());
+      result = DELETE_REQUIRES_REBOOT;
+    } else {
+      // Try closing any running chrome processes and deleting files once again.
+      CloseAllChromeProcesses();
+      if (!file_util::Delete(install_path, true)) {
+        LOG(ERROR) << "Failed to delete folder (2nd try): " << install_path;
+        result = DELETE_FAILED;
+      }
     }
-#endif
   }
 
-  if (delete_profile) {
+  if (delete_profile && got_local_state) {
     LOG(INFO) << "Deleting user profile" << user_local_state.value();
     if (!file_util::Delete(user_local_state, true)) {
       LOG(ERROR) << "Failed to delete user profile dir: "
                  << user_local_state.value();
-#if defined(CHROME_FRAME_BUILD)
-      ScheduleDirectoryForDeletion(user_local_state.value().c_str());
-      result = DELETE_REQUIRES_REBOOT;
-#else
-      result = DELETE_FAILED;
-#endif
+      if (InstallUtil::IsChromeFrameProcess()) {
+        ScheduleDirectoryForDeletion(user_local_state.value().c_str());
+        result = DELETE_REQUIRES_REBOOT;
+      } else {
+        result = DELETE_FAILED;
+      }
     }
-    DeleteEmptyParentDir(user_local_state.value());
+    if (result == DELETE_REQUIRES_REBOOT) {
+      ScheduleParentAndGrandparentForDeletion(user_local_state);
+    } else {
+      DeleteEmptyParentDir(user_local_state.value());
+    }
   }
 
-  // Now check and delete if the parent directories are empty
-  // For example Google\Chrome or Chromium
-  DeleteEmptyParentDir(install_path);
+  if (result == DELETE_REQUIRES_REBOOT) {
+    // If we need a reboot to continue, schedule the parent directories for
+    // deletion unconditionally. If they are not empty, the session manager
+    // will not delete them on reboot.
+    ScheduleParentAndGrandparentForDeletion(FilePath(install_path));
+  } else {
+    // Now check and delete if the parent directories are empty
+    // For example Google\Chrome or Chromium
+    DeleteEmptyParentDir(install_path);
+  }
   return result;
 }
 
@@ -294,12 +337,39 @@ installer_util::InstallStatus IsChromeActiveOrUserCancelled(
 
   return installer_util::UNINSTALL_CONFIRMED;
 }
+
+bool ShouldDeleteProfile(const CommandLine& cmd_line,
+                         installer_util::InstallStatus status,
+                         bool system_uninstall) {
+  bool should_delete = false;
+
+  // Chrome Frame uninstallations always want to delete the profile (we have no
+  // UI to prompt otherwise and the profile stores no useful data anyway)
+  // unless they are managed by MSI. MSI uninstalls will explicitly include
+  // the --delete-profile flag to distinguish them from MSI upgrades.
+  if (InstallUtil::IsChromeFrameProcess() &&
+      !InstallUtil::IsMSIProcess(system_uninstall)) {
+    should_delete = true;
+  } else {
+    should_delete =
+        status == installer_util::UNINSTALL_DELETE_PROFILE ||
+        cmd_line.HasSwitch(installer_util::switches::kDeleteProfile);
+  }
+
+  return should_delete;
+}
+
 }  // namespace
 
 
 bool installer_setup::DeleteChromeRegistrationKeys(HKEY root,
     const std::wstring& browser_entry_suffix,
     installer_util::InstallStatus& exit_code) {
+  if (!BrowserDistribution::GetDistribution()->CanSetAsDefault()) {
+    // We should have never set those keys.
+    return true;
+  }
+
   RegKey key(root, L"", KEY_ALL_ACCESS);
 
   // Delete Software\Classes\ChromeHTML,
@@ -397,10 +467,10 @@ installer_util::InstallStatus installer_setup::UninstallChrome(
   if (force_uninstall) {
     // Since --force-uninstall command line option is used, we are going to
     // do silent uninstall. Try to close all running Chrome instances.
-#if !defined(CHROME_FRAME_BUILD)
-    CloseAllChromeProcesses();
-#endif
-  } else {  // no --force-uninstall so lets show some UI dialog boxes.
+    if (!InstallUtil::IsChromeFrameProcess())
+      CloseAllChromeProcesses();
+  } else if (!InstallUtil::IsChromeFrameProcess()) {
+    // no --force-uninstall so lets show some UI dialog boxes.
     status = IsChromeActiveOrUserCancelled(system_uninstall);
     if (status != installer_util::UNINSTALL_CONFIRMED &&
         status != installer_util::UNINSTALL_DELETE_PROFILE)
@@ -470,12 +540,17 @@ installer_util::InstallStatus installer_setup::UninstallChrome(
   // Delete shared registry keys as well (these require admin rights) if
   // remove_all option is specified.
   if (remove_all) {
-    // Delete media player registry key that exists only in HKLM.
-    RegKey hklm_key(HKEY_LOCAL_MACHINE, L"", KEY_ALL_ACCESS);
-    std::wstring reg_path(installer::kMediaPlayerRegPath);
-    file_util::AppendToPath(&reg_path, installer_util::kChromeExe);
-    DeleteRegistryKey(hklm_key, reg_path);
-    hklm_key.Close();
+    if (!InstallUtil::IsChromeSxSProcess() &&
+        !InstallUtil::IsChromeFrameProcess()) {
+      // Delete media player registry key that exists only in HKLM.
+      // We don't delete this key in SxS uninstall or Chrome Frame uninstall
+      // as we never set the key for those products.
+      RegKey hklm_key(HKEY_LOCAL_MACHINE, L"", KEY_ALL_ACCESS);
+      std::wstring reg_path(installer::kMediaPlayerRegPath);
+      file_util::AppendToPath(&reg_path, installer_util::kChromeExe);
+      DeleteRegistryKey(hklm_key, reg_path);
+      hklm_key.Close();
+    }
 
     if (installed_version.get()) {
       // Unregister any dll servers that we may have registered.
@@ -496,8 +571,7 @@ installer_util::InstallStatus installer_setup::UninstallChrome(
 
   // Finally delete all the files from Chrome folder after moving setup.exe
   // and the user's Local State to a temp location.
-  bool delete_profile = (status == installer_util::UNINSTALL_DELETE_PROFILE) ||
-      (cmd_line.HasSwitch(installer_util::switches::kDeleteProfile));
+  bool delete_profile = ShouldDeleteProfile(cmd_line, status, system_uninstall);
   std::wstring local_state_path;
   ret = installer_util::UNINSTALL_SUCCESSFUL;
 

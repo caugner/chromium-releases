@@ -9,7 +9,7 @@
       'type': 'shared_library',
       'msvs_guid': '3BD81303-4E14-4559-AA69-B30C3BAB08DD',
       'dependencies': [
-        '../../app/app.gyp:*',
+        '../../app/app.gyp:app_base',
         '../../base/base.gyp:base',
       ],
       'defines': [
@@ -17,8 +17,7 @@
       ],
       'include_dirs': [
         '../..',
-        # TODO(beng): move wtl to src/third_party
-        '../../chrome/third_party/wtl/include',
+        '<(DEPTH)/third_party/wtl/include',
       ],
       'sources': [
         'call_stack.cc',

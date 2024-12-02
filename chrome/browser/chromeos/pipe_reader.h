@@ -7,12 +7,16 @@
 
 #include <fcntl.h>
 #include <stdio.h>
-#include <string>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <string>
+
 #include "base/basictypes.h"
+#include "base/file_path.h"
+
+namespace chromeos {
 
 // Given a named pipe, this class reads data from it and returns it as a string.
 // Currently, we are sending login cookies from the Chrome OS login manager to
@@ -25,9 +29,9 @@
 
 class PipeReader {
  public:
-  explicit PipeReader(const std::string& pipe_name)
+  explicit PipeReader(const FilePath& pipe_name)
       : pipe_(NULL),
-        pipe_name_(pipe_name) {
+        pipe_name_(pipe_name.value()) {
   }
   virtual ~PipeReader() {
     if (pipe_)
@@ -47,5 +51,7 @@ class PipeReader {
 
   DISALLOW_COPY_AND_ASSIGN(PipeReader);
 };
+
+}  // namespace chromeos
 
 #endif  // CHROME_BROWSER_CHROMEOS_PIPE_READER_H_

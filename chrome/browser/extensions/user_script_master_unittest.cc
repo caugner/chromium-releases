@@ -4,15 +4,17 @@
 
 #include "chrome/browser/extensions/user_script_master.h"
 
-#include <fstream>
+#include <string>
 
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
+#include "chrome/test/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 // Test bringing up a master on a specific directory, putting a script
@@ -39,12 +41,18 @@ class UserScriptMasterTest : public testing::Test,
     // Register for all user script notifications.
     registrar_.Add(this, NotificationType::USER_SCRIPTS_UPDATED,
                    NotificationService::AllSources());
+
+    // UserScriptMaster posts tasks to the file thread so make the current
+    // thread look like one.
+    file_thread_.reset(new ChromeThread(
+        ChromeThread::FILE, MessageLoop::current()));
   }
 
   virtual void TearDown() {
     // Clean up test directory.
     ASSERT_TRUE(file_util::Delete(script_dir_, true));
     ASSERT_FALSE(file_util::PathExists(script_dir_));
+    file_thread_.reset();
   }
 
   virtual void Observe(NotificationType type,
@@ -62,6 +70,8 @@ class UserScriptMasterTest : public testing::Test,
   // MessageLoop used in tests.
   MessageLoop message_loop_;
 
+  scoped_ptr<ChromeThread> file_thread_;
+
   // Directory containing user scripts.
   FilePath script_dir_;
 
@@ -71,9 +81,9 @@ class UserScriptMasterTest : public testing::Test,
 
 // Test that we get notified even when there are no scripts.
 TEST_F(UserScriptMasterTest, NoScripts) {
-
-  scoped_refptr<UserScriptMaster> master(
-      new UserScriptMaster(MessageLoop::current(), script_dir_));
+  TestingProfile profile;
+  scoped_refptr<UserScriptMaster> master(new UserScriptMaster(script_dir_,
+                                                              &profile));
   master->StartScan();
   message_loop_.PostTask(FROM_HERE, new MessageLoop::QuitTask);
   message_loop_.Run();
@@ -81,39 +91,17 @@ TEST_F(UserScriptMasterTest, NoScripts) {
   ASSERT_TRUE(shared_memory_ != NULL);
 }
 
-// TODO(shess): Disabled on Linux because of missing DirectoryWatcher.
-#if defined(OS_WIN) || defined(OS_MACOSX)
-// Test that we get notified about new scripts after they're added.
-TEST_F(UserScriptMasterTest, NewScripts) {
-  scoped_refptr<UserScriptMaster> master(
-      new UserScriptMaster(MessageLoop::current(), script_dir_));
-
-  FilePath path = script_dir_.AppendASCII("script.user.js");
-
-  const char content[] = "some content";
-  size_t written = file_util::WriteFile(path, content, sizeof(content));
-  ASSERT_EQ(written, sizeof(content));
-
-  // Post a delayed task so that we fail rather than hanging if things
-  // don't work.
-  message_loop_.PostDelayedTask(FROM_HERE, new MessageLoop::QuitTask, 5000);
-
-  message_loop_.Run();
-
-  ASSERT_TRUE(shared_memory_ != NULL);
-}
-#endif
-
 // Test that we get notified about scripts if they're already in the test dir.
 TEST_F(UserScriptMasterTest, ExistingScripts) {
+  TestingProfile profile;
   FilePath path = script_dir_.AppendASCII("script.user.js");
 
   const char content[] = "some content";
   size_t written = file_util::WriteFile(path, content, sizeof(content));
   ASSERT_EQ(written, sizeof(content));
 
-  scoped_refptr<UserScriptMaster> master(
-      new UserScriptMaster(MessageLoop::current(), script_dir_));
+  scoped_refptr<UserScriptMaster> master(new UserScriptMaster(script_dir_,
+                                                              &profile));
   master->StartScan();
 
   message_loop_.PostTask(FROM_HERE, new MessageLoop::QuitTask);
@@ -143,7 +131,7 @@ TEST_F(UserScriptMasterTest, Parse1) {
   UserScript script;
   EXPECT_TRUE(UserScriptMaster::ScriptReloader::ParseMetadataHeader(
       text, &script));
-  EXPECT_EQ(3U, script.globs().size());
+  ASSERT_EQ(3U, script.globs().size());
   EXPECT_EQ("*mail.google.com*", script.globs()[0]);
   EXPECT_EQ("*mail.yahoo.com*", script.globs()[1]);
   EXPECT_EQ("*mail.msn.com*", script.globs()[2]);
@@ -155,7 +143,7 @@ TEST_F(UserScriptMasterTest, Parse2) {
   UserScript script;
   EXPECT_TRUE(UserScriptMaster::ScriptReloader::ParseMetadataHeader(
       text, &script));
-  EXPECT_EQ(1U, script.globs().size());
+  ASSERT_EQ(1U, script.globs().size());
   EXPECT_EQ("*", script.globs()[0]);
 }
 
@@ -167,7 +155,7 @@ TEST_F(UserScriptMasterTest, Parse3) {
 
   UserScript script;
   UserScriptMaster::ScriptReloader::ParseMetadataHeader(text, &script);
-  EXPECT_EQ(1U, script.globs().size());
+  ASSERT_EQ(1U, script.globs().size());
   EXPECT_EQ("*foo*", script.globs()[0]);
 }
 
@@ -182,7 +170,7 @@ TEST_F(UserScriptMasterTest, Parse4) {
   EXPECT_TRUE(UserScriptMaster::ScriptReloader::ParseMetadataHeader(
       text, &script));
   EXPECT_EQ(0U, script.globs().size());
-  EXPECT_EQ(2U, script.url_patterns().size());
+  ASSERT_EQ(2U, script.url_patterns().size());
   EXPECT_EQ("http://*.mail.google.com/*",
             script.url_patterns()[0].GetAsString());
   EXPECT_EQ("http://mail.yahoo.com/*",
@@ -208,8 +196,42 @@ TEST_F(UserScriptMasterTest, Parse6) {
     "// @match  \t http://mail.yahoo.com/*\n"
     "// ==/UserScript==\n");
 
-  // Not allowed to mix @include and @value.
+  // Allowed to match @include and @match.
   UserScript script;
-  EXPECT_FALSE(UserScriptMaster::ScriptReloader::ParseMetadataHeader(
+  EXPECT_TRUE(UserScriptMaster::ScriptReloader::ParseMetadataHeader(
       text, &script));
+}
+
+TEST_F(UserScriptMasterTest, Parse7) {
+  const std::string text(
+    "\xEF\xBB\xBF// ==UserScript==\n"
+    "// @match http://*.mail.google.com/*\n"
+    "// ==/UserScript==\n");
+
+  // Should Ignore UTF-8's BOM.
+  UserScript script;
+  EXPECT_TRUE(UserScriptMaster::ScriptReloader::ParseMetadataHeader(
+      text, &script));
+  ASSERT_EQ(1U, script.url_patterns().size());
+  EXPECT_EQ("http://*.mail.google.com/*",
+            script.url_patterns()[0].GetAsString());
+}
+
+TEST_F(UserScriptMasterTest, Parse8) {
+  // Greasemonkey allows there to be any leading text before the comment marker.
+  const std::string text(
+    "// ==UserScript==\n"
+    "adsasdfasf// @name hello\n"
+    "  // @description\twiggity woo\n"
+    "\t// @match  \t http://mail.yahoo.com/*\n"
+    "// ==/UserScript==\n");
+
+  UserScript script;
+  EXPECT_TRUE(UserScriptMaster::ScriptReloader::ParseMetadataHeader(
+      text, &script));
+  ASSERT_EQ("hello", script.name());
+  ASSERT_EQ("wiggity woo", script.description());
+  ASSERT_EQ(1U, script.url_patterns().size());
+  EXPECT_EQ("http://mail.yahoo.com/*",
+            script.url_patterns()[0].GetAsString());
 }

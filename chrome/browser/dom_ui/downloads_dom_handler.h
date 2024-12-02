@@ -10,7 +10,6 @@
 #include "chrome/browser/dom_ui/dom_ui.h"
 #include "chrome/browser/download/download_manager.h"
 
-class DictionaryValue;
 class Value;
 
 // The handler for Javascript messages related to the "downloads" view,
@@ -29,6 +28,7 @@ class DownloadsDOMHandler : public DOMMessageHandler,
 
   // DownloadItem::Observer interface
   virtual void OnDownloadUpdated(DownloadItem* download);
+  virtual void OnDownloadFileCompleted(DownloadItem* download) { }
   virtual void OnDownloadOpened(DownloadItem* download) { }
 
   // DownloadManager::Observer interface
@@ -72,10 +72,6 @@ class DownloadsDOMHandler : public DOMMessageHandler,
   // Send the current list of downloads to the page.
   void SendCurrentDownloads();
 
-  // Creates a representation of a download in a format that the downloads
-  // HTML page can understand.
-  DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id);
-
   // Clear all download items and their observers.
   void ClearDownloadItems();
 
@@ -84,9 +80,6 @@ class DownloadsDOMHandler : public DOMMessageHandler,
 
   // Return the download that is referred to in a given value.
   DownloadItem* GetDownloadByValue(const Value* value);
-
-  // Get the localized status text for an in-progress download.
-  std::wstring GetProgressStatusText(DownloadItem* download);
 
   // Current search text.
   std::wstring search_text_;

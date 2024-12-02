@@ -1,4 +1,4 @@
-// Copyright (c) 2008-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,8 +55,8 @@ class AudioOutputStream {
     // |dest| is platform and format specific.
     // |pending_bytes| is the number of bytes will be played before the
     // requested data is played.
-    virtual size_t OnMoreData(AudioOutputStream* stream, void* dest,
-                              size_t max_size, int pending_bytes) = 0;
+    virtual uint32 OnMoreData(AudioOutputStream* stream, void* dest,
+                              uint32 max_size, uint32 pending_bytes) = 0;
 
     // The stream is done with this callback. After this call the audio source
     // can go away or be destroyed.
@@ -72,13 +72,15 @@ class AudioOutputStream {
 
   // Open the stream. |packet_size| is the requested buffer allocation which
   // the audio source thinks it can usually fill without blocking. Internally
-  // two buffers of |packet_size| size are created, one will be locked for
-  // playback and one will be ready to be filled in the call to
+  // two or three buffers of |packet_size| size are created, one will be
+  // locked for playback and one will be ready to be filled in the call to
   // AudioSourceCallback::OnMoreData().
+  // The number of buffers is controlled by AUDIO_PCM_LOW_LATENCY. See more
+  // information below.
   //
   // TODO(ajwong): Streams are not reusable, so try to move packet_size into the
   // constructor.
-  virtual bool Open(size_t packet_size) = 0;
+  virtual bool Open(uint32 packet_size) = 0;
 
   // Starts playing audio and generating AudioSourceCallback::OnMoreData().
   // Since implementor of AudioOutputStream may have internal buffers, right
@@ -91,13 +93,11 @@ class AudioOutputStream {
   // might have locked audio data that is processing.
   virtual void Stop() = 0;
 
-  // Sets the relative volume, with range [0.0, 1.0] inclusive. For mono audio
-  // sources the volume must be the same in both channels.
-  virtual void SetVolume(double left_level, double right_level) = 0;
+  // Sets the relative volume, with range [0.0, 1.0] inclusive.
+  virtual void SetVolume(double volume) = 0;
 
-  // Gets the relative volume, with range [0.0, 1.0] inclusive. For mono audio
-  // sources the level is returned in both channels.
-  virtual void GetVolume(double* left_level, double* right_level) = 0;
+  // Gets the relative volume, with range [0.0, 1.0] inclusive.
+  virtual void GetVolume(double* volume) = 0;
 
   // Close the stream. This also generates AudioSourceCallback::OnClose().
   // After calling this method, the object should not be used anymore.
@@ -113,30 +113,34 @@ class AudioOutputStream {
 class AudioManager {
  public:
   enum Format {
-    AUDIO_PCM_LINEAR = 0, // Pulse code modulation means 'raw' amplitude
-                          // samples.
-    AUDIO_PCM_DELTA,      // Delta-encoded pulse code modulation.
-    AUDIO_MOCK,           // Creates a dummy AudioOutputStream object.
-    AUDIO_LAST_FORMAT     // Only used for validation of format.
+    AUDIO_PCM_LINEAR = 0,     // PCM is 'raw' amplitude samples.
+    AUDIO_PCM_LOW_LATENCY,    // Linear PCM, low latency requested.
+    AUDIO_MOCK,               // Creates a dummy AudioOutputStream object.
+    AUDIO_LAST_FORMAT         // Only used for validation of format.
   };
 
   // Telephone quality sample rate, mostly for speech-only audio.
-  static const int kTelephoneSampleRate = 8000;
+  static const uint32 kTelephoneSampleRate = 8000;
   // CD sampling rate is 44.1 KHz or conveniently 2x2x3x3x5x5x7x7.
-  static const int kAudioCDSampleRate = 44100;
+  static const uint32 kAudioCDSampleRate = 44100;
   // Digital Audio Tape sample rate.
-  static const int kAudioDATSampleRate = 48000;
+  static const uint32 kAudioDATSampleRate = 48000;
 
   // Returns true if the OS reports existence of audio devices. This does not
   // guarantee that the existing devices support all formats and sample rates.
   virtual bool HasAudioDevices() = 0;
 
-  // Factory for all the supported stream formats. At this moment |channels|
-  // can be 1 (mono) or 2 (stereo). The |sample_rate| is in hertz and can be
-  // any value supported by the underlying platform. For some future formats
-  // the |sample_rate| and |bits_per_sample| can take special values.
+  // Factory for all the supported stream formats. The |channels| can be 1 to 5.
+  // The |sample_rate| is in hertz and can be any value supported by the
+  // platform. For some future formats the |sample_rate| and |bits_per_sample|
+  // can take special values.
   // Returns NULL if the combination of the parameters is not supported, or if
   // we have reached some other platform specific limit.
+  //
+  // AUDIO_PCM_LOW_LATENCY can be passed to this method and it has two effects:
+  // 1- Instead of triple buffered the audio will be double buffered.
+  // 2- A low latency driver or alternative audio subsystem will be used when
+  //    available.
   //
   // Do not free the returned AudioOutputStream. It is owned by AudioManager.
   virtual AudioOutputStream* MakeAudioStream(Format format, int channels,

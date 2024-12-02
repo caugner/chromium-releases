@@ -5,11 +5,10 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "webkit/api/public/WebString.h"
-#include "webkit/api/public/WebURL.h"
-#include "webkit/api/public/WebURLLoaderClient.h"
-#include "webkit/api/public/WebURLResponse.h"
-#include "webkit/glue/glue_util.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLLoaderClient.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLResponse.h"
 #include "webkit/glue/multipart_response_delegate.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -68,8 +67,7 @@ class MockWebURLLoaderClient : public WebURLLoaderClient {
     data_.clear();
   }
   virtual void didReceiveData(WebURLLoader* loader,
-                              const char* data, int data_length,
-                              long long length_received) {
+                              const char* data, int data_length) {
     ++received_data_;
     data_.append(data, data_length);
   }
@@ -81,6 +79,10 @@ class MockWebURLLoaderClient : public WebURLLoaderClient {
     received_response_ = received_data_ = 0;
     data_.clear();
     response_.reset();
+  }
+
+  string GetResponseHeader(const char* name) const {
+    return string(response_.httpHeaderField(WebString::fromUTF8(name)).utf8());
   }
 
   int received_response_, received_data_;
@@ -161,18 +163,21 @@ TEST(MultipartResponseTest, Functions) {
   delegate_tester.data().assign(test_header);
   EXPECT_TRUE(delegate_tester.ParseHeaders());
   EXPECT_TRUE(delegate_tester.data().length() == 0);
-  EXPECT_EQ(webkit_glue::WebStringToStdString(
-              client.response_.httpHeaderField(
-                WebString::fromUTF8("Content-Type"))),
-            string("image/png"));
-  EXPECT_EQ(webkit_glue::WebStringToStdString(
-              client.response_.httpHeaderField(
-                WebString::fromUTF8("content-length"))),
-            string("10"));
+  EXPECT_EQ(string("image/png"), client.GetResponseHeader("Content-Type"));
+  EXPECT_EQ(string("10"), client.GetResponseHeader("content-length"));
   // This header is passed from the original request.
-  EXPECT_EQ(webkit_glue::WebStringToStdString(
-              client.response_.httpHeaderField(WebString::fromUTF8("foo"))),
-            string("Bar"));
+  EXPECT_EQ(string("Bar"), client.GetResponseHeader("foo"));
+
+  // Make sure we parse the right mime-type if a charset is provided.
+  client.Reset();
+  string test_header2("content-type: text/html; charset=utf-8\n\n");
+  delegate_tester.data().assign(test_header2);
+  EXPECT_TRUE(delegate_tester.ParseHeaders());
+  EXPECT_TRUE(delegate_tester.data().length() == 0);
+  EXPECT_EQ(string("text/html; charset=utf-8"),
+            client.GetResponseHeader("Content-Type"));
+  EXPECT_EQ(string("utf-8"),
+            string(client.response_.textEncodingName().utf8()));
 
   // FindBoundary tests
   struct {
@@ -248,7 +253,7 @@ TEST(MultipartResponseTest, MissingBoundaries) {
     "Content-type: text/plain\n\n"
     "This is a sample response\n");
   delegate3.OnReceivedData(no_boundaries.c_str(),
-                          static_cast<int>(no_boundaries.length()));
+                           static_cast<int>(no_boundaries.length()));
   EXPECT_EQ(1, client.received_response_);
   EXPECT_EQ(0, client.received_data_);
   EXPECT_EQ(string(), client.data_);
@@ -536,12 +541,9 @@ TEST(MultipartResponseTest, MultipartByteRangeParsingTest) {
 TEST(MultipartResponseTest, MultipartContentRangesTest) {
   WebURLResponse response1;
   response1.initialize();
-  response1.setMIMEType(WebString::fromUTF8("application/pdf"));
-  response1.setHTTPHeaderField(WebString::fromUTF8("Content-Length"),
-                               WebString::fromUTF8("200"));
-  response1.setHTTPHeaderField(
-      WebString::fromUTF8("Content-Range"),
-      WebString::fromUTF8("bytes 1000-1050/5000"));
+  response1.setMIMEType("application/pdf");
+  response1.setHTTPHeaderField("Content-Length", "200");
+  response1.setHTTPHeaderField("Content-Range", "bytes 1000-1050/5000");
 
   int content_range_lower_bound = 0;
   int content_range_upper_bound = 0;
@@ -556,12 +558,9 @@ TEST(MultipartResponseTest, MultipartContentRangesTest) {
 
   WebURLResponse response2;
   response2.initialize();
-  response2.setMIMEType(WebString::fromUTF8("application/pdf"));
-  response2.setHTTPHeaderField(WebString::fromUTF8("Content-Length"),
-                               WebString::fromUTF8("200"));
-  response2.setHTTPHeaderField(
-      WebString::fromUTF8("Content-Range"),
-      WebString::fromUTF8("bytes 1000/1050"));
+  response2.setMIMEType("application/pdf");
+  response2.setHTTPHeaderField("Content-Length", "200");
+  response2.setHTTPHeaderField("Content-Range", "bytes 1000/1050");
 
   content_range_lower_bound = 0;
   content_range_upper_bound = 0;
@@ -571,6 +570,68 @@ TEST(MultipartResponseTest, MultipartContentRangesTest) {
       &content_range_upper_bound);
 
   EXPECT_EQ(result, false);
+
+  WebURLResponse response3;
+  response3.initialize();
+  response3.setMIMEType("application/pdf");
+  response3.setHTTPHeaderField("Content-Length", "200");
+  response3.setHTTPHeaderField("Range", "bytes 1000-1050/5000");
+
+  content_range_lower_bound = 0;
+  content_range_upper_bound = 0;
+
+  result = MultipartResponseDelegate::ReadContentRanges(
+      response3, &content_range_lower_bound,
+      &content_range_upper_bound);
+
+  EXPECT_EQ(result, true);
+  EXPECT_EQ(content_range_lower_bound, 1000);
+  EXPECT_EQ(content_range_upper_bound, 1050);
+
+  WebURLResponse response4;
+  response4.initialize();
+  response4.setMIMEType("application/pdf");
+  response4.setHTTPHeaderField("Content-Length", "200");
+
+  content_range_lower_bound = 0;
+  content_range_upper_bound = 0;
+
+  result = MultipartResponseDelegate::ReadContentRanges(
+      response4, &content_range_lower_bound,
+      &content_range_upper_bound);
+
+  EXPECT_EQ(result, false);
+}
+
+TEST(MultipartResponseTest, MultipartPayloadSet) {
+  WebURLResponse response;
+  response.initialize();
+  response.setMIMEType(WebString::fromUTF8("multipart/x-mixed-replace"));
+  MockWebURLLoaderClient client;
+  MultipartResponseDelegate delegate(&client, NULL, response, "bound");
+
+  string data(
+      "--bound\n"
+      "Content-type: text/plain\n\n"
+      "response data\n"
+      "--bound\n");
+  delegate.OnReceivedData(data.c_str(), static_cast<int>(data.length()));
+  EXPECT_EQ(1,
+            client.received_response_);
+  EXPECT_EQ(string("response data\n"),
+            client.data_);
+  EXPECT_EQ(false, client.response_.isMultipartPayload());
+
+  string data2(
+      "Content-type: text/plain\n\n"
+      "response data2\n"
+      "--bound\n");
+  delegate.OnReceivedData(data2.c_str(), static_cast<int>(data2.length()));
+  EXPECT_EQ(2,
+            client.received_response_);
+  EXPECT_EQ(string("response data2\n"),
+            client.data_);
+  EXPECT_EQ(true, client.response_.isMultipartPayload());
 }
 
 }  // namespace

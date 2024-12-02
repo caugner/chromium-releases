@@ -5,7 +5,9 @@
 #include "chrome/browser/views/bookmark_context_menu.h"
 
 #include "app/l10n_util.h"
+#include "base/i18n/rtl.h"
 #include "chrome/browser/profile.h"
+#include "chrome/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "views/controls/menu/menu_item_view.h"
 
@@ -18,14 +20,15 @@ BookmarkContextMenu::BookmarkContextMenu(
     PageNavigator* page_navigator,
     const BookmarkNode* parent,
     const std::vector<const BookmarkNode*>& selection,
-    BookmarkContextMenuController::ConfigurationType configuration)
+    BookmarkContextMenuControllerViews::ConfigurationType configuration)
     : ALLOW_THIS_IN_INITIALIZER_LIST(
-          controller_(new BookmarkContextMenuController(parent_window, this,
+          controller_(new BookmarkContextMenuControllerViews(parent_window, this,
                                                         profile, page_navigator,
                                                         parent, selection,
                                                         configuration))),
       parent_window_(parent_window),
-      ALLOW_THIS_IN_INITIALIZER_LIST(menu_(new views::MenuItemView(this))) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(menu_(new views::MenuItemView(this))),
+      observer_(NULL) {
   controller_->BuildMenu();
 }
 
@@ -33,11 +36,14 @@ BookmarkContextMenu::~BookmarkContextMenu() {
 }
 
 void BookmarkContextMenu::RunMenuAt(const gfx::Point& point) {
+  NotificationService::current()->Notify(
+      NotificationType::BOOKMARK_CONTEXT_MENU_SHOWN,
+      Source<BookmarkContextMenu>(this),
+      NotificationService::NoDetails());
   // width/height don't matter here.
-  views::MenuItemView::AnchorPosition anchor =
-      (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) ?
+  views::MenuItemView::AnchorPosition anchor = base::i18n::IsRTL() ?
       views::MenuItemView::TOPRIGHT : views::MenuItemView::TOPLEFT;
-  menu_->RunMenuAt(parent_window_, gfx::Rect(point.x(), point.y(), 0, 0),
+  menu_->RunMenuAt(parent_window_, NULL, gfx::Rect(point.x(), point.y(), 0, 0),
                    anchor, true);
 }
 
@@ -56,8 +62,13 @@ bool BookmarkContextMenu::IsCommandEnabled(int command_id) const {
   return controller_->IsCommandEnabled(command_id);
 }
 
+bool BookmarkContextMenu::ShouldCloseAllMenusOnExecute(int id) {
+  return id != IDS_BOOKMARK_BAR_REMOVE;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
-// BookmarkContextMenu, BookmarkContextMenuControllerDelegate implementation:
+// BookmarkContextMenu, BookmarkContextMenuControllerViewsDelegate
+// implementation:
 
 void BookmarkContextMenu::CloseMenu() {
   menu_->Cancel();
@@ -78,4 +89,15 @@ void BookmarkContextMenu::AddSeparator() {
 void BookmarkContextMenu::AddCheckboxItem(int command_id) {
   menu_->AppendMenuItem(command_id, l10n_util::GetString(command_id),
                         views::MenuItemView::CHECKBOX);
+}
+
+void BookmarkContextMenu::WillRemoveBookmarks(
+    const std::vector<const BookmarkNode*>& bookmarks) {
+  if (observer_)
+    observer_->WillRemoveBookmarks(bookmarks);
+}
+
+void BookmarkContextMenu::DidRemoveBookmarks() {
+  if (observer_)
+    observer_->DidRemoveBookmarks();
 }

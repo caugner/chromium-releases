@@ -1,10 +1,15 @@
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #include "debug.h"
 #include "sandbox_impl.h"
 
 namespace playground {
 
 int Sandbox::sandbox_ioctl(int d, int req, void *arg) {
-  Debug::syscall(__NR_ioctl, "Executing handler");
+  long long tm;
+  Debug::syscall(&tm, __NR_ioctl, "Executing handler");
   struct {
     int       sysnum;
     long long cookie;
@@ -23,10 +28,11 @@ int Sandbox::sandbox_ioctl(int d, int req, void *arg) {
       read(sys, threadFdPub(), &rc, sizeof(rc)) != sizeof(rc)) {
     die("Failed to forward ioctl() request [sandbox]");
   }
+  Debug::elapsed(tm, __NR_ioctl);
   return static_cast<int>(rc);
 }
 
-bool Sandbox::process_ioctl(int parentProc, int sandboxFd, int threadFdPub,
+bool Sandbox::process_ioctl(int parentMapsFd, int sandboxFd, int threadFdPub,
                             int threadFd, SecureMem::Args* mem) {
   // Read request
   IOCtl ioctl_req;

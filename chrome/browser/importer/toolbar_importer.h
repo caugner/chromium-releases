@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,9 @@
 #include <vector>
 
 #include "chrome/browser/importer/importer.h"
+#include "chrome/browser/importer/importer_data_types.h"
 #include "chrome/browser/net/url_fetcher.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"
 
 class ImporterBridge;
 class XmlReader;
@@ -33,13 +35,12 @@ bool IsGoogleGAIACookieInstalled();
 class Toolbar5Importer : public URLFetcher::Delegate, public Importer {
  public:
   Toolbar5Importer();
-  virtual ~Toolbar5Importer();
 
   // Importer view calls this method to begin the process.  The items parameter
   // should only either be NONE or FAVORITES, since as of right now these are
   // the only items this importer supports.  This method provides implementation
   // of Importer::StartImport.
-  virtual void StartImport(ProfileInfo profile_info,
+  virtual void StartImport(importer::ProfileInfo profile_info,
                            uint16 items,
                            ImporterBridge* bridge);
 
@@ -58,6 +59,8 @@ class Toolbar5Importer : public URLFetcher::Delegate, public Importer {
 
  private:
   FRIEND_TEST(Toolbar5ImporterTest, BookmarkParse);
+
+  virtual ~Toolbar5Importer();
 
   // Internal states of the toolbar importer.
   enum InternalStateEnum {

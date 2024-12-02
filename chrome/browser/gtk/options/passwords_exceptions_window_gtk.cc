@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,14 +6,17 @@
 
 #include <gtk/gtk.h>
 
+#include <string>
+
 #include "app/l10n_util.h"
 #include "base/message_loop.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/gtk/options/exceptions_page_gtk.h"
+#include "chrome/browser/gtk/accessible_widget_helper_gtk.h"
+#include "chrome/browser/gtk/gtk_util.h"
+#include "chrome/browser/gtk/options/passwords_exceptions_page_gtk.h"
 #include "chrome/browser/gtk/options/passwords_page_gtk.h"
 #include "chrome/browser/options_window.h"
 #include "chrome/browser/profile.h"
-#include "chrome/common/gtk_util.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -47,7 +50,10 @@ class PasswordsExceptionsWindowGtk {
   PasswordsPageGtk passwords_page_;
 
   // The exceptions page.
-  ExceptionsPageGtk exceptions_page_;
+  PasswordsExceptionsPageGtk exceptions_page_;
+
+  // Helper object to manage accessibility metadata.
+  scoped_ptr<AccessibleWidgetHelper> accessible_widget_helper_;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordsExceptionsWindowGtk);
 };
@@ -62,8 +68,10 @@ PasswordsExceptionsWindowGtk::PasswordsExceptionsWindowGtk(Profile* profile)
     : profile_(profile),
       passwords_page_(profile_),
       exceptions_page_(profile_) {
+  std::string dialog_name = l10n_util::GetStringUTF8(
+      IDS_PASSWORDS_EXCEPTIONS_WINDOW_TITLE);
   dialog_ = gtk_dialog_new_with_buttons(
-      l10n_util::GetStringUTF8(IDS_PASSWORDS_EXCEPTIONS_WINDOW_TITLE).c_str(),
+      dialog_name.c_str(),
       // Passwords and exceptions window is shared between all browser windows.
       NULL,
       // Non-modal.
@@ -73,6 +81,10 @@ PasswordsExceptionsWindowGtk::PasswordsExceptionsWindowGtk(Profile* profile)
       NULL);
   gtk_box_set_spacing(GTK_BOX(GTK_DIALOG(dialog_)->vbox),
                       gtk_util::kContentAreaSpacing);
+
+  accessible_widget_helper_.reset(new AccessibleWidgetHelper(
+      dialog_, profile));
+  accessible_widget_helper_->SendOpenWindowNotification(dialog_name);
 
   notebook_ = gtk_notebook_new();
 
@@ -91,13 +103,10 @@ PasswordsExceptionsWindowGtk::PasswordsExceptionsWindowGtk(Profile* profile)
   gtk_container_add(GTK_CONTAINER(GTK_DIALOG(dialog_)->vbox), notebook_);
 
   gtk_widget_realize(dialog_);
-  int width = 1, height = 1;
-  gtk_util::GetWidgetSizeFromResources(
-      dialog_,
-      IDS_PASSWORDS_DIALOG_WIDTH_CHARS,
-      IDS_PASSWORDS_DIALOG_HEIGHT_LINES,
-      &width, &height);
-  gtk_window_set_default_size(GTK_WINDOW(dialog_), width, height);
+  gtk_util::SetWindowSizeFromResources(GTK_WINDOW(dialog_),
+                                       IDS_PASSWORDS_DIALOG_WIDTH_CHARS,
+                                       IDS_PASSWORDS_DIALOG_HEIGHT_LINES,
+                                       true);
 
   // We only have one button and don't do any special handling, so just hook it
   // directly to gtk_widget_destroy.

@@ -28,7 +28,6 @@ class DevToolsProtocolHandler
       ToolToListenerMap;
 
   explicit DevToolsProtocolHandler(int port);
-  virtual ~DevToolsProtocolHandler();
 
   // This method should be called after the object construction.
   void Start();
@@ -66,11 +65,11 @@ class DevToolsProtocolHandler
   virtual void DidClose(ListenSocket *sock);
 
  private:
+  virtual ~DevToolsProtocolHandler();
+
   void Init();
   void Teardown();
   int port_;
-  MessageLoop* ui_loop_;
-  MessageLoop* io_loop_;
   ToolToListenerMap tool_to_listener_map_;
   scoped_refptr<ListenSocket> connection_;
   scoped_refptr<DevToolsRemoteListenSocket> server_;

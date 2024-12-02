@@ -14,9 +14,9 @@
 
 #include <string>
 
-#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
 #include "base/logging.h"
+#include "gfx/native_widget_types.h"
 #include "printing/print_settings.h"
 
 #if defined(OS_MACOSX)
@@ -53,6 +53,10 @@ class PrintingContext {
   // Selects the user's default printer and format. Updates the context with the
   // default device settings.
   Result UseDefaultSettings();
+
+  void SetUseOverlays(bool use_overlays) {
+    settings_.use_overlays = use_overlays;
+  }
 
   // Initializes with predefined settings.
   Result InitWithSettings(const PrintSettings& settings);
@@ -168,7 +172,7 @@ class PrintingContext {
   // Did the user cancel the print job.
   volatile bool abort_printing_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(PrintingContext);
+  DISALLOW_COPY_AND_ASSIGN(PrintingContext);
 };
 
 }  // namespace printing

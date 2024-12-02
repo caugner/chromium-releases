@@ -5,14 +5,24 @@
 #include "views/controls/native/native_view_host.h"
 
 #include "base/logging.h"
-#include "app/gfx/canvas.h"
+#include "gfx/canvas.h"
 #include "views/controls/native/native_view_host_wrapper.h"
+#include "views/widget/root_view.h"
 #include "views/widget/widget.h"
 
 namespace views {
 
 // static
 const char NativeViewHost::kViewClassName[] = "views/NativeViewHost";
+
+#if defined(OS_LINUX)
+// GTK renders the focus.
+// static
+const bool NativeViewHost::kRenderNativeControlFocus = false;
+#else
+// static
+const bool NativeViewHost::kRenderNativeControlFocus = true;
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeViewHost, public:
@@ -31,6 +41,7 @@ NativeViewHost::~NativeViewHost() {
 }
 
 void NativeViewHost::Attach(gfx::NativeView native_view) {
+  DCHECK(native_view);
   DCHECK(!native_view_);
   native_view_ = native_view;
   // If set_focus_view() has not been invoked, this view is the one that should
@@ -41,9 +52,7 @@ void NativeViewHost::Attach(gfx::NativeView native_view) {
 }
 
 void NativeViewHost::Detach() {
-  DCHECK(native_view_);
-  native_wrapper_->NativeViewDetaching();
-  native_view_ = NULL;
+  Detach(false);
 }
 
 void NativeViewHost::SetPreferredSize(const gfx::Size& size) {
@@ -54,7 +63,7 @@ void NativeViewHost::SetPreferredSize(const gfx::Size& size) {
 void NativeViewHost::NativeViewDestroyed() {
   // Detach so we can clear our state and notify the native_wrapper_ to release
   // ref on the native view.
-  Detach();
+  Detach(true);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -89,10 +98,15 @@ void NativeViewHost::Layout() {
     // Since widgets know nothing about the View hierarchy (they are direct
     // children of the Widget that hosts our View hierarchy) they need to be
     // positioned in the coordinate system of the Widget, not the current
-    // view.
-    gfx::Point top_left;
+    // view.  Also, they should be positioned respecting the border insets
+    // of the native view.
+    gfx::Insets insets = GetInsets();
+    gfx::Point top_left(insets.left(), insets.top());
     ConvertPointToWidget(this, &top_left);
-    native_wrapper_->ShowWidget(top_left.x(), top_left.y(), width(), height());
+    gfx::Rect local_bounds = GetLocalBounds(false);
+    native_wrapper_->ShowWidget(top_left.x(), top_left.y(),
+                                local_bounds.width(),
+                                local_bounds.height());
   } else {
     native_wrapper_->HideWidget();
   }
@@ -135,6 +149,29 @@ std::string NativeViewHost::GetClassName() const {
 
 void NativeViewHost::Focus() {
   native_wrapper_->SetFocus();
+}
+
+bool NativeViewHost::ContainsNativeView(gfx::NativeView native_view) const {
+  if (native_view == native_view_)
+    return true;
+
+  views::Widget* native_widget =
+      views::Widget::GetWidgetFromNativeView(native_view_);
+  views::RootView* root_view =
+      native_widget ? native_widget->GetRootView() : NULL;
+  if (root_view && root_view->ContainsNativeView(native_view))
+    return true;
+
+  return View::ContainsNativeView(native_view);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// NativeViewHost, private:
+
+void NativeViewHost::Detach(bool destroyed) {
+  DCHECK(native_view_);
+  native_wrapper_->NativeViewDetaching(destroyed);
+  native_view_ = NULL;
 }
 
 }  // namespace views

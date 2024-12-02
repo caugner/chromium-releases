@@ -19,9 +19,6 @@
 
 namespace {
 
-static const FilePath::CharType kStartFile[] =
-    FILE_PATH_LITERAL("index.html?dom|jslib&automated");
-
 const wchar_t kRunDromaeo[] = L"run-dromaeo-benchmark";
 
 class DromaeoTest : public UITest {
@@ -33,14 +30,16 @@ class DromaeoTest : public UITest {
     show_window_ = true;
   }
 
-  void RunTest() {
-    FilePath::StringType start_file(kStartFile);
+  void RunTest(const FilePath::CharType* suite) {
     FilePath test_path = GetDromaeoDir();
-    test_path = test_path.Append(start_file);
+    test_path = test_path.Append(
+        FilePath::StringType(FILE_PATH_LITERAL("index.html?")) +
+        FilePath::StringType(suite) +
+        FilePath::StringType(FILE_PATH_LITERAL("&automated")));
     GURL test_url(net::FilePathToFileURL(test_path));
 
     scoped_refptr<TabProxy> tab(GetActiveTab());
-    tab->NavigateToURL(test_url);
+    ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS, tab->NavigateToURL(test_url));
 
     // Wait for the test to finish.
     ASSERT_TRUE(WaitUntilTestCompletes(tab.get(), test_url));
@@ -60,7 +59,7 @@ class DromaeoTest : public UITest {
   }
 
   bool WaitUntilTestCompletes(TabProxy* tab, const GURL& test_url) {
-    return WaitUntilCookieValue(tab, test_url, "__done", 1000,
+    return WaitUntilCookieValue(tab, test_url, "__done",
                                 UITest::test_timeout_ms(), "1");
   }
 
@@ -105,15 +104,16 @@ class DromaeoTest : public UITest {
     std::string trace_name = reference_ ? "score_ref" : "score";
     std::string unit_name = "runs/s";
 
-    PrintResult("score", "", trace_name, score, unit_name, true);
-
     ResultsMap::const_iterator it = results.begin();
+    // First result is overall score and thus "important".
+    bool important = true;
     for (; it != results.end(); ++it) {
       std::string test_name = it->first;
       for (size_t i = 0; i < test_name.length(); i++)
         if (!isalnum(test_name[i]))
           test_name[i] = '_';
-      PrintResult(test_name, "", trace_name, it->second, unit_name, false);
+      PrintResult(test_name, "", trace_name, it->second, unit_name, important);
+      important = false;  // All others are not overall scores.
     }
   }
 
@@ -144,18 +144,33 @@ class DromaeoReferenceTest : public DromaeoTest {
   }
 };
 
-TEST_F(DromaeoTest, Perf) {
+TEST_F(DromaeoTest, DOMCorePerf) {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(kRunDromaeo))
     return;
 
-  RunTest();
+  RunTest(FILE_PATH_LITERAL("dom"));
 }
 
-TEST_F(DromaeoReferenceTest, Perf) {
+TEST_F(DromaeoTest, JSLibPerf) {
   if (!CommandLine::ForCurrentProcess()->HasSwitch(kRunDromaeo))
     return;
 
-  RunTest();
+  RunTest(FILE_PATH_LITERAL("jslib"));
 }
+
+TEST_F(DromaeoReferenceTest, DOMCorePerf) {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(kRunDromaeo))
+    return;
+
+  RunTest(FILE_PATH_LITERAL("dom"));
+}
+
+TEST_F(DromaeoReferenceTest, JSLibPerf) {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(kRunDromaeo))
+    return;
+
+  RunTest(FILE_PATH_LITERAL("jslib"));
+}
+
 
 }  // namespace

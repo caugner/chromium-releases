@@ -7,10 +7,16 @@
 
 #include <gtk/gtk.h>
 
-#include "app/gfx/native_widget_types.h"
+#include "app/gtk_signal.h"
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/message_loop.h"
-#include "webkit/api/public/WebDragOperation.h"
+#include "base/string16.h"
+#include "gfx/point.h"
+#include "gfx/native_widget_types.h"
+#include "googleurl/src/gurl.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDragOperation.h"
 
 class TabContents;
 class TabContentsView;
@@ -28,37 +34,24 @@ class TabContentsDragSource : public MessageLoopForUI::Observer {
   // Starts a drag for the tab contents this TabContentsDragSource was
   // created for.
   void StartDragging(const WebDropData& drop_data,
-                     GdkEventButton* last_mouse_down);
+                     WebKit::WebDragOperationsMask allowed_ops,
+                     GdkEventButton* last_mouse_down,
+                     const SkBitmap& image,
+                     const gfx::Point& image_offset);
 
   // MessageLoop::Observer implementation:
   virtual void WillProcessEvent(GdkEvent* event);
   virtual void DidProcessEvent(GdkEvent* event);
 
  private:
-  static gboolean OnDragFailedThunk(GtkWidget* widget,
-                                    GdkDragContext* drag_context,
-                                    GtkDragResult result,
-                                    TabContentsDragSource* handler) {
-    return handler->OnDragFailed();
-  }
-  gboolean OnDragFailed();
-  static void OnDragEndThunk(GtkWidget* widget,
-                             GdkDragContext* drag_context,
-                             TabContentsDragSource* handler) {
-    handler->OnDragEnd(WebKit::WebDragOperationCopy);
-    // TODO(snej): Pass actual operation instead of hardcoding copy
-  }
-  void OnDragEnd(WebKit::WebDragOperation operation);
-  static void OnDragDataGetThunk(GtkWidget* drag_widget,
-                                 GdkDragContext* context,
-                                 GtkSelectionData* selection_data,
-                                 guint target_type,
-                                 guint time,
-                                 TabContentsDragSource* handler) {
-    handler->OnDragDataGet(context, selection_data, target_type, time);
-  }
-  void OnDragDataGet(GdkDragContext* context, GtkSelectionData* selection_data,
-                     guint target_type, guint time);
+  CHROMEGTK_CALLBACK_2(TabContentsDragSource, gboolean, OnDragFailed,
+                       GdkDragContext*, GtkDragResult);
+  CHROMEGTK_CALLBACK_1(TabContentsDragSource, void, OnDragBegin,
+                       GdkDragContext*);
+  CHROMEGTK_CALLBACK_1(TabContentsDragSource, void, OnDragEnd,
+                       GdkDragContext*);
+  CHROMEGTK_CALLBACK_4(TabContentsDragSource, void, OnDragDataGet,
+                       GdkDragContext*, GtkSelectionData*, guint, guint);
 
   gfx::NativeView GetContentNativeView() const;
 
@@ -68,6 +61,11 @@ class TabContentsDragSource : public MessageLoopForUI::Observer {
   // The drop data for the current drag (for drags that originate in the render
   // view). Non-NULL iff there is a current drag.
   scoped_ptr<WebDropData> drop_data_;
+
+  // The image used for depicting the drag, and the offset between the cursor
+  // and the top left pixel.
+  SkBitmap drag_image_;
+  gfx::Point image_offset_;
 
   // The mime type for the file contents of the current drag (if any).
   GdkAtom drag_file_mime_type_;
@@ -80,6 +78,20 @@ class TabContentsDragSource : public MessageLoopForUI::Observer {
   // renderer widget, we can persist drags even when our contents is switched
   // out.
   GtkWidget* drag_widget_;
+
+  // The file mime type for a drag-out download.
+  string16 wide_download_mime_type_;
+
+  // The file name to be saved to for a drag-out download.
+  FilePath download_file_name_;
+
+  // The URL to download from for a drag-out download.
+  GURL download_url_;
+
+  // The widget that provides visual feedback for the drag. We use this instead
+  // of gtk_drag_set_icon_pixbuf() because some window managers will use shadows
+  // or other visual effects on top level windows.
+  GtkWidget* drag_icon_;
 
   DISALLOW_COPY_AND_ASSIGN(TabContentsDragSource);
 };

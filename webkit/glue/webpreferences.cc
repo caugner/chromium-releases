@@ -5,13 +5,16 @@
 #include "webkit/glue/webpreferences.h"
 
 #include "base/string_util.h"
-#include "webkit/api/public/WebKit.h"
-#include "webkit/api/public/WebSettings.h"
-#include "webkit/api/public/WebString.h"
-#include "webkit/api/public/WebURL.h"
-#include "webkit/api/public/WebView.h"
+#include "base/utf_string_conversions.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebRuntimeFeatures.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSettings.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
 
+using WebKit::WebRuntimeFeatures;
 using WebKit::WebSettings;
 using WebKit::WebString;
 using WebKit::WebURL;
@@ -38,6 +41,7 @@ void WebPreferences::Apply(WebView* web_view) const {
   settings->setPluginsEnabled(plugins_enabled);
   settings->setDOMPasteAllowed(dom_paste_enabled);
   settings->setDeveloperExtrasEnabled(developer_extras_enabled);
+  settings->setNeedsSiteSpecificQuirks(site_specific_quirks_enabled);
   settings->setShrinksStandaloneImagesToFit(shrinks_standalone_images_to_fit);
   settings->setUsesEncodingDetector(uses_universal_detector);
   settings->setTextAreasAreResizable(text_areas_are_resizable);
@@ -50,11 +54,9 @@ void WebPreferences::Apply(WebView* web_view) const {
   settings->setDownloadableBinaryFontsEnabled(remote_fonts_enabled);
   settings->setXSSAuditorEnabled(xss_auditor_enabled);
   settings->setLocalStorageEnabled(local_storage_enabled);
-  settings->setDatabasesEnabled(WebKit::databasesEnabled() || databases_enabled);
-  settings->setSessionStorageEnabled(session_storage_enabled);
+  WebRuntimeFeatures::enableDatabase(
+      WebRuntimeFeatures::isDatabaseEnabled() || databases_enabled);
   settings->setOfflineWebApplicationCacheEnabled(application_cache_enabled);
-  settings->setExperimentalNotificationsEnabled(
-      experimental_notifications_enabled);
 
   // This setting affects the behavior of links in an editable region:
   // clicking the link should select it rather than navigate to it.
@@ -73,6 +75,7 @@ void WebPreferences::Apply(WebView* web_view) const {
   // universal access. Only test shell will enable this.
   settings->setAllowUniversalAccessFromFileURLs(
       allow_universal_access_from_file_urls);
+  settings->setAllowFileAccessFromFileURLs(allow_file_access_from_file_urls);
 
   // We prevent WebKit from checking if it needs to add a "text direction"
   // submenu to a context menu. it is not only because we don't need the result
@@ -82,6 +85,10 @@ void WebPreferences::Apply(WebView* web_view) const {
   // Enable experimental WebGL support if requested on command line
   // and support is compiled in.
   settings->setExperimentalWebGLEnabled(experimental_webgl_enabled);
+
+  // Display colored borders around composited render layers if requested
+  // on command line.
+  settings->setShowDebugBorders(show_composited_layer_borders);
 
   // Web inspector settings need to be passed in differently.
   web_view->setInspectorSettings(WebString::fromUTF8(inspector_settings));

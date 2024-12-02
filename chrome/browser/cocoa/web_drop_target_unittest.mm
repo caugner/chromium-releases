@@ -13,14 +13,10 @@
 
 class WebDropTargetTest : public RenderViewHostTestHarness {
  public:
-  WebDropTargetTest() {
-   RenderViewHostTestHarness::SetUp();
-   drop_target_.reset([[WebDropTarget alloc] initWithTabContents:contents()]);
-  }
-
-  virtual ~WebDropTargetTest() {
-   RenderViewHostTestHarness::TearDown();
-
+  virtual void SetUp() {
+    RenderViewHostTestHarness::SetUp();
+    CocoaTest::BootstrapCocoa();
+    drop_target_.reset([[WebDropTarget alloc] initWithTabContents:contents()]);
   }
 
   void PutURLOnPasteboard(NSString* urlString, NSPasteboard* pboard) {
@@ -31,8 +27,20 @@ class WebDropTargetTest : public RenderViewHostTestHarness {
     [url writeToPasteboard:pboard];
   }
 
+  void PutCoreURLAndTitleOnPasteboard(NSString* urlString, NSString* title,
+                                      NSPasteboard* pboard) {
+    [pboard
+        declareTypes:[NSArray arrayWithObjects:kCorePasteboardFlavorType_url,
+                                               kCorePasteboardFlavorType_urln,
+                                               nil]
+               owner:nil];
+    [pboard setString:urlString
+              forType:kCorePasteboardFlavorType_url];
+    [pboard setString:title
+              forType:kCorePasteboardFlavorType_urln];
+  }
+
   base::ScopedNSAutoreleasePool pool_;
-  CocoaTestHelper cocoa_helper_;
   scoped_nsobject<WebDropTarget> drop_target_;
 };
 
@@ -44,12 +52,13 @@ TEST_F(WebDropTargetTest, Init) {
 // Test flipping of coordinates given a point in window coordinates.
 TEST_F(WebDropTargetTest, Flip) {
   NSPoint windowPoint = NSZeroPoint;
+  scoped_nsobject<NSWindow> window([[CocoaTestHelperWindow alloc] init]);
   NSPoint viewPoint =
       [drop_target_ flipWindowPointToView:windowPoint
-                                     view:cocoa_helper_.contentView()];
+                                     view:[window contentView]];
   NSPoint screenPoint =
       [drop_target_ flipWindowPointToScreen:windowPoint
-                               view:cocoa_helper_.contentView()];
+                               view:[window contentView]];
   EXPECT_EQ(viewPoint.x, 0);
   EXPECT_EQ(viewPoint.y, 600);
   EXPECT_EQ(screenPoint.x, 0);
@@ -59,29 +68,47 @@ TEST_F(WebDropTargetTest, Flip) {
 }
 
 TEST_F(WebDropTargetTest, URL) {
+  NSPasteboard* pboard = nil;
+  NSString* url = nil;
+  NSString* title = nil;
   WebDropData data;
 
   // Put a URL on the pasteboard and check it.
-  NSPasteboard* pboard = [NSPasteboard pasteboardWithUniqueName];
-  PutURLOnPasteboard(@"http://www.google.com", pboard);
-  [drop_target_ populateURLAndTitle:&data fromPasteboard:pboard];
-  EXPECT_EQ(data.url.spec(), "http://www.google.com/");
+  pboard = [NSPasteboard pasteboardWithUniqueName];
+  url = @"http://www.google.com/";
+  PutURLOnPasteboard(url, pboard);
+  EXPECT_TRUE([drop_target_ populateURLAndTitle:&data fromPasteboard:pboard]);
+  EXPECT_EQ(data.url.spec(), base::SysNSStringToUTF8(url));
   [pboard releaseGlobally];
 
   // Put a 'url ' and 'urln' on the pasteboard and check it.
-  NSString* title = @"Title of Awesomeness!";
   pboard = [NSPasteboard pasteboardWithUniqueName];
-  [pboard declareTypes:[NSArray arrayWithObjects:kCorePasteboardFlavorType_url,
-                                        kCorePasteboardFlavorType_urln, nil]
-                 owner:nil];
-  [pboard setString:@"http://www.something.com/"
-            forType:kCorePasteboardFlavorType_url];
-  [pboard setString:title
-            forType:kCorePasteboardFlavorType_urln];
-  [drop_target_ populateURLAndTitle:&data fromPasteboard:pboard];
-  EXPECT_EQ(data.url.spec(), "http://www.something.com/");
+  url = @"http://www.google.com/";
+  title = @"Title of Awesomeness!",
+  PutCoreURLAndTitleOnPasteboard(url, title, pboard);
+  EXPECT_TRUE([drop_target_ populateURLAndTitle:&data fromPasteboard:pboard]);
+  EXPECT_EQ(data.url.spec(), base::SysNSStringToUTF8(url));
   EXPECT_EQ(data.url_title, base::SysNSStringToUTF16(title));
+  [pboard releaseGlobally];
 
+  // Also check that it passes file:// via 'url '/'urln' properly.
+  pboard = [NSPasteboard pasteboardWithUniqueName];
+  url = @"file:///tmp/dont_delete_me.txt";
+  title = @"very important";
+  PutCoreURLAndTitleOnPasteboard(url, title, pboard);
+  EXPECT_TRUE([drop_target_ populateURLAndTitle:&data fromPasteboard:pboard]);
+  EXPECT_EQ(data.url.spec(), base::SysNSStringToUTF8(url));
+  EXPECT_EQ(data.url_title, base::SysNSStringToUTF16(title));
+  [pboard releaseGlobally];
+
+  // And javascript:.
+  pboard = [NSPasteboard pasteboardWithUniqueName];
+  url = @"javascript:open('http://www.youtube.com/')";
+  title = @"kill some time";
+  PutCoreURLAndTitleOnPasteboard(url, title, pboard);
+  EXPECT_TRUE([drop_target_ populateURLAndTitle:&data fromPasteboard:pboard]);
+  EXPECT_EQ(data.url.spec(), base::SysNSStringToUTF8(url));
+  EXPECT_EQ(data.url_title, base::SysNSStringToUTF16(title));
   [pboard releaseGlobally];
 }
 
@@ -103,9 +130,4 @@ TEST_F(WebDropTargetTest, Data) {
   EXPECT_EQ(data.text_html, base::SysNSStringToUTF16(htmlString));
 
   [pboard releaseGlobally];
-}
-
-TEST_F(WebDropTargetTest, EnterExitDrop) {
-  // TODO(pinkerton): Call enter/exit/drop and see what happens. This is a bit
-  // harder to test.
 }

@@ -5,9 +5,9 @@
 #ifndef CHROME_BROWSER_VIEWS_CONSTRAINED_WINDOW_WIN_H_
 #define CHROME_BROWSER_VIEWS_CONSTRAINED_WINDOW_WIN_H_
 
-#include "base/gfx/rect.h"
 #include "chrome/browser/tab_contents/constrained_window.h"
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
+#include "gfx/rect.h"
 #include "views/window/window_win.h"
 
 class ConstrainedTabContentsWindowDelegate;
@@ -35,7 +35,9 @@ class ConstrainedWindowWin : public ConstrainedWindow,
   virtual views::NonClientFrameView* CreateFrameViewForWindow();
 
   // Overridden from ConstrainedWindow:
+  virtual void ShowConstrainedWindow();
   virtual void CloseConstrainedWindow();
+  virtual void FocusConstrainedWindow();
   virtual std::wstring GetWindowTitle() const;
   virtual const gfx::Rect& GetCurrentBounds() const;
 
@@ -68,7 +70,8 @@ class ConstrainedWindowWin : public ConstrainedWindow,
   // Current display rectangle (relative to owner_'s visible area).
   gfx::Rect current_bounds_;
 
+  views::View* focused_view_;
   DISALLOW_COPY_AND_ASSIGN(ConstrainedWindowWin);
 };
 
-#endif  // #ifndef CHROME_BROWSER_VIEWS_CONSTRAINED_WINDOW_WIN_H_
+#endif  // CHROME_BROWSER_VIEWS_CONSTRAINED_WINDOW_WIN_H_

@@ -15,20 +15,21 @@
 #include "base/process_util.h"
 #include "base/rand_util.h"
 #include "base/stats_table.h"
-#include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/trace_event.h"
+#include "base/utf_string_conversions.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/net_module.h"
 #include "net/base/net_util.h"
 #include "net/http/http_cache.h"
 #include "net/socket/ssl_test_util.h"
 #include "net/url_request/url_request_context.h"
-#include "webkit/api/public/WebKit.h"
-#include "webkit/api/public/WebScriptController.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebScriptController.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/window_open_disposition.h"
 #include "webkit/extensions/v8/gc_extension.h"
+#include "webkit/extensions/v8/heap_profiler_extension.h"
 #include "webkit/extensions/v8/playback_extension.h"
 #include "webkit/extensions/v8/profiler_extension.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
@@ -38,18 +39,34 @@
 #include "webkit/tools/test_shell/test_shell_switches.h"
 #include "webkit/tools/test_shell/test_shell_webkit_init.h"
 
+#if defined(OS_WIN)
+#pragma warning(disable: 4996)
+#endif
+
 static const size_t kPathBufSize = 2048;
+
+using WebKit::WebScriptController;
 
 namespace {
 
 // StatsTable initialization parameters.
-static const char* kStatsFilePrefix = "testshell_";
-static int kStatsFileThreads = 20;
-static int kStatsFileCounters = 200;
+const char* const kStatsFilePrefix = "testshell_";
+int kStatsFileThreads = 20;
+int kStatsFileCounters = 200;
+
+void RemoveSharedMemoryFile(std::string& filename) {
+  // Stats uses SharedMemory under the hood. On posix, this results in a file
+  // on disk.
+#if defined(OS_POSIX)
+  base::SharedMemory memory;
+  memory.Delete(UTF8ToWide(filename));
+#endif
+}
 
 }  // namespace
 
 int main(int argc, char* argv[]) {
+  base::EnableInProcessStackDumping();
   base::EnableTerminationOnHeapCorruption();
 
   // Some tests may use base::Singleton<>, thus we need to instanciate
@@ -131,8 +148,8 @@ int main(int argc, char* argv[]) {
       parsed_command_line.HasSwitch(test_shell::kEnableFileCookies))
     net::CookieMonster::EnableFileScheme();
 
-  FilePath cache_path = FilePath::FromWStringHack(
-      parsed_command_line.GetSwitchValue(test_shell::kCacheDir));
+  FilePath cache_path =
+      parsed_command_line.GetSwitchValuePath(test_shell::kCacheDir);
   // If the cache_path is empty and it's layout_test_mode, leave it empty
   // so we use an in-memory cache. This makes running multiple test_shells
   // in parallel less flaky.
@@ -152,7 +169,7 @@ int main(int argc, char* argv[]) {
   // Config the network module so it has access to a limited set of resources.
   net::NetModule::SetResourceProvider(TestShell::NetResourceProvider);
 
-  // On Linux, load the test root certificate.
+  // On Linux and Mac, load the test root certificate.
   net::TestServerLauncher ssl_util;
   ssl_util.LoadTestRootCert();
 
@@ -215,18 +232,27 @@ int main(int argc, char* argv[]) {
   js_flags += L" --expose-gc";
   webkit_glue::SetJavaScriptFlags(js_flags);
   // Expose GCController to JavaScript.
-  WebKit::registerExtension(extensions_v8::GCExtension::Get());
+  WebScriptController::registerExtension(extensions_v8::GCExtension::Get());
 
   if (parsed_command_line.HasSwitch(test_shell::kProfiler)) {
-    WebKit::registerExtension(extensions_v8::ProfilerExtension::Get());
+    WebScriptController::registerExtension(
+        extensions_v8::ProfilerExtension::Get());
+  }
+
+  if (parsed_command_line.HasSwitch(test_shell::kHeapProfiler)) {
+    WebScriptController::registerExtension(
+        extensions_v8::HeapProfilerExtension::Get());
   }
 
   // Load and initialize the stats table.  Attempt to construct a somewhat
   // unique name to isolate separate instances from each other.
-  StatsTable *table = new StatsTable(
-      // truncate the random # to 32 bits for the benefit of Mac OS X, to
-      // avoid tripping over its maximum shared memory segment name length
-      kStatsFilePrefix + Uint64ToString(base::RandUint64() & 0xFFFFFFFFL),
+
+  // truncate the random # to 32 bits for the benefit of Mac OS X, to
+  // avoid tripping over its maximum shared memory segment name length
+  std::string stats_filename =
+      kStatsFilePrefix + Uint64ToString(base::RandUint64() & 0xFFFFFFFFL);
+  RemoveSharedMemoryFile(stats_filename);
+  StatsTable *table = new StatsTable(stats_filename,
       kStatsFileThreads,
       kStatsFileCounters);
   StatsTable::set_current(table);
@@ -235,7 +261,8 @@ int main(int argc, char* argv[]) {
   if (TestShell::CreateNewWindow(starting_url, &shell)) {
     if (record_mode || playback_mode) {
       platform.SetWindowPositionForRecording(shell);
-      WebKit::registerExtension(extensions_v8::PlaybackExtension::Get());
+      WebScriptController::registerExtension(
+          extensions_v8::PlaybackExtension::Get());
     }
 
     shell->Show(WebKit::WebNavigationPolicyNewWindow);
@@ -336,16 +363,9 @@ int main(int argc, char* argv[]) {
       // Flush any remaining messages before we kill ourselves.
       // http://code.google.com/p/chromium/issues/detail?id=9500
       MessageLoop::current()->RunAllPending();
-
-      delete shell;
     } else {
       MessageLoop::current()->Run();
     }
-
-    // Flush any remaining messages.  This ensures that any accumulated
-    // Task objects get destroyed before we exit, which avoids noise in
-    // purify leak-test results.
-    MessageLoop::current()->RunAllPending();
 
     if (record_mode)
       base::EventRecorder::current()->StopRecording();
@@ -359,6 +379,7 @@ int main(int argc, char* argv[]) {
   // Tear down shared StatsTable; prevents unit_tests from leaking it.
   StatsTable::set_current(NULL);
   delete table;
+  RemoveSharedMemoryFile(stats_filename);
 
   return 0;
 }

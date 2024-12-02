@@ -9,23 +9,38 @@
 
 #include "chrome/installer/util/chrome_frame_distribution.h"
 
+#include <string>
+#include <windows.h>
+
+#include "base/logging.h"
+#include "base/registry.h"
+#include "base/string_util.h"
 #include "chrome/installer/util/l10n_string_util.h"
 #include "chrome/installer/util/google_update_constants.h"
 
 #include "installer_util_strings.h"
 
+namespace {
+const wchar_t kChromeFrameGuid[] = L"{8BA986DA-5100-405E-AA35-86F34A02ACBF}";
+}
+
+std::wstring ChromeFrameDistribution::GetAppGuid() {
+  return kChromeFrameGuid;
+}
+
 std::wstring ChromeFrameDistribution::GetApplicationName() {
-  // TODO(robertshield): localize
-  return L"Google Chrome Frame";
+  const std::wstring& product_name =
+    installer_util::GetLocalizedString(IDS_PRODUCT_FRAME_NAME_BASE);
+  return product_name;
 }
 
 std::wstring ChromeFrameDistribution::GetAlternateApplicationName() {
-  // TODO(robertshield): localize
-  return L"Chromium technology in your existing browser";
+  const std::wstring& product_name =
+    installer_util::GetLocalizedString(IDS_PRODUCT_FRAME_NAME_BASE);
+  return product_name;
 }
 
 std::wstring ChromeFrameDistribution::GetInstallSubDir() {
-  // TODO(robertshield): localize
   return L"Google\\Chrome Frame";
 }
 
@@ -39,17 +54,25 @@ std::wstring ChromeFrameDistribution::GetAppDescription() {
   return L"Chrome in a Frame.";
 }
 
+std::wstring ChromeFrameDistribution::GetLongAppDescription() {
+  return L"Chrome in a Frame.";
+}
+
+std::string ChromeFrameDistribution::GetSafeBrowsingName() {
+  return "googlechromeframe";
+}
+
 std::wstring ChromeFrameDistribution::GetStateKey() {
   std::wstring key(google_update::kRegPathClientState);
   key.append(L"\\");
-  key.append(google_update::kChromeGuid);
+  key.append(kChromeFrameGuid);
   return key;
 }
 
 std::wstring ChromeFrameDistribution::GetStateMediumKey() {
   std::wstring key(google_update::kRegPathClientStateMedium);
   key.append(L"\\");
-  key.append(google_update::kChromeGuid);
+  key.append(kChromeFrameGuid);
   return key;
 }
 
@@ -70,19 +93,35 @@ std::wstring ChromeFrameDistribution::GetUninstallRegPath() {
 std::wstring ChromeFrameDistribution::GetVersionKey() {
   std::wstring key(google_update::kRegPathClients);
   key.append(L"\\");
-  key.append(google_update::kChromeGuid);
+  key.append(kChromeFrameGuid);
   return key;
 }
 
-int ChromeFrameDistribution::GetInstallReturnCode(
-    installer_util::InstallStatus status) {
-  switch (status) {
-    case installer_util::FIRST_INSTALL_SUCCESS:
-    case installer_util::INSTALL_REPAIRED:
-    case installer_util::NEW_VERSION_UPDATED:
-    case installer_util::HIGHER_VERSION_EXISTS:
-      return 0;  // For Google Update's benefit we need to return 0 for success
-    default:
-      return status;
+bool ChromeFrameDistribution::CanSetAsDefault() {
+  return false;
+}
+
+void ChromeFrameDistribution::UpdateDiffInstallStatus(bool system_install,
+    bool incremental_install, installer_util::InstallStatus install_status) {
+  HKEY reg_root = (system_install) ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
+  RegKey key;
+  std::wstring ap_key_value;
+  std::wstring reg_key(google_update::kRegPathClientState);
+  reg_key.append(L"\\");
+  reg_key.append(kChromeFrameGuid);
+  if (!key.Open(reg_root, reg_key.c_str(), KEY_ALL_ACCESS) ||
+      !key.ReadValue(google_update::kRegApField, &ap_key_value)) {
+    LOG(INFO) << "Application key not found.";
+  } else {
+    const char kMagicSuffix[] = "-full";
+    if (LowerCaseEqualsASCII(ap_key_value, kMagicSuffix)) {
+      key.DeleteValue(google_update::kRegApField);
+    } else {
+      size_t pos = ap_key_value.find(ASCIIToWide(kMagicSuffix));
+      if (pos != std::wstring::npos) {
+        ap_key_value.erase(pos, strlen(kMagicSuffix));
+        key.WriteValue(google_update::kRegApField, ap_key_value.c_str());
+      }
+    }
   }
 }

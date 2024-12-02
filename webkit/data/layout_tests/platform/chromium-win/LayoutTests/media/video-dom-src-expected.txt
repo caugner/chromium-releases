@@ -1,6 +1,0 @@
-EXPECTED (video.currentSrc == '') OK
-EXPECTED (video.currentSrc == '') OK
-EVENT(load)
-EXPECTED (relativeURL(video.currentSrc) == 'content/test.ogv') OK
-END OF TEST
-

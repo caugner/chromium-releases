@@ -1,20 +1,25 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/gtk/keyword_editor_view.h"
 
-#include "app/gfx/gtk_util.h"
+#include <string>
+
 #include "app/l10n_util.h"
+#include "base/message_loop.h"
+#include "base/utf_string_conversions.h"
+#include "chrome/browser/gtk/accessible_widget_helper_gtk.h"
 #include "chrome/browser/gtk/edit_search_engine_dialog.h"
-#include "chrome/browser/profile.h"
+#include "chrome/browser/gtk/gtk_tree.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/keyword_editor_controller.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_model.h"
 #include "chrome/browser/search_engines/template_url_table_model.h"
-#include "chrome/common/gtk_tree.h"
-#include "chrome/common/gtk_util.h"
+#include "gfx/gtk_util.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 
@@ -32,6 +37,10 @@ KeywordEditorView* instance_ = NULL;
 // static
 void KeywordEditorView::Show(Profile* profile) {
   DCHECK(profile);
+  // If this panel is opened from an Incognito window, closing that window can
+  // leave this with a stale pointer. Use the original profile instead.
+  // See http://crbug.com/23359.
+  profile = profile->GetOriginalProfile();
   if (!profile->GetTemplateURLModel())
     return;
 
@@ -70,14 +79,20 @@ KeywordEditorView::KeywordEditorView(Profile* profile)
 }
 
 void KeywordEditorView::Init() {
+  std::string dialog_name =
+      l10n_util::GetStringUTF8(IDS_SEARCH_ENGINES_EDITOR_WINDOW_TITLE);
   dialog_ = gtk_dialog_new_with_buttons(
-      l10n_util::GetStringUTF8(IDS_SEARCH_ENGINES_EDITOR_WINDOW_TITLE).c_str(),
+      dialog_name.c_str(),
       NULL,
       // Non-modal.
       GTK_DIALOG_NO_SEPARATOR,
       GTK_STOCK_CLOSE,
       GTK_RESPONSE_CLOSE,
       NULL);
+
+  accessible_widget_helper_.reset(new AccessibleWidgetHelper(
+      dialog_, profile_));
+  accessible_widget_helper_->SendOpenWindowNotification(dialog_name);
 
   gtk_box_set_spacing(GTK_BOX(GTK_DIALOG(dialog_)->vbox),
                       gtk_util::kContentAreaSpacing);
@@ -107,7 +122,7 @@ void KeywordEditorView::Init() {
   gtk_tree_view_set_row_separator_func(GTK_TREE_VIEW(tree_),
                                        OnCheckRowIsSeparator,
                                        NULL, NULL);
-  g_signal_connect(G_OBJECT(tree_), "row-activated",
+  g_signal_connect(tree_, "row-activated",
                    G_CALLBACK(OnRowActivated), this);
   gtk_container_add(GTK_CONTAINER(scroll_window), tree_);
 
@@ -141,35 +156,38 @@ void KeywordEditorView::Init() {
   gtk_tree_selection_set_mode(selection_, GTK_SELECTION_SINGLE);
   gtk_tree_selection_set_select_function(selection_, OnSelectionFilter,
                                          NULL, NULL);
-  g_signal_connect(G_OBJECT(selection_), "changed",
+  g_signal_connect(selection_, "changed",
                    G_CALLBACK(OnSelectionChanged), this);
 
   GtkWidget* button_box = gtk_vbox_new(FALSE, gtk_util::kControlSpacing);
   gtk_box_pack_start(GTK_BOX(hbox), button_box, FALSE, FALSE, 0);
 
-  add_button_ = gtk_button_new_with_label(
-      l10n_util::GetStringUTF8(IDS_SEARCH_ENGINES_EDITOR_NEW_BUTTON).c_str());
-  g_signal_connect(G_OBJECT(add_button_), "clicked",
+  add_button_ = gtk_button_new_with_mnemonic(
+      gtk_util::ConvertAcceleratorsFromWindowsStyle(
+          l10n_util::GetStringUTF8(
+              IDS_SEARCH_ENGINES_EDITOR_NEW_BUTTON)).c_str());
+  g_signal_connect(add_button_, "clicked",
                    G_CALLBACK(OnAddButtonClicked), this);
   gtk_box_pack_start(GTK_BOX(button_box), add_button_, FALSE, FALSE, 0);
 
   edit_button_ = gtk_button_new_with_label(
       l10n_util::GetStringUTF8(IDS_SEARCH_ENGINES_EDITOR_EDIT_BUTTON).c_str());
-  g_signal_connect(G_OBJECT(edit_button_), "clicked",
+  g_signal_connect(edit_button_, "clicked",
                    G_CALLBACK(OnEditButtonClicked), this);
   gtk_box_pack_start(GTK_BOX(button_box), edit_button_, FALSE, FALSE, 0);
 
-  remove_button_ = gtk_button_new_with_label(
-      l10n_util::GetStringUTF8(
-          IDS_SEARCH_ENGINES_EDITOR_REMOVE_BUTTON).c_str());
-  g_signal_connect(G_OBJECT(remove_button_), "clicked",
+  remove_button_ = gtk_button_new_with_mnemonic(
+      gtk_util::ConvertAcceleratorsFromWindowsStyle(
+          l10n_util::GetStringUTF8(
+              IDS_SEARCH_ENGINES_EDITOR_REMOVE_BUTTON)).c_str());
+  g_signal_connect(remove_button_, "clicked",
                    G_CALLBACK(OnRemoveButtonClicked), this);
   gtk_box_pack_start(GTK_BOX(button_box), remove_button_, FALSE, FALSE, 0);
 
   make_default_button_ = gtk_button_new_with_label(
       l10n_util::GetStringUTF8(
           IDS_SEARCH_ENGINES_EDITOR_MAKE_DEFAULT_BUTTON).c_str());
-  g_signal_connect(G_OBJECT(make_default_button_), "clicked",
+  g_signal_connect(make_default_button_, "clicked",
                    G_CALLBACK(OnMakeDefaultButtonClicked), this);
   gtk_box_pack_start(GTK_BOX(button_box), make_default_button_, FALSE, FALSE,
                      0);
@@ -182,13 +200,10 @@ void KeywordEditorView::Init() {
 
   // Set the size of the dialog.
   gtk_widget_realize(dialog_);
-  int width = 1, height = 1;
-  gtk_util::GetWidgetSizeFromResources(
-      dialog_,
-      IDS_SEARCHENGINES_DIALOG_WIDTH_CHARS,
-      IDS_SEARCHENGINES_DIALOG_HEIGHT_LINES,
-      &width, &height);
-  gtk_window_set_default_size(GTK_WINDOW(dialog_), width, height);
+  gtk_util::SetWindowSizeFromResources(GTK_WINDOW(dialog_),
+                                       IDS_SEARCHENGINES_DIALOG_WIDTH_CHARS,
+                                       IDS_SEARCHENGINES_DIALOG_HEIGHT_LINES,
+                                       true);
 
   g_signal_connect(dialog_, "response", G_CALLBACK(OnResponse), this);
   g_signal_connect(dialog_, "destroy", G_CALLBACK(OnWindowDestroy), this);
@@ -226,6 +241,7 @@ void KeywordEditorView::SetColumnValues(int model_row, GtkTreeIter* iter) {
       COL_KEYWORD, WideToUTF8(table_model_->GetText(
           model_row, IDS_SEARCH_ENGINES_EDITOR_KEYWORD_COLUMN)).c_str(),
       -1);
+  g_object_unref(pixbuf);
 }
 
 int KeywordEditorView::GetListStoreRowForModelRow(int model_row) const {
@@ -363,7 +379,7 @@ void KeywordEditorView::OnItemsRemoved(int start, int length) {
   // This is quite likely not correct with removing multiple in one call, but
   // that shouldn't happen since we only can select and modify/remove one at a
   // time.
-  DCHECK(length == 1);
+  DCHECK_EQ(length, 1);
   for (int i = 0; i < length; ++i) {
     int row = GetListStoreRowForModelRow(start + i);
     GtkTreeIter iter;

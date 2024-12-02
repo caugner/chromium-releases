@@ -22,28 +22,33 @@
 #include <functional>
 #include <iomanip>
 #include <iterator>
+#include <limits>
 #include <set>
 #include <string>
 
 #include "base/hash_tables.h"
+#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/perftimer.h"
 #include "base/scoped_ptr.h"
+#include "base/string_util.h"
 #include "base/time.h"
 #include "chrome/browser/sync/engine/syncer.h"
 #include "chrome/browser/sync/engine/syncer_util.h"
+#include "chrome/browser/sync/protocol/autofill_specifics.pb.h"
+#include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
+#include "chrome/browser/sync/protocol/preference_specifics.pb.h"
 #include "chrome/browser/sync/protocol/service_constants.h"
+#include "chrome/browser/sync/protocol/theme_specifics.pb.h"
+#include "chrome/browser/sync/protocol/typed_url_specifics.pb.h"
 #include "chrome/browser/sync/syncable/directory_backing_store.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/syncable-inl.h"
 #include "chrome/browser/sync/syncable/syncable_changes_version.h"
 #include "chrome/browser/sync/syncable/syncable_columns.h"
-#include "chrome/browser/sync/util/character_set_converters.h"
-#include "chrome/browser/sync/util/compat_file.h"
 #include "chrome/browser/sync/util/crypto_helpers.h"
 #include "chrome/browser/sync/util/event_sys-inl.h"
 #include "chrome/browser/sync/util/fast_dump.h"
-#include "chrome/browser/sync/util/path_helpers.h"
 
 namespace {
 enum InvariantCheckLevel {
@@ -57,10 +62,6 @@ static const InvariantCheckLevel kInvariantCheckLevel = VERIFY_IN_MEMORY;
 // Max number of milliseconds to spend checking syncable entry invariants
 static const int kInvariantCheckMaxMs = 50;
 }  // namespace
-
-// if sizeof(time_t) != sizeof(int32) we need to alter or expand the sqlite
-// datatype.
-COMPILE_ASSERT(sizeof(time_t) == sizeof(int32), time_t_is_not_int32);
 
 using browser_sync::FastDump;
 using browser_sync::SyncerUtil;
@@ -79,7 +80,7 @@ int64 Now() {
   LARGE_INTEGER n;
   memcpy(&n, &filetime, sizeof(filetime));
   return n.QuadPart;
-#elif (defined(OS_LINUX) || defined(OS_MACOSX))
+#elif defined(OS_LINUX) || defined(OS_MACOSX)
   struct timeval tv;
   gettimeofday(&tv, NULL);
   return static_cast<int64>(tv.tv_sec);
@@ -92,17 +93,9 @@ int64 Now() {
 // Compare functions and hashes for the indices.
 
 // Callback for sqlite3
+// TODO(chron): This should be somewhere else
 int ComparePathNames16(void*, int a_bytes, const void* a, int b_bytes,
                        const void* b) {
-#if defined(OS_WIN)
-  DCHECK_EQ(0, a_bytes % 2);
-  DCHECK_EQ(0, b_bytes % 2);
-  int result = CompareString(LOCALE_INVARIANT, NORM_IGNORECASE,
-    static_cast<const PathChar*>(a), a_bytes / 2,
-    static_cast<const PathChar*>(b), b_bytes / 2);
-  CHECK(0 != result) << "Error comparing strings: " << GetLastError();
-  return result - 2;  // Convert to -1, 0, 1
-#elif defined(OS_LINUX)
   int result = base::strncasecmp(reinterpret_cast<const char *>(a),
                                  reinterpret_cast<const char *>(b),
                                  std::min(a_bytes, b_bytes));
@@ -111,21 +104,6 @@ int ComparePathNames16(void*, int a_bytes, const void* a, int b_bytes,
   } else {
     return a_bytes > b_bytes ? 1 : b_bytes > a_bytes ? -1 : 0;
   }
-#elif defined(OS_MACOSX)
-  CFStringRef a_str;
-  CFStringRef b_str;
-  a_str = CFStringCreateWithBytes(NULL, reinterpret_cast<const UInt8*>(a),
-                                  a_bytes, kCFStringEncodingUTF8, FALSE);
-  b_str = CFStringCreateWithBytes(NULL, reinterpret_cast<const UInt8*>(b),
-                                  b_bytes, kCFStringEncodingUTF8, FALSE);
-  CFComparisonResult res;
-  res = CFStringCompare(a_str, b_str, kCFCompareCaseInsensitive);
-  CFRelease(a_str);
-  CFRelease(b_str);
-  return res;
-#else
-#error no ComparePathNames16() for your OS
-#endif
 }
 
 template <Int64Field field_index>
@@ -146,33 +124,29 @@ class HashField {
   base::hash_set<int64> hasher_;
 };
 
-// TODO(ncarter): Rename!
-int ComparePathNames(const PathString& a, const PathString& b) {
-  const size_t val_size = sizeof(PathString::value_type);
+// TODO(chron): Remove this function.
+int ComparePathNames(const string& a, const string& b) {
+  const size_t val_size = sizeof(string::value_type);
   return ComparePathNames16(NULL, a.size() * val_size, a.data(),
                                   b.size() * val_size, b.data());
 }
 
-class LessParentIdAndNames {
+class LessParentIdAndHandle {
  public:
   bool operator() (const syncable::EntryKernel* a,
                    const syncable::EntryKernel* b) const {
-    if (a->ref(PARENT_ID) != b->ref(PARENT_ID))
+    if (a->ref(PARENT_ID) != b->ref(PARENT_ID)) {
       return a->ref(PARENT_ID) < b->ref(PARENT_ID);
-    return ComparePathNames(a->ref(NAME), b->ref(NAME)) < 0;
+    }
+
+    // Meta handles are immutable per entry so this is ideal.
+    return a->ref(META_HANDLE) < b->ref(META_HANDLE);
   }
 };
 
-bool LessPathNames::operator() (const PathString& a,
-                                const PathString& b) const {
+// TODO(chron): Remove this function.
+bool LessPathNames::operator() (const string& a, const string& b) const {
   return ComparePathNames(a, b) < 0;
-}
-
-// static
-Name Name::FromEntryKernel(EntryKernel* kernel) {
-  PathString& sync_name_ref = kernel->ref(UNSANITIZED_NAME).empty() ?
-      kernel->ref(NAME) : kernel->ref(UNSANITIZED_NAME);
-  return Name(kernel->ref(NAME), sync_name_ref, kernel->ref(NON_UNIQUE_NAME));
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -181,27 +155,26 @@ Name Name::FromEntryKernel(EntryKernel* kernel) {
 static const DirectoryChangeEvent kShutdownChangesEvent =
     { DirectoryChangeEvent::SHUTDOWN, 0, 0 };
 
-Directory::Kernel::Kernel(const PathString& db_path,
-                          const PathString& name,
+Directory::Kernel::Kernel(const FilePath& db_path,
+                          const string& name,
                           const KernelLoadInfo& info)
-: db_path(db_path),
-  refcount(1),
-  name_(name),
-  metahandles_index(new Directory::MetahandlesIndex),
-  ids_index(new Directory::IdsIndex),
-  parent_id_and_names_index(new Directory::ParentIdAndNamesIndex),
-  extended_attributes(new ExtendedAttributes),
-  unapplied_update_metahandles(new MetahandleSet),
-  unsynced_metahandles(new MetahandleSet),
-  channel(new Directory::Channel(syncable::DIRECTORY_DESTROYED)),
-  changes_channel(new Directory::ChangesChannel(kShutdownChangesEvent)),
-  last_sync_timestamp_(info.kernel_info.last_sync_timestamp),
-  initial_sync_ended_(info.kernel_info.initial_sync_ended),
-  store_birthday_(info.kernel_info.store_birthday),
-  cache_guid_(info.cache_guid),
-  next_metahandle(info.max_metahandle + 1),
-  next_id(info.kernel_info.next_id) {
-  info_status_ = Directory::KERNEL_SHARE_INFO_VALID;
+    : db_path(db_path),
+      refcount(1),
+      name(name),
+      metahandles_index(new Directory::MetahandlesIndex),
+      ids_index(new Directory::IdsIndex),
+      parent_id_child_index(new Directory::ParentIdChildIndex),
+      client_tag_index(new Directory::ClientTagIndex),
+      extended_attributes(new ExtendedAttributes),
+      unapplied_update_metahandles(new MetahandleSet),
+      unsynced_metahandles(new MetahandleSet),
+      dirty_metahandles(new MetahandleSet),
+      channel(new Directory::Channel(syncable::DIRECTORY_DESTROYED)),
+      changes_channel(new Directory::ChangesChannel(kShutdownChangesEvent)),
+      info_status(Directory::KERNEL_SHARE_INFO_VALID),
+      persisted_info(info.kernel_info),
+      cache_guid(info.cache_guid),
+      next_metahandle(info.max_metahandle + 1) {
 }
 
 inline void DeleteEntry(EntryKernel* kernel) {
@@ -223,8 +196,10 @@ Directory::Kernel::~Kernel() {
   delete changes_channel;
   delete unsynced_metahandles;
   delete unapplied_update_metahandles;
+  delete dirty_metahandles;
   delete extended_attributes;
-  delete parent_id_and_names_index;
+  delete parent_id_child_index;
+  delete client_tag_index;
   delete ids_index;
   for_each(metahandles_index->begin(), metahandles_index->end(), DeleteEntry);
   delete metahandles_index;
@@ -237,60 +212,7 @@ Directory::~Directory() {
   Close();
 }
 
-BOOL PathNameMatch(const PathString& pathname, const PathString& pathspec) {
-#if defined(OS_WIN)
-  // Note that if we go Vista only this is easier:
-  // http://msdn2.microsoft.com/en-us/library/ms628611.aspx
-
-  // PathMatchSpec strips spaces from the start of pathspec, so we compare those
-  // ourselves.
-  const PathChar* pathname_ptr = pathname.c_str();
-  const PathChar* pathspec_ptr = pathspec.c_str();
-
-  while (*pathname_ptr == ' ' && *pathspec_ptr == ' ')
-     ++pathname_ptr, ++pathspec_ptr;
-
-  // If we have more inital spaces in the pathspec than in the pathname then the
-  // result from PathMatchSpec will be erronous.
-  if (*pathspec_ptr == ' ')
-    return FALSE;
-
-  // PathMatchSpec also gets "confused" when there are ';' characters in name or
-  // in spec. So, if we match (f.i.) ";" with ";" PathMatchSpec will return
-  // FALSE (which is wrong). Luckily for us, we can easily fix this by
-  // substituting ';' with ':' which is illegal character in file name and
-  // we're not going to see it there. With ':' in path name and spec
-  // PathMatchSpec works fine.
-  if ((NULL == wcschr(pathname_ptr, L';')) &&
-      (NULL == wcschr(pathspec_ptr, L';'))) {
-    // No ';' in file name and in spec. Just pass it as it is.
-    return ::PathMatchSpec(pathname_ptr, pathspec_ptr);
-  }
-
-  // We need to subst ';' with ':' in both, name and spec.
-  PathString name_subst(pathname_ptr);
-  PathString spec_subst(pathspec_ptr);
-
-  PathString::size_type index = name_subst.find(L';');
-  while (PathString::npos != index) {
-    name_subst[index] = L':';
-    index = name_subst.find(L';', index + 1);
-  }
-
-  index = spec_subst.find(L';');
-  while (PathString::npos != index) {
-    spec_subst[index] = L':';
-    index = spec_subst.find(L';', index + 1);
-  }
-
-  return ::PathMatchSpec(name_subst.c_str(), spec_subst.c_str());
-#else
-  return 0 == ComparePathNames(pathname, pathspec);
-#endif
-}
-
-DirOpenResult Directory::Open(const PathString& file_path,
-                              const PathString& name) {
+DirOpenResult Directory::Open(const FilePath& file_path, const string& name) {
   const DirOpenResult result = OpenImpl(file_path, name);
   if (OPENED != result)
     Close();
@@ -302,28 +224,33 @@ void Directory::InitializeIndices() {
   for (; it != kernel_->metahandles_index->end(); ++it) {
     EntryKernel* entry = *it;
     if (!entry->ref(IS_DEL))
-      kernel_->parent_id_and_names_index->insert(entry);
+      kernel_->parent_id_child_index->insert(entry);
     kernel_->ids_index->insert(entry);
+    if (!entry->ref(UNIQUE_CLIENT_TAG).empty()) {
+      kernel_->client_tag_index->insert(entry);
+    }
     if (entry->ref(IS_UNSYNCED))
       kernel_->unsynced_metahandles->insert(entry->ref(META_HANDLE));
     if (entry->ref(IS_UNAPPLIED_UPDATE))
       kernel_->unapplied_update_metahandles->insert(entry->ref(META_HANDLE));
+    DCHECK(!entry->is_dirty());
   }
 }
 
 DirectoryBackingStore* Directory::CreateBackingStore(
-    const PathString& dir_name, const PathString& backing_filepath) {
+    const string& dir_name, const FilePath& backing_filepath) {
   return new DirectoryBackingStore(dir_name, backing_filepath);
 }
 
-DirOpenResult Directory::OpenImpl(const PathString& file_path,
-                                  const PathString& name) {
+DirOpenResult Directory::OpenImpl(const FilePath& file_path,
+                                  const string& name) {
   DCHECK_EQ(static_cast<DirectoryBackingStore*>(NULL), store_);
-  const PathString db_path = ::GetFullPath(file_path);
+  FilePath db_path(file_path);
+  file_util::AbsolutePath(&db_path);
   store_ = CreateBackingStore(name, db_path);
 
   KernelLoadInfo info;
-  // Temporary indicies before kernel_ initialized in case Load fails. We 0(1)
+  // Temporary indices before kernel_ initialized in case Load fails. We 0(1)
   // swap these later.
   MetahandlesIndex metas_bucket;
   ExtendedAttributes xattrs_bucket;
@@ -359,17 +286,29 @@ EntryKernel* Directory::GetEntryById(const Id& id) {
 EntryKernel* Directory::GetEntryById(const Id& id,
                                      ScopedKernelLock* const lock) {
   DCHECK(kernel_);
-  // First look up in memory
-  kernel_->needle.ref(ID) = id;
+  // Find it in the in memory ID index.
+  kernel_->needle.put(ID, id);
   IdsIndex::iterator id_found = kernel_->ids_index->find(&kernel_->needle);
   if (id_found != kernel_->ids_index->end()) {
-    // Found it in memory.  Easy.
     return *id_found;
   }
   return NULL;
 }
 
-EntryKernel* Directory::GetEntryByTag(const PathString& tag) {
+EntryKernel* Directory::GetEntryByClientTag(const string& tag) {
+  ScopedKernelLock lock(this);
+  DCHECK(kernel_);
+  // Find it in the ClientTagIndex.
+  kernel_->needle.put(UNIQUE_CLIENT_TAG, tag);
+  ClientTagIndex::iterator found = kernel_->client_tag_index->find(
+      &kernel_->needle);
+  if (found != kernel_->client_tag_index->end()) {
+    return *found;
+  }
+  return NULL;
+}
+
+EntryKernel* Directory::GetEntryByServerTag(const string& tag) {
   ScopedKernelLock lock(this);
   DCHECK(kernel_);
   // We don't currently keep a separate index for the tags.  Since tags
@@ -379,7 +318,7 @@ EntryKernel* Directory::GetEntryByTag(const PathString& tag) {
   // looking for a match.
   MetahandlesIndex& set = *kernel_->metahandles_index;
   for (MetahandlesIndex::iterator i = set.begin(); i != set.end(); ++i) {
-    if ((*i)->ref(SINGLETON_TAG) == tag) {
+    if ((*i)->ref(UNIQUE_SERVER_TAG) == tag) {
       return *i;
     }
   }
@@ -394,7 +333,7 @@ EntryKernel* Directory::GetEntryByHandle(const int64 metahandle) {
 EntryKernel* Directory::GetEntryByHandle(const int64 metahandle,
                                          ScopedKernelLock* lock) {
   // Look up in memory
-  kernel_->needle.ref(META_HANDLE) = metahandle;
+  kernel_->needle.put(META_HANDLE, metahandle);
   MetahandlesIndex::iterator found =
     kernel_->metahandles_index->find(&kernel_->needle);
   if (found != kernel_->metahandles_index->end()) {
@@ -404,61 +343,14 @@ EntryKernel* Directory::GetEntryByHandle(const int64 metahandle,
   return NULL;
 }
 
-EntryKernel* Directory::GetChildWithName(const Id& parent_id,
-                                         const PathString& name) {
-  ScopedKernelLock lock(this);
-  return GetChildWithName(parent_id, name, &lock);
-}
-
-// Will return child entry if the folder is opened,
-// otherwise it will return NULL.
-EntryKernel* Directory::GetChildWithName(const Id& parent_id,
-                                         const PathString& name,
-                                         ScopedKernelLock* const lock) {
-  PathString dbname = name;
-  EntryKernel* parent = GetEntryById(parent_id, lock);
-  if (parent == NULL)
-    return NULL;
-  return GetChildWithNameImpl(parent_id, dbname, lock);
-}
-
-// Will return child entry even when the folder is not opened. This is used by
-// syncer to apply update when folder is closed.
-EntryKernel* Directory::GetChildWithDBName(const Id& parent_id,
-                                           const PathString& name) {
-  ScopedKernelLock lock(this);
-  return GetChildWithNameImpl(parent_id, name, &lock);
-}
-
-EntryKernel* Directory::GetChildWithNameImpl(const Id& parent_id,
-                                             const PathString& name,
-                                             ScopedKernelLock* const lock) {
-  // First look up in memory:
-  kernel_->needle.ref(NAME) = name;
-  kernel_->needle.ref(PARENT_ID) = parent_id;
-  ParentIdAndNamesIndex::iterator found =
-    kernel_->parent_id_and_names_index->find(&kernel_->needle);
-  if (found != kernel_->parent_id_and_names_index->end()) {
-    // Found it in memory.  Easy.
-    return *found;
-  }
-  return NULL;
-}
-
 // An interface to specify the details of which children
 // GetChildHandles() is looking for.
+// TODO(chron): Clean this up into one function to get child handles
 struct PathMatcher {
   explicit PathMatcher(const Id& parent_id) : parent_id_(parent_id) { }
   virtual ~PathMatcher() { }
-  enum MatchType {
-    NO_MATCH,
-    MATCH,
-    // Means we found the only entry we're looking for in
-    // memory so we don't need to check the DB.
-    EXACT_MATCH
-  };
-  virtual MatchType PathMatches(const PathString& path) = 0;
-  typedef Directory::ParentIdAndNamesIndex Index;
+
+  typedef Directory::ParentIdChildIndex Index;
   virtual Index::iterator lower_bound(Index* index) = 0;
   virtual Index::iterator upper_bound(Index* index) = 0;
   const Id parent_id_;
@@ -466,105 +358,23 @@ struct PathMatcher {
 };
 
 // Matches all children.
+// TODO(chron): Unit test this by itself
 struct AllPathsMatcher : public PathMatcher {
   explicit AllPathsMatcher(const Id& parent_id) : PathMatcher(parent_id) {
   }
-  virtual MatchType PathMatches(const PathString& path) {
-    return MATCH;
-  }
+
   virtual Index::iterator lower_bound(Index* index) {
-    needle_.ref(PARENT_ID) = parent_id_;
-    needle_.ref(NAME).clear();
+    needle_.put(PARENT_ID, parent_id_);
+    needle_.put(META_HANDLE, std::numeric_limits<int64>::min());
     return index->lower_bound(&needle_);
   }
 
   virtual Index::iterator upper_bound(Index* index) {
-    needle_.ref(PARENT_ID) = parent_id_;
-    needle_.ref(NAME).clear();
-    Index::iterator i = index->upper_bound(&needle_),
-      end = index->end();
-    while (i != end  && (*i)->ref(PARENT_ID) == parent_id_)
-      ++i;
-    return i;
-  }
-};
-
-// Matches an exact filename only; no wildcards.
-struct ExactPathMatcher : public PathMatcher {
-  ExactPathMatcher(const PathString& pathspec, const Id& parent_id)
-    : PathMatcher(parent_id), pathspec_(pathspec) {
-  }
-  virtual MatchType PathMatches(const PathString& path) {
-    return 0 == ComparePathNames(path, pathspec_) ? EXACT_MATCH : NO_MATCH;
-  }
-  virtual Index::iterator lower_bound(Index* index) {
-    needle_.ref(PARENT_ID) = parent_id_;
-    needle_.ref(NAME) = pathspec_;
-    return index->lower_bound(&needle_);
-  }
-  virtual Index::iterator upper_bound(Index* index) {
-    needle_.ref(PARENT_ID) = parent_id_;
-    needle_.ref(NAME) = pathspec_;
+    needle_.put(PARENT_ID, parent_id_);
+    needle_.put(META_HANDLE, std::numeric_limits<int64>::max());
     return index->upper_bound(&needle_);
   }
-  const PathString pathspec_;
 };
-
-// Matches a pathspec with wildcards.
-struct PartialPathMatcher : public PathMatcher {
-  PartialPathMatcher(const PathString& pathspec,
-                     PathString::size_type wildcard, const Id& parent_id)
-    : PathMatcher(parent_id), pathspec_(pathspec) {
-    if (0 == wildcard)
-      return;
-    lesser_.assign(pathspec_.data(), wildcard);
-    greater_.assign(pathspec_.data(), wildcard);
-    // Increment the last letter of greater so we can then less than
-    // compare to it.
-    PathString::size_type i = greater_.size() - 1;
-    do {
-    if (greater_[i] == std::numeric_limits<PathString::value_type>::max()) {
-        greater_.resize(i);  // Try the preceding character.
-        if (0 == i--)
-          break;
-      } else {
-        greater_[i] += 1;
-      }
-      // Yes, there are cases where incrementing a character
-      // actually decreases its position in the sort.  Example: 9 -> :
-    } while (ComparePathNames(lesser_, greater_) >= 0);
-  }
-
-  virtual MatchType PathMatches(const PathString& path) {
-    return PathNameMatch(path, pathspec_) ? MATCH : NO_MATCH;
-  }
-
-  virtual Index::iterator lower_bound(Index* index) {
-    needle_.ref(PARENT_ID) = parent_id_;
-    needle_.ref(NAME) = lesser_;
-    return index->lower_bound(&needle_);
-  }
-  virtual Index::iterator upper_bound(Index* index) {
-    if (greater_.empty()) {
-      needle_.ref(PARENT_ID) = parent_id_;
-      needle_.ref(NAME).clear();
-      Index::iterator i = index->upper_bound(&needle_),
-        end = index->end();
-      while (i != end && (*i)->ref(PARENT_ID) == parent_id_)
-        ++i;
-      return i;
-    } else {
-      needle_.ref(PARENT_ID) = parent_id_;
-      needle_.ref(NAME) = greater_;
-      return index->lower_bound(&needle_);
-    }
-  }
-
-  const PathString pathspec_;
-  PathString lesser_;
-  PathString greater_;
-};
-
 
 void Directory::GetChildHandles(BaseTransaction* trans, const Id& parent_id,
                                 Directory::ChildHandles* result) {
@@ -579,21 +389,17 @@ void Directory::GetChildHandlesImpl(BaseTransaction* trans, const Id& parent_id,
   result->clear();
   {
     ScopedKernelLock lock(this);
-    ParentIdAndNamesIndex* const index =
-      kernel_->parent_id_and_names_index;
-    typedef ParentIdAndNamesIndex::iterator iterator;
+
+    // This index is sorted by parent id and metahandle.
+    ParentIdChildIndex* const index = kernel_->parent_id_child_index;
+    typedef ParentIdChildIndex::iterator iterator;
     for (iterator i = matcher->lower_bound(index),
            end = matcher->upper_bound(index); i != end; ++i) {
       // root's parent_id is NULL in the db but 0 in memory, so
       // have avoid listing the root as its own child.
       if ((*i)->ref(ID) == (*i)->ref(PARENT_ID))
         continue;
-      PathMatcher::MatchType match = matcher->PathMatches((*i)->ref(NAME));
-      if (PathMatcher::NO_MATCH == match)
-        continue;
       result->push_back((*i)->ref(META_HANDLE));
-      if (PathMatcher::EXACT_MATCH == match)
-        return;
     }
   }
 }
@@ -602,29 +408,18 @@ EntryKernel* Directory::GetRootEntry() {
   return GetEntryById(Id());
 }
 
-EntryKernel* Directory::GetEntryByPath(const PathString& path) {
-  CHECK(kernel_);
-  EntryKernel* result = GetRootEntry();
-  CHECK(result) << "There should always be a root node.";
-  for (PathSegmentIterator<PathString> i(path), end;
-       i != end && NULL != result; ++i) {
-    result = GetChildWithName(result->ref(ID), *i);
-  }
-  return result;
-}
-
 void ZeroFields(EntryKernel* entry, int first_field) {
   int i = first_field;
   // Note that bitset<> constructor sets all bits to zero, and strings
   // initialize to empty.
   for ( ; i < INT64_FIELDS_END; ++i)
-    entry->ref(static_cast<Int64Field>(i)) = 0;
+    entry->put(static_cast<Int64Field>(i), 0);
   for ( ; i < ID_FIELDS_END; ++i)
-    entry->ref(static_cast<IdField>(i)).Clear();
+    entry->mutable_ref(static_cast<IdField>(i)).Clear();
   for ( ; i < BIT_FIELDS_END; ++i)
-    entry->ref(static_cast<BitField>(i)) = false;
-  if (i < BLOB_FIELDS_END)
-    i = BLOB_FIELDS_END;
+    entry->put(static_cast<BitField>(i), false);
+  if (i < PROTO_FIELDS_END)
+    i = PROTO_FIELDS_END;
 }
 
 void Directory::InsertEntry(EntryKernel* entry) {
@@ -637,29 +432,30 @@ void Directory::InsertEntry(EntryKernel* entry, ScopedKernelLock* lock) {
   CHECK(NULL != entry);
   static const char error[] = "Entry already in memory index.";
   CHECK(kernel_->metahandles_index->insert(entry).second) << error;
-  if (!entry->ref(IS_DEL))
-    CHECK(kernel_->parent_id_and_names_index->insert(entry).second) << error;
+
+  if (!entry->ref(IS_DEL)) {
+    CHECK(kernel_->parent_id_child_index->insert(entry).second) << error;
+  }
   CHECK(kernel_->ids_index->insert(entry).second) << error;
+
+  // Should NEVER be created with a client tag.
+  CHECK(entry->ref(UNIQUE_CLIENT_TAG).empty());
 }
 
-bool Directory::Undelete(EntryKernel* const entry) {
+void Directory::Undelete(EntryKernel* const entry) {
   DCHECK(entry->ref(IS_DEL));
   ScopedKernelLock lock(this);
-  if (NULL != GetChildWithName(entry->ref(PARENT_ID), entry->ref(NAME), &lock))
-    return false;  // Would have duplicated existing entry.
-  entry->ref(IS_DEL) = false;
-  entry->dirty[IS_DEL] = true;
-  CHECK(kernel_->parent_id_and_names_index->insert(entry).second);
-  return true;
+  entry->put(IS_DEL, false);
+  entry->mark_dirty();
+  CHECK(kernel_->parent_id_child_index->insert(entry).second);
 }
 
-bool Directory::Delete(EntryKernel* const entry) {
+void Directory::Delete(EntryKernel* const entry) {
   DCHECK(!entry->ref(IS_DEL));
-  entry->ref(IS_DEL) = true;
-  entry->dirty[IS_DEL] = true;
+  entry->put(IS_DEL, true);
+  entry->mark_dirty();
   ScopedKernelLock lock(this);
-  CHECK(1 == kernel_->parent_id_and_names_index->erase(entry));
-  return true;
+  CHECK(1 == kernel_->parent_id_child_index->erase(entry));
 }
 
 bool Directory::ReindexId(EntryKernel* const entry, const Id& new_id) {
@@ -667,40 +463,42 @@ bool Directory::ReindexId(EntryKernel* const entry, const Id& new_id) {
   if (NULL != GetEntryById(new_id, &lock))
     return false;
   CHECK(1 == kernel_->ids_index->erase(entry));
-  entry->ref(ID) = new_id;
+  entry->put(ID, new_id);
   CHECK(kernel_->ids_index->insert(entry).second);
   return true;
 }
 
-bool Directory::ReindexParentIdAndName(EntryKernel* const entry,
-                                       const Id& new_parent_id,
-                                       const PathString& new_name) {
+void Directory::ReindexParentId(EntryKernel* const entry,
+                                const Id& new_parent_id) {
+
   ScopedKernelLock lock(this);
-  PathString new_indexed_name = new_name;
   if (entry->ref(IS_DEL)) {
-    entry->ref(PARENT_ID) = new_parent_id;
-    entry->ref(NAME) = new_indexed_name;
-    return true;
+    entry->put(PARENT_ID, new_parent_id);
+    return;
   }
 
-  // check for a case changing rename
-  if (entry->ref(PARENT_ID) == new_parent_id &&
-    0 == ComparePathNames(entry->ref(NAME), new_indexed_name)) {
-    entry->ref(NAME) = new_indexed_name;
-  } else {
-    if (NULL != GetChildWithName(new_parent_id, new_indexed_name, &lock))
-      return false;
-    CHECK(1 == kernel_->parent_id_and_names_index->erase(entry));
-    entry->ref(PARENT_ID) = new_parent_id;
-    entry->ref(NAME) = new_indexed_name;
-    CHECK(kernel_->parent_id_and_names_index->insert(entry).second);
+  if (entry->ref(PARENT_ID) == new_parent_id) {
+    return;
   }
-  return true;
+
+  CHECK(1 == kernel_->parent_id_child_index->erase(entry));
+  entry->put(PARENT_ID, new_parent_id);
+  CHECK(kernel_->parent_id_child_index->insert(entry).second);
+}
+
+void Directory::AddToDirtyMetahandles(int64 handle) {
+  kernel_->transaction_mutex.AssertAcquired();
+  kernel_->dirty_metahandles->insert(handle);
+}
+
+void Directory::ClearDirtyMetahandles() {
+  kernel_->transaction_mutex.AssertAcquired();
+  kernel_->dirty_metahandles->clear();
 }
 
 // static
 bool Directory::SafeToPurgeFromMemory(const EntryKernel* const entry) {
-  return entry->ref(IS_DEL) && !entry->dirty.any() && !entry->ref(SYNCING) &&
+  return entry->ref(IS_DEL) && !entry->is_dirty() && !entry->ref(SYNCING) &&
          !entry->ref(IS_UNAPPLIED_UPDATE) && !entry->ref(IS_UNSYNCED);
 }
 
@@ -709,31 +507,19 @@ void Directory::TakeSnapshotForSaveChanges(SaveChangesSnapshot* snapshot) {
   ScopedKernelLock lock(this);
   // Deep copy dirty entries from kernel_->metahandles_index into snapshot and
   // clear dirty flags.
-  for (MetahandlesIndex::iterator i = kernel_->metahandles_index->begin();
-       i != kernel_->metahandles_index->end(); ++i) {
-    EntryKernel* entry = *i;
-    if (!entry->dirty.any())
+
+  for (MetahandleSet::const_iterator i = kernel_->dirty_metahandles->begin();
+       i != kernel_->dirty_metahandles->end(); ++i) {
+    EntryKernel* entry = GetEntryByHandle(*i, &lock);
+    if (!entry)
+      continue;
+    // Skip over false positives; it happens relatively infrequently.
+    if (!entry->is_dirty())
       continue;
     snapshot->dirty_metas.insert(snapshot->dirty_metas.end(), *entry);
-    entry->dirty.reset();
-    // TODO(timsteele): The previous *windows only* SaveChanges code path seems
-    // to have a bug in that the IS_NEW bit is not rolled back if the entire DB
-    // transaction is rolled back, due to the "recent" windows optimization of
-    // using a ReadTransaction rather than a WriteTransaction in SaveChanges.
-    // This bit is only used to decide whether we should sqlite INSERT or
-    // UPDATE, and if we are INSERTing we make sure to dirty all the fields so
-    // as to overwrite the database default values.  For now, this is rectified
-    // by flipping the bit to false here (note that the snapshot will contain
-    // the "original" value), and then resetting it on failure in
-    // HandleSaveChangesFailure, where "failure" is defined as "the DB
-    // "transaction was rolled back". This is safe because the only user of this
-    // bit is in fact SaveChanges, which enforces mutually exclusive access by
-    // way of save_changes_mutex_.  The TODO is to consider abolishing this bit
-    // in favor of using a sqlite INSERT OR REPLACE, which could(would?) imply
-    // that all bits need to be written rather than just the dirty ones in
-    // the BindArg helper function.
-    entry->ref(IS_NEW) = false;
+    entry->clear_dirty();
   }
+  ClearDirtyMetahandles();
 
   // Do the same for extended attributes.
   for (ExtendedAttributes::iterator i = kernel_->extended_attributes->begin();
@@ -745,18 +531,15 @@ void Directory::TakeSnapshotForSaveChanges(SaveChangesSnapshot* snapshot) {
   }
 
   // Fill kernel_info_status and kernel_info.
-  PersistedKernelInfo& info = snapshot->kernel_info;
-  info.initial_sync_ended = kernel_->initial_sync_ended_;
-  info.last_sync_timestamp = kernel_->last_sync_timestamp_;
+  snapshot->kernel_info = kernel_->persisted_info;
   // To avoid duplicates when the process crashes, we record the next_id to be
   // greater magnitude than could possibly be reached before the next save
   // changes.  In other words, it's effectively impossible for the user to
   // generate 65536 new bookmarks in 3 seconds.
-  info.next_id = kernel_->next_id - 65536;
-  info.store_birthday = kernel_->store_birthday_;
-  snapshot->kernel_info_status = kernel_->info_status_;
+  snapshot->kernel_info.next_id -= 65536;
+  snapshot->kernel_info_status = kernel_->info_status;
   // This one we reset on failure.
-  kernel_->info_status_ = KERNEL_SHARE_INFO_VALID;
+  kernel_->info_status = KERNEL_SHARE_INFO_VALID;
 }
 
 bool Directory::SaveChanges() {
@@ -782,11 +565,11 @@ void Directory::VacuumAfterSaveChanges(const SaveChangesSnapshot& snapshot) {
   // Need a write transaction as we are about to permanently purge entries.
   WriteTransaction trans(this, VACUUM_AFTER_SAVE, __FILE__, __LINE__);
   ScopedKernelLock lock(this);
-  kernel_->flushed_metahandles_.Push(0);  // Begin flush marker
+  kernel_->flushed_metahandles.Push(0);  // Begin flush marker
   // Now drop everything we can out of memory.
   for (OriginalEntries::const_iterator i = snapshot.dirty_metas.begin();
        i != snapshot.dirty_metas.end(); ++i) {
-    kernel_->needle.ref(META_HANDLE) = i->ref(META_HANDLE);
+    kernel_->needle.put(META_HANDLE, i->ref(META_HANDLE));
     MetahandlesIndex::iterator found =
         kernel_->metahandles_index->find(&kernel_->needle);
     EntryKernel* entry = (found == kernel_->metahandles_index->end() ?
@@ -795,11 +578,14 @@ void Directory::VacuumAfterSaveChanges(const SaveChangesSnapshot& snapshot) {
       // We now drop deleted metahandles that are up to date on both the client
       // and the server.
       size_t num_erased = 0;
-      kernel_->flushed_metahandles_.Push(entry->ref(META_HANDLE));
+      kernel_->flushed_metahandles.Push(entry->ref(META_HANDLE));
       num_erased = kernel_->ids_index->erase(entry);
       DCHECK(1 == num_erased);
       num_erased = kernel_->metahandles_index->erase(entry);
       DCHECK(1 == num_erased);
+
+      num_erased = kernel_->client_tag_index->erase(entry);  // Might not be in it
+      DCHECK(!entry->ref(UNIQUE_CLIENT_TAG).empty() == num_erased);
       delete entry;
     }
   }
@@ -820,22 +606,20 @@ void Directory::VacuumAfterSaveChanges(const SaveChangesSnapshot& snapshot) {
 
 void Directory::HandleSaveChangesFailure(const SaveChangesSnapshot& snapshot) {
   ScopedKernelLock lock(this);
-  kernel_->info_status_ = KERNEL_SHARE_INFO_DIRTY;
+  kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
 
-  // Because we cleared dirty bits on the real entries when taking the snapshot,
-  // we should make sure the fact that the snapshot was not persisted gets
-  // reflected in the entries.  Not doing this would mean if no other changes
-  // occur to the same fields of the entries in dirty_metas some changes could
-  // end up being lost, if they also failed to be committed to the server.
-  // Setting the bits ensures that SaveChanges will at least try again later.
+  // Because we optimistically cleared the dirty bit on the real entries when
+  // taking the snapshot, we must restore it on failure.  Not doing this could
+  // cause lost data, if no other changes are made to the in-memory entries
+  // that would cause the dirty bit to get set again. Setting the bit ensures
+  // that SaveChanges will at least try again later.
   for (OriginalEntries::const_iterator i = snapshot.dirty_metas.begin();
        i != snapshot.dirty_metas.end(); ++i) {
-    kernel_->needle.ref(META_HANDLE) = i->ref(META_HANDLE);
+    kernel_->needle.put(META_HANDLE, i->ref(META_HANDLE));
     MetahandlesIndex::iterator found =
         kernel_->metahandles_index->find(&kernel_->needle);
     if (found != kernel_->metahandles_index->end()) {
-      (*found)->dirty |= i->dirty;
-      (*found)->ref(IS_NEW) = i->ref(IS_NEW);
+      (*found)->mark_dirty();
     }
   }
 
@@ -849,48 +633,49 @@ void Directory::HandleSaveChangesFailure(const SaveChangesSnapshot& snapshot) {
   }
 }
 
-int64 Directory::last_sync_timestamp() const {
+int64 Directory::last_download_timestamp(ModelType model_type) const {
   ScopedKernelLock lock(this);
-  return kernel_->last_sync_timestamp_;
+  return kernel_->persisted_info.last_download_timestamp[model_type];
 }
 
-void Directory::set_last_sync_timestamp(int64 timestamp) {
+void Directory::set_last_download_timestamp(ModelType model_type,
+    int64 timestamp) {
   ScopedKernelLock lock(this);
-  if (kernel_->last_sync_timestamp_ == timestamp)
+  if (kernel_->persisted_info.last_download_timestamp[model_type] == timestamp)
     return;
-  kernel_->last_sync_timestamp_ = timestamp;
-  kernel_->info_status_ = KERNEL_SHARE_INFO_DIRTY;
+  kernel_->persisted_info.last_download_timestamp[model_type] = timestamp;
+  kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
 }
 
-bool Directory::initial_sync_ended() const {
+bool Directory::initial_sync_ended_for_type(ModelType type) const {
   ScopedKernelLock lock(this);
-  return kernel_->initial_sync_ended_;
+  return kernel_->persisted_info.initial_sync_ended[type];
 }
 
-void Directory::set_initial_sync_ended(bool x) {
+void Directory::set_initial_sync_ended_for_type(ModelType type, bool x) {
   ScopedKernelLock lock(this);
-  if (kernel_->initial_sync_ended_ == x)
+  if (kernel_->persisted_info.initial_sync_ended[type] == x)
     return;
-  kernel_->initial_sync_ended_ = x;
-  kernel_->info_status_ = KERNEL_SHARE_INFO_DIRTY;
+  kernel_->persisted_info.initial_sync_ended.set(type, x);
+  kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
 }
 
 string Directory::store_birthday() const {
   ScopedKernelLock lock(this);
-  return kernel_->store_birthday_;
+  return kernel_->persisted_info.store_birthday;
 }
 
 void Directory::set_store_birthday(string store_birthday) {
   ScopedKernelLock lock(this);
-  if (kernel_->store_birthday_ == store_birthday)
+  if (kernel_->persisted_info.store_birthday == store_birthday)
     return;
-  kernel_->store_birthday_ = store_birthday;
-  kernel_->info_status_ = KERNEL_SHARE_INFO_DIRTY;
+  kernel_->persisted_info.store_birthday = store_birthday;
+  kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
 }
 
 string Directory::cache_guid() const {
   // No need to lock since nothing ever writes to it after load.
-  return kernel_->cache_guid_;
+  return kernel_->cache_guid;
 }
 
 void Directory::GetAllMetaHandles(BaseTransaction* trans,
@@ -1052,9 +837,10 @@ void Directory::CheckTreeInvariants(syncable::BaseTransaction* trans,
       ++entries_done;
       continue;
     }
+
     if (!e.Get(IS_DEL)) {
       CHECK(id != parentid) << e;
-      CHECK(!e.Get(NAME).empty()) << e;
+      CHECK(!e.Get(NON_UNIQUE_NAME).empty()) << e;
       int safety_count = handles.size() + 1;
       while (!parentid.IsRoot()) {
         if (!idfilter.ShouldConsider(parentid))
@@ -1077,6 +863,11 @@ void Directory::CheckTreeInvariants(syncable::BaseTransaction* trans,
         CHECK(e.Get(IS_DEL)) << e;
         CHECK(id.ServerKnows()) << e;
       } else {
+        if (e.Get(IS_DIR)) {
+          // TODO(chron): Implement this mode if clients ever need it.
+          // For now, you can't combine a client tag and a directory.
+          CHECK(e.Get(UNIQUE_CLIENT_TAG).empty()) << e;
+        }
         // Uncommitted item.
         if (!e.Get(IS_DEL)) {
           CHECK(e.Get(IS_UNSYNCED)) << e;
@@ -1210,6 +1001,11 @@ WriteTransaction::~WriteTransaction() {
     else
       directory()->CheckTreeInvariants(this, originals_);
   }
+
+  for (OriginalEntries::const_iterator i = originals_->begin();
+      i != originals_->end(); ++i) {
+    directory()->AddToDirtyMetahandles(i->ref(META_HANDLE));
+  }
   UnlockAndLog(originals_);
 }
 
@@ -1221,9 +1017,14 @@ Entry::Entry(BaseTransaction* trans, GetById, const Id& id)
   kernel_ = trans->directory()->GetEntryById(id);
 }
 
-Entry::Entry(BaseTransaction* trans, GetByTag, const PathString& tag)
+Entry::Entry(BaseTransaction* trans, GetByClientTag, const string& tag)
     : basetrans_(trans) {
-  kernel_ = trans->directory()->GetEntryByTag(tag);
+  kernel_ = trans->directory()->GetEntryByClientTag(tag);
+}
+
+Entry::Entry(BaseTransaction* trans, GetByServerTag, const string& tag)
+    : basetrans_(trans) {
+  kernel_ = trans->directory()->GetEntryByServerTag(tag);
 }
 
 Entry::Entry(BaseTransaction* trans, GetByHandle, int64 metahandle)
@@ -1231,29 +1032,11 @@ Entry::Entry(BaseTransaction* trans, GetByHandle, int64 metahandle)
   kernel_ = trans->directory()->GetEntryByHandle(metahandle);
 }
 
-Entry::Entry(BaseTransaction* trans, GetByPath, const PathString& path)
-    : basetrans_(trans) {
-  kernel_ = trans->directory()->GetEntryByPath(path);
-}
-
-Entry::Entry(BaseTransaction* trans, GetByParentIdAndName, const Id& parentid,
-             const PathString& name)
-    : basetrans_(trans) {
-  kernel_ = trans->directory()->GetChildWithName(parentid, name);
-}
-
-Entry::Entry(BaseTransaction* trans, GetByParentIdAndDBName, const Id& parentid,
-             const PathString& name)
-    : basetrans_(trans) {
-  kernel_ = trans->directory()->GetChildWithDBName(parentid, name);
-}
-
-
 Directory* Entry::dir() const {
   return basetrans_->directory();
 }
 
-PathString Entry::Get(StringField field) const {
+const string& Entry::Get(StringField field) const {
   DCHECK(kernel_);
   return kernel_->ref(field);
 }
@@ -1272,52 +1055,78 @@ void Entry::DeleteAllExtendedAttributes(WriteTransaction *trans) {
   dir()->DeleteAllExtendedAttributes(trans, kernel_->ref(META_HANDLE));
 }
 
+syncable::ModelType Entry::GetServerModelType() const {
+  ModelType specifics_type = GetModelTypeFromSpecifics(Get(SERVER_SPECIFICS));
+  if (specifics_type != UNSPECIFIED)
+    return specifics_type;
+  if (IsRoot())
+    return TOP_LEVEL_FOLDER;
+  // Loose check for server-created top-level folders that aren't
+  // bound to a particular model type.
+  if (!Get(UNIQUE_SERVER_TAG).empty() && Get(SERVER_IS_DIR))
+    return TOP_LEVEL_FOLDER;
+
+  // Otherwise, we don't have a server type yet.  That should only happen
+  // if the item is an uncommitted locally created item.
+  // It's possible we'll need to relax these checks in the future; they're
+  // just here for now as a safety measure.
+  DCHECK(Get(IS_UNSYNCED));
+  DCHECK(Get(SERVER_VERSION) == 0);
+  DCHECK(Get(SERVER_IS_DEL));
+  // Note: can't enforce !Get(ID).ServerKnows() here because that could
+  // actually happen if we hit AttemptReuniteLostCommitResponses.
+  return UNSPECIFIED;
+}
+
+syncable::ModelType Entry::GetModelType() const {
+  ModelType specifics_type = GetModelTypeFromSpecifics(Get(SPECIFICS));
+  if (specifics_type != UNSPECIFIED)
+    return specifics_type;
+  if (IsRoot())
+    return TOP_LEVEL_FOLDER;
+  // Loose check for server-created top-level folders that aren't
+  // bound to a particular model type.
+  if (!Get(UNIQUE_SERVER_TAG).empty() && Get(IS_DIR))
+    return TOP_LEVEL_FOLDER;
+
+  return UNSPECIFIED;
+}
+
 ///////////////////////////////////////////////////////////////////////////
 // MutableEntry
 
 MutableEntry::MutableEntry(WriteTransaction* trans, Create,
-                           const Id& parent_id, const PathString& name)
-  : Entry(trans), write_transaction_(trans) {
-  if (NULL != trans->directory()->GetChildWithName(parent_id, name)) {
-    kernel_ = NULL;  // would have duplicated an existing entry.
-    return;
-  }
+                           const Id& parent_id, const string& name)
+    : Entry(trans),
+      write_transaction_(trans) {
   Init(trans, parent_id, name);
 }
 
 
 void MutableEntry::Init(WriteTransaction* trans, const Id& parent_id,
-                        const PathString& name) {
+                        const string& name) {
   kernel_ = new EntryKernel;
   ZeroFields(kernel_, BEGIN_FIELDS);
-  kernel_->ref(ID) = trans->directory_->NextId();
-  kernel_->dirty[ID] = true;
-  kernel_->ref(META_HANDLE) = trans->directory_->NextMetahandle();
-  kernel_->dirty[META_HANDLE] = true;
-  kernel_->ref(PARENT_ID) = parent_id;
-  kernel_->dirty[PARENT_ID] = true;
-  kernel_->ref(NAME) = name;
-  kernel_->dirty[NAME] = true;
-  kernel_->ref(NON_UNIQUE_NAME) = name;
-  kernel_->dirty[NON_UNIQUE_NAME] = true;
-  kernel_->ref(IS_NEW) = true;
+  kernel_->mark_dirty();
+  kernel_->put(ID, trans->directory_->NextId());
+  kernel_->put(META_HANDLE, trans->directory_->NextMetahandle());
+  kernel_->put(PARENT_ID, parent_id);
+  kernel_->put(NON_UNIQUE_NAME, name);
   const int64 now = Now();
-  kernel_->ref(CTIME) = now;
-  kernel_->dirty[CTIME] = true;
-  kernel_->ref(MTIME) = now;
-  kernel_->dirty[MTIME] = true;
+  kernel_->put(CTIME, now);
+  kernel_->put(MTIME, now);
   // We match the database defaults here
-  kernel_->ref(BASE_VERSION) = CHANGES_VERSION;
+  kernel_->put(BASE_VERSION, CHANGES_VERSION);
   trans->directory()->InsertEntry(kernel_);
   // Because this entry is new, it was originally deleted.
-  kernel_->ref(IS_DEL) = true;
+  kernel_->put(IS_DEL, true);
   trans->SaveOriginal(kernel_);
-  kernel_->ref(IS_DEL) = false;
+  kernel_->put(IS_DEL, false);
 }
 
 MutableEntry::MutableEntry(WriteTransaction* trans, CreateNewUpdateItem,
                            const Id& id)
-  : Entry(trans), write_transaction_(trans) {
+    : Entry(trans), write_transaction_(trans) {
   Entry same_id(trans, GET_BY_ID, id);
   if (same_id.good()) {
     kernel_ = NULL;  // already have an item with this ID.
@@ -1325,62 +1134,44 @@ MutableEntry::MutableEntry(WriteTransaction* trans, CreateNewUpdateItem,
   }
   kernel_ = new EntryKernel;
   ZeroFields(kernel_, BEGIN_FIELDS);
-  kernel_->ref(ID) = id;
-  kernel_->dirty[ID] = true;
-  kernel_->ref(META_HANDLE) = trans->directory_->NextMetahandle();
-  kernel_->dirty[META_HANDLE] = true;
-  kernel_->ref(IS_DEL) = true;
-  kernel_->dirty[IS_DEL] = true;
-  kernel_->ref(IS_NEW) = true;
+  kernel_->put(ID, id);
+  kernel_->mark_dirty();
+  kernel_->put(META_HANDLE, trans->directory_->NextMetahandle());
+  kernel_->put(IS_DEL, true);
   // We match the database defaults here
-  kernel_->ref(BASE_VERSION) = CHANGES_VERSION;
+  kernel_->put(BASE_VERSION, CHANGES_VERSION);
   trans->directory()->InsertEntry(kernel_);
   trans->SaveOriginal(kernel_);
 }
 
 MutableEntry::MutableEntry(WriteTransaction* trans, GetById, const Id& id)
-  : Entry(trans, GET_BY_ID, id), write_transaction_(trans) {
+    : Entry(trans, GET_BY_ID, id), write_transaction_(trans) {
   trans->SaveOriginal(kernel_);
 }
 
 MutableEntry::MutableEntry(WriteTransaction* trans, GetByHandle,
                            int64 metahandle)
-  : Entry(trans, GET_BY_HANDLE, metahandle), write_transaction_(trans) {
+    : Entry(trans, GET_BY_HANDLE, metahandle), write_transaction_(trans) {
   trans->SaveOriginal(kernel_);
 }
 
-MutableEntry::MutableEntry(WriteTransaction* trans, GetByPath,
-                           const PathString& path)
-  : Entry(trans, GET_BY_PATH, path), write_transaction_(trans) {
-  trans->SaveOriginal(kernel_);
-}
-
-MutableEntry::MutableEntry(WriteTransaction* trans, GetByParentIdAndName,
-                           const Id& parentid, const PathString& name)
-  : Entry(trans, GET_BY_PARENTID_AND_NAME, parentid, name),
-    write_transaction_(trans) {
-  trans->SaveOriginal(kernel_);
-}
-
-MutableEntry::MutableEntry(WriteTransaction* trans, GetByParentIdAndDBName,
-                           const Id& parentid, const PathString& name)
-  : Entry(trans, GET_BY_PARENTID_AND_DBNAME, parentid, name),
-    write_transaction_(trans) {
+MutableEntry::MutableEntry(WriteTransaction* trans, GetByClientTag,
+                           const std::string& tag)
+    : Entry(trans, GET_BY_CLIENT_TAG, tag), write_transaction_(trans) {
   trans->SaveOriginal(kernel_);
 }
 
 bool MutableEntry::PutIsDel(bool is_del) {
   DCHECK(kernel_);
-  if (is_del == kernel_->ref(IS_DEL))
+  if (is_del == kernel_->ref(IS_DEL)) {
     return true;
+  }
   if (is_del) {
     UnlinkFromOrder();
-    if (!dir()->Delete(kernel_))
-      return false;
+    dir()->Delete(kernel_);
     return true;
   } else {
-    if (!dir()->Undelete(kernel_))
-      return false;
+    dir()->Undelete(kernel_);
     PutPredecessor(Id());  // Restores position to the 0th index.
     return true;
   }
@@ -1389,8 +1180,8 @@ bool MutableEntry::PutIsDel(bool is_del) {
 bool MutableEntry::Put(Int64Field field, const int64& value) {
   DCHECK(kernel_);
   if (kernel_->ref(field) != value) {
-    kernel_->ref(field) = value;
-    kernel_->dirty[static_cast<int>(field)] = true;
+    kernel_->put(field, value);
+    kernel_->mark_dirty();
   }
   return true;
 }
@@ -1402,40 +1193,76 @@ bool MutableEntry::Put(IdField field, const Id& value) {
       if (!dir()->ReindexId(kernel_, value))
         return false;
     } else if (PARENT_ID == field) {
-      if (!dir()->ReindexParentIdAndName(kernel_, value, kernel_->ref(NAME)))
-        return false;
+      PutParentIdPropertyOnly(value);  // Makes sibling order inconsistent.
+      PutPredecessor(Id());  // Fixes up the sibling order inconsistency.
     } else {
-      kernel_->ref(field) = value;
+      kernel_->put(field, value);
     }
-    kernel_->dirty[static_cast<int>(field)] = true;
+    kernel_->mark_dirty();
   }
   return true;
+}
+
+void MutableEntry::PutParentIdPropertyOnly(const Id& parent_id) {
+  dir()->ReindexParentId(kernel_, parent_id);
+  kernel_->mark_dirty();
 }
 
 bool MutableEntry::Put(BaseVersion field, int64 value) {
   DCHECK(kernel_);
   if (kernel_->ref(field) != value) {
-    kernel_->ref(field) = value;
-    kernel_->dirty[static_cast<int>(field)] = true;
+    kernel_->put(field, value);
+    kernel_->mark_dirty();
   }
   return true;
 }
 
-bool MutableEntry::Put(StringField field, const PathString& value) {
+bool MutableEntry::Put(StringField field, const string& value) {
   return PutImpl(field, value);
 }
 
-bool MutableEntry::PutImpl(StringField field, const PathString& value) {
-  DCHECK(kernel_);
-  if (kernel_->ref(field) != value) {
-    if (NAME == field) {
-      if (!dir()->ReindexParentIdAndName(kernel_, kernel_->ref(PARENT_ID),
-          value))
-        return false;
-    } else {
-      kernel_->ref(field) = value;
+bool MutableEntry::PutUniqueClientTag(const string& new_tag) {
+  // There is no SERVER_UNIQUE_CLIENT_TAG. This field is similar to ID.
+  string old_tag = kernel_->ref(UNIQUE_CLIENT_TAG);
+  if (old_tag == new_tag) {
+    return true;
+  }
+
+  if (!new_tag.empty()) {
+    // Make sure your new value is not in there already.
+    EntryKernel lookup_kernel_ = *kernel_;
+    lookup_kernel_.put(UNIQUE_CLIENT_TAG, new_tag);
+    bool new_tag_conflicts =
+        (dir()->kernel_->client_tag_index->count(&lookup_kernel_) > 0);
+    if (new_tag_conflicts) {
+      return false;
     }
-    kernel_->dirty[static_cast<int>(field)] = true;
+
+    // We're sure that the new tag doesn't exist now so,
+    // erase the old tag and finish up.
+    dir()->kernel_->client_tag_index->erase(kernel_);
+    kernel_->put(UNIQUE_CLIENT_TAG, new_tag);
+    kernel_->mark_dirty();
+    CHECK(dir()->kernel_->client_tag_index->insert(kernel_).second);
+  } else {
+    // The new tag is empty. Since the old tag is not equal to the new tag,
+    // The old tag isn't empty, and thus must exist in the index.
+    CHECK(dir()->kernel_->client_tag_index->erase(kernel_));
+    kernel_->put(UNIQUE_CLIENT_TAG, new_tag);
+    kernel_->mark_dirty();
+  }
+  return true;
+}
+
+bool MutableEntry::PutImpl(StringField field, const string& value) {
+  DCHECK(kernel_);
+  if (field == UNIQUE_CLIENT_TAG) {
+    return PutUniqueClientTag(value);
+  }
+
+  if (kernel_->ref(field) != value) {
+    kernel_->put(field, value);
+    kernel_->mark_dirty();
   }
   return true;
 }
@@ -1454,31 +1281,8 @@ bool MutableEntry::Put(IndexedBitField field, bool value) {
       CHECK(index->insert(kernel_->ref(META_HANDLE)).second);
     else
       CHECK(1 == index->erase(kernel_->ref(META_HANDLE)));
-    kernel_->ref(field) = value;
-    kernel_->dirty[static_cast<int>(field)] = true;
-  }
-  return true;
-}
-
-// Avoids temporary collision in index when renaming a bookmark to another
-// folder.
-bool MutableEntry::PutParentIdAndName(const Id& parent_id,
-                                      const Name& name) {
-  DCHECK(kernel_);
-  const bool parent_id_changes = parent_id != kernel_->ref(PARENT_ID);
-  bool db_name_changes = name.db_value() != kernel_->ref(NAME);
-  if (parent_id_changes || db_name_changes) {
-    if (!dir()->ReindexParentIdAndName(kernel_, parent_id,
-                                       name.db_value()))
-      return false;
-  }
-  Put(UNSANITIZED_NAME, name.GetUnsanitizedName());
-  Put(NON_UNIQUE_NAME, name.non_unique_value());
-  if (db_name_changes)
-    kernel_->dirty[NAME] = true;
-  if (parent_id_changes) {
-    kernel_->dirty[PARENT_ID] = true;
-    PutPredecessor(Id());  // Put in the 0th position.
+    kernel_->put(field, value);
+    kernel_->mark_dirty();
   }
   return true;
 }
@@ -1514,15 +1318,21 @@ void MutableEntry::UnlinkFromOrder() {
 }
 
 bool MutableEntry::PutPredecessor(const Id& predecessor_id) {
-  // TODO(ncarter): Maybe there should be an independent HAS_POSITION bit?
-  if (!Get(IS_BOOKMARK_OBJECT))
-    return true;
   UnlinkFromOrder();
 
   if (Get(IS_DEL)) {
     DCHECK(predecessor_id.IsNull());
     return true;
   }
+
+  // TODO(ncarter): It should be possible to not maintain position for
+  // non-bookmark items.  However, we'd need to robustly handle all possible
+  // permutations of setting IS_DEL and the SPECIFICS to identify the
+  // object type; or else, we'd need to add a ModelType to the
+  // MutableEntry's Create ctor.
+  //   if (!ShouldMaintainPosition()) {
+  //     return false;
+  //   }
 
   // This is classic insert-into-doubly-linked-list from CS 101 and your last
   // job interview.  An "IsRoot" Id signifies the head or tail.
@@ -1552,6 +1362,7 @@ bool MutableEntry::PutPredecessor(const Id& predecessor_id) {
   return true;
 }
 
+
 ///////////////////////////////////////////////////////////////////////////
 // High-level functions
 
@@ -1567,8 +1378,8 @@ Id Directory::NextId() {
   int64 result;
   {
     ScopedKernelLock lock(this);
-    result = (kernel_->next_id)--;
-    kernel_->info_status_ = KERNEL_SHARE_INFO_DIRTY;
+    result = (kernel_->persisted_info.next_id)--;
+    kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
   }
   DCHECK_LT(result, 0);
   return Id::CreateFromClientString(Int64ToString(result));
@@ -1632,6 +1443,7 @@ MutableExtendedAttribute::MutableExtendedAttribute(
   ScopedKernelLock lock(trans->directory());
   if (!Init(trans, kernel, &lock, key)) {
     ExtendedAttributeValue val;
+    val.is_deleted = false;
     val.dirty = true;
     i_ = kernel->extended_attributes->insert(std::make_pair(key, val)).first;
     good_ = true;
@@ -1654,106 +1466,8 @@ bool IsLegalNewParent(BaseTransaction* trans, const Id& entry_id,
   return true;
 }
 
-// returns -1 if s contains any non [0-9] characters
-static int PathStringToInteger(PathString s) {
-  PathString::const_iterator i = s.begin();
-  for (; i != s.end(); ++i) {
-    if (PathString::npos == PathString(PSTR("0123456789")).find(*i))
-      return -1;
-  }
-  return
-#if !PATHSTRING_IS_STD_STRING
-  _wtoi
-#else
-  atoi
-#endif
-  (s.c_str());
-}
-
-static PathString IntegerToPathString(int i) {
-  const size_t kBufSize = 25;
-  PathChar buf[kBufSize];
-#if !PATHSTRING_IS_STD_STRING
-  const int radix = 10;
-  _itow(i, buf, radix);
-#else
-  snprintf(buf, kBufSize, "%d", i);
-#endif
-  return buf;
-}
-
-// appends ~1 to the end of 's' unless there is already ~#, in which case
-// it just increments the number
-static PathString FixBasenameInCollision(const PathString s) {
-  PathString::size_type last_tilde = s.find_last_of(PSTR('~'));
-  if (PathString::npos == last_tilde) return s + PSTR("~1");
-  if (s.size() == (last_tilde + 1)) return s + PSTR("1");
-  // we have ~, but not necessarily ~# (for some number >= 0). check for that
-  int n;
-  if ((n = PathStringToInteger(s.substr(last_tilde + 1))) != -1) {
-    n++;
-    PathString pre_number = s.substr(0, last_tilde + 1);
-    return pre_number + IntegerToPathString(n);
-  } else {
-    // we have a ~, but not a number following it, so we'll add another
-    // ~ and this time, a number
-    return s + PSTR("~1");
-  }
-}
-
-void DBName::MakeNoncollidingForEntry(BaseTransaction* trans,
-                                      const Id& parent_id,
-                                      Entry* e) {
-  const PathString& desired_name = *this;
-  CHECK(!desired_name.empty());
-  PathString::size_type first_dot = desired_name.find_first_of(PSTR('.'));
-  if (PathString::npos == first_dot)
-    first_dot = desired_name.size();
-  PathString basename = desired_name.substr(0, first_dot);
-  PathString dotextension = desired_name.substr(first_dot);
-  CHECK(basename + dotextension == desired_name);
-  for (;;) {
-    // Check for collision.
-    PathString testname = basename + dotextension;
-    Entry same_path_entry(trans, GET_BY_PARENTID_AND_DBNAME,
-                          parent_id, testname);
-    if (!same_path_entry.good() || (e && same_path_entry.Get(ID) == e->Get(ID)))
-      break;
-    // There was a collision, so fix the name.
-    basename = FixBasenameInCollision(basename);
-  }
-  // Set our value to the new value.  This invalidates desired_name.
-  PathString new_value = basename + dotextension;
-  swap(new_value);
-}
-
-PathString GetFullPath(BaseTransaction* trans, const Entry& e) {
-  PathString result;
-#if defined(COMPILER_MSVC)
-  result.reserve(MAX_PATH);
-#endif
-  ReverseAppend(e.Get(NAME), &result);
-  Id id = e.Get(PARENT_ID);
-  while (!id.IsRoot()) {
-    result.push_back(kPathSeparator[0]);
-    Entry ancestor(trans, GET_BY_ID, id);
-    if (!ancestor.good()) {
-      // This can happen if the parent folder got deleted before the entry.
-      LOG(WARNING) << "Cannot get full path of " << e
-                   << "\nbecause an ancestor folder has been deleted.";
-      result.clear();
-      return result;
-    }
-    ReverseAppend(ancestor.Get(NAME), &result);
-    id = ancestor.Get(PARENT_ID);
-  }
-  result.push_back(kPathSeparator[0]);
-  reverse(result.begin(), result.end());
-  return result;
-}
-
 const Blob* GetExtendedAttributeValue(const Entry& e,
-                                      const PathString& attribute_name) {
+                                      const string& attribute_name) {
   ExtendedAttributeKey key(e.Get(META_HANDLE), attribute_name);
   ExtendedAttribute extended_attribute(e.trans(), GET_BY_HANDLE, key);
   if (extended_attribute.good() && !extended_attribute.is_deleted())
@@ -1791,23 +1505,22 @@ inline FastDump& operator<<(FastDump& dump, const DumpColon&) {
 std::ostream& operator<<(std::ostream& stream, const syncable::Entry& entry) {
   // Using ostreams directly here is dreadfully slow, because a mutex is
   // acquired for every <<.  Users noticed it spiking CPU.
-  using browser_sync::ToUTF8;
-  using syncable::BitField;
-  using syncable::BitTemp;
-  using syncable::BlobField;
-  using syncable::EntryKernel;
-  using syncable::g_metas_columns;
-  using syncable::IdField;
-  using syncable::Int64Field;
-  using syncable::StringField;
   using syncable::BEGIN_FIELDS;
   using syncable::BIT_FIELDS_END;
   using syncable::BIT_TEMPS_BEGIN;
   using syncable::BIT_TEMPS_END;
-  using syncable::BLOB_FIELDS_END;
-  using syncable::INT64_FIELDS_END;
+  using syncable::BitField;
+  using syncable::BitTemp;
+  using syncable::EntryKernel;
   using syncable::ID_FIELDS_END;
+  using syncable::INT64_FIELDS_END;
+  using syncable::IdField;
+  using syncable::Int64Field;
+  using syncable::PROTO_FIELDS_END;
+  using syncable::ProtoField;
   using syncable::STRING_FIELDS_END;
+  using syncable::StringField;
+  using syncable::g_metas_columns;
 
   int i;
   FastDump s(&stream);
@@ -1826,12 +1539,13 @@ std::ostream& operator<<(std::ostream& stream, const syncable::Entry& entry) {
       s << g_metas_columns[i].name << separator;
   }
   for ( ; i < STRING_FIELDS_END; ++i) {
-    ToUTF8 field(kernel->ref(static_cast<StringField>(i)));
-    s << g_metas_columns[i].name << colon << field.get_string() << separator;
+    const string& field = kernel->ref(static_cast<StringField>(i));
+    s << g_metas_columns[i].name << colon << field << separator;
   }
-  for ( ; i < BLOB_FIELDS_END; ++i) {
+  for ( ; i < PROTO_FIELDS_END; ++i) {
     s << g_metas_columns[i].name << colon
-      << kernel->ref(static_cast<BlobField>(i)) << separator;
+      << kernel->ref(static_cast<ProtoField>(i)).SerializeAsString()
+      << separator;
   }
   s << "TempFlags: ";
   for ( ; i < BIT_TEMPS_END; ++i) {

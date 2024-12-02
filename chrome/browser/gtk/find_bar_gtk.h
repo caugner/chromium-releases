@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,11 @@
 #include "base/scoped_ptr.h"
 #include "chrome/browser/find_bar.h"
 #include "chrome/browser/gtk/focus_store_gtk.h"
+#include "chrome/browser/gtk/slide_animator_gtk.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/owned_widget_gtk.h"
+#include "gfx/point.h"
 
 class Browser;
 class BrowserWindowGtk;
@@ -24,6 +26,8 @@ class NineBox;
 class SlideAnimatorGtk;
 class TabContentsContainerGtk;
 
+typedef struct _GtkFloatingContainer GtkFloatingContainer;
+
 // Currently this class contains both a model and a view.  We may want to
 // eventually pull out the model specific bits and share with Windows.
 class FindBarGtk : public FindBar,
@@ -33,7 +37,7 @@ class FindBarGtk : public FindBar,
   explicit FindBarGtk(Browser* browser);
   virtual ~FindBarGtk();
 
-  GtkWidget* widget() const { return fixed_.get(); }
+  GtkWidget* widget() const { return slide_widget_->widget(); }
 
   // Methods from FindBar.
   virtual FindBarController* GetFindBarController() const {
@@ -42,7 +46,7 @@ class FindBarGtk : public FindBar,
   virtual void SetFindBarController(FindBarController* find_bar_controller) {
     find_bar_controller_ = find_bar_controller;
   }
-  virtual void Show();
+  virtual void Show(bool animate);
   virtual void Hide(bool animate);
   virtual void SetFocusAndSelection();
   virtual void ClearResults(const FindNotificationDetails& results);
@@ -53,8 +57,6 @@ class FindBarGtk : public FindBar,
   virtual void UpdateUIForFindResult(const FindNotificationDetails& result,
                                      const string16& find_text);
   virtual void AudibleAlert();
-  virtual gfx::Rect GetDialogPosition(gfx::Rect avoid_overlapping_rect);
-  virtual void SetDialogPosition(const gfx::Rect& new_pos, bool no_redraw);
   virtual bool IsFindBarVisible();
   virtual void RestoreSavedFocus();
   virtual FindBarTesting* GetFindBarTesting();
@@ -62,6 +64,7 @@ class FindBarGtk : public FindBar,
   // Methods from FindBarTesting.
   virtual bool GetFindBarWindowInfo(gfx::Point* position,
                                     bool* fully_visible);
+  virtual string16 GetFindText();
 
   // Overridden from NotificationObserver:
   virtual void Observe(NotificationType type,
@@ -81,18 +84,40 @@ class FindBarGtk : public FindBar,
   // See similar function in FindBarWin.
   bool MaybeForwardKeyEventToRenderer(GdkEventKey* event);
 
-  // Returns the child of |fixed_| that holds what the user perceives as the
-  // findbar.
-  GtkWidget* slide_widget();
-
   // Searches for another occurrence of the entry text, moving forward if
   // |forward_search| is true.
   void FindEntryTextInContents(bool forward_search);
 
   void UpdateMatchLabelAppearance(bool failure);
 
-  // Repositions the dialog without worrying about overlapping search results.
+  // Asynchronously repositions the dialog.
   void Reposition();
+
+  // Returns the rectangle representing where to position the find bar. If
+  // |avoid_overlapping_rect| is specified, the return value will be a rectangle
+  // located immediately to the left of |avoid_overlapping_rect|, as long as
+  // there is enough room for the dialog to draw within the bounds. If not, the
+  // dialog position returned will overlap |avoid_overlapping_rect|.
+  // Note: |avoid_overlapping_rect| is expected to use coordinates relative to
+  // the top of the page area, (it will be converted to coordinates relative to
+  // the top of the browser window, when comparing against the dialog
+  // coordinates). The returned value is relative to the browser window.
+  gfx::Rect GetDialogPosition(gfx::Rect avoid_overlapping_rect);
+
+  // Adjust the text alignment according to the text direction of the widget
+  // and |text_entry_|'s content, to make sure the real text alignment is
+  // always in sync with the UI language direction.
+  void AdjustTextAlignment();
+
+  // Get the position of the findbar within the floating container.
+  gfx::Point GetPosition();
+
+  static void OnParentSet(GtkWidget* widget, GtkObject* old_parent,
+                          FindBarGtk* find_bar);
+
+  static void OnSetFloatingPosition(GtkFloatingContainer* floating_container,
+                                    GtkAllocation* allocation,
+                                    FindBarGtk* find_bar);
 
   // Callback when the entry text changes.
   static gboolean OnChanged(GtkWindow* window, FindBarGtk* find_bar);
@@ -104,12 +129,6 @@ class FindBarGtk : public FindBar,
 
   // Callback for previous, next, and close button.
   static void OnClicked(GtkWidget* button, FindBarGtk* find_bar);
-
-  // Called when |fixed_| changes sizes. Used to position the dialog (the
-  // "dialog" is the widget hierarchy rooted at |slide_widget_|).
-  static void OnFixedSizeAllocate(GtkWidget* fixed,
-                                  GtkAllocation* allocation,
-                                  FindBarGtk* findbar);
 
   // Handles shapping and drawing the find bar background.
   static gboolean OnExpose(GtkWidget* widget, GdkEventExpose* event,
@@ -126,19 +145,35 @@ class FindBarGtk : public FindBar,
   static gboolean OnButtonPress(GtkWidget* text_entry, GdkEventButton* e,
                                 FindBarGtk* find_bar);
 
+  // Forwards ctrl-Home/End key bindings to the renderer.
+  static void OnMoveCursor(GtkEntry* entry, GtkMovementStep step, gint count,
+                           gboolean selection, FindBarGtk* bar);
+
+  // Handles Enter key.
+  static void OnActivate(GtkEntry* entry, FindBarGtk* bar);
+
+  static void OnWidgetDirectionChanged(GtkWidget* widget,
+                                       GtkTextDirection previous_direction,
+                                       FindBarGtk* find_bar) {
+    find_bar->AdjustTextAlignment();
+  }
+
+  static void OnKeymapDirectionChanged(GdkKeymap* keymap,
+                                       FindBarGtk* find_bar) {
+    find_bar->AdjustTextAlignment();
+  }
+
+  static gboolean OnFocusIn(GtkWidget* entry, GdkEventFocus* event,
+                            FindBarGtk* find_bar);
+
+  static gboolean OnFocusOut(GtkWidget* entry, GdkEventFocus* event,
+                             FindBarGtk* find_bar);
+
   Browser* browser_;
   BrowserWindowGtk* window_;
 
   // Provides colors and information about GTK.
   GtkThemeProvider* theme_provider_;
-
-  // GtkFixed containing the find bar widgets.
-  OwnedWidgetGtk fixed_;
-
-  // An event box which shows the background for |fixed_|. We could just set
-  // |fixed_| to have its own GdkWindow and draw the background directly, but
-  // then |container_| would clip to the bounds of |fixed_|.
-  GtkWidget* border_;
 
   // The widget that animates the slide-in and -out of the findbar.
   scoped_ptr<SlideAnimatorGtk> slide_widget_;
@@ -161,8 +196,6 @@ class FindBarGtk : public FindBar,
   // The border around the text entry area.
   GtkWidget* border_bin_;
   GtkWidget* border_bin_alignment_;
-  GtkWidget* border_bin_aa_;
-  GtkWidget* border_bin_aa_alignment_;
 
   // The next and previous match buttons.
   scoped_ptr<CustomDrawButton> find_previous_button_;
@@ -195,6 +228,10 @@ class FindBarGtk : public FindBar,
   int current_fixed_width_;
 
   scoped_ptr<NineBox> dialog_background_;
+
+  // The selection rect we are currently showing. We cache it to avoid covering
+  // it up.
+  gfx::Rect selection_rect_;
 
   NotificationRegistrar registrar_;
 

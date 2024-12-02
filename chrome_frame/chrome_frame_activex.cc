@@ -4,10 +4,10 @@
 
 #include "chrome_frame/chrome_frame_activex.h"
 
-#include <shdeprecated.h>  // for IBrowserService2
 #include <wininet.h>
 
 #include <algorithm>
+#include <map>
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
@@ -16,15 +16,102 @@
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/scoped_bstr_win.h"
+#include "base/singleton.h"
 #include "base/string_util.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "googleurl/src/gurl.h"
-#include "chrome_frame/com_message_event.h"
 #include "chrome_frame/utils.h"
 
-ChromeFrameActivex::ChromeFrameActivex() {
+namespace {
+
+// Class used to maintain a mapping from top-level windows to ChromeFrameActivex
+// instances.
+class TopLevelWindowMapping {
+ public:
+  typedef std::vector<HWND> WindowList;
+
+  static TopLevelWindowMapping* instance() {
+    return Singleton<TopLevelWindowMapping>::get();
+  }
+
+  // Add |cf_window| to the set of windows registered under |top_window|.
+  void AddMapping(HWND top_window, HWND cf_window) {
+    top_window_map_lock_.Lock();
+    top_window_map_[top_window].push_back(cf_window);
+    top_window_map_lock_.Unlock();
+  }
+
+  // Return the set of Chrome-Frame instances under |window|.
+  WindowList GetInstances(HWND window) {
+    top_window_map_lock_.Lock();
+    WindowList list = top_window_map_[window];
+    top_window_map_lock_.Unlock();
+    return list;
+  }
+
+ private:
+  // Constructor is private as this class it to be used as a singleton.
+  // See static method instance().
+  TopLevelWindowMapping() {}
+
+  friend struct DefaultSingletonTraits<TopLevelWindowMapping>;
+
+  typedef std::map<HWND, WindowList> TopWindowMap;
+  TopWindowMap top_window_map_;
+
+  CComAutoCriticalSection top_window_map_lock_;
+
+  DISALLOW_COPY_AND_ASSIGN(TopLevelWindowMapping);
+};
+
+// Message pump hook function that monitors for WM_MOVE and WM_MOVING
+// messages on a top-level window, and passes notification to the appropriate
+// Chrome-Frame instances.
+LRESULT CALLBACK TopWindowProc(int code, WPARAM wparam, LPARAM lparam) {
+  CWPSTRUCT *info = reinterpret_cast<CWPSTRUCT*>(lparam);
+  const UINT &message = info->message;
+  const HWND &message_hwnd = info->hwnd;
+
+  switch (message) {
+    case WM_MOVE:
+    case WM_MOVING: {
+      TopLevelWindowMapping::WindowList cf_instances =
+          TopLevelWindowMapping::instance()->GetInstances(message_hwnd);
+      TopLevelWindowMapping::WindowList::iterator
+          iter(cf_instances.begin()), end(cf_instances.end());
+      for (;iter != end; ++iter) {
+        PostMessage(*iter, WM_HOST_MOVED_NOTIFICATION, NULL, NULL);
+      }
+      break;
+    }
+    default:
+      break;
+  }
+
+  return CallNextHookEx(0, code, wparam, lparam);
+}
+
+HHOOK InstallLocalWindowHook(HWND window) {
+  if (!window)
+    return NULL;
+
+  DWORD proc_thread = ::GetWindowThreadProcessId(window, NULL);
+  if (!proc_thread)
+    return NULL;
+
+  // Note that this hook is installed as a LOCAL hook.
+  return  ::SetWindowsHookEx(WH_CALLWNDPROC,
+                             TopWindowProc,
+                             NULL,
+                             proc_thread);
+}
+
+}  // unnamed namespace
+
+ChromeFrameActivex::ChromeFrameActivex()
+    : chrome_wndproc_hook_(NULL) {
 }
 
 HRESULT ChromeFrameActivex::FinalConstruct() {
@@ -39,15 +126,35 @@ HRESULT ChromeFrameActivex::FinalConstruct() {
 
 ChromeFrameActivex::~ChromeFrameActivex() {
   // We expect these to be released during a call to SetClientSite(NULL).
-  DCHECK(onmessage_.size() == 0);
-  DCHECK(onloaderror_.size() == 0);
-  DCHECK(onload_.size() == 0);
-  DCHECK(onreadystatechanged_.size() == 0);
+  DCHECK_EQ(0, onmessage_.size());
+  DCHECK_EQ(0, onloaderror_.size());
+  DCHECK_EQ(0, onload_.size());
+  DCHECK_EQ(0, onreadystatechanged_.size());
+  DCHECK_EQ(0, onextensionready_.size());
+
+  if (chrome_wndproc_hook_) {
+    BOOL unhook_success = ::UnhookWindowsHookEx(chrome_wndproc_hook_);
+    DCHECK(unhook_success);
+  }
+
+  // ChromeFramePlugin::Uninitialize()
+  Base::Uninitialize();
 }
 
 LRESULT ChromeFrameActivex::OnCreate(UINT message, WPARAM wparam, LPARAM lparam,
                                      BOOL& handled) {
   Base::OnCreate(message, wparam, lparam, handled);
+  // Install the notification hook on the top-level window, so that we can
+  // be notified on move events.  Note that the return value is not checked.
+  // This hook is installed here, as opposed to during IOleObject_SetClientSite
+  // because m_hWnd has not yet been assigned during the SetSite call.
+  InstallTopLevelHook(m_spClientSite);
+  return 0;
+}
+
+LRESULT ChromeFrameActivex::OnHostMoved(UINT message, WPARAM wparam,
+                                        LPARAM lparam, BOOL& handled) {
+  Base::OnHostMoved();
   return 0;
 }
 
@@ -74,13 +181,7 @@ void ChromeFrameActivex::OnLoad(int tab_handle, const GURL& gurl) {
     Fire_onload(event);
 
   FireEvent(onload_, url);
-
-  HRESULT hr = InvokeScriptFunction(onload_handler_, url);
-
-  if (ready_state_ < READYSTATE_COMPLETE) {
-    ready_state_ = READYSTATE_COMPLETE;
-    FireOnChanged(DISPID_READYSTATE);
-  }
+  Base::OnLoad(tab_handle, gurl);
 }
 
 void ChromeFrameActivex::OnLoadFailed(int error_code, const std::string& url) {
@@ -89,8 +190,7 @@ void ChromeFrameActivex::OnLoadFailed(int error_code, const std::string& url) {
     Fire_onloaderror(event);
 
   FireEvent(onloaderror_, url);
-
-  HRESULT hr = InvokeScriptFunction(onerror_handler_, url);
+  Base::OnLoadFailed(error_code, url);
 }
 
 void ChromeFrameActivex::OnMessageFromChromeFrame(int tab_handle,
@@ -147,28 +247,38 @@ void ChromeFrameActivex::OnAutomationServerLaunchFailed(
   }
 }
 
-HRESULT ChromeFrameActivex::InvokeScriptFunction(const VARIANT& script_object,
-                                                 const std::string& param) {
-  ScopedVariant script_arg(UTF8ToWide(param.c_str()).c_str());
-  return InvokeScriptFunction(script_object, script_arg.AsInput());
+void ChromeFrameActivex::OnExtensionInstalled(
+    const FilePath& path,
+    void* user_data,
+    AutomationMsg_ExtensionResponseValues response) {
+  ScopedBstr path_str(path.value().c_str());
+  Fire_onextensionready(path_str, response);
 }
 
-HRESULT ChromeFrameActivex::InvokeScriptFunction(const VARIANT& script_object,
-                                                 VARIANT* param) {
-  if (V_VT(&script_object) != VT_DISPATCH) {
-    return S_FALSE;
+void ChromeFrameActivex::OnGetEnabledExtensionsComplete(
+    void* user_data,
+    const std::vector<FilePath>& extension_directories) {
+  SAFEARRAY* sa = ::SafeArrayCreateVector(VT_BSTR, 0,
+                                          extension_directories.size());
+  sa->fFeatures = sa->fFeatures | FADF_BSTR;
+  ::SafeArrayLock(sa);
+
+  for (size_t i = 0; i < extension_directories.size(); ++i) {
+    LONG index = static_cast<LONG>(i);
+    ::SafeArrayPutElement(sa, &index, reinterpret_cast<void*>(
+        CComBSTR(extension_directories[i].ToWStringHack().c_str()).Detach()));
   }
 
-  CComPtr<IDispatch> script(script_object.pdispVal);
-  HRESULT hr = script.Invoke1(static_cast<DISPID>(DISPID_VALUE), param);
-  // 0x80020101 == SCRIPT_E_REPORTED.
-  // When the script we're invoking has an error, we get this error back.
-  DLOG_IF(ERROR, FAILED(hr) && hr != 0x80020101) << "Failed to invoke script";
-
-  return hr;
+  Fire_ongetenabledextensionscomplete(sa);
+  ::SafeArrayUnlock(sa);
+  ::SafeArrayDestroy(sa);
 }
 
-HRESULT ChromeFrameActivex::OnDraw(ATL_DRAWINFO& draw_info) {  // NO_LINT
+void ChromeFrameActivex::OnChannelError() {
+  Fire_onchannelerror();
+}
+
+HRESULT ChromeFrameActivex::OnDraw(ATL_DRAWINFO& draw_info) {  // NOLINT
   HRESULT hr = S_OK;
   int dc_type = ::GetObjectType(draw_info.hicTargetDev);
   if (dc_type == OBJ_ENHMETADC) {
@@ -276,6 +386,7 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
       &onloaderror_,
       &onload_,
       &onreadystatechanged_,
+      &onextensionready_,
     };
 
     for (int i = 0; i < arraysize(handlers); ++i)
@@ -303,6 +414,8 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
 
       if (SUCCEEDED(service_hr) && wants_privileged)
         is_privileged_ = true;
+
+      url_fetcher_.set_privileged_mode(is_privileged_);
     }
 
     std::wstring chrome_extra_arguments;
@@ -316,14 +429,29 @@ HRESULT ChromeFrameActivex::IOleObject_SetClientSite(
         chrome_extra_arguments.assign(extra_arguments_arg,
                                       extra_arguments_arg.Length());
 
+      ScopedBstr automated_functions_arg;
+      service_hr = service->GetExtensionApisToAutomate(
+          automated_functions_arg.Receive());
+      if (S_OK == service_hr && automated_functions_arg) {
+        std::string automated_functions(
+            WideToASCII(static_cast<BSTR>(automated_functions_arg)));
+        functions_enabled_.clear();
+        // SplitString writes one empty entry for blank strings, so we need this
+        // to allow specifying zero automation of API functions.
+        if (!automated_functions.empty())
+          SplitString(automated_functions, ',', &functions_enabled_);
+      }
+
       ScopedBstr profile_name_arg;
       service_hr = service->GetChromeProfileName(profile_name_arg.Receive());
       if (S_OK == service_hr && profile_name_arg)
         profile_name.assign(profile_name_arg, profile_name_arg.Length());
     }
 
+    url_fetcher_.set_frame_busting(!is_privileged_);
+    automation_client_->SetUrlFetcher(&url_fetcher_);
     if (!InitializeAutomation(profile_name, chrome_extra_arguments,
-                              IsIEInPrivate())) {
+                              IsIEInPrivate(), true)) {
       return E_FAIL;
     }
   }
@@ -372,7 +500,7 @@ HRESULT ChromeFrameActivex::CreateScriptBlockForEvent(
     IHTMLElement2* insert_after, BSTR instance_id, BSTR script,
     BSTR event_name) {
   DCHECK(insert_after);
-  DCHECK(::SysStringLen(event_name) > 0);  // should always have this
+  DCHECK_GT(::SysStringLen(event_name), 0UL);  // should always have this
 
   // This might be 0 if not specified in the HTML document.
   if (!::SysStringLen(instance_id)) {
@@ -397,32 +525,6 @@ HRESULT ChromeFrameActivex::CreateScriptBlockForEvent(
                                                  element,
                                                  new_element.Receive());
       }
-    }
-  }
-
-  return hr;
-}
-
-HRESULT ChromeFrameActivex::CreateDomEvent(const std::string& event_type,
-                                           const std::string& data,
-                                           const std::string& origin,
-                                           IDispatch** event) {
-  DCHECK(event_type.length() > 0);
-  DCHECK(event != NULL);
-
-  CComObject<ComMessageEvent>* ev = NULL;
-  HRESULT hr = CComObject<ComMessageEvent>::CreateInstance(&ev);
-  if (SUCCEEDED(hr)) {
-    ev->AddRef();
-
-    ScopedComPtr<IOleContainer> container;
-    m_spClientSite->GetContainer(container.Receive());
-    if (ev->Initialize(container, data, origin, event_type)) {
-      *event = ev;
-    } else {
-      NOTREACHED() << "event->Initialize";
-      ev->Release();
-      hr = E_UNEXPECTED;
     }
   }
 
@@ -476,4 +578,69 @@ void ChromeFrameActivex::FireEvent(const EventHandlers& handlers,
     DLOG_IF(ERROR, FAILED(hr) && hr != 0x80020101)
         << StringPrintf(L"Failed to invoke script: 0x%08X", hr);
   }
+}
+
+HRESULT ChromeFrameActivex::InstallTopLevelHook(IOleClientSite* client_site) {
+  // Get the parent window of the site, and install our hook on the topmost
+  // window of the parent.
+  ScopedComPtr<IOleWindow> ole_window;
+  HRESULT hr = ole_window.QueryFrom(client_site);
+  if (FAILED(hr))
+    return hr;
+
+  HWND parent_wnd;
+  hr = ole_window->GetWindow(&parent_wnd);
+  if (FAILED(hr))
+    return hr;
+
+  HWND top_window = ::GetAncestor(parent_wnd, GA_ROOT);
+  chrome_wndproc_hook_ = InstallLocalWindowHook(top_window);
+  if (chrome_wndproc_hook_)
+    TopLevelWindowMapping::instance()->AddMapping(top_window, m_hWnd);
+
+  return chrome_wndproc_hook_ ? S_OK : E_FAIL;
+}
+
+HRESULT ChromeFrameActivex::registerBhoIfNeeded() {
+  if (!m_spUnkSite) {
+    NOTREACHED() << "Invalid client site";
+    return E_FAIL;
+  }
+
+  if (NavigationManager::GetThreadInstance() != NULL) {
+    DLOG(INFO) << "BHO already loaded";
+    return S_OK;
+  }
+
+  ScopedComPtr<IWebBrowser2> web_browser2;
+  HRESULT hr = DoQueryService(SID_SWebBrowserApp, m_spUnkSite,
+                              web_browser2.Receive());
+  if (FAILED(hr) || web_browser2.get() == NULL) {
+    DLOG(WARNING) << "Failed to get IWebBrowser2 from client site. Error:"
+                  << StringPrintf(" 0x%08X", hr);
+    return hr;
+  }
+
+  wchar_t bho_class_id_as_string[MAX_PATH] = {0};
+  StringFromGUID2(CLSID_ChromeFrameBHO, bho_class_id_as_string,
+                  arraysize(bho_class_id_as_string));
+
+  ScopedComPtr<IObjectWithSite> bho;
+  hr = bho.CreateInstance(CLSID_ChromeFrameBHO, NULL, CLSCTX_INPROC_SERVER);
+  if (FAILED(hr)) {
+    NOTREACHED() << "Failed to register ChromeFrame BHO. Error:"
+                 << StringPrintf(" 0x%08X", hr);
+    return hr;
+  }
+
+  hr = bho->SetSite(web_browser2);
+  if (FAILED(hr)) {
+    NOTREACHED() << "ChromeFrame BHO SetSite failed. Error:"
+                 << StringPrintf(" 0x%08X", hr);
+    return hr;
+  }
+
+  web_browser2->PutProperty(ScopedBstr(bho_class_id_as_string),
+                            ScopedVariant(bho));
+  return S_OK;
 }

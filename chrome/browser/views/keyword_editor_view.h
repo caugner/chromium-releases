@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,7 @@ namespace {
 class BorderView;
 }
 
+class SearchEngineSelectionObserver;
 class SkBitmap;
 class TemplateURLModel;
 class TemplateURLTableModel;
@@ -43,7 +44,14 @@ class KeywordEditorView : public views::View,
   // KeywordEditorView already open, it is closed and a new one is shown.
   static void Show(Profile* profile);
 
-  explicit KeywordEditorView(Profile* profile);
+  // Shows the KeywordEditorView for the specified profile, and passes in
+  // an observer to be called back on view close.
+  static void ShowAndObserve(Profile* profile,
+                             SearchEngineSelectionObserver* observer);
+
+  KeywordEditorView(Profile* profile,
+                    SearchEngineSelectionObserver* observer);
+
   virtual ~KeywordEditorView();
 
   // Overridden from EditSearchEngineControllerDelegate.
@@ -53,7 +61,7 @@ class KeywordEditorView : public views::View,
                                const std::wstring& keyword,
                                const std::wstring& url);
 
-  // Overriden to invoke Layout.
+  // Overridden to invoke Layout.
   virtual gfx::Size GetPreferredSize();
 
   // views::DialogDelegate methods:
@@ -88,7 +96,13 @@ class KeywordEditorView : public views::View,
   // The profile.
   Profile* profile_;
 
+  // Observer gets a callback when the KeywordEditorView closes.
+  SearchEngineSelectionObserver* observer_;
+
   scoped_ptr<KeywordEditorController> controller_;
+
+  // True if the user has set a default search engine in this dialog.
+  bool default_chosen_;
 
   // All the views are added as children, so that we don't need to delete
   // them directly.

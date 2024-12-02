@@ -22,19 +22,23 @@ HostCache::Entry::~Entry() {
 
 //-----------------------------------------------------------------------------
 
-HostCache::HostCache(size_t max_entries, size_t cache_duration_ms)
-    : max_entries_(max_entries), cache_duration_ms_(cache_duration_ms) {
+HostCache::HostCache(size_t max_entries,
+                     base::TimeDelta success_entry_ttl,
+                     base::TimeDelta failure_entry_ttl)
+    : max_entries_(max_entries),
+      success_entry_ttl_(success_entry_ttl),
+      failure_entry_ttl_(failure_entry_ttl) {
 }
 
 HostCache::~HostCache() {
 }
 
-const HostCache::Entry* HostCache::Lookup(const std::string& hostname,
+const HostCache::Entry* HostCache::Lookup(const Key& key,
                                           base::TimeTicks now) const {
   if (caching_is_disabled())
     return NULL;
 
-  EntryMap::const_iterator it = entries_.find(hostname);
+  EntryMap::const_iterator it = entries_.find(key);
   if (it == entries_.end())
     return NULL;  // Not found.
 
@@ -45,7 +49,7 @@ const HostCache::Entry* HostCache::Lookup(const std::string& hostname,
   return NULL;
 }
 
-HostCache::Entry* HostCache::Set(const std::string& hostname,
+HostCache::Entry* HostCache::Set(const Key& key,
                                  int error,
                                  const AddressList addrlist,
                                  base::TimeTicks now) {
@@ -53,9 +57,9 @@ HostCache::Entry* HostCache::Set(const std::string& hostname,
     return NULL;
 
   base::TimeTicks expiration = now +
-      base::TimeDelta::FromMilliseconds(cache_duration_ms_);
+      (error == OK ? success_entry_ttl_ : failure_entry_ttl_);
 
-  scoped_refptr<Entry>& entry = entries_[hostname];
+  scoped_refptr<Entry>& entry = entries_[key];
   if (!entry) {
     // Entry didn't exist, creating one now.
     Entry* ptr = new Entry(error, addrlist, expiration);
@@ -77,7 +81,7 @@ HostCache::Entry* HostCache::Set(const std::string& hostname,
 
 // static
 bool HostCache::CanUseEntry(const Entry* entry, const base::TimeTicks now) {
-  return entry->error == OK && entry->expiration > now;
+  return entry->expiration > now;
 }
 
 void HostCache::Compact(base::TimeTicks now, const Entry* pinned_entry) {

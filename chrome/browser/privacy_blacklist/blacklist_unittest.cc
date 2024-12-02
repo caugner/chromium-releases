@@ -8,141 +8,149 @@
 #include "base/file_util.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
+#include "chrome/browser/browser_prefs.h"
+#include "chrome/browser/pref_service.h"
+#include "chrome/browser/profile.h"
 #include "chrome/common/chrome_paths.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-TEST(BlacklistTest, Generic) {
-  // Get path relative to test data dir.
-  FilePath input;
-  PathService::Get(chrome::DIR_TEST_DATA, &input);
-  input = input.AppendASCII("blacklist_small.pbr");
+class BlacklistTest : public testing::Test {
+ protected:
+  virtual void SetUp() {
+    FilePath source_path;
+    PathService::Get(chrome::DIR_TEST_DATA, &source_path);
+    source_path = source_path.AppendASCII("profiles")
+        .AppendASCII("blacklist_prefs").AppendASCII("Preferences");
 
-  Blacklist blacklist(input);
+    prefs_.reset(new PrefService(source_path));
+    Profile::RegisterUserPrefs(prefs_.get());
+    browser::RegisterAllPrefs(prefs_.get(), prefs_.get());
+  }
 
-  // This test is a friend, so inspect the internal structures.
-  EXPECT_EQ(5U, blacklist.blacklist_.size());
-  std::vector<Blacklist::Entry*>::const_iterator i =
-      blacklist.blacklist_.begin();
+  scoped_ptr<PrefService> prefs_;
+};
 
-  EXPECT_EQ(Blacklist::kBlockByType|Blacklist::kDontPersistCookies,
-            (*i)->attributes());
-  EXPECT_TRUE((*i)->MatchType("application/x-shockwave-flash"));
-  EXPECT_FALSE((*i)->MatchType("image/jpeg"));
-  EXPECT_EQ("@", (*i++)->pattern());
+TEST_F(BlacklistTest, Generic) {
+  scoped_refptr<Blacklist> blacklist = new Blacklist(prefs_.get());
+  Blacklist::EntryList entries(blacklist->entries_begin(),
+                               blacklist->entries_end());
+
+  ASSERT_EQ(7U, entries.size());
 
   // All entries include global attributes.
   // NOTE: Silly bitwise-or with zero to workaround a Mac compiler bug.
-  EXPECT_EQ(Blacklist::kBlockUnsecure|0, (*i)->attributes());
-  EXPECT_FALSE((*i)->MatchType("application/x-shockwave-flash"));
-  EXPECT_FALSE((*i)->MatchType("image/jpeg"));
-  EXPECT_EQ("@poor-security-site.com", (*i++)->pattern());
-
-  EXPECT_EQ(Blacklist::kDontSendCookies|Blacklist::kDontStoreCookies,
-            (*i)->attributes());
-  EXPECT_FALSE((*i)->MatchType("application/x-shockwave-flash"));
-  EXPECT_FALSE((*i)->MatchType("image/jpeg"));
-  EXPECT_EQ("@.ad-serving-place.com", (*i++)->pattern());
-
-  EXPECT_EQ(Blacklist::kDontSendUserAgent|Blacklist::kDontSendReferrer,
-            (*i)->attributes());
-  EXPECT_FALSE((*i)->MatchType("application/x-shockwave-flash"));
-  EXPECT_FALSE((*i)->MatchType("image/jpeg"));
-  EXPECT_EQ("www.site.com/anonymous/folder/@", (*i++)->pattern());
+  EXPECT_EQ(Blacklist::kBlockUnsecure|0, entries[0]->attributes());
+  EXPECT_FALSE(entries[0]->is_exception());
+  EXPECT_EQ("@poor-security-site.com", entries[0]->pattern());
 
   // NOTE: Silly bitwise-or with zero to workaround a Mac compiler bug.
-  EXPECT_EQ(Blacklist::kBlockAll|0, (*i)->attributes());
-  EXPECT_FALSE((*i)->MatchType("application/x-shockwave-flash"));
-  EXPECT_FALSE((*i)->MatchType("image/jpeg"));
-  EXPECT_EQ("www.site.com/bad/url", (*i++)->pattern());
+  EXPECT_EQ(Blacklist::kBlockCookies|0, entries[1]->attributes());
+  EXPECT_FALSE(entries[1]->is_exception());
+  EXPECT_EQ("@.ad-serving-place.com", entries[1]->pattern());
 
-  EXPECT_EQ(1U, blacklist.providers_.size());
-  EXPECT_EQ("Sample", blacklist.providers_.front()->name());
-  EXPECT_EQ("http://www.google.com", blacklist.providers_.front()->url());
+  EXPECT_EQ(Blacklist::kDontSendUserAgent|Blacklist::kDontSendReferrer,
+            entries[2]->attributes());
+  EXPECT_FALSE(entries[2]->is_exception());
+  EXPECT_EQ("www.site.com/anonymous/folder/@", entries[2]->pattern());
+
+  // NOTE: Silly bitwise-or with zero to workaround a Mac compiler bug.
+  EXPECT_EQ(Blacklist::kBlockAll|0, entries[3]->attributes());
+  EXPECT_FALSE(entries[3]->is_exception());
+  EXPECT_EQ("www.site.com/bad/url", entries[3]->pattern());
+
+  // NOTE: Silly bitwise-or with zero to workaround a Mac compiler bug.
+  EXPECT_EQ(Blacklist::kBlockAll|0, entries[4]->attributes());
+  EXPECT_FALSE(entries[4]->is_exception());
+  EXPECT_EQ("@/script?@", entries[4]->pattern());
+
+  // NOTE: Silly bitwise-or with zero to workaround a Mac compiler bug.
+  EXPECT_EQ(Blacklist::kBlockAll|0, entries[5]->attributes());
+  EXPECT_FALSE(entries[5]->is_exception());
+  EXPECT_EQ("@?badparam@", entries[5]->pattern());
+
+  // NOTE: Silly bitwise-or with zero to workaround a Mac compiler bug.
+  EXPECT_EQ(Blacklist::kBlockAll|0, entries[6]->attributes());
+  EXPECT_TRUE(entries[6]->is_exception());
+  EXPECT_EQ("www.site.com/bad/url/good", entries[6]->pattern());
+
+  Blacklist::ProviderList providers(blacklist->providers_begin(),
+                                    blacklist->providers_end());
+
+  ASSERT_EQ(1U, providers.size());
+  EXPECT_EQ("Sample", providers[0]->name());
+  EXPECT_EQ("http://www.example.com", providers[0]->url());
 
   // No match for chrome, about or empty URLs.
-  EXPECT_FALSE(blacklist.findMatch(GURL()));
-  EXPECT_FALSE(blacklist.findMatch(GURL("chrome://new-tab")));
-  EXPECT_FALSE(blacklist.findMatch(GURL("about:blank")));
+  EXPECT_FALSE(blacklist->FindMatch(GURL()));
+  EXPECT_FALSE(blacklist->FindMatch(GURL("chrome://new-tab")));
+  EXPECT_FALSE(blacklist->FindMatch(GURL("about:blank")));
 
   // Expected rule matches.
-  Blacklist::Match* match;
-  match = blacklist.findMatch(GURL("http://www.google.com"));
+  Blacklist::Match* match =
+      blacklist->FindMatch(GURL("http://www.site.com/bad/url"));
   EXPECT_TRUE(match);
   if (match) {
-    EXPECT_EQ(Blacklist::kBlockByType|Blacklist::kDontPersistCookies,
-              match->attributes());
+    EXPECT_EQ(Blacklist::kBlockAll|0, match->attributes());
     EXPECT_EQ(1U, match->entries().size());
     delete match;
   }
 
-  match = blacklist.findMatch(GURL("http://www.site.com/bad/url"));
-  EXPECT_TRUE(match);
-  if (match) {
-    EXPECT_EQ(Blacklist::kBlockAll|
-              Blacklist::kBlockByType|Blacklist::kDontPersistCookies,
-              match->attributes());
-    EXPECT_EQ(2U, match->entries().size());
+  match = blacklist->FindMatch(GURL("http://www.site.com/anonymous"));
+  EXPECT_FALSE(match);
+  if (match)
     delete match;
-  }
 
-  match = blacklist.findMatch(GURL("http://www.site.com/anonymous"));
-  EXPECT_TRUE(match);
-  if (match) {
-    EXPECT_EQ(Blacklist::kBlockByType|Blacklist::kDontPersistCookies,
-              match->attributes());
-    EXPECT_EQ(1U, match->entries().size());
+  match = blacklist->FindMatch(GURL("http://www.site.com/anonymous/folder"));
+  EXPECT_FALSE(match);
+  if (match)
     delete match;
-  }
 
-  match = blacklist.findMatch(GURL("http://www.site.com/anonymous/folder"));
-  EXPECT_TRUE(match);
-  if (match) {
-    EXPECT_EQ(Blacklist::kBlockByType|Blacklist::kDontPersistCookies,
-      match->attributes());
-    EXPECT_EQ(1U, match->entries().size());
-    delete match;
-  }
-
-  match = blacklist.findMatch(
+  match = blacklist->FindMatch(
       GURL("http://www.site.com/anonymous/folder/subfolder"));
   EXPECT_TRUE(match);
   if (match) {
-    EXPECT_EQ(Blacklist::kDontSendUserAgent|Blacklist::kDontSendReferrer|
-              Blacklist::kBlockByType|Blacklist::kDontPersistCookies,
+    EXPECT_EQ(Blacklist::kDontSendUserAgent|Blacklist::kDontSendReferrer,
               match->attributes());
-    EXPECT_EQ(2U, match->entries().size());
+    EXPECT_EQ(1U, match->entries().size());
     delete match;
   }
 
-  // StripCookieExpiry Tests
-  std::string cookie1(
-      "PREF=ID=14a549990453e42a:TM=1245183232:LM=1245183232:S=Occ7khRVIEE36Ao5;"
-      " expires=Thu, 16-Jun-2011 20:13:52 GMT; path=/; domain=.google.com");
-  std::string cookie2(
-      "PREF=ID=14a549990453e42a:TM=1245183232:LM=1245183232:S=Occ7khRVIEE36Ao5;"
-      " path=/; domain=.google.com");
-  std::string cookie3(
-    "PREF=ID=14a549990453e42a:TM=1245183232:LM=1245183232:S=Occ7khRVIEE36Ao5;"
-    " expires=Thu, 17-Jun-2011 02:13:52 GMT; path=/; domain=.google.com");
-  std::string cookie4("E=MC^2; path=relative;  expires=never;");
-  std::string cookie5("E=MC^2; path=relative;");
+  // No matches for URLs without query string
+  match = blacklist->FindMatch(GURL("http://badparam.com/"));
+  EXPECT_FALSE(match);
+  if (match)
+    delete match;
 
-  // No expiry, should be equal to itself after stripping.
-  EXPECT_EQ(cookie2, Blacklist::StripCookieExpiry(cookie2));
-  EXPECT_EQ(cookie5, Blacklist::StripCookieExpiry(cookie5));
+  match = blacklist->FindMatch(GURL("http://script.bad.org/"));
+  EXPECT_FALSE(match);
+  if (match)
+    delete match;
 
-  // Expiry, should be equal to non-expiry version after stripping.
-  EXPECT_EQ(cookie2, Blacklist::StripCookieExpiry(cookie1));
-  EXPECT_EQ(cookie5, Blacklist::StripCookieExpiry(cookie4));
+  // Expected rule matches.
+  match = blacklist->FindMatch(GURL("http://host.com/script?q=x"));
+  EXPECT_TRUE(match);
+  if (match) {
+    EXPECT_EQ(Blacklist::kBlockAll, match->attributes());
+    EXPECT_EQ(1U, match->entries().size());
+    delete match;
+  }
 
-  // Same cookie other than expiry should be same after stripping.
-  EXPECT_EQ(Blacklist::StripCookieExpiry(cookie2),
-            Blacklist::StripCookieExpiry(cookie3));
+  match = blacklist->FindMatch(GURL("http://host.com/img?badparam=x"));
+  EXPECT_TRUE(match);
+  if (match) {
+    EXPECT_EQ(Blacklist::kBlockAll, match->attributes());
+    EXPECT_EQ(1U, match->entries().size());
+    delete match;
+  }
 
-  // Edge cases.
-  std::string invalid("#$%^&*()_+");
-  EXPECT_EQ(invalid, Blacklist::StripCookieExpiry(invalid));
-  EXPECT_EQ(std::string(), Blacklist::StripCookieExpiry(std::string()));
+  // Whitelisting tests.
+  match = blacklist->FindMatch(GURL("http://www.site.com/bad/url/good"));
+  EXPECT_TRUE(match);
+  if (match) {
+    EXPECT_EQ(0U, match->attributes());
+    EXPECT_EQ(1U, match->entries().size());
+    delete match;
+  }
 
   // StripCookies Test. Note that "\r\n" line terminators are used
   // because the underlying net util uniformizes those when stripping
@@ -162,9 +170,24 @@ TEST(BlacklistTest, Generic) {
   EXPECT_TRUE(header1 == Blacklist::StripCookies(header1));
   EXPECT_TRUE(header2 == Blacklist::StripCookies(header2));
   EXPECT_TRUE(header4 == Blacklist::StripCookies(header3));
+
+  // GetURLAsLookupString Test.
+  std::string url_spec1("example.com/some/path");
+  std::string url_spec2("example.com/script?param=1");
+
+  EXPECT_TRUE(url_spec1 == Blacklist::GetURLAsLookupString(
+              GURL("http://example.com/some/path")));
+  EXPECT_TRUE(url_spec1 == Blacklist::GetURLAsLookupString(
+              GURL("ftp://example.com/some/path")));
+  EXPECT_TRUE(url_spec1 == Blacklist::GetURLAsLookupString(
+              GURL("http://example.com:8080/some/path")));
+  EXPECT_TRUE(url_spec1 == Blacklist::GetURLAsLookupString(
+              GURL("http://user:login@example.com/some/path")));
+  EXPECT_TRUE(url_spec2 == Blacklist::GetURLAsLookupString(
+              GURL("http://example.com/script?param=1")));
 }
 
-TEST(BlacklistTest, PatternMatch) {
+TEST_F(BlacklistTest, PatternMatch) {
   // @ matches all but empty strings.
   EXPECT_TRUE(Blacklist::Matches("@", "foo.com"));
   EXPECT_TRUE(Blacklist::Matches("@", "path"));

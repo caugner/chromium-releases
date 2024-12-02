@@ -37,9 +37,9 @@ FilePath GetFirefoxDylibPath();
 #endif  // OS_MACOSX
 
 // Detects version of Firefox and installation path from given Firefox profile
-bool GetFirefoxVersionAndPathFromProfile(const std::wstring& profile_path,
+bool GetFirefoxVersionAndPathFromProfile(const FilePath& profile_path,
                                          int* version,
-                                         std::wstring* app_path);
+                                         FilePath* app_path);
 
 // Gets the full path of the profiles.ini file. This file records
 // the profiles that can be used by Firefox.  Returns an empty
@@ -58,7 +58,7 @@ FilePath GetProfilesINI();
 //   Path=Profiles/abcdefeg.default
 // We set "[value]" in path "<Section>.<Key>". For example, the path
 // "Genenral.StartWithLastProfile" has the value "1".
-void ParseProfileINI(std::wstring file, DictionaryValue* root);
+void ParseProfileINI(const FilePath& file, DictionaryValue* root);
 
 // Returns true if we want to add the URL to the history. We filter
 // out the URL with a unsupported scheme.
@@ -66,22 +66,22 @@ bool CanImportURL(const GURL& url);
 
 // Parses the OpenSearch XML files in |xml_files| and populates |search_engines|
 // with the resulting TemplateURLs.
-void ParseSearchEnginesFromXMLFiles(const std::vector<std::wstring>& xml_files,
+void ParseSearchEnginesFromXMLFiles(const std::vector<FilePath>& xml_files,
                                     std::vector<TemplateURL*>* search_engines);
 
 // Returns the index of the default search engine in the |search_engines| list.
 // If none is found, -1 is returned.
 int GetFirefoxDefaultSearchEngineIndex(
     const std::vector<TemplateURL*>& search_engines,
-    const std::wstring& profile_path);
+    const FilePath& profile_path);
 
 // Returns the home page set in Firefox in a particular profile.
-GURL GetHomepage(const std::wstring& profile_path);
+GURL GetHomepage(const FilePath& profile_path);
 
 // Checks to see if this home page is a default home page, as specified by
 // the resource file browserconfig.properties in the Firefox application
 // directory.
-bool IsDefaultHomepage(const GURL& homepage, const std::wstring& app_path);
+bool IsDefaultHomepage(const GURL& homepage, const FilePath& app_path);
 
 
 #endif  // CHROME_BROWSER_IMPORTER_FIREFOX_IMPORTER_UTILS_H_

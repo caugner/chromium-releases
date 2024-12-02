@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,9 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/browser_window.h"
+#include "chrome/browser/chrome_thread.h"
+#include "chrome/browser/intranet_redirect_detector.h"
+#include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/profile_manager.h"
@@ -31,11 +34,37 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/testing_browser_process.h"
 #include "chrome/test/ui_test_utils.h"
+#include "net/base/mock_host_resolver.h"
 #include "sandbox/src/dep.h"
+
+#if defined(OS_LINUX)
+#include "base/singleton.h"
+#include "chrome/browser/renderer_host/render_sandbox_host_linux.h"
+#include "chrome/browser/zygote_host_linux.h"
+
+namespace {
+
+// A helper class to do Linux-only initialization only once per process.
+class LinuxHostInit {
+ public:
+  LinuxHostInit() {
+    RenderSandboxHostLinux* shost = Singleton<RenderSandboxHostLinux>::get();
+    shost->Init("");
+    ZygoteHost* zhost = Singleton<ZygoteHost>::get();
+    zhost->Init("");
+  }
+  ~LinuxHostInit() {}
+};
+
+}  // namespace
+#endif
 
 extern int BrowserMain(const MainFunctionParams&);
 
 const wchar_t kUnitTestShowWindows[] = L"show-windows";
+
+// Passed as value of kTestType.
+static const char kBrowserTestType[] = "browser";
 
 // Default delay for the time-out at which we stop the
 // inner-message loop the first time.
@@ -51,6 +80,9 @@ InProcessBrowserTest::InProcessBrowserTest()
       single_process_(false),
       original_single_process_(false),
       initial_timeout_(kInitialTimeoutInMS) {
+}
+
+InProcessBrowserTest::~InProcessBrowserTest() {
 }
 
 void InProcessBrowserTest::SetUp() {
@@ -103,6 +135,10 @@ void InProcessBrowserTest::SetUp() {
   // Don't show the first run ui.
   command_line->AppendSwitch(switches::kNoFirstRun);
 
+  // This is a Browser test.
+  command_line->AppendSwitchWithValue(switches::kTestType,
+                                      ASCIIToWide(kBrowserTestType));
+
   // Single-process mode is not set in BrowserMain so it needs to be processed
   // explicitlty.
   original_single_process_ = RenderProcessHost::run_renderer_in_process();
@@ -129,7 +165,8 @@ void InProcessBrowserTest::SetUp() {
   params.ui_task =
       NewRunnableMethod(this, &InProcessBrowserTest::RunTestOnMainThreadLoop);
 
-  host_resolver_ = new net::RuleBasedHostResolverProc(NULL);
+  host_resolver_ = new net::RuleBasedHostResolverProc(
+      new IntranetRedirectHostResolverProc(NULL));
 
   // Something inside the browser does this lookup implicitly. Make it fail
   // to avoid external dependency. It won't break the tests.
@@ -143,6 +180,28 @@ void InProcessBrowserTest::SetUp() {
       host_resolver_.get());
 
   SetUpInProcessBrowserTestFixture();
+
+  // Before we run the browser, we have to hack the path to the exe to match
+  // what it would be if Chrome was running, because it is used to fork renderer
+  // processes, on Linux at least (failure to do so will cause a browser_test to
+  // be run instead of a renderer).
+  FilePath chrome_path;
+  CHECK(PathService::Get(base::FILE_EXE, &chrome_path));
+  chrome_path = chrome_path.DirName();
+#if defined(OS_WIN)
+  chrome_path = chrome_path.Append(chrome::kBrowserProcessExecutablePath);
+#elif defined(OS_POSIX)
+  chrome_path = chrome_path.Append(
+      WideToASCII(chrome::kBrowserProcessExecutablePath));
+#endif
+  CHECK(PathService::Override(base::FILE_EXE, chrome_path));
+
+#if defined(OS_LINUX)
+  // Initialize the RenderSandbox and Zygote hosts. Apparently they get used
+  // for InProcessBrowserTest, and this is not the normal browser startup path.
+  Singleton<LinuxHostInit>::get();
+#endif
+
   BrowserMain(params);
   TearDownInProcessBrowserTestFixture();
 }
@@ -192,10 +251,7 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
   // In the long term it would be great if we could use a TestingProfile
   // here and only enable services you want tested, but that requires all
   // consumers of Profile to handle NULL services.
-  FilePath user_data_dir;
-  PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
-  ProfileManager* profile_manager = g_browser_process->profile_manager();
-  Profile* profile = profile_manager->GetDefaultProfile(user_data_dir);
+  Profile* profile = ProfileManager::GetDefaultProfile();
   if (!profile) {
     // We should only be able to get here if the profile already exists and
     // has been created.
@@ -204,23 +260,8 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
     return;
   }
 
-
-  // Before we run the browser, we have to hack the path to the exe to match
-  // what it would be if Chrome was running, because it is used to fork renderer
-  // processes, on Linux at least (failure to do so will cause a browser_test to
-  // be run instead of a renderer).
-  FilePath chrome_path;
-  CHECK(PathService::Get(base::FILE_EXE, &chrome_path));
-  chrome_path = chrome_path.DirName();
-#if defined(OS_WIN)
-  chrome_path = chrome_path.Append(chrome::kBrowserProcessExecutablePath);
-#elif defined(OS_POSIX)
-  chrome_path = chrome_path.Append(
-      WideToASCII(chrome::kBrowserProcessExecutablePath));
-#endif
-  CHECK(PathService::Override(base::FILE_EXE, chrome_path));
-
-  g_browser_process->io_thread()->message_loop()->PostTask(FROM_HERE,
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
       NewRunnableFunction(chrome_browser_net::SetUrlRequestMocksEnabled, true));
 
   browser_ = CreateBrowser(profile);
@@ -235,10 +276,24 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
 
   // Close all browser windows.  This might not happen immediately, since some
   // may need to wait for beforeunload and unload handlers to fire in a tab.
-  // When all windows are closed, the last window will call Quit().
+  // When all windows are closed, the last window will call Quit(). Call
+  // Quit() explicitly if no windows are open.
+#if defined(OS_MACOSX)
+  // When the browser window closes, Cocoa will generate an inner-loop that
+  // processes the RenderProcessHost delete task, so allow task nesting.
+  bool old_state = MessageLoopForUI::current()->NestableTasksAllowed();
+  MessageLoopForUI::current()->SetNestableTasksAllowed(true);
+#endif
   BrowserList::const_iterator browser = BrowserList::begin();
-  for (; browser != BrowserList::end(); ++browser)
-    (*browser)->CloseWindow();
+  if (browser == BrowserList::end()) {
+    MessageLoopForUI::current()->Quit();
+  } else {
+    for (; browser != BrowserList::end(); ++browser)
+      (*browser)->CloseWindow();
+  }
+#if defined(OS_MACOSX)
+  MessageLoopForUI::current()->SetNestableTasksAllowed(old_state);
+#endif
 
   // Stop the HTTP server.
   http_server_ = NULL;

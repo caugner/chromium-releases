@@ -1,3 +1,7 @@
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 //{{NO_DEPENDENCIES}}
 //
 // What began as a Microsoft Visual C++ generated include file is now
@@ -7,6 +11,32 @@
 //
 
 #define IDR_MAINFRAME                   101
+#define IDR_CHROMEFRAME                 200
+
+#define IDI_THROBBER_01                 102
+#define IDI_THROBBER_02                 103
+#define IDI_THROBBER_03                 104
+#define IDI_THROBBER_04                 105
+#define IDI_THROBBER_05                 106
+#define IDI_THROBBER_06                 107
+#define IDI_THROBBER_07                 108
+#define IDI_THROBBER_08                 109
+#define IDI_THROBBER_09                 110
+#define IDI_THROBBER_10                 111
+#define IDI_THROBBER_11                 112
+#define IDI_THROBBER_12                 113
+#define IDI_THROBBER_13                 114
+#define IDI_THROBBER_14                 115
+#define IDI_THROBBER_15                 116
+#define IDI_THROBBER_16                 117
+#define IDI_THROBBER_17                 118
+#define IDI_THROBBER_18                 119
+#define IDI_THROBBER_19                 120
+#define IDI_THROBBER_20                 121
+#define IDI_THROBBER_21                 122
+#define IDI_THROBBER_22                 123
+#define IDI_THROBBER_23                 124
+#define IDI_THROBBER_24                 125
 
 // Values around 1600 are used by installer/setup/build/
 
@@ -43,6 +73,9 @@
 #define IDC_OPEN_CURRENT_URL            33004
 #define IDC_GO                          33005
 #define IDC_STOP                        33006
+// TODO: put this alongside RELOAD, next time someone wants to fix all
+// the Mac ids.
+#define IDC_RELOAD_IGNORING_CACHE       33007
 
 // Window management commands
 #define IDC_NEW_WINDOW                  34000
@@ -82,15 +115,16 @@
 #define IDC_EXIT                        34031
 #define IDC_MOVE_TAB_NEXT               34032
 #define IDC_MOVE_TAB_PREVIOUS           34033
+#define IDC_COMPACT_NAVBAR              34034
 
 // Page-related commands
 #define IDC_BOOKMARK_PAGE               35000
 #define IDC_BOOKMARK_ALL_TABS           35001
 #define IDC_VIEW_SOURCE                 35002
-#define IDC_CLOSE_POPUPS                35003
-#define IDC_PRINT                       35004
-#define IDC_SAVE_PAGE                   35005
-#define IDC_ENCODING_MENU               35006
+#define IDC_PRINT                       35003
+#define IDC_SAVE_PAGE                   35004
+#define IDC_ENCODING_MENU               35005
+#define IDC_EMAIL_PAGE_LOCATION         35006
 
 // When adding a new encoding to this list, be sure to append it to the
 // EncodingMenuController::kValidEncodingIds array in
@@ -155,12 +189,14 @@
 #define IDC_FOCUS_TOOLBAR               39000
 #define IDC_FOCUS_LOCATION              39001
 #define IDC_FOCUS_SEARCH                39002
+#define IDC_FOCUS_MENU_BAR              39003
 
 // Show various bits of UI
 #define IDC_OPEN_FILE                   40000
 #define IDC_CREATE_SHORTCUTS            40001
 #define IDC_DEVELOPER_MENU              40002
-#define IDC_DEV_TOOLS                   40004
+#define IDC_DEV_TOOLS                   40003
+#define IDC_DEV_TOOLS_CONSOLE           40004
 #define IDC_TASK_MANAGER                40005
 #define IDC_SELECT_PROFILE              40006
 #define IDC_NEW_PROFILE                 40007
@@ -180,6 +216,7 @@
 #define IDC_SHOW_PAGE_MENU              40021
 #define IDC_SHOW_EXTENSION_SHELF        40022
 #define IDC_MANAGE_EXTENSIONS           40023
+#define IDC_AUTOFILL_DEFAULT            40024
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.
@@ -197,13 +234,28 @@
 #define IDC_CHECK_SPELLING_OF_THIS_FIELD  41107
 #define IDC_SYNC_BOOKMARKS              41108
 #define IDC_SPELLPANEL_TOGGLE           41109
+
+// Writing direction
+#define IDC_WRITING_DIRECTION_MENU       41120     // OSX only
+#define IDC_WRITING_DIRECTION_DEFAULT    41121     // OSX only
+#define IDC_WRITING_DIRECTION_LTR        41122     // OSX only
+#define IDC_WRITING_DIRECTION_RTL        41123     // OSX only
+
+// Translate
+#define IDC_TRANSLATE_OPTIONS_ALWAYS               42000
+#define IDC_TRANSLATE_OPTIONS_NEVER_TRANSLATE_LANG 42001
+#define IDC_TRANSLATE_OPTIONS_NEVER_TRANSLATE_SITE 42002
+#define IDC_TRANSLATE_OPTIONS_ABOUT                42003
+#define IDC_TRANSLATE_ORIGINAL_LANGUAGE_BASE       42100
+#define IDC_TRANSLATE_TARGET_LANGUAGE_BASE         42400
+
 // Next default values for new objects
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        3001
-#define _APS_NEXT_COMMAND_VALUE         42000
+#define _APS_NEXT_COMMAND_VALUE         43000
 #define _APS_NEXT_CONTROL_VALUE         4017
 #define _APS_NEXT_SYMED_VALUE           1001
 #endif
@@ -213,7 +265,18 @@
 // Placed in a common file to help insure they never collide.
 #define IDC_BOOKMARK_MENU               43000     // OSX only
 #define IDC_VIEW_MENU                   44000     // OSX only
-#define IDC_CONTROL_PANEL               45000     // Linux2 only
+#define IDC_SYSTEM_OPTIONS              45000     // ChromeOS only
+#define IDC_INTERNET_OPTIONS            45100     // ChromeOS only
 #define IDC_HISTORY_MENU                46000     // OSX only
 #define IDC_HISTORY_MENU_VISITED        46100     // OSX only
 #define IDC_HISTORY_MENU_CLOSED         46200     // OSX only
+#define IDC_INPUT_METHODS_MENU          46300     // Linux only
+
+// Custom context menu entries
+#define IDC_CONTENT_CONTEXT_CUSTOM_FIRST 47000
+#define IDC_CONTENT_CONTEXT_CUSTOM_LAST  48000
+
+// Context menu items added by extensions.
+#define IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST 49000
+#define IDC_EXTENSIONS_CONTEXT_CUSTOM_LAST 50000
+

@@ -1,9 +1,16 @@
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #ifndef MAPS_H__
 #define MAPS_H__
 
 #include <elf.h>
+#include <functional>
+#include <map>
 #include <string>
-#include <vector>
+
+#include "allocator.h"
 
 #if defined(__x86_64__)
 typedef Elf64_Addr Elf_Addr;
@@ -19,18 +26,19 @@ class Library;
 class Maps {
   friend class Library;
  public:
-  Maps(const std::string& maps_file);
-  ~Maps();
+  typedef std::basic_string<char, std::char_traits<char>,
+                            SystemAllocator<char> > string;
+
+  Maps(int proc_self_maps);
+  ~Maps() { }
 
  protected:
-  char *forwardGetRequest(Library *library, Elf_Addr offset, char *buf,
-                          size_t length) const;
-  std::string forwardGetRequest(Library *library, Elf_Addr offset) const;
-
   // A map with all the libraries currently loaded into the application.
   // The key is a unique combination of device number, inode number, and
   // file name. It should be treated as opaque.
-  typedef std::map<std::string, Library> LibraryMap;
+  typedef std::map<string, Library, std::less<string>,
+                   SystemAllocator<std::pair<const string,
+                                             Library> > > LibraryMap;
   friend class Iterator;
   class Iterator {
     friend class Maps;
@@ -48,7 +56,7 @@ class Maps {
     Library* operator*() const;
     bool operator==(const Iterator& iter) const;
     bool operator!=(const Iterator& iter) const;
-    std::string name() const;
+    string name() const;
 
    protected:
     mutable LibraryMap::iterator iter_;
@@ -72,32 +80,13 @@ class Maps {
 
   char* vsyscall() const { return vsyscall_; }
 
- private:
-  struct Request {
-    enum Type { REQ_GET, REQ_GET_STR };
-
-    Request() { }
-
-    Request(enum Type t, Library* i, Elf_Addr o, ssize_t l) :
-        library(i), offset(o), length(l), type(t), padding(0) {
-    }
-
-    Library*   library;
-    Elf_Addr   offset;
-    ssize_t    length;
-    enum Type  type;
-    int        padding; // for valgrind
-  };
-
  protected:
-  const std::string maps_file_;
-  const Iterator    begin_iter_;
-  const Iterator    end_iter_;
+  const int      proc_self_maps_;
+  const Iterator begin_iter_;
+  const Iterator end_iter_;
 
-  LibraryMap  libs_;
-  pid_t       pid_;
-  int         fds_[2];
-  char*       vsyscall_;
+  LibraryMap     libs_;
+  char*          vsyscall_;
 };
 
 } // namespace

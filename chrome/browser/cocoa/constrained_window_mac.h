@@ -117,6 +117,7 @@ class ConstrainedWindowMac : public ConstrainedWindow {
   virtual ~ConstrainedWindowMac();
 
   // Overridden from ConstrainedWindow:
+  virtual void ShowConstrainedWindow();
   virtual void CloseConstrainedWindow();
 
   // Returns the TabContents that constrains this Constrained Window.
@@ -142,6 +143,9 @@ class ConstrainedWindowMac : public ConstrainedWindow {
 
   // Controller of the window that contains this sheet.
   BrowserWindowController* controller_;
+
+  // Stores if |ShowConstrainedWindow()| was called.
+  bool should_be_visible_;
 
   DISALLOW_COPY_AND_ASSIGN(ConstrainedWindowMac);
 };

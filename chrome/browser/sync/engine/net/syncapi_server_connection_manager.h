@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/scoped_ptr.h"
 #include "chrome/browser/sync/engine/net/server_connection_manager.h"
 
 namespace sync_api {
@@ -15,8 +16,8 @@ class HttpPostProviderFactory;
 
 // This provides HTTP Post functionality through the interface provided
 // to the sync API by the application hosting the syncer backend.
-class SyncAPIBridgedPost :
-    public browser_sync::ServerConnectionManager::Post {
+class SyncAPIBridgedPost
+    : public browser_sync::ServerConnectionManager::Post {
  public:
   SyncAPIBridgedPost(browser_sync::ServerConnectionManager* scm,
                      HttpPostProviderFactory* factory)
@@ -41,31 +42,31 @@ class SyncAPIBridgedPost :
 // A ServerConnectionManager subclass used by the syncapi layer. We use a
 // subclass so that we can override MakePost() to generate a POST object using
 // an instance of the HttpPostProviderFactory class.
-class SyncAPIServerConnectionManager :
-    public browser_sync::ServerConnectionManager {
+class SyncAPIServerConnectionManager
+    : public browser_sync::ServerConnectionManager {
  public:
+  // Takes ownership of factory.
   SyncAPIServerConnectionManager(const std::string& server,
                                  int port,
                                  bool use_ssl,
                                  const std::string& client_version,
-                                 const std::string& client_id)
+                                 const std::string& client_id,
+                                 HttpPostProviderFactory* factory)
       : ServerConnectionManager(server, port, use_ssl, client_version,
                                 client_id),
-        post_provider_factory_(NULL) {
+        post_provider_factory_(factory) {
+    DCHECK(post_provider_factory_.get());
   }
 
   virtual ~SyncAPIServerConnectionManager();
-
-  // This method gives ownership of |factory| to |this|.
-  void SetHttpPostProviderFactory(HttpPostProviderFactory* factory);
  protected:
   virtual Post* MakePost() {
-    return new SyncAPIBridgedPost(this, post_provider_factory_);
+    return new SyncAPIBridgedPost(this, post_provider_factory_.get());
   }
  private:
   // A factory creating concrete HttpPostProviders for use whenever we need to
   // issue a POST to sync servers.
-  HttpPostProviderFactory* post_provider_factory_;
+  scoped_ptr<HttpPostProviderFactory> post_provider_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncAPIServerConnectionManager);
 };

@@ -2,19 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#if defined(BROWSER_SYNC)
-
 #include "chrome/browser/dom_ui/new_tab_page_sync_handler.h"
 
 #include "app/l10n_util.h"
-#include "base/json_writer.h"
+#include "base/callback.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/net/chrome_url_request_context.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "net/base/cookie_monster.h"
@@ -51,8 +51,9 @@ static const GoogleCookieFilter kGAIACookieFilters[] = {
 
 bool IsGoogleGAIACookieInstalled() {
   for (size_t i = 0; i < arraysize(kGAIACookieFilters); ++i) {
-    URLRequestContext* context = Profile::GetDefaultRequestContext();
-    net::CookieStore* store = context->cookie_store();
+    // Since we are running on the UI thread don't call GetURLRequestContext().
+    net::CookieStore* store =
+        Profile::GetDefaultRequestContext()->GetCookieStore();
     GURL url(kGAIACookieFilters[i].url);
     net::CookieOptions options;
     options.set_include_httponly();  // The SID cookie might be httponly.
@@ -83,12 +84,12 @@ NewTabPageSyncHandler::~NewTabPageSyncHandler() {
 // static
 NewTabPageSyncHandler::MessageType
     NewTabPageSyncHandler::FromSyncStatusMessageType(
-        SyncStatusUIHelper::MessageType type) {
+        sync_ui_util::MessageType type) {
   switch (type) {
-    case SyncStatusUIHelper::SYNC_ERROR:
+    case sync_ui_util::SYNC_ERROR:
       return SYNC_ERROR;
-    case SyncStatusUIHelper::PRE_SYNCED:
-    case SyncStatusUIHelper::SYNCED:
+    case sync_ui_util::PRE_SYNCED:
+    case sync_ui_util::SYNCED:
     default:
       return HIDE;
   }
@@ -126,15 +127,8 @@ void NewTabPageSyncHandler::BuildAndSendSyncStatus() {
     return;
   }
 
-  // We show the sync promotion if sync has not been enabled and the user is
-  // logged in to Google Accounts. If the user is not signed in to GA, we
-  // should hide the sync status section entirely.
+  // Don't show sync status if setup is not complete.
   if (!sync_service_->HasSyncSetupCompleted()) {
-    if(!sync_service_->SetupInProgress() && IsGoogleGAIACookieInstalled()) {
-      SendSyncMessageToPage(PROMOTION,
-          WideToUTF8(l10n_util::GetString(IDS_SYNC_NTP_PROMOTION_MESSAGE)),
-          WideToUTF8(l10n_util::GetString(IDS_SYNC_NTP_START_NOW_LINK_LABEL)));
-    }
     return;
   }
 
@@ -144,20 +138,30 @@ void NewTabPageSyncHandler::BuildAndSendSyncStatus() {
   // "Sync error", when we can't authenticate or establish a connection with
   //               the sync server (appropriate information appended to
   //               message).
-  std::wstring status_msg;
-  std::wstring link_text;
-  SyncStatusUIHelper::MessageType type =
-      SyncStatusUIHelper::GetLabels(sync_service_, &status_msg, &link_text);
+  string16 status_msg;
+  string16 link_text;
+  sync_ui_util::MessageType type =
+      sync_ui_util::GetStatusLabels(sync_service_, &status_msg, &link_text);
   SendSyncMessageToPage(FromSyncStatusMessageType(type),
-                        WideToUTF8(status_msg), WideToUTF8(link_text));
+                        UTF16ToUTF8(status_msg), UTF16ToUTF8(link_text));
 }
 
 void NewTabPageSyncHandler::HandleSyncLinkClicked(const Value* value) {
   DCHECK(!waiting_for_initial_page_load_);
   DCHECK(sync_service_);
   if (sync_service_->HasSyncSetupCompleted()) {
-    // User clicked the 'Login again' link to re-authenticate.
-    sync_service_->ShowLoginDialog();
+    if (sync_service_->GetAuthError().state() ==
+        GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS ||
+        sync_service_->GetAuthError().state() ==
+        GoogleServiceAuthError::CAPTCHA_REQUIRED) {
+      sync_service_->ShowLoginDialog();
+      return;
+    }
+    DictionaryValue value;
+    value.SetString(L"syncEnabledMessage",
+        l10n_util::GetStringF(IDS_SYNC_NTP_SYNCED_TO,
+            UTF16ToWide(sync_service_->GetAuthenticatedUsername())));
+    dom_ui_->CallJavascriptFunction(L"syncAlreadyEnabled", value);
   } else {
     // User clicked the 'Start now' link to begin syncing.
     ProfileSyncService::SyncEvent(ProfileSyncService::START_FROM_NTP);
@@ -176,36 +180,21 @@ void NewTabPageSyncHandler::SendSyncMessageToPage(
     MessageType type, std::string msg,
     std::string linktext) {
   DictionaryValue value;
-  std::string msgtype;
   std::wstring user;
-  std::string title =
-      WideToUTF8(l10n_util::GetString(IDS_SYNC_NTP_SYNC_SECTION_TITLE));
+  std::string title;
   std::string linkurl;
-  switch (type) {
-    case HIDE:
-    case PROMOTION:
-      msgtype = "presynced";
-      break;
-    case SYNC_ERROR:
-      title =
-          WideToUTF8(
-              l10n_util::GetString(IDS_SYNC_NTP_SYNC_SECTION_ERROR_TITLE));
-      msgtype = "error";
-      break;
-    default:
-      NOTREACHED();
-      break;
-  }
 
   // If there is no message to show, we should hide the sync section
   // altogether.
   if (type == HIDE || msg.empty()) {
     value.SetBoolean(L"syncsectionisvisible", false);
-  } else {
+  } else {  // type == SYNC_ERROR
+    title = WideToUTF8(
+        l10n_util::GetString(IDS_SYNC_NTP_SYNC_SECTION_ERROR_TITLE));
+
     value.SetBoolean(L"syncsectionisvisible", true);
     value.SetString(L"msg", msg);
     value.SetString(L"title", title);
-    value.SetString(L"msgtype", msgtype);
     if (linktext.empty()) {
       value.SetBoolean(L"linkisvisible", false);
     } else {
@@ -226,5 +215,3 @@ void NewTabPageSyncHandler::SendSyncMessageToPage(
   }
   dom_ui_->CallJavascriptFunction(L"syncMessageChanged", value);
 }
-
-#endif  // defined(BROWSER_SYNC)

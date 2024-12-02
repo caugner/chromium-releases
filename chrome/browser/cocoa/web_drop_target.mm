@@ -5,6 +5,8 @@
 #import "chrome/browser/cocoa/web_drop_target.h"
 
 #include "base/sys_string_conversions.h"
+#include "chrome/browser/bookmarks/bookmark_drag_data.h"
+#include "chrome/browser/bookmarks/bookmark_pasteboard_helper_mac.h"
 #include "chrome/browser/renderer_host/render_view_host.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
 #import "third_party/mozilla/include/NSPasteboard+Utils.h"
@@ -78,6 +80,13 @@ using WebKit::WebDragOperationsMask;
     return NSDragOperationNone;
   }
 
+  // If the tab is showing the boomark manager, send BookmarkDrag events
+  RenderViewHostDelegate::BookmarkDrag* dragDelegate =
+      tabContents_->GetBookmarkDragDelegate();
+  BookmarkDragData dragData;
+  if(dragDelegate && dragData.ReadFromDragClipboard())
+    dragDelegate->OnDragEnter(dragData);
+
   // Fill out a WebDropData from pasteboard.
   WebDropData data;
   [self populateWebDropData:&data fromPasteboard:[info draggingPasteboard]];
@@ -113,7 +122,7 @@ using WebKit::WebDragOperationsMask;
                               view:(NSView*)view {
   DCHECK(currentRVH_);
   if (currentRVH_ != tabContents_->render_view_host())
-    [self draggingEntered:info];
+    [self draggingEntered:info view:view];
 
   if ([self onlyAllowsNavigation]) {
     if ([[info draggingPasteboard] containsURLData])
@@ -132,13 +141,19 @@ using WebKit::WebDragOperationsMask;
       gfx::Point(screenPoint.x, screenPoint.y),
       static_cast<WebDragOperationsMask>(mask));
 
+  // If the tab is showing the boomark manager, send BookmarkDrag events
+  RenderViewHostDelegate::BookmarkDrag* dragDelegate =
+      tabContents_->GetBookmarkDragDelegate();
+  BookmarkDragData dragData;
+  if(dragDelegate && dragData.ReadFromDragClipboard())
+    dragDelegate->OnDragOver(dragData);
   return current_operation_;
 }
 
 - (BOOL)performDragOperation:(id<NSDraggingInfo>)info
                               view:(NSView*)view {
   if (currentRVH_ != tabContents_->render_view_host())
-    [self draggingEntered:info];
+    [self draggingEntered:info view:view];
 
   // Check if we only allow navigation and navigate to a url on the pasteboard.
   if ([self onlyAllowsNavigation]) {
@@ -152,6 +167,13 @@ using WebKit::WebDragOperationsMask;
     }
     return NO;
   }
+
+  // If the tab is showing the boomark manager, send BookmarkDrag events
+  RenderViewHostDelegate::BookmarkDrag* dragDelegate =
+      tabContents_->GetBookmarkDragDelegate();
+  BookmarkDragData dragData;
+  if(dragDelegate && dragData.ReadFromDragClipboard())
+    dragDelegate->OnDrop(dragData);
 
   currentRVH_ = NULL;
 
@@ -168,27 +190,44 @@ using WebKit::WebDragOperationsMask;
 }
 
 // Populate the URL portion of |data|. There may be more than one, but we only
-// handle dropping the first. |data| must not be NULL. Assumes the caller has
-// already called |-containsURLData|.
-- (void)populateURLAndTitle:(WebDropData*)data
+// handle dropping the first. |data| must not be |NULL|. Returns |YES| if URL
+// data was obtained from the pasteboard, |NO| otherwise.
+- (BOOL)populateURLAndTitle:(WebDropData*)data
              fromPasteboard:(NSPasteboard*)pboard {
   DCHECK(data);
-  DCHECK([pboard containsURLData]);
 
-  // The getURLs:andTitles: will already validate URIs so we don't need to
-  // again. However, if the URI is a local file, it won't be prefixed with
-  // file://, which is what GURL expects. We can detect that case because the
-  // resulting URI will have no valid scheme, and we'll assume it's a local
-  // file. The arrays returned are both of NSString's.
+  // Bail out early if there's no URL data.
+  if (![pboard containsURLData])
+    return NO;
+
+  // |-getURLs:andTitles:| will already validate URIs so we don't need to again.
+  // However, if the URI is a local file, it won't be prefixed with file://,
+  // which is what GURL expects. We can detect that case because the resulting
+  // URI will have no valid scheme, and we'll assume it's a local file. The
+  // arrays returned are both of NSString's.
   NSArray* urls = nil;
   NSArray* titles = nil;
   [pboard getURLs:&urls andTitles:&titles];
+  DCHECK_EQ([urls count], [titles count]);
+  // It's possible that no URLs were actually provided!
+  if (![urls count])
+    return NO;
   NSString* urlString = [urls objectAtIndex:0];
-  NSURL* url = [NSURL URLWithString:urlString];
-  if (![url scheme])
-    urlString = [[NSURL fileURLWithPath:urlString] absoluteString];
-  data->url = GURL([urlString UTF8String]);
-  data->url_title = base::SysNSStringToUTF16([titles objectAtIndex:0]);
+  if ([urlString length]) {
+    NSURL* url = [NSURL URLWithString:urlString];
+    if (![url scheme])
+      urlString = [[NSURL fileURLWithPath:urlString] absoluteString];
+    // Check again just to make sure to not assign NULL into a std::string,
+    // which throws an exception.
+    const char* utf8Url = [urlString UTF8String];
+    if (utf8Url) {
+      data->url = GURL(utf8Url);
+      // Extra paranoia check.
+      if ([titles count])
+        data->url_title = base::SysNSStringToUTF16([titles objectAtIndex:0]);
+    }
+  }
+  return YES;
 }
 
 // Given |data|, which should not be nil, fill it in using the contents of the
@@ -199,9 +238,8 @@ using WebKit::WebDragOperationsMask;
   DCHECK(pboard);
   NSArray* types = [pboard types];
 
-  // Get URL.
-  if ([pboard containsURLData])
-    [self populateURLAndTitle:data fromPasteboard:pboard];
+  // Get URL if possible.
+  [self populateURLAndTitle:data fromPasteboard:pboard];
 
   // Get plain text.
   if ([types containsObject:NSStringPboardType]) {
@@ -230,7 +268,7 @@ using WebKit::WebDragOperationsMask;
     }
   }
 
-  // TODO(pinkerton): Get file contents.
+  // TODO(pinkerton): Get file contents. http://crbug.com/34661
 }
 
 @end

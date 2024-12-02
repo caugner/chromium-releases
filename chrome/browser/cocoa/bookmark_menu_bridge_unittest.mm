@@ -4,6 +4,7 @@
 
 #import <AppKit/AppKit.h>
 #import "base/scoped_nsobject.h"
+#include "base/string_util.h"
 #include "chrome/app/chrome_dll_resource.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/cocoa/bookmark_menu_bridge.h"
@@ -45,6 +46,9 @@ class BookmarkMenuBridgeTest : public PlatformTest {
     bridge->ClearBookmarkMenu(menu);
   }
 
+  void InvalidateMenu()  { bridge_->InvalidateMenu(); }
+  bool menu_is_valid()  { return bridge_->menuIsValid_; }
+
   void AddNodeToMenu(BookmarkMenuBridge* bridge, const BookmarkNode* root,
                      NSMenu* menu) {
     bridge->AddNodeToMenu(root, menu);
@@ -68,6 +72,28 @@ class BookmarkMenuBridgeTest : public PlatformTest {
   scoped_ptr<TestBookmarkMenuBridge> bridge_;
 };
 
+TEST_F(BookmarkMenuBridgeTest, TestBookmarkMenuAutoSeparator) {
+  BookmarkModel* model = bridge_->GetBookmarkModel();
+  bridge_->Loaded(model);
+  NSMenu* menu = bridge_->menu_.get();
+  bridge_->UpdateMenu(menu);
+  // The bare menu after loading has a separator and an "Other Bookmarks"
+  // submenu.
+  EXPECT_EQ(2, [menu numberOfItems]);
+  // Add a bookmark and reload and there should be 4 items: the previous
+  // menu contents plus a new separator and the new bookmark.
+  const BookmarkNode* parent = model->GetBookmarkBarNode();
+  const char* url = "http://www.zim-bop-a-dee.com/";
+  std::wstring title(L"Bookmark");
+  model->AddURL(parent, 0,  title, GURL(url));
+  bridge_->UpdateMenu(menu);
+  EXPECT_EQ(4, [menu numberOfItems]);
+  // Remove the new bookmark and reload and we should have 2 items again
+  // because the separator should have been removed as well.
+  model->Remove(parent, 0);
+  bridge_->UpdateMenu(menu);
+  EXPECT_EQ(2, [menu numberOfItems]);
+}
 
 // Test that ClearBookmarkMenu() removes all bookmark menus.
 TEST_F(BookmarkMenuBridgeTest, TestClearBookmarkMenu) {
@@ -91,6 +117,34 @@ TEST_F(BookmarkMenuBridgeTest, TestClearBookmarkMenu) {
   }
 }
 
+// Test invalidation
+TEST_F(BookmarkMenuBridgeTest, TestInvalidation) {
+  BookmarkModel* model = bridge_->GetBookmarkModel();
+  bridge_->Loaded(model);
+
+  EXPECT_FALSE(menu_is_valid());
+  bridge_->UpdateMenu(bridge_->menu_);
+  EXPECT_TRUE(menu_is_valid());
+
+  InvalidateMenu();
+  EXPECT_FALSE(menu_is_valid());
+  InvalidateMenu();
+  EXPECT_FALSE(menu_is_valid());
+  bridge_->UpdateMenu(bridge_->menu_);
+  EXPECT_TRUE(menu_is_valid());
+  bridge_->UpdateMenu(bridge_->menu_);
+  EXPECT_TRUE(menu_is_valid());
+
+  const BookmarkNode* parent = model->GetBookmarkBarNode();
+  const char* url = "http://www.zim-bop-a-dee.com/";
+  std::wstring title(L"Bookmark");
+  model->AddURL(parent, 0,  title, GURL(url));
+
+  EXPECT_FALSE(menu_is_valid());
+  bridge_->UpdateMenu(bridge_->menu_);
+  EXPECT_TRUE(menu_is_valid());
+}
+
 // Test that AddNodeToMenu() properly adds bookmark nodes as menus,
 // including the recursive case.
 TEST_F(BookmarkMenuBridgeTest, TestAddNodeToMenu) {
@@ -111,12 +165,14 @@ TEST_F(BookmarkMenuBridgeTest, TestAddNodeToMenu) {
   // Set their titles to be the same as the URLs
   const BookmarkNode* node = NULL;
   model->AddURL(root, 0, ASCIIToWide(short_url), GURL(short_url));
+  bridge_->UpdateMenu(menu);
   int prev_count = [menu numberOfItems] - 1; // "extras" added at this point
   node = model->AddGroup(root, 1, empty);
   model->AddURL(root, 2, ASCIIToWide(long_url), GURL(long_url));
 
   // And the submenu fo the middle one
   model->AddURL(node, 0, empty, GURL("http://sub"));
+  bridge_->UpdateMenu(menu);
 
   EXPECT_EQ((NSInteger)(prev_count+3), [menu numberOfItems]);
 
@@ -188,6 +244,7 @@ TEST_F(BookmarkMenuBridgeTest, TestGetMenuItemForNode) {
   EXPECT_EQ(2, root->GetChildCount());
   model->Remove(root, 0);
   EXPECT_EQ(1, root->GetChildCount());
+  bridge_->UpdateMenu(menu);
   EXPECT_FALSE(MenuItemForNode(bridge_.get(), removed_node));
   EXPECT_TRUE(MenuItemForNode(bridge_.get(), root->GetChild(0)));
 
@@ -208,9 +265,12 @@ TEST_F(BookmarkMenuBridgeTest, TestAddNodeToOther) {
   const char* short_url = "http://foo/";
   model->AddURL(root, 0, ASCIIToWide(short_url), GURL(short_url));
 
+  bridge_->UpdateMenu(menu);
+  ASSERT_GT([menu numberOfItems], 0);
   NSMenuItem* other = [menu itemAtIndex:([menu numberOfItems]-1)];
   EXPECT_TRUE(other);
   EXPECT_TRUE([other hasSubmenu]);
+  ASSERT_GT([[other submenu] numberOfItems], 0);
   EXPECT_TRUE([[[[other submenu] itemAtIndex:0] title] isEqual:@"http://foo/"]);
 }
 
@@ -225,6 +285,7 @@ TEST_F(BookmarkMenuBridgeTest, TestFavIconLoading) {
   const BookmarkNode* node =
       model->AddURL(root, 0, ASCIIToWide("Test Item"),
                     GURL("http://favicon-test"));
+  bridge_->UpdateMenu(menu);
   NSMenuItem* item = [menu itemWithTitle:@"Test Item"];
   EXPECT_TRUE([item image]);
   [item setImage:nil];
@@ -241,6 +302,7 @@ TEST_F(BookmarkMenuBridgeTest, TestChangeTitle) {
   const BookmarkNode* node =
       model->AddURL(root, 0, L"Test Item",
                     GURL("http://title-test"));
+  bridge_->UpdateMenu(menu);
   NSMenuItem* item = [menu itemWithTitle:@"Test Item"];
   EXPECT_TRUE([item image]);
 

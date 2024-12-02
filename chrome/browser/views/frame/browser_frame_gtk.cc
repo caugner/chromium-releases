@@ -1,22 +1,77 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/views/frame/browser_frame_gtk.h"
 
 #include "base/logging.h"
+#include "chrome/browser/browser_theme_provider.h"
 #include "chrome/browser/profile.h"
+#include "chrome/browser/status_bubble.h"
+#include "chrome/browser/views/frame/app_panel_browser_frame_view.h"
+#include "chrome/browser/views/frame/browser_extender.h"
 #include "chrome/browser/views/frame/browser_root_view.h"
 #include "chrome/browser/views/frame/browser_view.h"
 #include "chrome/browser/views/frame/opaque_browser_frame_view.h"
+#include "gfx/font.h"
 #include "views/widget/root_view.h"
+#include "views/window/hit_test.h"
 
+namespace {
+
+// BrowserNonClientFrameView implementation for popups. We let the window
+// manager implementation render the decorations for popups, so this draws
+// nothing.
+class PopupNonClientFrameView : public BrowserNonClientFrameView {
+ public:
+  PopupNonClientFrameView() {
+  }
+
+  // NonClientFrameView:
+  virtual gfx::Rect GetBoundsForClientView() const {
+    return gfx::Rect(0, 0, width(), height());
+  }
+  virtual bool AlwaysUseCustomFrame() const { return false; }
+  virtual bool AlwaysUseNativeFrame() const { return true; }
+  virtual gfx::Rect GetWindowBoundsForClientBounds(
+      const gfx::Rect& client_bounds) const {
+    return client_bounds;
+  }
+  virtual int NonClientHitTest(const gfx::Point& point) {
+    return bounds().Contains(point) ? HTCLIENT : HTNOWHERE;
+  }
+  virtual void GetWindowMask(const gfx::Size& size,
+                             gfx::Path* window_mask) {}
+  virtual void EnableClose(bool enable) {}
+  virtual void ResetWindowControls() {}
+
+  // BrowserNonClientFrameView:
+  virtual gfx::Rect GetBoundsForTabStrip(BaseTabStrip* tabstrip) const {
+    return gfx::Rect(0, 0, width(), tabstrip->GetPreferredHeight());
+  }
+  virtual void UpdateThrobber(bool running) {}
+  virtual void PaintTabStripShadow(gfx::Canvas* canvas) {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(PopupNonClientFrameView);
+};
+
+}
+
+#if !defined(OS_CHROMEOS)
 // static (Factory method.)
 BrowserFrame* BrowserFrame::Create(BrowserView* browser_view,
                                    Profile* profile) {
   BrowserFrameGtk* frame = new BrowserFrameGtk(browser_view, profile);
   frame->Init();
   return frame;
+}
+#endif
+
+// static
+const gfx::Font& BrowserFrame::GetTitleFont() {
+  static gfx::Font *title_font = new gfx::Font();
+  return *title_font;
 }
 
 BrowserFrameGtk::BrowserFrameGtk(BrowserView* browser_view, Profile* profile)
@@ -26,23 +81,28 @@ BrowserFrameGtk::BrowserFrameGtk(BrowserView* browser_view, Profile* profile)
       root_view_(NULL),
       profile_(profile) {
   browser_view_->set_frame(this);
-  browser_frame_view_ = new OpaqueBrowserFrameView(this, browser_view_);
-  GetNonClientView()->SetFrameView(browser_frame_view_);
-  // Don't focus anything on creation, selecting a tab will set the focus.
 }
 
 BrowserFrameGtk::~BrowserFrameGtk() {
 }
 
 void BrowserFrameGtk::Init() {
+  if (browser_frame_view_ == NULL) {
+    if (browser_view_->browser()->type() == Browser::TYPE_POPUP)
+      browser_frame_view_ = new PopupNonClientFrameView();
+    else
+      browser_frame_view_ = new OpaqueBrowserFrameView(this, browser_view_);
+  }
+  GetNonClientView()->SetFrameView(browser_frame_view_);
   WindowGtk::Init(NULL, gfx::Rect());
+  // Don't focus anything on creation, selecting a tab will set the focus.
 }
 
 views::Window* BrowserFrameGtk::GetWindow() {
   return this;
 }
 
-void BrowserFrameGtk::TabStripCreated(TabStripWrapper* tabstrip) {
+void BrowserFrameGtk::TabStripCreated(BaseTabStrip* tabstrip) {
 }
 
 int BrowserFrameGtk::GetMinimizeButtonOffset() const {
@@ -50,8 +110,7 @@ int BrowserFrameGtk::GetMinimizeButtonOffset() const {
   return 0;
 }
 
-gfx::Rect BrowserFrameGtk::GetBoundsForTabStrip(
-    TabStripWrapper* tabstrip) const {
+gfx::Rect BrowserFrameGtk::GetBoundsForTabStrip(BaseTabStrip* tabstrip) const {
   return browser_frame_view_->GetBoundsForTabStrip(tabstrip);
 }
 
@@ -73,6 +132,13 @@ bool BrowserFrameGtk::AlwaysUseNativeFrame() const {
   return false;
 }
 
+views::View* BrowserFrameGtk::GetFrameView() const {
+  return browser_frame_view_;
+}
+
+void BrowserFrameGtk::PaintTabStripShadow(gfx::Canvas* canvas) {
+}
+
 ThemeProvider* BrowserFrameGtk::GetThemeProvider() const {
   return profile_->GetThemeProvider();
 }
@@ -92,7 +158,32 @@ void BrowserFrameGtk::IsActiveChanged() {
   views::WidgetGtk::IsActiveChanged();
 }
 
+void BrowserFrameGtk::SetInitialFocus() {
+  browser_view_->RestoreFocus();
+}
+
 bool BrowserFrameGtk::GetAccelerator(int cmd_id,
-                                     views::Accelerator* accelerator) {
+                                     menus::Accelerator* accelerator) {
   return browser_view_->GetAccelerator(cmd_id, accelerator);
+}
+
+gboolean BrowserFrameGtk::OnWindowStateEvent(GtkWidget* widget,
+                                             GdkEventWindowState* event) {
+  bool was_full_screen = IsFullscreen();
+  gboolean result = views::WindowGtk::OnWindowStateEvent(widget, event);
+  if ((!IsVisible() || IsMinimized()) && browser_view_->GetStatusBubble()) {
+    // The window is effectively hidden. We have to hide the status bubble as
+    // unlike windows gtk has no notion of child windows that are hidden along
+    // with the parent.
+    browser_view_->GetStatusBubble()->Hide();
+  }
+  if (was_full_screen != IsFullscreen())
+    browser_view_->FullScreenStateChanged();
+  return result;
+}
+
+gboolean BrowserFrameGtk::OnConfigureEvent(GtkWidget* widget,
+                                           GdkEventConfigure* event) {
+  browser_view_->WindowMoved();
+  return views::WindowGtk::OnConfigureEvent(widget, event);
 }

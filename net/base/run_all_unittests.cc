@@ -27,8 +27,13 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include "base/histogram.h"
 #include "net/base/net_test_suite.h"
 
 int main(int argc, char** argv) {
-  return NetTestSuite(argc, argv).Run();
+  // Record histograms, so we can get histograms data in tests.
+  StatisticsRecorder recorder;
+  NetTestSuite test_suite(argc, argv);
+  // TODO(phajdan.jr): Enforce test isolation, http://crbug.com/12710.
+  return test_suite.Run();
 }

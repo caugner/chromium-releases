@@ -16,7 +16,7 @@ class JSONStringValueSerializer : public ValueSerializer {
   // json_string is the string that will be source of the deserialization
   // or the destination of the serialization.  The caller of the constructor
   // retains ownership of the string.
-  JSONStringValueSerializer(std::string* json_string)
+  explicit JSONStringValueSerializer(std::string* json_string)
       : json_string_(json_string),
         initialized_with_const_string_(false),
         pretty_print_(false),
@@ -25,7 +25,7 @@ class JSONStringValueSerializer : public ValueSerializer {
 
   // This version allows initialization with a const string reference for
   // deserialization only.
-  JSONStringValueSerializer(const std::string& json_string)
+  explicit JSONStringValueSerializer(const std::string& json_string)
       : json_string_(&const_cast<std::string&>(json_string)),
         initialized_with_const_string_(true),
         pretty_print_(false),
@@ -41,9 +41,12 @@ class JSONStringValueSerializer : public ValueSerializer {
 
   // Attempt to deserialize the data structure encoded in the string passed
   // in to the constructor into a structure of Value objects.  If the return
-  // value is NULL and |error_message| is non-null, |error_message| will contain
-  // a string describing the error.
-  Value* Deserialize(std::string* error_message);
+  // value is NULL, and if |error_code| is non-null, |error_code| will
+  // contain an integer error code (either JsonFileError or JsonParseError).
+  // If |error_message| is non-null, it will be filled in with a formatted
+  // error message including the location of the error if appropriate.
+  // The caller takes ownership of the returned value.
+  Value* Deserialize(int* error_code, std::string* error_message);
 
   void set_pretty_print(bool new_value) { pretty_print_ = new_value; }
   bool pretty_print() { return pretty_print_; }
@@ -85,13 +88,38 @@ class JSONFileValueSerializer : public ValueSerializer {
 
   // Attempt to deserialize the data structure encoded in the file passed
   // in to the constructor into a structure of Value objects.  If the return
-  // value is NULL, and if |error_message| is non-null, |error_message| will
-  // contain a string describing the error. The caller takes ownership of the
-  // returned value.
-  Value* Deserialize(std::string* error_message);
+  // value is NULL, and if |error_code| is non-null, |error_code| will
+  // contain an integer error code (either JsonFileError or JsonParseError).
+  // If |error_message| is non-null, it will be filled in with a formatted
+  // error message including the location of the error if appropriate.
+  // The caller takes ownership of the returned value.
+  Value* Deserialize(int* error_code, std::string* error_message);
+
+  // This enum is designed to safely overlap with JSONReader::JsonParseError.
+  enum JsonFileError {
+    JSON_NO_ERROR = 0,
+    JSON_ACCESS_DENIED = 1000,
+    JSON_CANNOT_READ_FILE,
+    JSON_FILE_LOCKED,
+    JSON_NO_SUCH_FILE
+  };
+
+  // File-specific error messages that can be returned.
+  static const char* kAccessDenied;
+  static const char* kCannotReadFile;
+  static const char* kFileLocked;
+  static const char* kNoSuchFile;
+
+  // Convert an error code into an error message.  |error_code| is assumed to
+  // be a JsonFileError.
+  static const char* GetErrorMessageForCode(int error_code);
 
  private:
   FilePath json_file_path_;
+
+  // A wrapper for file_util::ReadFileToString which returns a non-zero
+  // JsonFileError if there were file errors.
+  int ReadFileToString(std::string* json_string);
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(JSONFileValueSerializer);
 };

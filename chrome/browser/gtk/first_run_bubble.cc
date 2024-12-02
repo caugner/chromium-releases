@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,17 +6,18 @@
 
 #include <gtk/gtk.h>
 
-#include "app/gfx/gtk_util.h"
+#include "app/gtk_util.h"
 #include "app/l10n_util.h"
+#include "base/i18n/rtl.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
 #include "chrome/browser/options_window.h"
 #include "chrome/browser/search_engines/template_url_model.h"
-#include "chrome/common/gtk_util.h"
 #include "chrome/common/notification_service.h"
+#include "gfx/gtk_util.h"
 #include "grit/chromium_strings.h"
-#include "grit/locale_settings.h"
 #include "grit/generated_resources.h"
-#include "grit/google_chrome_strings.h"
+#include "grit/locale_settings.h"
 
 namespace {
 // Markup for the text of the Omnibox search label
@@ -24,6 +25,9 @@ const char kSearchLabelMarkup[] = "<big><b>%s</b></big>";
 
 // Padding for the buttons on first run bubble.
 const int kButtonPadding = 4;
+
+// Padding between content and edge of info bubble.
+const int kContentBorder = 7;
 
 string16 GetDefaultSearchEngineName(Profile* profile) {
   if (!profile) {
@@ -41,10 +45,10 @@ string16 GetDefaultSearchEngineName(Profile* profile) {
 
 // static
 void FirstRunBubble::Show(Profile* profile,
-                          GtkWindow* parent,
+                          GtkWidget* anchor,
                           const gfx::Rect& rect,
-                          bool use_OEM_bubble) {
-  new FirstRunBubble(profile, parent, rect);
+                          FirstRun::BubbleType bubble_type) {
+  new FirstRunBubble(profile, anchor, rect);
 }
 
 void FirstRunBubble::InfoBubbleClosing(InfoBubbleGtk* info_bubble,
@@ -71,11 +75,11 @@ void FirstRunBubble::Observe(NotificationType type,
 }
 
 FirstRunBubble::FirstRunBubble(Profile* profile,
-                               GtkWindow* parent,
+                               GtkWidget* anchor,
                                const gfx::Rect& rect)
     : profile_(profile),
       theme_provider_(GtkThemeProvider::GetFrom(profile_)),
-      parent_(parent),
+      anchor_(anchor),
       content_(NULL),
       bubble_(NULL) {
   GtkWidget* label1 = gtk_label_new(NULL);
@@ -109,12 +113,13 @@ FirstRunBubble::FirstRunBubble(Profile* profile,
       l10n_util::GetStringUTF8(IDS_FR_BUBBLE_CHANGE).c_str());
 
   content_ = gtk_vbox_new(FALSE, 5);
+  gtk_container_set_border_width(GTK_CONTAINER(content_), kContentBorder);
 
-  // We compute the widget's size using the parent window -- |content_| is
+  // We compute the widget's size using the anchor widget -- |content_| is
   // unrealized at this point.
   int width = -1, height = -1;
   gtk_util::GetWidgetSizeFromResources(
-      GTK_WIDGET(parent_),
+      anchor_,
       IDS_FIRSTRUNBUBBLE_DIALOG_WIDTH_CHARS,
       IDS_FIRSTRUNBUBBLE_DIALOG_HEIGHT_LINES,
       &width, &height);
@@ -143,9 +148,16 @@ FirstRunBubble::FirstRunBubble(Profile* profile,
   // We want the focus to start on the keep entry, not on the change button.
   gtk_widget_grab_focus(keep_button);
 
-  bubble_ = InfoBubbleGtk::Show(parent_,
-                                rect,
+  InfoBubbleGtk::ArrowLocationGtk arrow_location =
+      !base::i18n::IsRTL() ?
+      InfoBubbleGtk::ARROW_LOCATION_TOP_LEFT :
+      InfoBubbleGtk::ARROW_LOCATION_TOP_RIGHT;
+  bubble_ = InfoBubbleGtk::Show(anchor_,
+                                &rect,
                                 content_,
+                                arrow_location,
+                                true,  // match_system_theme
+                                true,  // grab_input
                                 theme_provider_,
                                 this);  // delegate
   if (!bubble_) {

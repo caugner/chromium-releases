@@ -4,15 +4,15 @@
 
 #include "printing/image.h"
 
-#include "app/gfx/codec/png_codec.h"
 #include "base/file_util.h"
-#include "base/gfx/rect.h"
 #include "base/md5.h"
 #include "base/string_util.h"
+#include "gfx/codec/png_codec.h"
+#include "gfx/rect.h"
 #include "skia/ext/platform_device.h"
 
 #if defined(OS_WIN)
-#include "app/gfx/gdi_util.h"  // EMF support
+#include "gfx/gdi_util.h"  // EMF support
 #elif defined(OS_MACOSX)
 #include <ApplicationServices/ApplicationServices.h>
 #include "base/scoped_cftyperef.h"
@@ -53,7 +53,7 @@ class DisableFontSmoothing {
  private:
   bool enable_again_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(DisableFontSmoothing);
+  DISALLOW_COPY_AND_ASSIGN(DisableFontSmoothing);
 };
 
 }  // namespace

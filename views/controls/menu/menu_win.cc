@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,16 @@
 
 #include <string>
 
-#include "app/gfx/canvas.h"
-#include "app/gfx/font.h"
 #include "app/l10n_util.h"
 #include "app/l10n_util_win.h"
 #include "app/win/window_impl.h"
-#include "base/gfx/rect.h"
 #include "base/keyboard_codes.h"
 #include "base/logging.h"
 #include "base/stl_util-inl.h"
 #include "base/string_util.h"
+#include "gfx/canvas.h"
+#include "gfx/font.h"
+#include "gfx/rect.h"
 #include "views/accelerator.h"
 
 namespace views {
@@ -96,7 +96,7 @@ class MenuHostWindow : public app::WindowImpl {
   void OnRButtonUp(UINT w_param, const CPoint& loc) {
     int id;
     if (menu_->delegate() && FindMenuIDByLocation(menu_, loc, &id))
-      menu_->delegate()->ShowContextMenu(menu_, id, loc.x, loc.y, true);
+      menu_->delegate()->ShowContextMenu(menu_, id, gfx::Point(loc), true);
   }
 
   void OnMeasureItem(WPARAM w_param, MEASUREITEMSTRUCT* lpmis) {

@@ -1,3 +1,7 @@
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
 #define XOPEN_SOURCE 500
 #include <algorithm>
 #include <elf.h>
@@ -16,6 +20,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include "allocator.h"
 #include "debug.h"
 #include "library.h"
 #include "sandbox_impl.h"
@@ -76,6 +81,24 @@ namespace playground {
 char* Library::__kernel_vsyscall;
 char* Library::__kernel_sigreturn;
 char* Library::__kernel_rt_sigreturn;
+
+Library::~Library() {
+  if (image_size_) {
+    // We no longer need access to a full mapping of the underlying library
+    // file. Move the temporarily extended mapping back to where we originally
+    // found. Make sure to preserve any changes that we might have made since.
+    Sandbox::SysCalls sys;
+    sys.mprotect(image_, 4096, PROT_READ | PROT_WRITE | PROT_EXEC);
+    if (memcmp(image_, memory_ranges_.rbegin()->second.start, 4096)) {
+      // Only copy data, if we made any changes in this data. Otherwise there
+      // is no need to create another modified COW mapping.
+      memcpy(image_, memory_ranges_.rbegin()->second.start, 4096);
+    }
+    sys.mprotect(image_, 4096, PROT_READ | PROT_EXEC);
+    sys.mremap(image_, image_size_, 4096, MREMAP_MAYMOVE | MREMAP_FIXED,
+               memory_ranges_.rbegin()->second.start);
+  }
+}
 
 char* Library::getBytes(char* dst, const char* src, ssize_t len) {
   // Some kernels don't allow accessing the VDSO from write()
@@ -148,30 +171,9 @@ char *Library::get(Elf_Addr offset, char *buf, size_t len) {
   long size = reinterpret_cast<char *>(iter->second.stop) -
               reinterpret_cast<char *>(iter->second.start);
   if (offset > size - len) {
-    if (!maps_ && memory_ranges_.size() == 1 &&
-        !memory_ranges_.begin()->first && !isVDSO_) {
-      // We are in the child and have exactly one mapping covering the whole
-      // library. We are trying to read data past the end of what is currently
-      // mapped. Check if we can expand the memory mapping to recover the
-      // needed data
-      Sandbox::SysCalls sys;
-      long new_size = (offset + len + 4095) & ~4095;
-      void *new_start = sys.mremap(iter->second.start, size, new_size,
-                                   MREMAP_MAYMOVE);
-      if (new_start != MAP_FAILED) {
-        memory_ranges_.clear();
-        memory_ranges_.insert(std::make_pair(0,
-          Range(new_start, reinterpret_cast<void *>(
-                    reinterpret_cast<char *>(new_start) + new_size),
-                PROT_READ)));
-        iter = memory_ranges_.begin();
-        goto ok;
-      }
-    }
     memset(buf, 0, len);
     return NULL;
   }
-ok:
   char *src = reinterpret_cast<char *>(iter->second.start) + offset;
   memset(buf, 0, len);
   if (!getBytes(buf, src, len)) {
@@ -180,7 +182,7 @@ ok:
   return buf;
 }
 
-std::string Library::get(Elf_Addr offset) {
+Library::string Library::get(Elf_Addr offset) {
   if (!valid_) {
     return "";
   }
@@ -189,31 +191,6 @@ std::string Library::get(Elf_Addr offset) {
     return "";
   }
   offset -= iter->first;
-  size_t size = reinterpret_cast<char *>(iter->second.stop) -
-                reinterpret_cast<char *>(iter->second.start);
-  if (offset > size - 4096) {
-    if (!maps_ && memory_ranges_.size() == 1 &&
-        !memory_ranges_.begin()->first && !isVDSO_) {
-      // We are in the child and have exactly one mapping covering the whole
-      // library. We are trying to read data past the end of what is currently
-      // mapped. Check if we can expand the memory mapping to recover the
-      // needed data. We assume that strings are never longer than 4kB.
-      Sandbox::SysCalls sys;
-      long new_size = (offset + 4096 + 4095) & ~4095;
-      void *new_start = sys.mremap(iter->second.start, size, new_size,
-                                   MREMAP_MAYMOVE);
-      if (new_start != MAP_FAILED) {
-        memory_ranges_.clear();
-        memory_ranges_.insert(std::make_pair(0,
-          Range(new_start, reinterpret_cast<void *>(
-                    reinterpret_cast<char *>(new_start) + new_size),
-                PROT_READ)));
-        iter = memory_ranges_.begin();
-        goto ok;
-      }
-    }
-  }
-ok:
   const char *start = reinterpret_cast<char *>(iter->second.start) + offset;
   const char *stop  = reinterpret_cast<char *>(iter->second.stop) + offset;
   char buf[4096]    = { 0 };
@@ -224,7 +201,7 @@ ok:
   while (*stop) {
     ++stop;
   }
-  std::string s = stop > start ? std::string(start, stop - start) : "";
+  string s = stop > start ? string(start, stop - start) : "";
   return s;
 }
 
@@ -233,18 +210,92 @@ char *Library::getOriginal(Elf_Addr offset, char *buf, size_t len) {
     memset(buf, 0, len);
     return NULL;
   }
-  if (maps_) {
-    return maps_->forwardGetRequest(this, offset, buf, len);
+  Sandbox::SysCalls sys;
+  if (!image_ && !isVDSO_ && !memory_ranges_.empty() &&
+      memory_ranges_.rbegin()->first == 0) {
+    // Extend the mapping of the very first page of the underlying library
+    // file. This way, we can read the original file contents of the entire
+    // library.
+    // We have to be careful, because doing so temporarily removes the first
+    // 4096 bytes of the library from memory. And we don't want to accidentally
+    // unmap code that we are executing. So, only use functions that can be
+    // inlined.
+    void* start = memory_ranges_.rbegin()->second.start;
+    image_size_ = memory_ranges_.begin()->first +
+      (reinterpret_cast<char *>(memory_ranges_.begin()->second.stop) -
+       reinterpret_cast<char *>(memory_ranges_.begin()->second.start));
+    if (image_size_ < 8192) {
+      // It is possible to create a library that is only a single page in
+      // size. In that case, we have to make sure that we artificially map
+      // one extra page past the end of it, as our code relies on mremap()
+      // actually moving the mapping.
+      image_size_ = 8192;
+    }
+    image_ = reinterpret_cast<char *>(sys.mremap(start, 4096, image_size_,
+                                                 MREMAP_MAYMOVE));
+    if (image_size_ == 8192 && image_ == start) {
+      // We really mean it, when we say we want the memory to be moved.
+      image_ = reinterpret_cast<char *>(sys.mremap(start, 4096, image_size_,
+                                                   MREMAP_MAYMOVE));
+      sys.munmap(reinterpret_cast<char *>(start) + 4096, 4096);
+    }
+    if (image_ == MAP_FAILED) {
+      image_ = NULL;
+    } else {
+      sys.MMAP(start, 4096, PROT_READ | PROT_WRITE | PROT_EXEC,
+               MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+      for (int i = 4096 / sizeof(long); --i;
+           reinterpret_cast<long *>(start)[i] =
+             reinterpret_cast<long *>(image_)[i]);
+    }
   }
-  return get(offset, buf, len);
+
+  if (image_) {
+    if (offset + len > image_size_) {
+      // It is quite likely that we initially did not map the entire file as
+      // we did not know how large it is. So, if necessary, try to extend the
+      // mapping.
+      size_t new_size = (offset + len + 4095) & ~4095;
+      char* tmp =
+        reinterpret_cast<char *>(sys.mremap(image_, image_size_, new_size,
+                                            MREMAP_MAYMOVE));
+      if (tmp != MAP_FAILED) {
+        image_      = tmp;
+        image_size_ = new_size;
+      }
+    }
+    if (buf && offset + len <= image_size_) {
+      return reinterpret_cast<char *>(memcpy(buf, image_ + offset, len));
+    }
+    return NULL;
+  }
+  return buf ? get(offset, buf, len) : NULL;
 }
 
-std::string Library::getOriginal(Elf_Addr offset) {
+Library::string Library::getOriginal(Elf_Addr offset) {
   if (!valid_) {
     return "";
   }
-  if (maps_) {
-    return maps_->forwardGetRequest(this, offset);
+  // Make sure we actually have a mapping that we can access. If the string
+  // is located at the end of the image, we might not yet have extended the
+  // mapping sufficiently.
+  if (!image_ || image_size_ <= offset) {
+    getOriginal(offset, NULL, 1);
+  }
+
+  if (image_) {
+    if (offset < image_size_) {
+      char* start = image_ + offset;
+      char* stop  = start;
+      while (stop < image_ + image_size_ && *stop) {
+        ++stop;
+        if (stop >= image_ + image_size_) {
+          getOriginal(stop - image_, NULL, 1);
+        }
+      }
+      return string(start, stop - start);
+    }
+    return "";
   }
   return get(offset);
 }
@@ -256,7 +307,7 @@ const Elf_Ehdr* Library::getEhdr() {
   return &ehdr_;
 }
 
-const Elf_Shdr* Library::getSection(const std::string& section) {
+const Elf_Shdr* Library::getSection(const string& section) {
   if (!valid_) {
     return NULL;
   }
@@ -267,7 +318,7 @@ const Elf_Shdr* Library::getSection(const std::string& section) {
   return &iter->second.second;
 }
 
-const int Library::getSectionIndex(const std::string& section) {
+int Library::getSectionIndex(const string& section) {
   if (!valid_) {
     return -1;
   }
@@ -276,22 +327,6 @@ const int Library::getSectionIndex(const std::string& section) {
     return -1;
   }
   return iter->second.first;
-}
-
-void **Library::getRelocation(const std::string& symbol) {
-  PltTable::const_iterator iter = plt_entries_.find(symbol);
-  if (iter == plt_entries_.end()) {
-    return NULL;
-  }
-  return reinterpret_cast<void **>(asr_offset_ + iter->second);
-}
-
-void *Library::getSymbol(const std::string& symbol) {
-  SymbolTable::const_iterator iter = symbols_.find(symbol);
-  if (iter == symbols_.end() || !iter->second.st_value) {
-    return NULL;
-  }
-  return asr_offset_ + iter->second.st_value;
 }
 
 void Library::makeWritable(bool state) const {
@@ -351,7 +386,7 @@ char* Library::getScratchSpace(const Maps* maps, char* near, int needed,
 void Library::patchSystemCallsInFunction(const Maps* maps, char *start,
                                          char *end, char** extraSpace,
                                          int* extraLength) {
-  std::set<char *> branch_targets;
+  std::set<char *, std::less<char *>, SystemAllocator<char *> > branch_targets;
   for (char *ptr = start; ptr < end; ) {
     unsigned short insn = next_inst((const char **)&ptr, __WORDSIZE == 64);
     char *target;
@@ -381,7 +416,12 @@ void Library::patchSystemCallsInFunction(const Maps* maps, char *start,
     code[codeIdx].insn = next_inst((const char **)&ptr, __WORDSIZE == 64,
                                    0, 0, &mod_rm, 0, 0);
     code[codeIdx].len = ptr - code[codeIdx].addr;
-    code[codeIdx].is_ip_relative = mod_rm && (*mod_rm & 0xC7) == 0x5;
+    code[codeIdx].is_ip_relative =
+      #if defined(__x86_64__)
+        mod_rm && (*mod_rm & 0xC7) == 0x5;
+      #else
+        false;
+      #endif
 
     // Whenever we find a system call, we patch it with a jump to out-of-line
     // code that redirects to our system call wrapper.
@@ -458,6 +498,7 @@ void Library::patchSystemCallsInFunction(const Maps* maps, char *start,
       #endif
       char *next = ptr;
       for (int i = codeIdx;
+           next < end &&
            (i = (i + 1) % (sizeof(code) / sizeof(struct Code))) != startIdx;
            ) {
         std::set<char *>::const_iterator iter =
@@ -481,12 +522,21 @@ void Library::patchSystemCallsInFunction(const Maps* maps, char *start,
         }
       }
       // We now know, how many instructions neighboring the system call we
-      // can safely overwrite. We need five bytes to insert a JMP/CALL and a
-      // 32bit address. We then jump to a code fragment that safely forwards
-      // to our system call wrapper. On x86-64, this is complicated by
-      // the fact that the API allows up to 128 bytes of red-zones below the
-      // current stack pointer. So, we cannot write to the stack until we
-      // have adjusted the stack pointer.
+      // can safely overwrite. On x86-32 we need six bytes, and on x86-64
+      // We need five bytes to insert a JMPQ and a 32bit address. We then
+      // jump to a code fragment that safely forwards to our system call
+      // wrapper.
+      // On x86-64, this is complicated by the fact that the API allows up
+      // to 128 bytes of red-zones below the current stack pointer. So, we
+      // cannot write to the stack until we have adjusted the stack
+      // pointer.
+      // On both x86-32 and x86-64 we take care to leave the stack unchanged
+      // while we are executing the preamble and postamble. This allows us
+      // to treat instructions that reference %esp/%rsp as safe for
+      // relocation.
+      // In particular, this means that on x86-32 we cannot use CALL, but
+      // have to use a PUSH/RET combination to change the instruction pointer.
+      // On x86-64, we can instead use a 32bit JMPQ.
       //
       // .. .. .. .. ; any leading instructions copied from original code
       // 48 81 EC 80 00 00 00        SUB  $0x80, %rsp
@@ -514,9 +564,10 @@ void Library::patchSystemCallsInFunction(const Maps* maps, char *start,
       // 68 .. .. .. ..              PUSH $syscallWrapper
       // C3                          RET
       // .. .. .. .. ; any trailing instructions copied from original code
+      // 68 .. .. .. ..              PUSH return_addr
       // C3                          RET
       //
-      // Total: 12 bytes + any bytes that were copied
+      // Total: 17 bytes + any bytes that were copied
       //
       // For indirect jumps from the VDSO to the VSyscall page, we instead
       // replace the following code (this is only necessary on x86-64). This
@@ -540,7 +591,7 @@ void Library::patchSystemCallsInFunction(const Maps* maps, char *start,
       //
       // Total: 52 bytes + any bytes that were copied
 
-      if (length < 5) {
+      if (length < (__WORDSIZE == 32 ? 6 : 5)) {
         // There are a very small number of instruction sequences that we
         // cannot easily intercept, and that have been observed in real world
         // examples. Handle them here:
@@ -567,6 +618,8 @@ void Library::patchSystemCallsInFunction(const Maps* maps, char *start,
           *reinterpret_cast<unsigned short *>(code[codeIdx].addr + 2) = 0x9090;
           goto findEndIdx;
         }
+        #elif defined(__x86_64__)
+        std::set<char *>::const_iterator iter;
         #endif
         // If we cannot figure out any other way to intercept this system call,
         // we replace it with a call to INT0. This causes a SEGV which we then
@@ -578,11 +631,40 @@ void Library::patchSystemCallsInFunction(const Maps* maps, char *start,
             memset(code[codeIdx].addr + 2, 0x90, code[codeIdx].len - 2);
           }
           goto replaced;
-        } else {
+        }
+        #if defined(__x86_64__)
+        // On x86-64, we occasionally see code like this in the VDSO:
+        //   48 8B 05 CF FE FF FF  MOV   -0x131(%rip),%rax
+        //   FF 50 20              CALLQ *0x20(%rax)
+        // By default, we would not replace the MOV instruction, as it is
+        // IP relative. But if the following instruction is also IP relative,
+        // we are left with only three bytes which is not enough to insert a
+        // jump.
+        // We recognize this particular situation, and as long as the CALLQ
+        // is not a branch target, we decide to still relocate the entire
+        // sequence. We just have to make sure that we then patch up the
+        // IP relative addressing.
+        else if (is_indirect_call && startIdx == codeIdx &&
+                 code[startIdx = (startIdx + (sizeof(code) /
+                                              sizeof(struct Code)) - 1) %
+                      (sizeof(code) / sizeof(struct Code))].addr &&
+                 ptr - code[startIdx].addr >= 5 &&
+                 code[startIdx].is_ip_relative &&
+                 isSafeInsn(code[startIdx].insn) &&
+                 ((iter = std::upper_bound(branch_targets.begin(),
+                                           branch_targets.end(),
+                                           code[startIdx].addr)) ==
+                  branch_targets.end() || *iter >= ptr)) {
+          // We changed startIdx to include the IP relative instruction.
+          // When copying this preamble, we make sure to patch up the
+          // offset.
+        }
+        #endif
+        else {
           Sandbox::die("Cannot intercept system call");
         }
       }
-      int needed = 5 - code[codeIdx].len;
+      int needed = (__WORDSIZE == 32 ? 6 : 5) - code[codeIdx].len;
       int first = codeIdx;
       while (needed > 0 && first != startIdx) {
         first = (first + (sizeof(code) / sizeof(struct Code)) - 1) %
@@ -607,7 +689,7 @@ void Library::patchSystemCallsInFunction(const Maps* maps, char *start,
         needed = 52 + preamble + postamble;
       }
       #elif defined(__i386__)
-      needed = 12 + preamble + postamble;
+      needed = 17 + preamble + postamble;
       #else
       #error Unsupported target platform
       #endif
@@ -617,6 +699,14 @@ void Library::patchSystemCallsInFunction(const Maps* maps, char *start,
       char* dest = getScratchSpace(maps, code[first].addr, needed,
                                    extraSpace, extraLength);
       memcpy(dest, code[first].addr, preamble);
+
+      // For jumps from the VDSO to the VSyscalls we sometimes allow exactly
+      // one IP relative instruction in the preamble.
+      if (code[first].is_ip_relative) {
+        *reinterpret_cast<int *>(dest + (code[codeIdx].addr -
+                                         code[first].addr) - 4)
+          -= dest - code[first].addr;
+      }
 
       // For indirect calls, we need to copy the actual CALL instruction and
       // turn it into a PUSH instruction.
@@ -678,7 +768,10 @@ void Library::patchSystemCallsInFunction(const Maps* maps, char *start,
             reinterpret_cast<void *>(&syscallWrapper);
       }
       #elif defined(__i386__)
-      *(dest + preamble + 11 + postamble) = '\xC3';
+      *(dest + preamble + 11 + postamble) = '\x68'; // PUSH
+      *reinterpret_cast<char **>(dest + preamble + 12 + postamble) =
+          code[second].addr + code[second].len;
+      *(dest + preamble + 16 + postamble) = '\xC3'; // RET
       *reinterpret_cast<char **>(dest + preamble + 1) =
           dest + preamble + 11;
       *reinterpret_cast<void (**)()>(dest + preamble + 6) = syscallWrapper;
@@ -692,14 +785,16 @@ void Library::patchSystemCallsInFunction(const Maps* maps, char *start,
 
       // Replace the system call with an unconditional jump to our new code.
       #if defined(__x86_64__)
-      *code[first].addr = '\xE9'; // JMPQ
+      *code[first].addr = '\xE9';   // JMPQ
+      *reinterpret_cast<int *>(code[first].addr + 1) =
+          dest - (code[first].addr + 5);
       #elif defined(__i386__)
-      *code[first].addr = '\xE8'; // CALL
+      code[first].addr[0] = '\x68'; // PUSH
+      *reinterpret_cast<char **>(code[first].addr + 1) = dest;
+      code[first].addr[5] = '\xC3'; // RET
       #else
       #error Unsupported target platform
       #endif
-      *reinterpret_cast<int *>(code[first].addr + 1) =
-          dest - (code[first].addr + 5);
     }
    replaced:
     codeIdx = (codeIdx + 1) % (sizeof(code) / sizeof(struct Code));
@@ -780,7 +875,7 @@ int Library::patchVSystemCalls() {
   // Only x86-64 has VSyscalls.
   if (maps_->vsyscall()) {
     char* copy = maps_->allocNearAddr(maps_->vsyscall(), 0x1000,
-                                    PROT_READ|PROT_WRITE);
+                                      PROT_READ|PROT_WRITE|PROT_EXEC);
     char* extraSpace = copy;
     int extraLength = 0x1000;
     memcpy(copy, maps_->vsyscall(), 0x1000);
@@ -975,25 +1070,9 @@ bool Library::parseElf() {
                    &str_shdr)) {
     // Not all memory mappings are necessarily ELF files. Skip memory
     // mappings that we cannot identify.
+ error:
     valid_ = false;
     return false;
-  }
-
-  // Find PT_DYNAMIC segment. This is what our PLT entries and symbols will
-  // point to. This information is probably incorrect in the child, as it
-  // requires access to the original memory mappings.
-  for (int i = 0; i < ehdr_.e_phnum; i++) {
-    Elf_Phdr phdr;
-    if (getOriginal(ehdr_.e_phoff + i*ehdr_.e_phentsize, &phdr) &&
-        phdr.p_type == PT_DYNAMIC) {
-      RangeMap::const_iterator iter =
-          memory_ranges_.lower_bound(phdr.p_offset);
-      if (iter != memory_ranges_.end()) {
-        asr_offset_ = reinterpret_cast<char *>(iter->second.start) -
-            (phdr.p_vaddr - (phdr.p_offset - iter->first));
-      }
-      break;
-    }
   }
 
   // Parse section table and find all sections in this ELF file
@@ -1005,6 +1084,38 @@ bool Library::parseElf() {
     section_table_.insert(
        std::make_pair(getOriginal(str_shdr.sh_offset + shdr.sh_name),
                       std::make_pair(i, shdr)));
+  }
+
+  // Compute the offset of entries in the .text segment
+  const Elf_Shdr* text = getSection(".text");
+  if (text == NULL) {
+    // On x86-32, the VDSO is unusual in as much as it does not have a single
+    // ".text" section. Instead, it has one section per function. Each
+    // section name starts with ".text". We just need to pick an arbitrary
+    // one in order to find the asr_offset_ -- which would typically be zero
+    // for the VDSO.
+    for (SectionTable::const_iterator iter = section_table_.begin();
+         iter != section_table_.end(); ++iter) {
+      if (!strncmp(iter->first.c_str(), ".text", 5)) {
+        text = &iter->second.second;
+        break;
+      }
+    }
+  }
+
+  // Now that we know where the .text segment is located, we can compute the
+  // asr_offset_.
+  if (text) {
+    RangeMap::const_iterator iter =
+        memory_ranges_.lower_bound(text->sh_offset);
+    if (iter != memory_ranges_.end()) {
+      asr_offset_ = reinterpret_cast<char *>(iter->second.start) -
+          (text->sh_addr - (text->sh_offset - iter->first));
+    } else {
+      goto error;
+    }
+  } else {
+    goto error;
   }
 
   return !isVDSO_ || parseSymbols();
@@ -1054,7 +1165,7 @@ bool Library::parseSymbols() {
         valid_ = false;
         return false;
       }
-      std::string name = getOriginal(strtab.sh_offset + sym.st_name);
+      string name = getOriginal(strtab.sh_offset + sym.st_name);
       if (name.empty()) {
         continue;
       }
@@ -1073,7 +1184,7 @@ bool Library::parseSymbols() {
         valid_ = false;
         return false;
       }
-      std::string name = getOriginal(strtab.sh_offset + sym.st_name);
+      string name = getOriginal(strtab.sh_offset + sym.st_name);
       if (name.empty()) {
         continue;
       }
@@ -1095,266 +1206,6 @@ bool Library::parseSymbols() {
   }
 
   return true;
-}
-
-void Library::recoverOriginalDataParent(Maps* maps) {
-  maps_ = maps;
-}
-
-void Library::recoverOriginalDataChild(const std::string& filename) {
-  if (isVDSO_) {
-    valid_ = true;
-    return;
-  }
-  if (memory_ranges_.empty() || memory_ranges_.rbegin()->first) {
- failed:
-    memory_ranges_.clear();
-  } else {
-    const Range& range = memory_ranges_.rbegin()->second;
-    struct Args {
-      void* old_addr;
-      long  old_length;
-      void* new_addr;
-      long  new_length;
-      long  prot;
-    } args = {
-      range.start,
-      (reinterpret_cast<long>(range.stop) -
-       reinterpret_cast<long>(range.start) + 4095) & ~4095,
-      0,
-      (memory_ranges_.begin()->first +
-       (reinterpret_cast<long>(memory_ranges_.begin()->second.stop) -
-        reinterpret_cast<long>(memory_ranges_.begin()->second.start)) +
-       4095) & ~4095,
-      range.prot
-    };
-    // We find the memory mapping that starts at file offset zero and
-    // extend it to cover the entire file. This is a little difficult to
-    // do, as the mapping needs to be moved to a different address. But
-    // we are potentially running code that is inside of this mapping at the
-    // time when it gets moved.
-    //
-    // We have to write the code in assembly. We allocate temporary
-    // storage and copy the critical code into this page. We then execute
-    // from this page, while we relocate the mapping. Finally, we allocate
-    // memory at the original location and copy the original data into it.
-    // The program can now resume execution.
-    #if defined(__x86_64__)
-    asm volatile(
-        // new_addr = 4096 + mmap(0, new_length + 4096,
-        //                        PROT_READ|PROT_WRITE|PROT_EXEC,
-        //                        MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
-        "mov  $0, %%r9\n"
-        "mov  $-1, %%r8\n"
-        "mov  $0x22, %%r10\n"
-        "mov  $7, %%rdx\n"
-        "mov  0x18(%0), %%rsi\n"
-        "add  $4096, %%rsi\n"
-        "mov  $0, %%rdi\n"
-        "mov  $9, %%rax\n"
-        "syscall\n"
-        "cmp  $-4096, %%rax\n"
-        "ja   6f\n"
-        "mov  %%rax, %%r12\n"
-        "add  $4096, %%r12\n"
-
-        // memcpy(new_addr - 4096, &&asm, asm_length)
-        "lea  2f(%%rip), %%rsi\n"
-        "lea  6f(%%rip), %%rdi\n"
-        "sub  %%rsi, %%rdi\n"
-      "0:sub  $1, %%rdi\n"
-        "test %%rdi, %%rdi\n"
-        "js   1f\n"
-        "movzbl (%%rsi, %%rdi, 1), %%ebx\n"
-        "mov  %%bl, (%%rax, %%rdi, 1)\n"
-        "jmp  0b\n"
-     "1:\n"
-
-        // ((void (*)())new_addr - 4096)()
-        "lea  6f(%%rip), %%rbx\n"
-        "push %%rbx\n"
-        "jmp  *%%rax\n"
-
-        // mremap(old_addr, old_length, new_length,
-        //        MREMAP_MAYMOVE|MREMAP_FIXED, new_addr)
-      "2:mov  %%r12, %%r8\n"
-        "mov  $3, %%r10\n"
-        "mov  0x18(%0), %%rdx\n"
-        "mov  0x8(%0), %%rsi\n"
-        "mov  0(%0), %%rdi\n"
-        "mov  $25, %%rax\n"
-        "syscall\n"
-        "cmp  $-4096, %%rax\n"
-        "ja   5f\n"
-
-        // mmap(old_addr, old_length, PROT_WRITE,
-        //      MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, -1, 0)
-        "mov  $0, %%r9\n"
-        "mov  $-1, %%r8\n"
-        "mov  $0x32, %%r10\n"
-        "mov  $2, %%rdx\n"
-        "mov  0x8(%0), %%rsi\n"
-        "mov  0(%0), %%rdi\n"
-        "mov  $9, %%rax\n"
-        "syscall\n"
-        "cmp  $-12, %%eax\n"
-        "jz   4f\n"
-        "cmp  $-4096, %%rax\n"
-        "ja   5f\n"
-
-        // memcpy(old_addr, new_addr, old_length)
-        "mov  0x8(%0), %%rdi\n"
-      "3:sub  $1, %%rdi\n"
-        "test %%rdi, %%rdi\n"
-        "js   4f\n"
-        "movzbl (%%r12, %%rdi, 1), %%ebx\n"
-        "mov  %%bl, (%%rax, %%rdi, 1)\n"
-        "jmp  3b\n"
-      "4:\n"
-
-        // mprotect(old_addr, old_length, prot)
-        "mov  0x20(%0), %%rdx\n"
-        "mov  0x8(%0), %%rsi\n"
-        "mov  %%rax, %%rdi\n"
-        "mov  $10, %%rax\n"
-        "syscall\n"
-
-        // args.new_addr = new_addr
-        "mov  %%r12, 0x10(%0)\n"
-      "5:retq\n"
-
-        // munmap(new_addr - 4096, 4096)
-      "6:mov  $4096, %%rsi\n"
-        "mov  %%r12, %%rdi\n"
-        "sub  %%rsi, %%rdi\n"
-        "mov  $11, %%rax\n"
-        "syscall\n"
-        :
-        : "q"(&args)
-        : "rax", "rbx", "rcx", "rdx", "rsi", "rdi",
-          "r8", "r9", "r10", "r11", "r12", "memory");
-    #elif defined(__i386__)
-    asm volatile(
-        "push %%ebp\n"
-        "push %%ebx\n"
-        "push %%edi\n"
-
-        // new_addr = 4096 + mmap(0, new_length + 4096,
-        //                        PROT_READ|PROT_WRITE|PROT_EXEC,
-        //                        MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
-        "mov  $0, %%ebp\n"
-        "mov  $0x22, %%esi\n"
-        "mov  $7, %%edx\n"
-        "mov  12(%%edi), %%ecx\n"
-        "add  $4096, %%ecx\n"
-        "mov  $-1, %%edi\n"
-        "mov  $0, %%ebx\n"
-        "mov  $192, %%eax\n"
-        "int  $0x80\n"
-        "cmp  $-4096, %%eax\n"
-        "ja   6f\n"
-        "mov  %%eax, %%ebp\n"
-        "add  $4096, %%ebp\n"
-
-        // memcpy(new_addr - 4096, &&asm, asm_length)
-        "lea  2f, %%ecx\n"
-        "lea  6f, %%ebx\n"
-        "sub  %%ecx, %%ebx\n"
-      "0:dec  %%ebx\n"
-        "test %%ebx, %%ebx\n"
-        "js   1f\n"
-        "movzbl (%%ecx, %%ebx, 1), %%edx\n"
-        "mov  %%dl, (%%eax, %%ebx, 1)\n"
-        "jmp  0b\n"
-      "1:\n"
-
-        // ((void (*)())new_addr - 4096)()
-        "lea  6f, %%ebx\n"
-        "push %%ebx\n"
-        "jmp  *%%eax\n"
-
-        // mremap(old_addr, old_length, new_length,
-        //        MREMAP_MAYMOVE|MREMAP_FIXED, new_addr)
-      "2:push %%ebp\n"
-        "mov  $3, %%esi\n"
-        "mov  8(%%esp), %%edi\n"
-        "mov  12(%%edi), %%edx\n"
-        "mov  4(%%edi), %%ecx\n"
-        "mov  0(%%edi), %%ebx\n"
-        "mov  %%ebp, %%edi\n"
-        "mov  $163, %%eax\n"
-        "int  $0x80\n"
-        "cmp  $-4096, %%eax\n"
-        "ja   5f\n"
-
-        // mmap(old_addr, old_length, PROT_WRITE,
-        //      MAP_PRIVATE|MAP_ANONYMOUS|MAP_FIXED, -1, 0)
-        "mov  $0, %%ebp\n"
-        "mov  $0x32, %%esi\n"
-        "mov  $2, %%edx\n"
-        "mov  8(%%esp), %%edi\n"
-        "mov  4(%%edi), %%ecx\n"
-        "mov  0(%%edi), %%ebx\n"
-        "mov  $-1, %%edi\n"
-        "mov  $192, %%eax\n"
-        "int  $0x80\n"
-        "cmp  $-12, %%eax\n"
-        "jz   4f\n"
-        "cmp  $-4096, %%eax\n"
-        "ja   5f\n"
-
-        // memcpy(old_addr, new_addr, old_length)
-        "mov  0(%%esp), %%ecx\n"
-        "mov  8(%%esp), %%edi\n"
-        "mov  4(%%edi), %%ebx\n"
-      "3:dec  %%ebx\n"
-        "test %%ebx, %%ebx\n"
-        "js   4f\n"
-        "movzbl (%%ecx, %%ebx, 1), %%edx\n"
-        "mov  %%dl, (%%eax, %%ebx, 1)\n"
-        "jmp  3b\n"
-      "4:\n"
-
-        // mprotect(old_addr, old_length, prot)
-        "mov  8(%%esp), %%edi\n"
-        "mov  16(%%edi), %%edx\n"
-        "mov  4(%%edi), %%ecx\n"
-        "mov  %%eax, %%ebx\n"
-        "mov  $125, %%eax\n"
-        "int  $0x80\n"
-
-        // args.new_addr = new_addr
-        "mov  8(%%esp), %%edi\n"
-        "mov  0(%%esp), %%ebp\n"
-        "mov  %%ebp, 0x8(%%edi)\n"
-
-      "5:pop  %%ebx\n"
-        "ret\n"
-
-        // munmap(new_addr - 4096, 4096)
-      "6:mov  $4096, %%ecx\n"
-        "sub  %%ecx, %%ebx\n"
-        "mov  $91, %%eax\n"
-        "int  $0x80\n"
-        "pop  %%edi\n"
-        "pop  %%ebx\n"
-        "pop  %%ebp\n"
-        :
-        : "D"(&args)
-        : "eax", "ecx", "edx", "esi", "memory");
-    #else
-    #error Unsupported target platform
-    #endif
-    if (!args.new_addr) {
-      goto failed;
-    }
-
-    memory_ranges_.clear();
-    memory_ranges_.insert(std::make_pair(0, Range(args.new_addr,
-                 reinterpret_cast<char *>(args.new_addr) + args.new_length,
-                 PROT_READ)));
-    valid_ = true;
-  }
 }
 
 } // namespace

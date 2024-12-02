@@ -1,8 +1,9 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/base/mock_host_resolver.h"
+#include "net/base/net_log.h"
 #include "net/base/ssl_config_service_defaults.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_transaction_unittest.h"
@@ -16,8 +17,8 @@ class HttpNetworkLayerTest : public PlatformTest {
 
 TEST_F(HttpNetworkLayerTest, CreateAndDestroy) {
   net::HttpNetworkLayer factory(
-      NULL, new net::MockHostResolver, net::ProxyService::CreateNull(),
-      new net::SSLConfigServiceDefaults);
+      NULL, NULL, new net::MockHostResolver, net::ProxyService::CreateNull(),
+      new net::SSLConfigServiceDefaults, NULL);
 
   scoped_ptr<net::HttpTransaction> trans;
   int rv = factory.CreateTransaction(&trans);
@@ -27,8 +28,8 @@ TEST_F(HttpNetworkLayerTest, CreateAndDestroy) {
 
 TEST_F(HttpNetworkLayerTest, Suspend) {
   net::HttpNetworkLayer factory(
-      NULL, new net::MockHostResolver, net::ProxyService::CreateNull(),
-      new net::SSLConfigServiceDefaults);
+      NULL, NULL, new net::MockHostResolver, net::ProxyService::CreateNull(),
+      new net::SSLConfigServiceDefaults, NULL);
 
   scoped_ptr<net::HttpTransaction> trans;
   int rv = factory.CreateTransaction(&trans);
@@ -62,12 +63,15 @@ TEST_F(HttpNetworkLayerTest, GET) {
                    "Connection: keep-alive\r\n"
                    "User-Agent: Foo/1.0\r\n\r\n"),
   };
-  net::StaticMockSocket data(data_reads, data_writes);
-  mock_socket_factory.AddMockSocket(&data);
+  net::StaticSocketDataProvider data(data_reads, arraysize(data_reads),
+                                     data_writes, arraysize(data_reads));
+  mock_socket_factory.AddSocketDataProvider(&data);
 
-  net::HttpNetworkLayer factory(&mock_socket_factory, new net::MockHostResolver,
+  net::HttpNetworkLayer factory(&mock_socket_factory, NULL,
+                                new net::MockHostResolver,
                                 net::ProxyService::CreateNull(),
-                                new net::SSLConfigServiceDefaults);
+                                new net::SSLConfigServiceDefaults,
+                                NULL);
 
   TestCompletionCallback callback;
 
@@ -81,7 +85,7 @@ TEST_F(HttpNetworkLayerTest, GET) {
   request_info.user_agent = "Foo/1.0";
   request_info.load_flags = net::LOAD_NORMAL;
 
-  rv = trans->Start(&request_info, &callback, NULL);
+  rv = trans->Start(&request_info, &callback, net::BoundNetLog());
   if (rv == net::ERR_IO_PENDING)
     rv = callback.WaitForResult();
   ASSERT_EQ(net::OK, rv);

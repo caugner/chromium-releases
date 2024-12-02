@@ -4,17 +4,21 @@
 
 #include "printing/printed_document.h"
 
+#include <algorithm>
 #include <set>
+#include <string>
+#include <vector>
 
-#include "app/gfx/font.h"
-#include "app/gfx/text_elider.h"
+#include "app/text_elider.h"
 #include "base/file_util.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/message_loop.h"
 #include "base/singleton.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/time.h"
 #include "base/i18n/time_formatting.h"
+#include "gfx/font.h"
 #include "printing/page_number.h"
 #include "printing/page_overlays.h"
 #include "printing/printed_pages_source.h"
@@ -127,7 +131,7 @@ void PrintedDocument::DisconnectSource() {
   mutable_.source_ = NULL;
 }
 
-size_t PrintedDocument::MemoryUsage() const {
+uint32 PrintedDocument::MemoryUsage() const {
   std::vector< scoped_refptr<PrintedPage> > pages_copy;
   {
     AutoLock lock(lock_);
@@ -140,7 +144,7 @@ size_t PrintedDocument::MemoryUsage() const {
       }
     }
   }
-  size_t total = 0;
+  uint32 total = 0;
   for (size_t i = 0; i < pages_copy.size(); ++i) {
     total += pages_copy[i]->native_metafile()->GetDataSize();
   }
@@ -176,6 +180,9 @@ void PrintedDocument::PrintHeaderFooter(gfx::NativeDrawingContext context,
                                         PageOverlays::VerticalPosition y,
                                         const gfx::Font& font) const {
   const PrintSettings& settings = immutable_.settings_;
+  if (!settings.use_overlays) {
+    return;
+  }
   const std::wstring& line = settings.overlays.GetOverlay(x, y);
   if (line.empty()) {
     return;
@@ -263,11 +270,17 @@ void PrintedDocument::DebugDump(const PrintedPage& page) {
   filename += L"_";
   filename += StringPrintf(L"%02d", page.page_number());
   filename += L"_.emf";
-  file_util::ReplaceIllegalCharacters(&filename, '_');
-  std::wstring path(g_debug_dump_info->debug_dump_path);
-  file_util::AppendToPath(&path, filename);
 #if defined(OS_WIN)
-  page.native_metafile()->SaveTo(path);
+  file_util::ReplaceIllegalCharactersInPath(&filename, '_');
+#else
+  std::string narrow_filename = WideToUTF8(filename);
+  file_util::ReplaceIllegalCharactersInPath(&narrow_filename, '_');
+  filename = UTF8ToWide(narrow_filename);
+#endif
+  FilePath path = FilePath::FromWStringHack(
+      g_debug_dump_info->debug_dump_path);
+#if defined(OS_WIN)
+  page.native_metafile()->SaveTo(path.Append(filename).ToWStringHack());
 #else  // OS_WIN
   NOTIMPLEMENTED();
 #endif  // OS_WIN

@@ -21,18 +21,18 @@ namespace keys = extension_page_actions_module_constants;
 
 namespace {
 // Errors.
-const char kNoExtensionError[] = "No extension with id: *.";
 const char kNoTabError[] = "No tab with id: *.";
 const char kNoPageActionError[] =
     "This extension has no page action specified.";
 const char kUrlNotActiveError[] = "This url is no longer active: *.";
 const char kIconIndexOutOfBounds[] = "Page action icon index out of bounds.";
+const char kNoIconSpecified[] = "Page action has no icons to show.";
 }
 
 // TODO(EXTENSIONS_DEPRECATED): obsolete API.
 bool PageActionFunction::SetPageActionEnabled(bool enable) {
   EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_LIST));
-  const ListValue* args = static_cast<const ListValue*>(args_);
+  const ListValue* args = args_as_list();
 
   std::string page_action_id;
   EXTENSION_FUNCTION_VALIDATE(args->GetString(0, &page_action_id));
@@ -56,9 +56,22 @@ bool PageActionFunction::SetPageActionEnabled(bool enable) {
     }
   }
 
+  ExtensionAction* page_action = GetExtension()->page_action();
+  if (!page_action) {
+    error_ = kNoPageActionError;
+    return false;
+  }
+
+  if (icon_id < 0 ||
+      static_cast<size_t>(icon_id) >= page_action->icon_paths()->size()) {
+    error_ = (icon_id == 0) ? kNoIconSpecified : kIconIndexOutOfBounds;
+    return false;
+  }
+
   // Find the TabContents that contains this tab id.
   TabContents* contents = NULL;
-  ExtensionTabUtil::GetTabById(tab_id, profile(), NULL, NULL, &contents, NULL);
+  ExtensionTabUtil::GetTabById(tab_id, profile(), include_incognito(),
+                               NULL, NULL, &contents, NULL);
   if (!contents) {
     error_ = ExtensionErrorUtils::FormatErrorMessage(kNoTabError,
                                                      IntToString(tab_id));
@@ -72,31 +85,17 @@ bool PageActionFunction::SetPageActionEnabled(bool enable) {
     return false;
   }
 
-  // Find our extension.
-  Extension* extension = NULL;
-  ExtensionsService* service = profile()->GetExtensionsService();
-  extension = service->GetExtensionById(extension_id());
-  if (!extension) {
-    error_ = ExtensionErrorUtils::FormatErrorMessage(kNoExtensionError,
-                                                     extension_id());
-    return false;
-  }
-
-  const ExtensionAction* page_action = extension->page_action();
-  if (!page_action) {
-    error_ = kNoPageActionError;
-    return false;
-  }
-
   // Set visibility and broadcast notifications that the UI should be updated.
-  contents->SetPageActionEnabled(page_action, enable, title, icon_id);
+  page_action->SetIsVisible(tab_id, enable);
+  page_action->SetTitle(tab_id, title);
+  page_action->SetIconIndex(tab_id, icon_id);
   contents->PageActionStateChanged();
 
   return true;
 }
 
 bool PageActionFunction::InitCommon(int tab_id) {
-  page_action_ = dispatcher()->GetExtension()->page_action();
+  page_action_ = GetExtension()->page_action();
   if (!page_action_) {
     error_ = kNoPageActionError;
     return false;
@@ -104,24 +103,24 @@ bool PageActionFunction::InitCommon(int tab_id) {
 
   // Find the TabContents that contains this tab id.
   contents_ = NULL;
-  ExtensionTabUtil::GetTabById(tab_id, profile(), NULL, NULL, &contents_, NULL);
+  ExtensionTabUtil::GetTabById(tab_id, profile(), include_incognito(),
+                               NULL, NULL, &contents_, NULL);
   if (!contents_) {
     error_ = ExtensionErrorUtils::FormatErrorMessage(kNoTabError,
                                                      IntToString(tab_id));
     return false;
   }
 
-  state_ = contents_->GetOrCreatePageActionState(page_action_);
   return true;
 }
 
-bool PageActionFunction::SetHidden(bool hidden) {
+bool PageActionFunction::SetVisible(bool visible) {
   int tab_id;
   EXTENSION_FUNCTION_VALIDATE(args_->GetAsInteger(&tab_id));
   if (!InitCommon(tab_id))
     return false;
 
-  state_->set_hidden(hidden);
+  page_action_->SetIsVisible(tab_id, visible);
   contents_->PageActionStateChanged();
   return true;
 }
@@ -135,16 +134,16 @@ bool DisablePageActionFunction::RunImpl() {
 }
 
 bool PageActionShowFunction::RunImpl() {
-  return SetHidden(false);
+  return SetVisible(true);
 }
 
 bool PageActionHideFunction::RunImpl() {
-  return SetHidden(true);
+  return SetVisible(false);
 }
 
 bool PageActionSetIconFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-  const DictionaryValue* args = static_cast<const DictionaryValue*>(args_);
+  const DictionaryValue* args = args_as_dictionary();
 
   int tab_id;
   EXTENSION_FUNCTION_VALIDATE(args->GetInteger(L"tabId", &tab_id));
@@ -161,15 +160,15 @@ bool PageActionSetIconFunction::RunImpl() {
     scoped_ptr<SkBitmap> bitmap(new SkBitmap);
     EXTENSION_FUNCTION_VALIDATE(
         IPC::ReadParam(&bitmap_pickle, &iter, bitmap.get()));
-    state_->set_icon(bitmap.release());
+    page_action_->SetIcon(tab_id, *bitmap);
   } else if (args->GetInteger(L"iconIndex", &icon_index)) {
-    if (icon_index < 0 ||
-        static_cast<size_t>(icon_index) >= page_action_->icon_paths().size()) {
+    if (icon_index < 0 || static_cast<size_t>(icon_index) >=
+                              page_action_->icon_paths()->size()) {
       error_ = kIconIndexOutOfBounds;
       return false;
     }
-    state_->set_icon(NULL);
-    state_->set_icon_index(icon_index);
+    page_action_->SetIcon(tab_id, SkBitmap());
+    page_action_->SetIconIndex(tab_id, icon_index);
   } else {
     EXTENSION_FUNCTION_VALIDATE(false);
   }
@@ -180,7 +179,7 @@ bool PageActionSetIconFunction::RunImpl() {
 
 bool PageActionSetTitleFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-  const DictionaryValue* args = static_cast<const DictionaryValue*>(args_);
+  const DictionaryValue* args = args_as_dictionary();
 
   int tab_id;
   EXTENSION_FUNCTION_VALIDATE(args->GetInteger(L"tabId", &tab_id));
@@ -190,14 +189,39 @@ bool PageActionSetTitleFunction::RunImpl() {
   std::string title;
   EXTENSION_FUNCTION_VALIDATE(args->GetString(L"title", &title));
 
-  state_->set_title(title);
+  page_action_->SetTitle(tab_id, title);
   contents_->PageActionStateChanged();
   return true;
 }
 
+bool PageActionSetPopupFunction::RunImpl() {
+  EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
+  const DictionaryValue* args = args_as_dictionary();
+
+  int tab_id;
+  EXTENSION_FUNCTION_VALIDATE(args->GetInteger(L"tabId", &tab_id));
+  if (!InitCommon(tab_id))
+    return false;
+
+  // TODO(skerner): Consider allowing null and undefined to mean the popup
+  // should be removed.
+  std::string popup_string;
+  EXTENSION_FUNCTION_VALIDATE(args->GetString(L"popup", &popup_string));
+
+  GURL popup_url;
+  if (!popup_string.empty())
+    popup_url = GetExtension()->GetResourceURL(popup_string);
+
+  page_action_->SetPopupUrl(tab_id, popup_url);
+  contents_->PageActionStateChanged();
+  return true;
+}
+
+// Not currently exposed to extensions. To re-enable, add mapping in
+// extension_function_dispatcher.
 bool PageActionSetBadgeBackgroundColorFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-  const DictionaryValue* args = static_cast<const DictionaryValue*>(args_);
+  const DictionaryValue* args = args_as_dictionary();
 
   int tab_id;
   EXTENSION_FUNCTION_VALIDATE(args->GetInteger(L"tabId", &tab_id));
@@ -214,14 +238,16 @@ bool PageActionSetBadgeBackgroundColorFunction::RunImpl() {
 
   SkColor color = SkColorSetARGB(color_array[3], color_array[0], color_array[1],
                                  color_array[2]);
-  state_->set_badge_background_color(color);
+  page_action_->SetBadgeBackgroundColor(tab_id, color);
   contents_->PageActionStateChanged();
   return true;
 }
 
+// Not currently exposed to extensions. To re-enable, add mapping in
+// extension_function_dispatcher.
 bool PageActionSetBadgeTextColorFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-  const DictionaryValue* args = static_cast<const DictionaryValue*>(args_);
+  const DictionaryValue* args = args_as_dictionary();
 
   int tab_id;
   EXTENSION_FUNCTION_VALIDATE(args->GetInteger(L"tabId", &tab_id));
@@ -238,14 +264,16 @@ bool PageActionSetBadgeTextColorFunction::RunImpl() {
 
   SkColor color = SkColorSetARGB(color_array[3], color_array[0], color_array[1],
                                  color_array[2]);
-  state_->set_badge_text_color(color);
+  page_action_->SetBadgeTextColor(tab_id, color);
   contents_->PageActionStateChanged();
   return true;
 }
 
+// Not currently exposed to extensions. To re-enable, add mapping in
+// extension_function_dispatcher.
 bool PageActionSetBadgeTextFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(args_->IsType(Value::TYPE_DICTIONARY));
-  const DictionaryValue* args = static_cast<const DictionaryValue*>(args_);
+  const DictionaryValue* args = args_as_dictionary();
 
   int tab_id;
   EXTENSION_FUNCTION_VALIDATE(args->GetInteger(L"tabId", &tab_id));
@@ -255,7 +283,7 @@ bool PageActionSetBadgeTextFunction::RunImpl() {
   std::string text;
   EXTENSION_FUNCTION_VALIDATE(args->GetString(L"text", &text));
 
-  state_->set_badge_text(text);
+  page_action_->SetBadgeText(tab_id, text);
   contents_->PageActionStateChanged();
   return true;
 }

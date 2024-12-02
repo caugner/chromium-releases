@@ -13,7 +13,7 @@
       ['exclude', '/(gtk|win|x11)_[^/]*\\.cc$'],
     ],
     'conditions': [
-      ['OS=="linux"', {'sources/': [
+      ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {'sources/': [
         ['include', '/gtk/'],
         ['include', '_(gtk|linux|posix|skia|x)\\.cc$'],
         ['include', '/(gtk|x11)_[^/]*\\.cc$'],
@@ -55,8 +55,8 @@
         'accessibility/view_accessibility.h',
         'accessibility/view_accessibility_wrapper.cc',
         'accessibility/view_accessibility_wrapper.h',
-        'animator.cc',
-        'animator.h',
+        'animation/bounds_animator.cc',
+        'animation/bounds_animator.h',
         'background.cc',
         'background.h',
         'border.cc',
@@ -135,8 +135,6 @@
         'controls/menu/native_menu_gtk.h',
         'controls/menu/native_menu_win.cc',
         'controls/menu/native_menu_win.h',
-        'controls/menu/simple_menu_model.cc',
-        'controls/menu/simple_menu_model.h',
         'controls/menu/submenu_view.cc',
         'controls/menu/submenu_view.h',
         'controls/menu/view_menu_delegate.h',
@@ -155,6 +153,10 @@
         'controls/native/native_view_host_win.cc',
         'controls/native/native_view_host_win.h',
         'controls/native/native_view_host_wrapper.h',
+        'controls/progress_bar.h',
+        'controls/progress_bar.cc',
+        'controls/resize_gripper.cc',
+        'controls/resize_gripper.h',
         'controls/scroll_view.cc',
         'controls/scroll_view.h',
         'controls/scrollbar/bitmap_scroll_bar.cc',
@@ -184,11 +186,20 @@
         'controls/tabbed_pane/native_tabbed_pane_win.cc',
         'controls/tabbed_pane/native_tabbed_pane_win.h',
         'controls/tabbed_pane/native_tabbed_pane_wrapper.h',
+        'controls/table/native_table_wrapper.h',
+        'controls/table/native_table_gtk.cc',
+        'controls/table/native_table_gtk.h',
+        'controls/table/native_table_win.cc',
+        'controls/table/native_table_win.h',
         'controls/table/group_table_view.cc',
         'controls/table/group_table_view.h',
         'controls/table/table_view.cc',
         'controls/table/table_view.h',
+        'controls/table/table_view2.cc',
+        'controls/table/table_view2.h',
         'controls/table/table_view_observer.h',
+        'controls/textfield/gtk_views_entry.cc',
+        'controls/textfield/gtk_views_entry.h',
         'controls/textfield/textfield.cc',
         'controls/textfield/textfield.h',
         'controls/textfield/native_textfield_gtk.cc',
@@ -239,6 +250,8 @@
         'view.h',
         'view_constants.cc',
         'view_constants.h',
+        'view_text_utils.cc',
+        'view_text_utils.h',
         'view_gtk.cc',
         'view_win.cc',
         'widget/aero_tooltip_manager.cc',
@@ -251,6 +264,8 @@
         'widget/drop_target_gtk.h',
         'widget/drop_target_win.cc',
         'widget/drop_target_win.h',
+        'widget/gtk_views_fixed.cc',
+        'widget/gtk_views_fixed.h',
         'widget/root_view.cc',
         'widget/root_view.h',
         'widget/root_view_gtk.cc',
@@ -289,13 +304,14 @@
         'window/window_win.h',
       ],
       'include_dirs': [
-        '../chrome/third_party/wtl/include',
+        '<(DEPTH)/third_party/wtl/include',
       ],
       'conditions': [
-        ['OS=="linux"', {
+        ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
             '../build/linux/system.gyp:x11',
+            '../build/linux/system.gyp:xext',
           ],
           'sources!': [
             'accessibility/accessible_wrapper.cc',
@@ -306,7 +322,6 @@
             'controls/hwnd_view.cc',
             'controls/table/group_table_view.cc',
             'controls/native_control.cc',
-            'controls/separator.cc',
             'controls/table/table_model.cc',
             'controls/table/table_view.cc',
             'controls/table/group_table_view.cc',
@@ -332,57 +347,71 @@
             'controls/slider/native_slider_wrapper.h',
           ],
           'include_dirs': [
-            # TODO(beng): move wtl to src/third_party
-            '../chrome/third_party/wtl/include',
+            '<(DEPTH)/third_party/wtl/include',
           ],
         }],
       ],
     },
-  ],
-  'conditions': [
-    # TODO(oshima): support win
-    ['OS!="win"', {
-      'targets': [
-        {
-          'target_name': 'view_examples',
-          'type': 'executable',
+    {
+      'target_name': 'view_examples',
+      'type': 'executable',
+      'dependencies': [
+        '../base/base.gyp:base',
+        '../skia/skia.gyp:skia',
+        '../third_party/icu/icu.gyp:icui18n',
+        '../third_party/icu/icu.gyp:icuuc',
+        'views',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        'examples/button_example.h',
+        'examples/combobox_example.h',
+        'examples/example_base.cc',
+        'examples/example_base.h',
+        'examples/examples_main.cc',
+        'examples/examples_main.h',
+        'examples/message_box_example.h',
+        'examples/menu_example.h',
+        'examples/radio_button_example.h',
+        'examples/scroll_view_example.h',
+        'examples/single_split_view_example.h',
+        'examples/slider_example.h',
+        'examples/tabbed_pane_example.h',
+        'examples/textfield_example.h',
+        'examples/widget_example.h',
+
+        '<(SHARED_INTERMEDIATE_DIR)/app/app_resources/app_resources.rc',
+      ],
+      'conditions': [
+        ['OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
           'dependencies': [
-            '../base/base.gyp:base',
-            '../skia/skia.gyp:skia',
-            'views',
-          ],
-          'include_dirs': [
-            '..',
-          ],
-          'sources': [
-            'examples/button_example.h',
-            'examples/combobox_example.h',
-            'examples/example_base.cc',
-            'examples/example_base.h',
-            'examples/examples_main_base.cc',
-            'examples/examples_main_base.h',
-            'examples/examples_main_gtk.cc',
-            'examples/message_box_example.h',
-            'examples/radio_button_example.h',
-            'examples/tabbed_pane_example.h',
-            'examples/textfield_example.h',
+            '../build/linux/system.gyp:gtk',
+            '../chrome/chrome.gyp:packed_resources',
           ],
           'conditions': [
-            ['OS=="linux"', {
-              'dependencies': [
-                '../build/linux/system.gyp:gtk',
-              ],
-            },
-            ],
-            ['OS=="linux" and toolkit_views==1', {
-              'dependencies': [
-                'views',
-              ],
+            ['linux_use_tcmalloc==1', {
+               'dependencies': [
+                 '../base/allocator/allocator.gyp:allocator',
+               ],
             }],
           ],
         },
+        ],
+        ['OS=="win"', {
+          'link_settings': {
+            'libraries': [
+              '-limm32.lib',
+              '-loleacc.lib',
+            ]
+          },
+          'include_dirs': [
+            '<(DEPTH)/third_party/wtl/include',
+          ],
+        }],
       ],
-    }],
+    },
   ],
 }
 

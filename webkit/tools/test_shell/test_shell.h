@@ -31,16 +31,18 @@
 #include <string>
 #include <list>
 
-#include "app/gfx/native_widget_types.h"
 #include "base/basictypes.h"
 #if defined(OS_MACOSX)
 #include "base/lazy_instance.h"
 #endif
 #include "base/ref_counted.h"
+#include "base/weak_ptr.h"
+#include "gfx/native_widget_types.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebNavigationPolicy.h"
 #include "webkit/tools/test_shell/event_sending_controller.h"
 #include "webkit/tools/test_shell/layout_test_controller.h"
+#include "webkit/tools/test_shell/plain_text_controller.h"
 #include "webkit/tools/test_shell/text_input_controller.h"
-#include "webkit/tools/test_shell/test_webview_delegate.h"
 #include "webkit/tools/test_shell/webview_host.h"
 #include "webkit/tools/test_shell/webwidget_host.h"
 
@@ -49,14 +51,18 @@ typedef std::list<gfx::NativeWindow> WindowList;
 struct WebPreferences;
 class AccessibilityController;
 class FilePath;
+class GURL;
 class TestNavigationEntry;
 class TestNavigationController;
+class TestShellDevToolsAgent;
+class TestShellDevToolsClient;
+class TestWebViewDelegate;
 
 namespace base {
 class StringPiece;
 }
 
-class TestShell {
+class TestShell : public base::SupportsWeakPtr<TestShell>  {
 public:
     struct TestParams {
       // Load the test defaults.
@@ -103,8 +109,33 @@ public:
     }
     WebWidgetHost* popupHost() { return m_popupHost; }
 
+    bool is_loading() const { return is_loading_; }
+    void set_is_loading(bool is_loading) { is_loading_ = is_loading; }
+
+    bool allow_images() const { return allow_images_; }
+    void set_allow_images(bool allow) { allow_images_ = allow; }
+
+    bool allow_plugins() const { return allow_plugins_; }
+    void set_allow_plugins(bool allow) { allow_plugins_ = allow; }
+
+    bool allow_scripts() const { return allow_scripts_; }
+    void set_allow_scripts(bool allow) { allow_scripts_ = allow; }
+
+    void UpdateNavigationControls();
+
+    // A new TestShell window will be opened with devtools url.
+    // DevTools window can be opened manually via menu or automatically when
+    // inspector's layout test url is passed from command line or console.
+    void ShowDevTools();
+    void CloseDevTools();
+
     // Called by the LayoutTestController to signal test completion.
     void TestFinished();
+
+    // Called by LayoutTestController when a test hits the timeout, but does not
+    // cause a hang. We can avoid killing TestShell in this case and still dump
+    // the test results.
+    void TestTimedOut();
 
     // Called to block the calling thread until TestFinished is called.
     void WaitTestFinished();
@@ -124,6 +155,9 @@ public:
     TestWebViewDelegate* popup_delegate() { return popup_delegate_.get(); }
     TestNavigationController* navigation_controller() {
       return navigation_controller_.get();
+    }
+    EventSendingController* event_sending_controller() {
+      return event_sending_controller_.get();
     }
 
     // Resets the LayoutTestController and EventSendingController.  Should be
@@ -280,8 +314,14 @@ public:
     // This is called indirectly by the network layer to access resources.
     static base::StringPiece NetResourceProvider(int key);
 
+    TestShellDevToolsAgent* dev_tools_agent() {
+      return dev_tools_agent_.get();
+    }
+
 protected:
+    void CreateDevToolsClient(TestShellDevToolsAgent* agent);
     bool Initialize(const GURL& starting_url);
+    void InitializeDevToolsAgent(WebKit::WebView* webView);
     bool IsSVGTestURL(const GURL& url);
     void SizeToSVG();
     void SizeToDefault();
@@ -290,6 +330,14 @@ protected:
 
     // Set the focus in interactive mode (pass through to relevant system call).
     void InteractiveSetFocus(WebWidgetHost* host, bool enable);
+
+    enum UIControl {
+      BACK_BUTTON,
+      FORWARD_BUTTON,
+      STOP_BUTTON
+    };
+
+    void EnableUIControl(UIControl control, bool is_enabled);
 
 #if defined(OS_WIN)
     static LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -322,6 +370,12 @@ private:
     static HINSTANCE instance_handle_;
 #endif
 
+    // True if developer extras should be enabled.
+    static bool developer_extras_enabled_;
+
+    // Whether DevTools should be open before loading the page.
+    static bool inspector_test_mode_;
+
     // True when the app is being run using the --layout-tests switch.
     static bool layout_test_mode_;
 
@@ -330,15 +384,17 @@ private:
 
     scoped_ptr<AccessibilityController> accessibility_controller_;
     scoped_ptr<LayoutTestController> layout_test_controller_;
-
     scoped_ptr<EventSendingController> event_sending_controller_;
-
+    scoped_ptr<PlainTextController> plain_text_controller_;
     scoped_ptr<TextInputController> text_input_controller_;
-
     scoped_ptr<TestNavigationController> navigation_controller_;
 
     scoped_ptr<TestWebViewDelegate> delegate_;
     scoped_ptr<TestWebViewDelegate> popup_delegate_;
+
+    base::WeakPtr<TestShell> devtools_shell_;
+    scoped_ptr<TestShellDevToolsAgent> dev_tools_agent_;
+    scoped_ptr<TestShellDevToolsClient> dev_tools_client_;
 
     const TestParams* test_params_;
 
@@ -350,6 +406,13 @@ private:
 
     // True if driven from a nested message loop.
     bool is_modal_;
+
+    // True if the page is loading.
+    bool is_loading_;
+
+    bool allow_images_;
+    bool allow_plugins_;
+    bool allow_scripts_;
 
     // The preferences for the test shell.
     static WebPreferences* web_prefs_;
@@ -363,4 +426,5 @@ private:
     bool dump_stats_table_on_exit_;
 };
 
-#endif // WEBKIT_TOOLS_TEST_SHELL_TEST_SHELL_H_
+#endif  // WEBKIT_TOOLS_TEST_SHELL_TEST_SHELL_H_
+

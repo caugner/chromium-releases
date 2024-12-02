@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,15 +9,18 @@
 #include <gdk/gdk.h>
 #endif
 
-#include "app/gfx/font.h"
+#include <string>
+
 #include "base/basictypes.h"
 #include "base/keyboard_codes.h"
+#include "base/logging.h"
 #include "base/string16.h"
+#include "gfx/font.h"
 #include "views/view.h"
 #include "third_party/skia/include/core/SkColor.h"
 
 #ifdef UNIT_TEST
-#include "app/gfx/native_widget_types.h"
+#include "gfx/native_widget_types.h"
 #include "views/controls/textfield/native_textfield_wrapper.h"
 #endif
 
@@ -109,8 +112,9 @@ class Textfield : public View {
   bool read_only() const { return read_only_; }
   void SetReadOnly(bool read_only);
 
-  // Returns true if the Textfield is a password field.
+  // Gets/Sets whether or not this Textfield is a password field.
   bool IsPassword() const;
+  void SetPassword(bool password);
 
   // Whether the text field is multi-line or not, must be set when the text
   // field is created, using StyleFlags.
@@ -181,11 +185,29 @@ class Textfield : public View {
   bool draw_border() const { return draw_border_; }
   void RemoveBorder();
 
+  // Sets the text to display when empty.
+  void set_text_to_display_when_empty(const string16& text) {
+    text_to_display_when_empty_ = text;
+#if !defined(OS_LINUX)
+    NOTIMPLEMENTED();
+#endif
+  }
+  const string16& text_to_display_when_empty() {
+    return text_to_display_when_empty_;
+  }
+
+  // Updates all properties on the textfield. This is invoked internally.
+  // Users of Textfield never need to invoke this directly.
+  void UpdateAllProperties();
+
   // Invoked by the edit control when the value changes. This method set
   // the text_ member variable to the value contained in edit control.
   // This is important because the edit control can be replaced if it has
   // been deleted during a window close.
   void SyncText();
+
+  // Returns whether or not an IME is composing text.
+  bool IsIMEComposing() const;
 
 #ifdef UNIT_TEST
   gfx::NativeView GetTestingHandle() const {
@@ -200,15 +222,17 @@ class Textfield : public View {
   virtual void AboutToRequestFocusFromTabTraversal(bool reverse);
   virtual bool SkipDefaultKeyEventProcessing(const KeyEvent& e);
   virtual void SetEnabled(bool enabled);
+  virtual void PaintFocusBorder(gfx::Canvas* canvas);
+
+  // Accessibility accessors, overridden from View:
+  virtual bool GetAccessibleRole(AccessibilityTypes::Role* role);
+  virtual bool GetAccessibleState(AccessibilityTypes::State* state);
+  virtual bool GetAccessibleValue(std::wstring* value);
 
  protected:
   virtual void Focus();
   virtual void ViewHierarchyChanged(bool is_add, View* parent, View* child);
   virtual std::string GetClassName() const;
-
-  // Creates a new native wrapper properly initialized and returns it. Ownership
-  // is passed to the caller.
-  NativeTextfieldWrapper* CreateWrapper();
 
   // The object that actually implements the native text field.
   NativeTextfieldWrapper* native_wrapper_;
@@ -260,6 +284,12 @@ class Textfield : public View {
   // TODO(beng): remove this once NativeTextfieldWin subclasses
   //             NativeControlWin.
   bool initialized_;
+
+  // The storage string for the accessibility name associated with this control.
+  std::wstring accessible_name_;
+
+  // Text to display when empty.
+  string16 text_to_display_when_empty_;
 
   DISALLOW_COPY_AND_ASSIGN(Textfield);
 };

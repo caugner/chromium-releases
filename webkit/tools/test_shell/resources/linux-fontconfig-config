@@ -111,4 +111,45 @@
       <string>Times New Roman</string>
     </edit>
   </match>
+
+  <match target="pattern">
+    <test name="family" compare="eq">
+      <string>NonAntiAliasedSans</string>
+    </test>
+    <edit name="family" mode="assign">
+      <string>Arial</string>
+    </edit>
+    <edit name="antialias" mode="assign">
+      <bool>false</bool>
+    </edit>
+  </match>
+
+  <match target="pattern">
+    <test name="family" compare="eq">
+      <string>SlightHintedGeorgia</string>
+    </test>
+    <edit name="family" mode="assign">
+      <string>Georgia</string>
+    </edit>
+    <edit name="hintstyle" mode="assign">
+      <const>hintslight</const>
+    </edit>
+  </match>
+
+  <match target="pattern">
+    <test name="family" compare="eq">
+      <string>NonHintedSans</string>
+    </test>
+    <edit name="family" mode="assign">
+      <string>Verdana</string>
+    </edit>
+    <!-- These deliberately contradict each other. The 'hinting' preference
+         should take priority -->
+    <edit name="hintstyle" mode="assign">
+      <const>hintfull</const>
+    </edit>
+   <edit name="hinting" mode="assign">
+      <bool>false</bool>
+    </edit>
+  </match>
 </fontconfig>

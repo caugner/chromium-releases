@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,12 @@
 #include "views/screen.h"
 #endif
 
-#include "app/gfx/canvas.h"
 #include "app/l10n_util.h"
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/keyboard_codes.h"
 #include "base/message_loop.h"
+#include "gfx/canvas.h"
 #include "grit/app_strings.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "views/controls/menu/menu.h"
@@ -107,9 +108,8 @@ class BitmapScrollBarThumb : public View {
     // Make sure the thumb is never sized smaller than its minimum possible
     // display size.
     gfx::Size prefsize = GetPreferredSize();
-    size = std::max(size,
-                    static_cast<int>(scroll_bar_->IsHorizontal() ?
-                        prefsize.width() : prefsize.height()));
+    size = std::max(size, scroll_bar_->IsHorizontal() ? prefsize.width() :
+                                                        prefsize.height());
     gfx::Rect thumb_bounds = bounds();
     if (scroll_bar_->IsHorizontal()) {
       thumb_bounds.set_width(size);
@@ -305,7 +305,7 @@ gfx::Rect BitmapScrollBar::GetTrackBounds() const {
     if (!show_scroll_buttons_)
       prefsize.set_width(0);
     int new_width =
-        std::max(0, static_cast<int>(width() - (prefsize.width() * 2)));
+        std::max(0, width() - (prefsize.width() * 2));
     gfx::Rect track_bounds(prefsize.width(), 0, new_width, prefsize.height());
     return track_bounds;
   }
@@ -546,13 +546,12 @@ enum ScrollBarContextMenuCommands {
 };
 
 void BitmapScrollBar::ShowContextMenu(View* source,
-                                      int x,
-                                      int y,
+                                      const gfx::Point& p,
                                       bool is_mouse_gesture) {
   Widget* widget = GetWidget();
   gfx::Rect widget_bounds;
   widget->GetBounds(&widget_bounds, true);
-  gfx::Point temp_pt(x - widget_bounds.x(), y - widget_bounds.y());
+  gfx::Point temp_pt(p.x() - widget_bounds.x(), p.y() - widget_bounds.y());
   View::ConvertPointFromWidget(this, &temp_pt);
   context_menu_mouse_position_ = IsHorizontal() ? temp_pt.x() : temp_pt.y();
 
@@ -568,7 +567,7 @@ void BitmapScrollBar::ShowContextMenu(View* source,
   menu->AppendSeparator();
   menu->AppendDelegateMenuItem(ScrollBarContextMenuCommand_ScrollPrev);
   menu->AppendDelegateMenuItem(ScrollBarContextMenuCommand_ScrollNext);
-  menu->RunMenuAt(x, y);
+  menu->RunMenuAt(p.x(), p.y());
 }
 
 ///////////////////////////////////////////////////////////////////////////////

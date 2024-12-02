@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,110 +7,73 @@
 
 #include <string>
 
-#include "net/url_request/url_request_inet_job.h"
+#include "net/base/auth.h"
+#include "net/base/completion_callback.h"
+#include "net/ftp/ftp_request_info.h"
+#include "net/ftp/ftp_transaction.h"
+#include "net/url_request/url_request_job.h"
 
-// A basic FTP job that handles download files and showing directory listings.
-class URLRequestFtpJob : public URLRequestInetJob {
+class URLRequestContext;
+
+namespace net {
+struct list_state;
+}
+
+// A URLRequestJob subclass that is built on top of FtpTransaction. It
+// provides an implementation for FTP.
+class URLRequestFtpJob : public URLRequestJob {
  public:
+
+  explicit URLRequestFtpJob(URLRequest* request);
+
   static URLRequestJob* Factory(URLRequest* request, const std::string& scheme);
 
+  // URLRequestJob methods:
+  virtual bool GetMimeType(std::string* mime_type) const;
+
+ private:
   virtual ~URLRequestFtpJob();
 
   // URLRequestJob methods:
   virtual void Start();
-  virtual bool GetMimeType(std::string* mime_type) const;
-
-  // URLRequestInetJob methods:
-  virtual void OnIOComplete(const AsyncResult& result);
-
- protected:
-  explicit URLRequestFtpJob(URLRequest* request);
-
-  // Starts the WinInet request.
-  virtual void SendRequest();
-
-  virtual int CallInternetRead(char* dest, int dest_size, int *bytes_read);
-  virtual bool GetReadBytes(const AsyncResult& result, int* bytes_read);
-  virtual void OnCancelAuth();
-  virtual void OnSetAuth();
+  virtual void Kill();
+  virtual net::LoadState GetLoadState() const;
   virtual bool NeedsAuth();
-  virtual void GetAuthChallengeInfo(scoped_refptr<net::AuthChallengeInfo>*);
-  virtual bool IsRedirectResponse(GURL* location, int* http_status_code);
+  virtual void GetAuthChallengeInfo(
+      scoped_refptr<net::AuthChallengeInfo>* auth_info);
+  virtual void SetAuth(const std::wstring& username,
+                       const std::wstring& password);
+  virtual void CancelAuth();
 
- private:
-  // Called after InternetConnect successfully connects to server.
-  void OnConnect();
+  // TODO(ibrar):  Yet to give another look at this function.
+  virtual uint64 GetUploadProgress() const { return 0; }
+  virtual bool ReadRawData(net::IOBuffer* buf, int buf_size, int *bytes_read);
 
-  // Called after FtpSetCurrentDirectory attempts to change current dir.
-  void OnSetCurrentDirectory(DWORD last_error);
+  void DestroyTransaction();
+  void StartTransaction();
 
-  // Requests the next file in the directory listing from WinInet.
-  void FindNextFile();
+  void OnStartCompleted(int result);
+  void OnReadCompleted(int result);
 
-  // Called when the first file in a directory listing is available.
-  void OnFindFirstFile(DWORD last_error);
+  void RestartTransactionWithAuth();
 
-  // Called when a file in a directory listing is available.
-  void OnFindFile(DWORD last_error);
+  void LogFtpServerType(char server_type);
 
-  // Call this when starting a directory listing to setup the html.
-  void OnStartDirectoryTraversal();
+  net::FtpRequestInfo request_info_;
+  scoped_ptr<net::FtpTransaction> transaction_;
 
-  // Call this at the end of a directory listing to complete the html.
-  void OnFinishDirectoryTraversal();
+  net::CompletionCallbackImpl<URLRequestFtpJob> start_callback_;
+  net::CompletionCallbackImpl<URLRequestFtpJob> read_callback_;
 
-  // If given data, writes it to the directory listing html.  If
-  // call_io_complete is true, will also notify the parent class that we wrote
-  // data in the given buffer.
-  int WriteData(const std::string* data, bool call_io_complete);
+  bool read_in_progress_;
 
-  // Continuation function for calling OnIOComplete through the message loop.
-  virtual void ContinueIOComplete(int bytes_written);
+  scoped_refptr<net::AuthData> server_auth_;
 
-  // Continuation function for calling NotifyHeadersComplete through the message
-  // loop.
-  virtual void ContinueNotifyHeadersComplete();
+  // Keep a reference to the url request context to be sure it's not deleted
+  // before us.
+  scoped_refptr<URLRequestContext> context_;
 
-  typedef enum {
-    // Initial state of the ftp job.
-    START = 0x200,
-    // Opening the url.
-    CONNECTING,
-    // Attempting to change current dir to match request.
-    SETTING_CUR_DIRECTORY,
-    // Retrieving first file information in cur dir (by FtpFindFirstFile).
-    FINDING_FIRST_FILE,
-    // Retrieving the directory listing (if directory).
-    GETTING_DIRECTORY,
-    // Initiate access to file by call to FtpOpenFile (if file).
-    GETTING_FILE_HANDLE,
-    // Retrieving the file (if file).
-    GETTING_FILE,
-    // URLRequestInetJob is reading the response now.
-    DONE
-  } FtpJobState;
-
-  // The FtpJob has several asynchronous operations which happen
-  // in sequence.  The state keeps track of which asynchronous IO
-  // is pending at any given point in time.
-  FtpJobState state_;
-
-  // In IE 4 and before, this pointer passed to asynchronous InternetReadFile
-  // calls is where the number of read bytes is written to.
-  DWORD bytes_read_;
-
-  bool is_directory_;  // does the url point to a file or directory
-  WIN32_FIND_DATAA find_data_;
-  std::string directory_html_;  // if url is directory holds html
-
-  // When building a directory listing, we need to temporarily hold on to the
-  // buffer in between the time a Read() call comes in and we get the file
-  // entry from WinInet.
-  char* dest_;
-  int dest_size_;
-
-
-  DISALLOW_EVIL_CONSTRUCTORS(URLRequestFtpJob);
+  DISALLOW_COPY_AND_ASSIGN(URLRequestFtpJob);
 };
 
 #endif  // NET_URL_REQUEST_URL_REQUEST_FTP_JOB_H_

@@ -1,6 +1,6 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved. Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "views/controls/button/native_button.h"
 
@@ -10,18 +10,24 @@
 #endif
 
 #include "app/l10n_util.h"
+#include "base/i18n/rtl.h"
 #include "base/keyboard_codes.h"
 #include "base/logging.h"
+#include "views/controls/native/native_view_host.h"
 
 namespace views {
-
-static const int kButtonBorderHWidth = 8;
 
 #if defined(OS_WIN)
 // The min size in DLUs comes from
 // http://msdn.microsoft.com/library/default.asp?url=/library/en-us/dnwue/html/ch14e.asp
 static const int kMinWidthDLUs = 50;
 static const int kMinHeightDLUs = 14;
+
+// Horizontal padding (on each side).
+static const int kButtonBorderHWidth = 8;
+#else
+// Horizontal padding (on each side).
+static const int kButtonBorderHWidth = 0;
 #endif
 
 // static
@@ -34,6 +40,7 @@ NativeButton::NativeButton(ButtonListener* listener)
     : Button(listener),
       native_wrapper_(NULL),
       is_default_(false),
+      need_elevation_(false),
       ignore_minimum_size_(false) {
   InitBorder();
   SetFocusable(true);
@@ -43,6 +50,7 @@ NativeButton::NativeButton(ButtonListener* listener, const std::wstring& label)
     : Button(listener),
       native_wrapper_(NULL),
       is_default_(false),
+      need_elevation_(false),
       ignore_minimum_size_(false) {
   SetLabel(label);  // SetLabel takes care of label layout in RTL UI.
   InitBorder();
@@ -66,11 +74,14 @@ void NativeButton::SetLabel(const std::wstring& label) {
   // RTL strings explicitly (using the appropriate Unicode formatting) so that
   // Windows displays the text correctly regardless of the HWND hierarchy.
   std::wstring localized_label;
-  if (l10n_util::AdjustStringForLocaleDirection(label_, &localized_label))
+  if (base::i18n::AdjustStringForLocaleDirection(label_, &localized_label))
     label_ = localized_label;
 
   if (native_wrapper_)
     native_wrapper_->UpdateLabel();
+
+  // Update the accessible name whenever the label changes.
+  SetAccessibleName(label);
 }
 
 void NativeButton::SetIsDefault(bool is_default) {
@@ -81,6 +92,12 @@ void NativeButton::SetIsDefault(bool is_default) {
   else
     RemoveAccelerator(Accelerator(base::VKEY_RETURN, false, false, false));
   SetAppearsAsDefault(is_default);
+}
+
+void NativeButton::SetNeedElevation(bool need_elevation) {
+  need_elevation_ = need_elevation;
+  if (native_wrapper_)
+    native_wrapper_->UpdateLabel();
 }
 
 void NativeButton::SetAppearsAsDefault(bool appears_as_default) {
@@ -189,6 +206,11 @@ void NativeButton::Focus() {
   else
     Button::Focus();  // Will focus the RootView window (so we still get
                       // keyboard messages).
+}
+
+void NativeButton::PaintFocusBorder(gfx::Canvas* canvas) {
+  if (NativeViewHost::kRenderNativeControlFocus)
+    View::PaintFocusBorder(canvas);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

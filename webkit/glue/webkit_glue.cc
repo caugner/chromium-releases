@@ -2,63 +2,60 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_WIN)
 #include <objidl.h>
 #include <mlang.h>
-#elif defined(OS_LINUX) || defined(OS_FREEBSD)
+#elif defined(OS_POSIX) && !defined(OS_MACOSX)
 #include <sys/utsname.h>
 #endif
 
-#include "BackForwardList.h"
-#include "Document.h"
-#include "FrameTree.h"
-#include "FrameView.h"
-#include "Frame.h"
-#include "GlyphPageTreeNode.h"
-#include "HistoryItem.h"
-#include "ImageSource.h"
-#include "KURL.h"
-#include "Page.h"
-#include "PlatformString.h"
-#include "RenderTreeAsText.h"
-#include "RenderView.h"
-#include "ScriptController.h"
-#include "SharedBuffer.h"
-
-#undef LOG
 #include "base/file_version_info.h"
+#include "base/logging.h"
 #include "base/singleton.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/sys_string_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "net/base/escape.h"
 #include "skia/ext/platform_canvas.h"
+#if defined(OS_MACOSX)
+#include "skia/ext/skia_utils_mac.h"
+#endif
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "webkit/api/public/WebHistoryItem.h"
-#include "webkit/api/public/WebString.h"
-#include "webkit/api/public/WebVector.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebData.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDocument.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebElement.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebGlyphCache.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebHistoryItem.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebImage.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebKit.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebSize.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebVector.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #if defined(OS_WIN)
-#include "webkit/api/public/win/WebInputEventFactory.h"
+#include "third_party/WebKit/WebKit/chromium/public/win/WebInputEventFactory.h"
 #endif
 #include "webkit/glue/glue_serialize.h"
-#include "webkit/glue/glue_util.h"
-#include "webkit/glue/webframe_impl.h"
-#include "webkit/glue/webview_impl.h"
+#include "v8/include/v8.h"
 
 #include "webkit_version.h"  // Generated
 
 using WebKit::WebCanvas;
+using WebKit::WebData;
+using WebKit::WebElement;
 using WebKit::WebFrame;
+using WebKit::WebGlyphCache;
 using WebKit::WebHistoryItem;
+using WebKit::WebImage;
+using WebKit::WebSize;
 using WebKit::WebString;
 using WebKit::WebVector;
 using WebKit::WebView;
-
-namespace {
 
 static const char kLayoutTestsPattern[] = "/LayoutTests/";
 static const std::string::size_type kLayoutTestsPatternSize =
@@ -68,8 +65,7 @@ static const char kDataUrlPattern[] = "data:";
 static const std::string::size_type kDataUrlPatternSize =
     arraysize(kDataUrlPattern) - 1;
 static const char kFileTestPrefix[] = "(file test):";
-
-}
+static const char kChrome1ProductString[] = "Chrome/1.0.154.53";
 
 //------------------------------------------------------------------------------
 // webkit_glue impl:
@@ -80,38 +76,35 @@ namespace webkit_glue {
 bool g_forcefully_terminate_plugin_process = false;
 
 void SetJavaScriptFlags(const std::wstring& str) {
-#if USE(V8)
+#if WEBKIT_USING_V8
   std::string utf8_str = WideToUTF8(str);
-  WebCore::ScriptController::setFlags(utf8_str.data(), static_cast<int>(utf8_str.size()));
+  v8::V8::SetFlagsFromString(
+      utf8_str.data(), static_cast<int>(utf8_str.size()));
 #endif
 }
 
 void EnableWebCoreNotImplementedLogging() {
-  WebCore::LogNotYetImplemented.state = WTFLogChannelOn;
+  WebKit::enableLogChannel("NotYetImplemented");
 }
 
 std::wstring DumpDocumentText(WebFrame* web_frame) {
-  WebFrameImpl* webFrameImpl = static_cast<WebFrameImpl*>(web_frame);
-  WebCore::Frame* frame = webFrameImpl->frame();
-
   // We use the document element's text instead of the body text here because
   // not all documents have a body, such as XML documents.
-  WebCore::Element* documentElement = frame->document()->documentElement();
-  if (!documentElement) {
+  WebElement document_element = web_frame->document().documentElement();
+  if (document_element.isNull())
     return std::wstring();
-  }
-  return StringToStdWString(documentElement->innerText());
+
+  return UTF16ToWideHack(document_element.innerText());
 }
 
 std::wstring DumpFramesAsText(WebFrame* web_frame, bool recursive) {
-  WebFrameImpl* webFrameImpl = static_cast<WebFrameImpl*>(web_frame);
   std::wstring result;
 
   // Add header for all but the main frame. Skip empty frames.
-  if (webFrameImpl->parent() &&
-      webFrameImpl->frame()->document()->documentElement()) {
+  if (web_frame->parent() &&
+      !web_frame->document().documentElement().isNull()) {
     result.append(L"\n--------\nFrame: '");
-    result.append(UTF16ToWideHack(webFrameImpl->name()));
+    result.append(UTF16ToWideHack(web_frame->name()));
     result.append(L"'\n--------\n");
   }
 
@@ -119,45 +112,64 @@ std::wstring DumpFramesAsText(WebFrame* web_frame, bool recursive) {
   result.append(L"\n");
 
   if (recursive) {
-    WebCore::Frame* child = webFrameImpl->frame()->tree()->firstChild();
-    for (; child; child = child->tree()->nextSibling()) {
-      result.append(
-          DumpFramesAsText(WebFrameImpl::FromFrame(child), recursive));
-    }
+    WebFrame* child = web_frame->firstChild();
+    for (; child; child = child->nextSibling())
+      result.append(DumpFramesAsText(child, recursive));
   }
 
   return result;
 }
 
 std::wstring DumpRenderer(WebFrame* web_frame) {
-  WebFrameImpl* webFrameImpl = static_cast<WebFrameImpl*>(web_frame);
-  WebCore::Frame* frame = webFrameImpl->frame();
+  return UTF16ToWideHack(web_frame->renderTreeAsText());
+}
 
-  WebCore::String frameText =
-      WebCore::externalRepresentation(frame->contentRenderer());
-  return StringToStdWString(frameText);
+bool CounterValueForElementById(WebFrame* web_frame, const std::string& id,
+                                std::wstring* counter_value) {
+  WebString result =
+      web_frame->counterValueForElementById(WebString::fromUTF8(id));
+  if (result.isNull())
+    return false;
+
+  *counter_value = UTF16ToWideHack(result);
+  return true;
+}
+
+int PageNumberForElementById(WebFrame* web_frame,
+                             const std::string& id,
+                             float page_width_in_pixels,
+                             float page_height_in_pixels) {
+  return web_frame->pageNumberForElementById(WebString::fromUTF8(id),
+                                             page_width_in_pixels,
+                                             page_height_in_pixels);
+}
+
+int NumberOfPages(WebFrame* web_frame,
+                  float page_width_in_pixels,
+                  float page_height_in_pixels) {
+  WebSize size(page_width_in_pixels, page_height_in_pixels);
+  int number_of_pages = web_frame->printBegin(size);
+  web_frame->printEnd();
+  return number_of_pages;
 }
 
 std::wstring DumpFrameScrollPosition(WebFrame* web_frame, bool recursive) {
-  WebFrameImpl* webFrameImpl = static_cast<WebFrameImpl*>(web_frame);
-  WebCore::IntSize offset = webFrameImpl->frameview()->scrollOffset();
+  gfx::Size offset = web_frame->scrollOffset();
   std::wstring result;
 
   if (offset.width() > 0 || offset.height() > 0) {
-    if (webFrameImpl->parent()) {
-      StringAppendF(&result, L"frame '%ls' ", StringToStdWString(
-          webFrameImpl->frame()->tree()->name()).c_str());
+    if (web_frame->parent()) {
+      StringAppendF(&result, L"frame '%ls' ", UTF16ToWide(
+          web_frame->name()).c_str());
     }
     StringAppendF(&result, L"scrolled to %d,%d\n",
                   offset.width(), offset.height());
   }
 
   if (recursive) {
-    WebCore::Frame* child = webFrameImpl->frame()->tree()->firstChild();
-    for (; child; child = child->tree()->nextSibling()) {
-      result.append(DumpFrameScrollPosition(WebFrameImpl::FromFrame(child),
-                                            recursive));
-    }
+    WebFrame* child = web_frame->firstChild();
+    for (; child; child = child->nextSibling())
+      result.append(DumpFrameScrollPosition(child, recursive));
   }
 
   return result;
@@ -228,18 +240,12 @@ std::wstring DumpHistoryState(const std::string& history_state, int indent,
 }
 
 void ResetBeforeTestRun(WebView* view) {
-  WebFrameImpl* webframe = static_cast<WebFrameImpl*>(view->mainFrame());
-  WebCore::Frame* frame = webframe->frame();
+  WebFrame* web_frame = view->mainFrame();
 
   // Reset the main frame name since tests always expect it to be empty.  It
   // is normally not reset between page loads (even in IE and FF).
-  if (frame && frame->tree())
-    frame->tree()->setName("");
-
-  // This is papering over b/850700.  But it passes a few more tests, so we'll
-  // keep it for now.
-  if (frame && frame->script())
-    frame->script()->setEventHandlerLineNumber(0);
+  if (web_frame)
+    web_frame->clearName();
 
 #if defined(OS_WIN)
   // Reset the last click information so the clicks generated from previous
@@ -259,25 +265,24 @@ void DumpLeakedObject(const char* file, int line, const char* object, int count)
 
 void CheckForLeaks() {
 #ifndef NDEBUG
-  int count = WebFrameImpl::live_object_count();
+  int count = WebFrame::instanceCount();
   if (count)
     DumpLeakedObject(__FILE__, __LINE__, "WebFrame", count);
 #endif
 }
 
 bool DecodeImage(const std::string& image_data, SkBitmap* image) {
-   RefPtr<WebCore::SharedBuffer> buffer(
-       WebCore::SharedBuffer::create(image_data.data(),
-                                     static_cast<int>(image_data.length())));
-  WebCore::ImageSource image_source;
-  image_source.setData(buffer.get(), true);
+  WebData web_data(image_data.data(), image_data.length());
+  WebImage web_image(WebImage::fromData(web_data, WebSize()));
+  if (web_image.isNull())
+    return false;
 
-  if (image_source.frameCount() > 0) {
-    *image = *reinterpret_cast<SkBitmap*>(image_source.createFrameAtIndex(0));
-    return true;
-  }
-  // We failed to decode the image.
-  return false;
+#if defined(OS_MACOSX)
+  *image = gfx::CGImageToSkBitmap(web_image.getCGImageRef());
+#else
+  *image = web_image.getSkBitmap();
+#endif
+  return true;
 }
 
 // NOTE: This pair of conversion functions are here instead of in glue_util.cc
@@ -301,11 +306,11 @@ WebString FilePathStringToWebString(const FilePath::StringType& str) {
 #endif
 }
 
-FilePath WebStringToFilePath(const WebKit::WebString& str) {
+FilePath WebStringToFilePath(const WebString& str) {
   return FilePath(WebStringToFilePathString(str));
 }
 
-WebKit::WebString FilePathToWebString(const FilePath& file_path) {
+WebString FilePathToWebString(const FilePath& file_path) {
   return FilePathStringToWebString(file_path.value());
 }
 
@@ -322,6 +327,13 @@ struct UserAgentState {
   }
 
   std::string user_agent;
+
+  // The UA string when we're pretending to be Chrome 1.
+  std::string mimic_chrome1_user_agent;
+
+  // The UA string when we're pretending to be Windows Chrome.
+  std::string mimic_windows_user_agent;
+
   bool user_agent_requested;
   bool user_agent_is_overridden;
 };
@@ -339,7 +351,7 @@ std::string BuildOSCpuInfo() {
                                                &os_minor_version,
                                                &os_bugfix_version);
 #endif
-#if !defined(OS_WIN) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
   // Should work on any Posix system.
   struct utsname unixinfo;
   uname(&unixinfo);
@@ -381,13 +393,18 @@ std::string BuildOSCpuInfo() {
   return os_cpu;
 }
 
-void BuildUserAgent(std::string* result) {
+// Construct the User-Agent header, filling in |result|.
+// The other parameters are workarounds for broken websites:
+// - If mimic_chrome1 is true, produce a fake Chrome 1 string.
+// - If mimic_windows is true, produce a fake Windows Chrome string.
+void BuildUserAgent(bool mimic_chrome1, bool mimic_windows,
+                    std::string* result) {
   const char kUserAgentPlatform[] =
 #if defined(OS_WIN)
       "Windows";
 #elif defined(OS_MACOSX)
       "Macintosh";
-#elif defined(OS_LINUX)
+#elif defined(USE_X11)
       "X11";              // strange, but that's what Firefox uses
 #else
       "?";
@@ -403,13 +420,17 @@ void BuildUserAgent(std::string* result) {
   // maximally compatible with Safari, we hope!!
   std::string product;
 
-  scoped_ptr<FileVersionInfo> version_info(
-      FileVersionInfo::CreateFileVersionInfoForCurrentModule());
-  if (version_info.get()) {
-    product = "Chrome/" + WideToASCII(version_info->product_version());
+  if (mimic_chrome1) {
+    product = kChrome1ProductString;
   } else {
-    DLOG(WARNING) << "Unknown product version";
-    product = "Chrome/0.0.0.0";
+    scoped_ptr<FileVersionInfo> version_info(
+        FileVersionInfo::CreateFileVersionInfoForCurrentModule());
+    if (version_info.get()) {
+      product = "Chrome/" + WideToASCII(version_info->product_version());
+    } else {
+      DLOG(WARNING) << "Unknown product version";
+      product = "Chrome/0.0.0.0";
+    }
   }
 
   // Derived from Safari's UA string.
@@ -417,9 +438,9 @@ void BuildUserAgent(std::string* result) {
       result,
       "Mozilla/5.0 (%s; %c; %s; %s) AppleWebKit/%d.%d"
       " (KHTML, like Gecko) %s Safari/%d.%d",
-      kUserAgentPlatform,
+      mimic_windows ? "Windows" : kUserAgentPlatform,
       kUserAgentSecurity,
-      BuildOSCpuInfo().c_str(),
+      ((mimic_windows ? "Windows " : "") + BuildOSCpuInfo()).c_str(),
       kUserAgentLocale,
       WEBKIT_VERSION_MAJOR,
       WEBKIT_VERSION_MINOR,
@@ -430,7 +451,7 @@ void BuildUserAgent(std::string* result) {
 }
 
 void SetUserAgentToDefault() {
-  BuildUserAgent(&g_user_agent->user_agent);
+  BuildUserAgent(false, false, &g_user_agent->user_agent);
 }
 
 }  // namespace
@@ -449,6 +470,29 @@ const std::string& GetUserAgent(const GURL& url) {
   if (g_user_agent->user_agent.empty())
     SetUserAgentToDefault();
   g_user_agent->user_agent_requested = true;
+  if (!g_user_agent->user_agent_is_overridden) {
+    // Workarounds for sites that use misguided UA sniffing.
+    if (MatchPatternASCII(url.host(), "*.pointroll.com")) {
+      // For cnn.com, which uses pointroll.com to serve their front door promo,
+      // we must spoof Chrome 1.0 in order to avoid a blank page.
+      // http://crbug.com/25934
+      // TODO(dglazkov): Remove this once CNN's front door promo is
+      // over or when pointroll fixes their sniffing.
+      if (g_user_agent->mimic_chrome1_user_agent.empty())
+        BuildUserAgent(true, false, &g_user_agent->mimic_chrome1_user_agent);
+      return g_user_agent->mimic_chrome1_user_agent;
+    }
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+    else if (MatchPatternASCII(url.host(), "*.mail.yahoo.com")) {
+      // mail.yahoo.com is ok with Windows Chrome but not Linux Chrome.
+      // http://bugs.chromium.org/11136
+      // TODO(evanm): remove this if Yahoo fixes their sniffing.
+      if (g_user_agent->mimic_windows_user_agent.empty())
+        BuildUserAgent(false, true, &g_user_agent->mimic_windows_user_agent);
+      return g_user_agent->mimic_windows_user_agent;
+    }
+#endif
+  }
   return g_user_agent->user_agent;
 }
 
@@ -477,7 +521,7 @@ WebCanvas* ToWebCanvas(skia::PlatformCanvas* canvas) {
 }
 
 int GetGlyphPageCount() {
-  return WebCore::GlyphPageTreeNode::treeGlyphPageCount();
+  return WebGlyphCache::pageCount();
 }
 
 bool g_enable_media_cache = false;

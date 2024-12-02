@@ -7,14 +7,15 @@
 #include <gtk/gtk.h>
 
 #include "app/l10n_util.h"
+#include "app/menus/menu_model.h"
 #include "base/message_loop.h"
 #include "chrome/app/chrome_dll_resource.h"
+#include "chrome/browser/back_forward_menu_model.h"
 #include "chrome/browser/browser.h"
-#include "chrome/browser/gtk/back_forward_menu_model_gtk.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/gtk/menu_gtk.h"
 #include "chrome/browser/profile.h"
-#include "chrome/common/gtk_util.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 
@@ -25,13 +26,14 @@ BackForwardButtonGtk::BackForwardButtonGtk(Browser* browser, bool is_forward)
     : browser_(browser),
       is_forward_(is_forward),
       show_menu_factory_(this) {
-  int normal, active, highlight, depressed, tooltip;
+  int normal, active, highlight, depressed, background, tooltip;
   const char* stock;
   if (is_forward) {
     normal = IDR_FORWARD;
     active = IDR_FORWARD_P;
     highlight = IDR_FORWARD_H;
     depressed = IDR_FORWARD_D;
+    background = IDR_FORWARD_MASK;
     tooltip = IDS_TOOLTIP_FORWARD;
     stock = GTK_STOCK_GO_FORWARD;
   } else {
@@ -39,28 +41,29 @@ BackForwardButtonGtk::BackForwardButtonGtk(Browser* browser, bool is_forward)
     active = IDR_BACK_P;
     highlight = IDR_BACK_H;
     depressed = IDR_BACK_D;
+    background = IDR_BACK_MASK;
     tooltip = IDS_TOOLTIP_BACK;
     stock = GTK_STOCK_GO_BACK;
   }
   button_.reset(new CustomDrawButton(
       GtkThemeProvider::GetFrom(browser_->profile()),
-      normal, active, highlight, depressed, stock,
+      normal, active, highlight, depressed, background, stock,
       GTK_ICON_SIZE_SMALL_TOOLBAR));
   gtk_widget_set_tooltip_text(widget(),
                               l10n_util::GetStringUTF8(tooltip).c_str());
-  menu_model_.reset(new BackForwardMenuModelGtk(browser,
-      is_forward ?
-          BackForwardMenuModel::FORWARD_MENU :
-          BackForwardMenuModel::BACKWARD_MENU,
-      this));
+  menu_model_.reset(
+      new BackForwardMenuModel(browser,
+          is_forward ?
+              BackForwardMenuModel::FORWARD_MENU :
+              BackForwardMenuModel::BACKWARD_MENU));
 
   g_signal_connect(widget(), "clicked",
-                   G_CALLBACK(OnClick), this);
+                   G_CALLBACK(OnClickThunk), this);
   g_signal_connect(widget(), "button-press-event",
-                   G_CALLBACK(OnButtonPress), this);
+                   G_CALLBACK(OnButtonPressThunk), this);
   gtk_widget_add_events(widget(), GDK_POINTER_MOTION_MASK);
   g_signal_connect(widget(), "motion-notify-event",
-                   G_CALLBACK(OnMouseMove), this);
+                   G_CALLBACK(OnMouseMoveThunk), this);
 
   // Popup the menu as left-aligned relative to this widget rather than the
   // default of right aligned.
@@ -73,12 +76,16 @@ BackForwardButtonGtk::BackForwardButtonGtk(Browser* browser, bool is_forward)
 BackForwardButtonGtk::~BackForwardButtonGtk() {
 }
 
-void BackForwardButtonGtk::StoppedShowingMenu() {
+void BackForwardButtonGtk::StoppedShowing() {
   button_->UnsetPaintOverride();
 }
 
+bool BackForwardButtonGtk::AlwaysShowImages() const {
+  return true;
+}
+
 void BackForwardButtonGtk::ShowBackForwardMenu() {
-  menu_.reset(new MenuGtk(menu_model_.get(), true));
+  menu_.reset(new MenuGtk(this, menu_model_.get()));
   button_->SetPaintOverride(GTK_STATE_ACTIVE);
 
   // gtk_menu_popup will ignore the first mouse button release if it matches
@@ -89,51 +96,46 @@ void BackForwardButtonGtk::ShowBackForwardMenu() {
   menu_->Popup(widget(), 1, gtk_get_current_event_time());
 }
 
-// static
-void BackForwardButtonGtk::OnClick(GtkWidget* widget,
-                                   BackForwardButtonGtk* button) {
-  button->show_menu_factory_.RevokeAll();
-  GdkEventButton* event =
-      reinterpret_cast<GdkEventButton*>(gtk_get_current_event());
+void BackForwardButtonGtk::OnClick(GtkWidget* widget) {
+  show_menu_factory_.RevokeAll();
 
-  button->browser_->ExecuteCommandWithDisposition(
-      button->is_forward_ ? IDC_FORWARD : IDC_BACK,
-      event_utils::DispositionFromEventFlags(event->state));
+  browser_->ExecuteCommandWithDisposition(
+      is_forward_ ? IDC_FORWARD : IDC_BACK,
+      gtk_util::DispositionForCurrentButtonPressEvent());
 }
 
-// static
 gboolean BackForwardButtonGtk::OnButtonPress(GtkWidget* widget,
-    GdkEventButton* event, BackForwardButtonGtk* button) {
+                                             GdkEventButton* event) {
   if (event->button == 3)
-    button->ShowBackForwardMenu();
+    ShowBackForwardMenu();
 
   if (event->button != 1)
     return FALSE;
 
-  button->y_position_of_last_press_ = static_cast<int>(event->y);
+  y_position_of_last_press_ = static_cast<int>(event->y);
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      button->show_menu_factory_.NewRunnableMethod(
+      show_menu_factory_.NewRunnableMethod(
           &BackForwardButtonGtk::ShowBackForwardMenu),
       kMenuTimerDelay);
   return FALSE;
 }
 
-// static
 gboolean BackForwardButtonGtk::OnMouseMove(GtkWidget* widget,
-    GdkEventMotion* event, BackForwardButtonGtk* button) {
+                                           GdkEventMotion* event) {
   // If we aren't waiting to show the back forward menu, do nothing.
-  if (button->show_menu_factory_.empty())
+  if (show_menu_factory_.empty())
     return FALSE;
 
   // We only count moves about a certain threshold.
   GtkSettings* settings = gtk_widget_get_settings(widget);
   int drag_min_distance;
   g_object_get(settings, "gtk-dnd-drag-threshold", &drag_min_distance, NULL);
-  if (event->y - button->y_position_of_last_press_ < drag_min_distance)
+  if (event->y - y_position_of_last_press_ < drag_min_distance)
     return FALSE;
 
   // We will show the menu now. Cancel the delayed event.
-  button->show_menu_factory_.RevokeAll();
-  button->ShowBackForwardMenu();
+  show_menu_factory_.RevokeAll();
+  ShowBackForwardMenu();
   return FALSE;
 }
+

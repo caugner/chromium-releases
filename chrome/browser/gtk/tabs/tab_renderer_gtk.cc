@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,20 +7,21 @@
 #include <algorithm>
 #include <utility>
 
-#include "app/gfx/canvas_paint.h"
-#include "app/gfx/favicon_size.h"
-#include "app/gfx/skbitmap_operations.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
+#include "app/throb_animation.h"
 #include "chrome/browser/browser.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/gtk/bookmark_utils_gtk.h"
 #include "chrome/browser/gtk/custom_button.h"
 #include "chrome/browser/gtk/gtk_theme_provider.h"
+#include "chrome/browser/gtk/gtk_util.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/tab_contents/tab_contents.h"
-#include "chrome/common/gtk_util.h"
 #include "chrome/common/notification_service.h"
+#include "gfx/canvas_paint.h"
+#include "gfx/favicon_size.h"
+#include "gfx/skbitmap_operations.h"
 #include "grit/app_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -36,13 +37,14 @@ const int kFavIconTitleSpacing = 4;
 const int kTitleCloseButtonSpacing = 5;
 const int kStandardTitleWidth = 175;
 const int kDropShadowOffset = 2;
-const int kInactiveTabBackgroundOffsetY = 20;
-// When a non-pinned tab is pinned the width of the tab animates. If the width
-// of a pinned tab is >= kPinnedTabRendererAsTabWidth then the tab is rendered
-// as a normal tab. This is done to avoid having the title immediately
-// disappear when transitioning a tab from normal to pinned.
-const int kPinnedTabRendererAsTabWidth =
-    browser_defaults::kPinnedTabWidth + 30;
+const int kInactiveTabBackgroundOffsetY = 15;
+
+// When a non-mini-tab becomes a mini-tab the width of the tab animates. If
+// the width of a mini-tab is >= kMiniTabRendererAsNormalTabWidth then the tab
+// is rendered as a normal tab. This is done to avoid having the title
+// immediately disappear when transitioning a tab from normal to mini-tab.
+const int kMiniTabRendererAsNormalTabWidth =
+    browser_defaults::kMiniTabWidth + 30;
 
 // The tab images are designed to overlap the toolbar by 1 pixel. For now we
 // don't actually overlap the toolbar, so this is used to know how many pixels
@@ -54,6 +56,12 @@ const int kHoverDurationMs = 90;
 
 // How opaque to make the hover state (out of 1).
 const double kHoverOpacity = 0.33;
+
+// Max opacity for the mini-tab title change animation.
+const double kMiniTitleChangeThrobOpacity = 0.75;
+
+// Duration for when the title of an inactive mini-tab changes.
+const int kMiniTitleChangeThrobDuration = 1000;
 
 const SkScalar kTabCapWidth = 15;
 const SkScalar kTabTopCurveWidth = 4;
@@ -237,23 +245,24 @@ TabRendererGtk::TabRendererGtk(ThemeProvider* theme_provider)
       should_display_crashed_favicon_(false),
       loading_animation_(theme_provider),
       background_offset_x_(0),
+      background_offset_y_(kInactiveTabBackgroundOffsetY),
       close_button_color_(NULL) {
   InitResources();
 
-  data_.pinned = false;
-  data_.animating_pinned_change = false;
-
   tab_.Own(gtk_fixed_new());
   gtk_widget_set_app_paintable(tab_.get(), TRUE);
-  g_signal_connect(G_OBJECT(tab_.get()), "expose-event",
+  g_signal_connect(tab_.get(), "expose-event",
                    G_CALLBACK(OnExposeEvent), this);
-  g_signal_connect(G_OBJECT(tab_.get()), "size-allocate",
+  g_signal_connect(tab_.get(), "size-allocate",
                    G_CALLBACK(OnSizeAllocate), this);
   close_button_.reset(MakeCloseButton());
   gtk_widget_show(tab_.get());
 
   hover_animation_.reset(new SlideAnimation(this));
   hover_animation_->SetSlideDuration(kHoverDurationMs);
+
+  registrar_.Add(this, NotificationType::BROWSER_THEME_CHANGED,
+                 NotificationService::AllSources());
 }
 
 TabRendererGtk::~TabRendererGtk() {
@@ -264,7 +273,9 @@ TabRendererGtk::~TabRendererGtk() {
   }
 }
 
-void TabRendererGtk::UpdateData(TabContents* contents, bool loading_only) {
+void TabRendererGtk::UpdateData(TabContents* contents,
+                                bool phantom,
+                                bool loading_only) {
   DCHECK(contents);
 
   theme_provider_ = GtkThemeProvider::GetFrom(contents->profile());
@@ -274,6 +285,7 @@ void TabRendererGtk::UpdateData(TabContents* contents, bool loading_only) {
     data_.off_the_record = contents->profile()->IsOffTheRecord();
     data_.crashed = contents->is_crashed();
     data_.favicon = contents->GetFavIcon();
+    data_.phantom = phantom;
     // This is kind of a hacky way to determine whether our icon is the default
     // favicon. But the plumbing that would be necessary to do it right would
     // be a good bit of work and would sully code for other platforms which
@@ -306,16 +318,15 @@ void TabRendererGtk::UpdateFromModel() {
   }
 }
 
-void TabRendererGtk::set_pinned(bool pinned) {
-  data_.pinned = pinned;
+void TabRendererGtk::SetBlocked(bool blocked) {
+  if (data_.blocked == blocked)
+    return;
+  data_.blocked = blocked;
+  // TODO(zelidrag) bug 32399: Make tabs pulse on Linux as well.
 }
 
-bool TabRendererGtk::is_pinned() const {
-  return data_.pinned;
-}
-
-void TabRendererGtk::set_animating_pinned_change(bool value) {
-  data_.animating_pinned_change = value;
+bool TabRendererGtk::is_blocked() const {
+  return data_.blocked;
 }
 
 bool TabRendererGtk::IsSelected() const {
@@ -329,7 +340,7 @@ bool TabRendererGtk::IsVisible() const {
 void TabRendererGtk::SetVisible(bool visible) const {
   if (visible) {
     gtk_widget_show(tab_.get());
-    if (data_.pinned)
+    if (data_.mini)
       gtk_widget_show(close_button_->widget());
   } else {
     gtk_widget_hide_all(tab_.get());
@@ -368,7 +379,7 @@ void TabRendererGtk::PaintFavIconArea(GdkEventExpose* event) {
       theme_id = IDR_THEME_TAB_BACKGROUND_INCOGNITO;
     }
     if (!theme_provider_->HasCustomImage(theme_id))
-      offset_y = kInactiveTabBackgroundOffsetY;
+      offset_y = background_offset_y_;
   }
   SkBitmap* tab_bg = theme_provider_->GetBitmapNamed(theme_id);
   canvas.TileImageInt(*tab_bg,
@@ -376,16 +387,14 @@ void TabRendererGtk::PaintFavIconArea(GdkEventExpose* event) {
       favicon_bounds_.x(), favicon_bounds_.y(),
       favicon_bounds_.width(), favicon_bounds_.height());
 
-  // Draw our hover state.
   if (!IsSelected()) {
-    Animation* animation = hover_animation_.get();
-    if (animation->GetCurrentValue() > 0) {
+    double throb_value = GetThrobValue();
+    if (throb_value > 0) {
       SkRect bounds;
       bounds.set(favicon_bounds_.x(), favicon_bounds_.y(),
           favicon_bounds_.right(), favicon_bounds_.bottom());
-      canvas.saveLayerAlpha(&bounds,
-          static_cast<int>(animation->GetCurrentValue() * kHoverOpacity * 0xff),
-              SkCanvas::kARGB_ClipLayer_SaveFlag);
+      canvas.saveLayerAlpha(&bounds, static_cast<int>(throb_value * 0xff),
+                            SkCanvas::kARGB_ClipLayer_SaveFlag);
       canvas.drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
       SkBitmap* active_bg = theme_provider_->GetBitmapNamed(IDR_THEME_TOOLBAR);
       canvas.TileImageInt(*active_bg,
@@ -427,8 +436,8 @@ gfx::Size TabRendererGtk::GetStandardSize() {
 }
 
 // static
-int TabRendererGtk::GetPinnedWidth() {
-  return browser_defaults::kPinnedTabWidth;
+int TabRendererGtk::GetMiniWidth() {
+  return browser_defaults::kMiniTabWidth;
 }
 
 // static
@@ -486,9 +495,45 @@ gfx::Rect TabRendererGtk::GetRequisition() const {
                    requisition_.width(), requisition_.height());
 }
 
+void TabRendererGtk::StartMiniTabTitleAnimation() {
+  if (!mini_title_animation_.get()) {
+    mini_title_animation_.reset(new ThrobAnimation(this));
+    mini_title_animation_->SetThrobDuration(kMiniTitleChangeThrobDuration);
+  }
+
+  if (!mini_title_animation_->IsAnimating()) {
+    mini_title_animation_->StartThrobbing(2);
+  } else if (mini_title_animation_->cycles_remaining() <= 2) {
+    // The title changed while we're already animating. Add at most one more
+    // cycle. This is done in an attempt to smooth out pages that continuously
+    // change the title.
+    mini_title_animation_->set_cycles_remaining(
+        mini_title_animation_->cycles_remaining() + 2);
+  }
+}
+
+void TabRendererGtk::StopMiniTabTitleAnimation() {
+  if (mini_title_animation_.get())
+    mini_title_animation_->Stop();
+}
+
 void TabRendererGtk::SetBounds(const gfx::Rect& bounds) {
   requisition_ = bounds;
   gtk_widget_set_size_request(tab_.get(), bounds.width(), bounds.height());
+}
+
+void TabRendererGtk::Observe(NotificationType type,
+                             const NotificationSource& source,
+                             const NotificationDetails& details) {
+  DCHECK(type == NotificationType::BROWSER_THEME_CHANGED);
+
+  // Clear our cache when we receive a theme change notification because it
+  // contains cached bitmaps based off the previous theme.
+  for (BitmapCache::iterator it = cached_bitmaps_.begin();
+       it != cached_bitmaps_.end(); ++it) {
+    delete it->second.bitmap;
+  }
+  cached_bitmaps_.clear();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -519,7 +564,7 @@ void TabRendererGtk::AnimationEnded(const Animation* animation) {
 void TabRendererGtk::StartCrashAnimation() {
   if (!crash_animation_.get())
     crash_animation_.reset(new FavIconCrashAnimation(this));
-  crash_animation_->Reset();
+  crash_animation_->Stop();
   crash_animation_->Start();
 }
 
@@ -549,7 +594,7 @@ void TabRendererGtk::ResetCrashedFavIcon() {
 void TabRendererGtk::Paint(gfx::Canvas* canvas) {
   // Don't paint if we're narrower than we can render correctly. (This should
   // only happen during animations).
-  if (width() < GetMinimumUnselectedSize().width() && !is_pinned())
+  if (width() < GetMinimumUnselectedSize().width() && !mini())
     return;
 
   // See if the model changes whether the icons should be painted.
@@ -559,8 +604,14 @@ void TabRendererGtk::Paint(gfx::Canvas* canvas) {
       show_close_button != showing_close_button_)
     Layout();
 
-  PaintTabBackground(canvas);
-  if (!is_pinned() || width() > kPinnedTabRendererAsTabWidth)
+  if (!phantom()) {
+    // TODO: this isn't quite right. To match the Windows side we need to render
+    // phantom tabs to a separate layer than alpha composite that. This will do
+    // for now though.
+    PaintTabBackground(canvas);
+  }
+
+  if (!mini() || width() > kMiniTabRendererAsNormalTabWidth)
     PaintTitle(canvas);
 
   if (show_icon)
@@ -571,6 +622,12 @@ SkBitmap TabRendererGtk::PaintBitmap() {
   gfx::Canvas canvas(width(), height(), false);
   Paint(&canvas);
   return canvas.ExtractBitmap();
+}
+
+cairo_surface_t* TabRendererGtk::PaintToSurface() {
+  gfx::Canvas canvas(width(), height(), false);
+  Paint(&canvas);
+  return cairo_surface_reference(cairo_get_target(canvas.beginPlatformPaint()));
 }
 
 void TabRendererGtk::SchedulePaint() {
@@ -596,15 +653,15 @@ void TabRendererGtk::Layout() {
     int favicon_top = kTopPadding + (content_height - kFavIconSize) / 2;
     favicon_bounds_.SetRect(local_bounds.x(), favicon_top,
                             kFavIconSize, kFavIconSize);
-    if ((is_pinned() || data_.animating_pinned_change) &&
-        bounds_.width() < kPinnedTabRendererAsTabWidth) {
-      int pin_delta = kPinnedTabRendererAsTabWidth - GetPinnedWidth();
-      int ideal_delta = bounds_.width() - GetPinnedWidth();
-      if (ideal_delta < pin_delta) {
-        int ideal_x = (GetPinnedWidth() - kFavIconSize) / 2;
+    if ((mini() || data_.animating_mini_change) &&
+        bounds_.width() < kMiniTabRendererAsNormalTabWidth) {
+      int mini_delta = kMiniTabRendererAsNormalTabWidth - GetMiniWidth();
+      int ideal_delta = bounds_.width() - GetMiniWidth();
+      if (ideal_delta < mini_delta) {
+        int ideal_x = (GetMiniWidth() - kFavIconSize) / 2;
         int x = favicon_bounds_.x() + static_cast<int>(
             (1 - static_cast<float>(ideal_delta) /
-             static_cast<float>(pin_delta)) *
+             static_cast<float>(mini_delta)) *
             (ideal_x - favicon_bounds_.x()));
         favicon_bounds_.set_x(x);
       }
@@ -639,7 +696,7 @@ void TabRendererGtk::Layout() {
     close_button_bounds_.SetRect(0, 0, 0, 0);
   }
 
-  if (!is_pinned() || width() >= kPinnedTabRendererAsTabWidth) {
+  if (!mini() || width() >= kMiniTabRendererAsNormalTabWidth) {
     // Size the Title text to fill the remaining space.
     int title_left = favicon_bounds_.right() + kFavIconTitleSpacing;
     int title_top = kTopPadding;
@@ -729,11 +786,9 @@ void TabRendererGtk::PaintTitle(gfx::Canvas* canvas) {
   // Paint the Title.
   string16 title = data_.title;
   if (title.empty()) {
-    if (data_.loading) {
-      title = l10n_util::GetStringUTF16(IDS_TAB_LOADING_TITLE);
-    } else {
-      title = l10n_util::GetStringUTF16(IDS_TAB_UNTITLED_TITLE);
-    }
+    title = data_.loading ?
+        l10n_util::GetStringUTF16(IDS_TAB_LOADING_TITLE) :
+        TabContents::GetDefaultTitle();
   } else {
     Browser::FormatTitleForDisplay(&title);
   }
@@ -784,22 +839,16 @@ void TabRendererGtk::PaintIcon(gfx::Canvas* canvas) {
 
 void TabRendererGtk::PaintTabBackground(gfx::Canvas* canvas) {
   if (IsSelected()) {
-    // Sometimes detaching a tab quickly can result in the model reporting it
-    // as not being selected, so is_drag_clone_ ensures that we always paint
-    // the active representation for the dragged tab.
     PaintActiveTabBackground(canvas);
   } else {
-    // Draw our hover state.
-    Animation* animation = hover_animation_.get();
-
     PaintInactiveTabBackground(canvas);
-    if (animation->GetCurrentValue() > 0) {
+
+    double throb_value = GetThrobValue();
+    if (throb_value > 0) {
       SkRect bounds;
-      bounds.set(0, 0,
-          SkIntToScalar(width()), SkIntToScalar(height()));
-      canvas->saveLayerAlpha(&bounds,
-          static_cast<int>(animation->GetCurrentValue() * kHoverOpacity * 0xff),
-              SkCanvas::kARGB_ClipLayer_SaveFlag);
+      bounds.set(0, 0, SkIntToScalar(width()), SkIntToScalar(height()));
+      canvas->saveLayerAlpha(&bounds, static_cast<int>(throb_value * 0xff),
+                             SkCanvas::kARGB_ClipLayer_SaveFlag);
       canvas->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
       PaintActiveTabBackground(canvas);
       canvas->restore();
@@ -823,7 +872,7 @@ void TabRendererGtk::PaintInactiveTabBackground(gfx::Canvas* canvas) {
   // should be at the top of the tab. Otherwise, we assume that the background
   // image is a composited foreground + frame image.
   int offset_y = theme_provider_->HasCustomImage(tab_id) ?
-      0 : kInactiveTabBackgroundOffsetY;
+      0 : background_offset_y_;
 
   // Draw left edge.
   SkBitmap* theme_l = GetMaskedBitmap(tab_alpha_.image_l, tab_bg, offset_x,
@@ -898,7 +947,7 @@ int TabRendererGtk::IconCapacity() const {
 }
 
 bool TabRendererGtk::ShouldShowIcon() const {
-  if (is_pinned() && height() >= GetMinimumUnselectedSize().height()) {
+  if (mini() && height() >= GetMinimumUnselectedSize().height()) {
     return true;
   } else if (!data_.show_icon) {
     return false;
@@ -912,25 +961,37 @@ bool TabRendererGtk::ShouldShowIcon() const {
 
 bool TabRendererGtk::ShouldShowCloseBox() const {
   // The selected tab never clips close button.
-  return !is_pinned() && (IsSelected() || IconCapacity() >= 3);
+  return !mini() && (IsSelected() || IconCapacity() >= 3);
 }
 
 CustomDrawButton* TabRendererGtk::MakeCloseButton() {
   CustomDrawButton* button = new CustomDrawButton(IDR_TAB_CLOSE,
       IDR_TAB_CLOSE_P, IDR_TAB_CLOSE_H, IDR_TAB_CLOSE);
 
-  g_signal_connect(G_OBJECT(button->widget()), "clicked",
+  gtk_widget_set_tooltip_text(button->widget(),
+      l10n_util::GetStringUTF8(IDS_TOOLTIP_CLOSE_TAB).c_str());
+
+  g_signal_connect(button->widget(), "clicked",
                    G_CALLBACK(OnCloseButtonClicked), this);
-  g_signal_connect(G_OBJECT(button->widget()), "button-release-event",
+  g_signal_connect(button->widget(), "button-release-event",
                    G_CALLBACK(OnCloseButtonMouseRelease), this);
-  g_signal_connect(G_OBJECT(button->widget()), "enter-notify-event",
+  g_signal_connect(button->widget(), "enter-notify-event",
                    G_CALLBACK(OnEnterNotifyEvent), this);
-  g_signal_connect(G_OBJECT(button->widget()), "leave-notify-event",
+  g_signal_connect(button->widget(), "leave-notify-event",
                    G_CALLBACK(OnLeaveNotifyEvent), this);
   GTK_WIDGET_UNSET_FLAGS(button->widget(), GTK_CAN_FOCUS);
   gtk_fixed_put(GTK_FIXED(tab_.get()), button->widget(), 0, 0);
 
   return button;
+}
+
+double TabRendererGtk::GetThrobValue() {
+  if (mini_title_animation_.get() && mini_title_animation_->IsAnimating()) {
+    return mini_title_animation_->GetCurrentValue() *
+        kMiniTitleChangeThrobOpacity;
+  }
+  return hover_animation_.get() ?
+      kHoverOpacity * hover_animation_->GetCurrentValue() : 0;
 }
 
 void TabRendererGtk::CloseButtonClicked() {
@@ -1008,7 +1069,7 @@ void TabRendererGtk::InitResources() {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   // Force the font size to 9pt, which matches Windows' default font size
   // (taken from the system).
-  gfx::Font base_font = rb.GetFont(ResourceBundle::BaseFont);
+  const gfx::Font& base_font = rb.GetFont(ResourceBundle::BaseFont);
   title_font_ = new gfx::Font(gfx::Font::CreateFont(base_font.FontName(), 9));
   title_font_height_ = title_font_->height();
 

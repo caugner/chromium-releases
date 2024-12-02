@@ -33,5 +33,9 @@
 #define kAcrobatReaderPlugin L"nppdf32.dll"
 #define kRealPlayerPlugin L"nppl3260.dll"
 #define kSilverlightPlugin L"npctrl.dll"
+#define kJavaPlugin1 L"npjp2.dll"
+#define kJavaPlugin2 L"npdeploytk.dll"
+
+#define kGPUPluginMimeType "application/vnd.google.chrome.gpu-plugin"
 
 #endif  // WEBKIT_GLUE_PLUGIN_PLUGIN_LIST_H_

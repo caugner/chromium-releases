@@ -1,5 +1,7 @@
 #!/usr/bin/python
-# Copyright 2009 Google Inc.  All rights reserved.
+# Copyright (c) 2009 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
 
 """This script generates an rc file and header (setup_strings.{rc,h}) to be
 included in setup.exe. The rc file includes translations for strings pulled
@@ -40,12 +42,16 @@ import FP
 # in setup.exe's resources.
 kStringIds = [
   'IDS_PRODUCT_NAME',
+  'IDS_SXS_SHORTCUT_NAME',
+  'IDS_PRODUCT_DESCRIPTION',
+  'IDS_PRODUCT_FRAME_NAME',
   'IDS_UNINSTALL_CHROME',
   'IDS_ABOUT_VERSION_COMPANY_NAME',
   'IDS_INSTALL_HIGHER_VERSION',
   'IDS_INSTALL_USER_LEVEL_EXISTS',
   'IDS_INSTALL_SYSTEM_LEVEL_EXISTS',
   'IDS_INSTALL_FAILED',
+  'IDS_SAME_VERSION_REPAIR_FAILED',
   'IDS_SETUP_PATCH_FAILED',
   'IDS_INSTALL_OS_NOT_SUPPORTED',
   'IDS_INSTALL_OS_ERROR',
@@ -54,6 +60,7 @@ kStringIds = [
   'IDS_INSTALL_INVALID_ARCHIVE',
   'IDS_INSTALL_INSUFFICIENT_RIGHTS',
   'IDS_UNINSTALL_FAILED',
+  'IDS_UNINSTALL_COMPLETE',
   'IDS_INSTALL_DIR_IN_USE',
   'IDS_OEM_MAIN_SHORTCUT_NAME',
   'IDS_SHORTCUT_TOOLTIP',
@@ -74,16 +81,21 @@ class TranslationStruct:
     return cmp(self.resource_id_str, other.resource_id_str)
 
 
-def CollectTranslatedStrings():
+def CollectTranslatedStrings(branding):
   """Collects all the translations for all the strings specified by kStringIds.
   Returns a list of tuples of (string_id, language, translated string). The
   list is sorted by language codes."""
+  strings_file = 'app/chromium_strings.grd'
+  translation_files = 'chromium_strings*.xtb'
+  if branding == 'Chrome':
+    strings_file = 'app/google_chrome_strings.grd'
+    translation_files = 'google_chrome_strings*.xtb'
   kGeneratedResourcesPath = os.path.join(path_utils.ScriptDir(), '..', '..',
-                                         '..', 'app/google_chrome_strings.grd')
+                                         '..', strings_file)
   kTranslationDirectory = os.path.join(path_utils.ScriptDir(), '..', '..',
                                        '..', 'app', 'resources')
   kTranslationFiles = glob.glob(os.path.join(kTranslationDirectory,
-                                             'google_chrome_strings*.xtb'))
+                                             translation_files))
 
   # Get the strings out of generated_resources.grd.
   dom = minidom.parse(kGeneratedResourcesPath)
@@ -145,8 +157,12 @@ def WriteRCFile(translated_strings, out_filename):
   )
   lines = [kHeaderText]
   for translation_struct in translated_strings:
+    # Escape special characters for the rc file.
+    translation = (translation_struct.translation.replace('"', '""')
+                                                 .replace('\t', '\\t')
+                                                 .replace('\n', '\\n'))
     lines.append(u'  %s "%s"\n' % (translation_struct.resource_id_str,
-                                   translation_struct.translation))
+                                   translation))
   lines.append(kFooterText)
   outfile = open(out_filename + '.rc', 'wb')
   outfile.write(''.join(lines).encode('utf-16'))
@@ -188,13 +204,17 @@ def WriteHeaderFile(translated_strings, out_filename):
   outfile.close()
 
 def main(argv):
-  translated_strings = CollectTranslatedStrings()
+  branding = ''
+  if (len(sys.argv) > 2):
+    branding = argv[2]
+  translated_strings = CollectTranslatedStrings(branding)
   kFilebase = os.path.join(argv[1], 'installer_util_strings')
   WriteRCFile(translated_strings, kFilebase)
   WriteHeaderFile(translated_strings, kFilebase)
 
 if '__main__' == __name__:
   if len(sys.argv) < 2:
-    print 'Usage:\n  %s <output_directory>' % sys.argv[0]
+    print 'Usage:\n  %s <output_directory> [branding]' % sys.argv[0]
     sys.exit(1)
+  # Use optparse to parse command line flags.
   main(sys.argv)

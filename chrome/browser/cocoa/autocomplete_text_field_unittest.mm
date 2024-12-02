@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,22 +11,70 @@
 #import "chrome/browser/cocoa/autocomplete_text_field_editor.h"
 #import "chrome/browser/cocoa/autocomplete_text_field_unittest_helper.h"
 #import "chrome/browser/cocoa/cocoa_test_helper.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
-#import "third_party/ocmock/OCMock/OCMock.h"
 
 using ::testing::InSequence;
-
-// OCMock wants to mock a concrete class or protocol.  This should
-// provide a correct protocol for newer versions of the SDK, while
-// providing something mockable for older versions.
-
-@protocol MockTextEditingDelegate<NSControlTextEditingDelegate>
-- (void)controlTextDidBeginEditing:(NSNotification*)aNotification;
-- (BOOL)control:(NSControl*)control textShouldEndEditing:(NSText*)fieldEditor;
-@end
+using ::testing::Return;
+using ::testing::StrictMock;
 
 namespace {
+class MockSecurityImageView : public LocationBarViewMac::SecurityImageView {
+ public:
+  MockSecurityImageView(LocationBarViewMac* owner,
+                        Profile* profile,
+                        ToolbarModel* model)
+      : LocationBarViewMac::SecurityImageView(owner, profile, model) {}
+
+  // We can't use gmock's MOCK_METHOD macro, because it doesn't like the
+  // NSRect argument to OnMousePressed.
+  virtual void OnMousePressed(NSRect bounds) {
+    mouse_was_pressed_ = true;
+  }
+  bool mouse_was_pressed_;
+};
+
+class MockPageActionImageView : public LocationBarViewMac::PageActionImageView {
+ public:
+  MockPageActionImageView() {}
+  virtual ~MockPageActionImageView() {}
+
+  // We can't use gmock's MOCK_METHOD macro, because it doesn't like the
+  // NSRect argument to OnMousePressed.
+  virtual void OnMousePressed(NSRect bounds) {
+    mouse_was_pressed_ = true;
+  }
+
+  bool MouseWasPressed() { return mouse_was_pressed_; }
+
+  void SetMenu(NSMenu* aMenu) {
+    menu_.reset([aMenu retain]);
+  }
+  virtual NSMenu* GetMenu() { return menu_; }
+
+private:
+  scoped_nsobject<NSMenu> menu_;
+  bool mouse_was_pressed_;
+};
+
+// TODO(shess): Consider lifting this to
+// autocomplete_text_field_unittest_helper.h to share this with the
+// cell tests.
+class TestPageActionViewList : public LocationBarViewMac::PageActionViewList {
+ public:
+  TestPageActionViewList()
+      : LocationBarViewMac::PageActionViewList(NULL, NULL, NULL) {}
+  ~TestPageActionViewList() {
+    // |~PageActionViewList()| calls delete on the contents of
+    // |views_|, which here are refs to stack objects.
+    views_.clear();
+  }
+
+  void Add(LocationBarViewMac::PageActionImageView* view) {
+    views_.push_back(view);
+  }
+};
 
 // Mock up an incrementing event number.
 NSUInteger eventNumber = 0;
@@ -59,29 +107,21 @@ NSEvent* Event(NSView* view, const NSPoint point, const NSEventType type) {
 // the time.
 static const CGFloat kWidth(300.0);
 
-class AutocompleteTextFieldTest : public PlatformTest {
+class AutocompleteTextFieldTest : public CocoaTest {
  public:
   AutocompleteTextFieldTest() {
     // Make sure this is wide enough to play games with the cell
     // decorations.
     NSRect frame = NSMakeRect(0, 0, kWidth, 30);
-    field_.reset([[AutocompleteTextField alloc] initWithFrame:frame]);
+    scoped_nsobject<AutocompleteTextField> field(
+        [[AutocompleteTextField alloc] initWithFrame:frame]);
+    field_ = field.get();
     [field_ setStringValue:@"Test test"];
-    [field_ setObserver:&field_observer_];
-    [cocoa_helper_.contentView() addSubview:field_.get()];
+    [[test_window() contentView] addSubview:field_];
 
     window_delegate_.reset(
         [[AutocompleteTextFieldWindowTestDelegate alloc] init]);
-    [cocoa_helper_.window() setDelegate:window_delegate_.get()];
-  }
-
-  // The removeFromSuperview call is needed to prevent crashes in
-  // later tests.
-  // TODO(shess): -removeromSuperview should not be necessary.  Fix
-  // it.  Also in autocomplete_text_field_editor_unittest.mm.
-  ~AutocompleteTextFieldTest() {
-    [cocoa_helper_.window() setDelegate:nil];
-    [field_ removeFromSuperview];
+    [test_window() setDelegate:window_delegate_.get()];
   }
 
   NSEvent* KeyDownEventWithFlags(NSUInteger flags) {
@@ -89,7 +129,7 @@ class AutocompleteTextFieldTest : public PlatformTest {
                             location:NSZeroPoint
                        modifierFlags:flags
                            timestamp:0.0
-                        windowNumber:[cocoa_helper_.window() windowNumber]
+                        windowNumber:[test_window() windowNumber]
                              context:nil
                           characters:@"a"
          charactersIgnoringModifiers:@"a"
@@ -99,10 +139,10 @@ class AutocompleteTextFieldTest : public PlatformTest {
 
   // Helper to return the field-editor frame being used w/in |field_|.
   NSRect EditorFrame() {
-    EXPECT_TRUE([field_.get() currentEditor]);
-    EXPECT_EQ([[field_.get() subviews] count], 1U);
-    if ([[field_.get() subviews] count] > 0) {
-      return [[[field_.get() subviews] objectAtIndex:0] frame];
+    EXPECT_TRUE([field_ currentEditor]);
+    EXPECT_EQ([[field_ subviews] count], 1U);
+    if ([[field_ subviews] count] > 0) {
+      return [[[field_ subviews] objectAtIndex:0] frame];
     } else {
       // Return something which won't work so the caller can soldier
       // on.
@@ -110,23 +150,35 @@ class AutocompleteTextFieldTest : public PlatformTest {
     }
   }
 
-  CocoaTestHelper cocoa_helper_;  // Inits Cocoa, creates window, etc...
-  scoped_nsobject<AutocompleteTextField> field_;
-  MockAutocompleteTextFieldObserver field_observer_;
+  AutocompleteTextField* field_;
   scoped_nsobject<AutocompleteTextFieldWindowTestDelegate> window_delegate_;
+};
+
+TEST_VIEW(AutocompleteTextFieldTest, field_);
+
+// Base class for testing AutocompleteTextFieldObserver messages.
+class AutocompleteTextFieldObserverTest : public AutocompleteTextFieldTest {
+ public:
+  virtual void SetUp() {
+    AutocompleteTextFieldTest::SetUp();
+    [field_ setObserver:&field_observer_];
+  }
+
+  virtual void TearDown() {
+    // Clear the observer so that we don't show output for
+    // uninteresting messages to the mock (for instance, if |field_| has
+    // focus at the end of the test).
+    [field_ setObserver:NULL];
+
+    AutocompleteTextFieldTest::TearDown();
+  }
+
+  StrictMock<MockAutocompleteTextFieldObserver> field_observer_;
 };
 
 // Test that we have the right cell class.
 TEST_F(AutocompleteTextFieldTest, CellClass) {
   EXPECT_TRUE([[field_ cell] isKindOfClass:[AutocompleteTextFieldCell class]]);
-}
-
-// Test adding/removing from the view hierarchy, mostly to ensure nothing
-// leaks or crashes.
-TEST_F(AutocompleteTextFieldTest, AddRemove) {
-  EXPECT_EQ(cocoa_helper_.contentView(), [field_ superview]);
-  [field_.get() removeFromSuperview];
-  EXPECT_FALSE([field_ superview]);
 }
 
 // Test that we get the same cell from -cell and
@@ -141,10 +193,10 @@ TEST_F(AutocompleteTextFieldTest, Cell) {
 TEST_F(AutocompleteTextFieldTest, FirstResponder) {
   EXPECT_EQ(nil, [field_ currentEditor]);
   EXPECT_EQ([[field_ subviews] count], 0U);
-  cocoa_helper_.makeFirstResponder(field_);
+  [test_window() makePretendKeyWindowAndSetFirstResponder:field_];
   EXPECT_FALSE(nil == [field_ currentEditor]);
   EXPECT_EQ([[field_ subviews] count], 1U);
-  EXPECT_TRUE([[field_ currentEditor] isDescendantOf:field_.get()]);
+  EXPECT_TRUE([[field_ currentEditor] isDescendantOf:field_]);
 
   // Check that the window delegate is providing the right editor.
   Class c = [AutocompleteTextFieldEditor class];
@@ -190,9 +242,9 @@ TEST_F(AutocompleteTextFieldTest, Display) {
   [field_ display];
 
   // Test focussed drawing.
-  cocoa_helper_.makeFirstResponder(field_);
+  [test_window() makePretendKeyWindowAndSetFirstResponder:field_];
   [field_ display];
-  cocoa_helper_.clearFirstResponder();
+  [test_window() clearPretendKeyWindowAndFirstResponder];
 
   // Test display of various cell configurations.
   AutocompleteTextFieldCell* cell = [field_ autocompleteTextFieldCell];
@@ -214,7 +266,7 @@ TEST_F(AutocompleteTextFieldTest, Display) {
   [field_ display];
 }
 
-TEST_F(AutocompleteTextFieldTest, FlagsChanged) {
+TEST_F(AutocompleteTextFieldObserverTest, FlagsChanged) {
   InSequence dummy;  // Call mock in exactly the order specified.
 
   // Test without Control key down, but some other modifier down.
@@ -229,8 +281,8 @@ TEST_F(AutocompleteTextFieldTest, FlagsChanged) {
 // This test is here rather than in the editor's tests because the
 // field catches -flagsChanged: because it's on the responder chain,
 // the field editor doesn't implement it.
-TEST_F(AutocompleteTextFieldTest, FieldEditorFlagsChanged) {
-  cocoa_helper_.makeFirstResponder(field_);
+TEST_F(AutocompleteTextFieldObserverTest, FieldEditorFlagsChanged) {
+  [test_window() makePretendKeyWindowAndSetFirstResponder:field_];
   NSResponder* firstResponder = [[field_ window] firstResponder];
   EXPECT_EQ(firstResponder, [field_ currentEditor]);
 
@@ -246,7 +298,7 @@ TEST_F(AutocompleteTextFieldTest, FieldEditorFlagsChanged) {
 }
 
 // Frame size changes are propagated to |observer_|.
-TEST_F(AutocompleteTextFieldTest, FrameChanged) {
+TEST_F(AutocompleteTextFieldObserverTest, FrameChanged) {
   EXPECT_CALL(field_observer_, OnFrameChanged());
   NSRect frame = [field_ frame];
   frame.size.width += 10.0;
@@ -258,27 +310,25 @@ TEST_F(AutocompleteTextFieldTest, FrameChanged) {
 // -resetFieldEditorFrameIfNeeded.
 TEST_F(AutocompleteTextFieldTest, ResetFieldEditorBase) {
   AutocompleteTextFieldCell* cell = [field_ autocompleteTextFieldCell];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
 
   // Capture the editor frame resulting from the standard focus
   // machinery.
-  cocoa_helper_.makeFirstResponder(field_);
+  [test_window() makePretendKeyWindowAndSetFirstResponder:field_];
   const NSRect baseEditorFrame(EditorFrame());
 
   // Setting a hint should result in a strictly smaller editor frame.
+  EXPECT_FALSE([cell hintString]);
   [cell setSearchHintString:@"search hint" availableWidth:kWidth];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
+  EXPECT_TRUE([cell hintString]);
   [field_ resetFieldEditorFrameIfNeeded];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
   EXPECT_FALSE(NSEqualRects(baseEditorFrame, EditorFrame()));
   EXPECT_TRUE(NSContainsRect(baseEditorFrame, EditorFrame()));
 
   // Clearing hint string and using -resetFieldEditorFrameIfNeeded
   // should result in the same frame as the standard focus machinery.
   [cell clearKeywordAndHint];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
+  EXPECT_FALSE([cell hintString]);
   [field_ resetFieldEditorFrameIfNeeded];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
   EXPECT_TRUE(NSEqualRects(baseEditorFrame, EditorFrame()));
 }
 
@@ -287,25 +337,21 @@ TEST_F(AutocompleteTextFieldTest, ResetFieldEditorBase) {
 // -resetFieldEditorFrameIfNeeded.
 TEST_F(AutocompleteTextFieldTest, ResetFieldEditorSearchHint) {
   AutocompleteTextFieldCell* cell = [field_ autocompleteTextFieldCell];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
 
   const NSString* kHintString(@"Type to search");
 
   // Capture the editor frame resulting from the standard focus
   // machinery.
   [cell setSearchHintString:kHintString availableWidth:kWidth];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-  cocoa_helper_.makeFirstResponder(field_);
+  EXPECT_TRUE([cell hintString]);
+  [test_window() makePretendKeyWindowAndSetFirstResponder:field_];
   const NSRect baseEditorFrame(EditorFrame());
 
   // Clearing the hint should result in a strictly larger editor
   // frame.
   [cell clearKeywordAndHint];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
+  EXPECT_FALSE([cell hintString]);
   [field_ resetFieldEditorFrameIfNeeded];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
   EXPECT_FALSE(NSEqualRects(baseEditorFrame, EditorFrame()));
   EXPECT_TRUE(NSContainsRect(EditorFrame(), baseEditorFrame));
 
@@ -313,9 +359,8 @@ TEST_F(AutocompleteTextFieldTest, ResetFieldEditorSearchHint) {
   // -resetFieldEditorFrameIfNeeded should result in the same frame as
   // the standard focus machinery.
   [cell setSearchHintString:kHintString availableWidth:kWidth];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
+  EXPECT_TRUE([cell hintString]);
   [field_ resetFieldEditorFrameIfNeeded];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
   EXPECT_TRUE(NSEqualRects(baseEditorFrame, EditorFrame()));
 }
 
@@ -324,7 +369,6 @@ TEST_F(AutocompleteTextFieldTest, ResetFieldEditorSearchHint) {
 // -resetFieldEditorFrameIfNeeded.
 TEST_F(AutocompleteTextFieldTest, ResetFieldEditorKeywordHint) {
   AutocompleteTextFieldCell* cell = [field_ autocompleteTextFieldCell];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
 
   const NSString* kFullString(@"Search Engine:");
   const NSString* kPartialString(@"Search Eng:");
@@ -334,18 +378,15 @@ TEST_F(AutocompleteTextFieldTest, ResetFieldEditorKeywordHint) {
   [cell setKeywordString:kFullString
            partialString:kPartialString
           availableWidth:kWidth];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
-  [cell setFieldEditorNeedsReset:NO];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
-  cocoa_helper_.makeFirstResponder(field_);
+  EXPECT_TRUE([cell keywordString]);
+  [test_window() makePretendKeyWindowAndSetFirstResponder:field_];
   const NSRect baseEditorFrame(EditorFrame());
 
   // Clearing the hint should result in a strictly larger editor
   // frame.
   [cell clearKeywordAndHint];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
+  EXPECT_FALSE([cell keywordString]);
   [field_ resetFieldEditorFrameIfNeeded];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
   EXPECT_FALSE(NSEqualRects(baseEditorFrame, EditorFrame()));
   EXPECT_TRUE(NSContainsRect(EditorFrame(), baseEditorFrame));
 
@@ -355,69 +396,29 @@ TEST_F(AutocompleteTextFieldTest, ResetFieldEditorKeywordHint) {
   [cell setKeywordString:kFullString
            partialString:kPartialString
           availableWidth:kWidth];
-  EXPECT_TRUE([cell fieldEditorNeedsReset]);
+  EXPECT_TRUE([cell keywordString]);
   [field_ resetFieldEditorFrameIfNeeded];
-  EXPECT_FALSE([cell fieldEditorNeedsReset]);
   EXPECT_TRUE(NSEqualRects(baseEditorFrame, EditorFrame()));
 }
 
 // Test that resetting the field editor bounds does not cause untoward
-// messages to the field's delegate.
-TEST_F(AutocompleteTextFieldTest, ResetFieldEditorBlocksEndEditing) {
-  // First, test that -makeFirstResponder: sends
-  // -controlTextDidBeginEditing: and -control:textShouldEndEditing at
-  // the expected times.
-  {
-    id mockDelegate =
-        [OCMockObject mockForProtocol:@protocol(MockTextEditingDelegate)];
+// messages to the field's observer.
+TEST_F(AutocompleteTextFieldObserverTest, ResetFieldEditorContinuesEditing) {
+  // Becoming first responder doesn't begin editing.
+  [test_window() makePretendKeyWindowAndSetFirstResponder:field_];
+  NSTextView* editor = static_cast<NSTextView*>([field_ currentEditor]);
+  EXPECT_TRUE(nil != editor);
 
-    [field_ setDelegate:mockDelegate];
+  // This should begin editing and indicate a change.
+  EXPECT_CALL(field_observer_, OnDidBeginEditing());
+  EXPECT_CALL(field_observer_, OnDidChange());
+  [editor shouldChangeTextInRange:NSMakeRange(0, 0) replacementString:@""];
+  [editor didChangeText];
 
-    // Becoming first responder doesn't begin editing.
-    cocoa_helper_.makeFirstResponder(field_);
-    NSTextView* editor = static_cast<NSTextView*>([field_ currentEditor]);
-    EXPECT_TRUE(nil != editor);
-    [mockDelegate verify];
-
-    // This should begin editing.
-    [[mockDelegate expect] controlTextDidBeginEditing:OCMOCK_ANY];
-    [editor shouldChangeTextInRange:NSMakeRange(0, 0) replacementString:@""];
-    [mockDelegate verify];
-
-    // Changing first responder ends editing.
-    BOOL yes = YES;
-    [[[mockDelegate expect] andReturnValue:OCMOCK_VALUE(yes)]
-      control:OCMOCK_ANY textShouldEndEditing:OCMOCK_ANY];
-    cocoa_helper_.makeFirstResponder(field_);
-    [mockDelegate verify];
-
-    [field_ setDelegate:nil];
-  }
-
-  // Test that -resetFieldEditorFrameIfNeeded manages to rearrange the
-  // editor without ending editing.
-  {
-    id mockDelegate =
-        [OCMockObject mockForProtocol:@protocol(MockTextEditingDelegate)];
-
-    [field_ setDelegate:mockDelegate];
-
-    // Start editing.
-    [[mockDelegate expect] controlTextDidBeginEditing:OCMOCK_ANY];
-    NSTextView* editor = static_cast<NSTextView*>([field_ currentEditor]);
-    [editor shouldChangeTextInRange:NSMakeRange(0, 0) replacementString:@""];
-    [mockDelegate verify];
-
-    // No more messages to mockDelegate.
-    AutocompleteTextFieldCell* cell = [field_ autocompleteTextFieldCell];
-    EXPECT_FALSE([cell fieldEditorNeedsReset]);
-    [cell setSearchHintString:@"Type to search" availableWidth:kWidth];
-    EXPECT_TRUE([cell fieldEditorNeedsReset]);
-    [field_ resetFieldEditorFrameIfNeeded];
-    [mockDelegate verify];
-
-    [field_ setDelegate:nil];
-  }
+  // No messages to |field_observer_| when resetting the frame.
+  AutocompleteTextFieldCell* cell = [field_ autocompleteTextFieldCell];
+  [cell setSearchHintString:@"Type to search" availableWidth:kWidth];
+  [field_ resetFieldEditorFrameIfNeeded];
 }
 
 // Clicking in the search hint should put the caret in the rightmost
@@ -430,7 +431,7 @@ TEST_F(AutocompleteTextFieldTest, ClickSearchHintPutsCaretRightmost) {
 
   // Can't rely on the window machinery to make us first responder,
   // here.
-  cocoa_helper_.makeFirstResponder(field_);
+  [test_window() makePretendKeyWindowAndSetFirstResponder:field_];
   EXPECT_TRUE([field_ currentEditor]);
 
   const NSPoint point(NSMakePoint(300.0 - 20.0, 5.0));
@@ -455,7 +456,7 @@ TEST_F(AutocompleteTextFieldTest, ClickKeywordPutsCaretLeftmost) {
 
   // Can't rely on the window machinery to make us first responder,
   // here.
-  cocoa_helper_.makeFirstResponder(field_);
+  [test_window() makePretendKeyWindowAndSetFirstResponder:field_];
   EXPECT_TRUE([field_ currentEditor]);
 
   const NSPoint point(NSMakePoint(20.0, 5.0));
@@ -473,7 +474,7 @@ TEST_F(AutocompleteTextFieldTest, ClickKeywordPutsCaretLeftmost) {
 TEST_F(AutocompleteTextFieldTest, ClickBorderSelectsAll) {
   // Can't rely on the window machinery to make us first responder,
   // here.
-  cocoa_helper_.makeFirstResponder(field_);
+  [test_window() makePretendKeyWindowAndSetFirstResponder:field_];
   EXPECT_TRUE([field_ currentEditor]);
 
   const NSPoint point(NSMakePoint(20.0, 1.0));
@@ -580,16 +581,283 @@ TEST_F(AutocompleteTextFieldTest, TripleClickSelectsAll) {
   EXPECT_EQ(selectedRange.length, [[field_ stringValue] length]);
 }
 
-TEST_F(AutocompleteTextFieldTest, SecurityIconMouseDown) {
+// Clicking the security icon should call its OnMousePressed.
+TEST_F(AutocompleteTextFieldObserverTest, SecurityIconMouseDown) {
   AutocompleteTextFieldCell* cell = [field_ autocompleteTextFieldCell];
-  scoped_nsobject<NSImage> hintIcon(
-      [[NSImage alloc] initWithSize:NSMakeSize(20, 20)]);
-  [cell setHintIcon:hintIcon.get() label:nil color:nil];
-  NSRect iconFrame([cell hintImageFrameForFrame:[field_ bounds]]);
+
+  MockSecurityImageView security_image_view(NULL, NULL, NULL);
+  [cell setSecurityImageView:&security_image_view];
+  security_image_view.SetImageShown(
+      LocationBarViewMac::SecurityImageView::LOCK);
+  security_image_view.SetVisible(true);
+
+  NSRect iconFrame([cell securityImageFrameForFrame:[field_ bounds]]);
   NSPoint location(NSMakePoint(NSMidX(iconFrame), NSMidY(iconFrame)));
   NSEvent* event(Event(field_, location, NSLeftMouseDown, 1));
-  EXPECT_CALL(field_observer_, OnSecurityIconClicked());
+
   [field_ mouseDown:event];
+  EXPECT_TRUE(security_image_view.mouse_was_pressed_);
+}
+
+// Clicking a Page Action icon should call its OnMousePressed.
+TEST_F(AutocompleteTextFieldObserverTest, PageActionMouseDown) {
+  AutocompleteTextFieldCell* cell = [field_ autocompleteTextFieldCell];
+
+  MockSecurityImageView security_image_view(NULL, NULL, NULL);
+  security_image_view.SetImageShown(
+      LocationBarViewMac::SecurityImageView::LOCK);
+  [cell setSecurityImageView:&security_image_view];
+
+  MockPageActionImageView page_action_view;
+  NSImage* image = [NSImage imageNamed:@"NSApplicationIcon"];
+  page_action_view.SetImage(image);
+
+  MockPageActionImageView page_action_view2;
+  page_action_view2.SetImage(image);
+
+  TestPageActionViewList list;
+  list.Add(&page_action_view);
+  list.Add(&page_action_view2);
+  [cell setPageActionViewList:&list];
+
+  // One page action, no security lock.
+  security_image_view.SetVisible(false);
+  page_action_view.SetVisible(true);
+  page_action_view2.SetVisible(false);
+  NSRect iconFrame([cell pageActionFrameForIndex:0 inFrame:[field_ bounds]]);
+  NSPoint location(NSMakePoint(NSMidX(iconFrame), NSMidY(iconFrame)));
+  NSEvent* event(Event(field_, location, NSLeftMouseDown, 1));
+
+  [field_ mouseDown:event];
+  EXPECT_TRUE(page_action_view.MouseWasPressed());
+
+  // Two page actions, no security lock.
+  page_action_view2.SetVisible(true);
+  iconFrame = [cell pageActionFrameForIndex:0 inFrame:[field_ bounds]];
+  location = NSMakePoint(NSMidX(iconFrame), NSMidY(iconFrame));
+  event = Event(field_, location, NSLeftMouseDown, 1);
+
+  [field_ mouseDown:event];
+  EXPECT_TRUE(page_action_view.MouseWasPressed());
+
+  iconFrame = [cell pageActionFrameForIndex:1 inFrame:[field_ bounds]];
+  location = NSMakePoint(NSMidX(iconFrame), NSMidY(iconFrame));
+  event = Event(field_, location, NSLeftMouseDown, 1);
+
+  [field_ mouseDown:event];
+  EXPECT_TRUE(page_action_view.MouseWasPressed());
+
+  // Two page actions plus security lock.
+  security_image_view.SetVisible(true);
+  iconFrame = [cell pageActionFrameForIndex:0 inFrame:[field_ bounds]];
+  location = NSMakePoint(NSMidX(iconFrame), NSMidY(iconFrame));
+  event = Event(field_, location, NSLeftMouseDown, 1);
+
+  [field_ mouseDown:event];
+  EXPECT_TRUE(page_action_view.MouseWasPressed());
+
+  iconFrame = [cell pageActionFrameForIndex:1 inFrame:[field_ bounds]];
+  location = NSMakePoint(NSMidX(iconFrame), NSMidY(iconFrame));
+  event = Event(field_, location, NSLeftMouseDown, 1);
+
+  [field_ mouseDown:event];
+  EXPECT_TRUE(page_action_view.MouseWasPressed());
+
+  iconFrame = [cell securityImageFrameForFrame:[field_ bounds]];
+  location = NSMakePoint(NSMidX(iconFrame), NSMidY(iconFrame));
+  event = Event(field_, location, NSLeftMouseDown, 1);
+
+  [field_ mouseDown:event];
+  EXPECT_TRUE(security_image_view.mouse_was_pressed_);
+}
+
+// Test that page action menus are properly returned.
+// TODO(shess): Really, this should test that things are forwarded to
+// the cell, and the cell tests should test that the right things are
+// selected.  It's easier to mock the event here, though.  This code's
+// event-mockers might be worth promoting to |test_event_utils.h| or
+// |cocoa_test_helper.h|.
+TEST_F(AutocompleteTextFieldTest, PageActionMenu) {
+  AutocompleteTextFieldCell* cell = [field_ autocompleteTextFieldCell];
+  const NSRect bounds([field_ bounds]);
+
+  const CGFloat edge = NSHeight(bounds) - 4.0;
+  const NSSize size = NSMakeSize(edge, edge);
+  scoped_nsobject<NSImage> image([[NSImage alloc] initWithSize:size]);
+
+  scoped_nsobject<NSMenu> menu([[NSMenu alloc] initWithTitle:@"Menu"]);
+
+  MockPageActionImageView page_action_views[2];
+  page_action_views[0].SetImage(image);
+  page_action_views[0].SetMenu(menu);
+  page_action_views[0].SetVisible(true);
+
+  page_action_views[1].SetImage(image);
+  page_action_views[1].SetVisible(true);
+
+  TestPageActionViewList list;
+  list.Add(&page_action_views[0]);
+  list.Add(&page_action_views[1]);
+  [cell setPageActionViewList:&list];
+
+  // The item with a menu returns it.
+  NSRect actionFrame = [cell pageActionFrameForIndex:0 inFrame:bounds];
+  NSPoint location = NSMakePoint(NSMidX(actionFrame), NSMidY(actionFrame));
+  NSEvent* event = Event(field_, location, NSRightMouseDown, 1);
+
+  NSMenu *actionMenu = [field_ actionMenuForEvent:event];
+  EXPECT_EQ(actionMenu, menu);
+
+  // The item without a menu returns nil.
+  actionFrame = [cell pageActionFrameForIndex:1 inFrame:bounds];
+  location = NSMakePoint(NSMidX(actionFrame), NSMidY(actionFrame));
+  event = Event(field_, location, NSRightMouseDown, 1);
+  EXPECT_FALSE([field_ actionMenuForEvent:event]);
+
+  // Something not in an action returns nil.
+  location = NSMakePoint(NSMidX(bounds), NSMidY(bounds));
+  event = Event(field_, location, NSRightMouseDown, 1);
+  EXPECT_FALSE([field_ actionMenuForEvent:event]);
+}
+
+// Verify that -setAttributedStringValue: works as expected when
+// focussed or when not focussed.  Our code mostly depends on about
+// whether -stringValue works right.
+TEST_F(AutocompleteTextFieldTest, SetAttributedStringBaseline) {
+  EXPECT_EQ(nil, [field_ currentEditor]);
+
+  // So that we can set rich text.
+  [field_ setAllowsEditingTextAttributes:YES];
+
+  // Set an attribute different from the field's default so we can
+  // tell we got the same string out as we put in.
+  NSFont* font = [NSFont fontWithDescriptor:[[field_ font] fontDescriptor]
+                                       size:[[field_ font] pointSize] + 2];
+  NSDictionary* attributes =
+      [NSDictionary dictionaryWithObject:font
+                                  forKey:NSFontAttributeName];
+  static const NSString* kString = @"This is a test";
+  scoped_nsobject<NSAttributedString> attributedString(
+      [[NSAttributedString alloc] initWithString:kString
+                                      attributes:attributes]);
+
+  // Check that what we get back looks like what we put in.
+  EXPECT_FALSE([[field_ stringValue] isEqualToString:kString]);
+  [field_ setAttributedStringValue:attributedString];
+  EXPECT_TRUE([[field_ attributedStringValue]
+                isEqualToAttributedString:attributedString]);
+  EXPECT_TRUE([[field_ stringValue] isEqualToString:kString]);
+
+  // Try that again with focus.
+  [test_window() makePretendKeyWindowAndSetFirstResponder:field_];
+
+  EXPECT_TRUE([field_ currentEditor]);
+
+  // Check that what we get back looks like what we put in.
+  [field_ setStringValue:@""];
+  EXPECT_FALSE([[field_ stringValue] isEqualToString:kString]);
+  [field_ setAttributedStringValue:attributedString];
+  EXPECT_TRUE([[field_ attributedStringValue]
+                isEqualToAttributedString:attributedString]);
+  EXPECT_TRUE([[field_ stringValue] isEqualToString:kString]);
+}
+
+// -setAttributedStringValue: shouldn't reset the undo state if things
+// are being editted.
+TEST_F(AutocompleteTextFieldTest, SetAttributedStringUndo) {
+  NSColor* redColor = [NSColor redColor];
+  NSDictionary* attributes =
+      [NSDictionary dictionaryWithObject:redColor
+                                  forKey:NSForegroundColorAttributeName];
+  static const NSString* kString = @"This is a test";
+  scoped_nsobject<NSAttributedString> attributedString(
+      [[NSAttributedString alloc] initWithString:kString
+                                      attributes:attributes]);
+  [test_window() makePretendKeyWindowAndSetFirstResponder:field_];
+  EXPECT_TRUE([field_ currentEditor]);
+  NSTextView* editor = static_cast<NSTextView*>([field_ currentEditor]);
+  NSUndoManager* undoManager = [editor undoManager];
+  EXPECT_TRUE(undoManager);
+
+  // Nothing to undo, yet.
+  EXPECT_FALSE([undoManager canUndo]);
+
+  // Starting an editing action creates an undoable item.
+  [editor shouldChangeTextInRange:NSMakeRange(0, 0) replacementString:@""];
+  [editor didChangeText];
+  EXPECT_TRUE([undoManager canUndo]);
+
+  // -setStringValue: resets the editor's undo chain.
+  [field_ setStringValue:kString];
+  EXPECT_FALSE([undoManager canUndo]);
+
+  // Verify that -setAttributedStringValue: does not reset the
+  // editor's undo chain.
+  [field_ setStringValue:@""];
+  [editor shouldChangeTextInRange:NSMakeRange(0, 0) replacementString:@""];
+  [editor didChangeText];
+  EXPECT_TRUE([undoManager canUndo]);
+  [field_ setAttributedStringValue:attributedString];
+  EXPECT_TRUE([undoManager canUndo]);
+
+  // Verify that calling -clearUndoChain clears the undo chain.
+  [field_ clearUndoChain];
+  EXPECT_FALSE([undoManager canUndo]);
+}
+
+TEST_F(AutocompleteTextFieldTest, EditorGetsCorrectUndoManager) {
+  [test_window() makePretendKeyWindowAndSetFirstResponder:field_];
+
+  NSTextView* editor = static_cast<NSTextView*>([field_ currentEditor]);
+  EXPECT_TRUE(editor);
+  EXPECT_EQ([field_ undoManagerForTextView:editor], [editor undoManager]);
+}
+
+TEST_F(AutocompleteTextFieldObserverTest, SendsEditingMessages) {
+  // Becoming first responder doesn't begin editing.
+  [test_window() makePretendKeyWindowAndSetFirstResponder:field_];
+  NSTextView* editor = static_cast<NSTextView*>([field_ currentEditor]);
+  EXPECT_TRUE(nil != editor);
+
+  // This should begin editing and indicate a change.
+  EXPECT_CALL(field_observer_, OnDidBeginEditing());
+  EXPECT_CALL(field_observer_, OnDidChange());
+  [editor shouldChangeTextInRange:NSMakeRange(0, 0) replacementString:@""];
+  [editor didChangeText];
+
+  // Further changes don't send the begin message.
+  EXPECT_CALL(field_observer_, OnDidChange());
+  [editor shouldChangeTextInRange:NSMakeRange(0, 0) replacementString:@""];
+  [editor didChangeText];
+
+  // -doCommandBySelector: should forward to observer via |field_|.
+  // TODO(shess): Test with a fake arrow-key event?
+  const SEL cmd = @selector(moveDown:);
+  EXPECT_CALL(field_observer_, OnDoCommandBySelector(cmd))
+      .WillOnce(Return(true));
+  [editor doCommandBySelector:cmd];
+
+  // Finished with the changes.
+  EXPECT_CALL(field_observer_, OnDidEndEditing());
+  [test_window() clearPretendKeyWindowAndFirstResponder];
+}
+
+// Test that the resign-key notification is forwarded right, and that
+// the notification is registered and unregistered when the view moves
+// in and out of the window.
+// TODO(shess): Should this test the key window for realz?  That would
+// be really annoying to whoever is running the tests.
+TEST_F(AutocompleteTextFieldObserverTest, SendsOnResignKey) {
+  EXPECT_CALL(field_observer_, OnDidResignKey());
+  [test_window() resignKeyWindow];
+
+  scoped_nsobject<AutocompleteTextField> pin([field_ retain]);
+  [field_ removeFromSuperview];
+  [test_window() resignKeyWindow];
+
+  [[test_window() contentView] addSubview:field_];
+  EXPECT_CALL(field_observer_, OnDidResignKey());
+  [test_window() resignKeyWindow];
 }
 
 }  // namespace

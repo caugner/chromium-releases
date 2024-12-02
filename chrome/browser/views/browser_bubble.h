@@ -2,11 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_VIEWS_BROWSER_BUBBLE_
-#define CHROME_BROWSER_VIEWS_BROWSER_BUBBLE_
+#ifndef CHROME_BROWSER_VIEWS_BROWSER_BUBBLE_H_
+#define CHROME_BROWSER_VIEWS_BROWSER_BUBBLE_H_
 
 #include "views/view.h"
 #include "views/widget/widget.h"
+
+class BrowserBubbleHost;
 
 // A class for creating a floating window that is "attached" to a particular
 // Browser.  If you don't install a delegate, the bubble will hide
@@ -19,25 +21,28 @@ class BrowserBubble {
   class Delegate {
    public:
     // Called when the Browser Window that this bubble is attached to moves.
-    virtual void BubbleBrowserWindowMoved(BrowserBubble* bubble) = 0;
+    virtual void BubbleBrowserWindowMoved(BrowserBubble* bubble) {}
 
     // Called with the Browser Window that this bubble is attached to is
     // about to close.
-    virtual void BubbleBrowserWindowClosing(BrowserBubble* bubble) = 0;
+    virtual void BubbleBrowserWindowClosing(BrowserBubble* bubble) {}
 
     // Called when the bubble became active / got focus.
     virtual void BubbleGotFocus(BrowserBubble* bubble) {}
 
     // Called when the bubble became inactive / lost focus.
-    virtual void BubbleLostFocus(BrowserBubble* bubble) {}
+    // |lost_focus_to_child| is true when a child window became active.
+    virtual void BubbleLostFocus(BrowserBubble* bubble,
+                                 bool lost_focus_to_child) {}
   };
 
   // Note that the bubble will size itself to the preferred size of |view|.
   // |view| is the embedded view, |frame| is widget that the bubble is being
   // positioned relative to, |origin| is the location that the bubble will
-  // be positioned relative to |frame|.
+  // be positioned relative to |frame|.  Pass true through |drop_shadow| to
+  // surround the bubble widget with a drop-shadow.
   BrowserBubble(views::View* view, views::Widget* frame,
-                const gfx::Point& origin);
+                const gfx::Point& origin, bool drop_shadow);
   virtual ~BrowserBubble();
 
   // Call manually if you need to detach the bubble from tracking the browser's
@@ -54,7 +59,7 @@ class BrowserBubble {
   Delegate* delegate() const { return delegate_; }
   void set_delegate(Delegate* del) { delegate_ = del; }
 
-  // Notifications from BrowserView.
+  // Notifications from BrowserBubbleHost.
   // With no delegate, both of these default to Hiding the bubble.
   virtual void BrowserWindowMoved();
   virtual void BrowserWindowClosing();
@@ -81,6 +86,9 @@ class BrowserBubble {
   // Resize the bubble to fit the view.
   void ResizeToView();
 
+  // Returns the NativeView containing that popup.
+  gfx::NativeView native_view() const { return popup_->GetNativeView(); }
+
  protected:
   // Create the popup widget.
   virtual void InitPopup();
@@ -93,7 +101,6 @@ class BrowserBubble {
 
   // The frame that this bubble is attached to.
   views::Widget* frame_;
-  gfx::NativeView frame_native_view_;
 
  private:
   // The view that is displayed in this bubble.
@@ -111,7 +118,13 @@ class BrowserBubble {
   // Is the bubble attached to a Browser window.
   bool attached_;
 
+  // Does the bubble have a drop-shadow.
+  bool drop_shadow_enabled_;
+
+  // Non-owning pointer to the host of this bubble.
+  BrowserBubbleHost* bubble_host_;
+
   DISALLOW_COPY_AND_ASSIGN(BrowserBubble);
 };
 
-#endif  // CHROME_BROWSER_VIEWS_BROWSER_BUBBLE_
+#endif  // CHROME_BROWSER_VIEWS_BROWSER_BUBBLE_H_

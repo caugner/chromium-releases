@@ -9,20 +9,31 @@
 
 #include "base/logging.h"
 #include "base/scoped_nsautorelease_pool.h"
+#import "chrome/browser/browser_theme_provider.h"
 #import "chrome/browser/cocoa/chrome_browser_window.h"
-#import "third_party/GTM/AppKit/GTMTheme.h"
+#import "chrome/browser/cocoa/themed_window.h"
+#include "grit/theme_resources.h"
 
-// To line up our background pattern with the patterns in the tabs we need
-// to move our background patterns in the window frame up by two pixels.
-// This will make the themes look slightly different than in Windows/Linux
-// because of the differing heights between window top and tab top, but this
-// has been approved by UI.
-static const NSInteger kBrowserFrameViewPatternPhaseOffset = 2;
+static const CGFloat kBrowserFrameViewPaintHeight = 60.0;
+static const NSPoint kBrowserFrameViewPatternPhaseOffset = { -5, 3 };
+
+static BOOL gCanDrawTitle = NO;
+static BOOL gCanGetCornerRadius = NO;
 
 @interface NSView (Swizzles)
 - (void)drawRectOriginal:(NSRect)rect;
 - (BOOL)_mouseInGroup:(NSButton*)widget;
 - (void)updateTrackingAreas;
+@end
+
+// Undocumented APIs. They are really on NSGrayFrame rather than
+// BrowserFrameView, but we call them from methods swizzled onto NSGrayFrame.
+@interface BrowserFrameView (UndocumentedAPI)
+
+- (float)roundedCornerRadius;
+- (CGRect)_titlebarTitleRect;
+- (void)_drawTitleStringIn:(struct CGRect)arg1 withColor:(id)color;
+
 @end
 
 @implementation BrowserFrameView
@@ -78,6 +89,15 @@ static const NSInteger kBrowserFrameViewPatternPhaseOffset = 2;
                                   method_getTypeEncoding(m0));
     DCHECK(didAdd);
   }
+
+  gCanDrawTitle =
+      [grayFrameClass
+        instancesRespondToSelector:@selector(_titlebarTitleRect)] &&
+      [grayFrameClass
+        instancesRespondToSelector:@selector(_drawTitleStringIn:withColor:)];
+  gCanGetCornerRadius =
+      [grayFrameClass
+        instancesRespondToSelector:@selector(roundedCornerRadius)];
 }
 
 - (id)initWithFrame:(NSRect)frame {
@@ -96,52 +116,212 @@ static const NSInteger kBrowserFrameViewPatternPhaseOffset = 2;
 - (void)drawRect:(NSRect)rect {
   // If this isn't the window class we expect, then pass it on to the
   // original implementation.
-  [self drawRectOriginal:rect];
   if (![[self window] isKindOfClass:[ChromeBrowserWindow class]]) {
+    [self drawRectOriginal:rect];
     return;
   }
 
-  // Set up our clip
+  // WARNING: There is an obvious optimization opportunity here that you DO NOT
+  // want to take. To save painting cycles, you might think it would be a good
+  // idea to call out to -drawRectOriginal: only if no theme were drawn. In
+  // reality, however, if you fail to call -drawRectOriginal:, or if you call it
+  // after a clipping path is set, the rounded corners at the top of the window
+  // will not draw properly. Do not try to be smart here.
+
+  // Only paint the top of the window.
   NSWindow* window = [self window];
-  NSRect windowRect = [window frame];
+  NSRect windowRect = [self convertRect:[window frame] fromView:nil];
   windowRect.origin = NSMakePoint(0, 0);
+
+  NSRect paintRect = windowRect;
+  paintRect.origin.y = NSMaxY(paintRect) - kBrowserFrameViewPaintHeight;
+  paintRect.size.height = kBrowserFrameViewPaintHeight;
+  rect = NSIntersectionRect(paintRect, rect);
+  [self drawRectOriginal:rect];
+
+  // Set up our clip.
+  float cornerRadius = 4.0;
+  if (gCanGetCornerRadius)
+    cornerRadius = [self roundedCornerRadius];
   [[NSBezierPath bezierPathWithRoundedRect:windowRect
-                                   xRadius:4
-                                   yRadius:4] addClip];
+                                   xRadius:cornerRadius
+                                   yRadius:cornerRadius] addClip];
   [[NSBezierPath bezierPathWithRect:rect] addClip];
 
-  // Draw our background color if we have one, otherwise fall back on
-  // system drawing.
-  GTMTheme* theme = [self gtm_theme];
-  GTMThemeState state = [window isMainWindow] ? GTMThemeStateActiveWindow
-                                              : GTMThemeStateInactiveWindow;
-  NSColor* color = [theme backgroundPatternColorForStyle:GTMThemeStyleWindow
-                                                   state:state];
-  if (color) {
-    // If we have a theme pattern, draw it here.
-    NSPoint phase = NSMakePoint(0, (NSHeight(windowRect) +
-                                    kBrowserFrameViewPatternPhaseOffset));
+  // Do the theming.
+  BOOL themed = [BrowserFrameView drawWindowThemeInDirtyRect:rect
+                                                     forView:self
+                                                      bounds:windowRect
+                                                      offset:NSZeroPoint
+                                        forceBlackBackground:NO];
+
+  // If the window needs a title and we painted over the title as drawn by the
+  // default window paint, paint it ourselves.
+  if (themed && gCanDrawTitle && ![[self window] _isTitleHidden]) {
+    [self _drawTitleStringIn:[self _titlebarTitleRect]
+                   withColor:[BrowserFrameView titleColorForThemeView:self]];
+  }
+
+  // Pinstripe the top.
+  if (themed) {
+    NSSize windowPixel = [self convertSizeFromBase:NSMakeSize(1, 1)];
+
+    windowRect = [self convertRect:[window frame] fromView:nil];
+    windowRect.origin = NSMakePoint(0, 0);
+    windowRect.origin.y -= 0.5 * windowPixel.height;
+    windowRect.origin.x -= 0.5 * windowPixel.width;
+    windowRect.size.width += windowPixel.width;
+    [[NSColor colorWithCalibratedWhite:1.0 alpha:0.5] set];
+    NSBezierPath* path = [NSBezierPath bezierPathWithRoundedRect:windowRect
+                                                         xRadius:cornerRadius
+                                                         yRadius:cornerRadius];
+    [path setLineWidth:windowPixel.width];
+    [path stroke];
+  }
+}
+
++ (BOOL)drawWindowThemeInDirtyRect:(NSRect)dirtyRect
+                           forView:(NSView*)view
+                            bounds:(NSRect)bounds
+                            offset:(NSPoint)offset
+              forceBlackBackground:(BOOL)forceBlackBackground {
+  ThemeProvider* themeProvider = [[view window] themeProvider];
+  if (!themeProvider)
+    return NO;
+
+  ThemedWindowStyle windowStyle = [[view window] themedWindowStyle];
+
+  // Devtools windows don't get themed.
+  if (windowStyle & THEMED_DEVTOOLS)
+    return NO;
+
+  BOOL active = [[view window] isMainWindow];
+  BOOL incognito = windowStyle & THEMED_INCOGNITO;
+  BOOL popup = windowStyle & THEMED_POPUP;
+
+  // Find a theme image.
+  NSColor* themeImageColor = nil;
+  int themeImageID;
+  if (popup && active)
+    themeImageID = IDR_THEME_TOOLBAR;
+  else if (popup && !active)
+    themeImageID = IDR_THEME_TAB_BACKGROUND;
+  else if (!popup && active && incognito)
+    themeImageID = IDR_THEME_FRAME_INCOGNITO;
+  else if (!popup && active && !incognito)
+    themeImageID = IDR_THEME_FRAME;
+  else if (!popup && !active && incognito)
+    themeImageID = IDR_THEME_FRAME_INCOGNITO_INACTIVE;
+  else
+    themeImageID = IDR_THEME_FRAME_INACTIVE;
+  if (themeProvider->HasCustomImage(IDR_THEME_FRAME))
+    themeImageColor = themeProvider->GetNSImageColorNamed(themeImageID, true);
+
+  // If no theme image, use a gradient if incognito.
+  NSGradient* gradient = nil;
+  if (!themeImageColor && incognito)
+    gradient = themeProvider->GetNSGradient(
+        active ? BrowserThemeProvider::GRADIENT_FRAME_INCOGNITO :
+                 BrowserThemeProvider::GRADIENT_FRAME_INCOGNITO_INACTIVE);
+
+  BOOL themed = NO;
+  if (themeImageColor) {
+    // The titlebar/tabstrip header on the mac is slightly smaller than on
+    // Windows.  To keep the window background lined up with the tab and toolbar
+    // patterns, we have to shift the pattern slightly, rather than simply
+    // drawing it from the top left corner.  The offset below was empirically
+    // determined in order to line these patterns up.
+    //
+    // This will make the themes look slightly different than in Windows/Linux
+    // because of the differing heights between window top and tab top, but this
+    // has been approved by UI.
+    NSView* frameView = [[[view window] contentView] superview];
+    NSPoint topLeft = NSMakePoint(NSMinX(bounds), NSMaxY(bounds));
+    NSPoint topLeftInFrameCoordinates =
+        [view convertPoint:topLeft toView:frameView];
+
+    NSPoint phase = kBrowserFrameViewPatternPhaseOffset;
+    phase.x += (offset.x + topLeftInFrameCoordinates.x);
+    phase.y += (offset.y + topLeftInFrameCoordinates.y);
+
+    // Align the phase to physical pixels so resizing the window under HiDPI
+    // doesn't cause wiggling of the theme.
+    phase = [frameView convertPointToBase:phase];
+    phase.x = floor(phase.x);
+    phase.y = floor(phase.y);
+    phase = [frameView convertPointFromBase:phase];
+
+    // Default to replacing any existing pixels with the theme image, but if
+    // asked paint black first and blend the theme with black.
+    NSCompositingOperation operation = NSCompositeCopy;
+    if (forceBlackBackground) {
+      [[NSColor blackColor] set];
+      NSRectFill(dirtyRect);
+      operation = NSCompositeSourceOver;
+    }
+
     [[NSGraphicsContext currentContext] setPatternPhase:phase];
-    [color set];
-    NSRectFill(rect);
+    [themeImageColor set];
+    NSRectFillUsingOperation(dirtyRect, operation);
+    themed = YES;
+  } else if (gradient) {
+    NSPoint startPoint = NSMakePoint(NSMinX(bounds), NSMaxY(bounds));
+    NSPoint endPoint = startPoint;
+    endPoint.y -= kBrowserFrameViewPaintHeight;
+    [gradient drawFromPoint:startPoint toPoint:endPoint options:0];
+    themed = YES;
   }
 
   // Check to see if we have an overlay image.
-  NSImage* overlayImage = [theme valueForAttribute:@"overlay"
-                                             style:GTMThemeStyleWindow
-                                             state:state];
-  if (overlayImage) {
-    NSSize overlaySize = [overlayImage size];
-    NSRect windowFrame = NSMakeRect(0,
-                                    NSHeight(windowRect) - overlaySize.height,
-                                    NSWidth(windowRect),
-                                    overlaySize.height);
-    NSRect imageFrame = NSMakeRect(0, 0, overlaySize.width, overlaySize.height);
-    [overlayImage drawInRect:windowFrame
-                    fromRect:imageFrame
-                   operation:NSCompositeSourceOver
-                    fraction:1.0];
+  NSImage* overlayImage = nil;
+  if (themeProvider->HasCustomImage(IDR_THEME_FRAME_OVERLAY)) {
+    overlayImage = themeProvider->
+        GetNSImageNamed(active ? IDR_THEME_FRAME_OVERLAY :
+                                 IDR_THEME_FRAME_OVERLAY_INACTIVE,
+                        true);
   }
+
+  if (overlayImage) {
+    // Anchor to top-left and don't scale.
+    NSSize overlaySize = [overlayImage size];
+    NSRect imageFrame = NSMakeRect(0, 0, overlaySize.width, overlaySize.height);
+    [overlayImage drawAtPoint:NSMakePoint(offset.x,
+                                          NSHeight(bounds) + offset.y -
+                                               overlaySize.height)
+                     fromRect:imageFrame
+                    operation:NSCompositeSourceOver
+                     fraction:1.0];
+  }
+
+  return themed;
+}
+
++ (NSColor*)titleColorForThemeView:(NSView*)view {
+  ThemeProvider* themeProvider = [[view window] themeProvider];
+  if (!themeProvider)
+    return [NSColor windowFrameTextColor];
+
+  ThemedWindowStyle windowStyle = [[view window] themedWindowStyle];
+  BOOL active = [[view window] isMainWindow];
+  BOOL incognito = windowStyle & THEMED_INCOGNITO;
+  BOOL popup = windowStyle & THEMED_POPUP;
+
+  NSColor* titleColor = nil;
+  if (popup && active) {
+    titleColor = themeProvider->GetNSColor(
+        BrowserThemeProvider::COLOR_TAB_TEXT, false);
+  } else if (popup && !active) {
+    titleColor = themeProvider->GetNSColor(
+        BrowserThemeProvider::COLOR_BACKGROUND_TAB_TEXT, false);
+  }
+
+  if (titleColor)
+    return titleColor;
+
+  if (incognito)
+    return [NSColor whiteColor];
+  else
+    return [NSColor windowFrameTextColor];
 }
 
 // Check to see if the mouse is currently in one of our window widgets.

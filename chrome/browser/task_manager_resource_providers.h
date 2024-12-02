@@ -13,8 +13,10 @@
 #include "chrome/browser/task_manager.h"
 #include "chrome/common/child_process_info.h"
 #include "chrome/common/notification_observer.h"
-#include "webkit/api/public/WebCache.h"
+#include "chrome/common/notification_registrar.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebCache.h"
 
+class BalloonHost;
 class Extension;
 class ExtensionHost;
 class TabContents;
@@ -35,6 +37,10 @@ class TaskManagerTabContentsResource : public TaskManager::Resource {
   virtual bool ReportsCacheStats() const { return true; }
   virtual WebKit::WebCache::ResourceTypeStats GetWebCoreCacheStats() const;
 
+  virtual bool ReportsV8MemoryStats() const { return true; }
+  virtual size_t GetV8MemoryAllocated() const;
+  virtual size_t GetV8MemoryUsed() const;
+
   // TabContents always provide the network usage.
   bool SupportNetworkUsage() const { return true; }
   void SetSupportNetworkUsage() { }
@@ -44,17 +50,23 @@ class TaskManagerTabContentsResource : public TaskManager::Resource {
   virtual void NotifyResourceTypeStats(
       const WebKit::WebCache::ResourceTypeStats& stats);
 
+  virtual void NotifyV8HeapStats(size_t v8_memory_allocated,
+                                 size_t v8_memory_used);
+
  private:
   TabContents* tab_contents_;
   base::ProcessHandle process_;
   int pid_;
   // The stats_ field holds information about resource usage in the renderer
-  // process and so it is updated asynchronously.  A query to any of the
-  // GetWebCore*CacheSize() functions will send an IPC to the renderer asking
-  // for an update unless a query is already outstanding.
+  // process and so it is updated asynchronously by the Refresh() call.
   WebKit::WebCache::ResourceTypeStats stats_;
   // This flag is true if we are waiting for the renderer to report its stats.
   bool pending_stats_update_;
+
+  // We do a similar dance to gather the V8 memory usage in a process.
+  size_t v8_memory_allocated_;
+  size_t v8_memory_used_;
+  bool pending_v8_memory_allocated_update_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerTabContentsResource);
 };
@@ -64,7 +76,6 @@ class TaskManagerTabContentsResourceProvider
       public NotificationObserver {
  public:
   explicit TaskManagerTabContentsResourceProvider(TaskManager* task_manager);
-  virtual ~TaskManagerTabContentsResourceProvider();
 
   virtual TaskManager::Resource* GetResource(int origin_pid,
                                              int render_process_host_id,
@@ -78,6 +89,8 @@ class TaskManagerTabContentsResourceProvider
                        const NotificationDetails& details);
 
  private:
+  virtual ~TaskManagerTabContentsResourceProvider();
+
   void Add(TabContents* tab_contents);
   void Remove(TabContents* tab_contents);
 
@@ -139,7 +152,6 @@ class TaskManagerChildProcessResourceProvider
       public NotificationObserver {
  public:
   explicit TaskManagerChildProcessResourceProvider(TaskManager* task_manager);
-  virtual ~TaskManagerChildProcessResourceProvider();
 
   virtual TaskManager::Resource* GetResource(int origin_pid,
                                              int render_process_host_id,
@@ -166,14 +178,14 @@ class TaskManagerChildProcessResourceProvider
   std::vector<ChildProcessInfo> existing_child_process_info_;
 
  private:
+  virtual ~TaskManagerChildProcessResourceProvider();
+
   void Add(ChildProcessInfo child_process_info);
   void Remove(ChildProcessInfo child_process_info);
 
   void AddToTaskManager(ChildProcessInfo child_process_info);
 
   TaskManager* task_manager_;
-
-  MessageLoop* ui_loop_;
 
   // Maps the actual resources (the ChildProcessInfo) to the Task Manager
   // resources.
@@ -200,13 +212,12 @@ class TaskManagerExtensionProcessResource : public TaskManager::Resource {
   base::ProcessHandle GetProcess() const;
   bool SupportNetworkUsage() const { return true; }
   void SetSupportNetworkUsage() { NOTREACHED(); }
+  const Extension* GetExtension() const;
 
   // Returns the pid of the extension process.
   int process_id() const { return pid_; }
 
  private:
-  Extension* extension() const;
-
   // The icon painted for the extension process.
   static SkBitmap* default_icon_;
 
@@ -226,7 +237,6 @@ class TaskManagerExtensionProcessResourceProvider
  public:
   explicit TaskManagerExtensionProcessResourceProvider(
       TaskManager* task_manager);
-  virtual ~TaskManagerExtensionProcessResourceProvider();
 
   virtual TaskManager::Resource* GetResource(int origin_pid,
                                              int render_process_host_id,
@@ -240,6 +250,8 @@ class TaskManagerExtensionProcessResourceProvider
                        const NotificationDetails& details);
 
  private:
+  virtual ~TaskManagerExtensionProcessResourceProvider();
+
   void AddToTaskManager(ExtensionHost* extension_host);
   void RemoveFromTaskManager(ExtensionHost* extension_host);
 
@@ -258,6 +270,70 @@ class TaskManagerExtensionProcessResourceProvider
   bool updating_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskManagerExtensionProcessResourceProvider);
+};
+
+class TaskManagerNotificationResource : public TaskManager::Resource {
+ public:
+  explicit TaskManagerNotificationResource(BalloonHost* balloon_host);
+  ~TaskManagerNotificationResource();
+
+  // TaskManager::Resource interface
+  std::wstring GetTitle() const { return title_; }
+  SkBitmap GetIcon() const;
+  base::ProcessHandle GetProcess() const;
+  virtual bool SupportNetworkUsage() const { return false; }
+  virtual void SetSupportNetworkUsage() { }
+
+ private:
+  // The icon painted for notifications.       .
+  static SkBitmap* default_icon_;
+
+  // Non-owned pointer to the balloon host.
+  BalloonHost* balloon_host_;
+
+  // Cached data about the balloon host.
+  base::ProcessHandle process_handle_;
+  int pid_;
+  std::wstring title_;
+
+  DISALLOW_COPY_AND_ASSIGN(TaskManagerNotificationResource);
+};
+
+class TaskManagerNotificationResourceProvider
+    : public TaskManager::ResourceProvider,
+      public NotificationObserver {
+ public:
+  explicit TaskManagerNotificationResourceProvider(TaskManager* task_manager);
+
+  // TaskManager::ResourceProvider interface
+  virtual TaskManager::Resource* GetResource(int origin_pid,
+                                             int render_process_host_id,
+                                             int routing_id);
+  virtual void StartUpdating();
+  virtual void StopUpdating();
+
+  // NotificationObserver interface
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
+
+ private:
+  virtual ~TaskManagerNotificationResourceProvider();
+
+  void AddToTaskManager(BalloonHost* balloon_host);
+  void RemoveFromTaskManager(BalloonHost* balloon_host);
+
+  TaskManager* task_manager_;
+
+  // Maps the actual resources (BalloonHost*) to the Task Manager resources.
+  std::map<BalloonHost*, TaskManagerNotificationResource*> resources_;
+
+  // A scoped container for notification registries.
+  NotificationRegistrar registrar_;
+
+  bool updating_;
+
+  DISALLOW_COPY_AND_ASSIGN(TaskManagerNotificationResourceProvider);
 };
 
 class TaskManagerBrowserProcessResource : public TaskManager::Resource {
@@ -294,7 +370,6 @@ class TaskManagerBrowserProcessResourceProvider
  public:
   explicit TaskManagerBrowserProcessResourceProvider(
       TaskManager* task_manager);
-  virtual ~TaskManagerBrowserProcessResourceProvider();
 
   virtual TaskManager::Resource* GetResource(int origin_pid,
                                              int render_process_host_id,
@@ -307,6 +382,8 @@ class TaskManagerBrowserProcessResourceProvider
   bool updating_;
 
  private:
+  virtual ~TaskManagerBrowserProcessResourceProvider();
+
   void AddToTaskManager(ChildProcessInfo child_process_info);
 
   TaskManager* task_manager_;

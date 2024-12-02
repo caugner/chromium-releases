@@ -13,8 +13,10 @@
 // WorkerProcess messages
 // These are messages sent from the browser to the worker process.
 IPC_BEGIN_MESSAGES(WorkerProcess)
-  IPC_MESSAGE_CONTROL2(WorkerProcessMsg_CreateWorker,
+  IPC_MESSAGE_CONTROL4(WorkerProcessMsg_CreateWorker,
                        GURL  /* url */,
+                       bool /* is_shared */,
+                       string16 /* name */,
                        int  /* route_id */)
 
   // Note: these Message Port related messages can also be sent to the
@@ -94,6 +96,10 @@ IPC_BEGIN_MESSAGES(Worker)
                       std::vector<int>  /* sent_message_port_ids */,
                       std::vector<int>  /* new_routing_ids */)
 
+  IPC_MESSAGE_ROUTED2(WorkerMsg_Connect,
+                      int /* sent_message_port_id */,
+                      int /* routing_id */)
+
   IPC_MESSAGE_ROUTED0(WorkerMsg_WorkerObjectDestroyed)
 IPC_END_MESSAGES(Worker)
 
@@ -117,5 +123,7 @@ IPC_BEGIN_MESSAGES(WorkerHost)
   IPC_MESSAGE_ROUTED1(WorkerHostMsg_ReportPendingActivity,
                       bool /* bool has_pending_activity */)
 
+  IPC_MESSAGE_CONTROL1(WorkerHostMsg_WorkerContextClosed,
+                       int /* worker_route_id */)
   IPC_MESSAGE_ROUTED0(WorkerHostMsg_WorkerContextDestroyed)
 IPC_END_MESSAGES(WorkerHost)

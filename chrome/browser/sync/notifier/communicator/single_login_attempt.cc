@@ -2,7 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
 #include <string>
+#include <vector>
 
 #include "chrome/browser/sync/notifier/communicator/single_login_attempt.h"
 
@@ -15,43 +17,29 @@
 #include "chrome/browser/sync/notifier/communicator/product_info.h"
 #include "chrome/browser/sync/notifier/communicator/xmpp_connection_generator.h"
 #include "chrome/browser/sync/notifier/communicator/xmpp_socket_adapter.h"
-#include "chrome/browser/sync/notifier/gaia_auth/gaiaauth.h"
 #include "talk/base/asynchttprequest.h"
 #include "talk/base/firewallsocketserver.h"
 #include "talk/base/signalthread.h"
 #include "talk/base/taskrunner.h"
 #include "talk/base/winsock_initializer.h"
 #include "talk/xmllite/xmlelement.h"
-#include "talk/xmpp/prexmppauth.h"
+#include "talk/xmpp/saslcookiemechanism.h"
+#include "talk/xmpp/saslhandler.h"
 #include "talk/xmpp/xmppclient.h"
 #include "talk/xmpp/xmppclientsettings.h"
 #include "talk/xmpp/xmppconstants.h"
 
 namespace notifier {
 
-static void FillProxyInfo(const buzz::XmppClientSettings& xcs,
-                          talk_base::ProxyInfo* proxy) {
-  ASSERT(proxy != NULL);
-  proxy->type = xcs.proxy();
-  proxy->address.SetIP(xcs.proxy_host());
-  proxy->address.SetPort(xcs.proxy_port());
-  if (xcs.use_proxy_auth()) {
-    proxy->username = xcs.proxy_user();
-    proxy->password = xcs.proxy_pass();
-  }
-}
-
 static void GetClientErrorInformation(
     buzz::XmppClient* client,
     buzz::XmppEngine::Error* error,
     int* subcode,
-    buzz::XmlElement** stream_error,
-    buzz::CaptchaChallenge* captcha_challenge) {
+    buzz::XmlElement** stream_error) {
   ASSERT(client != NULL);
-  ASSERT(error && subcode && stream_error && captcha_challenge);
+  ASSERT(error && subcode && stream_error);
 
   *error = client->GetError(subcode);
-  *captcha_challenge = client->GetCaptchaChallenge();
 
   *stream_error = NULL;
   if (*error == buzz::XmppEngine::ERROR_STREAM) {
@@ -61,6 +49,60 @@ static void GetClientErrorInformation(
     }
   }
 }
+
+namespace {
+
+const char kGaiaAuthMechanism[] = "X-GOOGLE-TOKEN";
+
+// This class looks for the X-GOOGLE-TOKEN auth mechanism and uses
+// that instead of the default auth mechanism (PLAIN).
+class GaiaOnlySaslHandler : public buzz::SaslHandler {
+ public:
+  GaiaOnlySaslHandler(
+      const std::string& username,
+      const std::string& token,
+      const std::string& token_service)
+      : username_(username),
+        token_(token),
+        token_service_(token_service) {}
+
+  virtual std::string ChooseBestSaslMechanism(
+      const std::vector<std::string> & mechanisms, bool encrypted) {
+    return (std::find(mechanisms.begin(),
+                      mechanisms.end(), kGaiaAuthMechanism) !=
+            mechanisms.end()) ? kGaiaAuthMechanism : "";
+  }
+
+  virtual buzz::SaslMechanism* CreateSaslMechanism(
+      const std::string& mechanism) {
+    return
+        (mechanism == kGaiaAuthMechanism) ?
+        new buzz::SaslCookieMechanism(
+            kGaiaAuthMechanism, username_, token_, token_service_)
+        : NULL;
+  }
+
+  virtual bool GetTlsServerInfo(const talk_base::SocketAddress& server,
+                                std::string* tls_server_hostname,
+                                std::string* tls_server_domain) {
+    std::string server_ip = server.IPAsString();
+    if ((server_ip == buzz::STR_TALK_GOOGLE_COM) ||
+        (server_ip == buzz::STR_TALKX_L_GOOGLE_COM)) {
+      // For Gaia auth, the talk.google.com server expects you to use
+      // "gmail.com" in the stream, and expects the domain certificate
+      // to be "gmail.com" as well.
+      *tls_server_hostname = buzz::STR_GMAIL_COM;
+      *tls_server_domain = buzz::STR_GMAIL_COM;
+      return true;
+    }
+    return false;
+  }
+
+ private:
+  std::string username_, token_, token_service_;
+};
+
+}  // namespace
 
 SingleLoginAttempt::SingleLoginAttempt(talk_base::Task* parent,
                                        LoginSettings* login_settings,
@@ -204,7 +246,8 @@ void SingleLoginAttempt::DoLogin(
   // Start connecting.
   client_->Connect(client_settings, login_settings_->lang(),
                    CreateSocket(client_settings),
-                   CreatePreXmppAuth(client_settings));
+                   NULL,
+                   CreateSaslHandler(client_settings));
   client_->Start();
 }
 
@@ -233,30 +276,11 @@ buzz::AsyncSocket* SingleLoginAttempt::CreateSocket(
   return adapter;
 }
 
-buzz::PreXmppAuth* SingleLoginAttempt::CreatePreXmppAuth(
+buzz::SaslHandler* SingleLoginAttempt::CreateSaslHandler(
     const buzz::XmppClientSettings& xcs) {
-  if (login_settings_->no_gaia_auth())
-    return NULL;
-
-  // For GMail, use Gaia preauthentication over HTTP.
-  buzz::GaiaAuth* auth = new buzz::GaiaAuth(GetUserAgentString(),
-                                            GetProductSignature());
-  auth->SignalAuthenticationError.connect(
-      this,
-      &SingleLoginAttempt::OnAuthenticationError);
-  auth->SignalCertificateExpired.connect(
-      this,
-      &SingleLoginAttempt::OnCertificateExpired);
-  auth->SignalFreshAuthCookie.connect(
-      this,
-      &SingleLoginAttempt::OnFreshAuthCookie);
-  auth->set_token_service(xcs.token_service());
-
-  talk_base::ProxyInfo proxy;
-  FillProxyInfo(xcs, &proxy);
-  auth->set_proxy(proxy);
-  auth->set_firewall(login_settings_->firewall());
-  return auth;
+  buzz::Jid jid(xcs.user(), xcs.host(), buzz::STR_EMPTY);
+  return new GaiaOnlySaslHandler(
+      jid.Str(), xcs.auth_cookie(), xcs.token_service());
 }
 
 void SingleLoginAttempt::OnFreshAuthCookie(const std::string& auth_cookie) {
@@ -441,13 +465,11 @@ void SingleLoginAttempt::OnClientStateChangeClosed(
     buzz::XmppEngine::State previous_state) {
   buzz::XmppEngine::Error error = buzz::XmppEngine::ERROR_NONE;
   int error_subcode = 0;
-  buzz::CaptchaChallenge captcha_challenge;
   buzz::XmlElement* stream_error_ptr;
   GetClientErrorInformation(client_,
                             &error,
                             &error_subcode,
-                            &stream_error_ptr,
-                            &captcha_challenge);
+                            &stream_error_ptr);
   scoped_ptr<buzz::XmlElement> stream_error(stream_error_ptr);
 
   client_->SignalStateChange.disconnect(this);
@@ -461,36 +483,20 @@ void SingleLoginAttempt::OnClientStateChangeClosed(
     SignalUnexpectedDisconnect();
     return;
   } else {
-    HandleConnectionError(error, error_subcode, stream_error.get(),
-                          captcha_challenge);
+    HandleConnectionError(error, error_subcode, stream_error.get());
   }
 }
 
-void SingleLoginAttempt::HandleConnectionPasswordError(
-    const buzz::CaptchaChallenge& captcha_challenge) {
+void SingleLoginAttempt::HandleConnectionPasswordError() {
   LOG(INFO) << "SingleLoginAttempt::HandleConnectionPasswordError";
-
-  // Clear the auth cookie.
-  std::string current_auth_cookie =
-      login_settings_->user_settings().auth_cookie();
-  login_settings_->modifiable_user_settings()->set_auth_cookie("");
-  // If there was an auth cookie and it was the same as the last auth cookie,
-  // then it is a stale cookie. Retry login.
-  if (!current_auth_cookie.empty() && !cookie_refreshed_) {
-    UseCurrentConnection();
-    return;
-  }
-
-  LoginFailure failure(LoginFailure::XMPP_ERROR, code_, subcode_,
-                       captcha_challenge);
+  LoginFailure failure(LoginFailure::XMPP_ERROR, code_, subcode_);
   SignalLoginFailure(failure);
 }
 
 void SingleLoginAttempt::HandleConnectionError(
     buzz::XmppEngine::Error code,
     int subcode,
-    const buzz::XmlElement* stream_error,
-    const buzz::CaptchaChallenge& captcha_challenge) {
+    const buzz::XmlElement* stream_error) {
   LOG(INFO) << "(" << code << ", " << subcode << ")";
 
   // Save off the error code information, so we can use it to tell the user
@@ -500,7 +506,7 @@ void SingleLoginAttempt::HandleConnectionError(
   if ((code_ == buzz::XmppEngine::ERROR_UNAUTHORIZED) ||
       (code_ == buzz::XmppEngine::ERROR_MISSING_USERNAME)) {
     // There was a problem with credentials (username/password).
-    HandleConnectionPasswordError(captcha_challenge);
+    HandleConnectionPasswordError();
     return;
   }
 
@@ -530,7 +536,7 @@ void SingleLoginAttempt::HandleConnectionError(
         // Yep, its a "stream:error" with "see-other-host" text, let's parse
         // out the server:port, and then reconnect with that.
         const std::string& redirect = text->BodyText();
-        unsigned int colon = redirect.find(":");
+        size_t colon = redirect.find(":");
         int redirect_port = kDefaultXmppPort;
         std::string redirect_server;
         if (colon == std::string::npos) {

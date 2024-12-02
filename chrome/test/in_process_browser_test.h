@@ -1,11 +1,10 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_TEST_IN_PROCESS_BROWSER_TEST_H_
 #define CHROME_TEST_IN_PROCESS_BROWSER_TEST_H_
 
-#include "net/base/mock_host_resolver.h"
 #include "net/url_request/url_request_unittest.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -27,7 +26,9 @@ class RuleBasedHostResolverProc;
 //   is shown, invoke MessageLoop::current()->Quit() to return control back to
 //   your test method.
 // . If you subclass and override SetUp, be sure and invoke
-//   InProcessBrowserTest::SetUp.
+//   InProcessBrowserTest::SetUp. (But see also
+//   SetUpInProcessBrowserTestFixture and related hook methods for a cleaner
+//   alternative).
 //
 // By default InProcessBrowserTest creates a single Browser (as returned from
 // the CreateBrowser method). You can obviously create more as needed.
@@ -41,6 +42,7 @@ class RuleBasedHostResolverProc;
 class InProcessBrowserTest : public testing::Test {
  public:
   InProcessBrowserTest();
+  virtual ~InProcessBrowserTest();
 
   // We do this so we can be used in a Task.
   void AddRef() {}

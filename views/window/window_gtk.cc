@@ -4,9 +4,12 @@
 
 #include "views/window/window_gtk.h"
 
-#include "app/gfx/path.h"
 #include "app/l10n_util.h"
-#include "base/gfx/rect.h"
+#include "gfx/rect.h"
+#include "base/i18n/rtl.h"
+#include "base/utf_string_conversions.h"
+#include "gfx/path.h"
+#include "views/event.h"
 #include "views/screen.h"
 #include "views/widget/root_view.h"
 #include "views/window/custom_frame_view.h"
@@ -184,6 +187,10 @@ bool WindowGtk::IsFullscreen() const {
   return window_state_ & GDK_WINDOW_STATE_FULLSCREEN;
 }
 
+void WindowGtk::SetUseDragFrame(bool use_drag_frame) {
+  NOTIMPLEMENTED();
+}
+
 void WindowGtk::EnableClose(bool enable) {
   gtk_window_set_deletable(GetNativeWindow(), enable);
 }
@@ -197,7 +204,7 @@ void WindowGtk::UpdateWindowTitle() {
   // the native frame is being used, since this also updates the taskbar, etc.
   std::wstring window_title = window_delegate_->GetWindowTitle();
   std::wstring localized_text;
-  if (l10n_util::AdjustStringForLocaleDirection(window_title, &localized_text))
+  if (base::i18n::AdjustStringForLocaleDirection(window_title, &localized_text))
     window_title.assign(localized_text);
 
   gtk_window_set_title(GetNativeWindow(), WideToUTF8(window_title).c_str());
@@ -253,16 +260,30 @@ void WindowGtk::FrameTypeChanged() {
 // WindowGtk, WidgetGtk overrides:
 
 gboolean WindowGtk::OnButtonPress(GtkWidget* widget, GdkEventButton* event) {
+  int x = 0, y = 0;
+  GetContainedWidgetEventCoordinates(event, &x, &y);
+
   int hittest_code =
-      non_client_view_->NonClientHitTest(gfx::Point(event->x, event->y));
+      non_client_view_->NonClientHitTest(gfx::Point(x, y));
   switch (hittest_code) {
     case HTCAPTION: {
-      gfx::Point screen_point(event->x, event->y);
-      View::ConvertPointToScreen(GetRootView(), &screen_point);
-      gtk_window_begin_move_drag(GetNativeWindow(), event->button,
-                                 screen_point.x(), screen_point.y(),
-                                 event->time);
-      return TRUE;
+      MouseEvent mouse_pressed(Event::ET_MOUSE_PRESSED, event->x, event->y,
+                               WidgetGtk::GetFlagsForEventButton(*event));
+      // Start dragging if the mouse event is a single click and *not* a right
+      // click. If it is a right click, then pass it through to
+      // WidgetGtk::OnButtonPress so that View class can show ContextMenu upon a
+      // mouse release event. We only start drag on single clicks as we get a
+      // crash in Gtk on double/triple clicks.
+      if (event->type == GDK_BUTTON_PRESS &&
+          !mouse_pressed.IsOnlyRightMouseButton()) {
+        gfx::Point screen_point(event->x, event->y);
+        View::ConvertPointToScreen(GetRootView(), &screen_point);
+        gtk_window_begin_move_drag(GetNativeWindow(), event->button,
+                                   screen_point.x(), screen_point.y(),
+                                   event->time);
+        return TRUE;
+      }
+      break;
     }
     case HTBOTTOM:
     case HTBOTTOMLEFT:
@@ -297,13 +318,18 @@ gboolean WindowGtk::OnConfigureEvent(GtkWidget* widget,
 }
 
 gboolean WindowGtk::OnMotionNotify(GtkWidget* widget, GdkEventMotion* event) {
+  int x = 0, y = 0;
+  GetContainedWidgetEventCoordinates(event, &x, &y);
+
   // Update the cursor for the screen edge.
   int hittest_code =
-      non_client_view_->NonClientHitTest(gfx::Point(event->x, event->y));
-  GdkCursorType cursor_type = HitTestCodeToGdkCursorType(hittest_code);
-  GdkCursor* cursor = gdk_cursor_new(cursor_type);
-  gdk_window_set_cursor(widget->window, cursor);
-  gdk_cursor_destroy(cursor);
+      non_client_view_->NonClientHitTest(gfx::Point(x, y));
+  if (hittest_code != HTCLIENT) {
+    GdkCursorType cursor_type = HitTestCodeToGdkCursorType(hittest_code);
+    GdkCursor* cursor = gdk_cursor_new(cursor_type);
+    gdk_window_set_cursor(widget->window, cursor);
+    gdk_cursor_destroy(cursor);
+  }
 
   return WidgetGtk::OnMotionNotify(widget, event);
 }
@@ -316,7 +342,7 @@ void WindowGtk::OnSizeAllocate(GtkWidget* widget, GtkAllocation* allocation) {
   non_client_view_->GetWindowMask(gfx::Size(allocation->width,
                                             allocation->height),
                                   &window_mask);
-  GdkRegion* mask_region = window_mask.CreateGdkRegion();
+  GdkRegion* mask_region = window_mask.CreateNativeRegion();
   gdk_window_shape_combine_region(GetNativeView()->window, mask_region, 0, 0);
   if (mask_region)
     gdk_region_destroy(mask_region);
@@ -355,15 +381,15 @@ WindowGtk::WindowGtk(WindowDelegate* window_delegate)
 }
 
 void WindowGtk::Init(GtkWindow* parent, const gfx::Rect& bounds) {
-  WidgetGtk::Init(NULL, bounds);
+  if (parent)
+    make_transient_to_parent();
+  WidgetGtk::Init(GTK_WIDGET(parent), bounds);
 
   // We call this after initializing our members since our implementations of
   // assorted WidgetWin functions may be called during initialization.
   is_modal_ = window_delegate_->IsModal();
   if (is_modal_)
     gtk_window_set_modal(GetNativeWindow(), true);
-  if (parent)
-    gtk_window_set_transient_for(GetNativeWindow(), parent);
 
   g_signal_connect(G_OBJECT(GetNativeWindow()), "configure-event",
                    G_CALLBACK(CallConfigureEvent), this);
@@ -451,9 +477,9 @@ void WindowGtk::SizeWindowToDefault(GtkWindow* parent) {
   SetBounds(bounds, NULL);
 }
 
-void WindowGtk::OnDestroy() {
+void WindowGtk::OnDestroy(GtkWidget* widget) {
   non_client_view_->WindowClosing();
-  WidgetGtk::OnDestroy();
+  WidgetGtk::OnDestroy(widget);
 }
 
 }  // namespace views

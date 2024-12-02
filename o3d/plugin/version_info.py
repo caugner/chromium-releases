@@ -31,20 +31,35 @@ FLAGS = gflags.FLAGS
 gflags.DEFINE_boolean('kill_switch', False,
                       'Generate version numbers for kill switch binary.')
 
-gflags.DEFINE_boolean('name', False,
-                      'Print out the plugin name and exit.')
-
 gflags.DEFINE_boolean('description', False,
                       'Print out the plugin description and exit.')
-
-gflags.DEFINE_boolean('mimetype', False,
-                      'Print out the plugin mime type and exit.')
 
 gflags.DEFINE_boolean('version', False,
                       'Print out the plugin version and exit.')
 
 gflags.DEFINE_boolean('commaversion', False,
                       'Print out the plugin version with commas and exit.')
+
+gflags.DEFINE_string('set_name', '',
+                     'Sets the plugin name to use.')
+
+gflags.DEFINE_string('set_npapi_filename', '',
+                     'Sets the plugin NPAPI filename to use.')
+
+gflags.DEFINE_string('set_npapi_mimetype', '',
+                     'Sets the plugin NPAPI mimetype to use.')
+
+gflags.DEFINE_string('set_activex_hostcontrol_clsid', '',
+                     'Sets the ActiveX HostControl\'s CLSID to use.')
+
+gflags.DEFINE_string('set_activex_typelib_clsid', '',
+                     'Sets the ActiveX TypeLib\'s CLSID to use.')
+
+gflags.DEFINE_string('set_activex_hostcontrol_name', '',
+                     'Sets the ActiveX HostControl\'s name to use.')
+
+gflags.DEFINE_string('set_activex_typelib_name', '',
+                     'Sets the ActiveX TypeLib\'s name to use.')
 
 def GetDotVersion(version):
   return '%d.%d.%d.%d' % version
@@ -93,25 +108,22 @@ def main(argv):
   # not change. If you change this you must change the name in
   # samples/o3djs/util.js but be aware, changing the name
   # will break all apps that use o3d on the web.
-  O3D_PLUGIN_NAME = 'O3D Plugin'
+  O3D_PLUGIN_NAME = FLAGS.set_name
   O3D_PLUGIN_VERSION = GetDotVersion(plugin_version)
   O3D_PLUGIN_VERSION_COMMAS = GetCommaVersion(plugin_version)
   O3D_SDK_VERSION = GetDotVersion(sdk_version)
   O3D_SDK_VERSION_COMMAS = GetCommaVersion(sdk_version)
   O3D_PLUGIN_DESCRIPTION = '%s version:%s' % (O3D_PLUGIN_NAME,
                                               O3D_PLUGIN_VERSION)
-  O3D_PLUGIN_MIME_TYPE = 'application/vnd.o3d.auto'
-
-  if FLAGS.name:
-    print '%s' % O3D_PLUGIN_NAME
-    sys.exit(0)
+  O3D_PLUGIN_NPAPI_FILENAME = FLAGS.set_npapi_filename
+  O3D_PLUGIN_NPAPI_MIMETYPE = FLAGS.set_npapi_mimetype
+  O3D_PLUGIN_ACTIVEX_HOSTCONTROL_CLSID = FLAGS.set_activex_hostcontrol_clsid
+  O3D_PLUGIN_ACTIVEX_TYPELIB_CLSID = FLAGS.set_activex_typelib_clsid
+  O3D_PLUGIN_ACTIVEX_HOSTCONTROL_NAME = FLAGS.set_activex_hostcontrol_name
+  O3D_PLUGIN_ACTIVEX_TYPELIB_NAME = FLAGS.set_activex_typelib_name
 
   if FLAGS.description:
     print '%s' % O3D_PLUGIN_DESCRIPTION
-    sys.exit(0)
-
-  if FLAGS.mimetype:
-    print '%s' % O3D_PLUGIN_MIME_TYPE
     sys.exit(0)
 
   if FLAGS.version:
@@ -127,7 +139,14 @@ def main(argv):
       ('@@@ProductVersionCommas@@@', O3D_PLUGIN_VERSION_COMMAS),
       ('@@@ProductVersion@@@', O3D_PLUGIN_VERSION),
       ('@@@PluginDescription@@@', O3D_PLUGIN_DESCRIPTION),
-      ('@@@PluginMimeType@@@', O3D_PLUGIN_MIME_TYPE),
+      ('@@@PluginNpapiFilename@@@', O3D_PLUGIN_NPAPI_FILENAME),
+      ('@@@PluginNpapiMimeType@@@', O3D_PLUGIN_NPAPI_MIMETYPE),
+      ('@@@PluginActiveXHostControlClsid@@@',
+           O3D_PLUGIN_ACTIVEX_HOSTCONTROL_CLSID),
+      ('@@@PluginActiveXTypeLibClsid@@@', O3D_PLUGIN_ACTIVEX_TYPELIB_CLSID),
+      ('@@@PluginActiveXHostControlName@@@',
+           O3D_PLUGIN_ACTIVEX_HOSTCONTROL_NAME),
+      ('@@@PluginActiveXTypeLibName@@@', O3D_PLUGIN_ACTIVEX_TYPELIB_NAME),
   ]
 
   if len(files) == 2:

@@ -8,7 +8,9 @@
 #include <limits>
 
 #include "base/file_path.h"
+#include "base/logging.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/sqlite_utils.h"
 
 using webkit_glue::PasswordForm;
@@ -139,13 +141,13 @@ bool LoginDatabase::AddLogin(const PasswordForm& form) {
 
   s.bind_string(COLUMN_ORIGIN_URL, form.origin.spec());
   s.bind_string(COLUMN_ACTION_URL, form.action.spec());
-  s.bind_wstring(COLUMN_USERNAME_ELEMENT, form.username_element);
-  s.bind_wstring(COLUMN_USERNAME_VALUE, form.username_value);
-  s.bind_wstring(COLUMN_PASSWORD_ELEMENT, form.password_element);
+  s.bind_string16(COLUMN_USERNAME_ELEMENT, form.username_element);
+  s.bind_string16(COLUMN_USERNAME_VALUE, form.username_value);
+  s.bind_string16(COLUMN_PASSWORD_ELEMENT, form.password_element);
   std::string encrypted_password = EncryptedString(form.password_value);
   s.bind_blob(COLUMN_PASSWORD_VALUE, encrypted_password.data(),
               static_cast<int>(encrypted_password.length()));
-  s.bind_wstring(COLUMN_SUBMIT_ELEMENT, form.submit_element);
+  s.bind_string16(COLUMN_SUBMIT_ELEMENT, form.submit_element);
   s.bind_string(COLUMN_SIGNON_REALM, form.signon_realm);
   s.bind_int(COLUMN_SSL_VALID, form.ssl_valid);
   s.bind_int(COLUMN_PREFERRED, form.preferred);
@@ -182,9 +184,9 @@ bool LoginDatabase::UpdateLogin(const PasswordForm& form, int* items_changed) {
   s.bind_int(2, form.ssl_valid);
   s.bind_int(3, form.preferred);
   s.bind_string(4, form.origin.spec());
-  s.bind_wstring(5, form.username_element);
-  s.bind_wstring(6, form.username_value);
-  s.bind_wstring(7, form.password_element);
+  s.bind_string16(5, form.username_element);
+  s.bind_string16(6, form.username_value);
+  s.bind_string16(7, form.password_element);
   s.bind_string(8, form.signon_realm);
 
   if (s.step() != SQLITE_DONE) {
@@ -213,10 +215,10 @@ bool LoginDatabase::RemoveLogin(const PasswordForm& form) {
   }
 
   s.bind_string(0, form.origin.spec());
-  s.bind_wstring(1, form.username_element);
-  s.bind_wstring(2, form.username_value);
-  s.bind_wstring(3, form.password_element);
-  s.bind_wstring(4, form.submit_element);
+  s.bind_string16(1, form.username_element);
+  s.bind_string16(2, form.username_value);
+  s.bind_string16(3, form.password_element);
+  s.bind_string16(4, form.submit_element);
   s.bind_string(5, form.signon_realm);
 
   if (s.step() != SQLITE_DONE) {
@@ -249,13 +251,13 @@ void LoginDatabase::InitPasswordFormFromStatement(PasswordForm* form,
   form->origin = GURL(tmp);
   s->column_string(COLUMN_ACTION_URL, &tmp);
   form->action = GURL(tmp);
-  s->column_wstring(COLUMN_USERNAME_ELEMENT, &form->username_element);
-  s->column_wstring(COLUMN_USERNAME_VALUE, &form->username_value);
-  s->column_wstring(COLUMN_PASSWORD_ELEMENT, &form->password_element);
+  s->column_string16(COLUMN_USERNAME_ELEMENT, &form->username_element);
+  s->column_string16(COLUMN_USERNAME_VALUE, &form->username_value);
+  s->column_string16(COLUMN_PASSWORD_ELEMENT, &form->password_element);
   std::string encrypted_password;
   s->column_blob_as_string(COLUMN_PASSWORD_VALUE, &encrypted_password);
   form->password_value = DecryptedString(encrypted_password);
-  s->column_wstring(COLUMN_SUBMIT_ELEMENT, &form->submit_element);
+  s->column_string16(COLUMN_SUBMIT_ELEMENT, &form->submit_element);
   s->column_string(COLUMN_SIGNON_REALM, &tmp);
   form->signon_realm = tmp;
   form->ssl_valid = (s->column_int(COLUMN_SSL_VALID) > 0);
@@ -285,6 +287,38 @@ bool LoginDatabase::GetLogins(const PasswordForm& form,
   }
 
   s.bind_string(0, form.signon_realm);
+
+  int result;
+  while ((result = s.step()) == SQLITE_ROW) {
+    PasswordForm* new_form = new PasswordForm();
+    InitPasswordFormFromStatement(new_form, &s);
+
+    forms->push_back(new_form);
+  }
+  return result == SQLITE_DONE;
+}
+
+bool LoginDatabase::GetLoginsCreatedBetween(
+    const base::Time begin,
+    const base::Time end,
+    std::vector<webkit_glue::PasswordForm*>* forms) const {
+  DCHECK(forms);
+  SQLStatement s;
+  std::string stmt = "SELECT origin_url, action_url, "
+                     "username_element, username_value, "
+                     "password_element, password_value, "
+                     "submit_element, signon_realm, ssl_valid, preferred, "
+                     "date_created, blacklisted_by_user, scheme FROM logins "
+                     "WHERE date_created >= ? AND date_created < ?"
+                     "ORDER BY origin_url";
+
+  if (s.prepare(db_, stmt.c_str()) != SQLITE_OK) {
+    NOTREACHED() << "Statement prepare failed";
+    return false;
+  }
+  s.bind_int64(0, begin.ToTimeT());
+  s.bind_int64(1, end.is_null() ? std::numeric_limits<int64>::max()
+                                : end.ToTimeT());
 
   int result;
   while ((result = s.step()) == SQLITE_ROW) {

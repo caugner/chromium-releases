@@ -1,15 +1,16 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef NET_BASE_HOST_CACHE_H_
 #define NET_BASE_HOST_CACHE_H_
 
+#include <map>
 #include <string>
 
-#include "base/hash_tables.h"
 #include "base/ref_counted.h"
 #include "base/time.h"
+#include "net/base/address_family.h"
 #include "net/base/address_list.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
@@ -21,7 +22,6 @@ class HostCache {
   // Stores the latest address list that was looked up for a hostname.
   struct Entry : public base::RefCounted<Entry> {
     Entry(int error, const AddressList& addrlist, base::TimeTicks expiration);
-    ~Entry();
 
     // The resolve results for this entry.
     int error;
@@ -29,28 +29,73 @@ class HostCache {
 
     // The time when this entry expires.
     base::TimeTicks expiration;
+
+   private:
+    friend class base::RefCounted<Entry>;
+
+    ~Entry();
   };
 
-  typedef base::hash_map<std::string, scoped_refptr<Entry> > EntryMap;
+  struct Key {
+    Key(const std::string& hostname, AddressFamily address_family,
+        HostResolverFlags host_resolver_flags)
+        : hostname(hostname),
+          address_family(address_family),
+          host_resolver_flags(host_resolver_flags) {}
 
-  // Constructs a HostCache whose entries are valid for |cache_duration_ms|
-  // milliseconds. The cache will store up to |max_entries|.
-  HostCache(size_t max_entries, size_t cache_duration_ms);
+    bool operator==(const Key& other) const {
+      // |address_family| and |host_resolver_flags| are compared before
+      // |hostname| under assumption that integer comparisons are faster than
+      // string comparisons.
+      return (other.address_family == address_family &&
+              other.host_resolver_flags == host_resolver_flags &&
+              other.hostname == hostname);
+    }
+
+    bool operator<(const Key& other) const {
+      // |address_family| and |host_resolver_flags| are compared before
+      // |hostname| under assumption that integer comparisons are faster than
+      // string comparisons.
+      if (address_family != other.address_family)
+        return address_family < other.address_family;
+      if (host_resolver_flags != other.host_resolver_flags)
+        return host_resolver_flags < other.host_resolver_flags;
+      return hostname < other.hostname;
+    }
+
+    std::string hostname;
+    AddressFamily address_family;
+    HostResolverFlags host_resolver_flags;
+  };
+
+  typedef std::map<Key, scoped_refptr<Entry> > EntryMap;
+
+  // Constructs a HostCache that caches successful host resolves for
+  // |success_entry_ttl| time, and failed host resolves for
+  // |failure_entry_ttl|. The cache will store up to |max_entries|.
+  HostCache(size_t max_entries,
+            base::TimeDelta success_entry_ttl,
+            base::TimeDelta failure_entry_ttl);
 
   ~HostCache();
 
-  // Returns a pointer to the entry for |hostname|, which is valid at time
+  // Returns a pointer to the entry for |key|, which is valid at time
   // |now|. If there is no such entry, returns NULL.
-  const Entry* Lookup(const std::string& hostname, base::TimeTicks now) const;
+  const Entry* Lookup(const Key& key, base::TimeTicks now) const;
 
-  // Overwrites or creates an entry for |hostname|. Returns the pointer to the
+  // Overwrites or creates an entry for |key|. Returns the pointer to the
   // entry, or NULL on failure (fails if caching is disabled).
   // (|error|, |addrlist|) is the value to set, and |now| is the current
   // timestamp.
-  Entry* Set(const std::string& hostname,
+  Entry* Set(const Key& key,
              int error,
              const AddressList addrlist,
              base::TimeTicks now);
+
+  // Empties the cache.
+  void clear() {
+    entries_.clear();
+  }
 
   // Returns true if this HostCache can contain no entries.
   bool caching_is_disabled() const {
@@ -66,8 +111,12 @@ class HostCache {
     return max_entries_;
   }
 
-  size_t cache_duration_ms() const {
-    return cache_duration_ms_;
+  base::TimeDelta success_entry_ttl() const {
+    return success_entry_ttl_;
+  }
+
+  base::TimeDelta failure_entry_ttl() const {
+    return failure_entry_ttl_;
   }
 
   // Note that this map may contain expired entries.
@@ -89,8 +138,9 @@ class HostCache {
   // Bound on total size of the cache.
   size_t max_entries_;
 
-  // Time to live for cache entries in milliseconds.
-  size_t cache_duration_ms_;
+  // Time to live for cache entries.
+  base::TimeDelta success_entry_ttl_;
+  base::TimeDelta failure_entry_ttl_;
 
   // Map from hostname (presumably in lowercase canonicalized format) to
   // a resolved result entry.

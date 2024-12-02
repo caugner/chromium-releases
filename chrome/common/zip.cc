@@ -5,7 +5,9 @@
 #include "chrome/common/zip.h"
 
 #include "base/file_util.h"
+#include "base/logging.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "net/base/file_stream.h"
 #include "third_party/zlib/contrib/minizip/unzip.h"
 #include "third_party/zlib/contrib/minizip/zip.h"
@@ -29,11 +31,6 @@ static bool ExtractCurrentFile(unzFile zip_file,
   if (filename_inzip[0] == '\0')
     return false;
 
-  // Check the filename here for directory traversal issues. In the name of
-  // simplicity and security, we might reject a valid filename such as "a..b"
-  if (strstr(filename_inzip, "..") != NULL)
-    return false;
-
   err = unzOpenCurrentFile(zip_file);
   if (err != UNZ_OK)
     return false;
@@ -45,6 +42,12 @@ static bool ExtractCurrentFile(unzFile zip_file,
 #elif defined(OS_POSIX)
   filename = filename_inzip;
 #endif
+
+  // Check the filename here for directory traversal issues. In the name of
+  // simplicity and security, we might reject a valid filename such as "a..b".
+  if (filename.find(FILE_PATH_LITERAL("..")) != FilePath::StringType::npos)
+    return false;
+
   SplitString(filename, '/', &filename_parts);
 
   FilePath dest_file(dest_dir);
@@ -258,7 +261,8 @@ static bool AddEntryToZip(zipFile zip_file, const FilePath& path,
   return success;
 }
 
-bool Zip(const FilePath& src_dir, const FilePath& dest_file) {
+bool Zip(const FilePath& src_dir, const FilePath& dest_file,
+         bool include_hidden_files) {
   DCHECK(file_util::DirectoryExists(src_dir));
 
 #if defined(OS_WIN)
@@ -291,6 +295,9 @@ bool Zip(const FilePath& src_dir, const FilePath& dest_file) {
           file_util::FileEnumerator::DIRECTORIES));
   for (FilePath path = file_enumerator.Next(); !path.value().empty();
        path = file_enumerator.Next()) {
+    if (!include_hidden_files && path.BaseName().ToWStringHack()[0] == L'.')
+      continue;
+
     if (!AddEntryToZip(zip_file, path, src_dir)) {
       success = false;
       return false;

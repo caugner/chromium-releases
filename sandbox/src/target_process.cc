@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2006-2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -184,13 +184,16 @@ DWORD TargetProcess::Create(const wchar_t* exe_path,
   sandbox_thread_ = process_info.hThread;
   sandbox_process_id_ = process_info.dwProcessId;
 
+#if defined(_WIN64)
+  void* entry_point = reinterpret_cast<void*>(context.Rcx);
+#else
 #pragma warning(push)
 #pragma warning(disable: 4312)
   // This cast generates a warning because it is 32 bit specific.
   void* entry_point = reinterpret_cast<void*>(context.Eax);
 #pragma warning(pop)
+#endif  // _WIN64
   base_address_ = GetBaseAddress(exe_path, entry_point);
-
   *target_info = process_info;
   return win_result;
 }
@@ -220,7 +223,7 @@ ResultCode TargetProcess::TransferVariable(char* name, void* address,
   UNREFERENCED_PARAMETER(name);
 #endif
 
-  DWORD written;
+  SIZE_T written;
   if (!::WriteProcessMemory(sandbox_process_, child_var, address, size,
                             &written))
     return SBOX_ERROR_GENERIC;

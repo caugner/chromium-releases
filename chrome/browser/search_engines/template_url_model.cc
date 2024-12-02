@@ -1,33 +1,25 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/search_engines/template_url_model.h"
 
-#include <algorithm>
 
 #include "app/l10n_util.h"
-#include "base/logging.h"
 #include "base/stl_util-inl.h"
-#include "base/string_util.h"
-#include "chrome/browser/browser_process.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/google_url_tracker.h"
 #include "chrome/browser/history/history.h"
+#include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/net/url_fixer_upper.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/rlz/rlz.h"
-#include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "chrome/common/url_constants.h"
-#include "googleurl/src/gurl.h"
-#include "googleurl/src/url_parse.h"
-#include "grit/locale_settings.h"
 #include "net/base/net_util.h"
-#include "unicode/rbbi.h"
-#include "unicode/uchar.h"
 
 using base::Time;
 
@@ -67,6 +59,7 @@ class TemplateURLModel::LessWithPrefix {
 TemplateURLModel::TemplateURLModel(Profile* profile)
     : profile_(profile),
       loaded_(false),
+      load_failed_(false),
       load_handle_(0),
       default_search_provider_(NULL),
       next_id_(1) {
@@ -78,6 +71,7 @@ TemplateURLModel::TemplateURLModel(const Initializer* initializers,
                                    const int count)
     : profile_(NULL),
       loaded_(true),
+      load_failed_(false),
       load_handle_(0),
       service_(NULL),
       default_search_provider_(NULL),
@@ -529,7 +523,7 @@ void TemplateURLModel::SetDefaultSearchProvider(const TemplateURL* url) {
 }
 
 const TemplateURL* TemplateURLModel::GetDefaultSearchProvider() {
-  if (loaded_)
+  if (loaded_ && !load_failed_)
     return default_search_provider_;
 
   if (!prefs_default_search_provider_.get()) {
@@ -584,8 +578,10 @@ void TemplateURLModel::OnWebDataServiceRequestDone(
   load_handle_ = 0;
 
   if (!result) {
-    // Results are null if the database went away.
+    // Results are null if the database went away or (most likely) wasn't
+    // loaded.
     loaded_ = true;
+    load_failed_ = true;
     NotifyLoaded();
     return;
   }
@@ -719,10 +715,13 @@ void TemplateURLModel::NotifyLoaded() {
 
 void TemplateURLModel::MergeEnginesFromPrepopulateData() {
   // Build a map from prepopulate id to TemplateURL of existing urls.
-  std::map<int, const TemplateURL*> id_to_turl;
-  for (size_t i = 0; i < template_urls_.size(); ++i) {
-    if (template_urls_[i]->prepopulate_id() > 0)
-      id_to_turl[template_urls_[i]->prepopulate_id()] = template_urls_[i];
+  typedef std::map<int, const TemplateURL*> IDMap;
+  IDMap id_to_turl;
+  for (TemplateURLVector::const_iterator i(template_urls_.begin());
+       i != template_urls_.end(); ++i) {
+    int prepopulate_id = (*i)->prepopulate_id();
+    if (prepopulate_id > 0)
+      id_to_turl[prepopulate_id] = *i;
   }
 
   std::vector<TemplateURL*> loaded_urls;
@@ -731,17 +730,19 @@ void TemplateURLModel::MergeEnginesFromPrepopulateData() {
                                                      &loaded_urls,
                                                      &default_search_index);
 
+  std::set<int> updated_ids;
   for (size_t i = 0; i < loaded_urls.size(); ++i) {
     scoped_ptr<TemplateURL> t_url(loaded_urls[i]);
-
-    if (!t_url->prepopulate_id()) {
-      // Prepopulate engines need an id.
+    int t_url_id = t_url->prepopulate_id();
+    if (!t_url_id || updated_ids.count(t_url_id)) {
+      // Prepopulate engines need a unique id.
       NOTREACHED();
       continue;
     }
 
-    const TemplateURL* existing_url = id_to_turl[t_url->prepopulate_id()];
-    if (existing_url) {
+    IDMap::iterator existing_url_iter(id_to_turl.find(t_url_id));
+    if (existing_url_iter != id_to_turl.end()) {
+      const TemplateURL* existing_url = existing_url_iter->second;
       if (!existing_url->safe_for_autoreplace()) {
         // User edited the entry, preserve the keyword and description.
         loaded_urls[i]->set_safe_for_autoreplace(false);
@@ -751,14 +752,27 @@ void TemplateURLModel::MergeEnginesFromPrepopulateData() {
         loaded_urls[i]->set_short_name(existing_url->short_name());
       }
       Replace(existing_url, loaded_urls[i]);
-      id_to_turl[t_url->prepopulate_id()] = loaded_urls[i];
+      id_to_turl.erase(existing_url_iter);
     } else {
       Add(loaded_urls[i]);
     }
     if (i == default_search_index && !default_search_provider_)
       SetDefaultSearchProvider(loaded_urls[i]);
 
+    updated_ids.insert(t_url_id);
     t_url.release();
+  }
+
+  // Remove any prepopulated engines which are no longer in the master list, as
+  // long as the user hasn't modified them or made them the default engine.
+  for (IDMap::iterator i(id_to_turl.begin()); i != id_to_turl.end(); ++i) {
+    const TemplateURL* template_url = i->second;
+    // We use default_search_provider_ instead of GetDefaultSearchProvider()
+    // because we're running before |loaded_| is set, and calling
+    // GetDefaultSearchProvider() will erroneously try to read the prefs.
+    if ((template_url->safe_for_autoreplace()) &&
+        (template_url != default_search_provider_))
+      Remove(template_url);
   }
 }
 
@@ -786,6 +800,10 @@ void TemplateURLModel::SaveDefaultSearchProviderToPrefs(
   const std::wstring id_string =
       t_url ? Int64ToWString(t_url->id()) : std::wstring();
   prefs->SetString(prefs::kDefaultSearchProviderID, id_string);
+
+  const std::wstring prepopulate_id =
+      t_url ? Int64ToWString(t_url->prepopulate_id()) : std::wstring();
+  prefs->SetString(prefs::kDefaultSearchProviderPrepopulateID, prepopulate_id);
 
   prefs->ScheduleSavePersistentPrefs();
 }
@@ -816,22 +834,30 @@ bool TemplateURLModel::LoadDefaultSearchProviderFromPrefs(
 
   std::wstring id_string = prefs->GetString(prefs::kDefaultSearchProviderID);
 
+  std::wstring prepopulate_id =
+      prefs->GetString(prefs::kDefaultSearchProviderPrepopulateID);
+
   *default_provider = new TemplateURL();
   (*default_provider)->set_short_name(name);
   (*default_provider)->SetURL(search_url, 0, 0);
   (*default_provider)->SetSuggestionsURL(suggest_url, 0, 0);
   if (!id_string.empty())
     (*default_provider)->set_id(StringToInt64(WideToUTF16Hack(id_string)));
+  if (!prepopulate_id.empty())
+    (*default_provider)->set_prepopulate_id(StringToInt(WideToUTF16Hack(
+        prepopulate_id)));
   return true;
 }
 
 void TemplateURLModel::RegisterPrefs(PrefService* prefs) {
-  if (prefs->IsPrefRegistered(prefs::kDefaultSearchProviderName))
+  if (prefs->FindPreference(prefs::kDefaultSearchProviderName))
     return;
   prefs->RegisterStringPref(
       prefs::kDefaultSearchProviderName, std::wstring());
   prefs->RegisterStringPref(
       prefs::kDefaultSearchProviderID, std::wstring());
+  prefs->RegisterStringPref(
+      prefs::kDefaultSearchProviderPrepopulateID, std::wstring());
   prefs->RegisterStringPref(
       prefs::kDefaultSearchProviderSuggestURL, std::wstring());
   prefs->RegisterStringPref(
@@ -979,7 +1005,7 @@ bool TemplateURLModel::BuildQueryTerms(const GURL& url,
           // this as if the term doesn't occur by setting the value to an empty
           // string.
           (*query_terms)[key_string] = std::string();
-          DCHECK (valid_term_count > 0);
+          DCHECK(valid_term_count > 0);
           valid_term_count--;
         }
       } else {

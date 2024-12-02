@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,13 @@
 #include "chrome/browser/browser_list.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/first_run.h"
+#include "chrome/browser/importer/importer.h"
 #include "chrome/browser/metrics/user_metrics.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
+#include "chrome/installer/util/browser_distribution.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -31,17 +33,20 @@
 #include "views/window/window.h"
 
 FirstRunViewBase::FirstRunViewBase(Profile* profile, bool homepage_defined,
-                                   int import_items, int dont_import_items)
+                                   int import_items, int dont_import_items,
+                                   bool search_engine_experiment)
     : preferred_width_(0),
       background_image_(NULL),
       separator_1_(NULL),
       default_browser_(NULL),
+      non_default_browser_label_(NULL),
       separator_2_(NULL),
       importer_host_(NULL),
       profile_(profile),
       homepage_defined_(homepage_defined),
       import_items_(import_items),
-      dont_import_items_(dont_import_items) {
+      dont_import_items_(dont_import_items),
+      search_engine_experiment_(search_engine_experiment) {
   DCHECK(profile);
   SetupControls();
 }
@@ -88,11 +93,22 @@ void FirstRunViewBase::SetupControls() {
   separator_1_ = new views::Separator;
   AddChildView(separator_1_);
 
-  // The "make us default browser" check box.
-  default_browser_ = new views::Checkbox(
-      l10n_util::GetString(IDS_FR_CUSTOMIZE_DEFAULT_BROWSER));
-  default_browser_->SetMultiLine(true);
-  AddChildView(default_browser_);
+  if (BrowserDistribution::GetDistribution()->CanSetAsDefault()) {
+    // The "make us default browser" check box.
+    default_browser_ = new views::Checkbox(
+        l10n_util::GetString(IDS_FR_CUSTOMIZE_DEFAULT_BROWSER));
+    default_browser_->SetMultiLine(true);
+    AddChildView(default_browser_);
+    default_browser_->set_listener(this);
+  } else {
+    non_default_browser_label_ = new Label(
+        l10n_util::GetStringF(IDS_OPTIONS_DEFAULTBROWSER_SXS,
+                              l10n_util::GetString(IDS_PRODUCT_NAME)));
+    non_default_browser_label_->SetMultiLine(true);
+    non_default_browser_label_->SetHorizontalAlignment(
+        views::Label::ALIGN_LEFT);
+    AddChildView(non_default_browser_label_);
+  }
 
   // The second separator marks the start of buttons.
   separator_2_ = new views::Separator;
@@ -134,9 +150,37 @@ void FirstRunViewBase::Layout() {
   next_v_space = separator_2_->y() + separator_2_->height() + kVertSpacing;
 
   int width = canvas.width() - 2 * kPanelHorizMargin;
-  int height = default_browser_->GetHeightForWidth(width);
-  default_browser_->SetBounds(kPanelHorizMargin, next_v_space, width, height);
-  AdjustDialogWidth(default_browser_);
+  if (default_browser_) {
+#if defined(OS_WIN)
+    // Add or remove a shield icon before calculating the button width.
+    // (If a button has a shield icon, Windows automatically adds the icon width
+    // to the button width.)
+    views::DialogClientView* client_view = GetDialogClientView();
+    if (client_view)
+      client_view->ok_button()->SetNeedElevation(default_browser_->checked());
+#endif
+
+    int height = default_browser_->GetHeightForWidth(width);
+    default_browser_->SetBounds(kPanelHorizMargin, next_v_space, width, height);
+    AdjustDialogWidth(default_browser_);
+  } else {
+    int height = non_default_browser_label_->GetHeightForWidth(width);
+    non_default_browser_label_->SetBounds(kPanelHorizMargin, next_v_space,
+                                          width, height);
+    AdjustDialogWidth(non_default_browser_label_);
+  }
+}
+
+void FirstRunViewBase::ButtonPressed(views::Button* sender,
+                                     const views::Event& event) {
+#if defined(OS_WIN)
+  if (default_browser_ && sender == default_browser_) {
+    // Update the elevation state of the "start chromium" button so we can add
+    // a shield icon when we need elevation.
+    views::DialogClientView* client_view = GetDialogClientView();
+    client_view->ok_button()->SetNeedElevation(default_browser_->checked());
+  }
+#endif
 }
 
 bool FirstRunViewBase::CanResize() const {
@@ -158,7 +202,9 @@ bool FirstRunViewBase::HasAlwaysOnTopMenu() const {
 std::wstring FirstRunViewBase::GetDialogButtonLabel(
     MessageBoxFlags::DialogButton button) const {
   if (MessageBoxFlags::DIALOGBUTTON_OK == button)
-    return l10n_util::GetString(IDS_FIRSTRUN_DLG_OK);
+    return search_engine_experiment_ ?
+        l10n_util::GetString(IDS_ACCNAME_NEXT) :
+        l10n_util::GetString(IDS_FIRSTRUN_DLG_OK);
   // The other buttons get the default text.
   return std::wstring();
 }
@@ -168,16 +214,16 @@ int FirstRunViewBase::GetImportItems() const {
   // the process take way too much time among other issues. So for the time
   // being we say: TODO(CPU): Bug 1196875
   int items = import_items_;
-  if (!(dont_import_items_ & HISTORY))
-    items = items | HISTORY;
-  if (!(dont_import_items_ & FAVORITES))
-    items = items | FAVORITES;
-  if (!(dont_import_items_ & PASSWORDS))
-    items = items | PASSWORDS;
-  if (!(dont_import_items_ & SEARCH_ENGINES))
-    items = items | SEARCH_ENGINES;
+  if (!(dont_import_items_ & importer::HISTORY))
+    items = items | importer::HISTORY;
+  if (!(dont_import_items_ & importer::FAVORITES))
+    items = items | importer::FAVORITES;
+  if (!(dont_import_items_ & importer::PASSWORDS))
+    items = items | importer::PASSWORDS;
+  if (!(dont_import_items_ & importer::SEARCH_ENGINES))
+    items = items | importer::SEARCH_ENGINES;
   if (!homepage_defined_)
-    items = items | HOME_PAGE;
+    items = items | importer::HOME_PAGE;
   return items;
 };
 
@@ -186,7 +232,8 @@ void FirstRunViewBase::DisableButtons() {
   views::DialogClientView* dcv = GetDialogClientView();
   dcv->ok_button()->SetEnabled(false);
   dcv->cancel_button()->SetEnabled(false);
-  default_browser_->SetEnabled(false);
+  if (default_browser_)
+    default_browser_->SetEnabled(false);
 }
 
 bool FirstRunViewBase::CreateDesktopShortcut() {
@@ -198,7 +245,8 @@ bool FirstRunViewBase::CreateQuickLaunchShortcut() {
 }
 
 bool FirstRunViewBase::SetDefaultBrowser() {
-  UserMetrics::RecordAction(L"FirstRun_Do_DefBrowser", profile_);
+  UserMetrics::RecordAction(UserMetricsAction("FirstRun_Do_DefBrowser"),
+                            profile_);
   return ShellIntegration::SetAsDefaultBrowser();
 }
 

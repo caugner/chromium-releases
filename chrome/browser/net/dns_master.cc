@@ -10,15 +10,15 @@
 
 #include "base/compiler_specific.h"
 #include "base/histogram.h"
-#include "base/message_loop.h"
-#include "base/lock.h"
 #include "base/stats_counters.h"
 #include "base/string_util.h"
 #include "base/time.h"
+#include "chrome/browser/chrome_thread.h"
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
 #include "net/base/host_resolver.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_log.h"
 
 using base::TimeDelta;
 
@@ -49,7 +49,7 @@ class DnsMaster::LookupRequest {
     // lets the HostResolver know it can de-prioritize it.
     resolve_info.set_is_speculative(true);
     return resolver_.Resolve(
-        resolve_info, &addresses_, &net_callback_, NULL);
+        resolve_info, &addresses_, &net_callback_, net::BoundNetLog());
   }
 
  private:
@@ -70,15 +70,13 @@ class DnsMaster::LookupRequest {
 };
 
 DnsMaster::DnsMaster(net::HostResolver* host_resolver,
-                     MessageLoop* host_resolver_loop,
                      TimeDelta max_queue_delay,
                      size_t max_concurrent)
   : peak_pending_lookups_(0),
     shutdown_(false),
     max_concurrent_lookups_(max_concurrent),
     max_queue_delay_(max_queue_delay),
-    host_resolver_(host_resolver),
-    host_resolver_loop_(host_resolver_loop) {
+    host_resolver_(host_resolver) {
 }
 
 DnsMaster::~DnsMaster() {
@@ -86,8 +84,7 @@ DnsMaster::~DnsMaster() {
 }
 
 void DnsMaster::Shutdown() {
-  AutoLock auto_lock(lock_);
-
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   DCHECK(!shutdown_);
   shutdown_ = true;
 
@@ -99,48 +96,30 @@ void DnsMaster::Shutdown() {
 // Overloaded Resolve() to take a vector of names.
 void DnsMaster::ResolveList(const NameList& hostnames,
                             DnsHostInfo::ResolutionMotivation motivation) {
-  AutoLock auto_lock(lock_);
-
-  // We need to run this on |host_resolver_loop_| since we may access
-  // |host_resolver_| which is not thread safe.
-  if (MessageLoop::current() != host_resolver_loop_) {
-    host_resolver_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-        &DnsMaster::ResolveList, hostnames, motivation));
-    return;
-  }
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
   NameList::const_iterator it;
   for (it = hostnames.begin(); it < hostnames.end(); ++it)
-    PreLockedResolve(*it, motivation);
+    AppendToResolutionQueue(*it, motivation);
 }
 
 // Basic Resolve() takes an invidual name, and adds it
 // to the queue.
 void DnsMaster::Resolve(const std::string& hostname,
                         DnsHostInfo::ResolutionMotivation motivation) {
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   if (0 == hostname.length())
     return;
-  AutoLock auto_lock(lock_);
-
-  // We need to run this on |host_resolver_loop_| since we may access
-  // |host_resolver_| which is not thread safe.
-  if (MessageLoop::current() != host_resolver_loop_) {
-    host_resolver_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-        &DnsMaster::Resolve, hostname, motivation));
-    return;
-  }
-
-  PreLockedResolve(hostname, motivation);
+  AppendToResolutionQueue(hostname, motivation);
 }
 
 bool DnsMaster::AccruePrefetchBenefits(const GURL& referrer,
-                                      DnsHostInfo* navigation_info) {
+                                       DnsHostInfo* navigation_info) {
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   std::string hostname = navigation_info->hostname();
 
-  AutoLock auto_lock(lock_);
   Results::iterator it = results_.find(hostname);
   if (it == results_.end()) {
-    // Remain under lock to assure static HISTOGRAM constructor is safely run.
     // Use UMA histogram to quantify potential future gains here.
     UMA_HISTOGRAM_LONG_TIMES("DNS.UnexpectedResolutionL",
                              navigation_info->resolve_duration());
@@ -166,7 +145,6 @@ bool DnsMaster::AccruePrefetchBenefits(const GURL& referrer,
   switch (benefit) {
     case PREFETCH_NAME_FOUND:
     case PREFETCH_NAME_NONEXISTANT:
-      // Remain under lock to push data.
       cache_hits_.push_back(*navigation_info);
       if (referrer_based_prefetch) {
         std::string motivating_referrer(
@@ -179,7 +157,6 @@ bool DnsMaster::AccruePrefetchBenefits(const GURL& referrer,
       return true;
 
     case PREFETCH_CACHE_EVICTION:
-      // Remain under lock to push data.
       cache_eviction_map_[hostname] = *navigation_info;
       return false;
 
@@ -194,7 +171,8 @@ bool DnsMaster::AccruePrefetchBenefits(const GURL& referrer,
 }
 
 void DnsMaster::NonlinkNavigation(const GURL& referrer,
-                                  DnsHostInfo* navigation_info) {
+                                  const DnsHostInfo* navigation_info) {
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   std::string referring_host = referrer.host();
   if (referring_host.empty() || referring_host == navigation_info->hostname())
     return;
@@ -203,15 +181,7 @@ void DnsMaster::NonlinkNavigation(const GURL& referrer,
 }
 
 void DnsMaster::NavigatingTo(const std::string& host_name) {
-  AutoLock auto_lock(lock_);
-
-  // We need to run this on |host_resolver_loop_| since we may access
-  // |host_resolver_| which is not thread safe.
-  if (MessageLoop::current() != host_resolver_loop_) {
-    host_resolver_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-        &DnsMaster::NavigatingTo, host_name));
-    return;
-  }
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
   Referrers::iterator it = referrers_.find(host_name);
   if (referrers_.end() == it)
@@ -219,7 +189,7 @@ void DnsMaster::NavigatingTo(const std::string& host_name) {
   Referrer* referrer = &(it->second);
   for (Referrer::iterator future_host = referrer->begin();
        future_host != referrer->end(); ++future_host) {
-    DnsHostInfo* queued_info = PreLockedResolve(
+    DnsHostInfo* queued_info = AppendToResolutionQueue(
         future_host->first,
         DnsHostInfo::LEARNED_REFERAL_MOTIVATED);
     if (queued_info)
@@ -283,7 +253,7 @@ struct RightToLeftStringSorter {
 };
 
 void DnsMaster::GetHtmlReferrerLists(std::string* output) {
-  AutoLock auto_lock(lock_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   if (referrers_.empty())
     return;
 
@@ -318,6 +288,7 @@ void DnsMaster::GetHtmlReferrerLists(std::string* output) {
 }
 
 void DnsMaster::GetHtmlInfo(std::string* output) {
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   // Local lists for calling DnsHostInfo
   DnsHostInfo::DnsInfoTable cache_hits;
   DnsHostInfo::DnsInfoTable cache_evictions;
@@ -325,11 +296,10 @@ void DnsMaster::GetHtmlInfo(std::string* output) {
   DnsHostInfo::DnsInfoTable network_hits;
   DnsHostInfo::DnsInfoTable already_cached;
 
-  // Get copies of all useful data under protection of a lock.
+  // Get copies of all useful data.
   typedef std::map<std::string, DnsHostInfo, RightToLeftStringSorter> Snapshot;
   Snapshot snapshot;
   {
-    AutoLock auto_lock(lock_);
     // DnsHostInfo supports value semantics, so we can do a shallow copy.
     for (Results::iterator it(results_.begin()); it != results_.end(); it++) {
       snapshot[it->first] = it->second;
@@ -386,10 +356,10 @@ void DnsMaster::GetHtmlInfo(std::string* output) {
       "Prefetching DNS records revealed non-existance for ", brief, output);
 }
 
-DnsHostInfo* DnsMaster::PreLockedResolve(
+DnsHostInfo* DnsMaster::AppendToResolutionQueue(
     const std::string& hostname,
     DnsHostInfo::ResolutionMotivation motivation) {
-  // DCHECK(We have the lock);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   DCHECK_NE(0u, hostname.length());
 
   if (shutdown_)
@@ -409,14 +379,12 @@ DnsHostInfo* DnsMaster::PreLockedResolve(
 
   info->SetQueuedState(motivation);
   work_queue_.Push(hostname, motivation);
-  PreLockedScheduleLookups();
+  StartSomeQueuedResolutions();
   return info;
 }
 
-void DnsMaster::PreLockedScheduleLookups() {
-  // We need to run this on |host_resolver_loop_| since we may access
-  // |host_resolver_| which is not thread safe.
-  DCHECK_EQ(MessageLoop::current(), host_resolver_loop_);
+void DnsMaster::StartSomeQueuedResolutions() {
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
   while (!work_queue_.IsEmpty() &&
          pending_lookups_.size() < max_concurrent_lookups_) {
@@ -425,7 +393,7 @@ void DnsMaster::PreLockedScheduleLookups() {
     DCHECK(info->HasHostname(hostname));
     info->SetAssignedState();
 
-    if (PreLockedCongestionControlPerformed(info)) {
+    if (CongestionControlPerformed(info)) {
       DCHECK(work_queue_.IsEmpty());
       return;
     }
@@ -441,13 +409,14 @@ void DnsMaster::PreLockedScheduleLookups() {
       // Completed synchronously (was already cached by HostResolver), or else
       // there was (equivalently) some network error that prevents us from
       // finding the name.  Status net::OK means it was "found."
-      PrelockedLookupFinished(request, hostname, status == net::OK);
+      LookupFinished(request, hostname, status == net::OK);
       delete request;
     }
   }
 }
 
-bool DnsMaster::PreLockedCongestionControlPerformed(DnsHostInfo* info) {
+bool DnsMaster::CongestionControlPerformed(DnsHostInfo* info) {
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   // Note: queue_duration is ONLY valid after we go to assigned state.
   if (info->queue_duration() < max_queue_delay_)
     return false;
@@ -466,19 +435,19 @@ bool DnsMaster::PreLockedCongestionControlPerformed(DnsHostInfo* info) {
 
 void DnsMaster::OnLookupFinished(LookupRequest* request,
                                  const std::string& hostname, bool found) {
-  DCHECK_EQ(MessageLoop::current(), host_resolver_loop_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
 
-  AutoLock auto_lock(lock_);  // For map access (changing info values).
-  PrelockedLookupFinished(request, hostname, found);
+  LookupFinished(request, hostname, found);
   pending_lookups_.erase(request);
   delete request;
 
-  PreLockedScheduleLookups();
+  StartSomeQueuedResolutions();
 }
 
-void DnsMaster::PrelockedLookupFinished(LookupRequest* request,
-                                        const std::string& hostname,
-                                        bool found) {
+void DnsMaster::LookupFinished(LookupRequest* request,
+                               const std::string& hostname,
+                               bool found) {
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   DnsHostInfo* info = &results_[hostname];
   DCHECK(info->HasHostname(hostname));
   if (info->is_marked_to_delete()) {
@@ -492,7 +461,7 @@ void DnsMaster::PrelockedLookupFinished(LookupRequest* request,
 }
 
 void DnsMaster::DiscardAllResults() {
-  AutoLock auto_lock(lock_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   // Delete anything listed so far in this session that shows in about:dns.
   cache_eviction_map_.clear();
   cache_hits_.clear();
@@ -533,8 +502,8 @@ void DnsMaster::DiscardAllResults() {
 }
 
 void DnsMaster::TrimReferrers() {
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   std::vector<std::string> hosts;
-  AutoLock auto_lock(lock_);
   for (Referrers::const_iterator it = referrers_.begin();
        it != referrers_.end(); ++it)
     hosts.push_back(it->first);
@@ -544,8 +513,8 @@ void DnsMaster::TrimReferrers() {
 }
 
 void DnsMaster::SerializeReferrers(ListValue* referral_list) {
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   referral_list->Clear();
-  AutoLock auto_lock(lock_);
   for (Referrers::const_iterator it = referrers_.begin();
        it != referrers_.end(); ++it) {
     // Serialize the list of subresource names.
@@ -561,7 +530,7 @@ void DnsMaster::SerializeReferrers(ListValue* referral_list) {
 }
 
 void DnsMaster::DeserializeReferrers(const ListValue& referral_list) {
-  AutoLock auto_lock(lock_);
+  DCHECK(ChromeThread::CurrentlyOn(ChromeThread::IO));
   for (size_t i = 0; i < referral_list.GetSize(); ++i) {
     ListValue* motivating_host;
     if (!referral_list.GetList(i, &motivating_host))

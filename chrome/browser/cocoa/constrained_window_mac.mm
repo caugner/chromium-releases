@@ -46,10 +46,16 @@ ConstrainedWindowMac::ConstrainedWindowMac(
     TabContents* owner, ConstrainedWindowMacDelegate* delegate)
     : owner_(owner),
       delegate_(delegate),
-      controller_(nil) {
+      controller_(nil),
+      should_be_visible_(false) {
   DCHECK(owner);
   DCHECK(delegate);
+}
 
+ConstrainedWindowMac::~ConstrainedWindowMac() {}
+
+void ConstrainedWindowMac::ShowConstrainedWindow() {
+  should_be_visible_ = true;
   // The TabContents only has a native window if it is currently visible. In
   // this case, open the sheet now. Else, Realize() will be called later, when
   // our tab becomes visible.
@@ -60,8 +66,6 @@ ConstrainedWindowMac::ConstrainedWindowMac(
     Realize(static_cast<BrowserWindowController*>(controller));
   }
 }
-
-ConstrainedWindowMac::~ConstrainedWindowMac() {}
 
 void ConstrainedWindowMac::CloseConstrainedWindow() {
   // Note: controller_ can be `nil` here if the sheet was never realized. That's
@@ -74,6 +78,9 @@ void ConstrainedWindowMac::CloseConstrainedWindow() {
 }
 
 void ConstrainedWindowMac::Realize(BrowserWindowController* controller) {
+  if (!should_be_visible_)
+    return;
+
   if (controller_ != nil) {
     DCHECK(controller_ == controller);
     return;

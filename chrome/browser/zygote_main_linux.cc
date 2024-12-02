@@ -3,24 +3,34 @@
 // found in the LICENSE file.
 
 #include <dlfcn.h>
-#include <unistd.h>
+#include <fcntl.h>
 #include <sys/epoll.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/signal.h>
 #include <sys/prctl.h>
+#include <sys/signal.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/wait.h>
+#include <unistd.h>
+
+#if defined(CHROMIUM_SELINUX)
+#include <selinux/selinux.h>
+#include <selinux/context.h>
+#endif
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/eintr_wrapper.h"
 #include "base/global_descriptors_posix.h"
+#include "base/hash_tables.h"
+#include "base/linux_util.h"
 #include "base/path_service.h"
 #include "base/pickle.h"
 #include "base/rand_util.h"
 #include "base/scoped_ptr.h"
 #include "base/sys_info.h"
 #include "base/unix_domain_socket_posix.h"
+#include "build/build_config.h"
 
 #include "chrome/browser/zygote_host_linux.h"
 #include "chrome/common/chrome_descriptors.h"
@@ -33,16 +43,26 @@
 
 #include "skia/ext/SkFontHost_fontconfig_control.h"
 
-#if defined(CHROMIUM_SELINUX)
-#include <selinux/selinux.h>
-#include <selinux/context.h>
-#endif
+#include "sandbox/linux/seccomp/sandbox.h"
 
 #include "unicode/timezone.h"
 
+#if defined(ARCH_CPU_X86_FAMILY) && !defined(CHROMIUM_SELINUX)
+// The seccomp sandbox is enabled on all ia32 and x86-64 processor as long as
+// we aren't using SELinux.
+#define SECCOMP_SANDBOX
+#endif
+
 // http://code.google.com/p/chromium/wiki/LinuxZygote
 
+static const int kBrowserDescriptor = 3;
 static const int kMagicSandboxIPCDescriptor = 5;
+static const int kZygoteIdDescriptor = 7;
+static bool g_suid_sandbox_active = false;
+#if defined(SECCOMP_SANDBOX)
+// |g_proc_fd| is used only by the seccomp sandbox.
+static int g_proc_fd = -1;
+#endif
 
 // This is the object which implements the zygote. The ZygoteMain function,
 // which is called from ChromeMain, at the the bottom and simple constructs one
@@ -52,7 +72,7 @@ class Zygote {
   bool ProcessRequests() {
     // A SOCK_SEQPACKET socket is installed in fd 3. We get commands from the
     // browser on it.
-    // A SOCK_DGRAM is installed in fd 4. This is the sandbox IPC channel.
+    // A SOCK_DGRAM is installed in fd 5. This is the sandbox IPC channel.
     // See http://code.google.com/p/chromium/wiki/LinuxSandboxIPC
 
     // We need to accept SIGCHLD, even though our handler is a no-op because
@@ -62,8 +82,18 @@ class Zygote {
     action.sa_handler = SIGCHLDHandler;
     CHECK(sigaction(SIGCHLD, &action, NULL) == 0);
 
+    if (g_suid_sandbox_active) {
+      // Let the ZygoteHost know we are ready to go.
+      // The receiving code is in chrome/browser/zygote_host_linux.cc.
+      std::vector<int> empty;
+      bool r = base::SendMsg(kBrowserDescriptor, kZygoteMagic,
+                             sizeof(kZygoteMagic), empty);
+      CHECK(r) << "Sending zygote magic failed";
+    }
+
     for (;;) {
-      if (HandleRequestFromBrowser(3))
+      // This function call can return multiple times, once per fork().
+      if (HandleRequestFromBrowser(kBrowserDescriptor))
         return true;
     }
   }
@@ -100,15 +130,18 @@ class Zygote {
     if (pickle.ReadInt(&iter, &kind)) {
       switch (kind) {
         case ZygoteHost::kCmdFork:
+          // This function call can return multiple times, once per fork().
           return HandleForkRequest(fd, pickle, iter, fds);
         case ZygoteHost::kCmdReap:
           if (!fds.empty())
             break;
-          return HandleReapRequest(fd, pickle, iter);
+          HandleReapRequest(fd, pickle, iter);
+          return false;
         case ZygoteHost::kCmdDidProcessCrash:
           if (!fds.empty())
             break;
-          return HandleDidProcessCrash(fd, pickle, iter);
+          HandleDidProcessCrash(fd, pickle, iter);
+          return false;
         default:
           NOTREACHED();
           break;
@@ -122,46 +155,60 @@ class Zygote {
     return false;
   }
 
-  bool HandleReapRequest(int fd, Pickle& pickle, void* iter) {
-    pid_t child;
+  void HandleReapRequest(int fd, const Pickle& pickle, void* iter) {
+    base::ProcessId child;
+    base::ProcessId actual_child;
 
     if (!pickle.ReadInt(&iter, &child)) {
       LOG(WARNING) << "Error parsing reap request from browser";
-      return false;
+      return;
     }
 
-    ProcessWatcher::EnsureProcessTerminated(child);
+    if (g_suid_sandbox_active) {
+      actual_child = real_pids_to_sandbox_pids[child];
+      if (!actual_child)
+        return;
+      real_pids_to_sandbox_pids.erase(child);
+    } else {
+      actual_child = child;
+    }
 
-    return false;
+    ProcessWatcher::EnsureProcessTerminated(actual_child);
   }
 
-  bool HandleDidProcessCrash(int fd, Pickle& pickle, void* iter) {
+  void HandleDidProcessCrash(int fd, const Pickle& pickle, void* iter) {
     base::ProcessHandle child;
 
     if (!pickle.ReadInt(&iter, &child)) {
       LOG(WARNING) << "Error parsing DidProcessCrash request from browser";
-      return false;
+      return;
     }
 
     bool child_exited;
-    bool did_crash = base::DidProcessCrash(&child_exited, child);
+    bool did_crash;
+    if (g_suid_sandbox_active)
+      child = real_pids_to_sandbox_pids[child];
+    if (child)
+      did_crash = base::DidProcessCrash(&child_exited, child);
+    else
+      did_crash = child_exited = false;
 
     Pickle write_pickle;
     write_pickle.WriteBool(did_crash);
     write_pickle.WriteBool(child_exited);
     HANDLE_EINTR(write(fd, write_pickle.data(), write_pickle.size()));
-
-    return false;
   }
 
   // Handle a 'fork' request from the browser: this means that the browser
   // wishes to start a new renderer.
-  bool HandleForkRequest(int fd, Pickle& pickle, void* iter,
+  bool HandleForkRequest(int fd, const Pickle& pickle, void* iter,
                          std::vector<int>& fds) {
     std::vector<std::string> args;
     int argc, numfds;
     base::GlobalDescriptors::Mapping mapping;
-    pid_t child;
+    base::ProcessId child;
+    uint64_t dummy_inode = 0;
+    int dummy_fd = -1;
 
     if (!pickle.ReadInt(&iter, &argc))
       goto error;
@@ -186,12 +233,35 @@ class Zygote {
     }
 
     mapping.push_back(std::make_pair(
-        static_cast<uint32_t>(kSandboxIPCChannel), 5));
+        static_cast<uint32_t>(kSandboxIPCChannel), kMagicSandboxIPCDescriptor));
+
+    if (g_suid_sandbox_active) {
+      dummy_fd = socket(PF_UNIX, SOCK_DGRAM, 0);
+      if (dummy_fd < 0)
+        goto error;
+
+      if (!base::FileDescriptorGetInode(&dummy_inode, dummy_fd))
+        goto error;
+    }
 
     child = fork();
 
     if (!child) {
-      close(3);  // our socket from the browser is in fd 3
+#if defined(SECCOMP_SANDBOX)
+      // Try to open /proc/self/maps as the seccomp sandbox needs access to it
+      if (g_proc_fd >= 0) {
+        int proc_self_maps = openat(g_proc_fd, "self/maps", O_RDONLY);
+        if (proc_self_maps >= 0) {
+          SeccompSandboxSetProcSelfMaps(proc_self_maps);
+        }
+        close(g_proc_fd);
+        g_proc_fd = -1;
+      }
+#endif
+
+      close(kBrowserDescriptor);  // our socket from the browser
+      if (g_suid_sandbox_active)
+        close(kZygoteIdDescriptor);  // another socket from the browser
       Singleton<base::GlobalDescriptors>()->Reset(mapping);
 
       // Reset the process-wide command line to our new command line.
@@ -199,23 +269,61 @@ class Zygote {
       CommandLine::Init(0, NULL);
       CommandLine::ForCurrentProcess()->InitFromArgv(args);
       CommandLine::SetProcTitle();
+      // The fork() request is handled further up the call stack.
       return true;
+    } else if (child < 0) {
+      LOG(ERROR) << "Zygote could not fork";
+      goto error;
     }
 
-    for (std::vector<int>::const_iterator
-         i = fds.begin(); i != fds.end(); ++i)
-      close(*i);
+    {
+      base::ProcessId proc_id;
+      if (g_suid_sandbox_active) {
+        close(dummy_fd);
+        dummy_fd = -1;
+        uint8_t reply_buf[512];
+        Pickle request;
+        request.WriteInt(LinuxSandbox::METHOD_GET_CHILD_WITH_INODE);
+        request.WriteUInt64(dummy_inode);
 
-    HANDLE_EINTR(write(fd, &child, sizeof(child)));
-    return false;
+        const ssize_t r = base::SendRecvMsg(kMagicSandboxIPCDescriptor,
+                                            reply_buf, sizeof(reply_buf),
+                                            NULL, request);
+        if (r == -1)
+          goto error;
+
+        Pickle reply(reinterpret_cast<char*>(reply_buf), r);
+        void* iter2 = NULL;
+        if (!reply.ReadInt(&iter2, &proc_id))
+          goto error;
+        real_pids_to_sandbox_pids[proc_id] = child;
+      } else {
+        proc_id = child;
+      }
+
+      for (std::vector<int>::const_iterator
+           i = fds.begin(); i != fds.end(); ++i)
+        close(*i);
+
+      HANDLE_EINTR(write(fd, &proc_id, sizeof(proc_id)));
+      return false;
+    }
 
    error:
-    LOG(WARNING) << "Error parsing fork request from browser";
+    LOG(ERROR) << "Error parsing fork request from browser";
     for (std::vector<int>::const_iterator
          i = fds.begin(); i != fds.end(); ++i)
       close(*i);
+    if (dummy_fd >= 0)
+      close(dummy_fd);
     return false;
   }
+
+  // In the SUID sandbox, we try to use a new PID namespace. Thus the PIDs
+  // fork() returns are not the real PIDs, so we need to map the Real PIDS
+  // into the sandbox PID namespace.
+  typedef base::hash_map<base::ProcessHandle, base::ProcessHandle> ProcessMap;
+  ProcessMap real_pids_to_sandbox_pids;
 };
 
 // With SELinux we can carve out a precise sandbox, so we don't have to play
@@ -371,36 +479,41 @@ static void WarnOnceAboutBrokenDlsym() {
 // This function triggers the static and lazy construction of objects that need
 // to be created before imposing the sandbox.
 static void PreSandboxInit() {
-    base::RandUint64();
+  base::RandUint64();
 
-    base::SysInfo::MaxSharedMemorySize();
+  base::SysInfo::MaxSharedMemorySize();
 
-    // To make wcstombs/mbstowcs work in a renderer, setlocale() has to be
-    // called before the sandbox is triggered. It's possible to avoid calling
-    // setlocale() by pulling out the conversion between FilePath and
-    // WebCore String out of the renderer and using string16 in place of
-    // FilePath for IPC.
-    const char* locale = setlocale(LC_ALL, "");
-    LOG_IF(WARNING, locale == NULL) << "setlocale failed.";
+  // To make wcstombs/mbstowcs work in a renderer, setlocale() has to be
+  // called before the sandbox is triggered. It's possible to avoid calling
+  // setlocale() by pulling out the conversion between FilePath and
+  // WebCore String out of the renderer and using string16 in place of
+  // FilePath for IPC.
+  const char* locale = setlocale(LC_ALL, "");
+  LOG_IF(WARNING, locale == NULL) << "setlocale failed.";
 
-    // ICU DateFormat class (used in base/time_format.cc) needs to get the
-    // Olson timezone ID by accessing the zoneinfo files on disk. After
-    // TimeZone::createDefault is called once here, the timezone ID is
-    // cached and there's no more need to access the file system.
-    scoped_ptr<icu::TimeZone> zone(icu::TimeZone::createDefault());
+  // ICU DateFormat class (used in base/time_format.cc) needs to get the
+  // Olson timezone ID by accessing the zoneinfo files on disk. After
+  // TimeZone::createDefault is called once here, the timezone ID is
+  // cached and there's no more need to access the file system.
+  scoped_ptr<icu::TimeZone> zone(icu::TimeZone::createDefault());
 
-    FilePath module_path;
-    if (PathService::Get(base::DIR_MODULE, &module_path))
-      media::InitializeMediaLibrary(module_path);
+  FilePath module_path;
+  if (PathService::Get(base::DIR_MODULE, &module_path))
+    media::InitializeMediaLibrary(module_path);
 }
 
 #if !defined(CHROMIUM_SELINUX)
 static bool EnterSandbox() {
+  // The SUID sandbox sets this environment variable to a file descriptor
+  // over which we can signal that we have completed our startup and can be
+  // chrooted.
   const char* const sandbox_fd_string = getenv("SBX_D");
-  if (sandbox_fd_string) {
-    // The SUID sandbox sets this environment variable to a file descriptor
-    // over which we can signal that we have completed our startup and can be
-    // chrooted.
+
+  if (switches::SeccompSandboxEnabled()) {
+    PreSandboxInit();
+    SkiaFontConfigUseIPCImplementation(kMagicSandboxIPCDescriptor);
+  } else if (sandbox_fd_string) {  // Use the SUID sandbox.
+    g_suid_sandbox_active = true;
 
     char* endptr;
     const long fd_long = strtol(sandbox_fd_string, &endptr, 10);
@@ -410,10 +523,10 @@ static bool EnterSandbox() {
 
     PreSandboxInit();
 
-    static const char kChrootMe = 'C';
-    static const char kChrootMeSuccess = 'O';
+    static const char kMsgChrootMe = 'C';
+    static const char kMsgChrootSuccessful = 'O';
 
-    if (HANDLE_EINTR(write(fd, &kChrootMe, 1)) != 1) {
+    if (HANDLE_EINTR(write(fd, &kMsgChrootMe, 1)) != 1) {
       LOG(ERROR) << "Failed to write to chroot pipe: " << errno;
       return false;
     }
@@ -427,7 +540,7 @@ static bool EnterSandbox() {
       return false;
     }
 
-    if (reply != kChrootMeSuccess) {
+    if (reply != kMsgChrootSuccessful) {
       LOG(ERROR) << "Error code reply from chroot helper";
       return false;
     }
@@ -478,15 +591,15 @@ static bool EnterSandbox() {
   }
 
   context_t context = context_new(security_context);
-  context_type_set(context, "chromium_renderer_t");
+  context_type_set(context, "chromium_zygote_t");
   const int r = setcon(context_str(context));
   context_free(context);
   freecon(security_context);
 
   if (r) {
-    LOG(ERROR) << "dynamic transition to type 'chromium_renderer_t' failed. "
+    LOG(ERROR) << "dynamic transition to type 'chromium_zygote_t' failed. "
                   "(this binary has been built with SELinux support, but maybe "
-                  "the policies haven't been loaded into the kernel?";
+                  "the policies haven't been loaded into the kernel?)";
     return false;
   }
 
@@ -500,12 +613,46 @@ bool ZygoteMain(const MainFunctionParams& params) {
   g_am_zygote_or_renderer = true;
 #endif
 
+#if defined(SECCOMP_SANDBOX)
+  // The seccomp sandbox needs access to files in /proc, which might be denied
+  // after one of the other sandboxes have been started. So, obtain a suitable
+  // file handle in advance.
+  if (switches::SeccompSandboxEnabled()) {
+    g_proc_fd = open("/proc", O_DIRECTORY | O_RDONLY);
+    if (g_proc_fd < 0) {
+      LOG(ERROR) << "WARNING! Cannot access \"/proc\". Disabling seccomp "
+                    "sandboxing.";
+    }
+  }
+#endif  // SECCOMP_SANDBOX
+
+  // Turn on the SELinux or SUID sandbox
   if (!EnterSandbox()) {
     LOG(FATAL) << "Failed to enter sandbox. Fail safe abort. (errno: "
                << errno << ")";
     return false;
   }
 
+#if defined(SECCOMP_SANDBOX)
+  // The seccomp sandbox will be turned on when the renderers start. But we can
+  // already check if sufficient support is available so that we only need to
+  // print one error message for the entire browser session.
+  if (g_proc_fd >= 0 && switches::SeccompSandboxEnabled()) {
+    if (!SupportsSeccompSandbox(g_proc_fd)) {
+      // There are a good number of users who cannot use the seccomp sandbox
+      // (e.g. because their distribution does not enable seccomp mode by
+      // default). While we would prefer to deny execution in this case, it
+      // seems more realistic to continue in degraded mode.
+      LOG(ERROR) << "WARNING! This machine lacks support needed for the "
+                    "Seccomp sandbox. Running renderers with Seccomp "
+                    "sandboxing disabled.";
+    } else {
+      LOG(INFO) << "Enabling experimental Seccomp sandbox.";
+    }
+  }
+#endif  // SECCOMP_SANDBOX
+
   Zygote zygote;
+  // This function call can return multiple times, once per fork().
   return zygote.ProcessRequests();
 }

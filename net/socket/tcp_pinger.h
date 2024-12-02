@@ -6,6 +6,7 @@
 #define NET_SOCKET_TCP_PINGER_H_
 
 #include "base/compiler_specific.h"
+#include "base/dynamic_annotations.h"
 #include "base/ref_counted.h"
 #include "base/scoped_ptr.h"
 #include "base/task.h"
@@ -86,7 +87,7 @@ class TCPPinger {
 
     void DoConnect() {
       sock_.reset(new TCPClientSocket(addr_));
-      int rv = sock_->Connect(&connect_callback_);
+      int rv = sock_->Connect(&connect_callback_, NULL);
       // Regardless of success or failure, if we're done now,
       // signal the customer.
       if (rv != ERR_IO_PENDING)
@@ -106,7 +107,10 @@ class TCPPinger {
 
     int TimedWaitForResult(base::TimeDelta tryTimeout) {
       event_.TimedWait(tryTimeout);
-      return net_error_;
+      // In case of timeout, the value of net_error_ should be ERR_IO_PENDING.
+      // However, a harmless data race can happen if TimedWait times out right
+      // before event_.Signal() is called in ConnectDone().
+      return ANNOTATE_UNPROTECTED_READ(net_error_);
     }
 
     int WaitForResult() {
@@ -115,6 +119,10 @@ class TCPPinger {
     }
 
    private:
+    friend class base::RefCountedThreadSafe<Worker>;
+
+    ~Worker() {}
+
     base::WaitableEvent event_;
     int net_error_;
     net::AddressList addr_;

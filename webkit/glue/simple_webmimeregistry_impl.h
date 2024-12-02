@@ -5,13 +5,15 @@
 #ifndef WEBMIMEREGISTRY_IMPL_H_
 #define WEBMIMEREGISTRY_IMPL_H_
 
-#include "webkit/api/public/WebMimeRegistry.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebMimeRegistry.h"
 
 namespace webkit_glue {
 
 class SimpleWebMimeRegistryImpl : public WebKit::WebMimeRegistry {
  public:
   // WebMimeRegistry methods:
+  virtual WebKit::WebMimeRegistry::SupportsType supportsMIMEType(
+      const WebKit::WebString&);
   virtual WebKit::WebMimeRegistry::SupportsType supportsImageMIMEType(
       const WebKit::WebString&);
   virtual WebKit::WebMimeRegistry::SupportsType supportsJavaScriptMIMEType(

@@ -5,11 +5,13 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_BOOKMARKS_MODULE_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_BOOKMARKS_MODULE_H_
 
+#include <list>
 #include <string>
 
 #include "base/singleton.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/shell_dialogs.h"
 #include "chrome/common/notification_registrar.h"
 
 // Observes BookmarkModel and then routes the notifications as events to
@@ -44,6 +46,8 @@ class ExtensionBookmarkEventRouter : public BookmarkModelObserver {
                                          const BookmarkNode* node);
   virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
                                              const BookmarkNode* node);
+  virtual void BookmarkImportBeginning(BookmarkModel* model);
+  virtual void BookmarkImportEnding(BookmarkModel* model);
 
  private:
   ExtensionBookmarkEventRouter();
@@ -64,12 +68,13 @@ class ExtensionBookmarkEventRouter : public BookmarkModelObserver {
 
 class BookmarksFunction : public AsyncExtensionFunction,
                           public NotificationObserver {
+ public:
   virtual void Run();
   virtual bool RunImpl() = 0;
 
  protected:
   // Helper to get the bookmark id as int64 from the given string id.
-  // Sets error_ to an errro string if the given id string can't be parsed
+  // Sets error_ to an error string if the given id string can't be parsed
   // as an int64. In case of error, doesn't change id and returns false.
   bool GetBookmarkIdAsInt64(const std::string& id_string, int64* id);
 
@@ -81,27 +86,50 @@ class BookmarksFunction : public AsyncExtensionFunction,
 };
 
 class GetBookmarksFunction : public BookmarksFunction {
+ public:
   virtual bool RunImpl();
+ private:
   DECLARE_EXTENSION_FUNCTION_NAME("bookmarks.get")
 };
 
 class GetBookmarkChildrenFunction : public BookmarksFunction {
+ public:
   virtual bool RunImpl();
+ private:
   DECLARE_EXTENSION_FUNCTION_NAME("bookmarks.getChildren")
 };
 
-class GetBookmarkTreeFunction : public BookmarksFunction {
+class GetBookmarkRecentFunction : public BookmarksFunction {
+ public:
   virtual bool RunImpl();
+ private:
+  DECLARE_EXTENSION_FUNCTION_NAME("bookmarks.getRecent")
+};
+
+class GetBookmarkTreeFunction : public BookmarksFunction {
+ public:
+  virtual bool RunImpl();
+ private:
   DECLARE_EXTENSION_FUNCTION_NAME("bookmarks.getTree")
 };
 
 class SearchBookmarksFunction : public BookmarksFunction {
+ public:
   virtual bool RunImpl();
+ private:
   DECLARE_EXTENSION_FUNCTION_NAME("bookmarks.search")
 };
 
 class RemoveBookmarkFunction : public BookmarksFunction {
+ public:
+  // Returns true on successful parse and sets invalid_id to true if conversion
+  // from id string to int64 failed.
+  static bool ExtractIds(const Value* args, std::list<int64>* ids,
+                         bool* invalid_id);
   virtual bool RunImpl();
+  virtual void GetQuotaLimitHeuristics(
+      std::list<QuotaLimitHeuristic*>* heuristics) const;
+ private:
   DECLARE_EXTENSION_FUNCTION_NAME("bookmarks.remove")
 };
 
@@ -110,18 +138,67 @@ class RemoveTreeBookmarkFunction : public RemoveBookmarkFunction {
 };
 
 class CreateBookmarkFunction : public BookmarksFunction {
+ public:
+  virtual void GetQuotaLimitHeuristics(
+      std::list<QuotaLimitHeuristic*>* heuristics) const;
   virtual bool RunImpl();
+ private:
   DECLARE_EXTENSION_FUNCTION_NAME("bookmarks.create")
 };
 
 class MoveBookmarkFunction : public BookmarksFunction {
+ public:
+  static bool ExtractIds(const Value* args, std::list<int64>* ids,
+                         bool* invalid_id);
+  virtual void GetQuotaLimitHeuristics(
+      std::list<QuotaLimitHeuristic*>* heuristics) const;
   virtual bool RunImpl();
+ private:
   DECLARE_EXTENSION_FUNCTION_NAME("bookmarks.move")
 };
 
 class UpdateBookmarkFunction : public BookmarksFunction {
+ public:
+  static bool ExtractIds(const Value* args, std::list<int64>* ids,
+                         bool* invalid_id);
+  virtual void GetQuotaLimitHeuristics(
+      std::list<QuotaLimitHeuristic*>* heuristics) const;
   virtual bool RunImpl();
+ private:
   DECLARE_EXTENSION_FUNCTION_NAME("bookmarks.update")
+};
+
+class BookmarksIOFunction : public BookmarksFunction,
+                            public SelectFileDialog::Listener {
+ public:
+  // Overridden from SelectFileDialog::Listener:
+  virtual void FileSelected(const FilePath& path, int index, void* params) = 0;
+  void MultiFilesSelected(const std::vector<FilePath>& files, void* params);
+  void FileSelectionCanceled(void* params);
+  void SelectFile(SelectFileDialog::Type type);
+
+ protected:
+  scoped_refptr<SelectFileDialog> select_file_dialog_;
+};
+
+class ImportBookmarksFunction : public BookmarksIOFunction {
+ public:
+  // Override BookmarkManagerIOFunction.
+  bool RunImpl();
+  void FileSelected(const FilePath& path, int index, void* params);
+
+ private:
+  DECLARE_EXTENSION_FUNCTION_NAME("bookmarks.import");
+};
+
+class ExportBookmarksFunction : public BookmarksIOFunction {
+ public:
+  // Override BookmarkManagerIOFunction.
+  bool RunImpl();
+  void FileSelected(const FilePath& path, int index, void* params);
+
+ private:
+  DECLARE_EXTENSION_FUNCTION_NAME("bookmarks.export");
 };
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_BOOKMARKS_MODULE_H_

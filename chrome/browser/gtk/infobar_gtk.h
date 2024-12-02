@@ -5,16 +5,22 @@
 #ifndef CHROME_BROWSER_GTK_INFOBAR_GTK_H_
 #define CHROME_BROWSER_GTK_INFOBAR_GTK_H_
 
+#include "app/gtk_signal.h"
 #include "base/basictypes.h"
 #include "base/scoped_ptr.h"
 #include "chrome/browser/gtk/slide_animator_gtk.h"
+#include "chrome/browser/tab_contents/infobar_delegate.h"
+#include "chrome/common/notification_observer.h"
+#include "chrome/common/notification_registrar.h"
 #include "chrome/common/owned_widget_gtk.h"
 
 class CustomDrawButton;
+class GtkThemeProvider;
 class InfoBarContainerGtk;
 class InfoBarDelegate;
 
-class InfoBar : public SlideAnimatorGtk::Delegate {
+class InfoBar : public SlideAnimatorGtk::Delegate,
+                public NotificationObserver {
  public:
   explicit InfoBar(InfoBarDelegate* delegate);
   virtual ~InfoBar();
@@ -46,13 +52,38 @@ class InfoBar : public SlideAnimatorGtk::Delegate {
   // Returns true if the infobar is showing the its open or close animation.
   bool IsAnimating();
 
+  void SetThemeProvider(GtkThemeProvider* theme_provider);
+
   // SlideAnimatorGtk::Delegate implementation.
   virtual void Closed();
+
+  // NotificationOPbserver implementation.
+  virtual void Observe(NotificationType type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
 
  protected:
   // Removes our associated InfoBarDelegate from the associated TabContents.
   // (Will lead to this InfoBar being closed).
   void RemoveInfoBar() const;
+
+  // Adds |display_text| to the infobar. If |link_text| is not empty, it is
+  // rendered as a hyperlink and inserted into |display_text| at |link_offset|,
+  // or right aligned in the infobar if |link_offset| is |npos|. |link_padding|
+  // pixels are inserted around the link (pass 0 for not padding). If a link
+  // is supplied, |link_callback| must not be null. It will be invoked on click.
+  void AddLabelAndLink(const std::wstring& display_text,
+                       const std::wstring& link,
+                       size_t link_offset,
+                       guint link_padding,
+                       GCallback link_callback);
+
+  // Retrieves the component colors for the infobar's background
+  // gradient. (This varies by infobars and can be animated to change).
+  virtual void GetTopColor(InfoBarDelegate::Type type,
+                           double* r, double* g, double *b);
+  virtual void GetBottomColor(InfoBarDelegate::Type type,
+                              double* r, double* g, double *b);
 
   // The top level widget of the infobar.
   scoped_ptr<SlideAnimatorGtk> slide_widget_;
@@ -72,8 +103,16 @@ class InfoBar : public SlideAnimatorGtk::Delegate {
   // The InfoBar's delegate.
   InfoBarDelegate* delegate_;
 
+  // The theme provider, used for getting border colors.
+  GtkThemeProvider* theme_provider_;
+
+  NotificationRegistrar registrar_;
+
  private:
-  static void OnCloseButton(GtkWidget* button, InfoBar* info_bar);
+  CHROMEGTK_CALLBACK_0(InfoBar, void, OnCloseButton);
+  CHROMEGTK_CALLBACK_1(InfoBar, gboolean, OnBackgroundExpose, GdkEventExpose*);
+
+  void UpdateBorderColor();
 
   DISALLOW_COPY_AND_ASSIGN(InfoBar);
 };

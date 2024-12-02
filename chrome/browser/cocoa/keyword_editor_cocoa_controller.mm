@@ -4,23 +4,32 @@
 
 #import <Cocoa/Cocoa.h>
 
+#import "chrome/browser/cocoa/keyword_editor_cocoa_controller.h"
+
 #import "base/mac_util.h"
+#include "base/singleton.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #import "chrome/browser/cocoa/edit_search_engine_cocoa_controller.h"
-#import "chrome/browser/cocoa/nswindow_local_state.h"
-#import "chrome/browser/cocoa/keyword_editor_cocoa_controller.h"
+#import "chrome/browser/cocoa/window_size_autosaver.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/profile.h"
 #include "chrome/browser/search_engines/template_url_table_model.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
 #include "grit/generated_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 
+namespace {
+
+const CGFloat kButtonBarHeight = 35.0;
+
+}  // namespace
+
 @interface KeywordEditorCocoaController (Private)
 - (void)adjustEditingButtons;
 - (void)editKeyword:(id)sender;
+- (int)indexInModelForRow:(NSUInteger)row;
 @end
 
 // KeywordEditorModelObserver -------------------------------------------------
@@ -28,11 +37,7 @@
 KeywordEditorModelObserver::KeywordEditorModelObserver(
     KeywordEditorCocoaController* controller)
     : controller_(controller),
-      iconImages_([[NSPointerArray alloc] initWithOptions:
-          NSPointerFunctionsStrongMemory |
-          NSPointerFunctionsObjectPersonality]) {
-  int count = [controller_ controller]->table_model()->RowCount();
-  [iconImages_ setCount:count];
+      icon_cache_(this) {
 }
 
 KeywordEditorModelObserver::~KeywordEditorModelObserver() {
@@ -57,53 +62,35 @@ void KeywordEditorModelObserver::OnEditedKeyword(
 }
 
 void KeywordEditorModelObserver::OnModelChanged() {
-  InvalidateIconCache(0, [iconImages_ count]);
-  int count = [controller_ controller]->table_model()->RowCount();
-  [iconImages_ setCount:count];
+  icon_cache_.OnModelChanged();
   [controller_ modelChanged];
 }
 
 void KeywordEditorModelObserver::OnItemsChanged(int start, int length) {
-  InvalidateIconCache(start, length);
+  icon_cache_.OnItemsChanged(start, length);
   [controller_ modelChanged];
 }
 
 void KeywordEditorModelObserver::OnItemsAdded(int start, int length) {
-  DCHECK_LE(start, static_cast<int>([iconImages_ count]));
-  for (int i = 0; i < length; ++i) {
-    [iconImages_ insertPointer:NULL atIndex:start];  // Values slide down.
-  }
+  icon_cache_.OnItemsAdded(start, length);
   [controller_ modelChanged];
 }
 
 void KeywordEditorModelObserver::OnItemsRemoved(int start, int length) {
-  DCHECK_LE(start + length, static_cast<int>([iconImages_ count]));
-  for (int i = 0; i < length; ++i) {
-    [iconImages_ removePointerAtIndex:start];  // Values slide up.
-  }
+  icon_cache_.OnItemsRemoved(start, length);
   [controller_ modelChanged];
 }
 
-NSImage* KeywordEditorModelObserver::GetImageForRow(int row) {
-  DCHECK(row >= 0 && row < static_cast<int>([iconImages_ count]));
-  NSImage* image = static_cast<NSImage*>([iconImages_ pointerAtIndex:row]);
-  if (!image) {
-    const SkBitmap bitmapIcon =
-        [controller_ controller]->table_model()->GetIcon(row);
-    if (!bitmapIcon.isNull()) {
-      image = gfx::SkBitmapToNSImage(bitmapIcon);
-      DCHECK(image);
-      [iconImages_ replacePointerAtIndex:row withPointer:image];
-    }
-  }
-  return image;
+int KeywordEditorModelObserver::RowCount() const {
+  return [controller_ controller]->table_model()->RowCount();
 }
 
-void KeywordEditorModelObserver::InvalidateIconCache(int start, int length) {
-  DCHECK_LE(start + length, static_cast<int>([iconImages_ count]));
-  for (int i = start; i < (start + length); ++i) {
-    [iconImages_ replacePointerAtIndex:i withPointer:NULL];
-  }
+SkBitmap KeywordEditorModelObserver::GetIcon(int row) const {
+  return [controller_ controller]->table_model()->GetIcon(row);
+}
+
+NSImage* KeywordEditorModelObserver::GetImageForRow(int row) {
+  return icon_cache_.GetImageForRow(row);
 }
 
 // KeywordEditorCocoaController -----------------------------------------------
@@ -134,9 +121,7 @@ typedef std::map<Profile*,KeywordEditorCocoaController*> ProfileControllerMap;
   // opened from an incognito window, which can leave the panel
   // holding onto a stale profile.  Since the same panel is used
   // either way, arrange to use the original profile instead.
-  if (profile->IsOffTheRecord()) {
-    profile = profile->GetOriginalProfile();
-  }
+  profile = profile->GetOriginalProfile();
 
   ProfileControllerMap* map = Singleton<ProfileControllerMap>::get();
   DCHECK(map != NULL);
@@ -165,6 +150,15 @@ typedef std::map<Profile*,KeywordEditorCocoaController*> ProfileControllerMap;
     observer_.reset(new KeywordEditorModelObserver(self));
     controller_->table_model()->SetObserver(observer_.get());
     controller_->url_model()->AddObserver(observer_.get());
+    groupCell_.reset([[NSTextFieldCell alloc] init]);
+
+    if (g_browser_process && g_browser_process->local_state()) {
+      sizeSaver_.reset([[WindowSizeAutosaver alloc]
+          initWithWindow:[self window]
+             prefService:g_browser_process->local_state()
+                    path:prefs::kKeywordEditorWindowPlacement
+                   state:kSaveWindowRect]);
+    }
   }
   return self;
 }
@@ -172,6 +166,8 @@ typedef std::map<Profile*,KeywordEditorCocoaController*> ProfileControllerMap;
 - (void)dealloc {
   controller_->table_model()->SetObserver(NULL);
   controller_->url_model()->RemoveObserver(observer_.get());
+  [tableView_ setDataSource:nil];
+  observer_.reset();
   [super dealloc];
 }
 
@@ -183,13 +179,10 @@ typedef std::map<Profile*,KeywordEditorCocoaController*> ProfileControllerMap;
   size.height = NSHeight([addButton_ frame]);
   [makeDefaultButton_ setFrameSize:size];
 
-  // Restore the window position.
-  if (g_browser_process && g_browser_process->local_state()) {
-    PrefService* prefs = g_browser_process->local_state();
-    NSWindow* window = [self window];
-    [window restoreWindowPositionFromPrefs:prefs
-                                withPath:prefs::kKeywordEditorWindowPlacement];
-  }
+  [[self window] setAutorecalculatesContentBorderThickness:NO
+                                                   forEdge:NSMinYEdge];
+  [[self window] setContentBorderThickness:kButtonBarHeight
+                                   forEdge:NSMinYEdge];
 
   [self adjustEditingButtons];
   [tableView_ setDoubleAction:@selector(editKeyword:)];
@@ -211,18 +204,9 @@ typedef std::map<Profile*,KeywordEditorCocoaController*> ProfileControllerMap;
   }
 }
 
-// The last page info window that was moved will determine the location of the
-// next new one.
-- (void)windowDidMove:(NSNotification*)notif {
-  if (g_browser_process && g_browser_process->local_state()) {
-    NSWindow* window = [self window];
-    [window saveWindowPositionToPrefs:g_browser_process->local_state()
-                             withPath:prefs::kKeywordEditorWindowPlacement];
-  }
-}
-
 - (void)modelChanged {
   [tableView_ reloadData];
+  [self adjustEditingButtons];
 }
 
 - (KeywordEditorController*)controller {
@@ -250,9 +234,10 @@ typedef std::map<Profile*,KeywordEditorCocoaController*> ProfileControllerMap;
 
 - (void)editKeyword:(id)sender {
   const NSInteger clickedRow = [tableView_ clickedRow];
-  if (clickedRow == -1)
+  if (clickedRow < 0 || [self tableView:tableView_ isGroupRow:clickedRow])
     return;
-  const TemplateURL* url = controller_->GetTemplateURL(clickedRow);
+  const TemplateURL* url = controller_->GetTemplateURL(
+      [self indexInModelForRow:clickedRow]);
   // The controller will release itself when the window closes.
   EditSearchEngineCocoaController* editor =
       [[EditSearchEngineCocoaController alloc] initWithProfile:profile_
@@ -270,7 +255,7 @@ typedef std::map<Profile*,KeywordEditorCocoaController*> ProfileControllerMap;
   DCHECK_GT([selection count], 0U);
   NSUInteger index = [selection lastIndex];
   while (index != NSNotFound) {
-    controller_->RemoveTemplateURL(index);
+    controller_->RemoveTemplateURL([self indexInModelForRow:index]);
     index = [selection indexLessThanIndex:index];
   }
 }
@@ -278,33 +263,55 @@ typedef std::map<Profile*,KeywordEditorCocoaController*> ProfileControllerMap;
 - (IBAction)makeDefault:(id)sender {
   NSIndexSet* selection = [tableView_ selectedRowIndexes];
   DCHECK_EQ([selection count], 1U);
-  controller_->MakeDefaultTemplateURL([selection firstIndex]);
+  int row = [self indexInModelForRow:[selection firstIndex]];
+  controller_->MakeDefaultTemplateURL(row);
+}
+
+// Called when the user hits the escape key. Closes the window.
+- (void)cancel:(id)sender {
+  [[self window] performClose:self];
 }
 
 // Table View Data Source -----------------------------------------------------
 
-- (NSInteger)numberOfRowsInTableView:(NSTableView*)aTableView {
-  return controller_->table_model()->RowCount();
+- (NSInteger)numberOfRowsInTableView:(NSTableView*)table {
+  int rowCount = controller_->table_model()->RowCount();
+  int numGroups = controller_->table_model()->GetGroups().size();
+  if ([self tableView:table isGroupRow:rowCount + numGroups - 1]) {
+    // Don't show a group header with no rows underneath it.
+    --numGroups;
+  }
+  return rowCount + numGroups;
 }
 
 - (id)tableView:(NSTableView*)tv
     objectValueForTableColumn:(NSTableColumn*)tableColumn
                           row:(NSInteger)row {
-  if (!tableColumn)
-    return nil;
-  NSString* identifier = [tableColumn identifier];
+  if ([self tableView:tv isGroupRow:row]) {
+    DCHECK(!tableColumn);
+    TableModel::Groups groups = controller_->table_model()->GetGroups();
+    if (row == 0) {
+      return base::SysWideToNSString(groups[0].title);
+    } else {
+      return base::SysWideToNSString(groups[1].title);
+    }
+  }
 
+  NSString* identifier = [tableColumn identifier];
   if ([identifier isEqualToString:@"name"]) {
     // The name column is an NSButtonCell so we can have text and image in the
     // same cell. As such, the "object value" for a button cell is either on
     // or off, so we always return off so we don't act like a button.
     return [NSNumber numberWithInt:NSOffState];
-  } else if ([identifier isEqualToString:@"keyword"]) {
+  }
+  if ([identifier isEqualToString:@"keyword"]) {
     // The keyword object value is a normal string.
+    int index = [self indexInModelForRow:row];
     int columnID = IDS_SEARCH_ENGINES_EDITOR_KEYWORD_COLUMN;
-    std::wstring text = controller_->table_model()->GetText(row, columnID);
+    std::wstring text = controller_->table_model()->GetText(index, columnID);
     return base::SysWideToNSString(text);
   }
+
   // And we shouldn't have any other columns...
   NOTREACHED();
   return nil;
@@ -317,20 +324,39 @@ typedef std::map<Profile*,KeywordEditorCocoaController*> ProfileControllerMap;
   [self adjustEditingButtons];
 }
 
+// Disallow selection of the group header rows.
+- (BOOL)tableView:(NSTableView*)table shouldSelectRow:(NSInteger)row {
+  return ![self tableView:table isGroupRow:row];
+}
+
+- (BOOL)tableView:(NSTableView*)table isGroupRow:(NSInteger)row {
+  int otherGroupRow =
+      controller_->table_model()->last_search_engine_index() + 1;
+  return (row == 0 || row == otherGroupRow);
+}
+
 - (NSCell*)tableView:(NSTableView*)tableView
     dataCellForTableColumn:(NSTableColumn*)tableColumn
                        row:(NSInteger)row {
   static const CGFloat kCellFontSize = 12.0;
+
+  // Check to see if we are a grouped row.
+  if ([self tableView:tableView isGroupRow:row]) {
+    DCHECK(!tableColumn);  // This would violate the group row contract.
+    return groupCell_.get();
+  }
+
   NSCell* cell = [tableColumn dataCellForRow:row];
+  int offsetRow = [self indexInModelForRow:row];
 
   // Set the favicon and title for the search engine in the name column.
   if ([[tableColumn identifier] isEqualToString:@"name"]) {
     DCHECK([cell isKindOfClass:[NSButtonCell class]]);
-	NSButtonCell* buttonCell = static_cast<NSButtonCell*>(cell);
-    std::wstring title = controller_->table_model()->GetText(row,
+    NSButtonCell* buttonCell = static_cast<NSButtonCell*>(cell);
+    std::wstring title = controller_->table_model()->GetText(offsetRow,
         IDS_SEARCH_ENGINES_EDITOR_DESCRIPTION_COLUMN);
     [buttonCell setTitle:base::SysWideToNSString(title)];
-    [buttonCell setImage:observer_->GetImageForRow(row)];
+    [buttonCell setImage:observer_->GetImageForRow(offsetRow)];
     [buttonCell setRefusesFirstResponder:YES];  // Don't push in like a button.
     [buttonCell setHighlightsBy:NSNoCellMask];
   }
@@ -338,7 +364,8 @@ typedef std::map<Profile*,KeywordEditorCocoaController*> ProfileControllerMap;
   // The default search engine should be in bold font.
   const TemplateURL* defaultEngine =
       controller_->url_model()->GetDefaultSearchProvider();
-  if (controller_->table_model()->IndexOfTemplateURL(defaultEngine) == row) {
+  int rowIndex = controller_->table_model()->IndexOfTemplateURL(defaultEngine);
+  if (rowIndex == offsetRow) {
     [cell setFont:[NSFont boldSystemFontOfSize:kCellFontSize]];
   } else {
     [cell setFont:[NSFont systemFontOfSize:kCellFontSize]];
@@ -351,13 +378,15 @@ typedef std::map<Profile*,KeywordEditorCocoaController*> ProfileControllerMap;
 // This function appropriately sets the enabled states on the table's editing
 // buttons.
 - (void)adjustEditingButtons {
-  // Delete button.
   NSIndexSet* selection = [tableView_ selectedRowIndexes];
   BOOL canRemove = ([selection count] > 0);
   NSUInteger index = [selection firstIndex];
+
+  // Delete button.
   while (canRemove && index != NSNotFound) {
+    int modelIndex = [self indexInModelForRow:index];
     const TemplateURL& url =
-        controller_->table_model()->GetTemplateURL(index);
+        controller_->table_model()->GetTemplateURL(modelIndex);
     if (!controller_->CanRemove(&url))
       canRemove = NO;
     index = [selection indexGreaterThanIndex:index];
@@ -368,9 +397,24 @@ typedef std::map<Profile*,KeywordEditorCocoaController*> ProfileControllerMap;
   if ([selection count] != 1) {
     [makeDefaultButton_ setEnabled:NO];
   } else {
+    int row = [self indexInModelForRow:[selection firstIndex]];
     const TemplateURL& url =
-        controller_->table_model()->GetTemplateURL([selection firstIndex]);
+        controller_->table_model()->GetTemplateURL(row);
     [makeDefaultButton_ setEnabled:controller_->CanMakeDefault(&url)];
+  }
+}
+
+// This converts a row index in our table view to an index in the model by
+// computing the group offsets.
+- (int)indexInModelForRow:(NSUInteger)row {
+  DCHECK_GT(row, 0U);
+  unsigned otherGroupId =
+      controller_->table_model()->last_search_engine_index() + 1;
+  DCHECK_NE(row, otherGroupId);
+  if (row >= otherGroupId) {
+    return row - 2;  // Other group.
+  } else {
+    return row - 1;  // Default group.
   }
 }
 

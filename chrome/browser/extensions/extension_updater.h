@@ -6,6 +6,8 @@
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_UPDATER_H_
 
 #include <deque>
+#include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -22,17 +24,114 @@
 
 class Extension;
 class ExtensionUpdaterTest;
-class MessageLoop;
 class ExtensionUpdaterFileHandler;
 class PrefService;
+
+// To save on server resources we can request updates for multiple extensions
+// in one manifest check. This class helps us keep track of the id's for a
+// given fetch, building up the actual URL, and what if anything to include
+// in the ping parameter.
+class ManifestFetchData {
+ public:
+  static const int kNeverPinged = -1;
+
+  explicit ManifestFetchData(GURL update_url) : base_url_(update_url),
+      full_url_(update_url) {}
+
+  // Returns true if this extension information was successfully added. If the
+  // return value is false it means the full_url would have become too long, and
+  // this ManifestFetchData object remains unchanged.
+  bool AddExtension(std::string id, std::string version, int ping_days);
+
+  const GURL& base_url() const { return base_url_; }
+  const GURL& full_url() const { return full_url_; }
+  int extension_count() { return extension_ids_.size(); }
+  const std::set<std::string>& extension_ids() const { return extension_ids_; }
+
+  // Returns true if the given id is included in this manifest fetch.
+  bool Includes(std::string extension_id) const {
+    return extension_ids_.find(extension_id) != extension_ids_.end();
+  }
+
+  // Returns true if a ping parameter was added to full_url for this extension
+  // id.
+  bool DidPing(std::string extension_id) const;
+
+ private:
+  // Returns true if we should include a ping parameter for a given number of
+  // days.
+  bool ShouldPing(int days) const;
+
+  std::set<std::string> extension_ids_;
+
+  // Keeps track of the day value to use for the extensions where we want to
+  // send a 'days since last ping' parameter in the check.
+  std::map<std::string, int> ping_days_;
+
+  // The base update url without any arguments added.
+  GURL base_url_;
+
+  // The base update url plus arguments indicating the id, version, etc.
+  // information about each extension.
+  GURL full_url_;
+
+  DISALLOW_COPY_AND_ASSIGN(ManifestFetchData);
+};
+
+// A class for building a set of ManifestFetchData objects from
+// extensions and pending extensions.
+class ManifestFetchesBuilder {
+ public:
+  explicit ManifestFetchesBuilder(ExtensionUpdateService* service);
+
+  void AddExtension(const Extension& extension);
+
+  void AddPendingExtension(const std::string& id,
+                           const PendingExtensionInfo& info);
+
+  // Adds all recorded stats taken so far to histogram counts.
+  void ReportStats() const;
+
+  // Caller takes ownership of the returned ManifestFetchData
+  // objects.  Clears all recorded stats.
+  std::vector<ManifestFetchData*> GetFetches();
+
+ private:
+  struct URLStats {
+    URLStats()
+        : no_url_count(0),
+          google_url_count(0),
+          other_url_count(0),
+          theme_count(0) {}
+
+    int no_url_count, google_url_count, other_url_count, theme_count;
+  };
+
+  void AddExtensionData(Extension::Location location,
+                        const std::string& id,
+                        const Version& version,
+                        bool converted_from_user_script,
+                        bool is_theme,
+                        GURL update_url);
+
+  ExtensionUpdateService* service_;
+
+  // List of data on fetches we're going to do. We limit the number of
+  // extensions grouped together in one batch to avoid running into the limits
+  // on the length of http GET requests, so there might be multiple
+  // ManifestFetchData* objects with the same base_url.
+  std::multimap<GURL, ManifestFetchData*> fetches_;
+
+  URLStats url_stats_;
+
+  DISALLOW_COPY_AND_ASSIGN(ManifestFetchesBuilder);
+};
 
 // A class for doing auto-updates of installed Extensions. Used like this:
 //
 // ExtensionUpdater* updater = new ExtensionUpdater(my_extensions_service,
 //                                                  pref_service,
-//                                                  update_frequency_secs,
-//                                                  file_io_loop,
-//                                                  io_loop);
+//                                                  update_frequency_secs);
 // updater.Start();
 // ....
 // updater.Stop();
@@ -45,11 +144,7 @@ class ExtensionUpdater
   // controls how often update checks are scheduled.
   ExtensionUpdater(ExtensionUpdateService* service,
                    PrefService* prefs,
-                   int frequency_seconds,
-                   MessageLoop* file_io_loop,
-                   MessageLoop* io_loop);
-
-  virtual ~ExtensionUpdater();
+                   int frequency_seconds);
 
   // Starts the updater running.
   void Start();
@@ -68,10 +163,12 @@ class ExtensionUpdater
   }
 
  private:
+  friend class base::RefCountedThreadSafe<ExtensionUpdater>;
   friend class ExtensionUpdaterTest;
   friend class ExtensionUpdaterFileHandler;
   friend class SafeManifestParser;
 
+  virtual ~ExtensionUpdater();
 
   // We need to keep track of some information associated with a url
   // when doing a fetch.
@@ -120,7 +217,8 @@ class ExtensionUpdater
 
   // Called when a crx file has been written into a temp file, and is ready
   // to be installed.
-  void OnCRXFileWritten(const std::string& id, const FilePath& path);
+  void OnCRXFileWritten(const std::string& id, const FilePath& path,
+                        const GURL& download_url);
 
   // Callback for when ExtensionsService::Install is finished.
   void OnExtensionInstallFinished(const FilePath& path, Extension* extension);
@@ -138,15 +236,16 @@ class ExtensionUpdater
   // BaseTimer::ReceiverMethod callback.
   void TimerFired();
 
-  // Begins an update check - called with url to fetch an update manifest.
-  void StartUpdateCheck(const GURL& url);
+  // Begins an update check. Takes ownership of |fetch_data|.
+  void StartUpdateCheck(ManifestFetchData* fetch_data);
 
   // Begins (or queues up) download of an updated extension.
   void FetchUpdatedExtension(const std::string& id, const GURL& url,
     const std::string& hash, const std::string& version);
 
   // Once a manifest is parsed, this starts fetches of any relevant crx files.
-  void HandleManifestResults(const UpdateManifest::ResultList& results);
+  void HandleManifestResults(const ManifestFetchData& fetch_data,
+                             const UpdateManifest::Results& results);
 
   // Determines the version of an existing extension.
   // Returns true on success and false on failures.
@@ -154,11 +253,8 @@ class ExtensionUpdater
 
   // Given a list of potential updates, returns the indices of the ones that are
   // applicable (are actually a new version, etc.) in |result|.
-  std::vector<int> DetermineUpdates(
-      const std::vector<UpdateManifest::Result>& possible_updates);
-
-  // Creates a blacklist update url.
-  static GURL GetBlacklistUpdateUrl(const std::wstring& version);
+  std::vector<int> DetermineUpdates(const ManifestFetchData& fetch_data,
+      const UpdateManifest::Results& possible_updates);
 
   // Outstanding url fetch requests for manifests and updates.
   scoped_ptr<URLFetcher> manifest_fetcher_;
@@ -166,8 +262,11 @@ class ExtensionUpdater
 
   // Pending manifests and extensions to be fetched when the appropriate fetcher
   // is available.
-  std::deque<GURL> manifests_pending_;
+  std::deque<ManifestFetchData*> manifests_pending_;
   std::deque<ExtensionFetch> extensions_pending_;
+
+  // The manifest currently being fetched (if any).
+  scoped_ptr<ManifestFetchData> current_manifest_fetch_;
 
   // The extension currently being fetched (if any).
   ExtensionFetch current_extension_fetch_;
@@ -177,12 +276,6 @@ class ExtensionUpdater
 
   base::OneShotTimer<ExtensionUpdater> timer_;
   int frequency_seconds_;
-
-  // The MessageLoop where we should do file I/O.
-  MessageLoop* file_io_loop_;
-
-  // The IO loop for IPC.
-  MessageLoop* io_loop_;
 
   PrefService* prefs_;
 

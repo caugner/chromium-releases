@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,7 @@
 
 #include "googleurl/src/gurl.h"
 #include "net/url_request/url_request.h"
-#include "webkit/api/public/WebApplicationCacheHost.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebApplicationCacheHost.h"
 
 using WebKit::WebApplicationCacheHost;
 
@@ -19,10 +19,18 @@ const char kHttpsScheme[] = "https";
 const char kHttpGETMethod[] = "GET";
 const char kHttpHEADMethod[] = "HEAD";
 
+const FilePath::CharType kAppCacheDatabaseName[] = FILE_PATH_LITERAL("Index");
+
 bool IsSchemeSupported(const GURL& url) {
   bool supported = url.SchemeIs(kHttpScheme) || url.SchemeIs(kHttpsScheme);
 #ifndef NDEBUG
-  supported |= url.SchemeIsFile();
+  // TODO(michaeln): It would be really nice if this could optionally work for
+  // file urls too to help web developers experiment and test their apps,
+  // perhaps enabled via a cmd line flag or some other developer tool setting.
+  // Unfortunately file scheme URLRequest don't produce the same signalling
+  // (200 response codes, headers) as http URLRequests, so this doesn't work
+  // just yet.
+  // supported |= url.SchemeIsFile();
 #endif
   return supported;
 }

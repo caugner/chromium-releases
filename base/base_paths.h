@@ -13,10 +13,7 @@
 #include "base/base_paths_win.h"
 #elif defined(OS_MACOSX)
 #include "base/base_paths_mac.h"
-#elif defined(OS_LINUX) || defined(OS_FREEBSD)
-#include "base/base_paths_linux.h"
 #endif
-#include "base/path_service.h"
 
 namespace base {
 
@@ -27,6 +24,20 @@ enum {
   DIR_EXE,      // directory containing FILE_EXE
   DIR_MODULE,   // directory containing FILE_MODULE
   DIR_TEMP,     // temporary directory
+  FILE_EXE,     // Path and filename of the current executable.
+  FILE_MODULE,  // Path and filename of the module containing the code for the
+                // PathService (which could differ from FILE_EXE if the
+                // PathService were compiled into a shared object, for example).
+  DIR_SOURCE_ROOT,  // Returns the root of the source tree.  This key is useful
+                    // for tests that need to locate various resources.  It
+                    // should not be used outside of test code.
+#if defined(OS_POSIX)
+  DIR_USER_CACHE,   // Directory where user cache data resides. The Chromium
+                    // browser cache can be a subdirectory of DIR_USER_CACHE.
+                    // This is $XDG_CACHE_HOME on Linux and ~/Library/Caches
+                    // on Mac.
+#endif
+
   PATH_END
 };
 

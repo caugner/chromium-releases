@@ -1,6 +1,7 @@
 // Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
 #include <windows.h>
 #include <shlobj.h>
 #include <vsstyle.h>
@@ -8,9 +9,6 @@
 
 #include "chrome/browser/views/options/languages_page_view.h"
 
-#include "app/gfx/canvas.h"
-#include "app/gfx/font.h"
-#include "app/gfx/native_theme_win.h"
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/command_line.h"
@@ -20,12 +18,15 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/language_combobox_model.h"
 #include "chrome/browser/language_order_table_model.h"
+#include "chrome/browser/pref_service.h"
 #include "chrome/browser/shell_dialogs.h"
-#include "chrome/browser/spellchecker.h"
 #include "chrome/browser/views/restart_message_box.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/pref_service.h"
+#include "chrome/common/spellcheck_common.h"
+#include "gfx/canvas.h"
+#include "gfx/font.h"
+#include "gfx/native_theme_win.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -139,7 +140,7 @@ void AddLanguageWindowView::Layout() {
 
 gfx::Size AddLanguageWindowView::GetPreferredSize() {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  gfx::Font font = rb.GetFont(ResourceBundle::BaseFont);
+  const gfx::Font& font = rb.GetFont(ResourceBundle::BaseFont);
   return gfx::Size(font.ave_char_width() * kDefaultWindowWidthChars,
                    font.height() * kDefaultWindowHeightLines);
 }
@@ -350,7 +351,7 @@ void LanguagesPageView::InitControlLayout() {
 
   // Determine Locale Codes.
   std::vector<std::string> spell_check_languages;
-  SpellChecker::SpellCheckLanguages(&spell_check_languages);
+  SpellCheckCommon::SpellCheckLanguages(&spell_check_languages);
   dictionary_language_model_.reset(new LanguageComboboxModel(profile(),
       spell_check_languages));
   change_dictionary_language_combobox_ =
@@ -432,7 +433,7 @@ void LanguagesPageView::NotifyPrefChanged(const std::wstring* pref_name) {
       const std::string& lang_region = WideToASCII(
           dictionary_language_.GetValue());
       dictionary_language_.SetValue(ASCIIToWide(
-          SpellChecker::GetLanguageFromLanguageRegion(lang_region)));
+          SpellCheckCommon::GetLanguageFromLanguageRegion(lang_region)));
       index = dictionary_language_model_->GetSelectedLanguageIndex(
           prefs::kSpellCheckDictionary);
     }
@@ -550,7 +551,7 @@ void LanguagesPageView::SaveChanges() {
   }
 
   if (ui_language_index_selected_ != -1) {
-    UserMetricsRecordAction(L"Options_AppLanguage",
+    UserMetricsRecordAction(UserMetricsAction("Options_AppLanguage"),
                             g_browser_process->local_state());
     app_locale_.SetValue(ASCIIToWide(ui_language_model_->
         GetLocaleFromIndex(ui_language_index_selected_)));
@@ -562,7 +563,7 @@ void LanguagesPageView::SaveChanges() {
   }
 
   if (spellcheck_language_index_selected_ != -1) {
-    UserMetricsRecordAction(L"Options_DictionaryLanguage",
+    UserMetricsRecordAction(UserMetricsAction("Options_DictionaryLanguage"),
                             profile()->GetPrefs());
     dictionary_language_.SetValue(ASCIIToWide(dictionary_language_model_->
         GetLocaleFromIndex(spellcheck_language_index_selected_)));

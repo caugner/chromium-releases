@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -34,35 +34,43 @@
 //    *[ Created ]  -->  [ Playing ]  -->  [ Paused ]
 //                           ^                 |
 //                           |                 |
-//                           `-----------------`
+//                           `-----------------'
 //
 // Here's an example of a typical IPC dialog for audio:
 //
-//   Renderer                                  AudioRendererHost
-//      |    >>>>>>>>>>> CreateStream >>>>>>>>>        |
-//      |    <<<<<<<<<<<< Created <<<<<<<<<<<<<        |
-//      |                                              |
-//      |    <<<<<< RequestAudioPacket <<<<<<<<        |
-//      |    >>>>>>> AudioPacketReady >>>>>>>>>        |
-//      |                   ...                        |
-//      |    <<<<<< RequestAudioPacket <<<<<<<<        |
-//      |    >>>>>>> AudioPacketReady >>>>>>>>>        |
-//      |                                              |
-//      |    >>>>>>>>>>>>> Play >>>>>>>>>>>>>>>        |
-//      |    <<<<<<<<<<<< Playing <<<<<<<<<<<<<        |  time
-//      |                   ...                        |
-//      |    <<<<<< RequestAudioPacket <<<<<<<<        |
-//      |    >>>>>>> AudioPacketReady >>>>>>>>>        |
-//      |                   ...                        |
-//      |    >>>>>>>>>>>>> Pause >>>>>>>>>>>>>>        |
-//      |    <<<<<<<<<<<< Paused <<<<<<<<<<<<<         |
-//      |                   ...                        |
-//      |    >>>>>>>>>>>>> Start >>>>>>>>>>>>>>        |
-//      |    <<<<<<<<<<<< Started <<<<<<<<<<<<<        |
-//      |                   ...                        |
-//      |    >>>>>>>>>>>>> Close >>>>>>>>>>>>>>        |
-//      v                                              v
-//
+//   Renderer                     AudioRendererHost
+//      |                               |
+//      |         CreateStream >        |
+//      |          < Created            |
+//      |                               |
+//      |             Play >            |
+//      |           < Playing           |  time
+//      |                               |
+//      |     < RequestAudioPacket      |
+//      |      AudioPacketReady >       |
+//      |             ...               |
+//      |     < RequestAudioPacket      |
+//      |      AudioPacketReady >       |
+//      |                               |
+//      |             ...               |
+//      |     < RequestAudioPacket      |
+//      |      AudioPacketReady >       |
+//      |             ...               |
+//      |           Pause >             |
+//      |          < Paused             |
+//      |            ...                |
+//      |           Start >             |
+//      |          < Started            |
+//      |             ...               |
+//      |            Close >            |
+//      v                               v
+
+// The above mode of operation uses relatively big buffers and has latencies
+// of 50 ms or more. There is a second mode of operation which is low latency.
+// For low latency audio, the picture above is modified by not having the
+// RequestAudioPacket and the AudioPacketReady messages, instead a SyncSocket
+// pair is used to signal buffer readiness without having to route messages
+// using the IO thread.
 
 #ifndef CHROME_BROWSER_RENDERER_HOST_AUDIO_RENDERER_HOST_H_
 #define CHROME_BROWSER_RENDERER_HOST_AUDIO_RENDERER_HOST_H_
@@ -72,27 +80,27 @@
 #include "base/lock.h"
 #include "base/process.h"
 #include "base/ref_counted.h"
+#include "base/scoped_ptr.h"
 #include "base/shared_memory.h"
+#include "base/sync_socket.h"
 #include "base/waitable_event.h"
+#include "chrome/browser/chrome_thread.h"
 #include "ipc/ipc_message.h"
 #include "media/audio/audio_output.h"
 #include "media/audio/simple_sources.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
 class AudioManager;
-class MessageLoop;
-struct ViewHostMsg_Audio_CreateStream;
+struct ViewHostMsg_Audio_CreateStream_Params;
 
-class AudioRendererHost : public base::RefCountedThreadSafe<AudioRendererHost> {
+class AudioRendererHost
+    : public base::RefCountedThreadSafe<
+          AudioRendererHost, ChromeThread::DeleteOnIOThread> {
  private:
   class IPCAudioSource;
  public:
   // Called from UI thread from the owner of this object.
-  explicit AudioRendererHost(MessageLoop* message_loop);
-
-  // Destruction can happen on either UI thread or IO thread, but at destruction
-  // all associated sources are destroyed and streams are closed.
-  virtual ~AudioRendererHost();
+  AudioRendererHost();
 
   // Called from UI thread from the owner of this object to kick start
   // destruction of streams in IO thread.
@@ -114,6 +122,12 @@ class AudioRendererHost : public base::RefCountedThreadSafe<AudioRendererHost> {
   bool OnMessageReceived(const IPC::Message& message, bool* message_was_ok);
 
  protected:
+  friend class ChromeThread;
+  friend class DeleteTask<AudioRendererHost>;
+
+  // Destruction always happens on the IO thread (see DeleteOnIOThread above).
+  virtual ~AudioRendererHost();
+
   //---------------------------------------------------------------------------
   // Helper methods called from IPCAudioSource or from this class, since
   // methods in IPCAudioSource maybe called from hardware audio threads, these
@@ -167,8 +181,9 @@ class AudioRendererHost : public base::RefCountedThreadSafe<AudioRendererHost> {
         int channels,                        // Number of channels.
         int sample_rate,                     // Sampling frequency/rate.
         char bits_per_sample,                // Number of bits per sample.
-        size_t decoded_packet_size,          // Number of bytes per packet.
-        size_t buffer_capacity               // Number of bytes in the buffer.
+        uint32 decoded_packet_size,          // Number of bytes per packet.
+        uint32 buffer_capacity,              // Number of bytes in the buffer.
+        bool low_latency                     // Use low-latency (socket) code
     );
     ~IPCAudioSource();
 
@@ -184,13 +199,17 @@ class AudioRendererHost : public base::RefCountedThreadSafe<AudioRendererHost> {
     // the renderer.
     void Pause();
 
+    // Discard all audio data buffered in this output stream. This method only
+    // has effect when the stream is paused.
+    void Flush();
+
     // Closes the audio output stream. After calling this method all activities
     // of the audio output stream are stopped.
     void Close();
 
     // Sets the volume of the audio output stream. There's no IPC messages
     // sent back to the renderer upon success and failure.
-    void SetVolume(double left, double right);
+    void SetVolume(double volume);
 
     // Gets the volume of the audio output stream.
     // ViewMsg_NotifyAudioStreamVolume is sent back to renderer with volume
@@ -199,11 +218,11 @@ class AudioRendererHost : public base::RefCountedThreadSafe<AudioRendererHost> {
 
     // Notify this source that buffer has been filled and is ready to be
     // consumed.
-    void NotifyPacketReady(size_t packet_size);
+    void NotifyPacketReady(uint32 packet_size);
 
     // AudioSourceCallback methods.
-    virtual size_t OnMoreData(AudioOutputStream* stream, void* dest,
-                              size_t max_size, int pending_bytes);
+    virtual uint32 OnMoreData(AudioOutputStream* stream, void* dest,
+                              uint32 max_size, uint32 pending_bytes);
     virtual void OnClose(AudioOutputStream* stream);
     virtual void OnError(AudioOutputStream* stream, int code);
 
@@ -217,10 +236,10 @@ class AudioRendererHost : public base::RefCountedThreadSafe<AudioRendererHost> {
                    int route_id,                // Routing ID to RenderView.
                    int stream_id,               // ID of this source.
                    AudioOutputStream* stream,   // Stream associated.
-                   size_t hardware_packet_size,
-                   size_t decoded_packet_size,  // Size of shared memory
+                   uint32 hardware_packet_size,
+                   uint32 decoded_packet_size,  // Size of shared memory
                                                 // buffer for writing.
-                   size_t buffer_capacity);     // Capacity of transportation
+                   uint32 buffer_capacity);     // Capacity of transportation
                                                 // buffer.
 
     // Check the condition of |outstanding_request_| and |push_source_| to
@@ -238,19 +257,23 @@ class AudioRendererHost : public base::RefCountedThreadSafe<AudioRendererHost> {
     int route_id_;
     int stream_id_;
     AudioOutputStream* stream_;
-    size_t hardware_packet_size_;
-    size_t decoded_packet_size_;
-    size_t buffer_capacity_;
+    uint32 hardware_packet_size_;
+    uint32 decoded_packet_size_;
+    uint32 buffer_capacity_;
 
     State state_;
+
     base::SharedMemory shared_memory_;
+    scoped_ptr<base::SyncSocket> shared_socket_;
+
+    // PushSource role is to buffer and it's only used in regular latency mode.
     PushSource push_source_;
 
     // Flag that indicates there is an outstanding request.
     bool outstanding_request_;
 
     // Number of bytes copied in the last OnMoreData call.
-    int pending_bytes_;
+    uint32 pending_bytes_;
     base::Time last_callback_time_;
 
     // Protects:
@@ -272,7 +295,8 @@ class AudioRendererHost : public base::RefCountedThreadSafe<AudioRendererHost> {
   // required properties. See IPCAudioSource::CreateIPCAudioSource() for more
   // details.
   void OnCreateStream(const IPC::Message& msg, int stream_id,
-                      const ViewHostMsg_Audio_CreateStream& params);
+                      const ViewHostMsg_Audio_CreateStream_Params& params,
+                      bool low_latency);
 
   // Starts buffering for the audio output stream. Delegates the start method
   // call to the corresponding IPCAudioSource::Play().
@@ -288,6 +312,9 @@ class AudioRendererHost : public base::RefCountedThreadSafe<AudioRendererHost> {
   // required IPCAudioSource is not found.
   void OnPauseStream(const IPC::Message& msg, int stream_id);
 
+  // Discard all audio data buffered.
+  void OnFlushStream(const IPC::Message& msg, int stream_id);
+
   // Closes the audio output stream, delegates the close method call to the
   // corresponding IPCAudioSource::Close(), no returning IPC message to renderer
   // upon success and failure.
@@ -298,8 +325,7 @@ class AudioRendererHost : public base::RefCountedThreadSafe<AudioRendererHost> {
   // ViewMsg_NotifyAudioStreamStateChanged with
   // AudioOutputStream::AUDIO_STREAM_ERROR is sent back to renderer if the
   // required IPCAudioSource is not found.
-  void OnSetVolume(const IPC::Message& msg, int stream_id,
-                   double left_channel, double right_channel);
+  void OnSetVolume(const IPC::Message& msg, int stream_id, double volume);
 
   // Gets the volume of the stream specified, delegates to corresponding
   // IPCAudioSource::GetVolume(), see the method for more details.
@@ -314,10 +340,7 @@ class AudioRendererHost : public base::RefCountedThreadSafe<AudioRendererHost> {
   // AudioOutputStream::AUDIO_STREAM_ERROR is sent back to renderer if the
   // required IPCAudioSource is not found.
   void OnNotifyPacketReady(const IPC::Message& msg, int stream_id,
-                           size_t packet_size);
-
-  // Called on IO thread when this object is created and initialized.
-  void OnInitialized();
+                           uint32 packet_size);
 
   // Called on IO thread when this object needs to be destroyed and after
   // Destroy() is called from owner of this class in UI thread.
@@ -340,8 +363,6 @@ class AudioRendererHost : public base::RefCountedThreadSafe<AudioRendererHost> {
   // and stream id. Returns NULL if not found.
   IPCAudioSource* Lookup(int render_view_id, int stream_id);
 
-  MessageLoop* io_loop() { return io_loop_; }
-
   int process_id_;
   base::ProcessHandle process_handle_;
   IPC::Message::Sender* ipc_sender_;
@@ -350,8 +371,6 @@ class AudioRendererHost : public base::RefCountedThreadSafe<AudioRendererHost> {
   typedef std::pair<int32, int32> SourceID;
   typedef std::map<SourceID, IPCAudioSource*> SourceMap;
   SourceMap sources_;
-
-  MessageLoop* io_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioRendererHost);
 };

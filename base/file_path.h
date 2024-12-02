@@ -1,4 +1,4 @@
-// Copyright (c) 2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -66,7 +66,7 @@
 //
 // WARNING: FilePaths should ALWAYS be displayed with LTR directionality, even
 // when the UI language is RTL. This means you always need to pass filepaths
-// through l10n_util::WrapPathWithLTRFormatting() before displaying it in the
+// through base::i18n::WrapPathWithLTRFormatting() before displaying it in the
 // RTL UI.
 //
 // This is a very common source of bugs, please try to keep this in mind.
@@ -115,6 +115,8 @@
 #define FILE_PATH_USES_DRIVE_LETTERS
 #define FILE_PATH_USES_WIN_SEPARATORS
 #endif  // OS_WIN
+
+class Pickle;
 
 // An abstraction to isolate users from the differences between native
 // pathnames on different platforms.
@@ -276,18 +278,64 @@ class FilePath {
   bool ReferencesParent() const;
 
   // Older Chromium code assumes that paths are always wstrings.
-  // This function converts a wstring to a FilePath, and is useful to smooth
-  // porting that old code to the FilePath API.
-  // It has "Hack" in its name so people feel bad about using it.
-  // TODO(port): remove these functions.
+  // These functions convert wstrings to/from FilePaths, and are
+  // useful to smooth porting that old code to the FilePath API.
+  // They have "Hack" in their names so people feel bad about using them.
+  // http://code.google.com/p/chromium/issues/detail?id=24672
+  //
+  // If you are trying to be a good citizen and remove these, ask yourself:
+  // - Am I interacting with other Chrome code that deals with files?  Then
+  //   try to convert the API into using FilePath.
+  // - Am I interacting with OS-native calls?  Then use value() to get at an
+  //   OS-native string format.
+  // - Am I using well-known file names, like "config.ini"?  Then use the
+  //   ASCII functions (we require paths to always be supersets of ASCII).
   static FilePath FromWStringHack(const std::wstring& wstring);
-
-  // Older Chromium code assumes that paths are always wstrings.
-  // This function produces a wstring from a FilePath, and is useful to smooth
-  // porting that old code to the FilePath API.
-  // It has "Hack" in its name so people feel bad about using it.
-  // TODO(port): remove these functions.
   std::wstring ToWStringHack() const;
+
+  // Static helper method to write a StringType to a pickle.
+  static void WriteStringTypeToPickle(Pickle* pickle,
+                                      const FilePath::StringType& path);
+  static bool ReadStringTypeFromPickle(Pickle* pickle, void** iter,
+                                       FilePath::StringType* path);
+
+  void WriteToPickle(Pickle* pickle);
+  bool ReadFromPickle(Pickle* pickle, void** iter);
+
+  // Compare two strings in the same way the file system does.
+  // Note that these always ignore case, even on file systems that are case-
+  // sensitive. If case-sensitive comparison is ever needed, add corresponding
+  // methods here.
+  // The methods are written as a static method so that they can also be used
+  // on parts of a file path, e.g., just the extension.
+  // CompareIgnoreCase() returns -1, 0 or 1 for less-than, equal-to and
+  // greater-than respectively.
+  static int CompareIgnoreCase(const StringType& string1,
+                               const StringType& string2);
+  static bool CompareEqualIgnoreCase(const StringType& string1,
+                                     const StringType& string2) {
+    return CompareIgnoreCase(string1, string2) == 0;
+  }
+  static bool CompareLessIgnoreCase(const StringType& string1,
+                                    const StringType& string2) {
+    return CompareIgnoreCase(string1, string2) < 0;
+  }
+
+#if defined(OS_MACOSX)
+  // Returns the string in the special canonical decomposed form as defined for
+  // HFS, which is close to, but not quite, decomposition form D. See
+  // http://developer.apple.com/mac/library/technotes/tn/tn1150.html#UnicodeSubtleties
+  // for further comments.
+  // Returns the epmty string if the conversion failed.
+  static StringType GetHFSDecomposedForm(const FilePath::StringType& string);
+
+  // Special UTF-8 version of FastUnicodeCompare. Cf:
+  // http://developer.apple.com/mac/library/technotes/tn/tn1150.html#StringComparisonAlgorithm
+  // IMPORTANT: The input strings must be in the special HFS decomposed form!
+  // (cf. above GetHFSDecomposedForm method)
+  static int HFSFastUnicodeCompare(const StringType& string1,
+                                   const StringType& string2);
+#endif
 
  private:
   // Remove trailing separators from this object.  If the path is absolute, it

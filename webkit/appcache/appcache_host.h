@@ -1,16 +1,15 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef WEBKIT_APPCACHE_APPCACHE_HOST_H_
 #define WEBKIT_APPCACHE_APPCACHE_HOST_H_
 
+#include "base/callback.h"
 #include "base/observer_list.h"
 #include "base/ref_counted.h"
-#include "base/task.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
-#include "webkit/appcache/appcache.h"
 #include "webkit/appcache/appcache_group.h"
 #include "webkit/appcache/appcache_interfaces.h"
 #include "webkit/appcache/appcache_service.h"
@@ -81,18 +80,32 @@ class AppCacheHost : public AppCacheStorage::Delegate,
   // same as the cache that is currently associated with the host.
   void SetSwappableCache(AppCacheGroup* group);
 
+  // Used to ensure that a loaded appcache survives a frame navigation.
+  void LoadMainResourceCache(int64 cache_id);
+
+  // Used to notify the host that the main resource was blocked by a policy. To
+  // work properly, this method needs to by invokde prior to cache selection.
+  void NotifyMainResourceBlocked();
+
+  // Used by the update job to keep track of which hosts are associated
+  // with which pending master entries.
+  const GURL& pending_master_entry_url() const {
+    return new_master_entry_url_;
+  }
+
   int host_id() const { return host_id_; }
   AppCacheService* service() const { return service_; }
   AppCacheFrontend* frontend() const { return frontend_; }
   AppCache* associated_cache() const { return associated_cache_.get(); }
 
- private:
   bool is_selection_pending() const {
     return pending_selected_cache_id_ != kNoCacheId ||
            !pending_selected_manifest_url_.is_empty();
   }
+
+ private:
   Status GetStatus();
-  void LoadCache(int64 cache_id);
+  void LoadSelectedCache(int64 cache_id);
   void LoadOrCreateGroup(const GURL& manifest_url);
 
   // AppCacheStorage::Delegate impl
@@ -107,7 +120,8 @@ class AppCacheHost : public AppCacheStorage::Delegate,
 
   void ObserveGroupBeingUpdated(AppCacheGroup* group);
 
-  // AppCacheGroup::UpdateObserver method
+  // AppCacheGroup::UpdateObserver methods.
+  virtual void OnContentBlocked(AppCacheGroup* group);
   virtual void OnUpdateComplete(AppCacheGroup* group);
 
   // Identifies the corresponding appcache host in the child process.
@@ -124,6 +138,16 @@ class AppCacheHost : public AppCacheStorage::Delegate,
 
   // Keep a reference to the group being updated until the update completes.
   scoped_refptr<AppCacheGroup> group_being_updated_;
+
+  // Similarly, keep a reference to the newest cache of the group until the
+  // update completes. When adding a new master entry to a cache that is not
+  // in use in any other host, this reference keeps the cache in  memory.
+  scoped_refptr<AppCache> newest_cache_of_group_being_updated_;
+
+  // Keep a reference to the cache of the main resource so it survives frame
+  // navigations.
+  scoped_refptr<AppCache> main_resource_cache_;
+  int64 pending_main_resource_cache_id_;
 
   // Cache loading is async, if we're loading a specific cache or group
   // for the purposes of cache selection, one or the other of these will
@@ -150,9 +174,14 @@ class AppCacheHost : public AppCacheStorage::Delegate,
   SwapCacheCallback* pending_swap_cache_callback_;
   void* pending_callback_param_;
 
+  // True if requests for this host were blocked by a policy.
+  bool main_resource_blocked_;
+
   // List of objects observing us.
   ObserverList<Observer> observers_;
 
+  friend class AppCacheRequestHandlerTest;
+  friend class AppCacheUpdateJobTest;
   FRIEND_TEST(AppCacheTest, CleanupUnusedCache);
   FRIEND_TEST(AppCacheGroupTest, CleanupUnusedGroup);
   FRIEND_TEST(AppCacheHostTest, Basic);
@@ -161,6 +190,7 @@ class AppCacheHost : public AppCacheStorage::Delegate,
   FRIEND_TEST(AppCacheHostTest, FailedCacheLoad);
   FRIEND_TEST(AppCacheHostTest, FailedGroupLoad);
   FRIEND_TEST(AppCacheHostTest, SetSwappableCache);
+  FRIEND_TEST(AppCacheGroupTest, QueueUpdate);
   DISALLOW_COPY_AND_ASSIGN(AppCacheHost);
 };
 

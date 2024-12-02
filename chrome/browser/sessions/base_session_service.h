@@ -6,9 +6,9 @@
 #define CHROME_BROWSER_SESSIONS_BASE_SESSION_SERVICE_H_
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/file_path.h"
 #include "base/ref_counted.h"
-#include "base/task.h"
 #include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/sessions/session_id.h"
 
@@ -46,8 +46,6 @@ class BaseSessionService : public CancelableRequestProvider,
                      Profile* profile,
                      const FilePath& path);
 
-  virtual ~BaseSessionService();
-
   Profile* profile() const { return profile_; }
 
   // Deletes the last session.
@@ -66,16 +64,22 @@ class BaseSessionService : public CancelableRequestProvider,
     explicit InternalGetCommandsRequest(CallbackType* callback)
         : CancelableRequest<InternalGetCommandsCallback>(callback) {
     }
-    virtual ~InternalGetCommandsRequest();
 
     // The commands. The backend fills this in for us.
     std::vector<SessionCommand*> commands;
+
+   protected:
+    virtual ~InternalGetCommandsRequest();
 
    private:
     DISALLOW_COPY_AND_ASSIGN(InternalGetCommandsRequest);
   };
 
  protected:
+  friend class base::RefCountedThreadSafe<BaseSessionService>;
+
+  virtual ~BaseSessionService();
+
   // Returns the backend.
   SessionBackend* backend() const { return backend_; }
 
@@ -115,12 +119,26 @@ class BaseSessionService : public CancelableRequestProvider,
       int index,
       const NavigationEntry& entry);
 
+  // Creates a SessionCommand that represents marking a tab as an application.
+  SessionCommand* CreateSetTabAppExtensionIDCommand(
+      SessionID::id_type command_id,
+      SessionID::id_type tab_id,
+      const std::string& extension_id);
+
   // Converts a SessionCommand previously created by
   // CreateUpdateTabNavigationCommand into a TabNavigation. Returns true
   // on success. If successful |tab_id| is set to the id of the restored tab.
   bool RestoreUpdateTabNavigationCommand(const SessionCommand& command,
                                          TabNavigation* navigation,
                                          SessionID::id_type* tab_id);
+
+  // Extracts a SessionCommand as previously created by
+  // CreateSetTabAppExtensionIDCommand into the tab id and application
+  // extension id.
+  bool RestoreSetTabAppExtensionIDCommand(
+      const SessionCommand& command,
+      SessionID::id_type* tab_id,
+      std::string* app_extension_id);
 
   // Returns true if the NavigationEntry should be written to disk.
   bool ShouldTrackEntry(const NavigationEntry& entry);
@@ -131,6 +149,12 @@ class BaseSessionService : public CancelableRequestProvider,
   // Invokes ReadLastSessionCommands with request on the backend thread.
   // If testing, ReadLastSessionCommands is invoked directly.
   Handle ScheduleGetLastSessionCommands(
+      InternalGetCommandsRequest* request,
+      CancelableRequestConsumerBase* consumer);
+
+  // Invokes ReadCurrentSessionCommands with request on the backend thread.
+  // If testing, ReadLastSessionCommands is invoked directly.
+  Handle ScheduleGetCurrentSessionCommands(
       InternalGetCommandsRequest* request,
       CancelableRequestConsumerBase* consumer);
 

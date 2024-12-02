@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,10 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/gfx/rect.h"
 #include "base/scoped_ptr.h"
 #include "base/task.h"
 #include "chrome/browser/command_updater.h"
-#include "chrome/browser/extensions/extension_shelf_model.h"
+#include "chrome/browser/pref_member.h"
 #include "chrome/browser/sessions/session_id.h"
 #include "chrome/browser/shell_dialogs.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
@@ -22,11 +21,14 @@
 #include "chrome/browser/tab_contents/tab_contents_delegate.h"
 #include "chrome/browser/toolbar_model.h"
 #include "chrome/common/notification_registrar.h"
-#include "chrome/common/pref_member.h"
+#include "chrome/common/page_zoom.h"
+#include "gfx/rect.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 
 class BrowserWindow;
 class DebuggerWindow;
+class Extension;
+class ExtensionShelfModel;
 class FindBarController;
 class GoButton;
 class LocationBar;
@@ -35,6 +37,9 @@ class Profile;
 class SkBitmap;
 class StatusBubble;
 class TabNavigation;
+namespace gfx {
+class Point;
+}
 
 class Browser : public TabStripModelDelegate,
                 public TabStripModelObserver,
@@ -44,11 +49,21 @@ class Browser : public TabStripModelDelegate,
                 public NotificationObserver,
                 public SelectFileDialog::Listener {
  public:
+  // If you change the values in this enum you'll need to update browser_proxy.
+  // TODO(sky): move into a common place that is referenced by both ui_tests
+  // and chrome.
   enum Type {
-    TYPE_NORMAL = 0,
-    TYPE_POPUP = 1,
-    TYPE_APP = 2,
+    TYPE_NORMAL = 1,
+    TYPE_POPUP = 2,
+    TYPE_APP = 4,
     TYPE_APP_POPUP = TYPE_APP | TYPE_POPUP,
+    TYPE_DEVTOOLS = TYPE_APP | 8,
+    TYPE_APP_PANEL = TYPE_APP | 16,
+    TYPE_ANY = TYPE_NORMAL |
+               TYPE_POPUP |
+               TYPE_APP |
+               TYPE_DEVTOOLS |
+               TYPE_APP_PANEL
   };
 
   // Possible elements of the Browser window.
@@ -76,6 +91,18 @@ class Browser : public TabStripModelDelegate,
     MAXIMIZED_STATE_UNMAXIMIZED
   };
 
+  // Constants passed to AddTabWithURL.
+  enum AddTabTypes {
+    // The tab should be selected.
+    ADD_SELECTED    = 1 << 0,
+
+    // The tab should be pinned.
+    ADD_PINNED      = 1 << 1,
+
+    // See TabStripModel::AddTabContents for details.
+    ADD_FORCE_INDEX = 1 << 2,
+  };
+
   // Constructors, Creation, Showing //////////////////////////////////////////
 
   // Creates a new browser of the given |type| and for the given |profile|. The
@@ -92,9 +119,14 @@ class Browser : public TabStripModelDelegate,
   static Browser* CreateForPopup(Profile* profile);
 
   // Like Create, but creates a tabstrip-less and toolbar-less "app" window for
-  // the specified app. Passing popup=true will create a TYPE_APP_POPUP browser
+  // the specified app. |is_panel| specifies whether the browser should be
+  // opened in an app panel window.
   static Browser* CreateForApp(const std::wstring& app_name, Profile* profile,
-                               bool is_popup);
+                               bool is_panel);
+
+  // Like Create, but creates a tabstrip-less and toolbar-less
+  // DevTools "app" window.
+  static Browser* CreateForDevTools(Profile* profile);
 
   // Set overrides for the initial window bounds and maximized state.
   void set_override_bounds(const gfx::Rect& bounds) {
@@ -133,10 +165,16 @@ class Browser : public TabStripModelDelegate,
   ToolbarModel* toolbar_model() { return &toolbar_model_; }
   const SessionID& session_id() const { return session_id_; }
   CommandUpdater* command_updater() { return &command_updater_; }
-  FindBarController* find_bar() { return find_bar_controller_.get(); }
   ExtensionShelfModel* extension_shelf_model() {
     return extension_shelf_model_.get();
   }
+
+  // Get the FindBarController for this browser, creating it if it does not
+  // yet exist.
+  FindBarController* GetFindBarController();
+
+  // Returns true if a FindBarController exists for this browser.
+  bool HasFindBarController() const;
 
   // Setters /////////////////////////////////////////////////////////////////
 
@@ -155,8 +193,39 @@ class Browser : public TabStripModelDelegate,
   // |profile|, that session is re-used.
   static void OpenURLOffTheRecord(Profile* profile, const GURL& url);
 
-  // Opens the a new application ("thin frame") window for the specified url.
-  static void OpenApplicationWindow(Profile* profile, const GURL& url);
+  // Open an application specified by |app_id| in the appropriate launch
+  // container.  Returns false if the app_id is invalid or if ExtensionsService
+  // isn't ready/available.
+  static bool OpenApplication(Profile* profile, const std::string& app_id);
+
+  // Opens a new application window for the specified url. If |as_panel|
+  // is true, the application will be opened as a Browser::Type::APP_PANEL in
+  // app panel window, otherwise it will be opened as a Browser::Type::APP,
+  // a.k.a. "thin frame".
+  static void OpenApplicationWindow(Profile* profile, const GURL& url,
+                                    bool as_panel);
+
+  // Open an application for |extension| in a new application window or panel.
+  static void OpenApplicationWindow(Profile* profile, Extension* extension);
+
+  // Open an application for |extension| in a new application tab.  Returns
+  // false if there are no appropriate existing browser windows for |profile|.
+  static bool OpenApplicationTab(Profile* profile, Extension* extension);
+
+  // Opens a new window and opens the bookmark manager.
+  static void OpenBookmarkManagerWindow(Profile* profile);
+
+#if defined(OS_MACOSX)
+  // Open a new window with history/downloads/help (needed on Mac when there are
+  // no windows).
+  static void OpenHistoryWindow(Profile* profile);
+  static void OpenDownloadsWindow(Profile* profile);
+  static void OpenHelpWindow(Profile* profile);
+#endif
+
+  // Opens a window with the extensions tab in it - needed by long-lived
+  // extensions which may run with no windows open.
+  static void OpenExtensionsWindow(Profile* profile);
 
   // State Storage and Retrieval for UI ///////////////////////////////////////
 
@@ -175,9 +244,6 @@ class Browser : public TabStripModelDelegate,
 
   // Prepares a title string for display (removes embedded newlines, etc).
   static void FormatTitleForDisplay(string16* title);
-
-  // Returns true if the frame should show a distributor logo for this Browser.
-  bool ShouldShowDistributorLogo() const;
 
   // OnBeforeUnload handling //////////////////////////////////////////////////
 
@@ -226,6 +292,7 @@ class Browser : public TabStripModelDelegate,
   // will be used to render the tab. |force_index| is passed through to
   // TabStripModel::AddTabContents and its meaning is documented with its
   // declaration.
+  // TODO(sky): nuke this and convert callers to new AddTablWithURL variant.
   TabContents* AddTabWithURL(const GURL& url,
                              const GURL& referrer,
                              PageTransition::Type transition,
@@ -234,6 +301,18 @@ class Browser : public TabStripModelDelegate,
                              bool force_index,
                              SiteInstance* instance);
 
+  // Adds a new tab at the specified index. |add_types| is a bitmask of the
+  // values defined by AddTabTypes; see AddTabTypes for details. If |instance|
+  // is not null, its process will be used to render the tab. If
+  // |app_extension_id| is non-empty the new tab is an app tab.
+  TabContents* AddTabWithURL(const GURL& url,
+                             const GURL& referrer,
+                             PageTransition::Type transition,
+                             int index,
+                             int add_types,
+                             SiteInstance* instance,
+                             const std::string& app_extension_id);
+
   // Add a new tab, given a TabContents. A TabContents appropriate to
   // display the last committed entry is created and returned.
   TabContents* AddTab(TabContents* tab_contents, PageTransition::Type type);
@@ -241,13 +320,18 @@ class Browser : public TabStripModelDelegate,
   // Add a tab with its session history restored from the SessionRestore
   // system. If select is true, the tab is selected. |tab_index| gives the index
   // to insert the tab at. |selected_navigation| is the index of the
-  // TabNavigation in |navigations| to select. If |pin| is true and |tab_index|
-  // is the last pinned tab, then the newly created tab is pinned.
+  // TabNavigation in |navigations| to select. If |app_extension_id| is
+  // non-empty the tab is an app tab and |app_extension_id| is the id of the
+  // extension. If |pin| is true and |tab_index|/ is the last pinned tab, then
+  // the newly created tab is pinned. If |from_last_session| is true,
+  // |navigations| are from the previous session.
   TabContents* AddRestoredTab(const std::vector<TabNavigation>& navigations,
                               int tab_index,
                               int selected_navigation,
+                              const std::string& app_extension_id,
                               bool select,
-                              bool pin);
+                              bool pin,
+                              bool from_last_session);
   // Creates a new tab with the already-created TabContents 'new_contents'.
   // The window for the added contents will be reparented correctly when this
   // method returns.  If |disposition| is NEW_POPUP, |pos| should hold the
@@ -280,15 +364,21 @@ class Browser : public TabStripModelDelegate,
   // history restored from the SessionRestore system.
   void ReplaceRestoredTab(
       const std::vector<TabNavigation>& navigations,
-      int selected_navigation);
+      int selected_navigation,
+      bool from_last_session,
+      const std::string& app_extension_id);
 
   // Returns true if a tab can be restored.
   virtual bool CanRestoreTab();
 
-  // Show a DOMUI tab given a URL. If a tab with the same URL is already
-  // visible in this browser, it becomes selected. Otherwise a new tab is
-  // created.
-  void ShowSingleDOMUITab(const GURL& url);
+  // Navigate to an index in the tab history, opening a new tab depending on the
+  // disposition.
+  bool NavigateToIndexWithDisposition(int index, WindowOpenDisposition disp);
+
+  // Show a given a URL. If a tab with the same URL (ignoring the ref) is
+  // already visible in this browser, it becomes selected. Otherwise a new tab
+  // is created.
+  void ShowSingletonTab(const GURL& url);
 
   // Update commands whose state depends on whether the window is in fullscreen
   // mode. This is a public function because on Linux, fullscreen mode is an
@@ -305,6 +395,7 @@ class Browser : public TabStripModelDelegate,
   void GoBack(WindowOpenDisposition disposition);
   void GoForward(WindowOpenDisposition disposition);
   void Reload();
+  void ReloadIgnoringCache();  // AKA shift-reload.
   void Home(WindowOpenDisposition disposition);
   void OpenCurrentURL();
   void Go(WindowOpenDisposition disposition);
@@ -326,8 +417,12 @@ class Browser : public TabStripModelDelegate,
   void RestoreTab();
   void WriteCurrentURLToClipboard();
   void ConvertPopupToTabbedBrowser();
+  // In kiosk mode, the first toggle is valid, the rest is discarded.
   void ToggleFullscreenMode();
   void Exit();
+#if defined(OS_CHROMEOS)
+  void ToggleCompactNavigationBar();
+#endif
 
   // Page-related commands
   void BookmarkCurrentPage();
@@ -339,20 +434,16 @@ class Browser : public TabStripModelDelegate,
   virtual bool SupportsWindowFeature(WindowFeature feature) const;
 
 // TODO(port): port these, and re-merge the two function declaration lists.
-#if defined(OS_WIN)
   // Page-related commands.
-  void ClosePopups();
-#endif
   void Print();
+  void EmailPageLocation();
   void ToggleEncodingAutoDetect();
   void OverrideEncoding(int encoding_id);
 
-#if defined(OS_WIN) || defined(OS_LINUX)
   // Clipboard commands
   void Cut();
   void Copy();
   void Paste();
-#endif
 
   // Find-in-page
   void Find();
@@ -360,19 +451,18 @@ class Browser : public TabStripModelDelegate,
   void FindPrevious();
 
   // Zoom
-  void ZoomIn();
-  void ZoomReset();
-  void ZoomOut();
+  void Zoom(PageZoom::Function zoom_function);
 
   // Focus various bits of UI
   void FocusToolbar();
-  void FocusLocationBar();
+  void FocusLocationBar();  // Also selects any existing text.
   void FocusSearch();
+  void FocusPageAndAppMenus();
 
   // Show various bits of UI
   void OpenFile();
   void OpenCreateShortcutsDialog();
-  void ToggleDevToolsWindow();
+  void ToggleDevToolsWindow(bool open_console);
   void OpenTaskManager();
   void OpenSelectProfileDialog();
   void OpenNewProfileDialog();
@@ -384,22 +474,25 @@ class Browser : public TabStripModelDelegate,
   void OpenBookmarkManager();
   void ShowAppMenu();
   void ShowPageMenu();
+  void ShowBookmarkManagerTab();
   void ShowHistoryTab();
   void ShowDownloadsTab();
+  void ShowExtensionsTab();
   void OpenClearBrowsingDataDialog();
   void OpenOptionsDialog();
   void OpenKeywordEditor();
   void OpenPasswordManager();
-#if defined(BROWSER_SYNC)
   void OpenSyncMyBookmarksDialog();
-#endif
   void OpenImportSettingsDialog();
   void OpenAboutChromeDialog();
   void OpenHelpTab();
-  void OpenExtensionsTab();
+  // Used by the "Get themes" link in the options dialog.
+  void OpenThemeGalleryTabAndActivate();
 #if defined(OS_CHROMEOS)
-  void ShowControlPanel();
+  void OpenSystemOptionsDialog();
+  void OpenInternetOptionsDialog();
 #endif
+  void AutoFillDefaultProfile();
 
   virtual void UpdateDownloadShelfVisibility(bool visible);
 
@@ -439,6 +532,22 @@ class Browser : public TabStripModelDelegate,
   // Calls ExecuteCommandWithDisposition with the given disposition.
   void ExecuteCommandWithDisposition(int id, WindowOpenDisposition);
 
+  // Returns whether the |id| is a reserved command, whose keyboard shortcuts
+  // should not be sent to the renderer.
+  bool IsReservedCommand(int id);
+
+  // Sets if command execution shall be blocked. If |block| is true then
+  // following calls to ExecuteCommand() or ExecuteCommandWithDisposition()
+  // method will not execute the command, and the last blocked command will be
+  // recorded for retrieval.
+  void SetBlockCommandExecution(bool block);
+
+  // Gets the last blocked command after calling SetBlockCommandExecution(true).
+  // Returns the command id or -1 if there is no command blocked. The
+  // disposition type of the command will be stored in |*disposition| if it's
+  // not null.
+  int GetLastBlockedCommand(WindowOpenDisposition* disposition);
+
   // Interface implementations ////////////////////////////////////////////////
 
   // Overridden from PageNavigator
@@ -449,7 +558,25 @@ class Browser : public TabStripModelDelegate,
   // Overridden from CommandUpdater::CommandUpdaterDelegate:
   virtual void ExecuteCommand(int id);
 
+  // Helper function to run unload listeners on a TabContents.
+  static bool RunUnloadEventsHelper(TabContents* contents);
+
  private:
+  FRIEND_TEST(BrowserTest, NoTabsInPopups);
+
+  // Used to describe why a tab is being detached. This is used by
+  // TabDetachedAtImpl.
+  enum DetachType {
+    // Result of TabDetachedAt.
+    DETACH_TYPE_DETACH,
+
+    // Result of TabReplacedAt.
+    DETACH_TYPE_REPLACE,
+
+    // Result of the tab strip not having any significant tabs.
+    DETACH_TYPE_EMPTY
+  };
+
   // Overridden from TabStripModelDelegate:
   virtual TabContents* AddBlankTab(bool foreground);
   virtual TabContents* AddBlankTabAt(int index, bool foreground);
@@ -490,8 +617,10 @@ class Browser : public TabStripModelDelegate,
                              bool user_gesture);
   virtual void TabMoved(TabContents* contents,
                         int from_index,
-                        int to_index,
-                        bool pinned_state_changed);
+                        int to_index);
+  virtual void TabReplacedAt(TabContents* old_contents,
+                             TabContents* new_contents,
+                             int index);
   virtual void TabPinnedStateChanged(TabContents* contents, int index);
   virtual void TabStripEmpty();
 
@@ -514,11 +643,15 @@ class Browser : public TabStripModelDelegate,
   virtual void MoveContents(TabContents* source, const gfx::Rect& pos);
   virtual void DetachContents(TabContents* source);
   virtual bool IsPopup(TabContents* source);
+  virtual bool CanReloadContents(TabContents* source) const;
   virtual void ToolbarSizeChanged(TabContents* source, bool is_animating);
   virtual void URLStarredChanged(TabContents* source, bool starred);
   virtual void UpdateTargetURL(TabContents* source, const GURL& url);
-  virtual void ContentsMouseEvent(TabContents* source, bool motion);
+  virtual void ContentsMouseEvent(
+      TabContents* source, const gfx::Point& location, bool motion);
   virtual void ContentsZoomChange(bool zoom_in);
+  virtual void OnBlockedContentChange(TabContents* source);
+  virtual void SetTabContentBlocked(TabContents* contents, bool blocked);
   virtual void TabContentsFocused(TabContents* tab_content);
   virtual bool TakeFocus(bool reverse);
   virtual bool IsApplication() const;
@@ -530,7 +663,7 @@ class Browser : public TabStripModelDelegate,
   virtual void BeforeUnloadFired(TabContents* source,
                                  bool proceed,
                                  bool* proceed_to_fire_unload);
-  virtual void SetFocusToLocationBar();
+  virtual void SetFocusToLocationBar(bool select_all);
   virtual void RenderWidgetShowing();
   virtual int GetExtraRenderViewHeight() const;
   virtual void OnStartDownload(DownloadItem* download);
@@ -540,8 +673,15 @@ class Browser : public TabStripModelDelegate,
                             const GURL& url,
                             const NavigationEntry::SSLStatus& ssl,
                             bool show_history);
-  virtual bool IsReservedAccelerator(const NativeWebKeyboardEvent& event);
+  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+                                        bool* is_keyboard_shortcut);
+  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
   virtual void ShowRepostFormWarningDialog(TabContents* tab_contents);
+  virtual void ShowContentSettingsWindow(ContentSettingsType content_type);
+  virtual bool ShouldAddNavigationsToHistory() const;
+  virtual void OnDidGetApplicationInfo(TabContents* tab_contents,
+                                       int32 page_id);
+  virtual Browser* GetBrowser() { return this; }
 
   // Overridden from SelectFileDialog::Listener:
   virtual void FileSelected(const FilePath& path, int index, void* params);
@@ -604,12 +744,6 @@ class Browser : public TabStripModelDelegate,
   // Notifies the history database of the index for all tabs whose index is
   // >= index.
   void SyncHistoryWithTabs(int index);
-
-  // Called from AddRestoredTab and ReplaceRestoredTab to build a
-  // TabContents from an incoming vector of TabNavigations.
-  // Caller takes ownership of the returned TabContents.
-  TabContents* BuildRestoredTab(const std::vector<TabNavigation>& navigations,
-                                int selected_navigation);
 
   // OnBeforeUnload handling //////////////////////////////////////////////////
 
@@ -677,25 +811,32 @@ class Browser : public TabStripModelDelegate,
   //             after a return to the message loop.
   void CloseFrame();
 
-  // Compute a deterministic name based on the URL. We use this pseudo name
-  // as a key to store window location per application URLs.
-  static std::wstring ComputeApplicationNameFromURL(const GURL& url);
-
-  FRIEND_TEST(BrowserTest, NoTabsInPopups);
+  void TabDetachedAtImpl(TabContents* contents, int index, DetachType type);
 
   // Create a preference dictionary for the provided application name. This is
   // done only once per application name / per session.
   static void RegisterAppPrefs(const std::wstring& app_name);
+
+  // Shared code between Reload() and ReloadAll().
+  void ReloadInternal(bool ignore_cache);
+
+  // Return true if the window dispositions means opening a new tab.
+  bool ShouldOpenNewTabForWindowDisposition(WindowOpenDisposition disposition);
+
+  // Depending on the disposition, return the |NavigationController| for the
+  // current tab or clone the current tab and return its |NavigationController|.
+  NavigationController& GetOrCloneNavigationControllerForDisposition(
+       WindowOpenDisposition disp);
 
   // Data members /////////////////////////////////////////////////////////////
 
   NotificationRegistrar registrar_;
 
   // This Browser's type.
-  Type type_;
+  const Type type_;
 
   // This Browser's profile.
-  Profile* profile_;
+  Profile* const profile_;
 
   // This Browser's window.
   BrowserWindow* window_;
@@ -715,31 +856,15 @@ class Browser : public TabStripModelDelegate,
   // across sessions.
   const SessionID session_id_;
 
-  // TODO(beng): should be combined with ToolbarModel now that this is the only
-  //             implementation.
-  class BrowserToolbarModel : public ToolbarModel {
-  public:
-    explicit BrowserToolbarModel(Browser* browser) : browser_(browser) { }
-    virtual ~BrowserToolbarModel() { }
-
-    // ToolbarModel implementation.
-    virtual NavigationController* GetNavigationController();
-
-  private:
-    Browser* browser_;
-
-    DISALLOW_COPY_AND_ASSIGN(BrowserToolbarModel);
-  };
-
   // The model for the toolbar view.
-  BrowserToolbarModel toolbar_model_;
+  ToolbarModel toolbar_model_;
 
   // The model for the extension shelf.
   scoped_ptr<ExtensionShelfModel> extension_shelf_model_;
 
   // UI update coalescing and handling ////////////////////////////////////////
 
-  typedef std::map<const TabContents*,int> UpdateMap;
+  typedef std::map<const TabContents*, int> UpdateMap;
 
   // Maps from TabContents to pending UI updates that need to be processed.
   // We don't update things like the URL or tab title right away to avoid
@@ -799,6 +924,27 @@ class Browser : public TabStripModelDelegate,
 
   // Keep track of the encoding auto detect pref.
   BooleanPrefMember encoding_auto_detect_;
+
+  // Indicates if command execution is blocked.
+  bool block_command_execution_;
+
+  // Stores the last blocked command id when |block_command_execution_| is true.
+  int last_blocked_command_id_;
+
+  // Stores the disposition type of the last blocked command.
+  WindowOpenDisposition last_blocked_command_disposition_;
+
+  // Different types of action when web app info is available.
+  // OnDidGetApplicationInfo uses this to dispatch calls.
+  enum WebAppAction {
+    NONE,             // No action at all.
+    CREATE_SHORTCUT,  // Bring up create application shortcut dialog.
+    UPDATE_SHORTCUT   // Update icon for app shortcut.
+  };
+
+  // Which deferred action to perform when OnDidGetApplicationInfo is notified
+  // from a TabContents. Currently, only one pending action is allowed.
+  WebAppAction pending_web_app_action_;
 
   DISALLOW_COPY_AND_ASSIGN(Browser);
 };

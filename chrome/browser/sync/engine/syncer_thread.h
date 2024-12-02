@@ -21,7 +21,10 @@
 #include "base/time.h"
 #include "base/waitable_event.h"
 #include "chrome/browser/sync/engine/all_status.h"
-#include "chrome/browser/sync/engine/client_command_channel.h"
+#if defined(OS_LINUX)
+#include "chrome/browser/sync/engine/idle_query_linux.h"
+#endif
+#include "chrome/browser/sync/sessions/sync_session.h"
 #include "chrome/browser/sync/util/event_sys-inl.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"  // For FRIEND_TEST
 
@@ -44,37 +47,18 @@ struct SyncerEvent;
 struct SyncerShutdownEvent;
 struct TalkMediatorEvent;
 
-class SyncerThreadFactory {
- public:
-  // Creates a SyncerThread based on the default (or user-overridden)
-  // implementation.  The thread does not start running until you call Start(),
-  // which will cause it to check-and-wait for certain conditions to be met
-  // (such as valid connection with Server established, syncable::Directory has
-  // been opened) before performing an intial sync with a server.  It uses
-  // |connection_manager| to detect valid connections, and |mgr| to detect the
-  // opening of a Directory, which will cause it to create a Syncer object for
-  // said Directory, and assign |model_safe_worker| to it.  |connection_manager|
-  // and |mgr| should outlive the SyncerThread.  You must stop the thread by
-  // calling Stop before destroying the object.  Stopping will first tear down
-  // the Syncer object, allowing it to finish work in progress, before joining
-  // the Stop-calling thread with the internal thread.
-  static SyncerThread* Create(ClientCommandChannel* command_channel,
-      syncable::DirectoryManager* mgr,
-      ServerConnectionManager* connection_manager, AllStatus* all_status,
-      ModelSafeWorker* model_safe_worker);
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(SyncerThreadFactory);
-};
-
-class SyncerThread : public base::RefCountedThreadSafe<SyncerThread> {
+class SyncerThread : public base::RefCountedThreadSafe<SyncerThread>,
+                     public sessions::SyncSession::Delegate {
   FRIEND_TEST(SyncerThreadTest, CalculateSyncWaitTime);
   FRIEND_TEST(SyncerThreadTest, CalculatePollingWaitTime);
   FRIEND_TEST(SyncerThreadWithSyncerTest, Polling);
   FRIEND_TEST(SyncerThreadWithSyncerTest, Nudge);
   FRIEND_TEST(SyncerThreadWithSyncerTest, Throttling);
+  FRIEND_TEST(SyncerThreadWithSyncerTest, AuthInvalid);
+  FRIEND_TEST(SyncerThreadWithSyncerTest, DISABLED_Pause);
   friend class SyncerThreadWithSyncerTest;
   friend class SyncerThreadFactory;
-public:
+ public:
   // Encapsulates the parameters that make up an interval on which the
   // syncer thread is sleeping.
   struct WaitInterval {
@@ -117,6 +101,7 @@ public:
   // longest possible poll interval.
   static const int kDefaultMaxPollIntervalMs;
 
+  SyncerThread(sessions::SyncSessionContext* context, AllStatus* all_status);
   virtual ~SyncerThread();
 
   virtual void WatchConnectionManager(ServerConnectionManager* conn_mgr);
@@ -129,6 +114,19 @@ public:
   // Stop processing. |max_wait| doesn't do anything in this version.
   virtual bool Stop(int max_wait);
 
+  // Request that the thread pauses.  Returns false if the request can
+  // not be completed (e.g. the thread is not running).  When the
+  // thread actually pauses, a SyncerEvent::PAUSED event notification
+  // will be sent to the relay channel.
+  virtual bool RequestPause();
+
+  // Request that the thread resumes from pause.  Returns false if the
+  // request can not be completed (e.g. the thread is not running or
+  // is not currently paused).  When the thread actually resumes, a
+  // SyncerEvent::RESUMED event notification will be sent to the relay
+  // channel.
+  virtual bool RequestResume();
+
   // Nudges the syncer to sync with a delay specified. This API is for access
   // from the SyncerThread's controller and will cause a mutex lock.
   virtual void NudgeSyncer(int milliseconds_from_now, NudgeSource source);
@@ -136,16 +134,9 @@ public:
   // Registers this thread to watch talk mediator events.
   virtual void WatchTalkMediator(TalkMediator* talk_mediator);
 
-  virtual void WatchClientCommands(ClientCommandChannel* channel);
-
-  virtual SyncerEventChannel* channel();
+  virtual SyncerEventChannel* relay_channel();
 
  protected:
-  SyncerThread();  // Necessary for temporary pthreads-based PIMPL impl.
-  SyncerThread(ClientCommandChannel* command_channel,
-      syncable::DirectoryManager* mgr,
-      ServerConnectionManager* connection_manager, AllStatus* all_status,
-      ModelSafeWorker* model_safe_worker);
   virtual void ThreadMain();
   void ThreadMainLoop();
 
@@ -191,6 +182,9 @@ public:
     // False when we want to stop the thread.
     bool stop_syncer_thread_;
 
+    // True when the thread should pause itself.
+    bool pause_;
+
     Syncer* syncer_;
 
     // State of the server connection.
@@ -208,7 +202,10 @@ public:
     WaitInterval current_wait_interval_;
 
     ProtectedFields()
-        : stop_syncer_thread_(false), syncer_(NULL), connected_(false) {}
+        : stop_syncer_thread_(false),
+          pause_(false),
+          syncer_(NULL),
+          connected_(false) {}
   } vault_;
 
   // Gets signaled whenever a thread outside of the syncer thread changes a
@@ -227,7 +224,14 @@ public:
   void HandleDirectoryManagerEvent(
       const syncable::DirectoryManagerEvent& event);
   void HandleSyncerEvent(const SyncerEvent& event);
-  void HandleClientCommand(ClientCommandChannel::EventType event);
+
+  // SyncSession::Delegate implementation.
+  virtual void OnSilencedUntil(const base::TimeTicks& silenced_until);
+  virtual bool IsSyncingCurrentlySilenced();
+  virtual void OnReceivedShortPollIntervalUpdate(
+      const base::TimeDelta& new_interval);
+  virtual void OnReceivedLongPollIntervalUpdate(
+      const base::TimeDelta& new_interval);
 
   void HandleServerConnectionEvent(const ServerConnectionEvent& event);
 
@@ -267,6 +271,12 @@ public:
   void SetUpdatesSource(bool nudged, NudgeSource nudge_source,
                         bool* initial_sync);
 
+  int UserIdleTime();
+
+  // The thread will remain in this method until a resume is requested
+  // or shutdown is started.
+  void PauseUntilResumedOrQuit();
+
   // For unit tests only.
   virtual void DisableIdleDetection() { disable_idle_detection_ = true; }
 
@@ -274,12 +284,8 @@ public:
   bool p2p_authenticated_;
   bool p2p_subscribed_;
 
-  scoped_ptr<EventListenerHookup> client_command_hookup_;
   scoped_ptr<EventListenerHookup> conn_mgr_hookup_;
   const AllStatus* allstatus_;
-
-  syncable::DirectoryManager* dirman_;
-  ServerConnectionManager* scm_;
 
   // Modifiable versions of kDefaultLongPollIntervalSeconds which can be
   // updated by the server.
@@ -295,22 +301,34 @@ public:
   // also takes previous failures into account.
   int syncer_max_interval_;
 
-  scoped_ptr<SyncerEventChannel> syncer_event_channel_;
-
   // This causes syncer to start syncing ASAP. If the rate of requests is too
   // high the request will be silently dropped.  mutex_ should be held when
   // this is called.
   void NudgeSyncImpl(int milliseconds_from_now, NudgeSource source);
 
   scoped_ptr<EventListenerHookup> talk_mediator_hookup_;
-  ClientCommandChannel* const command_channel_;
   scoped_ptr<EventListenerHookup> directory_manager_hookup_;
   scoped_ptr<EventListenerHookup> syncer_events_;
 
-  // Handles any tasks that will result in model changes (modifications of
-  // syncable::Entries). Pass this to the syncer created and managed by |this|.
-  // Only non-null in syncapi case.
-  scoped_ptr<ModelSafeWorker> model_safe_worker_;
+#if defined(OS_LINUX)
+  // On Linux, we need this information in order to query idle time.
+  scoped_ptr<IdleQueryLinux> idle_query_;
+#endif
+
+  scoped_ptr<sessions::SyncSessionContext> session_context_;
+
+  // Events from the Syncer's syncer_event_channel are first processed by the
+  // SyncerThread and then get relayed onto this channel for consumers.
+  // TODO(timsteele): Wow did this confused me. I had removed the channel from
+  // here thinking there was only one, and then realized this relay was
+  // happening. Is this strict event handling order needed?!
+  scoped_ptr<SyncerEventChannel> syncer_event_relay_channel_;
+
+  // Set whenever the server instructs us to stop sending it requests until
+  // a specified time, and reset for each call to SyncShare. (Note that the
+  // WaitInterval::THROTTLED contract is such that we don't call SyncShare at
+  // all until the "silenced until" embargo expires.)
+  base::TimeTicks silenced_until_;
 
   // Useful for unit tests
   bool disable_idle_detection_;

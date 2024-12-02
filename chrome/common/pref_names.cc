@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,22 +15,12 @@ const wchar_t kHomePageIsNewTabPage[] = L"homepage_is_newtabpage";
 // This is the URL of the page to load when opening new tabs.
 const wchar_t kHomePage[] = L"homepage";
 
-// This is the human-readable name of the current profile.
-const wchar_t kProfileName[] = L"profile.name";
-
-// This is the abbreviated human-readable name of the current profile
-const wchar_t kProfileNickname[] = L"profile.nickname";
-
-// This is a short, preferably human-readable ID for the current profile.
-// Its value should be unique within the current user data directory.
-const wchar_t kProfileID[] = L"profile.id";
-
 // Used to determine if the last session exited cleanly. Set to false when
 // first opened, and to true when closing. On startup if the value is false,
 // it means the profile didn't exit cleanly.
 const wchar_t kSessionExitedCleanly[] = L"profile.exited_cleanly";
 
-// This is one of three integer values:
+// An integer pref. Holds one of several values:
 // 0: (or empty) don't do anything special on startup.
 // 1: restore the last session.
 // 2: this was used to indicate a specific session should be restored. It is
@@ -60,7 +50,8 @@ const wchar_t kAcceptLanguages[] = L"intl.accept_languages";
 // stored in non-translatable part of the resource bundle.
 const wchar_t kStaticEncodings[] = L"intl.static_encodings";
 
-// The list of hostnames for which we whitelist popups (rather than blocking).
+// OBSOLETE.  The list of hostnames for which we whitelist popups (rather than
+// blocking).
 const wchar_t kPopupWhitelistedHosts[] = L"profile.popup_whitelisted_sites";
 
 // WebKit preferences.
@@ -113,9 +104,10 @@ const wchar_t kShowBookmarkBar[] = L"bookmark_bar.show_on_all_tabs";
 // passwords and fill in known passwords).
 const wchar_t kPasswordManagerEnabled[] = L"profile.password_manager_enabled";
 
-// Boolean that is true if the form autofill is on (will record values entered
-// in text inputs in forms and shows them in a popup when user type in a text
-// input with the same name later on).
+// OBSOLETE.  Boolean that is true if the form autofill is on (will record
+// values entered in text inputs in forms and shows them in a popup when user
+// type in a text input with the same name later on).  This has been superseded
+// by kAutoFillEnabled.
 const wchar_t kFormAutofillEnabled[] = L"profile.form_autofill_enabled";
 
 // Boolean that is true when SafeBrowsing is enabled.
@@ -124,7 +116,9 @@ const wchar_t kSafeBrowsingEnabled[] = L"safebrowsing.enabled";
 // Boolean that is true when Suggest support is enabled.
 const wchar_t kSearchSuggestEnabled[] = L"search.suggest_enabled";
 
-// Enum that specifies whether to enforce a third-party cookie blocking policy.
+// OBSOLETE.  Enum that specifies whether to enforce a third-party cookie
+// blocking policy.  This has been superseded by kDefaultContentSettings +
+// kBlockThirdPartyCookies.
 // 0 - allow all cookies.
 // 1 - block third-party cookies
 // 2 - block all cookies
@@ -151,6 +145,10 @@ const wchar_t kDefaultSearchProviderName[] = L"default_search_provider.name";
 // The id of the default search provider.
 const wchar_t kDefaultSearchProviderID[] = L"default_search_provider.id";
 
+// The prepopulate id of the default search provider.
+const wchar_t kDefaultSearchProviderPrepopulateID[] =
+    L"default_search_provider.prepopulate_id";
+
 // Boolean which specifies whether we should ask the user if we should download
 // a file (true) or just download it automatically.
 const wchar_t kPromptForDownload[] = L"download.prompt_for_download";
@@ -169,35 +167,54 @@ const wchar_t kDnsStartupPrefetchList[] = L"StartupDNSPrefetchList";
 // sub-resource hostnames (and expected latency benefits from pre-resolving such
 // sub-resource hostnames).
 // This list is adaptively grown and pruned.
-extern const wchar_t kDnsHostReferralList[] = L"HostReferralList";
+const wchar_t kDnsHostReferralList[] = L"HostReferralList";
 
-#if defined(OS_LINUX)
+// Is the cookie prompt expanded?
+const wchar_t kCookiePromptExpanded[] = L"cookieprompt.expanded";
+
+#if defined(USE_NSS)
 // Prefs for SSLConfigServicePref.  Currently, these are only present on
-// and used by Linux.
-extern const wchar_t kCertRevocationCheckingEnabled[] =
-    L"ssl.rev_checking.enabled";
-extern const wchar_t kSSL2Enabled[] = L"ssl.ssl2.enabled";
-extern const wchar_t kSSL3Enabled[] = L"ssl.ssl3.enabled";
-extern const wchar_t kTLS1Enabled[] = L"ssl.tls1.enabled";
+// and used by NSS-using OSes.
+const wchar_t kCertRevocationCheckingEnabled[] = L"ssl.rev_checking.enabled";
+const wchar_t kSSL2Enabled[] = L"ssl.ssl2.enabled";
+const wchar_t kSSL3Enabled[] = L"ssl.ssl3.enabled";
+const wchar_t kTLS1Enabled[] = L"ssl.tls1.enabled";
 #endif
 
 #if defined(OS_CHROMEOS)
 // A string pref set to the timezone.
-extern const wchar_t kTimeZone[] = L"settings.datetime.timezone";
+const wchar_t kTimeZone[] = L"settings.datetime.timezone";
 
 // A boolean pref set to true if TapToClick is being done in browser.
-extern const wchar_t kTapToClickEnabled[] =
-    L"settings.touchpad.enable_tap_to_click";
+const wchar_t kTapToClickEnabled[] = L"settings.touchpad.enable_tap_to_click";
 
 // A boolean pref set to true if VertEdgeScroll is being done in browser.
-extern const wchar_t kVertEdgeScrollEnabled[] =
+const wchar_t kVertEdgeScrollEnabled[] =
     L"settings.touchpad.enable_vert_edge_scroll";
 
 // A integer pref for the touchpad speed factor.
-extern const wchar_t kTouchpadSpeedFactor[] = L"settings.touchpad.speed_factor";
+const wchar_t kTouchpadSpeedFactor[] = L"settings.touchpad.speed_factor";
 
 // A integer pref for the touchpad sensitivity.
-extern const wchar_t kTouchpadSensitivity[] = L"settings.touchpad.sensitivity";
+const wchar_t kTouchpadSensitivity[] = L"settings.touchpad.sensitivity";
+
+// Boolean that is true when one IME status can be shared by all input contexts
+// in all Chrome processes.
+const wchar_t kLanguageUseGlobalEngine[] =
+    L"settings.language.use_global_engine";
+
+// A string pref (comma-separated list) set to the "next engine" hot-key lists.
+const wchar_t kLanguageHotkeyNextEngine[] =
+    L"settings.language.hotkey_next_engine";
+
+// A string pref (comma-separated list) set to the "trigger" hot-key lists.
+const wchar_t kLanguageHotkeyTrigger[] = L"settings.language.hotkey_trigger";
+
+// A string pref (comma-separated list) set to the preloaded (active) IME IDs.
+const wchar_t kLanguagePreloadEngines[] = L"settings.language.preload_engines";
+
+// A string pref which determines the keyboard layout for Hangul IME.
+const wchar_t kLanguageHangulKeyboard[] = L"settings.language.hangul_keyboard";
 #endif
 
 // The disabled messages in IPC logging.
@@ -228,7 +245,7 @@ const wchar_t kDeleteFormData[] = L"browser.clear_data.form_data";
 const wchar_t kDeleteTimePeriod[] = L"browser.clear_data.time_period";
 
 // Integer prefs giving the widths of the columns in the bookmark table. Two
-// configs are saved, one with the path column and one without.
+// configurations are saved, one with the path column and one without.
 const wchar_t kBookmarkTableNameWidth1[] = L"bookmark_table.name_width_1";
 const wchar_t kBookmarkTableURLWidth1[] = L"bookmark_table.url_width_1";
 const wchar_t kBookmarkTableNameWidth2[] = L"bookmark_table.name_width_2";
@@ -256,10 +273,11 @@ const wchar_t kPrintingPageHeaderRight[] = L"printing.page.header.right";
 const wchar_t kPrintingPageFooterLeft[] = L"printing.page.footer.left";
 const wchar_t kPrintingPageFooterCenter[] = L"printing.page.footer.center";
 const wchar_t kPrintingPageFooterRight[] = L"printing.page.footer.right";
-#if defined(OS_LINUX)
+#if defined(TOOLKIT_USES_GTK)
 // GTK specific preference on whether we should match the system GTK theme.
 const wchar_t kUsesSystemTheme[] = L"extensions.theme.use_system";
 #endif
+const wchar_t kCurrentThemePackFilename[] = L"extensions.theme.pack";
 const wchar_t kCurrentThemeID[] = L"extensions.theme.id";
 const wchar_t kCurrentThemeImages[] = L"extensions.theme.images";
 const wchar_t kCurrentThemeColors[] = L"extensions.theme.colors";
@@ -267,28 +285,129 @@ const wchar_t kCurrentThemeTints[] = L"extensions.theme.tints";
 const wchar_t kCurrentThemeDisplayProperties[] =
     L"extensions.theme.properties";
 
+// Boolean pref which persists whether the extensions_ui is in developer mode
+// (showing developer packing tools and extensions details)
+const wchar_t kExtensionsUIDeveloperMode[] = L"extensions.ui.developer_mode";
+
+// Integer pref that tracks the number of browser actions visible in the browser
+// actions toolbar.
+const wchar_t kExtensionToolbarSize[] = L"extensions.toolbarsize";
+
+// Pref containing the directory for internal plugins as written to the plugins
+// list (below).
+const wchar_t kPluginsLastInternalDirectory[] =
+    L"plugins.last_internal_directory";
+
+// List pref containing information (dictionaries) on plugins.
+const wchar_t kPluginsPluginsList[] = L"plugins.plugins_list";
+
 // Boolean that indicates whether we should check if we are the default browser
 // on start-up.
 const wchar_t kCheckDefaultBrowser[] = L"browser.check_default_browser";
+
+#if defined(OS_MACOSX)
+// Boolean that indicates whether the application should show the info bar
+// asking the user to set up automatic updates when Keystone promotion is
+// required.
+const wchar_t kShowUpdatePromotionInfoBar[] =
+    L"browser.show_update_promotion_info_bar";
+#endif
 
 // Boolean that is false if we should show window manager decorations.  If
 // true, we draw a custom chrome frame (thicker title bar and blue border).
 const wchar_t kUseCustomChromeFrame[] = L"browser.custom_chrome_frame";
 
-// Boolean that indicates whether the infobar explaining that search can be done
-// directly from the omnibox should be shown.
+// Boolean that indicates whether the infobar explaining that search can be
+// done directly from the omnibox should be shown.
 const wchar_t kShowOmniboxSearchHint[] = L"browser.show_omnibox_search_hint";
 
-// Integer that counts the number of times the theme promo has left to be
+// Integer that counts the number of times the promo on the NTP has left to be
 // shown; this decrements each time the NTP is shown for the first time
-// in a session.
-const wchar_t kNTPThemePromoRemaining[] = L"browser.ntp.theme_promo_remaining";
+// in a session. The message line can be closed separately from the promo
+// image, so we store two separate values for number of remaining views.
+const wchar_t kNTPPromoLineRemaining[] = L"browser.ntp.promo_line_remaining";
+const wchar_t kNTPPromoImageRemaining[] = L"browser.ntp.promo_image_remaining";
 
 // The list of origins which are allowed|denied to show desktop notifications.
 const wchar_t kDesktopNotificationAllowedOrigins[] =
     L"profile.notification_allowed_sites";
 const wchar_t kDesktopNotificationDeniedOrigins[] =
     L"profile.notification_denied_sites";
+
+// Dictionary of content settings applied to all hosts by default.
+const wchar_t kDefaultContentSettings[] = L"profile.default_content_settings";
+
+// OBSOLETE. Dictionary that maps hostnames to content related settings.
+// Default settings will be applied to hosts not in this pref.
+const wchar_t kPerHostContentSettings[] = L"profile.per_host_content_settings";
+
+// Version of the pattern format used to define content settings.
+const wchar_t kContentSettingsVersion[] =
+    L"profile.content_settings.pref_version";
+
+// Patterns for mapping hostnames to content related settings. Default settings
+// will be applied to hosts that don't match any of the patterns. Replaces
+// kPerHostContentSettings. The pattern format used is defined by
+// kContentSettingsVersion.
+const wchar_t kContentSettingsPatterns[] =
+    L"profile.content_settings.patterns";
+
+// Boolean that is true if we should unconditionally block third-party cookies,
+// regardless of other content settings.
+const wchar_t kBlockThirdPartyCookies[] = L"profile.block_third_party_cookies";
+
+// Boolean that is true when all locally stored site data (e.g. cookies, local
+// storage, etc..) should be deleted on exit.
+const wchar_t kClearSiteDataOnExit[] = L"profile.clear_site_data_on_exit";
+
+// Dictionary that maps hostnames to zoom levels.  Hosts not in this pref will
+// be displayed at the default zoom level.
+const wchar_t kPerHostZoomLevels[] = L"profile.per_host_zoom_levels";
+
+// Boolean that is true if the autofill infobar has been shown to the user.
+const wchar_t kAutoFillInfoBarShown[] = L"autofill.infobar_shown";
+
+// Boolean that is true if autofill is enabled and allowed to save profile data.
+const wchar_t kAutoFillEnabled[] = L"autofill.enabled";
+
+// Boolean that is true when auxiliary autofill profiles are enabled.
+// Currently applies to Address Book "me" card on Mac.  False on Win and Linux.
+const wchar_t kAutoFillAuxiliaryProfilesEnabled[] =
+    L"autofill.auxiliary_profiles_enabled";
+
+// Position and size of the autofill dialog.
+const wchar_t kAutoFillDialogPlacement[] = L"autofill.dialog_placement";
+
+// The label of the default AutoFill profile.
+const wchar_t kAutoFillDefaultProfile[] = L"autofill.default_profile";
+
+// The label of the default AutoFill credit card.
+const wchar_t kAutoFillDefaultCreditCard[] = L"autofill.default_creditcard";
+
+// Double that indicates positive (for matched forms) upload rate.
+const wchar_t kAutoFillPositiveUploadRate[] = L"autofill.positive_upload_rate";
+
+// Double that indicates negative (for not matched forms) upload rate.
+const wchar_t kAutoFillNegativeUploadRate[] = L"autofill.negative_upload_rate";
+
+// Dictionary that maps providers to lists of filter rules.
+const wchar_t kPrivacyFilterRules[] = L"profile.privacy_filter_rules";
+
+// Boolean that is true when the tabstrip is to be laid out vertically down the
+// side of the browser window.
+const wchar_t kUseVerticalTabs[] = L"tabs.use_vertical_tabs";
+
+// Boolean that is true when the translate feature is enabled.
+const wchar_t kEnableTranslate[] = L"translate.enabled";
+
+const wchar_t kPinnedTabs[] = L"pinned_tabs";
+
+// Integer containing the default Geolocation content setting.
+const wchar_t kGeolocationDefaultContentSetting[] =
+    L"geolocation.default_content_setting";
+
+// Dictionary that maps [frame, toplevel] to their Geolocation content setting.
+const wchar_t kGeolocationContentSettings[] = L"geolocation.content_settings";
 
 // *************** LOCAL STATE ***************
 // These are attached to the machine/installation
@@ -337,6 +456,11 @@ const wchar_t kStabilityExitedCleanly[] =
 const wchar_t kStabilityStatsVersion[] =
     L"user_experience_metrics.stability.stats_version";
 
+// Build time, in seconds since an epoch, which is used to assure that stability
+// metrics reported reflect stability of the same build.
+const wchar_t kStabilityStatsBuildTime[] =
+    L"user_experience_metrics.stability.stats_buildtime";
+
 // False if we received a session end and either we crashed during processing
 // the session end or ran out of time and windows terminated us.
 const wchar_t kStabilitySessionEndCompleted[] =
@@ -362,15 +486,9 @@ const wchar_t kStabilityPageLoadCount[] =
 const wchar_t kStabilityRendererCrashCount[] =
     L"user_experience_metrics.stability.renderer_crash_count";
 
-// Number of times a renderer started in the sandbox and successfully
-// used the sandbox desktop.
-const wchar_t kSecurityRendererOnSboxDesktop[] =
-    L"user_experience_metrics.security.renderer_on_sbox_desktop";
-
-// Number of times a renderer started in the sandbox and failed to
-// used the sandbox desktop.
-const wchar_t kSecurityRendererOnDefaultDesktop[] =
-    L"user_experience_metrics.security.renderer_on_default_desktop";
+// Number of times an extension renderer process crashed since the last report.
+const wchar_t kStabilityExtensionRendererCrashCount[] =
+    L"user_experience_metrics.stability.extension_renderer_crash_count";
 
 // Time when the app was last launched, in seconds since the epoch.
 const wchar_t kStabilityLaunchTimeSec[] =
@@ -381,11 +499,6 @@ const wchar_t kStabilityLaunchTimeSec[] =
 const wchar_t kStabilityLastTimestampSec[] =
     L"user_experience_metrics.stability.last_timestamp_sec";
 
-// Number of milliseconds that the main application process was up since
-// the last report.
-const wchar_t kStabilityUptimeSec[] =
-    L"user_experience_metrics.stability.uptime_sec";
-
 // This is the location of a list of dictionaries of plugin stability stats.
 const wchar_t kStabilityPluginStats[] =
     L"user_experience_metrics.stability.plugin_stats2";
@@ -394,6 +507,12 @@ const wchar_t kStabilityPluginStats[] =
 // report.
 const wchar_t kStabilityRendererHangCount[] =
     L"user_experience_metrics.stability.renderer_hang_count";
+
+// Total number of child process crashes (other than renderer / extension
+// renderer ones, and plugin children, which are counted separately) since the
+// last report.
+const wchar_t kStabilityChildProcessCrashCount[] =
+    L"user_experience_metrics.stability.child_process_crash_count";
 
 // Number of times the browser has been able to register crash reporting.
 const wchar_t kStabilityBreakpadRegistrationSuccess[] =
@@ -491,6 +610,11 @@ const wchar_t kSafeBrowsingWrappedKey[] = L"safe_browsing.wrapped_key";
 // last visited the options window.
 const wchar_t kOptionsWindowLastTabIndex[] = L"options_window.last_tab_index";
 
+// Integer that specifies the index of the tab the user was on when they
+// last visited the content settings window.
+const wchar_t kContentSettingsWindowLastTabIndex[] =
+    L"content_settings_window.last_tab_index";
+
 // The mere fact that this pref is registered signals that we should show the
 // First Run Search Information bubble when the first browser window appears.
 // This preference is only registered by the first-run procedure.
@@ -502,6 +626,13 @@ const wchar_t kShouldShowFirstRunBubble[] = L"show-first-run-bubble";
 // This preference is only registered by the first-run procedure.
 const wchar_t kShouldUseOEMFirstRunBubble[] = L"show-OEM-first-run-bubble";
 
+// The mere fact that this pref is registered signals that we should show the
+// minimal First Run omnibox information bubble when the first
+// browser window appears.
+// This preference is only registered by the first-run procedure.
+const wchar_t kShouldUseMinimalFirstRunBubble[] =
+    L"show-minimal-first-run-bubble";
+
 // Signal that we should show the welcome page when we launch Chrome.
 const wchar_t kShouldShowWelcomePage[] = L"show-welcome-page";
 
@@ -509,6 +640,10 @@ const wchar_t kShouldShowWelcomePage[] = L"show-welcome-page";
 // most cases, and use it to send traffic to the correct Google host or with the
 // correct Google domain/country code for whatever location the user is in.
 const wchar_t kLastKnownGoogleURL[] = L"browser.last_known_google_url";
+
+// String containing the last known intranet redirect URL, if any.  See
+// intranet_redirect_detector.h for more information.
+const wchar_t kLastKnownIntranetRedirectOrigin[] = L"";
 
 // Integer containing the system Country ID the first time we checked the
 // template URL prepopulate data.  This is used to avoid adding a whole bunch of
@@ -540,12 +675,16 @@ const wchar_t kNumFoldersInOtherBookmarkFolder[] =
 // Number of keywords.
 const wchar_t kNumKeywords[] = L"user_experience_metrics.num_keywords";
 
-// Whether Extensions or User Scripts are enabled.
+// Whether Extensions are enabled.
 const wchar_t kDisableExtensions[] = L"extensions.disabled";
-const wchar_t kEnableUserScripts[] = L"extensions.user_scripts_enabled";
 
 // Boolean which specifies whether the Extension Shelf is visible on all tabs.
 const wchar_t kShowExtensionShelf[] = L"extensions.shelf.show_on_all_tabs";
+
+// Integer boolean representing the width (in pixels) of the container for
+// browser actions.
+const wchar_t kBrowserActionContainerWidth[] =
+    L"extensions.browseractions.container.width";
 
 // Time of the last, and next scheduled, extensions auto-update checks.
 const wchar_t kLastExtensionsUpdateCheck[] =
@@ -577,8 +716,12 @@ const wchar_t kNTPTipsServer[] = L"ntp.tips_server";
 // 1 - Show the most visited sites in a grid
 // 2 - Show the most visited sites as a list
 // 4 - Show the recent section
-// 8 - Show recommendations
+// 8 - Show tips
+// 16 - show sync status
 const wchar_t kNTPShownSections[] = L"ntp.shown_sections";
+
+// This pref is used for migrating the prefs for the NTP
+const wchar_t kNTPPrefVersion[] = L"ntp.pref_version";
 
 // A boolean specifying whether dev tools window should be opened docked.
 const wchar_t kDevToolsOpenDocked[] = L"devtools.open_docked";
@@ -586,10 +729,32 @@ const wchar_t kDevToolsOpenDocked[] = L"devtools.open_docked";
 // Integer location of the split bar in the browser view.
 const wchar_t kDevToolsSplitLocation[] = L"devtools.split_location";
 
-// 64-bit integer serialization of the base::Time when the last sync occured.
+// 64-bit integer serialization of the base::Time when the last sync occurred.
 const wchar_t kSyncLastSyncedTime[] = L"sync.last_synced_time";
 
 // Boolean specifying whether the user finished setting up sync.
 const wchar_t kSyncHasSetupCompleted[] = L"sync.has_setup_completed";
+
+// Booleans specifying whether the user has selected to sync the following
+// datatypes.
+const wchar_t kSyncBookmarks[] = L"sync.bookmarks";
+const wchar_t kSyncPreferences[] = L"sync.preferences";
+const wchar_t kSyncAutofill[] = L"sync.autofill";
+const wchar_t kSyncThemes[] = L"sync.themes";
+const wchar_t kSyncTypedUrls[] = L"sync.typed_urls";
+
+// Whether sync auth was bootstrapped for Chrome OS.
+const wchar_t kSyncBootstrappedAuth[] = L"sync.bootstrapped_auth";
+
+// Create web application shortcut dialog preferences.
+const wchar_t kWebAppCreateOnDesktop[] = L"browser.web_app.create_on_desktop";
+const wchar_t kWebAppCreateInAppsMenu[] =
+    L"browser.web_app.create_in_apps_menu";
+const wchar_t kWebAppCreateInQuickLaunchBar[] =
+    L"browser.web_app.create_in_quick_launch_bar";
+
+// Dictionary that maps Geolocation network provider server URLs to
+// corresponding access token.
+const wchar_t kGeolocationAccessToken[] = L"geolocation.access_token";
 
 }  // namespace prefs

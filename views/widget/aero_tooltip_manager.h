@@ -40,11 +40,16 @@ class AeroTooltipManager : public TooltipManagerWin {
 
   class InitialTimer : public base::RefCounted<InitialTimer> {
    public:
-    InitialTimer(AeroTooltipManager* manager, int time);
+    explicit InitialTimer(AeroTooltipManager* manager);
+    void Start(int time);
     void Disown();
     void Execute();
 
    private:
+    friend class base::RefCounted<InitialTimer>;
+
+    ~InitialTimer() {}
+
     AeroTooltipManager* manager_;
   };
 

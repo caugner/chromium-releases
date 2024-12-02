@@ -8,74 +8,56 @@
 #include "base/scoped_nsobject.h"
 #import "chrome/browser/cocoa/bookmark_bubble_controller.h"
 #include "chrome/browser/cocoa/browser_test_helper.h"
+#include "chrome/browser/cocoa/browser_window_controller.h"
 #import "chrome/browser/cocoa/cocoa_test_helper.h"
+#import "chrome/browser/cocoa/info_bubble_window.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
-@interface BBDelegate : NSObject<BookmarkBubbleControllerDelegate> {
-  NSWindow* window_;  // weak
-  int edits_;
-  int dones_;
-}
-@property (readonly) int edits;
-@property (readonly) int dones;
-@property (readonly) NSWindow* window;
-@end
-
-@implementation BBDelegate
-
-@synthesize edits = edits_;
-@synthesize window = window_;
-@synthesize dones = dones_;
-
-- (NSPoint)topLeftForBubble {
-  return NSMakePoint(10, 300);
-}
-
-- (void)editBookmarkNode:(const BookmarkNode*)node {
-  edits_++;
-}
-
-- (void)doneWithBubbleController:(BookmarkBubbleController*)controller {
-  dones_++;
-}
-
-- (void)clear {
-  edits_ = 0;
-  dones_ = 0;
-}
-
-@end
-
 namespace {
 
-class BookmarkBubbleControllerTest : public PlatformTest {
+class BookmarkBubbleControllerTest : public CocoaTest {
  public:
-  CocoaTestHelper cocoa_helper_;  // Inits Cocoa, creates window, etc...
+  static int edits_;
   BrowserTestHelper helper_;
-  scoped_nsobject<BBDelegate> delegate_;
-  scoped_nsobject<BookmarkBubbleController> controller_;
+  BookmarkBubbleController* controller_;
 
-  BookmarkBubbleControllerTest() {
-    delegate_.reset([[BBDelegate alloc] init]);
+  BookmarkBubbleControllerTest() : controller_(nil) {
+    edits_ = 0;
+  }
+
+  virtual void TearDown() {
+    // TODO(shess): Figure out why CocoaTest::TearDown() needs 3
+    // passes through the event loop to fully close out these windows.
+    [controller_ close];
+    CocoaTest::TearDown();
   }
 
   // Returns a controller but ownership not transferred.
   // Only one of these will be valid at a time.
   BookmarkBubbleController* ControllerForNode(const BookmarkNode* node) {
-    controller_.reset([[BookmarkBubbleController alloc]
-                        initWithDelegate:delegate_.get()
-                            parentWindow:cocoa_helper_.window()
-                        topLeftForBubble:[delegate_ topLeftForBubble]
-                                   model:helper_.profile()->GetBookmarkModel()
-                                    node:node
-                       alreadyBookmarked:YES]);
-    [controller_ view];  // force nib load
-    return controller_.get();
+    if (controller_ && !IsWindowClosing()) {
+      [controller_ close];
+      controller_ = nil;
+    }
+    controller_ = [[BookmarkBubbleController alloc]
+                      initWithParentWindow:test_window()
+                                     model:helper_.profile()->GetBookmarkModel()
+                                      node:node
+                         alreadyBookmarked:YES];
+    EXPECT_TRUE([controller_ window]);
+    // The window must be gone or we'll fail a unit test with windows left open.
+    [static_cast<InfoBubbleWindow*>([controller_ window]) setDelayOnClose:NO];
+    [controller_ showWindow:nil];
+    return controller_;
   }
 
   BookmarkModel* GetBookmarkModel() {
     return helper_.profile()->GetBookmarkModel();
+  }
+
+  bool IsWindowClosing() {
+    return [static_cast<InfoBubbleWindow*>([controller_ window]) isClosing];
   }
 };
 
@@ -89,42 +71,104 @@ TEST_F(BookmarkBubbleControllerTest, TestBubbleWindow) {
                                            GURL("http://www.google.com"));
   BookmarkBubbleController* controller = ControllerForNode(node);
   EXPECT_TRUE(controller);
-  NSWindow* window = [controller createBubbleWindow];
+  NSWindow* window = [controller window];
   EXPECT_TRUE(window);
-  EXPECT_TRUE(NSContainsRect([cocoa_helper_.window() frame],
+  EXPECT_TRUE(NSContainsRect([test_window() frame],
                              [window frame]));
 }
+
+// Test that we can handle closing the parent window
+TEST_F(BookmarkBubbleControllerTest, TestClosingParentWindow) {
+  BookmarkModel* model = GetBookmarkModel();
+  const BookmarkNode* node = model->AddURL(model->GetBookmarkBarNode(),
+                                           0,
+                                           L"Bookie markie title",
+                                           GURL("http://www.google.com"));
+  BookmarkBubbleController* controller = ControllerForNode(node);
+  EXPECT_TRUE(controller);
+  NSWindow* window = [controller window];
+  EXPECT_TRUE(window);
+  base::ScopedNSAutoreleasePool pool;
+  [test_window() performClose:NSApp];
+}
+
 
 // Confirm population of folder list
 TEST_F(BookmarkBubbleControllerTest, TestFillInFolder) {
   // Create some folders, including a nested folder
   BookmarkModel* model = GetBookmarkModel();
-  const BookmarkNode* node1 = model->AddGroup(model->GetBookmarkBarNode(),
-                                              0, L"one");
-  const BookmarkNode* node2 = model->AddGroup(model->GetBookmarkBarNode(),
-                                              1, L"two");
-  const BookmarkNode* node3 = model->AddGroup(model->GetBookmarkBarNode(),
-                                              2, L"three");
-  const BookmarkNode* node4 = model->AddGroup(node2,
-                                              0, L"sub");
-  model->AddURL(node1, 0, L"title1", GURL("http://www.google.com"));
-  model->AddURL(node3, 0, L"title2", GURL("http://www.google.com"));
-  model->AddURL(node4, 0, L"title3", GURL("http://www.google.com/reader"));
+  EXPECT_TRUE(model);
+  const BookmarkNode* bookmarkBarNode = model->GetBookmarkBarNode();
+  EXPECT_TRUE(bookmarkBarNode);
+  const BookmarkNode* node1 = model->AddGroup(bookmarkBarNode, 0, L"one");
+  EXPECT_TRUE(node1);
+  const BookmarkNode* node2 = model->AddGroup(bookmarkBarNode, 1, L"two");
+  EXPECT_TRUE(node2);
+  const BookmarkNode* node3 = model->AddGroup(bookmarkBarNode, 2, L"three");
+  EXPECT_TRUE(node3);
+  const BookmarkNode* node4 = model->AddGroup(node2, 0, L"sub");
+  EXPECT_TRUE(node4);
+  const BookmarkNode* node5 =
+      model->AddURL(node1, 0, L"title1", GURL("http://www.google.com"));
+  EXPECT_TRUE(node5);
+  const BookmarkNode* node6 =
+      model->AddURL(node3, 0, L"title2", GURL("http://www.google.com"));
+  EXPECT_TRUE(node6);
+  const BookmarkNode* node7 =
+      model->AddURL(node4, 0, L"title3", GURL("http://www.google.com/reader"));
+  EXPECT_TRUE(node7);
 
   BookmarkBubbleController* controller = ControllerForNode(node4);
   EXPECT_TRUE(controller);
 
-  NSArray* items = [[controller folderComboBox] objectValues];
-  EXPECT_TRUE([items containsObject:@"one"]);
-  EXPECT_TRUE([items containsObject:@"two"]);
-  EXPECT_TRUE([items containsObject:@"three"]);
-  EXPECT_TRUE([items containsObject:@"sub"]);
-  EXPECT_FALSE([items containsObject:@"title1"]);
-  EXPECT_FALSE([items containsObject:@"title2"]);
+  NSArray* titles =
+      [[[controller folderPopUpButton] itemArray] valueForKey:@"title"];
+  EXPECT_TRUE([titles containsObject:@"one"]);
+  EXPECT_TRUE([titles containsObject:@"two"]);
+  EXPECT_TRUE([titles containsObject:@"three"]);
+  EXPECT_TRUE([titles containsObject:@"sub"]);
+  EXPECT_FALSE([titles containsObject:@"title1"]);
+  EXPECT_FALSE([titles containsObject:@"title2"]);
 }
 
+// Confirm ability to handle folders with blank name.
+TEST_F(BookmarkBubbleControllerTest, TestFolderWithBlankName) {
+  // Create some folders, including a nested folder
+  BookmarkModel* model = GetBookmarkModel();
+  EXPECT_TRUE(model);
+  const BookmarkNode* bookmarkBarNode = model->GetBookmarkBarNode();
+  EXPECT_TRUE(bookmarkBarNode);
+  const BookmarkNode* node1 = model->AddGroup(bookmarkBarNode, 0, L"one");
+  EXPECT_TRUE(node1);
+  const BookmarkNode* node2 = model->AddGroup(bookmarkBarNode, 1, L"");
+  EXPECT_TRUE(node2);
+  const BookmarkNode* node3 = model->AddGroup(bookmarkBarNode, 2, L"three");
+  EXPECT_TRUE(node3);
+  const BookmarkNode* node2_1 =
+      model->AddURL(node2, 0, L"title1", GURL("http://www.google.com"));
+  EXPECT_TRUE(node2_1);
+
+  BookmarkBubbleController* controller = ControllerForNode(node1);
+  EXPECT_TRUE(controller);
+
+  // One of the items should be blank and its node should be node2.
+  NSArray* items = [[controller folderPopUpButton] itemArray];
+  EXPECT_GT([items count], 4U);
+  BOOL blankFolderFound = NO;
+  for (NSMenuItem* item in [[controller folderPopUpButton] itemArray]) {
+    if ([[item title] length] == 0 &&
+        static_cast<const BookmarkNode*>([[item representedObject]
+                                          pointerValue]) == node2) {
+      blankFolderFound = YES;
+      break;
+    }
+  }
+  EXPECT_TRUE(blankFolderFound);
+}
+
+
 // Click on edit; bubble gets closed.
-TEST_F(BookmarkBubbleControllerTest, TestSimpleActions) {
+TEST_F(BookmarkBubbleControllerTest, TestEdit) {
   BookmarkModel* model = GetBookmarkModel();
   const BookmarkNode* node = model->AddURL(model->GetBookmarkBarNode(),
                                            0,
@@ -133,46 +177,109 @@ TEST_F(BookmarkBubbleControllerTest, TestSimpleActions) {
   BookmarkBubbleController* controller = ControllerForNode(node);
   EXPECT_TRUE(controller);
 
-  EXPECT_EQ([delegate_ edits], 0);
-  EXPECT_EQ([delegate_ dones], 0);
-  EXPECT_FALSE([controller windowHasBeenClosed]);
+  EXPECT_EQ(edits_, 0);
+  EXPECT_FALSE(IsWindowClosing());
   [controller edit:controller];
-  EXPECT_EQ([delegate_ edits], 1);
-  EXPECT_EQ([delegate_ dones], 1);
-  EXPECT_TRUE([controller windowHasBeenClosed]);
+  EXPECT_EQ(edits_, 1);
+  EXPECT_TRUE(IsWindowClosing());
+}
 
-  [delegate_ clear];
-  EXPECT_EQ([delegate_ edits], 0);
-  EXPECT_EQ([delegate_ dones], 0);
+// CallClose; bubble gets closed.
+TEST_F(BookmarkBubbleControllerTest, TestClose) {
+    BookmarkModel* model = GetBookmarkModel();
+    const BookmarkNode* node = model->AddURL(model->GetBookmarkBarNode(),
+                                             0,
+                                             L"Bookie markie title",
+                                             GURL("http://www.google.com"));
+  EXPECT_EQ(edits_, 0);
 
-  controller = ControllerForNode(node);
+  BookmarkBubbleController* controller = ControllerForNode(node);
   EXPECT_TRUE(controller);
-  EXPECT_FALSE([controller windowHasBeenClosed]);
-  [controller close:controller];
-  EXPECT_EQ([delegate_ edits], 0);
-  EXPECT_EQ([delegate_ dones], 1);
-  EXPECT_TRUE([controller windowHasBeenClosed]);
+  EXPECT_FALSE(IsWindowClosing());
+  [controller ok:controller];
+  EXPECT_EQ(edits_, 0);
+  EXPECT_TRUE(IsWindowClosing());
 }
 
 // User changes title and parent folder in the UI
 TEST_F(BookmarkBubbleControllerTest, TestUserEdit) {
   BookmarkModel* model = GetBookmarkModel();
-  const BookmarkNode* node = model->AddURL(model->GetBookmarkBarNode(),
+  EXPECT_TRUE(model);
+  const BookmarkNode* bookmarkBarNode = model->GetBookmarkBarNode();
+  EXPECT_TRUE(bookmarkBarNode);
+  const BookmarkNode* node = model->AddURL(bookmarkBarNode,
                                            0,
                                            L"short-title",
                                            GURL("http://www.google.com"));
-  model->AddGroup(model->GetBookmarkBarNode(), 0, L"grandma");
-  model->AddGroup(model->GetBookmarkBarNode(), 0, L"grandpa");
+  const BookmarkNode* grandma = model->AddGroup(bookmarkBarNode, 0, L"grandma");
+  EXPECT_TRUE(grandma);
+  const BookmarkNode* grandpa = model->AddGroup(bookmarkBarNode, 0, L"grandpa");
+  EXPECT_TRUE(grandpa);
+
   BookmarkBubbleController* controller = ControllerForNode(node);
   EXPECT_TRUE(controller);
 
   // simulate a user edit
-  [controller setTitle:@"oops" parentFolder:@"grandma"];
+  [controller setTitle:@"oops" parentFolder:grandma];
   [controller edit:controller];
 
   // Make sure bookmark has changed
   EXPECT_EQ(node->GetTitle(), L"oops");
   EXPECT_EQ(node->GetParent()->GetTitle(), L"grandma");
+}
+
+// Confirm happiness with parent nodes that have the same name.
+TEST_F(BookmarkBubbleControllerTest, TestNewParentSameName) {
+  BookmarkModel* model = GetBookmarkModel();
+  EXPECT_TRUE(model);
+  const BookmarkNode* bookmarkBarNode = model->GetBookmarkBarNode();
+  EXPECT_TRUE(bookmarkBarNode);
+  for (int i=0; i<2; i++) {
+    const BookmarkNode* node = model->AddURL(bookmarkBarNode,
+                                             0,
+                                             L"short-title",
+                                             GURL("http://www.google.com"));
+    EXPECT_TRUE(node);
+    const BookmarkNode* group = model->AddGroup(bookmarkBarNode, 0, L"NAME");
+    EXPECT_TRUE(group);
+    group = model->AddGroup(bookmarkBarNode, 0, L"NAME");
+    EXPECT_TRUE(group);
+    group = model->AddGroup(bookmarkBarNode, 0, L"NAME");
+    EXPECT_TRUE(group);
+    BookmarkBubbleController* controller = ControllerForNode(node);
+    EXPECT_TRUE(controller);
+
+    // simulate a user edit
+    [controller setParentFolderSelection:bookmarkBarNode->GetChild(i)];
+    [controller edit:controller];
+
+    // Make sure bookmark has changed, and that the parent is what we
+    // expect.  This proves nobody did searching based on name.
+    EXPECT_EQ(node->GetParent(), bookmarkBarNode->GetChild(i));
+  }
+}
+
+// Confirm happiness with nodes with the same Name
+TEST_F(BookmarkBubbleControllerTest, TestDuplicateNodeNames) {
+  BookmarkModel* model = GetBookmarkModel();
+  const BookmarkNode* bookmarkBarNode = model->GetBookmarkBarNode();
+  EXPECT_TRUE(bookmarkBarNode);
+  const BookmarkNode* node1 = model->AddGroup(bookmarkBarNode, 0, L"NAME");
+  EXPECT_TRUE(node1);
+  const BookmarkNode* node2 = model->AddGroup(bookmarkBarNode, 0, L"NAME");
+  EXPECT_TRUE(node2);
+  BookmarkBubbleController* controller = ControllerForNode(bookmarkBarNode);
+  EXPECT_TRUE(controller);
+
+  NSPopUpButton* button = [controller folderPopUpButton];
+  [controller setParentFolderSelection:node1];
+  NSMenuItem* item = [button selectedItem];
+  id itemObject = [item representedObject];
+  EXPECT_TRUE([itemObject isEqual:[NSValue valueWithPointer:node1]]);
+  [controller setParentFolderSelection:node2];
+  item = [button selectedItem];
+  itemObject = [item representedObject];
+  EXPECT_TRUE([itemObject isEqual:[NSValue valueWithPointer:node2]]);
 }
 
 // Click the "remove" button
@@ -189,12 +296,11 @@ TEST_F(BookmarkBubbleControllerTest, TestRemove) {
 
   [controller remove:controller];
   EXPECT_FALSE(model->IsBookmarked(gurl));
-  EXPECT_TRUE([controller windowHasBeenClosed]);
-  EXPECT_EQ([delegate_ dones], 1);
+  EXPECT_TRUE(IsWindowClosing());
 }
 
 // Confirm picking "choose another folder" caused edit: to be called.
-TEST_F(BookmarkBubbleControllerTest, ComboSelectionChanged) {
+TEST_F(BookmarkBubbleControllerTest, PopUpSelectionChanged) {
   BookmarkModel* model = GetBookmarkModel();
   GURL gurl("http://www.google.com");
   const BookmarkNode* node = model->AddURL(model->GetBookmarkBarNode(),
@@ -203,11 +309,93 @@ TEST_F(BookmarkBubbleControllerTest, ComboSelectionChanged) {
   BookmarkBubbleController* controller = ControllerForNode(node);
   EXPECT_TRUE(controller);
 
-  NSString* chooseAnotherFolder = [controller chooseAnotherFolderString];
-  EXPECT_EQ([delegate_ edits], 0);
-  [controller setTitle:@"DOH!" parentFolder:chooseAnotherFolder];
-  EXPECT_EQ([delegate_ edits], 1);
+  NSPopUpButton* button = [controller folderPopUpButton];
+  [button selectItemWithTitle:[[controller class] chooseAnotherFolderString]];
+  EXPECT_EQ(edits_, 0);
+  [button sendAction:[button action] to:[button target]];
+  EXPECT_EQ(edits_, 1);
 }
 
+// Create a controller that simulates the bookmark just now being created by
+// the user clicking the star, then sending the "cancel" command to represent
+// them pressing escape. The bookmark should not be there.
+TEST_F(BookmarkBubbleControllerTest, EscapeRemovesNewBookmark) {
+  BookmarkModel* model = GetBookmarkModel();
+  GURL gurl("http://www.google.com");
+  const BookmarkNode* node = model->AddURL(model->GetBookmarkBarNode(),
+                                           0,
+                                           L"Bookie markie title",
+                                           gurl);
+  BookmarkBubbleController* controller =
+      [[BookmarkBubbleController alloc]
+          initWithParentWindow:test_window()
+                         model:helper_.profile()->GetBookmarkModel()
+                          node:node
+             alreadyBookmarked:NO];  // The last param is the key difference.
+  EXPECT_TRUE([controller window]);
+  // Calls release on controller.
+  [controller cancel:nil];
+  EXPECT_FALSE(model->IsBookmarked(gurl));
+}
+
+// Create a controller where the bookmark already existed prior to clicking
+// the star and test that sending a cancel command doesn't change the state
+// of the bookmark.
+TEST_F(BookmarkBubbleControllerTest, EscapeDoesntTouchExistingBookmark) {
+  BookmarkModel* model = GetBookmarkModel();
+  GURL gurl("http://www.google.com");
+  const BookmarkNode* node = model->AddURL(model->GetBookmarkBarNode(),
+                                           0,
+                                           L"Bookie markie title",
+                                           gurl);
+  BookmarkBubbleController* controller = ControllerForNode(node);
+  EXPECT_TRUE(controller);
+
+  [(id)controller cancel:nil];
+  EXPECT_TRUE(model->IsBookmarked(gurl));
+}
+
+// Confirm indentation of items in pop-up menu
+TEST_F(BookmarkBubbleControllerTest, TestMenuIndentation) {
+  // Create some folders, including a nested folder
+  BookmarkModel* model = GetBookmarkModel();
+  EXPECT_TRUE(model);
+  const BookmarkNode* bookmarkBarNode = model->GetBookmarkBarNode();
+  EXPECT_TRUE(bookmarkBarNode);
+  const BookmarkNode* node1 = model->AddGroup(bookmarkBarNode, 0, L"one");
+  EXPECT_TRUE(node1);
+  const BookmarkNode* node2 = model->AddGroup(bookmarkBarNode, 1, L"two");
+  EXPECT_TRUE(node2);
+  const BookmarkNode* node2_1 = model->AddGroup(node2, 0, L"two dot one");
+  EXPECT_TRUE(node2_1);
+  const BookmarkNode* node3 = model->AddGroup(bookmarkBarNode, 2, L"three");
+  EXPECT_TRUE(node3);
+
+  BookmarkBubbleController* controller = ControllerForNode(node1);
+  EXPECT_TRUE(controller);
+
+  // Compare the menu item indents against expectations.
+  static const int kExpectedIndent[] = {0, 1, 1, 2, 1, 0};
+  NSArray* items = [[controller folderPopUpButton] itemArray];
+  ASSERT_GE([items count], 6U);
+  for(int itemNo = 0; itemNo < 6; itemNo++) {
+    NSMenuItem* item = [items objectAtIndex:itemNo];
+    EXPECT_EQ(kExpectedIndent[itemNo], [item indentationLevel])
+        << "Unexpected indent for menu item #" << itemNo;
+  }
+}
 
 }  // namespace
+
+@implementation NSApplication (BookmarkBubbleUnitTest)
+// Add handler for the editBookmarkNode: action to NSApp for testing purposes.
+// Normally this would be sent up the responder tree correctly, but since
+// tests run in the background, key window and main window are never set on
+// NSApplication. Adding it to NSApplication directly removes the need for
+// worrying about what the current window with focus is.
+- (void)editBookmarkNode:(id)sender {
+  EXPECT_TRUE([sender respondsToSelector:@selector(node)]);
+  BookmarkBubbleControllerTest::edits_++;
+}
+
+@end

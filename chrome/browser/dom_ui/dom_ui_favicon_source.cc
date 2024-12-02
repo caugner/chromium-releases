@@ -5,16 +5,18 @@
 #include "chrome/browser/dom_ui/dom_ui_favicon_source.h"
 
 #include "app/resource_bundle.h"
+#include "base/callback.h"
 #include "chrome/browser/profile.h"
 #include "chrome/common/url_constants.h"
 #include "grit/app_resources.h"
 
 DOMUIFavIconSource::DOMUIFavIconSource(Profile* profile)
-    : DataSource(chrome::kChromeUIFavIconPath, MessageLoop::current()),
+    : DataSource(chrome::kChromeUIFavIconHost, MessageLoop::current()),
       profile_(profile) {
 }
 
 void DOMUIFavIconSource::StartDataRequest(const std::string& path,
+                                          bool is_off_the_record,
                                           int request_id) {
   FaviconService* favicon_service =
       profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
@@ -41,7 +43,7 @@ void DOMUIFavIconSource::StartDataRequest(const std::string& path,
 void DOMUIFavIconSource::OnFavIconDataAvailable(
     FaviconService::Handle request_handle,
     bool know_favicon,
-    scoped_refptr<RefCountedBytes> data,
+    scoped_refptr<RefCountedMemory> data,
     bool expired,
     GURL icon_url) {
   FaviconService* favicon_service =
@@ -49,13 +51,13 @@ void DOMUIFavIconSource::OnFavIconDataAvailable(
   int request_id = cancelable_consumer_.GetClientData(favicon_service,
                                                       request_handle);
 
-  if (know_favicon && data.get() && !data->data.empty()) {
+  if (know_favicon && data.get() && data->size()) {
     // Forward the data along to the networking system.
     SendResponse(request_id, data);
   } else {
     if (!default_favicon_.get()) {
       default_favicon_ =
-          ResourceBundle::GetSharedInstance().LoadImageResourceBytes(
+          ResourceBundle::GetSharedInstance().LoadDataResourceBytes(
               IDR_DEFAULT_FAVICON);
     }
 

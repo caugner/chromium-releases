@@ -14,7 +14,6 @@
 #include "base/debug_on_start.h"
 #include "base/debug_util.h"
 #include "base/file_util.h"
-#include "base/gfx/size.h"
 #include "base/logging.h"
 #include "base/mac_util.h"
 #include "base/memory_debug.h"
@@ -23,13 +22,14 @@
 #include "base/stats_table.h"
 #include "base/string16.h"
 #include "base/string_piece.h"
-#include "base/string_util.h"
+#include "base/utf_string_conversions.h"
+#include "gfx/size.h"
 #include "grit/webkit_resources.h"
 #include "net/base/mime_util.h"
 #include "skia/ext/bitmap_platform_device.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/api/public/WebFrame.h"
-#include "webkit/api/public/WebView.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/glue/plugins/plugin_list.h"
@@ -37,6 +37,7 @@
 #include "webkit/tools/test_shell/resource.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
+#include "webkit/tools/test_shell/test_webview_delegate.h"
 
 #include "third_party/skia/include/core/SkBitmap.h"
 
@@ -93,10 +94,29 @@ FilePath GetResourcesFilePath() {
 
 // Receives notification that the window is closing so that it can start the
 // tear-down process. Is responsible for deleting itself when done.
-@interface WindowCloseDelegate : NSObject
+@interface WindowDelegate : NSObject {
+ @private
+  TestShellWebView* m_webView;
+}
+- (id)initWithWebView:(TestShellWebView*)view;
 @end
 
-@implementation WindowCloseDelegate
+@implementation WindowDelegate
+
+- (id)initWithWebView:(TestShellWebView*)view {
+  if ((self = [super init])) {
+    m_webView = view;
+  }
+  return self;
+}
+
+- (void)windowDidBecomeKey:(NSNotification*)notification {
+  [m_webView setIsActive:YES];
+}
+
+- (void)windowDidResignKey:(NSNotification*)notification {
+  [m_webView setIsActive:NO];
+}
 
 // Called when the window is about to close. Perform the self-destruction
 // sequence by getting rid of the shell and removing it and the window from
@@ -105,6 +125,8 @@ FilePath GetResourcesFilePath() {
 // before we go deleting objects. By returning YES, we allow the window to be
 // removed from the screen.
 - (BOOL)windowShouldClose:(id)window {
+  m_webView = nil;
+
   // Try to make the window go away, but it may not when running layout
   // tests due to the quirkyness of autorelease pools and having no main loop.
   [window autorelease];
@@ -132,6 +154,10 @@ FilePath GetResourcesFilePath() {
 // Mac-specific stuff to do when the dtor is called. Nothing to do in our
 // case.
 void TestShell::PlatformCleanUp() {
+}
+
+void TestShell::EnableUIControl(UIControl control, bool is_enabled) {
+  // TODO(darin): Implement me.
 }
 
 // static
@@ -248,10 +274,6 @@ bool TestShell::Initialize(const GURL& starting_url) {
   // Add to our map
   window_map_.Get()[m_mainWnd] = this;
 
-  // Create a window delegate to watch for when it's asked to go away. It will
-  // clean itself up so we don't need to hold a reference.
-  [m_mainWnd setDelegate:[[WindowCloseDelegate alloc] init]];
-
   // Rely on the window delegate to clean us up rather than immediately
   // releasing when the window gets closed. We use the delegate to do
   // everything from the autorelease pool so the shell isn't on the stack
@@ -268,6 +290,10 @@ bool TestShell::Initialize(const GURL& starting_url) {
   TestShellWebView* web_view =
       static_cast<TestShellWebView*>(m_webViewHost->view_handle());
   [web_view setShell:this];
+
+  // Create a window delegate to watch for when it's asked to go away. It will
+  // clean itself up so we don't need to hold a reference.
+  [m_mainWnd setDelegate:[[WindowDelegate alloc] initWithWebView:web_view]];
 
   // create buttons
   NSRect button_rect = [[m_mainWnd contentView] bounds];
@@ -426,12 +452,15 @@ void TestShell::WaitTestFinished() {
 }
 
 void TestShell::InteractiveSetFocus(WebWidgetHost* host, bool enable) {
-#if 0
-  if (enable)
-    ::SetFocus(host->view_handle());
-  else if (::GetFocus() == host->view_handle())
-    ::SetFocus(NULL);
-#endif
+  if (enable) {
+    [[host->view_handle() window] makeKeyAndOrderFront:nil];
+  } else {
+    // There is no way to resign key window status in Cocoa.  Fake it by
+    // ordering the window out (transferring key status to another window) and
+    // then ordering the window back in, but without making it key.
+    [[host->view_handle() window] orderOut:nil];
+    [[host->view_handle() window] orderFront:nil];
+  }
 }
 
 // static
@@ -588,9 +617,9 @@ std::string TestShell::RewriteLocalUrl(const std::string& url) {
   std::string new_url(url);
   if (url.compare(0, kPrefixLen, kPrefix, kPrefixLen) == 0) {
     FilePath replace_path;
-    PathService::Get(base::DIR_EXE, &replace_path);
-    replace_path = replace_path.DirName().DirName().Append(
-        "webkit/data/layout_tests/LayoutTests/");
+    PathService::Get(base::DIR_SOURCE_ROOT, &replace_path);
+    replace_path = replace_path.Append(
+        "third_party/WebKit/LayoutTests/");
     new_url = std::string("file://") + replace_path.value() +
         url.substr(kPrefixLen);
   }
@@ -611,7 +640,7 @@ void TestShell::ShowStartupDebuggingDialog() {
 
 base::StringPiece TestShell::NetResourceProvider(int key) {
   base::StringPiece res;
-  g_resource_data_pack->Get(key, &res);
+  g_resource_data_pack->GetStringPiece(key, &res);
   return res;
 }
 
@@ -621,7 +650,7 @@ namespace webkit_glue {
 
 string16 GetLocalizedString(int message_id) {
   base::StringPiece res;
-  if (!g_resource_data_pack->Get(message_id, &res)) {
+  if (!g_resource_data_pack->GetStringPiece(message_id, &res)) {
     LOG(FATAL) << "failed to load webkit string with id " << message_id;
   }
 

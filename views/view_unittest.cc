@@ -1,21 +1,22 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <map>
 
 #include "app/clipboard/clipboard.h"
-#include "app/gfx/canvas.h"
-#include "app/gfx/path.h"
 #include "base/keyboard_codes.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
+#include "gfx/canvas.h"
+#include "gfx/path.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "views/background.h"
 #include "views/controls/button/checkbox.h"
 #if defined(OS_WIN)
 #include "views/controls/button/native_button_win.h"
 #endif
+#include "views/controls/native/native_view_host.h"
 #include "views/controls/scroll_view.h"
 #include "views/controls/textfield/textfield.h"
 #include "views/event.h"
@@ -59,6 +60,9 @@ class ViewTest : public testing::Test {
 #endif
   }
 
+  void RunPendingMessages() {
+    message_loop_.RunAllPending();
+  }
  private:
   MessageLoopForUI message_loop_;
 };
@@ -121,7 +125,7 @@ class EmptyWindow : public CWindowImpl<EmptyWindow,
  private:
   bool empty_paint_;
 
-  DISALLOW_EVIL_CONSTRUCTORS(EmptyWindow);
+  DISALLOW_COPY_AND_ASSIGN(EmptyWindow);
 };
 */
 
@@ -222,7 +226,7 @@ void TestView::ViewHierarchyChanged(bool is_add, View *parent, View *child) {
   child_ = child;
 }
 
-}
+}  // namespace
 
 TEST_F(ViewTest, AddRemoveNotifications) {
   TestView* v1 = new TestView();
@@ -316,7 +320,7 @@ TEST_F(ViewTest, MouseEvent) {
   v1->SetBounds(0, 0, 300, 300);
 
   TestView* v2 = new TestView();
-  v2->SetBounds (100, 100, 100, 100);
+  v2->SetBounds(100, 100, 100, 100);
 
   scoped_ptr<Widget> window(CreateWidget());
 #if defined(OS_WIN)
@@ -425,7 +429,7 @@ TEST_F(ViewTest, DISABLED_Painting) {
   v2->Reset();
   v3->Reset();
   v4->Reset();
-  v3->SchedulePaint(10, 10, 10, 10);
+  v3->SchedulePaint(gfx::Rect(10, 10, 10, 10), false);
   PaintRootView(root, empty_paint);
 
   SkRect tmp_rect;
@@ -936,7 +940,7 @@ class TestViewWithControls : public View {
 
 class SimpleWindowDelegate : public WindowDelegate {
  public:
-  SimpleWindowDelegate(View* contents) : contents_(contents) {  }
+  explicit SimpleWindowDelegate(View* contents) : contents_(contents) {  }
 
   virtual void DeleteDelegate() { delete this; }
 
@@ -1207,3 +1211,138 @@ TEST_F(ViewTest, ChangeVisibility) {
   native->SetVisible(true);
 }
 */
+
+////////////////////////////////////////////////////////////////////////////////
+// Native view hierachy
+////////////////////////////////////////////////////////////////////////////////
+class TestNativeViewHierarchy : public views::View {
+ public:
+  TestNativeViewHierarchy() {
+  }
+
+  virtual void NativeViewHierarchyChanged(bool attached,
+                                          gfx::NativeView native_view,
+                                          RootView* root_view) {
+    NotificationInfo info;
+    info.attached = attached;
+    info.native_view = native_view;
+    info.root_view = root_view;
+    notifications_.push_back(info);
+  };
+  struct NotificationInfo {
+    bool attached;
+    gfx::NativeView native_view;
+    RootView* root_view;
+  };
+  static const size_t kTotalViews = 2;
+  std::vector<NotificationInfo> notifications_;
+};
+
+class TestChangeNativeViewHierarchy {
+ public:
+  explicit TestChangeNativeViewHierarchy(ViewTest *view_test) {
+    view_test_ = view_test;
+    native_host_ = new views::NativeViewHost();
+    host_ = view_test->CreateWidget();
+    host_->Init(NULL, gfx::Rect(0, 0, 500, 300));
+    host_->GetRootView()->AddChildView(native_host_);
+    for (size_t i = 0; i < TestNativeViewHierarchy::kTotalViews; ++i) {
+      windows_[i] = view_test->CreateWidget();
+      windows_[i]->Init(host_->GetNativeView(), gfx::Rect(0, 0, 500, 300));
+      root_views_[i] = windows_[i]->GetRootView();
+      test_views_[i] = new TestNativeViewHierarchy;
+      root_views_[i]->AddChildView(test_views_[i]);
+    }
+  }
+
+  ~TestChangeNativeViewHierarchy() {
+    for (size_t i = 0; i < TestNativeViewHierarchy::kTotalViews; ++i) {
+      windows_[i]->Close();
+    }
+    host_->Close();
+    // Will close and self-delete widgets - no need to manually delete them.
+    view_test_->RunPendingMessages();
+  }
+
+  void CheckEnumeratingRootViews() {
+    std::vector<RootView*> enumerated_root_views;
+#if defined(OS_WIN)
+    views::Widget::FindAllRootViews(host_->GetNativeView(),
+                                    &enumerated_root_views);
+#else
+    // host_->GetNativeView() returns gfx::NativeView which is GtkWidget on
+    // systems other than Windows and views::Widget::FindAllRootViews()
+    // requires GtkWindow.
+    if (host_->GetWindow()) {
+      views::Widget::FindAllRootViews(host_->GetWindow()->GetNativeWindow(),
+                                      &enumerated_root_views);
+    } else {
+      return;
+    }
+#endif
+    EXPECT_EQ(TestNativeViewHierarchy::kTotalViews + 1,
+              enumerated_root_views.size());
+    // Unfortunately there is no guarantee the sequence of views here so always
+    // go through all of them.
+    for (std::vector<RootView*>::iterator i = enumerated_root_views.begin();
+         i != enumerated_root_views.end(); ++i) {
+      if (host_->GetRootView() == *i)
+        continue;
+      size_t j;
+      for (j = 0; j < TestNativeViewHierarchy::kTotalViews; ++j)
+        if (root_views_[j] == *i)
+          break;
+      // EXPECT_LT/GT/GE() fails to compile with class-defined constants
+      // with gcc, with error
+      // "error: undefined reference to 'TestNativeViewHierarchy::kTotalViews'"
+      // so I forced to use EXPECT_TRUE() instead.
+      EXPECT_TRUE(TestNativeViewHierarchy::kTotalViews > j);
+    }
+  }
+
+  void CheckChangingHierarhy() {
+    size_t i;
+    for (i = 0; i < TestNativeViewHierarchy::kTotalViews; ++i) {
+      // TODO(georgey): use actual hierarchy changes to send notifications.
+      root_views_[i]->NotifyNativeViewHierarchyChanged(false,
+          host_->GetNativeView());
+      root_views_[i]->NotifyNativeViewHierarchyChanged(true,
+          host_->GetNativeView());
+    }
+    for (i = 0; i < TestNativeViewHierarchy::kTotalViews; ++i) {
+      ASSERT_EQ(static_cast<size_t>(2), test_views_[i]->notifications_.size());
+      EXPECT_FALSE(test_views_[i]->notifications_[0].attached);
+      EXPECT_EQ(host_->GetNativeView(),
+          test_views_[i]->notifications_[0].native_view);
+      EXPECT_EQ(root_views_[i], test_views_[i]->notifications_[0].root_view);
+      EXPECT_TRUE(test_views_[i]->notifications_[1].attached);
+      EXPECT_EQ(host_->GetNativeView(),
+          test_views_[i]->notifications_[1].native_view);
+      EXPECT_EQ(root_views_[i], test_views_[i]->notifications_[1].root_view);
+    }
+  }
+
+  views::NativeViewHost* native_host_;
+  views::Widget* host_;
+  views::Widget* windows_[TestNativeViewHierarchy::kTotalViews];
+  views::RootView* root_views_[TestNativeViewHierarchy::kTotalViews];
+  TestNativeViewHierarchy* test_views_[TestNativeViewHierarchy::kTotalViews];
+  ViewTest* view_test_;
+};
+
+TEST_F(ViewTest, ChangeNativeViewHierarchyFindRoots) {
+  // TODO(georgey): Fix the test for Linux
+#if defined(OS_WIN)
+  TestChangeNativeViewHierarchy test(this);
+  test.CheckEnumeratingRootViews();
+#endif
+}
+
+TEST_F(ViewTest, ChangeNativeViewHierarchyChangeHierarchy) {
+  // TODO(georgey): Fix the test for Linux
+#if defined(OS_WIN)
+  TestChangeNativeViewHierarchy test(this);
+  test.CheckChangingHierarhy();
+#endif
+}
+

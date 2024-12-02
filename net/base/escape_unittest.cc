@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/basictypes.h"
 #include "base/i18n/icu_string_conversions.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -19,13 +20,18 @@ struct EscapeCase {
 };
 
 struct UnescapeURLCase {
+  const wchar_t* input;
+  UnescapeRule::Type rules;
+  const wchar_t* output;
+};
+
+struct UnescapeURLCaseASCII {
   const char* input;
   UnescapeRule::Type rules;
   const char* output;
 };
 
-struct UnescapeAndDecodeURLCase {
-  const char* encoding;
+struct UnescapeAndDecodeCase {
   const char* input;
 
   // The expected output when run through UnescapeURL.
@@ -38,6 +44,12 @@ struct UnescapeAndDecodeURLCase {
   const wchar_t* decoded;
 };
 
+struct AdjustOffsetCase {
+  const char* input;
+  size_t input_offset;
+  size_t output_offset;
+};
+
 struct EscapeForHTMLCase {
   const char* input;
   const char* expected_output;
@@ -45,7 +57,7 @@ struct EscapeForHTMLCase {
 
 }  // namespace
 
-TEST(Escape, EscapeTextForFormSubmission) {
+TEST(EscapeTest, EscapeTextForFormSubmission) {
   const EscapeCase escape_cases[] = {
     {L"foo", L"foo"},
     {L"foo bar", L"foo+bar"},
@@ -53,7 +65,17 @@ TEST(Escape, EscapeTextForFormSubmission) {
   };
   for (size_t i = 0; i < arraysize(escape_cases); ++i) {
     EscapeCase value = escape_cases[i];
-    EXPECT_EQ(value.output, EscapeQueryParamValueUTF8(value.input));
+    EXPECT_EQ(value.output, EscapeQueryParamValueUTF8(value.input, true));
+  }
+
+  const EscapeCase escape_cases_no_plus[] = {
+    {L"foo", L"foo"},
+    {L"foo bar", L"foo%20bar"},
+    {L"foo++", L"foo%2B%2B"}
+  };
+  for (size_t i = 0; i < arraysize(escape_cases_no_plus); ++i) {
+    EscapeCase value = escape_cases_no_plus[i];
+    EXPECT_EQ(value.output, EscapeQueryParamValueUTF8(value.input, false));
   }
 
   // Test all the values in we're supposed to be escaping.
@@ -65,7 +87,7 @@ TEST(Escape, EscapeTextForFormSubmission) {
   for (int i = 0; i < 256; ++i) {
     std::string in;
     in.push_back(i);
-    std::string out = EscapeQueryParamValue(in);
+    std::string out = EscapeQueryParamValue(in, true);
     if (0 == i) {
       EXPECT_EQ(out, std::string("%00"));
     } else if (32 == i) {
@@ -83,17 +105,23 @@ TEST(Escape, EscapeTextForFormSubmission) {
 
   // Check to see if EscapeQueryParamValueUTF8 is the same as
   // EscapeQueryParamValue(..., kCodepageUTF8,)
-  std::wstring test_str;
+  string16 test_str;
   test_str.reserve(5000);
   for (int i = 1; i < 5000; ++i) {
     test_str.push_back(i);
   }
-  std::wstring wide;
-  EXPECT_TRUE(EscapeQueryParamValue(test_str, base::kCodepageUTF8, &wide));
-  EXPECT_EQ(wide, EscapeQueryParamValueUTF8(test_str));
+  string16 wide;
+  EXPECT_TRUE(EscapeQueryParamValue(test_str, base::kCodepageUTF8, true,
+                                    &wide));
+  EXPECT_EQ(UTF16ToWideHack(wide),
+            EscapeQueryParamValueUTF8(UTF16ToWideHack(test_str), true));
+  EXPECT_TRUE(EscapeQueryParamValue(test_str, base::kCodepageUTF8, false,
+                                    &wide));
+  EXPECT_EQ(UTF16ToWideHack(wide),
+            EscapeQueryParamValueUTF8(UTF16ToWideHack(test_str), false));
 }
 
-TEST(Escape, EscapePath) {
+TEST(EscapeTest, EscapePath) {
   ASSERT_EQ(
     // Most of the character space we care about, un-escaped
     EscapePath(
@@ -108,7 +136,7 @@ TEST(Escape, EscapePath) {
     "%7B%7C%7D~%7F%80%FF");
 }
 
-TEST(Escape, EscapeUrlEncodedData) {
+TEST(EscapeTest, EscapeUrlEncodedData) {
   ASSERT_EQ(
     // Most of the character space we care about, un-escaped
     EscapeUrlEncodedData(
@@ -123,8 +151,8 @@ TEST(Escape, EscapeUrlEncodedData) {
     "%7B%7C%7D~%7F%80%FF");
 }
 
-TEST(Escape, UnescapeURLComponent) {
-  const UnescapeURLCase unescape_cases[] = {
+TEST(EscapeTest, UnescapeURLComponentASCII) {
+  const UnescapeURLCaseASCII unescape_cases[] = {
     {"", UnescapeRule::NORMAL, ""},
     {"%2", UnescapeRule::NORMAL, "%2"},
     {"%%%%%%", UnescapeRule::NORMAL, "%%%%%%"},
@@ -184,40 +212,116 @@ TEST(Escape, UnescapeURLComponent) {
   EXPECT_EQ(expected, UnescapeURLComponent(input, UnescapeRule::NORMAL));
 }
 
-TEST(Escape, UnescapeAndDecodeURLComponent) {
-  const UnescapeAndDecodeURLCase unescape_cases[] = {
-    {"UTF8", "%", "%", "%", L"%"},
-    {"UTF8", "+", "+", " ", L"+"},
-    {"UTF8", "%2+", "%2+", "%2 ", L"%2+"},
-    {"UTF8", "+%%%+%%%", "+%%%+%%%", " %%% %%%", L"+%%%+%%%"},
-    {"UTF8", "Don't escape anything",
-             "Don't escape anything",
-             "Don't escape anything",
-             L"Don't escape anything"},
-    {"UTF8", "+Invalid %escape %2+",
-             "+Invalid %escape %2+",
-             " Invalid %escape %2 ",
-             L"+Invalid %escape %2+"},
-    {"UTF8", "Some random text %25%3bOK",
-             "Some random text %25;OK",
-             "Some random text %25;OK",
-             L"Some random text %25;OK"},
-    {"UTF8", "%01%02%03%04%05%06%07%08%09",
-             "%01%02%03%04%05%06%07%08%09",
-             "%01%02%03%04%05%06%07%08%09",
-             L"%01%02%03%04%05%06%07%08%09"},
-    {"UTF8", "%E4%BD%A0+%E5%A5%BD",
-             "\xE4\xBD\xA0+\xE5\xA5\xBD",
-             "\xE4\xBD\xA0 \xE5\xA5\xBD",
-             L"\x4f60+\x597d"},
-    {"BIG5", "%A7A%A6n",
-             "\xA7\x41\xA6n",
-             "\xA7\x41\xA6n",
-             L"\x4f60\x597d"},
-    {"UTF8", "%ED%ED",  // Invalid UTF-8.
-             "\xED\xED",
-             "\xED\xED",
-             L"%ED%ED"},  // Invalid UTF-8 -> kept unescaped.
+TEST(EscapeTest, UnescapeURLComponent) {
+  const UnescapeURLCase unescape_cases[] = {
+    {L"", UnescapeRule::NORMAL, L""},
+    {L"%2", UnescapeRule::NORMAL, L"%2"},
+    {L"%%%%%%", UnescapeRule::NORMAL, L"%%%%%%"},
+    {L"Don't escape anything", UnescapeRule::NORMAL, L"Don't escape anything"},
+    {L"Invalid %escape %2", UnescapeRule::NORMAL, L"Invalid %escape %2"},
+    {L"Some%20random text %25%3bOK", UnescapeRule::NONE,
+     L"Some%20random text %25%3bOK"},
+    {L"Some%20random text %25%3bOK", UnescapeRule::NORMAL,
+     L"Some%20random text %25;OK"},
+    {L"Some%20random text %25%3bOK", UnescapeRule::SPACES,
+     L"Some random text %25;OK"},
+    {L"Some%20random text %25%3bOK", UnescapeRule::URL_SPECIAL_CHARS,
+     L"Some%20random text %;OK"},
+    {L"Some%20random text %25%3bOK",
+     UnescapeRule::SPACES | UnescapeRule::URL_SPECIAL_CHARS,
+     L"Some random text %;OK"},
+    {L"%A0%B1%C2%D3%E4%F5", UnescapeRule::NORMAL, L"\xA0\xB1\xC2\xD3\xE4\xF5"},
+    {L"%Aa%Bb%Cc%Dd%Ee%Ff", UnescapeRule::NORMAL, L"\xAa\xBb\xCc\xDd\xEe\xFf"},
+    // Certain URL-sensitive characters should not be unescaped unless asked.
+    {L"Hello%20%13%10world %23# %3F? %3D= %26& %25% %2B+", UnescapeRule::SPACES,
+     L"Hello %13%10world %23# %3F? %3D= %26& %25% %2B+"},
+    {L"Hello%20%13%10world %23# %3F? %3D= %26& %25% %2B+",
+     UnescapeRule::URL_SPECIAL_CHARS,
+     L"Hello%20%13%10world ## ?? == && %% ++"},
+    // We can neither escape nor unescape '@' since some websites expect it to
+    // be preserved as either '@' or "%40".
+    // See http://b/996720 and http://crbug.com/23933 .
+    {L"me@my%40example", UnescapeRule::NORMAL, L"me@my%40example"},
+    // Control characters.
+    {L"%01%02%03%04%05%06%07%08%09 %25", UnescapeRule::URL_SPECIAL_CHARS,
+     L"%01%02%03%04%05%06%07%08%09 %"},
+    {L"%01%02%03%04%05%06%07%08%09 %25", UnescapeRule::CONTROL_CHARS,
+     L"\x01\x02\x03\x04\x05\x06\x07\x08\x09 %25"},
+    {L"Hello%20%13%10%02", UnescapeRule::SPACES, L"Hello %13%10%02"},
+    {L"Hello%20%13%10%02", UnescapeRule::CONTROL_CHARS,
+     L"Hello%20\x13\x10\x02"},
+    {L"Hello\x9824\x9827", UnescapeRule::CONTROL_CHARS,
+     L"Hello\x9824\x9827"},
+  };
+
+  for (size_t i = 0; i < arraysize(unescape_cases); i++) {
+    string16 str(WideToUTF16(unescape_cases[i].input));
+    EXPECT_EQ(WideToUTF16(unescape_cases[i].output),
+              UnescapeURLComponent(str, unescape_cases[i].rules));
+  }
+
+  // Test the NULL character unescaping (which wouldn't work above since those
+  // are just char pointers).
+  string16 input(WideToUTF16(L"Null"));
+  input.push_back(0);  // Also have a NULL in the input.
+  input.append(WideToUTF16(L"%00%39Test"));
+
+  // When we're unescaping NULLs
+  string16 expected(WideToUTF16(L"Null"));
+  expected.push_back(0);
+  expected.push_back(0);
+  expected.append(ASCIIToUTF16("9Test"));
+  EXPECT_EQ(expected, UnescapeURLComponent(input, UnescapeRule::CONTROL_CHARS));
+
+  // When we're not unescaping NULLs.
+  expected = WideToUTF16(L"Null");
+  expected.push_back(0);
+  expected.append(WideToUTF16(L"%009Test"));
+  EXPECT_EQ(expected, UnescapeURLComponent(input, UnescapeRule::NORMAL));
+}
+
+TEST(EscapeTest, UnescapeAndDecodeUTF8URLComponent) {
+  const UnescapeAndDecodeCase unescape_cases[] = {
+    { "%",
+      "%",
+      "%",
+     L"%"},
+    { "+",
+      "+",
+      " ",
+     L"+"},
+    { "%2+",
+      "%2+",
+      "%2 ",
+     L"%2+"},
+    { "+%%%+%%%",
+      "+%%%+%%%",
+      " %%% %%%",
+     L"+%%%+%%%"},
+    { "Don't escape anything",
+      "Don't escape anything",
+      "Don't escape anything",
+     L"Don't escape anything"},
+    { "+Invalid %escape %2+",
+      "+Invalid %escape %2+",
+      " Invalid %escape %2 ",
+     L"+Invalid %escape %2+"},
+    { "Some random text %25%3BOK",
+      "Some random text %25;OK",
+      "Some random text %25;OK",
+     L"Some random text %25;OK"},
+    { "%01%02%03%04%05%06%07%08%09",
+      "%01%02%03%04%05%06%07%08%09",
+      "%01%02%03%04%05%06%07%08%09",
+     L"%01%02%03%04%05%06%07%08%09"},
+    { "%E4%BD%A0+%E5%A5%BD",
+      "\xE4\xBD\xA0+\xE5\xA5\xBD",
+      "\xE4\xBD\xA0 \xE5\xA5\xBD",
+     L"\x4f60+\x597d"},
+    { "%ED%ED",  // Invalid UTF-8.
+      "\xED\xED",
+      "\xED\xED",
+     L"%ED%ED"},  // Invalid UTF-8 -> kept unescaped.
   };
 
   for (size_t i = 0; i < arraysize(unescape_cases); i++) {
@@ -230,14 +334,37 @@ TEST(Escape, UnescapeAndDecodeURLComponent) {
     EXPECT_EQ(std::string(unescape_cases[i].query_unescaped), unescaped);
 
     // TODO: Need to test unescape_spaces and unescape_percent.
-    std::wstring decoded = UnescapeAndDecodeURLComponent(
-        unescape_cases[i].input, unescape_cases[i].encoding,
-        UnescapeRule::NORMAL);
-    EXPECT_EQ(std::wstring(unescape_cases[i].decoded), decoded);
+    string16 decoded = UnescapeAndDecodeUTF8URLComponent(
+        unescape_cases[i].input, UnescapeRule::NORMAL, NULL);
+    EXPECT_EQ(WideToUTF16Hack(std::wstring(unescape_cases[i].decoded)),
+              decoded);
   }
 }
 
-TEST(Escape, EscapeForHTML) {
+TEST(EscapeTest, AdjustOffset) {
+  const AdjustOffsetCase adjust_cases[] = {
+    {"", 0, std::wstring::npos},
+    {"test", 0, 0},
+    {"test", 2, 2},
+    {"test", 4, std::wstring::npos},
+    {"test", std::wstring::npos, std::wstring::npos},
+    {"%3Btest", 6, 4},
+    {"%3Btest", 2, std::wstring::npos},
+    {"test%3B", 2, 2},
+    {"%E4%BD%A0+%E5%A5%BD", 9, 1},
+    {"%E4%BD%A0+%E5%A5%BD", 6, std::wstring::npos},
+    {"%ED%B0%80+%E5%A5%BD", 6, 6},
+  };
+
+  for (size_t i = 0; i < arraysize(adjust_cases); i++) {
+    size_t offset = adjust_cases[i].input_offset;
+    UnescapeAndDecodeUTF8URLComponent(adjust_cases[i].input,
+                                      UnescapeRule::NORMAL, &offset);
+    EXPECT_EQ(adjust_cases[i].output_offset, offset);
+  }
+}
+
+TEST(EscapeTest, EscapeForHTML) {
   const EscapeForHTMLCase tests[] = {
     { "hello", "hello" },
     { "<hello>", "&lt;hello&gt;" },
@@ -246,5 +373,25 @@ TEST(Escape, EscapeForHTML) {
   for (size_t i = 0; i < arraysize(tests); ++i) {
     std::string result = EscapeForHTML(std::string(tests[i].input));
     EXPECT_EQ(std::string(tests[i].expected_output), result);
+  }
+}
+
+TEST(EscapeTest, UnescapeForHTML) {
+  const EscapeForHTMLCase tests[] = {
+    { "", "" },
+    { "&lt;hello&gt;", "<hello>" },
+    { "don&#39;t mess with me", "don\'t mess with me" },
+    { "&lt;&gt;&amp;&quot;&#39;", "<>&\"'" },
+    { "& lt; &amp ; &; '", "& lt; &amp ; &; '" },
+    { "&amp;", "&" },
+    { "&quot;", "\"" },
+    { "&#39;", "'" },
+    { "&lt;", "<" },
+    { "&gt;", ">" },
+    { "&amp; &", "& &" },
+  };
+  for (size_t i = 0; i < arraysize(tests); ++i) {
+    string16 result = UnescapeForHTML(ASCIIToUTF16(tests[i].input));
+    EXPECT_EQ(ASCIIToUTF16(tests[i].expected_output), result);
   }
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,11 +55,18 @@ void RenderViewHostManager::Init(Profile* profile,
   if (!site_instance)
     site_instance = SiteInstance::CreateSiteInstance(profile);
   render_view_host_ = RenderViewHostFactory::Create(
-      site_instance, render_view_delegate_, routing_id);
+      site_instance, render_view_delegate_, routing_id, delegate_->
+      GetControllerForRenderManager().session_storage_namespace_id());
   NotificationService::current()->Notify(
       NotificationType::RENDER_VIEW_HOST_CREATED_FOR_TAB,
       Source<RenderViewHostManager>(this),
       Details<RenderViewHost>(render_view_host_));
+}
+
+RenderWidgetHostView* RenderViewHostManager::GetRenderWidgetHostView() const {
+  if (!render_view_host_)
+    return NULL;
+  return render_view_host_->view();
 }
 
 RenderViewHost* RenderViewHostManager::Navigate(const NavigationEntry& entry) {
@@ -208,6 +215,10 @@ void RenderViewHostManager::RendererAbortedProvisionalLoad(
 void RenderViewHostManager::ShouldClosePage(bool for_cross_site_transition,
                                             bool proceed) {
   if (for_cross_site_transition) {
+    // Ignore if we're not in a cross-site navigation.
+    if (!cross_navigation_pending_)
+      return;
+
     if (proceed) {
       // Ok to unload the current page, so proceed with the cross-site
       // navigation.  Note that if navigations are not currently suspended, it
@@ -328,9 +339,7 @@ SiteInstance* RenderViewHostManager::GetSiteInstanceForEntry(
   // If we haven't used our SiteInstance (and thus RVH) yet, then we can use it
   // for this entry.  We won't commit the SiteInstance to this site until the
   // navigation commits (in DidNavigate), unless the navigation entry was
-  // restored. As session restore loads all the pages immediately we need to set
-  // the site first, otherwise after a restore none of the pages would share
-  // renderers.
+  // restored or it's a DOM UI as described below.
   if (!curr_instance->has_site()) {
     // If we've already created a SiteInstance for our destination, we don't
     // want to use this unused SiteInstance; use the existing one.  (We don't
@@ -341,7 +350,22 @@ SiteInstance* RenderViewHostManager::GetSiteInstanceForEntry(
     if (curr_instance->HasRelatedSiteInstance(dest_url)) {
       return curr_instance->GetRelatedSiteInstance(dest_url);
     } else {
-      if (entry.restored())
+      // Normally the "site" on the SiteInstance is set lazily when the load
+      // actually commits. This is to support better process sharing in case
+      // the site redirects to some other site: we want to use the destination
+      // site in the site instance.
+      //
+      // In the case of session restore, as it loads all the pages immediately
+      // we need to set the site first, otherwise after a restore none of the
+      // pages would share renderers.
+      //
+      // For DOM UI (this mostly comes up for the new tab page), the
+      // SiteInstance has special meaning: we never want to reassign the
+      // process. If you navigate to another site before the DOM UI commits,
+      // we still want to create a new process rather than re-using the
+      // existing DOM UI process.
+      if (entry.restore_type() != NavigationEntry::RESTORE_NONE ||
+          DOMUIFactory::HasDOMUIScheme(dest_url))
         curr_instance->SetSite(dest_url);
       return curr_instance;
     }
@@ -408,7 +432,8 @@ bool RenderViewHostManager::CreatePendingRenderView(SiteInstance* instance) {
   }
 
   pending_render_view_host_ = RenderViewHostFactory::Create(
-      instance, render_view_delegate_, MSG_ROUTING_NONE);
+      instance, render_view_delegate_, MSG_ROUTING_NONE, delegate_->
+      GetControllerForRenderManager().session_storage_namespace_id());
   NotificationService::current()->Notify(
       NotificationType::RENDER_VIEW_HOST_CREATED_FOR_TAB,
       Source<RenderViewHostManager>(this),
@@ -426,20 +451,29 @@ bool RenderViewHostManager::CreatePendingRenderView(SiteInstance* instance) {
 }
 
 void RenderViewHostManager::CommitPending() {
-  // First commit the DOM UI, if any.
+  // First check whether we're going to want to focus the location bar after
+  // this commit.  We do this now because the navigation hasn't formally
+  // committed yet, so if we've already cleared |pending_dom_ui_| the call chain
+  // this triggers won't be able to figure out what's going on.
+  bool will_focus_location_bar = delegate_->FocusLocationBarByDefault();
+
+  // Next commit the DOM UI, if any.
   dom_ui_.swap(pending_dom_ui_);
   pending_dom_ui_.reset();
 
   // It's possible for the pending_render_view_host_ to be NULL when we aren't
   // crossing process boundaries. If so, we just needed to handle the DOM UI
   // committing above and we're done.
-  if (!pending_render_view_host_)
+  if (!pending_render_view_host_) {
+    if (will_focus_location_bar)
+      delegate_->SetFocusToLocationBar(false);
     return;
+  }
 
   // Remember if the page was focused so we can focus the new renderer in
   // that case.
-  bool focus_render_view = render_view_host_->view() &&
-      render_view_host_->view()->HasFocus();
+  bool focus_render_view = !will_focus_location_bar &&
+      render_view_host_->view() && render_view_host_->view()->HasFocus();
 
   // Hide the current view and prepare to destroy it.
   // TODO(creis): Get the old RenderViewHost to send us an UpdateState message
@@ -463,7 +497,9 @@ void RenderViewHostManager::CommitPending() {
   // Make sure the size is up to date.  (Fix for bug 1079768.)
   delegate_->UpdateRenderViewSizeForRenderManager();
 
-  if (focus_render_view && render_view_host_->view())
+  if (will_focus_location_bar)
+    delegate_->SetFocusToLocationBar(false);
+  else if (focus_render_view && render_view_host_->view())
     render_view_host_->view()->Focus();
 
   RenderViewHostSwitchedDetails details;
@@ -588,4 +624,18 @@ void RenderViewHostManager::CancelPending() {
   pending_render_view_host->Shutdown();
 
   pending_dom_ui_.reset();
+}
+
+void RenderViewHostManager::RenderViewDeleted(RenderViewHost* rvh) {
+  // We are doing this in order to work around and to track a crasher
+  // (http://crbug.com/23411) where it seems that pending_render_view_host_ is
+  // deleted (not sure from where) but not NULLed.
+  if (rvh == pending_render_view_host_) {
+    // If you hit this NOTREACHED, please report it in the following bug
+    // http://crbug.com/23411 Make sure to include what you were doing when it
+    // happened  (navigating to a new page, closing a tab...) and if you can
+    // reproduce.
+    NOTREACHED();
+    pending_render_view_host_ = NULL;
+  }
 }

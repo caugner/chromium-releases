@@ -1,9 +1,10 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2009 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/message_loop.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/common/notification_registrar.h"
 #include "chrome/common/notification_service.h"
@@ -35,6 +36,8 @@ class TestProvider : public AutocompleteProvider {
   }
 
  private:
+  ~TestProvider() {}
+
   void Run();
 
   void AddResults(int start_at, int num);
@@ -61,7 +64,7 @@ void TestProvider::Start(const AutocompleteInput& input,
 }
 
 void TestProvider::Run() {
-  DCHECK(num_results_per_provider > 0);
+  DCHECK_GT(num_results_per_provider, 0U);
   AddResults(1, num_results_per_provider);
   done_ = true;
   DCHECK(listener_);
@@ -212,11 +215,14 @@ TEST(AutocompleteTest, InputType) {
     { L"foo", AutocompleteInput::UNKNOWN },
     { L"foo.c", AutocompleteInput::UNKNOWN },
     { L"foo.com", AutocompleteInput::URL },
-    { L"-.com", AutocompleteInput::QUERY },
+    { L"-.com", AutocompleteInput::UNKNOWN },
     { L"foo/bar", AutocompleteInput::URL },
     { L"foo/bar baz", AutocompleteInput::UNKNOWN },
+    { L"foo bar.com", AutocompleteInput::QUERY },
     { L"http://foo/bar baz", AutocompleteInput::URL },
     { L"foo bar", AutocompleteInput::QUERY },
+    { L"foo+bar", AutocompleteInput::QUERY },
+    { L"foo+bar.com", AutocompleteInput::UNKNOWN },
     { L"\"foo:bar\"", AutocompleteInput::QUERY },
     { L"link:foo.com", AutocompleteInput::UNKNOWN },
     { L"www.foo.com:81", AutocompleteInput::URL },
@@ -243,7 +249,9 @@ TEST(AutocompleteTest, InputType) {
     { L"http://foo", AutocompleteInput::URL },
     { L"http://foo.c", AutocompleteInput::URL },
     { L"http://foo.com", AutocompleteInput::URL },
-    { L"http://-.com", AutocompleteInput::QUERY },
+    { L"http://foo_bar.com", AutocompleteInput::URL },
+    { L"http://-.com", AutocompleteInput::UNKNOWN },
+    { L"http://_foo_.com", AutocompleteInput::UNKNOWN },
     { L"http://foo.com:abc", AutocompleteInput::QUERY },
     { L"http://foo.com:123456", AutocompleteInput::QUERY },
     { L"http:user@foo.com", AutocompleteInput::URL },
@@ -267,6 +275,22 @@ TEST(AutocompleteTest, InputType) {
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(input_cases); ++i) {
     AutocompleteInput input(input_cases[i].input, std::wstring(), true, false,
                             false);
+    EXPECT_EQ(input_cases[i].type, input.type()) << "Input: " <<
+        input_cases[i].input;
+  }
+}
+
+TEST(AutocompleteTest, InputTypeWithDesiredTLD) {
+  struct test_data {
+    const wchar_t* input;
+    const AutocompleteInput::Type type;
+  } input_cases[] = {
+    { L"401k", AutocompleteInput::REQUESTED_URL },
+    { L"999999999999999", AutocompleteInput::REQUESTED_URL },
+  };
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(input_cases); ++i) {
+    AutocompleteInput input(input_cases[i].input, L"com", true, false, false);
     EXPECT_EQ(input_cases[i].type, input.type()) << "Input: " <<
         input_cases[i].input;
   }

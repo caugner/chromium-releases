@@ -22,6 +22,8 @@ ChromeFrameHistogramSnapshots::ChromeFrameHistogramSnapshots() {
 ChromeFrameHistogramSnapshots::HistogramPickledList
   ChromeFrameHistogramSnapshots::GatherAllHistograms() {
 
+  AutoLock auto_lock(lock_);
+
   StatisticsRecorder::Histograms histograms;
   StatisticsRecorder::GetHistograms(&histograms);
 
@@ -30,6 +32,7 @@ ChromeFrameHistogramSnapshots::HistogramPickledList
   for (StatisticsRecorder::Histograms::iterator it = histograms.begin();
        histograms.end() != it;
        it++) {
+    (*it)->SetFlags(Histogram::kIPCSerializationSourceFlag);
     GatherHistogram(**it, &pickled_histograms);
   }
 

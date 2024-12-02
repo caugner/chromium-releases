@@ -33,6 +33,60 @@
 #define snprintf sprintf_s
 #endif
 
+static void logWithWindowObject(NPObject* windowObject, NPP instance, const char* message)
+{
+    NPVariant consoleVariant;
+    if (!browser->getproperty(instance, windowObject, browser->getstringidentifier("console"), &consoleVariant)) {
+        fprintf(stderr, "Failed to retrieve console object while logging: %s\n", message);
+        return;
+    }
+
+    NPObject* consoleObject = NPVARIANT_TO_OBJECT(consoleVariant);
+
+    NPVariant messageVariant;
+    STRINGZ_TO_NPVARIANT(message, messageVariant);
+
+    NPVariant result;
+    if (!browser->invoke(instance, consoleObject, browser->getstringidentifier("log"), &messageVariant, 1, &result)) {
+        fprintf(stderr, "Failed to invoke console.log while logging: %s\n", message);
+        browser->releaseobject(consoleObject);
+        return;
+    }
+
+    browser->releasevariantvalue(&result);
+    browser->releaseobject(consoleObject);
+}
+
+static void logWithWindowObjectVariableArgs(NPObject* windowObject, NPP instance, const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    char message[2048] = "PLUGIN: ";
+    vsprintf(message + strlen(message), format, args);
+    va_end(args);
+
+    logWithWindowObject(windowObject, instance, message);
+}
+
+void log(NPP instance, const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    char message[2048] = "PLUGIN: ";
+    vsprintf(message + strlen(message), format, args);
+    va_end(args);
+
+    NPObject* windowObject = 0;
+    NPError error = browser->getvalue(instance, NPNVWindowNPObject, &windowObject);
+    if (error != NPERR_NO_ERROR) {
+        fprintf(stderr, "Failed to retrieve window object while logging: %s\n", message);
+        return;
+    }
+
+    logWithWindowObject(windowObject, instance, message);
+    browser->releaseobject(windowObject);
+}
+
 static void pluginInvalidate(NPObject*);
 static bool pluginHasProperty(NPObject*, NPIdentifier name);
 static bool pluginHasMethod(NPObject*, NPIdentifier name);
@@ -72,7 +126,8 @@ static bool identifiersInitialized = false;
 #define ID_PROPERTY_LOG_DESTROY                 4
 #define ID_PROPERTY_RETURN_ERROR_FROM_NEWSTREAM 5
 #define ID_PROPERTY_TEST_OBJECT_COUNT           6
-#define NUM_PROPERTY_IDENTIFIERS                7
+#define ID_PROPERTY_THROW_EXCEPTION_PROPERTY    7
+#define NUM_PROPERTY_IDENTIFIERS                8
 
 static NPIdentifier pluginPropertyIdentifiers[NUM_PROPERTY_IDENTIFIERS];
 static const NPUTF8 *pluginPropertyIdentifierNames[NUM_PROPERTY_IDENTIFIERS] = {
@@ -83,6 +138,7 @@ static const NPUTF8 *pluginPropertyIdentifierNames[NUM_PROPERTY_IDENTIFIERS] = {
     "logDestroy",
     "returnErrorFromNewStream",
     "testObjectCount",
+    "testThrowExceptionProperty",
 };
 
 enum {
@@ -113,6 +169,8 @@ enum {
     ID_TEST_HAS_METHOD,
     ID_TEST_THROW_EXCEPTION_METHOD,
     ID_TEST_FAIL_METHOD,
+    ID_TEST_GET_BROWSER_PROPERTY,
+    ID_TEST_SET_BROWSER_PROPERTY,
     NUM_METHOD_IDENTIFIERS
 };
 
@@ -145,7 +203,9 @@ static const NPUTF8 *pluginMethodIdentifierNames[NUM_METHOD_IDENTIFIERS] = {
     "testHasProperty",
     "testHasMethod",
     "testThrowException",
-    "testFail"
+    "testFail",
+    "testGetBrowserProperty",
+    "testSetBrowserProperty"
 };
 
 static NPUTF8* createCStringFromNPVariant(const NPVariant* variant)
@@ -205,6 +265,9 @@ static bool pluginGetProperty(NPObject* obj, NPIdentifier name, NPVariant* resul
     } else if (name == pluginPropertyIdentifiers[ID_PROPERTY_TEST_OBJECT_COUNT]) {
         INT32_TO_NPVARIANT(getTestObjectCount(), *result);
         return true;
+    } else if (name == pluginPropertyIdentifiers[ID_PROPERTY_THROW_EXCEPTION_PROPERTY]) {
+        browser->setexception(obj, "plugin object testThrowExceptionProperty SUCCESS");
+        return true;
     }
     return false;
 }
@@ -220,6 +283,9 @@ static bool pluginSetProperty(NPObject* obj, NPIdentifier name, const NPVariant*
         return true;
     } else if (name == pluginPropertyIdentifiers[ID_PROPERTY_RETURN_ERROR_FROM_NEWSTREAM]) {
         plugin->returnErrorFromNewStream = NPVARIANT_TO_BOOLEAN(*variant);
+        return true;
+    } else if (name == pluginPropertyIdentifiers[ID_PROPERTY_THROW_EXCEPTION_PROPERTY]) {
+        browser->setexception(obj, "plugin object testThrowExceptionProperty SUCCESS");
         return true;
     }
 
@@ -501,14 +567,14 @@ static bool testGetIntIdentifier(PluginObject*, const NPVariant* args, uint32_t 
 
     if (NPVARIANT_IS_DOUBLE(args[0])) {
         identifier = browser->getintidentifier((int)NPVARIANT_TO_DOUBLE(args[0]));
-        INT32_TO_NPVARIANT((int32)identifier, *result);
-        return true;
     } else if (NPVARIANT_IS_INT32(args[0])) {
         identifier = browser->getintidentifier((int)NPVARIANT_TO_INT32(args[0]));
-        INT32_TO_NPVARIANT((int32)identifier, *result);
-        return true;
+    } else {
+        return false;
     }
-    return false;
+
+    INT32_TO_NPVARIANT(static_cast<int32>(reinterpret_cast<intptr_t>(identifier)), *result);
+    return true;
 }
 
 static bool testGetProperty(PluginObject* obj, const NPVariant* args, uint32_t argCount, NPVariant* result)
@@ -627,6 +693,76 @@ static bool testConstruct(PluginObject* obj, const NPVariant* args, uint32_t arg
         return false;
 
     return browser->construct(obj->npp, NPVARIANT_TO_OBJECT(args[0]), args + 1, argCount - 1, result);
+}
+
+// Helper function to notify the layout test controller that the test completed.
+void notifyTestCompletion(NPP npp, NPObject* object)
+{
+    NPVariant result;
+    NPString script;
+    script.UTF8Characters = "javascript:window.layoutTestController.notifyDone();";
+    script.UTF8Length = strlen("javascript:window.layoutTestController.notifyDone();");
+    browser->evaluate(npp, object, &script, &result);
+    browser->releasevariantvalue(&result);
+}
+
+bool testDocumentOpen(NPP npp)
+{
+    NPIdentifier documentId = browser->getstringidentifier("document");
+    NPIdentifier openId = browser->getstringidentifier("open");
+
+    NPObject *windowObject = NULL;
+    browser->getvalue(npp, NPNVWindowNPObject, &windowObject);
+    if (!windowObject)
+        return false;
+
+    NPVariant docVariant;
+    browser->getproperty(npp, windowObject, documentId, &docVariant);
+    if (docVariant.type != NPVariantType_Object)
+        return false;
+
+    NPObject *documentObject = NPVARIANT_TO_OBJECT(docVariant);
+
+    NPVariant openArgs[2];
+    STRINGZ_TO_NPVARIANT("text/html", openArgs[0]);
+    STRINGZ_TO_NPVARIANT("_blank", openArgs[1]);
+
+    NPVariant result;
+    browser->invoke(npp, documentObject, openId, openArgs, 2, &result);
+    browser->releaseobject(documentObject);
+
+    if (result.type == NPVariantType_Object) {
+        logWithWindowObjectVariableArgs(windowObject, npp, "DOCUMENT OPEN SUCCESS");
+        notifyTestCompletion(npp, result.value.objectValue);
+        browser->releaseobject(result.value.objectValue);
+        return true;
+    }
+
+    return false;
+}
+
+bool testWindowOpen(NPP npp)
+{
+    NPIdentifier openId = browser->getstringidentifier("open");
+
+    NPObject *windowObject = NULL;
+    browser->getvalue(npp, NPNVWindowNPObject, &windowObject);
+    if (!windowObject)
+        return false;
+
+    NPVariant openArgs[2];
+    STRINGZ_TO_NPVARIANT("about:blank", openArgs[0]);
+    STRINGZ_TO_NPVARIANT("_blank", openArgs[1]);
+
+    NPVariant result;
+    browser->invoke(npp, windowObject, openId, openArgs, 2, &result);
+    if (result.type == NPVariantType_Object) {
+        logWithWindowObjectVariableArgs(windowObject, npp, "WINDOW OPEN SUCCESS");
+        notifyTestCompletion(npp, result.value.objectValue);
+        browser->releaseobject(result.value.objectValue);
+        return true;
+    }
+    return false;
 }
 
 static bool pluginInvoke(NPObject* header, NPIdentifier name, const NPVariant* args, uint32_t argCount, NPVariant* result)
@@ -797,6 +933,12 @@ static bool pluginInvoke(NPObject* header, NPIdentifier name, const NPVariant* a
     else if (name == pluginMethodIdentifiers[ID_TEST_THROW_EXCEPTION_METHOD]) {
         browser->setexception(header, "plugin object testThrowException SUCCESS");
         return true;
+    } else if (name == pluginMethodIdentifiers[ID_TEST_GET_BROWSER_PROPERTY]) {
+        browser->getproperty(plugin->npp, NPVARIANT_TO_OBJECT(args[0]), stringVariantToIdentifier(args[1]), result);
+        return true;
+    } else if (name == pluginMethodIdentifiers[ID_TEST_SET_BROWSER_PROPERTY]) {
+        browser->setproperty(plugin->npp, NPVARIANT_TO_OBJECT(args[0]), stringVariantToIdentifier(args[1]), &args[2]);
+        return true;
     }// else if (name == pluginMethodIdentifiers[ID_TEST_FAIL_METHOD])
     //    return browser->invoke(plugin->npp, 0, name, args, argCount, result);
 
@@ -837,6 +979,10 @@ static NPObject *pluginAllocate(NPP npp, NPClass *theClass)
     newInstance->firstHeaders = NULL;
     newInstance->lastUrl = NULL;
     newInstance->lastHeaders = NULL;
+
+    newInstance->testDocumentOpenInDestroyStream = FALSE;
+    newInstance->testWindowOpen = FALSE;
+    newInstance->testKeyboardFocusForPlugins = FALSE;
 
     return (NPObject*)newInstance;
 }

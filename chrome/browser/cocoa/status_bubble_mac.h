@@ -36,13 +36,17 @@ class StatusBubbleMac : public StatusBubble {
   virtual void SetStatus(const std::wstring& status);
   virtual void SetURL(const GURL& url, const std::wstring& languages);
   virtual void Hide();
-  virtual void MouseMoved();
+  virtual void MouseMoved(const gfx::Point& location, bool left_content);
   virtual void UpdateDownloadShelfVisibility(bool visible);
 
   // Mac-specific method: Update the size and position of the status bubble to
   // match the parent window. Safe to call even when the status bubble does not
   // exist.
   void UpdateSizeAndPosition();
+
+  // Mac-specific method: Change the parent window of the status bubble. Safe to
+  // call even when the status bubble does not exist.
+  void SwitchParentWindow(NSWindow* parent);
 
   // Delegate method called when a fade-in or fade-out transition has
   // completed.  This is public so that it may be visible to the CAAnimation
@@ -63,8 +67,16 @@ class StatusBubbleMac : public StatusBubble {
   // it does.)
   void Create();
 
-  // Attaches the status bubble window to its parent window.
+  // Attaches the status bubble window to its parent window. Safe to call even
+  // when already attached.
   void Attach();
+
+  // Detaches the status bubble window from its parent window.
+  void Detach();
+
+  // Is the status bubble attached to the browser window? It should be attached
+  // when shown and during any fades, but should be detached when hidden.
+  bool is_attached() { return [window_ parentWindow] != nil; }
 
   // Begins fading the status bubble window in or out depending on the value
   // of |show|.  This must be called from the appropriate fade state,
@@ -126,7 +138,7 @@ class StatusBubbleMac : public StatusBubble {
 @interface NSObject(StatusBubbleDelegate)
 // Called to query the delegate about the vertical offset (if any) that should
 // be applied to the StatusBubble's position.
-- (float)verticalOffsetForStatusBubble;
+- (CGFloat)verticalOffsetForStatusBubble;
 
 // Called from SetState to notify the delegate of state changes.
 - (void)statusBubbleWillEnterState:(StatusBubbleMac::StatusBubbleState)state;

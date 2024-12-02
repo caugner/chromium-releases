@@ -4,11 +4,10 @@
 
 #include "chrome/installer/util/google_update_constants.h"
 
-#include "appid.h"
-
 namespace google_update {
 
 const wchar_t kGearsUpgradeCode[] = L"{D92DBAED-3E3E-4530-B30D-072D16C7DDD0}";
+const wchar_t kChromeUpgradeCode[] = L"{8A69D345-D564-463C-AFF1-A69D9E530F96}";
 
 const wchar_t kRegPathClients[] = L"Software\\Google\\Update\\Clients";
 const wchar_t kRegPathClientState[] = L"Software\\Google\\Update\\ClientState";
@@ -21,6 +20,8 @@ const wchar_t kRegClientField[] = L"client";
 const wchar_t kRegDidRunField[] = L"dr";
 const wchar_t kRegLangField[] = L"lang";
 const wchar_t kRegLastCheckedField[] = L"LastChecked";
+const wchar_t kRegMetricsId[] = L"metricsid";
+const wchar_t kRegMSIField[] = L"msi";
 const wchar_t kRegNameField[] = L"name";
 const wchar_t kRegOldVersionField[] = L"opv";
 const wchar_t kRegRenameCmdField[] = L"cmd";
@@ -30,4 +31,8 @@ const wchar_t kRegVersionField[] = L"pv";
 const wchar_t kRegReferralField[] = L"referral";
 const wchar_t kRegEULAAceptedField[] = L"eulaaccepted";
 const wchar_t kEnvProductVersionKey[] = L"CHROME_VERSION";
-}  // namespace installer
+const wchar_t kRegLastRunTimeField[] = L"lastrun";
+
+const int kUpdateCheckInvervalHours = 6;
+
+}  // namespace google_update

@@ -6,12 +6,15 @@
 
 #include "chrome/browser/safe_browsing/safe_browsing_blocking_page.h"
 
+#include <string>
+
 #include "app/l10n_util.h"
 #include "app/resource_bundle.h"
 #include "base/histogram.h"
-#include "base/string_util.h"
+#include "base/i18n/rtl.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_thread.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/dom_ui/new_tab_ui.h"
 #include "chrome/browser/google_util.h"
@@ -40,6 +43,15 @@ static const char* const kSbDiagnosticUrl =
 static const char* const kSbReportPhishingUrl =
     "http://www.google.com/safebrowsing/report_error/";
 
+// URL for the "Learn more" link on the malware blocking page.
+static const char* const kLearnMoreMalwareUrl =
+    "http://www.google.com/support/bin/answer.py?answer=45449&topic=360"
+    "&sa=X&oi=malwarewarninglink&resnum=1&ct=help";
+
+// URL for the "Learn more" link on the phishing blocking page.
+static const char* const kLearnMorePhishingUrl =
+    "http://www.google.com/support/bin/answer.py?answer=106318";
+
 static const wchar_t* const kSbDiagnosticHtml =
     L"<a href=\"\" onClick=\"sendCommand('showDiagnostic'); return false;\" "
     L"onMouseDown=\"return false;\">%ls</a>";
@@ -57,12 +69,11 @@ enum SafeBrowsingBlockingPageEvent {
   SHOW,
   PROCEED,
   DONT_PROCEED,
+  UNUSED_ENUM,
 };
 
 void RecordSafeBrowsingBlockingPageStats(SafeBrowsingBlockingPageEvent event) {
-  static LinearHistogram histogram("interstial.safe_browsing", 0, 2, 3);
-  histogram.SetFlags(kUmaTargetedHistogramFlag);
-  histogram.Add(event);
+  UMA_HISTOGRAM_ENUMERATION("interstial.safe_browsing", event, UNUSED_ENUM);
 }
 
 }  // namespace
@@ -228,9 +239,7 @@ void SafeBrowsingBlockingPage::PopulateMultipleThreatStringDictionary(
       l10n_util::GetString(IDS_SAFE_BROWSING_MALWARE_PROCEED_BUTTON));
   strings->SetString(L"back_button",
       l10n_util::GetString(IDS_SAFE_BROWSING_MALWARE_BACK_BUTTON));
-  strings->SetString(L"textdirection",
-      (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) ?
-      L"rtl" : L"ltr");
+  strings->SetString(L"textdirection", base::i18n::IsRTL() ? L"rtl" : L"ltr");
 }
 
 void SafeBrowsingBlockingPage::PopulateMalwareStringDictionary(
@@ -270,9 +279,7 @@ void SafeBrowsingBlockingPage::PopulateMalwareStringDictionary(
       l10n_util::GetString(IDS_SAFE_BROWSING_MALWARE_PROCEED_BUTTON));
   strings->SetString(L"back_button",
       l10n_util::GetString(IDS_SAFE_BROWSING_MALWARE_BACK_BUTTON));
-  strings->SetString(L"textdirection",
-      (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) ?
-      L"rtl" : L"ltr");
+  strings->SetString(L"textdirection", base::i18n::IsRTL() ? L"rtl" : L"ltr");
 }
 
 void SafeBrowsingBlockingPage::PopulatePhishingStringDictionary(
@@ -293,9 +300,7 @@ void SafeBrowsingBlockingPage::PopulatePhishingStringDictionary(
       l10n_util::GetString(IDS_SAFE_BROWSING_PHISHING_BACK_BUTTON));
   strings->SetString(L"report_error",
       l10n_util::GetString(IDS_SAFE_BROWSING_PHISHING_REPORT_ERROR));
-  strings->SetString(L"textdirection",
-      (l10n_util::GetTextDirection() == l10n_util::RIGHT_TO_LEFT) ?
-      L"rtl" : L"ltr");
+  strings->SetString(L"textdirection", base::i18n::IsRTL() ? L"rtl" : L"ltr");
 }
 
 void SafeBrowsingBlockingPage::CommandReceived(const std::string& cmd) {
@@ -309,10 +314,10 @@ void SafeBrowsingBlockingPage::CommandReceived(const std::string& cmd) {
     // User pressed "Learn more".
     GURL url;
     if (unsafe_resources_[0].threat_type == SafeBrowsingService::URL_MALWARE) {
-      url = GURL(WideToUTF8(l10n_util::GetString(IDS_LEARN_MORE_MALWARE_URL)));
+      url = google_util::AppendGoogleLocaleParam(GURL(kLearnMoreMalwareUrl));
     } else if (unsafe_resources_[0].threat_type ==
                SafeBrowsingService::URL_PHISHING) {
-      url = GURL(WideToUTF8(l10n_util::GetString(IDS_LEARN_MORE_PHISHING_URL)));
+      url = google_util::AppendGoogleLocaleParam(GURL(kLearnMorePhishingUrl));
     } else {
       NOTREACHED();
     }
@@ -367,7 +372,7 @@ void SafeBrowsingBlockingPage::CommandReceived(const std::string& cmd) {
     // We're going to take the user to Google's SafeBrowsing diagnostic page.
     std::string diagnostic =
         StringPrintf(kSbDiagnosticUrl,
-                     EscapeQueryParamValue(bad_url_spec).c_str());
+                     EscapeQueryParamValue(bad_url_spec, true).c_str());
     GURL diagnostic_url(diagnostic);
     diagnostic_url = google_util::AppendGoogleLocaleParam(diagnostic_url);
     DCHECK(unsafe_resources_[element_index].threat_type ==
@@ -407,6 +412,16 @@ void SafeBrowsingBlockingPage::Proceed() {
 }
 
 void SafeBrowsingBlockingPage::DontProceed() {
+  DCHECK(action_taken() != DONT_PROCEED_ACTION);
+  // We could have already called Proceed(), in which case we must not notify
+  // the SafeBrowsingService again, as the client has been deleted.
+  if (action_taken() == PROCEED_ACTION) {
+    // We still want to hide the interstitial page.
+    InterstitialPage::DontProceed();
+    // We are now deleted.
+    return;
+  }
+
   RecordSafeBrowsingBlockingPageStats(DONT_PROCEED);
 
   NotifySafeBrowsingService(sb_service_, unsafe_resources_, false);
@@ -437,15 +452,11 @@ void SafeBrowsingBlockingPage::NotifySafeBrowsingService(
     SafeBrowsingService* sb_service,
     const UnsafeResourceList& unsafe_resources,
     bool proceed) {
-  MessageLoop* message_loop;
-  if (g_browser_process->io_thread())
-    message_loop = g_browser_process->io_thread()->message_loop();
-  else  // For unit-tests, just post on the current thread.
-    message_loop = MessageLoop::current();
-
-  message_loop->PostTask(FROM_HERE, NewRunnableMethod(
-      sb_service, &SafeBrowsingService::OnBlockingPageDone, unsafe_resources,
-      proceed));
+  ChromeThread::PostTask(
+      ChromeThread::IO, FROM_HERE,
+      NewRunnableMethod(
+          sb_service, &SafeBrowsingService::OnBlockingPageDone,
+          unsafe_resources, proceed));
 }
 
 // static

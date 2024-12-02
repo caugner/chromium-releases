@@ -12,6 +12,7 @@
     '<(DEPTH)/chrome/chrome.gyp:syncapi',
     '<(DEPTH)/third_party/hunspell/hunspell.gyp:hunspell',
     '<(DEPTH)/net/net.gyp:net_resources',
+    '<(DEPTH)/net/net.gyp:net_test_support',
     '<(DEPTH)/skia/skia.gyp:skia',
     '<(DEPTH)/third_party/icu/icu.gyp:icui18n',
     '<(DEPTH)/third_party/libpng/libpng.gyp:libpng',
@@ -25,24 +26,29 @@
   'include_dirs': [
     '<(DEPTH)',
   ],
-  # TODO(phajdan.jr): Only temporary, to make transition easier.
   'defines': [ 'ALLOW_IN_PROC_BROWSER_TEST' ],
   'sources': [
     '<(DEPTH)/chrome/browser/autocomplete/autocomplete_edit_view_browsertest.cc',
     '<(DEPTH)/chrome/browser/browser_focus_uitest.cc',
+    '<(DEPTH)/chrome/browser/browser_keyevents_browsertest.cc',
     '<(DEPTH)/chrome/browser/debugger/devtools_sanity_unittest.cc',
+    '<(DEPTH)/chrome/browser/gtk/bookmark_bar_gtk_interactive_uitest.cc',
     '<(DEPTH)/chrome/browser/views/bookmark_bar_view_test.cc',
-    '<(DEPTH)/chrome/browser/blocked_popup_container_interactive_uitest.cc',
     '<(DEPTH)/chrome/browser/views/find_bar_host_interactive_uitest.cc',
     '<(DEPTH)/chrome/browser/views/tabs/tab_dragging_test.cc',
     '<(DEPTH)/chrome/test/in_process_browser_test.cc',
     '<(DEPTH)/chrome/test/in_process_browser_test.h',
+    '<(DEPTH)/chrome/test/interactive_ui/keyboard_access_uitest.cc',
     '<(DEPTH)/chrome/test/interactive_ui/npapi_interactive_test.cc',
     '<(DEPTH)/chrome/test/interactive_ui/view_event_test_base.cc',
     '<(DEPTH)/chrome/test/interactive_ui/view_event_test_base.h',
+    '<(DEPTH)/chrome/test/test_launcher/out_of_proc_test_runner.cc',
+    '<(DEPTH)/chrome/test/test_launcher/test_runner.cc',
+    '<(DEPTH)/chrome/test/test_launcher/test_runner.h',
+    '<(DEPTH)/chrome/test/unit/chrome_test_suite.h',
   ],
   'conditions': [
-    ['OS=="linux"', {
+    ['OS=="linux" and toolkit_views==0 and chromeos==0', {
       'dependencies': [
         '<(DEPTH)/build/linux/system.gyp:gtk',
         '<(DEPTH)/tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
@@ -57,25 +63,32 @@
         '<(DEPTH)/chrome/test/interactive_ui/view_event_test_base.h',
       ],
     }],  # OS=="linux"
-    ['target_arch!="x64"', {
+    ['OS=="linux" and (toolkit_views==1 or chromeos==1)', {
       'dependencies': [
-        # run time dependency
-        '<(DEPTH)/webkit/tools/test_shell/test_shell.gyp:npapi_test_plugin',
-      ],
-    }],  # target_arch
-    ['OS=="linux" and toolkit_views==1', {
-      'dependencies': [
+        '<(DEPTH)/build/linux/system.gyp:gtk',
+        '<(DEPTH)/tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
         '<(DEPTH)/views/views.gyp:views',
       ],
-    }],
+      'sources!': [
+        '<(DEPTH)/chrome/browser/gtk/bookmark_bar_gtk_interactive_uitest.cc',
+        # TODO(port)
+        '<(DEPTH)/chrome/test/interactive_ui/npapi_interactive_test.cc',
+      ],
+    }],  # OS=="linux" and (toolkit_views==1 or chromeos==1)
+    ['target_arch!="x64" and target_arch!="arm"', {
+      'dependencies': [
+        # run time dependency
+        '<(DEPTH)/webkit/webkit.gyp:npapi_test_plugin',
+      ],
+    }],  # target_arch
     ['OS=="mac"', {
       'sources!': [
         # TODO(port)
         '<(DEPTH)/chrome/browser/autocomplete/autocomplete_edit_view_browsertest.cc',
         '<(DEPTH)/chrome/browser/browser_focus_uitest.cc',
+        '<(DEPTH)/chrome/browser/browser_keyevents_browsertest.cc',
         '<(DEPTH)/chrome/browser/debugger/devtools_sanity_unittest.cc',
         '<(DEPTH)/chrome/browser/views/bookmark_bar_view_test.cc',
-        '<(DEPTH)/chrome/browser/blocked_popup_container_interactive_uitest.cc',
         '<(DEPTH)/chrome/browser/views/find_bar_host_interactive_uitest.cc',
         '<(DEPTH)/chrome/browser/views/tabs/tab_dragging_test.cc',
         '<(DEPTH)/chrome/test/interactive_ui/npapi_interactive_test.cc',
@@ -85,14 +98,14 @@
     }],  # OS=="mac"
     ['OS=="win"', {
       'include_dirs': [
-        '<(DEPTH)/chrome/third_party/wtl/include',
+        '<(DEPTH)/third_party/wtl/include',
       ],
       'dependencies': [
+        '<(DEPTH)/app/app.gyp:app_resources',
         '<(DEPTH)/chrome/chrome.gyp:chrome_dll_version',
         '<(DEPTH)/chrome/chrome.gyp:crash_service',  # run time dependency
         '<(DEPTH)/chrome/installer/installer.gyp:installer_util_strings',
         '<(DEPTH)/views/views.gyp:views',
-        '<(DEPTH)/third_party/tcmalloc/tcmalloc.gyp:tcmalloc',
       ],
       'sources': [
         '<(DEPTH)/webkit/glue/resources/aliasb.cur',
@@ -112,14 +125,24 @@
         # their various targets (net.gyp:net_resources, etc.),
         # but that causes errors in other targets when
         # resulting .res files get referenced multiple times.
+        '<(SHARED_INTERMEDIATE_DIR)/app/app_resources/app_resources.rc',
         '<(SHARED_INTERMEDIATE_DIR)/chrome/browser_resources.rc',
         '<(SHARED_INTERMEDIATE_DIR)/chrome/common_resources.rc',
         '<(SHARED_INTERMEDIATE_DIR)/chrome/renderer_resources.rc',
+        '<(SHARED_INTERMEDIATE_DIR)/chrome/theme_resources.rc',
         '<(SHARED_INTERMEDIATE_DIR)/net/net_resources.rc',
+        '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_chromium_resources.rc',
         '<(SHARED_INTERMEDIATE_DIR)/webkit/webkit_resources.rc',
       ],
+      'conditions': [
+        ['win_use_allocator_shim==1', {
+          'dependencies': [
+             '<(DEPTH)/base/allocator/allocator.gyp:allocator',
+          ],
+        }],
+      ],
       'configurations': {
-        'Debug': {
+        'Debug_Base': {
           'msvs_settings': {
             'VCLinkerTool': {
               'LinkIncremental': '<(msvs_large_module_debug_link_mode)',

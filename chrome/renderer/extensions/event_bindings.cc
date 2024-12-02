@@ -14,9 +14,9 @@
 #include "chrome/renderer/render_thread.h"
 #include "chrome/renderer/render_view.h"
 #include "grit/renderer_resources.h"
-#include "webkit/api/public/WebDataSource.h"
-#include "webkit/api/public/WebFrame.h"
-#include "webkit/api/public/WebURLRequest.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebDataSource.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURLRequest.h"
 
 using bindings_utils::CallFunctionInContext;
 using bindings_utils::ContextInfo;
@@ -128,6 +128,14 @@ class ExtensionImpl : public ExtensionBase {
   }
 };
 
+// Returns true if the extension running in the given |context| has sufficient
+// permissions to access the data.
+static bool HasSufficientPermissions(ContextInfo* context,
+                                     bool requires_incognito_access) {
+  return (!requires_incognito_access ||
+          ExtensionProcessBindings::HasIncognitoEnabled(context->extension_id));
+}
+
 }  // namespace
 
 const char* EventBindings::kName = "chrome/EventBindings";
@@ -180,11 +188,6 @@ static void UnregisterContext(ContextList::iterator context_iter, bool in_gc) {
     }
   }
 
-  if (!(*context_iter)->parent_context.IsEmpty()) {
-    (*context_iter)->parent_context.Dispose();
-    (*context_iter)->parent_context.Clear();
-  }
-
   // Remove it from our registered contexts.
   (*context_iter)->context.ClearWeak();
   if (!in_gc) {
@@ -234,19 +237,18 @@ void EventBindings::HandleContextCreated(WebFrame* frame, bool content_script) {
     // care about content scripts and extension frames.
     // (Unless we're in unit tests, in which case we don't care what the URL
     // is).
-    DCHECK(frame_context == context);
+    DCHECK(frame_context.IsEmpty() || frame_context == context);
     if (!in_unit_tests)
       return;
   }
 
   v8::Persistent<v8::Context> persistent_context =
       v8::Persistent<v8::Context>::New(context);
-  v8::Persistent<v8::Context> parent_context;
+  WebFrame* parent_frame = NULL;
 
   if (content_script) {
     DCHECK(frame_context != context);
-
-    parent_context = v8::Persistent<v8::Context>::New(frame_context);
+    parent_frame = frame;
     // Content script contexts can get GCed before their frame goes away, so
     // set up a GC callback.
     persistent_context.MakeWeak(NULL, &ContextWeakReferenceCallback);
@@ -257,7 +259,7 @@ void EventBindings::HandleContextCreated(WebFrame* frame, bool content_script) {
     render_view = RenderView::FromWebView(frame->view());
 
   contexts.push_back(linked_ptr<ContextInfo>(
-      new ContextInfo(persistent_context, extension_id, parent_context,
+      new ContextInfo(persistent_context, extension_id, parent_frame,
                       render_view)));
 
   v8::Handle<v8::Value> argv[1];
@@ -272,30 +274,48 @@ void EventBindings::HandleContextDestroyed(WebFrame* frame) {
 
   v8::HandleScope handle_scope;
   v8::Local<v8::Context> context = frame->mainWorldScriptContext();
-  DCHECK(!context.IsEmpty());
-
-  ContextList::iterator context_iter = bindings_utils::FindContext(context);
-  if (context_iter != GetContexts().end())
-    UnregisterContext(context_iter, false);
+  if (!context.IsEmpty()) {
+    ContextList::iterator context_iter = bindings_utils::FindContext(context);
+    if (context_iter != GetContexts().end())
+      UnregisterContext(context_iter, false);
+  }
 
   // Unload any content script contexts for this frame.  Note that the frame
-  // itself might not be registered, but can still be a parent context.
+  // itself might not be registered, but can still be a parent frame.
   for (ContextList::iterator it = GetContexts().begin();
        it != GetContexts().end(); ) {
-    ContextList::iterator current = it++;
-    if ((*current)->parent_context == context)
-      UnregisterContext(current, false);
+    if ((*it)->parent_frame == frame) {
+      UnregisterContext(it, false);
+      // UnregisterContext will remove |it| from the list, but may also
+      // modify the rest of the list as a result of calling into javascript.
+      it = GetContexts().begin();
+    } else {
+      ++it;
+    }
   }
 }
 
 // static
 void EventBindings::CallFunction(const std::string& function_name,
                                  int argc, v8::Handle<v8::Value>* argv,
-                                 RenderView* render_view) {
-  for (ContextList::iterator it = GetContexts().begin();
-       it != GetContexts().end(); ++it) {
+                                 RenderView* render_view,
+                                 bool requires_incognito_access) {
+  // We copy the context list, because calling into javascript may modify it
+  // out from under us. We also guard against deleted contexts by checking if
+  // they have been cleared first.
+  ContextList contexts = GetContexts();
+
+  for (ContextList::iterator it = contexts.begin();
+       it != contexts.end(); ++it) {
     if (render_view && render_view != (*it)->render_view)
       continue;
+
+    if ((*it)->context.IsEmpty())
+      continue;
+
+    if (!HasSufficientPermissions(it->get(), requires_incognito_access))
+      continue;
+
     v8::Handle<v8::Value> retval = CallFunctionInContext((*it)->context,
         function_name, argc, argv);
     // In debug, the js will validate the event parameters and return a

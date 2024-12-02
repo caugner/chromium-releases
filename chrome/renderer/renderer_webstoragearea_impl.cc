@@ -1,13 +1,20 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.  Use of this
-// source code is governed by a BSD-style license that can be found in the
-// LICENSE file.
+// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #include "chrome/renderer/renderer_webstoragearea_impl.h"
 
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/render_thread.h"
+#include "chrome/renderer/render_view.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/WebKit/chromium/public/WebView.h"
 
+using WebKit::WebFrame;
 using WebKit::WebString;
+using WebKit::WebURL;
+using WebKit::WebView;
 
 RendererWebStorageAreaImpl::RendererWebStorageAreaImpl(
     int64 namespace_id, const WebString& origin) {
@@ -40,20 +47,39 @@ WebString RendererWebStorageAreaImpl::getItem(const WebString& key) {
   return value;
 }
 
-void RendererWebStorageAreaImpl::setItem(const WebString& key,
-                                         const WebString& value,
-                                         bool& quota_exception) {
-  RenderThread::current()->Send(
-      new ViewHostMsg_DOMStorageSetItem(storage_area_id_, key, value,
-                                        &quota_exception));
+void RendererWebStorageAreaImpl::setItem(
+    const WebString& key, const WebString& value, const WebURL& url,
+    WebStorageArea::Result& result, WebString& old_value_webkit,
+    WebFrame* web_frame) {
+  int32 routing_id = MSG_ROUTING_CONTROL;
+  if (web_frame) {
+    RenderView* render_view = RenderView::FromWebView(web_frame->view());
+    if (render_view)
+      routing_id = render_view->routing_id();
+  }
+  DCHECK(routing_id != MSG_ROUTING_CONTROL);
+
+  NullableString16 old_value;
+  IPC::SyncMessage* message =
+      new ViewHostMsg_DOMStorageSetItem(routing_id, storage_area_id_, key,
+                                        value, url, &result, &old_value);
+  // NOTE: This may pump events (see RenderThread::Send).
+  RenderThread::current()->Send(message);
+  old_value_webkit = old_value;
 }
 
-void RendererWebStorageAreaImpl::removeItem(const WebString& key) {
+void RendererWebStorageAreaImpl::removeItem(
+    const WebString& key, const WebURL& url, WebString& old_value_webkit) {
+  NullableString16 old_value;
   RenderThread::current()->Send(
-      new ViewHostMsg_DOMStorageRemoveItem(storage_area_id_, key));
+      new ViewHostMsg_DOMStorageRemoveItem(storage_area_id_, key,
+                                           url, &old_value));
+  old_value_webkit = old_value;
 }
 
-void RendererWebStorageAreaImpl::clear() {
+void RendererWebStorageAreaImpl::clear(
+    const WebURL& url, bool& cleared_something) {
   RenderThread::current()->Send(
-      new ViewHostMsg_DOMStorageClear(storage_area_id_));
+      new ViewHostMsg_DOMStorageClear(storage_area_id_, url,
+                                      &cleared_something));
 }

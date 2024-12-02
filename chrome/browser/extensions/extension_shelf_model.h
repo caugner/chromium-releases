@@ -9,10 +9,10 @@
 
 #include "base/basictypes.h"
 #include "base/observer_list.h"
+#include "chrome/browser/extensions/extension_host.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/notification_observer.h"
 #include "chrome/common/notification_registrar.h"
-#include "chrome/browser/extensions/extension_host.h"
-#include "chrome/browser/extensions/extensions_service.h"
 
 class Browser;
 class ExtensionPrefs;
@@ -24,7 +24,7 @@ class ExtensionShelfModelObserver;
 // are specific to a Browser.
 class ExtensionShelfModel : public NotificationObserver {
  public:
-  ExtensionShelfModel(Browser* browser);
+  explicit ExtensionShelfModel(Browser* browser);
   virtual ~ExtensionShelfModel();
 
   struct ToolstripItem {
@@ -158,6 +158,9 @@ class ExtensionShelfModelObserver {
 
   // The model is being destroyed.
   virtual void ShelfModelDeleting() {}
+
+ protected:
+  virtual ~ExtensionShelfModelObserver() {}
 };
 
 

@@ -14,7 +14,8 @@ class Profile;
 enum OptionsPage {
   OPTIONS_PAGE_DEFAULT = -1,
 #if defined(OS_CHROMEOS)
-  OPTIONS_PAGE_SETTINGS,
+  OPTIONS_PAGE_SYSTEM,
+  OPTIONS_PAGE_INTERNET,
 #endif
   OPTIONS_PAGE_GENERAL,
   OPTIONS_PAGE_CONTENT,
@@ -35,4 +36,4 @@ void ShowOptionsWindow(OptionsPage page,
                        OptionsGroup highlight_group,
                        Profile* profile);
 
-#endif  // #ifndef CHROME_BROWSER_OPTIONS_WINDOW_H__
+#endif  // CHROME_BROWSER_OPTIONS_WINDOW_H_
