@@ -17,12 +17,8 @@
 namespace ash {
 
 AmbientSlideshowUiLauncher::AmbientSlideshowUiLauncher(
-    AmbientPhotoCache& photo_cache,
-    AmbientPhotoCache& backup_photo_cache,
     AmbientViewDelegateImpl* view_delegate)
-    : photo_controller_(photo_cache,
-                        backup_photo_cache,
-                        *view_delegate,
+    : photo_controller_(*view_delegate,
                         CreateAmbientSlideshowPhotoConfig(),
                         std::make_unique<AmbientTopicQueueSlideshowDelegate>()),
       view_delegate_(view_delegate) {}
@@ -43,8 +39,6 @@ void AmbientSlideshowUiLauncher::OnImagesFailed() {
 void AmbientSlideshowUiLauncher::Initialize(InitializationCallback on_done) {
   CHECK(on_done);
   initialization_callback_ = std::move(on_done);
-  CHECK(!is_active_);
-  is_active_ = true;
   weather_refresher_ = Shell::Get()
                            ->ambient_controller()
                            ->ambient_weather_controller()
@@ -54,7 +48,6 @@ void AmbientSlideshowUiLauncher::Initialize(InitializationCallback on_done) {
 }
 
 std::unique_ptr<views::View> AmbientSlideshowUiLauncher::CreateView() {
-  CHECK(is_active_);
   return std::make_unique<PhotoView>(view_delegate_);
 }
 
@@ -62,7 +55,6 @@ void AmbientSlideshowUiLauncher::Finalize() {
   photo_controller_.StopScreenUpdate();
   ambient_backend_model_observer_.Reset();
   weather_refresher_.reset();
-  is_active_ = false;
 }
 
 AmbientBackendModel* AmbientSlideshowUiLauncher::GetAmbientBackendModel() {
@@ -72,10 +64,6 @@ AmbientBackendModel* AmbientSlideshowUiLauncher::GetAmbientBackendModel() {
 AmbientPhotoController*
 AmbientSlideshowUiLauncher::GetAmbientPhotoController() {
   return &photo_controller_;
-}
-
-bool AmbientSlideshowUiLauncher::IsActive() {
-  return is_active_;
 }
 
 }  // namespace ash

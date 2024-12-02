@@ -189,7 +189,7 @@ void PageInfoMainView::SetCookieInfo(const CookiesNewInfo& cookie_info) {
           IDS_PAGE_INFO_TRACKING_PROTECTION_SITE_INFO_BUTTON_LABEL_LIMITED);
     }
   } else {
-    icon = PageInfoViewFactory::GetPermissionIcon(info);
+    icon = PageInfoViewFactory::GetCookiesAndSiteDataIcon();
     title = l10n_util::GetStringUTF16(IDS_PAGE_INFO_COOKIES_HEADER);
     tooltip = l10n_util::GetStringUTF16(IDS_PAGE_INFO_COOKIES_TOOLTIP);
   }
@@ -636,14 +636,6 @@ PageInfoMainView::CreateAdPersonalizationSection() {
   ads_personalization_section
       ->SetLayoutManager(std::make_unique<views::FlexLayout>())
       ->SetOrientation(views::LayoutOrientation::kVertical);
-  const auto header_id =
-      base::FeatureList::IsEnabled(privacy_sandbox::kPrivacySandboxSettings4)
-          ? IDS_PAGE_INFO_AD_PRIVACY_HEADER
-          : IDS_PAGE_INFO_AD_PERSONALIZATION_HEADER;
-  const auto tooltip_id =
-      base::FeatureList::IsEnabled(privacy_sandbox::kPrivacySandboxSettings4)
-          ? IDS_PAGE_INFO_AD_PRIVACY_TOOLTIP
-          : IDS_PAGE_INFO_AD_PERSONALIZATION_TOOLTIP;
   ads_personalization_section
       ->AddChildView(std::make_unique<RichHoverButton>(
           base::BindRepeating(
@@ -652,9 +644,10 @@ PageInfoMainView::CreateAdPersonalizationSection() {
               },
               this),
           PageInfoViewFactory::GetAdPersonalizationIcon(),
-          l10n_util::GetStringUTF16(header_id), std::u16string(),
-          l10n_util::GetStringUTF16(tooltip_id), std::u16string(),
-          PageInfoViewFactory::GetOpenSubpageIcon()))
+          l10n_util::GetStringUTF16(IDS_PAGE_INFO_AD_PRIVACY_HEADER),
+          std::u16string(),
+          l10n_util::GetStringUTF16(IDS_PAGE_INFO_AD_PRIVACY_TOOLTIP),
+          std::u16string(), PageInfoViewFactory::GetOpenSubpageIcon()))
       ->SetID(PageInfoViewFactory::VIEW_ID_PAGE_INFO_AD_PERSONALIZATION_BUTTON);
 
   return ads_personalization_section;

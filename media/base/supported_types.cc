@@ -69,15 +69,21 @@ SupplementalProfileCache<AudioType>* GetSupplementalAudioTypeCache() {
   return cache.get();
 }
 
-bool IsSupportedHdrMetadata(const gfx::HdrMetadataType& hdr_metadata_type) {
-  switch (hdr_metadata_type) {
+bool IsSupportedHdrMetadata(const VideoType& type) {
+  switch (type.hdr_metadata_type) {
     case gfx::HdrMetadataType::kNone:
       return true;
 
     case gfx::HdrMetadataType::kSmpteSt2086:
-      return base::FeatureList::IsEnabled(kSupportSmpteSt2086HdrMetadata);
+      // HDR metadata is currently only used with the PQ transfer function.
+      // See gfx::ColorTransform for more details.
+      return type.color_space.transfer ==
+             VideoColorSpace::TransferID::SMPTEST2084;
 
     case gfx::HdrMetadataType::kSmpteSt2094_10:
+#if BUILDFLAG(ENABLE_PLATFORM_DOLBY_VISION)
+      return type.codec == VideoCodec::kDolbyVision;
+#endif
     case gfx::HdrMetadataType::kSmpteSt2094_40:
       return false;
   }
@@ -293,8 +299,8 @@ bool IsAV1Supported(const VideoType& type) {
 }
 
 bool IsMPEG4Supported() {
-#if BUILDFLAG(IS_CHROMEOS_ASH)
-  return true;
+#if BUILDFLAG(IS_CHROMEOS) && BUILDFLAG(USE_PROPRIETARY_CODECS)
+  return base::FeatureList::IsEnabled(kCrOSLegacyMediaFormats);
 #else
   return false;
 #endif
@@ -342,8 +348,9 @@ bool IsSupportedVideoType(const VideoType& type) {
 // TODO(chcunningham): Add platform specific logic for Android (move from
 // MimeUtilInternal).
 bool IsDefaultSupportedVideoType(const VideoType& type) {
-  if (!IsSupportedHdrMetadata(type.hdr_metadata_type))
+  if (!IsSupportedHdrMetadata(type)) {
     return false;
+  }
 
 #if !BUILDFLAG(USE_PROPRIETARY_CODECS)
   if (IsVideoCodecProprietary(type.codec))
@@ -351,9 +358,10 @@ bool IsDefaultSupportedVideoType(const VideoType& type) {
 #endif
 
   switch (type.codec) {
+    case VideoCodec::kTheora:
+      return IsBuiltInVideoCodec(type.codec);
     case VideoCodec::kH264:
     case VideoCodec::kVP8:
-    case VideoCodec::kTheora:
       return true;
     case VideoCodec::kAV1:
       return IsAV1Supported(type);
@@ -423,7 +431,7 @@ bool IsDefaultSupportedAudioType(const AudioType& type) {
 bool IsBuiltInVideoCodec(VideoCodec codec) {
 #if BUILDFLAG(ENABLE_FFMPEG_VIDEO_DECODERS)
   if (codec == VideoCodec::kTheora)
-    return true;
+    return base::FeatureList::IsEnabled(kTheoraVideoCodec);
   if (codec == VideoCodec::kVP8)
     return true;
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)

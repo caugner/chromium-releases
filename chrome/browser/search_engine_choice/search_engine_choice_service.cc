@@ -4,15 +4,21 @@
 
 #include "chrome/browser/search_engine_choice/search_engine_choice_service.h"
 
+#include "base/check_deref.h"
 #include "base/check_is_test.h"
 #include "base/command_line.h"
 #include "base/containers/contains.h"
+#include "base/debug/crash_logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search_engine_choice/search_engine_choice_service_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/profiles/profile_customization_bubble_sync_controller.h"
+#include "chrome/browser/ui/search_engine_choice/search_engine_choice_tab_helper.h"
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
+#include "components/country_codes/country_codes.h"
 #include "components/prefs/pref_service.h"
 #include "components/search_engines/search_engine_choice_utils.h"
 #include "components/search_engines/search_engines_pref_names.h"
@@ -25,26 +31,6 @@
 
 namespace {
 bool g_dialog_disabled_for_testing = false;
-
-// Checks that the profile is the first profile that sees the search engine
-// choice dialog.
-bool IsSelectedChoiceProfile(Profile& profile, PrefService* local_state) {
-  base::CommandLine* const command_line =
-      base::CommandLine::ForCurrentProcess();
-  // Force-enable the choice screen for testing the screen itself.
-  if (command_line->HasSwitch(switches::kForceSearchEngineChoiceScreen)) {
-    return true;
-  }
-
-  if (!local_state->HasPrefPath(prefs::kSearchEnginesChoiceProfile)) {
-    local_state->SetFilePath(prefs::kSearchEnginesChoiceProfile,
-                             profile.GetBaseName());
-    return true;
-  }
-
-  return profile.GetBaseName() ==
-         local_state->GetFilePath(prefs::kSearchEnginesChoiceProfile);
-}
 
 void RecordChoiceScreenNavigationCondition(
     search_engines::SearchEngineChoiceScreenConditions condition) {
@@ -68,7 +54,6 @@ bool IsBrowserTypeSupported(const Browser& browser) {
       return false;
   }
 }
-
 }  // namespace
 
 SearchEngineChoiceService::BrowserObserver::BrowserObserver(
@@ -108,8 +93,29 @@ void SearchEngineChoiceService::NotifyChoiceMade(int prepopulate_id,
     std::unique_ptr<TemplateURLData> search_engine =
         TemplateURLPrepopulateData::GetPrepopulatedEngine(pref_service,
                                                           prepopulate_id);
+
+    int country_id =
+        search_engines::GetSearchEngineChoiceCountryId(pref_service);
+    SCOPED_CRASH_KEY_STRING32(
+        "ChoiceService", "choice_country",
+        country_codes::CountryIDToCountryString(country_id));
+    SCOPED_CRASH_KEY_NUMBER("ChoiceService", "prepopulate_id", prepopulate_id);
+    SCOPED_CRASH_KEY_NUMBER("ChoiceService", "entry_point",
+                            static_cast<int>(entry_point));
+    if (!search_engine) {
+      search_engine =
+          TemplateURLPrepopulateData::GetPrepopulatedEngineFromFullList(
+              pref_service, prepopulate_id);
+
+      SCOPED_CRASH_KEY_BOOL("ChoiceService", "engine_found",
+                            search_engine != nullptr);
+      base::debug::DumpWithoutCrashing();
+    }
+
     CHECK(search_engine);
-    SetDefaultSearchProviderPrefValue(*pref_service, search_engine->sync_guid);
+    TemplateURL search_engine_template_url = TemplateURL(*search_engine);
+    template_url_service_->SetUserSelectedDefaultSearchProvider(
+        &search_engine_template_url);
   } else {
     // Make sure that the default search engine is a custom search engine.
     const TemplateURL* default_search_provider =
@@ -129,14 +135,22 @@ void SearchEngineChoiceService::NotifyChoiceMade(int prepopulate_id,
   browsers_with_open_dialogs_.clear();
 
   // Log the view entry point in which the choice was made.
-  if (entry_point == EntryPoint::kProfilePicker) {
-    choice_made_in_profile_picker_ = true;
-    search_engines::RecordChoiceScreenEvent(
-        search_engines::SearchEngineChoiceScreenEvents::kFreDefaultWasSet);
-  } else {
-    search_engines::RecordChoiceScreenEvent(
-        search_engines::SearchEngineChoiceScreenEvents::kDefaultWasSet);
+  search_engines::SearchEngineChoiceScreenEvents event;
+  switch (entry_point) {
+    case EntryPoint::kDialog:
+      event = search_engines::SearchEngineChoiceScreenEvents::kDefaultWasSet;
+      break;
+    case EntryPoint::kFirstRunExperience:
+      event = search_engines::SearchEngineChoiceScreenEvents::kFreDefaultWasSet;
+      choice_made_in_profile_picker_ = true;
+      break;
+    case EntryPoint::kProfileCreation:
+      event = search_engines::SearchEngineChoiceScreenEvents::
+          kProfileCreationDefaultWasSet;
+      choice_made_in_profile_picker_ = true;
+      break;
   }
+  search_engines::RecordChoiceScreenEvent(event);
 
   // `RecordChoiceMade` should always be called after setting the default
   // search engine.
@@ -179,6 +193,61 @@ void SearchEngineChoiceService::RegisterLocalStatePrefs(
                                  base::FilePath());
 }
 
+// static
+search_engines::ChoiceData SearchEngineChoiceService::GetChoiceDataFromProfile(
+    Profile& profile) {
+  if (!search_engines::IsChoiceScreenFlagEnabled(
+          search_engines::ChoicePromo::kAny)) {
+    return {};
+  }
+
+  PrefService* pref_service = profile.GetPrefs();
+  TemplateURLService* template_url_service =
+      TemplateURLServiceFactory::GetForProfile(&profile);
+  CHECK(template_url_service);
+  const TemplateURLData& default_search_engine =
+      template_url_service->GetDefaultSearchProvider()->data();
+
+  return {.timestamp = pref_service->GetInt64(
+              prefs::kDefaultSearchProviderChoiceScreenCompletionTimestamp),
+          .chrome_version = pref_service->GetString(
+              prefs::kDefaultSearchProviderChoiceScreenCompletionVersion),
+          .default_search_engine = default_search_engine};
+}
+
+// static
+void SearchEngineChoiceService::UpdateProfileFromChoiceData(
+    Profile& profile,
+    search_engines::ChoiceData& choice_data) {
+  if (!search_engines::IsChoiceScreenFlagEnabled(
+          search_engines::ChoicePromo::kAny)) {
+    return;
+  }
+
+  PrefService* pref_service = profile.GetPrefs();
+  if (choice_data.timestamp != 0) {
+    pref_service->SetInt64(
+        prefs::kDefaultSearchProviderChoiceScreenCompletionTimestamp,
+        choice_data.timestamp);
+  }
+
+  if (!choice_data.chrome_version.empty()) {
+    pref_service->SetString(
+        prefs::kDefaultSearchProviderChoiceScreenCompletionVersion,
+        choice_data.chrome_version);
+  }
+
+  TemplateURLData& default_search_engine = choice_data.default_search_engine;
+  if (!default_search_engine.keyword().empty() &&
+      !default_search_engine.url().empty()) {
+    TemplateURLService* template_url_service =
+        TemplateURLServiceFactory::GetForProfile(&profile);
+    CHECK(template_url_service);
+    TemplateURL template_url(default_search_engine);
+    template_url_service->SetUserSelectedDefaultSearchProvider(&template_url);
+  }
+}
+
 bool SearchEngineChoiceService::IsShowingDialog(Browser* browser) {
   return base::Contains(browsers_with_open_dialogs_, browser);
 }
@@ -188,68 +257,81 @@ SearchEngineChoiceService::GetSearchEngines() {
   return template_url_service_->GetTemplateURLsForChoiceScreen();
 }
 
-bool SearchEngineChoiceService::CanShowDialog(Browser& browser) {
-  if (!IsSelectedChoiceProfile(profile_.get(),
-                               g_browser_process->local_state())) {
-    RecordChoiceScreenNavigationCondition(
-        search_engines::SearchEngineChoiceScreenConditions::kProfileOutOfScope);
-    return false;
+search_engines::SearchEngineChoiceScreenConditions
+SearchEngineChoiceService::ComputeDialogConditions(Browser& browser) {
+  if (!search_engines::IsChoiceScreenFlagEnabled(
+          search_engines::ChoicePromo::kDialog)) {
+    return search_engines::SearchEngineChoiceScreenConditions::
+        kFeatureSuppressed;
   }
 
   if (web_app::AppBrowserController::IsWebApp(&browser)) {
     // Showing a Chrome-specific search engine dialog on top of a window
     // dedicated to a specific web app is a horrible UX, we suppress it for this
     // window. When the user proceeds to a non-web app window they will get it.
-    return false;
+    return search_engines::SearchEngineChoiceScreenConditions::
+        kUnsupportedBrowserType;
   }
 
   // Only show the dialog over normal and popup browsers. This is to avoid
   // showing it in picture-in-picture for example.
   if (!IsBrowserTypeSupported(browser)) {
-    RecordChoiceScreenNavigationCondition(
-        search_engines::SearchEngineChoiceScreenConditions::
-            kUnsupportedBrowserType);
-    return false;
+    return search_engines::SearchEngineChoiceScreenConditions::
+        kUnsupportedBrowserType;
+  }
+
+  if (!CanWindowHeightFitSearchEngineChoiceDialog(browser)) {
+    return search_engines::SearchEngineChoiceScreenConditions::
+        kBrowserWindowTooSmall;
   }
 
   // To avoid conflict, the dialog should not be shown if a sign-in dialog is
-  // being currently displayed.
-  if (browser.signin_view_controller()->ShowsModalDialog()) {
-    return false;
+  // currently displayed or is about to be displayed.
+  bool signin_dialog_displayed_or_pending =
+      browser.signin_view_controller()->ShowsModalDialog();
+#if !BUILDFLAG(IS_CHROMEOS_ASH)
+  signin_dialog_displayed_or_pending =
+      signin_dialog_displayed_or_pending ||
+      IsProfileCustomizationBubbleSyncControllerRunning(&browser);
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+  if (signin_dialog_displayed_or_pending) {
+    return search_engines::SearchEngineChoiceScreenConditions::
+        kSuppressedByOtherDialog;
   }
 
-  // Don't show the dialog if the default search engine is set by an extension.
-  if (template_url_service_->IsExtensionControlledDefaultSearch()) {
-    RecordChoiceScreenNavigationCondition(
-        search_engines::SearchEngineChoiceScreenConditions::
-            kExtensionContolled);
-    return false;
+  // Respect common conditions with other platforms.
+  search_engines::SearchEngineChoiceScreenConditions dynamic_conditions =
+      search_engines::GetDynamicChoiceScreenConditions(
+          CHECK_DEREF(profile_->GetPrefs()), *template_url_service_);
+  if (dynamic_conditions !=
+      search_engines::SearchEngineChoiceScreenConditions::kEligible) {
+    return dynamic_conditions;
   }
 
-  if (HasUserMadeChoice()) {
-    RecordChoiceScreenNavigationCondition(
-        search_engines::SearchEngineChoiceScreenConditions::kAlreadyCompleted);
-    return false;
+  // Lastly, we check if this profile can be the selected one for showing the
+  // dialogs. We check it last to make sure we don't mark to eagerly this one
+  // as the choice profile if one of the other conditions is not met.
+  if (!SearchEngineChoiceServiceFactory::IsSelectedChoiceProfile(
+          profile_.get(), /*try_claim=*/true)) {
+    return search_engines::SearchEngineChoiceScreenConditions::
+        kProfileOutOfScope;
   }
 
+  return search_engines::SearchEngineChoiceScreenConditions::kEligible;
+}
+
+bool SearchEngineChoiceService::CanShowDialog(Browser& browser) {
   // Dialog should not be shown if it is currently displayed
   if (g_dialog_disabled_for_testing || IsShowingDialog(&browser)) {
     return false;
   }
 
-  RecordChoiceScreenNavigationCondition(
-      search_engines::SearchEngineChoiceScreenConditions::kEligible);
-  return true;
-}
+  search_engines::SearchEngineChoiceScreenConditions conditions =
+      ComputeDialogConditions(browser);
+  RecordChoiceScreenNavigationCondition(conditions);
 
-bool SearchEngineChoiceService::HasUserMadeChoice() const {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kForceSearchEngineChoiceScreen)) {
-    return false;
-  }
-  PrefService* pref_service = profile_->GetPrefs();
-  return pref_service->GetInt64(
-      prefs::kDefaultSearchProviderChoiceScreenCompletionTimestamp);
+  return conditions ==
+         search_engines::SearchEngineChoiceScreenConditions::kEligible;
 }
 
 bool SearchEngineChoiceService::CanSuppressPrivacySandboxPromo() const {
@@ -273,9 +355,21 @@ bool SearchEngineChoiceService::IsUrlSuitableForDialog(GURL url) {
 
 void SearchEngineChoiceService::NotifyLearnMoreLinkClicked(
     EntryPoint entry_point) {
-  RecordChoiceScreenEvent(entry_point == EntryPoint::kDialog
-                              ? search_engines::SearchEngineChoiceScreenEvents::
-                                    kLearnMoreWasDisplayed
-                              : search_engines::SearchEngineChoiceScreenEvents::
-                                    kFreLearnMoreWasDisplayed);
+  search_engines::SearchEngineChoiceScreenEvents event;
+
+  switch (entry_point) {
+    case EntryPoint::kDialog:
+      event = search_engines::SearchEngineChoiceScreenEvents::
+          kLearnMoreWasDisplayed;
+      break;
+    case EntryPoint::kFirstRunExperience:
+      event = search_engines::SearchEngineChoiceScreenEvents::
+          kFreLearnMoreWasDisplayed;
+      break;
+    case EntryPoint::kProfileCreation:
+      event = search_engines::SearchEngineChoiceScreenEvents::
+          kProfileCreationLearnMoreDisplayed;
+      break;
+  }
+  RecordChoiceScreenEvent(event);
 }

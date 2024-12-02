@@ -31,10 +31,8 @@ class AmbientAnimationUiLauncher : public AmbientUiLauncher,
                                    public AmbientBackendModelObserver,
                                    public SessionObserver {
  public:
-  explicit AmbientAnimationUiLauncher(AmbientPhotoCache& photo_cache,
-                                      AmbientPhotoCache& backup_photo_cache,
-                                      AmbientUiSettings current_ui_settings,
-                                      AmbientViewDelegateImpl* view_delegate);
+  AmbientAnimationUiLauncher(AmbientUiSettings current_ui_settings,
+                             AmbientViewDelegateImpl* view_delegate);
   AmbientAnimationUiLauncher(const AmbientAnimationUiLauncher&) = delete;
   AmbientAnimationUiLauncher& operator=(const AmbientAnimationUiLauncher&) =
       delete;
@@ -50,13 +48,11 @@ class AmbientAnimationUiLauncher : public AmbientUiLauncher,
   void Finalize() override;
   AmbientBackendModel* GetAmbientBackendModel() override;
   AmbientPhotoController* GetAmbientPhotoController() override;
-  bool IsActive() override;
 
  private:
   const scoped_refptr<cc::SkottieWrapper> animation_;
   const raw_ptr<AmbientViewDelegateImpl> view_delegate_;
 
-  bool is_active_ = false;
   InitializationCallback initialization_callback_;
   AmbientPhotoController photo_controller_;
   AmbientUiSettings current_ui_settings_;

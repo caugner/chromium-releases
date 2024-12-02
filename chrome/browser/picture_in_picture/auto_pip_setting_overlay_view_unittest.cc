@@ -17,7 +17,17 @@
 #include "ui/events/test/event_generator.h"
 #include "ui/views/test/views_test_base.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_observer.h"
 #include "ui/views/widget/widget_utils.h"
+
+namespace {
+
+class MockWidgetObserver : public views::WidgetObserver {
+ public:
+  MOCK_METHOD(void, OnWidgetClosing, (views::Widget*), ());
+};
+
+}  // namespace
 
 class AutoPipSettingOverlayViewTest : public views::ViewsTestBase {
  public:
@@ -78,6 +88,20 @@ class AutoPipSettingOverlayViewTest : public views::ViewsTestBase {
 
   base::MockOnceCallback<void(UiResult)>& cb() { return cb_; }
 
+  void RemoveAndDeleteSettingOverlay() {
+    setting_overlay_ = nullptr;
+
+    // Setting the contents view will remove and delete the existing contents
+    // view, which is the setting overlay.
+    widget_->SetContentsView(std::make_unique<views::View>());
+  }
+
+ protected:
+  void WaitForBubbleToBeShown() {
+    // Bubble should be shown after an 500Ms delay.
+    task_environment()->FastForwardBy(base::Milliseconds(505));
+  }
+
  private:
   base::MockOnceCallback<void(UiResult)> cb_;
   std::unique_ptr<views::Widget> parent_widget_;
@@ -110,14 +134,23 @@ TEST_F(AutoPipSettingOverlayViewTest, TestBackgroundLayerAnimation) {
 }
 
 TEST_F(AutoPipSettingOverlayViewTest, TestWantsEvent) {
-  setting_overlay()->ShowBubble(
-      anchor_view_widget()->GetNativeView(),
-      AutoPipSettingOverlayView::PipWindowType::kDocumentPip);
+  setting_overlay()->ShowBubble(anchor_view_widget()->GetNativeView());
   // Assume nothing is at screen coordinate 0,0.
   EXPECT_FALSE(setting_overlay()->WantsEvent(gfx::Point(0, 0)));
 
-  // Make sure that the buttons work.
+  // Bubble show timer is running (bubble has not been shown yet). Make sure
+  // that clicking any of the overlay view buttons returns false.
   auto* view = setting_overlay()->get_view_for_testing();
+  EXPECT_FALSE(setting_overlay()->WantsEvent(
+      view->get_allow_always_button_center_in_screen_for_testing()));
+  EXPECT_FALSE(setting_overlay()->WantsEvent(
+      view->get_allow_once_button_center_in_screen_for_testing()));
+  EXPECT_FALSE(setting_overlay()->WantsEvent(
+      view->get_block_button_center_in_screen_for_testing()));
+
+  // Bubble show timer is no longer running (bubble is now visible). Make sure
+  // that the buttons work.
+  WaitForBubbleToBeShown();
   EXPECT_TRUE(setting_overlay()->WantsEvent(
       view->get_allow_always_button_center_in_screen_for_testing()));
   EXPECT_TRUE(setting_overlay()->WantsEvent(
@@ -128,17 +161,13 @@ TEST_F(AutoPipSettingOverlayViewTest, TestWantsEvent) {
 
 TEST_F(AutoPipSettingOverlayViewTest,
        TestOverlayViewDoesNotHaveFocusForDocumentPip) {
-  setting_overlay()->ShowBubble(
-      anchor_view_widget()->GetNativeView(),
-      AutoPipSettingOverlayView::PipWindowType::kDocumentPip);
+  setting_overlay()->ShowBubble(anchor_view_widget()->GetNativeView());
   EXPECT_FALSE(setting_overlay()->HasFocus());
 }
 
 TEST_F(AutoPipSettingOverlayViewTest,
        TestOverlayViewDoesNotHaveFocusForVideoPip) {
-  setting_overlay()->ShowBubble(
-      anchor_view_widget()->GetNativeView(),
-      AutoPipSettingOverlayView::PipWindowType::kVideoPip);
+  setting_overlay()->ShowBubble(anchor_view_widget()->GetNativeView());
   EXPECT_FALSE(setting_overlay()->HasFocus());
 }
 
@@ -148,9 +177,7 @@ TEST_F(AutoPipSettingOverlayViewTest,
 TEST_F(AutoPipSettingOverlayViewTest,
        TestOverlayViewNotShownBeforeDelayForDocumentPip) {
   // Initially bubble should not be shown.
-  setting_overlay()->ShowBubble(
-      anchor_view_widget()->GetNativeView(),
-      AutoPipSettingOverlayView::PipWindowType::kDocumentPip);
+  setting_overlay()->ShowBubble(anchor_view_widget()->GetNativeView());
   EXPECT_FALSE(
       setting_overlay()->get_view_for_testing()->GetWidget()->IsVisible());
 
@@ -165,27 +192,86 @@ TEST_F(AutoPipSettingOverlayViewTest,
 
 // Ensure that bubbles requested for Document Picture-in-Picture windows are
 // shown after the scrim animation.
-TEST_F(AutoPipSettingOverlayViewTest,
-       TestOverlayViewShownWithDelayForDocumentPip) {
-  setting_overlay()->ShowBubble(
-      anchor_view_widget()->GetNativeView(),
-      AutoPipSettingOverlayView::PipWindowType::kDocumentPip);
+TEST_F(AutoPipSettingOverlayViewTest, TestOverlayViewShownWithDelay) {
+  setting_overlay()->ShowBubble(anchor_view_widget()->GetNativeView());
   EXPECT_FALSE(
       setting_overlay()->get_view_for_testing()->GetWidget()->IsVisible());
 
-  // Bubble should be shown after an 500Ms delay.
-  task_environment()->FastForwardBy(base::Milliseconds(505));
+  WaitForBubbleToBeShown();
   EXPECT_TRUE(
       setting_overlay()->get_view_for_testing()->GetWidget()->IsVisible());
 }
 
-TEST_F(AutoPipSettingOverlayViewTest,
-       TestOverlayViewShownWithoutDelayForVideoPip) {
-  // Ensure that bubbles requested for Video Picture-in-Picture windows are
-  // shown without delay, regardless of platform.
-  setting_overlay()->ShowBubble(
-      anchor_view_widget()->GetNativeView(),
-      AutoPipSettingOverlayView::PipWindowType::kVideoPip);
-  EXPECT_TRUE(
-      setting_overlay()->get_view_for_testing()->GetWidget()->IsVisible());
+TEST_F(AutoPipSettingOverlayViewTest, TestDeletingOverlayClosesBubble) {
+  setting_overlay()->ShowBubble(anchor_view_widget()->GetNativeView());
+
+  MockWidgetObserver widget_observer;
+  views::Widget* widget =
+      setting_overlay()->get_view_for_testing()->GetWidget();
+  widget->AddObserver(&widget_observer);
+
+  // Removing and deleting the setting overlay should close the bubble widget.
+  EXPECT_CALL(widget_observer, OnWidgetClosing(widget))
+      .WillOnce(testing::InvokeWithoutArgs(
+          [&]() { widget->RemoveObserver(&widget_observer); }));
+  RemoveAndDeleteSettingOverlay();
+  testing::Mock::VerifyAndClearExpectations(&widget_observer);
+}
+
+namespace {
+
+class TestAutoPipSettingOverlayViewObserver
+    : public AutoPipSettingOverlayView::AutoPipSettingOverlayViewObserver {
+ public:
+  explicit TestAutoPipSettingOverlayViewObserver(
+      AutoPipSettingOverlayView* overlay_view) {
+    auto_pip_setting_overlay_view_observation_.Observe(overlay_view);
+  }
+  TestAutoPipSettingOverlayViewObserver(
+      const TestAutoPipSettingOverlayViewObserver&) = delete;
+  TestAutoPipSettingOverlayViewObserver& operator=(
+      const TestAutoPipSettingOverlayViewObserver&) = delete;
+
+  ~TestAutoPipSettingOverlayViewObserver() override = default;
+
+  bool observer_notified() const { return observer_notified_; }
+
+  void OnAutoPipSettingOverlayViewHidden() override {
+    observer_notified_ = true;
+  }
+
+ private:
+  bool observer_notified_ = false;
+  base::ScopedObservation<
+      AutoPipSettingOverlayView,
+      AutoPipSettingOverlayView::AutoPipSettingOverlayViewObserver>
+      auto_pip_setting_overlay_view_observation_{this};
+};
+
+}  // namespace
+
+TEST_F(AutoPipSettingOverlayViewTest, TestAutoPipSettingOverlayViewObserver) {
+  // Set up observer and show bubble.
+  TestAutoPipSettingOverlayViewObserver auto_pip_setting_overlay_view_observer(
+      setting_overlay());
+  setting_overlay()->ShowBubble(anchor_view_widget()->GetNativeView());
+  WaitForBubbleToBeShown();
+
+  // Observer should not have been notified at this point, since overlay view
+  // has not been hidden.
+  EXPECT_FALSE(auto_pip_setting_overlay_view_observer.observer_notified());
+
+  // Simulate clicking the "Allow once" button, which causes the overlay view to
+  // be hidden.
+  std::unique_ptr<ui::test::EventGenerator> event_generator =
+      std::make_unique<ui::test::EventGenerator>(views::GetRootWindow(
+          setting_overlay()->get_view_for_testing()->GetWidget()));
+  event_generator->MoveMouseTo(
+      setting_overlay()
+          ->get_view_for_testing()
+          ->get_allow_once_button_center_in_screen_for_testing());
+  event_generator->ClickLeftButton();
+
+  // Ensure that observer was notified.
+  EXPECT_TRUE(auto_pip_setting_overlay_view_observer.observer_notified());
 }

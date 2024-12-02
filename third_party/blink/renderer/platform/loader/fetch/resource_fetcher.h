@@ -178,6 +178,7 @@ class PLATFORM_EXPORT ResourceFetcher
   CodeCacheHost* GetCodeCacheHost();
 
   Resource* CachedResource(const KURL&) const;
+  bool ResourceHasBeenEmulatedLoadStartedForInspector(const KURL&) const;
 
   // Registers an callback to be called with the resource priority of the fetch
   // made to the specified URL. When `new_load_only` is set to false,
@@ -326,10 +327,6 @@ class PLATFORM_EXPORT ResourceFetcher
         is_potentially_lcp_element, is_potentially_lcp_influencer);
   }
 
-  bool ShouldLoadIncrementalForTesting(ResourceType type) {
-    return ShouldLoadIncremental(type);
-  }
-
   void SetThrottleOptionOverride(
       ResourceLoadScheduler::ThrottleOptionOverride throttle_option_override) {
     scheduler_->SetThrottleOptionOverride(throttle_option_override);
@@ -394,6 +391,11 @@ class PLATFORM_EXPORT ResourceFetcher
       const absl::optional<float> resource_height = absl::nullopt,
       bool is_potentially_lcp_element = false,
       bool is_potentially_lcp_influencer = false);
+  // A helper that uses `params` to fill out other remaining parameters.
+  ResourceLoadPriority ComputeLoadPriorityHelper(
+      ResourceType,
+      ResourcePriority::VisibilityStatus,
+      const FetchParameters& params);
   ResourceLoadPriority AdjustImagePriority(
       ResourceLoadPriority priority_so_far,
       ResourceType type,
@@ -402,7 +404,6 @@ class PLATFORM_EXPORT ResourceFetcher
       bool is_link_preload,
       const absl::optional<float> resource_width,
       const absl::optional<float> resource_height);
-  bool ShouldLoadIncremental(ResourceType type) const;
 
   // |virtual_time_pauser| is an output parameter. PrepareRequest may
   // create a new WebScopedVirtualTimePauser and set it to
@@ -563,6 +564,15 @@ class PLATFORM_EXPORT ResourceFetcher
 
   // Weak reference to all the fetched resources.
   DocumentResourceMap cached_resources_map_;
+
+  // When a resource is in the global memory cache but not in the
+  // cached_resources_map_ and it is referenced (e.g. when the StyleEngine
+  // processes a @font-face rule), the resource will be emulated via
+  // `EmulateLoadStartedForInspector` so that it shows up in DevTools.
+  // In order to ensure that this only occurs once per resource, we keep
+  // a weak reference to all emulated resources and only emulate resources
+  // that have not been previously emulated.
+  DocumentResourceMap emulated_load_started_for_inspector_resources_map_;
 
   // document_resource_strong_refs_ keeps strong references for fonts, images,
   // scripts and stylesheets within their freshness lifetime.

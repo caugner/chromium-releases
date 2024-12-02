@@ -32,7 +32,7 @@
 #include "ash/public/cpp/ambient/ambient_ui_model.h"
 #include "ash/public/cpp/assistant/controller/assistant_interaction_controller.h"
 #include "ash/public/cpp/personalization_app/time_of_day_test_utils.h"
-#include "ash/public/cpp/test/in_process_image_decoder.h"
+#include "ash/public/cpp/test/in_process_data_decoder.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/test/test_ash_web_view.h"
@@ -110,7 +110,7 @@ std::vector<base::OnceClosure> GetEventGeneratorCallbacks(
 
   event_callbacks.push_back(
       base::BindOnce(&ui::test::EventGenerator::PressTouch,
-                     base::Unretained(event_generator), absl::nullopt));
+                     base::Unretained(event_generator), std::nullopt));
 
   return event_callbacks;
 }
@@ -150,6 +150,31 @@ class AmbientUiVisibilityBarrier : public AmbientUiModelObserver {
   base::ScopedObservation<AmbientUiModel, AmbientUiModelObserver> observation_{
       this};
   base::RepeatingClosure run_loop_quit_closure_;
+};
+
+// UpdateDisplay triggers a rogue MouseEvent that cancels Ambient mode when
+// testing with Xvfb. A corresponding MouseEvent is not fired on a real device
+// when an external display is added. Ignore this MouseEvent for testing.
+// Store the old |ShouldIgnoreNativePlatformEvents| value and reset it at the
+// end of the test.
+class ScopedIgnoreNativePlatformEvents {
+ public:
+  ScopedIgnoreNativePlatformEvents()
+      : old_should_ignore_events_(
+            ui::PlatformEventSource::ShouldIgnoreNativePlatformEvents()) {
+    ui::PlatformEventSource::SetIgnoreNativePlatformEvents(true);
+  }
+  ScopedIgnoreNativePlatformEvents(const ScopedIgnoreNativePlatformEvents&) =
+      delete;
+  ScopedIgnoreNativePlatformEvents& operator=(
+      const ScopedIgnoreNativePlatformEvents&) = delete;
+  ~ScopedIgnoreNativePlatformEvents() {
+    ui::PlatformEventSource::SetIgnoreNativePlatformEvents(
+        old_should_ignore_events_);
+  }
+
+ private:
+  const bool old_should_ignore_events_;
 };
 
 }  // namespace
@@ -1242,14 +1267,7 @@ TEST_P(AmbientControllerTestForAnyUiSettings, ShowsOnMultipleDisplays) {
 }
 
 TEST_P(AmbientControllerTestForAnyUiSettings, RespondsToDisplayAdded) {
-  // UpdateDisplay triggers a rogue MouseEvent that cancels Ambient mode when
-  // testing with Xvfb. A corresponding MouseEvent is not fired on a real device
-  // when an external display is added. Ignore this MouseEvent for testing.
-  // Store the old |ShouldIgnoreNativePlatformEvents| value and reset it at the
-  // end of the test.
-  bool old_should_ignore_events =
-      ui::PlatformEventSource::ShouldIgnoreNativePlatformEvents();
-  ui::PlatformEventSource::SetIgnoreNativePlatformEvents(true);
+  ScopedIgnoreNativePlatformEvents ignore_native_platform_events;
 
   UpdateDisplay("800x600");
   SetAmbientShownAndWaitForWidgets();
@@ -1267,9 +1285,38 @@ TEST_P(AmbientControllerTestForAnyUiSettings, RespondsToDisplayAdded) {
   for (auto* ctrl : RootWindowController::root_window_controllers())
     EXPECT_TRUE(ctrl->ambient_widget_for_testing() &&
                 ctrl->ambient_widget_for_testing()->IsVisible());
+}
 
-  ui::PlatformEventSource::SetIgnoreNativePlatformEvents(
-      old_should_ignore_events);
+TEST_F(AmbientControllerTest, RespondsToDisplayAddedWhileInitializing) {
+  static constexpr base::TimeDelta kPhotoDownloadDelay = base::Seconds(2);
+
+  ScopedIgnoreNativePlatformEvents ignore_native_platform_events;
+
+  SetAmbientTheme(AmbientTheme::kSlideshow);
+  SetPhotoDownloadDelay(kPhotoDownloadDelay);
+
+  UpdateDisplay("800x600");
+  ambient_controller()->SetUiVisibilityShouldShow();
+
+  // First photo is downloaded, but the minimum required to start
+  // `kSlideshow` is two, so `AmbientPhotoController` should attempt to
+  // download another before starting the ui.
+  task_environment()->FastForwardBy(kPhotoDownloadDelay);
+  ASSERT_TRUE(GetContainerViews().empty());
+
+  // Now user plugs in second display.
+  UpdateDisplay("800x600,800x600");
+
+  task_environment()->FastForwardBy(kPhotoDownloadDelay);
+  FastForwardTiny();
+
+  EXPECT_TRUE(ambient_controller()->IsShowing());
+  EXPECT_EQ(display::Screen::GetScreen()->GetNumDisplays(), 2);
+  EXPECT_EQ(GetContainerViews().size(), 2u);
+  for (auto* ctrl : RootWindowController::root_window_controllers()) {
+    EXPECT_TRUE(ctrl->ambient_widget_for_testing() &&
+                ctrl->ambient_widget_for_testing()->IsVisible());
+  }
 }
 
 TEST_P(AmbientControllerTestForAnyUiSettings, HandlesDisplayRemoved) {
@@ -1688,12 +1735,12 @@ class AmbientControllerForManagedScreensaverTest : public AmbientAshTestBase {
   void SimulateScreensaverStart() {
     LockScreen();
     FastForwardByLockScreenInactivityTimeout();
-    EXPECT_EQ(absl::nullopt, GetRemainingLockScreenTimeoutFraction());
+    EXPECT_EQ(std::nullopt, GetRemainingLockScreenTimeoutFraction());
     EXPECT_TRUE(ambient_controller()->ShouldShowAmbientUi());
   }
 
   base::test::ScopedFeatureList scoped_feature_list_;
-  InProcessImageDecoder decoder_;
+  InProcessDataDecoder decoder_;
   std::vector<base::FilePath> image_file_paths_;
   base::ScopedTempDir temp_dir_;
   std::unique_ptr<base::ScopedPathOverride>

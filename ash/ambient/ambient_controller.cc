@@ -13,6 +13,7 @@
 #include "ash/ambient/ambient_animation_ui_launcher.h"
 #include "ash/ambient/ambient_constants.h"
 #include "ash/ambient/ambient_managed_slideshow_ui_launcher.h"
+#include "ash/ambient/ambient_photo_cache.h"
 #include "ash/ambient/ambient_photo_cache_settings.h"
 #include "ash/ambient/ambient_slideshow_ui_launcher.h"
 #include "ash/ambient/ambient_ui_launcher.h"
@@ -61,6 +62,7 @@
 #include "base/metrics/user_metrics.h"
 #include "base/notreached.h"
 #include "base/path_service.h"
+#include "base/task/thread_pool.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "base/values.h"
@@ -269,8 +271,13 @@ void AmbientController::RegisterProfilePrefs(PrefRegistrySimple* registry) {
 
 AmbientController::AmbientController(
     mojo::PendingRemote<device::mojom::Fingerprint> fingerprint)
-    : ambient_weather_controller_(std::make_unique<AmbientWeatherController>()),
+    : ambient_weather_controller_(std::make_unique<AmbientWeatherController>(
+          SimpleGeolocationProvider::GetInstance())),
       fingerprint_(std::move(fingerprint)) {
+  ambient_photo_cache::SetFileTaskRunner(
+      base::ThreadPool::CreateSequencedTaskRunner(
+          {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+           base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN}));
   ambient_backend_controller_ = CreateAmbientBackendController();
 
   // |SessionController| is initialized before |this| in Shell. Necessary to
@@ -999,12 +1006,6 @@ void AmbientController::OnEnabledPrefChanged() {
     AddConsumerPrefObservers();
   }
 
-  photo_cache_ = AmbientPhotoCache::Create(GetAmbientPhotoCacheRootDir(),
-                                           *AmbientClient::Get(),
-                                           access_token_controller_);
-  backup_photo_cache_ = AmbientPhotoCache::Create(
-      GetAmbientBackupPhotoCacheRootDir(), *AmbientClient::Get(),
-      access_token_controller_);
   CreateUiLauncher();
 
   ambient_ui_model_observer_.Observe(&ambient_ui_model_);
@@ -1031,8 +1032,6 @@ void AmbientController::ResetAmbientControllerResources() {
   power_manager_client_observer_.Reset();
 
   DestroyUiLauncher();
-  backup_photo_cache_.reset();
-  photo_cache_.reset();
 
   if (fingerprint_observer_receiver_.is_bound()) {
     fingerprint_observer_receiver_.reset();
@@ -1089,8 +1088,7 @@ void AmbientController::OnAmbientUiSettingsChanged() {
   // The UI may just not be optimal. Furthermore, the cache gradually gets
   // overwritten with topics reflecting the new theme anyways, so ambient mode
   // should not be stuck with a mismatched cache indefinitely.
-  CHECK(photo_cache_);
-  photo_cache_->Clear();
+  ambient_photo_cache::Clear(ambient_photo_cache::Store::kPrimary);
 
   // The |AmbientUiLauncher| implementation to use is largely dependent on
   // the current |AmbientUiSettings|, so this needs to be recreated.
@@ -1160,7 +1158,7 @@ AmbientWeatherModel* AmbientController::GetAmbientWeatherModel() {
 
 std::unique_ptr<views::Widget> AmbientController::CreateWidget(
     aura::Window* container) {
-  if (!ShouldShowAmbientUi()) {
+  if (ui_launcher_state_ != AmbientUiLauncherState::kRendering) {
     return nullptr;
   }
 
@@ -1217,6 +1215,7 @@ void AmbientController::OnUiLauncherInitialized(bool success) {
     SetUiVisibilityClosed();
     return;
   }
+  ui_launcher_state_ = AmbientUiLauncherState::kRendering;
   CreateAndShowWidgets();
 }
 
@@ -1236,6 +1235,7 @@ void AmbientController::StopScreensaver() {
   CloseAllWidgets(close_widgets_immediately_);
   session_metrics_recorder_.reset();
   ui_launcher_init_callback_.Cancel();
+  ui_launcher_state_ = AmbientUiLauncherState::kInactive;
   ambient_ui_launcher_->Finalize();
 }
 
@@ -1259,6 +1259,7 @@ void AmbientController::MaybeStartScreenSaver() {
   ui_launcher_init_callback_.Reset(
       base::BindOnce(&AmbientController::OnUiLauncherInitialized,
                      weak_ptr_factory_.GetWeakPtr()));
+  ui_launcher_state_ = AmbientUiLauncherState::kInitializing;
   ambient_ui_launcher_->Initialize(ui_launcher_init_callback_.callback());
 }
 
@@ -1302,18 +1303,13 @@ void AmbientController::CreateUiLauncher() {
   } else {
     switch (GetCurrentUiSettings().theme()) {
       case personalization_app::mojom::AmbientTheme::kSlideshow:
-        CHECK(photo_cache_);
-        CHECK(backup_photo_cache_);
-        ambient_ui_launcher_ = std::make_unique<AmbientSlideshowUiLauncher>(
-            *photo_cache_, *backup_photo_cache_, &delegate_);
+        ambient_ui_launcher_ =
+            std::make_unique<AmbientSlideshowUiLauncher>(&delegate_);
         break;
       case personalization_app::mojom::AmbientTheme::kFeelTheBreeze:
       case personalization_app::mojom::AmbientTheme::kFloatOnBy:
-        CHECK(photo_cache_);
-        CHECK(backup_photo_cache_);
         ambient_ui_launcher_ = std::make_unique<AmbientAnimationUiLauncher>(
-            *photo_cache_, *backup_photo_cache_, GetCurrentUiSettings(),
-            &delegate_);
+            GetCurrentUiSettings(), &delegate_);
         break;
       case personalization_app::mojom::AmbientTheme::kVideo:
         ambient_ui_launcher_ = std::make_unique<AmbientVideoUiLauncher>(
@@ -1326,11 +1322,12 @@ void AmbientController::CreateUiLauncher() {
 }
 
 void AmbientController::DestroyUiLauncher() {
+  ui_launcher_state_ = AmbientUiLauncherState::kInactive;
   ambient_ui_launcher_.reset();
 }
 
 bool AmbientController::IsUiLauncherActive() const {
-  return ambient_ui_launcher_ && ambient_ui_launcher_->IsActive();
+  return ui_launcher_state_ != AmbientUiLauncherState::kInactive;
 }
 
 void AmbientController::OnReadyStateChanged(bool is_ready) {

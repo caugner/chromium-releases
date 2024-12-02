@@ -220,7 +220,9 @@ public class WebApkUpdateManager implements WebApkUpdateDataFetcher.Observer, De
      *
      * @param before The current Bitmap of the web app.
      * @param after The new (proposed) Bitmap for the web app.
-     * @return the percentage difference of the two Bitmaps.
+     * @return the percentage difference of the two Bitmaps. Note that a floor function is used when
+     *     rounding, so a return value of 1 means there was a change between 1% and 2%, inclusive
+     *     and exclusive (respectively).
      */
     static int logIconDiffs(Bitmap before, Bitmap after) {
         // The icons may be null during unit testing.
@@ -324,7 +326,7 @@ public class WebApkUpdateManager implements WebApkUpdateDataFetcher.Observer, De
 
         if (!needsUpgrade) {
             if (!mStorage.didPreviousUpdateSucceed() || mStorage.shouldForceUpdate()) {
-                onFinishedUpdate(mStorage, WebApkInstallResult.SUCCESS, false /* relaxUpdates */);
+                onFinishedUpdate(mStorage, WebApkInstallResult.SUCCESS, /* relaxUpdates= */ false);
             }
             return;
         }
@@ -407,10 +409,19 @@ public class WebApkUpdateManager implements WebApkUpdateDataFetcher.Observer, De
                 >= shellVersion;
     }
 
+    /**
+     * @return whether a percentage change is below the threshold allowed for icon updates. Note
+     *     that percentage values are rounded using a floor function, so a `percentage` change of 1
+     *     means it is somewhere between 1% and 2%, inclusive and exclusive (respectively). This
+     *     means that the threshold updates need to be set to -1 to disable them (0 would allow
+     *     changes up to 1%).
+     */
     private static boolean belowAppIdIconUpdateThreshold(int percentage) {
         return percentage
-                <= ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
-                        ChromeFeatureList.WEB_APK_ICON_UPDATE_THRESHOLD, PARAM_CHANGE_THRESHOLD, 0);
+                < ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
+                        ChromeFeatureList.WEB_APK_ICON_UPDATE_THRESHOLD,
+                        PARAM_CHANGE_THRESHOLD,
+                        -1);
     }
 
     protected void showIconOrNameUpdateDialog(
@@ -452,7 +463,7 @@ public class WebApkUpdateManager implements WebApkUpdateDataFetcher.Observer, De
     protected void onUserApprovedUpdate(int dismissalCause) {
         // Set WebAPK update as having failed in case that Chrome is killed prior to
         // {@link onBuiltWebApk} being called.
-        recordUpdate(mStorage, WebApkInstallResult.FAILURE, false /* relaxUpdates*/);
+        recordUpdate(mStorage, WebApkInstallResult.FAILURE, /* relaxUpdates= */ false);
 
         // Continue if the user explicitly allows the update using the button, or isn't interested
         // in the update dialog warning (presses Back). Otherwise, they can be left in a state where
@@ -470,9 +481,9 @@ public class WebApkUpdateManager implements WebApkUpdateDataFetcher.Observer, De
                     mFetchedInfo,
                     mFetchedPrimaryIconUrl,
                     mFetchedSplashIconUrl,
-                    false /* isManifestStale */,
-                    nameUpdateDialogEnabled()
-                            || iconUpdateDialogEnabled() /* appIdentityUpdateSupported */,
+                    /* isManifestStale= */ false,
+                    /* appIdentityUpdateSupported= */ nameUpdateDialogEnabled()
+                            || iconUpdateDialogEnabled(),
                     mUpdateReasons);
             return;
         }
@@ -482,11 +493,11 @@ public class WebApkUpdateManager implements WebApkUpdateDataFetcher.Observer, De
         // occur if the Web Manifest is temporarily unreachable.
         buildUpdateRequestAndSchedule(
                 mInfo,
-                "" /* primaryIconUrl */,
-                "" /* splashIconUrl */,
-                true /* isManifestStale */,
-                nameUpdateDialogEnabled()
-                        || iconUpdateDialogEnabled() /* appIdentityUpdateSupported */,
+                /* primaryIconUrl= */ "",
+                /* splashIconUrl= */ "",
+                /* isManifestStale= */ true,
+                /* appIdentityUpdateSupported= */ nameUpdateDialogEnabled()
+                        || iconUpdateDialogEnabled(),
                 mUpdateReasons);
     }
 
@@ -515,7 +526,7 @@ public class WebApkUpdateManager implements WebApkUpdateDataFetcher.Observer, De
                 (success) -> {
                     if (!success) {
                         onFinishedUpdate(
-                                mStorage, WebApkInstallResult.FAILURE, false /* relaxUpdates*/);
+                                mStorage, WebApkInstallResult.FAILURE, /* relaxUpdates= */ false);
                         return;
                     }
                     scheduleUpdate();
@@ -554,7 +565,8 @@ public class WebApkUpdateManager implements WebApkUpdateDataFetcher.Observer, De
         if (mStorage.shouldForceUpdate()) {
             // Start an update task ASAP for forced updates.
             updateTask =
-                    TaskInfo.createOneOffTask(TaskIds.WEBAPK_UPDATE_JOB_ID, 0 /* windowEndTimeMs */)
+                    TaskInfo.createOneOffTask(
+                                    TaskIds.WEBAPK_UPDATE_JOB_ID, /* windowEndTimeMs= */ 0)
                             .setUpdateCurrent(true)
                             .setIsPersisted(true)
                             .build();

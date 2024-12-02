@@ -110,8 +110,9 @@ public class StatusView extends LinearLayout {
         mIconView.setOutlineProvider(
                 new RoundedCornerOutlineProvider(
                         getResources()
-                                .getDimensionPixelSize(
-                                        R.dimen.omnibox_search_engine_logo_composed_size)));
+                                        .getDimensionPixelSize(
+                                                R.dimen.omnibox_search_engine_logo_composed_size)
+                                / 2));
         mIconView.setClipToOutline(true);
 
         configureAccessibilityDescriptions();
@@ -245,8 +246,7 @@ public class StatusView extends LinearLayout {
                     .withEndAction(
                             () -> {
                                 // Set StatusIcon visibility and check whether we should set hover
-                                // action on
-                                // StatusView.
+                                // action on StatusView.
                                 setStatusIconVisibility(View.GONE);
 
                                 mIconView.setAlpha(1f);

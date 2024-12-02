@@ -9,7 +9,7 @@
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
-#include "base/metrics/histogram_macros.h"
+#include "base/rand_util.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "build/chromeos_buildflags.h"
@@ -38,7 +38,6 @@
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_features.h"
-#include "ui/compositor/compositor.h"
 #include "ui/compositor/layer.h"
 #include "ui/gfx/animation/throb_animation.h"
 #include "ui/gfx/canvas.h"
@@ -211,9 +210,12 @@ void BrowserAppMenuButton::UpdateTextAndHighlightColor() {
     (BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX))
     int message_id = IDS_APP_MENU_BUTTON_UPDATE;
     if (base::FeatureList::IsEnabled(features::kUpdateTextOptions)) {
-      if (features::kUpdateTextOptionNumber.Get() == 1) {
+      // Select an update text option randomly. Show this text in all browser
+      // windows.
+      static const int update_text_option = base::RandInt(1, 3);
+      if (update_text_option == 1) {
         message_id = IDS_APP_MENU_BUTTON_UPDATE_ALT1;
-      } else if (features::kUpdateTextOptionNumber.Get() == 2) {
+      } else if (update_text_option == 2) {
         message_id = IDS_APP_MENU_BUTTON_UPDATE_ALT2;
       } else {
         message_id = IDS_APP_MENU_BUTTON_UPDATE_ALT3;
@@ -278,21 +280,6 @@ void BrowserAppMenuButton::OnTouchUiChanged() {
 }
 
 void BrowserAppMenuButton::ButtonPressed(const ui::Event& event) {
-  // Registers a callback for logging time from app menu button pressed to menu
-  // shown to the compositor's callback. The callback will only be invoked after
-  // successful presentation of the next frame - app menu.
-  BrowserView::GetBrowserViewForBrowser(toolbar_view_->browser())
-      ->GetWidget()
-      ->GetCompositor()
-      ->RequestSuccessfulPresentationTimeForNextFrame(base::BindOnce(
-          [](base::TimeTicks menu_button_pressed_time,
-             base::TimeTicks presentation_time) {
-            UMA_HISTOGRAM_TIMES(
-                "Chrome.WrenchMenu.MenuButtonPressedToMenuShown",
-                presentation_time - menu_button_pressed_time);
-          },
-          base::TimeTicks::Now()));
-
   ShowMenu(event.IsKeyEvent() ? views::MenuRunner::SHOULD_SHOW_MNEMONICS
                               : views::MenuRunner::NO_FLAGS);
 }

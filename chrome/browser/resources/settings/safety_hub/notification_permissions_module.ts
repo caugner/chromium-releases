@@ -13,6 +13,7 @@ import 'chrome://resources/cr_elements/cr_shared_style.css.js';
 import 'chrome://resources/cr_elements/cr_toast/cr_toast.js';
 import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.js';
 import 'chrome://resources/cr_elements/cr_button/cr_button.js';
+import 'chrome://resources/polymer/v3_0/paper-tooltip/paper-tooltip.js';
 import '../settings_shared.css.js';
 import '../i18n_setup.js';
 import '../icons.html.js';
@@ -28,10 +29,12 @@ import {isUndoKeyboardEvent} from 'chrome://resources/js/util.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {BaseMixin} from '../base_mixin.js';
+import {MetricsBrowserProxy, MetricsBrowserProxyImpl, SafetyCheckNotificationsModuleInteractions} from '../metrics_browser_proxy.js';
 import {routes} from '../route.js';
 import {Route, RouteObserverMixin, Router} from '../router.js';
 import {NotificationPermission, SafetyHubBrowserProxy, SafetyHubBrowserProxyImpl, SafetyHubEvent} from '../safety_hub/safety_hub_browser_proxy.js';
 import {SiteSettingsMixin} from '../site_settings/site_settings_mixin.js';
+import {TooltipMixin} from '../tooltip_mixin.js';
 
 import {getTemplate} from './notification_permissions_module.html.js';
 import {SettingsSafetyHubModuleElement, SiteInfo, SiteInfoWithTarget} from './safety_hub_module.js';
@@ -66,8 +69,8 @@ interface NotificationPermissionsDisplay extends NotificationPermission,
                                                  SiteInfo {}
 
 const SettingsSafetyHubNotificationPermissionsModuleElementBase =
-    WebUiListenerMixin(RouteObserverMixin(
-        BaseMixin(SiteSettingsMixin(I18nMixin(PolymerElement)))));
+    TooltipMixin(WebUiListenerMixin(RouteObserverMixin(
+        BaseMixin(SiteSettingsMixin(I18nMixin(PolymerElement))))));
 
 export class SettingsSafetyHubNotificationPermissionsModuleElement extends
     SettingsSafetyHubNotificationPermissionsModuleElementBase {
@@ -132,6 +135,8 @@ export class SettingsSafetyHubNotificationPermissionsModuleElement extends
   private eventTracker_: EventTracker = new EventTracker();
   private browserProxy_: SafetyHubBrowserProxy =
       SafetyHubBrowserProxyImpl.getInstance();
+  private metricsBrowserProxy_: MetricsBrowserProxy =
+      MetricsBrowserProxyImpl.getInstance();
 
   override async connectedCallback() {
     // Register for review notification permission list updates.
@@ -158,6 +163,12 @@ export class SettingsSafetyHubNotificationPermissionsModuleElement extends
       // Remove event listener when navigating away from the page.
       this.eventTracker_.removeAll();
       return;
+    }
+
+    if (this.sites_ !== null) {
+      this.metricsBrowserProxy_
+          .recordSafetyHubNotificationPermissionsModuleListCountHistogram(
+              this.sites_.length);
     }
 
     this.eventTracker_.add(
@@ -216,6 +227,10 @@ export class SettingsSafetyHubNotificationPermissionsModuleElement extends
         e.detail.origin,
         this.browserProxy_.blockNotificationPermissionForOrigins.bind(
             this.browserProxy_, this.lastOrigins_));
+
+    this.metricsBrowserProxy_
+        .recordSafetyHubNotificationPermissionsModuleInteractionsHistogram(
+            SafetyCheckNotificationsModuleInteractions.BLOCK);
   }
 
   private onMoreActionClick_(e: CustomEvent<SiteInfoWithTarget>) {
@@ -236,6 +251,10 @@ export class SettingsSafetyHubNotificationPermissionsModuleElement extends
         this.lastOrigins_[0],
         this.browserProxy_.ignoreNotificationPermissionForOrigins.bind(
             this.browserProxy_, this.lastOrigins_));
+
+    this.metricsBrowserProxy_
+        .recordSafetyHubNotificationPermissionsModuleInteractionsHistogram(
+            SafetyCheckNotificationsModuleInteractions.IGNORE);
   }
 
   private onResetClick_(e: CustomEvent<NotificationPermission>) {
@@ -250,6 +269,10 @@ export class SettingsSafetyHubNotificationPermissionsModuleElement extends
         this.lastOrigins_[0],
         this.browserProxy_.resetNotificationPermissionForOrigins.bind(
             this.browserProxy_, this.lastOrigins_));
+
+    this.metricsBrowserProxy_
+        .recordSafetyHubNotificationPermissionsModuleInteractionsHistogram(
+            SafetyCheckNotificationsModuleInteractions.RESET);
   }
 
   private onBlockAllClick_(e: Event) {
@@ -259,18 +282,16 @@ export class SettingsSafetyHubNotificationPermissionsModuleElement extends
     assert(this.sites_);
     this.lastOrigins_ = this.sites_.map(site => site.origin);
 
-    // Pre-emptively set the header to the completion state, as that is the
-    // state we expect at the end of the animation. In the corner case that
-    // another site was added to the list at exactly the same time as the
-    // animation runs, the callback will still re-render the header correctly.
-    this.setHeaderToCompletionState_();
-
     this.$.module.animateHide(
         /* all origins */ null,
         this.browserProxy_.blockNotificationPermissionForOrigins.bind(
             this.browserProxy_, this.lastOrigins_));
     this.lastUserAction_ = Actions.BLOCK;
     this.$.undoToast.show();
+
+    this.metricsBrowserProxy_
+        .recordSafetyHubNotificationPermissionsModuleInteractionsHistogram(
+            SafetyCheckNotificationsModuleInteractions.BLOCK_ALL);
   }
 
   private onUndoClick_(e: Event) {
@@ -289,6 +310,10 @@ export class SettingsSafetyHubNotificationPermissionsModuleElement extends
     Router.getInstance().navigateTo(
         routes.SITE_SETTINGS_NOTIFICATIONS, /* dynamicParams= */ undefined,
         /* removeSearch= */ true);
+
+    this.metricsBrowserProxy_
+        .recordSafetyHubNotificationPermissionsModuleInteractionsHistogram(
+            SafetyCheckNotificationsModuleInteractions.GO_TO_SETTINGS);
   }
 
   private async updateUndoNotificationText_() {
@@ -330,14 +355,29 @@ export class SettingsSafetyHubNotificationPermissionsModuleElement extends
       case Actions.BLOCK:
         this.browserProxy_.allowNotificationPermissionForOrigins(
             this.lastOrigins_);
+        if (this.lastOrigins_!.length === 1) {
+          this.metricsBrowserProxy_
+              .recordSafetyHubNotificationPermissionsModuleInteractionsHistogram(
+                  SafetyCheckNotificationsModuleInteractions.UNDO_BLOCK);
+        } else {
+          this.metricsBrowserProxy_
+              .recordSafetyHubNotificationPermissionsModuleInteractionsHistogram(
+                  SafetyCheckNotificationsModuleInteractions.UNDO_BLOCK_ALL);
+        }
         break;
       case Actions.RESET:
         this.browserProxy_.allowNotificationPermissionForOrigins(
             this.lastOrigins_);
+        this.metricsBrowserProxy_
+            .recordSafetyHubNotificationPermissionsModuleInteractionsHistogram(
+                SafetyCheckNotificationsModuleInteractions.UNDO_RESET);
         break;
       case Actions.IGNORE:
         this.browserProxy_.undoIgnoreNotificationPermissionForOrigins(
             this.lastOrigins_);
+        this.metricsBrowserProxy_
+            .recordSafetyHubNotificationPermissionsModuleInteractionsHistogram(
+                SafetyCheckNotificationsModuleInteractions.UNDO_IGNORE);
         break;
       default:
         assertNotReached();
@@ -380,6 +420,13 @@ export class SettingsSafetyHubNotificationPermissionsModuleElement extends
     }
     return this.i18n(
         'safetyCheckNotificationPermissionReviewResetAriaLabel', origins[0]);
+  }
+
+  private showUndoTooltip_(e: Event) {
+    e.stopPropagation();
+    const tooltip = this.shadowRoot!.querySelector('paper-tooltip');
+    assert(tooltip);
+    this.showTooltipAtTarget(tooltip, e.target!);
   }
 }
 

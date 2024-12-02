@@ -51,6 +51,9 @@ using ParseStatus = content::IdpNetworkRequestManager::ParseStatus;
 using AccountsResponseInvalidReason =
     content::IdpNetworkRequestManager::AccountsResponseInvalidReason;
 using ErrorDialogType = content::IdpNetworkRequestManager::FedCmErrorDialogType;
+using TokenResponseType =
+    content::IdpNetworkRequestManager::FedCmTokenResponseType;
+using ErrorUrlType = content::IdpNetworkRequestManager::FedCmErrorUrlType;
 
 // TODO(kenrb): These need to be defined in the explainer or draft spec and
 // referenced here.
@@ -65,6 +68,8 @@ constexpr char kProviderUrlListKey[] = "provider_urls";
 constexpr char kIdAssertionEndpoint[] = "id_assertion_endpoint";
 constexpr char kClientMetadataEndpointKey[] = "client_metadata_endpoint";
 constexpr char kMetricsEndpoint[] = "metrics_endpoint";
+constexpr char kDisconnectEndpoint[] = "disconnect_endpoint";
+constexpr char kSupportsAddAccountKey[] = "supports_add_account";
 
 // Shared between the well-known files and config files
 constexpr char kAccountsEndpointKey[] = "accounts_endpoint";
@@ -122,6 +127,9 @@ constexpr char kUnauthorizedClient[] = "unauthorized_client";
 constexpr char kAccessDenied[] = "access_denied";
 constexpr char kTemporarilyUnavailable[] = "temporarily_unavailable";
 constexpr char kServerError[] = "server_error";
+
+// Disconnect response keys.
+constexpr char kDisconnectAccountId[] = "account_id";
 
 // 1 MiB is an arbitrary upper bound that should account for any reasonable
 // response size that is a part of this protocol.
@@ -512,6 +520,8 @@ void OnConfigParsed(const GURL& provider,
   endpoints.client_metadata =
       ExtractEndpoint(provider, response, kClientMetadataEndpointKey);
   endpoints.metrics = ExtractEndpoint(provider, response, kMetricsEndpoint);
+  endpoints.disconnect =
+      ExtractEndpoint(provider, response, kDisconnectEndpoint);
 
   const base::Value::Dict* idp_metadata_value =
       response.FindDict(kIdpBrandingKey);
@@ -524,6 +534,10 @@ void OnConfigParsed(const GURL& provider,
   }
   idp_metadata.idp_login_url =
       ExtractEndpoint(provider, response, kLoginUrlKey);
+  if (IsFedCmAddAccountEnabled()) {
+    idp_metadata.supports_add_account =
+        response.FindBool(kSupportsAddAccountKey).value_or(false);
+  }
   std::move(callback).Run({ParseStatus::kSuccess, fetch_status.response_code},
                           endpoints, std::move(idp_metadata));
 }
@@ -599,34 +613,41 @@ void OnAccountsRequestParsed(
                           std::move(account_list));
 }
 
-GURL GetErrorUrl(const std::string* url, const GURL& idp_url) {
+std::pair<GURL, absl::optional<ErrorUrlType>> GetErrorUrlAndType(
+    const std::string* url,
+    const GURL& idp_url) {
   if (!url || url->empty()) {
-    return GURL();
+    return std::make_pair(GURL(), absl::nullopt);
   }
 
   GURL error_url = idp_url.Resolve(*url);
   if (!error_url.is_valid()) {
-    return GURL();
+    return std::make_pair(GURL(), absl::nullopt);
   }
 
   url::Origin error_origin = url::Origin::Create(error_url);
   if (!network::IsOriginPotentiallyTrustworthy(error_origin)) {
-    return GURL();
+    return std::make_pair(GURL(), absl::nullopt);
   }
 
   std::string error_url_etld_plus_one =
       webid::FormatUrlWithDomain(error_url, /*for_display=*/false);
   if (error_url_etld_plus_one.empty()) {
-    return GURL();
+    return std::make_pair(GURL(), absl::nullopt);
+  }
+
+  url::Origin idp_origin = url::Origin::Create(idp_url);
+  if (error_origin == idp_origin) {
+    return std::make_pair(error_url, ErrorUrlType::kSameOrigin);
   }
 
   std::string idp_etld_plus_one =
       webid::FormatUrlWithDomain(idp_url, /*for_display=*/false);
   if (error_url_etld_plus_one != idp_etld_plus_one) {
-    return GURL();
+    return std::make_pair(GURL(), ErrorUrlType::kCrossSite);
   }
 
-  return error_url;
+  return std::make_pair(error_url, ErrorUrlType::kCrossOriginSameSite);
 }
 
 ErrorDialogType GetErrorDialogType(const std::string& code, const GURL& url) {
@@ -654,6 +675,22 @@ ErrorDialogType GetErrorDialogType(const std::string& code, const GURL& url) {
                  : ErrorDialogType::kGenericNonEmptyWithoutUrl;
 }
 
+TokenResponseType GetTokenResponseType(const std::string* token,
+                                       const base::Value::Dict* error) {
+  if (token && error) {
+    return TokenResponseType::kTokenReceivedAndErrorReceived;
+  } else if (token) {
+    return TokenResponseType::kTokenReceivedAndErrorNotReceived;
+  } else if (error) {
+    return TokenResponseType::kTokenNotReceivedAndErrorReceived;
+  }
+  return TokenResponseType::kTokenNotReceivedAndErrorNotReceived;
+}
+
+bool IsOkResponseCode(int response_code) {
+  return response_code / 100 == 2;
+}
+
 void OnTokenRequestParsed(
     IdpNetworkRequestManager::TokenRequestCallback callback,
     IdpNetworkRequestManager::ContinueOnCallback continue_on_callback,
@@ -668,27 +705,34 @@ void OnTokenRequestParsed(
     if (IsFedCmErrorEnabled()) {
       token_result.error = TokenError{kServerError, GURL()};
       std::move(record_error_metrics_callback)
-          .Run(ErrorDialogType::kServerErrorWithoutUrl);
+          .Run(TokenResponseType::kTokenNotReceivedAndErrorNotReceived,
+               ErrorDialogType::kServerErrorWithoutUrl,
+               /*error_url_type=*/absl::nullopt);
     }
     std::move(callback).Run(fetch_status, token_result);
     return;
   }
 
   const base::Value::Dict& response = result->GetDict();
-  const std::string* token = fetch_status.response_code / 100 == 2
+  const std::string* token = IsOkResponseCode(fetch_status.response_code)
                                  ? response.FindString(kTokenKey)
                                  : nullptr;
   const std::string* continue_on = response.FindString(kContinueOnKey);
+  const base::Value::Dict* response_error = response.FindDict(kErrorKey);
+  TokenResponseType token_response_type =
+      GetTokenResponseType(token, response_error);
 
   if (IsFedCmErrorEnabled()) {
-    const base::Value::Dict* response_error = response.FindDict(kErrorKey);
     if (response_error) {
       std::string error_code = ExtractString(*response_error, kErrorCodeKey);
       const std::string* url = response_error->FindString(kErrorUrlKey);
-      GURL error_url = GetErrorUrl(url, token_url);
+      GURL error_url;
+      absl::optional<ErrorUrlType> error_url_type;
+      std::tie(error_url, error_url_type) = GetErrorUrlAndType(url, token_url);
       token_result.error = TokenError{error_code, error_url};
       std::move(record_error_metrics_callback)
-          .Run(GetErrorDialogType(error_code, error_url));
+          .Run(token_response_type, GetErrorDialogType(error_code, error_url),
+               error_url_type);
       std::move(callback).Run(
           {ParseStatus::kSuccess, fetch_status.response_code}, token_result);
       return;
@@ -697,6 +741,9 @@ void OnTokenRequestParsed(
 
   if (token) {
     token_result.token = *token;
+    std::move(record_error_metrics_callback)
+        .Run(token_response_type, /*error_dialog_type=*/absl::nullopt,
+             /*error_url_type=*/absl::nullopt);
     std::move(callback).Run({ParseStatus::kSuccess, fetch_status.response_code},
                             token_result);
     return;
@@ -713,7 +760,8 @@ void OnTokenRequestParsed(
   }
 
   std::move(record_error_metrics_callback)
-      .Run(ErrorDialogType::kGenericEmptyWithoutUrl);
+      .Run(token_response_type, ErrorDialogType::kGenericEmptyWithoutUrl,
+           /*error_url_type=*/absl::nullopt);
   std::move(callback).Run(
       {ParseStatus::kInvalidResponseError, fetch_status.response_code},
       token_result);
@@ -724,6 +772,28 @@ void OnLogoutCompleted(IdpNetworkRequestManager::LogoutCallback callback,
                        int response_code,
                        const std::string& mime_type) {
   std::move(callback).Run();
+}
+
+void OnDisconnectResponseParsed(
+    IdpNetworkRequestManager::DisconnectCallback callback,
+    FetchStatus fetch_status,
+    data_decoder::DataDecoder::ValueOrError result) {
+  if (fetch_status.parse_status != ParseStatus::kSuccess) {
+    std::move(callback).Run(fetch_status, /*account_id=*/"");
+    return;
+  }
+
+  const base::Value::Dict& response = result->GetDict();
+  const std::string* account_id = response.FindString(kDisconnectAccountId);
+
+  if (account_id && !account_id->empty()) {
+    std::move(callback).Run(fetch_status, *account_id);
+    return;
+  }
+
+  std::move(callback).Run(
+      {ParseStatus::kInvalidResponseError, fetch_status.response_code},
+      /*account_id=*/"");
 }
 
 }  // namespace
@@ -872,7 +942,11 @@ void IdpNetworkRequestManager::SendTokenRequest(
       base::BindOnce(&OnTokenRequestParsed, std::move(callback),
                      std::move(continue_on),
                      std::move(record_error_metrics_callback), token_url),
-      maxResponseSizeInKiB * 1024);
+      maxResponseSizeInKiB * 1024,
+      // We should parse the response body for the ID assertion endpoint request
+      // even if the response code is non-2xx because the server may include the
+      // error details with the Error API.
+      IsFedCmErrorEnabled());
 }
 
 void IdpNetworkRequestManager::SendSuccessfulTokenRequestMetrics(
@@ -930,31 +1004,38 @@ void IdpNetworkRequestManager::SendLogout(const GURL& logout_url,
               maxResponseSizeInKiB * 1024);
 }
 
-void IdpNetworkRequestManager::SendRevokeRequest(
-    const GURL& revoke_url,
-    const std::string& account_id,
-    const url::Origin& top_frame_origin,
-    const url::Origin& relying_party,
-    RevokeCallback callback) {
-  // TODO(crbug.com/1473134): implement this method properly.
-  std::move(callback).Run(RevokeResponse::kSuccess);
+void IdpNetworkRequestManager::SendDisconnectRequest(
+    const GURL& disconnect_url,
+    const std::string& account_hint,
+    const std::string& client_id,
+    DisconnectCallback callback) {
+  auto resource_request = CreateCredentialedResourceRequest(
+      disconnect_url, CredentialedResourceRequestType::kOriginWithCORS);
+  std::string url_encoded_post_data =
+      "client_id=" + client_id + "&account_hint=" + account_hint;
+  DownloadJsonAndParse(
+      std::move(resource_request), url_encoded_post_data,
+      base::BindOnce(&OnDisconnectResponseParsed, std::move(callback)),
+      maxResponseSizeInKiB * 1024);
 }
 
 void IdpNetworkRequestManager::DownloadJsonAndParse(
     std::unique_ptr<network::ResourceRequest> resource_request,
     absl::optional<std::string> url_encoded_post_data,
     ParseJsonCallback parse_json_callback,
-    size_t max_download_size) {
+    size_t max_download_size,
+    bool allow_http_error_results) {
   DownloadUrl(std::move(resource_request), std::move(url_encoded_post_data),
               base::BindOnce(&OnDownloadedJson, std::move(parse_json_callback)),
-              max_download_size);
+              max_download_size, allow_http_error_results);
 }
 
 void IdpNetworkRequestManager::DownloadUrl(
     std::unique_ptr<network::ResourceRequest> resource_request,
     absl::optional<std::string> url_encoded_post_data,
     DownloadCallback callback,
-    size_t max_download_size) {
+    size_t max_download_size,
+    bool allow_http_error_results) {
   if (url_encoded_post_data) {
     resource_request->method = net::HttpRequestHeaders::kPostMethod;
     resource_request->headers.SetHeader(net::HttpRequestHeaders::kContentType,
@@ -966,10 +1047,7 @@ void IdpNetworkRequestManager::DownloadUrl(
   if (url_encoded_post_data) {
     url_loader->AttachStringForUpload(*url_encoded_post_data,
                                       kUrlEncodedContentType);
-    // We should parse the response body for the ID assertion endpoint request
-    // even if the response code is non-2xx because the server may include the
-    // error details with the Error API.
-    if (IsFedCmErrorEnabled()) {
+    if (allow_http_error_results) {
       url_loader->SetAllowHttpErrorResults(true);
     }
   }

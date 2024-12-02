@@ -47,11 +47,11 @@
 #include "components/download/public/common/download_danger_type.h"
 #include "components/download/public/common/download_features.h"
 #include "components/download/public/common/download_interrupt_reasons.h"
+#include "components/download/public/common/download_stats.h"
 #include "components/download/public/common/mock_download_item.h"
 #include "components/policy/core/common/policy_pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/buildflags.h"
-#include "components/safe_browsing/core/common/features.h"
 #include "components/safe_search_api/safe_search_util.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/browser/download_item_utils.h"
@@ -266,7 +266,7 @@ class TestDownloadCoreService : public DownloadCoreServiceImpl {
 
   ChromeDownloadManagerDelegate* GetDownloadManagerDelegate() override;
 
-  raw_ptr<ChromeDownloadManagerDelegate> delegate_;
+  raw_ptr<ChromeDownloadManagerDelegate> delegate_ = nullptr;
 };
 
 TestDownloadCoreService::TestDownloadCoreService(Profile* profile)
@@ -340,8 +340,7 @@ class ChromeDownloadManagerDelegateTest
 
  private:
   base::FilePath test_download_dir_;
-  raw_ptr<sync_preferences::TestingPrefServiceSyncable, DanglingUntriaged>
-      pref_service_;
+  raw_ptr<sync_preferences::TestingPrefServiceSyncable> pref_service_ = nullptr;
   std::unique_ptr<content::MockDownloadManager> download_manager_;
   std::unique_ptr<TestChromeDownloadManagerDelegate> delegate_;
   MockWebContentsDelegate web_contents_delegate_;
@@ -385,6 +384,7 @@ void ChromeDownloadManagerDelegateTest::SetUp() {
 
 void ChromeDownloadManagerDelegateTest::TearDown() {
   base::RunLoop().RunUntilIdle();
+  pref_service_ = nullptr;
   delegate_->Shutdown();
   ChromeRenderViewHostTestHarness::TearDown();
 }
@@ -867,6 +867,7 @@ TEST_F(ChromeDownloadManagerDelegateTest, InterceptDownloadForAutomotive) {
   if (!base::android::BuildInfo::GetInstance()->is_automotive()) {
     GTEST_SKIP() << "This test should only run on automotive.";
   }
+  base::HistogramTester histograms;
 
   TestDownloadMessageBridge* message_bridge = new TestDownloadMessageBridge();
   delegate()->SetDownloadMessageBridgeForTesting(
@@ -882,6 +883,8 @@ TEST_F(ChromeDownloadManagerDelegateTest, InterceptDownloadForAutomotive) {
   should_intercept = delegate()->InterceptDownloadIfApplicable(
       kUrl, "", "", mime_type, "", 10, false /*is_transient*/, nullptr);
   EXPECT_TRUE(should_intercept);
+  histograms.ExpectUniqueSample("Download.Blocked.ContentType.Automotive",
+                                download::DownloadContent::PDF, 1);
 
   EXPECT_EQ(1, message_bridge->GetMessageShownCount());
 }
@@ -1811,10 +1814,6 @@ TEST_F(ChromeDownloadManagerDelegateTest,
 #if !BUILDFLAG(IS_ANDROID)
 #if !BUILDFLAG(IS_CHROMEOS_ASH)
 TEST_F(ChromeDownloadManagerDelegateTest, ScheduleCancelForEphemeralWarning) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitWithFeatures(
-      {safe_browsing::kDownloadBubble, safe_browsing::kDownloadBubbleV2}, {});
-
   std::unique_ptr<download::MockDownloadItem> download_item =
       CreateActiveDownloadItem(0);
   EXPECT_CALL(*download_item, GetDangerType())
@@ -1833,9 +1832,6 @@ TEST_F(ChromeDownloadManagerDelegateTest, ScheduleCancelForEphemeralWarning) {
 
 TEST_F(ChromeDownloadManagerDelegateTest,
        ScheduleCancelForEphemeralWarning_DownloadKept) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitWithFeatures(
-      {safe_browsing::kDownloadBubble, safe_browsing::kDownloadBubbleV2}, {});
   std::unique_ptr<download::MockDownloadItem> download_item =
       CreateActiveDownloadItem(0);
   EXPECT_CALL(*download_item, GetDangerType())
@@ -1851,9 +1847,6 @@ TEST_F(ChromeDownloadManagerDelegateTest,
 #endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
 
 TEST_F(ChromeDownloadManagerDelegateTest, CancelAllEphemeralWarnings) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitWithFeatures(
-      {safe_browsing::kDownloadBubble, safe_browsing::kDownloadBubbleV2}, {});
   std::vector<download::DownloadItem*> items;
   auto safe_item = CreateActiveDownloadItem(0);
   EXPECT_CALL(*safe_item, GetDangerType())
@@ -2289,7 +2282,7 @@ class AndroidDownloadInfobarCounter
     infobar->RemoveSelf();
   }
 
-  raw_ptr<infobars::ContentInfoBarManager> infobar_manager_;
+  raw_ptr<infobars::ContentInfoBarManager> infobar_manager_ = nullptr;
   int infobar_count_ = 0;
 };
 
