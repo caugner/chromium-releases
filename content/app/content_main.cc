@@ -4,8 +4,6 @@
 
 #include "content/public/app/content_main.h"
 
-#include <optional>
-
 #include "base/allocator/partition_alloc_support.h"
 #include "base/allocator/partition_allocator/src/partition_alloc/partition_alloc_buildflags.h"
 #include "base/at_exit.h"
@@ -24,6 +22,7 @@
 #include "base/process/set_process_title.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/synchronization/condition_variable.h"
 #include "base/task/single_thread_task_executor.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
 #include "base/threading/platform_thread.h"
@@ -287,10 +286,8 @@ RunContentProcess(ContentMainParams params,
 #endif
 
 #if BUILDFLAG(IS_IOS)
-    // TODO(crbug.com/1412835): We support multiprocess launch of the content
-    // process, but for now networking and GPU are still in process.
+    base::ConditionVariable::InitializeFeatures();
     base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-    command_line->AppendSwitch(switches::kInProcessGPU);
     command_line->AppendSwitch(switches::kEnableViewport);
     command_line->AppendSwitch(switches::kUseMobileUserAgent);
 #endif

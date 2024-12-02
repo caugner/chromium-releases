@@ -5,10 +5,12 @@
 #ifndef CONTENT_PUBLIC_BROWSER_CLIPBOARD_TYPES_H_
 #define CONTENT_PUBLIC_BROWSER_CLIPBOARD_TYPES_H_
 
+#include "base/containers/flat_map.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/weak_ptr.h"
 #include "base/types/optional_ref.h"
 #include "content/common/content_export.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/clipboard/clipboard_format_type.h"
 #include "ui/base/clipboard/clipboard_sequence_number_token.h"
 #include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
@@ -61,11 +63,14 @@ struct CONTENT_EXPORT ClipboardPasteData {
   // PNG bytes to scan.
   std::vector<uint8_t> png;
 
+  // Bitmap to scan.
+  SkBitmap bitmap;
+
   // A list of full file paths to scan.
   std::vector<base::FilePath> file_paths;
 
   // Custom data to scan, keyed by type.
-  std::map<std::u16string, std::u16string> custom_data;
+  base::flat_map<std::u16string, std::u16string> custom_data;
 };
 
 // Class representing an endpoint tied to a clipboard interaction. This can

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef BASE_ALLOCATOR_PARTITION_ALLOCATOR_SRC_PARTITION_ALLOC_POINTERS_RAW_PTR_H_
-#define BASE_ALLOCATOR_PARTITION_ALLOCATOR_SRC_PARTITION_ALLOC_POINTERS_RAW_PTR_H_
+#ifndef PARTITION_ALLOC_POINTERS_RAW_PTR_H_
+#define PARTITION_ALLOC_POINTERS_RAW_PTR_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -12,7 +12,6 @@
 #include <utility>
 
 #include "build/build_config.h"
-#include "build/buildflag.h"
 #include "partition_alloc/flags.h"
 #include "partition_alloc/partition_alloc_base/compiler_specific.h"
 #include "partition_alloc/partition_alloc_base/component_export.h"
@@ -1011,34 +1010,34 @@ inline constexpr bool IsRawPtrMayDangleV<raw_ptr<T, Traits>> =
 
 // Template helpers for working with T* or raw_ptr<T>.
 template <typename T>
-struct IsPointer : std::false_type {};
+struct IsRawPointerHelper : std::false_type {};
 
 template <typename T>
-struct IsPointer<T*> : std::true_type {};
+struct IsRawPointerHelper<T*> : std::true_type {};
 
 template <typename T, RawPtrTraits Traits>
-struct IsPointer<raw_ptr<T, Traits>> : std::true_type {};
+struct IsRawPointerHelper<raw_ptr<T, Traits>> : std::true_type {};
 
 template <typename T>
-inline constexpr bool IsPointerV = IsPointer<T>::value;
+inline constexpr bool IsRawPointer = IsRawPointerHelper<T>::value;
 
 template <typename T>
-struct RemovePointer {
+struct RemoveRawPointer {
   using type = T;
 };
 
 template <typename T>
-struct RemovePointer<T*> {
+struct RemoveRawPointer<T*> {
   using type = T;
 };
 
 template <typename T, RawPtrTraits Traits>
-struct RemovePointer<raw_ptr<T, Traits>> {
+struct RemoveRawPointer<raw_ptr<T, Traits>> {
   using type = T;
 };
 
 template <typename T>
-using RemovePointerT = typename RemovePointer<T>::type;
+using RemoveRawPointerT = typename RemoveRawPointer<T>::type;
 
 }  // namespace base
 
@@ -1123,12 +1122,6 @@ constexpr inline auto SetExperimental = base::RawPtrTraits::kMayDangle;
 // DanglingUntriaged where necessary.
 constexpr inline auto CtnExperimental = base::RawPtrTraits::kMayDangle;
 
-// Temporary workaround needed when using vector<raw_ptr<T, VectorExperimental>
-// in Mocked method signatures as the macros don't allow commas within.
-template <typename T, base::RawPtrTraits Traits = base::RawPtrTraits::kEmpty>
-using vector_experimental_raw_ptr =
-    base::raw_ptr<T, Traits | VectorExperimental>;
-
 // Public verson used in callbacks arguments when it is known that they might
 // receive dangling pointers. In any other cases, please
 // use one of:
@@ -1211,4 +1204,4 @@ struct pointer_traits<::raw_ptr<T, Traits>> {
 
 }  // namespace std
 
-#endif  // BASE_ALLOCATOR_PARTITION_ALLOCATOR_SRC_PARTITION_ALLOC_POINTERS_RAW_PTR_H_
+#endif  // PARTITION_ALLOC_POINTERS_RAW_PTR_H_

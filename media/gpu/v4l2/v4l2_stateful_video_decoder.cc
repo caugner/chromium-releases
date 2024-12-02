@@ -11,6 +11,7 @@
 #include <sys/ioctl.h>
 
 #include "base/containers/contains.h"
+#include "base/containers/heap_array.h"
 #include "base/files/file_util.h"
 #include "base/functional/callback_helpers.h"
 #include "base/location.h"
@@ -162,13 +163,13 @@ scoped_refptr<media::DecoderBuffer> ReassembleFragments(
     std::vector<scoped_refptr<media::DecoderBuffer>>& fragments) {
   size_t frame_size = 0;
   for (const auto& fragment : fragments) {
-    frame_size += fragment->data_size();
+    frame_size += fragment->size();
   }
-  auto temp_buffer = std::make_unique<uint8_t[]>(frame_size);
-  uint8_t* dst = temp_buffer.get();
+  auto temp_buffer = base::HeapArray<uint8_t>::Uninit(frame_size);
+  uint8_t* dst = temp_buffer.data();
   for (const auto& fragment : fragments) {
-    memcpy(dst, fragment->data(), fragment->data_size());
-    dst += fragment->data_size();
+    memcpy(dst, fragment->data(), fragment->size());
+    dst += fragment->size();
   }
 
   auto reassembled_frame =
@@ -288,13 +289,14 @@ void V4L2StatefulVideoDecoder::Initialize(const VideoDecoderConfig& config,
     return;
   }
 
+  if (supported_configs_.empty()) {
+    supported_configs_ = GetSupportedV4L2DecoderConfigs().value_or(
+        SupportedVideoDecoderConfigs());
+    DCHECK(!supported_configs_.empty());
+  }
   // Make sure that the |config| requested is supported by the driver,
   // which must provide such information.
-  const auto supported_configs = GetSupportedV4L2DecoderConfigs();
-  if (!IsVideoDecoderConfigSupported(supported_configs.has_value()
-                                         ? supported_configs.value()
-                                         : SupportedVideoDecoderConfigs{},
-                                     config)) {
+  if (!IsVideoDecoderConfigSupported(supported_configs_, config)) {
     VLOGF(1) << "Video configuration is not supported: "
              << config.AsHumanReadableString();
     MEDIA_LOG(INFO, media_log_) << "Video configuration is not supported: "
@@ -409,9 +411,8 @@ void V4L2StatefulVideoDecoder::Initialize(const VideoDecoderConfig& config,
     return;
   }
 
-  aspect_ratio_ = config.aspect_ratio();
+  config_ = config;
   output_cb_ = std::move(output_cb);
-  profile_ = config.profile();
   if (is_h264) {
     h264_frame_reassembler_ = std::make_unique<H264FrameReassembler>();
   }
@@ -422,8 +423,8 @@ void V4L2StatefulVideoDecoder::Initialize(const VideoDecoderConfig& config,
 void V4L2StatefulVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
                                       DecodeCB decode_cb) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(IsInitialized()) << "V4L2StatefulVideoDecoder must be Initialize()d";
   VLOGF(3) << buffer->AsHumanReadableString(/*verbose=*/false);
+  DCHECK(IsInitialized());
 
   if (buffer->end_of_stream()) {
     if (!event_task_runner_) {
@@ -464,7 +465,7 @@ void V4L2StatefulVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
 
   PrintAndTraceQueueStates(FROM_HERE);
 
-  if (VideoCodecProfileToVideoCodec(profile_) == VideoCodec::kH264) {
+  if (VideoCodecProfileToVideoCodec(config_.profile()) == VideoCodec::kH264) {
     auto processed_buffer_and_decode_cbs = h264_frame_reassembler_->Process(
         std::move(buffer), std::move(decode_cb));
     // If Process() returns nothing, then it swallowed its arguments and
@@ -477,7 +478,8 @@ void V4L2StatefulVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
       decoder_buffer_and_callbacks_.push(std::move(a));
     }
 
-  } else if (VideoCodecProfileToVideoCodec(profile_) == VideoCodec::kHEVC) {
+  } else if (VideoCodecProfileToVideoCodec(config_.profile()) ==
+             VideoCodec::kHEVC) {
     NOTIMPLEMENTED();
     std::move(decode_cb).Run(DecoderStatus::Codes::kUnsupportedCodec);
     return;
@@ -519,6 +521,7 @@ void V4L2StatefulVideoDecoder::Reset(base::OnceClosure closure) {
   // Invalidate pointers from and cancel all hypothetical in-flight requests
   // to the WaitOnceForEvents() routine.
   weak_ptr_factory_for_events_.InvalidateWeakPtrs();
+  weak_ptr_factory_for_CAPTURE_availability_.InvalidateWeakPtrs();
   cancelable_task_tracker_.TryCancelAll();
 
   if (h264_frame_reassembler_) {
@@ -594,7 +597,11 @@ bool V4L2StatefulVideoDecoder::IsPlatformDecoder() const {
 void V4L2StatefulVideoDecoder::ApplyResolutionChange() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DVLOGF(2);
-  InitializeCAPTUREQueue();
+  // It's possible that we have been Reset()ed in the interval between receiving
+  // the resolution change event in WaitOnceForEvents() (in a background thread)
+  // and arriving here from our |client_|. Check if that's the case.
+  if (IsInitialized())
+    InitializeCAPTUREQueue();
 }
 
 size_t V4L2StatefulVideoDecoder::GetMaxOutputFramePoolSize() const {
@@ -698,7 +705,7 @@ bool V4L2StatefulVideoDecoder::InitializeCAPTUREQueue() {
   CroStatus::Or<ImageProcessor::PixelLayoutCandidate> status_or_output_format =
       client_->PickDecoderOutputFormat(
           candidates, *visible_rect,
-          aspect_ratio_.GetNaturalSize(*visible_rect),
+          config_.aspect_ratio().GetNaturalSize(*visible_rect),
           /*output_size=*/std::nullopt, num_codec_reference_frames,
           /*use_protected=*/false, /*need_aux_frame_pool=*/false,
           /*allocator=*/std::nullopt);
@@ -912,7 +919,14 @@ void V4L2StatefulVideoDecoder::TryAndDequeueCAPTUREQueueBuffers() {
         VLOGF(3) << "Failed to resume decoding after flush";
         // TODO(mcasas): Handle this error.
       }
-      if (flush_cb_) {
+      // In some cases we still have enqueued work in |OUTPUT_queue_| after
+      // seeing the LAST buffer. This happens at least when there's a pending
+      // resolution change (see vp80-03-segmentation-1436.ivf), that according
+      // to [1] must be processed first.
+      // [1] https://www.kernel.org/doc/html/v5.15/userspace-api/media/v4l/dev-decoder.html#drain
+      const bool has_pending_OUTPUT_queue_work =
+          OUTPUT_queue_->QueuedBuffersCount();
+      if (flush_cb_ && !has_pending_OUTPUT_queue_work) {
         std::move(flush_cb_).Run(DecoderStatus::Codes::kOk);
       }
       return;
@@ -1090,10 +1104,10 @@ bool V4L2StatefulVideoDecoder::TryAndEnqueueOUTPUTQueueBuffers() {
 
     CHECK_EQ(v4l2_buffer->PlanesCount(), 1u);
     uint8_t* dst = static_cast<uint8_t*>(v4l2_buffer->GetPlaneMapping(0));
-    CHECK_GE(v4l2_buffer->GetPlaneSize(/*plane=*/0), media_buffer->data_size());
-    memcpy(dst, media_buffer->data(), media_buffer->data_size());
-    v4l2_buffer->SetPlaneBytesUsed(0, media_buffer->data_size());
-    VLOGF(4) << "Enqueuing " << media_buffer->data_size() << " bytes.";
+    CHECK_GE(v4l2_buffer->GetPlaneSize(/*plane=*/0), media_buffer->size());
+    memcpy(dst, media_buffer->data(), media_buffer->size());
+    v4l2_buffer->SetPlaneBytesUsed(0, media_buffer->size());
+    VLOGF(4) << "Enqueuing " << media_buffer->size() << " bytes.";
     v4l2_buffer->SetTimeStamp(TimeDeltaToTimeVal(media_buffer->timestamp()));
 
     const int64_t flat_timespec = media_buffer->timestamp().InMilliseconds();
@@ -1113,6 +1127,7 @@ bool V4L2StatefulVideoDecoder::TryAndEnqueueOUTPUTQueueBuffers() {
 void V4L2StatefulVideoDecoder::PrintAndTraceQueueStates(
     const base::Location& from_here) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(IsInitialized()) << "V4L2StatefulVideoDecoder must be Initialize()d";
   VLOG(4) << from_here.function_name() << "(): |OUTPUT_queue_| "
           << OUTPUT_queue_->QueuedBuffersCount() << "/"
           << OUTPUT_queue_->AllocatedBuffersCount() << ", |CAPTURE_queue_| "
@@ -1167,7 +1182,7 @@ H264FrameReassembler::Process(scoped_refptr<DecoderBuffer> buffer,
       whole_frames;
 
   auto* buffer_pointer = buffer->data();
-  auto remaining_buffer_size = buffer->data_size();
+  auto remaining_buffer_size = buffer->size();
 
   do {
     const auto nalu_info =
@@ -1253,8 +1268,8 @@ H264FrameReassembler::FindH264FrameBoundary(const uint8_t* const data,
         "SubsetSPS",   "DPS",           "Reserved17",
         "Reserved18",  "CodedSliceAux", "CodedSliceExtension",
     };
-    const auto kMaxNALUTypeValue = std::size(kKnownNALUNames);
-    if (base::checked_cast<size_t>(nalu.nal_unit_type) > kMaxNALUTypeValue) {
+    constexpr auto kMaxNALUTypeValue = std::size(kKnownNALUNames);
+    if (base::checked_cast<size_t>(nalu.nal_unit_type) >= kMaxNALUTypeValue) {
       LOG(ERROR) << "NALU type unknown.";
       return std::nullopt;
     }
@@ -1327,7 +1342,7 @@ H264FrameReassembler::FindH264FrameBoundary(const uint8_t* const data,
                                  .is_start_of_new_frame = true,
                                  .nalu_size = nalu_size};
       default:
-        NOTREACHED_NORETURN() << "Unknown NALU, id: " << nalu.nal_unit_type;
+        VLOGF(4) << "Unsupported NALU " << kKnownNALUNames[nalu.nal_unit_type];
     }
   }
 }

@@ -35,6 +35,9 @@ constexpr char kOidcAuthResponseTemplate[] =
 constexpr char kDummyHeader[] = "encoded_header";
 constexpr char kDummySignature[] = "signature";
 
+constexpr char kOidcEntraReprocessUrl[] =
+    "https://login.microsoftonline.com/common/reprocess?%s";
+
 constexpr char kUserPrincipleNameClaimName[] = "upn";
 constexpr char kSubjectClaimName[] = "sub";
 
@@ -172,7 +175,7 @@ TEST_P(OidcAuthResponseCaptureNavigationThrottleTest, SuccessfulInterception) {
                     web_contents(),
                     ProfileManagementOicdTokens{.auth_token = auth_token,
                                                 .id_token = id_token},
-                    kExampleUserPrincipleName))
+                    kExampleAuthSubject))
         .WillOnce(testing::Return());
   }
   auto throttle =
@@ -181,7 +184,7 @@ TEST_P(OidcAuthResponseCaptureNavigationThrottleTest, SuccessfulInterception) {
   if (!enable_oidc_interception()) {
     ASSERT_EQ(nullptr, throttle.get());
   } else {
-    EXPECT_EQ(content::NavigationThrottle::DEFER,
+    EXPECT_EQ(content::NavigationThrottle::PROCEED,
               throttle->WillRedirectRequest().action());
   }
   loop_.RunUntilIdle();
@@ -197,7 +200,7 @@ TEST_P(OidcAuthResponseCaptureNavigationThrottleTest, MissingAuthToken) {
 
   auto* oidc_interceptor = GetMockOidcInterceptor();
   ExpectNoOidcInterception(oidc_interceptor, redirection_url,
-                           NavigationThrottle::CANCEL_AND_IGNORE);
+                           NavigationThrottle::PROCEED);
 }
 
 TEST_P(OidcAuthResponseCaptureNavigationThrottleTest, MissingIdToken) {
@@ -210,20 +213,30 @@ TEST_P(OidcAuthResponseCaptureNavigationThrottleTest, MissingIdToken) {
 
   auto* oidc_interceptor = GetMockOidcInterceptor();
   ExpectNoOidcInterception(oidc_interceptor, redirection_url,
-                           NavigationThrottle::CANCEL_AND_IGNORE);
+                           NavigationThrottle::PROCEED);
 }
 
-TEST_P(OidcAuthResponseCaptureNavigationThrottleTest, MissingAuthUpnClaim) {
-  std::string auth_token = BuildTokenFromDict(
-      base::Value::Dict().Set(kSubjectClaimName, kExampleAuthSubject));
-  std::string id_token = BuildTokenFromDict(
-      base::Value::Dict().Set(kSubjectClaimName, kExampleIdSubject));
+TEST_P(OidcAuthResponseCaptureNavigationThrottleTest,
+       MsftRedirectNotEnrolling) {
+  std::string redirection_url = base::StringPrintf(
+      kOidcEntraReprocessUrl, "random_encoded_value&session_id=123");
+
+  auto* oidc_interceptor = GetMockOidcInterceptor();
+  ExpectNoOidcInterception(oidc_interceptor, redirection_url,
+                           NavigationThrottle::PROCEED);
+}
+
+TEST_P(OidcAuthResponseCaptureNavigationThrottleTest, MissingAuthSubClaim) {
+  std::string auth_token = BuildTokenFromDict(base::Value::Dict().Set(
+      kUserPrincipleNameClaimName, kExampleUserPrincipleName));
+  std::string id_token = BuildTokenFromDict(base::Value::Dict().Set(
+      kUserPrincipleNameClaimName, kExampleUserPrincipleName));
 
   std::string redirection_url = BuildOidcResponseUrl(auth_token, id_token);
 
   auto* oidc_interceptor = GetMockOidcInterceptor();
   ExpectNoOidcInterception(oidc_interceptor, redirection_url,
-                           NavigationThrottle::DEFER);
+                           NavigationThrottle::PROCEED);
 }
 
 TEST_P(OidcAuthResponseCaptureNavigationThrottleTest, EmptyAuthJson) {
@@ -235,7 +248,7 @@ TEST_P(OidcAuthResponseCaptureNavigationThrottleTest, EmptyAuthJson) {
 
   auto* oidc_interceptor = GetMockOidcInterceptor();
   ExpectNoOidcInterception(oidc_interceptor, redirection_url,
-                           NavigationThrottle::DEFER);
+                           NavigationThrottle::PROCEED);
 }
 
 TEST_P(OidcAuthResponseCaptureNavigationThrottleTest,
@@ -302,7 +315,7 @@ TEST_P(OidcAuthResponseCaptureNavigationThrottleTest, DataDecoderFailure) {
 
   auto* oidc_interceptor = GetMockOidcInterceptor();
   ExpectNoOidcInterception(oidc_interceptor, redirection_url,
-                           NavigationThrottle::DEFER);
+                           NavigationThrottle::PROCEED);
 }
 
 INSTANTIATE_TEST_SUITE_P(All,

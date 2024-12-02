@@ -41,8 +41,6 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.app.feed.FeedActionDelegateImpl;
 import org.chromium.chrome.browser.bookmarks.BookmarkModel;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
-import org.chromium.chrome.browser.compositor.layouts.content.InvalidationAwareThumbnailProvider;
-import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.feed.FeedActionDelegate;
 import org.chromium.chrome.browser.feed.FeedReliabilityLogger;
@@ -66,7 +64,6 @@ import org.chromium.chrome.browser.magic_stack.ModuleRegistry;
 import org.chromium.chrome.browser.native_page.ContextMenuManager;
 import org.chromium.chrome.browser.omnibox.OmniboxFocusReason;
 import org.chromium.chrome.browser.omnibox.OmniboxStub;
-import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteControllerProvider;
 import org.chromium.chrome.browser.omnibox.voice.VoiceRecognitionHandler;
 import org.chromium.chrome.browser.privacy.settings.PrivacyPreferencesManagerImpl;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -75,6 +72,7 @@ import org.chromium.chrome.browser.search_resumption.SearchResumptionModuleCoord
 import org.chromium.chrome.browser.search_resumption.SearchResumptionModuleUtils;
 import org.chromium.chrome.browser.settings.SettingsLauncherImpl;
 import org.chromium.chrome.browser.share.ShareDelegate;
+import org.chromium.chrome.browser.single_tab.SingleTabSwitcherCoordinator;
 import org.chromium.chrome.browser.suggestions.SuggestionsMetrics;
 import org.chromium.chrome.browser.suggestions.SuggestionsNavigationDelegate;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegateImpl;
@@ -87,6 +85,8 @@ import org.chromium.chrome.browser.tab.TabHidingType;
 import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.tab.TabSelectionType;
+import org.chromium.chrome.browser.tab_ui.InvalidationAwareThumbnailProvider;
+import org.chromium.chrome.browser.tab_ui.TabContentManager;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
@@ -100,7 +100,6 @@ import org.chromium.chrome.browser.util.BrowserUiUtils;
 import org.chromium.chrome.browser.util.BrowserUiUtils.HostSurface;
 import org.chromium.chrome.browser.xsurface.feed.FeedLaunchReliabilityLogger.SurfaceType;
 import org.chromium.chrome.features.start_surface.StartSurfaceConfiguration;
-import org.chromium.chrome.features.tasks.SingleTabSwitcherCoordinator;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.components.browser_ui.styles.ChromeColors;
 import org.chromium.components.browser_ui.styles.SemanticColorUtils;
@@ -514,15 +513,13 @@ public class NewTabPage
         // For example, the user changes theme when a NTP is showing, which leads to the recreation
         // of the ChromeTabbedActivity and showing the NTP as the last visited Tab.
         if (mTabModelSelector.isTabStateInitialized()) {
-            mayCreateSearchResumptionModule(
-                    profile, AutocompleteControllerProvider.from(windowAndroid));
+            mayCreateSearchResumptionModule(profile);
         } else {
             mTabModelSelector.addObserver(
                     new TabModelSelectorObserver() {
                         @Override
                         public void onTabStateInitialized() {
-                            mayCreateSearchResumptionModule(
-                                    profile, AutocompleteControllerProvider.from(windowAndroid));
+                            mayCreateSearchResumptionModule(profile);
                             mTabModelSelector.removeObserver(this);
                         }
                     });
@@ -568,9 +565,8 @@ public class NewTabPage
                 mFeedSurfaceProvider.getUiConfig(),
                 lifecycleDispatcher,
                 uma,
-                mTab.isIncognito(),
+                mTab.getProfile(),
                 windowAndroid,
-                isNtpAsHomeSurfaceOnTablet(),
                 mIsSurfacePolishEnabled,
                 mIsSurfacePolishOmniboxColorEnabled,
                 mIsSurfacePolishLessBrandSpaceEnabled,
@@ -634,7 +630,6 @@ public class NewTabPage
                         isInNightMode,
                         this,
                         profile,
-                        /* isPlaceholderShownInitially= */ false,
                         mBottomSheetController,
                         shareDelegateSupplier,
                         /* externalScrollableContainerDelegate= */ null,
@@ -1175,7 +1170,7 @@ public class NewTabPage
             }
         }
 
-        if (isNtpAsHomeSurfaceOnTablet() && mSearchProviderHasLogo) {
+        if (mIsTablet && mSearchProviderHasLogo) {
             return resources.getDimensionPixelSize(R.dimen.ntp_logo_vertical_top_margin_tablet);
         }
 
@@ -1197,22 +1192,20 @@ public class NewTabPage
             }
         }
 
-        if (isNtpAsHomeSurfaceOnTablet() && mSearchProviderHasLogo) {
+        if (mIsTablet && mSearchProviderHasLogo) {
             return resources.getDimensionPixelSize(R.dimen.ntp_logo_vertical_bottom_margin_tablet);
         }
 
         return resources.getDimensionPixelSize(R.dimen.ntp_logo_margin_bottom);
     }
 
-    private void mayCreateSearchResumptionModule(
-            Profile profile, AutocompleteControllerProvider provider) {
+    private void mayCreateSearchResumptionModule(Profile profile) {
         // The module is disabled on tablets.
         if (mIsTablet) return;
 
         mSearchResumptionModuleCoordinator =
                 SearchResumptionModuleUtils.mayCreateSearchResumptionModule(
                         mNewTabPageLayout,
-                        provider,
                         mTabModelSelector.getCurrentModel(),
                         mTab,
                         profile,
@@ -1375,14 +1368,6 @@ public class NewTabPage
 
     public boolean getSnapshotSingleTabCardChangedForTesting() {
         return mSnapshotSingleTabCardChanged;
-    }
-
-    /**
-     * Returns whether Chrome is running on tablet with NTP as home surface enabled. Returns false
-     * if Chrome is running on phone.
-     */
-    private boolean isNtpAsHomeSurfaceOnTablet() {
-        return mIsNtpAsHomeSurfaceEnabled && mIsTablet;
     }
 
     @Override

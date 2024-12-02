@@ -104,7 +104,8 @@
   if (animated) {
     // Prepare for animation.
     BOOL shouldCrossfadeEditAndSteadyViews =
-        _trigger != OmniboxFocusTrigger::kUnpinnedLargeFakebox;
+        _trigger != OmniboxFocusTrigger::kUnpinnedLargeFakebox &&
+        _trigger != OmniboxFocusTrigger::kUnpinnedFakebox;
     if (shouldCrossfadeEditAndSteadyViews) {
       [self.locationBarAnimatee offsetTextFieldToMatchSteadyView];
       [self.locationBarAnimatee setEditViewFaded:YES];
@@ -117,10 +118,11 @@
       [self.locationBarAnimatee setSteadyViewFaded:YES];
     }
 
-    // Hide badge view before the transform regardless of current displayed
-    // state to prevent it from being visible outside of the location bar as the
-    // steadView moves outside to the leading side of the location bar.
-    [self.locationBarAnimatee hideSteadyViewBadgeView];
+    // Hide badge and entrypoint views before the transform regardless of
+    // current displayed state to prevent them from being visible outside of the
+    // location bar as the steadView moves outside to the leading side of the
+    // location bar.
+    [self.locationBarAnimatee hideSteadyViewBadgeAndEntrypointViews];
     // Make edit view transparent, but not hidden.
     [self.locationBarAnimatee setEditViewHidden:NO];
     [self.editViewAnimatee setLeadingIconScale:0];
@@ -192,7 +194,7 @@
   void (^cleanup)() = ^{
     [self.locationBarAnimatee setEditViewHidden:YES];
     [self.locationBarAnimatee setSteadyViewHidden:NO];
-    [self.locationBarAnimatee showSteadyViewBadgeView];
+    [self.locationBarAnimatee showSteadyViewBadgeAndEntrypointViews];
     [self.locationBarAnimatee resetTransforms];
     [self.locationBarAnimatee setSteadyViewFaded:NO];
     [self.editViewAnimatee setLeadingIconScale:1];
