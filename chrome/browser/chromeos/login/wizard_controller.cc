@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_registry_simple.h"
@@ -25,15 +26,13 @@
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/geolocation/simple_geolocation_provider.h"
-#include "chrome/browser/chromeos/login/enrollment/auto_enrollment_check_step.h"
+#include "chrome/browser/chromeos/login/enrollment/auto_enrollment_check_screen.h"
 #include "chrome/browser/chromeos/login/enrollment/enrollment_screen.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/hwid_checker.h"
-#include "chrome/browser/chromeos/login/login_display_host.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/managed/locally_managed_user_creation_screen.h"
-#include "chrome/browser/chromeos/login/oobe_display.h"
 #include "chrome/browser/chromeos/login/screens/error_screen.h"
 #include "chrome/browser/chromeos/login/screens/eula_screen.h"
 #include "chrome/browser/chromeos/login/screens/hid_detection_screen.h"
@@ -46,13 +45,16 @@
 #include "chrome/browser/chromeos/login/screens/user_image_screen.h"
 #include "chrome/browser/chromeos/login/screens/wrong_hwid_screen.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
-#include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host.h"
+#include "chrome/browser/chromeos/login/ui/oobe_display.h"
+#include "chrome/browser/chromeos/login/users/user_manager.h"
 #include "chrome/browser/chromeos/net/delay_network_call.h"
 #include "chrome/browser/chromeos/net/network_portal_detector.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/timezone/timezone_provider.h"
+#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/options/options_util.h"
@@ -86,10 +88,28 @@ static int kShowDelayMs = 400;
 // Total timezone resolving process timeout.
 const unsigned int kResolveTimeZoneTimeoutSeconds = 60;
 
+// Stores the list of all screens that should be shown when resuming OOBE.
+const char *kResumableScreens[] = {
+  chromeos::WizardController::kNetworkScreenName,
+  chromeos::WizardController::kUpdateScreenName,
+  chromeos::WizardController::kEulaScreenName,
+  chromeos::WizardController::kEnrollmentScreenName,
+  chromeos::WizardController::kTermsOfServiceScreenName,
+  chromeos::WizardController::kAutoEnrollmentCheckScreenName
+};
+
 // Checks flag for HID-detection screen show.
 bool CanShowHIDDetectionScreen() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(
-      chromeos::switches::kEnableHIDDetectionOnOOBE);
+  return !CommandLine::ForCurrentProcess()->HasSwitch(
+        chromeos::switches::kDisableHIDDetectionOnOOBE);
+}
+
+bool IsResumableScreen(const std::string& screen) {
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kResumableScreens); ++i) {
+    if (screen == kResumableScreens[i])
+      return true;
+  }
+  return false;
 }
 
 }  // namespace
@@ -107,6 +127,8 @@ const char WizardController::kKioskEnableScreenName[] = "kiosk-enable";
 const char WizardController::kKioskAutolaunchScreenName[] = "autolaunch";
 const char WizardController::kErrorScreenName[] = "error-message";
 const char WizardController::kTermsOfServiceScreenName[] = "tos";
+const char WizardController::kAutoEnrollmentCheckScreenName[] =
+  "auto-enrollment-check";
 const char WizardController::kWrongHWIDScreenName[] = "wrong-hwid";
 const char WizardController::kLocallyManagedUserCreationScreenName[] =
   "locally-managed-user-creation-flow";
@@ -151,8 +173,11 @@ WizardController::WizardController(chromeos::LoginDisplayHost* host,
       host_(host),
       oobe_display_(oobe_display),
       usage_statistics_reporting_(true),
+      skip_update_enroll_after_eula_(false),
+      enrollment_recovery_(ShouldRecoverEnrollment()),
       login_screen_started_(false),
       user_image_screen_return_to_previous_hack_(false),
+      timezone_resolved_(false),
       weak_factory_(this) {
   DCHECK(default_controller_ == NULL);
   default_controller_ = this;
@@ -208,9 +233,16 @@ void WizardController::Init(
     }
   }
 
-  AdvanceToScreen(first_screen_name);
+  const std::string screen_pref =
+      GetLocalState()->GetString(prefs::kOobeScreenPending);
+  if (is_out_of_box_ && !screen_pref.empty() && (first_screen_name.empty() ||
+      first_screen_name == WizardController::kTestNoScreenName)) {
+    first_screen_name_ = screen_pref;
+  }
+
+  AdvanceToScreen(first_screen_name_);
   if (!IsMachineHWIDCorrect() && !StartupUtils::IsDeviceRegistered() &&
-      first_screen_name.empty())
+      first_screen_name_.empty())
     ShowWrongHWIDScreen();
 }
 
@@ -298,6 +330,17 @@ chromeos::WrongHWIDScreen* WizardController::GetWrongHWIDScreen() {
             this, oobe_display_->GetWrongHWIDScreenActor()));
   }
   return wrong_hwid_screen_.get();
+}
+
+chromeos::AutoEnrollmentCheckScreen*
+    WizardController::GetAutoEnrollmentCheckScreen() {
+  if (!auto_enrollment_check_screen_.get()) {
+    auto_enrollment_check_screen_.reset(
+        new chromeos::AutoEnrollmentCheckScreen(
+            this,
+            oobe_display_->GetAutoEnrollmentCheckScreenActor()));
+  }
+  return auto_enrollment_check_screen_.get();
 }
 
 chromeos::LocallyManagedUserCreationScreen*
@@ -405,13 +448,18 @@ void WizardController::ShowEnrollmentScreen() {
 
   EnrollmentScreenActor::EnrollmentMode mode =
       EnrollmentScreenActor::ENROLLMENT_MODE_MANUAL;
-  if (is_auto_enrollment)
-    mode = EnrollmentScreenActor::ENROLLMENT_MODE_AUTO;
-  else if (ShouldAutoStartEnrollment() && !CanExitEnrollment())
-    mode = EnrollmentScreenActor::ENROLLMENT_MODE_FORCED;
-
   EnrollmentScreen* screen = GetEnrollmentScreen();
-  screen->SetParameters(mode, GetForcedEnrollmentDomain(), user);
+  std::string enrollment_domain = GetForcedEnrollmentDomain();
+  if (is_auto_enrollment) {
+    mode = EnrollmentScreenActor::ENROLLMENT_MODE_AUTO;
+  } else if (enrollment_recovery_) {
+    mode = EnrollmentScreenActor::ENROLLMENT_MODE_RECOVERY;
+    enrollment_domain = GetEnrollmentRecoveryDomain();
+  } else if (ShouldAutoStartEnrollment() && !CanExitEnrollment()) {
+    mode = EnrollmentScreenActor::ENROLLMENT_MODE_FORCED;
+  }
+
+  screen->SetParameters(mode, enrollment_domain, user);
   SetCurrentScreen(screen);
 }
 
@@ -455,6 +503,14 @@ void WizardController::ShowWrongHWIDScreen() {
   SetCurrentScreen(GetWrongHWIDScreen());
 }
 
+void WizardController::ShowAutoEnrollmentCheckScreen() {
+  VLOG(1) << "Showing Auto-enrollment check screen.";
+  SetStatusAreaVisible(true);
+  AutoEnrollmentCheckScreen* screen = GetAutoEnrollmentCheckScreen();
+  screen->set_auto_enrollment_controller(host_->GetAutoEnrollmentController());
+  SetCurrentScreen(screen);
+}
+
 void WizardController::ShowLocallyManagedUserCreationScreen() {
   VLOG(1) << "Showing Locally managed user creation screen screen.";
   SetStatusAreaVisible(true);
@@ -474,12 +530,7 @@ void WizardController::SkipToLoginForTesting(
   VLOG(1) << "SkipToLoginForTesting.";
   StartupUtils::MarkEulaAccepted();
   PerformPostEulaActions();
-  PerformOOBECompletedActions();
-  if (ShouldAutoStartEnrollment()) {
-    ShowEnrollmentScreen();
-  } else {
-    ShowLoginScreen(context);
-  }
+  OnOOBECompleted();
 }
 
 void WizardController::AddObserver(Observer* observer) {
@@ -494,10 +545,16 @@ void WizardController::OnSessionStart() {
   FOR_EACH_OBSERVER(Observer, observer_list_, OnSessionStart());
 }
 
+void WizardController::SkipUpdateEnrollAfterEula() {
+  skip_update_enroll_after_eula_ = true;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // WizardController, ExitHandlers:
 void WizardController::OnHIDDetectionCompleted() {
-  ShowNetworkScreen();
+  // Check for tests configuration.
+  if (!StartupUtils::IsOobeCompleted())
+    ShowNetworkScreen();
 }
 
 void WizardController::OnNetworkConnected() {
@@ -528,7 +585,7 @@ void WizardController::OnConnectionFailed() {
 }
 
 void WizardController::OnUpdateCompleted() {
-  StartAutoEnrollmentCheck();
+  ShowAutoEnrollmentCheckScreen();
 }
 
 void WizardController::OnEulaAccepted() {
@@ -546,7 +603,12 @@ void WizardController::OnEulaAccepted() {
 #endif
   }
 
-  InitiateOOBEUpdate();
+  if (skip_update_enroll_after_eula_) {
+    PerformPostEulaActions();
+    ShowAutoEnrollmentCheckScreen();
+  } else {
+    InitiateOOBEUpdate();
+  }
 }
 
 void WizardController::OnUpdateErrorCheckingForUpdate() {
@@ -597,7 +659,7 @@ void WizardController::OnUserImageSkipped() {
 void WizardController::OnEnrollmentDone() {
   // Mark OOBE as completed only if enterprise enrollment was part of the
   // forced flow (i.e. app kiosk).
-  if (ShouldAutoStartEnrollment())
+  if (ShouldAutoStartEnrollment() || enrollment_recovery_)
     PerformOOBECompletedActions();
 
   // TODO(mnissler): Unify the logic for auto-login for Public Sessions and
@@ -642,8 +704,7 @@ void WizardController::OnAutoEnrollmentDone() {
 }
 
 void WizardController::OnOOBECompleted() {
-  auto_enrollment_check_step_.reset();
-  if (ShouldAutoStartEnrollment()) {
+  if (ShouldAutoStartEnrollment() || enrollment_recovery_) {
     ShowEnrollmentScreen();
   } else {
     PerformOOBECompletedActions();
@@ -699,6 +760,13 @@ void WizardController::PerformPostEulaActions() {
 
 void WizardController::PerformOOBECompletedActions() {
   StartupUtils::MarkOobeCompleted();
+  UMA_HISTOGRAM_COUNTS_100(
+      "HIDDetection.TimesDialogShownPerOOBECompleted",
+      GetLocalState()->GetInteger(prefs::kTimesHIDDialogShown));
+  GetLocalState()->ClearPref(prefs::kTimesHIDDialogShown);
+
+  if (enrollment_recovery_)
+    chrome::AttemptRestart();
 }
 
 void WizardController::SetCurrentScreen(WizardScreen* new_current) {
@@ -710,6 +778,10 @@ void WizardController::ShowCurrentScreen() {
   // flow has been switched to sign in screen (ExistingUserController).
   if (!oobe_display_)
     return;
+
+  // First remember how far have we reached so that we can resume if needed.
+  if (is_out_of_box_ && IsResumableScreen(current_screen_->GetName()))
+    StartupUtils::SaveOobePendingScreen(current_screen_->GetName());
 
   smooth_show_timer_.Stop();
 
@@ -772,6 +844,8 @@ void WizardController::AdvanceToScreen(const std::string& screen_name) {
     ShowTermsOfServiceScreen();
   } else if (screen_name == kWrongHWIDScreenName) {
     ShowWrongHWIDScreen();
+  } else if (screen_name == kAutoEnrollmentCheckScreenName) {
+    ShowAutoEnrollmentCheckScreen();
   } else if (screen_name == kLocallyManagedUserCreationScreenName) {
     ShowLocallyManagedUserCreationScreen();
   } else if (screen_name == kAppLaunchSplashScreenName) {
@@ -824,7 +898,10 @@ void WizardController::OnExit(ExitCodes exit_code) {
       ShowNetworkScreen();
       break;
     case ENTERPRISE_AUTO_ENROLLMENT_CHECK_COMPLETED:
-      OnOOBECompleted();
+      if (skip_update_enroll_after_eula_)
+        ShowEnrollmentScreen();
+      else
+        OnOOBECompleted();
       break;
     case ENTERPRISE_ENROLLMENT_COMPLETED:
       OnEnrollmentDone();
@@ -945,6 +1022,21 @@ bool WizardController::ShouldAutoStartEnrollment() {
 }
 
 // static
+bool WizardController::ShouldRecoverEnrollment() {
+  policy::BrowserPolicyConnectorChromeOS* connector =
+      g_browser_process->platform_part()->browser_policy_connector_chromeos();
+  return connector->GetDeviceCloudPolicyManager()->ShouldRecoverEnrollment();
+}
+
+// static
+std::string WizardController::GetEnrollmentRecoveryDomain() {
+  policy::BrowserPolicyConnectorChromeOS* connector =
+      g_browser_process->platform_part()->browser_policy_connector_chromeos();
+  return
+      connector->GetDeviceCloudPolicyManager()->GetEnrollmentRecoveryDomain();
+}
+
+// static
 bool WizardController::CanExitEnrollment() {
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
@@ -968,12 +1060,6 @@ void WizardController::OnLocalStateInitialized(bool /* succeeded */) {
   ShowErrorScreen();
 }
 
-void WizardController::StartAutoEnrollmentCheck() {
-  auto_enrollment_check_step_.reset(
-      new AutoEnrollmentCheckStep(this, host_->GetAutoEnrollmentController()));
-  auto_enrollment_check_step_->Start();
-}
-
 PrefService* WizardController::GetLocalState() {
   if (local_state_for_testing_)
     return local_state_for_testing_;
@@ -988,6 +1074,10 @@ void WizardController::OnTimezoneResolved(
   // To check that "this" is not destroyed try to access some member
   // (timezone_provider_) in this case. Expect crash here.
   DCHECK(timezone_provider_.get());
+
+  timezone_resolved_ = true;
+  base::ScopedClosureRunner inform_test(on_timezone_resolved_for_testing_);
+  on_timezone_resolved_for_testing_.Reset();
 
   VLOG(1) << "Resolved local timezone={" << timezone->ToStringForDebug()
           << "}.";
@@ -1053,6 +1143,15 @@ void WizardController::OnLocationResolved(const Geoposition& position,
       timeout - elapsed,
       base::Bind(&WizardController::OnTimezoneResolved,
                  base::Unretained(this)));
+}
+
+bool WizardController::SetOnTimeZoneResolvedForTesting(
+    const base::Closure& callback) {
+  if (timezone_resolved_)
+    return false;
+
+  on_timezone_resolved_for_testing_ = callback;
+  return true;
 }
 
 }  // namespace chromeos

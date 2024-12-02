@@ -66,6 +66,7 @@ class ShellExtensionsBrowserClient : public ExtensionsBrowserClient {
   virtual scoped_ptr<ExtensionHostDelegate> CreateExtensionHostDelegate()
       OVERRIDE;
   virtual bool DidVersionUpdate(content::BrowserContext* context) OVERRIDE;
+  virtual void PermitExternalProtocolHandler() OVERRIDE;
   virtual scoped_ptr<AppSorting> CreateAppSorting() OVERRIDE;
   virtual bool IsRunningInForcedAppMode() OVERRIDE;
   virtual ApiActivityMonitor* GetApiActivityMonitor(
@@ -75,6 +76,8 @@ class ShellExtensionsBrowserClient : public ExtensionsBrowserClient {
       ExtensionFunctionRegistry* registry) const OVERRIDE;
   virtual scoped_ptr<RuntimeAPIDelegate> CreateRuntimeAPIDelegate(
       content::BrowserContext* context) const OVERRIDE;
+  virtual ComponentExtensionResourceManager*
+  GetComponentExtensionResourceManager() OVERRIDE;
 
  private:
   // The single BrowserContext for app_shell. Not owned.

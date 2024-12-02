@@ -16,7 +16,7 @@
 #include "chrome/browser/history/url_index_private_data.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
-#include "components/bookmarks/core/browser/bookmark_model.h"
+#include "components/bookmarks/browser/bookmark_model.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -38,13 +38,13 @@ void InitializeSchemeWhitelist(std::set<std::string>* whitelist) {
   DCHECK(whitelist);
   if (!whitelist->empty())
     return;  // Nothing to do, already initialized.
-  whitelist->insert(std::string(content::kAboutScheme));
+  whitelist->insert(std::string(url::kAboutScheme));
   whitelist->insert(std::string(content::kChromeUIScheme));
-  whitelist->insert(std::string(content::kFileScheme));
-  whitelist->insert(std::string(content::kFtpScheme));
+  whitelist->insert(std::string(url::kFileScheme));
+  whitelist->insert(std::string(url::kFtpScheme));
   whitelist->insert(std::string(url::kHttpScheme));
   whitelist->insert(std::string(url::kHttpsScheme));
-  whitelist->insert(std::string(content::kMailToScheme));
+  whitelist->insert(std::string(url::kMailToScheme));
 }
 
 // Restore/SaveCacheObserver ---------------------------------------------------
@@ -90,8 +90,10 @@ InMemoryURLIndex::RebuildPrivateDataFromHistoryDBTask::
 
 InMemoryURLIndex::InMemoryURLIndex(Profile* profile,
                                    const base::FilePath& history_dir,
-                                   const std::string& languages)
+                                   const std::string& languages,
+                                   HistoryClient* history_client)
     : profile_(profile),
+      history_client_(history_client),
       history_dir_(history_dir),
       languages_(languages),
       private_data_(new URLIndexPrivateData),
@@ -114,6 +116,7 @@ InMemoryURLIndex::InMemoryURLIndex(Profile* profile,
 // Called only by unit tests.
 InMemoryURLIndex::InMemoryURLIndex()
     : profile_(NULL),
+      history_client_(NULL),
       private_data_(new URLIndexPrivateData),
       restore_cache_observer_(NULL),
       save_cache_observer_(NULL),
@@ -160,12 +163,14 @@ bool InMemoryURLIndex::GetCacheFilePath(base::FilePath* file_path) {
 
 ScoredHistoryMatches InMemoryURLIndex::HistoryItemsForTerms(
     const base::string16& term_string,
-    size_t cursor_position) {
+    size_t cursor_position,
+    size_t max_matches) {
   return private_data_->HistoryItemsForTerms(
       term_string,
       cursor_position,
+      max_matches,
       languages_,
-      BookmarkModelFactory::GetForProfile(profile_));
+      history_client_);
 }
 
 // Updating --------------------------------------------------------------------
@@ -227,6 +232,25 @@ void InMemoryURLIndex::OnURLsDeleted(const URLsDeletedDetails* details) {
     for (URLRows::const_iterator row = details->rows.begin();
          row != details->rows.end(); ++row)
       needs_to_be_cached_ |= private_data_->DeleteURL(row->url());
+  }
+  // If we made changes, destroy the previous cache.  Otherwise, if we go
+  // through an unclean shutdown (and therefore fail to write a new cache file),
+  // when Chrome restarts and we restore from the previous cache, we'll end up
+  // searching over URLs that may be deleted.  This would be wrong, and
+  // surprising to the user who bothered to delete some URLs from his/her
+  // history.  In this situation, deleting the cache is a better solution than
+  // writing a new cache (after deleting the URLs from the in-memory structure)
+  // because deleting the cache forces it to be rebuilt from history upon
+  // startup.  If we instead write a new, updated cache then at the time of next
+  // startup (after an unclean shutdown) we will not rebuild the in-memory data
+  // structures from history but rather use the cache.  This solution is
+  // mediocre because this cache may not have the most-recently-visited URLs
+  // in it (URLs visited after user deleted some URLs from history), which
+  // would be odd and confusing.  It's better to force a rebuild.
+  base::FilePath path;
+  if (needs_to_be_cached_ && GetCacheFilePath(&path)) {
+    content::BrowserThread::PostBlockingPoolTask(
+        FROM_HERE, base::Bind(DeleteCacheFile, path));
   }
 }
 

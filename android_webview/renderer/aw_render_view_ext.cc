@@ -12,7 +12,6 @@
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "content/public/common/url_constants.h"
 #include "content/public/renderer/android_content_detection_prefixes.h"
 #include "content/public/renderer/document_state.h"
 #include "content/public/renderer/render_view.h"
@@ -31,6 +30,7 @@
 #include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "url/url_canon.h"
+#include "url/url_constants.h"
 #include "url/url_util.h"
 
 namespace android_webview {
@@ -117,7 +117,7 @@ void PopulateHitTestData(const GURL& absolute_link_url,
     data->img_src = absolute_image_url;
 
   const bool is_javascript_scheme =
-      absolute_link_url.SchemeIs(content::kJavaScriptScheme);
+      absolute_link_url.SchemeIs(url::kJavaScriptScheme);
   const bool has_link_url = !absolute_link_url.is_empty();
   const bool has_image_url = !absolute_image_url.is_empty();
 
@@ -160,7 +160,6 @@ bool AwRenderViewExt::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(AwViewMsg_ResetScrollAndScaleState,
                         OnResetScrollAndScaleState)
     IPC_MESSAGE_HANDLER(AwViewMsg_SetInitialPageScale, OnSetInitialPageScale)
-    IPC_MESSAGE_HANDLER(AwViewMsg_SetFixedLayoutSize, OnSetFixedLayoutSize)
     IPC_MESSAGE_HANDLER(AwViewMsg_SetBackgroundColor, OnSetBackgroundColor)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
@@ -179,16 +178,6 @@ void AwRenderViewExt::OnDocumentHasImagesRequest(int id) {
   }
   Send(new AwViewHostMsg_DocumentHasImagesResponse(routing_id(), id,
                                                    hasImages));
-}
-
-void AwRenderViewExt::DidCommitProvisionalLoad(blink::WebLocalFrame* frame,
-                                               bool is_new_navigation) {
-  content::DocumentState* document_state =
-      content::DocumentState::FromDataSource(frame->dataSource());
-  if (document_state->can_load_local_resources()) {
-    blink::WebSecurityOrigin origin = frame->document().securityOrigin();
-    origin.grantLoadLocalResources();
-  }
 }
 
 void AwRenderViewExt::DidCommitCompositorFrame() {
@@ -315,12 +304,6 @@ void AwRenderViewExt::OnSetInitialPageScale(double page_scale_factor) {
     return;
   render_view()->GetWebView()->setInitialPageScaleOverride(
       page_scale_factor);
-}
-
-void AwRenderViewExt::OnSetFixedLayoutSize(const gfx::Size& size) {
-  if (!render_view() || !render_view()->GetWebView())
-    return;
-  render_view()->GetWebView()->setFixedLayoutSize(size);
 }
 
 void AwRenderViewExt::OnSetBackgroundColor(SkColor c) {

@@ -22,11 +22,11 @@ namespace {
 const char* kValidSchemes[] = {
     url::kHttpScheme,
     url::kHttpsScheme,
-    content::kFileScheme,
-    content::kFtpScheme,
+    url::kFileScheme,
+    url::kFtpScheme,
     content::kChromeUIScheme,
     extensions::kExtensionScheme,
-    content::kFileSystemScheme,
+    url::kFileSystemScheme,
 };
 
 const int kValidSchemeMasks[] = {
@@ -50,6 +50,7 @@ const char kParseErrorEmptyHost[] = "Host can not be empty.";
 const char kParseErrorInvalidHostWildcard[] = "Invalid host wildcard.";
 const char kParseErrorEmptyPath[] = "Empty path.";
 const char kParseErrorInvalidPort[] = "Invalid port.";
+const char kParseErrorInvalidHost[] = "Invalid host.";
 
 // Message explaining each URLPattern::ParseResult.
 const char* const kParseResultMessages[] = {
@@ -61,6 +62,7 @@ const char* const kParseResultMessages[] = {
   kParseErrorInvalidHostWildcard,
   kParseErrorEmptyPath,
   kParseErrorInvalidPort,
+  kParseErrorInvalidHost,
 };
 
 COMPILE_ASSERT(URLPattern::NUM_PARSE_RESULTS == arraysize(kParseResultMessages),
@@ -108,6 +110,15 @@ std::string StripTrailingWildcard(const std::string& path) {
 }
 
 }  // namespace
+
+// static
+bool URLPattern::IsValidSchemeForExtensions(const std::string& scheme) {
+  for (size_t i = 0; i < arraysize(kValidSchemes); ++i) {
+    if (scheme == kValidSchemes[i])
+      return true;
+  }
+  return false;
+}
 
 URLPattern::URLPattern()
     : valid_schemes_(SCHEME_NONE),
@@ -161,7 +172,7 @@ URLPattern::ParseResult URLPattern::Parse(const std::string& pattern) {
   }
 
   // Parse out the scheme.
-  size_t scheme_end_pos = pattern.find(content::kStandardSchemeSeparator);
+  size_t scheme_end_pos = pattern.find(url::kStandardSchemeSeparator);
   bool has_standard_scheme_separator = true;
 
   // Some urls also use ':' alone as the scheme separator.
@@ -182,7 +193,7 @@ URLPattern::ParseResult URLPattern::Parse(const std::string& pattern) {
 
   // Advance past the scheme separator.
   scheme_end_pos +=
-      (standard_scheme ? strlen(content::kStandardSchemeSeparator) : 1);
+      (standard_scheme ? strlen(url::kStandardSchemeSeparator) : 1);
   if (scheme_end_pos >= pattern.size())
     return PARSE_ERROR_EMPTY_HOST;
 
@@ -192,7 +203,7 @@ URLPattern::ParseResult URLPattern::Parse(const std::string& pattern) {
 
   if (!standard_scheme) {
     path_start_pos = host_start_pos;
-  } else if (scheme_ == content::kFileScheme) {
+  } else if (scheme_ == url::kFileScheme) {
     size_t host_end_pos = pattern.find(kPathSeparator, host_start_pos);
     if (host_end_pos == std::string::npos) {
       // Allow hostname omission.
@@ -243,6 +254,10 @@ URLPattern::ParseResult URLPattern::Parse(const std::string& pattern) {
   // think '*' works as a glob in the host.
   if (host_.find('*') != std::string::npos)
     return PARSE_ERROR_INVALID_HOST_WILDCARD;
+
+  // Null characters are not allowed in hosts.
+  if (host_.find('\0') != std::string::npos)
+    return PARSE_ERROR_INVALID_HOST;
 
   return PARSE_SUCCESS;
 }
@@ -366,7 +381,7 @@ bool URLPattern::MatchesScheme(const std::string& test) const {
 
 bool URLPattern::MatchesHost(const std::string& host) const {
   std::string test(url::kHttpScheme);
-  test += content::kStandardSchemeSeparator;
+  test += url::kStandardSchemeSeparator;
   test += host;
   test += "/";
   return MatchesHost(GURL(test));
@@ -424,9 +439,9 @@ const std::string& URLPattern::GetAsString() const {
   bool standard_scheme = IsStandardScheme(scheme_);
 
   std::string spec = scheme_ +
-      (standard_scheme ? content::kStandardSchemeSeparator : ":");
+      (standard_scheme ? url::kStandardSchemeSeparator : ":");
 
-  if (scheme_ != content::kFileScheme && standard_scheme) {
+  if (scheme_ != url::kFileScheme && standard_scheme) {
     if (match_subdomains_) {
       spec += "*";
       if (!host_.empty())
@@ -493,7 +508,7 @@ bool URLPattern::MatchesAllSchemes(
 
 bool URLPattern::MatchesSecurityOriginHelper(const GURL& test) const {
   // Ignore hostname if scheme is file://.
-  if (scheme_ != content::kFileScheme && !MatchesHost(test))
+  if (scheme_ != url::kFileScheme && !MatchesHost(test))
     return false;
 
   if (!MatchesPortPattern(base::IntToString(test.EffectiveIntPort())))

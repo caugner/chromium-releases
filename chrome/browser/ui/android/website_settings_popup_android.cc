@@ -11,7 +11,6 @@
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/website_settings/website_settings.h"
-#include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/cert_store.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -32,11 +31,14 @@ using content::WebContents;
 
 static jobjectArray GetCertificateChain(JNIEnv* env,
                                         jobject obj,
-                                        jobject view) {
-  content::WebContents* contents =
-      content::ContentViewCore::GetNativeContentViewCore(env, view)->
-          GetWebContents();
-  int cert_id = contents->GetController().GetVisibleEntry()->GetSSL().cert_id;
+                                        jobject java_web_contents) {
+  content::WebContents* web_contents =
+      content::WebContents::FromJavaWebContents(java_web_contents);
+  if (!web_contents)
+    return NULL;
+
+  int cert_id =
+      web_contents->GetController().GetVisibleEntry()->GetSSL().cert_id;
   scoped_refptr<net::X509Certificate> cert;
   bool ok = CertStore::GetInstance()->RetrieveCert(cert_id, &cert);
   CHECK(ok);
@@ -64,18 +66,20 @@ static jobjectArray GetCertificateChain(JNIEnv* env,
 }
 
 // static
-void WebsiteSettingsPopupAndroid::Show(JNIEnv* env,
-                                       jobject context,
-                                       jobject java_content_view,
-                                       WebContents* web_contents) {
-  new WebsiteSettingsPopupAndroid(env, context, java_content_view,
-                                  web_contents);
+static jlong Init(JNIEnv* env,
+                  jclass clazz,
+                  jobject obj,
+                  jobject java_web_contents) {
+  content::WebContents* web_contents =
+      content::WebContents::FromJavaWebContents(java_web_contents);
+
+  return reinterpret_cast<intptr_t>(
+      new WebsiteSettingsPopupAndroid(env, obj, web_contents));
 }
 
 WebsiteSettingsPopupAndroid::WebsiteSettingsPopupAndroid(
     JNIEnv* env,
-    jobject context,
-    jobject java_content_view,
+    jobject java_website_settings_pop,
     WebContents* web_contents) {
   // Important to use GetVisibleEntry to match what's showing in the omnibox.
   content::NavigationEntry* nav_entry =
@@ -83,9 +87,7 @@ WebsiteSettingsPopupAndroid::WebsiteSettingsPopupAndroid(
   if (nav_entry == NULL)
     return;
 
-  popup_jobject_.Reset(
-      Java_WebsiteSettingsPopup_create(env, context, java_content_view,
-                                       reinterpret_cast<intptr_t>(this)));
+  popup_jobject_.Reset(env, java_website_settings_pop);
 
   presenter_.reset(new WebsiteSettings(
       this,
@@ -123,17 +125,15 @@ void WebsiteSettingsPopupAndroid::SetIdentityInfo(
 
     ScopedJavaLocalRef<jstring> description = ConvertUTF8ToJavaString(
         env, identity_info.identity_status_description);
-    Java_WebsiteSettingsPopup_addSection(env, popup_jobject_.obj(), icon_id,
-        ConvertUTF8ToJavaString(env, headline).obj(), description.obj());
-
     base::string16 certificate_label =
-        l10n_util::GetStringUTF16(IDS_PAGEINFO_CERT_INFO_BUTTON);
-    if (!certificate_label.empty()) {
-      Java_WebsiteSettingsPopup_setCertificateViewer(env, popup_jobject_.obj(),
-          ConvertUTF16ToJavaString(env, certificate_label).obj());
-    }
-
-    Java_WebsiteSettingsPopup_addDivider(env, popup_jobject_.obj());
+            l10n_util::GetStringUTF16(IDS_PAGEINFO_CERT_INFO_BUTTON);
+    Java_WebsiteSettingsPopup_addCertificateSection(
+        env,
+        popup_jobject_.obj(),
+        icon_id,
+        ConvertUTF8ToJavaString(env, headline).obj(),
+        description.obj(),
+        ConvertUTF16ToJavaString(env, certificate_label).obj());
   }
 
   {
@@ -143,16 +143,14 @@ void WebsiteSettingsPopupAndroid::SetIdentityInfo(
 
     ScopedJavaLocalRef<jstring> description = ConvertUTF8ToJavaString(
         env, identity_info.connection_status_description);
-    Java_WebsiteSettingsPopup_addSection(env, popup_jobject_.obj(), icon_id,
-        NULL, description.obj());
-
-    Java_WebsiteSettingsPopup_addDivider(env, popup_jobject_.obj());
+    Java_WebsiteSettingsPopup_addDescriptionSection(
+        env, popup_jobject_.obj(), icon_id, NULL, description.obj());
   }
 
   Java_WebsiteSettingsPopup_addMoreInfoLink(env, popup_jobject_.obj(),
       ConvertUTF8ToJavaString(
           env, l10n_util::GetStringUTF8(IDS_PAGE_INFO_HELP_CENTER_LINK)).obj());
-  Java_WebsiteSettingsPopup_show(env, popup_jobject_.obj());
+  Java_WebsiteSettingsPopup_showDialog(env, popup_jobject_.obj());
 }
 
 void WebsiteSettingsPopupAndroid::SetCookieInfo(
