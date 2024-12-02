@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <list>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,8 @@
 #include "content/common/cache_storage/cache_storage_types.h"
 #include "content/common/host_discardable_shared_memory_manager.h"
 #include "content/common/host_shared_bitmap_manager.h"
+#include "content/common/render_message_filter.mojom.h"
+#include "content/public/browser/browser_associated_interface.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "gpu/config/gpu_info.h"
 #include "ipc/message_filter.h"
@@ -46,12 +49,6 @@
 
 class GURL;
 struct FontDescriptor;
-struct ViewHostMsg_CreateWindow_Params;
-struct ViewHostMsg_CreateWindow_Reply;
-
-namespace blink {
-struct WebScreenInfo;
-}
 
 namespace base {
 class ProcessMetrics;
@@ -94,7 +91,10 @@ class ResourceDispatcherHostImpl;
 
 // This class filters out incoming IPC messages for the renderer process on the
 // IPC thread.
-class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
+class CONTENT_EXPORT RenderMessageFilter
+    : public BrowserMessageFilter,
+      public BrowserAssociatedInterface<mojom::RenderMessageFilter>,
+      public mojom::RenderMessageFilter {
  public:
   // Create the filter.
   RenderMessageFilter(int render_process_id,
@@ -121,8 +121,6 @@ class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
   friend class base::DeleteHelper<RenderMessageFilter>;
 
   void OnGetProcessMemorySizes(size_t* private_bytes, size_t* shared_bytes);
-  void OnCreateWindow(const ViewHostMsg_CreateWindow_Params& params,
-                      ViewHostMsg_CreateWindow_Reply* reply);
   void OnCreateWidget(int opener_id,
                       blink::WebPopupType popup_type,
                       int* route_id);
@@ -134,7 +132,10 @@ class CONTENT_EXPORT RenderMessageFilter : public BrowserMessageFilter {
   void SendLoadFontReply(IPC::Message* reply, FontLoader::Result* result);
 #endif
 
-  void OnGenerateRoutingID(int* route_id);
+  // mojom::RenderMessageFilter:
+  void GenerateRoutingID(const GenerateRoutingIDCallback& routing_id) override;
+  void CreateNewWindow(mojom::CreateNewWindowParamsPtr params,
+                       const CreateNewWindowCallback& callback) override;
 
   // Message handlers called on the browser IO thread:
   void OnEstablishGpuChannel(IPC::Message* reply);

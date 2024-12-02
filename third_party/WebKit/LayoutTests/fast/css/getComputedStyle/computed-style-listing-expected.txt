@@ -20,7 +20,6 @@ On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE
 -webkit-box-orient: horizontal
 -webkit-box-pack: start
 -webkit-box-reflect: none
--webkit-clip-path: none
 -webkit-font-smoothing: auto
 -webkit-highlight: none
 -webkit-hyphenate-character: auto
@@ -204,11 +203,13 @@ max-width: none
 min-height: 0px
 min-width: 0px
 mix-blend-mode: normal
-motion-offset: 0px
-motion-path: none
-motion-rotation: auto 0deg
 object-fit: fill
 object-position: 50% 50%
+offset-anchor: 50% 50%
+offset-distance: 0px
+offset-path: none
+offset-position: auto
+offset-rotation: auto 0deg
 opacity: 1
 order: 0
 orphans: 2
@@ -217,6 +218,7 @@ outline-offset: 0px
 outline-style: none
 outline-width: 0px
 overflow: visible
+overflow-anchor: auto
 overflow-wrap: normal
 overflow-x: visible
 overflow-y: visible

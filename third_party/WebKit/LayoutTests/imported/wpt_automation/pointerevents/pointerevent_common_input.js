@@ -1,71 +1,101 @@
 // This file contains the commonly used functions in pointerevent tests.
 
-// Mouse actions
-function mouseMoveToDocument() {
-  if (window.eventSender)
-    eventSender.mouseMoveTo(0, 0);
-}
-
-function mouseMoveIntoTarget(targetId) {
-  if (window.eventSender) {
-    var target = document.getElementById(targetId);
-    var targetRect = target.getBoundingClientRect();
-    eventSender.mouseMoveTo(targetRect.left+5, targetRect.top+5);
-  }
-}
-
-function mouseClickInTarget(targetId) {
-  if (window.eventSender) {
-    mouseMoveIntoTarget(targetId);
-    eventSender.mouseDown(0);
-    eventSender.mouseUp(0);
-  }
-}
-
-function mouseDragInTargets(targetIdList) {
-  if (window.eventSender) {
-    var target = document.getElementById(targetIdList[0]);
-    mouseMoveIntoTarget(targetIdList[0]);
-    eventSender.mouseDown(0);
-    for (var i=1; i<targetIdList.length; i++)
-      mouseMoveIntoTarget(targetIdList[i]);
-    eventSender.mouseUp(0);
-  }
-}
-
-function mouseDragInTarget(targetId) {
-  if (window.eventSender) {
-    var target = document.getElementById(targetId);
-    mouseMoveIntoTarget(targetId);
-    eventSender.mouseDown(0);
-    mouseMoveIntoTarget(targetId);
-    eventSender.mouseUp(0);
-  }
-}
-
-function mouseScrollUp() {
-  if (window.eventSender)
-    eventSender.continuousMouseScrollBy(-50, 0);
-
-}
-
-function mouseScrollLeft() {
-  if (window.eventSender)
-    eventSender.continuousMouseScrollBy(0, -50);
-}
-
-// Touch actions
 const scrollOffset = 30;
 const boundaryOffset = 5;
 const touchSourceType = 1;
 
-function touchTapInTarget(targetId) {
+function delayPromise(delay) {
   return new Promise(function(resolve, reject) {
-    if (window.chrome && chrome.gpuBenchmarking) {
-      var target = document.getElementById(targetId);
-      target.scrollIntoViewIfNeeded();
+    window.setTimeout(resolve, delay);
+  });
+}
+
+function scrollPageIfNeeded(targetSelector, targetDocument) {
+  var target = targetDocument.querySelector(targetSelector);
+  var targetRect = target.getBoundingClientRect();
+  if (targetRect.top < 0 || targetRect.left < 0 || targetRect.bottom > window.innerHeight || targetRect.right > window.innerWidth)
+    window.scrollTo(targetRect.left, targetRect.top);
+}
+
+// Mouse inputs.
+function mouseMoveToDocument() {
+  return new Promise(function(resolve, reject) {
+    if (window.eventSender) {
+      eventSender.mouseMoveTo(0, 0);
+      resolve();
+    } else {
+      reject();
+    }
+  });
+}
+
+function mouseMoveIntoTarget(targetSelector, targetFrame) {
+  var targetDocument = document;
+  var frameLeft = 0;
+  var frameTop = 0;
+  if (targetFrame !== undefined) {
+    targetDocument = targetFrame.contentDocument;
+    var frameRect = targetFrame.getBoundingClientRect();
+    frameLeft = frameRect.left;
+    frameTop = frameRect.top;
+  }
+  return new Promise(function(resolve, reject) {
+    if (window.eventSender) {
+      scrollPageIfNeeded(targetSelector, targetDocument);
+      var target = targetDocument.querySelector(targetSelector);
       var targetRect = target.getBoundingClientRect();
-      chrome.gpuBenchmarking.tap(targetRect.left + boundaryOffset, targetRect.top + boundaryOffset, function() {
+      eventSender.mouseMoveTo(frameLeft + targetRect.left + boundaryOffset, frameTop + targetRect.top + boundaryOffset);
+      resolve();
+    } else {
+      reject();
+    }
+  });
+}
+
+function mouseButtonPress(button) {
+  return new Promise(function(resolve, reject) {
+    if (window.eventSender) {
+      eventSender.mouseDown(button);
+      resolve();
+   } else {
+      reject();
+    }
+  });
+}
+
+function mouseButtonRelease(button) {
+  return new Promise(function(resolve, reject) {
+    if (window.eventSender) {
+      eventSender.mouseUp(button);
+      resolve();
+   } else {
+      reject();
+    }
+  });
+}
+
+function mouseClickInTarget(targetSelector, targetFrame) {
+  return mouseMoveIntoTarget(targetSelector, targetFrame).then(function() {
+    return new Promise(function(resolve, reject) {
+      if (window.eventSender) {
+        eventSender.mouseDown(0);
+        eventSender.mouseUp(0);
+        resolve();
+      } else {
+        reject();
+      }
+    });
+  });
+}
+
+function mouseDragInTargets(targetSelectorList) {
+  return new Promise(function(resolve, reject) {
+    if (window.eventSender) {
+      mouseMoveIntoTarget(targetSelectorList[0]).then(function() {
+        eventSender.mouseDown(0);
+        for (var i=1; i<targetSelectorList.length; i++)
+          mouseMoveIntoTarget(targetSelectorList[i]);
+        eventSender.mouseUp(0);
         resolve();
       });
     } else {
@@ -74,99 +104,148 @@ function touchTapInTarget(targetId) {
   });
 }
 
-function touchScrollInTarget(targetId, direction) {
+function mouseDragInTarget(targetSelector) {
+  return mouseDragInTargets([targetSelector, targetSelector]);
+}
+
+function mouseWheelScroll(direction) {
   return new Promise(function(resolve, reject) {
-    if (window.chrome && chrome.gpuBenchmarking) {
-      var target = document.getElementById(targetId);
-      target.scrollIntoViewIfNeeded();
-      var targetRect = target.getBoundingClientRect();
-      chrome.gpuBenchmarking.smoothScrollBy(scrollOffset, function() {
-        resolve();
-      }, targetRect.left + boundaryOffset, targetRect.top + boundaryOffset, 1, direction);
+    if (window.eventSender) {
+      if (direction == 'down')
+        eventSender.continuousMouseScrollBy(-scrollOffset, 0);
+      else if (direction == 'right')
+        eventSender.continuousMouseScrollBy(0, -scrollOffset);
+      else
+        reject();
+      resolve();
     } else {
       reject();
     }
   });
 }
 
-function scrollPageIfNeeded(targetRect, startX, startY) {
-  if (startY > window.innerHeight) {
-    window.scrollTo(0, targetRect.top);
+// Touch inputs.
+function touchTapInTarget(targetSelector, targetFrame) {
+  var targetDocument = document;
+  var frameLeft = 0;
+  var frameTop = 0;
+  if (targetFrame !== undefined) {
+    targetDocument = targetFrame.contentDocument;
+    var frameRect = targetFrame.getBoundingClientRect();
+    frameLeft = frameRect.left;
+    frameTop = frameRect.top;
   }
-  if (startX > window.innerWidth) {
-    window.scrollTo(targetRect.left, 0);
+  return new Promise(function(resolve, reject) {
+    if (window.chrome && chrome.gpuBenchmarking) {
+      scrollPageIfNeeded(targetSelector, targetDocument);
+      var target = targetDocument.querySelector(targetSelector);
+      var targetRect = target.getBoundingClientRect();
+      chrome.gpuBenchmarking.tap(frameLeft + targetRect.left + boundaryOffset, frameTop + targetRect.top + boundaryOffset, resolve);
+    } else {
+      reject();
+    }
+  });
+}
+
+function touchScrollInTarget(targetSelector, direction) {
+  return new Promise(function(resolve, reject) {
+    if (window.chrome && chrome.gpuBenchmarking) {
+      scrollPageIfNeeded(targetSelector, document);
+      var target = document.querySelector(targetSelector);
+      var targetRect = target.getBoundingClientRect();
+      chrome.gpuBenchmarking.smoothScrollBy(scrollOffset, resolve,
+          targetRect.left + boundaryOffset, targetRect.top + boundaryOffset, touchSourceType, direction);
+    } else {
+      reject();
+    }
+  });
+}
+
+function pinchZoomInTarget(targetSelector, scale) {
+  return new Promise(function(resolve, reject) {
+    if (window.chrome && chrome.gpuBenchmarking) {
+      scrollPageIfNeeded(targetSelector, document);
+      var target = document.querySelector(targetSelector);
+      var targetRect = target.getBoundingClientRect();
+      chrome.gpuBenchmarking.pinchBy(scale, targetRect.left + (targetRect.width/2), targetRect.top + (targetRect.height/2), function() {
+        resolve();
+      });
+    } else {
+      reject();
+    }
+  });
+}
+
+// Pen inputs.
+function penMoveToDocument() {
+  return new Promise(function(resolve, reject) {
+    if (window.eventSender) {
+      eventSender.mouseMoveTo(0, 0, [], "pen", 0);
+      resolve();
+    } else {
+      reject();
+    }
+  });
+}
+
+function penMoveIntoTarget(targetSelector, targetFrame) {
+  var targetDocument = document;
+  var frameLeft = 0;
+  var frameTop = 0;
+  if (targetFrame !== undefined) {
+    targetDocument = targetFrame.contentDocument;
+    var frameRect = targetFrame.getBoundingClientRect();
+    frameLeft = frameRect.left;
+    frameTop = frameRect.top;
   }
+  return new Promise(function(resolve, reject) {
+    if (window.eventSender) {
+      var target = targetDocument.querySelector(targetSelector);
+      var targetRect = target.getBoundingClientRect();
+      eventSender.mouseMoveTo(frameLeft + targetRect.left + boundaryOffset, frameTop + targetRect.top + boundaryOffset, [], "pen", 0);
+      resolve();
+    } else {
+      reject();
+    }
+  });
 }
 
-// TODO(nzolghadr): these two functions can be removed if we know the ID of the elements where we want to touch, see https://crbug.com/633672.
-function touchSmoothScrollUp(target) {
-  if (window.chrome && chrome.gpuBenchmarking) {
-    var targetRect = target.getBoundingClientRect();
-    var startX = targetRect.left+targetRect.width/2;
-    var startY = targetRect.top+targetRect.height/2;
-    scrollPageIfNeeded(targetRect, startX, startY);
-    targetRect = target.getBoundingClientRect();
-    startX = targetRect.left+targetRect.width/2;
-    startY = targetRect.top+targetRect.height/2;
-    chrome.gpuBenchmarking.smoothScrollBy(scrollOffset, function() {}, startX, startY, touchSourceType, "down");
-  }
+function penClickInTarget(targetSelector, targetFrame) {
+  return penMoveIntoTarget(targetSelector, targetFrame).then(function() {
+    return new Promise(function(resolve, reject) {
+      if (window.eventSender) {
+        eventSender.mouseDown(0, [], "pen", 0);
+        eventSender.mouseUp(0, [], "pen", 0);
+        resolve();
+      } else {
+        reject();
+      }
+    });
+  });
 }
 
-function touchSmoothScrollLeft(target, callback_func) {
-  if (window.chrome && chrome.gpuBenchmarking) {
-    var targetRect = target.getBoundingClientRect();
-    var startX = targetRect.left+targetRect.width/2;
-    var startY = targetRect.top+targetRect.height/2;
-    scrollPageIfNeeded(targetRect, startX, startY);
-    targetRect = target.getBoundingClientRect();
-    startX = targetRect.left+targetRect.width/2;
-    startY = targetRect.top+targetRect.height/2;
-    chrome.gpuBenchmarking.smoothScrollBy(scrollOffset, callback_func, startX, startY, touchSourceType, "right");
-  }
+// Keyboard inputs.
+function keyboardScroll(direction) {
+  return new Promise(function(resolve, reject) {
+    if (window.eventSender) {
+      if (direction == 'down')
+        eventSender.keyDown('ArrowDown');
+      else if (direction == 'right')
+        eventSender.keyDown('ArrowRight');
+      else
+        reject();
+      resolve();
+    } else {
+      reject();
+    }
+  });
 }
 
-function touchScrollUpInTarget(targetId) {
-  if (window.chrome && chrome.gpuBenchmarking) {
-    var target = document.getElementById(targetId);
-    touchSmoothScrollUp(target);
-  }
+{
+  var pointerevent_automation = async_test("PointerEvent Automation");
+  // Defined in every test and should return a promise that gets resolved when input is finished.
+  inject_input().then(function() {
+    pointerevent_automation.done();
+  });
 }
 
-function touchScrollLeftInTarget(targetId, callback_func) {
-  if (window.chrome && chrome.gpuBenchmarking) {
-    var target = document.getElementById(targetId);
-    touchSmoothScrollLeft(target, callback_func);
-  }
-}
-
-function touchScrollByPosition(x, y, offset, direction, callback_func) {
-  if (window.chrome && chrome.gpuBenchmarking) {
-    chrome.gpuBenchmarking.smoothScrollBy(offset, callback_func, x, y, 1, direction);
-  }
-}
-
-// Pen actions
-function penMoveIntoTarget(target) {
-  var targetRect = target.getBoundingClientRect();
-  eventSender.mouseMoveTo(targetRect.left+5, targetRect.top+5, [], "pen", 0);
-}
-
-function penClickIntoTarget(target) {
-  penMoveIntoTarget(target);
-  eventSender.mouseDown(0, [], "pen", 0);
-  eventSender.mouseUp(0, [], "pen", 0);
-}
-
-// Keyboard actions
-function keyboardScrollUp() {
-  if (window.eventSender)
-    eventSender.keyDown('ArrowDown');
-}
-
-function keyboardScrollLeft() {
-  if (window.eventSender)
-    eventSender.keyDown('ArrowRight');
-}
-
-// Defined in every test
-inject_input();

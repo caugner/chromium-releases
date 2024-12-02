@@ -308,6 +308,7 @@ interface IDBIndex
     method getKey
     method openCursor
     method openKeyCursor
+    setter name
 interface IDBKeyRange
     static method bound
     static method lowerBound
@@ -339,6 +340,7 @@ interface IDBObjectStore
     method openCursor
     method openKeyCursor
     method put
+    setter name
 interface IDBOpenDBRequest : IDBRequest
     getter onblocked
     getter onupgradeneeded
@@ -384,6 +386,8 @@ interface ImageBitmap
 interface ImageData
     getter height
     getter width
+    method constructor
+interface InstallEvent : ExtendableEvent
     method constructor
 interface MessageChannel
     getter port1
@@ -533,6 +537,9 @@ interface ServiceWorkerRegistration : EventTarget
     method unregister
     method update
     setter onupdatefound
+interface StorageManager
+    method constructor
+    method persisted
 interface SubtleCrypto
     method constructor
     method decrypt
@@ -636,6 +643,7 @@ interface WorkerGlobalScope : EventTarget
     getter caches
     getter crypto
     getter indexedDB
+    getter isSecureContext
     getter location
     getter navigator
     getter onerror
@@ -678,6 +686,7 @@ interface WorkerNavigator
     getter permissions
     getter platform
     getter product
+    getter storage
     getter userAgent
     method constructor
 interface webkitIDBCursor
@@ -727,6 +736,7 @@ interface webkitIDBIndex
     method getKey
     method openCursor
     method openKeyCursor
+    setter name
 interface webkitIDBKeyRange
     static method bound
     static method lowerBound
@@ -758,6 +768,7 @@ interface webkitIDBObjectStore
     method openCursor
     method openKeyCursor
     method put
+    setter name
 interface webkitIDBRequest : EventTarget
     getter error
     getter onerror

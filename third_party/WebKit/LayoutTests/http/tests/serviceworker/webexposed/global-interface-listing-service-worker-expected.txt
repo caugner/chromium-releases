@@ -321,6 +321,7 @@ interface IDBIndex
     method getKey
     method openCursor
     method openKeyCursor
+    setter name
 interface IDBKeyRange
     static method bound
     static method lowerBound
@@ -348,10 +349,12 @@ interface IDBObjectStore
     method get
     method getAll
     method getAllKeys
+    method getKey
     method index
     method openCursor
     method openKeyCursor
     method put
+    setter name
 interface IDBObservation
     getter key
     getter type
@@ -469,6 +472,7 @@ interface Notification : EventTarget
 interface NotificationEvent : ExtendableEvent
     getter action
     getter notification
+    getter reply
     method constructor
 interface OffscreenCanvas
     getter height
@@ -500,6 +504,7 @@ interface OffscreenCanvasRenderingContext2D
     method clearRect
     method clip
     method closePath
+    method commit
     method constructor
     method createImageData
     method createLinearGradient
@@ -1048,6 +1053,7 @@ interface WebGLRenderingContext
     method clearDepth
     method clearStencil
     method colorMask
+    method commit
     method compileShader
     method compressedTexImage2D
     method compressedTexSubImage2D
@@ -1199,6 +1205,7 @@ interface WorkerGlobalScope : EventTarget
     getter caches
     getter crypto
     getter indexedDB
+    getter isSecureContext
     getter location
     getter navigator
     getter onerror
@@ -1294,6 +1301,7 @@ interface webkitIDBIndex
     method getKey
     method openCursor
     method openKeyCursor
+    setter name
 interface webkitIDBKeyRange
     static method bound
     static method lowerBound
@@ -1321,10 +1329,12 @@ interface webkitIDBObjectStore
     method get
     method getAll
     method getAllKeys
+    method getKey
     method index
     method openCursor
     method openKeyCursor
     method put
+    setter name
 interface webkitIDBRequest : EventTarget
     getter error
     getter onerror

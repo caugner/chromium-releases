@@ -55,6 +55,14 @@ function elementCoordinates(element)
     return new Array(x, y);
 }
 
+function coordinatesOutsideElement(element)
+{
+    var elementBoundingRect = element.getBoundingClientRect();
+    var x = elementBoundingRect.left - 1;
+    var y = elementBoundingRect.top - 1;
+    return new Array(x, y);
+}
+
 function mediaControlsButtonCoordinates(element, id)
 {
     var button = mediaControlsButton(element, id);
@@ -171,4 +179,9 @@ function hasFullscreenButton(element)
 {
     var size = mediaControlsButtonDimensions(element, "fullscreen-button");
     return size[0] > 0 && size[1] > 0;
+}
+
+function isControlsPanelVisible(element)
+{
+    return getComputedStyle(mediaControlsButton(element, "panel")).opacity == "1";
 }

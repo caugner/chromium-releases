@@ -14,8 +14,10 @@ function test()
 
     function createNavigatorView()
     {
+        var workspace = WebInspector.workspace;
+        WebInspector.workspace = InspectorTest.testWorkspace;
         var navigatorView = new WebInspector.SourcesNavigatorView();
-        navigatorView._resetWorkspace(InspectorTest.testWorkspace);
+        WebInspector.workspace = workspace;
         navigatorView.show(WebInspector.inspectorView.element);
         return navigatorView;
     }
@@ -47,7 +49,7 @@ function test()
     {
         var uiSourceCode = InspectorTest.testDebuggerProject.createUISourceCode(url, WebInspector.resourceTypes.Script);
         InspectorTest.testDebuggerProject.addUISourceCodeWithProvider(uiSourceCode, createContentProvider(url));
-        return InspectorTest.testWorkspace.uiSourceCode("debugger:", uiSourceCode.url());
+        return uiSourceCode;
     }
 
     InspectorTest.runTestSuite([
