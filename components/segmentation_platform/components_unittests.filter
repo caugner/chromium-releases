@@ -1,3 +1,4 @@
+DatabaseMaintenanceImplTest.*
 DummyModelExecutionManagerTest.*
 DummySegmentationPlatformServiceTest.*
 FeatureAggregatorImplTest.*
@@ -17,4 +18,5 @@ SignalFilterProcessorTest.*
 SignalKeyInternalTest.*
 SignalKeyTest.*
 SignalStorageConfigTest.*
+StatsTest.*
 UserActionSignalHandlerTest.*
