@@ -70,6 +70,10 @@
     "documentation": "devtools",
     "example": "devtools.html"
   },
+  "export": {
+    "documentation": "shared_modules",
+    "example": {}
+  },
   "externally_connectable": {
     "documentation": "manifest/externally_connectable",
     "example": {
@@ -92,6 +96,10 @@
     "documentation": "manifest/icons",
     "example": {},
     "level": "recommended"
+  },
+  "import": {
+    "documentation": "shared_modules",
+    "example": [{"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]
   },
   "incognito": {
     "documentation": "manifest/incognito",
@@ -210,6 +218,10 @@
     "documentation": "manifest/version",
     "example": "versionString",
     "level": "required"
+  },
+  "version_name": {
+    "documentation": "manifest/version",
+    "example": "aString"
   },
   "web_accessible_resources": {
     "documentation": "manifest/web_accessible_resources",

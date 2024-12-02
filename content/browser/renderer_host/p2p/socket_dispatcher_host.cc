@@ -5,6 +5,7 @@
 #include "content/browser/renderer_host/p2p/socket_dispatcher_host.h"
 
 #include "base/bind.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "content/browser/renderer_host/p2p/socket_host.h"
 #include "content/common/p2p_messages.h"
@@ -68,6 +69,11 @@ class P2PSocketDispatcherHost::DnsRequest {
 
  private:
   void OnDone(int result) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "436634 P2PSocketDispatcherHost::DnsRequest::OnDone"));
+
     net::IPAddressList list;
     if (result != net::OK) {
       LOG(ERROR) << "Failed to resolve address for " << host_name_
@@ -313,8 +319,7 @@ void P2PSocketDispatcherHost::OnDestroySocket(int socket_id) {
 
 void P2PSocketDispatcherHost::DoGetNetworkList() {
   net::NetworkInterfaceList list;
-  net::GetNetworkList(&list, net::EXCLUDE_HOST_SCOPE_VIRTUAL_INTERFACES |
-                             net::INCLUDE_ONLY_TEMP_IPV6_ADDRESS_IF_POSSIBLE);
+  net::GetNetworkList(&list, net::EXCLUDE_HOST_SCOPE_VIRTUAL_INTERFACES);
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE, base::Bind(
           &P2PSocketDispatcherHost::SendNetworkList, this, list));

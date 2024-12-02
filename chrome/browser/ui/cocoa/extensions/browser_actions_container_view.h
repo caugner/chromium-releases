@@ -7,6 +7,8 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "base/mac/scoped_nsobject.h"
+
 // Sent when a user-initiated drag to resize the container is initiated.
 extern NSString* const kBrowserActionGrippyDragStartedNotification;
 
@@ -19,6 +21,9 @@ extern NSString* const kBrowserActionGrippyDragFinishedNotification;
 // Sent before the dragging will resize the container.
 extern NSString* const kBrowserActionGrippyWillDragNotification;
 
+// Sent when the Browser Actions container view is about to animate.
+extern NSString* const kBrowserActionsContainerWillAnimate;
+
 // Key which is used to notify the translation with delta.
 extern NSString* const kTranslationWithDelta;
 
@@ -28,10 +33,6 @@ extern NSString* const kTranslationWithDelta;
  @private
   // The frame encompasing the grippy used for resizing the container.
   NSRect grippyRect_;
-
-  // The end frame of the animation currently running for this container or
-  // NSZeroRect if none is in progress.
-  NSRect animationEndFrame_;
 
   // Used to cache the original position within the container that initiated the
   // drag.
@@ -65,6 +66,8 @@ extern NSString* const kTranslationWithDelta;
   // as letting the container expand when the window is going from super small
   // to large.
   BOOL grippyPinned_;
+
+  base::scoped_nsobject<NSViewAnimation> resizeAnimation_;
 }
 
 // Resizes the container to the given ideal width, adjusting the |lastXPos_| so
@@ -76,7 +79,16 @@ extern NSString* const kTranslationWithDelta;
 // placement of surrounding elements.
 - (CGFloat)resizeDeltaX;
 
-@property(nonatomic, readonly) NSRect animationEndFrame;
+// Returns the frame of the container after the running animation has finished.
+// If no animation is running, returns the container's current frame.
+- (NSRect)animationEndFrame;
+
+// Returns true if the view is animating.
+- (BOOL)isAnimating;
+
+// Stops any animation in progress.
+- (void)stopAnimation;
+
 @property(nonatomic) BOOL canDragLeft;
 @property(nonatomic) BOOL canDragRight;
 @property(nonatomic) BOOL grippyPinned;
