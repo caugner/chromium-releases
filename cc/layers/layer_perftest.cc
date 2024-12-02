@@ -24,7 +24,7 @@ static const int kTimeCheckInterval = 10;
 class MockLayerPainter : public LayerPainter {
  public:
   virtual void Paint(SkCanvas* canvas,
-                     gfx::Rect content_rect,
+                     const gfx::Rect& content_rect,
                      gfx::RectF* opaque) OVERRIDE {}
 };
 
@@ -80,7 +80,8 @@ TEST_F(LayerPerfTest, PushPropertiesTo) {
     test_layer->SetDoubleSided(double_sided);
     test_layer->SetHideLayerAndSubtree(hide_layer_and_subtree);
     test_layer->SetMasksToBounds(masks_to_bounds);
-    test_layer->SetScrollable(scrollable);
+    test_layer->SetScrollClipLayerId(scrollable ? test_layer->id()
+                                                : Layer::INVALID_ID);
     test_layer->PushPropertiesTo(impl_layer.get());
 
     anchor_point_z += 0.01f;

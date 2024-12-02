@@ -24,11 +24,20 @@ const char kDbusStub[] = "dbus-stub";
 // All stub networks are idle by default.
 const char kDefaultStubNetworkStateIdle[] = "default-stub-network-state-idle";
 
+// Time before a machine at OOBE is considered derelict
+const char kDerelictDetectionTimeout[] = "derelict-detection-timeout";
+
+// Time before a derelict machines starts demo mode.
+const char kDerelictIdleTimeout[] = "derelict-idle-timeout";
+
 // Disables wallpaper boot animation (except of OOBE case).
 const char kDisableBootAnimation[]          = "disable-boot-animation";
 
 // Disables Google Drive integration.
 const char kDisableDrive[]                  = "disable-drive";
+
+// Disables the ChromeOS demo.
+const char kDisableDemoMode[]               = "disable-demo-mode";
 
 // Disables reporting recently logged in users for enterprise-managed devices.
 const char kDisableEnterpriseUserReporting[] =
@@ -50,10 +59,16 @@ const char kDisableLoginAnimations[]        = "disable-login-animations";
 // Disable new channel switcher UI.
 const char kDisableNewChannelSwitcherUI[]   = "disable-new-channel-switcher-ui";
 
+// Disables new Kiosk UI when kiosk apps are represented as user pods.
+const char kDisableNewKioskUI[]             = "disable-new-kiosk-ui";
+
 // Disable Quickoffice component app thus handlers won't be registered so
 // it will be possible to install another version as normal app for testing.
 const char kDisableQuickofficeComponentApp[] =
     "disable-quickoffice-component-app";
+
+// Disables volume adjust sound.
+const char kDisableVolumeAdjustSound[] = "disable-volume-adjust-sound";
 
 // Disables fetching online CrOS EULA page, only static version is shown.
 const char kDisableOnlineEULA[] = "disable-cros-online-eula";
@@ -66,9 +81,6 @@ const char kDisableOobeAnimation[]          = "disable-oobe-animation";
 const char kDisableOOBEBlockingUpdate[] =
     "disable-oobe-blocking-update";
 
-// Disables fake ethernet network in the stub implementations.
-const char kDisableStubEthernet[] = "disable-stub-ethernet";
-
 // Enables overriding the path for the default echo component extension.
 // Useful for testing.
 const char kEchoExtensionPath[]             = "echo-ext-path";
@@ -80,9 +92,6 @@ const char kEnableBackgroundLoader[]        = "enable-background-loader";
 // Enables switching between different cellular carriers from the UI.
 const char kEnableCarrierSwitching[]        = "enable-carrier-switching";
 
-// Enables automatically initializing Google Drive offline mode on first run.
-const char kEnableDriveOfflineFirstRun[] = "enable-drive-offline-first-run";
-
 // Enable "interactive" mode for stub implemenations (e.g. NetworkStateHandler)
 const char kEnableStubInteractive[] = "enable-stub-interactive";
 
@@ -92,6 +101,15 @@ const char kEnableStubPortalledWifi[] = "enable-stub-portalled-wifi";
 // Enables touchpad three-finger-click as middle button.
 const char kEnableTouchpadThreeFingerClick[]
     = "enable-touchpad-three-finger-click";
+
+// Specifies stub network types to be enabled.  If this switch is not specified,
+// ethernet, wifi and vpn are enabled by default.
+//
+// Examples:
+// Disable all network types: --enabled-stub-network-types=''
+// Enable wifi only: --enabled-stub-network-types=wifi
+// Enable ethernet and wifi: --enabled-stub-network-types=ethernet,wifi
+const char kEnabledStubNetworkTypes[] = "enabled-stub-network-types";
 
 // Enable Kiosk mode for ChromeOS. Note this switch refers to retail mode rather
 // than the kiosk app mode.
@@ -118,9 +136,13 @@ const char kEnterpriseEnrollmentSkipRobotAuth[] =
 // Shows the selecting checkboxes in the Files.app.
 const char kFileManagerShowCheckboxes[]     = "file-manager-show-checkboxes";
 
-// Enables the webstore integration feature in the Files.app.
-const char kFileManagerEnableWebstoreIntegration[] =
-    "file-manager-enable-webstore-integration";
+// Enables the new audio player in the Files.app.
+const char kFileManagerEnableNewAudioPlayer[] =
+    "file-manager-enable-new-audio-player";
+
+// Enables the multi-profile support in the Files.app.
+const char kFileManagerEnableMultiProfile[] =
+    "file-manager-enable-multi-profile";
 
 // Passed to Chrome the first time that it's run after the system boots.
 // Not passed on restart after sign out.
@@ -130,10 +152,8 @@ const char kFirstExecAfterBoot[]            = "first-exec-after-boot";
 // tests can change how it's brought up. This flag disables that.
 const char kForceLoginManagerInTests[]      = "force-login-manager-in-tests";
 
-// Sets primary user's default multiprofile behavior to 'unrestricted' for
-// tests so that multiprofile is enabled for any user.
-// TODO(xiyuan): Remove when multiprofile is released to everyone.
-const char kForceMultiProfileInTests[]      = "force-multi-profiles-in-tests";
+// Makes GPU sandbox failures nonfatal.
+const char kGpuSandboxFailuresNonfatal[] = "gpu-sandbox-failures-nonfatal";
 
 // Indicates that the browser is in "browse without sign-in" (Guest session)
 // mode. Should completely disable extensions, sync and bookmarks.
@@ -170,6 +190,9 @@ const char kNaturalScrollDefault[]          = "enable-natural-scroll-default";
 // Skips all other OOBE pages after user login.
 const char kOobeSkipPostLogin[]             = "oobe-skip-postlogin";
 
+// Interval at which we check for total time on OOBE.
+const char kOobeTimerInterval[]             = "oobe-timer-interval";
+
 // Integer flag that sets the DeviceRegistered local state pref.
 const char kDeviceRegistered[]              = "device-registered";
 
@@ -188,8 +211,11 @@ const char kStubCrosSettings[]              = "stub-cros-settings";
 // Disables user image sync.
 const char kDisableUserImageSync[]          = "disable-user-image-sync";
 
-// Enables SAML sigin support.
-const char kEnableSamlSignin[]              = "enable-saml-signin";
+// Disables SAML sigin support.
+const char kDisableSamlSignin[]             = "disable-saml-signin";
+
+// Overrides the manifest of the GAIA auth extension with the given file.
+const char kGAIAAuthExtensionManifest[]     = "gaia-auth-extension-manifest";
 
 // Disables new first-run overlay UI.
 const char kDisableFirstRunUI[] = "disable-first-run-ui";
@@ -202,6 +228,9 @@ const char kForceFirstRunUI[] = "force-first-run-ui";
 
 // Enables testing for auto update UI.
 const char kTestAutoUpdateUI[] = "test-auto-update-ui";
+
+// Enables features required for supervised user sync,
+const char kEnableSupervisedPasswordSync[] = "enable-supervised-password-sync";
 
 }  // namespace switches
 }  // namespace chromeos

@@ -18,6 +18,7 @@
         '../../url/url.gyp:url_lib',
         '../base/strings/ui_strings.gyp:ui_strings',
         '../gfx/gfx.gyp:gfx',
+        '../gfx/gfx.gyp:gfx_geometry',
         '../resources/ui_resources.gyp:ui_resources',
         '../ui.gyp:ui',
       ],
@@ -72,8 +73,8 @@
         'notifier_settings.h',
         'views/bounded_label.cc',
         'views/bounded_label.h',
-        'views/group_view.cc',
-        'views/group_view.h',
+        'views/bounded_scroll_view.cc',
+        'views/bounded_scroll_view.h',
         'views/constants.h',
         'views/message_bubble_base.cc',
         'views/message_bubble_base.h',
@@ -88,6 +89,8 @@
         'views/message_popup_collection.h',
         'views/message_view.cc',
         'views/message_view.h',
+        'views/message_view_context_menu_controller.cc',
+        'views/message_view_context_menu_controller.h',
         'views/notifier_settings_view.cc',
         'views/notifier_settings_view.h',
         'views/notification_button.cc',
@@ -116,6 +119,7 @@
           'dependencies': [
             '../events/events.gyp:events',
             '../views/views.gyp:views',
+            '../compositor/compositor.gyp:compositor',
           ],
         }, {
           'sources/': [
@@ -130,19 +134,6 @@
             'views/message_center_bubble.h',
             'views/message_popup_bubble.cc',
             'views/message_popup_bubble.h',
-          ],
-        }],
-        ['OS=="mac"', {
-          'dependencies': [
-            '../ui.gyp:ui_cocoa_third_party_toolkits',
-          ],
-          'include_dirs': [
-            '../../third_party/GTM',
-          ],
-        }],
-        ['toolkit_views==1', {
-          'dependencies': [
-            '../compositor/compositor.gyp:compositor',
           ],
         }],
         ['notifications==0', {  # Android and iOS.
@@ -165,6 +156,7 @@
         '../../base/base.gyp:test_support_base',
         '../../skia/skia.gyp:skia',
         '../gfx/gfx.gyp:gfx',
+        '../gfx/gfx.gyp:gfx_geometry',
         '../ui.gyp:ui',
         'message_center',
       ],
@@ -181,15 +173,14 @@
       'dependencies': [
         '../../base/base.gyp:base',
         '../../base/base.gyp:test_support_base',
-        '../../chrome/chrome_resources.gyp:packed_resources',
         '../../skia/skia.gyp:skia',
         '../../testing/gtest.gyp:gtest',
         '../../url/url.gyp:url_lib',
-        '../../url/url.gyp:url_lib',
         '../gfx/gfx.gyp:gfx',
+        '../gfx/gfx.gyp:gfx_geometry',
         '../resources/ui_resources.gyp:ui_resources',
+        '../resources/ui_resources.gyp:ui_test_pak',
         '../ui.gyp:ui',
-        '../ui_unittests.gyp:run_ui_unittests',
         'message_center',
         'message_center_test_support',
       ],
@@ -203,6 +194,7 @@
         'cocoa/tray_view_controller_unittest.mm',
         'message_center_tray_unittest.cc',
         'message_center_impl_unittest.cc',
+        'notification_delegate_unittest.cc',
         'notification_list_unittest.cc',
         'test/run_all_unittests.cc',
       ],
@@ -214,7 +206,7 @@
         }],
         ['OS=="mac"', {
           'dependencies': [
-            '../ui_unittests.gyp:ui_test_support',
+            '../gfx/gfx.gyp:gfx_test_support',
           ],
         }],
         ['toolkit_views==1', {
@@ -227,6 +219,7 @@
           ],
           'sources': [
             'views/bounded_label_unittest.cc',
+            'views/bounded_scroll_view_unittest.cc',
             'views/message_center_view_unittest.cc',
             'views/message_popup_collection_unittest.cc',
             'views/notifier_settings_view_unittest.cc',

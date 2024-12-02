@@ -8,6 +8,7 @@
 #include "base/debug/crash_logging.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/user_metrics_action.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -21,9 +22,9 @@
 #include "chrome/common/extensions/chrome_extensions_client.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_process_policy.h"
-#include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/localized_error.h"
 #include "chrome/common/pepper_permission_util.h"
+#include "chrome/common/profile_management_switches.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/benchmarking_extension.h"
@@ -34,11 +35,13 @@
 #include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/chrome_v8_extension.h"
 #include "chrome/renderer/extensions/dispatcher.h"
+#include "chrome/renderer/extensions/extension_frame_helper.h"
 #include "chrome/renderer/extensions/extension_helper.h"
 #include "chrome/renderer/extensions/renderer_permissions_policy_delegate.h"
 #include "chrome/renderer/extensions/resource_request_policy.h"
 #include "chrome/renderer/external_extension.h"
 #include "chrome/renderer/loadtimes_extension_bindings.h"
+#include "chrome/renderer/media/cast_ipc_dispatcher.h"
 #include "chrome/renderer/media/chrome_key_systems.h"
 #include "chrome/renderer/net/net_error_helper.h"
 #include "chrome/renderer/net/prescient_networking_dispatcher.h"
@@ -66,7 +69,6 @@
 #include "components/autofill/content/renderer/autofill_agent.h"
 #include "components/autofill/content/renderer/password_autofill_agent.h"
 #include "components/autofill/content/renderer/password_generation_agent.h"
-#include "components/autofill/core/common/password_generation_util.h"
 #include "components/nacl/renderer/ppb_nacl_private_impl.h"
 #include "components/plugins/renderer/mobile_youtube_plugin.h"
 #include "components/visitedlink/renderer/visitedlink_slave.h"
@@ -77,7 +79,9 @@
 #include "content/public/renderer/render_view_visitor.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_set.h"
 #include "extensions/common/extension_urls.h"
+#include "extensions/common/switches.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/renderer_resources.h"
@@ -113,11 +117,16 @@
 #include "chrome/renderer/spellchecker/spellcheck_provider.h"
 #endif
 
+#if defined(OS_WIN)
+#include "chrome_elf/blacklist/blacklist.h"
+#endif  // OS_WIN
+
 using autofill::AutofillAgent;
 using autofill::PasswordAutofillAgent;
 using autofill::PasswordGenerationAgent;
+using base::ASCIIToUTF16;
+using base::UserMetricsAction;
 using content::RenderThread;
-using content::UserMetricsAction;
 using content::WebPluginInfo;
 using extensions::Extension;
 using blink::WebCache;
@@ -266,6 +275,8 @@ void ChromeContentRendererClient::RenderThreadStarted() {
 #if defined(ENABLE_WEBRTC)
   thread->AddFilter(webrtc_logging_message_filter_.get());
 #endif
+  thread->AddFilter(new CastIPCDispatcher(
+      content::RenderThread::Get()->GetIOMessageLoopProxy()));
 
   thread->RegisterExtension(extensions_v8::ExternalExtension::Get());
   thread->RegisterExtension(extensions_v8::LoadTimesExtension::Get());
@@ -286,13 +297,14 @@ void ChromeContentRendererClient::RenderThreadStarted() {
 
   // TODO(guohui): needs to forward the new-profile-management switch to
   // renderer processes.
-  if (command_line->HasSwitch(switches::kNewProfileManagement))
+  if (switches::IsNewProfileManagement())
     thread->RegisterExtension(extensions_v8::PrincipalsExtension::Get());
 
-  // chrome:, chrome-search:, and chrome-devtools: pages should not be
-  // accessible by normal content, and should also be unable to script anything
-  // but themselves (to help limit the damage that a corrupt page could cause).
-  WebString chrome_ui_scheme(ASCIIToUTF16(chrome::kChromeUIScheme));
+  // chrome:, chrome-search:, chrome-devtools:, and chrome-distiller: pages
+  // should not be accessible by normal content, and should also be unable to
+  // script anything but themselves (to help limit the damage that a corrupt
+  // page could cause).
+  WebString chrome_ui_scheme(ASCIIToUTF16(content::kChromeUIScheme));
   WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(chrome_ui_scheme);
 
   WebString chrome_search_scheme(ASCIIToUTF16(chrome::kChromeSearchScheme));
@@ -301,8 +313,12 @@ void ChromeContentRendererClient::RenderThreadStarted() {
   if (!command_line->HasSwitch(switches::kInstantProcess))
     WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(chrome_search_scheme);
 
-  WebString dev_tools_scheme(ASCIIToUTF16(chrome::kChromeDevToolsScheme));
+  WebString dev_tools_scheme(ASCIIToUTF16(content::kChromeDevToolsScheme));
   WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(dev_tools_scheme);
+
+  WebString dom_distiller_scheme(ASCIIToUTF16(chrome::kDomDistillerScheme));
+  // TODO(nyquist): Add test to ensure this happens when the flag is set.
+  WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(dom_distiller_scheme);
 
 #if defined(OS_CHROMEOS)
   WebString drive_scheme(ASCIIToUTF16(chrome::kDriveScheme));
@@ -328,7 +344,7 @@ void ChromeContentRendererClient::RenderThreadStarted() {
   WebSecurityPolicy::registerURLSchemeAsCORSEnabled(extension_scheme);
 
   WebString extension_resource_scheme(
-      ASCIIToUTF16(chrome::kExtensionResourceScheme));
+      ASCIIToUTF16(extensions::kExtensionResourceScheme));
   WebSecurityPolicy::registerURLSchemeAsSecure(extension_resource_scheme);
 
   // chrome-extension-resource: resources should be allowed to receive CORS
@@ -344,24 +360,53 @@ void ChromeContentRendererClient::RenderThreadStarted() {
 
   extensions::ExtensionsClient::Set(
       extensions::ChromeExtensionsClient::GetInstance());
+
+#if defined(OS_WIN)
+  // Report if the renderer process has been patched by chrome_elf.
+  // TODO(csharp): Remove once the renderer is no longer getting
+  // patched this way.
+  if (blacklist::IsBlacklistInitialized())
+    UMA_HISTOGRAM_BOOLEAN("Blacklist.PatchedInRenderer", true);
+#endif
 }
 
 void ChromeContentRendererClient::RenderFrameCreated(
     content::RenderFrame* render_frame) {
   new ChromeRenderFrameObserver(render_frame);
-#if defined(ENABLE_PLUGINS)
-  new PepperHelper(render_frame);
-#endif
-}
 
-void ChromeContentRendererClient::RenderViewCreated(
-    content::RenderView* render_view) {
   ContentSettingsObserver* content_settings =
-      new ContentSettingsObserver(render_view, extension_dispatcher_.get());
+      new ContentSettingsObserver(render_frame, extension_dispatcher_.get());
   if (chrome_observer_.get()) {
     content_settings->SetContentSettingRules(
         chrome_observer_->content_setting_rules());
   }
+
+  new extensions::ExtensionFrameHelper(render_frame);
+
+#if defined(ENABLE_PLUGINS)
+  new PepperHelper(render_frame);
+#endif
+
+  // TODO(jam): when the frame tree moves into content and parent() works at
+  // RenderFrame construction, simplify this by just checking parent().
+  if (render_frame->GetRenderView()->GetMainRenderFrame() != render_frame) {
+    // Avoid any race conditions from having the browser tell subframes that
+    // they're prerendering.
+    if (prerender::PrerenderHelper::IsPrerendering(
+            render_frame->GetRenderView()->GetMainRenderFrame())) {
+      new prerender::PrerenderHelper(render_frame);
+    }
+  }
+
+  if (render_frame->GetRenderView()->GetMainRenderFrame() == render_frame) {
+    // Only attach NetErrorHelper to the main frame, since only the main frame
+    // should get error pages.
+    new NetErrorHelper(render_frame);
+  }
+}
+
+void ChromeContentRendererClient::RenderViewCreated(
+    content::RenderView* render_view) {
   new extensions::ExtensionHelper(render_view, extension_dispatcher_.get());
   new PageLoadHistograms(render_view);
 #if defined(ENABLE_PRINTING)
@@ -375,19 +420,19 @@ void ChromeContentRendererClient::RenderViewCreated(
   safe_browsing::MalwareDOMDetails::Create(render_view);
 #endif
 
+  PasswordGenerationAgent* password_generation_agent =
+      new PasswordGenerationAgent(render_view);
   PasswordAutofillAgent* password_autofill_agent =
       new PasswordAutofillAgent(render_view);
-  new AutofillAgent(render_view, password_autofill_agent);
+  new AutofillAgent(render_view,
+                    password_autofill_agent,
+                    password_generation_agent);
 
   CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (autofill::password_generation::IsPasswordGenerationEnabled())
-    new PasswordGenerationAgent(render_view);
   if (command_line->HasSwitch(switches::kInstantProcess))
     new SearchBox(render_view);
 
   new ChromeRenderViewObserver(render_view, chrome_observer_.get());
-
-  new NetErrorHelper(render_view);
 }
 
 void ChromeContentRendererClient::SetNumberOfViews(int number_of_views) {
@@ -538,9 +583,8 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
       params.mimeType = WebString::fromUTF8(actual_mime_type.c_str());
     }
 
-    // TODO(jam): switch ContentSettingsObserver to RenderFrameObserver.
     ContentSettingsObserver* observer =
-        ContentSettingsObserver::Get(render_frame->GetRenderView());
+        ContentSettingsObserver::Get(render_frame);
 
     const ContentSettingsType content_type =
         ShouldUseJavaScriptSettingForPlugin(plugin) ?
@@ -563,8 +607,8 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
       status_value = ChromeViewHostMsg_GetPluginInfo_Status::kAllowed;
     }
 
-#if defined(USE_AURA) && defined(OS_WIN)
-    // In Aura for Windows we need to check if we can load NPAPI plugins.
+#if defined(OS_WIN)
+    // In Windows we need to check if we can load NPAPI plugins.
     // For example, if the render view is in the Ash desktop, we should not.
     if (status_value == ChromeViewHostMsg_GetPluginInfo_Status::kAllowed &&
         plugin.type == content::WebPluginInfo::PLUGIN_TYPE_NPAPI) {
@@ -778,6 +822,22 @@ WebPlugin* ChromeContentRendererClient::CreatePlugin(
         observer->DidBlockContentType(content_type);
         break;
       }
+      case ChromeViewHostMsg_GetPluginInfo_Status::kBlockedByPolicy: {
+        placeholder = ChromePluginPlaceholder::CreateBlockedPlugin(
+            render_frame,
+            frame,
+            params,
+            plugin,
+            identifier,
+            group_name,
+            IDR_BLOCKED_PLUGIN_HTML,
+            l10n_util::GetStringFUTF16(IDS_PLUGIN_BLOCKED, group_name));
+        placeholder->set_allow_loading(false);
+        RenderThread::Get()->RecordAction(
+            UserMetricsAction("Plugin_BlockedByPolicy"));
+        observer->DidBlockContentType(content_type);
+        break;
+      }
     }
   }
   placeholder->SetStatus(status);
@@ -920,16 +980,18 @@ bool ChromeContentRendererClient::HasErrorPage(int http_status_code,
   return true;
 }
 
-bool ChromeContentRendererClient::ShouldSuppressErrorPage(const GURL& url) {
+bool ChromeContentRendererClient::ShouldSuppressErrorPage(
+    content::RenderFrame* render_frame,
+    const GURL& url) {
   // Do not flash an error page if the Instant new tab page fails to load.
   return search_bouncer_.get() && search_bouncer_->IsNewTabPage(url);
 }
 
 void ChromeContentRendererClient::GetNavigationErrorStrings(
+    content::RenderView* render_view,
     blink::WebFrame* frame,
     const blink::WebURLRequest& failed_request,
     const blink::WebURLError& error,
-    const std::string& accept_languages,
     std::string* error_html,
     base::string16* error_description) {
   const GURL failed_url = error.unreachableURL;
@@ -945,36 +1007,33 @@ void ChromeContentRendererClient::GetNavigationErrorStrings(
 
   if (error_html) {
     // Use a local error page.
-    int resource_id;
-    base::DictionaryValue error_strings;
     if (extension && !extension->from_bookmark()) {
-      LocalizedError::GetAppErrorStrings(failed_url, extension, &error_strings);
-
       // TODO(erikkay): Should we use a different template for different
       // error messages?
-      resource_id = IDR_ERROR_APP_HTML;
-    } else {
-      const std::string locale = RenderThread::Get()->GetLocale();
-      if (!NetErrorHelper::GetErrorStringsForDnsProbe(
-              frame, error, is_post, locale, accept_languages,
-              &error_strings)) {
-        // In most cases, the NetErrorHelper won't provide DNS-probe-specific
-        // error pages, so fall back to LocalizedError.
-        LocalizedError::GetStrings(error.reason, error.domain.utf8(),
-                                   error.unreachableURL, is_post, locale,
-                                   accept_languages, &error_strings);
+      int resource_id = IDR_ERROR_APP_HTML;
+      const base::StringPiece template_html(
+          ResourceBundle::GetSharedInstance().GetRawDataResource(
+              resource_id));
+      if (template_html.empty()) {
+        NOTREACHED() << "unable to load template. ID: " << resource_id;
+      } else {
+        base::DictionaryValue error_strings;
+        LocalizedError::GetAppErrorStrings(failed_url, extension,
+                                           &error_strings);
+        // "t" is the id of the template's root node.
+        *error_html = webui::GetTemplatesHtml(template_html, &error_strings,
+                                              "t");
       }
-      resource_id = IDR_NET_ERROR_HTML;
-    }
-
-    const base::StringPiece template_html(
-        ResourceBundle::GetSharedInstance().GetRawDataResource(
-            resource_id));
-    if (template_html.empty()) {
-      NOTREACHED() << "unable to load template. ID: " << resource_id;
     } else {
-      // "t" is the id of the templates root node.
-      *error_html = webui::GetTemplatesHtml(template_html, &error_strings, "t");
+      // TODO(ellyjones): change GetNavigationErrorStrings to take a RenderFrame
+      // instead of a RenderView, then pass that in.
+      // This is safe for now because we only install the NetErrorHelper on the
+      // main render frame anyway; see the TODO(ellyjones) in
+      // RenderFrameCreated.
+      content::RenderFrame* main_render_frame =
+          render_view->GetMainRenderFrame();
+      NetErrorHelper* helper = NetErrorHelper::Get(main_render_frame);
+      helper->GetErrorHTML(frame, error, is_post, error_html);
     }
   }
 
@@ -1056,7 +1115,8 @@ bool ChromeContentRendererClient::ShouldFork(WebFrame* frame,
     return true;
   }
 
-  const ExtensionSet* extensions = extension_dispatcher_->extensions();
+  const extensions::ExtensionSet* extensions =
+      extension_dispatcher_->extensions();
 
   // Determine if the new URL is an extension (excluding bookmark apps).
   const Extension* new_url_extension = extensions::GetNonBookmarkAppExtension(
@@ -1119,7 +1179,7 @@ bool ChromeContentRendererClient::WillSendRequest(
     return true;
   }
 
-  if (url.SchemeIs(chrome::kExtensionResourceScheme) &&
+  if (url.SchemeIs(extensions::kExtensionResourceScheme) &&
       !extensions::ResourceRequestPolicy::CanRequestExtensionResourceScheme(
           url,
           frame)) {
@@ -1187,7 +1247,7 @@ void ChromeContentRendererClient::SetExtensionDispatcher(
 bool ChromeContentRendererClient::CrossesExtensionExtents(
     WebFrame* frame,
     const GURL& new_url,
-    const ExtensionSet& extensions,
+    const extensions::ExtensionSet& extensions,
     bool is_extension_url,
     bool is_initial_navigation) {
   GURL old_url(frame->top()->document().url());
@@ -1290,6 +1350,14 @@ bool ChromeContentRendererClient::IsExternalPepperPlugin(
   return module_name == "Native Client";
 }
 
+bool ChromeContentRendererClient::IsExtensionOrSharedModuleWhitelisted(
+    const GURL& url, const std::set<std::string>& whitelist) {
+  const extensions::ExtensionSet* extension_set =
+      g_current_client->extension_dispatcher_->extensions();
+  return chrome::IsExtensionOrSharedModuleWhitelisted(url, extension_set,
+      whitelist);
+}
+
 blink::WebSpeechSynthesizer*
 ChromeContentRendererClient::OverrideSpeechSynthesizer(
     blink::WebSpeechSynthesizerClient* client) {
@@ -1362,12 +1430,12 @@ bool ChromeContentRendererClient::ShouldEnableSiteIsolationPolicy() const {
   // SiteIsolationPolicy for a renderer process that does not have the extension
   // flag on.
   CommandLine* command_line = CommandLine::ForCurrentProcess();
-  return !command_line->HasSwitch(switches::kExtensionProcess);
+  return !command_line->HasSwitch(extensions::switches::kExtensionProcess);
 }
 
 blink::WebWorkerPermissionClientProxy*
 ChromeContentRendererClient::CreateWorkerPermissionClientProxy(
-    content::RenderView* render_view,
+    content::RenderFrame* render_frame,
     blink::WebFrame* frame) {
-  return new WorkerPermissionClientProxy(render_view, frame);
+  return new WorkerPermissionClientProxy(render_frame, frame);
 }

@@ -20,7 +20,6 @@
 
 class ChromeRenderProcessObserver;
 class ContentSettingsObserver;
-class ExternalHostBindings;
 class SkBitmap;
 class TranslateHelper;
 class WebViewColorOverlay;
@@ -61,7 +60,6 @@ class ChromeRenderViewObserver : public content::RenderViewObserver {
   virtual void DidStopLoading() OVERRIDE;
   virtual void DidCommitProvisionalLoad(blink::WebFrame* frame,
                                         bool is_new_navigation) OVERRIDE;
-  virtual void DidClearWindowObject(blink::WebFrame* frame) OVERRIDE;
   virtual void DetailedConsoleMessageAdded(const base::string16& message,
                                            const base::string16& source,
                                            const base::string16& stack_trace,
@@ -73,9 +71,6 @@ class ChromeRenderViewObserver : public content::RenderViewObserver {
                          const base::string16& jscript,
                          int id,
                          bool notify_result);
-  void OnHandleMessageFromExternalHost(const std::string& message,
-                                       const std::string& origin,
-                                       const std::string& target);
   void OnJavaScriptStressTestControl(int cmd, int param);
   void OnSetClientSidePhishingDetection(bool enable_phishing_detection);
   void OnSetVisuallyDeemphasized(bool deemphasized);
@@ -87,6 +82,8 @@ class ChromeRenderViewObserver : public content::RenderViewObserver {
                                 content::TopControlsState current,
                                 bool animate);
   void OnRetrieveWebappInformation(const GURL& expected_url);
+  void OnRetrieveMetaTagContent(const GURL& expected_url,
+                                const std::string tag_name);
 #endif
   void OnSetWindowFeatures(const blink::WebWindowFeatures& window_features);
 
@@ -101,8 +98,6 @@ class ChromeRenderViewObserver : public content::RenderViewObserver {
   // Retrieves the text from the given frame contents, the page text up to the
   // maximum amount kMaxIndexChars will be placed into the given buffer.
   void CaptureText(blink::WebFrame* frame, base::string16* contents);
-
-  ExternalHostBindings* GetExternalHostBindings();
 
   // Determines if a host is in the strict security host set.
   bool IsStrictSecurityHost(const std::string& host);
@@ -127,9 +122,6 @@ class ChromeRenderViewObserver : public content::RenderViewObserver {
   // page id to decide whether to reindex in certain cases like history
   // replacement.
   GURL last_indexed_url_;
-
-  // External host exposed through automation controller.
-  scoped_ptr<ExternalHostBindings> external_host_bindings_;
 
   // A color page overlay when visually de-emaphasized.
   scoped_ptr<WebViewColorOverlay> dimmed_color_overlay_;

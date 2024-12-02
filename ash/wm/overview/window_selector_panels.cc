@@ -4,7 +4,6 @@
 
 #include "ash/wm/overview/window_selector_panels.h"
 
-#include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/wm/overview/scoped_transform_overview_window.h"
@@ -73,10 +72,8 @@ views::Widget* ScopedTransformPanelWindow::GetCalloutWidget() {
 void ScopedTransformPanelWindow::RestoreCallout() {
   scoped_ptr<ui::LayerAnimationSequence> sequence(
       new ui::LayerAnimationSequence);
-  ui::LayerAnimationElement::AnimatableProperties paused_properties;
-  paused_properties.insert(ui::LayerAnimationElement::OPACITY);
   sequence->AddElement(ui::LayerAnimationElement::CreatePauseElement(
-      paused_properties, base::TimeDelta::FromMilliseconds(
+      ui::LayerAnimationElement::OPACITY, base::TimeDelta::FromMilliseconds(
           ScopedTransformOverviewWindow::kTransitionMilliseconds)));
   sequence->AddElement(ui::LayerAnimationElement::CreateOpacityElement(1,
       base::TimeDelta::FromMilliseconds(

@@ -19,6 +19,10 @@ void DataPipeProducerDispatcher::Init(scoped_refptr<DataPipe> data_pipe) {
   data_pipe_ = data_pipe;
 }
 
+Dispatcher::Type DataPipeProducerDispatcher::GetType() const {
+  return kTypeDataPipeProducer;
+}
+
 DataPipeProducerDispatcher::~DataPipeProducerDispatcher() {
   // |Close()|/|CloseImplNoLock()| should have taken care of the pipe.
   DCHECK(!data_pipe_.get());
@@ -29,47 +33,58 @@ void DataPipeProducerDispatcher::CancelAllWaitersNoLock() {
   data_pipe_->ProducerCancelAllWaiters();
 }
 
-MojoResult DataPipeProducerDispatcher::CloseImplNoLock() {
+void DataPipeProducerDispatcher::CloseImplNoLock() {
   lock().AssertAcquired();
   data_pipe_->ProducerClose();
   data_pipe_ = NULL;
-  return MOJO_RESULT_OK;
+}
+
+scoped_refptr<Dispatcher>
+DataPipeProducerDispatcher::CreateEquivalentDispatcherAndCloseImplNoLock() {
+  lock().AssertAcquired();
+
+  scoped_refptr<DataPipeProducerDispatcher> rv =
+      new DataPipeProducerDispatcher();
+  rv->Init(data_pipe_);
+  data_pipe_ = NULL;
+  return scoped_refptr<Dispatcher>(rv.get());
 }
 
 MojoResult DataPipeProducerDispatcher::WriteDataImplNoLock(
     const void* elements,
-    uint32_t* num_elements,
+    uint32_t* num_bytes,
     MojoWriteDataFlags flags) {
   lock().AssertAcquired();
 
-  if (!VerifyUserPointer<uint32_t>(num_elements, 1))
+  if (!VerifyUserPointer<uint32_t>(num_bytes, 1))
     return MOJO_RESULT_INVALID_ARGUMENT;
-  if (!VerifyUserPointerForSize(elements, data_pipe_->element_size(),
-                                *num_elements))
+  if (!VerifyUserPointer<void>(elements, *num_bytes))
     return MOJO_RESULT_INVALID_ARGUMENT;
 
-  return data_pipe_->ProducerWriteData(elements, num_elements, flags);
+  return data_pipe_->ProducerWriteData(
+      elements, num_bytes, (flags & MOJO_WRITE_DATA_FLAG_ALL_OR_NONE));
 }
 
 MojoResult DataPipeProducerDispatcher::BeginWriteDataImplNoLock(
     void** buffer,
-    uint32_t* buffer_num_elements,
+    uint32_t* buffer_num_bytes,
     MojoWriteDataFlags flags) {
   lock().AssertAcquired();
 
   if (!VerifyUserPointer<void*>(buffer, 1))
     return MOJO_RESULT_INVALID_ARGUMENT;
-  if (!VerifyUserPointer<uint32_t>(buffer_num_elements, 1))
+  if (!VerifyUserPointer<uint32_t>(buffer_num_bytes, 1))
     return MOJO_RESULT_INVALID_ARGUMENT;
 
-  return data_pipe_->ProducerBeginWriteData(buffer, buffer_num_elements, flags);
+  return data_pipe_->ProducerBeginWriteData(
+      buffer, buffer_num_bytes, (flags & MOJO_WRITE_DATA_FLAG_ALL_OR_NONE));
 }
 
 MojoResult DataPipeProducerDispatcher::EndWriteDataImplNoLock(
-    uint32_t num_elements_written) {
+    uint32_t num_bytes_written) {
   lock().AssertAcquired();
 
-  return data_pipe_->ProducerEndWriteData(num_elements_written);
+  return data_pipe_->ProducerEndWriteData(num_bytes_written);
 }
 
 MojoResult DataPipeProducerDispatcher::AddWaiterImplNoLock(
@@ -85,15 +100,9 @@ void DataPipeProducerDispatcher::RemoveWaiterImplNoLock(Waiter* waiter) {
   data_pipe_->ProducerRemoveWaiter(waiter);
 }
 
-scoped_refptr<Dispatcher>
-DataPipeProducerDispatcher::CreateEquivalentDispatcherAndCloseImplNoLock() {
+bool DataPipeProducerDispatcher::IsBusyNoLock() const {
   lock().AssertAcquired();
-
-  scoped_refptr<DataPipeProducerDispatcher> rv =
-      new DataPipeProducerDispatcher();
-  rv->Init(data_pipe_);
-  data_pipe_ = NULL;
-  return scoped_refptr<Dispatcher>(rv.get());
+  return data_pipe_->ProducerIsBusy();
 }
 
 }  // namespace system

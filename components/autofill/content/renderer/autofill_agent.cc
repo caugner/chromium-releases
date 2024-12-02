@@ -15,7 +15,9 @@
 #include "components/autofill/content/renderer/form_autofill_util.h"
 #include "components/autofill/content/renderer/page_click_tracker.h"
 #include "components/autofill/content/renderer/password_autofill_agent.h"
+#include "components/autofill/content/renderer/password_generation_agent.h"
 #include "components/autofill/core/common/autofill_constants.h"
+#include "components/autofill/core/common/autofill_data_validation.h"
 #include "components/autofill/core/common/autofill_switches.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/form_data_predictions.h"
@@ -32,12 +34,12 @@
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebElementCollection.h"
 #include "third_party/WebKit/public/web/WebFormControlElement.h"
 #include "third_party/WebKit/public/web/WebFormElement.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "third_party/WebKit/public/web/WebNode.h"
-#include "third_party/WebKit/public/web/WebNodeCollection.h"
 #include "third_party/WebKit/public/web/WebOptionElement.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -50,20 +52,13 @@ using blink::WebFrame;
 using blink::WebInputElement;
 using blink::WebKeyboardEvent;
 using blink::WebNode;
-using blink::WebNodeCollection;
+using blink::WebElementCollection;
 using blink::WebOptionElement;
 using blink::WebString;
 
+namespace autofill {
+
 namespace {
-
-// The size above which we stop triggering autofill for an input text field
-// (so to avoid sending long strings through IPC).
-const size_t kMaximumTextSizeForAutofill = 1000;
-
-// The maximum number of data list elements to send to the browser process
-// via IPC (to prevent long IPC messages).
-const size_t kMaximumDataListSizeForAutofill = 30;
-
 
 // Gets all the data list values (with corresponding label) for the given
 // element.
@@ -71,7 +66,7 @@ void GetDataListSuggestions(const blink::WebInputElement& element,
                             bool ignore_current_value,
                             std::vector<base::string16>* values,
                             std::vector<base::string16>* labels) {
-  WebNodeCollection options = element.dataListOptions();
+  WebElementCollection options = element.dataListOptions();
   if (options.isNull())
     return;
 
@@ -105,32 +100,24 @@ void GetDataListSuggestions(const blink::WebInputElement& element,
 // don't send too much data through the IPC.
 void TrimStringVectorForIPC(std::vector<base::string16>* strings) {
   // Limit the size of the vector.
-  if (strings->size() > kMaximumDataListSizeForAutofill)
-    strings->resize(kMaximumDataListSizeForAutofill);
+  if (strings->size() > kMaxListSize)
+    strings->resize(kMaxListSize);
 
   // Limit the size of the strings in the vector.
   for (size_t i = 0; i < strings->size(); ++i) {
-    if ((*strings)[i].length() > kMaximumTextSizeForAutofill)
-      (*strings)[i].resize(kMaximumTextSizeForAutofill);
+    if ((*strings)[i].length() > kMaxDataLength)
+      (*strings)[i].resize(kMaxDataLength);
   }
-}
-
-gfx::RectF GetScaledBoundingBox(float scale, WebInputElement* element) {
-  gfx::Rect bounding_box(element->boundsInViewportSpace());
-  return gfx::RectF(bounding_box.x() * scale,
-                    bounding_box.y() * scale,
-                    bounding_box.width() * scale,
-                    bounding_box.height() * scale);
 }
 
 }  // namespace
 
-namespace autofill {
-
 AutofillAgent::AutofillAgent(content::RenderView* render_view,
-                             PasswordAutofillAgent* password_autofill_agent)
+                             PasswordAutofillAgent* password_autofill_agent,
+                             PasswordGenerationAgent* password_generation_agent)
     : content::RenderViewObserver(render_view),
       password_autofill_agent_(password_autofill_agent),
+      password_generation_agent_(password_generation_agent),
       autofill_query_id_(0),
       autofill_action_(AUTOFILL_NONE),
       web_view_(render_view->GetWebView()),
@@ -158,22 +145,18 @@ bool AutofillAgent::OnMessageReceived(const IPC::Message& message) {
                         OnFieldTypePredictionsAvailable)
     IPC_MESSAGE_HANDLER(AutofillMsg_SetAutofillActionFill,
                         OnSetAutofillActionFill)
-    IPC_MESSAGE_HANDLER(AutofillMsg_ClearForm,
-                        OnClearForm)
+    IPC_MESSAGE_HANDLER(AutofillMsg_ClearForm, OnClearForm)
     IPC_MESSAGE_HANDLER(AutofillMsg_SetAutofillActionPreview,
                         OnSetAutofillActionPreview)
-    IPC_MESSAGE_HANDLER(AutofillMsg_ClearPreviewedForm,
-                        OnClearPreviewedForm)
-    IPC_MESSAGE_HANDLER(AutofillMsg_SetNodeText,
-                        OnSetNodeText)
+    IPC_MESSAGE_HANDLER(AutofillMsg_ClearPreviewedForm, OnClearPreviewedForm)
+    IPC_MESSAGE_HANDLER(AutofillMsg_SetNodeText, OnSetNodeText)
     IPC_MESSAGE_HANDLER(AutofillMsg_AcceptDataListSuggestion,
                         OnAcceptDataListSuggestion)
     IPC_MESSAGE_HANDLER(AutofillMsg_AcceptPasswordAutofillSuggestion,
                         OnAcceptPasswordAutofillSuggestion)
     IPC_MESSAGE_HANDLER(AutofillMsg_RequestAutocompleteResult,
                         OnRequestAutocompleteResult)
-    IPC_MESSAGE_HANDLER(AutofillMsg_PageShown,
-                        OnPageShown)
+    IPC_MESSAGE_HANDLER(AutofillMsg_PageShown, OnPageShown)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -205,11 +188,6 @@ void AutofillAgent::DidFinishDocumentLoad(WebFrame* frame) {
                                        forms_seen_timestamp_,
                                        state));
   }
-}
-
-void AutofillAgent::DidCommitProvisionalLoad(WebFrame* frame,
-                                             bool is_new_navigation) {
-  in_flight_request_form_.reset();
 }
 
 void AutofillAgent::FrameDetached(WebFrame* frame) {
@@ -314,22 +292,6 @@ void AutofillAgent::InputElementLostFocus() {
   HideAutofillUI();
 }
 
-void AutofillAgent::didClearAutofillSelection(const WebNode& node) {
-  if (password_autofill_agent_->DidClearAutofillSelection(node))
-    return;
-
-  if (!element_.isNull() && node == element_) {
-    ClearPreviewedFormWithElement(element_, was_query_node_autofilled_);
-  } else {
-    // TODO(isherman): There seem to be rare cases where this code *is*
-    // reachable: see [ http://crbug.com/96321#c6 ].  Ideally we would
-    // understand those cases and fix the code to avoid them.  However, so far I
-    // have been unable to reproduce such a case locally.  If you hit this
-    // NOTREACHED(), please file a bug against me.
-    NOTREACHED();
-  }
-}
-
 void AutofillAgent::textFieldDidEndEditing(const WebInputElement& element) {
   password_autofill_agent_->TextFieldDidEndEditing(element);
   has_shown_autofill_popup_for_current_edit_ = false;
@@ -361,6 +323,11 @@ void AutofillAgent::TextFieldDidChangeImpl(const WebInputElement& element) {
   // required to properly handle IME interactions.
   if (!element.focused())
     return;
+
+  if (password_generation_agent_ &&
+      password_generation_agent_->TextDidChangeInTextField(element)) {
+    return;
+  }
 
   if (password_autofill_agent_->TextDidChangeInTextField(element)) {
     element_ = element;
@@ -465,7 +432,19 @@ void AutofillAgent::OnSetAutofillActionPreview() {
 }
 
 void AutofillAgent::OnClearPreviewedForm() {
-  didClearAutofillSelection(element_);
+  if (!element_.isNull()) {
+    if (password_autofill_agent_->DidClearAutofillSelection(element_))
+      return;
+
+    ClearPreviewedFormWithElement(element_, was_query_node_autofilled_);
+  } else {
+    // TODO(isherman): There seem to be rare cases where this code *is*
+    // reachable: see [ http://crbug.com/96321#c6 ].  Ideally we would
+    // understand those cases and fix the code to avoid them.  However, so far I
+    // have been unable to reproduce such a case locally.  If you hit this
+    // NOTREACHED(), please file a bug against me.
+    NOTREACHED();
+  }
 }
 
 void AutofillAgent::OnSetNodeText(const base::string16& value) {
@@ -520,7 +499,7 @@ void AutofillAgent::ShowSuggestions(const WebInputElement& element,
   // criteria are not met.
   WebString value = element.editingValue();
   if (!datalist_only &&
-      (value.length() > kMaximumTextSizeForAutofill ||
+      (value.length() > kMaxDataLength ||
        (!autofill_on_empty_values && value.isEmpty()) ||
        (requires_caret_at_end &&
         (element.selectionStart() != element.selectionEnd() ||
@@ -632,6 +611,9 @@ void AutofillAgent::SetNodeText(const base::string16& value,
 }
 
 void AutofillAgent::HideAutofillUI() {
+  if (!element_.isNull())
+    OnClearPreviewedForm();
+
   Send(new AutofillHostMsg_HideAutofillUI(routing_id()));
 }
 

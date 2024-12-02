@@ -18,6 +18,7 @@ extern const char kBackgroundPage[];
 extern const char kBackgroundPageLegacy[];
 extern const char kBackgroundPersistent[];
 extern const char kBackgroundScripts[];
+extern const char kBluetooth[];
 extern const char kBookmarkUI[];
 extern const char kBrowserAction[];
 extern const char kBrowseURLs[];
@@ -53,6 +54,7 @@ extern const char kHideBookmarkButton[];
 extern const char kHomepageURL[];
 extern const char kIcons[];
 extern const char kId[];
+extern const char kImeOptionsPage[];
 extern const char kImport[];
 extern const char kIncognito[];
 extern const char kIncludeGlobs[];
@@ -117,6 +119,7 @@ extern const char kPlugins[];
 extern const char kPluginsPath[];
 extern const char kPluginsPublic[];
 extern const char kPublicKey[];
+extern const char kRemoveButton[];
 extern const char kResources[];
 extern const char kRequirements[];
 extern const char kRunAt[];
@@ -167,8 +170,9 @@ extern const char kVersion[];
 extern const char kWebAccessibleResources[];
 extern const char kWebURLs[];
 extern const char kWebview[];
+extern const char kWebviewName[];
 extern const char kWebviewAccessibleResources[];
-extern const char kWebviewPrivilegedPartitions[];
+extern const char kWebviewPartitions[];
 
 }  // namespace manifest_keys
 
@@ -220,11 +224,13 @@ extern const char kRunAtDocumentEnd[];
 extern const char kRunAtDocumentIdle[];
 extern const char kRunAtDocumentStart[];
 
-}  // manifest_values
+}  // namespace manifest_values
 
 // Error messages returned from extension installation.
 namespace manifest_errors {
 
+extern const char kActiveTabPermissionNotGranted[];
+extern const char kAllURLOrActiveTabNeeded[];
 extern const char kAppsNotEnabled[];
 extern const char kBackgroundPermissionNeeded[];
 extern const char kBackgroundRequiredForPlatformApps[];
@@ -371,6 +377,7 @@ extern const char kInvalidPageActionPopupPath[];
 extern const char kInvalidPageActionsList[];
 extern const char kInvalidPageActionsListSize[];
 extern const char kInvalidPageActionTypeValue[];
+extern const char kInvalidPermissionWithDetail[];
 extern const char kInvalidPermission[];
 extern const char kInvalidPermissions[];
 extern const char kInvalidPermissionScheme[];
@@ -419,12 +426,14 @@ extern const char kInvalidWebAccessibleResource[];
 extern const char kInvalidWebview[];
 extern const char kInvalidWebviewAccessibleResourcesList[];
 extern const char kInvalidWebviewAccessibleResource[];
-extern const char kInvalidWebviewPrivilegedPartitionList[];
-extern const char kInvalidWebviewPrivilegedPartition[];
+extern const char kInvalidWebviewPartition[];
+extern const char kInvalidWebviewPartitionName[];
+extern const char kInvalidWebviewPartitionsList[];
 extern const char kInvalidWebURL[];
 extern const char kInvalidWebURLs[];
 extern const char kInvalidZipHash[];
 extern const char kInsecureContentSecurityPolicy[];
+extern const char kKeyIsDeprecatedWithReplacement[];
 extern const char kLaunchPathAndExtentAreExclusive[];
 extern const char kLaunchPathAndURLAreExclusive[];
 extern const char kLaunchURLRequired[];

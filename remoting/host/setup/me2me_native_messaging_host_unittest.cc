@@ -319,10 +319,13 @@ void Me2MeNativeMessagingHostTest::StartHost() {
   scoped_ptr<NativeMessagingChannel> channel(
       new NativeMessagingChannel(input_read_handle, output_write_handle));
 
-  host_.reset(new Me2MeNativeMessagingHost(channel.Pass(),
-                                      daemon_controller,
-                                      pairing_registry,
-                                      scoped_ptr<remoting::OAuthClient>()));
+  host_.reset(new Me2MeNativeMessagingHost(
+        false,
+        0,
+        channel.Pass(),
+        daemon_controller,
+        pairing_registry,
+        scoped_ptr<remoting::OAuthClient>()));
   host_->Start(base::Bind(&Me2MeNativeMessagingHostTest::StopHost,
                           base::Unretained(this)));
 
@@ -337,7 +340,7 @@ void Me2MeNativeMessagingHostTest::StopHost() {
   host_.reset();
 
   // Wait till all shutdown tasks have completed.
-  base::MessageLoop::current()->RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   // Trigger a test shutdown via ExitTest().
   host_task_runner_ = NULL;

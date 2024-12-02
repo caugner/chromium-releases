@@ -17,7 +17,6 @@
 
 #include <libaddressinput/address_field.h>
 #include <libaddressinput/address_problem.h>
-#include <libaddressinput/util/basictypes.h>
 #include <libaddressinput/util/scoped_ptr.h>
 
 #include <map>
@@ -29,8 +28,6 @@ namespace addressinput {
 
 class Downloader;
 class LoadRulesDelegate;
-class Localization;
-class RuleRetriever;
 class Storage;
 struct AddressData;
 
@@ -40,8 +37,11 @@ typedef std::multimap<AddressField, AddressProblem::Type> AddressProblemFilter;
 // Validates an AddressData structure. Sample usage:
 //    class MyClass : public LoadRulesDelegate {
 //     public:
-//      MyClass() : validator_(new MyDownloader, new MyStorage, this) {
-//        validator_.LoadRules("US");
+//      MyClass() : validator_(AddressValidator::Build(
+//                      scoped_ptr<Downloader>(new MyDownloader),
+//                      scoped_ptr<Storage>(new MyStorage),
+//                      this)) {
+//        validator_->LoadRules("US");
 //      }
 //
 //      virtual ~MyClass() {}
@@ -59,14 +59,14 @@ typedef std::multimap<AddressField, AddressProblem::Type> AddressProblemFilter;
 //        AddressProblems problems;
 //        AddressProblemFilter filter;
 //        AddressValidator::Status status =
-//            validator_.ValidateAddress(address, filter, &problems);
+//            validator_->ValidateAddress(address, filter, &problems);
 //        if (status == AddressValidator::SUCCESS) {
 //          Process(problems);
 //        }
 //      }
 //
 //     private:
-//      AddressValidator validator_;
+//      scoped_ptr<AddressValidator> validator_;
 //    };
 class AddressValidator {
  public:
@@ -84,21 +84,28 @@ class AddressValidator {
     RULES_NOT_READY
   };
 
-  // Takes ownership of |downloader| and |storage|, which cannot be NULL. Does
-  // not take ownership of |load_rules_delegate|, which can be NULL.
-  AddressValidator(const Downloader* downloader,
-                   Storage* storage,
-                   LoadRulesDelegate* load_rules_delegate);
-  ~AddressValidator();
+  virtual ~AddressValidator();
+
+  // Builds an address validator. Takes ownership of |downloader| and |storage|,
+  // which cannot be NULL. Does not take ownership of |load_rules_delegate|,
+  // which can be NULL. The caller owns the result.
+  static scoped_ptr<AddressValidator> Build(
+      scoped_ptr<Downloader> downloader,
+      scoped_ptr<Storage> storage,
+      LoadRulesDelegate* load_rules_delegate);
 
   // Loads the generic validation rules for |country_code| and specific rules
   // for the country's administrative areas, localities, and dependent
   // localities. A typical data size is 10KB. The largest is 250KB. If a country
   // has language-specific validation rules, then these are also loaded.
   //
-  // If the rules were loaded successfully before, then does nothing. Notifies
-  // |load_rules_delegate| when the loading finishes.
-  void LoadRules(const std::string& country_code);
+  // Example rule:
+  // https://i18napis.appspot.com/ssl-aggregate-address/data/US
+  //
+  // If the rules were loaded successfully before or are still being loaded,
+  // then does nothing. Notifies |load_rules_delegate| when the loading
+  // finishes.
+  virtual void LoadRules(const std::string& country_code) = 0;
 
   // Validates the |address| and populates |problems| with the validation
   // problems, filtered according to the |filter| parameter.
@@ -109,15 +116,15 @@ class AddressValidator {
   //
   // If the |problems| parameter is NULL, then checks whether the validation
   // rules are available, but does not validate the |address|.
-  Status ValidateAddress(const AddressData& address,
-                         const AddressProblemFilter& filter,
-                         const Localization& localization,
-                         AddressProblems* problems) const;
- private:
-  scoped_ptr<RuleRetriever> rule_retriever_;
-  LoadRulesDelegate* load_rules_delegate_;
+  virtual Status ValidateAddress(const AddressData& address,
+                                 const AddressProblemFilter& filter,
+                                 AddressProblems* problems) const = 0;
 
-  DISALLOW_COPY_AND_ASSIGN(AddressValidator);
+  // Canonicalizes the administrative area in |address_data|. For example,
+  // "texas" changes to "TX". Returns true on success, otherwise leaves
+  // |address_data| alone and returns false.
+  virtual bool CanonicalizeAdministrativeArea(AddressData* address_data)
+      const = 0;
 };
 
 }  // namespace addressinput

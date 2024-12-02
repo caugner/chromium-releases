@@ -48,6 +48,17 @@ MockConnection::MockConnection(QuicGuid guid,
       helper_(helper()) {
 }
 
+MockConnection::MockConnection(bool is_server,
+                               const QuicVersionVector& supported_versions)
+    : QuicConnection(kTestGuid,
+                     IPEndPoint(net::test::Loopback4(), kTestPort),
+                     new testing::NiceMock<MockHelper>(),
+                     new testing::NiceMock<MockPacketWriter>(),
+                     is_server, supported_versions),
+      writer_(net::test::QuicConnectionPeer::GetWriter(this)),
+      helper_(helper()) {
+}
+
 MockConnection::~MockConnection() {
 }
 
@@ -85,10 +96,10 @@ MockPacketWriter::MockPacketWriter() {
 MockPacketWriter::~MockPacketWriter() {
 }
 
-MockQuicSessionOwner::MockQuicSessionOwner() {
+MockQuicServerSessionVisitor::MockQuicServerSessionVisitor() {
 }
 
-MockQuicSessionOwner::~MockQuicSessionOwner() {
+MockQuicServerSessionVisitor::~MockQuicServerSessionVisitor() {
 }
 
 bool TestDecompressorVisitor::OnDecompressedData(StringPiece data) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
+#include "chrome/browser/component_updater/component_updater_utils.h"
 #include "chrome/browser/component_updater/test/test_installer.h"
 #include "chrome/common/chrome_paths.h"
 #include "content/public/browser/browser_thread.h"
@@ -38,6 +39,10 @@ MockComponentObserver::MockComponentObserver() {
 }
 
 MockComponentObserver::~MockComponentObserver() {
+}
+
+bool PartialMatch::Match(const std::string& actual) const {
+  return actual.find(expected_) != std::string::npos;
 }
 
 TestConfigurator::TestConfigurator()
@@ -148,19 +153,6 @@ URLRequestPostInterceptor* InterceptorFactory::CreateInterceptor() {
   return URLRequestPostInterceptorFactory::CreateInterceptor(
     base::FilePath::FromUTF8Unsafe(POST_INTERCEPT_PATH));
 }
-
-class PartialMatch : public URLRequestPostInterceptor::RequestMatcher {
- public:
-  explicit PartialMatch(const std::string& expected) : expected_(expected) {}
-  virtual bool Match(const std::string& actual) const OVERRIDE {
-    return actual.find(expected_) != std::string::npos;
-  }
-
- private:
-  const std::string expected_;
-
-  DISALLOW_COPY_AND_ASSIGN(PartialMatch);
-};
 
 ComponentUpdaterTest::ComponentUpdaterTest()
     : test_config_(NULL),
@@ -497,6 +489,13 @@ TEST_F(ComponentUpdaterTest, InstallCrx) {
   EXPECT_NE(string::npos, elements[1].find(" arch="));
   EXPECT_NE(string::npos, elements[1].find(" prodchannel="));
   EXPECT_NE(string::npos, elements[1].find(" prodversion="));
+
+  // Look for additional attributes of the request, such as |version|,
+  // |requestid|, |lang|, and |nacl_arch|.
+  EXPECT_NE(string::npos, elements[1].find(" version="));
+  EXPECT_NE(string::npos, elements[1].find(" requestid="));
+  EXPECT_NE(string::npos, elements[1].find(" lang="));
+  EXPECT_NE(string::npos, elements[1].find(" nacl_arch="));
 
   component_updater()->Stop();
 }
@@ -1066,8 +1065,14 @@ TEST_F(ComponentUpdaterTest, DifferentialUpdateFails) {
   component_updater()->Stop();
 }
 
+// Test is flakey on Android bots. See crbug.com/331420.
+#if defined(OS_ANDROID)
+#define MAYBE_CheckFailedInstallPing DISABLED_CheckFailedInstallPing
+#else
+#define MAYBE_CheckFailedInstallPing CheckFailedInstallPing
+#endif
 // Verify that a failed installation causes an install failure ping.
-TEST_F(ComponentUpdaterTest, CheckFailedInstallPing) {
+  TEST_F(ComponentUpdaterTest, MAYBE_CheckFailedInstallPing) {
   // This test installer reports installation failure.
   class : public TestInstaller {
     virtual bool Install(const base::DictionaryValue& manifest,

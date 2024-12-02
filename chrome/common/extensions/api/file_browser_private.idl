@@ -8,7 +8,7 @@
  implemented_in="chrome/browser/chromeos/extensions/file_manager/file_browser_private_api_functions.h"]
 namespace fileBrowserPrivate {
 // Type of the mounted volume.
-enum VolumeType { drive, downloads, removable, archive };
+enum VolumeType { drive, downloads, removable, archive, cloud_device };
 
 // Device type. Available if this is removable volume.
 enum DeviceType { usb, sd, optical, mobile, unknown };
@@ -80,6 +80,50 @@ enum SearchType { EXCLUDE_DIRECTORIES, SHARED_WITH_ME, OFFLINE, ALL };
 // Zooming mode.
 enum ZoomOperationType { in, out, reset };
 
+// Device event type.
+enum DeviceEventType {
+  // Device is added.
+  added,
+  // If the device is disabled by preference, the disabled event is published
+  // instead of the added event.
+  disabled,
+  // Device is added, but scan for the device is canceled. The event is
+  // published after the added event.
+  scan_canceled,
+  // Device is removed.
+  removed,
+  // Format started.
+  format_start,
+  // Format succeeded.
+  format_success,
+  // Format failed.
+  format_fail
+};
+
+// Drive sync error type.
+// Keep it synced with DriveSyncErrorType in operation_observer.h.
+enum DriveSyncErrorType {
+  // Request to delete a file without permission.
+  delete_without_permission,
+  // Google Drive is temporarily unavailable.
+  service_unavailable,
+  // Miscellaneous errors other than listed above.
+  misc
+};
+
+// Result of task execution.
+enum TaskResult {
+  // The task execution succeeded and a new window/tab was opened.
+  opened,
+  // The task execution succeeded and the message was sent to the proper
+  // extension.
+  message_sent,
+  // The task execution failed.
+  failed,
+  // No URL is specified.
+  empty
+};
+
 // A file task represents an action that the file manager can perform over the
 // currently selected files. See
 // chrome/browser/chromeos/extensions/file_manager/file_tasks.h for details
@@ -146,11 +190,19 @@ dictionary MountPointSizeStats {
 
 // Information about a profile.
 dictionary ProfileInfo {
+  // Profile ID. This is currently e-mail address of the profile.
+  DOMString profileId;
+
   // The name of the profile for display purpose.
   DOMString displayName;
 
   // True if the profile is the one running the current file manager instance.
+  // TODO(hirono): Remove the property because of the design change of
+  // multi-profile suuport.
   boolean isCurrentProfile;
+
+  // Data URI of profile image;
+  DOMString? imageUri;
 };
 
 // Mounted disk volume metadata.
@@ -159,6 +211,8 @@ dictionary VolumeMetadata {
   DOMString volumeId;
 
   // Description of the profile where the volume belongs.
+  // TODO(hirono): Remove the property because of the design change of
+  // multi-profile suuport.
   ProfileInfo profile;
 
   // Disk volume mount point path.
@@ -172,6 +226,16 @@ dictionary VolumeMetadata {
 
   // Device type. Available if this is removable volume.
   DeviceType? deviceType;
+
+  // Path to identify the device. This is consistent with DeviceEvent's
+  // devicePath.
+  DOMString? devicePath;
+
+  // Label of the device.
+  DOMString? deviceLabel;
+
+  // Whether the device is parent or not (i.e. sdb rather than sdb1).
+  boolean? isParentDevice;
 
   // Flag that specifies if volume is mounted in read-only mode.
   boolean isReadOnly;
@@ -192,6 +256,9 @@ dictionary MountCompletedEvent {
 
   // Metadata of the mounted volume.
   VolumeMetadata volumeMetadata;
+
+  // Whether it is remount or not.
+  boolean isRemounting;
 };
 
 // Payload data for file transfer status updates.
@@ -210,6 +277,15 @@ dictionary FileTransferStatus {
 
   // Approximated total size of transfer operation.
   double? total;
+};
+
+// Error during the drive sync.
+dictionary DriveSyncErrorEvent {
+  // Error type.
+  DriveSyncErrorType type;
+
+  // File URL of the entry that the error happens to.
+  DOMString fileUrl;
 };
 
 // Payload data for copy status progress updates.
@@ -317,10 +393,20 @@ dictionary DriveConnectionState {
   DOMString? reason;
 };
 
-// |success| True of task execution was successfully initiated.
-callback ExecuteTaskCallback = void(optional boolean success);
+// Device event dispatched to listeners of onDeviceChaged.  See also
+// DeviceEventType to know when the event dispatched.
+dictionary DeviceEvent {
+  // Event type of the device event.
+  DeviceEventType type;
+  // Device path to identify the device.
+  DOMString devicePath;
+};
 
-callback SetDefaultTaskCallback = void();
+// Callback that does not take arguments.
+callback SimpleCallback = void();
+
+// |result| Result of the task execution.
+callback ExecuteTaskCallback = void(TaskResult result);
 
 // |tasks| The list of matched file URL patterns for this task.
 callback GetFileTasksCallback = void(FileTask[] tasks);
@@ -338,15 +424,9 @@ callback RemoveFileWatchCallback = void(optional boolean success);
 // |the caller has no appropriate permissions.
 callback RequestFileSystemCallback = void(optional object fileSystem);
 
-callback SelectFilesCallback = void();
-
-callback SelectFileCallback = void();
-
 // |fileProperties| A dictionary containing properties of the requested entry.
 callback GetDriveEntryPropertiesCallback =
     void(DriveEntryProperties fileProperties);
-
-callback PinDriveFileCallback = void();
 
 // |localFilePaths| An array of the local file paths for the requested files,
 // one entry for each file in fileUrls.
@@ -366,8 +446,6 @@ callback CancelFileTransfersCallback =
 // |copyId| ID of the copy task. Can be used to identify the progress, and to
 // cancel the task.
 callback StartCopyCallback = void(long copyId);
-
-callback CancelCopyCallback = void();
 
 // |sizeStats| Name/value pairs of size stats. Will be undefined if stats could
 // not be determined.
@@ -400,7 +478,12 @@ callback RequestWebStoreAccessTokenCallback = void(DOMString accessToken);
 // |shareUrl| Share Url for the sharing dialog.
 callback GetShareUrlCallback = void(DOMString shareUrl);
 
-callback InstallWebstoreItemCallback = void();
+// |profiles| List of profile information.
+// |runningProfile| ID of the profile that runs the application instance.
+// |showingProfile| ID of the profile that shows the application window.
+callback GetProfilesCallback = void(ProfileInfo[] profiles,
+                                    DOMString runningProfile,
+                                    DOMString displayProfile);
 
 interface Functions {
   // Logout the current user for navigating to the re-authentication screen for
@@ -427,7 +510,7 @@ interface Functions {
   static void setDefaultTask(DOMString taskId,
                              DOMString[] fileUrls,
                              optional DOMString[] mimeTypes,
-                             optional SetDefaultTaskCallback callback);
+                             optional SimpleCallback callback);
 
   // Gets the list of tasks that can be performed over selected files.
   // |fileUrls| Array of selected file URLs
@@ -473,7 +556,7 @@ interface Functions {
   // |callback|
   static void selectFiles(DOMString[] selectedPaths,
                           boolean shouldReturnLocalPath,
-                          SelectFilesCallback callback);
+                          SimpleCallback callback);
 
   // Selects a file.
   // |selectedPath| A selected path
@@ -485,7 +568,7 @@ interface Functions {
                          long index,
                          boolean forOpening,
                          boolean shouldReturnLocalPath,
-                         SelectFileCallback callback);
+                         SimpleCallback callback);
 
   // Requests Drive file properties for a file.
   // |fileUrl| URL of a file
@@ -500,7 +583,7 @@ interface Functions {
   //     was an error.
   static void pinDriveFile(DOMString fileUrl,
                            boolean pin,
-                           optional PinDriveFileCallback callback);
+                           optional SimpleCallback callback);
 
   // Get Drive files.
   // |fileUrls| Array of Drive file URLs to get.
@@ -515,8 +598,8 @@ interface Functions {
   static void addMount(DOMString source, AddMountCallback callback);
 
   // Unmounts a mounted resource.
-  // |mountPath| A path of the mount.
-  static void removeMount(DOMString mountPath);
+  // |volumeId| An ID of the volume.
+  static void removeMount(DOMString volumeId);
 
   // Get the list of mounted volumes.
   // |callback|
@@ -542,12 +625,12 @@ interface Functions {
   // Cancels the running copy task.
   // |copyId| ID of the copy task to be cancelled.
   // |callback| Completion callback of the cancel.
-  static void cancelCopy(long copyId, optional CancelCopyCallback callback);
+  static void cancelCopy(long copyId, optional SimpleCallback callback);
 
   // Retrieves total and remaining size of a mount point.
-  // |mountPath| Mount point path.
+  // |volumeId| ID of the volume to be checked.
   // |callback|
-  static void getSizeStats(DOMString mountPath, GetSizeStatsCallback callback);
+  static void getSizeStats(DOMString volumeId, GetSizeStatsCallback callback);
 
   // Formats a mounted volume.
   // |volumeId| ID of the volume to be formatted.
@@ -622,7 +705,14 @@ interface Functions {
   // |item_id| The id of the item to install.
   // |callback|
   static void installWebstoreItem(DOMString item_id,
-                                  InstallWebstoreItemCallback callback);
+                                  SimpleCallback callback);
+
+  // Obtains a list of profiles that are logged-in.
+  static void getProfiles(GetProfilesCallback callback);
+
+  // Moves the window to other user's desktop.
+  static void visitDesktop(DOMString profileId,
+                           optional SimpleCallback callback);
 };
 
 interface Events {
@@ -637,5 +727,16 @@ interface Events {
   static void onPreferencesChanged();
 
   static void onDriveConnectionStatusChanged();
+
+  static void onDeviceChanged(DeviceEvent event);
+
+  static void onDriveSyncError(DriveSyncErrorEvent event);
+
+  // Dispatched when a profile is added.
+  static void onProfileAdded();
+
+  // Dispatched when any window moves another desktop.
+  // TODO(hirono): Add information which window is moved.
+  static void onDesktopChanged();
 };
 };

@@ -29,6 +29,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/font_list.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/views/controls/button/image_button.h"
@@ -91,17 +92,17 @@ base::string16 GetAudioDeviceName(const chromeos::AudioDevice& device) {
     case chromeos::AUDIO_TYPE_USB:
       return l10n_util::GetStringFUTF16(
           IDS_ASH_STATUS_TRAY_AUDIO_USB_DEVICE,
-          UTF8ToUTF16(device.display_name));
+          base::UTF8ToUTF16(device.display_name));
     case chromeos::AUDIO_TYPE_BLUETOOTH:
       return l10n_util::GetStringFUTF16(
           IDS_ASH_STATUS_TRAY_AUDIO_BLUETOOTH_DEVICE,
-          UTF8ToUTF16(device.display_name));
+          base::UTF8ToUTF16(device.display_name));
     case chromeos::AUDIO_TYPE_HDMI:
       return l10n_util::GetStringFUTF16(
           IDS_ASH_STATUS_TRAY_AUDIO_HDMI_DEVICE,
-          UTF8ToUTF16(device.display_name));
+          base::UTF8ToUTF16(device.display_name));
     default:
-      return UTF8ToUTF16(device.display_name);
+      return base::UTF8ToUTF16(device.display_name);
   }
 }
 
@@ -486,8 +487,11 @@ class AudioDetailedView : public TrayDetailsView,
     scroller()->Layout();
   }
 
-  void AddScrollListInfoItem(const string16& text) {
-    views::Label* label = new views::Label(text);
+  void AddScrollListInfoItem(const base::string16& text) {
+    views::Label* label = new views::Label(
+        text,
+        ui::ResourceBundle::GetSharedInstance().GetFontList(
+            ui::ResourceBundle::BoldFont));
 
     //  Align info item with checkbox items
     int margin = kTrayPopupPaddingHorizontal +
@@ -499,19 +503,18 @@ class AudioDetailedView : public TrayDetailsView,
     else
       left_margin = margin;
 
-    label->set_border(views::Border::CreateEmptyBorder(
-        ash::kTrayPopupPaddingBetweenItems,
-        left_margin,
-        ash::kTrayPopupPaddingBetweenItems,
-        right_margin));
+    label->SetBorder(
+        views::Border::CreateEmptyBorder(ash::kTrayPopupPaddingBetweenItems,
+                                         left_margin,
+                                         ash::kTrayPopupPaddingBetweenItems,
+                                         right_margin));
     label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     label->SetEnabledColor(SkColorSetARGB(192, 0, 0, 0));
-    label->SetFont(label->font().DeriveFont(0, gfx::Font::BOLD));
 
     scroll_content()->AddChildView(label);
   }
 
-  HoverHighlightView* AddScrollListItem(const string16& text,
+  HoverHighlightView* AddScrollListItem(const base::string16& text,
                                         gfx::Font::FontStyle style,
                                         bool checked) {
     HoverHighlightView* container = new HoverHighlightView(this);
@@ -596,7 +599,7 @@ bool TrayAudio::ShouldHideArrow() const {
   return true;
 }
 
-bool TrayAudio::ShouldShowLauncher() const {
+bool TrayAudio::ShouldShowShelf() const {
   return ash::switches::ShowAudioDeviceMenu() && !pop_up_volume_view_;
 }
 

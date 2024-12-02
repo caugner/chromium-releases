@@ -115,11 +115,11 @@ class URLIteratorFromURLRows
 };
 
 // Callback from WebHistoryService::ExpireWebHistory().
-void ExpireWebHistoryComplete(
-    history::WebHistoryService::Request* request,
-    bool success) {
-  // Ignore the result and delete the request.
-  delete request;
+void ExpireWebHistoryComplete(bool success) {
+  // Ignore the result.
+  //
+  // TODO(davidben): ExpireLocalAndRemoteHistoryBetween callback should not fire
+  // until this completes.
 }
 
 }  // namespace
@@ -443,25 +443,6 @@ HistoryService::Handle HistoryService::QuerySegmentUsageSince(
                   from_time, max_result_count);
 }
 
-void HistoryService::IncreaseSegmentDuration(const GURL& url,
-                                             Time time,
-                                             base::TimeDelta delta) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  ScheduleAndForget(PRIORITY_NORMAL, &HistoryBackend::IncreaseSegmentDuration,
-                    url, time, delta);
-}
-
-HistoryService::Handle HistoryService::QuerySegmentDurationSince(
-    CancelableRequestConsumerBase* consumer,
-    base::Time from_time,
-    int max_result_count,
-    const SegmentQueryCallback& callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return Schedule(PRIORITY_UI, &HistoryBackend::QuerySegmentDuration,
-                  consumer, new history::QuerySegmentUsageRequest(callback),
-                  from_time, max_result_count);
-}
-
 void HistoryService::FlushForTest(const base::Closure& flushed) {
   thread_->message_loop_proxy()->PostTaskAndReply(
       FROM_HERE, base::Bind(&base::DoNothing), flushed);
@@ -603,13 +584,13 @@ void HistoryService::AddPagesWithDetails(const history::URLRows& info,
                     &HistoryBackend::AddPagesWithDetails, info, visit_source);
 }
 
-CancelableTaskTracker::TaskId HistoryService::GetFavicons(
+base::CancelableTaskTracker::TaskId HistoryService::GetFavicons(
     const std::vector<GURL>& icon_urls,
     int icon_types,
     int desired_size_in_dip,
     const std::vector<ui::ScaleFactor>& desired_scale_factors,
     const FaviconService::FaviconResultsCallback& callback,
-    CancelableTaskTracker* tracker) {
+    base::CancelableTaskTracker* tracker) {
   DCHECK(thread_checker_.CalledOnValidThread());
   LoadBackendIfNecessary();
 
@@ -628,13 +609,13 @@ CancelableTaskTracker::TaskId HistoryService::GetFavicons(
       base::Bind(&RunWithFaviconResults, callback, base::Owned(results)));
 }
 
-CancelableTaskTracker::TaskId HistoryService::GetFaviconsForURL(
+base::CancelableTaskTracker::TaskId HistoryService::GetFaviconsForURL(
     const GURL& page_url,
     int icon_types,
     int desired_size_in_dip,
     const std::vector<ui::ScaleFactor>& desired_scale_factors,
     const FaviconService::FaviconResultsCallback& callback,
-    CancelableTaskTracker* tracker) {
+    base::CancelableTaskTracker* tracker) {
   DCHECK(thread_checker_.CalledOnValidThread());
   LoadBackendIfNecessary();
 
@@ -653,12 +634,12 @@ CancelableTaskTracker::TaskId HistoryService::GetFaviconsForURL(
       base::Bind(&RunWithFaviconResults, callback, base::Owned(results)));
 }
 
-CancelableTaskTracker::TaskId HistoryService::GetLargestFaviconForURL(
+base::CancelableTaskTracker::TaskId HistoryService::GetLargestFaviconForURL(
     const GURL& page_url,
     const std::vector<int>& icon_types,
     int minimum_size_in_pixels,
     const FaviconService::FaviconRawCallback& callback,
-    CancelableTaskTracker* tracker) {
+    base::CancelableTaskTracker* tracker) {
   DCHECK(thread_checker_.CalledOnValidThread());
   LoadBackendIfNecessary();
 
@@ -675,12 +656,12 @@ CancelableTaskTracker::TaskId HistoryService::GetLargestFaviconForURL(
       base::Bind(&RunWithFaviconResult, callback, base::Owned(result)));
 }
 
-CancelableTaskTracker::TaskId HistoryService::GetFaviconForID(
+base::CancelableTaskTracker::TaskId HistoryService::GetFaviconForID(
     chrome::FaviconID favicon_id,
     int desired_size_in_dip,
     ui::ScaleFactor desired_scale_factor,
     const FaviconService::FaviconResultsCallback& callback,
-    CancelableTaskTracker* tracker) {
+    base::CancelableTaskTracker* tracker) {
   DCHECK(thread_checker_.CalledOnValidThread());
   LoadBackendIfNecessary();
 
@@ -698,14 +679,15 @@ CancelableTaskTracker::TaskId HistoryService::GetFaviconForID(
       base::Bind(&RunWithFaviconResults, callback, base::Owned(results)));
 }
 
-CancelableTaskTracker::TaskId HistoryService::UpdateFaviconMappingsAndFetch(
+base::CancelableTaskTracker::TaskId
+HistoryService::UpdateFaviconMappingsAndFetch(
     const GURL& page_url,
     const std::vector<GURL>& icon_urls,
     int icon_types,
     int desired_size_in_dip,
     const std::vector<ui::ScaleFactor>& desired_scale_factors,
     const FaviconService::FaviconResultsCallback& callback,
-    CancelableTaskTracker* tracker) {
+    base::CancelableTaskTracker* tracker) {
   DCHECK(thread_checker_.CalledOnValidThread());
   LoadBackendIfNecessary();
 
@@ -1026,11 +1008,12 @@ bool HistoryService::CanAddURL(const GURL& url) {
   // typed.  Right now, however, these are marked as typed even when triggered
   // by a shortcut or menu action.
   if (url.SchemeIs(content::kJavaScriptScheme) ||
-      url.SchemeIs(chrome::kChromeDevToolsScheme) ||
+      url.SchemeIs(content::kChromeDevToolsScheme) ||
+      url.SchemeIs(content::kChromeUIScheme) ||
+      url.SchemeIs(content::kViewSourceScheme) ||
       url.SchemeIs(chrome::kChromeNativeScheme) ||
-      url.SchemeIs(chrome::kChromeUIScheme) ||
       url.SchemeIs(chrome::kChromeSearchScheme) ||
-      url.SchemeIs(content::kViewSourceScheme))
+      url.SchemeIs(chrome::kDomDistillerScheme))
     return false;
 
   // Allow all about: and chrome: URLs except about:blank, since the user may
@@ -1132,7 +1115,7 @@ void HistoryService::ExpireHistoryBetween(
     Time begin_time,
     Time end_time,
     const base::Closure& callback,
-    CancelableTaskTracker* tracker) {
+    base::CancelableTaskTracker* tracker) {
   DCHECK(thread_);
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(history_backend_.get());
@@ -1149,7 +1132,7 @@ void HistoryService::ExpireHistoryBetween(
 void HistoryService::ExpireHistory(
     const std::vector<history::ExpireHistoryArgs>& expire_list,
     const base::Closure& callback,
-    CancelableTaskTracker* tracker) {
+    base::CancelableTaskTracker* tracker) {
   DCHECK(thread_);
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(history_backend_.get());
@@ -1165,7 +1148,7 @@ void HistoryService::ExpireLocalAndRemoteHistoryBetween(
     Time begin_time,
     Time end_time,
     const base::Closure& callback,
-    CancelableTaskTracker* tracker) {
+    base::CancelableTaskTracker* tracker) {
   // TODO(dubroy): This should be factored out into a separate class that
   // dispatches deletions to the proper places.
 
@@ -1180,14 +1163,12 @@ void HistoryService::ExpireLocalAndRemoteHistoryBetween(
 
     // Attempt online deletion from the history server, but ignore the result.
     // Deletion directives ensure that the results will eventually be deleted.
-    // Pass ownership of the request to the callback.
-    scoped_ptr<history::WebHistoryService::Request> request =
-        web_history->ExpireHistoryBetween(
-            restrict_urls, begin_time, end_time,
-            base::Bind(&ExpireWebHistoryComplete));
-
-    // The request will be freed when the callback is called.
-    CHECK(request.release());
+    //
+    // TODO(davidben): |callback| should not run until this operation completes
+    // too.
+    web_history->ExpireHistoryBetween(
+        restrict_urls, begin_time, end_time,
+        base::Bind(&ExpireWebHistoryComplete));
   }
   ExpireHistoryBetween(restrict_urls, begin_time, end_time, callback, tracker);
 }

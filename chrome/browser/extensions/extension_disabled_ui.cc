@@ -236,7 +236,7 @@ int ExtensionDisabledGlobalError::MenuItemCommandID() {
 
 base::string16 ExtensionDisabledGlobalError::MenuItemLabel() {
   return l10n_util::GetStringFUTF16(IDS_EXTENSION_DISABLED_ERROR_TITLE,
-                                    UTF8ToUTF16(extension_->name()));
+                                    base::UTF8ToUTF16(extension_->name()));
 }
 
 void ExtensionDisabledGlobalError::ExecuteMenuItem(Browser* browser) {
@@ -249,7 +249,7 @@ gfx::Image ExtensionDisabledGlobalError::GetBubbleViewIcon() {
 
 base::string16 ExtensionDisabledGlobalError::GetBubbleViewTitle() {
   return l10n_util::GetStringFUTF16(IDS_EXTENSION_DISABLED_ERROR_TITLE,
-                                    UTF8ToUTF16(extension_->name()));
+                                    base::UTF8ToUTF16(extension_->name()));
 }
 
 std::vector<base::string16>
@@ -258,7 +258,7 @@ ExtensionDisabledGlobalError::GetBubbleViewMessages() {
   messages.push_back(l10n_util::GetStringFUTF16(
       extension_->is_app() ?
       IDS_APP_DISABLED_ERROR_LABEL : IDS_EXTENSION_DISABLED_ERROR_LABEL,
-      UTF8ToUTF16(extension_->name())));
+      base::UTF8ToUTF16(extension_->name())));
   messages.push_back(l10n_util::GetStringUTF16(
       IDS_EXTENSION_PROMPT_WILL_NOW_HAVE_ACCESS_TO));
   std::vector<base::string16> permission_warnings =
@@ -350,6 +350,11 @@ void AddExtensionDisabledErrorWithIcon(base::WeakPtr<ExtensionService> service,
 
 void AddExtensionDisabledError(ExtensionService* service,
                                const Extension* extension) {
+  // Do not display notifications for ephemeral apps that have been disabled.
+  // Instead, a prompt will be shown the next time the app is launched.
+  if (extension->is_ephemeral())
+    return;
+
   extensions::ExtensionResource image = extensions::IconsInfo::GetIconResource(
       extension, kIconSize, ExtensionIconSet::MATCH_BIGGER);
   gfx::Size size(kIconSize, kIconSize);

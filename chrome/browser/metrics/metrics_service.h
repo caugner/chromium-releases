@@ -17,6 +17,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/field_trial.h"
+#include "base/metrics/user_metrics.h"
 #include "base/process/kill.h"
 #include "base/time/time.h"
 #include "chrome/browser/metrics/metrics_log.h"
@@ -29,7 +30,9 @@
 #include "content/public/browser/user_metrics.h"
 #include "net/url_request/url_fetcher_delegate.h"
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_ANDROID)
+#include "chrome/browser/android/activity_type_ids.h"
+#elif defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/external_metrics.h"
 #endif
 
@@ -174,6 +177,9 @@ class MetricsService
   // At startup, prefs needs to be called with a list of all the pref names and
   // types we'll be using.
   static void RegisterPrefs(PrefRegistrySimple* registry);
+#if defined(OS_ANDROID)
+  static void RegisterPrefsAndroid(PrefRegistrySimple* registry);
+#endif  // defined(OS_ANDROID)
 
   // Set up notifications which indicate that a user is performing work. This is
   // useful to allow some features to sleep, until the machine becomes active,
@@ -201,6 +207,18 @@ class MetricsService
   // This should be called when the application is shutting down. It records
   // that session end was successful.
   void RecordCompletedSessionEnd();
+
+#if defined(OS_ANDROID)
+  // Called to log launch and crash stats to preferences.
+  void LogAndroidStabilityToPrefs(PrefService* pref);
+
+  // Converts crash stats stored in the preferences into histograms.
+  void ConvertAndroidStabilityPrefsToHistograms(PrefService* pref);
+
+  // Called when the Activity that the user interacts with is swapped out.
+  void OnForegroundActivityChanged(PrefService* pref,
+                                   ActivityTypeIds::Type type);
+#endif  // defined(OS_ANDROID)
 
 #if defined(OS_ANDROID) || defined(OS_IOS)
   // Called when the application is going into background mode.
@@ -345,6 +363,9 @@ class MetricsService
   // the old version (after an autoupdate has arrived), and so we'd bias
   // initial results towards showing crashes :-(.
   static void DiscardOldStabilityStats(PrefService* local_state);
+#if defined(OS_ANDROID)
+  static void DiscardOldStabilityStatsAndroid(PrefService* local_state);
+#endif  // defined(OS_ANDROID)
 
   // Turns recording on or off.
   // DisableRecording() also forces a persistent save of logging state (if
@@ -474,7 +495,7 @@ class MetricsService
   void GetCurrentSyntheticFieldTrials(
       std::vector<chrome_variations::ActiveGroupId>* synthetic_trials);
 
-  content::ActionCallback action_callback_;
+  base::ActionCallback action_callback_;
 
   content::NotificationRegistrar registrar_;
 

@@ -127,7 +127,7 @@ base::string16 GetAppListIconPath() {
   std::stringstream ss;
   ss << "," << GetAppListIconIndex();
   base::string16 result = icon_path.value();
-  result.append(UTF8ToUTF16(ss.str()));
+  result.append(base::UTF8ToUTF16(ss.str()));
   return result;
 }
 
@@ -264,15 +264,6 @@ void CreateAppListShortcuts(
 // Customizes the app list |hwnd| for Windows (eg: disable aero peek, set up
 // restart params).
 void SetWindowAttributes(HWND hwnd) {
-  // Vista and lower do not offer pinning to the taskbar, which makes any
-  // presence on the taskbar useless. So, hide the window on the taskbar
-  // for these versions of Windows.
-  if (base::win::GetVersion() <= base::win::VERSION_VISTA) {
-    LONG_PTR ex_styles = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
-    ex_styles |= WS_EX_TOOLWINDOW;
-    SetWindowLongPtr(hwnd, GWL_EXSTYLE, ex_styles);
-  }
-
   if (base::win::GetVersion() > base::win::VERSION_VISTA) {
     // Disable aero peek. Without this, hovering over the taskbar popup puts
     // Windows into a mode for switching between windows in the same
@@ -434,7 +425,7 @@ void AppListServiceWin::Init(Profile* initial_profile) {
 
   if (enable_app_list_on_next_init_) {
     enable_app_list_on_next_init_ = false;
-    EnableAppList(initial_profile);
+    EnableAppList(initial_profile, ENABLE_ON_REINSTALL);
     CreateShortcut();
   }
 
@@ -465,7 +456,7 @@ void AppListServiceWin::Init(Profile* initial_profile) {
       chrome_launcher_support::UninstallLegacyAppLauncher(
           chrome_launcher_support::USER_LEVEL_INSTALLATION);
     }
-    EnableAppList(initial_profile);
+    EnableAppList(initial_profile, ENABLE_ON_REINSTALL);
     CreateShortcut();
   }
 #endif
@@ -473,8 +464,7 @@ void AppListServiceWin::Init(Profile* initial_profile) {
   ScheduleWarmup();
 
   MigrateAppLauncherEnabledPref();
-  HandleCommandLineFlags(initial_profile);
-  SendUsageStats();
+  PerformStartupChecks(initial_profile);
 }
 
 void AppListServiceWin::CreateForProfile(Profile* profile) {

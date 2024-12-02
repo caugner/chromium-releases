@@ -7,13 +7,14 @@
 
 #include <string>
 
+#include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
+#include "base/task/cancelable_task_tracker.h"
 #include "base/timer/timer.h"
 #include "base/values.h"
 #include "chrome/browser/common/cancelable_request.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/web_history_service.h"
-#include "chrome/common/cancelable_task_tracker.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/browser/web_ui_message_handler.h"
@@ -47,10 +48,10 @@ class BrowsingHistoryHandler : public content::WebUIMessageHandler,
     virtual ~HistoryEntry();
 
     // Formats this entry's URL and title and adds them to |result|.
-    void SetUrlAndTitle(DictionaryValue* result) const;
+    void SetUrlAndTitle(base::DictionaryValue* result) const;
 
     // Converts the entry to a DictionaryValue to be owned by the caller.
-    scoped_ptr<DictionaryValue> ToValue(
+    scoped_ptr<base::DictionaryValue> ToValue(
         BookmarkModel* bookmark_model,
         ManagedUserService* managed_user_service,
         const ProfileSyncService* sync_service) const;
@@ -157,8 +158,7 @@ class BrowsingHistoryHandler : public content::WebUIMessageHandler,
   void RemoveComplete();
 
   // Callback from history server when visits were deleted.
-  void RemoveWebHistoryComplete(history::WebHistoryService::Request* request,
-                                bool success);
+  void RemoveWebHistoryComplete(bool success);
 
   bool ExtractIntegerValueAtIndex(
       const base::ListValue* value, int index, int* out_int);
@@ -181,12 +181,11 @@ class BrowsingHistoryHandler : public content::WebUIMessageHandler,
   // Deleting the request will cancel it.
   scoped_ptr<history::WebHistoryService::Request> web_history_request_;
 
-  // The currently-executing delete request for synced history.
-  // Deleting the request will cancel it.
-  scoped_ptr<history::WebHistoryService::Request> web_history_delete_request_;
+  // True if there is a pending delete requests to the history service.
+  bool has_pending_delete_request_;
 
   // Tracker for delete requests to the history service.
-  CancelableTaskTracker delete_task_tracker_;
+  base::CancelableTaskTracker delete_task_tracker_;
 
   // The list of URLs that are in the process of being deleted.
   std::set<GURL> urls_to_be_deleted_;
@@ -202,6 +201,8 @@ class BrowsingHistoryHandler : public content::WebUIMessageHandler,
 
   // Timer used to implement a timeout on a Web History response.
   base::OneShotTimer<BrowsingHistoryHandler> web_history_timer_;
+
+  base::WeakPtrFactory<BrowsingHistoryHandler> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowsingHistoryHandler);
 };

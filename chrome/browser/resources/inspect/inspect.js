@@ -34,27 +34,43 @@ function onload() {
     tabHeader.addEventListener('click', selectTab.bind(null, tabContent.id));
     $('navigation').appendChild(tabHeader);
   }
-  var selectedTabName = window.location.hash.slice(1) || 'devices';
-  selectTab(selectedTabName);
+  onHashChange();
   initSettings();
   sendCommand('init-ui');
 }
 
+function onHashChange() {
+  var hash = window.location.hash.slice(1).toLowerCase();
+  if (!selectTab(hash))
+    selectTab('devices');
+}
+
+/**
+ * @param {string} id Tab id.
+ * @return {boolean} True if successful.
+ */
 function selectTab(id) {
+  closePortForwardingConfig();
+
   var tabContents = document.querySelectorAll('#content > div');
   var tabHeaders = $('navigation').querySelectorAll('.tab-header');
+  var found = false;
   for (var i = 0; i != tabContents.length; i++) {
     var tabContent = tabContents[i];
     var tabHeader = tabHeaders[i];
     if (tabContent.id == id) {
       tabContent.classList.add('selected');
       tabHeader.classList.add('selected');
+      found = true;
     } else {
       tabContent.classList.remove('selected');
       tabHeader.classList.remove('selected');
     }
   }
+  if (!found)
+    return false;
   window.location.hash = id;
+  return true;
 }
 
 function populateTargets(source, data) {
@@ -156,12 +172,10 @@ function populateRemoteTargets(devices) {
       deviceName.className = 'device-name';
       deviceHeader.appendChild(deviceName);
 
-      if (device.adbSerial) {
-        var deviceSerial = document.createElement('div');
-        deviceSerial.className = 'device-serial';
-        deviceSerial.textContent = '#' + device.adbSerial.toUpperCase();
-        deviceHeader.appendChild(deviceSerial);
-      }
+      var deviceSerial = document.createElement('div');
+      deviceSerial.className = 'device-serial';
+      deviceSerial.textContent = '#' + device.adbSerial.toUpperCase();
+      deviceHeader.appendChild(deviceSerial);
 
       var devicePorts = document.createElement('div');
       devicePorts.className = 'device-ports';
@@ -220,6 +234,8 @@ function populateRemoteTargets(devices) {
 
       var majorChromeVersion = browser.adbBrowserChromeVersion;
 
+      var incompatibleVersion = browser.hasOwnProperty('compatibleVersion') &&
+                                !browser.compatibleVersion;
       var pageList;
       var browserSection = $(browser.id);
       if (browserSection) {
@@ -241,7 +257,14 @@ function populateRemoteTargets(devices) {
           browserName.textContent += ' (' + browser.adbBrowserVersion + ')';
         browserSection.appendChild(browserHeader);
 
-        if (majorChromeVersion >= MIN_VERSION_NEW_TAB) {
+        if (incompatibleVersion) {
+          var warningSection = document.createElement('div');
+          warningSection.className = 'warning';
+          warningSection.textContent =
+            'You may need a newer version of desktop Chrome. ' +
+            'Please try Chrome ' + browser.adbBrowserVersion + ' or later.';
+          browserHeader.appendChild(warningSection);
+        } else if (majorChromeVersion >= MIN_VERSION_NEW_TAB) {
           var newPage = document.createElement('div');
           newPage.className = 'open';
 
@@ -273,7 +296,7 @@ function populateRemoteTargets(devices) {
         browserSection.appendChild(pageList);
       }
 
-      if (alreadyDisplayed(browserSection, browser))
+      if (incompatibleVersion || alreadyDisplayed(browserSection, browser))
         continue;
 
       pageList.textContent = '';
@@ -308,23 +331,30 @@ function populateRemoteTargets(devices) {
 function addToPagesList(data) {
   var row = addTargetToList(data, $('pages-list'), ['name', 'url']);
   addFavicon(row, data);
+  if (data.guests)
+    addGuestViews(row, data.guests);
 }
 
 function addToExtensionsList(data) {
   var row = addTargetToList(data, $('extensions-list'), ['name', 'url']);
   addFavicon(row, data);
+  if (data.guests)
+    addGuestViews(row, data.guests);
 }
 
 function addToAppsList(data) {
   var row = addTargetToList(data, $('apps-list'), ['name', 'url']);
   addFavicon(row, data);
-  if (data.guests) {
-    Array.prototype.forEach.call(data.guests, function(guest) {
-      var guestRow = addTargetToList(guest, row, ['name', 'url']);
-      guestRow.classList.add('guest');
-      addFavicon(guestRow, guest);
-    });
-  }
+  if (data.guests)
+    addGuestViews(row, data.guests);
+}
+
+function addGuestViews(row, guests) {
+  Array.prototype.forEach.call(guests, function(guest) {
+    var guestRow = addTargetToList(guest, row, ['name', 'url']);
+    guestRow.classList.add('guest');
+    addFavicon(guestRow, guest);
+  });
 }
 
 function addToWorkersList(data) {
@@ -349,17 +379,18 @@ function formatValue(data, property) {
   if (text.length > 100)
     text = text.substring(0, 100) + '\u2026';
 
-  var span = document.createElement('div');
-  span.textContent = text;
-  span.className = property;
-  return span;
+  var div = document.createElement('div');
+  div.textContent = text;
+  div.className = property;
+  return div;
 }
 
 function addFavicon(row, data) {
   var favicon = document.createElement('img');
   if (data['faviconUrl'])
     favicon.src = data['faviconUrl'];
-  row.insertBefore(favicon, row.firstChild);
+  var propertiesBox = row.querySelector('.properties-box');
+  propertiesBox.insertBefore(favicon, propertiesBox.firstChild);
 }
 
 function addWebViewDetails(row, data) {
@@ -397,13 +428,11 @@ function addWebViewDescription(row, webview) {
     subRow.className += ' invisible-view';
   if (viewStatus.visibility)
     subRow.appendChild(formatValue(viewStatus, 'visibility'));
-  subRow.appendChild(formatValue(viewStatus, 'position'));
+  if (viewStatus.position)
+    subRow.appendChild(formatValue(viewStatus, 'position'));
   subRow.appendChild(formatValue(viewStatus, 'size'));
-  var mainSubrow = row.querySelector('.subrow.main');
-  if (mainSubrow.nextSibling)
-    mainSubrow.parentNode.insertBefore(subRow, mainSubrow.nextSibling);
-  else
-    mainSubrow.parentNode.appendChild(subRow);
+  var subrowBox = row.querySelector('.subrow-box');
+  subrowBox.insertBefore(subRow, row.querySelector('.actions'));
 }
 
 function addWebViewThumbnail(row, webview, screenWidth, screenHeight) {
@@ -450,27 +479,28 @@ function addWebViewThumbnail(row, webview, screenWidth, screenHeight) {
     screenRect.appendChild(viewRect);
   }
 
-  row.insertBefore(thumbnail, row.firstChild);
+  var propertiesBox = row.querySelector('.properties-box');
+  propertiesBox.insertBefore(thumbnail, propertiesBox.firstChild);
 }
 
 function addTargetToList(data, list, properties) {
   var row = document.createElement('div');
   row.className = 'row';
 
+  var propertiesBox = document.createElement('div');
+  propertiesBox.className = 'properties-box';
+  row.appendChild(propertiesBox);
+
   var subrowBox = document.createElement('div');
   subrowBox.className = 'subrow-box';
-  row.appendChild(subrowBox);
+  propertiesBox.appendChild(subrowBox);
 
   var subrow = document.createElement('div');
-  subrow.className = 'subrow main';
+  subrow.className = 'subrow';
   subrowBox.appendChild(subrow);
 
-  var description = null;
   for (var j = 0; j < properties.length; j++)
     subrow.appendChild(formatValue(data, properties[j]));
-
-  if (description)
-    addWebViewDescription(description, subrowBox);
 
   var actionBox = document.createElement('div');
   actionBox.className = 'actions';
@@ -590,6 +620,9 @@ function openPortForwardingConfig() {
 }
 
 function closePortForwardingConfig() {
+  if (!$('port-forwarding-overlay').classList.contains('open'))
+    return;
+
   $('port-forwarding-overlay').classList.remove('open');
   document.removeEventListener('keyup', handleKey);
   unsetModal($('port-forwarding-overlay'));
@@ -662,8 +695,8 @@ function createConfigLine(port, location) {
         line.classList.contains('fresh') &&
         !line.classList.contains('empty')) {
       // Tabbing forward on the fresh line, try create a new empty one.
-      commitFreshLineIfValid(true);
-      e.preventDefault();
+      if (commitFreshLineIfValid(true))
+        e.preventDefault();
     }
   });
 
@@ -689,7 +722,7 @@ function validatePort(input) {
   if (!match)
     return false;
   var port = parseInt(match[1]);
-  if (port < 1024 || 10000 < port)
+  if (port < 1024 || 65535 < port)
     return false;
 
   var inputs = document.querySelectorAll('input.port:not(.invalid)');
@@ -703,11 +736,11 @@ function validatePort(input) {
 }
 
 function validateLocation(input) {
-  var match = input.value.match(/^([a-zA-Z0-9\.]+):(\d+)$/);
+  var match = input.value.match(/^([a-zA-Z0-9\.\-_]+):(\d+)$/);
   if (!match)
     return false;
   var port = parseInt(match[2]);
-  return port <= 10000;
+  return port <= 65535;
 }
 
 function createEmptyConfigLine() {
@@ -778,12 +811,15 @@ function unselectLine() {
 function commitFreshLineIfValid(opt_selectNew) {
   var line = document.querySelector('.port-forwarding-pair.fresh');
   if (line.querySelector('.invalid'))
-    return;
+    return false;
   line.classList.remove('fresh');
   var freshLine = createEmptyConfigLine();
   line.parentNode.appendChild(freshLine);
   if (opt_selectNew)
     freshLine.querySelector('.port').focus();
+  return true;
 }
 
 document.addEventListener('DOMContentLoaded', onload);
+
+window.addEventListener('hashchange', onHashChange);

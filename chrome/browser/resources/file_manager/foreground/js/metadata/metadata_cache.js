@@ -28,7 +28,7 @@
  * Typical usages:
  * {
  *   cache.get([entry1, entry2], 'drive|filesystem', function(metadata) {
- *     if (metadata[0].drive.pinned && metadata[1].filesystem.size == 0)
+ *     if (metadata[0].drive.pinned && metadata[1].filesystem.size === 0)
  *       alert("Pinned and empty!");
  *   });
  *
@@ -110,12 +110,13 @@ MetadataCache.DESCENDANTS = 2;
 MetadataCache.EVICTION_THRESHOLD_MARGIN = 500;
 
 /**
+ * @param {VolumeManagerWrapper} volumeManager Volume manager instance.
  * @return {MetadataCache!} The cache with all providers.
  */
-MetadataCache.createFull = function() {
+MetadataCache.createFull = function(volumeManager) {
   var cache = new MetadataCache();
   cache.providers_.push(new FilesystemProvider());
-  cache.providers_.push(new DriveProvider());
+  cache.providers_.push(new DriveProvider(volumeManager));
   cache.providers_.push(new ContentProvider());
   return cache;
 };
@@ -195,7 +196,7 @@ MetadataCache.prototype.get = function(entries, type, callback) {
     return;
   }
 
-  if (entries.length == 0) {
+  if (entries.length === 0) {
     if (callback) callback([]);
     return;
   }
@@ -207,7 +208,7 @@ MetadataCache.prototype.get = function(entries, type, callback) {
   var onOneItem = function(index, value) {
     result[index] = value;
     remaining--;
-    if (remaining == 0) {
+    if (remaining === 0) {
       this.endBatchUpdates();
       if (callback) setTimeout(callback, 0, result);
     }
@@ -226,7 +227,7 @@ MetadataCache.prototype.get = function(entries, type, callback) {
  * @param {function(Object)} callback The callback.
  */
 MetadataCache.prototype.getOne = function(entry, type, callback) {
-  if (type.indexOf('|') != -1) {
+  if (type.indexOf('|') !== -1) {
     var types = type.split('|');
     var result = {};
     var typesLeft = types.length;
@@ -234,7 +235,7 @@ MetadataCache.prototype.getOne = function(entry, type, callback) {
     var onOneType = function(requestedType, metadata) {
       result[requestedType] = metadata;
       typesLeft--;
-      if (typesLeft == 0) callback(result);
+      if (typesLeft === 0) callback(result);
     };
 
     for (var index = 0; index < types.length; index++) {
@@ -297,7 +298,7 @@ MetadataCache.prototype.getOne = function(entry, type, callback) {
   };
 
   var tryNextProvider = function() {
-    if (providers.length == 0) {
+    if (providers.length === 0) {
       self.endBatchUpdates();
       callback(item.properties[type] || null);
       return;
@@ -424,17 +425,17 @@ MetadataCache.prototype.clearRecursively = function(entry, type) {
  * @param {number} relation This defines, which items will trigger the observer.
  *     See comments to |MetadataCache.EXACT| and others.
  * @param {string} type The metadata type.
- * @param {function(Array.<Entry>, Array.<Object>)} observer List of entries
- *     and corresponding metadata values are passed to this callback.
+ * @param {function(Array.<Entry>, Object.<string, Object>)} observer Map of
+ *     entries and corresponding metadata values are passed to this callback.
  * @return {number} The observer id, which can be used to remove it.
  */
 MetadataCache.prototype.addObserver = function(
     entry, relation, type, observer) {
   var entryURL = entry.toURL();
   var re;
-  if (relation == MetadataCache.CHILDREN)
+  if (relation === MetadataCache.CHILDREN)
     re = entryURL + '(/[^/]*)?';
-  else if (relation == MetadataCache.DESCENDANTS)
+  else if (relation === MetadataCache.DESCENDANTS)
     re = entryURL + '(/.*)?';
   else
     re = entryURL;
@@ -458,7 +459,7 @@ MetadataCache.prototype.addObserver = function(
  */
 MetadataCache.prototype.removeObserver = function(id) {
   for (var index = 0; index < this.observers_.length; index++) {
-    if (this.observers_[index].id == id) {
+    if (this.observers_[index].id === id) {
       this.observers_.splice(index, 1);
       return true;
     }
@@ -471,7 +472,7 @@ MetadataCache.prototype.removeObserver = function(id) {
  */
 MetadataCache.prototype.startBatchUpdates = function() {
   this.batchCount_++;
-  if (this.batchCount_ == 1)
+  if (this.batchCount_ === 1)
     this.lastBatchStart_ = new Date();
 };
 
@@ -480,20 +481,20 @@ MetadataCache.prototype.startBatchUpdates = function() {
  */
 MetadataCache.prototype.endBatchUpdates = function() {
   this.batchCount_--;
-  if (this.batchCount_ != 0) return;
+  if (this.batchCount_ !== 0) return;
   if (this.totalCount_ > this.currentEvictionThreshold_())
     this.evict_();
   for (var index = 0; index < this.observers_.length; index++) {
     var observer = this.observers_[index];
     var entries = [];
-    var properties = [];
+    var properties = {};
     for (var entryURL in observer.pending) {
       if (observer.pending.hasOwnProperty(entryURL) &&
           entryURL in this.cache_) {
         var entry = observer.pending[entryURL];
         entries.push(entry);
-        properties.push(
-            this.cache_[entryURL].properties[observer.type] || null);
+        properties[entryURL] =
+            this.cache_[entryURL].properties[observer.type] || null;
       }
     }
     observer.pending = {};
@@ -513,11 +514,13 @@ MetadataCache.prototype.notifyObservers_ = function(entry, type) {
   var entryURL = entry.toURL();
   for (var index = 0; index < this.observers_.length; index++) {
     var observer = this.observers_[index];
-    if (observer.type == type && observer.re.test(entryURL)) {
-      if (this.batchCount_ == 0) {
-        // Observer expects array of urls and array of properties.
+    if (observer.type === type && observer.re.test(entryURL)) {
+      if (this.batchCount_ === 0) {
+        // Observer expects array of urls and map of properties.
+        var property = {};
+        property[entryURL] = this.cache_[entryURL].properties[type] || null;
         observer.callback(
-            [entry], [this.cache_[entryURL].properties[type] || null]);
+            [entry], property);
       } else {
         observer.pending[entryURL] = entry;
       }
@@ -575,7 +578,7 @@ MetadataCache.prototype.createEmptyItem_ = function() {
  * @private
  */
 MetadataCache.prototype.mergeProperties_ = function(entry, data) {
-  if (data == null) return;
+  if (data === null) return;
   var properties = this.cache_[entry.toURL()].properties;
   for (var type in data) {
     if (data.hasOwnProperty(type) && !properties.hasOwnProperty(type)) {
@@ -654,7 +657,7 @@ FilesystemProvider.prototype.supportsEntry = function(entry) {
  * @return {boolean} Whether this provider provides this metadata.
  */
 FilesystemProvider.prototype.providesType = function(type) {
-  return type == 'filesystem';
+  return type === 'filesystem';
 };
 
 /**
@@ -693,10 +696,17 @@ FilesystemProvider.prototype.fetch = function(
  *     drive: { pinned, hosted, present, customIconUrl, etc. }
  *     thumbnail: { url, transform }
  *     streaming: { }
+ * @param {VolumeManagerWrapper} volumeManager Volume manager instance.
  * @constructor
  */
-function DriveProvider() {
+function DriveProvider(volumeManager) {
   MetadataProvider.call(this);
+
+  /**
+   * @type {VolumeManagerWrapper}
+   * @private
+   */
+  this.volumeManager_ = volumeManager;
 
   // We batch metadata fetches into single API call.
   this.entries_ = [];
@@ -715,7 +725,8 @@ DriveProvider.prototype = {
  * @return {boolean} Whether this provider supports the entry.
  */
 DriveProvider.prototype.supportsEntry = function(entry) {
-  return FileType.isOnDrive(entry);
+  var locationInfo = this.volumeManager_.getLocationInfo(entry);
+  return locationInfo && locationInfo.isDriveBased;
 };
 
 /**
@@ -723,8 +734,8 @@ DriveProvider.prototype.supportsEntry = function(entry) {
  * @return {boolean} Whether this provider provides this metadata.
  */
 DriveProvider.prototype.providesType = function(type) {
-  return type == 'drive' || type == 'thumbnail' ||
-      type == 'streaming' || type == 'media';
+  return type === 'drive' || type === 'thumbnail' ||
+      type === 'streaming' || type === 'media';
 };
 
 /**
@@ -787,12 +798,12 @@ DriveProvider.isAvailableOffline = function(data, entry) {
     return false;
 
   // What's available offline? See the 'Web' column at:
-  // http://support.google.com/drive/bin/answer.py?hl=en&answer=1628467
+  // http://support.google.com/drive/answer/1628467
   var subtype = FileType.getType(entry).subtype;
-  return (subtype == 'doc' ||
-          subtype == 'draw' ||
-          subtype == 'sheet' ||
-          subtype == 'slides');
+  return (subtype === 'doc' ||
+          subtype === 'draw' ||
+          subtype === 'sheet' ||
+          subtype === 'slides');
 };
 
 /**
@@ -901,7 +912,7 @@ ContentProvider.prototype.supportsEntry = function(entry) {
  * @return {boolean} Whether this provider provides this metadata.
  */
 ContentProvider.prototype.providesType = function(type) {
-  return type == 'thumbnail' || type == 'fetchedMedia' || type == 'media';
+  return type === 'thumbnail' || type === 'fetchedMedia' || type === 'media';
 };
 
 /**

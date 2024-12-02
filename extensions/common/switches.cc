@@ -9,7 +9,7 @@ namespace extensions {
 namespace switches {
 
 // Allows non-https URL for background_page for hosted apps.
-const char kAllowHTTPBackgroundPage[]       = "allow-http-background-page";
+const char kAllowHTTPBackgroundPage[] = "allow-http-background-page";
 
 // Allows the browser to load extensions that lack a modern manifest when that
 // would otherwise be forbidden.
@@ -39,11 +39,14 @@ const char kErrorConsole[] = "error-console";
 
 // The time in milliseconds that an extension event page can be idle before it
 // is shut down.
-const char kEventPageIdleTime[]             = "event-page-idle-time";
+const char kEventPageIdleTime[] = "event-page-idle-time";
 
 // The time in milliseconds that an extension event page has between being
 // notified of its impending unload and that unload happening.
-const char kEventPageSuspendingTime[]       = "event-page-unloading-time";
+const char kEventPageSuspendingTime[] = "event-page-unloading-time";
+
+// Marks a renderer as extension process.
+const char kExtensionProcess[] = "extension-process";
 
 // Enables extensions running scripts on chrome:// URLs.
 // Extensions still need to explicitly request access to chrome:// URLs in the
@@ -59,13 +62,6 @@ const char kGlobalCommands[] = "global-commands";
 // Should we prompt the user before allowing external extensions to install?
 // Default is yes.
 const char kPromptForExternalExtensions[] = "prompt-for-external-extensions";
-
-// Enables or disables extension scripts badges in the location bar.
-const char kScriptBadges[] = "script-badges";
-
-// Enable or diable the "script bubble" icon in the URL bar that tells you how
-// many extensions are running scripts on a page.
-const char kScriptBubble[] = "script-bubble";
 
 // Makes component extensions appear in chrome://settings/extensions.
 const char kShowComponentExtensionOptions[] =

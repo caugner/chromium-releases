@@ -4,7 +4,6 @@
 
 {
   'variables': {
-    'jemalloc_dir': '../../third_party/jemalloc/chromium',
     'tcmalloc_dir': '../../third_party/tcmalloc/chromium',
     'use_vtable_verify%': 0,
   },
@@ -198,13 +197,6 @@
         '<(tcmalloc_dir)/src/windows/preamble_patcher.h',
         '<(tcmalloc_dir)/src/windows/preamble_patcher_with_stub.cc',
 
-        # jemalloc files
-        '<(jemalloc_dir)/jemalloc.c',
-        '<(jemalloc_dir)/jemalloc.h',
-        '<(jemalloc_dir)/ql.h',
-        '<(jemalloc_dir)/qr.h',
-        '<(jemalloc_dir)/rb.h',
-
         'allocator_shim.cc',
         'allocator_shim.h',
         'debugallocation_shim.cc',
@@ -358,7 +350,6 @@
             'libcmt',
           ],
           'include_dirs': [
-            '<(jemalloc_dir)',
             '<(tcmalloc_dir)/src/windows',
           ],
           'sources!': [
@@ -395,15 +386,6 @@
 
             # TODO(willchan): Support allocator shim later on.
             'allocator_shim.cc',
-
-            # TODO(willchan): support jemalloc on other platforms
-            # jemalloc files
-            '<(jemalloc_dir)/jemalloc.c',
-            '<(jemalloc_dir)/jemalloc.h',
-            '<(jemalloc_dir)/ql.h',
-            '<(jemalloc_dir)/qr.h',
-            '<(jemalloc_dir)/rb.h',
-
           ],
           # We enable all warnings by default, but upstream disables a few.
           # Keep "-Wno-*" flags in sync with upstream by comparing against:
@@ -513,7 +495,7 @@
             '../..',
           ],
           'sources': [
-            'allocator_unittests.cc',
+            'allocator_unittest.cc',
             '../profiler/alternate_timer.cc',
             '../profiler/alternate_timer.h',
           ],
@@ -616,7 +598,7 @@
           'sources': [
             'type_profiler_control.cc',
             'type_profiler_control.h',
-            'type_profiler_unittests.cc',
+            'type_profiler_unittest.cc',
           ],
         },
         {
@@ -638,7 +620,7 @@
             '../..',
           ],
           'sources': [
-            'type_profiler_map_unittests.cc',
+            'type_profiler_map_unittest.cc',
             '<(tcmalloc_dir)/src/gperftools/type_profiler_map.h',
             '<(tcmalloc_dir)/src/type_profiler_map.cc',
           ],

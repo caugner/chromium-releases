@@ -58,7 +58,9 @@ class FakeUserManager : public UserManager {
       const std::string& user_id,
       const UserAccountData& account_data) OVERRIDE {}
   virtual void Shutdown() OVERRIDE {}
-  virtual UserImageManager* GetUserImageManager() OVERRIDE;
+  virtual MultiProfileUserController* GetMultiProfileUserController() OVERRIDE;
+  virtual UserImageManager* GetUserImageManager(
+      const std::string& user_id) OVERRIDE;
   virtual SupervisedUserManager* GetSupervisedUserManager() OVERRIDE;
   virtual const UserList& GetLRULoggedInUsers() OVERRIDE;
   virtual UserList GetUnlockUsers() const OVERRIDE;
@@ -79,6 +81,8 @@ class FakeUserManager : public UserManager {
   virtual void SaveUserOAuthStatus(
       const std::string& username,
       User::OAuthTokenStatus oauth_token_status) OVERRIDE {}
+  virtual void SaveForceOnlineSignin(const std::string& user_id,
+                                     bool force_online_signin) OVERRIDE {}
   virtual base::string16 GetUserDisplayName(
       const std::string& username) const OVERRIDE;
   virtual void SaveUserDisplayEmail(const std::string& username,

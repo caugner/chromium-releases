@@ -8,7 +8,6 @@
 #include "chrome/browser/drive/drive_service_interface.h"
 #include "chrome/browser/sync_file_system/drive_backend/drive_backend_util.h"
 #include "chrome/browser/sync_file_system/drive_backend/metadata_database.h"
-#include "chrome/browser/sync_file_system/drive_backend_v1/drive_file_sync_util.h"
 #include "google_apis/drive/drive_api_parser.h"
 #include "google_apis/drive/gdata_wapi_parser.h"
 
@@ -43,6 +42,7 @@ void FolderCreator::Run(const FileIDCallback& callback) {
   drive_service_->AddNewDirectory(
       parent_folder_id_,
       title_,
+      drive::DriveServiceInterface::AddNewDirectoryOptions(),
       base::Bind(&FolderCreator::DidCreateFolder,
                  weak_ptr_factory_.GetWeakPtr(), callback));
 }

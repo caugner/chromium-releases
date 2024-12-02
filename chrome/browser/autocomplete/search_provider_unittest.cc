@@ -45,6 +45,8 @@
 #include "net/url_request/url_request_status.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using base::ASCIIToUTF16;
+
 namespace {
 
 // Returns the first match in |matches| with |allowed_to_be_default_match|
@@ -291,13 +293,16 @@ void SearchProviderTest::RunTest(TestData* cases,
                                  bool prefer_keyword) {
   ACMatches matches;
   for (int i = 0; i < num_cases; ++i) {
-    AutocompleteInput input(cases[i].input, base::string16::npos, base::string16(), GURL(),
+    AutocompleteInput input(cases[i].input, base::string16::npos,
+                            base::string16(), GURL(),
                             AutocompleteInput::INVALID_SPEC, false,
                             prefer_keyword, true,
                             AutocompleteInput::ALL_MATCHES);
     provider_->Start(input, false);
     matches = provider_->matches();
-    base::string16 diagnostic_details = ASCIIToUTF16("Input was: ") + cases[i].input +
+    base::string16 diagnostic_details =
+        ASCIIToUTF16("Input was: ") +
+        cases[i].input +
         ASCIIToUTF16("; prefer_keyword was: ") +
         (prefer_keyword ? ASCIIToUTF16("true") : ASCIIToUTF16("false"));
     EXPECT_EQ(cases[i].num_results, matches.size()) << diagnostic_details;
@@ -561,7 +566,7 @@ TEST_F(SearchProviderTest, QueryKeywordProvider) {
   EXPECT_FALSE(match.keyword.empty());
 
   // The fill into edit should contain the keyword.
-  EXPECT_EQ(keyword_t_url_->keyword() + char16(' ') + keyword_term_,
+  EXPECT_EQ(keyword_t_url_->keyword() + base::char16(' ') + keyword_term_,
             match.fill_into_edit);
 }
 
@@ -3020,156 +3025,190 @@ TEST_F(SearchProviderTest, NavigationInline) {
     // Some cases do not trim "http://" to match from the start of the scheme.
     const std::string fill_into_edit;
     const std::string inline_autocompletion;
-    const bool allowed_to_be_default_match;
+    const bool allowed_to_be_default_match_in_regular_mode;
+    const bool allowed_to_be_default_match_in_prevent_inline_mode;
   } cases[] = {
     // Do not inline matches that do not contain the input; trim http as needed.
-    { "x",                    "http://www.abc.com",
-                                     "www.abc.com",  std::string(), false },
-    { "https:",               "http://www.abc.com",
-                                     "www.abc.com",  std::string(), false },
-    { "abc.com/",             "http://www.abc.com",
-                                     "www.abc.com",  std::string(), false },
+    { "x",                 "http://www.abc.com",
+                                  "www.abc.com",  std::string(), false, false },
+    { "https:",            "http://www.abc.com",
+                                  "www.abc.com",  std::string(), false, false },
     { "http://www.abc.com/a", "http://www.abc.com",
-                              "http://www.abc.com",  std::string(), false },
+                              "http://www.abc.com",  std::string(), false,
+                                                                    false },
     { "http://www.abc.com",   "https://www.abc.com",
-                              "https://www.abc.com", std::string(), false },
+                              "https://www.abc.com", std::string(), false,
+                                                                    false },
     { "http://abc.com",       "ftp://abc.com",
-                              "ftp://abc.com",       std::string(), false },
+                              "ftp://abc.com",       std::string(), false,
+                                                                    false },
     { "https://www.abc.com",  "http://www.abc.com",
-                                     "www.abc.com",  std::string(), false },
+                                     "www.abc.com",  std::string(), false,
+                                                                    false },
     { "ftp://abc.com",        "http://abc.com",
-                                     "abc.com",      std::string(), false },
+                                     "abc.com",      std::string(), false,
+                                                                    false },
 
     // Do not inline matches with invalid input prefixes; trim http as needed.
-    { "ttp",                  "http://www.abc.com",
-                                     "www.abc.com", std::string(), false },
-    { "://w",                 "http://www.abc.com",
-                                     "www.abc.com", std::string(), false },
-    { "ww.",                  "http://www.abc.com",
-                                     "www.abc.com", std::string(), false },
-    { ".ab",                  "http://www.abc.com",
-                                     "www.abc.com", std::string(), false },
-    { "bc",                   "http://www.abc.com",
-                                     "www.abc.com", std::string(), false },
-    { ".com",                 "http://www.abc.com",
-                                     "www.abc.com", std::string(), false },
+    { "ttp",              "http://www.abc.com",
+                                 "www.abc.com", std::string(), false, false },
+    { "://w",             "http://www.abc.com",
+                                 "www.abc.com", std::string(), false, false },
+    { "ww.",              "http://www.abc.com",
+                                 "www.abc.com", std::string(), false, false },
+    { ".ab",              "http://www.abc.com",
+                                 "www.abc.com", std::string(), false, false },
+    { "bc",               "http://www.abc.com",
+                                 "www.abc.com", std::string(), false, false },
+    { ".com",             "http://www.abc.com",
+                                 "www.abc.com", std::string(), false, false },
 
     // Do not inline matches that omit input domain labels; trim http as needed.
-    { "www.a",                "http://a.com",
-                                     "a.com",       std::string(), false },
-    { "http://www.a",         "http://a.com",
-                              "http://a.com",       std::string(), false },
-    { "www.a",                "ftp://a.com",
-                              "ftp://a.com",        std::string(), false },
-    { "ftp://www.a",          "ftp://a.com",
-                              "ftp://a.com",        std::string(), false },
+    { "www.a",            "http://a.com",
+                                 "a.com",       std::string(), false, false },
+    { "http://www.a",     "http://a.com",
+                          "http://a.com",       std::string(), false, false },
+    { "www.a",            "ftp://a.com",
+                          "ftp://a.com",        std::string(), false, false },
+    { "ftp://www.a",      "ftp://a.com",
+                          "ftp://a.com",        std::string(), false, false },
 
     // Input matching but with nothing to inline will not yield an offset, but
     // will be allowed to be default.
-    { "abc.com",              "http://www.abc.com",
-                                     "www.abc.com", std::string(), true },
-    { "http://www.abc.com",   "http://www.abc.com",
-                              "http://www.abc.com", std::string(), true },
+    { "abc.com",             "http://www.abc.com",
+                                    "www.abc.com", std::string(), true, true },
+    { "abc.com/",            "http://www.abc.com",
+                                    "www.abc.com", std::string(), true, true },
+    { "http://www.abc.com",  "http://www.abc.com",
+                             "http://www.abc.com", std::string(), true, true },
+    { "http://www.abc.com/", "http://www.abc.com",
+                             "http://www.abc.com", std::string(), true, true },
+
+    // Inputs with trailing whitespace should inline when possible.
+    { "abc.com ",      "http://www.abc.com",
+                              "www.abc.com",      std::string(), true,  true },
+    { "abc.com/ ",     "http://www.abc.com",
+                              "www.abc.com",      std::string(), true,  true },
+    { "abc.com ",      "http://www.abc.com/bar",
+                              "www.abc.com/bar",  "/bar",        false, false },
 
     // Inline matches when the input is a leading substring of the scheme.
-    { "h",                    "http://www.abc.com",
-                              "http://www.abc.com", "ttp://www.abc.com", true },
-    { "http",                 "http://www.abc.com",
-                              "http://www.abc.com", "://www.abc.com",    true },
+    { "h",             "http://www.abc.com",
+                       "http://www.abc.com", "ttp://www.abc.com", true, false },
+    { "http",          "http://www.abc.com",
+                       "http://www.abc.com", "://www.abc.com",    true, false },
 
     // Inline matches when the input is a leading substring of the full URL.
-    { "http:",                "http://www.abc.com",
-                              "http://www.abc.com", "//www.abc.com", true },
-    { "http://w",             "http://www.abc.com",
-                              "http://www.abc.com", "ww.abc.com",    true },
-    { "http://www.",          "http://www.abc.com",
-                              "http://www.abc.com", "abc.com",       true },
-    { "http://www.ab",        "http://www.abc.com",
-                              "http://www.abc.com", "c.com",         true },
+    { "http:",             "http://www.abc.com",
+                           "http://www.abc.com", "//www.abc.com", true, false },
+    { "http://w",          "http://www.abc.com",
+                           "http://www.abc.com", "ww.abc.com",    true, false },
+    { "http://www.",       "http://www.abc.com",
+                           "http://www.abc.com", "abc.com",       true, false },
+    { "http://www.ab",     "http://www.abc.com",
+                           "http://www.abc.com", "c.com",         true, false },
     { "http://www.abc.com/p", "http://www.abc.com/path/file.htm?q=x#foo",
                               "http://www.abc.com/path/file.htm?q=x#foo",
                                                   "ath/file.htm?q=x#foo",
-                              true },
+                                                                  true, false },
     { "http://abc.com/p",     "http://abc.com/path/file.htm?q=x#foo",
                               "http://abc.com/path/file.htm?q=x#foo",
-                                              "ath/file.htm?q=x#foo", true},
+                                              "ath/file.htm?q=x#foo",
+                                                                  true, false},
 
     // Inline matches with valid URLPrefixes; only trim "http://".
     { "w",               "http://www.abc.com",
-                                "www.abc.com", "ww.abc.com", true },
+                                "www.abc.com", "ww.abc.com", true, false },
     { "www.a",           "http://www.abc.com",
-                                "www.abc.com", "bc.com",     true },
+                                "www.abc.com", "bc.com",     true, false },
     { "abc",             "http://www.abc.com",
-                                "www.abc.com", ".com",       true },
+                                "www.abc.com", ".com",       true, false },
     { "abc.c",           "http://www.abc.com",
-                                "www.abc.com", "om",         true },
+                                "www.abc.com", "om",         true, false },
     { "abc.com/p",       "http://www.abc.com/path/file.htm?q=x#foo",
                                 "www.abc.com/path/file.htm?q=x#foo",
-                                             "ath/file.htm?q=x#foo", true },
+                                             "ath/file.htm?q=x#foo",
+                                                             true, false },
     { "abc.com/p",       "http://abc.com/path/file.htm?q=x#foo",
                                 "abc.com/path/file.htm?q=x#foo",
-                                         "ath/file.htm?q=x#foo", true },
+                                         "ath/file.htm?q=x#foo",
+                                                             true, false },
 
     // Inline matches using the maximal URLPrefix components.
     { "h",               "http://help.com",
-                                "help.com", "elp.com",     true },
+                                "help.com", "elp.com",     true, false },
     { "http",            "http://http.com",
-                                "http.com", ".com",        true },
+                                "http.com", ".com",        true, false },
     { "h",               "http://www.help.com",
-                                "www.help.com", "elp.com", true },
+                                "www.help.com", "elp.com", true, false },
     { "http",            "http://www.http.com",
-                                "www.http.com", ".com",    true },
+                                "www.http.com", ".com",    true, false },
     { "w",               "http://www.www.com",
-                                "www.www.com",  "ww.com",  true },
+                                "www.www.com",  "ww.com",  true, false },
 
     // Test similar behavior for the ftp and https schemes.
-    { "ftp://www.ab",    "ftp://www.abc.com/path/file.htm?q=x#foo",
-                         "ftp://www.abc.com/path/file.htm?q=x#foo",
-                                     "c.com/path/file.htm?q=x#foo", true },
-    { "www.ab",          "ftp://www.abc.com/path/file.htm?q=x#foo",
-                         "ftp://www.abc.com/path/file.htm?q=x#foo",
-                                     "c.com/path/file.htm?q=x#foo", true },
-    { "ab",              "ftp://www.abc.com/path/file.htm?q=x#foo",
-                         "ftp://www.abc.com/path/file.htm?q=x#foo",
-                                     "c.com/path/file.htm?q=x#foo", true },
-    { "ab",              "ftp://abc.com/path/file.htm?q=x#foo",
-                         "ftp://abc.com/path/file.htm?q=x#foo",
-                                 "c.com/path/file.htm?q=x#foo",     true },
+    { "ftp://www.ab",  "ftp://www.abc.com/path/file.htm?q=x#foo",
+                       "ftp://www.abc.com/path/file.htm?q=x#foo",
+                                  "c.com/path/file.htm?q=x#foo",  true, false },
+    { "www.ab",        "ftp://www.abc.com/path/file.htm?q=x#foo",
+                       "ftp://www.abc.com/path/file.htm?q=x#foo",
+                                   "c.com/path/file.htm?q=x#foo", true, false },
+    { "ab",            "ftp://www.abc.com/path/file.htm?q=x#foo",
+                       "ftp://www.abc.com/path/file.htm?q=x#foo",
+                                   "c.com/path/file.htm?q=x#foo", true, false },
+    { "ab",            "ftp://abc.com/path/file.htm?q=x#foo",
+                       "ftp://abc.com/path/file.htm?q=x#foo",
+                               "c.com/path/file.htm?q=x#foo",     true, false },
     { "https://www.ab",  "https://www.abc.com/path/file.htm?q=x#foo",
                          "https://www.abc.com/path/file.htm?q=x#foo",
-                                       "c.com/path/file.htm?q=x#foo", true },
-    { "www.ab",          "https://www.abc.com/path/file.htm?q=x#foo",
-                         "https://www.abc.com/path/file.htm?q=x#foo",
-                                       "c.com/path/file.htm?q=x#foo", true },
-    { "ab",              "https://www.abc.com/path/file.htm?q=x#foo",
-                         "https://www.abc.com/path/file.htm?q=x#foo",
-                                       "c.com/path/file.htm?q=x#foo", true },
-    { "ab",              "https://abc.com/path/file.htm?q=x#foo",
-                         "https://abc.com/path/file.htm?q=x#foo",
-                                   "c.com/path/file.htm?q=x#foo", true },
+                                       "c.com/path/file.htm?q=x#foo",
+                                                                  true, false },
+    { "www.ab",      "https://www.abc.com/path/file.htm?q=x#foo",
+                     "https://www.abc.com/path/file.htm?q=x#foo",
+                                   "c.com/path/file.htm?q=x#foo", true, false },
+    { "ab",          "https://www.abc.com/path/file.htm?q=x#foo",
+                     "https://www.abc.com/path/file.htm?q=x#foo",
+                                   "c.com/path/file.htm?q=x#foo", true, false },
+    { "ab",          "https://abc.com/path/file.htm?q=x#foo",
+                     "https://abc.com/path/file.htm?q=x#foo",
+                               "c.com/path/file.htm?q=x#foo",     true, false },
 
     // Forced query input should inline and retain the "?" prefix.
     { "?http://www.ab",  "http://www.abc.com",
-                        "?http://www.abc.com", "c.com", true },
+                        "?http://www.abc.com", "c.com", true, false },
     { "?www.ab",         "http://www.abc.com",
-                               "?www.abc.com", "c.com", true },
+                               "?www.abc.com", "c.com", true, false },
     { "?ab",             "http://www.abc.com",
-                               "?www.abc.com", "c.com", true },
+                               "?www.abc.com", "c.com", true, false },
     { "?abc.com",        "http://www.abc.com",
-                               "?www.abc.com", "", true },
+                               "?www.abc.com", "",      true, true },
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); i++) {
+    // First test regular mode.
     QueryForInput(ASCIIToUTF16(cases[i].input), false, false);
     AutocompleteMatch match(
         provider_->NavigationToMatch(SearchProvider::NavigationResult(
             *provider_.get(), GURL(cases[i].url), base::string16(), false, 0,
-            false)));
+            false, ASCIIToUTF16(cases[i].input), std::string())));
     EXPECT_EQ(ASCIIToUTF16(cases[i].inline_autocompletion),
               match.inline_autocompletion);
     EXPECT_EQ(ASCIIToUTF16(cases[i].fill_into_edit), match.fill_into_edit);
-    EXPECT_EQ(cases[i].allowed_to_be_default_match,
+    EXPECT_EQ(cases[i].allowed_to_be_default_match_in_regular_mode,
               match.allowed_to_be_default_match);
+
+    // Then test prevent-inline-autocomplete mode.
+    QueryForInput(ASCIIToUTF16(cases[i].input), true, false);
+    AutocompleteMatch match_prevent_inline(
+        provider_->NavigationToMatch(SearchProvider::NavigationResult(
+            *provider_.get(), GURL(cases[i].url), base::string16(), false, 0,
+            false, ASCIIToUTF16(cases[i].input), std::string())));
+    EXPECT_EQ(ASCIIToUTF16(cases[i].inline_autocompletion),
+              match_prevent_inline.inline_autocompletion);
+    EXPECT_EQ(ASCIIToUTF16(cases[i].fill_into_edit),
+              match_prevent_inline.fill_into_edit);
+    EXPECT_EQ(cases[i].allowed_to_be_default_match_in_prevent_inline_mode,
+              match_prevent_inline.allowed_to_be_default_match);
   }
 }
 
@@ -3178,7 +3217,8 @@ TEST_F(SearchProviderTest, NavigationInlineSchemeSubstring) {
   const base::string16 input(ASCIIToUTF16("ht"));
   const base::string16 url(ASCIIToUTF16("http://a.com"));
   const SearchProvider::NavigationResult result(
-      *provider_.get(), GURL(url), base::string16(), false, 0, false);
+      *provider_.get(), GURL(url), base::string16(), false, 0, false,
+      input, std::string());
 
   // Check the offset and strings when inline autocompletion is allowed.
   QueryForInput(input, false, false);
@@ -3188,11 +3228,10 @@ TEST_F(SearchProviderTest, NavigationInlineSchemeSubstring) {
   EXPECT_TRUE(match_inline.allowed_to_be_default_match);
   EXPECT_EQ(url, match_inline.contents);
 
-  // Check the same offset and strings when inline autocompletion is prevented.
+  // Check the same strings when inline autocompletion is prevented.
   QueryForInput(input, true, false);
   AutocompleteMatch match_prevent(provider_->NavigationToMatch(result));
   EXPECT_EQ(url, match_prevent.fill_into_edit);
-  EXPECT_TRUE(match_prevent.inline_autocompletion.empty());
   EXPECT_FALSE(match_prevent.allowed_to_be_default_match);
   EXPECT_EQ(url, match_prevent.contents);
 }
@@ -3202,8 +3241,8 @@ TEST_F(SearchProviderTest, NavigationInlineDomainClassify) {
   QueryForInput(ASCIIToUTF16("w"), false, false);
   AutocompleteMatch match(
       provider_->NavigationToMatch(SearchProvider::NavigationResult(
-          *provider_.get(), GURL("http://www.wow.com"), base::string16(), false, 0,
-          false)));
+          *provider_.get(), GURL("http://www.wow.com"), base::string16(), false,
+          0, false, ASCIIToUTF16("w"), std::string())));
   EXPECT_EQ(ASCIIToUTF16("ow.com"), match.inline_autocompletion);
   EXPECT_TRUE(match.allowed_to_be_default_match);
   EXPECT_EQ(ASCIIToUTF16("www.wow.com"), match.fill_into_edit);
@@ -3374,21 +3413,22 @@ TEST_F(SearchProviderTest, RemoveStaleResultsTest) {
         provider_->default_results_.navigation_results.push_back(
             SearchProvider::NavigationResult(
                 *provider_.get(), GURL(suggestion), base::string16(), false,
-                cases[i].results[j].relevance, false));
+                cases[i].results[j].relevance, false,
+                ASCIIToUTF16(cases[i].omnibox_input), std::string()));
       } else {
         provider_->default_results_.suggest_results.push_back(
             SearchProvider::SuggestResult(
                 ASCIIToUTF16(suggestion), AutocompleteMatchType::SEARCH_SUGGEST,
-                base::string16(), base::string16(), std::string(),
+                ASCIIToUTF16(suggestion), base::string16(), std::string(),
                 std::string(), false, cases[i].results[j].relevance, false,
-                false));
+                false, ASCIIToUTF16(cases[i].omnibox_input)));
       }
     }
 
     provider_->input_ = AutocompleteInput(
-        ASCIIToUTF16(cases[i].omnibox_input), base::string16::npos, base::string16(),
-        GURL(), AutocompleteInput::INVALID_SPEC, false, false, true,
-        AutocompleteInput::ALL_MATCHES);
+        ASCIIToUTF16(cases[i].omnibox_input), base::string16::npos,
+        base::string16(), GURL(), AutocompleteInput::INVALID_SPEC, false, false,
+        true, AutocompleteInput::ALL_MATCHES);
     provider_->RemoveAllStaleResults();
 
     // Check cached results.
@@ -3495,13 +3535,13 @@ TEST_F(SearchProviderTest, ParseEntitySuggestion) {
       const Match& match = cases[i].matches[j];
       SCOPED_TRACE(" and match index: " + base::IntToString(j));
       EXPECT_EQ(match.contents,
-                UTF16ToUTF8(matches[j].contents));
+                base::UTF16ToUTF8(matches[j].contents));
       EXPECT_EQ(match.description,
-                UTF16ToUTF8(matches[j].description));
+                base::UTF16ToUTF8(matches[j].description));
       EXPECT_EQ(match.query_params,
                 matches[j].search_terms_args->suggest_query_params);
       EXPECT_EQ(match.fill_into_edit,
-                UTF16ToUTF8(matches[j].fill_into_edit));
+                base::UTF16ToUTF8(matches[j].fill_into_edit));
       EXPECT_EQ(match.type, matches[j].type);
     }
     // Ensure that no expected matches are missing.
@@ -3643,7 +3683,8 @@ TEST_F(SearchProviderTest, PrefetchMetadataParsing) {
     // Ensure that the returned matches equal the expectations.
     for (size_t j = 0; j < matches.size(); ++j) {
       SCOPED_TRACE(description);
-      EXPECT_EQ(cases[i].matches[j].contents, UTF16ToUTF8(matches[j].contents));
+      EXPECT_EQ(cases[i].matches[j].contents,
+                base::UTF16ToUTF8(matches[j].contents));
       EXPECT_EQ(cases[i].matches[j].allowed_to_be_prefetched,
                 SearchProvider::ShouldPrefetch(matches[j]));
       EXPECT_EQ(cases[i].matches[j].type, matches[j].type);
@@ -3674,7 +3715,7 @@ TEST_F(SearchProviderTest, XSSIGuardedJSONParsing_InvalidResponse) {
 
   // Should have exactly one "search what you typed" match
   ASSERT_TRUE(matches.size() == 1);
-  EXPECT_EQ(input_str, UTF16ToUTF8(matches[0].contents));
+  EXPECT_EQ(input_str, base::UTF16ToUTF8(matches[0].contents));
   EXPECT_EQ(AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED,
             matches[0].type);
 }
@@ -3756,7 +3797,8 @@ TEST_F(SearchProviderTest, XSSIGuardedJSONParsing_ValidResponses) {
     // Ensure that the returned matches equal the expectations.
     for (; j < matches.size(); ++j) {
       SCOPED_TRACE("and match: " + base::IntToString(j));
-      EXPECT_EQ(cases[i].matches[j].contents, UTF16ToUTF8(matches[j].contents));
+      EXPECT_EQ(cases[i].matches[j].contents,
+                base::UTF16ToUTF8(matches[j].contents));
       EXPECT_EQ(cases[i].matches[j].type, matches[j].type);
     }
     for (; j < ARRAYSIZE_UNSAFE(cases[i].matches); ++j) {
@@ -3837,7 +3879,7 @@ TEST_F(SearchProviderTest, ParseDeletionUrl) {
        for (size_t j = 0; j < matches.size(); ++j) {
          const Match& match = cases[i].matches[j];
          SCOPED_TRACE(" and match index: " + base::IntToString(j));
-         EXPECT_EQ(match.contents, UTF16ToUTF8(matches[j].contents));
+         EXPECT_EQ(match.contents, base::UTF16ToUTF8(matches[j].contents));
          EXPECT_EQ(match.deletion_url, matches[j].GetAdditionalInfo(
              "deletion_url"));
        }

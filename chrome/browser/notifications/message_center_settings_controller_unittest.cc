@@ -116,24 +116,26 @@ TEST_F(MessageCenterSettingsControllerTest, NotifierGroups) {
 
   EXPECT_EQ(controller()->GetNotifierGroupCount(), 2u);
 
-  EXPECT_EQ(controller()->GetNotifierGroupAt(0).name, UTF8ToUTF16("Profile-1"));
+  EXPECT_EQ(controller()->GetNotifierGroupAt(0).name,
+            base::UTF8ToUTF16("Profile-1"));
   EXPECT_EQ(controller()->GetNotifierGroupAt(0).index, 0u);
 
-  EXPECT_EQ(controller()->GetNotifierGroupAt(1).name, UTF8ToUTF16("Profile-2"));
+  EXPECT_EQ(controller()->GetNotifierGroupAt(1).name,
+            base::UTF8ToUTF16("Profile-2"));
   EXPECT_EQ(controller()->GetNotifierGroupAt(1).index, 1u);
 
   EXPECT_EQ(controller()->GetActiveNotifierGroup().name,
-            UTF8ToUTF16("Profile-1"));
+            base::UTF8ToUTF16("Profile-1"));
   EXPECT_EQ(controller()->GetActiveNotifierGroup().index, 0u);
 
   controller()->SwitchToNotifierGroup(1);
   EXPECT_EQ(controller()->GetActiveNotifierGroup().name,
-            UTF8ToUTF16("Profile-2"));
+            base::UTF8ToUTF16("Profile-2"));
   EXPECT_EQ(controller()->GetActiveNotifierGroup().index, 1u);
 
   controller()->SwitchToNotifierGroup(0);
   EXPECT_EQ(controller()->GetActiveNotifierGroup().name,
-            UTF8ToUTF16("Profile-1"));
+            base::UTF8ToUTF16("Profile-1"));
 }
 #else
 TEST_F(MessageCenterSettingsControllerChromeOSTest, NotifierGroups) {
@@ -143,21 +145,23 @@ TEST_F(MessageCenterSettingsControllerChromeOSTest, NotifierGroups) {
 
   EXPECT_EQ(controller()->GetNotifierGroupCount(), 1u);
 
-  EXPECT_EQ(controller()->GetNotifierGroupAt(0).name, UTF8ToUTF16("Profile-1"));
+  EXPECT_EQ(controller()->GetNotifierGroupAt(0).name,
+            base::UTF8ToUTF16("Profile-1"));
   EXPECT_EQ(controller()->GetNotifierGroupAt(0).index, 0u);
 
   SwitchActiveUser("Profile-2");
   EXPECT_EQ(controller()->GetNotifierGroupCount(), 1u);
-  EXPECT_EQ(controller()->GetNotifierGroupAt(0).name, UTF8ToUTF16("Profile-2"));
+  EXPECT_EQ(controller()->GetNotifierGroupAt(0).name,
+            base::UTF8ToUTF16("Profile-2"));
   EXPECT_EQ(controller()->GetNotifierGroupAt(0).index, 1u);
 
   SwitchActiveUser("Profile-1");
   EXPECT_EQ(controller()->GetNotifierGroupCount(), 1u);
-  EXPECT_EQ(controller()->GetNotifierGroupAt(0).name, UTF8ToUTF16("Profile-1"));
+  EXPECT_EQ(controller()->GetNotifierGroupAt(0).name,
+            base::UTF8ToUTF16("Profile-1"));
   EXPECT_EQ(controller()->GetNotifierGroupAt(0).index, 0u);
 }
 #endif
 
 // TODO(mukai): write a test case to reproduce the actual guest session scenario
-// in ChromeOS -- no profiles in the profile_info_cache but GetDefaultProfile
-// returns a new one.
+// in ChromeOS -- no profiles in the profile_info_cache.

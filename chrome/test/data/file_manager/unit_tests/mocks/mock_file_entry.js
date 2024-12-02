@@ -4,8 +4,12 @@
 
 /**
  * Mock class for FileEntry.
+ *
+ * @param {string} volumeId Id of the volume containing the entry.
+ * @param {string} fullPath Full path for the entry.
  * @constructor
  */
-function MockFileEntry() {
-  this.fullPath = null;
+function MockFileEntry(volumeId, fullPath) {
+  this.volumeId = volumeId;
+  this.fullPath = fullPath;
 }

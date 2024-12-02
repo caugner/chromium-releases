@@ -92,29 +92,29 @@ scoped_ptr<net::URLRequestJobFactory> CreateJobFactory(
     content::ProtocolHandlerMap* protocol_handlers) {
   scoped_ptr<AwURLRequestJobFactory> aw_job_factory(new AwURLRequestJobFactory);
   bool set_protocol = aw_job_factory->SetProtocolHandler(
-      chrome::kFileScheme,
+      content::kFileScheme,
       new net::FileProtocolHandler(
           content::BrowserThread::GetBlockingPool()->
               GetTaskRunnerWithShutdownBehavior(
                   base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)));
   DCHECK(set_protocol);
   set_protocol = aw_job_factory->SetProtocolHandler(
-      chrome::kDataScheme, new net::DataProtocolHandler());
+      content::kDataScheme, new net::DataProtocolHandler());
   DCHECK(set_protocol);
   set_protocol = aw_job_factory->SetProtocolHandler(
       chrome::kBlobScheme, (*protocol_handlers)[chrome::kBlobScheme].release());
   DCHECK(set_protocol);
   set_protocol = aw_job_factory->SetProtocolHandler(
-      chrome::kFileSystemScheme,
-      (*protocol_handlers)[chrome::kFileSystemScheme].release());
+      content::kFileSystemScheme,
+      (*protocol_handlers)[content::kFileSystemScheme].release());
   DCHECK(set_protocol);
   set_protocol = aw_job_factory->SetProtocolHandler(
-      chrome::kChromeUIScheme,
-      (*protocol_handlers)[chrome::kChromeUIScheme].release());
+      content::kChromeUIScheme,
+      (*protocol_handlers)[content::kChromeUIScheme].release());
   DCHECK(set_protocol);
   set_protocol = aw_job_factory->SetProtocolHandler(
-      chrome::kChromeDevToolsScheme,
-      (*protocol_handlers)[chrome::kChromeDevToolsScheme].release());
+      content::kChromeDevToolsScheme,
+      (*protocol_handlers)[content::kChromeDevToolsScheme].release());
   DCHECK(set_protocol);
   protocol_handlers->clear();
 

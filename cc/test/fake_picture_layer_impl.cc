@@ -36,7 +36,7 @@ void FakePictureLayerImpl::AppendQuads(QuadSink* quad_sink,
 }
 
 gfx::Size FakePictureLayerImpl::CalculateTileSize(
-    gfx::Size content_bounds) const {
+    const gfx::Size& content_bounds) const {
   if (fixed_tile_size_.IsEmpty()) {
     return PictureLayerImpl::CalculateTileSize(content_bounds);
   }
@@ -82,8 +82,8 @@ void FakePictureLayerImpl::SetAllTilesVisible() {
       Tile* tile = tiles[tile_idx];
       TilePriority priority;
       priority.resolution = HIGH_RESOLUTION;
-      priority.time_to_visible_in_seconds = 0.f;
-      priority.distance_to_visible_in_pixels = 0.f;
+      priority.priority_bin = TilePriority::NOW;
+      priority.distance_to_visible = 0.f;
       tile->SetPriority(tree, priority);
     }
   }

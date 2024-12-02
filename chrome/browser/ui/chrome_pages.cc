@@ -37,7 +37,7 @@
 #include "chromeos/chromeos_switches.h"
 #endif
 
-using content::UserMetricsAction;
+using base::UserMetricsAction;
 
 namespace chrome {
 namespace {
@@ -276,16 +276,6 @@ void ShowBrowserSignin(Browser* browser, signin::Source source) {
                            GURL(signin::GetPromoURL(source, false)));
     DCHECK_GT(browser->tab_strip_model()->count(), 0);
   }
-}
-
-void ShowGaiaSignin(Browser* browser,
-                    const std::string& service,
-                    const GURL& continue_url) {
-  GURL url(GaiaUrls::GetInstance()->service_login_url());
-  url = net::AppendQueryParameter(url, "service", service);
-  if (continue_url.is_valid())
-    url = net::AppendQueryParameter(url, "continue", continue_url.spec());
-  NavigateToSingletonTab(browser, url);
 }
 
 }  // namespace chrome

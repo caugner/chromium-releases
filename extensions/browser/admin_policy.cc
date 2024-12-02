@@ -13,8 +13,13 @@
 namespace {
 
 bool ManagementPolicyImpl(const extensions::Extension* extension,
-                          string16* error,
+                          base::string16* error,
                           bool modifiable_value) {
+  // Note that COMPONENT and EXTERNAL_COMPONENT are treated differently
+  // below. EXTERNAL_COMPONENT extensions can be modified including
+  // enabled, disabled, uninstalled while COMPONENT extensions cannot.
+  // However, those options are only available for EXTERNAL_COMPONENT
+  // extensions when the proper command line flag is passed.
   bool modifiable =
       extension->location() != extensions::Manifest::COMPONENT &&
       !extensions::Manifest::IsPolicyLocation(extension->location());
@@ -25,17 +30,18 @@ bool ManagementPolicyImpl(const extensions::Extension* extension,
   if (error) {
     *error = l10n_util::GetStringFUTF16(
         IDS_EXTENSION_CANT_MODIFY_POLICY_REQUIRED,
-        UTF8ToUTF16(extension->name()));
+        base::UTF8ToUTF16(extension->name()));
   }
   return !modifiable_value;
 }
 
-bool ReturnLoadError(const extensions::Extension* extension, string16* error) {
+bool ReturnLoadError(const extensions::Extension* extension,
+                     base::string16* error) {
   if (error) {
     *error = l10n_util::GetStringFUTF16(
           IDS_EXTENSION_CANT_INSTALL_POLICY_BLOCKED,
-          UTF8ToUTF16(extension->name()),
-          UTF8ToUTF16(extension->id()));
+          base::UTF8ToUTF16(extension->name()),
+          base::UTF8ToUTF16(extension->id()));
   }
   return false;
 }
@@ -55,7 +61,7 @@ bool UserMayLoad(const base::ListValue* blacklist,
                  const base::DictionaryValue* forcelist,
                  const base::ListValue* allowed_types,
                  const Extension* extension,
-                 string16* error) {
+                 base::string16* error) {
   // Component extensions are always allowed.
   if (extension->location() == Manifest::COMPONENT)
     return true;
@@ -109,11 +115,11 @@ bool UserMayLoad(const base::ListValue* blacklist,
   return true;
 }
 
-bool UserMayModifySettings(const Extension* extension, string16* error) {
+bool UserMayModifySettings(const Extension* extension, base::string16* error) {
   return ManagementPolicyImpl(extension, error, true);
 }
 
-bool MustRemainEnabled(const Extension* extension, string16* error) {
+bool MustRemainEnabled(const Extension* extension, base::string16* error) {
   return ManagementPolicyImpl(extension, error, false);
 }
 

@@ -37,8 +37,7 @@ class TestPacketWriter : public QuicDefaultPacketWriter {
   virtual WriteResult WritePacket(
       const char* buffer, size_t buf_len,
       const IPAddressNumber& self_address,
-      const IPEndPoint& peer_address,
-      QuicBlockedWriterInterface* blocked_writer) OVERRIDE {
+      const IPEndPoint& peer_address) OVERRIDE {
     QuicFramer framer(QuicSupportedVersions(), QuicTime::Zero(), true);
     FramerVisitorCapturingFrames visitor;
     framer.set_visitor(&visitor);
@@ -61,11 +60,12 @@ class TestPacketWriter : public QuicDefaultPacketWriter {
   QuicPacketHeader header_;
 };
 
-class QuicClientSessionTest : public ::testing::Test {
+class QuicClientSessionTest : public ::testing::TestWithParam<QuicVersion> {
  protected:
   QuicClientSessionTest()
       : writer_(new TestPacketWriter()),
-        connection_(new PacketSavingConnection(false)),
+        connection_(
+            new PacketSavingConnection(false, SupportedVersions(GetParam()))),
         session_(connection_, GetSocket().Pass(), writer_.Pass(), NULL, NULL,
                  kServerHostname, DefaultQuicConfig(), &crypto_config_,
                  &net_log_) {
@@ -105,11 +105,14 @@ class QuicClientSessionTest : public ::testing::Test {
   QuicCryptoClientConfig crypto_config_;
 };
 
-TEST_F(QuicClientSessionTest, CryptoConnect) {
+INSTANTIATE_TEST_CASE_P(Tests, QuicClientSessionTest,
+                        ::testing::ValuesIn(QuicSupportedVersions()));
+
+TEST_P(QuicClientSessionTest, CryptoConnect) {
   CompleteCryptoHandshake();
 }
 
-TEST_F(QuicClientSessionTest, MaxNumStreams) {
+TEST_P(QuicClientSessionTest, MaxNumStreams) {
   CompleteCryptoHandshake();
 
   std::vector<QuicReliableClientStream*> streams;
@@ -125,7 +128,7 @@ TEST_F(QuicClientSessionTest, MaxNumStreams) {
   EXPECT_TRUE(session_.CreateOutgoingDataStream());
 }
 
-TEST_F(QuicClientSessionTest, MaxNumStreamsViaRequest) {
+TEST_P(QuicClientSessionTest, MaxNumStreamsViaRequest) {
   CompleteCryptoHandshake();
 
   std::vector<QuicReliableClientStream*> streams;
@@ -149,7 +152,7 @@ TEST_F(QuicClientSessionTest, MaxNumStreamsViaRequest) {
   EXPECT_TRUE(stream != NULL);
 }
 
-TEST_F(QuicClientSessionTest, GoAwayReceived) {
+TEST_P(QuicClientSessionTest, GoAwayReceived) {
   CompleteCryptoHandshake();
 
   // After receiving a GoAway, I should no longer be able to create outgoing

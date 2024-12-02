@@ -71,7 +71,6 @@ class SearchTabHelperTest : public ChromeRenderViewHostTestHarness {
     SigninManagerBase* signin_manager = static_cast<SigninManagerBase*>(
         SigninManagerFactory::GetInstance()->SetTestingFactoryAndUse(
             profile(), FakeSigninManagerBase::Build));
-    signin_manager->Initialize(profile(), NULL);
 
     if (!username.empty()) {
       ASSERT_TRUE(signin_manager);
@@ -144,7 +143,7 @@ TEST_F(SearchTabHelperTest, OnChromeIdentityCheckMatch) {
       SearchTabHelper::FromWebContents(web_contents());
   ASSERT_NE(static_cast<SearchTabHelper*>(NULL), search_tab_helper);
 
-  const base::string16 test_identity = ASCIIToUTF16("foo@bar.com");
+  const base::string16 test_identity = base::ASCIIToUTF16("foo@bar.com");
   search_tab_helper->OnChromeIdentityCheck(test_identity);
 
   const IPC::Message* message = process()->sink().GetUniqueMessageMatching(
@@ -164,7 +163,7 @@ TEST_F(SearchTabHelperTest, OnChromeIdentityCheckMismatch) {
       SearchTabHelper::FromWebContents(web_contents());
   ASSERT_NE(static_cast<SearchTabHelper*>(NULL), search_tab_helper);
 
-  const base::string16 test_identity = ASCIIToUTF16("bar@foo.com");
+  const base::string16 test_identity = base::ASCIIToUTF16("bar@foo.com");
   search_tab_helper->OnChromeIdentityCheck(test_identity);
 
   const IPC::Message* message = process()->sink().GetUniqueMessageMatching(
@@ -204,7 +203,7 @@ TEST_F(SearchTabHelperTest, OnChromeIdentityCheckSignedOutMismatch) {
       SearchTabHelper::FromWebContents(web_contents());
   ASSERT_NE(static_cast<SearchTabHelper*>(NULL), search_tab_helper);
 
-  const base::string16 test_identity = ASCIIToUTF16("bar@foo.com");
+  const base::string16 test_identity = base::ASCIIToUTF16("bar@foo.com");
   search_tab_helper->OnChromeIdentityCheck(test_identity);
 
   const IPC::Message* message = process()->sink().GetUniqueMessageMatching(
@@ -294,8 +293,8 @@ TEST_F(SearchTabHelperWindowTest, OnProvisionalLoadFailRedirectNTPToLocal) {
   // A failed provisional load of a cacheable NTP should be redirected to local
   // NTP.
   const GURL cacheableNTPURL = chrome::GetNewTabPageURL(profile());
-  search_tab_helper->DidFailProvisionalLoad(1, string16(), true,
-      cacheableNTPURL, 1, string16(), NULL);
+  search_tab_helper->DidFailProvisionalLoad(1, base::string16(), true,
+      cacheableNTPURL, 1, base::string16(), NULL);
   CommitPendingLoad(controller);
   EXPECT_EQ(GURL(chrome::kChromeSearchLocalNtpUrl),
                  controller->GetLastCommittedEntry()->GetURL());
@@ -314,8 +313,8 @@ TEST_F(SearchTabHelperWindowTest, OnProvisionalLoadFailDontRedirectIfAborted) {
   // A failed provisional load of a cacheable NTP should be redirected to local
   // NTP.
   const GURL cacheableNTPURL = chrome::GetNewTabPageURL(profile());
-  search_tab_helper->DidFailProvisionalLoad(1, string16(), true,
-      cacheableNTPURL, net::ERR_ABORTED, string16(), NULL);
+  search_tab_helper->DidFailProvisionalLoad(1, base::string16(), true,
+      cacheableNTPURL, net::ERR_ABORTED, base::string16(), NULL);
   CommitPendingLoad(controller);
   EXPECT_EQ(GURL("chrome://blank"),
                  controller->GetLastCommittedEntry()->GetURL());
@@ -332,8 +331,8 @@ TEST_F(SearchTabHelperWindowTest, OnProvisionalLoadFailDontRedirectNonNTP) {
   ASSERT_NE(static_cast<SearchTabHelper*>(NULL), search_tab_helper);
 
   // Any other web page shouldn't be redirected when provisional load fails.
-  search_tab_helper->DidFailProvisionalLoad(1, string16(), true,
-      GURL("http://www.example.com"), 1, string16(), NULL);
+  search_tab_helper->DidFailProvisionalLoad(1, base::string16(), true,
+      GURL("http://www.example.com"), 1, base::string16(), NULL);
   CommitPendingLoad(controller);
   EXPECT_NE(GURL(chrome::kChromeSearchLocalNtpUrl),
                  controller->GetLastCommittedEntry()->GetURL());

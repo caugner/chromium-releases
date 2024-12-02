@@ -59,8 +59,7 @@ public class AwSettings {
     private String mSerifFontFamily = "serif";
     private String mCursiveFontFamily = "cursive";
     private String mFantasyFontFamily = "fantasy";
-    // TODO(mnaganov): Should be obtained from Android. Problem: it is hidden.
-    private String mDefaultTextEncoding = "Latin-1";
+    private String mDefaultTextEncoding;
     private String mUserAgent;
     private int mMinimumFontSize = 8;
     private int mMinimumLogicalFontSize = 8;
@@ -83,13 +82,11 @@ public class AwSettings {
     private String mDefaultVideoPosterURL;
     private float mInitialPageScalePercent = 0;
     private boolean mSpatialNavigationEnabled;  // Default depends on device features.
+    private boolean mEnableSupportedHardwareAcceleratedFeatures = false;
 
     private final boolean mSupportLegacyQuirks;
 
     private final boolean mPasswordEchoEnabled;
-
-    // Font scale factor determined by Android system setting.
-    private final float mFontScale;
 
     // Not accessed by the native side.
     private boolean mBlockNetworkLoads;  // Default depends on permission of embedding APK.
@@ -213,6 +210,7 @@ public class AwSettings {
                 mAllowFileAccessFromFileURLs = true;
             }
 
+            mDefaultTextEncoding = AwResource.getDefaultTextEncoding();
             mUserAgent = LazyDefaultUserAgent.sInstance;
 
             // Best-guess a sensible initial value based on the features supported on the device.
@@ -222,8 +220,10 @@ public class AwSettings {
             // Respect the system setting for password echoing.
             mPasswordEchoEnabled = Settings.System.getInt(context.getContentResolver(),
                     Settings.System.TEXT_SHOW_PASSWORD, 1) == 1;
-            mFontScale = context.getResources().getConfiguration().fontScale;
-            mTextSizePercent *= mFontScale;
+
+            // By default, scale the text size by the system font scale factor. Embedders
+            // may override this by invoking setTextZoom().
+            mTextSizePercent *= context.getResources().getConfiguration().fontScale;
 
             mSupportLegacyQuirks = supportsLegacyQuirks;
         }
@@ -401,6 +401,21 @@ public class AwSettings {
         return mSpatialNavigationEnabled;
     }
 
+    void setEnableSupportedHardwareAcceleratedFeatures(boolean enable) {
+        synchronized (mAwSettingsLock) {
+            if (mEnableSupportedHardwareAcceleratedFeatures != enable) {
+                mEnableSupportedHardwareAcceleratedFeatures = enable;
+                mEventHandler.updateWebkitPreferencesLocked();
+            }
+        }
+    }
+
+    @CalledByNative
+    private boolean getEnableSupportedHardwareAcceleratedFeaturesLocked() {
+        assert Thread.holdsLock(mAwSettingsLock);
+        return mEnableSupportedHardwareAcceleratedFeatures;
+    }
+
     /**
      * See {@link android.webkit.WebSettings#setNeedInitialFocus}.
      */
@@ -545,9 +560,8 @@ public class AwSettings {
      */
     public void setTextZoom(final int textZoom) {
         synchronized (mAwSettingsLock) {
-            int scaledTextZoomPercent = (int)(textZoom * mFontScale);
-            if (mTextSizePercent != scaledTextZoomPercent) {
-                mTextSizePercent = scaledTextZoomPercent;
+            if (mTextSizePercent != textZoom) {
+                mTextSizePercent = textZoom;
                 mEventHandler.updateWebkitPreferencesLocked();
             }
         }

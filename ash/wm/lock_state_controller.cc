@@ -17,7 +17,6 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/timer/timer.h"
-#include "content/public/browser/user_metrics.h"
 #include "ui/aura/root_window.h"
 #include "ui/compositor/layer_animation_sequence.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
@@ -167,7 +166,8 @@ LockStateController::LockStateController()
       shutting_down_(false),
       shutdown_after_lock_(false),
       animating_lock_(false),
-      can_cancel_lock_animation_(false) {
+      can_cancel_lock_animation_(false),
+      weak_ptr_factory_(this) {
   Shell::GetPrimaryRootWindow()->GetDispatcher()->AddRootWindowObserver(this);
 }
 
@@ -272,6 +272,7 @@ void LockStateController::RequestShutdown() {
 
   Shell* shell = ash::Shell::GetInstance();
   shell->cursor_manager()->HideCursor();
+  shell->cursor_manager()->LockCursor();
 
   animator_->StartGlobalAnimation(
       internal::SessionStateAnimator::ANIMATION_GRAYSCALE_BRIGHTNESS,
@@ -289,7 +290,7 @@ void LockStateController::SetLockScreenDisplayedCallback(
   lock_screen_displayed_callback_ = callback;
 }
 
-void LockStateController::OnRootWindowHostCloseRequested(
+void LockStateController::OnWindowTreeHostCloseRequested(
                                                 const aura::RootWindow*) {
   Shell::GetInstance()->delegate()->Exit();
 }
@@ -318,6 +319,7 @@ void LockStateController::OnAppTerminating() {
 }
 
 void LockStateController::OnLockStateChanged(bool locked) {
+  VLOG(1) << "OnLockStateChanged " << locked;
   if (shutting_down_ || (system_is_locked_ == locked))
     return;
 
@@ -333,8 +335,8 @@ void LockStateController::OnLockStateChanged(bool locked) {
 
 void LockStateController::OnLockFailTimeout() {
   DCHECK(!system_is_locked_);
-  // Undo lock animation.
-  StartUnlockAnimationAfterUIDestroyed();
+  CHECK(false) << "We can not be sure about the lock state. Crash and let the "
+               << "SessionManager end the session";
 }
 
 void LockStateController::StartLockToShutdownTimer() {
@@ -362,6 +364,7 @@ void LockStateController::StartPreShutdownAnimationTimer() {
 }
 
 void LockStateController::OnPreShutdownAnimationTimeout() {
+  VLOG(1) << "OnPreShutdownAnimationTimeout";
   shutting_down_ = true;
 
   Shell* shell = ash::Shell::GetInstance();
@@ -393,6 +396,7 @@ void LockStateController::StartRealShutdownTimer(bool with_animation_time) {
 }
 
 void LockStateController::OnRealShutdownTimeout() {
+  VLOG(1) << "OnRealShutdownTimeout";
   DCHECK(shutting_down_);
 #if defined(OS_CHROMEOS)
   if (!base::SysInfo::IsRunningOnChromeOS()) {
@@ -421,13 +425,14 @@ void LockStateController::StartCancellableShutdownAnimation() {
 
 void LockStateController::StartImmediatePreLockAnimation(
     bool request_lock_on_completion) {
+  VLOG(1) << "StartImmediatePreLockAnimation " << request_lock_on_completion;
   animating_lock_ = true;
-
   StoreUnlockedProperties();
 
   base::Closure next_animation_starter =
       base::Bind(&LockStateController::PreLockAnimationFinished,
-      base::Unretained(this), request_lock_on_completion);
+                 weak_ptr_factory_.GetWeakPtr(),
+                 request_lock_on_completion);
   AnimationFinishedObserver* observer =
       new AnimationFinishedObserver(next_animation_starter);
 
@@ -462,10 +467,11 @@ void LockStateController::StartImmediatePreLockAnimation(
 void LockStateController::StartCancellablePreLockAnimation() {
   animating_lock_ = true;
   StoreUnlockedProperties();
-
+  VLOG(1) << "StartCancellablePreLockAnimation";
   base::Closure next_animation_starter =
       base::Bind(&LockStateController::PreLockAnimationFinished,
-      base::Unretained(this), true /* request_lock */);
+                 weak_ptr_factory_.GetWeakPtr(),
+                 true /* request_lock */);
   AnimationFinishedObserver* observer =
       new AnimationFinishedObserver(next_animation_starter);
 
@@ -497,9 +503,10 @@ void LockStateController::StartCancellablePreLockAnimation() {
 }
 
 void LockStateController::CancelPreLockAnimation() {
+  VLOG(1) << "CancelPreLockAnimation";
   base::Closure next_animation_starter =
       base::Bind(&LockStateController::LockAnimationCancelled,
-      base::Unretained(this));
+                 weak_ptr_factory_.GetWeakPtr());
   AnimationFinishedObserver* observer =
       new AnimationFinishedObserver(next_animation_starter);
 
@@ -523,9 +530,10 @@ void LockStateController::CancelPreLockAnimation() {
 }
 
 void LockStateController::StartPostLockAnimation() {
+  VLOG(1) << "StartPostLockAnimation";
   base::Closure next_animation_starter =
       base::Bind(&LockStateController::PostLockAnimationFinished,
-      base::Unretained(this));
+                 weak_ptr_factory_.GetWeakPtr());
 
   AnimationFinishedObserver* observer =
       new AnimationFinishedObserver(next_animation_starter);
@@ -541,6 +549,7 @@ void LockStateController::StartPostLockAnimation() {
 
 void LockStateController::StartUnlockAnimationBeforeUIDestroyed(
     base::Closure& callback) {
+  VLOG(1) << "StartUnlockAnimationBeforeUIDestroyed";
   animator_->StartAnimationWithCallback(
       internal::SessionStateAnimator::LOCK_SCREEN_CONTAINERS,
       internal::SessionStateAnimator::ANIMATION_LIFT,
@@ -549,9 +558,10 @@ void LockStateController::StartUnlockAnimationBeforeUIDestroyed(
 }
 
 void LockStateController::StartUnlockAnimationAfterUIDestroyed() {
+  VLOG(1) << "StartUnlockAnimationAfterUIDestroyed";
   base::Closure next_animation_starter =
       base::Bind(&LockStateController::UnlockAnimationAfterUIDestroyedFinished,
-                 base::Unretained(this));
+                 weak_ptr_factory_.GetWeakPtr());
 
   AnimationFinishedObserver* observer =
       new AnimationFinishedObserver(next_animation_starter);
@@ -581,7 +591,7 @@ void LockStateController::LockAnimationCancelled() {
 
 void LockStateController::PreLockAnimationFinished(bool request_lock) {
   can_cancel_lock_animation_ = false;
-
+  VLOG(1) << "PreLockAnimationFinished";
   if (request_lock) {
     Shell::GetInstance()->metrics()->RecordUserMetricsAction(
         shutdown_after_lock_ ?
@@ -590,16 +600,29 @@ void LockStateController::PreLockAnimationFinished(bool request_lock) {
     delegate_->RequestLockScreen();
   }
 
+  int lock_timeout = kLockFailTimeoutMs;
+
+#if defined(OS_CHROMEOS)
+  std::string board = base::SysInfo::GetLsbReleaseBoard();
+
+  // Increase lock timeout for slower hardware, see http://crbug.com/350628
+  if (board == "x86-mario" ||
+      board.substr(0, 8) == "x86-alex" ||
+      board.substr(0, 7) == "x86-zgb") {
+    lock_timeout *= 2;
+  }
+#endif
+
   lock_fail_timer_.Start(
       FROM_HERE,
-      base::TimeDelta::FromMilliseconds(kLockFailTimeoutMs),
+      base::TimeDelta::FromMilliseconds(lock_timeout),
       this,
       &LockStateController::OnLockFailTimeout);
 }
 
 void LockStateController::PostLockAnimationFinished() {
   animating_lock_ = false;
-
+  VLOG(1) << "PostLockAnimationFinished";
   FOR_EACH_OBSERVER(LockStateObserver, observers_,
       OnLockStateEvent(LockStateObserver::EVENT_LOCK_ANIMATION_FINISHED));
   if (!lock_screen_displayed_callback_.is_null()) {

@@ -53,6 +53,13 @@ class InstallVerifier : public ManagementPolicy::Provider {
   // an initial one so that MustRemainDisabled can actually check against it.
   bool NeedsBootstrap();
 
+  // Returns the timestamp of our InstallSignature, if we have one.
+  base::Time SignatureTimestamp();
+
+  // Returns true if |id| is either verified or our stored signature explicitly
+  // tells us that it was invalid when we asked the server about it.
+  bool IsKnownId(const std::string& id);
+
   // A callback for indicating success/failure of adding new ids.
   typedef base::Callback<void(bool)> AddResultCallback;
 
@@ -106,6 +113,10 @@ class InstallVerifier : public ManagementPolicy::Provider {
 
   // Returns whether the given |id| is included in our verified signature.
   bool IsVerified(const std::string& id) const;
+
+  // Returns true if the extension with |id| was installed later than the
+  // timestamp of our signature.
+  bool WasInstalledAfterSignature(const std::string& id) const;
 
   // Begins the process of fetching a new signature, based on applying the
   // operation at the head of the queue to the current set of ids in

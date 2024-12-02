@@ -19,6 +19,10 @@ class ReliableQuicStreamPeer {
   static void SetWriteSideClosed(bool value, ReliableQuicStream* stream);
   static void SetStreamBytesWritten(QuicStreamOffset stream_bytes_written,
                                     ReliableQuicStream* stream);
+  static void CloseReadSide(ReliableQuicStream* stream);
+
+  static bool FinSent(ReliableQuicStream* stream);
+  static bool RstSent(ReliableQuicStream* stream);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ReliableQuicStreamPeer);

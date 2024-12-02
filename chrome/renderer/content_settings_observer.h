@@ -9,8 +9,8 @@
 #include <set>
 
 #include "chrome/common/content_settings.h"
-#include "content/public/renderer/render_view_observer.h"
-#include "content/public/renderer/render_view_observer_tracker.h"
+#include "content/public/renderer/render_frame_observer.h"
+#include "content/public/renderer/render_frame_observer_tracker.h"
 #include "extensions/common/permissions/api_permission.h"
 #include "third_party/WebKit/public/web/WebPermissionClient.h"
 
@@ -27,13 +27,13 @@ class Dispatcher;
 class Extension;
 }
 
-// Handles blocking content per content settings for each RenderView.
+// Handles blocking content per content settings for each RenderFrame.
 class ContentSettingsObserver
-    : public content::RenderViewObserver,
-      public content::RenderViewObserverTracker<ContentSettingsObserver>,
+    : public content::RenderFrameObserver,
+      public content::RenderFrameObserverTracker<ContentSettingsObserver>,
       public blink::WebPermissionClient {
  public:
-  ContentSettingsObserver(content::RenderView* render_view,
+  ContentSettingsObserver(content::RenderFrame* render_frame,
                           extensions::Dispatcher* extension_dispatcher);
   virtual ~ContentSettingsObserver();
 
@@ -76,7 +76,6 @@ class ContentSettingsObserver
   virtual bool allowMutationEvents(blink::WebFrame* frame,
                                    bool default_value);
   virtual bool allowPushState(blink::WebFrame* frame);
-  virtual bool allowWebGLDebugRendererInfo(blink::WebFrame* frame);
   virtual void didNotAllowPlugins(blink::WebFrame* frame);
   virtual void didNotAllowScript(blink::WebFrame* frame);
   virtual bool allowDisplayingInsecureContent(
@@ -97,11 +96,11 @@ class ContentSettingsObserver
   FRIEND_TEST_ALL_PREFIXES(ContentSettingsObserverTest, WhitelistedSchemes);
   FRIEND_TEST_ALL_PREFIXES(ChromeRenderViewTest,
                            ContentSettingsInterstitialPages);
+  FRIEND_TEST_ALL_PREFIXES(ChromeRenderViewTest, PluginsTemporarilyAllowed);
 
-  // RenderViewObserver implementation.
+  // RenderFrameObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void DidCommitProvisionalLoad(blink::WebFrame* frame,
-                                        bool is_new_navigation) OVERRIDE;
+  virtual void DidCommitProvisionalLoad(bool is_new_navigation) OVERRIDE;
 
   // Message handlers.
   void OnLoadBlockedPlugins(const std::string& identifier);
@@ -109,6 +108,7 @@ class ContentSettingsObserver
   void OnNPAPINotSupported();
   void OnSetAllowDisplayingInsecureContent(bool allow);
   void OnSetAllowRunningInsecureContent(bool allow);
+  void OnReloadFrame();
 
   // Resets the |content_blocked_| array.
   void ClearBlockedContentSettings();

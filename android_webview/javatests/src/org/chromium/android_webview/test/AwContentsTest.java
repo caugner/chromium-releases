@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * AwContents tests.
  */
 public class AwContentsTest extends AwTestBase {
-    public static class OnDownloadStartHelper extends CallbackHelper {
+    private static class OnDownloadStartHelper extends CallbackHelper {
         String mUrl;
         String mUserAgent;
         String mContentDisposition;
@@ -163,12 +163,12 @@ public class AwContentsTest extends AwTestBase {
 
         System.gc();
 
-        assertTrue(pollOnUiThread(new Callable<Boolean>() {
+        pollOnUiThread(new Callable<Boolean>() {
             @Override
             public Boolean call() {
                 return AwContents.getNativeInstanceCount() <= MAX_IDLE_INSTANCES;
             }
-        }));
+        });
         for (int i = 0; i < REPETITIONS; ++i) {
             for (int j = 0; j < CONCURRENT_INSTANCES; ++j) {
                 AwTestContainerView view = createAwTestContainerViewOnMainSync(mContentsClient);
@@ -186,12 +186,12 @@ public class AwContentsTest extends AwTestBase {
 
         System.gc();
 
-        assertTrue(pollOnUiThread(new Callable<Boolean>() {
+        pollOnUiThread(new Callable<Boolean>() {
             @Override
             public Boolean call() {
                 return AwContents.getNativeInstanceCount() <= MAX_IDLE_INSTANCES;
             }
-        }));
+        });
     }
 
     private int callDocumentHasImagesSync(final AwContents awContents)
@@ -334,13 +334,13 @@ public class AwContentsTest extends AwTestBase {
             getAwSettingsOnUiThread(awContents).setImagesEnabled(true);
             loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
 
-            assertTrue(pollOnUiThread(new Callable<Boolean>() {
+            pollOnUiThread(new Callable<Boolean>() {
                 @Override
                 public Boolean call() {
                     return awContents.getFavicon() != null &&
                         !awContents.getFavicon().sameAs(defaultFavicon);
                 }
-            }));
+            });
 
             final Object originalFaviconSource = (new URL(faviconUrl)).getContent();
             final Bitmap originalFavicon =
@@ -446,4 +446,26 @@ public class AwContentsTest extends AwTestBase {
         });
         callback.waitForCallback(0, 1, WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
     }
+
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testEscapingOfErrorPage() throws Throwable {
+        AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
+        AwContents awContents = testView.getAwContents();
+        String SCRIPT = "window.failed == true";
+
+        enableJavaScriptOnUiThread(awContents);
+        CallbackHelper onPageFinishedHelper = mContentsClient.getOnPageFinishedHelper();
+        int currentCallCount = onPageFinishedHelper.getCallCount();
+        loadUrlAsync(awContents,
+                "file:///file-that-does-not-exist#<script>window.failed = true;</script>");
+        // We must wait for two onPageFinished callbacks. One for the original failing URL, and
+        // one for the error page that we then display to the user.
+        onPageFinishedHelper.waitForCallback(currentCallCount, 2, WAIT_TIMEOUT_MS,
+                                             TimeUnit.MILLISECONDS);
+
+        assertEquals("false", executeJavaScriptAndWaitForResult(awContents, mContentsClient,
+                SCRIPT));
+    }
+
 }

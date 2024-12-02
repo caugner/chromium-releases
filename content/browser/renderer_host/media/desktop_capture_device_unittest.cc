@@ -43,18 +43,18 @@ class MockDeviceClient : public media::VideoCaptureDevice::Client {
   MOCK_METHOD2(ReserveOutputBuffer,
                scoped_refptr<Buffer>(media::VideoFrame::Format format,
                                      const gfx::Size& dimensions));
-  MOCK_METHOD0(OnError, void());
+  MOCK_METHOD1(OnError, void(const std::string& reason));
   MOCK_METHOD5(OnIncomingCapturedFrame,
                void(const uint8* data,
                     int length,
-                    base::Time timestamp,
+                    base::TimeTicks timestamp,
                     int rotation,
                     const media::VideoCaptureFormat& frame_format));
   MOCK_METHOD5(OnIncomingCapturedBuffer,
                void(const scoped_refptr<Buffer>& buffer,
                     media::VideoFrame::Format format,
                     const gfx::Size& dimensions,
-                    base::Time timestamp,
+                    base::TimeTicks timestamp,
                     int frame_rate));
 };
 
@@ -119,6 +119,14 @@ class FakeScreenCapturer : public webrtc::ScreenCapturer {
       MouseShapeObserver* mouse_shape_observer) OVERRIDE {
   }
 
+  virtual bool GetScreenList(ScreenList* screens) OVERRIDE {
+    return false;
+  }
+
+  virtual bool SelectScreen(webrtc::ScreenId id) OVERRIDE {
+    return false;
+  }
+
  private:
   Callback* callback_;
   int frame_index_;
@@ -156,7 +164,7 @@ TEST_F(DesktopCaptureDeviceTest, MAYBE_Capture) {
   int frame_size;
 
   scoped_ptr<MockDeviceClient> client(new MockDeviceClient());
-  EXPECT_CALL(*client, OnError()).Times(0);
+  EXPECT_CALL(*client, OnError(_)).Times(0);
   EXPECT_CALL(*client, OnIncomingCapturedFrame(_, _, _, _, _))
       .WillRepeatedly(
            DoAll(SaveArg<1>(&frame_size),
@@ -196,7 +204,7 @@ TEST_F(DesktopCaptureDeviceTest, ScreenResolutionChangeConstantResolution) {
   int frame_size;
 
   scoped_ptr<MockDeviceClient> client(new MockDeviceClient());
-  EXPECT_CALL(*client, OnError()).Times(0);
+  EXPECT_CALL(*client, OnError(_)).Times(0);
   EXPECT_CALL(*client, OnIncomingCapturedFrame(_, _, _, _, _))
       .WillRepeatedly(
            DoAll(SaveArg<1>(&frame_size),
@@ -243,7 +251,7 @@ TEST_F(DesktopCaptureDeviceTest, ScreenResolutionChangeVariableResolution) {
   base::WaitableEvent done_event(false, false);
 
   scoped_ptr<MockDeviceClient> client(new MockDeviceClient());
-  EXPECT_CALL(*client, OnError()).Times(0);
+  EXPECT_CALL(*client, OnError(_)).Times(0);
   EXPECT_CALL(*client, OnIncomingCapturedFrame(_, _, _, _, _))
       .WillRepeatedly(
            DoAll(SaveArg<4>(&format),

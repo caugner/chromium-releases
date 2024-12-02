@@ -90,7 +90,9 @@ bool PairingRegistry::Pairing::operator==(const Pairing& other) const {
 }
 
 bool PairingRegistry::Pairing::is_valid() const {
-  return !client_id_.empty() && !shared_secret_.empty();
+  // |shared_secret_| is optional. It will be empty on Windows because the
+  // privileged registry key can only be read in the elevated host process.
+  return !client_id_.empty();
 }
 
 PairingRegistry::PairingRegistry(
@@ -256,7 +258,7 @@ void PairingRegistry::SanitizePairings(const GetAllPairingsCallback& callback,
 
   scoped_ptr<base::ListValue> sanitized_pairings(new base::ListValue());
   for (size_t i = 0; i < pairings->GetSize(); ++i) {
-    DictionaryValue* pairing_json;
+    base::DictionaryValue* pairing_json;
     if (!pairings->GetDictionary(i, &pairing_json)) {
       LOG(WARNING) << "A pairing entry is not a dictionary.";
       continue;

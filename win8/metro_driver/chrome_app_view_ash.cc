@@ -200,7 +200,7 @@ class ChromeChannelListener : public IPC::Listener {
   }
 
   void OnOpenURLOnDesktop(const base::FilePath& shortcut,
-                          const string16& url) {
+                          const base::string16& url) {
     ui_proxy_->PostTask(FROM_HERE,
         base::Bind(&ChromeAppViewAsh::OnOpenURLOnDesktop,
         base::Unretained(app_view_),
@@ -214,8 +214,8 @@ class ChromeChannelListener : public IPC::Listener {
                                    reinterpret_cast<HCURSOR>(cursor)));
   }
 
-  void OnDisplayFileOpenDialog(const string16& title,
-                               const string16& filter,
+  void OnDisplayFileOpenDialog(const base::string16& title,
+                               const base::string16& filter,
                                const base::FilePath& default_path,
                                bool allow_multiple_files) {
     ui_proxy_->PostTask(FROM_HERE,
@@ -236,7 +236,7 @@ class ChromeChannelListener : public IPC::Listener {
                    params));
   }
 
-  void OnDisplayFolderPicker(const string16& title) {
+  void OnDisplayFolderPicker(const base::string16& title) {
     ui_proxy_->PostTask(
         FROM_HERE,
         base::Bind(&ChromeAppViewAsh::OnDisplayFolderPicker,
@@ -285,107 +285,6 @@ bool WaitForChromeIPCConnection(const std::string& channel_name) {
   return IPC::Channel::IsNamedServerInitialized(channel_name);
 }
 
-// This class helps decoding the pointer properties of an event.
-class PointerInfoHandler {
- public:
-  PointerInfoHandler()
-      : x_(0),
-        y_(0),
-        wheel_delta_(0),
-        update_kind_(winui::Input::PointerUpdateKind_Other),
-        timestamp_(0),
-        pointer_id_(0) {}
-
-  HRESULT Init(winui::Core::IPointerEventArgs* args) {
-    HRESULT hr = args->get_CurrentPoint(&pointer_point_);
-    if (FAILED(hr))
-      return hr;
-
-    winfoundtn::Point point;
-    hr = pointer_point_->get_Position(&point);
-    if (FAILED(hr))
-      return hr;
-
-    mswr::ComPtr<winui::Input::IPointerPointProperties> properties;
-    hr = pointer_point_->get_Properties(&properties);
-    if (FAILED(hr))
-      return hr;
-
-    hr = properties->get_PointerUpdateKind(&update_kind_);
-    if (FAILED(hr))
-      return hr;
-
-    hr = properties->get_MouseWheelDelta(&wheel_delta_);
-    if (FAILED(hr))
-      return hr;
-    x_ = point.X;
-    y_ = point.Y;
-    pointer_point_->get_Timestamp(&timestamp_);
-    pointer_point_->get_PointerId(&pointer_id_);
-    // Map the OS touch event id to a range allowed by the gesture recognizer.
-    if (IsTouch())
-      pointer_id_ %= ui::GestureSequence::kMaxGesturePoints;
-    return S_OK;
-  }
-
-  bool IsType(windevs::Input::PointerDeviceType type) const {
-    mswr::ComPtr<windevs::Input::IPointerDevice> pointer_device;
-    CheckHR(pointer_point_->get_PointerDevice(&pointer_device));
-    windevs::Input::PointerDeviceType device_type;
-    CheckHR(pointer_device->get_PointerDeviceType(&device_type));
-    return  (device_type == type);
-  }
-
-  bool IsMouse() const {
-    return IsType(windevs::Input::PointerDeviceType_Mouse);
-  }
-
-  bool IsTouch() const {
-    return IsType(windevs::Input::PointerDeviceType_Touch);
-  }
-
-  int32 wheel_delta() const {
-    return wheel_delta_;
-  }
-
-  ui::EventFlags flags() {
-    switch (update_kind_) {
-      case winui::Input::PointerUpdateKind_LeftButtonPressed:
-        return ui::EF_LEFT_MOUSE_BUTTON;
-      case winui::Input::PointerUpdateKind_LeftButtonReleased:
-        return ui::EF_LEFT_MOUSE_BUTTON;
-      case winui::Input::PointerUpdateKind_RightButtonPressed:
-        return ui::EF_RIGHT_MOUSE_BUTTON;
-      case winui::Input::PointerUpdateKind_RightButtonReleased:
-        return ui::EF_RIGHT_MOUSE_BUTTON;
-      case winui::Input::PointerUpdateKind_MiddleButtonPressed:
-        return ui::EF_MIDDLE_MOUSE_BUTTON;
-      case winui::Input::PointerUpdateKind_MiddleButtonReleased:
-        return ui::EF_MIDDLE_MOUSE_BUTTON;
-      default:
-        return ui::EF_NONE;
-    };
-  }
-
-  int x() const { return x_; }
-  int y() const { return y_; }
-
-  uint32 pointer_id() const {
-    return pointer_id_;
-  }
-
-  uint64 timestamp() const { return timestamp_; }
-
- private:
-  int x_;
-  int y_;
-  int wheel_delta_;
-  uint32 pointer_id_;
-  winui::Input::PointerUpdateKind update_kind_;
-  mswr::ComPtr<winui::Input::IPointerPoint> pointer_point_;
-  uint64 timestamp_;
-};
-
 void RunMessageLoop(winui::Core::ICoreDispatcher* dispatcher) {
   // We're entering a nested message loop, let's allow dispatching
   // tasks while we're in there.
@@ -433,7 +332,8 @@ bool LaunchChromeBrowserProcess(const wchar_t* additional_parameters,
         DVLOG(1) << "Activate: ActivationKind_Launch";
         mswrw::HString launch_args_str;
         launch_args->get_Arguments(launch_args_str.GetAddressOf());
-        string16 actual_launch_args(MakeStdWString(launch_args_str.Get()));
+        base::string16 actual_launch_args(
+            MakeStdWString(launch_args_str.Get()));
         if (actual_launch_args == win8::kMetroViewerConnectVerb) {
           DVLOG(1) << __FUNCTION__ << "Not launching chrome server";
           return true;
@@ -448,7 +348,7 @@ bool LaunchChromeBrowserProcess(const wchar_t* additional_parameters,
   if (!PathService::Get(base::FILE_EXE, &chrome_exe_path))
     return false;
 
-  string16 parameters = L"--silent-launch --viewer-connect ";
+  base::string16 parameters = L"--silent-launch --viewer-connect ";
   if (additional_parameters)
     parameters += additional_parameters;
 
@@ -463,11 +363,156 @@ bool LaunchChromeBrowserProcess(const wchar_t* additional_parameters,
 
 }  // namespace
 
+// This class helps decoding the pointer properties of an event.
+class ChromeAppViewAsh::PointerInfoHandler {
+ public:
+  PointerInfoHandler()
+      : x_(0),
+        y_(0),
+        wheel_delta_(0),
+        update_kind_(winui::Input::PointerUpdateKind_Other),
+        timestamp_(0),
+        pointer_id_(0),
+        mouse_down_flags_(0),
+        is_horizontal_wheel_(0) {}
+
+  HRESULT Init(winui::Core::IPointerEventArgs* args) {
+    HRESULT hr = args->get_CurrentPoint(&pointer_point_);
+    if (FAILED(hr))
+      return hr;
+
+    winfoundtn::Point point;
+    hr = pointer_point_->get_Position(&point);
+    if (FAILED(hr))
+      return hr;
+
+    mswr::ComPtr<winui::Input::IPointerPointProperties> properties;
+    hr = pointer_point_->get_Properties(&properties);
+    if (FAILED(hr))
+      return hr;
+
+    hr = properties->get_PointerUpdateKind(&update_kind_);
+    if (FAILED(hr))
+      return hr;
+
+    hr = properties->get_MouseWheelDelta(&wheel_delta_);
+    if (FAILED(hr))
+      return hr;
+
+    is_horizontal_wheel_ = 0;
+    properties->get_IsHorizontalMouseWheel(&is_horizontal_wheel_);
+
+    x_ = point.X;
+    y_ = point.Y;
+
+    pointer_point_->get_Timestamp(&timestamp_);
+    pointer_point_->get_PointerId(&pointer_id_);
+    // Map the OS touch event id to a range allowed by the gesture recognizer.
+    if (IsTouch())
+      pointer_id_ %= ui::GestureSequence::kMaxGesturePoints;
+
+    boolean left_button_state;
+    hr = properties->get_IsLeftButtonPressed(&left_button_state);
+    if (FAILED(hr))
+      return hr;
+    if (left_button_state)
+      mouse_down_flags_ |= ui::EF_LEFT_MOUSE_BUTTON;
+
+    boolean right_button_state;
+    hr = properties->get_IsRightButtonPressed(&right_button_state);
+    if (FAILED(hr))
+      return hr;
+    if (right_button_state)
+      mouse_down_flags_ |= ui::EF_RIGHT_MOUSE_BUTTON;
+
+    boolean middle_button_state;
+    hr = properties->get_IsMiddleButtonPressed(&middle_button_state);
+    if (FAILED(hr))
+      return hr;
+    if (middle_button_state)
+      mouse_down_flags_ |= ui::EF_MIDDLE_MOUSE_BUTTON;
+
+    return S_OK;
+  }
+
+  bool IsType(windevs::Input::PointerDeviceType type) const {
+    mswr::ComPtr<windevs::Input::IPointerDevice> pointer_device;
+    CheckHR(pointer_point_->get_PointerDevice(&pointer_device));
+    windevs::Input::PointerDeviceType device_type;
+    CheckHR(pointer_device->get_PointerDeviceType(&device_type));
+    return  (device_type == type);
+  }
+
+  bool IsMouse() const {
+    return IsType(windevs::Input::PointerDeviceType_Mouse);
+  }
+
+  bool IsTouch() const {
+    return IsType(windevs::Input::PointerDeviceType_Touch);
+  }
+
+  int32 wheel_delta() const {
+    return wheel_delta_;
+  }
+
+  // Identifies the button that changed.
+  ui::EventFlags changed_button() const {
+    switch (update_kind_) {
+      case winui::Input::PointerUpdateKind_LeftButtonPressed:
+        return ui::EF_LEFT_MOUSE_BUTTON;
+      case winui::Input::PointerUpdateKind_LeftButtonReleased:
+        return ui::EF_LEFT_MOUSE_BUTTON;
+      case winui::Input::PointerUpdateKind_RightButtonPressed:
+        return ui::EF_RIGHT_MOUSE_BUTTON;
+      case winui::Input::PointerUpdateKind_RightButtonReleased:
+        return ui::EF_RIGHT_MOUSE_BUTTON;
+      case winui::Input::PointerUpdateKind_MiddleButtonPressed:
+        return ui::EF_MIDDLE_MOUSE_BUTTON;
+      case winui::Input::PointerUpdateKind_MiddleButtonReleased:
+        return ui::EF_MIDDLE_MOUSE_BUTTON;
+      default:
+        return ui::EF_NONE;
+    }
+  }
+
+  uint32 mouse_down_flags() const { return mouse_down_flags_; }
+
+  int x() const { return x_; }
+  int y() const { return y_; }
+
+  uint32 pointer_id() const {
+    return pointer_id_;
+  }
+
+  uint64 timestamp() const { return timestamp_; }
+
+  winui::Input::PointerUpdateKind update_kind() const { return update_kind_; }
+
+  bool is_horizontal_wheel() const { return !!is_horizontal_wheel_; }
+
+ private:
+  int x_;
+  int y_;
+  int wheel_delta_;
+  uint32 pointer_id_;
+  winui::Input::PointerUpdateKind update_kind_;
+  mswr::ComPtr<winui::Input::IPointerPoint> pointer_point_;
+  uint64 timestamp_;
+
+  // Bitmask of ui::EventFlags corresponding to the buttons that are currently
+  // down.
+  uint32 mouse_down_flags_;
+
+  // Set to true for a horizontal wheel message.
+  boolean is_horizontal_wheel_;
+
+  DISALLOW_COPY_AND_ASSIGN(PointerInfoHandler);
+};
+
 ChromeAppViewAsh::ChromeAppViewAsh()
     : mouse_down_flags_(ui::EF_NONE),
       ui_channel_(nullptr),
-      core_window_hwnd_(NULL),
-      ui_loop_(base::MessageLoop::TYPE_UI) {
+      core_window_hwnd_(NULL) {
   DVLOG(1) << __FUNCTION__;
   globals.previous_state =
       winapp::Activation::ApplicationExecutionState_NotRunning;
@@ -723,10 +768,13 @@ void ChromeAppViewAsh::OnActivateDesktop(const base::FilePath& file_path,
     ::TerminateProcess(sei.hProcess, 0);
     ::CloseHandle(sei.hProcess);
   }
+
+  if (ash_exit)
+    ui_channel_->Close();
 }
 
 void ChromeAppViewAsh::OnOpenURLOnDesktop(const base::FilePath& shortcut,
-    const string16& url) {
+                                          const base::string16& url) {
   base::FilePath::StringType file = shortcut.value();
   SHELLEXECUTEINFO sei = { sizeof(sei) };
   sei.fMask = SEE_MASK_FLAG_LOG_USAGE;
@@ -742,8 +790,8 @@ void ChromeAppViewAsh::OnSetCursor(HCURSOR cursor) {
 }
 
 void ChromeAppViewAsh::OnDisplayFileOpenDialog(
-    const string16& title,
-    const string16& filter,
+    const base::string16& title,
+    const base::string16& filter,
     const base::FilePath& default_path,
     bool allow_multiple_files) {
   DVLOG(1) << __FUNCTION__;
@@ -772,7 +820,7 @@ void ChromeAppViewAsh::OnDisplayFileSaveAsDialog(
   file_picker_->Run();
 }
 
-void ChromeAppViewAsh::OnDisplayFolderPicker(const string16& title) {
+void ChromeAppViewAsh::OnDisplayFolderPicker(const base::string16& title) {
   DVLOG(1) << __FUNCTION__;
   // The FolderPickerSession instance is deleted when we receive a
   // callback from the FolderPickerSession class about the completion of the
@@ -887,7 +935,7 @@ void ChromeAppViewAsh::OnInputSourceChanged() {
 }
 
 void ChromeAppViewAsh::OnCompositionChanged(
-    const string16& text,
+    const base::string16& text,
     int32 selection_start,
     int32 selection_end,
     const std::vector<metro_viewer::UnderlineInfo>& underlines) {
@@ -895,8 +943,52 @@ void ChromeAppViewAsh::OnCompositionChanged(
       text, selection_start, selection_end, underlines));
 }
 
-void ChromeAppViewAsh::OnTextCommitted(const string16& text) {
+void ChromeAppViewAsh::OnTextCommitted(const base::string16& text) {
   ui_channel_->Send(new MetroViewerHostMsg_ImeTextCommitted(text));
+}
+
+void ChromeAppViewAsh::SendMouseButton(int x,
+                                       int y,
+                                       int extra,
+                                       ui::EventType event_type,
+                                       uint32 flags,
+                                       ui::EventFlags changed_button,
+                                       bool is_horizontal_wheel) {
+  MetroViewerHostMsg_MouseButtonParams params;
+  params.x = static_cast<int32>(x);
+  params.y = static_cast<int32>(y);
+  params.extra = static_cast<int32>(extra);
+  params.event_type = event_type;
+  params.flags = static_cast<int32>(flags);
+  params.changed_button = changed_button;
+  params.is_horizontal_wheel = is_horizontal_wheel;
+  ui_channel_->Send(new MetroViewerHostMsg_MouseButton(params));
+}
+
+void ChromeAppViewAsh::GenerateMouseEventFromMoveIfNecessary(
+    const PointerInfoHandler& pointer) {
+  ui::EventType event_type;
+  // For aura we want the flags to include the button that was released, thus
+  // we or the old and new.
+  uint32 mouse_down_flags = pointer.mouse_down_flags() | mouse_down_flags_;
+  mouse_down_flags_ = pointer.mouse_down_flags();
+  switch (pointer.update_kind()) {
+    case winui::Input::PointerUpdateKind_LeftButtonPressed:
+    case winui::Input::PointerUpdateKind_RightButtonPressed:
+    case winui::Input::PointerUpdateKind_MiddleButtonPressed:
+      event_type = ui::ET_MOUSE_PRESSED;
+      break;
+    case winui::Input::PointerUpdateKind_LeftButtonReleased:
+    case winui::Input::PointerUpdateKind_RightButtonReleased:
+    case winui::Input::PointerUpdateKind_MiddleButtonReleased:
+      event_type = ui::ET_MOUSE_RELEASED;
+      break;
+    default:
+      return;
+  }
+  SendMouseButton(pointer.x(), pointer.y(), 0, event_type,
+                  mouse_down_flags | GetKeyboardEventFlags(),
+                  pointer.changed_button(), pointer.is_horizontal_wheel());
 }
 
 HRESULT ChromeAppViewAsh::OnActivate(
@@ -937,6 +1029,7 @@ HRESULT ChromeAppViewAsh::OnPointerMoved(winui::Core::ICoreWindow* sender,
     return hr;
 
   if (pointer.IsMouse()) {
+    GenerateMouseEventFromMoveIfNecessary(pointer);
     ui_channel_->Send(new MetroViewerHostMsg_MouseMoved(
         pointer.x(),
         pointer.y(),
@@ -955,7 +1048,8 @@ HRESULT ChromeAppViewAsh::OnPointerMoved(winui::Core::ICoreWindow* sender,
 // event for the first button pressed and the last button released in a sequence
 // of mouse events.
 // For example, a sequence of LEFT_DOWN, RIGHT_DOWN, LEFT_UP, RIGHT_UP results
-// only in PointerPressed(LEFT)/PointerReleased(RIGHT) events.
+// only in PointerPressed(LEFT)/PointerReleased(RIGHT) events. Intermediary
+// presses and releases are tracked in OnPointMoved().
 HRESULT ChromeAppViewAsh::OnPointerPressed(
     winui::Core::ICoreWindow* sender,
     winui::Core::IPointerEventArgs* args) {
@@ -965,15 +1059,10 @@ HRESULT ChromeAppViewAsh::OnPointerPressed(
     return hr;
 
   if (pointer.IsMouse()) {
-    // TODO: this is wrong, more than one pointer may be down at a time.
-    mouse_down_flags_ = pointer.flags();
-    ui_channel_->Send(new MetroViewerHostMsg_MouseButton(
-        pointer.x(),
-        pointer.y(),
-        0,
-        ui::ET_MOUSE_PRESSED,
-        static_cast<ui::EventFlags>(
-            mouse_down_flags_ | GetKeyboardEventFlags())));
+    mouse_down_flags_ = pointer.mouse_down_flags();
+    SendMouseButton(pointer.x(), pointer.y(), 0, ui::ET_MOUSE_PRESSED,
+                    mouse_down_flags_ | GetKeyboardEventFlags(),
+                    pointer.changed_button(), pointer.is_horizontal_wheel());
   } else {
     DCHECK(pointer.IsTouch());
     ui_channel_->Send(new MetroViewerHostMsg_TouchDown(pointer.x(),
@@ -993,15 +1082,12 @@ HRESULT ChromeAppViewAsh::OnPointerReleased(
     return hr;
 
   if (pointer.IsMouse()) {
-    // TODO: this is wrong, more than one pointer may be down at a time.
     mouse_down_flags_ = ui::EF_NONE;
-    ui_channel_->Send(new MetroViewerHostMsg_MouseButton(
-        pointer.x(),
-        pointer.y(),
-        0,
-        ui::ET_MOUSE_RELEASED,
-        static_cast<ui::EventFlags>(
-            pointer.flags() | GetKeyboardEventFlags())));
+    SendMouseButton(pointer.x(), pointer.y(), 0, ui::ET_MOUSE_RELEASED,
+                    static_cast<uint32>(pointer.changed_button()) |
+                    GetKeyboardEventFlags(),
+                    pointer.changed_button(),
+                    pointer.is_horizontal_wheel());
   } else {
     DCHECK(pointer.IsTouch());
     ui_channel_->Send(new MetroViewerHostMsg_TouchUp(pointer.x(),
@@ -1020,10 +1106,9 @@ HRESULT ChromeAppViewAsh::OnWheel(
   if (FAILED(hr))
     return hr;
   DCHECK(pointer.IsMouse());
-  ui_channel_->Send(new MetroViewerHostMsg_MouseButton(pointer.x(), pointer.y(),
-                                                       pointer.wheel_delta(),
-                                                       ui::ET_MOUSEWHEEL,
-                                                       ui::EF_NONE));
+  SendMouseButton(pointer.x(), pointer.y(), pointer.wheel_delta(),
+                  ui::ET_MOUSEWHEEL, ui::EF_NONE, ui::EF_NONE,
+                  pointer.is_horizontal_wheel());
   return S_OK;
 }
 
@@ -1093,6 +1178,13 @@ HRESULT ChromeAppViewAsh::OnAcceleratorKeyDown(
       break;
 
     case winui::Core::CoreAcceleratorKeyEventType_SystemKeyDown:
+      // Don't send the Alt + F4 combination to Chrome as this is intended to
+      // shut the metro environment down. Reason we check for Control here is
+      // Windows does not shutdown metro if Ctrl is pressed along with Alt F4.
+      // Other key combinations with Alt F4 shutdown metro.
+      if ((virtual_key == VK_F4) && ((keyboard_flags & ui::EF_ALT_DOWN) &&
+          !(keyboard_flags & ui::EF_CONTROL_DOWN)))
+        return S_OK;
       ui_channel_->Send(new MetroViewerHostMsg_KeyDown(virtual_key,
                                                        status.RepeatCount,
                                                        status.ScanCode,
@@ -1165,7 +1257,7 @@ HRESULT ChromeAppViewAsh::HandleSearchRequest(
 
   mswrw::HString search_string;
   CheckHR(search_args->get_QueryText(search_string.GetAddressOf()));
-  string16 search_text(MakeStdWString(search_string.Get()));
+  base::string16 search_text(MakeStdWString(search_string.Get()));
 
   ui_loop_.PostTask(FROM_HERE,
                     base::Bind(&ChromeAppViewAsh::OnSearchRequest,
@@ -1190,7 +1282,7 @@ HRESULT ChromeAppViewAsh::HandleProtocolRequest(
   protocol_args->get_Uri(&uri);
   mswrw::HString url;
   uri->get_AbsoluteUri(url.GetAddressOf());
-  string16 actual_url(MakeStdWString(url.Get()));
+  base::string16 actual_url(MakeStdWString(url.Get()));
   DVLOG(1) << "Received url request: " << actual_url;
 
   ui_loop_.PostTask(FROM_HERE,
@@ -1203,20 +1295,16 @@ HRESULT ChromeAppViewAsh::HandleProtocolRequest(
 HRESULT ChromeAppViewAsh::OnEdgeGestureCompleted(
     winui::Input::IEdgeGesture* gesture,
     winui::Input::IEdgeGestureEventArgs* args) {
-  // Swipe from edge gesture (and win+z) is equivalent to pressing F11.
-  // TODO(cpu): Make this cleaner for m33.
-  ui_channel_->Send(new MetroViewerHostMsg_KeyDown(VK_F11, 1, 0, 0));
-  ::Sleep(15);
-  ui_channel_->Send(new MetroViewerHostMsg_KeyUp(VK_F11, 1, 0, 0));
+  ui_channel_->Send(new MetroViewerHostMsg_EdgeGesture());
   return S_OK;
 }
 
-void ChromeAppViewAsh::OnSearchRequest(const string16& search_string) {
+void ChromeAppViewAsh::OnSearchRequest(const base::string16& search_string) {
   DCHECK(ui_channel_);
   ui_channel_->Send(new MetroViewerHostMsg_SearchRequest(search_string));
 }
 
-void ChromeAppViewAsh::OnNavigateToUrl(const string16& url) {
+void ChromeAppViewAsh::OnNavigateToUrl(const base::string16& url) {
   DCHECK(ui_channel_);
  ui_channel_->Send(new MetroViewerHostMsg_OpenURL(url));
 }

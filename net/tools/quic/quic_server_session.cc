@@ -15,13 +15,11 @@ namespace tools {
 QuicServerSession::QuicServerSession(
     const QuicConfig& config,
     QuicConnection* connection,
-    QuicSessionOwner* owner)
+    QuicServerSessionVisitor* visitor)
     : QuicSession(connection, config),
-      owner_(owner) {
-}
+      visitor_(visitor) {}
 
-QuicServerSession::~QuicServerSession() {
-}
+QuicServerSession::~QuicServerSession() {}
 
 void QuicServerSession::InitializeSession(
     const QuicCryptoServerConfig& crypto_config) {
@@ -36,18 +34,23 @@ QuicCryptoServerStream* QuicServerSession::CreateQuicCryptoServerStream(
 void QuicServerSession::OnConnectionClosed(QuicErrorCode error,
                                            bool from_peer) {
   QuicSession::OnConnectionClosed(error, from_peer);
-  owner_->OnConnectionClosed(connection()->guid(), error);
+  visitor_->OnConnectionClosed(connection()->guid(), error);
+}
+
+void QuicServerSession::OnWriteBlocked() {
+  QuicSession::OnWriteBlocked();
+  visitor_->OnWriteBlocked(connection());
 }
 
 bool QuicServerSession::ShouldCreateIncomingDataStream(QuicStreamId id) {
   if (id % 2 == 0) {
-    DLOG(INFO) << "Invalid incoming even stream_id:" << id;
+    DVLOG(1) << "Invalid incoming even stream_id:" << id;
     connection()->SendConnectionClose(QUIC_INVALID_STREAM_ID);
     return false;
   }
   if (GetNumOpenStreams() >= get_max_open_streams()) {
-    DLOG(INFO) << "Failed to create a new incoming stream with id:" << id
-               << " Already " << GetNumOpenStreams() << " open.";
+    DVLOG(1) << "Failed to create a new incoming stream with id:" << id
+             << " Already " << GetNumOpenStreams() << " open.";
     connection()->SendConnectionClose(QUIC_TOO_MANY_OPEN_STREAMS);
     return false;
   }

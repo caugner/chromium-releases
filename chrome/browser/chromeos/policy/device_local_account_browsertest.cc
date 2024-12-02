@@ -42,8 +42,10 @@
 #include "chrome/browser/chromeos/login/user_image_manager_impl.h"
 #include "chrome/browser/chromeos/login/user_image_manager_test_util.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/login/user_manager_impl.h"
 #include "chrome/browser/chromeos/login/webui_login_view.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/cloud_external_data_manager_base_test_util.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/policy/device_local_account_policy_service.h"
@@ -51,9 +53,7 @@
 #include "chrome/browser/chromeos/policy/device_policy_cros_browser_test.h"
 #include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/policy/test/local_policy_test_server.h"
@@ -70,7 +70,6 @@
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/chrome_switches.h"
 #include "chromeos/chromeos_paths.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/fake_session_manager_client.h"
@@ -82,6 +81,7 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_namespace.h"
 #include "components/policy/core/common/policy_service.h"
+#include "components/policy/core/common/policy_switches.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
@@ -89,6 +89,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "crypto/rsa_private_key.h"
+#include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -251,8 +252,8 @@ bool DoesInstallSuccessReferToId(const std::string& id,
 bool DoesInstallFailureReferToId(const std::string& id,
                                  const content::NotificationSource& source,
                                  const content::NotificationDetails& details) {
-  return content::Details<const base::string16>(details)->find(UTF8ToUTF16(id)) !=
-      base::string16::npos;
+  return content::Details<const base::string16>(details)->
+      find(base::UTF8ToUTF16(id)) != base::string16::npos;
 }
 
 scoped_ptr<net::FakeURLFetcher> RunCallbackAndReturnFakeURLFetcher(
@@ -277,7 +278,9 @@ class DeviceLocalAccountTest : public DevicePolicyCrosBrowserTest,
       : user_id_1_(GenerateDeviceLocalAccountUserId(
             kAccountId1, DeviceLocalAccount::TYPE_PUBLIC_SESSION)),
         user_id_2_(GenerateDeviceLocalAccountUserId(
-            kAccountId2, DeviceLocalAccount::TYPE_PUBLIC_SESSION)) {}
+            kAccountId2, DeviceLocalAccount::TYPE_PUBLIC_SESSION)) {
+    set_exit_when_last_browser_closes(false);
+  }
 
   virtual ~DeviceLocalAccountTest() {}
 
@@ -307,8 +310,8 @@ class DeviceLocalAccountTest : public DevicePolicyCrosBrowserTest,
     command_line->AppendSwitch(chromeos::switches::kLoginManager);
     command_line->AppendSwitch(chromeos::switches::kForceLoginManagerInTests);
     command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile, "user");
-    command_line->AppendSwitchASCII(
-        switches::kDeviceManagementUrl, test_server_.GetServiceURL().spec());
+    command_line->AppendSwitchASCII(policy::switches::kDeviceManagementUrl,
+                                    test_server_.GetServiceURL().spec());
   }
 
   virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
@@ -451,7 +454,7 @@ static bool DisplayNameMatches(const std::string& account_id,
       chromeos::UserManager::Get()->FindUser(account_id);
   if (!user || user->display_name().empty())
     return false;
-  EXPECT_EQ(UTF8ToUTF16(display_name), user->display_name());
+  EXPECT_EQ(base::UTF8ToUTF16(display_name), user->display_name());
   return true;
 }
 
@@ -604,10 +607,6 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, FullscreenDisallowed) {
   if (!oobe_ui_ready)
     run_loop.Run();
 
-  // Ensure that the browser stays alive, even though no windows are opened
-  // during session start.
-  chrome::StartKeepAlive();
-
   // Start login into the device-local account.
   host->StartSignInScreen(LoginScreenContext());
   chromeos::ExistingUserController* controller =
@@ -619,8 +618,6 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, FullscreenDisallowed) {
   content::WindowedNotificationObserver(chrome::NOTIFICATION_SESSION_STARTED,
                                         base::Bind(IsSessionStarted)).Wait();
 
-  // Open a browser window.
-  chrome::NewEmptyWindow(GetProfileForTest(), chrome::HOST_DESKTOP_TYPE_ASH);
   BrowserList* browser_list =
     BrowserList::GetInstance(chrome::HOST_DESKTOP_TYPE_ASH);
   EXPECT_EQ(1U, browser_list->size());
@@ -628,7 +625,6 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, FullscreenDisallowed) {
   ASSERT_TRUE(browser);
   BrowserWindow* browser_window = browser->window();
   ASSERT_TRUE(browser_window);
-  chrome::EndKeepAlive();
 
   // Verify that an attempt to enter fullscreen mode is denied.
   EXPECT_FALSE(browser_window->IsFullscreen());
@@ -686,10 +682,6 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, ExtensionsUncached) {
   const bool oobe_ui_ready = oobe_ui->IsJSReady(run_loop.QuitClosure());
   if (!oobe_ui_ready)
     run_loop.Run();
-
-  // Ensure that the browser stays alive, even though no windows are opened
-  // during session start.
-  chrome::StartKeepAlive();
 
   // Start listening for app/extension installation results.
   content::WindowedNotificationObserver hosted_app_observer(
@@ -786,10 +778,6 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, ExtensionsCached) {
   if (!oobe_ui_ready)
     run_loop.Run();
 
-  // Ensure that the browser stays alive, even though no windows are opened
-  // during session start.
-  chrome::StartKeepAlive();
-
   // Start listening for app/extension installation results.
   content::WindowedNotificationObserver hosted_app_observer(
       chrome::NOTIFICATION_EXTENSION_INSTALLED,
@@ -828,14 +816,13 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, ExtensionsCached) {
 }
 
 IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, ExternalData) {
-  // chromeos::UserImageManagerImpl requests an external data fetch whenever the
-  // key::kUserAvatarImage policy is set. Since this test wants to verify that
-  // the underlying policy subsystem will start a fetch without this request as
-  // well, the chromeos::UserImageManagerImpl must be prevented from seeing the
-  // policy change.
-  reinterpret_cast<chromeos::UserImageManagerImpl*>(
-      chromeos::UserManager::Get()->GetUserImageManager())->
-          StopPolicyObserverForTesting();
+  // chromeos::UserManager requests an external data fetch whenever
+  // the key::kUserAvatarImage policy is set. Since this test wants to
+  // verify that the underlying policy subsystem will start a fetch
+  // without this request as well, the chromeos::UserManager must be
+  // prevented from seeing the policy change.
+  reinterpret_cast<chromeos::UserManagerImpl*>(chromeos::UserManager::Get())->
+      StopPolicyObserverForTesting();
 
   UploadDeviceLocalAccountPolicy();
   AddPublicSessionToDevicePolicy(kAccountId1);
@@ -867,9 +854,11 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, ExternalData) {
   device_local_account_policy_.payload().mutable_useravatarimage()->set_value(
       policy);
   UploadAndInstallDeviceLocalAccountPolicy();
+  policy::BrowserPolicyConnectorChromeOS* connector =
+      g_browser_process->platform_part()->browser_policy_connector_chromeos();
   DeviceLocalAccountPolicyBroker* broker =
-      g_browser_process->browser_policy_connector()->
-          GetDeviceLocalAccountPolicyService()->GetBrokerForUser(user_id_1_);
+      connector->GetDeviceLocalAccountPolicyService()->GetBrokerForUser(
+          user_id_1_);
   ASSERT_TRUE(broker);
   broker->core()->store()->Load();
 
@@ -910,10 +899,6 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, ExternalData) {
   const bool oobe_ui_ready = oobe_ui->IsJSReady(run_loop->QuitClosure());
   if (!oobe_ui_ready)
     run_loop->Run();
-
-  // Ensure that the browser stays alive, even though no windows are opened
-  // during session start.
-  chrome::StartKeepAlive();
 
   // Start login into the device-local account.
   host->StartSignInScreen(LoginScreenContext());
@@ -980,9 +965,11 @@ IN_PROC_BROWSER_TEST_F(DeviceLocalAccountTest, UserAvatarImage) {
   device_local_account_policy_.payload().mutable_useravatarimage()->set_value(
       policy);
   UploadAndInstallDeviceLocalAccountPolicy();
+  policy::BrowserPolicyConnectorChromeOS* connector =
+      g_browser_process->platform_part()->browser_policy_connector_chromeos();
   DeviceLocalAccountPolicyBroker* broker =
-      g_browser_process->browser_policy_connector()->
-          GetDeviceLocalAccountPolicyService()->GetBrokerForUser(user_id_1_);
+      connector->GetDeviceLocalAccountPolicyService()->GetBrokerForUser(
+          user_id_1_);
   ASSERT_TRUE(broker);
 
   run_loop_.reset(new base::RunLoop);
@@ -1146,15 +1133,15 @@ IN_PROC_BROWSER_TEST_P(TermsOfServiceTest, TermsOfServiceScreen) {
   // Verify that the screen's headings have been set correctly.
   EXPECT_EQ(
       l10n_util::GetStringFUTF8(IDS_TERMS_OF_SERVICE_SCREEN_HEADING,
-                                UTF8ToUTF16(kDomain)),
+                                base::UTF8ToUTF16(kDomain)),
       heading);
   EXPECT_EQ(
       l10n_util::GetStringFUTF8(IDS_TERMS_OF_SERVICE_SCREEN_SUBHEADING,
-                                UTF8ToUTF16(kDomain)),
+                                base::UTF8ToUTF16(kDomain)),
       subheading);
   EXPECT_EQ(
       l10n_util::GetStringFUTF8(IDS_TERMS_OF_SERVICE_SCREEN_CONTENT_HEADING,
-                                UTF8ToUTF16(kDomain)),
+                                base::UTF8ToUTF16(kDomain)),
       content_heading);
 
   if (!GetParam()) {

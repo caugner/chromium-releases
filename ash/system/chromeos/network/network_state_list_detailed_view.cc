@@ -65,7 +65,7 @@ const int kRequestScanDelaySeconds = 10;
 views::Label* CreateInfoBubbleLabel(const base::string16& text) {
   views::Label* label = new views::Label(text);
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  label->SetFont(rb.GetFont(ui::ResourceBundle::SmallFont));
+  label->SetFontList(rb.GetFontList(ui::ResourceBundle::SmallFont));
   label->SetEnabledColor(SkColorSetARGB(127, 0, 0, 0));
   return label;
 }
@@ -73,10 +73,11 @@ views::Label* CreateInfoBubbleLabel(const base::string16& text) {
 // Create a label formatted for info items in the menu
 views::Label* CreateMenuInfoLabel(const base::string16& text) {
   views::Label* label = new views::Label(text);
-  label->set_border(views::Border::CreateEmptyBorder(
-      ash::kTrayPopupPaddingBetweenItems,
-      ash::kTrayPopupPaddingHorizontal,
-      ash::kTrayPopupPaddingBetweenItems, 0));
+  label->SetBorder(
+      views::Border::CreateEmptyBorder(ash::kTrayPopupPaddingBetweenItems,
+                                       ash::kTrayPopupPaddingHorizontal,
+                                       ash::kTrayPopupPaddingBetweenItems,
+                                       0));
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   label->SetEnabledColor(SkColorSetARGB(192, 0, 0, 0));
   return label;
@@ -89,8 +90,8 @@ views::View* CreateInfoBubbleLine(const base::string16& text_label,
   view->SetLayoutManager(
       new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 1));
   view->AddChildView(CreateInfoBubbleLabel(text_label));
-  view->AddChildView(CreateInfoBubbleLabel(UTF8ToUTF16(": ")));
-  view->AddChildView(CreateInfoBubbleLabel(UTF8ToUTF16(text_string)));
+  view->AddChildView(CreateInfoBubbleLabel(base::UTF8ToUTF16(": ")));
+  view->AddChildView(CreateInfoBubbleLabel(base::UTF8ToUTF16(text_string)));
   return view;
 }
 
@@ -429,7 +430,7 @@ void NetworkStateListDetailedView::CreateNetworkExtra() {
       std::string toggle_debug_preferred_label =
           (list_type_ == LIST_TYPE_DEBUG_PREFERRED) ? "Visible" : "Preferred";
       toggle_debug_preferred_networks_ = new TrayPopupLabelButton(
-          this, UTF8ToUTF16(toggle_debug_preferred_label));
+          this, base::UTF8ToUTF16(toggle_debug_preferred_label));
       bottom_row->AddChildView(toggle_debug_preferred_networks_);
     }
   } else {
@@ -546,7 +547,7 @@ void NetworkStateListDetailedView::UpdateNetworkList() {
       if (favorite) {
         info->image = network_icon::GetImageForDisconnectedNetwork(
             network_icon::ICON_TYPE_LIST, favorite->type());
-        info->label = UTF8ToUTF16(favorite->name());
+        info->label = base::UTF8ToUTF16(favorite->name());
       }
     }
   }
@@ -618,8 +619,8 @@ bool NetworkStateListDetailedView::UpdateNetworkChild(int index,
     container = new HoverHighlightView(this);
     container->AddIconAndLabel(info->image, info->label, font);
     scroll_content()->AddChildViewAt(container, index);
-    container->set_border(views::Border::CreateEmptyBorder(
-        0, kTrayPopupPaddingHorizontal, 0, 0));
+    container->SetBorder(
+        views::Border::CreateEmptyBorder(0, kTrayPopupPaddingHorizontal, 0, 0));
     needs_relayout = true;
   } else {
     container = found->second;
@@ -833,7 +834,7 @@ views::View* NetworkStateListDetailedView::CreateNetworkInfoView() {
   views::View* container = new views::View;
   container->SetLayoutManager(
       new views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 1));
-  container->set_border(views::Border::CreateEmptyBorder(0, 5, 0, 5));
+  container->SetBorder(views::Border::CreateEmptyBorder(0, 5, 0, 5));
 
   std::string ethernet_address, wifi_address, vpn_address;
   if (list_type_ != LIST_TYPE_VPN) {

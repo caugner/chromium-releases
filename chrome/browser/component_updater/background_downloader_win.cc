@@ -96,7 +96,7 @@ namespace {
 
 // All jobs created by this module have a specific description so they can
 // be found at run-time or by using system administration tools.
-const char16 kJobDescription[] = L"Chrome Component Updater";
+const base::char16 kJobDescription[] = L"Chrome Component Updater";
 
 // How often the code looks for changes in the BITS job state.
 const int kJobPollingIntervalSec = 10;
@@ -167,7 +167,7 @@ HRESULT GetJobFileProperties(IBackgroundCopyFile* file,
   HRESULT hr = S_OK;
 
   if (local_name) {
-    ScopedCoMem<char16> name;
+    ScopedCoMem<base::char16> name;
     hr = file->GetLocalName(&name);
     if (FAILED(hr))
       return hr;
@@ -175,7 +175,7 @@ HRESULT GetJobFileProperties(IBackgroundCopyFile* file,
   }
 
   if (remote_name) {
-    ScopedCoMem<char16> name;
+    ScopedCoMem<base::char16> name;
     hr = file->GetRemoteName(&name);
     if (FAILED(hr))
       return hr;
@@ -221,7 +221,7 @@ HRESULT GetJobByteCount(IBackgroundCopyJob* job,
 }
 
 HRESULT GetJobDescription(IBackgroundCopyJob* job, const base::string16* name) {
-  ScopedCoMem<char16> description;
+  ScopedCoMem<base::char16> description;
   return job->GetDescription(&description);
 }
 
@@ -315,7 +315,7 @@ bool JobFileUrlEqual::operator()(IBackgroundCopyJob* job,
     return false;
 
   for (size_t i = 0; i != files.size(); ++i) {
-    ScopedCoMem<char16> name;
+    ScopedCoMem<base::char16> name;
     if (SUCCEEDED(files[i]->GetRemoteName(&name)) &&
         remote_name.compare(name) == 0)
       return true;
@@ -396,6 +396,19 @@ BackgroundDownloader::BackgroundDownloader(
 }
 
 BackgroundDownloader::~BackgroundDownloader() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  // The following objects have thread affinity and can't be destroyed on the
+  // UI thread. The resources managed by these objects are acquired at the
+  // beginning of a download and released at the end of the download. Most of
+  // the time, when this destructor is called, these resources have been already
+  // disposed by. Releasing the ownership here is a NOP. However, if the browser
+  // is shutting down while a download is in progress, the timer is active and
+  // the interface pointers are valid. Releasing the ownership means leaking
+  // these objects and their associated resources.
+  timer_.release();
+  bits_manager_.Detach();
+  job_.Detach();
 }
 
 void BackgroundDownloader::DoStartDownload(const GURL& url) {
@@ -526,10 +539,6 @@ void BackgroundDownloader::EndDownload(HRESULT error) {
       DCHECK(bytes_downloaded == static_cast<int64>(progress.BytesTransferred));
       DCHECK(bytes_total == static_cast<int64>(progress.BytesTotal));
       response = base::FilePath(local_name);
-      if (progress.BytesTransferred <= kint64max)
-        bytes_downloaded = progress.BytesTransferred;
-      if (progress.BytesTotal <= kint64max)
-        bytes_total = progress.BytesTotal;
     } else {
       error = hr;
     }

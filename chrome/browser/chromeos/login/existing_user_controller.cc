@@ -34,6 +34,7 @@
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
@@ -179,8 +180,6 @@ void ExistingUserController::Init(const UserList& users) {
   time_init_ = base::Time::Now();
   UpdateLoginDisplay(users);
   ConfigurePublicSessionAutoLogin();
-
-  DBusThreadManager::Get()->GetSessionManagerClient()->EmitLoginPromptReady();
 }
 
 void ExistingUserController::UpdateLoginDisplay(const UserList& users) {
@@ -303,7 +302,7 @@ void ExistingUserController::CancelPasswordChangedFlow() {
 }
 
 void ExistingUserController::CreateAccount() {
-  content::RecordAction(content::UserMetricsAction("Login.CreateAccount"));
+  content::RecordAction(base::UserMetricsAction("Login.CreateAccount"));
   guest_mode_url_ =
       google_util::AppendGoogleLocaleParam(GURL(kCreateAccountURL));
   LoginAsGuest();
@@ -558,8 +557,9 @@ void ExistingUserController::LoginAsPublicAccount(
       l10n_util::GetStringUTF8(IDS_CHROMEOS_ACC_LOGIN_SIGNIN_PUBLIC_ACCOUNT));
 }
 
-void ExistingUserController::LoginAsKioskApp(const std::string& app_id) {
-  host_->StartAppLaunch(app_id);
+void ExistingUserController::LoginAsKioskApp(const std::string& app_id,
+                                             bool diagnostic_mode) {
+  host_->StartAppLaunch(app_id, diagnostic_mode);
 }
 
 void ExistingUserController::OnSigninScreenReady() {
@@ -573,15 +573,22 @@ void ExistingUserController::OnUserSelected(const std::string& username) {
 }
 
 void ExistingUserController::OnStartEnterpriseEnrollment() {
+  if (KioskAppManager::Get()->IsConsumerKioskDeviceWithAutoLaunch()) {
+    LOG(WARNING) << "Enterprise enrollment is not available after kiosk auto "
+                    "launch is set.";
+    return;
+  }
+
   DeviceSettingsService::Get()->GetOwnershipStatusAsync(
       base::Bind(&ExistingUserController::OnEnrollmentOwnershipCheckCompleted,
                  weak_factory_.GetWeakPtr()));
 }
 
 void ExistingUserController::OnStartKioskEnableScreen() {
-  KioskAppManager::Get()->GetConsumerKioskModeStatus(
-      base::Bind(&ExistingUserController::OnConsumerKioskModeCheckCompleted,
-                 weak_factory_.GetWeakPtr()));
+  KioskAppManager::Get()->GetConsumerKioskAutoLaunchStatus(
+      base::Bind(
+          &ExistingUserController::OnConsumerKioskAutoLaunchCheckCompleted,
+          weak_factory_.GetWeakPtr()));
 }
 
 void ExistingUserController::OnStartDeviceReset() {
@@ -603,7 +610,7 @@ void ExistingUserController::SetDisplayEmail(const std::string& email) {
 }
 
 void ExistingUserController::ShowWrongHWIDScreen() {
-  scoped_ptr<DictionaryValue> params;
+  scoped_ptr<base::DictionaryValue> params;
   host_->StartWizard(WizardController::kWrongHWIDScreenName, params.Pass());
   login_display_->OnFadeOut();
 }
@@ -612,9 +619,9 @@ void ExistingUserController::Signout() {
   NOTREACHED();
 }
 
-void ExistingUserController::OnConsumerKioskModeCheckCompleted(
-    KioskAppManager::ConsumerKioskModeStatus status) {
-  if (status == KioskAppManager::CONSUMER_KIOSK_MODE_CONFIGURABLE)
+void ExistingUserController::OnConsumerKioskAutoLaunchCheckCompleted(
+    KioskAppManager::ConsumerKioskAutoLaunchStatus status) {
+  if (status == KioskAppManager::CONSUMER_KIOSK_AUTO_LAUNCH_CONFIGURABLE)
     ShowKioskEnableScreen();
 }
 
@@ -642,9 +649,9 @@ void ExistingUserController::OnEnrollmentOwnershipCheckCompleted(
 
 void ExistingUserController::ShowEnrollmentScreen(bool is_auto_enrollment,
                                                   const std::string& user) {
-  scoped_ptr<DictionaryValue> params;
+  scoped_ptr<base::DictionaryValue> params;
   if (is_auto_enrollment) {
-    params.reset(new DictionaryValue());
+    params.reset(new base::DictionaryValue());
     params->SetBoolean("is_auto_enrollment", true);
     params->SetString("user", user);
   }
@@ -654,19 +661,19 @@ void ExistingUserController::ShowEnrollmentScreen(bool is_auto_enrollment,
 }
 
 void ExistingUserController::ShowResetScreen() {
-  scoped_ptr<DictionaryValue> params;
+  scoped_ptr<base::DictionaryValue> params;
   host_->StartWizard(WizardController::kResetScreenName, params.Pass());
   login_display_->OnFadeOut();
 }
 
 void ExistingUserController::ShowKioskEnableScreen() {
-  scoped_ptr<DictionaryValue> params;
+  scoped_ptr<base::DictionaryValue> params;
   host_->StartWizard(WizardController::kKioskEnableScreenName, params.Pass());
   login_display_->OnFadeOut();
 }
 
 void ExistingUserController::ShowKioskAutolaunchScreen() {
-  scoped_ptr<DictionaryValue> params;
+  scoped_ptr<base::DictionaryValue> params;
   host_->StartWizard(WizardController::kKioskAutolaunchScreenName,
                      params.Pass());
   login_display_->OnFadeOut();
@@ -929,7 +936,7 @@ void ExistingUserController::DeviceSettingsChanged() {
 }
 
 void ExistingUserController::ActivateWizard(const std::string& screen_name) {
-  scoped_ptr<DictionaryValue> params;
+  scoped_ptr<base::DictionaryValue> params;
   host_->StartWizard(screen_name, params.Pass());
 }
 
@@ -1015,9 +1022,11 @@ void ExistingUserController::InitializeStartUrls() const {
   std::vector<std::string> start_urls;
 
   const base::ListValue *urls;
+  UserManager* user_manager = UserManager::Get();
   bool can_show_getstarted_guide =
-    UserManager::Get()->IsLoggedInAsRegularUser();
-  if (UserManager::Get()->IsLoggedInAsDemoUser()) {
+      user_manager->GetActiveUser()->GetType() == User::USER_TYPE_REGULAR &&
+      !user_manager->IsCurrentUserNonCryptohomeDataEphemeral();
+  if (user_manager->IsLoggedInAsDemoUser()) {
     if (CrosSettings::Get()->GetList(kStartUpUrls, &urls)) {
       // The retail mode user will get start URLs from a special policy if it is
       // set.
@@ -1030,7 +1039,7 @@ void ExistingUserController::InitializeStartUrls() const {
     }
     can_show_getstarted_guide = false;
   // Skip the default first-run behavior for public accounts.
-  } else if (!UserManager::Get()->IsLoggedInAsPublicAccount()) {
+  } else if (!user_manager->IsLoggedInAsPublicAccount()) {
     if (AccessibilityManager::Get()->IsSpokenFeedbackEnabled()) {
       const char* url = kChromeVoxTutorialURLPattern;
       PrefService* prefs = g_browser_process->local_state();
@@ -1051,8 +1060,7 @@ void ExistingUserController::InitializeStartUrls() const {
   }
 
   // Only show getting started guide for a new user.
-  const bool should_show_getstarted_guide =
-      UserManager::Get()->IsCurrentUserNew();
+  const bool should_show_getstarted_guide = user_manager->IsCurrentUserNew();
 
   if (can_show_getstarted_guide && should_show_getstarted_guide) {
     // Don't open default Chrome window if we're going to launch the first-run

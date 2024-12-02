@@ -12,8 +12,8 @@
 #include "chrome/browser/chromeos/login/captive_portal_window_proxy.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/command_updater.h"
+#include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/password_manager/password_manager.h"
-#include "chrome/browser/password_manager/password_manager_delegate_impl.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model_delegate.h"
@@ -49,11 +49,12 @@ const int kExternalMargin = 60;
 // Margin between WebView and SimpleWebViewDialog border.
 const int kInnerMargin = 2;
 
+const SkColor kDialogColor = SK_ColorWHITE;
+
 class ToolbarRowView : public views::View {
  public:
   ToolbarRowView() {
-    set_background(views::Background::CreateSolidBackground(
-        SkColorSetRGB(0xbe, 0xbe, 0xbe)));
+    set_background(views::Background::CreateSolidBackground(kDialogColor));
   }
 
   virtual ~ToolbarRowView() {}
@@ -136,6 +137,8 @@ SimpleWebViewDialog::SimpleWebViewDialog(Profile* profile)
 }
 
 SimpleWebViewDialog::~SimpleWebViewDialog() {
+  if (web_view_ && web_view_->web_contents())
+    web_view_->web_contents()->SetDelegate(NULL);
 }
 
 void SimpleWebViewDialog::StartLoad(const GURL& url) {
@@ -150,15 +153,13 @@ void SimpleWebViewDialog::StartLoad(const GURL& url) {
   DCHECK(web_contents);
 
   // Create the password manager that is needed for the proxy.
-  PasswordManagerDelegateImpl::CreateForWebContents(web_contents);
-  PasswordManager::CreateForWebContentsAndDelegate(
-      web_contents, PasswordManagerDelegateImpl::FromWebContents(web_contents));
+  ChromePasswordManagerClient::CreateForWebContents(web_contents);
 }
 
 void SimpleWebViewDialog::Init() {
   toolbar_model_.reset(new ToolbarModelImpl(this));
 
-  set_background(views::Background::CreateSolidBackground(SK_ColorWHITE));
+  set_background(views::Background::CreateSolidBackground(kDialogColor));
 
   // Back/Forward buttons.
   back_ = new views::ImageButton(this);
@@ -249,19 +250,19 @@ void SimpleWebViewDialog::ButtonPressed(views::Button* sender,
   command_updater_->ExecuteCommand(sender->tag());
 }
 
+content::WebContents* SimpleWebViewDialog::OpenURL(
+    const content::OpenURLParams& params) {
+  // As there are no Browsers right now, this could not actually ever work.
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
 void SimpleWebViewDialog::NavigationStateChanged(
     const WebContents* source, unsigned changed_flags) {
   if (location_bar_) {
     location_bar_->Update(NULL);
     UpdateButtons();
   }
-}
-
-content::WebContents* SimpleWebViewDialog::OpenURL(
-    const content::OpenURLParams& params) {
-  // As there are no Browsers right now, this could not actually ever work.
-  NOTIMPLEMENTED();
-  return NULL;
 }
 
 void SimpleWebViewDialog::LoadingStateChanged(WebContents* source) {
@@ -315,6 +316,10 @@ PageActionImageView* SimpleWebViewDialog::CreatePageActionImageView(
 
 content::WebContents* SimpleWebViewDialog::GetActiveWebContents() const {
   return web_view_->web_contents();
+}
+
+bool SimpleWebViewDialog::InTabbedBrowser() const {
+  return false;
 }
 
 void SimpleWebViewDialog::ExecuteCommandWithDisposition(

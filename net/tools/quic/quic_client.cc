@@ -153,7 +153,8 @@ bool QuicClient::Connect() {
 }
 
 bool QuicClient::StartConnect() {
-  DCHECK(!connected() && initialized_);
+  DCHECK(initialized_);
+  DCHECK(!connected());
 
   QuicPacketWriter* writer = CreateQuicPacketWriter();
   if (writer_.get() != writer) {
@@ -238,20 +239,26 @@ void QuicClient::OnEvent(int fd, EpollEvent* event) {
     }
   }
   if (connected() && (event->in_events & EPOLLOUT)) {
+    writer_->SetWritable();
     session_->connection()->OnCanWrite();
   }
   if (event->in_events & EPOLLERR) {
-    DLOG(INFO) << "Epollerr";
+    DVLOG(1) << "Epollerr";
   }
 }
 
 void QuicClient::OnClose(QuicDataStream* stream) {
+  QuicSpdyClientStream* client_stream =
+      static_cast<QuicSpdyClientStream*>(stream);
+  if (response_listener_.get() != NULL) {
+    response_listener_->OnCompleteResponse(
+        stream->id(), client_stream->headers(), client_stream->data());
+  }
+
   if (!print_response_) {
     return;
   }
 
-  QuicSpdyClientStream* client_stream =
-      static_cast<QuicSpdyClientStream*>(stream);
   const BalsaHeaders& headers = client_stream->headers();
   printf("%s\n", headers.first_line().as_string().c_str());
   for (BalsaHeaders::const_header_lines_iterator i =
@@ -304,18 +311,6 @@ bool QuicClient::ReadAndProcessPacket() {
   }
 
   QuicEncryptedPacket packet(buf, bytes_read, false);
-  QuicGuid our_guid = session_->connection()->guid();
-  QuicGuid packet_guid;
-
-  if (!QuicFramer::ReadGuidFromPacket(packet, &packet_guid)) {
-    DLOG(INFO) << "Could not read GUID from packet";
-    return true;
-  }
-  if (packet_guid != our_guid) {
-    DLOG(INFO) << "Ignoring packet from unexpected GUID: "
-               << packet_guid << " instead of " << our_guid;
-    return true;
-  }
 
   IPEndPoint client_address(client_ip, client_address_.port());
   session_->connection()->ProcessUdpPacket(

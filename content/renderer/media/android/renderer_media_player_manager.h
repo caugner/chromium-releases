@@ -17,10 +17,6 @@
 #include "media/base/media_keys.h"
 #include "url/gurl.h"
 
-#if defined(GOOGLE_TV)
-#include "ui/gfx/rect_f.h"
-#endif
-
 namespace blink {
 class WebFrame;
 }
@@ -68,6 +64,9 @@ class RendererMediaPlayerManager : public RenderViewObserver {
   // Sets the player volume.
   void SetVolume(int player_id, double volume);
 
+  // Sets the poster image.
+  void SetPoster(int player_id, const GURL& poster);
+
   // Releases resources for the player.
   void ReleaseResources(int player_id);
 
@@ -95,12 +94,13 @@ class RendererMediaPlayerManager : public RenderViewObserver {
                      const GURL& frame_url);
   void CreateSession(int media_keys_id,
                      uint32 session_id,
-                     const std::string& type,
+                     MediaKeysHostMsg_CreateSession_Type type,
                      const std::vector<uint8>& init_data);
   void UpdateSession(int media_keys_id,
                      uint32 session_id,
                      const std::vector<uint8>& response);
   void ReleaseSession(int media_keys_id, uint32 session_id);
+  void DestroyCdm(int media_keys_id);
 
   // Registers and unregisters a WebMediaPlayerAndroid object.
   int RegisterMediaPlayer(WebMediaPlayerAndroid* player);
@@ -168,7 +168,7 @@ class RendererMediaPlayerManager : public RenderViewObserver {
   void OnSessionMessage(int media_keys_id,
                         uint32 session_id,
                         const std::vector<uint8>& message,
-                        const std::string& destination_url);
+                        const GURL& destination_url);
   void OnSessionReady(int media_keys_id, uint32 session_id);
   void OnSessionClosed(int media_keys_id, uint32 session_id);
   void OnSessionError(int media_keys_id,

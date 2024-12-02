@@ -41,12 +41,11 @@ class KeywordHintView;
 class LocationIconView;
 class OpenPDFInReaderView;
 class ManagePasswordsIconView;
+class OriginChipView;
 class PageActionWithBadgeView;
 class PageActionImageView;
 class Profile;
-class ScriptBubbleIconView;
 class SelectedKeywordView;
-class SiteChipView;
 class StarView;
 class TemplateURLService;
 class TranslateIconView;
@@ -59,6 +58,7 @@ struct SSLStatus;
 namespace views {
 class BubbleDelegateView;
 class ImageButton;
+class ImageView;
 class Label;
 class LabelButton;
 class Widget;
@@ -160,9 +160,6 @@ class LocationBarView : public LocationBar,
   SkColor GetColor(ToolbarModel::SecurityLevel security_level,
                    ColorKind kind) const;
 
-  // Returns corresponding profile.
-  Profile* profile() const { return profile_; }
-
   // Returns the delegate.
   Delegate* delegate() const { return delegate_; }
 
@@ -200,8 +197,8 @@ class LocationBarView : public LocationBar,
   // The translate icon. It may not be visible.
   TranslateIconView* translate_icon_view() { return translate_icon_view_; }
 
-  void set_site_chip_view(SiteChipView* site_chip_view) {
-    site_chip_view_ = site_chip_view;
+  void set_origin_chip_view(OriginChipView* origin_chip_view) {
+    origin_chip_view_ = origin_chip_view;
   }
 
   // Shows the bookmark prompt.
@@ -385,13 +382,6 @@ class LocationBarView : public LocationBar,
   // changed, or PageActionWithBadgeView were created/destroyed.
   bool RefreshPageActionViews();
 
-  // Returns the number of scripts currently running on the page.
-  size_t ScriptBubbleScriptsRunning();
-
-  // Updates the Script Bubble Icon, to reflect the number of content scripts
-  // running on the page. Returns true if the visibility of the bubble changed.
-  bool RefreshScriptBubble();
-
   // Updates the view for the zoom icon based on the current tab's zoom. Returns
   // true if the visibility of the view changed.
   bool RefreshZoomView();
@@ -414,17 +404,10 @@ class LocationBarView : public LocationBar,
   // Helper to show the first run info bubble.
   void ShowFirstRunBubbleInternal();
 
-  // Draws backgrounds and borders for page actions.  Must be called
-  // after layout, so the |page_action_views_| have their bounds.
-  void PaintPageActionBackgrounds(gfx::Canvas* canvas);
-
   // Handles a request to change the value of this text field from software
   // using an accessibility API (typically automation software, screen readers
   // don't normally use this). Sets the value and clears the selection.
   void AccessibilitySetValue(const base::string16& new_value);
-
-  // Checks if an extension has specified the bookmark star be hidden.
-  bool IsBookmarkStarHiddenByExtension();
 
   // The Browser this LocationBarView is in.  Note that at least
   // chromeos::SimpleWebViewDialog uses a LocationBarView outside any browser
@@ -433,15 +416,11 @@ class LocationBarView : public LocationBar,
 
   OmniboxViewViews* omnibox_view_;
 
-  // The profile which corresponds to this View.
-  Profile* profile_;
-
   // Our delegate.
   Delegate* delegate_;
 
-  // Objects used to paint the normal-mode background.
-  scoped_ptr<views::Painter> background_border_painter_;
-  scoped_ptr<views::Painter> background_filling_painter_;
+  // Object used to paint the border.
+  scoped_ptr<views::Painter> border_painter_;
 
   // An icon to the left of the edit field.
   LocationIconView* location_icon_view_;
@@ -495,11 +474,8 @@ class LocationBarView : public LocationBar,
   // The page action icon views.
   PageActionViews page_action_views_;
 
-  // The script bubble.
-  ScriptBubbleIconView* script_bubble_icon_view_;
-
-  // The Site Chip.
-  SiteChipView* site_chip_view_;
+  // The Origin Chip.
+  OriginChipView* origin_chip_view_;
 
   // The icon for Translate.
   TranslateIconView* translate_icon_view_;

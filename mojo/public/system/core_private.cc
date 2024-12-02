@@ -7,7 +7,7 @@
 #include <assert.h>
 #include <stddef.h>
 
-static mojo::CorePrivate* g_core = NULL;
+static mojo::Core* g_core = NULL;
 
 extern "C" {
 
@@ -36,11 +36,10 @@ MojoResult MojoWaitMany(const MojoHandle* handles,
   return g_core->WaitMany(handles, flags, num_handles, deadline);
 }
 
-MojoResult MojoCreateMessagePipe(MojoHandle* message_pipe_handle_0,
-                                 MojoHandle* message_pipe_handle_1) {
+MojoResult MojoCreateMessagePipe(MojoHandle* message_pipe_handle0,
+                                 MojoHandle* message_pipe_handle1) {
   assert(g_core);
-  return g_core->CreateMessagePipe(message_pipe_handle_0,
-                                   message_pipe_handle_1);
+  return g_core->CreateMessagePipe(message_pipe_handle0, message_pipe_handle1);
 }
 
 MojoResult MojoWriteMessage(MojoHandle message_pipe_handle,
@@ -121,16 +120,58 @@ MojoResult MojoEndReadData(MojoHandle data_pipe_consumer_handle,
   return g_core->EndReadData(data_pipe_consumer_handle, num_elements_read);
 }
 
+MojoResult MojoCreateSharedBuffer(
+    const struct MojoCreateSharedBufferOptions* options,
+    uint64_t* num_bytes,
+    MojoHandle* shared_buffer_handle) {
+  assert(g_core);
+  return g_core->CreateSharedBuffer(options, num_bytes, shared_buffer_handle);
+}
+
+MojoResult MojoDuplicateBufferHandle(
+    MojoHandle buffer_handle,
+    const struct MojoDuplicateBufferHandleOptions* options,
+    MojoHandle* new_buffer_handle) {
+  assert(g_core);
+  return g_core->DuplicateBufferHandle(buffer_handle, options,
+                                       new_buffer_handle);
+}
+
+MojoResult MojoMapBuffer(MojoHandle buffer_handle,
+                         uint64_t offset,
+                         uint64_t num_bytes,
+                         void** buffer,
+                         MojoMapBufferFlags flags) {
+  assert(g_core);
+  return g_core->MapBuffer(buffer_handle, offset, num_bytes, buffer, flags);
+}
+
+MojoResult MojoUnmapBuffer(void* buffer) {
+  assert(g_core);
+  return g_core->UnmapBuffer(buffer);
+}
+
 }  // extern "C"
 
 namespace mojo {
 
-CorePrivate::~CorePrivate() {
+Core::~Core() {
 }
 
-void CorePrivate::Init(CorePrivate* core) {
+// static
+void Core::Init(Core* core) {
   assert(!g_core);
   g_core = core;
+}
+
+// static
+Core* Core::Get() {
+  return g_core;
+}
+
+// static
+void Core::Reset() {
+  g_core = NULL;
 }
 
 }  // namespace mojo

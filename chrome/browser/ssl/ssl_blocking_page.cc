@@ -41,6 +41,7 @@
 #include "base/win/windows_version.h"
 #endif
 
+using base::ASCIIToUTF16;
 using base::TimeTicks;
 using content::InterstitialPage;
 using content::NavigationController;
@@ -74,6 +75,7 @@ enum SSLBlockingPageEvent {
   PROCEED_INTERNAL_HOSTNAME,
   SHOW_NEW_SITE,
   PROCEED_NEW_SITE,
+  PROCEED_MANUAL_NONOVERRIDABLE,
   UNUSED_BLOCKING_PAGE_EVENT,
 };
 
@@ -92,6 +94,9 @@ void RecordSSLBlockingPageDetailedStats(
   UMA_HISTOGRAM_ENUMERATION("interstitial.ssl_error_type",
      SSLErrorInfo::NetErrorToErrorType(cert_error), SSLErrorInfo::END_OF_ENUM);
   if (!overridable) {
+    if (proceed) {
+      RecordSSLBlockingPageEventStats(PROCEED_MANUAL_NONOVERRIDABLE);
+    }
     // Overridable is false if the user didn't have any option except to turn
     // back. If that's the case, don't record some of the metrics.
     return;
@@ -196,7 +201,7 @@ SSLBlockingPage::~SSLBlockingPage() {
 }
 
 std::string SSLBlockingPage::GetHTMLContents() {
-  DictionaryValue strings;
+  base::DictionaryValue strings;
   int resource_id;
   if (overridable_ && !strict_enforcement_) {
     // Let's build the overridable error page.
@@ -416,7 +421,7 @@ void SSLBlockingPage::NotifyAllowCertificate() {
 
 // static
 void SSLBlockingPage::SetExtraInfo(
-    DictionaryValue* strings,
+    base::DictionaryValue* strings,
     const std::vector<base::string16>& extra_info) {
   DCHECK_LT(extra_info.size(), 5U);  // We allow 5 paragraphs max.
   const char* keys[5] = {

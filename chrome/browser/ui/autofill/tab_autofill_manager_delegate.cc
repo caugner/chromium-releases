@@ -9,6 +9,7 @@
 #include "chrome/browser/autofill/autofill_cc_infobar_delegate.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/password_manager/password_generation_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_controller.h"
@@ -144,6 +145,14 @@ void TabAutofillManagerDelegate::UpdateAutofillPopupDataListValues(
 void TabAutofillManagerDelegate::HideAutofillPopup() {
   if (popup_controller_.get())
     popup_controller_->Hide();
+
+  // Password generation popups behave in the same fashion and should also
+  // be hidden.
+  PasswordGenerationManager* generation_manager =
+      ChromePasswordManagerClient::GetGenerationManagerFromWebContents(
+          web_contents_);
+  if (generation_manager)
+    generation_manager->HidePopup();
 }
 
 bool TabAutofillManagerDelegate::IsAutocompleteEnabled() {
@@ -180,7 +189,8 @@ void TabAutofillManagerDelegate::WebContentsDestroyed(
 void TabAutofillManagerDelegate::DetectAccountCreationForms(
     const std::vector<autofill::FormStructure*>& forms) {
   PasswordGenerationManager* manager =
-      PasswordGenerationManager::FromWebContents(web_contents_);
+      ChromePasswordManagerClient::GetGenerationManagerFromWebContents(
+          web_contents_);
   if (manager)
     manager->DetectAccountCreationForms(forms);
 }

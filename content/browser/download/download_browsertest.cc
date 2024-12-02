@@ -11,6 +11,8 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/platform_thread.h"
+#include "base/time/time.h"
 #include "content/browser/byte_stream.h"
 #include "content/browser/download/download_file_factory.h"
 #include "content/browser/download/download_file_impl.h"
@@ -350,6 +352,7 @@ class TestShellDownloadManagerDelegate : public ShellDownloadManagerDelegate {
  public:
   TestShellDownloadManagerDelegate()
       : delay_download_open_(false) {}
+  virtual ~TestShellDownloadManagerDelegate() {}
 
   virtual bool ShouldOpenDownload(
       DownloadItem* item,
@@ -370,8 +373,6 @@ class TestShellDownloadManagerDelegate : public ShellDownloadManagerDelegate {
     callbacks->swap(delayed_callbacks_);
   }
  private:
-  virtual ~TestShellDownloadManagerDelegate() {}
-
   bool delay_download_open_;
   std::vector<DownloadOpenDelayedCallback> delayed_callbacks_;
 };
@@ -522,12 +523,12 @@ class DownloadContentTest : public ContentBrowserTest {
   virtual void SetUpOnMainThread() OVERRIDE {
     ASSERT_TRUE(downloads_directory_.CreateUniqueTempDir());
 
-    TestShellDownloadManagerDelegate* delegate =
-        new TestShellDownloadManagerDelegate();
-    delegate->SetDownloadBehaviorForTesting(downloads_directory_.path());
+    test_delegate_.reset(new TestShellDownloadManagerDelegate());
+    test_delegate_->SetDownloadBehaviorForTesting(downloads_directory_.path());
     DownloadManager* manager = DownloadManagerForShell(shell());
-    manager->SetDelegate(delegate);
-    delegate->SetDownloadManager(manager);
+    manager->GetDelegate()->Shutdown();
+    manager->SetDelegate(test_delegate_.get());
+    test_delegate_->SetDownloadManager(manager);
 
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
@@ -538,10 +539,8 @@ class DownloadContentTest : public ContentBrowserTest {
         base::Bind(&URLRequestMockHTTPJob::AddUrlHandler, mock_base));
   }
 
-  TestShellDownloadManagerDelegate* GetDownloadManagerDelegate(
-      DownloadManager* manager) {
-    return static_cast<TestShellDownloadManagerDelegate*>(
-        manager->GetDelegate());
+  TestShellDownloadManagerDelegate* GetDownloadManagerDelegate() {
+    return test_delegate_.get();
   }
 
   // Create a DownloadTestObserverTerminal that will wait for the
@@ -699,6 +698,7 @@ class DownloadContentTest : public ContentBrowserTest {
 
   // Location of the downloads directory for these tests
   base::ScopedTempDir downloads_directory_;
+  scoped_ptr<TestShellDownloadManagerDelegate> test_delegate_;
 };
 
 IN_PROC_BROWSER_TEST_F(DownloadContentTest, DownloadCancelled) {
@@ -857,7 +857,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, CancelAtRelease) {
   DownloadManagerImpl* download_manager(DownloadManagerForShell(shell()));
 
   // Mark delegate for delayed open.
-  GetDownloadManagerDelegate(download_manager)->SetDelayedOpen(true);
+  GetDownloadManagerDelegate()->SetDelayedOpen(true);
 
   // Setup new factory.
   DownloadFileWithDelayFactory* file_factory =
@@ -898,7 +898,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, CancelAtRelease) {
 
   // Need to complete open test.
   std::vector<DownloadOpenDelayedCallback> delayed_callbacks;
-  GetDownloadManagerDelegate(download_manager)->GetDelayedCallbacks(
+  GetDownloadManagerDelegate()->GetDelayedCallbacks(
       &delayed_callbacks);
   ASSERT_EQ(1u, delayed_callbacks.size());
   delayed_callbacks[0].Run(true);
@@ -944,7 +944,20 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, ShutdownInProgress) {
     EXPECT_CALL(item_observer, OnDownloadDestroyed(items[0]))
         .WillOnce(Return());
   }
+
+  // See http://crbug.com/324525.  If we have a refcount release/post task
+  // race, the second post will stall the IO thread long enough so that we'll
+  // lose the race and crash.  The first stall is just to give the UI thread
+  // a chance to get the second stall onto the IO thread queue after the cancel
+  // message created by Shutdown and before the notification callback
+  // created by the IO thread in canceling the request.
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          base::Bind(&base::PlatformThread::Sleep,
+                                     base::TimeDelta::FromMilliseconds(25)));
   DownloadManagerForShell(shell())->Shutdown();
+  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
+                          base::Bind(&base::PlatformThread::Sleep,
+                                     base::TimeDelta::FromMilliseconds(25)));
   items.clear();
 }
 
@@ -954,7 +967,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, ShutdownAtRelease) {
   DownloadManagerImpl* download_manager(DownloadManagerForShell(shell()));
 
   // Mark delegate for delayed open.
-  GetDownloadManagerDelegate(download_manager)->SetDelayedOpen(true);
+  GetDownloadManagerDelegate()->SetDelayedOpen(true);
 
   // Setup new factory.
   DownloadFileWithDelayFactory* file_factory =

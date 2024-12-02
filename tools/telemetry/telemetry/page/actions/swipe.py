@@ -3,10 +3,10 @@
 # found in the LICENSE file.
 import os
 
-from telemetry.page.actions import gesture_action
+from telemetry.page.actions.gesture_action import GestureAction
 from telemetry.page.actions import page_action
 
-class SwipeAction(gesture_action.GestureAction):
+class SwipeAction(GestureAction):
   def __init__(self, attributes=None):
     super(SwipeAction, self).__init__(attributes)
     self._SetTimelineMarkerBaseName('SwipeAction::RunAction')
@@ -22,6 +22,11 @@ class SwipeAction(gesture_action.GestureAction):
       raise page_action.PageActionNotSupported(
           'Synthetic swipe not supported for this browser')
 
+    if (GestureAction.GetGestureSourceTypeFromOptions(tab) ==
+        'chrome.gpuBenchmarking.MOUSE_INPUT'):
+      raise page_action.PageActionNotSupported(
+          'Swipe page action does not support mouse input')
+
     # TODO(dominikg): Query synthetic gesture target to check if touch is
     #                 supported.
 
@@ -36,6 +41,7 @@ class SwipeAction(gesture_action.GestureAction):
     top_start_percentage = 0.5
     direction = 'left'
     distance = 100
+    speed = 800
     if hasattr(self, 'left_start_percentage'):
       left_start_percentage = self.left_start_percentage
     if hasattr(self, 'top_start_percentage'):
@@ -47,6 +53,8 @@ class SwipeAction(gesture_action.GestureAction):
             'Invalid swipe direction: %s' % direction)
     if hasattr(self, 'distance'):
       distance = self.distance
+    if hasattr(self, 'speed'):
+      speed = self.speed
     if hasattr(self, 'element_function'):
       tab.ExecuteJavaScript("""
           (%s)(function(element) { window.__swipeAction.start(
@@ -54,12 +62,14 @@ class SwipeAction(gesture_action.GestureAction):
                left_start_percentage: %s,
                top_start_percentage: %s,
                direction: '%s',
-               distance: %s })
+               distance: %s,
+               speed: %s })
              });""" % (self.element_function,
                        left_start_percentage,
                        top_start_percentage,
                        direction,
-                       distance))
+                       distance,
+                       speed))
     else:
       tab.ExecuteJavaScript("""
           window.__swipeAction.start(
@@ -67,11 +77,13 @@ class SwipeAction(gesture_action.GestureAction):
             left_start_percentage: %s,
             top_start_percentage: %s,
             direction: '%s',
-            distance: %s });"""
+            distance: %s,
+            speed: %s });"""
         % (left_start_percentage,
            top_start_percentage,
            direction,
-           distance))
+           distance,
+           speed))
 
     tab.WaitForJavaScriptExpression('window.__swipeActionDone', 60)
 

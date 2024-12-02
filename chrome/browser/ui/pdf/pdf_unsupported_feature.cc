@@ -45,11 +45,11 @@
 #include "base/win/metro.h"
 #endif
 
+using base::UserMetricsAction;
 using content::InterstitialPage;
 using content::OpenURLParams;
 using content::PluginService;
 using content::Referrer;
-using content::UserMetricsAction;
 using content::WebContents;
 using content::WebPluginInfo;
 
@@ -109,9 +109,9 @@ void PDFEnableAdobeReaderPromptDelegate::Accept() {
   content::RecordAction(UserMetricsAction("PDF_EnableReaderInfoBarOK"));
   PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile_).get();
   plugin_prefs->EnablePluginGroup(
-      true, ASCIIToUTF16(PluginMetadata::kAdobeReaderGroupName));
+      true, base::ASCIIToUTF16(PluginMetadata::kAdobeReaderGroupName));
   plugin_prefs->EnablePluginGroup(
-      false, ASCIIToUTF16(ChromeContentClient::kPDFPluginName));
+      false, base::ASCIIToUTF16(ChromeContentClient::kPDFPluginName));
 }
 
 void PDFEnableAdobeReaderPromptDelegate::Cancel() {
@@ -173,7 +173,7 @@ class PDFUnsupportedFeatureInterstitial
  protected:
   // InterstitialPageDelegate implementation.
   virtual std::string GetHTMLContents() OVERRIDE {
-    DictionaryValue strings;
+    base::DictionaryValue strings;
     strings.SetString(
         "title",
         l10n_util::GetStringUTF16(IDS_READER_OUT_OF_DATE_BLOCKING_PAGE_TITLE));
@@ -216,7 +216,7 @@ class PDFUnsupportedFeatureInterstitial
       content::RecordAction(
           UserMetricsAction("PDF_ReaderInterstitialIgnore"));
       // Pretend that the plug-in is up-to-date so that we don't block it.
-      reader_webplugininfo_.version = ASCIIToUTF16("11.0.0.0");
+      reader_webplugininfo_.version = base::ASCIIToUTF16("11.0.0.0");
       OpenUsingReader(web_contents_, reader_webplugininfo_, NULL);
     } else {
       NOTREACHED();

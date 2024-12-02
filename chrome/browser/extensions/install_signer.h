@@ -38,6 +38,14 @@ struct InstallSignature {
   // The date that the signature should expire, in YYYY-MM-DD format.
   std::string expire_date;
 
+  // The time this signature was obtained from the server. Note that this
+  // is computed locally and *not* signed by the server key.
+  base::Time timestamp;
+
+  // The set of ids that the server indicated were invalid (ie not signed).
+  // Note that this is computed locally and *not* signed by the signature.
+  ExtensionIdSet invalid_ids;
+
   InstallSignature();
   ~InstallSignature();
 
@@ -108,6 +116,9 @@ class InstallSigner {
   net::URLRequestContextGetter* context_getter_;
   scoped_ptr<net::URLFetcher> url_fetcher_;
   scoped_ptr<FetcherDelegate> delegate_;
+
+  // The time the request to the server was started.
+  base::Time request_start_time_;
 
   DISALLOW_COPY_AND_ASSIGN(InstallSigner);
 };

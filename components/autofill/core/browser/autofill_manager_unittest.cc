@@ -18,8 +18,8 @@
 #include "base/time/time.h"
 #include "base/tuple.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
+#include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/password_manager/password_manager.h"
-#include "chrome/browser/password_manager/password_manager_delegate_impl.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -52,9 +52,10 @@
 #include "ui/gfx/rect.h"
 #include "url/gurl.h"
 
+using base::ASCIIToUTF16;
+using base::UTF8ToUTF16;
 using content::WebContents;
 using testing::_;
-using blink::WebFormElement;
 
 namespace autofill {
 
@@ -415,12 +416,6 @@ class TestAutofillManager : public AutofillManager {
     autofill_enabled_ = autofill_enabled;
   }
 
-  const std::vector<std::pair<WebFormElement::AutocompleteResult, FormData> >&
-      request_autocomplete_results() const {
-    return request_autocomplete_results_;
-  }
-
-
   void set_expected_submitted_field_types(
       const std::vector<ServerFieldTypeSet>& expected_types) {
     expected_submitted_field_types_ = expected_types;
@@ -441,7 +436,7 @@ class TestAutofillManager : public AutofillManager {
         SCOPED_TRACE(
             base::StringPrintf(
                 "Field %d with value %s", static_cast<int>(i),
-                UTF16ToUTF8(submitted_form->field(i)->value).c_str()));
+                base::UTF16ToUTF8(submitted_form->field(i)->value).c_str()));
         const ServerFieldTypeSet& possible_types =
             submitted_form->field(i)->possible_types();
         EXPECT_EQ(expected_submitted_field_types_[i].size(),
@@ -516,8 +511,6 @@ class TestAutofillManager : public AutofillManager {
   TestPersonalDataManager* personal_data_;
 
   bool autofill_enabled_;
-  std::vector<std::pair<WebFormElement::AutocompleteResult, FormData> >
-      request_autocomplete_results_;
 
   scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
 

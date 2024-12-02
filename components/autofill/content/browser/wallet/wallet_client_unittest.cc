@@ -293,7 +293,8 @@ const char kErrorTypeMissingInResponse[] =
 
 // The JSON below is used to test against the request payload being sent to
 // Online Wallet. It's indented differently since JSONWriter creates compact
-// JSON from DictionaryValues.
+// JSON from DictionaryValues. NB: The values must be alphabetical to pass
+// the tests.
 
 const char kAcceptLegalDocumentsValidRequest[] =
     "{"
@@ -394,9 +395,11 @@ const char kSaveAddressValidRequest[] =
                 "],"
                 "\"administrative_area_name\":\"save_admin_area_name\","
                 "\"country_name_code\":\"US\","
+                "\"dependent_locality_name\":\"save_dependent_locality_name\","
                 "\"locality_name\":\"save_locality_name\","
                 "\"postal_code_number\":\"save_postal_code_number\","
-                "\"recipient_name\":\"save_recipient_name\""
+                "\"recipient_name\":\"save_recipient_name\","
+                "\"sorting_code\":\"save_sorting_code\""
             "}"
         "},"
         "\"use_minimal_addresses\":false"
@@ -417,9 +420,11 @@ const char kSaveInstrumentValidRequest[] =
                     "],"
                     "\"administrative_area_name\":\"admin_area_name\","
                     "\"country_name_code\":\"US\","
+                    "\"dependent_locality_name\":\"dependent_locality_name\","
                     "\"locality_name\":\"locality_name\","
                     "\"postal_code_number\":\"postal_code_number\","
-                    "\"recipient_name\":\"recipient_name\""
+                    "\"recipient_name\":\"recipient_name\","
+                    "\"sorting_code\":\"sorting_code\""
                 "},"
                 "\"exp_month\":12,"
                 "\"exp_year\":3000,"
@@ -450,9 +455,11 @@ const char kSaveInstrumentAndAddressValidRequest[] =
                     "],"
                     "\"administrative_area_name\":\"admin_area_name\","
                     "\"country_name_code\":\"US\","
+                    "\"dependent_locality_name\":\"dependent_locality_name\","
                     "\"locality_name\":\"locality_name\","
                     "\"postal_code_number\":\"postal_code_number\","
-                    "\"recipient_name\":\"recipient_name\""
+                    "\"recipient_name\":\"recipient_name\","
+                    "\"sorting_code\":\"sorting_code\""
                 "},"
                 "\"exp_month\":12,"
                 "\"exp_year\":3000,"
@@ -477,9 +484,11 @@ const char kSaveInstrumentAndAddressValidRequest[] =
                 "],"
                 "\"administrative_area_name\":\"save_admin_area_name\","
                 "\"country_name_code\":\"US\","
+                "\"dependent_locality_name\":\"save_dependent_locality_name\","
                 "\"locality_name\":\"save_locality_name\","
                 "\"postal_code_number\":\"save_postal_code_number\","
-                "\"recipient_name\":\"save_recipient_name\""
+                "\"recipient_name\":\"save_recipient_name\","
+                "\"sorting_code\":\"save_sorting_code\""
             "}"
         "},"
         "\"use_minimal_addresses\":false"
@@ -503,9 +512,11 @@ const char kUpdateAddressValidRequest[] =
                 "],"
                 "\"administrative_area_name\":\"ship_admin_area_name\","
                 "\"country_name_code\":\"US\","
+                "\"dependent_locality_name\":\"ship_dependent_locality_name\","
                 "\"locality_name\":\"ship_locality_name\","
                 "\"postal_code_number\":\"ship_postal_code_number\","
-                "\"recipient_name\":\"ship_recipient_name\""
+                "\"recipient_name\":\"ship_recipient_name\","
+                "\"sorting_code\":\"ship_sorting_code\""
             "}"
         "},"
         "\"use_minimal_addresses\":false"
@@ -526,9 +537,11 @@ const char kUpdateInstrumentAddressValidRequest[] =
             "],"
             "\"administrative_area_name\":\"admin_area_name\","
             "\"country_name_code\":\"US\","
+            "\"dependent_locality_name\":\"dependent_locality_name\","
             "\"locality_name\":\"locality_name\","
             "\"postal_code_number\":\"postal_code_number\","
-            "\"recipient_name\":\"recipient_name\""
+            "\"recipient_name\":\"recipient_name\","
+            "\"sorting_code\":\"sorting_code\""
         "},"
         "\"upgraded_instrument_id\":\"default_instrument_id\","
         "\"use_minimal_addresses\":false"
@@ -549,9 +562,11 @@ const char kUpdateInstrumentAddressWithNameChangeValidRequest[] =
             "],"
             "\"administrative_area_name\":\"admin_area_name\","
             "\"country_name_code\":\"US\","
+            "\"dependent_locality_name\":\"dependent_locality_name\","
             "\"locality_name\":\"locality_name\","
             "\"postal_code_number\":\"postal_code_number\","
-            "\"recipient_name\":\"recipient_name\""
+            "\"recipient_name\":\"recipient_name\","
+            "\"sorting_code\":\"sorting_code\""
         "},"
         "\"upgraded_instrument_id\":\"default_instrument_id\","
         "\"use_minimal_addresses\":false"
@@ -842,14 +857,15 @@ class WalletClientTest : public testing::Test {
 
  private:
   std::string GetData(const std::string& upload_data) {
-    scoped_ptr<Value> root(base::JSONReader::Read(upload_data));
+    scoped_ptr<base::Value> root(base::JSONReader::Read(upload_data));
 
     // If this is not a JSON dictionary, return plain text.
-    if (!root || !root->IsType(Value::TYPE_DICTIONARY))
+    if (!root || !root->IsType(base::Value::TYPE_DICTIONARY))
       return upload_data;
 
     // Remove api_key entry (to prevent accidental leak), return JSON as text.
-    DictionaryValue* dict = static_cast<DictionaryValue*>(root.get());
+    base::DictionaryValue* dict =
+        static_cast<base::DictionaryValue*>(root.get());
     dict->Remove("api_key", NULL);
     std::string clean_upload_data;
     base::JSONWriter::Write(dict, &clean_upload_data);
@@ -1701,25 +1717,11 @@ TEST_F(WalletClientTest, HasRequestInProgress) {
   EXPECT_FALSE(wallet_client_->HasRequestInProgress());
 }
 
-TEST_F(WalletClientTest, PendingRequest) {
-  EXPECT_EQ(0U, wallet_client_->pending_requests_.size());
-
-  // Shouldn't queue the first request.
+TEST_F(WalletClientTest, ErrorResponse) {
+  EXPECT_FALSE(wallet_client_->HasRequestInProgress());
   delegate_.ExpectBaselineMetrics();
   wallet_client_->GetWalletItems();
-  EXPECT_EQ(0U, wallet_client_->pending_requests_.size());
-  testing::Mock::VerifyAndClear(delegate_.metric_logger());
-
-  wallet_client_->GetWalletItems();
-  EXPECT_EQ(1U, wallet_client_->pending_requests_.size());
-
-  delegate_.ExpectLogWalletApiCallDuration(AutofillMetrics::GET_WALLET_ITEMS,
-                                           1);
-  delegate_.ExpectBaselineMetrics();
-  VerifyAndFinishRequest(net::HTTP_OK,
-                         kGetWalletItemsValidRequest,
-                         kGetWalletItemsValidResponse);
-  EXPECT_EQ(0U, wallet_client_->pending_requests_.size());
+  EXPECT_TRUE(wallet_client_->HasRequestInProgress());
   testing::Mock::VerifyAndClear(delegate_.metric_logger());
 
   EXPECT_CALL(delegate_, OnWalletError(
@@ -1729,25 +1731,20 @@ TEST_F(WalletClientTest, PendingRequest) {
   delegate_.ExpectWalletErrorMetric(
       AutofillMetrics::WALLET_SERVICE_UNAVAILABLE);
 
-  // Finish the second request.
   VerifyAndFinishRequest(net::HTTP_INTERNAL_SERVER_ERROR,
                          kGetWalletItemsValidRequest,
                          kErrorResponse);
 }
 
-TEST_F(WalletClientTest, CancelRequests) {
-  ASSERT_EQ(0U, wallet_client_->pending_requests_.size());
+TEST_F(WalletClientTest, CancelRequest) {
+  EXPECT_FALSE(wallet_client_->HasRequestInProgress());
   delegate_.ExpectLogWalletApiCallDuration(AutofillMetrics::GET_WALLET_ITEMS,
                                            0);
   delegate_.ExpectBaselineMetrics();
 
   wallet_client_->GetWalletItems();
-  wallet_client_->GetWalletItems();
-  wallet_client_->GetWalletItems();
-  EXPECT_EQ(2U, wallet_client_->pending_requests_.size());
-
-  wallet_client_->CancelRequests();
-  EXPECT_EQ(0U, wallet_client_->pending_requests_.size());
+  EXPECT_TRUE(wallet_client_->HasRequestInProgress());
+  wallet_client_->CancelRequest();
   EXPECT_FALSE(wallet_client_->HasRequestInProgress());
 }
 
