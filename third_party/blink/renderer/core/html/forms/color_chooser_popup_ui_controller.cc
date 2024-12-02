@@ -92,8 +92,8 @@ void ColorChooserPopupUIController::WriteDocument(SharedBuffer* data) {
 
 void ColorChooserPopupUIController::WriteColorPickerDocument(
     SharedBuffer* data) {
-  gfx::Rect anchor_rect_in_screen = chrome_client_->ViewportToScreen(
-      client_->ElementRectRelativeToViewport(), frame_->View());
+  gfx::Rect anchor_rect_in_screen = chrome_client_->LocalRootToScreenDIPs(
+      client_->ElementRectRelativeToLocalRoot(), frame_->View());
 
   PagePopupClient::AddString(
       "<!DOCTYPE html><head><meta charset='UTF-8'><meta name='color-scheme' "
@@ -162,8 +162,8 @@ void ColorChooserPopupUIController::WriteColorSuggestionPickerDocument(
     suggestion_values.push_back(
         Color::FromRGBA32(suggestion->color).SerializeAsCanvasColor());
   }
-  gfx::Rect anchor_rect_in_screen = chrome_client_->ViewportToScreen(
-      client_->ElementRectRelativeToViewport(), frame_->View());
+  gfx::Rect anchor_rect_in_screen = chrome_client_->LocalRootToScreenDIPs(
+      client_->ElementRectRelativeToLocalRoot(), frame_->View());
 
   PagePopupClient::AddString(
       "<!DOCTYPE html><head><meta charset='UTF-8'><meta name='color-scheme' "
@@ -280,11 +280,11 @@ void ColorChooserPopupUIController::OpenEyeDropper() {
   frame_->GetBrowserInterfaceBroker().GetInterface(
       eye_dropper_chooser_.BindNewPipeAndPassReceiver(
           frame_->GetTaskRunner(TaskType::kUserInteraction)));
-  eye_dropper_chooser_.set_disconnect_handler(WTF::Bind(
+  eye_dropper_chooser_.set_disconnect_handler(WTF::BindOnce(
       &ColorChooserPopupUIController::EndChooser, WrapWeakPersistent(this)));
   eye_dropper_chooser_->Choose(
-      WTF::Bind(&ColorChooserPopupUIController::EyeDropperResponseHandler,
-                WrapWeakPersistent(this)));
+      WTF::BindOnce(&ColorChooserPopupUIController::EyeDropperResponseHandler,
+                    WrapWeakPersistent(this)));
 }
 
 void ColorChooserPopupUIController::OpenSystemColorChooser() {

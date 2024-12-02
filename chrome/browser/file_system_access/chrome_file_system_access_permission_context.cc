@@ -70,9 +70,9 @@
 #endif
 
 namespace features {
-const base::Feature kFileSystemAccessPersistentPermissions{
-    "kFileSystemAccessPersistentPermissions",
-    base::FEATURE_DISABLED_BY_DEFAULT};
+BASE_FEATURE(kFileSystemAccessPersistentPermissions,
+             "kFileSystemAccessPersistentPermissions",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 }  // namespace features
 
 namespace {
@@ -380,6 +380,8 @@ void DoSafeBrowsingCheckOnUIThread(
 
   sb_service->download_protection_service()->CheckFileSystemAccessWrite(
       std::move(item), std::move(callback));
+#else
+  std::move(callback).Run(safe_browsing::DownloadCheckResult::UNKNOWN);
 #endif
 }
 
@@ -389,7 +391,7 @@ InterpretSafeBrowsingResult(safe_browsing::DownloadCheckResult result) {
   switch (result) {
     // Only allow downloads that are marked as SAFE or UNKNOWN by SafeBrowsing.
     // All other types are going to be blocked. UNKNOWN could be the result of a
-    // failed safe browsing ping.
+    // failed safe browsing ping or if Safe Browsing is not enabled.
     case Result::UNKNOWN:
     case Result::SAFE:
     case Result::ALLOWLISTED_BY_POLICY:
@@ -1176,7 +1178,7 @@ void ChromeFileSystemAccessPermissionContext::ConfirmSensitiveEntryAccess(
     PathType path_type,
     const base::FilePath& path,
     HandleType handle_type,
-    ui::SelectFileDialog::Type dialog_type,
+    UserAction user_action,
     content::GlobalRenderFrameHostId frame_id,
     base::OnceCallback<void(SensitiveEntryResult)> callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -1187,7 +1189,7 @@ void ChromeFileSystemAccessPermissionContext::ConfirmSensitiveEntryAccess(
   // should have a separate Chrome OS only code path to block for example the
   // root of certain external file systems.
   if (path_type == PathType::kExternal) {
-    DidConfirmSensitiveDirectoryAccess(origin, path, handle_type, dialog_type,
+    DidConfirmSensitiveDirectoryAccess(origin, path, handle_type, user_action,
                                        frame_id, std::move(callback),
                                        /*should_block=*/false);
     return;
@@ -1198,7 +1200,7 @@ void ChromeFileSystemAccessPermissionContext::ConfirmSensitiveEntryAccess(
       base::BindOnce(&ShouldBlockAccessToPath, path, handle_type),
       base::BindOnce(&ChromeFileSystemAccessPermissionContext::
                          DidConfirmSensitiveDirectoryAccess,
-                     GetWeakPtr(), origin, path, handle_type, dialog_type,
+                     GetWeakPtr(), origin, path, handle_type, user_action,
                      frame_id, std::move(callback)));
 }
 
@@ -1229,7 +1231,7 @@ void ChromeFileSystemAccessPermissionContext::
         const url::Origin& origin,
         const base::FilePath& path,
         HandleType handle_type,
-        ui::SelectFileDialog::Type dialog_type,
+        UserAction user_action,
         content::GlobalRenderFrameHostId frame_id,
         base::OnceCallback<void(SensitiveEntryResult)> callback,
         bool should_block) {
@@ -1237,7 +1239,7 @@ void ChromeFileSystemAccessPermissionContext::
   if (!should_block) {
     // If attempting to save a file with a dangerous extension, prompt the user
     // to make them confirm they actually want to save the file.
-    if (dialog_type == ui::SelectFileDialog::SELECT_SAVEAS_FILE) {
+    if (user_action == UserAction::kSave) {
       safe_browsing::DownloadFileType::DangerLevel danger_level =
           safe_browsing::FileTypePolicies::GetInstance()->GetFileDangerLevel(
               path, origin.GetURL(),

@@ -328,6 +328,10 @@ namespace shell_integration_linux {
 class LaunchXdgUtilityScopedAllowBaseSyncPrimitives;
 }
 
+namespace tracing {
+class FuchsiaPerfettoProducerConnector;
+}
+
 namespace ui {
 class WindowResizeHelperMac;
 }
@@ -370,6 +374,10 @@ class GetAppOutputScopedAllowBaseSyncPrimitives;
 class JobTaskSource;
 class TaskTracker;
 }  // namespace internal
+
+namespace win {
+class OSInfo;
+}
 
 class AdjustOOMScoreHelper;
 class FileDescriptorWatcher;
@@ -463,6 +471,7 @@ class BASE_EXPORT ScopedAllowBlocking {
   friend class content::RenderWidgetHostViewMac;  // http://crbug.com/121917
   friend class content::ShellPathProvider;
 #if BUILDFLAG(IS_WIN)
+  friend class base::win::OSInfo;
   friend class content::WebContentsImpl;  // http://crbug.com/1262162
 #endif
   friend class content::WebContentsViewMac;
@@ -598,6 +607,7 @@ class BASE_EXPORT ScopedAllowBaseSyncPrimitives {
   friend class syncer::HttpBridge;
   friend class syncer::GetLocalChangesRequest;
   friend class webrtc::DesktopConfigurationMonitor;
+  friend class ::tracing::FuchsiaPerfettoProducerConnector;
 
   // Usage that should be fixed:
   friend class ::NativeBackendKWallet;  // http://crbug.com/125331

@@ -4,6 +4,7 @@
 
 #import "ios/chrome/browser/ui/popup_menu/overflow_menu/destination_usage_history/destination_usage_history.h"
 
+#import "base/ranges/algorithm.h"
 #import "base/strings/string_number_conversions.h"
 #import "base/strings/sys_string_conversions.h"
 #import "base/time/time.h"
@@ -124,8 +125,8 @@ overflow_menu::Destination HighestUnshown(
 void Swap(std::vector<overflow_menu::Destination>& ranking,
           overflow_menu::Destination from,
           overflow_menu::Destination to) {
-  auto from_loc = std::find(ranking.begin(), ranking.end(), from);
-  auto to_loc = std::find(ranking.begin(), ranking.end(), to);
+  auto from_loc = base::ranges::find(ranking, from);
+  auto to_loc = base::ranges::find(ranking, to);
   *from_loc = to;
   *to_loc = from;
 }
@@ -257,9 +258,9 @@ base::Value::List List(Range&& ranking) {
 
   int numClicks = history.FindIntByDottedPath(path).value_or(0) + 1;
 
-  DictionaryPrefUpdate update(self.prefService,
+  ScopedDictPrefUpdate update(self.prefService,
                               prefs::kOverflowMenuDestinationUsageHistory);
-  update->SetIntPath(path, numClicks);
+  update->SetByDottedPath(path, numClicks);
 
   // User's very first time using Smart Sorting.
   if (history.size() == 0)
@@ -269,10 +270,10 @@ base::Value::List List(Range&& ranking) {
   // ahead of time so overflow menu presentation needn't run ranking algorithm
   // each time it presents.
   const base::Value::List* currentRanking = [self fetchCurrentRanking];
-  const base::Value::List newRanking =
+  base::Value::List newRanking =
       [self calculateNewRanking:currentRanking
           numAboveFoldDestinations:numAboveFoldDestinations];
-  update->SetKey(kRankingKey, base::Value(newRanking.Clone()));
+  update->Set(kRankingKey, std::move(newRanking));
 }
 
 #pragma mark - Private
@@ -291,7 +292,7 @@ base::Value::List List(Range&& ranking) {
   int defaultNumClicks =
       (kInitialBufferNumClicks - 1) * (kDampening - 1.0) * 100.0;
   std::string today = base::NumberToString(TodaysDay());
-  DictionaryPrefUpdate update(self.prefService,
+  ScopedDictPrefUpdate update(self.prefService,
                               prefs::kOverflowMenuDestinationUsageHistory);
   const base::Value::Dict& history =
       self.prefService->GetDict(prefs::kOverflowMenuDestinationUsageHistory);
@@ -299,7 +300,7 @@ base::Value::List List(Range&& ranking) {
   for (overflow_menu::Destination destination : kDefaultRanking) {
     const std::string path =
         today + "." + overflow_menu::StringNameForDestination(destination);
-    update->SetIntPath(
+    update->SetByDottedPath(
         path, history.FindIntByDottedPath(path).value_or(0) + defaultNumClicks);
   }
 }

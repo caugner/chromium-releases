@@ -37,9 +37,9 @@ const char kMainFrameProfileType[] = "Navigation.MainFrameProfileType2";
 namespace {
 
 // Kill switch for crbug.com/1362507.
-const base::Feature kStopRecordingIDNA2008Metrics(
-    "StopRecordingIDNA2008Metrics",
-    base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kStopRecordingIDNA2008Metrics,
+             "StopRecordingIDNA2008Metrics",
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 const char* const kSchemeNames[] = {
     "unknown",
@@ -60,6 +60,7 @@ const char* const kSchemeNames[] = {
     "chrome-extension",
     "view-source",
     "externalfile",
+    "isolated-app",
 };
 
 static_assert(std::size(kSchemeNames) == static_cast<int>(Scheme::COUNT),
@@ -68,10 +69,6 @@ static_assert(std::size(kSchemeNames) == static_cast<int>(Scheme::COUNT),
 // Returns the eTLD+1 of `hostname16`. Excludes private registries such as
 // blogspot.com so that test.blogspot.com returns blogspot.com.
 std::u16string GetEtldPlusOne16(const std::u16string& hostname16) {
-  if (base::FeatureList::IsEnabled(kStopRecordingIDNA2008Metrics)) {
-    return std::u16string();
-  }
-
   std::string hostname = base::UTF16ToUTF8(hostname16);
   DCHECK(!hostname.empty());
   std::string etld_plus_one =
@@ -179,6 +176,9 @@ void RecordOmniboxURLNavigation(const GURL& url) {
 
 IDNA2008DeviationCharacter RecordIDNA2008Metrics(
     const std::u16string& hostname16) {
+  if (base::FeatureList::IsEnabled(kStopRecordingIDNA2008Metrics)) {
+    return IDNA2008DeviationCharacter::kNone;
+  }
   if (hostname16.empty()) {
     return IDNA2008DeviationCharacter::kNone;
   }
