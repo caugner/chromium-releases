@@ -4,10 +4,13 @@
 
 #include <tuple>
 
+#include "base/bind.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
+#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings.h"
+#include "chrome/browser/data_reduction_proxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/metrics/subprocess_metrics_provider.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_test_waiter.h"
 #include "chrome/browser/profiles/profile.h"
@@ -16,6 +19,8 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_service_client_test_utils.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_pingback_client.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_util.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_features.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
@@ -26,6 +31,7 @@
 #include "components/data_reduction_proxy/proto/client_config.pb.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/network_service_instance.h"
+#include "content/public/common/network_service_util.h"
 #include "content/public/common/service_manager_connection.h"
 #include "content/public/common/service_names.mojom.h"
 #include "content/public/test/browser_test_utils.h"
@@ -72,7 +78,7 @@ std::unique_ptr<net::test_server::HttpResponse> IncrementRequestCount(
 
 void SimulateNetworkChange(network::mojom::ConnectionType type) {
   if (base::FeatureList::IsEnabled(network::features::kNetworkService) &&
-      !content::IsNetworkServiceRunningInProcess()) {
+      !content::IsInProcessNetworkService()) {
     network::mojom::NetworkServiceTestPtr network_service_test;
     content::ServiceManagerConnection::GetForProcess()
         ->GetConnector()
@@ -443,6 +449,48 @@ class DataReductionProxyFallbackBrowsertest
   net::EmbeddedTestServer secondary_server_;
 };
 
+class TestDataReductionProxyPingbackClient
+    : public DataReductionProxyPingbackClient {
+ public:
+  bool received_valid_pingback() { return received_valid_pingback_; }
+
+ private:
+  void SendPingback(const DataReductionProxyData& data,
+                    const DataReductionProxyPageLoadTiming& timing) override {
+    ASSERT_TRUE(data.used_data_reduction_proxy());
+    ASSERT_EQ(kSessionKey, data.session_key());
+    ASSERT_GT(data.page_id(), 0U);
+    received_valid_pingback_ = true;
+  }
+
+  void SetPingbackReportingFraction(
+      float pingback_reporting_fraction) override {}
+
+  bool received_valid_pingback_ = false;
+};
+
+IN_PROC_BROWSER_TEST_F(DataReductionProxyBrowsertest, PingbackSent) {
+  net::EmbeddedTestServer primary_server;
+  SetConfig(CreateConfigForServer(primary_server));
+
+  // Pingback client is owned by the DRP service.
+  TestDataReductionProxyPingbackClient* pingback_client =
+      new TestDataReductionProxyPingbackClient();
+  DataReductionProxyChromeSettingsFactory::GetForBrowserContext(
+      browser()->profile())
+      ->data_reduction_proxy_service()
+      ->SetPingbackClientForTesting(pingback_client);
+
+  // Proxy will be used, so it shouldn't matter if the host cannot be resolved.
+  ui_test_utils::NavigateToURL(browser(), GURL("http://does.not.resolve/echo"));
+  // EXPECT_THAT(GetBody(), kPrimaryResponse);
+
+  // Navigate away for the metrics to be recorded.
+  ui_test_utils::NavigateToURL(browser(), GURL("about:blank"));
+
+  ASSERT_TRUE(pingback_client->received_valid_pingback());
+}
+
 IN_PROC_BROWSER_TEST_F(DataReductionProxyFallbackBrowsertest,
                        FallbackProxyUsedOnNetError) {
   SetResponseHook(
@@ -593,6 +641,47 @@ IN_PROC_BROWSER_TEST_F(DataReductionProxyFallbackBrowsertest,
   EXPECT_THAT(GetBody(), kDummyBody);
 }
 
+IN_PROC_BROWSER_TEST_F(DataReductionProxyFallbackBrowsertest,
+                       FallbackProxyUsedWhenBlockForLargeDurationSent) {
+  base::HistogramTester histogram_tester;
+  net::EmbeddedTestServer test_server;
+  test_server.RegisterRequestHandler(
+      base::BindRepeating(&BasicResponse, kDummyBody));
+  ASSERT_TRUE(test_server.Start());
+
+  // Sending block=86400 triggers a long bypass event that blocks requests for
+  // a day.
+  SetHeader("block=86400");
+  ui_test_utils::NavigateToURL(browser(),
+                               GetURLWithMockHost(test_server, "/echo"));
+  EXPECT_THAT(GetBody(), kDummyBody);
+  histogram_tester.ExpectUniqueSample("DataReductionProxy.BlockTypePrimary",
+                                      BYPASS_EVENT_TYPE_LONG, 1);
+
+  // Request should still not use proxy.
+  SetHeader("");
+  ui_test_utils::NavigateToURL(browser(),
+                               GetURLWithMockHost(test_server, "/echo"));
+  EXPECT_THAT(GetBody(), kDummyBody);
+}
+
+IN_PROC_BROWSER_TEST_F(DataReductionProxyFallbackBrowsertest,
+                       ProxyBlockedOnAuthError) {
+  base::HistogramTester histogram_tester;
+  net::EmbeddedTestServer test_server;
+  test_server.RegisterRequestHandler(
+      base::BindRepeating(&BasicResponse, kDummyBody));
+  ASSERT_TRUE(test_server.Start());
+
+  SetStatusCode(net::HTTP_PROXY_AUTHENTICATION_REQUIRED);
+
+  ui_test_utils::NavigateToURL(browser(),
+                               GetURLWithMockHost(test_server, "/echo"));
+  EXPECT_THAT(GetBody(), kDummyBody);
+  histogram_tester.ExpectUniqueSample("DataReductionProxy.BlockTypePrimary",
+                                      BYPASS_EVENT_TYPE_MALFORMED_407, 1);
+}
+
 class DataReductionProxyResourceTypeBrowsertest
     : public DataReductionProxyBrowsertest {
  public:
@@ -628,6 +717,46 @@ class DataReductionProxyResourceTypeBrowsertest
   net::EmbeddedTestServer unspecified_server_;
   net::EmbeddedTestServer core_server_;
 };
+
+IN_PROC_BROWSER_TEST_F(DataReductionProxyFallbackBrowsertest,
+                       ProxyBypassedOn502Error) {
+  base::HistogramTester histogram_tester;
+  net::EmbeddedTestServer test_server;
+  test_server.RegisterRequestHandler(
+      base::BindRepeating(&BasicResponse, kDummyBody));
+  ASSERT_TRUE(test_server.Start());
+
+  SetStatusCode(net::HTTP_BAD_GATEWAY);
+
+  ui_test_utils::NavigateToURL(browser(),
+                               GetURLWithMockHost(test_server, "/echo"));
+  EXPECT_THAT(GetBody(), kSecondaryResponse);
+  histogram_tester.ExpectUniqueSample(
+      "DataReductionProxy.BypassTypePrimary",
+      BYPASS_EVENT_TYPE_STATUS_502_HTTP_BAD_GATEWAY, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(DataReductionProxyFallbackBrowsertest,
+                       ProxyShortBypassedOn502ErrorWithFeature) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeatureWithParameters(
+      features::kDataReductionProxyBlockOnBadGatewayResponse,
+      {{"block_duration_seconds", "10"}});
+  base::HistogramTester histogram_tester;
+  net::EmbeddedTestServer test_server;
+  test_server.RegisterRequestHandler(
+      base::BindRepeating(&BasicResponse, kDummyBody));
+  ASSERT_TRUE(test_server.Start());
+
+  SetStatusCode(net::HTTP_BAD_GATEWAY);
+
+  ui_test_utils::NavigateToURL(browser(),
+                               GetURLWithMockHost(test_server, "/echo"));
+  // Both the proxies should be blocked.
+  EXPECT_THAT(GetBody(), kDummyBody);
+  histogram_tester.ExpectUniqueSample("DataReductionProxy.BlockTypePrimary",
+                                      BYPASS_EVENT_TYPE_SHORT, 1);
+}
 
 IN_PROC_BROWSER_TEST_F(DataReductionProxyResourceTypeBrowsertest,
                        CoreProxyUsedForMedia) {
@@ -770,7 +899,7 @@ IN_PROC_BROWSER_TEST_P(DataReductionProxyWarmupURLBrowsertest,
 // First parameter indicate proxy scheme for proxies that are being tested.
 // Second parameter is true if the test proxy server should set via header
 // correctly on the response headers.
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     ,
     DataReductionProxyWarmupURLBrowsertest,
     ::testing::Combine(testing::Values(ProxyServer_ProxyScheme_HTTP,
