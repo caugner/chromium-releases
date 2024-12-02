@@ -69,9 +69,6 @@ class TabProxy : public AutomationResourceProxy,
   // Gets the tabstrip index of the tab.
   bool GetTabIndex(int* index) const WARN_UNUSED_RESULT;
 
-  // Gets the number of constrained window for this tab.
-  bool GetConstrainedWindowCount(int* count) const WARN_UNUSED_RESULT;
-
   // Executes a javascript in a frame's context whose xpath is provided as the
   // first parameter and extract the values from the resulting json string.
   // Examples:
@@ -123,13 +120,6 @@ class TabProxy : public AutomationResourceProxy,
       const GURL& url,
       WindowOpenDisposition disposition) WARN_UNUSED_RESULT;
 
-  // Replaces a vector contents with the redirect chain out of the given URL.
-  // Returns true on success. Failure may be due to being unable to send the
-  // message, parse the response, or a failure of the history system in the
-  // browser.
-  bool GetRedirectsFrom(const GURL& source_url,
-                        std::vector<GURL>* redirects) WARN_UNUSED_RESULT;
-
   // Equivalent to hitting the Back button. This is a synchronous call and
   // hence blocks until the navigation completes.
   AutomationMsg_NavigationResponseValues GoBack() WARN_UNUSED_RESULT;
@@ -177,24 +167,6 @@ class TabProxy : public AutomationResourceProxy,
   // the process_id is 0.
   bool GetProcessID(int* process_id) const WARN_UNUSED_RESULT;
 
-  // Supply or cancel authentication to a login prompt.  These are synchronous
-  // calls and hence block until the load finishes (or another login prompt
-  // appears, in the case of invalid login info).
-  bool SetAuth(const std::wstring& username,
-               const std::wstring& password) WARN_UNUSED_RESULT;
-  bool CancelAuth() WARN_UNUSED_RESULT;
-
-  // Checks if this tab has a login prompt waiting for auth.  This will be
-  // true if a navigation results in a login prompt, and if an attempted login
-  // fails.
-  // Note that this is only valid if you've done a navigation on this same
-  // object; different TabProxy objects can refer to the same Tab.  Calls
-  // that can set this are NavigateToURL, GoBack, and GoForward.
-  // TODO(mpcomplete): we have no way of knowing if auth is needed after either
-  // NavigateToURLAsync, or after appending a tab with an URL that triggers
-  // auth.
-  bool NeedsAuth() const WARN_UNUSED_RESULT;
-
   // Starts a search within the current tab. The parameter |search_string|
   // specifies what string to search for, |forward| specifies whether to search
   // in forward direction, and |match_case| specifies case sensitivity
@@ -220,14 +192,6 @@ class TabProxy : public AutomationResourceProxy,
   // Sends a InspectElement message for the current tab. |x| and |y| are the
   // coordinates that we want to simulate that the user is trying to inspect.
   int InspectElement(int x, int y);
-
-  // Block the thread until the constrained(child) window count changes.
-  // First parameter is the original child window count
-  // The second parameter is updated with the number of new child windows.
-  // The third parameter specifies the timeout length for the wait loop.
-  // Returns false if the count does not change.
-  bool WaitForChildWindowCountToChange(int count, int* new_count,
-      int wait_timeout) WARN_UNUSED_RESULT;
 
   // Gets the number of popups blocked from this tab.
   bool GetBlockedPopupCount(int* count) const WARN_UNUSED_RESULT;
@@ -295,9 +259,6 @@ class TabProxy : public AutomationResourceProxy,
   // this is equivalent to clicking the 'Proceed' button, if false to 'Take me
   // out of there' button.
   bool TakeActionOnSSLBlockingPage(bool proceed) WARN_UNUSED_RESULT;
-
-  // Prints the current page without user intervention.
-  bool PrintNow() WARN_UNUSED_RESULT;
 
   // Sends off an asynchronous request for printing.
   bool PrintAsync() WARN_UNUSED_RESULT;

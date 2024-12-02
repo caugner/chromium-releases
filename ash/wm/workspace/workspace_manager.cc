@@ -11,34 +11,24 @@
 #include "ash/wm/property_util.h"
 #include "ash/wm/shelf_layout_manager.h"
 #include "ash/wm/window_animations.h"
-#include "ash/wm/window_resizer.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/workspace/managed_workspace.h"
 #include "ash/wm/workspace/maximized_workspace.h"
 #include "base/auto_reset.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
-#include "ui/aura/env.h"
 #include "ui/aura/client/aura_constants.h"
+#include "ui/aura/env.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/monitor.h"
-#include "ui/aura/monitor_manager.h"
 #include "ui/aura/window.h"
 #include "ui/base/ui_base_types.h"
-#include "ui/gfx/compositor/layer.h"
-#include "ui/gfx/compositor/layer_animator.h"
-#include "ui/gfx/compositor/scoped_layer_animation_settings.h"
+#include "ui/compositor/layer.h"
+#include "ui/compositor/layer_animator.h"
+#include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/transform.h"
 
 namespace {
-
-// The horizontal margein between workspaces in pixels.
-const int kWorkspaceHorizontalMargin = 50;
-
-// Minimum/maximum scale for overview mode.
-const float kMaxOverviewScale = 0.9f;
-const float kMinOverviewScale = 0.3f;
 
 // Returns a list of all the windows with layers in |result|.
 void BuildWindowList(const std::vector<aura::Window*>& windows,
@@ -48,15 +38,6 @@ void BuildWindowList(const std::vector<aura::Window*>& windows,
       result->push_back(windows[i]);
     BuildWindowList(windows[i]->transient_children(), result);
   }
-}
-
-gfx::Rect AlignRectToGrid(const gfx::Rect& rect, int grid_size) {
-  if (grid_size <= 1)
-    return rect;
-  return gfx::Rect(ash::WindowResizer::AlignToGrid(rect.x(), grid_size),
-                   ash::WindowResizer::AlignToGrid(rect.y(), grid_size),
-                   ash::WindowResizer::AlignToGrid(rect.width(), grid_size),
-                   ash::WindowResizer::AlignToGrid(rect.height(), grid_size));
 }
 
 }
@@ -70,7 +51,6 @@ namespace internal {
 WorkspaceManager::WorkspaceManager(aura::Window* contents_view)
     : contents_view_(contents_view),
       active_workspace_(NULL),
-      is_overview_(false),
       ignored_window_(NULL),
       grid_size_(0),
       shelf_(NULL) {
@@ -84,11 +64,18 @@ WorkspaceManager::~WorkspaceManager() {
 
 bool WorkspaceManager::IsManagedWindow(aura::Window* window) const {
   return window->type() == aura::client::WINDOW_TYPE_NORMAL &&
-         !window->transient_parent() && ash::GetTrackedByWorkspace(window);
+         !window->transient_parent() &&
+         ash::GetTrackedByWorkspace(window) &&
+         !ash::GetPersistsAcrossAllWorkspaces(window);
 }
 
 bool WorkspaceManager::IsManagingWindow(aura::Window* window) const {
   return FindBy(window) != NULL;
+}
+
+bool WorkspaceManager::IsInMaximizedMode() const {
+  return active_workspace_ &&
+      active_workspace_->type() == Workspace::TYPE_MAXIMIZED;
 }
 
 void WorkspaceManager::AddWindow(aura::Window* window) {
@@ -106,9 +93,6 @@ void WorkspaceManager::AddWindow(aura::Window* window) {
     UpdateShelfVisibility();
     return;
   }
-
-  if (wm::IsWindowNormal(window) && grid_size_ > 1)
-    SetWindowBounds(window, AlignBoundsToGrid(window->GetTargetBounds()));
 
   Workspace* workspace = NULL;
   Workspace::Type type_for_window = Workspace::TypeForWindow(window);
@@ -136,25 +120,12 @@ void WorkspaceManager::RemoveWindow(aura::Window* window) {
     return;
   workspace->RemoveWindow(window);
   CleanupWorkspace(workspace);
-  UpdateShelfVisibility();
 }
 
 void WorkspaceManager::SetActiveWorkspaceByWindow(aura::Window* window) {
   Workspace* workspace = FindBy(window);
   if (workspace)
     workspace->Activate();
-}
-
-void WorkspaceManager::SetOverview(bool overview) {
-  if (is_overview_ == overview)
-    return;
-  NOTIMPLEMENTED();
-}
-
-gfx::Rect WorkspaceManager::AlignBoundsToGrid(const gfx::Rect& bounds) {
-  if (grid_size_ <= 1)
-    return bounds;
-  return AlignRectToGrid(bounds, grid_size_);
 }
 
 void WorkspaceManager::UpdateShelfVisibility() {
@@ -166,24 +137,29 @@ WorkspaceManager::WindowState WorkspaceManager::GetWindowState() {
     return WINDOW_STATE_DEFAULT;
 
   // TODO: this code needs to be made multi-monitor aware.
-  gfx::Rect bounds(gfx::Screen::GetMonitorAreaNearestWindow(contents_view_));
+  gfx::Rect bounds(
+      gfx::Screen::GetMonitorNearestWindow(contents_view_).bounds());
   bounds.set_height(bounds.height() - shelf_->shelf_height());
   const aura::Window::Windows& windows(contents_view_->children());
   bool window_overlaps_launcher = false;
+  bool has_maximized_window = false;
   for (aura::Window::Windows::const_iterator i = windows.begin();
        i != windows.end(); ++i) {
-    if (!IsManagingWindow(*i))
-      continue;
     ui::Layer* layer = (*i)->layer();
     if (!layer->GetTargetVisibility() || layer->GetTargetOpacity() == 0.0f)
       continue;
-    if (wm::IsWindowMaximized(*i))
-      return WINDOW_STATE_MAXIMIZED;
-    if (wm::IsWindowFullscreen(*i))
+    if (wm::IsWindowMaximized(*i)) {
+      // An untracked window may still be fullscreen so we keep iterating when
+      // we hit a maximized window.
+      has_maximized_window = true;
+    } else if (wm::IsWindowFullscreen(*i)) {
       return WINDOW_STATE_FULL_SCREEN;
+    }
     if (!window_overlaps_launcher && (*i)->bounds().bottom() > bounds.bottom())
       window_overlaps_launcher = true;
   }
+  if (has_maximized_window)
+    return WINDOW_STATE_MAXIMIZED;
 
   return window_overlaps_launcher ? WINDOW_STATE_WINDOW_OVERLAPS_SHELF :
       WINDOW_STATE_DEFAULT;
@@ -250,6 +226,10 @@ void WorkspaceManager::SetWindowLayerVisibility(
     ui::Layer* layer = windows[i]->layer();
     // Only show the layer for windows that want to be visible.
     if (layer && (!value || windows[i]->TargetVisibility())) {
+      bool animation_disabled =
+          windows[i]->GetProperty(aura::client::kAnimationsDisabledKey);
+      WindowVisibilityAnimationType animation_type =
+          GetWindowVisibilityAnimationType(windows[i]);
       windows[i]->SetProperty(aura::client::kAnimationsDisabledKey,
                               change_type == DONT_ANIMATE);
       bool update_layer = true;
@@ -266,8 +246,9 @@ void WorkspaceManager::SetWindowLayerVisibility(
         layer->SetVisible(value);
       // Reset the animation type so it isn't used in a future hide/show.
       ash::SetWindowVisibilityAnimationType(
-          windows[i], ash::WINDOW_VISIBILITY_ANIMATION_TYPE_DEFAULT);
-      windows[i]->ClearProperty(aura::client::kAnimationsDisabledKey);
+          windows[i], animation_type);
+      windows[i]->SetProperty(aura::client::kAnimationsDisabledKey,
+                              animation_disabled);
     }
   }
 }
@@ -295,8 +276,6 @@ void WorkspaceManager::SetActiveWorkspace(Workspace* workspace) {
                                     last_active ? ANIMATE : DONT_ANIMATE, true);
     UpdateShelfVisibility();
   }
-
-  is_overview_ = false;
 }
 
 // Returns the index of the workspace that contains the |window|.
@@ -329,7 +308,6 @@ void WorkspaceManager::OnTypeOfWorkspacedNeededChanged(aura::Window* window) {
     new_workspace->AddWindowAfter(window, NULL);
   } else {
     // Maximized -> unmaximized; move window to unmaximized workspace.
-    wm::SetOpenWindowSplit(window, false);
     new_workspace = GetManagedWorkspace();
     current_workspace->RemoveWindow(window);
     if (!new_workspace)

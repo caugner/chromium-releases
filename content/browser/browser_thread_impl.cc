@@ -214,6 +214,9 @@ class BrowserThreadMessageLoopProxy : public base::MessageLoopProxy {
     return BrowserThread::CurrentlyOn(id_);
   }
 
+ protected:
+  virtual ~BrowserThreadMessageLoopProxy() {}
+
  private:
   BrowserThread::ID id_;
   DISALLOW_COPY_AND_ASSIGN(BrowserThreadMessageLoopProxy);
@@ -224,6 +227,14 @@ bool BrowserThread::PostBlockingPoolTask(
     const tracked_objects::Location& from_here,
     const base::Closure& task) {
   return g_globals.Get().blocking_pool->PostWorkerTask(from_here, task);
+}
+
+bool BrowserThread::PostBlockingPoolTaskAndReply(
+    const tracked_objects::Location& from_here,
+    const base::Closure& task,
+    const base::Closure& reply) {
+  return g_globals.Get().blocking_pool->PostTaskAndReply(
+      from_here, task, reply);
 }
 
 // static

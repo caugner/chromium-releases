@@ -17,9 +17,11 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
-#include "chrome/browser/extensions/extension_pref_value_map.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
+#include "chrome/browser/extensions/extension_system.h"
+#include "chrome/browser/extensions/extension_system_factory.h"
+#include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/geolocation/chrome_geolocation_permission_context.h"
 #include "chrome/browser/history/history.h"
@@ -33,12 +35,11 @@
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/browser/protector/protector_service_factory.h"
-#include "chrome/browser/search_engines/template_url_fetcher.h"
+#include "chrome/browser/search_engines/template_url_fetcher_factory.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/speech/chrome_speech_recognition_preferences.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
-#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -54,11 +55,6 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "webkit/database/database_tracker.h"
-#include "webkit/fileapi/file_system_context.h"
-#include "webkit/fileapi/file_system_options.h"
-#include "webkit/quota/mock_quota_manager.h"
-#include "webkit/quota/quota_manager.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/proxy_config_service_impl.h"
@@ -102,6 +98,9 @@ class TestExtensionURLRequestContext : public net::URLRequestContext {
     cookie_monster->SetCookieableSchemes(schemes, 1);
     set_cookie_store(cookie_monster);
   }
+
+ private:
+  virtual ~TestExtensionURLRequestContext() {}
 };
 
 class TestExtensionURLRequestContextGetter
@@ -115,6 +114,9 @@ class TestExtensionURLRequestContextGetter
   virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() const {
     return BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
   }
+
+ protected:
+  virtual ~TestExtensionURLRequestContextGetter() {}
 
  private:
   scoped_refptr<net::URLRequestContext> context_;
@@ -195,6 +197,12 @@ TestingProfile::TestingProfile(const FilePath& path,
 }
 
 void TestingProfile::Init() {
+  if (!file_util::PathExists(profile_path_))
+    file_util::CreateDirectory(profile_path_);
+
+  ExtensionSystemFactory::GetInstance()->SetTestingFactory(
+      this, TestExtensionSystem::Build);
+
   profile_dependency_manager_->CreateProfileServices(this, true);
 
 #if defined(ENABLE_NOTIFICATIONS)
@@ -360,10 +368,6 @@ void TestingProfile::BlockUntilTopSitesLoaded() {
   top_sites_loaded_observer.Wait();
 }
 
-void TestingProfile::CreateTemplateURLFetcher() {
-  template_url_fetcher_.reset(new TemplateURLFetcher(this));
-}
-
 static ProfileKeyedService* BuildTemplateURLService(Profile* profile) {
   return new TemplateURLService(profile);
 }
@@ -384,39 +388,6 @@ void TestingProfile::BlockUntilTemplateURLServiceLoaded() {
       content::NotificationService::AllSources());
   turl_model->Load();
   turl_service_load_observer.Wait();
-}
-
-void TestingProfile::CreateExtensionProcessManager() {
-  extension_process_manager_.reset(ExtensionProcessManager::Create(this));
-}
-
-ExtensionService* TestingProfile::CreateExtensionService(
-    const CommandLine* command_line,
-    const FilePath& install_directory,
-    bool autoupdate_enabled) {
-  // Extension pref store, created for use by |extension_prefs_|.
-
-  extension_pref_value_map_.reset(new ExtensionPrefValueMap);
-
-  bool extensions_disabled =
-      command_line && command_line->HasSwitch(switches::kDisableExtensions);
-
-  // Note that the GetPrefs() creates a TestingPrefService, therefore
-  // the extension controlled pref values set in extension_prefs_
-  // are not reflected in the pref service. One would need to
-  // inject a new ExtensionPrefStore(extension_pref_value_map_.get(), false).
-  extension_prefs_.reset(
-      new ExtensionPrefs(GetPrefs(),
-                         install_directory,
-                         extension_pref_value_map_.get()));
-  extension_prefs_->Init(extensions_disabled);
-  extension_service_.reset(new ExtensionService(this,
-                                                command_line,
-                                                install_directory,
-                                                extension_prefs_.get(),
-                                                autoupdate_enabled,
-                                                true));
-  return extension_service_.get();
 }
 
 FilePath TestingProfile::GetPath() {
@@ -467,27 +438,19 @@ VisitedLinkMaster* TestingProfile::GetVisitedLinkMaster() {
 }
 
 ExtensionService* TestingProfile::GetExtensionService() {
-  return extension_service_.get();
+  return ExtensionSystem::Get(this)->extension_service();
 }
 
 UserScriptMaster* TestingProfile::GetUserScriptMaster() {
-  return NULL;
-}
-
-ExtensionDevToolsManager* TestingProfile::GetExtensionDevToolsManager() {
-  return NULL;
+  return ExtensionSystem::Get(this)->user_script_master();
 }
 
 ExtensionProcessManager* TestingProfile::GetExtensionProcessManager() {
-  return extension_process_manager_.get();
-}
-
-ExtensionMessageService* TestingProfile::GetExtensionMessageService() {
-  return NULL;
+  return ExtensionSystem::Get(this)->process_manager();
 }
 
 ExtensionEventRouter* TestingProfile::GetExtensionEventRouter() {
-  return NULL;
+  return ExtensionSystem::Get(this)->event_router();
 }
 
 void TestingProfile::SetExtensionSpecialStoragePolicy(
@@ -500,10 +463,6 @@ TestingProfile::GetExtensionSpecialStoragePolicy() {
   if (!extension_special_storage_policy_.get())
     extension_special_storage_policy_ = new ExtensionSpecialStoragePolicy(NULL);
   return extension_special_storage_policy_.get();
-}
-
-LazyBackgroundTaskQueue* TestingProfile::GetLazyBackgroundTaskQueue() {
-  return NULL;
 }
 
 FaviconService* TestingProfile::GetFaviconService(ServiceAccessType access) {
@@ -542,12 +501,14 @@ WebDataService* TestingProfile::GetWebDataServiceWithoutCreating() {
 }
 
 void TestingProfile::SetPrefService(PrefService* prefs) {
+#if defined(ENABLE_PROTECTOR_SERVICE)
   // ProtectorService binds itself very closely to the PrefService at the moment
   // of Profile creation and watches pref changes to update their backup.
   // For tests that replace the PrefService after TestingProfile creation,
   // ProtectorService is disabled to prevent further invalid memory accesses.
   protector::ProtectorServiceFactory::GetInstance()->
       SetTestingFactory(this, NULL);
+#endif
   prefs_.reset(prefs);
 }
 
@@ -564,10 +525,6 @@ PrefService* TestingProfile::GetPrefs() {
     CreateTestingPrefService();
   }
   return prefs_.get();
-}
-
-TemplateURLFetcher* TestingProfile::GetTemplateURLFetcher() {
-  return template_url_fetcher_.get();
 }
 
 history::TopSites* TestingProfile::GetTopSites() {
@@ -588,8 +545,10 @@ net::URLRequestContextGetter* TestingProfile::GetRequestContext() {
 
 net::URLRequestContextGetter* TestingProfile::GetRequestContextForRenderProcess(
     int renderer_child_id) {
-  if (extension_service_.get()) {
-    const Extension* installed_app = extension_service_->
+  ExtensionService* extension_service =
+      ExtensionSystem::Get(this)->extension_service();
+  if (extension_service) {
+    const Extension* installed_app = extension_service->
         GetInstalledAppForRenderer(renderer_child_id);
     if (installed_app != NULL && installed_app->is_storage_isolated())
       return GetRequestContextForIsolatedApp(installed_app->id());
@@ -608,7 +567,7 @@ void TestingProfile::CreateRequestContext() {
 void TestingProfile::ResetRequestContext() {
   // Any objects holding live URLFetchers should be deleted before the request
   // context is shut down.
-  template_url_fetcher_.reset();
+  TemplateURLFetcherFactory::ShutdownForProfile(this);
 
   request_context_ = NULL;
 }
@@ -619,15 +578,11 @@ net::URLRequestContextGetter* TestingProfile::GetRequestContextForMedia() {
 
 net::URLRequestContextGetter* TestingProfile::GetRequestContextForExtensions() {
   if (!extensions_request_context_)
-      extensions_request_context_ = new TestExtensionURLRequestContextGetter();
+    extensions_request_context_ = new TestExtensionURLRequestContextGetter();
   return extensions_request_context_.get();
 }
 
 net::SSLConfigService* TestingProfile::GetSSLConfigService() {
-  return NULL;
-}
-
-UserStyleSheetWatcher* TestingProfile::GetUserStyleSheetWatcher() {
   return NULL;
 }
 
@@ -730,22 +685,6 @@ void TestingProfile::BlockUntilHistoryProcessesPendingRequests() {
   MessageLoop::current()->Run();
 }
 
-ExtensionInfoMap* TestingProfile::GetExtensionInfoMap() {
-  return NULL;
-}
-
-PromoCounter* TestingProfile::GetInstantPromoCounter() {
-  return NULL;
-}
-
-ChromeURLDataManager* TestingProfile::GetChromeURLDataManager() {
-  if (!chrome_url_data_manager_.get())
-    chrome_url_data_manager_.reset(
-        new ChromeURLDataManager(
-            base::Callback<ChromeURLDataManagerBackend*(void)>()));
-  return chrome_url_data_manager_.get();
-}
-
 chrome_browser_net::Predictor* TestingProfile::GetNetworkPredictor() {
   return NULL;
 }
@@ -775,4 +714,9 @@ void TestingProfile::DestroyWebDataService() {
 
 bool TestingProfile::WasCreatedByVersionOrLater(const std::string& version) {
   return true;
+}
+
+base::Callback<ChromeURLDataManagerBackend*(void)>
+    TestingProfile::GetChromeURLDataManagerBackendGetter() const {
+  return base::Callback<ChromeURLDataManagerBackend*(void)>();
 }

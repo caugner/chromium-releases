@@ -164,11 +164,11 @@ void TabStripModel::InsertTabContentsAt(int index,
 
   FOR_EACH_OBSERVER(TabStripModelObserver, observers_,
                     TabInsertedAt(contents, index, active));
-  TabStripSelectionModel old_model;
-  old_model.Copy(selection_model_);
   if (active) {
-    selection_model_.SetSelectedIndex(index);
-    NotifyIfActiveOrSelectionChanged(selected_contents, false, old_model);
+    TabStripSelectionModel new_model;
+    new_model.Copy(selection_model_);
+    new_model.SetSelectedIndex(index);
+    SetSelection(new_model, NOTIFY_DEFAULT);
   }
 }
 
@@ -218,19 +218,18 @@ TabContentsWrapper* TabStripModel::DiscardTabContentsAt(int index) {
                               NULL /* base_tab_contents */,
                               NULL /* session_storage_namespace */));
   TabContentsWrapper* old_contents = GetContentsAt(index);
-  NavigationEntry* old_nav_entry =
-      old_contents->web_contents()->GetController().GetActiveEntry();
-  if (old_nav_entry) {
-    // Set the new tab contents to reload this URL when clicked.
-    // This also allows the tab to keep drawing the favicon and page title.
-    NavigationEntry* new_nav_entry = NavigationEntry::Create(*old_nav_entry);
-    std::vector<NavigationEntry*> entries;
-    entries.push_back(new_nav_entry);
-    null_contents->web_contents()->GetController().Restore(0, false, &entries);
-  }
+  // Copy over the state from the navigation controller so we preserve the
+  // back/forward history and continue to display the correct title/favicon.
+  null_contents->web_contents()->GetController().CopyStateFrom(
+      old_contents->web_contents()->GetController());
+  // Replace the tab we're discarding with the null version.
   ReplaceTabContentsAt(index, null_contents);
   // Mark the tab so it will reload when we click.
   contents_data_[index]->discarded = true;
+  // Discard the old tab's renderer.
+  // TODO(jamescook): This breaks script connections with other tabs.
+  // We need to find a different approach that doesn't do that, perhaps based
+  // on navigation to swappedout://.
   delete old_contents;
   return null_contents;
 }
@@ -263,6 +262,7 @@ TabContentsWrapper* TabStripModel::DetachTabContentsAt(int index) {
     TabStripSelectionModel old_model;
     old_model.Copy(selection_model_);
     if (index == old_active) {
+      NotifyIfTabDeactivated(removed_contents);
       if (!selection_model_.empty()) {
         // The active tab was removed, but there is still something selected.
         // Move the active and anchor to the first selected index.
@@ -273,7 +273,7 @@ TabContentsWrapper* TabStripModel::DetachTabContentsAt(int index) {
         // selection and send out notification.
         selection_model_.SetSelectedIndex(next_selected_index);
       }
-      NotifyIfActiveTabChanged(removed_contents, false);
+      NotifyIfActiveTabChanged(removed_contents, NOTIFY_DEFAULT);
     }
 
     // Sending notification in case the detached tab was selected. Using
@@ -290,20 +290,18 @@ TabContentsWrapper* TabStripModel::DetachTabContentsAt(int index) {
 
 void TabStripModel::ActivateTabAt(int index, bool user_gesture) {
   DCHECK(ContainsIndex(index));
-  TabContentsWrapper* old_contents = GetActiveTabContents();
-  TabStripSelectionModel old_model;
-  old_model.Copy(selection_model_);
-  selection_model_.SetSelectedIndex(index);
-  NotifyIfActiveOrSelectionChanged(old_contents, user_gesture, old_model);
+  TabStripSelectionModel new_model;
+  new_model.Copy(selection_model_);
+  new_model.SetSelectedIndex(index);
+  SetSelection(new_model, user_gesture ? NOTIFY_USER_GESTURE : NOTIFY_DEFAULT);
 }
 
 void TabStripModel::AddTabAtToSelection(int index) {
   DCHECK(ContainsIndex(index));
-  TabContentsWrapper* old_contents = GetActiveTabContents();
-  TabStripSelectionModel old_model;
-  old_model.Copy(selection_model_);
-  selection_model_.AddIndexToSelection(index);
-  NotifyIfActiveOrSelectionChanged(old_contents, false, old_model);
+  TabStripSelectionModel new_model;
+  new_model.Copy(selection_model_);
+  new_model.AddIndexToSelection(index);
+  SetSelection(new_model, NOTIFY_DEFAULT);
 }
 
 void TabStripModel::MoveTabContentsAt(int index,
@@ -562,7 +560,7 @@ void TabStripModel::SetTabPinned(int index, bool pinned) {
       NOTREACHED();
       return;
     }
-    // Changing the pinned state of an app tab doesn't effect it's mini-tab
+    // Changing the pinned state of an app tab doesn't affect its mini-tab
     // status.
     contents_data_[index]->pinned = pinned;
   } else {
@@ -628,43 +626,40 @@ int TabStripModel::ConstrainInsertionIndex(int index, bool mini_tab) {
 
 void TabStripModel::ExtendSelectionTo(int index) {
   DCHECK(ContainsIndex(index));
-  TabContentsWrapper* old_contents = GetActiveTabContents();
-  TabStripSelectionModel old_model;
-  old_model.Copy(selection_model());
-  selection_model_.SetSelectionFromAnchorTo(index);
-  NotifyIfActiveOrSelectionChanged(old_contents, false, old_model);
+  TabStripSelectionModel new_model;
+  new_model.Copy(selection_model_);
+  new_model.SetSelectionFromAnchorTo(index);
+  SetSelection(new_model, NOTIFY_DEFAULT);
 }
 
 void TabStripModel::ToggleSelectionAt(int index) {
   DCHECK(ContainsIndex(index));
-  TabContentsWrapper* old_contents = GetActiveTabContents();
-  TabStripSelectionModel old_model;
-  old_model.Copy(selection_model());
+  TabStripSelectionModel new_model;
+  new_model.Copy(selection_model());
   if (selection_model_.IsSelected(index)) {
     if (selection_model_.size() == 1) {
       // One tab must be selected and this tab is currently selected so we can't
       // unselect it.
       return;
     }
-    selection_model_.RemoveIndexFromSelection(index);
-    selection_model_.set_anchor(index);
-    if (selection_model_.active() == index ||
-        selection_model_.active() == TabStripSelectionModel::kUnselectedIndex)
-      selection_model_.set_active(selection_model_.selected_indices()[0]);
+    new_model.RemoveIndexFromSelection(index);
+    new_model.set_anchor(index);
+    if (new_model.active() == index ||
+        new_model.active() == TabStripSelectionModel::kUnselectedIndex)
+      new_model.set_active(new_model.selected_indices()[0]);
   } else {
-    selection_model_.AddIndexToSelection(index);
-    selection_model_.set_anchor(index);
-    selection_model_.set_active(index);
+    new_model.AddIndexToSelection(index);
+    new_model.set_anchor(index);
+    new_model.set_active(index);
   }
-  NotifyIfActiveOrSelectionChanged(old_contents, false, old_model);
+  SetSelection(new_model, NOTIFY_DEFAULT);
 }
 
 void TabStripModel::AddSelectionFromAnchorTo(int index) {
-  TabContentsWrapper* old_contents = GetActiveTabContents();
-  TabStripSelectionModel old_model;
-  old_model.Copy(selection_model());
-  selection_model_.AddSelectionFromAnchorTo(index);
-  NotifyIfActiveOrSelectionChanged(old_contents, false, old_model);
+  TabStripSelectionModel new_model;
+  new_model.Copy(selection_model_);
+  new_model.AddSelectionFromAnchorTo(index);
+  SetSelection(new_model, NOTIFY_DEFAULT);
 }
 
 bool TabStripModel::IsTabSelected(int index) const {
@@ -675,11 +670,7 @@ bool TabStripModel::IsTabSelected(int index) const {
 void TabStripModel::SetSelectionFromModel(
     const TabStripSelectionModel& source) {
   DCHECK_NE(TabStripSelectionModel::kUnselectedIndex, source.active());
-  TabContentsWrapper* old_contents = GetActiveTabContents();
-  TabStripSelectionModel old_model;
-  old_model.Copy(selection_model());
-  selection_model_.Copy(source);
-  NotifyIfActiveOrSelectionChanged(old_contents, false, old_model);
+  SetSelection(source, NOTIFY_DEFAULT);
 }
 
 void TabStripModel::AddTabContents(TabContentsWrapper* contents,
@@ -869,7 +860,7 @@ void TabStripModel::ExecuteContextMenuCommand(
     case CommandDuplicate: {
       content::RecordAction(UserMetricsAction("TabContextMenu_Duplicate"));
       std::vector<int> indices = GetIndicesForCommand(context_index);
-      // Copy the TabContents off as the indices will change as tabs are
+      // Copy the TabContentsWrapper off as the indices will change as tabs are
       // duplicated.
       std::vector<TabContentsWrapper*> tabs;
       for (size_t i = 0; i < indices.size(); ++i)
@@ -885,7 +876,7 @@ void TabStripModel::ExecuteContextMenuCommand(
     case CommandCloseTab: {
       content::RecordAction(UserMetricsAction("TabContextMenu_CloseTab"));
       std::vector<int> indices = GetIndicesForCommand(context_index);
-      // Copy the TabContents off as the indices will change as we remove
+      // Copy the TabContentsWrapper off as the indices will change as we remove
       // things.
       std::vector<TabContentsWrapper*> tabs;
       for (size_t i = 0; i < indices.size(); ++i)
@@ -1016,7 +1007,7 @@ void TabStripModel::Observe(int type,
                             const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_WEB_CONTENTS_DESTROYED: {
-      // Sometimes, on qemu, it seems like a TabContents object can be destroyed
+      // Sometimes, on qemu, it seems like a WebContents object can be destroyed
       // while we still have a reference to it. We need to break this reference
       // here so we don't crash later.
       int index = GetWrapperIndex(content::Source<WebContents>(source).ptr());
@@ -1036,9 +1027,9 @@ void TabStripModel::Observe(int type,
         TabContentsWrapper* contents = GetTabContentsAt(i);
         if (contents->extension_tab_helper()->extension_app() == extension) {
           // The extension an app tab was created from has been nuked. Delete
-          // the TabContents. Deleting a TabContents results in a notification
-          // of type TAB_CONTENTS_DESTROYED; we do the necessary cleanup in
-          // handling that notification.
+          // the WebContents. Deleting a WebContents results in a notification
+          // of type NOTIFICATION_WEB_CONTENTS_DESTROYED; we do the necessary
+          // cleanup in handling that notification.
 
           InternalCloseTab(contents, i, false);
         }
@@ -1145,9 +1136,9 @@ bool TabStripModel::InternalCloseTabs(const std::vector<int>& in_indices,
   if (indices.empty())
     return retval;
 
-  // Map the indices to TabContents, that way if deleting a tab deletes other
-  // tabs we're ok. Crashes seem to indicate during tab deletion other tabs are
-  // getting removed.
+  // Map the indices to TabContentsWrapper, that way if deleting a tab deletes
+  // other tabs we're ok. Crashes seem to indicate during tab deletion other
+  // tabs are getting removed.
   std::vector<TabContentsWrapper*> tabs;
   for (size_t i = 0; i < indices.size(); ++i)
     tabs.push_back(GetContentsAt(indices[i]));
@@ -1222,8 +1213,8 @@ void TabStripModel::InternalCloseTab(TabContentsWrapper* contents,
   if (create_historical_tabs)
     delegate_->CreateHistoricalTab(contents);
 
-  // Deleting the TabContents will call back to us via NotificationObserver
-  // and detach it.
+  // Deleting the TabContentsWrapper will call back to us via
+  // NotificationObserver and detach it.
   delete contents;
 }
 
@@ -1233,18 +1224,22 @@ TabContentsWrapper* TabStripModel::GetContentsAt(int index) const {
   return contents_data_.at(index)->contents;
 }
 
+void TabStripModel::NotifyIfTabDeactivated(TabContentsWrapper* contents) {
+  if (contents) {
+    FOR_EACH_OBSERVER(TabStripModelObserver, observers_,
+                      TabDeactivated(contents));
+  }
+}
+
 void TabStripModel::NotifyIfActiveTabChanged(
     TabContentsWrapper* old_contents,
-    bool user_gesture) {
+    NotifyTypes notify_types) {
   TabContentsWrapper* new_contents = GetContentsAt(active_index());
   if (old_contents != new_contents) {
-    if (old_contents) {
-      FOR_EACH_OBSERVER(TabStripModelObserver, observers_,
-                        TabDeactivated(old_contents));
-    }
     FOR_EACH_OBSERVER(TabStripModelObserver, observers_,
                       ActiveTabChanged(old_contents, new_contents,
-                                       active_index(), user_gesture));
+                                       active_index(),
+                                       notify_types == NOTIFY_USER_GESTURE));
     // Activating a discarded tab reloads it, so it is no longer discarded.
     contents_data_[active_index()]->discarded = false;
   }
@@ -1252,14 +1247,26 @@ void TabStripModel::NotifyIfActiveTabChanged(
 
 void TabStripModel::NotifyIfActiveOrSelectionChanged(
     TabContentsWrapper* old_contents,
-    bool user_gesture,
+    NotifyTypes notify_types,
     const TabStripSelectionModel& old_model) {
-  NotifyIfActiveTabChanged(old_contents, user_gesture);
+  NotifyIfActiveTabChanged(old_contents, notify_types);
 
   if (!selection_model().Equals(old_model)) {
     FOR_EACH_OBSERVER(TabStripModelObserver, observers_,
                       TabSelectionChanged(this, old_model));
   }
+}
+
+void TabStripModel::SetSelection(
+    const TabStripSelectionModel& new_model,
+    NotifyTypes notify_types) {
+  TabContentsWrapper* old_contents = GetActiveTabContents();
+  TabStripSelectionModel old_model;
+  old_model.Copy(selection_model_);
+  if (new_model.active() != selection_model_.active())
+    NotifyIfTabDeactivated(old_contents);
+  selection_model_.Copy(new_model);
+  NotifyIfActiveOrSelectionChanged(old_contents, notify_types, old_model);
 }
 
 void TabStripModel::SelectRelativeTab(bool next) {

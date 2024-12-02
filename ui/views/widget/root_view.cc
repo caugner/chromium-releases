@@ -11,8 +11,8 @@
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/compositor/layer.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/compositor/layer.h"
 #include "ui/views/focus/view_storage.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
@@ -217,6 +217,8 @@ bool RootView::OnMousePressed(const MouseEvent& event) {
   for (mouse_pressed_handler_ = GetEventHandlerForPoint(e.location());
        mouse_pressed_handler_ && (mouse_pressed_handler_ != this);
        mouse_pressed_handler_ = mouse_pressed_handler_->parent()) {
+    DVLOG(1) << "OnMousePressed testing "
+        << mouse_pressed_handler_->GetClassName();
     if (!mouse_pressed_handler_->enabled()) {
       // Disabled views should eat events instead of propagating them upwards.
       hit_disabled_view = true;
@@ -250,6 +252,8 @@ bool RootView::OnMousePressed(const MouseEvent& event) {
     // forwarded to that view.
     if (handled) {
       last_click_handler_ = mouse_pressed_handler_;
+      DVLOG(1) << "OnMousePressed handled by "
+          << mouse_pressed_handler_->GetClassName();
       return true;
     }
   }
@@ -261,7 +265,7 @@ bool RootView::OnMousePressed(const MouseEvent& event) {
   // entire hierarchy (even as a single-click when sent to a different view),
   // it must be marked as handled to avoid anything happening from default
   // processing if it the first click-part was handled by us.
-  if (last_click_handler_ && e.flags() & ui::EF_IS_DOUBLE_CLICK)
+  if (last_click_handler_ && (e.flags() & ui::EF_IS_DOUBLE_CLICK))
     hit_disabled_view = true;
 
   last_click_handler_ = NULL;
@@ -495,7 +499,7 @@ void RootView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
 
 void RootView::OnPaint(gfx::Canvas* canvas) {
   if (!layer() || !layer()->fills_bounds_opaquely())
-    canvas->sk_canvas()->drawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
+    canvas->DrawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
 
   // TODO (pkotwicz): Remove this once we switch over to Aura desktop.
   // This is needed so that we can set the background behind the RWHV when the

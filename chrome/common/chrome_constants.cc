@@ -122,6 +122,9 @@ const FilePath::CharType kExtensionFileExtension[] = FPL(".crx");
 const FilePath::CharType kExtensionKeyFileExtension[] = FPL(".pem");
 
 // filenames
+#if defined(OS_ANDROID)
+const FilePath::CharType kAndroidCacheFilename[] = FPL("AndroidCache");
+#endif
 const FilePath::CharType kArchivedHistoryFilename[] = FPL("Archived History");
 const FilePath::CharType kCacheDirname[] = FPL("Cache");
 const FilePath::CharType kCRLSetFilename[] =
@@ -200,6 +203,11 @@ extern const int kHighestRendererOomScore = 1000;
 #if defined(OS_WIN)
 // This is used by the PreRead experiment.
 const char kPreReadEnvironmentVariable[] = "CHROME_PRE_READ_EXPERIMENT";
+const wchar_t kMetroChromeUserDataSubDir[] = L"Metro";
+const wchar_t kMetroNavigationAndSearchMessage[] =
+    L"CHROME_METRO_NAV_SEARCH_REQUEST";
+const wchar_t kMetroGetCurrentTabInfoMessage[] =
+    L"CHROME_METRO_GET_CURRENT_TAB_INFO";
 #endif
 
 }  // namespace chrome

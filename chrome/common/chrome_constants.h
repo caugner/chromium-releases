@@ -52,6 +52,9 @@ extern const FilePath::CharType kExtensionFileExtension[];
 extern const FilePath::CharType kExtensionKeyFileExtension[];
 
 // filenames
+#if defined(OS_ANDROID)
+extern const FilePath::CharType kAndroidCacheFilename[];
+#endif
 extern const FilePath::CharType kArchivedHistoryFilename[];
 extern const FilePath::CharType kCacheDirname[];
 extern const FilePath::CharType kCRLSetFilename[];
@@ -130,6 +133,12 @@ extern const int kHighestRendererOomScore;
 #if defined(OS_WIN)
 // This is used by the PreRead experiment.
 extern const char kPreReadEnvironmentVariable[];
+// Used by Metro Chrome to create the profile under a custom subdirectory.
+extern const wchar_t kMetroChromeUserDataSubDir[];
+// Used by Metro Chrome to initiate navigation and search requests.
+extern const wchar_t kMetroNavigationAndSearchMessage[];
+// Used by Metro Chrome to get information about the current tab.
+extern const wchar_t kMetroGetCurrentTabInfoMessage[];
 #endif
 
 }  // namespace chrome

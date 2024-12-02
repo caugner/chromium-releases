@@ -14,6 +14,7 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/string_piece.h"
@@ -394,7 +395,8 @@ bool CellularConfigDocument::LoadFromFile(const FilePath& config_path) {
   if (!file_util::ReadFileToString(config_path, &config))
     return false;
 
-  scoped_ptr<Value> root(base::JSONReader::Read(config, true));
+  scoped_ptr<Value> root(
+      base::JSONReader::Read(config, base::JSON_ALLOW_TRAILING_COMMAS));
   DCHECK(root.get() != NULL);
   if (!root.get() || root->GetType() != Value::TYPE_DICTIONARY) {
     LOG(WARNING) << "Bad cellular config file";
@@ -450,7 +452,7 @@ void MobileSetupUIHTMLSource::StartDataRequest(const std::string& path,
   // If we are activating, shutting down, or logging in, |network| may not
   // be available.
   if (!network || !network->SupportsActivation()) {
-    scoped_refptr<RefCountedBytes> html_bytes(new RefCountedBytes);
+    scoped_refptr<base::RefCountedBytes> html_bytes(new base::RefCountedBytes);
     SendResponse(request_id, html_bytes);
     return;
   }
@@ -744,8 +746,7 @@ bool MobileSetupHandler::ConnectToNetwork(
   if (state_ != PLAN_ACTIVATION_RECONNECTING_OTASP_TRY &&
       state_ != PLAN_ACTIVATION_RECONNECTING &&
       state_ != PLAN_ACTIVATION_RECONNECTING_PAYMENT &&
-      state_ != PLAN_ACTIVATION_RECONNECTING_OTASP)
-    return false;
+      state_ != PLAN_ACTIVATION_RECONNECTING_OTASP) return false;
   if (network)
     LOG(INFO) << "Connecting to: " << network->service_path();
   connection_retry_count_++;
@@ -757,7 +758,7 @@ bool MobileSetupHandler::ConnectToNetwork(
     // with a delay (and try to reconnect if needed).
     BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE,
         base::Bind(&MobileSetupHandler::ContinueConnecting, AsWeakPtr(), delay),
-        delay);
+        base::TimeDelta::FromMilliseconds(delay));
     return false;
   }
   chromeos::CrosLibrary::Get()->GetNetworkLibrary()->
@@ -780,7 +781,7 @@ void MobileSetupHandler::ForceReconnect(
   // Check the network state 3s after we disconnect to make sure.
   BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE,
       base::Bind(&MobileSetupHandler::ContinueConnecting, AsWeakPtr(), delay),
-      delay);
+      base::TimeDelta::FromMilliseconds(delay));
 }
 
 bool MobileSetupHandler::ConnectionTimeout() {
@@ -1185,7 +1186,7 @@ void MobileSetupHandler::ChangeState(chromeos::CellularNetwork* network,
       UMA_HISTOGRAM_COUNTS("Cellular.RetryOTASP", 1);
       BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE,
           base::Bind(&MobileSetupHandler::RetryOTASP, AsWeakPtr()),
-          kOTASPRetryDelay);
+          base::TimeDelta::FromMilliseconds(kOTASPRetryDelay));
       break;
     }
     case PLAN_ACTIVATION_INITIATING_ACTIVATION:
@@ -1402,7 +1403,7 @@ MobileSetupUI::MobileSetupUI(content::WebUI* web_ui)
 
   // Set up the chrome://mobilesetup/ source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  profile->GetChromeURLDataManager()->AddDataSource(html_source);
+  ChromeURLDataManager::AddDataSource(profile, html_source);
 }
 
 void MobileSetupUI::RenderViewCreated(RenderViewHost* host) {

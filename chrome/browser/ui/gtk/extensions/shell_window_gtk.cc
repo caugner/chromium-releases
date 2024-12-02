@@ -19,35 +19,9 @@ ShellWindowGtk::ShellWindowGtk(ExtensionHost* host)
 
   gtk_container_add(GTK_CONTAINER(window_), host_->view()->native_view());
 
+  gtk_window_set_default_size(window_, kDefaultWidth, kDefaultHeight);
+
   const Extension* extension = host_->extension();
-
-  // TOOD(mihaip): restore prior window dimensions and positions on relaunch.
-  gtk_window_set_default_size(
-      window_, extension->launch_width(), extension->launch_height());
-
-  int min_width = extension->launch_min_width();
-  int min_height = extension->launch_min_height();
-  int max_width = extension->launch_max_width();
-  int max_height = extension->launch_max_height();
-  GdkGeometry hints;
-  int hints_mask = 0;
-  if (min_width || min_height) {
-    hints.min_height = min_height;
-    hints.min_width = min_width;
-    hints_mask |= GDK_HINT_MIN_SIZE;
-  }
-  if (max_width || max_height) {
-    hints.max_height = max_height ? max_height : G_MAXINT;
-    hints.max_width = max_width ? max_width : G_MAXINT;
-    hints_mask |= GDK_HINT_MAX_SIZE;
-  }
-  if (hints_mask) {
-    gtk_window_set_geometry_hints(
-        window_,
-        GTK_WIDGET(window_),
-        &hints,
-        static_cast<GdkWindowHints>(hints_mask));
-  }
 
   // TODO(mihaip): Mirror contents of <title> tag in window title
   gtk_window_set_title(window_, extension->name().c_str());
@@ -78,6 +52,10 @@ bool ShellWindowGtk::IsMaximized() const {
 
 bool ShellWindowGtk::IsMinimized() const {
   return (state_ & GDK_WINDOW_STATE_ICONIFIED);
+}
+
+bool ShellWindowGtk::IsFullscreen() const {
+  return false;
 }
 
 gfx::Rect ShellWindowGtk::GetRestoredBounds() const {
@@ -135,6 +113,10 @@ void ShellWindowGtk::SetBounds(const gfx::Rect& bounds) {
   // TODO(mihaip): Do we need the same workaround as BrowserWindowGtk::
   // SetWindowSize in order to avoid triggering fullscreen mode?
   gtk_window_resize(window_, bounds.width(), bounds.height());
+}
+
+void ShellWindowGtk::SetDraggableRegion(SkRegion* region) {
+  // TODO: implement
 }
 
 void ShellWindowGtk::FlashFrame(bool flash) {

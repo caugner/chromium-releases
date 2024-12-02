@@ -154,7 +154,8 @@ class PrerenderContents::TabContentsDelegateImpl
       WebContents* web_contents,
       int route_id,
       WindowContainerType window_container_type,
-      const string16& frame_name) OVERRIDE {
+      const string16& frame_name,
+      const GURL& target_url) OVERRIDE {
     // Since we don't want to permit child windows that would have a
     // window.opener property, terminate prerendering.
     prerender_contents_->Destroy(FINAL_STATUS_CREATE_NEW_WINDOW);
@@ -179,7 +180,7 @@ class PrerenderContents::TabContentsDelegateImpl
     return prerender_contents_->ShouldSuppressDialogs();
   }
 
-  // Commits the History of Pages to the given TabContents.
+  // Commits the History of Pages to the given TabContentsWrapper.
   void CommitHistory(TabContentsWrapper* tab) {
     for (size_t i = 0; i < add_page_vector_.size(); ++i)
       tab->history_tab_helper()->UpdateHistoryForNavigation(
@@ -280,8 +281,7 @@ void PrerenderContents::StartPrerendering(
   InformRenderProcessAboutPrerender(prerender_url_, true,
                                     creator_child_id_);
 
-  WebContents* new_contents = WebContents::Create(
-      profile_, NULL, MSG_ROUTING_NONE, NULL, session_storage_namespace);
+  WebContents* new_contents = CreateWebContents(session_storage_namespace);
   prerender_contents_.reset(new TabContentsWrapper(new_contents));
   content::WebContentsObserver::Observe(new_contents);
 
@@ -316,16 +316,16 @@ void PrerenderContents::StartPrerendering(
   tab_contents_delegate_.reset(new TabContentsDelegateImpl(this));
   new_contents->SetDelegate(tab_contents_delegate_.get());
 
-  // Set the size of the prerender TabContents.
+  // Set the size of the prerender WebContents.
   prerender_contents_->web_contents()->GetView()->SizeContents(
       tab_bounds.size());
 
   // Register as an observer of the RenderViewHost so we get messages.
   render_view_host_observer_.reset(
-      new PrerenderRenderViewHostObserver(this, render_view_host_mutable()));
+      new PrerenderRenderViewHostObserver(this, GetRenderViewHostMutable()));
 
-  child_id_ = render_view_host()->GetProcess()->GetID();
-  route_id_ = render_view_host()->GetRoutingID();
+  child_id_ = GetRenderViewHost()->GetProcess()->GetID();
+  route_id_ = GetRenderViewHost()->GetRoutingID();
 
   // Register this with the ResourceDispatcherHost as a prerender
   // RenderViewHost. This must be done before the Navigate message to catch all
@@ -410,13 +410,10 @@ PrerenderContents::~PrerenderContents() {
     }
   }
 
-  // If we still have a TabContents, clean up anything we need to and then
+  // If we still have a WebContents, clean up anything we need to and then
   // destroy it.
   if (prerender_contents_.get())
     delete ReleasePrerenderContents();
-
-  // The following URLs are no longer rendering.
-  prerender_tracker_->RemovePrerenderURLsOnUIThread(alias_urls_);
 }
 
 void PrerenderContents::Observe(int type,
@@ -457,11 +454,11 @@ void PrerenderContents::Observe(int type,
         content::Details<RenderViewHost> new_render_view_host(details);
         OnRenderViewHostCreated(new_render_view_host.ptr());
 
-        // When a new RenderView is created for a prerendering TabContents,
+        // When a new RenderView is created for a prerendering WebContents,
         // tell the new RenderView it's being used for prerendering before any
         // navigations occur.  Note that this is always triggered before the
         // first navigation, so there's no need to send the message just after
-        // the TabContents is created.
+        // the WebContents is created.
         new_render_view_host->Send(
             new PrerenderMsg_SetIsPrerendering(
                 new_render_view_host->GetRoutingID(),
@@ -487,6 +484,12 @@ void PrerenderContents::Observe(int type,
 
 void PrerenderContents::OnRenderViewHostCreated(
     RenderViewHost* new_render_view_host) {
+}
+
+WebContents* PrerenderContents::CreateWebContents(
+    content::SessionStorageNamespace* session_storage_namespace) {
+  return  WebContents::Create(profile_, NULL, MSG_ROUTING_NONE, NULL,
+                              session_storage_namespace);
 }
 
 void PrerenderContents::OnUpdateFaviconURL(
@@ -521,7 +524,6 @@ bool PrerenderContents::AddAliasURL(const GURL& url) {
 
   alias_urls_.push_back(url);
   InformRenderProcessAboutPrerender(url, true, creator_child_id_);
-  prerender_tracker_->AddPrerenderURLOnUIThread(url);
   return true;
 }
 
@@ -531,7 +533,6 @@ void PrerenderContents::AddAliasURLsFromOtherPrerenderContents(
        it != other_pc->alias_urls_.end();
        ++it) {
     alias_urls_.push_back(*it);
-    prerender_tracker_->AddPrerenderURLOnUIThread(*it);
   }
 }
 
@@ -633,9 +634,9 @@ void PrerenderContents::Destroy(FinalStatus final_status) {
 base::ProcessMetrics* PrerenderContents::MaybeGetProcessMetrics() {
   if (process_metrics_.get() == NULL) {
     // If a PrenderContents hasn't started prerending, don't be fully formed.
-    if (!render_view_host() || !render_view_host()->GetProcess())
+    if (!GetRenderViewHost() || !GetRenderViewHost()->GetProcess())
       return NULL;
-    base::ProcessHandle handle = render_view_host()->GetProcess()->GetHandle();
+    base::ProcessHandle handle = GetRenderViewHost()->GetProcess()->GetHandle();
     if (handle == base::kNullProcessHandle)
       return NULL;
 #if !defined(OS_MACOSX)
@@ -675,11 +676,11 @@ WebContents* PrerenderContents::GetWebContents() {
   return prerender_contents_->web_contents();
 }
 
-RenderViewHost* PrerenderContents::render_view_host_mutable() {
-  return const_cast<RenderViewHost*>(render_view_host());
+RenderViewHost* PrerenderContents::GetRenderViewHostMutable() {
+  return const_cast<RenderViewHost*>(GetRenderViewHost());
 }
 
-const RenderViewHost* PrerenderContents::render_view_host() const {
+const RenderViewHost* PrerenderContents::GetRenderViewHost() const {
   if (!prerender_contents_.get())
     return NULL;
   return prerender_contents_->web_contents()->GetRenderViewHost();

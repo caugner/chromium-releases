@@ -8,10 +8,10 @@
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
-#include "chrome/browser/sync/internal_api/user_share.h"
 #include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/test/test_http_bridge_factory.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "sync/internal_api/user_share.h"
 #include "sync/js/js_reply_handler.h"
 #include "sync/protocol/encryption.pb.h"
 #include "sync/sessions/session_state.h"
@@ -49,8 +49,8 @@ void SyncBackendHostForProfileSyncTest::
   syncable::ModelTypeSet sync_ended;
   if (!fail_initial_download_)
     sync_ended = syncable::ModelTypeSet::All();
-  std::string download_progress_markers[syncable::MODEL_TYPE_COUNT];
-  HandleSyncCycleCompletedOnFrontendLoop(new SyncSessionSnapshot(
+  syncable::ModelTypePayloadMap download_progress_markers;
+  HandleSyncCycleCompletedOnFrontendLoop(SyncSessionSnapshot(
       SyncerStatus(), ErrorCounters(), 0, false,
       sync_ended, download_progress_markers, false, false, 0, 0, 0, 0, 0,
       false, SyncSourceInfo(), false, 0, base::Time::Now(), false));
@@ -92,8 +92,8 @@ void SyncBackendHostForProfileSyncTest::StartConfiguration(
 
     if (!fail_initial_download_)
       sync_ended.Put(syncable::NIGORI);
-    std::string download_progress_markers[syncable::MODEL_TYPE_COUNT];
-    HandleSyncCycleCompletedOnFrontendLoop(new SyncSessionSnapshot(
+    syncable::ModelTypePayloadMap download_progress_markers;
+    HandleSyncCycleCompletedOnFrontendLoop(SyncSessionSnapshot(
         SyncerStatus(), ErrorCounters(), 0, false,
         sync_ended, download_progress_markers, false, false, 0, 0, 0, 0, 0,
         false, SyncSourceInfo(), false, 0, base::Time::Now(), false));

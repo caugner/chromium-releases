@@ -27,9 +27,6 @@
 #include "chrome/browser/sync/glue/chrome_encryptor.h"
 #include "chrome/browser/sync/glue/http_bridge.h"
 #include "chrome/browser/sync/glue/sync_backend_registrar.h"
-#include "chrome/browser/sync/internal_api/base_transaction.h"
-#include "chrome/browser/sync/internal_api/read_transaction.h"
-#include "chrome/browser/sync/notifier/sync_notifier.h"
 #include "chrome/browser/sync/sync_prefs.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -42,9 +39,13 @@
 #include "jingle/notifier/base/notifier_options.h"
 #include "net/base/host_port_pair.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "sync/engine/model_safe_worker.h"
+#include "sync/internal_api/base_transaction.h"
+#include "sync/internal_api/read_transaction.h"
+#include "sync/notifier/sync_notifier.h"
 #include "sync/protocol/encryption.pb.h"
 #include "sync/protocol/sync.pb.h"
-#include "sync/sessions/session_state.h"
+#include "sync/util/experiments.h"
 #include "sync/util/nigori.h"
 
 static const int kSaveChangesIntervalSeconds = 10;
@@ -80,7 +81,7 @@ class SyncBackendHost::Core
   // traffic controller here, forwarding incoming messages to appropriate
   // landing threads.
   virtual void OnSyncCycleCompleted(
-      const sessions::SyncSessionSnapshot* snapshot) OVERRIDE;
+      const sessions::SyncSessionSnapshot& snapshot) OVERRIDE;
   virtual void OnInitializationComplete(
       const WeakHandle<JsBackend>& js_backend,
       bool success) OVERRIDE;
@@ -220,7 +221,7 @@ class SyncBackendHost::Core
   SyncBackendRegistrar* registrar_;
 
   // The timer used to periodically call SaveChanges.
-  base::RepeatingTimer<Core> save_changes_timer_;
+  scoped_ptr<base::RepeatingTimer<Core> > save_changes_timer_;
 
   // Our encryptor, which uses Chrome's encryption functions.
   ChromeEncryptor encryptor_;
@@ -613,8 +614,8 @@ SyncBackendHost::Status SyncBackendHost::GetDetailedStatus() {
   return core_->sync_manager()->GetDetailedStatus();
 }
 
-const SyncSessionSnapshot* SyncBackendHost::GetLastSessionSnapshot() const {
-  return last_snapshot_.get();
+SyncSessionSnapshot SyncBackendHost::GetLastSessionSnapshot() const {
+  return last_snapshot_;
 }
 
 bool SyncBackendHost::HasUnsyncedItems() const {
@@ -656,17 +657,17 @@ void SyncBackendHost::InitCore(const DoInitializeOptions& options) {
 }
 
 void SyncBackendHost::HandleSyncCycleCompletedOnFrontendLoop(
-    SyncSessionSnapshot* snapshot) {
+    const SyncSessionSnapshot& snapshot) {
   if (!frontend_)
     return;
   DCHECK_EQ(MessageLoop::current(), frontend_loop_);
 
-  last_snapshot_.reset(snapshot);
+  last_snapshot_ = snapshot;
 
-  SDVLOG(1) << "Got snapshot " << snapshot->ToString();
+  SDVLOG(1) << "Got snapshot " << snapshot.ToString();
 
   const syncable::ModelTypeSet to_migrate =
-      snapshot->syncer_status.types_needing_local_migration;
+      snapshot.syncer_status().types_needing_local_migration;
   if (!to_migrate.Empty())
     frontend_->OnMigrationNeededForTypes(to_migrate);
 
@@ -685,7 +686,7 @@ void SyncBackendHost::HandleSyncCycleCompletedOnFrontendLoop(
         pending_download_state_->added_types;
     DCHECK(types_to_add.HasAll(added_types));
     const syncable::ModelTypeSet initial_sync_ended =
-        snapshot->initial_sync_ended;
+        snapshot.initial_sync_ended();
     const syncable::ModelTypeSet failed_configuration_types =
         Difference(added_types, initial_sync_ended);
     SDVLOG(1)
@@ -697,7 +698,7 @@ void SyncBackendHost::HandleSyncCycleCompletedOnFrontendLoop(
         << syncable::ModelTypeSetToString(failed_configuration_types);
 
     if (!failed_configuration_types.Empty() &&
-        snapshot->retry_scheduled) {
+        snapshot.retry_scheduled()) {
       // Inform the caller that download failed but we are retrying.
       if (!pending_download_state_->retry_in_progress) {
         pending_download_state_->retry_callback.Run();
@@ -737,16 +738,18 @@ void SyncBackendHost::FinishConfigureDataTypesOnFrontendLoop() {
   SDVLOG(1) << "Syncer in config mode. SBH executing "
             << "FinishConfigureDataTypesOnFrontendLoop";
 
+
+  ModelSafeRoutingInfo routing_info;
+  registrar_->GetModelSafeRoutingInfo(&routing_info);
+  const syncable::ModelTypeSet enabled_types =
+      GetRoutingInfoTypes(routing_info);
+
+  // Update |chrome_sync_notification_bridge_|'s enabled types here as it has
+  // to happen on the UI thread.
+  chrome_sync_notification_bridge_.UpdateEnabledTypes(enabled_types);
+
   if (pending_config_mode_state_->added_types.Empty() &&
       !core_->sync_manager()->InitialSyncEndedForAllEnabledTypes()) {
-
-    syncable::ModelTypeSet enabled_types;
-    ModelSafeRoutingInfo routing_info;
-    registrar_->GetModelSafeRoutingInfo(&routing_info);
-    for (ModelSafeRoutingInfo::const_iterator i = routing_info.begin();
-         i != routing_info.end(); ++i) {
-      enabled_types.Put(i->first);
-    }
 
     // TODO(tim): Log / UMA / count this somehow?
     // Add only the types with empty progress markers. Note: it is possible
@@ -861,14 +864,14 @@ SyncBackendHost::PendingConfigureDataTypesState::
 ~PendingConfigureDataTypesState() {}
 
 void SyncBackendHost::Core::OnSyncCycleCompleted(
-    const SyncSessionSnapshot* snapshot) {
+    const SyncSessionSnapshot& snapshot) {
   if (!sync_loop_)
     return;
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   host_.Call(
       FROM_HERE,
       &SyncBackendHost::HandleSyncCycleCompletedOnFrontendLoop,
-      new SyncSessionSnapshot(*snapshot));
+      snapshot);
 }
 
 
@@ -1006,6 +1009,8 @@ std::string MakeUserAgentForSyncApi() {
   user_agent = "Chrome ";
 #if defined(OS_WIN)
   user_agent += "WIN ";
+#elif defined(OS_CHROMEOS)
+  user_agent += "CROS ";
 #elif defined(OS_LINUX)
   user_agent += "LINUX ";
 #elif defined(OS_FREEBSD)
@@ -1149,7 +1154,7 @@ void SyncBackendHost::Core::DoShutdown(bool sync_disabled) {
   if (!sync_manager_.get())
     return;
 
-  save_changes_timer_.Stop();
+  save_changes_timer_.reset();
   sync_manager_->ShutdownOnSyncThread();
   sync_manager_->RemoveObserver(this);
   sync_manager_.reset();
@@ -1196,7 +1201,9 @@ void SyncBackendHost::Core::StartSavingChanges() {
   if (!sync_loop_)
     return;
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
-  save_changes_timer_.Start(FROM_HERE,
+  DCHECK(!save_changes_timer_.get());
+  save_changes_timer_.reset(new base::RepeatingTimer<Core>());
+  save_changes_timer_->Start(FROM_HERE,
       base::TimeDelta::FromSeconds(kSaveChangesIntervalSeconds),
       this, &Core::SaveChanges);
 }
@@ -1208,9 +1215,9 @@ void SyncBackendHost::Core::SaveChanges() {
 
 void SyncBackendHost::AddExperimentalTypes() {
   CHECK(initialized());
-  syncable::ModelTypeSet to_add;
-  if (core_->sync_manager()->ReceivedExperimentalTypes(&to_add))
-    frontend_->OnDataTypesChanged(to_add);
+  Experiments experiments;
+  if (core_->sync_manager()->ReceivedExperiment(&experiments))
+    frontend_->OnExperimentsChanged(experiments);
 }
 
 void SyncBackendHost::OnNigoriDownloadRetry() {

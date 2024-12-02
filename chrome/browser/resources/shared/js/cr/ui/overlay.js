@@ -2,8 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// This file exists to share common overlay behaviors.
-
+/**
+ * @fileoverview Provides dialog-like behaviors for the tracing UI.
+ */
 cr.define('cr.ui.overlay', function() {
 
   /**
@@ -45,14 +46,21 @@ cr.define('cr.ui.overlay', function() {
       }
     });
 
-    window.addEventListener('resize', function() {
-      var overlay = getTopOverlay();
-      var page = overlay ? overlay.querySelector('.page:not([hidden])') : null;
-      if (!page)
-        return;
+    window.addEventListener('resize', setMaxHeightAllPages);
 
-      page.style.maxHeight = Math.min(0.9 * window.innerHeight, 640) + 'px';
-    });
+    setMaxHeightAllPages();
+  }
+
+  /**
+   * Sets the max-height of all pages in all overlays, based on the window
+   * height.
+   */
+  function setMaxHeightAllPages() {
+    var pages = document.querySelectorAll('.overlay .page');
+
+    var maxHeight = Math.min(0.9 * window.innerHeight, 640) + 'px';
+    for (var i = 0; i < pages.length; i++)
+      pages[i].style.maxHeight = maxHeight;
   }
 
   /**

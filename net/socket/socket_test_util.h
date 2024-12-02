@@ -269,14 +269,14 @@ struct SSLSocketDataProvider {
   SSLSocketDataProvider(IoMode mode, int result);
   ~SSLSocketDataProvider();
 
-  void SetNextProto(SSLClientSocket::NextProto proto);
+  void SetNextProto(NextProto proto);
 
   MockConnect connect;
   SSLClientSocket::NextProtoStatus next_proto_status;
   std::string next_proto;
   std::string server_protos;
   bool was_npn_negotiated;
-  SSLClientSocket::NextProto protocol_negotiated;
+  NextProto protocol_negotiated;
   bool client_cert_sent;
   SSLCertRequestInfo* cert_request_info;
   scoped_refptr<X509Certificate> cert;
@@ -433,14 +433,14 @@ class DeterministicMockTCPClientSocket;
 //
 // For examples of how to use this class, see:
 //   deterministic_socket_data_unittests.cc
-class DeterministicSocketData : public StaticSocketDataProvider,
-    public base::RefCounted<DeterministicSocketData> {
+class DeterministicSocketData
+    : public StaticSocketDataProvider,
+      public base::RefCounted<DeterministicSocketData> {
  public:
   // |reads| the list of MockRead completions.
   // |writes| the list of MockWrite completions.
   DeterministicSocketData(MockRead* reads, size_t reads_count,
                           MockWrite* writes, size_t writes_count);
-  virtual ~DeterministicSocketData();
 
   // Consume all the data up to the give stop point (via SetStop()).
   void Run();
@@ -475,7 +475,12 @@ class DeterministicSocketData : public StaticSocketDataProvider,
   virtual void Reset() OVERRIDE;
   virtual void CompleteRead() OVERRIDE {}
 
+ protected:
+  virtual ~DeterministicSocketData();
+
  private:
+  friend class base::RefCounted<DeterministicSocketData>;
+
   // Invoke the read and write callbacks, if the timing is appropriate.
   void InvokeCallbacks();
 
@@ -496,8 +501,7 @@ class DeterministicSocketData : public StaticSocketDataProvider,
 template<typename T>
 class SocketDataProviderArray {
  public:
-  SocketDataProviderArray() : next_index_(0) {
-  }
+  SocketDataProviderArray() : next_index_(0) {}
 
   T* GetNext() {
     DCHECK_LT(next_index_, data_providers_.size());
@@ -750,9 +754,9 @@ class MockSSLClientSocket : public MockClientSocket, public AsyncSocket {
                                        std::string* server_protos) OVERRIDE;
   virtual bool was_npn_negotiated() const OVERRIDE;
   virtual bool set_was_npn_negotiated(bool negotiated) OVERRIDE;
-  virtual SSLClientSocket::NextProto protocol_negotiated() const OVERRIDE;
   virtual void set_protocol_negotiated(
-      SSLClientSocket::NextProto protocol_negotiated) OVERRIDE;
+      NextProto protocol_negotiated) OVERRIDE;
+  virtual NextProto GetNegotiatedProtocol() const OVERRIDE;
 
   // This MockSocket does not implement the manual async IO feature.
   virtual void OnReadComplete(const MockRead& data) OVERRIDE;
@@ -774,7 +778,7 @@ class MockSSLClientSocket : public MockClientSocket, public AsyncSocket {
   bool new_npn_value_;
   bool was_used_to_convey_data_;
   bool is_protocol_negotiated_set_;
-  SSLClientSocket::NextProto protocol_negotiated_;
+  NextProto protocol_negotiated_;
 };
 
 class MockUDPClientSocket : public DatagramClientSocket,

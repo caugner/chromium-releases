@@ -26,6 +26,8 @@
 
 #if defined(USE_ASH)
 #include "ash/shell.h"
+#elif defined(USE_AURA)
+#include "ui/views/widget/desktop_native_widget_helper_aura.h"
 #endif
 
 namespace {
@@ -72,8 +74,8 @@ void ChromeViewsDelegate::SaveWindowPlacement(const views::Widget* window,
   window_preferences->SetInteger("bottom", bounds.bottom());
   window_preferences->SetBoolean("maximized",
                                  show_state == ui::SHOW_STATE_MAXIMIZED);
-
-  gfx::Rect work_area(gfx::Screen::GetMonitorWorkAreaMatching(bounds));
+  gfx::Rect work_area(
+      gfx::Screen::GetMonitorMatching(bounds).work_area());
   window_preferences->SetInteger("work_area_left", work_area.x());
   window_preferences->SetInteger("work_area_top", work_area.y());
   window_preferences->SetInteger("work_area_right", work_area.right());
@@ -156,4 +158,21 @@ void ChromeViewsDelegate::ReleaseRef() {
 
 int ChromeViewsDelegate::GetDispositionForEvent(int event_flags) {
   return event_utils::DispositionFromEventFlags(event_flags);
+}
+
+#if defined(USE_AURA)
+views::NativeWidgetHelperAura* ChromeViewsDelegate::CreateNativeWidgetHelper(
+    views::NativeWidgetAura* native_widget) {
+#if !defined(USE_ASH)
+  return new views::DesktopNativeWidgetHelperAura(native_widget);
+#else
+  return NULL;
+#endif
+}
+#endif
+
+content::WebContents* ChromeViewsDelegate::CreateWebContents(
+    content::BrowserContext* browser_context,
+    content::SiteInstance* site_instance) {
+  return NULL;
 }

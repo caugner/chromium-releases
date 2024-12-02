@@ -29,6 +29,8 @@ using testing::StrictMock;
 using testing::StrEq;
 using testing::Unused;
 
+namespace media {
+
 class MockAlsaWrapper : public AlsaWrapper {
  public:
   MOCK_METHOD3(DeviceNameHint, int(int card,
@@ -67,8 +69,7 @@ class MockAlsaWrapper : public AlsaWrapper {
 
 class MockAudioSourceCallback : public AudioOutputStream::AudioSourceCallback {
  public:
-  MOCK_METHOD4(OnMoreData, uint32(AudioOutputStream* stream,
-                                  uint8* dest, uint32 max_size,
+  MOCK_METHOD3(OnMoreData, uint32(uint8* dest, uint32 max_size,
                                   AudioBuffersState buffers_state));
   MOCK_METHOD2(OnError, void(AudioOutputStream* stream, int code));
 };
@@ -438,8 +439,7 @@ TEST_F(AlsaPcmOutputStreamTest, StartStop) {
   EXPECT_CALL(mock_alsa_wrapper_, PcmDelay(kFakeHandle, _))
       .Times(2)
       .WillRepeatedly(DoAll(SetArgumentPointee<1>(0), Return(0)));
-  EXPECT_CALL(mock_callback,
-              OnMoreData(test_stream, _, kTestPacketSize, _))
+  EXPECT_CALL(mock_callback, OnMoreData(_, kTestPacketSize, _))
       .Times(2)
       .WillOnce(Return(kTestPacketSize))
       .WillOnce(Return(0));
@@ -557,8 +557,7 @@ TEST_F(AlsaPcmOutputStreamTest, BufferPacket) {
       .WillRepeatedly(Return(0));  // Buffer is full.
 
   // Return a partially filled packet.
-  EXPECT_CALL(mock_callback,
-              OnMoreData(test_stream, _, _, _))
+  EXPECT_CALL(mock_callback, OnMoreData(_, _, _))
       .WillOnce(Return(10));
 
   bool source_exhausted;
@@ -584,7 +583,7 @@ TEST_F(AlsaPcmOutputStreamTest, BufferPacket_Negative) {
       .WillOnce(DoAll(SetArgumentPointee<1>(-1), Return(0)));
   EXPECT_CALL(mock_alsa_wrapper_, PcmAvailUpdate(_))
       .WillRepeatedly(Return(0));  // Buffer is full.
-  EXPECT_CALL(mock_callback, OnMoreData(test_stream, _, _, _))
+  EXPECT_CALL(mock_callback, OnMoreData(_, _, _))
       .WillOnce(Return(10));
 
   bool source_exhausted;
@@ -609,7 +608,7 @@ TEST_F(AlsaPcmOutputStreamTest, BufferPacket_Underrun) {
   EXPECT_CALL(mock_alsa_wrapper_, PcmAvailUpdate(_))
       .WillRepeatedly(Return(0));  // Buffer is full.
   EXPECT_CALL(mock_callback,
-              OnMoreData(test_stream, _, _, AllOf(
+              OnMoreData(_, _, AllOf(
                   Field(&AudioBuffersState::pending_bytes, 0),
                   Field(&AudioBuffersState::hardware_delay_bytes, 0))))
       .WillOnce(Return(10));
@@ -824,3 +823,5 @@ TEST_F(AlsaPcmOutputStreamTest, ScheduleNextWrite_StopStream) {
   test_stream->TransitionTo(AlsaPcmOutputStream::kIsClosed);
   test_stream->Close();
 }
+
+}  // namespace media

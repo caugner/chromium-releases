@@ -20,7 +20,6 @@
 #include "ppapi/proxy/ppb_file_system_proxy.h"
 #include "ppapi/proxy/ppb_flash_menu_proxy.h"
 #include "ppapi/proxy/ppb_flash_message_loop_proxy.h"
-#include "ppapi/proxy/ppb_flash_net_connector_proxy.h"
 #include "ppapi/proxy/ppb_graphics_2d_proxy.h"
 #include "ppapi/proxy/ppb_graphics_3d_proxy.h"
 #include "ppapi/proxy/ppb_host_resolver_private_proxy.h"
@@ -33,8 +32,8 @@
 #include "ppapi/proxy/ppb_url_loader_proxy.h"
 #include "ppapi/proxy/ppb_video_capture_proxy.h"
 #include "ppapi/proxy/ppb_video_decoder_proxy.h"
+#include "ppapi/proxy/ppb_x509_certificate_private_proxy.h"
 #include "ppapi/shared_impl/api_id.h"
-#include "ppapi/shared_impl/function_group_base.h"
 #include "ppapi/shared_impl/host_resource.h"
 #include "ppapi/shared_impl/ppb_audio_config_shared.h"
 #include "ppapi/shared_impl/ppb_input_event_shared.h"
@@ -62,10 +61,118 @@ InterfaceProxy* ResourceCreationProxy::Create(Dispatcher* dispatcher) {
   return new ResourceCreationProxy(dispatcher);
 }
 
-ResourceCreationAPI* ResourceCreationProxy::AsResourceCreationAPI() {
-  return this;
+PP_Resource ResourceCreationProxy::CreateFileIO(PP_Instance instance) {
+  return PPB_FileIO_Proxy::CreateProxyResource(instance);
 }
 
+PP_Resource ResourceCreationProxy::CreateFileRef(PP_Resource file_system,
+                                                 const char* path) {
+  return PPB_FileRef_Proxy::CreateProxyResource(file_system, path);
+}
+
+PP_Resource ResourceCreationProxy::CreateFileSystem(
+    PP_Instance instance,
+    PP_FileSystemType type) {
+  return PPB_FileSystem_Proxy::CreateProxyResource(instance, type);
+}
+
+PP_Resource ResourceCreationProxy::CreateKeyboardInputEvent(
+    PP_Instance instance,
+    PP_InputEvent_Type type,
+    PP_TimeTicks time_stamp,
+    uint32_t modifiers,
+    uint32_t key_code,
+    struct PP_Var character_text) {
+  if (type != PP_INPUTEVENT_TYPE_RAWKEYDOWN &&
+      type != PP_INPUTEVENT_TYPE_KEYDOWN &&
+      type != PP_INPUTEVENT_TYPE_KEYUP &&
+      type != PP_INPUTEVENT_TYPE_CHAR)
+    return 0;
+  InputEventData data;
+  data.event_type = type;
+  data.event_time_stamp = time_stamp;
+  data.event_modifiers = modifiers;
+  data.key_code = key_code;
+  if (character_text.type == PP_VARTYPE_STRING) {
+    StringVar* text_str = StringVar::FromPPVar(character_text);
+    if (!text_str)
+      return 0;
+    data.character_text = text_str->value();
+  }
+
+  return (new PPB_InputEvent_Shared(OBJECT_IS_PROXY,
+                                    instance, data))->GetReference();
+}
+
+PP_Resource ResourceCreationProxy::CreateMouseInputEvent(
+    PP_Instance instance,
+    PP_InputEvent_Type type,
+    PP_TimeTicks time_stamp,
+    uint32_t modifiers,
+    PP_InputEvent_MouseButton mouse_button,
+    const PP_Point* mouse_position,
+    int32_t click_count,
+    const PP_Point* mouse_movement) {
+  if (type != PP_INPUTEVENT_TYPE_MOUSEDOWN &&
+      type != PP_INPUTEVENT_TYPE_MOUSEUP &&
+      type != PP_INPUTEVENT_TYPE_MOUSEMOVE &&
+      type != PP_INPUTEVENT_TYPE_MOUSEENTER &&
+      type != PP_INPUTEVENT_TYPE_MOUSELEAVE)
+    return 0;
+
+  InputEventData data;
+  data.event_type = type;
+  data.event_time_stamp = time_stamp;
+  data.event_modifiers = modifiers;
+  data.mouse_button = mouse_button;
+  data.mouse_position = *mouse_position;
+  data.mouse_click_count = click_count;
+  data.mouse_movement = *mouse_movement;
+
+  return (new PPB_InputEvent_Shared(OBJECT_IS_PROXY,
+                                    instance, data))->GetReference();
+}
+
+PP_Resource ResourceCreationProxy::CreateResourceArray(
+    PP_Instance instance,
+    const PP_Resource elements[],
+    uint32_t size) {
+  PPB_ResourceArray_Shared* object = new PPB_ResourceArray_Shared(
+      OBJECT_IS_PROXY, instance, elements, size);
+  return object->GetReference();
+}
+
+PP_Resource ResourceCreationProxy::CreateURLLoader(PP_Instance instance) {
+  return PPB_URLLoader_Proxy::CreateProxyResource(instance);
+}
+
+PP_Resource ResourceCreationProxy::CreateURLRequestInfo(
+    PP_Instance instance,
+    const PPB_URLRequestInfo_Data& data) {
+  return (new PPB_URLRequestInfo_Shared(OBJECT_IS_PROXY,
+                                        instance, data))->GetReference();
+}
+
+PP_Resource ResourceCreationProxy::CreateWheelInputEvent(
+    PP_Instance instance,
+    PP_TimeTicks time_stamp,
+    uint32_t modifiers,
+    const PP_FloatPoint* wheel_delta,
+    const PP_FloatPoint* wheel_ticks,
+    PP_Bool scroll_by_page) {
+  InputEventData data;
+  data.event_type = PP_INPUTEVENT_TYPE_WHEEL;
+  data.event_time_stamp = time_stamp;
+  data.event_modifiers = modifiers;
+  data.wheel_delta = *wheel_delta;
+  data.wheel_ticks = *wheel_ticks;
+  data.wheel_scroll_by_page = PP_ToBool(scroll_by_page);
+
+  return (new PPB_InputEvent_Shared(OBJECT_IS_PROXY,
+                                    instance, data))->GetReference();
+}
+
+#if !defined(OS_NACL)
 PP_Resource ResourceCreationProxy::CreateAudio(
     PP_Instance instance,
     PP_Resource config_id,
@@ -136,22 +243,6 @@ PP_Resource ResourceCreationProxy::CreateFileChooser(
                                                     accept_mime_types);
 }
 
-PP_Resource ResourceCreationProxy::CreateFileIO(PP_Instance instance) {
-  return PPB_FileIO_Proxy::CreateProxyResource(instance);
-}
-
-PP_Resource ResourceCreationProxy::CreateFileRef(PP_Resource file_system,
-                                                 const char* path) {
-  return PPB_FileRef_Proxy::CreateProxyResource(file_system, path);
-}
-
-PP_Resource ResourceCreationProxy::CreateFileSystem(
-    PP_Instance instance,
-    PP_FileSystemType type) {
-  return PPB_FileSystem_Proxy::CreateProxyResource(instance, type);
-}
-
-#if !defined(OS_NACL)
 PP_Resource ResourceCreationProxy::CreateFlashMenu(
     PP_Instance instance,
     const PP_Flash_Menu* menu_data) {
@@ -162,12 +253,6 @@ PP_Resource ResourceCreationProxy::CreateFlashMessageLoop(
     PP_Instance instance) {
   return PPB_Flash_MessageLoop_Proxy::CreateProxyResource(instance);
 }
-
-PP_Resource ResourceCreationProxy::CreateFlashNetConnector(
-    PP_Instance instance) {
-  return PPB_Flash_NetConnector_Proxy::CreateProxyResource(instance);
-}
-#endif  // !defined(OS_NACL)
 
 PP_Resource ResourceCreationProxy::CreateGraphics2D(PP_Instance instance,
                                                     const PP_Size& size,
@@ -187,63 +272,6 @@ PP_Resource ResourceCreationProxy::CreateImageData(PP_Instance instance,
                                                    PP_Bool init_to_zero) {
   return PPB_ImageData_Proxy::CreateProxyResource(instance, format, size,
                                                   init_to_zero);
-}
-
-PP_Resource ResourceCreationProxy::CreateKeyboardInputEvent(
-    PP_Instance instance,
-    PP_InputEvent_Type type,
-    PP_TimeTicks time_stamp,
-    uint32_t modifiers,
-    uint32_t key_code,
-    struct PP_Var character_text) {
-  if (type != PP_INPUTEVENT_TYPE_RAWKEYDOWN &&
-      type != PP_INPUTEVENT_TYPE_KEYDOWN &&
-      type != PP_INPUTEVENT_TYPE_KEYUP &&
-      type != PP_INPUTEVENT_TYPE_CHAR)
-    return 0;
-  InputEventData data;
-  data.event_type = type;
-  data.event_time_stamp = time_stamp;
-  data.event_modifiers = modifiers;
-  data.key_code = key_code;
-  if (character_text.type == PP_VARTYPE_STRING) {
-    StringVar* text_str = StringVar::FromPPVar(character_text);
-    if (!text_str)
-      return 0;
-    data.character_text = text_str->value();
-  }
-
-  return (new PPB_InputEvent_Shared(OBJECT_IS_PROXY,
-                                    instance, data))->GetReference();
-}
-
-PP_Resource ResourceCreationProxy::CreateMouseInputEvent(
-    PP_Instance instance,
-    PP_InputEvent_Type type,
-    PP_TimeTicks time_stamp,
-    uint32_t modifiers,
-    PP_InputEvent_MouseButton mouse_button,
-    const PP_Point* mouse_position,
-    int32_t click_count,
-    const PP_Point* mouse_movement) {
-  if (type != PP_INPUTEVENT_TYPE_MOUSEDOWN &&
-      type != PP_INPUTEVENT_TYPE_MOUSEUP &&
-      type != PP_INPUTEVENT_TYPE_MOUSEMOVE &&
-      type != PP_INPUTEVENT_TYPE_MOUSEENTER &&
-      type != PP_INPUTEVENT_TYPE_MOUSELEAVE)
-    return 0;
-
-  InputEventData data;
-  data.event_type = type;
-  data.event_time_stamp = time_stamp;
-  data.event_modifiers = modifiers;
-  data.mouse_button = mouse_button;
-  data.mouse_position = *mouse_position;
-  data.mouse_click_count = click_count;
-  data.mouse_movement = *mouse_movement;
-
-  return (new PPB_InputEvent_Shared(OBJECT_IS_PROXY,
-                                    instance, data))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateNetworkMonitor(
@@ -271,15 +299,6 @@ PP_Resource ResourceCreationProxy::CreateGraphics3DRaw(
   return 0;
 }
 
-PP_Resource ResourceCreationProxy::CreateResourceArray(
-    PP_Instance instance,
-    const PP_Resource elements[],
-    uint32_t size) {
-  PPB_ResourceArray_Shared* object = new PPB_ResourceArray_Shared(
-      OBJECT_IS_PROXY, instance, elements, size);
-  return object->GetReference();
-}
-
 PP_Resource ResourceCreationProxy::CreateScrollbar(PP_Instance instance,
                                                    PP_Bool vertical) {
   NOTIMPLEMENTED();  // Not proxied yet.
@@ -290,7 +309,6 @@ PP_Resource ResourceCreationProxy::CreateTalk(PP_Instance instance) {
   return PPB_Talk_Private_Proxy::CreateProxyResource(instance);
 }
 
-#if !defined(OS_NACL)
 PP_Resource ResourceCreationProxy::CreateTCPServerSocketPrivate(
     PP_Instance instance) {
   return PPB_TCPServerSocket_Private_Proxy::CreateProxyResource(instance);
@@ -300,7 +318,6 @@ PP_Resource ResourceCreationProxy::CreateTCPSocketPrivate(
     PP_Instance instance) {
   return PPB_TCPSocket_Private_Proxy::CreateProxyResource(instance);
 }
-#endif  // !defined(OS_NACL)
 
 PP_Resource ResourceCreationProxy::CreateTransport(PP_Instance instance,
                                                    const char* name,
@@ -309,22 +326,9 @@ PP_Resource ResourceCreationProxy::CreateTransport(PP_Instance instance,
   return 0;
 }
 
-#if !defined(OS_NACL)
 PP_Resource ResourceCreationProxy::CreateUDPSocketPrivate(
     PP_Instance instance) {
   return PPB_UDPSocket_Private_Proxy::CreateProxyResource(instance);
-}
-#endif  // !defined(OS_NACL)
-
-PP_Resource ResourceCreationProxy::CreateURLLoader(PP_Instance instance) {
-  return PPB_URLLoader_Proxy::CreateProxyResource(instance);
-}
-
-PP_Resource ResourceCreationProxy::CreateURLRequestInfo(
-    PP_Instance instance,
-    const PPB_URLRequestInfo_Data& data) {
-  return (new PPB_URLRequestInfo_Shared(OBJECT_IS_PROXY,
-                                        instance, data))->GetReference();
 }
 
 PP_Resource ResourceCreationProxy::CreateVideoCapture(PP_Instance instance) {
@@ -351,24 +355,12 @@ PP_Resource ResourceCreationProxy::CreateWebSocket(PP_Instance instance) {
   return 0;
 }
 
-PP_Resource ResourceCreationProxy::CreateWheelInputEvent(
-    PP_Instance instance,
-    PP_TimeTicks time_stamp,
-    uint32_t modifiers,
-    const PP_FloatPoint* wheel_delta,
-    const PP_FloatPoint* wheel_ticks,
-    PP_Bool scroll_by_page) {
-  InputEventData data;
-  data.event_type = PP_INPUTEVENT_TYPE_WHEEL;
-  data.event_time_stamp = time_stamp;
-  data.event_modifiers = modifiers;
-  data.wheel_delta = *wheel_delta;
-  data.wheel_ticks = *wheel_ticks;
-  data.wheel_scroll_by_page = PP_ToBool(scroll_by_page);
-
-  return (new PPB_InputEvent_Shared(OBJECT_IS_PROXY,
-                                    instance, data))->GetReference();
+PP_Resource ResourceCreationProxy::CreateX509CertificatePrivate(
+    PP_Instance instance) {
+  return PPB_X509Certificate_Private_Proxy::CreateProxyResource(instance);
 }
+#endif  // !defined(OS_NACL)
+
 
 bool ResourceCreationProxy::Send(IPC::Message* msg) {
   return dispatcher()->Send(msg);

@@ -9,9 +9,12 @@
 #include "base/metrics/histogram.h"
 #include "base/string_split.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_info_cache.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -24,11 +27,14 @@
 #include "chrome/browser/ui/sync/one_click_signin_sync_starter.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_view.h"
 #include "content/public/common/frame_navigate_params.h"
+#include "content/public/common/page_transition_types.h"
+#include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -38,8 +44,6 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/forms/password_form.h"
 #include "webkit/forms/password_form_dom_manager.h"
-
-namespace {
 
 // The infobar asking the user if they want to use one-click sign in.
 class OneClickLoginInfoBarDelegate : public ConfirmInfoBarDelegate {
@@ -59,6 +63,8 @@ class OneClickLoginInfoBarDelegate : public ConfirmInfoBarDelegate {
   virtual string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
   virtual bool Accept() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
+
+  virtual InfoBarAutomationType GetInfoBarAutomationType() const OVERRIDE;
 
   // Set the profile preference to turn off one-click sign in so that it won't
   // show again in this profile.
@@ -123,6 +129,19 @@ string16 OneClickLoginInfoBarDelegate::GetButtonLabel(
 
 namespace {
 
+void OnLearnMore(Browser* browser) {
+  browser->AddSelectedTabWithURL(
+      GURL(chrome::kSyncLearnMoreURL),
+      content::PAGE_TRANSITION_AUTO_BOOKMARK);
+}
+
+void OnAdvanced(Browser* browser) {
+  browser->AddSelectedTabWithURL(
+      GURL(std::string(chrome::kChromeUISettingsURL) +
+           chrome::kSyncSetupSubPage),
+      content::PAGE_TRANSITION_AUTO_BOOKMARK);
+}
+
 // Start syncing with the given user information.
 void StartSync(content::WebContents* web_contents,
                const std::string& session_index,
@@ -137,7 +156,9 @@ void StartSync(content::WebContents* web_contents,
           profile, session_index, email, password, use_default_settings));
 
   Browser* browser = BrowserList::FindBrowserWithWebContents(web_contents);
-  browser->window()->ShowOneClickSigninBubble();
+  browser->window()->ShowOneClickSigninBubble(
+      base::Bind(&OnLearnMore, base::Unretained(browser)),
+      base::Bind(&OnAdvanced, base::Unretained(browser)));
 }
 
 }  // namespace
@@ -160,6 +181,11 @@ bool OneClickLoginInfoBarDelegate::Cancel() {
   return true;
 }
 
+InfoBarDelegate::InfoBarAutomationType
+    OneClickLoginInfoBarDelegate::GetInfoBarAutomationType() const {
+  return ONE_CLICK_LOGIN_INFOBAR;
+}
+
 void OneClickLoginInfoBarDelegate::DisableOneClickSignIn() {
   PrefService* pref_service =
       TabContentsWrapper::GetCurrentWrapperForContents(
@@ -171,8 +197,6 @@ void OneClickLoginInfoBarDelegate::RecordHistogramAction(int action) {
   UMA_HISTOGRAM_ENUMERATION("AutoLogin.Reverse", action,
                             one_click_signin::HISTOGRAM_MAX);
 }
-
-}  // namespace
 
 // static
 bool OneClickSigninHelper::CanOffer(content::WebContents* web_contents,
@@ -265,13 +289,26 @@ void OneClickSigninHelper::ShowInfoBarUIThread(
   if (!web_contents || !CanOffer(web_contents, true))
     return;
 
+  // If some profile, not just the current one, is already connected to this
+  // account, don't show the infobar.
+  if (g_browser_process) {
+    ProfileManager* manager = g_browser_process->profile_manager();
+    if (manager) {
+      string16 email16 = UTF8ToUTF16(email);
+      ProfileInfoCache& cache = manager->GetProfileInfoCache();
+
+      for (size_t i = 0; i < cache.GetNumberOfProfiles(); ++i) {
+        if (email16 == cache.GetUserNameOfProfileAtIndex(i))
+          return;
+      }
+    }
+  }
+
   TabContentsWrapper* wrapper =
       TabContentsWrapper::GetCurrentWrapperForContents(web_contents);
   if (!wrapper)
     return;
 
-  // TODO(rogerta): remove this #if once the dialog is fully implemented for
-  // mac and linux.
   // Save the email in the one-click signin manager.  The manager may
   // not exist if the contents is incognito or if the profile is already
   // connected to a Google account.

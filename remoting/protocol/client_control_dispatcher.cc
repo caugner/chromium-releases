@@ -21,6 +21,7 @@ namespace protocol {
 ClientControlDispatcher::ClientControlDispatcher()
     : ChannelDispatcherBase(kControlChannelName),
       client_stub_(NULL),
+      clipboard_stub_(NULL),
       writer_(new BufferedSocketWriter(base::MessageLoopProxy::current())) {
 }
 
@@ -42,11 +43,30 @@ void ClientControlDispatcher::InjectClipboardEvent(
   writer_->Write(SerializeAndFrameMessage(message), base::Closure());
 }
 
+void ClientControlDispatcher::NotifyClientDimensions(
+    const ClientDimensions& dimensions) {
+  ControlMessage message;
+  message.mutable_client_dimensions()->CopyFrom(dimensions);
+  writer_->Write(SerializeAndFrameMessage(message), base::Closure());
+}
+
+void ClientControlDispatcher::ControlVideo(const VideoControl& video_control) {
+  ControlMessage message;
+  message.mutable_video_control()->CopyFrom(video_control);
+  writer_->Write(SerializeAndFrameMessage(message), base::Closure());
+}
+
 void ClientControlDispatcher::OnMessageReceived(
     scoped_ptr<ControlMessage> message, const base::Closure& done_task) {
   DCHECK(client_stub_);
+  DCHECK(clipboard_stub_);
   base::ScopedClosureRunner done_runner(done_task);
-  LOG(WARNING) << "Unknown control message received.";
+
+  if (message->has_clipboard_event()) {
+    clipboard_stub_->InjectClipboardEvent(message->clipboard_event());
+  } else {
+    LOG(WARNING) << "Unknown control message received.";
+  }
 }
 
 }  // namespace protocol

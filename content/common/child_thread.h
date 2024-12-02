@@ -100,8 +100,7 @@ class CONTENT_EXPORT ChildThread : public IPC::Channel::Listener,
 #endif
 
   virtual void OnSetProfilerStatus(tracked_objects::ThreadData::Status status);
-  virtual void OnGetChildProfilerData(int sequence_number,
-                                      const std::string& process_type);
+  virtual void OnGetChildProfilerData(int sequence_number);
 
   virtual void OnDumpHandles();
 
@@ -115,6 +114,10 @@ class CONTENT_EXPORT ChildThread : public IPC::Channel::Listener,
   // IPC::Channel::Listener implementation:
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
   virtual void OnChannelError() OVERRIDE;
+
+#if defined(USE_TCMALLOC)
+  void OnGetTcmallocStats();
+#endif
 
   std::string channel_name_;
   scoped_ptr<IPC::SyncChannel> channel_;

@@ -22,6 +22,7 @@
 #include "chrome/browser/instant/instant_loader_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
+#include "chrome/browser/tab_contents/thumbnail_generator.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
 #include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/browser/ui/constrained_window_tab_helper_delegate.h"
@@ -641,8 +642,8 @@ InstantLoader::InstantLoader(InstantLoaderDelegate* delegate,
 InstantLoader::~InstantLoader() {
   registrar_.RemoveAll();
 
-  // Delete the TabContents before the delegate as the TabContents holds a
-  // reference to the delegate.
+  // Delete the TabContentsWrapper before the delegate as the TabContentsWrapper
+  // holds a reference to the delegate.
   if (preview_contents())
     AddPreviewUsageForHistogram(template_url_id_, PREVIEW_DELETED, group_);
   preview_contents_.reset();
@@ -699,11 +700,10 @@ bool InstantLoader::Update(TabContentsWrapper* tab_contents,
     DCHECK(template_url_id_ == template_url->id());
     if (!created_preview_contents) {
       if (is_determining_if_page_supports_instant()) {
-        // The page hasn't loaded yet. We'll send the script down when it does.
+        // The page hasn't loaded yet. Note it, but send down the text anyway.
         frame_load_observer_->set_text(user_text_);
         frame_load_observer_->set_verbatim(verbatim);
         preview_tab_contents_delegate_->set_user_typed_before_load();
-        return true;
       }
       // TODO: support real cursor position.
       int text_length = static_cast<int>(user_text_.size());
@@ -727,8 +727,7 @@ bool InstantLoader::Update(TabContentsWrapper* tab_contents,
             complete_suggested_text_.substr(user_text_.size());
       }
     } else {
-      LoadInstantURL(tab_contents, template_url, transition_type, user_text_,
-                     verbatim);
+      LoadInstantURL(template_url, transition_type, user_text_, verbatim);
     }
   } else {
     DCHECK(template_url_id_ == 0);
@@ -832,6 +831,10 @@ TabContentsWrapper* InstantLoader::ReleasePreviewContents(
         base::Histogram::kUmaTargetedHistogramFlag);
     histogram->Add(tab_contents == NULL || session_storage_namespace_ ==
         GetSessionStorageNamespace(tab_contents));
+    // Now that the ownership is being passed to the caller, the thumbnailer
+    // needs to resume taking thumbnails.
+    if (preview_contents_->thumbnail_generator())
+      preview_contents_->thumbnail_generator()->set_enabled(true);
   }
   session_storage_namespace_ = NULL;
   return preview_contents_.release();
@@ -856,8 +859,8 @@ void InstantLoader::MaybeLoadInstantURL(TabContentsWrapper* tab_contents,
     return;
 
   CreatePreviewContents(tab_contents);
-  LoadInstantURL(tab_contents, template_url, content::PAGE_TRANSITION_GENERATED,
-                 string16(), true);
+  LoadInstantURL(template_url, content::PAGE_TRANSITION_GENERATED, string16(),
+                 true);
 }
 
 bool InstantLoader::IsNavigationPending() const {
@@ -1073,6 +1076,10 @@ void InstantLoader::SetupPreviewContents(TabContentsWrapper* tab_contents) {
       preview_tab_contents_delegate_.get());
   preview_contents_->core_tab_helper()->set_delegate(
       preview_tab_contents_delegate_.get());
+  // Disables thumbnailing while the web contents is shown as preview to avoid
+  // generating unnecessary thumbnails.
+  if (preview_contents_->thumbnail_generator())
+    preview_contents_->thumbnail_generator()->set_enabled(false);
 
 #if defined(OS_MACOSX)
   // If |preview_contents_| does not currently have a RWHV, we will call
@@ -1112,8 +1119,7 @@ void InstantLoader::CreatePreviewContents(TabContentsWrapper* tab_contents) {
   preview_contents_->web_contents()->ShowContents();
 }
 
-void InstantLoader::LoadInstantURL(TabContentsWrapper* tab_contents,
-                                   const TemplateURL* template_url,
+void InstantLoader::LoadInstantURL(const TemplateURL* template_url,
                                    content::PageTransition transition_type,
                                    const string16& user_text,
                                    bool verbatim) {
@@ -1127,8 +1133,8 @@ void InstantLoader::LoadInstantURL(TabContentsWrapper* tab_contents,
   // functionality so that embeded tags (like {google:baseURL}) are escaped
   // correctly.
   // TODO(sky): having to use a replaceable url is a bit of a hack here.
-  GURL instant_url(template_url->instant_url()->ReplaceSearchTermsUsingProfile(
-      tab_contents->profile(), *template_url, string16(), -1, string16()));
+  GURL instant_url(template_url->instant_url_ref().ReplaceSearchTerms(
+      string16(), TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16()));
   CommandLine* cl = CommandLine::ForCurrentProcess();
   if (cl->HasSwitch(switches::kInstantURL))
     instant_url = GURL(cl->GetSwitchValueASCII(switches::kInstantURL));

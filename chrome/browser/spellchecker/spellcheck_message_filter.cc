@@ -25,9 +25,6 @@ SpellCheckMessageFilter::SpellCheckMessageFilter(int render_process_id)
       document_tag_(0) {
 }
 
-SpellCheckMessageFilter::~SpellCheckMessageFilter() {
-}
-
 void SpellCheckMessageFilter::OverrideThreadForMessage(
     const IPC::Message& message, BrowserThread::ID* thread) {
   if (message.type() == SpellCheckHostMsg_RequestDictionary::ID ||
@@ -55,6 +52,8 @@ bool SpellCheckMessageFilter::OnMessageReceived(const IPC::Message& message,
   IPC_END_MESSAGE_MAP()
   return handled;
 }
+
+SpellCheckMessageFilter::~SpellCheckMessageFilter() {}
 
 void SpellCheckMessageFilter::OnSpellCheckerRequestDictionary() {
   content::RenderProcessHost* host =
@@ -107,6 +106,8 @@ void SpellCheckMessageFilter::OnCallSpellingService(
     Send(new SpellCheckMsg_RespondSpellingService(route_id,
                                                   identifier,
                                                   document_tag,
+                                                  false,
+                                                  text,
                                                   results));
     return;
   }
@@ -116,10 +117,13 @@ void SpellCheckMessageFilter::OnCallSpellingService(
 
 void SpellCheckMessageFilter::OnTextCheckComplete(
     int tag,
+    bool success,
     const std::vector<SpellCheckResult>& results) {
   Send(new SpellCheckMsg_RespondSpellingService(route_id_,
                                                 identifier_,
                                                 tag,
+                                                success,
+                                                string16(),
                                                 results));
   client_.reset();
 }
@@ -138,7 +142,7 @@ bool SpellCheckMessageFilter::CallSpellingService(
     return false;
   client_.reset(new SpellingServiceClient);
   return client_->RequestTextCheck(
-      profile, document_tag, text,
+      profile, document_tag, SpellingServiceClient::SPELLCHECK, text,
       base::Bind(&SpellCheckMessageFilter::OnTextCheckComplete,
                  base::Unretained(this)));
 }

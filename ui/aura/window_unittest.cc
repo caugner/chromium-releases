@@ -24,9 +24,9 @@
 #include "ui/aura/window_property.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/compositor/layer.h"
+#include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/compositor/layer.h"
-#include "ui/gfx/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/screen.h"
 
 DECLARE_WINDOW_PROPERTY_TYPE(const char*)
@@ -125,6 +125,7 @@ class CaptureWindowDelegateImpl : public TestWindowDelegate {
     capture_lost_count_ = 0;
     mouse_event_count_ = 0;
     touch_event_count_ = 0;
+    gesture_event_count_ = 0;
   }
 
   int capture_changed_event_count() const {
@@ -133,6 +134,7 @@ class CaptureWindowDelegateImpl : public TestWindowDelegate {
   int capture_lost_count() const { return capture_lost_count_; }
   int mouse_event_count() const { return mouse_event_count_; }
   int touch_event_count() const { return touch_event_count_; }
+  int gesture_event_count() const { return gesture_event_count_; }
 
   virtual bool OnMouseEvent(MouseEvent* event) OVERRIDE {
     if (event->type() == ui::ET_MOUSE_CAPTURE_CHANGED)
@@ -145,6 +147,7 @@ class CaptureWindowDelegateImpl : public TestWindowDelegate {
     return ui::TOUCH_STATUS_UNKNOWN;
   }
   virtual ui::GestureStatus OnGestureEvent(GestureEvent* event) OVERRIDE {
+    gesture_event_count_++;
     return ui::GESTURE_STATUS_UNKNOWN;
   }
   virtual void OnCaptureLost() OVERRIDE {
@@ -156,6 +159,7 @@ class CaptureWindowDelegateImpl : public TestWindowDelegate {
   int capture_lost_count_;
   int mouse_event_count_;
   int touch_event_count_;
+  int gesture_event_count_;
 
   DISALLOW_COPY_AND_ASSIGN(CaptureWindowDelegateImpl);
 };
@@ -222,6 +226,10 @@ class MouseTrackingDelegate : public TestWindowDelegate {
 
   DISALLOW_COPY_AND_ASSIGN(MouseTrackingDelegate);
 };
+
+base::TimeDelta getTime() {
+  return base::Time::NowFromSystemTime() - base::Time();
+}
 
 }  // namespace
 
@@ -532,18 +540,58 @@ TEST_F(WindowTest, StackChildAbove) {
   EXPECT_EQ(child3.layer(), parent.layer()->children()[2]);
 }
 
+// Ensure capture of touch events works.
+TEST_F(WindowTest, TouchCaptureTests) {
+CaptureWindowDelegateImpl delegate;
+  scoped_ptr<Window> window(CreateTestWindowWithDelegate(
+      &delegate, 0, gfx::Rect(0, 0, 20, 20), NULL));
+  EXPECT_FALSE(window->HasCapture(ui::CW_LOCK_MOUSE));
+  EXPECT_FALSE(window->HasCapture(ui::CW_LOCK_TOUCH));
+
+  delegate.ResetCounts();
+
+  // Capture touch events.
+  window->SetCapture(ui::CW_LOCK_TOUCH);
+  EXPECT_FALSE(window->HasCapture(ui::CW_LOCK_MOUSE));
+  EXPECT_TRUE(window->HasCapture(ui::CW_LOCK_TOUCH));
+  EXPECT_EQ(0, delegate.capture_lost_count());
+  EXPECT_EQ(0, delegate.capture_changed_event_count());
+  EventGenerator generator(root_window(), gfx::Point(50, 50));
+  generator.PressLeftButton();
+  EXPECT_EQ(0, delegate.mouse_event_count());
+
+  TouchEvent touchev(ui::ET_TOUCH_PRESSED, gfx::Point(50, 50), 0, getTime());
+  root_window()->DispatchTouchEvent(&touchev);
+  EXPECT_EQ(1, delegate.touch_event_count());
+  delegate.ResetCounts();
+  window->ReleaseCapture();
+
+  // Capture both touch and mouse events.
+  window->SetCapture(ui::CW_LOCK_TOUCH | ui::CW_LOCK_MOUSE);
+  EXPECT_TRUE(window->HasCapture(ui::CW_LOCK_MOUSE));
+  EXPECT_TRUE(window->HasCapture(ui::CW_LOCK_TOUCH));
+  generator.PressLeftButton();
+  EXPECT_EQ(1, delegate.mouse_event_count());
+
+  TouchEvent touchev2(ui::ET_TOUCH_PRESSED, gfx::Point(50, 50), 1, getTime());
+  root_window()->DispatchTouchEvent(&touchev2);
+  EXPECT_EQ(1, delegate.touch_event_count());
+}
+
 // Various capture assertions.
 TEST_F(WindowTest, CaptureTests) {
   CaptureWindowDelegateImpl delegate;
   scoped_ptr<Window> window(CreateTestWindowWithDelegate(
       &delegate, 0, gfx::Rect(0, 0, 20, 20), NULL));
-  EXPECT_FALSE(window->HasCapture());
+  EXPECT_FALSE(window->HasCapture(ui::CW_LOCK_MOUSE));
+  EXPECT_FALSE(window->HasCapture(ui::CW_LOCK_TOUCH));
 
   delegate.ResetCounts();
 
   // Do a capture.
-  window->SetCapture();
-  EXPECT_TRUE(window->HasCapture());
+  window->SetCapture(ui::CW_LOCK_MOUSE);
+  EXPECT_TRUE(window->HasCapture(ui::CW_LOCK_MOUSE));
+  EXPECT_FALSE(window->HasCapture(ui::CW_LOCK_TOUCH));
   EXPECT_EQ(0, delegate.capture_lost_count());
   EXPECT_EQ(0, delegate.capture_changed_event_count());
   EventGenerator generator(root_window(), gfx::Point(50, 50));
@@ -554,13 +602,14 @@ TEST_F(WindowTest, CaptureTests) {
   EXPECT_EQ(2, delegate.mouse_event_count());
   delegate.ResetCounts();
 
-  TouchEvent touchev(ui::ET_TOUCH_PRESSED, gfx::Point(50, 50), 0);
+  TouchEvent touchev(ui::ET_TOUCH_PRESSED, gfx::Point(50, 50), 0, getTime());
   root_window()->DispatchTouchEvent(&touchev);
-  EXPECT_EQ(1, delegate.touch_event_count());
+  EXPECT_EQ(0, delegate.touch_event_count());
   delegate.ResetCounts();
 
   window->ReleaseCapture();
-  EXPECT_FALSE(window->HasCapture());
+  EXPECT_FALSE(window->HasCapture(ui::CW_LOCK_MOUSE));
+  EXPECT_FALSE(window->HasCapture(ui::CW_LOCK_TOUCH));
   EXPECT_EQ(1, delegate.capture_lost_count());
   EXPECT_EQ(1, delegate.capture_changed_event_count());
   EXPECT_EQ(1, delegate.mouse_event_count());
@@ -568,17 +617,89 @@ TEST_F(WindowTest, CaptureTests) {
   generator.PressLeftButton();
   EXPECT_EQ(1, delegate.mouse_event_count());
 
-  TouchEvent touchev2(ui::ET_TOUCH_PRESSED, gfx::Point(250, 250), 1);
+  TouchEvent touchev2(ui::ET_TOUCH_PRESSED, gfx::Point(250, 250), 1, getTime());
   root_window()->DispatchTouchEvent(&touchev2);
   EXPECT_EQ(0, delegate.touch_event_count());
 
   // Removing the capture window from parent should reset the capture window
   // in the root window.
-  window->SetCapture();
+  window->SetCapture(ui::CW_LOCK_MOUSE);
   EXPECT_EQ(window.get(), root_window()->capture_window());
   window->parent()->RemoveChild(window.get());
-  EXPECT_FALSE(window->HasCapture());
+  EXPECT_FALSE(window->HasCapture(ui::CW_LOCK_MOUSE));
   EXPECT_EQ(NULL, root_window()->capture_window());
+}
+
+TEST_F(WindowTest, TouchCaptureCancelsOtherTouches) {
+  CaptureWindowDelegateImpl delegate1;
+  scoped_ptr<Window> w1(CreateTestWindowWithDelegate(
+      &delegate1, 0, gfx::Rect(0, 0, 20, 20), NULL));
+  CaptureWindowDelegateImpl delegate2;
+  scoped_ptr<Window> w2(CreateTestWindowWithDelegate(
+      &delegate2, 0, gfx::Rect(20, 20, 20, 20), NULL));
+
+  // Press on w1.
+  TouchEvent press(ui::ET_TOUCH_PRESSED,
+                   gfx::Point(10, 10), 0, getTime());
+  root_window()->DispatchTouchEvent(&press);
+  EXPECT_EQ(1, delegate1.gesture_event_count());
+  delegate1.ResetCounts();
+  w2->SetCapture(ui::CW_LOCK_TOUCH);
+
+  // The touch was cancelled when the other window
+  // attained a touch lock.
+  EXPECT_EQ(1, delegate1.touch_event_count());
+  EXPECT_EQ(0, delegate2.touch_event_count());
+
+  delegate1.ResetCounts();
+  delegate2.ResetCounts();
+
+  TouchEvent move(ui::ET_TOUCH_MOVED,
+                  gfx::Point(10, 10), 0, getTime());
+  root_window()->DispatchTouchEvent(&move);
+
+  // This touch id is now ignored, no scroll fired.
+  EXPECT_EQ(0, delegate1.gesture_event_count());
+  EXPECT_EQ(0, delegate2.gesture_event_count());
+
+  TouchEvent release(ui::ET_TOUCH_RELEASED,
+                     gfx::Point(10, 10), 0, getTime());
+  root_window()->DispatchTouchEvent(&release);
+  EXPECT_EQ(0, delegate1.gesture_event_count());
+  EXPECT_EQ(0, delegate2.gesture_event_count());
+
+  // A new press is captured by w2.
+
+  TouchEvent press2(ui::ET_TOUCH_PRESSED,
+                    gfx::Point(10, 10), 0, getTime());
+  root_window()->DispatchTouchEvent(&press2);
+  EXPECT_EQ(0, delegate1.gesture_event_count());
+  EXPECT_EQ(1, delegate2.gesture_event_count());
+}
+
+TEST_F(WindowTest, TouchCaptureDoesntCancelCapturedTouches) {
+  CaptureWindowDelegateImpl delegate;
+  scoped_ptr<Window> window(CreateTestWindowWithDelegate(
+      &delegate, 0, gfx::Rect(0, 0, 20, 20), NULL));
+
+  TouchEvent press(ui::ET_TOUCH_PRESSED,
+                   gfx::Point(10, 10), 0, getTime());
+  root_window()->DispatchTouchEvent(&press);
+
+  EXPECT_EQ(1, delegate.gesture_event_count());
+  delegate.ResetCounts();
+
+  window->SetCapture(ui::CW_LOCK_TOUCH);
+  EXPECT_EQ(0, delegate.gesture_event_count());
+  delegate.ResetCounts();
+
+  // The move event should still create a gesture, as this touch was
+  // on the window which was captured.
+  TouchEvent release(ui::ET_TOUCH_RELEASED,
+                     gfx::Point(10, 10), 0, getTime() +
+                     base::TimeDelta::FromMilliseconds(50));
+  root_window()->DispatchTouchEvent(&release);
+  EXPECT_EQ(1, delegate.gesture_event_count());
 }
 
 // Changes capture while capture is already ongoing.
@@ -594,12 +715,13 @@ TEST_F(WindowTest, ChangeCaptureWhileMouseDown) {
   // aggregated.
   RunAllPendingInMessageLoop();
 
-  EXPECT_FALSE(window->HasCapture());
+  EXPECT_FALSE(window->HasCapture(ui::CW_LOCK_MOUSE));
+  EXPECT_FALSE(window->HasCapture(ui::CW_LOCK_TOUCH));
 
   // Do a capture.
   delegate.ResetCounts();
-  window->SetCapture();
-  EXPECT_TRUE(window->HasCapture());
+  window->SetCapture(ui::CW_LOCK_MOUSE);
+  EXPECT_TRUE(window->HasCapture(ui::CW_LOCK_MOUSE));
   EXPECT_EQ(0, delegate.capture_lost_count());
   EXPECT_EQ(0, delegate.capture_changed_event_count());
   EventGenerator generator(root_window(), gfx::Point(50, 50));
@@ -611,7 +733,7 @@ TEST_F(WindowTest, ChangeCaptureWhileMouseDown) {
   // Set capture to |w2|, should implicitly unset capture for |window|.
   delegate.ResetCounts();
   delegate2.ResetCounts();
-  w2->SetCapture();
+  w2->SetCapture(ui::CW_LOCK_MOUSE);
 
   generator.MoveMouseTo(gfx::Point(40, 40), 2);
   EXPECT_EQ(1, delegate.capture_lost_count());
@@ -625,11 +747,11 @@ TEST_F(WindowTest, ReleaseCaptureOnDestroy) {
   CaptureWindowDelegateImpl delegate;
   scoped_ptr<Window> window(CreateTestWindowWithDelegate(
       &delegate, 0, gfx::Rect(0, 0, 20, 20), NULL));
-  EXPECT_FALSE(window->HasCapture());
+  EXPECT_FALSE(window->HasCapture(ui::CW_LOCK_MOUSE));
 
   // Do a capture.
-  window->SetCapture();
-  EXPECT_TRUE(window->HasCapture());
+  window->SetCapture(ui::CW_LOCK_MOUSE);
+  EXPECT_TRUE(window->HasCapture(ui::CW_LOCK_MOUSE));
 
   // Destroy the window.
   window.reset();
@@ -639,22 +761,22 @@ TEST_F(WindowTest, ReleaseCaptureOnDestroy) {
   EXPECT_EQ(NULL, root_window()->capture_window());
 }
 
-TEST_F(WindowTest, GetScreenBounds) {
+TEST_F(WindowTest, GetBoundsInRootWindow) {
   scoped_ptr<Window> viewport(CreateTestWindowWithBounds(
       gfx::Rect(0, 0, 300, 300), NULL));
   scoped_ptr<Window> child(CreateTestWindowWithBounds(
       gfx::Rect(0, 0, 100, 100), viewport.get()));
   // Sanity check.
-  EXPECT_EQ("0,0 100x100", child->GetScreenBounds().ToString());
+  EXPECT_EQ("0,0 100x100", child->GetBoundsInRootWindow().ToString());
 
   // The |child| window's screen bounds should move along with the |viewport|.
   viewport->SetBounds(gfx::Rect(-100, -100, 300, 300));
-  EXPECT_EQ("-100,-100 100x100", child->GetScreenBounds().ToString());
+  EXPECT_EQ("-100,-100 100x100", child->GetBoundsInRootWindow().ToString());
 
   // The |child| window is moved to the 0,0 in screen coordinates.
-  // |GetScreenBounds()| should return 0,0.
+  // |GetBoundsInRootWindow()| should return 0,0.
   child->SetBounds(gfx::Rect(100, 100, 100, 100));
-  EXPECT_EQ("0,0 100x100", child->GetScreenBounds().ToString());
+  EXPECT_EQ("0,0 100x100", child->GetBoundsInRootWindow().ToString());
 }
 
 class MouseEnterExitWindowDelegate : public TestWindowDelegate {
@@ -762,8 +884,10 @@ class VisibilityWindowDelegate : public TestWindowDelegate {
 // Verifies show/hide propagate correctly to children and the layer.
 TEST_F(WindowTest, Visibility) {
   VisibilityWindowDelegate d;
+  VisibilityWindowDelegate d2;
   scoped_ptr<Window> w1(CreateTestWindowWithDelegate(&d, 1, gfx::Rect(), NULL));
-  scoped_ptr<Window> w2(CreateTestWindowWithId(2, w1.get()));
+  scoped_ptr<Window> w2(
+      CreateTestWindowWithDelegate(&d2, 2, gfx::Rect(),  w1.get()));
   scoped_ptr<Window> w3(CreateTestWindowWithId(3, w2.get()));
 
   // Create shows all the windows.
@@ -802,6 +926,18 @@ TEST_F(WindowTest, Visibility) {
   EXPECT_TRUE(w1->IsVisible());
   EXPECT_TRUE(w2->IsVisible());
   EXPECT_TRUE(w3->IsVisible());
+
+  // Verify that if an ancestor isn't visible and we change the visibility of a
+  // child window that OnChildWindowVisibilityChanged() is still invoked.
+  w1->Hide();
+  d2.Clear();
+  w2->Hide();
+  EXPECT_EQ(1, d2.hidden());
+  EXPECT_EQ(0, d2.shown());
+  d2.Clear();
+  w2->Show();
+  EXPECT_EQ(0, d2.hidden());
+  EXPECT_EQ(1, d2.shown());
 }
 
 TEST_F(WindowTest, IgnoreEventsTest) {
@@ -838,7 +974,7 @@ TEST_F(WindowTest, IgnoreEventsTest) {
 TEST_F(WindowTest, Transform) {
   gfx::Size size = root_window()->GetHostSize();
   EXPECT_EQ(gfx::Rect(size),
-            gfx::Screen::GetMonitorAreaNearestPoint(gfx::Point()));
+            gfx::Screen::GetMonitorNearestPoint(gfx::Point()).bounds());
 
   // Rotate it clock-wise 90 degrees.
   ui::Transform transform;
@@ -850,8 +986,9 @@ TEST_F(WindowTest, Transform) {
   gfx::Size transformed_size(size.height(), size.width());
   EXPECT_EQ(transformed_size.ToString(),
             root_window()->bounds().size().ToString());
-  EXPECT_EQ(gfx::Rect(transformed_size).ToString(),
-            gfx::Screen::GetMonitorAreaNearestPoint(gfx::Point()).ToString());
+  EXPECT_EQ(
+      gfx::Rect(transformed_size).ToString(),
+      gfx::Screen::GetMonitorNearestPoint(gfx::Point()).bounds().ToString());
 
   // Host size shouldn't change.
   EXPECT_EQ(size.ToString(),
@@ -873,7 +1010,7 @@ TEST_F(WindowTest, TransformGesture) {
   root_window()->SetTransform(transform);
 
   TouchEvent press(ui::ET_TOUCH_PRESSED,
-      gfx::Point(size.height() - 10, 10), 0);
+                   gfx::Point(size.height() - 10, 10), 0, getTime());
   root_window()->DispatchTouchEvent(&press);
   EXPECT_EQ(gfx::Point(10, 10).ToString(), delegate->position().ToString());
 }
@@ -906,6 +1043,11 @@ TEST_F(WindowTest, TransientChildren) {
   ASSERT_EQ(2u, parent->children().size());
   EXPECT_EQ(w3.get(), parent->children()[0]);
   EXPECT_EQ(w1.get(), parent->children()[1]);
+
+  // Hiding parent should hide transient children.
+  EXPECT_TRUE(w2->IsVisible());
+  w1->Hide();
+  EXPECT_FALSE(w2->IsVisible());
 }
 
 // Tests that when a focused window is closed, its parent inherits the focus.
@@ -1467,6 +1609,7 @@ class StackingMadrigalLayoutManager : public LayoutManager {
   virtual void OnWindowResized() OVERRIDE {}
   virtual void OnWindowAddedToLayout(Window* child) OVERRIDE {}
   virtual void OnWillRemoveWindowFromLayout(Window* child) OVERRIDE {}
+  virtual void OnWindowRemovedFromLayout(Window* child) OVERRIDE {}
   virtual void OnChildWindowVisibilityChanged(Window* child,
                                               bool visible) OVERRIDE {
     Window::Windows::const_iterator it = root_window_->children().begin();
@@ -1776,6 +1919,23 @@ TEST_F(WindowTest, RootWindowAttachment) {
   w111 = NULL;
   EXPECT_EQ(2, observer.added_count());
   EXPECT_EQ(2, observer.removed_count());
+}
+
+TEST_F(WindowTest, OwnedByParentFalse) {
+  // By default, a window is owned by its parent. If this is set to false, the
+  // window will not be destroyed when its parent is.
+
+  scoped_ptr<Window> w1(new Window(NULL));
+  w1->Init(ui::LAYER_NOT_DRAWN);
+  scoped_ptr<Window> w2(new Window(NULL));
+  w2->set_owned_by_parent(false);
+  w2->Init(ui::LAYER_NOT_DRAWN);
+  w2->SetParent(w1.get());
+
+  w1.reset();
+
+  // We should be able to deref w2 still, but its parent should now be NULL.
+  EXPECT_EQ(NULL, w2->parent());
 }
 
 }  // namespace test

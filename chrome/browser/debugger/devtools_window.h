@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,8 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/memory/scoped_ptr.h"
+#include "chrome/browser/debugger/devtools_file_helper.h"
 #include "chrome/browser/debugger/devtools_toggle_action.h"
 #include "content/public/browser/devtools_client_host.h"
 #include "content/public/browser/devtools_frontend_host_delegate.h"
@@ -40,7 +42,8 @@ class WebContents;
 
 class DevToolsWindow : private content::NotificationObserver,
                        private content::WebContentsDelegate,
-                       private content::DevToolsFrontendHostDelegate {
+                       private content::DevToolsFrontendHostDelegate,
+                       private DevToolsFileHelper::Delegate {
  public:
   static const char kDevToolsApp[];
   static void RegisterUserPrefs(PrefService* prefs);
@@ -63,8 +66,8 @@ class DevToolsWindow : private content::NotificationObserver,
   virtual ~DevToolsWindow();
 
   // Overridden from DevToolsClientHost.
-  virtual void InspectedTabClosing() OVERRIDE;
-  virtual void TabReplaced(content::WebContents* new_tab) OVERRIDE;
+  virtual void InspectedContentsClosing() OVERRIDE;
+  virtual void ContentsReplaced(content::WebContents* new_contents) OVERRIDE;
   content::RenderViewHost* GetRenderViewHost();
 
   void Show(DevToolsToggleAction action);
@@ -100,8 +103,8 @@ class DevToolsWindow : private content::NotificationObserver,
                              bool shared_worker_frontend);
   void UpdateTheme();
   void AddDevToolsExtensionsToClient();
-  void CallClientFunction(const string16& function_name,
-                          const base::Value& arg);
+  void CallClientFunction(const std::string& function_name,
+                          const base::Value* arg);
   // Overridden from content::WebContentsDelegate.
   virtual content::WebContents* OpenURLFromTab(
       content::WebContents* source,
@@ -136,8 +139,15 @@ class DevToolsWindow : private content::NotificationObserver,
   virtual void UndockWindow() OVERRIDE;
   virtual void SetDockSide(const std::string& side) OVERRIDE;
   virtual void OpenInNewTab(const std::string& url) OVERRIDE;
-  virtual void SaveToFile(const std::string& suggested_file_name,
-                          const std::string& content) OVERRIDE;
+  virtual void SaveToFile(const std::string& url,
+                          const std::string& content,
+                          bool save_as) OVERRIDE;
+  virtual void AppendToFile(const std::string& url,
+                            const std::string& content) OVERRIDE;
+
+  // Overridden from DevToolsFileHelper::Delegate
+  virtual void FileSavedAs(const std::string& url)  OVERRIDE;
+  virtual void AppendedTo(const std::string& url)  OVERRIDE;
 
   void RequestSetDocked(bool docked);
 
@@ -150,6 +160,7 @@ class DevToolsWindow : private content::NotificationObserver,
   DevToolsToggleAction action_on_load_;
   content::NotificationRegistrar registrar_;
   content::DevToolsClientHost* frontend_host_;
+  scoped_ptr<DevToolsFileHelper> file_helper_;
   DISALLOW_COPY_AND_ASSIGN(DevToolsWindow);
 };
 

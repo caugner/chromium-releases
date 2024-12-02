@@ -28,8 +28,9 @@ class TestFunctionDispatcherDelegate
   virtual ~TestFunctionDispatcherDelegate() {}
 
  private:
-  virtual Browser* GetBrowser() OVERRIDE {
-    return browser_;
+  virtual ExtensionWindowController* GetExtensionWindowController()
+      const OVERRIDE {
+    return browser_->extension_window_controller();
   }
 
   virtual WebContents* GetAssociatedWebContents() const OVERRIDE {
@@ -44,8 +45,7 @@ class TestFunctionDispatcherDelegate
 namespace extension_function_test_utils {
 
 base::Value* ParseJSON(const std::string& data) {
-  const bool kAllowTrailingComma = false;
-  return base::JSONReader::Read(data, kAllowTrailingComma);
+  return base::JSONReader::Read(data);
 }
 
 base::ListValue* ParseList(const std::string& data) {
@@ -99,13 +99,18 @@ base::ListValue* ToList(base::Value* val) {
 }
 
 scoped_refptr<Extension> CreateEmptyExtension() {
+  return CreateEmptyExtensionWithLocation(Extension::INTERNAL);
+}
+
+scoped_refptr<Extension> CreateEmptyExtensionWithLocation(
+    Extension::Location location) {
   std::string error;
   const FilePath test_extension_path;
   scoped_ptr<base::DictionaryValue> test_extension_value(
       ParseDictionary("{\"name\": \"Test\", \"version\": \"1.0\"}"));
   scoped_refptr<Extension> extension(Extension::Create(
       test_extension_path,
-      Extension::INTERNAL,
+      location,
       *test_extension_value.get(),
       Extension::NO_FLAGS,
       &error));
@@ -124,8 +129,7 @@ std::string RunFunctionAndReturnError(UIThreadExtensionFunction* function,
                                       RunFunctionFlags flags) {
   scoped_refptr<ExtensionFunction> function_owner(function);
   RunFunction(function, args, browser, flags);
-  EXPECT_FALSE(function->GetResultValue()) << "Unexpected function result " <<
-      function->GetResult();
+  EXPECT_FALSE(function->GetResultValue()) << "Did not expect a result";
   return function->GetError();
 }
 
@@ -169,7 +173,9 @@ class SendResponseDelegate
   }
 
   virtual void OnSendResponse(UIThreadExtensionFunction* function,
-                              bool success) {
+                              bool success,
+                              bool bad_message) {
+    ASSERT_FALSE(bad_message);
     ASSERT_FALSE(HasResponse());
     response_.reset(new bool);
     *response_ = success;

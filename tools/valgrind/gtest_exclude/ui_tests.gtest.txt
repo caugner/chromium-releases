@@ -68,8 +68,8 @@ LayoutPluginTester.NPObjectSetException
 
 # This doesn't pass under valgrind, because the valgrind helper prevents us
 # from properly SIGTERMing the browser process.
-# See http://crbug.com/42105
-BrowserTest.SessionEnd
+# See http://crbug.com/39500
+BrowserUITestEnd.SessionEnd
 
 # Fails flakily, http://crbug.com/70323
 AutomatedUITestBase.ShowBookmarkBar
@@ -84,9 +84,6 @@ MediaTest.VideoBear*
 
 # Flakily times out, http://crbug.com/85865
 AppCacheUITest.AppCacheLayoutTests_NoPHP
-
-# Flakily times out, http://crbug.com/85866
-MetricsServiceTest.CloseRenderersNormally
 
 # Fails flakily, http://crbug.com/46783
 SessionHistoryTest.FrameBackForward
@@ -149,3 +146,4 @@ OutOfProcessPPAPITest.InputEvent
 
 # Fails on valgrind bots http://crbug.com/96767
 OutOfProcessPPAPITest.FlashFullscreen
+

@@ -10,31 +10,28 @@
 #include "base/basictypes.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/timer.h"
 #include "chrome/browser/ui/panels/display_settings_provider.h"
 #include "chrome/browser/ui/panels/panel.h"
-#include "chrome/browser/ui/panels/panel_resize_controller.h"
+#include "chrome/browser/ui/panels/panel_constants.h"
 #include "chrome/browser/ui/panels/panel_strip.h"
 #include "ui/gfx/rect.h"
 
 class Browser;
 class DetachedPanelStrip;
 class DockedPanelStrip;
-class OverflowPanelStrip;
 class PanelDragController;
+class PanelResizeController;
 class PanelMouseWatcher;
 
 // This class manages a set of panels.
-class PanelManager : public DisplaySettingsProvider::Observer {
+class PanelManager : public DisplaySettingsProvider::DisplayAreaObserver,
+                     public DisplaySettingsProvider::FullScreenObserver {
  public:
   // Returns a single instance.
   static PanelManager* GetInstance();
 
   // Returns true if panels should be used for the extension.
   static bool ShouldUsePanels(const std::string& extension_id);
-
-  // Called when the display is changed, i.e. work area is updated.
-  void OnDisplayChanged();
 
   // Creates a panel and returns it. The panel might be queued for display
   // later.
@@ -46,6 +43,11 @@ class PanelManager : public DisplaySettingsProvider::Observer {
   // Asynchronous confirmation of panel having been closed.
   void OnPanelClosed(Panel* panel);
 
+  // Returns the maximum size that panel can be auto-resized or resized by the
+  // API.
+  int GetMaxPanelWidth() const;
+  int GetMaxPanelHeight() const;
+
   // Drags the given panel.
   // |mouse_location| is in screen coordinate system.
   void StartDragging(Panel* panel, const gfx::Point& mouse_location);
@@ -55,12 +57,12 @@ class PanelManager : public DisplaySettingsProvider::Observer {
   // Resizes the given panel.
   // |mouse_location| is in screen coordinate system.
   void StartResizingByMouse(Panel* panel, const gfx::Point& mouse_location,
-                            PanelResizeController::ResizingSides sides);
+                            panel::ResizingSides sides);
   void ResizeByMouse(const gfx::Point& mouse_location);
   void EndResizingByMouse(bool cancelled);
 
-  // Invoked when a panel's expansion state changes.
-  void OnPanelExpansionStateChanged(Panel* panel);
+  // Resizes the panel and sets the origin.
+  void OnPanelResizedByMouse(Panel* panel, const gfx::Rect& new_bounds);
 
   // Invoked when the preferred window size of the given panel might need to
   // get changed.
@@ -71,19 +73,13 @@ class PanelManager : public DisplaySettingsProvider::Observer {
   // for panels that are auto-sized.
   void ResizePanel(Panel* panel, const gfx::Size& new_size);
 
-  // Resizes the panel and sets the origin.
-  void SetPanelBounds(Panel* panel, const gfx::Rect& new_bounds);
+  // Invoked when a panel's expansion state changes.
+  void OnPanelExpansionStateChanged(Panel* panel);
 
   // Moves the |panel| to a different type of panel strip.
   void MovePanelToStrip(Panel* panel,
                         PanelStrip::Type new_layout,
                         PanelStrip::PositioningMask positioning_mask);
-
-  // Move all panels up to, and including, the |last_panel_to_move| to overflow.
-  void MovePanelsToOverflow(Panel* last_panel_to_move);
-
-  // Moves as many panels out of overflow as space allows.
-  void MovePanelsOutOfOverflowIfCanFit();
 
   // Returns true if we should bring up the titlebars, given the current mouse
   // point.
@@ -98,7 +94,6 @@ class PanelManager : public DisplaySettingsProvider::Observer {
   BrowserWindow* GetNextBrowserWindowToActivate(Panel* panel) const;
 
   int num_panels() const;
-  int StartingRightPosition() const;
   std::vector<Panel*> panels() const;
 
   PanelDragController* drag_controller() const {
@@ -115,6 +110,8 @@ class PanelManager : public DisplaySettingsProvider::Observer {
     return display_settings_provider_.get();
   }
 
+  gfx::Rect display_area() const { return display_area_; }
+
   PanelMouseWatcher* mouse_watcher() const {
     return panel_mouse_watcher_.get();
   }
@@ -127,19 +124,11 @@ class PanelManager : public DisplaySettingsProvider::Observer {
     return docked_strip_.get();
   }
 
-  bool is_full_screen() const { return is_full_screen_; }
-  OverflowPanelStrip* overflow_strip() const {
-    return overflow_strip_.get();
-  }
-
-  // Width of the overflow strip in compact state i.e mouse not hovering over.
-  int overflow_strip_width() const;
-
   // Reduces time interval in tests to shorten test run time.
   // Wrapper should be used around all time intervals in panels code.
   static inline double AdjustTimeInterval(double interval) {
     if (shorten_time_intervals_)
-      return interval / 100.0;
+      return interval / 500.0;
     else
       return interval;
   }
@@ -148,6 +137,9 @@ class PanelManager : public DisplaySettingsProvider::Observer {
   bool auto_sizing_enabled() const {
     return auto_sizing_enabled_;
   }
+
+  // Called from native level when panel animation ends.
+  void OnPanelAnimationEnded(Panel* panel);
 
 #ifdef UNIT_TEST
   static void shorten_time_intervals_for_testing() {
@@ -163,10 +155,6 @@ class PanelManager : public DisplaySettingsProvider::Observer {
     auto_sizing_enabled_ = enabled;
   }
 
-  const gfx::Rect& work_area() const {
-    return work_area_;
-  }
-
   void SetMouseWatcherForTesting(PanelMouseWatcher* watcher) {
     SetMouseWatcher(watcher);
   }
@@ -178,20 +166,11 @@ class PanelManager : public DisplaySettingsProvider::Observer {
   PanelManager();
   virtual ~PanelManager();
 
-  // Overridden from DisplaySettingsProvider::Observer:
-  virtual void OnAutoHidingDesktopBarThicknessChanged() OVERRIDE;
-  virtual void OnAutoHidingDesktopBarVisibilityChanged(
-      DisplaySettingsProvider::DesktopBarAlignment alignment,
-      DisplaySettingsProvider::DesktopBarVisibility visibility) OVERRIDE;
+  // Overridden from DisplaySettingsProvider::DisplayAreaObserver:
+  virtual void OnDisplayAreaChanged(const gfx::Rect& display_area) OVERRIDE;
 
-  // Adjusts the work area to exclude the influence of auto-hiding desktop bars.
-  void AdjustWorkAreaForDisplaySettingsProviders();
-
-  // Positions the various groupings of panels.
-  void Layout();
-
-  // Tests if the current active app is in full screen mode.
-  void CheckFullScreenMode();
+  // Overridden from DisplaySettingsProvider::FullScreenObserver:
+  virtual void OnFullScreenModeChanged(bool is_full_screen) OVERRIDE;
 
   // Tests may want to use a mock panel mouse watcher.
   void SetMouseWatcher(PanelMouseWatcher* watcher);
@@ -201,7 +180,6 @@ class PanelManager : public DisplaySettingsProvider::Observer {
 
   scoped_ptr<DetachedPanelStrip> detached_strip_;
   scoped_ptr<DockedPanelStrip> docked_strip_;
-  scoped_ptr<OverflowPanelStrip> overflow_strip_;
 
   scoped_ptr<PanelDragController> drag_controller_;
   scoped_ptr<PanelResizeController> resize_controller_;
@@ -211,32 +189,14 @@ class PanelManager : public DisplaySettingsProvider::Observer {
   // panel.
   scoped_ptr<PanelMouseWatcher> panel_mouse_watcher_;
 
-  // The maximum work area avaialble. This area does not include the area taken
-  // by the always-visible (non-auto-hiding) desktop bars.
-  gfx::Rect work_area_;
-
-  // The useable work area for computing the panel bounds. This area excludes
-  // the potential area that could be taken by the auto-hiding desktop
-  // bars (we only consider those bars that are aligned to bottom, left, and
-  // right of the screen edges) when they become fully visible.
-  gfx::Rect adjusted_work_area_;
-
   scoped_ptr<DisplaySettingsProvider> display_settings_provider_;
+
+  gfx::Rect display_area_;
 
   // Whether or not bounds will be updated when the preferred content size is
   // changed. The testing code could set this flag to false so that other tests
   // will not be affected.
   bool auto_sizing_enabled_;
-
-  // Timer used to track if the current active app is in full screen mode.
-  base::RepeatingTimer<PanelManager> full_screen_mode_timer_;
-
-  // True if current active app is in full screen mode.
-  bool is_full_screen_;
-
-  // True only while moving panels to overflow. Used to prevent moving panels
-  // out of overflow while in the process of moving panels to overflow.
-  bool is_processing_overflow_;
 
   DISALLOW_COPY_AND_ASSIGN(PanelManager);
 };

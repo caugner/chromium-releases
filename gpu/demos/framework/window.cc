@@ -94,6 +94,7 @@ bool Window::CreateRenderContext(gfx::AcceleratedWidget hwnd) {
   std::vector<int32> attribs;
   if (!decoder_->Initialize(surface_.get(),
                             context_.get(),
+                            surface_->IsOffscreen(),
                             gfx::Size(),
                             gpu::gles2::DisallowedFeatures(),
                             NULL,
@@ -117,6 +118,7 @@ bool Window::CreateRenderContext(gfx::AcceleratedWidget hwnd) {
   ::gles2::Initialize();
   gles2_implementation_.reset(new GLES2Implementation(
       gles2_cmd_helper_.get(),
+      NULL,
       transfer_buffer_.get(),
       false,
       true));

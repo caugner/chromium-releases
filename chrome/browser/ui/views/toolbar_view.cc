@@ -19,7 +19,6 @@
 #include "chrome/browser/ui/views/browser_actions_container.h"
 #include "chrome/browser/ui/views/event_utils.h"
 #include "chrome/browser/ui/views/location_bar/page_action_image_view.h"
-#include "chrome/browser/ui/views/window.h"
 #include "chrome/browser/ui/views/wrench_menu.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -33,6 +32,7 @@
 #include "grit/theme_resources_standard.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas.h"
@@ -54,54 +54,63 @@
 using content::UserMetricsAction;
 using content::WebContents;
 
-// static
-const char ToolbarView::kViewClassName[] = "browser/ui/views/ToolbarView";
-// The space between items is 4 px in general.
-// TODO(jamescook): Update all Chrome platforms to use the new art and metrics
-// from Ash, crbug.com/118228
-#if defined(USE_ASH)
-const int ToolbarView::kStandardSpacing = 3;
-#else
-const int ToolbarView::kStandardSpacing = 4;
-#endif
+namespace {
 
-// The top of the toolbar has an edge we have to skip over in addition to the 4
-// px of spacing.
-const int ToolbarView::kVertSpacing = 5;
 // The edge graphics have some built-in spacing/shadowing, so we have to adjust
-// our spacing to make it still appear to be 4 px.
-#if defined(USE_ASH)
-static const int kLeftEdgeSpacing = 3;
-static const int kRightEdgeSpacing = 2;
-#else
-static const int kLeftEdgeSpacing = 3;
-static const int kRightEdgeSpacing = 3;
-#endif
+// our spacing to make it match.
+const int kLeftEdgeSpacing = 3;
+const int kRightEdgeSpacing = 2;
 
 // The buttons to the left of the omnibox are close together.
-#if defined(USE_ASH)
-static const int kButtonSpacing = 0;
-#else
-static const int kButtonSpacing = 1;
-#endif
+const int kButtonSpacing = 0;
 
-// The content area line has a shadow that extends a couple of pixels above
-// the toolbar bounds.
 #if defined(USE_ASH)
+// Ash doesn't use a rounded content area and its top edge has an extra shadow.
 const int kContentShadowHeight = 2;
 #else
+// Windows uses a rounded content area with no shadow in the assets.
 const int kContentShadowHeight = 0;
 #endif
 
-static const int kPopupTopSpacingNonGlass = 3;
-static const int kPopupBottomSpacingNonGlass = 2;
-static const int kPopupBottomSpacingGlass = 1;
+const int kPopupTopSpacingNonGlass = 3;
+const int kPopupBottomSpacingNonGlass = 2;
+const int kPopupBottomSpacingGlass = 1;
 
 // Top margin for the wrench menu badges (badge is placed in the upper right
 // corner of the wrench menu).
-static const int kBadgeTopMargin = 2;
+const int kBadgeTopMargin = 2;
 
-static SkBitmap* kPopupBackgroundEdge = NULL;
+SkBitmap* kPopupBackgroundEdge = NULL;
+
+// The omnibox border has some additional shadow, so we use less vertical
+// spacing than ToolbarView::kVertSpacing.
+int location_bar_vert_spacing() {
+  static int value = -1;
+  if (value == -1) {
+    switch (ui::GetDisplayLayout()) {
+      case ui::LAYOUT_ASH:
+      case ui::LAYOUT_DESKTOP:
+        value = 4;
+        break;
+      case ui::LAYOUT_TOUCH:
+        value = 6;
+        break;
+      default:
+        NOTREACHED();
+    }
+  }
+  return value;
+}
+
+}  // namespace
+
+// static
+const char ToolbarView::kViewClassName[] = "browser/ui/views/ToolbarView";
+// The space between items is 3 px in general.
+const int ToolbarView::kStandardSpacing = 3;
+// The top of the toolbar has an edge we have to skip over in addition to the
+// above spacing.
+const int ToolbarView::kVertSpacing = 5;
 
 ////////////////////////////////////////////////////////////////////////////////
 // ToolbarView, public:
@@ -127,8 +136,8 @@ ToolbarView::ToolbarView(Browser* browser)
       DISPLAYMODE_NORMAL : DISPLAYMODE_LOCATION;
 
   if (!kPopupBackgroundEdge) {
-    kPopupBackgroundEdge = ResourceBundle::GetSharedInstance().GetBitmapNamed(
-        IDR_LOCATIONBG_POPUPMODE_EDGE);
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+    kPopupBackgroundEdge = rb.GetBitmapNamed(IDR_LOCATIONBG_POPUPMODE_EDGE);
   }
 
   registrar_.Add(this, chrome::NOTIFICATION_UPGRADE_RECOMMENDED,
@@ -389,7 +398,7 @@ void ToolbarView::ShowPageInfo(content::WebContents* web_contents,
 
 views::Widget* ToolbarView::CreateViewsBubble(
     views::BubbleDelegateView* bubble_delegate) {
-  return browser::CreateViewsBubble(bubble_delegate);
+  return views::BubbleDelegateView::CreateBubble(bubble_delegate);
 }
 
 PageActionImageView* ToolbarView::CreatePageActionImageView(
@@ -491,6 +500,17 @@ bool ToolbarView::GetAcceleratorForCommandId(int command_id,
     case IDC_PASTE:
       *accelerator = ui::Accelerator(ui::VKEY_V, false, true, false);
       return true;
+#if defined(USE_ASH)
+    // When USE_ASH is defined, IDC_NEW_WINDOW and IDC_NEW_INCOGNITO_WINDOW are
+    // handled outside Chrome, in ash/accelerators/accelerator_table.cc.
+    // crbug.com/120196
+    case IDC_NEW_WINDOW:
+      *accelerator = ui::Accelerator(ui::VKEY_N, false, true, false);
+      return true;
+    case IDC_NEW_INCOGNITO_WINDOW:
+      *accelerator = ui::Accelerator(ui::VKEY_N, true, true, false);
+      return true;
+#endif
   }
   // Else, we retrieve the accelerator information from the frame.
   return GetWidget()->GetAccelerator(command_id, accelerator);
@@ -513,7 +533,7 @@ gfx::Size ToolbarView::GetPreferredSize() {
 
     CR_DEFINE_STATIC_LOCAL(SkBitmap, normal_background, ());
     if (normal_background.isNull()) {
-      ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+      ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
       normal_background = *rb.GetBitmapNamed(IDR_CONTENT_TOP_CENTER);
     }
 
@@ -580,8 +600,8 @@ void ToolbarView::Layout() {
   int location_x = home_->x() + home_->width() + kStandardSpacing;
   int available_width = width() - kRightEdgeSpacing - app_menu_width -
       browser_actions_width - location_x;
-  int location_y = child_y;
-  int location_bar_height = child_height;
+  int location_y = std::min(location_bar_vert_spacing(), height());
+  int location_bar_height = location_bar_->GetPreferredSize().height();
 
   location_bar_->SetBounds(location_x, location_y, std::max(available_width, 0),
                            location_bar_height);
@@ -603,6 +623,15 @@ void ToolbarView::Layout() {
     app_menu_width += kRightEdgeSpacing;
   app_menu_->SetBounds(browser_actions_->x() + browser_actions_width, child_y,
                        app_menu_width, child_height);
+}
+
+bool ToolbarView::HitTest(const gfx::Point& l) const {
+  // Don't take hits in our top shadow edge.  Let them fall through to the
+  // tab strip above us.
+  if (l.y() < kContentShadowHeight)
+    return false;
+  // Otherwise let our superclass take care of it.
+  return AccessiblePaneView::HitTest(l);
 }
 
 void ToolbarView::OnPaint(gfx::Canvas* canvas) {
@@ -713,17 +742,7 @@ bool ToolbarView::ShouldShowIncompatibilityWarning() {
 }
 
 int ToolbarView::PopupTopSpacing() const {
-  // TODO(beng): For some reason GetWidget() returns NULL here in some
-  //             unidentified circumstances on ChromeOS. This means GetWidget()
-  //             succeeded but we were (probably) unable to locate a
-  //             NativeWidgetGtk* on it using
-  //             NativeWidget::GetNativeWidgetForNativeView.
-  //             I am throwing in a NULL check for now to stop the hurt, but
-  //             it's possible the crash may just show up somewhere else.
-  const views::Widget* widget = GetWidget();
-  DCHECK(widget) << "If you hit this please talk to beng";
-  return widget && widget->ShouldUseNativeFrame() ?
-      0 : kPopupTopSpacingNonGlass;
+  return GetWidget()->ShouldUseNativeFrame() ? 0 : kPopupTopSpacingNonGlass;
 }
 
 void ToolbarView::LoadImages() {
@@ -774,7 +793,7 @@ void ToolbarView::ShowCriticalNotification() {
 #if defined(OS_WIN)
   CriticalNotificationBubbleView* bubble_delegate =
       new CriticalNotificationBubbleView(app_menu_);
-  browser::CreateViewsBubble(bubble_delegate);
+  views::BubbleDelegateView::CreateBubble(bubble_delegate);
   bubble_delegate->StartFade(true);
 #endif
 }

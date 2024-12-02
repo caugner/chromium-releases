@@ -37,18 +37,12 @@ FullscreenController::FullscreenController(BrowserWindow* window,
     mouse_lock_state_(MOUSELOCK_NOT_REQUESTED) {
 }
 
-FullscreenController::~FullscreenController() {}
-
-bool FullscreenController::IsFullscreenForTab() const {
-  return fullscreened_tab_ != NULL;
+bool FullscreenController::IsFullscreenForBrowser() const {
+  return window_->IsFullscreen() && !tab_caused_fullscreen_;
 }
 
-bool FullscreenController::IsFullscreenForTab(const WebContents* tab) const {
-  if (IsFullscreenForTabOrPending(tab)) {
-    DCHECK(window_->IsFullscreen());
-    return true;
-  }
-  return false;
+bool FullscreenController::IsFullscreenForTabOrPending() const {
+  return fullscreened_tab_ != NULL;
 }
 
 bool FullscreenController::IsFullscreenForTabOrPending(
@@ -61,29 +55,37 @@ bool FullscreenController::IsFullscreenForTabOrPending(
   return true;
 }
 
-void FullscreenController::RequestToLockMouse(WebContents* tab) {
+bool FullscreenController::IsMouseLockRequested() const {
+  return mouse_lock_state_ == MOUSELOCK_REQUESTED;
+}
+
+bool FullscreenController::IsMouseLocked() const {
+  return mouse_lock_state_ == MOUSELOCK_ACCEPTED;
+}
+
+void FullscreenController::RequestToLockMouse(WebContents* tab,
+                                              bool /* user_gesture */) {
+  // TODO(scheib) user_gesture required for Mouse Lock in Windowed Mode.
+  // See http://crbug.com/107013, which will land in multiple patches.
+
+  DCHECK(!IsMouseLocked());
+
   // Mouse Lock is only permitted when browser is in tab fullscreen.
   if (!IsFullscreenForTabOrPending(tab)) {
     tab->GotResponseToLockMouseRequest(false);
     return;
   }
 
-  if (mouse_lock_state_ == MOUSELOCK_ACCEPTED) {
-    tab->GotResponseToLockMouseRequest(true);
-    return;
-  }
-
   switch (GetMouseLockSetting(tab->GetURL())) {
     case CONTENT_SETTING_ALLOW:
       if (tab_fullscreen_accepted_) {
-        mouse_lock_state_ = MOUSELOCK_ACCEPTED;
-        tab->GotResponseToLockMouseRequest(true);
+        if (tab->GotResponseToLockMouseRequest(true))
+          mouse_lock_state_ = MOUSELOCK_ACCEPTED;
       } else {
         mouse_lock_state_ = MOUSELOCK_REQUESTED;
       }
       break;
     case CONTENT_SETTING_BLOCK:
-      mouse_lock_state_ = MOUSELOCK_NOT_REQUESTED;
       tab->GotResponseToLockMouseRequest(false);
       break;
     case CONTENT_SETTING_ASK:
@@ -171,7 +173,7 @@ void FullscreenController::LostMouseLock() {
 }
 
 void FullscreenController::OnTabClosing(WebContents* web_contents) {
-  if (IsFullscreenForTab(web_contents)) {
+  if (IsFullscreenForTabOrPending(web_contents)) {
     ExitTabbedFullscreenModeIfNecessary();
     // The call to exit fullscreen may result in asynchronous notification of
     // fullscreen state change (e.g., on Linux). We don't want to rely on it
@@ -200,7 +202,7 @@ void FullscreenController::OnAcceptFullscreenPermission(
   HostContentSettingsMap* settings_map = profile_->GetHostContentSettingsMap();
   ContentSettingsPattern pattern = ContentSettingsPattern::FromURL(url);
   if (mouse_lock) {
-    DCHECK_EQ(mouse_lock_state_, MOUSELOCK_REQUESTED);
+    DCHECK(IsMouseLockRequested());
     // TODO(markusheintz): We should allow patterns for all possible URLs here.
     if (pattern.IsValid()) {
       settings_map->SetContentSetting(
@@ -234,7 +236,7 @@ void FullscreenController::OnDenyFullscreenPermission(
   DCHECK_NE(tab_fullscreen_accepted_, fullscreen);
 
   if (mouse_lock) {
-    DCHECK_EQ(mouse_lock_state_, MOUSELOCK_REQUESTED);
+    DCHECK(IsMouseLockRequested());
     mouse_lock_state_ = MOUSELOCK_NOT_REQUESTED;
     fullscreened_tab_->web_contents()->GotResponseToLockMouseRequest(false);
     if (!fullscreen)
@@ -265,11 +267,13 @@ void FullscreenController::WindowFullscreenStateChanged() {
 }
 
 bool FullscreenController::HandleUserPressedEscape() {
-  if (!IsFullscreenForTab())
+  if (!IsFullscreenForTabOrPending())
     return false;
   ExitTabbedFullscreenModeIfNecessary();
   return true;
 }
+
+FullscreenController::~FullscreenController() {}
 
 void FullscreenController::NotifyTabOfFullscreenExitIfNecessary() {
   if (fullscreened_tab_) {

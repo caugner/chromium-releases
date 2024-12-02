@@ -18,7 +18,7 @@ class RendererWebIDBIndexImpl : public WebKit::WebIDBIndex {
   // WebKit::WebIDBIndex
   virtual WebKit::WebString name() const;
   virtual WebKit::WebString storeName() const;
-  virtual WebKit::WebString keyPath() const;
+  virtual WebKit::WebIDBKeyPath keyPath() const;
   virtual bool unique() const;
   virtual bool multiEntry() const;
 
@@ -36,11 +36,11 @@ class RendererWebIDBIndexImpl : public WebKit::WebIDBIndex {
                      WebKit::WebIDBCallbacks* callbacks,
                      const WebKit::WebIDBTransaction& transaction,
                      WebKit::WebExceptionCode& ec);
-  virtual void getObject(const WebKit::WebIDBKey& key,
+  virtual void getObject(const WebKit::WebIDBKeyRange& key_range,
                          WebKit::WebIDBCallbacks* callbacks,
                          const WebKit::WebIDBTransaction& transaction,
                          WebKit::WebExceptionCode& ec);
-  virtual void getKey(const WebKit::WebIDBKey& key,
+  virtual void getKey(const WebKit::WebIDBKeyRange& key_range,
                       WebKit::WebIDBCallbacks* callbacks,
                       const WebKit::WebIDBTransaction& transaction,
                       WebKit::WebExceptionCode& ec);

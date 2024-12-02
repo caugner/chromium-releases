@@ -27,6 +27,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/test/base/chrome_test_suite.h"
 #include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -35,8 +36,10 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/renderer/mock_content_renderer_client.h"
 #include "content/test/test_browser_thread.h"
+#include "content/test/test_launcher.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/test/test_server.h"
+#include "ui/compositor/compositor_switches.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/audio/audio_handler.h"
@@ -53,12 +56,12 @@ const char kBrowserTestType[] = "browser";
 
 InProcessBrowserTest::InProcessBrowserTest()
     : browser_(NULL),
-      show_window_(false),
-      initial_window_required_(true),
-      dom_automation_enabled_(false),
-      tab_closeable_state_watcher_enabled_(false)
+      dom_automation_enabled_(false)
+#if defined(OS_POSIX)
+      , handle_sigterm_(true)
+#endif
 #if defined(OS_MACOSX)
-    , autorelease_pool_(NULL)
+      , autorelease_pool_(NULL)
 #endif  // OS_MACOSX
     {
 #if defined(OS_MACOSX)
@@ -84,26 +87,26 @@ InProcessBrowserTest::~InProcessBrowserTest() {
 }
 
 void InProcessBrowserTest::SetUp() {
-  // Create a temporary user data directory if required.
-  ASSERT_TRUE(CreateUserDataDirectory())
-      << "Could not create user data directory.";
-
   // Undo TestingBrowserProcess creation in ChromeTestSuite.
   // TODO(phajdan.jr): Extract a smaller test suite so we don't need this.
   DCHECK(g_browser_process);
   delete g_browser_process;
   g_browser_process = NULL;
 
-  // Allow subclasses the opportunity to make changes to the default user data
-  // dir before running any tests.
-  ASSERT_TRUE(SetUpUserDataDirectory())
-      << "Could not set up user data directory.";
-
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   // Allow subclasses to change the command line before running any tests.
   SetUpCommandLine(command_line);
   // Add command line arguments that are used by all InProcessBrowserTests.
   PrepareTestCommandLine(command_line);
+
+  // Create a temporary user data directory if required.
+  ASSERT_TRUE(CreateUserDataDirectory())
+      << "Could not create user data directory.";
+
+  // Allow subclasses the opportunity to make changes to the default user data
+  // dir before running any tests.
+  ASSERT_TRUE(SetUpUserDataDirectory())
+      << "Could not set up user data directory.";
 
   // Single-process mode is not set in BrowserMain, so process it explicitly,
   // and set up renderer.
@@ -134,6 +137,16 @@ void InProcessBrowserTest::SetUp() {
   net::ScopedDefaultHostResolverProc scoped_host_resolver_proc(
       host_resolver_.get());
 
+#if defined(OS_MACOSX)
+  // On Mac, without the following autorelease pool, code which is directly
+  // executed (as opposed to executed inside a message loop) would autorelease
+  // objects into a higher-level pool. This pool is not recycled in-sync with
+  // the message loops' pools and causes problems with code relying on
+  // deallocation via an autorelease pool (such as browser window closure and
+  // browser shutdown). To avoid this, the following pool is recycled after each
+  // time code is directly executed.
+  autorelease_pool_ = new base::mac::ScopedNSAutoreleasePool;
+#endif
   BrowserTestBase::SetUp();
 }
 
@@ -170,12 +183,15 @@ void InProcessBrowserTest::PrepareTestCommandLine(CommandLine* command_line) {
                                  subprocess_path);
 #endif
 
-  // If neccessary, disable TabCloseableStateWatcher.
-  if (!tab_closeable_state_watcher_enabled_)
-    command_line->AppendSwitch(switches::kDisableTabCloseableStateWatcher);
-
   // TODO(pkotwicz): Investigate if we can remove this switch.
   command_line->AppendSwitch(switches::kDisableZeroBrowsersOpenForTests);
+
+  if (!command_line->HasSwitch(switches::kHomePage)) {
+      command_line->AppendSwitchASCII(
+          switches::kHomePage, chrome::kAboutBlankURL);
+  }
+  if (command_line->GetArgs().empty())
+    command_line->AppendArg(chrome::kAboutBlankURL);
 }
 
 bool InProcessBrowserTest::CreateUserDataDirectory() {
@@ -198,6 +214,10 @@ bool InProcessBrowserTest::CreateUserDataDirectory() {
 void InProcessBrowserTest::TearDown() {
   DCHECK(!g_browser_process);
   BrowserTestBase::TearDown();
+}
+
+content::BrowserContext* InProcessBrowserTest::GetBrowserContext() {
+  return browser_->profile();
 }
 
 content::ResourceContext* InProcessBrowserTest::GetResourceContext() {
@@ -243,7 +263,8 @@ Browser* InProcessBrowserTest::CreateIncognitoBrowser() {
 }
 
 Browser* InProcessBrowserTest::CreateBrowserForPopup(Profile* profile) {
-  Browser* browser = Browser::CreateForType(Browser::TYPE_POPUP, profile);
+  Browser* browser = Browser::CreateWithParams(
+      Browser::CreateParams(Browser::TYPE_POPUP, profile));
   AddBlankTabAndShow(browser);
   return browser;
 }
@@ -251,11 +272,9 @@ Browser* InProcessBrowserTest::CreateBrowserForPopup(Profile* profile) {
 Browser* InProcessBrowserTest::CreateBrowserForApp(
     const std::string& app_name,
     Profile* profile) {
-  Browser* browser = Browser::CreateForApp(
-      Browser::TYPE_POPUP,
-      app_name,
-      gfx::Rect(),
-      profile);
+  Browser* browser = Browser::CreateWithParams(
+      Browser::CreateParams::CreateForApp(
+          Browser::TYPE_POPUP, app_name, gfx::Rect(), profile));
   AddBlankTabAndShow(browser);
   return browser;
 }
@@ -271,6 +290,38 @@ void InProcessBrowserTest::AddBlankTabAndShow(Browser* browser) {
   browser->window()->Show();
 }
 
+#if !defined(OS_MACOSX)
+CommandLine InProcessBrowserTest::GetCommandLineForRelaunch() {
+  CommandLine new_command_line(CommandLine::ForCurrentProcess()->GetProgram());
+  CommandLine::SwitchMap switches =
+      CommandLine::ForCurrentProcess()->GetSwitches();
+  switches.erase(switches::kUserDataDir);
+  switches.erase(test_launcher::kSingleProcessTestsFlag);
+  switches.erase(test_launcher::kSingleProcessTestsAndChromeFlag);
+  new_command_line.AppendSwitch(ChromeTestSuite::kLaunchAsBrowser);
+
+#if defined(USE_AURA)
+  // Copy what UITestBase::SetLaunchSwitches() does, and also what
+  // ChromeTestSuite does if the process had went into the test path. Otherwise
+  // tests will fail on bots.
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableTestCompositor)) {
+    new_command_line.AppendSwitch(switches::kTestCompositor);
+  }
+#endif
+
+  FilePath user_data_dir;
+  PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
+  new_command_line.AppendSwitchPath(switches::kUserDataDir, user_data_dir);
+
+  for (CommandLine::SwitchMap::const_iterator iter = switches.begin();
+        iter != switches.end(); ++iter) {
+    new_command_line.AppendSwitchNative((*iter).first, (*iter).second);
+  }
+  return new_command_line;
+}
+#endif
+
 #if defined(OS_POSIX)
 // On SIGTERM (sent by the runner on timeouts), dump a stack trace (to make
 // debugging easier) and also exit with a known error code (so that the test
@@ -283,34 +334,20 @@ static void DumpStackTraceSignalHandler(int signal) {
 
 void InProcessBrowserTest::RunTestOnMainThreadLoop() {
 #if defined(OS_POSIX)
-  signal(SIGTERM, DumpStackTraceSignalHandler);
+  if (handle_sigterm_)
+    signal(SIGTERM, DumpStackTraceSignalHandler);
 #endif  // defined(OS_POSIX)
-
-#if defined(OS_MACOSX)
-  // On Mac, without the following autorelease pool, code which is directly
-  // executed (as opposed to executed inside a message loop) would autorelease
-  // objects into a higher-level pool. This pool is not recycled in-sync with
-  // the message loops' pools and causes problems with code relying on
-  // deallocation via an autorelease pool (such as browser window closure and
-  // browser shutdown). To avoid this, the following pool is recycled after each
-  // time code is directly executed.
-  base::mac::ScopedNSAutoreleasePool pool;
-  AutoReset<base::mac::ScopedNSAutoreleasePool*> autorelease_pool_reset(
-      &autorelease_pool_, &pool);
-#endif
 
   // Pump startup related events.
   ui_test_utils::RunAllPendingInMessageLoop();
 
 #if defined(OS_MACOSX)
-  pool.Recycle();
+  autorelease_pool_->Recycle();
 #endif
 
-  if (initial_window_required_) {
-    browser_ = CreateBrowser(ProfileManager::GetDefaultProfile());
-#if defined(OS_MACOSX)
-    pool.Recycle();
-#endif
+  if (BrowserList::size()) {
+    browser_ = *BrowserList::begin();
+    ui_test_utils::WaitForLoadStop(browser_->GetSelectedWebContents());
   }
 
   // Pump any pending events that were created as a result of creating a
@@ -319,26 +356,23 @@ void InProcessBrowserTest::RunTestOnMainThreadLoop() {
 
   SetUpOnMainThread();
 #if defined(OS_MACOSX)
-  pool.Recycle();
+  autorelease_pool_->Recycle();
 #endif
 
   if (!HasFatalFailure())
     RunTestOnMainThread();
 #if defined(OS_MACOSX)
-  pool.Recycle();
+  autorelease_pool_->Recycle();
 #endif
 
   // Invoke cleanup and quit even if there are failures. This is similar to
   // gtest in that it invokes TearDown even if Setup fails.
   CleanUpOnMainThread();
 #if defined(OS_MACOSX)
-  pool.Recycle();
+  autorelease_pool_->Recycle();
 #endif
 
   QuitBrowsers();
-#if defined(OS_MACOSX)
-  pool.Recycle();
-#endif
 }
 
 void InProcessBrowserTest::QuitBrowsers() {
@@ -351,4 +385,9 @@ void InProcessBrowserTest::QuitBrowsers() {
   MessageLoopForUI::current()->PostTask(FROM_HERE,
                                         base::Bind(&BrowserList::AttemptExit));
   ui_test_utils::RunMessageLoop();
+
+#if defined(OS_MACOSX)
+  delete autorelease_pool_;
+  autorelease_pool_ = NULL;
+#endif
 }

@@ -18,8 +18,10 @@
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/content_client.h"
 #include "grit/chromium_strings.h"
@@ -32,13 +34,18 @@
 #include "webkit/glue/webkit_glue.h"
 
 #if defined(OS_CHROMEOS)
+#include "base/i18n/time_formatting.h"
+#include "base/file_util_proxy.h"
+#include "base/sys_info.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "content/public/browser/browser_thread.h"
 #endif
 
 using base::ListValue;
+using content::BrowserThread;
 
 namespace {
 
@@ -88,12 +95,18 @@ bool CanChangeReleaseChannel() {
   return false;
 }
 
+// Pointer to a |StringValue| holding the date of the last update to Chromium
+// OS. Because this value is obtained by reading a file, it is cached here to
+// prevent the need to read from the file system multiple times unnecessarily.
+Value* g_last_updated_string = NULL;
+
 #endif  // defined(OS_CHROMEOS)
 
 }  // namespace
 
 HelpHandler::HelpHandler()
-    : version_updater_(VersionUpdater::Create()) {
+    : version_updater_(VersionUpdater::Create()),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
 }
 
 HelpHandler::~HelpHandler() {
@@ -134,6 +147,7 @@ void HelpHandler::GetLocalizedValues(DictionaryValue* localized_strings) {
     { "webkit", IDS_WEBKIT },
     { "userAgent", IDS_ABOUT_VERSION_USER_AGENT },
     { "commandLine", IDS_ABOUT_VERSION_COMMAND_LINE },
+    { "lastUpdated", IDS_ABOUT_VERSION_LAST_UPDATED },
 #endif
 #if defined(OS_MACOSX)
     { "promote", IDS_ABOUT_CHROME_PROMOTE_UPDATER },
@@ -183,6 +197,9 @@ void HelpHandler::GetLocalizedValues(DictionaryValue* localized_strings) {
 }
 
 void HelpHandler::RegisterMessages() {
+  registrar_.Add(this, chrome::NOTIFICATION_UPGRADE_RECOMMENDED,
+                 content::NotificationService::AllSources());
+
   web_ui()->RegisterMessageCallback("onPageLoaded",
       base::Bind(&HelpHandler::OnPageLoaded, base::Unretained(this)));
   web_ui()->RegisterMessageCallback("relaunchNow",
@@ -201,6 +218,25 @@ void HelpHandler::RegisterMessages() {
 #endif
 }
 
+void HelpHandler::Observe(int type, const content::NotificationSource& source,
+                          const content::NotificationDetails& details) {
+  switch (type) {
+    case chrome::NOTIFICATION_UPGRADE_RECOMMENDED: {
+      // A version update is installed and ready to go. Refresh the UI so the
+      // correct state will be shown.
+      version_updater_->CheckForUpdate(
+          base::Bind(&HelpHandler::SetUpdateStatus, base::Unretained(this))
+#if defined(OS_MACOSX)
+          , base::Bind(&HelpHandler::SetPromotionState, base::Unretained(this))
+#endif
+          );
+      break;
+    }
+    default:
+      NOTREACHED();
+  }
+}
+
 void HelpHandler::OnPageLoaded(const ListValue* args) {
 #if defined(OS_CHROMEOS)
   // Version information is loaded from a callback
@@ -214,6 +250,19 @@ void HelpHandler::OnPageLoaded(const ListValue* args) {
       base::Value::CreateBooleanValue(CanChangeReleaseChannel()));
   web_ui()->CallJavascriptFunction(
       "help.HelpPage.updateEnableReleaseChannel", *can_change_channel_value);
+
+  if (g_last_updated_string == NULL) {
+    // If |g_last_updated_string| is |NULL|, the date has not yet been assigned.
+    // Get the date of the last lsb-release file modification.
+    base::FileUtilProxy::GetFileInfo(
+        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
+        base::SysInfo::GetLsbReleaseFilePath(),
+        base::Bind(&HelpHandler::ProcessLsbFileInfo,
+                   weak_factory_.GetWeakPtr()));
+  } else {
+    web_ui()->CallJavascriptFunction("help.HelpPage.setLastUpdated",
+                                     *g_last_updated_string);
+  }
 #endif  // defined(OS_CHROMEOS)
 
   version_updater_->CheckForUpdate(
@@ -355,5 +404,33 @@ void HelpHandler::OnReleaseChannel(const std::string& channel) {
   scoped_ptr<Value> channel_string(Value::CreateStringValue(channel));
   web_ui()->CallJavascriptFunction(
       "help.HelpPage.updateSelectedChannel", *channel_string);
+}
+
+void HelpHandler::ProcessLsbFileInfo(
+    base::PlatformFileError error, const base::PlatformFileInfo& file_info) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  // If |g_last_updated_string| is not |NULL|, then the file's information has
+  // already been retrieved by another tab.
+  if (g_last_updated_string == NULL) {
+    base::Time time;
+    if (error == base::PLATFORM_FILE_OK) {
+      // Retrieves the approximate time at which Chrome OS was last updated.
+      // Each time a new build is created, /etc/lsb-release is modified with the
+      // new version numbers of the release.
+      time = file_info.last_modified;
+    } else {
+      // If the time of the last update cannot be retrieved, return and do not
+      // display the "Last Updated" section.
+      return;
+    }
+
+    // Note that this string will be internationalized.
+    string16 last_updated = base::TimeFormatFriendlyDate(time);
+    g_last_updated_string = Value::CreateStringValue(last_updated);
+  }
+
+  web_ui()->CallJavascriptFunction("help.HelpPage.setLastUpdated",
+                                   *g_last_updated_string);
 }
 #endif // defined(OS_CHROMEOS)

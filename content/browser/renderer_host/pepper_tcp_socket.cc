@@ -10,6 +10,7 @@
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/string_util.h"
 #include "content/browser/renderer_host/pepper_message_filter.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/cert_verifier.h"
@@ -19,12 +20,14 @@
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/base/single_request_host_resolver.h"
+#include "net/base/x509_certificate.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/tcp_client_socket.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/shared_impl/private/net_address_private_impl.h"
+#include "ppapi/shared_impl/private/ppb_x509_certificate_private_shared.h"
 #include "ppapi/shared_impl/private/tcp_socket_private_impl.h"
 
 using content::BrowserThread;
@@ -101,8 +104,11 @@ void PepperTCPSocket::ConnectWithNetAddress(
   StartConnect(address_list_);
 }
 
-void PepperTCPSocket::SSLHandshake(const std::string& server_name,
-                                   uint16_t server_port) {
+void PepperTCPSocket::SSLHandshake(
+    const std::string& server_name,
+    uint16_t server_port,
+    const std::vector<std::vector<char> >& trusted_certs,
+    const std::vector<std::vector<char> >& untrusted_certs) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   // Allow to do SSL handshake only if currently the socket has been connected
@@ -116,6 +122,8 @@ void PepperTCPSocket::SSLHandshake(const std::string& server_name,
   }
 
   connection_state_ = SSL_HANDSHAKE_IN_PROGRESS;
+  // TODO(raymes,rsleevi): Use trusted/untrusted certificates when connecting.
+
   net::ClientSocketHandle* handle = new net::ClientSocketHandle();
   handle->set_socket(socket_.release());
   net::ClientSocketFactory* factory =
@@ -202,6 +210,65 @@ void PepperTCPSocket::SendConnectACKError() {
       NetAddressPrivateImpl::kInvalidNetAddress));
 }
 
+// static
+bool PepperTCPSocket::GetCertificateFields(
+    const net::X509Certificate& cert,
+    ppapi::PPB_X509Certificate_Fields* fields) {
+  const net::CertPrincipal& issuer = cert.issuer();
+  fields->SetField(PP_X509CERTIFICATE_PRIVATE_ISSUER_COMMON_NAME,
+      new base::StringValue(issuer.common_name));
+  fields->SetField(PP_X509CERTIFICATE_PRIVATE_ISSUER_LOCALITY_NAME,
+      new base::StringValue(issuer.locality_name));
+  fields->SetField(PP_X509CERTIFICATE_PRIVATE_ISSUER_STATE_OR_PROVINCE_NAME,
+      new base::StringValue(issuer.state_or_province_name));
+  fields->SetField(PP_X509CERTIFICATE_PRIVATE_ISSUER_COUNTRY_NAME,
+      new base::StringValue(issuer.country_name));
+  fields->SetField(PP_X509CERTIFICATE_PRIVATE_ISSUER_ORGANIZATION_NAME,
+      new base::StringValue(JoinString(issuer.organization_names, '\n')));
+  fields->SetField(PP_X509CERTIFICATE_PRIVATE_ISSUER_ORGANIZATION_UNIT_NAME,
+      new base::StringValue(JoinString(issuer.organization_unit_names, '\n')));
+
+  const net::CertPrincipal& subject = cert.subject();
+  fields->SetField(PP_X509CERTIFICATE_PRIVATE_SUBJECT_COMMON_NAME,
+      new base::StringValue(subject.common_name));
+  fields->SetField(PP_X509CERTIFICATE_PRIVATE_SUBJECT_LOCALITY_NAME,
+      new base::StringValue(subject.locality_name));
+  fields->SetField(PP_X509CERTIFICATE_PRIVATE_SUBJECT_STATE_OR_PROVINCE_NAME,
+      new base::StringValue(subject.state_or_province_name));
+  fields->SetField(PP_X509CERTIFICATE_PRIVATE_SUBJECT_COUNTRY_NAME,
+      new base::StringValue(subject.country_name));
+  fields->SetField(PP_X509CERTIFICATE_PRIVATE_SUBJECT_ORGANIZATION_NAME,
+      new base::StringValue(JoinString(subject.organization_names, '\n')));
+  fields->SetField(PP_X509CERTIFICATE_PRIVATE_SUBJECT_ORGANIZATION_UNIT_NAME,
+      new base::StringValue(JoinString(subject.organization_unit_names, '\n')));
+
+  const std::string& serial_number = cert.serial_number();
+  fields->SetField(PP_X509CERTIFICATE_PRIVATE_SERIAL_NUMBER,
+      base::BinaryValue::CreateWithCopiedBuffer(serial_number.data(),
+                                                serial_number.length()));
+  fields->SetField(PP_X509CERTIFICATE_PRIVATE_VALIDITY_NOT_BEFORE,
+      base::Value::CreateDoubleValue(cert.valid_start().ToDoubleT()));
+  fields->SetField(PP_X509CERTIFICATE_PRIVATE_VALIDITY_NOT_AFTER,
+      base::Value::CreateDoubleValue(cert.valid_expiry().ToDoubleT()));
+  std::string der;
+  net::X509Certificate::GetDEREncoded(cert.os_cert_handle(), &der);
+  fields->SetField(PP_X509CERTIFICATE_PRIVATE_RAW,
+      base::BinaryValue::CreateWithCopiedBuffer(der.data(), der.length()));
+  return true;
+}
+
+// static
+bool PepperTCPSocket::GetCertificateFields(
+    const char* der,
+    uint32_t length,
+    ppapi::PPB_X509Certificate_Fields* fields) {
+  scoped_refptr<net::X509Certificate> cert =
+      net::X509Certificate::CreateFromBytes(der, length);
+  if (!cert.get())
+    return false;
+  return GetCertificateFields(*cert, fields);
+}
+
 void PepperTCPSocket::SendReadACKError() {
   manager_->Send(new PpapiMsg_PPBTCPSocket_ReadACK(
     routing_id_, plugin_dispatcher_id_, socket_id_, false, std::string()));
@@ -213,8 +280,22 @@ void PepperTCPSocket::SendWriteACKError() {
 }
 
 void PepperTCPSocket::SendSSLHandshakeACK(bool succeeded) {
+  ppapi::PPB_X509Certificate_Fields certificate_fields;
+  if (succeeded) {
+    // Our socket is guaranteed to be an SSL socket if we get here.
+    net::SSLClientSocket* ssl_socket =
+        static_cast<net::SSLClientSocket*>(socket_.get());
+    net::SSLInfo ssl_info;
+    ssl_socket->GetSSLInfo(&ssl_info);
+    if (ssl_info.cert.get())
+      GetCertificateFields(*ssl_info.cert, &certificate_fields);
+  }
   manager_->Send(new PpapiMsg_PPBTCPSocket_SSLHandshakeACK(
-      routing_id_, plugin_dispatcher_id_, socket_id_, succeeded));
+      routing_id_,
+      plugin_dispatcher_id_,
+      socket_id_,
+      succeeded,
+      certificate_fields));
 }
 
 void PepperTCPSocket::OnResolveCompleted(int result) {

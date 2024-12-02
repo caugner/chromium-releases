@@ -283,7 +283,7 @@ bool SQLiteServerBoundCertStore::Backend::EnsureDatabaseVersion() {
               cert_from_db.data(), cert_from_db.size()));
       if (cert) {
         if (cur_version == 2) {
-          update_expires_smt.Reset();
+          update_expires_smt.Reset(true);
           update_expires_smt.BindInt64(0,
                                        cert->valid_expiry().ToInternalValue());
           update_expires_smt.BindString(1, origin);
@@ -294,7 +294,7 @@ bool SQLiteServerBoundCertStore::Backend::EnsureDatabaseVersion() {
           }
         }
 
-        update_creation_smt.Reset();
+        update_creation_smt.Reset(true);
         update_creation_smt.BindInt64(0, cert->valid_start().ToInternalValue());
         update_creation_smt.BindString(1, origin);
         if (!update_creation_smt.Run()) {
@@ -406,7 +406,7 @@ void SQLiteServerBoundCertStore::Backend::Commit() {
     scoped_ptr<PendingOperation> po(*it);
     switch (po->op()) {
       case PendingOperation::CERT_ADD: {
-        add_smt.Reset();
+        add_smt.Reset(true);
         add_smt.BindString(0, po->cert().server_identifier());
         const std::string& private_key = po->cert().private_key();
         add_smt.BindBlob(1, private_key.data(), private_key.size());
@@ -420,7 +420,7 @@ void SQLiteServerBoundCertStore::Backend::Commit() {
         break;
       }
       case PendingOperation::CERT_DELETE:
-        del_smt.Reset();
+        del_smt.Reset(true);
         del_smt.BindString(0, po->cert().server_identifier());
         if (!del_smt.Run())
           NOTREACHED() << "Could not delete a server bound cert from the DB.";
@@ -479,15 +479,6 @@ SQLiteServerBoundCertStore::SQLiteServerBoundCertStore(const FilePath& path)
     : backend_(new Backend(path)) {
 }
 
-SQLiteServerBoundCertStore::~SQLiteServerBoundCertStore() {
-  if (backend_.get()) {
-    backend_->Close();
-    // Release our reference, it will probably still have a reference if the
-    // background thread has not run Close() yet.
-    backend_ = NULL;
-  }
-}
-
 bool SQLiteServerBoundCertStore::Load(
     std::vector<net::DefaultServerBoundCertStore::ServerBoundCert*>* certs) {
   return backend_->Load(certs);
@@ -516,4 +507,13 @@ void SQLiteServerBoundCertStore::Flush(const base::Closure& completion_task) {
     backend_->Flush(completion_task);
   else if (!completion_task.is_null())
     MessageLoop::current()->PostTask(FROM_HERE, completion_task);
+}
+
+SQLiteServerBoundCertStore::~SQLiteServerBoundCertStore() {
+  if (backend_.get()) {
+    backend_->Close();
+    // Release our reference, it will probably still have a reference if the
+    // background thread has not run Close() yet.
+    backend_ = NULL;
+  }
 }

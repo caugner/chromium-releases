@@ -112,7 +112,7 @@
 #   persistent IDs for all fields (but not for groups!) are needed. These are
 #   specified by the 'id' keys of each policy. NEVER CHANGE EXISTING IDs,
 #   because doing so would break the deployed wire format!
-#   For your editing convenience: highest ID currently used: 140
+#   For your editing convenience: highest ID currently used: 144
 #
 # Placeholders:
 #   The following placeholder strings are automatically substituted:
@@ -1154,9 +1154,9 @@
           'type': 'int-enum',
           'items': [
             {
-              'name': 'RestoreOnStartupIsNone',
-              'value': 0,
-              'caption': '''Open home page'''
+              'name': 'RestoreOnStartupIsNewTabPage',
+              'value': 5,
+              'caption': '''Open New Tab Page'''
             },
             {
               'name': 'RestoreOnStartupIsLastSession',
@@ -1179,7 +1179,7 @@
           'caption': '''Action on startup''',
           'desc': '''Allows you to specify the behavior on startup.
 
-          If you choose 'Open home page' the home page will always be opened when you start <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+          If you choose 'Open New Tab Page' the New Tab Page will always be opened when you start <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
 
           If you choose 'Restore the last session', the URLs that were open last time <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> was closed will be reopened and the browsing session will be restored as it was left.
           Choosing this option disables some settings that rely on sessions or that perform actions on exit (such as Clear browsing data on exit or session-only cookies).
@@ -1795,6 +1795,18 @@
 
           For example patterns see http://www.chromium.org/developers/how-tos/chrome-frame-getting-started.''',
         },
+        {
+          'name': 'AdditionalLaunchParameters',
+          'type': 'string',
+          'supported_on': ['chrome_frame:19-'],
+          'features': {'dynamic_refresh': False},
+          'example_value': '--enable-media-stream --enable-media-source',
+          'id': 141,
+          'caption': '''Additional command line parameters for <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>''',
+          'desc': '''Allows you to specify additional parameters that are used when <ph name="PRODUCT_FRAME_NAME">$3<ex>Google Chrome Frame</ex></ph> launches <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+
+          If this policy is not set the default command line will be used.''',
+        },
       ],
     },
     {
@@ -2315,6 +2327,20 @@
       If the policy is not set, or set to false, the state of the dev switch will not be reported.''',
     },
     {
+      'name': 'ReportDeviceLocation',
+      'type': 'main',
+      'supported_on': ['chrome_os:20-'],
+      'device_only': True,
+      'features': {'dynamic_refresh': True},
+      'future': True,
+      'example_value': False,
+      'id': 143,
+      'caption': '''Report device location''',
+      'desc': '''Report the geographic location of the device.
+
+      If the policy is not set, or set to false, the location will not be reported.''',
+    },
+    {
       'name': 'DeviceUserWhitelist',
       'type': 'list',
       'supported_on': ['chrome_os:12-'],
@@ -2538,6 +2564,25 @@
       <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> devices automatically check for updates when this setting is not configured or set to False.''',
     },
     {
+      'name': 'DeviceTargetVersionPrefix',
+      'type': 'string',
+      'supported_on': ['chrome_os:19-'],
+      'device_only': True,
+      'features': {'dynamic_refresh': True},
+      'example_value': '1412.',
+      'id': 142,
+      'caption': '''Target Auto Update Version''',
+      'desc': '''Sets a target version for Auto Updates.
+
+      Specifies the prefix of a target version <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> should update to. If the device is running a version that's before the specified prefix, it will update to the latest version with the given prefix. If the device is already on a later version, there is no effect (i.e. no downgrades are performed) and the device will remain on the current version. The prefix format works component-wise as is demonstrated in the following example:
+
+      "" (or not configured): update to latest version available.
+      "1412.": update to any minor version of 1412 (e.g. 1412.24.34 or 1412.60.2)
+      "1412.2.": update to any minor version of 1412.2 (e.g. 1412.2.34 or 1412.2.2)
+      "1412.24.34": update to this specific version only
+      '''
+    },
+    {
       'name': 'BackgroundModeEnabled',
       'type': 'main',
       'supported_on': ['chrome.win:19-', 'chrome.linux:19-'],
@@ -2591,6 +2636,23 @@
           - if not set or false, users will be able to transfer files to Google Docs via cellular connections.''',
         },
       ],
+    },
+    {
+      'name': 'PinnedLauncherApps',
+      'type': 'list',
+      'supported_on': ['chrome_os:20-' ],
+      'features': {
+        'dynamic_refresh': True,
+        'can_be_recommended': True,
+      },
+      'example_value': ['pjkljhegncpnkpknbcohdijeoejaedia'],
+      'id': 144,
+      'caption': '''List of pinned apps to show in the launcher''',
+      'desc': '''Lists the application identifiers <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> shows as pinned apps in the launcher bar.
+
+      If this policy is configured, the set of applications is fixed and can't be changed by the user.
+
+      If this policy is left unset, the user may change the list of pinned apps in the launcher.''',
     },
   ],
   'messages': {

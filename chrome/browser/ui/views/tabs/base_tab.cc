@@ -158,15 +158,13 @@ BaseTab::BaseTab(TabController* controller)
 
   // Add the Close Button.
   close_button_ = new TabCloseButton(this);
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   close_button_->SetImage(views::CustomButton::BS_NORMAL,
                           rb.GetBitmapNamed(IDR_TAB_CLOSE));
   close_button_->SetImage(views::CustomButton::BS_HOT,
                           rb.GetBitmapNamed(IDR_TAB_CLOSE_H));
   close_button_->SetImage(views::CustomButton::BS_PUSHED,
                           rb.GetBitmapNamed(IDR_TAB_CLOSE_P));
-  close_button_->SetTooltipText(
-      l10n_util::GetStringUTF16(IDS_TOOLTIP_CLOSE_TAB));
   close_button_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));
   // Disable animation so that the red danger sign shows up immediately
@@ -292,20 +290,24 @@ bool BaseTab::OnMousePressed(const views::MouseEvent& event) {
   if (event.IsOnlyLeftMouseButton()) {
     TabStripSelectionModel original_selection;
     original_selection.Copy(controller()->GetSelectionModel());
-    if (event.IsShiftDown() && event.IsControlDown()) {
-      controller()->AddSelectionFromAnchorTo(this);
-    } else if (event.IsShiftDown()) {
-      controller()->ExtendSelectionTo(this);
-    } else if (event.IsControlDown()) {
-      controller()->ToggleSelected(this);
-      if (!IsSelected()) {
-        // Don't allow dragging non-selected tabs.
-        return false;
+    if (controller()->SupportsMultipleSelection()) {
+      if (event.IsShiftDown() && event.IsControlDown()) {
+        controller()->AddSelectionFromAnchorTo(this);
+      } else if (event.IsShiftDown()) {
+        controller()->ExtendSelectionTo(this);
+      } else if (event.IsControlDown()) {
+        controller()->ToggleSelected(this);
+        if (!IsSelected()) {
+          // Don't allow dragging non-selected tabs.
+          return false;
+        }
+      } else if (!IsSelected()) {
+        controller()->SelectTab(this);
+      } else if (IsActive()) {
+        controller()->ClickActiveTab(this);
       }
     } else if (!IsSelected()) {
       controller()->SelectTab(this);
-    } else if (IsActive()) {
-      controller()->ClickActiveTab(this);
     }
     controller()->MaybeStartDrag(this, event, original_selection);
   }
@@ -392,7 +394,7 @@ void BaseTab::AdvanceLoadingAnimation(TabRendererData::NetworkState old_state,
   static int waiting_to_loading_frame_count_ratio = 0;
   if (!initialized) {
     initialized = true;
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     SkBitmap loading_animation(*rb.GetBitmapNamed(IDR_THROBBER));
     loading_animation_frame_count =
         loading_animation.width() / loading_animation.height();
@@ -443,7 +445,7 @@ void BaseTab::PaintIcon(gfx::Canvas* canvas) {
     canvas->Save();
     canvas->ClipRect(GetLocalBounds());
     if (should_display_crashed_favicon_) {
-      ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+      ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
       SkBitmap crashed_favicon(*rb.GetBitmapNamed(IDR_SAD_FAVICON));
       bounds.set_y(bounds.y() + favicon_hiding_offset_);
       DrawIconCenter(canvas, crashed_favicon, 0,
@@ -573,8 +575,8 @@ void BaseTab::InitResources() {
   static bool initialized = false;
   if (!initialized) {
     initialized = true;
-    font_ = new gfx::Font(
-        ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::BaseFont));
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+    font_ = new gfx::Font(rb.GetFont(ui::ResourceBundle::BaseFont));
     font_height_ = font_->GetHeight();
   }
 }

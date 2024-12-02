@@ -10,8 +10,6 @@
 
 #include "webkit/fileapi/file_system_dir_url_request_job.h"
 
-#include "build/build_config.h"
-
 #include <string>
 
 #include "base/file_path.h"
@@ -83,6 +81,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
     delegate_.reset(NULL);
 
     net::URLRequest::Deprecated::RegisterProtocolFactory("filesystem", NULL);
+    ClearUnusedJob();
   }
 
   void OnValidateFileSystem(base::PlatformFileError result) {
@@ -199,6 +198,13 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
     net::URLRequestJob* temp = job_;
     job_ = NULL;
     return temp;
+  }
+
+  static void ClearUnusedJob() {
+    if (job_) {
+      scoped_refptr<net::URLRequestJob> deleter = job_;
+      job_ = NULL;
+    }
   }
 
   FileSystemFileUtil* file_util() {

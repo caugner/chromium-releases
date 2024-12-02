@@ -42,8 +42,8 @@
 #include "ui/views/painter.h"
 #include "ui/views/widget/widget.h"
 
-#if defined(OS_CHROMEOS) && defined(USE_AURA)
-#include "chrome/browser/chromeos/notifications/balloon_view_host.h"
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/notifications/balloon_view_host_chromeos.h"
 #else
 #include "chrome/browser/ui/views/notifications/balloon_view_host.h"
 #endif
@@ -308,7 +308,7 @@ gfx::Rect BalloonViewImpl::GetLabelBounds() const {
 }
 
 void BalloonViewImpl::Show(Balloon* balloon) {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
 
   balloon_ = balloon;
 
@@ -323,6 +323,12 @@ void BalloonViewImpl::Show(Balloon* balloon) {
   AddChildView(source_label_);
   options_menu_button_ = new views::MenuButton(NULL, string16(), this, false);
   AddChildView(options_menu_button_);
+#if defined(OS_CHROMEOS)
+  // Disable and hide the options menu on ChromeOS. This is a short term fix
+  // for a crash (long term we're redesigning notifications).
+  options_menu_button_->SetEnabled(false);
+  options_menu_button_->SetVisible(false);
+#endif
   close_button_ = new views::ImageButton(this);
   close_button_->SetTooltipText(l10n_util::GetStringUTF16(
       IDS_NOTIFICATION_BALLOON_DISMISS_LABEL));
@@ -391,7 +397,7 @@ void BalloonViewImpl::Show(Balloon* balloon) {
   options_menu_button_->set_border(NULL);
   options_menu_button_->SetBoundsRect(GetOptionsButtonBounds());
 
-  source_label_->SetFont(rb.GetFont(ResourceBundle::SmallFont));
+  source_label_->SetFont(rb.GetFont(ui::ResourceBundle::SmallFont));
   source_label_->SetBackgroundColor(kControlBarBackgroundColor);
   source_label_->SetEnabledColor(kControlBarTextColor);
   source_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
@@ -511,7 +517,7 @@ void BalloonViewImpl::OnPaint(gfx::Canvas* canvas) {
   SkPaint paint;
   paint.setAntiAlias(true);
   paint.setColor(kControlBarBackgroundColor);
-  canvas->sk_canvas()->drawPath(path, paint);
+  canvas->DrawPath(path, paint);
 
   // Draw a 1-pixel gray line between the content and the menu bar.
   int line_width = GetTotalWidth() - kLeftMargin - kRightMargin;

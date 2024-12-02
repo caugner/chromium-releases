@@ -18,6 +18,8 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/sync_global_error.h"
@@ -50,7 +52,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 #include <gtk/gtk.h>
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #endif
@@ -167,9 +169,6 @@ void ToolsMenuModel::Build(Browser* browser) {
 #endif
 
   AddItemWithStringId(IDC_MANAGE_EXTENSIONS, IDS_SHOW_EXTENSIONS);
-#if defined(OS_CHROMEOS)
-  AddItemWithStringId(IDC_FILE_MANAGER, IDS_FILE_MANAGER);
-#endif
   AddItemWithStringId(IDC_TASK_MANAGER, IDS_TASK_MANAGER);
   AddItemWithStringId(IDC_CLEAR_BROWSING_DATA, IDS_CLEAR_BROWSING_DATA);
 
@@ -259,12 +258,12 @@ string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
     case IDC_SHOW_SYNC_SETUP: {
       ProfileSyncService* service =
           ProfileSyncServiceFactory::GetInstance()->GetForProfile(
-              browser_->GetProfile()->GetOriginalProfile());
+              browser_->profile()->GetOriginalProfile());
       SyncGlobalError* error = service->sync_global_error();
       if (error && error->HasCustomizedSyncMenuItem())
         return error->MenuItemLabel();
       if (service->HasSyncSetupCompleted()) {
-        std::string username = browser_->GetProfile()->GetPrefs()->GetString(
+        std::string username = browser_->profile()->GetPrefs()->GetString(
             prefs::kGoogleServicesUsername);
         if (!username.empty()) {
           return l10n_util::GetStringFUTF16(IDS_SYNC_MENU_SYNCED_LABEL,
@@ -296,7 +295,7 @@ bool WrenchMenuModel::GetIconForCommandId(int command_id,
     case IDC_SHOW_SYNC_SETUP: {
       ProfileSyncService* service =
           ProfileSyncServiceFactory::GetInstance()->GetForProfile(
-              browser_->GetProfile()->GetOriginalProfile());
+              browser_->profile()->GetOriginalProfile());
       SyncGlobalError* error = service->sync_global_error();
       if (error && error->HasCustomizedSyncMenuItem()) {
         int icon_id = error->MenuItemIconResourceID();
@@ -324,7 +323,7 @@ void WrenchMenuModel::ExecuteCommand(int command_id) {
   if (command_id == IDC_SHOW_SYNC_SETUP) {
     ProfileSyncService* service =
         ProfileSyncServiceFactory::GetInstance()->GetForProfile(
-            browser_->GetProfile()->GetOriginalProfile());
+            browser_->profile()->GetOriginalProfile());
     SyncGlobalError* error = service->sync_global_error();
     if (error && error->HasCustomizedSyncMenuItem()) {
       error->ExecuteMenuItem(browser_);
@@ -427,11 +426,15 @@ WrenchMenuModel::WrenchMenuModel()
       tabstrip_model_(NULL) {
 }
 
-#if !defined(OS_CHROMEOS)
 void WrenchMenuModel::Build() {
   AddItemWithStringId(IDC_NEW_TAB, IDS_NEW_TAB);
   AddItemWithStringId(IDC_NEW_WINDOW, IDS_NEW_WINDOW);
+#if defined(OS_CHROMEOS)
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kGuestSession))
+    AddItemWithStringId(IDC_NEW_INCOGNITO_WINDOW, IDS_NEW_INCOGNITO_WINDOW);
+#else
   AddItemWithStringId(IDC_NEW_INCOGNITO_WINDOW, IDS_NEW_INCOGNITO_WINDOW);
+#endif
 
   bookmark_sub_menu_model_.reset(new BookmarkSubMenuModel(this, browser_));
   AddSubMenuWithStringId(IDC_BOOKMARKS_MENU, IDS_BOOKMARKS_MENU,
@@ -487,7 +490,8 @@ void WrenchMenuModel::Build() {
   AddItemWithStringId(IDC_SHOW_DOWNLOADS, IDS_SHOW_DOWNLOADS);
   AddSeparator();
 
-  if (browser_->profile()->GetOriginalProfile()->IsSyncAccessible()) {
+  if (browser_defaults::kShowSyncSetupMenuItem &&
+      browser_->profile()->GetOriginalProfile()->IsSyncAccessible()) {
     const string16 short_product_name =
         l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
     AddItem(IDC_SHOW_SYNC_SETUP, l10n_util::GetStringFUTF16(
@@ -501,17 +505,26 @@ void WrenchMenuModel::Build() {
       TaskManager::GetBackgroundPageCount());
   AddItem(IDC_VIEW_BACKGROUND_PAGES, l10n_util::GetStringFUTF16(
       IDS_VIEW_BACKGROUND_PAGES, num_background_pages));
-  AddItem(IDC_UPGRADE_DIALOG, l10n_util::GetStringUTF16(IDS_UPDATE_NOW));
+  if (browser_defaults::kShowUpgradeMenuItem)
+    AddItem(IDC_UPGRADE_DIALOG, l10n_util::GetStringUTF16(IDS_UPDATE_NOW));
   AddItem(IDC_VIEW_INCOMPATIBILITIES, l10n_util::GetStringUTF16(
       IDS_VIEW_INCOMPATIBILITIES));
 
 #if defined(OS_WIN)
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   SetIcon(GetIndexOfCommandId(IDC_VIEW_INCOMPATIBILITIES),
-          *rb.GetBitmapNamed(IDR_CONFLICT_MENU));
+          *ui::ResourceBundle::GetSharedInstance().
+          GetBitmapNamed(IDR_CONFLICT_MENU));
 #endif
 
   AddItemWithStringId(IDC_HELP_PAGE, IDS_HELP_PAGE);
+  if (browser_defaults::kShowHelpMenuItemIcon) {
+    ui::ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    SetIcon(GetIndexOfCommandId(IDC_HELP_PAGE),
+            *rb.GetBitmapNamed(IDR_HELP_MENU));
+  }
+
+  if (browser_defaults::kShowFeedbackMenuItem)
+    AddItemWithStringId(IDC_FEEDBACK, IDS_FEEDBACK);
 
   AddGlobalErrorMenuItems();
 
@@ -520,7 +533,6 @@ void WrenchMenuModel::Build() {
     AddItemWithStringId(IDC_EXIT, IDS_EXIT);
   }
 }
-#endif // !OS_CHROMEOS
 
 void WrenchMenuModel::AddGlobalErrorMenuItems() {
   // TODO(sail): Currently we only build the wrench menu once per browser
@@ -574,6 +586,8 @@ void WrenchMenuModel::UpdateZoomControls() {
 }
 
 string16 WrenchMenuModel::GetSyncMenuLabel() const {
-  return sync_ui_util::GetSyncMenuLabel(ProfileSyncServiceFactory::
-      GetInstance()->GetForProfile(browser_->profile()->GetOriginalProfile()));
+  Profile* profile = browser_->profile()->GetOriginalProfile();
+  return sync_ui_util::GetSyncMenuLabel(
+      ProfileSyncServiceFactory::GetForProfile(profile),
+      *SigninManagerFactory::GetForProfile(profile));
 }

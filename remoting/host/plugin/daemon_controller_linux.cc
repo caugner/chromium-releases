@@ -7,21 +7,50 @@
 #include <unistd.h>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/environment.h"
 #include "base/file_path.h"
+#include "base/file_util.h"
+#include "base/json/json_writer.h"
 #include "base/logging.h"
+#include "base/md5.h"
 #include "base/process_util.h"
+#include "base/string_number_conversions.h"
 #include "base/string_split.h"
+#include "base/string_util.h"
+#include "base/threading/thread.h"
+#include "base/values.h"
+#include "net/base/net_util.h"
+#include "remoting/host/host_config.h"
+#include "remoting/host/json_host_config.h"
 
 namespace remoting {
 
 namespace {
 
-const char* kDaemonScript = "me2me_virtual_host.py";
+const char kDaemonScript[] = "me2me_virtual_host.py";
 const int64 kDaemonTimeoutMs = 5000;
 
+std::string GetMd5(const std::string& value) {
+  base::MD5Context ctx;
+  base::MD5Init(&ctx);
+  base::MD5Update(&ctx, value);
+  base::MD5Digest digest;
+  base::MD5Final(&digest, &ctx);
+  return StringToLowerASCII(base::HexEncode(digest.a, sizeof(digest.a)));
+}
+
+// TODO(sergeyu): This is a very hacky implementation of
+// DaemonController interface for linux. Current version works, but
+// there are sevaral problems with it:
+//   * All calls are executed synchronously, even though this API is
+//     supposed to be asynchronous.
+//   * The host is configured by passing configuration data as CL
+//     argument - this is obviously not secure.
+// Rewrite this code to solve these two problems.
+// http://crbug.com/120950 .
 class DaemonControllerLinux : public remoting::DaemonController {
  public:
   DaemonControllerLinux();
@@ -29,15 +58,32 @@ class DaemonControllerLinux : public remoting::DaemonController {
   virtual State GetState() OVERRIDE;
   virtual void GetConfig(const GetConfigCallback& callback) OVERRIDE;
   virtual void SetConfigAndStart(
-      scoped_ptr<base::DictionaryValue> config) OVERRIDE;
-  virtual void SetPin(const std::string& pin) OVERRIDE;
-  virtual void Stop() OVERRIDE;
+      scoped_ptr<base::DictionaryValue> config,
+      const CompletionCallback& done_callback) OVERRIDE;
+  virtual void UpdateConfig(scoped_ptr<base::DictionaryValue> config,
+                            const CompletionCallback& done_callback) OVERRIDE;
+  virtual void Stop(const CompletionCallback& done_callback) OVERRIDE;
+  virtual void SetWindow(void* window_handle) OVERRIDE;
+  virtual void GetVersion(const GetVersionCallback& done_callback) OVERRIDE;
 
  private:
+  FilePath GetConfigPath();
+
+  void DoGetConfig(const GetConfigCallback& callback);
+  void DoSetConfigAndStart(scoped_ptr<base::DictionaryValue> config,
+                           const CompletionCallback& done_callback);
+  void DoUpdateConfig(scoped_ptr<base::DictionaryValue> config,
+                      const CompletionCallback& done_callback);
+  void DoStop(const CompletionCallback& done_callback);
+
+  base::Thread file_io_thread_;
+
   DISALLOW_COPY_AND_ASSIGN(DaemonControllerLinux);
 };
 
-DaemonControllerLinux::DaemonControllerLinux() {
+DaemonControllerLinux::DaemonControllerLinux()
+    : file_io_thread_("DaemonControllerFileIO") {
+  file_io_thread_.Start();
 }
 
 // TODO(jamiewalch): We'll probably be able to do a better job of
@@ -108,41 +154,129 @@ remoting::DaemonController::State DaemonControllerLinux::GetState() {
 }
 
 void DaemonControllerLinux::GetConfig(const GetConfigCallback& callback) {
-  NOTIMPLEMENTED();
+  // base::Unretained() is safe because we control lifetime of the thread.
+  file_io_thread_.message_loop()->PostTask(FROM_HERE, base::Bind(
+      &DaemonControllerLinux::DoGetConfig, base::Unretained(this), callback));
 }
 
 void DaemonControllerLinux::SetConfigAndStart(
-    scoped_ptr<base::DictionaryValue> config) {
-  // TODO(sergeyu): Save the |config|.
-  // TODO(sergeyu): Set state to START_FAILED if RunScript() fails.
-  std::vector<std::string> no_args;
-  RunScript(no_args, NULL);
+    scoped_ptr<base::DictionaryValue> config,
+    const CompletionCallback& done_callback) {
+  // base::Unretained() is safe because we control lifetime of the thread.
+  file_io_thread_.message_loop()->PostTask(FROM_HERE, base::Bind(
+      &DaemonControllerLinux::DoSetConfigAndStart, base::Unretained(this),
+      base::Passed(&config), done_callback));
 }
 
-void DaemonControllerLinux::SetPin(const std::string& pin) {
+void DaemonControllerLinux::UpdateConfig(
+    scoped_ptr<base::DictionaryValue> config,
+    const CompletionCallback& done_callback) {
+  file_io_thread_.message_loop()->PostTask(FROM_HERE, base::Bind(
+      &DaemonControllerLinux::DoUpdateConfig, base::Unretained(this),
+      base::Passed(&config), done_callback));
+}
+
+void DaemonControllerLinux::Stop(const CompletionCallback& done_callback) {
+  file_io_thread_.message_loop()->PostTask(FROM_HERE, base::Bind(
+      &DaemonControllerLinux::DoStop, base::Unretained(this),
+      done_callback));
+}
+
+void DaemonControllerLinux::SetWindow(void* window_handle) {
+  // noop
+}
+
+void DaemonControllerLinux::GetVersion(
+    const GetVersionCallback& done_callback) {
+  NOTIMPLEMENTED();
+  done_callback.Run("");
+}
+
+FilePath DaemonControllerLinux::GetConfigPath() {
+  std::string filename = "host#" + GetMd5(net::GetHostName()) + ".json";
+  return file_util::GetHomeDir().
+      Append(".config/chrome-remote-desktop").Append(filename);
+}
+
+void DaemonControllerLinux::DoGetConfig(const GetConfigCallback& callback) {
+  scoped_ptr<base::DictionaryValue> result(new base::DictionaryValue());
+
+  if (GetState() != remoting::DaemonController::STATE_NOT_IMPLEMENTED) {
+    JsonHostConfig config(GetConfigPath());
+    if (config.Read()) {
+      std::string value;
+      if (config.GetString(kHostIdConfigPath, &value)) {
+        result->SetString(kHostIdConfigPath, value);
+      }
+      if (config.GetString(kXmppLoginConfigPath, &value)) {
+        result->SetString(kXmppLoginConfigPath, value);
+      }
+    } else {
+      result.reset(); // Return NULL in case of error.
+    }
+  }
+
+  callback.Run(result.Pass());
+}
+
+void DaemonControllerLinux::DoSetConfigAndStart(
+    scoped_ptr<base::DictionaryValue> config,
+    const CompletionCallback& done_callback) {
   std::vector<std::string> args;
-  args.push_back("--explicit-pin");
-  args.push_back(pin);
+  args.push_back("--explicit-config");
+  std::string config_json;
+  base::JSONWriter::Write(config.get(), &config_json);
+  args.push_back(config_json);
+  std::vector<std::string> no_args;
   int exit_code = 0;
-  RunScript(args, &exit_code);
+  AsyncResult result;
+  if (RunScript(args, &exit_code)) {
+    result = (exit_code == 0) ? RESULT_OK : RESULT_FAILED;
+  } else {
+    result = RESULT_FAILED;
+  }
+  done_callback.Run(result);
 }
 
-// TODO(jamiewalch): If Stop is called after Start but before GetState returns
-// STARTED, then it should prevent the daemon from starting; currently it will
-// just fail silently.
-void DaemonControllerLinux::Stop() {
+void DaemonControllerLinux::DoUpdateConfig(
+    scoped_ptr<base::DictionaryValue> config,
+    const CompletionCallback& done_callback) {
+  JsonHostConfig config_file(GetConfigPath());
+  if (!config_file.Read()) {
+    done_callback.Run(RESULT_FAILED);
+  }
+
+  for (DictionaryValue::key_iterator key(config->begin_keys());
+       key != config->end_keys(); ++key) {
+    std::string value;
+    if (!config->GetString(*key, &value)) {
+      LOG(ERROR) << *key << " is not a string.";
+      done_callback.Run(RESULT_FAILED);
+    }
+    config_file.SetString(*key, value);
+  }
+  bool success = config_file.Save();
+  done_callback.Run(success ? RESULT_OK : RESULT_FAILED);
+  // TODO(sergeyu): Send signal to the daemon to restart the host.
+}
+
+void DaemonControllerLinux::DoStop(const CompletionCallback& done_callback) {
   std::vector<std::string> args;
   args.push_back("--stop");
-  // TODO(jamiewalch): Make Stop asynchronous like start once there's UI in the
-  // web-app to support it.
   int exit_code = 0;
-  RunScript(args, &exit_code);
+  AsyncResult result;
+  if (RunScript(args, &exit_code)) {
+    result = (exit_code == 0) ? RESULT_OK : RESULT_FAILED;
+  } else {
+    result = RESULT_FAILED;
+  }
+  done_callback.Run(result);
 }
 
 }  // namespace
 
-DaemonController* remoting::DaemonController::Create() {
-  return new DaemonControllerLinux();
+scoped_ptr<DaemonController> remoting::DaemonController::Create() {
+  return scoped_ptr<DaemonController>(new DaemonControllerLinux());
 }
 
 }  // namespace remoting

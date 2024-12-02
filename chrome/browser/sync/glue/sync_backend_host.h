@@ -18,14 +18,15 @@
 #include "chrome/browser/sync/glue/backend_data_type_configurer.h"
 #include "chrome/browser/sync/glue/chrome_extensions_activity_monitor.h"
 #include "chrome/browser/sync/glue/chrome_sync_notification_bridge.h"
-#include "chrome/browser/sync/internal_api/configure_reason.h"
-#include "chrome/browser/sync/internal_api/sync_manager.h"
-#include "chrome/browser/sync/notifier/sync_notifier_factory.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "googleurl/src/gurl.h"
 #include "sync/engine/model_safe_worker.h"
+#include "sync/internal_api/configure_reason.h"
+#include "sync/internal_api/sync_manager.h"
+#include "sync/notifier/sync_notifier_factory.h"
 #include "sync/protocol/encryption.pb.h"
 #include "sync/protocol/sync_protocol_error.h"
+#include "sync/sessions/session_state.h"
 #include "sync/syncable/model_type.h"
 #include "sync/util/report_unrecoverable_error_function.h"
 #include "sync/util/unrecoverable_error_handler.h"
@@ -36,11 +37,8 @@ class Profile;
 
 namespace browser_sync {
 
-namespace sessions {
-struct SyncSessionSnapshot;
-}
-
 class ChangeProcessor;
+struct Experiments;
 class JsBackend;
 class JsEventHandler;
 class SyncBackendRegistrar;
@@ -124,7 +122,8 @@ class SyncFrontend {
       syncable::ModelTypeSet types) = 0;
 
   // Inform the Frontend that new datatypes are available for registration.
-  virtual void OnDataTypesChanged(syncable::ModelTypeSet to_add) = 0;
+  virtual void OnExperimentsChanged(
+      const browser_sync::Experiments& experiments) = 0;
 
   // Called when the sync cycle returns there is an user actionable error.
   virtual void OnActionableError(
@@ -256,7 +255,7 @@ class SyncBackendHost : public BackendDataTypeConfigurer {
   // Called from any thread to obtain current status information in detailed or
   // summarized form.
   Status GetDetailedStatus();
-  const sessions::SyncSessionSnapshot* GetLastSessionSnapshot() const;
+  sessions::SyncSessionSnapshot GetLastSessionSnapshot() const;
 
   // Determines if the underlying sync engine has made any local changes to
   // items that have not yet been synced with the server.
@@ -328,7 +327,7 @@ class SyncBackendHost : public BackendDataTypeConfigurer {
   // Called from Core::OnSyncCycleCompleted to handle updating frontend
   // thread components.
   void HandleSyncCycleCompletedOnFrontendLoop(
-      sessions::SyncSessionSnapshot* snapshot);
+      const sessions::SyncSessionSnapshot& snapshot);
 
   // Called to finish the job of ConfigureDataTypes once the syncer is in
   // configuration mode.
@@ -515,7 +514,7 @@ class SyncBackendHost : public BackendDataTypeConfigurer {
   sync_pb::EncryptedData cached_pending_keys_;
 
   // UI-thread cache of the last SyncSessionSnapshot received from syncapi.
-  scoped_ptr<sessions::SyncSessionSnapshot> last_snapshot_;
+  sessions::SyncSessionSnapshot last_snapshot_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncBackendHost);
 };

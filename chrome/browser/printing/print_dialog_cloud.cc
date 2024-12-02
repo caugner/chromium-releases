@@ -21,7 +21,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/dialog_style.h"
+#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -49,7 +49,7 @@
 
 #if defined(USE_AURA)
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/views/html_dialog_view.h"
+#include "chrome/browser/ui/views/web_dialog_view.h"
 #include "ui/aura/root_window.h"
 #include "ui/views/widget/widget.h"
 #endif
@@ -71,18 +71,18 @@
 // PrintDialogCloud.
 
 // The constructor for PrintDialogCloud creates a
-// CloudPrintHtmlDialogDelegate and asks the current active browser to
+// CloudPrintWebDialogDelegate and asks the current active browser to
 // show an HTML dialog using that class as the delegate. That class
 // hands in the kChromeUICloudPrintResourcesURL as the URL to visit.  That is
 // recognized by the GetWebUIFactoryFunction as a signal to create an
-// ExternalHtmlDialogUI.
+// ExternalWebDialogUI.
 
-// CloudPrintHtmlDialogDelegate also temporarily owns a
+// CloudPrintWebDialogDelegate also temporarily owns a
 // CloudPrintFlowHandler, a class which is responsible for the actual
 // interactions with the dialog contents, including handing in the
 // print data and getting any page setup parameters that the dialog
 // contents provides.  As part of bringing up the dialog,
-// HtmlDialogUI::RenderViewCreated is called (an override of
+// WebDialogUI::RenderViewCreated is called (an override of
 // WebUI::RenderViewCreated).  That routine, in turn, calls the
 // delegate's GetWebUIMessageHandlers routine, at which point the
 // ownership of the CloudPrintFlowHandler is handed over.  A pointer
@@ -130,7 +130,7 @@ namespace internal_cloud_print_helpers {
 // parameters.
 bool GetPageSetupParameters(const std::string& json,
                             PrintMsg_Print_Params& parameters) {
-  scoped_ptr<Value> parsed_value(base::JSONReader::Read(json, false));
+  scoped_ptr<Value> parsed_value(base::JSONReader::Read(json));
   DLOG_IF(ERROR, (!parsed_value.get() ||
                   !parsed_value->IsType(Value::TYPE_DICTIONARY)))
       << "PageSetup call didn't have expected contents";
@@ -286,9 +286,9 @@ CloudPrintFlowHandler::~CloudPrintFlowHandler() {
 
 
 void CloudPrintFlowHandler::SetDialogDelegate(
-    CloudPrintHtmlDialogDelegate* delegate) {
+    CloudPrintWebDialogDelegate* delegate) {
   // Even if setting a new WebUI, it means any previous task needs
-  // to be cancelled, it's now invalid.
+  // to be canceled, its now invalid.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   CancelAnyRunningTask();
   dialog_delegate_ = delegate;
@@ -296,7 +296,7 @@ void CloudPrintFlowHandler::SetDialogDelegate(
 
 // Cancels any print data sender we have in flight and removes our
 // reference to it, so when the task that is calling it finishes and
-// removes it's reference, it goes away.
+// removes its reference, it goes away.
 void CloudPrintFlowHandler::CancelAnyRunningTask() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (print_data_sender_.get()) {
@@ -486,7 +486,7 @@ void CloudPrintFlowHandler::StoreDialogClientSize() const {
   }
 }
 
-CloudPrintHtmlDialogDelegate::CloudPrintHtmlDialogDelegate(
+CloudPrintWebDialogDelegate::CloudPrintWebDialogDelegate(
     const FilePath& path_to_file,
     int width, int height,
     const std::string& json_arguments,
@@ -511,7 +511,7 @@ CloudPrintHtmlDialogDelegate::CloudPrintHtmlDialogDelegate(
 }
 
 // For unit testing.
-CloudPrintHtmlDialogDelegate::CloudPrintHtmlDialogDelegate(
+CloudPrintWebDialogDelegate::CloudPrintWebDialogDelegate(
     CloudPrintFlowHandler* flow_handler,
     int width, int height,
     const std::string& json_arguments,
@@ -524,8 +524,8 @@ CloudPrintHtmlDialogDelegate::CloudPrintHtmlDialogDelegate(
   Init(width, height, json_arguments);
 }
 
-void CloudPrintHtmlDialogDelegate::Init(int width, int height,
-                                        const std::string& json_arguments) {
+void CloudPrintWebDialogDelegate::Init(int width, int height,
+                                       const std::string& json_arguments) {
   // This information is needed to show the dialog HTML content.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   params_.url = GURL(chrome::kChromeUICloudPrintResourcesURL);
@@ -540,9 +540,9 @@ void CloudPrintHtmlDialogDelegate::Init(int width, int height,
     BrowserList::StartKeepAlive();
 }
 
-CloudPrintHtmlDialogDelegate::~CloudPrintHtmlDialogDelegate() {
+CloudPrintWebDialogDelegate::~CloudPrintWebDialogDelegate() {
   // If the flow_handler_ is about to outlive us because we don't own
-  // it anymore, we need to have it remove it's reference to us.
+  // it anymore, we need to have it remove its reference to us.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   flow_handler_->SetDialogDelegate(NULL);
   if (owns_flow_handler_) {
@@ -550,19 +550,19 @@ CloudPrintHtmlDialogDelegate::~CloudPrintHtmlDialogDelegate() {
   }
 }
 
-ui::ModalType CloudPrintHtmlDialogDelegate::GetDialogModalType() const {
+ui::ModalType CloudPrintWebDialogDelegate::GetDialogModalType() const {
     return modal_ ? ui::MODAL_TYPE_WINDOW : ui::MODAL_TYPE_NONE;
 }
 
-string16 CloudPrintHtmlDialogDelegate::GetDialogTitle() const {
+string16 CloudPrintWebDialogDelegate::GetDialogTitle() const {
   return string16();
 }
 
-GURL CloudPrintHtmlDialogDelegate::GetDialogContentURL() const {
+GURL CloudPrintWebDialogDelegate::GetDialogContentURL() const {
   return params_.url;
 }
 
-void CloudPrintHtmlDialogDelegate::GetWebUIMessageHandlers(
+void CloudPrintWebDialogDelegate::GetWebUIMessageHandlers(
     std::vector<WebUIMessageHandler*>* handlers) const {
   handlers->push_back(flow_handler_);
   // We don't own flow_handler_ anymore, but it sticks around until at
@@ -571,16 +571,16 @@ void CloudPrintHtmlDialogDelegate::GetWebUIMessageHandlers(
   owns_flow_handler_ = false;
 }
 
-void CloudPrintHtmlDialogDelegate::GetDialogSize(gfx::Size* size) const {
+void CloudPrintWebDialogDelegate::GetDialogSize(gfx::Size* size) const {
   size->set_width(params_.width);
   size->set_height(params_.height);
 }
 
-std::string CloudPrintHtmlDialogDelegate::GetDialogArgs() const {
+std::string CloudPrintWebDialogDelegate::GetDialogArgs() const {
   return params_.json_input;
 }
 
-void CloudPrintHtmlDialogDelegate::OnDialogClosed(
+void CloudPrintWebDialogDelegate::OnDialogClosed(
     const std::string& json_retval) {
   // Get the final dialog size and store it.
   flow_handler_->StoreDialogClientSize();
@@ -598,22 +598,22 @@ void CloudPrintHtmlDialogDelegate::OnDialogClosed(
   delete this;
 }
 
-void CloudPrintHtmlDialogDelegate::OnCloseContents(WebContents* source,
-                                                   bool* out_close_dialog) {
+void CloudPrintWebDialogDelegate::OnCloseContents(WebContents* source,
+                                                  bool* out_close_dialog) {
   if (out_close_dialog)
     *out_close_dialog = true;
 }
 
-bool CloudPrintHtmlDialogDelegate::ShouldShowDialogTitle() const {
+bool CloudPrintWebDialogDelegate::ShouldShowDialogTitle() const {
   return false;
 }
 
-bool CloudPrintHtmlDialogDelegate::HandleContextMenu(
+bool CloudPrintWebDialogDelegate::HandleContextMenu(
     const content::ContextMenuParams& params) {
   return true;
 }
 
-void CreatePrintDialogForBytesImpl(scoped_refptr<RefCountedBytes> data,
+void CreatePrintDialogForBytesImpl(scoped_refptr<base::RefCountedBytes> data,
                                    const string16& print_job_title,
                                    const string16& print_ticket,
                                    const std::string& file_type,
@@ -658,7 +658,7 @@ void CreateDialogImpl(const FilePath& path_to_file,
       if (web_contents)
         job_title = web_contents->GetTitle();
     }
-    profile = browser->GetProfile();
+    profile = browser->profile();
   } else {
     std::vector<Profile*> loaded_profiles =
         g_browser_process->profile_manager()->GetLoadedProfiles();
@@ -683,50 +683,13 @@ void CreateDialogImpl(const FilePath& path_to_file,
   int width = pref_service->GetInteger(prefs::kCloudPrintDialogWidth);
   int height = pref_service->GetInteger(prefs::kCloudPrintDialogHeight);
 
-  HtmlDialogUIDelegate* dialog_delegate =
-      new internal_cloud_print_helpers::CloudPrintHtmlDialogDelegate(
+  WebDialogDelegate* dialog_delegate =
+      new internal_cloud_print_helpers::CloudPrintWebDialogDelegate(
           path_to_file, width, height, std::string(), job_title, print_ticket,
           file_type, modal, delete_on_close, close_after_signin,
           callback);
-  if (modal) {
-    DCHECK(browser);
-
-#if defined(USE_AURA)
-    HtmlDialogView* html_view =
-        new HtmlDialogView(profile, browser, dialog_delegate);
-    views::Widget::CreateWindowWithParent(html_view,
-        browser->window()->GetNativeHandle());
-    html_view->InitDialog();
-    views::Widget* widget = html_view->GetWidget();
-    DCHECK(widget);
-    widget->Show();
-#if defined(OS_WIN)
-    gfx::NativeWindow window = widget->GetNativeWindow();
-#endif
-#else
-#if defined(OS_WIN)
-    gfx::NativeWindow window =
-#endif
-        browser->BrowserShowHtmlDialog(dialog_delegate, NULL, STYLE_GENERIC);
-#endif
-#if defined(OS_WIN)
-    HWND dialog_handle;
-#if defined(USE_AURA)
-    dialog_handle = window->GetRootWindow()->GetAcceleratedWidget();
-#else
-    dialog_handle = window;
-#endif
-    if (::GetForegroundWindow() != dialog_handle) {
-      ui::ForegroundHelper::SetForeground(dialog_handle);
-    }
-#endif
-  } else {
-    browser::ShowHtmlDialog(NULL,
-                            profile,
-                            browser,
-                            dialog_delegate,
-                            STYLE_GENERIC);
-  }
+  browser::ShowWebDialog(modal ? browser->window()->GetNativeHandle() : NULL,
+      profile, browser, dialog_delegate);
 }
 
 void CreateDialogSigninImpl(const base::Closure& callback) {
@@ -786,7 +749,7 @@ void CreateCloudPrintSigninDialog(const base::Closure& callback) {
                  callback));
 }
 
-void CreatePrintDialogForBytes(scoped_refptr<RefCountedBytes> data,
+void CreatePrintDialogForBytes(scoped_refptr<base::RefCountedBytes> data,
                                const string16& print_job_title,
                                const string16& print_ticket,
                                const std::string& file_type,
@@ -794,7 +757,8 @@ void CreatePrintDialogForBytes(scoped_refptr<RefCountedBytes> data,
   // TODO(abodenha@chromium.org) Avoid cloning the PDF data.  Make use of a
   // shared memory object instead.
   // http://code.google.com/p/chromium/issues/detail?id=44093
-  scoped_refptr<RefCountedBytes> cloned_data(new RefCountedBytes(data->data()));
+  scoped_refptr<base::RefCountedBytes> cloned_data =
+      new base::RefCountedBytes(data->data());
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
       base::Bind(&internal_cloud_print_helpers::CreatePrintDialogForBytesImpl,

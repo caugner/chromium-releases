@@ -46,23 +46,23 @@ gfx::NativeCursor RootWindowEventFilter::CursorForWindowComponent(
     int window_component) {
   switch (window_component) {
     case HTBOTTOM:
-      return aura::kCursorSouthResize;
+      return ui::kCursorSouthResize;
     case HTBOTTOMLEFT:
-      return aura::kCursorSouthWestResize;
+      return ui::kCursorSouthWestResize;
     case HTBOTTOMRIGHT:
-      return aura::kCursorSouthEastResize;
+      return ui::kCursorSouthEastResize;
     case HTLEFT:
-      return aura::kCursorWestResize;
+      return ui::kCursorWestResize;
     case HTRIGHT:
-      return aura::kCursorEastResize;
+      return ui::kCursorEastResize;
     case HTTOP:
-      return aura::kCursorNorthResize;
+      return ui::kCursorNorthResize;
     case HTTOPLEFT:
-      return aura::kCursorNorthWestResize;
+      return ui::kCursorNorthWestResize;
     case HTTOPRIGHT:
-      return aura::kCursorNorthEastResize;
+      return ui::kCursorNorthEastResize;
     default:
-      return aura::kCursorNull;
+      return ui::kCursorNull;
   }
 }
 
@@ -149,8 +149,16 @@ ui::TouchStatus RootWindowEventFilter::PreHandleTouchEvent(
 ui::GestureStatus RootWindowEventFilter::PreHandleGestureEvent(
     aura::Window* target,
     aura::GestureEvent* event) {
-  // TODO(sad):
-  return ui::GESTURE_STATUS_UNKNOWN;
+  ui::GestureStatus status = ui::GESTURE_STATUS_UNKNOWN;
+  if (filters_.might_have_observers()) {
+    ObserverListBase<aura::EventFilter>::Iterator it(filters_);
+    aura::EventFilter* filter;
+    while (status == ui::GESTURE_STATUS_UNKNOWN &&
+        (filter = it.GetNext()) != NULL) {
+      status = filter->PreHandleGestureEvent(target, event);
+    }
+  }
+  return status;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

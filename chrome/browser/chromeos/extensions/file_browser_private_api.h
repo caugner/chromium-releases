@@ -14,6 +14,7 @@
 #include "base/platform_file.h"
 #include "chrome/browser/chromeos/extensions/file_browser_event_router.h"
 #include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "googleurl/src/url_util.h"
 
 class GURL;
@@ -30,9 +31,6 @@ class RequestLocalFileSystemFunction : public AsyncExtensionFunction {
 
  private:
   class LocalFileSystemCallbackDispatcher;
-
-  // Adds gdata mount point.
-  void AddGDataMountPoint();
 
   void RespondSuccessOnUIThread(const std::string& name,
                                 const GURL& root_path);
@@ -102,6 +100,8 @@ class ExecuteTasksFileBrowserFunction : public AsyncExtensionFunction {
  public:
   ExecuteTasksFileBrowserFunction();
   virtual ~ExecuteTasksFileBrowserFunction();
+
+  void OnTaskExecuted(bool success);
 
  protected:
   // AsyncExtensionFunction overrides.
@@ -243,6 +243,11 @@ class AddMountFunction
   // GetLocalPathsOnFileThreadAndRunCallbackOnUIThread.
   void GetLocalPathsResponseOnUIThread(const std::string& mount_type_str,
                                        const SelectedFileInfoList& files);
+  // A callback method to handle the result of SetMountedState.
+  void OnMountedStateSet(const std::string& mount_type,
+                         const FilePath::StringType& file_name,
+                         base::PlatformFileError error,
+                         const FilePath& file_path);
 
   DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.addMount");
 };
@@ -406,10 +411,10 @@ class GetGDataFilePropertiesFunction : public FileBrowserFunction {
   void PrepareResults();
 
  private:
-  void OnFileProperties(base::DictionaryValue* property_dict,
-                        base::PlatformFileError error,
-                        const FilePath& directory_path,
-                        gdata::GDataFileBase* file);
+  void OnGetFileInfo(base::DictionaryValue* property_dict,
+                     const FilePath& file_path,
+                     base::PlatformFileError error,
+                     scoped_ptr<gdata::GDataFileProto> file_proto);
 
   void CacheStateReceived(base::DictionaryValue* property_dict,
                           base::PlatformFileError error,
@@ -455,7 +460,7 @@ class PinGDataFileFunction : public GetGDataFilePropertiesFunction {
 };
 
 // Get file locations for the given list of file URLs. Returns a list of
-// location idenfitiers, like ['gdata', 'local'], where 'gdata' means the
+// location idenfitiers, like ['drive', 'local'], where 'drive' means the
 // file is on gdata, and 'local' means the file is on the local drive.
 class GetFileLocationsFunction : public FileBrowserFunction {
  public:
@@ -565,6 +570,44 @@ class TransferFileFunction : public FileBrowserFunction {
   void OnTransferCompleted(base::PlatformFileError error);
 
   DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.transferFile");
+};
+
+// Read setting value.
+class GetGDataPreferencesFunction : public SyncExtensionFunction {
+ protected:
+  virtual bool RunImpl() OVERRIDE;
+ private:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.getGDataPreferences");
+};
+
+// Write setting value.
+class SetGDataPreferencesFunction : public SyncExtensionFunction {
+ protected:
+  virtual bool RunImpl() OVERRIDE;
+ private:
+  DECLARE_EXTENSION_FUNCTION_NAME("fileBrowserPrivate.setGDataPreferences");
+};
+
+class GetPathForDriveSearchResultFunction : public AsyncExtensionFunction {
+ protected:
+  virtual bool RunImpl() OVERRIDE;
+
+  void OnEntryFound(base::PlatformFileError error,
+                    const FilePath& entry_path,
+                    scoped_ptr<gdata::GDataEntryProto> entry_proto);
+
+ private:
+  DECLARE_EXTENSION_FUNCTION_NAME(
+      "fileBrowserPrivate.getPathForDriveSearchResult");
+};
+
+// Implements the chrome.fileBrowserPrivate.getNetworkConnectionState method.
+class GetNetworkConnectionStateFunction : public SyncExtensionFunction {
+ protected:
+  virtual bool RunImpl() OVERRIDE;
+ private:
+  DECLARE_EXTENSION_FUNCTION_NAME(
+      "fileBrowserPrivate.getNetworkConnectionState");
 };
 
 #endif  // CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_BROWSER_PRIVATE_API_H_

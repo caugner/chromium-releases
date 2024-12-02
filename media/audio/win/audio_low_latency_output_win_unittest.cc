@@ -16,6 +16,7 @@
 #include "base/win/scoped_com_initializer.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_manager.h"
+#include "media/audio/audio_util.h"
 #include "media/audio/win/audio_low_latency_output_win.h"
 #include "media/base/seekable_buffer.h"
 #include "media/base/test_data_util.h"
@@ -52,8 +53,7 @@ MATCHER_P(HasValidDelay, value, "") {
 
 class MockAudioSourceCallback : public AudioOutputStream::AudioSourceCallback {
  public:
-  MOCK_METHOD4(OnMoreData, uint32(AudioOutputStream* stream,
-                                  uint8* dest,
+  MOCK_METHOD3(OnMoreData, uint32(uint8* dest,
                                   uint32 max_size,
                                   AudioBuffersState buffers_state));
   MOCK_METHOD2(OnError, void(AudioOutputStream* stream, int code));
@@ -71,7 +71,6 @@ class ReadFromFileAudioSource : public AudioOutputStream::AudioSourceCallback {
     // Reads a test file from media/test/data directory and stores it in
     // a scoped_array.
     ReadTestDataFile(name, &file_, &file_size_);
-    file_size_ = file_size_;
 
     // Creates an array that will store delta times between callbacks.
     // The content of this array will be written to a text file at
@@ -102,8 +101,7 @@ class ReadFromFileAudioSource : public AudioOutputStream::AudioSourceCallback {
   }
 
   // AudioOutputStream::AudioSourceCallback implementation.
-  virtual uint32 OnMoreData(AudioOutputStream* stream,
-                            uint8* dest,
+  virtual uint32 OnMoreData(uint8* dest,
                             uint32 max_size,
                             AudioBuffersState buffers_state) {
     // Store time difference between two successive callbacks in an array.
@@ -141,8 +139,14 @@ class ReadFromFileAudioSource : public AudioOutputStream::AudioSourceCallback {
 };
 
 // Convenience method which ensures that we are not running on the build
-// bots and that at least one valid output device can be found.
+// bots and that at least one valid output device can be found. We also
+// verify that we are not running on XP since the low-latency (WASAPI-
+// based) version requires Windows Vista or higher.
 static bool CanRunAudioTests(AudioManager* audio_man) {
+  if (!media::IsWASAPISupported()) {
+    LOG(WARNING) << "This tests requires Windows Vista or higher.";
+    return false;
+  }
   // TODO(henrika): note that we use Wave today to query the number of
   // existing output devices.
   bool output = audio_man->HasAudioOutputDevices();
@@ -393,7 +397,7 @@ TEST(WinAudioOutputTest, WASAPIAudioOutputStreamTestPacketSizeInMilliseconds) {
   AudioBuffersState state(0, bytes_per_packet);
 
   // Wait for the first callback and verify its parameters.
-  EXPECT_CALL(source, OnMoreData(aos, NotNull(), bytes_per_packet,
+  EXPECT_CALL(source, OnMoreData(NotNull(), bytes_per_packet,
                                  HasValidDelay(state)))
       .WillOnce(
           DoAll(
@@ -403,7 +407,7 @@ TEST(WinAudioOutputTest, WASAPIAudioOutputStreamTestPacketSizeInMilliseconds) {
 
   aos->Start(&source);
   loop.PostDelayedTask(FROM_HERE, MessageLoop::QuitClosure(),
-                       TestTimeouts::action_timeout_ms());
+                       TestTimeouts::action_timeout());
   loop.Run();
   aos->Stop();
   aos->Close();
@@ -435,7 +439,7 @@ TEST(WinAudioOutputTest, WASAPIAudioOutputStreamTestPacketSizeInSamples) {
   AudioBuffersState state(0, bytes_per_packet);
 
   // Wait for the first callback and verify its parameters.
-  EXPECT_CALL(source, OnMoreData(aos, NotNull(), bytes_per_packet,
+  EXPECT_CALL(source, OnMoreData(NotNull(), bytes_per_packet,
                                  HasValidDelay(state)))
       .WillOnce(
           DoAll(
@@ -445,7 +449,7 @@ TEST(WinAudioOutputTest, WASAPIAudioOutputStreamTestPacketSizeInSamples) {
 
   aos->Start(&source);
   loop.PostDelayedTask(FROM_HERE, MessageLoop::QuitClosure(),
-                       TestTimeouts::action_timeout_ms());
+                       TestTimeouts::action_timeout());
   loop.Run();
   aos->Stop();
   aos->Close();
@@ -481,7 +485,7 @@ TEST(WinAudioOutputTest, WASAPIAudioOutputStreamTestMono) {
   // Set up expected minimum delay estimation.
   AudioBuffersState state(0, bytes_per_packet);
 
-  EXPECT_CALL(source, OnMoreData(aos, NotNull(), bytes_per_packet,
+  EXPECT_CALL(source, OnMoreData(NotNull(), bytes_per_packet,
                                  HasValidDelay(state)))
       .WillOnce(
           DoAll(
@@ -491,7 +495,7 @@ TEST(WinAudioOutputTest, WASAPIAudioOutputStreamTestMono) {
 
   aos->Start(&source);
   loop.PostDelayedTask(FROM_HERE, MessageLoop::QuitClosure(),
-                       TestTimeouts::action_timeout_ms());
+                       TestTimeouts::action_timeout());
   loop.Run();
   aos->Stop();
   aos->Close();

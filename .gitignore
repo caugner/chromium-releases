@@ -31,7 +31,7 @@
 # Only /build/(Debug|Release|x64|ipch) should need to be ignored, but bug #119528 makes this global ignore required for now.
 Debug/
 ipch/
-Relase/
+Release/
 x64/
 tags
 Thumbs.db
@@ -63,6 +63,7 @@ v8.log
 /chrome/chrome_version_resources.xml
 /chrome/common/extensions/api/api.xml
 /chrome/feedback_proto.xml
+/chrome/gdata_proto.xml
 /chrome/in_memory_url_index_cache_proto.xml
 /chrome/installer/linux
 /chrome/installer/mac/internal
@@ -96,11 +97,13 @@ v8.log
 /chrome_frame/tools/test/reference_build
 /content/test/data/layout_tests/LayoutTests/
 /data
+/delegate_execute
 /googleurl
 /gpu/gles2_conform_test
 /gyp-mac-tool
 /llvm
 /media/yuv_convert_simd_x86.xml
+/metro_driver
 /native_client
 /net/Debug
 /net/Release
@@ -116,6 +119,7 @@ v8.log
 /remoting/proto/chromotocol_proto_lib.xml
 /remoting/proto/trace_proto_lib.xml
 /remoting/remoting_host_installation.xml
+/remoting/remoting_host_installation_unittest.xml
 /remoting/remoting_me2me_host.xml
 /remoting/remoting_version_resources.xml
 /remoting/tools/internal/
@@ -147,6 +151,7 @@ v8.log
 /third_party/flac
 /third_party/freetype
 /third_party/gles2_conform
+/third_party/gnu_binutils/
 /third_party/gold
 /third_party/googlemac
 /third_party/hunspell
@@ -175,8 +180,8 @@ v8.log
 /third_party/ots
 /third_party/pdfsqueeze
 /third_party/pefile
-/third_party/platformsdk_win2008_6_1
 /third_party/platformsdk_win7
+/third_party/platformsdk_win8
 /third_party/ppapi
 /third_party/psyco_win32
 /third_party/pthreads-win32
@@ -195,6 +200,7 @@ v8.log
 /third_party/speex
 /third_party/swiftshader/include/
 /third_party/swig
+/third_party/syzygy
 /third_party/syzygy/binaries
 /third_party/undoview
 /third_party/v8-i18n
@@ -203,6 +209,7 @@ v8.log
 /third_party/webdriver/python/selenium
 /third_party/webgl_conformance
 /third_party/webrtc
+/third_party/wix
 /third_party/xdg-utils
 /third_party/xulrunner-sdk
 /third_party/yasm/binaries

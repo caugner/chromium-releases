@@ -15,12 +15,12 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/web_applications/web_app.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
@@ -51,7 +51,7 @@ class UpdateShortcutWorker : public content::NotificationObserver {
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details);
 
-  // Downloads icon via TabContents.
+  // Downloads icon via TabContentsWrapper.
   void DownloadIcon();
 
   // Callback when icon downloaded.
@@ -104,7 +104,7 @@ UpdateShortcutWorker::UpdateShortcutWorker(TabContentsWrapper* tab_contents)
 
   registrar_.Add(
       this,
-      content::NOTIFICATION_TAB_CLOSING,
+      chrome::NOTIFICATION_TAB_CLOSING,
       content::Source<NavigationController>(
           &tab_contents_->web_contents()->GetController()));
 }
@@ -118,7 +118,7 @@ void UpdateShortcutWorker::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  if (type == content::NOTIFICATION_TAB_CLOSING &&
+  if (type == chrome::NOTIFICATION_TAB_CLOSING &&
       content::Source<NavigationController>(source).ptr() ==
         &tab_contents_->web_contents()->GetController()) {
     // Underlying tab is closing.
@@ -127,17 +127,17 @@ void UpdateShortcutWorker::Observe(
 }
 
 void UpdateShortcutWorker::DownloadIcon() {
-  // FetchIcon must run on UI thread because it relies on TabContents
+  // FetchIcon must run on UI thread because it relies on WebContents
   // to download the icon.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (tab_contents_ == NULL) {
-    DeleteMe();  // We are done if underlying TabContents is gone.
+    DeleteMe();  // We are done if underlying WebContents is gone.
     return;
   }
 
   if (unprocessed_icons_.empty()) {
-    // No app icon. Just use the favicon from TabContents.
+    // No app icon. Just use the favicon from WebContents.
     UpdateShortcuts();
     return;
   }
@@ -156,7 +156,7 @@ void UpdateShortcutWorker::OnIconDownloaded(int download_id,
                                             bool errored,
                                             const SkBitmap& image) {
   if (tab_contents_ == NULL) {
-    DeleteMe();  // We are done if underlying TabContents is gone.
+    DeleteMe();  // We are done if underlying WebContents is gone.
     return;
   }
 
@@ -257,14 +257,16 @@ void UpdateShortcutWorker::UpdateShortcutsOnFileThread() {
       shortcut_info_.description.resize(MAX_PATH - 1);
 
     for (size_t i = 0; i < shortcut_files_.size(); ++i) {
-      file_util::UpdateShortcutLink(NULL,
+      file_util::CreateOrUpdateShortcutLink(
+          NULL,
           shortcut_files_[i].value().c_str(),
           NULL,
           NULL,
           shortcut_info_.description.c_str(),
           icon_file.value().c_str(),
           0,
-          app_id.c_str());
+          app_id.c_str(),
+          file_util::SHORTCUT_NO_OPTIONS);
     }
   }
 

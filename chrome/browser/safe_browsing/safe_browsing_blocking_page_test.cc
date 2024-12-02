@@ -37,8 +37,6 @@ class FakeSafeBrowsingService :  public SafeBrowsingService {
  public:
   FakeSafeBrowsingService() {}
 
-  virtual ~FakeSafeBrowsingService() {}
-
   // Called on the IO thread to check if the given url is safe or not.  If we
   // can synchronously determine that the url is safe, CheckUrl returns true.
   // Otherwise it returns false, and "client" is called asynchronously with the
@@ -89,6 +87,8 @@ class FakeSafeBrowsingService :  public SafeBrowsingService {
   std::vector<std::string> reports_;
 
  private:
+  virtual ~FakeSafeBrowsingService() {}
+
   base::hash_map<std::string, UrlCheckResult> badurls;
 };
 
@@ -110,8 +110,6 @@ class FakeMalwareDetails : public MalwareDetails {
                      WebContents* web_contents,
                      const SafeBrowsingService::UnsafeResource& unsafe_resource)
       : MalwareDetails(sb_service, web_contents, unsafe_resource) { }
-
-  virtual ~FakeMalwareDetails() {}
 
   virtual void AddDOMDetails(
       const std::vector<SafeBrowsingHostMsg_MalwareDOMDetails_Node>& params) {
@@ -152,6 +150,8 @@ class FakeMalwareDetails : public MalwareDetails {
   }
 
  private:
+  virtual ~FakeMalwareDetails() {}
+
   // Some logic to figure out if we should wait for the dom details or not.
   // These variables should only be accessed in the UI thread.
   bool got_dom_;
@@ -569,8 +569,9 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest,
       browser()->GetSelectedTabContentsWrapper()->web_contents()->GetURL());
 }
 
+// Crashy, http://crbug.com/99159.
 IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest,
-                       MalwareIframeReportDetails) {
+                       DISABLED_MalwareIframeReportDetails) {
   GURL url = test_server()->GetURL(kMalwarePage);
   GURL iframe_url = test_server()->GetURL(kMalwareIframe);
   AddURLResult(iframe_url, SafeBrowsingService::URL_MALWARE);
@@ -589,7 +590,7 @@ IN_PROC_BROWSER_TEST_F(SafeBrowsingBlockingPageTest,
   }
 
   SendCommand("\"doReport\"");  // Simulate the user checking the checkbox.
-  EXPECT_TRUE(browser()->GetProfile()->GetPrefs()->GetBoolean(
+  EXPECT_TRUE(browser()->profile()->GetPrefs()->GetBoolean(
       prefs::kSafeBrowsingReportingEnabled));
 
   SendCommand("\"proceed\"");  // Simulate the user clicking "back"

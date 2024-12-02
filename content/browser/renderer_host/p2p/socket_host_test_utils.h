@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,6 +75,7 @@ class FakeSocket : public net::StreamSocket {
   virtual bool UsingTCPFastOpen() const OVERRIDE;
   virtual int64 NumBytesRead() const OVERRIDE;
   virtual base::TimeDelta GetConnectTimeMicros() const OVERRIDE;
+  virtual net::NextProto GetNegotiatedProtocol() const OVERRIDE;
 
  private:
   bool read_pending_;
@@ -219,6 +220,10 @@ base::TimeDelta FakeSocket::GetConnectTimeMicros() const {
   return base::TimeDelta::FromMicroseconds(-1);
 }
 
+net::NextProto FakeSocket::GetNegotiatedProtocol() const {
+  return net::kProtoUnknown;
+}
+
 void CreateRandomPacket(std::vector<char>* packet) {
   size_t size = kStunHeaderSize + rand() % 1000;
   packet->resize(size);
@@ -232,10 +237,11 @@ void CreateRandomPacket(std::vector<char>* packet) {
 
 void CreateStunPacket(std::vector<char>* packet, uint16 type) {
   CreateRandomPacket(packet);
-  *reinterpret_cast<uint16*>(&*packet->begin()) = htons(type);
+  *reinterpret_cast<uint16*>(&*packet->begin()) = base::HostToNet16(type);
   *reinterpret_cast<uint16*>(&*packet->begin() + 2) =
-      htons(packet->size() - kStunHeaderSize);
-  *reinterpret_cast<uint32*>(&*packet->begin() + 4) = htonl(kStunMagicCookie);
+      base::HostToNet16(packet->size() - kStunHeaderSize);
+  *reinterpret_cast<uint32*>(&*packet->begin() + 4) =
+      base::HostToNet32(kStunMagicCookie);
 }
 
 void CreateStunRequest(std::vector<char>* packet) {

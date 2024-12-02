@@ -26,6 +26,10 @@
 class PanelBrowserWindowCocoa;
 @class PanelTitlebarViewCocoa;
 
+@interface PanelWindowCocoaImpl : ChromeBrowserWindow {
+}
+@end
+
 @interface PanelWindowControllerCocoa : NSWindowController
                                             <NSWindowDelegate,
                                              NSAnimationDelegate,
@@ -38,7 +42,6 @@ class PanelBrowserWindowCocoa;
   NSViewAnimation* boundsAnimation_;  // Lifetime controlled manually, needs
                                       // more then just |release| to terminate.
   BOOL animateOnBoundsChange_;
-  ScopedCrTrackingArea windowTrackingArea_;
   BOOL throbberShouldSpin_;
   BOOL playingMinimizeAnimation_;
   float animationStopToShowTitlebarOnly_;
@@ -57,7 +60,7 @@ class PanelBrowserWindowCocoa;
 - (void)tabDetached:(content::WebContents*)contents;
 
 // Sometimes (when we animate the size of the window) we want to stop resizing
-// the TabContents' cocoa view to avoid unnecessary rendering and issues
+// the WebContents's Cocoa view to avoid unnecessary rendering and issues
 // that can be caused by sizes near 0.
 - (void)disableTabContentsViewAutosizing;
 - (void)enableTabContentsViewAutosizing;
@@ -68,6 +71,7 @@ class PanelBrowserWindowCocoa;
 - (void)updateTitleBar;
 - (void)updateIcon;
 - (void)updateThrobber:(BOOL)shouldSpin;
+- (void)updateTitleBarMinimizeRestoreButtonVisibility;
 
 // Adds the FindBar controller's view to this Panel. Must only be
 // called once per PanelWindowControllerCocoa.
@@ -77,6 +81,11 @@ class PanelBrowserWindowCocoa;
 // layer. This will take care of PanelManager, other panels and close the
 // native window at the end.
 - (void)closePanel;
+
+// Minimize/Restore the panel or all panels, depending on the modifier.
+// Invoked when the minimize/restore button is clicked.
+- (void)minimizeButtonClicked:(int)modifierFlags;
+- (void)restoreButtonClicked:(int)modifierFlags;
 
 // Uses nonblocking animation for moving the Panels. It's especially
 // important in case of dragging a Panel when other Panels should 'slide out',
@@ -88,7 +97,6 @@ class PanelBrowserWindowCocoa;
 
 // Used by PanelTitlebarViewCocoa when user rearranges the Panels by dragging.
 // |mouseLocation| is in Cocoa's screen coordinates.
-- (BOOL)isDraggable;
 - (void)startDrag:(NSPoint)mouseLocation;
 - (void)endDrag:(BOOL)cancelled;
 - (void)drag:(NSPoint)mouseLocation;
@@ -107,9 +115,6 @@ class PanelBrowserWindowCocoa;
 // |command| is an integer value containing one of the constants defined in the
 // "chrome/app/chrome_command_ids.h" file.
 - (void)executeCommand:(int)command;
-
-// Invokes the settings menu when the settings button is pressed.
-- (void)runSettingsMenu:(NSView*)button;
 
 // NSAnimationDelegate method, invoked when bounds animation is finished.
 - (void)animationDidEnd:(NSAnimation*)animation;
@@ -134,9 +139,6 @@ class PanelBrowserWindowCocoa;
 // Returns true if browser window requested activation of the window.
 - (BOOL)activationRequestedByBrowser;
 
-// Returns width of titlebar when shown in "icon only" mode.
-- (int)titlebarIconOnlyWidthInScreenCoordinates;
-
 - (void)ensureFullyVisible;
 
 - (void)updateWindowLevel;
@@ -144,10 +146,6 @@ class PanelBrowserWindowCocoa;
 // Turns on user-resizable corners/sides indications and enables live resize.
 - (void)enableResizeByMouse:(BOOL)enable;
 
-// In certain cases (when in a Docked strip for example) we want
-// the standard behavior of activating the app when clicking on the titlebar
-// to be disabled. This way, user can minimize the panel w/o activating it.
-- (BOOL)isActivationByClickingTitlebarEnabled;
 @end  // @interface PanelWindowController
 
 #endif  // CHROME_BROWSER_UI_PANELS_PANEL_WINDOW_CONTROLLER_COCOA_H_

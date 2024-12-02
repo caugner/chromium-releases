@@ -4,12 +4,13 @@
 
 #include "webkit/media/buffered_resource_loader.h"
 
+#include "base/callback_helpers.h"
 #include "base/format_macros.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "media/base/media_log.h"
-#include "net/base/net_errors.h"
+#include "media/base/seekable_buffer.h"
 #include "net/http/http_request_headers.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoaderOptions.h"
@@ -32,17 +33,17 @@ static const int kHttpOK = 200;
 static const int kHttpPartialContent = 206;
 
 // Define the number of bytes in a megabyte.
-static const size_t kMegabyte = 1024 * 1024;
+static const int kMegabyte = 1024 * 1024;
 
 // Minimum capacity of the buffer in forward or backward direction.
 //
 // 2MB is an arbitrary limit; it just seems to be "good enough" in practice.
-static const size_t kMinBufferCapacity = 2 * kMegabyte;
+static const int kMinBufferCapacity = 2 * kMegabyte;
 
 // Maximum capacity of the buffer in forward or backward direction. This is
 // effectively the largest single read the code path can handle.
 // 20MB is an arbitrary limit; it just seems to be "good enough" in practice.
-static const size_t kMaxBufferCapacity = 20 * kMegabyte;
+static const int kMaxBufferCapacity = 20 * kMegabyte;
 
 // Maximum number of bytes outside the buffer we will wait for in order to
 // fulfill a read. If a read starts more than 2MB away from the data we
@@ -50,22 +51,29 @@ static const size_t kMaxBufferCapacity = 20 * kMegabyte;
 // location and will instead reset the request.
 static const int kForwardWaitThreshold = 2 * kMegabyte;
 
+// The lower bound on our buffer (expressed as a fraction of the buffer size)
+// where we'll disable deferring and continue downloading data.
+//
+// TODO(scherkus): refer to http://crbug.com/124719 for more discussion on
+// how we could improve our buffering logic.
+static const double kDisableDeferThreshold = 0.9;
+
 // Computes the suggested backward and forward capacity for the buffer
 // if one wants to play at |playback_rate| * the natural playback speed.
 // Use a value of 0 for |bitrate| if it is unknown.
 static void ComputeTargetBufferWindow(float playback_rate, int bitrate,
-                                      size_t* out_backward_capacity,
-                                      size_t* out_forward_capacity) {
-  static const size_t kDefaultBitrate = 200 * 1024 * 8;  // 200 Kbps.
-  static const size_t kMaxBitrate = 20 * kMegabyte * 8;  // 20 Mbps.
+                                      int* out_backward_capacity,
+                                      int* out_forward_capacity) {
+  static const int kDefaultBitrate = 200 * 1024 * 8;  // 200 Kbps.
+  static const int kMaxBitrate = 20 * kMegabyte * 8;  // 20 Mbps.
   static const float kMaxPlaybackRate = 25.0;
-  static const size_t kTargetSecondsBufferedAhead = 10;
-  static const size_t kTargetSecondsBufferedBehind = 2;
+  static const int kTargetSecondsBufferedAhead = 10;
+  static const int kTargetSecondsBufferedBehind = 2;
 
   // Use a default bit rate if unknown and clamp to prevent overflow.
   if (bitrate <= 0)
     bitrate = kDefaultBitrate;
-  bitrate = std::min(static_cast<size_t>(bitrate), kMaxBitrate);
+  bitrate = std::min(bitrate, kMaxBitrate);
 
   // Only scale the buffer window for playback rates greater than 1.0 in
   // magnitude and clamp to prevent overflow.
@@ -78,7 +86,7 @@ static void ComputeTargetBufferWindow(float playback_rate, int bitrate,
   playback_rate = std::max(playback_rate, 1.0f);
   playback_rate = std::min(playback_rate, kMaxPlaybackRate);
 
-  size_t bytes_per_second = static_cast<size_t>(playback_rate * bitrate / 8.0);
+  int bytes_per_second = (bitrate / 8.0) * playback_rate;
 
   // Clamp between kMinBufferCapacity and kMaxBufferCapacity.
   *out_forward_capacity = std::max(
@@ -102,7 +110,6 @@ BufferedResourceLoader::BufferedResourceLoader(
     float playback_rate,
     media::MediaLog* media_log)
     : defer_strategy_(strategy),
-      range_requested_(false),
       range_supported_(false),
       saved_forward_capacity_(0),
       url_(url),
@@ -121,8 +128,8 @@ BufferedResourceLoader::BufferedResourceLoader(
       playback_rate_(playback_rate),
       media_log_(media_log) {
 
-  size_t backward_capacity;
-  size_t forward_capacity;
+  int backward_capacity;
+  int forward_capacity;
   ComputeTargetBufferWindow(
       playback_rate_, bitrate_, &backward_capacity, &forward_capacity);
   buffer_.reset(new media::SeekableBuffer(backward_capacity, forward_capacity));
@@ -131,7 +138,7 @@ BufferedResourceLoader::BufferedResourceLoader(
 BufferedResourceLoader::~BufferedResourceLoader() {}
 
 void BufferedResourceLoader::Start(
-    const net::CompletionCallback& start_cb,
+    const StartCB& start_cb,
     const base::Closure& event_cb,
     WebFrame* frame) {
   // Make sure we have not started.
@@ -155,12 +162,12 @@ void BufferedResourceLoader::Start(
   request.setTargetType(WebURLRequest::TargetIsMedia);
 
   if (IsRangeRequest()) {
-    range_requested_ = true;
     request.setHTTPHeaderField(
         WebString::fromUTF8(net::HttpRequestHeaders::kRange),
         WebString::fromUTF8(GenerateHeaders(first_byte_position_,
                                             last_byte_position_)));
   }
+
   frame->setReferrerForRequest(request, WebKit::WebURL());
 
   // Disable compression, compression for audio/video doesn't make sense...
@@ -207,7 +214,7 @@ void BufferedResourceLoader::Read(
     int64 position,
     int read_size,
     uint8* buffer,
-    const net::CompletionCallback& read_cb) {
+    const ReadCB& read_cb) {
   DCHECK(start_cb_.is_null());
   DCHECK(read_cb_.is_null());
   DCHECK(!read_cb.is_null());
@@ -229,7 +236,8 @@ void BufferedResourceLoader::Read(
   // of the file.
   if (instance_size_ != kPositionNotSpecified &&
       instance_size_ <= read_position_) {
-    DoneRead(0);
+    DVLOG(1) << "Appear to have seeked beyond EOS; returning 0.";
+    DoneRead(kOk, 0);
     return;
   }
 
@@ -237,19 +245,19 @@ void BufferedResourceLoader::Read(
   // amount.
   if (read_position_ > offset_ + kint32max ||
       read_position_ < offset_ + kint32min) {
-    DoneRead(net::ERR_CACHE_MISS);
+    DoneRead(kCacheMiss, 0);
     return;
   }
 
   // Make sure |read_size_| is not too large for the buffer to ever be able to
   // fulfill the read request.
   if (read_size_ > kMaxBufferCapacity) {
-    DoneRead(net::ERR_FAILED);
+    DoneRead(kFailed, 0);
     return;
   }
 
   // Prepare the parameters.
-  first_offset_ = static_cast<int>(read_position_ - offset_);
+  first_offset_ = read_position_ - offset_;
   last_offset_ = first_offset_ + read_size_;
 
   // If we can serve the request now, do the actual read.
@@ -263,8 +271,7 @@ void BufferedResourceLoader::Read(
   // necessary and disable deferring.
   if (WillFulfillRead()) {
     // Advance offset as much as possible to create additional capacity.
-    int advance = std::min(first_offset_,
-                           static_cast<int>(buffer_->forward_bytes()));
+    int advance = std::min(first_offset_, buffer_->forward_bytes());
     bool ret = buffer_->Seek(advance);
     DCHECK(ret);
 
@@ -277,7 +284,7 @@ void BufferedResourceLoader::Read(
     //
     // This can happen when reading in a large seek index or when the
     // first byte of a read request falls within kForwardWaitThreshold.
-    if (last_offset_ > static_cast<int>(buffer_->forward_capacity())) {
+    if (last_offset_ > buffer_->forward_capacity()) {
       saved_forward_capacity_ = buffer_->forward_capacity();
       buffer_->set_forward_capacity(last_offset_);
     }
@@ -293,12 +300,12 @@ void BufferedResourceLoader::Read(
   }
 
   // Make a callback to report failure.
-  DoneRead(net::ERR_CACHE_MISS);
+  DoneRead(kCacheMiss, 0);
 }
 
 int64 BufferedResourceLoader::GetBufferedPosition() {
   if (buffer_.get())
-    return offset_ + static_cast<int>(buffer_->forward_bytes()) - 1;
+    return offset_ + buffer_->forward_bytes() - 1;
   return kPositionNotSpecified;
 }
 
@@ -320,11 +327,6 @@ bool BufferedResourceLoader::is_downloading_data() {
 
 const GURL& BufferedResourceLoader::url() {
   return url_;
-}
-
-void BufferedResourceLoader::SetURLLoaderForTest(
-    scoped_ptr<WebURLLoader> test_loader) {
-  test_loader_ = test_loader.Pass();
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -367,27 +369,27 @@ void BufferedResourceLoader::didReceiveResponse(
   if (start_cb_.is_null())
     return;
 
-  bool partial_response = false;
+  // Expected content length can be |kPositionNotSpecified|, in that case
+  // |content_length_| is not specified and this is a streaming response.
+  content_length_ = response.expectedContentLength();
 
   // We make a strong assumption that when we reach here we have either
   // received a response from HTTP/HTTPS protocol or the request was
   // successful (in particular range request). So we only verify the partial
   // response for HTTP and HTTPS protocol.
   if (url_.SchemeIs(kHttpScheme) || url_.SchemeIs(kHttpsScheme)) {
-    int error = net::OK;
-
-    partial_response = (response.httpStatusCode() == kHttpPartialContent);
+    bool partial_response = (response.httpStatusCode() == kHttpPartialContent);
     bool ok_response = (response.httpStatusCode() == kHttpOK);
 
-    if (range_requested_) {
+    if (IsRangeRequest()) {
       // Check to see whether the server supports byte ranges.
       std::string accept_ranges =
           response.httpHeaderField("Accept-Ranges").utf8();
       range_supported_ = (accept_ranges.find("bytes") != std::string::npos);
 
       // If we have verified the partial response and it is correct, we will
-      // return net::OK. It's also possible for a server to support range
-      // requests without advertising Accept-Ranges: bytes.
+      // return kOk. It's also possible for a server to support range requests
+      // without advertising "Accept-Ranges: bytes".
       if (partial_response && VerifyPartialResponse(response)) {
         range_supported_ = true;
       } else if (ok_response && first_byte_position_ == 0 &&
@@ -395,31 +397,32 @@ void BufferedResourceLoader::didReceiveResponse(
         // We accept a 200 response for a Range:0- request, trusting the
         // Accept-Ranges header, because Apache thinks that's a reasonable thing
         // to return.
+        instance_size_ = content_length_;
       } else {
-        error = net::ERR_INVALID_RESPONSE;
+        DoneStart(kFailed);
+        return;
       }
-    } else if (response.httpStatusCode() != kHttpOK) {
-      // We didn't request a range but server didn't reply with "200 OK".
-      error = net::ERR_FAILED;
+    } else {
+      instance_size_ = content_length_;
+      if (response.httpStatusCode() != kHttpOK) {
+        // We didn't request a range but server didn't reply with "200 OK".
+        DoneStart(kFailed);
+        return;
+      }
     }
 
-    if (error != net::OK) {
-      DoneStart(error);
-      return;
+  } else {
+    CHECK_EQ(instance_size_, kPositionNotSpecified);
+    if (content_length_ != kPositionNotSpecified) {
+      if (first_byte_position_ == kPositionNotSpecified)
+        instance_size_ = content_length_;
+      else if (last_byte_position_ == kPositionNotSpecified)
+        instance_size_ = content_length_ + first_byte_position_;
     }
   }
 
-  // Expected content length can be |kPositionNotSpecified|, in that case
-  // |content_length_| is not specified and this is a streaming response.
-  content_length_ = response.expectedContentLength();
-
-  // If we have not requested a range or have not received a range, then the
-  // size of the instance is equal to the content length.
-  if (!range_requested_ || !partial_response)
-    instance_size_ = content_length_;
-
   // Calls with a successful response.
-  DoneStart(net::OK);
+  DoneStart(kOk);
 }
 
 void BufferedResourceLoader::didReceiveData(
@@ -448,7 +451,7 @@ void BufferedResourceLoader::didReceiveData(
 
   // Consume excess bytes from our in-memory buffer if necessary.
   if (buffer_->forward_bytes() > buffer_->forward_capacity()) {
-    size_t excess = buffer_->forward_bytes() - buffer_->forward_capacity();
+    int excess = buffer_->forward_bytes() - buffer_->forward_capacity();
     bool success = buffer_->Seek(excess);
     DCHECK(success);
     offset_ += first_offset_ + excess;
@@ -491,7 +494,7 @@ void BufferedResourceLoader::didFinishLoading(
   if (!start_cb_.is_null()) {
     DCHECK(read_cb_.is_null())
         << "Shouldn't have a read callback during start";
-    DoneStart(net::OK);
+    DoneStart(kOk);
     return;
   }
 
@@ -505,7 +508,7 @@ void BufferedResourceLoader::didFinishLoading(
     if (CanFulfillRead())
       ReadInternal();
     else
-      DoneRead(net::ERR_CACHE_MISS);
+      DoneRead(kCacheMiss, 0);
   }
 
   // There must not be any outstanding read request.
@@ -529,13 +532,13 @@ void BufferedResourceLoader::didFail(
   if (!start_cb_.is_null()) {
     DCHECK(read_cb_.is_null())
         << "Shouldn't have a read callback during start";
-    DoneStart(net::ERR_FAILED);
+    DoneStart(kFailed);
     return;
   }
 
   // Don't leave read callbacks hanging around.
   if (HasPendingRead()) {
-    DoneRead(net::ERR_FAILED);
+    DoneRead(kFailed, 0);
   }
 }
 
@@ -574,8 +577,8 @@ void BufferedResourceLoader::UpdateBufferWindow() {
   if (!buffer_.get())
     return;
 
-  size_t backward_capacity;
-  size_t forward_capacity;
+  int backward_capacity;
+  int forward_capacity;
   ComputeTargetBufferWindow(
       playback_rate_, bitrate_, &backward_capacity, &forward_capacity);
 
@@ -636,15 +639,17 @@ bool BufferedResourceLoader::ShouldDisableDefer() const {
     // We have an outstanding read request, and we have not buffered enough
     // yet to fulfill the request; disable defer to get more data.
     case kReadThenDefer:
-      return !read_cb_.is_null() &&
-          last_offset_ > static_cast<int>(buffer_->forward_bytes());
+      return !read_cb_.is_null() && last_offset_ > buffer_->forward_bytes();
 
-    // We have less than half the capacity of our threshold, so
-    // disable defer to get more data.
+    // Disable deferring whenever our forward-buffered amount falls beneath our
+    // threshold.
+    //
+    // TODO(scherkus): refer to http://crbug.com/124719 for more discussion on
+    // how we could improve our buffering logic.
     case kThresholdDefer: {
-      size_t amount_buffered = buffer_->forward_bytes();
-      size_t half_capacity = buffer_->forward_capacity() / 2;
-      return amount_buffered < half_capacity;
+      int buffered = buffer_->forward_bytes();
+      int threshold = buffer_->forward_capacity() * kDisableDeferThreshold;
+      return buffered < threshold;
     }
   }
 
@@ -654,12 +659,11 @@ bool BufferedResourceLoader::ShouldDisableDefer() const {
 
 bool BufferedResourceLoader::CanFulfillRead() const {
   // If we are reading too far in the backward direction.
-  if (first_offset_ < 0 &&
-      first_offset_ + static_cast<int>(buffer_->backward_bytes()) < 0)
+  if (first_offset_ < 0 && (first_offset_ + buffer_->backward_bytes()) < 0)
     return false;
 
   // If the start offset is too far ahead.
-  if (first_offset_ >= static_cast<int>(buffer_->forward_bytes()))
+  if (first_offset_ >= buffer_->forward_bytes())
     return false;
 
   // At the point, we verified that first byte requested is within the buffer.
@@ -669,7 +673,7 @@ bool BufferedResourceLoader::CanFulfillRead() const {
 
   // If the resource request is still active, make sure the whole requested
   // range is covered.
-  if (last_offset_ > static_cast<int>(buffer_->forward_bytes()))
+  if (last_offset_ > buffer_->forward_bytes())
     return false;
 
   return true;
@@ -677,13 +681,11 @@ bool BufferedResourceLoader::CanFulfillRead() const {
 
 bool BufferedResourceLoader::WillFulfillRead() const {
   // Trying to read too far behind.
-  if (first_offset_ < 0 &&
-      first_offset_ + static_cast<int>(buffer_->backward_bytes()) < 0)
+  if (first_offset_ < 0 && (first_offset_ + buffer_->backward_bytes()) < 0)
     return false;
 
   // Trying to read too far ahead.
-  if (first_offset_ - static_cast<int>(buffer_->forward_bytes()) >=
-      kForwardWaitThreshold)
+  if ((first_offset_ - buffer_->forward_bytes()) >= kForwardWaitThreshold)
     return false;
 
   // The resource request has completed, there's no way we can fulfill the
@@ -700,11 +702,11 @@ void BufferedResourceLoader::ReadInternal() {
   DCHECK(ret);
 
   // Then do the read.
-  int read = static_cast<int>(buffer_->Read(read_buffer_, read_size_));
+  int read = buffer_->Read(read_buffer_, read_size_);
   offset_ += first_offset_ + read;
 
   // And report with what we have read.
-  DoneRead(read);
+  DoneRead(kOk, read);
 }
 
 // static
@@ -792,7 +794,7 @@ std::string BufferedResourceLoader::GenerateHeaders(
   return header;
 }
 
-void BufferedResourceLoader::DoneRead(int error) {
+void BufferedResourceLoader::DoneRead(Status status, int bytes_read) {
   if (buffer_.get() && saved_forward_capacity_) {
     buffer_->set_forward_capacity(saved_forward_capacity_);
     saved_forward_capacity_ = 0;
@@ -804,15 +806,12 @@ void BufferedResourceLoader::DoneRead(int error) {
   last_offset_ = 0;
   Log();
 
-  net::CompletionCallback read_cb;
-  std::swap(read_cb, read_cb_);
-  read_cb.Run(error);
+  base::ResetAndReturn(&read_cb_).Run(status, bytes_read);
 }
 
-void BufferedResourceLoader::DoneStart(int error) {
-  net::CompletionCallback start_cb;
-  std::swap(start_cb, start_cb_);
-  start_cb.Run(error);
+
+void BufferedResourceLoader::DoneStart(Status status) {
+  base::ResetAndReturn(&start_cb_).Run(status);
 }
 
 void BufferedResourceLoader::NotifyNetworkEvent() {

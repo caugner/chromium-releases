@@ -8,10 +8,12 @@
 #include "ash/app_list/app_list_model.h"
 #include "ash/app_list/app_list_model_view.h"
 #include "ash/app_list/app_list_view_delegate.h"
+#include "ash/screen_ash.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
-#include "ui/gfx/compositor/layer.h"
-#include "ui/gfx/compositor/scoped_layer_animation_settings.h"
+#include "ash/wm/shelf_layout_manager.h"
+#include "ui/compositor/layer.h"
+#include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/transform_util.h"
 #include "ui/views/background.h"
@@ -26,6 +28,12 @@ const SkColor kBackgroundColor = SkColorSetARGB(0x33, 0, 0, 0);
 
 const float kModelViewAnimationScaleFactor = 0.9f;
 
+ui::Transform GetScaleTransform(AppListModelView* model_view) {
+  gfx::Rect pixel_bounds = model_view->GetLayerBoundsInPixel();
+  gfx::Point center(pixel_bounds.width() / 2, pixel_bounds.height() / 2);
+  return ui::GetScaleTransform(center, kModelViewAnimationScaleFactor);
+}
+
 }  // namespace
 
 AppListView::AppListView(
@@ -38,6 +46,9 @@ AppListView::AppListView(
 }
 
 AppListView::~AppListView() {
+  // Model is going away, so set to NULL before superclass deletes child views.
+  if (model_view_)
+    model_view_->SetModel(NULL);
 }
 
 void AppListView::AnimateShow(int duration_ms) {
@@ -55,10 +66,7 @@ void AppListView::AnimateHide(int duration_ms) {
   animation.SetTransitionDuration(
       base::TimeDelta::FromMilliseconds(duration_ms));
   animation.SetTweenType(ui::Tween::EASE_IN);
-  model_view_->SetTransform(
-      ui::GetScaleTransform(gfx::Point(model_view_->width() / 2,
-                                       model_view_->height() / 2),
-                            kModelViewAnimationScaleFactor));
+  model_view_->SetTransform(GetScaleTransform(model_view_));
 }
 
 void AppListView::Close() {
@@ -89,11 +97,7 @@ void AppListView::Init(const gfx::Rect& bounds) {
   widget->SetVisibilityChangedAnimationsEnabled(false);
 
   // Sets initial transform. AnimateShow changes it back to identity transform.
-  model_view_->SetTransform(
-      ui::GetScaleTransform(gfx::Point(model_view_->width() / 2,
-                                       model_view_->height() / 2),
-                            kModelViewAnimationScaleFactor));
-
+  model_view_->SetTransform(GetScaleTransform(model_view_));
   UpdateModel();
 }
 
@@ -117,8 +121,10 @@ void AppListView::Layout() {
     return;
 
   // Gets work area rect, which is in screen coordinates.
-  gfx::Rect workarea = gfx::Screen::GetMonitorWorkAreaNearestWindow(
-      GetWidget()->GetNativeView());
+  gfx::Rect workarea = Shell::GetInstance()->shelf()->IsVisible() ?
+      ScreenAsh::GetUnmaximizedWorkAreaBounds(GetWidget()->GetNativeView()) :
+      gfx::Screen::GetMonitorNearestWindow(
+          GetWidget()->GetNativeView()).work_area();
 
   // Converts |workarea| into view's coordinates.
   gfx::Point origin(workarea.origin());

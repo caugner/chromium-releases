@@ -22,16 +22,20 @@ class ShellDelegateImpl : public ash::ShellDelegate {
 
   void SetWatcher(WindowWatcher* watcher);
 
-  virtual views::Widget* CreateStatusArea() OVERRIDE;
   virtual bool IsUserLoggedIn() OVERRIDE;
   virtual void LockScreen() OVERRIDE;
   virtual void UnlockScreen() OVERRIDE;
   virtual bool IsScreenLocked() const OVERRIDE;
+  virtual void Shutdown() OVERRIDE;
   virtual void Exit() OVERRIDE;
   virtual void NewWindow(bool incognito) OVERRIDE;
+  virtual void Search() OVERRIDE;
+  virtual void OpenFileManager() OVERRIDE;
+  virtual void OpenCrosh() OVERRIDE;
+  virtual void OpenMobileSetup() OVERRIDE;
+  virtual content::BrowserContext* GetCurrentBrowserContext() OVERRIDE;
+  virtual void ToggleSpokenFeedback() OVERRIDE;
   virtual ash::AppListViewDelegate* CreateAppListViewDelegate() OVERRIDE;
-  virtual std::vector<aura::Window*> GetCycleWindowList(
-      CycleSource source) const OVERRIDE;
   virtual void StartPartialScreenshot(
       ash::ScreenshotDelegate* screenshot_delegate) OVERRIDE;
   virtual ash::LauncherDelegate* CreateLauncherDelegate(

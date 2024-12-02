@@ -73,12 +73,12 @@
 #include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/print_preview_tab_controller.h"
-#include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/protector/protector_service.h"
 #include "chrome/browser/protector/protector_service_factory.h"
+#include "chrome/browser/protector/protector_utils.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -100,9 +100,11 @@
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/browser_init.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
+#include "chrome/browser/ui/fullscreen_controller.h"
+#include "chrome/browser/ui/fullscreen_exit_bubble_type.h"
 #include "chrome/browser/ui/login/login_prompt.h"
+#include "chrome/browser/ui/media_stream_infobar_delegate.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/search_engines/keyword_editor_controller.h"
@@ -124,6 +126,7 @@
 #include "content/public/browser/browser_child_process_host_iterator.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/favicon_status.h"
+#include "content/public/browser/geolocation.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/interstitial_page_delegate.h"
 #include "content/public/browser/navigation_entry.h"
@@ -131,10 +134,12 @@
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/common_param_traits.h"
+#include "content/public/common/geoposition.h"
 #include "content/public/common/ssl_status.h"
 #include "net/cookies/cookie_store.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
@@ -146,14 +151,12 @@
 #include "webkit/plugins/webplugininfo.h"
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
-#include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/policy/configuration_policy_provider.h"
-#include "chrome/browser/policy/policy_map.h"
+#include "chrome/browser/policy/policy_service.h"
 #include "policy/policy_constants.h"
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
 #endif
 
 #if defined(OS_MACOSX)
@@ -183,6 +186,18 @@ using content::SSLStatus;
 using content::WebContents;
 
 namespace {
+
+// Helper to reply asynchronously if |automation| is still valid.
+void SendSuccessReply(base::WeakPtr<AutomationProvider> automation,
+                      IPC::Message* reply_message) {
+  if (automation)
+    AutomationJSONReply(automation.get(), reply_message).SendSuccess(NULL);
+}
+
+// Helper to resolve the overloading of PostTask.
+void PostTask(BrowserThread::ID id, const base::Closure& callback) {
+  BrowserThread::PostTask(id, FROM_HERE, callback);
+}
 
 void SendMouseClick(int flags) {
   ui_controls::MouseButton button = ui_controls::LEFT;
@@ -224,14 +239,14 @@ class AutomationInterstitialPage : public content::InterstitialPageDelegate {
 }  // namespace
 
 TestingAutomationProvider::TestingAutomationProvider(Profile* profile)
-    : AutomationProvider(profile),
+    : AutomationProvider(profile)
 #if defined(TOOLKIT_VIEWS)
-      popup_menu_waiter_(NULL),
+      , popup_menu_waiter_(NULL)
 #endif
 #if defined(OS_CHROMEOS)
-      power_manager_observer_(NULL),
+      , power_manager_observer_(NULL)
 #endif
-      redirect_query_(0) {
+      {
   BrowserList::AddObserver(this);
   registrar_.Add(this, chrome::NOTIFICATION_SESSION_END,
                  content::NotificationService::AllSources());
@@ -323,6 +338,7 @@ void TestingAutomationProvider::Observe(
 
 bool TestingAutomationProvider::OnMessageReceived(
     const IPC::Message& message) {
+  base::ThreadRestrictions::ScopedAllowWait allow_wait;
   bool handled = true;
   bool deserialize_success = true;
   IPC_BEGIN_MESSAGE_MAP_EX(TestingAutomationProvider,
@@ -350,11 +366,6 @@ bool TestingAutomationProvider::OnMessageReceived(
     IPC_MESSAGE_HANDLER(AutomationMsg_NavigationAsyncWithDisposition,
                         NavigationAsyncWithDisposition)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_Reload, Reload)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_SetAuth, SetAuth)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_CancelAuth, CancelAuth)
-    IPC_MESSAGE_HANDLER(AutomationMsg_NeedsAuth, NeedsAuth)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_RedirectsFrom,
-                                    GetRedirectsFrom)
     IPC_MESSAGE_HANDLER(AutomationMsg_BrowserWindowCount, GetBrowserWindowCount)
     IPC_MESSAGE_HANDLER(AutomationMsg_NormalBrowserWindowCount,
                         GetNormalBrowserWindowCount)
@@ -395,8 +406,6 @@ bool TestingAutomationProvider::OnMessageReceived(
                         GetFullscreenBubbleVisibility)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_DomOperation,
                                     ExecuteJavascript)
-    IPC_MESSAGE_HANDLER(AutomationMsg_ConstrainedWindowCount,
-                        GetConstrainedWindowCount)
 #if defined(TOOLKIT_VIEWS)
     IPC_MESSAGE_HANDLER(AutomationMsg_GetFocusedViewID, GetFocusedViewID)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_WaitForFocusedViewIDToChange,
@@ -428,7 +437,6 @@ bool TestingAutomationProvider::OnMessageReceived(
     IPC_MESSAGE_HANDLER(AutomationMsg_BringBrowserToFront, BringBrowserToFront)
     IPC_MESSAGE_HANDLER(AutomationMsg_IsMenuCommandEnabled,
                         IsMenuCommandEnabled)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_PrintNow, PrintNow)
     IPC_MESSAGE_HANDLER(AutomationMsg_SavePage, SavePage)
     IPC_MESSAGE_HANDLER(AutomationMsg_OpenFindInPage,
                         HandleOpenFindInPageRequest)
@@ -483,8 +491,6 @@ bool TestingAutomationProvider::OnMessageReceived(
     IPC_MESSAGE_HANDLER_DELAY_REPLY(
         AutomationMsg_GoForwardBlockUntilNavigationsComplete,
         GoForwardBlockUntilNavigationsComplete)
-    IPC_MESSAGE_HANDLER(AutomationMsg_SavePackageShouldPromptUser,
-                        SavePackageShouldPromptUser)
     IPC_MESSAGE_HANDLER(AutomationMsg_WindowTitle, GetWindowTitle)
     IPC_MESSAGE_HANDLER(AutomationMsg_SetShelfVisibility, SetShelfVisibility)
     IPC_MESSAGE_HANDLER(AutomationMsg_BlockedPopupCount, GetBlockedPopupCount)
@@ -761,99 +767,6 @@ void TestingAutomationProvider::Reload(int handle,
 
   AutomationMsg_Reload::WriteReplyParams(
       reply_message, AUTOMATION_MSG_NAVIGATION_ERROR);
-  Send(reply_message);
-}
-
-void TestingAutomationProvider::SetAuth(int tab_handle,
-                                        const std::wstring& username,
-                                        const std::wstring& password,
-                                        IPC::Message* reply_message) {
-  if (tab_tracker_->ContainsHandle(tab_handle)) {
-    NavigationController* tab = tab_tracker_->GetResource(tab_handle);
-    LoginHandlerMap::iterator iter = login_handler_map_.find(tab);
-
-    if (iter != login_handler_map_.end()) {
-      // If auth is needed again after this, assume login has failed.  This is
-      // not strictly correct, because a navigation can require both proxy and
-      // server auth, but it should be OK for now.
-      LoginHandler* handler = iter->second;
-      new NavigationNotificationObserver(
-          tab, this, reply_message, 1, false, false);
-      handler->SetAuth(WideToUTF16Hack(username), WideToUTF16Hack(password));
-      return;
-    }
-  }
-
-  AutomationMsg_SetAuth::WriteReplyParams(
-      reply_message, AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED);
-  Send(reply_message);
-}
-
-void TestingAutomationProvider::CancelAuth(int tab_handle,
-                                           IPC::Message* reply_message) {
-  if (tab_tracker_->ContainsHandle(tab_handle)) {
-    NavigationController* tab = tab_tracker_->GetResource(tab_handle);
-    LoginHandlerMap::iterator iter = login_handler_map_.find(tab);
-
-    if (iter != login_handler_map_.end()) {
-      // If auth is needed again after this, something is screwy.
-      LoginHandler* handler = iter->second;
-      new NavigationNotificationObserver(
-          tab, this, reply_message, 1, false, false);
-      handler->CancelAuth();
-      return;
-    }
-  }
-
-  AutomationMsg_CancelAuth::WriteReplyParams(
-      reply_message, AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED);
-  Send(reply_message);
-}
-
-void TestingAutomationProvider::NeedsAuth(int tab_handle, bool* needs_auth) {
-  *needs_auth = false;
-
-  if (tab_tracker_->ContainsHandle(tab_handle)) {
-    NavigationController* tab = tab_tracker_->GetResource(tab_handle);
-    LoginHandlerMap::iterator iter = login_handler_map_.find(tab);
-
-    if (iter != login_handler_map_.end()) {
-      // The LoginHandler will be in our map IFF the tab needs auth.
-      *needs_auth = true;
-    }
-  }
-}
-
-void TestingAutomationProvider::GetRedirectsFrom(int tab_handle,
-                                                 const GURL& source_url,
-                                                 IPC::Message* reply_message) {
-  if (redirect_query_) {
-    LOG(ERROR) << "Can only handle one redirect query at once.";
-  } else if (tab_tracker_->ContainsHandle(tab_handle)) {
-    NavigationController* tab = tab_tracker_->GetResource(tab_handle);
-    Profile* profile = Profile::FromBrowserContext(tab->GetBrowserContext());
-    HistoryService* history_service =
-        profile->GetHistoryService(Profile::EXPLICIT_ACCESS);
-
-    DCHECK(history_service) << "Tab " << tab_handle << "'s profile " <<
-                               "has no history service";
-    if (history_service) {
-      DCHECK(!reply_message_);
-      reply_message_ = reply_message;
-      // Schedule a history query for redirects. The response will be sent
-      // asynchronously from the callback the history system uses to notify us
-      // that it's done: OnRedirectQueryComplete.
-      redirect_query_ = history_service->QueryRedirectsFrom(
-          source_url, &consumer_,
-          base::Bind(&TestingAutomationProvider::OnRedirectQueryComplete,
-                     base::Unretained(this)));
-      return;  // Response will be sent when query completes.
-    }
-  }
-
-  // Send failure response.
-  std::vector<GURL> empty;
-  AutomationMsg_RedirectsFrom::WriteReplyParams(reply_message, false, empty);
   Send(reply_message);
 }
 
@@ -1415,9 +1328,7 @@ void TestingAutomationProvider::GetFullscreenBubbleVisibility(int handle,
   }
 }
 
-namespace {
-
-void ExecuteJavascriptInRenderViewFrame(
+void TestingAutomationProvider::ExecuteJavascriptInRenderViewFrame(
     const string16& frame_xpath,
     const string16& script,
     IPC::Message* reply_message,
@@ -1426,18 +1337,12 @@ void ExecuteJavascriptInRenderViewFrame(
   // This routing id needs to be remembered for the reverse
   // communication while sending back the response of
   // this javascript execution.
-  std::string set_automation_id;
-  base::SStringPrintf(&set_automation_id,
-                      "window.domAutomationController.setAutomationId(%d);",
-                      reply_message->routing_id());
-
   render_view_host->ExecuteJavascriptInWebFrame(
-      frame_xpath, UTF8ToUTF16(set_automation_id));
+      frame_xpath,
+      UTF8ToUTF16("window.domAutomationController.setAutomationId(0);"));
   render_view_host->ExecuteJavascriptInWebFrame(
       frame_xpath, script);
 }
-
-}  // namespace
 
 void TestingAutomationProvider::ExecuteJavascript(
     int handle,
@@ -1455,23 +1360,6 @@ void TestingAutomationProvider::ExecuteJavascript(
   ExecuteJavascriptInRenderViewFrame(WideToUTF16Hack(frame_xpath),
                                      WideToUTF16Hack(script), reply_message,
                                      web_contents->GetRenderViewHost());
-}
-
-void TestingAutomationProvider::GetConstrainedWindowCount(int handle,
-                                                          int* count) {
-  *count = -1;  // -1 is the error code
-  if (tab_tracker_->ContainsHandle(handle)) {
-    NavigationController* nav_controller = tab_tracker_->GetResource(handle);
-    WebContents* web_contents = nav_controller->GetWebContents();
-    if (web_contents) {
-      TabContentsWrapper* wrapper =
-          TabContentsWrapper::GetCurrentWrapperForContents(web_contents);
-      if (wrapper) {
-        *count = static_cast<int>(wrapper->constrained_window_tab_helper()->
-                                  constrained_window_count());
-      }
-    }
-  }
 }
 
 void TestingAutomationProvider::HandleInspectElementRequest(
@@ -1656,7 +1544,7 @@ void TestingAutomationProvider::GetPageType(
     *page_type = entry->GetPageType();
     *success = true;
     // In order to return the proper result when an interstitial is shown and
-    // no navigation entry were created for it we need to ask the TabContents.
+    // no navigation entry were created for it we need to ask the WebContents.
     if (*page_type == content::PAGE_TYPE_NORMAL &&
         tab->GetWebContents()->ShowingInterstitialPage())
       *page_type = content::PAGE_TYPE_INTERSTITIAL;
@@ -1724,31 +1612,6 @@ void TestingAutomationProvider::IsMenuCommandEnabled(int browser_handle,
     *menu_item_enabled =
         browser->command_updater()->IsCommandEnabled(message_num);
   }
-}
-
-void TestingAutomationProvider::PrintNow(int tab_handle,
-                                         IPC::Message* reply_message) {
-  NavigationController* tab = NULL;
-  WebContents* web_contents = GetWebContentsForHandle(tab_handle, &tab);
-  if (web_contents) {
-    FindAndActivateTab(tab);
-
-    content::NotificationObserver* observer =
-        new DocumentPrintedNotificationObserver(this, reply_message);
-
-    TabContentsWrapper* wrapper =
-        TabContentsWrapper::GetCurrentWrapperForContents(web_contents);
-    if (!wrapper->print_view_manager()->PrintNow()) {
-      // Clean up the observer. It will send the reply message.
-      delete observer;
-    }
-
-    // Return now to avoid sending reply message twice.
-    return;
-  }
-
-  AutomationMsg_PrintNow::WriteReplyParams(reply_message, false);
-  Send(reply_message);
 }
 
 void TestingAutomationProvider::SavePage(int tab_handle,
@@ -2248,11 +2111,6 @@ void TestingAutomationProvider::GoForwardBlockUntilNavigationsComplete(
   Send(reply_message);
 }
 
-void TestingAutomationProvider::SavePackageShouldPromptUser(
-    bool should_prompt) {
-  SavePackageFilePicker::SetShouldPromptUser(should_prompt);
-}
-
 void TestingAutomationProvider::SetShelfVisibility(int handle, bool visible) {
   if (browser_tracker_->ContainsHandle(handle)) {
     Browser* browser = browser_tracker_->GetResource(handle);
@@ -2286,7 +2144,8 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
   scoped_ptr<Value> values;
   base::JSONReader reader;
   std::string error;
-  values.reset(reader.ReadAndReturnError(json_request, true, NULL, &error));
+  values.reset(reader.ReadAndReturnError(json_request,
+      base::JSON_ALLOW_TRAILING_COMMAS, NULL, &error));
   if (!error.empty()) {
     AutomationJSONReply(this, reply_message).SendError(error);
     return;
@@ -2315,6 +2174,8 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
       &TestingAutomationProvider::GetIndicesFromTab;
   handler_map["NavigateToURL"] =
       &TestingAutomationProvider::NavigateToURL;
+  handler_map["WaitUntilNavigationCompletes"] =
+      &TestingAutomationProvider::WaitUntilNavigationCompletes;
   handler_map["GetLocalStatePrefsInfo"] =
       &TestingAutomationProvider::GetLocalStatePrefsInfo;
   handler_map["SetLocalStatePrefs"] =
@@ -2323,8 +2184,8 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
   handler_map["SetPrefs"] = &TestingAutomationProvider::SetPrefs;
   handler_map["ExecuteJavascript"] =
       &TestingAutomationProvider::ExecuteJavascriptJSON;
-  handler_map["AddDomRaisedEventObserver"] =
-      &TestingAutomationProvider::AddDomRaisedEventObserver;
+  handler_map["AddDomEventObserver"] =
+      &TestingAutomationProvider::AddDomEventObserver;
   handler_map["RemoveEventObserver"] =
       &TestingAutomationProvider::RemoveEventObserver;
   handler_map["GetNextEvent"] =
@@ -2387,8 +2248,6 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
       &TestingAutomationProvider::AcceptOrDismissAppModalDialog;
   handler_map["GetChromeDriverAutomationVersion"] =
       &TestingAutomationProvider::GetChromeDriverAutomationVersion;
-  handler_map["UpdateExtensionsNow"] =
-      &TestingAutomationProvider::UpdateExtensionsNow;
   handler_map["IsPageActionVisible"] =
       &TestingAutomationProvider::IsPageActionVisible;
   handler_map["CreateNewAutomationProvider"] =
@@ -2401,10 +2260,10 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
       &TestingAutomationProvider::GetMultiProfileInfo;
   handler_map["GetProcessInfo"] =
       &TestingAutomationProvider::GetProcessInfo;
-  handler_map["SetPolicies"] =
-      &TestingAutomationProvider::SetPolicies;
   handler_map["GetPolicyDefinitionList"] =
       &TestingAutomationProvider::GetPolicyDefinitionList;
+  handler_map["RefreshPolicies"] =
+      &TestingAutomationProvider::RefreshPolicies;
   handler_map["InstallExtension"] =
       &TestingAutomationProvider::InstallExtension;
   handler_map["GetExtensionsInfo"] =
@@ -2413,22 +2272,30 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
       &TestingAutomationProvider::UninstallExtensionById;
   handler_map["SetExtensionStateById"] =
       &TestingAutomationProvider::SetExtensionStateById;
-  handler_map["RefreshPolicies"] =
-      &TestingAutomationProvider::RefreshPolicies;
   handler_map["TriggerPageActionById"] =
       &TestingAutomationProvider::TriggerPageActionById;
   handler_map["TriggerBrowserActionById"] =
       &TestingAutomationProvider::TriggerBrowserActionById;
+  handler_map["UpdateExtensionsNow"] =
+      &TestingAutomationProvider::UpdateExtensionsNow;
 #if !defined(NO_TCMALLOC) && (defined(OS_LINUX) || defined(OS_CHROMEOS))
   handler_map["HeapProfilerDump"] =
       &TestingAutomationProvider::HeapProfilerDump;
 #endif  // !defined(NO_TCMALLOC) && (defined(OS_LINUX) || defined(OS_CHROMEOS))
+  handler_map["OverrideGeoposition"] =
+      &TestingAutomationProvider::OverrideGeoposition;
+  handler_map["AppendSwitchASCIIToCommandLine"] =
+      &TestingAutomationProvider::AppendSwitchASCIIToCommandLine;
+
 #if defined(OS_CHROMEOS)
   handler_map["GetLoginInfo"] = &TestingAutomationProvider::GetLoginInfo;
   handler_map["ShowCreateAccountUI"] =
       &TestingAutomationProvider::ShowCreateAccountUI;
+  handler_map["ExecuteJavascriptInOOBEWebUI"] =
+      &TestingAutomationProvider::ExecuteJavascriptInOOBEWebUI;
   handler_map["LoginAsGuest"] = &TestingAutomationProvider::LoginAsGuest;
-  handler_map["Login"] = &TestingAutomationProvider::Login;
+  handler_map["AddLoginEventObserver"] =
+      &TestingAutomationProvider::AddLoginEventObserver;
 
   handler_map["LockScreen"] = &TestingAutomationProvider::LockScreen;
   handler_map["UnlockScreen"] = &TestingAutomationProvider::UnlockScreen;
@@ -2528,10 +2395,12 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
   browser_handler_map["PerformActionOnSearchEngine"] =
       &TestingAutomationProvider::PerformActionOnSearchEngine;
 
+#if defined(ENABLE_PROTECTOR_SERVICE)
   browser_handler_map["GetProtectorState"] =
       &TestingAutomationProvider::GetProtectorState;
   browser_handler_map["PerformProtectorAction"] =
       &TestingAutomationProvider::PerformProtectorAction;
+#endif
 
   browser_handler_map["SetWindowDimensions"] =
       &TestingAutomationProvider::SetWindowDimensions;
@@ -2612,12 +2481,8 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
 
   browser_handler_map["GetNTPInfo"] =
       &TestingAutomationProvider::GetNTPInfo;
-  browser_handler_map["MoveNTPMostVisitedThumbnail"] =
-      &TestingAutomationProvider::MoveNTPMostVisitedThumbnail;
   browser_handler_map["RemoveNTPMostVisitedThumbnail"] =
       &TestingAutomationProvider::RemoveNTPMostVisitedThumbnail;
-  browser_handler_map["UnpinNTPMostVisitedThumbnail"] =
-      &TestingAutomationProvider::UnpinNTPMostVisitedThumbnail;
   browser_handler_map["RestoreAllNTPMostVisitedThumbnails"] =
       &TestingAutomationProvider::RestoreAllNTPMostVisitedThumbnails;
 
@@ -2632,6 +2497,26 @@ void TestingAutomationProvider::SendJSONRequest(int handle,
       &TestingAutomationProvider::GetV8HeapStats;
   browser_handler_map["GetFPS"] =
       &TestingAutomationProvider::GetFPS;
+
+  browser_handler_map["IsFullscreenForBrowser"] =
+      &TestingAutomationProvider::IsFullscreenForBrowser;
+  browser_handler_map["IsFullscreenForTab"] =
+      &TestingAutomationProvider::IsFullscreenForTab;
+  browser_handler_map["IsMouseLocked"] =
+      &TestingAutomationProvider::IsMouseLocked;
+  browser_handler_map["IsMouseLockPermissionRequested"] =
+      &TestingAutomationProvider::IsMouseLockPermissionRequested;
+  browser_handler_map["IsFullscreenPermissionRequested"] =
+      &TestingAutomationProvider::IsFullscreenPermissionRequested;
+  browser_handler_map["IsFullscreenBubbleDisplayed"] =
+      &TestingAutomationProvider::IsFullscreenBubbleDisplayed;
+  browser_handler_map["IsFullscreenBubbleDisplayingButtons"] =
+      &TestingAutomationProvider::IsFullscreenBubbleDisplayingButtons;
+  browser_handler_map["AcceptCurrentFullscreenOrMouseLockRequest"] =
+      &TestingAutomationProvider::AcceptCurrentFullscreenOrMouseLockRequest;
+  browser_handler_map["DenyCurrentFullscreenOrMouseLockRequest"] =
+      &TestingAutomationProvider::DenyCurrentFullscreenOrMouseLockRequest;
+
 #if defined(OS_CHROMEOS)
   browser_handler_map["CaptureProfilePhoto"] =
       &TestingAutomationProvider::CaptureProfilePhoto;
@@ -2708,15 +2593,25 @@ ListValue* TestingAutomationProvider::GetInfobarsInfo(WebContents* wc) {
   for (size_t i = 0; i < infobar_helper->infobar_count(); ++i) {
     DictionaryValue* infobar_item = new DictionaryValue;
     InfoBarDelegate* infobar = infobar_helper->GetInfoBarDelegateAt(i);
+    switch (infobar->GetInfoBarAutomationType()) {
+      case InfoBarDelegate::CONFIRM_INFOBAR:
+        infobar_item->SetString("type", "confirm_infobar");
+        break;
+      case InfoBarDelegate::ONE_CLICK_LOGIN_INFOBAR:
+        infobar_item->SetString("type", "oneclicklogin_infobar");
+        break;
+      case InfoBarDelegate::PASSWORD_INFOBAR:
+        infobar_item->SetString("type", "password_infobar");
+        break;
+      case InfoBarDelegate::RPH_INFOBAR:
+        infobar_item->SetString("type", "rph_infobar");
+        break;
+      case InfoBarDelegate::UNKNOWN_INFOBAR:
+        infobar_item->SetString("type", "unknown_infobar");
+        break;
+    }
     if (infobar->AsConfirmInfoBarDelegate()) {
       // Also covers ThemeInstalledInfoBarDelegate.
-      if (infobar->AsSavePasswordInfoBarDelegate()) {
-        infobar_item->SetString("type", "password_infobar");
-      } else if (infobar->AsRegisterProtocolHandlerInfoBarDelegate()) {
-        infobar_item->SetString("type", "rph_infobar");
-      } else {
-        infobar_item->SetString("type", "confirm_infobar");
-      }
       ConfirmInfoBarDelegate* confirm_infobar =
         infobar->AsConfirmInfoBarDelegate();
       infobar_item->SetString("text", confirm_infobar->GetMessageText());
@@ -2817,6 +2712,32 @@ void TestingAutomationProvider::PerformActionOnInfobar(
     reply.SendSuccess(NULL);
     return;
   }
+  if ("allow" == action || "deny" == action) {
+    MediaStreamInfoBarDelegate* media_stream_infobar;
+    if (!(media_stream_infobar = infobar->AsMediaStreamInfoBarDelegate())) {
+      reply.SendError("Not a media stream infobar.");
+      return;
+    }
+    if ("allow" == action) {
+      content::MediaStreamDevices video_devices =
+          media_stream_infobar->GetVideoDevices();
+      content::MediaStreamDevices audio_devices =
+          media_stream_infobar->GetAudioDevices();
+      if (video_devices.empty() || audio_devices.empty()) {
+        reply.SendError("No available audio/video devices to autoselect.");
+        return;
+      }
+
+      media_stream_infobar->Accept(audio_devices[0].device_id,
+                                   video_devices[0].device_id);
+      infobar_helper->RemoveInfoBar(infobar);
+    } else if ("deny" == action) {
+      media_stream_infobar->Deny();
+      infobar_helper->RemoveInfoBar(infobar);
+    }
+    reply.SendSuccess(NULL);
+    return;
+  }
   reply.SendError("Invalid action");
 }
 
@@ -2908,14 +2829,19 @@ void TestingAutomationProvider::GetBrowserInfo(
     browser_item->SetBoolean("fullscreen",
                              browser->window()->IsFullscreen());
     ListValue* visible_page_actions = new ListValue;
-    LocationBarTesting* loc_bar =
-        browser->window()->GetLocationBar()->GetLocationBarForTesting();
-    size_t page_action_visible_count =
-        static_cast<size_t>(loc_bar->PageActionVisibleCount());
-    for (size_t i = 0; i < page_action_visible_count; ++i) {
-      StringValue* extension_id = new StringValue(
-          loc_bar->GetVisiblePageAction(i)->extension_id());
-      visible_page_actions->Append(extension_id);
+    // Add info about all visible page actions. Skipped on panels, which do not
+    // have a location bar.
+    LocationBar* loc_bar = browser->window()->GetLocationBar();
+    if (loc_bar) {
+      LocationBarTesting* loc_bar_test =
+          loc_bar->GetLocationBarForTesting();
+      size_t page_action_visible_count =
+          static_cast<size_t>(loc_bar_test->PageActionVisibleCount());
+      for (size_t i = 0; i < page_action_visible_count; ++i) {
+        StringValue* extension_id = new StringValue(
+            loc_bar_test->GetVisiblePageAction(i)->extension_id());
+        visible_page_actions->Append(extension_id);
+      }
     }
     browser_item->Set("visible_page_actions", visible_page_actions);
     browser_item->SetInteger("selected_tab", browser->active_index());
@@ -2975,28 +2901,38 @@ void TestingAutomationProvider::GetBrowserInfo(
         profiles[i]->GetExtensionProcessManager();
     if (!process_manager)
       continue;
-    ExtensionProcessManager::const_iterator jt;
-    for (jt = process_manager->begin(); jt != process_manager->end(); ++jt) {
-      ExtensionHost* ex_host = *jt;
+    const ExtensionProcessManager::ViewSet view_set =
+        process_manager->GetAllViews();
+    for (ExtensionProcessManager::ViewSet::const_iterator jt =
+             view_set.begin();
+         jt != view_set.end(); ++jt) {
+      content::RenderViewHost* render_view_host = *jt;
       // Don't add dead extension processes.
-      if (!ex_host->IsRenderViewLive())
+      if (!render_view_host->IsRenderViewLive())
+        continue;
+      // Don't add views for which we can't obtain an extension.
+      // TODO(benwells): work out why this happens. It only happens for one
+      // test, and only on the bots.
+      const Extension* extension =
+          process_manager->GetExtensionForRenderViewHost(render_view_host);
+      if (!extension)
         continue;
       DictionaryValue* item = new DictionaryValue;
-      item->SetString("name", ex_host->extension()->name());
-      item->SetString("extension_id", ex_host->extension()->id());
+      item->SetString("name", extension->name());
+      item->SetString("extension_id", extension->id());
       item->SetInteger(
           "pid",
-          base::GetProcId(ex_host->render_process_host()->GetHandle()));
+          base::GetProcId(render_view_host->GetProcess()->GetHandle()));
       DictionaryValue* view = new DictionaryValue;
       view->SetInteger(
           "render_process_id",
-          ex_host->render_process_host()->GetID());
+          render_view_host->GetProcess()->GetID());
       view->SetInteger(
           "render_view_id",
-          ex_host->render_view_host()->GetRoutingID());
+          render_view_host->GetRoutingID());
       item->Set("view", view);
       std::string type;
-      switch (ex_host->extension_host_type()) {
+      switch (render_view_host->GetDelegate()->GetRenderViewType()) {
         case chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE:
           type = "EXTENSION_BACKGROUND_PAGE";
           break;
@@ -3020,8 +2956,8 @@ void TestingAutomationProvider::GetBrowserInfo(
           break;
       }
       item->SetString("view_type", type);
-      item->SetString("url", ex_host->GetURL().spec());
-      item->SetBoolean("loaded", ex_host->did_stop_loading());
+      item->SetString("url", render_view_host->GetDelegate()->GetURL().spec());
+      item->SetBoolean("loaded", !render_view_host->IsLoading());
       extension_views->Append(item);
     }
   }
@@ -3050,7 +2986,8 @@ void TestingAutomationProvider::GetProcessInfo(
     IPC::Message* reply_message) {
   scoped_refptr<ProcessInfoObserver>
       proc_observer(new ProcessInfoObserver(this, reply_message));
-  proc_observer->StartFetch();
+  // TODO(jamescook): Maybe this shouldn't update UMA stats?
+  proc_observer->StartFetch(MemoryDetails::UPDATE_USER_METRICS);
 }
 
 // Sample json input: { "command": "GetNavigationInfo" }
@@ -3282,6 +3219,13 @@ void TestingAutomationProvider::PerformActionOnDownload(
     return;
   }
 
+  // We need to be IN_PROGRESS for these actions.
+  if ((action == "toggle_pause" || action == "cancel") &&
+      !selected_item->IsInProgress()) {
+    AutomationJSONReply(this, reply_message)
+        .SendError("Selected DownloadItem is not in progress.");
+  }
+
   if (action == "open") {
     selected_item->AddObserver(
         new AutomationProviderDownloadUpdatedObserver(
@@ -3337,7 +3281,7 @@ void TestingAutomationProvider::LoadSearchEngineInfo(
     return;
   }
   url_model->AddObserver(new AutomationProviderSearchEngineObserver(
-      this, reply_message));
+      this, browser->profile(), reply_message));
   url_model->Load();
 }
 
@@ -3357,19 +3301,18 @@ void TestingAutomationProvider::GetSearchEngineInfo(
        template_urls.begin(); it != template_urls.end(); ++it) {
     DictionaryValue* search_engine = new DictionaryValue;
     search_engine->SetString("short_name", UTF16ToUTF8((*it)->short_name()));
-    search_engine->SetString("description", UTF16ToUTF8((*it)->description()));
     search_engine->SetString("keyword", UTF16ToUTF8((*it)->keyword()));
     search_engine->SetBoolean("in_default_list", (*it)->ShowInDefaultList());
     search_engine->SetBoolean("is_default",
         (*it) == url_model->GetDefaultSearchProvider());
-    search_engine->SetBoolean("is_valid", (*it)->url()->IsValid());
+    search_engine->SetBoolean("is_valid", (*it)->url_ref().IsValid());
     search_engine->SetBoolean("supports_replacement",
-                              (*it)->url()->SupportsReplacement());
-    search_engine->SetString("url", (*it)->url()->url());
-    search_engine->SetString("host", (*it)->url()->GetHost());
-    search_engine->SetString("path", (*it)->url()->GetPath());
+                              (*it)->url_ref().SupportsReplacement());
+    search_engine->SetString("url", (*it)->url());
+    search_engine->SetString("host", (*it)->url_ref().GetHost());
+    search_engine->SetString("path", (*it)->url_ref().GetPath());
     search_engine->SetString("display_url",
-                             UTF16ToUTF8((*it)->url()->DisplayURL()));
+                             UTF16ToUTF8((*it)->url_ref().DisplayURL()));
     search_engines->Append(search_engine);
   }
   return_value->Set("search_engines", search_engines);
@@ -3399,20 +3342,20 @@ void TestingAutomationProvider::AddOrEditSearchEngine(
   scoped_ptr<KeywordEditorController> controller(
       new KeywordEditorController(browser->profile()));
   if (args->GetString("keyword", &keyword)) {
-    const TemplateURL* template_url(
-        url_model->GetTemplateURLForKeyword(UTF8ToUTF16(keyword)));
+    TemplateURL* template_url =
+        url_model->GetTemplateURLForKeyword(UTF8ToUTF16(keyword));
     if (template_url == NULL) {
       AutomationJSONReply(this, reply_message).SendError(
           "No match for keyword: " + keyword);
       return;
     }
     url_model->AddObserver(new AutomationProviderSearchEngineObserver(
-        this, reply_message));
+        this, browser->profile(), reply_message));
     controller->ModifyTemplateURL(template_url, new_title, new_keyword,
                                   new_ref_url);
   } else {
     url_model->AddObserver(new AutomationProviderSearchEngineObserver(
-        this, reply_message));
+        this, browser->profile(), reply_message));
     controller->AddTemplateURL(new_title, new_keyword, new_ref_url);
   }
 }
@@ -3433,8 +3376,8 @@ void TestingAutomationProvider::PerformActionOnSearchEngine(
         "One or more inputs invalid");
     return;
   }
-  const TemplateURL* template_url(
-      url_model->GetTemplateURLForKeyword(UTF8ToUTF16(keyword)));
+  TemplateURL* template_url =
+      url_model->GetTemplateURLForKeyword(UTF8ToUTF16(keyword));
   if (template_url == NULL) {
     AutomationJSONReply(this, reply_message).SendError(
         "No match for keyword: " + keyword);
@@ -3442,11 +3385,11 @@ void TestingAutomationProvider::PerformActionOnSearchEngine(
   }
   if (action == "delete") {
     url_model->AddObserver(new AutomationProviderSearchEngineObserver(
-      this, reply_message));
+      this, browser->profile(), reply_message));
     url_model->Remove(template_url);
   } else if (action == "default") {
     url_model->AddObserver(new AutomationProviderSearchEngineObserver(
-      this, reply_message));
+      this, browser->profile(), reply_message));
     url_model->SetDefaultSearchProvider(template_url);
   } else {
     AutomationJSONReply(this, reply_message).SendError(
@@ -3454,6 +3397,7 @@ void TestingAutomationProvider::PerformActionOnSearchEngine(
   }
 }
 
+#if defined(ENABLE_PROTECTOR_SERVICE)
 // Sample json output: { "enabled": true,
 //                       "showing_change": false }
 void TestingAutomationProvider::GetProtectorState(
@@ -3498,6 +3442,7 @@ void TestingAutomationProvider::PerformProtectorAction(
     return reply.SendError("Invalid 'action' value");
   reply.SendSuccess(NULL);
 }
+#endif  // defined(ENABLE_PROTECTOR_SERVICE)
 
 // Sample json input: { "command": "GetLocalStatePrefsInfo" }
 // Refer chrome/test/pyautolib/prefs_info.py for sample json output.
@@ -3602,8 +3547,13 @@ void TestingAutomationProvider::GetOmniboxInfo(Browser* browser,
                                                DictionaryValue* args,
                                                IPC::Message* reply_message) {
   scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
+  AutomationJSONReply reply(this, reply_message);
 
   LocationBar* loc_bar = browser->window()->GetLocationBar();
+  if (!loc_bar) {
+    reply.SendError("The specified browser does not have a location bar.");
+    return;
+  }
   OmniboxView* omnibox_view = loc_bar->location_entry();
   AutocompleteEditModel* model = omnibox_view->model();
 
@@ -3632,7 +3582,7 @@ void TestingAutomationProvider::GetOmniboxInfo(Browser* browser,
   properties->SetString("text", omnibox_view->GetText());
   return_value->Set("properties", properties);
 
-  AutomationJSONReply(this, reply_message).SendSuccess(return_value.get());
+  reply.SendSuccess(return_value.get());
 }
 
 // Sample json input: { "command": "SetOmniboxText",
@@ -3648,6 +3598,10 @@ void TestingAutomationProvider::SetOmniboxText(Browser* browser,
   }
   browser->FocusLocationBar();
   LocationBar* loc_bar = browser->window()->GetLocationBar();
+  if (!loc_bar) {
+    reply.SendError("The specified browser does not have a location bar.");
+    return;
+  }
   OmniboxView* omnibox_view = loc_bar->location_entry();
   omnibox_view->model()->OnSetFocus(false);
   omnibox_view->SetUserText(text);
@@ -3669,6 +3623,10 @@ void TestingAutomationProvider::OmniboxMovePopupSelection(
     return;
   }
   LocationBar* loc_bar = browser->window()->GetLocationBar();
+  if (!loc_bar) {
+    reply.SendError("The specified browser does not have a location bar.");
+    return;
+  }
   AutocompleteEditModel* model = loc_bar->location_entry()->model();
   model->OnUpOrDownKeyPressed(count);
   reply.SendSuccess(NULL);
@@ -3681,8 +3639,14 @@ void TestingAutomationProvider::OmniboxAcceptInput(
     IPC::Message* reply_message) {
   NavigationController& controller =
       browser->GetSelectedWebContents()->GetController();
+  LocationBar* loc_bar = browser->window()->GetLocationBar();
+  if (!loc_bar) {
+    AutomationJSONReply(this, reply_message).SendError(
+        "The specified browser does not have a location bar.");
+    return;
+  }
   new OmniboxAcceptNotificationObserver(&controller, this, reply_message);
-  browser->window()->GetLocationBar()->AcceptInput();
+  loc_bar->AcceptInput();
 }
 
 // Sample json input: { "command": "GetInstantInfo" }
@@ -3791,16 +3755,19 @@ void TestingAutomationProvider::EnablePlugin(Browser* browser,
                                              DictionaryValue* args,
                                              IPC::Message* reply_message) {
   FilePath::StringType path;
-  AutomationJSONReply reply(this, reply_message);
   if (!args->GetString("path", &path)) {
-    reply.SendError("path not specified.");
-  } else if (!PluginPrefs::GetForProfile(browser->profile())->EnablePlugin(
-      true, FilePath(path))) {
-    reply.SendError(StringPrintf("Could not enable plugin for path %s.",
-                                 path.c_str()));
-  } else {
-    reply.SendSuccess(NULL);
+    AutomationJSONReply(this, reply_message).SendError("path not specified.");
+    return;
   }
+  PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(browser->profile());
+  if (!plugin_prefs->CanEnablePlugin(true, FilePath(path))) {
+    AutomationJSONReply(this, reply_message).SendError(
+        StringPrintf("Could not enable plugin for path %s.", path.c_str()));
+    return;
+  }
+  plugin_prefs->EnablePlugin(
+      true, FilePath(path),
+      base::Bind(SendSuccessReply, AsWeakPtr(), reply_message));
 }
 
 // Sample json input:
@@ -3810,16 +3777,19 @@ void TestingAutomationProvider::DisablePlugin(Browser* browser,
                                               DictionaryValue* args,
                                               IPC::Message* reply_message) {
   FilePath::StringType path;
-  AutomationJSONReply reply(this, reply_message);
   if (!args->GetString("path", &path)) {
-    reply.SendError("path not specified.");
-  } else if (!PluginPrefs::GetForProfile(browser->profile())->EnablePlugin(
-      false, FilePath(path))) {
-    reply.SendError(StringPrintf("Could not disable plugin for path %s.",
-                                 path.c_str()));
-  } else {
-    reply.SendSuccess(NULL);
+    AutomationJSONReply(this, reply_message).SendError("path not specified.");
+    return;
   }
+  PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(browser->profile());
+  if (!plugin_prefs->CanEnablePlugin(false, FilePath(path))) {
+    AutomationJSONReply(this, reply_message).SendError(
+        StringPrintf("Could not disable plugin for path %s.", path.c_str()));
+    return;
+  }
+  plugin_prefs->EnablePlugin(
+      false, FilePath(path),
+      base::Bind(SendSuccessReply, AsWeakPtr(), reply_message));
 }
 
 // Sample json input:
@@ -4166,7 +4136,7 @@ TabContentsWrapper* GetTabContentsWrapperFromDict(const Browser* browser,
   return tab_contents;
 }
 
-// Get the TranslateInfoBarDelegate from TabContents.
+// Get the TranslateInfoBarDelegate from WebContents.
 TranslateInfoBarDelegate* GetTranslateInfoBarDelegate(
     WebContents* web_contents) {
   InfoBarTabHelper* infobar_helper =
@@ -4466,6 +4436,12 @@ void TestingAutomationProvider::InstallExtension(
     DictionaryValue* args, IPC::Message* reply_message) {
   FilePath::StringType path_string;
   bool with_ui;
+  Browser* browser;
+  std::string error_msg;
+  if (!GetBrowserFromJSONArgs(args, &browser, &error_msg)) {
+    AutomationJSONReply(this, reply_message).SendError(error_msg);
+    return;
+  }
   if (!args->GetString("path", &path_string)) {
     AutomationJSONReply(this, reply_message).SendError(
         "Missing or invalid 'path'");
@@ -4476,8 +4452,9 @@ void TestingAutomationProvider::InstallExtension(
         "Missing or invalid 'with_ui'");
     return;
   }
-  ExtensionService* service = profile()->GetExtensionService();
-  ExtensionProcessManager* manager = profile()->GetExtensionProcessManager();
+  ExtensionService* service = browser->profile()->GetExtensionService();
+  ExtensionProcessManager* manager =
+      browser->profile()->GetExtensionProcessManager();
   if (service && manager) {
     // The observer will delete itself when done.
     new ExtensionReadyNotificationObserver(
@@ -4491,7 +4468,7 @@ void TestingAutomationProvider::InstallExtension(
     // and install it. Otherwise load it as an unpacked extension.
     if (extension_path.MatchesExtension(FILE_PATH_LITERAL(".crx"))) {
       ExtensionInstallUI* client =
-          (with_ui ? new ExtensionInstallUI(profile()) : NULL);
+          (with_ui ? new ExtensionInstallUI(browser->profile()) : NULL);
       scoped_refptr<CrxInstaller> installer(
           CrxInstaller::Create(service, client));
       if (!with_ui)
@@ -4548,7 +4525,13 @@ void TestingAutomationProvider::GetExtensionsInfo(
     DictionaryValue* args,
     IPC::Message* reply_message) {
   AutomationJSONReply reply(this, reply_message);
-  ExtensionService* service = profile()->GetExtensionService();
+  Browser* browser;
+  std::string error_msg;
+  if (!GetBrowserFromJSONArgs(args, &browser, &error_msg)) {
+    reply.SendError(error_msg);
+    return;
+  }
+  ExtensionService* service = browser->profile()->GetExtensionService();
   if (!service) {
     reply.SendError("No extensions service.");
     return;
@@ -4608,11 +4591,17 @@ void TestingAutomationProvider::UninstallExtensionById(
     IPC::Message* reply_message) {
   const Extension* extension;
   std::string error;
-  if (!GetExtensionFromJSONArgs(args, "id", profile(), &extension, &error)) {
+  Browser* browser;
+  if (!GetBrowserFromJSONArgs(args, &browser, &error)) {
     AutomationJSONReply(this, reply_message).SendError(error);
     return;
   }
-  ExtensionService* service = profile()->GetExtensionService();
+  if (!GetExtensionFromJSONArgs(
+          args, "id", browser->profile(), &extension, &error)) {
+    AutomationJSONReply(this, reply_message).SendError(error);
+    return;
+  }
+  ExtensionService* service = browser->profile()->GetExtensionService();
   if (!service) {
     AutomationJSONReply(this, reply_message).SendError(
         "No extensions service.");
@@ -4632,7 +4621,13 @@ void TestingAutomationProvider::SetExtensionStateById(
     IPC::Message* reply_message) {
   const Extension* extension;
   std::string error;
-  if (!GetExtensionFromJSONArgs(args, "id", profile(), &extension, &error)) {
+  Browser* browser;
+  if (!GetBrowserFromJSONArgs(args, &browser, &error)) {
+    AutomationJSONReply(this, reply_message).SendError(error);
+    return;
+  }
+  if (!GetExtensionFromJSONArgs(
+          args, "id", browser->profile(), &extension, &error)) {
     AutomationJSONReply(this, reply_message).SendError(error);
     return;
   }
@@ -4658,8 +4653,9 @@ void TestingAutomationProvider::SetExtensionStateById(
     return;
   }
 
-  ExtensionService* service = profile()->GetExtensionService();
-  ExtensionProcessManager* manager = profile()->GetExtensionProcessManager();
+  ExtensionService* service = browser->profile()->GetExtensionService();
+  ExtensionProcessManager* manager =
+      browser->profile()->GetExtensionProcessManager();
   if (!service) {
     AutomationJSONReply(this, reply_message)
         .SendError("No extensions service or process manager.");
@@ -4678,7 +4674,7 @@ void TestingAutomationProvider::SetExtensionStateById(
       AutomationJSONReply(this, reply_message).SendSuccess(NULL);
     }
   } else {
-    service->DisableExtension(extension->id());
+    service->DisableExtension(extension->id(), Extension::DISABLE_USER_ACTION);
     AutomationJSONReply(this, reply_message).SendSuccess(NULL);
   }
 
@@ -4712,7 +4708,7 @@ void TestingAutomationProvider::TriggerPageActionById(
   }
   const Extension* extension;
   if (!GetEnabledExtensionFromJSONArgs(
-          args, "id", profile(), &extension, &error)) {
+          args, "id", browser->profile(), &extension, &error)) {
     AutomationJSONReply(this, reply_message).SendError(error);
     return;
   }
@@ -4765,7 +4761,7 @@ void TestingAutomationProvider::TriggerBrowserActionById(
   }
   const Extension* extension;
   if (!GetEnabledExtensionFromJSONArgs(
-          args, "id", profile(), &extension, &error)) {
+          args, "id", browser->profile(), &extension, &error)) {
     AutomationJSONReply(this, reply_message).SendError(error);
     return;
   }
@@ -4816,16 +4812,61 @@ void TestingAutomationProvider::TriggerBrowserActionById(
   }
 }
 
+// Sample json input: { "command": "UpdateExtensionsNow" }
+// Sample json output: {}
+void TestingAutomationProvider::UpdateExtensionsNow(
+    DictionaryValue* args,
+    IPC::Message* reply_message) {
+  std::string error;
+  Browser* browser;
+  if (!GetBrowserFromJSONArgs(args, &browser, &error)) {
+    AutomationJSONReply(this, reply_message).SendError(error);
+    return;
+  }
+  ExtensionService* service = browser->profile()->GetExtensionService();
+  if (!service) {
+    AutomationJSONReply(this, reply_message).SendError(
+        "No extensions service.");
+    return;
+  }
+
+  extensions::ExtensionUpdater* updater = service->updater();
+  if (!updater) {
+    AutomationJSONReply(this, reply_message).SendError(
+        "No updater for extensions service.");
+    return;
+  }
+
+  ExtensionProcessManager* manager =
+      browser->profile()->GetExtensionProcessManager();
+  if (!manager) {
+    AutomationJSONReply(this, reply_message).SendError(
+        "No extension process manager.");
+    return;
+  }
+
+  // Create a new observer that waits until the extensions have been fully
+  // updated (we should not send the reply until after all extensions have
+  // been updated).  This observer will delete itself.
+  new ExtensionsUpdatedObserver(manager, this, reply_message);
+  updater->CheckNow();
+}
+
 #if !defined(NO_TCMALLOC) && (defined(OS_LINUX) || defined(OS_CHROMEOS))
-// Refer to HeapProfilerDump() in chrome/test/pyautolib/pyauto.py for
-// sample json input.
+// Sample json input: { "command": "HeapProfilerDump",
+//                      "process_type": "renderer",
+//                      "reason": "Perf bot",
+//                      "tab_index": 0,
+//                      "windex": 0 }
+// "auto_id" is acceptable instead of "tab_index" and "windex".
 void TestingAutomationProvider::HeapProfilerDump(
     DictionaryValue* args,
     IPC::Message* reply_message) {
   AutomationJSONReply reply(this, reply_message);
 
-  if (!::IsHeapProfilerRunning()) {
-    reply.SendError("The heap profiler is not running");
+  std::string process_type_string;
+  if (!args->GetString("process_type", &process_type_string)) {
+    reply.SendError("No process type is specified");
     return;
   }
 
@@ -4835,11 +4876,90 @@ void TestingAutomationProvider::HeapProfilerDump(
   else
     reason_string = "By PyAuto testing";
 
-  ::HeapProfilerDump(reason_string.c_str());
+  if (process_type_string == "browser") {
+    if (!::IsHeapProfilerRunning()) {
+      reply.SendError("The heap profiler is not running");
+      return;
+    }
+    ::HeapProfilerDump(reason_string.c_str());
+    reply.SendSuccess(NULL);
+    return;
+  } else if (process_type_string == "renderer") {
+    WebContents* web_contents;
+    std::string error;
 
-  reply.SendSuccess(NULL);
+    if (!GetTabFromJSONArgs(args, &web_contents, &error)) {
+      reply.SendError(error);
+      return;
+    }
+
+    RenderViewHost* render_view = web_contents->GetRenderViewHost();
+    if (!render_view) {
+      reply.SendError("Tab has no associated RenderViewHost");
+      return;
+    }
+
+    TabContentsWrapper* tab_contents =
+        TabContentsWrapper::GetCurrentWrapperForContents(web_contents);
+    tab_contents->automation_tab_helper()->HeapProfilerDump(reason_string);
+    reply.SendSuccess(NULL);
+    return;
+  }
+
+  reply.SendError("Process type is not supported");
 }
 #endif  // !defined(NO_TCMALLOC) && (defined(OS_LINUX) || defined(OS_CHROMEOS))
+
+namespace {
+
+void SendSuccessIfAlive(
+    base::WeakPtr<AutomationProvider> provider,
+    IPC::Message* reply_message) {
+  if (provider)
+    AutomationJSONReply(provider.get(), reply_message).SendSuccess(NULL);
+}
+
+}  // namespace
+
+void TestingAutomationProvider::OverrideGeoposition(
+    base::DictionaryValue* args,
+    IPC::Message* reply_message) {
+  double latitude, longitude, altitude;
+  if (!args->GetDouble("latitude", &latitude) ||
+      !args->GetDouble("longitude", &longitude) ||
+      !args->GetDouble("altitude", &altitude)) {
+    AutomationJSONReply(this, reply_message).SendError(
+        "Missing or invalid geolocation parameters");
+    return;
+  }
+  content::Geoposition position;
+  position.latitude = latitude;
+  position.longitude = longitude;
+  position.altitude = altitude;
+  position.accuracy = 0.;
+  position.timestamp = base::Time::Now();
+  content::OverrideLocationForTesting(
+      position,
+      base::Bind(&SendSuccessIfAlive, AsWeakPtr(), reply_message));
+}
+
+// Sample json input:
+// { "command": "AppendSwitchASCIIToCommandLine",
+//   "switch": "instant-field-trial",
+//   "value": "disabled" }
+void TestingAutomationProvider::AppendSwitchASCIIToCommandLine(
+         DictionaryValue* args, IPC::Message* reply_message) {
+  AutomationJSONReply reply(this, reply_message);
+  std::string switch_name, switch_value;
+  if (!args->GetString("switch", &switch_name) ||
+      !args->GetString("value", &switch_value)) {
+    reply.SendError("Missing or invalid command line switch");
+    return;
+  }
+  CommandLine::ForCurrentProcess()->AppendSwitchASCII(switch_name,
+                                                      switch_value);
+  reply.SendSuccess(NULL);
+}
 
 // Sample json input:
 //    { "command": "GetAutofillProfile" }
@@ -5572,40 +5692,6 @@ void TestingAutomationProvider::GetNTPInfo(
   new NTPInfoObserver(this, reply_message, &consumer_);
 }
 
-void TestingAutomationProvider::MoveNTPMostVisitedThumbnail(
-    Browser* browser,
-    DictionaryValue* args,
-    IPC::Message* reply_message) {
-  AutomationJSONReply reply(this, reply_message);
-  std::string url, error;
-  int index, old_index;
-  if (!args->GetString("url", &url)) {
-    reply.SendError("Missing or invalid 'url' key.");
-    return;
-  }
-  if (!args->GetInteger("index", &index)) {
-    reply.SendError("Missing or invalid 'index' key.");
-    return;
-  }
-  if (!args->GetInteger("old_index", &old_index)) {
-    reply.SendError("Missing or invalid 'old_index' key");
-    return;
-  }
-  history::TopSites* top_sites = browser->profile()->GetTopSites();
-  if (!top_sites) {
-    reply.SendError("TopSites service is not initialized.");
-    return;
-  }
-  GURL swapped;
-  // If thumbnail A is switching positions with a pinned thumbnail B, B
-  // should be pinned in the old index of A.
-  if (top_sites->GetPinnedURLAtIndex(index, &swapped)) {
-    top_sites->AddPinnedURL(swapped, old_index);
-  }
-  top_sites->AddPinnedURL(GURL(url), index);
-  reply.SendSuccess(NULL);
-}
-
 void TestingAutomationProvider::RemoveNTPMostVisitedThumbnail(
     Browser* browser,
     DictionaryValue* args,
@@ -5622,25 +5708,6 @@ void TestingAutomationProvider::RemoveNTPMostVisitedThumbnail(
     return;
   }
   top_sites->AddBlacklistedURL(GURL(url));
-  reply.SendSuccess(NULL);
-}
-
-void TestingAutomationProvider::UnpinNTPMostVisitedThumbnail(
-    Browser* browser,
-    DictionaryValue* args,
-    IPC::Message* reply_message) {
-  AutomationJSONReply reply(this, reply_message);
-  std::string url;
-  if (!args->GetString("url", &url)) {
-    reply.SendError("Missing or invalid 'url' key.");
-    return;
-  }
-  history::TopSites* top_sites = browser->profile()->GetTopSites();
-  if (!top_sites) {
-    reply.SendError("TopSites service is not initialized.");
-    return;
-  }
-  top_sites->RemovePinnedURL(GURL(url));
   reply.SendSuccess(NULL);
 }
 
@@ -5865,15 +5932,10 @@ void TestingAutomationProvider::SendOSLevelKeyEventToTab(
   if (!ui_controls::SendKeyPressNotifyWhenDone(
           window, static_cast<ui::KeyboardCode>(keycode),
           control, shift, alt, meta,
-          base::Bind(&TestingAutomationProvider::SendSuccessReply, this,
-                     reply_message))) {
+          base::Bind(SendSuccessReply, AsWeakPtr(), reply_message))) {
     AutomationJSONReply(this, reply_message)
         .SendError("Could not send the native key event");
   }
-}
-
-void TestingAutomationProvider::SendSuccessReply(IPC::Message* reply_message) {
-  AutomationJSONReply(this, reply_message).SendSuccess(NULL);
 }
 
 void TestingAutomationProvider::ProcessWebMouseEvent(
@@ -6179,6 +6241,101 @@ void TestingAutomationProvider::GetFPS(
   render_view->Send(new ChromeViewMsg_GetFPS(routing_id));
 }
 
+void TestingAutomationProvider::IsFullscreenForBrowser(Browser* browser,
+    base::DictionaryValue* args,
+    IPC::Message* reply_message) {
+  DictionaryValue dict;
+  dict.SetBoolean("result",
+                  browser->fullscreen_controller_->IsFullscreenForBrowser());
+  AutomationJSONReply(this, reply_message).SendSuccess(&dict);
+}
+
+void TestingAutomationProvider::IsFullscreenForTab(Browser* browser,
+    base::DictionaryValue* args,
+    IPC::Message* reply_message) {
+  DictionaryValue dict;
+  dict.SetBoolean("result", browser->IsFullscreenForTabOrPending());
+  AutomationJSONReply(this, reply_message).SendSuccess(&dict);
+}
+
+void TestingAutomationProvider::IsMouseLocked(Browser* browser,
+    base::DictionaryValue* args,
+    IPC::Message* reply_message) {
+  DictionaryValue dict;
+  dict.SetBoolean("result", browser->GetSelectedWebContents()->
+      GetRenderViewHost()->GetView()->IsMouseLocked());
+  AutomationJSONReply(this, reply_message).SendSuccess(&dict);
+}
+
+void TestingAutomationProvider::IsMouseLockPermissionRequested(
+    Browser* browser,
+    base::DictionaryValue* args,
+    IPC::Message* reply_message) {
+  FullscreenExitBubbleType type =
+      browser->fullscreen_controller_->GetFullscreenExitBubbleType();
+  bool mouse_lock = false;
+  fullscreen_bubble::PermissionRequestedByType(type, NULL, &mouse_lock);
+  DictionaryValue dict;
+  dict.SetBoolean("result", mouse_lock);
+  AutomationJSONReply(this, reply_message).SendSuccess(&dict);
+}
+
+void TestingAutomationProvider::IsFullscreenPermissionRequested(
+    Browser* browser,
+    base::DictionaryValue* args,
+    IPC::Message* reply_message) {
+  FullscreenExitBubbleType type =
+      browser->fullscreen_controller_->GetFullscreenExitBubbleType();
+  bool fullscreen = false;
+  fullscreen_bubble::PermissionRequestedByType(type, &fullscreen, NULL);
+  DictionaryValue dict;
+  dict.SetBoolean("result", fullscreen);
+  AutomationJSONReply(this, reply_message).SendSuccess(&dict);
+}
+
+void TestingAutomationProvider::IsFullscreenBubbleDisplayed(Browser* browser,
+    base::DictionaryValue* args,
+    IPC::Message* reply_message) {
+  FullscreenExitBubbleType type =
+      browser->fullscreen_controller_->GetFullscreenExitBubbleType();
+  DictionaryValue dict;
+  dict.SetBoolean("result",
+                  type != FEB_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION);
+  AutomationJSONReply(this, reply_message).SendSuccess(&dict);
+}
+
+void TestingAutomationProvider::IsFullscreenBubbleDisplayingButtons(
+    Browser* browser,
+    base::DictionaryValue* args,
+    IPC::Message* reply_message) {
+  FullscreenExitBubbleType type =
+      browser->fullscreen_controller_->GetFullscreenExitBubbleType();
+  DictionaryValue dict;
+  dict.SetBoolean("result", fullscreen_bubble::ShowButtonsForType(type));
+  AutomationJSONReply(this, reply_message).SendSuccess(&dict);
+}
+
+void TestingAutomationProvider::AcceptCurrentFullscreenOrMouseLockRequest(
+    Browser* browser,
+    base::DictionaryValue* args,
+    IPC::Message* reply_message) {
+  WebContents* fullscreen_tab = browser->GetSelectedWebContents();
+  FullscreenExitBubbleType type =
+      browser->fullscreen_controller_->GetFullscreenExitBubbleType();
+  browser->OnAcceptFullscreenPermission(fullscreen_tab->GetURL(), type);
+  AutomationJSONReply(this, reply_message).SendSuccess(NULL);
+}
+
+void TestingAutomationProvider::DenyCurrentFullscreenOrMouseLockRequest(
+    Browser* browser,
+    base::DictionaryValue* args,
+    IPC::Message* reply_message) {
+  FullscreenExitBubbleType type =
+      browser->fullscreen_controller_->GetFullscreenExitBubbleType();
+  browser->OnDenyFullscreenPermission(type);
+  AutomationJSONReply(this, reply_message).SendSuccess(NULL);
+}
+
 void TestingAutomationProvider::WaitForAllViewsToStopLoading(
     DictionaryValue* args,
     IPC::Message* reply_message) {
@@ -6190,68 +6347,6 @@ void TestingAutomationProvider::WaitForAllViewsToStopLoading(
   // This class will send the message immediately if no tab is loading.
   new AllViewsStoppedLoadingObserver(
       this, reply_message, profile()->GetExtensionProcessManager());
-}
-
-void TestingAutomationProvider::SetPolicies(
-    DictionaryValue* args,
-    IPC::Message* reply_message) {
-  scoped_ptr<AutomationJSONReply> reply(
-      new AutomationJSONReply(this, reply_message));
-
-#if !defined(ENABLE_CONFIGURATION_POLICY) || defined(OFFICIAL_BUILD)
-  reply->SendError("Configuration Policy disabled");
-#else
-  policy::BrowserPolicyConnector* connector =
-      g_browser_process->browser_policy_connector();
-  struct {
-    std::string name;
-    policy::ConfigurationPolicyProvider* provider;
-    policy::PolicyLevel level;
-  } providers[] = {
-    { "managed_cloud",
-      connector->GetManagedCloudProvider(),
-      policy::POLICY_LEVEL_MANDATORY },
-    { "managed_platform",
-      connector->GetManagedPlatformProvider(),
-      policy::POLICY_LEVEL_MANDATORY },
-    { "recommended_cloud",
-      connector->GetRecommendedCloudProvider(),
-      policy::POLICY_LEVEL_RECOMMENDED },
-    { "recommended_platform",
-      connector->GetRecommendedPlatformProvider(),
-      policy::POLICY_LEVEL_RECOMMENDED },
-  };
-  // Verify if all the requested providers exist before changing anything.
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(providers); ++i) {
-    DictionaryValue* policies = NULL;
-    if (args->GetDictionary(providers[i].name, &policies) &&
-        policies &&
-        !providers[i].provider) {
-      reply->SendError("Provider not available: " + providers[i].name);
-      return;
-    }
-  }
-  // TODO(joaodasilva): POLICY_SCOPE_USER is currently hardcoded, and the
-  // level is determined by the provider. Change this interface to support
-  // per-policy level and scope once the PolicyService is ready.
-  // http://crbug.com/110588
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(providers); ++i) {
-    DictionaryValue* policies = NULL;
-    if (args->GetDictionary(providers[i].name, &policies) && policies) {
-      policy::PolicyMap* map = new policy::PolicyMap;
-      map->LoadFrom(policies, providers[i].level, policy::POLICY_SCOPE_USER);
-      providers[i].provider->OverridePolicies(map);
-    }
-  }
-
-  // Make sure the policies are in effect before returning. This will go
-  // away once all platforms rely on directly installing the policy files and
-  // using RefreshPolicies, and SetPolicies is removed.
-  PolicyUpdatesObserver::PostCallbackAfterPolicyUpdates(
-      base::Bind(&AutomationJSONReply::SendSuccess,
-                 base::Owned(reply.release()),
-                 static_cast<const Value*>(NULL)));
-#endif  // defined(OFFICIAL_BUILD)
 }
 
 void TestingAutomationProvider::GetPolicyDefinitionList(
@@ -6300,10 +6395,18 @@ void TestingAutomationProvider::RefreshPolicies(
   AutomationJSONReply(this, reply_message).SendError(
       "Configuration Policy disabled");
 #else
-  policy::BrowserPolicyConnector* connector =
-      g_browser_process->browser_policy_connector();
-  new PolicyUpdatesObserver(this, reply_message, connector);
-  connector->RefreshPolicies();
+  // Some policies (e.g. URLBlacklist) post tasks to other message loops
+  // before they start enforcing updated policy values; make sure those tasks
+  // have finished after a policy update.
+  // Updates of the URLBlacklist are done on IO, after building the blacklist
+  // on FILE, which is initiated from IO.
+  base::Closure reply =
+      base::Bind(SendSuccessReply, AsWeakPtr(), reply_message);
+  g_browser_process->policy_service()->RefreshPolicies(
+      base::Bind(PostTask, BrowserThread::IO,
+          base::Bind(PostTask, BrowserThread::FILE,
+              base::Bind(PostTask, BrowserThread::IO,
+                  base::Bind(PostTask, BrowserThread::UI, reply)))));
 #endif
 }
 
@@ -6387,6 +6490,29 @@ void TestingAutomationProvider::NavigateToURL(
       content::PAGE_TRANSITION_TYPED, false));
 }
 
+void TestingAutomationProvider::WaitUntilNavigationCompletes(
+    DictionaryValue* args,
+    IPC::Message* reply_message) {
+  if (SendErrorIfModalDialogActive(this, reply_message))
+    return;
+
+  std::string error;
+  Browser* browser;
+  WebContents* web_contents;
+  if (!GetBrowserAndTabFromJSONArgs(args, &browser, &web_contents, &error)) {
+    AutomationJSONReply(this, reply_message).SendError(error);
+    return;
+  }
+  NavigationNotificationObserver* observer =
+      new NavigationNotificationObserver(&web_contents->GetController(), this,
+                                         reply_message, 1, true, true);
+  if (!web_contents->IsLoading()) {
+    AutomationJSONReply(this, reply_message).SendSuccess(NULL);
+    delete observer;
+    return;
+  }
+}
+
 void TestingAutomationProvider::ExecuteJavascriptJSON(
     DictionaryValue* args,
     IPC::Message* reply_message) {
@@ -6457,7 +6583,7 @@ void TestingAutomationProvider::ExecuteJavascriptInRenderView(
                                      rvh);
 }
 
-void TestingAutomationProvider::AddDomRaisedEventObserver(
+void TestingAutomationProvider::AddDomEventObserver(
     DictionaryValue* args,
     IPC::Message* reply_message) {
   if (SendErrorIfModalDialogActive(this, reply_message))
@@ -6484,10 +6610,8 @@ void TestingAutomationProvider::AddDomRaisedEventObserver(
     automation_event_queue_.reset(new AutomationEventQueue);
 
   int observer_id = automation_event_queue_->AddObserver(
-      new DomRaisedEventObserver(automation_event_queue_.get(),
-                                 event_name,
-                                 automation_id,
-                                 recurring));
+      new DomEventObserver(automation_event_queue_.get(), event_name,
+                           automation_id, recurring));
   scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
   return_value->SetInteger("observer_id", observer_id);
   reply.SendSuccess(return_value.get());
@@ -6704,16 +6828,19 @@ void TestingAutomationProvider::GetViews(
 
   ExtensionProcessManager* extension_mgr =
       profile()->GetExtensionProcessManager();
-  ExtensionProcessManager::const_iterator iter;
-  for (iter = extension_mgr->begin(); iter != extension_mgr->end();
-       ++iter) {
-    ExtensionHost* host = *iter;
+  const ExtensionProcessManager::ViewSet all_views =
+      extension_mgr->GetAllViews();
+  ExtensionProcessManager::ViewSet::const_iterator iter;
+  for (iter = all_views.begin(); iter != all_views.end(); ++iter) {
+    content::RenderViewHost* host = (*iter);
     AutomationId id = automation_util::GetIdForExtensionView(host);
     if (!id.is_valid())
       continue;
+    const Extension* extension =
+        extension_mgr->GetExtensionForRenderViewHost(host);
     DictionaryValue* dict = new DictionaryValue();
     dict->Set("auto_id", id.ToValue());
-    dict->SetString("extension_id", host->extension_id());
+    dict->SetString("extension_id", extension->id());
     view_list->Append(dict);
   }
   DictionaryValue dict;
@@ -6826,39 +6953,6 @@ void TestingAutomationProvider::ActivateTabJSON(
   reply.SendSuccess(NULL);
 }
 
-// Sample json input: { "command": "UpdateExtensionsNow" }
-// Sample json output: {}
-void TestingAutomationProvider::UpdateExtensionsNow(
-    DictionaryValue* args,
-    IPC::Message* reply_message) {
-  ExtensionService* service = profile()->GetExtensionService();
-  if (!service) {
-    AutomationJSONReply(this, reply_message).SendError(
-        "No extensions service.");
-    return;
-  }
-
-  extensions::ExtensionUpdater* updater = service->updater();
-  if (!updater) {
-    AutomationJSONReply(this, reply_message).SendError(
-        "No updater for extensions service.");
-    return;
-  }
-
-  ExtensionProcessManager* manager = profile()->GetExtensionProcessManager();
-  if (!manager) {
-    AutomationJSONReply(this, reply_message).SendError(
-        "No extension process manager.");
-    return;
-  }
-
-  // Create a new observer that waits until the extensions have been fully
-  // updated (we should not send the reply until after all extensions have
-  // been updated).  This observer will delete itself.
-  new ExtensionsUpdatedObserver(manager, this, reply_message);
-  updater->CheckNow();
-}
-
 void TestingAutomationProvider::IsPageActionVisible(
     base::DictionaryValue* args,
     IPC::Message* reply_message) {
@@ -6870,9 +6964,10 @@ void TestingAutomationProvider::IsPageActionVisible(
     reply.SendError(error);
     return;
   }
+  Browser* browser = automation_util::GetBrowserForTab(tab);
   const Extension* extension;
   if (!GetEnabledExtensionFromJSONArgs(
-          args, "extension_id", profile(), &extension, &error)) {
+          args, "extension_id", browser->profile(), &extension, &error)) {
     reply.SendError(error);
     return;
   }
@@ -6881,7 +6976,6 @@ void TestingAutomationProvider::IsPageActionVisible(
     reply.SendError("Extension doesn't have any page action");
     return;
   }
-  Browser* browser = automation_util::GetBrowserForTab(tab);
   if (!browser) {
     reply.SendError("Tab does not belong to an open browser");
     return;
@@ -7062,29 +7156,6 @@ void TestingAutomationProvider::GetParentBrowserOfTab(int tab_handle,
       *success = true;
     }
   }
-}
-
-// TODO(brettw) change this to accept GURLs when history supports it
-void TestingAutomationProvider::OnRedirectQueryComplete(
-    HistoryService::Handle request_handle,
-    GURL from_url,
-    bool success,
-    history::RedirectList* redirects) {
-  DCHECK_EQ(redirect_query_, request_handle);
-  DCHECK(reply_message_ != NULL);
-
-  std::vector<GURL> redirects_gurl;
-  reply_message_->WriteBool(success);
-  if (success) {
-    for (size_t i = 0; i < redirects->size(); i++)
-      redirects_gurl.push_back(redirects->at(i));
-  }
-
-  IPC::ParamTraits<std::vector<GURL> >::Write(reply_message_, redirects_gurl);
-
-  Send(reply_message_);
-  redirect_query_ = 0;
-  reply_message_ = NULL;
 }
 
 void TestingAutomationProvider::OnRemoveProvider() {

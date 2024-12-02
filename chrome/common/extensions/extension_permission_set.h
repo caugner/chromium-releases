@@ -100,7 +100,6 @@ class ExtensionAPIPermission {
     kBookmark,
     kBrowsingData,
     kChromeAuthPrivate,
-    kChromePrivate,
     kChromeosInfoPrivate,
     kClipboardRead,
     kClipboardWrite,
@@ -118,12 +117,12 @@ class ExtensionAPIPermission {
     kInput,
     kInputMethodPrivate,
     kKeybinding,
-    kManagedMode,
+    kManagedModePrivate,
     kManagement,
     kMediaPlayerPrivate,
     kMetricsPrivate,
     kNotification,
-    kOffersPrivate,
+    kEchoPrivate,
     kPageCapture,
     kPlugin,
     kPrivacy,
@@ -137,6 +136,7 @@ class ExtensionAPIPermission {
     kTts,
     kTtsEngine,
     kUnlimitedStorage,
+    kUsb,
     kWebNavigation,
     kWebRequest,
     kWebRequestBlocking,
@@ -197,15 +197,15 @@ class ExtensionAPIPermission {
   // Instances should only be constructed from within ExtensionPermissionsInfo.
   friend class ExtensionPermissionsInfo;
 
-  // Register ALL the permissions!
-  static void RegisterAllPermissions(ExtensionPermissionsInfo* info);
-
   explicit ExtensionAPIPermission(
       ID id,
       const char* name,
       int l10n_message_id,
       ExtensionPermissionMessage::ID message_id,
       int flags);
+
+  // Register ALL the permissions!
+  static void RegisterAllPermissions(ExtensionPermissionsInfo* info);
 
   ID id_;
   const char* name_;
@@ -273,6 +273,8 @@ class ExtensionPermissionsInfo {
   DISALLOW_COPY_AND_ASSIGN(ExtensionPermissionsInfo);
 };
 
+typedef std::set<std::string> ExtensionOAuth2Scopes;
+
 // The ExtensionPermissionSet is an immutable class that encapsulates an
 // extension's permissions. The class exposes set operations for combining and
 // manipulating the permissions.
@@ -288,14 +290,23 @@ class ExtensionPermissionSet
   // manifest, |apis| and |hosts|.
   ExtensionPermissionSet(const Extension* extension,
                          const ExtensionAPIPermissionSet& apis,
-                         const URLPatternSet& explicit_hosts);
+                         const URLPatternSet& explicit_hosts,
+                         const ExtensionOAuth2Scopes& scopes);
+
 
   // Creates a new permission set based on the specified data.
   ExtensionPermissionSet(const ExtensionAPIPermissionSet& apis,
                          const URLPatternSet& explicit_hosts,
                          const URLPatternSet& scriptable_hosts);
 
-  ~ExtensionPermissionSet();
+  // Creates a new permission set that has oauth scopes in it.
+  ExtensionPermissionSet(const ExtensionAPIPermissionSet& apis,
+                         const URLPatternSet& explicit_hosts,
+                         const URLPatternSet& scriptable_hosts,
+                         const ExtensionOAuth2Scopes& scopes);
+
+  // Creates a new permission set containing only oauth scopes.
+  explicit ExtensionPermissionSet(const ExtensionOAuth2Scopes& scopes);
 
   // Creates a new permission set equal to |set1| - |set2|, passing ownership of
   // the new set to the caller.
@@ -383,11 +394,14 @@ class ExtensionPermissionSet
 
   const URLPatternSet& scriptable_hosts() const { return scriptable_hosts_; }
 
+  const ExtensionOAuth2Scopes& scopes() const { return scopes_; }
+
  private:
   FRIEND_TEST_ALL_PREFIXES(ExtensionPermissionsTest,
                            HasLessHostPrivilegesThan);
-
   friend class base::RefCountedThreadSafe<ExtensionPermissionSet>;
+
+  ~ExtensionPermissionSet();
 
   static std::set<std::string> GetDistinctHosts(
       const URLPatternSet& host_patterns,
@@ -413,6 +427,9 @@ class ExtensionPermissionSet
   bool HasLessHostPrivilegesThan(
       const ExtensionPermissionSet* permissions) const;
 
+  // Returns true if |permissions| has more oauth2 scopes compared to this set.
+  bool HasLessScopesThan(const ExtensionPermissionSet* permissions) const;
+
   // The api list is used when deciding if an extension can access certain
   // extension APIs and features.
   ExtensionAPIPermissionSet apis_;
@@ -427,6 +444,10 @@ class ExtensionPermissionSet
 
   // The list of hosts this effectively grants access to.
   URLPatternSet effective_hosts_;
+
+  // A set of oauth2 scopes that are used by the identity API to create OAuth2
+  // tokens for accessing the Google Account of the signed-in sync account.
+  ExtensionOAuth2Scopes scopes_;
 };
 
 #endif  // CHROME_COMMON_EXTENSIONS_EXTENSION_PERMISSION_SET_H_

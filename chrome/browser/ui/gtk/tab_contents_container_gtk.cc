@@ -163,7 +163,7 @@ void TabContentsContainerGtk::HideTab(TabContentsWrapper* tab) {
 void TabContentsContainerGtk::DetachTab(TabContentsWrapper* tab) {
   gfx::NativeView widget = tab->web_contents()->GetNativeView();
 
-  // It is possible to detach an unrealized, unparented TabContents if you
+  // It is possible to detach an unrealized, unparented WebContents if you
   // slow things down enough in valgrind. Might happen in the real world, too.
   if (widget) {
     GtkWidget* parent = gtk_widget_get_parent(widget);
@@ -212,10 +212,8 @@ gboolean TabContentsContainerGtk::OnFocus(GtkWidget* widget,
 // ViewIDUtil::Delegate implementation
 
 GtkWidget* TabContentsContainerGtk::GetWidgetForViewID(ViewID view_id) {
-  if (view_id == VIEW_ID_TAB_CONTAINER ||
-      view_id == VIEW_ID_TAB_CONTAINER_FOCUS_VIEW) {
+  if (view_id == VIEW_ID_TAB_CONTAINER)
     return widget();
-  }
 
   return NULL;
 }

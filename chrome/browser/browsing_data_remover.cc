@@ -16,6 +16,7 @@
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browsing_data_helper.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -239,11 +240,13 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
         tab_service->DeleteLastSession();
       }
 
+#if defined(ENABLE_SESSION_SERVICE)
       // We also delete the last session when we delete the history.
       SessionService* session_service =
           SessionServiceFactory::GetForProfile(profile_);
       if (session_service)
         session_service->DeleteLastSession();
+#endif
     }
   }
 
@@ -322,10 +325,8 @@ void BrowsingDataRemover::RemoveImpl(int remove_mask,
     content::RecordAction(UserMetricsAction("ClearBrowsingData_LSOData"));
 
     waiting_for_clear_plugin_data_ = true;
-    if (!plugin_data_remover_.get()) {
-      plugin_data_remover_.reset(
-          content::PluginDataRemover::Create(profile_->GetResourceContext()));
-    }
+    if (!plugin_data_remover_.get())
+      plugin_data_remover_.reset(content::PluginDataRemover::Create(profile_));
     base::WaitableEvent* event =
         plugin_data_remover_->StartRemoving(delete_begin_);
     watcher_.StartWatching(event, this);
@@ -614,6 +615,8 @@ void BrowsingDataRemover::OnGotQuotaManagedOrigins(
   // isn't protected.
   std::set<GURL>::const_iterator origin;
   for (origin = origins.begin(); origin != origins.end(); ++origin) {
+    if (!BrowsingDataHelper::IsValidScheme(origin->scheme()))
+      continue;
     if (special_storage_policy_->IsStorageProtected(origin->GetOrigin()))
       continue;
     if (!remove_origin_.is_empty() && remove_origin_ != origin->GetOrigin())

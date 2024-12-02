@@ -90,7 +90,7 @@ class BasePerfTest(pyauto.PyUITest):
     # TODO(dennisjeffrey): Implement wait for idle CPU on Windows/Mac.
     if self.IsLinux():  # IsLinux() also implies IsChromeOS().
       os.system('sync')
-      self._WaitForIdleCPU(60.0, 0.03)
+      self._WaitForIdleCPU(60.0, 0.05)
 
   def _WaitForIdleCPU(self, timeout, utilization):
     """Waits for the CPU to become idle (< utilization).
@@ -180,14 +180,8 @@ class BasePerfTest(pyauto.PyUITest):
         std_dev = math.sqrt(sum(temp_vals) / (len(temp_vals) - 1))
     return avg, std_dev
 
-  # TODO(dennisjeffrey): For all long-running perf results (lists of (x, y)
-  # tuples), make them incremental such that we always add the new tuples to
-  # the previous result, not just completely replace the previous result.  This
-  # change will reduce the total stdio output size of the perf tests.  Once this
-  # change is made, get rid of the |incremental_tuple| parameter in this
-  # function.
-  def _OutputDataForStandaloneGraphing(self, graph_name, description, value,
-                                       units, units_x, incremental_tuple=False):
+  def _OutputPerfForStandaloneGraphing(self, graph_name, description, value,
+                                       units, units_x):
     """Outputs perf measurement data to a local folder to be graphed.
 
     This function only applies to Chrome desktop, and assumes that environment
@@ -211,18 +205,23 @@ class BasePerfTest(pyauto.PyUITest):
           with the performance measurements, such as 'iteration' if the x values
           are iteration numbers.  If this argument is specified, then the
           |value| argument must be a list of (x, y) tuples.
-      incremental_tuple: A boolean indicating whether or not long-running
-          performance measurements in |value| are incremental or not.  If the
-          measurements are incremental, they are appended to existing
-          measurements already stored in data files.  If the measurements are
-          not incremental, they replace any existing measurements in the data
-          files.
     """
+    revision_num_file = os.path.join(self._local_perf_dir, 'last_revision.dat')
+    if os.path.exists(revision_num_file):
+      with open(revision_num_file) as f:
+        revision = int(f.read())
+    else:
+      revision = 0
+
+    if not self._seen_graph_lines:
+      # We're about to output data for a new test run.
+      revision += 1
+
     # Update graphs.dat.
     existing_graphs = []
     graphs_file = os.path.join(self._local_perf_dir, 'graphs.dat')
     if os.path.exists(graphs_file):
-      with open(graphs_file, 'r') as f:
+      with open(graphs_file) as f:
         existing_graphs = simplejson.loads(f.read())
     is_new_graph = True
     for graph in existing_graphs:
@@ -243,25 +242,23 @@ class BasePerfTest(pyauto.PyUITest):
       os.chmod(graphs_file, 0755)
 
     # Update data file for this particular graph.
-    data_file_name = graph_name + '-summary.dat'
     existing_lines = []
-    data_file = os.path.join(self._local_perf_dir, data_file_name)
+    data_file = os.path.join(self._local_perf_dir, graph_name + '-summary.dat')
     if os.path.exists(data_file):
-      with open(data_file, 'r') as f:
+      with open(data_file) as f:
         existing_lines = f.readlines()
-    existing_lines = map(lambda x: x.strip(), existing_lines)
+    existing_lines = map(eval, map(lambda x: x.strip(), existing_lines))
 
     seen_key = graph_name + '|' + description
     if units_x:
       points = []
-      if incremental_tuple:
-        if seen_key in self._seen_graph_lines:
-          # We've added points previously for this graph line in the current
-          # test execution, so retrieve the original set of points specified in
-          # the most recent revision in the data file.
-          points = eval(existing_lines[0])['traces'][description]
-      for point in value:
-        points.append([str(point[0]), str(point[1])])
+      if seen_key in self._seen_graph_lines:
+        # We've added points previously for this graph line in the current
+        # test execution, so retrieve the original set of points specified in
+        # the most recent revision in the data file.
+        points = existing_lines[0]['traces'][description]
+      for x_value, y_value in value:
+        points.append([str(x_value), str(y_value)])
       new_traces = {
         description: points
       }
@@ -269,17 +266,14 @@ class BasePerfTest(pyauto.PyUITest):
       new_traces = {
         description: [str(value), str(0.0)]
       }
-    revision = 1
-    if existing_lines:
-      revision = int(eval(existing_lines[0])['rev']) + 1
+
     new_line = {
-      'traces': new_traces,
-      'rev': revision
+      'rev': revision,
+      'traces': new_traces
     }
 
     if seen_key in self._seen_graph_lines:
       # Update results for the most recent revision.
-      new_line['rev'] = int(eval(existing_lines[0])['rev'])
       existing_lines[0] = new_line
     else:
       # New results for a new revision.
@@ -291,11 +285,11 @@ class BasePerfTest(pyauto.PyUITest):
       f.write('\n'.join(existing_lines))
     os.chmod(data_file, 0755)
 
-  # TODO(dennisjeffrey): Remove the |standalone_graphing_only| parameter once
-  # its use in perf_endure.py is no longer needed.
+    with open(revision_num_file, 'w') as f:
+      f.write(str(revision))
+
   def _OutputPerfGraphValue(self, description, value, units,
-                            graph_name='Default-Graph', units_x=None,
-                            standalone_graphing_only=False):
+                            graph_name, units_x=None):
     """Outputs a performance value to have it graphed on the performance bots.
 
     The output format differs, depending on whether the current platform is
@@ -326,8 +320,6 @@ class BasePerfTest(pyauto.PyUITest):
           with the performance measurements, such as 'iteration' if the x values
           are iteration numbers.  If this argument is specified, then the
           |value| argument must be a list of (x, y) tuples.
-      standalone_graphing_only: A boolean indicating whether or not we should
-          only output data for standalone graphing.
     """
     if isinstance(value, list):
       assert units_x
@@ -353,28 +345,116 @@ class BasePerfTest(pyauto.PyUITest):
                                         self._PERF_OUTPUT_MARKER_POST)
         sys.stdout.flush()
     else:
-      if not standalone_graphing_only:
-        if units_x:
-          # TODO(dennisjeffrey): Once changes to the Chrome graphing
-          # infrastructure are committed to support graphs for long-running perf
-          # tests (crosbug.com/21881), revise the output format in the following
-          # line if necessary.
-          pyauto_utils.PrintPerfResult(graph_name, description, value,
-                                       units + ' ' + units_x)
-        else:
-          pyauto_utils.PrintPerfResult(graph_name, description, value, units)
+      if units_x:
+        pyauto_utils.PrintPerfResult(graph_name, description, value,
+                                     units + ' ' + units_x)
+      else:
+        pyauto_utils.PrintPerfResult(graph_name, description, value, units)
 
       if self._local_perf_dir:
-        if 'Latency' in description:  # TODO(dennisjeffrey): Remove this hack.
-          self._OutputDataForStandaloneGraphing(
-              graph_name, description, value, units, units_x,
-              incremental_tuple=True)
-        else:
-          self._OutputDataForStandaloneGraphing(
-              graph_name, description, value, units, units_x)
+        self._OutputPerfForStandaloneGraphing(
+            graph_name, description, value, units, units_x)
 
-  def _PrintSummaryResults(self, description, values, units,
-                           graph_name='Default-Graph'):
+  def _OutputEventForStandaloneGraphing(self, description, event_list):
+    """Outputs event information to a local folder to be graphed.
+
+    See function _OutputEventGraphValue below for a description of an event.
+
+    This function only applies to Chrome Endure tests running on Chrome desktop,
+    and assumes that environment variable 'LOCAL_PERF_DIR' has been specified
+    and refers to a valid directory on the local machine.
+
+    Args:
+      description: A string description of the event.  Should not include
+          spaces.
+      event_list: A list of (x, y) tuples representing one or more events
+          occurring during an endurance test, where 'x' is the time of the event
+          (in seconds since the start of the test), and 'y' is a dictionary
+          representing relevant data associated with that event (as key/value
+          pairs).
+    """
+    revision_num_file = os.path.join(self._local_perf_dir, 'last_revision.dat')
+    if os.path.exists(revision_num_file):
+      with open(revision_num_file) as f:
+        revision = int(f.read())
+    else:
+      revision = 0
+
+    if not self._seen_graph_lines:
+      # We're about to output data for a new test run.
+      revision += 1
+
+    existing_lines = []
+    data_file = os.path.join(self._local_perf_dir, '_EVENT_-summary.dat')
+    if os.path.exists(data_file):
+      with open(data_file) as f:
+        existing_lines = f.readlines()
+    existing_lines = map(eval, map(lambda x: x.strip(), existing_lines))
+
+    seen_event_type = description
+    value_list = []
+    if seen_event_type in self._seen_graph_lines:
+      # We've added events previously for this event type in the current
+      # test execution, so retrieve the original set of values specified in
+      # the most recent revision in the data file.
+      value_list = existing_lines[0]['events'][description]
+    for event_time, event_data in event_list:
+      value_list.append([str(event_time), event_data])
+    new_events = {
+      description: value_list
+    }
+
+    new_line = {
+      'rev': revision,
+      'events': new_events
+    }
+
+    if seen_event_type in self._seen_graph_lines:
+      # Update results for the most recent revision.
+      existing_lines[0] = new_line
+    else:
+      # New results for a new revision.
+      existing_lines.insert(0, new_line)
+      self._seen_graph_lines[seen_event_type] = True
+
+    existing_lines = map(str, existing_lines)
+    with open(data_file, 'w') as f:
+      f.write('\n'.join(existing_lines))
+    os.chmod(data_file, 0755)
+
+    with open(revision_num_file, 'w') as f:
+      f.write(str(revision))
+
+  def _OutputEventGraphValue(self, description, event_list):
+    """Outputs a set of events to have them graphed on the Chrome Endure bots.
+
+    An "event" can be anything recorded by a performance test that occurs at
+    particular times during a test execution.  For example, a garbage collection
+    in the v8 heap can be considered an event.  An event is distinguished from a
+    regular perf measurement in two ways: (1) an event is depicted differently
+    in the performance graphs than performance measurements; (2) an event can
+    be associated with zero or more data fields describing relevant information
+    associated with the event.  For example, a garbage collection event will
+    occur at a particular time, and it may be associated with data such as
+    the number of collected bytes and/or the length of time it took to perform
+    the garbage collection.
+
+    This function only applies to Chrome Endure tests running on Chrome desktop.
+
+    Args:
+      description: A string description of the event.  Should not include
+          spaces.
+      event_list: A list of (x, y) tuples representing one or more events
+          occurring during an endurance test, where 'x' is the time of the event
+          (in seconds since the start of the test), and 'y' is a dictionary
+          representing relevant data associated with that event (as key/value
+          pairs).
+    """
+    pyauto_utils.PrintPerfResult('_EVENT_', description, event_list, '')
+    if self._local_perf_dir:
+      self._OutputEventForStandaloneGraphing(description, event_list)
+
+  def _PrintSummaryResults(self, description, values, units, graph_name):
     """Logs summary measurement information.
 
     This function computes and outputs the average and standard deviation of
@@ -394,11 +474,12 @@ class BasePerfTest(pyauto.PyUITest):
       avg, std_dev = self._AvgAndStdDev(values)
       logging.info('  Average: %f %s', avg, units)
       logging.info('  Std dev: %f %s', std_dev, units)
-      self._OutputPerfGraphValue(description, avg, units, graph_name=graph_name)
+      self._OutputPerfGraphValue(description, avg, units, graph_name)
     else:
       logging.info('No results to report.')
 
-  def _RunNewTabTest(self, description, open_tab_command, num_tabs=1):
+  def _RunNewTabTest(self, description, open_tab_command, graph_name,
+                     num_tabs=1):
     """Runs a perf test that involves opening new tab(s).
 
     This helper function can be called from different tests to do perf testing
@@ -408,6 +489,8 @@ class BasePerfTest(pyauto.PyUITest):
     Args:
       description: A string description of the associated tab test.
       open_tab_command: A callable that will open a single tab.
+      graph_name: A string name for the performance graph associated with this
+          test.  Only used on Chrome desktop.
       num_tabs: The number of tabs to open, i.e., the number of times to invoke
           the |open_tab_command|.
     """
@@ -432,8 +515,7 @@ class BasePerfTest(pyauto.PyUITest):
       for _ in range(num_tabs):
         self.GetBrowserWindow(0).GetTab(1).Close(True)
 
-    self._PrintSummaryResults(description, timings, 'milliseconds',
-                              description)
+    self._PrintSummaryResults(description, timings, 'milliseconds', graph_name)
 
   def _LoginToGoogleAccount(self, account_key='test_google_account'):
     """Logs in to a test Google account.
@@ -463,7 +545,7 @@ class BasePerfTest(pyauto.PyUITest):
       }
     """
     try:
-      f = open('/proc/stat', 'r')
+      f = open('/proc/stat')
       cpu_usage_str = f.readline().split()
       f.close()
     except IOError, e:
@@ -492,6 +574,17 @@ class BasePerfTest(pyauto.PyUITest):
     return ((float(time_non_idling_end) - time_non_idling_start) /
             (total_time_end - total_time_start))
 
+  def ExtraChromeFlags(self):
+    """Ensures Chrome is launched with custom flags.
+
+    Returns:
+      A list of extra flags to pass to Chrome when it is launched.
+    """
+    flags = super(BasePerfTest, self).ExtraChromeFlags()
+    if 'USE_PGO' in os.environ:
+      flags = flags + ['--renderer-clean-exit', '--no-sandbox']
+    return flags
+
 
 class TabPerfTest(BasePerfTest):
   """Tests that involve opening tabs."""
@@ -499,7 +592,7 @@ class TabPerfTest(BasePerfTest):
   def testNewTab(self):
     """Measures time to open a new tab."""
     self._RunNewTabTest('NewTabPage',
-                        lambda: self._AppendTab('chrome://newtab'))
+                        lambda: self._AppendTab('chrome://newtab'), 'open_tab')
 
   def testNewTabPdf(self):
     """Measures time to open a new tab navigated to a PDF file."""
@@ -508,7 +601,8 @@ class TabPerfTest(BasePerfTest):
                                     'TechCrunch.pdf')),
         msg='Missing required PDF data file.')
     url = self.GetFileURLForDataPath('pyauto_private', 'pdf', 'TechCrunch.pdf')
-    self._RunNewTabTest('NewTabPdfPage', lambda: self._AppendTab(url))
+    self._RunNewTabTest('NewTabPdfPage', lambda: self._AppendTab(url),
+                        'open_tab')
 
   def testNewTabFlash(self):
     """Measures time to open a new tab navigated to a flash page."""
@@ -516,12 +610,14 @@ class TabPerfTest(BasePerfTest):
         os.path.exists(os.path.join(self.DataDir(), 'plugin', 'flash.swf')),
         msg='Missing required flash data file.')
     url = self.GetFileURLForDataPath('plugin', 'flash.swf')
-    self._RunNewTabTest('NewTabFlashPage', lambda: self._AppendTab(url))
+    self._RunNewTabTest('NewTabFlashPage', lambda: self._AppendTab(url),
+                        'open_tab')
 
   def test20Tabs(self):
     """Measures time to open 20 tabs."""
     self._RunNewTabTest('20TabsNewTabPage',
-                        lambda: self._AppendTab('chrome://newtab'), num_tabs=20)
+                        lambda: self._AppendTab('chrome://newtab'),
+                        'open_20_tabs', num_tabs=20)
 
 
 class BenchmarkPerfTest(BasePerfTest):
@@ -575,10 +671,10 @@ class BenchmarkPerfTest(BasePerfTest):
     for key, val in timings.items():
       if key == 'final_score':
         self._PrintSummaryResults('V8Benchmark', val, 'score',
-                                  'V8Benchmark-final')
+                                  'v8_benchmark_final')
       else:
         self._PrintSummaryResults('V8Benchmark-%s' % key, val, 'score',
-                                  'V8Benchmark-individual')
+                                  'v8_benchmark_individual')
 
   def testSunSpider(self):
     """Runs the SunSpider javascript benchmark suite."""
@@ -607,7 +703,7 @@ class BenchmarkPerfTest(BasePerfTest):
     total = re.search('Total:\s*([\d.]+)ms', results).group(1)
     logging.info('Total: %f ms', float(total))
     self._OutputPerfGraphValue('SunSpider-total', float(total), 'ms',
-                               graph_name='SunSpider-total')
+                               'sunspider_total')
 
     for match_category in re.finditer('\s\s(\w+):\s*([\d.]+)ms.+?<br><br>',
                                       results):
@@ -617,7 +713,7 @@ class BenchmarkPerfTest(BasePerfTest):
                    float(category_result))
       self._OutputPerfGraphValue('SunSpider-' + category_name,
                                  float(category_result), 'ms',
-                                 graph_name='SunSpider-individual')
+                                 'sunspider_individual')
 
       for match_result in re.finditer('<br>\s\s\s\s([\w-]+):\s*([\d.]+)ms',
                                       match_category.group(0)):
@@ -627,8 +723,7 @@ class BenchmarkPerfTest(BasePerfTest):
                      float(result_value))
         self._OutputPerfGraphValue(
             'SunSpider-%s-%s' % (category_name, result_name),
-            float(result_value), 'ms',
-            graph_name='SunSpider-individual')
+            float(result_value), 'ms', 'sunspider_individual')
 
   def testDromaeoSuite(self):
     """Measures results from Dromaeo benchmark suite."""
@@ -685,17 +780,14 @@ class BenchmarkPerfTest(BasePerfTest):
     results = eval(self.ExecuteJavascript(js_get_results, tab_index=1))
     total_result = results['total_result']
     logging.info('Total result: ' + total_result)
-    self._OutputPerfGraphValue(
-        'Dromaeo-total',
-        float(total_result), 'runsPerSec',
-        graph_name='Dromaeo-total')
+    self._OutputPerfGraphValue('Dromaeo-total', float(total_result),
+                               'runsPerSec', 'dromaeo_total')
 
     for group_name, group in results['all_results'].iteritems():
       logging.info('Benchmark "%s": %s', group_name, group['result'])
-      self._OutputPerfGraphValue(
-          'Dromaeo-' + group_name.replace(' ', ''),
-          float(group['result']), 'runsPerSec',
-          graph_name='Dromaeo-individual')
+      self._OutputPerfGraphValue('Dromaeo-' + group_name.replace(' ', ''),
+                                 float(group['result']), 'runsPerSec',
+                                 'dromaeo_individual')
       for benchmark_name, benchmark_score in group['sub_groups'].iteritems():
         logging.info('  Result "%s": %s', benchmark_name, benchmark_score)
 
@@ -736,7 +828,8 @@ class LiveWebappLoadTest(BasePerfTest):
                       msg='Timed out waiting for expected Gmail string.')
 
     self._LoginToGoogleAccount()
-    self._RunNewTabTest('NewTabGmail', _RunSingleGmailTabOpen)
+    self._RunNewTabTest('NewTabGmail', _RunSingleGmailTabOpen,
+                        'open_tab_live_webapp')
 
   def testNewTabCalendar(self):
     """Measures time to open a tab to a logged-in Calendar account.
@@ -764,7 +857,8 @@ class LiveWebappLoadTest(BasePerfTest):
                       msg='Timed out waiting for expected Calendar string.')
 
     self._LoginToGoogleAccount()
-    self._RunNewTabTest('NewTabCalendar', _RunSingleCalendarTabOpen)
+    self._RunNewTabTest('NewTabCalendar', _RunSingleCalendarTabOpen,
+                        'open_tab_live_webapp')
 
   def testNewTabDocs(self):
     """Measures time to open a tab to a logged-in Docs account.
@@ -792,7 +886,8 @@ class LiveWebappLoadTest(BasePerfTest):
                       msg='Timed out waiting for expected Docs string.')
 
     self._LoginToGoogleAccount()
-    self._RunNewTabTest('NewTabDocs', _RunSingleDocsTabOpen)
+    self._RunNewTabTest('NewTabDocs', _RunSingleDocsTabOpen,
+                        'open_tab_live_webapp')
 
 
 class NetflixPerfTest(BasePerfTest, NetflixTestHelper):
@@ -803,14 +898,14 @@ class NetflixPerfTest(BasePerfTest, NetflixTestHelper):
     NetflixTestHelper.__init__(self, self)
 
   def tearDown(self):
-    self._SignOut()
-    pyauto.PyUITest.tearDown(self) 
+    self.SignOut()
+    pyauto.PyUITest.tearDown(self)
 
   def testNetflixDroppedFrames(self):
     """Measures the Netflix video dropped frames/second. Runs for 60 secs."""
-    self._LoginAndStartPlaying()
-    self._CheckNetflixPlaying(self.IS_PLAYING,
-                              'Player did not start playing the title.')
+    self.LoginAndStartPlaying()
+    self.CheckNetflixPlaying(self.IS_PLAYING,
+                             'Player did not start playing the title.')
     # Ignore first 10 seconds of video playing so we get smooth videoplayback.
     time.sleep(10)
     init_dropped_frames = self._GetVideoDroppedFrames()
@@ -826,13 +921,14 @@ class NetflixPerfTest(BasePerfTest, NetflixTestHelper):
       prev_dropped_frames = total_dropped_frames
       # Play the video for some time.
       time.sleep(1)
-    self._PrintSummaryResults('NetflixDroppedFrames', dropped_frames, 'frames')
+    self._PrintSummaryResults('NetflixDroppedFrames', dropped_frames, 'frames',
+                              'netflix_dropped_frames')
 
   def testNetflixCPU(self):
     """Measures the Netflix video CPU usage. Runs for 60 seconds."""
-    self._LoginAndStartPlaying()
-    self._CheckNetflixPlaying(self.IS_PLAYING,
-                              'Player did not start playing the title.')
+    self.LoginAndStartPlaying()
+    self.CheckNetflixPlaying(self.IS_PLAYING,
+                             'Player did not start playing the title.')
     # Ignore first 10 seconds of video playing so we get smooth videoplayback.
     time.sleep(10)
     init_dropped_frames = self._GetVideoDroppedFrames()
@@ -850,10 +946,8 @@ class NetflixPerfTest(BasePerfTest, NetflixTestHelper):
     extrapolation_value = fraction_non_idle_time * \
         (float(total_video_frames) + total_dropped_frames) / total_video_frames
     logging.info('Netflix CPU extrapolation: %f', extrapolation_value)
-    self._OutputPerfGraphValue(
-        'NetflixCPUExtrapolation',
-        extrapolation_value, 'extrapolation',
-        graph_name='NetflixCPUExtrapolation')
+    self._OutputPerfGraphValue('NetflixCPUExtrapolation', extrapolation_value,
+                               'extrapolation', 'netflix_cpu_extrapolation')
 
 
 class YoutubePerfTest(BasePerfTest, YoutubeTestHelper):
@@ -900,7 +994,7 @@ class YoutubePerfTest(BasePerfTest, YoutubeTestHelper):
 
   def testYoutubeDroppedFrames(self):
     """Measures the Youtube video dropped frames/second. Runs for 60 secs.
-       
+
     This test measures Youtube video dropped frames for three different types
     of videos like slow, normal and fast motion.
     """
@@ -916,7 +1010,7 @@ class YoutubePerfTest(BasePerfTest, YoutubeTestHelper):
       dropped_fps = []
       for iteration in xrange(60):
         frames = self.GetVideoDroppedFrames() - init_dropped_frames
-        current_dropped_frames = frames - total_dropped_frames 
+        current_dropped_frames = frames - total_dropped_frames
         dropped_fps.append(current_dropped_frames)
         logging.info('Iteration %d of %d: %f dropped frames in the last '
                      'second', iteration + 1, 60, current_dropped_frames)
@@ -924,7 +1018,8 @@ class YoutubePerfTest(BasePerfTest, YoutubeTestHelper):
         # Play the video for some time
         time.sleep(1)
       graph_description = 'YoutubeDroppedFrames' + video_type
-      self._PrintSummaryResults(graph_description, dropped_fps, 'frames')
+      self._PrintSummaryResults(graph_description, dropped_fps, 'frames',
+                                'youtube_dropped_frames')
 
   def testYoutubeCPU(self):
     """Measures the Youtube video CPU usage. Runs for 60 seconds.
@@ -956,10 +1051,8 @@ class YoutubePerfTest(BasePerfTest, YoutubeTestHelper):
     logging.info('Youtube CPU extrapolation: %f', extrapolation_value)
     # Video is still running so log some more detailed data.
     self._LogProcessActivity()
-    self._OutputPerfGraphValue(
-        'YoutubeCPUExtrapolation',
-        extrapolation_value, 'extrapolation',
-        graph_name='YoutubeCPUExtrapolation')
+    self._OutputPerfGraphValue('YoutubeCPUExtrapolation', extrapolation_value,
+                               'extrapolation', 'youtube_cpu_extrapolation')
 
 
 class FlashVideoPerfTest(BasePerfTest):
@@ -998,17 +1091,17 @@ class FlashVideoPerfTest(BasePerfTest):
     result = test_result['averageFPS']
     logging.info('Result for %s: %f FPS (average)', description, result)
     self._OutputPerfGraphValue(description, result, 'FPS',
-                               graph_name=description)
+                               'flash_video_1080p_fps')
     result = test_result['droppedFrames']
     logging.info('Result for %s: %f dropped frames', description, result)
     self._OutputPerfGraphValue(description, result, 'DroppedFrames',
-                               graph_name=description)
+                               'flash_video_1080p_dropped_frames')
 
 
 class WebGLTest(BasePerfTest):
   """Tests for WebGL performance."""
 
-  def _RunWebGLTest(self, url, description):
+  def _RunWebGLTest(self, url, description, graph_name):
     """Measures FPS using a specified WebGL demo.
 
     Args:
@@ -1017,6 +1110,8 @@ class WebGLTest(BasePerfTest):
           settings in the demo).
       description: A string description for this demo, used as a performance
           value description.  Should not contain any spaces.
+      graph_name: A string name for the performance graph associated with this
+          test.  Only used on Chrome desktop.
     """
     self.assertTrue(self.AppendTab(pyauto.GURL(url)),
                     msg='Failed to append tab for %s.' % description)
@@ -1049,28 +1144,189 @@ class WebGLTest(BasePerfTest):
       fps_vals.append(fps)
       logging.info('Iteration %d of %d: %f FPS', iteration + 1, 30, fps)
       time.sleep(1)
-    self._PrintSummaryResults(description, fps_vals, 'fps')
+    self._PrintSummaryResults(description, fps_vals, 'fps', graph_name)
 
   def testWebGLAquarium(self):
     """Measures performance using the WebGL Aquarium demo."""
     self._RunWebGLTest(
         self.GetFileURLForDataPath('pyauto_private', 'webgl', 'aquarium',
                                    'aquarium.html'),
-        'WebGLAquarium')
+        'WebGLAquarium', 'webgl_demo')
 
   def testWebGLField(self):
     """Measures performance using the WebGL Field demo."""
     self._RunWebGLTest(
         self.GetFileURLForDataPath('pyauto_private', 'webgl', 'field',
                                    'field.html'),
-        'WebGLField')
+        'WebGLField', 'webgl_demo')
 
   def testWebGLSpaceRocks(self):
     """Measures performance using the WebGL SpaceRocks demo."""
     self._RunWebGLTest(
         self.GetFileURLForDataPath('pyauto_private', 'webgl', 'spacerocks',
                                    'spacerocks.html'),
-        'WebGLSpaceRocks')
+        'WebGLSpaceRocks', 'webgl_demo')
+
+
+class GPUPerfTest(BasePerfTest):
+  """Tests for GPU performance."""
+
+  def setUp(self):
+    """Performs necessary setup work before running each test in this class."""
+    self._gpu_info_dict = self.EvalDataFrom(os.path.join(self.DataDir(),
+                                            'gpu', 'gpuperf.txt'))
+    self._demo_name_url_dict = self._gpu_info_dict['demo_info']
+    pyauto.PyUITest.setUp(self)
+
+  def _MeasureFpsOverTime(self, tab_index=0):
+    """Measures FPS using a specified demo.
+
+    This function assumes that the demo is already loaded in the specified tab
+    index.
+
+    Args:
+      tab_index: The tab index, default is 0.
+    """
+    # Let the experiment run for 5 seconds before we start collecting FPS
+    # values.
+    time.sleep(5)
+
+    # Collect the current FPS value each second for the next 10 seconds.
+    # Then return the average FPS value from among those collected.
+    fps_vals = []
+    for iteration in xrange(10):
+      fps = self.GetFPS(tab_index=tab_index)
+      fps_vals.append(fps['fps'])
+      time.sleep(1)
+    avg_fps, _ = self._AvgAndStdDev(fps_vals)
+    return avg_fps
+
+  def _GetStdAvgAndCompare(self, avg_fps, description, ref_dict):
+    """Computes the average and compare set of values with reference data.
+
+    Args:
+      avg_fps: Average fps value.
+      description: A string description for this demo, used as a performance
+                   value description.
+      ref_dict: Dictionary which contains reference data for this test case.
+
+    Returns:
+      True, if the actual FPS value is within 10% of the reference FPS value,
+      or False, otherwise.
+    """
+    std_fps = 0
+    status = True
+    # Load reference data according to platform.
+    platform_ref_dict = None
+    if self.IsWin():
+      platform_ref_dict = ref_dict['win']
+    elif self.IsMac():
+      platform_ref_dict = ref_dict['mac']
+    elif self.IsLinux():
+      platform_ref_dict = ref_dict['linux']
+    else:
+      self.assertFail(msg='This platform is unsupported.')
+    std_fps = platform_ref_dict[description]
+    # Compare reference data to average fps.
+    # We allow the average FPS value to be within 10% of the reference
+    # FPS value.
+    if avg_fps < (0.9 * std_fps):
+      logging.info('FPS difference exceeds threshold for: %s', description)
+      logging.info('  Average: %f fps', avg_fps)
+      logging.info('Reference Average: %f fps', std_fps)
+      status = False
+    else:
+      logging.info('Average FPS is actually greater than 10 percent '
+                   'more than the reference FPS for: %s', description)
+      logging.info('  Average: %f fps', avg_fps)
+      logging.info('  Reference Average: %f fps', std_fps)
+    return status
+
+  def testLaunchDemosParallelInSeparateTabs(self):
+    """Measures performance of demos in different tabs in same browser."""
+    # Launch all the demos parallel in separate tabs
+    counter = 0
+    all_demos_passed = True
+    ref_dict = self._gpu_info_dict['separate_tab_ref_data']
+    # Iterate through dictionary and append all url to browser
+    for url in self._demo_name_url_dict.iterkeys():
+      self.assertTrue(
+          self.AppendTab(pyauto.GURL(self._demo_name_url_dict[url])),
+          msg='Failed to append tab for %s.' % url)
+      counter += 1
+      # Assert number of tab count is equal to number of tabs appended.
+      self.assertEqual(self.GetTabCount(), counter + 1)
+      # Measures performance using different demos and compare it golden
+      # reference.
+    for url in self._demo_name_url_dict.iterkeys():
+      avg_fps = self._MeasureFpsOverTime(tab_index=counter)
+      # Get the reference value of fps and compare the results
+      if not self._GetStdAvgAndCompare(avg_fps, url, ref_dict):
+        all_demos_passed = False
+      counter -= 1
+    self.assertTrue(
+        all_demos_passed,
+        msg='One or more demos failed to yield an acceptable FPS value')
+
+  def testLaunchDemosInSeparateBrowser(self):
+    """Measures performance by launching each demo in a separate tab."""
+    # Launch demos in the browser
+    ref_dict = self._gpu_info_dict['separate_browser_ref_data']
+    all_demos_passed = True
+    for url in self._demo_name_url_dict.iterkeys():
+      self.NavigateToURL(self._demo_name_url_dict[url])
+      # Measures performance using different demos.
+      avg_fps = self._MeasureFpsOverTime()
+      self.RestartBrowser()
+      # Get the standard value of fps and compare the rseults
+      if not self._GetStdAvgAndCompare(avg_fps, url, ref_dict):
+        all_demos_passed = False
+    self.assertTrue(
+        all_demos_passed,
+        msg='One or more demos failed to yield an acceptable FPS value')
+
+  def testLaunchDemosBrowseForwardBackward(self):
+    """Measures performance of various demos in browser going back and forth."""
+    ref_dict = self._gpu_info_dict['browse_back_forward_ref_data']
+    url_array = []
+    desc_array = []
+    all_demos_passed = True
+    # Get URL/Description from dictionary and put in individual array
+    for url in self._demo_name_url_dict.iterkeys():
+      url_array.append(self._demo_name_url_dict[url])
+      desc_array.append(url)
+    for index in range(len(url_array) - 1):
+      # Launch demo in the Browser
+      if index == 0:
+        self.NavigateToURL(url_array[index])
+        # Measures performance using the first demo.
+        avg_fps = self._MeasureFpsOverTime()
+        status1 = self._GetStdAvgAndCompare(avg_fps, desc_array[index],
+                                            ref_dict)
+      # Measures performance using the second demo.
+      self.NavigateToURL(url_array[index + 1])
+      avg_fps = self._MeasureFpsOverTime()
+      status2 = self._GetStdAvgAndCompare(avg_fps, desc_array[index + 1],
+                                          ref_dict)
+      # Go Back to previous demo
+      self.GetBrowserWindow(0).GetTab(0).GoBack();
+      # Measures performance for first demo when moved back
+      avg_fps = self._MeasureFpsOverTime()
+      status3 = self._GetStdAvgAndCompare(
+          avg_fps, desc_array[index] + '_backward',
+          ref_dict)
+      # Go Forward to previous demo
+      self.GetBrowserWindow(0).GetTab(0).GoForward();
+      # Measures performance for second demo when moved forward
+      avg_fps = self._MeasureFpsOverTime()
+      status4 = self._GetStdAvgAndCompare(
+          avg_fps, desc_array[index + 1] + '_forward',
+          ref_dict)
+      if not all([status1, status2, status3, status4]):
+        all_demos_passed = False
+    self.assertTrue(
+        all_demos_passed,
+        msg='One or more demos failed to yield an acceptable FPS value')
 
 
 class HTML5BenchmarkTest(BasePerfTest):
@@ -1104,7 +1360,7 @@ class HTML5BenchmarkTest(BasePerfTest):
     score = self.ExecuteJavascript(js_final_score)
     logging.info('HTML5 Benchmark final score: %f', float(score))
     self._OutputPerfGraphValue('HTML5Benchmark', float(score), 'score',
-                               graph_name='HTML5Benchmark')
+                               'html5_benchmark')
 
 
 class FileUploadDownloadTest(BasePerfTest):
@@ -1198,7 +1454,8 @@ class FileUploadDownloadTest(BasePerfTest):
       self.SetDownloadShelfVisible(False)
       _CleanupAdditionalFilesInDir(download_dir, orig_downloads)
 
-    self._PrintSummaryResults('Download100MBFile', timings, 'milliseconds')
+    self._PrintSummaryResults('Download100MBFile', timings, 'milliseconds',
+                              'download_file')
 
     # Tell the local server to delete the 100 MB file.
     self.NavigateToURL(DELETE_100MB_URL)
@@ -1239,7 +1496,8 @@ class FileUploadDownloadTest(BasePerfTest):
         logging.info('Iteration %d of %d: %f milliseconds', iteration,
                      self._num_iterations, elapsed_time)
 
-    self._PrintSummaryResults('Upload50MBFile', timings, 'milliseconds')
+    self._PrintSummaryResults('Upload50MBFile', timings, 'milliseconds',
+                              'upload_file')
 
 
 class ScrollTest(BasePerfTest):
@@ -1254,15 +1512,19 @@ class ScrollTest(BasePerfTest):
     # Extra flag needed by scroll performance tests.
     return super(ScrollTest, self).ExtraChromeFlags() + ['--disable-gpu-vsync']
 
-  def _RunScrollTest(self, url, description):
+  def _RunScrollTest(self, url, description, graph_name, setup_js=''):
     """Runs a scroll performance test on the specified webpage.
 
     Args:
       url: The string url for the webpage on which to run the scroll test.
       description: A string description for the particular test being run.
+      graph_name: A string name for the performance graph associated with this
+          test.  Only used on Chrome desktop.
+      setup_js: String representing additional Javascript setup code to execute
+          in the webpage immediately before running the scroll test.
     """
     scroll_file = os.path.join(self.DataDir(), 'scroll', 'scroll.js')
-    with open(scroll_file, 'r') as f:
+    with open(scroll_file) as f:
       scroll_text = f.read()
 
     def _RunSingleInvocation(url, scroll_text):
@@ -1272,8 +1534,10 @@ class ScrollTest(BasePerfTest):
 
       js = """
           %s
+          %s
+          __scroll_test();
           window.domAutomationController.send('done');
-      """ % scroll_text
+      """ % (scroll_text, setup_js)
       self.ExecuteJavascript(js, tab_index=1)
 
       # Poll the webpage until the test is complete.
@@ -1309,34 +1573,44 @@ class ScrollTest(BasePerfTest):
         logging.info('Iteration %d of %d: %f fps', iteration,
                      self._num_iterations, fps)
 
-    self._PrintSummaryResults(description, fps_vals, 'FPS')
+    self._PrintSummaryResults(description, fps_vals, 'FPS', graph_name)
 
   def testBlankPageScroll(self):
     """Runs the scroll test on a blank page."""
     self._RunScrollTest(
-        self.GetFileURLForDataPath('scroll', 'blank.html'), 'ScrollBlankPage')
+        self.GetFileURLForDataPath('scroll', 'blank.html'), 'ScrollBlankPage',
+        'scroll_fps')
 
   def testTextScroll(self):
     """Runs the scroll test on a text-filled page."""
     self._RunScrollTest(
-        self.GetFileURLForDataPath('scroll', 'text.html'), 'ScrollTextPage')
+        self.GetFileURLForDataPath('scroll', 'text.html'), 'ScrollTextPage',
+        'scroll_fps')
 
   def testGooglePlusScroll(self):
     """Runs the scroll test on a Google Plus anonymized page."""
     self._RunScrollTest(
         self.GetFileURLForDataPath('scroll', 'plus.html'),
-        'ScrollGooglePlusPage')
+        'ScrollGooglePlusPage', 'scroll_fps')
+
+  def testGmailScroll(self):
+    """Runs the scroll test using the live Gmail site."""
+    self._LoginToGoogleAccount(account_key='test_google_account_gmail')
+    self._RunScrollTest('http://www.gmail.com', 'ScrollGmail', 'scroll_fps',
+                        setup_js='__is_gmail_test = true;')
 
 
 class FlashTest(BasePerfTest):
   """Tests to measure flash performance."""
 
-  def _RunFlashTestForAverageFPS(self, webpage_url, description):
+  def _RunFlashTestForAverageFPS(self, webpage_url, description, graph_name):
     """Runs a single flash test that measures an average FPS value.
 
     Args:
       webpage_url: The string URL to a webpage that will run the test.
       description: A string description for this test.
+      graph_name: A string name for the performance graph associated with this
+          test.  Only used on Chrome desktop.
     """
     # Open up the test webpage; it's assumed the test will start automatically.
     self.assertTrue(self.AppendTab(pyauto.GURL(webpage_url)),
@@ -1354,22 +1628,19 @@ class FlashTest(BasePerfTest):
         msg='Timed out when waiting for test result.')
     result = float(self.ExecuteJavascript(js, tab_index=1))
     logging.info('Result for %s: %f FPS (average)', description, result)
-    self._OutputPerfGraphValue(
-        description,
-        result, 'FPS',
-        graph_name=description)
+    self._OutputPerfGraphValue(description, result, 'FPS', graph_name)
 
   def testFlashGaming(self):
     """Runs a simple flash gaming benchmark test."""
     webpage_url = self.GetHttpURLForDataPath('pyauto_private', 'flash',
                                              'FlashGamingTest2.html')
-    self._RunFlashTestForAverageFPS(webpage_url, 'FlashGaming')
+    self._RunFlashTestForAverageFPS(webpage_url, 'FlashGaming', 'flash_fps')
 
   def testFlashText(self):
     """Runs a simple flash text benchmark test."""
     webpage_url = self.GetHttpURLForDataPath('pyauto_private', 'flash',
                                              'FlashTextTest2.html')
-    self._RunFlashTestForAverageFPS(webpage_url, 'FlashText')
+    self._RunFlashTestForAverageFPS(webpage_url, 'FlashText', 'flash_fps')
 
   def testScimarkGui(self):
     """Runs the ScimarkGui benchmark tests."""
@@ -1404,21 +1675,17 @@ class FlashTest(BasePerfTest):
       logging.info('Results for ScimarkGui_%s:', benchmark)
       logging.info('  %f MFLOPS', mflops)
       logging.info('  %f MB', mem)
-      self._OutputPerfGraphValue(
-          'ScimarkGui-%s-MFLOPS' % benchmark,
-          mflops, 'MFLOPS',
-          graph_name='ScimarkGui')
-      self._OutputPerfGraphValue(
-          'ScimarkGui-%s-Mem' % benchmark,
-          mem, 'MB',
-          graph_name='ScimarkGui')
+      self._OutputPerfGraphValue('ScimarkGui-%s-MFLOPS' % benchmark, mflops,
+                                 'MFLOPS', 'scimark_gui_mflops')
+      self._OutputPerfGraphValue('ScimarkGui-%s-Mem' % benchmark, mem, 'MB',
+                                 'scimark_gui_mem')
 
 
 class LiveGamePerfTest(BasePerfTest):
   """Tests to measure performance of live gaming webapps."""
 
   def _RunLiveGamePerfTest(self, url, url_title_substring,
-                           description):
+                           description, graph_name):
     """Measures performance metrics for the specified live gaming webapp.
 
     This function connects to the specified URL to launch the gaming webapp,
@@ -1432,6 +1699,8 @@ class LiveGamePerfTest(BasePerfTest):
           the webapp loads correctly.
       description: A string description for this game, used in the performance
           value description.  Should not contain any spaces.
+      graph_name: A string name for the performance graph associated with this
+          test.  Only used on Chrome desktop.
     """
     self.NavigateToURL(url)
     loaded_tab_title = self.GetActiveTabTitle()
@@ -1449,22 +1718,268 @@ class LiveGamePerfTest(BasePerfTest):
 
     logging.info('Fraction of CPU time spent non-idle: %f',
                  fraction_non_idle_time)
-    self._OutputPerfGraphValue(
-        description + 'CpuBusy',
-        fraction_non_idle_time, 'Fraction',
-        graph_name='CpuBusy')
+    self._OutputPerfGraphValue(description + 'CpuBusy', fraction_non_idle_time,
+                               'Fraction', graph_name + '_cpu_busy')
     v8_heap_stats = self.GetV8HeapStats()
     v8_heap_size = v8_heap_stats['v8_memory_used'] / (1024.0 * 1024.0)
     logging.info('Total v8 heap size: %f MB', v8_heap_size)
-    self._OutputPerfGraphValue(
-        description + 'V8HeapSize',
-        v8_heap_size, 'MB',
-        graph_name='V8HeapSize')
+    self._OutputPerfGraphValue(description + 'V8HeapSize', v8_heap_size, 'MB',
+                               graph_name + '_v8_heap_size')
 
   def testAngryBirds(self):
     """Measures performance for Angry Birds."""
     self._RunLiveGamePerfTest('http://chrome.angrybirds.com', 'Angry Birds',
-                              'AngryBirds')
+                              'AngryBirds', 'angry_birds')
+
+
+class PageCyclerTest(BasePerfTest):
+  """Tests to run various page cyclers."""
+
+  # Page Cycler lives in src/data/page_cycler rather than src/chrome/test/data
+  PC_PATH = os.path.join(BasePerfTest.DataDir(), os.pardir, os.pardir,
+                         os.pardir, 'data', 'page_cycler')
+
+  def ExtraChromeFlags(self):
+    """Ensures Chrome is launched with custom flags.
+
+    Returns:
+      A list of extra flags to pass to Chrome when it is launched.
+    """
+    # Extra flags required to run these tests.
+    # The first two are needed for the test.
+    # The plugins argument is to prevent bad scores due to pop-ups from
+    # running an old version of something (like Flash).
+    return (super(PageCyclerTest, self).ExtraChromeFlags() +
+            ['--js-flags="--expose_gc"',
+             '--enable-file-cookies',
+             '--allow-outdated-plugins'])
+
+  def _PreReadDir(self, dir):
+    """This recursively reads all of the files in a given url directory.
+
+    The intent is to get them into memory before they are used by the benchmark.
+    """
+    def _PreReadDir(dirname, names):
+      for rfile in names:
+        with open(os.path.join(dirname, rfile)) as fp:
+          fp.read()
+
+    for root, dirs, files in os.walk(os.path.dirname(dir)):
+      _PreReadDir(root, files)
+
+  def setUp(self):
+    self._PreReadDir(os.path.join(self.PC_PATH, 'common'))
+    BasePerfTest.setUp(self)
+
+  def _RunPageCyclerTest(self, dirname, iterations, description):
+    """Runs the specified PageCycler test.
+
+    The final score that is calculated is a geometric mean of the
+    arithmetic means of each site's load time, and we drop the upper
+    20% of the times for each site so they don't skew the mean.
+    The Geometric mean is used for the final score because the time
+    range for any given site may be very different, and we don't want
+    slower sites to weight more heavily than others.
+
+    Args:
+      dirname: The directory containing the page cycler test.
+      iterations: How many times to run through the set of pages.
+      description: A string description for the particular test being run.
+    """
+    self._PreReadDir(os.path.join(self.PC_PATH, dirname))
+
+    url = self.GetFileURLForDataPath(os.path.join(self.PC_PATH, dirname),
+                                     'start.html')
+
+    self.NavigateToURL('%s?auto=1&iterations=%d' % (url, iterations))
+
+    # Check cookies for "__pc_done=1" to know the test is over.
+    def IsTestDone():
+      cookies = self.GetCookie(pyauto.GURL(url))  # Window 0, tab 0.
+      return '__pc_done=1' in cookies
+
+    self.assertTrue(
+        self.WaitUntil(IsTestDone, timeout=(60 * iterations), retry_sleep=1),
+        msg='Timed out waiting for page cycler test to complete.')
+
+    # Collect the results from the cookies.
+    site_to_time_list = {}
+    cookies = self.GetCookie(pyauto.GURL(url))  # Window 0, tab 0.
+    site_list = ''
+    time_list = ''
+    for cookie in cookies.split(';'):
+      if '__pc_pages' in cookie:
+        site_list = cookie[cookie.find('=') + 1:]
+      elif '__pc_timings' in cookie:
+        time_list = cookie[cookie.find('=') + 1:]
+    self.assertTrue(site_list and time_list,
+                    msg='Could not find test results in cookies: %s' % cookies)
+    site_list = site_list.split(',')
+    time_list = time_list.split(',')
+    self.assertEqual(iterations, len(time_list) / len(site_list),
+                     msg='Iteration count %d does not match with site/timing '
+                     'lists: %s and %s' % (iterations, site_list, time_list))
+    for site_index, site in enumerate(site_list):
+      site_to_time_list[site] = []
+      for iteration_index in xrange(iterations):
+        site_to_time_list[site].append(
+            float(time_list[iteration_index * len(site_list) + site_index]))
+
+    site_times = []
+    for site, time_list in site_to_time_list.iteritems():
+      sorted_times = sorted(time_list)
+      num_to_drop = int(len(sorted_times) * 0.2)
+      logging.debug('Before dropping %d: ' % num_to_drop)
+      logging.debug(sorted_times)
+      if num_to_drop:
+        sorted_times = sorted_times[:-num_to_drop]
+      logging.debug('After dropping:')
+      logging.debug(sorted_times)
+      # Do an arithmetic mean of the load times for a given page.
+      mean_time = sum(sorted_times) / len(sorted_times)
+      logging.debug('Mean time is: ' + str(mean_time))
+      site_times.append(mean_time)
+
+    logging.info('site times = %s' % site_times)
+    # Compute a geometric mean over the averages for each site.
+    final_result = reduce(lambda x, y: x * y,
+                          site_times) ** (1.0/ len(site_times))
+    logging.info('%s page cycler final result: %f' %
+                 (description, final_result))
+    self._OutputPerfGraphValue(description + '_PageCycler', final_result,
+                               'milliseconds', graph_name='PageCycler')
+
+  def testMoreJSFile(self):
+    self._RunPageCyclerTest('morejs', self._num_iterations, 'MoreJSFile')
+
+  def testAlexaFile(self):
+    self._RunPageCyclerTest('alexa_us', self._num_iterations, 'Alexa_usFile')
+
+  def testBloatFile(self):
+    self._RunPageCyclerTest('bloat', self._num_iterations, 'BloatFile')
+
+  def testDHTMLFile(self):
+    self._RunPageCyclerTest('dhtml', self._num_iterations, 'DhtmlFile')
+
+  def testIntl1File(self):
+    self._RunPageCyclerTest('intl1', self._num_iterations, 'Intl1File')
+
+  def testIntl2File(self):
+    self._RunPageCyclerTest('intl2', self._num_iterations, 'Intl2File')
+
+  def testMozFile(self):
+    self._RunPageCyclerTest('moz', self._num_iterations, 'MozFile')
+
+  def testMoz2File(self):
+    self._RunPageCyclerTest('moz2', self._num_iterations, 'Moz2File')
+
+
+class MemoryTest(BasePerfTest):
+  """Tests to measure memory consumption under different usage scenarios."""
+
+  def ExtraChromeFlags(self):
+    """Launches Chrome with custom flags.
+
+    Returns:
+      A list of extra flags to pass to Chrome when it is launched.
+    """
+    # Ensure Chrome assigns one renderer process to each tab.
+    return super(MemoryTest, self).ExtraChromeFlags() + ['--process-per-tab']
+
+  def _RecordMemoryStats(self, description, when, duration):
+    """Outputs memory statistics to be graphed.
+
+    Args:
+      description: A string description for the test.  Should not contain
+          spaces.  For example, 'MemCtrl'.
+      when: A string description of when the memory stats are being recorded
+          during test execution (since memory stats may be recorded multiple
+          times during a test execution at certain "interesting" times).  Should
+          not contain spaces.
+      duration: The number of seconds to sample data before outputting the
+          memory statistics.
+    """
+    mem = self.GetMemoryStatsChromeOS(duration)
+    measurement_types = [
+      ('gem_obj', 'GemObj'),
+      ('gtt', 'GTT'),
+      ('mem_free', 'MemFree'),
+      ('mem_available', 'MemAvail'),
+      ('mem_shared', 'MemShare'),
+      ('mem_cached', 'MemCache'),
+      ('mem_anon', 'MemAnon'),
+      ('mem_file', 'MemFile'),
+      ('mem_slab', 'MemSlab'),
+      ('browser_priv', 'BrowPriv'),
+      ('browser_shared', 'BrowShar'),
+      ('gpu_priv', 'GpuPriv'),
+      ('gpu_shared', 'GpuShar'),
+      ('renderer_priv', 'RendPriv'),
+      ('renderer_shared', 'RendShar'),
+    ]
+    for type_key, type_string in measurement_types:
+      if type_key not in mem:
+        continue
+      self._OutputPerfGraphValue(
+          '%s-Min%s-%s' % (description, type_string, when),
+          mem[type_key]['min'], 'KB', '%s-%s' % (description, type_string))
+      self._OutputPerfGraphValue(
+          '%s-Max%s-%s' % (description, type_string, when),
+          mem[type_key]['max'], 'KB', '%s-%s' % (description, type_string))
+      self._OutputPerfGraphValue(
+          '%s-End%s-%s' % (description, type_string, when),
+          mem[type_key]['end'], 'KB', '%s-%s' % (description, type_string))
+
+  def _RunTest(self, tabs, description, duration):
+    """Runs a general memory test.
+
+    Args:
+      tabs: A list of strings representing the URLs of the websites to open
+          during this test.
+      description: A string description for the test.  Should not contain
+          spaces.  For example, 'MemCtrl'.
+      duration: The number of seconds to sample data before outputting memory
+          statistics.
+    """
+    self._RecordMemoryStats(description, '0Tabs0', duration)
+
+    for iteration_num in xrange(2):
+      for site in tabs:
+        self.AppendTab(pyauto.GURL(site))
+
+      self._RecordMemoryStats(description,
+                              '%dTabs%d' % (len(tabs), iteration_num + 1),
+                              duration)
+
+      for _ in xrange(len(tabs)):
+        self.GetBrowserWindow(0).GetTab(1).Close(True)
+
+      self._RecordMemoryStats(description, '0Tabs%d' % (iteration_num + 1),
+                              duration)
+
+  def testOpenCloseTabsControl(self):
+    """Measures memory usage when opening/closing tabs to about:blank."""
+    tabs = ['about:blank'] * 10
+    self._RunTest(tabs, 'MemCtrl', 15)
+
+  def testOpenCloseTabsLiveSites(self):
+    """Measures memory usage when opening/closing tabs to live sites."""
+    tabs = [
+      'http://www.google.com/gmail',
+      'http://www.google.com/calendar',
+      'http://www.google.com/plus',
+      'http://www.google.com/youtube',
+      'http://www.nytimes.com',
+      'http://www.cnn.com',
+      'http://www.facebook.com',
+      'http://www.techcrunch.com',
+      'http://www.theverge.com',
+      'http://www.yahoo.com',
+    ]
+    # Log in to a test Google account to make connections to the above Google
+    # websites more interesting.
+    self._LoginToGoogleAccount()
+    self._RunTest(tabs, 'MemLive', 20)
 
 
 class PerfTestServerRequestHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):

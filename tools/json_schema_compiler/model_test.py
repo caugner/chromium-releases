@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -26,25 +27,9 @@ class ModelTest(unittest.TestCase):
     self.assertEquals(3, len(self.model.namespaces))
     self.assertTrue(self.permissions)
 
-  def testNamespaceNoCompile(self):
-    self.permissions_json[0]['namespace'] = 'something'
-    self.permissions_json[0]['nocompile'] = True
-    self.model.AddNamespace(self.permissions_json[0],
-        'path/to/something.json')
-    self.assertEquals(3, len(self.model.namespaces))
-
   def testHasFunctions(self):
     self.assertEquals(["contains", "getAll", "remove", "request"],
         sorted(self.permissions.functions.keys()))
-
-  def testFunctionNoCompile(self):
-    # tabs.json has 2 functions marked as nocompile (connect, sendRequest)
-    self.assertEquals(["captureVisibleTab", "create", "detectLanguage",
-          "executeScript", "get", "getAllInWindow", "getCurrent",
-          "getSelected", "highlight", "insertCSS", "move", "query", "reload",
-          "remove", "update"],
-          sorted(self.tabs.functions.keys())
-    )
 
   def testHasTypes(self):
     self.assertEquals(['Tab'], self.tabs.types.keys())
@@ -52,9 +37,9 @@ class ModelTest(unittest.TestCase):
     self.assertEquals(['Window'], self.windows.types.keys())
 
   def testHasProperties(self):
-    self.assertEquals(["active", "fav_icon_url", "highlighted", "id",
+    self.assertEquals(["active", "favIconUrl", "highlighted", "id",
         "incognito", "index", "pinned", "selected", "status", "title", "url",
-        "window_id"],
+        "windowId"],
         sorted(self.tabs.types['Tab'].properties.keys()))
 
   def testProperties(self):
@@ -70,7 +55,7 @@ class ModelTest(unittest.TestCase):
     self.assertEquals(model.PropertyType.OBJECT, object_prop.type_)
     self.assertEquals(
         ["active", "highlighted", "pinned", "status", "title", "url",
-         "window_id", "window_type"],
+         "windowId", "windowType"],
         sorted(object_prop.properties.keys()))
 
   def testChoices(self):
@@ -100,6 +85,22 @@ class ModelTest(unittest.TestCase):
         param.choices[model.PropertyType.INTEGER].unix_name)
     self.assertRaises(AttributeError,
         param.choices[model.PropertyType.INTEGER].SetUnixName, 'breakage')
+
+  def testUnixName(self):
+    expectations = {
+      'foo': 'foo',
+      'fooBar': 'foo_bar',
+      'fooBarBaz': 'foo_bar_baz',
+      'fooBARBaz': 'foo_bar_baz',
+      'fooBAR': 'foo_bar',
+      'FOO': 'foo',
+      'FOOBar': 'foo_bar',
+      'foo.bar': 'foo_bar',
+      'foo.BAR': 'foo_bar',
+      'foo.barBAZ': 'foo_bar_baz'
+      }
+    for name in expectations:
+      self.assertEquals(expectations[name], model._UnixName(name));
 
 if __name__ == '__main__':
   unittest.main()

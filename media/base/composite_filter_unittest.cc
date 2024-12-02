@@ -141,7 +141,7 @@ class CompositeFilterTest : public testing::Test {
 };
 
 CompositeFilterTest::CompositeFilterTest() :
-    composite_(new CompositeFilter(&message_loop_)),
+    composite_(new CompositeFilter(message_loop_.message_loop_proxy())),
     filter_1_status_(PIPELINE_OK),
     filter_2_status_(PIPELINE_OK),
     mock_filter_host_(new StrictMock<MockFilterHost>()) {
@@ -151,7 +151,7 @@ CompositeFilterTest::~CompositeFilterTest() {}
 
 void CompositeFilterTest::SetupAndAdd2Filters() {
   mock_filter_host_.reset(new StrictMock<MockFilterHost>());
-  composite_ = new CompositeFilter(&message_loop_);
+  composite_ = new CompositeFilter(message_loop_.message_loop_proxy());
   composite_->set_host(mock_filter_host_.get());
 
   // Setup |filter_1_| and arrange for methods to set
@@ -458,10 +458,10 @@ TEST_F(CompositeFilterTest, TestPlayErrors) {
 
   // At this point Play() has been called on |filter_2_|. Simulate an
   // error by calling SetError() on its FilterHost interface.
-  filter_2_->host()->SetError(PIPELINE_ERROR_OUT_OF_MEMORY);
+  filter_2_->host()->SetError(PIPELINE_ERROR_DECODE);
 
   // Expect error to be reported and "play done" callback to be called.
-  EXPECT_CALL(*mock_filter_host_, SetError(PIPELINE_ERROR_OUT_OF_MEMORY));
+  EXPECT_CALL(*mock_filter_host_, SetError(PIPELINE_ERROR_DECODE));
   EXPECT_CALL(*callback, Run());
 
   // Run callback to indicate that |filter_2_|'s Play() has completed.
@@ -532,10 +532,10 @@ TEST_F(CompositeFilterTest, TestPauseErrors) {
 
   // Simulate an error by calling SetError() on |filter_1_|'s FilterHost
   // interface.
-  filter_1_->host()->SetError(PIPELINE_ERROR_OUT_OF_MEMORY);
+  filter_1_->host()->SetError(PIPELINE_ERROR_DECODE);
 
   // Expect error to be reported and "pause done" callback to be called.
-  EXPECT_CALL(*mock_filter_host_, SetError(PIPELINE_ERROR_OUT_OF_MEMORY));
+  EXPECT_CALL(*mock_filter_host_, SetError(PIPELINE_ERROR_DECODE));
   EXPECT_CALL(*callback, Run());
 
   RunFilter1Callback();
@@ -599,12 +599,12 @@ TEST_F(CompositeFilterTest, TestFlushErrors) {
 
   // Simulate an error by calling SetError() on |filter_1_|'s FilterHost
   // interface.
-  filter_1_->host()->SetError(PIPELINE_ERROR_OUT_OF_MEMORY);
+  filter_1_->host()->SetError(PIPELINE_ERROR_DECODE);
 
   RunFilter1Callback();
 
   // Expect error to be reported and "pause done" callback to be called.
-  EXPECT_CALL(*mock_filter_host_, SetError(PIPELINE_ERROR_OUT_OF_MEMORY));
+  EXPECT_CALL(*mock_filter_host_, SetError(PIPELINE_ERROR_DECODE));
   EXPECT_CALL(*callback, Run());
 
   RunFilter2Callback();
@@ -752,8 +752,8 @@ TEST_F(CompositeFilterTest, TestErrorWhilePlaying) {
   DoPlay();
 
   // Simulate an error on |filter_2_| while playing.
-  EXPECT_CALL(*mock_filter_host_, SetError(PIPELINE_ERROR_OUT_OF_MEMORY));
-  filter_2_->host()->SetError(PIPELINE_ERROR_OUT_OF_MEMORY);
+  EXPECT_CALL(*mock_filter_host_, SetError(PIPELINE_ERROR_DECODE));
+  filter_2_->host()->SetError(PIPELINE_ERROR_DECODE);
 
   DoPause();
 

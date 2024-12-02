@@ -36,15 +36,21 @@ class PpapiPluginProcessHost : public content::BrowserChildProcessHostDelegate,
   class Client {
    public:
     // Gets the information about the renderer that's requesting the channel.
-    virtual void GetChannelInfo(base::ProcessHandle* renderer_handle,
-                                int* renderer_id) = 0;
+    virtual void GetPpapiChannelInfo(base::ProcessHandle* renderer_handle,
+                                     int* renderer_id) = 0;
 
     // Called when the channel is asynchronously opened to the plugin or on
     // error. On error, the parameters should be:
     //   base::kNullProcessHandle
-    //   IPC::ChannelHandle()
-    virtual void OnChannelOpened(base::ProcessHandle plugin_process_handle,
-                                 const IPC::ChannelHandle& channel_handle) = 0;
+    //   IPC::ChannelHandle(),
+    //   0
+    virtual void OnPpapiChannelOpened(
+        base::ProcessHandle plugin_process_handle,
+        const IPC::ChannelHandle& channel_handle,
+        int plugin_child_id) = 0;
+
+    // Returns true if the current connection is off-the-record.
+    virtual bool OffTheRecord() = 0;
   };
 
   class PluginClient : public Client {
@@ -118,9 +124,6 @@ class PpapiPluginProcessHost : public content::BrowserChildProcessHostDelegate,
   FilePath plugin_path_;
 
   const bool is_broker_;
-
-  // The unique id created for the process.
-  int process_id_;
 
   scoped_ptr<BrowserChildProcessHostImpl> process_;
 

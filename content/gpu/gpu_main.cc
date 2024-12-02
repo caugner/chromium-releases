@@ -10,6 +10,7 @@
 
 #include "base/environment.h"
 #include "base/message_loop.h"
+#include "base/rand_util.h"
 #include "base/stringprintf.h"
 #include "base/threading/platform_thread.h"
 #include "base/win/scoped_com_initializer.h"
@@ -21,6 +22,7 @@
 #include "content/gpu/gpu_child_thread.h"
 #include "content/gpu/gpu_info_collector.h"
 #include "content/gpu/gpu_process.h"
+#include "crypto/hmac.h"
 #include "ui/gfx/gl/gl_surface.h"
 #include "ui/gfx/gl/gl_switches.h"
 
@@ -33,8 +35,8 @@
 #include "ui/base/x/x11_util.h"
 #endif
 
-#if defined(TOOLKIT_USES_GTK)
-#include "ui/gfx/gtk_util.h"
+#if defined(OS_LINUX)
+#include "content/public/common/sandbox_init.h"
 #endif
 
 // Main function for starting the Gpu process.
@@ -56,9 +58,6 @@ int GpuMain(const content::MainFunctionParams& parameters) {
         SEM_NOOPENFILEERRORBOX);
 #elif defined(USE_X11)
     ui::SetDefaultX11ErrorHandlers();
-#endif
-#if defined(TOOLKIT_USES_GTK)
-    gfx::GtkInitFromCommandLine(*CommandLine::ForCurrentProcess());
 #endif
   }
 
@@ -82,7 +81,8 @@ int GpuMain(const content::MainFunctionParams& parameters) {
     }
 
 #if defined(OS_LINUX)
-    if (gpu_info.vendor_id == 0x10de) {  // NVIDIA
+    if (gpu_info.vendor_id == 0x10de &&  // NVIDIA
+        gpu_info.driver_vendor == "NVIDIA") {
       base::ThreadRestrictions::AssertIOAllowed();
       if (access("/dev/nvidiactl", R_OK) != 0) {
         LOG(INFO) << "NVIDIA device file /dev/nvidiactl access denied";
@@ -100,15 +100,26 @@ int GpuMain(const content::MainFunctionParams& parameters) {
     dead_on_arrival = true;
   }
 
+  // Warm up the random subsystem, which needs to be done pre-sandbox on all
+  // platforms.
+  (void) base::RandUint64();
+
+  // Warm up the crypto subsystem, which needs to done pre-sandbox on all
+  // platforms.
+  crypto::HMAC hmac(crypto::HMAC::SHA256);
+  unsigned char key = '\0';
+  bool ret = hmac.Init(&key, sizeof(key));
+  (void) ret;
+
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+  content::InitializeSandbox();
+#endif
+
   base::win::ScopedCOMInitializer com_initializer;
 
 #if defined(OS_WIN)
   // Preload this DLL because the sandbox prevents it from loading.
   LoadLibrary(L"setupapi.dll");
-
-  // Cause advapi32 to load before the sandbox is turned on.
-  unsigned int dummy_rand;
-  rand_s(&dummy_rand);
 
   sandbox::TargetServices* target_services =
       parameters.sandbox_info->target_services;
@@ -132,6 +143,8 @@ int GpuMain(const content::MainFunctionParams& parameters) {
           gfx::kGLImplementationDesktopName) {
       message_loop_type = MessageLoop::TYPE_UI;
   }
+#elif defined(OS_LINUX)
+  message_loop_type = MessageLoop::TYPE_DEFAULT;
 #endif
 
   MessageLoop main_message_loop(message_loop_type);

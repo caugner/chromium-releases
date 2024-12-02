@@ -27,6 +27,7 @@ class Browser;
 class ChromeRenderMessageFilter;
 class ExtensionFunction;
 class ExtensionFunctionDispatcher;
+class ExtensionWindowController;
 class UIThreadExtensionFunction;
 class IOThreadExtensionFunction;
 class Profile;
@@ -78,16 +79,25 @@ class ExtensionFunction
 
   // Execute the API. Clients should initialize the ExtensionFunction using
   // SetArgs(), set_request_id(), and the other setters before calling this
-  // method. Derived classes should be ready to return GetResult() and
+  // method. Derived classes should be ready to return GetResultValue() and
   // GetError() before returning from this function.
   // Note that once Run() returns, dispatcher() can be NULL, so be sure to
   // NULL-check.
   virtual void Run();
 
+  // Gets whether quota should be applied to this individual function
+  // invocation. This is different to GetQuotaLimitHeuristics which is only
+  // invoked once and then cached.
+  //
+  // Returns false by default.
+  virtual bool ShouldSkipQuotaLimiting() const;
+
   // Optionally adds one or multiple QuotaLimitHeuristic instances suitable for
   // this function to |heuristics|. The ownership of the new QuotaLimitHeuristic
   // instances is passed to the owner of |heuristics|.
   // No quota limiting by default.
+  //
+  // Only called once per lifetime of the ExtensionsQuotaService.
   virtual void GetQuotaLimitHeuristics(
       QuotaLimitHeuristics* heuristics) const {}
 
@@ -98,12 +108,8 @@ class ExtensionFunction
   // Specifies the raw arguments to the function, as a JSON value.
   virtual void SetArgs(const base::ListValue* args);
 
-  // Retrieves the results of the function as a JSON-encoded string (may
-  // be empty).
-  virtual const std::string GetResult();
-
   // Retrieves the results of the function as a Value.
-  base::Value* GetResultValue();
+  const base::Value* GetResultValue();
 
   // Retrieves any error string from the function.
   virtual const std::string GetError();
@@ -222,7 +228,8 @@ class UIThreadExtensionFunction : public ExtensionFunction {
   class DelegateForTests {
    public:
     virtual void OnSendResponse(UIThreadExtensionFunction* function,
-                                bool success) = 0;
+                                bool success,
+                                bool bad_message) = 0;
   };
 
   UIThreadExtensionFunction();
@@ -271,7 +278,12 @@ class UIThreadExtensionFunction : public ExtensionFunction {
   // This method can return NULL if there is no matching browser, which can
   // happen if only incognito windows are open, or early in startup or shutdown
   // shutdown when there are no active windows.
+  //
+  // TODO(stevenjb): Replace this with GetExtensionWindowController().
   Browser* GetCurrentBrowser();
+
+  // Same as above but uses ExtensionWindowList instead of BrowserList.
+  ExtensionWindowController* GetExtensionWindowController();
 
  protected:
   friend struct content::BrowserThread::DeleteOnThread<

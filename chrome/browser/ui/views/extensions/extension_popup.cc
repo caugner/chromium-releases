@@ -12,7 +12,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/views/window.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -60,11 +59,10 @@ ExtensionPopup::ExtensionPopup(
     Browser* browser,
     ExtensionHost* host,
     views::View* anchor_view,
-    views::BubbleBorder::ArrowLocation arrow_location,
-    bool inspect_with_devtools)
+    views::BubbleBorder::ArrowLocation arrow_location)
     : BubbleDelegateView(anchor_view, arrow_location),
       extension_host_(host),
-      inspect_with_devtools_(inspect_with_devtools),
+      inspect_with_devtools_(false),
       close_bubble_factory_(this) {
   // Adjust the margin so that contents fit better.
   set_margin(views::BubbleBorder::GetCornerRadius() / 2);
@@ -73,6 +71,8 @@ ExtensionPopup::ExtensionPopup(
   host->view()->SetContainer(this);
   // Use OnNativeFocusChange to check for child window activation on deactivate.
   set_close_on_deactivate(false);
+  // Make the bubble move with its anchor (during inspection, etc.).
+  set_move_with_anchor(true);
 
   // Wait to show the popup until the contained host finishes loading.
   registrar_.Add(this, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
@@ -82,17 +82,15 @@ ExtensionPopup::ExtensionPopup(
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
                  content::Source<Profile>(host->profile()));
 
+  // Listen for the dev tools opening on this popup, so we can stop it going
+  // away when the dev tools get focus.
+  registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_WINDOW_OPENING,
+                 content::Source<Profile>(host->profile()));
+
   // Listen for the dev tools closing, so we can close this window if it is
   // being inspected and the inspector is closed.
   registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
       content::Source<content::BrowserContext>(host->profile()));
-
-  if (!inspect_with_devtools_) {
-    // Listen for the dev tools opening on this popup, so we can stop it going
-    // away when the dev tools get focus.
-    registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_WINDOW_OPENING,
-                   content::Source<Profile>(host->profile()));
-  }
 }
 
 ExtensionPopup::~ExtensionPopup() {
@@ -129,7 +127,6 @@ void ExtensionPopup::Observe(int type,
         // Set inspect_with_devtools_ so the popup will be kept open while
         // the devtools are open.
         inspect_with_devtools_ = true;
-        set_close_on_deactivate(false);
       }
       break;
     default:
@@ -172,14 +169,13 @@ ExtensionPopup* ExtensionPopup::ShowPopup(
     const GURL& url,
     Browser* browser,
     views::View* anchor_view,
-    views::BubbleBorder::ArrowLocation arrow_location,
-    bool inspect_with_devtools) {
+    views::BubbleBorder::ArrowLocation arrow_location) {
   ExtensionProcessManager* manager =
       browser->profile()->GetExtensionProcessManager();
   ExtensionHost* host = manager->CreatePopupHost(url, browser);
   ExtensionPopup* popup = new ExtensionPopup(browser, host, anchor_view,
-      arrow_location, inspect_with_devtools);
-  browser::CreateViewsBubble(popup);
+      arrow_location);
+  views::BubbleDelegateView::CreateBubble(popup);
 
   // If the host had somehow finished loading, then we'd miss the notification
   // and not show.  This seems to happen in single-process mode.

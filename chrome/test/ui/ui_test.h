@@ -78,24 +78,8 @@ class UITestBase {
   void CloseBrowserAndServer();
 
   // Launches the browser with the given command line.
-  // TODO(phajdan.jr): Make LaunchBrowser private. Tests should use
-  // LaunchAnotherBrowserBlockUntilClosed.
+  // TODO(phajdan.jr): Make LaunchBrowser private.
   void LaunchBrowser(const CommandLine& cmdline, bool clear_profile);
-
-#if !defined(OS_MACOSX)
-  // These functions are deliberately not defined on the Mac because re-using an
-  // existing browser process when launching from the command line isn't a
-  // concept that we support on the Mac; AppleEvents are the Mac solution for
-  // the same need. Any test based on these functions doesn't apply to the Mac.
-
-  // Launches an another browser process and waits for it to finish. Returns
-  // true on success.
-  bool LaunchAnotherBrowserBlockUntilClosed(const CommandLine& cmdline);
-
-  // Same as LaunchAnotherBrowserBlockUntilClosed except that the URL argument
-  // is not used.
-  bool LaunchAnotherBrowserNoUrlArg(const CommandLine& cmdline);
-#endif
 
   // Exits out browser instance.
   void QuitBrowser();
@@ -173,9 +157,6 @@ class UITestBase {
   // browser process terminated).  Note that in that case this method returns
   // after the browser process has terminated.
   bool CloseBrowser(BrowserProxy* browser, bool* application_closed) const;
-
-  // Gets the directory for the currently active profile in the browser.
-  FilePath GetDownloadDirectory();
 
   // Gets the executable file path of the Chrome browser process.
   const FilePath::CharType* GetExecutablePath();
@@ -403,17 +384,6 @@ class UITest : public UITestBase, public PlatformTest {
   // file is in use).
   // TODO(phajdan.jr): Move to test_file_util if we need it in more places.
   bool EvictFileFromSystemCacheWrapper(const FilePath& path);
-
-  // Wait for |generated_file| to be ready and then compare it with
-  // |original_file| to see if they're identical or not if |compare_file| is
-  // true. If |need_equal| is true, they need to be identical. Otherwise,
-  // they should be different. This function will delete the generated file if
-  // the parameter |delete_generated_file| is true.
-  void WaitForGeneratedFileAndCheck(const FilePath& generated_file,
-                                    const FilePath& original_file,
-                                    bool compare_files,
-                                    bool need_equal,
-                                    bool delete_generated_file);
 
   // Polls the tab for a JavaScript condition and returns once one of the
   // following conditions hold true:

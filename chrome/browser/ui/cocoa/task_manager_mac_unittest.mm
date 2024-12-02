@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,11 @@ class TestResource : public TaskManager::Resource {
   virtual string16 GetProfileName() const OVERRIDE { return string16(); }
   virtual SkBitmap GetIcon() const OVERRIDE { return SkBitmap(); }
   virtual base::ProcessHandle GetProcess() const OVERRIDE { return pid_; }
+  virtual int GetUniqueChildProcessId() const OVERRIDE {
+    // In reality the unique child process ID is not the actual process ID,
+    // but for testing purposes it shouldn't make difference.
+    return static_cast<int>(base::GetCurrentProcId());
+  }
   virtual Type GetType() const OVERRIDE { return RENDERER; }
   virtual bool SupportNetworkUsage() const OVERRIDE { return false; }
   virtual void SetSupportNetworkUsage() OVERRIDE { NOTREACHED(); }
@@ -66,7 +71,7 @@ TEST_F(TaskManagerWindowControllerTest, Sort) {
 
   // Test that table is sorted on title.
   NSTableColumn* title_column = [table tableColumnWithIdentifier:
-      [NSNumber numberWithInt:IDS_TASK_MANAGER_PAGE_COLUMN]];
+      [NSNumber numberWithInt:IDS_TASK_MANAGER_TASK_COLUMN]];
   NSCell* cell;
   cell = [controller tableView:table dataCellForTableColumn:title_column row:0];
   EXPECT_NSEQ(@"zzb", [cell title]);

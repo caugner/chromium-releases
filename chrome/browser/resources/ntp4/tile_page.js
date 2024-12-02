@@ -448,7 +448,6 @@ cr.define('ntp', function() {
       this.addEventListener('DOMNodeInsertedIntoDocument',
                             this.onNodeInsertedIntoDocument_);
 
-      this.addEventListener('mousewheel', this.onMouseWheel_);
       this.content_.addEventListener('scroll', this.onScroll_.bind(this));
 
       this.dragWrapper_ = new cr.ui.DragWrapper(this.tileGrid_, this);
@@ -519,6 +518,18 @@ cr.define('ntp', function() {
       // NOTE: Implicitly removes from DOM if |node| is inside it.
       this.content_.insertBefore(node, this.topMargin_.nextElementSibling);
       this.positionNotification_();
+    },
+
+    /**
+     * Fetches the size, in pixels, of the padding-top of the tile contents.
+     * @type {number}
+     */
+    get contentPadding() {
+      if (typeof this.contentPadding_ == 'undefined') {
+        this.contentPadding_ =
+            parseInt(getComputedStyle(this.content_).paddingTop, 10);
+      }
+      return this.contentPadding_;
     },
 
     /**
@@ -973,12 +984,16 @@ cr.define('ntp', function() {
       // be 1/3 down the page.
       var numTiles = this.tileCount +
           (this.isCurrentDragTarget && !this.withinPageDrag_ ? 1 : 0);
-      var numRows = Math.ceil(numTiles / layout.numRowTiles);
+      // Minimum of 1 row (this can come into play when there is an app install
+      // hint hiding the webstore tile, and there are no other tiles).
+      var numRows = Math.max(1, Math.ceil(numTiles / layout.numRowTiles));
       var usedHeight = layout.rowHeight * numRows;
-      // 60 matches the top padding of tile-page (which acts as the minimum).
       var newMargin = document.documentElement.clientHeight / 3 -
-          usedHeight / 3 - 60;
-      newMargin = Math.max(newMargin, 0);
+          usedHeight / 3 - this.contentPadding;
+      // The 'height' style attribute of topMargin is non-zero to work around
+      // webkit's collapsing margin behavior, so we have to factor that into
+      // our calculations here.
+      newMargin = Math.max(newMargin, 0) - this.topMargin_.offsetHeight;
 
       // |newMargin| is the final margin we actually want to show. However,
       // part of that should be animated and part should not (for the same
@@ -1051,28 +1066,21 @@ cr.define('ntp', function() {
     },
 
     /**
-     * Scrolls the page in response to a mousewheel event.
+     * Scrolls the page in response to an mousewheel event, although the event
+     * may have been triggered on a different element. Return true if the
+     * event triggered scrolling, and false otherwise.
+     * This is called explicitly, which allows a consistent experience whether
+     * the user scrolls on the page or on the page switcher, because this
+     * function provides a common conversion factor between wheel delta and
+     * scroll delta.
      * @param {Event} e The mousewheel event.
      */
     handleMouseWheel: function(e) {
-      this.content_.scrollTop -= e.wheelDeltaY / 3;
-    },
-
-    /**
-     * Handles mouse wheels on |this|. We handle this explicitly because we want
-     * a consistent experience whether the user scrolls on the page or on the
-     * page switcher (handleMouseWheel provides a common conversion factor
-     * between wheel delta and scroll delta).
-     * @param {Event} e The mousewheel event.
-     * @private
-     */
-    onMouseWheel_: function(e) {
       if (e.wheelDeltaY == 0)
-        return;
+        return false;
 
-      this.handleMouseWheel(e);
-      e.preventDefault();
-      e.stopPropagation();
+      this.content_.scrollTop -= e.wheelDeltaY / 3;
+      return true;
     },
 
     /**
@@ -1203,6 +1211,7 @@ cr.define('ntp', function() {
      */
     doDrop: function(e) {
       e.stopPropagation();
+      e.preventDefault();
 
       var index = this.currentDropIndex_;
       // Only change data if this was not a 'null drag'.

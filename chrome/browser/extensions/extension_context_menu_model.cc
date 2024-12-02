@@ -30,51 +30,21 @@ enum MenuEntries {
   HIDE,
   DISABLE,
   UNINSTALL,
-  MANAGE,
-  INSPECT_POPUP
+  MANAGE
 };
 
 ExtensionContextMenuModel::ExtensionContextMenuModel(
     const Extension* extension,
-    Browser* browser,
-    PopupDelegate* delegate)
+    Browser* browser)
     : ALLOW_THIS_IN_INITIALIZER_LIST(SimpleMenuModel(this)),
       extension_id_(extension->id()),
       browser_(browser),
-      profile_(browser->profile()),
-      delegate_(delegate) {
+      profile_(browser->profile()) {
   extension_action_ = extension->browser_action();
   if (!extension_action_)
     extension_action_ = extension->page_action();
 
   InitCommonCommands();
-
-  if (profile_->GetPrefs()->GetBoolean(prefs::kExtensionsUIDeveloperMode) &&
-      delegate_) {
-    AddSeparator();
-    AddItemWithStringId(INSPECT_POPUP, IDS_EXTENSION_ACTION_INSPECT_POPUP);
-  }
-}
-
-ExtensionContextMenuModel::~ExtensionContextMenuModel() {
-}
-
-void ExtensionContextMenuModel::InitCommonCommands() {
-  const Extension* extension = GetExtension();
-
-  // The extension pointer should only be null if the extension was uninstalled,
-  // and since the menu just opened, it should still be installed.
-  DCHECK(extension);
-
-  AddItem(NAME, UTF8ToUTF16(extension->name()));
-  AddSeparator();
-  AddItemWithStringId(CONFIGURE, IDS_EXTENSIONS_OPTIONS_MENU_ITEM);
-  AddItemWithStringId(DISABLE, IDS_EXTENSIONS_DISABLE);
-  AddItem(UNINSTALL, l10n_util::GetStringUTF16(IDS_EXTENSIONS_UNINSTALL));
-  if (extension->browser_action())
-    AddItemWithStringId(HIDE, IDS_EXTENSIONS_HIDE_BUTTON);
-  AddSeparator();
-  AddItemWithStringId(MANAGE, IDS_MANAGE_EXTENSIONS);
 }
 
 bool ExtensionContextMenuModel::IsCommandIdChecked(int command_id) const {
@@ -92,12 +62,6 @@ bool ExtensionContextMenuModel::IsCommandIdEnabled(int command_id) const {
     // The NAME links to the Homepage URL. If the extension doesn't have a
     // homepage, we just disable this menu item.
     return extension->GetHomepageURL().is_valid();
-  } else if (command_id == INSPECT_POPUP) {
-    WebContents* contents = browser_->GetSelectedWebContents();
-    if (!contents)
-      return false;
-
-    return extension_action_->HasPopup(ExtensionTabUtil::GetTabId(contents));
   } else if (command_id == DISABLE || command_id == UNINSTALL) {
     // Some extension types can not be disabled or uninstalled.
     return Extension::UserMayDisable(extension->location());
@@ -135,7 +99,8 @@ void ExtensionContextMenuModel::ExecuteCommand(int command_id) {
     }
     case DISABLE: {
       ExtensionService* extension_service = profile_->GetExtensionService();
-      extension_service->DisableExtension(extension_id_);
+      extension_service->DisableExtension(extension_id_,
+                                          Extension::DISABLE_USER_ACTION);
       break;
     }
     case UNINSTALL: {
@@ -146,11 +111,7 @@ void ExtensionContextMenuModel::ExecuteCommand(int command_id) {
       break;
     }
     case MANAGE: {
-      browser_->ShowOptionsTab(chrome::kExtensionsSubPage);
-      break;
-    }
-    case INSPECT_POPUP: {
-      delegate_->InspectPopup(extension_action_);
+      browser_->ShowExtensionsTab();
       break;
     }
     default:
@@ -169,6 +130,26 @@ void ExtensionContextMenuModel::ExtensionUninstallAccepted() {
 
 void ExtensionContextMenuModel::ExtensionUninstallCanceled() {
   Release();
+}
+
+ExtensionContextMenuModel::~ExtensionContextMenuModel() {}
+
+void ExtensionContextMenuModel::InitCommonCommands() {
+  const Extension* extension = GetExtension();
+
+  // The extension pointer should only be null if the extension was uninstalled,
+  // and since the menu just opened, it should still be installed.
+  DCHECK(extension);
+
+  AddItem(NAME, UTF8ToUTF16(extension->name()));
+  AddSeparator();
+  AddItemWithStringId(CONFIGURE, IDS_EXTENSIONS_OPTIONS_MENU_ITEM);
+  AddItemWithStringId(DISABLE, IDS_EXTENSIONS_DISABLE);
+  AddItem(UNINSTALL, l10n_util::GetStringUTF16(IDS_EXTENSIONS_UNINSTALL));
+  if (extension->browser_action())
+    AddItemWithStringId(HIDE, IDS_EXTENSIONS_HIDE_BUTTON);
+  AddSeparator();
+  AddItemWithStringId(MANAGE, IDS_MANAGE_EXTENSIONS);
 }
 
 const Extension* ExtensionContextMenuModel::GetExtension() const {

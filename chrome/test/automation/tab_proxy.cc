@@ -123,37 +123,6 @@ AutomationMsg_NavigationResponseValues
   return navigate_response;
 }
 
-bool TabProxy::SetAuth(const std::wstring& username,
-                       const std::wstring& password) {
-  if (!is_valid())
-    return false;
-
-  AutomationMsg_NavigationResponseValues navigate_response =
-      AUTOMATION_MSG_NAVIGATION_ERROR;
-  sender_->Send(new AutomationMsg_SetAuth(handle_, username, password,
-                                          &navigate_response));
-  return navigate_response == AUTOMATION_MSG_NAVIGATION_SUCCESS;
-}
-
-bool TabProxy::CancelAuth() {
-  if (!is_valid())
-    return false;
-
-  AutomationMsg_NavigationResponseValues navigate_response =
-      AUTOMATION_MSG_NAVIGATION_ERROR;
-  sender_->Send(new AutomationMsg_CancelAuth(handle_, &navigate_response));
-  return navigate_response == AUTOMATION_MSG_NAVIGATION_SUCCESS;
-}
-
-bool TabProxy::NeedsAuth() const {
-  if (!is_valid())
-    return false;
-
-  bool needs_auth = false;
-  sender_->Send(new AutomationMsg_NeedsAuth(handle_, &needs_auth));
-  return needs_auth;
-}
-
 AutomationMsg_NavigationResponseValues TabProxy::GoBack() {
   return GoBackBlockUntilNavigationsComplete(1);
 }
@@ -195,16 +164,6 @@ AutomationMsg_NavigationResponseValues TabProxy::Reload() {
       AUTOMATION_MSG_NAVIGATION_ERROR;
   sender_->Send(new AutomationMsg_Reload(handle_, &navigate_response));
   return navigate_response;
-}
-
-bool TabProxy::GetRedirectsFrom(const GURL& source_url,
-                                std::vector<GURL>* redirects) {
-  bool succeeded = false;
-  sender_->Send(new AutomationMsg_RedirectsFrom(handle_,
-                                                source_url,
-                                                &succeeded,
-                                                redirects));
-  return succeeded;
 }
 
 bool TabProxy::GetCurrentURL(GURL* url) const {
@@ -346,35 +305,6 @@ DOMElementProxyRef TabProxy::GetDOMDocument() {
   if (!ExecuteJavaScriptAndGetReturn("document", &element_handle))
     return NULL;
   return GetObjectProxy<DOMElementProxy>(element_handle);
-}
-
-bool TabProxy::GetConstrainedWindowCount(int* count) const {
-  if (!is_valid())
-    return false;
-
-  if (!count) {
-    NOTREACHED();
-    return false;
-  }
-
-  return sender_->Send(new AutomationMsg_ConstrainedWindowCount(
-      handle_, count));
-}
-
-bool TabProxy::WaitForChildWindowCountToChange(int count, int* new_count,
-                                               int wait_timeout) {
-  int intervals = std::max(wait_timeout / automation::kSleepTime, 1);
-  for (int i = 0; i < intervals; ++i) {
-    base::PlatformThread::Sleep(
-        base::TimeDelta::FromMilliseconds(automation::kSleepTime));
-    bool succeeded = GetConstrainedWindowCount(new_count);
-    if (!succeeded)
-      return false;
-    if (count != *new_count)
-      return true;
-  }
-  // Constrained Window count did not change, return false.
-  return false;
 }
 
 bool TabProxy::GetBlockedPopupCount(int* count) const {
@@ -610,15 +540,6 @@ bool TabProxy::TakeActionOnSSLBlockingPage(bool proceed) {
                                                           &result));
   return result == AUTOMATION_MSG_NAVIGATION_SUCCESS ||
       result == AUTOMATION_MSG_NAVIGATION_AUTH_NEEDED;
-}
-
-bool TabProxy::PrintNow() {
-  if (!is_valid())
-    return false;
-
-  bool succeeded = false;
-  sender_->Send(new AutomationMsg_PrintNow(handle_, &succeeded));
-  return succeeded;
 }
 
 bool TabProxy::PrintAsync() {

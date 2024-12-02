@@ -33,13 +33,12 @@
 #include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/backend_migrator.h"
 #include "chrome/browser/sync/glue/change_processor.h"
+#include "chrome/browser/sync/glue/chrome_encryptor.h"
 #include "chrome/browser/sync/glue/chrome_report_unrecoverable_error.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/glue/session_data_type_controller.h"
 #include "chrome/browser/sync/glue/session_model_associator.h"
 #include "chrome/browser/sync/glue/typed_url_data_type_controller.h"
-#include "chrome/browser/sync/internal_api/configure_reason.h"
-#include "chrome/browser/sync/internal_api/sync_manager.h"
 #include "chrome/browser/sync/profile_sync_components_factory_impl.h"
 #include "chrome/browser/sync/sync_global_error.h"
 #include "chrome/browser/sync/user_selectable_sync_type.h"
@@ -48,8 +47,6 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/global_error_service.h"
 #include "chrome/browser/ui/global_error_service_factory.h"
-#include "chrome/browser/ui/webui/signin/login_ui_service.h"
-#include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
@@ -60,9 +57,11 @@
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "net/cookies/cookie_monster.h"
+#include "sync/internal_api/configure_reason.h"
 #include "sync/js/js_arg_list.h"
 #include "sync/js/js_event_details.h"
 #include "sync/util/cryptographer.h"
+#include "sync/util/experiments.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using browser_sync::ChangeProcessor;
@@ -133,6 +132,12 @@ ProfileSyncService::ProfileSyncService(ProfileSyncComponentsFactory* factory,
       failed_datatypes_handler_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       configure_status_(DataTypeManager::UNKNOWN),
       setup_in_progress_(false) {
+#if defined(OS_ANDROID)
+  chrome::VersionInfo version_info;
+  if (version_info.IsOfficialBuild()) {
+    sync_service_url_ = GURL(kSyncServerUrl);
+  }
+#else
   // By default, dev, canary, and unbranded Chromium users will go to the
   // development servers. Development servers have more features than standard
   // sync servers. Users with officially-branded Chrome stable and beta builds
@@ -145,6 +150,7 @@ ProfileSyncService::ProfileSyncService(ProfileSyncComponentsFactory* factory,
       channel == chrome::VersionInfo::CHANNEL_BETA) {
     sync_service_url_ = GURL(kSyncServerUrl);
   }
+#endif
 }
 
 ProfileSyncService::~ProfileSyncService() {
@@ -221,6 +227,11 @@ void ProfileSyncService::TryStart() {
       OnUnrecoverableError(FROM_HERE, "Sync credentials lost.");
     }
   }
+}
+
+void ProfileSyncService::StartSyncingWithServer() {
+  if (backend_.get())
+    backend_->StartSyncingWithServer();
 }
 
 void ProfileSyncService::RegisterAuthNotifications() {
@@ -397,6 +408,13 @@ void ProfileSyncService::StartUp() {
 
   last_synced_time_ = sync_prefs_.GetLastSyncedTime();
 
+#if defined(OS_CHROMEOS)
+  std::string bootstrap_token = sync_prefs_.GetEncryptionBootstrapToken();
+  if (bootstrap_token.empty()) {
+    sync_prefs_.SetEncryptionBootstrapToken(
+        sync_prefs_.GetSpareBootstrapToken());
+  }
+#endif
   CreateBackend();
 
   // Initialize the backend.  Every time we start up a new SyncBackendHost,
@@ -405,7 +423,7 @@ void ProfileSyncService::StartUp() {
   InitializeBackend(!HasSyncSetupCompleted());
 
   if (!sync_global_error_.get()) {
-    sync_global_error_.reset(new SyncGlobalError(this));
+    sync_global_error_.reset(new SyncGlobalError(this, signin()));
     GlobalErrorServiceFactory::GetForProfile(profile_)->AddGlobalError(
         sync_global_error_.get());
     AddObserver(sync_global_error_.get());
@@ -468,7 +486,7 @@ void ProfileSyncService::ShutdownImpl(bool sync_disabled) {
   expect_sync_configuration_aborted_ = false;
   is_auth_in_progress_ = false;
   backend_initialized_ = false;
-  cached_passphrases_ = CachedPassphrases();
+  cached_passphrase_.clear();
   encryption_pending_ = false;
   encrypt_everything_ = false;
   encrypted_types_ = browser_sync::Cryptographer::SensitiveTypes();
@@ -577,6 +595,13 @@ void ProfileSyncService::RegisterNewDataType(syncable::ModelType data_type) {
 void ProfileSyncService::OnUnrecoverableError(
     const tracked_objects::Location& from_here,
     const std::string& message) {
+  OnUnrecoverableErrorImpl(from_here, message, true);
+}
+
+void ProfileSyncService::OnUnrecoverableErrorImpl(
+    const tracked_objects::Location& from_here,
+    const std::string& message,
+    bool delete_sync_database) {
   unrecoverable_error_detected_ = true;
   unrecoverable_error_message_ = message;
   unrecoverable_error_location_ = from_here;
@@ -591,7 +616,7 @@ void ProfileSyncService::OnUnrecoverableError(
   // Shut all data types down.
   MessageLoop::current()->PostTask(FROM_HERE,
       base::Bind(&ProfileSyncService::ShutdownImpl, weak_factory_.GetWeakPtr(),
-                 true));
+                 delete_sync_database));
 }
 
 void ProfileSyncService::OnDisableDatatype(
@@ -626,15 +651,23 @@ void ProfileSyncService::OnBackendInitialized(
   }
 
   if (!success) {
-    // Something went unexpectedly wrong.  Play it safe: nuke our current state
-    // and prepare ourselves to try again later.
-    DisableForUser();
+    // Something went unexpectedly wrong.  Play it safe: stop syncing at once
+    // and surface error UI to alert the user sync has stopped.
+    // Keep the directory around for now so that on restart we will retry
+    // again and potentially succeed in presence of transient file IO failures
+    // or permissions issues, etc.
+    OnUnrecoverableErrorImpl(FROM_HERE, "BackendInitialize failure", false);
     return;
   }
 
   backend_initialized_ = true;
 
   sync_js_controller_.AttachJsBackend(js_backend);
+
+  // If we have a cached passphrase use it to decrypt/encrypt data now that the
+  // backend is initialized. We want to call this before notifying observers in
+  // case this operation affects the "passphrase required" status.
+  ConsumeCachedPassphraseIfPossible();
 
   // The very first time the backend initializes is effectively the first time
   // we can say we successfully "synced".  last_synced_time_ will only be null
@@ -675,9 +708,11 @@ void ProfileSyncService::OnSyncCycleCompleted() {
   NotifyObservers();
 }
 
-// TODO(sync): eventually support removing datatypes too.
-void ProfileSyncService::OnDataTypesChanged(
-    syncable::ModelTypeSet to_add) {
+void ProfileSyncService::OnExperimentsChanged(
+    const browser_sync::Experiments& experiments) {
+  if (current_experiments.Matches(experiments))
+    return;
+
   // If this is a first time sync for a client, this will be called before
   // OnBackendInitialized() to ensure the new datatypes are available at sync
   // setup. As a result, the migrator won't exist yet. This is fine because for
@@ -685,18 +720,18 @@ void ProfileSyncService::OnDataTypesChanged(
   // available.
   if (migrator_.get() &&
       migrator_->state() != browser_sync::BackendMigrator::IDLE) {
-    DVLOG(1) << "Dropping OnDataTypesChanged due to migrator busy.";
+    DVLOG(1) << "Dropping OnExperimentsChanged due to migrator busy.";
     return;
   }
 
-  DVLOG(2) << "OnDataTypesChanged called with types: "
-           << syncable::ModelTypeSetToString(to_add);
-
   const syncable::ModelTypeSet registered_types = GetRegisteredDataTypes();
-
+  syncable::ModelTypeSet to_add;
+  if (experiments.sync_tabs)
+    to_add.Put(syncable::SESSIONS);
   const syncable::ModelTypeSet to_register =
       Difference(to_add, registered_types);
-
+  DVLOG(2) << "OnExperimentsChanged called with types: "
+           << syncable::ModelTypeSetToString(to_add);
   DVLOG(2) << "Enabling types: " << syncable::ModelTypeSetToString(to_register);
 
   for (syncable::ModelTypeSet::Iterator it = to_register.First();
@@ -704,6 +739,7 @@ void ProfileSyncService::OnDataTypesChanged(
     // Received notice to enable experimental type. Check if the type is
     // registered, and if not register a new datatype controller.
     RegisterNewDataType(it.Get());
+#if !defined(OS_ANDROID)
     // Enable the about:flags switch for the experimental type so we don't have
     // to always perform this reconfiguration. Once we set this, the type will
     // remain registered on restart, so we will no longer go down this code
@@ -714,6 +750,7 @@ void ProfileSyncService::OnDataTypesChanged(
     about_flags::SetExperimentEnabled(g_browser_process->local_state(),
                                       experiment_name,
                                       true);
+#endif  // !defined(OS_ANDROID)
   }
 
   // Check if the user has "Keep Everything Synced" enabled. If so, we want
@@ -734,6 +771,16 @@ void ProfileSyncService::OnDataTypesChanged(
       OnMigrationNeededForTypes(to_register);
     }
   }
+
+  // Now enable any non-datatype features.
+  if (experiments.sync_tab_favicons) {
+    DVLOG(1) << "Enabling syncing of tab favicons.";
+    about_flags::SetExperimentEnabled(g_browser_process->local_state(),
+                                      "sync-tab-favicons",
+                                      true);
+  }
+
+  current_experiments = experiments;
 }
 
 void ProfileSyncService::UpdateAuthErrorState(
@@ -829,48 +876,17 @@ void ProfileSyncService::OnPassphraseRequired(
            << sync_api::PassphraseRequiredReasonToString(reason);
   passphrase_required_reason_ = reason;
 
-  // First try supplying gaia password as the passphrase.
-  if (!cached_passphrases_.gaia_passphrase.empty()) {
-    std::string gaia_passphrase = cached_passphrases_.gaia_passphrase;
-    cached_passphrases_.gaia_passphrase.clear();
-    DVLOG(1) << "Attempting gaia passphrase.";
-    if (!backend_->IsUsingExplicitPassphrase()) {
-      // The passphrase will be re-cached if the syncer isn't ready.
-      SetEncryptionPassphrase(gaia_passphrase, IMPLICIT);
-      return;
-    }
-  }
-
-  // If the above failed then try the custom passphrase the user might have
-  // entered in setup.
-  if (!cached_passphrases_.explicit_passphrase.empty()) {
-    // TODO(atwilson): Remove the cached explicit passphrase. Setup will not let
-    // you specify a passphrase until after the nigori node is downloaded.
-    // See http://crbug.com/95269
-    std::string explicit_passphrase = cached_passphrases_.explicit_passphrase;
-    cached_passphrases_.explicit_passphrase.clear();
-    if (backend_->IsUsingExplicitPassphrase()) {
-      DVLOG(1) << "Attempting explicit passphrase.";
-      // The passphrase will be re-cached if the syncer isn't ready.
-      if (SetDecryptionPassphrase(explicit_passphrase))
-        return;
-    }
-  }
-
-  // If no passphrase is required (due to not having any encrypted data types
-  // enabled), just act as if we don't have any passphrase error. We still
-  // track the auth error in passphrase_required_reason_ in case the user later
-  // re-enables an encrypted data type.
-  if (!IsPassphraseRequiredForDecryption()) {
-    DVLOG(1) << "Decrypting and no encrypted datatypes enabled"
-             << ", accepted passphrase.";
-    ResolvePassphraseRequired();
-  }
+  // Notify observers that the passphrase status may have changed.
   NotifyObservers();
 }
 
 void ProfileSyncService::OnPassphraseAccepted() {
   DVLOG(1) << "Received OnPassphraseAccepted.";
+  // If we are not using an explicit passphrase, and we have a cache of the gaia
+  // password, use it for encryption at this point.
+  DCHECK(cached_passphrase_.empty()) <<
+      "Passphrase no longer required but there is still a cached passphrase";
+
   // Reset passphrase_required_reason_ since we know we no longer require the
   // passphrase. We do this here rather than down in ResolvePassphraseRequired()
   // because that can be called by OnPassphraseRequired() if no encrypted data
@@ -887,21 +903,6 @@ void ProfileSyncService::OnPassphraseAccepted() {
                                   sync_api::CONFIGURE_REASON_RECONFIGURATION);
   }
 
-  ResolvePassphraseRequired();
-}
-
-void ProfileSyncService::ResolvePassphraseRequired() {
-  DCHECK(!IsPassphraseRequiredForDecryption());
-
-  // If we are not using an explicit passphrase, and we have a cache of the gaia
-  // password, use it for encryption at this point.
-  if (!IsUsingSecondaryPassphrase() &&
-      !cached_passphrases_.gaia_passphrase.empty()) {
-    SetEncryptionPassphrase(cached_passphrases_.gaia_passphrase, IMPLICIT);
-  }
-
-  // Don't hold on to a passphrase in raw form longer than needed.
-  cached_passphrases_ = CachedPassphrases();
   NotifyObservers();
 }
 
@@ -965,11 +966,6 @@ void ProfileSyncService::OnActionableError(const SyncProtocolError& error) {
   NotifyObservers();
 }
 
-void ProfileSyncService::ShowErrorUI() {
-  // TODO(atwilson): Remove this.
-  LoginUIServiceFactory::GetForProfile(profile_)->ShowLoginUI(false);
-}
-
 std::string ProfileSyncService::QuerySyncStatusSummary() {
   if (unrecoverable_error_detected_) {
     return "Unrecoverable error detected";
@@ -1016,10 +1012,6 @@ bool ProfileSyncService::waiting_for_auth() const {
 
 bool ProfileSyncService::unrecoverable_error_detected() const {
   return unrecoverable_error_detected_;
-}
-
-bool ProfileSyncService::UIShouldDepictAuthInProgress() const {
-  return signin()->AuthInProgress();
 }
 
 bool ProfileSyncService::IsPassphraseRequired() const {
@@ -1105,6 +1097,23 @@ void ProfileSyncService::UpdateSelectedTypesHistogram(
   }
 }
 
+#if defined(OS_CHROMEOS)
+void ProfileSyncService::RefreshSpareBootstrapToken(
+    const std::string& passphrase) {
+  browser_sync::ChromeEncryptor encryptor;
+  browser_sync::Cryptographer temp_cryptographer(&encryptor);
+  // The first 2 params (hostname and username) doesn't have any effect here.
+  browser_sync::KeyParams key_params = {"localhost", "dummy", passphrase};
+
+  std::string bootstrap_token;
+  if (!temp_cryptographer.AddKey(key_params)) {
+    NOTREACHED() << "Failed to add key to cryptographer.";
+  }
+  temp_cryptographer.GetBootstrapToken(&bootstrap_token);
+  sync_prefs_.SetSpareBootstrapToken(bootstrap_token);
+}
+#endif
+
 void ProfileSyncService::OnUserChoseDatatypes(bool sync_everything,
     syncable::ModelTypeSet chosen_types) {
   if (!backend_.get() &&
@@ -1189,7 +1198,9 @@ void ProfileSyncService::ConfigureDataTypeManager() {
     migrator_.reset(
         new browser_sync::BackendMigrator(
             profile_->GetDebugName(), GetUserShare(),
-            this, data_type_manager_.get()));
+            this, data_type_manager_.get(),
+            base::Bind(&ProfileSyncService::StartSyncingWithServer,
+                       base::Unretained(this))));
   }
 
   const syncable::ModelTypeSet types = GetPreferredDataTypes();
@@ -1223,13 +1234,13 @@ sync_api::UserShare* ProfileSyncService::GetUserShare() const {
   return NULL;
 }
 
-const browser_sync::sessions::SyncSessionSnapshot*
+browser_sync::sessions::SyncSessionSnapshot
     ProfileSyncService::GetLastSessionSnapshot() const {
   if (backend_.get() && backend_initialized_) {
     return backend_->GetLastSessionSnapshot();
   }
   NOTREACHED();
-  return NULL;
+  return browser_sync::sessions::SyncSessionSnapshot();
 }
 
 bool ProfileSyncService::HasUnsyncedItems() const {
@@ -1271,40 +1282,66 @@ void ProfileSyncService::DeactivateDataType(syncable::ModelType type) {
   backend_->DeactivateDataType(type);
 }
 
+void ProfileSyncService::ConsumeCachedPassphraseIfPossible() {
+  // If no cached passphrase, or sync backend hasn't started up yet, just exit.
+  // If the backend isn't running yet, OnBackendInitialized() will call this
+  // method again after the backend starts up.
+  if (cached_passphrase_.empty() || !sync_initialized())
+    return;
+
+  // Backend is up and running, so we can consume the cached passphrase.
+  std::string passphrase = cached_passphrase_;
+  cached_passphrase_.clear();
+
+  // If we need a passphrase to decrypt data, try the cached passphrase.
+  if (passphrase_required_reason() == sync_api::REASON_DECRYPTION) {
+    if (SetDecryptionPassphrase(passphrase)) {
+      DVLOG(1) << "Cached passphrase successfully decrypted pending keys";
+      return;
+    }
+  }
+
+  // If we get here, we don't have pending keys (or at least, the passphrase
+  // doesn't decrypt them) - just try to re-encrypt using the encryption
+  // passphrase.
+  if (!IsUsingSecondaryPassphrase())
+    SetEncryptionPassphrase(passphrase, IMPLICIT);
+}
+
 void ProfileSyncService::SetEncryptionPassphrase(const std::string& passphrase,
                                                  PassphraseType type) {
+  // This should only be called when the backend has been initialized.
+  DCHECK(sync_initialized());
+  DCHECK(!(type == IMPLICIT && IsUsingSecondaryPassphrase())) <<
+      "Data is already encrypted using an explicit passphrase";
+  DCHECK(!(type == EXPLICIT && IsPassphraseRequired())) <<
+      "Cannot switch to an explicit passphrase if a passphrase is required";
+
   if (type == EXPLICIT)
     UMA_HISTOGRAM_BOOLEAN("Sync.CustomPassphrase", true);
 
-  if (ShouldPushChanges() || IsPassphraseRequired()) {
-    if (type == IMPLICIT && backend_->IsUsingExplicitPassphrase()) {
-      // This should only happen when you re-auth (or when you log in on
-      // ChromeOS).
-      DVLOG(1) << "Ignoring implicit passphrase, explicit passphrase already "
-               << "set.";
-      return;
-    }
-    DVLOG(1) << "Setting " << (type == EXPLICIT ? "explicit" : "implicit")
-             << " passphrase for encryption.";
-    backend_->SetEncryptionPassphrase(passphrase, type == EXPLICIT);
-  } else {
-    if (type == IMPLICIT) {
-      DVLOG(1) << "Caching gaia passphrase.";
-      cached_passphrases_.gaia_passphrase = passphrase;
-    } else {
-      NOTREACHED();
-    }
+  DVLOG(1) << "Setting " << (type == EXPLICIT ? "explicit" : "implicit")
+           << " passphrase for encryption.";
+  if (passphrase_required_reason_ == sync_api::REASON_ENCRYPTION) {
+    // REASON_ENCRYPTION implies that the cryptographer does not have pending
+    // keys. Hence, as long as we're not trying to do an invalid passphrase
+    // change (e.g. explicit -> explicit or explicit -> implicit), we know this
+    // will succeed. If for some reason a new encryption key arrives via
+    // sync later, the SBH will trigger another OnPassphraseRequired().
+    passphrase_required_reason_ = sync_api::REASON_PASSPHRASE_NOT_REQUIRED;
+    NotifyObservers();
   }
+  backend_->SetEncryptionPassphrase(passphrase, type == EXPLICIT);
 }
 
 bool ProfileSyncService::SetDecryptionPassphrase(
     const std::string& passphrase) {
-  if (ShouldPushChanges() || IsPassphraseRequired()) {
+  if (IsPassphraseRequired()) {
     DVLOG(1) << "Setting passphrase for decryption.";
     return backend_->SetDecryptionPassphrase(passphrase);
   } else {
-    NOTREACHED() << "SetDecryptionPassphrase must not be called when both "
-                    "ShouldPushChanges() and IsPassphraseRequired() are false.";
+    NOTREACHED() << "SetDecryptionPassphrase must not be called when "
+                    "IsPassphraseRequired() is false.";
     return false;
   }
 }
@@ -1359,6 +1396,10 @@ void ProfileSyncService::Observe(int type,
       break;
     }
     case chrome::NOTIFICATION_SYNC_CONFIGURE_DONE: {
+      // We should have cleared our cached passphrase before we get here (in
+      // OnBackendInitialized()).
+      DCHECK(cached_passphrase_.empty());
+
       DataTypeManager::ConfigureResult* result =
           content::Details<DataTypeManager::ConfigureResult>(details).ptr();
 
@@ -1417,26 +1458,21 @@ void ProfileSyncService::Observe(int type,
       DCHECK(!(IsPassphraseRequiredForDecryption() &&
                !IsEncryptedDatatypeEnabled()));
 
-      // Ensure we consume any cached gaia passphrase now that we've finished
-      // setting up. SetEncryptionPassphrase will drop any implicit passphrases
-      // if an explicit passphrase has already been set, so this is safe.
-      if (!cached_passphrases_.gaia_passphrase.empty()) {
-        std::string gaia_passphrase = cached_passphrases_.gaia_passphrase;
-        cached_passphrases_.gaia_passphrase.clear();
-        DVLOG(1) << "Consuming cached gaia passphrase.";
-        SetEncryptionPassphrase(gaia_passphrase, IMPLICIT);
-      }
-
       // This must be done before we start syncing with the server to avoid
       // sending unencrypted data up on a first time sync.
       if (encryption_pending_)
         backend_->EnableEncryptEverything();
       NotifyObservers();
 
-      // In the old world, this would be a no-op.  With new syncer thread,
-      // this is the point where it is safe to switch from config-mode to
-      // normal operation.
-      backend_->StartSyncingWithServer();
+      if (migrator_.get() &&
+          migrator_->state() != browser_sync::BackendMigrator::IDLE) {
+        // Migration in progress.  Let the migrator know we just finished
+        // configuring something.  It will be up to the migrator to call
+        // StartSyncingWithServer() if migration is now finished.
+        migrator_->OnConfigureDone(*result);
+      } else {
+        StartSyncingWithServer();
+      }
 
       break;
     }
@@ -1444,15 +1480,17 @@ void ProfileSyncService::Observe(int type,
       const GoogleServiceSigninSuccessDetails* successful =
           content::Details<const GoogleServiceSigninSuccessDetails>(
               details).ptr();
-      // We cannot override a previously set explicit passphrase with an
-      // implicit one.
-      // TODO(sync): This is the only place where SetEncryptionPassphrase may be
-      // called before the backend is initialized. It makes sense for this to be
-      // the place where we cache the gaia password, rather than in
-      // SetEncryptionPassphrase. http://crbug.com/95269.
-      if (!successful->password.empty())
-        SetEncryptionPassphrase(successful->password, IMPLICIT);
-
+      DCHECK(!successful->password.empty());
+      if (!sync_prefs_.IsStartSuppressed()) {
+        cached_passphrase_ = successful->password;
+        // Try to consume the passphrase we just cached. If the sync backend
+        // is not running yet, the passphrase will remain cached until the
+        // backend starts up.
+        ConsumeCachedPassphraseIfPossible();
+      }
+#if defined(OS_CHROMEOS)
+      RefreshSpareBootstrapToken(successful->password);
+#endif
       if (!sync_initialized() ||
           GetAuthError().state() != GoogleServiceAuthError::NONE) {
         // Track the fact that we're still waiting for auth to complete.
@@ -1464,7 +1502,14 @@ void ProfileSyncService::Observe(int type,
       const TokenService::TokenRequestFailedDetails& token_details =
           *(content::Details<const TokenService::TokenRequestFailedDetails>(
               details).ptr());
-      if (IsTokenServiceRelevant(token_details.service())) {
+      if (IsTokenServiceRelevant(token_details.service()) &&
+          !AreCredentialsAvailable()) {
+        // The additional check around AreCredentialsAvailable above prevents us
+        // sounding the alarm if we actually have a valid token but a refresh
+        // attempt by TokenService failed for any variety of reasons (e.g. flaky
+        // network). It's possible the token we do have is also invalid, but in
+        // that case we should already have (or can expect) an auth error sent
+        // from the sync backend.
         GoogleServiceAuthError error(
             GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);
         UpdateAuthErrorState(error);

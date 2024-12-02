@@ -9,6 +9,7 @@
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/scoped_temp_dir.h"
 #include "base/stl_util.h"
 #include "base/string16.h"
@@ -22,6 +23,7 @@
 #include "content/browser/download/download_manager_impl.h"
 #include "content/browser/download/download_request_handle.h"
 #include "content/browser/download/mock_download_file.h"
+#include "content/browser/power_save_blocker.h"
 #include "content/public/browser/download_interrupt_reasons.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager_delegate.h"
@@ -60,6 +62,7 @@ using content::DownloadId;
 using content::DownloadItem;
 using content::DownloadManager;
 using content::WebContents;
+using ::testing::NiceMock;
 using ::testing::ReturnRef;
 using ::testing::Return;
 
@@ -348,6 +351,7 @@ DownloadFileWithErrors::DownloadFileWithErrors(DownloadCreateInfo* info,
                        new DownloadRequestHandle(),
                        manager,
                        calculate_hash,
+                       scoped_ptr<PowerSaveBlocker>(NULL).Pass(),
                        net::BoundNetLog()),
       forced_error_(net::OK) {
 }
@@ -538,7 +542,9 @@ TEST_F(DownloadManagerTest, MAYBE_StartDownload) {
 
     DownloadFile* download_file(
         new DownloadFileImpl(info.get(), new DownloadRequestHandle(),
-                             download_manager_, false, net::BoundNetLog()));
+                             download_manager_, false,
+                             scoped_ptr<PowerSaveBlocker>(NULL).Pass(),
+                             net::BoundNetLog()));
     AddDownloadToFileManager(info->download_id.local(), download_file);
     download_file->Initialize();
     download_manager_->StartDownload(info->download_id.local());
@@ -803,7 +809,7 @@ TEST_F(DownloadManagerTest, DownloadFilenameTest) {
     info->download_id = DownloadId(kValidIdDomain, i);
     info->url_chain.push_back(GURL());
 
-    MockDownloadFile* download_file(new MockDownloadFile());
+    MockDownloadFile* download_file(new NiceMock<MockDownloadFile>());
     FilePath suggested_path(ExpandFilenameTestPath(
         kDownloadFilenameTestCases[i].suggested_path,
         downloads_dir, alternate_dir));
@@ -881,7 +887,7 @@ TEST_F(DownloadManagerTest, DownloadRenameTest) {
     info->url_chain.push_back(GURL());
     const FilePath new_path(kDownloadRenameCases[i].suggested_path);
 
-    MockDownloadFile* download_file(new MockDownloadFile());
+    MockDownloadFile* download_file(new NiceMock<MockDownloadFile>());
     const DownloadId id = info->download_id;
     ON_CALL(*download_file, GlobalId())
         .WillByDefault(ReturnRef(id));
@@ -943,7 +949,7 @@ TEST_F(DownloadManagerTest, DownloadInterruptTest) {
   const FilePath new_path(FILE_PATH_LITERAL("foo.zip"));
   const FilePath cr_path(GetTempDownloadPath(new_path));
 
-  MockDownloadFile* download_file(new MockDownloadFile());
+  MockDownloadFile* download_file(new NiceMock<MockDownloadFile>());
   ON_CALL(*download_file, AppendDataToFile(_, _))
       .WillByDefault(Return(net::OK));
 
@@ -1087,7 +1093,7 @@ TEST_F(DownloadManagerTest, DownloadCancelTest) {
   const FilePath new_path(FILE_PATH_LITERAL("foo.zip"));
   const FilePath cr_path(GetTempDownloadPath(new_path));
 
-  MockDownloadFile* download_file(new MockDownloadFile());
+  MockDownloadFile* download_file(new NiceMock<MockDownloadFile>());
   ON_CALL(*download_file, AppendDataToFile(_, _))
       .WillByDefault(Return(net::OK));
   AddMockDownloadToFileManager(info->download_id.local(), download_file);
@@ -1183,7 +1189,9 @@ TEST_F(DownloadManagerTest, MAYBE_DownloadOverwriteTest) {
   // properly.
   DownloadFile* download_file(
       new DownloadFileImpl(info.get(), new DownloadRequestHandle(),
-                           download_manager_, false, net::BoundNetLog()));
+                           download_manager_, false,
+                           scoped_ptr<PowerSaveBlocker>(NULL).Pass(),
+                           net::BoundNetLog()));
   download_file->Rename(cr_path);
   // This creates the .temp version of the file.
   download_file->Initialize();
@@ -1257,7 +1265,9 @@ TEST_F(DownloadManagerTest, MAYBE_DownloadRemoveTest) {
   // properly.
   DownloadFile* download_file(
       new DownloadFileImpl(info.get(), new DownloadRequestHandle(),
-                           download_manager_, false, net::BoundNetLog()));
+                           download_manager_, false,
+                           scoped_ptr<PowerSaveBlocker>(NULL).Pass(),
+                           net::BoundNetLog()));
   download_file->Rename(cr_path);
   // This creates the .temp version of the file.
   download_file->Initialize();

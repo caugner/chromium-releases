@@ -17,11 +17,11 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/cros_settings.h"
-#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
-#include "chrome/browser/chromeos/dbus/power_manager_client.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
+#include "chrome/browser/chromeos/login/authenticator.h"
+#include "chrome/browser/chromeos/login/base_login_display_host.h"
 #include "chrome/browser/chromeos/login/captive_portal_window_proxy.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user.h"
@@ -32,6 +32,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/common/url_constants.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/power_manager_client.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
@@ -78,17 +80,6 @@ const int kMaxUsers = 5;
 const char kReasonNetworkChanged[] = "network changed";
 const char kReasonProxyChanged[] = "proxy changed";
 const char kReasonPortalDetected[] = "portal detected";
-
-// Sanitize emails. Currently, it only ensures all emails have a domain.
-std::string SanitizeEmail(const std::string& email) {
-  std::string sanitized(email);
-
-  // Apply a default domain if necessary.
-  if (sanitized.find('@') == std::string::npos)
-    sanitized += kDefaultDomain;
-
-  return sanitized;
-}
 
 // The Task posted to PostTaskAndReply in StartClearingDnsCache on the IO
 // thread.
@@ -195,6 +186,9 @@ void NetworkStateInformer::Init() {
   registrar_.Add(this,
                  chrome::NOTIFICATION_LOGIN_PROXY_CHANGED,
                  content::NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_SESSION_STARTED,
+                 content::NotificationService::AllSources());
 }
 
 NetworkStateInformer::~NetworkStateInformer() {
@@ -230,8 +224,12 @@ void NetworkStateInformer::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK_EQ(type, chrome::NOTIFICATION_LOGIN_PROXY_CHANGED);
-  SendStateToObservers(kReasonProxyChanged);
+  if (type == chrome::NOTIFICATION_SESSION_STARTED)
+    registrar_.RemoveAll();
+  else if (type == chrome::NOTIFICATION_LOGIN_PROXY_CHANGED)
+    SendStateToObservers(kReasonProxyChanged);
+  else
+    NOTREACHED() << "Unknown notification: " << type;
 }
 
 void NetworkStateInformer::OnPortalDetected() {
@@ -286,8 +284,7 @@ SigninScreenHandler::SigninScreenHandler()
       dns_clear_task_running_(false),
       cookies_cleared_(false),
       cookie_remover_(NULL),
-      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
-      key_event_listener_(NULL) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   CrosSettings::Get()->AddSettingsObserver(kAccountsPrefAllowNewUser, this);
   CrosSettings::Get()->AddSettingsObserver(kAccountsPrefAllowGuest, this);
 }
@@ -296,8 +293,12 @@ SigninScreenHandler::~SigninScreenHandler() {
   weak_factory_.InvalidateWeakPtrs();
   if (cookie_remover_)
     cookie_remover_->RemoveObserver(this);
-  if (key_event_listener_)
-    key_event_listener_->RemoveCapsLockObserver(this);
+  SystemKeyEventListener* key_event_listener =
+      SystemKeyEventListener::GetInstance();
+  if (key_event_listener)
+    key_event_listener->RemoveCapsLockObserver(this);
+  if (delegate_)
+    delegate_->SetWebUIHandler(NULL);
   CrosSettings::Get()->RemoveSettingsObserver(kAccountsPrefAllowNewUser, this);
   CrosSettings::Get()->RemoveSettingsObserver(kAccountsPrefAllowGuest, this);
 }
@@ -341,6 +342,8 @@ void SigninScreenHandler::GetLocalizedStrings(
       l10n_util::GetStringUTF16(IDS_LOGIN_MAYBE_CAPTIVE_PORTAL_TITLE));
   localized_strings->SetString("captivePortalMessage",
       l10n_util::GetStringUTF16(IDS_LOGIN_MAYBE_CAPTIVE_PORTAL));
+  localized_strings->SetString("captivePortalProxyMessage",
+      l10n_util::GetStringUTF16(IDS_LOGIN_MAYBE_CAPTIVE_PORTAL_PROXY));
   localized_strings->SetString("captivePortalNetworkSelect",
       l10n_util::GetStringUTF16(IDS_LOGIN_MAYBE_CAPTIVE_PORTAL_NETWORK_SELECT));
   localized_strings->SetString("proxyMessageText",
@@ -403,9 +406,10 @@ void SigninScreenHandler::Initialize() {
     return;
 
   // Register for Caps Lock state change notifications;
-  key_event_listener_ = SystemKeyEventListener::GetInstance();
-  if (key_event_listener_)
-    key_event_listener_->AddCapsLockObserver(this);
+  SystemKeyEventListener* key_event_listener =
+      SystemKeyEventListener::GetInstance();
+  if (key_event_listener)
+    key_event_listener->AddCapsLockObserver(this);
 
   if (show_on_init_) {
     show_on_init_ = false;
@@ -486,6 +490,9 @@ void SigninScreenHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("networkErrorShown",
       base::Bind(&SigninScreenHandler::HandleNetworkErrorShown,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("openProxySettings",
+      base::Bind(&SigninScreenHandler::HandleOpenProxySettings,
+                 base::Unretained(this)));
 }
 
 void SigninScreenHandler::HandleGetUsers(const base::ListValue* args) {
@@ -544,6 +551,10 @@ void SigninScreenHandler::ShowGaiaPasswordChanged(const std::string& username) {
   web_ui()->CallJavascriptFunction("cr.ui.Oobe.showSigninUI", email_value);
   web_ui()->CallJavascriptFunction(
       "login.AccountPickerScreen.updateUserGaiaNeeded", email_value);
+}
+
+void SigninScreenHandler::ResetSigninScreenHandlerDelegate() {
+  SetDelegate(NULL);
 }
 
 void SigninScreenHandler::OnBrowsingDataRemoverDone() {
@@ -685,7 +696,7 @@ void SigninScreenHandler::HandleCompleteLogin(const base::ListValue* args) {
     return;
   }
 
-  typed_email = SanitizeEmail(typed_email);
+  typed_email = Authenticator::Sanitize(typed_email);
   delegate_->SetDisplayEmail(typed_email);
   delegate_->CompleteLogin(typed_email, password);
 }
@@ -702,7 +713,7 @@ void SigninScreenHandler::HandleAuthenticateUser(const base::ListValue* args) {
     return;
   }
 
-  username = SanitizeEmail(username);
+  username = Authenticator::Sanitize(username);
   delegate_->Login(username, password);
 }
 
@@ -978,6 +989,10 @@ void SigninScreenHandler::HandleCreateAccount(const base::ListValue* args) {
   if (!delegate_)
     return;
   delegate_->CreateAccount();
+}
+
+void SigninScreenHandler::HandleOpenProxySettings(const base::ListValue* args) {
+  BaseLoginDisplayHost::default_host()->OpenProxySettings();
 }
 
 void SigninScreenHandler::StartClearingDnsCache() {

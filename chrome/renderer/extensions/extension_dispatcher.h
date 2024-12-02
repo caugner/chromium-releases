@@ -21,8 +21,9 @@
 #include "chrome/renderer/resource_bundle_source_map.h"
 #include "v8/include/v8.h"
 
-class ModuleSystem;
+class ExtensionRequestSender;
 class GURL;
+class ModuleSystem;
 class URLPattern;
 class UserScriptSlave;
 struct ExtensionMsg_Loaded_Params;
@@ -88,9 +89,6 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
                                 v8::Handle<v8::Context> context,
                                 int world_id);
 
-  void SetTestExtensionId(const std::string& extension_id);
-  bool IsTestExtensionId(const std::string& id);
-
   // TODO(mpcomplete): remove. http://crbug.com/100411
   bool IsAdblockWithWebRequestInstalled() const {
     return webrequest_adblock_;
@@ -101,6 +99,17 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
   bool IsOtherExtensionWithWebRequestInstalled() const {
     return webrequest_other_;
   }
+
+  void OnExtensionResponse(int request_id,
+                           bool success,
+                           const base::ListValue& response,
+                           const std::string& error);
+
+  // Checks that the current context contains an extension that has permission
+  // to execute the specified function. If it does not, a v8 exception is thrown
+  // and the method returns false. Otherwise returns true.
+  bool CheckCurrentContextAccessToExtensionAPI(
+      const std::string& function_name) const;
 
  private:
   friend class RenderViewTest;
@@ -118,7 +127,13 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
                        const base::ListValue& args,
                        const GURL& event_url,
                        bool user_gesture);
+  void OnDispatchOnConnect(int target_port_id,
+                           const std::string& channel_name,
+                           const std::string& tab_json,
+                           const std::string& source_extension_id,
+                           const std::string& target_extension_id);
   void OnDeliverMessage(int target_port_id, const std::string& message);
+  void OnDispatchOnDisconnect(int port_id, bool connection_error);
   void OnSetFunctionNames(const std::vector<std::string>& names);
   void OnLoaded(
       const std::vector<ExtensionMsg_Loaded_Params>& loaded_extensions);
@@ -138,7 +153,8 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
       bool adblock,
       bool adblock_plus,
       bool other_webrequest);
-  void OnShouldClose(const std::string& extension_id, int sequence_id);
+  void OnShouldUnload(const std::string& extension_id, int sequence_id);
+  void OnUnload(const std::string& extension_id);
 
   // Update the list of active extensions that will be reported when we crash.
   void UpdateActiveExtensions();
@@ -203,8 +219,6 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
   // True once WebKit has been initialized (and it is therefore safe to poke).
   bool is_webkit_initialized_;
 
-  std::string test_extension_id_;
-
   // Status of webrequest usage for known extensions.
   // TODO(mpcomplete): remove. http://crbug.com/100411
   bool webrequest_adblock_;
@@ -219,6 +233,9 @@ class ExtensionDispatcher : public content::RenderProcessObserver {
   // Bindings that are defined lazily and have BindingInstallers to install
   // them.
   std::map<std::string, BindingInstaller> lazy_bindings_map_;
+
+  // Sends API requests to the extension host.
+  scoped_ptr<ExtensionRequestSender> request_sender_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionDispatcher);
 };

@@ -14,6 +14,7 @@
 #include "base/rand_util.h"
 #include "base/stringprintf.h"
 #include "base/time.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_extensions.h"
@@ -37,8 +38,11 @@
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
+#include "content/public/browser/web_intents_dispatcher.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "webkit/glue/web_intent_data.h"
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/ui/browser.h"
@@ -88,8 +92,12 @@ bool ChromeDownloadManagerDelegate::IsExtensionDownload(
   if (item->PromptUserForSaveLocation())
     return false;
 
-  return (item->GetMimeType() == Extension::kMimeType) ||
-      UserScript::IsURLUserScript(item->GetURL(), item->GetMimeType());
+  if ((item->GetMimeType() != Extension::kMimeType) &&
+      !UserScript::IsURLUserScript(item->GetURL(), item->GetMimeType())) {
+    return false;
+  }
+
+  return download_crx_util::ShouldOpenExtensionDownload(*item);
 }
 
 void ChromeDownloadManagerDelegate::SetDownloadManager(DownloadManager* dm) {
@@ -150,11 +158,11 @@ void ChromeDownloadManagerDelegate::ChooseDownloadPath(
     int32 download_id) {
   // Deletes itself.
 #if defined(OS_CHROMEOS)
-  new DownloadFilePickerChromeOS(
+  new DownloadFilePickerChromeOS
 #else
-  new DownloadFilePicker(
+  new DownloadFilePicker
 #endif
-      download_manager_, web_contents, suggested_path, download_id);
+      (download_manager_, web_contents, suggested_path, download_id);
 }
 
 FilePath ChromeDownloadManagerDelegate::GetIntermediatePath(
@@ -189,33 +197,51 @@ bool ChromeDownloadManagerDelegate::ShouldOpenFileBasedOnExtension(
   return download_prefs_->IsAutoOpenEnabledForExtension(extension);
 }
 
+// static
+void ChromeDownloadManagerDelegate::DisableSafeBrowsing(DownloadItem* item) {
+#if defined(ENABLE_SAFE_BROWSING)
+  SafeBrowsingState* state = static_cast<SafeBrowsingState*>(
+      item->GetExternalData(&safe_browsing_id));
+  DCHECK(state == NULL);
+  if (state == NULL) {
+    state = new SafeBrowsingState();
+    item->SetExternalData(&safe_browsing_id, state);
+  }
+  state->pending = false;
+  state->verdict = DownloadProtectionService::SAFE;
+#endif
+}
+
 bool ChromeDownloadManagerDelegate::ShouldCompleteDownload(DownloadItem* item) {
 #if defined(ENABLE_SAFE_BROWSING)
   // See if there is already a pending SafeBrowsing check for that download.
   SafeBrowsingState* state = static_cast<SafeBrowsingState*>(
       item->GetExternalData(&safe_browsing_id));
-  if (state)
-    // Don't complete the download until we have an answer.
-    return !state->pending;
-
-  // Begin the safe browsing download protection check.
-  DownloadProtectionService* service = GetDownloadProtectionService();
-  if (service) {
-    VLOG(2) << __FUNCTION__ << "() Start SB download check for download = "
-            << item->DebugString(false);
-    state = new SafeBrowsingState();
-    state->pending = true;
-    state->verdict = DownloadProtectionService::SAFE;
-    item->SetExternalData(&safe_browsing_id, state);
-    service->CheckClientDownload(
-        DownloadProtectionService::DownloadInfo::FromDownloadItem(*item),
-        base::Bind(
-            &ChromeDownloadManagerDelegate::CheckClientDownloadDone,
-            this,
-            item->GetId()));
+  // Don't complete the download until we have an answer.
+  if (state && state->pending)
     return false;
+
+  if (state == NULL) {
+    // Begin the safe browsing download protection check.
+    DownloadProtectionService* service = GetDownloadProtectionService();
+    if (service) {
+      VLOG(2) << __FUNCTION__ << "() Start SB download check for download = "
+              << item->DebugString(false);
+      state = new SafeBrowsingState();
+      state->pending = true;
+      state->verdict = DownloadProtectionService::SAFE;
+      item->SetExternalData(&safe_browsing_id, state);
+      service->CheckClientDownload(
+          DownloadProtectionService::DownloadInfo::FromDownloadItem(*item),
+          base::Bind(
+              &ChromeDownloadManagerDelegate::CheckClientDownloadDone,
+              this,
+              item->GetId()));
+      return false;
+    }
   }
 #endif
+
 #if defined(OS_CHROMEOS)
   // If there's a GData upload associated with this download, we wait until that
   // is complete before allowing the download item to complete.
@@ -226,26 +252,81 @@ bool ChromeDownloadManagerDelegate::ShouldCompleteDownload(DownloadItem* item) {
 }
 
 bool ChromeDownloadManagerDelegate::ShouldOpenDownload(DownloadItem* item) {
-  if (!IsExtensionDownload(item)) {
+  if (IsExtensionDownload(item)) {
+    scoped_refptr<CrxInstaller> crx_installer =
+        download_crx_util::OpenChromeExtension(profile_, *item);
+
+    // CRX_INSTALLER_DONE will fire when the install completes.  Observe()
+    // will call DelayedDownloadOpened() on this item.  If this DownloadItem is
+    // not around when CRX_INSTALLER_DONE fires, Complete() will not be called.
+    registrar_.Add(this,
+                   chrome::NOTIFICATION_CRX_INSTALLER_DONE,
+                   content::Source<CrxInstaller>(crx_installer.get()));
+
+    crx_installers_[crx_installer.get()] = item->GetId();
+    // The status text and percent complete indicator will change now
+    // that we are installing a CRX.  Update observers so that they pick
+    // up the change.
+    item->UpdateObservers();
+    return false;
+  }
+
+  if (ShouldOpenWithWebIntents(item)) {
+    OpenWithWebIntent(item);
+    item->DelayedDownloadOpened();
+    return false;
+  }
+
+  return true;
+}
+
+bool ChromeDownloadManagerDelegate::ShouldOpenWithWebIntents(
+    const DownloadItem* item) {
+  if (!item->GetWebContents() || !item->GetWebContents()->GetDelegate())
+    return false;
+
+  std::string mime_type = item->GetMimeType();
+  if (mime_type == "application/rss+xml" ||
+      mime_type == "application/atom+xml") {
     return true;
   }
 
-  scoped_refptr<CrxInstaller> crx_installer =
-      download_crx_util::OpenChromeExtension(profile_, *item);
+#if defined(OS_CHROMEOS)
+  if (mime_type == "application/msword" ||
+      mime_type == "application/vnd.ms-powerpoint" ||
+      mime_type == "application/vnd.ms-excel" ||
+      mime_type == "application/vnd.openxmlformats-officedocument."
+                   "wordprocessingml.document" ||
+      mime_type == "application/vnd.openxmlformats-officedocument."
+                   "presentationml.presentation" ||
+      mime_type == "application/vnd.openxmlformats-officedocument."
+                   "spreadsheetml.sheet") {
+    return true;
+  }
+#endif  // defined(OS_CHROMEOS)
 
-  // CRX_INSTALLER_DONE will fire when the install completes.  Observe()
-  // will call DelayedDownloadOpened() on this item.  If this DownloadItem is
-  // not around when CRX_INSTALLER_DONE fires, Complete() will not be called.
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_CRX_INSTALLER_DONE,
-                 content::Source<CrxInstaller>(crx_installer.get()));
-
-  crx_installers_[crx_installer.get()] = item->GetId();
-  // The status text and percent complete indicator will change now
-  // that we are installing a CRX.  Update observers so that they pick
-  // up the change.
-  item->UpdateObservers();
   return false;
+}
+
+void ChromeDownloadManagerDelegate::OpenWithWebIntent(
+    const DownloadItem* item) {
+  webkit_glue::WebIntentData intent_data(
+      ASCIIToUTF16("http://webintents.org/view"),
+      ASCIIToUTF16(item->GetMimeType()),
+      item->GetFullPath(),
+      item->GetReceivedBytes());
+
+  // TODO(gbillock): Should we pass this? RCH specifies that the receiver gets
+  // the url, but with web intents we don't need to pass it.
+  intent_data.extra_data.insert(make_pair(
+      ASCIIToUTF16("url"), ASCIIToUTF16(item->GetURL().spec())));
+
+  content::WebIntentsDispatcher* dispatcher =
+      content::WebIntentsDispatcher::Create(intent_data);
+  // TODO(gbillock): try to get this to be able to delegate to the Browser
+  // object directly, passing a NULL WebContents?
+  item->GetWebContents()->GetDelegate()->WebIntentDispatch(
+      item->GetWebContents(), dispatcher);
 }
 
 bool ChromeDownloadManagerDelegate::GenerateFileHash() {
@@ -316,11 +397,10 @@ void ChromeDownloadManagerDelegate::ChooseSavePath(
     const FilePath& suggested_path,
     const FilePath::StringType& default_extension,
     bool can_save_as_complete,
-    content::SaveFilePathPickedCallback callback) {
+    const content::SavePackagePathPickedCallback& callback) {
   // Deletes itself.
 #if defined(OS_CHROMEOS)
-  // Note that we're ignoring the callback here. TODO(achuith): Fix this.
-  new SavePackageFilePickerChromeOS(web_contents, suggested_path);
+  new SavePackageFilePickerChromeOS(web_contents, suggested_path, callback);
 #else
   new SavePackageFilePicker(web_contents, suggested_path, default_extension,
       can_save_as_complete, download_prefs_.get(), callback);

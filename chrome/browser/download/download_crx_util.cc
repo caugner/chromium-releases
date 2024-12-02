@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -8,8 +8,10 @@
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/extension_switch_utils.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/notification_service.h"
 
@@ -49,6 +51,15 @@ void SetMockInstallUIForTesting(ExtensionInstallUI* mock_ui) {
   mock_install_ui_for_testing = mock_ui;
 }
 
+bool ShouldOpenExtensionDownload(const DownloadItem& download_item) {
+  if (extensions::switch_utils::IsOffStoreInstallEnabled() ||
+      WebstoreInstaller::GetAssociatedApproval(download_item)) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
 scoped_refptr<CrxInstaller> OpenChromeExtension(
     Profile* profile,
     const DownloadItem& download_item) {
@@ -58,7 +69,10 @@ scoped_refptr<CrxInstaller> OpenChromeExtension(
   CHECK(service);
 
   scoped_refptr<CrxInstaller> installer(
-      CrxInstaller::Create(service, CreateExtensionInstallUI(profile)));
+      CrxInstaller::Create(
+          service,
+          CreateExtensionInstallUI(profile),
+          WebstoreInstaller::GetAssociatedApproval(download_item)));
   installer->set_delete_source(true);
 
   if (UserScript::IsURLUserScript(download_item.GetURL(),

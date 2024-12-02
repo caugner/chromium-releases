@@ -9,7 +9,7 @@
 #include "ash/ash_export.h"
 #include "ash/system/user/login_status.h"
 #include "base/basictypes.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/compiler_specific.h"
 
 namespace views {
 class View;
@@ -24,6 +24,10 @@ class ASH_EXPORT SystemTrayItem {
 
   // Returns a view to be displayed in the system tray. If this returns NULL,
   // then this item is not displayed in the tray.
+  // NOTE: The returned view should almost always be a TrayItemView, which
+  // automatically resizes the widget when the size of the view changes, and
+  // adds animation when the visibility of the view changes. If a view wants to
+  // avoid these behaviour, then it should not be a TrayItemView.
   virtual views::View* CreateTrayView(user::LoginStatus status) = 0;
 
   // Returns a view for the item to be displayed in the list. This view can be
@@ -39,6 +43,11 @@ class ASH_EXPORT SystemTrayItem {
   virtual void DestroyTrayView() = 0;
   virtual void DestroyDefaultView() = 0;
   virtual void DestroyDetailedView() = 0;
+
+  // Updates the tray view (if applicable) when the user's login status changes.
+  // It is not necessary the update the default or detailed view, since the
+  // default/detailed popup is closed when login status changes.
+  virtual void UpdateAfterLoginStatusChange(user::LoginStatus status) = 0;
 
   // Pops up the detailed view for this item. An item can request to show its
   // detailed view using this function (e.g. from an observer callback when

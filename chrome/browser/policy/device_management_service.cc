@@ -186,9 +186,10 @@ const std::string& GetPlatformString() {
 class DeviceManagementRequestContext : public net::URLRequestContext {
  public:
   explicit DeviceManagementRequestContext(net::URLRequestContext* base_context);
-  virtual ~DeviceManagementRequestContext();
 
  private:
+  virtual ~DeviceManagementRequestContext();
+
   // Overridden from net::URLRequestContext:
   virtual const std::string& GetUserAgent(const GURL& url) const OVERRIDE;
 };
@@ -237,6 +238,9 @@ class DeviceManagementRequestContextGetter
   virtual net::URLRequestContext* GetURLRequestContext() OVERRIDE;
   virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy()
       const OVERRIDE;
+
+ protected:
+  virtual ~DeviceManagementRequestContextGetter() {}
 
  private:
   scoped_refptr<net::URLRequestContext> context_;

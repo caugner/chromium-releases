@@ -4,9 +4,9 @@
  * found in the LICENSE file.
  */
 
+#include "native_client/src/shared/imc/nacl_imc_c.h"
 #include "native_client/src/shared/platform/nacl_time.h"
 #include "native_client/src/trusted/desc/nrd_all_modules.h"
-#include "native_client/src/trusted/handle_pass/browser_handle.h"
 #include "native_client/src/trusted/plugin/nacl_entry_points.h"
 #include "native_client/src/trusted/plugin/plugin.h"
 
@@ -56,8 +56,9 @@ class ModulePpapi : public pp::Module {
     NaClSrpcModuleInit();
 
 #if NACL_WINDOWS && !defined(NACL_STANDALONE)
-    NaClHandlePassBrowserInit();
+    NaClSetBrokerDuplicateHandleFunc(private_interface_->BrokerDuplicateHandle);
 #endif
+
     init_was_successful_ = true;
     return true;
   }

@@ -58,6 +58,8 @@ ChromeWebUIDataSource* CreateSyncInternalsHTMLSource() {
   source->add_resource_path("search.js", IDR_SYNC_INTERNALS_SEARCH_JS);
   source->add_resource_path("node_browser.js",
                             IDR_SYNC_INTERNALS_NODE_BROWSER_JS);
+  source->add_resource_path("traffic.js",
+                            IDR_SYNC_INTERNALS_TRAFFIC_JS);
   source->set_default_resource(IDR_SYNC_INTERNALS_INDEX_HTML);
   return source;
 }
@@ -80,8 +82,7 @@ SyncInternalsUI::SyncInternalsUI(content::WebUI* web_ui)
       weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   // TODO(akalin): Fix.
   Profile* profile = Profile::FromWebUI(web_ui);
-  profile->GetChromeURLDataManager()->AddDataSource(
-      CreateSyncInternalsHTMLSource());
+  ChromeURLDataManager::AddDataSource(profile, CreateSyncInternalsHTMLSource());
   ProfileSyncService* sync_service = GetProfileSyncService(profile);
   if (sync_service) {
     js_controller_ = sync_service->GetJsController();

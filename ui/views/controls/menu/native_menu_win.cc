@@ -17,6 +17,7 @@
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
+#include "ui/base/models/menu_model.h"
 #include "ui/base/win/hwnd_util.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
@@ -73,7 +74,7 @@ static NativeMenuWin* GetNativeMenuWinFromHMENU(HMENU hmenu) {
 // structure we have constructed in NativeMenuWin.
 class NativeMenuWin::MenuHostWindow {
  public:
-  MenuHostWindow(NativeMenuWin* parent) : parent_(parent) {
+  explicit MenuHostWindow(NativeMenuWin* parent) : parent_(parent) {
     RegisterClass();
     hwnd_ = CreateWindowEx(l10n_util::GetExtendedStyles(), kWindowClassName,
                            L"", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, NULL, NULL);
@@ -739,26 +740,11 @@ void NativeMenuWin::CreateHostWindow() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// SystemMenuModel:
-
-SystemMenuModel::SystemMenuModel(ui::SimpleMenuModel::Delegate* delegate)
-    : SimpleMenuModel(delegate) {
-}
-
-SystemMenuModel::~SystemMenuModel() {
-}
-
-int SystemMenuModel::GetFirstItemIndex(gfx::NativeMenu native_menu) const {
-  // We allow insertions before last item (Close).
-  return std::max(0, GetMenuItemCount(native_menu) - 1);
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // MenuWrapper, public:
 
 // static
-MenuWrapper* MenuWrapper::CreateWrapper(Menu2* menu) {
-  return new NativeMenuWin(menu->model(), NULL);
+MenuWrapper* MenuWrapper::CreateWrapper(ui::MenuModel* model) {
+  return new NativeMenuWin(model, NULL);
 }
 
 }  // namespace views

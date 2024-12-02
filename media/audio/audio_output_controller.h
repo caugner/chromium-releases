@@ -147,8 +147,7 @@ class MEDIA_EXPORT AudioOutputController
 
   ///////////////////////////////////////////////////////////////////////////
   // AudioSourceCallback methods.
-  virtual uint32 OnMoreData(AudioOutputStream* stream,
-                            uint8* dest,
+  virtual uint32 OnMoreData(uint8* dest,
                             uint32 max_size,
                             AudioBuffersState buffers_state) OVERRIDE;
   virtual void OnError(AudioOutputStream* stream, int code) OVERRIDE;
@@ -184,7 +183,7 @@ class MEDIA_EXPORT AudioOutputController
   void PollAndStartIfDataReady();
   void DoPause();
   void DoFlush();
-  void DoClose(const base::Closure& closed_task);
+  void DoClose();
   void DoSetVolume(double volume);
   void DoReportError(int code);
 

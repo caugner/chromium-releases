@@ -42,7 +42,6 @@ class WebDatabaseObserverImpl;
 namespace WebKit {
 class WebMediaStreamCenter;
 class WebMediaStreamCenterClient;
-class WebStorageEventDispatcher;
 }
 
 namespace base {
@@ -66,7 +65,7 @@ class Extension;
 // instances live.  The RenderThread supports an API that is used by its
 // consumer to talk indirectly to the RenderViews and supporting objects.
 // Likewise, it provides an API for the RenderViews to talk back to the main
-// process (i.e., their corresponding TabContents).
+// process (i.e., their corresponding WebContentsImpl).
 //
 // Most of the communication occurs in the form of IPC messages.  They are
 // routed to the RenderThread according to the routing IDs of the messages.
@@ -222,7 +221,6 @@ class CONTENT_EXPORT RenderThreadImpl : public content::RenderThread,
   scoped_ptr<AppCacheDispatcher> appcache_dispatcher_;
   scoped_ptr<IndexedDBDispatcher> main_thread_indexed_db_dispatcher_;
   scoped_ptr<RendererWebKitPlatformSupportImpl> webkit_platform_support_;
-  scoped_ptr<WebKit::WebStorageEventDispatcher> dom_storage_event_dispatcher_;
 
   // Used on the render thread and deleted by WebKit at shutdown.
   content::MediaStreamCenter* media_stream_center_;

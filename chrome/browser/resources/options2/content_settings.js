@@ -61,6 +61,8 @@ cr.define('options', function() {
                                       page.title,
                                       '/' + url);
           uber.invokeMethodOnParent('setPath', {path: url});
+          uber.invokeMethodOnParent('setTitle',
+              {title: templateData[hash + 'TabTitle']});
         };
       }
 
@@ -72,7 +74,7 @@ cr.define('options', function() {
       }
 
       if (cr.isChromeOS)
-        AccountsOptions.applyGuestModeVisibility(document);
+        UIAccountTweaks.applyGuestModeVisibility(document);
 
       // Cookies filter page ---------------------------------------------------
       $('show-cookies-button').onclick = function(event) {

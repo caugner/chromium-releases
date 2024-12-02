@@ -6,6 +6,7 @@
 
 #include <limits>
 
+#include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
@@ -24,6 +25,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/skbitmap_operations.h"
 
 using content::BrowserThread;
@@ -33,7 +35,7 @@ namespace {
 // Version number of the current theme pack. We just throw out and rebuild
 // theme packs that aren't int-equal to this. Increment this number if you
 // change default theme assets.
-const int kThemePackVersion = 20;
+const int kThemePackVersion = 22;
 
 // IDs that are in the DataPack won't clash with the positive integer
 // uint16. kHeaderID should always have the maximum value because we want the
@@ -285,7 +287,7 @@ const int kPreloadIDs[] = {
 };
 
 // Returns a piece of memory with the contents of the file |path|.
-RefCountedMemory* ReadFileData(const FilePath& path) {
+base::RefCountedMemory* ReadFileData(const FilePath& path) {
   if (!path.empty()) {
     net::FileStream file(NULL);
     int flags = base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_READ;
@@ -297,7 +299,7 @@ RefCountedMemory* ReadFileData(const FilePath& path) {
         raw_data.resize(size);
         char* data = reinterpret_cast<char*>(&(raw_data.front()));
         if (file.ReadUntilComplete(data, size) == avail)
-          return RefCountedBytes::TakeVector(&raw_data);
+          return base::RefCountedBytes::TakeVector(&raw_data);
       }
     }
   }
@@ -309,13 +311,15 @@ RefCountedMemory* ReadFileData(const FilePath& path) {
 // the returned image.
 gfx::Image* CreateHSLShiftedImage(const gfx::Image& image,
                                   const color_utils::HSL& hsl_shift) {
-  std::vector<const SkBitmap*> bitmaps;
-  for (size_t i = 0; i < image.GetNumberOfSkBitmaps(); ++i) {
-    const SkBitmap* bitmap = image.GetSkBitmapAtIndex(i);
-    bitmaps.push_back(new SkBitmap(SkBitmapOperations::CreateHSLShiftedBitmap(
-        *bitmap, hsl_shift)));
+  const std::vector<const SkBitmap*>& src_bitmaps =
+      image.ToImageSkia()->bitmaps();
+  std::vector<const SkBitmap*> dst_bitmaps;
+  for (size_t i = 0; i < src_bitmaps.size(); ++i) {
+    const SkBitmap* bitmap = src_bitmaps[i];
+    dst_bitmaps.push_back(new SkBitmap(
+        SkBitmapOperations::CreateHSLShiftedBitmap(*bitmap, hsl_shift)));
   }
-  return new gfx::Image(bitmaps);
+  return new gfx::Image(dst_bitmaps);
 }
 
 }  // namespace
@@ -376,7 +380,8 @@ scoped_refptr<BrowserThemePack> BrowserThemePack::BuildFromDataPack(
   // (see http://crbug.com/80206)
   base::ThreadRestrictions::ScopedAllowIO allow_io;
   scoped_refptr<BrowserThemePack> pack(new BrowserThemePack);
-  pack->data_pack_.reset(new ui::DataPack);
+  pack->data_pack_.reset(
+      new ui::DataPack(ui::ResourceHandle::kScaleFactor100x));
 
   if (!pack->data_pack_->Load(path)) {
     LOG(ERROR) << "Failed to load theme data pack.";
@@ -425,7 +430,7 @@ scoped_refptr<BrowserThemePack> BrowserThemePack::BuildFromDataPack(
   return pack;
 }
 
-bool BrowserThemePack::WriteToDisk(FilePath path) const {
+bool BrowserThemePack::WriteToDisk(const FilePath& path) const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   // Add resources for each of the property arrays.
   RawDataForWriting resources;
@@ -524,7 +529,7 @@ const gfx::Image* BrowserThemePack::GetImageNamed(int idr_id) const {
   if (image_iter != loaded_images_.end())
     return image_iter->second;
 
-  scoped_refptr<RefCountedMemory> memory;
+  scoped_refptr<base::RefCountedMemory> memory;
   if (data_pack_.get()) {
     memory = data_pack_->GetStaticMemory(prs_id);
   } else {
@@ -553,8 +558,8 @@ const gfx::Image* BrowserThemePack::GetImageNamed(int idr_id) const {
   return NULL;
 }
 
-RefCountedMemory* BrowserThemePack::GetRawData(int idr_id) const {
-  RefCountedMemory* memory = NULL;
+base::RefCountedMemory* BrowserThemePack::GetRawData(int idr_id) const {
+  base::RefCountedMemory* memory = NULL;
   int prs_id = GetPersistentIDByIDR(idr_id);
 
   if (prs_id != -1) {
@@ -866,7 +871,7 @@ bool BrowserThemePack::LoadRawBitmapsTo(
 
   for (FilePathMap::const_iterator it = file_paths.begin();
        it != file_paths.end(); ++it) {
-    scoped_refptr<RefCountedMemory> raw_data(ReadFileData(it->second));
+    scoped_refptr<base::RefCountedMemory> raw_data(ReadFileData(it->second));
     if (!raw_data.get()) {
       LOG(ERROR) << "Could not load theme image";
       return false;
@@ -988,10 +993,12 @@ void BrowserThemePack::GenerateTabBackgroundImages(ImageCache* bitmaps) const {
     ImageCache::const_iterator it = bitmaps->find(prs_base_id);
     if (it != bitmaps->end()) {
       const gfx::Image& image_to_tint = *(it->second);
+      const std::vector<const SkBitmap*>& bitmaps_to_tint =
+          image_to_tint.ToImageSkia()->bitmaps();
       std::vector<const SkBitmap*> tinted_bitmaps;
-      for (size_t j = 0; j < image_to_tint.GetNumberOfSkBitmaps(); ++j) {
+      for (size_t j = 0; j < bitmaps_to_tint.size(); ++j) {
         SkBitmap bg_tint = SkBitmapOperations::CreateHSLShiftedBitmap(
-            *image_to_tint.GetSkBitmapAtIndex(j), GetTintInternal(
+            *bitmaps_to_tint[j], GetTintInternal(
                 ThemeService::TINT_BACKGROUND_TAB));
         int vertical_offset = bitmaps->count(prs_id)
                               ? kRestoredTabVerticalOffset : 0;
@@ -1028,7 +1035,8 @@ void BrowserThemePack::RepackImages(const ImageCache& images,
       NOTREACHED() << "Image file for resource " << it->first
                    << " could not be encoded.";
     } else {
-      (*reencoded_images)[it->first] = RefCountedBytes::TakeVector(&image_data);
+      (*reencoded_images)[it->first] =
+          base::RefCountedBytes::TakeVector(&image_data);
     }
   }
 }

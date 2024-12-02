@@ -14,7 +14,6 @@
 #include "ui/base/win/scoped_ole_initializer.h"
 #endif
 
-class AudioManager;
 class BrowserOnlineStateObserver;
 class CommandLine;
 class HighResolutionTimerManager;
@@ -23,6 +22,10 @@ class SystemMessageWindowWin;
 
 namespace base {
 class SystemMonitor;
+}
+
+namespace media {
+class AudioManager;
 }
 
 namespace net {
@@ -35,11 +38,10 @@ class BrowserMainParts;
 class BrowserShutdownImpl;
 class BrowserThreadImpl;
 struct MainFunctionParams;
-class MediaDeviceNotificationsLinux;
 class ResourceDispatcherHostImpl;
 class WebKitThread;
 
-// Implements the main browser loop stages called from |BrowserMain()|.
+// Implements the main browser loop stages called from BrowserMainRunner.
 // See comments in browser_main_parts.h for additional info.
 // All functions are to be called only on the UI thread unless otherwise noted.
 class BrowserMainLoop {
@@ -66,7 +68,7 @@ class BrowserMainLoop {
   int GetResultCode() const { return result_code_; }
 
   // Can be called on any thread.
-  static AudioManager* GetAudioManager();
+  static media::AudioManager* GetAudioManager();
 
  private:
   // For ShutdownThreadsAndCleanUp.
@@ -89,14 +91,11 @@ class BrowserMainLoop {
   scoped_ptr<base::SystemMonitor> system_monitor_;
   scoped_ptr<HighResolutionTimerManager> hi_res_timer_manager_;
   scoped_ptr<net::NetworkChangeNotifier> network_change_notifier_;
-  scoped_ptr<AudioManager> audio_manager_;
+  scoped_ptr<media::AudioManager> audio_manager_;
   // Per-process listener for online state changes.
   scoped_ptr<BrowserOnlineStateObserver> online_state_observer_;
 #if defined(OS_WIN)
   scoped_ptr<SystemMessageWindowWin> system_message_window_;
-#elif defined(OS_LINUX)
-  scoped_refptr<MediaDeviceNotificationsLinux>
-      media_device_notifications_linux_;
 #endif
 
   // Destroy parts_ before main_message_loop_ (required) and before other

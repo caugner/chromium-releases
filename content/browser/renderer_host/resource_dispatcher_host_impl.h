@@ -14,6 +14,7 @@
 #pragma once
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -37,7 +38,7 @@ class DownloadFileManager;
 class ResourceHandler;
 class ResourceMessageFilter;
 class SaveFileManager;
-class TabContents;
+class WebContentsImpl;
 struct ResourceHostMsg_Request;
 struct ViewMsg_SwapOut_Params;
 
@@ -199,7 +200,7 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
                                 const net::SSLInfo* ssl_info) OVERRIDE;
   virtual void ContinueSSLRequest(const content::GlobalRequestID& id) OVERRIDE;
 
-  void OnUserGesture(TabContents* tab);
+  void OnUserGesture(WebContentsImpl* contents);
 
   // Retrieves a net::URLRequest.  Must be called from the IO thread.
   net::URLRequest* GetURLRequest(
@@ -441,7 +442,8 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
 
   // A timer that periodically calls UpdateLoadStates while pending_requests_
   // is not empty.
-  base::RepeatingTimer<ResourceDispatcherHostImpl> update_load_states_timer_;
+  scoped_ptr<base::RepeatingTimer<ResourceDispatcherHostImpl> >
+      update_load_states_timer_;
 
   // We own the download file writing thread and manager
   scoped_refptr<DownloadFileManager> download_file_manager_;
@@ -500,6 +502,10 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   // to the respective request.
   typedef std::map<GlobalRequestID, net::URLRequest*> TransferredNavigations;
   TransferredNavigations transferred_navigations_;
+
+  // http://crbug.com/90971 - Assists in tracking down use-after-frees on
+  // shutdown.
+  std::set<const ResourceContext*> canceled_resource_contexts_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceDispatcherHostImpl);
 };

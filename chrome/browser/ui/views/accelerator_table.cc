@@ -85,9 +85,6 @@ const AcceleratorMapping kAcceleratorMap[] = {
   { ui::VKEY_OEM_2,          false, true,  false, IDC_HELP_PAGE },
   { ui::VKEY_OEM_2,          true,  true,  false, IDC_HELP_PAGE },
 #endif
-#if defined(OS_CHROMEOS) && !defined(USE_AURA)
-  { ui::VKEY_L,              true,  true,  false, IDC_LOCK_SCREEN },
-#endif
   { ui::VKEY_I,              true,  true,  false, IDC_DEV_TOOLS },
 #if defined(OS_CHROMEOS)
   { ui::VKEY_I,              true,  false,  true, IDC_FEEDBACK },
@@ -95,9 +92,13 @@ const AcceleratorMapping kAcceleratorMap[] = {
   { ui::VKEY_F12,            false, false, false, IDC_DEV_TOOLS },
   { ui::VKEY_J,              true,  true,  false, IDC_DEV_TOOLS_CONSOLE },
   { ui::VKEY_C,              true,  true,  false, IDC_DEV_TOOLS_INSPECT },
+#if !defined(USE_ASH)
   { ui::VKEY_N,              true,  true,  false, IDC_NEW_INCOGNITO_WINDOW },
+#endif
   { ui::VKEY_T,              false, true,  false, IDC_NEW_TAB },
+#if !defined(USE_ASH)
   { ui::VKEY_N,              false, true,  false, IDC_NEW_WINDOW },
+#endif
   { ui::VKEY_O,              false, true,  false, IDC_OPEN_FILE },
   { ui::VKEY_P,              false, true,  false, IDC_PRINT},
   { ui::VKEY_P,              true,  true,  false, IDC_ADVANCED_PRINT},
@@ -115,13 +116,6 @@ const AcceleratorMapping kAcceleratorMap[] = {
   { ui::VKEY_HOME,           false, false, true,  IDC_HOME },
   { ui::VKEY_T,              true,  true,  false, IDC_RESTORE_TAB },
   { ui::VKEY_S,              false, true,  false, IDC_SAVE_PAGE },
-#if defined(OS_CHROMEOS) && defined(USE_AURA)
-  { ui::VKEY_T,              false, true,  true, IDC_NEW_CROSH_TAB },
-#endif
-#if defined(OS_CHROMEOS)
-  { ui::VKEY_M,              false, true,  false, IDC_FILE_MANAGER },
-  { ui::VKEY_LWIN,           false, false, false, IDC_SEARCH },
-#endif
   { ui::VKEY_9,              false, true,  false, IDC_SELECT_LAST_TAB },
   { ui::VKEY_NUMPAD9,        false, true,  false, IDC_SELECT_LAST_TAB },
   { ui::VKEY_TAB,            false, true,  false, IDC_SELECT_NEXT_TAB },

@@ -21,6 +21,17 @@ class SimpleMessageBoxViews : public views::DialogDelegate,
                               public MessageLoop::Dispatcher,
                               public base::RefCounted<SimpleMessageBoxViews> {
  public:
+  static void ShowWarningMessageBox(gfx::NativeWindow parent_window,
+                                    const string16& title,
+                                    const string16& message);
+  static bool ShowQuestionMessageBox(gfx::NativeWindow parent_window,
+                                     const string16& title,
+                                     const string16& message);
+
+  // Returns true if the Accept button was clicked.
+  bool accepted() const { return disposition_ == DISPOSITION_OK; }
+
+ private:
   friend class base::RefCounted<SimpleMessageBoxViews>;
 
   // The state of the dialog when closing.
@@ -30,30 +41,18 @@ class SimpleMessageBoxViews : public views::DialogDelegate,
     DISPOSITION_OK
   };
 
-  // Message box is modal to |parent_window|.
-  static void ShowErrorBox(gfx::NativeWindow parent_window,
-                           const string16& title,
-                           const string16& message);
-  static bool ShowYesNoBox(gfx::NativeWindow parent_window,
-                           const string16& title,
-                           const string16& message);
+  enum DialogType {
+    DIALOG_TYPE_WARNING,
+    DIALOG_TYPE_QUESTION,
+  };
 
-  // Overridden from views::DialogDelegate:
-  virtual bool Cancel() OVERRIDE;
-  virtual bool Accept() OVERRIDE;
-
-  // Returns true if the Accept button was clicked.
-  const bool Accepted() {
-    return disposition_ == DISPOSITION_OK;
-  }
-
- protected:
   // Overridden from views::DialogDelegate:
   virtual int GetDialogButtons() const OVERRIDE;
   virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
+  virtual bool Cancel() OVERRIDE;
+  virtual bool Accept() OVERRIDE;
 
   // Overridden from views::WidgetDelegate:
-  virtual bool ShouldShowWindowTitle() const OVERRIDE;
   virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual ui::ModalType GetModalType() const OVERRIDE;
@@ -61,32 +60,21 @@ class SimpleMessageBoxViews : public views::DialogDelegate,
   virtual views::Widget* GetWidget() OVERRIDE;
   virtual const views::Widget* GetWidget() const OVERRIDE;
 
- private:
-  enum DialogType {
-    DIALOG_ERROR,
-    DIALOG_YES_NO,
-  };
-
   SimpleMessageBoxViews(gfx::NativeWindow parent_window,
-                        DialogType type,
+                        DialogType dialog_type,
                         const string16& title,
                         const string16& message);
   virtual ~SimpleMessageBoxViews();
 
   // MessageLoop::Dispatcher implementation.
-#if defined(OS_WIN)
   // Dispatcher method. This returns true if the menu was canceled, or
   // if the message is such that the menu should be closed.
-  virtual bool Dispatch(const MSG& msg) OVERRIDE;
-#elif defined(USE_AURA)
-  virtual base::MessagePumpDispatcher::DispatchStatus Dispatch(
-      XEvent* xevent) OVERRIDE;
-#endif
+  virtual bool Dispatch(const base::NativeEvent& event) OVERRIDE;
 
-  const DialogType type_;
-  string16 message_box_title_;
-  views::MessageBoxView* message_box_view_;
+  const DialogType dialog_type_;
   DispositionType disposition_;
+  const string16 window_title_;
+  views::MessageBoxView* message_box_view_;
 
   DISALLOW_COPY_AND_ASSIGN(SimpleMessageBoxViews);
 };

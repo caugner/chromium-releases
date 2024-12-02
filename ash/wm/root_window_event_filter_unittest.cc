@@ -13,7 +13,6 @@
 #include "ash/wm/window_util.h"
 #include "ui/aura/client/activation_client.h"
 #include "ui/aura/client/activation_delegate.h"
-#include "ui/aura/cursor.h"
 #include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/test/aura_test_base.h"
@@ -21,8 +20,17 @@
 #include "ui/aura/test/test_event_filter.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/test/test_windows.h"
+#include "ui/base/cursor/cursor.h"
 #include "ui/base/hit_test.h"
 #include "ui/gfx/screen.h"
+
+namespace {
+
+base::TimeDelta getTime() {
+  return base::Time::NowFromSystemTime() - base::Time();
+}
+
+}  // namespace
 
 namespace ash {
 
@@ -112,7 +120,7 @@ TEST_F(RootWindowEventFilterTest, Focus) {
   // Touch on a sub-window (w122) to focus it.
   gfx::Point click_point = w122->bounds().CenterPoint();
   aura::Window::ConvertPointToWindow(w122->parent(), root_window, &click_point);
-  aura::TouchEvent touchev(ui::ET_TOUCH_PRESSED, click_point, 0);
+  aura::TouchEvent touchev(ui::ET_TOUCH_PRESSED, click_point, 0, getTime());
   root_window->DispatchTouchEvent(&touchev);
   focus_manager = w122->GetFocusManager();
   EXPECT_EQ(w122.get(), focus_manager->GetFocusedWindow());
@@ -308,7 +316,7 @@ TEST_F(RootWindowEventFilterTest, ActivateOnTouch) {
   // Touch window2.
   gfx::Point press_point = w2->bounds().CenterPoint();
   aura::Window::ConvertPointToWindow(w2->parent(), root_window, &press_point);
-  aura::TouchEvent touchev1(ui::ET_TOUCH_PRESSED, press_point, 0);
+  aura::TouchEvent touchev1(ui::ET_TOUCH_PRESSED, press_point, 0, getTime());
   root_window->DispatchTouchEvent(&touchev1);
 
   // Window2 should have become active.
@@ -325,7 +333,7 @@ TEST_F(RootWindowEventFilterTest, ActivateOnTouch) {
   press_point = w1->bounds().CenterPoint();
   aura::Window::ConvertPointToWindow(w1->parent(), root_window, &press_point);
   d1.set_activate(false);
-  aura::TouchEvent touchev2(ui::ET_TOUCH_PRESSED, press_point, 1);
+  aura::TouchEvent touchev2(ui::ET_TOUCH_PRESSED, press_point, 1, getTime());
   root_window->DispatchTouchEvent(&touchev2);
 
   // Window2 should still be active and focused.
@@ -375,45 +383,49 @@ TEST_F(RootWindowEventFilterTest, MouseEventCursors) {
   aura::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2, 0x0);
 
   // Cursor starts as a pointer (set during Shell::Init()).
-  EXPECT_EQ(aura::kCursorPointer, root_window->last_cursor());
+  EXPECT_EQ(ui::kCursorPointer, root_window->last_cursor().native_type());
 
   // Resize edges and corners show proper cursors.
   window_delegate.set_hittest_code(HTBOTTOM);
   root_window->DispatchMouseEvent(&move1);
-  EXPECT_EQ(aura::kCursorSouthResize, root_window->last_cursor());
+  EXPECT_EQ(ui::kCursorSouthResize, root_window->last_cursor().native_type());
 
   window_delegate.set_hittest_code(HTBOTTOMLEFT);
   root_window->DispatchMouseEvent(&move2);
-  EXPECT_EQ(aura::kCursorSouthWestResize, root_window->last_cursor());
+  EXPECT_EQ(ui::kCursorSouthWestResize,
+      root_window->last_cursor().native_type());
 
   window_delegate.set_hittest_code(HTBOTTOMRIGHT);
   root_window->DispatchMouseEvent(&move1);
-  EXPECT_EQ(aura::kCursorSouthEastResize, root_window->last_cursor());
+  EXPECT_EQ(ui::kCursorSouthEastResize,
+      root_window->last_cursor().native_type());
 
   window_delegate.set_hittest_code(HTLEFT);
   root_window->DispatchMouseEvent(&move2);
-  EXPECT_EQ(aura::kCursorWestResize, root_window->last_cursor());
+  EXPECT_EQ(ui::kCursorWestResize, root_window->last_cursor().native_type());
 
   window_delegate.set_hittest_code(HTRIGHT);
   root_window->DispatchMouseEvent(&move1);
-  EXPECT_EQ(aura::kCursorEastResize, root_window->last_cursor());
+  EXPECT_EQ(ui::kCursorEastResize, root_window->last_cursor().native_type());
 
   window_delegate.set_hittest_code(HTTOP);
   root_window->DispatchMouseEvent(&move2);
-  EXPECT_EQ(aura::kCursorNorthResize, root_window->last_cursor());
+  EXPECT_EQ(ui::kCursorNorthResize, root_window->last_cursor().native_type());
 
   window_delegate.set_hittest_code(HTTOPLEFT);
   root_window->DispatchMouseEvent(&move1);
-  EXPECT_EQ(aura::kCursorNorthWestResize, root_window->last_cursor());
+  EXPECT_EQ(ui::kCursorNorthWestResize,
+      root_window->last_cursor().native_type());
 
   window_delegate.set_hittest_code(HTTOPRIGHT);
   root_window->DispatchMouseEvent(&move2);
-  EXPECT_EQ(aura::kCursorNorthEastResize, root_window->last_cursor());
+  EXPECT_EQ(ui::kCursorNorthEastResize,
+      root_window->last_cursor().native_type());
 
   // Client area uses null cursor.
   window_delegate.set_hittest_code(HTCLIENT);
   root_window->DispatchMouseEvent(&move1);
-  EXPECT_EQ(aura::kCursorNull, root_window->last_cursor());
+  EXPECT_EQ(ui::kCursorNull, root_window->last_cursor().native_type());
 }
 
 #if defined(OS_MACOSX)
@@ -428,8 +440,9 @@ TEST_F(RootWindowEventFilterTest, MAYBE_TransformActivate) {
 
   aura::RootWindow* root_window = Shell::GetRootWindow();
   gfx::Size size = root_window->bounds().size();
-  EXPECT_EQ(gfx::Rect(size),
-            gfx::Screen::GetMonitorAreaNearestPoint(gfx::Point()));
+  EXPECT_EQ(
+      gfx::Rect(size).ToString(),
+      gfx::Screen::GetMonitorNearestPoint(gfx::Point()).bounds().ToString());
 
   // Rotate it clock-wise 90 degrees.
   ui::Transform transform;
@@ -560,9 +573,9 @@ TEST_F(RootWindowEventFilterTest, UpdateCursorVisibility) {
   aura::MouseEvent mouse_moved(
       ui::ET_MOUSE_MOVED, gfx::Point(0, 0), gfx::Point(0, 0), 0x0);
   aura::TouchEvent touch_pressed1(
-      ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), 0);
+      ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), 0, getTime());
   aura::TouchEvent touch_pressed2(
-      ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), 1);
+      ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), 1, getTime());
 
   root_window_filter->set_update_cursor_visibility(true);
   root_window->DispatchMouseEvent(&mouse_moved);

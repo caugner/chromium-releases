@@ -10,51 +10,13 @@
 #include "ui/aura/env.h"
 #include "ui/aura/monitor_manager.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/test/single_monitor_manager.h"
+#include "ui/aura/single_monitor_manager.h"
 #include "ui/aura/test/test_activation_client.h"
 #include "ui/aura/test/test_screen.h"
 #include "ui/aura/test/test_stacking_client.h"
 #include "ui/base/ime/input_method.h"
-
-namespace {
-
-class DummyInputMethod : public ui::InputMethod {
- public:
-  DummyInputMethod() {}
-  virtual ~DummyInputMethod() {}
-
-  // ui::InputMethod overrides:
-  virtual void SetDelegate(
-      ui::internal::InputMethodDelegate* delegate) OVERRIDE {}
-  virtual void Init(bool focused) OVERRIDE {}
-  virtual void OnFocus() OVERRIDE {}
-  virtual void OnBlur() OVERRIDE {}
-  virtual void SetFocusedTextInputClient(
-      ui::TextInputClient* client) OVERRIDE {}
-  virtual ui::TextInputClient* GetTextInputClient() const OVERRIDE {
-    return NULL;
-  }
-  virtual void DispatchKeyEvent(
-      const base::NativeEvent& native_key_event) OVERRIDE {}
-  virtual void OnTextInputTypeChanged(
-      const ui::TextInputClient* client) OVERRIDE {}
-  virtual void OnCaretBoundsChanged(
-      const ui::TextInputClient* client) OVERRIDE {}
-  virtual void CancelComposition(const ui::TextInputClient* client) OVERRIDE {}
-  virtual std::string GetInputLocale() OVERRIDE { return ""; }
-  virtual base::i18n::TextDirection GetInputTextDirection() OVERRIDE {
-    return base::i18n::UNKNOWN_DIRECTION;
-  }
-  virtual bool IsActive() OVERRIDE { return true; }
-  virtual ui::TextInputType GetTextInputType() const OVERRIDE {
-    return ui::TEXT_INPUT_TYPE_NONE;
-  }
-  virtual bool CanComposeInline() const OVERRIDE {
-    return true;
-  }
-};
-
-}  // namespace
+#include "ui/base/test/dummy_input_method.h"
+#include "ui/gfx/screen.h"
 #endif
 
 namespace views {
@@ -63,7 +25,7 @@ ViewsTestBase::ViewsTestBase()
     : setup_called_(false),
       teardown_called_(false) {
 #if defined(USE_AURA)
-  test_input_method_.reset(new DummyInputMethod);
+  test_input_method_.reset(new ui::test::DummyInputMethod);
 #endif
 }
 
@@ -80,8 +42,7 @@ void ViewsTestBase::SetUp() {
   if (!views_delegate_.get())
     views_delegate_.reset(new TestViewsDelegate());
 #if defined(USE_AURA)
-  aura::Env::GetInstance()->SetMonitorManager(
-      new aura::test::SingleMonitorManager);
+  aura::Env::GetInstance()->SetMonitorManager(new aura::SingleMonitorManager);
   root_window_.reset(aura::MonitorManager::CreateRootWindowForPrimaryMonitor());
   gfx::Screen::SetInstance(new aura::TestScreen(root_window_.get()));
   root_window_->SetProperty(
@@ -91,7 +52,7 @@ void ViewsTestBase::SetUp() {
       new aura::test::TestActivationClient(root_window_.get()));
   test_stacking_client_.reset(
       new aura::test::TestStackingClient(root_window_.get()));
-#endif
+#endif  // USE_AURA
 }
 
 void ViewsTestBase::TearDown() {

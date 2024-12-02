@@ -210,6 +210,7 @@ class ChromeTests:
     tool = valgrind_test.CreateTool(self._options.valgrind_tool)
     cmd = self._DefaultCommand(tool, name, valgrind_test_args)
     self._AppendGtestFilter(tool, name, cmd)
+    cmd.extend(['--test-tiny-timeout=1000'])
     if cmd_args:
       cmd.extend(cmd_args)
 
@@ -381,7 +382,7 @@ class ChromeTests:
                           "run_webkit_tests.py")
     script_cmd = ["python", script, "-v",
                   "--run-singly",  # run a separate DumpRenderTree for each test
-                  "--experimental-fully-parallel",
+                  "--fully-parallel",
                   "--time-out-ms=200000",
                   "--noshow-results",
                   "--nocheck-sys-deps"]

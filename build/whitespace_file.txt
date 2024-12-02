@@ -3,7 +3,7 @@ Use of this useless file is governed by a BSD-style license that can be
 found in the LICENSE file.
 
 This file is used for making non-code changes to trigger buildbot cycles. Make
-any modification below this line.
+any modification below this line. 
 
 =============================================================================
 
@@ -47,4 +47,7 @@ Next time, there won't be any sushi. Why sushis with waffles anyway? It's like
 salmon in a cereal bowl.
 
 CHAPTER 4:
-The taste of stale sushi in his mouth the next morning was unbearable.
+The taste of stale sushi in his mouth the next morning was unbearable. He
+wondered where the sushi came from. He tries to recall the cook's face.
+
+CHAPTER 5:

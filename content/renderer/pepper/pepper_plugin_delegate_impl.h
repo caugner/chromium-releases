@@ -29,15 +29,8 @@
 #include "webkit/plugins/ppapi/ppb_flash_menu_impl.h"
 
 class FilePath;
-class PepperBrokerImpl;
-class PepperDeviceEnumerationEventHandler;
-class PepperPluginDelegateImpl;
 class RenderViewImpl;
-
-namespace content {
-class GamepadSharedMemoryReader;
-struct CustomContextMenuContext;
-}
+class TransportDIB;
 
 namespace gfx {
 class Point;
@@ -46,6 +39,10 @@ class Rect;
 
 namespace IPC {
 struct ChannelHandle;
+}
+
+namespace ppapi {
+class PPB_X509Certificate_Fields;
 }
 
 namespace ui {
@@ -69,13 +66,19 @@ struct WebCompositionUnderline;
 struct WebFileChooserParams;
 }
 
-class TransportDIB;
+namespace content {
+
+struct CustomContextMenuContext;
+class GamepadSharedMemoryReader;
+class PepperBrokerImpl;
+class PepperDeviceEnumerationEventHandler;
+class PepperPluginDelegateImpl;
 
 class PepperPluginDelegateImpl
     : public webkit::ppapi::PluginDelegate,
       public base::SupportsWeakPtr<PepperPluginDelegateImpl>,
       public PepperParentContextProvider,
-      public content::RenderViewObserver {
+      public RenderViewObserver {
  public:
   explicit PepperPluginDelegateImpl(RenderViewImpl* render_view);
   virtual ~PepperPluginDelegateImpl();
@@ -165,6 +168,8 @@ class PepperPluginDelegateImpl
   virtual void InstanceDeleted(
       webkit::ppapi::PluginInstance* instance) OVERRIDE;
   virtual SkBitmap* GetSadPluginBitmap() OVERRIDE;
+  virtual WebKit::WebPlugin* CreatePluginReplacement(
+      const FilePath& file_path) OVERRIDE;
   virtual uint32_t GetAudioHardwareOutputSampleRate() OVERRIDE;
   virtual uint32_t GetAudioHardwareOutputBufferSize() OVERRIDE;
   virtual PlatformAudioOutput* CreateAudioOutput(
@@ -256,19 +261,6 @@ class PepperPluginDelegateImpl
       FilePath* platform_path) OVERRIDE;
   virtual scoped_refptr<base::MessageLoopProxy>
       GetFileThreadMessageLoopProxy() OVERRIDE;
-  virtual int32_t ConnectTcp(
-      webkit::ppapi::PPB_Flash_NetConnector_Impl* connector,
-      const char* host,
-      uint16_t port) OVERRIDE;
-  virtual int32_t ConnectTcpAddress(
-      webkit::ppapi::PPB_Flash_NetConnector_Impl* connector,
-      const struct PP_NetAddress_Private* addr) OVERRIDE;
-  // This is the completion for both |ConnectTcp()| and |ConnectTcpAddress()|.
-  void OnConnectTcpACK(
-      int request_id,
-      base::PlatformFile socket,
-      const PP_NetAddress_Private& local_addr,
-      const PP_NetAddress_Private& remote_addr);
 
   virtual uint32 TCPSocketCreate() OVERRIDE;
   virtual void TCPSocketConnect(
@@ -280,9 +272,12 @@ class PepperPluginDelegateImpl
       webkit::ppapi::PPB_TCPSocket_Private_Impl* socket,
       uint32 socket_id,
       const PP_NetAddress_Private& addr) OVERRIDE;
-  virtual void TCPSocketSSLHandshake(uint32 socket_id,
-                                     const std::string& server_name,
-                                     uint16_t server_port) OVERRIDE;
+  virtual void TCPSocketSSLHandshake(
+      uint32 socket_id,
+      const std::string& server_name,
+      uint16_t server_port,
+      const std::vector<std::vector<char> >& trusted_certs,
+      const std::vector<std::vector<char> >& untrusted_certs) OVERRIDE;
   virtual void TCPSocketRead(uint32 socket_id, int32_t bytes_to_read) OVERRIDE;
   virtual void TCPSocketWrite(uint32 socket_id,
                               const std::string& buffer) OVERRIDE;
@@ -325,14 +320,18 @@ class PepperPluginDelegateImpl
   virtual void RemoveNetworkListObserver(
       webkit_glue::NetworkListObserver* observer) OVERRIDE;
 
+  virtual bool X509CertificateParseDER(
+      const std::vector<char>& der,
+      ppapi::PPB_X509Certificate_Fields* fields) OVERRIDE;
+
   virtual int32_t ShowContextMenu(
       webkit::ppapi::PluginInstance* instance,
       webkit::ppapi::PPB_Flash_Menu_Impl* menu,
       const gfx::Point& position) OVERRIDE;
   void OnContextMenuClosed(
-      const content::CustomContextMenuContext& custom_context);
+      const CustomContextMenuContext& custom_context);
   void OnCustomContextMenuAction(
-      const content::CustomContextMenuContext& custom_context,
+      const CustomContextMenuContext& custom_context,
       unsigned action);
   void CompleteShowContextMenu(int request_id,
                                bool did_select,
@@ -351,7 +350,6 @@ class PepperPluginDelegateImpl
   virtual void SaveURLAs(const GURL& url) OVERRIDE;
   virtual webkit_glue::P2PTransport* CreateP2PTransport() OVERRIDE;
   virtual double GetLocalTimeZoneOffset(base::Time t) OVERRIDE;
-  virtual std::string GetFlashCommandLineArgs() OVERRIDE;
   virtual base::SharedMemory* CreateAnonymousSharedMemory(uint32_t size)
       OVERRIDE;
   virtual ::ppapi::Preferences GetPreferences() OVERRIDE;
@@ -369,6 +367,7 @@ class PepperPluginDelegateImpl
       PP_DeviceType_Dev type,
       const EnumerateDevicesCallback& callback) OVERRIDE;
   virtual webkit_glue::ClipboardClient* CreateClipboardClient() const OVERRIDE;
+  virtual std::string GetDeviceID() OVERRIDE;
 
   // RenderViewObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
@@ -379,9 +378,11 @@ class PepperPluginDelegateImpl
                              bool succeeded,
                              const PP_NetAddress_Private& local_addr,
                              const PP_NetAddress_Private& remote_addr);
-  void OnTCPSocketSSLHandshakeACK(uint32 plugin_dispatcher_id,
-                                  uint32 socket_id,
-                                  bool succeeded);
+  void OnTCPSocketSSLHandshakeACK(
+      uint32 plugin_dispatcher_id,
+      uint32 socket_id,
+      bool succeeded,
+      const ppapi::PPB_X509Certificate_Fields& certificate_fields);
   void OnTCPSocketReadACK(uint32 plugin_dispatcher_id,
                           uint32 socket_id,
                           bool succeeded,
@@ -442,7 +443,8 @@ class PepperPluginDelegateImpl
       webkit::ppapi::PluginModule* plugin_module);
 
   // Implementation of PepperParentContextProvider.
-  virtual ContentGLContext* GetParentContextForPlatformContext3D() OVERRIDE;
+  virtual WebGraphicsContext3DCommandBufferImpl*
+      GetParentContextForPlatformContext3D() OVERRIDE;
 
   MouseLockDispatcher::LockTarget* GetOrCreateLockTargetAdapter(
       webkit::ppapi::PluginInstance* instance);
@@ -461,9 +463,6 @@ class PepperPluginDelegateImpl
   unsigned saved_context_menu_action_;
 
   IDMap<AsyncOpenFileCallback> pending_async_open_files_;
-
-  IDMap<scoped_refptr<webkit::ppapi::PPB_Flash_NetConnector_Impl>,
-        IDMapOwnPointer> pending_connect_tcps_;
 
   IDMap<webkit::ppapi::PPB_TCPSocket_Private_Impl> tcp_sockets_;
 
@@ -492,12 +491,14 @@ class PepperPluginDelegateImpl
   // when it is destroyed via InstanceDeleted().
   webkit::ppapi::PluginInstance* last_mouse_event_target_;
 
-  scoped_ptr<content::GamepadSharedMemoryReader> gamepad_shared_memory_reader_;
+  scoped_ptr<GamepadSharedMemoryReader> gamepad_shared_memory_reader_;
 
   scoped_ptr<PepperDeviceEnumerationEventHandler>
       device_enumeration_event_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperPluginDelegateImpl);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_RENDERER_PEPPER_PEPPER_PLUGIN_DELEGATE_IMPL_H_

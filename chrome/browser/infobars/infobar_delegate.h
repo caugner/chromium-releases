@@ -44,7 +44,17 @@ class InfoBarDelegate {
     PAGE_ACTION_TYPE,
   };
 
+  enum InfoBarAutomationType {
+    CONFIRM_INFOBAR,
+    ONE_CLICK_LOGIN_INFOBAR,
+    PASSWORD_INFOBAR,
+    RPH_INFOBAR,
+    UNKNOWN_INFOBAR,
+  };
+
   virtual ~InfoBarDelegate();
+
+  virtual InfoBarAutomationType GetInfoBarAutomationType() const;
 
   // Called to create the InfoBar. Implementation of this method is
   // platform-specific.
@@ -90,10 +100,9 @@ class InfoBarDelegate {
   virtual ExtensionInfoBarDelegate* AsExtensionInfoBarDelegate();
   virtual InsecureContentInfoBarDelegate* AsInsecureContentInfoBarDelegate();
   virtual LinkInfoBarDelegate* AsLinkInfoBarDelegate();
-  virtual MediaStreamInfoBarDelegate* AsMediaStreamInfobarDelegate();
+  virtual MediaStreamInfoBarDelegate* AsMediaStreamInfoBarDelegate();
   virtual RegisterProtocolHandlerInfoBarDelegate*
       AsRegisterProtocolHandlerInfoBarDelegate();
-  virtual SavePasswordInfoBarDelegate* AsSavePasswordInfoBarDelegate();
   virtual ThemeInstalledInfoBarDelegate* AsThemePreviewInfobarDelegate();
   virtual TranslateInfoBarDelegate* AsTranslateInfoBarDelegate();
 
@@ -102,7 +111,7 @@ class InfoBarDelegate {
   // using StoreActiveEntryUniqueID automatically.
   explicit InfoBarDelegate(InfoBarTabHelper* infobar_helper);
 
-  // Store the unique id for the active entry in the specified TabContents, to
+  // Store the unique id for the active entry in the specified WebContents, to
   // be used later upon navigation to determine if this InfoBarDelegate should
   // be expired from |contents_|.
   void StoreActiveEntryUniqueID(InfoBarTabHelper* infobar_helper);
@@ -116,7 +125,7 @@ class InfoBarDelegate {
   void RemoveSelf();
 
  private:
-  // The unique id of the active NavigationEntry of the TabContents that we were
+  // The unique id of the active NavigationEntry of the WebContents that we were
   // opened for. Used to help expire on navigations.
   int contents_unique_id_;
 

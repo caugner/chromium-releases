@@ -308,6 +308,21 @@ void TabRestoreService::RestoreMostRecentEntry(
   RestoreEntryById(delegate, entries_.front()->id, UNKNOWN);
 }
 
+TabRestoreService::Tab* TabRestoreService::RemoveTabEntryById(
+    SessionID::id_type id) {
+  Entries::iterator i = GetEntryIteratorById(id);
+  if (i == entries_.end())
+    return NULL;
+
+  Entry* entry = *i;
+  if (entry->type != TAB)
+    return NULL;
+
+  Tab* tab = static_cast<Tab*>(entry);
+  entries_.erase(i);
+  return tab;
+}
+
 void TabRestoreService::RestoreEntryById(TabRestoreServiceDelegate* delegate,
                                          SessionID::id_type id,
                                          WindowOpenDisposition disposition) {
@@ -424,6 +439,11 @@ void TabRestoreService::LoadTabsFromLastSession() {
   if (load_state_ != NOT_LOADED || entries_.size() == kMaxEntries)
     return;
 
+#if !defined(ENABLE_SESSION_SERVICE)
+  // If sessions are not stored in the SessionService, default to
+  // |LOADED_LAST_SESSION| state.
+  load_state_ = LOADING | LOADED_LAST_SESSION;
+#else
   load_state_ = LOADING;
 
   SessionService* session_service =
@@ -440,6 +460,7 @@ void TabRestoreService::LoadTabsFromLastSession() {
   } else {
     load_state_ |= LOADED_LAST_SESSION;
   }
+#endif
 
   // Request the tabs closed in the last session. If the last session crashed,
   // this won't contain the tabs/window that were open at the point of the

@@ -338,6 +338,9 @@ ResourceDispatcherHostImpl::ResourceDispatcherHostImpl()
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&appcache::AppCacheInterceptor::EnsureRegistered));
+
+  update_load_states_timer_.reset(
+      new base::RepeatingTimer<ResourceDispatcherHostImpl>());
 }
 
 ResourceDispatcherHostImpl::~ResourceDispatcherHostImpl() {
@@ -370,6 +373,8 @@ void ResourceDispatcherHostImpl::CancelRequestsForContext(
     ResourceContext* context) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(context);
+
+  canceled_resource_contexts_.insert(context);
 
   // Note that request cancellation has side effects. Therefore, we gather all
   // the requests to cancel first, and then we start cancelling. We assert at
@@ -441,7 +446,8 @@ void ResourceDispatcherHostImpl::CancelRequestsForContext(
        i != pending_requests_.end(); ++i) {
     ResourceRequestInfoImpl* info =
         ResourceRequestInfoImpl::ForRequest(i->second);
-    DCHECK_NE(info->GetContext(), context);
+    // http://crbug.com/90971
+    CHECK_NE(info->GetContext(), context);
   }
 
   for (BlockedRequestMap::const_iterator i = blocked_requests_map_.begin();
@@ -450,7 +456,8 @@ void ResourceDispatcherHostImpl::CancelRequestsForContext(
     if (!requests->empty()) {
       ResourceRequestInfoImpl* info =
           ResourceRequestInfoImpl::ForRequest(requests->front());
-      DCHECK_NE(info->GetContext(), context);
+      // http://crbug.com/90971
+      CHECK_NE(info->GetContext(), context);
     }
   }
 }
@@ -467,6 +474,13 @@ net::Error ResourceDispatcherHostImpl::BeginDownload(
     return CallbackAndReturn(started_callback, net::ERR_INSUFFICIENT_RESOURCES);
 
   const GURL& url = request->original_url();
+
+  // http://crbug.com/90971
+  char url_buf[128];
+  base::strlcpy(url_buf, url.spec().c_str(), arraysize(url_buf));
+  base::debug::Alias(url_buf);
+  CHECK(!ContainsKey(canceled_resource_contexts_, context));
+
   const net::URLRequestContext* request_context = context->GetRequestContext();
   request->set_referrer(MaybeStripReferrer(GURL(request->referrer())).spec());
   request->set_context(request_context);
@@ -605,7 +619,7 @@ void ResourceDispatcherHostImpl::OnShutdown() {
   // Make sure we shutdown the timer now, otherwise by the time our destructor
   // runs if the timer is still running the Task is deleted twice (once by
   // the MessageLoop and the second time by RepeatingTimer).
-  update_load_states_timer_.Stop();
+  update_load_states_timer_.reset();
 
   // Clear blocked requests if any left.
   // Note that we have to do this in 2 passes as we cannot call
@@ -694,8 +708,8 @@ void ResourceDispatcherHostImpl::OnRequestResource(
 
 // Begins a resource request with the given params on behalf of the specified
 // child process.  Responses will be dispatched through the given receiver. The
-// process ID is used to lookup TabContents from routing_id's in the case of a
-// request from a renderer.  request_context is the cookie/cache context to be
+// process ID is used to lookup WebContentsImpl from routing_id's in the case of
+// a request from a renderer.  request_context is the cookie/cache context to be
 // used for this request.
 //
 // If sync_result is non-null, then a SyncLoad reply will be generated, else
@@ -737,6 +751,8 @@ void ResourceDispatcherHostImpl::BeginRequest(
   }
 
   ResourceContext* resource_context = filter_->resource_context();
+  // http://crbug.com/90971
+  CHECK(!ContainsKey(canceled_resource_contexts_, resource_context));
 
   // Might need to resolve the blob references in the upload data.
   if (request_data.upload_data) {
@@ -884,6 +900,8 @@ void ResourceDispatcherHostImpl::BeginRequest(
     }
   }
 
+  bool allow_download = request_data.allow_download &&
+      ResourceType::IsFrame(request_data.resource_type);
   // Make extra info and read footer (contains request ID).
   ResourceRequestInfoImpl* extra_info =
       new ResourceRequestInfoImpl(
@@ -901,7 +919,7 @@ void ResourceDispatcherHostImpl::BeginRequest(
           request_data.transition_type,
           upload_size,
           false,  // is download
-          ResourceType::IsFrame(request_data.resource_type),  // allow_download
+          allow_download,
           request_data.has_user_gesture,
           request_data.referrer_policy,
           resource_context);
@@ -1124,6 +1142,12 @@ void ResourceDispatcherHostImpl::BeginSaveFile(
     ResourceContext* context) {
   if (is_shutdown_)
     return;
+
+  // http://crbug.com/90971
+  char url_buf[128];
+  base::strlcpy(url_buf, url.spec().c_str(), arraysize(url_buf));
+  base::debug::Alias(url_buf);
+  CHECK(!ContainsKey(canceled_resource_contexts_, context));
 
   scoped_refptr<ResourceHandler> handler(
       new SaveFileResourceHandler(child_id,
@@ -1368,8 +1392,8 @@ void ResourceDispatcherHostImpl::RemovePendingRequest(
   pending_requests_.erase(iter);
 
   // If we have no more pending requests, then stop the load state monitor
-  if (pending_requests_.empty())
-    update_load_states_timer_.Stop();
+  if (pending_requests_.empty() && update_load_states_timer_.get())
+    update_load_states_timer_->Stop();
 }
 
 // net::URLRequest::Delegate ---------------------------------------------------
@@ -1731,8 +1755,8 @@ void ResourceDispatcherHostImpl::StartRequest(net::URLRequest* request) {
   request->Start();
 
   // Make sure we have the load state monitor running
-  if (!update_load_states_timer_.IsRunning()) {
-    update_load_states_timer_.Start(FROM_HERE,
+  if (!update_load_states_timer_->IsRunning()) {
+    update_load_states_timer_->Start(FROM_HERE,
         TimeDelta::FromMilliseconds(kUpdateLoadStatesIntervalMsec),
         this, &ResourceDispatcherHostImpl::UpdateLoadStates);
   }
@@ -1902,21 +1926,28 @@ void ResourceDispatcherHostImpl::ResponseCompleted(net::URLRequest* request) {
   // If the load for a main frame has failed, track it in a histogram,
   // since it will probably cause the user to see an error page.
   if (!request->status().is_success() &&
-      info->GetResourceType() == ResourceType::MAIN_FRAME &&
       request->status().error() != net::ERR_ABORTED) {
-    // This enumeration has "2" appended to its name to distinguish it from
-    // its original version. We changed the buckets at one point (added
-    // guard buckets by using CustomHistogram::ArrayToCustomRanges).
-    UMA_HISTOGRAM_CUSTOM_ENUMERATION(
-        "Net.ErrorCodesForMainFrame2",
-        -request->status().error(),
-        base::CustomHistogram::ArrayToCustomRanges(
-            kAllNetErrorCodes, arraysize(kAllNetErrorCodes)));
-
-    if (request->url().SchemeIsSecure() &&
-        request->url().host() == "www.google.com") {
+    if (info->GetResourceType() == ResourceType::MAIN_FRAME) {
+      // This enumeration has "2" appended to its name to distinguish it from
+      // its original version. We changed the buckets at one point (added
+      // guard buckets by using CustomHistogram::ArrayToCustomRanges).
       UMA_HISTOGRAM_CUSTOM_ENUMERATION(
-          "Net.ErrorCodesForHTTPSGoogleMainFrame",
+          "Net.ErrorCodesForMainFrame2",
+          -request->status().error(),
+          base::CustomHistogram::ArrayToCustomRanges(
+              kAllNetErrorCodes, arraysize(kAllNetErrorCodes)));
+
+      if (request->url().SchemeIsSecure() &&
+          request->url().host() == "www.google.com") {
+        UMA_HISTOGRAM_CUSTOM_ENUMERATION(
+            "Net.ErrorCodesForHTTPSGoogleMainFrame",
+            -request->status().error(),
+            base::CustomHistogram::ArrayToCustomRanges(
+                kAllNetErrorCodes, arraysize(kAllNetErrorCodes)));
+      }
+    } else {
+      UMA_HISTOGRAM_CUSTOM_ENUMERATION(
+          "Net.ErrorCodesForSubresources",
           -request->status().error(),
           base::CustomHistogram::ArrayToCustomRanges(
               kAllNetErrorCodes, arraysize(kAllNetErrorCodes)));
@@ -1983,7 +2014,7 @@ void ResourceDispatcherHostImpl::ContinueSSLRequest(
   request->ContinueDespiteLastError();
 }
 
-void ResourceDispatcherHostImpl::OnUserGesture(TabContents* tab) {
+void ResourceDispatcherHostImpl::OnUserGesture(WebContentsImpl* contents) {
   last_user_gesture_time_ = TimeTicks::Now();
 }
 

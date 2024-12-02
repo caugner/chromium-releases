@@ -6,19 +6,30 @@
 
 #include "base/bind.h"
 #include "base/json/json_reader.h"
+#include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/gdata/gdata_file_system.h"
 #include "chrome/browser/chromeos/gdata/gdata_util.h"
-#include "chrome/browser/net/browser_url_util.h"
-#include "chrome/common/libxml_utils.h"
 #include "chrome/common/net/gaia/gaia_urls.h"
+#include "chrome/common/net/gaia/google_service_auth_error.h"
+#include "chrome/common/net/url_util.h"
 #include "net/base/escape.h"
 #include "net/http/http_util.h"
+#include "third_party/libxml/chromium/libxml_utils.h"
 
 using content::BrowserThread;
 using content::URLFetcher;
 
 namespace {
+
+// Used for success ratio histograms. 0 for failure, 1 for success,
+// 2 for no connection (likely offline).
+const int kSuccessRatioHistogramFailure = 0;
+const int kSuccessRatioHistogramSuccess = 1;
+const int kSuccessRatioHistogramNoConnection = 2;
+const int kSuccessRatioHistogramMaxValue = 3;  // The max value is exclusive.
 
 // Template for optional OAuth2 authorization HTTP header.
 const char kAuthorizationHeaderFormat[] = "Authorization: Bearer %s";
@@ -33,6 +44,10 @@ const char kIfMatchHeaderFormat[] = "If-Match: %s";
 // (handled with '-/mine' part).
 const char kGetDocumentListURL[] =
     "https://docs.google.com/feeds/default/private/full/-/mine";
+
+// URL requesting documents list of changes to documents collections.
+const char kGetChangesListURL[] =
+    "https://docs.google.com/feeds/default/private/changes";
 
 // Root document list url.
 const char kDocumentListRootURL[] =
@@ -50,10 +65,8 @@ const char kUploadContentLength[] = "X-Upload-Content-Length: ";
 // Use smaller 'page' size while debugging to ensure we hit feed reload
 // almost always. Be careful not to use something too small on account that
 // have many items because server side 503 error might kick in.
-const int kMaxDocumentsPerFirstFeed = 200;
 const int kMaxDocumentsPerFeed = 1000;
 #else
-const int kMaxDocumentsPerFirstFeed = 200;
 const int kMaxDocumentsPerFeed = 1000;
 #endif
 
@@ -77,23 +90,50 @@ const char kUserContentScope[] = "https://docs.googleusercontent.com/";
 // folders in the feed are added to document feed URLs.
 GURL AddStandardUrlParams(const GURL& url) {
   GURL result =
-      chrome_browser_net::AppendOrReplaceQueryParameter(url, "v", "3");
+      chrome_common_net::AppendOrReplaceQueryParameter(url, "v", "3");
   result =
-      chrome_browser_net::AppendOrReplaceQueryParameter(result, "alt", "json");
+      chrome_common_net::AppendOrReplaceQueryParameter(result, "alt", "json");
+  return result;
+}
+
+// Adds additional parameters to metadata feed to include installed 3rd party
+// applications.
+GURL AddMetadataUrlParams(const GURL& url) {
+  GURL result = AddStandardUrlParams(url);
+  result = chrome_common_net::AppendOrReplaceQueryParameter(
+      result, "include-installed-apps", "true");
   return result;
 }
 
 // Adds additional parameters for API version, output content type and to show
 // folders in the feed are added to document feed URLs.
-GURL AddFeedUrlParams(const GURL& url, int num_items_to_fetch) {
+GURL AddFeedUrlParams(const GURL& url,
+                      int num_items_to_fetch,
+                      int changestamp,
+                      const std::string& search_string) {
   GURL result = AddStandardUrlParams(url);
-  result = chrome_browser_net::AppendOrReplaceQueryParameter(result,
-                                                    "showfolders",
-                                                    "true");
-  result = chrome_browser_net::AppendOrReplaceQueryParameter(
+  result = chrome_common_net::AppendOrReplaceQueryParameter(
+      result,
+      "showfolders",
+      "true");
+  result = chrome_common_net::AppendOrReplaceQueryParameter(
       result,
       "max-results",
       base::StringPrintf("%d", num_items_to_fetch));
+  result = chrome_common_net::AppendOrReplaceQueryParameter(
+      result, "include-installed-apps", "true");
+
+  if (changestamp) {
+    result = chrome_common_net::AppendQueryParameter(
+        result,
+        "start-index",
+        base::StringPrintf("%d", changestamp));
+  }
+
+  if (!search_string.empty()) {
+    result = chrome_common_net::AppendOrReplaceQueryParameter(
+        result, "q", search_string);
+  }
   return result;
 }
 
@@ -120,7 +160,7 @@ void AuthOperation::Start() {
   scopes.push_back(kSpreadsheetsScope);
   scopes.push_back(kUserContentScope);
   oauth2_access_token_fetcher_.reset(new OAuth2AccessTokenFetcher(
-      this, profile_->GetRequestContext()));
+      this, g_browser_process->system_request_context()));
   NotifyStart();
   oauth2_access_token_fetcher_->Start(
       GaiaUrls::GetInstance()->oauth2_chrome_client_id(),
@@ -139,6 +179,11 @@ void AuthOperation::DoCancel() {
 // used to start fetching user data.
 void AuthOperation::OnGetTokenSuccess(const std::string& access_token) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  UMA_HISTOGRAM_ENUMERATION("GData.AuthSuccess",
+                            kSuccessRatioHistogramSuccess,
+                            kSuccessRatioHistogramMaxValue);
+
   callback_.Run(HTTP_SUCCESS, access_token);
   NotifyFinish(GDataOperationRegistry::OPERATION_COMPLETED);
 }
@@ -146,8 +191,24 @@ void AuthOperation::OnGetTokenSuccess(const std::string& access_token) {
 // Callback for OAuth2AccessTokenFetcher on failure.
 void AuthOperation::OnGetTokenFailure(const GoogleServiceAuthError& error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  LOG(WARNING) << "AuthOperation: token request using refresh token failed";
-  callback_.Run(HTTP_UNAUTHORIZED, std::string());
+
+  LOG(WARNING) << "AuthOperation: token request using refresh token failed"
+               << error.ToString();
+
+  // There are many ways to fail, but if the failure is due to connection,
+  // it's likely that the device is off-line. We treat the error differently
+  // so that the file manager works while off-line.
+  if (error.state() == GoogleServiceAuthError::CONNECTION_FAILED) {
+    UMA_HISTOGRAM_ENUMERATION("GData.AuthSuccess",
+                              kSuccessRatioHistogramNoConnection,
+                              kSuccessRatioHistogramMaxValue);
+    callback_.Run(GDATA_NO_CONNECTION, std::string());
+  } else {
+    UMA_HISTOGRAM_ENUMERATION("GData.AuthSuccess",
+                              kSuccessRatioHistogramFailure,
+                              kSuccessRatioHistogramMaxValue);
+    callback_.Run(HTTP_UNAUTHORIZED, std::string());
+  }
   NotifyFinish(GDataOperationRegistry::OPERATION_FAILED);
 }
 
@@ -157,8 +218,6 @@ UrlFetchOperationBase::UrlFetchOperationBase(GDataOperationRegistry* registry,
                                              Profile* profile)
     : GDataOperationRegistry::Operation(registry),
       profile_(profile),
-      // MessageLoopProxy is used to run |callback| on the origin thread.
-      relay_proxy_(base::MessageLoopProxy::current()),
       re_authenticate_count_(0),
       save_temp_file_(false),
       started_(false) {
@@ -171,7 +230,6 @@ UrlFetchOperationBase::UrlFetchOperationBase(
     Profile* profile)
     : GDataOperationRegistry::Operation(registry, type, path),
       profile_(profile),
-      relay_proxy_(base::MessageLoopProxy::current()),
       re_authenticate_count_(0),
       save_temp_file_(false) {
 }
@@ -186,7 +244,7 @@ void UrlFetchOperationBase::Start(const std::string& auth_token) {
   DVLOG(1) << "URL: " << url.spec();
 
   url_fetcher_.reset(URLFetcher::Create(url, GetRequestType(), this));
-  url_fetcher_->SetRequestContext(profile_->GetRequestContext());
+  url_fetcher_->SetRequestContext(g_browser_process->system_request_context());
   // Always set flags to neither send nor save cookies.
   url_fetcher_->SetLoadFlags(
       net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES |
@@ -291,6 +349,9 @@ void UrlFetchOperationBase::OnAuthFailed(GDataErrorCode code) {
     NotifyStart();
 
   NotifyFinish(GDataOperationRegistry::OPERATION_FAILED);
+
+  // Notify authentication failed.
+  NotifyAuthFailed();
 }
 
 std::string UrlFetchOperationBase::GetResponseHeadersAsString(
@@ -333,17 +394,14 @@ bool EntryActionOperation::ProcessURLFetchResults(const URLFetcher* source) {
   if (!callback_.is_null()) {
     GDataErrorCode code =
         static_cast<GDataErrorCode>(source->GetResponseCode());
-    relay_proxy_->PostTask(FROM_HERE,
-                           base::Bind(callback_, code, document_url_));
+    callback_.Run(code, document_url_);
   }
   return true;
 }
 
 void EntryActionOperation::RunCallbackOnPrematureFailure(GDataErrorCode code) {
-  if (!callback_.is_null()) {
-    relay_proxy_->PostTask(FROM_HERE,
-                           base::Bind(callback_, code, document_url_));
-  }
+  if (!callback_.is_null())
+    callback_.Run(code, document_url_);
 }
 
 //============================== GetDataOperation ==============================
@@ -375,20 +433,15 @@ bool GetDataOperation::ProcessURLFetchResults(const URLFetcher* source) {
       break;
   }
 
-  if (!callback_.is_null()) {
-    relay_proxy_->PostTask(
-        FROM_HERE,
-        base::Bind(callback_, code, base::Passed(&root_value)));
-  }
+  if (!callback_.is_null())
+    callback_.Run(code, root_value.Pass());
   return root_value.get() != NULL;
 }
 
 void GetDataOperation::RunCallbackOnPrematureFailure(GDataErrorCode code) {
   if (!callback_.is_null()) {
     scoped_ptr<base::Value> root_value;
-    relay_proxy_->PostTask(
-        FROM_HERE,
-        base::Bind(callback_, code, base::Passed(&root_value)));
+    callback_.Run(code, root_value.Pass());
   }
 }
 
@@ -397,7 +450,7 @@ base::Value* GetDataOperation::ParseResponse(const std::string& data) {
   int error_code = -1;
   std::string error_message;
   scoped_ptr<base::Value> root_value(base::JSONReader::ReadAndReturnError(
-      data, false, &error_code, &error_message));
+      data, base::JSON_PARSE_RFC, &error_code, &error_message));
   if (!root_value.get()) {
     LOG(ERROR) << "Error while parsing entry response: "
                << error_message
@@ -414,8 +467,12 @@ base::Value* GetDataOperation::ParseResponse(const std::string& data) {
 
 GetDocumentsOperation::GetDocumentsOperation(GDataOperationRegistry* registry,
                                              Profile* profile,
+                                             int start_changestamp,
+                                             const std::string& search_string,
                                              const GetDataCallback& callback)
-    : GetDataOperation(registry, profile, callback) {
+    : GetDataOperation(registry, profile, callback),
+      start_changestamp_(start_changestamp),
+      search_string_(search_string) {
 }
 
 GetDocumentsOperation::~GetDocumentsOperation() {}
@@ -426,9 +483,22 @@ void GetDocumentsOperation::SetUrl(const GURL& url) {
 
 GURL GetDocumentsOperation::GetURL() const {
   if (!override_url_.is_empty())
-    return AddFeedUrlParams(override_url_, kMaxDocumentsPerFeed);
+    return AddFeedUrlParams(override_url_,
+                            kMaxDocumentsPerFeed,
+                            0,
+                            std::string());
 
-  return AddFeedUrlParams(GURL(kGetDocumentListURL), kMaxDocumentsPerFirstFeed);
+  if (start_changestamp_ == 0) {
+    return AddFeedUrlParams(GURL(kGetDocumentListURL),
+                            kMaxDocumentsPerFeed,
+                            0,
+                            search_string_);
+  }
+
+  return AddFeedUrlParams(GURL(kGetChangesListURL),
+                          kMaxDocumentsPerFeed,
+                          start_changestamp_,
+                          std::string());
 }
 
 //========================= GetAccountMetadataOperation ========================
@@ -443,7 +513,7 @@ GetAccountMetadataOperation::GetAccountMetadataOperation(
 GetAccountMetadataOperation::~GetAccountMetadataOperation() {}
 
 GURL GetAccountMetadataOperation::GetURL() const {
-  return AddStandardUrlParams(GURL(kAccountMetadataURL));
+  return AddMetadataUrlParams(GURL(kAccountMetadataURL));
 }
 
 //============================ DownloadFileOperation ===========================
@@ -451,7 +521,8 @@ GURL GetAccountMetadataOperation::GetURL() const {
 DownloadFileOperation::DownloadFileOperation(
     GDataOperationRegistry* registry,
     Profile* profile,
-    const DownloadActionCallback& callback,
+    const DownloadActionCallback& download_action_callback,
+    const GetDownloadDataCallback& get_download_data_callback,
     const GURL& document_url,
     const FilePath& virtual_path,
     const FilePath& output_file_path)
@@ -459,7 +530,8 @@ DownloadFileOperation::DownloadFileOperation(
                             GDataOperationRegistry::OPERATION_DOWNLOAD,
                             virtual_path,
                             profile),
-      callback_(callback),
+      download_action_callback_(download_action_callback),
+      get_download_data_callback_(get_download_data_callback),
       document_url_(document_url) {
   // Make sure we download the content into a temp file.
   if (output_file_path.empty())
@@ -481,6 +553,17 @@ void DownloadFileOperation::OnURLFetchDownloadProgress(const URLFetcher* source,
   NotifyProgress(current, total);
 }
 
+bool DownloadFileOperation::ShouldSendDownloadData() {
+  return !get_download_data_callback_.is_null();
+}
+
+void DownloadFileOperation::OnURLFetchDownloadData(
+    const URLFetcher* source,
+    scoped_ptr<std::string> download_data) {
+  if (!get_download_data_callback_.is_null())
+    get_download_data_callback_.Run(HTTP_SUCCESS, download_data.Pass());
+}
+
 bool DownloadFileOperation::ProcessURLFetchResults(const URLFetcher* source) {
   GDataErrorCode code = static_cast<GDataErrorCode>(source->GetResponseCode());
 
@@ -492,20 +575,14 @@ bool DownloadFileOperation::ProcessURLFetchResults(const URLFetcher* source) {
     code = GDATA_FILE_ERROR;
   }
 
-  if (!callback_.is_null()) {
-    relay_proxy_->PostTask(
-        FROM_HERE,
-        base::Bind(callback_, code, document_url_, temp_file));
-  }
+  if (!download_action_callback_.is_null())
+    download_action_callback_.Run(code, document_url_, temp_file);
   return code == HTTP_SUCCESS;
 }
 
 void DownloadFileOperation::RunCallbackOnPrematureFailure(GDataErrorCode code) {
-  if (!callback_.is_null()) {
-    relay_proxy_->PostTask(
-        FROM_HERE,
-        base::Bind(callback_, code, document_url_, FilePath()));
-  }
+  if (!download_action_callback_.is_null())
+    download_action_callback_.Run(code, document_url_, FilePath());
 }
 
 //=========================== DeleteDocumentOperation ==========================
@@ -762,7 +839,7 @@ InitiateUploadOperation::InitiateUploadOperation(
                             profile),
       callback_(callback),
       params_(params),
-      initiate_upload_url_(chrome_browser_net::AppendOrReplaceQueryParameter(
+      initiate_upload_url_(chrome_common_net::AppendOrReplaceQueryParameter(
           params.resumable_create_media_link,
           kUploadParamConvertKey,
           kUploadParamConvertValue)) {
@@ -789,10 +866,8 @@ bool InitiateUploadOperation::ProcessURLFetchResults(const URLFetcher* source) {
           << "]: code=" << code
           << ", location=[" << upload_location << "]";
 
-  if (!callback_.is_null()) {
-    relay_proxy_->PostTask(FROM_HERE,
-                           base::Bind(callback_, code, GURL(upload_location)));
-  }
+  if (!callback_.is_null())
+    callback_.Run(code, GURL(upload_location));
   return code == HTTP_SUCCESS;
 }
 
@@ -802,10 +877,8 @@ void InitiateUploadOperation::NotifySuccessToOperationRegistry() {
 
 void InitiateUploadOperation::RunCallbackOnPrematureFailure(
     GDataErrorCode code) {
-  if (!callback_.is_null()) {
-    relay_proxy_->PostTask(FROM_HERE,
-                           base::Bind(callback_, code, GURL()));
-  }
+  if (!callback_.is_null())
+    callback_.Run(code, GURL());
 }
 
 URLFetcher::RequestType InitiateUploadOperation::GetRequestType() const {
@@ -911,13 +984,10 @@ bool ResumeUploadOperation::ProcessURLFetchResults(const URLFetcher* source) {
   }
 
   if (!callback_.is_null()) {
-    relay_proxy_->PostTask(
-        FROM_HERE,
-        base::Bind(callback_,
-                   ResumeUploadResponse(code,
-                                        start_range_received,
-                                        end_range_received),
-                   base::Passed(&entry)));
+    callback_.Run(ResumeUploadResponse(code,
+                                       start_range_received,
+                                       end_range_received),
+                  entry.Pass());
   }
 
   if (code == HTTP_CREATED)
@@ -939,12 +1009,8 @@ void ResumeUploadOperation::NotifySuccessToOperationRegistry() {
 
 void ResumeUploadOperation::RunCallbackOnPrematureFailure(GDataErrorCode code) {
   scoped_ptr<DocumentEntry> entry;
-  if (!callback_.is_null()) {
-    relay_proxy_->PostTask(FROM_HERE,
-                           base::Bind(callback_,
-                                      ResumeUploadResponse(code, 0, 0),
-                                      base::Passed(&entry)));
-  }
+  if (!callback_.is_null())
+    callback_.Run(ResumeUploadResponse(code, 0, 0), entry.Pass());
 }
 
 URLFetcher::RequestType ResumeUploadOperation::GetRequestType() const {

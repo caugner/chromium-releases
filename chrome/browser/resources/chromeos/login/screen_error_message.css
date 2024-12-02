@@ -4,17 +4,21 @@
  */
 
 #error-message-screen-title {
-  -webkit-margin-start: 60px;
   -webkit-margin-end: 60px;
+  -webkit-margin-start: 60px;
   display: block;
   font-weight: bold;
   margin-bottom: 20px;
 }
 
 #error-message-body {
-  -webkit-margin-start: 60px;
   -webkit-margin-end: 60px;
+  -webkit-margin-start: 60px;
   display: block;
+}
+
+#captive-portal-proxy-message-text {
+  margin-top: 20px;
 }
 
 #captive-portal-network-select-text {
@@ -31,6 +35,10 @@
 .show-captive-portal .show-with-captive-portal,
 .show-proxy-error .show-with-proxy-error {
   display: block;
+}
+
+.show-captive-portal .dont-show-with-captive-portal {
+  display: none;
 }
 
 #error-guest-signin,

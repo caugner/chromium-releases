@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,10 +11,12 @@
 #include <shobjidl.h>
 
 #include "base/file_path.h"
+#include "base/win/metro.h"
 #include "base/path_service.h"
 #include "base/win/scoped_co_mem.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/installer/util/browser_distribution.h"
+#include "content/public/common/content_switches.h"
 
 namespace chrome {
 
@@ -23,6 +25,8 @@ bool GetDefaultUserDataDirectory(FilePath* result) {
     return false;
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   *result = result->Append(dist->GetInstallSubDir());
+  if (base::win::GetMetroModule())
+    *result = result->Append(kMetroChromeUserDataSubDir);
   *result = result->Append(chrome::kUserDataDirname);
   return true;
 }
@@ -92,6 +96,21 @@ bool GetUserDesktop(FilePath* result) {
     return false;
   *result = FilePath(system_buffer);
   return true;
+}
+
+bool ProcessNeedsProfileDir(const std::string& process_type) {
+  // On windows we don't want subprocesses other than the browser process and
+  // service processes to be able to use the profile directory because if it
+  // lies on a network share the sandbox will prevent us from accessing it.
+  // TODO(pastarmovj): For now gpu and plugin broker processes are whitelisted
+  // too because they do use the profile dir in some way but this must be
+  // investigated and fixed if possible.
+  return process_type.empty() ||
+         process_type == switches::kServiceProcess ||
+         process_type == switches::kGpuProcess ||
+         process_type == switches::kNaClBrokerProcess ||
+         process_type == switches::kNaClLoaderProcess ||
+         process_type == switches::kPpapiBrokerProcess;
 }
 
 }  // namespace chrome

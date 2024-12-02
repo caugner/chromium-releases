@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -184,18 +184,15 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, kEnableInstant) {
   ASSERT_TRUE(BooleanPrefMatches(prefs::kInstantConfirmDialogShown));
   ASSERT_TRUE(BooleanPrefMatches(prefs::kInstantEnabled));
   ASSERT_TRUE(BooleanPrefMatches(prefs::kInstantEnabledOnce));
-  ASSERT_TRUE(Int64PrefMatches(prefs::kInstantEnabledTime));
 
   ChangeBooleanPref(0, prefs::kInstantConfirmDialogShown);
   ChangeBooleanPref(0, prefs::kInstantEnabled);
   ChangeBooleanPref(0, prefs::kInstantEnabledOnce);
-  ChangeInt64Pref(0, prefs::kInstantEnabledTime, 1);
 
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
   ASSERT_TRUE(BooleanPrefMatches(prefs::kInstantConfirmDialogShown));
   ASSERT_TRUE(BooleanPrefMatches(prefs::kInstantEnabled));
   ASSERT_TRUE(BooleanPrefMatches(prefs::kInstantEnabledOnce));
-  ASSERT_TRUE(Int64PrefMatches(prefs::kInstantEnabledTime));
 }
 
 // TCM ID - 3611311.
@@ -556,7 +553,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, kAcceptLanguages) {
 }
 
 // TCM ID - 7590682
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, kUsesSystemTheme) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(BooleanPrefMatches(prefs::kUsesSystemTheme));
@@ -565,10 +562,10 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, kUsesSystemTheme) {
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
   ASSERT_FALSE(BooleanPrefMatches(prefs::kUsesSystemTheme));
 }
-#endif  // TOOLKIT_USES_GTK
+#endif  // TOOLKIT_GTK
 
 // TCM ID - 3636292
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest,
                        kUseCustomChromeFrame) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
@@ -580,7 +577,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest,
   ASSERT_TRUE(BooleanPrefMatches(
       prefs::kUseCustomChromeFrame));
 }
-#endif  // TOOLKIT_USES_GTK
+#endif  // TOOLKIT_GTK
 
 // TCM ID - 6473347.
 #if defined(OS_CHROMEOS)

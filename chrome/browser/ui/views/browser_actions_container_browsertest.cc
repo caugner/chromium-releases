@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,17 +13,13 @@
 
 class BrowserActionsContainerTest : public ExtensionBrowserTest {
  public:
-  BrowserActionsContainerTest() : browser_(NULL) {
+  BrowserActionsContainerTest() {
   }
   virtual ~BrowserActionsContainerTest() {}
 
-  virtual Browser* CreateBrowser(Profile* profile) {
-    browser_ = InProcessBrowserTest::CreateBrowser(profile);
-    browser_actions_bar_.reset(new BrowserActionTestUtil(browser_));
-    return browser_;
+  virtual void SetUpOnMainThread() OVERRIDE {
+    browser_actions_bar_.reset(new BrowserActionTestUtil(browser()));
   }
-
-  Browser* browser() { return browser_; }
 
   BrowserActionTestUtil* browser_actions_bar() {
     return browser_actions_bar_.get();
@@ -41,12 +37,15 @@ class BrowserActionsContainerTest : public ExtensionBrowserTest {
 
  private:
   scoped_ptr<BrowserActionTestUtil> browser_actions_bar_;
-
-  Browser* browser_;  // Weak.
 };
 
 // Test the basic functionality.
+// http://crbug.com/120770
+#if defined(OS_WIN)
+IN_PROC_BROWSER_TEST_F(BrowserActionsContainerTest, DISABLED_Basic) {
+#else
 IN_PROC_BROWSER_TEST_F(BrowserActionsContainerTest, Basic) {
+#endif
   BrowserActionsContainer::disable_animations_during_testing_ = true;
 
   // Load an extension with no browser action.
@@ -69,8 +68,13 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsContainerTest, Basic) {
   EXPECT_EQ(0, browser_actions_bar()->NumberOfBrowserActions());
 }
 
-// TODO(mpcomplete): http://code.google.com/p/chromium/issues/detail?id=38992
-IN_PROC_BROWSER_TEST_F(BrowserActionsContainerTest, Visibility) {
+// http://crbug.com/38992: Times out occasionally.
+#if defined(OS_CHROMEOS)
+#define MAYBE_Visibility DISABLED_Visibility
+#else
+#define MAYBE_Visibility Visibility
+#endif
+IN_PROC_BROWSER_TEST_F(BrowserActionsContainerTest, MAYBE_Visibility) {
   BrowserActionsContainer::disable_animations_during_testing_ = true;
 
   base::TimeTicks start_time = base::TimeTicks::Now();

@@ -16,7 +16,7 @@ cr.define('options', function() {
   function CookiesView(model) {
     OptionsPage.call(this, 'cookies',
                      templateData.cookiesViewPageTabTitle,
-                     'cookiesViewPage');
+                     'cookies-view-page');
   }
 
   cr.addSingletonGetter(CookiesView);
@@ -55,6 +55,14 @@ cr.define('options', function() {
 
       $('cookies-view-overlay-confirm').onclick =
           OptionsPage.closeOverlay.bind(OptionsPage);
+    },
+
+    /**
+     * Clear search filter when the dialog is displayed.
+     * @inheritDoc
+     */
+    didShowPage: function() {
+      $('cookies-search-box').value = '';
     },
 
     /**

@@ -13,8 +13,8 @@
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/site_instance_impl.h"
-#include "content/browser/tab_contents/navigation_entry_impl.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/web_contents/navigation_entry_impl.h"
+#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/web_ui_controller_factory.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_constants.h"
@@ -61,8 +61,10 @@ class SiteInstanceTestWebUIControllerFactory
                                       const GURL& url) const OVERRIDE {
     return content::GetContentClient()->HasWebUIScheme(url);
   }
-  virtual bool IsURLAcceptableForWebUI(BrowserContext* browser_context,
-      const GURL& url) const OVERRIDE {
+  virtual bool IsURLAcceptableForWebUI(
+      BrowserContext* browser_context,
+      const GURL& url,
+      bool data_urls_allowed) const OVERRIDE {
     return false;
   }
 };
@@ -206,7 +208,7 @@ class TestSiteInstance : public SiteInstanceImpl {
 
 // Test to ensure no memory leaks for SiteInstance objects.
 TEST_F(SiteInstanceTest, SiteInstanceDestructor) {
-  // The existence of this object will cause TabContents to create our
+  // The existence of this object will cause WebContentsImpl to create our
   // test one instead of the real one.
   content::RenderViewHostTestEnabler rvh_test_enabler;
   int site_delete_counter = 0;
@@ -249,16 +251,13 @@ TEST_F(SiteInstanceTest, SiteInstanceDestructor) {
                                                &site_delete_counter,
                                                &browsing_delete_counter);
   {
-    TabContents contents(browser_context.get(),
-                         instance,
-                         MSG_ROUTING_NONE,
-                         NULL,
-                         NULL);
+    WebContentsImpl web_contents(browser_context.get(), instance,
+                                 MSG_ROUTING_NONE, NULL, NULL, NULL);
     EXPECT_EQ(1, site_delete_counter);
     EXPECT_EQ(1, browsing_delete_counter);
   }
 
-  // Make sure that we flush any messages related to the above TabContents
+  // Make sure that we flush any messages related to the above WebContentsImpl
   // destruction.
   MessageLoop::current()->RunAllPending();
 
@@ -414,6 +413,7 @@ TEST_F(SiteInstanceTest, OneSiteInstancePerSite) {
       static_cast<SiteInstanceImpl*>(
           browsing_instance->GetSiteInstanceForURL(url_b1)));
   EXPECT_NE(site_instance_a1.get(), site_instance_b1.get());
+  EXPECT_TRUE(site_instance_a1->IsRelatedSiteInstance(site_instance_b1));
 
   // Getting the new SiteInstance from the BrowsingInstance and from another
   // SiteInstance in the BrowsingInstance should give the same result.
@@ -437,6 +437,7 @@ TEST_F(SiteInstanceTest, OneSiteInstancePerSite) {
       static_cast<SiteInstanceImpl*>(
           browsing_instance2->GetSiteInstanceForURL(url_a2)));
   EXPECT_NE(site_instance_a1.get(), site_instance_a2_2.get());
+  EXPECT_FALSE(site_instance_a1->IsRelatedSiteInstance(site_instance_a2_2));
 
   // Should be able to see that we do have SiteInstances.
   EXPECT_TRUE(browsing_instance->HasSiteInstance(
@@ -475,6 +476,7 @@ TEST_F(SiteInstanceTest, OneSiteInstancePerSiteInBrowserContext) {
       static_cast<SiteInstanceImpl*>(
           browsing_instance->GetSiteInstanceForURL(url_b1)));
   EXPECT_NE(site_instance_a1.get(), site_instance_b1.get());
+  EXPECT_TRUE(site_instance_a1->IsRelatedSiteInstance(site_instance_b1));
 
   // Getting the new SiteInstance from the BrowsingInstance and from another
   // SiteInstance in the BrowsingInstance should give the same result.

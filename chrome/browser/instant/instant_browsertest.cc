@@ -48,17 +48,19 @@ using content::WebContents;
 class InstantTest : public InProcessBrowserTest {
  public:
   InstantTest() {
-    set_show_window(true);
     EnableDOMAutomation();
   }
 
   void EnableInstant() {
+    CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+        switches::kInstantFieldTrial, switches::kInstantFieldTrialInstant);
     InstantController::Enable(browser()->profile());
   }
 
   void SetupInstantProvider(const std::string& page) {
+    Profile* profile = browser()->profile();
     TemplateURLService* model =
-        TemplateURLServiceFactory::GetForProfile(browser()->profile());
+        TemplateURLServiceFactory::GetForProfile(profile);
 
     ui_test_utils::WindowedNotificationObserver observer(
         chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED,
@@ -68,19 +70,15 @@ class InstantTest : public InProcessBrowserTest {
       observer.Wait();
     }
 
-    // TemplateURLService takes ownership of this.
-    TemplateURL* template_url = new TemplateURL();
-
-    std::string url = base::StringPrintf(
-        "http://%s:%d/files/%s?q={searchTerms}",
+    TemplateURLData data;
+    data.short_name = ASCIIToUTF16("foo");
+    data.SetKeyword(ASCIIToUTF16("foo"));
+    data.SetURL(base::StringPrintf("http://%s:%d/files/%s?q={searchTerms}",
         test_server()->host_port_pair().host().c_str(),
-        test_server()->host_port_pair().port(),
-        page.c_str());
-    template_url->SetURL(url, 0, 0);
-    template_url->SetInstantURL(url, 0, 0);
-    template_url->set_keyword(ASCIIToUTF16("foo"));
-    template_url->set_short_name(ASCIIToUTF16("foo"));
-
+        test_server()->host_port_pair().port(), page.c_str()));
+    data.instant_url = data.url();
+    // TemplateURLService takes ownership of this.
+    TemplateURL* template_url = new TemplateURL(profile, data);
     model->Add(template_url);
     model->SetDefaultSearchProvider(template_url);
   }
@@ -282,9 +280,8 @@ IN_PROC_BROWSER_TEST_F(InstantTest, MAYBE(OnChangeEvent)) {
       TemplateURLServiceFactory::GetForProfile(browser()->profile())->
       GetDefaultSearchProvider();
   EXPECT_TRUE(default_turl);
-  EXPECT_TRUE(default_turl->url());
-  EXPECT_EQ(default_turl->url()->ReplaceSearchTerms(
-                *default_turl, ASCIIToUTF16("defghi"), 0, string16()),
+  EXPECT_EQ(default_turl->url_ref().ReplaceSearchTerms(ASCIIToUTF16("defghi"),
+                TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16()),
             loader()->url().spec());
 
   // Check that the value is reflected and onchange is called.
@@ -624,7 +621,7 @@ IN_PROC_BROWSER_TEST_F(InstantTest, MAYBE(SearchServerDoesntSupportInstant)) {
   SetupInstantProvider("empty.html");
 
   ui_test_utils::WindowedNotificationObserver tab_closed_observer(
-      content::NOTIFICATION_TAB_CLOSED,
+      content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
       content::NotificationService::AllSources());
 
   omnibox()->SetUserText(ASCIIToUTF16("d"));
@@ -650,7 +647,7 @@ IN_PROC_BROWSER_TEST_F(InstantTest,
   EXPECT_FALSE(preview());
 
   ui_test_utils::WindowedNotificationObserver tab_closed_observer(
-      content::NOTIFICATION_TAB_CLOSED,
+      content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
       content::NotificationService::AllSources());
 
   // Now type in some search text.
@@ -729,9 +726,13 @@ IN_PROC_BROWSER_TEST_F(InstantTest, MAYBE(DontPersistSearchbox)) {
 }
 
 // Tests that instant search is preloaded whenever the omnibox gets focus.
+// PreloadsInstant fails on linux_chromeos trybots all the time, possibly
+// because of http://crbug.com/80118.
+#if defined(OS_CHROMEOS)
+IN_PROC_BROWSER_TEST_F(InstantTest, DISABLED_PreloadsInstant) {
+#else
 IN_PROC_BROWSER_TEST_F(InstantTest, MAYBE(PreloadsInstant)) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kPreloadInstantSearch);
+#endif
   ASSERT_TRUE(test_server()->Start());
   EnableInstant();
   SetupInstantProvider("instant.html");

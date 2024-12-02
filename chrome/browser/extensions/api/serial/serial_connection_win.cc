@@ -26,14 +26,29 @@ void SerialConnection::Close() {
   // TODO(miket): implement
 }
 
-int SerialConnection::Read(unsigned char* byte) {
+int SerialConnection::Read(uint8* byte) {
   // TODO(miket): implement
   return -1;
 }
 
-int SerialConnection::Write(const std::string& data) {
+int SerialConnection::Write(scoped_refptr<net::IOBuffer> io_buffer,
+                            int byte_count) {
   // TODO(miket): implement
   return -1;
+}
+
+// static
+SerialConnection::StringSet SerialConnection::GenerateValidPatterns() {
+  // TODO(miket): implement
+  StringSet valid_patterns;
+  return valid_patterns;
+}
+
+// static
+SerialConnection::StringSet SerialConnection::GenerateValidSerialPortNames() {
+  // TODO(miket): implement
+  StringSet valid_names;
+  return valid_names;
 }
 
 }  // namespace extensions

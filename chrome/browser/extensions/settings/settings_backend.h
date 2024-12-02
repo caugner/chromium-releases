@@ -17,6 +17,8 @@
 #include "chrome/browser/extensions/settings/syncable_settings_storage.h"
 #include "chrome/browser/sync/api/syncable_service.h"
 
+class SyncErrorFactory;
+
 namespace extensions {
 
 // Manages SettingsStorage objects for extensions, including routing
@@ -48,7 +50,8 @@ class SettingsBackend : public SyncableService {
   virtual SyncError MergeDataAndStartSyncing(
       syncable::ModelType type,
       const SyncDataList& initial_sync_data,
-      scoped_ptr<SyncChangeProcessor> sync_processor) OVERRIDE;
+      scoped_ptr<SyncChangeProcessor> sync_processor,
+      scoped_ptr<SyncErrorFactory> sync_error_factory) OVERRIDE;
   virtual SyncError ProcessSyncChanges(
       const tracked_objects::Location& from_here,
       const SyncChangeList& change_list) OVERRIDE;
@@ -64,6 +67,10 @@ class SettingsBackend : public SyncableService {
   // Gets all extension IDs known to extension settings.  This may not be all
   // installed extensions.
   std::set<std::string> GetKnownExtensionIDs() const;
+
+  // Creates a new SettingsSyncProcessor for an extension.
+  scoped_ptr<SettingsSyncProcessor> CreateSettingsSyncProcessor(
+      const std::string& extension_id) const;
 
   // The Factory to use for creating leveldb storage areas.
   const scoped_refptr<SettingsStorageFactory> storage_factory_;
@@ -89,6 +96,9 @@ class SettingsBackend : public SyncableService {
 
   // Current sync processor, if any.
   scoped_ptr<SyncChangeProcessor> sync_processor_;
+
+  // Current sync error handler if any.
+  scoped_ptr<SyncErrorFactory> sync_error_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SettingsBackend);
 };

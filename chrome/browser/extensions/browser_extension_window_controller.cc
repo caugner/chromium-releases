@@ -17,21 +17,25 @@ BrowserExtensionWindowController::BrowserExtensionWindowController(
       browser_(browser) {
 }
 
-const SessionID& BrowserExtensionWindowController::GetSessionId() const {
-  return browser_->session_id();
+int BrowserExtensionWindowController::GetWindowId() const {
+  return static_cast<int>(browser_->session_id().id());
 }
 
 namespace keys = extension_tabs_module_constants;
 
+std::string BrowserExtensionWindowController::GetWindowTypeText() const {
+  if (browser_->is_type_popup())
+    return keys::kWindowTypeValuePopup;
+  if (browser_->is_type_panel())
+    return keys::kWindowTypeValuePanel;
+  if (browser_->is_app())
+    return keys::kWindowTypeValueApp;
+  return keys::kWindowTypeValueNormal;
+}
+
 base::DictionaryValue*
 BrowserExtensionWindowController::CreateWindowValue() const {
   DictionaryValue* result = ExtensionWindowController::CreateWindowValue();
-
-  result->SetString(keys::kWindowTypeKey,
-                    ExtensionTabUtil::GetWindowTypeText(browser_));
-  result->SetString(keys::kShowStateKey,
-                    ExtensionTabUtil::GetWindowShowStateText(browser_));
-
   return result;
 }
 
@@ -44,12 +48,11 @@ BrowserExtensionWindowController::CreateWindowValueWithTabs() const {
   return result;
 }
 
-bool BrowserExtensionWindowController::CanClose(
-    ExtensionWindowController::Reason* reason) const {
+bool BrowserExtensionWindowController::CanClose(Reason* reason) const {
   // Don't let an extension remove the window if the user is dragging tabs
   // in that window.
   if (!browser_->IsTabStripEditable()) {
-    *reason = ExtensionWindowController::REASON_TAB_STRIP_NOT_EDITABLE;
+    *reason = ExtensionWindowController::REASON_NOT_EDITABLE;
     return false;
   }
   return true;
@@ -60,4 +63,8 @@ void BrowserExtensionWindowController::SetFullscreenMode(
     const GURL& extension_url) const {
   if (browser_->window()->IsFullscreen() != is_fullscreen)
     browser_->ToggleFullscreenModeWithExtension(extension_url);
+}
+
+Browser* BrowserExtensionWindowController::GetBrowser() const {
+  return browser_;
 }

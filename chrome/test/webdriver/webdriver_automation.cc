@@ -30,7 +30,6 @@
 #include "chrome/test/automation/automation_json_requests.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
-#include "chrome/test/automation/extension_proxy.h"
 #include "chrome/test/automation/proxy_launcher.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/base/chrome_process_util.h"
@@ -779,12 +778,6 @@ void Automation::WaitForAllViewsToStopLoading(Error** error) {
     *error = Error::FromAutomationError(auto_error);
 }
 
-void Automation::InstallExtensionDeprecated(
-    const FilePath& path, Error** error) {
-  if (!launcher_->automation()->InstallExtension(path, false).get())
-    *error = new Error(kUnknownError, "Failed to install extension");
-}
-
 void Automation::InstallExtension(
     const FilePath& path, std::string* extension_id, Error** error) {
   *error = CheckNewExtensionInterfaceSupported();
@@ -915,6 +908,35 @@ void Automation::SetPreference(const std::string& pref,
   }
 }
 
+void Automation::GetGeolocation(scoped_ptr<DictionaryValue>* geolocation,
+                                Error** error) {
+  *error = CheckGeolocationSupported();
+  if (*error)
+    return;
+
+  if (geolocation_.get()) {
+    geolocation->reset(geolocation_->DeepCopy());
+  } else {
+    *error = new Error(kUnknownError,
+                       "Location must be set before it can be retrieved");
+  }
+}
+
+void Automation::OverrideGeolocation(DictionaryValue* geolocation,
+                                     Error** error) {
+  *error = CheckGeolocationSupported();
+  if (*error)
+    return;
+
+  automation::Error auto_error;
+  if (SendOverrideGeolocationJSONRequest(
+          automation(), geolocation, &auto_error)) {
+    geolocation_.reset(geolocation->DeepCopy());
+  } else {
+    *error = Error::FromAutomationError(auto_error);
+  }
+}
+
 AutomationProxy* Automation::automation() const {
   return launcher_->automation();
 }
@@ -972,6 +994,13 @@ Error* Automation::CheckNewExtensionInterfaceSupported() {
   const char* message =
       "Extension interface is not supported for this version of Chrome";
   return CheckVersion(947, message);
+}
+
+Error* Automation::CheckGeolocationSupported() {
+  const char* message =
+      "Geolocation automation interface is not supported for this version of "
+      "Chrome.";
+  return CheckVersion(1119, message);
 }
 
 }  // namespace webdriver

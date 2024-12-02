@@ -21,12 +21,12 @@ static const int kLabelPadding = 5;
 
 IconLabelBubbleView::IconLabelBubbleView(const int background_images[],
                                          int contained_image,
-                                         const SkColor& color)
+                                         SkColor color)
     : background_painter_(background_images),
       is_extension_icon_(false) {
   image_ = new views::ImageView();
   image_->SetImage(
-      ResourceBundle::GetSharedInstance().GetBitmapNamed(contained_image));
+      ui::ResourceBundle::GetSharedInstance().GetBitmapNamed(contained_image));
   AddChildView(image_);
 
   label_ = new views::Label();
@@ -78,8 +78,8 @@ gfx::Size IconLabelBubbleView::GetNonLabelSize() const {
 }
 
 int IconLabelBubbleView::GetPreLabelWidth() const {
-  return kBubbleOuterPadding + ResourceBundle::GetSharedInstance().
-      GetBitmapNamed(IDR_OMNIBOX_SEARCH)->width() +
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  return kBubbleOuterPadding + rb.GetBitmapNamed(IDR_OMNIBOX_SEARCH)->width() +
       LocationBarView::kItemPadding;
 }
 

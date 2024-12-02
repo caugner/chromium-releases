@@ -45,7 +45,6 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPeerConnectionHandlerClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSerializedScriptValue.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageEventDispatcher.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "webkit/glue/simple_webmimeregistry_impl.h"
@@ -89,11 +88,11 @@ using WebKit::WebIDBKeyPath;
 using WebKit::WebKitPlatformSupport;
 using WebKit::WebMediaStreamCenter;
 using WebKit::WebMediaStreamCenterClient;
+using WebKit::WebPeerConnection00Handler;
+using WebKit::WebPeerConnection00HandlerClient;
 using WebKit::WebPeerConnectionHandler;
 using WebKit::WebPeerConnectionHandlerClient;
 using WebKit::WebSerializedScriptValue;
-using WebKit::WebStorageArea;
-using WebKit::WebStorageEventDispatcher;
 using WebKit::WebStorageNamespace;
 using WebKit::WebString;
 using WebKit::WebURL;
@@ -311,30 +310,9 @@ void RendererWebKitPlatformSupportImpl::suddenTerminationChanged(bool enabled) {
 WebStorageNamespace*
 RendererWebKitPlatformSupportImpl::createLocalStorageNamespace(
     const WebString& path, unsigned quota) {
-#ifdef ENABLE_NEW_DOM_STORAGE_BACKEND
-  return new RendererWebStorageNamespaceImpl(DOM_STORAGE_LOCAL);
-#else
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess))
-    return WebStorageNamespace::createLocalStorageNamespace(path, quota);
-  return new RendererWebStorageNamespaceImpl(DOM_STORAGE_LOCAL);
-#endif
+  return new RendererWebStorageNamespaceImpl();
 }
 
-void RendererWebKitPlatformSupportImpl::dispatchStorageEvent(
-    const WebString& key, const WebString& old_value,
-    const WebString& new_value, const WebString& origin,
-    const WebKit::WebURL& url, bool is_local_storage) {
-#ifdef ENABLE_NEW_DOM_STORAGE_BACKEND
-  NOTREACHED();
-#else
-  DCHECK(CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess));
-  // Inefficient, but only used in single process mode.
-  scoped_ptr<WebStorageEventDispatcher> event_dispatcher(
-      WebStorageEventDispatcher::create());
-  event_dispatcher->dispatchStorageEvent(key, old_value, new_value, origin,
-                                         url, is_local_storage);
-#endif
-}
 
 //------------------------------------------------------------------------------
 
@@ -350,13 +328,13 @@ WebIDBFactory* RendererWebKitPlatformSupportImpl::idbFactory() {
 
 void RendererWebKitPlatformSupportImpl::createIDBKeysFromSerializedValuesAndKeyPath(
     const WebVector<WebSerializedScriptValue>& values,
-    const WebString& keyPath,
+    const WebIDBKeyPath& keyPath,
     WebVector<WebIDBKey>& keys_out) {
   DCHECK(CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess));
   WebVector<WebIDBKey> keys(values.size());
   for (size_t i = 0; i < values.size(); ++i) {
     keys[i] = WebIDBKey::createFromValueAndKeyPath(
-        values[i], WebIDBKeyPath::create(keyPath));
+        values[i], keyPath);
   }
   keys_out.swap(keys);
 }
@@ -365,10 +343,10 @@ WebSerializedScriptValue
 RendererWebKitPlatformSupportImpl::injectIDBKeyIntoSerializedValue(
     const WebIDBKey& key,
     const WebSerializedScriptValue& value,
-    const WebString& keyPath) {
+    const WebIDBKeyPath& keyPath) {
   DCHECK(CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess));
   return WebIDBKey::injectIDBKeyIntoSerializedValue(
-      key, value, WebIDBKeyPath::create(keyPath));
+      key, value, keyPath);
 }
 
 //------------------------------------------------------------------------------
@@ -501,7 +479,7 @@ bool RendererWebKitPlatformSupportImpl::SandboxSupport::loadFont(
 
   if (font_data_size == 0 || font_data == base::SharedMemory::NULLHandle() ||
       *font_id == 0) {
-    NOTREACHED() << "Bad response from ViewHostMsg_LoadFont() for " <<
+    LOG(ERROR) << "Bad response from ViewHostMsg_LoadFont() for " <<
         src_font_descriptor.font_name;
     *out = NULL;
     *font_id = 0;
@@ -658,11 +636,9 @@ RendererWebKitPlatformSupportImpl::createAudioDevice(
       layout = CHANNEL_LAYOUT_STEREO;
   }
 
-  AudioParameters params(AudioParameters::AUDIO_PCM_LOW_LATENCY,
-                         layout,
-                         static_cast<int>(sampleRate),
-                         16,
-                         bufferSize);
+  media::AudioParameters params(
+      media::AudioParameters::AUDIO_PCM_LOW_LATENCY, layout,
+      static_cast<int>(sampleRate), 16, bufferSize);
 
   return new RendererWebAudioDeviceImpl(params, callback);
 }
@@ -726,6 +702,18 @@ RendererWebKitPlatformSupportImpl::createPeerConnectionHandler(
   if (!render_view)
     return NULL;
   return render_view->CreatePeerConnectionHandler(client);
+}
+
+WebPeerConnection00Handler*
+RendererWebKitPlatformSupportImpl::createPeerConnection00Handler(
+    WebPeerConnection00HandlerClient* client) {
+  WebFrame* web_frame = WebFrame::frameForCurrentContext();
+  if (!web_frame)
+    return NULL;
+  RenderViewImpl* render_view = RenderViewImpl::FromWebView(web_frame->view());
+  if (!render_view)
+    return NULL;
+  return render_view->CreatePeerConnectionHandlerJsep(client);
 }
 
 //------------------------------------------------------------------------------

@@ -20,6 +20,14 @@
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/browser/web_ui_message_handler.h"
 
+#if defined(OS_CHROMEOS)
+namespace chromeos {
+namespace system {
+class PointerDeviceObserver;
+}  // namespace system
+}  // namespace chromeos
+#endif
+
 namespace options2 {
 
 // The base class handler of Javascript messages of options pages.
@@ -102,14 +110,7 @@ class OptionsUI : public content::WebUIController,
       const AutocompleteResult& autocompleteResult,
       base::ListValue * const suggestions);
 
-  static RefCountedMemory* GetFaviconResourceBytes();
-
-  // WebUIController implementation.
-  virtual void RenderViewCreated(
-      content::RenderViewHost* render_view_host) OVERRIDE;
-  virtual void RenderViewReused(
-      content::RenderViewHost* render_view_host) OVERRIDE;
-  virtual void DidBecomeActiveForReusedRenderView() OVERRIDE;
+  static base::RefCountedMemory* GetFaviconResourceBytes();
 
   // Overridden from OptionsPageUIHandlerHost:
   virtual void InitializeHandlers() OVERRIDE;
@@ -119,13 +120,14 @@ class OptionsUI : public content::WebUIController,
   void AddOptionsPageUIHandler(base::DictionaryValue* localized_strings,
                                OptionsPageUIHandler* handler);
 
-  // Sets the WebUI CommandLineString property with arguments passed while
-  // launching chrome.
-  void SetCommandLineString(content::RenderViewHost* render_view_host);
-
   bool initialized_handlers_;
 
   std::vector<OptionsPageUIHandler*> handlers_;
+
+#if defined(OS_CHROMEOS)
+  scoped_ptr<chromeos::system::PointerDeviceObserver>
+      pointer_device_observer_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(OptionsUI);
 };

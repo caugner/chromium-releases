@@ -28,18 +28,10 @@ using views::ImageView;
 using views::Textfield;
 
 
-namespace {
-// Converts a URL as understood by TemplateURL to one appropriate for display
-// to the user.
-string16 GetDisplayURL(const TemplateURL& turl) {
-  return turl.url() ? turl.url()->DisplayURL() : string16();
-}
-}  // namespace
-
 namespace browser {
 
 void EditSearchEngine(gfx::NativeWindow parent,
-                      const TemplateURL* template_url,
+                      TemplateURL* template_url,
                       EditSearchEngineControllerDelegate* delegate,
                       Profile* profile) {
   EditSearchEngineDialog::Show(parent, template_url, delegate, profile);
@@ -48,7 +40,7 @@ void EditSearchEngine(gfx::NativeWindow parent,
 }  // namespace browser
 
 EditSearchEngineDialog::EditSearchEngineDialog(
-    const TemplateURL* template_url,
+    TemplateURL* template_url,
     EditSearchEngineControllerDelegate* delegate,
     Profile* profile)
     : controller_(new EditSearchEngineController(template_url,
@@ -62,7 +54,7 @@ EditSearchEngineDialog::~EditSearchEngineDialog() {
 
 // static
 void EditSearchEngineDialog::Show(gfx::NativeWindow parent,
-                                  const TemplateURL* template_url,
+                                  TemplateURL* template_url,
                                   EditSearchEngineControllerDelegate* delegate,
                                   Profile* profile) {
   EditSearchEngineDialog* contents =
@@ -129,8 +121,8 @@ void EditSearchEngineDialog::Init() {
     title_tf_ = CreateTextfield(controller_->template_url()->short_name(),
                                 false);
     keyword_tf_ = CreateTextfield(controller_->template_url()->keyword(), true);
-    url_tf_ = CreateTextfield(GetDisplayURL(*controller_->template_url()),
-                              false);
+    url_tf_ = CreateTextfield(
+        controller_->template_url()->url_ref().DisplayURL(), false);
     // We don't allow users to edit prepopulate URLs. This is done as
     // occasionally we need to update the URL of prepopulated TemplateURLs.
     url_tf_->SetReadOnly(controller_->template_url()->prepopulate_id() != 0);
@@ -237,14 +229,7 @@ views::Label* EditSearchEngineDialog::CreateLabel(int message_id) {
 Textfield* EditSearchEngineDialog::CreateTextfield(const string16& text,
                                                    bool lowercase) {
   Textfield* text_field = new Textfield(
-#if defined(USE_AURA)
-      Textfield::STYLE_DEFAULT);
-  NOTIMPLEMENTED();   // TODO(beng): support lowercase mode in
-                      //             NativeTextfieldViews.
-                      //             http://crbug.com/109308
-#else
       lowercase ? Textfield::STYLE_LOWERCASE : Textfield::STYLE_DEFAULT);
-#endif
   text_field->SetText(text);
   text_field->SetController(this);
   return text_field;
@@ -263,15 +248,12 @@ void EditSearchEngineDialog::UpdateImageViews() {
 void EditSearchEngineDialog::UpdateImageView(ImageView* image_view,
                                              bool is_valid,
                                              int invalid_message_id) {
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   if (is_valid) {
     image_view->SetTooltipText(string16());
-    image_view->SetImage(
-        ResourceBundle::GetSharedInstance().GetBitmapNamed(
-            IDR_INPUT_GOOD));
+    image_view->SetImage(rb.GetBitmapNamed(IDR_INPUT_GOOD));
   } else {
     image_view->SetTooltipText(l10n_util::GetStringUTF16(invalid_message_id));
-    image_view->SetImage(
-        ResourceBundle::GetSharedInstance().GetBitmapNamed(
-            IDR_INPUT_ALERT));
+    image_view->SetImage(rb.GetBitmapNamed(IDR_INPUT_ALERT));
   }
 }

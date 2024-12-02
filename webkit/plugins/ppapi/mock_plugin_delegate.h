@@ -8,6 +8,7 @@
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 
 struct PP_NetAddress_Private;
+namespace ppapi { class PPB_X509Certificate_Fields; }
 namespace webkit_glue { class ClipboardClient; }
 
 namespace webkit {
@@ -27,6 +28,7 @@ class MockPluginDelegate : public PluginDelegate {
   virtual void InstanceCreated(PluginInstance* instance);
   virtual void InstanceDeleted(PluginInstance* instance);
   virtual SkBitmap* GetSadPluginBitmap();
+  virtual WebKit::WebPlugin* CreatePluginReplacement(const FilePath& file_path);
   virtual PlatformImage2D* CreateImage2D(int width, int height);
   virtual PlatformContext3D* CreateContext3D();
   virtual PlatformVideoDecoder* CreateVideoDecoder(
@@ -104,13 +106,6 @@ class MockPluginDelegate : public PluginDelegate {
                                              FilePath* platform_path);
   virtual scoped_refptr<base::MessageLoopProxy>
       GetFileThreadMessageLoopProxy();
-  virtual int32_t ConnectTcp(
-      webkit::ppapi::PPB_Flash_NetConnector_Impl* connector,
-      const char* host,
-      uint16_t port);
-  virtual int32_t ConnectTcpAddress(
-      webkit::ppapi::PPB_Flash_NetConnector_Impl* connector,
-      const PP_NetAddress_Private* addr);
   virtual uint32 TCPSocketCreate();
   virtual void TCPSocketConnect(PPB_TCPSocket_Private_Impl* socket,
                                 uint32 socket_id,
@@ -120,9 +115,12 @@ class MockPluginDelegate : public PluginDelegate {
       PPB_TCPSocket_Private_Impl* socket,
       uint32 socket_id,
       const PP_NetAddress_Private& addr);
-  virtual void TCPSocketSSLHandshake(uint32 socket_id,
-                                     const std::string& server_name,
-                                     uint16_t server_port);
+  virtual void TCPSocketSSLHandshake(
+      uint32 socket_id,
+      const std::string& server_name,
+      uint16_t server_port,
+      const std::vector<std::vector<char> >& trusted_certs,
+      const std::vector<std::vector<char> >& untrusted_certs);
   virtual void TCPSocketRead(uint32 socket_id, int32_t bytes_to_read);
   virtual void TCPSocketWrite(uint32 socket_id, const std::string& buffer);
   virtual void TCPSocketDisconnect(uint32 socket_id);
@@ -156,6 +154,10 @@ class MockPluginDelegate : public PluginDelegate {
       webkit_glue::NetworkListObserver* observer) OVERRIDE;
   virtual void RemoveNetworkListObserver(
       webkit_glue::NetworkListObserver* observer) OVERRIDE;
+  virtual bool X509CertificateParseDER(
+      const std::vector<char>& der,
+      ::ppapi::PPB_X509Certificate_Fields* fields);
+
   virtual int32_t ShowContextMenu(
       PluginInstance* instance,
       webkit::ppapi::PPB_Flash_Menu_Impl* menu,
@@ -173,7 +175,6 @@ class MockPluginDelegate : public PluginDelegate {
   virtual void SaveURLAs(const GURL& url);
   virtual webkit_glue::P2PTransport* CreateP2PTransport();
   virtual double GetLocalTimeZoneOffset(base::Time t);
-  virtual std::string GetFlashCommandLineArgs();
   virtual base::SharedMemory* CreateAnonymousSharedMemory(uint32_t size);
   virtual ::ppapi::Preferences GetPreferences();
   virtual bool LockMouse(PluginInstance* instance);
@@ -188,6 +189,7 @@ class MockPluginDelegate : public PluginDelegate {
   virtual int EnumerateDevices(PP_DeviceType_Dev type,
                                const EnumerateDevicesCallback& callback);
   virtual webkit_glue::ClipboardClient* CreateClipboardClient() const;
+  virtual std::string GetDeviceID();
 };
 
 }  // namespace ppapi

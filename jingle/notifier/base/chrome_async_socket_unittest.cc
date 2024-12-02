@@ -13,7 +13,7 @@
 #include "base/message_loop.h"
 #include "base/sys_byteorder.h"
 #include "jingle/notifier/base/resolving_client_socket_factory.h"
-#include "net/base/cert_verifier.h"
+#include "net/base/mock_cert_verifier.h"
 #include "net/base/net_errors.h"
 #include "net/base/ssl_config_service.h"
 #include "net/socket/socket_test_util.h"
@@ -101,7 +101,7 @@ class AsyncSocketDataProvider : public net::SocketDataProvider {
 // Takes a 32-bit integer in host byte order and converts it to a
 // net::IPAddressNumber.
 net::IPAddressNumber Uint32ToIPAddressNumber(uint32 ip) {
-  uint32 ip_nbo = htonl(ip);
+  uint32 ip_nbo = base::HostToNet32(ip);
   const unsigned char* const ip_start =
       reinterpret_cast<const unsigned char*>(&ip_nbo);
   return net::IPAddressNumber(ip_start, ip_start + (sizeof ip_nbo));
@@ -121,7 +121,7 @@ class MockXmppClientSocketFactory : public ResolvingClientSocketFactory {
       const net::AddressList& address_list)
           : mock_client_socket_factory_(mock_client_socket_factory),
             address_list_(address_list),
-            cert_verifier_(net::CertVerifier::CreateDefault()) {
+            cert_verifier_(new net::MockCertVerifier) {
   }
 
   // ResolvingClientSocketFactory implementation.

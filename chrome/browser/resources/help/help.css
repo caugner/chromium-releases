@@ -21,9 +21,12 @@ body {
   margin-top: 30px;
 }
 
-#update-buttons-container,
-#update-status-container {
+#update-buttons-container {
   margin-top: 5px;
+}
+
+#update-status-container {
+  margin-top: 10px;
 }
 
 #update-status {
@@ -79,12 +82,15 @@ body {
 
 #more-info-container.visible {
   margin-bottom: 1.5em;
-  max-height: 25em;
 }
 
 #more-info-container {
   -webkit-transition: all 500ms linear;
+  height: 0;
   margin-bottom: 0;
-  max-height: 0;
   overflow: hidden;
+}
+
+#last-updated-container.empty {
+  visibility: hidden;
 }

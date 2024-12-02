@@ -6,7 +6,9 @@
 
 #include "base/logging.h"
 #include "base/string_split.h"
+#include "base/threading/worker_pool.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/shell/shell_network_delegate.h"
 #include "net/base/cert_verifier.h"
 #include "net/base/default_server_bound_cert_store.h"
 #include "net/base/host_resolver.h"
@@ -49,11 +51,13 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
 
   if (!url_request_context_) {
     url_request_context_ = new net::URLRequestContext();
+    network_delegate_.reset(new ShellNetworkDelegate);
+    url_request_context_->set_network_delegate(network_delegate_.get());
     storage_.reset(new net::URLRequestContextStorage(url_request_context_));
-
     storage_->set_cookie_store(new net::CookieMonster(NULL, NULL));
     storage_->set_server_bound_cert_service(new net::ServerBoundCertService(
-        new net::DefaultServerBoundCertStore(NULL)));
+        new net::DefaultServerBoundCertStore(NULL),
+        base::WorkerPool::GetTaskRunner(true)));
     url_request_context_->set_accept_language("en-us,en");
     url_request_context_->set_accept_charset("iso-8859-1,*,utf-8");
 
@@ -87,15 +91,16 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
         url_request_context_->host_resolver(),
         url_request_context_->cert_verifier(),
         url_request_context_->server_bound_cert_service(),
-        NULL, // tranport_security_state
+        NULL, /* transport_security_state */
         url_request_context_->proxy_service(),
-        "", // ssl_session_cache_shard
+        "", /* ssl_session_cache_shard */
         url_request_context_->ssl_config_service(),
         url_request_context_->http_auth_handler_factory(),
-        NULL,  // network_delegate
+        url_request_context_->network_delegate(),
         url_request_context_->http_server_properties(),
         NULL,
-        main_backend);
+        main_backend,
+        "" /* trusted_spdy_proxy */ );
     storage_->set_http_transaction_factory(main_cache);
 
     storage_->set_job_factory(new net::URLRequestJobFactory);

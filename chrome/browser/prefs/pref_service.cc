@@ -134,19 +134,13 @@ PrefService* PrefService::CreatePrefService(const FilePath& pref_filename,
 #endif
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
-  ConfigurationPolicyPrefStore* managed_platform =
-      ConfigurationPolicyPrefStore::CreateManagedPlatformPolicyPrefStore();
-  ConfigurationPolicyPrefStore* managed_cloud =
-      ConfigurationPolicyPrefStore::CreateManagedCloudPolicyPrefStore();
-  ConfigurationPolicyPrefStore* recommended_platform =
-      ConfigurationPolicyPrefStore::CreateRecommendedPlatformPolicyPrefStore();
-  ConfigurationPolicyPrefStore* recommended_cloud =
-      ConfigurationPolicyPrefStore::CreateRecommendedCloudPolicyPrefStore();
+  ConfigurationPolicyPrefStore* managed =
+      ConfigurationPolicyPrefStore::CreateMandatoryPolicyPrefStore();
+  ConfigurationPolicyPrefStore* recommended =
+      ConfigurationPolicyPrefStore::CreateRecommendedPolicyPrefStore();
 #else
-  ConfigurationPolicyPrefStore* managed_platform = NULL;
-  ConfigurationPolicyPrefStore* managed_cloud = NULL;
-  ConfigurationPolicyPrefStore* recommended_platform = NULL;
-  ConfigurationPolicyPrefStore* recommended_cloud = NULL;
+  ConfigurationPolicyPrefStore* managed = NULL;
+  ConfigurationPolicyPrefStore* recommended = NULL;
 #endif  // ENABLE_CONFIGURATION_POLICY
 
   CommandLinePrefStore* command_line =
@@ -162,13 +156,11 @@ PrefService* PrefService::CreatePrefService(const FilePath& pref_filename,
   return new PrefService(
       pref_notifier,
       new PrefValueStore(
-          managed_platform,
-          managed_cloud,
+          managed,
           extension_prefs,
           command_line,
           user,
-          recommended_platform,
-          recommended_cloud,
+          recommended,
           default_pref_store,
           pref_sync_associator,
           pref_notifier),
@@ -188,13 +180,11 @@ PrefService* PrefService::CreateIncognitoPrefService(
   return new PrefService(
       pref_notifier,
       pref_value_store_->CloneAndSpecialize(
-          NULL,  // managed_platform_prefs
-          NULL,  // managed_cloud_prefs
+          NULL,  // managed
           incognito_extension_prefs,
           NULL,  // command_line_prefs
           incognito_pref_store,
-          NULL,  // recommended_platform_prefs
-          NULL,  // recommended_cloud_prefs
+          NULL,  // recommended
           default_store_.get(),
           NULL,  // pref_sync_associator
           pref_notifier),
@@ -694,6 +684,31 @@ const DictionaryValue* PrefService::GetDictionary(const char* path) const {
   return static_cast<const DictionaryValue*>(value);
 }
 
+const base::Value* PrefService::GetUserPrefValue(const char* path) const {
+  DCHECK(CalledOnValidThread());
+
+  const Preference* pref = FindPreference(path);
+  if (!pref) {
+    NOTREACHED() << "Trying to get an unregistered pref: " << path;
+    return NULL;
+  }
+
+  // Look for an existing preference in the user store. If it doesn't
+  // exist, return NULL.
+  base::Value* value = NULL;
+  if (user_pref_store_->GetMutableValue(path, &value) !=
+          PersistentPrefStore::READ_OK) {
+    return NULL;
+  }
+
+  if (!value->IsType(pref->GetType())) {
+    NOTREACHED() << "Pref value type doesn't match registered type.";
+    return NULL;
+  }
+
+  return value;
+}
+
 const ListValue* PrefService::GetList(const char* path) const {
   DCHECK(CalledOnValidThread());
 
@@ -736,6 +751,23 @@ void PrefService::RegisterPreference(const char* path,
   base::Value::Type orig_type = default_value->GetType();
   DCHECK(orig_type != Value::TYPE_NULL && orig_type != Value::TYPE_BINARY) <<
          "invalid preference type: " << orig_type;
+
+  // For ListValue and DictionaryValue with non empty default, empty value
+  // for |path| needs to be persisted in |user_pref_store_|. So that
+  // non empty default is not used when user sets an empty ListValue or
+  // DictionaryValue.
+  bool needs_empty_value = false;
+  if (orig_type == base::Value::TYPE_LIST) {
+    const base::ListValue* list = NULL;
+    if (default_value->GetAsList(&list) && !list->empty())
+      needs_empty_value = true;
+  } else if (orig_type == base::Value::TYPE_DICTIONARY) {
+    const base::DictionaryValue* dict = NULL;
+    if (default_value->GetAsDictionary(&dict) && !dict->empty())
+      needs_empty_value = true;
+  }
+  if (needs_empty_value)
+    user_pref_store_->MarkNeedsEmptyValue(path);
 
   // Hand off ownership.
   default_store_->SetDefaultValue(path, scoped_value.release());

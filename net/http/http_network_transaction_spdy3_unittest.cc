@@ -19,9 +19,9 @@
 #include "base/utf_string_conversions.h"
 #include "net/base/auth.h"
 #include "net/base/capturing_net_log.h"
-#include "net/base/cert_verifier.h"
 #include "net/base/completion_callback.h"
 #include "net/base/host_cache.h"
+#include "net/base/mock_cert_verifier.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/base/net_log.h"
 #include "net/base/net_log_unittest.h"
@@ -98,7 +98,7 @@ std::vector<std::string> MakeNextProtos(const char* a, ...) {
 // SpdyNextProtos returns a vector of NPN protocol strings for negotiating
 // SPDY.
 std::vector<std::string> SpdyNextProtos() {
-  return MakeNextProtos("http/1.1", "spdy/2", "spdy/2.1", "spdy/3", NULL);
+  return MakeNextProtos("http/1.1", "spdy/2", "spdy/3", NULL);
 }
 
 int GetIdleSocketCountInTransportSocketPool(net::HttpNetworkSession* session) {
@@ -123,7 +123,7 @@ struct SessionDependencies {
   // Default set of dependencies -- "null" proxy service.
   SessionDependencies()
       : host_resolver(new MockHostResolver),
-        cert_verifier(CertVerifier::CreateDefault()),
+        cert_verifier(new MockCertVerifier),
         proxy_service(ProxyService::CreateDirect()),
         ssl_config_service(new SSLConfigServiceDefaults),
         http_auth_handler_factory(
@@ -133,7 +133,7 @@ struct SessionDependencies {
   // Custom proxy service dependency.
   explicit SessionDependencies(ProxyService* proxy_service)
       : host_resolver(new MockHostResolver),
-        cert_verifier(CertVerifier::CreateDefault()),
+        cert_verifier(new MockCertVerifier),
         proxy_service(proxy_service),
         ssl_config_service(new SSLConfigServiceDefaults),
         http_auth_handler_factory(
@@ -148,6 +148,7 @@ struct SessionDependencies {
   scoped_ptr<HttpAuthHandlerFactory> http_auth_handler_factory;
   HttpServerPropertiesImpl http_server_properties;
   NetLog* net_log;
+  std::string trusted_spdy_proxy;
 };
 
 HttpNetworkSession* CreateSession(SessionDependencies* session_deps) {
@@ -161,6 +162,7 @@ HttpNetworkSession* CreateSession(SessionDependencies* session_deps) {
       session_deps->http_auth_handler_factory.get();
   params.http_server_properties = &session_deps->http_server_properties;
   params.net_log = session_deps->net_log;
+  params.trusted_spdy_proxy = session_deps->trusted_spdy_proxy;
   return new HttpNetworkSession(params);
 }
 
@@ -175,7 +177,7 @@ class HttpNetworkTransactionSpdy3Test : public PlatformTest {
   };
 
   virtual void SetUp() {
-    SpdySession::set_default_protocol(SSLClientSocket::kProtoSPDY3);
+    SpdySession::set_default_protocol(kProtoSPDY3);
     NetworkChangeNotifier::NotifyObserversOfIPAddressChangeForTests();
     MessageLoop::current()->RunAllPending();
   }
@@ -2171,7 +2173,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, HttpsProxySpdyGet) {
   session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
 
   SSLSocketDataProvider ssl(ASYNC, OK);
-  ssl.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  ssl.SetNextProto(kProtoSPDY3);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   TestCompletionCallback callback1;
@@ -2255,7 +2257,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, HttpsProxySpdyGetWithProxyAuth) {
   session_deps.socket_factory.AddSocketDataProvider(data.get());
 
   SSLSocketDataProvider ssl(ASYNC, OK);
-  ssl.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  ssl.SetNextProto(kProtoSPDY3);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   TestCompletionCallback callback1;
@@ -2350,11 +2352,11 @@ TEST_F(HttpNetworkTransactionSpdy3Test, HttpsProxySpdyConnectHttps) {
   session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
 
   SSLSocketDataProvider ssl(ASYNC, OK);
-  ssl.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  ssl.SetNextProto(kProtoSPDY3);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
   SSLSocketDataProvider ssl2(ASYNC, OK);
   ssl2.was_npn_negotiated = false;
-  ssl2.protocol_negotiated = SSLClientSocket::kProtoUnknown;
+  ssl2.protocol_negotiated = kProtoUnknown;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl2);
 
   TestCompletionCallback callback1;
@@ -2429,11 +2431,11 @@ TEST_F(HttpNetworkTransactionSpdy3Test, HttpsProxySpdyConnectSpdy) {
   session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
 
   SSLSocketDataProvider ssl(ASYNC, OK);
-  ssl.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  ssl.SetNextProto(kProtoSPDY3);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
   SSLSocketDataProvider ssl2(ASYNC, OK);
-  ssl2.SetNextProto(SSLClientSocket::kProtoSPDY3);
-  ssl2.protocol_negotiated = SSLClientSocket::kProtoSPDY3;
+  ssl2.SetNextProto(kProtoSPDY3);
+  ssl2.protocol_negotiated = kProtoSPDY3;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl2);
 
   TestCompletionCallback callback1;
@@ -2493,10 +2495,10 @@ TEST_F(HttpNetworkTransactionSpdy3Test, HttpsProxySpdyConnectFailure) {
   session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
 
   SSLSocketDataProvider ssl(ASYNC, OK);
-  ssl.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  ssl.SetNextProto(kProtoSPDY3);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
   SSLSocketDataProvider ssl2(ASYNC, OK);
-  ssl2.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  ssl2.SetNextProto(kProtoSPDY3);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl2);
 
   TestCompletionCallback callback1;
@@ -4598,7 +4600,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, RedirectOfHttpsConnectViaSpdyProxy) {
           data_reads, arraysize(data_reads),
           data_writes, arraysize(data_writes)));
   SSLSocketDataProvider proxy_ssl(ASYNC, OK);  // SSL to the proxy
-  proxy_ssl.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  proxy_ssl.SetNextProto(kProtoSPDY3);
 
   session_deps.socket_factory.AddSocketDataProvider(data.get());
   session_deps.socket_factory.AddSSLSocketDataProvider(&proxy_ssl);
@@ -4717,7 +4719,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
           data_reads, arraysize(data_reads),
           data_writes, arraysize(data_writes)));
   SSLSocketDataProvider proxy_ssl(ASYNC, OK);  // SSL to the proxy
-  proxy_ssl.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  proxy_ssl.SetNextProto(kProtoSPDY3);
 
   session_deps.socket_factory.AddSocketDataProvider(data.get());
   session_deps.socket_factory.AddSSLSocketDataProvider(&proxy_ssl);
@@ -4788,8 +4790,8 @@ TEST_F(HttpNetworkTransactionSpdy3Test, BasicAuthSpdyProxy) {
   // The proxy responds to the connect with a 407, using a persistent
   // connection.
   const char* const kAuthChallenge[] = {
-    "status", "407 Proxy Authentication Required",
-    "version", "HTTP/1.1",
+    ":status", "407 Proxy Authentication Required",
+    ":version", "HTTP/1.1",
     "proxy-authenticate", "Basic realm=\"MyRealm1\"",
   };
 
@@ -4827,7 +4829,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, BasicAuthSpdyProxy) {
   session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
   // Negotiate SPDY to the proxy
   SSLSocketDataProvider proxy(ASYNC, OK);
-  proxy.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  proxy.SetNextProto(kProtoSPDY3);
   session_deps.socket_factory.AddSSLSocketDataProvider(&proxy);
   // Vanilla SSL to the server
   SSLSocketDataProvider server(ASYNC, OK);
@@ -4879,6 +4881,197 @@ TEST_F(HttpNetworkTransactionSpdy3Test, BasicAuthSpdyProxy) {
 
   // The password prompt info should not be set.
   EXPECT_TRUE(response->auth_challenge.get() == NULL);
+
+  trans.reset();
+  session->CloseAllConnections();
+}
+
+// Test that an explicitly trusted SPDY proxy can push a resource from an
+// origin that is different from that of its associated resource.
+TEST_F(HttpNetworkTransactionSpdy3Test, CrossOriginProxyPush) {
+  HttpRequestInfo request;
+  HttpRequestInfo push_request;
+
+  static const unsigned char kPushBodyFrame[] = {
+    0x00, 0x00, 0x00, 0x02,                                      // header, ID
+    0x01, 0x00, 0x00, 0x06,                                      // FIN, length
+    'p', 'u', 's', 'h', 'e', 'd'                                 // "pushed"
+  };
+
+  request.method = "GET";
+  request.url = GURL("http://www.google.com/");
+  push_request.method = "GET";
+  push_request.url = GURL("http://www.another-origin.com/foo.dat");
+
+  // Configure against https proxy server "myproxy:70".
+  SessionDependencies session_deps(
+      ProxyService::CreateFixed("https://myproxy:70"));
+  CapturingBoundNetLog log(CapturingNetLog::kUnbounded);
+  session_deps.net_log = log.bound().net_log();
+
+  // Enable cross-origin push.
+  session_deps.trusted_spdy_proxy = "myproxy:70";
+
+  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+
+  scoped_ptr<SpdyFrame>
+      stream1_syn(ConstructSpdyGet(NULL, 0, false, 1, LOWEST, false));
+
+  MockWrite spdy_writes[] = {
+    CreateMockWrite(*stream1_syn, 1, ASYNC)
+  };
+
+  scoped_ptr<SpdyFrame>
+      stream1_reply(ConstructSpdyGetSynReply(NULL, 0, 1));
+
+  scoped_ptr<SpdyFrame>
+      stream1_body(ConstructSpdyBodyFrame(1, true));
+
+  scoped_ptr<SpdyFrame>
+      stream2_syn(ConstructSpdyPush(NULL,
+                                    0,
+                                    2,
+                                    1,
+                                    "http://www.another-origin.com/foo.dat"));
+
+  MockRead spdy_reads[] = {
+    CreateMockRead(*stream1_reply, 2, ASYNC),
+    CreateMockRead(*stream2_syn, 3, ASYNC),
+    CreateMockRead(*stream1_body, 4, ASYNC),
+    MockRead(ASYNC, reinterpret_cast<const char*>(kPushBodyFrame),
+             arraysize(kPushBodyFrame), 5),
+    MockRead(ASYNC, ERR_IO_PENDING, 6),  // Force a pause
+  };
+
+  scoped_ptr<OrderedSocketData> spdy_data(
+      new OrderedSocketData(
+          spdy_reads, arraysize(spdy_reads),
+          spdy_writes, arraysize(spdy_writes)));
+  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
+  // Negotiate SPDY to the proxy
+  SSLSocketDataProvider proxy(ASYNC, OK);
+  proxy.SetNextProto(kProtoSPDY3);
+  session_deps.socket_factory.AddSSLSocketDataProvider(&proxy);
+
+  scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
+  TestCompletionCallback callback;
+  int rv = trans->Start(&request, callback.callback(), log.bound());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+
+  rv = callback.WaitForResult();
+  EXPECT_EQ(OK, rv);
+  const HttpResponseInfo* response = trans->GetResponseInfo();
+
+  scoped_ptr<HttpTransaction> push_trans(new HttpNetworkTransaction(session));
+  rv = push_trans->Start(&push_request, callback.callback(), log.bound());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+
+  rv = callback.WaitForResult();
+  EXPECT_EQ(OK, rv);
+  const HttpResponseInfo* push_response = push_trans->GetResponseInfo();
+
+  ASSERT_TRUE(response != NULL);
+  EXPECT_TRUE(response->headers->IsKeepAlive());
+
+  EXPECT_EQ(200, response->headers->response_code());
+  EXPECT_TRUE(HttpVersion(1, 1) == response->headers->GetHttpVersion());
+
+  std::string response_data;
+  rv = ReadTransaction(trans.get(), &response_data);
+  EXPECT_EQ(OK, rv);
+  EXPECT_EQ("hello!", response_data);
+
+  // Verify the pushed stream.
+  EXPECT_TRUE(push_response->headers != NULL);
+  EXPECT_EQ(200, push_response->headers->response_code());
+
+  rv = ReadTransaction(push_trans.get(), &response_data);
+  EXPECT_EQ(OK, rv);
+  EXPECT_EQ("pushed", response_data);
+
+  trans.reset();
+  push_trans.reset();
+  session->CloseAllConnections();
+}
+
+// Test that an explicitly trusted SPDY proxy cannot push HTTPS content.
+TEST_F(HttpNetworkTransactionSpdy3Test, CrossOriginProxyPushCorrectness) {
+  HttpRequestInfo request;
+
+  request.method = "GET";
+  request.url = GURL("http://www.google.com/");
+
+  // Configure against https proxy server "myproxy:70".
+  SessionDependencies session_deps(
+      ProxyService::CreateFixed("https://myproxy:70"));
+  CapturingBoundNetLog log(CapturingNetLog::kUnbounded);
+  session_deps.net_log = log.bound().net_log();
+
+  // Enable cross-origin push.
+  session_deps.trusted_spdy_proxy = "myproxy:70";
+
+  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+
+  scoped_ptr<SpdyFrame>
+      stream1_syn(ConstructSpdyGet(NULL, 0, false, 1, LOWEST, false));
+
+  scoped_ptr<SpdyFrame> push_rst(
+      ConstructSpdyRstStream(2, REFUSED_STREAM));
+
+  MockWrite spdy_writes[] = {
+    CreateMockWrite(*stream1_syn, 1, ASYNC),
+    CreateMockWrite(*push_rst, 4),
+  };
+
+  scoped_ptr<SpdyFrame>
+      stream1_reply(ConstructSpdyGetSynReply(NULL, 0, 1));
+
+  scoped_ptr<SpdyFrame>
+      stream1_body(ConstructSpdyBodyFrame(1, true));
+
+  scoped_ptr<SpdyFrame>
+      stream2_syn(ConstructSpdyPush(NULL,
+                                    0,
+                                    2,
+                                    1,
+                                    "https://www.another-origin.com/foo.dat"));
+
+  MockRead spdy_reads[] = {
+    CreateMockRead(*stream1_reply, 2, ASYNC),
+    CreateMockRead(*stream2_syn, 3, ASYNC),
+    CreateMockRead(*stream1_body, 5, ASYNC),
+    MockRead(ASYNC, ERR_IO_PENDING, 6),  // Force a pause
+  };
+
+  scoped_ptr<OrderedSocketData> spdy_data(
+      new OrderedSocketData(
+          spdy_reads, arraysize(spdy_reads),
+          spdy_writes, arraysize(spdy_writes)));
+  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
+  // Negotiate SPDY to the proxy
+  SSLSocketDataProvider proxy(ASYNC, OK);
+  proxy.SetNextProto(kProtoSPDY3);
+  session_deps.socket_factory.AddSSLSocketDataProvider(&proxy);
+
+  scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
+  TestCompletionCallback callback;
+  int rv = trans->Start(&request, callback.callback(), log.bound());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+
+  rv = callback.WaitForResult();
+  EXPECT_EQ(OK, rv);
+  const HttpResponseInfo* response = trans->GetResponseInfo();
+
+  ASSERT_TRUE(response != NULL);
+  EXPECT_TRUE(response->headers->IsKeepAlive());
+
+  EXPECT_EQ(200, response->headers->response_code());
+  EXPECT_TRUE(HttpVersion(1, 1) == response->headers->GetHttpVersion());
+
+  std::string response_data;
+  rv = ReadTransaction(trans.get(), &response_data);
+  EXPECT_EQ(OK, rv);
+  EXPECT_EQ("hello!", response_data);
 
   trans.reset();
   session->CloseAllConnections();
@@ -5352,14 +5545,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, BuildRequest_ExtraHeadersStripped) {
   EXPECT_EQ(OK, rv);
 }
 
-// http://crbug.com/112682
-#if defined(OS_MACOSX)
-#define MAYBE_SOCKS4_HTTP_GET DISABLED_SOCKS4_HTTP_GET
-#else
-#define MAYBE_SOCKS4_HTTP_GET SOCKS4_HTTP_GET
-#endif
-
-TEST_F(HttpNetworkTransactionSpdy3Test, MAYBE_SOCKS4_HTTP_GET) {
+TEST_F(HttpNetworkTransactionSpdy3Test, SOCKS4_HTTP_GET) {
   HttpRequestInfo request;
   request.method = "GET";
   request.url = GURL("http://www.google.com/");
@@ -5410,14 +5596,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, MAYBE_SOCKS4_HTTP_GET) {
   EXPECT_EQ("Payload", response_text);
 }
 
-// http://crbug.com/112682
-#if defined(OS_MACOSX)
-#define MAYBE_SOCKS4_SSL_GET DISABLED_SOCKS4_SSL_GET
-#else
-#define MAYBE_SOCKS4_SSL_GET SOCKS4_SSL_GET
-#endif
-
-TEST_F(HttpNetworkTransactionSpdy3Test, MAYBE_SOCKS4_SSL_GET) {
+TEST_F(HttpNetworkTransactionSpdy3Test, SOCKS4_SSL_GET) {
   HttpRequestInfo request;
   request.method = "GET";
   request.url = GURL("https://www.google.com/");
@@ -6166,7 +6345,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, LargeContentLengthThenClose) {
 
   std::string response_data;
   rv = ReadTransaction(trans.get(), &response_data);
-  EXPECT_EQ(ERR_CONNECTION_CLOSED, rv);
+  EXPECT_EQ(ERR_CONTENT_LENGTH_MISMATCH, rv);
 }
 
 TEST_F(HttpNetworkTransactionSpdy3Test, UploadFileSmallerThanLength) {
@@ -6917,7 +7096,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, UseAlternateProtocolForNpnSpdy) {
   session_deps.socket_factory.AddSocketDataProvider(&first_transaction);
 
   SSLSocketDataProvider ssl(ASYNC, OK);
-  ssl.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  ssl.SetNextProto(kProtoSPDY3);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   scoped_ptr<SpdyFrame> req(ConstructSpdyGet(NULL, 0, false, 1, LOWEST));
@@ -7016,7 +7195,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, AlternateProtocolWithSpdyLateBinding) {
   session_deps.socket_factory.AddSocketDataProvider(&hanging_socket);
 
   SSLSocketDataProvider ssl(ASYNC, OK);
-  ssl.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  ssl.SetNextProto(kProtoSPDY3);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   scoped_ptr<SpdyFrame> req1(ConstructSpdyGet(NULL, 0, false, 1, LOWEST));
@@ -7122,7 +7301,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, StallAlternateProtocolForNpnSpdy) {
   session_deps.socket_factory.AddSocketDataProvider(&first_transaction);
 
   SSLSocketDataProvider ssl(ASYNC, OK);
-  ssl.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  ssl.SetNextProto(kProtoSPDY3);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   MockConnect never_finishing_connect(SYNCHRONOUS, ERR_IO_PENDING);
@@ -7255,7 +7434,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
   session_deps.socket_factory.AddSocketDataProvider(&first_transaction);
 
   SSLSocketDataProvider ssl(ASYNC, OK);
-  ssl.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  ssl.SetNextProto(kProtoSPDY3);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   scoped_ptr<SpdyFrame> req(ConstructSpdyGet(NULL, 0, false, 1, LOWEST));
@@ -7359,7 +7538,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
   session_deps.socket_factory.AddSocketDataProvider(&first_transaction);
 
   SSLSocketDataProvider ssl(ASYNC, OK);
-  ssl.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  ssl.SetNextProto(kProtoSPDY3);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   scoped_ptr<SpdyFrame> req(ConstructSpdyGet(NULL, 0, false, 1, LOWEST));
@@ -8194,7 +8373,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, NpnWithHttpOverSSL) {
   SSLSocketDataProvider ssl(ASYNC, OK);
   ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
   ssl.next_proto = "http/1.1";
-  ssl.protocol_negotiated = SSLClientSocket::kProtoHTTP11;
+  ssl.protocol_negotiated = kProtoHTTP11;
 
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
@@ -8242,7 +8421,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, SpdyPostNPNServerHangup) {
   request.load_flags = 0;
 
   SSLSocketDataProvider ssl(ASYNC, OK);
-  ssl.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  ssl.SetNextProto(kProtoSPDY3);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   scoped_ptr<SpdyFrame> req(ConstructSpdyGet(NULL, 0, false, 1, LOWEST));
@@ -8278,7 +8457,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, SpdyAlternateProtocolThroughProxy) {
   HttpStreamFactory::set_use_alternate_protocols(true);
   HttpStreamFactory::SetNextProtos(
       MakeNextProtos(
-          "http/1.1", "http1.1", "spdy/2", "spdy/2.1", "spdy/3", "spdy", NULL));
+          "http/1.1", "http1.1", "spdy/2", "spdy/3", "spdy", NULL));
 
   SessionDependencies session_deps(ProxyService::CreateFixed("myproxy:70"));
   HttpAuthHandlerMock::Factory* auth_factory =
@@ -8373,7 +8552,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, SpdyAlternateProtocolThroughProxy) {
                             data_writes_2, arraysize(data_writes_2)));
 
   SSLSocketDataProvider ssl(ASYNC, OK);
-  ssl.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  ssl.SetNextProto(kProtoSPDY3);
 
   MockConnect never_finishing_connect(SYNCHRONOUS, ERR_IO_PENDING);
   StaticSocketDataProvider hanging_non_alternate_protocol_socket(
@@ -8654,7 +8833,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, PreconnectWithExistingSpdySession) {
   session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
 
   SSLSocketDataProvider ssl(ASYNC, OK);
-  ssl.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  ssl.SetNextProto(kProtoSPDY3);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
@@ -9090,7 +9269,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test, UseIPConnectionPooling) {
   pool_peer.DisableDomainAuthenticationVerification();
 
   SSLSocketDataProvider ssl(ASYNC, OK);
-  ssl.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  ssl.SetNextProto(kProtoSPDY3);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   scoped_ptr<SpdyFrame> host1_req(ConstructSpdyGet(
@@ -9241,7 +9420,7 @@ TEST_F(HttpNetworkTransactionSpdy3Test,
   pool_peer.DisableDomainAuthenticationVerification();
 
   SSLSocketDataProvider ssl(ASYNC, OK);
-  ssl.SetNextProto(SSLClientSocket::kProtoSPDY3);
+  ssl.SetNextProto(kProtoSPDY3);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   scoped_ptr<SpdyFrame> host1_req(ConstructSpdyGet(

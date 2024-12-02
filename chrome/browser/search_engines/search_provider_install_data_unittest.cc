@@ -224,18 +224,19 @@ void SearchProviderInstallDataTest::SimulateDefaultSearchIsManaged(
                           new StringValue(std::string()));
   service->SetManagedPref(prefs::kDefaultSearchProviderPrepopulateID,
                           new StringValue(std::string()));
-  util_.model()->Observe(chrome::NOTIFICATION_PREF_CHANGED,
-      content::Source<PrefService>(util_.profile()->GetTestingPrefService()),
-      content::Details<std::string>(NULL));
+  util_.model()->Observe(chrome::NOTIFICATION_DEFAULT_SEARCH_POLICY_CHANGED,
+                         content::NotificationService::AllSources(),
+                         content::NotificationService::NoDetails());
 }
 
 TemplateURL* SearchProviderInstallDataTest::AddNewTemplateURL(
     const std::string& url,
     const string16& keyword) {
-  TemplateURL* t_url = new TemplateURL();
-  t_url->set_short_name(keyword);
-  t_url->set_keyword(keyword);
-  t_url->SetURL(url, 0, 0);
+  TemplateURLData data;
+  data.short_name = keyword;
+  data.SetKeyword(keyword);
+  data.SetURL(url);
+  TemplateURL* t_url = new TemplateURL(util_.profile(), data);
   util_.model()->Add(t_url);
   return t_url;
 }
@@ -300,7 +301,7 @@ TEST_F(SearchProviderInstallDataTest, GoogleBaseUrlChange) {
   // Set up the database.
   util_.ChangeModelToLoadState();
   std::string google_host = "w.com";
-  util_.SetGoogleBaseURL("http://" + google_host + "/");
+  util_.SetGoogleBaseURL(GURL("http://" + google_host + "/"));
   // Wait for the I/O thread to process the update notification.
   TemplateURLServiceTestUtil::BlockTillIOThreadProcessesRequests();
 
@@ -318,7 +319,7 @@ TEST_F(SearchProviderInstallDataTest, GoogleBaseUrlChange) {
 
   // Change the Google base url.
   google_host = "foo.com";
-  util_.SetGoogleBaseURL("http://" + google_host + "/");
+  util_.SetGoogleBaseURL(GURL("http://" + google_host + "/"));
   // Wait for the I/O thread to process the update notification.
   TemplateURLServiceTestUtil::BlockTillIOThreadProcessesRequests();
 

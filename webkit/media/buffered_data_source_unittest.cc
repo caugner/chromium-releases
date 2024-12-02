@@ -56,8 +56,9 @@ class MockBufferedDataSource : public BufferedDataSource {
         .WillByDefault(Assign(&loading_, true));
     ON_CALL(*url_loader, cancel())
         .WillByDefault(Assign(&loading_, false));
-    scoped_ptr<WebURLLoader> wul(url_loader);
-    loader->SetURLLoaderForTest(wul.Pass());
+
+    // |test_loader_| will be used when Start() is called.
+    loader->test_loader_ = scoped_ptr<WebURLLoader>(url_loader);
     return loader;
   }
 
@@ -65,6 +66,8 @@ class MockBufferedDataSource : public BufferedDataSource {
   void set_loading(bool loading) { loading_ = loading; }
 
  private:
+  virtual ~MockBufferedDataSource() {}
+
   // Whether the resource load has starting loading but yet to been cancelled.
   bool loading_;
 
@@ -162,7 +165,7 @@ class BufferedDataSourceTest : public testing::Test {
     return loader()->active_loader_->loader_.get();
   }
 
-  media::Preload preload() { return data_source_->preload_; }
+  Preload preload() { return data_source_->preload_; }
   BufferedResourceLoader::DeferStrategy defer_strategy() {
     return loader()->defer_strategy_;
   }
@@ -371,7 +374,7 @@ TEST_F(BufferedDataSourceTest, DefaultValues) {
   InitializeWith206Response();
 
   // Ensure we have sane values for default loading scenario.
-  EXPECT_EQ(media::AUTO, preload());
+  EXPECT_EQ(AUTO, preload());
   EXPECT_EQ(BufferedResourceLoader::kThresholdDefer, defer_strategy());
 
   EXPECT_EQ(0, data_source_bitrate());

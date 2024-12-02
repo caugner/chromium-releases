@@ -4,6 +4,7 @@
 
 #include "content/public/app/content_main_runner.h"
 
+#include "base/allocator/allocator_extension.h"
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
@@ -27,13 +28,19 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/common/sandbox_init.h"
+#include "content/public/common/url_constants.h"
 #include "crypto/nss_util.h"
 #include "ipc/ipc_switches.h"
 #include "media/base/media.h"
 #include "sandbox/src/sandbox_types.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/base/ui_base_paths.h"
+#include "ui/base/win/dpi.h"
 #include "webkit/glue/webkit_glue.h"
+
+#if defined(USE_TCMALLOC)
+#include "third_party/tcmalloc/chromium/src/gperftools/malloc_extension.h"
+#endif
 
 #if defined(OS_WIN)
 #include <atlbase.h>
@@ -223,9 +230,10 @@ int RunZygote(const content::MainFunctionParams& main_function_params,
   // If a custom user agent was passed on the command line, we need
   // to (re)set it now, rather than using the default one the zygote
   // initialized.
-  bool custom = false;
-  std::string ua = content::GetContentClient()->GetUserAgent(&custom);
-  if (custom) webkit_glue::SetUserAgent(ua, custom);
+  if (command_line.HasSwitch(switches::kUserAgent)) {
+    webkit_glue::SetUserAgent(
+        command_line.GetSwitchValueASCII(switches::kUserAgent), true);
+  }
 
   // The StatsTable must be initialized in each process; we already
   // initialized for the browser process, now we need to initialize
@@ -311,6 +319,17 @@ class ContentMainRunnerImpl : public content::ContentMainRunner {
       Shutdown();
   }
 
+#if defined(USE_TCMALLOC)
+static void GetStatsThunk(char* buffer, int buffer_length) {
+  MallocExtension::instance()->GetStats(buffer, buffer_length);
+}
+
+static void ReleaseFreeMemoryThunk() {
+  MallocExtension::instance()->ReleaseFreeMemory();
+}
+#endif
+
+
 #if defined(OS_WIN)
   virtual int Initialize(HINSTANCE instance,
                          sandbox::SandboxInterfaceInfo* sandbox_info,
@@ -340,6 +359,10 @@ class ContentMainRunnerImpl : public content::ContentMainRunner {
 #if !defined(OS_MACOSX) && defined(USE_TCMALLOC)
     // For tcmalloc, we need to tell it to behave like new.
     tc_set_new_mode(1);
+
+    // On windows, we've already set these thunks up in _heap_init()
+    base::allocator::SetGetStatsFunction(GetStatsThunk);
+    base::allocator::SetReleaseFreeMemoryFunction(ReleaseFreeMemoryThunk);
 #endif
 
 #if !defined(OS_ANDROID)
@@ -382,6 +405,8 @@ class ContentMainRunnerImpl : public content::ContentMainRunner {
     int exit_code;
     if (delegate && delegate->BasicStartupComplete(&exit_code))
       return exit_code;
+    DCHECK(!delegate || content::GetContentClient()) <<
+        "BasicStartupComplete didn't set the content client";
 
     completed_basic_startup_ = true;
 
@@ -416,6 +441,9 @@ class ContentMainRunnerImpl : public content::ContentMainRunner {
       SendTaskPortToParentProcess();
     }
 #elif defined(OS_WIN)
+#if defined(ENABLE_HIDPI)
+    ui::EnableHighDPISupport();
+#endif
     content::SetupCRT(command_line);
 #endif
 
@@ -443,6 +471,7 @@ class ContentMainRunnerImpl : public content::ContentMainRunner {
 
     ui::RegisterPathProvider();
     content::RegisterPathProvider();
+    content::RegisterContentSchemes(true);
 
     CHECK(icu_util::Initialize());
 
@@ -466,6 +495,14 @@ class ContentMainRunnerImpl : public content::ContentMainRunner {
 
     if (delegate)
       delegate->PreSandboxStartup();
+
+    // Set any custom user agent passed on the command line now so the string
+    // doesn't change between calls to webkit_glue::GetUserAgent(), otherwise it
+    // defaults to the user agent set during SetContentClient().
+    if (command_line.HasSwitch(switches::kUserAgent)) {
+      webkit_glue::SetUserAgent(
+          command_line.GetSwitchValueASCII(switches::kUserAgent), true);
+    }
 
     if (!process_type.empty())
       CommonSubprocessInit(process_type);

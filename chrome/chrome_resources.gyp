@@ -100,6 +100,13 @@
           },
           'includes': [ '../build/grit_action.gypi' ],
         },
+        {
+          'action_name': 'extensions_api_resources',
+          'variables': {
+            'grit_grd_file': 'common/extensions_api_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        }
       ],
       'includes': [ '../build/grit_target.gypi' ],
     },
@@ -186,7 +193,7 @@
       'includes': [ '../build/grit_target.gypi' ],
     },
     {
-      'target_name': 'theme_resources',
+      'target_name': 'theme_resources_gen',
       'type': 'none',
       'actions': [
         {
@@ -210,8 +217,69 @@
           },
           'includes': [ '../build/grit_action.gypi' ],
         },
+        {
+          'action_name': 'theme_resources_touch_1x',
+          'variables': {
+            'grit_grd_file': 'app/theme/theme_resources_touch_1x.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
       ],
       'includes': [ '../build/grit_target.gypi' ],
+    },
+    {
+      'target_name': 'theme_resources',
+      'type': 'none',
+      'dependencies': [
+        'theme_resources_gen',
+        '<(DEPTH)/ui/ui.gyp:ui_resources_2x',
+        '<(DEPTH)/ui/ui.gyp:ui_resources_standard',
+        '<(DEPTH)/ui/ui.gyp:ui_resources_touch',
+      ],
+      'conditions': [
+        ['OS != "mac"', {
+          # Copy pak files to the product directory. These files will be picked
+          # up by the following installer scripts:
+          #   - Windows: chrome/installer/mini_installer/chrome.release
+          #   - Linux: chrome/installer/linux/internal/common/installer.include
+          # Ensure that the above scripts are updated when adding or removing
+          # pak files.
+          # Copying files to the product directory is not needed on the Mac
+          # since the framework build phase will copy them into the framework
+          # bundle directly.
+          'copies': [
+            {
+              'destination': '<(PRODUCT_DIR)',
+              'files': [
+                '<(grit_out_dir)/theme_resources_standard.pak',
+                '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_standard/ui_resources_standard.pak',
+              ],
+            },
+          ],
+        }],
+        ['OS != "mac" and enable_hidpi == 1', {
+          'copies': [
+            {
+              'destination': '<(PRODUCT_DIR)',
+              'files': [
+                '<(grit_out_dir)/theme_resources_2x.pak',
+                '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_2x/ui_resources_2x.pak',
+              ],
+            },
+          ],
+        }],
+        ['enable_touch_ui==1', {
+          'copies': [
+            {
+              'destination': '<(PRODUCT_DIR)',
+              'files': [
+                '<(grit_out_dir)/theme_resources_touch_1x.pak',
+                '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources_touch/ui_resources_touch.pak',
+              ],
+            },
+          ],
+        }],
+      ],
     },
     {
       'target_name': 'packed_extra_resources',
@@ -262,8 +330,6 @@
         '<(DEPTH)/ui/base/strings/ui_strings.gyp:ui_strings',
         '<(DEPTH)/ui/ui.gyp:gfx_resources',
         '<(DEPTH)/ui/ui.gyp:ui_resources',
-        '<(DEPTH)/ui/ui.gyp:ui_resources_2x',
-        '<(DEPTH)/ui/ui.gyp:ui_resources_standard',
         '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
         '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_strings',
       ],

@@ -12,8 +12,8 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/gdata/gdata_parser.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/libxml_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/libxml/chromium/libxml_utils.h"
 
 using base::Value;
 using base::DictionaryValue;
@@ -75,14 +75,11 @@ TEST_F(GDataParserTest, DocumentFeedJsonParser) {
   scoped_ptr<Value> document(LoadJSONFile("basic_feed.json"));
   ASSERT_TRUE(document.get());
   ASSERT_TRUE(document->GetType() == Value::TYPE_DICTIONARY);
-  Value* feed_value;
-  ASSERT_TRUE(reinterpret_cast<DictionaryValue*>(document.get())->Get(
-      std::string("feed"), &feed_value));
-  ASSERT_TRUE(feed_value);
-  scoped_ptr<DocumentFeed> feed(DocumentFeed::CreateFrom(feed_value));
+  scoped_ptr<DocumentFeed> feed(DocumentFeed::ExtractAndParse(*document));
+  ASSERT_TRUE(feed.get());
 
   base::Time update_time;
-  ASSERT_TRUE(GDataEntry::GetTimeFromString("2011-12-14T01:03:21.151Z",
+  ASSERT_TRUE(FeedEntry::GetTimeFromString("2011-12-14T01:03:21.151Z",
                                             &update_time));
 
   EXPECT_EQ(1, feed->start_index());
@@ -121,9 +118,9 @@ TEST_F(GDataParserTest, DocumentFeedJsonParser) {
   EXPECT_EQ(ASCIIToUTF16("Entry 1 Title"), folder_entry->title());
   base::Time entry1_update_time;
   base::Time entry1_publish_time;
-  ASSERT_TRUE(GDataEntry::GetTimeFromString("2011-04-01T18:34:08.234Z",
+  ASSERT_TRUE(FeedEntry::GetTimeFromString("2011-04-01T18:34:08.234Z",
                                               &entry1_update_time));
-  ASSERT_TRUE(GDataEntry::GetTimeFromString("2010-11-07T05:03:54.719Z",
+  ASSERT_TRUE(FeedEntry::GetTimeFromString("2010-11-07T05:03:54.719Z",
                                               &entry1_publish_time));
   ASSERT_EQ(entry1_update_time, folder_entry->updated_time());
   ASSERT_EQ(entry1_publish_time, folder_entry->published_time());
@@ -187,9 +184,9 @@ TEST_F(GDataParserTest, DocumentEntryXmlParser) {
   EXPECT_EQ(ASCIIToUTF16("Xml Entry File Title.tar"), entry->title());
   base::Time entry1_update_time;
   base::Time entry1_publish_time;
-  ASSERT_TRUE(GDataEntry::GetTimeFromString("2011-04-01T18:34:08.234Z",
+  ASSERT_TRUE(FeedEntry::GetTimeFromString("2011-04-01T18:34:08.234Z",
                                               &entry1_update_time));
-  ASSERT_TRUE(GDataEntry::GetTimeFromString("2010-11-07T05:03:54.719Z",
+  ASSERT_TRUE(FeedEntry::GetTimeFromString("2010-11-07T05:03:54.719Z",
                                               &entry1_publish_time));
   ASSERT_EQ(entry1_update_time, entry->updated_time());
   ASSERT_EQ(entry1_publish_time, entry->published_time());
@@ -240,7 +237,6 @@ TEST_F(GDataParserTest, DocumentEntryXmlParser) {
   EXPECT_EQ(26562560, entry->file_size());
 }
 
-
 TEST_F(GDataParserTest, AccountMetadataFeedParser) {
   scoped_ptr<Value> document(LoadJSONFile("account_metadata.json"));
   ASSERT_TRUE(document.get());
@@ -251,9 +247,42 @@ TEST_F(GDataParserTest, AccountMetadataFeedParser) {
   ASSERT_TRUE(entry_value);
 
   scoped_ptr<AccountMetadataFeed> feed(
-      AccountMetadataFeed::CreateFrom(document.get()));
-  EXPECT_EQ(1234, feed->quota_bytes_used());
-  EXPECT_EQ(12345, feed->quota_bytes_total());
+      AccountMetadataFeed::CreateFrom(*document));
+  ASSERT_TRUE(feed.get());
+  EXPECT_EQ(GG_LONGLONG(6789012345), feed->quota_bytes_used());
+  EXPECT_EQ(GG_LONGLONG(9876543210), feed->quota_bytes_total());
+  EXPECT_EQ(654321, feed->largest_changestamp());
+  ASSERT_EQ(2U, feed->installed_apps()->size());
+  const InstalledApp* first_app = feed->installed_apps()[0];
+  const InstalledApp* second_app = feed->installed_apps()[1];
+
+  EXPECT_EQ("Drive App 1", UTF16ToUTF8(first_app->app_name()));
+  EXPECT_EQ("Drive App Object 1", UTF16ToUTF8(first_app->object_type()));
+  EXPECT_TRUE(first_app->supports_create());
+  EXPECT_EQ("https://chrome.google.com/webstore/detail/11111111",
+            first_app->GetProductUrl().spec());
+  ASSERT_EQ(2U, first_app->primary_mimetypes()->size());
+  EXPECT_EQ("application/test_type_1",
+            *first_app->primary_mimetypes()->at(0));
+  EXPECT_EQ("application/vnd.google-apps.drive-sdk.11111111",
+            *first_app->primary_mimetypes()->at(1));
+  ASSERT_EQ(1U, first_app->secondary_mimetypes()->size());
+  EXPECT_EQ("image/jpeg", *first_app->secondary_mimetypes()->at(0));
+  ASSERT_EQ(2U, first_app->primary_extensions()->size());
+  EXPECT_EQ("ext_1", *first_app->primary_extensions()->at(0));
+  EXPECT_EQ("ext_2", *first_app->primary_extensions()->at(1));
+  ASSERT_EQ(1U, first_app->secondary_extensions()->size());
+  EXPECT_EQ("ext_3", *first_app->secondary_extensions()->at(0));
+
+  EXPECT_EQ("Drive App 2", UTF16ToUTF8(second_app->app_name()));
+  EXPECT_EQ("Drive App Object 2", UTF16ToUTF8(second_app->object_type()));
+  EXPECT_EQ("https://chrome.google.com/webstore/detail/22222222",
+            second_app->GetProductUrl().spec());
+  EXPECT_FALSE(second_app->supports_create());
+  EXPECT_EQ(2U, second_app->primary_mimetypes()->size());
+  EXPECT_EQ(0U, second_app->secondary_mimetypes()->size());
+  EXPECT_EQ(1U, second_app->primary_extensions()->size());
+  EXPECT_EQ(0U, second_app->secondary_extensions()->size());
 }
 
 // Test file extension checking in DocumentEntry::HasDocumentExtension().

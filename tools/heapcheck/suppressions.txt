@@ -95,7 +95,7 @@
    bug_51988_c
    Heapcheck:Leak
    ...
-   fun:crypto::OpenTestNSSDB
+   fun:crypto::Open*NSSDB
 }
 {
    bug_51988_d
@@ -116,6 +116,35 @@
    Heapcheck:Leak
    ...
    fun:net::CertDatabaseNSSTest::TearDown
+}
+{
+   bug_51988_g
+   Heapcheck:Leak
+   fun:sqlite3MemMalloc
+   ...
+   fun:net::CertDatabaseNSSTest::SetUp
+}
+{
+   bug_51988_h
+   Heapcheck:Leak
+   fun:sqlite3MemMalloc
+   ...
+   fun:chromeos::OncNetworkParser::ParseServerOrCaCertificate
+   fun:chromeos::OncNetworkParser::ParseCertificate
+}
+{
+   bug_51988_i
+   Heapcheck:Leak
+   fun:sqlite3MemMalloc
+   fun:net::X509Certificate::GetDefaultNickname
+}
+{
+   bug_51988_j
+   Heapcheck:Leak
+   fun:sqlite3MemMalloc
+   fun:chromeos::*::ListCertsInSlot
+   ...
+   fun:chromeos::*::TearDown
 }
 {
    bug_66941_a
@@ -139,6 +168,14 @@
    bug_todo_getdelim_lucid
    Heapcheck:Leak
    fun:_IO_getdelim
+}
+{
+   bug_119677
+   Heapcheck:Leak
+   ...
+   fun:MonitorChangeObserverX11
+   fun:aura::Env::Init
+   fun:aura::Env::GetInstance
 }
 
 #-----------------------------------------------------------------------
@@ -245,7 +282,6 @@
    fun:InitSessionCacheLocks
    fun:initSessionCacheLocksLazily
    ...
-   fun:ssl_InitSessionCacheLocks
    fun:lock_cache
    fun:ssl_LookupSID
    fun:ssl2_BeginClientHandshake
@@ -659,13 +695,6 @@
    fun:safe_browsing::PhishingDOMFeatureExtractorTest::GetNextThreadName
 }
 {
-   bug_52826
-   Heapcheck:Leak
-   fun:TestingProfile::CreateRequestContext
-   fun:GoogleURLTrackerTest::CreateRequestContext
-   fun:GoogleURLTrackerTest*_Test::TestBody
-}
-{
    bug_53184
    Heapcheck:Leak
    fun:base::WaitableEventWatcher::StartWatching
@@ -697,14 +726,6 @@
    fun:file_util::FileEnumerator::Next
    fun:::RelayReadDirectory::RunWork
    fun:::MessageLoopRelay::ProcessOnTargetThread
-}
-{
-   bug_57910
-   Heapcheck:Leak
-   fun:inflateInit2_
-   fun:remoting::DecompressorZlib::InitStream
-   fun:remoting::DecompressorZlib::Reset
-   fun:~DecompressorZlib
 }
 {
    bug_58474_a
@@ -855,17 +876,6 @@
    Heapcheck:Leak
    ...
    fun:GpuProcessHostUIShim::GetForRenderer
-}
-{
-   bug_75023
-   Heapcheck:Leak
-   ...
-   fun:::DefaultFocusManagerFactory::CreateFocusManager
-   fun:views::FocusManagerFactory::Create
-   fun:views::Widget::OnNativeWidgetCreated
-   fun:views::NativeWidgetAura::InitNativeWidget
-   fun:views::Widget::Init
-   fun:views::::NativeWidgetAuraTest_GetClientAreaScreenBounds_Test::TestBody
 }
 {
    bug_76354
@@ -1100,7 +1110,6 @@
    Heapcheck:Leak
    fun:sqlite3MemMalloc
    fun:net::CertDatabase::ListCerts
-   fun:net::CertDatabaseNSSTest_ListCerts_Test::TestBody
 }
 {
    bug_82974e
@@ -1196,16 +1205,6 @@
    fun:chromeos::ProxyConfigServiceImplTest::CreateConfigService
 }
 {
-   bug_90154
-   Heapcheck:Leak
-   ...
-   fun:views::NativeWidgetGtk::InitNativeWidget
-   fun:views::Widget::Init
-   fun:NativeTabContentsViewGtk::InitNativeTabContentsView
-   fun:TabContentsViewViews::CreateView
-   fun:TabContents
-}
-{
    bug_90271
    Heapcheck:Leak
    ...
@@ -1238,37 +1237,31 @@
    Heapcheck:Leak
    fun:DownloadManager::OnPathExistenceAvailable
 }
-# These are temporary suppressions for the CrOS bot to be used until the stacks are fixed.
 {
    bug_90013_a
    Heapcheck:Leak
-   ...
-   fun:gtk_views_fixed_new
+   fun:??
+   fun:gfx::RenderTextLinux::EnsureLayout
 }
 {
    bug_90013_b
    Heapcheck:Leak
-   ...
-   fun:g_type_class_meta_marshal
+   fun:??
+   fun:gfx::RenderTextLinux::GetStringSize
 }
 {
    bug_90013_c
    Heapcheck:Leak
-   ...
-   fun:find_invisible_char
+   fun:??
+   fun:::FindBestMatchFontFamilyName
+   fun:PlatformFontPango
 }
 {
    bug_90013_d
    Heapcheck:Leak
-   ...
-   fun:views::View::*
-}
-# This one is the most scary
-{
-   bug_90013_e
-   Heapcheck:Leak
-   ...
    fun:??
+   fun:gfx::GetPangoFontMetrics
+   fun:gfx::PlatformFontPango::InitPangoMetrics
 }
 {
    bug_91491
@@ -1755,17 +1748,6 @@
    fun:TraceSubscriberStdioTest_CanWriteDataToFile_Test::TestBody
 }
 {
-   bug_116923
-   Heapcheck:Leak
-   fun:AppLauncherButton
-   fun:ash::internal::LauncherView::CreateViewForItem
-   fun:ash::internal::LauncherView::Init
-   fun:Launcher
-   fun:ash::Shell::Init
-   fun:ash::Shell::CreateInstance
-   fun:chromeos::DesktopNotificationsTest::SetUp
-}
-{
    bug_117389
    Heapcheck:Leak
    ...
@@ -1797,28 +1779,61 @@
    fun:SelectFileDialogExtensionTest_SelfDeleting_Test::TestBody
 }
 {
-   bug_119714_a
+   bug_121571_a
    Heapcheck:Leak
    ...
-   fun:*AudioInputControllerTest_CreateAndClose_Test*
+   fun:fileapi::FileSystem*URLRequestJobTest::TestRequestHelper
+   fun:fileapi::FileSystem*URLRequestJobTest::TestRequest
+   fun:fileapi::::FileSystem*URLRequestJobTest_InvalidURL_Test::TestBody
 }
 {
-   # This should be removed soon!  It's a pretty broad suppression.
-   bug_119714_b
+   bug_121571_b
    Heapcheck:Leak
    fun:MessageLoop::MessageLoop
-   fun:base::Thread::ThreadMain
-   fun:base::::ThreadFunc
+   fun:fileapi::FileSystem*URLRequestJobTest::FileSystem*URLRequestJobTest
+   fun:fileapi::::FileSystem*URLRequestJobTest_InvalidURL_Test::FileSystem*URLRequestJobTest_InvalidURL_Test
+   fun:testing::internal::TestFactoryImpl::CreateTest
 }
 {
-   bug_120353_a
+   bug_121571_c
    Heapcheck:Leak
-   ...
-   fun:gdata::GDataFileSystemTest*
+   fun:MessageLoop::MessageLoop
+   fun:FileSystem*URLRequestJobTest
+   fun:FileSystem*URLRequestJobTest_InvalidURL_Test
+   fun:testing::internal::TestFactoryImpl::CreateTest
 }
 {
-   bug_120353_b
+   bug_124758
+   Heapcheck:Leak
+   fun:sqlite3MemMalloc
+   fun:crypto::RSAPrivateKey::FindFromPublicKeyInfo
+   fun:crypto::RSAPrivateKeyNSSTest_*_Test::TestBody
+}
+{
+   bug_125129_a
    Heapcheck:Leak
    ...
-   fun:gdata::GDataFileSystem::OnFileDownloaded
+   fun:RenderProcessHostImpl::RenderProcessHostImpl
+   fun:SiteInstanceImpl::GetProcess
+   fun:*RenderViewHostImpl
+   fun:*TestRenderViewHost
+   fun:::TestInterstitialPage::CreateRenderViewHost
+}
+{
+   bug_125129_b
+   Heapcheck:Leak
+   ...
+   fun:RenderProcessHostImpl::RenderProcessHostImpl
+   fun:SiteInstanceImpl::GetProcess
+   ...
+   fun:*_*_Test::TestBody
+}
+{
+   bug_125807
+   Heapcheck:Leak
+   ...
+   fun:TransportSecurityPersister::TransportSecurityPersister
+   fun:TransportSecurityPersisterTest::TransportSecurityPersisterTest
+   ...
+   fun:testing::internal::TestFactoryImpl::CreateTest
 }

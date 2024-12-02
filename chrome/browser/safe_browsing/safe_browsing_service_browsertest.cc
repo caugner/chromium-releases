@@ -194,15 +194,11 @@ class TestProtocolManager :  public SafeBrowsingProtocolManager {
  public:
   TestProtocolManager(SafeBrowsingService* sb_service,
                       const std::string& client_name,
-                      const std::string& client_key,
-                      const std::string& wrapped_key,
                       net::URLRequestContextGetter* request_context_getter,
-                      const std::string& info_url_prefix,
-                      const std::string& mackey_url_prefix,
+                      const std::string& url_prefix,
                       bool disable_auto_update)
-      : SafeBrowsingProtocolManager(sb_service, client_name, client_key,
-                                    wrapped_key, request_context_getter,
-                                    info_url_prefix, mackey_url_prefix,
+      : SafeBrowsingProtocolManager(sb_service, client_name,
+                                    request_context_getter, url_prefix,
                                     disable_auto_update),
         sb_service_(sb_service),
         delay_ms_(0) {
@@ -249,16 +245,12 @@ class TestSBProtocolManagerFactory : public SBProtocolManagerFactory {
   virtual SafeBrowsingProtocolManager* CreateProtocolManager(
       SafeBrowsingService* sb_service,
       const std::string& client_name,
-      const std::string& client_key,
-      const std::string& wrapped_key,
       net::URLRequestContextGetter* request_context_getter,
-      const std::string& info_url_prefix,
-      const std::string& mackey_url_prefix,
+      const std::string& url_prefix,
       bool disable_auto_update) {
     pm_ = new TestProtocolManager(
-        sb_service, client_name, client_key, wrapped_key,
-        request_context_getter, info_url_prefix, mackey_url_prefix,
-        disable_auto_update);
+        sb_service, client_name, request_context_getter,
+        url_prefix, disable_auto_update);
     return pm_;
   }
   TestProtocolManager* GetProtocolManager() {
@@ -514,9 +506,9 @@ class TestSBClient
     : public base::RefCountedThreadSafe<TestSBClient>,
       public SafeBrowsingService::Client {
  public:
-  TestSBClient() : result_(SafeBrowsingService::SAFE),
-                   safe_browsing_service_(g_browser_process->
-                                          safe_browsing_service()) {
+  TestSBClient()
+    : result_(SafeBrowsingService::SAFE),
+      safe_browsing_service_(g_browser_process->safe_browsing_service()) {
   }
 
   int GetResult() {
@@ -540,6 +532,9 @@ class TestSBClient
   }
 
  private:
+  friend class base::RefCountedThreadSafe<TestSBClient>;
+  virtual ~TestSBClient() {}
+
   void CheckDownloadUrlOnIOThread(const std::vector<GURL>& url_chain) {
     safe_browsing_service_->CheckDownloadUrl(url_chain, this);
   }

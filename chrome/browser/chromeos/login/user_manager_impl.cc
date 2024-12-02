@@ -31,8 +31,6 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/cryptohome/async_method_caller.h"
-#include "chrome/browser/chromeos/dbus/cryptohome_client.h"
-#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/login/default_user_images.h"
 #include "chrome/browser/chromeos/login/helper.h"
@@ -51,6 +49,8 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
+#include "chromeos/dbus/cryptohome_client.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/url_constants.h"
@@ -196,12 +196,12 @@ class RealTPMTokenInfoDelegate : public crypto::TPMTokenInfoDelegate {
  private:
   // This method is used to implement RequestIsTokenReady.
   void OnPkcs11IsTpmTokenReady(base::Callback<void(bool result)> callback,
-                               CryptohomeClient::CallStatus call_status,
+                               DBusMethodCallStatus call_status,
                                bool is_tpm_token_ready) const;
 
   // This method is used to implement RequestIsTokenReady.
   void OnPkcs11GetTpmTokenInfo(base::Callback<void(bool result)> callback,
-                               CryptohomeClient::CallStatus call_status,
+                               DBusMethodCallStatus call_status,
                                const std::string& token_name,
                                const std::string& user_pin) const;
 
@@ -253,9 +253,9 @@ void RealTPMTokenInfoDelegate::GetTokenInfo(std::string* token_name,
 
 void RealTPMTokenInfoDelegate::OnPkcs11IsTpmTokenReady(
     base::Callback<void(bool result)> callback,
-    CryptohomeClient::CallStatus call_status,
+    DBusMethodCallStatus call_status,
     bool is_tpm_token_ready) const {
-  if (call_status != CryptohomeClient::SUCCESS || !is_tpm_token_ready) {
+  if (call_status != DBUS_METHOD_CALL_SUCCESS || !is_tpm_token_ready) {
     callback.Run(false);
     return;
   }
@@ -270,10 +270,10 @@ void RealTPMTokenInfoDelegate::OnPkcs11IsTpmTokenReady(
 
 void RealTPMTokenInfoDelegate::OnPkcs11GetTpmTokenInfo(
     base::Callback<void(bool result)> callback,
-    CryptohomeClient::CallStatus call_status,
+    DBusMethodCallStatus call_status,
     const std::string& token_name,
     const std::string& user_pin) const {
-  if (call_status == CryptohomeClient::SUCCESS) {
+  if (call_status == DBUS_METHOD_CALL_SUCCESS) {
     token_name_ = token_name;
     user_pin_ = user_pin;
     token_ready_ = true;
@@ -286,6 +286,7 @@ void RealTPMTokenInfoDelegate::OnPkcs11GetTpmTokenInfo(
 UserManagerImpl::UserManagerImpl()
     : ALLOW_THIS_IN_INITIALIZER_LIST(image_loader_(new UserImageLoader)),
       logged_in_user_(NULL),
+      session_started_(false),
       is_current_user_owner_(false),
       is_current_user_new_(false),
       is_current_user_ephemeral_(false),
@@ -299,7 +300,8 @@ UserManagerImpl::UserManagerImpl()
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   if (!base::chromeos::IsRunningOnChromeOS() &&
       !command_line->HasSwitch(switches::kLoginManager) &&
-      !command_line->HasSwitch(switches::kLoginPassword)) {
+      !command_line->HasSwitch(switches::kLoginPassword) &&
+      !command_line->HasSwitch(switches::kGuestSession)) {
     StubUserLoggedIn();
   }
 
@@ -380,8 +382,6 @@ void UserManagerImpl::UserLoggedIn(const std::string& email) {
   // This user must be in the front of the user list.
   users_.insert(users_.begin(), logged_in_user_);
 
-  NotifyOnLogin();
-
   if (is_current_user_new_) {
     SetInitialUserImage(email);
   } else {
@@ -395,7 +395,7 @@ void UserManagerImpl::UserLoggedIn(const std::string& email) {
           base::Bind(&UserManagerImpl::DownloadProfileImage,
                      base::Unretained(this),
                      kProfileDownloadReasonLoggedIn),
-          kProfileImageDownloadDelayMs);
+          base::TimeDelta::FromMilliseconds(kProfileImageDownloadDelayMs));
     }
 
     int histogram_index = image_index;
@@ -413,6 +413,8 @@ void UserManagerImpl::UserLoggedIn(const std::string& email) {
                               histogram_index,
                               kHistogramImagesCount);
   }
+
+  NotifyOnLogin();
 }
 
 void UserManagerImpl::DemoUserLoggedIn() {
@@ -445,6 +447,14 @@ void UserManagerImpl::StubUserLoggedIn() {
   logged_in_user_ = new User(kStubUser, false);
   logged_in_user_->SetImage(GetDefaultImage(kStubDefaultImageIndex),
                             kStubDefaultImageIndex);
+}
+
+void UserManagerImpl::SessionStarted() {
+  session_started_ = true;
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_SESSION_STARTED,
+      content::NotificationService::AllSources(),
+      content::NotificationService::NoDetails());
 }
 
 void UserManagerImpl::RemoveUser(const std::string& email,
@@ -697,6 +707,10 @@ bool UserManagerImpl::IsLoggedInAsStub() const {
   return IsUserLoggedIn() && logged_in_user_->email() == kStubUser;
 }
 
+bool UserManagerImpl::IsSessionStarted() const {
+  return session_started_;
+}
+
 void UserManagerImpl::AddObserver(Observer* obs) {
   observer_list_.AddObserver(obs);
 }
@@ -906,9 +920,14 @@ void UserManagerImpl::LoadKeyStore() {
 
   // Only load the Opencryptoki library into NSS if we have this switch.
   // TODO(gspencer): Remove this switch once cryptohomed work is finished:
-  // http://crosbug.com/12295 and http://crosbug.com/12304
+  // http://crosbug.com/12295 and 12304
+  // Note: ChromeOS login with or without loginmanager will crash when
+  // the CertLibrary is not there (http://crosbug.com/121456). Before removing
+  // make sure that that case still works.
   if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kLoadOpencryptoki)) {
+          switches::kLoadOpencryptoki) ||
+      CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kStubCros)) {
     crypto::EnableTPMTokenForNSS(new RealTPMTokenInfoDelegate());
     CertLibrary* cert_library;
     cert_library = chromeos::CrosLibrary::Get()->GetCertLibrary();
@@ -927,9 +946,10 @@ void UserManagerImpl::SetInitialUserImage(const std::string& username) {
 int UserManagerImpl::GetUserWallpaperIndex() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  // If at login screen, use the default guest wallpaper.
+  // If at login screen, use an invalid index to prevent any wallpaper
+  // operation.
   if (!IsUserLoggedIn())
-    return ash::GetGuestWallpaperIndex();
+    return ash::GetInvalidWallpaperIndex();
   // If logged in as other ephemeral users (Demo/Stub/Normal user with
   // ephemeral policy enabled/Guest), use the index in memory.
   if (IsCurrentUserEphemeral())
@@ -946,7 +966,10 @@ int UserManagerImpl::GetUserWallpaperIndex() {
   if (!user_wallpapers->GetIntegerWithoutPathExpansion(username, &index))
     index = current_user_wallpaper_index_;
 
-  DCHECK(index >=0 && index < ash::GetWallpaperCount());
+  if (index < 0 || index >= ash::GetWallpaperCount()) {
+    index = ash::GetDefaultWallpaperIndex();
+    SaveUserWallpaperIndex(index);
+  }
   return index;
 }
 

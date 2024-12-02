@@ -66,7 +66,7 @@ class SpdyProxyClientSocketSpdy3Test : public PlatformTest {
 
  protected:
   virtual void SetUp() {
-    SpdySession::set_default_protocol(SSLClientSocket::kProtoSPDY3);
+    SpdySession::set_default_protocol(kProtoSPDY3);
   }
 
   void Initialize(MockRead* reads, size_t reads_count, MockWrite* writes,
@@ -318,7 +318,7 @@ SpdyProxyClientSocketSpdy3Test::ConstructConnectRequestFrame() {
     SYN_STREAM,
     kStreamId,
     0,
-    net::ConvertRequestPriorityToSpdyPriority(LOWEST),
+    net::ConvertRequestPriorityToSpdyPriority(LOWEST, 3),
     0,
     CONTROL_FLAG_NONE,
     false,
@@ -346,7 +346,7 @@ SpdyProxyClientSocketSpdy3Test::ConstructConnectAuthRequestFrame() {
     SYN_STREAM,
     kStreamId,
     0,
-    net::ConvertRequestPriorityToSpdyPriority(LOWEST),
+    net::ConvertRequestPriorityToSpdyPriority(LOWEST, 3),
     0,
     CONTROL_FLAG_NONE,
     false,
@@ -370,8 +370,8 @@ SpdyProxyClientSocketSpdy3Test::ConstructConnectAuthRequestFrame() {
 // Constructs a standard SPDY SYN_REPLY frame to match the SPDY CONNECT.
 SpdyFrame* SpdyProxyClientSocketSpdy3Test::ConstructConnectReplyFrame() {
   const char* const kStandardReplyHeaders[] = {
-      "status", "200 Connection Established",
-      "version", "HTTP/1.1"
+      ":status", "200 Connection Established",
+      ":version", "HTTP/1.1"
   };
   return ConstructSpdyControlFrame(NULL,
                                    0,
@@ -388,8 +388,8 @@ SpdyFrame* SpdyProxyClientSocketSpdy3Test::ConstructConnectReplyFrame() {
 SpdyFrame*
 SpdyProxyClientSocketSpdy3Test::ConstructConnectAuthReplyFrame() {
   const char* const kStandardReplyHeaders[] = {
-      "status", "407 Proxy Authentication Required",
-      "version", "HTTP/1.1",
+      ":status", "407 Proxy Authentication Required",
+      ":version", "HTTP/1.1",
       "proxy-authenticate", "Basic realm=\"MyRealm1\"",
   };
 
@@ -408,8 +408,8 @@ SpdyProxyClientSocketSpdy3Test::ConstructConnectAuthReplyFrame() {
 SpdyFrame*
 SpdyProxyClientSocketSpdy3Test::ConstructConnectErrorReplyFrame() {
   const char* const kStandardReplyHeaders[] = {
-      "status", "500 Internal Server Error",
-      "version", "HTTP/1.1",
+      ":status", "500 Internal Server Error",
+      ":version", "HTTP/1.1",
   };
 
   return ConstructSpdyControlFrame(NULL,

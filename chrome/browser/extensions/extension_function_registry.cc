@@ -16,8 +16,10 @@
 #include "chrome/browser/extensions/api/identity/identity_api.h"
 #include "chrome/browser/extensions/api/offscreen_tabs/offscreen_tabs_api.h"
 #include "chrome/browser/extensions/api/permissions/permissions_api.h"
+#include "chrome/browser/extensions/api/runtime/runtime_api.h"
 #include "chrome/browser/extensions/api/serial/serial_api.h"
 #include "chrome/browser/extensions/api/socket/socket_api.h"
+#include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
 #include "chrome/browser/extensions/api/web_request/web_request_api.h"
 #include "chrome/browser/extensions/execute_code_in_tab_function.h"
 #include "chrome/browser/extensions/extension_chrome_auth_private_api.h"
@@ -32,14 +34,14 @@
 #include "chrome/browser/extensions/extension_management_api.h"
 #include "chrome/browser/extensions/extension_metrics_module.h"
 #include "chrome/browser/extensions/extension_module.h"
-#include "chrome/browser/extensions/extension_omnibox_api.h"
+#include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/extensions/extension_page_capture_api.h"
 #include "chrome/browser/extensions/extension_preference_api.h"
 #include "chrome/browser/extensions/extension_processes_api.h"
+#include "chrome/browser/extensions/extension_record_api.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extension_test_api.h"
 #include "chrome/browser/extensions/extension_web_socket_proxy_private_api.h"
-#include "chrome/browser/extensions/extension_webnavigation_api.h"
 #include "chrome/browser/extensions/extension_webstore_private_api.h"
 #include "chrome/browser/extensions/settings/settings_api.h"
 #include "chrome/browser/extensions/system/system_api.h"
@@ -62,7 +64,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/extensions/file_browser_private_api.h"
-#include "chrome/browser/chromeos/extensions/offers_private_api.h"
+#include "chrome/browser/chromeos/extensions/echo_private_api.h"
 #include "chrome/browser/chromeos/media/media_player_extension_api.h"
 #include "chrome/browser/extensions/api/terminal/terminal_private_api.h"
 #include "chrome/browser/extensions/extension_info_private_api_chromeos.h"
@@ -83,6 +85,8 @@ ExtensionFunctionRegistry::~ExtensionFunctionRegistry() {
 }
 
 void ExtensionFunctionRegistry::ResetFunctions() {
+#if defined(ENABLE_EXTENSIONS)
+
   // Register all functions here.
 
   // Windows
@@ -112,8 +116,8 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<TabsInsertCSSFunction>();
 
   // Page Actions.
-  RegisterFunction<EnablePageActionFunction>();
-  RegisterFunction<DisablePageActionFunction>();
+  RegisterFunction<EnablePageActionsFunction>();
+  RegisterFunction<DisablePageActionsFunction>();
   RegisterFunction<PageActionShowFunction>();
   RegisterFunction<PageActionHideFunction>();
   RegisterFunction<PageActionSetIconFunction>();
@@ -207,6 +211,10 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<MetricsRecordMediumTimeFunction>();
   RegisterFunction<MetricsRecordLongTimeFunction>();
 
+  // Record.
+  RegisterFunction<CaptureURLsFunction>();
+  RegisterFunction<ReplayURLsFunction>();
+
   // RLZ.
 #if defined(OS_WIN) || defined(OS_MACOSX)
   RegisterFunction<RlzRecordProductEventFunction>();
@@ -250,8 +258,8 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<RemoveAllContextMenusFunction>();
 
   // Omnibox.
-  RegisterFunction<OmniboxSendSuggestionsFunction>();
-  RegisterFunction<OmniboxSetDefaultSuggestionFunction>();
+  RegisterFunction<extensions::OmniboxSendSuggestionsFunction>();
+  RegisterFunction<extensions::OmniboxSetDefaultSuggestionFunction>();
 
   // Speech input.
   RegisterFunction<StartSpeechInputFunction>();
@@ -321,8 +329,8 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<GetWebGLStatusFunction>();
 
   // WebNavigation.
-  RegisterFunction<GetFrameFunction>();
-  RegisterFunction<GetAllFramesFunction>();
+  RegisterFunction<extensions::GetFrameFunction>();
+  RegisterFunction<extensions::GetAllFramesFunction>();
 
   // WebRequest.
   RegisterFunction<WebRequestAddEventListener>();
@@ -367,6 +375,10 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   RegisterFunction<GetFileTransfersFunction>();
   RegisterFunction<CancelFileTransfersFunction>();
   RegisterFunction<TransferFileFunction>();
+  RegisterFunction<GetGDataPreferencesFunction>();
+  RegisterFunction<SetGDataPreferencesFunction>();
+  RegisterFunction<GetPathForDriveSearchResultFunction>();
+  RegisterFunction<GetNetworkConnectionStateFunction>();
 
   // Mediaplayer
   RegisterFunction<PlayMediaplayerFunction>();
@@ -377,9 +389,8 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   // InputMethod
   RegisterFunction<GetInputMethodFunction>();
 
-  // Offers
-  RegisterFunction<GetCouponCodeFunction>();
-  RegisterFunction<GetUserConsentFunction>();
+  // Echo
+  RegisterFunction<GetRegistrationCodeFunction>();
 
   // Terminal
   RegisterFunction<OpenTerminalProcessFunction>();
@@ -418,21 +429,28 @@ void ExtensionFunctionRegistry::ResetFunctions() {
 
   // Font settings.
   RegisterFunction<GetFontListFunction>();
-  RegisterFunction<GetFontNameFunction>();
-  RegisterFunction<SetFontNameFunction>();
+  RegisterFunction<ClearFontFunction>();
+  RegisterFunction<GetFontFunction>();
+  RegisterFunction<SetFontFunction>();
+  RegisterFunction<ClearDefaultFontSizeFunction>();
   RegisterFunction<GetDefaultFontSizeFunction>();
   RegisterFunction<SetDefaultFontSizeFunction>();
+  RegisterFunction<ClearDefaultFixedFontSizeFunction>();
   RegisterFunction<GetDefaultFixedFontSizeFunction>();
   RegisterFunction<SetDefaultFixedFontSizeFunction>();
+  RegisterFunction<ClearMinimumFontSizeFunction>();
   RegisterFunction<GetMinimumFontSizeFunction>();
   RegisterFunction<SetMinimumFontSizeFunction>();
+  RegisterFunction<ClearDefaultCharacterSetFunction>();
+  RegisterFunction<GetDefaultCharacterSetFunction>();
+  RegisterFunction<SetDefaultCharacterSetFunction>();
 
   // ChromeAuth settings.
   RegisterFunction<SetCloudPrintCredentialsFunction>();
 
   // Experimental App API.
-  RegisterFunction<AppNotifyFunction>();
-  RegisterFunction<AppClearAllNotificationsFunction>();
+  RegisterFunction<extensions::AppNotifyFunction>();
+  RegisterFunction<extensions::AppClearAllNotificationsFunction>();
 
   // Permissions
   RegisterFunction<ContainsPermissionsFunction>();
@@ -495,8 +513,12 @@ void ExtensionFunctionRegistry::ResetFunctions() {
   // Identity
   RegisterFunction<extensions::GetAuthTokenFunction>();
 
+  // Runtime
+  RegisterFunction<extensions::RuntimeGetBackgroundPageFunction>();
+
   // Generated APIs
   extensions::api::GeneratedFunctionRegistry::RegisterAll(this);
+#endif  // defined(ENABLE_EXTENSIONS)
 }
 
 void ExtensionFunctionRegistry::GetAllNames(std::vector<std::string>* names) {

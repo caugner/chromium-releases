@@ -11,6 +11,8 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/global_error_service.h"
 #include "chrome/browser/ui/global_error_service_factory.h"
+#include "chrome/browser/ui/webui/signin/login_ui_service.h"
+#include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -18,8 +20,12 @@
 
 typedef GoogleServiceAuthError AuthError;
 
-SyncGlobalError::SyncGlobalError(ProfileSyncService* service)
-    : service_(service) {
+SyncGlobalError::SyncGlobalError(ProfileSyncService* service,
+                                 SigninManager* signin)
+    : service_(service),
+      signin_(signin) {
+  DCHECK(service_);
+  DCHECK(signin_);
   OnStateChanged();
 }
 
@@ -57,7 +63,7 @@ void SyncGlobalError::ExecuteMenuItem(Browser* browser) {
     return;
   }
 #endif
-  service_->ShowErrorUI();
+  LoginUIServiceFactory::GetForProfile(service_->profile())->ShowLoginUI();
 }
 
 bool SyncGlobalError::HasBubbleView() {
@@ -96,7 +102,7 @@ void SyncGlobalError::OnStateChanged() {
   string16 bubble_message;
   string16 bubble_accept_label;
   sync_ui_util::GetStatusLabelsForSyncGlobalError(
-      service_, &menu_label, &bubble_message, &bubble_accept_label);
+      service_, *signin_, &menu_label, &bubble_message, &bubble_accept_label);
 
   // All the labels should be empty or all of them non-empty.
   DCHECK((menu_label.empty() && bubble_message.empty() &&

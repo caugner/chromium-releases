@@ -9,16 +9,16 @@
 #include "base/string_number_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/theme_util.h"
-#include "chrome/browser/sync/internal_api/change_record.h"
-#include "chrome/browser/sync/internal_api/read_node.h"
-#include "chrome/browser/sync/internal_api/write_node.h"
-#include "chrome/browser/sync/internal_api/write_transaction.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "sync/internal_api/change_record.h"
+#include "sync/internal_api/read_node.h"
+#include "sync/internal_api/write_node.h"
+#include "sync/internal_api/write_transaction.h"
 #include "sync/protocol/theme_specifics.pb.h"
 #include "sync/util/unrecoverable_error_handler.h"
 
@@ -43,8 +43,9 @@ void ThemeChangeProcessor::Observe(
 
   sync_api::WriteTransaction trans(FROM_HERE, share_handle());
   sync_api::WriteNode node(&trans);
-  if (!node.InitByClientTagLookup(syncable::THEMES,
-                                  kCurrentThemeClientTag)) {
+  if (node.InitByClientTagLookup(syncable::THEMES,
+                                 kCurrentThemeClientTag) !=
+          sync_api::BaseNode::INIT_OK) {
     std::string err = "Could not create node with client tag: ";
     error_handler()->OnUnrecoverableError(FROM_HERE,
                                           err + kCurrentThemeClientTag);
@@ -99,7 +100,7 @@ void ThemeChangeProcessor::ApplyChangesFromSyncModel(
   // ThemeSpecifics, which would cause the default theme to be set.
   if (change.action != sync_api::ChangeRecord::ACTION_DELETE) {
     sync_api::ReadNode node(trans);
-    if (!node.InitByIdLookup(change.id)) {
+    if (node.InitByIdLookup(change.id) != sync_api::BaseNode::INIT_OK) {
       error_handler()->OnSingleDatatypeUnrecoverableError(FROM_HERE,
           "Theme node lookup failed.");
       return;

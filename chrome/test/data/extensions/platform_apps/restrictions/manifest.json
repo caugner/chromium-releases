@@ -1,0 +1,9 @@
+{
+  "name": "Platform App Test: various document and window restrictions",
+  "platform_app": true,
+  "version": "1",
+  "manifest_version": 2,
+  "background": {
+    "scripts": ["test.js"]
+  }
+}

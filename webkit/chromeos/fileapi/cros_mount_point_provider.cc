@@ -4,6 +4,7 @@
 
 #include "webkit/chromeos/fileapi/cros_mount_point_provider.h"
 
+#include "base/chromeos/chromeos_version.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -17,6 +18,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "webkit/chromeos/fileapi/file_access_permissions.h"
 #include "webkit/chromeos/fileapi/remote_file_system_operation.h"
+#include "webkit/fileapi/file_system_file_reader.h"
 #include "webkit/fileapi/file_system_operation.h"
 #include "webkit/fileapi/file_system_util.h"
 #include "webkit/fileapi/native_file_util.h"
@@ -26,21 +28,10 @@ namespace {
 
 const char kChromeUIScheme[] = "chrome";
 
-// Copied from chrome/browser/chromeos/system/runtime_environment.h
-// TODO(satorux): oshima is now moving the function to 'base/chromeos'.
-// Use the one in 'base/chromeos' once it's done.
-bool IsRunningOnChromeOS() {
-  // Check if the user name is chronos. Note that we don't go with
-  // getuid() + getpwuid_r() as it may end up reading /etc/passwd, which
-  // can be expensive.
-  const char* user = getenv("USER");
-  return user && strcmp(user, "chronos") == 0;
-}
-
 // Returns the home directory path, or an empty string if the home directory
 // is not found.
 std::string GetHomeDirectory() {
-  if (IsRunningOnChromeOS())
+  if (base::chromeos::IsRunningOnChromeOS())
     return "/home/chronos/user";
 
   const char* home = getenv("HOME");
@@ -260,6 +251,17 @@ CrosMountPointProvider::CreateFileSystemOperation(
     return new chromeos::RemoteFileSystemOperation(mount_point->remote_proxy);
 
   return new fileapi::FileSystemOperation(file_proxy, context);
+}
+
+webkit_blob::FileReader* CrosMountPointProvider::CreateFileReader(
+    const GURL& url,
+    int64 offset,
+    base::MessageLoopProxy* file_proxy,
+    fileapi::FileSystemContext* context) const {
+  // For now we return a generic Reader implementation which utilizes
+  // CreateSnapshotFile internally (i.e. will download everything first).
+  // TODO(satorux,zel): implement more efficient reader for remote cases.
+  return new fileapi::FileSystemFileReader(file_proxy, context, url, offset);
 }
 
 bool CrosMountPointProvider::GetVirtualPath(const FilePath& filesystem_path,

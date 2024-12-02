@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "base/threading/thread.h"
 #include "base/time.h"
@@ -66,25 +67,6 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
                           public JobStatusUpdaterDelegate,
                           public cloud_print::PrinterWatcherDelegate,
                           public cloud_print::JobSpoolerDelegate {
-  enum PrintJobError {
-    SUCCESS,
-    JOB_DOWNLOAD_FAILED,
-    INVALID_JOB_DATA,
-    PRINT_FAILED,
-  };
-  struct JobDetails {
-    JobDetails();
-    ~JobDetails();
-    void Clear();
-
-    std::string job_id_;
-    std::string job_title_;
-    std::string print_ticket_;
-    FilePath print_data_file_path_;
-    std::string print_data_mime_type_;
-    std::vector<std::string> tags_;
-  };
-
  public:
   class Delegate {
    public:
@@ -109,14 +91,18 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
                     const GURL& cloud_print_server_url,
                     cloud_print::PrintSystem* print_system,
                     Delegate* delegate);
-  virtual ~PrinterJobHandler();
+
   bool Initialize();
+
   std::string GetPrinterName() const;
+
   // Requests a job check. |reason| is the reason for fetching the job. Used
   // for logging and diagnostc purposes.
   void CheckForJobs(const std::string& reason);
+
   // Shutdown everything (the process is exiting).
   void Shutdown();
+
   base::TimeTicks last_job_fetch_time() const { return last_job_fetch_time_; }
   // End public interface
 
@@ -161,6 +147,15 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
   // End Delegate implementations
 
  private:
+  friend class base::RefCountedThreadSafe<PrinterJobHandler>;
+
+  enum PrintJobError {
+    SUCCESS,
+    JOB_DOWNLOAD_FAILED,
+    INVALID_JOB_DATA,
+    PRINT_FAILED,
+  };
+
   // Prototype for a JSON data handler.
   typedef CloudPrintURLFetcher::ResponseAction
       (PrinterJobHandler::*JSONDataHandler)(const content::URLFetcher* source,
@@ -172,6 +167,22 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
       (PrinterJobHandler::*DataHandler)(const content::URLFetcher* source,
                                         const GURL& url,
                                         const std::string& data);
+
+  struct JobDetails {
+    JobDetails();
+    ~JobDetails();
+    void Clear();
+
+    std::string job_id_;
+    std::string job_title_;
+    std::string print_ticket_;
+    FilePath print_data_file_path_;
+    std::string print_data_mime_type_;
+    std::vector<std::string> tags_;
+  };
+
+  virtual ~PrinterJobHandler();
+
   // Begin request handlers for each state in the state machine
   CloudPrintURLFetcher::ResponseAction HandlePrinterUpdateResponse(
       const content::URLFetcher* source,
@@ -218,7 +229,6 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
   void Stop();
 
   void StartPrinting();
-  void HandleServerError(const GURL& url);
   void Reset();
   void UpdateJobStatus(cloud_print::PrintJobStatus status, PrintJobError error);
 
@@ -289,6 +299,7 @@ class PrinterJobHandler : public base::RefCountedThreadSafe<PrinterJobHandler>,
   JobStatusUpdaterList job_status_updater_list_;
 
   base::TimeTicks last_job_fetch_time_;
+  base::WeakPtrFactory<PrinterJobHandler> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PrinterJobHandler);
 };

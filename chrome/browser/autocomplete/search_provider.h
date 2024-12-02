@@ -29,6 +29,7 @@
 #include "content/public/common/url_fetcher_delegate.h"
 
 class Profile;
+class TemplateURLService;
 
 namespace base {
 class Value;
@@ -90,63 +91,44 @@ class SearchProvider : public AutocompleteProvider,
   // . The keyword provider. This is used if the user has typed in a keyword.
   class Providers {
    public:
-    Providers() : default_provider_(NULL), keyword_provider_(NULL) {}
+    explicit Providers(TemplateURLService* template_url_service);
 
-    // Returns true if the specified providers match the two providers managed
+    // Returns true if the specified providers match the two providers cached
     // by this class.
-    bool equals(const TemplateURL* default_provider,
-                const TemplateURL* keyword_provider) {
-      return (default_provider == default_provider_ &&
-              keyword_provider == keyword_provider_);
+    bool equal(const string16& default_provider,
+               const string16& keyword_provider) const {
+      return (default_provider == default_provider_) &&
+          (keyword_provider == keyword_provider_);
     }
 
-    // Resets the providers.
-    void Set(const TemplateURL* default_provider,
-             const TemplateURL* keyword_provider);
-
-    const TemplateURL& default_provider() const {
-      DCHECK(valid_default_provider());
-      return cached_default_provider_;
+    // Resets the cached providers.
+    void set(const string16& default_provider,
+             const string16& keyword_provider) {
+      default_provider_ = default_provider;
+      keyword_provider_ = keyword_provider;
     }
 
-    const TemplateURL& keyword_provider() const {
-      DCHECK(valid_keyword_provider());
-      return cached_keyword_provider_;
-    }
+    TemplateURLService* template_url_service() { return template_url_service_; }
+    const string16& default_provider() const { return default_provider_; }
+    const string16& keyword_provider() const { return keyword_provider_; }
 
-    // Returns true of the keyword provider is valid.
-    bool valid_keyword_provider() const { return !!keyword_provider_; }
+    // NOTE: These may return NULL even if the provider members are nonempty!
+    const TemplateURL* GetDefaultProviderURL() const;
+    const TemplateURL* GetKeywordProviderURL() const;
 
-    // Returns true if the keyword provider is valid and has a valid suggest
-    // url.
-    bool valid_suggest_for_keyword_provider() const {
-      return keyword_provider_ && cached_keyword_provider_.suggestions_url();
-    }
-
-    // Returns true of the default provider is valid.
-    bool valid_default_provider() const { return !!default_provider_; }
-
-    // Returns true if the default provider is valid and has a valid suggest
-    // url.
-    bool valid_suggest_for_default_provider() const {
-      return default_provider_ && cached_default_provider_.suggestions_url();
-    }
-
-    // Returns true if |from_keyword_provider| is true, or
-    // the keyword provider is not valid.
+    // Returns true if |from_keyword_provider| is true, or the keyword provider
+    // is not valid.
     bool is_primary_provider(bool from_keyword_provider) const {
-      return from_keyword_provider || !valid_keyword_provider();
+      return from_keyword_provider || keyword_provider_.empty();
     }
 
    private:
+    TemplateURLService* template_url_service_;
+
     // Cached across the life of a query so we behave consistently even if the
     // user changes their default while the query is running.
-    TemplateURL cached_default_provider_;
-    TemplateURL cached_keyword_provider_;
-
-    // TODO(pkasting): http://b/1162970  We shouldn't need these.
-    const TemplateURL* default_provider_;
-    const TemplateURL* keyword_provider_;
+    string16 default_provider_;
+    string16 keyword_provider_;
 
     DISALLOW_COPY_AND_ASSIGN(Providers);
   };
@@ -195,10 +177,11 @@ class SearchProvider : public AutocompleteProvider,
   void StopSuggest();
 
   // Creates a URLFetcher requesting suggest results from the specified
-  // |provider|. The caller owns the returned URLFetcher.
-  content::URLFetcher* CreateSuggestFetcher(int id,
-                                            const TemplateURL& provider,
-                                            const string16& text);
+  // |suggestions_url|. The caller owns the returned URLFetcher.
+  content::URLFetcher* CreateSuggestFetcher(
+      int id,
+      const TemplateURLRef& suggestions_url,
+      const string16& text);
 
   // Parses the results from the Suggest server and stores up to kMaxMatches of
   // them in server_results_.  Returns whether parsing succeeded.

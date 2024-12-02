@@ -47,12 +47,8 @@ class BrowserPolicyConnector : public content::NotificationObserver {
   // policy system running.
   void Init();
 
-  ConfigurationPolicyProvider* GetManagedPlatformProvider() const;
-  ConfigurationPolicyProvider* GetManagedCloudProvider() const;
-  ConfigurationPolicyProvider* GetRecommendedPlatformProvider() const;
-  ConfigurationPolicyProvider* GetRecommendedCloudProvider() const;
-
-  PolicyService* GetPolicyService() const;
+  // Ownership is transferred to the caller.
+  PolicyService* CreatePolicyService() const;
 
   // Returns a weak pointer to the CloudPolicySubsystem corresponding to the
   // device policy managed by this policy connector, or NULL if no such
@@ -108,9 +104,6 @@ class BrowserPolicyConnector : public content::NotificationObserver {
   // will be cancelled.
   void FetchCloudPolicy();
 
-  // Refreshes policies on each existing provider.
-  void RefreshPolicies();
-
   // Schedules initialization of the cloud policy backend services, if the
   // services are already constructed.
   void ScheduleServiceInitialization(int64 delay_milliseconds);
@@ -165,8 +158,6 @@ class BrowserPolicyConnector : public content::NotificationObserver {
 
   scoped_ptr<CloudPolicyProvider> managed_cloud_provider_;
   scoped_ptr<CloudPolicyProvider> recommended_cloud_provider_;
-
-  scoped_ptr<PolicyServiceImpl> policy_service_;
 
 #if defined(OS_CHROMEOS)
   scoped_ptr<CloudPolicyDataStore> device_data_store_;

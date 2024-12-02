@@ -6,6 +6,13 @@
 
 namespace switches {
 
+// The default device scale factor to apply to the browser UI and
+// the contents in the absence of a viewport meta tag.
+const char kDefaultDeviceScaleFactor[] = "default-device-scale-factor";
+
+// Enable support for touch events.
+const char kEnableTouchEvents[]             = "enable-touch-events";
+
 // The language file that we want to try to open. Of the form
 // language[-country] where language is the 2 letter code from ISO-639.
 const char kLang[]                          = "lang";

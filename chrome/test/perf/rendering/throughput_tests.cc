@@ -68,7 +68,7 @@ class ThroughputTest : public BrowserPerfTest {
                           const std::string& json,
                           int index) {
     scoped_ptr<base::Value> root;
-    root.reset(base::JSONReader::Read(json, false));
+    root.reset(base::JSONReader::Read(json));
 
     ListValue* root_list = NULL;
     if (!root.get() || !root->GetAsList(&root_list)) {
@@ -179,7 +179,6 @@ class ThroughputTest : public BrowserPerfTest {
     command_line->AppendSwitch(switches::kAllowFileAccessFromFiles);
     // Enable or disable GPU acceleration.
     if (use_gpu_) {
-      command_line->AppendSwitch(switches::kEnableAccelerated2dCanvas);
       command_line->AppendSwitch(switches::kForceCompositingMode);
     } else {
       command_line->AppendSwitch(switches::kDisableAcceleratedCompositing);

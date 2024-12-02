@@ -181,8 +181,10 @@ void MigrateWin7ShortcutsInPath(
     GetShortcutAppId(shell_link, &existing_app_id);
 
     if (expected_app_id != existing_app_id) {
-      file_util::UpdateShortcutLink(NULL, shortcut.value().c_str(), NULL, NULL,
-                                    NULL, NULL, 0, expected_app_id.c_str());
+      file_util::CreateOrUpdateShortcutLink(NULL, shortcut.value().c_str(),
+                                            NULL, NULL, NULL, NULL, 0,
+                                            expected_app_id.c_str(),
+                                            file_util::SHORTCUT_NO_OPTIONS);
     }
   }
 }
@@ -373,7 +375,10 @@ ShellIntegration::DefaultWebClientState
 
   string16 wprotocol = UTF8ToUTF16(protocol);
 
-  if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
+  if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
+    // Windows 8 has removed the ability to ask about the default handlers.
+    return UNKNOWN_DEFAULT_WEB_CLIENT;
+  } else if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
     base::win::ScopedComPtr<IApplicationAssociationRegistration> pAAR;
     HRESULT hr = pAAR.CreateInstance(CLSID_ApplicationAssociationRegistration,
         NULL, CLSCTX_INPROC);

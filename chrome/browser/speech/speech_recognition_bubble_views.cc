@@ -11,7 +11,6 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_icon_view.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
-#include "chrome/browser/ui/views/window.h"
 #include "content/public/browser/resource_context.h"
 #include "content/public/browser/speech_recognition_manager.h"
 #include "content/public/browser/web_contents.h"
@@ -366,7 +365,7 @@ void SpeechRecognitionBubbleImpl::Show() {
         browser_view->GetLocationBarView()->location_icon_view() : NULL;
     bubble_ = new SpeechRecognitionBubbleView(delegate_, icon, element_rect_,
                                               GetWebContents());
-    browser::CreateViewsBubble(bubble_);
+    views::BubbleDelegateView::CreateBubble(bubble_);
     UpdateLayout();
   }
   bubble_->Show();

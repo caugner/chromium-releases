@@ -13,6 +13,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
@@ -169,10 +170,10 @@ class TranslateManagerTest : public TabContentsWrapperTestHarness,
     WebKit::initialize(&webkit_platform_support_);
     // Access the TranslateManager singleton so it is created before we call
     // TabContentsWrapperTestHarness::SetUp() to match what's done in Chrome,
-    // where the TranslateManager is created before the TabContents.  This
+    // where the TranslateManager is created before the WebContents.  This
     // matters as they both register for similar events and we want the
     // notifications to happen in the same sequence (TranslateManager first,
-    // TabContents second).  Also clears the translate script so it is fetched
+    // WebContents second).  Also clears the translate script so it is fetched
     // everytime and sets the expiration delay to a large value by default (in
     // case it was zeroed in a previous test).
     TranslateManager::GetInstance()->ClearTranslateScript();
@@ -322,6 +323,7 @@ class TestRenderViewContextMenu : public RenderViewContextMenu {
   }
 
   virtual void PlatformInit() { }
+  virtual void PlatformCancel() { }
   virtual bool GetAcceleratorForCommandId(
       int command_id,
       ui::Accelerator* accelerator) { return false; }
@@ -1347,7 +1349,9 @@ TEST_F(TranslateManagerTest, BeforeTranslateExtraButtons) {
   TranslateInfoBarDelegate* infobar;
   TestingProfile* test_profile =
       static_cast<TestingProfile*>(contents()->GetBrowserContext());
-  test_profile->CreateExtensionProcessManager();
+  static_cast<TestExtensionSystem*>(
+      ExtensionSystem::Get(test_profile))->
+      CreateExtensionProcessManager();
   test_profile->set_incognito(true);
   for (int i = 0; i < 8; ++i) {
     SCOPED_TRACE(::testing::Message() << "Iteration " << i <<

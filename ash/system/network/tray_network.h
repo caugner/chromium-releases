@@ -8,7 +8,6 @@
 
 #include "ash/system/network/network_observer.h"
 #include "ash/system/tray/system_tray_item.h"
-#include "base/memory/scoped_ptr.h"
 
 namespace ash {
 namespace internal {
@@ -33,13 +32,14 @@ class TrayNetwork : public SystemTrayItem,
   virtual void DestroyTrayView() OVERRIDE;
   virtual void DestroyDefaultView() OVERRIDE;
   virtual void DestroyDetailedView() OVERRIDE;
+  virtual void UpdateAfterLoginStatusChange(user::LoginStatus status) OVERRIDE;
 
   // Overridden from NetworkObserver.
   virtual void OnNetworkRefresh(const NetworkIconInfo& info) OVERRIDE;
 
-  scoped_ptr<tray::NetworkTrayView> tray_;
-  scoped_ptr<tray::NetworkDefaultView> default_;
-  scoped_ptr<tray::NetworkDetailedView> detailed_;
+  tray::NetworkTrayView* tray_;
+  tray::NetworkDefaultView* default_;
+  tray::NetworkDetailedView* detailed_;
 
   DISALLOW_COPY_AND_ASSIGN(TrayNetwork);
 };

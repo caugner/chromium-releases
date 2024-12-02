@@ -115,7 +115,28 @@ TEST_F(ClipboardTest, HTMLTest) {
 #endif  // defined(OS_WIN)
 }
 
-#if defined(TOOLKIT_USES_GTK)
+TEST_F(ClipboardTest, RTFTest) {
+  Clipboard clipboard;
+
+  std::string rtf =
+      "{\\rtf1\\ansi{\\fonttbl\\f0\\fswiss Helvetica;}\\f0\\pard\n"
+      "This is some {\\b bold} text.\\par\n"
+      "}";
+
+  {
+    ScopedClipboardWriter clipboard_writer(&clipboard,
+                                           Clipboard::BUFFER_STANDARD);
+    clipboard_writer.WriteRTF(rtf);
+  }
+
+  EXPECT_TRUE(clipboard.IsFormatAvailable(Clipboard::GetRtfFormatType(),
+                                          Clipboard::BUFFER_STANDARD));
+  std::string result;
+  clipboard.ReadRTF(Clipboard::BUFFER_STANDARD, &result);
+  EXPECT_EQ(rtf, result);
+}
+
+#if defined(TOOLKIT_GTK)
 TEST_F(ClipboardTest, MultipleBufferTest) {
   Clipboard clipboard;
 
@@ -209,7 +230,7 @@ TEST_F(ClipboardTest, UniodeHTMLTest) {
 }
 #endif  // defined(OS_WIN)
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 // Regression test for crbug.com/56298 (pasting empty HTML crashes Linux).
 TEST_F(ClipboardTest, EmptyHTMLTest) {
   Clipboard clipboard;
@@ -366,7 +387,7 @@ TEST_F(ClipboardTest, SharedBitmapTest) {
 // The following test somehow fails on GTK. The image when read back from the
 // clipboard has the alpha channel set to 0xFF for some reason. The other
 // channels stay intact. So I am turning this on only for aura.
-#if defined(USE_AURA)
+#if defined(USE_AURA) && !defined(OS_WIN)
 TEST_F(ClipboardTest, MultipleBitmapReadWriteTest) {
   Clipboard clipboard;
 

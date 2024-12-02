@@ -25,7 +25,7 @@ class TestBufferedSpdyVisitor : public BufferedSpdyFramerVisitorInterface {
       header_stream_id_(-1) {
   }
 
-  void OnError(int error_code) {
+  void OnError(SpdyFramer::SpdyError error_code) {
     LOG(INFO) << "SpdyFramer Error: " << error_code;
     error_count_++;
   }
@@ -176,9 +176,11 @@ class BufferedSpdyFramerSpdy3Test : public PlatformTest {
 
 TEST_F(BufferedSpdyFramerSpdy3Test, OnSetting) {
   SpdyFramer framer(3);
-  SpdySettings settings;
-  settings.push_back(SpdySetting(SettingsFlagsAndId(0, 1), 0x00000002));
-  settings.push_back(SpdySetting(SettingsFlagsAndId(0, 1), 0x00000003));
+  SettingsMap settings;
+  settings[SETTINGS_UPLOAD_BANDWIDTH] =
+      SettingsFlagsAndValue(SETTINGS_FLAG_NONE, 0x00000002);
+  settings[SETTINGS_DOWNLOAD_BANDWIDTH] =
+      SettingsFlagsAndValue(SETTINGS_FLAG_NONE, 0x00000003);
 
   scoped_ptr<SpdyFrame> control_frame(framer.CreateSettings(settings));
   TestBufferedSpdyVisitor visitor;
@@ -186,8 +188,8 @@ TEST_F(BufferedSpdyFramerSpdy3Test, OnSetting) {
   visitor.SimulateInFramer(
       reinterpret_cast<unsigned char*>(control_frame->data()),
       control_frame->length() + SpdyControlFrame::kHeaderSize);
-  EXPECT_EQ(1, visitor.error_count_);
-  EXPECT_EQ(1, visitor.setting_count_);
+  EXPECT_EQ(0, visitor.error_count_);
+  EXPECT_EQ(2, visitor.setting_count_);
 }
 
 TEST_F(BufferedSpdyFramerSpdy3Test, ReadSynStreamHeaderBlock) {

@@ -16,10 +16,10 @@
 #include "ui/aura/event.h"
 #include "ui/aura/root_window.h"
 #include "ui/aura/window.h"
+#include "ui/compositor/layer.h"
+#include "ui/compositor/layer_animator.h"
+#include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/compositor/layer.h"
-#include "ui/gfx/compositor/layer_animator.h"
-#include "ui/gfx/compositor/scoped_layer_animation_settings.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
@@ -71,8 +71,14 @@ SystemModalContainerLayoutManager::~SystemModalContainerLayoutManager() {
 
 void SystemModalContainerLayoutManager::OnWindowResized() {
   if (modal_screen_) {
-    modal_screen_->SetBounds(gfx::Rect(0, 0, container_->bounds().width(),
-                                       container_->bounds().height()));
+    // Note: we have to set the entire bounds with the screen offset.
+    modal_screen_->SetBounds(container_->bounds());
+  }
+  if (!modal_windows_.empty()) {
+    aura::Window::Windows::iterator it = modal_windows_.begin();
+    for (it = modal_windows_.begin(); it != modal_windows_.end(); ++it) {
+      (*it)->SetBounds((*it)->bounds().AdjustToFit(container_->bounds()));
+    }
   }
 }
 
@@ -91,6 +97,10 @@ void SystemModalContainerLayoutManager::OnWillRemoveWindowFromLayout(
   child->RemoveObserver(this);
   if (child->GetProperty(aura::client::kModalKey) != ui::MODAL_TYPE_NONE)
     RemoveModalWindow(child);
+}
+
+void SystemModalContainerLayoutManager::OnWindowRemovedFromLayout(
+    aura::Window* child) {
 }
 
 void SystemModalContainerLayoutManager::OnChildWindowVisibilityChanged(
@@ -130,15 +140,6 @@ void SystemModalContainerLayoutManager::OnWindowDestroying(
 
 ////////////////////////////////////////////////////////////////////////////////
 // SystemModalContainerLayoutManager,
-//     ui::ImplicitAnimationObserver implementation:
-
-void SystemModalContainerLayoutManager::OnImplicitAnimationsCompleted() {
-  if (modal_screen_ && !modal_screen_->GetNativeView()->layer()->ShouldDraw())
-    DestroyModalScreen();
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// SystemModalContainerLayoutManager,
 //     SystemModalContainerEventFilter::Delegate implementation:
 
 bool SystemModalContainerLayoutManager::CanWindowReceiveEvents(
@@ -155,6 +156,11 @@ bool SystemModalContainerLayoutManager::CanWindowReceiveEvents(
 // SystemModalContainerLayoutManager, private:
 
 void SystemModalContainerLayoutManager::AddModalWindow(aura::Window* window) {
+  if (modal_windows_.empty()) {
+    aura::RootWindow* root = container_->GetRootWindow();
+    if (root->capture_window())
+      root->capture_window()->ReleaseCapture();
+  }
   modal_windows_.push_back(window);
   CreateModalScreen();
 }
@@ -167,7 +173,7 @@ void SystemModalContainerLayoutManager::RemoveModalWindow(
     modal_windows_.erase(it);
 
   if (modal_windows_.empty())
-    HideModalScreen();
+    DestroyModalScreen();
   else
     wm::ActivateWindow(modal_window());
 }
@@ -188,31 +194,22 @@ void SystemModalContainerLayoutManager::CreateModalScreen() {
     Shell::GetInstance()->AddRootWindowEventFilter(modality_filter_.get());
   }
 
-  StopObservingImplicitAnimations();
-
   ui::ScopedLayerAnimationSettings settings(
       modal_screen_->GetNativeView()->layer()->GetAnimator());
-  settings.AddObserver(this);
   modal_screen_->Show();
   modal_screen_->GetNativeView()->layer()->SetOpacity(0.5f);
   container_->StackChildAtTop(modal_screen_->GetNativeView());
 }
 
 void SystemModalContainerLayoutManager::DestroyModalScreen() {
-  // Stop observing the modal screen's animations.
-  StopObservingImplicitAnimations();
-  modal_screen_->Close();
-  modal_screen_ = NULL;
-}
-
-void SystemModalContainerLayoutManager::HideModalScreen() {
-  StopObservingImplicitAnimations();
-
   Shell::GetInstance()->RemoveRootWindowEventFilter(modality_filter_.get());
   ui::ScopedLayerAnimationSettings settings(
       modal_screen_->GetNativeView()->layer()->GetAnimator());
-  settings.AddObserver(this);
+  modal_screen_->Close();
+  settings.AddObserver(
+      CreateHidingWindowAnimationObserver(modal_screen_->GetNativeView()));
   modal_screen_->GetNativeView()->layer()->SetOpacity(0.0f);
+  modal_screen_ = NULL;
 }
 
 }  // namespace internal

@@ -9,17 +9,23 @@
 #include "base/message_loop.h"
 #include "base/stl_util.h"
 #include "base/values.h"
+#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/extensions/file_browser_notifications.h"
 #include "chrome/browser/chromeos/extensions/file_manager_util.h"
 #include "chrome/browser/chromeos/gdata/gdata_system_service.h"
 #include "chrome/browser/chromeos/gdata/gdata_util.h"
+#include "chrome/browser/chromeos/login/base_login_display_host.h"
+#include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/extensions/extension_event_names.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "webkit/fileapi/file_system_types.h"
@@ -85,13 +91,19 @@ FileBrowserEventRouter::FileBrowserEventRouter(
     Profile* profile)
     : delegate_(new FileBrowserEventRouter::FileWatcherDelegate(this)),
       notifications_(new FileBrowserNotifications(profile)),
-      profile_(profile) {
+      pref_change_registrar_(new PrefChangeRegistrar),
+      profile_(profile),
+      num_remote_update_requests_(0) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
 FileBrowserEventRouter::~FileBrowserEventRouter() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
 
 void FileBrowserEventRouter::ShutdownOnUIThread() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   DCHECK(file_watchers_.empty());
   STLDeleteValues(&file_watchers_);
   if (!profile_) {
@@ -104,8 +116,14 @@ void FileBrowserEventRouter::ShutdownOnUIThread() {
       GDataSystemServiceFactory::FindForProfile(profile_);
   if (system_service) {
     system_service->file_system()->RemoveObserver(this);
-    system_service->file_system()->RemoveOperationObserver(this);
+    system_service->file_system()->GetOperationRegistry()->
+        RemoveObserver(this);
   }
+
+  chromeos::NetworkLibrary* network_library =
+      chromeos::CrosLibrary::Get()->GetNetworkLibrary();
+  if (network_library)
+     network_library->RemoveNetworkManagerObserver(this);
 
   profile_ = NULL;
 }
@@ -129,8 +147,18 @@ void FileBrowserEventRouter::ObserveFileSystemEvents() {
     NOTREACHED();
     return;
   }
-  system_service->file_system()->AddOperationObserver(this);
+  system_service->file_system()->GetOperationRegistry()->AddObserver(this);
   system_service->file_system()->AddObserver(this);
+
+  chromeos::NetworkLibrary* network_library =
+      chromeos::CrosLibrary::Get()->GetNetworkLibrary();
+  if (network_library)
+     network_library->AddNetworkManagerObserver(this);
+
+  pref_change_registrar_->Init(profile_->GetPrefs());
+  pref_change_registrar_->Add(prefs::kDisableGDataOverCellular, this);
+  pref_change_registrar_->Add(prefs::kDisableGDataHostedFiles, this);
+  pref_change_registrar_->Add(prefs::kDisableGData, this);
 }
 
 // File watch setup routines.
@@ -138,6 +166,8 @@ bool FileBrowserEventRouter::AddFileWatch(
     const FilePath& local_path,
     const FilePath& virtual_path,
     const std::string& extension_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+
   base::AutoLock lock(lock_);
   FilePath watch_path = local_path;
   bool is_remote_watch = false;
@@ -147,6 +177,10 @@ bool FileBrowserEventRouter::AddFileWatch(
   if (gdata::util::GetSpecialRemoteRootPath().IsParent(watch_path)) {
     watch_path = gdata::util::ExtractGDataPath(watch_path);
     is_remote_watch = true;
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&FileBrowserEventRouter::HandleRemoteUpdateRequestOnUIThread,
+                   this, true));
   }
 
   WatcherMap::iterator iter = file_watchers_.find(watch_path);
@@ -169,8 +203,21 @@ bool FileBrowserEventRouter::AddFileWatch(
 void FileBrowserEventRouter::RemoveFileWatch(
     const FilePath& local_path,
     const std::string& extension_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+
   base::AutoLock lock(lock_);
-  WatcherMap::iterator iter = file_watchers_.find(local_path);
+  FilePath watch_path = local_path;
+  // Tweak watch path for remote sources - we need to drop leading /special
+  // directory from there in order to be able to pair these events with
+  // their change notifications.
+  if (gdata::util::GetSpecialRemoteRootPath().IsParent(watch_path)) {
+    watch_path = gdata::util::ExtractGDataPath(watch_path);
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&FileBrowserEventRouter::HandleRemoteUpdateRequestOnUIThread,
+                   this, false));
+  }
+  WatcherMap::iterator iter = file_watchers_.find(watch_path);
   if (iter == file_watchers_.end())
     return;
   // Remove the renderer process for this watch.
@@ -181,9 +228,30 @@ void FileBrowserEventRouter::RemoveFileWatch(
   }
 }
 
+void FileBrowserEventRouter::HandleRemoteUpdateRequestOnUIThread(bool start) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  gdata::GDataFileSystem* file_system = GetRemoteFileSystem();
+  DCHECK(file_system);
+
+  if (start) {
+    file_system->CheckForUpdates();
+    if (num_remote_update_requests_ == 0)
+      file_system->StartUpdates();
+    ++num_remote_update_requests_;
+  } else {
+    DCHECK_LE(0, num_remote_update_requests_);
+    --num_remote_update_requests_;
+    if (num_remote_update_requests_ == 0)
+      file_system->StopUpdates();
+  }
+}
+
 void FileBrowserEventRouter::DiskChanged(
     DiskMountManagerEventType event,
     const DiskMountManager::Disk* disk) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   // Disregard hidden devices.
   if (disk->is_hidden())
     return;
@@ -197,6 +265,8 @@ void FileBrowserEventRouter::DiskChanged(
 void FileBrowserEventRouter::DeviceChanged(
     DiskMountManagerEventType event,
     const std::string& device_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   if (event == chromeos::disks::MOUNT_DEVICE_ADDED) {
     OnDeviceAdded(device_path);
   } else if (event == chromeos::disks::MOUNT_DEVICE_REMOVED) {
@@ -223,6 +293,8 @@ void FileBrowserEventRouter::MountCompleted(
     DiskMountManager::MountEvent event_type,
     chromeos::MountError error_code,
     const DiskMountManager::MountPointInfo& mount_info) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   DispatchMountCompletedEvent(event_type, error_code, mount_info);
 
   if (mount_info.mount_type == chromeos::MOUNT_TYPE_DEVICE &&
@@ -239,11 +311,48 @@ void FileBrowserEventRouter::MountCompleted(
         disk->system_path_prefix(), disk->drive_label(), disk->is_parent(),
         error_code == chromeos::MOUNT_ERROR_NONE,
         error_code == chromeos::MOUNT_ERROR_UNSUPORTED_FILESYSTEM);
+  } else if (mount_info.mount_type == chromeos::MOUNT_TYPE_ARCHIVE) {
+    // Clear the "mounted" state for archive files in gdata cache
+    // when mounting failed or unmounting succeeded.
+    if ((event_type == DiskMountManager::MOUNTING) !=
+        (error_code == chromeos::MOUNT_ERROR_NONE)) {
+      FilePath source_path(mount_info.source_path);
+      gdata::GDataFileSystem* file_system = GetRemoteFileSystem();
+      if (file_system && file_system->IsUnderGDataCacheDirectory(source_path))
+        file_system->SetMountedState(source_path, false,
+                                     gdata::SetMountedStateCallback());
+    }
   }
+}
+
+void FileBrowserEventRouter::OnNetworkManagerChanged(
+    chromeos::NetworkLibrary* network_library) {
+  if (!profile_ || !profile_->GetExtensionEventRouter()) {
+    NOTREACHED();
+    return;
+  }
+  profile_->GetExtensionEventRouter()->DispatchEventToRenderers(
+      extension_event_names::kOnFileBrowserNetworkConnectionChanged,
+      "[]", NULL, GURL());
+}
+
+void FileBrowserEventRouter::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  if (!profile_ || !profile_->GetExtensionEventRouter()) {
+    NOTREACHED();
+    return;
+  }
+  profile_->GetExtensionEventRouter()->DispatchEventToRenderers(
+      extension_event_names::kOnFileBrowserGDataPreferencesChanged,
+      "[]", NULL, GURL());
 }
 
 void FileBrowserEventRouter::OnProgressUpdate(
     const std::vector<gdata::GDataOperationRegistry::ProgressStatus>& list) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   scoped_ptr<ListValue> event_list(
       file_manager_util::ProgressStatusVectorToListValue(
           profile_,
@@ -267,6 +376,36 @@ void FileBrowserEventRouter::OnDirectoryChanged(
     const FilePath& directory_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   HandleFileWatchNotification(directory_path, false);
+}
+
+void FileBrowserEventRouter::OnDocumentFeedFetched(
+    int num_accumulated_entries) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  ListValue args;
+  args.Append(base::Value::CreateIntegerValue(num_accumulated_entries));
+  std::string args_json;
+  base::JSONWriter::Write(&args, &args_json);
+
+  profile_->GetExtensionEventRouter()->DispatchEventToExtension(
+      std::string(kFileBrowserDomain),
+      extension_event_names::kOnDocumentFeedFetched, args_json,
+      NULL, GURL());
+
+}
+
+void FileBrowserEventRouter::OnAuthenticationFailed() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  // Raise a MountCompleted event to notify the File Manager.
+  const std::string& gdata_path = gdata::util::GetGDataMountPointPathAsString();
+  DiskMountManager::MountPointInfo mount_info(
+      gdata_path,
+      gdata_path,
+      chromeos::MOUNT_TYPE_GDATA,
+      chromeos::disks::MOUNT_CONDITION_NONE);
+  MountCompleted(DiskMountManager::UNMOUNTING, chromeos::MOUNT_ERROR_NONE,
+                 mount_info);
 }
 
 void FileBrowserEventRouter::HandleFileWatchNotification(
@@ -311,6 +450,7 @@ void FileBrowserEventRouter::DispatchFolderChangeEvent(
   }
 }
 
+// TODO(tbarzic): This is not used anymore. Remove it.
 void FileBrowserEventRouter::DispatchDiskEvent(
     const DiskMountManager::Disk* disk, bool added) {
   if (!profile_) {
@@ -352,24 +492,8 @@ void FileBrowserEventRouter::DispatchMountCompletedEvent(
       "mountType",
       DiskMountManager::MountTypeToString(mount_info.mount_type));
 
-  if (mount_info.mount_type == chromeos::MOUNT_TYPE_ARCHIVE ||
-      mount_info.mount_type == chromeos::MOUNT_TYPE_GDATA) {
-    GURL source_url;
-    if (file_manager_util::ConvertFileToFileSystemUrl(profile_,
-            FilePath(mount_info.source_path),
-            file_manager_util::GetFileBrowserExtensionUrl().GetOrigin(),
-            &source_url)) {
-      mount_info_value->SetString("sourceUrl", source_url.spec());
-    } else {
-      // If mounting of gdata moutn point failed, we may not be able to convert
-      // source path to source url, so let just send empty string.
-      DCHECK(mount_info.mount_type == chromeos::MOUNT_TYPE_GDATA &&
-             error_code != chromeos::MOUNT_ERROR_NONE);
-      mount_info_value->SetString("sourceUrl", "");
-    }
-  } else {
-    mount_info_value->SetString("sourceUrl", mount_info.source_path);
-  }
+  // Add sourcePath to the event.
+  mount_info_value->SetString("sourcePath", mount_info.source_path);
 
   FilePath relative_mount_path;
   bool relative_mount_path_set = false;
@@ -386,6 +510,10 @@ void FileBrowserEventRouter::DispatchMountCompletedEvent(
       mount_info_value->SetString("mountPath",
                                   "/" + relative_mount_path.value());
       relative_mount_path_set = true;
+    } else {
+      LOG(ERROR) << "Mount path is not accessible: " << mount_info.mount_path;
+      mount_info_value->SetString("status",
+          MountErrorToString(chromeos::MOUNT_ERROR_PATH_UNMOUNTED));
     }
   }
 
@@ -394,6 +522,12 @@ void FileBrowserEventRouter::DispatchMountCompletedEvent(
   profile_->GetExtensionEventRouter()->DispatchEventToRenderers(
       extension_event_names::kOnFileBrowserMountCompleted, args_json, NULL,
       GURL());
+
+  // Do not attempt to open File Manager while the login is in progress or
+  // the screen is locked.
+  if (chromeos::BaseLoginDisplayHost::default_host() ||
+      chromeos::ScreenLocker::default_screen_locker())
+    return;
 
   if (relative_mount_path_set &&
       mount_info.mount_type == chromeos::MOUNT_TYPE_DEVICE &&
@@ -405,23 +539,35 @@ void FileBrowserEventRouter::DispatchMountCompletedEvent(
 
 void FileBrowserEventRouter::OnDiskAdded(
     const DiskMountManager::Disk* disk) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   VLOG(1) << "Disk added: " << disk->device_path();
   if (disk->device_path().empty()) {
     VLOG(1) << "Empty system path for " << disk->device_path();
     return;
   }
 
-  // If disk is not mounted yet, give it a try.
-  if (disk->mount_path().empty()) {
-    // Initiate disk mount operation.
+  // If disk is not mounted yet and it has media, give it a try.
+  if (disk->mount_path().empty() && disk->has_media()) {
+    // Initiate disk mount operation. MountPath auto-detects the filesystem
+    // format if the second argument is empty. The third argument (mount label)
+    // is not used in a disk mount operation.
     DiskMountManager::GetInstance()->MountPath(
-        disk->device_path(), chromeos::MOUNT_TYPE_DEVICE);
+        disk->device_path(), std::string(), std::string(),
+        chromeos::MOUNT_TYPE_DEVICE);
+  } else {
+    // Either the disk was mounted or it has no media. In both cases we don't
+    // want the Scanning notification to persist.
+    notifications_->HideNotification(FileBrowserNotifications::DEVICE,
+                                     disk->system_path_prefix());
   }
   DispatchDiskEvent(disk, true);
 }
 
 void FileBrowserEventRouter::OnDiskRemoved(
     const DiskMountManager::Disk* disk) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   VLOG(1) << "Disk removed: " << disk->device_path();
 
   if (!disk->mount_path().empty()) {
@@ -432,16 +578,20 @@ void FileBrowserEventRouter::OnDiskRemoved(
 
 void FileBrowserEventRouter::OnDeviceAdded(
     const std::string& device_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   VLOG(1) << "Device added : " << device_path;
 
   notifications_->RegisterDevice(device_path);
   notifications_->ShowNotificationDelayed(FileBrowserNotifications::DEVICE,
                                           device_path,
-                                          4000);
+                                          5000);
 }
 
 void FileBrowserEventRouter::OnDeviceRemoved(
     const std::string& device_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   VLOG(1) << "Device removed : " << device_path;
   notifications_->HideNotification(FileBrowserNotifications::DEVICE,
                                    device_path);
@@ -452,11 +602,14 @@ void FileBrowserEventRouter::OnDeviceRemoved(
 
 void FileBrowserEventRouter::OnDeviceScanned(
     const std::string& device_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   VLOG(1) << "Device scanned : " << device_path;
 }
 
 void FileBrowserEventRouter::OnFormattingStarted(
     const std::string& device_path, bool success) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   if (success) {
     notifications_->ShowNotification(FileBrowserNotifications::FORMAT_START,
                                      device_path);
@@ -468,6 +621,8 @@ void FileBrowserEventRouter::OnFormattingStarted(
 
 void FileBrowserEventRouter::OnFormattingFinished(
     const std::string& device_path, bool success) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
   if (success) {
     notifications_->HideNotification(FileBrowserNotifications::FORMAT_START,
                                      device_path);
@@ -476,8 +631,10 @@ void FileBrowserEventRouter::OnFormattingFinished(
     // Hide it after a couple of seconds.
     notifications_->HideNotificationDelayed(
         FileBrowserNotifications::FORMAT_SUCCESS, device_path, 4000);
-
-    DiskMountManager::GetInstance()->MountPath(device_path,
+    // MountPath auto-detects filesystem format if second argument is empty.
+    // The third argument (mount label) is not used in a disk mount operation.
+    DiskMountManager::GetInstance()->MountPath(device_path, std::string(),
+                                               std::string(),
                                                chromeos::MOUNT_TYPE_DEVICE);
   } else {
     notifications_->HideNotification(FileBrowserNotifications::FORMAT_START,
@@ -574,6 +731,13 @@ FileBrowserEventRouter::FileWatcherExtensions::GetRefCount() const {
 const FilePath&
 FileBrowserEventRouter::FileWatcherExtensions::GetVirtualPath() const {
   return virtual_path_;
+}
+
+gdata::GDataFileSystem* FileBrowserEventRouter::GetRemoteFileSystem() const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  gdata::GDataSystemService* system_service =
+      gdata::GDataSystemServiceFactory::GetForProfile(profile_);
+  return (system_service ? system_service->file_system() : NULL);
 }
 
 bool FileBrowserEventRouter::FileWatcherExtensions::Watch

@@ -5,8 +5,10 @@
 #include "net/socket/socks5_client_socket.h"
 
 #include <algorithm>
+#include <iterator>
 #include <map>
 
+#include "base/sys_byteorder.h"
 #include "net/base/address_list.h"
 #include "net/base/net_log.h"
 #include "net/base/net_log_unittest.h"
@@ -56,7 +58,7 @@ class SOCKS5ClientSocketTest : public PlatformTest {
 };
 
 SOCKS5ClientSocketTest::SOCKS5ClientSocketTest()
-  : kNwPort(htons(80)),
+  : kNwPort(base::HostToNet16(80)),
     net_log_(CapturingNetLog::kUnbounded),
     host_resolver_(new MockHostResolver) {
 }

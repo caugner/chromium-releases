@@ -56,6 +56,7 @@ class BrightnessView : public views::View,
     AddChildView(icon);
 
     slider_ = new views::Slider(this, views::Slider::HORIZONTAL);
+    slider_->set_focus_border_color(kFocusBorderColor);
     slider_->SetValue(static_cast<float>(initial_percent / 100.0));
     slider_->SetAccessibleName(
         ui::ResourceBundle::GetSharedInstance().GetLocalizedString(
@@ -124,6 +125,7 @@ class BrightnessView : public views::View,
 
 TrayBrightness::TrayBrightness()
     : weak_ptr_factory_(this),
+      brightness_view_(NULL),
       is_default_view_(false),
       current_percent_(100.0),
       got_current_percent_(false) {
@@ -141,11 +143,9 @@ void TrayBrightness::GetInitialBrightness() {
   BrightnessControlDelegate* delegate =
       Shell::GetInstance()->accelerator_controller()->
       brightness_control_delegate();
-  if (!delegate) {
-    LOG(WARNING) << "Unable to get initial brightness; "
-                 << "BrightnessControlDelegate not yet created";
+  // Worrisome, but happens in unit tests, so don't log anything.
+  if (!delegate)
     return;
-  }
   delegate->GetBrightnessPercent(
       base::Bind(&TrayBrightness::HandleInitialBrightness,
                  weak_ptr_factory_.GetWeakPtr()));
@@ -161,15 +161,17 @@ views::View* TrayBrightness::CreateTrayView(user::LoginStatus status) {
 }
 
 views::View* TrayBrightness::CreateDefaultView(user::LoginStatus status) {
-  brightness_view_.reset(new tray::BrightnessView(current_percent_));
+  CHECK(brightness_view_ == NULL);
+  brightness_view_ = new tray::BrightnessView(current_percent_);
   is_default_view_ = true;
-  return brightness_view_.get();
+  return brightness_view_;
 }
 
 views::View* TrayBrightness::CreateDetailedView(user::LoginStatus status) {
-  brightness_view_.reset(new tray::BrightnessView(current_percent_));
+  CHECK(brightness_view_ == NULL);
+  brightness_view_ = new tray::BrightnessView(current_percent_);
   is_default_view_ = false;
-  return brightness_view_.get();
+  return brightness_view_;
 }
 
 void TrayBrightness::DestroyTrayView() {
@@ -177,24 +179,27 @@ void TrayBrightness::DestroyTrayView() {
 
 void TrayBrightness::DestroyDefaultView() {
   if (is_default_view_)
-    brightness_view_.reset();
+    brightness_view_ = NULL;
 }
 
 void TrayBrightness::DestroyDetailedView() {
   if (!is_default_view_)
-    brightness_view_.reset();
+    brightness_view_ = NULL;
+}
+
+void TrayBrightness::UpdateAfterLoginStatusChange(user::LoginStatus status) {
 }
 
 void TrayBrightness::OnBrightnessChanged(double percent, bool user_initiated) {
   current_percent_ = percent;
   got_current_percent_ = true;
 
-  if (brightness_view_.get())
+  if (brightness_view_)
     brightness_view_->SetBrightnessPercent(percent);
   if (!user_initiated)
     return;
 
-  if (brightness_view_.get())
+  if (brightness_view_)
     SetDetailedViewCloseDelay(kTrayPopupAutoCloseDelayInSeconds);
   else
     PopupDetailedView(kTrayPopupAutoCloseDelayInSeconds, false);

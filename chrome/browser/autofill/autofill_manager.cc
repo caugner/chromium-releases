@@ -16,6 +16,7 @@
 #include "base/logging.h"
 #include "base/string16.h"
 #include "base/string_util.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete_history_manager.h"
 #include "chrome/browser/autofill/autofill_cc_infobar_delegate.h"
@@ -33,8 +34,11 @@
 #include "chrome/browser/autofill/phone_number_i18n.h"
 #include "chrome/browser/autofill/select_control_handler.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
+#include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -53,11 +57,13 @@
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "ipc/ipc_message_macros.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebAutofillClient.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/rect.h"
 #include "webkit/forms/form_data.h"
 #include "webkit/forms/form_data_predictions.h"
 #include "webkit/forms/form_field.h"
+#include "webkit/forms/password_form_dom_manager.h"
 
 using base::TimeTicks;
 using content::BrowserThread;
@@ -143,7 +149,7 @@ void DeterminePossibleFieldTypesForUpload(
     const std::vector<AutofillProfile>& profiles,
     const std::vector<CreditCard>& credit_cards,
     FormStructure* submitted_form) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
 
   // For each field in the |submitted_form|, extract the value.  Then for each
   // profile or credit card, identify any stored types that match the value.
@@ -183,13 +189,17 @@ AutofillManager::AutofillManager(TabContentsWrapper* tab_contents)
       user_did_type_(false),
       user_did_autofill_(false),
       user_did_edit_autofilled_field_(false),
+      password_generation_enabled_(false),
       external_delegate_(NULL) {
   // |personal_data_| is NULL when using test-enabled WebContents.
   personal_data_ = PersonalDataManagerFactory::GetForProfile(
       tab_contents->profile()->GetOriginalProfile());
+  RegisterWithSyncService();
 }
 
 AutofillManager::~AutofillManager() {
+  if (sync_service_ && sync_service_->HasObserver(this))
+    sync_service_->RemoveObserver(this);
 }
 
 // static
@@ -214,10 +224,64 @@ void AutofillManager::RegisterUserPrefs(PrefService* prefs) {
                             PrefService::UNSYNCABLE_PREF);
 }
 
+void AutofillManager::RegisterWithSyncService() {
+  ProfileSyncService* temp_sync_service =
+      ProfileSyncServiceFactory::GetForProfile(
+          tab_contents_wrapper_->profile());
+  if (temp_sync_service) {
+    sync_service_ = temp_sync_service->AsWeakPtr();
+    sync_service_->AddObserver(this);
+  }
+}
+
+void AutofillManager::SendPasswordGenerationStateToRenderer(
+    content::RenderViewHost* host, bool enabled) {
+  host->Send(new AutofillMsg_PasswordGenerationEnabled(host->GetRoutingID(),
+                                                       enabled));
+}
+
+void AutofillManager::UpdatePasswordGenerationState(
+    content::RenderViewHost* host,
+    bool new_renderer) {
+  if (!sync_service_)
+    return;
+
+  // Password generation requires sync for passwords and the password manager
+  // to both be enabled.
+  syncable::ModelTypeSet sync_set = sync_service_->GetPreferredDataTypes();
+  bool password_sync_enabled = (sync_service_->HasSyncSetupCompleted() &&
+                                sync_set.Has(syncable::PASSWORDS));
+  bool new_password_generation_enabled =
+      password_sync_enabled &&
+      tab_contents_wrapper_->password_manager()->IsSavingEnabled();
+  if (new_password_generation_enabled != password_generation_enabled_ ||
+      new_renderer) {
+    password_generation_enabled_ = new_password_generation_enabled;
+    SendPasswordGenerationStateToRenderer(host, password_generation_enabled_);
+  }
+}
+
+void AutofillManager::RenderViewCreated(content::RenderViewHost* host) {
+      UpdatePasswordGenerationState(host, true);
+}
+
+void AutofillManager::OnStateChanged() {
+  // It is possible for sync state to change during tab contents destruction.
+  // In this case, we don't need to update the renderer since it's going away.
+  if (web_contents() && web_contents()->GetRenderViewHost()) {
+    UpdatePasswordGenerationState(web_contents()->GetRenderViewHost(),
+                                  false);
+  }
+}
+
 void AutofillManager::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
     const content::FrameNavigateParams& params) {
   Reset();
+}
+
+bool AutofillManager::HasExternalDelegate() {
+  return external_delegate_ != NULL;
 }
 
 bool AutofillManager::OnMessageReceived(const IPC::Message& message) {
@@ -245,6 +309,10 @@ bool AutofillManager::OnMessageReceived(const IPC::Message& message) {
                         OnHideAutofillPopup)
     IPC_MESSAGE_HANDLER(AutofillHostMsg_ShowPasswordGenerationPopup,
                         OnShowPasswordGenerationPopup)
+    IPC_MESSAGE_HANDLER(AutofillHostMsg_AddPasswordFormMapping,
+                        OnAddPasswordFormMapping)
+    IPC_MESSAGE_HANDLER(AutofillHostMsg_ShowPasswordSuggestions,
+                        OnShowPasswordSuggestions)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -304,15 +372,11 @@ bool AutofillManager::OnFormSubmitted(const FormData& form,
       copied_credit_cards.push_back(**it);
     }
 
-    // TODO(isherman): Ideally, we should not be using the FILE thread here.
-    // Per jar@, this is a good compromise for now, as we don't currently have a
-    // broad consensus on how to support such one-off background tasks.
-
     // Note that ownership of |submitted_form| is passed to the second task,
     // using |base::Owned|.
     FormStructure* raw_submitted_form = submitted_form.get();
-    BrowserThread::PostTaskAndReply(
-        BrowserThread::FILE, FROM_HERE,
+    BrowserThread::GetBlockingPool()->PostTaskAndReply(
+        FROM_HERE,
         base::Bind(&DeterminePossibleFieldTypesForUpload,
                    copied_profiles,
                    copied_credit_cards,
@@ -425,7 +489,8 @@ void AutofillManager::OnQueryFormFieldAutofill(int query_id,
         values.assign(1, l10n_util::GetStringUTF16(warning));
         labels.assign(1, string16());
         icons.assign(1, string16());
-        unique_ids.assign(1, -1);
+        unique_ids.assign(1,
+                          WebKit::WebAutofillClient::MenuItemIDWarningMessage);
       } else {
         bool section_is_autofilled =
             SectionIsAutofilled(*form_structure, form,
@@ -632,6 +697,45 @@ void AutofillManager::OnShowPasswordGenerationPopup(const gfx::Rect& bounds) {
 #endif  // #if defined(OS_ANDROID)
 }
 
+void AutofillManager::RemoveAutofillProfileOrCreditCard(int unique_id) {
+  const std::vector<AutofillProfile*>& profiles = personal_data_->profiles();
+  const std::vector<CreditCard*>& credit_cards = personal_data_->credit_cards();
+  const AutofillProfile* profile = NULL;
+  const CreditCard* credit_card = NULL;
+  size_t variant = 0;
+  if (!GetProfileOrCreditCard(unique_id, profiles, credit_cards, &profile,
+                              &credit_card, &variant)) {
+    NOTREACHED();
+    return;
+  }
+
+  // TODO(csharp): If we are dealing with a variant only the variant should
+  // be deleted, instead of doing nothing.
+  // http://crbug.com/124211
+  if (variant != 0)
+    return;
+
+  if (profile)
+    personal_data_->RemoveProfile(profile->guid());
+  else
+    personal_data_->RemoveCreditCard(credit_card->guid());
+}
+
+void AutofillManager::OnAddPasswordFormMapping(
+      const webkit::forms::FormField& form,
+      const webkit::forms::PasswordFormFillData& fill_data) {
+  if (external_delegate_)
+    external_delegate_->AddPasswordFormMapping(form, fill_data);
+}
+
+void AutofillManager::OnShowPasswordSuggestions(
+    const webkit::forms::FormField& field,
+    const gfx::Rect& bounds,
+    const std::vector<string16>& suggestions) {
+  if (external_delegate_)
+    external_delegate_->OnShowPasswordSuggestions(suggestions, field, bounds);
+}
+
 void AutofillManager::OnLoadedServerPredictions(
     const std::string& response_xml) {
   // Parse and store the server predictions.
@@ -740,6 +844,9 @@ void AutofillManager::Reset() {
   user_did_edit_autofilled_field_ = false;
   forms_loaded_timestamp_ = TimeTicks();
   initial_interaction_timestamp_ = TimeTicks();
+
+  if (external_delegate_)
+    external_delegate_->Reset();
 }
 
 AutofillManager::AutofillManager(TabContentsWrapper* tab_contents,
@@ -756,8 +863,10 @@ AutofillManager::AutofillManager(TabContentsWrapper* tab_contents,
       user_did_type_(false),
       user_did_autofill_(false),
       user_did_edit_autofilled_field_(false),
+      password_generation_enabled_(false),
       external_delegate_(NULL) {
   DCHECK(tab_contents);
+  RegisterWithSyncService();
 }
 
 void AutofillManager::set_metric_logger(const AutofillMetrics* metric_logger) {

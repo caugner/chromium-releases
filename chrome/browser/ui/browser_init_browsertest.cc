@@ -123,8 +123,8 @@ IN_PROC_BROWSER_TEST_F(BrowserInitTest, OpenURLsPopup) {
   OpenURLsPopupObserver observer;
   BrowserList::AddObserver(&observer);
 
-  Browser* popup = Browser::CreateForType(Browser::TYPE_POPUP,
-                                          browser()->profile());
+  Browser* popup = Browser::CreateWithParams(
+      Browser::CreateParams(Browser::TYPE_POPUP, browser()->profile()));
   ASSERT_TRUE(popup->is_type_popup());
   ASSERT_EQ(popup, observer.added_browser_);
 
@@ -148,14 +148,11 @@ IN_PROC_BROWSER_TEST_F(BrowserInitTest, OpenURLsPopup) {
 // background application.
 IN_PROC_BROWSER_TEST_F(BrowserInitTest,
                        StartupURLsOnNewWindowWithNoTabbedBrowsers) {
-  // Use a couple arbitrary URLs.
+  // Use a couple same-site HTTP URLs.
+  ASSERT_TRUE(test_server()->Start());
   std::vector<GURL> urls;
-  urls.push_back(ui_test_utils::GetTestUrl(
-      FilePath(FilePath::kCurrentDirectory),
-      FilePath(FILE_PATH_LITERAL("title1.html"))));
-  urls.push_back(ui_test_utils::GetTestUrl(
-      FilePath(FilePath::kCurrentDirectory),
-      FilePath(FILE_PATH_LITERAL("title2.html"))));
+  urls.push_back(test_server()->GetURL("files/title1.html"));
+  urls.push_back(test_server()->GetURL("files/title2.html"));
 
   // Set the startup preference to open these URLs.
   SessionStartupPref pref(SessionStartupPref::URLS);
@@ -173,7 +170,7 @@ IN_PROC_BROWSER_TEST_F(BrowserInitTest,
   ASSERT_TRUE(launch.Launch(browser()->profile(), std::vector<GURL>(), false));
 
   // This should have created a new browser window.  |browser()| is still
-  // around at this point, even though we've closed it's window.
+  // around at this point, even though we've closed its window.
   Browser* new_browser = NULL;
   ASSERT_NO_FATAL_FAILURE(FindOneOtherBrowser(&new_browser));
 
@@ -182,6 +179,11 @@ IN_PROC_BROWSER_TEST_F(BrowserInitTest,
   for (size_t i=0; i < urls.size(); i++) {
     EXPECT_EQ(urls[i], new_browser->GetWebContentsAt(i)->GetURL());
   }
+
+  // The two tabs, despite having the same site, should be in different
+  // SiteInstances.
+  EXPECT_NE(new_browser->GetWebContentsAt(0)->GetSiteInstance(),
+            new_browser->GetWebContentsAt(1)->GetSiteInstance());
 }
 
 // Verify that startup URLs aren't used when the process already exists
@@ -407,7 +409,7 @@ IN_PROC_BROWSER_TEST_F(BrowserInitTest, StartupURLsForTwoProfiles) {
   // urls1 were opened in a browser for default_profile, and urls2 were opened
   // in a browser for other_profile.
   Browser* new_browser = NULL;
-  // |browser()| is still around at this point, even though we've closed it's
+  // |browser()| is still around at this point, even though we've closed its
   // window. Thus the browser count for default_profile is 2.
   ASSERT_EQ(2u, BrowserList::GetBrowserCount(default_profile));
   new_browser = FindOneOtherBrowserForProfile(default_profile, browser());
@@ -483,14 +485,14 @@ IN_PROC_BROWSER_TEST_F(BrowserInitTest, UpdateWithTwoProfiles) {
   new_browser = FindOneOtherBrowserForProfile(profile1, NULL);
   ASSERT_TRUE(new_browser);
   ASSERT_EQ(1, new_browser->tab_count());
-  EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
+  EXPECT_EQ(GURL(chrome::kAboutBlankURL),
             new_browser->GetWebContentsAt(0)->GetURL());
 
   ASSERT_EQ(1u, BrowserList::GetBrowserCount(profile2));
   new_browser = FindOneOtherBrowserForProfile(profile2, NULL);
   ASSERT_TRUE(new_browser);
   ASSERT_EQ(1, new_browser->tab_count());
-  EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
+  EXPECT_EQ(GURL(chrome::kAboutBlankURL),
             new_browser->GetWebContentsAt(0)->GetURL());
 }
 
@@ -582,7 +584,7 @@ IN_PROC_BROWSER_TEST_F(BrowserInitTest, ProfilesWithoutPagesNotLaunched) {
   new_browser = FindOneOtherBrowserForProfile(profile_last, NULL);
   ASSERT_TRUE(new_browser);
   ASSERT_EQ(1, new_browser->tab_count());
-  EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
+  EXPECT_EQ(GURL(chrome::kAboutBlankURL),
             new_browser->GetWebContentsAt(0)->GetURL());
 
   // profile_home2 was not launched since it would've only opened the home page.
@@ -669,13 +671,13 @@ IN_PROC_BROWSER_TEST_F(BrowserInitTest, ProfilesLaunchedAfterCrash) {
   EXPECT_EQ(1U, new_browser->GetTabContentsWrapperAt(0)->infobar_tab_helper()->
             infobar_count());
 
-  // The profile which normally opens URLs opens them (in addition to displaying
-  // the crash info bar).
+  // The profile which normally opens URLs displays the new tab page.
   ASSERT_EQ(1u, BrowserList::GetBrowserCount(profile_urls));
   new_browser = FindOneOtherBrowserForProfile(profile_urls, NULL);
   ASSERT_TRUE(new_browser);
   ASSERT_EQ(1, new_browser->tab_count());
-  EXPECT_EQ(urls[0], new_browser->GetWebContentsAt(0)->GetURL());
+  EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
+            new_browser->GetWebContentsAt(0)->GetURL());
   EXPECT_EQ(1U, new_browser->GetTabContentsWrapperAt(0)->infobar_tab_helper()->
             infobar_count());
 }

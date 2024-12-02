@@ -16,6 +16,7 @@
 #include "content/common/media/video_capture.h"
 #include "content/renderer/media/video_capture_message_filter.h"
 #include "media/video/capture/video_capture.h"
+#include "media/video/capture/video_capture_types.h"
 
 namespace base {
 class MessageLoopProxy;
@@ -25,8 +26,9 @@ class CONTENT_EXPORT VideoCaptureImpl
     : public media::VideoCapture, public VideoCaptureMessageFilter::Delegate {
  public:
   // media::VideoCapture interface.
-  virtual void StartCapture(media::VideoCapture::EventHandler* handler,
-                            const VideoCaptureCapability& capability) OVERRIDE;
+  virtual void StartCapture(
+      media::VideoCapture::EventHandler* handler,
+      const media::VideoCaptureCapability& capability) OVERRIDE;
   virtual void StopCapture(media::VideoCapture::EventHandler* handler) OVERRIDE;
   virtual void FeedBuffer(scoped_refptr<VideoFrameBuffer> buffer) OVERRIDE;
   virtual bool CaptureStarted() OVERRIDE;
@@ -51,12 +53,12 @@ class CONTENT_EXPORT VideoCaptureImpl
   struct DIBBuffer;
 
   VideoCaptureImpl(media::VideoCaptureSessionId id,
-                   scoped_refptr<base::MessageLoopProxy> ml_proxy,
+                   base::MessageLoopProxy* capture_message_loop_proxy,
                    VideoCaptureMessageFilter* filter);
   virtual ~VideoCaptureImpl();
 
   void DoStartCapture(media::VideoCapture::EventHandler* handler,
-                      const VideoCaptureCapability& capability);
+                      const media::VideoCaptureCapability& capability);
   void DoStopCapture(media::VideoCapture::EventHandler* handler);
   void DoFeedBuffer(scoped_refptr<VideoFrameBuffer> buffer);
 
@@ -81,21 +83,22 @@ class CONTENT_EXPORT VideoCaptureImpl
   bool ClientHasDIB();
 
   scoped_refptr<VideoCaptureMessageFilter> message_filter_;
-  scoped_refptr<base::MessageLoopProxy> ml_proxy_;
+  scoped_refptr<base::MessageLoopProxy> capture_message_loop_proxy_;
+  scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy_;
   int device_id_;
 
   // Pool of DIBs.
   typedef std::map<int /* buffer_id */, DIBBuffer*> CachedDIB;
   CachedDIB cached_dibs_;
 
-  typedef std::map<media::VideoCapture::EventHandler*, VideoCaptureCapability>
-      ClientInfo;
+  typedef std::map<media::VideoCapture::EventHandler*,
+      media::VideoCaptureCapability> ClientInfo;
   ClientInfo clients_;
 
   ClientInfo clients_pending_on_filter_;
   ClientInfo clients_pending_on_restart_;
 
-  media::VideoFrame::Format video_type_;
+  media::VideoCaptureCapability::Format video_type_;
 
   // The parameter is being used in current capture session. A capture session
   // starts with StartCapture and ends with StopCapture.

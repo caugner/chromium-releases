@@ -13,9 +13,7 @@ namespace {
 void SetDialogTitle(GtkWidget* dialog, const string16& title) {
   gtk_window_set_title(GTK_WINDOW(dialog), UTF16ToUTF8(title).c_str());
 
-  // The following code requires the dialog to be realized. However, we host
-  // dialog's content in a Chrome window without really realize the dialog
-  // on ChromeOS. Thus, skip the following code for ChromeOS.
+  // The following code requires the dialog to be realized.
   gtk_widget_realize(dialog);
 
   // Make sure it's big enough to show the title.
@@ -45,12 +43,12 @@ void HandleOnResponseDialog(GtkWidget* widget, int response, void* user_data) {
 
 namespace browser {
 
-void ShowErrorBox(gfx::NativeWindow parent,
-                  const string16& title,
-                  const string16& message) {
+void ShowWarningMessageBox(gfx::NativeWindow parent,
+                           const string16& title,
+                           const string16& message) {
   GtkWidget* dialog = gtk_message_dialog_new(parent,
                                              GTK_DIALOG_MODAL,
-                                             GTK_MESSAGE_ERROR,
+                                             GTK_MESSAGE_WARNING,
                                              GTK_BUTTONS_OK,
                                              "%s",
                                              UTF16ToUTF8(message).c_str());
@@ -62,9 +60,9 @@ void ShowErrorBox(gfx::NativeWindow parent,
   gtk_util::ShowDialog(dialog);
 }
 
-bool ShowYesNoBox(gfx::NativeWindow parent,
-                  const string16& title,
-                  const string16& message) {
+bool ShowQuestionMessageBox(gfx::NativeWindow parent,
+                            const string16& title,
+                            const string16& message) {
   GtkWidget* dialog = gtk_message_dialog_new(parent,
                                              GTK_DIALOG_MODAL,
                                              GTK_MESSAGE_QUESTION,

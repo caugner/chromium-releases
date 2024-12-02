@@ -74,9 +74,8 @@ class ProfileSyncServiceMock : public ProfileSyncService {
   MOCK_CONST_METHOD0(GetPreferredDataTypes, syncable::ModelTypeSet());
   MOCK_CONST_METHOD0(GetRegisteredDataTypes, syncable::ModelTypeSet());
   MOCK_CONST_METHOD0(GetLastSessionSnapshot,
-                     const browser_sync::sessions::SyncSessionSnapshot*());
+                     browser_sync::sessions::SyncSessionSnapshot());
 
-  MOCK_CONST_METHOD0(UIShouldDepictAuthInProgress, bool());
   MOCK_METHOD0(QueryDetailedSyncStatus,
                browser_sync::SyncBackendHost::Status());
   MOCK_CONST_METHOD0(GetAuthError, const GoogleServiceAuthError&());
@@ -97,8 +96,6 @@ class ProfileSyncServiceMock : public ProfileSyncService {
   MOCK_METHOD1(SetDecryptionPassphrase, bool(const std::string& passphrase));
   MOCK_METHOD2(SetEncryptionPassphrase, void(const std::string& passphrase,
                                              PassphraseType type));
-
-  MOCK_METHOD0(ShowErrorUI, void());
 };
 
 #endif  // CHROME_BROWSER_SYNC_PROFILE_SYNC_SERVICE_MOCK_H_

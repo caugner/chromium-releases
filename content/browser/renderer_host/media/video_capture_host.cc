@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,7 +38,7 @@ struct VideoCaptureHost::Entry {
 };
 
 VideoCaptureHost::VideoCaptureHost(content::ResourceContext* resource_context,
-                                   AudioManager* audio_manager)
+                                   media::AudioManager* audio_manager)
     : resource_context_(resource_context),
       audio_manager_(audio_manager) {
 }
@@ -177,6 +177,12 @@ bool VideoCaptureHost::OnMessageReceived(const IPC::Message& message,
 void VideoCaptureHost::OnStartCapture(int device_id,
                                       const media::VideoCaptureParams& params) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DVLOG(1) << "VideoCaptureHost::OnStartCapture, device_id " << device_id
+           << ", (" << params.width
+           << ", " << params.height
+           << ", " << params.frame_per_second
+           << ", " << params.session_id
+           << ")";
   VideoCaptureControllerID controller_id(device_id);
   DCHECK(entries_.find(controller_id) == entries_.end());
 
@@ -223,6 +229,8 @@ void VideoCaptureHost::DoControllerAddedOnIOThread(
 
 void VideoCaptureHost::OnStopCapture(int device_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DVLOG(1) << "VideoCaptureHost::OnStopCapture, device_id " << device_id;
+
   VideoCaptureControllerID controller_id(device_id);
   EntryMap::iterator it = entries_.find(controller_id);
 

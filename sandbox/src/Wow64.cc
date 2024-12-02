@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/win/scoped_process_information.h"
 #include "base/win/windows_version.h"
 #include "sandbox/src/target_process.h"
 
@@ -136,7 +137,7 @@ bool Wow64::WaitForNtdll() {
 }
 
 bool Wow64::RunWowHelper(void* buffer) {
-  COMPILE_ASSERT(sizeof(buffer) <= sizeof DWORD, unsupported_64_bits);
+  COMPILE_ASSERT(sizeof(buffer) <= sizeof(DWORD), unsupported_64_bits);
 
   // Get the path to the helper (beside the exe).
   wchar_t prog_name[MAX_PATH];
@@ -156,18 +157,16 @@ bool Wow64::RunWowHelper(void* buffer) {
 
   STARTUPINFO startup_info = {0};
   startup_info.cb = sizeof(startup_info);
-  PROCESS_INFORMATION process_info;
+  base::win::ScopedProcessInformation process_info;
   if (!::CreateProcess(NULL, writable_command.get(), NULL, NULL, FALSE, 0, NULL,
-                       NULL, &startup_info, &process_info))
+                       NULL, &startup_info, process_info.Receive()))
     return false;
 
-  DWORD reason = ::WaitForSingleObject(process_info.hProcess, INFINITE);
+  DWORD reason = ::WaitForSingleObject(process_info.process_handle(), INFINITE);
 
   DWORD code;
-  bool ok = ::GetExitCodeProcess(process_info.hProcess, &code) ? true : false;
-
-  ::CloseHandle(process_info.hProcess);
-  ::CloseHandle(process_info.hThread);
+  bool ok =
+      ::GetExitCodeProcess(process_info.process_handle(), &code) ? true : false;
 
   if (WAIT_TIMEOUT == reason)
     return false;

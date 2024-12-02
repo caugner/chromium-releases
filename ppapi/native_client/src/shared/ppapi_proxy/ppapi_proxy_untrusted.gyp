@@ -39,6 +39,7 @@
           '<(DEPTH)/gpu/command_buffer/client/gles2_lib.cc',
           '<(DEPTH)/gpu/command_buffer/client/mapped_memory.cc',
           '<(DEPTH)/gpu/command_buffer/client/query_tracker.cc',
+          '<(DEPTH)/gpu/command_buffer/client/share_group.cc',
           '<(DEPTH)/gpu/command_buffer/client/ring_buffer.cc',
           '<(DEPTH)/gpu/command_buffer/common/id_allocator.cc',
 
@@ -56,7 +57,6 @@
           'plugin_ppb_audio_config.cc',
           'plugin_ppb_buffer.cc',
           'plugin_ppb_core.cc',
-          'plugin_ppb_cursor_control.cc',
           'plugin_ppb_file_io.cc',
           'plugin_ppb_file_system.cc',
           'plugin_ppb_file_ref.cc',
@@ -72,6 +72,7 @@
           'plugin_ppb_instance.cc',
           'plugin_ppb_memory.cc',
           'plugin_ppb_messaging.cc',
+          'plugin_ppb_mouse_cursor.cc',
           'plugin_ppb_mouse_lock.cc',
           'plugin_ppb_net_address_private.cc',
           'plugin_ppb_pdf.cc',

@@ -88,6 +88,7 @@ struct I18nContentToMessage {
   { "keyboardOverlayBookmarkCurrentPage",
     IDS_KEYBOARD_OVERLAY_BOOKMARK_CURRENT_PAGE },
   { "keyboardOverlayBookmarkManager", IDS_KEYBOARD_OVERLAY_BOOKMARK_MANAGER },
+  { "keyboardOverlayCenterWindow", IDS_KEYBOARD_OVERLAY_CENTER_WINDOW },
   { "keyboardOverlayClearBrowsingDataDialog",
     IDS_KEYBOARD_OVERLAY_CLEAR_BROWSING_DATA_DIALOG },
   { "keyboardOverlayCloseTab", IDS_KEYBOARD_OVERLAY_CLOSE_TAB },
@@ -112,6 +113,7 @@ struct I18nContentToMessage {
   { "keyboardOverlayFocusAddressBarInSearchMode",
     IDS_KEYBOARD_OVERLAY_FOCUS_ADDRESS_BAR_IN_SEARCH_MODE },
   { "keyboardOverlayFocusBookmarks", IDS_KEYBOARD_OVERLAY_FOCUS_BOOKMARKS },
+  { "keyboardOverlayFocusLauncher", IDS_KEYBOARD_OVERLAY_FOCUS_LAUNCHER },
   { "keyboardOverlayFocusNextPane", IDS_KEYBOARD_OVERLAY_FOCUS_NEXT_PANE },
   { "keyboardOverlayFocusPreviousPane",
     IDS_KEYBOARD_OVERLAY_FOCUS_PREVIOUS_PANE },
@@ -129,6 +131,8 @@ struct I18nContentToMessage {
   { "keyboardOverlayLockScreen", IDS_KEYBOARD_OVERLAY_LOCK_SCREEN },
   { "keyboardOverlayLockScreenOrPowerOff",
     IDS_KEYBOARD_OVERLAY_LOCK_SCREEN_OR_POWER_OFF },
+  { "keyboardOverlayMaximizeWindow", IDS_KEYBOARD_OVERLAY_MAXIMIZE_WINDOW },
+  { "keyboardOverlayMinimizeWindow", IDS_KEYBOARD_OVERLAY_MINIMIZE_WINDOW },
   { "keyboardOverlayNewIncognitoWindow",
     IDS_KEYBOARD_OVERLAY_NEW_INCOGNITO_WINDOW },
   { "keyboardOverlayNewTab", IDS_KEYBOARD_OVERLAY_NEW_TAB },
@@ -166,6 +170,8 @@ struct I18nContentToMessage {
     IDS_KEYBOARD_OVERLAY_SELECT_WORD_AT_A_TIME },
   { "keyboardOverlayShowWrenchMenu", IDS_KEYBOARD_OVERLAY_SHOW_WRENCH_MENU },
   { "keyboardOverlaySignOut", IDS_KEYBOARD_OVERLAY_SIGN_OUT },
+  { "keyboardOverlaySnapWindowLeft", IDS_KEYBOARD_OVERLAY_SNAP_WINDOW_LEFT },
+  { "keyboardOverlaySnapWindowRight", IDS_KEYBOARD_OVERLAY_SNAP_WINDOW_RIGHT },
   { "keyboardOverlayTakeScreenshot", IDS_KEYBOARD_OVERLAY_TAKE_SCREENSHOT },
   { "keyboardOverlayTaskManager", IDS_KEYBOARD_OVERLAY_TASK_MANAGER },
   { "keyboardOverlayToggleAccessibilityFeatures",
@@ -309,12 +315,12 @@ void KeyboardOverlayHandler::OpenLearnMorePage(const ListValue* args) {
 ////////////////////////////////////////////////////////////////////////////////
 
 KeyboardOverlayUI::KeyboardOverlayUI(content::WebUI* web_ui)
-    : HtmlDialogUI(web_ui) {
+    : WebDialogUI(web_ui) {
   Profile* profile = Profile::FromWebUI(web_ui);
   KeyboardOverlayHandler* handler = new KeyboardOverlayHandler(profile);
   web_ui->AddMessageHandler(handler);
 
   // Set up the chrome://keyboardoverlay/ source.
-  profile->GetChromeURLDataManager()->AddDataSource(
+  ChromeURLDataManager::AddDataSource(profile,
       CreateKeyboardOverlayUIHTMLSource());
 }

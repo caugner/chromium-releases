@@ -19,8 +19,13 @@
 #include "content/common/gpu/gpu_watchdog.h"
 #include "content/common/gpu/image_transport_surface.h"
 #include "gpu/command_buffer/common/constants.h"
+#include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "ui/gfx/gl/gl_bindings.h"
 #include "ui/gfx/gl/gl_switches.h"
+
+#if defined(OS_WIN)
+#include "content/public/common/sandbox_init.h"
+#endif
 
 GpuCommandBufferStub::SurfaceState::SurfaceState(int32 surface_id,
                                                  bool visible,
@@ -34,6 +39,7 @@ GpuCommandBufferStub::GpuCommandBufferStub(
     GpuChannel* channel,
     GpuCommandBufferStub* share_group,
     const gfx::GLSurfaceHandle& handle,
+    gpu::gles2::MailboxManager* mailbox_manager,
     const gfx::Size& size,
     const gpu::gles2::DisallowedFeatures& disallowed_features,
     const std::string& allowed_extensions,
@@ -52,17 +58,18 @@ GpuCommandBufferStub::GpuCommandBufferStub(
       gpu_preference_(gpu_preference),
       route_id_(route_id),
       software_(software),
+      client_has_memory_allocation_changed_callback_(false),
       last_flush_count_(0),
-      allocation_(GpuMemoryAllocation::INVALID_RESOURCE_SIZE, true, true),
+      allocation_(GpuMemoryAllocation::INVALID_RESOURCE_SIZE,
+                  GpuMemoryAllocation::kHasFrontbuffer |
+                  GpuMemoryAllocation::kHasBackbuffer),
       parent_stub_for_initialization_(),
       parent_texture_for_initialization_(0),
       watchdog_(watchdog) {
   if (share_group) {
     context_group_ = share_group->context_group_;
   } else {
-    // TODO(gman): this needs to be false for everything but Pepper.
-    bool bind_generates_resource = true;
-    context_group_ = new gpu::gles2::ContextGroup(bind_generates_resource);
+    context_group_ = new gpu::gles2::ContextGroup(mailbox_manager, true);
   }
   if (surface_id != 0)
     surface_state_.reset(new GpuCommandBufferStubBase::SurfaceState(
@@ -127,6 +134,9 @@ bool GpuCommandBufferStub::OnMessageReceived(const IPC::Message& message) {
                         OnDiscardBackbuffer)
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_EnsureBackbuffer,
                         OnEnsureBackbuffer)
+    IPC_MESSAGE_HANDLER(
+        GpuCommandBufferMsg_SetClientHasMemoryAllocationChangedCallback,
+        OnSetClientHasMemoryAllocationChangedCallback)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -292,6 +302,7 @@ void GpuCommandBufferStub::OnInitialize(
   // Initialize the decoder with either the view or pbuffer GLContext.
   if (!decoder_->Initialize(surface_.get(),
                             context_.get(),
+                            !surface_id(),
                             initial_size_,
                             disallowed_features_,
                             allowed_extensions_.c_str(),
@@ -468,17 +479,7 @@ void GpuCommandBufferStub::OnRegisterTransferBuffer(
     size_t size,
     int32 id_request,
     IPC::Message* reply_message) {
-#if defined(OS_WIN)
-  // Windows dups the shared memory handle it receives into the current process
-  // and closes it when this variable goes out of scope.
-  base::SharedMemory shared_memory(transfer_buffer,
-                                   false,
-                                   channel_->renderer_process());
-#else
-  // POSIX receives a dup of the shared memory handle and closes the dup when
-  // this variable goes out of scope.
   base::SharedMemory shared_memory(transfer_buffer, false);
-#endif
 
   if (command_buffer_.get()) {
     int32 id = command_buffer_->RegisterTransferBuffer(&shared_memory,
@@ -507,20 +508,22 @@ void GpuCommandBufferStub::OnDestroyTransferBuffer(
 void GpuCommandBufferStub::OnGetTransferBuffer(
     int32 id,
     IPC::Message* reply_message) {
-  // Fail if the renderer process has not provided its process handle.
-  if (!channel_->renderer_process())
-    return;
-
   if (command_buffer_.get()) {
     base::SharedMemoryHandle transfer_buffer = base::SharedMemoryHandle();
     uint32 size = 0;
 
     gpu::Buffer buffer = command_buffer_->GetTransferBuffer(id);
     if (buffer.shared_memory) {
-      // Assume service is responsible for duplicating the handle to the calling
-      // process.
-      buffer.shared_memory->ShareToProcess(channel_->renderer_process(),
+#if defined(OS_WIN)
+      transfer_buffer = NULL;
+      content::BrokerDuplicateHandle(buffer.shared_memory->handle(),
+          channel_->renderer_pid(), &transfer_buffer, FILE_MAP_READ |
+          FILE_MAP_WRITE, 0);
+      CHECK(transfer_buffer != NULL);
+#else
+      buffer.shared_memory->ShareToProcess(channel_->renderer_pid(),
                                            &transfer_buffer);
+#endif
       size = buffer.size;
     }
 
@@ -549,7 +552,7 @@ void GpuCommandBufferStub::ReportState() {
 }
 
 void GpuCommandBufferStub::OnCreateVideoDecoder(
-    media::VideoDecodeAccelerator::Profile profile,
+    media::VideoCodecProfile profile,
     IPC::Message* reply_message) {
   int decoder_route_id = channel_->GenerateRouteID();
   GpuCommandBufferMsg_CreateVideoDecoder::WriteReplyParams(
@@ -558,8 +561,7 @@ void GpuCommandBufferStub::OnCreateVideoDecoder(
       new GpuVideoDecodeAccelerator(this, decoder_route_id, this);
   video_decoders_.AddWithID(decoder, decoder_route_id);
   channel_->AddRoute(decoder_route_id, decoder);
-  decoder->Initialize(profile, reply_message,
-                      channel_->renderer_process());
+  decoder->Initialize(profile, reply_message);
 }
 
 void GpuCommandBufferStub::OnDestroyVideoDecoder(int decoder_route_id) {
@@ -593,6 +595,12 @@ void GpuCommandBufferStub::OnEnsureBackbuffer() {
       gfx::GLSurface::BUFFER_ALLOCATION_FRONT_AND_BACK);
 }
 
+void GpuCommandBufferStub::OnSetClientHasMemoryAllocationChangedCallback(
+    bool has_callback) {
+  client_has_memory_allocation_changed_callback_ = has_callback;
+  channel_->gpu_channel_manager()->gpu_memory_manager()->ScheduleManage();
+}
+
 void GpuCommandBufferStub::SendConsoleMessage(
     int32 id,
     const std::string& message) {
@@ -615,10 +623,21 @@ void GpuCommandBufferStub::RemoveDestructionObserver(
   destruction_observers_.RemoveObserver(observer);
 }
 
+gfx::Size GpuCommandBufferStub::GetSurfaceSize() const {
+  if (!surface_)
+    return gfx::Size();
+  return surface_->GetSize();
+}
+
 bool GpuCommandBufferStub::IsInSameContextShareGroup(
     const GpuCommandBufferStubBase& other) const {
   return context_group_ ==
       static_cast<const GpuCommandBufferStub&>(other).context_group_;
+}
+
+bool GpuCommandBufferStub::
+    client_has_memory_allocation_changed_callback() const {
+  return client_has_memory_allocation_changed_callback_;
 }
 
 bool GpuCommandBufferStub::has_surface_state() const {

@@ -63,7 +63,6 @@ IPC_ENUM_TRAITS(WebKit::WebContextMenuData::MediaType)
 IPC_ENUM_TRAITS(WebKit::WebMediaPlayerAction::Type)
 IPC_ENUM_TRAITS(WebKit::WebPluginAction::Type)
 IPC_ENUM_TRAITS(WebKit::WebPopupType)
-IPC_ENUM_TRAITS(WebKit::WebReferrerPolicy)
 IPC_ENUM_TRAITS(WebKit::WebTextDirection)
 IPC_ENUM_TRAITS(WebMenuItem::Type)
 IPC_ENUM_TRAITS(WindowContainerType)
@@ -190,7 +189,6 @@ IPC_STRUCT_TRAITS_BEGIN(WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(unified_textchecker_enabled)
   IPC_STRUCT_TRAITS_MEMBER(accelerated_compositing_enabled)
   IPC_STRUCT_TRAITS_MEMBER(force_compositing_mode)
-  IPC_STRUCT_TRAITS_MEMBER(composite_to_texture_enabled)
   IPC_STRUCT_TRAITS_MEMBER(fixed_position_compositing_enabled)
   IPC_STRUCT_TRAITS_MEMBER(accelerated_2d_canvas_enabled)
   IPC_STRUCT_TRAITS_MEMBER(deferred_2d_canvas_enabled)
@@ -212,6 +210,7 @@ IPC_STRUCT_TRAITS_BEGIN(WebPreferences)
   IPC_STRUCT_TRAITS_MEMBER(per_tile_painting_enabled)
   IPC_STRUCT_TRAITS_MEMBER(password_echo_enabled)
   IPC_STRUCT_TRAITS_MEMBER(css_regions_enabled)
+  IPC_STRUCT_TRAITS_MEMBER(css_shaders_enabled)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(WebMenuItem)
@@ -283,11 +282,6 @@ IPC_STRUCT_TRAITS_BEGIN(content::FrameNavigateParams)
   IPC_STRUCT_TRAITS_MEMBER(password_form)
   IPC_STRUCT_TRAITS_MEMBER(contents_mime_type)
   IPC_STRUCT_TRAITS_MEMBER(socket_address)
-IPC_STRUCT_TRAITS_END()
-
-IPC_STRUCT_TRAITS_BEGIN(content::Referrer)
-  IPC_STRUCT_TRAITS_MEMBER(url)
-  IPC_STRUCT_TRAITS_MEMBER(policy)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::RendererPreferences)
@@ -499,7 +493,8 @@ IPC_STRUCT_BEGIN(ViewHostMsg_UpdateRect_Params)
   // The size of the RenderView when this message was generated.  This is
   // included so the host knows how large the view is from the perspective of
   // the renderer process.  This is necessary in case a resize operation is in
-  // progress.
+  // progress. If auto-resize is enabled, this should update the corresponding
+  // view size.
   IPC_STRUCT_MEMBER(gfx::Size, view_size)
 
   // New window locations for plugin child windows.
@@ -613,6 +608,9 @@ IPC_STRUCT_BEGIN(ViewMsg_Navigate_Params)
   // Unless this refers to a transferred navigation, these values are -1 and -1.
   IPC_STRUCT_MEMBER(int, transferred_request_child_id)
   IPC_STRUCT_MEMBER(int, transferred_request_request_id)
+
+  // Whether or not we should allow the url to download.
+  IPC_STRUCT_MEMBER(bool, allow_download)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(ViewMsg_New_Params)
@@ -637,6 +635,13 @@ IPC_STRUCT_BEGIN(ViewMsg_New_Params)
   // The name of the frame associated with this view (or empty if none).
   IPC_STRUCT_MEMBER(string16, frame_name)
 
+  // The route ID of the opener RenderView if we need to set one
+  // (MSG_ROUTING_NONE otherwise).
+  IPC_STRUCT_MEMBER(int, opener_route_id)
+
+  // Whether the RenderView should initially be swapped out.
+  IPC_STRUCT_MEMBER(bool, swapped_out)
+
   // The initial page ID to use for this view, which must be larger than any
   // existing navigation that might be loaded in the view.  Page IDs are unique
   // to a view and are only updated by the renderer after this initial value.
@@ -648,6 +653,9 @@ IPC_STRUCT_BEGIN(ViewMsg_New_Params)
   // Indicates whether this newly created RenderView will be hosted by another
   // RenderView.
   IPC_STRUCT_MEMBER(bool, guest)
+
+  // The accessibility mode of the renderer.
+  IPC_STRUCT_MEMBER(AccessibilityMode, accessibility_mode)
 IPC_STRUCT_END()
 
 // Messages sent from the browser to the renderer.
@@ -1171,11 +1179,16 @@ IPC_MESSAGE_ROUTED2(ViewMsg_SavePageAsMHTML,
                     int /* job_id */,
                     IPC::PlatformFileForTransit /* file handle */)
 
-// Temporary message to diagnose an unexpected condition in TabContents.
+// Temporary message to diagnose an unexpected condition in WebContentsImpl.
 IPC_MESSAGE_CONTROL1(ViewMsg_TempCrashWithData,
                      GURL /* data */)
 
+// Enable or disable inverting of web content pixels, for users who prefer
+// white-on-black.
+IPC_MESSAGE_ROUTED1(ViewMsg_InvertWebContent,
+                    bool /* invert */)
 
+// -----------------------------------------------------------------------------
 // Messages sent from the renderer to the browser.
 
 // Sent by the renderer when it is creating a new window.  The browser creates
@@ -1188,7 +1201,7 @@ IPC_SYNC_MESSAGE_CONTROL1_3(ViewHostMsg_CreateWindow,
                             int64 /* cloned_session_storage_namespace_id */)
 
 // Similar to ViewHostMsg_CreateWindow, except used for sub-widgets, like
-// <select> dropdowns.  This message is sent to the TabContents that
+// <select> dropdowns.  This message is sent to the WebContentsImpl that
 // contains the widget being created.
 IPC_SYNC_MESSAGE_CONTROL2_2(ViewHostMsg_CreateWidget,
                             int /* opener_id */,
@@ -1247,7 +1260,8 @@ IPC_MESSAGE_ROUTED1(ViewHostMsg_ShowFullscreenWidget,
 
 // This message is sent after ViewHostMsg_ShowView to cause the RenderView
 // to run in a modal fashion until it is closed.
-IPC_SYNC_MESSAGE_ROUTED0_0(ViewHostMsg_RunModal)
+IPC_SYNC_MESSAGE_ROUTED1_0(ViewHostMsg_RunModal,
+                           int /* opener_id */)
 
 // Indicates the renderer is ready in response to a ViewMsg_New or
 // a ViewMsg_CreatingNew_ACK.
@@ -1289,7 +1303,7 @@ IPC_MESSAGE_ROUTED1(ViewHostMsg_ShowPopup,
 
 // Response from ViewMsg_ScriptEvalRequest. The ID is the parameter supplied
 // to ViewMsg_ScriptEvalRequest. The result has the value returned by the
-// script as it's only element, one of Null, Boolean, Integer, Real, Date, or
+// script as its only element, one of Null, Boolean, Integer, Real, Date, or
 // String.
 IPC_MESSAGE_ROUTED2(ViewHostMsg_ScriptEvalResponse,
                     int  /* id */,
@@ -1385,13 +1399,13 @@ IPC_MESSAGE_ROUTED0(ViewHostMsg_DidStopLoading)
 IPC_MESSAGE_ROUTED1(ViewHostMsg_DidChangeLoadProgress,
                     double /* load_progress */)
 
-// Sent when the document element is available for the toplevel frame.  This
+// Sent when the document element is available for the top-level frame.  This
 // happens after the page starts loading, but before all resources are
 // finished.
 IPC_MESSAGE_ROUTED0(ViewHostMsg_DocumentAvailableInMainFrame)
 
 // Sent when after the onload handler has been invoked for the document
-// in the toplevel frame.
+// in the top-level frame.
 IPC_MESSAGE_ROUTED1(ViewHostMsg_DocumentOnLoadCompletedInMainFrame,
                     int32 /* page_id */)
 
@@ -1598,6 +1612,10 @@ IPC_MESSAGE_ROUTED3(ViewHostMsg_DownloadUrl,
 IPC_MESSAGE_ROUTED1(ViewHostMsg_GoToEntryAtOffset,
                     int /* offset (from current) of history item to get */)
 
+// Sent from an inactive renderer for the browser to route to the active
+// renderer, instructing it to close.
+IPC_MESSAGE_ROUTED0(ViewHostMsg_RouteCloseEvent)
+
 IPC_SYNC_MESSAGE_ROUTED4_2(ViewHostMsg_RunJavaScriptMessage,
                            string16     /* in - alert message */,
                            string16     /* in - default prompt */,
@@ -1642,14 +1660,21 @@ IPC_MESSAGE_ROUTED3(ViewHostMsg_WebUISend,
                     std::string  /* message */,
                     base::ListValue /* args */)
 
-// A renderer sends this to the browser process when it wants to
-// create a ppapi plugin.  The browser will create the plugin process if
-// necessary, and will return a handle to the channel on success.
-// On error an empty string is returned.
-IPC_SYNC_MESSAGE_CONTROL1_2(ViewHostMsg_OpenChannelToPepperPlugin,
+// A renderer sends this to the browser process when it wants to create a ppapi
+// plugin.  The browser will create the plugin process if necessary, and will
+// return a handle to the channel on success.
+//
+// The plugin_child_id is the ChildProcessHost ID assigned in the browser
+// process. This ID is valid only in the context of the browser process and is
+// used to identify the proper process when the renderer notifies it that the
+// plugin is hung.
+//
+// On error an empty string and null handles are returned.
+IPC_SYNC_MESSAGE_CONTROL1_3(ViewHostMsg_OpenChannelToPepperPlugin,
                             FilePath /* path */,
                             base::ProcessHandle /* plugin_process_handle */,
-                            IPC::ChannelHandle /* handle to channel */)
+                            IPC::ChannelHandle /* handle to channel */,
+                            int /* plugin_child_id */)
 
 // A renderer sends this to the browser process when it wants to
 // create a ppapi broker.  The browser will create the broker process
@@ -1895,6 +1920,15 @@ IPC_MESSAGE_ROUTED2(ViewHostMsg_AcceleratedSurfaceBuffersSwapped,
                     uint64 /* surface_handle */)
 #endif
 
+// This message is synthesized by GpuProcessHost to pass through a swap message
+// to the RenderWidgetHelper. This allows GetBackingStore to block for either a
+// software or GPU frame.
+IPC_MESSAGE_ROUTED4(ViewHostMsg_CompositorSurfaceBuffersSwapped,
+                    int32 /* surface id */,
+                    uint64 /* surface_handle */,
+                    int32 /* route_id */,
+                    int32 /* gpu_process_host_id */)
+
 // Opens a file asynchronously. The response returns a file descriptor
 // and an error code from base/platform_file.h.
 IPC_MESSAGE_ROUTED3(ViewHostMsg_AsyncOpenFile,
@@ -1976,7 +2010,8 @@ IPC_MESSAGE_CONTROL1(ViewHostMsg_MediaLogEvent,
 
 // Requests to lock the mouse. Will result in a ViewMsg_LockMouse_ACK message
 // being sent back.
-IPC_MESSAGE_ROUTED0(ViewHostMsg_LockMouse)
+IPC_MESSAGE_ROUTED1(ViewHostMsg_LockMouse,
+                    bool /* user_gesture */)
 
 // Requests to unlock the mouse. A ViewMsg_MouseLockLost message will be sent
 // whenever the mouse is unlocked (which may or may not be caused by
@@ -1992,7 +2027,11 @@ IPC_MESSAGE_ROUTED2(ViewHostMsg_DomOperationResponse,
                     std::string  /* json_string */,
                     int  /* automation_id */)
 
-// Enable or disable inverting of web content pixels, for users who prefer
-// white-on-black.
-IPC_MESSAGE_ROUTED1(ViewMsg_InvertWebContent,
-                    bool /* invert */)
+// Sent to the browser when the renderer detects it is blocked on a pepper
+// plugin message for too long. This is also sent when it becomes unhung
+// (according to the value of is_hung). The browser can give the user the
+// option of killing the plugin.
+IPC_MESSAGE_ROUTED3(ViewHostMsg_PepperPluginHung,
+                    int /* plugin_child_id */,
+                    FilePath /* path */,
+                    bool /* is_hung */)

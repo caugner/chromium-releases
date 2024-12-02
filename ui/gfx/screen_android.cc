@@ -5,13 +5,19 @@
 #include "ui/gfx/screen.h"
 
 #include "base/logging.h"
+#include "ui/gfx/monitor.h"
 
 namespace gfx {
 
 // static
-gfx::Size Screen::GetPrimaryMonitorSize() {
+gfx::Monitor Screen::GetPrimaryMonitor() {
   NOTIMPLEMENTED() << "crbug.com/117839 tracks implementation";
-  return gfx::Size(1, 1);
+  return gfx::Monitor(0, gfx::Rect(0, 0, 1, 1));
+}
+
+// static
+gfx::Monitor Screen::GetMonitorNearestWindow(gfx::NativeView view) {
+  return GetPrimaryMonitor();
 }
 
 // static

@@ -31,6 +31,7 @@
 #include "chrome/browser/extensions/extension_message_handler.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_system.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/extensions/extension_webkit_preferences.h"
 #include "chrome/browser/geolocation/chrome_access_token_store.h"
@@ -65,6 +66,7 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "chrome/browser/user_style_sheet_watcher.h"
+#include "chrome/browser/user_style_sheet_watcher_factory.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
@@ -93,6 +95,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/glue/webpreferences.h"
+#include "webkit/plugins/plugin_switches.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/chrome_browser_main_win.h"
@@ -109,19 +112,16 @@
 #include "chrome/browser/chrome_browser_main_posix.h"
 #endif
 
-#if defined(USE_AURA)
-#include "chrome/browser/tab_contents/chrome_web_contents_view_delegate_aura.h"
-#elif defined(OS_WIN)
-#include "chrome/browser/tab_contents/chrome_web_contents_view_delegate_win.h"
+#if defined(USE_AURA) || defined(OS_WIN)
+#include "chrome/browser/tab_contents/chrome_web_contents_view_delegate_views.h"
 #endif
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 #include "chrome/browser/chrome_browser_main_extra_parts_gtk.h"
 #endif
 
 #if defined(TOOLKIT_VIEWS)
 #include "chrome/browser/chrome_browser_main_extra_parts_views.h"
-#include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
 #endif
 
 #if defined(USE_AURA)
@@ -132,9 +132,9 @@
 #include "chrome/browser/chrome_browser_main_extra_parts_ash.h"
 #endif
 
-#if defined(OS_LINUX) || defined(OS_OPENBSD)
+#if defined(OS_LINUX) || defined(OS_OPENBSD) || defined(OS_ANDROID)
 #include "base/linux_util.h"
-#include "chrome/browser/crash_handler_host_linux.h"
+#include "chrome/browser/crash_handler_host_linuxish.h"
 #endif
 
 #if defined(TOOLKIT_GTK)
@@ -157,7 +157,12 @@ namespace {
 
 const char* kPredefinedAllowedSocketOrigins[] = {
   "okddffdblfhhnmhodogpojmfkjmhinfp",  // Test SSH Client
-  "pnhechapfaindjhompbnflcldabbghjo"   // HTerm App (SSH Client)
+  "pnhechapfaindjhompbnflcldabbghjo",  // HTerm App (SSH Client)
+  "bglhmjfplikpjnfoegeomebmfnkjomhe",  // see crbug.com/122126
+  "gbchcmhmhahfdphkhkmpfmihenigjmpp",  // Chrome Remote Desktop
+  "kgngmbheleoaphbjbaiobfdepmghbfah",  // Pre-release Chrome Remote Desktop
+  "odkaodonbgfohohmklejpjiejmcipmib",  // Dogfood Chrome Remote Desktop
+  "ojoimpklfciegopdfgeenehpalipignm"   // Chromoting canary
 };
 
 // Handles rewriting Web UI URLs.
@@ -340,7 +345,7 @@ content::BrowserMainParts* ChromeContentBrowserClient::CreateBrowserMainParts(
 
   // Construct additional browser parts. Stages are called in the order in
   // which they are added.
-#if defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
   main_parts->AddParts(new ChromeBrowserMainExtraPartsGtk());
 #endif
 
@@ -362,26 +367,20 @@ content::BrowserMainParts* ChromeContentBrowserClient::CreateBrowserMainParts(
 content::WebContentsView*
     ChromeContentBrowserClient::OverrideCreateWebContentsView(
         WebContents* web_contents) {
-#if defined(TOOLKIT_VIEWS) && (!defined(OS_WIN) || defined(USE_AURA))
-  return new TabContentsViewViews(web_contents,
-                                  GetWebContentsViewDelegate(web_contents));
-#endif
   return NULL;
 }
 
 content::WebContentsViewDelegate*
     ChromeContentBrowserClient::GetWebContentsViewDelegate(
         content::WebContents* web_contents) {
-#if defined(OS_WIN) && !defined(USE_AURA)
-  return new ChromeWebContentsViewDelegateWin(web_contents);
+#if defined(USE_AURA) || defined(OS_WIN)
+  return new ChromeWebContentsViewDelegateViews(web_contents);
 #elif defined(TOOLKIT_GTK)
   return new ChromeWebContentsViewDelegateGtk(web_contents);
 #elif defined(OS_MACOSX)
   return
       chrome_web_contents_view_delegate_mac::CreateWebContentsViewDelegateMac(
           web_contents);
-#elif defined(USE_AURA)
-  return new ChromeWebContentsViewDelegateAura(web_contents);
 #else
   return NULL;
 #endif
@@ -581,13 +580,11 @@ bool ChromeContentBrowserClient::ShouldTryToUseExistingProcessHost(
       GetLoadedProfiles();
   for (size_t i = 0; i < profiles.size(); ++i) {
     ExtensionProcessManager* epm = profiles[i]->GetExtensionProcessManager();
-    for (ExtensionProcessManager::const_iterator iter = epm->begin();
-       iter != epm->end();
-       ++iter) {
+    for (ExtensionProcessManager::const_iterator iter =
+             epm->background_hosts().begin();
+         iter != epm->background_hosts().end(); ++iter) {
       ExtensionHost* host = *iter;
-      if (host->extension()->has_background_page()) {
-        process_ids.insert(host->render_process_host()->GetID());
-      }
+      process_ids.insert(host->render_process_host()->GetID());
     }
   }
 
@@ -621,7 +618,7 @@ void ChromeContentBrowserClient::SiteInstanceGotProcess(
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&ExtensionInfoMap::RegisterExtensionProcess,
-                 profile->GetExtensionInfoMap(),
+                 ExtensionSystem::Get(profile)->info_map(),
                  extension->id(),
                  site_instance->GetProcess()->GetID(),
                  site_instance->GetId()));
@@ -650,7 +647,7 @@ void ChromeContentBrowserClient::SiteInstanceDeleting(
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&ExtensionInfoMap::UnregisterExtensionProcess,
-                 profile->GetExtensionInfoMap(),
+                 ExtensionSystem::Get(profile)->info_map(),
                  extension->id(),
                  site_instance->GetProcess()->GetID(),
                  site_instance->GetId()));
@@ -776,7 +773,9 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       switches::kExperimentalSpellcheckerFeatures,
       switches::kMemoryProfiling,
       switches::kMessageLoopHistogrammer,
+      switches::kNoJsRandomness,
       switches::kNoRunningInsecureContent,
+      switches::kPlaybackMode,
       switches::kPpapiFlashArgs,
       switches::kPpapiFlashInProcess,
       switches::kPpapiFlashPath,
@@ -784,6 +783,7 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       switches::kProfilingAtStart,
       switches::kProfilingFile,
       switches::kProfilingFlush,
+      switches::kRecordMode,
       switches::kSilentDumpOnDCHECK,
       switches::kWhitelistedExtensionID,
     };
@@ -793,6 +793,7 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
   } else if (process_type == switches::kUtilityProcess) {
     static const char* const kSwitchNames[] = {
       switches::kEnableExperimentalExtensionApis,
+      switches::kEnablePlatformApps,
       switches::kWhitelistedExtensionID,
     };
 
@@ -878,7 +879,7 @@ bool ChromeContentBrowserClient::AllowGetCookie(
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&TabSpecificContentSettings::CookiesRead, render_process_id,
-                 render_view_id, url, cookie_list, !allow));
+                 render_view_id, url, first_party, cookie_list, !allow));
   return allow;
 }
 
@@ -901,7 +902,8 @@ bool ChromeContentBrowserClient::AllowSetCookie(
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
       base::Bind(&TabSpecificContentSettings::CookieChanged, render_process_id,
-                 render_view_id, url, cookie_line, *options, !allow));
+                 render_view_id, url, first_party, cookie_line, *options,
+                 !allow));
   return allow;
 }
 
@@ -1127,10 +1129,9 @@ void ChromeContentBrowserClient::RequestMediaAccessPermission(
   InfoBarDelegate* old_infobar = NULL;
   for (size_t i = 0; i < infobar_helper->infobar_count() && !old_infobar; ++i) {
     old_infobar =
-        infobar_helper->GetInfoBarDelegateAt(i)->AsMediaStreamInfobarDelegate();
+        infobar_helper->GetInfoBarDelegateAt(i)->AsMediaStreamInfoBarDelegate();
   }
 
-#if defined(TOOLKIT_VIEWS) || defined(OS_LINUX)
   InfoBarDelegate* infobar = new MediaStreamInfoBarDelegate(infobar_helper,
                                                             request,
                                                             callback);
@@ -1138,19 +1139,6 @@ void ChromeContentBrowserClient::RequestMediaAccessPermission(
     infobar_helper->ReplaceInfoBar(old_infobar, infobar);
   else
     infobar_helper->AddInfoBar(infobar);
-#elif defined(OS_MACOSX)
-  // TODO(macourteau): UI is not implemented yet for OS X. Fallback to
-  // the default behaviour and allow access to the first device of each
-  // requested type.
-  content::MediaStreamDevices devices;
-  for (content::MediaStreamDeviceMap::const_iterator it =
-       request->devices.begin(); it != request->devices.end(); ++it) {
-    if (!it->second.empty())
-      devices.push_back(*it->second.begin());
-  }
-
-  callback.Run(devices);
-#endif  // TOOLKIT_VIEWS || OS_LINUX
 }
 
 content::MediaObserver* ChromeContentBrowserClient::GetMediaObserver() {
@@ -1259,29 +1247,35 @@ bool ChromeContentBrowserClient::CanCreateWindow(
     const GURL& source_origin,
     WindowContainerType container_type,
     content::ResourceContext* context,
-    int render_process_id) {
+    int render_process_id,
+    bool* no_javascript_access) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
+  *no_javascript_access = false;
+
   // If the opener is trying to create a background window but doesn't have
   // the appropriate permission, fail the attempt.
   if (container_type == WINDOW_CONTAINER_TYPE_BACKGROUND) {
     ProfileIOData* io_data = ProfileIOData::FromResourceContext(context);
     ExtensionInfoMap* map = io_data->GetExtensionInfoMap();
 
-    // If the opener is not allowed to script its background window, then return
-    // false so that the window.open call returns null.  In this case, only
-    // the manifest is permitted to create a background window.
+    if (!map->SecurityOriginHasAPIPermission(
+            source_origin,
+            render_process_id,
+            ExtensionAPIPermission::kBackground)) {
+      return false;
+    }
+
     // Note: this use of GetExtensionOrAppByURL is safe but imperfect.  It may
     // return a recently installed Extension even if this CanCreateWindow call
     // was made by an old copy of the page in a normal web process.  That's ok,
-    // because the permission check below will still fail.  We must use the
-    // full URL to find hosted apps, though, and not just the origin.
+    // because the permission check above would have caused an early return
+    // already. We must use the full URL to find hosted apps, though, and not
+    // just the origin.
     const Extension* extension = map->extensions().GetExtensionOrAppByURL(
         ExtensionURLInfo(opener_url));
     if (extension && !extension->allow_background_js_access())
-      return false;
-
-    return map->SecurityOriginHasAPIPermission(
-        source_origin, render_process_id, ExtensionAPIPermission::kBackground);
+      *no_javascript_access = true;
   }
   return true;
 }
@@ -1413,10 +1407,12 @@ void ChromeContentBrowserClient::OverrideWebkitPrefs(
   web_prefs->password_echo_enabled = browser_defaults::kPasswordEchoEnabled;
 
   // The user stylesheet watcher may not exist in a testing profile.
-  if (profile->GetUserStyleSheetWatcher()) {
+  UserStyleSheetWatcher* user_style_sheet_watcher =
+      UserStyleSheetWatcherFactory::GetForProfile(profile);
+  if (user_style_sheet_watcher) {
     web_prefs->user_style_sheet_enabled = true;
     web_prefs->user_style_sheet_location =
-        profile->GetUserStyleSheetWatcher()->user_style_sheet();
+        user_style_sheet_watcher->user_style_sheet();
   } else {
     web_prefs->user_style_sheet_enabled = false;
   }
@@ -1556,12 +1552,24 @@ bool ChromeContentBrowserClient::AllowSocketAPI(
   if (allowed_socket_origins_.count(host))
     return true;
 
+  Profile* profile = Profile::FromBrowserContext(browser_context);
+  const Extension* extension = NULL;
+  if (profile && profile->GetExtensionService()) {
+    extension = profile->GetExtensionService()->extensions()->
+        GetExtensionOrAppByURL(ExtensionURLInfo(url));
+  }
+
   // Need to check this now and not on construction because otherwise it won't
   // work with browser_tests.
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   std::string allowed_list =
       command_line.GetSwitchValueASCII(switches::kAllowNaClSocketAPI);
-  if (!allowed_list.empty()) {
+  if (allowed_list == "*") {
+    // The wildcard allows socket API only for packaged and platform apps.
+    return extension &&
+        (extension->GetType() == Extension::TYPE_PACKAGED_APP ||
+         extension->GetType() == Extension::TYPE_PLATFORM_APP);
+  } else if (!allowed_list.empty()) {
     StringTokenizer t(allowed_list, ",");
     while (t.GetNext()) {
       if (t.token() == host)
@@ -1569,12 +1577,6 @@ bool ChromeContentBrowserClient::AllowSocketAPI(
     }
   }
 
-  Profile* profile = Profile::FromBrowserContext(browser_context);
-  if (!profile || !profile->GetExtensionService())
-    return false;
-
-  const Extension* extension = profile->GetExtensionService()->extensions()->
-      GetExtensionOrAppByURL(ExtensionURLInfo(url));
   if (!extension)
     return false;
 
@@ -1587,11 +1589,6 @@ bool ChromeContentBrowserClient::AllowSocketAPI(
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 int ChromeContentBrowserClient::GetCrashSignalFD(
     const CommandLine& command_line) {
-#if defined(OS_ANDROID)
-  // TODO(carlosvaldivia): Upstream breakpad code for Android and remove this
-  // fork. http://crbug.com/113560
-  NOTIMPLEMENTED();
-#else
   if (command_line.HasSwitch(switches::kExtensionProcess)) {
     ExtensionCrashHandlerHostLinux* crash_handler =
         ExtensionCrashHandlerHostLinux::GetInstance();
@@ -1612,7 +1609,6 @@ int ChromeContentBrowserClient::GetCrashSignalFD(
 
   if (process_type == switches::kGpuProcess)
     return GpuCrashHandlerHostLinux::GetInstance()->GetDeathSignalSocket();
-#endif  // defined(OS_ANDROID)
 
   return -1;
 }

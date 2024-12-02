@@ -97,19 +97,26 @@ class DataTypeController
   // Current state of the data type controller.
   virtual State state() const = 0;
 
+  // Partial implementation of DataTypeErrorHandler.
+  // This is thread safe.
+  virtual SyncError CreateAndUploadError(
+      const tracked_objects::Location& location,
+      const std::string& message,
+      syncable::ModelType type) OVERRIDE;
+
  protected:
+  friend struct content::BrowserThread::DeleteOnThread<
+      content::BrowserThread::UI>;
+  friend class base::DeleteHelper<DataTypeController>;
+
+  virtual ~DataTypeController() {}
+
   // Handles the reporting of unrecoverable error. It records stuff in
   // UMA and reports to breakpad.
   // Virtual for testing purpose.
   virtual void RecordUnrecoverableError(
       const tracked_objects::Location& from_here,
       const std::string& message);
-
-  friend struct content::BrowserThread::DeleteOnThread<
-      content::BrowserThread::UI>;
-  friend class base::DeleteHelper<DataTypeController>;
-
-  virtual ~DataTypeController() {}
 };
 
 }  // namespace browser_sync

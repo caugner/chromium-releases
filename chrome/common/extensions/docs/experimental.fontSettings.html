@@ -211,23 +211,53 @@
             <a href="#global-methods">Methods</a>
             <ol>
               <li>
+                <a href="#method-clearDefaultCharacterSet">clearDefaultCharacterSet</a>
+              </li><li>
+                <a href="#method-clearDefaultFixedFontSize">clearDefaultFixedFontSize</a>
+              </li><li>
+                <a href="#method-clearDefaultFontSize">clearDefaultFontSize</a>
+              </li><li>
+                <a href="#method-clearFont">clearFont</a>
+              </li><li>
+                <a href="#method-clearMinimumFontSize">clearMinimumFontSize</a>
+              </li><li>
+                <a href="#method-getDefaultCharacterSet">getDefaultCharacterSet</a>
+              </li><li>
                 <a href="#method-getDefaultFixedFontSize">getDefaultFixedFontSize</a>
               </li><li>
                 <a href="#method-getDefaultFontSize">getDefaultFontSize</a>
               </li><li>
+                <a href="#method-getFont">getFont</a>
+              </li><li>
                 <a href="#method-getFontList">getFontList</a>
               </li><li>
-                <a href="#method-getFontName">getFontName</a>
-              </li><li>
                 <a href="#method-getMinimumFontSize">getMinimumFontSize</a>
+              </li><li>
+                <a href="#method-setDefaultCharacterSet">setDefaultCharacterSet</a>
               </li><li>
                 <a href="#method-setDefaultFixedFontSize">setDefaultFixedFontSize</a>
               </li><li>
                 <a href="#method-setDefaultFontSize">setDefaultFontSize</a>
               </li><li>
-                <a href="#method-setFontName">setFontName</a>
+                <a href="#method-setFont">setFont</a>
               </li><li>
                 <a href="#method-setMinimumFontSize">setMinimumFontSize</a>
+              </li>
+            </ol>
+          </li>
+                  <li>
+            <a href="#global-events">Events</a>
+            <ol>
+              <li>
+                <a href="#event-onDefaultCharacterSetChanged">onDefaultCharacterSetChanged</a>
+              </li><li>
+                <a href="#event-onDefaultFixedFontSizeChanged">onDefaultFixedFontSizeChanged</a>
+              </li><li>
+                <a href="#event-onDefaultFontSizeChanged">onDefaultFontSizeChanged</a>
+              </li><li>
+                <a href="#event-onFontChanged">onFontChanged</a>
+              </li><li>
+                <a href="#event-onMinimumFontSizeChanged">onMinimumFontSizeChanged</a>
               </li>
             </ol>
           </li>
@@ -236,6 +266,18 @@
             <ol>
               <li>
                 <a href="#type-FontName">FontName</a>
+                <ol>
+                </ol>
+              </li><li>
+                <a href="#type-ScriptCode">ScriptCode</a>
+                <ol>
+                </ol>
+              </li><li>
+                <a href="#type-GenericFamily">GenericFamily</a>
+                <ol>
+                </ol>
+              </li><li>
+                <a href="#type-LevelOfControl">LevelOfControl</a>
                 <ol>
                 </ol>
               </li>
@@ -286,13 +328,13 @@ for Korean, these codes are newer than "Hrkt" and "Hang" which Chrome continues
 to use for compatibility purposes.</p>
 <h2 id="examples">Examples</h2>
 <p>The following code gets the standard font for Arabic.</p>
-<pre>chrome.experimental.fontSettings.getFontName(
+<pre>chrome.experimental.fontSettings.getFont(
   { genericFamily: 'standard', script: 'Arab' },
   function(details) { console.log(details.fontName); }
 );
 </pre>
 <p>The next snippet sets the sans-serif font for Japanese.</p>
-<pre>chrome.experimental.fontSettings.setFontName(
+<pre>chrome.experimental.fontSettings.setFont(
   { genericFamily: 'sansserif', script: 'Hrkt', fontName: 'IPAPGothic' }
 );
 </pre>
@@ -314,6 +356,637 @@ directory. For other examples and for help in viewing the source code, see
             <h3>Methods</h3>
             <!-- iterates over all functions -->
             <div class="apiItem">
+              <a name="method-clearDefaultCharacterSet"></a> <!-- method-anchor -->
+              <h4>clearDefaultCharacterSet</h4>
+              <div class="summary">
+                  <!-- Note: intentionally longer 80 columns -->
+                  <span>chrome.experimental.fontSettings.clearDefaultCharacterSet</span>(<span class="optional"><span>object</span>
+                      <var><span>details</span></var></span><span class="optional"><span>, </span><span>function</span>
+                      <var><span>callback</span></var></span>)</div>
+              <div class="description">
+                <p>Clears the default character set set by this extension, if any.</p>
+                <!-- PARAMETERS -->
+                <h4>Parameters</h4>
+                <dl>
+                  <div>
+                    <div>
+          <dt>
+            <var>details</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>object</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>This parameter is currently unused.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+            </dl>
+          </dd>
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                  </div><div>
+                    <div>
+          <dt>
+            <var>callback</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>function</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                  </div>
+                </dl>
+                <!-- RETURNS -->
+                <dl>
+                </dl>
+                <!-- CALLBACK -->
+                <div>
+                  <div>
+                  <h4>Callback function</h4>
+                  <p>
+                    If you specify the <em>callback</em> parameter, it should
+                    specify a function that looks like this:
+                  </p>
+                  <!-- Note: intentionally longer 80 columns -->
+                  <pre>function(<span></span>) <span class="subdued">{...}</span>;</pre>
+                  <dl>
+                  </dl>
+                  </div>
+                </div>
+                <!-- MIN_VERSION -->
+              </div> <!-- /description -->
+            </div><div class="apiItem">
+              <a name="method-clearDefaultFixedFontSize"></a> <!-- method-anchor -->
+              <h4>clearDefaultFixedFontSize</h4>
+              <div class="summary">
+                  <!-- Note: intentionally longer 80 columns -->
+                  <span>chrome.experimental.fontSettings.clearDefaultFixedFontSize</span>(<span class="optional"><span>object</span>
+                      <var><span>details</span></var></span><span class="optional"><span>, </span><span>function</span>
+                      <var><span>callback</span></var></span>)</div>
+              <div class="description">
+                <p>Clears the default fixed font size set by this extension, if any.</p>
+                <!-- PARAMETERS -->
+                <h4>Parameters</h4>
+                <dl>
+                  <div>
+                    <div>
+          <dt>
+            <var>details</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>object</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>This parameter is currently unused.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+            </dl>
+          </dd>
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                  </div><div>
+                    <div>
+          <dt>
+            <var>callback</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>function</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                  </div>
+                </dl>
+                <!-- RETURNS -->
+                <dl>
+                </dl>
+                <!-- CALLBACK -->
+                <div>
+                  <div>
+                  <h4>Callback function</h4>
+                  <p>
+                    If you specify the <em>callback</em> parameter, it should
+                    specify a function that looks like this:
+                  </p>
+                  <!-- Note: intentionally longer 80 columns -->
+                  <pre>function(<span></span>) <span class="subdued">{...}</span>;</pre>
+                  <dl>
+                  </dl>
+                  </div>
+                </div>
+                <!-- MIN_VERSION -->
+              </div> <!-- /description -->
+            </div><div class="apiItem">
+              <a name="method-clearDefaultFontSize"></a> <!-- method-anchor -->
+              <h4>clearDefaultFontSize</h4>
+              <div class="summary">
+                  <!-- Note: intentionally longer 80 columns -->
+                  <span>chrome.experimental.fontSettings.clearDefaultFontSize</span>(<span class="optional"><span>object</span>
+                      <var><span>details</span></var></span><span class="optional"><span>, </span><span>function</span>
+                      <var><span>callback</span></var></span>)</div>
+              <div class="description">
+                <p>Clears the default font size set by this extension, if any.</p>
+                <!-- PARAMETERS -->
+                <h4>Parameters</h4>
+                <dl>
+                  <div>
+                    <div>
+          <dt>
+            <var>details</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>object</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>This parameter is currently unused.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+            </dl>
+          </dd>
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                  </div><div>
+                    <div>
+          <dt>
+            <var>callback</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>function</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                  </div>
+                </dl>
+                <!-- RETURNS -->
+                <dl>
+                </dl>
+                <!-- CALLBACK -->
+                <div>
+                  <div>
+                  <h4>Callback function</h4>
+                  <p>
+                    If you specify the <em>callback</em> parameter, it should
+                    specify a function that looks like this:
+                  </p>
+                  <!-- Note: intentionally longer 80 columns -->
+                  <pre>function(<span></span>) <span class="subdued">{...}</span>;</pre>
+                  <dl>
+                  </dl>
+                  </div>
+                </div>
+                <!-- MIN_VERSION -->
+              </div> <!-- /description -->
+            </div><div class="apiItem">
+              <a name="method-clearFont"></a> <!-- method-anchor -->
+              <h4>clearFont</h4>
+              <div class="summary">
+                  <!-- Note: intentionally longer 80 columns -->
+                  <span>chrome.experimental.fontSettings.clearFont</span>(<span class="null"><span>object</span>
+                      <var><span>details</span></var></span><span class="optional"><span>, </span><span>function</span>
+                      <var><span>callback</span></var></span>)</div>
+              <div class="description">
+                <p>Clears the font set by this extension, if any.</p>
+                <!-- PARAMETERS -->
+                <h4>Parameters</h4>
+                <dl>
+                  <div>
+                    <div>
+          <dt>
+            <var>details</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>object</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+              <div>
+                <div>
+          <dt>
+            <var>script</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <a href="experimental.fontSettings.html#type-ScriptCode">ScriptCode</a>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The script for which the font should be cleared. If omitted, the global script font setting is cleared.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>genericFamily</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <a href="experimental.fontSettings.html#type-GenericFamily">GenericFamily</a>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The generic font family for which the font should be cleared.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div>
+            </dl>
+          </dd>
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                  </div><div>
+                    <div>
+          <dt>
+            <var>callback</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>function</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                  </div>
+                </dl>
+                <!-- RETURNS -->
+                <dl>
+                </dl>
+                <!-- CALLBACK -->
+                <div>
+                  <div>
+                  <h4>Callback function</h4>
+                  <p>
+                    If you specify the <em>callback</em> parameter, it should
+                    specify a function that looks like this:
+                  </p>
+                  <!-- Note: intentionally longer 80 columns -->
+                  <pre>function(<span></span>) <span class="subdued">{...}</span>;</pre>
+                  <dl>
+                  </dl>
+                  </div>
+                </div>
+                <!-- MIN_VERSION -->
+              </div> <!-- /description -->
+            </div><div class="apiItem">
+              <a name="method-clearMinimumFontSize"></a> <!-- method-anchor -->
+              <h4>clearMinimumFontSize</h4>
+              <div class="summary">
+                  <!-- Note: intentionally longer 80 columns -->
+                  <span>chrome.experimental.fontSettings.clearMinimumFontSize</span>(<span class="optional"><span>object</span>
+                      <var><span>details</span></var></span><span class="optional"><span>, </span><span>function</span>
+                      <var><span>callback</span></var></span>)</div>
+              <div class="description">
+                <p>Clears the minimum font size set by this extension, if any.</p>
+                <!-- PARAMETERS -->
+                <h4>Parameters</h4>
+                <dl>
+                  <div>
+                    <div>
+          <dt>
+            <var>details</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>object</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>This parameter is currently unused.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+            </dl>
+          </dd>
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                  </div><div>
+                    <div>
+          <dt>
+            <var>callback</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>function</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                  </div>
+                </dl>
+                <!-- RETURNS -->
+                <dl>
+                </dl>
+                <!-- CALLBACK -->
+                <div>
+                  <div>
+                  <h4>Callback function</h4>
+                  <p>
+                    If you specify the <em>callback</em> parameter, it should
+                    specify a function that looks like this:
+                  </p>
+                  <!-- Note: intentionally longer 80 columns -->
+                  <pre>function(<span></span>) <span class="subdued">{...}</span>;</pre>
+                  <dl>
+                  </dl>
+                  </div>
+                </div>
+                <!-- MIN_VERSION -->
+              </div> <!-- /description -->
+            </div><div class="apiItem">
+              <a name="method-getDefaultCharacterSet"></a> <!-- method-anchor -->
+              <h4>getDefaultCharacterSet</h4>
+              <div class="summary">
+                  <!-- Note: intentionally longer 80 columns -->
+                  <span>chrome.experimental.fontSettings.getDefaultCharacterSet</span>(<span class="optional"><span>object</span>
+                      <var><span>details</span></var></span><span class="optional"><span>, </span><span>function</span>
+                      <var><span>callback</span></var></span>)</div>
+              <div class="description">
+                <p>Gets the default character set.</p>
+                <!-- PARAMETERS -->
+                <h4>Parameters</h4>
+                <dl>
+                  <div>
+                    <div>
+          <dt>
+            <var>details</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>object</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>This parameter is currently unused.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+            </dl>
+          </dd>
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                  </div><div>
+                    <div>
+          <dt>
+            <var>callback</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>function</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                  </div>
+                </dl>
+                <!-- RETURNS -->
+                <dl>
+                </dl>
+                <!-- CALLBACK -->
+                <div>
+                  <div>
+                  <h4>Callback function</h4>
+                  <p>
+                    If you specify the <em>callback</em> parameter, it should
+                    specify a function that looks like this:
+                  </p>
+                  <!-- Note: intentionally longer 80 columns -->
+                  <pre>function(<span>object details</span>) <span class="subdued">{...}</span>;</pre>
+                  <dl>
+                    <div>
+                      <div>
+          <dt>
+            <var>details</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>object</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+              <div>
+                <div>
+          <dt>
+            <var>charset</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>string</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The default character set, such as "ISO-8859-1".</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div>
+            </dl>
+          </dd>
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                    </div>
+                  </dl>
+                  </div>
+                </div>
+                <!-- MIN_VERSION -->
+              </div> <!-- /description -->
+            </div><div class="apiItem">
               <a name="method-getDefaultFixedFontSize"></a> <!-- method-anchor -->
               <h4>getDefaultFixedFontSize</h4>
               <div class="summary">
@@ -346,6 +1019,10 @@ directory. For other examples and for help in viewing the source code, see
           </dt>
           <dd>This parameter is currently unused.</dd>
           <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+            </dl>
+          </dd>
           <!-- OBJECT METHODS -->
           <!-- OBJECT EVENT FIELDS -->
           <!-- FUNCTION PARAMETERS -->
@@ -484,6 +1161,10 @@ directory. For other examples and for help in viewing the source code, see
           </dt>
           <dd>This parameter is currently unused.</dd>
           <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+            </dl>
+          </dd>
           <!-- OBJECT METHODS -->
           <!-- OBJECT EVENT FIELDS -->
           <!-- FUNCTION PARAMETERS -->
@@ -571,6 +1252,197 @@ directory. For other examples and for help in viewing the source code, see
               </em>
           </dt>
           <dd>The font size in pixels.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div>
+            </dl>
+          </dd>
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                    </div>
+                  </dl>
+                  </div>
+                </div>
+                <!-- MIN_VERSION -->
+              </div> <!-- /description -->
+            </div><div class="apiItem">
+              <a name="method-getFont"></a> <!-- method-anchor -->
+              <h4>getFont</h4>
+              <div class="summary">
+                  <!-- Note: intentionally longer 80 columns -->
+                  <span>chrome.experimental.fontSettings.getFont</span>(<span class="null"><span>object</span>
+                      <var><span>details</span></var></span><span class="optional"><span>, </span><span>function</span>
+                      <var><span>callback</span></var></span>)</div>
+              <div class="description">
+                <p>Gets the font for a given script and generic font family.</p>
+                <!-- PARAMETERS -->
+                <h4>Parameters</h4>
+                <dl>
+                  <div>
+                    <div>
+          <dt>
+            <var>details</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>object</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+              <div>
+                <div>
+          <dt>
+            <var>script</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <a href="experimental.fontSettings.html#type-ScriptCode">ScriptCode</a>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The script for which the font should be retrieved. If omitted, the font for the global script is retrieved.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>genericFamily</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <a href="experimental.fontSettings.html#type-GenericFamily">GenericFamily</a>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The generic font family for which the font should be retrieved.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div>
+            </dl>
+          </dd>
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                  </div><div>
+                    <div>
+          <dt>
+            <var>callback</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>function</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                  </div>
+                </dl>
+                <!-- RETURNS -->
+                <dl>
+                </dl>
+                <!-- CALLBACK -->
+                <div>
+                  <div>
+                  <h4>Callback function</h4>
+                  <p>
+                    If you specify the <em>callback</em> parameter, it should
+                    specify a function that looks like this:
+                  </p>
+                  <!-- Note: intentionally longer 80 columns -->
+                  <pre>function(<span>object details</span>) <span class="subdued">{...}</span>;</pre>
+                  <dl>
+                    <div>
+                      <div>
+          <dt>
+            <var>details</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>object</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+              <div>
+                <div>
+          <dt>
+            <var>fontName</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>string</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The font name. Rather than the literal font name preference value, this may be the name of the font that the system resolves the preference value to. The empty string signifies fallback to the global script font setting.</dd>
           <!-- OBJECT PROPERTIES -->
           <!-- OBJECT METHODS -->
           <!-- OBJECT EVENT FIELDS -->
@@ -680,201 +1552,6 @@ directory. For other examples and for help in viewing the source code, see
                 <!-- MIN_VERSION -->
               </div> <!-- /description -->
             </div><div class="apiItem">
-              <a name="method-getFontName"></a> <!-- method-anchor -->
-              <h4>getFontName</h4>
-              <div class="summary">
-                  <!-- Note: intentionally longer 80 columns -->
-                  <span>chrome.experimental.fontSettings.getFontName</span>(<span class="null"><span>object</span>
-                      <var><span>details</span></var></span><span class="optional"><span>, </span><span>function</span>
-                      <var><span>callback</span></var></span>)</div>
-              <div class="description">
-                <p>Gets the font name of the current setting for a given script and generic font family.</p>
-                <!-- PARAMETERS -->
-                <h4>Parameters</h4>
-                <dl>
-                  <div>
-                    <div>
-          <dt>
-            <var>details</var>
-              <em>
-                <!-- TYPE -->
-                <div style="display:inline">
-                  (
-                    <span id="typeTemplate">
-                      <span>
-                        <span>object</span>
-                      </span>
-                    </span>
-                  )
-                </div>
-              </em>
-          </dt>
-          <dd class="todo">
-            Undocumented.
-          </dd>
-          <!-- OBJECT PROPERTIES -->
-          <dd>
-            <dl>
-              <div>
-                <div>
-          <dt>
-            <var>script</var>
-              <em>
-                <!-- TYPE -->
-                <div style="display:inline">
-                  (
-                    <span class="optional">optional</span>
-                    <span class="enum">enumerated</span>
-                    <span id="typeTemplate">
-                      <span>
-                        <span>string</span>
-                        <span>["Arab", "Armn", "Beng", "Cans", "Cher", "Cyrl", "Deva", "Ethi", "Geor", "Grek", "Gujr", "Guru", "Hang", "Hans", "Hant", "Hebr", "Hrkt", "Knda", "Khmr", "Laoo", "Mlym", "Mong", "Mymr", "Orya", "Sinh", "Taml", "Telu", "Thaa", "Thai", "Tibt", "Yiii"]</span>
-                      </span>
-                    </span>
-                  )
-                </div>
-              </em>
-          </dt>
-          <dd>The ISO 15924 script code for which the font setting should be retrieved. If omitted, the global script font setting is retrieved.</dd>
-          <!-- OBJECT PROPERTIES -->
-          <!-- OBJECT METHODS -->
-          <!-- OBJECT EVENT FIELDS -->
-          <!-- FUNCTION PARAMETERS -->
-        </div>
-              </div><div>
-                <div>
-          <dt>
-            <var>genericFamily</var>
-              <em>
-                <!-- TYPE -->
-                <div style="display:inline">
-                  (
-                    <span class="enum">enumerated</span>
-                    <span id="typeTemplate">
-                      <span>
-                        <span>string</span>
-                        <span>["standard", "sansserif", "serif", "fixed", "cursive", "fantasy"]</span>
-                      </span>
-                    </span>
-                  )
-                </div>
-              </em>
-          </dt>
-          <dd>The CSS generic font family for which the font setting should be retrieved.</dd>
-          <!-- OBJECT PROPERTIES -->
-          <!-- OBJECT METHODS -->
-          <!-- OBJECT EVENT FIELDS -->
-          <!-- FUNCTION PARAMETERS -->
-        </div>
-              </div>
-            </dl>
-          </dd>
-          <!-- OBJECT METHODS -->
-          <!-- OBJECT EVENT FIELDS -->
-          <!-- FUNCTION PARAMETERS -->
-        </div>
-                  </div><div>
-                    <div>
-          <dt>
-            <var>callback</var>
-              <em>
-                <!-- TYPE -->
-                <div style="display:inline">
-                  (
-                    <span class="optional">optional</span>
-                    <span id="typeTemplate">
-                      <span>
-                        <span>function</span>
-                      </span>
-                    </span>
-                  )
-                </div>
-              </em>
-          </dt>
-          <dd class="todo">
-            Undocumented.
-          </dd>
-          <!-- OBJECT PROPERTIES -->
-          <!-- OBJECT METHODS -->
-          <!-- OBJECT EVENT FIELDS -->
-          <!-- FUNCTION PARAMETERS -->
-        </div>
-                  </div>
-                </dl>
-                <!-- RETURNS -->
-                <dl>
-                </dl>
-                <!-- CALLBACK -->
-                <div>
-                  <div>
-                  <h4>Callback function</h4>
-                  <p>
-                    If you specify the <em>callback</em> parameter, it should
-                    specify a function that looks like this:
-                  </p>
-                  <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>object details</span>) <span class="subdued">{...}</span>;</pre>
-                  <dl>
-                    <div>
-                      <div>
-          <dt>
-            <var>details</var>
-              <em>
-                <!-- TYPE -->
-                <div style="display:inline">
-                  (
-                    <span id="typeTemplate">
-                      <span>
-                        <span>object</span>
-                      </span>
-                    </span>
-                  )
-                </div>
-              </em>
-          </dt>
-          <dd class="todo">
-            Undocumented.
-          </dd>
-          <!-- OBJECT PROPERTIES -->
-          <dd>
-            <dl>
-              <div>
-                <div>
-          <dt>
-            <var>fontName</var>
-              <em>
-                <!-- TYPE -->
-                <div style="display:inline">
-                  (
-                    <span id="typeTemplate">
-                      <span>
-                        <span>string</span>
-                      </span>
-                    </span>
-                  )
-                </div>
-              </em>
-          </dt>
-          <dd>The font name.</dd>
-          <!-- OBJECT PROPERTIES -->
-          <!-- OBJECT METHODS -->
-          <!-- OBJECT EVENT FIELDS -->
-          <!-- FUNCTION PARAMETERS -->
-        </div>
-              </div>
-            </dl>
-          </dd>
-          <!-- OBJECT METHODS -->
-          <!-- OBJECT EVENT FIELDS -->
-          <!-- FUNCTION PARAMETERS -->
-        </div>
-                    </div>
-                  </dl>
-                  </div>
-                </div>
-                <!-- MIN_VERSION -->
-              </div> <!-- /description -->
-            </div><div class="apiItem">
               <a name="method-getMinimumFontSize"></a> <!-- method-anchor -->
               <h4>getMinimumFontSize</h4>
               <div class="summary">
@@ -907,6 +1584,10 @@ directory. For other examples and for help in viewing the source code, see
           </dt>
           <dd>This parameter is currently unused.</dd>
           <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+            </dl>
+          </dd>
           <!-- OBJECT METHODS -->
           <!-- OBJECT EVENT FIELDS -->
           <!-- FUNCTION PARAMETERS -->
@@ -1007,6 +1688,119 @@ directory. For other examples and for help in viewing the source code, see
           <!-- FUNCTION PARAMETERS -->
         </div>
                     </div>
+                  </dl>
+                  </div>
+                </div>
+                <!-- MIN_VERSION -->
+              </div> <!-- /description -->
+            </div><div class="apiItem">
+              <a name="method-setDefaultCharacterSet"></a> <!-- method-anchor -->
+              <h4>setDefaultCharacterSet</h4>
+              <div class="summary">
+                  <!-- Note: intentionally longer 80 columns -->
+                  <span>chrome.experimental.fontSettings.setDefaultCharacterSet</span>(<span class="null"><span>object</span>
+                      <var><span>details</span></var></span><span class="optional"><span>, </span><span>function</span>
+                      <var><span>callback</span></var></span>)</div>
+              <div class="description">
+                <p>Sets the default character set.</p>
+                <!-- PARAMETERS -->
+                <h4>Parameters</h4>
+                <dl>
+                  <div>
+                    <div>
+          <dt>
+            <var>details</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>object</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+              <div>
+                <div>
+          <dt>
+            <var>charset</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>string</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The character set.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div>
+            </dl>
+          </dd>
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                  </div><div>
+                    <div>
+          <dt>
+            <var>callback</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>function</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                  </div>
+                </dl>
+                <!-- RETURNS -->
+                <dl>
+                </dl>
+                <!-- CALLBACK -->
+                <div>
+                  <div>
+                  <h4>Callback function</h4>
+                  <p>
+                    If you specify the <em>callback</em> parameter, it should
+                    specify a function that looks like this:
+                  </p>
+                  <!-- Note: intentionally longer 80 columns -->
+                  <pre>function(<span></span>) <span class="subdued">{...}</span>;</pre>
+                  <dl>
                   </dl>
                   </div>
                 </div>
@@ -1239,15 +2033,15 @@ directory. For other examples and for help in viewing the source code, see
                 <!-- MIN_VERSION -->
               </div> <!-- /description -->
             </div><div class="apiItem">
-              <a name="method-setFontName"></a> <!-- method-anchor -->
-              <h4>setFontName</h4>
+              <a name="method-setFont"></a> <!-- method-anchor -->
+              <h4>setFont</h4>
               <div class="summary">
                   <!-- Note: intentionally longer 80 columns -->
-                  <span>chrome.experimental.fontSettings.setFontName</span>(<span class="null"><span>object</span>
+                  <span>chrome.experimental.fontSettings.setFont</span>(<span class="null"><span>object</span>
                       <var><span>details</span></var></span><span class="optional"><span>, </span><span>function</span>
                       <var><span>callback</span></var></span>)</div>
               <div class="description">
-                <p>Sets the font name of the current setting for a given script and generic font family.</p>
+                <p>Sets the font for a given script and generic font family.</p>
                 <!-- PARAMETERS -->
                 <h4>Parameters</h4>
                 <dl>
@@ -1283,18 +2077,16 @@ directory. For other examples and for help in viewing the source code, see
                 <div style="display:inline">
                   (
                     <span class="optional">optional</span>
-                    <span class="enum">enumerated</span>
                     <span id="typeTemplate">
                       <span>
-                        <span>string</span>
-                        <span>["Arab", "Armn", "Beng", "Cans", "Cher", "Cyrl", "Deva", "Ethi", "Geor", "Grek", "Gujr", "Guru", "Hang", "Hans", "Hant", "Hebr", "Hrkt", "Knda", "Khmr", "Laoo", "Mlym", "Mong", "Mymr", "Orya", "Sinh", "Taml", "Telu", "Thaa", "Thai", "Tibt", "Yiii"]</span>
+                        <a href="experimental.fontSettings.html#type-ScriptCode">ScriptCode</a>
                       </span>
                     </span>
                   )
                 </div>
               </em>
           </dt>
-          <dd>The ISO 15924 script code for which the font setting should be set. If omitted, the global script font setting is set.</dd>
+          <dd>The script code which the font should be set. If omitted, the font for the global script is set.</dd>
           <!-- OBJECT PROPERTIES -->
           <!-- OBJECT METHODS -->
           <!-- OBJECT EVENT FIELDS -->
@@ -1308,18 +2100,16 @@ directory. For other examples and for help in viewing the source code, see
                 <!-- TYPE -->
                 <div style="display:inline">
                   (
-                    <span class="enum">enumerated</span>
                     <span id="typeTemplate">
                       <span>
-                        <span>string</span>
-                        <span>["standard", "sansserif", "serif", "fixed", "cursive", "fantasy"]</span>
+                        <a href="experimental.fontSettings.html#type-GenericFamily">GenericFamily</a>
                       </span>
                     </span>
                   )
                 </div>
               </em>
           </dt>
-          <dd>The CSS generic font family for which the font setting should be set.</dd>
+          <dd>The generic font family for which the font should be set.</dd>
           <!-- OBJECT PROPERTIES -->
           <!-- OBJECT METHODS -->
           <!-- OBJECT EVENT FIELDS -->
@@ -1342,7 +2132,7 @@ directory. For other examples and for help in viewing the source code, see
                 </div>
               </em>
           </dt>
-          <dd>The font name.</dd>
+          <dd>The font name. If a script is specified, the empty string means to fallback to the global script font setting.</dd>
           <!-- OBJECT PROPERTIES -->
           <!-- OBJECT METHODS -->
           <!-- OBJECT EVENT FIELDS -->
@@ -1518,7 +2308,546 @@ directory. For other examples and for help in viewing the source code, see
             </div>  <!-- /apiItem -->
           </div>  <!-- /apiGroup -->
           <!-- EVENTS -->
-           <!-- /apiGroup -->
+          <div id="eventsTemplate" class="apiGroup">
+            <a name="global-events"></a>
+            <h3>Events</h3>
+            <!-- iterates over all events -->
+            <div class="apiItem">
+              <a name="event-onDefaultCharacterSetChanged"></a>
+              <h4>onDefaultCharacterSetChanged</h4>
+              <div class="summary">
+                <!-- Note: intentionally longer 80 columns -->
+                <span class="subdued">chrome.experimental.fontSettings.</span><span>onDefaultCharacterSetChanged</span><span class="subdued">.addListener</span>(function(<span>object details</span>) <span class="subdued">{...}</span><span></span>);
+              </div>
+              <div class="description">
+                <p>Fired when the default character set setting changes.</p>
+                <!-- LISTENER PARAMETERS -->
+                <div>
+                  <h4>Listener parameters</h4>
+                  <dl>
+                    <div>
+                      <div>
+          <dt>
+            <var>details</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>object</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+              <div>
+                <div>
+          <dt>
+            <var>charset</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>string</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The character set.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>levelOfControl</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <a href="experimental.fontSettings.html#type-LevelOfControl">LevelOfControl</a>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The level of control this extension has over the setting.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div>
+            </dl>
+          </dd>
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                    </div>
+                  </dl>
+                </div>
+                <!-- EXTRA PARAMETERS -->
+                <!-- LISTENER RETURN VALUE -->
+                <dl>
+                </dl>
+              </div> <!-- /description -->
+            </div><div class="apiItem">
+              <a name="event-onDefaultFixedFontSizeChanged"></a>
+              <h4>onDefaultFixedFontSizeChanged</h4>
+              <div class="summary">
+                <!-- Note: intentionally longer 80 columns -->
+                <span class="subdued">chrome.experimental.fontSettings.</span><span>onDefaultFixedFontSizeChanged</span><span class="subdued">.addListener</span>(function(<span>object details</span>) <span class="subdued">{...}</span><span></span>);
+              </div>
+              <div class="description">
+                <p>Fired when the default fixed font size setting changes.</p>
+                <!-- LISTENER PARAMETERS -->
+                <div>
+                  <h4>Listener parameters</h4>
+                  <dl>
+                    <div>
+                      <div>
+          <dt>
+            <var>details</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>object</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+              <div>
+                <div>
+          <dt>
+            <var>pixelSize</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>integer</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The font size in pixels.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>levelOfControl</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <a href="experimental.fontSettings.html#type-LevelOfControl">LevelOfControl</a>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The level of control this extension has over the setting.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div>
+            </dl>
+          </dd>
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                    </div>
+                  </dl>
+                </div>
+                <!-- EXTRA PARAMETERS -->
+                <!-- LISTENER RETURN VALUE -->
+                <dl>
+                </dl>
+              </div> <!-- /description -->
+            </div><div class="apiItem">
+              <a name="event-onDefaultFontSizeChanged"></a>
+              <h4>onDefaultFontSizeChanged</h4>
+              <div class="summary">
+                <!-- Note: intentionally longer 80 columns -->
+                <span class="subdued">chrome.experimental.fontSettings.</span><span>onDefaultFontSizeChanged</span><span class="subdued">.addListener</span>(function(<span>object details</span>) <span class="subdued">{...}</span><span></span>);
+              </div>
+              <div class="description">
+                <p>Fired when the default font size setting changes.</p>
+                <!-- LISTENER PARAMETERS -->
+                <div>
+                  <h4>Listener parameters</h4>
+                  <dl>
+                    <div>
+                      <div>
+          <dt>
+            <var>details</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>object</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+              <div>
+                <div>
+          <dt>
+            <var>pixelSize</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>integer</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The font size in pixels.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>levelOfControl</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <a href="experimental.fontSettings.html#type-LevelOfControl">LevelOfControl</a>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The level of control this extension has over the setting.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div>
+            </dl>
+          </dd>
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                    </div>
+                  </dl>
+                </div>
+                <!-- EXTRA PARAMETERS -->
+                <!-- LISTENER RETURN VALUE -->
+                <dl>
+                </dl>
+              </div> <!-- /description -->
+            </div><div class="apiItem">
+              <a name="event-onFontChanged"></a>
+              <h4>onFontChanged</h4>
+              <div class="summary">
+                <!-- Note: intentionally longer 80 columns -->
+                <span class="subdued">chrome.experimental.fontSettings.</span><span>onFontChanged</span><span class="subdued">.addListener</span>(function(<span>object details</span>) <span class="subdued">{...}</span><span></span>);
+              </div>
+              <div class="description">
+                <p>Fired when a font setting changes.</p>
+                <!-- LISTENER PARAMETERS -->
+                <div>
+                  <h4>Listener parameters</h4>
+                  <dl>
+                    <div>
+                      <div>
+          <dt>
+            <var>details</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>object</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+              <div>
+                <div>
+          <dt>
+            <var>fontName</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>string</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>script</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <a href="experimental.fontSettings.html#type-ScriptCode">ScriptCode</a>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The script code for which the font setting has changed. If omitted, the global script font setting has changed.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>genericFamily</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <a href="experimental.fontSettings.html#type-GenericFamily">GenericFamily</a>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The generic font family for which the font setting has changed.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>levelOfControl</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <a href="experimental.fontSettings.html#type-LevelOfControl">LevelOfControl</a>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The level of control this extension has over the setting.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div>
+            </dl>
+          </dd>
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                    </div>
+                  </dl>
+                </div>
+                <!-- EXTRA PARAMETERS -->
+                <!-- LISTENER RETURN VALUE -->
+                <dl>
+                </dl>
+              </div> <!-- /description -->
+            </div><div class="apiItem">
+              <a name="event-onMinimumFontSizeChanged"></a>
+              <h4>onMinimumFontSizeChanged</h4>
+              <div class="summary">
+                <!-- Note: intentionally longer 80 columns -->
+                <span class="subdued">chrome.experimental.fontSettings.</span><span>onMinimumFontSizeChanged</span><span class="subdued">.addListener</span>(function(<span>object details</span>) <span class="subdued">{...}</span><span></span>);
+              </div>
+              <div class="description">
+                <p>Fired when the minimum font size setting changes.</p>
+                <!-- LISTENER PARAMETERS -->
+                <div>
+                  <h4>Listener parameters</h4>
+                  <dl>
+                    <div>
+                      <div>
+          <dt>
+            <var>details</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>object</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd class="todo">
+            Undocumented.
+          </dd>
+          <!-- OBJECT PROPERTIES -->
+          <dd>
+            <dl>
+              <div>
+                <div>
+          <dt>
+            <var>pixelSize</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <span>integer</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The font size in pixels.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div><div>
+                <div>
+          <dt>
+            <var>levelOfControl</var>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span id="typeTemplate">
+                      <span>
+                        <a href="experimental.fontSettings.html#type-LevelOfControl">LevelOfControl</a>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>The level of control this extension has over the setting.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+              </div>
+            </dl>
+          </dd>
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+                    </div>
+                  </dl>
+                </div>
+                <!-- EXTRA PARAMETERS -->
+                <!-- LISTENER RETURN VALUE -->
+                <dl>
+                </dl>
+              </div> <!-- /description -->
+            </div> <!-- /apiItem -->
+          </div> <!-- /apiGroup -->
           <!-- TYPES -->
           <div class="apiGroup">
             <a name="types"></a>
@@ -1595,6 +2924,84 @@ directory. For other examples and for help in viewing the source code, see
               </div>
             </dl>
           </dd>
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+            </div><div class="apiItem">
+              <a name="type-ScriptCode"></a>
+              <h4>ScriptCode</h4>
+              <div>
+          <dt>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="enum">enumerated</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>string</span>
+                        <span>["Arab", "Armn", "Beng", "Cans", "Cher", "Cyrl", "Deva", "Ethi", "Geor", "Grek", "Gujr", "Guru", "Hang", "Hans", "Hant", "Hebr", "Hrkt", "Knda", "Khmr", "Laoo", "Mlym", "Mong", "Mymr", "Orya", "Sinh", "Taml", "Telu", "Thaa", "Thai", "Tibt", "Yiii"]</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>An ISO 15924 script code.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+            </div><div class="apiItem">
+              <a name="type-GenericFamily"></a>
+              <h4>GenericFamily</h4>
+              <div>
+          <dt>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="enum">enumerated</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>string</span>
+                        <span>["standard", "sansserif", "serif", "fixed", "cursive", "fantasy"]</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>A CSS generic font family.</dd>
+          <!-- OBJECT PROPERTIES -->
+          <!-- OBJECT METHODS -->
+          <!-- OBJECT EVENT FIELDS -->
+          <!-- FUNCTION PARAMETERS -->
+        </div>
+            </div><div class="apiItem">
+              <a name="type-LevelOfControl"></a>
+              <h4>LevelOfControl</h4>
+              <div>
+          <dt>
+              <em>
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="enum">enumerated</span>
+                    <span id="typeTemplate">
+                      <span>
+                        <span>string</span>
+                        <span>["not_controllable", "controlled_by_other_extensions", "controllable_by_this_extension", "controlled_by_this_extension"]</span>
+                      </span>
+                    </span>
+                  )
+                </div>
+              </em>
+          </dt>
+          <dd>One of<br><var>not_controllable</var>: cannot be controlled by any extension<br><var>controlled_by_other_extensions</var>: controlled by extensions with higher precedence<br><var>controllable_by_this_extension</var>: can be controlled by this extension<br><var>controlled_by_this_extension</var>: controlled by this extension</dd>
+          <!-- OBJECT PROPERTIES -->
           <!-- OBJECT METHODS -->
           <!-- OBJECT EVENT FIELDS -->
           <!-- FUNCTION PARAMETERS -->

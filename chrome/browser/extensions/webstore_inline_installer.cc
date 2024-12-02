@@ -157,9 +157,7 @@ WebstoreInlineInstaller::WebstoreInlineInstaller(WebContents* web_contents,
       requestor_url_(requestor_url),
       delegate_(delegate),
       average_rating_(0.0),
-      rating_count_(0) {}
-
-WebstoreInlineInstaller::~WebstoreInlineInstaller() {
+      rating_count_(0) {
 }
 
 void WebstoreInlineInstaller::BeginInstall() {
@@ -187,6 +185,8 @@ void WebstoreInlineInstaller::BeginInstall() {
                                            net::LOAD_DISABLE_CACHE);
   webstore_data_url_fetcher_->Start();
 }
+
+WebstoreInlineInstaller::~WebstoreInlineInstaller() {}
 
 void WebstoreInlineInstaller::OnURLFetchComplete(
     const content::URLFetcher* source) {
@@ -322,31 +322,6 @@ void WebstoreInlineInstaller::OnWebstoreResponseParseSuccess(
   helper->Start();
 }
 
-// static
-bool WebstoreInlineInstaller::IsRequestorURLInVerifiedSite(
-    const GURL& requestor_url,
-    const std::string& verified_site) {
-  // Turn the verified site (which may be a bare domain, or have a port and/or a
-  // path) into a URL that can be parsed by URLPattern.
-  std::string verified_site_url =
-      StringPrintf("http://*.%s%s",
-          verified_site.c_str(),
-          verified_site.find('/') == std::string::npos ? "/*" : "*");
-
-  URLPattern verified_site_pattern(
-      URLPattern::SCHEME_HTTP | URLPattern::SCHEME_HTTPS);
-  URLPattern::ParseResult parse_result =
-      verified_site_pattern.Parse(verified_site_url);
-  if (parse_result != URLPattern::PARSE_SUCCESS) {
-    DLOG(WARNING) << "Could not parse " << verified_site_url <<
-        " as URL pattern " << parse_result;
-    return false;
-  }
-  verified_site_pattern.SetScheme("*");
-
-  return verified_site_pattern.MatchesURL(requestor_url);
-}
-
 void WebstoreInlineInstaller::OnWebstoreResponseParseFailure(
     const std::string& error) {
   CompleteInstall(error);
@@ -373,20 +348,17 @@ void WebstoreInlineInstaller::OnWebstoreParseSuccess(
   prompt.SetInlineInstallWebstoreData(localized_user_count_,
                                       average_rating_,
                                       rating_count_);
-
-  if (!ShowExtensionInstallDialogForManifest(profile,
-                                             this,
-                                             manifest,
-                                             id_,
-                                             localized_name_,
-                                             localized_description_,
-                                             &icon_,
-                                             prompt,
-                                             &dummy_extension_)) {
-    CompleteInstall(kInvalidManifestError);
+  std::string error;
+  dummy_extension_ = ExtensionInstallUI::GetLocalizedExtensionForDisplay(
+      manifest, id_, localized_name_, localized_description_, &error);
+  if (!dummy_extension_) {
+    OnWebstoreParseFailure(id_, WebstoreInstallHelper::Delegate::MANIFEST_ERROR,
+                           kInvalidManifestError);
     return;
   }
 
+  install_ui_.reset(new ExtensionInstallUI(profile));
+  install_ui_->ConfirmInlineInstall(this, dummy_extension_, &icon_, prompt);
   // Control flow finishes up in InstallUIProceed or InstallUIAbort.
 }
 
@@ -404,18 +376,18 @@ void WebstoreInlineInstaller::InstallUIProceed() {
     return;
   }
 
-  CrxInstaller::WhitelistEntry* entry = new CrxInstaller::WhitelistEntry;
-
-  entry->parsed_manifest.reset(manifest_.get()->DeepCopy());
-  entry->localized_name = localized_name_;
-  entry->use_app_installed_bubble = true;
-  CrxInstaller::SetWhitelistEntry(id_, entry);
-
   Profile* profile = Profile::FromBrowserContext(
       web_contents()->GetBrowserContext());
 
+  scoped_ptr<WebstoreInstaller::Approval> approval(
+      new WebstoreInstaller::Approval);
+  approval->extension_id = id_;
+  approval->profile = profile;
+  approval->parsed_manifest.reset(manifest_.get()->DeepCopy());
+  approval->use_app_installed_bubble = true;
+
   scoped_refptr<WebstoreInstaller> installer = new WebstoreInstaller(
-      profile, this, &(web_contents()->GetController()), id_,
+      profile, this, &(web_contents()->GetController()), id_, approval.Pass(),
       WebstoreInstaller::FLAG_INLINE_INSTALL);
   installer->Start();
 }
@@ -455,4 +427,29 @@ void WebstoreInlineInstaller::CompleteInstall(const std::string& error) {
   }
 
   Release(); // Matches the AddRef in BeginInstall.
+}
+
+// static
+bool WebstoreInlineInstaller::IsRequestorURLInVerifiedSite(
+    const GURL& requestor_url,
+    const std::string& verified_site) {
+  // Turn the verified site (which may be a bare domain, or have a port and/or a
+  // path) into a URL that can be parsed by URLPattern.
+  std::string verified_site_url =
+      StringPrintf("http://*.%s%s",
+          verified_site.c_str(),
+          verified_site.find('/') == std::string::npos ? "/*" : "*");
+
+  URLPattern verified_site_pattern(
+      URLPattern::SCHEME_HTTP | URLPattern::SCHEME_HTTPS);
+  URLPattern::ParseResult parse_result =
+      verified_site_pattern.Parse(verified_site_url);
+  if (parse_result != URLPattern::PARSE_SUCCESS) {
+    DLOG(WARNING) << "Could not parse " << verified_site_url <<
+        " as URL pattern " << parse_result;
+    return false;
+  }
+  verified_site_pattern.SetScheme("*");
+
+  return verified_site_pattern.MatchesURL(requestor_url);
 }

@@ -36,10 +36,6 @@ const char kBrowserSubprocessPath[]         = "browser-subprocess-path";
 // as a dependent process of the Chrome Frame plugin.
 const char kChromeFrame[]                   = "chrome-frame";
 
-// The default device scale factor to apply to contents in the absence of
-// a viewport meta tag.
-const char kDefaultDeviceScaleFactor[]      = "default-device-scale-factor";
-
 // Disables client-visible 3D APIs, in particular WebGL and Pepper 3D.
 // This is controlled by policy and is kept separate from the other
 // enable/disable switches to avoid accidentally regressing the policy
@@ -171,6 +167,9 @@ const char kDisableSmoothScrolling[]        = "disable-smooth-scrolling";
 // Disable the seccomp sandbox (Linux only)
 const char kDisableSeccompSandbox[]         = "disable-seccomp-sandbox";
 
+// Disable the seccomp filter sandbox (Linux only)
+const char kDisableSeccompFilterSandbox[]   = "disable-seccomp-filter-sandbox";
+
 // Disable session storage.
 const char kDisableSessionStorage[]         = "disable-session-storage";
 
@@ -211,17 +210,11 @@ const char kDisableXSSAuditor[]             = "disable-xss-auditor";
 // |DOMAutomationController| to the |AutomationRenderViewHelper|.
 const char kDomAutomationController[]       = "dom-automation";
 
-// Enable gpu-accelerated 2d canvas.
-const char kEnableAccelerated2dCanvas[]     = "enable-accelerated-2d-canvas";
-
 // Enable hardware accelerated page painting.
 const char kEnableAcceleratedPainting[]     = "enable-accelerated-painting";
 
 // Enable gpu-accelerated SVG/W3C filters.
 const char kEnableAcceleratedFilters[]      = "enable-accelerated-filters";
-
-// Enables WebKit accessibility within the renderer process.
-const char kEnableAccessibility[]           = "enable-accessibility";
 
 // Turns on extremely verbose logging of accessibility events.
 const char kEnableAccessibilityLogging[]    = "enable-accessibility-logging";
@@ -236,14 +229,18 @@ const char kEnableCompositingForFixedPosition[] =
 // Enable deferred 2d canvas rendering.
 const char kEnableDeferred2dCanvas[]        = "enable-deferred-2d-canvas";
 
-// Enables compositing to texture instead of display.
-const char kEnableCompositeToTexture[]      = "enable-composite-to-texture";
-
 // Enables CSS3 regions
 const char kEnableCssRegions[]              = "enable-css-regions";
 
+// Enables CSS3 custom filters
+const char kEnableCssShaders[]              = "enable-css-shaders";
+
 // Enables device motion events.
 const char kEnableDeviceMotion[]            = "enable-device-motion";
+
+// Enables support for encrypted media. Current implementation is
+// incomplete and this flag is used for development and testing.
+const char kEnableEncryptedMedia[]          = "enable-encrypted-media";
 
 // Enables the fastback page cache.
 const char kEnableFastback[]                = "enable-fastback";
@@ -267,11 +264,12 @@ const char kEnableGamepad[]                 = "enable-gamepad";
 const char kEnableLogging[]                 = "enable-logging";
 
 // Enables Media Source API on <audio>/<video> elements.
-const char kEnableMediaSource[]              = "enable-media-source";
+const char kEnableMediaSource[]             = "enable-media-source";
 
 // Enable media stream in WebKit.
 // http://www.whatwg.org/specs/web-apps/current-work/multipage/dnd.html#mediastream
 const char kEnableMediaStream[]             = "enable-media-stream";
+const char kEnablePeerConnection[]          = "enable-peer-connection";
 
 // On Windows, converts the page to the currently-installed monitor profile.
 // This does NOT enable color management for images. The source is still
@@ -338,9 +336,6 @@ const char kDisableThreadedCompositing[]     = "disable-threaded-compositing";
 // SYN packet.
 const char kEnableTcpFastOpen[]             = "enable-tcp-fastopen";
 
-// Enable support for JavaScript touch events.
-const char kEnableTouchEvents[]             = "enable-touch-events";
-
 // Enables support for video tracks. Current implementation is
 // incomplete and this flag is used for development and testing.
 const char kEnableVideoTrack[]              = "enable-video-track";
@@ -366,17 +361,15 @@ const char kExtraPluginDir[]                = "extra-plugin-dir";
 // the base layer even when compositing is not strictly required.
 const char kForceCompositingMode[]          = "force-compositing-mode";
 
-// Some field tests may rendomized in the browser, and the randomly selected
-// outcome needs to be propagated to the renderer.  For instance, this is used
+// Some field trials may be randomized in the browser, and the randomly selected
+// outcome needs to be propagated to the renderer. For instance, this is used
 // to modify histograms recorded in the renderer, or to get the renderer to
 // also set of its state (initialize, or not initialize components) to match the
-// experiment(s).
-// The argument is a string-ized list of experiment names, and the associated
-// value that was randomly selected.  In the recent implementetaion, the
-// persistent representation generated by field_trial.cc and later decoded, is a
-// list of name and value pairs, separated by slashes. See field trial.cc for
-// current details.
-const char kForceFieldTestNameAndValue[]    = "force-fieldtest";
+// experiment(s). The option is also useful for forcing field trials when
+// testing changes locally. The argument is a list of name and value pairs,
+// separated by slashes. See FieldTrialList::CreateTrialsFromString() in
+// field_trial.h for details.
+const char kForceFieldTrials[]              = "force-fieldtrials";
 
 // Force renderer accessibility to be on instead of enabling it on demand when
 // a screen reader is detected. The disable-renderer-accessibility switch
@@ -426,22 +419,11 @@ const char kNaClBrokerProcess[]             = "nacl-broker";
 // Causes the process to run as a NativeClient loader.
 const char kNaClLoaderProcess[]             = "nacl-loader";
 
-// Support a separate switch that enables the v8 playback extension.
-// The extension causes javascript calls to Date.now() and Math.random()
-// to return consistent values, such that subsequent loads of the same
-// page will result in consistent js-generated data and XHR requests.
-// Pages may still be able to generate inconsistent data from plugins.
-const char kNoJsRandomness[]                = "no-js-randomness";
-
 // Don't send HTTP-Referer headers.
 const char kNoReferrers[]                   = "no-referrers";
 
 // Disables the sandbox for all process types that are normally sandboxed.
 const char kNoSandbox[]                     = "no-sandbox";
-
-// Read previously recorded data from the cache. Only cached data is read.
-// See kRecordMode.
-const char kPlaybackMode[]                  = "playback-mode";
 
 // Specifies a command that should be used to launch the plugin process.  Useful
 // for running the plugin process through purify or quantify.  Ex:
@@ -459,9 +441,6 @@ const char kPluginStartupDialog[]           = "plugin-startup-dialog";
 
 // Argument to the process type that indicates a PPAPI broker process type.
 const char kPpapiBrokerProcess[]            = "ppapi-broker";
-
-// "Command-line" arguments for the PPAPI Flash; used for debugging options.
-const char kPpapiFlashArgs[]                = "ppapi-flash-args";
 
 // Use the PPAPI (Pepper) Flash found at the given path.
 const char kPpapiFlashPath[]                = "ppapi-flash-path";
@@ -495,12 +474,6 @@ const char kProcessPerSite[]                = "process-per-site";
 // script connections to each other).
 const char kProcessPerTab[]                 = "process-per-tab";
 
-// Chrome supports a playback and record mode.  Record mode saves *everything*
-// to the cache.  Playback mode reads data exclusively from the cache.  This
-// allows us to record a session into the cache and then replay it at will.
-// See also kPlaybackMode.
-const char kRecordMode[]                    = "record-mode";
-
 // The value of this switch determines whether the process is started as a
 // renderer or plugin host.  If it's empty, it's the browser.
 const char kProcessType[]                   = "type";
@@ -514,12 +487,14 @@ const char kRemoteDebuggingPort[]           = "remote-debugging-port";
 // Causes the renderer process to throw an assertion on launch.
 const char kRendererAssertTest[]            = "renderer-assert-test";
 
+#if defined(OS_POSIX)
+// Causes the renderer process to cleanly exit via calling exit().
+const char kRendererCleanExit[]             = "renderer-clean-exit";
+#endif
+
 // On POSIX only: the contents of this flag are prepended to the renderer
 // command line. Useful values might be "valgrind" or "xterm -e gdb --args".
 const char kRendererCmdPrefix[]             = "renderer-cmd-prefix";
-
-// Causes the renderer process to crash on launch.
-const char kRendererCrashTest[]             = "renderer-crash-test";
 
 // Causes the process to run as renderer instead of as browser.
 const char kRendererProcess[]               = "renderer";
@@ -640,11 +615,6 @@ const char kScrollPixels[]                  = "scroll-pixels";
 // Use the system SSL library (Secure Transport on Mac, SChannel on Windows)
 // instead of NSS for SSL.
 const char kUseSystemSSL[]                  = "use-system-ssl";
-#endif
-
-#if !defined(OFFICIAL_BUILD)
-// Causes the renderer process to throw an assertion on launch.
-const char kRendererCheckFalseTest[]        = "renderer-check-false-test";
 #endif
 
 // Enable per-tile page painting.

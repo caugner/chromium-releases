@@ -232,7 +232,7 @@ void ProfileWriter::AddFavicons(
       SetImportedFavicons(favicons);
 }
 
-typedef std::map<std::string, const TemplateURL*> HostPathMap;
+typedef std::map<std::string, TemplateURL*> HostPathMap;
 
 // Returns the key for the map built by BuildHostPathMap. If url_string is not
 // a valid URL, an empty string is returned, otherwise host+path is returned.
@@ -255,15 +255,13 @@ static std::string HostPathKeyForURL(const GURL& url) {
 // the TemplateURL is invalid.
 static std::string BuildHostPathKey(const TemplateURL* t_url,
                                     bool try_url_if_invalid) {
-  if (t_url->url()) {
-    if (try_url_if_invalid && !t_url->url()->IsValid())
-      return HostPathKeyForURL(GURL(t_url->url()->url()));
+  if (try_url_if_invalid && !t_url->url_ref().IsValid())
+    return HostPathKeyForURL(GURL(t_url->url()));
 
-    if (t_url->url()->SupportsReplacement()) {
-      return HostPathKeyForURL(GURL(
-          t_url->url()->ReplaceSearchTerms(*t_url, ASCIIToUTF16("x"),
-              TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16())));
-    }
+  if (t_url->url_ref().SupportsReplacement()) {
+    return HostPathKeyForURL(GURL(
+        t_url->url_ref().ReplaceSearchTerms(ASCIIToUTF16("x"),
+            TemplateURLRef::NO_SUGGESTIONS_AVAILABLE, string16())));
   }
   return std::string();
 }
@@ -317,9 +315,9 @@ void ProfileWriter::AddKeywords(ScopedVector<TemplateURL> template_urls,
       continue;
 
     // Only add valid TemplateURLs to the model.
-    if ((*i)->url() && (*i)->url()->IsValid()) {
-      model->Add(*i);  // Takes ownership.
-      *i = NULL;       // Prevent the vector from deleting *i later.
+    if ((*i)->url_ref().IsValid()) {
+      model->AddAndSetProfile(*i, profile_);  // Takes ownership.
+      *i = NULL;  // Prevent the vector from deleting *i later.
     }
   }
 }

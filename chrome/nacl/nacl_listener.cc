@@ -26,6 +26,8 @@
 #if defined(OS_WIN)
 #include <fcntl.h>
 #include <io.h>
+
+#include "content/public/common/sandbox_init.h"
 #endif
 
 namespace {
@@ -65,6 +67,30 @@ int CreateMemoryObject(size_t size, int executable) {
 
 int CreateMemoryObject(size_t size, int executable) {
   return content::MakeSharedMemorySegmentViaIPC(size, executable);
+}
+
+#elif defined(OS_WIN)
+
+NaClListener* g_listener;
+
+// We wrap the function to convert the bool return value to an int.
+int BrokerDuplicateHandle(NaClHandle source_handle,
+                          uint32_t process_id,
+                          NaClHandle* target_handle,
+                          uint32_t desired_access,
+                          uint32_t options) {
+  return content::BrokerDuplicateHandle(source_handle, process_id,
+                                        target_handle, desired_access,
+                                        options);
+}
+
+int AttachDebugExceptionHandler(void* info, size_t info_size) {
+  std::string info_string(reinterpret_cast<char*>(info), info_size);
+  bool result = false;
+  if (!g_listener->Send(new NaClProcessMsg_AttachDebugExceptionHandler(
+           info_string, &result)))
+    return false;
+  return result;
 }
 
 #endif
@@ -118,11 +144,18 @@ NaClListener::NaClListener() : shutdown_event_(true, false),
                                main_loop_(NULL),
                                debug_enabled_(false) {
   io_thread_.StartWithOptions(base::Thread::Options(MessageLoop::TYPE_IO, 0));
+#if defined(OS_WIN)
+  DCHECK(g_listener == NULL);
+  g_listener = this;
+#endif
 }
 
 NaClListener::~NaClListener() {
   NOTREACHED();
   shutdown_event_.Signal();
+#if defined(OS_WIN)
+  g_listener = NULL;
+#endif
 }
 
 bool NaClListener::Send(IPC::Message* msg) {
@@ -142,7 +175,7 @@ void NaClListener::Listen() {
           switches::kProcessChannelID);
   channel_.reset(new IPC::SyncChannel(this, io_thread_.message_loop_proxy(),
                                       &shutdown_event_));
-  filter_.reset(new IPC::SyncMessageFilter(&shutdown_event_));
+  filter_ = new IPC::SyncMessageFilter(&shutdown_event_);
   channel_->AddFilter(filter_.get());
   channel_->Init(channel_name, IPC::Channel::MODE_CLIENT, true);
   main_loop_ = MessageLoop::current();
@@ -152,19 +185,20 @@ void NaClListener::Listen() {
 bool NaClListener::OnMessageReceived(const IPC::Message& msg) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(NaClListener, msg)
-      IPC_MESSAGE_HANDLER(NaClProcessMsg_Start, OnStartSelLdr)
+      IPC_MESSAGE_HANDLER(NaClProcessMsg_Start, OnMsgStart)
       IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
 }
 
-void NaClListener::OnStartSelLdr(std::vector<nacl::FileDescriptor> handles,
-                                 bool enable_exception_handling) {
+void NaClListener::OnMsgStart(const nacl::NaClStartParams& params) {
   struct NaClChromeMainArgs *args = NaClChromeMainArgsCreate();
   if (args == NULL) {
     LOG(ERROR) << "NaClChromeMainArgsCreate() failed";
     return;
   }
+
+  std::vector<nacl::FileDescriptor> handles = params.handles;
 
 #if defined(OS_LINUX) || defined(OS_MACOSX)
   args->create_memory_object_func = CreateMemoryObject;
@@ -194,15 +228,18 @@ void NaClListener::OnStartSelLdr(std::vector<nacl::FileDescriptor> handles,
     LOG(INFO) << "NaCl validation cache enabled.";
     // The cache structure is not freed and exists until the NaCl process exits.
     args->validation_cache = CreateValidationCache(
-        new BrowserValidationDBProxy(this),
-        // TODO(ncbray) plumb through real keys and versions.
-        "bogus key for HMAC....", "bogus version");
+        new BrowserValidationDBProxy(this), params.validation_cache_key,
+        params.version);
   }
 
   CHECK(handles.size() == 1);
   args->imc_bootstrap_handle = nacl::ToNativeHandle(handles[0]);
-  args->enable_exception_handling = enable_exception_handling;
+  args->enable_exception_handling = params.enable_exception_handling;
   args->enable_debug_stub = debug_enabled_;
+#if defined(OS_WIN)
+  args->broker_duplicate_handle_func = BrokerDuplicateHandle;
+  args->attach_debug_exception_handler_func = AttachDebugExceptionHandler;
+#endif
   NaClChromeMainStart(args);
   NOTREACHED();
 }

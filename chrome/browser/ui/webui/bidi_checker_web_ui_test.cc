@@ -22,7 +22,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "ui/base/resource/resource_bundle.h"
 
-#if defined(OS_POSIX) && defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_GTK)
 #include <gtk/gtk.h>
 #endif
 
@@ -81,14 +81,14 @@ void WebUIBidiCheckerBrowserTestRTL::SetUpOnMainThread() {
   ResourceBundle::GetSharedInstance().OverrideLocalePakForTest(pak_path);
   ResourceBundle::GetSharedInstance().ReloadLocaleResources("he");
   base::i18n::SetICUDefaultLocale("he");
-#if defined(OS_POSIX) && defined(TOOLKIT_USES_GTK)
+#if defined(OS_POSIX) && defined(TOOLKIT_GTK)
   gtk_widget_set_default_direction(GTK_TEXT_DIR_RTL);
 #endif
 }
 
 void WebUIBidiCheckerBrowserTestRTL::CleanUpOnMainThread() {
   WebUIBidiCheckerBrowserTest::CleanUpOnMainThread();
-#if defined(OS_POSIX) && defined(TOOLKIT_USES_GTK)
+#if defined(OS_POSIX) && defined(TOOLKIT_GTK)
   gtk_widget_set_default_direction(GTK_TEXT_DIR_LTR);
 #endif
   base::i18n::SetICUDefaultLocale(app_locale_);
@@ -114,7 +114,7 @@ static void SetupHistoryPageTest(Browser* browser,
 
 // TODO(estade): fix this test: http://crbug.com/119595
 IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestLTR,
-                       DISABLED_TestHistoryPage) {
+                       TestHistoryPage) {
   // Test an Israeli news site with a Hebrew title.
   SetupHistoryPageTest(browser(),
                        "http://www.ynet.co.il",
@@ -124,7 +124,7 @@ IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestLTR,
 
 // TODO(estade): fix this test: http://crbug.com/119595
 IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestRTL,
-                       DISABLED_TestHistoryPage) {
+                       TestHistoryPage) {
   SetupHistoryPageTest(browser(), "http://www.google.com", "Google");
   RunBidiCheckerOnPage(chrome::kChromeUIHistoryFrameURL);
 }
@@ -354,9 +354,8 @@ IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestLTR,
   RunBidiCheckerOnPage(url);
 }
 
-// http://crbug.com/117871
 IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestRTL,
-                       DISABLED_TestSettingsLanguageOptionsPage) {
+                       TestSettingsLanguageOptionsPage) {
   std::string url(chrome::kChromeUISettingsFrameURL);
   url += std::string(chrome::kLanguageOptionsSubPage);
   RunBidiCheckerOnPage(url);
@@ -619,8 +618,15 @@ IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestLTR,
   RunBidiCheckerOnPage(url);
 }
 
+// Fails on chromeos. http://crbug.com/125367
+#if defined(OS_CHROMEOS)
+#define MAYBE_TestSettingsFrameHandler DISABLED_TestSettingsFrameHandler
+#else
+#define MAYBE_TestSettingsFrameHandler TestSettingsFrameHandler
+#endif
+
 IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestRTL,
-                       TestSettingsFrameHandler) {
+                       MAYBE_TestSettingsFrameHandler) {
   std::string url(chrome::kChromeUISettingsFrameURL);
   url += chrome::kHandlerSettingsSubPage;
   RunBidiCheckerOnPage(url);
@@ -673,9 +679,8 @@ IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestLTR,
   RunBidiCheckerOnPage(url);
 }
 
-// http://crbug.com/118420
 IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestRTL,
-                       DISABLED_TestSettingsFrameFonts) {
+                       TestSettingsFrameFonts) {
   std::string url(chrome::kChromeUISettingsFrameURL);
   url += "fonts";
   RunBidiCheckerOnPage(url);
@@ -700,18 +705,11 @@ IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestRTL,
 // chrome://help-frame
 //==============================
 
-// http://crbug.com/118477
-#if defined(OS_CHROMEOS)
-#define MAYBE_TestHelpFrame DISABLED_TestHelpFrame
-#else
-#define MAYBE_TestHelpFrame TestHelpFrame
-#endif  // defined(OS_CHROMEOS)
-
 IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestLTR, TestHelpFrame) {
   RunBidiCheckerOnPage(chrome::kChromeUIHelpFrameURL);
 }
 
-IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestRTL, MAYBE_TestHelpFrame) {
+IN_PROC_BROWSER_TEST_F(WebUIBidiCheckerBrowserTestRTL, TestHelpFrame) {
   RunBidiCheckerOnPage(chrome::kChromeUIHelpFrameURL);
 }
 

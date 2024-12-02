@@ -12,11 +12,13 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/perftimer.h"
+#include "base/profiler/alternate_timer.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/third_party/nspr/prtime.h"
 #include "base/time.h"
+#include "base/tracked_objects.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
@@ -26,13 +28,15 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
+#include "chrome/common/metrics/experiments_helper.h"
 #include "chrome/common/metrics/proto/omnibox_event.pb.h"
+#include "chrome/common/metrics/proto/profiler_event.pb.h"
 #include "chrome/common/metrics/proto/system_profile.pb.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/gpu_data_manager.h"
-#include "content/public/common/gpu_info.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/gpu_info.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/screen.h"
 #include "webkit/plugins/webplugininfo.h"
@@ -46,8 +50,10 @@ extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 using content::GpuDataManager;
 using metrics::OmniboxEventProto;
+using metrics::ProfilerEventProto;
 using metrics::SystemProfileProto;
-typedef base::FieldTrial::NameGroupId NameGroupId;
+using tracked_objects::ProcessDataSnapshot;
+typedef experiments_helper::SelectedGroupId SelectedGroupId;
 
 namespace {
 
@@ -141,6 +147,41 @@ OmniboxEventProto::Suggestion::ResultType AsOmniboxEventResultType(
   }
 }
 
+ProfilerEventProto::TrackedObject::ProcessType AsProtobufProcessType(
+    content::ProcessType process_type) {
+  switch (process_type) {
+    case content::PROCESS_TYPE_BROWSER:
+      return ProfilerEventProto::TrackedObject::BROWSER;
+    case content::PROCESS_TYPE_RENDERER:
+      return ProfilerEventProto::TrackedObject::RENDERER;
+    case content::PROCESS_TYPE_PLUGIN:
+      return ProfilerEventProto::TrackedObject::PLUGIN;
+    case content::PROCESS_TYPE_WORKER:
+      return ProfilerEventProto::TrackedObject::WORKER;
+    case content::PROCESS_TYPE_NACL_LOADER:
+      return ProfilerEventProto::TrackedObject::NACL_LOADER;
+    case content::PROCESS_TYPE_UTILITY:
+      return ProfilerEventProto::TrackedObject::UTILITY;
+    case content::PROCESS_TYPE_PROFILE_IMPORT:
+      return ProfilerEventProto::TrackedObject::PROFILE_IMPORT;
+    case content::PROCESS_TYPE_ZYGOTE:
+      return ProfilerEventProto::TrackedObject::ZYGOTE;
+    case content::PROCESS_TYPE_SANDBOX_HELPER:
+      return ProfilerEventProto::TrackedObject::SANDBOX_HELPER;
+    case content::PROCESS_TYPE_NACL_BROKER:
+      return ProfilerEventProto::TrackedObject::NACL_BROKER;
+    case content::PROCESS_TYPE_GPU:
+      return ProfilerEventProto::TrackedObject::GPU;
+    case content::PROCESS_TYPE_PPAPI_PLUGIN:
+      return ProfilerEventProto::TrackedObject::PPAPI_PLUGIN;
+    case content::PROCESS_TYPE_PPAPI_BROKER:
+      return ProfilerEventProto::TrackedObject::PPAPI_BROKER;
+    default:
+      NOTREACHED();
+      return ProfilerEventProto::TrackedObject::UNKNOWN;
+  }
+}
+
 // Returns the plugin preferences corresponding for this user, if available.
 // If multiple user profiles are loaded, returns the preferences corresponding
 // to an arbitrary one of the profiles.
@@ -170,14 +211,52 @@ void SetPluginInfo(const webkit::WebPluginInfo& plugin_info,
     plugin->set_is_disabled(!plugin_prefs->IsPluginEnabled(plugin_info));
 }
 
-void WriteFieldTrials(const std::vector<NameGroupId>& field_trial_ids,
+void WriteFieldTrials(const std::vector<SelectedGroupId>& field_trial_ids,
                       SystemProfileProto* system_profile) {
-  for (std::vector<NameGroupId>::const_iterator it = field_trial_ids.begin();
-       it != field_trial_ids.end(); ++it) {
+  for (std::vector<SelectedGroupId>::const_iterator it =
+       field_trial_ids.begin(); it != field_trial_ids.end(); ++it) {
     SystemProfileProto::FieldTrial* field_trial =
         system_profile->add_field_trial();
     field_trial->set_name_id(it->name);
     field_trial->set_group_id(it->group);
+  }
+}
+
+void WriteProfilerData(const ProcessDataSnapshot& profiler_data,
+                       content::ProcessType process_type,
+                       ProfilerEventProto* performance_profile) {
+  for (std::vector<tracked_objects::TaskSnapshot>::const_iterator it =
+           profiler_data.tasks.begin();
+       it != profiler_data.tasks.end(); ++it) {
+    std::string ignored;
+    uint64 birth_thread_name_hash;
+    uint64 exec_thread_name_hash;
+    uint64 source_file_name_hash;
+    uint64 source_function_name_hash;
+    MetricsLogBase::CreateHashes(it->birth.thread_name,
+                                 &ignored, &birth_thread_name_hash);
+    MetricsLogBase::CreateHashes(it->death_thread_name,
+                                 &ignored, &exec_thread_name_hash);
+    MetricsLogBase::CreateHashes(it->birth.location.function_name,
+                                 &ignored, &source_file_name_hash);
+    MetricsLogBase::CreateHashes(it->birth.location.file_name,
+                                 &ignored, &source_function_name_hash);
+
+    const tracked_objects::DeathDataSnapshot& death_data = it->death_data;
+    ProfilerEventProto::TrackedObject* tracked_object =
+        performance_profile->add_tracked_object();
+    tracked_object->set_birth_thread_name_hash(birth_thread_name_hash);
+    tracked_object->set_exec_thread_name_hash(exec_thread_name_hash);
+    tracked_object->set_source_file_name_hash(source_file_name_hash);
+    tracked_object->set_source_function_name_hash(source_function_name_hash);
+    tracked_object->set_source_line_number(it->birth.location.line_number);
+    tracked_object->set_exec_count(death_data.count);
+    tracked_object->set_exec_time_total(death_data.run_duration_sum);
+    tracked_object->set_exec_time_sampled(death_data.run_duration_sample);
+    tracked_object->set_queue_time_total(death_data.queue_duration_sum);
+    tracked_object->set_queue_time_sampled(death_data.queue_duration_sample);
+    tracked_object->set_process_type(AsProtobufProcessType(process_type));
+    tracked_object->set_process_id(profiler_data.process_id);
   }
 }
 
@@ -264,17 +343,16 @@ PrefService* MetricsLog::GetPrefService() {
 }
 
 gfx::Size MetricsLog::GetScreenSize() const {
-  return gfx::Screen::GetPrimaryMonitorSize();
+  return gfx::Screen::GetPrimaryMonitor().GetSizeInPixel();
 }
 
 int MetricsLog::GetScreenCount() const {
   return gfx::Screen::GetNumMonitors();
 }
 
-
 void MetricsLog::GetFieldTrialIds(
-    std::vector<NameGroupId>* field_trial_ids) const {
-  base::FieldTrialList::GetFieldTrialNameGroupIds(field_trial_ids);
+    std::vector<SelectedGroupId>* field_trial_ids) const {
+  experiments_helper::GetFieldTrialSelectedGroupIds(field_trial_ids);
 }
 
 void MetricsLog::WriteStabilityElement(
@@ -699,9 +777,34 @@ void MetricsLog::RecordEnvironmentProto(
   bool write_as_xml = false;
   WritePluginList(plugin_list, write_as_xml);
 
-  std::vector<NameGroupId> field_trial_ids;
+  std::vector<SelectedGroupId> field_trial_ids;
   GetFieldTrialIds(&field_trial_ids);
   WriteFieldTrials(field_trial_ids, system_profile);
+}
+
+void MetricsLog::RecordProfilerData(
+    const tracked_objects::ProcessDataSnapshot& process_data,
+    content::ProcessType process_type) {
+  DCHECK(!locked());
+
+  if (tracked_objects::GetTimeSourceType() !=
+          tracked_objects::TIME_SOURCE_TYPE_WALL_TIME) {
+    // We currently only support the default time source, wall clock time.
+    return;
+  }
+
+  ProfilerEventProto* profile;
+  if (!uma_proto()->profiler_event_size()) {
+    // For the first process's data, add a new field to the protocol buffer.
+    profile = uma_proto()->add_profiler_event();
+    profile->set_profile_type(ProfilerEventProto::STARTUP_PROFILE);
+    profile->set_time_source(ProfilerEventProto::WALL_CLOCK_TIME);
+  } else {
+    // For the remaining calls, re-use the existing field.
+    profile = uma_proto()->mutable_profiler_event(0);
+  }
+
+  WriteProfilerData(process_data, process_type, profile);
 }
 
 void MetricsLog::WriteAllProfilesMetrics(
@@ -782,13 +885,14 @@ void MetricsLog::RecordOmniboxOpenedURL(const AutocompleteLog& log) {
   }
   WriteCommonEventAttributes();
 
+  std::vector<string16> terms;
+  const int num_terms =
+      static_cast<int>(Tokenize(log.text, kWhitespaceUTF16, &terms));
   {
     OPEN_ELEMENT_FOR_SCOPE("autocomplete");
 
     WriteIntAttribute("typedlength", static_cast<int>(log.text.length()));
-    std::vector<string16> terms;
-    WriteIntAttribute("numterms",
-        static_cast<int>(Tokenize(log.text, kWhitespaceUTF16, &terms)));
+    WriteIntAttribute("numterms", num_terms);
     WriteIntAttribute("selectedindex", static_cast<int>(log.selected_index));
     WriteIntAttribute("completedlength",
                       static_cast<int>(log.inline_autocompleted_length));
@@ -824,8 +928,18 @@ void MetricsLog::RecordOmniboxOpenedURL(const AutocompleteLog& log) {
     omnibox_event->set_tab_id(log.tab_id);
   }
   omnibox_event->set_typed_length(log.text.length());
+  omnibox_event->set_just_deleted_text(log.just_deleted_text);
+  omnibox_event->set_num_typed_terms(num_terms);
   omnibox_event->set_selected_index(log.selected_index);
   omnibox_event->set_completed_length(log.inline_autocompleted_length);
+  if (log.elapsed_time_since_user_first_modified_omnibox !=
+      base::TimeDelta::FromMilliseconds(-1)) {
+    // Only upload the typing duration if it is set/valid.
+    omnibox_event->set_typing_duration_ms(
+        log.elapsed_time_since_user_first_modified_omnibox.InMilliseconds());
+  }
+  omnibox_event->set_current_page_classification(
+      log.current_page_classification);
   omnibox_event->set_input_type(AsOmniboxEventInputType(log.input_type));
   for (AutocompleteResult::const_iterator i(log.result.begin());
        i != log.result.end(); ++i) {

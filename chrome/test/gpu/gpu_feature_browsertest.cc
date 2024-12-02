@@ -19,8 +19,12 @@
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/common/content_switches.h"
 #include "content/test/gpu/gpu_test_config.h"
+#include "content/test/gpu/test_switches.h"
 #include "net/base/net_util.h"
 #include "ui/gfx/gl/gl_switches.h"
+#if defined(OS_MACOSX)
+#include "ui/surface/io_surface_support_mac.h"
+#endif
 
 using content::GpuDataManager;
 using content::GpuFeatureType;
@@ -52,7 +56,7 @@ class GpuFeatureTest : public InProcessBrowserTest {
     InProcessBrowserTest::SetUpCommandLine(command_line);
 
     // Do not use mesa if real GPU is required.
-    if (!command_line->HasSwitch("use-gpu-in-tests")) {
+    if (!command_line->HasSwitch(switches::kUseGpuInTests)) {
 #if !defined(OS_MACOSX)
       CHECK(test_launcher_utils::OverrideGLImplementation(
           command_line, gfx::kGLImplementationOSMesaName)) <<
@@ -108,6 +112,11 @@ class GpuFeatureTest : public InProcessBrowserTest {
 #if defined(OS_LINUX) && !defined(NDEBUG)
     // Bypass tests on GPU Linux Debug bots.
     if (gpu_enabled_)
+      return;
+#endif
+#if defined(OS_MACOSX)
+    // Bypass tests on Mac OSX 10.5 bots (IOSurfaceSupport is now required).
+    if (!IOSurfaceSupport::Initialize())
       return;
 #endif
 
@@ -245,20 +254,40 @@ IN_PROC_BROWSER_TEST_F(GpuFeatureTest, MultisamplingAllowed) {
   if (use_gl == gfx::kGLImplementationOSMesaName)
     return;
 
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_MACOSX)
   // Linux Intel uses mesa driver, where multisampling is not supported.
+  // Multisampling is also not supported on virtualized mac os.
   GPUTestBotConfig test_bot;
   test_bot.LoadCurrentConfig(NULL);
+
   const std::vector<uint32>& gpu_vendor = test_bot.gpu_vendor();
+#if defined(OS_LINUX)
   if (gpu_vendor.size() == 1 && gpu_vendor[0] == 0x8086)
     return;
-#endif
+#endif  // defined(OS_LINUX)
+
+#if defined(OS_MACOSX)
+  if (gpu_vendor.size() == 1 && gpu_vendor[0] == 0x15AD)
+    return;
+#endif  // defined(OS_MACOSX)
+
+#endif  // defined(OS_LINUX) || defined(OS_MACOSX)
 
   const FilePath url(FILE_PATH_LITERAL("feature_multisampling.html"));
   RunTest(url, "\"TRUE\"", true);
 }
 
 IN_PROC_BROWSER_TEST_F(GpuFeatureTest, MultisamplingBlocked) {
+#if defined(OS_MACOSX)
+  // Multisampling fails on virtualized mac os.
+  GPUTestBotConfig test_bot;
+  test_bot.LoadCurrentConfig(NULL);
+
+  const std::vector<uint32>& gpu_vendor = test_bot.gpu_vendor();
+  if (gpu_vendor.size() == 1 && gpu_vendor[0] == 0x15AD)
+    return;
+#endif
+
   const std::string json_blacklist =
       "{\n"
       "  \"name\": \"gpu blacklist\",\n"
@@ -289,19 +318,21 @@ class WebGLMultisamplingTest : public GpuFeatureTest {
 };
 
 IN_PROC_BROWSER_TEST_F(WebGLMultisamplingTest, MultisamplingDisabled) {
+#if defined(OS_MACOSX)
+  // Multisampling fails on virtualized mac os.
+  GPUTestBotConfig test_bot;
+  test_bot.LoadCurrentConfig(NULL);
+
+  const std::vector<uint32>& gpu_vendor = test_bot.gpu_vendor();
+  if (gpu_vendor.size() == 1 && gpu_vendor[0] == 0x15AD)
+    return;
+#endif
+
   const FilePath url(FILE_PATH_LITERAL("feature_multisampling.html"));
   RunTest(url, "\"FALSE\"", true);
 }
 
-class Canvas2DEnabledTest : public GpuFeatureTest {
- public:
-  virtual void SetUpCommandLine(CommandLine* command_line) {
-    GpuFeatureTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kEnableAccelerated2dCanvas);
-  }
-};
-
-IN_PROC_BROWSER_TEST_F(Canvas2DEnabledTest, Canvas2DAllowed) {
+IN_PROC_BROWSER_TEST_F(GpuFeatureTest, Canvas2DAllowed) {
 #if defined(OS_WIN)
   // Accelerated canvas 2D is not supported on XP.
   GPUTestBotConfig test_bot;
@@ -317,7 +348,7 @@ IN_PROC_BROWSER_TEST_F(Canvas2DEnabledTest, Canvas2DAllowed) {
   RunTest(url, EXPECT_GPU_SWAP_BUFFERS);
 }
 
-IN_PROC_BROWSER_TEST_F(Canvas2DEnabledTest, Canvas2DBlocked) {
+IN_PROC_BROWSER_TEST_F(GpuFeatureTest, Canvas2DBlocked) {
   const std::string json_blacklist =
       "{\n"
       "  \"name\": \"gpu blacklist\",\n"
@@ -371,6 +402,7 @@ class ThreadedCompositorTest : public GpuFeatureTest {
   }
 };
 
+// disabled in http://crbug.com/123503
 IN_PROC_BROWSER_TEST_F(ThreadedCompositorTest, ThreadedCompositor) {
   const FilePath url(FILE_PATH_LITERAL("feature_compositing.html"));
   RunTest(url, EXPECT_GPU_SWAP_BUFFERS);
@@ -410,4 +442,3 @@ IN_PROC_BROWSER_TEST_F(GpuFeatureTest, RafNoDamage) {
 }
 
 }  // namespace anonymous
-

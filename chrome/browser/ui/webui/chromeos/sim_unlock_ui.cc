@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/string_piece.h"
@@ -670,7 +671,7 @@ SimUnlockUI::SimUnlockUI(content::WebUI* web_ui) : WebUIController(web_ui) {
 
   // Set up the chrome://sim-unlock/ source.
   Profile* profile = Profile::FromWebUI(web_ui);
-  profile->GetChromeURLDataManager()->AddDataSource(html_source);
+  ChromeURLDataManager::AddDataSource(profile, html_source);
 }
 
 }  // namespace chromeos

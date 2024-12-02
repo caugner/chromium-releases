@@ -12,10 +12,11 @@
 #include "ui/aura/layout_manager.h"
 #include "ui/aura/monitor_manager.h"
 #include "ui/aura/root_window.h"
-#include "ui/aura/test/single_monitor_manager.h"
+#include "ui/aura/single_monitor_manager.h"
 #include "ui/aura/test/test_screen.h"
 #include "ui/aura/test/test_stacking_client.h"
 #include "ui/aura/window.h"
+#include "ui/gfx/screen.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -37,8 +38,7 @@ class NativeWidgetAuraTest : public testing::Test {
 
   // testing::Test overrides:
   virtual void SetUp() OVERRIDE {
-    aura::Env::GetInstance()->SetMonitorManager(
-        new aura::test::SingleMonitorManager);
+    aura::Env::GetInstance()->SetMonitorManager(new aura::SingleMonitorManager);
     root_window_.reset(
         aura::MonitorManager::CreateRootWindowForPrimaryMonitor());
     gfx::Screen::SetInstance(new aura::TestScreen(root_window_.get()));
@@ -108,6 +108,8 @@ class TestLayoutManager : public aura::LayoutManager {
     SetChildBoundsDirect(child, gfx::Rect(0, 0, 300, 300));
   }
   virtual void OnWillRemoveWindowFromLayout(aura::Window* child) OVERRIDE {
+  }
+  virtual void OnWindowRemovedFromLayout(aura::Window* child) OVERRIDE {
   }
   virtual void OnChildWindowVisibilityChanged(aura::Window* child,
                                               bool visible) OVERRIDE {

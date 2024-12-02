@@ -181,8 +181,34 @@ class WebMediaPlayerImpl
 
   virtual WebKit::WebAudioSourceProvider* audioSourceProvider();
 
+  virtual AddIdStatus sourceAddId(const WebKit::WebString& id,
+                                  const WebKit::WebString& type);
+  virtual bool sourceRemoveId(const WebKit::WebString& id);
+  virtual WebKit::WebTimeRanges sourceBuffered(const WebKit::WebString& id);
+  // TODO(acolwell): Remove non-id version when http://webk.it/83788 fix lands.
   virtual bool sourceAppend(const unsigned char* data, unsigned length);
+  virtual bool sourceAppend(const WebKit::WebString& id,
+                            const unsigned char* data,
+                            unsigned length);
+  virtual bool sourceAbort(const WebKit::WebString& id);
   virtual void sourceEndOfStream(EndOfStreamStatus status);
+
+  virtual MediaKeyException generateKeyRequest(
+      const WebKit::WebString& key_system,
+      const unsigned char* init_data,
+      unsigned init_data_length);
+
+  virtual MediaKeyException addKey(const WebKit::WebString& key_system,
+                                   const unsigned char* key,
+                                   unsigned key_length,
+                                   const unsigned char* init_data,
+                                   unsigned init_data_length,
+                                   const WebKit::WebString& session_id);
+
+  virtual MediaKeyException cancelKeyRequest(
+      const WebKit::WebString& key_system,
+      const WebKit::WebString& session_id);
+
 
   // As we are closing the tab or even the browser, |main_loop_| is destroyed
   // even before this object gets destructed, so we need to know when
@@ -198,6 +224,7 @@ class WebMediaPlayerImpl
   void OnPipelineError(media::PipelineStatus error);
   void OnNetworkEvent(media::NetworkEvent type);
   void OnDemuxerOpened();
+  void OnKeyNeeded(scoped_array<uint8> init_data, int init_data_size);
   void SetOpaque(bool);
 
  private:
@@ -205,7 +232,7 @@ class WebMediaPlayerImpl
   void DataSourceInitialized(const GURL& gurl, media::PipelineStatus status);
 
   // Finishes starting the pipeline due to a call to load().
-  void StartPipeline(const GURL& gurl);
+  void StartPipeline();
 
   // Helpers that set the network/ready state and notifies the client if
   // they've changed.

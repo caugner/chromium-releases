@@ -35,6 +35,7 @@ EnumMapper<PropertyIndex>::Pair property_index_table[] = {
   { flimflam::kCellularApnProperty, PROPERTY_INDEX_CELLULAR_APN },
   { flimflam::kCellularLastGoodApnProperty,
     PROPERTY_INDEX_CELLULAR_LAST_GOOD_APN },
+  { flimflam::kCheckPortalProperty, PROPERTY_INDEX_CHECK_PORTAL },
   { flimflam::kCheckPortalListProperty, PROPERTY_INDEX_CHECK_PORTAL_LIST },
   { flimflam::kConnectableProperty, PROPERTY_INDEX_CONNECTABLE },
   { flimflam::kConnectedTechnologiesProperty,
@@ -181,8 +182,10 @@ EnumMapper<PropertyIndex>::Pair property_index_table[] = {
   { flimflam::kOpenVPNTLSRemoteProperty, PROPERTY_INDEX_OPEN_VPN_TLSREMOTE },
   { flimflam::kOpenVPNUserProperty, PROPERTY_INDEX_OPEN_VPN_USER },
   { flimflam::kPaymentPortalProperty, PROPERTY_INDEX_OLP },
+  { flimflam::kPaymentURLProperty, PROPERTY_INDEX_OLP_URL },
   { flimflam::kVPNDomainProperty, PROPERTY_INDEX_VPN_DOMAIN },
   { flimflam::kWifiAuthMode, PROPERTY_INDEX_WIFI_AUTH_MODE },
+  { flimflam::kWifiBSsid, PROPERTY_INDEX_WIFI_BSSID },
   { flimflam::kWifiFrequency, PROPERTY_INDEX_WIFI_FREQUENCY },
   { flimflam::kWifiHexSsid, PROPERTY_INDEX_WIFI_HEX_SSID },
   { flimflam::kWifiHiddenSsid, PROPERTY_INDEX_WIFI_HIDDEN_SSID },
@@ -546,13 +549,25 @@ bool NativeNetworkDeviceParser::ParseSimLockStateFromDictionary(
     int* out_retries,
     bool* out_enabled) {
   std::string state_string;
+  // Since RetriesLeft is sent as a uint32, which may overflow int32 range, from
+  // Flimflam, it may be stored as an integer or a double in DictionaryValue.
+  base::Value* retries_value = NULL;
   if (!info.GetString(flimflam::kSIMLockTypeProperty, &state_string) ||
-      !info.GetInteger(flimflam::kSIMLockRetriesLeftProperty, out_retries) ||
-      !info.GetBoolean(flimflam::kSIMLockEnabledProperty, out_enabled)) {
+      !info.GetBoolean(flimflam::kSIMLockEnabledProperty, out_enabled) ||
+      !info.Get(flimflam::kSIMLockRetriesLeftProperty, &retries_value) ||
+      (retries_value->GetType() != base::Value::TYPE_INTEGER &&
+       retries_value->GetType() != base::Value::TYPE_DOUBLE)) {
     LOG(ERROR) << "Error parsing SIMLock state";
     return false;
   }
   *out_state = ParseSimLockState(state_string);
+  if (retries_value->GetType() == base::Value::TYPE_INTEGER) {
+    retries_value->GetAsInteger(out_retries);
+  } else if (retries_value->GetType() == base::Value::TYPE_DOUBLE) {
+    double retries_double = 0;
+    retries_value->GetAsDouble(&retries_double);
+    *out_retries = retries_double;
+  }
   return true;
 }
 
@@ -721,6 +736,9 @@ bool NativeNetworkParser::ParseValue(PropertyIndex index,
       network->set_save_credentials(save_credentials);
       return true;
     }
+    case PROPERTY_INDEX_CHECK_PORTAL:
+      // This property is ignored.
+      return true;
     default:
       return NetworkParser::ParseValue(index, value, network);
       break;
@@ -941,6 +959,9 @@ bool NativeCellularNetworkParser::ParseValue(PropertyIndex index,
       }
       break;
     }
+    case PROPERTY_INDEX_OLP_URL:
+      // This property is ignored.
+      return true;
     case PROPERTY_INDEX_STATE: {
       // Save previous state before calling WirelessNetwork::ParseValue.
       ConnectionState prev_state = cellular_network->state();
@@ -1019,16 +1040,30 @@ bool NativeWifiNetworkParser::ParseValue(PropertyIndex index,
       std::string ssid_hex;
       if (!value.GetAsString(&ssid_hex))
         return false;
-
       wifi_network->SetHexSsid(ssid_hex);
       return true;
     }
-    case PROPERTY_INDEX_WIFI_AUTH_MODE:
-    case PROPERTY_INDEX_WIFI_PHY_MODE:
-    case PROPERTY_INDEX_WIFI_HIDDEN_SSID:
-    case PROPERTY_INDEX_WIFI_FREQUENCY:
-      // These properties are currently not used in the UI.
+    case PROPERTY_INDEX_WIFI_BSSID: {
+      std::string bssid;
+      if (!value.GetAsString(&bssid))
+        return false;
+      wifi_network->set_bssid(bssid);
       return true;
+    }
+    case PROPERTY_INDEX_WIFI_HIDDEN_SSID: {
+      bool hidden_ssid;
+      if (!value.GetAsBoolean(&hidden_ssid))
+        return false;
+      wifi_network->set_hidden_ssid(hidden_ssid);
+      return true;
+    }
+    case PROPERTY_INDEX_WIFI_FREQUENCY: {
+      int frequency;
+      if (!value.GetAsInteger(&frequency))
+        return false;
+      wifi_network->set_frequency(frequency);
+      return true;
+    }
     case PROPERTY_INDEX_NAME: {
       // Does not change network name when it was already set by WiFi.HexSSID.
       if (!wifi_network->name().empty())
@@ -1062,7 +1097,6 @@ bool NativeWifiNetworkParser::ParseValue(PropertyIndex index,
     }
     case PROPERTY_INDEX_PASSPHRASE_REQUIRED: {
       bool passphrase_required;
-      value.GetAsBoolean(&passphrase_required);
       if (!value.GetAsBoolean(&passphrase_required))
         break;
       wifi_network->set_passphrase_required(passphrase_required);
@@ -1139,6 +1173,8 @@ bool NativeWifiNetworkParser::ParseValue(PropertyIndex index,
       wifi_network->set_eap_server_ca_cert_nss_nickname(eap_cert_nickname);
       return true;
     }
+    case PROPERTY_INDEX_WIFI_AUTH_MODE:
+    case PROPERTY_INDEX_WIFI_PHY_MODE:
     case PROPERTY_INDEX_EAP_CLIENT_CERT:
     case PROPERTY_INDEX_EAP_CLIENT_CERT_NSS:
     case PROPERTY_INDEX_EAP_PRIVATE_KEY:

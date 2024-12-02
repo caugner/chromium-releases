@@ -12,8 +12,8 @@
 
 namespace speech {
 
-// This is Chrome's implementation of the SpeechRecognitionManager interface.
-// This class is a singleton and accessed via the Get method.
+// This is Chrome's implementation of the SpeechRecognitionManagerDelegate
+// interface.
 class ChromeSpeechRecognitionManagerDelegate
     : NON_EXPORTED_BASE(public content::SpeechRecognitionManagerDelegate),
       public SpeechRecognitionBubbleControllerDelegate {
@@ -23,31 +23,37 @@ class ChromeSpeechRecognitionManagerDelegate
 
   // SpeechRecognitionBubbleControllerDelegate methods.
   virtual void InfoBubbleButtonClicked(
-      int caller_id, SpeechRecognitionBubble::Button button) OVERRIDE;
-  virtual void InfoBubbleFocusChanged(int caller_id) OVERRIDE;
+      int session_id, SpeechRecognitionBubble::Button button) OVERRIDE;
+  virtual void InfoBubbleFocusChanged(int session_id) OVERRIDE;
 
  protected:
   // SpeechRecognitionManagerDelegate methods.
-  virtual void GetRequestInfo(bool* can_report_metrics,
-                              std::string* request_info) OVERRIDE;
-  virtual void ShowRecognitionRequested(int caller_id,
-                                        int render_process_id,
-                                        int render_view_id,
-                                        const gfx::Rect& element_rect) OVERRIDE;
-  virtual void ShowWarmUp(int caller_id) OVERRIDE;
-  virtual void ShowRecognizing(int caller_id) OVERRIDE;
-  virtual void ShowRecording(int caller_id) OVERRIDE;
-  virtual void ShowInputVolume(int caller_id,
+  virtual void GetDiagnosticInformation(bool* can_report_metrics,
+                                        std::string* hardware_info) OVERRIDE;
+  virtual void CheckRecognitionIsAllowed(
+      int session_id,
+      base::Callback<void(int session_id, bool is_allowed)> callback) OVERRIDE;
+  virtual void ShowRecognitionRequested(int session_id) OVERRIDE;
+  virtual void ShowWarmUp(int session_id) OVERRIDE;
+  virtual void ShowRecognizing(int session_id) OVERRIDE;
+  virtual void ShowRecording(int session_id) OVERRIDE;
+  virtual void ShowInputVolume(int session_id,
                                float volume,
                                float noise_volume) OVERRIDE;
-  virtual void ShowMicError(int caller_id,
-                            MicError error) OVERRIDE;
-  virtual void ShowRecognizerError(
-      int caller_id, content::SpeechRecognitionErrorCode error) OVERRIDE;
-  virtual void DoClose(int caller_id) OVERRIDE;
+  virtual void ShowError(int session_id,
+                         const content::SpeechRecognitionError& error) OVERRIDE;
+  virtual void DoClose(int session_id) OVERRIDE;
 
  private:
   class OptionalRequestInfo;
+
+  // Checks for VIEW_TYPE_WEB_CONTENTS host in the UI thread and notifies back
+  // the result in the IO thread through |callback|.
+  static void CheckRenderViewType(
+      int session_id,
+      base::Callback<void(int session_id, bool is_allowed)> callback,
+      int render_process_id,
+      int render_view_id);
 
   scoped_refptr<SpeechRecognitionBubbleController> bubble_controller_;
   scoped_refptr<OptionalRequestInfo> optional_request_info_;

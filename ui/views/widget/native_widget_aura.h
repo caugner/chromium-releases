@@ -16,6 +16,7 @@
 #include "ui/views/widget/native_widget_private.h"
 
 namespace aura {
+class Monitor;
 class Window;
 }
 namespace gfx {
@@ -25,6 +26,7 @@ class Font;
 namespace views {
 
 class DropHelper;
+class NativeWidgetHelperAura;
 class TooltipManagerAura;
 
 class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
@@ -63,9 +65,9 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
   virtual void SendNativeAccessibilityEvent(
       View* view,
       ui::AccessibilityTypes::Event event_type) OVERRIDE;
-  virtual void SetMouseCapture() OVERRIDE;
-  virtual void ReleaseMouseCapture() OVERRIDE;
-  virtual bool HasMouseCapture() const OVERRIDE;
+  virtual void SetCapture(unsigned int flags) OVERRIDE;
+  virtual void ReleaseCapture() OVERRIDE;
+  virtual bool HasCapture(unsigned int flags) const OVERRIDE;
   virtual InputMethod* CreateInputMethod() OVERRIDE;
   virtual void CenterWindow(const gfx::Size& size) OVERRIDE;
   virtual void GetWindowPlacement(
@@ -166,6 +168,8 @@ class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
   void SetInitialFocus();
 
   internal::NativeWidgetDelegate* delegate_;
+
+  scoped_ptr<NativeWidgetHelperAura> desktop_helper_;
 
   aura::Window* window_;
 

@@ -49,7 +49,6 @@ class MessageLoop;
 class Profile;
 class ScopedTempDir;
 class SkBitmap;
-class TabContents;
 class TabContentsWrapper;
 class TemplateURLService;
 
@@ -65,6 +64,7 @@ class WebContents;
 
 namespace gfx {
 class Point;
+class Rect;
 class Size;
 }
 
@@ -82,6 +82,7 @@ enum BrowserTestWaitFlags {
   BROWSER_TEST_WAIT_FOR_BROWSER = 1 << 0,     // Wait for a new browser.
   BROWSER_TEST_WAIT_FOR_TAB = 1 << 1,         // Wait for a new tab.
   BROWSER_TEST_WAIT_FOR_NAVIGATION = 1 << 2,  // Wait for navigation to finish.
+  BROWSER_TEST_WAIT_FOR_AUTH = 1 << 3,        // Wait for auth prompt.
 
   BROWSER_TEST_MASK = BROWSER_TEST_WAIT_FOR_BROWSER |
                       BROWSER_TEST_WAIT_FOR_TAB |
@@ -203,6 +204,7 @@ GURL GetFileUrlWithQuery(const FilePath& path, const std::string& query_string);
 
 // Blocks until an application modal dialog is showns and returns it.
 AppModalDialog* WaitForAppModalDialog();
+void WaitForAppModalDialogAndCloseIt();
 
 // Causes the specified tab to crash. Blocks until it is crashed.
 void CrashTab(content::WebContents* tab);
@@ -215,6 +217,23 @@ int FindInPage(TabContentsWrapper* tab,
                bool forward,
                bool case_sensitive,
                int* ordinal);
+
+// Simulates clicking at the center of the given tab asynchronously. Unlike
+// ClickOnView, this works even if the browser isn't in the foreground.
+void SimulateMouseClick(content::WebContents* tab);
+
+// Sends a key press asynchronously. Unlike the SendKeyPress functions, this
+// works even if the browser isn't in the foreground.
+void SimulateKeyPress(content::WebContents* tab,
+                      ui::KeyboardCode key,
+                      bool control,
+                      bool shift,
+                      bool alt,
+                      bool command);
+
+#if defined OS_MACOSX
+void SetWindowBounds(gfx::NativeWindow window, const gfx::Rect& bounds);
+#endif
 
 // Returns true if the View is focused.
 bool IsViewFocused(const Browser* browser, ViewID vid);
@@ -239,8 +258,7 @@ void WaitForHistoryToLoad(Browser* browser);
 
 // Puts the native window for |browser| in |native_window|. Returns true on
 // success.
-bool GetNativeWindow(const Browser* browser, gfx::NativeWindow* native_window)
-    WARN_UNUSED_RESULT;
+bool GetNativeWindow(const Browser* browser, gfx::NativeWindow* native_window);
 
 // Brings the native window for |browser| to the foreground. Returns true on
 // success.
@@ -333,6 +351,9 @@ class TestWebSocketServer {
   // Use a random port, useful for tests that are sharded. Returns the port.
   int UseRandomPort();
 
+  // Serves with TLS.
+  void UseTLS();
+
   // Starts the python websocket server using |root_directory|. Returns whether
   // the server was successfully started.
   bool Start(const FilePath& root_directory);
@@ -365,7 +386,11 @@ class TestWebSocketServer {
   base::win::ScopedHandle job_handle_;
 #endif
 
+  // Holds port number which the python websocket server uses.
   int port_;
+
+  // If the python websocket server serves with TLS.
+  bool secure_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWebSocketServer);
 };
@@ -435,6 +460,30 @@ class WindowedNotificationObserver : public content::NotificationObserver {
   content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowedNotificationObserver);
+};
+
+// A WindowedNotificationObserver hard-wired to observe
+// chrome::NOTIFICATION_TAB_ADDED.
+class WindowedTabAddedNotificationObserver
+    : public WindowedNotificationObserver {
+ public:
+  // Register to listen for notifications of NOTIFICATION_TAB_ADDED from either
+  // a specific source, or from all sources if |source| is
+  // NotificationService::AllSources().
+  explicit WindowedTabAddedNotificationObserver(
+      const content::NotificationSource& source);
+
+  // Returns the added tab, or NULL if no notification was observed yet.
+  content::WebContents* GetTab() { return added_tab_; }
+
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
+ private:
+  content::WebContents* added_tab_;
+
+  DISALLOW_COPY_AND_ASSIGN(WindowedTabAddedNotificationObserver);
 };
 
 // Similar to WindowedNotificationObserver but also provides a way of retrieving
@@ -630,6 +679,21 @@ void MoveMouseToCenterAndPress(
     ui_controls::MouseButton button,
     int state,
     const base::Closure& task);
+
+#if defined(OS_WIN)
+// Saves a snapshot of the entire screen to a file named
+// ChromiumSnapshotYYYYMMDDHHMMSS.png to |directory|, returning true on success.
+// The path to the file produced is returned in |screenshot_path| if non-NULL.
+bool SaveScreenSnapshotToDirectory(const FilePath& directory,
+                                   FilePath* screenshot_path);
+
+// Saves a snapshot of the entire screen as above to the current user's desktop.
+// The Chrome path provider must be registered prior to calling this function.
+bool SaveScreenSnapshotToDesktop(FilePath* screenshot_path);
+#endif
+
+// Configures the geolocation provider to always return the given position.
+void OverrideGeolocation(double latitude, double longitude);
 
 namespace internal {
 

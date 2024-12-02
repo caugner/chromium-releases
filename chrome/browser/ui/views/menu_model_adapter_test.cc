@@ -88,6 +88,19 @@ class TestViewsDelegate : public views::ViewsDelegate {
     return 0;
   }
 
+#if defined(USE_AURA)
+  virtual views::NativeWidgetHelperAura* CreateNativeWidgetHelper(
+      views::NativeWidgetAura* native_widget) OVERRIDE {
+    return NULL;
+  }
+#endif
+
+  content::WebContents* CreateWebContents(
+      content::BrowserContext* browser_context,
+      content::SiteInstance* site_instance) OVERRIDE {
+    return NULL;
+  }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(TestViewsDelegate);
 };

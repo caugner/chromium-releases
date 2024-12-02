@@ -59,9 +59,9 @@ const int kTitlebarTopAndBottomEdgeThickness = 2;
 const int kIconLeftSpacing = 2;
 // The icon never shrinks below 16 px on a side.
 const int kIconMinimumSize = 16;
-// There is a 4 px gap between the icon and the title text.
-const int kIconTitleSpacing = 4;
-// There is a 5 px gap between the title text and the caption buttons.
+// The space between the window icon and the title text.
+const int kTitleIconOffsetX = 4;
+// The space between the title text and the caption buttons.
 const int kTitleCaptionSpacing = 5;
 
 #if defined(USE_AURA)
@@ -94,13 +94,12 @@ const gfx::Font& GetTitleFont() {
 
 CustomFrameView::CustomFrameView()
     : frame_(NULL),
+      window_icon_(NULL),
       minimize_button_(NULL),
       maximize_button_(NULL),
       restore_button_(NULL),
       close_button_(NULL),
-      window_icon_(NULL),
       should_show_minmax_buttons_(false),
-      should_show_client_edge_(false),
       frame_background_(new FrameBackground()) {
 }
 
@@ -127,7 +126,6 @@ void CustomFrameView::Init(Widget* frame) {
       IDR_RESTORE, IDR_RESTORE_H, IDR_RESTORE_P);
 
   should_show_minmax_buttons_ = frame_->widget_delegate()->CanMaximize();
-  should_show_client_edge_ = frame_->widget_delegate()->ShouldShowClientEdge();
 
   if (frame_->widget_delegate()->ShouldShowWindowIcon()) {
     window_icon_ = new ImageButton(this);
@@ -209,7 +207,8 @@ void CustomFrameView::ResetWindowControls() {
 }
 
 void CustomFrameView::UpdateWindowIcon() {
-  window_icon_->SchedulePaint();
+  if (window_icon_)
+    window_icon_->SchedulePaint();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -290,10 +289,6 @@ int CustomFrameView::IconSize() const {
 #endif
 }
 
-bool CustomFrameView::ShouldShowClientEdge() const {
-  return should_show_client_edge_ && !frame_->IsMaximized();
-}
-
 gfx::Rect CustomFrameView::IconBounds() const {
   int size = IconSize();
   int frame_thickness = FrameBorderThickness();
@@ -317,14 +312,17 @@ gfx::Rect CustomFrameView::IconBounds() const {
   return gfx::Rect(frame_thickness + kIconLeftSpacing, y, size, size);
 }
 
-void CustomFrameView::PaintRestoredFrameBorder(gfx::Canvas* canvas) {
-  // Window frame mode.
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+bool CustomFrameView::ShouldShowClientEdge() const {
+  return !frame_->IsMaximized();
+}
 
+void CustomFrameView::PaintRestoredFrameBorder(gfx::Canvas* canvas) {
   frame_background_->set_frame_color(GetFrameColor());
   const SkBitmap* frame_image = GetFrameBitmap();
   frame_background_->set_theme_bitmap(frame_image);
   frame_background_->set_top_area_height(frame_image->height());
+
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
 
   frame_background_->SetCornerImages(
       rb.GetImageNamed(IDR_WINDOW_TOP_LEFT_CORNER).ToSkBitmap(),
@@ -341,13 +339,12 @@ void CustomFrameView::PaintRestoredFrameBorder(gfx::Canvas* canvas) {
 }
 
 void CustomFrameView::PaintMaximizedFrameBorder(gfx::Canvas* canvas) {
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-
   const SkBitmap* frame_image = GetFrameBitmap();
   frame_background_->set_theme_bitmap(frame_image);
   frame_background_->set_top_area_height(frame_image->height());
-
   frame_background_->PaintMaximized(canvas, this);
+
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
 
   // TODO(jamescook): Migrate this into FrameBackground.
   // The bottom of the titlebar actually comes from the top of the Client Edge
@@ -355,21 +352,21 @@ void CustomFrameView::PaintMaximizedFrameBorder(gfx::Canvas* canvas) {
   const SkBitmap* titlebar_bottom = rb.GetImageNamed(
       IDR_APP_TOP_CENTER).ToSkBitmap();
   int edge_height = titlebar_bottom->height() -
-                    (ShouldShowClientEdge() ? kClientEdgeThickness : 0);
+      (ShouldShowClientEdge() ? kClientEdgeThickness : 0);
   canvas->TileImageInt(*titlebar_bottom, 0,
       frame_->client_view()->y() - edge_height, width(), edge_height);
 }
 
 void CustomFrameView::PaintTitleBar(gfx::Canvas* canvas) {
-  WidgetDelegate* d = frame_->widget_delegate();
+  WidgetDelegate* delegate = frame_->widget_delegate();
 
   // It seems like in some conditions we can be asked to paint after the window
   // that contains us is WM_DESTROYed. At this point, our delegate is NULL. The
   // correct long term fix may be to shut down the RootView in WM_DESTROY.
-  if (!d)
+  if (!delegate)
     return;
 
-  canvas->DrawStringInt(d->GetWindowTitle(), GetTitleFont(),
+  canvas->DrawStringInt(delegate->GetWindowTitle(), GetTitleFont(),
                         SK_ColorWHITE, GetMirroredXForRect(title_bounds_),
                         title_bounds_.y(), title_bounds_.width(),
                         title_bounds_.height());
@@ -501,15 +498,16 @@ void CustomFrameView::LayoutWindowControls() {
 }
 
 void CustomFrameView::LayoutTitleBar() {
-  // The window title is based on the calculated icon position, even when there
-  // is no icon.
+  // The window title position is calculated based on the icon position, even
+  // when there is no icon.
   gfx::Rect icon_bounds(IconBounds());
-  if (frame_->widget_delegate()->ShouldShowWindowIcon())
+  bool show_window_icon = window_icon_ != NULL;
+  if (show_window_icon)
     window_icon_->SetBoundsRect(icon_bounds);
 
-  // Size the title.
-  int title_x = frame_->widget_delegate()->ShouldShowWindowIcon() ?
-      icon_bounds.right() + kIconTitleSpacing : icon_bounds.x();
+  // The offset between the window left edge and the title text.
+  int title_x = show_window_icon ? icon_bounds.right() + kTitleIconOffsetX
+                                 : icon_bounds.x();
   int title_height = GetTitleFont().GetHeight();
   // We bias the title position so that when the difference between the icon and
   // title heights is odd, the extra pixel of the title is above the vertical

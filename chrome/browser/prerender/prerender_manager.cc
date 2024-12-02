@@ -25,6 +25,7 @@
 #include "chrome/browser/prerender/prerender_final_status.h"
 #include "chrome/browser/prerender/prerender_histograms.h"
 #include "chrome/browser/prerender/prerender_history.h"
+#include "chrome/browser/prerender/prerender_local_predictor.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/prerender/prerender_tab_helper.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
@@ -394,7 +395,7 @@ bool PrerenderManager::MaybeUsePrerenderedPage(WebContents* web_contents,
   }
 
   // If we don't want to use prerenders at all, we are done.
-  // For bookkeeping purposes, we need to mark this TabContents to
+  // For bookkeeping purposes, we need to mark this WebContents to
   // reflect that it would have been prerendered.
   if (GetMode() == PRERENDER_MODE_EXPERIMENT_NO_USE_GROUP) {
     MarkWebContentsAsWouldBePrerendered(web_contents);
@@ -534,7 +535,7 @@ void PrerenderManager::MoveEntryToPendingDelete(PrerenderContents* entry,
   AddToHistory(entry);
   pending_delete_list_.push_back(entry);
 
-  // Destroy the old TabContents relatively promptly to reduce resource usage,
+  // Destroy the old WebContents relatively promptly to reduce resource usage,
   // and in the case of HTML5 media, reduce the change of playing any sound.
   PostCleanupTask();
 }
@@ -697,18 +698,6 @@ bool PrerenderManager::WouldWebContentsBePrerendered(
     WebContents* web_contents) const {
   DCHECK(CalledOnValidThread());
   return would_be_prerendered_tab_contents_set_.count(web_contents) > 0;
-}
-
-bool PrerenderManager::IsOldRenderViewHost(
-    const RenderViewHost* render_view_host) const {
-  for (std::list<TabContentsWrapper*>::const_iterator it =
-           old_tab_contents_list_.begin();
-       it != old_tab_contents_list_.end();
-       ++it) {
-    if ((*it)->web_contents()->GetRenderViewHost() == render_view_host)
-      return true;
-  }
-  return false;
 }
 
 bool PrerenderManager::HasRecentlyBeenNavigatedTo(const GURL& url) {

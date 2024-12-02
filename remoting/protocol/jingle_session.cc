@@ -187,8 +187,7 @@ void JingleSession::CreateStreamChannel(
       authenticator_->CreateChannelAuthenticator();
   scoped_ptr<StreamTransport> channel =
       session_manager_->transport_factory_->CreateStreamTransport();
-  channel->Initialize(name, session_manager_->transport_config_,
-                      this, channel_authenticator.Pass());
+  channel->Initialize(name, this, channel_authenticator.Pass());
   channel->Connect(callback);
   channels_[name] = channel.release();
 }
@@ -202,8 +201,7 @@ void JingleSession::CreateDatagramChannel(
       authenticator_->CreateChannelAuthenticator();
   scoped_ptr<DatagramTransport> channel =
       session_manager_->transport_factory_->CreateDatagramTransport();
-  channel->Initialize(name, session_manager_->transport_config_,
-                      this, channel_authenticator.Pass());
+  channel->Initialize(name, this, channel_authenticator.Pass());
   channel->Connect(callback);
   channels_[name] = channel.release();
 }
@@ -246,7 +244,8 @@ void JingleSession::Close() {
 
 void JingleSession::OnTransportCandidate(Transport* transport,
                                          const cricket::Candidate& candidate) {
-  pending_candidates_.push_back(candidate);
+  pending_candidates_.push_back(JingleMessage::NamedCandidate(
+      transport->name(), candidate));
 
   if (!transport_infos_timer_.IsRunning()) {
     // Delay sending the new candidates in case we get more candidates
@@ -438,15 +437,15 @@ void JingleSession::OnSessionInfo(const JingleMessage& message,
 }
 
 void JingleSession::ProcessTransportInfo(const JingleMessage& message) {
-  for (std::list<cricket::Candidate>::const_iterator it =
+  for (std::list<JingleMessage::NamedCandidate>::const_iterator it =
            message.candidates.begin();
        it != message.candidates.end(); ++it) {
-    ChannelsMap::iterator channel = channels_.find(it->name());
+    ChannelsMap::iterator channel = channels_.find(it->name);
     if (channel == channels_.end()) {
-      LOG(WARNING) << "Received candidate for unknown channel " << it->name();
+      LOG(WARNING) << "Received candidate for unknown channel " << it->name;
       continue;
     }
-    channel->second->AddRemoteCandidate(*it);
+    channel->second->AddRemoteCandidate(it->candidate);
   }
 }
 

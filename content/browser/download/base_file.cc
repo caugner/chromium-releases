@@ -215,7 +215,6 @@ BaseFile::BaseFile(const FilePath& full_path,
       file_stream_(file_stream),
       bytes_so_far_(received_bytes),
       start_tick_(base::TimeTicks::Now()),
-      power_save_blocker_(PowerSaveBlocker::kPowerSaveBlockPreventSystemSleep),
       calculate_hash_(calculate_hash),
       detached_(false),
       bound_net_log_(bound_net_log) {
@@ -510,7 +509,7 @@ net::Error BaseFile::Open() {
 
     // We may be re-opening the file after rename. Always make sure we're
     // writing at the end of the file.
-    int64 seek_result = file_stream_->Seek(net::FROM_END, 0);
+    int64 seek_result = file_stream_->SeekSync(net::FROM_END, 0);
     if (seek_result < 0)
       return ClearStream(LOG_ERROR("Seek", seek_result));
   } else {

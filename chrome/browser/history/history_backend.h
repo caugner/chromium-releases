@@ -34,7 +34,9 @@ struct DownloadPersistentStoreInfo;
 }
 
 namespace history {
-
+#if defined(OS_ANDROID)
+class AndroidProviderBackend;
+#endif
 class CommitLaterTask;
 class HistoryPublisher;
 class VisitFilter;
@@ -91,6 +93,9 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
     // Tell TopSites to start reading thumbnails from the ThumbnailsDB.
     virtual void StartTopSitesMigration(int backend_id) = 0;
+
+    virtual void NotifyVisitDBObserversOnAddVisit(
+        const history::BriefVisitInfo& info) = 0;
   };
 
   // Init must be called to complete object creation. This object can be
@@ -136,6 +141,18 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   virtual void SetPageTitle(const GURL& url, const string16& title);
   void AddPageNoVisitForBookmark(const GURL& url);
 
+  // Updates the database backend with a page's ending time stamp information.
+  // The page can be identified by the combination of the pointer to
+  // a RenderProcessHost, the page id and the url.
+  //
+  // The given pointer will not be dereferenced, it is only used for
+  // identification purposes, hence it is a void*.
+  void UpdateWithPageEndTime(const void* host,
+                             int32 page_id,
+                             const GURL& url,
+                             base::Time end_ts);
+
+
   // Indexing ------------------------------------------------------------------
 
   void SetPageContents(const GURL& url, const string16& contents);
@@ -180,7 +197,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Request the |result_count| URLs and the chain of redirects
   // leading to each of these URLs, filterd and sorted based on the |filter|.
   void QueryFilteredURLs(
-      scoped_refptr<QueryMostVisitedURLsRequest> request,
+      scoped_refptr<QueryFilteredURLsRequest> request,
       int result_count,
       const history::VisitFilter& filter);
 
@@ -224,7 +241,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Exposed for testing reasons.
   void GetPageThumbnailDirectly(
       const GURL& page_url,
-      scoped_refptr<RefCountedBytes>* data);
+      scoped_refptr<base::RefCountedBytes>* data);
 
   void MigrateThumbnailsDatabase();
 
@@ -238,9 +255,11 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                         const GURL& page_url,
                         int icon_types);
 
+  void GetFaviconForID(scoped_refptr<GetFaviconRequest> request, FaviconID id);
+
   void SetFavicon(const GURL& page_url,
                   const GURL& icon_url,
-                  scoped_refptr<RefCountedMemory> data,
+                  scoped_refptr<base::RefCountedMemory> data,
                   IconType icon_type);
 
   void UpdateFaviconMappingAndFetch(scoped_refptr<GetFaviconRequest> request,
@@ -291,6 +310,64 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
       TemplateURLID keyword_id,
       const string16& prefix,
       int max_count);
+
+#if defined(OS_ANDROID)
+  // Android Provider ---------------------------------------------------------
+
+  // History and bookmarks ----------------------------------------------------
+  void InsertHistoryAndBookmark(scoped_refptr<InsertRequest> request,
+                                const HistoryAndBookmarkRow& row);
+
+  void QueryHistoryAndBookmarks(
+      scoped_refptr<QueryRequest> request,
+      const std::vector<HistoryAndBookmarkRow::ColumnID>& projections,
+      const std::string& selection,
+      const std::vector<string16>& selection_args,
+      const std::string& sort_order);
+
+  void UpdateHistoryAndBookmarks(scoped_refptr<UpdateRequest> request,
+                                 const HistoryAndBookmarkRow& row,
+                                 const std::string& selection,
+                                 const std::vector<string16>& selection_args);
+
+  void DeleteHistoryAndBookmarks(scoped_refptr<DeleteRequest> request,
+                                 const std::string& selection,
+                                 const std::vector<string16>& selection_args);
+
+  void DeleteHistory(scoped_refptr<DeleteRequest> request,
+                     const std::string& selection,
+                     const std::vector<string16>& selection_args);
+
+  // Statement ----------------------------------------------------------------
+  // Move the statement's current position.
+  void MoveStatement(scoped_refptr<MoveStatementRequest> request,
+                     history::AndroidStatement* statement,
+                     int current_pos,
+                     int destination);
+
+  // Close the given statement. The ownership is transfered.
+  void CloseStatement(AndroidStatement* statement);
+
+  // Search terms -------------------------------------------------------------
+  void InsertSearchTerm(scoped_refptr<InsertRequest> request,
+                        const SearchRow& row);
+
+  void UpdateSearchTerms(scoped_refptr<UpdateRequest> request,
+                         const SearchRow& row,
+                         const std::string& selection,
+                         const std::vector<string16> selection_args);
+
+  void DeleteSearchTerms(scoped_refptr<DeleteRequest> request,
+                         const std::string& selection,
+                         const std::vector<string16> selection_args);
+
+  void QuerySearchTerms(scoped_refptr<QueryRequest> request,
+                        const std::vector<SearchRow::ColumnID>& projections,
+                        const std::string& selection,
+                        const std::vector<string16>& selection_args,
+                        const std::string& sort_order);
+
+#endif  // defined(OS_ANDROID)
 
   // Generic operations --------------------------------------------------------
 
@@ -391,8 +468,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetFaviconForURL);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            CloneFaviconIsRestrictedToSameDomain);
-  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
-                           QueryFilteredURLs);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, QueryFilteredURLs);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, UpdateVisitDuration);
 
   friend class ::TestingProfile;
 
@@ -404,6 +481,11 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // See ThumbnailDatabase::RenameAndDropThumbnails.
   FilePath GetFaviconsFileName() const;
   FilePath GetArchivedFileName() const;
+
+#if defined(OS_ANDROID)
+  // Returns the name of android cache database.
+  FilePath GetAndroidCacheFileName() const;
+#endif
 
   class URLQuerier;
   friend class URLQuerier;
@@ -434,6 +516,9 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // at |cur_visit|.
   void GetRedirectsToSpecificVisit(
       VisitID cur_visit, history::RedirectList* redirects);
+
+  // Update the visit_duration information in visits table.
+  void UpdateVisitDuration(VisitID visit_id, const base::Time end_ts);
 
   // Thumbnail Helpers ---------------------------------------------------------
 
@@ -567,6 +652,13 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                         int icon_types,
                         FaviconData* favicon);
 
+  // Get favicon by the given |favicon_id|, the |favicon| is set appropriately
+  // and true if returned on success, otherwise false is returned.
+  bool GetFaviconFromDB(FaviconID favicon_id, FaviconData* favicon);
+
+  // Notify any observers of an addition to the visit database.
+  void NotifyVisitObservers(const VisitRow& visit);
+
   // Data ----------------------------------------------------------------------
 
   // Delegate. See the class definition above for more information. This will
@@ -657,6 +749,11 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Publishes the history to all indexers which are registered to receive
   // history data from us. Can be NULL if there are no listeners.
   scoped_ptr<HistoryPublisher> history_publisher_;
+
+#if defined(OS_ANDROID)
+  // Used to provide the Android ContentProvider APIs.
+  scoped_ptr<AndroidProviderBackend> android_provider_backend_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(HistoryBackend);
 };

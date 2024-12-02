@@ -8,6 +8,8 @@
 #include "chrome/browser/extensions/extension_host.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/notifications/balloon.h"
+#include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/balloon_host.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_delegate.h"
@@ -90,7 +92,11 @@ class ExtensionCrashRecoveryTest : public ExtensionBrowserTest {
     ExtensionHost* extension_host = GetExtensionProcessManager()->
         GetBackgroundHostForExtension(extension_id);
     ASSERT_TRUE(extension_host);
-    ASSERT_TRUE(GetExtensionProcessManager()->HasExtensionHost(extension_host));
+    ExtensionProcessManager::ViewSet all_views =
+        GetExtensionProcessManager()->GetAllViews();
+    ExtensionProcessManager::ViewSet::const_iterator it =
+        all_views.find(extension_host->host_contents()->GetRenderViewHost());
+    ASSERT_FALSE(it == all_views.end());
     ASSERT_TRUE(extension_host->IsRenderViewLive());
     extensions::ProcessMap* process_map =
         browser()->profile()->GetExtensionService()->process_map();

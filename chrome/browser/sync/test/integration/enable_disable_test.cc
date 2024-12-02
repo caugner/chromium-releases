@@ -4,9 +4,9 @@
 
 #include "chrome/browser/sync/test/integration/sync_test.h"
 
-#include "chrome/browser/sync/internal_api/read_node.h"
-#include "chrome/browser/sync/internal_api/read_transaction.h"
 #include "chrome/browser/sync/profile_sync_service_harness.h"
+#include "sync/internal_api/read_node.h"
+#include "sync/internal_api/read_transaction.h"
 #include "sync/syncable/model_type.h"
 
 // This file contains tests that exercise enabling and disabling data
@@ -34,7 +34,8 @@ bool DoesTopLevelNodeExist(sync_api::UserShare* user_share,
                            syncable::ModelType type) {
     sync_api::ReadTransaction trans(FROM_HERE, user_share);
     sync_api::ReadNode node(&trans);
-    return node.InitByTagLookup(syncable::ModelTypeToRootTag(type));
+    return node.InitByTagLookup(syncable::ModelTypeToRootTag(type)) ==
+        sync_api::BaseNode::INIT_OK;
 }
 
 IN_PROC_BROWSER_TEST_F(EnableDisableSingleClientTest, EnableOneAtATime) {

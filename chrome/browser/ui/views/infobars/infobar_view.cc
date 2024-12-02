@@ -23,7 +23,6 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/menu_button.h"
@@ -73,8 +72,9 @@ InfoBarView::~InfoBarView() {
 }
 
 views::Label* InfoBarView::CreateLabel(const string16& text) const {
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   views::Label* label = new views::Label(text,
-      ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::MediumFont));
+      rb.GetFont(ui::ResourceBundle::MediumFont));
   label->SetBackgroundColor(background()->get_color());
   label->SetEnabledColor(SK_ColorBLACK);
   label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
@@ -83,10 +83,10 @@ views::Label* InfoBarView::CreateLabel(const string16& text) const {
 
 views::Link* InfoBarView::CreateLink(const string16& text,
                                      views::LinkListener* listener) const {
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   views::Link* link = new views::Link;
   link->SetText(text);
-  link->SetFont(
-      ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::MediumFont));
+  link->SetFont(rb.GetFont(ui::ResourceBundle::MediumFont));
   link->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   link->set_listener(listener);
   link->SetBackgroundColor(background()->get_color());
@@ -102,13 +102,13 @@ views::MenuButton* InfoBarView::CreateMenuButton(
       NULL, text, menu_button_listener, true);
   menu_button->set_border(new InfoBarButtonBorder);
   menu_button->set_animate_on_state_change(false);
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   menu_button->set_menu_marker(
-      rb.GetBitmapNamed(IDR_INFOBARBUTTON_MENU_DROPARROW));
+      rb.GetImageNamed(IDR_INFOBARBUTTON_MENU_DROPARROW).ToSkBitmap());
   menu_button->SetEnabledColor(SK_ColorBLACK);
   menu_button->SetHighlightColor(SK_ColorBLACK);
   menu_button->SetHoverColor(SK_ColorBLACK);
-  menu_button->SetFont(rb.GetFont(ResourceBundle::MediumFont));
+  menu_button->SetFont(rb.GetFont(ui::ResourceBundle::MediumFont));
   menu_button->set_focusable(true);
   return menu_button;
 }
@@ -124,13 +124,13 @@ views::TextButton* InfoBarView::CreateTextButton(
   text_button->SetEnabledColor(SK_ColorBLACK);
   text_button->SetHighlightColor(SK_ColorBLACK);
   text_button->SetHoverColor(SK_ColorBLACK);
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  text_button->SetFont(rb.GetFont(ResourceBundle::MediumFont));
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+  text_button->SetFont(rb.GetFont(ui::ResourceBundle::MediumFont));
 #if defined(OS_WIN)
   if (needs_elevation &&
       (base::win::GetVersion() >= base::win::VERSION_VISTA) &&
       base::win::UserAccountControlIsEnabled()) {
-    SHSTOCKICONINFO icon_info = { sizeof SHSTOCKICONINFO };
+    SHSTOCKICONINFO icon_info = { sizeof(SHSTOCKICONINFO) };
     // Even with the runtime guard above, we have to use GetProcAddress() here,
     // because otherwise the loader will try to resolve the function address on
     // startup, which will break on XP.
@@ -223,13 +223,13 @@ void InfoBarView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
     }
 
     close_button_ = new views::ImageButton(this);
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     close_button_->SetImage(views::CustomButton::BS_NORMAL,
-                            rb.GetBitmapNamed(IDR_CLOSE_BAR));
+                            rb.GetImageNamed(IDR_CLOSE_BAR).ToSkBitmap());
     close_button_->SetImage(views::CustomButton::BS_HOT,
-                            rb.GetBitmapNamed(IDR_CLOSE_BAR_H));
+                            rb.GetImageNamed(IDR_CLOSE_BAR_H).ToSkBitmap());
     close_button_->SetImage(views::CustomButton::BS_PUSHED,
-                            rb.GetBitmapNamed(IDR_CLOSE_BAR_P));
+                            rb.GetImageNamed(IDR_CLOSE_BAR_P).ToSkBitmap());
     close_button_->SetAccessibleName(
         l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));
     close_button_->set_focusable(true);

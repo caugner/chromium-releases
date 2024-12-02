@@ -16,16 +16,14 @@ namespace content {
 
 class ShellBrowserContext;
 class ShellBrowserMainParts;
+class ShellResourceDispatcherHostDelegate;
 
 class ShellContentBrowserClient : public ContentBrowserClient {
  public:
   ShellContentBrowserClient();
   virtual ~ShellContentBrowserClient();
 
-  void set_shell_browser_main_parts(ShellBrowserMainParts* parts) {
-    shell_browser_main_parts_ = parts;
-  }
-
+  // content::ContentBrowserClient overrides.
   virtual BrowserMainParts* CreateBrowserMainParts(
       const content::MainFunctionParams& parameters) OVERRIDE;
   virtual WebContentsView* OverrideCreateWebContentsView(
@@ -146,7 +144,8 @@ class ShellContentBrowserClient : public ContentBrowserClient {
       const GURL& origin,
       WindowContainerType container_type,
       content::ResourceContext* context,
-      int render_process_id) OVERRIDE;
+      int render_process_id,
+      bool* no_javascript_access) OVERRIDE;
   virtual std::string GetWorkerProcessTitle(
       const GURL& url, content::ResourceContext* context) OVERRIDE;
   virtual void ResourceDispatcherHostCreated() OVERRIDE;
@@ -188,6 +187,9 @@ class ShellContentBrowserClient : public ContentBrowserClient {
   ShellBrowserContext* browser_context();
 
  private:
+  scoped_ptr<ShellResourceDispatcherHostDelegate>
+      resource_dispatcher_host_delegate_;
+
   ShellBrowserMainParts* shell_browser_main_parts_;
 };
 
