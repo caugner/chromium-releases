@@ -5,6 +5,17 @@ On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE
 
 
 [INTERFACES]
+interface AbortController
+    attribute @@toStringTag
+    getter signal
+    method abort
+    method constructor
+interface AbortSignal : EventTarget
+    attribute @@toStringTag
+    getter aborted
+    getter onabort
+    method constructor
+    setter onabort
 interface AnalyserNode : AudioNode
     attribute @@toStringTag
     getter fftSize
@@ -154,6 +165,17 @@ interface AudioParam
     method setValueAtTime
     method setValueCurveAtTime
     setter value
+interface AudioParamMap
+    attribute @@toStringTag
+    getter size
+    method @@iterator
+    method constructor
+    method entries
+    method forEach
+    method get
+    method has
+    method keys
+    method values
 interface AudioProcessingEvent : Event
     attribute @@toStringTag
     getter inputBuffer
@@ -167,12 +189,19 @@ interface AudioScheduledSourceNode : AudioNode
     method start
     method stop
     setter onended
+interface AudioWorklet : Worklet
+    attribute @@toStringTag
+    method constructor
+interface AudioWorkletNode : AudioNode
+    attribute @@toStringTag
+    method constructor
 interface BarProp
     attribute @@toStringTag
     getter visible
     method constructor
 interface BaseAudioContext : EventTarget
     attribute @@toStringTag
+    getter audioWorklet
     getter currentTime
     getter destination
     getter listener
@@ -273,8 +302,37 @@ interface CDATASection : Text
     method constructor
 interface CSS
     static getter paintWorklet
+    static method Hz
+    static method Q
+    static method ch
+    static method cm
+    static method deg
+    static method dpcm
+    static method dpi
+    static method dppx
+    static method em
     static method escape
+    static method ex
+    static method fr
+    static method grad
+    static method in
+    static method kHz
+    static method mm
+    static method ms
+    static method number
+    static method pc
+    static method percent
+    static method pt
+    static method px
+    static method rad
+    static method rem
+    static method s
     static method supports
+    static method turn
+    static method vh
+    static method vmax
+    static method vmin
+    static method vw
     attribute @@toStringTag
     method constructor
 interface CSSConditionRule : CSSGroupingRule
@@ -291,12 +349,16 @@ interface CSSGroupingRule : CSSRule
     method constructor
     method deleteRule
     method insertRule
+interface CSSImageValue : CSSStyleValue
+    attribute @@toStringTag
+    method constructor
 interface CSSImportRule : CSSRule
     attribute @@toStringTag
     getter href
     getter media
     getter styleSheet
     method constructor
+    setter media
 interface CSSKeyframeRule : CSSRule
     attribute @@toStringTag
     getter keyText
@@ -312,21 +374,106 @@ interface CSSKeyframesRule : CSSRule
     method deleteRule
     method findRule
     setter name
+interface CSSKeywordValue : CSSStyleValue
+    attribute @@toStringTag
+    getter value
+    method constructor
+    setter value
+interface CSSMathInvert : CSSMathValue
+    attribute @@toStringTag
+    getter value
+    method constructor
+interface CSSMathMax : CSSMathValue
+    attribute @@toStringTag
+    getter values
+    method constructor
+interface CSSMathMin : CSSMathValue
+    attribute @@toStringTag
+    getter values
+    method constructor
+interface CSSMathNegate : CSSMathValue
+    attribute @@toStringTag
+    getter value
+    method constructor
+interface CSSMathProduct : CSSMathValue
+    attribute @@toStringTag
+    getter values
+    method constructor
+interface CSSMathSum : CSSMathValue
+    attribute @@toStringTag
+    getter values
+    method constructor
+interface CSSMathValue : CSSNumericValue
+    attribute @@toStringTag
+    getter operator
+    method constructor
+interface CSSMatrixComponent : CSSTransformComponent
+    attribute @@toStringTag
+    getter matrix
+    method constructor
+    setter matrix
 interface CSSMediaRule : CSSConditionRule
     attribute @@toStringTag
     getter media
     method constructor
+    setter media
 interface CSSNamespaceRule : CSSRule
     attribute @@toStringTag
     getter namespaceURI
     getter prefix
     method constructor
+interface CSSNumericArray
+    attribute @@toStringTag
+    getter length
+    method @@iterator
+    method constructor
+    method entries
+    method forEach
+    method keys
+    method values
+interface CSSNumericValue : CSSStyleValue
+    attribute @@toStringTag
+    method add
+    method constructor
+    method div
+    method equals
+    method max
+    method min
+    method mul
+    method sub
+    method to
+    method toSum
+    method type
 interface CSSPageRule : CSSRule
     attribute @@toStringTag
     getter selectorText
     getter style
     method constructor
     setter selectorText
+    setter style
+interface CSSPerspective : CSSTransformComponent
+    attribute @@toStringTag
+    getter length
+    method constructor
+    setter length
+interface CSSPositionValue : CSSStyleValue
+    attribute @@toStringTag
+    getter x
+    getter y
+    method constructor
+    setter x
+    setter y
+interface CSSRotate : CSSTransformComponent
+    attribute @@toStringTag
+    getter angle
+    getter x
+    getter y
+    getter z
+    method constructor
+    setter angle
+    setter x
+    setter y
+    setter z
 interface CSSRule
     attribute @@toStringTag
     attribute CHARSET_RULE
@@ -351,6 +498,32 @@ interface CSSRuleList
     method @@iterator
     method constructor
     method item
+interface CSSScale : CSSTransformComponent
+    attribute @@toStringTag
+    getter x
+    getter y
+    getter z
+    method constructor
+    setter x
+    setter y
+    setter z
+interface CSSSkew : CSSTransformComponent
+    attribute @@toStringTag
+    getter ax
+    getter ay
+    method constructor
+    setter ax
+    setter ay
+interface CSSSkewX : CSSTransformComponent
+    attribute @@toStringTag
+    getter ax
+    method constructor
+    setter ax
+interface CSSSkewY : CSSTransformComponent
+    attribute @@toStringTag
+    getter ay
+    method constructor
+    setter ay
 interface CSSStyleDeclaration
     attribute @@toStringTag
     getter cssFloat
@@ -370,6 +543,7 @@ interface CSSStyleRule : CSSRule
     attribute @@toStringTag
     getter selectorText
     getter style
+    getter styleMap
     method constructor
     setter selectorText
     setter style
@@ -383,9 +557,63 @@ interface CSSStyleSheet : StyleSheet
     method deleteRule
     method insertRule
     method removeRule
+interface CSSStyleValue
+    static method parse
+    static method parseAll
+    attribute @@toStringTag
+    method constructor
+    method toString
 interface CSSSupportsRule : CSSConditionRule
     attribute @@toStringTag
     method constructor
+interface CSSTransformComponent
+    attribute @@toStringTag
+    getter is2D
+    method constructor
+    method toMatrix
+    method toString
+    setter is2D
+interface CSSTransformValue : CSSStyleValue
+    attribute @@toStringTag
+    getter is2D
+    getter length
+    method @@iterator
+    method constructor
+    method entries
+    method forEach
+    method keys
+    method toMatrix
+    method values
+interface CSSTranslate : CSSTransformComponent
+    attribute @@toStringTag
+    getter x
+    getter y
+    getter z
+    method constructor
+    setter x
+    setter y
+    setter z
+interface CSSUnitValue : CSSNumericValue
+    attribute @@toStringTag
+    getter unit
+    getter value
+    method constructor
+    setter value
+interface CSSUnparsedValue : CSSStyleValue
+    attribute @@toStringTag
+    getter length
+    method @@iterator
+    method constructor
+    method entries
+    method forEach
+    method keys
+    method values
+interface CSSVariableReferenceValue
+    attribute @@toStringTag
+    getter fallback
+    getter variable
+    method constructor
+    setter variable
 interface Cache
     attribute @@toStringTag
     method add
@@ -524,9 +752,7 @@ interface CharacterData : Node
 interface Clipboard : EventTarget
     attribute @@toStringTag
     method constructor
-    method read
     method readText
-    method write
     method writeText
 interface ClipboardEvent : Event
     attribute @@toStringTag
@@ -1251,6 +1477,7 @@ interface Element : Node
     attribute @@toStringTag
     attribute @@unscopables
     getter assignedSlot
+    getter attributeStyleMap
     getter attributes
     getter childElementCount
     getter children
@@ -1293,6 +1520,7 @@ interface Element : Node
     method attachShadow
     method before
     method closest
+    method computedStyleMap
     method constructor
     method createShadowRoot
     method getAttribute
@@ -1804,12 +2032,14 @@ interface HTMLDocument : Document
 interface HTMLElement : Element
     attribute @@toStringTag
     getter accessKey
+    getter autocapitalize
     getter contentEditable
     getter dataset
     getter dir
     getter draggable
     getter hidden
     getter innerText
+    getter inputMode
     getter isContentEditable
     getter lang
     getter nonce
@@ -1903,11 +2133,13 @@ interface HTMLElement : Element
     method constructor
     method focus
     setter accessKey
+    setter autocapitalize
     setter contentEditable
     setter dir
     setter draggable
     setter hidden
     setter innerText
+    setter inputMode
     setter lang
     setter nonce
     setter onabort
@@ -2252,7 +2484,6 @@ interface HTMLInputElement : HTMLElement
     getter accept
     getter align
     getter alt
-    getter autocapitalize
     getter autocomplete
     getter autofocus
     getter checked
@@ -2311,7 +2542,6 @@ interface HTMLInputElement : HTMLElement
     setter accept
     setter align
     setter alt
-    setter autocapitalize
     setter autocomplete
     setter autofocus
     setter checked
@@ -2724,6 +2954,7 @@ interface HTMLScriptElement : HTMLElement
     setter type
 interface HTMLSelectElement : HTMLElement
     attribute @@toStringTag
+    getter autocomplete
     getter autofocus
     getter disabled
     getter form
@@ -2750,6 +2981,7 @@ interface HTMLSelectElement : HTMLElement
     method remove
     method reportValidity
     method setCustomValidity
+    setter autocomplete
     setter autofocus
     setter disabled
     setter length
@@ -2924,7 +3156,7 @@ interface HTMLTemplateElement : HTMLElement
     method constructor
 interface HTMLTextAreaElement : HTMLElement
     attribute @@toStringTag
-    getter autocapitalize
+    getter autocomplete
     getter autofocus
     getter cols
     getter defaultValue
@@ -2956,7 +3188,7 @@ interface HTMLTextAreaElement : HTMLElement
     method setCustomValidity
     method setRangeText
     method setSelectionRange
-    setter autocapitalize
+    setter autocomplete
     setter autofocus
     setter cols
     setter defaultValue
@@ -3267,7 +3499,6 @@ interface ImageCapture
     method getPhotoCapabilities
     method getPhotoSettings
     method grabFrame
-    method setOptions
     method takePhoto
 interface ImageData
     attribute @@toStringTag
@@ -3391,6 +3622,16 @@ interface MIDIPort : EventTarget
     method constructor
     method open
     setter onstatechange
+interface MediaCapabilities
+    attribute @@toStringTag
+    method constructor
+    method decodingInfo
+interface MediaCapabilitiesInfo
+    attribute @@toStringTag
+    getter powerEfficient
+    getter smooth
+    getter supported
+    method constructor
 interface MediaDeviceInfo
     attribute @@toStringTag
     getter deviceId
@@ -3477,6 +3718,7 @@ interface MediaList
     method constructor
     method deleteMedium
     method item
+    method toString
     setter mediaText
 interface MediaQueryList : EventTarget
     attribute @@toStringTag
@@ -3723,6 +3965,7 @@ interface Navigator
     getter appName
     getter appVersion
     getter budget
+    getter clipboard
     getter connection
     getter cookieEnabled
     getter credentials
@@ -3733,6 +3976,7 @@ interface Navigator
     getter language
     getter languages
     getter maxTouchPoints
+    getter mediaCapabilities
     getter mediaDevices
     getter mimeTypes
     getter onLine
@@ -4299,6 +4543,21 @@ interface RTCCertificate
     getter expires
     method constructor
     method getFingerprints
+interface RTCDTMFSender : EventTarget
+    attribute @@toStringTag
+    getter canInsertDTMF
+    getter duration
+    getter interToneGap
+    getter ontonechange
+    getter toneBuffer
+    getter track
+    method constructor
+    method insertDTMF
+    setter ontonechange
+interface RTCDTMFToneChangeEvent : Event
+    attribute @@toStringTag
+    getter tone
+    method constructor
 interface RTCDataChannel : EventTarget
     attribute @@toStringTag
     getter binaryType
@@ -4403,6 +4662,7 @@ interface RTCRtpReceiver
     method getContributingSources
 interface RTCRtpSender
     attribute @@toStringTag
+    getter dtmf
     getter track
     method constructor
     method replaceTrack
@@ -4503,11 +4763,13 @@ interface Request
     getter destination
     getter headers
     getter integrity
+    getter keepalive
     getter method
     getter mode
     getter redirect
     getter referrer
     getter referrerPolicy
+    getter signal
     getter url
     method arrayBuffer
     method blob
@@ -5866,6 +6128,25 @@ interface StorageManager
     method estimate
     method persist
     method persisted
+interface StylePropertyMap : StylePropertyMapReadOnly
+    attribute @@toStringTag
+    method append
+    method clear
+    method constructor
+    method delete
+    method set
+interface StylePropertyMapReadOnly
+    attribute @@toStringTag
+    getter size
+    method @@iterator
+    method constructor
+    method entries
+    method forEach
+    method get
+    method getAll
+    method has
+    method keys
+    method values
 interface StyleSheet
     attribute @@toStringTag
     getter disabled
@@ -5877,6 +6158,7 @@ interface StyleSheet
     getter type
     method constructor
     setter disabled
+    setter media
 interface StyleSheetList
     attribute @@toStringTag
     getter length

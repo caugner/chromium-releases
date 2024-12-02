@@ -289,18 +289,33 @@ FileTasks.prototype.openSuggestAppsDialog = function(
  * The list of known extensions to record UMA.
  * Note: Because the data is recorded by the index, so new item shouldn't be
  * inserted.
+ * Must match the ViewFileType entry in enums.xml.
  *
  * @const
  * @type {Array<string>}
  */
 FileTasks.UMA_INDEX_KNOWN_EXTENSIONS = Object.freeze([
-  'other', '.3ga', '.3gp', '.aac', '.alac', '.asf', '.avi', '.bmp', '.csv',
-  '.doc', '.docx', '.flac', '.gif', '.jpeg', '.jpg', '.log', '.m3u', '.m3u8',
-  '.m4a', '.m4v', '.mid', '.mkv', '.mov', '.mp3', '.mp4', '.mpg', '.odf',
-  '.odp', '.ods', '.odt', '.oga', '.ogg', '.ogv', '.pdf', '.png', '.ppt',
-  '.pptx', '.ra', '.ram', '.rar', '.rm', '.rtf', '.wav', '.webm', '.webp',
-  '.wma', '.wmv', '.xls', '.xlsx', '.crdownload', '.crx', '.dmg', '.exe',
-  '.html', 'htm', '.jar', '.ps', '.torrent', '.txt', '.zip',
+  'other',     '.3ga',         '.3gp',
+  '.aac',      '.alac',        '.asf',
+  '.avi',      '.bmp',         '.csv',
+  '.doc',      '.docx',        '.flac',
+  '.gif',      '.jpeg',        '.jpg',
+  '.log',      '.m3u',         '.m3u8',
+  '.m4a',      '.m4v',         '.mid',
+  '.mkv',      '.mov',         '.mp3',
+  '.mp4',      '.mpg',         '.odf',
+  '.odp',      '.ods',         '.odt',
+  '.oga',      '.ogg',         '.ogv',
+  '.pdf',      '.png',         '.ppt',
+  '.pptx',     '.ra',          '.ram',
+  '.rar',      '.rm',          '.rtf',
+  '.wav',      '.webm',        '.webp',
+  '.wma',      '.wmv',         '.xls',
+  '.xlsx',     '.crdownload',  '.crx',
+  '.dmg',      '.exe',         '.html',
+  'htm',       '.jar',         '.ps',
+  '.torrent',  '.txt',         '.zip',
+  'directory', 'no extension', 'unknown extension'
 ]);
 
 /**
@@ -311,6 +326,16 @@ FileTasks.UMA_INDEX_KNOWN_EXTENSIONS = Object.freeze([
  */
 FileTasks.EXTENSIONS_TO_SKIP_SUGGEST_APPS_ = Object.freeze([
   '.crdownload', '.dsc', '.inf', '.crx',
+]);
+
+/**
+ * Task IDs of the zip file handlers to be recorded.
+ * The indexes of the IDs must match with the values of
+ * FileManagerZipHandlerType in enums.xml, and should not change.
+ */
+FileTasks.UMA_ZIP_HANDLER_TASK_IDS_ = Object.freeze([
+  FileTasks.ZIP_UNPACKER_TASK_ID, FileTasks.ZIP_ARCHIVER_UNZIP_TASK_ID,
+  FileTasks.ZIP_ARCHIVER_ZIP_TASK_ID
 ]);
 
 /**
@@ -342,6 +367,13 @@ FileTasks.recordViewingRootTypeUMA_ = function(rootType) {
   if (rootType !== null) {
     metrics.recordEnum(
         'ViewingRootType', rootType, VolumeManagerCommon.RootTypesForUMA);
+  }
+};
+
+FileTasks.recordZipHandlerUMA_ = function(taskId) {
+  if (FileTasks.UMA_ZIP_HANDLER_TASK_IDS_.indexOf(taskId) != -1) {
+    metrics.recordEnum(
+        'ZipFileTask', taskId, FileTasks.UMA_ZIP_HANDLER_TASK_IDS_);
   }
 };
 
@@ -640,6 +672,7 @@ FileTasks.prototype.executeInternal_ = function(taskId) {
     if (FileTasks.isInternalTask_(taskId)) {
       this.executeInternalTask_(taskId);
     } else {
+      FileTasks.recordZipHandlerUMA_(taskId);
       chrome.fileManagerPrivate.executeTask(taskId,
           this.entries_,
           function(result) {
@@ -851,7 +884,7 @@ FileTasks.prototype.updateOpenComboButton_ = function(combobutton, tasks) {
   } else {
     combobutton.defaultItem = {
       type: FileTasks.TaskMenuButtonItemType.ShowMenu,
-      label: str('MORE_ACTIONS_BUTTON_LABEL')
+      label: str('OPEN_WITH_BUTTON_LABEL')
     };
   }
 

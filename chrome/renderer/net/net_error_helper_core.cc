@@ -489,6 +489,9 @@ bool NetErrorHelperCore::IsReloadableError(
          info.error.reason() != net::ERR_SSL_PROTOCOL_ERROR &&
          // Do not trigger for XSS Auditor violations.
          info.error.reason() != net::ERR_BLOCKED_BY_XSS_AUDITOR &&
+         // Do not trigger for blacklisted URLs.
+         // https://crbug.com/803839
+         info.error.reason() != net::ERR_BLOCKED_BY_ADMINISTRATOR &&
          !info.was_failed_post &&
          // Don't auto-reload non-http/https schemas.
          // https://crbug.com/471713
@@ -498,7 +501,8 @@ bool NetErrorHelperCore::IsReloadableError(
 NetErrorHelperCore::NetErrorHelperCore(Delegate* delegate,
                                        bool auto_reload_enabled,
                                        bool auto_reload_visible_only,
-                                       bool is_visible)
+                                       bool is_visible,
+                                       bool online)
     : delegate_(delegate),
       last_probe_status_(error_page::DNS_PROBE_POSSIBLE),
       can_show_network_diagnostics_dialog_(false),
@@ -508,8 +512,7 @@ NetErrorHelperCore::NetErrorHelperCore(Delegate* delegate,
       auto_reload_paused_(false),
       auto_reload_in_flight_(false),
       uncommitted_load_started_(false),
-      // TODO(ellyjones): Make online_ accurate at object creation.
-      online_(true),
+      online_(online),
       visible_(is_visible),
       auto_reload_count_(0),
       navigation_from_button_(NO_BUTTON) {}

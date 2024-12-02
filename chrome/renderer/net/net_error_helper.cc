@@ -29,7 +29,6 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/url_constants.h"
-#include "content/public/renderer/child_url_loader_factory_getter.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/public/renderer/document_state.h"
 #include "content/public/renderer/render_frame.h"
@@ -40,8 +39,8 @@
 #include "ipc/ipc_message_macros.h"
 #include "net/base/net_errors.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "third_party/WebKit/common/associated_interfaces/associated_interface_provider.h"
-#include "third_party/WebKit/common/associated_interfaces/associated_interface_registry.h"
+#include "third_party/WebKit/public/common/associated_interfaces/associated_interface_provider.h"
+#include "third_party/WebKit/public/common/associated_interfaces/associated_interface_registry.h"
 #include "third_party/WebKit/public/platform/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
@@ -118,7 +117,7 @@ const net::NetworkTrafficAnnotationTag& GetNetworkTrafficAnnotationTag() {
 
 }  // namespace
 
-NetErrorHelper::NetErrorHelper(RenderFrame* render_frame)
+NetErrorHelper::NetErrorHelper(RenderFrame* render_frame, bool online)
     : RenderFrameObserver(render_frame),
       content::RenderFrameObserverTracker<NetErrorHelper>(render_frame),
       weak_controller_delegate_factory_(this),
@@ -131,10 +130,9 @@ NetErrorHelper::NetErrorHelper(RenderFrame* render_frame)
       command_line->HasSwitch(switches::kEnableOfflineAutoReloadVisibleOnly);
   // TODO(mmenke): Consider only creating a NetErrorHelperCore for main frames.
   // subframes don't need any of the NetErrorHelperCore's extra logic.
-  core_.reset(new NetErrorHelperCore(this,
-                                     auto_reload_enabled,
+  core_.reset(new NetErrorHelperCore(this, auto_reload_enabled,
                                      auto_reload_visible_only,
-                                     !render_frame->IsHidden()));
+                                     !render_frame->IsHidden(), online));
 
   render_frame->GetAssociatedInterfaceRegistry()->AddInterface(
       base::Bind(&NetErrorHelper::OnNetworkDiagnosticsClientRequest,
@@ -378,11 +376,13 @@ void NetErrorHelper::FetchNavigationCorrections(
   correction_fetcher_->SetBody(navigation_correction_request_body);
   correction_fetcher_->SetHeader("Content-Type", "application/json");
 
+  // Prevent CORB from triggering on this request by setting an Origin header.
+  correction_fetcher_->SetHeader("Origin", "null");
+
   correction_fetcher_->Start(
       render_frame()->GetWebFrame(),
       blink::WebURLRequest::kRequestContextInternal,
-      render_frame()->GetURLLoaderFactory(navigation_correction_url),
-      GetNetworkTrafficAnnotationTag(),
+      render_frame()->GetURLLoaderFactory(), GetNetworkTrafficAnnotationTag(),
       base::BindOnce(&NetErrorHelper::OnNavigationCorrectionsFetched,
                      base::Unretained(this)));
 
@@ -406,8 +406,7 @@ void NetErrorHelper::SendTrackingRequest(
   tracking_fetcher_->Start(
       render_frame()->GetWebFrame(),
       blink::WebURLRequest::kRequestContextInternal,
-      render_frame()->GetURLLoaderFactory(tracking_url),
-      GetNetworkTrafficAnnotationTag(),
+      render_frame()->GetURLLoaderFactory(), GetNetworkTrafficAnnotationTag(),
       base::BindOnce(&NetErrorHelper::OnTrackingRequestComplete,
                      base::Unretained(this)));
 }

@@ -62,6 +62,9 @@ cr.define('cr.ui.Oobe', function() {
       login.TopHeaderBar.decorate($('top-header-bar'));
 
       chrome.send('screenStateInitialize');
+
+      if (Oobe.getInstance().showingViewsLogin)
+        chrome.send('showAddUser');
     },
 
     // Dummy Oobe functions not present with stripped login UI.
@@ -84,6 +87,14 @@ cr.define('cr.ui.Oobe', function() {
       loadTimeData.overrideValues(data);
       i18nTemplate.process(document, loadTimeData);
       Oobe.getInstance().updateLocalizedContent_();
+    },
+
+    /**
+     * Updates "device in tablet mode" state when tablet mode is changed.
+     * @param {Boolean} isInTabletMode True when in tablet mode.
+     */
+    setTabletModeState: function(isInTabletMode) {
+      Oobe.getInstance().setTabletModeState_(isInTabletMode);
     },
   };
 });

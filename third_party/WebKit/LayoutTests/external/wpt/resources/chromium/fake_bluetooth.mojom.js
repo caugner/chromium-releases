@@ -5,15 +5,12 @@
 'use strict';
 
 (function() {
-  var mojomId = 'device/bluetooth/public/interfaces/test/fake_bluetooth.mojom';
+  var mojomId = 'device/bluetooth/public/mojom/test/fake_bluetooth.mojom';
   if (mojo.internal.isMojomLoaded(mojomId)) {
     console.warn('The following mojom is loaded multiple times: ' + mojomId);
     return;
   }
   mojo.internal.markMojomLoaded(mojomId);
-
-  // TODO(yzshen): Define these aliases to minimize the differences between the
-  // old/new modes. Remove them when the old mode goes away.
   var bindings = mojo;
   var associatedBindings = mojo;
   var codec = mojo.internal;
@@ -24,7 +21,7 @@
       mojo.internal.exposeNamespace('bluetooth.mojom');
   if (mojo.config.autoLoadMojomDeps) {
     mojo.internal.loadMojomIfNecessary(
-        'device/bluetooth/public/interfaces/uuid.mojom', '../uuid.mojom.js');
+        'device/bluetooth/public/mojom/uuid.mojom', '../uuid.mojom.js');
   }
 
 
@@ -55,6 +52,317 @@
     return validator.validationError.UNKNOWN_ENUM_VALUE;
   };
 
+  function Appearance(values) {
+    this.initDefaults_();
+    this.initFields_(values);
+  }
+
+
+  Appearance.prototype.initDefaults_ = function() {
+    this.hasValue = false;
+    this.value = 0;
+  };
+  Appearance.prototype.initFields_ = function(fields) {
+    for(var field in fields) {
+        if (this.hasOwnProperty(field))
+          this[field] = fields[field];
+    }
+  };
+
+  Appearance.validate = function(messageValidator, offset) {
+    var err;
+    err = messageValidator.validateStructHeader(offset, codec.kStructHeaderSize);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+    var kVersionSizes = [
+      {version: 0, numBytes: 16}
+    ];
+    err = messageValidator.validateStructVersion(offset, kVersionSizes);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+
+
+    return validator.validationError.NONE;
+  };
+
+  Appearance.encodedSize = codec.kStructHeaderSize + 8;
+
+  Appearance.decode = function(decoder) {
+    var packed;
+    var val = new Appearance();
+    var numberOfBytes = decoder.readUint32();
+    var version = decoder.readUint32();
+    packed = decoder.readUint8();
+    val.hasValue = (packed >> 0) & 1 ? true : false;
+    val.value = decoder.decodeStruct(codec.Int8);
+    decoder.skip(1);
+    decoder.skip(1);
+    decoder.skip(1);
+    decoder.skip(1);
+    decoder.skip(1);
+    decoder.skip(1);
+    return val;
+  };
+
+  Appearance.encode = function(encoder, val) {
+    var packed;
+    encoder.writeUint32(Appearance.encodedSize);
+    encoder.writeUint32(0);
+    packed = 0;
+    packed |= (val.hasValue & 1) << 0
+    encoder.writeUint8(packed);
+    encoder.encodeStruct(codec.Int8, val.value);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.skip(1);
+  };
+  function Power(values) {
+    this.initDefaults_();
+    this.initFields_(values);
+  }
+
+
+  Power.prototype.initDefaults_ = function() {
+    this.hasValue = false;
+    this.value = 0;
+  };
+  Power.prototype.initFields_ = function(fields) {
+    for(var field in fields) {
+        if (this.hasOwnProperty(field))
+          this[field] = fields[field];
+    }
+  };
+
+  Power.validate = function(messageValidator, offset) {
+    var err;
+    err = messageValidator.validateStructHeader(offset, codec.kStructHeaderSize);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+    var kVersionSizes = [
+      {version: 0, numBytes: 16}
+    ];
+    err = messageValidator.validateStructVersion(offset, kVersionSizes);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+
+
+    return validator.validationError.NONE;
+  };
+
+  Power.encodedSize = codec.kStructHeaderSize + 8;
+
+  Power.decode = function(decoder) {
+    var packed;
+    var val = new Power();
+    var numberOfBytes = decoder.readUint32();
+    var version = decoder.readUint32();
+    packed = decoder.readUint8();
+    val.hasValue = (packed >> 0) & 1 ? true : false;
+    val.value = decoder.decodeStruct(codec.Int8);
+    decoder.skip(1);
+    decoder.skip(1);
+    decoder.skip(1);
+    decoder.skip(1);
+    decoder.skip(1);
+    decoder.skip(1);
+    return val;
+  };
+
+  Power.encode = function(encoder, val) {
+    var packed;
+    encoder.writeUint32(Power.encodedSize);
+    encoder.writeUint32(0);
+    packed = 0;
+    packed |= (val.hasValue & 1) << 0
+    encoder.writeUint8(packed);
+    encoder.encodeStruct(codec.Int8, val.value);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.skip(1);
+  };
+  function ScanRecord(values) {
+    this.initDefaults_();
+    this.initFields_(values);
+  }
+
+
+  ScanRecord.prototype.initDefaults_ = function() {
+    this.name = null;
+    this.uuids = null;
+    this.appearance = null;
+    this.txPower = null;
+    this.manufacturerData = null;
+  };
+  ScanRecord.prototype.initFields_ = function(fields) {
+    for(var field in fields) {
+        if (this.hasOwnProperty(field))
+          this[field] = fields[field];
+    }
+  };
+
+  ScanRecord.validate = function(messageValidator, offset) {
+    var err;
+    err = messageValidator.validateStructHeader(offset, codec.kStructHeaderSize);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+    var kVersionSizes = [
+      {version: 0, numBytes: 48}
+    ];
+    err = messageValidator.validateStructVersion(offset, kVersionSizes);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+
+    // validate ScanRecord.name
+    err = messageValidator.validateStringPointer(offset + codec.kStructHeaderSize + 0, true)
+    if (err !== validator.validationError.NONE)
+        return err;
+
+
+    // validate ScanRecord.uuids
+    err = messageValidator.validateArrayPointer(offset + codec.kStructHeaderSize + 8, 8, new codec.PointerTo(uuid$.UUID), true, [0], 0);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+
+    // validate ScanRecord.appearance
+    err = messageValidator.validateStructPointer(offset + codec.kStructHeaderSize + 16, Appearance, false);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+
+    // validate ScanRecord.txPower
+    err = messageValidator.validateStructPointer(offset + codec.kStructHeaderSize + 24, Power, false);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+
+    // validate ScanRecord.manufacturerData
+    err = messageValidator.validateMapPointer(offset + codec.kStructHeaderSize + 32, true, codec.Uint8, new codec.ArrayOf(codec.Uint8), false);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+    return validator.validationError.NONE;
+  };
+
+  ScanRecord.encodedSize = codec.kStructHeaderSize + 40;
+
+  ScanRecord.decode = function(decoder) {
+    var packed;
+    var val = new ScanRecord();
+    var numberOfBytes = decoder.readUint32();
+    var version = decoder.readUint32();
+    val.name = decoder.decodeStruct(codec.NullableString);
+    val.uuids = decoder.decodeArrayPointer(new codec.PointerTo(uuid$.UUID));
+    val.appearance = decoder.decodeStructPointer(Appearance);
+    val.txPower = decoder.decodeStructPointer(Power);
+    val.manufacturerData = decoder.decodeMapPointer(codec.Uint8, new codec.ArrayOf(codec.Uint8));
+    return val;
+  };
+
+  ScanRecord.encode = function(encoder, val) {
+    var packed;
+    encoder.writeUint32(ScanRecord.encodedSize);
+    encoder.writeUint32(0);
+    encoder.encodeStruct(codec.NullableString, val.name);
+    encoder.encodeArrayPointer(new codec.PointerTo(uuid$.UUID), val.uuids);
+    encoder.encodeStructPointer(Appearance, val.appearance);
+    encoder.encodeStructPointer(Power, val.txPower);
+    encoder.encodeMapPointer(codec.Uint8, new codec.ArrayOf(codec.Uint8), val.manufacturerData);
+  };
+  function ScanResult(values) {
+    this.initDefaults_();
+    this.initFields_(values);
+  }
+
+
+  ScanResult.prototype.initDefaults_ = function() {
+    this.deviceAddress = null;
+    this.rssi = 0;
+    this.scanRecord = null;
+  };
+  ScanResult.prototype.initFields_ = function(fields) {
+    for(var field in fields) {
+        if (this.hasOwnProperty(field))
+          this[field] = fields[field];
+    }
+  };
+
+  ScanResult.validate = function(messageValidator, offset) {
+    var err;
+    err = messageValidator.validateStructHeader(offset, codec.kStructHeaderSize);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+    var kVersionSizes = [
+      {version: 0, numBytes: 32}
+    ];
+    err = messageValidator.validateStructVersion(offset, kVersionSizes);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+
+    // validate ScanResult.deviceAddress
+    err = messageValidator.validateStringPointer(offset + codec.kStructHeaderSize + 0, false)
+    if (err !== validator.validationError.NONE)
+        return err;
+
+
+
+    // validate ScanResult.scanRecord
+    err = messageValidator.validateStructPointer(offset + codec.kStructHeaderSize + 16, ScanRecord, false);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+    return validator.validationError.NONE;
+  };
+
+  ScanResult.encodedSize = codec.kStructHeaderSize + 24;
+
+  ScanResult.decode = function(decoder) {
+    var packed;
+    var val = new ScanResult();
+    var numberOfBytes = decoder.readUint32();
+    var version = decoder.readUint32();
+    val.deviceAddress = decoder.decodeStruct(codec.String);
+    val.rssi = decoder.decodeStruct(codec.Int8);
+    decoder.skip(1);
+    decoder.skip(1);
+    decoder.skip(1);
+    decoder.skip(1);
+    decoder.skip(1);
+    decoder.skip(1);
+    decoder.skip(1);
+    val.scanRecord = decoder.decodeStructPointer(ScanRecord);
+    return val;
+  };
+
+  ScanResult.encode = function(encoder, val) {
+    var packed;
+    encoder.writeUint32(ScanResult.encodedSize);
+    encoder.writeUint32(0);
+    encoder.encodeStruct(codec.String, val.deviceAddress);
+    encoder.encodeStruct(codec.Int8, val.rssi);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.encodeStructPointer(ScanRecord, val.scanRecord);
+  };
   function CharacteristicProperties(values) {
     this.initDefaults_();
     this.initFields_(values);
@@ -611,6 +919,107 @@
   FakeCentral_SimulatePreconnectedPeripheral_ResponseParams.encode = function(encoder, val) {
     var packed;
     encoder.writeUint32(FakeCentral_SimulatePreconnectedPeripheral_ResponseParams.encodedSize);
+    encoder.writeUint32(0);
+  };
+  function FakeCentral_SimulateAdvertisementReceived_Params(values) {
+    this.initDefaults_();
+    this.initFields_(values);
+  }
+
+
+  FakeCentral_SimulateAdvertisementReceived_Params.prototype.initDefaults_ = function() {
+    this.result = null;
+  };
+  FakeCentral_SimulateAdvertisementReceived_Params.prototype.initFields_ = function(fields) {
+    for(var field in fields) {
+        if (this.hasOwnProperty(field))
+          this[field] = fields[field];
+    }
+  };
+
+  FakeCentral_SimulateAdvertisementReceived_Params.validate = function(messageValidator, offset) {
+    var err;
+    err = messageValidator.validateStructHeader(offset, codec.kStructHeaderSize);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+    var kVersionSizes = [
+      {version: 0, numBytes: 16}
+    ];
+    err = messageValidator.validateStructVersion(offset, kVersionSizes);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+
+    // validate FakeCentral_SimulateAdvertisementReceived_Params.result
+    err = messageValidator.validateStructPointer(offset + codec.kStructHeaderSize + 0, ScanResult, false);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+    return validator.validationError.NONE;
+  };
+
+  FakeCentral_SimulateAdvertisementReceived_Params.encodedSize = codec.kStructHeaderSize + 8;
+
+  FakeCentral_SimulateAdvertisementReceived_Params.decode = function(decoder) {
+    var packed;
+    var val = new FakeCentral_SimulateAdvertisementReceived_Params();
+    var numberOfBytes = decoder.readUint32();
+    var version = decoder.readUint32();
+    val.result = decoder.decodeStructPointer(ScanResult);
+    return val;
+  };
+
+  FakeCentral_SimulateAdvertisementReceived_Params.encode = function(encoder, val) {
+    var packed;
+    encoder.writeUint32(FakeCentral_SimulateAdvertisementReceived_Params.encodedSize);
+    encoder.writeUint32(0);
+    encoder.encodeStructPointer(ScanResult, val.result);
+  };
+  function FakeCentral_SimulateAdvertisementReceived_ResponseParams(values) {
+    this.initDefaults_();
+    this.initFields_(values);
+  }
+
+
+  FakeCentral_SimulateAdvertisementReceived_ResponseParams.prototype.initDefaults_ = function() {
+  };
+  FakeCentral_SimulateAdvertisementReceived_ResponseParams.prototype.initFields_ = function(fields) {
+    for(var field in fields) {
+        if (this.hasOwnProperty(field))
+          this[field] = fields[field];
+    }
+  };
+
+  FakeCentral_SimulateAdvertisementReceived_ResponseParams.validate = function(messageValidator, offset) {
+    var err;
+    err = messageValidator.validateStructHeader(offset, codec.kStructHeaderSize);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+    var kVersionSizes = [
+      {version: 0, numBytes: 8}
+    ];
+    err = messageValidator.validateStructVersion(offset, kVersionSizes);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+    return validator.validationError.NONE;
+  };
+
+  FakeCentral_SimulateAdvertisementReceived_ResponseParams.encodedSize = codec.kStructHeaderSize + 0;
+
+  FakeCentral_SimulateAdvertisementReceived_ResponseParams.decode = function(decoder) {
+    var packed;
+    var val = new FakeCentral_SimulateAdvertisementReceived_ResponseParams();
+    var numberOfBytes = decoder.readUint32();
+    var version = decoder.readUint32();
+    return val;
+  };
+
+  FakeCentral_SimulateAdvertisementReceived_ResponseParams.encode = function(encoder, val) {
+    var packed;
+    encoder.writeUint32(FakeCentral_SimulateAdvertisementReceived_ResponseParams.encodedSize);
     encoder.writeUint32(0);
   };
   function FakeCentral_SetNextGATTConnectionResponse_Params(values) {
@@ -1251,6 +1660,137 @@
     encoder.writeUint32(FakeCentral_AddFakeService_ResponseParams.encodedSize);
     encoder.writeUint32(0);
     encoder.encodeStruct(codec.NullableString, val.serviceId);
+  };
+  function FakeCentral_RemoveFakeService_Params(values) {
+    this.initDefaults_();
+    this.initFields_(values);
+  }
+
+
+  FakeCentral_RemoveFakeService_Params.prototype.initDefaults_ = function() {
+    this.serviceId = null;
+    this.peripheralAddress = null;
+  };
+  FakeCentral_RemoveFakeService_Params.prototype.initFields_ = function(fields) {
+    for(var field in fields) {
+        if (this.hasOwnProperty(field))
+          this[field] = fields[field];
+    }
+  };
+
+  FakeCentral_RemoveFakeService_Params.validate = function(messageValidator, offset) {
+    var err;
+    err = messageValidator.validateStructHeader(offset, codec.kStructHeaderSize);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+    var kVersionSizes = [
+      {version: 0, numBytes: 24}
+    ];
+    err = messageValidator.validateStructVersion(offset, kVersionSizes);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+
+    // validate FakeCentral_RemoveFakeService_Params.serviceId
+    err = messageValidator.validateStringPointer(offset + codec.kStructHeaderSize + 0, false)
+    if (err !== validator.validationError.NONE)
+        return err;
+
+
+    // validate FakeCentral_RemoveFakeService_Params.peripheralAddress
+    err = messageValidator.validateStringPointer(offset + codec.kStructHeaderSize + 8, false)
+    if (err !== validator.validationError.NONE)
+        return err;
+
+    return validator.validationError.NONE;
+  };
+
+  FakeCentral_RemoveFakeService_Params.encodedSize = codec.kStructHeaderSize + 16;
+
+  FakeCentral_RemoveFakeService_Params.decode = function(decoder) {
+    var packed;
+    var val = new FakeCentral_RemoveFakeService_Params();
+    var numberOfBytes = decoder.readUint32();
+    var version = decoder.readUint32();
+    val.serviceId = decoder.decodeStruct(codec.String);
+    val.peripheralAddress = decoder.decodeStruct(codec.String);
+    return val;
+  };
+
+  FakeCentral_RemoveFakeService_Params.encode = function(encoder, val) {
+    var packed;
+    encoder.writeUint32(FakeCentral_RemoveFakeService_Params.encodedSize);
+    encoder.writeUint32(0);
+    encoder.encodeStruct(codec.String, val.serviceId);
+    encoder.encodeStruct(codec.String, val.peripheralAddress);
+  };
+  function FakeCentral_RemoveFakeService_ResponseParams(values) {
+    this.initDefaults_();
+    this.initFields_(values);
+  }
+
+
+  FakeCentral_RemoveFakeService_ResponseParams.prototype.initDefaults_ = function() {
+    this.success = false;
+  };
+  FakeCentral_RemoveFakeService_ResponseParams.prototype.initFields_ = function(fields) {
+    for(var field in fields) {
+        if (this.hasOwnProperty(field))
+          this[field] = fields[field];
+    }
+  };
+
+  FakeCentral_RemoveFakeService_ResponseParams.validate = function(messageValidator, offset) {
+    var err;
+    err = messageValidator.validateStructHeader(offset, codec.kStructHeaderSize);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+    var kVersionSizes = [
+      {version: 0, numBytes: 16}
+    ];
+    err = messageValidator.validateStructVersion(offset, kVersionSizes);
+    if (err !== validator.validationError.NONE)
+        return err;
+
+
+    return validator.validationError.NONE;
+  };
+
+  FakeCentral_RemoveFakeService_ResponseParams.encodedSize = codec.kStructHeaderSize + 8;
+
+  FakeCentral_RemoveFakeService_ResponseParams.decode = function(decoder) {
+    var packed;
+    var val = new FakeCentral_RemoveFakeService_ResponseParams();
+    var numberOfBytes = decoder.readUint32();
+    var version = decoder.readUint32();
+    packed = decoder.readUint8();
+    val.success = (packed >> 0) & 1 ? true : false;
+    decoder.skip(1);
+    decoder.skip(1);
+    decoder.skip(1);
+    decoder.skip(1);
+    decoder.skip(1);
+    decoder.skip(1);
+    decoder.skip(1);
+    return val;
+  };
+
+  FakeCentral_RemoveFakeService_ResponseParams.encode = function(encoder, val) {
+    var packed;
+    encoder.writeUint32(FakeCentral_RemoveFakeService_ResponseParams.encodedSize);
+    encoder.writeUint32(0);
+    packed = 0;
+    packed |= (val.success & 1) << 0
+    encoder.writeUint8(packed);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.skip(1);
+    encoder.skip(1);
   };
   function FakeCentral_AddFakeCharacteristic_Params(values) {
     this.initDefaults_();
@@ -2696,19 +3236,21 @@
   FakeBluetoothStub.prototype.validator = validateFakeBluetoothRequest;
   FakeBluetoothProxy.prototype.validator = validateFakeBluetoothResponse;
   var kFakeCentral_SimulatePreconnectedPeripheral_Name = 0;
-  var kFakeCentral_SetNextGATTConnectionResponse_Name = 1;
-  var kFakeCentral_SetNextGATTDiscoveryResponse_Name = 2;
-  var kFakeCentral_SimulateGATTDisconnection_Name = 3;
-  var kFakeCentral_SimulateGATTServicesChanged_Name = 4;
-  var kFakeCentral_AddFakeService_Name = 5;
-  var kFakeCentral_AddFakeCharacteristic_Name = 6;
-  var kFakeCentral_RemoveFakeCharacteristic_Name = 7;
-  var kFakeCentral_AddFakeDescriptor_Name = 8;
-  var kFakeCentral_SetNextReadCharacteristicResponse_Name = 9;
-  var kFakeCentral_SetNextWriteCharacteristicResponse_Name = 10;
-  var kFakeCentral_SetNextSubscribeToNotificationsResponse_Name = 11;
-  var kFakeCentral_GetLastWrittenValue_Name = 12;
-  var kFakeCentral_SetNextReadDescriptorResponse_Name = 13;
+  var kFakeCentral_SimulateAdvertisementReceived_Name = 1;
+  var kFakeCentral_SetNextGATTConnectionResponse_Name = 2;
+  var kFakeCentral_SetNextGATTDiscoveryResponse_Name = 3;
+  var kFakeCentral_SimulateGATTDisconnection_Name = 4;
+  var kFakeCentral_SimulateGATTServicesChanged_Name = 5;
+  var kFakeCentral_AddFakeService_Name = 6;
+  var kFakeCentral_RemoveFakeService_Name = 7;
+  var kFakeCentral_AddFakeCharacteristic_Name = 8;
+  var kFakeCentral_RemoveFakeCharacteristic_Name = 9;
+  var kFakeCentral_AddFakeDescriptor_Name = 10;
+  var kFakeCentral_SetNextReadCharacteristicResponse_Name = 11;
+  var kFakeCentral_SetNextWriteCharacteristicResponse_Name = 12;
+  var kFakeCentral_SetNextSubscribeToNotificationsResponse_Name = 13;
+  var kFakeCentral_GetLastWrittenValue_Name = 14;
+  var kFakeCentral_SetNextReadDescriptorResponse_Name = 15;
 
   function FakeCentralPtr(handleOrPtrInfo) {
     this.ptr = new bindings.InterfacePtrController(FakeCentral,
@@ -2749,6 +3291,31 @@
         var reader = new codec.MessageReader(message);
         var responseParams =
             reader.decodeStruct(FakeCentral_SimulatePreconnectedPeripheral_ResponseParams);
+        resolve(responseParams);
+      }).catch(function(result) {
+        reject(Error("Connection error: " + result));
+      });
+    }.bind(this));
+  };
+  FakeCentralPtr.prototype.simulateAdvertisementReceived = function() {
+    return FakeCentralProxy.prototype.simulateAdvertisementReceived
+        .apply(this.ptr.getProxy(), arguments);
+  };
+
+  FakeCentralProxy.prototype.simulateAdvertisementReceived = function(result) {
+    var params = new FakeCentral_SimulateAdvertisementReceived_Params();
+    params.result = result;
+    return new Promise(function(resolve, reject) {
+      var builder = new codec.MessageV1Builder(
+          kFakeCentral_SimulateAdvertisementReceived_Name,
+          codec.align(FakeCentral_SimulateAdvertisementReceived_Params.encodedSize),
+          codec.kMessageExpectsResponse, 0);
+      builder.encodeStruct(FakeCentral_SimulateAdvertisementReceived_Params, params);
+      var message = builder.finish();
+      this.receiver_.acceptAndExpectResponse(message).then(function(message) {
+        var reader = new codec.MessageReader(message);
+        var responseParams =
+            reader.decodeStruct(FakeCentral_SimulateAdvertisementReceived_ResponseParams);
         resolve(responseParams);
       }).catch(function(result) {
         reject(Error("Connection error: " + result));
@@ -2877,6 +3444,32 @@
         var reader = new codec.MessageReader(message);
         var responseParams =
             reader.decodeStruct(FakeCentral_AddFakeService_ResponseParams);
+        resolve(responseParams);
+      }).catch(function(result) {
+        reject(Error("Connection error: " + result));
+      });
+    }.bind(this));
+  };
+  FakeCentralPtr.prototype.removeFakeService = function() {
+    return FakeCentralProxy.prototype.removeFakeService
+        .apply(this.ptr.getProxy(), arguments);
+  };
+
+  FakeCentralProxy.prototype.removeFakeService = function(serviceId, peripheralAddress) {
+    var params = new FakeCentral_RemoveFakeService_Params();
+    params.serviceId = serviceId;
+    params.peripheralAddress = peripheralAddress;
+    return new Promise(function(resolve, reject) {
+      var builder = new codec.MessageV1Builder(
+          kFakeCentral_RemoveFakeService_Name,
+          codec.align(FakeCentral_RemoveFakeService_Params.encodedSize),
+          codec.kMessageExpectsResponse, 0);
+      builder.encodeStruct(FakeCentral_RemoveFakeService_Params, params);
+      var message = builder.finish();
+      this.receiver_.acceptAndExpectResponse(message).then(function(message) {
+        var reader = new codec.MessageReader(message);
+        var responseParams =
+            reader.decodeStruct(FakeCentral_RemoveFakeService_ResponseParams);
         resolve(responseParams);
       }).catch(function(result) {
         reject(Error("Connection error: " + result));
@@ -3115,6 +3708,9 @@
   FakeCentralStub.prototype.simulatePreconnectedPeripheral = function(address, name, knownServiceUuids) {
     return this.delegate_ && this.delegate_.simulatePreconnectedPeripheral && this.delegate_.simulatePreconnectedPeripheral(address, name, knownServiceUuids);
   }
+  FakeCentralStub.prototype.simulateAdvertisementReceived = function(result) {
+    return this.delegate_ && this.delegate_.simulateAdvertisementReceived && this.delegate_.simulateAdvertisementReceived(result);
+  }
   FakeCentralStub.prototype.setNextGATTConnectionResponse = function(address, code) {
     return this.delegate_ && this.delegate_.setNextGATTConnectionResponse && this.delegate_.setNextGATTConnectionResponse(address, code);
   }
@@ -3129,6 +3725,9 @@
   }
   FakeCentralStub.prototype.addFakeService = function(peripheralAddress, serviceUuid) {
     return this.delegate_ && this.delegate_.addFakeService && this.delegate_.addFakeService(peripheralAddress, serviceUuid);
+  }
+  FakeCentralStub.prototype.removeFakeService = function(serviceId, peripheralAddress) {
+    return this.delegate_ && this.delegate_.removeFakeService && this.delegate_.removeFakeService(serviceId, peripheralAddress);
   }
   FakeCentralStub.prototype.addFakeCharacteristic = function(characteristicUuid, properties, serviceId, peripheralAddress) {
     return this.delegate_ && this.delegate_.addFakeCharacteristic && this.delegate_.addFakeCharacteristic(characteristicUuid, properties, serviceId, peripheralAddress);
@@ -3177,6 +3776,21 @@
             codec.align(FakeCentral_SimulatePreconnectedPeripheral_ResponseParams.encodedSize),
             codec.kMessageIsResponse, reader.requestID);
         builder.encodeStruct(FakeCentral_SimulatePreconnectedPeripheral_ResponseParams,
+                             responseParams);
+        var message = builder.finish();
+        responder.accept(message);
+      });
+      return true;
+    case kFakeCentral_SimulateAdvertisementReceived_Name:
+      var params = reader.decodeStruct(FakeCentral_SimulateAdvertisementReceived_Params);
+      this.simulateAdvertisementReceived(params.result).then(function(response) {
+        var responseParams =
+            new FakeCentral_SimulateAdvertisementReceived_ResponseParams();
+        var builder = new codec.MessageV1Builder(
+            kFakeCentral_SimulateAdvertisementReceived_Name,
+            codec.align(FakeCentral_SimulateAdvertisementReceived_ResponseParams.encodedSize),
+            codec.kMessageIsResponse, reader.requestID);
+        builder.encodeStruct(FakeCentral_SimulateAdvertisementReceived_ResponseParams,
                              responseParams);
         var message = builder.finish();
         responder.accept(message);
@@ -3257,6 +3871,22 @@
             codec.align(FakeCentral_AddFakeService_ResponseParams.encodedSize),
             codec.kMessageIsResponse, reader.requestID);
         builder.encodeStruct(FakeCentral_AddFakeService_ResponseParams,
+                             responseParams);
+        var message = builder.finish();
+        responder.accept(message);
+      });
+      return true;
+    case kFakeCentral_RemoveFakeService_Name:
+      var params = reader.decodeStruct(FakeCentral_RemoveFakeService_Params);
+      this.removeFakeService(params.serviceId, params.peripheralAddress).then(function(response) {
+        var responseParams =
+            new FakeCentral_RemoveFakeService_ResponseParams();
+        responseParams.success = response.success;
+        var builder = new codec.MessageV1Builder(
+            kFakeCentral_RemoveFakeService_Name,
+            codec.align(FakeCentral_RemoveFakeService_ResponseParams.encodedSize),
+            codec.kMessageIsResponse, reader.requestID);
+        builder.encodeStruct(FakeCentral_RemoveFakeService_ResponseParams,
                              responseParams);
         var message = builder.finish();
         responder.accept(message);
@@ -3404,6 +4034,10 @@
         if (message.expectsResponse())
           paramsClass = FakeCentral_SimulatePreconnectedPeripheral_Params;
       break;
+      case kFakeCentral_SimulateAdvertisementReceived_Name:
+        if (message.expectsResponse())
+          paramsClass = FakeCentral_SimulateAdvertisementReceived_Params;
+      break;
       case kFakeCentral_SetNextGATTConnectionResponse_Name:
         if (message.expectsResponse())
           paramsClass = FakeCentral_SetNextGATTConnectionResponse_Params;
@@ -3423,6 +4057,10 @@
       case kFakeCentral_AddFakeService_Name:
         if (message.expectsResponse())
           paramsClass = FakeCentral_AddFakeService_Params;
+      break;
+      case kFakeCentral_RemoveFakeService_Name:
+        if (message.expectsResponse())
+          paramsClass = FakeCentral_RemoveFakeService_Params;
       break;
       case kFakeCentral_AddFakeCharacteristic_Name:
         if (message.expectsResponse())
@@ -3470,6 +4108,10 @@
         if (message.isResponse())
           paramsClass = FakeCentral_SimulatePreconnectedPeripheral_ResponseParams;
         break;
+      case kFakeCentral_SimulateAdvertisementReceived_Name:
+        if (message.isResponse())
+          paramsClass = FakeCentral_SimulateAdvertisementReceived_ResponseParams;
+        break;
       case kFakeCentral_SetNextGATTConnectionResponse_Name:
         if (message.isResponse())
           paramsClass = FakeCentral_SetNextGATTConnectionResponse_ResponseParams;
@@ -3489,6 +4131,10 @@
       case kFakeCentral_AddFakeService_Name:
         if (message.isResponse())
           paramsClass = FakeCentral_AddFakeService_ResponseParams;
+        break;
+      case kFakeCentral_RemoveFakeService_Name:
+        if (message.isResponse())
+          paramsClass = FakeCentral_RemoveFakeService_ResponseParams;
         break;
       case kFakeCentral_AddFakeCharacteristic_Name:
         if (message.isResponse())
@@ -3544,6 +4190,10 @@
   exports.kGATTSuccess = kGATTSuccess;
   exports.kGATTInvalidHandle = kGATTInvalidHandle;
   exports.CentralState = CentralState;
+  exports.Appearance = Appearance;
+  exports.Power = Power;
+  exports.ScanRecord = ScanRecord;
+  exports.ScanResult = ScanResult;
   exports.CharacteristicProperties = CharacteristicProperties;
   exports.FakeBluetooth = FakeBluetooth;
   exports.FakeBluetoothPtr = FakeBluetoothPtr;

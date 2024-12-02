@@ -2,7 +2,7 @@
   var {page, session, dp} = await testRunner.startURL('../resources/dom-snapshot.html', 'Tests DOMSnapshot.getSnapshot method.');
 
   await session.evaluate(`
-    var host = document.querySelector('#shadow-host').createShadowRoot();
+    var host = document.querySelector('#shadow-host').attachShadow({mode: 'open'});
     var template = document.querySelector('#shadow-template');
     host.appendChild(template.content);
     template.remove();
@@ -15,6 +15,8 @@
       return '<' + typeof(value) + '>';
     if (typeof value === 'string' && value.indexOf('/dom-snapshot/') !== -1)
       value = '<value>';
+    if (typeof value === 'string' && value.indexOf('file://') !== -1)
+      value = '<string>' + value.substr(value.indexOf("WebKit/"));
     return value;
   }
 
