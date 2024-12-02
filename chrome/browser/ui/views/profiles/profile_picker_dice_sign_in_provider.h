@@ -13,8 +13,10 @@
 #include "chrome/browser/ui/views/profiles/profile_picker_web_contents_host.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "ui/color/color_provider_manager.h"
 
 struct CoreAccountInfo;
+class ProfilePickerDiceSignInToolbar;
 
 namespace content {
 struct ContextMenuParams;
@@ -45,7 +47,8 @@ class ProfilePickerDiceSignInProvider
                               std::unique_ptr<content::WebContents>,
                               bool is_saml)>;
 
-  explicit ProfilePickerDiceSignInProvider(ProfilePickerWebContentsHost* host);
+  ProfilePickerDiceSignInProvider(ProfilePickerWebContentsHost* host,
+                                  ProfilePickerDiceSignInToolbar* toolbar);
   ~ProfilePickerDiceSignInProvider() override;
   ProfilePickerDiceSignInProvider(const ProfilePickerDiceSignInProvider&) =
       delete;
@@ -64,9 +67,13 @@ class ProfilePickerDiceSignInProvider
   // Reloads the sign-in page if applicable.
   void ReloadSignInPage();
 
+  // Navigates back in the sign-in flow if applicable.
+  void NavigateBack();
+
   // Returns theme provider based on the sign-in profile or nullptr if the flow
   // is not yet initialized.
   const ui::ThemeProvider* GetThemeProvider() const;
+  ui::ColorProviderManager::InitializerSupplier* GetCustomTheme() const;
 
  private:
   // content::WebContentsDelegate:
@@ -116,8 +123,9 @@ class ProfilePickerDiceSignInProvider
 
   content::WebContents* contents() const { return contents_.get(); }
 
-  // The host object, must outlive this object.
-  ProfilePickerWebContentsHost* host_;
+  // The host and toolbar objects, must outlive this object.
+  ProfilePickerWebContentsHost* const host_;
+  ProfilePickerDiceSignInToolbar* const toolbar_;
   // Sign-in callback, valid until it's called.
   SignedInCallback callback_;
 
@@ -129,6 +137,11 @@ class ProfilePickerDiceSignInProvider
   // The web contents backed by `profile`. This is used for displaying the
   // sign-in flow.
   std::unique_ptr<content::WebContents> contents_;
+
+  // Because of ProfileOAuth2TokenService intricacies, the sign in should not
+  // finish before both the notification gets called.
+  // TODO(crbug.com/1249488): Remove this if the bug gets resolved.
+  bool refresh_token_updated_ = false;
 
   base::ScopedObservation<signin::IdentityManager,
                           signin::IdentityManager::Observer>

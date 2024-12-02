@@ -181,8 +181,6 @@ bool ContentMainDelegateImpl::BasicStartupComplete(int* exit_code) {
     ::features::kPeriodicBackgroundSync,
     // TODO(crbug.com/1174856): Support Portals.
     blink::features::kPortals,
-    // TODO(crbug.com/1174566): Enable by default after experiment.
-    content_capture::features::kContentCapture,
     // TODO(crbug.com/1144912): Support BackForwardCache on WebLayer.
     ::features::kBackForwardCache,
 
@@ -193,14 +191,10 @@ bool ContentMainDelegateImpl::BasicStartupComplete(int* exit_code) {
     ::features::kDisableDeJelly,
     ::features::kDynamicColorGamut,
 #else
-    // TODO(crbug.com/1131021): Support WebOTP Service on WebLayer.
+    // WebOTP is supported only on Android in WebLayer.
     ::features::kWebOTP,
 #endif
   };
-
-  // TODO(crbug.com/1057770): make Background Fetch work with WebLayer.
-  if (!BackgroundFetchDelegateFactory::IsEnabled())
-    disabled_features.push_back(::features::kBackgroundFetch);
 
 #if defined(OS_ANDROID)
   if (base::android::BuildInfo::GetInstance()->sdk_int() >=

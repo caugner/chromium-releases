@@ -14,12 +14,12 @@ namespace signin {
 const base::Feature kMobileIdentityConsistencyFRE{
     "MobileIdentityConsistencyFRE", base::FEATURE_DISABLED_BY_DEFAULT};
 const base::Feature kMobileIdentityConsistencyPromos{
-    "MobileIdentityConsistencyPromos", base::FEATURE_DISABLED_BY_DEFAULT};
+    "MobileIdentityConsistencyPromos", base::FEATURE_ENABLED_BY_DEFAULT};
 #endif
 
 #if defined(OS_IOS)
 const base::Feature kMICEWebSignIn{"MICEWebSignIn",
-                                   base::FEATURE_DISABLED_BY_DEFAULT};
+                                   base::FEATURE_ENABLED_BY_DEFAULT};
 bool IsMICEWebSignInEnabled() {
   return base::FeatureList::IsEnabled(kMICEWebSignIn);
 }

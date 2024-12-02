@@ -106,6 +106,10 @@ class BrowserAddedWaiter : public BrowserListObserver {
   explicit BrowserAddedWaiter(size_t total_count) : total_count_(total_count) {
     BrowserList::AddObserver(this);
   }
+
+  BrowserAddedWaiter(const BrowserAddedWaiter&) = delete;
+  BrowserAddedWaiter& operator=(const BrowserAddedWaiter&) = delete;
+
   ~BrowserAddedWaiter() override { BrowserList::RemoveObserver(this); }
 
   Browser* Wait() {
@@ -128,8 +132,6 @@ class BrowserAddedWaiter : public BrowserListObserver {
   const size_t total_count_;
   Browser* browser_ = nullptr;
   base::RunLoop run_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(BrowserAddedWaiter);
 };
 
 // Fake user policy signin service immediately invoking the callbacks.
@@ -633,7 +635,7 @@ IN_PROC_BROWSER_TEST_F(ProfilePickerCreationFlowBrowserTest,
 
   // Make it work without waiting for a long delay.
   ProfilePicker::SetExtendedAccountInfoTimeoutForTesting(
-      base::TimeDelta::FromMilliseconds(10));
+      base::Milliseconds(10));
 
   // Add an account - simulate a successful Gaia sign-in.
   CoreAccountInfo core_account_info =
@@ -796,8 +798,8 @@ IN_PROC_BROWSER_TEST_F(ProfilePickerCreationFlowBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(ProfilePickerCreationFlowBrowserTest, OpenProfile) {
-  AvatarToolbarButton::SetIPHMinDelayAfterCreationForTesting(
-      base::TimeDelta::FromSeconds(0));
+  AvatarToolbarButton::SetIPHMinDelayAfterCreationForTesting(base::Seconds(0));
+  FeaturePromoControllerViews::BlockActiveWindowCheckForTesting();
   ASSERT_EQ(1u, BrowserList::GetInstance()->size());
   // Create a second profile.
   base::FilePath other_path = CreateNewProfileWithoutBrowser();
@@ -818,8 +820,7 @@ IN_PROC_BROWSER_TEST_F(ProfilePickerCreationFlowBrowserTest, OpenProfile) {
 
 IN_PROC_BROWSER_TEST_F(ProfilePickerCreationFlowBrowserTest,
                        OpenProfile_Settings) {
-  AvatarToolbarButton::SetIPHMinDelayAfterCreationForTesting(
-      base::TimeDelta::FromSeconds(0));
+  AvatarToolbarButton::SetIPHMinDelayAfterCreationForTesting(base::Seconds(0));
   ASSERT_EQ(1u, BrowserList::GetInstance()->size());
   // Create a second profile.
   base::FilePath other_path = CreateNewProfileWithoutBrowser();
@@ -883,8 +884,7 @@ IN_PROC_BROWSER_TEST_F(ProfilePickerCreationFlowBrowserTest,
 // Regression test for https://crbug.com/1199035
 IN_PROC_BROWSER_TEST_F(ProfilePickerCreationFlowBrowserTest,
                        OpenProfile_Guest) {
-  AvatarToolbarButton::SetIPHMinDelayAfterCreationForTesting(
-      base::TimeDelta::FromSeconds(0));
+  AvatarToolbarButton::SetIPHMinDelayAfterCreationForTesting(base::Seconds(0));
   ASSERT_EQ(1u, BrowserList::GetInstance()->size());
   // Create a second profile.
   base::FilePath other_path = CreateNewProfileWithoutBrowser();
@@ -1320,10 +1320,18 @@ class ProfilePickerCreationFlowEphemeralProfileBrowserTest
   testing::NiceMock<policy::MockConfigurationPolicyProvider> policy_provider_;
 };
 
+// Flaky on Windows: https://crbug.com/1247530.
+#if defined(OS_WIN)
+#define MAYBE_PRE_Signin DISABLED_PRE_Signin
+#define MAYBE_Signin DISABLED_Signin
+#else
+#define MAYBE_PRE_Signin PRE_Signin
+#define MAYBE_Signin Signin
+#endif
 // Checks that the new profile is no longer ephemeral at the end of the flow and
 // still exists after restart.
 IN_PROC_BROWSER_TEST_P(ProfilePickerCreationFlowEphemeralProfileBrowserTest,
-                       PRE_Signin) {
+                       MAYBE_PRE_Signin) {
   ASSERT_EQ(1u, BrowserList::GetInstance()->size());
   ASSERT_EQ(1u, profile_manager()->GetNumberOfProfiles());
   ASSERT_TRUE(OriginalProfileExists());
@@ -1363,7 +1371,7 @@ IN_PROC_BROWSER_TEST_P(ProfilePickerCreationFlowEphemeralProfileBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_P(ProfilePickerCreationFlowEphemeralProfileBrowserTest,
-                       Signin) {
+                       MAYBE_Signin) {
   if (AreEphemeralProfilesForced()) {
     // If the policy is set, all profiles should have been deleted.
     EXPECT_EQ(1u, profile_manager()->GetNumberOfProfiles());

@@ -1349,6 +1349,10 @@ class CORE_EXPORT Document : public ContainerNode,
 
   const DocumentTiming& GetTiming() const { return document_timing_; }
 
+  bool ShouldMarkFontPerformance() const {
+    return !IsInitialEmptyDocument() && !IsXMLDocument();
+  }
+
   int RequestAnimationFrame(FrameCallback*);
   void CancelAnimationFrame(int id);
   void ServiceScriptedAnimations(base::TimeTicks monotonic_animation_start_time,
@@ -1752,7 +1756,6 @@ class CORE_EXPORT Document : public ContainerNode,
                            BeforeMatchExpandedHiddenMatchableUkm);
   FRIEND_TEST_ALL_PREFIXES(TextFinderSimTest,
                            BeforeMatchExpandedHiddenMatchableUkmNoHandler);
-  class NetworkStateObserver;
 
   // Listed elements that are not associated to a <form> element.
   class UnassociatedListedElementsList {
@@ -2196,8 +2199,6 @@ class CORE_EXPORT Document : public ContainerNode,
 
   Member<PropertyRegistry> property_registry_;
 
-  Member<NetworkStateObserver> network_state_observer_;
-
   UnassociatedListedElementsList unassociated_listed_elements_;
 
   // |ukm_recorder_| and |source_id_| will allow objects that are part of
@@ -2376,7 +2377,7 @@ struct DowncastTraits<Document> {
 
 #ifndef NDEBUG
 // Outside the blink namespace for ease of invocation from gdb.
-CORE_EXPORT void showLiveDocumentInstances();
+CORE_EXPORT void ShowLiveDocumentInstances();
 #endif
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_CORE_DOM_DOCUMENT_H_

@@ -74,12 +74,10 @@ namespace {
 
 // Initial delay before moving tabs when the dragged tab is close to the edge of
 // the stacked tabs.
-constexpr auto kMoveAttachedInitialDelay =
-    base::TimeDelta::FromMilliseconds(600);
+constexpr auto kMoveAttachedInitialDelay = base::Milliseconds(600);
 
 // Delay for moving tabs after the initial delay has passed.
-constexpr auto kMoveAttachedSubsequentDelay =
-    base::TimeDelta::FromMilliseconds(300);
+constexpr auto kMoveAttachedSubsequentDelay = base::Milliseconds(300);
 
 // A dragged window is forced to be a bit smaller than maximized bounds during a
 // drag. This prevents the dragged browser widget from getting maximized at
@@ -656,24 +654,6 @@ void TabDragController::EndDrag(EndDragReason reason) {
                                                              : NORMAL);
 }
 
-void TabDragController::
-    CheckSourceAndAttachedContextContainNoDuplicateTabGroupIds() {
-  if (source_context_ == nullptr || attached_context_ == nullptr ||
-      source_context_ == attached_context_) {
-    return;
-  }
-  const std::vector<tab_groups::TabGroupId> source_groups_vec =
-      source_context_->GetTabStripModel()->group_model()->ListTabGroups();
-  const std::vector<tab_groups::TabGroupId> attached_groups_vec =
-      attached_context_->GetTabStripModel()->group_model()->ListTabGroups();
-
-  for (const tab_groups::TabGroupId& attached_group_id :
-       attached_context_->GetTabStripModel()->group_model()->ListTabGroups()) {
-    CHECK(std::find(source_groups_vec.begin(), source_groups_vec.end(),
-                    attached_group_id) == source_groups_vec.end());
-  }
-}
-
 void TabDragController::SetDragLoopDoneCallbackForTesting(
     base::OnceClosure callback) {
   drag_loop_done_callback_ = std::move(callback);
@@ -878,7 +858,7 @@ TabDragController::Liveness TabDragController::ContinueDragging(
   }
   if (current_state_ == DragState::kDraggingWindow) {
     bring_to_front_timer_.Start(
-        FROM_HERE, base::TimeDelta::FromMilliseconds(750),
+        FROM_HERE, base::Milliseconds(750),
         base::BindOnce(&TabDragController::BringWindowUnderPointToFront,
                        base::Unretained(this), point_in_screen));
   }
@@ -1583,8 +1563,13 @@ gfx::Point TabDragController::GetAttachedDragPoint(
   const int x = attached_context_->AsView()->GetMirroredXInView(tab_loc.x()) -
                 mouse_offset_.x();
 
-  const int max_x = attached_context_->GetTabDragAreaWidth() -
-                    TabStrip::GetSizeNeededForViews(attached_views_);
+  // If the width needed for the `attached_views_` is greater than what is
+  // available in the tab drag area the attached drag point should simply be the
+  // beginning of the tab strip. Once attached the `attached_views_` will simply
+  // overflow as usual (see https://crbug.com/1250184).
+  const int max_x =
+      std::max(0, attached_context_->GetTabDragAreaWidth() -
+                      TabStrip::GetSizeNeededForViews(attached_views_));
   return gfx::Point(base::clamp(x, 0, max_x), 0);
 }
 
@@ -1645,10 +1630,6 @@ void TabDragController::EndDragImpl(EndDragType type) {
 
   // Clear out drag data so we don't attempt to do anything with it.
   drag_data_.clear();
-
-  // Check EndDrag leaves Tab Groups in the correct state, see
-  // https://crbug.com/1197888
-  CheckSourceAndAttachedContextContainNoDuplicateTabGroupIds();
 
   TabDragContext* owning_context =
       attached_context_ ? attached_context_ : source_context_;

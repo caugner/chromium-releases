@@ -97,8 +97,7 @@ PasswordForm GenerateExamplePasswordForm() {
   form.times_used = 1;
   form.form_data.name = u"form_name";
   form.date_last_used = base::Time::Now();
-  form.date_password_modified =
-      base::Time::Now() - base::TimeDelta::FromDays(1);
+  form.date_password_modified = base::Time::Now() - base::Days(1);
   form.display_name = u"Mr. Smith";
   form.icon_url = GURL("https://accounts.google.com/Icon");
   form.skip_zero_click = true;
@@ -877,9 +876,9 @@ TEST_F(LoginDatabaseTest, ClearPrivateData_SavedPasswords) {
   EXPECT_EQ(0U, result.size());
 
   base::Time now = base::Time::Now();
-  base::TimeDelta one_day = base::TimeDelta::FromDays(1);
-  base::Time back_30_days = now - base::TimeDelta::FromDays(30);
-  base::Time back_31_days = now - base::TimeDelta::FromDays(31);
+  base::TimeDelta one_day = base::Days(1);
+  base::Time back_30_days = now - base::Days(30);
+  base::Time back_31_days = now - base::Days(31);
 
   // Create one with a 0 time.
   EXPECT_TRUE(
@@ -1251,7 +1250,8 @@ TEST_F(LoginDatabaseTest, AddWrongForm) {
 }
 
 // Test that when adding a login with no password_value but with
-// encrypted_password, the encrypted_password is kept.
+// encrypted_password, the encrypted_password is kept and the password_value
+// is filled in with the decrypted password.
 TEST_F(LoginDatabaseTest, AddLoginWithEncryptedPassword) {
   PasswordForm form;
   form.url = GURL("http://accounts.google.com/LoginAuth");
@@ -1263,13 +1263,18 @@ TEST_F(LoginDatabaseTest, AddLoginWithEncryptedPassword) {
   form.encrypted_password = encrypted;
   form.blocked_by_user = false;
   form.scheme = PasswordForm::Scheme::kHtml;
-  EXPECT_EQ(AddChangeForForm(form), db().AddLogin(form));
+
+  // |AddLogin| will decrypt the encrypted password, so compare with that.
+  PasswordForm form_with_password = form;
+  form_with_password.password_value = u"my_encrypted_password";
+  EXPECT_EQ(AddChangeForForm(form_with_password), db().AddLogin(form));
 
   std::vector<std::unique_ptr<PasswordForm>> result;
   ASSERT_TRUE(db().GetLogins(PasswordFormDigest(form),
                              /*should_PSL_matching_apply=*/true, &result));
   ASSERT_EQ(1U, result.size());
   EXPECT_EQ(form.encrypted_password, result[0].get()->encrypted_password);
+  EXPECT_EQ(u"my_encrypted_password", result[0].get()->password_value);
 
   std::u16string decrypted;
   EXPECT_EQ(
@@ -1323,10 +1328,9 @@ TEST_F(LoginDatabaseTest, UpdateLogin) {
       ValueElementPair(u"my_new_username", u"new_username_id"));
   form.times_used = 20;
   form.submit_element = u"submit_element";
-  form.date_created = base::Time::Now() - base::TimeDelta::FromDays(3);
+  form.date_created = base::Time::Now() - base::Days(3);
   form.date_last_used = base::Time::Now();
-  form.date_password_modified =
-      base::Time::Now() - base::TimeDelta::FromDays(1);
+  form.date_password_modified = base::Time::Now() - base::Days(1);
   form.blocked_by_user = true;
   form.scheme = PasswordForm::Scheme::kBasic;
   form.type = PasswordForm::Type::kGenerated;
@@ -1367,7 +1371,7 @@ TEST_F(LoginDatabaseTest, UpdateLoginWithoutPassword) {
       ValueElementPair(u"my_new_username", u"new_username_id"));
   form.times_used = 20;
   form.submit_element = u"submit_element";
-  form.date_created = base::Time::Now() - base::TimeDelta::FromDays(3);
+  form.date_created = base::Time::Now() - base::Days(3);
   form.date_last_used = base::Time::Now();
   form.display_name = u"Mr. Smith";
   form.icon_url = GURL("https://accounts.google.com/Icon");
@@ -1439,7 +1443,7 @@ void AddMetricsTestData(LoginDatabase* db) {
 
   password_form.url = GURL("http://fourth.example.com/");
   password_form.signon_realm = "http://fourth.example.com/";
-  password_form.type = PasswordForm::Type::kManual;
+  password_form.type = PasswordForm::Type::kFormSubmission;
   password_form.username_value = u"";
   password_form.times_used = 10;
   password_form.scheme = PasswordForm::Scheme::kHtml;

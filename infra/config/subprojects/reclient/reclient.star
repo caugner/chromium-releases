@@ -20,7 +20,7 @@ luci.bucket(
         ),
         acl.entry(
             roles = acl.BUILDBUCKET_OWNER,
-            groups = "google/luci-task-force@google.com",
+            groups = "project-chromium-admins",
         ),
     ],
 )
@@ -78,9 +78,9 @@ def fyi_reclient_test_builder(
     )
 
 fyi_reclient_staging_builder(
-    name = "Linux Builder Re-Client Staging",
+    name = "Linux Builder reclient staging",
 )
 
 fyi_reclient_test_builder(
-    name = "Linux Builder Re-Client Test",
+    name = "Linux Builder reclient test",
 )

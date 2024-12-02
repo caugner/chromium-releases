@@ -115,7 +115,7 @@ def try_builder(
     experiments = experiments or {}
 
     # TODO(crbug.com/1135718): Promote out of experiment for all builders.
-    experiments.setdefault("chromium.chromium_tests.use_rdb_results", 10)
+    experiments.setdefault("chromium.chromium_tests.use_rdb_results", 100)
 
     merged_resultdb_bigquery_exports = [
         resultdb.export_test_results(
@@ -367,6 +367,17 @@ def chromium_mac_ios_builder(
         **kwargs
     )
 
+def chromium_rust_builder(
+        *,
+        name,
+        **kwargs):
+    return try_builder(
+        name = name,
+        builder_group = "tryserver.chromium.rust",
+        goma_backend = builders.goma.backend.RBE_PROD,
+        **kwargs
+    )
+
 def chromium_swangle_builder(*, name, pinned = True, **kwargs):
     builder_args = dict(kwargs)
     builder_args.update(
@@ -581,6 +592,7 @@ try_ = struct(
     chromium_linux_builder = chromium_linux_builder,
     chromium_mac_builder = chromium_mac_builder,
     chromium_mac_ios_builder = chromium_mac_ios_builder,
+    chromium_rust_builder = chromium_rust_builder,
     chromium_swangle_linux_builder = chromium_swangle_linux_builder,
     chromium_swangle_mac_builder = chromium_swangle_mac_builder,
     chromium_swangle_windows_builder = chromium_swangle_windows_builder,

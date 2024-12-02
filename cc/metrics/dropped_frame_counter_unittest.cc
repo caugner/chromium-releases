@@ -284,13 +284,26 @@ class DroppedFrameCounterTest : public testing::Test {
     return frame_states;
   }
 
-  void SimulatePendingFrame(int repeat) {
+  std::vector<viz::BeginFrameArgs> SimulatePendingFrame(int repeat) {
+    std::vector<viz::BeginFrameArgs> args(repeat);
     for (int i = 0; i < repeat; i++) {
-      viz::BeginFrameArgs args_ = SimulateBeginFrameArgs();
-      dropped_frame_counter_.OnBeginFrame(args_, /*is_scroll_active=*/false);
+      args[i] = SimulateBeginFrameArgs();
+      dropped_frame_counter_.OnBeginFrame(args[i], /*is_scroll_active=*/false);
       sequence_number_++;
       frame_time_ += interval_;
     }
+    return args;
+  }
+
+  // Simulate a main and impl thread update on the same frame.
+  void SimulateForkedFrame(bool main_dropped, bool impl_dropped) {
+    viz::BeginFrameArgs args_ = SimulateBeginFrameArgs();
+    dropped_frame_counter_.OnBeginFrame(args_, /*is_scroll_active=*/false);
+    dropped_frame_counter_.OnBeginFrame(args_, /*is_scroll_active=*/false);
+    dropped_frame_counter_.OnEndFrame(args_, main_dropped);
+    dropped_frame_counter_.OnEndFrame(args_, impl_dropped);
+    sequence_number_++;
+    frame_time_ += interval_;
   }
 
   void AdvancetimeByIntervals(int interval_count) {
@@ -305,9 +318,7 @@ class DroppedFrameCounterTest : public testing::Test {
     return dropped_frame_counter_.SlidingWindow95PercentilePercentDropped();
   }
 
-  double GetTotalFramesInWindow() {
-    return base::TimeDelta::FromSeconds(1) / interval_;
-  }
+  double GetTotalFramesInWindow() { return base::Seconds(1) / interval_; }
 
   void SetInterval(base::TimeDelta interval) { interval_ = interval; }
 
@@ -348,8 +359,7 @@ class DroppedFrameCounterTest : public testing::Test {
   uint64_t source_id_ = 1;
   const base::TickClock* tick_clock_ = base::DefaultTickClock::GetInstance();
   base::TimeTicks frame_time_ = tick_clock_->NowTicks();
-  base::TimeDelta interval_ =
-      base::TimeDelta::FromMicroseconds(16667);  // 16.667 ms
+  base::TimeDelta interval_ = base::Microseconds(16667);  // 16.667 ms
 
   viz::BeginFrameArgs SimulateBeginFrameArgs() {
     viz::BeginFrameId current_id_(source_id_, sequence_number_);
@@ -441,7 +451,7 @@ TEST_F(DroppedFrameCounterTest, MaxPercentDroppedWithIdleFrames) {
 }
 
 TEST_F(DroppedFrameCounterTest, NoCrashForIntervalLargerThanWindow) {
-  SetInterval(base::TimeDelta::FromMilliseconds(1000));
+  SetInterval(base::Milliseconds(1000));
   SimulateFrameSequence({false, false}, 1);
 }
 
@@ -452,8 +462,8 @@ TEST_F(DroppedFrameCounterTest, Percentile95WithIdleFrames) {
   // The 96%ile dropped-frame metric should be 0.
 
   // Set an interval that rounds up nicely with 1 second.
-  constexpr auto kInterval = base::TimeDelta::FromMilliseconds(10);
-  constexpr size_t kFps = base::TimeDelta::FromSeconds(1) / kInterval;
+  constexpr auto kInterval = base::Milliseconds(10);
+  constexpr size_t kFps = base::Seconds(1) / kInterval;
   static_assert(
       kFps % 5 == 0,
       "kFps must be a multiple of 5 because this test depends on it.");
@@ -486,8 +496,8 @@ TEST_F(DroppedFrameCounterTest, Percentile95WithIdleFramesWhileHidden) {
   // contribute to the sliding window.
 
   // Set an interval that rounds up nicely with 1 second.
-  constexpr auto kInterval = base::TimeDelta::FromMilliseconds(10);
-  constexpr size_t kFps = base::TimeDelta::FromSeconds(1) / kInterval;
+  constexpr auto kInterval = base::Milliseconds(10);
+  constexpr size_t kFps = base::Seconds(1) / kInterval;
   static_assert(
       kFps % 5 == 0,
       "kFps must be a multiple of 5 because this test depends on it.");
@@ -519,8 +529,8 @@ TEST_F(DroppedFrameCounterTest, Percentile95WithIdleFramesThenHide) {
   // contribute to the sliding window.
 
   // Set an interval that rounds up nicely with 1 second.
-  constexpr auto kInterval = base::TimeDelta::FromMilliseconds(10);
-  constexpr size_t kFps = base::TimeDelta::FromSeconds(1) / kInterval;
+  constexpr auto kInterval = base::Milliseconds(10);
+  constexpr size_t kFps = base::Seconds(1) / kInterval;
   static_assert(
       kFps % 5 == 0,
       "kFps must be a multiple of 5 because this test depends on it.");
@@ -560,8 +570,8 @@ TEST_F(DroppedFrameCounterTest,
   // a new GPU Process. (https://crbug.com/1164647)
 
   // Set an interval that rounds up nicely with 1 second.
-  constexpr auto kInterval = base::TimeDelta::FromMilliseconds(10);
-  constexpr size_t kFps = base::TimeDelta::FromSeconds(1) / kInterval;
+  constexpr auto kInterval = base::Milliseconds(10);
+  constexpr size_t kFps = base::Seconds(1) / kInterval;
   SetInterval(kInterval);
 
   // One good frame
@@ -590,8 +600,8 @@ TEST_F(DroppedFrameCounterTest,
 
 TEST_F(DroppedFrameCounterTest, ResetPendingFramesAccountingForPendingFrames) {
   // Set an interval that rounds up nicely with 1 second.
-  constexpr auto kInterval = base::TimeDelta::FromMilliseconds(10);
-  constexpr size_t kFps = base::TimeDelta::FromSeconds(1) / kInterval;
+  constexpr auto kInterval = base::Milliseconds(10);
+  constexpr size_t kFps = base::Seconds(1) / kInterval;
   SetInterval(kInterval);
 
   // First 2 seconds with 20% dropped frames.
@@ -614,8 +624,8 @@ TEST_F(DroppedFrameCounterTest, ResetPendingFramesAccountingForPendingFrames) {
 
 TEST_F(DroppedFrameCounterTest, Reset) {
   // Set an interval that rounds up nicely with 1 second.
-  constexpr auto kInterval = base::TimeDelta::FromMilliseconds(10);
-  constexpr size_t kFps = base::TimeDelta::FromSeconds(1) / kInterval;
+  constexpr auto kInterval = base::Milliseconds(10);
+  constexpr size_t kFps = base::Seconds(1) / kInterval;
   SetInterval(kInterval);
 
   // First 2 seconds with 20% dropped frames.
@@ -638,8 +648,8 @@ TEST_F(DroppedFrameCounterTest, Reset) {
 
 TEST_F(DroppedFrameCounterTest, ConsistentSmoothnessRatings) {
   // Set an interval that rounds up nicely with 1 second.
-  constexpr auto kInterval = base::TimeDelta::FromMilliseconds(10);
-  constexpr size_t kFps = base::TimeDelta::FromSeconds(1) / kInterval;
+  constexpr auto kInterval = base::Milliseconds(10);
+  constexpr size_t kFps = base::Seconds(1) / kInterval;
   static_assert(kFps == 100,
                 "kFps must be 100 because this test depends on it.");
   SetInterval(kInterval);
@@ -687,8 +697,8 @@ TEST_F(DroppedFrameCounterTest, ConsistentSmoothnessRatings) {
 
 TEST_F(DroppedFrameCounterTest, MovingSmoothnessRatings) {
   // Set an interval that rounds up nicely with 1 second.
-  constexpr auto kInterval = base::TimeDelta::FromMilliseconds(10);
-  constexpr size_t kFps = base::TimeDelta::FromSeconds(1) / kInterval;
+  constexpr auto kInterval = base::Milliseconds(10);
+  constexpr size_t kFps = base::Seconds(1) / kInterval;
   static_assert(kFps == 100,
                 "kFps must be 100 because this test depends on it.");
   SetInterval(kInterval);
@@ -723,6 +733,39 @@ TEST_F(DroppedFrameCounterTest, MovingSmoothnessRatings) {
   SimulateFrameSequence({true}, kFps);
   SimulateFrameSequence({false}, kFps);
   EXPECT_TRUE(CheckSmoothnessBuckets({3, 3, 6, 13, 25, 25, 25}));
+}
+
+TEST_F(DroppedFrameCounterTest, FramesInFlightWhenFcpReceived) {
+  // Start five frames in flight.
+  std::vector<viz::BeginFrameArgs> pending_frames = SimulatePendingFrame(5);
+
+  // Set that FCP was received after the third frame starts, but before it ends.
+  base::TimeTicks time_fcp_sent =
+      pending_frames[2].frame_time + pending_frames[2].interval / 2;
+  dropped_frame_counter_.SetTimeFcpReceivedForTesting(time_fcp_sent);
+
+  // End each of the frames as dropped. The first three should not count for
+  // smoothness, only the last two.
+  for (const auto& frame : pending_frames) {
+    dropped_frame_counter_.OnEndFrame(frame, true);
+  }
+  EXPECT_EQ(dropped_frame_counter_.total_smoothness_dropped(), 2u);
+}
+
+TEST_F(DroppedFrameCounterTest, ForkedCompositorFrameReporter) {
+  // Run different combinations of main and impl threads dropping, make sure
+  // only one frame is counted as dropped each time.
+  SimulateForkedFrame(false, false);
+  EXPECT_EQ(dropped_frame_counter_.total_smoothness_dropped(), 0u);
+
+  SimulateForkedFrame(true, false);
+  EXPECT_EQ(dropped_frame_counter_.total_smoothness_dropped(), 1u);
+
+  SimulateForkedFrame(false, true);
+  EXPECT_EQ(dropped_frame_counter_.total_smoothness_dropped(), 2u);
+
+  SimulateForkedFrame(true, true);
+  EXPECT_EQ(dropped_frame_counter_.total_smoothness_dropped(), 3u);
 }
 
 }  // namespace

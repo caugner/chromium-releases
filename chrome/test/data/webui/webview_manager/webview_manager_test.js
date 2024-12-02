@@ -6,7 +6,7 @@ import {WebviewManager} from 'chrome://resources/js/webview_manager.js';
 
 // The actual URL doesn't matter since we are configuring the behavior that
 // occurs before the request starts.
-const TARGET_URL = 'http://127.0.0.1';
+const TARGET_URL = 'chrome://about';
 
 suite('WebviewManagerTest', function() {
   suiteSetup(function() {
@@ -42,7 +42,7 @@ suite('WebviewManagerTest', function() {
     }, {urls: ['<all_urls>']}, ['requestHeaders']);
 
     // URL is not the TARGET_URL, so no token should be sent
-    this.webview.src = 'http:/127.0.0.2';
+    this.webview.src = 'chrome://version';
   });
 
 

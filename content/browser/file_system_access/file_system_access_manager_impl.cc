@@ -474,14 +474,11 @@ void FileSystemAccessManagerImpl::ResolveDefaultDirectory(
       &FileSystemAccessManagerImpl::SetDefaultPathAndShowPicker,
       weak_factory_.GetWeakPtr(), context, std::move(options),
       std::move(common_options), default_directory, std::move(callback));
-  operation_runner()
-      .AsyncCall(base::IgnoreResult(
-          &storage::FileSystemOperationRunner::DirectoryExists))
-      .WithArgs(fs_url,
-                base::BindPostTask(
-                    base::SequencedTaskRunnerHandle::Get(),
-                    base::BindOnce(&DidCheckIfDefaultDirectoryExists, fs_url,
-                                   std::move(wrapped_callback))));
+  DoFileSystemOperation(FROM_HERE,
+                        &storage::FileSystemOperationRunner::DirectoryExists,
+                        base::BindOnce(&DidCheckIfDefaultDirectoryExists,
+                                       fs_url, std::move(wrapped_callback)),
+                        fs_url);
 }
 
 void FileSystemAccessManagerImpl::Shutdown() {
@@ -606,20 +603,15 @@ void FileSystemAccessManagerImpl::ResolveDataTransferToken(
   auto fs_url = CreateFileSystemURLFromPath(
       data_transfer_token_impl->second->path_type(),
       data_transfer_token_impl->second->file_path());
-  operation_runner()
-      .AsyncCall(
-          base::IgnoreResult(&storage::FileSystemOperationRunner::GetMetadata))
-      .WithArgs(fs_url,
-                storage::FileSystemOperation::GET_METADATA_FIELD_IS_DIRECTORY,
-                base::BindPostTask(
-                    base::SequencedTaskRunnerHandle::Get(),
-                    base::BindOnce(&HandleTypeFromFileInfo)
-                        .Then(base::BindOnce(
-                            &FileSystemAccessManagerImpl::
-                                ResolveDataTransferTokenWithFileType,
-                            weak_factory_.GetWeakPtr(), binding_context,
-                            data_transfer_token_impl->second->file_path(),
-                            fs_url, std::move(token_resolved_callback)))));
+  DoFileSystemOperation(
+      FROM_HERE, &storage::FileSystemOperationRunner::GetMetadata,
+      base::BindOnce(&HandleTypeFromFileInfo)
+          .Then(base::BindOnce(&FileSystemAccessManagerImpl::
+                                   ResolveDataTransferTokenWithFileType,
+                               weak_factory_.GetWeakPtr(), binding_context,
+                               data_transfer_token_impl->second->file_path(),
+                               fs_url, std::move(token_resolved_callback))),
+      fs_url, storage::FileSystemOperation::GET_METADATA_FIELD_IS_DIRECTORY);
 }
 
 void FileSystemAccessManagerImpl::ResolveDataTransferTokenWithFileType(
@@ -1228,7 +1220,6 @@ void FileSystemAccessManagerImpl::DidVerifySensitiveDirectoryAccess(
         CreateFileSystemURLFromPath(entries.front().type, entries.front().path);
 
     operation_runner().PostTaskWithThisObject(
-        FROM_HERE,
         base::BindOnce(
             &CreateAndTruncateFile, fs_url,
             base::BindOnce(
@@ -1341,19 +1332,22 @@ void FileSystemAccessManagerImpl::RemoveFileWriter(
 }
 
 void FileSystemAccessManagerImpl::RemoveAccessHandleHost(
-    FileSystemAccessAccessHandleHostImpl* access_handle_host) {
+    FileSystemAccessAccessHandleHostImpl* access_handle_host,
+    base::OnceCallback<void()> callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // Capacity allocations only exist in non-incognito mode.
-  if (!context()->is_incognito()) {
-    // Asynchronously clean up capacity overallocations.
-    CleanupAccessHandleCapacityAllocation(
-        access_handle_host->url(), access_handle_host->granted_capacity());
+  if (context()->is_incognito()) {
+    DidCleanupAccessHandleCapacityAllocation(access_handle_host,
+                                             std::move(callback));
+    return;
   }
-
-  size_t count_removed =
-      access_handle_host_receivers_.erase(access_handle_host);
-  DCHECK_EQ(1u, count_removed);
+  CleanupAccessHandleCapacityAllocation(
+      access_handle_host->url(), access_handle_host->granted_capacity(),
+      base::BindOnce(&FileSystemAccessManagerImpl::
+                         DidCleanupAccessHandleCapacityAllocation,
+                     weak_factory_.GetWeakPtr(), access_handle_host,
+                     std::move(callback)));
 }
 
 void FileSystemAccessManagerImpl::RemoveToken(
@@ -1435,25 +1429,24 @@ FileSystemAccessManagerImpl::GetSharedHandleStateForPath(
 
 void FileSystemAccessManagerImpl::CleanupAccessHandleCapacityAllocation(
     const storage::FileSystemURL& url,
-    int64_t allocated_file_size) {
+    int64_t allocated_file_size,
+    base::OnceCallback<void()> callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_GE(allocated_file_size, 0);
 
-  operation_runner()
-      .AsyncCall(
-          base::IgnoreResult(&storage::FileSystemOperationRunner::GetMetadata))
-      .WithArgs(url, storage::FileSystemOperation::GET_METADATA_FIELD_SIZE,
-                base::BindPostTask(
-                    base::SequencedTaskRunnerHandle::Get(),
-                    base::BindOnce(
-                        &FileSystemAccessManagerImpl::
-                            CleanupAccessHandleCapacityAllocationImpl,
-                        weak_factory_.GetWeakPtr(), url, allocated_file_size)));
+  DoFileSystemOperation(
+      FROM_HERE, &storage::FileSystemOperationRunner::GetMetadata,
+      base::BindOnce(&FileSystemAccessManagerImpl::
+                         CleanupAccessHandleCapacityAllocationImpl,
+                     weak_factory_.GetWeakPtr(), url, allocated_file_size,
+                     std::move(callback)),
+      url, storage::FileSystemOperation::GET_METADATA_FIELD_SIZE);
 }
 
 void FileSystemAccessManagerImpl::CleanupAccessHandleCapacityAllocationImpl(
     const storage::FileSystemURL& url,
     int64_t allocated_file_size,
+    base::OnceCallback<void()> callback,
     base::File::Error result,
     const base::File::Info& file_info) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -1472,7 +1465,25 @@ void FileSystemAccessManagerImpl::CleanupAccessHandleCapacityAllocationImpl(
   context_->quota_manager_proxy()->NotifyStorageModified(
       storage::QuotaClientType::kFileSystem, url.storage_key(),
       storage::FileSystemTypeToQuotaStorageType(url.type()), -overallocation,
-      base::Time::Now());
+      base::Time::Now(),
+      /*callback_task_runner=*/base::SequencedTaskRunnerHandle::Get(),
+      std::move(callback));
+}
+
+void FileSystemAccessManagerImpl::DidCleanupAccessHandleCapacityAllocation(
+    FileSystemAccessAccessHandleHostImpl* access_handle_host,
+    base::OnceCallback<void()> callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(access_handle_host);
+  std::move(callback).Run();
+  size_t count_removed =
+      access_handle_host_receivers_.erase(access_handle_host);
+  DCHECK_EQ(1u, count_removed);
+}
+
+base::WeakPtr<FileSystemAccessManagerImpl>
+FileSystemAccessManagerImpl::AsWeakPtr() {
+  return weak_factory_.GetWeakPtr();
 }
 
 }  // namespace content

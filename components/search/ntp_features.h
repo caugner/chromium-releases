@@ -59,7 +59,7 @@ extern const char kNtpChromeCartModuleDataParam[];
 extern const char kNtpChromeCartModuleAbandonedCartDiscountParam[];
 // Parameter for enabling the abandoned cart discount with utm_source tag to
 // indicate the feature state.
-extern const char NtpChromeCartModuleAbandonedCartDiscountUseUtmParam[];
+extern const char kNtpChromeCartModuleAbandonedCartDiscountUseUtmParam[];
 // Parameter for enabling the cart heuristics improvement.
 extern const char kNtpChromeCartModuleHeuristicsImprovementParam[];
 // Parameter for enabling coupons on the Cart module.
@@ -73,6 +73,8 @@ extern const char kNtpDriveModuleCacheMaxAgeSParam[];
 // Parameter for communicating the experiment group of the Drive module
 // experiment.
 extern const char kNtpDriveModuleExperimentGroupParam[];
+// Parameter determining the type of Photos data to render.
+extern const char kNtpPhotosModuleDataParam[];
 // Parameter determining the number of times a module is shown to a user
 // before cooldown starts.
 extern const char kNtpSafeBrowsingModuleCountMaxParam[];

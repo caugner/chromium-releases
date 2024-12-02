@@ -211,9 +211,11 @@ void DroppedFrameCounter::OnEndFrame(const viz::BeginFrameArgs& args,
   if (!args.interval.is_zero())
     total_frames_in_window_ = kSlidingWindowInterval / args.interval;
 
-  if (is_dropped) {
-    if (fcp_received_)
-      ++total_smoothness_dropped_;
+  // Don't measure smoothness for frames that start before FCP is received, or
+  // that have already been reported as dropped.
+  if (is_dropped && fcp_received_ && args.frame_time >= time_fcp_received_ &&
+      !frame_sorter_.IsFrameDropped(args.frame_id)) {
+    ++total_smoothness_dropped_;
     ReportFrames();
   }
   auto iter = scroll_start_per_frame_.find(args.frame_id);
@@ -222,9 +224,8 @@ void DroppedFrameCounter::OnEndFrame(const viz::BeginFrameArgs& args,
     if (args.frame_id.source_id == scroll_start.frame_id.source_id) {
       UMA_HISTOGRAM_CUSTOM_TIMES(
           "Graphics.Smoothness.Diagnostic.DroppedFrameAfterScrollStart.Time",
-          (args.frame_time - scroll_start.timestamp),
-          base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromSeconds(4),
-          50);
+          (args.frame_time - scroll_start.timestamp), base::Milliseconds(1),
+          base::Seconds(4), 50);
       UMA_HISTOGRAM_CUSTOM_COUNTS(
           "Graphics.Smoothness.Diagnostic.DroppedFrameAfterScrollStart.Frames",
           (args.frame_id.sequence_number -
@@ -420,21 +421,22 @@ void DroppedFrameCounter::UpdateMaxPercentDroppedFrame(
 
   const auto fcp_time_delta = base::TimeTicks::Now() - time_fcp_received_;
 
-  if (fcp_time_delta > base::TimeDelta::FromSeconds(1))
+  if (fcp_time_delta > base::Seconds(1))
     sliding_window_max_percent_dropped_After_1_sec_ =
         std::max(sliding_window_max_percent_dropped_After_1_sec_.value_or(0.0),
                  percent_dropped_frame);
-  if (fcp_time_delta > base::TimeDelta::FromSeconds(2))
+  if (fcp_time_delta > base::Seconds(2))
     sliding_window_max_percent_dropped_After_2_sec_ =
         std::max(sliding_window_max_percent_dropped_After_2_sec_.value_or(0.0),
                  percent_dropped_frame);
-  if (fcp_time_delta > base::TimeDelta::FromSeconds(5))
+  if (fcp_time_delta > base::Seconds(5))
     sliding_window_max_percent_dropped_After_5_sec_ =
         std::max(sliding_window_max_percent_dropped_After_5_sec_.value_or(0.0),
                  percent_dropped_frame);
 }
 
 void DroppedFrameCounter::OnFcpReceived() {
+  DCHECK(!fcp_received_);
   fcp_received_ = true;
   time_fcp_received_ = base::TimeTicks::Now();
 }

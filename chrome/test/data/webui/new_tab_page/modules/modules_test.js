@@ -8,7 +8,7 @@ import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {assertDeepEquals, assertEquals, assertFalse, assertTrue} from '../../chai_assert.js';
 import {TestBrowserProxy} from '../../test_browser_proxy.js';
 import {fakeMetricsPrivate, MetricsTracker} from '../metrics_test_support.js';
-import {assertNotStyle, assertStyle, installMock} from '../test_support.js';
+import {assertNotStyle, assertStyle, createElement, initNullModule, installMock} from '../test_support.js';
 
 suite('NewTabPageModulesModulesTest', () => {
   /** @type {!TestBrowserProxy} */
@@ -50,23 +50,20 @@ suite('NewTabPageModulesModulesTest', () => {
 
   [true, false].forEach(visible => {
     test(`modules rendered if visibility ${visible}`, async () => {
-      const fooDescriptor =
-          new ModuleDescriptor('foo', 'Foo', () => Promise.resolve(null));
-      const barDescriptor =
-          new ModuleDescriptor('bar', 'Bar', () => Promise.resolve(null));
-      const bazDescriptor =
-          new ModuleDescriptor('baz', 'Baz', () => Promise.resolve(null));
+      const fooDescriptor = new ModuleDescriptor('foo', 'Foo', initNullModule);
+      const barDescriptor = new ModuleDescriptor('bar', 'Bar', initNullModule);
+      const bazDescriptor = new ModuleDescriptor('baz', 'Baz', initNullModule);
       moduleRegistry.setResultFor(
           'getDescriptors', [fooDescriptor, barDescriptor, bazDescriptor]);
       // Act.
       const modulesElement = await createModulesElement([
         {
           descriptor: fooDescriptor,
-          element: document.createElement('div'),
+          element: createElement(),
         },
         {
           descriptor: barDescriptor,
-          element: document.createElement('div'),
+          element: createElement(),
         }
       ]);
       callbackRouterRemote.setDisabledModules(
@@ -88,6 +85,8 @@ suite('NewTabPageModulesModulesTest', () => {
       }
       assertNotStyle(moduleWrappers[1], 'display', 'none');
       assertStyle(moduleWrapperContainers[1], 'display', 'none');
+      assertNotStyle(moduleWrappers[0], 'cursor', 'grab');
+      assertNotStyle(moduleWrappers[1], 'cursor', 'grab');
       const histogram = 'NewTabPage.Modules.EnabledOnNTPLoad';
       assertEquals(1, metrics.count(`${histogram}.foo`, visible));
       assertEquals(1, metrics.count(`${histogram}.bar`, false));
@@ -102,15 +101,14 @@ suite('NewTabPageModulesModulesTest', () => {
   test('modules can be dismissed and restored', async () => {
     // Arrange.
     let restoreCalled = false;
-    const fooDescriptor =
-        new ModuleDescriptor('foo', 'Foo', () => Promise.resolve(null));
+    const fooDescriptor = new ModuleDescriptor('foo', 'Foo', initNullModule);
     moduleRegistry.setResultFor('getDescriptors', [fooDescriptor]);
 
     // Act.
     const modulesElement = await createModulesElement([
       {
         descriptor: fooDescriptor,
-        element: document.createElement('div'),
+        element: createElement(),
       },
     ]);
     callbackRouterRemote.setDisabledModules(false, []);
@@ -164,14 +162,13 @@ suite('NewTabPageModulesModulesTest', () => {
   test('modules can be disabled and restored', async () => {
     // Arrange.
     let restoreCalled = false;
-    const fooDescriptor =
-        new ModuleDescriptor('foo', 'bar', () => Promise.resolve(null));
+    const fooDescriptor = new ModuleDescriptor('foo', 'bar', initNullModule);
     moduleRegistry.setResultFor('getDescriptors', [fooDescriptor]);
 
     // Act.
     const modulesElement = await createModulesElement([{
       descriptor: fooDescriptor,
-      element: document.createElement('div'),
+      element: createElement(),
     }]);
     callbackRouterRemote.setDisabledModules(false, []);
     await callbackRouterRemote.$.flushForTesting();
@@ -256,17 +253,15 @@ suite('NewTabPageModulesModulesTest', () => {
       // Arrange.
       const moduleArray = [];
       for (let i = 0; i < 3; ++i) {
-        let module = document.createElement('div');
+        let module = createElement();
         module.style.height = `300px`;
         module.style.width = `300px`;
         moduleArray.push(module);
       }
-      const fooDescriptor =
-          new ModuleDescriptor('foo', 'Foo', () => Promise.resolve(null));
-      const barDescriptor =
-          new ModuleDescriptor('bar', 'Bar', () => Promise.resolve(null));
-      const fooBarDescriptor = new ModuleDescriptor(
-          'foo bar', 'Foo Baz', () => Promise.resolve(null));
+      const fooDescriptor = new ModuleDescriptor('foo', 'Foo', initNullModule);
+      const barDescriptor = new ModuleDescriptor('bar', 'Bar', initNullModule);
+      const fooBarDescriptor =
+          new ModuleDescriptor('foo bar', 'Foo Baz', initNullModule);
       moduleRegistry.setResultFor(
           'getDescriptors', [fooDescriptor, barDescriptor, fooBarDescriptor]);
       const modulesElement = await createModulesElement([
@@ -294,6 +289,9 @@ suite('NewTabPageModulesModulesTest', () => {
       assertTrue(!!firstModule);
       assertTrue(!!secondModule);
       assertTrue(!!thirdModule);
+      assertStyle(firstModule, 'cursor', 'grab');
+      assertStyle(secondModule, 'cursor', 'grab');
+      assertStyle(thirdModule, 'cursor', 'grab');
 
       const firstPositionRect = moduleWrappers[0].getBoundingClientRect();
       const secondPositionRect = moduleWrappers[1].getBoundingClientRect();

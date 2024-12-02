@@ -333,6 +333,9 @@ class Browser : public TabStripModelObserver,
   // Returns whether a browser window can be created for the specified profile.
   static CreationStatus GetCreationStatusForProfile(Profile* profile);
 
+  Browser(const Browser&) = delete;
+  Browser& operator=(const Browser&) = delete;
+
   ~Browser() override;
 
   // Set overrides for the initial window bounds and maximized state.
@@ -679,6 +682,9 @@ class Browser : public TabStripModelObserver,
   void MediaWatchTimeChanged(
       const content::MediaPlayerWatchTime& watch_time) override;
   base::WeakPtr<content::WebContentsDelegate> GetDelegateWeakPtr() override;
+  std::unique_ptr<content::EyeDropper> OpenEyeDropper(
+      content::RenderFrameHost* frame,
+      content::EyeDropperListener* listener) override;
 
   bool is_type_normal() const { return type_ == TYPE_NORMAL; }
   bool is_type_popup() const { return type_ == TYPE_POPUP; }
@@ -840,9 +846,6 @@ class Browser : public TabStripModelObserver,
   content::JavaScriptDialogManager* GetJavaScriptDialogManager(
       content::WebContents* source) override;
   bool GuestSaveFrame(content::WebContents* guest_web_contents) override;
-  std::unique_ptr<content::EyeDropper> OpenEyeDropper(
-      content::RenderFrameHost* frame,
-      content::EyeDropperListener* listener) override;
   void RunFileChooser(content::RenderFrameHost* render_frame_host,
                       scoped_refptr<content::FileSelectListener> listener,
                       const blink::mojom::FileChooserParams& params) override;
@@ -1250,8 +1253,6 @@ class Browser : public TabStripModelObserver,
 
   // The following factory is used to close the frame at a later time.
   base::WeakPtrFactory<Browser> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(Browser);
 };
 
 #endif  // CHROME_BROWSER_UI_BROWSER_H_

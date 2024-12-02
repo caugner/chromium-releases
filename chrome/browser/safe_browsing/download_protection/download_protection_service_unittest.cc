@@ -543,8 +543,8 @@ class DownloadProtectionServiceTestBase
       const base::FilePath& tmp_full_path,
       const base::FilePath& final_full_path) {
     url_chain_.clear();
-    for (std::string item : url_chain_items)
-      url_chain_.push_back(GURL(item));
+    for (std::string url_chain_item : url_chain_items)
+      url_chain_.push_back(GURL(url_chain_item));
     if (url_chain_.empty())
       url_chain_.push_back(GURL());
     referrer_ = GURL(referrer_url);
@@ -776,7 +776,9 @@ class DeepScanningDownloadTest : public DownloadProtectionServiceTestBase,
 class EnhancedProtectionDownloadTest
     : public DownloadProtectionServiceTestBase {
  public:
-  EnhancedProtectionDownloadTest() {}
+  EnhancedProtectionDownloadTest() {
+    EnableFeatures({kSafeBrowsingRemoveCookiesInAuthRequests});
+  }
 };
 
 void DownloadProtectionServiceTestBase::CheckClientDownloadReportCorruptArchive(
@@ -3458,7 +3460,7 @@ TEST_P(DeepScanningDownloadTest, PasswordProtectedArchivesBlockedByPreference) {
         base::BindRepeating(&DownloadProtectionServiceTest::CheckDoneCallback,
                             base::Unretained(this), run_loop.QuitClosure()));
     run_loop.Run();
-    EXPECT_TRUE(IsResult(DownloadCheckResult::UNKNOWN));
+    EXPECT_TRUE(IsResult(DownloadCheckResult::SAFE));
     EXPECT_TRUE(HasClientDownloadRequest());
     ClearClientDownloadRequest();
   }
@@ -3536,7 +3538,7 @@ TEST_P(DeepScanningDownloadTest, LargeFileBlockedByPreference) {
         base::BindRepeating(&DownloadProtectionServiceTest::CheckDoneCallback,
                             base::Unretained(this), run_loop.QuitClosure()));
     run_loop.Run();
-    EXPECT_TRUE(IsResult(DownloadCheckResult::UNKNOWN));
+    EXPECT_TRUE(IsResult(DownloadCheckResult::SAFE));
     EXPECT_TRUE(HasClientDownloadRequest());
     ClearClientDownloadRequest();
   }
@@ -3618,7 +3620,7 @@ TEST_P(DeepScanningDownloadTest, UnsupportedFiletypeBlockedByPreference) {
         base::BindRepeating(&DownloadProtectionServiceTest::CheckDoneCallback,
                             base::Unretained(this), run_loop.QuitClosure()));
     run_loop.Run();
-    EXPECT_TRUE(IsResult(DownloadCheckResult::UNKNOWN));
+    EXPECT_TRUE(IsResult(DownloadCheckResult::SAFE));
     EXPECT_TRUE(HasClientDownloadRequest());
     ClearClientDownloadRequest();
   }
@@ -3840,6 +3842,36 @@ TEST_F(DownloadProtectionServiceTest, FileSystemAccessWriteRequest_Success) {
 }
 
 TEST_F(DownloadProtectionServiceTest,
+       FileSystemAccessWriteRequest_WebContentsNull) {
+  PrepareResponse(ClientDownloadResponse::SAFE, net::HTTP_OK, net::OK);
+
+  auto item = PrepareBasicFileSystemAccessWriteItem(
+      /*tmp_path_literal=*/FILE_PATH_LITERAL("a.exe.crswap"),
+      /*final_path_literal=*/FILE_PATH_LITERAL("a.exe"));
+  item->web_contents = nullptr;
+
+  EXPECT_CALL(*sb_service_->mock_database_manager(),
+              MatchDownloadAllowlistUrl(_))
+      .WillRepeatedly(Return(false));
+  EXPECT_CALL(*binary_feature_extractor_.get(), CheckSignature(tmp_path_, _))
+      .Times(1);
+  EXPECT_CALL(*binary_feature_extractor_.get(),
+              ExtractImageFeatures(
+                  tmp_path_, BinaryFeatureExtractor::kDefaultOptions, _, _))
+      .Times(1);
+
+  RunLoop run_loop;
+  download_service_->CheckFileSystemAccessWrite(
+      CloneFileSystemAccessWriteItem(item.get()),
+      base::BindOnce(&DownloadProtectionServiceTest::CheckDoneCallback,
+                     base::Unretained(this), run_loop.QuitClosure()));
+  run_loop.Run();
+  EXPECT_TRUE(IsResult(DownloadCheckResult::SAFE));
+  EXPECT_TRUE(HasClientDownloadRequest());
+  ClearClientDownloadRequest();
+}
+
+TEST_F(DownloadProtectionServiceTest,
        FileSystemAccessWriteRequest_AllowlistedByPolicy) {
   AddDomainToEnterpriseAllowlist("example.com");
 
@@ -4038,6 +4070,13 @@ TEST_F(EnhancedProtectionDownloadTest, AccessTokenForEnhancedProtectionUsers) {
                 ExtractImageFeatures(
                     tmp_path_, BinaryFeatureExtractor::kDefaultOptions, _, _))
         .Times(1);
+    sb_service_->GetTestURLLoaderFactory(profile())->SetInterceptor(
+        base::BindLambdaForTesting(
+            [&](const network::ResourceRequest& request) {
+              // Cookies should be removed when token is set.
+              EXPECT_EQ(request.credentials_mode,
+                        network::mojom::CredentialsMode::kOmit);
+            }));
 
     RunLoop run_loop;
     download_service_->CheckClientDownload(
@@ -4071,6 +4110,13 @@ TEST_F(EnhancedProtectionDownloadTest, AccessTokenForEnhancedProtectionUsers) {
                 ExtractImageFeatures(
                     tmp_path_, BinaryFeatureExtractor::kDefaultOptions, _, _))
         .Times(1);
+    sb_service_->GetTestURLLoaderFactory(profile())->SetInterceptor(
+        base::BindLambdaForTesting(
+            [&](const network::ResourceRequest& request) {
+              // Cookies should be attached when token is empty.
+              EXPECT_EQ(request.credentials_mode,
+                        network::mojom::CredentialsMode::kInclude);
+            }));
 
     RunLoop run_loop;
     download_service_->CheckClientDownload(
@@ -4348,7 +4394,7 @@ TEST_P(DeepScanningDownloadTest, PolicyEnabled) {
     run_loop.Run();
 
     if (flag_enabled()) {
-      EXPECT_TRUE(IsResult(DownloadCheckResult::UNKNOWN));
+      EXPECT_TRUE(IsResult(DownloadCheckResult::SAFE));
       EXPECT_TRUE(HasClientDownloadRequest());
       EXPECT_TRUE(test_upload_service->was_called());
     } else {

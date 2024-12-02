@@ -44,6 +44,10 @@ class ASH_EXPORT DeskMiniView
   static gfx::Rect GetDeskPreviewBounds(aura::Window* root_window);
 
   DeskMiniView(DesksBarView* owner_bar, aura::Window* root_window, Desk* desk);
+
+  DeskMiniView(const DeskMiniView&) = delete;
+  DeskMiniView& operator=(const DeskMiniView&) = delete;
+
   ~DeskMiniView() override;
 
   aura::Window* root_window() { return root_window_; }
@@ -58,6 +62,11 @@ class ASH_EXPORT DeskMiniView
 
   DesksBarView* owner_bar() { return owner_bar_; }
   const DeskPreviewView* desk_preview() const { return desk_preview_; }
+
+  bool is_animating_to_remove() const { return is_animating_to_remove_; }
+  void set_is_animating_to_remove(bool value) {
+    is_animating_to_remove_ = value;
+  }
 
   gfx::Rect GetPreviewBoundsInScreen() const;
 
@@ -148,6 +157,9 @@ class ASH_EXPORT DeskMiniView
   // The close button that shows on hover.
   CloseDeskButton* close_desk_button_;
 
+  // True when this mini view is being animated to be removed from the bar.
+  bool is_animating_to_remove_ = false;
+
   // We force showing the close button when the mini_view is long pressed or
   // tapped using touch gestures.
   bool force_show_close_button_ = false;
@@ -158,8 +170,6 @@ class ASH_EXPORT DeskMiniView
   bool defer_select_all_ = false;
 
   bool is_desk_name_being_modified_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(DeskMiniView);
 };
 
 }  // namespace ash

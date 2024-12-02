@@ -9,6 +9,8 @@
 #import "ios/chrome/common/credential_provider/archivable_credential.h"
 #import "ios/chrome/common/credential_provider/constants.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
+#import "ios/chrome/common/ui/elements/form_input_accessory_view.h"
+#import "ios/chrome/common/ui/elements/form_input_accessory_view_text_data.h"
 #import "ios/chrome/credential_provider_extension/metrics_util.h"
 #import "ios/chrome/credential_provider_extension/ui/new_password_footer_view.h"
 #import "ios/chrome/credential_provider_extension/ui/new_password_table_cell.h"
@@ -26,11 +28,21 @@ const CGFloat kTableViewTopSpace = 14;
 
 }  // namespace
 
-@interface NewPasswordViewController () <UITableViewDataSource,
-                                         NewPasswordTableCellDelegate>
+@interface NewPasswordViewController () <FormInputAccessoryViewDelegate,
+                                         NewPasswordTableCellDelegate,
+                                         UITableViewDataSource>
 
 // The current creation type of the entered password.
 @property(nonatomic, assign) CPEPasswordCreated passwordCreationType;
+
+// Input accessory view for the text fields
+@property(nonatomic, strong) FormInputAccessoryView* accessoryView;
+
+// The cell for username entry.
+@property(nonatomic, readonly) NewPasswordTableCell* usernameCell;
+
+// The cell for password entry
+@property(nonatomic, readonly) NewPasswordTableCell* passwordCell;
 
 @end
 
@@ -40,6 +52,8 @@ const CGFloat kTableViewTopSpace = 14;
   UITableViewStyle style = UITableViewStyleInsetGrouped;
   self = [super initWithStyle:style];
   _passwordCreationType = CPEPasswordCreated::kPasswordManuallyEntered;
+  _accessoryView = [[FormInputAccessoryView alloc] init];
+  [_accessoryView setUpWithLeadingView:nil navigationDelegate:self];
   return self;
 }
 
@@ -52,10 +66,16 @@ const CGFloat kTableViewTopSpace = 14;
 
   UINavigationBarAppearance* appearance =
       [[UINavigationBarAppearance alloc] init];
-  [appearance configureWithOpaqueBackground];
+  [appearance configureWithDefaultBackground];
   appearance.backgroundColor = backgroundColor;
-  appearance.shadowColor = UIColor.clearColor;
-  self.navigationItem.standardAppearance = appearance;
+  if (@available(iOS 15, *)) {
+    self.navigationItem.scrollEdgeAppearance = appearance;
+  } else {
+    // On iOS 14, scrollEdgeAppearance only affects navigation bars with large
+    // titles, so it can't be used. Instead, the navigation bar will always be
+    // the same style.
+    self.navigationItem.standardAppearance = appearance;
+  }
 
   self.title =
       NSLocalizedString(@"IDS_IOS_CREDENTIAL_PROVIDER_NEW_PASSWORD_TITLE",
@@ -78,13 +98,21 @@ const CGFloat kTableViewTopSpace = 14;
 
 - (NSInteger)tableView:(UITableView*)tableView
     numberOfRowsInSection:(NSInteger)section {
-  return NewPasswordTableCellTypeNumRows;
+  // If password sync is not on (represented by the user's email not being
+  // available as used in the sync disclaimer), then don't show the "Suggest
+  // Strong Password" button.
+  NSString* syncingUserEmail = [app_group::GetGroupUserDefaults()
+      stringForKey:AppGroupUserDefaultsCredentialProviderUserEmail()];
+  BOOL passwordSyncOn = syncingUserEmail != nil;
+  return (passwordSyncOn) ? NewPasswordTableCellTypeNumRows
+                          : NewPasswordTableCellTypeNumRows - 1;
 }
 
 - (UITableViewCell*)tableView:(UITableView*)tableView
         cellForRowAtIndexPath:(NSIndexPath*)indexPath {
   NewPasswordTableCell* cell = [tableView
       dequeueReusableCellWithIdentifier:NewPasswordTableCell.reuseID];
+  cell.textField.inputAccessoryView = self.accessoryView;
 
   NewPasswordTableCellType cellType;
   switch (indexPath.row) {
@@ -166,14 +194,19 @@ const CGFloat kTableViewTopSpace = 14;
 
 #pragma mark - NewPasswordTableCellDelegate
 
+- (void)textFieldDidBeginEditingInCell:(NewPasswordTableCell*)cell {
+  self.accessoryView.previousButton.enabled = (cell == self.passwordCell);
+  self.accessoryView.nextButton.enabled = (cell == self.usernameCell);
+}
+
 - (void)textFieldDidChangeInCell:(NewPasswordTableCell*)cell {
-  if (cell == [self passwordCell]) {
+  if (cell == self.passwordCell) {
     // Update the password creation type so the correct histogram value can be
     // fired when the password is actually created.
     if (self.passwordCreationType == CPEPasswordCreated::kPasswordSuggested) {
       self.passwordCreationType =
           CPEPasswordCreated::kPasswordSuggestedAndChanged;
-    } else if ([self passwordCell].textField.text.length == 0) {
+    } else if (self.passwordCell.textField.text.length == 0) {
       // When the password field is empty, reset the creation type to manual as
       // any traces of the suggested password are now gone.
       self.passwordCreationType = CPEPasswordCreated::kPasswordManuallyEntered;
@@ -183,10 +216,10 @@ const CGFloat kTableViewTopSpace = 14;
 }
 
 - (BOOL)textFieldShouldReturnInCell:(NewPasswordTableCell*)cell {
-  if (cell == [self usernameCell]) {
-    [[self passwordCell].textField becomeFirstResponder];
-  } else if (cell == [self passwordCell]) {
-    [[self passwordCell].textField resignFirstResponder];
+  if (cell == self.usernameCell) {
+    [self.passwordCell.textField becomeFirstResponder];
+  } else if (cell == self.passwordCell) {
+    [self.passwordCell.textField resignFirstResponder];
   }
   return NO;
 }
@@ -195,7 +228,7 @@ const CGFloat kTableViewTopSpace = 14;
 // cell.
 - (void)updateSaveButtonState {
   self.navigationItem.rightBarButtonItem.enabled =
-      [self passwordCell].textField.text.length > 0;
+      self.passwordCell.textField.text.length > 0;
 }
 
 #pragma mark - Private
@@ -244,8 +277,12 @@ const CGFloat kTableViewTopSpace = 14;
 #pragma mark - NewPasswordUIHandler
 
 - (void)setPassword:(NSString*)password {
-  NewPasswordTableCell* passwordCell = [self passwordCell];
+  NewPasswordTableCell* passwordCell = self.passwordCell;
   passwordCell.textField.text = password;
+  // Move voiceover focus to the save button so the user knows that something
+  // has happend and the save button is now enabled.
+  UIAccessibilityPostNotification(UIAccessibilityLayoutChangedNotification,
+                                  self.navigationItem.rightBarButtonItem);
   [self updateSaveButtonState];
 }
 
@@ -341,6 +378,46 @@ const CGFloat kTableViewTopSpace = 14;
                        static_cast<int>(usernameType));
   UpdateHistogramCount(@"IOS.CredentialExtension.PasswordCreated",
                        static_cast<int>(self.passwordCreationType));
+}
+
+#pragma mark - FormInputAccessoryViewDelegate
+
+- (void)formInputAccessoryViewDidTapNextButton:(FormInputAccessoryView*)sender {
+  // The next button should only be enabled in the username field, going to the
+  // password field.
+  [self.passwordCell.textField becomeFirstResponder];
+}
+
+- (void)formInputAccessoryViewDidTapPreviousButton:
+    (FormInputAccessoryView*)sender {
+  // The previous button should only be enabled in the password field, going
+  // back to the username field.
+  [self.usernameCell.textField becomeFirstResponder];
+}
+
+- (void)formInputAccessoryViewDidTapCloseButton:
+    (FormInputAccessoryView*)sender {
+  [self.view endEditing:YES];
+}
+
+- (FormInputAccessoryViewTextData*)textDataforFormInputAccessoryView:
+    (FormInputAccessoryView*)sender {
+  return [[FormInputAccessoryViewTextData alloc]
+              initWithCloseButtonTitle:NSLocalizedString(
+                                           @"IDS_IOS_CREDENTIAL_PROVIDER_DONE",
+                                           @"Done")
+         closeButtonAccessibilityLabel:
+             NSLocalizedString(
+                 @"IDS_IOS_CREDENTIAL_PROVIDER_NEW_PASSWORD_HIDE_KEYBOARD_HINT",
+                 @"Hide Keyboard")
+          nextButtonAccessibilityLabel:
+              NSLocalizedString(
+                  @"IDS_IOS_CREDENTIAL_PROVIDER_NEW_PASSWORD_NEXT_FIELD_HINT",
+                  @"Next field")
+      previousButtonAccessibilityLabel:
+          NSLocalizedString(
+              @"IDS_IOS_CREDENTIAL_PROVIDER_NEW_PASSWORD_PREVIOUS_FIELD_HINT",
+              @"Previous field")];
 }
 
 @end
