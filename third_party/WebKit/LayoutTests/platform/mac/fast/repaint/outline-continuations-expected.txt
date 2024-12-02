@@ -6,16 +6,12 @@
       "contentsOpaque": true,
       "drawsContent": true,
       "repaintRects": [
-        [18, 166, 200, 20],
         [18, 148, 200, 18],
-        [18, 128, 200, 20],
         [18, 110, 200, 18],
-        [16, 164, 204, 24],
         [16, 146, 202, 22],
-        [16, 126, 204, 24],
+        [16, 146, 88, 22],
         [16, 108, 202, 22],
-        [14, 146, 208, 44],
-        [14, 108, 208, 44]
+        [16, 108, 88, 60]
       ],
       "paintInvalidationClients": [
         "InlineTextBox 'CONTENTS'",
@@ -26,10 +22,8 @@
         "LayoutInline SPAN id='outer'",
         "InlineFlowBox",
         "LayoutBlockFlow (anonymous)",
-        "LayoutBlockFlow (anonymous)",
         "LayoutInline SPAN id='outer'",
         "InlineFlowBox",
-        "LayoutBlockFlow (anonymous)",
         "LayoutBlockFlow (anonymous)",
         "LayoutInline SPAN id='outer'"
       ]

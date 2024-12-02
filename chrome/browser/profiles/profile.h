@@ -17,6 +17,7 @@
 #include "content/public/browser/content_browser_client.h"
 
 class ChromeAppCacheService;
+class ChromeZoomLevelPrefs;
 class DevToolsNetworkControllerHandle;
 class ExtensionSpecialStoragePolicy;
 class HostContentSettingsMap;
@@ -33,10 +34,6 @@ class TabContentsProvider;
 namespace base {
 class SequencedTaskRunner;
 class Time;
-}
-
-namespace chrome {
-class ChromeZoomLevelPrefs;
 }
 
 namespace chrome_browser_net {
@@ -196,7 +193,7 @@ class Profile : public content::BrowserContext {
   // Retrieves a pointer to the PrefService that manages the default zoom
   // level and the per-host zoom levels for this user profile.
   // TODO(wjmaclean): Remove this when HostZoomMap migrates to StoragePartition.
-  virtual chrome::ChromeZoomLevelPrefs* GetZoomLevelPrefs();
+  virtual ChromeZoomLevelPrefs* GetZoomLevelPrefs();
 
   // Retrieves a pointer to the PrefService that manages the preferences
   // for OffTheRecord Profiles.  This PrefService is lazily created the first
@@ -212,9 +209,6 @@ class Profile : public content::BrowserContext {
 
   // Returns the SSLConfigService for this profile.
   virtual net::SSLConfigService* GetSSLConfigService() = 0;
-
-  // Returns the Hostname <-> Content settings map for this profile.
-  virtual HostContentSettingsMap* GetHostContentSettingsMap() = 0;
 
   // Return whether 2 profiles are the same. 2 profiles are the same if they
   // represent the same profile. This can happen if there is pointer equality

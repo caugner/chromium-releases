@@ -18,6 +18,7 @@
 #include "components/autofill/core/browser/autofill_experiments.h"
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
+#include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/personal_data_manager_observer.h"
@@ -148,6 +149,22 @@ class PersonalDataManagerTest : public testing::Test {
     prefs_->SetString(::prefs::kGoogleServicesAccountId, account_id);
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
         switches::kEnableOfferStoreUnmaskedWalletCards);
+  }
+
+  void SetupReferenceProfile() {
+    ASSERT_EQ(0U, personal_data_->GetProfiles().size());
+
+    AutofillProfile profile(base::GenerateGUID(), "https://www.example.com");
+    test::SetProfileInfo(&profile, "Marion", "Mitchell", "Morrison",
+                         "johnwayne@me.xyz", "Fox", "123 Zoo St", "unit 5",
+                         "Hollywood", "CA", "91601", "US", "12345678910");
+    personal_data_->AddProfile(profile);
+
+    EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged())
+        .WillOnce(QuitMainMessageLoop());
+    base::MessageLoop::current()->Run();
+
+    ASSERT_EQ(1U, personal_data_->GetProfiles().size());
   }
 
   // The temporary directory should be deleted at the end to ensure that
@@ -1540,60 +1557,6 @@ TEST_F(PersonalDataManagerTest, AggregateProfileWithInsufficientAddress) {
   ASSERT_EQ(0U, cards.size());
 }
 
-TEST_F(PersonalDataManagerTest, AggregateExistingAuxiliaryProfile) {
-  // Simulate having access to an auxiliary profile.
-  // |auxiliary_profile| will be owned by |personal_data_|.
-  AutofillProfile* auxiliary_profile =
-      new AutofillProfile(base::GenerateGUID(), "https://www.example.com");
-  test::SetProfileInfo(auxiliary_profile,
-      "Tester", "Frederick", "McAddressBookTesterson",
-      "tester@example.com", "Acme Inc.", "1 Main", "Apt A", "San Francisco",
-      "CA", "94102", "US", "1.415.888.9999");
-  ScopedVector<AutofillProfile>& auxiliary_profiles =
-      personal_data_->auxiliary_profiles_;
-  auxiliary_profiles.push_back(auxiliary_profile);
-
-  // Simulate a form submission with a subset of the info.
-  // Note that the phone number format is different from the saved format.
-  FormData form;
-  FormFieldData field;
-  test::CreateTestFormField(
-      "First name:", "first_name", "Tester", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField(
-      "Last name:", "last_name", "McAddressBookTesterson", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField(
-      "Email:", "email", "tester@example.com", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address1", "1 Main", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "CA", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Phone:", "phone", "4158889999", "text", &field);
-  form.fields.push_back(field);
-
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes();
-  scoped_ptr<CreditCard> imported_credit_card;
-  EXPECT_TRUE(personal_data_->ImportFormData(form_structure,
-                                             &imported_credit_card));
-  EXPECT_FALSE(imported_credit_card);
-
-  // Note: No refresh.
-
-  // Expect no change.
-  const std::vector<AutofillProfile*>& web_profiles =
-      personal_data_->web_profiles();
-  EXPECT_EQ(0U, web_profiles.size());
-  ASSERT_EQ(1U, auxiliary_profiles.size());
-  EXPECT_EQ(0, auxiliary_profile->Compare(*auxiliary_profiles[0]));
-}
-
 TEST_F(PersonalDataManagerTest, AggregateTwoDifferentCreditCards) {
   FormData form1;
 
@@ -2876,61 +2839,6 @@ TEST_F(PersonalDataManagerTest, GetCreditCardSuggestions) {
   EXPECT_EQ(ASCIIToUTF16("Bonnie Parker"), suggestions[3].value);
 }
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-TEST_F(PersonalDataManagerTest, ShowAddressBookPrompt) {
-  // TODO(erikchen): After Address Book integration has been disabled for 6
-  // weeks, and there are no major problems, rip out all the code. Expected
-  // removal date: 07/15/2015. http://crbug.com/488146.
-  return;
-
-  EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged()).Times(2);
-
-  AutofillType type(ADDRESS_HOME_STREET_ADDRESS);
-
-  prefs_->SetBoolean(prefs::kAutofillEnabled, false);
-  EXPECT_FALSE(personal_data_->ShouldShowAccessAddressBookSuggestion(type));
-
-  prefs_->SetBoolean(prefs::kAutofillEnabled, true);
-  EXPECT_TRUE(personal_data_->ShouldShowAccessAddressBookSuggestion(type));
-
-  // Adding an Autofill Profile should prevent the prompt from appearing.
-  AutofillProfile profile(base::GenerateGUID(), "https://www.example.com/");
-  test::SetProfileInfo(&profile,
-      "Marion", "Mitchell", "Morrison",
-      "johnwayne@me.xyz", "Fox", "123 Zoo St.", "unit 5", "Hollywood", "CA",
-      "91601", "US", "12345678910");
-  personal_data_->AddProfile(profile);
-
-  EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged())
-      .WillOnce(QuitMainMessageLoop());
-  base::MessageLoop::current()->Run();
-
-  EXPECT_FALSE(personal_data_->ShouldShowAccessAddressBookSuggestion(type));
-}
-
-// Tests that the logic to show the access Address Book prompt respects the
-// preference that indicates the total number of times the prompt has already
-// been shown.
-TEST_F(PersonalDataManagerTest, MaxTimesToShowAddressBookPrompt) {
-  // TODO(erikchen): After Address Book integration has been disabled for 6
-  // weeks, and there are no major problems, rip out all the code. Expected
-  // removal date: 07/15/2015. http://crbug.com/488146.
-  return;
-  EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged()).Times(1);
-
-  AutofillType type(ADDRESS_HOME_STREET_ADDRESS);
-
-  prefs_->SetBoolean(prefs::kAutofillEnabled, true);
-  EXPECT_TRUE(personal_data_->ShouldShowAccessAddressBookSuggestion(type));
-
-  prefs_->SetInteger(prefs::kAutofillMacAddressBookShowedCount, 4);
-  EXPECT_TRUE(personal_data_->ShouldShowAccessAddressBookSuggestion(type));
-
-  prefs_->SetInteger(prefs::kAutofillMacAddressBookShowedCount, 6);
-  EXPECT_FALSE(personal_data_->ShouldShowAccessAddressBookSuggestion(type));
-}
-#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
-
 TEST_F(PersonalDataManagerTest, RecordUseOf) {
   AutofillProfile profile(test::GetFullProfile());
   EXPECT_EQ(0U, profile.use_count());
@@ -3194,6 +3102,268 @@ TEST_F(PersonalDataManagerTest, DontDuplicateServerCard) {
   EXPECT_FALSE(
       personal_data_->ImportFormData(form_structure2, &imported_credit_card));
   EXPECT_FALSE(imported_credit_card);
+}
+
+// Tests that a profile with all the same info as the reference profile except
+// the name gets saved as a new profile.
+TEST_F(PersonalDataManagerTest, SaveImportedProfile_DifferentNames) {
+  SetupReferenceProfile();
+
+  AutofillProfile profile2(base::GenerateGUID(), "https://www.example.com");
+  // New profile changes the first name from "Marion" to "Marionette".
+  test::SetProfileInfo(&profile2, "Marionette", "Mitchell", "Morrison",
+                       "johnwayne@me.xyz", "Fox", "123 Zoo St.", "unit 5",
+                       "Hollywood", "CA", "91601", "US", "12345678910");
+
+  personal_data_->SaveImportedProfile(profile2);
+
+  const std::vector<AutofillProfile*>& profiles2 =
+      personal_data_->GetProfiles();
+  ASSERT_EQ(2U, profiles2.size());
+}
+
+// Tests that a profile with all the same info as the reference profile except
+// the address line 1 gets saved as a new profile.
+TEST_F(PersonalDataManagerTest, SaveImportedProfile_DifferentAddresseLine1) {
+  SetupReferenceProfile();
+
+  AutofillProfile profile2(base::GenerateGUID(), "https://www.example.com");
+  test::SetProfileInfo(&profile2, "Marion", "Mitchell", "Morrison",
+                       "johnwayne@me.xyz", "Fox", "123 Aquarium St.", "unit 5",
+                       "Hollywood", "CA", "91601", "US", "12345678910");
+
+  personal_data_->SaveImportedProfile(profile2);
+
+  const std::vector<AutofillProfile*>& profiles2 =
+      personal_data_->GetProfiles();
+  ASSERT_EQ(2U, profiles2.size());
+}
+
+// Tests that a profile with all the same info as the reference profile except
+// the address line 2 gets saved as a new profile.
+TEST_F(PersonalDataManagerTest, SaveImportedProfile_DifferentAddresseLine2) {
+  SetupReferenceProfile();
+
+  AutofillProfile profile2(base::GenerateGUID(), "https://www.example.com");
+  test::SetProfileInfo(&profile2, "Marion", "Mitchell", "Morrison",
+                       "johnwayne@me.xyz", "Fox", "123 Zoo St.", "unit 7",
+                       "Hollywood", "CA", "91601", "US", "12345678910");
+
+  personal_data_->SaveImportedProfile(profile2);
+
+  const std::vector<AutofillProfile*>& profiles2 =
+      personal_data_->GetProfiles();
+  ASSERT_EQ(2U, profiles2.size());
+}
+
+// Tests that a profile with all the same info as the reference profile plus a
+// new piece of information gets merged with the reference profile and that the
+// old empty value gets overwritten by the new information.
+TEST_F(PersonalDataManagerTest, SaveImportedProfile_AddtionalInfoCompanyName) {
+  SetupReferenceProfile();
+
+  // Remove the zip code from the reference profile.
+  const std::vector<AutofillProfile*>& profiles = personal_data_->GetProfiles();
+  profiles.front()->SetRawInfo(COMPANY_NAME, base::UTF8ToUTF16(""));
+
+  AutofillProfile profile2(base::GenerateGUID(), "https://www.example.com");
+  test::SetProfileInfo(&profile2, "Marion", "Mitchell", "Morrison",
+                       "johnwayne@me.xyz", "Fox", "123 Zoo St.", "unit 5",
+                       "Hollywood", "CA", "91601", "US", "12345678910");
+
+  personal_data_->SaveImportedProfile(profile2);
+
+  const std::vector<AutofillProfile*>& profiles2 =
+      personal_data_->GetProfiles();
+  ASSERT_EQ(1U, profiles2.size());
+  // Make sure the new information is saved.
+  ASSERT_EQ(base::UTF8ToUTF16("Fox"),
+            profiles2.front()->GetRawInfo(COMPANY_NAME));
+}
+
+// Tests that a profile with all the same info as the reference profile except a
+// loss of information gets merged with the reference profile but that the value
+// of the reference profile is not overwritten (no information loss).
+TEST_F(PersonalDataManagerTest, SaveImportedProfile_LessInfoCompanyName) {
+  SetupReferenceProfile();
+
+  AutofillProfile profile2(base::GenerateGUID(), "https://www.example.com");
+  test::SetProfileInfo(&profile2, "Marion", "Mitchell", "Morrison",
+                       "johnwayne@me.xyz", "", "123 Zoo St.", "unit 5",
+                       "Hollywood", "CA", "91601", "US", "12345678910");
+
+  personal_data_->SaveImportedProfile(profile2);
+
+  const std::vector<AutofillProfile*>& profiles2 =
+      personal_data_->GetProfiles();
+  ASSERT_EQ(1U, profiles2.size());
+  // Make sure there is no loss of information.
+  ASSERT_EQ(base::UTF8ToUTF16("Fox"),
+            profiles2.front()->GetRawInfo(COMPANY_NAME));
+}
+
+// Tests that a profile with all the same info as the reference profile plus a
+// new piece of information on the address line 2 gets merged with the reference
+// profile and that the old empty value gets overwritten by the new information.
+TEST_F(PersonalDataManagerTest, SaveImportedProfile_AddtionalInfoAddressLine2) {
+  SetupReferenceProfile();
+
+  // Remove the address line 2 from the reference profile.
+  const std::vector<AutofillProfile*>& profiles = personal_data_->GetProfiles();
+  profiles.front()->SetRawInfo(ADDRESS_HOME_LINE2, base::UTF8ToUTF16(""));
+
+  AutofillProfile profile2(base::GenerateGUID(), "https://www.example.com");
+  test::SetProfileInfo(&profile2, "Marion", "Mitchell", "Morrison",
+                       "johnwayne@me.xyz", "Fox", "123 Zoo St.", "unit 5",
+                       "Hollywood", "CA", "91601", "US", "12345678910");
+
+  personal_data_->SaveImportedProfile(profile2);
+
+  const std::vector<AutofillProfile*>& profiles2 =
+      personal_data_->GetProfiles();
+  ASSERT_EQ(1U, profiles2.size());
+  // Make sure the new information is saved.
+  ASSERT_EQ(base::UTF8ToUTF16("unit 5"),
+            profiles2.front()->GetRawInfo(ADDRESS_HOME_LINE2));
+}
+
+// Tests that a profile with all the same info as the reference profile except a
+// loss of information on the address line 2 gets merged with the reference
+// profile but that the value of the reference profile is not overwritten (no
+// information loss).
+TEST_F(PersonalDataManagerTest, SaveImportedProfile_LessInfoAddressLine2) {
+  SetupReferenceProfile();
+
+  AutofillProfile profile2(base::GenerateGUID(), "https://www.example.com");
+  test::SetProfileInfo(&profile2, "Marion", "Mitchell", "Morrison",
+                       "johnwayne@me.xyz", "Fox", "123 Zoo St.", "",
+                       "Hollywood", "CA", "91601", "US", "12345678910");
+
+  personal_data_->SaveImportedProfile(profile2);
+
+  const std::vector<AutofillProfile*>& profiles2 =
+      personal_data_->GetProfiles();
+  ASSERT_EQ(1U, profiles2.size());
+  // Make sure there is no loss of information.
+  ASSERT_EQ(base::UTF8ToUTF16("unit 5"),
+            profiles2.front()->GetRawInfo(ADDRESS_HOME_LINE2));
+}
+
+// Tests that a profile with all the same info as the reference profile except
+// additional punctuation in the two address lines gets merged with the
+// reference profile and that the address of the reference profile is
+// overwritten.
+TEST_F(PersonalDataManagerTest, SaveImportedProfile_SameAddressAddPunctuation) {
+  SetupReferenceProfile();
+
+  AutofillProfile profile2(base::GenerateGUID(), "https://www.example.com");
+  // New profile changes the first address line from "123 Zoo St" to "123, Zoo
+  // St.".
+  test::SetProfileInfo(&profile2, "Marion", "Mitchell", "Morrison",
+                       "johnwayne@me.xyz", "Fox", "123, Zoo St.", "unit. 5",
+                       "Hollywood", "CA", "91601", "US", "12345678910");
+
+  personal_data_->SaveImportedProfile(profile2);
+
+  const std::vector<AutofillProfile*>& profiles2 =
+      personal_data_->GetProfiles();
+  ASSERT_EQ(1U, profiles2.size());
+
+  // Make sure that the new address punctuation is saved.
+  ASSERT_EQ(base::UTF8ToUTF16("123, Zoo St."),
+            profiles2.front()->GetRawInfo(ADDRESS_HOME_LINE1));
+  ASSERT_EQ(base::UTF8ToUTF16("unit. 5"),
+            profiles2.front()->GetRawInfo(ADDRESS_HOME_LINE2));
+}
+
+// Tests that a profile with all the same info as the reference profile except
+// less punctuation in the two address lines gets merged with the reference
+// profile and that the address of the reference profile is overwritten.
+TEST_F(PersonalDataManagerTest,
+       SaveImportedProfile_SameAddressRemovePunctuation) {
+  SetupReferenceProfile();
+
+  // Add punctuation to the reference profile's ADDRESS_HOME_LINE1 and 2.
+  const std::vector<AutofillProfile*>& profiles = personal_data_->GetProfiles();
+  profiles.front()->SetRawInfo(ADDRESS_HOME_LINE1,
+                               base::UTF8ToUTF16("123, Zoo St."));
+  profiles.front()->SetRawInfo(ADDRESS_HOME_LINE2,
+                               base::UTF8ToUTF16("Unit. 5"));
+
+  AutofillProfile profile2(base::GenerateGUID(), "https://www.example.com");
+  // New profile changes the first address line from "123, Zoo St." to "123 Zoo
+  // St".
+  test::SetProfileInfo(&profile2, "Marion", "Mitchell", "Morrison",
+                       "johnwayne@me.xyz", "Fox", "123 Zoo St", "unit 5",
+                       "Hollywood", "CA", "91601", "US", "12345678910");
+
+  personal_data_->SaveImportedProfile(profile2);
+
+  const std::vector<AutofillProfile*>& profiles2 =
+      personal_data_->GetProfiles();
+  ASSERT_EQ(1U, profiles2.size());
+
+  // Make sure that the new address punctuation is saved.
+  ASSERT_EQ(base::UTF8ToUTF16("123 Zoo St"),
+            profiles2.front()->GetRawInfo(ADDRESS_HOME_LINE1));
+  ASSERT_EQ(base::UTF8ToUTF16("unit 5"),
+            profiles2.front()->GetRawInfo(ADDRESS_HOME_LINE2));
+}
+
+// Tests that a profile with all the same info as the reference profile except
+// that the address line 1 is in the address line 2 gets merged with the
+// reference profile and that the address lines of the reference profile are
+// not overwritten.
+TEST_F(PersonalDataManagerTest, SaveImportedProfile_FromTwoAddressLinesToOne) {
+  SetupReferenceProfile();
+
+  AutofillProfile profile2(base::GenerateGUID(), "https://www.example.com");
+  test::SetProfileInfo(&profile2, "Marion", "Mitchell", "Morrison",
+                       "johnwayne@me.xyz", "Fox", "123 Zoo St, unit 5", "",
+                       "Hollywood", "CA", "91601", "US", "12345678910");
+
+  personal_data_->SaveImportedProfile(profile2);
+
+  const std::vector<AutofillProfile*>& profiles2 =
+      personal_data_->GetProfiles();
+  ASSERT_EQ(1U, profiles2.size());
+
+  // Make sure that the address was not overwritten.
+  ASSERT_EQ(base::UTF8ToUTF16("123 Zoo St"),
+            profiles2.front()->GetRawInfo(ADDRESS_HOME_LINE1));
+  ASSERT_EQ(base::UTF8ToUTF16("unit 5"),
+            profiles2.front()->GetRawInfo(ADDRESS_HOME_LINE2));
+}
+
+// Tests that a profile with all the same info as the reference profile except
+// that the address line 2 contains part of the old address line 1 gets merged
+// with the reference profile and that the address lines of the reference
+// profile are overwritten.
+TEST_F(PersonalDataManagerTest, SaveImportedProfile_FromOneAddressLineToTwo) {
+  SetupReferenceProfile();
+
+  // Add punctuation to the reference profile's ADDRESS_HOME_LINE1.
+  const std::vector<AutofillProfile*>& profiles = personal_data_->GetProfiles();
+  profiles.front()->SetRawInfo(ADDRESS_HOME_LINE1,
+                               base::UTF8ToUTF16("123, Zoo St, Unit. 5"));
+  profiles.front()->SetRawInfo(ADDRESS_HOME_LINE2, base::UTF8ToUTF16(""));
+
+  AutofillProfile profile2(base::GenerateGUID(), "https://www.example.com");
+  test::SetProfileInfo(&profile2, "Marion", "Mitchell", "Morrison",
+                       "johnwayne@me.xyz", "Fox", "123 Zoo St", "unit 5",
+                       "Hollywood", "CA", "91601", "US", "12345678910");
+
+  personal_data_->SaveImportedProfile(profile2);
+
+  const std::vector<AutofillProfile*>& profiles2 =
+      personal_data_->GetProfiles();
+  ASSERT_EQ(1U, profiles2.size());
+
+  // Make sure that the new address layout is saved.
+  ASSERT_EQ(base::UTF8ToUTF16("123 Zoo St"),
+            profiles2.front()->GetRawInfo(ADDRESS_HOME_LINE1));
+  ASSERT_EQ(base::UTF8ToUTF16("unit 5"),
+            profiles2.front()->GetRawInfo(ADDRESS_HOME_LINE2));
 }
 
 }  // namespace autofill

@@ -48,24 +48,43 @@ class MediaRouterAndroid : public MediaRouter {
       const MediaRoute::Id& route_id,
       scoped_ptr<std::vector<uint8>> data,
       const SendRouteMessageCallback& callback) override;
+  void AddIssue(const Issue& issue) override;
   void ClearIssue(const Issue::Id& issue_id) override;
   void OnPresentationSessionDetached(const MediaRoute::Id& route_id) override;
 
-  // JNI functions.
+  // The methods called by the Java counterpart.
+
+  // Notifies the media router that information about sinks is received for
+  // a specific source URN.
   void OnSinksReceived(
       JNIEnv* env, jobject obj, jstring jsource_urn, jint jcount);
+
+  // Notifies the media router about a successful route creation.
   void OnRouteCreated(
       JNIEnv* env,
       jobject obj,
       jstring jmedia_route_id,
-      jint jcreate_route_request_id,
+      jstring jmedia_sink_id,
+      jint jroute_request_id,
       jboolean jis_local);
-  void OnRouteCreationError(
+
+  // Notifies the media router that route creation or joining failed.
+  void OnRouteRequestError(
       JNIEnv* env,
       jobject obj,
       jstring jerror_text,
-      jint jcreate_route_request_id);
+      jint jroute_request_id);
+
+  // Notifies the media router when the route was closed.
   void OnRouteClosed(JNIEnv* env, jobject obj, jstring jmedia_route_id);
+
+  // Notifies the media router about the result of sending a message.
+  void OnMessageSentResult(
+      JNIEnv* env, jobject obj, jboolean jsuccess, jint jcallback_id);
+
+  // Notifies the media router about a message received from the media route.
+  void OnMessage(
+      JNIEnv* env, jobject obj, jstring jmedia_route_id, jstring jmessage);
 
  private:
   friend class MediaRouterFactory;
@@ -73,7 +92,7 @@ class MediaRouterAndroid : public MediaRouter {
   explicit MediaRouterAndroid(content::BrowserContext*);
 
   // MediaRouter implementation.
-  void RegisterMediaSinksObserver(MediaSinksObserver* observer) override;
+  bool RegisterMediaSinksObserver(MediaSinksObserver* observer) override;
   void UnregisterMediaSinksObserver(MediaSinksObserver* observer) override;
   void RegisterMediaRoutesObserver(MediaRoutesObserver* observer) override;
   void UnregisterMediaRoutesObserver(MediaRoutesObserver* observer) override;
@@ -93,26 +112,32 @@ class MediaRouterAndroid : public MediaRouter {
 
   base::ObserverList<MediaRoutesObserver> routes_observers_;
 
-  struct CreateMediaRouteRequest {
-    CreateMediaRouteRequest(
+  struct MediaRouteRequest {
+    MediaRouteRequest(
         const MediaSource& source,
-        const MediaSink& sink,
         const std::string& presentation_id,
         const std::vector<MediaRouteResponseCallback>& callbacks);
-    ~CreateMediaRouteRequest();
+    ~MediaRouteRequest();
 
     MediaSource media_source;
-    MediaSink media_sink;
     std::string presentation_id;
     std::vector<MediaRouteResponseCallback> callbacks;
   };
 
-  using CreateMediaRouteRequests =
-      IDMap<CreateMediaRouteRequest, IDMapOwnPointer>;
-  CreateMediaRouteRequests create_route_requests_;
+  using MediaRouteRequests =
+      IDMap<MediaRouteRequest, IDMapOwnPointer>;
+  MediaRouteRequests route_requests_;
 
   using MediaRoutes = std::vector<MediaRoute>;
   MediaRoutes active_routes_;
+
+  using SendMessageCallbacks = IDMap<SendRouteMessageCallback, IDMapOwnPointer>;
+  SendMessageCallbacks message_callbacks_;
+
+  using MessagesObservers = base::ScopedPtrHashMap<
+      MediaRoute::Id,
+      scoped_ptr<base::ObserverList<PresentationSessionMessagesObserver>>>;
+  MessagesObservers messages_observers_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaRouterAndroid);
 };

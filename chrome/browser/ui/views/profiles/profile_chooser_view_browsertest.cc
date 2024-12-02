@@ -30,9 +30,6 @@
 #include "ui/events/event_utils.h"
 #include "ui/views/controls/webview/webview.h"
 
-// ChromeOS and mobile platforms don't have a ProfileChooserView.
-#if defined(FRAME_AVATAR_BUTTON)
-
 namespace {
 
 Profile* CreateTestingProfile(const std::string& profile_name) {
@@ -50,6 +47,18 @@ Profile* CreateTestingProfile(const std::string& profile_name) {
   profile_manager->RegisterTestingProfile(profile, true, false);
   EXPECT_EQ(starting_number_of_profiles + 1,
             profile_manager->GetNumberOfProfiles());
+  return profile;
+}
+
+Profile* CreateProfileOutsideUserDataDir() {
+  base::FilePath path;
+  if (!base::CreateNewTempDirectory(base::FilePath::StringType(), &path))
+    NOTREACHED() << "Could not create directory at " << path.MaybeAsASCII();
+
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  Profile* profile =
+      Profile::CreateProfile(path, NULL, Profile::CREATE_MODE_SYNCHRONOUS);
+  profile_manager->RegisterTestingProfile(profile, true, false);
   return profile;
 }
 
@@ -95,7 +104,6 @@ class ProfileChooserViewExtensionsTest : public ExtensionBrowserTest {
  protected:
   void SetUp() override {
     ExtensionBrowserTest::SetUp();
-    DCHECK(switches::IsNewAvatarMenu());
     DCHECK(switches::IsNewProfileManagement());
   }
 
@@ -186,6 +194,20 @@ class ProfileChooserViewExtensionsTest : public ExtensionBrowserTest {
 
   DISALLOW_COPY_AND_ASSIGN(ProfileChooserViewExtensionsTest);
 };
+
+IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
+    NoProfileChooserOnOutsideUserDataDirProfiles) {
+  // Test that the profile chooser view does not show when avatar menu is not
+  // available. This can be repro'ed with a profile path outside user_data_dir.
+  // crbug.com/527505
+  Profile* new_profile = CreateProfileOutsideUserDataDir();
+  Browser* browser = CreateBrowser(new_profile);
+  browser->window()->ShowAvatarBubbleFromAvatarButton(
+      BrowserWindow::AVATAR_BUBBLE_MODE_CONFIRM_SIGNIN,
+      signin::ManageAccountsParams());
+  ASSERT_FALSE(ProfileChooserView::IsShowing());
+  CloseBrowserSynchronously(browser);
+}
 
 IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, SigninButtonHasFocus) {
   ASSERT_TRUE(profiles::IsMultipleProfilesEnabled());
@@ -298,5 +320,3 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
   // We need to hide the User Manager or else the process can't die.
   UserManager::Hide();
 }
-
-#endif

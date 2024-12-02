@@ -23,6 +23,7 @@
 #include "content/public/test/test_utils.h"
 #include "content/test/content_browser_sanity_checker.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_util.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ui/compositor/compositor_switches.h"
@@ -184,7 +185,7 @@ void BrowserTestBase::SetUp() {
   // when sharded.
   command_line->AppendSwitchASCII(
       switches::kIPCConnectionTimeout,
-      base::IntToString(TestTimeouts::action_max_timeout().InSeconds()));
+      base::Int64ToString(TestTimeouts::action_max_timeout().InSeconds()));
 
   // The tests assume that file:// URIs can freely access other file:// URIs.
   command_line->AppendSwitch(switches::kAllowFileAccessFromFiles);

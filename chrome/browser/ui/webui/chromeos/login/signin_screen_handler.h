@@ -316,9 +316,6 @@ class SigninScreenHandler
   void OnMaximizeModeStarted() override;
   void OnMaximizeModeEnded() override;
 
-  // Updates authentication extension. Called when device settings that affect
-  // sign-in (allow BWSI and allow whitelist) are changed.
-  void UserSettingsChanged();
   void UpdateAddButtonStatus();
 
   // Restore input focus to current user pod.
@@ -471,11 +468,11 @@ class SigninScreenHandler
   NetworkError::ErrorReason gaia_reload_reason_ =
       NetworkError::ERROR_REASON_NONE;
 
-  bool caps_lock_enabled_;
+  bool caps_lock_enabled_ = false;
 
   // Non-owning ptr.
   // TODO(antrim@): remove this dependency.
-  GaiaScreenHandler* gaia_screen_handler_;
+  GaiaScreenHandler* gaia_screen_handler_ = nullptr;
 
   // Maximized mode controller delegate.
   scoped_ptr<TouchViewControllerDelegate> max_mode_delegate_;

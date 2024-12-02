@@ -417,7 +417,7 @@ var availableTests = [
       assertEq([
         {Scanning: false, State: 'Enabled', Type: 'Ethernet'},
         {Scanning: false, State: 'Enabled', Type: 'WiFi'},
-        {State: 'Uninitialized', Type: 'Cellular'},
+        {State: 'Uninitialized', Type: 'Cellular', SimPresent: true},
         {State: 'Disabled', Type: 'WiMAX'},
       ],
                result);
@@ -483,6 +483,7 @@ var availableTests = [
             Carrier: 'Cellular1_Carrier',
             Family: 'GSM',
             HomeProvider: {
+              Code: '000000',
               Country: 'us',
               Name: 'Cellular1_Provider'
             },

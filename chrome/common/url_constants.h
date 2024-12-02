@@ -43,6 +43,7 @@ extern const char kChromeUIFlagsURL[];
 extern const char kChromeUIFlashURL[];
 extern const char kChromeUIGCMInternalsURL[];
 extern const char kChromeUIHelpFrameURL[];
+extern const char kChromeUIHelpURL[];
 extern const char kChromeUIHistoryURL[];
 extern const char kChromeUIHistoryFrameURL[];
 extern const char kChromeUIIdentityInternalsURL[];
@@ -70,17 +71,16 @@ extern const char kChromeUIMdSettingsURL[];
 extern const char kChromeUISettingsURL[];
 extern const char kChromeUIContentSettingsURL[];
 extern const char kChromeUISettingsFrameURL[];
+extern const char kChromeUISiteEngagementHost[];
 extern const char kChromeUISuggestionsURL[];
 extern const char kChromeUISupervisedUserPassphrasePageURL[];
 extern const char kChromeUITermsURL[];
 extern const char kChromeUIThemeURL[];
 extern const char kChromeUIThumbnailURL[];
 extern const char kChromeUIThumbnailListURL[];
-extern const char kChromeUIUberURL[];
 extern const char kChromeUIUberFrameURL[];
 extern const char kChromeUIUserActionsURL[];
 extern const char kChromeUIVersionURL[];
-extern const char kChromeUIVoiceSearchURL[];
 
 #if defined(OS_ANDROID)
 extern const char kChromeUIContextualSearchPromoURL[];
@@ -235,7 +235,6 @@ extern const char kChromeUIUberFrameHost[];
 extern const char kChromeUIUberHost[];
 extern const char kChromeUIUserActionsHost[];
 extern const char kChromeUIVersionHost[];
-extern const char kChromeUIVoiceSearchHost[];
 extern const char kChromeUIWebRTCDeviceProviderHost[];
 extern const char kChromeUIWorkersHost[];
 
@@ -252,6 +251,7 @@ extern const char kChromeUISandboxHost[];
 
 #if defined(OS_ANDROID)
 extern const char kChromeUIContextualSearchPromoHost[];
+extern const char kChromeUIPopularSitesInternalsHost[];
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -282,6 +282,7 @@ extern const char kChromeUISimUnlockHost[];
 extern const char kChromeUISlowHost[];
 extern const char kChromeUISlowTraceHost[];
 extern const char kChromeUIUserImageHost[];
+extern const char kChromeUIVoiceSearchHost[];
 
 extern const char kEULAPathFormat[];
 extern const char kOemEulaURLPath[];
@@ -344,6 +345,7 @@ extern const char kSyncGoogleDashboardURL[];
 extern const char kPasswordManagerLearnMoreURL[];
 extern const char kUpgradeHelpCenterBaseURL[];
 extern const char kPasswordManagerAccountDashboardURL[];
+extern const char kSmartLockHelpPage[];
 
 // "Learn more" URL for the Settings API, NTP bubble and other settings bubbles
 // showing which extension is controlling them.

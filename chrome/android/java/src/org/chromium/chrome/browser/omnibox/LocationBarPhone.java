@@ -24,9 +24,9 @@ import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.WindowDelegate;
 import org.chromium.chrome.browser.appmenu.AppMenuButtonHelper;
-import org.chromium.chrome.browser.document.BrandColorUtils;
 import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.util.ColorUtils;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.widget.TintedImageButton;
 import org.chromium.ui.UiUtils;
@@ -102,6 +102,11 @@ public class LocationBarPhone extends LocationBarLayout {
                 return false;
             }
         });
+    }
+
+    @Override
+    public View getMenuAnchor() {
+        return mMenuButton;
     }
 
     @Override
@@ -341,10 +346,12 @@ public class LocationBarPhone extends LocationBarLayout {
             if (getToolbarDataProvider().isUsingBrandColor()) {
                 int currentPrimaryColor = getToolbarDataProvider().getPrimaryColor();
                 useLightDrawables |=
-                        BrandColorUtils.shouldUseLightDrawablesForToolbar(currentPrimaryColor);
+                        ColorUtils.shoudUseLightForegroundOnBackground(currentPrimaryColor);
             }
-            ColorStateList dark = getResources().getColorStateList(R.color.dark_mode_tint);
-            ColorStateList white = getResources().getColorStateList(R.color.light_mode_tint);
+            ColorStateList dark = ApiCompatibilityUtils.getColorStateList(getResources(),
+                    R.color.dark_mode_tint);
+            ColorStateList white = ApiCompatibilityUtils.getColorStateList(getResources(),
+                    R.color.light_mode_tint);
             mMenuButton.setTint(useLightDrawables ? white : dark);
         }
     }

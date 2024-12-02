@@ -74,7 +74,7 @@ TEST_F(RenderViewHostTest, FilterAbout) {
 
 // Create a full screen popup RenderWidgetHost and View.
 TEST_F(RenderViewHostTest, CreateFullscreenWidget) {
-  int routing_id = process()->GetNextRoutingID();
+  int32 routing_id = process()->GetNextRoutingID();
   test_rvh()->CreateNewFullscreenWidget(routing_id);
 }
 
@@ -244,7 +244,6 @@ class TestSaveImageFromDataURL : public RenderMessageFilter {
       BrowserContext* context)
       : RenderMessageFilter(
             0,
-            nullptr,
             context,
             context->GetRequestContext(),
             nullptr,
@@ -268,12 +267,13 @@ class TestSaveImageFromDataURL : public RenderMessageFilter {
   }
 
   void Test(const std::string& url) {
-    OnMessageReceived(ViewHostMsg_SaveImageFromDataURL(0, url));
+    OnMessageReceived(ViewHostMsg_SaveImageFromDataURL(0, 0, url));
   }
 
  protected:
   ~TestSaveImageFromDataURL() override {}
   void DownloadUrl(int render_view_id,
+                   int render_frame_id,
                    const GURL& url,
                    const Referrer& referrer,
                    const base::string16& suggested_name,

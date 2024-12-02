@@ -131,8 +131,6 @@ void ManageProfileHandler::GetLocalizedValues(
                                supervised_user_dashboard_url,
                                supervised_user_dashboard_display));
 
-  localized_strings->SetBoolean("newAvatarMenuEnabled",
-                                switches::IsNewAvatarMenu());
   localized_strings->SetBoolean("profileShortcutsEnabled",
                                 ProfileShortcutManager::IsFeatureEnabled());
 
@@ -243,7 +241,7 @@ void ManageProfileHandler::GenerateSignedinUserSpecificStrings(
   DCHECK(profile);
   SigninManagerBase* manager = SigninManagerFactory::GetForProfile(profile);
   if (manager) {
-    username = manager->GetAuthenticatedUsername();
+    username = manager->GetAuthenticatedAccountInfo().email;
     // If there is no one logged in or if the profile name is empty then the
     // domain name is empty. This happens in browser tests.
     if (!username.empty()) {
@@ -496,7 +494,7 @@ void ManageProfileHandler::RequestCreateProfileUpdate(
   SigninManagerBase* manager =
       SigninManagerFactory::GetForProfile(profile);
   base::string16 username =
-      base::UTF8ToUTF16(manager->GetAuthenticatedUsername());
+      base::UTF8ToUTF16(manager->GetAuthenticatedAccountInfo().email);
   ProfileSyncService* service =
      ProfileSyncServiceFactory::GetForProfile(profile);
   GoogleServiceAuthError::State state = GoogleServiceAuthError::NONE;

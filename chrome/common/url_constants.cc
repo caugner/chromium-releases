@@ -47,6 +47,7 @@ const char kChromeUIFlagsURL[] = "chrome://flags/";
 const char kChromeUIFlashURL[] = "chrome://flash/";
 const char kChromeUIGCMInternalsURL[] = "chrome://gcm-internals/";
 const char kChromeUIHelpFrameURL[] = "chrome://help-frame/";
+const char kChromeUIHelpURL[] = "chrome://help/";
 const char kChromeUIHistoryURL[] = "chrome://history/";
 const char kChromeUIHistoryFrameURL[] = "chrome://history-frame/";
 const char kChromeUIIdentityInternalsURL[] = "chrome://identity-internals/";
@@ -81,11 +82,9 @@ const char kChromeUITermsURL[] = "chrome://terms/";
 const char kChromeUIThemeURL[] = "chrome://theme/";
 const char kChromeUIThumbnailURL[] = "chrome://thumb/";
 const char kChromeUIThumbnailListURL[] = "chrome://thumbnails/";
-const char kChromeUIUberURL[] = "chrome://chrome/";
 const char kChromeUIUberFrameURL[] = "chrome://uber-frame/";
 const char kChromeUIUserActionsURL[] = "chrome://user-actions/";
 const char kChromeUIVersionURL[] = "chrome://version/";
-const char kChromeUIVoiceSearchURL[] = "chrome://voicesearch/";
 
 #if defined(OS_ANDROID)
 const char kChromeUIContextualSearchPromoURL[] =
@@ -229,6 +228,7 @@ const char kChromeUISettingsHost[] = "settings";
 const char kChromeUISettingsFrameHost[] = "settings-frame";
 const char kChromeUIShorthangHost[] = "shorthang";
 const char kChromeUISignInInternalsHost[] = "signin-internals";
+const char kChromeUISiteEngagementHost[] = "site-engagement";
 const char kChromeUISuggestionsHost[] = "suggestions";
 const char kChromeUISupervisedUserInternalsHost[] = "supervised-user-internals";
 const char kChromeUISupervisedUserPassphrasePageHost[] =
@@ -249,7 +249,6 @@ const char kChromeUIUberFrameHost[] = "uber-frame";
 const char kChromeUIUberHost[] = "chrome";
 const char kChromeUIUserActionsHost[] = "user-actions";
 const char kChromeUIVersionHost[] = "version";
-const char kChromeUIVoiceSearchHost[] = "voicesearch";
 const char kChromeUIWebRTCDeviceProviderHost[] =
     "webrtc-device-provider";
 const char kChromeUIWorkersHost[] = "workers";
@@ -267,6 +266,7 @@ const char kChromeUISandboxHost[] = "sandbox";
 
 #if defined(OS_ANDROID)
 const char kChromeUIContextualSearchPromoHost[] = "contextual-search-promo";
+const char kChromeUIPopularSitesInternalsHost[] = "popular-sites-internals";
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -297,6 +297,7 @@ const char kChromeUISimUnlockHost[] = "sim-unlock";
 const char kChromeUISlowHost[] = "slow";
 const char kChromeUISlowTraceHost[] = "slow_trace";
 const char kChromeUIUserImageHost[] = "userimage";
+const char kChromeUIVoiceSearchHost[] = "voicesearch";
 
 const char kEULAPathFormat[] = "/usr/share/chromeos-assets/eula/%s/eula.html";
 const char kOemEulaURLPath[] = "oem";
@@ -376,6 +377,9 @@ const char kUpgradeHelpCenterBaseURL[] =
 
 const char kPasswordManagerAccountDashboardURL[] =
     "https://passwords.google.com/settings/passwords";
+
+const char kSmartLockHelpPage[] =
+    "https://support.google.com/accounts/answer/6197437";
 
 const char kExtensionControlledSettingLearnMoreURL[] =
     "https://support.google.com/chrome/?p=ui_settings_api_extension";
@@ -616,7 +620,6 @@ const char* const kChromeHostURLs[] = {
   kChromeUITranslateInternalsHost,
   kChromeUIUserActionsHost,
   kChromeUIVersionHost,
-  kChromeUIVoiceSearchHost,
   content::kChromeUIAccessibilityHost,
   content::kChromeUIAppCacheInternalsHost,
   content::kChromeUIBlobInternalsHost,
@@ -663,6 +666,7 @@ const char* const kChromeHostURLs[] = {
   kChromeUIOSCreditsHost,
   kChromeUIPowerHost,
   kChromeUIProxySettingsHost,
+  kChromeUIVoiceSearchHost,
 #endif
 #if defined(OS_WIN) || defined(OS_CHROMEOS)
   kChromeUIDiscardsHost,

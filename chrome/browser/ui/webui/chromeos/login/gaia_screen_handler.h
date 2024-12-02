@@ -14,6 +14,8 @@
 #include "chrome/browser/extensions/signin/scoped_gaia_auth_extension.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
+#include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
+#include "chromeos/network/portal_detector/network_portal_detector.h"
 #include "net/base/net_errors.h"
 
 namespace policy {
@@ -30,19 +32,19 @@ struct GaiaContext {
   GaiaContext();
 
   // Forces Gaia to reload.
-  bool force_reload;
+  bool force_reload = false;
 
   // Whether local verison of Gaia is used.
-  bool is_local;
+  bool is_local = false;
 
   // True if user pods can be displayed.
-  bool show_users;
+  bool show_users = false;
 
   // Whether Gaia should be loaded in offline mode.
-  bool use_offline;
+  bool use_offline = false;
 
   // True if user list is non-empty.
-  bool has_users;
+  bool has_users = false;
 
   // Email of the current user.
   std::string email;
@@ -54,11 +56,12 @@ struct GaiaContext {
   std::string gaps_cookie;
 
   // Whether consumer management enrollment is in progress.
-  bool is_enrolling_consumer_management;
+  bool is_enrolling_consumer_management = false;
 };
 
 // A class that handles WebUI hooks in Gaia screen.
-class GaiaScreenHandler : public BaseScreenHandler {
+class GaiaScreenHandler : public BaseScreenHandler,
+                          public NetworkPortalDetector::Observer {
  public:
   enum FrameState {
     FRAME_STATE_UNKNOWN = 0,
@@ -73,12 +76,21 @@ class GaiaScreenHandler : public BaseScreenHandler {
       policy::ConsumerManagementService* consumer_management);
   ~GaiaScreenHandler() override;
 
+  // Decides whether an auth extension should be pre-loaded. If it should,
+  // pre-loads it.
+  void MaybePreloadAuthExtension();
+
+  void DisableRestrictiveProxyCheckForTest();
+
+ private:
+  // TODO (antrim@): remove this dependency.
+  friend class SigninScreenHandler;
+
   void LoadGaia(const GaiaContext& context);
 
   // Callback that loads GAIA after version information has been retrieved.
   void LoadGaiaWithVersion(const GaiaContext& context,
                            const std::string& platform_version);
-  void UpdateGaia(const GaiaContext& context);
 
   // Sends request to reload Gaia. If |force_reload| is true, request
   // will be sent in any case, otherwise it will be sent only when Gaia is
@@ -89,19 +101,8 @@ class GaiaScreenHandler : public BaseScreenHandler {
   // we're using the offline login page but the device is online.
   void MonitorOfflineIdle(bool is_online);
 
-  // Decides whether an auth extension should be pre-loaded. If it should,
-  // pre-loads it.
-  void MaybePreloadAuthExtension();
-
   // Show error UI at the end of GAIA flow when user is not whitelisted.
   void ShowWhitelistCheckFailedError();
-
-  FrameState frame_state() const { return frame_state_; }
-  net::Error frame_error() const { return frame_error_; }
-
- private:
-  // TODO (antrim@): remove this dependency.
-  friend class SigninScreenHandler;
 
   // BaseScreenHandler implementation:
   void DeclareLocalizedValues(
@@ -111,6 +112,11 @@ class GaiaScreenHandler : public BaseScreenHandler {
 
   // WebUIMessageHandler implementation:
   void RegisterMessages() override;
+
+  // NetworkPortalDetector::Observer implementation.
+  void OnPortalDetectionCompleted(
+      const NetworkState* network,
+      const NetworkPortalDetector::CaptivePortalState& state) override;
 
   // WebUI message handlers.
   void HandleFrameLoadingCompleted(int status);
@@ -151,7 +157,9 @@ class GaiaScreenHandler : public BaseScreenHandler {
                        bool using_saml);
 
   // Fill GAIA user name.
-  void PopulateEmail(const std::string& user_id);
+  void set_populated_email(const std::string& populated_email) {
+    populated_email_ = populated_email;
+  }
 
   // Kick off cookie / local storage cleanup.
   void StartClearingCookies(const base::Closure& on_clear_callback);
@@ -162,8 +170,8 @@ class GaiaScreenHandler : public BaseScreenHandler {
   void OnDnsCleared();
 
   // Show sign-in screen for the given credentials.
-  virtual void ShowSigninScreenForCreds(const std::string& username,
-                                        const std::string& password);
+  void ShowSigninScreenForTest(const std::string& username,
+                               const std::string& password);
   // Attempts login for test.
   void SubmitLoginFormForTest();
 
@@ -197,69 +205,94 @@ class GaiaScreenHandler : public BaseScreenHandler {
   void UpdateState(NetworkError::ErrorReason reason);
 
   // TODO (antrim@): remove this dependency.
-  void SetSigninScreenHandler(SigninScreenHandler* handler);
+  void set_signin_screen_handler(SigninScreenHandler* handler) {
+    signin_screen_handler_ = handler;
+  }
+
+  // Are we on a restrictive proxy?
+  bool IsRestrictiveProxy() const;
 
   SigninScreenHandlerDelegate* Delegate();
 
   // Returns temporary unused device Id.
   std::string GetTemporaryDeviceId();
 
+  FrameState frame_state() const { return frame_state_; }
+  net::Error frame_error() const { return frame_error_; }
+
+  // Returns user canonical e-mail. Finds already used account alias, if
+  // user has already signed in.
+  std::string GetCanonicalEmail(const std::string& authenticated_email,
+                                const std::string& gaia_id) const;
+
+  // Returns current visible screen.
+  // TODO(jdufault): This definition exists in multiple locations. Refactor it
+  // into BaseScreenHandler.
+  OobeUI::Screen GetCurrentScreen() const;
+
   // Current state of Gaia frame.
-  FrameState frame_state_;
+  FrameState frame_state_ = FRAME_STATE_UNKNOWN;
 
   // Latest Gaia frame error.
-  net::Error frame_error_;
+  net::Error frame_error_ = net::OK;
 
   // Network state informer used to keep signin screen up.
   scoped_refptr<NetworkStateInformer> network_state_informer_;
 
   // Consumer management service for checking if enrollment is in progress.
-  policy::ConsumerManagementService* consumer_management_;
+  policy::ConsumerManagementService* consumer_management_ = nullptr;
 
-  CoreOobeActor* core_oobe_actor_;
+  CoreOobeActor* core_oobe_actor_ = nullptr;
 
   // Email to pre-populate with.
   std::string populated_email_;
 
   // True if dns cache cleanup is done.
-  bool dns_cleared_;
+  bool dns_cleared_ = false;
 
   // True if DNS cache task is already running.
-  bool dns_clear_task_running_;
+  bool dns_clear_task_running_ = false;
 
   // True if cookie jar cleanup is done.
-  bool cookies_cleared_;
+  bool cookies_cleared_ = false;
 
   // If true, the sign-in screen will be shown when DNS cache and cookie
   // clean-up finish.
-  bool show_when_dns_and_cookies_cleared_;
+  bool show_when_dns_and_cookies_cleared_ = false;
 
   // Has Gaia page silent load been started for the current sign-in attempt?
-  bool gaia_silent_load_;
+  bool gaia_silent_load_ = false;
 
   // The active network at the moment when Gaia page was preloaded.
   std::string gaia_silent_load_network_;
 
   // If the user authenticated via SAML, this indicates whether the principals
   // API was used.
-  bool using_saml_api_;
+  bool using_saml_api_ = false;
 
   // Whether consumer management enrollment is in progress.
-  bool is_enrolling_consumer_management_;
+  bool is_enrolling_consumer_management_ = false;
 
   // Test credentials.
   std::string test_user_;
   std::string test_pass_;
-  bool test_expects_complete_login_;
+  bool test_expects_complete_login_ = false;
 
   // True if Easy bootstrap is enabled.
-  bool use_easy_bootstrap_;
+  bool use_easy_bootstrap_ = false;
+
+  // True if proxy doesn't allow access to google.com/generate_204.
+  NetworkPortalDetector::CaptivePortalStatus captive_portal_status_ =
+      NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE;
+
+  scoped_ptr<NetworkPortalDetector> network_portal_detector_;
+  bool disable_restrictive_proxy_check_for_test_ = false;
 
   // Non-owning ptr to SigninScreenHandler instance. Should not be used
   // in dtor.
   // TODO (antrim@): GaiaScreenHandler shouldn't communicate with
   // signin_screen_handler directly.
-  SigninScreenHandler* signin_screen_handler_;
+  SigninScreenHandler* signin_screen_handler_ = nullptr;
 
   // GAIA extension loader.
   scoped_ptr<ScopedGaiaAuthExtension> auth_extension_;

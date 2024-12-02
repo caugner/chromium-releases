@@ -26,6 +26,7 @@ ButtonInfo::ButtonInfo(const base::string16& title)
 
 RichNotificationData::RichNotificationData()
     : priority(DEFAULT_PRIORITY),
+      is_web_notification(false),
       never_timeout(false),
       timestamp(base::Time::Now()),
       context_message(base::string16()),
@@ -36,6 +37,7 @@ RichNotificationData::RichNotificationData()
 
 RichNotificationData::RichNotificationData(const RichNotificationData& other)
     : priority(other.priority),
+      is_web_notification(other.is_web_notification),
       never_timeout(other.never_timeout),
       timestamp(other.timestamp),
       context_message(other.context_message),
@@ -67,6 +69,7 @@ Notification::Notification(NotificationType type,
       title_(title),
       message_(message),
       icon_(icon),
+      adjust_icon_(true),
       display_source_(display_source),
       origin_url_(origin_url),
       notifier_id_(notifier_id),
@@ -82,6 +85,7 @@ Notification::Notification(const std::string& id, const Notification& other)
       title_(other.title_),
       message_(other.message_),
       icon_(other.icon_),
+      adjust_icon_(other.adjust_icon_),
       display_source_(other.display_source_),
       origin_url_(other.origin_url_),
       notifier_id_(other.notifier_id_),
@@ -97,6 +101,7 @@ Notification::Notification(const Notification& other)
       title_(other.title_),
       message_(other.message_),
       icon_(other.icon_),
+      adjust_icon_(other.adjust_icon_),
       display_source_(other.display_source_),
       origin_url_(other.origin_url_),
       notifier_id_(other.notifier_id_),
@@ -112,6 +117,7 @@ Notification& Notification::operator=(const Notification& other) {
   title_ = other.title_;
   message_ = other.message_;
   icon_ = other.icon_;
+  adjust_icon_ = other.adjust_icon_;
   display_source_ = other.display_source_;
   origin_url_ = other.origin_url_;
   notifier_id_ = other.notifier_id_;
@@ -135,6 +141,7 @@ void Notification::CopyState(Notification* base) {
   is_read_ = base->is_read_;
   if (!delegate_.get())
     delegate_ = base->delegate();
+  optional_fields_.is_web_notification = base->is_web_notification();
   optional_fields_.never_timeout = base->never_timeout();
 }
 

@@ -31,6 +31,11 @@
 #include "config.h"
 
 #include "platform/testing/URLTestHelpers.h"
+#include "public/platform/Platform.h"
+#include "public/platform/WebPrerender.h"
+#include "public/platform/WebPrerenderingSupport.h"
+#include "public/platform/WebString.h"
+#include "public/platform/WebUnitTestSupport.h"
 #include "public/web/WebCache.h"
 #include "public/web/WebDocument.h"
 #include "public/web/WebElement.h"
@@ -42,12 +47,6 @@
 #include "public/web/WebView.h"
 #include "public/web/WebViewClient.h"
 #include "web/tests/FrameTestHelpers.h"
-
-#include "public/platform/Platform.h"
-#include "public/platform/WebPrerender.h"
-#include "public/platform/WebPrerenderingSupport.h"
-#include "public/platform/WebString.h"
-#include "public/platform/WebUnitTestSupport.h"
 #include "wtf/OwnPtr.h"
 #include <functional>
 #include <gtest/gtest.h>
@@ -177,7 +176,7 @@ private:
 
 class PrerenderingTest : public testing::Test {
 public:
-    ~PrerenderingTest()
+    ~PrerenderingTest() override
     {
         Platform::current()->unitTestSupport()->unregisterAllMockedURLs();
     }
@@ -208,7 +207,7 @@ public:
     WebElement console()
     {
         WebElement console = m_webViewHelper.webView()->mainFrame()->document().getElementById("console");
-        ASSERT(console.nodeName() == "UL");
+        ASSERT(console.hasHTMLTagName("UL"));
         return console;
     }
 
@@ -222,11 +221,12 @@ public:
         ASSERT(consoleLength() > i);
 
         WebNode consoleListItem = console().childNodes().item(1 + i);
-        ASSERT(consoleListItem.nodeName() == "LI");
+        ASSERT(consoleListItem.isElementNode());
+        ASSERT(consoleListItem.to<WebElement>().hasHTMLTagName("LI"));
         ASSERT(consoleListItem.hasChildNodes());
 
         WebNode textNode = consoleListItem.firstChild();
-        ASSERT(textNode.nodeName() == "#text");
+        ASSERT(textNode.isTextNode());
 
         return textNode.nodeValue().utf8().data();
     }

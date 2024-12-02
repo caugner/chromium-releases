@@ -10,11 +10,14 @@
 #include "base/memory/ref_counted.h"
 #include "ios/web/public/browser_state.h"
 
-class HostContentSettingsMap;
 class PrefService;
 
 namespace base {
 class SequencedTaskRunner;
+}
+
+namespace syncable_prefs {
+class PrefServiceSyncable;
 }
 
 namespace web {
@@ -61,8 +64,9 @@ class ChromeBrowserState : public web::BrowserState {
   // Retrieves a pointer to the PrefService that manages the preferences.
   virtual PrefService* GetPrefs() = 0;
 
-  // Returns the Hostname <-> Content settings map for the ChromeBrowserState.
-  virtual HostContentSettingsMap* GetHostContentSettingsMap() = 0;
+  // Retrieves a pointer to the PrefService that manages the preferences as
+  // a syncable_prefs::PrefServiceSyncable.
+  virtual syncable_prefs::PrefServiceSyncable* GetSyncablePrefs() = 0;
 
  protected:
   ChromeBrowserState() {}

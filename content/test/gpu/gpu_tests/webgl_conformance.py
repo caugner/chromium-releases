@@ -7,9 +7,10 @@ import os
 import sys
 
 import gpu_test_base
+import path_util
 import webgl_conformance_expectations
+import webgl2_conformance_expectations
 
-from telemetry.core import util
 from telemetry.internal.browser import browser_finder
 from telemetry.page import page_test
 from telemetry.page import shared_page_state
@@ -17,7 +18,7 @@ from telemetry.story.story_set import StorySet
 
 
 conformance_path = os.path.join(
-    util.GetChromiumSrcDir(),
+    path_util.GetChromiumSrcDir(),
     'third_party', 'webgl', 'src', 'sdk', 'tests')
 
 conformance_harness_script = r"""
@@ -57,6 +58,7 @@ conformance_harness_script = r"""
     testHarness.reportResults(null, false, message);
     testHarness.notifyFinished(null);
   };
+  window.quietMode = function() { return true; }
 """
 
 def _DidWebGLTestSucceed(tab):
@@ -75,7 +77,7 @@ class WebglConformanceValidator(gpu_test_base.ValidatorBase):
   def __init__(self):
     super(WebglConformanceValidator, self).__init__()
 
-  def ValidateAndMeasurePageInner(self, page, tab, results):
+  def ValidateAndMeasurePage(self, page, tab, results):
     if not _DidWebGLTestSucceed(tab):
       raise page_test.Failure(_WebGLTestMessages(tab))
 
@@ -123,32 +125,17 @@ class WebglConformancePage(gpu_test_base.PageBase):
       expectations=expectations)
     self.script_to_evaluate_on_commit = conformance_harness_script
 
-  def RunNavigateStepsInner(self, action_runner):
-    num_tries = 1 + self.GetExpectations().GetFlakyRetriesForPage(
-      self, action_runner.tab.browser)
-    # This loop will run once for tests that aren't marked flaky, and
-    # will fall through to the validator's ValidateAndMeasurePage on
-    # the last iteration.
-    for ii in xrange(0, num_tries):
-      # The first time through, the superclass has already run the
-      # default navigation steps.
-      if ii > 0:
-        self.RunDefaultNavigateSteps(action_runner)
-      action_runner.WaitForJavaScriptCondition(
-          'webglTestHarness._finished', timeout_in_seconds=180)
-      if ii < num_tries - 1:
-        if _DidWebGLTestSucceed(action_runner.tab):
-          return
-        else:
-          print 'FLAKY TEST FAILURE, retrying: ' + self.display_name
-          print 'Error messages from test run:'
-          print _WebGLTestMessages(action_runner.tab)
+  def RunNavigateSteps(self, action_runner):
+    super(WebglConformancePage, self).RunNavigateSteps(action_runner)
+    action_runner.WaitForJavaScriptCondition(
+        'webglTestHarness._finished', timeout_in_seconds=180)
 
 class WebglConformance(gpu_test_base.TestBase):
   """Conformance with Khronos WebGL Conformance Tests"""
   def __init__(self):
     super(WebglConformance, self).__init__(max_failures=10)
     self._cached_expectations = None
+    self._webgl_version = 0
 
   @classmethod
   def Name(cls):
@@ -174,6 +161,9 @@ class WebglConformance(gpu_test_base.TestBase):
         (options.webgl2_only == 'true'),
         None)
 
+    self._webgl_version = [
+        int(x) for x in options.webgl_conformance_version.split('.')][0]
+
     ps = StorySet(serving_dirs=[''], base_dir=conformance_path)
 
     expectations = self.GetExpectations()
@@ -183,14 +173,20 @@ class WebglConformance(gpu_test_base.TestBase):
     return ps
 
   def _CreateExpectations(self):
-    return webgl_conformance_expectations.WebGLConformanceExpectations(
-        conformance_path)
+    assert (self._webgl_version == 1 or self._webgl_version == 2)
+    if self._webgl_version == 1:
+      return webgl_conformance_expectations.WebGLConformanceExpectations(
+          conformance_path)
+    else:
+      return webgl2_conformance_expectations.WebGL2ConformanceExpectations(
+          conformance_path)
 
   @staticmethod
   def _ParseTests(path, version, webgl2_only, folder_min_version):
     test_paths = []
     current_dir = os.path.dirname(path)
     full_path = os.path.normpath(os.path.join(conformance_path, path))
+    webgl_version = int(version.split('.')[0])
 
     if not os.path.exists(full_path):
       raise Exception('The WebGL conformance test path specified ' +
@@ -236,6 +232,8 @@ class WebglConformance(gpu_test_base.TestBase):
               include_path, version, webgl2_only, min_version_to_compare)
         else:
           test = os.path.join(current_dir, test_name)
+          if webgl_version > 1:
+            test += '?webglVersion=' + str(webgl_version)
           test_paths.append(test)
 
     return test_paths

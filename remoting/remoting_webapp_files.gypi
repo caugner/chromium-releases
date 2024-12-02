@@ -93,9 +93,11 @@
       'webapp/base/js/dns_blackhole_checker_unittest.js',
       'webapp/base/js/error_unittest.js',
       'webapp/base/js/fallback_signal_strategy_unittest.js',
+      'webapp/base/js/host_options_unittest.js',
       'webapp/base/js/identity_unittest.js',
       'webapp/base/js/ipc_unittest.js',
       'webapp/base/js/l10n_unittest.js',
+      'webapp/base/js/network_connectivity_detector_unittest.js',
       'webapp/base/js/platform_unittest.js',
       'webapp/base/js/protocol_extension_manager_unittest.js',
       'webapp/base/js/session_logger_unittest.js',
@@ -119,14 +121,17 @@
       'webapp/crd/js/host_table_entry_unittest.js',
       'webapp/crd/js/legacy_host_list_api_unittest.js',
       'webapp/crd/js/menu_button_unittest.js',
+      'webapp/crd/js/me2me_telemetry_integration_test.js',
       'webapp/crd/js/mock_xhr_unittest.js',
     ],
     'remoting_webapp_unittests_js_mock_files': [
       'webapp/crd/js/mock_client_plugin.js',
       'webapp/crd/js/mock_host_daemon_facade.js',
       'webapp/crd/js/mock_host_list_api.js',
+      'webapp/crd/js/mock_modal_dialog_factory.js',
       'webapp/crd/js/mock_identity.js',
       'webapp/crd/js/mock_signal_strategy.js',
+      'webapp/crd/js/remoting_activity_test_driver.js',
       'webapp/js_proto/chrome_mocks.js',
       'webapp/unittests/sinon_helpers.js',
       'webapp/crd/js/mock_xhr.js',
@@ -178,7 +183,6 @@
       'webapp/base/js/credentials_provider.js',
       'webapp/base/js/experiments.js',
       'webapp/base/js/host_desktop.js',
-      'webapp/base/js/smart_reconnector.js',
       'webapp/base/js/telemetry_event_writer.js',
       'webapp/base/js/xmpp_error_cache.js',
     ],
@@ -194,6 +198,7 @@
       'webapp/base/js/protocol_extension_manager.js',
       'webapp/base/js/protocol_extension.js',
       'webapp/base/js/error.js',
+      'webapp/base/js/network_connectivity_detector.js',
       'webapp/base/js/plugin_settings.js',
       'webapp/base/js/suspend_detector.js',
       'webapp/base/js/typecheck.js',
@@ -204,7 +209,7 @@
     # Host JavaScript files.
     'remoting_webapp_shared_js_host_files': [
       'webapp/base/js/host.js',
-      'webapp/base/js/host_settings.js',
+      'webapp/base/js/host_options.js',
     ],
     # Logging and stats JavaScript files.
     'remoting_webapp_shared_js_logging_files': [
@@ -284,6 +289,17 @@
       'webapp/crd/js/native_message_host_log_message_handler.js',
       'webapp/crd/js/paired_client_manager.js',
     ],
+    # Files for controlling the local it2me host.
+    # Included by public_session.html.
+    'remoting_webapp_js_it2me_host_control_files': [
+      'webapp/crd/js/buffered_signal_strategy.js',
+      'webapp/crd/js/host_screen.js',
+      'webapp/crd/js/host_session.js',
+      'webapp/crd/js/host_install_dialog.js',
+      'webapp/crd/js/host_installer.js',
+      'webapp/crd/js/it2me_host_facade.js',
+      'webapp/crd/js/native_message_host_log_message_handler.js',
+    ],
     # Files for displaying (in the client) info about available hosts.
     'remoting_webapp_js_host_display_files': [
       'webapp/crd/js/host_list.js',
@@ -347,6 +363,27 @@
       '<@(remoting_webapp_js_cast_extension_files)',
       '<@(remoting_webapp_js_host_control_files)',
       '<@(remoting_webapp_js_host_display_files)',
+    ],
+
+    'remoting_webapp_template_public_session':
+      '<(DEPTH)/remoting/webapp/crd/html/template_public_session.html',
+
+    # The shared JavaScript files required by public_session.html.
+    'remoting_webapp_public_session_html_all_js_files': [
+      '<@(remoting_webapp_shared_js_core_files)',
+      '<@(remoting_webapp_shared_js_auth_google_files)',
+      '<@(remoting_webapp_shared_js_client_files)',
+      '<@(remoting_webapp_shared_js_host_files)',
+      '<@(remoting_webapp_shared_js_logging_files)',
+      '<@(remoting_webapp_shared_js_signaling_files)',
+      '<@(remoting_webapp_shared_js_ui_files)',
+      '<@(remoting_webapp_js_it2me_host_control_files)',
+      'webapp/crd/js/public_session_main.js',
+    ],
+
+    # These template files are used to construct public_session.html.
+    'remoting_webapp_public_session_template_files': [
+      'webapp/crd/html/dialog_host.html',
     ],
 
     # The JS files required by unittest.html.
@@ -494,6 +531,7 @@
       '<@(remoting_webapp_shared_js_files)',
       '<@(remoting_webapp_crd_main_html_all_js_files)',
       '<@(remoting_webapp_credits_html_all_js_files)',
+      '<@(remoting_webapp_public_session_html_all_js_files)',
     ],
 
     'remoting_webapp_info_files': [
@@ -534,6 +572,7 @@
       'webapp/crd/html/crd_main.css',
       'webapp/crd/html/toolbar.css',
       'webapp/crd/html/menu_button.css',
+      'webapp/crd/html/public_session.css',
       'webapp/crd/html/window_frame.css',
       'webapp/crd/resources/scale-to-fit.webp',
     ],

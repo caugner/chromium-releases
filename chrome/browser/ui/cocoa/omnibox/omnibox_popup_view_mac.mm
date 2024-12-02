@@ -6,6 +6,8 @@
 
 #include <cmath>
 
+#include "base/mac/mac_util.h"
+#import "base/mac/sdk_forward_declarations.h"
 #include "base/stl_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/search/search.h"
@@ -274,9 +276,18 @@ void OmniboxPopupViewMac::PositionPopup(const CGFloat matrixHeight) {
   }
 
   [NSAnimationContext beginGrouping];
-  // Don't use the GTM addition for the "Steve" slowdown because this can happen
-  // async from user actions and the effects could be a surprise.
+  // Don't use the GTM addition for the "Steve" slowdown because this can
+  // happen async from user actions and the effects could be a surprise.
   [[NSAnimationContext currentContext] setDuration:kShrinkAnimationDuration];
+  // When using the animator to update |popup_| on El Capitan, for some reason
+  // the window does not get redrawn. Use a completion handler to make sure
+  // |popup_| gets redrawn once the animation completes. See
+  // http://crbug.com/538590 and http://crbug.com/551007 .
+  if (base::mac::IsOSElCapitanOrLater()) {
+    [[NSAnimationContext currentContext] setCompletionHandler:^{
+      [popup_ display];
+    }];
+  }
   [[popup_ animator] setFrame:popup_frame display:YES];
   [NSAnimationContext endGrouping];
 

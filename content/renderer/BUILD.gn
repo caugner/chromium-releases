@@ -168,17 +168,9 @@ source_set("renderer") {
       "//ppapi/host",
       "//ppapi/proxy",
       "//ppapi/shared_impl",
-      "//third_party/libvpx",
+      "//third_party/libvpx_new",
       "//third_party/libyuv",
     ]
-  } else {
-    # These files are in the WebRTC list, but also require plugins.
-    if (enable_webrtc) {
-      sources -= [
-        "media/webrtc/video_destination_handler.cc",
-        "media/webrtc/video_destination_handler.h",
-      ]
-    }
   }
 
   if (enable_plugins && enable_webrtc) {

@@ -15,6 +15,7 @@
 #include "media/base/media_log.h"
 #include "media/base/mock_demuxer_host.h"
 #include "media/base/test_helpers.h"
+#include "media/base/timestamp_constants.h"
 #include "media/ffmpeg/ffmpeg_common.h"
 #include "media/filters/ffmpeg_demuxer.h"
 #include "media/filters/file_data_source.h"
@@ -295,8 +296,7 @@ TEST_F(FFmpegDemuxerTest, Initialize_Successful) {
   EXPECT_EQ(240, video_config.visible_rect().height());
   EXPECT_EQ(320, video_config.natural_size().width());
   EXPECT_EQ(240, video_config.natural_size().height());
-  EXPECT_FALSE(video_config.extra_data());
-  EXPECT_EQ(0u, video_config.extra_data_size());
+  EXPECT_TRUE(video_config.extra_data().empty());
 
   // Audio stream should be present.
   stream = demuxer_->GetStream(DemuxerStream::AUDIO);
@@ -309,8 +309,7 @@ TEST_F(FFmpegDemuxerTest, Initialize_Successful) {
   EXPECT_EQ(CHANNEL_LAYOUT_STEREO, audio_config.channel_layout());
   EXPECT_EQ(44100, audio_config.samples_per_second());
   EXPECT_EQ(kSampleFormatPlanarF32, audio_config.sample_format());
-  EXPECT_TRUE(audio_config.extra_data());
-  EXPECT_GT(audio_config.extra_data_size(), 0u);
+  EXPECT_FALSE(audio_config.extra_data().empty());
 
   // Unknown stream should never be present.
   EXPECT_FALSE(demuxer_->GetStream(DemuxerStream::UNKNOWN));
@@ -954,6 +953,44 @@ TEST_F(FFmpegDemuxerTest, MP4_ZeroStszEntry) {
   ReadUntilEndOfStream(demuxer_->GetStream(DemuxerStream::AUDIO));
 }
 
+class Mp3SeekFFmpegDemuxerTest
+    : public FFmpegDemuxerTest,
+      public testing::WithParamInterface<const char*> {
+};
+TEST_P(Mp3SeekFFmpegDemuxerTest, TestFastSeek) {
+  // Init demxuer with given MP3 file parameter.
+  CreateDemuxer(GetParam());
+  InitializeDemuxer();
+
+  // We read a bunch of bytes when we first open the file. Reset the count
+  // here to just track the bytes read for the upcoming seek. This allows us
+  // to use a more narrow threshold for passing the test.
+  data_source_->reset_bytes_read_for_testing();
+
+  FFmpegDemuxerStream* audio = static_cast<FFmpegDemuxerStream*>(
+    demuxer_->GetStream(DemuxerStream::AUDIO));
+  ASSERT_TRUE(audio);
+
+  // Seek to near the end of the file
+  WaitableMessageLoopEvent event;
+  demuxer_->Seek(.9 * audio->duration(), event.GetPipelineStatusCB());
+  event.RunAndWaitForStatus(PIPELINE_OK);
+
+  // Verify that seeking to the end read only a small portion of the file.
+  // Slow that read sequentially up to the seek point will fail this check.
+  int64 file_size = 0;
+  ASSERT_TRUE(data_source_->GetSize(&file_size));
+  EXPECT_LT(data_source_->bytes_read_for_testing(), (file_size * .25));
+}
+
+// MP3s should seek quickly without sequentially reading up to the seek point.
+// VBR vs CBR and the presence/absence of TOC influence the seeking algorithm.
+// See http://crbug.com/530043 and FFmpeg flag AVFMT_FLAG_FAST_SEEK.
+INSTANTIATE_TEST_CASE_P(, Mp3SeekFFmpegDemuxerTest,
+                        ::testing::Values("bear-audio-10s-CBR-has-TOC.mp3",
+                                          "bear-audio-10s-CBR-no-TOC.mp3",
+                                          "bear-audio-10s-VBR-has-TOC.mp3",
+                                          "bear-audio-10s-VBR-no-TOC.mp3"));
 
 static void ValidateAnnexB(DemuxerStream* stream,
                            DemuxerStream::Status status,
@@ -1055,7 +1092,7 @@ TEST_F(FFmpegDemuxerTest, NaturalSizeWithoutPASP) {
   ASSERT_TRUE(stream);
 
   const VideoDecoderConfig& video_config = stream->video_decoder_config();
-  EXPECT_EQ(gfx::Size(638, 360), video_config.natural_size());
+  EXPECT_EQ(gfx::Size(639, 360), video_config.natural_size());
 }
 
 TEST_F(FFmpegDemuxerTest, NaturalSizeWithPASP) {
@@ -1066,9 +1103,25 @@ TEST_F(FFmpegDemuxerTest, NaturalSizeWithPASP) {
   ASSERT_TRUE(stream);
 
   const VideoDecoderConfig& video_config = stream->video_decoder_config();
-  EXPECT_EQ(gfx::Size(638, 360), video_config.natural_size());
+  EXPECT_EQ(gfx::Size(639, 360), video_config.natural_size());
 }
 
+#endif
+
+#if defined(ENABLE_HEVC_DEMUXING)
+TEST_F(FFmpegDemuxerTest, HEVC_in_MP4_container) {
+  CreateDemuxer("bear-hevc-frag.mp4");
+  InitializeDemuxer();
+
+  DemuxerStream* video = demuxer_->GetStream(DemuxerStream::VIDEO);
+  ASSERT_TRUE(video);
+
+  video->Read(NewReadCB(FROM_HERE, 3569, 66733, true));
+  message_loop_.Run();
+
+  video->Read(NewReadCB(FROM_HERE, 1042, 200200, false));
+  message_loop_.Run();
+}
 #endif
 
 }  // namespace media

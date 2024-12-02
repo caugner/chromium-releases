@@ -60,6 +60,12 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest>,
                                              std::string* partition_name,
                                              bool* in_memory);
 
+  // Returns the WebView partition ID associated with the render process
+  // represented by |render_process_host|, if any. Otherwise, an empty string is
+  // returned.
+  static std::string GetPartitionID(
+      const content::RenderProcessHost* render_process_host);
+
   static const char Type[];
 
   // Returns the stored rules registry ID of the given webview. Will generate
@@ -353,6 +359,8 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest>,
   bool HandleKeyboardShortcuts(const content::NativeWebKeyboardEvent& event);
 
   void ApplyAttributes(const base::DictionaryValue& params);
+
+  void SetContextMenuPosition(const gfx::Point& position) override;
 
   // Identifies the set of rules registries belonging to this guest.
   int rules_registry_id_;

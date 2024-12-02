@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/i18n/rtl.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
@@ -85,7 +86,7 @@ const int kHeaderRowSpacing = 4;
 const int kLocationIconVerticalMargin = 5;
 
 // The max possible width of the popup.
-const int kMaxPopupWidth = 500;
+const int kMaxPopupWidth = 1000;
 
 // The margins between the popup border and the popup content.
 const int kPopupMarginTop = 4;
@@ -97,6 +98,7 @@ const int kPopupMarginRight = 0;
 const int kPermissionsSectionContentMinWidth = 300;
 const int kPermissionsSectionPaddingBottom = 6;
 const int kPermissionsSectionPaddingLeft = 18;
+const int kPermissionsSectionPaddingRight = 18;
 const int kPermissionsSectionPaddingTop = 16;
 
 // Space between the headline and the content of a section on the permissions
@@ -108,7 +110,6 @@ const int kPermissionsSectionHeadlineMarginBottom = 10;
 const int kPermissionsSectionRowSpacing = 2;
 
 const int kSiteDataIconColumnWidth = 20;
-const int kSiteDataSectionRowSpacing = 11;
 
 }  // namespace
 
@@ -126,6 +127,8 @@ class PopupHeaderView : public views::View {
   // Sets the |status_text| for the identity check of this site and the
   // |text_color|.
   void SetIdentityStatus(const base::string16& status_text, SkColor text_color);
+
+  int GetPreferredNameWidth() const;
 
  private:
   // The label that displays the name of the site's identity.
@@ -220,6 +223,10 @@ PopupHeaderView::PopupHeaderView(views::ButtonListener* close_button_listener)
 PopupHeaderView::~PopupHeaderView() {
 }
 
+int PopupHeaderView::GetPreferredNameWidth() const {
+  return name_->GetPreferredSize().width();
+}
+
 void PopupHeaderView::SetIdentityName(const base::string16& name) {
   name_->SetText(name);
 }
@@ -277,17 +284,18 @@ WebsiteSettingsPopupView::~WebsiteSettingsPopupView() {
 }
 
 // static
-void WebsiteSettingsPopupView::ShowPopup(views::View* anchor_view,
-                                         const gfx::Rect& anchor_rect,
-                                         Profile* profile,
-                                         content::WebContents* web_contents,
-                                         const GURL& url,
-                                         const content::SSLStatus& ssl) {
+void WebsiteSettingsPopupView::ShowPopup(
+    views::View* anchor_view,
+    const gfx::Rect& anchor_rect,
+    Profile* profile,
+    content::WebContents* web_contents,
+    const GURL& url,
+    const SecurityStateModel::SecurityInfo& security_info) {
   is_popup_showing = true;
   gfx::NativeView parent_window =
       anchor_view ? nullptr : web_contents->GetNativeView();
   if (InternalChromePage(url)) {
-    // Use the concrete type so that SetAnchorRect() can be called as a friend.
+    // Use the concrete type so that |SetAnchorRect| can be called as a friend.
     InternalPageInfoPopupView* popup =
         new InternalPageInfoPopupView(anchor_view, parent_window);
     if (!anchor_view)
@@ -295,7 +303,7 @@ void WebsiteSettingsPopupView::ShowPopup(views::View* anchor_view,
     popup->GetWidget()->Show();
   } else {
     WebsiteSettingsPopupView* popup = new WebsiteSettingsPopupView(
-        anchor_view, parent_window, profile, web_contents, url, ssl);
+        anchor_view, parent_window, profile, web_contents, url, security_info);
     if (!anchor_view)
       popup->SetAnchorRect(anchor_rect);
     popup->GetWidget()->Show();
@@ -313,8 +321,9 @@ WebsiteSettingsPopupView::WebsiteSettingsPopupView(
     Profile* profile,
     content::WebContents* web_contents,
     const GURL& url,
-    const content::SSLStatus& ssl)
-    : BubbleDelegateView(anchor_view, views::BubbleBorder::TOP_LEFT),
+    const SecurityStateModel::SecurityInfo& security_info)
+    : content::WebContentsObserver(web_contents),
+      BubbleDelegateView(anchor_view, views::BubbleBorder::TOP_LEFT),
       web_contents_(web_contents),
       header_(nullptr),
       tabbed_pane_(nullptr),
@@ -357,10 +366,10 @@ WebsiteSettingsPopupView::WebsiteSettingsPopupView(
   layout->StartRow(1, content_column);
   layout->AddView(tabbed_pane_);
 
-  // Tabs must be added after the tabbed_pane_ was added to the views hierarchy.
-  // Adding the |tabbed_pane_| to the views hierarchy triggers the
+  // Tabs must be added after the |tabbed_pane_| was added to the views
+  // hierarchy. Adding the |tabbed_pane_| to the views hierarchy triggers the
   // initialization of the native tab UI element. If the native tab UI element
-  // is not initalized, adding a tab will result in a NULL pointer exception.
+  // is not initialized, adding a tab will result in a NULL pointer exception.
   permissions_tab_ = CreatePermissionsTab();
   tabbed_pane_->AddTabAtIndex(
       TAB_ID_PERMISSIONS,
@@ -380,10 +389,15 @@ WebsiteSettingsPopupView::WebsiteSettingsPopupView(
   views::BubbleDelegateView::CreateBubble(this);
 
   presenter_.reset(new WebsiteSettings(
-      this, profile,
-      TabSpecificContentSettings::FromWebContents(web_contents),
-      InfoBarService::FromWebContents(web_contents), url, ssl,
-      content::CertStore::GetInstance()));
+      this, profile, TabSpecificContentSettings::FromWebContents(web_contents),
+      web_contents, url, security_info, content::CertStore::GetInstance()));
+}
+
+void WebsiteSettingsPopupView::RenderFrameDeleted(
+    content::RenderFrameHost* render_frame_host) {
+  if (render_frame_host == web_contents_->GetMainFrame()) {
+    GetWidget()->Close();
+  }
 }
 
 void WebsiteSettingsPopupView::OnPermissionChanged(
@@ -442,7 +456,7 @@ gfx::Size WebsiteSettingsPopupView::GetPreferredSize() const {
 
   int height = 0;
   if (header_)
-    height += header_->GetPreferredSize().height();
+    height += header_->GetPreferredSize().height() + kHeaderMarginBottom;
   if (tabbed_pane_)
     height += tabbed_pane_->GetPreferredSize().height();
 
@@ -451,47 +465,63 @@ gfx::Size WebsiteSettingsPopupView::GetPreferredSize() const {
     width = std::max(width, site_data_content_->GetPreferredSize().width());
   if (permissions_content_)
     width = std::max(width, permissions_content_->GetPreferredSize().width());
-  width += kPermissionsSectionPaddingLeft;
+  if (header_)
+    width = std::max(width, header_->GetPreferredNameWidth());
+  width += kPermissionsSectionPaddingLeft + kPermissionsSectionPaddingRight;
   width = std::min(width, kMaxPopupWidth);
-
   return gfx::Size(width, height);
 }
 
 void WebsiteSettingsPopupView::SetCookieInfo(
     const CookieInfoList& cookie_info_list) {
-  site_data_content_->RemoveAllChildViews(true);
+  // |cookie_info_list| should only ever have 2 items: first- and third-party
+  // cookies.
+  DCHECK_EQ(cookie_info_list.size(), 2u);
+  base::string16 first_party_label_text;
+  base::string16 third_party_label_text;
+  for (const auto& i : cookie_info_list) {
+    if (i.is_first_party) {
+      first_party_label_text =
+          l10n_util::GetStringFUTF16(IDS_WEBSITE_SETTINGS_FIRST_PARTY_SITE_DATA,
+                                     base::IntToString16(i.allowed));
+    } else {
+      third_party_label_text =
+          l10n_util::GetStringFUTF16(IDS_WEBSITE_SETTINGS_THIRD_PARTY_SITE_DATA,
+                                     base::IntToString16(i.allowed));
+    }
+  }
 
-  views::GridLayout* layout = new views::GridLayout(site_data_content_);
-  site_data_content_->SetLayoutManager(layout);
+  if (!cookie_dialog_link_) {
+    cookie_dialog_link_ = new views::Link(first_party_label_text);
+    cookie_dialog_link_->set_listener(this);
+  } else {
+    cookie_dialog_link_->SetText(first_party_label_text);
+  }
 
-  const int site_data_content_column = 0;
-  views::ColumnSet* column_set =
-      layout->AddColumnSet(site_data_content_column);
-  column_set->AddColumn(views::GridLayout::FILL,
-                        views::GridLayout::FILL,
-                        1,
-                        views::GridLayout::FIXED,
-                        kSiteDataIconColumnWidth,
-                        0);
-  column_set->AddPaddingColumn(0, kIconMarginLeft);
-  column_set->AddColumn(views::GridLayout::FILL,
-                        views::GridLayout::FILL,
-                        1,
-                        views::GridLayout::USE_PREF,
-                        0,
-                        0);
+  views::GridLayout* layout =
+      static_cast<views::GridLayout*>(site_data_content_->GetLayoutManager());
+  if (!layout) {
+    layout = new views::GridLayout(site_data_content_);
+    site_data_content_->SetLayoutManager(layout);
 
-  layout->AddPaddingRow(1, 5);
-  for (CookieInfoList::const_iterator i(cookie_info_list.begin());
-       i != cookie_info_list.end();
-       ++i) {
-    base::string16 label_text = l10n_util::GetStringFUTF16(
-        IDS_WEBSITE_SETTINGS_SITE_DATA_STATS_LINE,
-        base::UTF8ToUTF16(i->cookie_source),
-        base::IntToString16(i->allowed),
-        base::IntToString16(i->blocked));
-    if (i != cookie_info_list.begin())
-      layout->AddPaddingRow(1, kSiteDataSectionRowSpacing);
+    const int site_data_content_column = 0;
+    views::ColumnSet* column_set =
+        layout->AddColumnSet(site_data_content_column);
+    column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1,
+                          views::GridLayout::FIXED, kSiteDataIconColumnWidth,
+                          0);
+    column_set->AddPaddingColumn(0, kIconMarginLeft);
+    column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1,
+                          views::GridLayout::USE_PREF, 0, 0);
+    // No padding. This third column is for |third_party_label_text| (see
+    // below),
+    // and the text needs to flow naturally from the |first_party_label_text|
+    // link.
+    column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1,
+                          views::GridLayout::USE_PREF, 0, 0);
+
+    layout->AddPaddingRow(1, 5);
+
     layout->StartRow(1, site_data_content_column);
     WebsiteSettingsUI::PermissionInfo info;
     info.type = CONTENT_SETTINGS_TYPE_COOKIES;
@@ -501,10 +531,15 @@ void WebsiteSettingsPopupView::SetCookieInfo(
     icon->SetImage(image.ToImageSkia());
     layout->AddView(icon, 1, 1, views::GridLayout::CENTER,
                     views::GridLayout::CENTER);
-    layout->AddView(new views::Label(label_text), 1, 1,
+    layout->AddView(cookie_dialog_link_, 1, 1, views::GridLayout::CENTER,
+                    views::GridLayout::CENTER);
+    base::string16 comma = base::ASCIIToUTF16(", ");
+
+    layout->AddView(new views::Label(comma + third_party_label_text), 1, 1,
                     views::GridLayout::LEADING, views::GridLayout::CENTER);
+
+    layout->AddPaddingRow(1, 6);
   }
-  layout->AddPaddingRow(1, 6);
 
   layout->Layout(site_data_content_);
   SizeToContents();
@@ -512,6 +547,14 @@ void WebsiteSettingsPopupView::SetCookieInfo(
 
 void WebsiteSettingsPopupView::SetPermissionInfo(
     const PermissionInfoList& permission_info_list) {
+  // When a permission is changed, WebsiteSettings::OnSitePermissionChanged()
+  // calls this method with updated permissions. However, PermissionSelectorView
+  // will have already updated its state, so it's already reflected in the UI.
+  // In addition, if a permission is set to the default setting, WebsiteSettings
+  // removes it from |permission_info_list|, but the button should remain.
+  if (permissions_content_)
+    return;
+
   permissions_content_ = new views::View();
   views::GridLayout* layout = new views::GridLayout(permissions_content_);
   permissions_content_->SetLayoutManager(layout);
@@ -627,15 +670,10 @@ views::View* WebsiteSettingsPopupView::CreatePermissionsTab() {
       new views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 1));
 
   // Add cookies and site data section.
-  cookie_dialog_link_ = new views::Link(
-      l10n_util::GetStringUTF16(IDS_WEBSITE_SETTINGS_SHOW_SITE_DATA));
-  cookie_dialog_link_->set_listener(this);
   site_data_content_ = new views::View();
-  views::View* site_data_section =
-      CreateSection(l10n_util::GetStringUTF16(
-                        IDS_WEBSITE_SETTINGS_TITLE_SITE_DATA),
-                    site_data_content_,
-                    cookie_dialog_link_);
+  views::View* site_data_section = CreateSection(
+      l10n_util::GetStringUTF16(IDS_WEBSITE_SETTINGS_TITLE_SITE_DATA),
+      site_data_content_, NULL);
   pane->AddChildView(site_data_section);
 
   return pane;
@@ -740,7 +778,6 @@ void WebsiteSettingsPopupView::ResetConnectionSection(
                         0,
                         0);
   column_set->AddPaddingColumn(0, kConnectionSectionPaddingRight);
-
 
   layout->AddPaddingRow(0, kConnectionSectionPaddingTop);
   layout->StartRow(1, 0);

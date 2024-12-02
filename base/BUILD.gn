@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/compiler/compiler.gni")
 import("//build/config/ui.gni")
 import("//testing/test.gni")
 
@@ -64,8 +65,6 @@ component("base") {
   sources = [
     "allocator/allocator_extension.cc",
     "allocator/allocator_extension.h",
-    "allocator/type_profiler_control.cc",
-    "allocator/type_profiler_control.h",
     "android/animation_frame_time_histogram.cc",
     "android/animation_frame_time_histogram.h",
     "android/apk_assets.cc",
@@ -132,9 +131,6 @@ component("base") {
     "android/thread_utils.h",
     "android/trace_event_binding.cc",
     "android/trace_event_binding.h",
-    "async_socket_io_handler.h",
-    "async_socket_io_handler_posix.cc",
-    "async_socket_io_handler_win.cc",
     "at_exit.cc",
     "at_exit.h",
     "atomic_ref_count.h",
@@ -186,6 +182,8 @@ component("base") {
     "deferred_sequenced_task_runner.h",
     "environment.cc",
     "environment.h",
+    "feature_list.cc",
+    "feature_list.h",
     "file_descriptor_posix.h",
     "file_version_info.h",
     "file_version_info_mac.h",
@@ -644,13 +642,19 @@ component("base") {
 
   if (is_ios) {
     sources -= [
+      "files/file_path_watcher.cc",
+      "files/file_path_watcher.h",
+      "files/file_path_watcher_fsevents.cc",
+      "files/file_path_watcher_fsevents.h",
+      "files/file_path_watcher_kqueue.cc",
+      "files/file_path_watcher_kqueue.h",
       "message_loop/message_pump_libevent.cc",
       "message_loop/message_pump_libevent.h",
-    ]
 
-    set_sources_assignment_filter([])
-    sources += [ "files/file_path_watcher_mac.cc" ]
-    set_sources_assignment_filter(sources_assignment_filter)
+      # These don't work and are unused on iOS.
+      "sync_socket.h",
+      "sync_socket_posix.cc",
+    ]
   }
 
   sources -= [
@@ -726,9 +730,6 @@ component("base") {
     set_sources_assignment_filter(sources_assignment_filter)
 
     sources -= [
-      "allocator/type_profiler_control.cc",
-      "allocator/type_profiler_control.h",
-      "async_socket_io_handler_posix.cc",
       "cpu.cc",
       "files/file_enumerator_posix.cc",
       "files/file_proxy.cc",
@@ -758,6 +759,11 @@ component("base") {
 
   # Windows.
   if (is_win) {
+    sources += [
+      "profiler/win32_stack_frame_unwinder.cc",
+      "profiler/win32_stack_frame_unwinder.h",
+    ]
+
     sources -= [
       "message_loop/message_pump_libevent.cc",
       "strings/string16.cc",
@@ -818,13 +824,6 @@ component("base") {
     if (is_asan) {
       # TODO(GYP) hook up asan on Mac. GYP has this extra dylib:
       #data += [ "$root_out_dir/libclang_rt.asan_osx_dynamic.dylib" ]
-    }
-
-    if (is_ios) {
-      sources -= [
-        "files/file_path_watcher_fsevents.cc",
-        "files/file_path_watcher_fsevents.h",
-      ]
     }
   } else {
     # Non-Mac.
@@ -936,7 +935,7 @@ component("base") {
 
   configs += [ "//build/config/compiler:wexit_time_destructors" ]
   if (!is_debug) {
-    configs -= [ "//build/config/compiler:optimize" ]
+    configs -= [ "//build/config/compiler:default_optimization" ]
     configs += [ "//build/config/compiler:optimize_max" ]
   }
 
@@ -955,7 +954,7 @@ source_set("base_static") {
   ]
 
   if (!is_debug) {
-    configs -= [ "//build/config/compiler:optimize" ]
+    configs -= [ "//build/config/compiler:default_optimization" ]
     configs += [ "//build/config/compiler:optimize_max" ]
   }
 }
@@ -1012,7 +1011,7 @@ component("i18n") {
   ]
 
   if (!is_debug) {
-    configs -= [ "//build/config/compiler:optimize" ]
+    configs -= [ "//build/config/compiler:default_optimization" ]
     configs += [ "//build/config/compiler:optimize_max" ]
   }
 
@@ -1062,6 +1061,7 @@ if (is_ios || is_win || (is_linux && !is_chromeos)) {
       ]
       deps = [
         ":base",
+        "//build/config/sanitizers:deps",
         "//third_party/icu:icuuc",
       ]
     }
@@ -1072,6 +1072,7 @@ if (is_ios || is_win || (is_linux && !is_chromeos)) {
       ]
       deps = [
         ":base",
+        "//build/config/sanitizers:deps",
       ]
     }
   }
@@ -1128,7 +1129,7 @@ component("prefs") {
   ]
 
   if (!is_debug) {
-    configs -= [ "//build/config/compiler:optimize" ]
+    configs -= [ "//build/config/compiler:default_optimization" ]
     configs += [ "//build/config/compiler:optimize_max" ]
   }
 }
@@ -1185,6 +1186,9 @@ if (is_win) {
       "cfgmgr32.lib",
       "shell32.lib",
     ]
+    deps = [
+      "//build/config/sanitizers:deps",
+    ]
   }
 }
 
@@ -1208,7 +1212,6 @@ test("base_unittests") {
     "android/path_utils_unittest.cc",
     "android/scoped_java_ref_unittest.cc",
     "android/sys_utils_unittest.cc",
-    "async_socket_io_handler_unittest.cc",
     "at_exit_unittest.cc",
     "atomicops_unittest.cc",
     "barrier_closure_unittest.cc",
@@ -1300,6 +1303,7 @@ test("base_unittests") {
     "memory/scoped_ptr_unittest.cc",
     "memory/scoped_ptr_unittest.nc",
     "memory/scoped_vector_unittest.cc",
+    "memory/shared_memory_mac_unittest.cc",
     "memory/shared_memory_unittest.cc",
     "memory/singleton_unittest.cc",
     "memory/weak_ptr_unittest.cc",
@@ -1427,6 +1431,7 @@ test("base_unittests") {
     "win/registry_unittest.cc",
     "win/scoped_bstr_unittest.cc",
     "win/scoped_comptr_unittest.cc",
+    "win/scoped_handle_unittest.cc",
     "win/scoped_process_information_unittest.cc",
     "win/scoped_variant_unittest.cc",
     "win/shortcut_unittest.cc",
@@ -1474,11 +1479,13 @@ test("base_unittests") {
 
   if (is_ios) {
     sources -= [
+      "files/file_path_watcher_unittest.cc",
       "memory/discardable_shared_memory_unittest.cc",
       "memory/shared_memory_unittest.cc",
       "process/memory_unittest.cc",
       "process/process_unittest.cc",
       "process/process_util_unittest.cc",
+      "sync_socket_unittest.cc",
     ]
 
     # Pull in specific Mac files for iOS (which have been filtered out by file
@@ -1565,7 +1572,7 @@ if (is_android) {
       "android/java/src/org/chromium/base/metrics/RecordUserAction.java",
     ]
 
-    deps = [
+    public_deps = [
       ":android_runtime_jni_headers",
     ]
 
@@ -1586,6 +1593,7 @@ if (is_android) {
     ]
 
     deps = [
+      "//third_party/android_tools:android_support_multidex_java",
       "//third_party/jsr-305:jsr_305_javalib",
     ]
 
@@ -1617,12 +1625,29 @@ if (is_android) {
     DEPRECATED_java_in_dir = "test/android/javatests/src"
   }
 
+  # TODO(jbudorick): Remove this once we roll to robolectric 3.0 and pull
+  # in the multidex shadow library. crbug.com/522043
+  # GYP: //base.gyp:base_junit_test_support
+  java_library("base_junit_test_support") {
+    testonly = true
+    java_files = [ "test/android/junit/src/org/chromium/base/test/shadows/ShadowMultiDex.java" ]
+    deps = [
+      "//third_party/android_tools:android_support_multidex_java",
+      "//third_party/robolectric:android-all-4.3_r2-robolectric-0",
+      "//third_party/robolectric:robolectric_java",
+    ]
+  }
+
   # GYP: //base.gyp:base_junit_tests
   junit_binary("base_junit_tests") {
-    java_files = [ "android/junit/src/org/chromium/base/LogTest.java" ]
+    java_files = [
+      "android/junit/src/org/chromium/base/BaseChromiumApplicationTest.java",
+      "android/junit/src/org/chromium/base/LogTest.java",
+    ]
     deps = [
       ":base_java",
       ":base_java_test_support",
+      ":base_junit_test_support",
     ]
   }
 

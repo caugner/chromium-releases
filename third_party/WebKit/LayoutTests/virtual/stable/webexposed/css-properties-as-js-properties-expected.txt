@@ -209,6 +209,7 @@ strokeWidth
 tabSize
 tableLayout
 textAlign
+textAlignLast
 textAnchor
 textDecoration
 textIndent
@@ -285,7 +286,6 @@ webkitFontSizeDelta
 webkitFontSmoothing
 webkitHighlight
 webkitHyphenateCharacter
-webkitLineBoxContain
 webkitLineBreak
 webkitLineClamp
 webkitLocale

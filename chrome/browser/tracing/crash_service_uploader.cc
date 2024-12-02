@@ -9,7 +9,6 @@
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
 #include "base/json/json_writer.h"
-#include "base/memory/shared_memory.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -33,11 +32,15 @@
 using std::string;
 
 namespace {
+
 const char kUploadURL[] = "https://clients2.google.com/cr/staging_report";
 const char kUploadContentType[] = "multipart/form-data";
 const char kMultipartBoundary[] =
     "----**--yradnuoBgoLtrapitluMklaTelgooG--**----";
 const int kHttpResponseOk = 200;
+
+// Allow up to 10MB for trace upload
+const int kMaxUploadBytes = 10000000;
 
 }  // namespace
 
@@ -195,7 +198,8 @@ void TraceCrashServiceUploader::DoUploadOnFileThread(
                  base::Unretained(this), upload_url, post_data));
 }
 
-void TraceCrashServiceUploader::OnUploadError(std::string error_message) {
+void TraceCrashServiceUploader::OnUploadError(
+    const std::string& error_message) {
   LOG(ERROR) << error_message;
   content::BrowserThread::PostTask(
       content::BrowserThread::UI, FROM_HERE,

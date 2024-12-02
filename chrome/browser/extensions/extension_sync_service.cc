@@ -6,7 +6,6 @@
 
 #include "base/basictypes.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/extensions/bookmark_app_helper.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_sync_data.h"
@@ -18,7 +17,6 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/sync_helper.h"
 #include "chrome/common/web_application_info.h"
-#include "components/sync_driver/sync_prefs.h"
 #include "extensions/browser/app_sorting.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
@@ -94,35 +92,20 @@ syncer::SyncDataList ToSyncerSyncDataList(
 
 ExtensionSyncService::ExtensionSyncService(Profile* profile)
     : profile_(profile),
+      registry_observer_(this),
+      prefs_observer_(this),
       flare_(sync_start_util::GetFlareForSyncableService(profile->GetPath())) {
+  registry_observer_.Add(ExtensionRegistry::Get(profile_));
+  prefs_observer_.Add(ExtensionPrefs::Get(profile_));
 }
 
-ExtensionSyncService::~ExtensionSyncService() {}
+ExtensionSyncService::~ExtensionSyncService() {
+}
 
 // static
 ExtensionSyncService* ExtensionSyncService::Get(
     content::BrowserContext* context) {
   return ExtensionSyncServiceFactory::GetForBrowserContext(context);
-}
-
-void ExtensionSyncService::SyncUninstallExtension(
-    const Extension& extension) {
-  if (!extensions::util::ShouldSync(&extension, profile_))
-    return;
-
-  // TODO(tim): If we get here and IsSyncing is false, this will cause
-  // "back from the dead" style bugs, because sync will add-back the extension
-  // that was uninstalled here when MergeDataAndStartSyncing is called.
-  // See crbug.com/256795.
-  syncer::ModelType type =
-      extension.is_app() ? syncer::APPS : syncer::EXTENSIONS;
-  SyncBundle* bundle = GetSyncBundle(type);
-  if (bundle->IsSyncing()) {
-    bundle->PushSyncDeletion(extension.id(),
-                             CreateSyncData(extension).GetSyncData());
-  } else if (extension_service()->is_ready() && !flare_.is_null()) {
-    flare_.Run(type);  // Tell sync to start ASAP.
-  }
 }
 
 void ExtensionSyncService::SyncExtensionChangeIfNeeded(
@@ -197,9 +180,9 @@ syncer::SyncDataList ExtensionSyncService::GetAllSyncData(
   std::vector<ExtensionSyncData> sync_data_list =
       GetLocalSyncDataList(type, true);
 
-  // Add pending data (where the local extension is either not installed yet or
-  // outdated).
-  std::vector<ExtensionSyncData> pending_extensions = bundle->GetPendingData();
+  // Add pending data (where the local extension is not installed yet).
+  std::vector<ExtensionSyncData> pending_extensions =
+      bundle->GetPendingExtensionData();
   sync_data_list.insert(sync_data_list.begin(),
                         pending_extensions.begin(),
                         pending_extensions.end());
@@ -225,7 +208,17 @@ syncer::SyncError ExtensionSyncService::ProcessSyncChanges(
 ExtensionSyncData ExtensionSyncService::CreateSyncData(
     const Extension& extension) const {
   const ExtensionPrefs* extension_prefs = ExtensionPrefs::Get(profile_);
-  bool enabled = extension_service()->IsExtensionEnabled(extension.id());
+  // Query the enabled state from ExtensionPrefs rather than
+  // ExtensionService::IsExtensionEnabled - the latter uses ExtensionRegistry
+  // which might not have been updated yet (ExtensionPrefs are updated first,
+  // and we're listening for changes to these).
+  bool enabled = !extension_prefs->IsExtensionDisabled(extension.id());
+  enabled = enabled &&
+      !extension_prefs->IsExternalExtensionUninstalled(extension.id());
+  // Blacklisted extensions are not marked as disabled in ExtensionPrefs.
+  enabled = enabled &&
+      extension_prefs->GetExtensionBlacklistState(extension.id()) ==
+          extensions::NOT_BLACKLISTED;
   int disable_reasons = extension_prefs->GetDisableReasons(extension.id());
   bool incognito_enabled = extensions::util::IsIncognitoEnabled(extension.id(),
                                                                 profile_);
@@ -234,29 +227,137 @@ ExtensionSyncData ExtensionSyncService::CreateSyncData(
                                         Extension::DISABLE_REMOTE_INSTALL);
   ExtensionSyncData::OptionalBoolean allowed_on_all_url =
       GetAllowedOnAllUrlsOptionalBoolean(extension.id(), profile_);
-  if (extension.is_app()) {
-    AppSorting* app_sorting = ExtensionSystem::Get(profile_)->app_sorting();
-    return ExtensionSyncData(
-        extension, enabled, disable_reasons, incognito_enabled, remote_install,
-        allowed_on_all_url,
-        app_sorting->GetAppLaunchOrdinal(extension.id()),
-        app_sorting->GetPageOrdinal(extension.id()),
-        extensions::GetLaunchTypePrefValue(extension_prefs, extension.id()));
+  AppSorting* app_sorting = ExtensionSystem::Get(profile_)->app_sorting();
+
+  ExtensionSyncData result = extension.is_app()
+      ? ExtensionSyncData(
+            extension, enabled, disable_reasons, incognito_enabled,
+            remote_install, allowed_on_all_url,
+            app_sorting->GetAppLaunchOrdinal(extension.id()),
+            app_sorting->GetPageOrdinal(extension.id()),
+            extensions::GetLaunchTypePrefValue(extension_prefs,
+                                               extension.id()))
+      : ExtensionSyncData(
+            extension, enabled, disable_reasons, incognito_enabled,
+            remote_install, allowed_on_all_url);
+
+  // If there's a pending update, send the new version to sync instead of the
+  // installed one.
+  auto it = pending_update_versions_.find(extension.id());
+  if (it != pending_update_versions_.end()) {
+    const base::Version& version = it->second;
+    // If we have a pending version, it should be newer than the installed one.
+    DCHECK_EQ(-1, extension.version()->CompareTo(version));
+    result.set_version(version);
   }
-  return ExtensionSyncData(
-      extension, enabled, disable_reasons, incognito_enabled, remote_install,
-      allowed_on_all_url);
+  return result;
 }
 
-bool ExtensionSyncService::ApplySyncData(
+void ExtensionSyncService::ApplySyncData(
     const ExtensionSyncData& extension_sync_data) {
   syncer::ModelType type = extension_sync_data.is_app() ? syncer::APPS
                                                         : syncer::EXTENSIONS;
+  const std::string& id = extension_sync_data.id();
+  // Note: |extension| may be null if it hasn't been installed yet.
+  const Extension* extension =
+      ExtensionRegistry::Get(profile_)->GetInstalledExtension(id);
+  // TODO(bolms): we should really handle this better.  The particularly bad
+  // case is where an app becomes an extension or vice versa, and we end up with
+  // a zombie extension that won't go away.
+  // TODO(treib): Is this still true?
+  if (extension && !IsCorrectSyncType(*extension, type))
+    return;
+
   SyncBundle* bundle = GetSyncBundle(type);
+  // Forward to the bundle. This will just update the list of synced extensions.
   bundle->ApplySyncData(extension_sync_data);
 
-  const std::string& id = extension_sync_data.id();
+  // Handle uninstalls first.
+  if (extension_sync_data.uninstalled()) {
+    if (!ExtensionService::UninstallExtensionHelper(
+            extension_service(), id, extensions::UNINSTALL_REASON_SYNC)) {
+      LOG(WARNING) << "Could not uninstall extension " << id << " for sync";
+    }
+    return;
+  }
 
+  // Extension from sync was uninstalled by the user as an external extension.
+  // Honor user choice and skip installation/enabling.
+  // TODO(treib): Should we still apply pref changes?
+  if (ExtensionPrefs::Get(profile_)->IsExternalExtensionUninstalled(id)) {
+    LOG(WARNING) << "Extension with id " << id
+                 << " from sync was uninstalled as external extension";
+    return;
+  }
+
+  int version_compare_result = extension ?
+      extension->version()->CompareTo(extension_sync_data.version()) : 0;
+
+  // Enable/disable the extension.
+  if (extension_sync_data.enabled()) {
+    DCHECK(!extension_sync_data.disable_reasons());
+
+    // Only grant permissions if the sync data explicitly sets the disable
+    // reasons to Extension::DISABLE_NONE (as opposed to the legacy (<M45) case
+    // where they're not set at all), and if the version from sync matches our
+    // local one. Otherwise we just enable it without granting permissions. If
+    // any permissions are missing, CheckPermissionsIncrease will soon disable
+    // it again.
+    bool grant_permissions =
+        extension_sync_data.supports_disable_reasons() &&
+        extension && (version_compare_result == 0);
+    if (grant_permissions)
+      extension_service()->GrantPermissionsAndEnableExtension(extension);
+    else
+      extension_service()->EnableExtension(id);
+  } else {
+    int disable_reasons = extension_sync_data.disable_reasons();
+    if (extension_sync_data.remote_install()) {
+      if (!(disable_reasons & Extension::DISABLE_REMOTE_INSTALL)) {
+        // In the non-legacy case (>=M45) where disable reasons are synced at
+        // all, DISABLE_REMOTE_INSTALL should be among them already.
+        DCHECK(!extension_sync_data.supports_disable_reasons());
+        disable_reasons |= Extension::DISABLE_REMOTE_INSTALL;
+      }
+    } else if (!extension_sync_data.supports_disable_reasons()) {
+      // Legacy case (<M45), from before we synced disable reasons (see
+      // crbug.com/484214).
+      disable_reasons = Extension::DISABLE_UNKNOWN_FROM_SYNC;
+    }
+
+    // In the non-legacy case (>=M45), clear any existing disable reasons first.
+    // Otherwise sync can't remove just some of them.
+    if (extension_sync_data.supports_disable_reasons())
+      ExtensionPrefs::Get(profile_)->ClearDisableReasons(id);
+
+    extension_service()->DisableExtension(id, disable_reasons);
+  }
+
+  // If the target extension has already been installed ephemerally, it can
+  // be promoted to a regular installed extension and downloading from the Web
+  // Store is not necessary.
+  if (extension && extensions::util::IsEphemeralApp(id, profile_))
+    extension_service()->PromoteEphemeralApp(extension, true);
+
+  // Cache whether the extension was already installed because setting the
+  // incognito flag invalidates the |extension| pointer (it reloads the
+  // extension).
+  bool extension_installed = (extension != nullptr);
+
+  // Update the incognito flag.
+  extensions::util::SetIsIncognitoEnabled(
+      id, profile_, extension_sync_data.incognito_enabled());
+  extension = nullptr;  // No longer safe to use.
+
+  // Update the all urls flag.
+  if (extension_sync_data.all_urls_enabled() !=
+          ExtensionSyncData::BOOLEAN_UNSET) {
+    bool allowed = extension_sync_data.all_urls_enabled() ==
+        ExtensionSyncData::BOOLEAN_TRUE;
+    extensions::util::SetAllowedScriptingOnAllUrls(id, profile_, allowed);
+  }
+
+  // Set app-specific data.
   if (extension_sync_data.is_app()) {
     if (extension_sync_data.app_launch_ordinal().IsValid() &&
         extension_sync_data.page_ordinal().IsValid()) {
@@ -279,13 +380,35 @@ bool ExtensionSyncService::ApplySyncData(
       ApplyBookmarkAppSyncData(extension_sync_data);
   }
 
-  if (!ApplyExtensionSyncDataHelper(extension_sync_data, type)) {
-    bundle->AddPendingExtension(id, extension_sync_data);
-    extension_service()->CheckForUpdatesSoon();
-    return false;
+  // Finally, trigger installation/update as required.
+  bool check_for_updates = false;
+  if (extension_installed) {
+    // If the extension is installed but outdated, store the new version.
+    if (version_compare_result < 0) {
+      pending_update_versions_[id] = extension_sync_data.version();
+      check_for_updates = true;
+    }
+  } else {
+    if (!extension_service()->pending_extension_manager()->AddFromSync(
+            id,
+            extension_sync_data.update_url(),
+            extension_sync_data.version(),
+            extensions::sync_helper::IsSyncable,
+            extension_sync_data.remote_install(),
+            extension_sync_data.installed_by_custodian())) {
+      LOG(WARNING) << "Could not add pending extension for " << id;
+      // This means that the extension is already pending installation, with a
+      // non-INTERNAL location.  Add to pending_sync_data, even though it will
+      // never be removed (we'll never install a syncable version of the
+      // extension), so that GetAllSyncData() continues to send it.
+    }
+    // Track pending extensions so that we can return them in GetAllSyncData().
+    bundle->AddPendingExtensionData(id, extension_sync_data);
+    check_for_updates = true;
   }
 
-  return true;
+  if (check_for_updates)
+    extension_service()->CheckForUpdatesSoon();
 }
 
 void ExtensionSyncService::ApplyBookmarkAppSyncData(
@@ -349,6 +472,74 @@ ExtensionService* ExtensionSyncService::extension_service() const {
   return ExtensionSystem::Get(profile_)->extension_service();
 }
 
+void ExtensionSyncService::OnExtensionInstalled(
+    content::BrowserContext* browser_context,
+    const Extension* extension,
+    bool is_update) {
+  DCHECK_EQ(profile_, browser_context);
+  // Clear pending version if the installed one has caught up.
+  auto it = pending_update_versions_.find(extension->id());
+  if (it != pending_update_versions_.end()) {
+    const base::Version& pending_version = it->second;
+    if (extension->version()->CompareTo(pending_version) >= 0)
+      pending_update_versions_.erase(it);
+  }
+  SyncExtensionChangeIfNeeded(*extension);
+}
+
+void ExtensionSyncService::OnExtensionUninstalled(
+    content::BrowserContext* browser_context,
+    const Extension* extension,
+    extensions::UninstallReason reason) {
+  DCHECK_EQ(profile_, browser_context);
+  // Don't bother syncing if the extension will be re-installed momentarily.
+  if (reason == extensions::UNINSTALL_REASON_REINSTALL ||
+      !extensions::util::ShouldSync(extension, profile_))
+    return;
+
+  // TODO(tim): If we get here and IsSyncing is false, this will cause
+  // "back from the dead" style bugs, because sync will add-back the extension
+  // that was uninstalled here when MergeDataAndStartSyncing is called.
+  // See crbug.com/256795.
+  // Possible fix: Set NeedsSync here, then in MergeDataAndStartSyncing, if
+  // NeedsSync is set but the extension isn't installed, send a sync deletion.
+  syncer::ModelType type =
+      extension->is_app() ? syncer::APPS : syncer::EXTENSIONS;
+  SyncBundle* bundle = GetSyncBundle(type);
+  if (bundle->IsSyncing()) {
+    bundle->PushSyncDeletion(extension->id(),
+                             CreateSyncData(*extension).GetSyncData());
+  } else if (extension_service()->is_ready() && !flare_.is_null()) {
+    flare_.Run(type);  // Tell sync to start ASAP.
+  }
+
+  pending_update_versions_.erase(extension->id());
+}
+
+void ExtensionSyncService::OnExtensionStateChanged(
+    const std::string& extension_id,
+    bool state) {
+  ExtensionRegistry* registry = ExtensionRegistry::Get(profile_);
+  const Extension* extension = registry->GetInstalledExtension(extension_id);
+  // We can get pref change notifications for extensions that aren't installed
+  // (yet). In that case, we'll pick up the change later via ExtensionRegistry
+  // observation (in OnExtensionInstalled).
+  if (extension)
+    SyncExtensionChangeIfNeeded(*extension);
+}
+
+void ExtensionSyncService::OnExtensionDisableReasonsChanged(
+    const std::string& extension_id,
+    int disabled_reasons) {
+  ExtensionRegistry* registry = ExtensionRegistry::Get(profile_);
+  const Extension* extension = registry->GetInstalledExtension(extension_id);
+  // We can get pref change notifications for extensions that aren't installed
+  // (yet). In that case, we'll pick up the change later via ExtensionRegistry
+  // observation (in OnExtensionInstalled).
+  if (extension)
+    SyncExtensionChangeIfNeeded(*extension);
+}
+
 SyncBundle* ExtensionSyncService::GetSyncBundle(syncer::ModelType type) {
   return const_cast<SyncBundle*>(
       const_cast<const ExtensionSyncService&>(*this).GetSyncBundle(type));
@@ -362,8 +553,7 @@ const SyncBundle* ExtensionSyncService::GetSyncBundle(
 std::vector<ExtensionSyncData> ExtensionSyncService::GetLocalSyncDataList(
     syncer::ModelType type,
     bool include_everything) const {
-  // Collect the local state. FillSyncDataList will filter out extensions for
-  // which we have pending data that should be used instead.
+  // Collect the local state.
   ExtensionRegistry* registry = ExtensionRegistry::Get(profile_);
   std::vector<ExtensionSyncData> data;
   // TODO(treib, kalman): Should we be including blacklisted/blocked extensions
@@ -386,137 +576,14 @@ void ExtensionSyncService::FillSyncDataList(
     syncer::ModelType type,
     bool include_everything,
     std::vector<ExtensionSyncData>* sync_data_list) const {
-  const SyncBundle* bundle = GetSyncBundle(type);
   for (const scoped_refptr<const Extension>& extension : extensions) {
     if (IsCorrectSyncType(*extension, type) &&
         extensions::util::ShouldSync(extension.get(), profile_) &&
-        !bundle->HasPendingExtensionId(extension->id()) &&
         (include_everything ||
          ExtensionPrefs::Get(profile_)->NeedsSync(extension->id()))) {
+      // We should never have pending data for an installed extension.
+      DCHECK(!GetSyncBundle(type)->HasPendingExtensionData(extension->id()));
       sync_data_list->push_back(CreateSyncData(*extension));
     }
   }
-}
-
-bool ExtensionSyncService::ApplyExtensionSyncDataHelper(
-    const ExtensionSyncData& extension_sync_data,
-    syncer::ModelType type) {
-  const std::string& id = extension_sync_data.id();
-  ExtensionRegistry* registry = ExtensionRegistry::Get(profile_);
-  const Extension* extension = registry->GetInstalledExtension(id);
-
-  // TODO(bolms): we should really handle this better.  The particularly bad
-  // case is where an app becomes an extension or vice versa, and we end up with
-  // a zombie extension that won't go away.
-  if (extension && !IsCorrectSyncType(*extension, type))
-    return true;
-
-  // Handle uninstalls first.
-  if (extension_sync_data.uninstalled()) {
-    if (!ExtensionService::UninstallExtensionHelper(
-            extension_service(), id, extensions::UNINSTALL_REASON_SYNC)) {
-      LOG(WARNING) << "Could not uninstall extension " << id << " for sync";
-    }
-    return true;
-  }
-
-  // Extension from sync was uninstalled by the user as external extensions.
-  // Honor user choice and skip installation/enabling.
-  if (ExtensionPrefs::Get(profile_)->IsExternalExtensionUninstalled(id)) {
-    LOG(WARNING) << "Extension with id " << id
-                 << " from sync was uninstalled as external extension";
-    return true;
-  }
-
-  int version_compare_result = extension ?
-      extension->version()->CompareTo(extension_sync_data.version()) : 0;
-
-  // Set user settings.
-  if (extension_sync_data.enabled()) {
-    DCHECK(!extension_sync_data.disable_reasons());
-
-    // Only grant permissions if the sync data explicitly sets the disable
-    // reasons to Extension::DISABLE_NONE (as opposed to the legacy (<M45) case
-    // where they're not set at all), and if the version from sync matches our
-    // local one. Otherwise we just enable it without granting permissions. If
-    // any permissions are missing, CheckPermissionsIncrease will soon disable
-    // it again.
-    bool grant_permissions =
-        extension_sync_data.supports_disable_reasons() &&
-        extension && (version_compare_result == 0);
-    if (grant_permissions)
-      extension_service()->GrantPermissionsAndEnableExtension(extension);
-    else
-      extension_service()->EnableExtension(id);
-  } else {
-    int disable_reasons = extension_sync_data.disable_reasons();
-    if (extension_sync_data.remote_install()) {
-      if (!(disable_reasons & Extension::DISABLE_REMOTE_INSTALL)) {
-        // In the non-legacy case (>=M45) where disable reasons are synced at
-        // all, DISABLE_REMOTE_INSTALL should be among them already.
-        DCHECK(!extension_sync_data.supports_disable_reasons());
-        disable_reasons |= Extension::DISABLE_REMOTE_INSTALL;
-      }
-    } else if (!extension_sync_data.supports_disable_reasons()) {
-      // Legacy case (<M45), from before we synced disable reasons (see
-      // crbug.com/484214).
-      disable_reasons = Extension::DISABLE_UNKNOWN_FROM_SYNC;
-    }
-
-    // In the non-legacy case (>=M45), clear any existing disable reasons first.
-    // Otherwise sync can't remove just some of them.
-    if (extension_sync_data.supports_disable_reasons())
-      ExtensionPrefs::Get(profile_)->ClearDisableReasons(id);
-
-    extension_service()->DisableExtension(id, disable_reasons);
-  }
-
-  // We need to cache some information here because setting the incognito flag
-  // invalidates the |extension| pointer (it reloads the extension).
-  bool extension_installed = (extension != NULL);
-
-  // If the target extension has already been installed ephemerally, it can
-  // be promoted to a regular installed extension and downloading from the Web
-  // Store is not necessary.
-  if (extension && extensions::util::IsEphemeralApp(id, profile_))
-    extension_service()->PromoteEphemeralApp(extension, true);
-
-  // Update the incognito flag.
-  extensions::util::SetIsIncognitoEnabled(
-      id, profile_, extension_sync_data.incognito_enabled());
-  extension = NULL;  // No longer safe to use.
-
-  // Update the all urls flag.
-  if (extension_sync_data.all_urls_enabled() !=
-          ExtensionSyncData::BOOLEAN_UNSET) {
-    bool allowed = extension_sync_data.all_urls_enabled() ==
-        ExtensionSyncData::BOOLEAN_TRUE;
-    extensions::util::SetAllowedScriptingOnAllUrls(id, profile_, allowed);
-  }
-
-  if (extension_installed) {
-    // If the extension is already installed, check if it's outdated.
-    if (version_compare_result < 0) {
-      // Extension is outdated.
-      return false;
-    }
-  } else {
-    CHECK(type == syncer::EXTENSIONS || type == syncer::APPS);
-    if (!extension_service()->pending_extension_manager()->AddFromSync(
-            id,
-            extension_sync_data.update_url(),
-            extensions::sync_helper::IsSyncable,
-            extension_sync_data.remote_install(),
-            extension_sync_data.installed_by_custodian())) {
-      LOG(WARNING) << "Could not add pending extension for " << id;
-      // This means that the extension is already pending installation, with a
-      // non-INTERNAL location.  Add to pending_sync_data, even though it will
-      // never be removed (we'll never install a syncable version of the
-      // extension), so that GetAllSyncData() continues to send it.
-    }
-    // Track pending extensions so that we can return them in GetAllSyncData().
-    return false;
-  }
-
-  return true;
 }

@@ -241,22 +241,22 @@ Press any key to continue exploring.
   <message name="IDS_FILE_BROWSER_INSTALL_NEW_EXTENSION_LABEL" desc="Title of the menu item for installing new extensions from the web store.">
     Install new from the webstore
   </message>
-  <message name="IDS_FILE_BROWSER_ACTION_VIEW" desc="Title of the action to view (no edit) a file.">
+  <message name="IDS_FILE_BROWSER_TASK_VIEW" desc="Title of the action to view (no edit) a file.">
     View
   </message>
-  <message name="IDS_FILE_BROWSER_ACTION_OPEN" desc="Title of the action to open (and possibly edit) a file.">
+  <message name="IDS_FILE_BROWSER_TASK_OPEN" desc="Title of the action to open (and possibly edit) a file.">
     Open
   </message>
-  <message name="IDS_FILE_BROWSER_ACTION_OPEN_GDOC" desc="Title of the action to open a Google Docs document.">
+  <message name="IDS_FILE_BROWSER_TASK_OPEN_GDOC" desc="Title of the action to open a Google Docs document.">
     Docs
   </message>
-  <message name="IDS_FILE_BROWSER_ACTION_OPEN_GSHEET" desc="Title of the action to open a Google Spreadsheets document.">
+  <message name="IDS_FILE_BROWSER_TASK_OPEN_GSHEET" desc="Title of the action to open a Google Spreadsheets document.">
     Sheets
   </message>
-  <message name="IDS_FILE_BROWSER_ACTION_OPEN_GSLIDES" desc="Title of the action to open a Google Slides document.">
+  <message name="IDS_FILE_BROWSER_TASK_OPEN_GSLIDES" desc="Title of the action to open a Google Slides document.">
     Slides
   </message>
-  <message name="IDS_FILE_BROWSER_ACTION_LISTEN" desc="Title of the action to play an audio file.">
+  <message name="IDS_FILE_BROWSER_TASK_LISTEN" desc="Title of the action to play an audio file.">
     Listen
   </message>
 
@@ -354,6 +354,9 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_FILE_BROWSER_GALLERY_OVERWRITE_BUBBLE" desc="In the Gallery, text in the bubble informing user about saving and overwriting original file.">
     Your edits are saved automatically.<ph name="BREAKS">&lt;br&gt;&lt;br&gt;<ex>&lt;br&gt;&lt;br&gt;</ex></ph>To keep a copy of the original image, uncheck "Overwrite original"
+  </message>
+  <message name="IDS_FILE_BROWSER_GALLERY_READONLY_AND_NON_WRITABLE_FORMAT_WARNING" desc="In the Gallery, message informing that all edits will be saved to Downloads directory since the directory is readonly and the file is non-writable format of Gallery.">
+    Cannot save to $1. All edits will be saved to $2 in the Downloads folder.
   </message>
   <message name="IDS_FILE_BROWSER_GALLERY_READONLY_WARNING" desc="In the Gallery, message informing that directory is readonly, and edited files will be saved to Downloads directory.">
     Cannot save to $1. Edited images will be saved in the Downloads folder.
@@ -586,7 +589,10 @@ Press any key to continue exploring.
     Google Drive is not available right now. Uploading will automatically restart once Google Drive is back.
   </message>
   <message name="IDS_FILE_BROWSER_SYNC_MISC_ERROR" desc="File Manager status message shown when the drive sync is failed because of miscellaneous errors.">
-    Google Drive was unable to sync "<ph name="FILENAME">$1<ex>photo.jpg</ex></ph>" right now. Please try again later.
+    Google Drive was unable to sync "<ph name="FILENAME">$1<ex>photo.jpg</ex></ph>" right now. Google Drive will try again later.
+  </message>
+  <message name="IDS_FILE_BROWSER_SYNC_NO_SERVER_SPACE" desc="File Manager status message shown when the drive sync is failed because it runs out the space in Google Drive server.">
+    "<ph name="FILENAME">$1<ex>photo.jpg</ex></ph>" was not uploaded. There is not enough free space in your Google Drive.
   </message>
   <message name="IDS_FILE_BROWSER_SHARE_ERROR" desc="File Manager error message when sharing a file or a directory on Drive fails because of internet connection problems.">
     Sharing failed. Check your connection and try again later.
@@ -825,20 +831,20 @@ Press any key to continue exploring.
   <message name="IDS_FILE_BROWSER_DRIVE_WELCOME_DISMISS" desc="In the Welcome to Google Drive banner, a text on the button to dismiss the banner.">
     Dismiss
   </message>
-  <message name="IDS_FILE_BROWSER_NO_ACTION_FOR_FILE" desc="Message shown when user tries to open file, which we can't handle.">
+  <message name="IDS_FILE_BROWSER_NO_TASK_FOR_FILE" desc="Message shown when user tries to open file, which we can't handle.">
     This file type is not supported. Please visit the <ph name="BEGIN_LINK">&lt;a target='_blank' href='$1'&gt;<ex>&lt;a target='_blank' href='$1'&gt;</ex></ph>Chrome Web Store<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph> to find an app that can open this type of file.
     <ph name="BEGIN_LINK_HELP">&lt;a target='_blank' href='$2'&gt;<ex>&lt;a target='_blank' href='$2'&gt;</ex></ph>Learn More<ph name="END_LINK_HELP">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>
   </message>
-  <message name="IDS_FILE_BROWSER_NO_ACTION_FOR_EXECUTABLE" desc="Message shown when user tries to open a windows executable file, which we can't handle.">
+  <message name="IDS_FILE_BROWSER_NO_TASK_FOR_EXECUTABLE" desc="Message shown when user tries to open a windows executable file, which we can't handle.">
     This file is designed for a PC using Windows software. This is not compatible with your device which runs Chrome OS. Please search the <ph name="BEGIN_LINK">&lt;a target='_blank' href='$1'&gt;<ex>&lt;a target='_blank' href='$1'&gt;</ex></ph>Chrome Web Store<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph> for a suitable replacement app.<ph name="BEGIN_LINK_HELP">&lt;a target='_blank' href='$2'&gt;<ex>&lt;a target='_blank' href='$2'&gt;</ex></ph>Learn More<ph name="END_LINK_HELP">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>
   </message>
-  <message name="IDS_FILE_BROWSER_NO_ACTION_FOR_DMG" desc="Message shown when user tries to open a windows executable file, which we can't handle.">
+  <message name="IDS_FILE_BROWSER_NO_TASK_FOR_DMG" desc="Message shown when user tries to open a windows executable file, which we can't handle.">
     This file is designed for a computer using Macintosh software. This is not compatible with your device which runs Chrome OS. Please search the <ph name="BEGIN_LINK">&lt;a target='_blank' href='$1'&gt;<ex>&lt;a target='_blank' href='$1'&gt;</ex></ph>Chrome Web Store<ph name="END_LINK">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph> for a suitable replacement app.<ph name="BEGIN_LINK_HELP">&lt;a target='_blank' href='$2'&gt;<ex>&lt;a target='_blank' href='$2'&gt;</ex></ph>Learn More<ph name="END_LINK_HELP">&lt;/a&gt;<ex>&lt;/a&gt;</ex></ph>
   </message>
-  <message name="IDS_FILE_BROWSER_NO_ACTION_FOR_CRX_TITLE" desc="Message shown when a user tries to open a *.crx file, which we don't handle in Files.app.">
+  <message name="IDS_FILE_BROWSER_NO_TASK_FOR_CRX_TITLE" desc="Message shown when a user tries to open a *.crx file, which we don't handle in Files.app.">
     Wait just a sec
   </message>
-  <message name="IDS_FILE_BROWSER_NO_ACTION_FOR_CRX" desc="Message shown when a user tries to open a *.crx file, which we don't handle in Files.app.">
+  <message name="IDS_FILE_BROWSER_NO_TASK_FOR_CRX" desc="Message shown when a user tries to open a *.crx file, which we don't handle in Files.app.">
     We're constantly looking for ways to make your browsing safer. Previously, any website could prompt you to add an extension into your browser. In the latest versions of Google Chrome, you must explicitly tell Chrome that you want to install these extensions by adding them through the Extensions page. <ph name="BEGIN_LINK">&lt;a target='_blank' href='https://support.google.com/chrome_webstore/answer/2664769?p=crx_warning&amp;rd=1'&gt;</ph>Learn more<ph name="END_LINK">&lt;/a&gt;</ph>
   </message>
 
@@ -976,16 +982,13 @@ Press any key to continue exploring.
     No items match &lt;b&gt;"<ph name="SEARCH_STRING">$1<ex>abc</ex></ph>"&lt;/b&gt;
   </message>
 
-  <message name="IDS_FILE_BROWSER_MORE_ACTIONS" desc="In the File Manager, the text in combobutton to show the user there exist actions which can be executed to the file.">
-    More actions...
-  </message>
   <message name="IDS_FILE_BROWSER_CHANGE_DEFAULT_MENU_ITEM" desc="In the File Manager, the text in the menu item to change the default action for a particular file type.">
     Change default...
   </message>
   <message name="IDS_FILE_BROWSER_CHANGE_DEFAULT_CAPTION" desc="In the File Manager, the caption on the dialog box that chooses the default action for a particular file type.">
     Choose the default app for <ph name="FILE_TYPE">$1<ex>PNG</ex></ph> files:
   </message>
-  <message name="IDS_FILE_BROWSER_DEFAULT_ACTION_LABEL" desc="In the File Manager actions menu, the text next to the default action name.">
+  <message name="IDS_FILE_BROWSER_DEFAULT_TASK_LABEL" desc="In the File Manager actions menu, the text next to the default action name.">
     (default)
   </message>
 
@@ -1938,6 +1941,9 @@ Press any key to continue exploring.
   <message name="IDS_OPTIONS_SETTINGS_SECTION_THIRD_PARTY_VPN_NAME_TEMPLATE" desc="Template for constructing the name of a VPN network that is handled by a third-party VPN provider from the provider name and the network name.">
     <ph name="PROVIDER_NAME">$1<ex>OpenVPN</ex></ph>: <ph name="NETWORK_NAME">$2<ex>Work Network</ex></ph>
   </message>
+  <message name="IDS_OPTIONS_SETTINGS_SECTION_DEFAULT_THIRD_PARTY_PROVIDER_NAME" desc="Default Third Party VPN Provider Name used when the extension is uninstalled or for non primary users." >
+    Third Party VPN
+  </message>
   <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_ADD_CONNECTION" desc="Title for control to add a new network connection." >
     Add connection
   </message>
@@ -2064,35 +2070,35 @@ Press any key to continue exploring.
   <message name="IDS_OPTIONS_POWER_SOURCE_LOW_POWER_CHARGER" desc="The text referring to a low-power charger like a USB charger as the power source.">
     Low-power charger
   </message>
-  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_LEFT" desc="The text referring to the USB Type-C port on the left side of the device.">
+  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_LEFT" desc="The text identifying an external device, when that device is connected to the USB Type-C port on the left side of this device.">
     USB-C device (left port)
   </message>
-  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_RIGHT" desc="The text referring to the USB Type-C port on the right side of the device.">
+  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_RIGHT" desc="The text identifying an external device, when that device is connected to the USB Type-C port on the right side of this device.">
     USB-C device (right port)
   </message>
-  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_BACK" desc="The text referring to the USB Type-C port on the back of the device.">
+  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_BACK" desc="The text identifying an external device, when that device is connected to the USB Type-C port on the back of this device.">
     USB-C device (rear port)
   </message>
-  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_FRONT" desc="The text referring to the USB Type-C port on the front of the device.">
+  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_FRONT" desc="The text identifying an external device, when that device is connected to the USB Type-C port on the front of this device.">
     USB-C device (front port)
   </message>
-  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_LEFT_FRONT" desc="The text referring to the furthest front USB Type-C port on the left side of the device.">
-    USB-C device (left-front port)
+  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_LEFT_FRONT" desc="The text identifying an external device, when that device is connected to a USB Type-C port on the left side of this device. In this case there are two ports on that side, so this text should refer to the front one on that side.">
+    USB-C device (left side front port)
   </message>
-  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_LEFT_BACK" desc="The text referring to the furthest back USB Type-C port on the left side of the device.">
-    USB-C device (left-back port)
+  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_LEFT_BACK" desc="The text identifying an external device, when that device is connected to a USB Type-C port on the left side of this device. In this case there are two ports on that side, so this text should refer to the back one on that side.">
+    USB-C device (left side back port)
   </message>
-  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_RIGHT_FRONT" desc="The text referring to the furthest front USB Type-C port on the right side of the device.">
-    USB-C device (right-front port)
+  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_RIGHT_FRONT" desc="The text identifying an external device, when that device is connected to a USB Type-C port on the right side of this device. In this case there are two ports on that side, so this text should refer to the front one on that side.">">
+    USB-C device (right side front port)
   </message>
-  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_RIGHT_BACK" desc="The text referring to the furthest back USB Type-C port on the right side of the device.">
-    USB-C device (right-back port)
+  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_RIGHT_BACK" desc="The text identifying an external device, when that device is connected to a USB Type-C port on the right side of this device. In this case there are two ports on that side, so this text should refer to the back one on that side.">">
+    USB-C device (right side back port)
   </message>
-  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_BACK_LEFT" desc="The text referring to the furthest left USB Type-C port on the back of the device.">
-    USB-C device (rear-left port)
+  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_BACK_LEFT" desc="The text identifying an external device, when that device is connected to a USB Type-C port on the back of this device. In this case there are two ports on the back, so this text should refer to the one on the left.">
+    USB-C device (left port in the back)
   </message>
-  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_BACK_RIGHT" desc="The text referring to the furthest right USB Type-C port on the back of the device.">
-    USB-C device (rear-right port)
+  <message name="IDS_OPTIONS_POWER_SOURCE_PORT_BACK_RIGHT" desc="The text identifying an external device, when that device is connected to a USB Type-C port on the back of this device. In this case there are two ports on the back, so this text should refer to the one on the right.">
+    USB-C device (right port in the back)
   </message>
   <message name="IDS_OPTIONS_POWER_SOURCE_PORT_UNKNOWN" desc="The text referring to the device to charge from, when its port location cannot be determined.">
     USB-C device
@@ -3146,9 +3152,6 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_OPTIONS_CONTROLLED_SETTING_OWNER" desc="Text displayed in the controlled settings bubble when a setting's value can be edited only by the owner.">
     This setting is managed by the device owner, <ph name="OWNER_EMAIL">$1<ex>john@google.com</ex></ph>.
-  </message>
-  <message name="IDS_OPTION_DISABLED_BY_POLICY" desc="Text displayed in the controlled settings bubble when a setting's value is enforced by enterprise policy.">
-    This option is controlled by enterprise policy. Please contact your administrator for more information.
   </message>
   <message name="IDS_OPTIONS_CONTROLLED_SETTING_SHARED" desc="Text displayed in the controlled settings bubble when a setting's value belongs to the primary user but can be edited.">
     This setting belongs to <ph name="OWNER_EMAIL">$1<ex>john@google.com</ex></ph>.
@@ -4826,8 +4829,14 @@ Battery full
   <message name="IDS_STATUSBAR_LAYOUT_ESTONIA" desc="In the language menu button, this shows the input mode [Estonian keyboard].">
     Estonian
   </message>
+  <message name="IDS_STATUSBAR_LAYOUT_FAROESE" desc="In the language menu button, this shows the input mode [Faroese keyboard].">
+    Faroese
+  </message>
   <message name="IDS_STATUSBAR_LAYOUT_HUNGARY" desc="In the language menu button, this shows the input mode [Hungarian keyboard].">
     Hungarian
+  </message>
+  <message name="IDS_STATUSBAR_LAYOUT_HUNGARY_QWERTY" desc="In the language menu button, this shows the input mode [Hungarian QWERTY keyboard].">
+    Hungarian QWERTY
   </message>
   <message name="IDS_STATUSBAR_LAYOUT_POLAND" desc="In the language menu button, this shows the input mode [Polish keyboard].">
     Polish
@@ -4910,6 +4919,9 @@ Battery full
   <message name="IDS_STATUSBAR_LAYOUT_TURKEY" desc="In the language menu button, this shows the input mode [Turkish keyboard].">
     Turkish
   </message>
+  <message name="IDS_STATUSBAR_LAYOUT_TURKEY_F" desc="In the language menu button, this shows the input mode [Turkish-F keyboard].">
+    Turkish-F
+  </message>
   <message name="IDS_STATUSBAR_LAYOUT_PORTUGAL" desc="In the language menu button, this shows the input mode [Portuguese keyboard].">
     Portuguese
   </message>
@@ -4924,6 +4936,9 @@ Battery full
   </message>
   <message name="IDS_STATUSBAR_LAYOUT_SPAIN_CATALAN" desc="In the language menu button, this shows the input mode [Catalan keyboard].">
     Catalan
+  </message>
+  <message name="IDS_STATUSBAR_LAYOUT_FRANCE_BEPO" desc="In the language menu button, this shows the input mode [French BÉPO keyboard].">
+    French BÉPO
   </message>
   <message name="IDS_STATUSBAR_LAYOUT_FRANCE" desc="In the language menu button, this shows the input mode [French keyboard].">
     French
@@ -5025,8 +5040,14 @@ Battery full
   <message name="IDS_IME_NAME_KEYBOARD_ESTONIAN" desc="The input method name shows in system tray menu, this shows [Estonian keyboard].">
     Estonian keyboard
   </message>
+  <message name="IDS_IME_NAME_KEYBOARD_FAROESE" desc="The input method name shows in system tray menu, this shows [Faroese keyboard].">
+    Faroese keyboard
+  </message>
   <message name="IDS_IME_NAME_KEYBOARD_FINNISH" desc="The input method name shows in system tray menu, this shows [Finnish keyboard].">
     Finnish keyboard
+  </message>
+  <message name="IDS_IME_NAME_KEYBOARD_FRENCH_BEPO" desc="The input method name shows in system tray menu, this shows [French BÉPO keyboard].">
+    French BÉPO keyboard
   </message>
   <message name="IDS_IME_NAME_KEYBOARD_FRENCH" desc="The input method name shows in system tray menu, this shows [French keyboard].">
     French keyboard
@@ -5048,6 +5069,9 @@ Battery full
   </message>
   <message name="IDS_IME_NAME_KEYBOARD_HUNGARIAN" desc="The input method name shows in system tray menu, this shows [Hungarian keyboard].">
     Hungarian keyboard
+  </message>
+  <message name="IDS_IME_NAME_KEYBOARD_HUNGARIAN_QWERTY" desc="The input method name shows in system tray menu, this shows [Hungarian QWERTY keyboard].">
+    Hungarian QWERTY keyboard
   </message>
   <message name="IDS_IME_NAME_KEYBOARD_ICELANDIC" desc="The input method name shows in system tray menu, this shows [Icelandic keyboard].">
     Icelandic keyboard
@@ -5132,6 +5156,9 @@ Battery full
   </message>
   <message name="IDS_IME_NAME_KEYBOARD_TURKISH" desc="The input method name shows in system tray menu, this shows [Turkish keyboard].">
     Turkish keyboard
+  </message>
+  <message name="IDS_IME_NAME_KEYBOARD_TURKISH_F" desc="The input method name shows in system tray menu, this shows [Turkish-F keyboard].">
+    Turkish-F keyboard
   </message>
   <message name="IDS_IME_NAME_KEYBOARD_UK_DVORAK" desc="The input method name shows in system tray menu, this shows [UK Dvorak keyboard].">
     UK Dvorak keyboard
@@ -6329,6 +6356,21 @@ All users must sign out to continue.
   </message>
   <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_NOTIFICATION_WRITABLE_MESSAGE" desc="Message in a notification about granted full permissions (read, write, delete, create files and directories) to a volume (eg. USB drive, SD card, MTP device) with the specified name to the extension.">
     Read and write access to <ph name="VOLUME_NAME">$1<ex>FooBar 4GB</ex></ph> has been granted.
+  </message>
+  <message name="IDS_FLAGS_CROS_REGIONS_MODE_NAME" desc="Title for the flag to select cros-regions file handling mode.">
+    Cros-regions load mode
+  </message>
+  <message name="IDS_FLAGS_CROS_REGIONS_MODE_DESCRIPTION" desc="Description for the flag to select cros-regions file handling mode.">
+    This flag controls cros-regions load mode
+  </message>
+  <message name="IDS_FLAGS_CROS_REGIONS_MODE_DEFAULT" desc="Name of the value for cros-regions file handling mode for 'default' mode.">
+    Default
+  </message>
+  <message name="IDS_FLAGS_CROS_REGIONS_MODE_OVERRIDE" desc="Name of the value for cros-regions file handling mode for 'override' mode (values from region file replace matching VPD values).">
+    Override VPD values.
+  </message>
+  <message name="IDS_FLAGS_CROS_REGIONS_MODE_HIDE" desc="Name of the value for cros-regions file handling mode for 'hide' mode (VPD values are hidden, only cros-region values are used).">
+    Hide VPD values.
   </message>
 
   <!-- Webstore widget app -->

@@ -20,7 +20,9 @@
 #include "base/time/time.h"
 #include "base/win/registry.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/safe_browsing/srt_field_trial_win.h"
 #include "chrome/browser/safe_browsing/srt_global_error_win.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -165,14 +167,17 @@ void ReportFoundUwS() {
   }
 }
 
+}  // namespace
+
 // Class that will attempt to download the SRT, showing the SRT notification
 // bubble when the download operation is complete. Instances of SRTFetcher own
 // themselves, they will self-delete on completion of the network request when
 // OnURLFetchComplete is called.
 class SRTFetcher : public net::URLFetcherDelegate {
  public:
-  SRTFetcher()
-      : url_fetcher_(net::URLFetcher::Create(0,
+  explicit SRTFetcher(Profile* profile)
+      : profile_(profile),
+        url_fetcher_(net::URLFetcher::Create(0,
                                              GURL(GetSRTDownloadURL()),
                                              net::URLFetcher::GET,
                                              this)) {
@@ -182,6 +187,16 @@ class SRTFetcher : public net::URLFetcherDelegate {
         BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE));
     url_fetcher_->SetRequestContext(
         g_browser_process->system_request_context());
+    // Adds the UMA bit to the download request if the user is enrolled in UMA.
+    ProfileIOData* io_data = ProfileIOData::FromResourceContext(
+        profile_->GetResourceContext());
+    net::HttpRequestHeaders headers;
+    variations::VariationsHttpHeaderProvider::GetInstance()->AppendHeaders(
+        url_fetcher_->GetOriginalURL(),
+        io_data->IsOffTheRecord(),
+        ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled(),
+        &headers);
+    url_fetcher_->SetExtraRequestHeaders(headers.ToString());
     url_fetcher_->Start();
   }
 
@@ -223,12 +238,17 @@ class SRTFetcher : public net::URLFetcherDelegate {
  private:
   ~SRTFetcher() override {}
 
+  // The user profile.
+  Profile* profile_;
+
   // The underlying URL fetcher. The instance is alive from construction through
   // OnURLFetchComplete.
   scoped_ptr<net::URLFetcher> url_fetcher_;
 
   DISALLOW_COPY_AND_ASSIGN(SRTFetcher);
 };
+
+namespace {
 
 // Try to fetch the SRT, and on success, show the prompt to run it.
 void MaybeFetchSRT(Browser* browser, const std::string& reporter_version) {
@@ -256,15 +276,19 @@ void MaybeFetchSRT(Browser* browser, const std::string& reporter_version) {
     return;
   }
 
-  if (!incoming_seed.empty())
+  if (!incoming_seed.empty() && incoming_seed != old_seed) {
     prefs->SetString(prefs::kSwReporterPromptSeed, incoming_seed);
+    // Forget about pending prompts if prompt seed has changed.
+    if (local_state)
+      local_state->SetBoolean(prefs::kSwReporterPendingPrompt, false);
+  }
   prefs->SetString(prefs::kSwReporterPromptVersion, reporter_version);
 
   // Download the SRT.
   RecordReporterStepHistogram(SW_REPORTER_DOWNLOAD_START);
 
   // All the work happens in the self-deleting class below.
-  new SRTFetcher();
+  new SRTFetcher(profile);
 }
 
 // This class tries to run the reporter and reacts to its exit code. It

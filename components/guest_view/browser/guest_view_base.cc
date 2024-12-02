@@ -50,7 +50,7 @@ SetSizeParams::~SetSizeParams() {
 class GuestViewBase::OwnerContentsObserver : public WebContentsObserver {
  public:
   OwnerContentsObserver(GuestViewBase* guest,
-                        content::WebContents* embedder_web_contents)
+                        WebContents* embedder_web_contents)
       : WebContentsObserver(embedder_web_contents),
         is_fullscreen_(false),
         destroyed_(false),
@@ -140,12 +140,11 @@ class GuestViewBase::OpenerLifetimeObserver : public WebContentsObserver {
   DISALLOW_COPY_AND_ASSIGN(OpenerLifetimeObserver);
 };
 
-GuestViewBase::GuestViewBase(content::WebContents* owner_web_contents)
+GuestViewBase::GuestViewBase(WebContents* owner_web_contents)
     : owner_web_contents_(owner_web_contents),
       browser_context_(owner_web_contents->GetBrowserContext()),
-      guest_instance_id_(
-          GuestViewManager::FromBrowserContext(browser_context_)->
-              GetNextInstanceID()),
+      guest_instance_id_(GuestViewManager::FromBrowserContext(browser_context_)
+                             ->GetNextInstanceID()),
       view_instance_id_(kInstanceIDNone),
       element_instance_id_(kInstanceIDNone),
       initialized_(false),
@@ -185,7 +184,7 @@ void GuestViewBase::Init(const base::DictionaryValue& create_params,
 
 void GuestViewBase::InitWithWebContents(
     const base::DictionaryValue& create_params,
-    content::WebContents* guest_web_contents) {
+    WebContents* guest_web_contents) {
   DCHECK(guest_web_contents);
 
   // Create a ZoomController to allow the guest's contents to be zoomed.
@@ -299,17 +298,17 @@ void GuestViewBase::SetSize(const SetSizeParams& params) {
       new_size = GetDefaultSize();
     }
 
+    bool changed_due_to_auto_resize = false;
     if (auto_size_enabled_) {
       // Autosize was previously enabled.
       rvh->DisableAutoResize(new_size);
-      GuestSizeChangedDueToAutoSize(guest_size_, new_size);
+      changed_due_to_auto_resize = true;
     } else {
       // Autosize was already disabled.
       guest_host_->SizeContents(new_size);
     }
 
-    DispatchOnResizeEvent(guest_size_, new_size);
-    guest_size_ = new_size;
+    UpdateGuestSize(new_size, changed_due_to_auto_resize);
   }
 
   auto_size_enabled_ = enable_auto_size;
@@ -336,10 +335,9 @@ GuestViewBase* GuestViewBase::From(int owner_process_id,
   if (!host)
     return nullptr;
 
-  content::WebContents* guest_web_contents =
-      GuestViewManager::FromBrowserContext(
-          host->GetBrowserContext())->
-              GetGuestByInstanceIDSafely(guest_instance_id, owner_process_id);
+  WebContents* guest_web_contents =
+      GuestViewManager::FromBrowserContext(host->GetBrowserContext())
+          ->GetGuestByInstanceIDSafely(guest_instance_id, owner_process_id);
   if (!guest_web_contents)
     return nullptr;
 
@@ -370,8 +368,10 @@ bool GuestViewBase::ZoomPropagatesFromEmbedderToGuest() const {
   return true;
 }
 
-content::WebContents* GuestViewBase::CreateNewGuestWindow(
-    const content::WebContents::CreateParams& create_params) {
+void GuestViewBase::SetContextMenuPosition(const gfx::Point& position) {}
+
+WebContents* GuestViewBase::CreateNewGuestWindow(
+    const WebContents::CreateParams& create_params) {
   auto guest_manager = GuestViewManager::FromBrowserContext(browser_context());
   return guest_manager->CreateGuestWithWebContentsParams(
       GetViewType(),
@@ -430,11 +430,7 @@ WebContents* GuestViewBase::GetOwnerWebContents() const {
 }
 
 void GuestViewBase::GuestSizeChanged(const gfx::Size& new_size) {
-  if (!auto_size_enabled_)
-    return;
-  GuestSizeChangedDueToAutoSize(guest_size_, new_size);
-  DispatchOnResizeEvent(guest_size_, new_size);
-  guest_size_ = new_size;
+  UpdateGuestSize(new_size, auto_size_enabled_);
 }
 
 const GURL& GuestViewBase::GetOwnerSiteURL() const {
@@ -495,7 +491,7 @@ void GuestViewBase::SetGuestHost(content::GuestHost* guest_host) {
   guest_host_ = guest_host;
 }
 
-void GuestViewBase::WillAttach(content::WebContents* embedder_web_contents,
+void GuestViewBase::WillAttach(WebContents* embedder_web_contents,
                                int element_instance_id,
                                bool is_full_page_plugin,
                                const base::Closure& callback) {
@@ -601,7 +597,7 @@ void GuestViewBase::DeactivateContents(WebContents* web_contents) {
       embedder_web_contents());
 }
 
-void GuestViewBase::ContentsMouseEvent(content::WebContents* source,
+void GuestViewBase::ContentsMouseEvent(WebContents* source,
                                        const gfx::Point& location,
                                        bool motion) {
   if (!attached() || !embedder_web_contents()->GetDelegate())
@@ -628,7 +624,7 @@ void GuestViewBase::HandleKeyboardEvent(
       HandleKeyboardEvent(embedder_web_contents(), event);
 }
 
-void GuestViewBase::LoadingStateChanged(content::WebContents* source,
+void GuestViewBase::LoadingStateChanged(WebContents* source,
                                         bool to_different_document) {
   if (!attached() || !embedder_web_contents()->GetDelegate())
     return;
@@ -648,6 +644,11 @@ content::ColorChooser* GuestViewBase::OpenColorChooser(
       web_contents, color, suggestions);
 }
 
+void GuestViewBase::ResizeDueToAutoResize(WebContents* web_contents,
+                                          const gfx::Size& new_size) {
+  guest_host_->GuestResizeDueToAutoResize(new_size);
+}
+
 void GuestViewBase::RunFileChooser(WebContents* web_contents,
                                    const content::FileChooserParams& params) {
   if (!attached() || !embedder_web_contents()->GetDelegate())
@@ -661,16 +662,15 @@ bool GuestViewBase::ShouldFocusPageAfterCrash() {
   return false;
 }
 
-bool GuestViewBase::PreHandleGestureEvent(content::WebContents* source,
-                                         const blink::WebGestureEvent& event) {
+bool GuestViewBase::PreHandleGestureEvent(WebContents* source,
+                                          const blink::WebGestureEvent& event) {
   return event.type == blink::WebGestureEvent::GesturePinchBegin ||
       event.type == blink::WebGestureEvent::GesturePinchUpdate ||
       event.type == blink::WebGestureEvent::GesturePinchEnd;
 }
 
-void GuestViewBase::UpdatePreferredSize(
-    content::WebContents* target_web_contents,
-    const gfx::Size& pref_size) {
+void GuestViewBase::UpdatePreferredSize(WebContents* target_web_contents,
+                                        const gfx::Size& pref_size) {
   // In theory it's not necessary to check IsPreferredSizeModeEnabled() because
   // there will only be events if it was enabled in the first place. However,
   // something else may have turned on preferred size mode, so double check.
@@ -680,8 +680,7 @@ void GuestViewBase::UpdatePreferredSize(
   }
 }
 
-void GuestViewBase::UpdateTargetURL(content::WebContents* source,
-                                    const GURL& url) {
+void GuestViewBase::UpdateTargetURL(WebContents* source, const GURL& url) {
   if (!attached() || !embedder_web_contents()->GetDelegate())
     return;
 
@@ -764,7 +763,7 @@ void GuestViewBase::SendQueuedEvents() {
 void GuestViewBase::CompleteInit(
     scoped_ptr<base::DictionaryValue> create_params,
     const WebContentsCreatedCallback& callback,
-    content::WebContents* guest_web_contents) {
+    WebContents* guest_web_contents) {
   if (!guest_web_contents) {
     // The derived class did not create a WebContents so this class serves no
     // purpose. Let's self-destruct.
@@ -869,6 +868,14 @@ void GuestViewBase::StopTrackingEmbedderZoomLevel() {
   if (!embedder_zoom_controller)
     return;
   embedder_zoom_controller->RemoveObserver(this);
+}
+
+void GuestViewBase::UpdateGuestSize(const gfx::Size& new_size,
+                                    bool due_to_auto_resize) {
+  if (due_to_auto_resize)
+    GuestSizeChangedDueToAutoSize(guest_size_, new_size);
+  DispatchOnResizeEvent(guest_size_, new_size);
+  guest_size_ = new_size;
 }
 
 }  // namespace guest_view

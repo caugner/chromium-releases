@@ -14,7 +14,7 @@
   <link rel="import" type="css" href="settings_menu.css">
   <template>
     <paper-menu name="root-menu">
-      <paper-submenu data-page="basic">
+      <paper-submenu data-page="basic" on-tap="openPage_">
         <paper-icon-item class="menu-trigger">
           <iron-icon icon="expand-more" item-icon></iron-icon>
           <span i18n-content="basicPageTitle"></span>
@@ -31,6 +31,10 @@
             <span i18n-content="appearancePageTitle"></span>
           </paper-icon-item>
           <paper-icon-item>
+            <iron-icon icon="image:brightness-1" item-icon></iron-icon>
+            <span i18n-content="onStartup"></span>
+          </paper-icon-item>
+          <paper-icon-item>
             <iron-icon icon="search" item-icon></iron-icon>
             <span i18n-content="searchPageTitle"></span>
           </paper-icon-item>
@@ -42,7 +46,7 @@
 </if>
         </paper-menu>
       </paper-submenu>
-      <paper-submenu data-page="advanced">
+      <paper-submenu data-page="advanced" on-tap="openPage_">
         <paper-icon-item class="menu-trigger">
           <iron-icon icon="expand-more" item-icon></iron-icon>
           <span i18n-content="advancedPageTitle"></span>
@@ -62,10 +66,12 @@
             <iron-icon icon="file-download" item-icon></iron-icon>
             <span i18n-content="downloadsPageTitle"></span>
           </paper-icon-item>
+<if expr="chromeos">
           <paper-icon-item>
             <iron-icon icon="accessibility" item-icon></iron-icon>
             <span i18n-content="a11yPageTitle"></span>
           </paper-icon-item>
+</if>
           <paper-icon-item>
             <iron-icon icon="notification:sync" item-icon></iron-icon>
             <span i18n-content="syncPageTitle"></span>

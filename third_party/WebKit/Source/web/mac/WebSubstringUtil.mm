@@ -59,14 +59,14 @@
 
 using namespace blink;
 
-static NSAttributedString* attributedSubstringFromRange(const Range* range)
+static NSAttributedString* attributedSubstringFromRange(const EphemeralRange& range)
 {
     NSMutableAttributedString* string = [[NSMutableAttributedString alloc] init];
     NSMutableDictionary* attrs = [NSMutableDictionary dictionary];
-    size_t length = range->endOffset() - range->startOffset();
+    size_t length = range.endPosition().computeOffsetInContainerNode() - range.startPosition().computeOffsetInContainerNode();
 
     unsigned position = 0;
-    for (TextIterator it(range->startPosition(), range->endPosition()); !it.atEnd() && [string length] < length; it.advance()) {
+    for (TextIterator it(range.startPosition(), range.endPosition()); !it.atEnd() && [string length] < length; it.advance()) {
         unsigned numCharacters = it.length();
         if (!numCharacters)
             continue;
@@ -110,16 +110,31 @@ static NSAttributedString* attributedSubstringFromRange(const Range* range)
     return [string autorelease];
 }
 
+WebPoint getBaselinePoint(FrameView* frameView, const EphemeralRange& range, NSAttributedString* string)
+{
+    // Compute bottom left corner and convert to AppKit coordinates.
+    // TODO(yosin) We shold avoid to create |Range| object. See crbug.com/529985.
+    IntRect stringRect = enclosingIntRect(createRange(range)->boundingRect());
+    IntPoint stringPoint = stringRect.minXMaxYCorner();
+    stringPoint.setY(frameView->height() - stringPoint.y());
+
+    // Adjust for the font's descender. AppKit wants the baseline point.
+    if ([string length]) {
+        NSDictionary* attributes = [string attributesAtIndex:0 effectiveRange:NULL];
+        if (NSFont* font = [attributes objectForKey:NSFontAttributeName])
+            stringPoint.move(0, ceil(-[font descender]));
+    }
+    return stringPoint;
+}
+
 namespace blink {
 
 NSAttributedString* WebSubstringUtil::attributedWordAtPoint(WebView* view, WebPoint point, WebPoint& baselinePoint)
 {
     HitTestResult result = static_cast<WebViewImpl*>(view)->coreHitTestResultAt(point);
     if (!result.innerNode())
-      return nil;
+        return nil;
     LocalFrame* frame = result.innerNode()->document().frame();
-    FrameView* frameView = frame->view();
-
     EphemeralRange range = frame->rangeForPoint(result.roundedPointInInnerNodeFrame());
     if (range.isNull())
         return nil;
@@ -127,29 +142,20 @@ NSAttributedString* WebSubstringUtil::attributedWordAtPoint(WebView* view, WebPo
     // Expand to word under point.
     VisibleSelection selection(range);
     selection.expandUsingGranularity(WordGranularity);
-    RefPtrWillBeRawPtr<Range> wordRange = selection.toNormalizedRange();
+    const EphemeralRange wordRange = selection.toNormalizedEphemeralRange();
 
     // Convert to NSAttributedString.
-    NSAttributedString* string = attributedSubstringFromRange(wordRange.get());
-
-    // Compute bottom left corner and convert to AppKit coordinates.
-    IntRect stringRect = enclosingIntRect(wordRange->boundingRect());
-    IntPoint stringPoint = stringRect.minXMaxYCorner();
-    stringPoint.setY(frameView->height() - stringPoint.y());
-
-    // Adjust for the font's descender. AppKit wants the baseline point.
-    if ([string length]) {
-        NSDictionary* attributes = [string attributesAtIndex:0 effectiveRange:NULL];
-        NSFont* font = [attributes objectForKey:NSFontAttributeName];
-        if (font)
-            stringPoint.move(0, ceil(-[font descender]));
-    }
-
-    baselinePoint = stringPoint;
+    NSAttributedString* string = attributedSubstringFromRange(wordRange);
+    baselinePoint = getBaselinePoint(frame->view(), wordRange, string);
     return string;
 }
 
 NSAttributedString* WebSubstringUtil::attributedSubstringInRange(WebLocalFrame* webFrame, size_t location, size_t length)
+{
+    return WebSubstringUtil::attributedSubstringInRange(webFrame, location, length, nil);
+}
+
+NSAttributedString* WebSubstringUtil::attributedSubstringInRange(WebLocalFrame* webFrame, size_t location, size_t length, WebPoint* baselinePoint)
 {
     LocalFrame* frame = toWebLocalFrameImpl(webFrame)->frame();
     if (frame->view()->needsLayout())
@@ -162,8 +168,10 @@ NSAttributedString* WebSubstringUtil::attributedSubstringInRange(WebLocalFrame* 
     if (ephemeralRange.isNull())
         return nil;
 
-    RefPtrWillBeRawPtr<Range> range = Range::create(ephemeralRange.document(), ephemeralRange.startPosition(), ephemeralRange.endPosition());
-    return attributedSubstringFromRange(range.get());
+    NSAttributedString* result = attributedSubstringFromRange(ephemeralRange);
+    if (baselinePoint)
+        *baselinePoint = getBaselinePoint(frame->view(), ephemeralRange, result);
+    return result;
 }
 
 } // namespace blink

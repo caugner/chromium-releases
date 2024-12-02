@@ -35,6 +35,16 @@ scoped_refptr<scheduler::TaskQueue> FakeRendererScheduler::TimerTaskRunner() {
   return nullptr;
 }
 
+scoped_refptr<scheduler::TaskQueue> FakeRendererScheduler::NewLoadingTaskRunner(
+    const char* name) {
+  return nullptr;
+}
+
+scoped_refptr<scheduler::TaskQueue> FakeRendererScheduler::NewTimerTaskRunner(
+    const char* name) {
+  return nullptr;
+}
+
 void FakeRendererScheduler::WillBeginFrame(const cc::BeginFrameArgs& args) {
 }
 
@@ -66,7 +76,19 @@ void FakeRendererScheduler::OnRendererHidden() {
 void FakeRendererScheduler::OnRendererVisible() {
 }
 
-void FakeRendererScheduler::OnPageLoadStarted() {
+void FakeRendererScheduler::OnRendererBackgrounded() {
+}
+
+void FakeRendererScheduler::OnRendererForegrounded() {
+}
+
+void FakeRendererScheduler::AddPendingNavigation() {
+}
+
+void FakeRendererScheduler::RemovePendingNavigation() {
+}
+
+void FakeRendererScheduler::OnNavigationStarted() {
 }
 
 bool FakeRendererScheduler::ShouldYieldForHighPriorityWork() {
@@ -93,5 +115,8 @@ void FakeRendererScheduler::SuspendTimerQueue() {
 
 void FakeRendererScheduler::ResumeTimerQueue() {
 }
+
+void FakeRendererScheduler::SetTimerQueueSuspensionWhenBackgroundedEnabled(
+    bool enabled) {}
 
 }  // namespace content

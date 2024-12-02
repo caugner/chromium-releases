@@ -52,10 +52,17 @@ NavigationControllerBrowserTest.DontIgnoreBackAfterNavEntryLimit
 WebRtcBrowserTest.CallInsideIframe
 
 # https://crbug.com/504187
-# https://crbug.com/517977
-WebRtcGetUserMediaBrowserTest.*
+WebRtcGetUserMediaBrowserTest.TestGetUserMediaAspectRatio1To1
+WebRtcGetUserMediaBrowserTest.TestGetUserMediaAspectRatio16To9
+WebRtcGetUserMediaBrowserTest.TestGetUserMediaAspectRatio4To3
+WebRtcGetUserMediaBrowserTest.TwoGetUserMediaAndCheckCallbackAfterFailure
+WebRtcGetUserMediaBrowserTest.TwoGetUserMediaWithEqualConstraints
 
-# https://crbug.com/517977
-WebRtcBrowserTest.AddTwoMediaStreamsToOnePC
-WebRtcBrowserTest.CanSetupCallAndSendDtmf
-WebRtcBrowserTest.NegotiateNonCryptoCall
+# https://crbug.com/507012
+ServiceWorkerVersionBrowserTest.ReadResourceFailure_WaitingWorker
+
+# https://crbug.com/376668
+TouchActionBrowserTest.DefaultAuto
+
+# https://crbug.com/536881
+IndexedDBBrowserTest.DiskFullOnCommit

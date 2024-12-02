@@ -45,6 +45,9 @@ media::VideoPixelFormat V4L2Device::V4L2PixFmtToVideoPixelFormat(
     case V4L2_PIX_FMT_NV12M:
       return media::PIXEL_FORMAT_NV12;
 
+    case V4L2_PIX_FMT_MT21:
+      return media::PIXEL_FORMAT_MT21;
+
     case V4L2_PIX_FMT_YUV420:
     case V4L2_PIX_FMT_YUV420M:
       return media::PIXEL_FORMAT_I420;
@@ -105,6 +108,9 @@ uint32_t V4L2Device::V4L2PixFmtToDrmFormat(uint32_t format) {
     case V4L2_PIX_FMT_NV12:
     case V4L2_PIX_FMT_NV12M:
       return DRM_FORMAT_NV12;
+
+    case V4L2_PIX_FMT_MT21:
+      return DRM_FORMAT_MT21;
 
     case V4L2_PIX_FMT_YUV420:
     case V4L2_PIX_FMT_YUV420M:

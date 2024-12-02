@@ -57,14 +57,14 @@ class ContentSettingBubbleControllerTest
     ChromeUnitTestSuite::InitializeResourceBundle();
     content_client_.reset(new ChromeContentClient);
     content::SetContentClient(content_client_.get());
-    browser_content_client_.reset(new chrome::ChromeContentBrowserClient());
+    browser_content_client_.reset(new ChromeContentBrowserClient());
     content::SetBrowserClientForTesting(browser_content_client_.get());
     initializer_.reset(new TestingBrowserProcessInitializer);
     ChromeRenderViewHostTestHarness::SetUp();
   }
 
   scoped_ptr<ChromeContentClient> content_client_;
-  scoped_ptr<chrome::ChromeContentBrowserClient> browser_content_client_;
+  scoped_ptr<ChromeContentBrowserClient> browser_content_client_;
 
   // This is a unit test running in the browser_tests suite, so we must create
   // the TestingBrowserProcess manually. Must be first member.
@@ -102,29 +102,12 @@ ContentSettingBubbleControllerTest::CreateBubbleController(
 
 // Check that the bubble doesn't crash or leak for any settings type
 TEST_F(ContentSettingBubbleControllerTest, Init) {
-  for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
-    if (i == CONTENT_SETTINGS_TYPE_NOTIFICATIONS ||
-        i == CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE ||
-        i == CONTENT_SETTINGS_TYPE_FULLSCREEN ||
-        i == CONTENT_SETTINGS_TYPE_MOUSELOCK ||
-        i == CONTENT_SETTINGS_TYPE_MEDIASTREAM ||
-        i == CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC ||
-        i == CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA ||
-        i == CONTENT_SETTINGS_TYPE_PPAPI_BROKER ||
-        i == CONTENT_SETTINGS_TYPE_MIDI_SYSEX ||
-        i == CONTENT_SETTINGS_TYPE_PUSH_MESSAGING ||
-        i == CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS ||
-        i == CONTENT_SETTINGS_TYPE_APP_BANNER ||
-        i == CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT ||
-        i == CONTENT_SETTINGS_TYPE_DURABLE_STORAGE) {
-      // These types have no bubble.
+  for (ContentSettingsType type :
+       ContentSettingBubbleModel::GetSupportedBubbleTypes()) {
+    // Media stream is tested in the MediaStreamBubble test below.
+    if (type == CONTENT_SETTINGS_TYPE_MEDIASTREAM)
       continue;
-    }
-
-    ContentSettingsType settingsType = static_cast<ContentSettingsType>(i);
-
-    ContentSettingBubbleController* controller =
-        CreateBubbleController(settingsType);
+    ContentSettingBubbleController* controller = CreateBubbleController(type);
     EXPECT_EQ(0u, [controller mediaMenus]->size());
     [parent_ close];
   }

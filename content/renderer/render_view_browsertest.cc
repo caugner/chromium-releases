@@ -6,7 +6,6 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/location.h"
-#include "base/memory/shared_memory.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -229,8 +228,8 @@ class RenderViewImplTest : public RenderViewTest {
                         static_cast<ui::KeyboardCode>(key_code),
                         flags);
     ui::KeyEvent event2(xevent);
-    event2.set_character(GetCharacterFromKeyCode(event2.key_code(),
-                                                 event2.flags()));
+    event2.set_character(
+        DomCodeToUsLayoutCharacter(event2.code(), event2.flags()));
     ui::KeyEventTestApi test_event2(&event2);
     test_event2.set_is_char(true);
     NativeWebKeyboardEvent char_event(event2);
@@ -243,8 +242,9 @@ class RenderViewImplTest : public RenderViewTest {
     NativeWebKeyboardEvent keyup_event(event3);
     SendNativeKeyEvent(keyup_event);
 
-    long c = GetCharacterFromKeyCode(static_cast<ui::KeyboardCode>(key_code),
-                                     flags);
+    long c = DomCodeToUsLayoutCharacter(
+        UsLayoutKeyboardCodeToDomCode(static_cast<ui::KeyboardCode>(key_code)),
+        flags);
     output->assign(1, static_cast<base::char16>(c));
     return 1;
 #elif defined(USE_OZONE)
@@ -268,8 +268,9 @@ class RenderViewImplTest : public RenderViewTest {
     NativeWebKeyboardEvent keyup_web_event(keyup_event);
     SendNativeKeyEvent(keyup_web_event);
 
-    long c = GetCharacterFromKeyCode(static_cast<ui::KeyboardCode>(key_code),
-                                     flags);
+    long c = DomCodeToUsLayoutCharacter(
+        UsLayoutKeyboardCodeToDomCode(static_cast<ui::KeyboardCode>(key_code)),
+        flags);
     output->assign(1, static_cast<base::char16>(c));
     return 1;
 #else
@@ -331,7 +332,7 @@ class RenderViewImplBlinkSettingsTest : public RenderViewImplTest {
     RenderViewImplTest::SetUp();
   }
 
-  const blink::WebSettings* settings() {
+  blink::WebSettings* settings() {
     return view()->webview()->settings();
   }
 
@@ -381,8 +382,8 @@ TEST_F(RenderViewImplTest, SaveImageFromDataURL) {
 
   ViewHostMsg_SaveImageFromDataURL::Param param1;
   ViewHostMsg_SaveImageFromDataURL::Read(msg2, &param1);
-  EXPECT_EQ(base::get<1>(param1).length(), image_data_url.length());
-  EXPECT_EQ(base::get<1>(param1), image_data_url);
+  EXPECT_EQ(base::get<2>(param1).length(), image_data_url.length());
+  EXPECT_EQ(base::get<2>(param1), image_data_url);
 
   ProcessPendingMessages();
   render_thread_->sink().ClearMessages();
@@ -397,8 +398,8 @@ TEST_F(RenderViewImplTest, SaveImageFromDataURL) {
 
   ViewHostMsg_SaveImageFromDataURL::Param param2;
   ViewHostMsg_SaveImageFromDataURL::Read(msg3, &param2);
-  EXPECT_EQ(base::get<1>(param2).length(), large_data_url.length());
-  EXPECT_EQ(base::get<1>(param2), large_data_url);
+  EXPECT_EQ(base::get<2>(param2).length(), large_data_url.length());
+  EXPECT_EQ(base::get<2>(param2), large_data_url);
 
   ProcessPendingMessages();
   render_thread_->sink().ClearMessages();
@@ -1763,7 +1764,6 @@ TEST_F(RenderViewImplTest, TestBackForward) {
 
 #if defined(OS_MACOSX) || defined(USE_AURA)
 TEST_F(RenderViewImplTest, GetCompositionCharacterBoundsTest) {
-
 #if defined(OS_WIN)
   // http://crbug.com/304193
   if (base::win::GetVersion() < base::win::VERSION_VISTA)
@@ -2367,15 +2367,24 @@ TEST_F(RenderViewImplTest, HistoryIsProperlyUpdatedOnNavigation) {
 
 TEST_F(RenderViewImplBlinkSettingsTest, Default) {
   DoSetUp();
-  EXPECT_EQ(blink::WebSettings::HoverTypeNone, settings()->primaryHoverType());
   EXPECT_FALSE(settings()->viewportEnabled());
 }
 
 TEST_F(RenderViewImplBlinkSettingsTest, CommandLine) {
   base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-      switches::kBlinkSettings, "primaryHoverType=4,viewportEnabled=true");
+      switches::kBlinkSettings,
+      "multiTargetTapNotificationEnabled=true,viewportEnabled=true");
   DoSetUp();
-  EXPECT_EQ(blink::WebSettings::HoverTypeHover, settings()->primaryHoverType());
+  EXPECT_TRUE(settings()->multiTargetTapNotificationEnabled());
+  EXPECT_TRUE(settings()->viewportEnabled());
+}
+
+TEST_F(RenderViewImplBlinkSettingsTest, Negative) {
+  base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kBlinkSettings,
+      "multiTargetTapNotificationEnabled=false,viewportEnabled=true");
+  DoSetUp();
+  EXPECT_FALSE(settings()->multiTargetTapNotificationEnabled());
   EXPECT_TRUE(settings()->viewportEnabled());
 }
 

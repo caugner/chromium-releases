@@ -5,6 +5,7 @@
 #include "extensions/renderer/dispatcher.h"
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/containers/scoped_ptr_map.h"
@@ -17,7 +18,6 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/synchronization/lock.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "content/grit/content_resources.h"
@@ -91,6 +91,7 @@
 #include "extensions/renderer/v8_context_native_handler.h"
 #include "extensions/renderer/v8_helpers.h"
 #include "extensions/renderer/wake_event_page.h"
+#include "extensions/renderer/worker_script_context_set.h"
 #include "grit/extensions_renderer_resources.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
@@ -192,41 +193,13 @@ class ChromeNativeHandler : public ObjectBackedNativeHandler {
   }
 };
 
-class ServiceWorkerScriptContextSet {
- public:
-  ServiceWorkerScriptContextSet() {}
-  ~ServiceWorkerScriptContextSet() {}
-
-  void Insert(const GURL& url, scoped_ptr<ScriptContext> context) {
-    base::AutoLock lock(lock_);
-    scoped_ptr<ScriptContext> existing = script_contexts_.take_and_erase(url);
-    // This should be CHECK(!existing), but can't until these ScriptContexts
-    // are keyed on v8::Contexts rather than URLs. See crbug.com/525965.
-    if (existing)
-      existing->Invalidate();
-    script_contexts_.set(url, context.Pass());
-  }
-
-  void Remove(const GURL& url) {
-    base::AutoLock lock(lock_);
-    scoped_ptr<ScriptContext> context = script_contexts_.take_and_erase(url);
-    CHECK(context);
-    context->Invalidate();
-  }
-
- private:
-  base::ScopedPtrMap<GURL, scoped_ptr<ScriptContext>> script_contexts_;
-
-  mutable base::Lock lock_;
-
-  DISALLOW_COPY_AND_ASSIGN(ServiceWorkerScriptContextSet);
-};
-
-base::LazyInstance<ServiceWorkerScriptContextSet>
-    g_service_worker_script_context_set = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<WorkerScriptContextSet> g_worker_script_context_set =
+    LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
+// Note that we can't use Blink public APIs in the constructor becase Blink
+// is not initialized at the point we create Dispatcher.
 Dispatcher::Dispatcher(DispatcherDelegate* delegate)
     : delegate_(delegate),
       content_watcher_(new ContentWatcher()),
@@ -253,38 +226,7 @@ Dispatcher::Dispatcher(DispatcherDelegate* delegate)
   user_script_set_manager_observer_.Add(user_script_set_manager_.get());
   request_sender_.reset(new RequestSender(this));
   PopulateSourceMap();
-  WakeEventPage::Get()->Init(content::RenderThread::Get());
-
-  // chrome-extensions: and chrome-extensions-resource: schemes should be
-  // treated as secure because communication with them is entirely in the
-  // browser, so there is no danger of manipulation or eavesdropping on
-  // communication with them by third parties.
-  WebString extension_scheme(base::ASCIIToUTF16(kExtensionScheme));
-  blink::WebSecurityPolicy::registerURLSchemeAsSecure(extension_scheme);
-
-  WebString extension_resource_scheme(base::ASCIIToUTF16(
-      kExtensionResourceScheme));
-  blink::WebSecurityPolicy::registerURLSchemeAsSecure(
-      extension_resource_scheme);
-
-  // chrome-extension: and chrome-extension-resource: resources should be
-  // allowed to receive CORS requests.
-  WebSecurityPolicy::registerURLSchemeAsCORSEnabled(extension_scheme);
-  WebSecurityPolicy::registerURLSchemeAsCORSEnabled(extension_resource_scheme);
-
-  // chrome-extension: resources should bypass Content Security Policy checks
-  // when included in protected resources.
-  WebSecurityPolicy::registerURLSchemeAsBypassingContentSecurityPolicy(
-      extension_scheme);
-  WebSecurityPolicy::registerURLSchemeAsBypassingContentSecurityPolicy(
-      extension_resource_scheme);
-
-  // Extension resources, when loaded as the top-level document, should
-  // bypass Blink's strict first-party origin checks.
-  WebSecurityPolicy::registerURLSchemeAsFirstPartyWhenTopLevel(
-      extension_scheme);
-  WebSecurityPolicy::registerURLSchemeAsFirstPartyWhenTopLevel(
-      extension_resource_scheme);
+  WakeEventPage::Get()->Init(RenderThread::Get());
 }
 
 Dispatcher::~Dispatcher() {
@@ -403,15 +345,36 @@ void Dispatcher::DidInitializeServiceWorkerContextOnWorkerThread(
   const Extension* extension =
       RendererExtensionRegistry::Get()->GetExtensionOrAppByURL(url);
 
-  if (!extension)
+  if (!extension) {
+    // TODO(kalman): This is no good. Instead we need to either:
+    //
+    // - Hold onto the v8::Context and create the ScriptContext and install
+    //   our bindings when this extension is loaded.
+    // - Deal with there being an extension ID (url.host()) but no
+    //   extension associated with it, then document that getBackgroundClient
+    //   may fail if the extension hasn't loaded yet.
+    //
+    // The former is safer, but is unfriendly to caching (e.g. session restore).
+    // It seems to contradict the service worker idiom.
+    //
+    // The latter is friendly to caching, but running extension code without an
+    // installed extension makes me nervous, and means that we won't be able to
+    // expose arbitrary (i.e. capability-checked) extension APIs to service
+    // workers. We will probably need to relax some assertions - we just need
+    // to find them.
+    //
+    // Perhaps this could be solved with our own event on the service worker
+    // saying that an extension is ready, and documenting that extension APIs
+    // won't work before that event has fired?
     return;
+  }
 
   ScriptContext* context = new ScriptContext(
       v8_context, nullptr, extension, Feature::SERVICE_WORKER_CONTEXT,
       extension, Feature::SERVICE_WORKER_CONTEXT);
+  context->set_url(url);
 
-  g_service_worker_script_context_set.Get().Insert(url,
-                                                   make_scoped_ptr(context));
+  g_worker_script_context_set.Get().Insert(make_scoped_ptr(context));
 
   v8::Isolate* isolate = context->isolate();
 
@@ -422,17 +385,34 @@ void Dispatcher::DidInitializeServiceWorkerContextOnWorkerThread(
   v8::Local<v8::String> script = v8::String::NewExternal(
       isolate, new StaticV8ExternalOneByteStringResource(script_resource));
 
-  // Run the script to get the main function, then run the main function to
-  // inject service worker bindings.
-  v8::Local<v8::Value> result = context->RunScript(
-      v8_helpers::ToV8StringUnsafe(isolate, "service_worker"), script,
-      base::Bind(&CrashOnException));
-  CHECK(result->IsFunction());
+  // Run service_worker.js to get the main function.
+  v8::Local<v8::Function> main_function;
+  {
+    v8::Local<v8::Value> result = context->RunScript(
+        v8_helpers::ToV8StringUnsafe(isolate, "service_worker"), script,
+        base::Bind(&CrashOnException));
+    CHECK(result->IsFunction());
+    main_function = result.As<v8::Function>();
+  }
+
+  // Expose CHECK/DCHECK/NOTREACHED to the main function with a
+  // LoggingNativeHandler. Admire the neat base::Bind trick to both Invalidate
+  // and delete the native handler.
+  LoggingNativeHandler* logging = new LoggingNativeHandler(context);
+  context->AddInvalidationObserver(
+      base::Bind(&NativeHandler::Invalidate, base::Owned(logging)));
+
+  // Execute the main function with its dependencies passed in as arguments.
   v8::Local<v8::Value> args[] = {
+      // The extension's background URL.
       v8_helpers::ToV8StringUnsafe(
           isolate, BackgroundInfo::GetBackgroundURL(extension).spec()),
+      // The wake-event-page native function.
+      WakeEventPage::Get()->GetForContext(context),
+      // The logging module.
+      logging->NewInstance(),
   };
-  context->CallFunction(result.As<v8::Function>(), arraysize(args), args);
+  context->CallFunction(main_function, arraysize(args), args);
 
   const base::TimeDelta elapsed = base::TimeTicks::Now() - start_time;
   UMA_HISTOGRAM_TIMES(
@@ -457,11 +437,12 @@ void Dispatcher::WillReleaseScriptContext(
 
 // static
 void Dispatcher::WillDestroyServiceWorkerContextOnWorkerThread(
+    v8::Local<v8::Context> v8_context,
     const GURL& url) {
   if (url.SchemeIs(kExtensionScheme) ||
       url.SchemeIs(kExtensionResourceScheme)) {
     // See comment in DidInitializeServiceWorkerContextOnWorkerThread.
-    g_service_worker_script_context_set.Get().Remove(url);
+    g_worker_script_context_set.Get().Remove(v8_context, url);
   }
 }
 
@@ -857,10 +838,11 @@ bool Dispatcher::OnControlMessageReceived(const IPC::Message& message) {
   IPC_MESSAGE_HANDLER(ExtensionMsg_Loaded, OnLoaded)
   IPC_MESSAGE_HANDLER(ExtensionMsg_MessageInvoke, OnMessageInvoke)
   IPC_MESSAGE_HANDLER(ExtensionMsg_SetChannel, OnSetChannel)
-  IPC_MESSAGE_HANDLER(ExtensionMsg_SetFunctionNames, OnSetFunctionNames)
   IPC_MESSAGE_HANDLER(ExtensionMsg_SetScriptingWhitelist,
                       OnSetScriptingWhitelist)
   IPC_MESSAGE_HANDLER(ExtensionMsg_SetSystemFont, OnSetSystemFont)
+  IPC_MESSAGE_HANDLER(ExtensionMsg_SetWebViewPartitionID,
+                      OnSetWebViewPartitionID)
   IPC_MESSAGE_HANDLER(ExtensionMsg_ShouldSuspend, OnShouldSuspend)
   IPC_MESSAGE_HANDLER(ExtensionMsg_Suspend, OnSuspend)
   IPC_MESSAGE_HANDLER(ExtensionMsg_TransferBlobs, OnTransferBlobs)
@@ -883,10 +865,42 @@ bool Dispatcher::OnControlMessageReceived(const IPC::Message& message) {
 void Dispatcher::WebKitInitialized() {
   RenderThread::Get()->RegisterExtension(SafeBuiltins::CreateV8Extension());
 
+  // WebSecurityPolicy whitelists. They should be registered for both
+  // chrome-extension: and chrome-extension-resource.
+  using RegisterFunction = void (*)(const WebString&);
+  RegisterFunction register_functions[] = {
+      // Treat as secure because communication with them is entirely in the
+      // browser, so there is no danger of manipulation or eavesdropping on
+      // communication with them by third parties.
+      WebSecurityPolicy::registerURLSchemeAsSecure,
+      // As far as Blink is concerned, they should be allowed to receive CORS
+      // requests. At the Extensions layer, requests will actually be blocked
+      // unless overridden by the web_accessible_resources manifest key.
+      // TODO(kalman): See what happens with a service worker.
+      WebSecurityPolicy::registerURLSchemeAsCORSEnabled,
+      // Resources should bypass Content Security Policy checks when included in
+      // protected resources. TODO(kalman): What are "protected resources"?
+      WebSecurityPolicy::registerURLSchemeAsBypassingContentSecurityPolicy,
+      // Extension resources are HTTP-like and safe to expose to the fetch API.
+      // The rules for the fetch API are consistent with XHR.
+      WebSecurityPolicy::registerURLSchemeAsSupportingFetchAPI,
+      // Extension resources, when loaded as the top-level document, should
+      // bypass Blink's strict first-party origin checks.
+      WebSecurityPolicy::registerURLSchemeAsFirstPartyWhenTopLevel,
+  };
+
+  WebString extension_scheme(base::ASCIIToUTF16(kExtensionScheme));
+  WebString extension_resource_scheme(base::ASCIIToUTF16(
+      kExtensionResourceScheme));
+  for (RegisterFunction func : register_functions) {
+    func(extension_scheme);
+    func(extension_resource_scheme);
+  }
+
   // For extensions, we want to ensure we call the IdleHandler every so often,
   // even if the extension keeps up activity.
   if (set_idle_notifications_) {
-    forced_idle_timer_.reset(new base::RepeatingTimer<content::RenderThread>);
+    forced_idle_timer_.reset(new base::RepeatingTimer);
     forced_idle_timer_->Start(
         FROM_HERE,
         base::TimeDelta::FromMilliseconds(kMaxExtensionIdleHandlerDelayMs),
@@ -1055,13 +1069,6 @@ void Dispatcher::OnMessageInvoke(const std::string& extension_id,
 
 void Dispatcher::OnSetChannel(int channel) {
   delegate_->SetChannel(channel);
-  AddChannelSpecificFeatures();
-}
-
-void Dispatcher::OnSetFunctionNames(const std::vector<std::string>& names) {
-  function_names_.clear();
-  for (size_t i = 0; i < names.size(); ++i)
-    function_names_.insert(names[i]);
 }
 
 void Dispatcher::OnSetScriptingWhitelist(
@@ -1073,6 +1080,12 @@ void Dispatcher::OnSetSystemFont(const std::string& font_family,
                                  const std::string& font_size) {
   system_font_family_ = font_family;
   system_font_size_ = font_size;
+}
+
+void Dispatcher::OnSetWebViewPartitionID(const std::string& partition_id) {
+  // |webview_partition_id_| cannot be changed once set.
+  CHECK(webview_partition_id_.empty() || webview_partition_id_ == partition_id);
+  webview_partition_id_ = partition_id;
 }
 
 void Dispatcher::OnShouldSuspend(const std::string& extension_id,
@@ -1139,9 +1152,9 @@ void Dispatcher::OnUpdatePermissions(
   if (!extension)
     return;
 
-  scoped_refptr<const PermissionSet> active =
+  scoped_ptr<const PermissionSet> active =
       params.active_permissions.ToPermissionSet();
-  scoped_refptr<const PermissionSet> withheld =
+  scoped_ptr<const PermissionSet> withheld =
       params.withheld_permissions.ToPermissionSet();
 
   if (is_webkit_initialized_) {
@@ -1151,7 +1164,7 @@ void Dispatcher::OnUpdatePermissions(
         active->effective_hosts());
   }
 
-  extension->permissions_data()->SetPermissions(active, withheld);
+  extension->permissions_data()->SetPermissions(active.Pass(), withheld.Pass());
   UpdateBindings(extension->id());
 }
 
@@ -1169,10 +1182,9 @@ void Dispatcher::OnUpdateTabSpecificPermissions(const GURL& visible_url,
       extension->permissions_data()->GetEffectiveHostPermissions();
   extension->permissions_data()->UpdateTabSpecificPermissions(
       tab_id,
-      new extensions::PermissionSet(extensions::APIPermissionSet(),
-                                    extensions::ManifestPermissionSet(),
-                                    new_hosts,
-                                    extensions::URLPatternSet()));
+      extensions::PermissionSet(extensions::APIPermissionSet(),
+                                extensions::ManifestPermissionSet(), new_hosts,
+                                extensions::URLPatternSet()));
 
   if (is_webkit_initialized_ && update_origin_whitelist) {
     UpdateOriginPermissions(
@@ -1429,7 +1441,7 @@ bool Dispatcher::IsRuntimeAvailableToContext(ScriptContext* context) {
        *RendererExtensionRegistry::Get()->GetMainThreadExtensionSet()) {
     ExternallyConnectableInfo* info = static_cast<ExternallyConnectableInfo*>(
         extension->GetManifestData(manifest_keys::kExternallyConnectable));
-    if (info && info->matches.MatchesURL(context->GetURL()))
+    if (info && info->matches.MatchesURL(context->url()))
       return true;
   }
   return false;
@@ -1441,13 +1453,13 @@ void Dispatcher::UpdateContentCapabilities(ScriptContext* context) {
        *RendererExtensionRegistry::Get()->GetMainThreadExtensionSet()) {
     const ContentCapabilitiesInfo& info =
         ContentCapabilitiesInfo::Get(extension.get());
-    if (info.url_patterns.MatchesURL(context->GetURL())) {
+    if (info.url_patterns.MatchesURL(context->url())) {
       APIPermissionSet new_permissions;
       APIPermissionSet::Union(permissions, info.permissions, &new_permissions);
       permissions = new_permissions;
     }
   }
-  context->SetContentCapabilities(permissions);
+  context->set_content_capabilities(permissions);
 }
 
 void Dispatcher::PopulateSourceMap() {
@@ -1585,15 +1597,6 @@ void Dispatcher::RequireGuestViewModules(ScriptContext* context) {
   if (context_type == Feature::BLESSED_EXTENSION_CONTEXT) {
     module_system->Require("guestViewDeny");
   }
-}
-
-void Dispatcher::AddChannelSpecificFeatures() {
-  // chrome-extension: resources should be allowed to register a Service Worker.
-  if (FeatureProvider::GetBehaviorFeature(BehaviorFeature::kServiceWorker)
-          ->IsAvailableToEnvironment()
-          .is_available())
-    WebSecurityPolicy::registerURLSchemeAsAllowingServiceWorkers(
-        WebString::fromUTF8(kExtensionScheme));
 }
 
 }  // namespace extensions

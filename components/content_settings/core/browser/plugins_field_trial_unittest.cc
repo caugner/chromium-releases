@@ -9,8 +9,8 @@
 #include "base/metrics/field_trial.h"
 #include "base/test/mock_entropy_provider.h"
 #include "components/content_settings/core/browser/content_settings_default_provider.h"
+#include "components/content_settings/core/browser/content_settings_registry.h"
 #include "components/content_settings/core/browser/website_settings_info.h"
-#include "components/content_settings/core/browser/website_settings_registry.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/plugins/common/plugins_switches.h"
 #include "components/pref_registry/testing_pref_service_syncable.h"
@@ -78,22 +78,21 @@ TEST_F(PluginsFieldTrialTest, SwitchOverridesFieldTrial2) {
   EXPECT_FALSE(PluginsFieldTrial::IsPluginPowerSaverEnabled());
 }
 
-// Disabled on iOS due to flakiness. https://crbug.com/523462
-#if defined(OS_IOS)
-#define MAYBE_NoPrefLeftBehind DISABLED_NoPrefLeftBehind
-#else
-#define MAYBE_NoPrefLeftBehind NoPrefLeftBehind
-#endif
-TEST_F(PluginsFieldTrialTest, MAYBE_NoPrefLeftBehind) {
+TEST_F(PluginsFieldTrialTest, NoPrefLeftBehind) {
   ASSERT_TRUE(FieldTrialList::CreateFieldTrial(kEnableFieldTrial, "Enabled"));
+  // We need to reset the ContentSettingsRegistry as its construction depends on
+  // the field trial created above.
+  ContentSettingsRegistry::GetInstance()->ResetForTest();
+
   user_prefs::TestingPrefServiceSyncable prefs;
   {
     DefaultProvider::RegisterProfilePrefs(prefs.registry());
     DefaultProvider default_provider(&prefs, false);
   }
   const std::string& default_plugin_setting_pref_name =
-      WebsiteSettingsRegistry::GetInstance()
+      ContentSettingsRegistry::GetInstance()
           ->Get(CONTENT_SETTINGS_TYPE_PLUGINS)
+          ->website_settings_info()
           ->default_value_pref_name();
   EXPECT_EQ(CONTENT_SETTING_DETECT_IMPORTANT_CONTENT,
             prefs.GetInteger(default_plugin_setting_pref_name));

@@ -274,6 +274,15 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                          bool debug,
                          FilteredURLList* result);
 
+  // Statistics ----------------------------------------------------------------
+
+  // Gets the number of URLs as seen in chrome://history within the time range
+  // [|begin_time|, |end_time|). Each URL is counted only once per day. For
+  // determination of the date, timestamps are converted to dates using local
+  // time.
+  HistoryCountResult GetHistoryCount(const base::Time& begin_time,
+                                     const base::Time& end_time);
+
   // Favicon -------------------------------------------------------------------
 
   void GetFavicons(
@@ -557,7 +566,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   friend class ::TestingProfile;
 
   // Computes the name of the specified database on disk.
-  base::FilePath GetArchivedFileName() const;
   base::FilePath GetThumbnailFileName() const;
 
   // Returns the name of the Favicons database. This is the new name

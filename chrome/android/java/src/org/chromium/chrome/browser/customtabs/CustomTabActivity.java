@@ -33,14 +33,15 @@ import org.chromium.chrome.browser.appmenu.AppMenuPropertiesDelegate;
 import org.chromium.chrome.browser.appmenu.ChromeAppMenuPropertiesDelegate;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel.StateChangeReason;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManagerDocument;
-import org.chromium.chrome.browser.document.BrandColorUtils;
 import org.chromium.chrome.browser.rappor.RapporServiceBridge;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.SingleTabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.toolbar.ToolbarControlContainer;
+import org.chromium.chrome.browser.util.ColorUtils;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.chrome.browser.widget.findinpage.FindToolbarManager;
+import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.common.Referrer;
 
@@ -158,9 +159,10 @@ public class CustomTabActivity extends ChromeActivity {
                 == CustomTabIntentDataProvider.SHOW_PAGE_TITLE);
         int toolbarColor = mIntentDataProvider.getToolbarColor();
         getToolbarManager().updatePrimaryColor(toolbarColor);
-        if (toolbarColor != getResources().getColor(R.color.default_primary_color)) {
+        if (toolbarColor != ApiCompatibilityUtils.getColor(
+                getResources(), R.color.default_primary_color)) {
             ApiCompatibilityUtils.setStatusBarColor(getWindow(),
-                    BrandColorUtils.computeStatusBarColor(toolbarColor));
+                    ColorUtils.getDarkenedColorForStatusBar(toolbarColor));
         }
 
         // Setting task title and icon to be null will preserve the client app's title and icon.
@@ -182,8 +184,7 @@ public class CustomTabActivity extends ChromeActivity {
         // If extra headers have been passed, cancel any current prerender, as
         // prerendering doesn't support extra headers.
         if (IntentHandler.getExtraHeadersFromIntent(getIntent()) != null) {
-            CustomTabsConnection.getInstance(getApplication())
-                    .takePrerenderedUrl(mSession, "", null);
+            CustomTabsConnection.getInstance(getApplication()).cancelPrerender(mSession);
         }
 
         mTab = new CustomTab(this, getWindowAndroid(), mSession, url, referrerUrl,
@@ -344,6 +345,9 @@ public class CustomTabActivity extends ChromeActivity {
     @Override
     protected boolean handleBackPressed() {
         if (mTab == null) return false;
+
+        if (exitFullscreenIfShowing()) return true;
+
         if (mTab.canGoBack()) {
             mTab.goBack();
         } else {
@@ -379,6 +383,12 @@ public class CustomTabActivity extends ChromeActivity {
     }
 
     @Override
+    protected void showAppMenuForKeyboardEvent() {
+        if (!shouldShowAppMenu()) return;
+        super.showAppMenuForKeyboardEvent();
+    }
+
+    @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         int menuIndex = getAppMenuPropertiesDelegate().getIndexOfMenuItem(item);
         if (menuIndex >= 0) {
@@ -398,14 +408,27 @@ public class CustomTabActivity extends ChromeActivity {
     }
 
     @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (!getToolbarManager().isInitialized()) {
+            return super.onKeyDown(keyCode, event);
+        }
+        return KeyboardShortcuts.onKeyDown(event, this, true, false)
+                || super.onKeyDown(keyCode, event);
+    }
+
+    @Override
     public boolean onMenuOrKeyboardAction(int id, boolean fromMenu) {
-        if (id == R.id.show_menu) {
-            if (shouldShowAppMenu()) {
-                getAppMenuHandler().showAppMenu(null, false);
-                return true;
-            }
+        // Disable creating new tabs, bookmark, history, print, help, focus_url, etc.
+        if (id == R.id.focus_url_bar || id == R.id.all_bookmarks_menu_id
+                || id == R.id.bookmark_this_page_id || id == R.id.print_id || id == R.id.help_id
+                || id == R.id.recent_tabs_menu_id || id == R.id.new_incognito_tab_menu_id
+                || id == R.id.new_tab_menu_id) {
+            return true;
         } else if (id == R.id.open_in_chrome_id) {
             String url = getTabModelSelector().getCurrentTab().getUrl();
+            if (DomDistillerUrlUtils.isDistilledPage(url)) {
+                url = DomDistillerUrlUtils.getOriginalUrlFromDistillerUrl(url);
+            }
             Intent chromeIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
             chromeIntent.setPackage(getApplicationContext().getPackageName());
             chromeIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -423,11 +446,13 @@ public class CustomTabActivity extends ChromeActivity {
                 RecordUserAction.record("MobileShortcutFindInPage");
             }
             return true;
-        } else if (id == R.id.focus_url_bar) {
-            // Do nothing because url bar in custom tabs is not editable.
-            return true;
         }
         return super.onMenuOrKeyboardAction(id, fromMenu);
+    }
+
+    @Override
+    protected void setStatusBarColor(Tab tab, int color) {
+        // Intentionally do nothing as CustomTabActivity explicitly sets status bar color.
     }
 
     /**

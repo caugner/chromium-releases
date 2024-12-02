@@ -53,6 +53,8 @@
         'signin/core/browser/about_signin_internals.h',
         'signin/core/browser/account_fetcher_service.cc',
         'signin/core/browser/account_fetcher_service.h',
+        'signin/core/browser/account_info.cc',
+        'signin/core/browser/account_info.h',
         'signin/core/browser/account_info_fetcher.cc',
         'signin/core/browser/account_info_fetcher.h',
         'signin/core/browser/account_reconcilor.cc',
@@ -184,6 +186,7 @@
           'target_name': 'signin_ios_browser',
           'type': 'static_library',
           'dependencies': [
+            '../ios/web/ios_web.gyp:ios_web',
             'signin_core_browser',
           ],
           'include_dirs': [
@@ -191,6 +194,9 @@
           ],
           'sources': [
             # Note: file list duplicated in GN build.
+            'signin/ios/browser/account_consistency_service.h',
+            'signin/ios/browser/account_consistency_service.mm',
+            'signin/ios/browser/manage_accounts_delegate.h',
             'signin/ios/browser/merge_session_observer_bridge.h',
             'signin/ios/browser/merge_session_observer_bridge.mm',
             'signin/ios/browser/oauth2_token_service_observer_bridge.h',

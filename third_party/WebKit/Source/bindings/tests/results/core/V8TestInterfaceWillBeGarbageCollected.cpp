@@ -110,7 +110,7 @@ static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info)
 
 } // namespace TestInterfaceWillBeGarbageCollectedV8Internal
 
-static const V8DOMConfiguration::AccessorConfiguration V8TestInterfaceWillBeGarbageCollectedAccessors[] = {
+const V8DOMConfiguration::AccessorConfiguration V8TestInterfaceWillBeGarbageCollectedAccessors[] = {
     {"attr1", TestInterfaceWillBeGarbageCollectedV8Internal::attr1AttributeGetterCallback, TestInterfaceWillBeGarbageCollectedV8Internal::attr1AttributeSetterCallback, 0, 0, 0, v8::DEFAULT, static_cast<v8::PropertyAttribute>(v8::DontDelete), V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnInstance, V8DOMConfiguration::CheckHolder},
 };
 
@@ -201,10 +201,10 @@ static void installV8TestInterfaceWillBeGarbageCollectedTemplate(v8::Local<v8::F
     ALLOW_UNUSED_LOCAL(instanceTemplate);
     v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
     ALLOW_UNUSED_LOCAL(prototypeTemplate);
-    const V8DOMConfiguration::MethodConfiguration funcMethodConfiguration = {
-        "func", TestInterfaceWillBeGarbageCollectedV8Internal::funcMethodCallback, 0, 1, V8DOMConfiguration::ExposedToAllScripts,
-    };
-    V8DOMConfiguration::installMethod(isolate, instanceTemplate, defaultSignature, static_cast<v8::PropertyAttribute>(v8::DontDelete | v8::ReadOnly), funcMethodConfiguration);
+    ExecutionContext* context = currentExecutionContext(isolate);
+    ALLOW_UNUSED_LOCAL(context);
+    const V8DOMConfiguration::MethodConfiguration funcMethodConfiguration = {"func", TestInterfaceWillBeGarbageCollectedV8Internal::funcMethodCallback, 0, 1, V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnInstance};
+    V8DOMConfiguration::installMethod(isolate, instanceTemplate, prototypeTemplate, functionTemplate, defaultSignature, static_cast<v8::PropertyAttribute>(v8::ReadOnly | v8::DontDelete), funcMethodConfiguration);
 
     // Custom toString template
     functionTemplate->Set(v8AtomicString(isolate, "toString"), V8PerIsolateData::from(isolate)->toStringTemplate());

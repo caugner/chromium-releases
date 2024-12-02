@@ -104,9 +104,8 @@ LocationBarViewMac::LocationBarViewMac(AutocompleteTextField* field,
           new ManagePasswordsDecoration(command_updater, this)),
       browser_(browser),
       weak_ptr_factory_(this) {
-  for (size_t i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
-    DCHECK_EQ(i, content_setting_decorations_.size());
-    ContentSettingsType type = static_cast<ContentSettingsType>(i);
+  for (ContentSettingsType type :
+       ContentSettingBubbleModel::GetSupportedBubbleTypes()) {
     content_setting_decorations_.push_back(
         new ContentSettingDecoration(type, this, profile));
   }
@@ -423,7 +422,7 @@ void LocationBarViewMac::Layout() {
     selected_keyword_decoration_->SetKeyword(short_name, is_extension_keyword);
     selected_keyword_decoration_->SetImage(GetKeywordImage(keyword));
   } else if (chrome_toolbar_model->GetSecurityLevel(false) ==
-             connection_security::EV_SECURE) {
+             SecurityStateModel::EV_SECURE) {
     // Switch from location icon to show the EV bubble instead.
     location_icon_decoration_->SetVisible(false);
     ev_bubble_decoration_->SetVisible(true);

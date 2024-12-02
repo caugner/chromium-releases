@@ -518,26 +518,30 @@ bool ExtensionService::UpdateExtension(const extensions::CRXFileInfo& file,
     return false;
   }
 
-  scoped_refptr<CrxInstaller> installer(
-      CrxInstaller::Create(this, scoped_ptr<ExtensionInstallPrompt>()));
+  scoped_refptr<CrxInstaller> installer(CrxInstaller::CreateSilent(this));
   installer->set_expected_id(id);
   installer->set_expected_hash(file.expected_hash);
   int creation_flags = Extension::NO_FLAGS;
   if (pending_extension_info) {
     installer->set_install_source(pending_extension_info->install_source());
     installer->set_allow_silent_install(true);
-    if (pending_extension_info->remote_install())
+    // If the extension came in disabled due to a permission increase, then
+    // don't grant it all the permissions. crbug.com/484214
+    bool has_permissions_increase =
+        extensions::ExtensionPrefs::Get(profile_)->HasDisableReason(
+            id, Extension::DISABLE_PERMISSIONS_INCREASE);
+    const base::Version& expected_version = pending_extension_info->version();
+    if (has_permissions_increase ||
+        pending_extension_info->remote_install() ||
+        !expected_version.IsValid()) {
       installer->set_grant_permissions(false);
+    } else {
+      installer->set_expected_version(expected_version,
+                                      false /* fail_install_if_unexpected */);
+    }
     creation_flags = pending_extension_info->creation_flags();
     if (pending_extension_info->mark_acknowledged())
       external_install_manager_->AcknowledgeExternalExtension(id);
-
-    // If the extension came in disabled due to a permission increase, then
-    // don't grant it all the permissions. crbug.com/484214
-    if (extensions::ExtensionPrefs::Get(profile_)->HasDisableReason(
-            id, Extension::DISABLE_PERMISSIONS_INCREASE)) {
-      installer->set_grant_permissions(false);
-    }
   } else if (extension) {
     installer->set_install_source(extension->location());
   }
@@ -763,12 +767,6 @@ bool ExtensionService::UninstallExtension(
   ExtensionRegistry::Get(profile_)
       ->TriggerOnUninstalled(extension.get(), reason);
 
-  // Don't sync the uninstall if we're going to reinstall the extension
-  // momentarily.
-  if (reason != extensions::UNINSTALL_REASON_REINSTALL) {
-    ExtensionSyncService::Get(profile_)->SyncUninstallExtension(*extension);
-  }
-
   delayed_installs_.Remove(extension->id());
 
   extension_prefs_->OnExtensionUninstalled(
@@ -834,11 +832,9 @@ void ExtensionService::EnableExtension(const std::string& extension_id) {
     return;
   }
 
-  extension_prefs_->SetExtensionState(extension_id, Extension::ENABLED);
-  extension_prefs_->ClearDisableReasons(extension_id);
+  extension_prefs_->SetExtensionEnabled(extension_id);
 
-  // This can happen if sync enables an extension that is not
-  // installed yet.
+  // This can happen if sync enables an extension that is not installed yet.
   if (!extension)
     return;
 
@@ -853,15 +849,13 @@ void ExtensionService::EnableExtension(const std::string& extension_id) {
       extensions::NOTIFICATION_EXTENSION_ENABLED,
       content::Source<Profile>(profile_),
       content::Details<const Extension>(extension));
-
-  ExtensionSyncService::Get(profile_)->SyncExtensionChangeIfNeeded(*extension);
 }
 
 void ExtensionService::DisableExtension(const std::string& extension_id,
                                         int disable_reasons) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  // The extension may have been disabled already. Just add a disable reason.
+  // The extension may have been disabled already. Just add the disable reasons.
   if (!IsExtensionEnabled(extension_id)) {
     extension_prefs_->AddDisableReasons(extension_id, disable_reasons);
     return;
@@ -881,8 +875,7 @@ void ExtensionService::DisableExtension(const std::string& extension_id,
     return;
   }
 
-  extension_prefs_->SetExtensionState(extension_id, Extension::DISABLED);
-  extension_prefs_->AddDisableReasons(extension_id, disable_reasons);
+  extension_prefs_->SetExtensionDisabled(extension_id, disable_reasons);
 
   int include_mask =
       ExtensionRegistry::EVERYTHING & ~ExtensionRegistry::DISABLED;
@@ -903,8 +896,6 @@ void ExtensionService::DisableExtension(const std::string& extension_id,
   } else {
     registry_->RemoveTerminated(extension->id());
   }
-
-  ExtensionSyncService::Get(profile_)->SyncExtensionChangeIfNeeded(*extension);
 }
 
 void ExtensionService::DisableUserExtensions(
@@ -1010,7 +1001,7 @@ void ExtensionService::RecordPermissionMessagesHistogram(
 
   PermissionIDSet permissions =
       extensions::PermissionMessageProvider::Get()->GetAllPermissionIDs(
-          extension->permissions_data()->active_permissions().get(),
+          extension->permissions_data()->active_permissions(),
           extension->GetType());
   counter_has_any->AddBoolean(!permissions.empty());
   for (const PermissionID& id : permissions)
@@ -1264,14 +1255,7 @@ void ExtensionService::CheckForUpdatesSoon() {
   if (!updater_.get())
     return;
 
-  if (AreAllExternalProvidersReady()) {
     updater_->CheckSoon();
-  } else {
-    // Sync can start updating before all the external providers are ready
-    // during startup. Start the update as soon as those providers are ready,
-    // but not before.
-    update_once_all_providers_are_ready_ = true;
-  }
 }
 
 // Some extensions will autoupdate themselves externally from Chrome.  These
@@ -1506,8 +1490,6 @@ void ExtensionService::AddExtension(const Extension* extension) {
   } else if (!reloading &&
              extension_prefs_->IsExtensionDisabled(extension->id())) {
     registry_->AddDisabled(extension);
-    ExtensionSyncService::Get(profile_)->SyncExtensionChangeIfNeeded(
-        *extension);
     content::NotificationService::current()->Notify(
         extensions::NOTIFICATION_EXTENSION_UPDATE_DISABLED,
         content::Source<Profile>(profile_),
@@ -1544,8 +1526,6 @@ void ExtensionService::AddExtension(const Extension* extension) {
     }
 
     registry_->AddEnabled(extension);
-    ExtensionSyncService::Get(profile_)->SyncExtensionChangeIfNeeded(
-        *extension);
     NotifyExtensionLoaded(extension);
   }
   system_->runtime_data()->SetBeingUpgraded(extension->id(), false);
@@ -1615,7 +1595,7 @@ void ExtensionService::CheckPermissionsIncrease(const Extension* extension,
   if (extension->location() == Manifest::INTERNAL && !auto_grant_permission) {
     // Add all the recognized permissions if the granted permissions list
     // hasn't been initialized yet.
-    scoped_refptr<PermissionSet> granted_permissions =
+    scoped_ptr<const PermissionSet> granted_permissions =
         extension_prefs_->GetGrantedPermissions(extension->id());
     CHECK(granted_permissions.get());
 
@@ -1625,8 +1605,8 @@ void ExtensionService::CheckPermissionsIncrease(const Extension* extension,
     // to a version that requires additional privileges.
     is_privilege_increase =
         extensions::PermissionMessageProvider::Get()->IsPrivilegeIncrease(
-            granted_permissions.get(),
-            extension->permissions_data()->active_permissions().get(),
+            *granted_permissions,
+            extension->permissions_data()->active_permissions(),
             extension->GetType());
   }
 
@@ -1635,22 +1615,23 @@ void ExtensionService::CheckPermissionsIncrease(const Extension* extension,
     // disabled on permissions increase.
     bool previously_disabled =
         extension_prefs_->IsExtensionDisabled(extension->id());
-    // Legacy disabled extensions do not have a disable reason. Infer that if
-    // there was no permission increase, it was likely disabled by the user.
-    if (previously_disabled && disable_reasons == Extension::DISABLE_NONE &&
-        !extension_prefs_->DidExtensionEscalatePermissions(extension->id())) {
+    // Legacy disabled extensions do not have a disable reason. Infer that it
+    // was likely disabled by the user.
+    if (previously_disabled && disable_reasons == Extension::DISABLE_NONE)
       disable_reasons |= Extension::DISABLE_USER_ACTION;
-    }
+
     // Extensions that came to us disabled from sync need a similar inference,
     // except based on the new version's permissions.
     if (previously_disabled &&
-        disable_reasons == Extension::DISABLE_UNKNOWN_FROM_SYNC) {
+        (disable_reasons & Extension::DISABLE_UNKNOWN_FROM_SYNC)) {
       // Remove the DISABLE_UNKNOWN_FROM_SYNC reason.
-      extension_prefs_->ClearDisableReasons(extension->id());
+      disable_reasons &= ~Extension::DISABLE_UNKNOWN_FROM_SYNC;
+      extension_prefs_->RemoveDisableReason(
+          extension->id(), Extension::DISABLE_UNKNOWN_FROM_SYNC);
+      // If there was no privilege increase, it was likely disabled by the user.
       if (!is_privilege_increase)
         disable_reasons |= Extension::DISABLE_USER_ACTION;
     }
-    disable_reasons &= ~Extension::DISABLE_UNKNOWN_FROM_SYNC;
   }
 
   // Extension has changed permissions significantly. Disable it. A
@@ -1658,12 +1639,10 @@ void ExtensionService::CheckPermissionsIncrease(const Extension* extension,
   // disabled because it was installed remotely, don't add another disable
   // reason.
   if (is_privilege_increase &&
-      disable_reasons != Extension::DISABLE_REMOTE_INSTALL) {
+      !(disable_reasons & Extension::DISABLE_REMOTE_INSTALL)) {
     disable_reasons |= Extension::DISABLE_PERMISSIONS_INCREASE;
-    if (!extension_prefs_->DidExtensionEscalatePermissions(extension->id())) {
+    if (!extension_prefs_->DidExtensionEscalatePermissions(extension->id()))
       RecordPermissionMessagesHistogram(extension, "AutoDisable");
-    }
-    extension_prefs_->SetExtensionState(extension->id(), Extension::DISABLED);
 
 #if defined(ENABLE_SUPERVISED_USERS)
     // If a custodian-installed extension is disabled for a supervised user due
@@ -1680,7 +1659,7 @@ void ExtensionService::CheckPermissionsIncrease(const Extension* extension,
 #endif
   }
   if (disable_reasons != Extension::DISABLE_NONE)
-    extension_prefs_->AddDisableReasons(extension->id(), disable_reasons);
+    extension_prefs_->SetExtensionDisabled(extension->id(), disable_reasons);
 }
 
 void ExtensionService::UpdateActiveExtensionsInCrashReporter() {
@@ -1749,8 +1728,6 @@ void ExtensionService::OnExtensionInstalled(
   } else {
     // Requirement is supported now, remove the corresponding disable reason
     // instead.
-    extension_prefs_->RemoveDisableReason(
-        id, Extension::DISABLE_UNSUPPORTED_REQUIREMENT);
     disable_reasons &= ~Extension::DISABLE_UNSUPPORTED_REQUIREMENT;
   }
 
@@ -1759,8 +1736,6 @@ void ExtensionService::OnExtensionInstalled(
   if (extensions::ExtensionManagementFactory::GetForBrowserContext(profile())
           ->CheckMinimumVersion(extension, nullptr)) {
     // And remove the corresponding disable reason.
-    extension_prefs_->RemoveDisableReason(
-        id, Extension::DISABLE_UPDATE_REQUIRED_BY_POLICY);
     disable_reasons &= ~Extension::DISABLE_UPDATE_REQUIRED_BY_POLICY;
   }
 
@@ -1795,12 +1770,13 @@ void ExtensionService::OnExtensionInstalled(
     }
   }
 
-  if (disable_reasons)
-    extension_prefs_->AddDisableReasons(id, disable_reasons);
-
   const Extension::State initial_state =
       disable_reasons == Extension::DISABLE_NONE ? Extension::ENABLED
                                                  : Extension::DISABLED;
+  if (initial_state == Extension::ENABLED)
+    extension_prefs_->SetExtensionEnabled(id);
+  else
+    extension_prefs_->SetExtensionDisabled(id, disable_reasons);
 
   if (ShouldDelayExtensionUpdate(
           id,
@@ -1866,9 +1842,8 @@ void ExtensionService::OnExtensionManagementSettingsChanged() {
     if (!settings->IsPermissionSetAllowed(
             extension.get(),
             extension->permissions_data()->active_permissions())) {
-      extensions::PermissionsUpdater(profile()).RemovePermissions(
-          extension.get(),
-          settings->GetBlockedPermissions(extension.get()).get());
+      extensions::PermissionsUpdater(profile()).RemovePermissionsUnsafe(
+          extension.get(), *settings->GetBlockedPermissions(extension.get()));
     }
   }
 
@@ -2180,7 +2155,8 @@ bool ExtensionService::OnExternalExtensionFileFound(
   scoped_refptr<CrxInstaller> installer(CrxInstaller::CreateSilent(this));
   installer->set_install_source(location);
   installer->set_expected_id(id);
-  installer->set_expected_version(*version);
+  installer->set_expected_version(*version,
+                                  true /* fail_install_if_unexpected */);
   installer->set_install_cause(extension_misc::INSTALL_CAUSE_EXTERNAL_FILE);
   installer->set_install_immediately(install_immediately);
   installer->set_creation_flags(creation_flags);
@@ -2206,6 +2182,10 @@ void ExtensionService::DidCreateRenderViewForBackgroundPage(
   if (iter == orphaned_dev_tools_.end())
     return;
 
+  // Keepalive count is reset on extension reload. This re-establishes the
+  // keepalive that was added when the DevTools agent was initially attached.
+  extensions::ProcessManager::Get(profile_)->IncrementLazyKeepaliveCount(
+      host->extension());
   iter->second->ConnectWebContents(host->host_contents());
   orphaned_dev_tools_.erase(iter);
 }

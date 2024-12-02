@@ -71,6 +71,7 @@ extern const char kKeycode[];
 extern const char kKioskEnabled[];
 extern const char kKioskOnly[];
 extern const char kKioskMode[];
+extern const char kKioskSecondaryApps[];
 extern const char kLanguage[];
 extern const char kLaunch[];
 extern const char kLaunchContainer[];
@@ -194,6 +195,7 @@ namespace manifest_values {
 
 extern const char kApiKey[];
 extern const char kBrowserActionCommandEvent[];
+extern const char kIncognitoNotAllowed[];
 extern const char kIncognitoSplit[];
 extern const char kIncognitoSpanning[];
 extern const char kIsolatedStorage[];
@@ -350,6 +352,9 @@ extern const char kInvalidKeyBindingUnknownPlatform[];
 extern const char kInvalidKioskEnabled[];
 extern const char kInvalidKioskOnly[];
 extern const char kInvalidKioskOnlyButNotEnabled[];
+extern const char kInvalidKioskSecondaryApps[];
+extern const char kInvalidKioskSecondaryAppsBadAppEntry[];
+extern const char kInvalidKioskSecondaryAppsBadAppId[];
 extern const char kInvalidLauncherPage[];
 extern const char kInvalidLauncherPagePage[];
 extern const char kInvalidLaunchContainer[];

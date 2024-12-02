@@ -126,7 +126,7 @@ class ChannelListenerWithOnConnectedSend : public IPC::TestChannelListener {
   ChannelListenerWithOnConnectedSend() {}
   ~ChannelListenerWithOnConnectedSend() override {}
 
-  void OnChannelConnected(int32 peer_pid) override {
+  void OnChannelConnected(int32_t peer_pid) override {
     SendNextMessage();
   }
 };
@@ -167,7 +167,7 @@ MULTIPROCESS_IPC_TEST_CLIENT_MAIN(GenericClient) {
 
   // Set up IPC channel.
   scoped_ptr<IPC::Channel> channel(IPC::Channel::CreateClient(
-      IPCTestBase::GetChannelName("GenericClient"), &listener, nullptr));
+      IPCTestBase::GetChannelName("GenericClient"), &listener));
   CHECK(channel->Connect());
   listener.Init(channel.get());
   IPC::TestChannelListener::SendOneMessage(channel.get(), "hello from child");

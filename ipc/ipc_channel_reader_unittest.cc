@@ -4,30 +4,27 @@
 
 #include "build/build_config.h"
 
+#include <limits>
 #include <set>
 
 #include "ipc/attachment_broker.h"
 #include "ipc/brokerable_attachment.h"
 #include "ipc/ipc_channel_reader.h"
+#include "ipc/placeholder_brokerable_attachment.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if USE_ATTACHMENT_BROKER
 namespace IPC {
 namespace internal {
 
 namespace {
 
+#if USE_ATTACHMENT_BROKER
+
 class MockAttachment : public BrokerableAttachment {
  public:
-  MockAttachment(int internal_state) : internal_state_(internal_state) {}
+  MockAttachment() {}
   MockAttachment(BrokerableAttachment::AttachmentId id)
-      : BrokerableAttachment(id, true), internal_state_(-1) {}
-
-  void PopulateWithAttachment(const BrokerableAttachment* attachment) override {
-    const MockAttachment* mock_attachment =
-        static_cast<const MockAttachment*>(attachment);
-    internal_state_ = mock_attachment->internal_state_;
-  }
+      : BrokerableAttachment(id) {}
 
 #if defined(OS_POSIX)
   base::PlatformFile TakePlatformFile() override {
@@ -39,8 +36,6 @@ class MockAttachment : public BrokerableAttachment {
 
  private:
   ~MockAttachment() override {}
-  // Internal state differentiates MockAttachments.
-  int internal_state_;
 };
 
 class MockAttachmentBroker : public AttachmentBroker {
@@ -59,6 +54,8 @@ class MockAttachmentBroker : public AttachmentBroker {
     NotifyObservers(attachment->GetIdentifier());
   }
 };
+
+#endif  // USE_ATTACHMENT_BROKER
 
 class MockChannelReader : public ChannelReader {
  public:
@@ -99,18 +96,26 @@ class MockChannelReader : public ChannelReader {
   AttachmentBroker* broker_;
 };
 
+class ExposedMessage: public Message {
+ public:
+  using Message::Header;
+  using Message::header;
+};
+
 }  // namespace
+
+#if USE_ATTACHMENT_BROKER
 
 TEST(ChannelReaderTest, AttachmentAlreadyBrokered) {
   MockAttachmentBroker broker;
   MockChannelReader reader;
   reader.set_broker(&broker);
-  scoped_refptr<MockAttachment> attachment(new MockAttachment(5));
+  scoped_refptr<MockAttachment> attachment(new MockAttachment);
   broker.AddAttachment(attachment);
 
   Message* m = new Message;
-  MockAttachment* needs_brokering_attachment =
-      new MockAttachment(attachment->GetIdentifier());
+  PlaceholderBrokerableAttachment* needs_brokering_attachment =
+      new PlaceholderBrokerableAttachment(attachment->GetIdentifier());
   EXPECT_TRUE(m->WriteAttachment(needs_brokering_attachment));
   reader.AddMessageForDispatch(m);
   EXPECT_EQ(ChannelReader::DISPATCH_FINISHED, reader.DispatchMessages());
@@ -121,11 +126,11 @@ TEST(ChannelReaderTest, AttachmentNotYetBrokered) {
   MockAttachmentBroker broker;
   MockChannelReader reader;
   reader.set_broker(&broker);
-  scoped_refptr<MockAttachment> attachment(new MockAttachment(5));
+  scoped_refptr<MockAttachment> attachment(new MockAttachment);
 
   Message* m = new Message;
-  MockAttachment* needs_brokering_attachment =
-      new MockAttachment(attachment->GetIdentifier());
+  PlaceholderBrokerableAttachment* needs_brokering_attachment =
+      new PlaceholderBrokerableAttachment(attachment->GetIdentifier());
   EXPECT_TRUE(m->WriteAttachment(needs_brokering_attachment));
   reader.AddMessageForDispatch(m);
   EXPECT_EQ(ChannelReader::DISPATCH_WAITING_ON_BROKER,
@@ -136,6 +141,55 @@ TEST(ChannelReaderTest, AttachmentNotYetBrokered) {
   EXPECT_EQ(m, reader.get_last_dispatched_message());
 }
 
+#endif  // USE_ATTACHMENT_BROKER
+
+#if !USE_ATTACHMENT_BROKER
+
+// We can determine message size from its header (and hence resize the buffer)
+// only when attachment broker is not used, see IPC::Message::FindNext().
+
+TEST(ChannelReaderTest, ResizeOverflowBuffer) {
+  MockChannelReader reader;
+
+  ExposedMessage::Header header = {};
+
+  header.payload_size = 128 * 1024;
+  EXPECT_LT(reader.input_overflow_buf_.capacity(), header.payload_size);
+  EXPECT_TRUE(reader.TranslateInputData(
+      reinterpret_cast<const char*>(&header), sizeof(header)));
+
+  // Once message header is available we resize overflow buffer to
+  // fit the entire message.
+  EXPECT_GE(reader.input_overflow_buf_.capacity(), header.payload_size);
+}
+
+TEST(ChannelReaderTest, InvalidMessageSize) {
+  MockChannelReader reader;
+
+  ExposedMessage::Header header = {};
+
+  size_t capacity_before = reader.input_overflow_buf_.capacity();
+
+  // Message is slightly larger than maximum allowed size
+  header.payload_size = Channel::kMaximumMessageSize + 1;
+  EXPECT_FALSE(reader.TranslateInputData(
+      reinterpret_cast<const char*>(&header), sizeof(header)));
+  EXPECT_LE(reader.input_overflow_buf_.capacity(), capacity_before);
+
+  // Payload size is negative, overflow is detected by Pickle::PeekNext()
+  header.payload_size = static_cast<uint32_t>(-1);
+  EXPECT_FALSE(reader.TranslateInputData(
+      reinterpret_cast<const char*>(&header), sizeof(header)));
+  EXPECT_LE(reader.input_overflow_buf_.capacity(), capacity_before);
+
+  // Payload size is maximum int32 value
+  header.payload_size = std::numeric_limits<int32_t>::max();
+  EXPECT_FALSE(reader.TranslateInputData(
+      reinterpret_cast<const char*>(&header), sizeof(header)));
+  EXPECT_LE(reader.input_overflow_buf_.capacity(), capacity_before);
+}
+
+#endif  // !USE_ATTACHMENT_BROKER
+
 }  // namespace internal
 }  // namespace IPC
-#endif  // USE_ATTACHMENT_BROKER

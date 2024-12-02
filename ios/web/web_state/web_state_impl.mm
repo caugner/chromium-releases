@@ -18,6 +18,7 @@
 #include "ios/web/public/web_state/ui/crw_content_view.h"
 #include "ios/web/public/web_state/web_state_observer.h"
 #include "ios/web/public/web_state/web_state_policy_decider.h"
+#include "ios/web/web_state/global_web_state_event_tracker.h"
 #import "ios/web/web_state/ui/crw_web_controller.h"
 #import "ios/web/web_state/ui/crw_web_controller_container_view.h"
 #include "ios/web/web_state/web_state_facade_delegate.h"
@@ -34,6 +35,7 @@ WebStateImpl::WebStateImpl(BrowserState* browser_state)
       navigation_manager_(this, browser_state),
       interstitial_(nullptr),
       cache_mode_(net::RequestTracker::CACHE_NORMAL) {
+  GlobalWebStateEventTracker::GetInstance()->OnWebStateCreated(this);
 }
 
 WebStateImpl::~WebStateImpl() {
@@ -104,6 +106,10 @@ WebStateImpl* WebStateImpl::CopyForSessionWindow() {
   return copy;
 }
 
+void WebStateImpl::OnNavigationCommitted(const GURL& url) {
+  UpdateHttpResponseHeaders(url);
+}
+
 void WebStateImpl::OnUrlHashChanged() {
   FOR_EACH_OBSERVER(WebStateObserver, observers_, UrlHashChanged());
 }
@@ -129,7 +135,6 @@ bool WebStateImpl::OnScriptCommandReceived(const std::string& command,
 }
 
 void WebStateImpl::SetIsLoading(bool is_loading) {
-  DCHECK(Configured());
   if (is_loading == is_loading_)
     return;
 
@@ -149,7 +154,6 @@ bool WebStateImpl::IsLoading() const {
 }
 
 void WebStateImpl::OnPageLoaded(const GURL& url, bool load_success) {
-  UpdateHttpResponseHeaders(url);
   if (facade_delegate_)
     facade_delegate_->OnPageLoaded();
 
@@ -307,6 +311,8 @@ void WebStateImpl::OnHttpResponseHeadersReceived(
   // Store the headers in a map until the page finishes loading, as we do not
   // know which URL corresponds to the main page yet.
   // Remove the hash (if any) as it is sometimes altered by in-page navigations.
+  // TODO(crbug/551677): Simplify all this logic once UIWebView is no longer
+  // supported.
   const GURL& url = GURLByRemovingRefFromGURL(resource_url);
   response_headers_map_[url] = response_headers;
 }
@@ -351,18 +357,6 @@ void WebStateImpl::ShowWebInterstitial(WebInterstitialImpl* interstitial) {
 
 void WebStateImpl::ClearTransientContentView() {
   if (interstitial_) {
-    CRWSessionController* sessionController =
-        navigation_manager_.GetSessionController();
-    web::NavigationItem* currentItem =
-        [sessionController.currentEntry navigationItem];
-    if (currentItem->IsUnsafe()) {
-      // The unsafe page should be removed from history, and, in fact,
-      // SafeBrowsingBlockingPage will do just that *provided* that it
-      // isn't the current page. So to make this happen, before removing the
-      // interstitial, have the session controller go back one page.
-      [sessionController goBack];
-    }
-    [sessionController discardNonCommittedEntries];
     // Store the currently displayed interstitial in a local variable and reset
     // |interstitial_| early.  This is to prevent an infinite loop, as
     // |DontProceed()| internally calls |ClearTransientContentView()|.
@@ -391,6 +385,10 @@ WebUIIOS* WebStateImpl::CreateWebUIIOS(const GURL& url) {
 
   delete web_ui;
   return NULL;
+}
+
+void WebStateImpl::SetContentsMimeType(const std::string& mime_type) {
+  mime_type_ = mime_type;
 }
 
 void WebStateImpl::ExecuteJavaScriptAsync(const base::string16& javascript) {

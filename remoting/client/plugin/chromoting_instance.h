@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/thread_task_runner_handle.h"
@@ -17,7 +16,6 @@
 #include "ppapi/cpp/instance.h"
 #include "ppapi/cpp/text_input_controller.h"
 #include "ppapi/cpp/var.h"
-#include "remoting/client/chromoting_stats.h"
 #include "remoting/client/client_context.h"
 #include "remoting/client/client_user_interface.h"
 #include "remoting/client/empty_cursor_filter.h"
@@ -35,6 +33,7 @@
 #include "remoting/protocol/input_event_tracker.h"
 #include "remoting/protocol/mouse_input_filter.h"
 #include "remoting/protocol/negotiating_client_authenticator.h"
+#include "remoting/protocol/performance_tracker.h"
 #include "remoting/protocol/third_party_client_authenticator.h"
 
 namespace base {
@@ -180,8 +179,6 @@ class ChromotingInstance : public ClientUserInterface,
                                 int histogram_buckets);
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(ChromotingInstanceTest, TestCaseSetup);
-
   // Used as the |FetchSecretCallback| for IT2Me (or Me2Me from old webapps).
   // Immediately calls |secret_fetched_callback| with |shared_secret|.
   static void FetchSecretFromString(
@@ -233,7 +230,7 @@ class ChromotingInstance : public ClientUserInterface,
   // Callback for DelegatingSignalStrategy.
   void SendOutgoingIq(const std::string& iq);
 
-  void SendPerfStats();
+  void UpdatePerfStatsInUI();
 
   // Returns true if there is a ConnectionToHost and it is connected.
   bool IsConnected();
@@ -251,6 +248,7 @@ class ChromotingInstance : public ClientUserInterface,
   scoped_ptr<base::ThreadTaskRunnerHandle> thread_task_runner_handle_;
   scoped_ptr<jingle_glue::JingleThreadWrapper> thread_wrapper_;
   ClientContext context_;
+  protocol::PerformanceTracker perf_tracker_;
   scoped_ptr<PepperVideoRenderer> video_renderer_;
   pp::View plugin_view_;
 
@@ -285,12 +283,14 @@ class ChromotingInstance : public ClientUserInterface,
 
   base::WeakPtr<TokenFetcherProxy> token_fetcher_proxy_;
 
-  // Weak reference to this instance, used for global logging and task posting.
-  base::WeakPtrFactory<ChromotingInstance> weak_factory_;
+  base::RepeatingTimer stats_update_timer_;
 
   base::TimeTicks connection_started_time;
   base::TimeTicks connection_authenticated_time_;
   base::TimeTicks connection_connected_time_;
+
+  // Weak reference to this instance, used for global logging and task posting.
+  base::WeakPtrFactory<ChromotingInstance> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromotingInstance);
 };

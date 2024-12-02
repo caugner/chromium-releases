@@ -34,11 +34,11 @@
 #include "chrome/browser/extensions/updater/chrome_extension_downloader_factory.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/google/google_brand.h"
-#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/crx_file/id_util.h"
+#include "components/syncable_prefs/pref_service_syncable.h"
 #include "components/update_client/update_query_params.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
@@ -1816,18 +1816,8 @@ class ExtensionUpdaterTest : public testing::Test {
 
     ExtensionPrefs* prefs = prefs_->prefs();
 
-    for (size_t i = 0; i < disabled.size(); i++) {
-      int reasons = disabled[i];
-      const std::string& id = disabled_extensions[i]->id();
-      // Iterate over the DisableReason values, marking that reason in prefs
-      // for this id if it is set.
-      for (int reason = 1; reason < Extension::DISABLE_REASON_LAST;
-           reason <<= 1) {
-        if (reasons & reason)
-          prefs->AddDisableReason(
-              id, static_cast<Extension::DisableReason>(reason));
-      }
-    }
+    for (size_t i = 0; i < disabled.size(); i++)
+      prefs->SetExtensionDisabled(disabled_extensions[i]->id(), disabled[i]);
 
     // Create the extension updater, make it issue an update, and capture the
     // URL that it tried to fetch.
@@ -2243,6 +2233,34 @@ TEST_F(ExtensionUpdaterTest, TestDisabledReasons3) {
   std::vector<int> disabled;
   disabled.push_back(0);
   TestPingMetrics(0, disabled);
+}
+
+TEST_F(ExtensionUpdaterTest, TestUninstallWhileUpdateCheck) {
+  ServiceForManifestTests service(prefs_.get());
+  ExtensionList tmp;
+  service.CreateTestExtensions(1, 1, &tmp, nullptr, Manifest::INTERNAL);
+  service.set_extensions(tmp, ExtensionList());
+
+  ASSERT_EQ(1u, tmp.size());
+  ExtensionId id = tmp.front()->id();
+  ASSERT_TRUE(service.GetExtensionById(id, false));
+
+  ExtensionUpdater updater(&service,
+                           service.extension_prefs(),
+                           service.pref_service(),
+                           service.profile(),
+                           kUpdateFrequencySecs,
+                           NULL,
+                           service.GetDownloaderFactory());
+  ExtensionUpdater::CheckParams params;
+  params.ids.push_back(id);
+  updater.Start();
+  updater.CheckNow(params);
+
+  service.set_extensions(ExtensionList(), ExtensionList());
+  ASSERT_FALSE(service.GetExtensionById(id, false));
+
+  content::RunAllBlockingPoolTasksUntilIdle();
 }
 
 // TODO(asargent) - (http://crbug.com/12780) add tests for:

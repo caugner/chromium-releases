@@ -4,8 +4,8 @@
 
 #include "mandoline/services/core_services/application_delegate_factory.h"
 
+#include "components/mus/mus_app.h"
 #include "components/resource_provider/resource_provider_app.h"
-#include "components/view_manager/view_manager_app.h"
 #include "mojo/services/network/network_service_delegate.h"
 
 namespace core_services {
@@ -18,8 +18,8 @@ scoped_ptr<mojo::ApplicationDelegate> CreateApplicationDelegateNotAndroid(
     return make_scoped_ptr(
         new resource_provider::ResourceProviderApp("mojo:core_services"));
   }
-  if (url == "mojo://view_manager/")
-    return make_scoped_ptr(new view_manager::ViewManagerApp);
+  if (url == "mojo://mus/")
+    return make_scoped_ptr(new mus::MandolineUIServicesApp);
   return nullptr;
 }
 

@@ -43,6 +43,7 @@ class OmniboxPopupContentsView : public views::View,
   // OmniboxPopupView:
   bool IsOpen() const override;
   void InvalidateLine(size_t line) override;
+  void OnLineSelected(size_t line) override;
   void UpdatePopupAppearance() override;
   gfx::Rect GetTargetBounds() override;
   void PaintUpdatesNow() override;
@@ -68,9 +69,9 @@ class OmniboxPopupContentsView : public views::View,
   gfx::Image GetIconIfExtensionMatch(size_t index) const;
   bool IsStarredMatch(const AutocompleteMatch& match) const;
 
-  int max_match_contents_width() const {
-    return max_match_contents_width_;
-  }
+  int max_match_contents_width() const { return max_match_contents_width_; }
+  int start_margin() const { return start_margin_; }
+  int end_margin() const { return end_margin_; }
 
  protected:
   OmniboxPopupContentsView(const gfx::FontList& font_list,
@@ -153,10 +154,12 @@ class OmniboxPopupContentsView : public views::View,
   gfx::Rect start_bounds_;
   gfx::Rect target_bounds_;
 
-  int left_margin_;
-  int right_margin_;
+  int start_margin_;
+  int end_margin_;
 
-  const gfx::ImageSkia* bottom_shadow_;  // Ptr owned by resource bundle.
+  // These pointers are owned by the resource bundle.
+  const gfx::ImageSkia* top_shadow_ = nullptr;
+  const gfx::ImageSkia* bottom_shadow_ = nullptr;
 
   // When the dropdown is not wide enough while displaying postfix suggestions,
   // we use the width of widest match contents to shift the suggestions so that

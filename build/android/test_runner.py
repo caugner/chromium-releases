@@ -8,30 +8,30 @@
 
 import argparse
 import collections
+import itertools
 import logging
 import os
-import shutil
 import signal
 import sys
 import threading
 import unittest
 
+from devil import base_error
+from devil.android import apk_helper
+from devil.android import device_blacklist
+from devil.android import device_errors
+from devil.android import device_utils
+from devil.android import ports
+from devil.utils import reraiser_thread
+from devil.utils import run_tests_helper
+
 from pylib import constants
 from pylib import forwarder
-from pylib import ports
 from pylib.base import base_test_result
 from pylib.base import environment_factory
 from pylib.base import test_dispatcher
 from pylib.base import test_instance_factory
 from pylib.base import test_run_factory
-from pylib.device import device_blacklist
-from pylib.device import device_errors
-from pylib.device import device_utils
-from pylib.gtest import gtest_config
-# TODO(jbudorick): Remove this once we stop selectively enabling platform mode.
-from pylib.gtest import gtest_test_instance
-from pylib.gtest import setup as gtest_setup
-from pylib.gtest import test_options as gtest_test_options
 from pylib.linker import setup as linker_setup
 from pylib.host_driven import setup as host_driven_setup
 from pylib.instrumentation import setup as instrumentation_setup
@@ -47,10 +47,6 @@ from pylib.results import json_results
 from pylib.results import report_results
 from pylib.uiautomator import setup as uiautomator_setup
 from pylib.uiautomator import test_options as uiautomator_test_options
-from pylib.utils import apk_helper
-from pylib.utils import base_error
-from pylib.utils import reraiser_thread
-from pylib.utils import run_tests_helper
 
 
 def AddCommonOptions(parser):
@@ -195,15 +191,10 @@ def AddDeviceOptions(parser):
 def AddGTestOptions(parser):
   """Adds gtest options to |parser|."""
 
-  gtest_suites = list(gtest_config.STABLE_TEST_SUITES
-                      + gtest_config.EXPERIMENTAL_TEST_SUITES)
-
   group = parser.add_argument_group('GTest Options')
   group.add_argument('-s', '--suite', dest='suite_name',
                      nargs='+', metavar='SUITE_NAME', required=True,
-                     help=('Executable name of the test suite to run. '
-                           'Available suites include (but are not limited to): '
-                            '%s' % ', '.join('"%s"' % s for s in gtest_suites)))
+                     help='Executable name of the test suite to run.')
   group.add_argument('--gtest_also_run_disabled_tests',
                      '--gtest-also-run-disabled-tests',
                      dest='run_disabled', action='store_true',
@@ -228,6 +219,10 @@ def AddGTestOptions(parser):
   group.add_argument('--delete-stale-data', dest='delete_stale_data',
                      action='store_true',
                      help='Delete stale test data on the device.')
+  group.add_argument('--repeat', '--gtest_repeat', '--gtest-repeat',
+                     dest='repeat', type=int, default=0,
+                     help='Number of times to repeat the specified set of '
+                          'tests.')
 
   filter_group = group.add_mutually_exclusive_group()
   filter_group.add_argument('-f', '--gtest_filter', '--gtest-filter',
@@ -257,6 +252,9 @@ def AddJavaTestOptions(argument_group):
   argument_group.add_argument(
       '-f', '--test-filter', dest='test_filter',
       help=('Test filter (if not fully qualified, will run all matches).'))
+  argument_group.add_argument(
+      '--repeat', dest='repeat', type=int, default=0,
+      help='Number of times to repeat the specified set of tests.')
   argument_group.add_argument(
       '-A', '--annotation', dest='annotation_str',
       help=('Comma-separated list of annotations. Run only tests with any of '
@@ -334,6 +332,10 @@ def AddInstrumentationTestOptions(parser):
                      help=('The name of the apk containing the tests '
                            '(without the .apk extension; '
                            'e.g. "ContentShellTest").'))
+  group.add_argument('--additional-apk', action='append',
+                     dest='additional_apks', default=[],
+                     help='Additional apk that must be installed on '
+                          'the device when the tests are run')
   group.add_argument('--coverage-dir',
                      help=('Directory in which to place all generated '
                            'EMMA coverage files.'))
@@ -547,6 +549,9 @@ def AddUirobotTestOptions(parser):
   group.add_argument('--app-under-test', required=True,
                      help='APK to run tests on.')
   group.add_argument(
+      '--repeat', dest='repeat', type=int, default=0,
+      help='Number of times to repeat the uirobot test.')
+  group.add_argument(
       '--minutes', default=5, type=int,
       help='Number of minutes to run uirobot test [default: %(default)s].')
 
@@ -595,6 +600,10 @@ def AddPerfTestOptions(parser):
       default='',
       help='Write out chartjson into the given file.')
   group.add_argument(
+      '--get-output-dir-archive', metavar='FILENAME',
+      help='Write the chached output directory archived by a step into the'
+      ' given ZIP file.')
+  group.add_argument(
       '--flaky-steps',
       help=('A JSON file containing steps that are flaky '
             'and will have its exit code ignored.'))
@@ -640,7 +649,8 @@ def ProcessPerfTestOptions(args):
       args.steps, args.flaky_steps, args.output_json_list,
       args.print_step, args.no_timeout, args.test_filter,
       args.dry_run, args.single_step, args.collect_chartjson_data,
-      args.output_chartjson_data, args.max_battery_temp, args.min_battery_level)
+      args.output_chartjson_data, args.get_output_dir_archive,
+      args.max_battery_temp, args.min_battery_level)
 
 
 def AddPythonTestOptions(parser):
@@ -650,44 +660,6 @@ def AddPythonTestOptions(parser):
       choices=constants.PYTHON_UNIT_TEST_SUITES.keys(),
       help='Name of the test suite to run.')
   AddCommonOptions(parser)
-
-
-def _RunGTests(args, devices):
-  """Subcommand of RunTestsCommands which runs gtests."""
-  exit_code = 0
-  for suite_name in args.suite_name:
-    # TODO(jbudorick): Either deprecate multi-suite or move its handling down
-    # into the gtest code.
-    gtest_options = gtest_test_options.GTestOptions(
-        args.tool,
-        args.test_filter,
-        args.run_disabled,
-        args.test_arguments,
-        args.timeout,
-        args.isolate_file_path,
-        suite_name,
-        args.app_data_files,
-        args.app_data_file_dir,
-        args.delete_stale_data)
-    runner_factory, tests = gtest_setup.Setup(gtest_options, devices)
-
-    results, test_exit_code = test_dispatcher.RunTests(
-        tests, runner_factory, devices, shard=True, test_timeout=None,
-        num_retries=args.num_retries)
-
-    if test_exit_code and exit_code != constants.ERROR_EXIT_CODE:
-      exit_code = test_exit_code
-
-    report_results.LogFull(
-        results=results,
-        test_type='Unit test',
-        test_package=suite_name,
-        flakiness_server=args.flakiness_dashboard_server)
-
-    if args.json_results_file:
-      json_results.GenerateJsonResultsFile(results, args.json_results_file)
-
-  return exit_code
 
 
 def _RunLinkerTests(args, devices):
@@ -704,14 +676,14 @@ def _RunLinkerTests(args, devices):
       test_package='ChromiumLinkerTest')
 
   if args.json_results_file:
-    json_results.GenerateJsonResultsFile(results, args.json_results_file)
+    json_results.GenerateJsonResultsFile([results], args.json_results_file)
 
   return exit_code
 
 
 def _RunInstrumentationTests(args, devices):
   """Subcommand of RunTestsCommands which runs instrumentation tests."""
-  logging.info('_RunInstrumentationTests(%s, %s)' % (str(args), str(devices)))
+  logging.info('_RunInstrumentationTests(%s, %s)', str(args), str(devices))
 
   instrumentation_options = ProcessInstrumentationOptions(args)
 
@@ -723,41 +695,52 @@ def _RunInstrumentationTests(args, devices):
   exit_code = 0
 
   if args.run_java_tests:
-    runner_factory, tests = instrumentation_setup.Setup(
+    java_runner_factory, java_tests = instrumentation_setup.Setup(
         instrumentation_options, devices)
-
-    test_results, exit_code = test_dispatcher.RunTests(
-        tests, runner_factory, devices, shard=True, test_timeout=None,
-        num_retries=args.num_retries)
-
-    results.AddTestRunResults(test_results)
+  else:
+    java_runner_factory = None
+    java_tests = None
 
   if args.run_python_tests:
-    runner_factory, tests = host_driven_setup.InstrumentationSetup(
+    py_runner_factory, py_tests = host_driven_setup.InstrumentationSetup(
         args.host_driven_root, args.official_build,
         instrumentation_options)
+  else:
+    py_runner_factory = None
+    py_tests = None
 
-    if tests:
+  results = []
+  repetitions = (xrange(args.repeat + 1) if args.repeat >= 0
+                 else itertools.count())
+  for _ in repetitions:
+    iteration_results = base_test_result.TestRunResults()
+    if java_tests:
       test_results, test_exit_code = test_dispatcher.RunTests(
-          tests, runner_factory, devices, shard=True, test_timeout=None,
-          num_retries=args.num_retries)
-
-      results.AddTestRunResults(test_results)
+          java_tests, java_runner_factory, devices, shard=True,
+          test_timeout=None, num_retries=args.num_retries)
+      iteration_results.AddTestRunResults(test_results)
 
       # Only allow exit code escalation
       if test_exit_code and exit_code != constants.ERROR_EXIT_CODE:
         exit_code = test_exit_code
 
-  if args.device_flags:
-    args.device_flags = os.path.join(constants.DIR_SOURCE_ROOT,
-                                     args.device_flags)
+    if py_tests:
+      test_results, test_exit_code = test_dispatcher.RunTests(
+          py_tests, py_runner_factory, devices, shard=True, test_timeout=None,
+          num_retries=args.num_retries)
+      iteration_results.AddTestRunResults(test_results)
 
-  report_results.LogFull(
-      results=results,
-      test_type='Instrumentation',
-      test_package=os.path.basename(args.test_apk),
-      annotation=args.annotations,
-      flakiness_server=args.flakiness_dashboard_server)
+      # Only allow exit code escalation
+      if test_exit_code and exit_code != constants.ERROR_EXIT_CODE:
+        exit_code = test_exit_code
+
+    results.append(iteration_results)
+    report_results.LogFull(
+        results=iteration_results,
+        test_type='Instrumentation',
+        test_package=os.path.basename(args.test_apk),
+        annotation=args.annotations,
+        flakiness_server=args.flakiness_dashboard_server)
 
   if args.json_results_file:
     json_results.GenerateJsonResultsFile(results, args.json_results_file)
@@ -783,7 +766,7 @@ def _RunUIAutomatorTests(args, devices):
       flakiness_server=args.flakiness_dashboard_server)
 
   if args.json_results_file:
-    json_results.GenerateJsonResultsFile(results, args.json_results_file)
+    json_results.GenerateJsonResultsFile([results], args.json_results_file)
 
   return exit_code
 
@@ -799,7 +782,7 @@ def _RunJUnitTests(args):
       test_package=args.test_suite)
 
   if args.json_results_file:
-    json_results.GenerateJsonResultsFile(results, args.json_results_file)
+    json_results.GenerateJsonResultsFile([results], args.json_results_file)
 
   return exit_code
 
@@ -820,7 +803,7 @@ def _RunMonkeyTests(args, devices):
       test_package='Monkey')
 
   if args.json_results_file:
-    json_results.GenerateJsonResultsFile(results, args.json_results_file)
+    json_results.GenerateJsonResultsFile([results], args.json_results_file)
 
   return exit_code
 
@@ -837,7 +820,8 @@ def _RunPerfTests(args, active_devices):
   # Just print the results from a single previously executed step.
   if perf_options.print_step:
     return perf_test_runner.PrintTestOutput(
-        perf_options.print_step, perf_options.output_chartjson_data)
+        perf_options.print_step, perf_options.output_chartjson_data,
+        perf_options.get_output_dir_archive)
 
   runner_factory, tests, devices = perf_setup.Setup(
       perf_options, active_devices)
@@ -856,7 +840,7 @@ def _RunPerfTests(args, active_devices):
       test_package='Perf')
 
   if args.json_results_file:
-    json_results.GenerateJsonResultsFile(results, args.json_results_file)
+    json_results.GenerateJsonResultsFile([results], args.json_results_file)
 
   if perf_options.single_step:
     return perf_test_runner.PrintTestOutput('single_step')
@@ -894,13 +878,10 @@ def _GetAttachedDevices(blacklist_file, test_device):
   Returns:
     A list of attached devices.
   """
-  if not blacklist_file:
-    # TODO(jbudorick): Remove this once bots pass the blacklist file.
-    blacklist_file = device_blacklist.BLACKLIST_JSON
-    logging.warning('Using default device blacklist %s',
-                    device_blacklist.BLACKLIST_JSON)
+  blacklist = (device_blacklist.Blacklist(blacklist_file)
+               if blacklist_file
+               else None)
 
-  blacklist = device_blacklist.Blacklist(blacklist_file)
   attached_devices = device_utils.DeviceUtils.HealthyDevices(blacklist)
   if test_device:
     test_device = [d for d in attached_devices if d == test_device]
@@ -916,7 +897,7 @@ def _GetAttachedDevices(blacklist_file, test_device):
     return sorted(attached_devices)
 
 
-def RunTestsCommand(args, parser):
+def RunTestsCommand(args, parser): # pylint: disable=too-many-return-statements
   """Checks test type and dispatches to the appropriate function.
 
   Args:
@@ -947,9 +928,7 @@ def RunTestsCommand(args, parser):
     raise Exception('Failed to reset test server port.')
 
   if command == 'gtest':
-    if args.suite_name[0] in gtest_test_instance.BROWSER_TEST_SUITES:
-      return RunTestsInPlatformMode(args, parser)
-    return _RunGTests(args, devices)
+    return RunTestsInPlatformMode(args, parser)
   elif command == 'linker':
     return _RunLinkerTests(args, devices)
   elif command == 'instrumentation':
@@ -978,30 +957,38 @@ _SUPPORTED_IN_PLATFORM_MODE = [
 
 def RunTestsInPlatformMode(args, parser):
 
+  def infra_error(message):
+    parser.exit(status=constants.INFRA_EXIT_CODE, message=message)
+
   if args.command not in _SUPPORTED_IN_PLATFORM_MODE:
-    parser.error('%s is not yet supported in platform mode' % args.command)
+    infra_error('%s is not yet supported in platform mode' % args.command)
 
-  with environment_factory.CreateEnvironment(args, parser.error) as env:
-    with test_instance_factory.CreateTestInstance(args, parser.error) as test:
+  with environment_factory.CreateEnvironment(args, infra_error) as env:
+    with test_instance_factory.CreateTestInstance(args, infra_error) as test:
       with test_run_factory.CreateTestRun(
-          args, env, test, parser.error) as test_run:
-        results = test_run.RunTests()
+          args, env, test, infra_error) as test_run:
+        results = []
+        repetitions = (xrange(args.repeat + 1) if args.repeat >= 0
+                       else itertools.count())
+        for _ in repetitions:
+          iteration_results = test_run.RunTests()
 
-        if args.environment == 'remote_device' and args.trigger:
-          return 0 # Not returning results, only triggering.
-
-        report_results.LogFull(
-            results=results,
-            test_type=test.TestType(),
-            test_package=test_run.TestPackage(),
-            annotation=getattr(args, 'annotations', None),
-            flakiness_server=getattr(args, 'flakiness_dashboard_server', None))
+          if iteration_results is not None:
+            results.append(iteration_results)
+            report_results.LogFull(
+                results=iteration_results,
+                test_type=test.TestType(),
+                test_package=test_run.TestPackage(),
+                annotation=getattr(args, 'annotations', None),
+                flakiness_server=getattr(args, 'flakiness_dashboard_server',
+                                         None))
 
         if args.json_results_file:
           json_results.GenerateJsonResultsFile(
               results, args.json_results_file)
 
-  return 0 if results.DidRunPass() else constants.ERROR_EXIT_CODE
+  return (0 if all(r.DidRunPass() for r in results)
+          else constants.ERROR_EXIT_CODE)
 
 
 CommandConfigTuple = collections.namedtuple(

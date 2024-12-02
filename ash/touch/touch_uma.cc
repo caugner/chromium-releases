@@ -52,7 +52,7 @@ namespace ash {
 
 // static
 TouchUMA* TouchUMA::GetInstance() {
-  return Singleton<TouchUMA>::get();
+  return base::Singleton<TouchUMA>::get();
 }
 
 void TouchUMA::RecordGestureEvent(aura::Window* target,
@@ -81,8 +81,10 @@ void TouchUMA::RecordGestureAction(GestureActionType action) {
 
 void TouchUMA::RecordTouchEvent(aura::Window* target,
                                 const ui::TouchEvent& event) {
-  UMA_HISTOGRAM_CUSTOM_COUNTS("Ash.TouchRadius",
-      static_cast<int>(std::max(event.radius_x(), event.radius_y())),
+  UMA_HISTOGRAM_CUSTOM_COUNTS(
+      "Ash.TouchRadius",
+      static_cast<int>(std::max(event.pointer_details().radius_x(),
+                                event.pointer_details().radius_y())),
       1, 500, 100);
 
   UpdateTouchState(event);

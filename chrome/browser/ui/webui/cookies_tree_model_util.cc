@@ -15,6 +15,7 @@
 #include "base/values.h"
 #include "chrome/browser/browsing_data/cookies_tree_model.h"
 #include "chrome/grit/generated_resources.h"
+#include "content/public/browser/cache_storage_context.h"
 #include "content/public/browser/indexed_db_context.h"
 #include "content/public/browser/service_worker_context.h"
 #include "net/cookies/canonical_cookie.h"
@@ -181,11 +182,11 @@ bool CookiesTreeModelUtil::GetCookieTreeNodeDictionary(
       const content::IndexedDBInfo& indexed_db_info =
           *node.GetDetailedInfo().indexed_db_info;
 
-      dict->SetString(kKeyOrigin, indexed_db_info.origin_.spec());
-      dict->SetString(kKeySize, ui::FormatBytes(indexed_db_info.size_));
-      dict->SetString(kKeyModified, base::UTF16ToUTF8(
-          base::TimeFormatFriendlyDateAndTime(indexed_db_info.last_modified_)));
-
+      dict->SetString(kKeyOrigin, indexed_db_info.origin.spec());
+      dict->SetString(kKeySize, ui::FormatBytes(indexed_db_info.size));
+      dict->SetString(kKeyModified,
+                      base::UTF16ToUTF8(base::TimeFormatFriendlyDateAndTime(
+                          indexed_db_info.last_modified)));
       break;
     }
     case CookieTreeNode::DetailedInfo::TYPE_FILE_SYSTEM: {
@@ -268,6 +269,21 @@ bool CookiesTreeModelUtil::GetCookieTreeNodeDictionary(
         scopes->AppendString(it->spec());
       }
       dict->Set(kKeyScopes, scopes);
+      break;
+    }
+    case CookieTreeNode::DetailedInfo::TYPE_CACHE_STORAGE: {
+      dict->SetString(kKeyType, "cache_storage");
+      dict->SetString(kKeyIcon, "chrome://theme/IDR_COOKIE_STORAGE_ICON");
+
+      const content::CacheStorageUsageInfo& cache_storage_info =
+          *node.GetDetailedInfo().cache_storage_info;
+
+      dict->SetString(kKeyOrigin, cache_storage_info.origin.spec());
+      dict->SetString(kKeySize,
+                      ui::FormatBytes(cache_storage_info.total_size_bytes));
+      dict->SetString(kKeyModified,
+                      base::UTF16ToUTF8(base::TimeFormatFriendlyDateAndTime(
+                          cache_storage_info.last_modified)));
       break;
     }
     case CookieTreeNode::DetailedInfo::TYPE_FLASH_LSO: {

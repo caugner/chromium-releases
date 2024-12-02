@@ -17,7 +17,6 @@
 #include "chrome/browser/devtools/devtools_target_impl.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_iterator.h"
@@ -31,7 +30,10 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
+#include "components/syncable_prefs/pref_service_syncable.h"
 #include "components/ui/zoom/page_zoom.h"
+#include "content/public/browser/devtools_external_agent_proxy.h"
+#include "content/public/browser/devtools_external_agent_proxy_delegate.h"
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -70,6 +72,11 @@ static const char kTitleFormat[] = "Developer Tools - %s";
 
 static const char kDevToolsActionTakenHistogram[] = "DevTools.ActionTaken";
 static const char kDevToolsPanelShownHistogram[] = "DevTools.PanelShown";
+
+static const char kRemotePageActionInspect[] = "inspect";
+static const char kRemotePageActionReload[] = "reload";
+static const char kRemotePageActionActivate[] = "activate";
+static const char kRemotePageActionClose[] = "close";
 
 // This constant should be in sync with
 // the constant at shell_devtools_frontend.cc.
@@ -327,6 +334,7 @@ void DevToolsUIBindings::FrontendWebContentsObserver::RenderProcessGone(
     case base::TERMINATION_STATUS_PROCESS_WAS_KILLED_BY_OOM:
 #endif
     case base::TERMINATION_STATUS_PROCESS_CRASHED:
+    case base::TERMINATION_STATUS_LAUNCH_FAILED:
       if (devtools_bindings_->agent_host_.get())
         devtools_bindings_->Detach();
       break;
@@ -358,6 +366,81 @@ void DevToolsUIBindings::FrontendWebContentsObserver::
   devtools_bindings_->DidNavigateMainFrame();
 }
 
+// WebSocketAPIChannel --------------------------------------------------------
+
+class DevToolsUIBindings::WebSocketAPIChannel :
+    public content::DevToolsExternalAgentProxyDelegate {
+ public :
+  explicit WebSocketAPIChannel(base::WeakPtr<DevToolsUIBindings> bindings);
+  ~WebSocketAPIChannel() override;
+  void DispatchOnClientHost(const std::string& message);
+  void ConnectionClosed();
+
+ private:
+  // content::DevToolsExternalAgentProxyDelegate implementation.
+  void Attach(content::DevToolsExternalAgentProxy* proxy) override;
+  void Detach() override;
+  void SendMessageToBackend(const std::string& message) override;
+
+  base::WeakPtr<DevToolsUIBindings> bindings_;
+  content::DevToolsExternalAgentProxy* attached_proxy_;
+  DISALLOW_COPY_AND_ASSIGN(WebSocketAPIChannel);
+};
+
+DevToolsUIBindings::WebSocketAPIChannel::WebSocketAPIChannel(
+    base::WeakPtr<DevToolsUIBindings> bindings)
+    : bindings_(bindings),
+      attached_proxy_(nullptr) {
+  bindings->open_api_channel_ = this;
+}
+
+DevToolsUIBindings::WebSocketAPIChannel::~WebSocketAPIChannel() {
+  if (bindings_)
+    bindings_->open_api_channel_ = nullptr;
+}
+
+void DevToolsUIBindings::WebSocketAPIChannel::DispatchOnClientHost(
+    const std::string& message) {
+  if (attached_proxy_)
+    attached_proxy_->DispatchOnClientHost(message);
+}
+
+void DevToolsUIBindings::WebSocketAPIChannel::ConnectionClosed() {
+  if (bindings_) {
+    bindings_->CallClientFunction("DevToolsAPI.frontendAPIDetached",
+                                  nullptr, nullptr, nullptr);
+  }
+  if (attached_proxy_)
+    attached_proxy_->ConnectionClosed();
+}
+
+void DevToolsUIBindings::WebSocketAPIChannel::Attach(
+    content::DevToolsExternalAgentProxy* proxy) {
+  attached_proxy_ = proxy;
+  if (bindings_) {
+    bindings_->CallClientFunction("DevToolsAPI.frontendAPIAttached",
+                                  nullptr, nullptr, nullptr);
+  }
+}
+
+void DevToolsUIBindings::WebSocketAPIChannel::Detach() {
+  attached_proxy_ = nullptr;
+  if (bindings_) {
+    bindings_->open_api_channel_ = nullptr;
+    bindings_->CallClientFunction("DevToolsAPI.frontendAPIDetached",
+                                  nullptr, nullptr, nullptr);
+  }
+}
+
+void DevToolsUIBindings::WebSocketAPIChannel::SendMessageToBackend(
+    const std::string& message) {
+  if (!bindings_)
+    return;
+  base::StringValue message_value(message);
+  bindings_->CallClientFunction("DevToolsAPI.dispatchFrontendAPIMessage",
+                                &message_value, nullptr, nullptr);
+}
+
 // DevToolsUIBindings ---------------------------------------------------------
 
 DevToolsUIBindings* DevToolsUIBindings::ForWebContents(
@@ -380,6 +463,7 @@ DevToolsUIBindings::DevToolsUIBindings(content::WebContents* web_contents)
       delegate_(new DefaultBindingsDelegate(web_contents_)),
       devices_updates_enabled_(false),
       frontend_loaded_(false),
+      open_api_channel_(nullptr),
       weak_factory_(this) {
   g_instances.Get().push_back(this);
   frontend_contents_observer_.reset(new FrontendWebContentsObserver(this));
@@ -411,6 +495,9 @@ DevToolsUIBindings::~DevToolsUIBindings() {
   }
   indexing_jobs_.clear();
   SetDevicesUpdatesEnabled(false);
+
+  if (open_api_channel_)
+    open_api_channel_->ConnectionClosed();
 
   // Remove self from global list.
   DevToolsUIBindingsList* instances = g_instances.Pointer();
@@ -673,6 +760,35 @@ void DevToolsUIBindings::ResetZoom() {
   ui_zoom::PageZoom::Zoom(web_contents(), content::PAGE_ZOOM_RESET);
 }
 
+void DevToolsUIBindings::SetDevicesDiscoveryConfig(
+    bool discover_usb_devices,
+    bool port_forwarding_enabled,
+    const std::string& port_forwarding_config) {
+  base::DictionaryValue* config_dict = nullptr;
+  scoped_ptr<base::Value> parsed_config =
+      base::JSONReader::Read(port_forwarding_config);
+  if (!parsed_config || !parsed_config->GetAsDictionary(&config_dict))
+    return;
+
+  profile_->GetPrefs()->SetBoolean(
+      prefs::kDevToolsDiscoverUsbDevicesEnabled, discover_usb_devices);
+  profile_->GetPrefs()->SetBoolean(
+      prefs::kDevToolsPortForwardingEnabled, port_forwarding_enabled);
+  profile_->GetPrefs()->Set(
+      prefs::kDevToolsPortForwardingConfig, *config_dict);
+}
+
+void DevToolsUIBindings::DevicesDiscoveryConfigUpdated() {
+  CallClientFunction(
+      "DevToolsAPI.devicesDiscoveryConfigChanged",
+      profile_->GetPrefs()->FindPreference(
+          prefs::kDevToolsDiscoverUsbDevicesEnabled)->GetValue(),
+      profile_->GetPrefs()->FindPreference(
+          prefs::kDevToolsPortForwardingEnabled)->GetValue(),
+      profile_->GetPrefs()->FindPreference(
+          prefs::kDevToolsPortForwardingConfig)->GetValue());
+}
+
 void DevToolsUIBindings::SetDevicesUpdatesEnabled(bool enabled) {
   if (devices_updates_enabled_ == enabled)
     return;
@@ -682,9 +798,38 @@ void DevToolsUIBindings::SetDevicesUpdatesEnabled(bool enabled) {
         base::Bind(&DevToolsUIBindings::DevicesUpdated,
                    base::Unretained(this)),
         profile_);
+    pref_change_registrar_.Init(profile_->GetPrefs());
+    pref_change_registrar_.Add(prefs::kDevToolsDiscoverUsbDevicesEnabled,
+        base::Bind(&DevToolsUIBindings::DevicesDiscoveryConfigUpdated,
+                   base::Unretained(this)));
+    pref_change_registrar_.Add(prefs::kDevToolsPortForwardingEnabled,
+        base::Bind(&DevToolsUIBindings::DevicesDiscoveryConfigUpdated,
+                   base::Unretained(this)));
+    pref_change_registrar_.Add(prefs::kDevToolsPortForwardingConfig,
+        base::Bind(&DevToolsUIBindings::DevicesDiscoveryConfigUpdated,
+                   base::Unretained(this)));
+    DevicesDiscoveryConfigUpdated();
   } else {
     remote_targets_handler_.reset();
+    pref_change_registrar_.RemoveAll();
   }
+}
+
+void DevToolsUIBindings::PerformActionOnRemotePage(const std::string& page_id,
+                                                   const std::string& action) {
+  if (!remote_targets_handler_)
+    return;
+  DevToolsTargetImpl* target = remote_targets_handler_->GetTarget(page_id);
+  if (!target)
+    return;
+  if (action == kRemotePageActionInspect)
+    target->Inspect(profile_);
+  if (action == kRemotePageActionReload)
+    target->Reload();
+  if (action == kRemotePageActionActivate)
+    target->Activate();
+  if (action == kRemotePageActionClose)
+    target->Close();
 }
 
 void DevToolsUIBindings::GetPreferences(const DispatchCallback& callback) {
@@ -747,6 +892,13 @@ void DevToolsUIBindings::SendJsonRequest(const DispatchCallback& callback,
       base::Bind(&DevToolsUIBindings::JsonReceived,
                  weak_factory_.GetWeakPtr(),
                  callback));
+}
+
+void DevToolsUIBindings::SendFrontendAPINotification(
+    const std::string& message) {
+  if (!open_api_channel_)
+    return;
+  open_api_channel_->DispatchOnClientHost(message);
 }
 
 void DevToolsUIBindings::JsonReceived(const DispatchCallback& callback,
@@ -943,6 +1095,13 @@ void DevToolsUIBindings::Detach() {
 
 bool DevToolsUIBindings::IsAttachedTo(content::DevToolsAgentHost* agent_host) {
   return agent_host_.get() == agent_host;
+}
+
+content::DevToolsExternalAgentProxyDelegate*
+DevToolsUIBindings::CreateWebSocketAPIChannel() {
+  if (open_api_channel_)
+    open_api_channel_->ConnectionClosed();
+  return new WebSocketAPIChannel(weak_factory_.GetWeakPtr());
 }
 
 void DevToolsUIBindings::CallClientFunction(const std::string& function_name,

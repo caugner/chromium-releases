@@ -9,14 +9,13 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/bookmarks/bookmark_stats.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar_instructions_delegate.h"
-#include "chrome/browser/ui/views/bookmarks/bookmark_bubble_view_observer.h"
+#include "chrome/browser/ui/bookmarks/bookmark_bubble_observer.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_menu_controller_observer.h"
 #include "components/bookmarks/browser/bookmark_model_observer.h"
 #include "components/bookmarks/browser/bookmark_node_data.h"
@@ -71,7 +70,7 @@ class BookmarkBarView : public views::AccessiblePaneView,
                         public gfx::AnimationDelegate,
                         public BookmarkMenuControllerObserver,
                         public BookmarkBarInstructionsDelegate,
-                        public BookmarkBubbleViewObserver {
+                        public bookmarks::BookmarkBubbleObserver {
  public:
   // The internal view class name.
   static const char kViewClassName[];
@@ -101,9 +100,6 @@ class BookmarkBarView : public views::AccessiblePaneView,
   // Changes the state of the bookmark bar.
   void SetBookmarkBarState(BookmarkBar::State state,
                            BookmarkBar::AnimateChangeType animate_type);
-
-  // Returns the toolbar overlap when fully detached.
-  int GetFullyDetachedToolbarOverlap() const;
 
   // Whether or not we are animating.
   bool is_animating();
@@ -203,8 +199,8 @@ class BookmarkBarView : public views::AccessiblePaneView,
   // BookmarkBarInstructionsDelegate:
   void OnImportBookmarks() override;
 
-  // BookmarkBubbleViewObserver:
-  void OnBookmarkBubbleShown(const GURL& url) override;
+  // bookmarks::BookmarkBubbleObserver:
+  void OnBookmarkBubbleShown(const bookmarks::BookmarkNode* node) override;
   void OnBookmarkBubbleHidden() override;
 
   // bookmarks::BookmarkModelObserver:

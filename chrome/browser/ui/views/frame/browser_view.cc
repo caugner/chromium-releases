@@ -35,12 +35,12 @@
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/search/search.h"
-#include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/signin/chrome_signin_helper.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
+#include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar_constants.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bubble_delegate.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bubble_sign_in_delegate.h"
@@ -86,6 +86,7 @@
 #include "chrome/browser/ui/views/tabs/browser_tab_strip_controller.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
+#include "chrome/browser/ui/views/toolbar/browser_actions_container.h"
 #include "chrome/browser/ui/views/toolbar/reload_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/browser/ui/views/toolbar/wrench_toolbar_button.h"
@@ -107,6 +108,7 @@
 #include "components/omnibox/browser/omnibox_popup_model.h"
 #include "components/omnibox/browser/omnibox_popup_view.h"
 #include "components/omnibox/browser/omnibox_view.h"
+#include "components/sessions/core/tab_restore_service.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/translate/core/browser/language_state.h"
 #include "content/app/resources/grit/content_resources.h"
@@ -123,6 +125,7 @@
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/content_accelerators/accelerator_util.h"
@@ -168,7 +171,6 @@
 using base::TimeDelta;
 using base::UserMetricsAction;
 using content::NativeWebKeyboardEvent;
-using content::SSLStatus;
 using content::WebContents;
 using views::ColumnSet;
 using views::GridLayout;
@@ -208,24 +210,20 @@ void PaintDetachedBookmarkBar(gfx::Canvas* canvas,
   // if animating, these are fading in/out.
   SkColor separator_color =
       chrome::GetDetachedBookmarkBarSeparatorColor(theme_service);
-  PaintHorizontalBorder(canvas, view, true, separator_color);
-  // The bottom border needs to be 1-px thick in both regular and retina
-  // displays, so we can't use PaintHorizontalBorder which paints a 2-px thick
-  // border in retina display.
-  SkPaint paint;
-  paint.setAntiAlias(false);
-  // Sets border to 1-px thick regardless of scale factor.
-  paint.setStrokeWidth(0);
-  // Bottom border is at 50% opacity of top border.
-  paint.setColor(SkColorSetA(separator_color,
-                             SkColorGetA(separator_color) / 2));
-  // Calculate thickness of bottom border as per current scale factor to
-  // determine where to draw the 1-px thick border.
-  float thickness = views::NonClientFrameView::kClientEdgeThickness /
-                    canvas->image_scale();
-  SkScalar y = SkIntToScalar(view->height()) - SkFloatToScalar(thickness);
-  canvas->sk_canvas()->drawLine(SkIntToScalar(0), y,
-                                SkIntToScalar(view->width()), y, paint);
+
+  if (ui::MaterialDesignController::IsModeMaterial()) {
+    BrowserView::Paint1pxHorizontalLine(
+        canvas, separator_color,
+        gfx::Rect(0, 0, view->width(),
+                  views::NonClientFrameView::kClientEdgeThickness));
+  } else {
+    PaintHorizontalBorder(canvas, view, true, separator_color);
+  }
+
+  BrowserView::Paint1pxHorizontalLine(
+      canvas,
+      SkColorSetA(separator_color, SkColorGetA(separator_color) / 2),
+      view->GetLocalBounds());
 }
 
 // Paints the background (including the theme image behind content area) for
@@ -246,8 +244,10 @@ void PaintBackgroundAttachedMode(gfx::Canvas* canvas,
                        bounds.width(),
                        bounds.height());
 
-  if (host_desktop_type == chrome::HOST_DESKTOP_TYPE_ASH) {
-    // Ash provides additional lightening at the edges of the toolbar.
+  if (host_desktop_type == chrome::HOST_DESKTOP_TYPE_ASH &&
+      !ui::MaterialDesignController::IsModeMaterial()) {
+    // The pre-material design version of Ash provides additional lightening
+    // at the edges of the toolbar.
     gfx::ImageSkia* toolbar_left =
         theme_provider->GetImageSkiaNamed(IDR_TOOLBAR_SHADE_LEFT);
     canvas->TileImageInt(*toolbar_left,
@@ -281,11 +281,19 @@ void PaintAttachedBookmarkBar(gfx::Canvas* canvas,
                               host_desktop_type);
   if (view->height() >= toolbar_overlap) {
     // Draw the separator below the Bookmarks Bar; this is fading in/out.
-    PaintHorizontalBorder(canvas,
-                          view,
-                          false,
-                          ThemeProperties::GetDefaultColor(
-                              ThemeProperties::COLOR_TOOLBAR_SEPARATOR));
+    if (ui::MaterialDesignController::IsModeMaterial()) {
+      BrowserView::Paint1pxHorizontalLine(
+          canvas,
+          ThemeProperties::GetDefaultColor(
+              ThemeProperties::COLOR_TOOLBAR_SEPARATOR),
+          view->GetLocalBounds());
+    } else {
+      PaintHorizontalBorder(canvas,
+                            view,
+                            false,
+                            ThemeProperties::GetDefaultColor(
+                                ThemeProperties::COLOR_TOOLBAR_SEPARATOR));
+    }
   }
 }
 
@@ -536,6 +544,24 @@ BrowserView* BrowserView::GetBrowserViewForNativeWindow(
 // static
 BrowserView* BrowserView::GetBrowserViewForBrowser(const Browser* browser) {
   return static_cast<BrowserView*>(browser->window());
+}
+
+// static
+void BrowserView::Paint1pxHorizontalLine(gfx::Canvas* canvas,
+                                         SkColor color,
+                                         const gfx::Rect& bounds) {
+  canvas->Save();
+  SkScalar scale_factor = 1.0f / canvas->image_scale();
+  canvas->sk_canvas()->scale(scale_factor, scale_factor);
+
+  gfx::RectF line_rect =
+      gfx::ScaleRect(gfx::RectF(bounds), canvas->image_scale());
+  line_rect.Inset(0, line_rect.height() - 1, 0, 0);
+
+  SkPaint paint;
+  paint.setColor(color);
+  canvas->sk_canvas()->drawRect(gfx::RectFToSkRect(line_rect), paint);
+  canvas->Restore();
 }
 
 void BrowserView::InitStatusBubble() {
@@ -874,7 +900,7 @@ void BrowserView::OnActiveTabChanged(content::WebContents* old_contents,
 
   if (new_contents && PermissionBubbleManager::FromWebContents(new_contents)) {
     PermissionBubbleManager::FromWebContents(new_contents)
-        ->DisplayPendingRequests(browser_.get());
+        ->DisplayPendingRequests();
   }
 
   UpdateUIForContents(new_contents);
@@ -1103,6 +1129,11 @@ void BrowserView::FocusToolbar() {
   toolbar_->SetPaneFocus(nullptr);
 }
 
+ToolbarActionsBar* BrowserView::GetToolbarActionsBar() {
+  return toolbar_ ?
+      toolbar_->browser_actions()->toolbar_actions_bar() : nullptr;
+}
+
 void BrowserView::ToolbarSizeChanged(bool is_animating) {
   // The call to SetMaxTopArrowHeight() below can result in reentrancy;
   // |call_state| tracks whether we're reentrant.  We can't just early-return in
@@ -1238,11 +1269,9 @@ void BrowserView::ShowBookmarkBubble(const GURL& url, bool already_bookmarked) {
   delegate.reset(new BookmarkBubbleSignInDelegate(browser_.get()));
 
   BookmarkBubbleView::ShowBubble(GetToolbarView()->GetBookmarkBubbleAnchor(),
-                                 bookmark_bar_view_.get(),
-                                 delegate.Pass(),
-                                 browser_->profile(),
-                                 url,
-                                 !already_bookmarked);
+                                 gfx::Rect(), nullptr, bookmark_bar_view_.get(),
+                                 delegate.Pass(), browser_->profile(), url,
+                                 already_bookmarked);
 }
 
 void BrowserView::ShowBookmarkAppBubble(
@@ -1275,10 +1304,6 @@ void BrowserView::ShowTranslateBubble(
   TranslateBubbleView::ShowBubble(
       GetToolbarView()->GetTranslateBubbleAnchor(), web_contents, step,
       error_type, is_user_gesture);
-}
-
-bool BrowserView::ShowSessionCrashedBubble() {
-  return SessionCrashedBubbleView::Show(browser_.get());
 }
 
 bool BrowserView::IsProfileResetBubbleSupported() const {
@@ -1356,10 +1381,11 @@ void BrowserView::UserChangedTheme() {
   frame_->FrameTypeChanged();
 }
 
-void BrowserView::ShowWebsiteSettings(Profile* profile,
-                                      content::WebContents* web_contents,
-                                      const GURL& url,
-                                      const content::SSLStatus& ssl) {
+void BrowserView::ShowWebsiteSettings(
+    Profile* profile,
+    content::WebContents* web_contents,
+    const GURL& url,
+    const SecurityStateModel::SecurityInfo& security_info) {
   // Some browser windows have a location icon embedded in the frame. Try to
   // use that if it exists. If it doesn't exist, use the location icon from
   // the location bar.
@@ -1368,7 +1394,7 @@ void BrowserView::ShowWebsiteSettings(Profile* profile,
     popup_anchor = GetLocationBarView()->location_icon_view();
 
   WebsiteSettingsPopupView::ShowPopup(popup_anchor, gfx::Rect(), profile,
-                                      web_contents, url, ssl);
+                                      web_contents, url, security_info);
 }
 
 void BrowserView::ShowAppMenu() {
@@ -1400,6 +1426,8 @@ bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
 
   // What we have to do here is as follows:
   // - If the |browser_| is for an app, do nothing.
+  // - On CrOS if |accelerator| is deprecated, we allow web contents to consume
+  //   it if needed.
   // - If the |browser_| is not for an app, and the |accelerator| is not
   //   associated with the browser (e.g. an Ash shortcut), process it.
   // - If the |browser_| is not for an app, and the |accelerator| is associated
@@ -1414,6 +1442,14 @@ bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
     // in content/renderer/render_widget.cc for details.
     return false;
   }
+
+#if defined(OS_CHROMEOS)
+  if (chrome::IsAcceleratorDeprecated(accelerator)) {
+    if (event.type == blink::WebInputEvent::RawKeyDown)
+      *is_keyboard_shortcut = true;
+    return false;
+  }
+#endif  // defined(OS_CHROMEOS)
 
   chrome::BrowserCommandController* controller = browser_->command_controller();
 
@@ -2482,6 +2518,9 @@ void BrowserView::ShowAvatarBubbleFromAvatarButton(
     AvatarBubbleMode mode,
     const signin::ManageAccountsParams& manage_accounts_params) {
 #if defined(FRAME_AVATAR_BUTTON)
+  // Do not show avatar bubble if there is no avatar menu button.
+  if (!frame_->GetNewAvatarMenuButton())
+    return;
   profiles::BubbleViewMode bubble_view_mode;
   profiles::TutorialMode tutorial_mode;
   profiles::BubbleViewModeFromAvatarBubbleMode(mode, &bubble_view_mode,
@@ -2498,13 +2537,13 @@ void BrowserView::ShowAvatarBubbleFromAvatarButton(
 
 int BrowserView::GetRenderViewHeightInsetWithDetachedBookmarkBar() {
   if (browser_->bookmark_bar_state() != BookmarkBar::DETACHED ||
-      !bookmark_bar_view_.get() || !bookmark_bar_view_->IsDetached()) {
+      !bookmark_bar_view_ || !bookmark_bar_view_->IsDetached()) {
     return 0;
   }
   // Don't use bookmark_bar_view_->height() which won't be the final height if
   // the bookmark bar is animating.
   return chrome::kNTPBookmarkBarHeight -
-      bookmark_bar_view_->GetFullyDetachedToolbarOverlap();
+      views::NonClientFrameView::kClientEdgeThickness;
 }
 
 void BrowserView::ExecuteExtensionCommand(

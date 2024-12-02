@@ -1,4 +1,19 @@
 {
+    "AutofillClassifier": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "AutofillFieldMetadata": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "AutomaticTabDiscarding": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
     "BrowserBlacklist": [
         {
             "group_name": "Enabled"
@@ -19,7 +34,22 @@
             "group_name": "Default"
         }
     ],
+    "ChromotingQUIC": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "EnableGoogleCachedCopyTextExperiment": [
+        {
+            "group_name": "Button"
+        }
+    ],
     "EnableSessionCrashedBubbleUI": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "ExtensionActionRedesign": [
         {
             "group_name": "Enabled"
         }
@@ -49,6 +79,35 @@
             "group_name": "Enabled"
         }
     ],
+    "IntelligentSessionRestore": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "NetworkQualityEstimator": [
+        {
+            "group_name": "Enabled",
+            "params": {
+                "2G.DefaultMedianKbps": "81",
+                "2G.DefaultMedianRTTMsec": "1337",
+                "3G.DefaultMedianKbps": "658",
+                "3G.DefaultMedianRTTMsec": "297",
+                "4G.DefaultMedianKbps": "1756",
+                "4G.DefaultMedianRTTMsec": "159",
+                "Bluetooth.DefaultMedianKbps": "449",
+                "Bluetooth.DefaultMedianRTTMsec": "135",
+                "Ethernet.DefaultMedianKbps": "3263",
+                "Ethernet.DefaultMedianRTTMsec": "106",
+                "HalfLifeSeconds": "60",
+                "None.DefaultMedianKbps": "567",
+                "None.DefaultMedianRTTMsec": "272",
+                "Unknown.DefaultMedianKbps": "1916",
+                "Unknown.DefaultMedianRTTMsec": "121",
+                "WiFi.DefaultMedianKbps": "2736",
+                "WiFi.DefaultMedianRTTMsec": "168"
+            }
+        }
+    ],
     "NewProfileManagement": [
         {
             "group_name": "Enabled"
@@ -59,27 +118,22 @@
             "group_name": "Disabled"
         }
     ],
+    "PluginPowerSaver": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
     "QUIC": [
         {
             "group_name": "Enabled",
             "params": {
-              "alternate_protocol_probability_threshold": "0.01"
+                "alternate_protocol_probability_threshold": "0.01"
             }
         }
     ],
     "RefreshTokenDeviceId": [
         {
             "group_name": "Enabled"
-        }
-    ],
-    "SRTPromptFieldTrial": [
-        {
-            "group_name": "Default"
-        }
-    ],
-    "SettingsEnforcement": [
-        {
-            "group_name": "enforce_always_with_extensions_and_dse"
         }
     ],
     "ReportCertificateErrors": [
@@ -111,9 +165,30 @@
             "group_name": "DontShowAndDontSend"
         }
     ],
+    "SRTPromptFieldTrial": [
+        {
+            "group_name": "Default"
+        }
+    ],
+    "SafeBrowsingReportPhishingErrorLink": [
+        {
+            "group_name": "Enabled"
+        },
+        {
+            "group_name": "Control"
+        },
+        {
+            "group_name": "Disabled"
+        }
+    ],
     "SdchPersistence": [
         {
             "group_name": "Enabled"
+        }
+    ],
+    "SettingsEnforcement": [
+        {
+            "group_name": "enforce_always_with_extensions_and_dse"
         }
     ],
     "SyncHttpContentCompression": [
@@ -124,7 +199,7 @@
             "group_name": "Disabled"
         }
     ],
-    "AutofillFieldMetadata": [
+    "TabSyncByRecency": [
         {
             "group_name": "Enabled"
         }

@@ -4,16 +4,9 @@
 
 #include "chrome/browser/extensions/extension_install_prompt.h"
 
-#include <map>
-
-#include "base/command_line.h"
 #include "base/location.h"
-#include "base/prefs/pref_service.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/thread_task_runner_handle.h"
 #include "chrome/browser/extensions/bundle_installer.h"
@@ -22,7 +15,6 @@
 #include "chrome/browser/extensions/permissions_updater.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/extensions/extension_install_ui_factory.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/web_contents.h"
@@ -40,6 +32,7 @@
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
 #include "extensions/common/manifest_handlers/permissions_parser.h"
+#include "extensions/common/permissions/permission_message_provider.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/url_pattern.h"
@@ -52,8 +45,8 @@
 using extensions::BundleInstaller;
 using extensions::Extension;
 using extensions::Manifest;
-using extensions::CoalescedPermissionMessage;
-using extensions::CoalescedPermissionMessages;
+using extensions::PermissionMessage;
+using extensions::PermissionMessages;
 using extensions::PermissionSet;
 
 namespace {
@@ -246,7 +239,7 @@ ExtensionInstallPrompt::Prompt::~Prompt() {
 }
 
 void ExtensionInstallPrompt::Prompt::SetPermissions(
-    const CoalescedPermissionMessages& permissions,
+    const PermissionMessages& permissions,
     PermissionsType permissions_type) {
   InstallPromptPermissions& install_permissions =
       GetPermissionsForType(permissions_type);
@@ -255,7 +248,7 @@ void ExtensionInstallPrompt::Prompt::SetPermissions(
   install_permissions.details.clear();
   install_permissions.is_showing_details.clear();
 
-  for (const CoalescedPermissionMessage& msg : permissions) {
+  for (const PermissionMessage& msg : permissions) {
     install_permissions.permissions.push_back(msg.message());
     // Add a dash to the front of each permission detail.
     base::string16 details;
@@ -630,10 +623,10 @@ ExtensionInstallPrompt::~ExtensionInstallPrompt() {
 void ExtensionInstallPrompt::ConfirmBundleInstall(
     extensions::BundleInstaller* bundle,
     const SkBitmap* icon,
-    const PermissionSet* permissions) {
+    scoped_ptr<const PermissionSet> permissions) {
   DCHECK(ui_loop_ == base::MessageLoop::current());
   bundle_ = bundle;
-  custom_permissions_ = permissions;
+  custom_permissions_ = permissions.Pass();
   delegate_ = bundle;
   prompt_ = new Prompt(BUNDLE_INSTALL_PROMPT);
 
@@ -645,11 +638,11 @@ void ExtensionInstallPrompt::ConfirmPermissionsForDelegatedBundleInstall(
     extensions::BundleInstaller* bundle,
     const std::string& delegated_username,
     const SkBitmap* icon,
-    const extensions::PermissionSet* permissions) {
+    scoped_ptr<const extensions::PermissionSet> permissions) {
   DCHECK(ui_loop_ == base::MessageLoop::current());
   bundle_ = bundle;
   delegated_username_ = delegated_username;
-  custom_permissions_ = permissions;
+  custom_permissions_ = permissions.Pass();
   delegate_ = bundle;
   prompt_ = new Prompt(DELEGATED_BUNDLE_PERMISSIONS_PROMPT);
 
@@ -766,10 +759,10 @@ void ExtensionInstallPrompt::ConfirmExternalInstall(
 void ExtensionInstallPrompt::ConfirmPermissions(
     Delegate* delegate,
     const Extension* extension,
-    const PermissionSet* permissions) {
+    scoped_ptr<const PermissionSet> permissions) {
   DCHECK(ui_loop_ == base::MessageLoop::current());
   extension_ = extension;
-  custom_permissions_ = permissions;
+  custom_permissions_ = permissions.Pass();
   delegate_ = delegate;
   prompt_ = new Prompt(PERMISSIONS_PROMPT);
 
@@ -852,9 +845,10 @@ void ExtensionInstallPrompt::LoadImageIfNeeded() {
 }
 
 void ExtensionInstallPrompt::ShowConfirmation() {
-  scoped_refptr<const PermissionSet> permissions_to_display;
+  scoped_ptr<const PermissionSet> permissions_wrapper;
+  const PermissionSet* permissions_to_display = nullptr;
   if (custom_permissions_.get()) {
-    permissions_to_display = custom_permissions_;
+    permissions_to_display = custom_permissions_.get();
   } else if (extension_) {
     // Initialize permissions if they have not already been set so that
     // withheld permissions are displayed properly in the install prompt.
@@ -862,20 +856,20 @@ void ExtensionInstallPrompt::ShowConfirmation() {
         profile_, extensions::PermissionsUpdater::INIT_FLAG_TRANSIENT)
         .InitializePermissions(extension_);
     permissions_to_display =
-        extension_->permissions_data()->active_permissions();
+        &extension_->permissions_data()->active_permissions();
     // For delegated installs, all optional permissions are pre-approved by the
     // person who triggers the install, so add them to the list.
     if (prompt_->type() == DELEGATED_PERMISSIONS_PROMPT ||
         prompt_->type() == DELEGATED_BUNDLE_PERMISSIONS_PROMPT) {
-      scoped_refptr<const PermissionSet> optional_permissions =
+      const PermissionSet& optional_permissions =
           extensions::PermissionsParser::GetOptionalPermissions(extension_);
-      permissions_to_display = PermissionSet::CreateUnion(
-          permissions_to_display.get(),
-          optional_permissions.get());
+      permissions_wrapper = PermissionSet::CreateUnion(*permissions_to_display,
+                                                       optional_permissions);
+      permissions_to_display = permissions_wrapper.get();
     }
   }
 
-  if (permissions_to_display.get() &&
+  if (permissions_to_display &&
       (!extension_ ||
        !extensions::PermissionsData::ShouldSkipPermissionWarnings(
            extension_->id()))) {
@@ -886,16 +880,16 @@ void ExtensionInstallPrompt::ShowConfirmation() {
 
     prompt_->SetPermissions(message_provider->GetPermissionMessages(
                                 message_provider->GetAllPermissionIDs(
-                                    permissions_to_display.get(), type)),
+                                    *permissions_to_display, type)),
                             REGULAR_PERMISSIONS);
 
-    scoped_refptr<const extensions::PermissionSet> withheld =
-        extension_ ? extension_->permissions_data()->withheld_permissions()
+    const PermissionSet* withheld =
+        extension_ ? &extension_->permissions_data()->withheld_permissions()
                    : nullptr;
     if (withheld && !withheld->IsEmpty()) {
       prompt_->SetPermissions(
           message_provider->GetPermissionMessages(
-              message_provider->GetAllPermissionIDs(withheld.get(), type)),
+              message_provider->GetAllPermissionIDs(*withheld, type)),
           WITHHELD_PERMISSIONS);
     }
   }

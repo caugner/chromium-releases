@@ -7,6 +7,8 @@
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
+#include "base/strings/string_split.h"
 #include "net/quic/quic_data_stream.h"
 #include "net/quic/quic_spdy_session.h"
 #include "net/quic/spdy_utils.h"
@@ -97,10 +99,28 @@ bool QuicSpdyServerStream::ParseRequestHeaders(const char* data,
   if (data_len > len) {
     body_.append(data + len, data_len - len);
   }
-  if (ContainsKey(request_headers_, "content-length") &&
-      !StringToInt(request_headers_["content-length"], &content_length_)) {
-    return false;  // Invalid content-length.
+  if (ContainsKey(request_headers_, "content-length")) {
+    string delimiter;
+    delimiter.push_back('\0');
+    std::vector<string> values =
+        base::SplitString(request_headers_["content-length"], delimiter,
+                          base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+
+    for (const string& value : values) {
+      int new_value;
+      if (!StringToInt(value, &new_value) || new_value < 0) {
+        return false;
+      }
+      if (content_length_ < 0) {
+        content_length_ = new_value;
+        continue;
+      }
+      if (new_value != content_length_) {
+        return false;
+      }
+    }
   }
+
   return true;
 }
 

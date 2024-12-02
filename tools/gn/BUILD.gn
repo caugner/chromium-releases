@@ -229,6 +229,7 @@ executable("gn") {
     ":gn_lib",
     ":last_commit_position",
     "//base",
+    "//build/config/sanitizers:deps",
   ]
 }
 
@@ -248,6 +249,7 @@ test("gn_unittests") {
     "builder_unittest.cc",
     "c_include_iterator_unittest.cc",
     "command_format_unittest.cc",
+    "config_unittest.cc",
     "config_values_extractors_unittest.cc",
     "escape_unittest.cc",
     "exec_process_unittest.cc",
@@ -316,5 +318,6 @@ executable("generate_test_gn_data") {
   ]
   deps = [
     "//base",
+    "//build/config/sanitizers:deps",
   ]
 }

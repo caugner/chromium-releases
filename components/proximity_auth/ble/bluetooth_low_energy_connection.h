@@ -88,8 +88,6 @@ class BluetoothLowEnergyConnection : public Connection,
       const RemoteDevice& remote_device,
       scoped_refptr<device::BluetoothAdapter> adapter,
       const device::BluetoothUUID remote_service_uuid,
-      const device::BluetoothUUID to_peripheral_char_uuid,
-      const device::BluetoothUUID from_peripheral_char_uuid,
       BluetoothThrottler* bluetooth_throttler,
       int max_number_of_write_attempts);
 
@@ -98,6 +96,7 @@ class BluetoothLowEnergyConnection : public Connection,
   // proximity_auth::Connection:
   void Connect() override;
   void Disconnect() override;
+  std::string GetDeviceAddress() override;
 
  protected:
   // Exposed for testing.
@@ -220,11 +219,8 @@ class BluetoothLowEnergyConnection : public Connection,
                                  const std::vector<uint8>& bytes,
                                  bool is_last_message_for_wire_message);
 
-  // Clears |write_requests_queue_|.
-  void ClearWriteRequestsQueue();
-
-  // Returns the Bluetooth address of the remote device.
-  const std::string& GetRemoteDeviceAddress();
+  // Prints the time elapsed since |Connect()| was called.
+  void PrintTimeElapsed();
 
   // Returns the device corresponding to |remote_device_address_|.
   device::BluetoothDevice* GetRemoteDevice();
@@ -302,12 +298,6 @@ class BluetoothLowEnergyConnection : public Connection,
 
   // Stores when the instace was created.
   base::TimeTicks start_time_;
-
-  // Delay imposed after a GATT connection is created and before any read/write
-  // request is sent to the characteristics. This delay is necessary as a
-  // workaroud for crbug.com/507325. Reading/writing characteristics
-  // immediatelly after the connection is complete fails with GATT_ERROR_FAILED.
-  base::TimeDelta delay_after_gatt_connection_;
 
   base::WeakPtrFactory<BluetoothLowEnergyConnection> weak_ptr_factory_;
 

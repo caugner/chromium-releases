@@ -138,10 +138,13 @@
       <part file="data_reduction_proxy_strings.grdp" />
       <part file="dom_distiller_strings.grdp" />
       <part file="error_page_strings.grdp" />
+      <part file="flags_ui_strings.grdp" />
       <part file="omnibox_strings.grdp" />
       <part file="password_manager_strings.grdp" />
       <part file="pdf_strings.grdp" />
       <part file="policy_strings.grdp" />
+      <part file="security_interstitials_strings.grdp" />
+      <part file="ssl_errors_strings.grdp" />
       <part file="translate_strings.grdp" />
       <part file="undo_strings.grdp" />
       <part file="version_info.grdp" />

@@ -32,8 +32,10 @@ import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler;
 import org.chromium.chrome.browser.ssl.ConnectionSecurityLevel;
 import org.chromium.chrome.browser.tab.ChromeTab;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
+import org.chromium.chrome.browser.tab.InterceptNavigationDelegateImpl;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabIdManager;
+import org.chromium.chrome.browser.tab.TabWebContentsDelegateAndroid;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
@@ -200,7 +202,7 @@ public class CustomTab extends ChromeTab {
     protected InterceptNavigationDelegateImpl createInterceptNavigationDelegate() {
         mNavigationDelegate = new CustomTabNavigationDelegate(mActivity);
         mNavigationHandler = new ExternalNavigationHandler(mNavigationDelegate);
-        return new InterceptNavigationDelegateImpl(mNavigationHandler);
+        return new InterceptNavigationDelegateImpl(mNavigationHandler, mActivity, this);
     }
 
     /**
@@ -238,7 +240,7 @@ public class CustomTab extends ChromeTab {
                 String linkUrl = params.getLinkUrl();
                 if (linkUrl != null) linkUrl = linkUrl.trim();
                 if (!TextUtils.isEmpty(linkUrl)) {
-                    menu.add(Menu.NONE, org.chromium.chrome.R.id.contextmenu_copy_link_address_text,
+                    menu.add(Menu.NONE, org.chromium.chrome.R.id.contextmenu_copy_link_address,
                             Menu.NONE, org.chromium.chrome.R.string.contextmenu_copy_link_address);
                 }
 
@@ -344,8 +346,8 @@ public class CustomTab extends ChromeTab {
     }
 
     @Override
-    protected TabChromeWebContentsDelegateAndroid createWebContentsDelegate() {
-        return new TabChromeWebContentsDelegateAndroidImpl() {
+    protected TabWebContentsDelegateAndroid createWebContentsDelegate() {
+        return new TabWebContentsDelegateAndroid(this, mActivity) {
             private String mTargetUrl;
 
             @Override

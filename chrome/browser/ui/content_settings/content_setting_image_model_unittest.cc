@@ -4,6 +4,7 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile.h"
@@ -63,14 +64,14 @@ TEST_F(ContentSettingImageModelTest, UpdateFromWebContents) {
      ContentSettingImageModel::CreateContentSettingImageModel(
          CONTENT_SETTINGS_TYPE_IMAGES));
   EXPECT_FALSE(content_setting_image_model->is_visible());
-  EXPECT_EQ(0, content_setting_image_model->get_icon());
+  EXPECT_TRUE(content_setting_image_model->icon().IsEmpty());
   EXPECT_TRUE(content_setting_image_model->get_tooltip().empty());
 
   content_settings->OnContentBlocked(CONTENT_SETTINGS_TYPE_IMAGES);
   content_setting_image_model->UpdateFromWebContents(web_contents());
 
   EXPECT_TRUE(content_setting_image_model->is_visible());
-  EXPECT_NE(0, content_setting_image_model->get_icon());
+  EXPECT_FALSE(content_setting_image_model->icon().IsEmpty());
   EXPECT_FALSE(content_setting_image_model->get_tooltip().empty());
 }
 
@@ -95,13 +96,14 @@ TEST_F(ContentSettingImageModelTest, CookieAccessed) {
   TabSpecificContentSettings::CreateForWebContents(web_contents());
   TabSpecificContentSettings* content_settings =
       TabSpecificContentSettings::FromWebContents(web_contents());
-  profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_COOKIES, CONTENT_SETTING_BLOCK);
+  HostContentSettingsMapFactory::GetForProfile(profile())
+      ->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_COOKIES,
+                                 CONTENT_SETTING_BLOCK);
   scoped_ptr<ContentSettingImageModel> content_setting_image_model(
      ContentSettingImageModel::CreateContentSettingImageModel(
          CONTENT_SETTINGS_TYPE_COOKIES));
   EXPECT_FALSE(content_setting_image_model->is_visible());
-  EXPECT_EQ(0, content_setting_image_model->get_icon());
+  EXPECT_TRUE(content_setting_image_model->icon().IsEmpty());
   EXPECT_TRUE(content_setting_image_model->get_tooltip().empty());
 
   net::CookieOptions options;
@@ -112,7 +114,7 @@ TEST_F(ContentSettingImageModelTest, CookieAccessed) {
                                     false);
   content_setting_image_model->UpdateFromWebContents(web_contents());
   EXPECT_TRUE(content_setting_image_model->is_visible());
-  EXPECT_NE(0, content_setting_image_model->get_icon());
+  EXPECT_FALSE(content_setting_image_model->icon().IsEmpty());
   EXPECT_FALSE(content_setting_image_model->get_tooltip().empty());
 }
 

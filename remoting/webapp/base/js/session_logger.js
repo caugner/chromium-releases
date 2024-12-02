@@ -43,9 +43,16 @@ remoting.SessionLogger = function(role, writeLogEntry) {
   this.authTotalTime_ = 0;
   /** @private */
   this.hostVersion_ = '';
-
+  /** @private {remoting.ChromotingEvent.Os}*/
+  this.hostOs_ = remoting.ChromotingEvent.Os.OTHER;
+  /** @private */
+  this.hostOsVersion_ = '';
+  /** @private {number} */
+  this.hostStatusUpdateElapsedTime_;
   /** @private */
   this.mode_ = remoting.ChromotingEvent.Mode.ME2ME;
+  /** @private {remoting.ChromotingEvent.AuthMethod} */
+  this.authMethod_;
 
   this.setSessionId_();
 };
@@ -68,6 +75,27 @@ remoting.SessionLogger.prototype.setHostVersion = function(hostVersion) {
 };
 
 /** @override {remoting.Logger} */
+remoting.SessionLogger.prototype.setHostOs = function(hostOs) {
+  this.hostOs_ = hostOs;
+};
+
+/** @override {remoting.Logger} */
+remoting.SessionLogger.prototype.setHostOsVersion = function(hostOsVersion) {
+  this.hostOsVersion_ = hostOsVersion;
+};
+
+/** @override {remoting.Logger} */
+remoting.SessionLogger.prototype.setHostStatusUpdateElapsedTime =
+    function(time) {
+  this.hostStatusUpdateElapsedTime_ = time;
+};
+
+/** @override {remoting.Logger} */
+remoting.SessionLogger.prototype.setHostOsVersion = function(hostOsVersion) {
+  this.hostOsVersion_ = hostOsVersion;
+};
+
+/** @override {remoting.Logger} */
 remoting.SessionLogger.prototype.setConnectionType = function(connectionType) {
   this.connectionType_ = toConnectionType(connectionType);
 };
@@ -75,6 +103,11 @@ remoting.SessionLogger.prototype.setConnectionType = function(connectionType) {
 /** @override {remoting.Logger} */
 remoting.SessionLogger.prototype.setLogEntryMode = function(mode) {
   this.mode_ = mode;
+};
+
+/** @override {remoting.Logger} */
+remoting.SessionLogger.prototype.setAuthMethod = function(authMethod) {
+  this.authMethod_ = authMethod;
 };
 
 /** @override {remoting.Logger} */
@@ -97,10 +130,10 @@ remoting.SessionLogger.prototype.logSignalStrategyProgress =
 
 /** @override {remoting.Logger} */
 remoting.SessionLogger.prototype.logClientSessionStateChange = function(
-    state, connectionError, xmppError) {
+    state, stateError, xmppError) {
   this.logSessionStateChange(
       toSessionState(state),
-      toConnectionError(connectionError),
+      stateError.toConnectionError(),
       xmppError);
 };
 
@@ -236,7 +269,15 @@ remoting.SessionLogger.prototype.fillEvent_ = function(entry) {
   if (Boolean(this.connectionType_)) {
     entry.connection_type = this.connectionType_;
   }
+  if (this.hostStatusUpdateElapsedTime_ != undefined) {
+    entry.host_status_update_elapsed_time = this.hostStatusUpdateElapsedTime_;
+  }
+  if (this.authMethod_ != undefined) {
+    entry.auth_method = this.authMethod_;
+  }
   entry.host_version = this.hostVersion_;
+  entry.host_os = this.hostOs_;
+  entry.host_os_version = this.hostOsVersion_;
 };
 
 /**
@@ -326,42 +367,6 @@ function toSessionState(state) {
       return SessionState.CONNECTION_CANCELED;
     default:
       throw new Error('Unknown session state : ' + state);
-  }
-}
-
-/**
- * @param {remoting.Error} error
- * @return {remoting.ChromotingEvent.ConnectionError}
- */
-function toConnectionError(error) {
-  var ConnectionError = remoting.ChromotingEvent.ConnectionError;
-  switch (error.getTag()) {
-    case remoting.Error.Tag.NONE:
-      return ConnectionError.NONE;
-    case remoting.Error.Tag.INVALID_ACCESS_CODE:
-      return ConnectionError.INVALID_ACCESS_CODE;
-    case remoting.Error.Tag.MISSING_PLUGIN:
-      return ConnectionError.MISSING_PLUGIN;
-    case remoting.Error.Tag.AUTHENTICATION_FAILED:
-      return ConnectionError.AUTHENTICATION_FAILED;
-    case remoting.Error.Tag.HOST_IS_OFFLINE:
-      return ConnectionError.HOST_OFFLINE;
-    case remoting.Error.Tag.INCOMPATIBLE_PROTOCOL:
-      return ConnectionError.INCOMPATIBLE_PROTOCOL;
-    case remoting.Error.Tag.BAD_PLUGIN_VERSION:
-      return ConnectionError.ERROR_BAD_PLUGIN_VERSION;
-    case remoting.Error.Tag.NETWORK_FAILURE:
-      return ConnectionError.NETWORK_FAILURE;
-    case remoting.Error.Tag.HOST_OVERLOAD:
-      return ConnectionError.HOST_OVERLOAD;
-    case remoting.Error.Tag.P2P_FAILURE:
-      return ConnectionError.P2P_FAILURE;
-    case remoting.Error.Tag.CLIENT_SUSPENDED:
-      return ConnectionError.CLIENT_SUSPENDED;
-    case remoting.Error.Tag.UNEXPECTED:
-      return ConnectionError.UNEXPECTED;
-    default:
-      throw new Error('Unknown error Tag : ' + error.getTag());
   }
 }
 

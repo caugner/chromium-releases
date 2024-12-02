@@ -24,7 +24,9 @@
 #include "remoting/protocol/libjingle_transport_factory.h"
 #include "remoting/protocol/negotiating_client_authenticator.h"
 #include "remoting/protocol/network_settings.h"
+#include "remoting/protocol/performance_tracker.h"
 #include "remoting/signaling/server_log_entry.h"
+#include "ui/events/keycodes/dom/keycode_converter.h"
 
 namespace remoting {
 
@@ -123,6 +125,7 @@ void ChromotingJniInstance::Disconnect() {
   view_.reset();
   authenticator_.reset();
   signaling_.reset();
+  perf_tracker_.reset();
   client_context_.reset();
 }
 
@@ -229,10 +232,17 @@ void ChromotingJniInstance::SendMouseWheelEvent(int delta_x, int delta_y) {
   client_->input_stub()->InjectMouseEvent(event);
 }
 
-bool ChromotingJniInstance::SendKeyEvent(int key_code, bool key_down) {
-  uint32 usb_key_code = AndroidKeycodeToUsbKeycode(key_code);
+bool ChromotingJniInstance::SendKeyEvent(int scan_code,
+                                         int key_code,
+                                         bool key_down) {
+  // For software keyboards |scan_code| is set to 0, in which case the
+  // |key_code| is used instead.
+  uint32_t usb_key_code =
+      scan_code ? ui::KeycodeConverter::NativeKeycodeToUsbKeycode(scan_code)
+                : AndroidKeycodeToUsbKeycode(key_code);
   if (!usb_key_code) {
-    LOG(WARNING) << "Ignoring unknown keycode: " << key_code;
+    LOG(WARNING) << "Ignoring unknown key code: " << key_code
+                 << " scan code: " << scan_code;
     return false;
   }
 
@@ -280,18 +290,6 @@ void ChromotingJniInstance::SendClientMessage(const std::string& type,
   extension_message.set_type(type);
   extension_message.set_data(data);
   client_->host_stub()->DeliverClientMessage(extension_message);
-}
-
-void ChromotingJniInstance::RecordPaintTime(int64 paint_time_ms) {
-  if (!jni_runtime_->network_task_runner()->BelongsToCurrentThread()) {
-    jni_runtime_->network_task_runner()->PostTask(
-        FROM_HERE, base::Bind(&ChromotingJniInstance::RecordPaintTime, this,
-                              paint_time_ms));
-    return;
-  }
-
-  if (stats_logging_enabled_)
-    video_renderer_->GetStats()->RecordPaintTime(paint_time_ms);
 }
 
 void ChromotingJniInstance::OnConnectionState(
@@ -391,9 +389,11 @@ void ChromotingJniInstance::ConnectToHostOnNetworkThread() {
   client_context_.reset(new ClientContext(jni_runtime_->network_task_runner()));
   client_context_->Start();
 
+  perf_tracker_.reset(new protocol::PerformanceTracker());
+
   view_.reset(new JniFrameConsumer(jni_runtime_));
   video_renderer_.reset(new SoftwareVideoRenderer(
-      client_context_->decode_task_runner(), view_.get()));
+      client_context_->decode_task_runner(), view_.get(), perf_tracker_.get()));
 
   client_.reset(new ChromotingClient(
       client_context_.get(), this, video_renderer_.get(), nullptr));
@@ -484,16 +484,16 @@ void ChromotingJniInstance::LogPerfStats() {
   if (!stats_logging_enabled_)
     return;
 
-  ChromotingStats* stats = video_renderer_->GetStats();
-  __android_log_print(ANDROID_LOG_INFO, "stats",
-                      "Bandwidth:%.0f FrameRate:%.1f Capture:%.1f Encode:%.1f "
-                      "Decode:%.1f Render:%.1f Latency:%.0f",
-                      stats->video_bandwidth(), stats->video_frame_rate(),
-                      stats->video_capture_ms(), stats->video_encode_ms(),
-                      stats->video_decode_ms(), stats->video_paint_ms(),
-                      stats->round_trip_ms());
+  __android_log_print(
+      ANDROID_LOG_INFO, "stats",
+      "Bandwidth:%.0f FrameRate:%.1f Capture:%.1f Encode:%.1f "
+      "Decode:%.1f Render:%.1f Latency:%.0f",
+      perf_tracker_->video_bandwidth(), perf_tracker_->video_frame_rate(),
+      perf_tracker_->video_capture_ms(), perf_tracker_->video_encode_ms(),
+      perf_tracker_->video_decode_ms(), perf_tracker_->video_paint_ms(),
+      perf_tracker_->round_trip_ms());
 
-  client_status_logger_->LogStatistics(stats);
+  client_status_logger_->LogStatistics(perf_tracker_.get());
 
   jni_runtime_->network_task_runner()->PostDelayedTask(
       FROM_HERE, base::Bind(&ChromotingJniInstance::LogPerfStats, this),

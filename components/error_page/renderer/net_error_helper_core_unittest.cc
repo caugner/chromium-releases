@@ -19,6 +19,7 @@
 #include "base/values.h"
 #include "components/error_page/common/error_page_params.h"
 #include "components/error_page/common/net_error_info.h"
+#include "components/test_runner/test_common.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/net_errors.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -162,6 +163,7 @@ class NetErrorHelperCoreTest : public testing::Test,
                              error_url_(GURL(content::kUnreachableWebDataURL)),
                              tracking_request_count_(0) {
     SetUpCore(false, false, true);
+    test_runner::EnsureBlinkInitialized();
   }
 
   ~NetErrorHelperCoreTest() override {
@@ -2457,14 +2459,14 @@ TEST_F(NetErrorHelperCoreHistogramTest, SuccessPageLoadedBeforeTimerFires) {
 TEST_F(NetErrorHelperCoreTest, ExplicitReloadSucceeds) {
   DoErrorLoad(net::ERR_CONNECTION_RESET);
   EXPECT_EQ(0, reload_count());
-  core()->ExecuteButtonPress(true, NetErrorHelperCore::RELOAD_BUTTON);
+  core()->ExecuteButtonPress(NetErrorHelperCore::RELOAD_BUTTON);
   EXPECT_EQ(1, reload_count());
 }
 
 TEST_F(NetErrorHelperCoreTest, ExplicitShowSavedSucceeds) {
   DoErrorLoad(net::ERR_CONNECTION_RESET);
   EXPECT_EQ(0, show_saved_count());
-  core()->ExecuteButtonPress(true, NetErrorHelperCore::SHOW_SAVED_COPY_BUTTON);
+  core()->ExecuteButtonPress(NetErrorHelperCore::SHOW_SAVED_COPY_BUTTON);
   EXPECT_EQ(1, show_saved_count());
   EXPECT_EQ(GURL(kFailedUrl), show_saved_url());
 }
@@ -2480,7 +2482,7 @@ TEST_F(NetErrorHelperCoreTest, CanShowNetworkDiagnostics) {
   DoErrorLoad(net::ERR_CONNECTION_RESET);
   EXPECT_TRUE(last_can_show_network_diagnostics_dialog());
 
-  core()->ExecuteButtonPress(true, NetErrorHelperCore::DIAGNOSE_ERROR);
+  core()->ExecuteButtonPress(NetErrorHelperCore::DIAGNOSE_ERROR);
   EXPECT_EQ(1, diagnose_error_count());
   EXPECT_EQ(GURL(kFailedUrl), diagnose_error_url());
 }

@@ -12,12 +12,14 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityEvent;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.ui.R;
+import org.chromium.ui.UiUtils;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.gfx.DeviceDisplayInfo;
 
@@ -52,8 +54,6 @@ public class AutofillKeyboardAccessory extends LinearLayout
         mMaximumSublabelWidthPx = deviceWidthPx / 4;
 
         mWindowAndroid.addKeyboardVisibilityListener(this);
-        setContentDescription(getContext().getString(R.string.autofill_popup_content_description));
-
         int horizontalPaddingPx = getResources().getDimensionPixelSize(
                 R.dimen.keyboard_accessory_half_padding);
         setPadding(horizontalPaddingPx, 0, horizontalPaddingPx, 0);
@@ -65,7 +65,7 @@ public class AutofillKeyboardAccessory extends LinearLayout
      * @param isRtl Gives the layout direction for the <input> field.
      */
     @SuppressLint("InlinedApi")
-    public void showWithSuggestions(AutofillSuggestion[] suggestions, boolean isRtl) {
+    public void showWithSuggestions(AutofillSuggestion[] suggestions, final boolean isRtl) {
         removeAllViews();
         int separatorPosition = -1;
         for (int i = 0; i < suggestions.length; i++) {
@@ -128,12 +128,20 @@ public class AutofillKeyboardAccessory extends LinearLayout
         ApiCompatibilityUtils.setLayoutDirection(
                 this, isRtl ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
 
+        final HorizontalScrollView container =
+                (HorizontalScrollView) mWindowAndroid.getKeyboardAccessoryView();
         if (getParent() == null) {
-            ViewGroup container = mWindowAndroid.getKeyboardAccessoryView();
             container.addView(this);
             container.setVisibility(View.VISIBLE);
-            sendAccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED);
+            container.sendAccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED);
         }
+
+        container.post(new Runnable() {
+            @Override
+            public void run() {
+                container.scrollTo(isRtl ? getRight() : 0, 0);
+            }
+        });
     }
 
     /**
@@ -157,6 +165,7 @@ public class AutofillKeyboardAccessory extends LinearLayout
 
     @Override
     public void onClick(View v) {
+        UiUtils.hideKeyboard(this);
         mAutofillDelegate.suggestionSelected((int) v.getTag());
     }
 

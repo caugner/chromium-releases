@@ -40,6 +40,9 @@ class CONTENT_EXPORT BrowserIOSurfaceManager : public IOSurfaceManager {
   // the bootstrap server. |pid| is the process ID of the service.
   static base::mac::ScopedMachSendRight LookupServicePort(pid_t pid);
 
+  // Returns the name of the service registered with the bootstrap server.
+  static std::string GetMachPortName();
+
   // Overridden from IOSurfaceManager:
   bool RegisterIOSurface(IOSurfaceId io_surface_id,
                          int client_id,
@@ -66,7 +69,7 @@ class CONTENT_EXPORT BrowserIOSurfaceManager : public IOSurfaceManager {
 
  private:
   friend class BrowserIOSurfaceManagerTest;
-  friend struct DefaultSingletonTraits<BrowserIOSurfaceManager>;
+  friend struct base::DefaultSingletonTraits<BrowserIOSurfaceManager>;
 
   BrowserIOSurfaceManager();
   ~BrowserIOSurfaceManager() override;

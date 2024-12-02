@@ -30,7 +30,7 @@
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/memory/oom_priority_manager.h"
+#include "chrome/browser/memory/tab_manager.h"
 #include "chrome/browser/memory/tab_stats.h"
 #include "chrome/browser/memory_details.h"
 #include "chrome/browser/net/predictor.h"
@@ -51,6 +51,7 @@
 #include "content/public/common/process_type.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "grit/browser_resources.h"
+#include "grit/components_resources.h"
 #include "net/base/escape.h"
 #include "net/base/filename_util.h"
 #include "net/base/load_flags.h"
@@ -204,7 +205,7 @@ class ChromeOSOnlineTermsHandler : public net::URLFetcherDelegate {
 
   // Timer that enforces a timeout on the attempt to download the
   // ChromeOS Terms.
-  base::OneShotTimer<ChromeOSOnlineTermsHandler> download_timer_;
+  base::OneShotTimer download_timer_;
 
   // |fetch_callback_| called when fetching succeeded or failed.
   FetchCallback fetch_callback_;
@@ -505,8 +506,8 @@ std::string BuildAboutDiscardsRunPage() {
 }
 
 std::vector<std::string> GetHtmlTabDescriptorsForDiscardPage() {
-  memory::OomPriorityManager* oom = g_browser_process->GetOomPriorityManager();
-  memory::TabStatsList stats = oom->GetTabStats();
+  memory::TabManager* tab_manager = g_browser_process->GetTabManager();
+  memory::TabStatsList stats = tab_manager->GetTabStats();
   std::vector<std::string> titles;
   titles.reserve(stats.size());
   for (memory::TabStatsList::iterator it = stats.begin(); it != stats.end();
@@ -529,6 +530,8 @@ std::vector<std::string> GetHtmlTabDescriptorsForDiscardPage() {
                                 chrome::kChromeUIDiscardsURL,
                                 kAboutDiscardsRunCommand, it->tab_contents_id);
     }
+    str += base::StringPrintf("&nbsp;&nbsp;(%d discards this session)",
+                              it->discard_count);
     titles.push_back(str);
   }
   return titles;
@@ -537,17 +540,17 @@ std::vector<std::string> GetHtmlTabDescriptorsForDiscardPage() {
 std::string AboutDiscards(const std::string& path) {
   std::string output;
   int64 web_content_id;
-  memory::OomPriorityManager* oom = g_browser_process->GetOomPriorityManager();
+  memory::TabManager* tab_manager = g_browser_process->GetTabManager();
 
   std::vector<std::string> path_split = base::SplitString(
       path, "/", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   if (path_split.size() == 2 && path_split[0] == kAboutDiscardsRunCommand &&
       base::StringToInt64(path_split[1], &web_content_id)) {
-    oom->DiscardTabById(web_content_id);
+    tab_manager->DiscardTabById(web_content_id);
     return BuildAboutDiscardsRunPage();
   } else if (path_split.size() == 1 &&
              path_split[0] == kAboutDiscardsRunCommand) {
-    oom->DiscardTab();
+    tab_manager->DiscardTab();
     return BuildAboutDiscardsRunPage();
   }
 
@@ -570,8 +573,8 @@ std::string AboutDiscards(const std::string& path) {
   } else {
     output.append("<p>None found.  Wait 10 seconds, then refresh.</p>");
   }
-  output.append(
-      base::StringPrintf("%d discards this session. ", oom->discard_count()));
+  output.append(base::StringPrintf("%d discards this session. ",
+                                   tab_manager->discard_count()));
   output.append(base::StringPrintf("<a href='%s%s'>Discard tab now</a>",
                                    chrome::kChromeUIDiscardsURL,
                                    kAboutDiscardsRunCommand));
@@ -870,11 +873,11 @@ void AboutMemoryHandler::OnDetailsAvailable() {
     if (!log_string.empty())
       log_string += base::ASCIIToUTF16(", ");
     log_string += browser_processes[index].name + base::ASCIIToUTF16(", ") +
-                  base::Int64ToString16(aggregate.working_set.priv) +
+                  base::SizeTToString16(aggregate.working_set.priv) +
                   base::ASCIIToUTF16(", ") +
-                  base::Int64ToString16(aggregate.working_set.shared) +
+                  base::SizeTToString16(aggregate.working_set.shared) +
                   base::ASCIIToUTF16(", ") +
-                  base::Int64ToString16(aggregate.working_set.shareable);
+                  base::SizeTToString16(aggregate.working_set.shareable);
   }
   if (!log_string.empty())
     VLOG(1) << "memory: " << log_string;
@@ -936,9 +939,9 @@ void AboutUIHTMLSource::StartDataRequest(
   if (source_name_ == chrome::kChromeUIChromeURLsHost) {
     response = ChromeURLs();
   } else if (source_name_ == chrome::kChromeUICreditsHost) {
-    int idr = IDR_CREDITS_HTML;
+    int idr = IDR_ABOUT_UI_CREDITS_HTML;
     if (path == kCreditsJsPath)
-      idr = IDR_CREDITS_JS;
+      idr = IDR_ABOUT_UI_CREDITS_JS;
 #if defined(OS_CHROMEOS)
     else if (path == kKeyboardUtilsPath)
       idr = IDR_KEYBOARD_UTILS_JS;

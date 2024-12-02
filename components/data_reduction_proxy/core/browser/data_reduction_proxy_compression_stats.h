@@ -14,9 +14,12 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/prefs/pref_member.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_metrics.h"
+#include "components/data_reduction_proxy/core/browser/db_data_owner.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "components/data_reduction_proxy/proto/data_store.pb.h"
 #include "net/base/network_change_notifier.h"
@@ -26,7 +29,6 @@ class PrefService;
 
 namespace base {
 class ListValue;
-class SequencedTaskRunner;
 class Value;
 }
 
@@ -57,8 +59,6 @@ class DataReductionProxyCompressionStats
  public:
   typedef base::ScopedPtrHashMap<std::string, scoped_ptr<PerSiteDataUsage>>
       SiteUsageMap;
-  typedef base::ScopedPtrHashMap<ConnectionType, scoped_ptr<SiteUsageMap>>
-      DataUsageMap;
 
   // Collects and store data usage and compression statistics. Basic data usage
   // stats are stored in browser preferences. More detailed stats broken down
@@ -69,11 +69,9 @@ class DataReductionProxyCompressionStats
   // |delay| and stores them in |pref_map_| and |list_pref_map| between writes.
   // If |delay| is zero, writes directly to the PrefService and does not store
   // in the maps.
-  DataReductionProxyCompressionStats(
-      DataReductionProxyService* service,
-      PrefService* pref_service,
-      const scoped_refptr<base::SequencedTaskRunner>& task_runner,
-      base::TimeDelta delay);
+  DataReductionProxyCompressionStats(DataReductionProxyService* service,
+                                     PrefService* pref_service,
+                                     const base::TimeDelta& delay);
   ~DataReductionProxyCompressionStats() override;
 
   // Records detailed data usage broken down by connection type and domain. Also
@@ -111,6 +109,19 @@ class DataReductionProxyCompressionStats
                          int64* received_content_length,
                          int64* last_update_time);
 
+  // Calls |get_data_usage_callback| with full data usage history. In-memory
+  // data usage stats are flushed to storage before querying for full history.
+  // An empty vector will be returned if "data_usage_reporting.enabled" pref is
+  // not enabled or if called immediately after enabling the pref before
+  // in-memory stats could be initialized from storage. Data usage is sorted
+  // chronologically with the last entry corresponding to |base::Time::Now()|.
+  void GetHistoricalDataUsage(
+      const HistoricalDataUsageCallback& get_data_usage_callback);
+
+  // Deletes browsing history from storage and memory for the given time
+  // range. Currently, this method deletes all data usage for the given range.
+  void DeleteBrowsingHistory(const base::Time& start, const base::Time& end);
+
   // Called by |net::NetworkChangeNotifier| when network type changes. Used to
   // keep track of connection type for reporting data usage breakdown by
   // connection type.
@@ -120,9 +131,12 @@ class DataReductionProxyCompressionStats
   // Callback from loading detailed data usage. Initializes in memory data
   // structures used to collect data usage. |data_usage| contains the data usage
   // for the last stored interval.
-  void OnDataUsageLoaded(scoped_ptr<DataUsageBucket> data_usage);
+  void OnCurrentDataUsageLoaded(scoped_ptr<DataUsageBucket> data_usage);
 
  private:
+  // Enum to track the state of loading data usage from storage.
+  enum CurrentDataUsageLoadStatus { NOT_LOADED = 0, LOADING = 1, LOADED = 2 };
+
   friend class DataReductionProxyCompressionStatsTest;
 
   typedef std::map<const char*, int64> DataReductionProxyPrefMap;
@@ -161,8 +175,8 @@ class DataReductionProxyCompressionStats
   // |DataReductionProxyListPrefMap| to |pref_service|.
   void WritePrefs();
 
-  // Writes the stored prefs to |pref_service| and then posts another a delayed
-  // task to write prefs again in |kMinutesBetweenWrites|.
+  // Starts a timer (if necessary) to write prefs in |kMinutesBetweenWrites| to
+  // the |pref_service|.
   void DelayedWritePrefs();
 
   // Copies the values at each index of |from_list| to the same index in
@@ -180,7 +194,7 @@ class DataReductionProxyCompressionStats
                               bool with_data_reduction_proxy_enabled,
                               DataReductionProxyRequestType request_type,
                               const std::string& mime_type,
-                              base::Time now);
+                              const base::Time& now);
 
   void IncrementDailyUmaPrefs(int64_t original_size,
                               int64_t received_size,
@@ -198,15 +212,33 @@ class DataReductionProxyCompressionStats
   // are displayed to users as their data savings.
   void RecordUserVisibleDataSavings();
 
+  // Record data usage and original size of request broken down by host. |time|
+  // is the time at which the data usage occurred. This method should be called
+  // in real time, so |time| is expected to be |Time::Now()|.
   void RecordDataUsage(const std::string& data_usage_host,
                        int64 original_request_size,
-                       int64 data_used);
+                       int64 data_used,
+                       const base::Time& time);
 
-  // Persist the in memory data usage information to storage.
+  // Persists the in memory data usage information to storage and clears all
+  // in-memory data usage. Do not call this method unless |data_usage_loaded_|
+  // is |LOADED|.
   void PersistDataUsage();
 
-  // Clear all in memory data usage.
-  void ClearInMemoryDataUsage();
+  // Deletes all historical data usage from storage and memory. This method
+  // should not be called when |current_data_usage_load_status_| is |LOADING|.
+  void DeleteHistoricalDataUsage();
+
+  // Actual implementation of |GetHistoricalDataUsage|. This helper method
+  // explicitly passes |base::Time::Now()| to make testing easier.
+  void GetHistoricalDataUsageImpl(
+      const HistoricalDataUsageCallback& get_data_usage_callback,
+      const base::Time& now);
+
+  // Called when |prefs::kDataUsageReportingEnabled| pref values changes.
+  // Initializes data usage statistics in memory when pref is enabled and
+  // persists data usage to memory when pref is disabled.
+  void OnDataUsageReportingPrefChanged();
 
   // Normalizes the hostname for data usage attribution. Returns a substring
   // without the protocol.
@@ -215,25 +247,30 @@ class DataReductionProxyCompressionStats
 
   DataReductionProxyService* service_;
   PrefService* pref_service_;
-  scoped_refptr<base::SequencedTaskRunner> task_runner_;
   const base::TimeDelta delay_;
-  bool delayed_task_posted_;
   DataReductionProxyPrefMap pref_map_;
   DataReductionProxyListPrefMap list_pref_map_;
   scoped_ptr<PrefChangeRegistrar> pref_change_registrar_;
+  BooleanPrefMember data_usage_reporting_enabled_;
   ConnectionType connection_type_;
 
   // Maintains detailed data usage for current interval.
-  DataUsageMap data_usage_map_;
+  SiteUsageMap data_usage_map_;
+
+  // Time when |data_usage_map_| was last updated. Contains NULL time if
+  // |data_usage_map_| does not have any data. This could happen either because
+  // current data usage has not yet been loaded from storage, or because
+  // no data usage has ever been recorded.
   base::Time data_usage_map_last_updated_;
 
   // Tracks whether |data_usage_map_| has changes that have not yet been
   // persisted to storage.
   bool data_usage_map_is_dirty_;
 
-  // Tracks whether detailed data usage has been loaded from storage at startup.
-  bool data_usage_loaded_;
+  // Tracks state of loading data usage from storage.
+  CurrentDataUsageLoadStatus current_data_usage_load_status_;
 
+  base::OneShotTimer pref_writer_timer_;
   base::ThreadChecker thread_checker_;
 
   base::WeakPtrFactory<DataReductionProxyCompressionStats> weak_factory_;

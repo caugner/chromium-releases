@@ -27,6 +27,7 @@
 #include "components/version_info/version_info.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/feature_switch.h"
 #include "extensions/common/permissions/manifest_permission_set.h"
@@ -131,6 +132,8 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
   source_map->RegisterSource("automationNode", IDR_AUTOMATION_NODE_JS);
   source_map->RegisterSource("browserAction",
                              IDR_BROWSER_ACTION_CUSTOM_BINDINGS_JS);
+  source_map->RegisterSource("certificateProvider",
+                             IDR_CERTIFICATE_PROVIDER_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("declarativeContent",
                              IDR_DECLARATIVE_CONTENT_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("desktopCapture",
@@ -257,4 +260,9 @@ void ChromeExtensionsDispatcherDelegate::OnActiveExtensionsUpdated(
 
 void ChromeExtensionsDispatcherDelegate::SetChannel(int channel) {
   extensions::SetCurrentChannel(static_cast<version_info::Channel>(channel));
+  if (extensions::GetCurrentChannel() == version_info::Channel::UNKNOWN) {
+    // chrome-extension: resources should be allowed to register ServiceWorkers.
+    blink::WebSecurityPolicy::registerURLSchemeAsAllowingServiceWorkers(
+        blink::WebString::fromUTF8(extensions::kExtensionScheme));
+  }
 }

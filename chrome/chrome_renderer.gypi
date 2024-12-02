@@ -39,8 +39,6 @@
       'renderer/plugins/non_loadable_plugin_placeholder.h',
       'renderer/plugins/plugin_uma.cc',
       'renderer/plugins/plugin_uma.h',
-      'renderer/plugins/shadow_dom_plugin_placeholder.cc',
-      'renderer/plugins/shadow_dom_plugin_placeholder.h',
       'renderer/prerender/prerender_dispatcher.cc',
       'renderer/prerender/prerender_dispatcher.h',
       'renderer/prerender/prerender_extra_data.cc',
@@ -132,6 +130,7 @@
       'renderer/resources/extensions/app_custom_bindings.js',
       'renderer/resources/extensions/automation_custom_bindings.js',
       'renderer/resources/extensions/browser_action_custom_bindings.js',
+      'renderer/resources/extensions/certificate_provider_custom_bindings.js',
       'renderer/resources/extensions/chrome_direct_setting.js',
       'renderer/resources/extensions/chrome_setting.js',
       'renderer/resources/extensions/content_setting.js',
@@ -253,6 +252,7 @@
         '../components/components.gyp:omnibox_common',
         '../components/components.gyp:error_page_renderer',
         '../components/components.gyp:startup_metric_utils',
+        '../components/components.gyp:page_load_metrics_renderer',
         '../components/components.gyp:password_manager_content_renderer',
         '../components/components.gyp:plugins_renderer',
         '../components/components.gyp:translate_content_renderer',
@@ -280,6 +280,8 @@
         ['OS != "ios"', {
           'dependencies': [
             'common_net',
+            '../components/components.gyp:dom_distiller_content_renderer',
+            '../media/media.gyp:media',
           ],
         }],
         ['disable_nacl!=1', {

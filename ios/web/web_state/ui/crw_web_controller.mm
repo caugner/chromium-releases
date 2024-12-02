@@ -217,6 +217,9 @@ void CancelAllTouches(UIScrollView* web_scroll_view) {
   // Content view was reset due to low memory. Use the placeholder overlay on
   // next creation.
   BOOL _usePlaceholderOverlay;
+  // The next time the view is requested, reload the page (using the placeholder
+  // overlay until it's loaded).
+  BOOL _requireReloadOnDisplay;
   // Overlay view used instead of webView.
   base::scoped_nsobject<UIImageView> _placeholderOverlayView;
   // The touch tracking recognizer allowing us to decide if a navigation is
@@ -329,8 +332,16 @@ void CancelAllTouches(UIScrollView* web_scroll_view) {
 // Generates the JavaScript string used to update the UIWebView's URL so that it
 // matches the URL displayed in the omnibox and sets window.history.state to
 // stateObject. Needed for history.pushState() and history.replaceState().
-- (NSString*)javascriptToReplaceWebViewURL:(const GURL&)url
+- (NSString*)javascriptToReplaceWebViewURL:(const GURL&)URL
                            stateObjectJSON:(NSString*)stateObject;
+// Injects JavaScript into the web view to update the URL to |URL|, to set
+// window.history.state to |stateObject|, and to trigger a popstate() event.
+// Upon the scripts completion, resets |urlOnStartLoading_| and
+// |_lastRegisteredRequestURL| to |URL|.  This is necessary so that sites that
+// depend on URL params/fragments continue to work correctly and that checks for
+// the URL don't incorrectly trigger |-pageChanged| calls.
+- (void)setPushedOrReplacedURL:(const GURL&)URL
+                   stateObject:(NSString*)stateObject;
 - (BOOL)isLoaded;
 // Called by NSNotificationCenter upon orientation changes.
 - (void)orientationDidChange;
@@ -763,6 +774,10 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 
 - (void)requirePageReconstruction {
   [self removeWebViewAllowingCachedReconstruction:NO];
+}
+
+- (void)requirePageReload {
+  _requireReloadOnDisplay = YES;
 }
 
 - (void)resetContainerView {
@@ -1257,23 +1272,23 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   _webStateImpl->OnProvisionalNavigationStarted(requestURL);
 }
 
-- (NSString*)javascriptToReplaceWebViewURL:(const GURL&)url
+- (NSString*)javascriptToReplaceWebViewURL:(const GURL&)URL
                            stateObjectJSON:(NSString*)stateObject {
   std::string outURL;
-  base::EscapeJSONString(url.spec(), true, &outURL);
+  base::EscapeJSONString(URL.spec(), true, &outURL);
   return
       [NSString stringWithFormat:@"__gCrWeb.replaceWebViewURL(%@, %@);",
                                  base::SysUTF8ToNSString(outURL), stateObject];
 }
 
-- (void)finishPushStateNavigationToURL:(const GURL&)url
-                       withStateObject:(NSString*)stateObject {
+- (void)setPushedOrReplacedURL:(const GURL&)URL
+                   stateObject:(NSString*)stateObject {
   // TODO(stuartmorgan): Make CRWSessionController manage this internally (or
   // remove it; it's not clear this matches other platforms' behavior).
   _webStateImpl->GetNavigationManagerImpl().OnNavigationItemCommitted();
 
   NSString* replaceWebViewUrlJS =
-      [self javascriptToReplaceWebViewURL:url stateObjectJSON:stateObject];
+      [self javascriptToReplaceWebViewURL:URL stateObjectJSON:stateObject];
   std::string outState;
   base::EscapeJSONString(base::SysNSStringToUTF8(stateObject), true, &outState);
   NSString* popstateJS =
@@ -1281,7 +1296,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
                                  base::SysUTF8ToNSString(outState)];
   NSString* combinedJS =
       [NSString stringWithFormat:@"%@%@", replaceWebViewUrlJS, popstateJS];
-  GURL urlCopy(url);
+  GURL urlCopy(URL);
   base::WeakNSObject<CRWWebController> weakSelf(self);
   [self evaluateJavaScript:combinedJS
        stringResultHandler:^(NSString*, NSError*) {
@@ -1379,14 +1394,8 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 
   const GURL currentUrl = [self currentNavigationURL];
 
-  // TODO(bhnascar): Fix POST data check for WKWebView here and elsewhere.
-  // See crbug.com/517911.
-  DCHECK([self currentSessionEntry]);
-  NSData* currentPOSTData =
-      [self currentSessionEntry].navigationItemImpl->GetPostData();
-  BOOL isPost = currentPOSTData != nil;
-
   error = web::NetErrorFromError(error);
+  BOOL isPost = [self isCurrentNavigationItemPOST];
   [self setNativeController:[_nativeProvider controllerForURL:currentUrl
                                                     withError:error
                                                        isPost:isPost]];
@@ -1436,6 +1445,11 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
     DCHECK(!params.extra_headers);
     DCHECK(!params.post_data);
   } else {
+    // Clear transient view before making any changes to history and navigation
+    // manager. TODO(stuartmorgan): Drive Transient Item clearing from
+    // navigation system, rather than from WebController.
+    [self clearTransientContentView];
+
     // TODO(stuartmorgan): Why doesn't recordStateInHistory get called for
     // forward/back transitions?
     [self recordStateInHistory];
@@ -1562,6 +1576,10 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
     // Don't reset the overlay flag if in preview mode.
     if (!_overlayPreviewMode)
       _usePlaceholderOverlay = NO;
+  } else if (_requireReloadOnDisplay && self.webView) {
+    [self addPlaceholderOverlay];
+    [self loadCurrentURL];
+    _requireReloadOnDisplay = NO;
   }
 }
 
@@ -1587,10 +1605,23 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   _lastUserInteraction.reset();
   web::RecordAction(UserMetricsAction("Reload"));
   if (self.webView) {
-    // Just as we don't use the WebView native back and forward navigation
-    // (preferring to load the URLs manually) we don't use the native reload.
-    // This ensures state processing and delegate calls are consistent.
-    [self loadCurrentURL];
+    web::NavigationItem* transientItem =
+        _webStateImpl->GetNavigationManagerImpl().GetTransientItem();
+    if (transientItem) {
+      // If there's a transient item, a reload is considered a new navigation to
+      // the transient item's URL (as on other platforms).
+      web::WebLoadParams reloadParams(transientItem->GetURL());
+      reloadParams.transition_type = ui::PAGE_TRANSITION_RELOAD;
+      reloadParams.extra_headers.reset(
+          [transientItem->GetHttpRequestHeaders() copy]);
+      [self loadWithParams:reloadParams];
+    } else {
+      // As with back and forward navigation, load the URL manually instead of
+      // using the web view's reload. This ensures state processing and delegate
+      // calls are consistent.
+      // TODO(eugenebut): revisit this for WKWebView.
+      [self loadCurrentURL];
+    }
   } else {
     [self.nativeController reload];
   }
@@ -1647,11 +1678,6 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
     [self injectEarlyInjectionScripts];
     [self checkForUnexpectedURLChange];
   }
-  // Discard any outstanding pending entries before adjusting the navigation
-  // index.
-  CRWSessionController* sessionController =
-      _webStateImpl->GetNavigationManagerImpl().GetSessionController();
-  [sessionController discardNonCommittedEntries];
 
   bool wasShowingInterstitial = _webStateImpl->IsShowingWebInterstitial();
 
@@ -1696,7 +1722,10 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 
   CRWSessionController* sessionController =
       _webStateImpl->GetNavigationManagerImpl().GetSessionController();
-  CRWSessionEntry* fromEntry = [sessionController currentEntry];
+  // fromEntry is retained because it has the potential to be released
+  // by goDelta: if it has not been committed.
+  base::scoped_nsobject<CRWSessionEntry> fromEntry(
+      [[sessionController currentEntry] retain]);
   [sessionController goDelta:delta];
   if (fromEntry) {
     _webStateImpl->SetCacheMode(net::RequestTracker::CACHE_HISTORY);
@@ -1755,6 +1784,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
       _webStateImpl->GetCacheMode());
 
   [self restoreStateFromHistory];
+  [self loadCompletedForURL:currentURL];
   _webStateImpl->OnPageLoaded(currentURL, loadSuccess);
   _webStateImpl->SetIsLoading(false);
   // Inform the embedder the load completed.
@@ -1764,19 +1794,24 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 - (void)finishHistoryNavigationFromEntry:(CRWSessionEntry*)fromEntry {
   [_delegate webWillFinishHistoryNavigationFromEntry:fromEntry];
 
-  // Check if toEntry was created by a JavaScript window.history.pushState()
-  // call from fromEntry. If it was, don't load the URL. Instead update
-  // UIWebView's URL and dispatch a popstate event.
-  if ([_webStateImpl->GetNavigationManagerImpl().GetSessionController()
+  // Only load the new URL if the current entry was not created by a JavaScript
+  // window.history.pushState() call from |fromEntry|.
+  BOOL shouldLoadURL =
+      ![_webStateImpl->GetNavigationManagerImpl().GetSessionController()
           isPushStateNavigationBetweenEntry:fromEntry
-                                   andEntry:self.currentSessionEntry]) {
-    NSString* state = [self currentSessionEntry]
-                          .navigationItemImpl->GetSerializedStateObject();
-    [self finishPushStateNavigationToURL:[self currentNavigationURL]
-                         withStateObject:state];
-  } else {
-    web::NavigationItem* currentItem =
-        _webStateImpl->GetNavigationManagerImpl().GetVisibleItem();
+                                   andEntry:self.currentSessionEntry];
+  // Set the serialized state if necessary.  State must be set if:
+  // - the transition between |fromEntry| and the current session entry is a
+  //   history.pushState, or
+  // - the current session entry has a serialized state object (occurs after a
+  //   history.replaceState).
+  web::NavigationItemImpl* currentItem =
+      self.currentSessionEntry.navigationItemImpl;
+  NSString* stateObject = currentItem->GetSerializedStateObject();
+  if (!shouldLoadURL || stateObject.length) {
+    [self setPushedOrReplacedURL:currentItem->GetURL() stateObject:stateObject];
+  }
+  if (shouldLoadURL) {
     GURL endURL = [self URLForHistoryNavigationFromItem:fromEntry.navigationItem
                                                  toItem:currentItem];
     ui::PageTransition transition = ui::PageTransitionFromInt(
@@ -2171,7 +2206,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   // the main page (using logic from the popup blocker), or if the keyboard
   // is visible.
   BOOL submittedByUser = [context[web::kUserIsInteractingKey] boolValue] ||
-                         [_webViewProxy getKeyboardAccessory];
+                         [_webViewProxy keyboardAccessory];
   _webStateImpl->OnDocumentSubmitted(formName, submittedByUser);
   return YES;
 }
@@ -2581,7 +2616,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   _URLOnStartLoading = url;
   _displayStateOnStartLoading = self.pageDisplayState;
 
-  _userInteractionRegistered = NO;
+  self.userInteractionRegistered = NO;
   _pageHasZoomed = NO;
 
   [[self sessionController] commitPendingEntry];
@@ -3002,6 +3037,8 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
                         shouldContinue(proceed);
                       }
                     }];
+  DCHECK([self currentNavItem]);
+  [self currentNavItem]->SetUnsafe(true);
 }
 
 - (void)updatedProgress:(float)progress {
@@ -3060,7 +3097,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
 - (void)touched:(BOOL)touched {
   _clickInProgress = touched;
   if (touched) {
-    _userInteractionRegistered = YES;
+    self.userInteractionRegistered = YES;
     _userInteractedWithWebController = YES;
     if (_isBeingDestroyed)
       return;
@@ -3270,7 +3307,7 @@ const NSTimeInterval kSnapshotOverlayTransition = 0.5;
   // - the user has interacted with the page.
   CRWSessionEntry* current = [self currentSessionEntry];
   if (current && [current navigationItem]->GetURL() == [self currentURL] &&
-      _userInteractionRegistered) {
+      self.userInteractionRegistered) {
     [current navigationItem]->SetPageDisplayState(self.pageDisplayState);
   }
 }

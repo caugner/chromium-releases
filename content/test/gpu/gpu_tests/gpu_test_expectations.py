@@ -16,6 +16,7 @@ class GpuExpectation(test_expectations.Expectation):
     self.device_id_conditions = []
     self.angle_conditions = []
     self.max_num_retries = max_num_retries
+    assert self.max_num_retries == 0 or expectation == 'flaky'
     super(GpuExpectation, self).__init__(
       expectation, pattern, conditions=conditions, bug=bug)
 
@@ -55,16 +56,16 @@ class GpuExpectation(test_expectations.Expectation):
 
 
 class GpuTestExpectations(test_expectations.TestExpectations):
-  def CreateExpectation(self, expectation, url_pattern, conditions=None,
+  def CreateExpectation(self, expectation, pattern, conditions=None,
                         bug=None):
-    return GpuExpectation(expectation, url_pattern, conditions, bug)
+    return GpuExpectation(expectation, pattern, conditions, bug)
 
-  def Flaky(self, url_pattern, conditions=None, bug=None, max_num_retries=2):
-    self.expectations.append(GpuExpectation(
-      'pass', url_pattern, conditions=conditions, bug=bug,
+  def Flaky(self, pattern, conditions=None, bug=None, max_num_retries=2):
+    self._AddExpectation(GpuExpectation(
+      'flaky', pattern, conditions=conditions, bug=bug,
       max_num_retries=max_num_retries))
 
-  def GetFlakyRetriesForPage(self, page, browser):
+  def GetFlakyRetriesForPage(self, browser, page):
     e = self._GetExpectationObjectForPage(browser, page)
     if e:
       return e.max_num_retries
@@ -100,14 +101,14 @@ class GpuTestExpectations(test_expectations.TestExpectations):
       if primary_gpu:
         vendor_string = primary_gpu.vendor_string.lower()
         vendor_id = primary_gpu.vendor_id
-        if vendor_string:
-          return vendor_string.split(' ')[0]
-        elif vendor_id == 0x10DE:
+        if vendor_id == 0x10DE:
           return 'nvidia'
         elif vendor_id == 0x1002:
           return 'amd'
         elif vendor_id == 0x8086:
           return 'intel'
+        elif vendor_string:
+          return vendor_string.split(' ')[0]
     return 'unknown_gpu'
 
   def _GetGpuDeviceId(self, gpu_info):

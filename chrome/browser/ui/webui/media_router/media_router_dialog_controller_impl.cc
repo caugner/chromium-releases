@@ -9,6 +9,7 @@
 
 #include "chrome/browser/media/router/presentation_service_delegate_impl.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/toolbar/media_router_action.h"
 #include "chrome/browser/ui/webui/constrained_web_dialog_ui.h"
 #include "chrome/browser/ui/webui/media_router/media_router_ui.h"
 #include "chrome/common/url_constants.h"
@@ -33,9 +34,9 @@ using content::WebUIMessageHandler;
 using ui::WebDialogDelegate;
 
 namespace {
-const int kMaxHeight = 260;
+const int kMaxHeight = 300;
 #if !defined(OS_MACOSX)
-const int kMinHeight = 130;
+const int kMinHeight = 80;
 #endif  // !defined(OS_MACOSX)
 const int kWidth = 340;
 }
@@ -48,7 +49,7 @@ namespace {
 // will look like.
 class MediaRouterDialogDelegate : public WebDialogDelegate {
  public:
-  MediaRouterDialogDelegate() {}
+  explicit MediaRouterDialogDelegate(base::WeakPtr<MediaRouterAction> action) {}
   ~MediaRouterDialogDelegate() override {}
 
   // WebDialogDelegate implementation.
@@ -79,6 +80,8 @@ class MediaRouterDialogDelegate : public WebDialogDelegate {
   void OnDialogClosed(const std::string& json_retval) override {
     // We don't delete |this| here because this class is owned
     // by ConstrainedWebDialogDelegate.
+    if (action_)
+      action_->OnPopupHidden();
   }
 
   void OnCloseContents(WebContents* source, bool* out_close_dialog) override {
@@ -90,7 +93,13 @@ class MediaRouterDialogDelegate : public WebDialogDelegate {
     return false;
   }
 
+  void SetAction(const base::WeakPtr<MediaRouterAction>& action) {
+    action_ = action;
+  }
+
  private:
+  base::WeakPtr<MediaRouterAction> action_;
+
   DISALLOW_COPY_AND_ASSIGN(MediaRouterDialogDelegate);
 };
 
@@ -161,6 +170,11 @@ WebContents* MediaRouterDialogControllerImpl::GetMediaRouterDialog() const {
   return dialog_observer_.get() ? dialog_observer_->web_contents() : nullptr;
 }
 
+void MediaRouterDialogControllerImpl::SetMediaRouterAction(
+    const base::WeakPtr<MediaRouterAction>& action) {
+  action_ = action;
+}
+
 bool MediaRouterDialogControllerImpl::IsShowingMediaRouterDialog() const {
   return GetMediaRouterDialog() != nullptr;
 }
@@ -177,6 +191,11 @@ void MediaRouterDialogControllerImpl::CloseMediaRouterDialog() {
     if (media_router_ui)
       media_router_ui->Close();
   }
+
+  // If there was no dialog to be closed, the action icon should not have been
+  // pressed and this would be a no-op.
+  if (action_)
+    action_->OnPopupHidden();
 }
 
 void MediaRouterDialogControllerImpl::CreateMediaRouterDialog() {
@@ -186,8 +205,8 @@ void MediaRouterDialogControllerImpl::CreateMediaRouterDialog() {
       Profile::FromBrowserContext(initiator()->GetBrowserContext());
   DCHECK(profile);
 
-  WebDialogDelegate* web_dialog_delegate = new MediaRouterDialogDelegate;
-
+  WebDialogDelegate* web_dialog_delegate =
+      new MediaRouterDialogDelegate(action_);
   // |web_dialog_delegate|'s owner is |constrained_delegate|.
   // |constrained_delegate| is owned by the parent |views::View|.
   // TODO(apacible): Remove after autoresizing is implemented for OSX.
@@ -216,11 +235,17 @@ void MediaRouterDialogControllerImpl::CreateMediaRouterDialog() {
 
   dialog_observer_.reset(new DialogWebContentsObserver(
       media_router_dialog, this));
+
+  if (action_)
+    action_->OnPopupShown();
 }
 
 void MediaRouterDialogControllerImpl::Reset() {
   MediaRouterDialogController::Reset();
   dialog_observer_.reset();
+
+  if (action_)
+    action_->OnPopupHidden();
 }
 
 void MediaRouterDialogControllerImpl::OnDialogNavigated(
@@ -276,4 +301,3 @@ void MediaRouterDialogControllerImpl::PopulateDialog(
 }
 
 }  // namespace media_router
-

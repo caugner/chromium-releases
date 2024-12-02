@@ -48,6 +48,7 @@
 #include "chrome/common/spellcheck_common.h"
 #include "chrome/common/spellcheck_marker.h"
 #include "chrome/common/spellcheck_messages.h"
+#include "components/data_use_measurement/core/data_use_user_data.h"
 #include "content/public/browser/render_process_host.h"
 #include "google_apis/google_api_keys.h"
 #include "net/base/load_flags.h"
@@ -57,6 +58,8 @@
 namespace spellcheck {
 
 namespace {
+
+const size_t kMaxFeedbackSizeBytes = 10 * 1024 * 1024;  // 10 MB
 
 // The default URL where feedback data is sent.
 const char kFeedbackServiceURL[] = "https://www.googleapis.com/rpc";
@@ -165,6 +168,7 @@ FeedbackSender::FeedbackSender(net::URLRequestContextGetter* request_context,
       language_(language),
       country_(country),
       misspelling_counter_(0),
+      feedback_(kMaxFeedbackSizeBytes),
       session_start_(base::Time::Now()),
       feedback_service_url_(kFeedbackServiceURL) {
   // The command-line switch is for testing and temporary.
@@ -410,6 +414,8 @@ void FeedbackSender::SendFeedback(const std::vector<Misspelling>& feedback_data,
   net::URLFetcher* sender =
       net::URLFetcher::Create(kUrlFetcherId, feedback_service_url_,
                               net::URLFetcher::POST, this).release();
+  data_use_measurement::DataUseUserData::AttachToFetcher(
+      sender, data_use_measurement::DataUseUserData::SPELL_CHECKER);
   sender->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
                        net::LOAD_DO_NOT_SAVE_COOKIES);
   sender->SetUploadData("application/json", feedback);

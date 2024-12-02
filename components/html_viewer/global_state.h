@@ -9,10 +9,16 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/thread.h"
 #include "components/html_viewer/discardable_memory_allocator.h"
+#include "components/mus/gles2/mojo_gpu_memory_buffer_manager.h"
+#include "components/mus/gles2/raster_thread_helper.h"
+#include "components/mus/public/interfaces/gpu.mojom.h"
 #include "components/resource_provider/public/cpp/resource_loader.h"
-#include "components/view_manager/gles2/mojo_gpu_memory_buffer_manager.h"
-#include "components/view_manager/gles2/raster_thread_helper.h"
+#include "skia/ext/refptr.h"
 #include "ui/gfx/geometry/size.h"
+
+namespace font_service {
+class FontLoader;
+}
 
 namespace mojo {
 class ApplicationImpl;
@@ -53,7 +59,6 @@ class GlobalState {
   void InitIfNecessary(const gfx::Size& screen_size_in_pixels,
                        float device_pixel_ratio);
 
-  bool is_headless() const { return is_headless_; }
   bool did_init() const { return did_init_; }
 
   const gfx::Size& screen_size_in_pixels() const {
@@ -70,21 +75,24 @@ class GlobalState {
     return &raster_thread_helper_;
   }
 
-  gles2::MojoGpuMemoryBufferManager* gpu_memory_buffer_manager() {
+  mus::MojoGpuMemoryBufferManager* gpu_memory_buffer_manager() {
     return &gpu_memory_buffer_manager_;
   }
+
+  const mojo::GpuInfo* GetGpuInfo();
 
   MediaFactory* media_factory() { return media_factory_.get(); }
 
  private:
+  // Callback for |gpu_service_|->GetGpuInfo().
+  void GetGpuInfoCallback(mojo::GpuInfoPtr gpu_info);
+
   // App for HTMLViewer, not the document's app.
   // WARNING: do not expose this. It's too easy to use the wrong one.
   // HTMLDocument should be using the application it creates, not this one.
   mojo::ApplicationImpl* app_;
 
   resource_provider::ResourceLoader resource_loader_;
-
-  const bool is_headless_;
 
   // True once we've completed init.
   bool did_init_;
@@ -107,8 +115,14 @@ class GlobalState {
   scoped_ptr<BlinkPlatformImpl> blink_platform_;
   base::Thread compositor_thread_;
   gles2::RasterThreadHelper raster_thread_helper_;
-  gles2::MojoGpuMemoryBufferManager gpu_memory_buffer_manager_;
+  mus::MojoGpuMemoryBufferManager gpu_memory_buffer_manager_;
+  mojo::GpuPtr gpu_service_;
+  mojo::GpuInfoPtr gpu_info_;
   scoped_ptr<MediaFactory> media_factory_;
+
+#if defined(OS_LINUX) && !defined(OS_ANDROID)
+  skia::RefPtr<font_service::FontLoader> font_loader_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(GlobalState);
 };

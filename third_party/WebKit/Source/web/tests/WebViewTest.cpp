@@ -31,6 +31,7 @@
 #include "config.h"
 #include "public/web/WebView.h"
 
+#include "bindings/core/v8/V8Document.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/editing/FrameSelection.h"
@@ -49,8 +50,8 @@
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/page/Page.h"
-#include "core/paint/DeprecatedPaintLayer.h"
-#include "core/paint/DeprecatedPaintLayerPainter.h"
+#include "core/paint/PaintLayer.h"
+#include "core/paint/PaintLayerPainter.h"
 #include "core/timing/DOMWindowPerformance.h"
 #include "core/timing/Performance.h"
 #include "core/timing/PerformanceCompositeTiming.h"
@@ -531,10 +532,10 @@ TEST_F(WebViewTest, SetBaseBackgroundColorAndBlendWithExistingContent)
 
     // Paint the root of the main frame in the way that CompositedLayerMapping would.
     FrameView* view = m_webViewHelper.webViewImpl()->mainFrameImpl()->frameView();
-    DeprecatedPaintLayer* rootLayer = view->layoutView()->layer();
+    PaintLayer* rootLayer = view->layoutView()->layer();
     LayoutRect paintRect(0, 0, kWidth, kHeight);
-    DeprecatedPaintLayerPaintingInfo paintingInfo(rootLayer, paintRect, GlobalPaintNormalPhase, LayoutSize());
-    DeprecatedPaintLayerPainter(*rootLayer).paintLayerContents(&pictureBuilder.context(), paintingInfo, PaintLayerPaintingCompositingAllPhases);
+    PaintLayerPaintingInfo paintingInfo(rootLayer, paintRect, GlobalPaintNormalPhase, LayoutSize());
+    PaintLayerPainter(*rootLayer).paintLayerContents(&pictureBuilder.context(), paintingInfo, PaintLayerPaintingCompositingAllPhases);
 
     pictureBuilder.endRecording()->playback(&canvas);
 
@@ -597,14 +598,12 @@ TEST_F(WebViewTest, HitTestResultAtWithPageScale)
 
     // Image is at top left quandrant, so should not hit it.
     WebHitTestResult negativeResult = webView->hitTestResultAt(hitPoint);
-    ASSERT_EQ(WebNode::ElementNode, negativeResult.node().nodeType());
     EXPECT_FALSE(negativeResult.node().to<WebElement>().hasHTMLTagName("img"));
     negativeResult.reset();
 
     // Scale page up 2x so image should occupy the whole viewport.
     webView->setPageScaleFactor(2.0f);
     WebHitTestResult positiveResult = webView->hitTestResultAt(hitPoint);
-    ASSERT_EQ(WebNode::ElementNode, positiveResult.node().nodeType());
     EXPECT_TRUE(positiveResult.node().to<WebElement>().hasHTMLTagName("img"));
     positiveResult.reset();
 }
@@ -620,21 +619,18 @@ TEST_F(WebViewTest, HitTestResultAtWithPageScaleAndPan)
 
     // Image is at top left quandrant, so should not hit it.
     WebHitTestResult negativeResult = webView->hitTestResultAt(hitPoint);
-    ASSERT_EQ(WebNode::ElementNode, negativeResult.node().nodeType());
     EXPECT_FALSE(negativeResult.node().to<WebElement>().hasHTMLTagName("img"));
     negativeResult.reset();
 
     // Scale page up 2x so image should occupy the whole viewport.
     webView->setPageScaleFactor(2.0f);
     WebHitTestResult positiveResult = webView->hitTestResultAt(hitPoint);
-    ASSERT_EQ(WebNode::ElementNode, positiveResult.node().nodeType());
     EXPECT_TRUE(positiveResult.node().to<WebElement>().hasHTMLTagName("img"));
     positiveResult.reset();
 
     // Pan around the zoomed in page so the image is not visible in viewport.
     webView->setVisualViewportOffset(WebFloatPoint(100, 100));
     WebHitTestResult negativeResult2 = webView->hitTestResultAt(hitPoint);
-    ASSERT_EQ(WebNode::ElementNode, negativeResult2.node().nodeType());
     EXPECT_FALSE(negativeResult2.node().to<WebElement>().hasHTMLTagName("img"));
     negativeResult2.reset();
 }
@@ -649,21 +645,18 @@ TEST_F(WebViewTest, HitTestResultForTapWithTapArea)
 
     // Image is at top left quandrant, so should not hit it.
     WebHitTestResult negativeResult = webView->hitTestResultAt(hitPoint);
-    ASSERT_EQ(WebNode::ElementNode, negativeResult.node().nodeType());
     EXPECT_FALSE(negativeResult.node().to<WebElement>().hasHTMLTagName("img"));
     negativeResult.reset();
 
     // The tap area is 20 by 20 square, centered at 55, 55.
     WebSize tapArea(20, 20);
     WebHitTestResult positiveResult = webView->hitTestResultForTap(hitPoint, tapArea);
-    ASSERT_EQ(WebNode::ElementNode, positiveResult.node().nodeType());
     EXPECT_TRUE(positiveResult.node().to<WebElement>().hasHTMLTagName("img"));
     positiveResult.reset();
 
     // Move the hit point the image is just outside the tapped area now.
     hitPoint = WebPoint(61, 61);
     WebHitTestResult negativeResult2 = webView->hitTestResultForTap(hitPoint, tapArea);
-    ASSERT_EQ(WebNode::ElementNode, negativeResult2.node().nodeType());
     EXPECT_FALSE(negativeResult2.node().to<WebElement>().hasHTMLTagName("img"));
     negativeResult2.reset();
 }
@@ -679,14 +672,12 @@ TEST_F(WebViewTest, HitTestResultForTapWithTapAreaPageScaleAndPan)
 
     // Image is at top left quandrant, so should not hit it.
     WebHitTestResult negativeResult = webView->hitTestResultAt(hitPoint);
-    ASSERT_EQ(WebNode::ElementNode, negativeResult.node().nodeType());
     EXPECT_FALSE(negativeResult.node().to<WebElement>().hasHTMLTagName("img"));
     negativeResult.reset();
 
     // The tap area is 20 by 20 square, centered at 55, 55.
     WebSize tapArea(20, 20);
     WebHitTestResult positiveResult = webView->hitTestResultForTap(hitPoint, tapArea);
-    ASSERT_EQ(WebNode::ElementNode, positiveResult.node().nodeType());
     EXPECT_TRUE(positiveResult.node().to<WebElement>().hasHTMLTagName("img"));
     positiveResult.reset();
 
@@ -694,7 +685,6 @@ TEST_F(WebViewTest, HitTestResultForTapWithTapAreaPageScaleAndPan)
     webView->setPageScaleFactor(2.0f);
     webView->setVisualViewportOffset(WebFloatPoint(100, 100));
     WebHitTestResult negativeResult2 = webView->hitTestResultForTap(hitPoint, tapArea);
-    ASSERT_EQ(WebNode::ElementNode, negativeResult2.node().nodeType());
     EXPECT_FALSE(negativeResult2.node().to<WebElement>().hasHTMLTagName("img"));
     negativeResult2.reset();
 }
@@ -813,8 +803,14 @@ void WebViewTest::testTextInputType(WebTextInputType expectedType, const std::st
 {
     URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL.c_str()), WebString::fromUTF8(htmlFile.c_str()));
     WebView* webView = m_webViewHelper.initializeAndLoad(m_baseURL + htmlFile);
+    EXPECT_EQ(WebTextInputTypeNone, webView->textInputType());
+    EXPECT_EQ(WebTextInputTypeNone, webView->textInputInfo().type);
     webView->setInitialFocus(false);
+    EXPECT_EQ(expectedType, webView->textInputType());
     EXPECT_EQ(expectedType, webView->textInputInfo().type);
+    webView->clearFocusedElement();
+    EXPECT_EQ(WebTextInputTypeNone, webView->textInputType());
+    EXPECT_EQ(WebTextInputTypeNone, webView->textInputInfo().type);
 }
 
 TEST_F(WebViewTest, TextInputType)
@@ -1308,7 +1304,7 @@ TEST_F(WebViewTest, PrintWithXHRInFlight)
     m_webViewHelper.reset();
 }
 
-class DropTask : public WebThread::Task {
+class DropTask : public WebTaskRunner::Task {
 public:
     explicit DropTask(WebView* webView) : m_webView(webView)
     {
@@ -1338,7 +1334,7 @@ static void DragAndDropURL(WebViewImpl* webView, const std::string& url)
     const WebPoint clientPoint(0, 0);
     const WebPoint screenPoint(0, 0);
     webView->dragTargetDragEnter(dragData, clientPoint, screenPoint, WebDragOperationCopy, 0);
-    Platform::current()->currentThread()->postTask(FROM_HERE, new DropTask(webView));
+    Platform::current()->currentThread()->taskRunner()->postTask(FROM_HERE, new DropTask(webView));
     FrameTestHelpers::pumpPendingRequestsDoNotUse(webView->mainFrame());
 }
 
@@ -2098,18 +2094,16 @@ WebFrame* CreateChildCounterFrameClient::createChildFrame(WebLocalFrame* parent,
 
 TEST_F(WebViewTest, ChangeDisplayMode)
 {
-    WebView* webView = m_webViewHelper.initializeAndLoad("about:blank", true);
+    URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL.c_str()), WebString::fromUTF8("display_mode.html"));
+    WebView* webView = m_webViewHelper.initializeAndLoad(m_baseURL + "display_mode.html", true);
 
-    WebScriptSource source("document.querySelector('body').innerHTML = window.matchMedia('(display-mode: minimal-ui)').matches");
-
-    webView->mainFrame()->executeScript(source);
-    std::string content = webView->mainFrame()->contentAsText(5).utf8();
-    EXPECT_EQ("false", content);
+    std::string content = webView->mainFrame()->contentAsText(21).utf8();
+    EXPECT_EQ("regular-ui", content);
 
     webView->setDisplayMode(WebDisplayModeMinimalUi);
-    webView->mainFrame()->executeScript(source);
-    content = webView->mainFrame()->contentAsText(5).utf8();
-    EXPECT_EQ("true", content);
+    content = webView->mainFrame()->contentAsText(21).utf8();
+    EXPECT_EQ("minimal-ui", content);
+    m_webViewHelper.reset();
 }
 
 TEST_F(WebViewTest, AddFrameInCloseUnload)
@@ -3058,6 +3052,23 @@ TEST_F(WebViewTest, TestRecordFrameTimingEvents)
         double docDuration = docFinishTime - docStartTime;
         ASSERT_DOUBLE_EQ(docDuration, renders[i]->duration());
     }
+}
+
+
+TEST_F(WebViewTest, StopLoadingIfJavaScriptURLReturnsNoStringResult)
+{
+    ViewCreatingWebViewClient client;
+    FrameTestHelpers::WebViewHelper mainWebView;
+    mainWebView.initializeAndLoad("about:blank", true, 0, &client);
+    mainWebView.webViewImpl()->page()->settings().setJavaScriptCanOpenWindowsAutomatically(true);
+
+    WebFrame* frame = mainWebView.webView()->mainFrame();
+    v8::HandleScope scope(v8::Isolate::GetCurrent());
+    v8::Local<v8::Value> v8Value = frame->executeScriptAndReturnValue(WebScriptSource("var win = window.open('javascript:false'); win.document"));
+    ASSERT_TRUE(v8Value->IsObject());
+    Document* document = V8Document::toImplWithTypeCheck(v8::Isolate::GetCurrent(), v8Value);
+    ASSERT_TRUE(document);
+    EXPECT_FALSE(document->frame()->isLoading());
 }
 
 } // namespace blink

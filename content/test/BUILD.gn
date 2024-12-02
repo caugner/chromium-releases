@@ -7,6 +7,7 @@ import("//build/config/crypto.gni")
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
 import("//build/module_args/v8.gni")
+import("//media/media_options.gni")
 import("//testing/test.gni")
 import("//third_party/mojo/src/mojo/public/tools/bindings/mojom.gni")
 
@@ -147,7 +148,7 @@ source_set("test_support") {
       ]
       deps += [
         "//ui/compositor",
-        "//third_party/libvpx",
+        "//third_party/libvpx_new",
       ]
     }
 
@@ -310,6 +311,10 @@ if (!is_mac) {
 
     defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
 
+    if (proprietary_codecs && enable_hevc_demuxing) {
+      defines += [ "ENABLE_HEVC_DEMUXING" ]
+    }
+
     configs += [
       "//build/config:precompiled_headers",
       "//build/config/compiler:no_size_t_to_int_warning",
@@ -404,6 +409,7 @@ if (!is_mac) {
               "//content")
       sources -=
           [ "../browser/battery_status/battery_monitor_impl_browsertest.cc" ]
+      deps -= [ "//device/battery" ]
       deps += [
         "//content/shell/android:content_shell_jni_headers",
         "//content/shell:content_shell_lib",
@@ -509,6 +515,7 @@ test("content_unittests") {
     "//base/allocator",
     "//base/test:test_support",
     "//content/browser/background_sync:background_sync_proto",
+    "//content/browser/cache_storage:cache_storage_proto",
     "//content/browser/notifications:notification_proto",
     "//content/browser/service_worker:service_worker_proto",
     "//content/browser/speech/proto",
@@ -605,13 +612,6 @@ test("content_unittests") {
       sources +=
           [ "../browser/media/capture/desktop_capture_device_aura_unittest.cc" ]
     }
-  } else {
-    if (enable_plugins) {
-      # This file is added only when plugins are enabled, but we don't want it
-      # unless webrtc is also enabled.
-      sources -=
-          [ "../renderer/media/webrtc/video_destination_handler_unittest.cc" ]
-    }
   }
 
   if (enable_web_speech) {
@@ -651,13 +651,15 @@ test("content_unittests") {
     sources -= [
       "../browser/geolocation/network_location_provider_unittest.cc",
       "../browser/geolocation/wifi_data_provider_common_unittest.cc",
+      "../browser/power_usage_monitor_impl_unittest.cc",
       "../browser/renderer_host/begin_frame_observer_proxy_unittest.cc",
       "../browser/webui/url_data_manager_backend_unittest.cc",
     ]
+    deps -= [ "//device/battery" ]
     deps += [ "//testing/android/native_test:native_test_native_code" ]
   }
   if (!is_android && !is_ios) {
-    deps += [ "//third_party/libvpx" ]
+    deps += [ "//third_party/libvpx_new" ]
   }
 
   if (use_aura) {

@@ -11,9 +11,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "cc/trees/layer_tree_host_client.h"
-#include "components/view_manager/public/interfaces/gpu.mojom.h"
-#include "components/view_manager/public/interfaces/surfaces.mojom.h"
-#include "mojo/cc/output_surface_mojo.h"
+#include "components/mus/public/cpp/output_surface.h"
+#include "components/mus/public/interfaces/gpu.mojom.h"
 #include "third_party/WebKit/public/platform/WebLayerTreeView.h"
 
 namespace base {
@@ -40,19 +39,17 @@ class View;
 namespace html_viewer {
 
 class WebLayerTreeViewImpl : public blink::WebLayerTreeView,
-                             public cc::LayerTreeHostClient,
-                             public mojo::OutputSurfaceMojoClient {
+                             public cc::LayerTreeHostClient {
  public:
   WebLayerTreeViewImpl(
       scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner,
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
-      cc::TaskGraphRunner* task_graph_runner,
-      mojo::SurfacePtr surface,
-      mojo::GpuPtr gpu_service);
+      cc::TaskGraphRunner* task_graph_runner);
   ~WebLayerTreeViewImpl() override;
 
-  void set_widget(blink::WebWidget* widget) { widget_ = widget; }
-  void set_view(mojo::View* view) { view_ = view; }
+  void Initialize(mojo::GpuPtr gpu_service,
+                  mus::View* view,
+                  blink::WebWidget* widget);
 
   // cc::LayerTreeHostClient implementation.
   void WillBeginMainFrame() override;
@@ -73,7 +70,6 @@ class WebLayerTreeViewImpl : public blink::WebLayerTreeView,
   void DidCommitAndDrawFrame() override;
   void DidCompleteSwapBuffers() override;
   void DidCompletePageScaleAnimation() override {}
-  void RateLimitSharedMainThreadContext() override {}
   void RecordFrameTimingEvents(
       scoped_ptr<cc::FrameTimingTracker::CompositeTimingSet> composite_events,
       scoped_ptr<cc::FrameTimingTracker::MainFrameTimingSet> main_frame_events)
@@ -83,7 +79,6 @@ class WebLayerTreeViewImpl : public blink::WebLayerTreeView,
   virtual void setRootLayer(const blink::WebLayer& layer);
   virtual void clearRootLayer();
   virtual void setViewportSize(const blink::WebSize& device_viewport_size);
-  virtual blink::WebSize deviceViewportSize() const;
   virtual void setDeviceScaleFactor(float);
   virtual float deviceScaleFactor() const;
   virtual void setBackgroundColor(blink::WebColor color);
@@ -101,7 +96,6 @@ class WebLayerTreeViewImpl : public blink::WebLayerTreeView,
   virtual void didStopFlinging() {}
   virtual void compositeAndReadbackAsync(
       blink::WebCompositeAndReadbackAsyncCallback* callback) {}
-  virtual void finishAllRendering();
   virtual void setDeferCommits(bool defer_commits) {}
   virtual void registerForAnimations(blink::WebLayer* layer);
   virtual void registerViewportLayers(
@@ -115,18 +109,12 @@ class WebLayerTreeViewImpl : public blink::WebLayerTreeView,
   virtual void setShowFPSCounter(bool) {}
   virtual void setShowPaintRects(bool) {}
   virtual void setShowDebugBorders(bool) {}
-  virtual void setContinuousPaintingEnabled(bool) {}
   virtual void setShowScrollBottleneckRects(bool) {}
 
-  // OutputSurfaceMojoClient implementation.
-  void DidCreateSurface(cc::SurfaceId id) override;
-
  private:
-  void DidCreateSurfaceOnMainThread(cc::SurfaceId id);
-
   // widget_ and view_ will outlive us.
   blink::WebWidget* widget_;
-  mojo::View* view_;
+  mus::View* view_;
   scoped_ptr<cc::LayerTreeHost> layer_tree_host_;
   scoped_ptr<cc::OutputSurface> output_surface_;
   scoped_refptr<base::SingleThreadTaskRunner>

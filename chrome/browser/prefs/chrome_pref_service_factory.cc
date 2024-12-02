@@ -25,10 +25,8 @@
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/prefs/chrome_pref_model_associator_client.h"
 #include "chrome/browser/prefs/command_line_pref_store.h"
-#include "chrome/browser/prefs/pref_model_associator.h"
-#include "chrome/browser/prefs/pref_service_syncable.h"
-#include "chrome/browser/prefs/pref_service_syncable_factory.h"
 #include "chrome/browser/prefs/profile_pref_store_manager.h"
 #include "chrome/browser/profiles/file_path_verifier_win.h"
 #include "chrome/browser/profiles/profile.h"
@@ -44,6 +42,9 @@
 #include "components/search_engines/default_search_pref_migration.h"
 #include "components/search_engines/search_engines_pref_names.h"
 #include "components/sync_driver/pref_names.h"
+#include "components/syncable_prefs/pref_model_associator.h"
+#include "components/syncable_prefs/pref_service_syncable.h"
+#include "components/syncable_prefs/pref_service_syncable_factory.h"
 #include "components/user_prefs/tracked/pref_names.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -54,7 +55,6 @@
 #if defined(ENABLE_CONFIGURATION_POLICY)
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/browser/configuration_policy_pref_store.h"
-#include "components/policy/core/common/policy_types.h"
 #endif
 
 #if defined(ENABLE_EXTENSIONS)
@@ -420,24 +420,17 @@ scoped_ptr<ProfilePrefStoreManager> CreateProfilePrefStoreManager(
 }
 
 void PrepareFactory(
-    PrefServiceSyncableFactory* factory,
+    syncable_prefs::PrefServiceSyncableFactory* factory,
     policy::PolicyService* policy_service,
     SupervisedUserSettingsService* supervised_user_settings,
     scoped_refptr<PersistentPrefStore> user_pref_store,
     const scoped_refptr<PrefStore>& extension_prefs,
     bool async) {
 #if defined(ENABLE_CONFIGURATION_POLICY)
-  using policy::ConfigurationPolicyPrefStore;
-  factory->set_managed_prefs(
-      make_scoped_refptr(new ConfigurationPolicyPrefStore(
-          policy_service,
-          g_browser_process->browser_policy_connector()->GetHandlerList(),
-          policy::POLICY_LEVEL_MANDATORY)));
-  factory->set_recommended_prefs(
-      make_scoped_refptr(new ConfigurationPolicyPrefStore(
-          policy_service,
-          g_browser_process->browser_policy_connector()->GetHandlerList(),
-          policy::POLICY_LEVEL_RECOMMENDED)));
+  policy::BrowserPolicyConnector* policy_connector =
+      g_browser_process->browser_policy_connector();
+  factory->SetManagedPolicies(policy_service, policy_connector);
+  factory->SetRecommendedPolicies(policy_service, policy_connector);
 #endif  // ENABLE_CONFIGURATION_POLICY
 
 #if defined(ENABLE_SUPERVISED_USERS)
@@ -457,6 +450,8 @@ void PrepareFactory(
       new CommandLinePrefStore(base::CommandLine::ForCurrentProcess())));
   factory->set_read_error_callback(base::Bind(&HandleReadError));
   factory->set_user_prefs(user_pref_store);
+  factory->SetPrefModelAssociatorClient(
+      ChromePrefModelAssociatorClient::GetInstance());
 }
 
 }  // namespace
@@ -483,7 +478,7 @@ scoped_ptr<PrefService> CreateLocalState(
     policy::PolicyService* policy_service,
     const scoped_refptr<PrefRegistry>& pref_registry,
     bool async) {
-  PrefServiceSyncableFactory factory;
+  syncable_prefs::PrefServiceSyncableFactory factory;
   PrepareFactory(
       &factory,
       policy_service,
@@ -495,7 +490,7 @@ scoped_ptr<PrefService> CreateLocalState(
   return factory.Create(pref_registry.get());
 }
 
-scoped_ptr<PrefServiceSyncable> CreateProfilePrefs(
+scoped_ptr<syncable_prefs::PrefServiceSyncable> CreateProfilePrefs(
     const base::FilePath& profile_path,
     base::SequencedTaskRunner* pref_io_task_runner,
     TrackedPreferenceValidationDelegate* validation_delegate,
@@ -517,7 +512,7 @@ scoped_ptr<PrefServiceSyncable> CreateProfilePrefs(
       base::Bind(sync_start_util::GetFlareForSyncableService(profile_path),
                  syncer::PREFERENCES);
 
-  PrefServiceSyncableFactory factory;
+  syncable_prefs::PrefServiceSyncableFactory factory;
   scoped_refptr<PersistentPrefStore> user_pref_store(
       CreateProfilePrefStoreManager(profile_path)
           ->CreateProfilePrefStore(pref_io_task_runner,
@@ -529,7 +524,7 @@ scoped_ptr<PrefServiceSyncable> CreateProfilePrefs(
                  user_pref_store,
                  extension_prefs,
                  async);
-  scoped_ptr<PrefServiceSyncable> pref_service =
+  scoped_ptr<syncable_prefs::PrefServiceSyncable> pref_service =
       factory.CreateSyncable(pref_registry.get());
 
   ConfigureDefaultSearchPrefMigrationToDictionaryValue(pref_service.get());

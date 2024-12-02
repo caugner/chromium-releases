@@ -9,9 +9,10 @@
 
 #include "base/strings/string16.h"
 #include "components/autofill/core/common/autofill_constants.h"
+#include "components/autofill/core/common/password_form_field_prediction_map.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
 #include "third_party/WebKit/public/web/WebElementCollection.h"
-#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_f.h"
 
 class GURL;
 
@@ -30,6 +31,8 @@ namespace autofill {
 struct FormData;
 struct FormFieldData;
 struct WebElementDescriptor;
+
+namespace form_util {
 
 // A bit field mask to extract data from WebFormControlElement.
 // Copied to components/autofill/ios/browser/resources/autofill_controller.js.
@@ -53,6 +56,35 @@ enum ExtractMask {
 // Copied to components/autofill/ios/browser/resources/autofill_controller.js.
 extern const size_t kMaxParseableFields;
 
+// Extract FormData from the form element and return whether the operation was
+// successful.
+bool ExtractFormData(const blink::WebFormElement& form_element, FormData* data);
+
+// Helper function to check if there exist any form on |frame| where its action
+// equals |action|. Returns true if so. For forms with empty or unspecified
+// actions, all form data are used for comparison. Form data comparison is
+// disabled on Mac and Android because the update prompt isn't implemented.
+// It may cause many false password updates.
+// TODO(kolos) Turn on all data comparing when the update prompt will be
+// implemented on Mac and Android.
+bool IsFormVisible(blink::WebFrame* frame,
+                   const GURL& action,
+                   const GURL& origin,
+                   const FormData& form_data);
+
+// Returns true if at least one element from |control_elements| is visible.
+bool IsSomeControlElementVisible(
+    const blink::WebVector<blink::WebFormControlElement>& control_elements);
+
+// Returns true if some control elements of |form| are visible.
+bool AreFormContentsVisible(const blink::WebFormElement& form);
+
+// Helper functions to assist in getting the canonical form of the action and
+// origin. The action will proplerly take into account <BASE>, and both will
+// strip unnecessary data (e.g. query params and HTTP credentials).
+GURL GetCanonicalActionForForm(const blink::WebFormElement& form);
+GURL GetCanonicalOriginForDocument(const blink::WebDocument& document);
+
 // Returns true if |element| is a month input element.
 bool IsMonthInput(const blink::WebInputElement* element);
 
@@ -72,8 +104,12 @@ bool IsCheckableElement(const blink::WebInputElement* element);
 // autofilled. {Text, Radiobutton, Checkbox}.
 bool IsAutofillableInputElement(const blink::WebInputElement* element);
 
-// Recursively checks whether |node| or any of its children have a non-empty
-// bounding box.
+// True if this node takes up space in the layout, ie. this node or a descendant
+// has a non-empty bounding bounding client rect.
+//
+// TODO(esprehn): This isn't really about visibility, it's about the size.
+// We should remove this function and just call hasNonEmptyLayoutSize()
+// directly.
 bool IsWebNodeVisible(const blink::WebNode& node);
 
 // Returns the form's |name| attribute if non-empty; otherwise the form's |id|
@@ -120,7 +156,20 @@ GetUnownedAutofillableFormFieldElements(
 // representation for |element|.
 // |extract_mask| usage and the return value are the same as
 // WebFormElementToFormData() above.
-bool UnownedFormElementsAndFieldSetsToFormData(
+// This function will return false and not perform any extraction if
+// |document| does not pertain to checkout.
+bool UnownedCheckoutFormElementsAndFieldSetsToFormData(
+    const std::vector<blink::WebElement>& fieldsets,
+    const std::vector<blink::WebFormControlElement>& control_elements,
+    const blink::WebFormControlElement* element,
+    const blink::WebDocument& document,
+    ExtractMask extract_mask,
+    FormData* form,
+    FormFieldData* field);
+
+// Same as above, but without the requirement that the elements only be
+// related to checkout.
+bool UnownedPasswordFormElementsAndFieldSetsToFormData(
     const std::vector<blink::WebElement>& fieldsets,
     const std::vector<blink::WebFormControlElement>& control_elements,
     const blink::WebFormControlElement* element,
@@ -187,6 +236,7 @@ void PreviewSuggestion(const base::string16& suggestion,
                        const base::string16& user_input,
                        blink::WebFormControlElement* input_element);
 
+}  // namespace form_util
 }  // namespace autofill
 
 #endif  // COMPONENTS_AUTOFILL_CONTENT_RENDERER_FORM_AUTOFILL_UTIL_H_

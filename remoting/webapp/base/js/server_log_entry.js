@@ -106,7 +106,7 @@ remoting.ServerLogEntry.getValueForError_ = function(connectionError) {
       return 'host-is-offline';
     case remoting.Error.Tag.INCOMPATIBLE_PROTOCOL:
       return 'incompatible-protocol';
-    case remoting.Error.Tag.BAD_PLUGIN_VERSION:
+    case remoting.Error.Tag.BAD_VERSION:
       return 'bad-plugin-version';
     case remoting.Error.Tag.NETWORK_FAILURE:
       return 'network-failure';
@@ -426,6 +426,21 @@ remoting.ServerLogEntry.prototype.addWebappVersionField = function() {
 remoting.ServerLogEntry.prototype.addHostVersion = function(hostVersion) {
   this.set_(remoting.ServerLogEntry.KEY_HOST_VERSION_, hostVersion);
 };
+
+/**
+ * Stub.
+ * @param {remoting.ChromotingEvent.Os} hostOs type of the host OS for current
+ *        session.
+ * @return {void} Nothing.
+ */
+remoting.ServerLogEntry.prototype.addHostOs = function(hostOs) {};
+
+/**
+ * Stub.
+ * @param {string} hostOsVersion Version of the host OS for current session.
+ * @return {void} Nothing.
+ */
+remoting.ServerLogEntry.prototype.addHostOsVersion = function(hostOsVersion) {};
 
 /**
  * Adds a field specifying the mode to this log entry.

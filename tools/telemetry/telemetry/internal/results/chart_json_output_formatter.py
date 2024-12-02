@@ -45,6 +45,9 @@ def ResultsAsChartDict(benchmark_metadata, page_specific_values,
       if chart_name == trace_name:
         trace_name = 'summary'
 
+    if value.tir_label:
+      chart_name = value.tir_label + '@@' + chart_name
+
     # This intentionally overwrites the trace if it already exists because this
     # is expected of output from the buildbots currently.
     # See: crbug.com/413393

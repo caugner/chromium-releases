@@ -261,6 +261,10 @@ class ExtensionWebRequestEventRouter
   void OnURLRequestDestroyed(void* browser_context,
                              const net::URLRequest* request);
 
+  // See https://crbug.com/289715.
+  void OnURLRequestJobOrphaned(void* browser_context,
+                               const net::URLRequest* request);
+
   // Called when an event listener handles a blocking event and responds.
   void OnEventHandled(void* browser_context,
                       const std::string& extension_id,
@@ -310,7 +314,7 @@ class ExtensionWebRequestEventRouter
   void AddCallbackForPageLoad(const base::Closure& callback);
 
  private:
-  friend struct DefaultSingletonTraits<ExtensionWebRequestEventRouter>;
+  friend struct base::DefaultSingletonTraits<ExtensionWebRequestEventRouter>;
 
   struct EventListener;
   using EventListeners = std::vector<const EventListener*>;

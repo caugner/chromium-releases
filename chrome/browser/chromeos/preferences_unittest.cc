@@ -17,9 +17,9 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "components/syncable_prefs/testing_pref_service_syncable.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "sync/api/attachments/attachment_id.h"
@@ -203,7 +203,7 @@ class PreferencesTest : public testing::Test {
   // Not owned.
   const user_manager::User* test_user_;
   TestingProfile* test_profile_;
-  TestingPrefServiceSyncable* pref_service_;
+  syncable_prefs::TestingPrefServiceSyncable* pref_service_;
   input_method::MyMockInputMethodManager* mock_manager_;
 
  private:
@@ -339,7 +339,7 @@ class InputMethodPreferencesTest : public PreferencesTest {
   }
 
   // Translates engine IDs in a CSV string to input method IDs.
-  std::string ToInputMethodIds(std::string value) {
+  std::string ToInputMethodIds(const std::string& value) {
     std::vector<std::string> tokens = base::SplitString(
         value, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
     std::transform(tokens.begin(), tokens.end(), tokens.begin(),

@@ -13,16 +13,15 @@
 #include "base/memory/scoped_ptr.h"
 #include "content/public/browser/content_browser_client.h"
 
+class PrefService;
+
 namespace breakpad {
 class CrashHandlerHostLinux;
 }
 
-namespace content {
-class BrowserMessageFilter;
-}
-
 namespace media {
 class AudioManagerFactory;
+class BrowserCdmFactory;
 }
 
 namespace metrics {
@@ -30,9 +29,12 @@ class MetricsService;
 }
 
 namespace chromecast {
+class CastService;
+
 namespace media {
 class MediaPipelineBackend;
 struct MediaPipelineDeviceParams;
+class CmaMediaPipelineClient;
 }
 
 namespace shell {
@@ -51,19 +53,29 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
   // Appends extra command line arguments before launching a new process.
   virtual void AppendExtraCommandLineSwitches(base::CommandLine* command_line);
 
-  // Returns any BrowserMessageFilters that should be added when launching a
-  // new render process.
-  virtual std::vector<scoped_refptr<content::BrowserMessageFilter>>
-  GetBrowserMessageFilters();
+  // Creates and returns the CastService instance for the current process.
+  // Note: |request_context_getter| might be different than the main request
+  // getter accessible via CastBrowserProcess.
+  virtual scoped_ptr<CastService> CreateCastService(
+      content::BrowserContext* browser_context,
+      PrefService* pref_service,
+      net::URLRequestContextGetter* request_context_getter);
 
   // Provide an AudioManagerFactory instance for WebAudio playback.
   virtual scoped_ptr<::media::AudioManagerFactory> CreateAudioManagerFactory();
 
 #if !defined(OS_ANDROID)
-  // Creates a MediaPipelineDevice (CMA backend) for media playback, called
-  // once per media player instance.
-  virtual scoped_ptr<media::MediaPipelineBackend> CreateMediaPipelineBackend(
-      const media::MediaPipelineDeviceParams& params);
+  // Creates a CmaMediaPipelineClient which is responsible to create (CMA
+  // backend)
+  // for media playback and watch media pipeline status, called once per media
+  // player
+  // instance.
+  virtual scoped_refptr<media::CmaMediaPipelineClient>
+  CreateCmaMediaPipelineClient();
+
+  // Creates and returns a factory used for creating BrowserCdm instances for
+  // playing protected content. This is called once per browser lifetime.
+  virtual scoped_ptr<::media::BrowserCdmFactory> CreateBrowserCdmFactory();
 #endif
 
   // Performs cleanup for process exit (but before AtExitManager cleanup).
@@ -75,6 +87,10 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
   // Allows registration of extra metrics providers.
   virtual void RegisterMetricsProviders(
       ::metrics::MetricsService* metrics_service);
+
+  // Returns whether or not the remote debugging service should be started
+  // on browser startup.
+  virtual bool EnableRemoteDebuggingImmediately();
 
   // content::ContentBrowserClient implementation:
   content::BrowserMainParts* CreateBrowserMainParts(
@@ -127,7 +143,7 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
       int opener_render_frame_id,
       bool* no_javascript_access) override;
   void RegisterUnsandboxedOutOfProcessMojoApplications(
-      std::vector<GURL>* urls) override;
+      std::map<GURL, base::string16>* apps) override;
 #if defined(OS_ANDROID)
   void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
@@ -148,6 +164,10 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
 
  protected:
   CastContentBrowserClient();
+
+  URLRequestContextFactory* url_request_context_factory() const {
+    return url_request_context_factory_.get();
+  }
 
  private:
   void AddNetworkHintsMessageFilter(int render_process_id,

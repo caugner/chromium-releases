@@ -1,20 +1,18 @@
 {
   "android_chromium_gn_compile_dbg": {
     "additional_compile_targets": [
+      "blimp_tests",
       "chrome_public_apk",
       "chrome_public_test_apk",
-      "chrome_shell_apk",
-      "chrome_shell_test_apk",
       "content_shell_apk",
       "mandoline:all"
     ]
   },
   "android_chromium_gn_compile_rel": {
     "additional_compile_targets": [
+      "blimp_tests",
       "chrome_public_apk",
       "chrome_public_test_apk",
-      "chrome_shell_apk",
-      "chrome_shell_test_apk",
       "content_shell_apk",
       "content_shell_test_apk",
       "mandoline:all"
@@ -47,6 +45,7 @@
       "jingle_unittests",
       "mandoline:all",
       "media_unittests",
+      "media_blink_unittests",
       "net_unittests",
       "ppapi_unittests",
       "printing_unittests",
@@ -94,6 +93,7 @@
       "jingle_unittests",
       "mandoline:all",
       "media_unittests",
+      "media_blink_unittests",
       "net_unittests",
       "ppapi_unittests",
       "printing_unittests",
@@ -144,6 +144,7 @@
       "jingle_unittests",
       "mandoline:all",
       "media_unittests",
+      "media_blink_unittests",
       "net_unittests",
       "ppapi_unittests",
       "printing_unittests",
@@ -258,6 +259,9 @@
         "test": "jingle_unittests"
       },
       {
+        "test": "media_blink_unittests"
+      },
+      {
         "test": "media_unittests"
       },
       {
@@ -289,6 +293,9 @@
       },
       {
         "test": "mojo_system_unittests"
+      },
+      {
+        "test": "mojo_view_manager_lib_unittests"
       },
       {
         "test": "nacl_loader_unittests"
@@ -346,10 +353,6 @@
       }
     ],
     "scripts": [
-      {
-        "name": "gn_check",
-        "script": "gn_check.py"
-      },
       {
         "args": [
           "chrome"

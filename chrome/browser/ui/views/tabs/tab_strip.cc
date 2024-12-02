@@ -22,6 +22,7 @@
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/view_ids.h"
+#include "chrome/browser/ui/views/layout_constants.h"
 #include "chrome/browser/ui/views/tabs/stacked_tab_strip_layout.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_drag_controller.h"
@@ -112,15 +113,6 @@ const int kMouseMoveCountBeforeConsiderReal = 3;
 
 // Amount of time we delay before resizing after a close from a touch.
 const int kTouchResizeLayoutTimeMS = 2000;
-
-// Amount the left edge of a tab is offset from the rectangle of the tab's
-// favicon/title/close box.  Related to the width of IDR_TAB_ACTIVE_LEFT.
-// Affects the size of the "V" between adjacent tabs.
-#if defined(OS_MACOSX)
-const int kTabHorizontalOffset = -19;
-#else
-const int kTabHorizontalOffset = -26;
-#endif
 
 // Amount to adjust the clip by when the tab is stacked before the active index.
 const int kStackedTabLeftClip = 20;
@@ -812,7 +804,7 @@ void TabStrip::PrepareForCloseAt(int model_index, CloseTabSource source) {
     Tab* last_tab = tab_at(model_count - 1);
     Tab* tab_being_removed = tab_at(model_index);
     available_width_for_tabs_ = last_tab->x() + last_tab->width() -
-        tab_being_removed->width() - kTabHorizontalOffset;
+        tab_being_removed->width() + GetLayoutConstant(TABSTRIP_TAB_OVERLAP);
     if (model_index == 0 && tab_being_removed->data().pinned &&
         !tab_at(1)->data().pinned) {
       available_width_for_tabs_ -= kPinnedToNonPinnedGap;
@@ -1216,7 +1208,8 @@ bool TabStrip::ShouldPaintTab(const Tab* tab, gfx::Rect* clip) {
     if (tab_bounds.x() < previous_tab_bounds.x())
       return true;  // Can happen during dragging.
 
-    if (previous_tab_bounds.right() + kTabHorizontalOffset != tab_bounds.x()) {
+    if (previous_tab_bounds.right() - GetLayoutConstant(TABSTRIP_TAB_OVERLAP) !=
+        tab_bounds.x()) {
       int x = previous_tab_bounds.right() - tab_bounds.x() -
           kStackedTabRightClip;
       clip->SetRect(x, 0, tab_bounds.width() - x, tab_bounds.height());
@@ -1332,15 +1325,15 @@ void TabStrip::PaintChildren(const ui::PaintContext& context) {
     paint.setXfermodeMode(SkXfermode::kDstIn_Mode);
     paint.setStyle(SkPaint::kFill_Style);
 
-    // The tab graphics include some shadows at the top, so the actual
-    // tabstrip top is 4 px. above the apparent top of the tab, to provide room
-    // to draw these. Exclude this region when trying to make tabs transparent
-    // as it's transparent enough already, and drawing in this region can
-    // overlap the avatar button, leading to visual artifacts.
-    const int kTopOffset = 4;
-    // The tabstrip area overlaps the toolbar area by 2 px.
-    recorder.canvas()->DrawRect(
-        gfx::Rect(0, kTopOffset, width(), height() - kTopOffset - 2), paint);
+    gfx::Rect bounds(GetLocalBounds());
+    // The tab graphics include some shadows at the top, plus a 1 pixel top
+    // stroke.  Exclude this region when trying to make tabs transparent as it's
+    // transparent enough already, and drawing in this region can overlap the
+    // avatar button, leading to visual artifacts.  Also exclude the toolbar
+    // overlap region at the bottom.
+    gfx::Insets tab_insets(GetLayoutInsets(TAB));
+    bounds.Inset(0, tab_insets.top(), 0, tab_insets.bottom());
+    recorder.canvas()->DrawRect(bounds, paint);
   }
 
   // Now selected but not active. We don't want these dimmed if using native
@@ -1389,13 +1382,14 @@ gfx::Size TabStrip::GetPreferredSize() const {
       needed_tab_width += kPinnedToNonPinnedGap + min_selected_width +
           ((remaining_tab_count - 1) * min_unselected_width);
     }
+    const int tab_overlap = GetLayoutConstant(TABSTRIP_TAB_OVERLAP);
     if (tab_count() > 1)
-      needed_tab_width += (tab_count() - 1) * kTabHorizontalOffset;
+      needed_tab_width -= (tab_count() - 1) * tab_overlap;
 
     // Don't let the tabstrip shrink smaller than is necessary to show one tab,
     // and don't force it to be larger than is necessary to show 20 tabs.
     const int largest_min_tab_width =
-        min_selected_width + 19 * (min_unselected_width + kTabHorizontalOffset);
+        min_selected_width + 19 * (min_unselected_width - tab_overlap);
     needed_tab_width = std::min(
         std::max(needed_tab_width, min_selected_width), largest_min_tab_width);
   }
@@ -1537,7 +1531,7 @@ void TabStrip::Init() {
 
 Tab* TabStrip::CreateTab() {
   Tab* tab = new Tab(this);
-  tab->set_animation_container(animation_container_.get());
+  tab->SetAnimationContainer(animation_container_.get());
   return tab;
 }
 
@@ -1556,9 +1550,9 @@ void TabStrip::StartInsertTabAnimation(int model_index) {
                    ideal_bounds(model_index).height());
   } else {
     Tab* last_tab = tab_at(model_index - 1);
-    tab->SetBounds(last_tab->bounds().right() + kTabHorizontalOffset,
-                   ideal_bounds(model_index).y(), 0,
-                   ideal_bounds(model_index).height());
+    tab->SetBounds(
+        last_tab->bounds().right() - GetLayoutConstant(TABSTRIP_TAB_OVERLAP),
+        ideal_bounds(model_index).y(), 0, ideal_bounds(model_index).height());
   }
 
   AnimateToIdealBounds();
@@ -1807,7 +1801,7 @@ void TabStrip::CalculateBoundsForDraggedTabs(const Tabs& tabs,
     gfx::Rect new_bounds = tab->bounds();
     new_bounds.set_origin(gfx::Point(x, 0));
     bounds->push_back(new_bounds);
-    x += tab->width() + kTabHorizontalOffset;
+    x += tab->width() - GetLayoutConstant(TABSTRIP_TAB_OVERLAP);
   }
 }
 
@@ -1819,8 +1813,8 @@ int TabStrip::GetSizeNeededForTabs(const Tabs& tabs) {
     if (i > 0 && tab->data().pinned != tabs[i - 1]->data().pinned)
       width += kPinnedToNonPinnedGap;
   }
-  if (tabs.size() > 0)
-    width += kTabHorizontalOffset * static_cast<int>(tabs.size() - 1);
+  if (!tabs.empty())
+    width -= GetLayoutConstant(TABSTRIP_TAB_OVERLAP) * (tabs.size() - 1);
   return width;
 }
 
@@ -2110,9 +2104,10 @@ void TabStrip::GetDesiredTabWidths(int tab_count,
   // Determine how much space we can actually allocate to tabs.
   int available_width = (available_width_for_tabs_ < 0) ?
       tab_area_width() : available_width_for_tabs_;
+  const int tab_overlap = GetLayoutConstant(TABSTRIP_TAB_OVERLAP);
   if (pinned_tab_count > 0) {
     available_width -=
-        pinned_tab_count * (Tab::GetPinnedWidth() + kTabHorizontalOffset);
+        pinned_tab_count * (Tab::GetPinnedWidth() - tab_overlap);
     tab_count -= pinned_tab_count;
     if (tab_count == 0) {
       *selected_width = *unselected_width = Tab::GetStandardSize().width();
@@ -2125,9 +2120,9 @@ void TabStrip::GetDesiredTabWidths(int tab_count,
   // Calculate the desired tab widths by dividing the available space into equal
   // portions.  Don't let tabs get larger than the "standard width" or smaller
   // than the minimum width for each type, respectively.
-  const int total_offset = kTabHorizontalOffset * (tab_count - 1);
+  const int total_overlap = tab_overlap * (tab_count - 1);
   const double desired_tab_width = std::min((static_cast<double>(
-      available_width - total_offset) / static_cast<double>(tab_count)),
+      available_width + total_overlap) / static_cast<double>(tab_count)),
       static_cast<double>(Tab::GetStandardSize().width()));
   *unselected_width = std::max(desired_tab_width, min_unselected_width);
   *selected_width = std::max(desired_tab_width, min_selected_width);
@@ -2145,7 +2140,7 @@ void TabStrip::GetDesiredTabWidths(int tab_count,
     if (desired_tab_width < min_selected_width) {
       // Unselected width = (total width - selected width) / (num_tabs - 1)
       *unselected_width = std::max(static_cast<double>(
-          available_width - total_offset - min_selected_width) /
+          available_width + total_overlap - min_selected_width) /
           static_cast<double>(tab_count - 1), min_unselected_width);
     }
   }
@@ -2222,15 +2217,13 @@ gfx::Rect TabStrip::GetDropBounds(int drop_index,
                                   bool* is_beneath) {
   DCHECK_NE(drop_index, -1);
   int center_x;
+  const int tab_overlap = GetLayoutConstant(TABSTRIP_TAB_OVERLAP);
   if (drop_index < tab_count()) {
     Tab* tab = tab_at(drop_index);
-    if (drop_before)
-      center_x = tab->x() - (kTabHorizontalOffset / 2);
-    else
-      center_x = tab->x() + (tab->width() / 2);
+    center_x = tab->x() + ((drop_before ? tab_overlap : tab->width()) / 2);
   } else {
     Tab* last_tab = tab_at(drop_index - 1);
-    center_x = last_tab->x() + last_tab->width() + (kTabHorizontalOffset / 2);
+    center_x = last_tab->x() + last_tab->width() - (tab_overlap / 2);
   }
 
   // Mirror the center point if necessary.
@@ -2390,6 +2383,7 @@ void TabStrip::GenerateIdealBounds() {
   int tab_height = Tab::GetStandardSize().height();
   int first_non_pinned_index = 0;
   double tab_x = GenerateIdealBoundsForPinnedTabs(&first_non_pinned_index);
+  const int tab_overlap = GetLayoutConstant(TABSTRIP_TAB_OVERLAP);
   for (int i = first_non_pinned_index; i < tab_count(); ++i) {
     Tab* tab = tab_at(i);
     DCHECK(!tab->data().pinned);
@@ -2401,7 +2395,7 @@ void TabStrip::GenerateIdealBounds() {
         i,
         gfx::Rect(rounded_tab_x, 0, Round(end_of_tab) - rounded_tab_x,
                   tab_height));
-    tab_x = end_of_tab + kTabHorizontalOffset;
+    tab_x = end_of_tab - tab_overlap;
   }
 
   // Update bounds of new tab button.
@@ -2413,7 +2407,7 @@ void TabStrip::GenerateIdealBounds() {
     // right-most Tab, otherwise it'll bounce when animating.
     new_tab_x = width() - newtab_button_bounds_.width();
   } else {
-    new_tab_x = Round(tab_x - kTabHorizontalOffset) +
+    new_tab_x = Round(tab_x + tab_overlap) +
         kNewTabButtonHorizontalOffset;
   }
   newtab_button_bounds_.set_origin(gfx::Point(new_tab_x, new_tab_y));
@@ -2427,7 +2421,7 @@ int TabStrip::GenerateIdealBoundsForPinnedTabs(int* first_non_pinned_index) {
   for (; index < tab_count() && tab_at(index)->data().pinned; ++index) {
     tabs_.set_ideal_bounds(index,
                            gfx::Rect(next_x, 0, pinned_width, tab_height));
-    next_x += pinned_width + kTabHorizontalOffset;
+    next_x += pinned_width - GetLayoutConstant(TABSTRIP_TAB_OVERLAP);
   }
   if (index > 0 && index < tab_count())
     next_x += kPinnedToNonPinnedGap;
@@ -2456,7 +2450,7 @@ void TabStrip::StartMouseInitiatedRemoveTabAnimation(int model_index) {
   // The user initiated the close. We want to persist the bounds of all the
   // existing tabs, so we manually shift ideal_bounds then animate.
   Tab* tab_closing = tab_at(model_index);
-  int delta = tab_closing->width() + kTabHorizontalOffset;
+  int delta = tab_closing->width() - GetLayoutConstant(TABSTRIP_TAB_OVERLAP);
   // If the tab being closed is a pinned tab next to a non-pinned tab, be sure
   // to add the extra padding.
   DCHECK_LT(model_index, tab_count() - 1);
@@ -2509,7 +2503,8 @@ int TabStrip::GetStartXForNormalTabs() const {
   int pinned_tab_count = GetPinnedTabCount();
   if (pinned_tab_count == 0)
     return 0;
-  return pinned_tab_count * (Tab::GetPinnedWidth() + kTabHorizontalOffset) +
+  const int overlap = GetLayoutConstant(TABSTRIP_TAB_OVERLAP);
+  return pinned_tab_count * (Tab::GetPinnedWidth() - overlap) +
       kPinnedToNonPinnedGap;
 }
 
@@ -2580,7 +2575,7 @@ void TabStrip::SwapLayoutIfNecessary() {
     tab_size.set_width(Tab::GetTouchWidth());
     touch_layout_.reset(new StackedTabStripLayout(
                             tab_size,
-                            kTabHorizontalOffset,
+                            GetLayoutConstant(TABSTRIP_TAB_OVERLAP),
                             kStackedPadding,
                             kMaxStackedCount,
                             &tabs_));
@@ -2611,10 +2606,9 @@ bool TabStrip::NeedsTouchLayout() const {
   int normal_count = tab_count() - pinned_tab_count;
   if (normal_count <= 1 || normal_count == pinned_tab_count)
     return false;
-  int x = GetStartXForNormalTabs();
-  int available_width = tab_area_width() - x;
-  return (Tab::GetTouchWidth() * normal_count +
-          kTabHorizontalOffset * (normal_count - 1)) > available_width;
+  const int overlap = GetLayoutConstant(TABSTRIP_TAB_OVERLAP);
+  return (Tab::GetTouchWidth() * normal_count - overlap * (normal_count - 1)) >
+      tab_area_width() - GetStartXForNormalTabs();
 }
 
 void TabStrip::SetResetToShrinkOnExit(bool value) {

@@ -104,6 +104,7 @@ class TrayAccessibilityTest
       policy_map.Set(policy::key::kShowAccessibilityOptionsInSystemTrayMenu,
                      policy::POLICY_LEVEL_MANDATORY,
                      policy::POLICY_SCOPE_USER,
+                     policy::POLICY_SOURCE_CLOUD,
                      new base::FundamentalValue(value),
                      NULL);
       provider_.UpdateChromePolicy(policy_map);
@@ -277,8 +278,7 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, LoginStatus) {
   EXPECT_EQ(ash::user::LOGGED_IN_USER, GetLoginStatus());
 }
 
-// http://crbug.com/396342
-IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, DISABLED_ShowTrayIcon) {
+IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowTrayIcon) {
   SetLoginStatus(ash::user::LOGGED_IN_NONE);
 
   // Confirms that the icon is invisible before login.
@@ -347,8 +347,7 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, DISABLED_ShowTrayIcon) {
   EXPECT_FALSE(IsTrayIconVisible());
 }
 
-// http://crbug.com/396342
-IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, DISABLED_ShowMenu) {
+IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowMenu) {
   // Login
   user_manager::UserManager::Get()->UserLoggedIn(
       "owner@invalid.domain", "owner@invalid.domain", true);
@@ -416,9 +415,7 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, DISABLED_ShowMenu) {
   EXPECT_FALSE(CanCreateMenuItem());
 }
 
-// http://crbug.com/396318
-IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest,
-    DISABLED_ShowMenuWithShowMenuOption) {
+IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ShowMenuWithShowMenuOption) {
   // Login
   user_manager::UserManager::Get()->UserLoggedIn(
       "owner@invalid.domain", "owner@invalid.domain", true);
@@ -607,13 +604,9 @@ IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, KeepMenuVisibilityOnLockScreen) {
   EXPECT_TRUE(CanCreateMenuItem());
 }
 
-#if defined(OS_CHROMEOS)
-#define MAYBE_ClickDetailMenu DISABLED_ClickDetailMenu
-#else
-#define MAYBE_ClickDetailMenu ClickDetailMenu
-#endif
+IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, ClickDetailMenu) {
+  SetLoginStatus(ash::user::LOGGED_IN_USER);
 
-IN_PROC_BROWSER_TEST_P(TrayAccessibilityTest, MAYBE_ClickDetailMenu) {
   // Confirms that the check item toggles the spoken feedback.
   EXPECT_FALSE(AccessibilityManager::Get()->IsSpokenFeedbackEnabled());
 

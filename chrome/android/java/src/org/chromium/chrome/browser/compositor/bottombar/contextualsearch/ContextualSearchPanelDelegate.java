@@ -4,8 +4,11 @@
 
 package org.chromium.chrome.browser.compositor.bottombar.contextualsearch;
 
+import org.chromium.base.VisibleForTesting;
+import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel.PanelState;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel.StateChangeReason;
+import org.chromium.content.browser.ContentViewCore;
 
 /**
  * The delegate that that interfaces with the {@link ContextualSearchPanel}.
@@ -79,22 +82,6 @@ public interface ContextualSearchPanelDelegate {
     void updateBasePageSelectionYPx(float y);
 
     /**
-     * Handles the onLoadStarted event in the WebContents.
-     */
-    void onLoadStarted();
-
-    /**
-     * Handles the onLoadStopped event in the WebContents.
-     */
-    void onLoadStopped();
-
-    /**
-     * Handles the onLoadProgressChanged event in the WebContents.
-     * @param progress The loading progress in percentage (from 0 to 100).
-     */
-    void onLoadProgressChanged(int progress);
-
-    /**
      * @return The panel's state.
      */
     PanelState getPanelState();
@@ -103,11 +90,6 @@ public interface ContextualSearchPanelDelegate {
      * Sets that the contextual search involved the promo.
      */
     void setDidSearchInvolvePromo();
-
-    /**
-     * Sets that the Search Content View was seen.
-     */
-    void setWasSearchContentViewSeen();
 
     /**
      * Sets whether the promo is active.
@@ -128,13 +110,90 @@ public interface ContextualSearchPanelDelegate {
     void onSearchResultsLoaded(boolean wasPrefetch);
 
     /**
-     * @return ContextualSearchControl The Android View that renders the BottomBar text.
-     */
-    ContextualSearchControl getContextualSearchControl();
-
-    /**
      * @return {@code true} Whether the close animation should run when the the panel is closed
      *                      due the panel being promoted to a tab.
      */
     boolean shouldAnimatePanelCloseOnPromoteToTab();
+
+    /**
+     * @return The ContentViewCore associated with the panel.
+     * TODO(mdjones): Remove this method from the interface.
+     */
+    ContentViewCore getContentViewCore();
+
+    /**
+     * Remove the last entry from history provided it is in a given time frame.
+     * @param historyUrl The URL to remove.
+     * @param urlTimeMs The time that the URL was visited.
+     */
+    void removeLastHistoryEntry(String historyUrl, long urlTimeMs);
+
+    /**
+     * Shows the search term in the SearchBar. This should be called when the search term is set
+     * without search term resolution.
+     * @param searchTerm The string that represents the search term.
+     */
+    void displaySearchTerm(String searchTerm);
+
+    /**
+     * Shows the search context in the SearchBar.
+     * @param selection The portion of the context that represents the user's selection.
+     * @param end The portion of the context from the selection to its end.
+     */
+    void displaySearchContext(String selection, String end);
+
+    /**
+     * Handles showing the resolved search term in the SearchBar.
+     * @param searchTerm The string that represents the search term.
+     */
+    void onSearchTermResolutionResponse(String searchTerm);
+
+    /**
+     * @param activity The current active ChromeActivity.
+     */
+    void setChromeActivity(ChromeActivity activity);
+
+    /**
+     * Load a URL in the panel ContentViewCore.
+     * @param url The URL to load.
+     */
+    void loadUrlInPanel(String url);
+
+    /**
+     * @return True if the ContentViewCore is being shown.
+     */
+    boolean isContentViewShowing();
+
+    /**
+     * @return True if the panel loaded a URL.
+     */
+    boolean isProcessingPendingNavigation();
+
+    /**
+     * Sets the top control state based on the internals of the panel.
+     */
+    void updateTopControlState();
+
+    /**
+     * Notify the panel that the ContentViewCore was seen.
+     */
+    void setWasSearchContentViewSeen();
+
+    /**
+     * Notifies that the Panel has been touched.
+     */
+    void notifyPanelTouched();
+
+    /**
+     * Destroys the Content.
+     * TODO(pedrosimonetti): Fix for M47. Replace this with a better delayed load approach.
+     */
+    void destroyContent();
+
+    /**
+     * Allows test cases to use a custom OverlayPanelContent in tests.
+     * @param factory The OverlayPanelContentFactory that will create the OverlayPanelContent.
+     */
+    @VisibleForTesting
+    void setOverlayPanelContentFactory(OverlayPanelContentFactory factory);
 }

@@ -15,20 +15,20 @@
 #include "build/build_config.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/dom_distiller/profile_utils.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/chrome_url_request_context_getter.h"
-#include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/permissions/permission_manager.h"
 #include "chrome/browser/permissions/permission_manager_factory.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "chrome/browser/prefs/pref_service_syncable.h"
+#include "chrome/browser/prefs/pref_service_syncable_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ssl/chrome_ssl_host_state_delegate.h"
 #include "chrome/browser/ssl/chrome_ssl_host_state_delegate_factory.h"
@@ -38,9 +38,10 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
+#include "components/proxy_config/pref_proxy_config_tracker.h"
+#include "components/syncable_prefs/pref_service_syncable.h"
 #include "components/ui/zoom/zoom_event_manager.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/browser_thread.h"
@@ -111,7 +112,7 @@ void NotifyOTRProfileDestroyedOnIOThread(void* original_profile,
 
 OffTheRecordProfileImpl::OffTheRecordProfileImpl(Profile* real_profile)
     : profile_(real_profile),
-      prefs_(PrefServiceSyncable::IncognitoFromProfile(real_profile)),
+      prefs_(PrefServiceSyncableIncognitoFromProfile(real_profile)),
       start_time_(Time::Now()) {
   // Register on BrowserContext.
   user_prefs::UserPrefs::Set(this, prefs_);
@@ -184,9 +185,6 @@ OffTheRecordProfileImpl::~OffTheRecordProfileImpl() {
       base::Bind(&NotifyOTRProfileDestroyedOnIOThread, profile_, this));
 #endif
 
-  if (host_content_settings_map_.get())
-    host_content_settings_map_->ShutdownOnUIThread();
-
   if (pref_proxy_config_tracker_)
     pref_proxy_config_tracker_->DetachFromPrefService();
 
@@ -244,7 +242,7 @@ base::FilePath OffTheRecordProfileImpl::GetPath() const {
 scoped_ptr<content::ZoomLevelDelegate>
 OffTheRecordProfileImpl::CreateZoomLevelDelegate(
     const base::FilePath& partition_path) {
-  return make_scoped_ptr(new chrome::ChromeZoomLevelOTRDelegate(
+  return make_scoped_ptr(new ChromeZoomLevelOTRDelegate(
       ui_zoom::ZoomEventManager::GetForBrowserContext(this)->GetWeakPtr()));
 }
 
@@ -374,34 +372,6 @@ content::ResourceContext* OffTheRecordProfileImpl::GetResourceContext() {
 
 net::SSLConfigService* OffTheRecordProfileImpl::GetSSLConfigService() {
   return profile_->GetSSLConfigService();
-}
-
-HostContentSettingsMap* OffTheRecordProfileImpl::GetHostContentSettingsMap() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  // Retrieve the host content settings map of the parent profile in order to
-  // ensure the preferences have been migrated.
-  profile_->GetHostContentSettingsMap();
-  if (!host_content_settings_map_.get()) {
-    host_content_settings_map_ = new HostContentSettingsMap(GetPrefs(), true);
-#if defined(ENABLE_EXTENSIONS)
-    ExtensionService* extension_service =
-        extensions::ExtensionSystem::Get(this)->extension_service();
-    if (extension_service) {
-      extension_service->RegisterContentSettings(
-          host_content_settings_map_.get());
-    }
-#endif
-#if defined(ENABLE_SUPERVISED_USERS)
-    SupervisedUserSettingsService* supervised_service =
-        SupervisedUserSettingsServiceFactory::GetForProfile(this);
-    scoped_ptr<content_settings::SupervisedProvider> supervised_provider(
-        new content_settings::SupervisedProvider(supervised_service));
-    host_content_settings_map_->RegisterProvider(
-        HostContentSettingsMap::SUPERVISED_PROVIDER,
-        supervised_provider.Pass());
-#endif
-  }
-  return host_content_settings_map_.get();
 }
 
 content::BrowserPluginGuestManager* OffTheRecordProfileImpl::GetGuestManager() {
@@ -578,6 +548,10 @@ void OffTheRecordProfileImpl::UpdateDefaultZoomLevel() {
   double default_zoom_level =
       profile_->GetZoomLevelPrefs()->GetDefaultZoomLevelPref();
   host_zoom_map->SetDefaultZoomLevel(default_zoom_level);
+  // HostZoomMap does not trigger zoom notification events when the default
+  // zoom level is set, so we need to do it here.
+  ui_zoom::ZoomEventManager::GetForBrowserContext(this)
+      ->OnDefaultZoomLevelChanged();
 }
 
 PrefProxyConfigTracker* OffTheRecordProfileImpl::CreateProxyConfigTracker() {

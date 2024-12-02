@@ -8,6 +8,7 @@
                nodeprecated="yes"
                linkoffline="https://developer.android.com/reference ."
                bootclasspath="../../../../third_party/android_tools/sdk/platforms/android-22/android.jar"
+               use="true"
                >
         <fileset dir="${source.dir}" defaultexcludes="yes">
           <include name="**/*.java"/>
@@ -15,6 +16,7 @@
           <exclude name="**/Chromium*.java"/>
           <exclude name="**/ChunkedWritableByteChannel*.java"/>
           <exclude name="**/HttpUrl*.java"/>
+          <exclude name="**/NetworkQuality*.java"/>
         </fileset>
       </javadoc>
   </target>

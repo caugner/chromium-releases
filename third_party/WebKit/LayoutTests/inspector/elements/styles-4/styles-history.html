@@ -64,7 +64,7 @@ function test()
 
                 function step1(style)
                 {
-                    var property = style.getLiveProperty("margin");
+                    var property = getLiveProperty(style, "margin");
                     property.setText("margin:25px;", false, true).then(dumpHistory(next));
                 }
             },
@@ -75,7 +75,7 @@ function test()
 
                 function step1(style)
                 {
-                    var property = style.getLiveProperty("margin");
+                    var property = getLiveProperty(style, "margin");
                     InspectorTest.addSniffer(WebInspector.UISourceCode.prototype, "addRevision", dumpHistory(next));
                     property.setText("margin:30px;", true, true);
                 }
@@ -89,10 +89,10 @@ function test()
 
         function onNodeSelected(node)
         {
-            InspectorTest.CSSAgent.getMatchedStylesForNode(node.id, true, true, onMatchedStylesForNode);
+            InspectorTest.CSSAgent.getMatchedStylesForNode(node.id, onMatchedStylesForNode);
         }
 
-        function onMatchedStylesForNode(error, matchedStyles)
+        function onMatchedStylesForNode(error, inlineStyle, attributeStyle, matchedStyles)
         {
             if (error) {
                 InspectorTest.addResult("error: " + error);
@@ -103,7 +103,7 @@ function test()
                 var rule = matchedStyles[i].rule;
                 if (rule.origin !== "regular")
                     continue;
-                callback(WebInspector.CSSStyleDeclaration.parsePayload(InspectorTest.cssModel, rule.style));
+                callback(new WebInspector.CSSStyleDeclaration(InspectorTest.cssModel, null, rule.style));
                 return;
             }
             InspectorTest.addResult("error: did not find any regular rule");
@@ -123,6 +123,17 @@ function test()
             next();
         }
         return result;
+    }
+
+    function getLiveProperty(style, name)
+    {
+        for (var property of style.allProperties) {
+            if (!property.activeInStyle())
+                continue;
+            if (property.name === name)
+                return property;
+        }
+        return null;
     }
 }
 

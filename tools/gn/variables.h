@@ -83,6 +83,10 @@ extern const char kArgs[];
 extern const char kArgs_HelpShort[];
 extern const char kArgs_Help[];
 
+extern const char kAsmflags[];
+extern const char kAsmflags_HelpShort[];
+extern const char* kAsmflags_Help;
+
 extern const char kCflags[];
 extern const char kCflags_HelpShort[];
 extern const char* kCflags_Help;
@@ -114,6 +118,10 @@ extern const char kCompleteStaticLib_Help[];
 extern const char kConfigs[];
 extern const char kConfigs_HelpShort[];
 extern const char kConfigs_Help[];
+
+extern const char kConsole[];
+extern const char kConsole_HelpShort[];
+extern const char kConsole_Help[];
 
 extern const char kData[];
 extern const char kData_HelpShort[];

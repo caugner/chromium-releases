@@ -555,8 +555,8 @@ system call NtUserCallOneParam.RELEASEDC
 USER32.dll!ReleaseDC
 *!std::_Tree<>::_Erase
 *!std::_Tree<>::erase
-*!DefaultSingletonTraits<>::Delete
-*!Singleton<>::OnExit
+*!base::DefaultSingletonTraits<>::Delete
+*!base::Singleton<>::OnExit
 *!base::AtExitManager::ProcessCallbacksNow
 *!base::AtExitManager::~AtExitManager
 *!base::TestSuite::~TestSuite
@@ -743,3 +743,9 @@ name=bug_522049
 *!base::MessagePumpDefault::Run
 *!base::MessageLoop::RunHandler
 *!base::MessageLoop::Run
+
+UNADDRESSABLE ACCESS
+name=bug_536803
+*!blink::SecurityOrigin::addSuborigin
+*!blink::SecurityOriginTest_Suborigins_Test::TestBody
+*!testing::internal::HandleExceptionsInMethodIfSupported<>

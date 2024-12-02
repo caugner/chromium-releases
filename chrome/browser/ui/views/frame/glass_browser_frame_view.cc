@@ -12,6 +12,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/layout_constants.h"
 #include "chrome/browser/ui/views/profiles/avatar_menu_button.h"
 #include "chrome/browser/ui/views/profiles/new_avatar_button.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
@@ -21,6 +22,7 @@
 #include "components/signin/core/common/profile_management_switches.h"
 #include "grit/theme_resources.h"
 #include "skia/ext/image_operations.h"
+#include "ui/base/resource/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle_win.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas.h"
@@ -59,9 +61,6 @@ const int kAvatarRightSpacing = -2;
 const int kNewAvatarButtonOffset = 5;
 // The content left/right images have a shadow built into them.
 const int kContentEdgeShadowThickness = 2;
-// The top 3 px of the tabstrip is shadow; in maximized mode we push this off
-// the top of the screen so the tabs appear flush against the screen edge.
-const int kTabstripTopShadowThickness = 3;
 // In restored mode, the New Tab button isn't at the same height as the caption
 // buttons, but the space will look cluttered if it actually slides under them,
 // so we stop it when the gap between the two is down to 5 px.
@@ -115,7 +114,6 @@ gfx::Rect GlassBrowserFrameView::GetBoundsForTabStrip(
   // The new avatar button is optionally displayed to the left of the
   // minimize button.
   if (new_avatar_button()) {
-    DCHECK(switches::IsNewAvatarMenu());
     minimize_button_offset -=
         new_avatar_button()->width() + kNewAvatarButtonOffset;
 
@@ -138,8 +136,7 @@ gfx::Rect GlassBrowserFrameView::GetBoundsForTabStrip(
   if (base::i18n::IsRTL()) {
     if (!browser_view()->ShouldShowAvatar() && frame()->IsMaximized()) {
       tabstrip_x += avatar_bounds_.x();
-    } else if (browser_view()->IsRegularOrGuestSession() &&
-               switches::IsNewAvatarMenu()) {
+    } else if (browser_view()->IsRegularOrGuestSession()) {
       tabstrip_x = width() - minimize_button_offset;
     }
 
@@ -275,7 +272,7 @@ void GlassBrowserFrameView::OnPaint(gfx::Canvas* canvas) {
 }
 
 void GlassBrowserFrameView::Layout() {
-  if (browser_view()->IsRegularOrGuestSession() && switches::IsNewAvatarMenu())
+  if (browser_view()->IsRegularOrGuestSession())
     LayoutNewStyleAvatar();
   else
     LayoutAvatar();
@@ -346,7 +343,8 @@ int GlassBrowserFrameView::NonClientTopBorderHeight() const {
   // at the top (see AeroGlassFrame::OnGetMinMaxInfo()).
   return gfx::win::GetSystemMetricsInDIP(SM_CYSIZEFRAME) +
       (!frame()->ShouldLeaveOffsetNearTopBorder() ?
-      -kTabstripTopShadowThickness : kNonClientRestoredExtraThickness);
+          -GetLayoutConstant(TABSTRIP_TOP_SHADOW_HEIGHT) :
+          kNonClientRestoredExtraThickness);
 }
 
 void GlassBrowserFrameView::PaintToolbarBackground(gfx::Canvas* canvas) {
@@ -418,13 +416,22 @@ void GlassBrowserFrameView::PaintToolbarBackground(gfx::Canvas* canvas) {
   }
 
   // Draw the content/toolbar separator.
-  canvas->FillRect(
-      gfx::Rect(x + kClientEdgeThickness,
-                toolbar_bounds.bottom() - kClientEdgeThickness,
-                w - (2 * kClientEdgeThickness),
-                kClientEdgeThickness),
-      ThemeProperties::GetDefaultColor(
-          ThemeProperties::COLOR_TOOLBAR_SEPARATOR));
+  if (ui::MaterialDesignController::IsModeMaterial()) {
+    toolbar_bounds.Inset(kClientEdgeThickness, 0);
+    BrowserView::Paint1pxHorizontalLine(
+        canvas,
+        ThemeProperties::GetDefaultColor(
+            ThemeProperties::COLOR_TOOLBAR_SEPARATOR),
+        toolbar_bounds);
+  } else {
+    canvas->FillRect(
+        gfx::Rect(x + kClientEdgeThickness,
+                  toolbar_bounds.bottom() - kClientEdgeThickness,
+                  w - (2 * kClientEdgeThickness),
+                  kClientEdgeThickness),
+        ThemeProperties::GetDefaultColor(
+            ThemeProperties::COLOR_TOOLBAR_SEPARATOR));
+  }
 }
 
 void GlassBrowserFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
@@ -478,7 +485,7 @@ void GlassBrowserFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
 }
 
 void GlassBrowserFrameView::LayoutNewStyleAvatar() {
-  DCHECK(switches::IsNewAvatarMenu());
+  DCHECK(browser_view()->IsRegularOrGuestSession());
   if (!new_avatar_button())
     return;
 
@@ -493,8 +500,9 @@ void GlassBrowserFrameView::LayoutNewStyleAvatar() {
   // We need to offset the button correctly in maximized mode, so that the
   // custom glass style aligns with the native control glass style. The
   // glass shadow is off by 1px, which was determined by visual inspection.
-  int button_y = !frame()->IsMaximized() ? 1 :
-      NonClientTopBorderHeight() + kTabstripTopShadowThickness - 1;
+  const int shadow_height = GetLayoutConstant(TABSTRIP_TOP_SHADOW_HEIGHT);
+  int button_y = frame()->IsMaximized() ?
+      (NonClientTopBorderHeight() + shadow_height - 1) : 1;
 
   new_avatar_button()->SetBounds(
       button_x,
@@ -504,9 +512,6 @@ void GlassBrowserFrameView::LayoutNewStyleAvatar() {
 }
 
 void GlassBrowserFrameView::LayoutAvatar() {
-  // Even though the avatar is used for both incognito and profiles we always
-  // use the incognito icon to layout the avatar button. The profile icon
-  // can be customized so we can't depend on its size to perform layout.
   gfx::ImageSkia incognito_icon = browser_view()->GetOTRAvatarIcon();
 
   int avatar_x = NonClientBorderThickness() + kAvatarLeftSpacing;
@@ -520,9 +525,9 @@ void GlassBrowserFrameView::LayoutAvatar() {
   int avatar_bottom = GetTopInset() +
       browser_view()->GetTabStripHeight() - kAvatarBottomSpacing;
   int avatar_restored_y = avatar_bottom - incognito_icon.height();
+  const int shadow_height = GetLayoutConstant(TABSTRIP_TOP_SHADOW_HEIGHT);
   int avatar_y = frame()->IsMaximized() ?
-      (NonClientTopBorderHeight() + kTabstripTopShadowThickness) :
-      avatar_restored_y;
+      (NonClientTopBorderHeight() + shadow_height) : avatar_restored_y;
   avatar_bounds_.SetRect(avatar_x, avatar_y, incognito_icon.width(),
       browser_view()->ShouldShowAvatar() ? (avatar_bottom - avatar_y) : 0);
   if (avatar_button())

@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UPGRADE_DETECTOR_H_
 #define CHROME_BROWSER_UPGRADE_DETECTOR_H_
 
+#include "base/gtest_prod_util.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "ui/base/idle/idle.h"
@@ -163,7 +164,7 @@ class UpgradeDetector {
   // A timer to check to see if we've been idle for long enough to show the
   // critical warning. Should only be set if |upgrade_available_| is
   // UPGRADE_AVAILABLE_CRITICAL.
-  base::RepeatingTimer<UpgradeDetector> idle_check_timer_;
+  base::RepeatingTimer idle_check_timer_;
 
   // The stage at which the annoyance level for upgrade notifications is at.
   UpgradeNotificationAnnoyanceLevel upgrade_notification_stage_;

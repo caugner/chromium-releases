@@ -342,6 +342,20 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
       const QueryFilteredURLsCallback& callback,
       base::CancelableTaskTracker* tracker);
 
+  // Statistics ----------------------------------------------------------------
+
+  // Gets the number of URLs as seen in chrome://history within the time range
+  // [|begin_time|, |end_time|). Each URL is counted only once per day. For
+  // determination of the date, timestamps are converted to dates using local
+  // time.
+  typedef base::Callback<void(HistoryCountResult)> GetHistoryCountCallback;
+
+  base::CancelableTaskTracker::TaskId GetHistoryCount(
+      const base::Time& begin_time,
+      const base::Time& end_time,
+      const GetHistoryCountCallback& callback,
+      base::CancelableTaskTracker* tracker);
+
   // Database management operations --------------------------------------------
 
   // Delete all the information related to a single url.

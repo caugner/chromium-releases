@@ -18,7 +18,6 @@ from telemetry.internal.browser import browser_info as browser_info_module
 from telemetry.internal.platform.profiler import profiler_finder
 from telemetry.internal.util import exception_formatter
 from telemetry.internal.util import file_handle
-from telemetry.page import action_runner as action_runner_module
 from telemetry.page import page_test
 from telemetry import story
 from telemetry.util import wpr_modes
@@ -47,6 +46,11 @@ class SharedPageState(story.SharedState):
   def __init__(self, test, finder_options, story_set):
     super(SharedPageState, self).__init__(test, finder_options, story_set)
     if isinstance(test, timeline_based_measurement.TimelineBasedMeasurement):
+      assert not finder_options.profiler, ('This is a Timeline Based '
+          'Measurement benchmark. You cannot run it with the --profiler flag. '
+          'If you need trace data, tracing is always enabled in Timeline Based '
+          'Measurement benchmarks and you can get the trace data by using '
+          '--output-format=json.')
       # This is to avoid the cyclic-import caused by timeline_based_page_test.
       from telemetry.web_perf import timeline_based_page_test
       self._test = timeline_based_page_test.TimelineBasedPageTest(test)
@@ -162,6 +166,8 @@ class SharedPageState(story.SharedState):
     self._possible_browser.SetCredentialsPath(page.credentials_path)
 
     self._test.WillStartBrowser(self.platform)
+    if page.startup_url:
+      self._finder_options.browser_options.startup_url = page.startup_url
     self._browser = self._possible_browser.Create(self._finder_options)
     self._test.DidStartBrowser(self.browser)
 
@@ -260,7 +266,7 @@ class SharedPageState(story.SharedState):
   def _PreparePage(self):
     self._current_tab = self._test.TabForPage(self._current_page, self.browser)
     if self._current_page.is_file:
-      self.browser.SetHTTPServerDirectories(
+      self.platform.SetHTTPServerDirectories(
           self._current_page.page_set.serving_dirs |
           set([self._current_page.serving_dir]))
 
@@ -274,22 +280,22 @@ class SharedPageState(story.SharedState):
     if self._test.clear_cache_before_each_run:
       self._current_tab.ClearCache(force=True)
 
-  def _ImplicitPageNavigation(self):
-    """Executes the implicit navigation that occurs for every page iteration.
+  @property
+  def current_page(self):
+    return self._current_page
 
-    This function will be called once per page before any actions are executed.
-    """
-    self._test.WillNavigateToPage(self._current_page, self._current_tab)
-    self._test.RunNavigateSteps(self._current_page, self._current_tab)
-    self._test.DidNavigateToPage(self._current_page, self._current_tab)
+  @property
+  def current_tab(self):
+    return self._current_tab
+
+  @property
+  def page_test(self):
+    return self._test
 
   def RunStory(self, results):
     try:
       self._PreparePage()
-      self._ImplicitPageNavigation()
-      action_runner = action_runner_module.ActionRunner(
-          self._current_tab, skip_waits=self._current_page.skip_waits)
-      self._current_page.RunPageInteractions(action_runner)
+      self._current_page.Run(self)
       self._test.ValidateAndMeasurePage(
           self._current_page, self._current_tab, results)
     except exceptions.Error:
@@ -306,6 +312,7 @@ class SharedPageState(story.SharedState):
       self._migrated_profile = None
 
     self._StopBrowser()
+    self.platform.StopAllLocalServers()
 
   def _StopBrowser(self):
     if self._browser:

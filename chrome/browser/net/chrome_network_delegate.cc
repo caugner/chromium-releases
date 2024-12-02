@@ -121,7 +121,7 @@ void RecordPrecacheStatsOnUIThread(const GURL& url,
   precache::PrecacheManager* precache_manager =
       precache::PrecacheManagerFactory::GetForBrowserContext(profile);
   // |precache_manager| could be NULL if the profile is off the record.
-  if (!precache_manager || !precache_manager->WouldRun())
+  if (!precache_manager || !precache_manager->IsPrecachingAllowed())
     return;
 
   precache_manager->RecordStatsForFetch(url, referrer, latency, fetch_time,
@@ -468,6 +468,10 @@ int ChromeNetworkDelegate::OnHeadersReceived(
 
 void ChromeNetworkDelegate::OnBeforeRedirect(net::URLRequest* request,
                                              const GURL& new_location) {
+// Recording data use of request on redirects.
+#if !defined(OS_IOS)
+  data_use_measurement_.ReportDataUseUMA(request);
+#endif
   if (domain_reliability_monitor_)
     domain_reliability_monitor_->OnBeforeRedirect(request);
   extensions_delegate_->OnBeforeRedirect(request, new_location);
@@ -478,19 +482,24 @@ void ChromeNetworkDelegate::OnResponseStarted(net::URLRequest* request) {
   extensions_delegate_->OnResponseStarted(request);
 }
 
-void ChromeNetworkDelegate::OnRawBytesRead(const net::URLRequest& request,
-                                           int bytes_read) {
+void ChromeNetworkDelegate::OnNetworkBytesReceived(
+    const net::URLRequest& request,
+    int64_t bytes_received) {
 #if defined(ENABLE_TASK_MANAGER)
-  // This is not completely accurate, but as a first approximation ignore
-  // requests that are served from the cache. See bug 330931 for more info.
-  if (!request.was_cached()) {
-    task_management::TaskManagerInterface::OnRawBytesRead(request, bytes_read);
-  }
+  // Note: Currently, OnNetworkBytesReceived is only implemented for HTTP jobs,
+  // not FTP or other types, so those kinds of bytes will not be reported here.
+  task_management::TaskManagerInterface::OnRawBytesRead(request,
+                                                        bytes_received);
 #endif  // defined(ENABLE_TASK_MANAGER)
 }
 
 void ChromeNetworkDelegate::OnCompleted(net::URLRequest* request,
                                         bool started) {
+#if !defined(OS_IOS)
+  // TODO(amohammadkhan): Verify that there is no double recording in data use
+  // of redirected requests.
+  data_use_measurement_.ReportDataUseUMA(request);
+#endif
   RecordNetworkErrorHistograms(request);
   if (started) {
     // Only call in for requests that were started, to obey the precondition
@@ -531,6 +540,10 @@ void ChromeNetworkDelegate::OnCompleted(net::URLRequest* request,
 
 void ChromeNetworkDelegate::OnURLRequestDestroyed(net::URLRequest* request) {
   extensions_delegate_->OnURLRequestDestroyed(request);
+}
+
+void ChromeNetworkDelegate::OnURLRequestJobOrphaned(net::URLRequest* request) {
+  extensions_delegate_->OnURLRequestJobOrphaned(request);
 }
 
 void ChromeNetworkDelegate::OnPACScriptError(int line_number,

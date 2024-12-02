@@ -4,18 +4,22 @@
 
 package org.chromium.chrome.browser.enhancedbookmarks;
 
+import android.content.Context;
+
 import org.chromium.base.ObserverList;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.BookmarksBridge;
-import org.chromium.chrome.browser.offline_pages.OfflinePageBridge;
-import org.chromium.chrome.browser.offline_pages.OfflinePageBridge.OfflinePageModelObserver;
-import org.chromium.chrome.browser.offline_pages.OfflinePageBridge.SavePageCallback;
-import org.chromium.chrome.browser.offline_pages.OfflinePageItem;
+import org.chromium.chrome.browser.ChromeBrowserProviderClient;
+import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
+import org.chromium.chrome.browser.offlinepages.OfflinePageBridge.OfflinePageModelObserver;
+import org.chromium.chrome.browser.offlinepages.OfflinePageBridge.SavePageCallback;
+import org.chromium.chrome.browser.offlinepages.OfflinePageItem;
+import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.bookmarks.BookmarkId;
 import org.chromium.components.bookmarks.BookmarkType;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
-import org.chromium.components.offline_pages.SavePageResult;
+import org.chromium.components.offlinepages.SavePageResult;
 import org.chromium.content_public.browser.WebContents;
 
 import java.util.ArrayList;
@@ -30,14 +34,16 @@ public class EnhancedBookmarksModel extends BookmarksBridge {
     private static final int FAVICON_MAX_CACHE_SIZE = 10 * 1024 * 1024; // 10MB
 
     /**
-     * Callback for use with addBookmark.
+     * Callback for use with addBookmarkAsync / saveOfflinePage.
      */
     public interface AddBookmarkCallback {
         /**
          * Called when the bookmark has been added.
          * @param bookmarkId ID of the bookmark that has been added.
+         * @param whether an offline copy of the bookmarked page was successfully saved. This could
+         *        be false due to, e.g. save not requested or storage full.
          */
-        void onBookmarkAdded(BookmarkId bookmarkId);
+        void onBookmarkAdded(BookmarkId bookmarkId, boolean pageSavedOffline);
     }
 
     /**
@@ -71,6 +77,9 @@ public class EnhancedBookmarksModel extends BookmarksBridge {
     public EnhancedBookmarksModel(Profile profile) {
         super(profile);
 
+        // Note: we check if mOfflinePageBridge is null after this to determine if offline pages
+        // feature is enabled. When it is enabled by default, we should check all the places
+        // that checks for nullability of mOfflinePageBridge.
         if (OfflinePageBridge.isEnabled()) {
             mOfflinePageBridge = new OfflinePageBridge(profile);
             if (mOfflinePageBridge.isOfflinePageModelLoaded()) {
@@ -185,20 +194,31 @@ public class EnhancedBookmarksModel extends BookmarksBridge {
 
         // If there is no need to save offline page, return now.
         if (mOfflinePageBridge == null) {
-            callback.onBookmarkAdded(enhancedId);
+            callback.onBookmarkAdded(enhancedId, false);
             return;
         }
 
-        mOfflinePageBridge.savePage(webContents, enhancedId,
-                new SavePageCallback() {
-                    @Override
-                    public void onSavePageDone(int savePageResult, String url) {
-                        // TODO(jianli): Error handling.
-                        if (savePageResult == SavePageResult.SUCCESS) {
-                            callback.onBookmarkAdded(enhancedId);
-                        }
-                    }
-                });
+        saveOfflinePage(enhancedId, webContents, callback);
+    }
+
+    /**
+    * Save an offline copy for the bookmarked page asynchronously.
+    *
+    * @param bookmarkId The ID of the page to save an offline copy.
+    * @param webContents A {@link WebContents} object.
+    * @param callback The callback to be invoked when the offline copy is saved.
+    */
+    public void saveOfflinePage(final BookmarkId bookmarkId, WebContents webContents,
+            final AddBookmarkCallback callback) {
+        assert bookmarkId.getId() != ChromeBrowserProviderClient.INVALID_BOOKMARK_ID;
+        if (mOfflinePageBridge != null) {
+            mOfflinePageBridge.savePage(webContents, bookmarkId, new SavePageCallback() {
+                @Override
+                public void onSavePageDone(int savePageResult, String url) {
+                    callback.onBookmarkAdded(bookmarkId, savePageResult == SavePageResult.SUCCESS);
+                }
+            });
+        }
     }
 
     /**
@@ -209,19 +229,27 @@ public class EnhancedBookmarksModel extends BookmarksBridge {
     }
 
     /**
-     * Returns the url used to launch a bookmark.
+     * Retrieves the url to launch a bookmark or saved page. If latter, also marks it as being
+     * accessed.
      *
+     * @parma context Context for checking connection.
      * @param bookmarkId ID of the bookmark to launch.
+     * @return The launch URL.
      */
-    public String getBookmarkLaunchUrl(BookmarkId bookmarkId) {
+    public String getLaunchUrlAndMarkAccessed(Context context, BookmarkId bookmarkId) {
         String url = getBookmarkById(bookmarkId).getUrl();
-        if (mOfflinePageBridge == null) {
-            return url;
-        }
+        // When there is a network connection, we visit original URL online.
+        if (mOfflinePageBridge == null || OfflinePageUtils.isConnected(context)) return url;
 
-        // Return the offline url for the offline page.
+        // Return the offline url for the offline page if one exists.
         OfflinePageItem page = mOfflinePageBridge.getPageByBookmarkId(bookmarkId);
-        return page == null ? url : page.getOfflineUrl();
+        if (page == null) return url;
+
+        // Mark that the offline page has been accessed, that will cause last access time and access
+        // count being updated.
+        mOfflinePageBridge.markPageAccessed(bookmarkId);
+
+        return page.getOfflineUrl();
     }
 
     /**

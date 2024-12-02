@@ -16,13 +16,10 @@
               "children": [
                 {
                   "bounds": [85, 200],
+                  "shouldFlattenTransform": false,
                   "children": [
                     {
-                      "children": [
-                        {
-                          "bounds": [10, 200]
-                        }
-                      ]
+                      "bounds": [10, 200]
                     }
                   ]
                 }
@@ -49,13 +46,10 @@
               "children": [
                 {
                   "bounds": [200, 85],
+                  "shouldFlattenTransform": false,
                   "children": [
                     {
-                      "children": [
-                        {
-                          "bounds": [200, 10]
-                        }
-                      ]
+                      "bounds": [200, 10]
                     }
                   ]
                 }
@@ -82,13 +76,10 @@
               "children": [
                 {
                   "bounds": [200, 200],
+                  "shouldFlattenTransform": false,
                   "children": [
                     {
-                      "children": [
-                        {
-                          "bounds": [200, 200]
-                        }
-                      ]
+                      "bounds": [200, 200]
                     }
                   ]
                 }

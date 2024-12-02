@@ -27,7 +27,6 @@
 #include "chrome/browser/supervised_user/legacy/permission_request_creator_sync.h"
 #include "chrome/browser/supervised_user/legacy/supervised_user_pref_mapping_service.h"
 #include "chrome/browser/supervised_user/legacy/supervised_user_pref_mapping_service_factory.h"
-#include "chrome/browser/supervised_user/legacy/supervised_user_registration_utility.h"
 #include "chrome/browser/supervised_user/legacy/supervised_user_shared_settings_service_factory.h"
 #include "chrome/browser/supervised_user/supervised_user_constants.h"
 #include "chrome/browser/supervised_user/supervised_user_service_observer.h"
@@ -50,6 +49,10 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/user_metrics.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#include "chrome/browser/supervised_user/legacy/supervised_user_registration_utility.h"
+#endif
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
@@ -422,7 +425,7 @@ bool SupervisedUserService::IncludesSyncSessionsType() const {
 void SupervisedUserService::OnStateChanged() {
   ProfileSyncService* service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
-  if (waiting_for_sync_initialization_ && service->backend_initialized() &&
+  if (waiting_for_sync_initialization_ && service->IsBackendInitialized() &&
       service->backend_mode() == ProfileSyncService::SYNC) {
     waiting_for_sync_initialization_ = false;
     service->RemoveObserver(this);
@@ -454,7 +457,7 @@ void SupervisedUserService::FinishSetupSyncWhenReady() {
   // Continue in FinishSetupSync() once the Sync backend has been initialized.
   ProfileSyncService* service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
-  if (service->backend_initialized() &&
+  if (service->IsBackendInitialized() &&
       service->backend_mode() == ProfileSyncService::SYNC) {
     FinishSetupSync();
   } else {
@@ -466,7 +469,7 @@ void SupervisedUserService::FinishSetupSyncWhenReady() {
 void SupervisedUserService::FinishSetupSync() {
   ProfileSyncService* service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
-  DCHECK(service->backend_initialized());
+  DCHECK(service->IsBackendInitialized());
   DCHECK(service->backend_mode() == ProfileSyncService::SYNC);
 
   // Sync nothing (except types which are set via GetPreferredDataTypes).
@@ -635,6 +638,7 @@ void SupervisedUserService::OnBlacklistFileChecked(const base::FilePath& path,
   blacklist_downloader_.reset(new FileDownloader(
       url,
       path,
+      false,
       profile_->GetRequestContext(),
       base::Bind(&SupervisedUserService::OnBlacklistDownloadDone,
                  base::Unretained(this), path)));
@@ -845,6 +849,7 @@ void SupervisedUserService::SetActive(bool active) {
   }
 }
 
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
 void SupervisedUserService::RegisterAndInitSync(
     SupervisedUserRegistrationUtility* registration_utility,
     Profile* custodian_profile,
@@ -874,6 +879,7 @@ void SupervisedUserService::RegisterAndInitSync(
       base::Bind(&SupervisedUserService::OnCustodianProfileDownloaded,
                  weak_ptr_factory_.GetWeakPtr()));
 }
+#endif
 
 void SupervisedUserService::OnCustodianProfileDownloaded(
     const base::string16& full_name) {
@@ -890,8 +896,9 @@ void SupervisedUserService::OnSupervisedUserRegistered(
     InitSync(token);
     SigninManagerBase* signin =
         SigninManagerFactory::GetForProfile(custodian_profile);
-    profile_->GetPrefs()->SetString(prefs::kSupervisedUserCustodianEmail,
-                                    signin->GetAuthenticatedUsername());
+    profile_->GetPrefs()->SetString(
+        prefs::kSupervisedUserCustodianEmail,
+        signin->GetAuthenticatedAccountInfo().email);
 
     // The supervised user profile is now ready for use.
     ProfileManager* profile_manager = g_browser_process->profile_manager();

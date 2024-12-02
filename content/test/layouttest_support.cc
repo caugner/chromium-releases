@@ -6,7 +6,6 @@
 
 #include "base/callback.h"
 #include "base/lazy_instance.h"
-#include "cc/blink/web_layer_impl.h"
 #include "components/test_runner/test_common.h"
 #include "components/test_runner/web_frame_test_proxy.h"
 #include "components/test_runner/web_test_proxy.h"
@@ -24,6 +23,7 @@
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_blink_platform_impl.h"
+#include "content/shell/common/shell_switches.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "third_party/WebKit/public/platform/WebBatteryStatus.h"
 #include "third_party/WebKit/public/platform/WebGamepads.h"
@@ -34,6 +34,11 @@
 
 #if defined(OS_MACOSX)
 #include "content/browser/frame_host/popup_menu_helper_mac.h"
+#elif defined(OS_WIN)
+#include "content/common/font_warmup_win.h"
+#include "third_party/WebKit/public/web/win/WebFontRendering.h"
+#include "third_party/skia/include/ports/SkFontMgr.h"
+#include "ui/gfx/win/direct_write.h"
 #endif
 
 using blink::WebBatteryStatus;
@@ -82,6 +87,22 @@ RenderFrameImpl* CreateWebFrameTestProxy(
 
   return render_frame_proxy;
 }
+
+#if defined(OS_WIN)
+// DirectWrite only has access to %WINDIR%\Fonts by default. For developer
+// side-loading, support kRegisterFontFiles to allow access to additional fonts.
+void RegisterSideloadedTypefaces(SkFontMgr* fontmgr) {
+  RenderThreadImpl::current()->EnsureWebKitInitialized();
+  std::vector<std::string> files = switches::GetSideloadFontFiles();
+  for (std::vector<std::string>::const_iterator i(files.begin());
+       i != files.end();
+       ++i) {
+    SkTypeface* typeface = fontmgr->createFromFile(i->c_str());
+    DoPreSandboxWarmupForTypeface(typeface);
+    blink::WebFontRendering::addSideloadedFontForTesting(typeface);
+  }
+}
+#endif  // OS_WIN
 
 }  // namespace
 
@@ -146,6 +167,11 @@ void MockBatteryStatusChanged(const WebBatteryStatus& status) {
 
 void EnableRendererLayoutTestMode() {
   RenderThreadImpl::current()->set_layout_test_mode(true);
+
+#if defined(OS_WIN)
+  if (gfx::win::ShouldUseDirectWrite())
+    RegisterSideloadedTypefaces(GetPreSandboxWarmupFontMgr());
+#endif
 }
 
 void EnableBrowserLayoutTestMode() {
@@ -429,16 +455,6 @@ std::string DumpBackForwardList(std::vector<PageState>& page_state,
   }
   result.append("===============================================\n");
   return result;
-}
-
-scoped_refptr<cc::TextureLayer> CreateTextureLayerForMailbox(
-    cc::TextureLayerClient* client) {
-  return cc::TextureLayer::CreateForMailbox(
-      cc_blink::WebLayerImpl::LayerSettings(), client);
-}
-
-blink::WebLayer* InstantiateWebLayer(scoped_refptr<cc::TextureLayer> layer) {
-  return new cc_blink::WebLayerImpl(layer);
 }
 
 }  // namespace content

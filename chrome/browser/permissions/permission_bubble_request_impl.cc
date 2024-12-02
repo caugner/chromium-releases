@@ -7,11 +7,11 @@
 #include "chrome/browser/permissions/permission_context_base.h"
 #include "chrome/browser/permissions/permission_context_uma_util.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/url_formatter/url_formatter.h"
+#include "components/url_formatter/elide_url.h"
 #include "grit/theme_resources.h"
 #include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/vector_icons_public2.h"
+#include "ui/gfx/vector_icons_public.h"
 
 PermissionBubbleRequestImpl::PermissionBubbleRequestImpl(
     const GURL& request_origin,
@@ -61,7 +61,7 @@ gfx::VectorIconId PermissionBubbleRequestImpl::GetVectorIconId() const {
 #endif
 }
 
-int PermissionBubbleRequestImpl::GetIconID() const {
+int PermissionBubbleRequestImpl::GetIconId() const {
   int icon_id;
   switch (type_) {
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
@@ -75,15 +75,11 @@ int PermissionBubbleRequestImpl::GetIconID() const {
     case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
       icon_id = IDR_ALLOWED_MIDI_SYSEX;
       break;
-#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
     case CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:
       icon_id = IDR_INFOBAR_PROTECTED_MEDIA_IDENTIFIER;
       break;
 #endif
-    // TODO(dgrogan): Get a real icon. https://crbug.com/516069
-    case CONTENT_SETTINGS_TYPE_DURABLE_STORAGE:
-      icon_id = IDR_INFOBAR_WARNING;
-      break;
     default:
       NOTREACHED();
       return IDR_INFOBAR_WARNING;
@@ -108,7 +104,7 @@ base::string16 PermissionBubbleRequestImpl::GetMessageText() const {
     case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
       message_id = IDS_PUSH_MESSAGES_PERMISSION_QUESTION;
       break;
-#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
     case CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:
       message_id = IDS_PROTECTED_MEDIA_IDENTIFIER_INFOBAR_QUESTION;
       break;
@@ -117,13 +113,9 @@ base::string16 PermissionBubbleRequestImpl::GetMessageText() const {
       NOTREACHED();
       return base::string16();
   }
-  return l10n_util::GetStringFUTF16(
-      message_id,
-      url_formatter::FormatUrl(
-          request_origin_, display_languages_,
-          url_formatter::kFormatUrlOmitUsernamePassword |
-              url_formatter::kFormatUrlOmitTrailingSlashOnBareHostname,
-          net::UnescapeRule::SPACES, nullptr, nullptr, nullptr));
+  return l10n_util::GetStringFUTF16(message_id,
+                                    url_formatter::FormatUrlForSecurityDisplay(
+                                        request_origin_, display_languages_));
 }
 
 base::string16 PermissionBubbleRequestImpl::GetMessageTextFragment() const {
@@ -143,7 +135,7 @@ base::string16 PermissionBubbleRequestImpl::GetMessageTextFragment() const {
     case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
       message_id = IDS_PUSH_MESSAGES_BUBBLE_FRAGMENT;
       break;
-#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
     case CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:
       message_id = IDS_PROTECTED_MEDIA_IDENTIFIER_PERMISSION_FRAGMENT;
       break;

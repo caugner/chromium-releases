@@ -2,6 +2,39 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// A cut-down version of MockInteractions.move, which is not exposed
+// publicly.
+function getMouseMoveEvents(fromX, fromY, toX, toY, steps) {
+  var dx = Math.round((toX - fromX) / steps);
+  var dy = Math.round((toY - fromY) / steps);
+  var events = [];
+
+  // Deliberate <= to ensure that an event is run for toX, toY
+  for (var i = 0; i <= steps; i++) {
+    var e = new MouseEvent('mousemove', {
+      clientX: fromX,
+      clientY: fromY,
+      movementX: dx,
+      movementY: dy
+    });
+    events.push(e);
+    fromX += dx;
+    fromY += dy;
+  }
+  return events;
+}
+
+function makeTapEvent(x, y) {
+  var e = new MouseEvent('mousemove', {
+    clientX: x,
+    clientY: y,
+    movementX: 0,
+    movementY: 0,
+    sourceCapabilities: new InputDeviceCapabilities({firesTouchEvents: true})
+  });
+  return e;
+}
+
 var tests = [
   /**
    * Test that ToolbarManager.forceHideTopToolbar hides (or shows) the top
@@ -14,25 +47,11 @@ var tests = [
     var zoomToolbar = Polymer.Base.create('viewer-zoom-toolbar');
     var toolbarManager = new ToolbarManager(mockWindow, toolbar, zoomToolbar);
 
-    // A cut-down version of MockInteractions.move, which is not exposed
-    // publicly.
     var mouseMove = function(fromX, fromY, toX, toY, steps) {
-      var dx = Math.round((toX - fromX) / steps);
-      var dy = Math.round((toY - fromY) / steps);
-
-      // Deliberate <= to ensure that an event is run for toX, toY
-      for (var i = 0; i <= steps; i++) {
-        var e = new MouseEvent('mousemove', {
-          clientX: fromX,
-          clientY: fromY,
-          movementX: dx,
-          movementY: dy
-        });
-        toolbarManager.showToolbarsForMouseMove(e);
-        fromX += dx;
-        fromY += dy;
-      }
-    }
+      getMouseMoveEvents(fromX, fromY, toX, toY, steps).forEach(function(e) {
+        toolbarManager.handleMouseMove(e);
+      });
+    };
 
     // Force hide the toolbar, then do a quick mousemove in the center of the
     // window. Top toolbar should not show.
@@ -78,13 +97,89 @@ var tests = [
     var toolbarManager =
         new ToolbarManager(mockWindow, toolbar, mockZoomToolbar);
 
-    chrome.test.assertTrue(bookmarksDropdown.lowerBound == 680);
+    chrome.test.assertEq(680, bookmarksDropdown.lowerBound);
 
     mockWindow.setSize(1920, 480);
-    chrome.test.assertTrue(bookmarksDropdown.lowerBound == 80);
+    chrome.test.assertEq(80, bookmarksDropdown.lowerBound);
 
     chrome.test.succeed();
   },
+
+  /**
+   * Test that the toolbar will not be hidden when navigating with the tab key.
+   */
+  function testToolbarKeyboardNavigation() {
+    var mockWindow = new MockWindow(1920, 1080);
+    var toolbar =
+        Polymer.Base.create('viewer-pdf-toolbar', {loadProgress: 100});
+    var zoomToolbar = Polymer.Base.create('viewer-zoom-toolbar');
+    var toolbarManager = new ToolbarManager(mockWindow, toolbar, zoomToolbar);
+
+    var mouseMove = function(fromX, fromY, toX, toY, steps) {
+      getMouseMoveEvents(fromX, fromY, toX, toY, steps).forEach(function(e) {
+        toolbarManager.handleMouseMove(e);
+      });
+    };
+
+    // Move the mouse and then hit tab -> Toolbars stay open.
+    mouseMove(200, 200, 800, 800, 5);
+    toolbarManager.showToolbarsForKeyboardNavigation();
+    chrome.test.assertTrue(toolbar.opened);
+    mockWindow.runTimeout();
+    chrome.test.assertTrue(toolbar.opened);
+
+    // Hit escape -> Toolbars close.
+    toolbarManager.hideSingleToolbarLayer();
+    chrome.test.assertFalse(toolbar.opened);
+
+    // Show toolbars, use mouse, run timeout -> Toolbars close.
+    toolbarManager.showToolbarsForKeyboardNavigation();
+    mouseMove(200, 200, 800, 800, 5);
+    chrome.test.assertTrue(toolbar.opened);
+    mockWindow.runTimeout();
+    chrome.test.assertFalse(toolbar.opened);
+
+    chrome.test.succeed();
+  },
+
+  /**
+   * Test that the toolbars can be shown or hidden by tapping with a touch
+   * device.
+   */
+  function testToolbarTouchInteraction() {
+    var mockWindow = new MockWindow(1920, 1080);
+    var toolbar =
+        Polymer.Base.create('viewer-pdf-toolbar', {loadProgress: 100});
+    var zoomToolbar = Polymer.Base.create('viewer-zoom-toolbar');
+    var toolbarManager = new ToolbarManager(mockWindow, toolbar, zoomToolbar);
+
+    toolbarManager.hideToolbarsIfAllowed();
+    chrome.test.assertFalse(toolbar.opened);
+
+    // Tap anywhere on the screen -> Toolbars open.
+    toolbarManager.handleMouseMove(makeTapEvent(500, 500));
+    chrome.test.assertTrue(toolbar.opened, "toolbars open after tap");
+
+    // Tap again -> Toolbars close.
+    toolbarManager.handleMouseMove(makeTapEvent(500, 500));
+    chrome.test.assertFalse(toolbar.opened, "toolbars close after tap");
+
+    // Open toolbars, wait 2 seconds -> Toolbars close.
+    toolbarManager.handleMouseMove(makeTapEvent(500, 500));
+    mockWindow.runTimeout();
+    chrome.test.assertFalse(toolbar.opened, "toolbars close after wait");
+
+    // Open toolbars, tap near toolbars -> Toolbar doesn't close.
+    toolbarManager.handleMouseMove(makeTapEvent(500, 500));
+    toolbarManager.handleMouseMove(makeTapEvent(100, 75));
+    chrome.test.assertTrue(toolbar.opened,
+                           "toolbars stay open after tap near toolbars");
+    mockWindow.runTimeout();
+    chrome.test.assertTrue(toolbar.opened,
+                           "tap near toolbars prevents auto close");
+
+    chrome.test.succeed();
+  }
 ];
 
 importTestHelpers().then(function() {

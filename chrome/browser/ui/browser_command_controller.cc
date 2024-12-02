@@ -16,7 +16,6 @@
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/signin/signin_promo.h"
@@ -34,6 +33,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/profiling.h"
 #include "components/dom_distiller/core/dom_distiller_switches.h"
+#include "components/sessions/core/tab_restore_service.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -237,7 +237,7 @@ BrowserCommandController::BrowserCommandController(Browser* browser)
 
   InitCommandState();
 
-  TabRestoreService* tab_restore_service =
+  sessions::TabRestoreService* tab_restore_service =
       TabRestoreServiceFactory::GetForProfile(profile());
   if (tab_restore_service) {
     tab_restore_service->AddObserver(this);
@@ -248,7 +248,7 @@ BrowserCommandController::BrowserCommandController(Browser* browser)
 BrowserCommandController::~BrowserCommandController() {
   // TabRestoreService may have been shutdown by the time we get here. Don't
   // trigger creating it.
-  TabRestoreService* tab_restore_service =
+  sessions::TabRestoreService* tab_restore_service =
       TabRestoreServiceFactory::GetForProfileIfExisting(profile());
   if (tab_restore_service)
     tab_restore_service->RemoveObserver(this);
@@ -778,6 +778,9 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       ash::accelerators::ToggleTouchHudProjection();
       break;
 #endif
+    case IDC_ROUTE_MEDIA:
+      RouteMedia(browser_);
+      break;
 
     default:
       LOG(WARNING) << "Received Unimplemented Command: " << id;
@@ -821,23 +824,24 @@ void BrowserCommandController::TabBlockedStateChanged(
   PrintingStateChanged();
   FullscreenStateChanged();
   UpdateCommandsForFind();
+  UpdateCommandsForMediaRouter();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserCommandController, TabRestoreServiceObserver implementation:
 
 void BrowserCommandController::TabRestoreServiceChanged(
-    TabRestoreService* service) {
+    sessions::TabRestoreService* service) {
   UpdateTabRestoreCommandState();
 }
 
 void BrowserCommandController::TabRestoreServiceDestroyed(
-    TabRestoreService* service) {
+    sessions::TabRestoreService* service) {
   service->RemoveObserver(this);
 }
 
 void BrowserCommandController::TabRestoreServiceLoaded(
-    TabRestoreService* service) {
+    sessions::TabRestoreService* service) {
   UpdateTabRestoreCommandState();
 }
 
@@ -1137,6 +1141,7 @@ void BrowserCommandController::UpdateCommandsForTabState() {
   UpdateCommandsForContentRestrictionState();
   UpdateCommandsForBookmarkEditing();
   UpdateCommandsForFind();
+  UpdateCommandsForMediaRouter();
   // Update the zoom commands when an active tab is selected.
   UpdateCommandsForZoomState();
 }
@@ -1322,7 +1327,7 @@ void BrowserCommandController::UpdateReloadStopState(bool is_loading,
 }
 
 void BrowserCommandController::UpdateTabRestoreCommandState() {
-  TabRestoreService* tab_restore_service =
+  sessions::TabRestoreService* tab_restore_service =
       TabRestoreServiceFactory::GetForProfile(profile());
   // The command is enabled if the service hasn't loaded yet to trigger loading.
   // The command is updated once the load completes.
@@ -1341,6 +1346,11 @@ void BrowserCommandController::UpdateCommandsForFind() {
   command_updater_.UpdateCommandEnabled(IDC_FIND, enabled);
   command_updater_.UpdateCommandEnabled(IDC_FIND_NEXT, enabled);
   command_updater_.UpdateCommandEnabled(IDC_FIND_PREVIOUS, enabled);
+}
+
+void BrowserCommandController::UpdateCommandsForMediaRouter() {
+  command_updater_.UpdateCommandEnabled(IDC_ROUTE_MEDIA,
+                                        CanRouteMedia(browser_));
 }
 
 void BrowserCommandController::AddInterstitialObservers(WebContents* contents) {

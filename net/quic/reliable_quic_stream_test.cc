@@ -156,9 +156,9 @@ TEST_F(ReliableQuicStreamTest, WriteAllData) {
   Initialize(kShouldProcessData);
 
   size_t length = 1 + QuicPacketCreator::StreamFramePacketOverhead(
-      PACKET_8BYTE_CONNECTION_ID, !kIncludeVersion,
-      PACKET_6BYTE_SEQUENCE_NUMBER, 0u, NOT_IN_FEC_GROUP);
-  connection_->set_max_packet_length(length);
+                          PACKET_8BYTE_CONNECTION_ID, !kIncludeVersion,
+                          PACKET_6BYTE_PACKET_NUMBER, 0u, NOT_IN_FEC_GROUP);
+  connection_->SetMaxPacketLength(length);
 
   EXPECT_CALL(*session_, WritevData(kTestStreamId, _, _, _, _, _))
       .WillOnce(Return(QuicConsumedData(kDataLen, true)));
@@ -215,9 +215,9 @@ TEST_F(ReliableQuicStreamTest, WriteOrBufferData) {
 
   EXPECT_FALSE(HasWriteBlockedStreams());
   size_t length = 1 + QuicPacketCreator::StreamFramePacketOverhead(
-      PACKET_8BYTE_CONNECTION_ID, !kIncludeVersion,
-      PACKET_6BYTE_SEQUENCE_NUMBER, 0u, NOT_IN_FEC_GROUP);
-  connection_->set_max_packet_length(length);
+                          PACKET_8BYTE_CONNECTION_ID, !kIncludeVersion,
+                          PACKET_6BYTE_PACKET_NUMBER, 0u, NOT_IN_FEC_GROUP);
+  connection_->SetMaxPacketLength(length);
 
   EXPECT_CALL(*session_, WritevData(_, _, _, _, _, _)).WillOnce(
       Return(QuicConsumedData(kDataLen - 1, false)));
@@ -249,9 +249,9 @@ TEST_F(ReliableQuicStreamTest, WriteOrBufferDataWithFecProtectAlways) {
 
   EXPECT_FALSE(HasWriteBlockedStreams());
   size_t length = 1 + QuicPacketCreator::StreamFramePacketOverhead(
-      PACKET_8BYTE_CONNECTION_ID, !kIncludeVersion,
-      PACKET_6BYTE_SEQUENCE_NUMBER, 0u, IN_FEC_GROUP);
-  connection_->set_max_packet_length(length);
+                          PACKET_8BYTE_CONNECTION_ID, !kIncludeVersion,
+                          PACKET_6BYTE_PACKET_NUMBER, 0u, IN_FEC_GROUP);
+  connection_->SetMaxPacketLength(length);
 
   // Write first data onto stream, which will cause one session write.
   EXPECT_CALL(*session_, WritevData(_, _, _, _, MUST_FEC_PROTECT, _)).WillOnce(
@@ -284,9 +284,9 @@ TEST_F(ReliableQuicStreamTest, WriteOrBufferDataWithFecProtectOptional) {
 
   EXPECT_FALSE(HasWriteBlockedStreams());
   size_t length = 1 + QuicPacketCreator::StreamFramePacketOverhead(
-      PACKET_8BYTE_CONNECTION_ID, !kIncludeVersion,
-      PACKET_6BYTE_SEQUENCE_NUMBER, 0u, NOT_IN_FEC_GROUP);
-  connection_->set_max_packet_length(length);
+                          PACKET_8BYTE_CONNECTION_ID, !kIncludeVersion,
+                          PACKET_6BYTE_PACKET_NUMBER, 0u, NOT_IN_FEC_GROUP);
+  connection_->SetMaxPacketLength(length);
 
   // Write first data onto stream, which will cause one session write.
   EXPECT_CALL(*session_, WritevData(_, _, _, _, MAY_FEC_PROTECT, _)).WillOnce(

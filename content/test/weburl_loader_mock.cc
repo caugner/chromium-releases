@@ -5,6 +5,8 @@
 #include "content/test/weburl_loader_mock.h"
 
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
+#include "content/child/web_url_loader_impl.h"
 #include "content/test/weburl_loader_mock_factory.h"
 #include "third_party/WebKit/public/platform/WebData.h"
 #include "third_party/WebKit/public/platform/WebURLError.h"
@@ -33,39 +35,69 @@ void WebURLLoaderMock::ServeAsynchronousRequest(
   if (!client_)
     return;
 
+  // If no delegate is provided then create an empty one. The default behavior
+  // will just proxy to the client.
+  scoped_ptr<blink::WebURLLoaderTestDelegate> defaultDelegate;
+  if (!delegate) {
+    defaultDelegate.reset(new blink::WebURLLoaderTestDelegate());
+    delegate = defaultDelegate.get();
+  }
+
   // didReceiveResponse() and didReceiveData() might end up getting ::cancel()
   // to be called which will make the ResourceLoader to delete |this|.
   base::WeakPtr<WebURLLoaderMock> self(weak_factory_.GetWeakPtr());
 
-  client_->didReceiveResponse(this, response);
+  delegate->didReceiveResponse(client_, this, response);
   if (!self)
     return;
 
   if (error.reason) {
-    client_->didFail(this, error);
+    delegate->didFail(client_, this, error);
     return;
   }
-  if (delegate) {
-    delegate->didReceiveData(client_, this, data.data(), data.size(),
+  delegate->didReceiveData(client_, this, data.data(), data.size(),
                              data.size());
-  } else {
-    client_->didReceiveData(this, data.data(), data.size(), data.size());
-  }
-
   if (!self)
     return;
 
-  client_->didFinishLoading(this, 0, data.size());
+  delegate->didFinishLoading(client_, this, 0, data.size());
 }
 
 blink::WebURLRequest WebURLLoaderMock::ServeRedirect(
+    const blink::WebURLRequest& request,
     const blink::WebURLResponse& redirectResponse) {
+  GURL redirectURL(redirectResponse.httpHeaderField("Location"));
+
+  net::RedirectInfo redirectInfo;
+  redirectInfo.new_method = request.httpMethod().utf8();
+  redirectInfo.new_url = redirectURL;
+  redirectInfo.new_first_party_for_cookies = redirectURL;
+
   blink::WebURLRequest newRequest;
   newRequest.initialize();
-  newRequest.setRequestContext(blink::WebURLRequest::RequestContextInternal);
-  GURL redirectURL(redirectResponse.httpHeaderField("Location"));
-  newRequest.setURL(redirectURL);
+  content::WebURLLoaderImpl::PopulateURLRequestForRedirect(
+      request,
+      redirectInfo,
+      request.referrerPolicy(),
+      request.skipServiceWorker(),
+      &newRequest);
+
+  base::WeakPtr<WebURLLoaderMock> self(weak_factory_.GetWeakPtr());
+
   client_->willSendRequest(this, newRequest, redirectResponse);
+
+  // |this| might be deleted in willSendRequest().
+  if (!self)
+    return newRequest;
+
+  if (redirectURL != GURL(newRequest.url())) {
+    // Only follow the redirect if WebKit left the URL unmodified.
+    // We assume that WebKit only changes the URL to suppress a redirect, and we
+    // assume that it does so by setting it to be invalid.
+    DCHECK(!newRequest.url().isValid());
+    cancel();
+  }
+
   return newRequest;
 }
 

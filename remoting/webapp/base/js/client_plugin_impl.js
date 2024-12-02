@@ -66,10 +66,8 @@ remoting.ClientPluginImpl = function(container, capabilities) {
    * @private {Array<remoting.ClientSession.Capability>}
    */
   this.hostCapabilities_ = null;
-  /** @private {boolean} */
-  this.helloReceived_ = false;
-  /** @private {function(boolean)|null} */
-  this.onInitializedCallback_ = null;
+  /** @private {base.Deferred} */
+  this.onInitializedDeferred_ = new base.Deferred();
   /** @private {function(string, string):void} */
   this.onPairingComplete_ = function(clientId, sharedSecret) {};
   /** @private {remoting.ClientSession.PerfStats} */
@@ -77,13 +75,14 @@ remoting.ClientPluginImpl = function(container, capabilities) {
 
   /** @type {remoting.ClientPluginImpl} */
   var that = this;
-  this.plugin_.addEventListener('message',
-        /** @param {Event} event Message event from the plugin. */
-        function(event) {
-          that.handleMessage_(
-              /** @type {remoting.ClientPluginMessage} */ (event.data));
-        }, false);
 
+  this.eventHooks_ = new base.Disposables(
+    new base.DomEventHook(
+      this.plugin_, 'message', this.handleMessage_.bind(this), false),
+    new base.DomEventHook(
+      this.plugin_, 'crash', this.onPluginCrashed_.bind(this), false),
+    new base.DomEventHook(
+      this.plugin_, 'error', this.onPluginLoadError_.bind(this), false));
   /** @private */
   this.hostDesktop_ = new remoting.ClientPlugin.HostDesktopImpl(
       this, this.postMessage_.bind(this));
@@ -113,7 +112,7 @@ remoting.ClientPluginImpl.createPluginElement_ = function() {
   plugin.height = '0';
   plugin.tabIndex = 0;  // Required, otherwise focus() doesn't work.
   return plugin;
-}
+};
 
 /**
  * @param {remoting.ClientPlugin.ConnectionEventHandler} handler
@@ -148,11 +147,12 @@ remoting.ClientPluginImpl.prototype.setDebugDirtyRegionHandler =
 };
 
 /**
- * @param {string|remoting.ClientPluginMessage}
- *    rawMessage Message from the plugin.
+ * @param {Event} event Message from the plugin.
  * @private
  */
-remoting.ClientPluginImpl.prototype.handleMessage_ = function(rawMessage) {
+remoting.ClientPluginImpl.prototype.handleMessage_ = function(event) {
+  var rawMessage =
+      /** @type {remoting.ClientPluginMessage|string} */ (event.data);
   var message =
       /** @type {remoting.ClientPluginMessage} */
       ((typeof(rawMessage) == 'string') ? base.jsonParseSafe(rawMessage)
@@ -167,7 +167,23 @@ remoting.ClientPluginImpl.prototype.handleMessage_ = function(rawMessage) {
   } catch(/** @type {*} */ e) {
     console.error(e);
   }
-}
+};
+
+/** @private */
+remoting.ClientPluginImpl.prototype.onPluginCrashed_ = function(event) {
+  // This should only happen on assert() or exit() according to
+  // https://developer.chrome.com/native-client/devguide/coding/progress-events,
+  // which is extremely unlikely in retail builds.  So we just log it without
+  // propagating it to the UI.
+  console.error('Plugin crashed.');
+};
+
+/** @private */
+remoting.ClientPluginImpl.prototype.onPluginLoadError_ = function() {
+  console.error('Failed to load plugin : ' + this.plugin_.lastError);
+  this.onInitializedDeferred_.reject(
+      new remoting.Error(remoting.Error.Tag.MISSING_PLUGIN));
+};
 
 /**
  * @param {remoting.ClientPluginMessage}
@@ -237,12 +253,7 @@ remoting.ClientPluginImpl.prototype.handleMessageMethod_ = function(message) {
   }
 
   if (message.method == 'hello') {
-    this.helloReceived_ = true;
-    if (this.onInitializedCallback_ != null) {
-      this.onInitializedCallback_(true);
-      this.onInitializedCallback_ = null;
-    }
-
+    this.onInitializedDeferred_.resolve();
   } else if (message.method == 'onDesktopSize') {
     this.hostDesktop_.onSizeUpdated(message);
   } else if (message.method == 'onDesktopShape') {
@@ -336,6 +347,9 @@ remoting.ClientPluginImpl.prototype.handleMessageMethod_ = function(message) {
  * Deletes the plugin.
  */
 remoting.ClientPluginImpl.prototype.dispose = function() {
+  base.dispose(this.eventHooks_);
+  this.eventHooks_ = null;
+
   if (this.plugin_) {
     this.plugin_.parentNode.removeChild(this.plugin_);
     this.plugin_ = null;
@@ -353,14 +367,15 @@ remoting.ClientPluginImpl.prototype.element = function() {
 };
 
 /**
- * @param {function(boolean): void} onDone
+ * @override {remoting.ClientPlugin}
  */
-remoting.ClientPluginImpl.prototype.initialize = function(onDone) {
-  if (this.helloReceived_) {
-    onDone(true);
-  } else {
-    this.onInitializedCallback_ = onDone;
+remoting.ClientPluginImpl.prototype.initialize = function() {
+  // If Nacl is disabled, we won't receive any error events, rejecting the
+  // promise immediately.
+  if (!base.isNaclEnabled()) {
+    return Promise.reject(new remoting.Error(remoting.Error.Tag.NACL_DISABLED));
   }
+  return this.onInitializedDeferred_.promise();
 };
 
 /**

@@ -11,21 +11,21 @@
 #include "sync/internal_api/public/base/model_type.h"
 #include "sync/internal_api/public/sync_context_proxy.h"
 
-namespace syncer {
-class ModelTypeSyncProxy;
+namespace syncer_v2 {
+class ModelTypeProcessorImpl;
 }
 
-namespace sync_driver {
+namespace sync_driver_v2 {
 
 // Lives on the UI thread and manages the interactions between many sync
 // components.
 //
 // There are three main parts to this controller:
 // - The SyncContextProxy, represening the sync thread.
-// - The ModelTypeSyncProxy, representing the model type thread.
+// - The ModelTypeProcessor, representing the model type thread.
 // - The user-set state for this type (prefs), which lives on the UI thread.
 //
-// The ModelTypeSyncProxy can exist in three different states.  Those
+// The ModelTypeProcessor can exist in three different states.  Those
 // states are:
 // - Enabled: Changes are being synced.
 // - Disconnected: Changes would be synced, but there is no connection between
@@ -38,7 +38,7 @@ namespace sync_driver {
 // of these states.  It does this by posting tasks to the model type thread.
 //
 // The type proxy is enabled when the user has indicated a desire to sync this
-// type, and the ModelTypeSyncProxy and SyncContextProxy are available.
+// type, and the ModelTypeProcessor and SyncContextProxy are available.
 //
 // The type proxy is disconnected during initialization, or when either the
 // NonBlockingDataTypeController or SyncContextProxy have not yet registered.
@@ -57,13 +57,13 @@ class NonBlockingDataTypeController {
   NonBlockingDataTypeController(syncer::ModelType type, bool is_preferred);
   ~NonBlockingDataTypeController();
 
-  // Connects the ModelTypeSyncProxy to this controller.
+  // Connects the ModelTypeProcessor to this controller.
   //
   // There is no "undo" for this operation.  The NonBlockingDataTypeController
   // will only ever deal with a single type proxy.
   void InitializeType(
       const scoped_refptr<base::SequencedTaskRunner>& task_runner,
-      const base::WeakPtr<syncer_v2::ModelTypeSyncProxyImpl>& type_sync_proxy);
+      const base::WeakPtr<syncer_v2::ModelTypeProcessorImpl>& type_processor);
 
   // Initialize the connection to the SyncContextProxy.
   //
@@ -87,19 +87,19 @@ class NonBlockingDataTypeController {
   // Figures out which signals need to be sent then send then sends them.
   void UpdateState();
 
-  // Sends an enable signal to the ModelTypeSyncProxyImpl.
+  // Sends an enable signal to the ModelTypeProcessorImpl.
   void SendEnableSignal();
 
-  // Sends a disable signal to the ModelTypeSyncProxyImpl.
+  // Sends a disable signal to the ModelTypeProcessorImpl.
   void SendDisableSignal();
 
-  // Sends a disconnect signal to the ModelTypeSyncProxyImpl.
+  // Sends a disconnect signal to the ModelTypeProcessorImpl.
   void SendDisconnectSignal();
 
   // Returns true if this type should be synced.
   bool IsPreferred() const;
 
-  // Returns true if this object has access to the ModelTypeSyncProxyImpl.
+  // Returns true if this object has access to the ModelTypeProcessorImpl.
   bool IsSyncProxyConnected() const;
 
   // Returns true if this object has access to the SyncContextProxy.
@@ -123,9 +123,9 @@ class NonBlockingDataTypeController {
   // Whether or not the user wants to sync this type.
   bool is_preferred_;
 
-  // The ModelTypeSyncProxyImpl and its associated thread.  May be NULL.
+  // The ModelTypeProcessorImpl and its associated thread.  May be NULL.
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
-  base::WeakPtr<syncer_v2::ModelTypeSyncProxyImpl> type_sync_proxy_;
+  base::WeakPtr<syncer_v2::ModelTypeProcessorImpl> type_processor_;
 
   // The SyncContextProxy that connects to the current sync backend.  May be
   // NULL.
@@ -134,6 +134,6 @@ class NonBlockingDataTypeController {
   DISALLOW_COPY_AND_ASSIGN(NonBlockingDataTypeController);
 };
 
-}  // namespace sync_driver
+}  // namespace sync_driver_v2
 
 #endif  // COMPONENTS_SYNC_DRIVER_NON_BLOCKING_DATA_TYPE_CONTROLLER_H_

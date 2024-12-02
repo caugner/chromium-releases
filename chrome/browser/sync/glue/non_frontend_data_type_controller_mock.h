@@ -19,7 +19,6 @@ class NonFrontendDataTypeControllerMock : public NonFrontendDataTypeController {
   MOCK_METHOD1(StartAssociating,
                  void(const StartCallback& start_callback));
   MOCK_METHOD1(LoadModels, void(const ModelLoadCallback& model_load_callback));
-  MOCK_METHOD0(OnModelLoaded, void());
 
   MOCK_METHOD0(Stop, void());
   MOCK_METHOD0(enabled, bool());
@@ -37,7 +36,7 @@ class NonFrontendDataTypeControllerMock : public NonFrontendDataTypeController {
                     const base::Closure&));
   MOCK_METHOD0(StartAssociation, void());
   MOCK_METHOD0(CreateSyncComponents,
-               ProfileSyncComponentsFactory::SyncComponents());
+               sync_driver::SyncApiComponentFactory::SyncComponents());
   MOCK_METHOD3(StartDone,
                void(DataTypeController::ConfigureResult result,
                     const syncer::SyncMergeResult& local_merge_result,

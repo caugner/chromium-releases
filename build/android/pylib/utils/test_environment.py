@@ -6,8 +6,8 @@ import logging
 import psutil
 import signal
 
-from pylib.device import device_errors
-from pylib.device import device_utils
+from devil.android import device_errors
+from devil.android import device_utils
 
 
 def _KillWebServers():
@@ -21,12 +21,12 @@ def _KillWebServers():
           logging.info('Killing %s %s %s', s, server, p.pid)
           p.send_signal(s)
           signalled.append(p)
-        except Exception:
+        except Exception: # pylint: disable=broad-except
           logging.exception('Failed killing %s %s', server, p.pid)
     for p in signalled:
       try:
         p.wait(1)
-      except Exception:
+      except Exception: # pylint: disable=broad-except
         logging.exception('Failed waiting for %s to die.', p.pid)
 
 

@@ -19,8 +19,9 @@ function parseThenSerializeRule(rule)
     var head = document.getElementById("head");
     head.appendChild(styleElement);
     
+    styleElement.appendChild(document.createTextNode("@namespace n url('test');"));
     styleElement.appendChild(document.createTextNode(rule));
-    return styleElement.sheet.cssRules[0].cssText;
+    return styleElement.sheet.cssRules[1].cssText;
 }
 
 function testSelectorRoundTrip(selector)
@@ -71,6 +72,8 @@ testSelectorRoundTrip(":focus");
 testSelectorRoundTrip(":hover");
 testSelectorRoundTrip(":indeterminate");
 testSelectorRoundTrip(":link");
+testSelectorRoundTrip(":not(:placeholder-shown)");
+testSelectorRoundTrip(":placeholder-shown");
 testSelectorRoundTrip(":root");
 testSelectorRoundTrip(":target");
 testSelectorRoundTrip(":visited");
@@ -137,7 +140,7 @@ testSelectorRoundTrip(':-webkit-any(a.class1.class2.class3:hover)');
 debug('');
 
 shouldBe("parseThenSerializeRule('*:active { }')", "':active { }'");
-shouldBe("parseThenSerializeRule('|a { }')", "'a { }'");
+testSelectorRoundTrip("|a");
 
 debug('');
 

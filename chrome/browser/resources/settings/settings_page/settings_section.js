@@ -4,20 +4,20 @@
 
 /**
  * @fileoverview
- * 'cr-settings-section' shows a paper material themed section with a header
- * which shows its page title and icon.
+ * 'settings-section' shows a paper material themed section with a header
+ * which shows its page title.
  *
  * Example:
  *
- *    <cr-settings-section page-title="[[pageTitle]]" icon="[[icon]]">
+ *    <settings-section page-title="[[pageTitle]]">
  *      <!-- Insert your section controls here -->
- *    </cr-settings-section>
+ *    </settings-section>
  *
  * @group Chrome Settings Elements
- * @element cr-settings-section
+ * @element settings-section
  */
 Polymer({
-  is: 'cr-settings-section',
+  is: 'settings-section',
 
   behaviors: [
     Polymer.NeonAnimationRunnerBehavior,
@@ -25,55 +25,88 @@ Polymer({
 
   properties: {
     /**
+     * The current active route.
+     */
+    currentRoute: {
+      type: Object,
+      observer: 'currentRouteChanged_',
+    },
+
+    /**
+     * The section is expanded to a full-page view when this property matches
+     * currentRoute.section.
+     */
+    section: {
+      type: String,
+    },
+
+    /**
      * Title for the page header and navigation menu.
      */
     pageTitle: String,
 
-    /**
-     * Name of the 'iron-icon' to show.
-     */
-    icon: String,
-
-    /**
-     * True if the section should be expanded to take up the full height of
-     * the page (except the toolbar). The title and icon of the section will be
-     * hidden, and the section contents is expected to provide its own subtitle.
-     */
-    expanded: {
-      type: Boolean,
-      observer: 'expandedChanged',
-    },
-
-    /**
-     * Container that determines the sizing of expanded sections.
-     */
-    expandContainer: {
-      type: Object,
-      notify: true,
-    },
-
     animationConfig: {
       value: function() {
         return {
+          collapse: {
+            name: 'collapse-card-animation',
+            node: this,
+          },
           expand: {
             name: 'expand-card-animation',
             node: this,
           },
-          collapse: {
-            name: 'collapse-card-animation',
-            node: this,
-          }
         };
       },
     },
   },
 
-  expandedChanged: function() {
-    if (this.expanded) {
-      this.playAnimation('expand');
-    } else {
-      this.playAnimation('collapse');
+  listeners: {
+    'expand-animation-complete': 'onExpandAnimationComplete_',
+  },
+
+  /** @private */
+  currentRouteChanged_: function(newRoute, oldRoute) {
+    var newExpanded = newRoute.section == this.section;
+    var oldExpanded = oldRoute && oldRoute.section == this.section;
+
+    var visible = newExpanded || this.currentRoute.section == '';
+
+    // If the user navigates directly to a subpage, skip all the animations.
+    if (!oldRoute) {
+      if (newExpanded) {
+        // If we navigate directly to a subpage, skip animations.
+        this.classList.add('expanded');
+      } else if (!visible) {
+        this.hidden = true;
+        this.$.card.elevation = 0;
+      }
+
+      return;
     }
+
+    if (newExpanded && !oldExpanded) {
+      this.playAnimation('expand');
+    } else if (oldExpanded && !newExpanded) {
+      // For contraction, we defer the animation to allow
+      // settings-animated-pages to reflow the new page correctly.
+      this.async(function() {
+        this.playAnimation('collapse');
+      }.bind(this));
+    }
+
+    this.$.card.elevation = visible ? 1 : 0;
+
+    // Remove 'hidden' class immediately, but defer adding it if we are invisble
+    // until the animation is complete.
+    if (visible)
+      this.hidden = false;
+  },
+
+  /** @private */
+  onExpandAnimationComplete_: function() {
+    this.hidden = this.currentRoute.section != '' &&
+                  this.currentRoute.section != this.section;
   },
 });
 
@@ -85,31 +118,36 @@ Polymer({
   ],
 
   configure: function(config) {
-    var node = config.node;
-    var containerRect = node.expandContainer.getBoundingClientRect();
-    var nodeRect = node.getBoundingClientRect();
+    var section = config.node;
+    var card = section.$.card;
+    var containerRect = section.offsetParent.getBoundingClientRect();
+    var cardRect = card.getBoundingClientRect();
 
-    // Save section's original height.
-    node.unexpandedHeight = nodeRect.height;
+    // Set placeholder height so the page does not reflow during animation.
+    // TODO(tommycli): For URLs that directly load subpages, this does not work.
+    var placeholder = section.$.placeholder;
+    placeholder.style.top = card.offsetTop + 'px';
+    placeholder.style.height = card.offsetHeight + 'px';
 
-    var headerHeight = node.$.header.getBoundingClientRect().height;
-    var newTop = containerRect.top - headerHeight;
-    var newHeight = containerRect.height + headerHeight;
+    section.classList.add('neon-animating');
 
-    node.style.position = 'fixed';
-
-    this._effect = new KeyframeEffect(node, [
-      {'top': nodeRect.top, 'height': nodeRect.height},
-      {'top': newTop, 'height': newHeight},
+    this._effect = new KeyframeEffect(card, [
+      {'top': cardRect.top + 'px', 'height': cardRect.height + 'px'},
+      {'top': containerRect.top + 'px', 'height': containerRect.height + 'px'},
     ], this.timingFromConfig(config));
     return this._effect;
   },
 
   complete: function(config) {
-    config.node.style.position = 'absolute';
-    config.node.style.top =
-        -config.node.$.header.getBoundingClientRect().height + 'px';
-    config.node.style.bottom = 0;
+    var section = config.node;
+    section.classList.remove('neon-animating');
+    section.classList.add('expanded');
+
+    // This event fires on itself as well, but that is benign.
+    var sections = section.parentNode.querySelectorAll('settings-section');
+    for (var i = 0; i < sections.length; ++i) {
+      sections[i].fire('expand-animation-complete');
+    }
   }
 });
 
@@ -121,25 +159,24 @@ Polymer({
   ],
 
   configure: function(config) {
-    var node = config.node;
+    var section = config.node;
+    var oldRect = section.offsetParent.getBoundingClientRect();
 
-    var oldRect = node.getBoundingClientRect();
+    section.classList.remove('expanded');
 
-    // Temporarily set position to static to determine new height.
-    node.style.position = '';
-    var newTop = node.getBoundingClientRect().top;
-    var newHeight = node.unexpandedHeight;
+    var card = section.$.card;
+    var newRect = card.getBoundingClientRect();
 
-    node.style.position = 'fixed';
+    section.classList.add('neon-animating');
 
-    this._effect = new KeyframeEffect(node, [
-      {'top': oldRect.top, 'height': oldRect.height},
-      {'top': newTop, 'height': newHeight},
+    this._effect = new KeyframeEffect(card, [
+      {'top': oldRect.top + 'px', 'height': oldRect.height + 'px'},
+      {'top': newRect.top + 'px', 'height': newRect.height + 'px'},
     ], this.timingFromConfig(config));
     return this._effect;
   },
 
   complete: function(config) {
-    config.node.style.position = '';
+    config.node.classList.remove('neon-animating');
   }
 });

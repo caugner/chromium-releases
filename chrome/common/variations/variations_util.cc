@@ -9,9 +9,7 @@
 
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_split.h"
-#include "chrome/common/crash_keys.h"
 #include "chrome/common/variations/fieldtrial_testing_config.h"
-#include "components/variations/active_field_trials.h"
 #include "components/variations/variations_associated_data.h"
 #include "net/base/escape.h"
 
@@ -25,12 +23,6 @@ std::string EscapeValue(const std::string& value) {
 
 } // namespace
 
-void SetChildProcessLoggingVariationList() {
-  std::vector<std::string> experiment_strings;
-  variations::GetFieldTrialActiveGroupIdsAsStrings(&experiment_strings);
-  crash_keys::SetVariationsList(experiment_strings);
-}
-
 bool AssociateParamsFromString(const std::string& varations_string) {
   // Format: Trial1.Group1:k1/v1/k2/v2,Trial2.Group2:k1/v1/k2/v2
   for (const base::StringPiece& experiment_group : base::SplitStringPiece(
@@ -38,18 +30,24 @@ bool AssociateParamsFromString(const std::string& varations_string) {
            base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
     std::vector<base::StringPiece> experiment = base::SplitStringPiece(
         experiment_group, ":", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
-    if (experiment.size() != 2)
+    if (experiment.size() != 2) {
+      DLOG(ERROR) << "Experiment and params should be separated by ':'";
       return false;
+    }
 
     std::vector<std::string> group_parts = base::SplitString(
         experiment[0], ".", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
-    if (group_parts.size() != 2)
+    if (group_parts.size() != 2) {
+      DLOG(ERROR) << "Study and group name should be separated by '.'";
       return false;
+    }
 
     std::vector<std::string> key_values = base::SplitString(
         experiment[1], "/", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
-    if (key_values.size() % 2 != 0)
+    if (key_values.size() % 2 != 0) {
+      DLOG(ERROR) << "Param name and param value should be separated by '/'";
       return false;
+    }
 
     std::map<std::string, std::string> params;
     for (size_t i = 0; i < key_values.size(); i += 2) {

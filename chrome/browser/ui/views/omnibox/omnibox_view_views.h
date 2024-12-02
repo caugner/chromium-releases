@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/toolbar/chrome_toolbar_model.h"
@@ -205,7 +206,7 @@ class OmniboxViewViews
 
   scoped_ptr<OmniboxPopupView> popup_view_;
 
-  connection_security::SecurityLevel security_level_;
+  SecurityStateModel::SecurityLevel security_level_;
 
   // Selection persisted across temporary text changes, like popup suggestions.
   gfx::Range saved_temporary_selection_;

@@ -1299,6 +1299,7 @@ void StartupBrowserCreatorFirstRunTest::SetUpInProcessBrowserTestFixture() {
   policy_map_.Set(policy::key::kMetricsReportingEnabled,
                   policy::POLICY_LEVEL_MANDATORY,
                   policy::POLICY_SCOPE_USER,
+                  policy::POLICY_SOURCE_CLOUD,
                   new base::FundamentalValue(false),
                   NULL);
   provider_.UpdateChromePolicy(policy_map_);
@@ -1666,6 +1667,7 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorFirstRunTest,
       policy::key::kRestoreOnStartup,
       policy::POLICY_LEVEL_MANDATORY,
       policy::POLICY_SCOPE_USER,
+      policy::POLICY_SOURCE_CLOUD,
       new base::FundamentalValue(SessionStartupPref::kPrefValueURLs),
       NULL);
   base::ListValue startup_urls;
@@ -1673,7 +1675,8 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserCreatorFirstRunTest,
       new base::StringValue(test_server()->GetURL("files/title1.html").spec()));
   policy_map_.Set(policy::key::kRestoreOnStartupURLs,
                   policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
-                  startup_urls.DeepCopy(), NULL);
+                  policy::POLICY_SOURCE_CLOUD, startup_urls.DeepCopy(),
+                  nullptr);
   provider_.UpdateChromePolicy(policy_map_);
   base::RunLoop().RunUntilIdle();
 

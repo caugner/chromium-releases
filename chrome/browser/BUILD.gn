@@ -26,7 +26,6 @@ declare_args() {
   enable_hotwording = is_chrome_branded && is_chromeos
 }
 
-about_credits_file = "$target_gen_dir/about_credits.html"
 additional_modules_list_file =
     "$root_gen_dir/chrome/browser/internal/additional_modules_list.txt"
 
@@ -97,27 +96,29 @@ source_set("browser") {
     "//chrome/app:generated_resources_map",
     "//chrome/app/resources:platform_locale_settings",
     "//chrome/app/theme:theme_resources",
-    "//chrome/browser/net:encrypted_cert_logger_proto",
     "//chrome/browser/net:probe_message_proto",
-    "//chrome/browser/ssl:cert_logger_proto",
     "//chrome/browser/ui",
     "//chrome/common",
     "//components/autofill/core/browser",
     "//components/bookmarks/browser",
     "//components/bookmarks/managed",
     "//components/captive_portal",
+    "//components/certificate_reporting",
     "//components/cloud_devices/common",
     "//components/component_updater",
+    "//components/compression",
     "//components/content_settings/content/common",
     "//components/content_settings/core/browser",
     "//components/content_settings/core/common",
     "//components/crx_file",
     "//components/data_reduction_proxy/core/browser",
+    "//components/data_use_measurement/core",
     "//components/device_event_log",
     "//components/domain_reliability",
     "//components/enhanced_bookmarks",
     "//components/favicon/core",
     "//components/favicon_base",
+    "//components/flags_ui",
     "//components/gcm_driver",
     "//components/gcm_driver/instance_id",
     "//components/google/core/browser",
@@ -150,6 +151,7 @@ source_set("browser") {
     "//components/search_provider_logos",
     "//components/security_interstitials/core",
     "//components/signin/core/browser",
+    "//components/ssl_errors",
     "//components/startup_metric_utils",
     "//components/strings",
     "//components/suggestions",
@@ -165,6 +167,7 @@ source_set("browser") {
     "//components/user_prefs/tracked:user_prefs_tracked",
     "//components/variations",
     "//components/variations/net",
+    "//components/variations/service",
     "//components/webdata/common",
     "//components/webdata_services",
     "//components/web_resource",
@@ -272,19 +275,25 @@ source_set("browser") {
       "//components/autofill/content/browser",
       "//components/browsing_data",
       "//components/data_reduction_proxy/content/browser",
+      "//components/data_use_measurement/content",
       "//components/devtools_discovery",
       "//components/devtools_http_handler",
       "//components/dom_distiller/content:content_browser",
+      "//components/error_page/common",
       "//components/favicon/content",
       "//components/history/content/browser",
       "//components/keyed_service/content",
       "//components/navigation_interception",
+      "//components/net_log",
+      "//components/network_hints/common",
       "//components/password_manager/content/browser",
       "//components/password_manager/sync/browser",
       "//components/plugins/common",
+      "//components/proxy_config",
       "//components/safe_json",
       "//components/sessions",
       "//components/storage_monitor",
+      "//components/syncable_prefs",
       "//components/translate/content/browser",
       "//components/upload_list",
       "//components/url_matcher",
@@ -294,6 +303,7 @@ source_set("browser") {
       "//components/web_modal",
       "//content/app/resources",
       "//media",
+      "//media/midi",
       "//mojo/application/public/cpp",
       "//mojo/common",
       "//mojo/environment:chromium",
@@ -367,6 +377,12 @@ source_set("browser") {
       #"app_shim"  TODO(GYP) bug 512600
       #"browser_app_shim"  TODO(GYP) bug 512600
     ]
+  }
+  if (is_mac || is_android) {
+    sources += rebase_path(
+            gypi_values.chrome_browser_password_manager_mac_android_sources,
+            ".",
+            "//chrome")
   }
   if (enable_extensions) {
     public_deps += [ "//chrome/browser/extensions" ]
@@ -478,6 +494,9 @@ source_set("browser") {
                       ".",
                       "//chrome")
       deps += [ "//chrome/common/safe_browsing:proto" ]
+      if (is_win) {
+        deps += [ "//chrome/browser/safe_browsing/incident_reporting:state_store_data_proto" ]
+      }
     } else if (safe_browsing_mode == 3) {
       sources += rebase_path(
               gypi_values.chrome_browser_safe_browsing_mobile_extended_sources,
@@ -507,11 +526,6 @@ source_set("browser") {
                            ".",
                            "//chrome")
     deps += [ "//chrome/browser/chromeos" ]
-  } else {
-    # Non-ChromeOS.
-    sources += rebase_path(gypi_values.chrome_browser_non_chromeos_sources,
-                           ".",
-                           "//chrome")
   }
 
   if (is_ios) {
@@ -573,8 +587,8 @@ source_set("browser") {
       "//chrome/app/chrome_crash_reporter_client.h",
     ]
     deps += [
-      "//components/crash/app",
-      "//components/crash/browser",
+      "//components/crash/content/app",
+      "//components/crash/content/browser",
     ]
   }
   if (use_nss_certs) {
@@ -588,7 +602,12 @@ source_set("browser") {
     sources += rebase_path(gypi_values.chrome_browser_notifications_sources,
                            ".",
                            "//chrome")
-    if (!is_android) {
+    if (is_android) {
+      sources +=
+          rebase_path(gypi_values.chrome_browser_notifications_android_sources,
+                      ".",
+                      "//chrome")
+    } else {
       sources += rebase_path(
               gypi_values.chrome_browser_notifications_non_android_sources,
               ".",
@@ -655,6 +674,7 @@ source_set("browser") {
                            "//chrome")
     deps += [
       "//components/feedback",
+      "//components/webusb",
       "//device/core",
       "//device/devices_app/public/cpp",
       "//device/devices_app/public/cpp:factory",
@@ -781,14 +801,12 @@ source_set("browser") {
   }
 
   if (is_linux) {
-    sources +=
-        rebase_path(gypi_values.chrome_browser_linux_sources, ".", "//chrome")
     if (use_aura) {
-      configs += [
-        "//build/config/linux:dbus",
-        "//build/config/linux:fontconfig",
+      configs += [ "//build/config/linux:dbus" ]
+      deps += [
+        "//build/linux:fontconfig",
+        "//dbus",
       ]
-      deps += [ "//dbus" ]
     }
     if (use_x11) {
       configs += [ "//build/config/linux:x11" ]
@@ -915,52 +933,21 @@ grit("resources") {
     "browser_resources.pak",
   ]
 
-  omnibox_mojom_file =
-      "$root_gen_dir/chrome/browser/ui/webui/omnibox/omnibox.mojom.js"
-
   grit_flags = [
-    "-E",
-    "about_credits_file=" + rebase_path(about_credits_file, root_build_dir),
     "-E",
     "additional_modules_list_file=" +
         rebase_path(additional_modules_list_file, root_build_dir),
     "-E",
-    "omnibox_mojom_file=" + rebase_path(omnibox_mojom_file, root_build_dir),
+    "root_gen_dir=" + rebase_path(root_gen_dir, root_build_dir),
   ]
 
   deps = [
-    ":about_credits",
     ":chrome_internal_resources_gen",
 
     # Depend only on the generated mojo bindings since we read the .mojom.js
     # file, rather than the whole mojo target which will link the C++ bindings.
+    "//chrome/browser/ui/webui/engagement:mojo_bindings__generator",
     "//chrome/browser/ui/webui/omnibox:mojo_bindings__generator",
-  ]
-  inputs = [
-    omnibox_mojom_file,
-  ]
-}
-
-# GYP version: chrome/chrome_resource.gyp:about_credits
-action("about_credits") {
-  script = "//tools/licenses.py"
-
-  inputs = [
-    # This is not a complete list. TODO(phajdan.jr, dbeam): licenses.py needs to
-    # generate a .d file with all the licenses/credits that about:credits uses.
-    # Then about:credits will automatically rebuild when one of them changes.
-    # See: depfile in gn's documentation (gn help depfile).
-    "resources/about_credits.tmpl",
-    "resources/about_credits_entry.tmpl",
-  ]
-
-  outputs = [
-    about_credits_file,
-  ]
-
-  args = [
-    "credits",
-    rebase_path(about_credits_file, root_build_dir),
   ]
 }
 
@@ -993,6 +980,8 @@ source_set("test_support") {
   sources = [
     "browsing_data/mock_browsing_data_appcache_helper.cc",
     "browsing_data/mock_browsing_data_appcache_helper.h",
+    "browsing_data/mock_browsing_data_cache_storage_helper.cc",
+    "browsing_data/mock_browsing_data_cache_storage_helper.h",
     "browsing_data/mock_browsing_data_channel_id_helper.cc",
     "browsing_data/mock_browsing_data_channel_id_helper.h",
     "browsing_data/mock_browsing_data_cookie_helper.cc",
@@ -1027,14 +1016,10 @@ source_set("test_support") {
     "notifications/notification_test_util.h",
     "password_manager/mock_password_store_service.cc",
     "password_manager/mock_password_store_service.h",
-    "password_manager/null_password_store_service.cc",
-    "password_manager/null_password_store_service.h",
     "password_manager/password_manager_test_base.cc",
     "password_manager/password_manager_test_base.h",
     "password_manager/test_password_store_service.cc",
     "password_manager/test_password_store_service.h",
-    "prefs/pref_service_mock_factory.cc",
-    "prefs/pref_service_mock_factory.h",
     "profile_resetter/profile_resetter_test_base.cc",
     "profile_resetter/profile_resetter_test_base.h",
     "search_engines/template_url_service_factory_test_util.cc",
@@ -1078,6 +1063,7 @@ source_set("test_support") {
     "//components/invalidation/impl:test_support",
     "//components/password_manager/core/browser:test_support",
     "//components/search_engines:test_support",
+    "//components/syncable_prefs:test_support",
     "//components/user_prefs/tracked:user_prefs_tracked_test_support",
     "//content/test:test_support",
     "//chrome/app/theme:theme_resources",
@@ -1092,6 +1078,17 @@ source_set("test_support") {
     deps += [
       "//components/sessions:test_support",
       "//google_apis:test_support",
+    ]
+  }
+
+  if (is_android) {
+    sources -= [
+      "password_manager/password_manager_test_base.cc",
+      "password_manager/password_manager_test_base.h",
+      "sessions/session_service_test_helper.cc",
+      "sessions/session_service_test_helper.h",
+      "ui/webui/signin/login_ui_test_utils.cc",
+      "ui/webui/signin/login_ui_test_utils.h",
     ]
   }
 

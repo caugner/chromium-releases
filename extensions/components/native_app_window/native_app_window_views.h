@@ -115,6 +115,7 @@ class NativeAppWindowViews : public extensions::NativeAppWindow,
       const gfx::Point& location) override;
 
   // WidgetObserver implementation.
+  void OnWidgetDestroying(views::Widget* widget) override;
   void OnWidgetVisibilityChanged(views::Widget* widget, bool visible) override;
   void OnWidgetActivationChanged(views::Widget* widget, bool active) override;
 
@@ -140,7 +141,6 @@ class NativeAppWindowViews : public extensions::NativeAppWindow,
       const std::vector<extensions::DraggableRegion>& regions) override;
   SkRegion* GetDraggableRegion() override;
   void UpdateShape(scoped_ptr<SkRegion> region) override;
-  void SetInterceptAllKeys(bool want_all_keys) override;
   void HandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) override;
   bool IsFrameless() const override;

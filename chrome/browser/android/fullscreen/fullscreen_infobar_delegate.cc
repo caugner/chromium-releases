@@ -13,7 +13,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/infobar.h"
-#include "components/url_formatter/url_formatter.h"
+#include "components/url_formatter/elide_url.h"
 #include "grit/components_strings.h"
 #include "grit/theme_resources.h"
 #include "jni/FullscreenInfoBarDelegate_jni.h"
@@ -21,8 +21,9 @@
 #include "url/gurl.h"
 
 // static
-jlong LaunchFullscreenInfoBar(
-    JNIEnv* env, jobject obj, jobject tab) {
+jlong LaunchFullscreenInfoBar(JNIEnv* env,
+                              const JavaParamRef<jobject>& obj,
+                              const JavaParamRef<jobject>& tab) {
   TabAndroid* tab_android = TabAndroid::GetNativeTab(env, tab);
   GURL origin = tab_android->GetURL().GetOrigin();
   FullscreenInfoBarDelegate* delegate = new FullscreenInfoBarDelegate(
@@ -58,7 +59,7 @@ void FullscreenInfoBarDelegate::CloseFullscreenInfoBar(
     infobar()->owner()->RemoveInfoBar(infobar());
 }
 
-int FullscreenInfoBarDelegate::GetIconID() const {
+int FullscreenInfoBarDelegate::GetIconId() const {
   return IDR_INFOBAR_FULLSCREEN;
 }
 
@@ -69,7 +70,7 @@ base::string16 FullscreenInfoBarDelegate::GetMessageText() const {
       profile->GetPrefs()->GetString(prefs::kAcceptLanguages);
   return l10n_util::GetStringFUTF16(
       IDS_FULLSCREEN_INFOBAR_TEXT,
-      url_formatter::FormatUrl(GURL(origin_), language));
+      url_formatter::FormatUrlForSecurityDisplay(origin_, language));
 }
 
 base::string16 FullscreenInfoBarDelegate::GetButtonLabel(

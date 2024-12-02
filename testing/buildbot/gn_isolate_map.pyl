@@ -1,4 +1,4 @@
-# Copyright 2015 The Chromium Authors. All rights reserved.
+## Copyright 2015 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -17,7 +17,7 @@
 # "windowed_test_launcher"
 # : the test is a gtest-based test that uses the 'brave-new-test-launcher'
 #   from //base/test:test_support and needs to run under Xvfb if run on
-#   an X11-based platform (use_x11=true).                         
+#   an X11-based platform (use_x11=true).
 #  "console_test_launcher"
 #  : the test is a gtest-based test that uses the 'brave-new-test-launcher'
 #    from //base/test:test_support but does not need Xvfb.
@@ -38,8 +38,13 @@
     "type": "raw",
     "args": [],
   },
+  "angle_end2end_tests": {
+    "label": "//third_party/angle/src/tests:angle_end2end_tests",
+    "type": "raw",
+    "args": [],
+  },
   "angle_unittests": {
-    "label": "//gpu:angle_unittests",
+    "label": "//third_party/angle/src/tests:angle_unittests",
     "type": "raw",
     "args": [],
   },
@@ -201,7 +206,7 @@
   },
   "google_apis_unittests": {
     "label": "//google_apis:google_apis_unittests",
-    "type": "unknown",
+    "type": "console_test_launcher",
   },
   "gpu_unittests": {
     "label": "//gpu:gpu_unittests",
@@ -239,9 +244,13 @@
     "label": "//media:media_unittests",
     "type": "windowed_test_launcher",
   },
+  "media_blink_unittests": {
+    "label": "//media/blink:media_blink_unittests",
+    "type": "windowed_test_launcher",
+  },
   "midi_unittests": {
-    "label": "//media:midi_unittests",
-    "type": "unknown",
+    "label": "//media/midi:midi_unittests",
+    "type": "windowed_test_launcher",
   },
   "mojo_common_unittests": {
     "label": "//mojo/common:mojo_common_unittests",
@@ -261,11 +270,11 @@
   },
   "mojo_public_system_unittests": {
     "label": "//third_party/mojo/src/mojo/edk/test:mojo_public_system_unittests",
-    "type": "unknown",
+    "type": "console_test_launcher",
   },
   "mojo_public_utility_unittests": {
     "label": "//third_party/mojo/src/mojo/edk/test:mojo_public_utility_unittests",
-    "type": "unknown",
+    "type": "console_test_launcher",
   },
   "mojo_runner_unittests": {
     "label": "//mojo/runner:mojo_runner_unittests",
@@ -365,6 +374,20 @@
     "label": "//chrome/test:browser_tests",
     "type": "gpu_browser_test",
     "gtest_filter": "CastStreamingApiTestWithPixelOutput.EndToEnd*:TabCaptureApiPixelTest.EndToEnd*",
+  },
+  "telemetry_gpu_test": {
+    "label": "//chrome/test:telemetry_gpu_test",
+    "type": "script",
+    "script": "//content/test/gpu/run_gpu_test.py",
+  },
+  "telemetry_gpu_unittests": {
+    "label": "//chrome/test:telemetry_gpu_unittests",
+    "type": "script",
+    "script": "//testing/scripts/run_telemetry_as_googletest.py",
+    "args": [
+      "../../content/test/gpu/run_unittests.py",
+      "-v",
+    ],
   },
   "ui_base_unittests": {
     "label": "//ui/base:ui_base_unittests",

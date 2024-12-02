@@ -54,6 +54,7 @@ X11Window::X11Window(PlatformWindowDelegate* delegate)
 }
 
 X11Window::~X11Window() {
+  Destroy();
 }
 
 void X11Window::Destroy() {
@@ -200,9 +201,6 @@ void X11Window::Show() {
   size_hints.win_gravity = StaticGravity;
   XSetWMNormalHints(xdisplay_, xwindow_, &size_hints);
 
-  // TODO(sky): provide real scale factor.
-  delegate_->OnAcceleratedWidgetAvailable(xwindow_, 1.f);
-
   XMapWindow(xdisplay_, xwindow_);
 
   // We now block until our window is mapped. Some X11 APIs will crash and
@@ -211,6 +209,9 @@ void X11Window::Show() {
   if (X11EventSource::GetInstance())
     X11EventSource::GetInstance()->BlockUntilWindowMapped(xwindow_);
   window_mapped_ = true;
+
+  // TODO(sky): provide real scale factor.
+  delegate_->OnAcceleratedWidgetAvailable(xwindow_, 1.f);
 }
 
 void X11Window::Hide() {
@@ -240,6 +241,8 @@ void X11Window::SetBounds(const gfx::Rect& bounds) {
 gfx::Rect X11Window::GetBounds() {
   return confirmed_bounds_;
 }
+
+void X11Window::SetTitle(const base::string16& title) {}
 
 void X11Window::SetCapture() {}
 

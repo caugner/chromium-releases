@@ -147,6 +147,7 @@ v8.log
 /components/gcm_driver.xml
 /components/leveldb_proto_test_support.xml
 /components/rappor.xml
+/components/resources/default_100_percent/google_chrome
 /components/search_engines/prepopulated_engines.xml
 /components/suggestions.xml
 /components/variations.xml
@@ -331,14 +332,13 @@ v8.log
 /third_party/libaddressinput/src
 /third_party/libexif/sources
 /third_party/libjingle/source
-/third_party/libjingle/source_internal
 /third_party/libjpeg_turbo
 /third_party/liblouis/src
 /third_party/libphonenumber/libphonenumber.xml
 /third_party/libphonenumber/libphonenumber_without_metadata.xml
 /third_party/libphonenumber/src
 /third_party/libsrtp
-/third_party/libvpx
+/third_party/libvpx_new/source/libvpx
 /third_party/libwebm/source
 /third_party/libyuv
 /third_party/lighttpd
@@ -348,6 +348,7 @@ v8.log
 /third_party/lss
 /third_party/mesa/src
 /third_party/mingw-w64
+/third_party/minigbm/src
 /third_party/mkl
 /third_party/mocha
 /third_party/mockito/src
@@ -379,11 +380,10 @@ v8.log
 /third_party/robolectric/lib
 /third_party/safe_browsing/testing
 /third_party/scons-2.0.1
-/third_party/sfntly/cpp
+/third_party/sfntly/src
 /third_party/skia
 /third_party/smhasher/src
 /third_party/snappy/src
-/third_party/stp/src
 /third_party/swiftshader/include/
 /third_party/syzygy
 /third_party/syzygy/binaries
@@ -400,8 +400,6 @@ v8.log
 /third_party/webgl/src
 /third_party/webpagereplay/
 /third_party/webrtc
-/third_party/webrtc/internal
-/third_party/webrtc/modules/video_coding/codecs/vp8_internal
 /third_party/widevine/cdm/chromeos
 /third_party/widevine/cdm/linux
 /third_party/widevine/cdm/mac

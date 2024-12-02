@@ -823,7 +823,8 @@ TEST_F(BrowserAccessibilityTest, TestCaretAndSelectionInSimpleFields) {
   ui::AXNodeData combo_box;
   combo_box.id = 2;
   combo_box.role = ui::AX_ROLE_COMBO_BOX;
-  combo_box.state = (1 << ui::AX_STATE_FOCUSABLE) | (1 << ui::AX_STATE_FOCUSED);
+  combo_box.state = (1 << ui::AX_STATE_EDITABLE) |
+      (1 << ui::AX_STATE_FOCUSABLE) | (1 << ui::AX_STATE_FOCUSED);
   combo_box.SetValue("Test1");
   // Place the caret between 't' and 'e'.
   combo_box.AddIntAttribute(ui::AX_ATTR_TEXT_SEL_START, 1);
@@ -832,7 +833,8 @@ TEST_F(BrowserAccessibilityTest, TestCaretAndSelectionInSimpleFields) {
   ui::AXNodeData text_field;
   text_field.id = 3;
   text_field.role = ui::AX_ROLE_TEXT_FIELD;
-  text_field.state = 1 << ui::AX_STATE_FOCUSABLE;
+  text_field.state = (1 << ui::AX_STATE_EDITABLE) |
+      (1 << ui::AX_STATE_FOCUSABLE);
   text_field.SetValue("Test2");
   // Select the letter 'e'.
   text_field.AddIntAttribute(ui::AX_ATTR_TEXT_SEL_START, 1);
@@ -925,23 +927,27 @@ TEST_F(BrowserAccessibilityTest, TestCaretInContentEditables) {
   ui::AXNodeData div_editable;
   div_editable.id = 2;
   div_editable.role = ui::AX_ROLE_DIV;
-  div_editable.state = (1 << ui::AX_STATE_FOCUSABLE);
+  div_editable.state = (1 << ui::AX_STATE_EDITABLE) |
+      (1 << ui::AX_STATE_FOCUSABLE);
 
   ui::AXNodeData text;
   text.id = 3;
   text.role = ui::AX_ROLE_STATIC_TEXT;
+  text.state = (1 << ui::AX_STATE_EDITABLE);
   text.SetName("Click ");
 
   ui::AXNodeData link;
   link.id = 4;
   link.role = ui::AX_ROLE_LINK;
-  link.state = (1 << ui::AX_STATE_FOCUSABLE) | (1 << ui::AX_STATE_LINKED);
+  link.state = (1 << ui::AX_STATE_EDITABLE) |
+      (1 << ui::AX_STATE_FOCUSABLE) | (1 << ui::AX_STATE_LINKED);
   link.SetName("here");
 
   ui::AXNodeData link_text;
   link_text.id = 5;
   link_text.role = ui::AX_ROLE_STATIC_TEXT;
-  link_text.state = (1 << ui::AX_STATE_FOCUSABLE) | (1 << ui::AX_STATE_LINKED);
+  link_text.state = (1 << ui::AX_STATE_EDITABLE) |
+      (1 << ui::AX_STATE_FOCUSABLE) | (1 << ui::AX_STATE_LINKED);
   link_text.SetName("here");
 
   // Place the caret between 'h' and 'e'.
@@ -1161,6 +1167,214 @@ TEST_F(BrowserAccessibilityTest, DISABLED_TestSelectionInContentEditables) {
 
   manager.reset();
   ASSERT_EQ(0, CountedBrowserAccessibility::num_instances());
+}
+
+TEST_F(BrowserAccessibilityTest, TestIAccessibleHyperlink) {
+  ui::AXNodeData root;
+  root.id = 1;
+  root.role = ui::AX_ROLE_ROOT_WEB_AREA;
+  root.state = (1 << ui::AX_STATE_READ_ONLY) | (1 << ui::AX_STATE_FOCUSABLE);
+
+  ui::AXNodeData div;
+  div.id = 2;
+  div.role = ui::AX_ROLE_DIV;
+  div.state = (1 << ui::AX_STATE_FOCUSABLE);
+
+  ui::AXNodeData text;
+  text.id = 3;
+  text.role = ui::AX_ROLE_STATIC_TEXT;
+  text.SetName("Click ");
+
+  ui::AXNodeData link;
+  link.id = 4;
+  link.role = ui::AX_ROLE_LINK;
+  link.state = (1 << ui::AX_STATE_FOCUSABLE) | (1 << ui::AX_STATE_LINKED);
+  link.SetName("here");
+  link.AddStringAttribute(ui::AX_ATTR_URL, "example.com");
+
+  root.child_ids.push_back(2);
+  div.child_ids.push_back(3);
+  div.child_ids.push_back(4);
+
+  CountedBrowserAccessibility::reset();
+  scoped_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          MakeAXTreeUpdate(root, div, link, text), nullptr,
+          new CountedBrowserAccessibilityFactory()));
+  ASSERT_EQ(4, CountedBrowserAccessibility::num_instances());
+
+  ASSERT_NE(nullptr, manager->GetRoot());
+  BrowserAccessibilityWin* root_accessible =
+      manager->GetRoot()->ToBrowserAccessibilityWin();
+  ASSERT_NE(nullptr, root_accessible);
+  ASSERT_EQ(1U, root_accessible->PlatformChildCount());
+
+  BrowserAccessibilityWin* div_accessible =
+      root_accessible->PlatformGetChild(0)->ToBrowserAccessibilityWin();
+  ASSERT_NE(nullptr, div_accessible);
+  ASSERT_EQ(2U, div_accessible->PlatformChildCount());
+
+  BrowserAccessibilityWin* text_accessible =
+      div_accessible->PlatformGetChild(0)->ToBrowserAccessibilityWin();
+  ASSERT_NE(nullptr, text_accessible);
+  BrowserAccessibilityWin* link_accessible =
+      div_accessible->PlatformGetChild(1)->ToBrowserAccessibilityWin();
+  ASSERT_NE(nullptr, link_accessible);
+
+  // -1 is never a valid value.
+  LONG n_actions = -1;
+  LONG start_index = -1;
+  LONG end_index = -1;
+
+  base::win::ScopedComPtr<IAccessibleHyperlink> hyperlink;
+  base::win::ScopedVariant anchor;
+  base::win::ScopedVariant anchor_target;
+  base::win::ScopedBstr bstr;
+
+  base::string16 div_hypertext(L"Click ");
+  div_hypertext.push_back(BrowserAccessibilityWin::kEmbeddedCharacter);
+
+  // div_accessible and link_accessible are the only IA2 hyperlinks.
+  EXPECT_HRESULT_FAILED(root_accessible->QueryInterface(
+      IID_IAccessibleHyperlink, reinterpret_cast<void**>(hyperlink.Receive())));
+  hyperlink.Release();
+  EXPECT_HRESULT_SUCCEEDED(div_accessible->QueryInterface(
+      IID_IAccessibleHyperlink, reinterpret_cast<void**>(hyperlink.Receive())));
+  hyperlink.Release();
+  EXPECT_HRESULT_FAILED(text_accessible->QueryInterface(
+      IID_IAccessibleHyperlink, reinterpret_cast<void**>(hyperlink.Receive())));
+  hyperlink.Release();
+  EXPECT_HRESULT_SUCCEEDED(link_accessible->QueryInterface(
+      IID_IAccessibleHyperlink, reinterpret_cast<void**>(hyperlink.Receive())));
+  hyperlink.Release();
+
+  EXPECT_HRESULT_SUCCEEDED(root_accessible->nActions(&n_actions));
+  EXPECT_EQ(0, n_actions);
+  EXPECT_HRESULT_SUCCEEDED(div_accessible->nActions(&n_actions));
+  EXPECT_EQ(1, n_actions);
+  EXPECT_HRESULT_SUCCEEDED(text_accessible->nActions(&n_actions));
+  EXPECT_EQ(0, n_actions);
+  EXPECT_HRESULT_SUCCEEDED(link_accessible->nActions(&n_actions));
+  EXPECT_EQ(1, n_actions);
+
+  EXPECT_HRESULT_FAILED(root_accessible->get_anchor(0, anchor.Receive()));
+  anchor.Reset();
+  HRESULT hr = div_accessible->get_anchor(0, anchor.Receive());
+  EXPECT_EQ(S_OK, hr);
+  EXPECT_EQ(VT_BSTR, anchor.type());
+  bstr.Reset(V_BSTR(anchor.ptr()));
+  EXPECT_STREQ(div_hypertext.c_str(), bstr);
+  bstr.Reset();
+  anchor.Reset();
+  EXPECT_HRESULT_FAILED(text_accessible->get_anchor(0, anchor.Receive()));
+  anchor.Reset();
+  hr = link_accessible->get_anchor(0, anchor.Receive());
+  EXPECT_EQ(S_OK, hr);
+  EXPECT_EQ(VT_BSTR, anchor.type());
+  bstr.Reset(V_BSTR(anchor.ptr()));
+  EXPECT_STREQ(L"here", bstr);
+  bstr.Reset();
+  anchor.Reset();
+  EXPECT_HRESULT_FAILED(div_accessible->get_anchor(1, anchor.Receive()));
+  anchor.Reset();
+  EXPECT_HRESULT_FAILED(link_accessible->get_anchor(1, anchor.Receive()));
+  anchor.Reset();
+
+  EXPECT_HRESULT_FAILED(
+      root_accessible->get_anchorTarget(0, anchor_target.Receive()));
+  anchor_target.Reset();
+  hr = div_accessible->get_anchorTarget(0, anchor_target.Receive());
+  EXPECT_EQ(S_FALSE, hr);
+  EXPECT_EQ(VT_BSTR, anchor_target.type());
+  bstr.Reset(V_BSTR(anchor_target.ptr()));
+  // Target should be empty.
+  EXPECT_STREQ(L"", bstr);
+  bstr.Reset();
+  anchor_target.Reset();
+  EXPECT_HRESULT_FAILED(
+      text_accessible->get_anchorTarget(0, anchor_target.Receive()));
+  anchor_target.Reset();
+  hr = link_accessible->get_anchorTarget(0, anchor_target.Receive());
+  EXPECT_EQ(S_OK, hr);
+  EXPECT_EQ(VT_BSTR, anchor_target.type());
+  bstr.Reset(V_BSTR(anchor_target.ptr()));
+  EXPECT_STREQ(L"example.com", bstr);
+  bstr.Reset();
+  anchor_target.Reset();
+  EXPECT_HRESULT_FAILED(
+      div_accessible->get_anchorTarget(1, anchor_target.Receive()));
+  anchor_target.Reset();
+  EXPECT_HRESULT_FAILED(
+      link_accessible->get_anchorTarget(1, anchor_target.Receive()));
+  anchor_target.Reset();
+
+  EXPECT_HRESULT_FAILED(root_accessible->get_startIndex(&start_index));
+  EXPECT_HRESULT_SUCCEEDED(div_accessible->get_startIndex(&start_index));
+  EXPECT_EQ(0, start_index);
+  EXPECT_HRESULT_FAILED(text_accessible->get_startIndex(&start_index));
+  EXPECT_HRESULT_SUCCEEDED(link_accessible->get_startIndex(&start_index));
+  EXPECT_EQ(6, start_index);
+
+  EXPECT_HRESULT_FAILED(root_accessible->get_endIndex(&end_index));
+  EXPECT_HRESULT_SUCCEEDED(div_accessible->get_endIndex(&end_index));
+  EXPECT_EQ(1, end_index);
+  EXPECT_HRESULT_FAILED(text_accessible->get_endIndex(&end_index));
+  EXPECT_HRESULT_SUCCEEDED(link_accessible->get_endIndex(&end_index));
+  EXPECT_EQ(7, end_index);
+}
+
+TEST_F(BrowserAccessibilityTest, TestPlatformDeepestFirstLastChild) {
+  ui::AXNodeData root;
+  root.id = 1;
+  root.role = ui::AX_ROLE_ROOT_WEB_AREA;
+
+  ui::AXNodeData child1;
+  child1.id = 2;
+  root.child_ids.push_back(2);
+
+  ui::AXNodeData child2;
+  child2.id = 3;
+  root.child_ids.push_back(3);
+
+  ui::AXNodeData child2_child1;
+  child2_child1.id = 4;
+  child2.child_ids.push_back(4);
+
+  ui::AXNodeData child2_child2;
+  child2_child2.id = 5;
+  child2.child_ids.push_back(5);
+
+  scoped_ptr<BrowserAccessibilityManager> manager(
+      BrowserAccessibilityManager::Create(
+          MakeAXTreeUpdate(root, child1, child2, child2_child1, child2_child2),
+          nullptr, new CountedBrowserAccessibilityFactory()));
+
+  auto root_accessible = manager->GetRoot();
+  ASSERT_NE(nullptr, root_accessible);
+  ASSERT_EQ(2, root_accessible->PlatformChildCount());
+  auto child1_accessible = root_accessible->PlatformGetChild(0);
+  ASSERT_NE(nullptr, child1_accessible);
+  auto child2_accessible = root_accessible->PlatformGetChild(1);
+  ASSERT_NE(nullptr, child2_accessible);
+  ASSERT_EQ(2, child2_accessible->PlatformChildCount());
+  auto child2_child1_accessible = child2_accessible->PlatformGetChild(0);
+  ASSERT_NE(nullptr, child2_child1_accessible);
+  auto child2_child2_accessible = child2_accessible->PlatformGetChild(1);
+  ASSERT_NE(nullptr, child2_child2_accessible);
+
+  EXPECT_EQ(child1_accessible, root_accessible->PlatformDeepestFirstChild());
+  EXPECT_EQ(child2_child2_accessible,
+            root_accessible->PlatformDeepestLastChild());
+  EXPECT_EQ(nullptr, child1_accessible->PlatformDeepestFirstChild());
+  EXPECT_EQ(nullptr, child1_accessible->PlatformDeepestLastChild());
+  EXPECT_EQ(child2_child1_accessible,
+            child2_accessible->PlatformDeepestFirstChild());
+  EXPECT_EQ(child2_child2_accessible,
+            child2_accessible->PlatformDeepestLastChild());
+  EXPECT_EQ(nullptr, child2_child1_accessible->PlatformDeepestFirstChild());
+  EXPECT_EQ(nullptr, child2_child1_accessible->PlatformDeepestLastChild());
+  EXPECT_EQ(nullptr, child2_child2_accessible->PlatformDeepestFirstChild());
+  EXPECT_EQ(nullptr, child2_child2_accessible->PlatformDeepestLastChild());
 }
 
 }  // namespace content

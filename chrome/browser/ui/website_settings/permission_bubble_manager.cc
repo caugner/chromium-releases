@@ -12,19 +12,23 @@
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/user_metrics.h"
 
+#if !defined(OS_ANDROID)
+#include "chrome/browser/ui/browser_finder.h"
+#endif
+
 namespace {
 
 class CancelledRequest : public PermissionBubbleRequest {
  public:
   explicit CancelledRequest(PermissionBubbleRequest* cancelled)
-      : icon_(cancelled->GetIconID()),
+      : icon_(cancelled->GetIconId()),
         message_text_(cancelled->GetMessageText()),
         message_fragment_(cancelled->GetMessageTextFragment()),
         user_gesture_(cancelled->HasUserGesture()),
         hostname_(cancelled->GetRequestingHostname()) {}
   ~CancelledRequest() override {}
 
-  int GetIconID() const override { return icon_; }
+  int GetIconId() const override { return icon_; }
   base::string16 GetMessageText() const override { return message_text_; }
   base::string16 GetMessageTextFragment() const override {
     return message_fragment_;
@@ -60,17 +64,6 @@ void PermissionBubbleManager::Observer::OnBubbleAdded() {
 // PermissionBubbleManager -----------------------------------------------------
 
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(PermissionBubbleManager);
-
-// static
-bool PermissionBubbleManager::Enabled() {
-#if defined(OS_ANDROID) || defined(OS_IOS)
-  return false;
-#endif
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisablePermissionsBubbles))
-    return false;
-  return true;
-}
 
 PermissionBubbleManager::PermissionBubbleManager(
     content::WebContents* web_contents)
@@ -209,12 +202,17 @@ void PermissionBubbleManager::HideBubble() {
   view_.reset();
 }
 
-void PermissionBubbleManager::DisplayPendingRequests(Browser* browser) {
+void PermissionBubbleManager::DisplayPendingRequests() {
   if (IsBubbleVisible())
     return;
 
-  view_ = view_factory_.Run(browser);
+#if defined(OS_ANDROID)
+  NOTREACHED();
+  return;
+#else
+  view_ = view_factory_.Run(chrome::FindBrowserWithWebContents(web_contents()));
   view_->SetDelegate(this);
+#endif
 
   TriggerShowBubble();
 }

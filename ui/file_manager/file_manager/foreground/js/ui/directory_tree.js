@@ -14,6 +14,25 @@
 var DirectoryItemTreeBaseMethods = {};
 
 /**
+ * Finds an item by entry and returns it.
+ * @param {!Entry} entry
+ * @return {DirectoryItem} null is returned if it's not found.
+ * @this {(DirectoryItem|DirectoryTree)}
+ */
+DirectoryItemTreeBaseMethods.getItemByEntry = function(entry) {
+  for (var i = 0; i < this.items.length; i++) {
+    var item = this.items[i];
+    if (!item.entry)
+      continue;
+    if (util.isSameEntry(item.entry, entry))
+      return item;
+    if (util.isDescendantEntry(item.entry, entry))
+      return item.getItemByEntry(entry);
+  }
+  return null;
+};
+
+/**
  * Finds a parent directory of the {@code entry} in {@code this}, and
  * invokes the DirectoryItem.selectByEntry() of the found directory.
  *
@@ -87,7 +106,7 @@ function DirectoryItem(label, tree) {
 
   item.label = label;
   return item;
-};
+}
 
 DirectoryItem.prototype = {
   __proto__: cr.ui.TreeItem.prototype,
@@ -159,6 +178,15 @@ DirectoryItem.prototype.updateSubElementsFromList = function(recursive) {
   } else {
     this.hasChildren = true;
   }
+};
+
+/**
+ * Calls DirectoryItemTreeBaseMethods.getItemByEntry().
+ * @param {!Entry} entry
+ * @return {DirectoryItem}
+ */
+DirectoryItem.prototype.getItemByEntry = function(entry) {
+  return DirectoryItemTreeBaseMethods.getItemByEntry.call(this, entry);
 };
 
 /**
@@ -357,6 +385,10 @@ function SubDirectoryItem(label, dirEntry, parentDirItem, tree) {
 
   item.dirEntry_ = dirEntry;
 
+  // Set helper attribute for testing.
+  if (window.IN_TEST)
+    item.setAttribute('full-path-for-testing', dirEntry.fullPath);
+
   // Sets up icons of the item.
   var icon = item.querySelector('.icon');
   icon.classList.add('item-icon');
@@ -419,6 +451,11 @@ function VolumeItem(modelItem, tree) {
 
   item.modelItem_ = modelItem;
   item.volumeInfo_ = modelItem.volumeInfo;
+
+  // Set helper attribute for testing.
+  if (window.IN_TEST)
+    item.setAttribute('volume-type-for-testing', item.volumeInfo_.volumeType);
+
   item.setupIcon_(item.querySelector('.icon'), item.volumeInfo_);
 
   // Attach the "eject" icon if the volume is ejectable.
@@ -805,11 +842,11 @@ function MenuItem(modelItem, tree) {
   item.label = modelItem.label;
 
   item.menuButton_ = /** @type {!cr.ui.MenuButton} */(queryRequiredElement(
-        assert(item.firstElementChild), '.button'));
+        '.button', assert(item.firstElementChild)));
   item.menuButton_.setAttribute('menu', item.modelItem_.menu);
   cr.ui.MenuButton.decorate(item.menuButton_);
 
-  var icon = queryRequiredElement(item, '.icon');
+  var icon = queryRequiredElement('.icon', item);
   icon.setAttribute('menu-button-icon', item.modelItem_.icon);
 
   return item;
@@ -879,13 +916,16 @@ function DirectoryTree() {}
  * @param {!DirectoryModel} directoryModel Current DirectoryModel.
  * @param {!VolumeManagerWrapper} volumeManager VolumeManager of the system.
  * @param {!MetadataModel} metadataModel Shared MetadataModel instance.
+ * @param {!FileOperationManager} fileOperationManager
  * @param {boolean} fakeEntriesVisible True if it should show the fakeEntries.
  */
 DirectoryTree.decorate = function(
-    el, directoryModel, volumeManager, metadataModel, fakeEntriesVisible) {
+    el, directoryModel, volumeManager, metadataModel, fileOperationManager,
+    fakeEntriesVisible) {
   el.__proto__ = DirectoryTree.prototype;
   /** @type {DirectoryTree} */ (el).decorateDirectoryTree(
-      directoryModel, volumeManager, metadataModel, fakeEntriesVisible);
+      directoryModel, volumeManager, metadataModel, fileOperationManager,
+      fakeEntriesVisible);
 };
 
 DirectoryTree.prototype = {
@@ -953,6 +993,41 @@ DirectoryTree.prototype = {
 
 cr.defineProperty(DirectoryTree, 'contextMenuForSubitems', cr.PropertyKind.JS);
 cr.defineProperty(DirectoryTree, 'contextMenuForRootItems', cr.PropertyKind.JS);
+
+/**
+ * Updates and selects new directory.
+ * @param {!DirectoryEntry} parentDirectory Parent directory of new directory.
+ * @param {!DirectoryEntry} newDirectory
+ */
+DirectoryTree.prototype.updateAndSelectNewDirectory = function(
+    parentDirectory, newDirectory) {
+  // Expand parent directory.
+  var parentItem = DirectoryItemTreeBaseMethods.getItemByEntry.call(
+      this, parentDirectory);
+  parentItem.expanded = true;
+
+  // If new directory is already added to the tree, just select it.
+  for (var i = 0; i < parentItem.items.length; i++) {
+    var item = parentItem.items[i];
+    if (util.isSameEntry(item.entry, newDirectory)) {
+      this.selectedItem = item;
+      return;
+    }
+  }
+
+  // Create new item, and add it.
+  var newDirectoryItem = new SubDirectoryItem(
+      newDirectory.name, newDirectory, parentItem, this);
+
+  var addAt = 0;
+  while (addAt < parentItem.items.length &&
+      parentItem.items[addAt].entry.name < newDirectory.name) {
+    addAt++;
+  }
+
+  parentItem.addAt(newDirectoryItem, addAt);
+  this.selectedItem = newDirectoryItem;
+};
 
 /**
  * Calls DirectoryItemTreeBaseMethods.updateSubElementsFromList().
@@ -1051,10 +1126,12 @@ DirectoryTree.prototype.searchAndSelectByEntry = function(entry) {
  * @param {!DirectoryModel} directoryModel Current DirectoryModel.
  * @param {!VolumeManagerWrapper} volumeManager VolumeManager of the system.
  * @param {!MetadataModel} metadataModel Shared MetadataModel instance.
+ * @param {!FileOperationManager} fileOperationManager
  * @param {boolean} fakeEntriesVisible True if it should show the fakeEntries.
  */
 DirectoryTree.prototype.decorateDirectoryTree = function(
-    directoryModel, volumeManager, metadataModel, fakeEntriesVisible) {
+    directoryModel, volumeManager, metadataModel, fileOperationManager,
+    fakeEntriesVisible) {
   cr.ui.Tree.prototype.decorate.call(this);
 
   this.sequence_ = 0;
@@ -1070,6 +1147,11 @@ DirectoryTree.prototype.decorateDirectoryTree = function(
   this.directoryModel_.addEventListener('directory-changed',
       this.onCurrentDirectoryChanged_.bind(this));
 
+  util.addEventListenerToBackgroundComponent(
+      fileOperationManager,
+      'entries-changed',
+      this.onEntriesChanged_.bind(this));
+
   this.privateOnDirectoryChangedBound_ =
       this.onDirectoryContentChanged_.bind(this);
   chrome.fileManagerPrivate.onDirectoryChanged.addListener(
@@ -1084,6 +1166,20 @@ DirectoryTree.prototype.decorateDirectoryTree = function(
    * @private
    */
   this.fakeEntriesVisible_ = fakeEntriesVisible;
+};
+
+/**
+ * Handles entries changed event.
+ * @param {!Event} event
+ * @private
+ */
+DirectoryTree.prototype.onEntriesChanged_ = function(event) {
+  // TODO(yawano): Handle other entry change kinds.
+  if (event.kind !== util.EntryChangedKind.DELETED)
+    return;
+
+  var directories = event.entries.filter((entry) => entry.isDirectory);
+  directories.forEach((directory) => this.updateTreeByEntry_(directory));
 };
 
 /**

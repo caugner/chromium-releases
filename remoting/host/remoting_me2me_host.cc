@@ -96,6 +96,7 @@
 #if defined(OS_LINUX)
 #include <gtk/gtk.h>
 #include <X11/Xlib.h>
+#include <base/linux_util.h>
 #include "remoting/host/audio_capturer_linux.h"
 #endif  // defined(OS_LINUX)
 
@@ -469,19 +470,15 @@ bool HostProcess::InitWithCommandLine(const base::CommandLine* cmd_line) {
   daemon_channel_ = IPC::ChannelProxy::Create(channel_handle,
                                               IPC::Channel::MODE_CLIENT,
                                               this,
-                                              context_->network_task_runner(),
-                                              nullptr);
+                                              context_->network_task_runner());
 #else  // !defined(REMOTING_MULTI_PROCESS)
   // Connect to the daemon process.
   std::string channel_name =
       cmd_line->GetSwitchValueASCII(kDaemonPipeSwitchName);
   if (!channel_name.empty()) {
     daemon_channel_ =
-        IPC::ChannelProxy::Create(channel_name,
-                                  IPC::Channel::MODE_CLIENT,
-                                  this,
-                                  context_->network_task_runner().get(),
-                                  nullptr);
+        IPC::ChannelProxy::Create(channel_name, IPC::Channel::MODE_CLIENT, this,
+                                  context_->network_task_runner().get());
   }
 
   if (cmd_line->HasSwitch(kHostConfigSwitchName)) {
@@ -1619,6 +1616,10 @@ int HostProcessMain() {
   // Continue windows, though these should not be used for the Me2Me case
   // (crbug.com/104377).
   gtk_init(nullptr, nullptr);
+
+  // Need to prime the host OS version value for linux to prevent IO on the
+  // network thread. base::GetLinuxDistro() caches the result.
+  base::GetLinuxDistro();
 #endif
 
   // Enable support for SSL server sockets, which must be done while still

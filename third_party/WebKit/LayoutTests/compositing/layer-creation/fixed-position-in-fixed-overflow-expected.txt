@@ -16,18 +16,15 @@
               "children": [
                 {
                   "bounds": [785, 1000],
+                  "shouldFlattenTransform": false,
                   "drawsContent": true,
                   "children": [
                     {
-                      "children": [
-                        {
-                          "position": [192, 0],
-                          "bounds": [100, 100],
-                          "contentsOpaque": true,
-                          "drawsContent": true,
-                          "backgroundColor": "#FFFF00"
-                        }
-                      ]
+                      "position": [192, 0],
+                      "bounds": [100, 100],
+                      "contentsOpaque": true,
+                      "drawsContent": true,
+                      "backgroundColor": "#FFFF00"
                     }
                   ]
                 }
@@ -37,8 +34,7 @@
               "children": [
                 {
                   "position": [785, 0],
-                  "bounds": [15, 600],
-                  "drawsContent": true
+                  "bounds": [15, 600]
                 }
               ]
             }

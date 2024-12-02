@@ -141,10 +141,6 @@
         '<(webrtc_base)/nethelpers.h',
         '<(webrtc_base)/network.cc',
         '<(webrtc_base)/network.h',
-        '<(webrtc_base)/nssidentity.cc',
-        '<(webrtc_base)/nssidentity.h',
-        '<(webrtc_base)/nssstreamadapter.cc',
-        '<(webrtc_base)/nssstreamadapter.h',
         '<(webrtc_base)/nullsocketserver.h',
         '<(webrtc_base)/openssladapter.cc',
         '<(webrtc_base)/openssldigest.cc',
@@ -275,7 +271,7 @@
         'include_dirs': [
           './overrides',
           './<(libjingle_source)',
-          '../../third_party/webrtc/overrides',
+          '../../third_party/webrtc_overrides',
           '../../third_party',
           '../../third_party/webrtc',
         ],
@@ -301,6 +297,7 @@
       'type': 'none',
       'variables': {
         'nlib_target': 'libjingle_p2p_constants_nacl.a',
+        'nacl_untrusted_build': 1,
         'build_glibc': 0,
         'build_newlib': 1,
         'build_pnacl_newlib': 1,

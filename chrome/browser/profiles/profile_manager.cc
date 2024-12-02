@@ -24,6 +24,7 @@
 #include "chrome/browser/bookmarks/startup_task_runner_service_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
@@ -183,9 +184,11 @@ void ProfileSizeTask(const base::FilePath& path, int enabled_app_count) {
     UMA_HISTOGRAM_COUNTS_10000("Profile.AppCount", enabled_app_count);
 }
 
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
 void QueueProfileDirectoryForDeletion(const base::FilePath& path) {
   ProfilesToDelete().push_back(path);
 }
+#endif
 
 bool IsProfileMarkedForDeletion(const base::FilePath& profile_path) {
   return std::find(ProfilesToDelete().begin(), ProfilesToDelete().end(),
@@ -653,6 +656,7 @@ ProfileShortcutManager* ProfileManager::profile_shortcut_manager() {
   return profile_shortcut_manager_.get();
 }
 
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
 void ProfileManager::ScheduleProfileForDeletion(
     const base::FilePath& profile_dir,
     const CreateCallback& callback) {
@@ -687,15 +691,15 @@ void ProfileManager::ScheduleProfileForDeletion(
 
   base::FilePath new_path;
   if (last_non_supervised_profile_path.empty()) {
-    // If we are using --new-avatar-menu, then assign the default
-    // placeholder avatar and name. Otherwise, use random ones.
-    bool is_new_avatar_menu = switches::IsNewAvatarMenu();
+    base::string16 new_avatar_url = base::string16();
+    base::string16 new_profile_name = base::string16();
+
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
     int avatar_index = profiles::GetPlaceholderAvatarIndex();
-    base::string16 new_avatar_url = is_new_avatar_menu ?
-        base::UTF8ToUTF16(profiles::GetDefaultAvatarIconUrl(avatar_index)) :
-        base::string16();
-    base::string16 new_profile_name = is_new_avatar_menu ?
-        cache.ChooseNameForNewProfile(avatar_index) : base::string16();
+    new_avatar_url =
+        base::UTF8ToUTF16(profiles::GetDefaultAvatarIconUrl(avatar_index));
+    new_profile_name = cache.ChooseNameForNewProfile(avatar_index);
+#endif
 
     new_path = GenerateNextProfileDirectoryPath();
     CreateProfileAsync(new_path,
@@ -736,6 +740,7 @@ void ProfileManager::ScheduleProfileForDeletion(
 
   FinishDeletingProfile(profile_dir, last_non_supervised_profile_path);
 }
+#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 
 void ProfileManager::AutoloadProfiles() {
   // If running in the background is disabled for the browser, do not autoload
@@ -822,12 +827,13 @@ void ProfileManager::InitProfileUserPrefs(Profile* profile) {
           cache.GetSupervisedUserIdOfProfileAtIndex(profile_cache_index);
     } else if (profile->GetPath() ==
                profiles::GetDefaultProfileDir(cache.GetUserDataDir())) {
-      // The --new-avatar-menu flag no longer uses the "First User" name.
-      bool is_new_avatar_menu = switches::IsNewAvatarMenu();
       avatar_index = profiles::GetPlaceholderAvatarIndex();
-      profile_name = is_new_avatar_menu ?
-          base::UTF16ToUTF8(cache.ChooseNameForNewProfile(avatar_index)) :
-          l10n_util::GetStringUTF8(IDS_DEFAULT_PROFILE_NAME);
+#if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
+      profile_name =
+          base::UTF16ToUTF8(cache.ChooseNameForNewProfile(avatar_index));
+#else
+      profile_name = l10n_util::GetStringUTF8(IDS_DEFAULT_PROFILE_NAME);
+#endif
     } else {
       avatar_index = cache.ChooseAvatarIconIndexForNewProfile();
       profile_name =
@@ -1055,13 +1061,23 @@ void ProfileManager::DoFinalInitForServices(Profile* profile,
 
 #if defined(ENABLE_EXTENSIONS)
   ProfileInfoCache& cache = GetProfileInfoCache();
+
+  // Ensure that the HostContentSettingsMap has been created before the
+  // ExtensionSystem is initialized otherwise the ExtensionSystem will be
+  // registered twice
+  HostContentSettingsMap* content_settings_map =
+    HostContentSettingsMapFactory::GetForProfile(profile);
+
   extensions::ExtensionSystem::Get(profile)->InitForRegularProfile(
       !go_off_the_record);
   // During tests, when |profile| is an instance of TestingProfile,
   // ExtensionSystem might not create an ExtensionService.
+  // This block is duplicated in the HostContentSettingsMapFactory
+  // ::BuildServiceInstanceFor method, it should be called once when both the
+  // HostContentSettingsMap and the extension_service are set up.
   if (extensions::ExtensionSystem::Get(profile)->extension_service()) {
     extensions::ExtensionSystem::Get(profile)->extension_service()->
-        RegisterContentSettings(profile->GetHostContentSettingsMap());
+        RegisterContentSettings(content_settings_map);
   }
   // Set the block extensions bit on the ExtensionService. There likely are no
   // blockable extensions to block.
@@ -1211,6 +1227,7 @@ Profile* ProfileManager::CreateAndInitializeProfile(
   return profile;
 }
 
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
 void ProfileManager::FinishDeletingProfile(
     const base::FilePath& profile_dir,
     const base::FilePath& new_active_profile_dir) {
@@ -1272,6 +1289,7 @@ void ProfileManager::FinishDeletingProfile(
   cache.DeleteProfileFromCache(profile_dir);
   ProfileMetrics::UpdateReportedProfilesStatistics(this);
 }
+#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 
 ProfileManager::ProfileInfo* ProfileManager::RegisterProfile(
     Profile* profile,
@@ -1301,9 +1319,8 @@ void ProfileManager::AddProfileToCache(Profile* profile) {
       SigninManagerFactory::GetForProfile(profile);
   AccountTrackerService* account_tracker =
       AccountTrackerServiceFactory::GetForProfile(profile);
-  AccountTrackerService::AccountInfo account_info =
-      account_tracker->GetAccountInfo(
-          signin_manager->GetAuthenticatedAccountId());
+  AccountInfo account_info = account_tracker->GetAccountInfo(
+      signin_manager->GetAuthenticatedAccountId());
   base::string16 username = base::UTF8ToUTF16(account_info.email);
 
   size_t profile_index = cache.GetIndexOfProfileWithPath(profile->GetPath());
@@ -1453,7 +1470,6 @@ void ProfileManager::BrowserListObserver::OnBrowserSetLastActive(
 
   profile_manager_->UpdateLastUser(last_active);
 }
-#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 
 void ProfileManager::OnNewActiveProfileLoaded(
     const base::FilePath& profile_to_delete_path,
@@ -1480,6 +1496,7 @@ void ProfileManager::OnNewActiveProfileLoaded(
   if (!original_callback.is_null())
     original_callback.Run(loaded_profile, status);
 }
+#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 
 ProfileManagerWithoutInit::ProfileManagerWithoutInit(
     const base::FilePath& user_data_dir) : ProfileManager(user_data_dir) {

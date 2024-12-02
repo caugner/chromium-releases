@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_iterator.h"
+#include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/singleton_tabs.h"
@@ -576,8 +577,9 @@ bool ExtensionTabUtil::IsKillURL(const GURL& url) {
   if (!fixed_url.SchemeIs(content::kChromeUIScheme))
     return false;
 
+  base::StringPiece fixed_host = fixed_url.host_piece();
   for (size_t i = 0; i < arraysize(kill_hosts); ++i) {
-    if (fixed_url.host() == kill_hosts[i])
+    if (fixed_host == kill_hosts[i])
       return true;
   }
 

@@ -72,7 +72,7 @@ BasicHTTPURLRequestContextGetter::GetURLRequestContext() {
     net::URLRequestContextBuilder builder;
     builder.set_proxy_service(net::ProxyService::CreateDirect());
     builder.SetSpdyAndQuicEnabled(false, false);
-    url_request_context_.reset(builder.Build());
+    url_request_context_ = builder.Build().Pass();
   }
 
   return url_request_context_.get();

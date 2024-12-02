@@ -52,10 +52,10 @@ class FaviconDriverImpl : public FaviconDriver {
 
   // FaviconDriver implementation.
   void FetchFavicon(const GURL& url) override;
-  void SaveFavicon() override;
   bool IsBookmarked(const GURL& url) override;
-  void OnFaviconAvailable(const gfx::Image& image,
+  void OnFaviconAvailable(const GURL& page_url,
                           const GURL& icon_url,
+                          const gfx::Image& image,
                           bool is_active_favicon) override;
   bool HasPendingTasksForTest() override;
 
@@ -74,7 +74,13 @@ class FaviconDriverImpl : public FaviconDriver {
   void SetFaviconOutOfDateForPage(const GURL& url, bool force_reload);
 
   // Broadcasts new favicon URL candidates to FaviconHandlers.
-  void OnUpdateFaviconURL(const std::vector<FaviconURL>& candidates);
+  void OnUpdateFaviconURL(const GURL& page_url,
+                          const std::vector<FaviconURL>& candidates);
+
+ protected:
+  history::HistoryService* history_service() { return history_service_; }
+
+  FaviconService* favicon_service() { return favicon_service_; }
 
  private:
   // KeyedServices used by FaviconDriverImpl. They may be null during testing,

@@ -7,9 +7,12 @@
 
 #include <string>
 
+#include "base/containers/scoped_ptr_map.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/values.h"
+#include "components/content_settings/core/browser/content_settings_utils.h"
 #include "components/content_settings/core/browser/website_settings_info.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
@@ -22,38 +25,43 @@ namespace content_settings {
 // const.
 class WebsiteSettingsRegistry {
  public:
+  typedef base::ScopedPtrMap<ContentSettingsType,
+                             scoped_ptr<WebsiteSettingsInfo>> Map;
+  typedef MapValueIterator<typename Map::const_iterator,
+                           const WebsiteSettingsInfo*> const_iterator;
+
   static WebsiteSettingsRegistry* GetInstance();
+
+  // Reset the instance for use inside tests.
+  void ResetForTest();
 
   const WebsiteSettingsInfo* Get(ContentSettingsType type) const;
   const WebsiteSettingsInfo* GetByName(const std::string& name) const;
 
+  // Register a new website setting. This maps an origin to an arbitrary
+  // base::Value. Returns a pointer to the registered WebsiteSettingsInfo which
+  // is owned by the registry.
+  const WebsiteSettingsInfo* Register(
+      ContentSettingsType type,
+      const std::string& name,
+      scoped_ptr<base::Value> initial_default_value,
+      WebsiteSettingsInfo::SyncStatus sync_status,
+      WebsiteSettingsInfo::LossyStatus lossy_status);
+
+  const_iterator begin() const;
+  const_iterator end() const;
+
  private:
+  friend class ContentSettingsRegistryTest;
   friend class WebsiteSettingsRegistryTest;
   friend struct base::DefaultLazyInstanceTraits<WebsiteSettingsRegistry>;
 
   WebsiteSettingsRegistry();
   ~WebsiteSettingsRegistry();
 
-  // Register a new website setting. This maps an arbitrary base::Value to an
-  // origin. NOTE: Currently we don't pass in WebsiteSettingsInfo::SyncStatus as
-  // a property of a WebsiteSetting here but this is only because there are
-  // currently no WebsiteSettings that need to be synced. We should add that as
-  // a parameter here in the future if a setting were to be added which needs to
-  // be synced.
-  void RegisterWebsiteSetting(ContentSettingsType type,
-                              const std::string& name,
-                              WebsiteSettingsInfo::LossyStatus lossy_status);
-  // Register a new content setting. This maps an ALLOW/ASK/BLOCK value (see the
-  // ContentSetting enum) to an origin.
-  void RegisterContentSetting(ContentSettingsType type,
-                              const std::string& name,
-                              ContentSetting initial_default_value,
-                              WebsiteSettingsInfo::SyncStatus sync_status);
+  void Init();
 
-  // Helper used by Register/RegisterPermission.
-  void StoreWebsiteSettingsInfo(WebsiteSettingsInfo* info);
-
-  ScopedVector<WebsiteSettingsInfo> website_settings_info_;
+  Map website_settings_info_;
 
   DISALLOW_COPY_AND_ASSIGN(WebsiteSettingsRegistry);
 };

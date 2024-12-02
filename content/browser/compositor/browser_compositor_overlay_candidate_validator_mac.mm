@@ -5,6 +5,8 @@
 #include "content/browser/compositor/browser_compositor_overlay_candidate_validator_mac.h"
 
 #include "cc/output/overlay_strategy_sandwich.h"
+#include "content/browser/gpu/gpu_data_manager_impl.h"
+#include "gpu/config/gpu_driver_bug_workaround_type.h"
 
 namespace content {
 
@@ -12,7 +14,10 @@ BrowserCompositorOverlayCandidateValidatorMac::
     BrowserCompositorOverlayCandidateValidatorMac(
         gfx::AcceleratedWidget widget)
     : widget_(widget),
-      software_mirror_active_(false) {
+      software_mirror_active_(false),
+      ca_layers_disabled_(
+          GpuDataManagerImpl::GetInstance()->IsDriverBugWorkaroundActive(
+              gpu::DISABLE_OVERLAY_CA_LAYERS)) {
 }
 
 BrowserCompositorOverlayCandidateValidatorMac::
@@ -32,10 +37,11 @@ void BrowserCompositorOverlayCandidateValidatorMac::CheckOverlaySupport(
   if (software_mirror_active_)
     return;
 
-  for (size_t i = 0; i < surfaces->size(); ++i) {
-    if (surfaces->at(i).plane_z_order > 0)
-      surfaces->at(i).overlay_handled = true;
-  }
+  if (ca_layers_disabled_)
+    return;
+
+  for (size_t i = 0; i < surfaces->size(); ++i)
+    surfaces->at(i).overlay_handled = true;
 }
 
 void BrowserCompositorOverlayCandidateValidatorMac::SetSoftwareMirrorMode(

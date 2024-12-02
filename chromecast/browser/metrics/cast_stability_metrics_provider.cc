@@ -27,6 +27,15 @@ namespace metrics {
 
 namespace {
 
+enum RendererType {
+  RENDERER_TYPE_RENDERER = 1,
+  RENDERER_TYPE_EXTENSION, //  Not used, but needed for correct histogram count.
+  // NOTE: Add new action types only immediately above this line. Also,
+  // make sure the enum list in tools/metrics/histograms/histograms.xml is
+  // updated with any change in here.
+  RENDERER_TYPE_COUNT
+};
+
 void IncrementPrefValue(const char* path) {
   PrefService* pref = shell::CastBrowserProcess::GetInstance()->pref_service();
   DCHECK(pref);
@@ -45,6 +54,7 @@ int MapCrashExitCodeForHistogram(int exit_code) {
 // static
 void CastStabilityMetricsProvider::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterIntegerPref(prefs::kStabilityRendererCrashCount, 0);
+  registry->RegisterIntegerPref(prefs::kStabilityRendererFailedLaunchCount, 0);
   registry->RegisterIntegerPref(prefs::kStabilityRendererHangCount, 0);
   registry->RegisterIntegerPref(prefs::kStabilityChildProcessCrashCount, 0);
 }
@@ -88,6 +98,12 @@ void CastStabilityMetricsProvider::ProvideStabilityMetrics(
   if (count) {
     stability_proto->set_renderer_crash_count(count);
     pref->SetInteger(prefs::kStabilityRendererCrashCount, 0);
+  }
+
+  count = pref->GetInteger(prefs::kStabilityRendererFailedLaunchCount);
+  if (count) {
+    stability_proto->set_renderer_failed_launch_count(count);
+    pref->SetInteger(prefs::kStabilityRendererFailedLaunchCount, 0);
   }
 
   count = pref->GetInteger(prefs::kStabilityRendererHangCount);
@@ -155,11 +171,16 @@ void CastStabilityMetricsProvider::LogRendererCrash(
 
     UMA_HISTOGRAM_SPARSE_SLOWLY("CrashExitCodes.Renderer",
                                 MapCrashExitCodeForHistogram(exit_code));
-    UMA_HISTOGRAM_PERCENTAGE("BrowserRenderProcessHost.ChildCrashes", 1);
+    UMA_HISTOGRAM_ENUMERATION("BrowserRenderProcessHost.ChildCrashes",
+                              RENDERER_TYPE_RENDERER, RENDERER_TYPE_COUNT);
   } else if (status == base::TERMINATION_STATUS_PROCESS_WAS_KILLED) {
-    UMA_HISTOGRAM_PERCENTAGE("BrowserRenderProcessHost.ChildKills", 1);
+    UMA_HISTOGRAM_ENUMERATION("BrowserRenderProcessHost.ChildKills",
+                              RENDERER_TYPE_RENDERER, RENDERER_TYPE_COUNT);
   } else if (status == base::TERMINATION_STATUS_STILL_RUNNING) {
-    UMA_HISTOGRAM_PERCENTAGE("BrowserRenderProcessHost.DisconnectedAlive", 1);
+    UMA_HISTOGRAM_ENUMERATION("BrowserRenderProcessHost.DisconnectedAlive",
+                              RENDERER_TYPE_RENDERER, RENDERER_TYPE_COUNT);
+  } else if (status == base::TERMINATION_STATUS_LAUNCH_FAILED) {
+    IncrementPrefValue(prefs::kStabilityRendererFailedLaunchCount);
   }
 }
 

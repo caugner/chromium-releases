@@ -15,7 +15,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
-#include "extensions/common/permissions/coalesced_permission_message.h"
+#include "extensions/common/permissions/permission_message.h"
 #include "extensions/common/url_pattern.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/image/image.h"
@@ -102,9 +102,8 @@ class ExtensionInstallPrompt
    public:
     explicit Prompt(PromptType type);
 
-    void SetPermissions(
-        const extensions::CoalescedPermissionMessages& permissions,
-        PermissionsType permissions_type);
+    void SetPermissions(const extensions::PermissionMessages& permissions,
+                        PermissionsType permissions_type);
     void SetIsShowingDetails(DetailsType type,
                              size_t index,
                              bool is_showing_details);
@@ -310,7 +309,7 @@ class ExtensionInstallPrompt
   virtual void ConfirmBundleInstall(
       extensions::BundleInstaller* bundle,
       const SkBitmap* icon,
-      const extensions::PermissionSet* permissions);
+      scoped_ptr<const extensions::PermissionSet> permissions);
 
   // This is called by the bundle installer to verify the permissions for a
   // delegated bundle install.
@@ -320,7 +319,7 @@ class ExtensionInstallPrompt
       extensions::BundleInstaller* bundle,
       const std::string& delegated_username,
       const SkBitmap* icon,
-      const extensions::PermissionSet* permissions);
+      scoped_ptr<const extensions::PermissionSet> permissions);
 
   // This is called by the standalone installer to verify whether the install
   // from the webstore should proceed.
@@ -382,9 +381,10 @@ class ExtensionInstallPrompt
   // extension may be granted additional permissions.
   //
   // We *MUST* eventually call either Proceed() or Abort() on |delegate|.
-  virtual void ConfirmPermissions(Delegate* delegate,
-                                  const extensions::Extension* extension,
-                                  const extensions::PermissionSet* permissions);
+  virtual void ConfirmPermissions(
+      Delegate* delegate,
+      const extensions::Extension* extension,
+      scoped_ptr<const extensions::PermissionSet> permissions);
 
   // This is called by the app handler launcher to review what permissions the
   // extension or app currently has.
@@ -453,7 +453,7 @@ class ExtensionInstallPrompt
 
   // A custom set of permissions to show in the install prompt instead of the
   // extension's active permissions.
-  scoped_refptr<const extensions::PermissionSet> custom_permissions_;
+  scoped_ptr<const extensions::PermissionSet> custom_permissions_;
 
   // The object responsible for doing the UI specific actions.
   scoped_ptr<extensions::ExtensionInstallUI> install_ui_;

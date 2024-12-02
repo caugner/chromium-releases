@@ -191,7 +191,7 @@ base::DictionaryValue* GetSettingsDictionary(const base::ListValue* args) {
   }
   scoped_ptr<base::DictionaryValue> settings(
       static_cast<base::DictionaryValue*>(
-          base::JSONReader::DeprecatedRead(json_str)));
+          base::JSONReader::Read(json_str).release()));
   if (!settings.get() || !settings->IsType(base::Value::TYPE_DICTIONARY)) {
     NOTREACHED() << "Print job settings must be a dictionary.";
     return NULL;
@@ -1629,7 +1629,7 @@ void PrintPreviewHandler::StartPrivetLocalPrint(const std::string& print_ticket,
 
   if (signin_manager) {
     privet_local_print_operation_->SetUsername(
-        signin_manager->GetAuthenticatedUsername());
+        signin_manager->GetAuthenticatedAccountInfo().email);
   }
 
   privet_local_print_operation_->Start();

@@ -39,6 +39,7 @@ class OobeBaseTest : public ExtensionApiTest {
 
   static const char kFakeUserEmail[];
   static const char kFakeUserPassword[];
+  static const char kFakeUserGaiaId[];
 
   // FakeGaia is configured to return these cookies for kFakeUserEmail.
   static const char kFakeSIDCookie[];
@@ -89,6 +90,7 @@ class OobeBaseTest : public ExtensionApiTest {
   WebUILoginDisplay* GetLoginDisplay();
 
   void WaitForGaiaPageLoad();
+  void WaitForGaiaPageReload();
   void WaitForSigninScreen();
   void ExecuteJsInSigninFrame(const std::string& js);
   void SetSignFormField(const std::string& field_id,

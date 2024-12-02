@@ -5,6 +5,7 @@
 'use strict';
 
 var resultQueue = new ResultQueue();
+var registrationReference = null;
 
 // Sends data back to the test. This must be in response to an earlier
 // request, but it's ok to respond asynchronously. The request blocks until
@@ -42,6 +43,45 @@ function registerOneShot(tag) {
     .catch(sendErrorToTest);
 }
 
+function unregisterOneShot(tag) {
+  navigator.serviceWorker.ready
+    .then(function(swRegistration) {
+      return swRegistration.sync.getRegistration(tag);
+    })
+    .then(function(syncRegistration) {
+      if (!syncRegistration) {
+        sendResultToTest('error - ' + tag + ' not found');
+        return;
+      }
+      return syncRegistration.unregister();
+    })
+    .then(function() {
+      sendResultToTest('ok - ' + tag + ' unregistered');
+    })
+    .catch(sendErrorToTest);
+}
+
+function unregisterOneShotTwice(tag) {
+  navigator.serviceWorker.ready
+    .then(function(swRegistration) {
+      return swRegistration.sync.getRegistration(tag);
+    })
+    .then(function(syncRegistration) {
+      if (!syncRegistration) {
+        sendResultToTest('error - ' + tag + ' not found');
+        return;
+      }
+      return syncRegistration.unregister();
+    })
+    .then(function() {
+      return syncRegistration.unregister();
+    })
+    .then(sendErrorToTest, function() {
+      sendResultToTest('ok - ' + tag + ' failed to unregister twice');
+    })
+    .catch(sendErrorToTest);
+}
+
 function getRegistrationOneShot(tag) {
   navigator.serviceWorker.ready
     .then(function(swRegistration) {
@@ -74,7 +114,7 @@ function getRegistrationsOneShot(tag) {
 function completeDelayedOneShot() {
   navigator.serviceWorker.ready
     .then(function(swRegistration) {
-      swRegistration.active.postMessage('completeDelayedOneShot');
+      swRegistration.active.postMessage({action: 'completeDelayedOneShot'});
       sendResultToTest('ok - delay completing');
     })
     .catch(sendErrorToTest);
@@ -83,8 +123,45 @@ function completeDelayedOneShot() {
 function rejectDelayedOneShot() {
   navigator.serviceWorker.ready
     .then(function(swRegistration) {
-      swRegistration.active.postMessage('rejectDelayedOneShot');
+      swRegistration.active.postMessage({action: 'rejectDelayedOneShot'});
       sendResultToTest('ok - delay rejecting');
+    })
+    .catch(sendErrorToTest);
+}
+
+function notifyWhenDoneOneShot(tag) {
+  navigator.serviceWorker.ready
+    .then(function(swRegistration) {
+      swRegistration.active.postMessage({action: 'notifyWhenDone', tag: tag});
+    })
+    .catch(sendErrorToTest);
+}
+
+function notifyWhenDoneImmediateOneShot(tag) {
+  if (registrationReference == null) {
+    sendResultToTest('error - must call storeRegistration first');
+    return;
+  }
+
+  registrationReference.done
+    .then(function(success) {
+      sendResultToTest('ok - ' + registrationReference.tag +
+                       ' result: ' + success)
+    }, function(err) {
+      sendResultToTest('error - ' + registrationReference.tag + ' failed');
+    })
+    .catch(sendErrorToTest)
+}
+
+
+function storeRegistration(tag) {
+  navigator.serviceWorker.ready
+    .then(function(swRegistration) {
+      return swRegistration.sync.getRegistration(tag);
+    })
+    .then(function(syncRegistration) {
+      registrationReference = syncRegistration;
+      sendResultToTest('ok - ' + tag + ' stored');
     })
     .catch(sendErrorToTest);
 }

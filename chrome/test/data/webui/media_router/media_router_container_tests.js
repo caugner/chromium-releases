@@ -119,16 +119,15 @@ cr.define('media_router_container', function() {
 
         // Initialize local variables.
         fakeCastModeList = [
-          new media_router.CastMode(0, 'Cast Mode 0', 'Description 0',
-              'google.com'),
-          new media_router.CastMode(1, 'Cast Mode 1', 'Description 1', null),
-          new media_router.CastMode(2, 'Cast Mode 2', 'Description 2', null),
+          new media_router.CastMode(0, 'Description 0', 'google.com'),
+          new media_router.CastMode(1, 'Description 1', null),
+          new media_router.CastMode(2, 'Description 2', null),
         ];
 
         fakeCastModeListWithNonDefaultModesOnly = [
-          new media_router.CastMode(1, 'Cast Mode 1', 'Description 1', null),
-          new media_router.CastMode(2, 'Cast Mode 2', 'Description 2', null),
-          new media_router.CastMode(3, 'Cast Mode 3', 'Description 3', null),
+          new media_router.CastMode(1, 'Description 1', null),
+          new media_router.CastMode(2, 'Description 2', null),
+          new media_router.CastMode(3, 'Description 3', null),
         ];
 
         fakeRouteList = [
@@ -143,10 +142,13 @@ cr.define('media_router_container', function() {
 
         fakeSinkList = [
           new media_router.Sink('sink id 1', 'Sink 1',
+              media_router.SinkIconType.CAST,
               media_router.SinkStatus.ACTIVE, [1, 2, 3]),
           new media_router.Sink('sink id 2', 'Sink 2',
+              media_router.SinkIconType.CAST,
               media_router.SinkStatus.ACTIVE, [1, 2, 3]),
           new media_router.Sink('sink id 3', 'Sink 3',
+              media_router.SinkIconType.CAST,
               media_router.SinkStatus.PENDING, [1, 2, 3]),
         ];
 
@@ -343,8 +345,8 @@ cr.define('media_router_container', function() {
           var routeList =
               container.$['sink-list'].querySelectorAll('.route');
 
-          checkElementText(fakeRouteList[0].title, routeList[0]);
-          checkElementText(fakeRouteList[1].title, routeList[1]);
+          checkElementText(fakeRouteList[0].description, routeList[0]);
+          checkElementText(fakeRouteList[1].description, routeList[1]);
           checkElementText('', routeList[2]);
           done();
         });
@@ -386,10 +388,21 @@ cr.define('media_router_container', function() {
 
       // Tests the expected view when there are no local active routes and
       // media_router_container is created for the first time.
-      test('initial view with one local route', function() {
+      test('initial view with no local route', function() {
         container.sinkList = fakeSinkList;
         container.routeList = [];
 
+        checkCurrentView(container.CONTAINER_VIEW_.SINK_LIST);
+      });
+
+      // Tests the expected view when there are no local active routes and
+      // media_router_container is created for the first time.
+      test('view after route is closed remotely', function() {
+        container.sinkList = fakeSinkList;
+        container.routeList = fakeRouteList;
+        checkCurrentView(container.CONTAINER_VIEW_.ROUTE_DETAILS);
+
+        container.routeList = [];
         checkCurrentView(container.CONTAINER_VIEW_.SINK_LIST);
       });
 

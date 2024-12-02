@@ -7,27 +7,16 @@
 #include "chrome/browser/ssl/ssl_error_classification.h"
 
 #include "base/build_time.h"
-#include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ssl/ssl_error_info.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/web_contents.h"
+#include "components/ssl_errors/error_info.h"
 #include "net/base/net_util.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/cert/x509_cert_types.h"
 #include "net/cert/x509_certificate.h"
 #include "url/gurl.h"
-
-#if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
-#include "chrome/browser/captive_portal/captive_portal_service.h"
-#include "chrome/browser/captive_portal/captive_portal_service_factory.h"
-#endif
 
 #if defined(OS_WIN)
 #include "base/win/win_util.h"
@@ -52,25 +41,11 @@ enum SSLInterstitialCause {
   LIKELY_MULTI_TENANT_HOSTING,
   LOCALHOST,
   PRIVATE_URL,
-  AUTHORITY_ERROR_CAPTIVE_PORTAL,
+  AUTHORITY_ERROR_CAPTIVE_PORTAL,  // Deprecated in M47.
   SELF_SIGNED,
   EXPIRED_RECENTLY,
   LIKELY_SAME_DOMAIN,
   UNUSED_INTERSTITIAL_CAUSE_ENTRY,
-};
-
-// Events for UMA. Do not reorder or change!
-enum SSLInterstitialCauseCaptivePortal {
-  CAPTIVE_PORTAL_ALL,
-  CAPTIVE_PORTAL_DETECTION_ENABLED,
-  CAPTIVE_PORTAL_DETECTION_ENABLED_OVERRIDABLE,
-  CAPTIVE_PORTAL_PROBE_COMPLETED,
-  CAPTIVE_PORTAL_PROBE_COMPLETED_OVERRIDABLE,
-  CAPTIVE_PORTAL_NO_RESPONSE,
-  CAPTIVE_PORTAL_NO_RESPONSE_OVERRIDABLE,
-  CAPTIVE_PORTAL_DETECTED,
-  CAPTIVE_PORTAL_DETECTED_OVERRIDABLE,
-  UNUSED_CAPTIVE_PORTAL_EVENT,
 };
 
 void RecordSSLInterstitialCause(bool overridable, SSLInterstitialCause event) {
@@ -82,14 +57,6 @@ void RecordSSLInterstitialCause(bool overridable, SSLInterstitialCause event) {
                               UNUSED_INTERSTITIAL_CAUSE_ENTRY);
   }
 }
-
-#if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
-void RecordCaptivePortalEventStats(SSLInterstitialCauseCaptivePortal event) {
-  UMA_HISTOGRAM_ENUMERATION("interstitial.ssl.captive_portal",
-                            event,
-                            UNUSED_CAPTIVE_PORTAL_EVENT);
-}
-#endif
 
 int GetLevensteinDistance(const std::string& str1,
                           const std::string& str2) {
@@ -117,82 +84,41 @@ int GetLevensteinDistance(const std::string& str1,
   return kSecondRow[str2.size()];
 }
 
+// The time to use when doing build time operations in browser tests.
+base::Time g_testing_build_time;
+
 } // namespace
 
-SSLErrorClassification::SSLErrorClassification(
-    content::WebContents* web_contents,
-    const base::Time& current_time,
-    const GURL& url,
-    int cert_error,
-    const net::X509Certificate& cert)
-  : web_contents_(web_contents),
-    current_time_(current_time),
-    request_url_(url),
-    cert_error_(cert_error),
-    cert_(cert),
-    captive_portal_detection_enabled_(false),
-    captive_portal_probe_completed_(false),
-    captive_portal_no_response_(false),
-    captive_portal_detected_(false) {
-#if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
-  Profile* profile = Profile::FromBrowserContext(
-      web_contents_->GetBrowserContext());
-  captive_portal_detection_enabled_ =
-      CaptivePortalServiceFactory::GetForProfile(profile)->enabled();
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_CAPTIVE_PORTAL_CHECK_RESULT,
-                 content::Source<Profile>(profile));
-#endif
-}
+SSLErrorClassification::SSLErrorClassification(const base::Time& current_time,
+                                               const GURL& url,
+                                               int cert_error,
+                                               const net::X509Certificate& cert)
+    : current_time_(current_time),
+      request_url_(url),
+      cert_error_(cert_error),
+      cert_(cert) {}
 
 SSLErrorClassification::~SSLErrorClassification() { }
 
-void SSLErrorClassification::RecordCaptivePortalUMAStatistics(
-    bool overridable) const {
-#if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
-  RecordCaptivePortalEventStats(CAPTIVE_PORTAL_ALL);
-  if (captive_portal_detection_enabled_)
-    RecordCaptivePortalEventStats(
-        overridable ?
-        CAPTIVE_PORTAL_DETECTION_ENABLED_OVERRIDABLE :
-        CAPTIVE_PORTAL_DETECTION_ENABLED);
-  if (captive_portal_probe_completed_)
-    RecordCaptivePortalEventStats(
-        overridable ?
-        CAPTIVE_PORTAL_PROBE_COMPLETED_OVERRIDABLE :
-        CAPTIVE_PORTAL_PROBE_COMPLETED);
-  // Log only one of portal detected and no response results.
-  if (captive_portal_detected_)
-    RecordCaptivePortalEventStats(
-        overridable ?
-        CAPTIVE_PORTAL_DETECTED_OVERRIDABLE :
-        CAPTIVE_PORTAL_DETECTED);
-  else if (captive_portal_no_response_)
-    RecordCaptivePortalEventStats(
-        overridable ?
-        CAPTIVE_PORTAL_NO_RESPONSE_OVERRIDABLE :
-        CAPTIVE_PORTAL_NO_RESPONSE);
-#endif
-}
-
 void SSLErrorClassification::RecordUMAStatistics(
     bool overridable) const {
-  SSLErrorInfo::ErrorType type =
-      SSLErrorInfo::NetErrorToErrorType(cert_error_);
-  UMA_HISTOGRAM_ENUMERATION(
-      "interstitial.ssl_error_type", type, SSLErrorInfo::END_OF_ENUM);
+  ssl_errors::ErrorInfo::ErrorType type =
+      ssl_errors::ErrorInfo::NetErrorToErrorType(cert_error_);
+  UMA_HISTOGRAM_ENUMERATION("interstitial.ssl_error_type", type,
+                            ssl_errors::ErrorInfo::END_OF_ENUM);
   switch (type) {
-    case SSLErrorInfo::CERT_DATE_INVALID: {
+    case ssl_errors::ErrorInfo::CERT_DATE_INVALID: {
       if (IsUserClockInThePast(base::Time::NowFromSystemTime())) {
         RecordSSLInterstitialCause(overridable, CLOCK_PAST);
       } else if (IsUserClockInTheFuture(base::Time::NowFromSystemTime())) {
         RecordSSLInterstitialCause(overridable, CLOCK_FUTURE);
-      } else if (cert_.HasExpired() && TimePassedSinceExpiry().InDays() < 28) {
+      } else if (cert_.HasExpired() &&
+                 (current_time_ - cert_.valid_expiry()).InDays() < 28) {
         RecordSSLInterstitialCause(overridable, EXPIRED_RECENTLY);
       }
       break;
     }
-    case SSLErrorInfo::CERT_COMMON_NAME_INVALID: {
+    case ssl_errors::ErrorInfo::CERT_COMMON_NAME_INVALID: {
       std::string host_name = request_url_.host();
       if (IsHostNameKnownTLD(host_name)) {
         Tokens host_name_tokens = Tokenize(host_name);
@@ -216,14 +142,12 @@ void SSLErrorClassification::RecordUMAStatistics(
       }
       break;
     }
-    case SSLErrorInfo::CERT_AUTHORITY_INVALID: {
+    case ssl_errors::ErrorInfo::CERT_AUTHORITY_INVALID: {
       const std::string& hostname = request_url_.HostNoBrackets();
       if (net::IsLocalhost(hostname))
         RecordSSLInterstitialCause(overridable, LOCALHOST);
       if (IsHostnameNonUniqueOrDotless(hostname))
         RecordSSLInterstitialCause(overridable, PRIVATE_URL);
-      if (captive_portal_probe_completed_ && captive_portal_detected_)
-        RecordSSLInterstitialCause(overridable, AUTHORITY_ERROR_CAPTIVE_PORTAL);
       if (net::X509Certificate::IsSelfSigned(cert_.os_cert_handle()))
         RecordSSLInterstitialCause(overridable, SELF_SIGNED);
       break;
@@ -236,32 +160,45 @@ void SSLErrorClassification::RecordUMAStatistics(
                             net::NetworkChangeNotifier::CONNECTION_LAST);
 }
 
-base::TimeDelta SSLErrorClassification::TimePassedSinceExpiry() const {
-  base::TimeDelta delta = current_time_ - cert_.valid_expiry();
-  return delta;
-}
-
 bool SSLErrorClassification::IsUserClockInThePast(const base::Time& time_now) {
+  base::Time build_time;
+  if (!g_testing_build_time.is_null()) {
+    build_time = g_testing_build_time;
+  } else {
 #if defined(DONT_EMBED_BUILD_METADATA) && !defined(OFFICIAL_BUILD)
-  return false;
+    return false;
 #else
-  base::Time build_time = base::GetBuildTime();
+    build_time = base::GetBuildTime();
+#endif
+  }
+
   if (time_now < build_time - base::TimeDelta::FromDays(2))
     return true;
   return false;
-#endif
 }
 
 bool SSLErrorClassification::IsUserClockInTheFuture(
     const base::Time& time_now) {
+  base::Time build_time;
+  if (!g_testing_build_time.is_null()) {
+    build_time = g_testing_build_time;
+  } else {
 #if defined(DONT_EMBED_BUILD_METADATA) && !defined(OFFICIAL_BUILD)
-  return false;
+    return false;
 #else
-  base::Time build_time = base::GetBuildTime();
+    build_time = base::GetBuildTime();
+#endif
+  }
+
   if (time_now > build_time + base::TimeDelta::FromDays(365))
     return true;
   return false;
-#endif
+}
+
+// static
+void SSLErrorClassification::SetBuildTimeForTesting(
+    const base::Time& testing_time) {
+  g_testing_build_time = testing_time;
 }
 
 bool SSLErrorClassification::MaybeWindowsLacksSHA256Support() {
@@ -504,35 +441,4 @@ bool SSLErrorClassification::IsHostnameNonUniqueOrDotless(
     const std::string& hostname) {
   return net::IsHostnameNonUnique(hostname) ||
          hostname.find('.') == std::string::npos;
-}
-
-void SSLErrorClassification::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-#if defined(ENABLE_CAPTIVE_PORTAL_DETECTION)
-  // When detection is disabled, captive portal service always sends
-  // RESULT_INTERNET_CONNECTED. Ignore any probe results in that case.
-  if (!captive_portal_detection_enabled_)
-    return;
-  if (type == chrome::NOTIFICATION_CAPTIVE_PORTAL_CHECK_RESULT) {
-    captive_portal_probe_completed_ = true;
-    CaptivePortalService::Results* results =
-        content::Details<CaptivePortalService::Results>(details).ptr();
-    // If a captive portal was detected at any point when the interstitial was
-    // displayed, assume that the interstitial was caused by a captive portal.
-    // Example scenario:
-    // 1- Interstitial displayed and captive portal detected, setting the flag.
-    // 2- Captive portal detection automatically opens portal login page.
-    // 3- User logs in on the portal login page.
-    // A notification will be received here for RESULT_INTERNET_CONNECTED. Make
-    // sure we don't clear the captive protal flag, since the interstitial was
-    // potentially caused by the captive portal.
-    captive_portal_detected_ = captive_portal_detected_ ||
-        (results->result == captive_portal::RESULT_BEHIND_CAPTIVE_PORTAL);
-    // Also keep track of non-HTTP portals and error cases.
-    captive_portal_no_response_ = captive_portal_no_response_ ||
-        (results->result == captive_portal::RESULT_NO_RESPONSE);
-  }
-#endif
 }

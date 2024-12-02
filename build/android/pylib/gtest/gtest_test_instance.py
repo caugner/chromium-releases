@@ -5,24 +5,25 @@
 import logging
 import os
 import re
-import shutil
 import sys
 import tempfile
 
+from devil.android import apk_helper
 from pylib import constants
 from pylib.base import base_test_result
 from pylib.base import test_instance
-from pylib.utils import apk_helper
 
 sys.path.append(os.path.join(
     constants.DIR_SOURCE_ROOT, 'build', 'util', 'lib', 'common'))
-import unittest_util
+import unittest_util # pylint: disable=import-error
 
 
 BROWSER_TEST_SUITES = [
   'components_browsertests',
   'content_browsertests',
 ]
+
+RUN_IN_SUB_THREAD_TEST_SUITES = ['net_unittests']
 
 
 _DEFAULT_ISOLATE_FILE_PATHS = {
@@ -74,7 +75,12 @@ _DEPS_EXCLUSION_LIST = [
 _EXTRA_NATIVE_TEST_ACTIVITY = (
     'org.chromium.native_test.NativeTestInstrumentationTestRunner.'
         'NativeTestActivity')
-_EXTRA_SHARD_SIZE_LIMIT =(
+_EXTRA_RUN_IN_SUB_THREAD = (
+    'org.chromium.native_test.NativeTestActivity.RunInSubThread')
+EXTRA_SHARD_NANO_TIMEOUT = (
+    'org.chromium.native_test.NativeTestInstrumentationTestRunner.'
+        'ShardNanoTimeout')
+_EXTRA_SHARD_SIZE_LIMIT = (
     'org.chromium.native_test.NativeTestInstrumentationTestRunner.'
         'ShardSizeLimit')
 
@@ -145,11 +151,15 @@ class GtestTestInstance(test_instance.TestInstance):
       self._activity = helper.GetActivityName()
       self._package = helper.GetPackageName()
       self._runner = helper.GetInstrumentationName()
+      self._permissions = helper.GetPermissions()
       self._extras = {
         _EXTRA_NATIVE_TEST_ACTIVITY: self._activity,
       }
+      if self._suite in RUN_IN_SUB_THREAD_TEST_SUITES:
+        self._extras[_EXTRA_RUN_IN_SUB_THREAD] = 1
       if self._suite in BROWSER_TEST_SUITES:
         self._extras[_EXTRA_SHARD_SIZE_LIMIT] = 1
+        self._extras[EXTRA_SHARD_NANO_TIMEOUT] = int(60e9)
 
     if not os.path.exists(self._exe_path):
       self._exe_path = None
@@ -177,7 +187,7 @@ class GtestTestInstance(test_instance.TestInstance):
       self._isolated_abs_path = os.path.join(
           constants.GetOutDirectory(), '%s.isolated' % self._suite)
     else:
-      logging.warning('No isolate file provided. No data deps will be pushed.');
+      logging.warning('No isolate file provided. No data deps will be pushed.')
       self._isolate_delegate = None
 
     if args.app_data_files:
@@ -206,7 +216,8 @@ class GtestTestInstance(test_instance.TestInstance):
       dest_dir = None
       if self._suite == 'breakpad_unittests':
         dest_dir = '/data/local/tmp/'
-      self._data_deps.extend([(constants.ISOLATE_DEPS_DIR, dest_dir)])
+      self._data_deps.extend([
+          (self._isolate_delegate.isolate_deps_dir, dest_dir)])
 
 
   def GetDataDependencies(self):
@@ -259,6 +270,7 @@ class GtestTestInstance(test_instance.TestInstance):
 
     return '*-%s' % ':'.join(disabled_filter_items)
 
+  # pylint: disable=no-self-use
   def ParseGTestOutput(self, output):
     """Parses raw gtest output and returns a list of results.
 
@@ -267,22 +279,32 @@ class GtestTestInstance(test_instance.TestInstance):
     Returns:
       A list of base_test_result.BaseTestResults.
     """
+    log = []
+    result_type = None
     results = []
     for l in output:
+      logging.info(l)
       matcher = _RE_TEST_STATUS.match(l)
       if matcher:
-        result_type = None
-        if matcher.group(1) == 'OK':
+        if matcher.group(1) == 'RUN':
+          log = []
+        elif matcher.group(1) == 'OK':
           result_type = base_test_result.ResultType.PASS
         elif matcher.group(1) == 'FAILED':
           result_type = base_test_result.ResultType.FAIL
 
-        if result_type:
-          test_name = matcher.group(2)
-          duration = matcher.group(3) if matcher.group(3) else 0
-          results.append(base_test_result.BaseTestResult(
-              test_name, result_type, duration))
-      logging.info(l)
+      if log is not None:
+        log.append(l)
+
+      if result_type:
+        test_name = matcher.group(2)
+        duration = matcher.group(3) if matcher.group(3) else 0
+        results.append(base_test_result.BaseTestResult(
+            test_name, result_type, duration,
+            log=('\n'.join(log) if log else '')))
+        log = None
+        result_type = None
+
     return results
 
   #override
@@ -318,6 +340,10 @@ class GtestTestInstance(test_instance.TestInstance):
   @property
   def package(self):
     return self._package
+
+  @property
+  def permissions(self):
+    return self._permissions
 
   @property
   def runner(self):

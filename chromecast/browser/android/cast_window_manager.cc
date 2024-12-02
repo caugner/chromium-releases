@@ -52,12 +52,15 @@ bool RegisterCastWindowManager(JNIEnv* env) {
   return RegisterNativesImpl(env);
 }
 
-void Init(JNIEnv* env, jclass clazz, jobject obj) {
-  g_window_manager.Get().Reset(
-      base::android::ScopedJavaLocalRef<jobject>(env, obj));
+void Init(JNIEnv* env,
+          const JavaParamRef<jclass>& clazz,
+          const JavaParamRef<jobject>& obj) {
+  g_window_manager.Get().Reset(obj);
 }
 
-jlong LaunchCastWindow(JNIEnv* env, jclass clazz, jstring jurl) {
+jlong LaunchCastWindow(JNIEnv* env,
+                       const JavaParamRef<jclass>& clazz,
+                       const JavaParamRef<jstring>& jurl) {
   GURL url(base::android::ConvertJavaStringToUTF8(env, jurl));
   return reinterpret_cast<jlong>(
       CastWindowAndroid::CreateNewWindow(
@@ -65,8 +68,10 @@ jlong LaunchCastWindow(JNIEnv* env, jclass clazz, jstring jurl) {
           url));
 }
 
-void StopCastWindow(JNIEnv* env, jclass clazz,
-                    jlong nativeCastWindow, jboolean gracefully) {
+void StopCastWindow(JNIEnv* env,
+                    const JavaParamRef<jclass>& clazz,
+                    jlong nativeCastWindow,
+                    jboolean gracefully) {
   CastWindowAndroid* window =
       reinterpret_cast<CastWindowAndroid*>(nativeCastWindow);
   DCHECK(window);
@@ -76,7 +81,9 @@ void StopCastWindow(JNIEnv* env, jclass clazz,
     window->Destroy();
 }
 
-void EnableDevTools(JNIEnv* env, jclass clazz, jboolean enable) {
+void EnableDevTools(JNIEnv* env,
+                    const JavaParamRef<jclass>& clazz,
+                    jboolean enable) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   CastBrowserProcess::GetInstance()->pref_service()->SetBoolean(
       prefs::kEnableRemoteDebugging, enable);

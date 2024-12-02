@@ -6,6 +6,7 @@
 
 #include <errno.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <sys/types.h>
 
 #include <algorithm>
@@ -122,15 +123,13 @@ void ChannelNacl::ReaderThreadRunner::Run() {
 
 ChannelNacl::ChannelNacl(const IPC::ChannelHandle& channel_handle,
                          Mode mode,
-                         Listener* listener,
-                         AttachmentBroker* broker)
+                         Listener* listener)
     : ChannelReader(listener),
       mode_(mode),
       waiting_connect_(true),
       pipe_(-1),
       pipe_name_(channel_handle.name),
-      weak_ptr_factory_(this),
-      broker_(broker) {
+      weak_ptr_factory_(this) {
   if (!CreatePipe(channel_handle)) {
     // The pipe may have been closed already.
     const char *modestr = (mode_ & MODE_SERVER_FLAG) ? "server" : "client";
@@ -140,6 +139,7 @@ ChannelNacl::ChannelNacl(const IPC::ChannelHandle& channel_handle,
 }
 
 ChannelNacl::~ChannelNacl() {
+  CleanUp();
   Close();
 }
 
@@ -223,7 +223,7 @@ bool ChannelNacl::Send(Message* message) {
 }
 
 AttachmentBroker* ChannelNacl::GetAttachmentBroker() {
-  return broker_;
+  return nullptr;
 }
 
 void ChannelNacl::DidRecvMsg(scoped_ptr<MessageContents> contents) {
@@ -358,7 +358,7 @@ bool ChannelNacl::ShouldDispatchInputMessage(Message* msg) {
 }
 
 bool ChannelNacl::GetNonBrokeredAttachments(Message* msg) {
-  uint16 header_fds = msg->header()->num_fds;
+  uint16_t header_fds = msg->header()->num_fds;
   CHECK(header_fds == input_fds_.size());
   if (header_fds == 0)
     return true;  // Nothing to do.
@@ -397,10 +397,8 @@ bool ChannelNacl::IsAttachmentBrokerEndpoint() {
 // static
 scoped_ptr<Channel> Channel::Create(const IPC::ChannelHandle& channel_handle,
                                     Mode mode,
-                                    Listener* listener,
-                                    AttachmentBroker* broker) {
-  return scoped_ptr<Channel>(
-      new ChannelNacl(channel_handle, mode, listener, broker));
+                                    Listener* listener) {
+  return scoped_ptr<Channel>(new ChannelNacl(channel_handle, mode, listener));
 }
 
 }  // namespace IPC

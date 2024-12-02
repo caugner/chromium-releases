@@ -49,7 +49,7 @@ async_test(function(t) {
     .then(function(new_registration) {
         assert_not_equals(
           registration, new_registration,
-          'register should resolve to the different registration');
+          'register should resolve to a different registration');
         assert_equals(
           registration.scope, new_registration.scope,
           'registrations should have the same scope');
@@ -69,7 +69,7 @@ async_test(function(t) {
 
         assert_not_equals(
           registration.active, new_registration.active,
-          'registration should have the different active worker');
+          'registration should have a different active worker');
         assert_equals(
           registration.active.scriptURL,
           new_registration.active.scriptURL,
@@ -90,11 +90,12 @@ async_test(function(t) {
 
 async_test(function(t) {
   var scope = 'resources/scope/concurrent-register';
+  var number_of_registrations = 10;
 
   service_worker_unregister(t, scope)
     .then(function() {
         var promises = [];
-        for (var i = 0; i < 10; ++i) {
+        for (var i = 0; i < number_of_registrations; ++i) {
           promises.push(navigator.serviceWorker.register(worker_url,
                                                          { scope: scope }));
         }

@@ -42,11 +42,9 @@ TEST(ExtensionInstallPromptUnittest, PromptShowsPermissionWarnings) {
   content::TestBrowserThreadBundle thread_bundle;
   APIPermissionSet api_permissions;
   api_permissions.insert(APIPermission::kTab);
-  scoped_refptr<PermissionSet> permission_set =
-      new PermissionSet(api_permissions,
-                        ManifestPermissionSet(),
-                        URLPatternSet(),
-                        URLPatternSet());
+  scoped_ptr<const PermissionSet> permission_set(
+      new PermissionSet(api_permissions, ManifestPermissionSet(),
+                        URLPatternSet(), URLPatternSet()));
   scoped_refptr<const Extension> extension =
       ExtensionBuilder().SetManifest(
           DictionaryBuilder().Set("name", "foo")
@@ -61,8 +59,7 @@ TEST(ExtensionInstallPromptUnittest, PromptShowsPermissionWarnings) {
                  1u,  // |regular_permissions_count|.
                  0u));  // |withheld_permissions_count|.
   prompt.ConfirmPermissions(nullptr,  // no delegate
-                            extension.get(),
-                            permission_set.get());
+                            extension.get(), permission_set.Pass());
   run_loop.Run();
 }
 

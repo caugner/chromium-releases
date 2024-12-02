@@ -10,8 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/compiler_specific.h"
-#include "base/gtest_prod_util.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "content/public/browser/content_browser_client.h"
@@ -37,8 +36,6 @@ class PrefRegistrySyncable;
 namespace version_info {
 enum class Channel;
 }
-
-namespace chrome {
 
 class ChromeContentBrowserClient : public content::ContentBrowserClient {
  public:
@@ -73,12 +70,15 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   void RenderProcessWillLaunch(content::RenderProcessHost* host) override;
   bool ShouldUseProcessPerSite(content::BrowserContext* browser_context,
                                const GURL& effective_url) override;
+  bool ShouldLockToOrigin(content::BrowserContext* browser_context,
+                          const GURL& effective_site_url) override;
   GURL GetEffectiveURL(content::BrowserContext* browser_context,
                        const GURL& url) override;
   void GetAdditionalWebUISchemes(
       std::vector<std::string>* additional_schemes) override;
   void GetAdditionalWebUIHostsToIgnoreParititionCheck(
       std::vector<std::string>* hosts) override;
+  bool LogWebUIUrl(const GURL& web_ui_url) const override;
   net::URLRequestContextGetter* CreateRequestContext(
       content::BrowserContext* browser_context,
       content::ProtocolHandlerMap* protocol_handlers,
@@ -285,6 +285,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::WebContents* web_contents) override;
 
   void RecordURLMetric(const std::string& metric, const GURL& url) override;
+  ScopedVector<content::NavigationThrottle> CreateThrottlesForNavigation(
+      content::NavigationHandle* handle) override;
 
  private:
   friend class DisableWebRtcEncryptionFlagTest;
@@ -336,7 +338,5 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
 
   DISALLOW_COPY_AND_ASSIGN(ChromeContentBrowserClient);
 };
-
-}  // namespace chrome
 
 #endif  // CHROME_BROWSER_CHROME_CONTENT_BROWSER_CLIENT_H_

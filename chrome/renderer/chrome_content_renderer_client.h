@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "content/public/renderer/content_renderer_client.h"
@@ -45,6 +46,7 @@ class Extension;
 class ExtensionSet;
 class ExtensionsGuestViewContainerDispatcher;
 class RendererPermissionsPolicyDelegate;
+class ResourceRequestPolicy;
 }
 
 namespace prerender {
@@ -89,10 +91,6 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                             blink::WebLocalFrame* frame,
                             const blink::WebPluginParams& params,
                             blink::WebPlugin** plugin) override;
-  scoped_ptr<blink::WebPluginPlaceholder> CreatePluginPlaceholder(
-      content::RenderFrame* render_frame,
-      blink::WebLocalFrame* frame,
-      const blink::WebPluginParams& params) override;
   blink::WebPlugin* CreatePluginReplacement(
       content::RenderFrame* render_frame,
       const base::FilePath& plugin_path) override;
@@ -109,6 +107,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                       bool has_played_media_before,
                       const base::Closure& closure) override;
   bool RunIdleHandlerWhenWidgetsHidden() override;
+  bool AllowTimerSuspensionWhenProcessBackgrounded() override;
   bool AllowPopup() override;
   bool ShouldFork(blink::WebLocalFrame* frame,
                   const GURL& url,
@@ -158,7 +157,10 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   void DidInitializeServiceWorkerContextOnWorkerThread(
       v8::Local<v8::Context> context,
       const GURL& url) override;
-  void WillDestroyServiceWorkerContextOnWorkerThread(const GURL& url) override;
+  void WillDestroyServiceWorkerContextOnWorkerThread(
+      v8::Local<v8::Context> context,
+      const GURL& url) override;
+  bool ShouldEnforceWebRTCRoutingPreferences() override;
 #if defined(ENABLE_EXTENSIONS)
   // Takes ownership.
   void SetExtensionDispatcherForTest(
@@ -231,6 +233,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       permissions_policy_delegate_;
   scoped_ptr<extensions::ExtensionsGuestViewContainerDispatcher>
       guest_view_container_dispatcher_;
+  scoped_ptr<extensions::ResourceRequestPolicy> resource_request_policy_;
 #endif
 
   scoped_ptr<network_hints::PrescientNetworkingDispatcher>

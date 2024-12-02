@@ -16,13 +16,12 @@ import optparse
 import sys
 import time
 
+from devil.android import device_blacklist
+from devil.android import device_errors
+from devil.android import device_utils
+from devil.utils import run_tests_helper
 from pylib import constants
 from pylib import forwarder
-from pylib.device import adb_wrapper
-from pylib.device import device_blacklist
-from pylib.device import device_errors
-from pylib.device import device_utils
-from pylib.utils import run_tests_helper
 
 
 def main(argv):
@@ -50,17 +49,15 @@ def main(argv):
     sys.exit(1)
 
   try:
-    port_pairs = map(int, args[1:])
+    port_pairs = [int(a) for a in args[1:]]
     port_pairs = zip(port_pairs[::2], port_pairs[1::2])
   except ValueError:
     parser.error('Bad port number')
     sys.exit(1)
 
-  if options.blacklist_file:
-    blacklist = device_blacklist.Blacklist(options.blacklist_file)
-  else:
-    blacklist = None
-
+  blacklist = (device_blacklist.Blacklist(options.blacklist_file)
+               if options.blacklist_file
+               else None)
   devices = device_utils.DeviceUtils.HealthyDevices(blacklist)
 
   if options.device:

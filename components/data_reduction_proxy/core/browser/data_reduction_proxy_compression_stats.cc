@@ -12,18 +12,18 @@
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
-#include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_metrics.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
 #include "components/data_reduction_proxy/core/browser/data_usage_store.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
 #include "net/base/mime_util.h"
 
@@ -348,16 +348,13 @@ class DailyDataSavingUpdate {
 DataReductionProxyCompressionStats::DataReductionProxyCompressionStats(
     DataReductionProxyService* service,
     PrefService* prefs,
-    const scoped_refptr<base::SequencedTaskRunner>& task_runner,
-    base::TimeDelta delay)
+    const base::TimeDelta& delay)
     : service_(service),
       pref_service_(prefs),
-      task_runner_(task_runner),
       delay_(delay),
-      delayed_task_posted_(false),
       pref_change_registrar_(new PrefChangeRegistrar()),
       data_usage_map_is_dirty_(false),
-      data_usage_loaded_(false),
+      current_data_usage_load_status_(NOT_LOADED),
       weak_factory_(this) {
   DCHECK(service);
   DCHECK(prefs);
@@ -368,9 +365,9 @@ DataReductionProxyCompressionStats::DataReductionProxyCompressionStats(
 DataReductionProxyCompressionStats::~DataReductionProxyCompressionStats() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  if (data_usage_map_is_dirty_)
+  if (current_data_usage_load_status_ == LOADED)
     PersistDataUsage();
-  ClearInMemoryDataUsage();
+
   net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
 
   WritePrefs();
@@ -380,9 +377,17 @@ DataReductionProxyCompressionStats::~DataReductionProxyCompressionStats() {
 void DataReductionProxyCompressionStats::Init() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  service_->LoadCurrentDataUsageBucket(
-      base::Bind(&DataReductionProxyCompressionStats::OnDataUsageLoaded,
-                 weak_factory_.GetWeakPtr()));
+  data_usage_reporting_enabled_.Init(
+      prefs::kDataUsageReportingEnabled, pref_service_,
+      base::Bind(
+          &DataReductionProxyCompressionStats::OnDataUsageReportingPrefChanged,
+          weak_factory_.GetWeakPtr()));
+  if (data_usage_reporting_enabled_.GetValue()) {
+    current_data_usage_load_status_ = LOADING;
+    service_->LoadCurrentDataUsageBucket(base::Bind(
+        &DataReductionProxyCompressionStats::OnCurrentDataUsageLoaded,
+        weak_factory_.GetWeakPtr()));
+  }
 
   net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
   connection_type_ =
@@ -478,7 +483,7 @@ void DataReductionProxyCompressionStats::UpdateContentLengths(
   SetInt64(data_reduction_proxy::prefs::kHttpOriginalContentLength,
            total_original);
 
-  RecordDataUsage(data_usage_host, data_used, original_size);
+  RecordDataUsage(data_usage_host, data_used, original_size, base::Time::Now());
   RecordRequestSizePrefs(data_used, original_size, data_reduction_proxy_enabled,
                          request_type, mime_type, base::Time::Now());
 }
@@ -543,8 +548,6 @@ void DataReductionProxyCompressionStats::WritePrefs() {
     TransferList(*(iter->second),
                  ListPrefUpdate(pref_service_, iter->first).Get());
   }
-
-  delayed_task_posted_ = false;
 }
 
 base::Value*
@@ -626,34 +629,66 @@ void DataReductionProxyCompressionStats::GetContentLengths(
   *last_update_time = GetInt64(prefs::kDailyHttpContentLengthLastUpdateDate);
 }
 
+void DataReductionProxyCompressionStats::GetHistoricalDataUsage(
+    const HistoricalDataUsageCallback& get_data_usage_callback) {
+  GetHistoricalDataUsageImpl(get_data_usage_callback, base::Time::Now());
+}
+
+void DataReductionProxyCompressionStats::DeleteBrowsingHistory(
+    const base::Time& start,
+    const base::Time& end) {
+  DCHECK_NE(LOADING, current_data_usage_load_status_);
+
+  if (!data_usage_map_last_updated_.is_null() &&
+      DataUsageStore::BucketOverlapsInterval(data_usage_map_last_updated_,
+                                             start, end)) {
+    data_usage_map_.clear();
+    data_usage_map_last_updated_ = base::Time();
+    data_usage_map_is_dirty_ = false;
+  }
+
+  service_->DeleteBrowsingHistory(start, end);
+}
+
 void DataReductionProxyCompressionStats::OnConnectionTypeChanged(
     net::NetworkChangeNotifier::ConnectionType type) {
   connection_type_ = StoredConnectionType(type);
 }
 
-void DataReductionProxyCompressionStats::OnDataUsageLoaded(
+void DataReductionProxyCompressionStats::OnCurrentDataUsageLoaded(
     scoped_ptr<DataUsageBucket> data_usage) {
-  DCHECK(!data_usage_loaded_);
+  DCHECK(current_data_usage_load_status_ == LOADING);
+
+  // Exit early if the pref was turned off before loading from storage
+  // completed.
+  if (!data_usage_reporting_enabled_.GetValue()) {
+    current_data_usage_load_status_ = NOT_LOADED;
+    return;
+  }
+
   DCHECK(data_usage_map_last_updated_.is_null());
   DCHECK(data_usage_map_.empty());
 
+  // We currently do not break down by connection type. However, we use a schema
+  // that makes it easy to transition to a connection based breakdown without
+  // requiring a data migration.
+  DCHECK(data_usage->connection_usage_size() == 0 ||
+         data_usage->connection_usage_size() == 1);
   for (auto connection_usage : data_usage->connection_usage()) {
-    ConnectionType type = connection_usage.connection_type();
-    scoped_ptr<SiteUsageMap> site_usage_map(new SiteUsageMap());
-
     for (auto site_usage : connection_usage.site_usage()) {
-      site_usage_map->set(site_usage.site_url(),
+      data_usage_map_.set(site_usage.hostname(),
                           make_scoped_ptr(new PerSiteDataUsage(site_usage)));
     }
-    data_usage_map_.set(type, site_usage_map.Pass());
   }
 
   data_usage_map_last_updated_ =
       base::Time::FromInternalValue(data_usage->last_updated_timestamp());
-  data_usage_loaded_ = true;
+  current_data_usage_load_status_ = LOADED;
 }
 
 void DataReductionProxyCompressionStats::ClearDataSavingStatistics() {
+  DeleteHistoricalDataUsage();
+
   list_pref_map_.get(
       prefs::kDailyContentLengthHttpsWithDataReductionProxyEnabled)->Clear();
   list_pref_map_
@@ -680,17 +715,11 @@ void DataReductionProxyCompressionStats::ClearDataSavingStatistics() {
 }
 
 void DataReductionProxyCompressionStats::DelayedWritePrefs() {
-  // Only write after the first time posting the task.
-  if (delayed_task_posted_)
+  if (pref_writer_timer_.IsRunning())
     return;
 
-  task_runner_->PostDelayedTask(
-      FROM_HERE,
-      base::Bind(&DataReductionProxyCompressionStats::WritePrefs,
-                 weak_factory_.GetWeakPtr()),
-      delay_);
-
-  delayed_task_posted_ = true;
+  pref_writer_timer_.Start(FROM_HERE, delay_, this,
+                           &DataReductionProxyCompressionStats::WritePrefs);
 }
 
 void DataReductionProxyCompressionStats::TransferList(
@@ -724,7 +753,7 @@ void DataReductionProxyCompressionStats::RecordRequestSizePrefs(
     bool with_data_reduction_proxy_enabled,
     DataReductionProxyRequestType request_type,
     const std::string& mime_type,
-    base::Time now) {
+    const base::Time& now) {
   // TODO(bengr): Remove this check once the underlying cause of
   // http://crbug.com/287821 is fixed. For now, only continue if the current
   // year is reported as being between 1972 and 2970.
@@ -1092,58 +1121,107 @@ void DataReductionProxyCompressionStats::RecordUserVisibleDataSavings() {
 void DataReductionProxyCompressionStats::RecordDataUsage(
     const std::string& data_usage_host,
     int64 data_used,
-    int64 original_size) {
-  if (!data_usage_loaded_)
+    int64 original_size,
+    const base::Time& time) {
+  if (current_data_usage_load_status_ != LOADED)
     return;
 
-  if (!DataUsageStore::IsInCurrentInterval(data_usage_map_last_updated_)) {
-    if (data_usage_map_is_dirty_)
-      PersistDataUsage();
-    ClearInMemoryDataUsage();
-    DCHECK(data_usage_map_last_updated_.is_null());
-    DCHECK(data_usage_map_.empty());
+  if (!DataUsageStore::AreInSameInterval(data_usage_map_last_updated_, time)) {
+    PersistDataUsage();
+    data_usage_map_.clear();
+    data_usage_map_last_updated_ = base::Time();
   }
 
   std::string normalized_host = NormalizeHostname(data_usage_host);
 
-  auto i =
-      data_usage_map_.add(connection_type_, make_scoped_ptr(new SiteUsageMap));
-  SiteUsageMap* site_usage_map = i.first->second;
-
-  auto j = site_usage_map->add(normalized_host,
+  auto j = data_usage_map_.add(normalized_host,
                                make_scoped_ptr(new PerSiteDataUsage()));
   PerSiteDataUsage* per_site_usage = j.first->second;
-
-  per_site_usage->set_site_url(normalized_host);
-  data_usage_map_last_updated_ = base::Time::Now();
+  per_site_usage->set_hostname(normalized_host);
   per_site_usage->set_original_size(per_site_usage->original_size() +
                                     original_size);
   per_site_usage->set_data_used(per_site_usage->data_used() + data_used);
 
+  data_usage_map_last_updated_ = time;
   data_usage_map_is_dirty_ = true;
 }
 
 void DataReductionProxyCompressionStats::PersistDataUsage() {
-  scoped_ptr<DataUsageBucket> data_usage_bucket(new DataUsageBucket());
-  for (auto i = data_usage_map_.begin(); i != data_usage_map_.end(); ++i) {
-    SiteUsageMap* site_usage_map = i->second;
+  DCHECK(current_data_usage_load_status_ == LOADED);
+
+  if (data_usage_map_is_dirty_) {
+    scoped_ptr<DataUsageBucket> data_usage_bucket(new DataUsageBucket());
+    data_usage_bucket->set_last_updated_timestamp(
+        data_usage_map_last_updated_.ToInternalValue());
     PerConnectionDataUsage* connection_usage =
         data_usage_bucket->add_connection_usage();
-    connection_usage->set_connection_type(connection_type_);
-    for (auto j = site_usage_map->begin(); j != site_usage_map->end(); ++j) {
-      PerSiteDataUsage* per_site_usage = connection_usage->add_site_usage();
-      per_site_usage->CopyFrom(*(j->second));
+    for (auto i = data_usage_map_.begin(); i != data_usage_map_.end(); ++i) {
+        PerSiteDataUsage* per_site_usage = connection_usage->add_site_usage();
+        per_site_usage->CopyFrom(*(i->second));
     }
+    service_->StoreCurrentDataUsageBucket(data_usage_bucket.Pass());
   }
-  // TODO(kundaji): Persist |data_usage_bucket|.
 
   data_usage_map_is_dirty_ = false;
 }
 
-void DataReductionProxyCompressionStats::ClearInMemoryDataUsage() {
-  DCHECK(!data_usage_map_is_dirty_);
+void DataReductionProxyCompressionStats::DeleteHistoricalDataUsage() {
+  // This method does not support being called in |LOADING| status since this
+  // means that the in-memory data usage will get populated when data usage
+  // loads, which will undo the clear below. This method is called when users
+  // click on the "Clear Data" button, or when user deletes the extension. In
+  // both cases, enough time has passed since startup to load current data
+  // usage. Technically, this could occur, and will have the effect of not
+  // clearing data from the current bucket.
+  // TODO(kundaji): Use cancellable tasks and remove this DCHECK.
+  DCHECK(current_data_usage_load_status_ != LOADING);
+
   data_usage_map_.clear();
   data_usage_map_last_updated_ = base::Time();
+  data_usage_map_is_dirty_ = false;
+
+  service_->DeleteHistoricalDataUsage();
+}
+
+void DataReductionProxyCompressionStats::GetHistoricalDataUsageImpl(
+    const HistoricalDataUsageCallback& get_data_usage_callback,
+    const base::Time& now) {
+  if (current_data_usage_load_status_ != LOADED) {
+    // If current data usage has not yet loaded, we return an empty array. The
+    // extension can retry after a slight delay.
+    // This use case is unlikely to occur in practice since current data usage
+    // should have sufficient time to load before user tries to view data usage.
+    get_data_usage_callback.Run(
+        make_scoped_ptr(new std::vector<DataUsageBucket>()));
+    return;
+  }
+
+  PersistDataUsage();
+
+  if (!DataUsageStore::AreInSameInterval(data_usage_map_last_updated_, now)) {
+    data_usage_map_.clear();
+    data_usage_map_last_updated_ = base::Time();
+
+    // Force the last bucket to be for the current interval.
+    scoped_ptr<DataUsageBucket> data_usage_bucket(new DataUsageBucket());
+    data_usage_bucket->set_last_updated_timestamp(now.ToInternalValue());
+    service_->StoreCurrentDataUsageBucket(data_usage_bucket.Pass());
+  }
+
+  service_->LoadHistoricalDataUsage(get_data_usage_callback);
+}
+
+void DataReductionProxyCompressionStats::OnDataUsageReportingPrefChanged() {
+  if (data_usage_reporting_enabled_.GetValue()) {
+    if (current_data_usage_load_status_ == NOT_LOADED) {
+      current_data_usage_load_status_ = LOADING;
+      service_->LoadCurrentDataUsageBucket(base::Bind(
+          &DataReductionProxyCompressionStats::OnCurrentDataUsageLoaded,
+          weak_factory_.GetWeakPtr()));
+    }
+  } else {
+    DeleteHistoricalDataUsage();
+  }
 }
 
 // static

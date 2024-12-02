@@ -14,7 +14,7 @@ assert(enable_extensions)
 
 # GYP version: extensions/extensions_resources.gyp:extensions_resources
 group("extensions_resources") {
-  deps = [
+  public_deps = [
     ":extensions_browser_resources",
     ":extensions_renderer_resources",
     ":extensions_resources_grd",
@@ -99,6 +99,10 @@ source_set("test_support") {
     "//content/public/browser",
     "//extensions/common/api/cast_channel:cast_channel_proto",
   ]
+
+  if (cld_version == 2) {
+    deps += [ "//third_party/cld_2:cld2_static" ]
+  }
 }
 
 # GYP version: //extensions/extensions.gyp:extensions_shell_and_test_pak
@@ -178,6 +182,8 @@ test("extensions_unittests") {
     "//components/user_prefs",
     "//content/test:test_support",
     "//device/bluetooth:mocks",
+    "//device/core",
+    "//device/hid",
     "//device/serial",
     "//device/serial:test_support",
     "//extensions/common",
@@ -195,7 +201,9 @@ test("extensions_unittests") {
     "//third_party/mojo/src/mojo/public/cpp/bindings",
   ]
 
-  data_deps = [ "//third_party/mesa:osmesa" ]
+  data_deps = [
+    "//third_party/mesa:osmesa",
+  ]
 
   if (is_win) {
     deps += [ "//base/allocator" ]
@@ -203,6 +211,8 @@ test("extensions_unittests") {
 
   if (is_chromeos) {
     sources += [
+      "browser/api/webcam_private/visca_webcam_unittest.cc",
+
       # TODO(rockot): There are two implementations of VpnServiceFactory, a
       # stub in app_shell and a real one in Chrome. This is wrong.
       "shell/browser/api/vpn_provider/vpn_service_factory.cc",
@@ -259,7 +269,9 @@ test("extensions_browsertests") {
     "//third_party/mojo/src/mojo/public/cpp/bindings",
   ]
 
-  data_deps = [ "//third_party/mesa:osmesa" ]
+  data_deps = [
+    "//third_party/mesa:osmesa",
+  ]
 
   if (is_win) {
     deps += [ "//base/allocator" ]

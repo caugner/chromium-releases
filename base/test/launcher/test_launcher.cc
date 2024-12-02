@@ -434,6 +434,7 @@ void DoLaunchChildTestProcess(
 
 }  // namespace
 
+const char kGTestBreakOnFailure[] = "gtest_break_on_failure";
 const char kGTestFilterFlag[] = "gtest_filter";
 const char kGTestHelpFlag[]   = "gtest_help";
 const char kGTestListTestsFlag[] = "gtest_list_tests";
@@ -456,6 +457,7 @@ TestLauncher::TestLauncher(TestLauncherDelegate* launcher_delegate,
       test_broken_count_(0),
       retry_count_(0),
       retry_limit_(0),
+      force_run_broken_tests_(false),
       run_result_(true),
       watchdog_timer_(FROM_HERE,
                       TimeDelta::FromSeconds(kOutputTimeoutSeconds),
@@ -619,7 +621,7 @@ void TestLauncher::OnTestFinished(const TestResult& result) {
   }
   size_t broken_threshold =
       std::max(static_cast<size_t>(20), test_started_count_ / 10);
-  if (test_broken_count_ >= broken_threshold) {
+  if (!force_run_broken_tests_ && test_broken_count_ >= broken_threshold) {
     fprintf(stdout, "Too many badly broken tests (%" PRIuS "), exiting now.\n",
             test_broken_count_);
     fflush(stdout);
@@ -643,7 +645,7 @@ void TestLauncher::OnTestFinished(const TestResult& result) {
     return;
   }
 
-  if (tests_to_retry_.size() >= broken_threshold) {
+  if (!force_run_broken_tests_ && tests_to_retry_.size() >= broken_threshold) {
     fprintf(stdout,
             "Too many failing tests (%" PRIuS "), skipping retries.\n",
             tests_to_retry_.size());
@@ -754,6 +756,9 @@ bool TestLauncher::Init() {
     // in bot mode.
     retry_limit_ = 3;
   }
+
+  if (command_line->HasSwitch(switches::kTestLauncherForceRunBrokenTests))
+    force_run_broken_tests_ = true;
 
   if (command_line->HasSwitch(switches::kTestLauncherJobs)) {
     int jobs = -1;
@@ -963,7 +968,10 @@ void TestLauncher::RunTests() {
 }
 
 void TestLauncher::RunTestIteration() {
-  if (cycles_ == 0) {
+  const bool stop_on_failure =
+      CommandLine::ForCurrentProcess()->HasSwitch(kGTestBreakOnFailure);
+  if (cycles_ == 0 ||
+      (stop_on_failure && test_success_count_ != test_finished_count_)) {
     MessageLoop::current()->Quit();
     return;
   }

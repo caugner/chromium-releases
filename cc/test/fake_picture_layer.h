@@ -38,16 +38,9 @@ class FakePictureLayer : public PictureLayer {
     always_update_resources_ = always_update_resources;
   }
 
-  void disable_lcd_text() { disable_lcd_text_ = true; }
-
   bool Update() override;
 
   void PushPropertiesTo(LayerImpl* layer) override;
-
-  void OnOutputSurfaceCreated() override;
-  size_t output_surface_created_count() const {
-    return output_surface_created_count_;
-  }
 
  private:
   FakePictureLayer(const LayerSettings& settings, ContentLayerClient* client);
@@ -58,9 +51,7 @@ class FakePictureLayer : public PictureLayer {
 
   int update_count_;
   size_t push_properties_count_;
-  size_t output_surface_created_count_;
   bool always_update_resources_;
-  bool disable_lcd_text_;
 };
 
 }  // namespace cc

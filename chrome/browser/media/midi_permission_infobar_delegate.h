@@ -10,7 +10,6 @@
 #include "components/content_settings/core/common/content_settings_types.h"
 
 class GURL;
-class PermissionQueueController;
 class InfoBarService;
 
 // MidiPermissionInfoBarDelegates are created by the
@@ -20,23 +19,23 @@ class MidiPermissionInfoBarDelegate : public PermissionInfobarDelegate {
  public:
   // Creates a MIDI permission infobar and delegate and adds the infobar to
   // |infobar_service|.  Returns the infobar if it was successfully added.
-  static infobars::InfoBar* Create(InfoBarService* infobar_service,
-                                   PermissionQueueController* controller,
-                                   const PermissionRequestID& id,
-                                   const GURL& requesting_frame,
-                                   const std::string& display_languages,
-                                   ContentSettingsType type);
+  static infobars::InfoBar* Create(
+      InfoBarService* infobar_service,
+      const GURL& requesting_frame,
+      const std::string& display_languages,
+      ContentSettingsType type,
+      const PermissionSetCallback& callback);
 
  private:
-  MidiPermissionInfoBarDelegate(PermissionQueueController* controller,
-                                const PermissionRequestID& id,
-                                const GURL& requesting_frame,
-                                const std::string& display_languages,
-                                ContentSettingsType type);
+  MidiPermissionInfoBarDelegate(
+      const GURL& requesting_frame,
+      const std::string& display_languages,
+      ContentSettingsType type,
+      const PermissionSetCallback& callback);
   ~MidiPermissionInfoBarDelegate() override;
 
   // ConfirmInfoBarDelegate:
-  int GetIconID() const override;
+  int GetIconId() const override;
   base::string16 GetMessageText() const override;
 
   GURL requesting_frame_;

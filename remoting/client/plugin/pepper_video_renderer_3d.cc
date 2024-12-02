@@ -14,15 +14,21 @@
 #include "ppapi/cpp/instance.h"
 #include "ppapi/lib/gl/include/GLES2/gl2.h"
 #include "ppapi/lib/gl/include/GLES2/gl2ext.h"
-#include "remoting/client/chromoting_stats.h"
 #include "remoting/proto/video.pb.h"
+#include "remoting/protocol/performance_tracker.h"
 #include "remoting/protocol/session_config.h"
 
 namespace remoting {
 
-// The implementation here requires this minimum number of pictures from the
-// video decoder interface to work.
-const uint32_t kMinimumPictureCount = 3;
+// The implementation here requires that the decoder allocates at least 3
+// pictures. PPB_VideoDecoder didn't support this parameter prior to
+// 1.1, so we have to pass 0 for backwards compatibility with older versions of
+// the browser. Currently all API implementations allocate more than 3 buffers
+// by default.
+//
+// TODO(sergeyu): Change this to 3 once PPB_VideoDecoder v1.1 is enabled on
+// stable channel (crbug.com/520323).
+const uint32_t kMinimumPictureCount = 0;  // 3
 
 class PepperVideoRenderer3D::PendingPacket {
  public:
@@ -54,26 +60,7 @@ class PepperVideoRenderer3D::Picture {
   PP_VideoPicture picture_;
 };
 
-
-PepperVideoRenderer3D::FrameDecodeTimestamp::FrameDecodeTimestamp(
-    uint32_t frame_id,
-    base::TimeTicks decode_started_time)
-    : frame_id(frame_id), decode_started_time(decode_started_time) {
-}
-
-PepperVideoRenderer3D::PepperVideoRenderer3D()
-    : event_handler_(nullptr),
-      initialization_finished_(false),
-      decode_pending_(false),
-      get_picture_pending_(false),
-      paint_pending_(false),
-      latest_frame_id_(0),
-      force_repaint_(false),
-      current_shader_program_texture_target_(0),
-      shader_program_(0),
-      shader_texcoord_scale_location_(0),
-      callback_factory_(this) {
-}
+PepperVideoRenderer3D::PepperVideoRenderer3D() : callback_factory_(this) {}
 
 PepperVideoRenderer3D::~PepperVideoRenderer3D() {
   if (shader_program_)
@@ -82,13 +69,16 @@ PepperVideoRenderer3D::~PepperVideoRenderer3D() {
   STLDeleteElements(&pending_packets_);
 }
 
-bool PepperVideoRenderer3D::Initialize(pp::Instance* instance,
-                                       const ClientContext& context,
-                                       EventHandler* event_handler) {
+bool PepperVideoRenderer3D::Initialize(
+    pp::Instance* instance,
+    const ClientContext& context,
+    EventHandler* event_handler,
+    protocol::PerformanceTracker* perf_tracker) {
   DCHECK(event_handler);
   DCHECK(!event_handler_);
 
   event_handler_ = event_handler;
+  perf_tracker_ = perf_tracker;
 
   const int32_t context_attributes[] = {
       PP_GRAPHICS3DATTRIB_ALPHA_SIZE,     8,
@@ -176,19 +166,12 @@ void PepperVideoRenderer3D::OnSessionConfig(
       NOTREACHED();
   }
 
-  bool supports_video_decoder_1_1 =
-      pp::Module::Get()->GetBrowserInterface(
-          PPB_VIDEODECODER_INTERFACE_1_1) != NULL;
   int32_t result = video_decoder_.Initialize(
       graphics_, video_profile, PP_HARDWAREACCELERATION_WITHFALLBACK,
-      supports_video_decoder_1_1 ? kMinimumPictureCount : 0,
+      kMinimumPictureCount,
       callback_factory_.NewCallback(&PepperVideoRenderer3D::OnInitialized));
   CHECK_EQ(result, PP_OK_COMPLETIONPENDING)
       << "video_decoder_.Initialize() returned " << result;
-}
-
-ChromotingStats* PepperVideoRenderer3D::GetStats() {
-  return &stats_;
 }
 
 protocol::VideoStub* PepperVideoRenderer3D::GetVideoStub() {
@@ -199,7 +182,7 @@ void PepperVideoRenderer3D::ProcessVideoPacket(scoped_ptr<VideoPacket> packet,
                                                const base::Closure& done) {
   base::ScopedClosureRunner done_runner(done);
 
-  stats_.RecordVideoPacketStats(*packet);
+  perf_tracker_->RecordVideoPacketStats(*packet);
 
   // Don't need to do anything if the packet is empty. Host sends empty video
   // packets when the screen is not changing.
@@ -280,14 +263,10 @@ void PepperVideoRenderer3D::DecodeNextPacket() {
   if (!initialization_finished_ || decode_pending_ || pending_packets_.empty())
     return;
 
-  ++latest_frame_id_;
-  frame_decode_timestamps_.push_back(
-      FrameDecodeTimestamp(latest_frame_id_, base::TimeTicks::Now()));
-
   const VideoPacket* packet = pending_packets_.front()->packet();
 
   int32_t result = video_decoder_.Decode(
-      latest_frame_id_, packet->data().size(), packet->data().data(),
+      packet->frame_id(), packet->data().size(), packet->data().data(),
       callback_factory_.NewCallback(&PepperVideoRenderer3D::OnDecodeDone));
   CHECK_EQ(result, PP_OK_COMPLETIONPENDING);
   decode_pending_ = true;
@@ -332,21 +311,22 @@ void PepperVideoRenderer3D::OnPictureReady(int32_t result,
     return;
   }
 
-  CHECK(!frame_decode_timestamps_.empty());
-  const FrameDecodeTimestamp& frame_timer = frame_decode_timestamps_.front();
+  perf_tracker_->OnFrameDecoded(picture.decode_id);
 
-  if (picture.decode_id != frame_timer.frame_id) {
-    LOG(ERROR)
-        << "Received a video packet that didn't contain a complete frame.";
-    event_handler_->OnVideoDecodeError();
-    return;
+  // Workaround crbug.com/542945 by filling in visible_rect if it isn't set.
+  if (picture.visible_rect.size.width == 0 ||
+      picture.visible_rect.size.height == 0) {
+    static bool warning_logged = false;
+    if (!warning_logged) {
+      LOG(WARNING) << "PPB_VideoDecoder doesn't set visible_rect.";
+      warning_logged = true;
+    }
+
+    picture.visible_rect.size.width =
+        std::min(frame_size_.width(), picture.texture_size.width);
+    picture.visible_rect.size.height =
+        std::min(frame_size_.height(), picture.texture_size.height);
   }
-
-  base::TimeDelta decode_time =
-      base::TimeTicks::Now() - frame_timer.decode_started_time;
-  stats_.RecordDecodeTime(decode_time.InMilliseconds());
-
-  frame_decode_timestamps_.pop_front();
 
   next_picture_.reset(new Picture(&video_decoder_, picture));
 
@@ -363,7 +343,6 @@ void PepperVideoRenderer3D::PaintIfNeeded() {
     current_picture_ = next_picture_.Pass();
 
   force_repaint_ = false;
-  latest_paint_started_time_ = base::TimeTicks::Now();
 
   const PP_VideoPicture& picture = current_picture_->picture();
   PP_Resource graphics_3d = graphics_.pp_resource();
@@ -376,6 +355,7 @@ void PepperVideoRenderer3D::PaintIfNeeded() {
   double scale_x = picture.visible_rect.size.width;
   double scale_y = picture.visible_rect.size.height;
   if (picture.texture_target != GL_TEXTURE_RECTANGLE_ARB) {
+    CHECK(picture.texture_size.width > 0 && picture.texture_size.height > 0);
     scale_x /= picture.texture_size.width;
     scale_y /= picture.texture_size.height;
   }
@@ -401,6 +381,8 @@ void PepperVideoRenderer3D::PaintIfNeeded() {
   // nearest-neighbor scaling to achieve crisper image. Linear filter is used in
   // all other cases.
   GLint mag_filter = GL_LINEAR;
+  CHECK(picture.visible_rect.size.width > 0 &&
+        picture.visible_rect.size.height > 0);
   if (view_size_.width() % picture.visible_rect.size.width == 0 &&
       view_size_.height() % picture.visible_rect.size.height == 0) {
     mag_filter = GL_NEAREST;
@@ -424,9 +406,7 @@ void PepperVideoRenderer3D::OnPaintDone(int32_t result) {
   CHECK_EQ(result, PP_OK) << "Graphics3D::SwapBuffers() failed";
 
   paint_pending_ = false;
-  base::TimeDelta paint_time =
-      base::TimeTicks::Now() - latest_paint_started_time_;
-  stats_.RecordPaintTime(paint_time.InMilliseconds());
+  perf_tracker_->OnFramePainted(current_picture_->picture().decode_id);
   PaintIfNeeded();
 }
 

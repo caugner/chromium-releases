@@ -283,6 +283,12 @@
         <message desc="Message displayed next to the checkbox that the user can select to allow crash dump collection and reporting." name="IDS_HOST_SETUP_CRASH_REPORTING_MESSAGE">
           Help us improve Chrome Remote Desktop by allowing us to collect usage statistics and crash reports.
         </message>
+        <message desc="Title of the dialog used to download and install the Chrome Remote Desktop host component." name="IDS_INSTALLER_DOWNLOAD">
+          Download Chrome Remote Desktop Host Installer
+        </message>
+        <message desc="Message shown to inform the user that the product is governed by Google's terms of service and to include a link to view them." name="IDS_HOST_SETUP_TERMS_OF_SERVICE">
+          By downloading the Chrome Remote Desktop Host Installer, you are agreeing to the Google <ph name="LINK_BEGIN">$1<ex>&lt;a href="http://www.google.com/intl/en/policies/terms"&gt;</ex></ph>Terms of Service<ph name="LINK_END">$4<ex>&lt;/a&gt;</ex></ph>.
+        </message>
         <message desc="Message shown when user is asked to manually install the Host components." name="IDS_HOST_SETUP_INSTALL">
           Chrome is downloading the Chrome Remote Desktop Host installer.  Once the download is complete, please run the installer before continuing.
         </message>
@@ -379,6 +385,12 @@
         <message desc="Message displayed next to the checkbox that the user can select to allow crash dump collection and reporting." name="IDS_HOST_SETUP_CRASH_REPORTING_MESSAGE">
           Help us improve Chromoting by allowing us to collect usage statistics and crash reports.
         </message>
+        <message desc="Title of the dialog used to download and install the Chromoting host component." name="IDS_INSTALLER_DOWNLOAD">
+          Download Chromoting Host Installer
+        </message>
+        <message desc="Message shown to inform the user that the product is governed by Google's terms of service and to include a link to view them." name="IDS_HOST_SETUP_TERMS_OF_SERVICE">
+          By downloading the Chromoting Host Installer, you are agreeing to the Google <ph name="LINK_BEGIN">$1<ex>&lt;a href="http://www.google.com/intl/en/policies/terms"&gt;</ex></ph>Terms of Service<ph name="LINK_END">$4<ex>&lt;/a&gt;</ex></ph>.
+        </message>
         <message desc="Message shown when user is asked to manually install the Host components." name="IDS_HOST_SETUP_INSTALL">
           Chrome is downloading the Chromoting Host installer.  Once the download is complete, please run the installer before continuing.
         </message>
@@ -440,6 +452,9 @@
       </message>
       <message desc="Error displayed if the client plugin fails to load." name="IDS_ERROR_MISSING_PLUGIN">
         Some required components are missing. Please make sure you're running the latest version of Chrome and try again.
+      </message>
+      <message desc="Error displayed if Native Client is not enabled." name="IDS_ERROR_NACL_DISABLED">
+        Some required components are missing. Please go to chrome://plugins and make sure Native Client is enabled.
       </message>
       <message desc="Message shown if the user is not authorized to perform the requested action." name="IDS_ERROR_NOT_AUTHORIZED">
         You do not have permission to perform that action.
@@ -872,12 +887,28 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
       <message desc="Label for general-purpose OK buttons." name="IDS_OK">
         OK
       </message>
-      <message desc="Modified version of the host name shown for hosts that are not currently accessible and for which no last-online status is available." name="IDS_OFFLINE">
-        <ph name="HOSTNAME">$1<ex>My Linux desktop</ex></ph> (offline)
-      </message>
-      <message desc="Modified version of the host name shown for hosts that are not currently accessible." name="IDS_LAST_ONLINE">
-        <ph name="HOSTNAME">$1<ex>My Linux desktop</ex></ph> (last online <ph name="DATE_OR_TIME">$2<ex>1/6/2013 or 11:23:32 AM</ex></ph>)
-      </message>
+      <if expr="is_android">
+        <message desc="This string represents a host status line, which is shown below the host name for offline hosts.  The status line consists of 1) a host offline status (i.e. a specific 'Host failed to read the policy.' or 'Invalid host owner.' or a generic 'Host if offline.') and 2) statement when the host was last seen online (i.e. 'Last seen online 20 minutes ago.')."
+                 name="IDS_HOST_STATUS_LINE" formatter_data="android_java">
+          <ph name="OPTIONAL_OFFLINE_REASON">%2$s<ex>Host failed to read the policy.</ex></ph>  Last seen online <ph name="RELATIVE_TIMESTAMP">%1$s<ex>yesterday</ex></ph>.
+        </message>
+        <message desc="Content description (used for accessibility) of a host icon representing an online host."
+                 name="IDS_HOST_ICON_ONLINE_DESCRIPTION" formatter_data="android_java">
+          Online.
+        </message>
+        <message desc="Content description (used for accessibility) of a host icon representing an offline host."
+                 name="IDS_HOST_ICON_OFFLINE_DESCRIPTION" formatter_data="android_java">
+          Offline.
+        </message>
+      </if>
+      <if expr="not is_android">
+        <message desc="Modified version of the host name shown for hosts that are not currently accessible and for which no last-online status is available." name="IDS_OFFLINE">
+          <ph name="HOSTNAME">$1<ex>My Linux desktop</ex></ph> (offline)
+        </message>
+        <message desc="Modified version of the host name shown for hosts that are not currently accessible." name="IDS_LAST_ONLINE">
+          <ph name="HOSTNAME">$1<ex>My Linux desktop</ex></ph> (last online <ph name="DATE_OR_TIME">$2<ex>1/6/2013 or 11:23:32 AM</ex></ph>)
+        </message>
+      </if>
       <message desc="Error message indicating that the host is offline, because the host failed to initialize (i.e. failed to generate a host certificate, run out of memory early during startup, failed to set up inter-process communication, etc.)."
                name="IDS_OFFLINE_REASON_INITIALIZATION_FAILED" formatter_data="android_java">
         Host initialization failed.
@@ -1118,6 +1149,15 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
       </message>
       <message desc="Text shown in tooltip to inform the user that a setting is managed by domain policy." name="IDS_SETTING_MANAGED_BY_POLICY">
         This setting is managed by your domain policy.
+      </message>
+      <message desc="Platform-specific text indicating that a component is for the Windows OS." name="IDS_FOR_PLATFORM_WINDOWS">
+        For Windows (XP and above)
+      </message>
+      <message desc="Platform-specific text indicating that a component is for the Mac OS." name="IDS_FOR_PLATFORM_MAC">
+        For Mac (OS X 10.6 and above)
+      </message>
+      <message desc="Text for the button the user clicks to indicate that they agree to the terms of service and want to proceed with downloading the installer." name="IDS_ACCEPT_AND_INSTALL">
+        Accept and Install
       </message>
 
     </messages>

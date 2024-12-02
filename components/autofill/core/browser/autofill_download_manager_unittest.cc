@@ -7,6 +7,7 @@
 #include <list>
 
 #include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/histogram_tester.h"
@@ -262,7 +263,7 @@ TEST_F(AutofillDownloadTest, QueryAndUploadTest) {
   fetcher = factory.GetFetcherByID(0);
   ASSERT_TRUE(fetcher);
   FakeOnURLFetchComplete(fetcher, 200, std::string(responses[0]));
-  EXPECT_EQ(static_cast<size_t>(3), responses_.size());
+  EXPECT_EQ(3U, responses_.size());
 
   EXPECT_EQ(AutofillDownloadTest::UPLOAD_SUCCESSFULL,
             responses_.front().type_of_response);
@@ -351,6 +352,53 @@ TEST_F(AutofillDownloadTest, QueryAndUploadTest) {
   EXPECT_EQ(NULL, fetcher);
 }
 
+TEST_F(AutofillDownloadTest, QueryTooManyFieldsTest) {
+  // Create and register factory.
+  net::TestURLFetcherFactory factory;
+
+  // Create a query that contains too many fields for the server.
+  std::vector<FormData> forms(21);
+  ScopedVector<FormStructure> form_structures;
+  for (auto& form : forms) {
+    for (size_t i = 0; i < 5; ++i) {
+      FormFieldData field;
+      field.label = base::IntToString16(i);
+      field.name = base::IntToString16(i);
+      field.form_control_type = "text";
+      form.fields.push_back(field);
+    }
+    FormStructure* form_structure = new FormStructure(form);
+    form_structures.push_back(form_structure);
+  }
+
+  // Check whether the query is aborted.
+  EXPECT_FALSE(download_manager_.StartQueryRequest(form_structures.get()));
+}
+
+TEST_F(AutofillDownloadTest, QueryNotTooManyFieldsTest) {
+  // Create and register factory.
+  net::TestURLFetcherFactory factory;
+
+  // Create a query that contains a lot of fields, but not too many for the
+  // server.
+  std::vector<FormData> forms(25);
+  ScopedVector<FormStructure> form_structures;
+  for (auto& form : forms) {
+    for (size_t i = 0; i < 4; ++i) {
+      FormFieldData field;
+      field.label = base::IntToString16(i);
+      field.name = base::IntToString16(i);
+      field.form_control_type = "text";
+      form.fields.push_back(field);
+    }
+    FormStructure* form_structure = new FormStructure(form);
+    form_structures.push_back(form_structure);
+  }
+
+  // Check that the query is not aborted.
+  EXPECT_TRUE(download_manager_.StartQueryRequest(form_structures.get()));
+}
+
 TEST_F(AutofillDownloadTest, CacheQueryTest) {
   // Create and register factory.
   net::TestURLFetcherFactory factory;
@@ -424,12 +472,12 @@ TEST_F(AutofillDownloadTest, CacheQueryTest) {
                                AutofillMetrics::QUERY_SENT, 1);
 
   // No responses yet
-  EXPECT_EQ(static_cast<size_t>(0), responses_.size());
+  EXPECT_EQ(0U, responses_.size());
 
   net::TestURLFetcher* fetcher = factory.GetFetcherByID(0);
   ASSERT_TRUE(fetcher);
   FakeOnURLFetchComplete(fetcher, 200, std::string(responses[0]));
-  ASSERT_EQ(static_cast<size_t>(1), responses_.size());
+  ASSERT_EQ(1U, responses_.size());
   EXPECT_EQ(responses[0], responses_.front().response);
 
   responses_.clear();
@@ -439,7 +487,7 @@ TEST_F(AutofillDownloadTest, CacheQueryTest) {
   histogram.ExpectUniqueSample("Autofill.ServerQueryResponse",
                                AutofillMetrics::QUERY_SENT, 2);
   // Data is available immediately from cache - no over-the-wire trip.
-  ASSERT_EQ(static_cast<size_t>(1), responses_.size());
+  ASSERT_EQ(1U, responses_.size());
   EXPECT_EQ(responses[0], responses_.front().response);
   responses_.clear();
 
@@ -448,12 +496,12 @@ TEST_F(AutofillDownloadTest, CacheQueryTest) {
   histogram.ExpectUniqueSample("Autofill.ServerQueryResponse",
                                AutofillMetrics::QUERY_SENT, 3);
   // No responses yet
-  EXPECT_EQ(static_cast<size_t>(0), responses_.size());
+  EXPECT_EQ(0U, responses_.size());
 
   fetcher = factory.GetFetcherByID(1);
   ASSERT_TRUE(fetcher);
   FakeOnURLFetchComplete(fetcher, 200, std::string(responses[1]));
-  ASSERT_EQ(static_cast<size_t>(1), responses_.size());
+  ASSERT_EQ(1U, responses_.size());
   EXPECT_EQ(responses[1], responses_.front().response);
 
   responses_.clear();
@@ -466,7 +514,7 @@ TEST_F(AutofillDownloadTest, CacheQueryTest) {
   fetcher = factory.GetFetcherByID(2);
   ASSERT_TRUE(fetcher);
   FakeOnURLFetchComplete(fetcher, 200, std::string(responses[2]));
-  ASSERT_EQ(static_cast<size_t>(1), responses_.size());
+  ASSERT_EQ(1U, responses_.size());
   EXPECT_EQ(responses[2], responses_.front().response);
 
   responses_.clear();
@@ -480,7 +528,7 @@ TEST_F(AutofillDownloadTest, CacheQueryTest) {
   histogram.ExpectUniqueSample("Autofill.ServerQueryResponse",
                                AutofillMetrics::QUERY_SENT, 6);
 
-  ASSERT_EQ(static_cast<size_t>(2), responses_.size());
+  ASSERT_EQ(2U, responses_.size());
   EXPECT_EQ(responses[1], responses_.front().response);
   EXPECT_EQ(responses[2], responses_.back().response);
   responses_.clear();
@@ -491,12 +539,12 @@ TEST_F(AutofillDownloadTest, CacheQueryTest) {
   histogram.ExpectUniqueSample("Autofill.ServerQueryResponse",
                                AutofillMetrics::QUERY_SENT, 7);
   // No responses yet
-  EXPECT_EQ(static_cast<size_t>(0), responses_.size());
+  EXPECT_EQ(0U, responses_.size());
 
   fetcher = factory.GetFetcherByID(3);
   ASSERT_TRUE(fetcher);
   FakeOnURLFetchComplete(fetcher, 200, std::string(responses[0]));
-  ASSERT_EQ(static_cast<size_t>(1), responses_.size());
+  ASSERT_EQ(1U, responses_.size());
   EXPECT_EQ(responses[0], responses_.front().response);
 }
 

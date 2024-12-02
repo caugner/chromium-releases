@@ -20,6 +20,7 @@ from telemetry.internal.util import path
 PUBLIC_BUCKET = 'chromium-telemetry'
 PARTNER_BUCKET = 'chrome-partner-telemetry'
 INTERNAL_BUCKET = 'chrome-telemetry'
+TELEMETRY_OUTPUT = 'chrome-telemetry-output'
 
 
 # Uses ordered dict to make sure that bucket's key-value items are ordered from
@@ -28,6 +29,7 @@ BUCKET_ALIASES = collections.OrderedDict((
     ('public', PUBLIC_BUCKET),
     ('partner', PARTNER_BUCKET),
     ('internal', INTERNAL_BUCKET),
+    ('output', TELEMETRY_OUTPUT),
 ))
 
 
@@ -209,6 +211,24 @@ def Insert(bucket, remote_path, local_path, publicly_readable=False):
   _RunCommand(command_and_args)
   return 'https://console.developers.google.com/m/cloudstorage/b/%s/o/%s' % (
       bucket, remote_path)
+
+
+def GetIfHashChanged(cs_path, download_path, bucket, file_hash):
+  """Downloads |download_path| to |file_path| if |file_path| doesn't exist or
+     it's hash doesn't match |file_hash|.
+
+  Returns:
+    True if the binary was changed.
+  Raises:
+    CredentialsError if the user has no configured credentials.
+    PermissionError if the user does not have permission to access the bucket.
+    NotFoundError if the file is not in the given bucket in cloud_storage.
+  """
+  if (os.path.exists(download_path) and
+      CalculateHash(download_path) == file_hash):
+    return False
+  Get(bucket, cs_path, download_path)
+  return True
 
 
 def GetIfChanged(file_path, bucket):

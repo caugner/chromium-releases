@@ -17,22 +17,23 @@
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/dom_distiller/tab_utils.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/media/router/media_router_dialog_controller.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/sessions/session_service_factory.h"
-#include "chrome/browser/sessions/tab_restore_service.h"
-#include "chrome/browser/sessions/tab_restore_service_delegate.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/accelerator_utils.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
+#include "chrome/browser/ui/bookmarks/bookmark_utils_desktop.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_instant_controller.h"
-#include "chrome/browser/ui/browser_tab_restore_service_delegate.h"
+#include "chrome/browser/ui/browser_live_tab_context.h"
+#include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
@@ -56,6 +57,8 @@
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/favicon/content/content_favicon_driver.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/sessions/core/live_tab_context.h"
+#include "components/sessions/core/tab_restore_service.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/ui/zoom/page_zoom.h"
@@ -117,7 +120,6 @@ using content::NavigationController;
 using content::NavigationEntry;
 using content::OpenURLParams;
 using content::Referrer;
-using content::SSLStatus;
 using content::WebContents;
 
 namespace chrome {
@@ -217,11 +219,10 @@ void ReloadInternal(Browser* browser,
   if (!new_tab->FocusLocationBarByDefault())
     new_tab->Focus();
 
-  if (DevToolsWindow* devtools =
-      DevToolsWindow::GetInstanceForInspectedWebContents(new_tab)) {
-    devtools->ReloadInspectedWebContents(ignore_cache);
+  DevToolsWindow* devtools =
+      DevToolsWindow::GetInstanceForInspectedWebContents(new_tab);
+  if (devtools && devtools->ReloadInspectedWebContents(ignore_cache))
     return;
-  }
 
   if (ignore_cache)
     new_tab->GetController().ReloadIgnoringCache(true);
@@ -360,7 +361,8 @@ Browser* OpenEmptyWindow(Profile* profile, HostDesktopType desktop_type) {
 
 void OpenWindowWithRestoredTabs(Profile* profile,
                                 HostDesktopType host_desktop_type) {
-  TabRestoreService* service = TabRestoreServiceFactory::GetForProfile(profile);
+  sessions::TabRestoreService* service =
+      TabRestoreServiceFactory::GetForProfile(profile);
   if (service)
     service->RestoreMostRecentEntry(NULL, host_desktop_type);
 }
@@ -595,11 +597,11 @@ bool CanResetZoom(content::WebContents* contents) {
 
 TabStripModelDelegate::RestoreTabType GetRestoreTabType(
     const Browser* browser) {
-  TabRestoreService* service =
+  sessions::TabRestoreService* service =
       TabRestoreServiceFactory::GetForProfile(browser->profile());
   if (!service || service->entries().empty())
     return TabStripModelDelegate::RESTORE_NONE;
-  if (service->entries().front()->type == TabRestoreService::WINDOW)
+  if (service->entries().front()->type == sessions::TabRestoreService::WINDOW)
     return TabStripModelDelegate::RESTORE_WINDOW;
   return TabStripModelDelegate::RESTORE_TAB;
 }
@@ -860,13 +862,14 @@ void ShowFindBar(Browser* browser) {
   browser->GetFindBarController()->Show();
 }
 
-void ShowWebsiteSettings(Browser* browser,
-                         content::WebContents* web_contents,
-                         const GURL& url,
-                         const SSLStatus& ssl) {
+void ShowWebsiteSettings(
+    Browser* browser,
+    content::WebContents* web_contents,
+    const GURL& url,
+    const SecurityStateModel::SecurityInfo& security_info) {
   browser->window()->ShowWebsiteSettings(
       Profile::FromBrowserContext(web_contents->GetBrowserContext()),
-      web_contents, url, ssl);
+      web_contents, url, security_info);
 }
 
 void Print(Browser* browser) {
@@ -909,6 +912,27 @@ bool CanBasicPrint(Browser* browser) {
       (PrintPreviewShowing(browser) || CanPrint(browser));
 }
 #endif  // ENABLE_BASIC_PRINTING
+
+bool CanRouteMedia(Browser* browser) {
+  if (!switches::MediaRouterEnabled() || browser->profile()->IsOffTheRecord())
+    return false;
+
+  // Do not allow user to open Media Router dialog when there is already an
+  // active modal dialog. This avoids overlapping dialogs.
+  return !IsShowingWebContentsModalDialog(browser);
+}
+
+void RouteMedia(Browser* browser) {
+  DCHECK(CanRouteMedia(browser));
+
+  media_router::MediaRouterDialogController* dialog_controller =
+      media_router::MediaRouterDialogController::GetOrCreateForWebContents(
+          browser->tab_strip_model()->GetActiveWebContents());
+  if (!dialog_controller)
+    return;
+
+  dialog_controller->ShowMediaRouterDialog();
+}
 
 void EmailPageLocation(Browser* browser) {
   content::RecordAction(UserMetricsAction("EmailPageLocation"));

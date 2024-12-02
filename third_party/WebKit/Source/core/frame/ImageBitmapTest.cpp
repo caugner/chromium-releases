@@ -129,11 +129,10 @@ TEST_F(ImageBitmapTest, ImageBitmapLiveResourcePriority)
         StaticBitmapImage::create(m_image).get());
     imageOutsideCrop->setImageResource(cachedImageOutsideCrop.get());
 
-    MockImageResourceClient mockClient1, mockClient2, mockClient3, mockClient4;
-    cachedImageNoCrop->addClient(&mockClient1);
-    cachedImageInteriorCrop->addClient(&mockClient2);
-    cachedImageExteriorCrop->addClient(&mockClient3);
-    cachedImageOutsideCrop->addClient(&mockClient4);
+    MockImageResourceClient mockClient1(cachedImageNoCrop);
+    MockImageResourceClient mockClient2(cachedImageInteriorCrop);
+    MockImageResourceClient mockClient3(cachedImageExteriorCrop);
+    MockImageResourceClient mockClient4(cachedImageOutsideCrop);
 
     memoryCache()->add(cachedImageNoCrop.get());
     memoryCache()->add(cachedImageInteriorCrop.get());
@@ -181,11 +180,6 @@ TEST_F(ImageBitmapTest, ImageBitmapLiveResourcePriority)
     // There is still an ImageBitmap that references this image.
     ASSERT_EQ(memoryCache()->priority(imageInteriorCrop->cachedImage()), MemoryCacheLiveResourcePriorityHigh);
     imageBitmapInteriorCrop = nullptr;
-
-    cachedImageNoCrop->removeClient(&mockClient1);
-    cachedImageInteriorCrop->removeClient(&mockClient2);
-    cachedImageExteriorCrop->removeClient(&mockClient3);
-    cachedImageOutsideCrop->removeClient(&mockClient4);
 }
 
 // Verifies that ImageBitmaps constructed from HTMLImageElements hold a reference to the original Image if the HTMLImageElement src is changed.
@@ -205,16 +199,23 @@ TEST_F(ImageBitmapTest, ImageBitmapSourceChanged)
     image->setImageResource(newImageResource.get());
 
     // The ImageBitmap should contain the same data as the original cached image but should no longer hold a reference.
-    ASSERT_NE(imageBitmap->bitmapImage().get(), originalImageResource->image());
-    SkBitmap bitmap1, bitmap2;
-    ASSERT_TRUE(imageBitmap->bitmapImage()->deprecatedBitmapForCurrentFrame(&bitmap1));
-    ASSERT_TRUE(originalImageResource->image()->deprecatedBitmapForCurrentFrame(&bitmap2));
-    ASSERT_EQ(bitmap1.pixelRef()->pixels(), bitmap2.pixelRef()->pixels());
+    {
+        ASSERT_NE(imageBitmap->bitmapImage().get(), originalImageResource->image());
+        RefPtr<SkImage> image1 = imageBitmap->bitmapImage()->imageForCurrentFrame();
+        ASSERT_NE(image1, nullptr);
+        RefPtr<SkImage> image2 = originalImageResource->image()->imageForCurrentFrame();
+        ASSERT_NE(image2, nullptr);
+        ASSERT_EQ(image1, image2);
+    }
 
-    ASSERT_NE(imageBitmap->bitmapImage().get(), newImageResource->image());
-    ASSERT_TRUE(imageBitmap->bitmapImage()->deprecatedBitmapForCurrentFrame(&bitmap1));
-    ASSERT_TRUE(newImageResource->image()->deprecatedBitmapForCurrentFrame(&bitmap2));
-    ASSERT_NE(bitmap1.pixelRef()->pixels(), bitmap2.pixelRef()->pixels());
+    {
+        ASSERT_NE(imageBitmap->bitmapImage().get(), newImageResource->image());
+        RefPtr<SkImage> image1 = imageBitmap->bitmapImage()->imageForCurrentFrame();
+        ASSERT_NE(image1, nullptr);
+        RefPtr<SkImage> image2 = newImageResource->image()->imageForCurrentFrame();
+        ASSERT_NE(image2, nullptr);
+        ASSERT_NE(image1, image2);
+    }
 }
 
 } // namespace

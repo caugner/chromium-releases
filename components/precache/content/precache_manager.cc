@@ -64,42 +64,40 @@ PrecacheManager::PrecacheManager(
 
 PrecacheManager::~PrecacheManager() {}
 
-bool PrecacheManager::ShouldRun() const {
-  // Verify PrecachingAllowed() before calling IsPrecachingEnabled(). This is
-  // because field trials are only assigned when requested. This allows us to
-  // create Control and Experiment groups that are limited to users for whom
-  // PrecachingAllowed() is true, thus accentuating the impact of precaching.
-  return PrecachingAllowed() == AllowedType::ALLOWED && IsPrecachingEnabled();
+bool PrecacheManager::IsInExperimentGroup() const {
+  // Verify IsPrecachingAllowed() before calling FieldTrialList::FindFullName().
+  // This is because field trials are only assigned when requested. This allows
+  // us to create Control and Experiment groups that are limited to users for
+  // whom PrecachingAllowed() is true, thus accentuating the impact of
+  // precaching.
+  return IsPrecachingAllowed() &&
+         (base::StartsWith(
+              base::FieldTrialList::FindFullName(kPrecacheFieldTrialName),
+              kPrecacheFieldTrialEnabledGroup, base::CompareCase::SENSITIVE) ||
+          base::CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kEnablePrecache));
 }
 
-bool PrecacheManager::WouldRun() const {
-  return PrecachingAllowed() == AllowedType::ALLOWED;
-}
-
-bool PrecacheManager::InControlGroup() const {
-  // Verify PrecachingAllowed() before calling FindFullName(). See
-  // PrecacheManager::ShouldRun() for an explanation of why.
-  return PrecachingAllowed() == AllowedType::ALLOWED &&
+bool PrecacheManager::IsInControlGroup() const {
+  // Verify IsPrecachingAllowed() before calling FindFullName(). See
+  // PrecacheManager::IsInExperimentGroup() for an explanation of why.
+  return IsPrecachingAllowed() &&
          base::StartsWith(
              base::FieldTrialList::FindFullName(kPrecacheFieldTrialName),
              kPrecacheFieldTrialControlGroup, base::CompareCase::SENSITIVE);
 }
 
-// static
-bool PrecacheManager::IsPrecachingEnabled() {
-  return base::StartsWith(
-             base::FieldTrialList::FindFullName(kPrecacheFieldTrialName),
-             kPrecacheFieldTrialEnabledGroup, base::CompareCase::SENSITIVE) ||
-         base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kEnablePrecache);
+bool PrecacheManager::IsPrecachingAllowed() const {
+  return PrecachingAllowed() == AllowedType::ALLOWED;
 }
 
 PrecacheManager::AllowedType PrecacheManager::PrecachingAllowed() const {
-  if (!(sync_service_ && sync_service_->backend_initialized()))
+  if (!(sync_service_ && sync_service_->IsBackendInitialized()))
     return AllowedType::PENDING;
 
   // SyncService delegates to SyncPrefs, which must be called on the UI thread.
-  if (sync_service_->GetActiveDataTypes().Has(syncer::SESSIONS) &&
+  if (history_service_ &&
+      sync_service_->GetActiveDataTypes().Has(syncer::SESSIONS) &&
       !sync_service_->GetEncryptedDataTypes().Has(syncer::SESSIONS))
     return AllowedType::ALLOWED;
 
@@ -117,7 +115,7 @@ void PrecacheManager::StartPrecaching(
   }
   precache_completion_callback_ = precache_completion_callback;
 
-  if (history_service_ && ShouldRun()) {
+  if (IsInExperimentGroup()) {
     is_precaching_ = true;
 
     BrowserThread::PostTask(
@@ -131,7 +129,7 @@ void PrecacheManager::StartPrecaching(
     history_service_->TopHosts(
         NumTopHosts(),
         base::Bind(&PrecacheManager::OnHostsReceived, AsWeakPtr()));
-  } else if (InControlGroup() && history_service_) {
+  } else if (IsInControlGroup()) {
     // Set is_precaching_ so that the longer delay is placed between calls to
     // TopHosts.
     is_precaching_ = true;

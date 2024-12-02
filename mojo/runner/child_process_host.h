@@ -8,11 +8,11 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/process/process.h"
-#include "mojo/edk/embedder/channel_info_forward.h"
-#include "mojo/edk/embedder/platform_channel_pair.h"
-#include "mojo/edk/embedder/scoped_platform_handle.h"
 #include "mojo/runner/child_process.mojom.h"
 #include "mojo/runner/child_process_host.h"
+#include "third_party/mojo/src/mojo/edk/embedder/channel_info_forward.h"
+#include "third_party/mojo/src/mojo/edk/embedder/platform_channel_pair.h"
+#include "third_party/mojo/src/mojo/edk/embedder/scoped_platform_handle.h"
 
 namespace mojo {
 namespace runner {
@@ -33,12 +33,10 @@ class ChildProcessHost {
  public:
   // |name| is just for debugging ease. We will spawn off a process so that it
   // can be sandboxed if |start_sandboxed| is true. |app_path| is a path to the
-  // mojo application we wish to start. |clean_app_path| cleans up transient
-  // applications after execution.
+  // mojo application we wish to start.
   ChildProcessHost(Context* context,
                    bool start_sandboxed,
-                   const base::FilePath& app_path,
-                   bool clean_app_path);
+                   const base::FilePath& app_path);
   virtual ~ChildProcessHost();
 
   // |Start()|s the child process; calls |DidStart()| (on the thread on which
@@ -73,7 +71,6 @@ class ChildProcessHost {
   Context* const context_;
   bool start_sandboxed_;
   const base::FilePath app_path_;
-  bool clean_app_path_;
   base::Process child_process_;
   embedder::PlatformChannelPair platform_channel_pair_;
   ChildControllerPtr controller_;

@@ -28,7 +28,13 @@ class ExtensionRegistry;
 class ExtensionSet;
 }
 
-// Model for the browser actions toolbar.
+// Model for the browser actions toolbar. This is a per-profile instance, and
+// manages the user's global preferences.
+// Each browser window will attempt to show browser actions as specified by this
+// model, but if the window is too narrow, actions may end up pushed into the
+// overflow menu on a per-window basis. Callers interested in the arrangement of
+// actions in a particular window should check that window's instance of
+// ToolbarActionsBar, which is responsible for the per-window layout.
 class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
                             public extensions::ExtensionRegistryObserver,
                             public KeyedService {
@@ -50,7 +56,7 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
   // An action id and its corresponding ActionType.
   struct ToolbarItem {
     ToolbarItem() : type(UNKNOWN_ACTION) {}
-    ToolbarItem(std::string action_id, ActionType action_type)
+    ToolbarItem(const std::string& action_id, ActionType action_type)
         : id(action_id), type(action_type) {}
 
     bool operator==(const ToolbarItem& other) { return other.id == id; }
@@ -86,13 +92,6 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
     // Signals that the browser action with |id| has been updated.
     virtual void OnToolbarActionUpdated(const std::string& id) = 0;
 
-    // Signals the action with |id| to show the popup now in the active
-    // window. If |grant_active_tab| is true, then active tab permissions
-    // should be given to the action (only do this if this is through a user
-    // action). Returns true if a popup was slated to be shown.
-    virtual bool ShowToolbarActionPopup(const std::string& id,
-                                        bool grant_active_tab) = 0;
-
     // Signals when the container needs to be redrawn because of a size change,
     // and when the model has finished loading.
     virtual void OnToolbarVisibleCountChanged() = 0;
@@ -110,9 +109,6 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
     // observers were postponing animation during the initialization stage, they
     // can catch up.
     virtual void OnToolbarModelInitialized() = 0;
-
-    // Returns the browser associated with the Observer.
-    virtual Browser* GetBrowser() = 0;
 
    protected:
     virtual ~Observer() {}
@@ -133,6 +129,9 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
   // "show all actions".
   void SetVisibleIconCount(size_t count);
 
+  // Note that this (and all_icons_visible()) are the global default, but are
+  // inappropriate for determining a specific window's state - for that, use
+  // the ToolbarActionsBar.
   size_t visible_icon_count() const {
     // We have guards around this because |visible_icon_count_| can be set by
     // prefs/sync, and we want to ensure that the icon count returned is within
@@ -142,7 +141,6 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
                : std::min(static_cast<size_t>(visible_icon_count_),
                           toolbar_items().size());
   }
-
   bool all_icons_visible() const {
     return visible_icon_count() == toolbar_items().size();
   }
@@ -161,23 +159,6 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
   HighlightType highlight_type() const { return highlight_type_; }
 
   void OnActionToolbarPrefChange();
-
-  // Returns the index of the given action with |id|, or -1 if the id
-  // wasn't found.
-  int GetIndexForId(const std::string& id) const;
-
-  // Finds the Observer associated with |browser| and tells it to display a
-  // popup for the given action with |id|. If |grant_active_tab| is true,
-  // this grants active tab permissions to the action; only do this because of
-  // a direct user action.
-  bool ShowToolbarActionPopup(const std::string& id,
-                              Browser* browser,
-                              bool grant_active_tab);
-
-  // Ensures that the actions in the |action_ids| list are visible on the
-  // toolbar. This might mean they need to be moved to the front (if they are in
-  // the overflow bucket).
-  void EnsureVisibility(const std::vector<std::string>& action_ids);
 
   // Highlights the actions specified by |action_ids|. This will cause
   // the ToolbarModel to only display those actions.
@@ -224,7 +205,7 @@ class ToolbarActionsModel : public extensions::ExtensionActionAPI::Observer,
   // takes the shortcut - looking at the regular model's content and modifying
   // it.
   void InitializeActionList();
-  void Populate(std::vector<std::string>* positions);
+  void Populate();
   void IncognitoPopulate();
 
   // Save the model to prefs.

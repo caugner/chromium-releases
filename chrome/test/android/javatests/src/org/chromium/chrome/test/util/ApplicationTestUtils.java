@@ -30,6 +30,8 @@ public class ApplicationTestUtils {
 
     private static PowerManager.WakeLock sWakeLock = null;
 
+    // TODO(jbudorick): fix deprecation warning crbug.com/537347
+    @SuppressWarnings("deprecation")
     public static void setUp(Context context, boolean clearAppData, boolean checkHttpServer)
             throws Exception {
         if (clearAppData) {
@@ -144,14 +146,23 @@ public class ApplicationTestUtils {
     }
 
     /**
+     * See {@link #assertWaitForPageScaleFactorMatch(ChromeActivity,float,long)}.
+     */
+    public static void assertWaitForPageScaleFactorMatch(
+            final ChromeActivity activity, final float expectedScale) throws InterruptedException {
+        assertWaitForPageScaleFactorMatch(activity, expectedScale, false);
+    }
+
+    /**
      * Waits till the ContentViewCore receives the expected page scale factor
      * from the compositor and asserts that this happens.
      *
      * Proper use of this function requires waiting for a page scale factor that isn't 1.0f because
      * the default seems to be 1.0f.
      */
-    public static void assertWaitForPageScaleFactorMatch(
-            final ChromeActivity activity, final float expectedScale) throws InterruptedException {
+    public static void assertWaitForPageScaleFactorMatch(final ChromeActivity activity,
+            final float expectedScale, boolean waitLongerForLoad) throws InterruptedException {
+        long waitTimeInMs = waitLongerForLoad ? 10000 : CriteriaHelper.DEFAULT_MAX_TIME_TO_POLL;
         boolean scaleFactorMatch = CriteriaHelper.pollForCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
@@ -160,7 +171,7 @@ public class ApplicationTestUtils {
                 return Math.abs(activity.getCurrentContentViewCore().getScale() - expectedScale)
                         < FLOAT_EPSILON;
             }
-        });
+        }, waitTimeInMs, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
         Assert.assertTrue("Expecting scale factor of: " + expectedScale + ", got: "
                     + activity.getCurrentContentViewCore().getScale(), scaleFactorMatch);
     }

@@ -59,6 +59,7 @@
 
 #if defined(OS_IOS)
 #include "components/autofill/ios/browser/autofill_field_trial_ios.h"
+#include "components/autofill/ios/browser/keyboard_accessory_metrics_logger.h"
 #endif
 
 namespace autofill {
@@ -177,64 +178,11 @@ void AutofillManager::RegisterProfilePrefs(
   // This choice is made on a per-device basis, so it's not syncable.
   registry->RegisterBooleanPref(
       prefs::kAutofillWalletImportStorageCheckboxState, true);
-#if defined(OS_MACOSX)
-  registry->RegisterBooleanPref(
-      prefs::kAutofillAuxiliaryProfilesEnabled,
-      true,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-#else  // defined(OS_MACOSX)
-  registry->RegisterBooleanPref(prefs::kAutofillAuxiliaryProfilesEnabled,
-                                false);
-#endif  // defined(OS_MACOSX)
-#if defined(OS_MACOSX)
-  registry->RegisterBooleanPref(prefs::kAutofillMacAddressBookQueried, false);
-#endif  // defined(OS_MACOSX)
   registry->RegisterDoublePref(prefs::kAutofillPositiveUploadRate,
                                kAutofillPositiveUploadRateDefaultValue);
   registry->RegisterDoublePref(prefs::kAutofillNegativeUploadRate,
                                kAutofillNegativeUploadRateDefaultValue);
-
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-  registry->RegisterBooleanPref(prefs::kAutofillUseMacAddressBook, false);
-  registry->RegisterIntegerPref(prefs::kAutofillMacAddressBookShowedCount, 0);
-#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 }
-
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-void AutofillManager::MigrateUserPrefs(PrefService* prefs) {
-  const PrefService::Preference* pref =
-      prefs->FindPreference(prefs::kAutofillUseMacAddressBook);
-
-  // If the pref is not its default value, then the migration has already been
-  // performed.
-  if (!pref->IsDefaultValue())
-    return;
-
-  // Whether Chrome has already tried to access the user's Address Book.
-  const PrefService::Preference* pref_accessed =
-      prefs->FindPreference(prefs::kAutofillMacAddressBookQueried);
-  // Whether the user wants to use the Address Book to populate Autofill.
-  const PrefService::Preference* pref_enabled =
-      prefs->FindPreference(prefs::kAutofillAuxiliaryProfilesEnabled);
-
-  if (pref_accessed->IsDefaultValue() && pref_enabled->IsDefaultValue()) {
-    // This is likely a new user. Reset the default value to prevent the
-    // migration from happening again.
-    prefs->SetBoolean(prefs::kAutofillUseMacAddressBook,
-                      prefs->GetBoolean(prefs::kAutofillUseMacAddressBook));
-    return;
-  }
-
-  bool accessed;
-  bool enabled;
-  bool success = pref_accessed->GetValue()->GetAsBoolean(&accessed);
-  DCHECK(success);
-  success = pref_enabled->GetValue()->GetAsBoolean(&enabled);
-  DCHECK(success);
-
-  prefs->SetBoolean(prefs::kAutofillUseMacAddressBook, accessed && enabled);
-}
-#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 
 void AutofillManager::SetExternalDelegate(AutofillExternalDelegate* delegate) {
   // TODO(jrg): consider passing delegate into the ctor.  That won't
@@ -248,42 +196,13 @@ void AutofillManager::ShowAutofillSettings() {
   client_->ShowAutofillSettings();
 }
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-bool AutofillManager::ShouldShowAccessAddressBookSuggestion(
-    const FormData& form,
-    const FormFieldData& field) {
-  AutofillField* autofill_field = GetAutofillField(form, field);
-  return autofill_field &&
-         personal_data_->ShouldShowAccessAddressBookSuggestion(
-             autofill_field->Type());
-}
-
-bool AutofillManager::AccessAddressBook() {
-  if (!personal_data_)
-    return false;
-  return personal_data_->AccessAddressBook();
-}
-
-void AutofillManager::ShowedAccessAddressBookPrompt() {
-  if (!personal_data_)
-    return;
-  return personal_data_->ShowedAccessAddressBookPrompt();
-}
-
-int AutofillManager::AccessAddressBookPromptCount() {
-  if (!personal_data_)
-    return 0;
-  return personal_data_->AccessAddressBookPromptCount();
-}
-#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
-
 bool AutofillManager::ShouldShowScanCreditCard(const FormData& form,
                                                const FormFieldData& field) {
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          autofill::switches::kEnableCreditCardScan) &&
+          switches::kEnableCreditCardScan) &&
       (base::FieldTrialList::FindFullName("CreditCardScan") != "Enabled" ||
        base::CommandLine::ForCurrentProcess()->HasSwitch(
-           autofill::switches::kDisableCreditCardScan))) {
+           switches::kDisableCreditCardScan))) {
     return false;
   }
 
@@ -507,10 +426,18 @@ void AutofillManager::OnQueryFormFieldAutofill(int query_id,
           // If the relevant section is auto-filled and the renderer is querying
           // for suggestions, then the user is editing the value of a field.
           // In this case, mimic autocomplete: don't display labels or icons,
-          // as that information is redundant.
-          for (size_t i = 0; i < suggestions.size(); i++) {
-            suggestions[i].label = base::string16();
-            suggestions[i].icon = base::string16();
+          // as that information is redundant. Moreover, filter out duplicate
+          // suggestions.
+          std::set<base::string16> seen_values;
+          for (auto iter = suggestions.begin(); iter != suggestions.end();) {
+            if (!seen_values.insert(iter->value).second) {
+              // If we've seen this suggestion value before, remove it.
+              iter = suggestions.erase(iter);
+            } else {
+              iter->label.clear();
+              iter->icon.clear();
+              ++iter;
+            }
           }
         }
 
@@ -622,10 +549,6 @@ void AutofillManager::FillOrPreviewForm(
     const FormData& form,
     const FormFieldData& field,
     int unique_id) {
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-  EmitIsFromAddressBookMetric(unique_id);
-#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
-
   if (!IsValidFormData(form) || !IsValidFormFieldData(field))
     return;
 
@@ -1471,7 +1394,11 @@ std::vector<Suggestion> AutofillManager::GetCreditCardSuggestions(
 }
 
 void AutofillManager::ParseForms(const std::vector<FormData>& forms) {
+  if (forms.empty())
+    return;
+
   std::vector<FormStructure*> non_queryable_forms;
+  std::vector<FormStructure*> queryable_forms;
   for (const FormData& form : forms) {
     scoped_ptr<FormStructure> form_structure(new FormStructure(form));
 
@@ -1485,24 +1412,34 @@ void AutofillManager::ParseForms(const std::vector<FormData>& forms) {
 
     form_structure->DetermineHeuristicTypes();
 
-    if (form_structure->ShouldBeCrowdsourced()) {
+    // Ownership is transferred to |form_structures_| which maintains it until
+    // the manager is Reset() or destroyed. It is safe to use references below
+    // as long as receivers don't take ownership.
+    form_structures_.push_back(form_structure.Pass());
+
+    if (form_structures_.back()->ShouldBeCrowdsourced()) {
       AutofillMetrics::LogPasswordFormQueryVolume(
           AutofillMetrics::CURRENT_QUERY);
-      form_structures_.push_back(form_structure.release());
-    } else
-      non_queryable_forms.push_back(form_structure.release());
+      queryable_forms.push_back(form_structures_.back());
+    } else {
+      non_queryable_forms.push_back(form_structures_.back());
+    }
   }
 
-  if (!form_structures_.empty() && download_manager_) {
+  if (!queryable_forms.empty() && download_manager_) {
     // Query the server if at least one of the forms was parsed.
-    download_manager_->StartQueryRequest(form_structures_.get());
+    download_manager_->StartQueryRequest(queryable_forms);
   }
 
-  for (FormStructure* structure : non_queryable_forms)
-    form_structures_.push_back(structure);
-
-  if (!form_structures_.empty())
+  if (!queryable_forms.empty() || !non_queryable_forms.empty()) {
     AutofillMetrics::LogUserHappinessMetric(AutofillMetrics::FORMS_LOADED);
+#if defined(OS_IOS)
+    // Log this from same location as AutofillMetrics::FORMS_LOADED to ensure
+    // that KeyboardAccessoryButtonsIOS and UserHappiness UMA metrics will be
+    // directly comparable.
+    KeyboardAccessoryMetricsLogger::OnFormsLoaded();
+#endif
+  }
 
   // For the |non_queryable_forms|, we have all the field type info we're ever
   // going to get about them.  For the other forms, we'll wait until we get a
@@ -1592,21 +1529,6 @@ bool AutofillManager::ShouldUploadForm(const FormStructure& form) {
   return true;
 }
 
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-void AutofillManager::EmitIsFromAddressBookMetric(int unique_id) {
-  const AutofillProfile* profile = nullptr;
-  bool result = GetProfile(unique_id, &profile);
-  if (!result)
-    return;
-
-  bool is_from_address_book =
-      profile->record_type() == AutofillProfile::AUXILIARY_PROFILE;
-  UMA_HISTOGRAM_BOOLEAN(
-      "Autofill.MacAddressBook.AcceptedSuggestionIsFromAddressBook",
-      is_from_address_book);
-}
-#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
-
 #ifdef ENABLE_FORM_DEBUG_DUMP
 void AutofillManager::DumpAutofillData(bool imported_cc) const {
   base::ThreadRestrictions::ScopedAllowIO allow_id;
@@ -1626,7 +1548,7 @@ void AutofillManager::DumpAutofillData(bool imported_cc) const {
 
   fputs("------------------------------------------------------\n", file);
   if (imported_cc)
-   fputs("Got a new credit card on CC form:\n", file);
+    fputs("Got a new credit card on CC form:\n", file);
   else
     fputs("Submitted form:\n", file);
   for (int i = static_cast<int>(recently_autofilled_forms_.size()) - 1;

@@ -4,6 +4,9 @@
 
 #include "chrome/browser/ui/browser_dialogs.h"
 
+#include "chrome/browser/ui/bookmarks/bookmark_bubble_sign_in_delegate.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/views/bookmarks/bookmark_bubble_view.h"
 #include "chrome/browser/ui/views/website_settings/website_settings_popup_view.h"
 
 // This file provides definitions of desktop browser dialog-creation methods for
@@ -14,14 +17,30 @@
 
 namespace chrome {
 
-void ShowWebsiteSettingsBubbleViewsAtPoint(const gfx::Point& anchor_point,
-                                           Profile* profile,
-                                           content::WebContents* web_contents,
-                                           const GURL& url,
-                                           const content::SSLStatus& ssl) {
-  WebsiteSettingsPopupView::ShowPopup(nullptr,
-                                      gfx::Rect(anchor_point, gfx::Size()),
-                                      profile, web_contents, url, ssl);
+void ShowWebsiteSettingsBubbleViewsAtPoint(
+    const gfx::Point& anchor_point,
+    Profile* profile,
+    content::WebContents* web_contents,
+    const GURL& url,
+    const SecurityStateModel::SecurityInfo& security_info) {
+  WebsiteSettingsPopupView::ShowPopup(
+      nullptr, gfx::Rect(anchor_point, gfx::Size()), profile, web_contents, url,
+      security_info);
+}
+
+void ShowBookmarkBubbleViewsAtPoint(const gfx::Point& anchor_point,
+                                    gfx::NativeView parent,
+                                    bookmarks::BookmarkBubbleObserver* observer,
+                                    Browser* browser,
+                                    const GURL& url,
+                                    bool already_bookmarked) {
+  // The Views dialog may prompt for sign in.
+  scoped_ptr<BookmarkBubbleDelegate> delegate(
+      new BookmarkBubbleSignInDelegate(browser));
+
+  BookmarkBubbleView::ShowBubble(nullptr, gfx::Rect(anchor_point, gfx::Size()),
+                                 parent, observer, delegate.Pass(),
+                                 browser->profile(), url, already_bookmarked);
 }
 
 }  // namespace chrome

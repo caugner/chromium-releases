@@ -26,6 +26,7 @@
 #include "ui/app_list/app_list_view_delegate.h"
 #include "ui/app_list/test/app_list_test_view_delegate.h"
 #include "ui/aura/window.h"
+#include "ui/gfx/image/image.h"
 
 #if defined(OS_CHROMEOS)
 #include "ash/system/tray/system_tray_notifier.h"
@@ -107,6 +108,10 @@ bool TestShellDelegate::IsRunningInForcedAppMode() const {
 
 bool TestShellDelegate::IsMultiAccountEnabled() const {
   return false;
+}
+
+bool TestShellDelegate::CanShowWindowForUser(aura::Window* window) const {
+  return true;
 }
 
 bool TestShellDelegate::IsForceMaximizeOnFirstRun() const {
@@ -197,6 +202,10 @@ GPUSupport* TestShellDelegate::CreateGPUSupport() {
 
 base::string16 TestShellDelegate::GetProductName() const {
   return base::string16();
+}
+
+gfx::Image TestShellDelegate::GetDeprecatedAcceleratorImage() const {
+  return gfx::Image();
 }
 
 void TestShellDelegate::SetMediaCaptureState(MediaCaptureState state) {

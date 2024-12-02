@@ -34,7 +34,7 @@
 #include "chrome/browser/ui/webui/app_launcher_login_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
-#include "chrome/browser/web_resource/notification_promo.h"
+#include "chrome/browser/web_resource/notification_promo_helper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -43,6 +43,7 @@
 #include "chrome/grit/locale_settings.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "components/web_resource/notification_promo.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
@@ -172,7 +173,7 @@ NTPResourceCache::NTPResourceCache(Profile* profile)
   registrar_.Add(this, chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED,
                  content::NotificationService::AllSources());
 
-  PromoResourceService* promo_service =
+  web_resource::PromoResourceService* promo_service =
       g_browser_process->promo_resource_service();
   if (promo_service) {
     promo_resource_subscription_ = promo_service->RegisterStateChangedCallback(
@@ -410,9 +411,6 @@ void NTPResourceCache::CreateNewTabHTML() {
   base::DictionaryValue load_time_data;
   load_time_data.SetBoolean("bookmarkbarattached",
       prefs->GetBoolean(bookmarks::prefs::kShowBookmarkBar));
-  load_time_data.SetBoolean("hasattribution",
-      ThemeServiceFactory::GetForProfile(profile_)->HasCustomImage(
-          IDR_THEME_NTP_ATTRIBUTION));
   load_time_data.SetBoolean("showAppLauncherPromo",
       ShouldShowAppLauncherPromo());
   load_time_data.SetString("title",
@@ -486,11 +484,6 @@ void NTPResourceCache::CreateNewTabHTML() {
   load_time_data.SetBoolean("canShowAppInfoDialog",
                             CanShowAppInfoDialog());
 
-#if defined(OS_CHROMEOS)
-  load_time_data.SetString("expandMenu",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_CLOSE_MENU_EXPAND));
-#endif
-
   NewTabPageHandler::GetLocalizedValues(profile_, &load_time_data);
   AppLauncherLoginHandler::GetLocalizedValues(profile_, &load_time_data);
 
@@ -500,27 +493,26 @@ void NTPResourceCache::CreateNewTabHTML() {
   load_time_data.SetBoolean("anim",
                             gfx::Animation::ShouldRenderRichAnimation());
 
-  ui::ThemeProvider* tp = ThemeServiceFactory::GetForProfile(profile_);
-  int alignment = tp->GetDisplayProperty(
-      ThemeProperties::NTP_BACKGROUND_ALIGNMENT);
-  load_time_data.SetString("themegravity",
-      (alignment & ThemeProperties::ALIGN_RIGHT) ? "right" : "");
-
   // Disable the promo if this is the first run, otherwise set the promo string
   // for display if there is a valid outstanding promo.
   if (first_run::IsChromeFirstRun()) {
-    NotificationPromo::HandleClosed(NotificationPromo::NTP_NOTIFICATION_PROMO);
+    web_resource::HandleNotificationPromoClosed(
+        web_resource::NotificationPromo::NTP_NOTIFICATION_PROMO);
   } else {
-    NotificationPromo notification_promo;
-    notification_promo.InitFromPrefs(NotificationPromo::NTP_NOTIFICATION_PROMO);
+    web_resource::NotificationPromo notification_promo(
+        g_browser_process->local_state());
+    notification_promo.InitFromPrefs(
+        web_resource::NotificationPromo::NTP_NOTIFICATION_PROMO);
     if (notification_promo.CanShow()) {
       load_time_data.SetString("notificationPromoText",
                                notification_promo.promo_text());
       DVLOG(1) << "Notification promo:" << notification_promo.promo_text();
     }
 
-    NotificationPromo bubble_promo;
-    bubble_promo.InitFromPrefs(NotificationPromo::NTP_BUBBLE_PROMO);
+    web_resource::NotificationPromo bubble_promo(
+        g_browser_process->local_state());
+    bubble_promo.InitFromPrefs(
+        web_resource::NotificationPromo::NTP_BUBBLE_PROMO);
     if (bubble_promo.CanShow()) {
       load_time_data.SetString("bubblePromoText",
                                bubble_promo.promo_text());
@@ -652,6 +644,23 @@ void NTPResourceCache::CreateNewTabCSS() {
   substitutions["colorSectionBorder"] =
       SkColorToRGBComponents(color_section_border);
   substitutions["colorText"] = SkColorToRGBComponents(color_text);
+
+  // For themes that right-align the background, we flip the attribution to the
+  // left to avoid conflicts.
+  int alignment = tp->GetDisplayProperty(
+      ThemeProperties::NTP_BACKGROUND_ALIGNMENT);
+  if (alignment & ThemeProperties::ALIGN_RIGHT) {
+    substitutions["leftAlignAttribution"] = "0";
+    substitutions["rightAlignAttribution"] = "auto";
+    substitutions["textAlignAttribution"] = "right";
+  } else {
+    substitutions["leftAlignAttribution"] = "auto";
+    substitutions["rightAlignAttribution"] = "0";
+    substitutions["textAlignAttribution"] = "left";
+  }
+
+  substitutions["displayAttribution"] =
+      tp->HasCustomImage(IDR_THEME_NTP_ATTRIBUTION) ? "inline" : "none";
 
   // Get our template.
   static const base::StringPiece new_tab_theme_css(

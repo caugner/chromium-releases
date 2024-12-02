@@ -37,20 +37,12 @@
               "children": [
                 {
                   "bounds": [85, 120],
+                  "shouldFlattenTransform": false,
                   "drawsContent": true,
                   "paintingPhases": [
                     "GraphicsLayerPaintForeground",
                     "GraphicsLayerPaintOverflowContents",
                     "GraphicsLayerPaintCompositedScroll"
-                  ],
-                  "children": [
-                    {
-                      "paintingPhases": [
-                        "GraphicsLayerPaintForeground",
-                        "GraphicsLayerPaintOverflowContents",
-                        "GraphicsLayerPaintCompositedScroll"
-                      ]
-                    }
                   ]
                 }
               ]

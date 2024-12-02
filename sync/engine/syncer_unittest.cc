@@ -20,6 +20,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/test/histogram_tester.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "sync/engine/backoff_delay_provider.h"
@@ -663,6 +664,115 @@ TEST_F(SyncerTest, GetCommitIdsFiltersThrottledEntries) {
     Entry entryA(&rtrans, syncable::GET_BY_ID, ids_.FromNumber(1));
     ASSERT_TRUE(entryA.good());
     EXPECT_FALSE(entryA.GetIsUnsynced());
+  }
+}
+
+// This test has three steps. In the first step, a BOOKMARK update is received.
+// In the next step, syncing BOOKMARKS is disabled, so no BOOKMARK is sent or
+// received. In the last step, a BOOKMARK update is committed.
+TEST_F(SyncerTest, DataUseHistogramsTest) {
+  base::HistogramTester histogram_tester;
+  sync_pb::EntitySpecifics bookmark_data;
+  AddDefaultFieldValue(BOOKMARKS, &bookmark_data);
+
+  mock_server_->AddUpdateDirectory(1, 0, "A", 10, 10, foreign_cache_guid(),
+                                   "-1");
+  int download_bytes_bookmark = 0;
+  vector<unsigned int> progress_bookmark(3, 0);
+  vector<unsigned int> progress_all(3, 0);
+  vector<base::Bucket> samples;
+  EXPECT_TRUE(SyncShareNudge());
+  {
+    histogram_tester.ExpectTotalCount("DataUse.Sync.Upload.Count", 0);
+    histogram_tester.ExpectTotalCount("DataUse.Sync.Upload.Bytes", 0);
+    histogram_tester.ExpectTotalCount("DataUse.Sync.Download.Count", 1);
+    histogram_tester.ExpectUniqueSample("DataUse.Sync.Download.Count",
+                                        BOOKMARKS, 1);
+    samples = histogram_tester.GetAllSamples("DataUse.Sync.Download.Bytes");
+    EXPECT_EQ(samples.size(), 1u);
+    EXPECT_EQ(samples.at(0).min, BOOKMARKS);
+    EXPECT_GE(samples.at(0).count, 0);
+    download_bytes_bookmark = samples.at(0).count;
+
+    samples =
+        histogram_tester.GetAllSamples("DataUse.Sync.ProgressMarker.Bytes");
+
+    for (const base::Bucket& bucket : samples) {
+      if (bucket.min == BOOKMARKS)
+        progress_bookmark.at(0) += bucket.count;
+      progress_all.at(0) += bucket.count;
+    }
+    EXPECT_GT(progress_bookmark.at(0), 0u);
+    EXPECT_GT(progress_all.at(0), 0u);
+
+    WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
+    MutableEntry A(&wtrans, GET_BY_ID, ids_.FromNumber(1));
+    A.PutIsUnsynced(true);
+    A.PutSpecifics(bookmark_data);
+    A.PutNonUniqueName("bookmark");
+  }
+
+  // Now sync without enabling bookmarks.
+  mock_server_->ExpectGetUpdatesRequestTypes(
+      Difference(context_->GetEnabledTypes(), ModelTypeSet(BOOKMARKS)));
+  ResetSession();
+  syncer_->NormalSyncShare(
+      Difference(context_->GetEnabledTypes(), ModelTypeSet(BOOKMARKS)),
+      &nudge_tracker_, session_.get());
+
+  {
+    // Nothing should have been committed as bookmarks is throttled.
+    histogram_tester.ExpectTotalCount("DataUse.Sync.Upload.Count", 0);
+    histogram_tester.ExpectTotalCount("DataUse.Sync.Upload.Bytes", 0);
+    histogram_tester.ExpectTotalCount("DataUse.Sync.Download.Count", 1);
+    histogram_tester.ExpectUniqueSample("DataUse.Sync.Download.Count",
+                                        BOOKMARKS, 1);
+
+    samples = histogram_tester.GetAllSamples("DataUse.Sync.Download.Bytes");
+    EXPECT_EQ(samples.size(), 1u);
+    EXPECT_EQ(samples.at(0).min, BOOKMARKS);
+    EXPECT_EQ(samples.at(0).count, download_bytes_bookmark);
+
+    samples =
+        histogram_tester.GetAllSamples("DataUse.Sync.ProgressMarker.Bytes");
+    for (const base::Bucket& bucket : samples) {
+      if (bucket.min == BOOKMARKS)
+        progress_bookmark.at(1) += bucket.count;
+      progress_all.at(1) += bucket.count;
+    }
+    EXPECT_EQ(progress_bookmark.at(1), progress_bookmark.at(0));
+    EXPECT_GT(progress_all.at(1), progress_all.at(0));
+  }
+
+  // Sync again with bookmarks enabled.
+  mock_server_->ExpectGetUpdatesRequestTypes(context_->GetEnabledTypes());
+  EXPECT_TRUE(SyncShareNudge());
+  {
+    // It should have been committed.
+    histogram_tester.ExpectTotalCount("DataUse.Sync.Upload.Count", 1);
+    histogram_tester.ExpectUniqueSample("DataUse.Sync.Upload.Count", BOOKMARKS,
+                                        1);
+    samples = histogram_tester.GetAllSamples("DataUse.Sync.Upload.Bytes");
+    EXPECT_EQ(samples.size(), 1u);
+    EXPECT_EQ(samples.at(0).min, BOOKMARKS);
+    EXPECT_GE(samples.at(0).count, 0);
+
+    samples = histogram_tester.GetAllSamples("DataUse.Sync.Download.Bytes");
+    EXPECT_EQ(samples.size(), 1u);
+    EXPECT_EQ(samples.at(0).min, BOOKMARKS);
+    EXPECT_EQ(samples.at(0).count, download_bytes_bookmark);
+
+    histogram_tester.ExpectTotalCount("DataUse.Sync.Download.Count", 1);
+
+    samples =
+        histogram_tester.GetAllSamples("DataUse.Sync.ProgressMarker.Bytes");
+    for (const base::Bucket& bucket : samples) {
+      if (bucket.min == BOOKMARKS)
+        progress_bookmark.at(2) += bucket.count;
+      progress_all.at(2) += bucket.count;
+    }
+    EXPECT_GT(progress_bookmark.at(2), progress_bookmark.at(1));
+    EXPECT_GT(progress_all.at(2), progress_all.at(1));
   }
 }
 
@@ -4226,6 +4336,8 @@ TEST_F(SyncerTest, ClientTagUpdateClashesWithLocalEntry) {
     tag2_metahandle = tag2.GetMetahandle();
 
     // Preferences type root should have been created by the updates above.
+    ASSERT_TRUE(directory()->InitialSyncEndedForType(&trans, PREFERENCES));
+
     Entry pref_root(&trans, GET_TYPE_ROOT, PREFERENCES);
     ASSERT_TRUE(pref_root.good());
 
@@ -4268,6 +4380,8 @@ TEST_F(SyncerTest, ClientTagUpdateClashesWithLocalEntry) {
     EXPECT_EQ(tag2_metahandle, tag2.GetMetahandle());
 
     // Preferences type root should have been created by the updates above.
+    ASSERT_TRUE(directory()->InitialSyncEndedForType(&trans, PREFERENCES));
+
     Entry pref_root(&trans, GET_TYPE_ROOT, PREFERENCES);
     ASSERT_TRUE(pref_root.good());
 
@@ -4350,6 +4464,8 @@ TEST_F(SyncerTest, ClientTagClashWithinBatchOfUpdates) {
     EXPECT_EQ("tag c", tag_c.GetUniqueClientTag());
 
     // Preferences type root should have been created by the updates above.
+    ASSERT_TRUE(directory()->InitialSyncEndedForType(&trans, PREFERENCES));
+
     Entry pref_root(&trans, GET_TYPE_ROOT, PREFERENCES);
     ASSERT_TRUE(pref_root.good());
 
@@ -4373,6 +4489,9 @@ TEST_F(SyncerTest, EntryWithParentIdUpdatedWithEntryWithoutParentId) {
     // Preferences type root should have been created by the update above.
     // We need it in order to get its ID.
     syncable::ReadTransaction trans(FROM_HERE, directory());
+
+    ASSERT_TRUE(directory()->InitialSyncEndedForType(&trans, PREFERENCES));
+
     Entry pref_root(&trans, GET_TYPE_ROOT, PREFERENCES);
     ASSERT_TRUE(pref_root.good());
     pref_root_id = pref_root.GetId();
@@ -4565,16 +4684,17 @@ TEST_F(SyncerTest, ConfigureDownloadsTwoBatchesSuccess) {
   syncable::Id node2 = ids_.NewServerId();
 
   // Construct the first GetUpdates response.
-  mock_server_->AddUpdateDirectory(node1, ids_.root(), "one", 1, 10,
-                                   foreign_cache_guid(), "-2");
+  mock_server_->AddUpdatePref(node1.GetServerId(), "", "one", 1, 10);
   mock_server_->SetChangesRemaining(1);
   mock_server_->NextUpdateBatch();
 
   // Construct the second GetUpdates response.
-  mock_server_->AddUpdateDirectory(node2, ids_.root(), "two", 1, 20,
-                                   foreign_cache_guid(), "-2");
+  mock_server_->AddUpdatePref(node2.GetServerId(), "", "two", 2, 20);
 
   SyncShareConfigure();
+
+  // The type should now be marked as having the initial sync completed.
+  EXPECT_TRUE(directory()->InitialSyncEndedForType(PREFERENCES));
 
   syncable::ReadTransaction trans(FROM_HERE, directory());
   // Both nodes should be downloaded and applied.
@@ -4600,16 +4720,17 @@ TEST_F(SyncerTest, ConfigureFailsDontApplyUpdates) {
   mock_server_->FailNthPostBufferToPathCall(2);
 
   // Construct the first GetUpdates response.
-  mock_server_->AddUpdateDirectory(node1, ids_.root(), "one", 1, 10,
-                                   foreign_cache_guid(), "-1");
+  mock_server_->AddUpdatePref(node1.GetServerId(), "", "one", 1, 10);
   mock_server_->SetChangesRemaining(1);
   mock_server_->NextUpdateBatch();
 
-  // Consutrct the second GetUpdates response.
-  mock_server_->AddUpdateDirectory(node2, ids_.root(), "two", 1, 20,
-                                   foreign_cache_guid(), "-2");
+  // Construct the second GetUpdates response.
+  mock_server_->AddUpdatePref(node2.GetServerId(), "", "two", 2, 20);
 
   SyncShareConfigure();
+
+  // The type shouldn't be marked as having the initial sync completed.
+  EXPECT_FALSE(directory()->InitialSyncEndedForType(PREFERENCES));
 
   syncable::ReadTransaction trans(FROM_HERE, directory());
 
@@ -4655,6 +4776,27 @@ TEST_F(SyncerTest, GetKeyEmpty) {
     syncable::ReadTransaction rtrans(FROM_HERE, directory());
     EXPECT_TRUE(directory()->GetNigoriHandler()->NeedKeystoreKey(&rtrans));
   }
+}
+
+// Trigger an update that contains a progress marker only and verify that
+// the type's permanent folder is created and the type is marked as having
+// initial sync complete.
+TEST_F(SyncerTest, ProgressMarkerOnlyUpdateCreatesRootFolder) {
+  EXPECT_FALSE(directory()->InitialSyncEndedForType(PREFERENCES));
+  sync_pb::DataTypeProgressMarker* marker =
+      mock_server_->AddUpdateProgressMarker();
+  marker->set_data_type_id(GetSpecificsFieldNumberFromModelType(PREFERENCES));
+  marker->set_token("foobar");
+
+  SyncShareNudge();
+
+  {
+    syncable::ReadTransaction trans(FROM_HERE, directory());
+    syncable::Entry root(&trans, syncable::GET_TYPE_ROOT, PREFERENCES);
+    EXPECT_TRUE(root.good());
+  }
+
+  EXPECT_TRUE(directory()->InitialSyncEndedForType(PREFERENCES));
 }
 
 // Tests specifically related to bookmark (and therefore no client tags) sync

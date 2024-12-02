@@ -15,7 +15,6 @@
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -39,6 +38,7 @@
 #include "components/sync_driver/data_type_error_handler_mock.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "sync/api/sync_error.h"
+#include "sync/api/sync_merge_result.h"
 #include "sync/internal_api/public/change_record.h"
 #include "sync/internal_api/public/read_node.h"
 #include "sync/internal_api/public/read_transaction.h"
@@ -379,7 +379,8 @@ class ProfileSyncServiceBookmarkTest : public testing::Test {
   // change the sync model directly after ModelAssociation.  This function can
   // be invoked prior to model association to set up first-time sync model
   // association scenarios.
-  int64 AddFolderToShare(syncer::WriteTransaction* trans, std::string title) {
+  int64 AddFolderToShare(syncer::WriteTransaction* trans,
+                         const std::string& title) {
     EXPECT_FALSE(model_associator_);
 
     // Be sure to call CreatePermanentBookmarkNodes(), otherwise this will fail.

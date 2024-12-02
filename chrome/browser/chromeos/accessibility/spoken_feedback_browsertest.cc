@@ -327,7 +327,7 @@ IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, NavigateAppLauncher) {
 
   SendKeyPress(ui::VKEY_RETURN);
 
-  EXPECT_EQ("Search or type U R L", speech_monitor_.GetNextUtterance());
+  EXPECT_EQ("Search or type URL", speech_monitor_.GetNextUtterance());
   EXPECT_EQ("Edit text", speech_monitor_.GetNextUtterance());
 
   SendKeyPress(ui::VKEY_DOWN);
@@ -645,7 +645,7 @@ IN_PROC_BROWSER_TEST_F(OobeSpokenFeedbackTest, DISABLED_SpokenFeedbackInOobe) {
 
   // We expect to be in the language select dropdown for this test to work,
   // so make sure that's the case.
-  js_checker().Execute("$('language-select').focus()");
+  js_checker().ExecuteAsync("$('language-select').focus()");
   AccessibilityManager::Get()->EnableSpokenFeedback(
       true, ui::A11Y_NOTIFICATION_NONE);
   ASSERT_TRUE(speech_monitor_.SkipChromeVoxEnabledMessage());

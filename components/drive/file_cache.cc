@@ -25,9 +25,6 @@
 #include "net/base/filename_util.h"
 #include "net/base/mime_sniffer.h"
 #include "net/base/mime_util.h"
-#if defined(OS_CHROMEOS)
-#include "third_party/cros_system_api/constants/cryptohome.h"
-#endif
 
 namespace drive {
 namespace internal {
@@ -84,10 +81,7 @@ bool FileCache::FreeDiskSpaceIfNeededFor(int64 num_bytes) {
   // Remove all entries unless specially marked.
   scoped_ptr<ResourceMetadataStorage::Iterator> it = storage_->GetIterator();
   for (; !it->IsAtEnd(); it->Advance()) {
-    if (it->GetValue().file_specific_info().has_cache_state() &&
-        !it->GetValue().file_specific_info().cache_state().is_pinned() &&
-        !it->GetValue().file_specific_info().cache_state().is_dirty() &&
-        !mounted_files_.count(it->GetID())) {
+    if (IsEvictable(it->GetID(), it->GetValue())) {
       ResourceEntry entry(it->GetValue());
       entry.mutable_file_specific_info()->clear_cache_state();
       storage_->PutEntry(entry);
@@ -115,6 +109,27 @@ bool FileCache::FreeDiskSpaceIfNeededFor(int64 num_bytes) {
 
   // Check the disk space again.
   return HasEnoughSpaceFor(num_bytes, cache_file_directory_);
+}
+
+uint64_t FileCache::CalculateEvictableCacheSize() {
+  AssertOnSequencedWorkerPool();
+
+  uint64_t evictable_cache_size = 0;
+  int64_t cache_size = 0;
+
+  scoped_ptr<ResourceMetadataStorage::Iterator> it = storage_->GetIterator();
+  for (; !it->IsAtEnd(); it->Advance()) {
+    if (IsEvictable(it->GetID(), it->GetValue()) &&
+        base::GetFileSize(GetCacheFilePath(it->GetID()), &cache_size)) {
+      DCHECK_GE(cache_size, 0);
+      evictable_cache_size += cache_size;
+    }
+  }
+
+  if (it->HasError())
+    return 0;
+
+  return evictable_cache_size;
 }
 
 FileError FileCache::GetFile(const std::string& id,
@@ -563,12 +578,7 @@ bool FileCache::HasEnoughSpaceFor(int64 num_bytes,
     free_space = base::SysInfo::AmountOfFreeDiskSpace(path);
 
   // Subtract this as if this portion does not exist.
-#if defined(OS_CHROMEOS)
-  const int64 kMinFreeBytes = cryptohome::kMinFreeSpaceInBytes;
-#else
-  const int64 kMinFreeBytes = 512ull * 1024ull * 1024ull;  // 512MB
-#endif
-  free_space -= kMinFreeBytes;
+  free_space -= drive::internal::kMinFreeSpaceInBytes;
   return (free_space >= num_bytes);
 }
 
@@ -620,6 +630,13 @@ void FileCache::CloseForWrite(const std::string& id) {
     LOG(ERROR) << "Failed to put entry: " << id << ", "
                << FileErrorToString(error);
   }
+}
+
+bool FileCache::IsEvictable(const std::string& id, const ResourceEntry& entry) {
+  return entry.file_specific_info().has_cache_state() &&
+         !entry.file_specific_info().cache_state().is_pinned() &&
+         !entry.file_specific_info().cache_state().is_dirty() &&
+         !mounted_files_.count(id);
 }
 
 }  // namespace internal

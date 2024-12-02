@@ -38,8 +38,8 @@
 #include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/util_constants.h"
-#include "components/crash/app/breakpad_win.h"
-#include "components/crash/app/crash_reporter_client.h"
+#include "components/crash/content/app/breakpad_win.h"
+#include "components/crash/content/app/crash_reporter_client.h"
 #include "components/metrics/client_info.h"
 #include "content/public/app/startup_helper_win.h"
 #include "sandbox/win/src/sandbox.h"
@@ -50,8 +50,8 @@ typedef int (*DLL_MAIN)(HINSTANCE, sandbox::SandboxInterfaceInfo*);
 
 typedef void (*RelaunchChromeBrowserWithNewCommandLineIfNeededFunc)();
 
-base::LazyInstance<chrome::ChromeCrashReporterClient>::Leaky
-    g_chrome_crash_client = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<ChromeCrashReporterClient>::Leaky g_chrome_crash_client =
+    LAZY_INSTANCE_INITIALIZER;
 
 // Loads |module| after setting the CWD to |module|'s directory. Returns a
 // reference to the loaded module on success, or null on error.
@@ -99,7 +99,7 @@ base::FilePath GetExecutableDir() {
 
 base::string16 GetCurrentModuleVersion() {
   scoped_ptr<FileVersionInfo> file_version_info(
-      FileVersionInfo::CreateFileVersionInfoForCurrentModule());
+      CREATE_FILE_VERSION_INFO_FOR_CURRENT_MODULE());
   if (file_version_info.get()) {
     base::string16 version_string(file_version_info->file_version());
     if (Version(base::UTF16ToASCII(version_string)).IsValid())

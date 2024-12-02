@@ -25,7 +25,6 @@ class FakeCompositorDependencies : public CompositorDependencies {
   bool IsLcdTextEnabled() override;
   bool IsDistanceFieldTextEnabled() override;
   bool IsZeroCopyEnabled() override;
-  bool IsOneCopyEnabled() override;
   bool IsPersistentGpuMemoryBufferEnabled() override;
   bool IsElasticOverscrollEnabled() override;
   std::vector<unsigned> GetImageTextureTargets() override;
@@ -40,7 +39,7 @@ class FakeCompositorDependencies : public CompositorDependencies {
   scoped_ptr<cc::BeginFrameSource> CreateExternalBeginFrameSource(
       int routing_id) override;
   cc::TaskGraphRunner* GetTaskGraphRunner() override;
-  bool IsGatherPixelRefsEnabled() override;
+  bool AreImageDecodeTasksEnabled() override;
   bool IsThreadedAnimationEnabled() override;
 
  private:

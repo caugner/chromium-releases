@@ -28,10 +28,27 @@
 
       childDepth: Number,
 
-      childrenShown_: {
+      childrenShown: {
         type: Boolean,
+        reflectToAttribute: true,
         value: false
+      },
+
+      keyEventTarget: {
+        type: Object,
+        value: function() {
+          return this.$.item;
+        }
       }
+    },
+
+    behaviors: [
+      Polymer.IronA11yKeysBehavior
+    ],
+
+    keyBindings: {
+      'enter': 'onEnter_',
+      'space': 'onSpace_'
     },
 
     bookmarkChanged_: function() {
@@ -41,7 +58,8 @@
 
     depthChanged: function() {
       this.childDepth = this.depth + 1;
-      this.$.item.style.paddingLeft = (this.depth * BOOKMARK_INDENT) + 'px';
+      this.$.item.style.webkitPaddingStart =
+          (this.depth * BOOKMARK_INDENT) + 'px';
     },
 
     onClick: function() {
@@ -49,12 +67,23 @@
         this.fire('change-page', {page: this.bookmark.page});
     },
 
+    onEnter_: function(e) {
+      // Don't allow events which have propagated up from the expand button to
+      // trigger a click.
+      if (e.detail.keyboardEvent.target != this.$.expand)
+        this.onClick();
+    },
+
+    onSpace_: function(e) {
+      // paper-icon-button stops propagation of space events, so there's no need
+      // to check the event source here.
+      this.onClick();
+      // Prevent default space scroll behavior.
+      e.detail.keyboardEvent.preventDefault();
+    },
+
     toggleChildren: function(e) {
-      this.childrenShown_ = !this.childrenShown_;
-      if (this.childrenShown_)
-        this.$.expand.classList.add('open');
-      else
-        this.$.expand.classList.remove('open');
+      this.childrenShown = !this.childrenShown;
       e.stopPropagation();  // Prevent the above onClick handler from firing.
     }
   });

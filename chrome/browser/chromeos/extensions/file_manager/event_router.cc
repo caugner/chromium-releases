@@ -15,7 +15,6 @@
 #include "base/values.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/chromeos/drive/drive_integration_service.h"
-#include "chrome/browser/chromeos/drive/file_system_interface.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_util.h"
 #include "chrome/browser/chromeos/file_manager/app_id.h"
@@ -37,6 +36,7 @@
 #include "chromeos/network/network_state_handler.h"
 #include "components/drive/drive_pref_names.h"
 #include "components/drive/file_change.h"
+#include "components/drive/file_system_interface.h"
 #include "components/drive/service/drive_service_interface.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
@@ -363,6 +363,7 @@ EventRouter::~EventRouter() {
 
 void EventRouter::Shutdown() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  chromeos::system::TimezoneSettings::GetInstance()->RemoveObserver(this);
 
   DLOG_IF(WARNING, !file_watchers_.empty())
       << "Not all file watchers are "
@@ -450,6 +451,8 @@ void EventRouter::ObserveEvents() {
   pref_change_registrar_->Add(drive::prefs::kDisableDrive, callback);
   pref_change_registrar_->Add(prefs::kSearchSuggestEnabled, callback);
   pref_change_registrar_->Add(prefs::kUse24HourClock, callback);
+
+  chromeos::system::TimezoneSettings::GetInstance()->AddObserver(this);
 }
 
 // File watch setup routines.
@@ -602,6 +605,10 @@ void EventRouter::DefaultNetworkChanged(const chromeos::NetworkState* network) {
       file_manager_private::OnDriveConnectionStatusChanged::Create());
 }
 
+void EventRouter::TimezoneChanged(const icu::TimeZone& timezone) {
+  OnFileManagerPrefsChanged();
+}
+
 void EventRouter::OnFileManagerPrefsChanged() {
   if (!profile_ || !extensions::EventRouter::Get(profile_)) {
     NOTREACHED();
@@ -690,6 +697,9 @@ void EventRouter::OnDriveSyncError(drive::file_system::DriveSyncErrorType type,
     case drive::file_system::DRIVE_SYNC_ERROR_SERVICE_UNAVAILABLE:
       event.type =
           file_manager_private::DRIVE_SYNC_ERROR_TYPE_SERVICE_UNAVAILABLE;
+      break;
+    case drive::file_system::DRIVE_SYNC_ERROR_NO_SERVER_SPACE:
+      event.type = file_manager_private::DRIVE_SYNC_ERROR_TYPE_NO_SERVER_SPACE;
       break;
     case drive::file_system::DRIVE_SYNC_ERROR_MISC:
       event.type =

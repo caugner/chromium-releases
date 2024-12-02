@@ -31,8 +31,8 @@ remoting.Me2MeActivity = function(host, hostList) {
   /** @private */
   this.retryOnHostOffline_ = true;
 
-  /** @private {remoting.SmartReconnector} */
-  this.reconnector_ = null;
+  /** @private {remoting.NetworkConnectivityDetector} */
+  this.networkDetector_ = null;
 
   /** @private {remoting.SessionLogger} */
   this.logger_ = null;
@@ -44,6 +44,8 @@ remoting.Me2MeActivity = function(host, hostList) {
 remoting.Me2MeActivity.prototype.dispose = function() {
   base.dispose(this.desktopActivity_);
   this.desktopActivity_ = null;
+  base.dispose(this.networkDetector_);
+  this.networkDetector_ = null;
 };
 
 remoting.Me2MeActivity.prototype.start = function() {
@@ -55,15 +57,29 @@ remoting.Me2MeActivity.prototype.start = function() {
   this.logger_.logSessionStateChange(Event.SessionState.STARTED,
                                      Event.ConnectionError.NONE);
 
+  var errorTag = Event.ConnectionError.NONE;
+
+  function handleError(/** remoting.Error */ error) {
+    if (error.isCancel()) {
+      remoting.setMode(remoting.AppMode.HOME);
+      that.logger_.logSessionStateChange(Event.SessionState.CONNECTION_CANCELED,
+                                         errorTag);
+    } else {
+      that.logger_.logSessionStateChange(Event.SessionState.CONNECTION_FAILED,
+                                         error.toConnectionError());
+      that.showErrorMessage_(error);
+    }
+  }
+
   this.hostUpdateDialog_.showIfNecessary(webappVersion).then(function() {
     return that.host_.options.load();
-  }).then(function() {
-    that.connect_();
   }).catch(remoting.Error.handler(function(/** remoting.Error */ error) {
-    if (error.hasTag(remoting.Error.Tag.CANCELLED)) {
-      remoting.setMode(remoting.AppMode.HOME);
-    }
-  }));
+    // User cancels out of the Host upgrade dialog.  Report it as bad version.
+    errorTag = Event.ConnectionError.BAD_VERSION;
+    throw error;
+  })).then(
+    this.connect_.bind(this)
+  ).catch(remoting.Error.handler(handleError));
 };
 
 remoting.Me2MeActivity.prototype.stop = function() {
@@ -87,7 +103,11 @@ remoting.Me2MeActivity.prototype.createLogger_ = function(entryPoint) {
   var logger = remoting.SessionLogger.createForClient();
   logger.setEntryPoint(entryPoint);
   logger.setHostVersion(this.host_.hostVersion);
+  logger.setHostOs(this.host_.hostOs);
+  logger.setHostOsVersion(this.host_.hostOsVersion);
   logger.setLogEntryMode(Mode.ME2ME);
+  logger.setHostStatusUpdateElapsedTime(
+      this.hostList_.getHostStatusUpdateElapsedTime());
   return logger;
 };
 
@@ -108,10 +128,10 @@ remoting.Me2MeActivity.prototype.reconnect_ = function(entryPoint) {
  */
 remoting.Me2MeActivity.prototype.connect_ = function() {
   base.dispose(this.desktopActivity_);
-  this.desktopActivity_ = new remoting.DesktopRemotingActivity(this);
+  this.desktopActivity_ =
+      new remoting.DesktopRemotingActivity(this, this.logger_);
   this.desktopActivity_.getConnectingDialog().show();
-  this.desktopActivity_.start(this.host_, this.createCredentialsProvider_(),
-                              this.logger_);
+  this.desktopActivity_.start(this.host_, this.createCredentialsProvider_());
 };
 
 /**
@@ -159,8 +179,7 @@ remoting.Me2MeActivity.prototype.createCredentialsProvider_ = function() {
 
   return new remoting.CredentialsProvider({
     fetchPin: requestPin,
-    pairingInfo: /** @type{remoting.PairingInfo} */ (
-        base.deepCopy(host.options.pairingInfo)),
+    pairingInfo: host.options.getPairingInfo(),
     fetchThirdPartyToken: fetchThirdPartyToken
   });
 };
@@ -171,39 +190,43 @@ remoting.Me2MeActivity.prototype.createCredentialsProvider_ = function() {
  */
 remoting.Me2MeActivity.prototype.reconnectOnHostOffline_ = function(error) {
   var that = this;
-  var onHostListRefresh = function(/** boolean */ success) {
-    if (success) {
-      var host = that.hostList_.getHostForId(that.host_.hostId);
-      var SessionEntryPoint = remoting.ChromotingEvent.SessionEntryPoint;
+  var onHostListRefresh = function() {
+    var host = that.hostList_.getHostForId(that.host_.hostId);
+    var SessionEntryPoint = remoting.ChromotingEvent.SessionEntryPoint;
 
-      // Reconnect if the host's JID changes.
-      if (Boolean(host) && host.jabberId != that.host_.jabberId) {
-        that.host_ = host;
-        that.reconnect_(SessionEntryPoint.AUTO_RECONNECT_ON_HOST_OFFLINE);
-        return;
-      }
+    // Reconnect if the host's JID changes.
+    if (Boolean(host) &&
+        host.jabberId != that.host_.jabberId &&
+        host.status == 'ONLINE') {
+      that.host_ = host;
+      that.reconnect_(SessionEntryPoint.AUTO_RECONNECT_ON_HOST_OFFLINE);
+      return;
     }
     that.showErrorMessage_(error);
   };
 
   this.retryOnHostOffline_ = false;
   // The plugin will be re-created when the host list has been refreshed.
-  this.hostList_.refresh(onHostListRefresh);
+  this.hostList_.refreshAndDisplay().then(
+    onHostListRefresh
+  ).catch(
+    this.showErrorMessage_.bind(this, error)
+  );
 };
 
 /**
  * @param {!remoting.Error} error
  */
 remoting.Me2MeActivity.prototype.onConnectionFailed = function(error) {
+  base.dispose(this.desktopActivity_);
+  this.desktopActivity_ = null;
+
   if (error.hasTag(remoting.Error.Tag.HOST_IS_OFFLINE) &&
       this.retryOnHostOffline_) {
     this.reconnectOnHostOffline_(error);
   } else if (!error.isNone()) {
     this.showErrorMessage_(error);
   }
-
-  base.dispose(this.desktopActivity_);
-  this.desktopActivity_ = null;
 };
 
 /**
@@ -220,26 +243,27 @@ remoting.Me2MeActivity.prototype.onConnected = function(connectionInfo) {
   plugin.extensions().register(new remoting.GnubbyAuthHandler());
   this.pinDialog_.requestPairingIfNecessary(connectionInfo.plugin());
 
-  var SessionEntryPoint = remoting.ChromotingEvent.SessionEntryPoint;
-
-  base.dispose(this.reconnector_);
-  this.reconnector_ = new remoting.SmartReconnector(
-      this.desktopActivity_.getConnectingDialog(),
-      this.reconnect_.bind(
-          this, SessionEntryPoint.AUTO_RECONNECT_ON_CONNECTION_DROPPED),
-      this.stop.bind(this), connectionInfo.session());
+  // Drop the session after 30s of suspension.  If this timeout is too short, we
+  // risk dropping a connection that is self-recoverable. If this timeout is too
+  // long, the user may lose his/her patience and just manually reconnects.
+  this.desktopActivity_.getSession().dropSessionOnSuspend(30 * 1000);
 };
 
 remoting.Me2MeActivity.prototype.onDisconnected = function(error) {
+  base.dispose(this.desktopActivity_);
+  this.desktopActivity_ = null;
+
   if (error.isNone()) {
     this.showFinishDialog_(remoting.AppMode.CLIENT_SESSION_FINISHED_ME2ME);
   } else {
-    this.reconnector_.onConnectionDropped(error);
     this.showErrorMessage_(error);
+    var SessionEntryPoint = remoting.ChromotingEvent.SessionEntryPoint;
+    base.dispose(this.networkDetector_);
+    this.networkDetector_ = remoting.NetworkConnectivityDetector.create();
+    this.networkDetector_.waitForOnline().then(
+      this.reconnect_.bind(
+          this, SessionEntryPoint.AUTO_RECONNECT_ON_CONNECTION_DROPPED));
   }
-
-  base.dispose(this.desktopActivity_);
-  this.desktopActivity_ = null;
 };
 
 /**
@@ -257,7 +281,7 @@ remoting.Me2MeActivity.prototype.showErrorMessage_ = function(error) {
  * @private
  */
 remoting.Me2MeActivity.prototype.showFinishDialog_ = function(mode) {
-  var dialog = new remoting.MessageDialog(
+  var dialog = remoting.modalDialogFactory.createMessageDialog(
       mode,
       document.getElementById('client-finished-me2me-button'),
       document.getElementById('client-reconnect-button'));
@@ -267,6 +291,9 @@ remoting.Me2MeActivity.prototype.showFinishDialog_ = function(mode) {
   var that = this;
 
   dialog.show().then(function(/** Result */result) {
+    base.dispose(that.networkDetector_);
+    that.networkDetector_ = null;
+
     if (result === Result.PRIMARY) {
       remoting.setMode(remoting.AppMode.HOME);
     } else {
@@ -285,7 +312,7 @@ remoting.HostNeedsUpdateDialog = function(rootElement, host) {
   /** @private */
   this.host_ = host;
   /** @private */
-  this.dialog_ = new remoting.MessageDialog(
+  this.dialog_ = remoting.modalDialogFactory.createMessageDialog(
       remoting.AppMode.CLIENT_HOST_NEEDS_UPGRADE,
       rootElement.querySelector('.connect-button'),
       rootElement.querySelector('.cancel-button'));
@@ -333,7 +360,7 @@ remoting.PinDialog = function(rootElement, host) {
   /** @private */
   this.host_ = host;
   /** @private */
-  this.dialog_ = new remoting.InputDialog(
+  this.dialog_ = remoting.modalDialogFactory.createInputDialog(
     remoting.AppMode.CLIENT_PIN_PROMPT,
     this.rootElement_.querySelector('form'),
     this.pinInput_,
@@ -367,8 +394,8 @@ remoting.PinDialog.prototype.requestPairingIfNecessary = function(plugin) {
      * @param {string} sharedSecret
      */
     var onPairingComplete = function(clientId, sharedSecret) {
-      that.host_.options.pairingInfo.clientId = clientId;
-      that.host_.options.pairingInfo.sharedSecret = sharedSecret;
+      that.host_.options.setPairingInfo({'clientId': clientId,
+                                         'sharedSecret': sharedSecret});
       that.host_.options.save();
     };
 
