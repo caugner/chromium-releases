@@ -5,6 +5,8 @@
 #include "chrome/browser/android/preferences/pref_service_bridge.h"
 
 #include <jni.h>
+#include <stddef.h>
+#include <vector>
 
 #include "base/android/build_info.h"
 #include "base/android/jni_android.h"
@@ -14,11 +16,13 @@
 #include "base/files/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_service.h"
+#include "base/scoped_observer.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
+#include "chrome/browser/browsing_data/browsing_data_remover_factory.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/net/prediction_options.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
@@ -391,9 +395,9 @@ static jboolean GetCrashReportManaged(JNIEnv* env,
       prefs::kCrashReportingEnabled);
 }
 
-static jboolean GetForceGoogleSafeSearch(JNIEnv* env,
+static jboolean GetSupervisedUserSafeSitesEnabled(JNIEnv* env,
                                          const JavaParamRef<jobject>& obj) {
-  return GetPrefService()->GetBoolean(prefs::kForceGoogleSafeSearch);
+  return GetPrefService()->GetBoolean(prefs::kSupervisedUserSafeSites);
 }
 
 static jint GetDefaultSupervisedUserFilteringBehavior(
@@ -452,6 +456,17 @@ static jboolean HasSetMetricsReporting(JNIEnv* env,
   return local_state->HasPrefPath(metrics::prefs::kMetricsReportingEnabled);
 }
 
+static void SetClickedUpdateMenuItem(JNIEnv* env,
+                                       const JavaParamRef<jobject>& obj,
+                                       jboolean clicked) {
+  GetPrefService()->SetBoolean(prefs::kClickedUpdateMenuItem, clicked);
+}
+
+static jboolean GetClickedUpdateMenuItem(JNIEnv* env,
+                                       const JavaParamRef<jobject>& obj) {
+  return GetPrefService()->GetBoolean(prefs::kClickedUpdateMenuItem);
+}
+
 namespace {
 
 // Redirects a BrowsingDataRemover completion callback back into Java.
@@ -459,14 +474,15 @@ class ClearBrowsingDataObserver : public BrowsingDataRemover::Observer {
  public:
   // |obj| is expected to be the object passed into ClearBrowsingData(); e.g. a
   // ChromePreference.
-  ClearBrowsingDataObserver(JNIEnv* env, jobject obj)
-      : weak_chrome_native_preferences_(env, obj) {
+  ClearBrowsingDataObserver(JNIEnv* env,
+                            jobject obj,
+                            BrowsingDataRemover* browsing_data_remover)
+      : weak_chrome_native_preferences_(env, obj), observer_(this) {
+    observer_.Add(browsing_data_remover);
   }
 
   void OnBrowsingDataRemoverDone() override {
-    // Just as a BrowsingDataRemover deletes itself when done, we delete ourself
-    // when done.  No need to remove ourself as an observer given the lifetime
-    // of BrowsingDataRemover.
+    // We delete ourselves when done.
     scoped_ptr<ClearBrowsingDataObserver> auto_delete(this);
 
     JNIEnv* env = AttachCurrentThread();
@@ -479,7 +495,9 @@ class ClearBrowsingDataObserver : public BrowsingDataRemover::Observer {
 
  private:
   JavaObjectWeakGlobalRef weak_chrome_native_preferences_;
+  ScopedObserver<BrowsingDataRemover, BrowsingDataRemover::Observer> observer_;
 };
+
 }  // namespace
 
 static void ClearBrowsingData(JNIEnv* env,
@@ -489,13 +507,11 @@ static void ClearBrowsingData(JNIEnv* env,
                               jboolean cookies_and_site_data,
                               jboolean passwords,
                               jboolean form_data) {
-  // BrowsingDataRemover deletes itself.
   BrowsingDataRemover* browsing_data_remover =
-      BrowsingDataRemover::CreateForPeriod(
-          GetOriginalProfile(),
-          static_cast<BrowsingDataRemover::TimePeriod>(
-              BrowsingDataRemover::EVERYTHING));
-  browsing_data_remover->AddObserver(new ClearBrowsingDataObserver(env, obj));
+      BrowsingDataRemoverFactory::GetForBrowserContext(GetOriginalProfile());
+  // ClearBrowsingDataObserver removes itself when |browsing_data_remover| is
+  // done.
+  new ClearBrowsingDataObserver(env, obj, browsing_data_remover);
 
   int remove_mask = 0;
   if (history)
@@ -510,7 +526,7 @@ static void ClearBrowsingData(JNIEnv* env,
     remove_mask |= BrowsingDataRemover::REMOVE_PASSWORDS;
   if (form_data)
     remove_mask |= BrowsingDataRemover::REMOVE_FORM_DATA;
-  browsing_data_remover->Remove(remove_mask,
+  browsing_data_remover->Remove(BrowsingDataRemover::Unbounded(), remove_mask,
                                 BrowsingDataHelper::UNPROTECTED_WEB);
 }
 
@@ -619,13 +635,21 @@ static void SetCrashReporting(JNIEnv* env,
 
 static jboolean CanPredictNetworkActions(JNIEnv* env,
                                          const JavaParamRef<jobject>& obj) {
-  return chrome_browser_net::CanPrefetchAndPrerenderUI(GetPrefService());
+  return chrome_browser_net::CanPrefetchAndPrerenderUI(GetPrefService()) ==
+      chrome_browser_net::NetworkPredictionStatus::ENABLED;
 }
 
 static void SetDoNotTrackEnabled(JNIEnv* env,
                                  const JavaParamRef<jobject>& obj,
                                  jboolean allow) {
   GetPrefService()->SetBoolean(prefs::kEnableDoNotTrack, allow);
+}
+
+static ScopedJavaLocalRef<jstring> GetSyncLastAccountId(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  return ConvertUTF8ToJavaString(
+      env, GetPrefService()->GetString(prefs::kGoogleServicesLastAccountId));
 }
 
 static ScopedJavaLocalRef<jstring> GetSyncLastAccountName(
@@ -670,37 +694,6 @@ static void MigrateJavascriptPreference(JNIEnv* env,
   SetContentSettingEnabled(env, obj,
       CONTENT_SETTINGS_TYPE_JAVASCRIPT, javascript_enabled);
   GetPrefService()->ClearPref(prefs::kWebKitJavascriptEnabled);
-}
-
-static void MigrateLocationPreference(JNIEnv* env,
-                                      const JavaParamRef<jobject>& obj) {
-  const PrefService::Preference* pref =
-      GetPrefService()->FindPreference(prefs::kGeolocationEnabled);
-  if (!pref || !pref->HasUserSetting())
-    return;
-  bool location_enabled = false;
-  bool retval = pref->GetValue()->GetAsBoolean(&location_enabled);
-  DCHECK(retval);
-  // Do a restrictive migration. GetAllowLocationEnabled could be
-  // non-usermodifiable and we don't want to migrate that.
-  if (!location_enabled)
-    SetAllowLocationEnabled(env, obj, false);
-  GetPrefService()->ClearPref(prefs::kGeolocationEnabled);
-}
-
-static void MigrateProtectedMediaPreference(JNIEnv* env,
-                                            const JavaParamRef<jobject>& obj) {
-  const PrefService::Preference* pref =
-      GetPrefService()->FindPreference(prefs::kProtectedMediaIdentifierEnabled);
-  if (!pref || !pref->HasUserSetting())
-    return;
-  bool pmi_enabled = false;
-  bool retval = pref->GetValue()->GetAsBoolean(&pmi_enabled);
-  DCHECK(retval);
-  // Do a restrictive migration if values disagree.
-  if (!pmi_enabled)
-    SetProtectedMediaIdentifierEnabled(env, obj, false);
-  GetPrefService()->ClearPref(prefs::kProtectedMediaIdentifierEnabled);
 }
 
 static void SetPasswordEchoEnabled(JNIEnv* env,
@@ -972,4 +965,11 @@ std::string PrefServiceBridge::GetAndroidPermissionForContentSetting(
     return std::string();
 
   return ConvertJavaStringToUTF8(android_permission);
+}
+
+static void SetSupervisedUserId(JNIEnv* env,
+                                const JavaParamRef<jobject>& obj,
+                                const JavaParamRef<jstring>& pref) {
+  GetPrefService()->SetString(prefs::kSupervisedUserId,
+                              ConvertJavaStringToUTF8(env, pref));
 }

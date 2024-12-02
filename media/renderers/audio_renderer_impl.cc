@@ -5,8 +5,9 @@
 #include "media/renderers/audio_renderer_impl.h"
 
 #include <math.h>
-
+#include <stddef.h>
 #include <algorithm>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/callback.h"
@@ -15,6 +16,7 @@
 #include "base/metrics/histogram.h"
 #include "base/single_thread_task_runner.h"
 #include "base/time/default_tick_clock.h"
+#include "build/build_config.h"
 #include "media/base/audio_buffer.h"
 #include "media/base/audio_buffer_converter.h"
 #include "media/base/audio_hardware_config.h"
@@ -53,7 +55,7 @@ AudioRendererImpl::AudioRendererImpl(
       expecting_config_changes_(false),
       sink_(sink),
       audio_buffer_stream_(
-          new AudioBufferStream(task_runner, decoders.Pass(), media_log)),
+          new AudioBufferStream(task_runner, std::move(decoders), media_log)),
       hardware_config_(hardware_config),
       media_log_(media_log),
       tick_clock_(new base::DefaultTickClock()),
@@ -358,7 +360,17 @@ void AudioRendererImpl::Initialize(
         // (http://crbug.com/379288), platform specific issues around channel
         // layouts (http://crbug.com/266674), and unnecessary upmixing overhead.
         stream->audio_decoder_config().channel_layout(),
-        hw_params.sample_rate(), hw_params.bits_per_sample(),
+#if defined(OS_CHROMEOS) || defined(OS_ANDROID)
+        // On ChromeOS and Android let the OS level resampler handle resampling
+        // unless the initial sample rate is too low; this allows support for
+        // sample rate adaptations where necessary.
+        stream->audio_decoder_config().samples_per_second() < 44100
+            ? hw_params.sample_rate()
+            : stream->audio_decoder_config().samples_per_second(),
+#else
+        hw_params.sample_rate(),
+#endif
+        hw_params.bits_per_sample(),
         hardware_config_.GetHighLatencyBufferSize());
   }
 
@@ -616,7 +628,8 @@ bool AudioRendererImpl::IsBeforeStartTime(
 }
 
 int AudioRendererImpl::Render(AudioBus* audio_bus,
-                              int audio_delay_milliseconds) {
+                              uint32_t audio_delay_milliseconds,
+                              uint32_t frames_skipped) {
   const int requested_frames = audio_bus->frames();
   base::TimeDelta playback_delay = base::TimeDelta::FromMilliseconds(
       audio_delay_milliseconds);
@@ -656,9 +669,14 @@ int AudioRendererImpl::Render(AudioBus* audio_bus,
     // Delay playback by writing silence if we haven't reached the first
     // timestamp yet; this can occur if the video starts before the audio.
     if (algorithm_->frames_buffered() > 0) {
-      DCHECK(first_packet_timestamp_ != kNoTimestamp());
+      CHECK_NE(first_packet_timestamp_, kNoTimestamp());
+      CHECK_GE(first_packet_timestamp_, base::TimeDelta());
       const base::TimeDelta play_delay =
           first_packet_timestamp_ - audio_clock_->back_timestamp();
+      CHECK_LT(play_delay.InSeconds(), 1000)
+          << "first_packet_timestamp_ = " << first_packet_timestamp_
+          << ", audio_clock_->back_timestamp() = "
+          << audio_clock_->back_timestamp();
       if (play_delay > base::TimeDelta()) {
         DCHECK_EQ(frames_written, 0);
         frames_written =

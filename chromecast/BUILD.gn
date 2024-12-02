@@ -7,6 +7,7 @@ import("//build/config/locales.gni")
 import("//build/config/ui.gni")
 import("//chromecast/build/tests/cast_test.gni")
 import("//chromecast/chromecast.gni")
+import("//media/media_options.gni")
 import("//tools/grit/repack.gni")
 import("//ui/ozone/ozone.gni")
 
@@ -28,7 +29,6 @@ cast_test_group("cast_tests") {
     "//base:base_unittests",
     "//chromecast/base:cast_base_unittests",
     "//chromecast/crypto:cast_crypto_unittests",
-    "//chromecast/crash:cast_crash_unittests",
     "//content/test:content_unittests",
     "//crypto:crypto_unittests",
     "//ipc:ipc_tests",
@@ -45,9 +45,14 @@ cast_test_group("cast_tests") {
     "//url:url_unittests",
   ]
 
+  if (is_linux) {
+    tests += [ "//chromecast/crash:cast_crash_unittests" ]
+  }
+
   filters = []
 
-  if (target_cpu == "arm" && target_os == "linux") {
+  # Apply filters to embedded linux devices.
+  if (target_os == "linux" && !is_cast_desktop_build) {
     filters += [
       # Run net_unittests first to avoid random failures due to slow python startup
       # KeygenHandlerTest.SmokeTest and KeygenHandlerTest.ConcurrencyTest fail due to
@@ -91,7 +96,7 @@ cast_test_group("cast_tests") {
       # DoAppendUTF8Invalid fails because of dcheck_always_on flag in Eng builds
       "url_unittests --gtest_filter=-URLCanonTest.DoAppendUTF8Invalid",
     ]
-  } else if (target_cpu != "arm" || target_os == "android") {
+  } else if (is_cast_desktop_build || target_os == "android") {
     filters += [
       # Disable PipelineIntegrationTest.BasicPlayback_MediaSource_VP9_WebM (not supported)
       "media_unittests --gtest_filter=-PipelineIntegrationTest.BasicPlayback_MediaSource_VP9_WebM",
@@ -105,7 +110,16 @@ cast_test_group("cast_tests") {
       "//chromecast/media:cast_media_unittests",
     ]
 
-    filters += [ "cast_shell_browser_test --no-sandbox --disable-gpu" ]
+    # --enable-local-file-accesses => to load sample media files
+    # --test-launcher-jobs=1 => so internal code can bind to port
+    filters += [ "cast_shell_browser_test --no-sandbox --enable-local-file-accesses --enable-cma-media-pipeline --ozone-platform=cast --test-launcher-jobs=1" ]
+
+    # TODO(slan): Reenable this test for Desktop x86 when CQ supports it.
+    # (b/26429268)
+    if (use_alsa && !is_cast_desktop_build) {
+      tests +=
+          [ "//chromecast/media/cma/backend/alsa:alsa_cma_backend_unittests" ]
+    }
   }
 
   if (!disable_display) {
@@ -200,8 +214,8 @@ repack("cast_shell_pak") {
     "//content/app/resources",
     "//content/app/strings",
     "//net:net_resources",
-    "//third_party/WebKit/public:resources",
     "//third_party/WebKit/public:image_resources_grit",
+    "//third_party/WebKit/public:resources",
     "//ui/resources",
     "//ui/strings",
   ]

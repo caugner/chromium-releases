@@ -6,7 +6,6 @@ package org.chromium.chrome.browser;
 
 import android.app.Activity;
 import android.app.ActivityManager;
-import android.app.SearchManager;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
@@ -721,9 +720,7 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
 
         @Override
         public void processWebSearchIntent(String query) {
-            Intent searchIntent = new Intent(Intent.ACTION_WEB_SEARCH);
-            searchIntent.putExtra(SearchManager.QUERY, query);
-            startActivity(searchIntent);
+            assert false;
         }
     }
 
@@ -929,12 +926,8 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
                     @Override
                     public void run() {
                         StartupMetrics.getInstance().recordOpenedBookmarks();
-                        if (!EnhancedBookmarkUtils.showEnhancedBookmarkIfEnabled(
-                                ChromeTabbedActivity.this)) {
-                            currentTab.loadUrl(new LoadUrlParams(
-                                    UrlConstants.BOOKMARKS_URL,
-                                    PageTransition.AUTO_BOOKMARK));
-                        }
+                        EnhancedBookmarkUtils.showBookmarkManager(
+                                ChromeTabbedActivity.this);
                     }
                 });
                 RecordUserAction.record("MobileMenuAllBookmarks");
@@ -1219,11 +1212,6 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
         return getCompositorViewHolder() != null && !getCompositorViewHolder().isTabInteractive();
     }
 
-    @Override
-    public boolean mayShowUpdateInfoBar() {
-        return !isOverlayVisible();
-    }
-
     // App Menu related code -----------------------------------------------------------------------
 
     @Override
@@ -1271,6 +1259,7 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
     public void onOverviewModeStartedShowing(boolean showToolbar) {
         if (mFindToolbarManager != null) mFindToolbarManager.hideToolbar();
         if (getAssistStatusHandler() != null) getAssistStatusHandler().updateAssistState();
+        if (getAppMenuHandler() != null) getAppMenuHandler().hideAppMenu();
         ApiCompatibilityUtils.setStatusBarColor(getWindow(), Color.BLACK);
         StartupMetrics.getInstance().recordOpenedTabSwitcher();
     }
@@ -1280,6 +1269,7 @@ public class ChromeTabbedActivity extends ChromeActivity implements OverviewMode
 
     @Override
     public void onOverviewModeStartedHiding(boolean showToolbar, boolean delayAnimation) {
+        if (getAppMenuHandler() != null) getAppMenuHandler().hideAppMenu();
     }
 
     @Override

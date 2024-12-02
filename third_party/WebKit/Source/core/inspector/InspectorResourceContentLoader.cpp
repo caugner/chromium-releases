@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "core/inspector/InspectorResourceContentLoader.h"
 
 #include "core/css/CSSStyleSheet.h"
@@ -93,7 +92,8 @@ void InspectorResourceContentLoader::start()
 {
     m_started = true;
     WillBeHeapVector<RawPtrWillBeMember<Document>> documents;
-    for (LocalFrame* frame : InspectedFrames(m_inspectedFrame)) {
+    OwnPtrWillBeRawPtr<InspectedFrames> inspectedFrames = InspectedFrames::create(m_inspectedFrame);
+    for (LocalFrame* frame : *inspectedFrames) {
         documents.append(frame->document());
         documents.appendVector(InspectorPageAgent::importsForFrame(frame));
     }

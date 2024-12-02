@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/inspector/InspectorPageAgent.h"
 
 #include "bindings/core/v8/DOMWrapperWorld.h"
@@ -78,8 +77,6 @@ namespace blink {
 namespace PageAgentState {
 static const char pageAgentEnabled[] = "pageAgentEnabled";
 static const char pageAgentScriptsToEvaluateOnLoad[] = "pageAgentScriptsToEvaluateOnLoad";
-static const char showSizeOnResize[] = "showSizeOnResize";
-static const char showGridOnResize[] = "showGridOnResize";
 static const char screencastEnabled[] = "screencastEnabled";
 }
 
@@ -129,7 +126,7 @@ static bool decodeBuffer(const char* buffer, unsigned size, const String& textEn
 static bool prepareResourceBuffer(Resource* cachedResource, bool* hasZeroSize)
 {
     *hasZeroSize = false;
-    if (!cachedResource)
+    if (!cachedResource || cachedResource->wasPurged())
         return false;
 
     if (cachedResource->dataBufferingPolicy() == DoNotBufferData)
@@ -306,6 +303,8 @@ TypeBuilder::Page::ResourceType::Enum InspectorPageAgent::resourceTypeJson(Inspe
         return TypeBuilder::Page::ResourceType::EventSource;
     case WebSocketResource:
         return TypeBuilder::Page::ResourceType::WebSocket;
+    case ManifestResource:
+        return TypeBuilder::Page::ResourceType::Manifest;
     case OtherResource:
         return TypeBuilder::Page::ResourceType::Other;
     }
@@ -321,6 +320,8 @@ InspectorPageAgent::ResourceType InspectorPageAgent::cachedResourceType(const Re
         return InspectorPageAgent::FontResource;
     case Resource::Media:
         return InspectorPageAgent::MediaResource;
+    case Resource::Manifest:
+        return InspectorPageAgent::ManifestResource;
     case Resource::TextTrack:
         return InspectorPageAgent::TextTrackResource;
     case Resource::CSSStyleSheet:
@@ -361,8 +362,6 @@ void InspectorPageAgent::restore()
     if (m_state->getBoolean(PageAgentState::pageAgentEnabled)) {
         ErrorString error;
         enable(&error);
-        if (m_client)
-            m_client->setShowViewportSizeOnResize(m_state->getBoolean(PageAgentState::showSizeOnResize), m_state->getBoolean(PageAgentState::showGridOnResize));
     }
 }
 
@@ -382,7 +381,6 @@ void InspectorPageAgent::disable(ErrorString*)
     m_pendingScriptToEvaluateOnLoadOnce = String();
     m_instrumentingAgents->setInspectorPageAgent(0);
 
-    setShowViewportSizeOnResize(0, false, 0);
     stopScreencast(0);
 
     finishReload();
@@ -435,6 +433,8 @@ static void cachedResourcesForDocument(Document* document, WillBeHeapVector<RawP
     const ResourceFetcher::DocumentResourceMap& allResources = document->fetcher()->allResources();
     for (const auto& resource : allResources) {
         Resource* cachedResource = resource.value.get();
+        if (!cachedResource)
+            continue;
 
         switch (cachedResource->type()) {
         case Resource::Image:
@@ -533,41 +533,37 @@ void InspectorPageAgent::getResourceContent(ErrorString* errorString, const Stri
     m_inspectorResourceContentLoader->ensureResourcesContentLoaded(bind(&InspectorPageAgent::getResourceContentAfterResourcesContentLoaded, this, frameId, url, callback));
 }
 
-static bool textContentForResource(Resource* cachedResource, String* result)
+void InspectorPageAgent::searchContentAfterResourcesContentLoaded(const String& frameId, const String& url, const String& query, bool caseSensitive, bool isRegex, PassRefPtrWillBeRawPtr<SearchInResourceCallback> callback)
 {
-    if (hasTextContent(cachedResource)) {
-        String content;
-        bool base64Encoded;
-        if (InspectorPageAgent::cachedResourceContent(cachedResource, result, &base64Encoded)) {
-            ASSERT(!base64Encoded);
-            return true;
-        }
-    }
-    return false;
-}
-
-void InspectorPageAgent::searchInResource(ErrorString*, const String& frameId, const String& url, const String& query, const bool* const optionalCaseSensitive, const bool* const optionalIsRegex, RefPtr<TypeBuilder::Array<TypeBuilder::Debugger::SearchMatch>>& results)
-{
-    results = TypeBuilder::Array<TypeBuilder::Debugger::SearchMatch>::create();
+    if (!callback->isActive())
+        return;
 
     LocalFrame* frame = IdentifiersFactory::frameById(m_inspectedFrames, frameId);
-    KURL kurl(ParsedURLString, url);
-
-    FrameLoader* frameLoader = frame ? &frame->loader() : nullptr;
-    DocumentLoader* loader = frameLoader ? frameLoader->documentLoader() : nullptr;
-    if (!loader)
+    if (!frame) {
+        callback->sendFailure("No frame for given id found");
         return;
-
+    }
+    ErrorString errorString;
     String content;
-    bool success = false;
-    Resource* resource = cachedResource(frame, kurl);
-    if (resource)
-        success = textContentForResource(resource, &content);
-
-    if (!success)
+    bool base64Encoded;
+    resourceContent(&errorString, frame, KURL(ParsedURLString, url), &content, &base64Encoded);
+    if (!errorString.isEmpty()) {
+        callback->sendFailure(errorString);
         return;
+    }
 
-    results = ContentSearchUtils::searchInTextByLines(content, query, asBool(optionalCaseSensitive), asBool(optionalIsRegex));
+    RefPtr<TypeBuilder::Array<TypeBuilder::Debugger::SearchMatch>> results;
+    results = ContentSearchUtils::searchInTextByLines(content, query, caseSensitive, isRegex);
+    callback->sendSuccess(results);
+}
+
+void InspectorPageAgent::searchInResource(ErrorString*, const String& frameId, const String& url, const String& query, const bool* optionalCaseSensitive, const bool* optionalIsRegex, PassRefPtrWillBeRawPtr<SearchInResourceCallback> callback)
+{
+    if (!m_enabled) {
+        callback->sendFailure("Agent is not enabled.");
+        return;
+    }
+    m_inspectorResourceContentLoader->ensureResourcesContentLoaded(bind(&InspectorPageAgent::searchContentAfterResourcesContentLoaded, this, frameId, url, query, asBool(optionalCaseSensitive), asBool(optionalIsRegex), callback));
 }
 
 void InspectorPageAgent::setDocumentContent(ErrorString* errorString, const String& frameId, const String& html)
@@ -678,7 +674,7 @@ void InspectorPageAgent::didRunJavaScriptDialog(bool result)
 void InspectorPageAgent::didUpdateLayout()
 {
     if (m_enabled && m_client)
-        m_client->pageLayoutInvalidated(false);
+        m_client->pageLayoutInvalidated();
 }
 
 void InspectorPageAgent::didResizeMainFrame()
@@ -687,7 +683,7 @@ void InspectorPageAgent::didResizeMainFrame()
         return;
 #if !OS(ANDROID)
     if (m_enabled && m_client)
-        m_client->pageLayoutInvalidated(true);
+        m_client->pageLayoutInvalidated();
 #endif
     frontend()->frameResized();
 }
@@ -695,7 +691,7 @@ void InspectorPageAgent::didResizeMainFrame()
 void InspectorPageAgent::didRecalculateStyle(int)
 {
     if (m_enabled && m_client)
-        m_client->pageLayoutInvalidated(false);
+        m_client->pageLayoutInvalidated();
 }
 
 PassRefPtr<TypeBuilder::Page::Frame> InspectorPageAgent::buildObjectForFrame(LocalFrame* frame)
@@ -763,7 +759,7 @@ PassRefPtr<TypeBuilder::Page::FrameResourceTree> InspectorPageAgent::buildObject
     return result;
 }
 
-void InspectorPageAgent::startScreencast(ErrorString*, const String* format, const int* quality, const int* maxWidth, const int* maxHeight)
+void InspectorPageAgent::startScreencast(ErrorString*, const String* format, const int* quality, const int* maxWidth, const int* maxHeight, const int* everyNthFrame)
 {
     m_state->setBoolean(PageAgentState::screencastEnabled, true);
 }
@@ -771,14 +767,6 @@ void InspectorPageAgent::startScreencast(ErrorString*, const String* format, con
 void InspectorPageAgent::stopScreencast(ErrorString*)
 {
     m_state->setBoolean(PageAgentState::screencastEnabled, false);
-}
-
-void InspectorPageAgent::setShowViewportSizeOnResize(ErrorString*, bool show, const bool* showGrid)
-{
-    m_state->setBoolean(PageAgentState::showSizeOnResize, show);
-    m_state->setBoolean(PageAgentState::showGridOnResize, asBool(showGrid));
-    if (m_client)
-        m_client->setShowViewportSizeOnResize(show, asBool(showGrid));
 }
 
 void InspectorPageAgent::setOverlayMessage(ErrorString*, const String* message)
@@ -789,6 +777,7 @@ void InspectorPageAgent::setOverlayMessage(ErrorString*, const String* message)
 
 DEFINE_TRACE(InspectorPageAgent)
 {
+    visitor->trace(m_inspectedFrames);
     visitor->trace(m_debuggerAgent);
     visitor->trace(m_inspectorResourceContentLoader);
     InspectorBaseAgent::trace(visitor);

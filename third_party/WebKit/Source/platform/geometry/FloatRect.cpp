@@ -24,7 +24,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "platform/geometry/FloatRect.h"
 
 #include "platform/FloatConversion.h"
@@ -170,6 +169,14 @@ void FloatRect::scale(float sx, float sy)
     m_location.setY(y() * sy);
     m_size.setWidth(width() * sx);
     m_size.setHeight(height() * sy);
+}
+
+float FloatRect::squaredDistanceTo(const FloatPoint& point) const
+{
+    FloatPoint closestPoint;
+    closestPoint.setX(clampTo<float>(point.x(), x(), maxX()));
+    closestPoint.setY(clampTo<float>(point.y(), y(), maxY()));
+    return (point - closestPoint).diagonalLengthSquared();
 }
 
 FloatRect unionRect(const Vector<FloatRect>& rects)

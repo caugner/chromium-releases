@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/css/resolver/AnimatedStyleBuilder.h"
 
 #include "core/animation/animatable/AnimatableClipPathOperation.h"
@@ -43,6 +42,7 @@
 #include "core/animation/animatable/AnimatableLengthPoint.h"
 #include "core/animation/animatable/AnimatableLengthPoint3D.h"
 #include "core/animation/animatable/AnimatableLengthSize.h"
+#include "core/animation/animatable/AnimatablePath.h"
 #include "core/animation/animatable/AnimatableRepeatable.h"
 #include "core/animation/animatable/AnimatableSVGPaint.h"
 #include "core/animation/animatable/AnimatableShadow.h"
@@ -59,7 +59,8 @@
 #include "core/css/resolver/StyleResolverState.h"
 #include "core/style/ComputedStyle.h"
 #include "wtf/MathExtras.h"
-#include "wtf/TypeTraits.h"
+
+#include <type_traits>
 
 namespace blink {
 
@@ -95,7 +96,7 @@ BorderImageLength animatableValueToBorderImageLength(const AnimatableValue* valu
 
 template<typename T> T animatableValueClampTo(const AnimatableValue* value, T min = defaultMinimumForClamp<T>(), T max = defaultMaximumForClamp<T>())
 {
-    static_assert(WTF::IsInteger<T>::value, "should use integral type T when rounding values");
+    static_assert(std::is_integral<T>::value, "should use integral type T when rounding values");
     return clampTo<T>(roundForImpreciseConversion<T>(toAnimatableDouble(value)->toDouble()), min, max);
 }
 
@@ -467,7 +468,7 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
         style->setOpacity(clampTo<float>(toAnimatableDouble(value)->toDouble(), 0, nextafterf(1, 0)));
         return;
     case CSSPropertyOrphans:
-        style->setOrphans(clampTo<unsigned short>(round(toAnimatableDouble(value)->toDouble()), 1));
+        style->setOrphans(clampTo<short>(round(toAnimatableDouble(value)->toDouble()), 1));
         return;
     case CSSPropertyOutlineColor:
         style->setOutlineColor(toAnimatableColor(value)->color());
@@ -663,7 +664,7 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
         style->setTransformOriginZ(toAnimatableDouble(value)->toDouble());
         return;
     case CSSPropertyWidows:
-        style->setWidows(clampTo<unsigned short>(round(toAnimatableDouble(value)->toDouble()), 1));
+        style->setWidows(clampTo<short>(round(toAnimatableDouble(value)->toDouble()), 1));
         return;
     case CSSPropertyWidth:
         style->setWidth(animatableValueToLength(value, state, ValueRangeNonNegative));
@@ -679,6 +680,9 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
         return;
     case CSSPropertyZIndex:
         style->setZIndex(clampTo<int>(round(toAnimatableDouble(value)->toDouble())));
+        return;
+    case CSSPropertyD:
+        style->setD(toAnimatablePath(value)->path());
         return;
     case CSSPropertyCx:
         style->setCx(animatableValueToLength(value, state));

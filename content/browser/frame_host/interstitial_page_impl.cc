@@ -4,16 +4,19 @@
 
 #include "content/browser/frame_host/interstitial_page_impl.h"
 
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
+#include "build/build_config.h"
 #include "content/browser/dom_storage/dom_storage_context_wrapper.h"
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
 #include "content/browser/frame_host/interstitial_page_navigator_impl.h"
@@ -145,6 +148,14 @@ InterstitialPage* InterstitialPage::GetInterstitialPage(
   return iter->second;
 }
 
+InterstitialPage* InterstitialPage::FromRenderFrameHost(RenderFrameHost* rfh) {
+  if (!rfh)
+    return nullptr;
+  return static_cast<RenderFrameHostImpl*>(rfh)
+      ->delegate()
+      ->GetAsInterstitialPage();
+}
+
 InterstitialPageImpl::InterstitialPageImpl(
     WebContents* web_contents,
     RenderWidgetHostDelegate* render_widget_host_delegate,
@@ -182,11 +193,6 @@ InterstitialPageImpl::InterstitialPageImpl(
       delegate_(delegate),
       weak_ptr_factory_(this) {
   InitInterstitialPageMap();
-  // It would be inconsistent to create an interstitial with no new navigation
-  // (which is the case when the interstitial was triggered by a sub-resource on
-  // a page) when we have a pending entry (in the process of loading a new top
-  // frame).
-  DCHECK(new_navigation || !web_contents->GetController().GetPendingEntry());
 }
 
 InterstitialPageImpl::~InterstitialPageImpl() {
@@ -244,7 +250,7 @@ void InterstitialPageImpl::Show() {
     // Give delegates a chance to set some states on the navigation entry.
     delegate_->OverrideEntry(entry.get());
 
-    controller_->SetTransientEntry(entry.Pass());
+    controller_->SetTransientEntry(std::move(entry));
 
     static_cast<WebContentsImpl*>(web_contents_)->DidChangeVisibleSSLState();
   }
@@ -395,7 +401,7 @@ void InterstitialPageImpl::RenderFrameCreated(
 
 void InterstitialPageImpl::UpdateTitle(
     RenderFrameHost* render_frame_host,
-    int32 page_id,
+    int32_t page_id,
     const base::string16& title,
     base::i18n::TextDirection title_direction) {
   if (!enabled())
@@ -424,6 +430,10 @@ void InterstitialPageImpl::UpdateTitle(
   // http://code.google.com/p/chromium/issues/detail?id=27094
   entry->SetTitle(title);
   controller_->delegate()->NotifyNavigationStateChanged(INVALIDATE_TYPE_TITLE);
+}
+
+InterstitialPage* InterstitialPageImpl::GetAsInterstitialPage() {
+  return this;
 }
 
 AccessibilityMode InterstitialPageImpl::GetAccessibilityMode() const {
@@ -475,6 +485,10 @@ void InterstitialPageImpl::SelectAll() {
 
 RenderViewHostDelegateView* InterstitialPageImpl::GetDelegateView() {
   return rvh_delegate_view_.get();
+}
+
+WebContents* InterstitialPageImpl::GetWebContents() const {
+  return web_contents();
 }
 
 const GURL& InterstitialPageImpl::GetMainFrameLastCommittedURL() const {
@@ -614,8 +628,8 @@ WebContentsView* InterstitialPageImpl::CreateWebContentsView() {
   RenderWidgetHostImpl::From(render_view_host_->GetWidget())->SetView(view);
   render_view_host_->AllowBindings(BINDINGS_POLICY_DOM_AUTOMATION);
 
-  int32 max_page_id = web_contents()->
-      GetMaxPageIDForSiteInstance(render_view_host_->GetSiteInstance());
+  int32_t max_page_id = web_contents()->GetMaxPageIDForSiteInstance(
+      render_view_host_->GetSiteInstance());
   render_view_host_->CreateRenderView(MSG_ROUTING_NONE,
                                       MSG_ROUTING_NONE,
                                       max_page_id,
@@ -768,14 +782,14 @@ void InterstitialPageImpl::CreateNewWindow(
   NOTREACHED() << "InterstitialPage does not support showing popups yet.";
 }
 
-void InterstitialPageImpl::CreateNewWidget(int32 render_process_id,
-                                           int32 route_id,
+void InterstitialPageImpl::CreateNewWidget(int32_t render_process_id,
+                                           int32_t route_id,
                                            blink::WebPopupType popup_type) {
   NOTREACHED() << "InterstitialPage does not support showing drop-downs yet.";
 }
 
-void InterstitialPageImpl::CreateNewFullscreenWidget(int32 render_process_id,
-                                                     int32 route_id) {
+void InterstitialPageImpl::CreateNewFullscreenWidget(int32_t render_process_id,
+                                                     int32_t route_id) {
   NOTREACHED()
       << "InterstitialPage does not support showing full screen popups.";
 }

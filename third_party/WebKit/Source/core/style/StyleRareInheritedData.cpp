@@ -19,7 +19,6 @@
  *
  */
 
-#include "config.h"
 #include "core/style/StyleRareInheritedData.h"
 
 #include "core/style/AppliedTextDecoration.h"
@@ -39,7 +38,7 @@ struct SameSizeAsStyleRareInheritedData : public RefCounted<SameSizeAsStyleRareI
     float firstFloat;
     Color colors[5];
     void* ownPtrs[1];
-    AtomicString atomicStrings[4];
+    AtomicString atomicStrings[3];
 #if ENABLE(OILPAN)
     void* refPtrs[1];
     Persistent<void*> persistentHandles[2];
@@ -155,7 +154,6 @@ StyleRareInheritedData::StyleRareInheritedData(const StyleRareInheritedData& o)
     , hyphenationLimitBefore(o.hyphenationLimitBefore)
     , hyphenationLimitAfter(o.hyphenationLimitAfter)
     , hyphenationLimitLines(o.hyphenationLimitLines)
-    , locale(o.locale)
     , textEmphasisCustomMark(o.textEmphasisCustomMark)
     , tapHighlightColor(o.tapHighlightColor)
     , appliedTextDecorations(o.appliedTextDecorations)
@@ -216,7 +214,6 @@ bool StyleRareInheritedData::operator==(const StyleRareInheritedData& o) const
         && m_selfOrAncestorHasDirAutoAttribute == o.m_selfOrAncestorHasDirAutoAttribute
         && m_respectImageOrientation == o.m_respectImageOrientation
         && hyphenationString == o.hyphenationString
-        && locale == o.locale
         && textEmphasisCustomMark == o.textEmphasisCustomMark
         && quotesDataEquivalent(o)
         && m_tabSize == o.m_tabSize
@@ -225,7 +222,7 @@ bool StyleRareInheritedData::operator==(const StyleRareInheritedData& o) const
         && m_rubyPosition == o.m_rubyPosition
         && dataEquivalent(listStyleImage.get(), o.listStyleImage.get())
         && dataEquivalent(appliedTextDecorations, o.appliedTextDecorations)
-        && variables == o.variables;
+        && dataEquivalent(variables, o.variables);
 }
 
 bool StyleRareInheritedData::shadowDataEquivalent(const StyleRareInheritedData& o) const

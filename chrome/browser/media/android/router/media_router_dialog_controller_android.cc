@@ -4,6 +4,7 @@
 
 #include "chrome/browser/media/android/router/media_router_dialog_controller_android.h"
 
+#include "base/android/context_utils.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "chrome/browser/media/android/router/media_router_android.h"
@@ -35,7 +36,9 @@ MediaRouterDialogControllerAndroid::GetOrCreateForWebContents(
 }
 
 void MediaRouterDialogControllerAndroid::OnSinkSelected(
-    JNIEnv* env, jobject obj, jstring jsink_id) {
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jstring>& jsink_id) {
   scoped_ptr<CreatePresentationConnectionRequest> create_connection_request =
       TakeCreateConnectionRequest();
   const PresentationRequest& presentation_request =
@@ -60,20 +63,21 @@ void MediaRouterDialogControllerAndroid::OnSinkSelected(
 
 void MediaRouterDialogControllerAndroid::OnRouteClosed(
     JNIEnv* env,
-    jobject obj,
-    jstring jmedia_route_id) {
+    const JavaParamRef<jobject>& obj,
+    const JavaParamRef<jstring>& jmedia_route_id) {
   std::string media_route_id = ConvertJavaStringToUTF8(env, jmedia_route_id);
 
   MediaRouter* router = MediaRouterFactory::GetApiForBrowserContext(
       initiator()->GetBrowserContext());
 
-  router->CloseRoute(media_route_id);
+  router->TerminateRoute(media_route_id);
 
   CancelPresentationRequest();
 }
 
 void MediaRouterDialogControllerAndroid::OnDialogCancelled(
-    JNIEnv* env, jobject obj) {
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
   CancelPresentationRequest();
 }
 

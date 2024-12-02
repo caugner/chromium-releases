@@ -5,11 +5,15 @@
 #ifndef CONTENT_RENDERER_RENDER_THREAD_IMPL_H_
 #define CONTENT_RENDERER_RENDER_THREAD_IMPL_H_
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <set>
 #include <string>
 #include <vector>
 
 #include "base/cancelable_callback.h"
+#include "base/macros.h"
 #include "base/memory/memory_pressure_listener.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/user_metrics_action.h"
@@ -72,6 +76,7 @@ class GpuVideoAcceleratorFactories;
 
 namespace scheduler {
 class RendererScheduler;
+class WebThreadBase;
 }
 
 namespace v8 {
@@ -116,6 +121,7 @@ class WebGraphicsContext3DCommandBufferImpl;
 class WebRTCIdentityService;
 
 #if defined(OS_ANDROID)
+class StreamTextureFactory;
 class SynchronousCompositorFilter;
 #endif
 
@@ -163,8 +169,8 @@ class CONTENT_EXPORT RenderThreadImpl
   std::string GetLocale() override;
   IPC::SyncMessageFilter* GetSyncMessageFilter() override;
   scoped_refptr<base::SingleThreadTaskRunner> GetIOMessageLoopProxy() override;
-  void AddRoute(int32 routing_id, IPC::Listener* listener) override;
-  void RemoveRoute(int32 routing_id) override;
+  void AddRoute(int32_t routing_id, IPC::Listener* listener) override;
+  void RemoveRoute(int32_t routing_id) override;
   int GenerateRoutingID() override;
   void AddFilter(IPC::MessageFilter* filter) override;
   void RemoveFilter(IPC::MessageFilter* filter) override;
@@ -179,11 +185,11 @@ class CONTENT_EXPORT RenderThreadImpl
       size_t buffer_size) override;
   cc::SharedBitmapManager* GetSharedBitmapManager() override;
   void RegisterExtension(v8::Extension* extension) override;
-  void ScheduleIdleHandler(int64 initial_delay_ms) override;
+  void ScheduleIdleHandler(int64_t initial_delay_ms) override;
   void IdleHandler() override;
-  int64 GetIdleNotificationDelayInMs() const override;
+  int64_t GetIdleNotificationDelayInMs() const override;
   void SetIdleNotificationDelayInMs(
-      int64 idle_notification_delay_in_ms) override;
+      int64_t idle_notification_delay_in_ms) override;
   void UpdateHistograms(int sequence_number) override;
   int PostTaskToAllWebWorkers(const base::Closure& closure) override;
   bool ResolveProxy(const GURL& url, std::string* proxy_list) override;
@@ -288,6 +294,8 @@ class CONTENT_EXPORT RenderThreadImpl
   SynchronousCompositorFilter* sync_compositor_message_filter() {
     return sync_compositor_message_filter_.get();
   }
+
+  scoped_refptr<StreamTextureFactory> GetStreamTexureFactory();
 #endif
 
   // Creates the embedder implementation of WebMediaStreamCenter.
@@ -434,8 +442,8 @@ class CONTENT_EXPORT RenderThreadImpl
   void WidgetHidden();
   void WidgetRestored();
 
-  void AddEmbeddedWorkerRoute(int32 routing_id, IPC::Listener* listener);
-  void RemoveEmbeddedWorkerRoute(int32 routing_id);
+  void AddEmbeddedWorkerRoute(int32_t routing_id, IPC::Listener* listener);
+  void RemoveEmbeddedWorkerRoute(int32_t routing_id);
 
   void RegisterPendingRenderFrameConnect(
       int routing_id,
@@ -460,11 +468,13 @@ class CONTENT_EXPORT RenderThreadImpl
   scoped_refptr<base::SingleThreadTaskRunner> GetIOThreadTaskRunner() override;
   scoped_ptr<base::SharedMemory> AllocateSharedMemory(size_t size) override;
   CreateCommandBufferResult CreateViewCommandBuffer(
-      int32 surface_id,
+      int32_t surface_id,
       const GPUCreateCommandBufferConfig& init_params,
-      int32 route_id) override;
+      int32_t route_id) override;
 
   void Init();
+
+  void InitializeCompositorThread();
 
   void OnCreateNewFrame(FrameMsg_NewFrame_Params params);
   void OnCreateNewFrameProxy(int routing_id,
@@ -560,7 +570,7 @@ class CONTENT_EXPORT RenderThreadImpl
   int hidden_widget_count_;
 
   // The current value of the idle notification timer delay.
-  int64 idle_notification_delay_in_ms_;
+  int64_t idle_notification_delay_in_ms_;
 
   // The number of idle handler calls that skip sending idle notifications.
   int idle_notifications_to_skip_;
@@ -590,10 +600,13 @@ class CONTENT_EXPORT RenderThreadImpl
   scoped_ptr<base::Thread> file_thread_;
 
   // May be null if overridden by ContentRendererClient.
-  scoped_ptr<base::Thread> compositor_thread_;
+  scoped_ptr<scheduler::WebThreadBase> compositor_thread_;
 
   // Utility class to provide GPU functionalities to media.
-  scoped_ptr<content::RendererGpuVideoAcceleratorFactories> gpu_factories_;
+  // TODO(dcastagna): This should be just one scoped_ptr once
+  // http://crbug.com/580386 is fixed.
+  // NOTE(dcastagna): At worst this accumulates a few bytes per context lost.
+  ScopedVector<content::RendererGpuVideoAcceleratorFactories> gpu_factories_;
 
   // Thread for running multimedia operations (e.g., video decoding).
   scoped_ptr<base::Thread> media_thread_;
@@ -612,12 +625,12 @@ class CONTENT_EXPORT RenderThreadImpl
 
 #if defined(OS_ANDROID)
   scoped_refptr<SynchronousCompositorFilter> sync_compositor_message_filter_;
+  scoped_refptr<StreamTextureFactory> stream_texture_factory_;
 #endif
 
   scoped_refptr<BluetoothMessageFilter> bluetooth_message_filter_;
 
-  scoped_refptr<cc_blink::ContextProviderWebContext>
-      shared_main_thread_contexts_;
+  scoped_refptr<ContextProviderCommandBuffer> shared_main_thread_contexts_;
 
   base::ObserverList<RenderProcessObserver> observers_;
 

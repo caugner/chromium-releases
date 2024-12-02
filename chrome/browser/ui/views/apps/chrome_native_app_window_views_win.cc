@@ -5,14 +5,12 @@
 #include "chrome/browser/ui/views/apps/chrome_native_app_window_views_win.h"
 
 #include "apps/ui/views/app_window_frame_view.h"
-#include "ash/shell.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/apps/per_app_settings_service.h"
 #include "chrome/browser/apps/per_app_settings_service_factory.h"
-#include "chrome/browser/metro_utils/metro_chrome_win.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/views/apps/app_window_desktop_native_widget_aura_win.h"
@@ -39,28 +37,8 @@ ChromeNativeAppWindowViewsWin::ChromeNativeAppWindowViewsWin()
 ChromeNativeAppWindowViewsWin::~ChromeNativeAppWindowViewsWin() {
 }
 
-void ChromeNativeAppWindowViewsWin::ActivateParentDesktopIfNecessary() {
-  // Only switching into Ash from Native is supported. Tearing the user out of
-  // Metro mode can only be done by launching a process from Metro mode itself.
-  // This is done for launching apps, but not regular activations.
-  if (IsRunningInAsh() &&
-      chrome::GetActiveDesktop() == chrome::HOST_DESKTOP_TYPE_NATIVE) {
-    chrome::ActivateMetroChrome();
-  }
-}
-
 HWND ChromeNativeAppWindowViewsWin::GetNativeAppWindowHWND() const {
   return views::HWNDForWidget(widget()->GetTopLevelWidget());
-}
-
-bool ChromeNativeAppWindowViewsWin::IsRunningInAsh() {
-  if (!ash::Shell::HasInstance())
-    return false;
-
-  views::Widget* widget = GetWidget();
-  chrome::HostDesktopType host_desktop_type =
-      chrome::GetHostDesktopTypeForNativeWindow(widget->GetNativeWindow());
-  return host_desktop_type == chrome::HOST_DESKTOP_TYPE_ASH;
 }
 
 void ChromeNativeAppWindowViewsWin::EnsureCaptionStyleSet() {
@@ -101,10 +79,7 @@ void ChromeNativeAppWindowViewsWin::OnBeforeWidgetInit(
       desktop_type = chrome::GetActiveDesktop();
     }
   }
-  if (desktop_type == chrome::HOST_DESKTOP_TYPE_ASH)
-    init_params->context = ash::Shell::GetPrimaryRootWindow();
-  else
-    init_params->native_widget = new AppWindowDesktopNativeWidgetAuraWin(this);
+  init_params->native_widget = new AppWindowDesktopNativeWidgetAuraWin(this);
 
   is_translucent_ =
       init_params->opacity == views::Widget::InitParams::TRANSLUCENT_WINDOW;
@@ -113,11 +88,6 @@ void ChromeNativeAppWindowViewsWin::OnBeforeWidgetInit(
 void ChromeNativeAppWindowViewsWin::InitializeDefaultWindow(
     const extensions::AppWindow::CreateParams& create_params) {
   ChromeNativeAppWindowViewsAura::InitializeDefaultWindow(create_params);
-
-  // Remaining initialization is for Windows shell integration, which doesn't
-  // apply to app windows in Ash.
-  if (IsRunningInAsh())
-    return;
 
   const extensions::Extension* extension = app_window()->GetExtension();
   if (!extension)
@@ -147,16 +117,6 @@ ChromeNativeAppWindowViewsWin::CreateStandardDesktopAppFrame() {
     return glass_frame_view_;
   }
   return ChromeNativeAppWindowViewsAura::CreateStandardDesktopAppFrame();
-}
-
-void ChromeNativeAppWindowViewsWin::Show() {
-  ActivateParentDesktopIfNecessary();
-  ChromeNativeAppWindowViewsAura::Show();
-}
-
-void ChromeNativeAppWindowViewsWin::Activate() {
-  ActivateParentDesktopIfNecessary();
-  ChromeNativeAppWindowViewsAura::Activate();
 }
 
 bool ChromeNativeAppWindowViewsWin::CanMinimize() const {

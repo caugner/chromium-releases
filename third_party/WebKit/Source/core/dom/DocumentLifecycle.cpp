@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/dom/DocumentLifecycle.h"
 
 #include "platform/RuntimeEnabledFeatures.h"
@@ -213,9 +212,8 @@ bool DocumentLifecycle::canAdvanceTo(State nextState) const
         if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
             if (nextState == InUpdatePaintProperties)
                 return true;
-        } else {
-            if (nextState == InPaint && RuntimeEnabledFeatures::slimmingPaintSynchronizedPaintingEnabled())
-                return true;
+        } else if (nextState == InPaint) {
+            return true;
         }
         break;
     case InUpdatePaintProperties:
@@ -227,12 +225,10 @@ bool DocumentLifecycle::canAdvanceTo(State nextState) const
             return true;
         break;
     case InPaint:
-        if (nextState == PaintClean && RuntimeEnabledFeatures::slimmingPaintSynchronizedPaintingEnabled())
+        if (nextState == PaintClean)
             return true;
         break;
     case PaintClean:
-        if (!RuntimeEnabledFeatures::slimmingPaintSynchronizedPaintingEnabled())
-            break;
         if (nextState == InStyleRecalc)
             return true;
         if (nextState == InPreLayout)
@@ -263,7 +259,7 @@ bool DocumentLifecycle::canRewindTo(State nextState) const
         || m_state == LayoutClean
         || m_state == CompositingClean
         || m_state == PaintInvalidationClean
-        || (m_state == PaintClean && RuntimeEnabledFeatures::slimmingPaintSynchronizedPaintingEnabled());
+        || m_state == PaintClean;
 }
 
 #endif

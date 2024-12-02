@@ -4,10 +4,13 @@
 
 #include "chrome/browser/ui/views/website_settings/website_settings_popup_view.h"
 
+#include <stddef.h>
+
 #include <algorithm>
 #include <vector>
 
 #include "base/i18n/rtl.h"
+#include "base/macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -19,6 +22,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/views/collected_cookies_views.h"
+#include "chrome/browser/ui/views/website_settings/chosen_object_view.h"
 #include "chrome/browser/ui/views/website_settings/permission_selector_view.h"
 #include "chrome/browser/ui/website_settings/website_settings.h"
 #include "chrome/browser/ui/website_settings/website_settings_utils.h"
@@ -38,6 +42,7 @@
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/image/image.h"
 #include "ui/resources/grit/ui_resources.h"
+#include "ui/views/bubble/bubble_frame_view.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/button/menu_button_listener.h"
@@ -159,6 +164,8 @@ class InternalPageInfoPopupView : public views::BubbleDelegateView {
   ~InternalPageInfoPopupView() override;
 
   // views::BubbleDelegateView:
+  views::NonClientFrameView* CreateNonClientFrameView(
+      views::Widget* widget) override;
   void OnWidgetDestroying(views::Widget* widget) override;
 
  private:
@@ -292,12 +299,13 @@ InternalPageInfoPopupView::InternalPageInfoPopupView(
   set_anchor_view_insets(gfx::Insets(kLocationIconVerticalMargin, 0,
                                      kLocationIconVerticalMargin, 0));
 
-  const int kSpacing = 4;
+  const int kSpacing = 16;
   SetLayoutManager(new views::BoxLayout(views::BoxLayout::kHorizontal, kSpacing,
                                         kSpacing, kSpacing));
+  set_margins(gfx::Insets());
   views::ImageView* icon_view = new views::ImageView();
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  icon_view->SetImage(rb.GetImageSkiaNamed(IDR_PRODUCT_LOGO_26));
+  icon_view->SetImage(rb.GetImageSkiaNamed(IDR_PRODUCT_LOGO_16));
   AddChildView(icon_view);
 
   views::Label* label =
@@ -311,6 +319,16 @@ InternalPageInfoPopupView::InternalPageInfoPopupView(
 }
 
 InternalPageInfoPopupView::~InternalPageInfoPopupView() {
+}
+
+views::NonClientFrameView* InternalPageInfoPopupView::CreateNonClientFrameView(
+    views::Widget* widget) {
+  views::BubbleFrameView* frame = static_cast<views::BubbleFrameView*>(
+      BubbleDelegateView::CreateNonClientFrameView(widget));
+  // 16px padding + half of icon width comes out to 24px.
+  frame->bubble_border()->set_arrow_offset(
+      24 + frame->bubble_border()->GetBorderThickness());
+  return frame;
 }
 
 void InternalPageInfoPopupView::OnWidgetDestroying(views::Widget* widget) {
@@ -331,7 +349,7 @@ void WebsiteSettingsPopupView::ShowPopup(
     Profile* profile,
     content::WebContents* web_contents,
     const GURL& url,
-    const SecurityStateModel::SecurityInfo& security_info) {
+    const security_state::SecurityStateModel::SecurityInfo& security_info) {
   is_popup_showing = true;
   gfx::NativeView parent_window =
       anchor_view ? nullptr : web_contents->GetNativeView();
@@ -362,7 +380,7 @@ WebsiteSettingsPopupView::WebsiteSettingsPopupView(
     Profile* profile,
     content::WebContents* web_contents,
     const GURL& url,
-    const SecurityStateModel::SecurityInfo& security_info)
+    const security_state::SecurityStateModel::SecurityInfo& security_info)
     : content::WebContentsObserver(web_contents),
       BubbleDelegateView(anchor_view, views::BubbleBorder::TOP_LEFT),
       web_contents_(web_contents),
@@ -444,6 +462,11 @@ void WebsiteSettingsPopupView::RenderFrameDeleted(
 void WebsiteSettingsPopupView::OnPermissionChanged(
     const WebsiteSettingsUI::PermissionInfo& permission) {
   presenter_->OnSitePermissionChanged(permission.type, permission.setting);
+}
+
+void WebsiteSettingsPopupView::OnChosenObjectDeleted(
+    const WebsiteSettingsUI::ChosenObjectInfo& info) {
+  presenter_->OnSiteChosenObjectDeleted(info.ui_info, *info.object);
 }
 
 void WebsiteSettingsPopupView::OnWidgetDestroying(views::Widget* widget) {
@@ -567,6 +590,9 @@ void WebsiteSettingsPopupView::SetCookieInfo(
     WebsiteSettingsUI::PermissionInfo info;
     info.type = CONTENT_SETTINGS_TYPE_COOKIES;
     info.setting = CONTENT_SETTING_ALLOW;
+    info.is_incognito =
+        Profile::FromBrowserContext(web_contents_->GetBrowserContext())
+            ->IsOffTheRecord();
     views::ImageView* icon = new views::ImageView();
     const gfx::Image& image = WebsiteSettingsUI::GetPermissionIcon(info);
     icon->SetImage(image.ToImageSkia());
@@ -587,14 +613,18 @@ void WebsiteSettingsPopupView::SetCookieInfo(
 }
 
 void WebsiteSettingsPopupView::SetPermissionInfo(
-    const PermissionInfoList& permission_info_list) {
+    const PermissionInfoList& permission_info_list,
+    const ChosenObjectInfoList& chosen_object_info_list) {
   // When a permission is changed, WebsiteSettings::OnSitePermissionChanged()
   // calls this method with updated permissions. However, PermissionSelectorView
   // will have already updated its state, so it's already reflected in the UI.
   // In addition, if a permission is set to the default setting, WebsiteSettings
   // removes it from |permission_info_list|, but the button should remain.
-  if (permissions_content_)
+  if (permissions_content_) {
+    STLDeleteContainerPointers(chosen_object_info_list.begin(),
+                               chosen_object_info_list.end());
     return;
+  }
 
   permissions_content_ = new views::View();
   views::GridLayout* layout = new views::GridLayout(permissions_content_);
@@ -617,19 +647,26 @@ void WebsiteSettingsPopupView::SetPermissionInfo(
                         views::GridLayout::USE_PREF,
                         0,
                         0);
-  for (PermissionInfoList::const_iterator permission =
-           permission_info_list.begin();
-       permission != permission_info_list.end();
-       ++permission) {
+  for (const auto& permission : permission_info_list) {
     layout->StartRow(1, content_column);
     PermissionSelectorView* selector = new PermissionSelectorView(
         web_contents_ ? web_contents_->GetURL() : GURL::EmptyGURL(),
-        *permission);
+        permission);
     selector->AddObserver(this);
     layout->AddView(selector,
                     1,
                     1,
                     views::GridLayout::LEADING,
+                    views::GridLayout::CENTER);
+    layout->AddPaddingRow(1, kPermissionsSectionRowSpacing);
+  }
+
+  for (auto object : chosen_object_info_list) {
+    layout->StartRow(1, content_column);
+    // The view takes ownership of the object info.
+    auto object_view = new ChosenObjectView(make_scoped_ptr(object));
+    object_view->AddObserver(this);
+    layout->AddView(object_view, 1, 1, views::GridLayout::LEADING,
                     views::GridLayout::CENTER);
     layout->AddPaddingRow(1, kPermissionsSectionRowSpacing);
   }
@@ -910,7 +947,8 @@ void WebsiteSettingsPopupView::HandleLinkClickedAsync(views::Link* source) {
   }
 }
 
-void WebsiteSettingsPopupView::StyledLabelLinkClicked(const gfx::Range& range,
+void WebsiteSettingsPopupView::StyledLabelLinkClicked(views::StyledLabel* label,
+                                                      const gfx::Range& range,
                                                       int event_flags) {
   presenter_->RecordWebsiteSettingsAction(
       WebsiteSettings::WEBSITE_SETTINGS_SECURITY_DETAILS_OPENED);

@@ -5,6 +5,9 @@
 #ifndef CONTENT_COMMON_GPU_MEDIA_ANDROID_DEFERRED_RENDERING_BACKING_STRATEGY_H_
 #define CONTENT_COMMON_GPU_MEDIA_ANDROID_DEFERRED_RENDERING_BACKING_STRATEGY_H_
 
+#include <stdint.h>
+
+#include "base/macros.h"
 #include "content/common/content_export.h"
 #include "content/common/gpu/media/android_video_decode_accelerator.h"
 
@@ -35,11 +38,11 @@ class CONTENT_EXPORT AndroidDeferredRenderingBackingStrategy
 
   // AndroidVideoDecodeAccelerator::BackingStrategy
   void Initialize(AVDAStateProvider*) override;
-  void Cleanup(const AndroidVideoDecodeAccelerator::OutputBufferMap&) override;
-  uint32 GetNumPictureBuffers() const override;
-  uint32 GetTextureTarget() const override;
+  void Cleanup(bool have_context,
+               const AndroidVideoDecodeAccelerator::OutputBufferMap&) override;
+  uint32_t GetTextureTarget() const override;
   scoped_refptr<gfx::SurfaceTexture> CreateSurfaceTexture() override;
-  void UseCodecBufferForPictureBuffer(int32 codec_buffer_index,
+  void UseCodecBufferForPictureBuffer(int32_t codec_buffer_index,
                                       const media::PictureBuffer&) override;
   void AssignOnePictureBuffer(const media::PictureBuffer&) override;
   void ReuseOnePictureBuffer(const media::PictureBuffer&) override;
@@ -47,6 +50,7 @@ class CONTENT_EXPORT AndroidDeferredRenderingBackingStrategy
   void CodecChanged(
       media::VideoCodecBridge*,
       const AndroidVideoDecodeAccelerator::OutputBufferMap&) override;
+  void OnFrameAvailable() override;
 
  private:
   // Release any codec buffer that is associated with the given picture buffer

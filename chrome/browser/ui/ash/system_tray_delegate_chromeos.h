@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_UI_ASH_SYSTEM_TRAY_DELEGATE_CHROMEOS_H_
 #define CHROME_BROWSER_UI_ASH_SYSTEM_TRAY_DELEGATE_CHROMEOS_H_
 
+#include <stdint.h>
+
 #include <string>
 #include <vector>
 
@@ -16,7 +18,7 @@
 #include "base/callback_forward.h"
 #include "base/callback_list.h"
 #include "base/compiler_specific.h"
-#include "base/containers/scoped_ptr_hash_map.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
@@ -96,6 +98,7 @@ class SystemTrayDelegateChromeOS
   void ShowSetTimeDialog() override;
   void ShowNetworkSettingsForGuid(const std::string& guid) override;
   void ShowDisplaySettings() override;
+  void ShowPowerSettings() override;
   void ShowChromeSlow() override;
   bool ShouldShowDisplayNotification() override;
   void ShowIMESettings() override;
@@ -136,8 +139,6 @@ class SystemTrayDelegateChromeOS
   int GetSystemTrayMenuWidth() override;
   void ActiveUserWasChanged() override;
   bool IsSearchKeyMappedToCapsLock() override;
-  ash::tray::UserAccountsDelegate* GetUserAccountsDelegate(
-      const AccountId& account_id) override;
   void AddCustodianInfoTrayObserver(
       ash::CustodianInfoTrayObserver* observer) override;
   void RemoveCustodianInfoTrayObserver(
@@ -293,8 +294,6 @@ class SystemTrayDelegateChromeOS
   scoped_ptr<ash::NetworkingConfigDelegate> networking_config_delegate_;
   scoped_ptr<ash::VolumeControlDelegate> volume_control_delegate_;
   scoped_ptr<AccessibilityStatusSubscription> accessibility_subscription_;
-  base::ScopedPtrMap<AccountId, scoped_ptr<ash::tray::UserAccountsDelegate>>
-      accounts_delegates_;
   scoped_ptr<ShutdownPolicyHandler> shutdown_policy_handler_;
   scoped_ptr<ash::VPNDelegate> vpn_delegate_;
 

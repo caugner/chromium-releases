@@ -5,16 +5,18 @@
 #ifndef COMPONENTS_MUS_WS_CONNECTION_MANAGER_H_
 #define COMPONENTS_MUS_WS_CONNECTION_MANAGER_H_
 
+#include <stdint.h>
+
 #include <map>
 #include <set>
+#include <vector>
 
-#include "base/basictypes.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/timer/timer.h"
 #include "components/mus/public/interfaces/window_tree.mojom.h"
 #include "components/mus/public/interfaces/window_tree_host.mojom.h"
 #include "components/mus/surfaces/surfaces_state.h"
-#include "components/mus/ws/focus_controller_delegate.h"
 #include "components/mus/ws/ids.h"
 #include "components/mus/ws/operation.h"
 #include "components/mus/ws/server_window_delegate.h"
@@ -25,7 +27,6 @@
 #include "mojo/public/cpp/bindings/binding.h"
 
 namespace mus {
-
 namespace ws {
 
 class ClientConnection;
@@ -48,7 +49,9 @@ class ConnectionManager : public ServerWindowDelegate,
 
   // Creates a new ServerWindow. The return value is owned by the caller, but
   // must be destroyed before ConnectionManager.
-  ServerWindow* CreateServerWindow(const WindowId& id);
+  ServerWindow* CreateServerWindow(
+      const WindowId& id,
+      const std::map<std::string, std::vector<uint8_t>>& properties);
 
   // Returns the id for the next WindowTreeImpl.
   ConnectionSpecificId GetAndAdvanceNextConnectionId();
@@ -59,14 +62,15 @@ class ConnectionManager : public ServerWindowDelegate,
   // Invoked when a WindowTreeImpl's connection encounters an error.
   void OnConnectionError(ClientConnection* connection);
 
+  ClientConnection* GetClientConnection(WindowTreeImpl* window_tree);
+
   // Invoked when a WindowTreeHostConnection encounters an error or the
   // associated Display window is closed.
   void OnHostConnectionClosed(WindowTreeHostConnection* connection);
 
   // See description of WindowTree::Embed() for details. This assumes
   // |transport_window_id| is valid.
-  WindowTreeImpl* EmbedAtWindow(ConnectionSpecificId creator_id,
-                                const WindowId& window_id,
+  WindowTreeImpl* EmbedAtWindow(ServerWindow* root,
                                 uint32_t policy_bitmask,
                                 mojom::WindowTreeClientPtr client);
 
@@ -104,18 +108,22 @@ class ConnectionManager : public ServerWindowDelegate,
       const ServerWindow* window);
 
   // Returns the WindowTreeImpl that has |id| as a root.
-  WindowTreeImpl* GetConnectionWithRoot(const WindowId& id) {
+  WindowTreeImpl* GetConnectionWithRoot(const ServerWindow* window) {
     return const_cast<WindowTreeImpl*>(
-        const_cast<const ConnectionManager*>(this)->GetConnectionWithRoot(id));
+        const_cast<const ConnectionManager*>(this)
+            ->GetConnectionWithRoot(window));
   }
-  const WindowTreeImpl* GetConnectionWithRoot(const WindowId& id) const;
+  const WindowTreeImpl* GetConnectionWithRoot(const ServerWindow* window) const;
 
   WindowTreeHostImpl* GetWindowTreeHostByWindow(const ServerWindow* window);
   const WindowTreeHostImpl* GetWindowTreeHostByWindow(
       const ServerWindow* window) const;
 
-  // Returns the first ancestor of |service| that is marked as an embed root.
-  WindowTreeImpl* GetEmbedRoot(WindowTreeImpl* service);
+  WindowTreeHostImpl* GetActiveWindowTreeHost();
+
+  bool has_tree_host_connections() const {
+    return !host_connection_map_.empty();
+  }
 
   // Returns a change id for the window manager that is associated with
   // |source| and |client_change_id|. When the window manager replies
@@ -129,6 +137,9 @@ class ConnectionManager : public ServerWindowDelegate,
   // supplied by the client.
   void WindowManagerChangeCompleted(uint32_t window_manager_change_id,
                                     bool success);
+  void WindowManagerCreatedTopLevelWindow(WindowTreeImpl* wm_connection,
+                                          uint32_t window_manager_change_id,
+                                          Id transport_window_id);
 
   // These functions trivially delegate to all WindowTreeImpls, which in
   // term notify their clients.
@@ -136,10 +147,12 @@ class ConnectionManager : public ServerWindowDelegate,
   void ProcessWindowBoundsChanged(const ServerWindow* window,
                                   const gfx::Rect& old_bounds,
                                   const gfx::Rect& new_bounds);
-  void ProcessClientAreaChanged(const ServerWindow* window,
-                                const gfx::Insets& old_client_area,
-                                const gfx::Insets& new_client_area);
-  void ProcessViewportMetricsChanged(const mojom::ViewportMetrics& old_metrics,
+  void ProcessClientAreaChanged(
+      const ServerWindow* window,
+      const gfx::Insets& new_client_area,
+      const std::vector<gfx::Rect>& new_additional_client_areas);
+  void ProcessViewportMetricsChanged(WindowTreeHostImpl* host,
+                                     const mojom::ViewportMetrics& old_metrics,
                                      const mojom::ViewportMetrics& new_metrics);
   void ProcessWillChangeWindowHierarchy(const ServerWindow* window,
                                         const ServerWindow* new_parent,
@@ -150,7 +163,9 @@ class ConnectionManager : public ServerWindowDelegate,
   void ProcessWindowReorder(const ServerWindow* window,
                             const ServerWindow* relative_window,
                             const mojom::OrderDirection direction);
-  void ProcessWindowDeleted(const WindowId& window);
+  void ProcessWindowDeleted(const ServerWindow* window);
+  void ProcessWillChangeWindowPredefinedCursor(ServerWindow* window,
+                                               int32_t cursor_id);
 
  private:
   friend class Operation;
@@ -169,6 +184,14 @@ class ConnectionManager : public ServerWindowDelegate,
 
   using InFlightWindowManagerChangeMap =
       std::map<uint32_t, InFlightWindowManagerChange>;
+
+  bool GetAndClearInFlightWindowManagerChange(
+      uint32_t window_manager_change_id,
+      InFlightWindowManagerChange* change);
+
+  // Called when we get an unexpected message from the WindowManager.
+  // TODO(sky): decide what we want to do here.
+  void WindowManagerSentBogusMessage(WindowTreeImpl* connection) {}
 
   // Invoked when a connection is about to execute a window server operation.
   // Subsequently followed by FinishOperation() once the change is done.
@@ -190,6 +213,9 @@ class ConnectionManager : public ServerWindowDelegate,
   // Adds |connection| to internal maps.
   void AddConnection(ClientConnection* connection);
 
+  // Run in response to events which may cause us to change the native cursor.
+  void MaybeUpdateNativeCursor(ServerWindow* window);
+
   // Overridden from ServerWindowDelegate:
   mus::SurfacesState* GetSurfacesState() override;
   void OnScheduleWindowPaint(const ServerWindow* window) override;
@@ -207,9 +233,10 @@ class ConnectionManager : public ServerWindowDelegate,
   void OnWindowBoundsChanged(ServerWindow* window,
                              const gfx::Rect& old_bounds,
                              const gfx::Rect& new_bounds) override;
-  void OnWindowClientAreaChanged(ServerWindow* window,
-                                 const gfx::Insets& old_client_area,
-                                 const gfx::Insets& new_client_area) override;
+  void OnWindowClientAreaChanged(
+      ServerWindow* window,
+      const gfx::Insets& new_client_area,
+      const std::vector<gfx::Rect>& new_additional_client_areas) override;
   void OnWindowReordered(ServerWindow* window,
                          ServerWindow* relative,
                          mojom::OrderDirection direction) override;
@@ -218,6 +245,8 @@ class ConnectionManager : public ServerWindowDelegate,
       ServerWindow* window,
       const std::string& name,
       const std::vector<uint8_t>* new_data) override;
+  void OnWindowPredefinedCursorChanged(ServerWindow* window,
+                                       int32_t cursor_id) override;
   void OnWindowTextInputStateChanged(ServerWindow* window,
                                      const ui::TextInputState& state) override;
   void OnTransientWindowAdded(ServerWindow* window,
@@ -259,7 +288,6 @@ class ConnectionManager : public ServerWindowDelegate,
 };
 
 }  // namespace ws
-
 }  // namespace mus
 
 #endif  // COMPONENTS_MUS_WS_CONNECTION_MANAGER_H_

@@ -165,6 +165,7 @@ interface ExtendableEvent : Event
     method constructor
     method waitUntil
 interface FetchEvent : ExtendableEvent
+    getter clientId
     getter isReload
     getter request
     method constructor
@@ -414,6 +415,10 @@ interface PermissionStatus : EventTarget
 interface Permissions
     method constructor
     method query
+interface PromiseRejectionEvent : Event
+    getter promise
+    getter reason
+    method constructor
 interface PushEvent : ExtendableEvent
     method constructor
 interface PushManager
@@ -473,6 +478,7 @@ interface ServiceWorkerRegistration : EventTarget
     getter onupdatefound
     getter pushManager
     getter scope
+    getter sync
     method constructor
     method getNotifications
     method showNotification
@@ -493,6 +499,14 @@ interface SubtleCrypto
     method unwrapKey
     method verify
     method wrapKey
+interface SyncEvent : ExtendableEvent
+    getter lastChance
+    getter tag
+    method constructor
+interface SyncManager
+    method constructor
+    method getTags
+    method register
 interface TextDecoder
     getter encoding
     getter fatal
@@ -529,6 +543,19 @@ interface URL
     setter protocol
     setter search
     setter username
+interface URLSearchParams
+    method append
+    method constructor
+    method delete
+    method entries
+    method forEach
+    method get
+    method getAll
+    method has
+    method keys
+    method set
+    method toString
+    method values
 interface WebSocket : EventTarget
     attribute CLOSED
     attribute CLOSING
@@ -557,6 +584,7 @@ interface WindowClient : Client
     getter visibilityState
     method constructor
     method focus
+    method navigate
 interface WorkerGlobalScope : EventTarget
     attribute PERSISTENT
     attribute TEMPORARY
@@ -566,6 +594,8 @@ interface WorkerGlobalScope : EventTarget
     getter location
     getter navigator
     getter onerror
+    getter onrejectionhandled
+    getter onunhandledrejection
     getter performance
     getter self
     getter webkitIndexedDB
@@ -585,6 +615,8 @@ interface WorkerGlobalScope : EventTarget
     method webkitResolveLocalFileSystemURL
     setter console
     setter onerror
+    setter onrejectionhandled
+    setter onunhandledrejection
 interface WorkerLocation
     getter hash
     getter host
@@ -719,6 +751,7 @@ global object
     getter onmessage
     getter onnotificationclick
     getter onpush
+    getter onsync
     getter registration
     method close
     method fetch
@@ -730,6 +763,7 @@ global object
     setter onmessage
     setter onnotificationclick
     setter onpush
+    setter onsync
 This is a testharness.js-based test.
 PASS Verify the interface of ServiceWorkerGlobalScope 
 Harness: the test ran to completion.

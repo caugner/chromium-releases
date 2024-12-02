@@ -2,15 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "platform/fonts/ScriptRunIterator.h"
 
 #include "platform/Logging.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "wtf/Assertions.h"
 #include "wtf/Threading.h"
 #include "wtf/text/WTFString.h"
-
-#include <gtest/gtest.h>
 #include <string>
 
 namespace blink {
@@ -37,7 +35,7 @@ public:
 
     static const MockScriptData* instance()
     {
-        AtomicallyInitializedStaticReference(const MockScriptData, mockScriptData, (new MockScriptData()));
+        DEFINE_THREAD_SAFE_STATIC_LOCAL(const MockScriptData, mockScriptData, (new MockScriptData()));
 
         return &mockScriptData;
     }

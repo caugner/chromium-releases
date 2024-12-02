@@ -5,6 +5,8 @@
 #ifndef IPC_IPC_MESSAGE_UTILS_H_
 #define IPC_IPC_MESSAGE_UTILS_H_
 
+#include <limits.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include <algorithm>
@@ -23,6 +25,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/tuple.h"
+#include "build/build_config.h"
 #include "ipc/brokerable_attachment.h"
 #include "ipc/ipc_message_start.h"
 #include "ipc/ipc_param_traits.h"
@@ -1023,7 +1026,7 @@ class SyncMessageSchema {
     Message* reply = SyncMessage::GenerateReply(msg);
     if (ok) {
       typename base::TupleTypes<ReplyParam>::ValueTuple reply_params;
-      DispatchToMethod(obj, func, send_params, &reply_params);
+      base::DispatchToMethod(obj, func, send_params, &reply_params);
       WriteParam(reply, reply_params);
       LogReplyParamsToMessage(reply_params, msg);
     } else {
@@ -1043,7 +1046,7 @@ class SyncMessageSchema {
     if (ok) {
       base::Tuple<Message&> t = base::MakeRefTuple(*reply);
       ConnectMessageAndReply(msg, reply);
-      DispatchToMethod(obj, func, send_params, &t);
+      base::DispatchToMethod(obj, func, send_params, &t);
     } else {
       NOTREACHED() << "Error deserializing message " << msg->type();
       reply->set_reply_error();

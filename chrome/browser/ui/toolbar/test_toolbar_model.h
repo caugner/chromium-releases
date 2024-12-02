@@ -5,14 +5,21 @@
 #ifndef CHROME_BROWSER_UI_TOOLBAR_TEST_TOOLBAR_MODEL_H_
 #define CHROME_BROWSER_UI_TOOLBAR_TEST_TOOLBAR_MODEL_H_
 
+#include <stddef.h>
+
 #include "base/compiler_specific.h"
+#include "base/macros.h"
 #include "base/strings/string16.h"
-#include "chrome/browser/ui/toolbar/chrome_toolbar_model.h"
+#include "components/toolbar/toolbar_model.h"
+
+namespace gfx {
+enum class VectorIconId;
+}
 
 // A ToolbarModel that is backed by instance variables, which are initialized
 // with some basic values that can be changed with the provided setters. This
 // should be used only for testing.
-class TestToolbarModel : public ChromeToolbarModel {
+class TestToolbarModel : public ToolbarModel {
  public:
   TestToolbarModel();
   ~TestToolbarModel() override;
@@ -21,7 +28,7 @@ class TestToolbarModel : public ChromeToolbarModel {
   base::string16 GetCorpusNameForMobile() const override;
   GURL GetURL() const override;
   bool WouldPerformSearchTermReplacement(bool ignore_editing) const override;
-  SecurityStateModel::SecurityLevel GetSecurityLevel(
+  security_state::SecurityStateModel::SecurityLevel GetSecurityLevel(
       bool ignore_editing) const override;
   int GetIcon() const override;
   gfx::VectorIconId GetVectorIcon() const override;
@@ -34,10 +41,11 @@ class TestToolbarModel : public ChromeToolbarModel {
       bool perform_search_term_replacement) {
     perform_search_term_replacement_ = perform_search_term_replacement;
   }
-  void set_security_level(SecurityStateModel::SecurityLevel security_level) {
+  void set_security_level(
+      security_state::SecurityStateModel::SecurityLevel security_level) {
     security_level_ = security_level;
   }
-  void set_icon(int icon) { icon_ = icon; }
+  void set_icon(gfx::VectorIconId icon) { icon_ = icon; }
   void set_ev_cert_name(const base::string16& ev_cert_name) {
     ev_cert_name_ = ev_cert_name;
   }
@@ -49,8 +57,8 @@ class TestToolbarModel : public ChromeToolbarModel {
   base::string16 text_;
   GURL url_;
   bool perform_search_term_replacement_;
-  SecurityStateModel::SecurityLevel security_level_;
-  int icon_;
+  security_state::SecurityStateModel::SecurityLevel security_level_;
+  gfx::VectorIconId icon_;
   base::string16 ev_cert_name_;
   bool should_display_url_;
 

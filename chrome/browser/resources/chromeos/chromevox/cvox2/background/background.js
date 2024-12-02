@@ -8,14 +8,16 @@
  */
 
 goog.provide('Background');
-goog.provide('ChromeVoxMode');
 goog.provide('global');
 
 goog.require('AutomationPredicate');
 goog.require('AutomationUtil');
+goog.require('ChromeVoxState');
+goog.require('LiveRegions');
 goog.require('NextEarcons');
 goog.require('Output');
 goog.require('Output.EventType');
+goog.require('constants');
 goog.require('cursors.Cursor');
 goog.require('cvox.BrailleKeyCommand');
 goog.require('cvox.ChromeVoxEditableTextBase');
@@ -26,26 +28,18 @@ goog.require('cvox.NavBraille');
 
 goog.scope(function() {
 var AutomationNode = chrome.automation.AutomationNode;
-var Dir = AutomationUtil.Dir;
+var Dir = constants.Dir;
 var EventType = chrome.automation.EventType;
 var RoleType = chrome.automation.RoleType;
 
 /**
- * All possible modes ChromeVox can run.
- * @enum {string}
- */
-ChromeVoxMode = {
-  CLASSIC: 'classic',
-  COMPAT: 'compat',
-  NEXT: 'next',
-  FORCE_NEXT: 'force_next'
-};
-
-/**
  * ChromeVox2 background page.
  * @constructor
+ * @extends {ChromeVoxState}
  */
 Background = function() {
+  ChromeVoxState.call(this);
+
   /**
    * A list of site substring patterns to use with ChromeVox next. Keep these
    * strings relatively specific.
@@ -100,13 +94,15 @@ Background = function() {
     }).bind(this)
   });
 
-  Object.defineProperty(cvox.ChromeVox, 'modKeyStr', {
-    get: function() {
-      return (this.mode_ == ChromeVoxMode.CLASSIC || this.mode_ ==
-              ChromeVoxMode.COMPAT) ?
-          'Search+Shift' : 'Search';
-    }.bind(this)
-  });
+  if (cvox.ChromeVox.isChromeOS) {
+    Object.defineProperty(cvox.ChromeVox, 'modKeyStr', {
+      get: function() {
+        return (this.mode_ == ChromeVoxMode.CLASSIC || this.mode_ ==
+            ChromeVoxMode.COMPAT) ?
+                'Search+Shift' : 'Search';
+      }.bind(this)
+    });
+  }
 
   Object.defineProperty(cvox.ChromeVox, 'isActive', {
     get: function() {
@@ -119,35 +115,131 @@ Background = function() {
 
   cvox.ExtensionBridge.addMessageListener(this.onMessage_);
 
-  document.addEventListener(
-      'keydown', cvox.ChromeVoxKbHandler.basicKeyDownActionsListener, true);
+  document.addEventListener('keydown', this.onKeyDown.bind(this), true);
   cvox.ChromeVoxKbHandler.commandHandler = this.onGotCommand.bind(this);
 
   // Classic keymap.
   cvox.ChromeVoxKbHandler.handlerKeyMap = cvox.KeyMap.fromDefaults();
 
-  chrome.automation.addTreeChangeObserver(this.onTreeChange);
+  // Live region handler.
+  this.liveRegions_ = new LiveRegions(this);
+
+  if (!chrome.accessibilityPrivate.setKeyboardListener)
+    chrome.accessibilityPrivate.setKeyboardListener = function() {};
 };
 
 Background.prototype = {
-  /** Forces ChromeVox Next to be active for all tabs. */
-  forceChromeVoxNextActive: function() {
-    this.setChromeVoxMode(ChromeVoxMode.FORCE_NEXT);
-  },
+  __proto__: ChromeVoxState.prototype,
 
-  get mode() {
+  /**
+   * @override
+   */
+  getMode: function() {
     return this.mode_;
   },
 
-  get currentRange() {
+  /**
+   * @override
+   */
+  setMode: function(mode, opt_injectClassic) {
+    // Switching key maps potentially affects the key codes that involve
+    // sequencing. Without resetting this list, potentially stale key codes
+    // remain. The key codes themselves get pushed in
+    // cvox.KeySequence.deserialize which gets called by cvox.KeyMap.
+    cvox.ChromeVox.sequenceSwitchKeyCodes = [];
+    if (mode === ChromeVoxMode.CLASSIC || mode === ChromeVoxMode.COMPAT)
+      cvox.ChromeVoxKbHandler.handlerKeyMap = cvox.KeyMap.fromDefaults();
+    else
+      cvox.ChromeVoxKbHandler.handlerKeyMap = cvox.KeyMap.fromNext();
+
+    if (mode == ChromeVoxMode.CLASSIC) {
+      if (chrome.commands &&
+          chrome.commands.onCommand.hasListener(this.onGotCommand))
+        chrome.commands.onCommand.removeListener(this.onGotCommand);
+      chrome.accessibilityPrivate.setKeyboardListener(false, false);
+    } else {
+      if (chrome.commands &&
+          !chrome.commands.onCommand.hasListener(this.onGotCommand))
+        chrome.commands.onCommand.addListener(this.onGotCommand);
+        chrome.accessibilityPrivate.setKeyboardListener(
+            true, cvox.ChromeVox.isStickyPrefOn);
+    }
+
+    chrome.tabs.query({active: true}, function(tabs) {
+      if (mode === ChromeVoxMode.CLASSIC) {
+        // Generally, we don't want to inject classic content scripts as it is
+        // done by the extension system at document load. The exception is when
+        // we toggle classic on manually as part of a user command.
+        if (opt_injectClassic)
+          cvox.ChromeVox.injectChromeVoxIntoTabs(tabs);
+      } else {
+        // When in compat mode, if the focus is within the desktop tree proper,
+        // then do not disable content scripts.
+        if (this.currentRange_ && !this.currentRange_.isWebRange())
+          return;
+
+        this.disableClassicChromeVox_();
+      }
+    }.bind(this));
+
+    // If switching out of a ChromeVox Next mode, make sure we cancel
+    // the progress loading sound just in case.
+    if ((this.mode_ === ChromeVoxMode.NEXT ||
+         this.mode_ === ChromeVoxMode.FORCE_NEXT) &&
+        this.mode_ != mode) {
+      cvox.ChromeVox.earcons.cancelEarcon(cvox.Earcon.PAGE_START_LOADING);
+    }
+
+    this.mode_ = mode;
+  },
+
+  /**
+   * Mode refreshes takes into account both |url| and the current ChromeVox
+   *    range. The latter gets used to decide if the user is or isn't in web
+   *    content. The focused state also needs to be set for this info to be
+   *    reliable.
+   * @override
+   */
+  refreshMode: function(url) {
+    var mode = this.mode_;
+    if (mode != ChromeVoxMode.FORCE_NEXT) {
+      if (this.isWhitelistedForNext_(url)) {
+        mode = ChromeVoxMode.NEXT;
+      } else if (this.isBlacklistedForClassic_(url) || (this.currentRange_ &&
+          !this.currentRange_.isWebRange() &&
+          this.currentRange_.start.node.state.focused)) {
+        mode = ChromeVoxMode.COMPAT;
+      } else {
+        mode = ChromeVoxMode.CLASSIC;
+      }
+    }
+
+    this.setMode(mode);
+  },
+
+  /**
+   * @override
+   */
+  getCurrentRange: function() {
     return this.currentRange_;
   },
 
-  set currentRange(value) {
-    if (!value)
+  /**
+   * @override
+   */
+  setCurrentRange: function(newRange) {
+    if (!newRange)
       return;
 
-    this.currentRange_ = value;
+    this.currentRange_ = newRange;
+
+    if (this.currentRange_)
+      this.currentRange_.start.node.makeVisible();
+  },
+
+  /** Forces ChromeVox Next to be active for all tabs. */
+  forceChromeVoxNextActive: function() {
+    this.setMode(ChromeVoxMode.FORCE_NEXT);
   },
 
   /**
@@ -325,8 +417,8 @@ Background.prototype = {
               .onSpeechEnd(function() { continueReading(prevRange); })
               .go();
           prevRange = this.currentRange_;
-          this.currentRange_ =
-              this.currentRange_.move(cursors.Unit.NODE, Dir.FORWARD);
+          this.setCurrentRange(
+              this.currentRange_.move(cursors.Unit.NODE, Dir.FORWARD));
 
           if (!this.currentRange_ || this.currentRange_.equals(prevRange))
             global.isReadingContinuously = false;
@@ -360,13 +452,12 @@ Background.prototype = {
       case 'toggleChromeVoxVersion':
         var newMode;
         if (this.mode_ == ChromeVoxMode.FORCE_NEXT) {
-          var inViews =
-              this.currentRange_.start.node.root.role == RoleType.desktop;
-          newMode = inViews ? ChromeVoxMode.COMPAT : ChromeVoxMode.CLASSIC;
+          var inWeb = current.isWebRange();
+          newMode = inWeb ? ChromeVoxMode.CLASSIC : ChromeVoxMode.COMPAT;
         } else {
           newMode = ChromeVoxMode.FORCE_NEXT;
         }
-        this.setChromeVoxMode(newMode, true);
+        this.setMode(newMode, true);
 
         var isClassic =
             newMode == ChromeVoxMode.CLASSIC || newMode == ChromeVoxMode.COMPAT;
@@ -374,6 +465,16 @@ Background.prototype = {
         // Leaving unlocalized as 'next' isn't an official name.
         cvox.ChromeVox.tts.speak(isClassic ?
             'classic' : 'next', cvox.QueueMode.FLUSH, {doNotInterrupt: true});
+        break;
+      case 'toggleStickyMode':
+        cvox.ChromeVoxBackground.setPref('sticky',
+                                         !cvox.ChromeVox.isStickyPrefOn,
+                                         true);
+
+        if (cvox.ChromeVox.isStickyPrefOn)
+          chrome.accessibilityPrivate.setKeyboardListener(true, true);
+        else
+          chrome.accessibilityPrivate.setKeyboardListener(true, false);
         break;
       default:
         return true;
@@ -402,14 +503,31 @@ Background.prototype = {
       actionNode.focus();
 
       var prevRange = this.currentRange_;
-      this.currentRange_ = current;
+      this.setCurrentRange(current);
 
       new Output().withSpeechAndBraille(
               this.currentRange_, prevRange, Output.EventType.NAVIGATE)
+          .withQueueMode(cvox.QueueMode.FLUSH)
           .go();
     }
 
     return false;
+  },
+
+  /**
+   * Handles key down events.
+   * @param {Event} evt The key down event to process.
+   * @return {boolean} True if the default action should be performed.
+   */
+  onKeyDown: function(evt) {
+    evt.stickyMode = cvox.ChromeVox.isStickyModeOn() && cvox.ChromeVox.isActive;
+    if (this.mode_ != ChromeVoxMode.CLASSIC &&
+        !cvox.ChromeVoxKbHandler.basicKeyDownActionsListener(evt)) {
+      evt.preventDefault();
+      evt.stopPropagation();
+    }
+
+    Output.flushNextSpeechUtterance();
   },
 
   /**
@@ -462,67 +580,6 @@ Background.prototype = {
   },
 
   /**
-   * Refreshes the current mode based on a url.
-   * @param {string} url
-   */
-  refreshMode: function(url) {
-    var mode = this.mode_;
-    if (mode != ChromeVoxMode.FORCE_NEXT) {
-      if (this.isWhitelistedForNext_(url))
-        mode = ChromeVoxMode.NEXT;
-      else if (this.isBlacklistedForClassic_(url))
-        mode = ChromeVoxMode.COMPAT;
-      else
-        mode = ChromeVoxMode.CLASSIC;
-    }
-
-    this.setChromeVoxMode(mode);
-  },
-
-  /**
-   * Called when the automation tree is changed.
-   * @param {chrome.automation.TreeChange} treeChange
-   */
-  onTreeChange: function(treeChange) {
-    if (this.mode_ === ChromeVoxMode.CLASSIC || !cvox.ChromeVox.isActive)
-      return;
-
-    var node = treeChange.target;
-    if (!node.containerLiveStatus)
-      return;
-
-    if (node.containerLiveRelevant.indexOf('additions') >= 0 &&
-        treeChange.type == 'nodeCreated')
-      this.outputLiveRegionChange_(node, null);
-    if (node.containerLiveRelevant.indexOf('text') >= 0 &&
-        treeChange.type == 'nodeChanged')
-      this.outputLiveRegionChange_(node, null);
-    if (node.containerLiveRelevant.indexOf('removals') >= 0 &&
-        treeChange.type == 'nodeRemoved')
-      this.outputLiveRegionChange_(node, '@live_regions_removed');
-  },
-
-  /**
-   * Given a node that needs to be spoken as part of a live region
-   * change and an additional optional format string, output the
-   * live region description.
-   * @param {!chrome.automation.AutomationNode} node The changed node.
-   * @param {?string} opt_prependFormatStr If set, a format string for
-   *     cvox2.Output to prepend to the output.
-   * @private
-   */
-  outputLiveRegionChange_: function(node, opt_prependFormatStr) {
-    var range = cursors.Range.fromNode(node);
-    var output = new Output();
-    if (opt_prependFormatStr) {
-      output.format(opt_prependFormatStr);
-    }
-    output.withSpeech(range, null, Output.EventType.NAVIGATE);
-    output.withSpeechCategory(cvox.TtsCategory.LIVE);
-    output.go();
-  },
-
-  /**
    * Returns true if the url should have Classic running.
    * @return {boolean}
    * @private
@@ -539,7 +596,7 @@ Background.prototype = {
    * @private
    */
   isBlacklistedForClassic_: function(url) {
-    return url === '' || this.classicBlacklistRegExp_.test(url);
+    return this.classicBlacklistRegExp_.test(url);
   },
 
   /**
@@ -561,48 +618,6 @@ Background.prototype = {
         message: 'SYSTEM_COMMAND',
         command: 'killChromeVox'
     });
-  },
-
-  /**
-   * Sets the current ChromeVox mode.
-   * @param {ChromeVoxMode} mode
-   * @param {boolean=} opt_injectClassic Injects ChromeVox classic into tabs;
-   *                                     defaults to false.
-   */
-  setChromeVoxMode: function(mode, opt_injectClassic) {
-    if (mode === ChromeVoxMode.CLASSIC || mode === ChromeVoxMode.COMPAT)
-      cvox.ChromeVoxKbHandler.handlerKeyMap = cvox.KeyMap.fromDefaults();
-    else
-      cvox.ChromeVoxKbHandler.handlerKeyMap = cvox.KeyMap.fromNext();
-
-    if (mode == ChromeVoxMode.CLASSIC) {
-      if (chrome.commands &&
-          chrome.commands.onCommand.hasListener(this.onGotCommand))
-        chrome.commands.onCommand.removeListener(this.onGotCommand);
-    } else {
-      if (chrome.commands &&
-          !chrome.commands.onCommand.hasListener(this.onGotCommand))
-        chrome.commands.onCommand.addListener(this.onGotCommand);
-    }
-
-    chrome.tabs.query({active: true}, function(tabs) {
-      if (mode === ChromeVoxMode.CLASSIC) {
-        // Generally, we don't want to inject classic content scripts as it is
-        // done by the extension system at document load. The exception is when
-        // we toggle classic on manually as part of a user command.
-        if (opt_injectClassic)
-          cvox.ChromeVox.injectChromeVoxIntoTabs(tabs);
-      } else {
-        // When in compat mode, if the focus is within the desktop tree proper,
-        // then do not disable content scripts.
-        if (this.currentRange_.start.node.root.role == 'desktop')
-          return;
-
-        this.disableClassicChromeVox_();
-      }
-    }.bind(this));
-
-    this.mode_ = mode;
   },
 
   /**
@@ -653,6 +668,10 @@ Background.prototype = {
             target: 'next',
             isClassicEnabled: isClassicEnabled
           });
+        } else if (action == 'onCommand') {
+          this.onGotCommand(msg['command']);
+        } else if (action == 'flushNextUtterance') {
+          Output.flushNextSpeechUtterance();
         }
         break;
     }

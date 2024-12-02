@@ -38,7 +38,6 @@ WebInspector.ConsoleView = function()
 {
     WebInspector.VBox.call(this);
     this.setMinimumSize(0, 35);
-    this.registerRequiredCSS("ui/filter.css");
     this.registerRequiredCSS("console/consoleView.css");
 
     this._searchableView = new WebInspector.SearchableView(this);
@@ -70,14 +69,14 @@ WebInspector.ConsoleView = function()
     this._preserveLogCheckbox = new WebInspector.ToolbarCheckbox(WebInspector.UIString("Preserve log"), WebInspector.UIString("Do not clear log on page reload / navigation"), WebInspector.moduleSetting("preserveConsoleLog"));
     this._progressToolbarItem = new WebInspector.ToolbarItem(createElement("div"));
 
-    var toolbar = new WebInspector.Toolbar(this._contentsElement);
-    toolbar.appendToolbarItem(WebInspector.ToolbarButton.createActionButton("console.clear"));
+    var toolbar = new WebInspector.Toolbar("", this._contentsElement);
+    toolbar.appendToolbarItem(WebInspector.Toolbar.createActionButton(WebInspector.actionRegistry.action("console.clear")));
     toolbar.appendToolbarItem(this._filterBar.filterButton());
     toolbar.appendToolbarItem(this._executionContextComboBox);
     toolbar.appendToolbarItem(this._preserveLogCheckbox);
     toolbar.appendToolbarItem(this._progressToolbarItem);
 
-    this._contentsElement.appendChild(this._filterBar.filtersElement());
+    this._filterBar.show(this._contentsElement);
     this._filter.addFilters(this._filterBar);
 
     this._viewport = new WebInspector.ViewportControl(this);

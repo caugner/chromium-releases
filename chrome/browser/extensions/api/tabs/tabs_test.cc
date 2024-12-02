@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <limits.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <string>
 
@@ -13,6 +16,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/devtools/devtools_window_testing.h"
 #include "chrome/browser/extensions/api/tabs/tabs_api.h"
@@ -42,7 +46,7 @@
 #include "extensions/common/test_util.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
-#include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
@@ -1608,15 +1612,13 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsZoomTest, ZoomSettings) {
   // load without causing an error page load), (2) have different domains, and
   // (3) are zoomable by the extension API (this last condition rules out
   // chrome:// urls). We achieve this by noting that about:blank meets these
-  // requirements, allowing us to spin up a spawned http server on localhost to
-  // get the other domain.
-  net::SpawnedTestServer http_server(
-      net::SpawnedTestServer::TYPE_HTTP,
-      net::SpawnedTestServer::kLocalhost,
-      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  // requirements, allowing us to spin up an embedded http server on localhost
+  // to get the other domain.
+  net::EmbeddedTestServer http_server;
+  http_server.ServeFilesFromSourceDirectory("chrome/test/data");
   ASSERT_TRUE(http_server.Start());
 
-  GURL url_A = http_server.GetURL("files/simple.html");
+  GURL url_A = http_server.GetURL("/simple.html");
   GURL url_B("about:blank");
 
   // Tabs A1 and A2 are navigated to the same origin, while B is navigated
@@ -1675,13 +1677,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionTabsZoomTest, ZoomSettings) {
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionTabsZoomTest, PerTabResetsOnNavigation) {
-  net::SpawnedTestServer http_server(
-      net::SpawnedTestServer::TYPE_HTTP,
-      net::SpawnedTestServer::kLocalhost,
-      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  net::EmbeddedTestServer http_server;
+  http_server.ServeFilesFromSourceDirectory("chrome/test/data");
   ASSERT_TRUE(http_server.Start());
 
-  GURL url_A = http_server.GetURL("files/simple.html");
+  GURL url_A = http_server.GetURL("/simple.html");
   GURL url_B("about:blank");
 
   content::WebContents* web_contents = OpenUrlAndWaitForLoad(url_A);

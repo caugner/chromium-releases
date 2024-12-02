@@ -4,13 +4,18 @@
 
 #include "content/browser/renderer_host/render_widget_host_view_aura.h"
 
-#include "base/basictypes.h"
+#include <stddef.h>
+#include <stdint.h>
+#include <utility>
+
 #include "base/command_line.h"
+#include "base/macros.h"
 #include "base/memory/shared_memory.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/simple_test_tick_clock.h"
+#include "build/build_config.h"
 #include "cc/output/begin_frame_args.h"
 #include "cc/output/compositor_frame.h"
 #include "cc/output/compositor_frame_metadata.h"
@@ -21,6 +26,7 @@
 #include "content/browser/compositor/resize_lock.h"
 #include "content/browser/compositor/test/no_transport_image_transport_factory.h"
 #include "content/browser/frame_host/render_widget_host_view_guest.h"
+#include "content/browser/gpu/compositor_util.h"
 #include "content/browser/renderer_host/input/input_router.h"
 #include "content/browser/renderer_host/input/web_input_event_util.h"
 #include "content/browser/renderer_host/overscroll_controller.h"
@@ -192,12 +198,14 @@ class TestWindowObserver : public aura::WindowObserver {
 class FakeFrameSubscriber : public RenderWidgetHostViewFrameSubscriber {
  public:
   FakeFrameSubscriber(gfx::Size size, base::Callback<void(bool)> callback)
-      : size_(size), callback_(callback) {}
+      : size_(size), callback_(callback), should_capture_(true) {}
 
   bool ShouldCaptureFrame(const gfx::Rect& damage_rect,
                           base::TimeTicks present_time,
                           scoped_refptr<media::VideoFrame>* storage,
                           DeliverFrameCallback* callback) override {
+    if (!should_capture_)
+      return false;
     last_present_time_ = present_time;
     *storage = media::VideoFrame::CreateFrame(media::PIXEL_FORMAT_YV12, size_,
                                               gfx::Rect(size_), size_,
@@ -207,6 +215,10 @@ class FakeFrameSubscriber : public RenderWidgetHostViewFrameSubscriber {
   }
 
   base::TimeTicks last_present_time() const { return last_present_time_; }
+
+  void set_should_capture(bool should_capture) {
+    should_capture_ = should_capture;
+  }
 
   static void CallbackMethod(base::Callback<void(bool)> callback,
                              base::TimeTicks present_time,
@@ -219,6 +231,7 @@ class FakeFrameSubscriber : public RenderWidgetHostViewFrameSubscriber {
   gfx::Size size_;
   base::Callback<void(bool)> callback_;
   base::TimeTicks last_present_time_;
+  bool should_capture_;
 };
 
 class FakeWindowEventDispatcher : public aura::WindowEventDispatcher {
@@ -227,7 +240,7 @@ class FakeWindowEventDispatcher : public aura::WindowEventDispatcher {
       : WindowEventDispatcher(host),
         processed_touch_event_count_(0) {}
 
-  void ProcessedTouchEvent(uint32 unique_event_id,
+  void ProcessedTouchEvent(uint32_t unique_event_id,
                            aura::Window* window,
                            ui::EventResult result) override {
     WindowEventDispatcher::ProcessedTouchEvent(unique_event_id, window, result);
@@ -254,7 +267,7 @@ class FakeRenderWidgetHostViewAura : public RenderWidgetHostViewAura {
   void UseFakeDispatcher() {
     dispatcher_ = new FakeWindowEventDispatcher(window()->GetHost());
     scoped_ptr<aura::WindowEventDispatcher> dispatcher(dispatcher_);
-    aura::test::SetHostDispatcher(window()->GetHost(), dispatcher.Pass());
+    aura::test::SetHostDispatcher(window()->GetHost(), std::move(dispatcher));
   }
 
   ~FakeRenderWidgetHostViewAura() override {}
@@ -274,7 +287,7 @@ class FakeRenderWidgetHostViewAura : public RenderWidgetHostViewAura {
   }
 
   void InterceptCopyOfOutput(scoped_ptr<cc::CopyOutputRequest> request) {
-    last_copy_request_ = request.Pass();
+    last_copy_request_ = std::move(request);
     if (last_copy_request_->has_texture_mailbox()) {
       // Give the resulting texture a size.
       GLHelper* gl_helper = ImageTransportFactory::GetInstance()->GetGLHelper();
@@ -388,7 +401,7 @@ class RenderWidgetHostViewAuraTest : public testing::Test {
 
     sink_ = &process_host_->sink();
 
-    int32 routing_id = process_host_->GetNextRoutingID();
+    int32_t routing_id = process_host_->GetNextRoutingID();
     parent_host_ =
         new RenderWidgetHostImpl(&delegate_, process_host_, routing_id, false);
     parent_view_ = new RenderWidgetHostViewAura(parent_host_,
@@ -408,11 +421,19 @@ class RenderWidgetHostViewAuraTest : public testing::Test {
   void TearDownEnvironment() {
     sink_ = NULL;
     process_host_ = NULL;
-    if (view_)
+    if (view_) {
+      // For guest-views, |view_| is not the view used by |widget_host_|.
+      if (!is_guest_view_hack_) {
+        EXPECT_EQ(view_, widget_host_->GetView());
+      }
       view_->Destroy();
+      if (!is_guest_view_hack_) {
+        EXPECT_EQ(nullptr, widget_host_->GetView());
+      }
+    }
 
     if (widget_host_uses_shutdown_to_destroy_)
-      widget_host_->Shutdown();
+      widget_host_->ShutdownAndDestroyWidget(true);
     else
       delete widget_host_;
 
@@ -458,7 +479,7 @@ class RenderWidgetHostViewAuraTest : public testing::Test {
 
   void SendTouchEventACK(WebInputEvent::Type type,
                          InputEventAckState ack_result,
-                         uint32 event_id) {
+                         uint32_t event_id) {
     DCHECK(WebInputEvent::isTouchEventType(type));
     InputEventAck ack(type, ack_result, event_id);
     InputHostMsg_HandleInputEvent_ACK response(0, ack);
@@ -601,8 +622,8 @@ class RenderWidgetHostViewAuraOverscrollTest
   }
 
   void SimulateWheelEvent(float dX, float dY, int modifiers, bool precise) {
-    widget_host_->ForwardWheelEvent(
-        SyntheticWebMouseWheelEventBuilder::Build(dX, dY, modifiers, precise));
+    widget_host_->ForwardWheelEvent(SyntheticWebMouseWheelEventBuilder::Build(
+        0, 0, dX, dY, modifiers, precise));
   }
 
   void SimulateWheelEventWithLatencyInfo(float dX,
@@ -611,7 +632,8 @@ class RenderWidgetHostViewAuraOverscrollTest
                                          bool precise,
                                          const ui::LatencyInfo& ui_latency) {
     widget_host_->ForwardWheelEventWithLatencyInfo(
-        SyntheticWebMouseWheelEventBuilder::Build(dX, dY, modifiers, precise),
+        SyntheticWebMouseWheelEventBuilder::Build(0, 0, dX, dY, modifiers,
+                                                  precise),
         ui_latency);
   }
 
@@ -718,8 +740,8 @@ class RenderWidgetHostViewAuraOverscrollTest
     return overscroll_delegate_.get();
   }
 
-  uint32 SendTouchEvent() {
-    uint32 touch_event_id = touch_event_.uniqueTouchEventId;
+  uint32_t SendTouchEvent() {
+    uint32_t touch_event_id = touch_event_.uniqueTouchEventId;
     widget_host_->ForwardTouchEventWithLatencyInfo(touch_event_,
                                                    ui::LatencyInfo());
     touch_event_.ResetPoints();
@@ -758,6 +780,12 @@ class RenderWidgetHostViewAuraShutdownTest
  private:
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewAuraShutdownTest);
 };
+
+// Checks that RenderWidgetHostViewAura can be destroyed before it is properly
+// initialized.
+TEST_F(RenderWidgetHostViewAuraTest, DestructionBeforeProperInitialization) {
+  // Terminate the test without initializing |view_|.
+}
 
 // Checks that a fullscreen view has the correct show-state and receives the
 // focus.
@@ -1504,8 +1532,8 @@ scoped_ptr<cc::CompositorFrame> MakeDelegatedFrame(float scale_factor,
   scoped_ptr<cc::RenderPass> pass = cc::RenderPass::Create();
   pass->SetNew(
       cc::RenderPassId(1, 1), gfx::Rect(size), damage, gfx::Transform());
-  frame->delegated_frame_data->render_pass_list.push_back(pass.Pass());
-  return frame.Pass();
+  frame->delegated_frame_data->render_pass_list.push_back(std::move(pass));
+  return frame;
 }
 
 // Resizing in fullscreen mode should send the up-to-date screen info.
@@ -1704,7 +1732,7 @@ TEST_F(RenderWidgetHostViewAuraTest, Resize) {
       root_window->GetHost()->compositor());
 
   bool has_resize = false;
-  for (uint32 i = 0; i < sink_->message_count(); ++i) {
+  for (uint32_t i = 0; i < sink_->message_count(); ++i) {
     const IPC::Message* msg = sink_->GetMessageAt(i);
     switch (msg->type()) {
       case InputMsg_HandleInputEvent::ID: {
@@ -1891,7 +1919,7 @@ TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFrames) {
 
   // Create a bunch of renderers.
   for (size_t i = 0; i < renderer_count; ++i) {
-    int32 routing_id = process_host_->GetNextRoutingID();
+    int32_t routing_id = process_host_->GetNextRoutingID();
     hosts[i] =
         new RenderWidgetHostImpl(&delegate_, process_host_, routing_id, false);
     hosts[i]->Init();
@@ -2055,7 +2083,7 @@ TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFramesWithLocking) {
 
   // Create a bunch of renderers.
   for (size_t i = 0; i < renderer_count; ++i) {
-    int32 routing_id = process_host_->GetNextRoutingID();
+    int32_t routing_id = process_host_->GetNextRoutingID();
     hosts[i] =
         new RenderWidgetHostImpl(&delegate_, process_host_, routing_id, false);
     hosts[i]->Init();
@@ -2124,7 +2152,7 @@ TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFramesWithMemoryPressure) {
 
   // Create a bunch of renderers.
   for (size_t i = 0; i < renderer_count; ++i) {
-    int32 routing_id = process_host_->GetNextRoutingID();
+    int32_t routing_id = process_host_->GetNextRoutingID();
     hosts[i] =
         new RenderWidgetHostImpl(&delegate_, process_host_, routing_id, false);
     hosts[i]->Init();
@@ -2225,7 +2253,10 @@ class RenderWidgetHostViewAuraCopyRequestTest
   void RunLoopUntilCallback() {
     base::RunLoop run_loop;
     quit_closure_ = run_loop.QuitClosure();
+    // Temporarily ignore real draw requests.
+    frame_subscriber_->set_should_capture(false);
     run_loop.Run();
+    frame_subscriber_->set_should_capture(true);
   }
 
   void InitializeView() {
@@ -2257,12 +2288,16 @@ class RenderWidgetHostViewAuraCopyRequestTest
   void OnSwapCompositorFrame() {
     view_->OnSwapCompositorFrame(
         1, MakeDelegatedFrame(1.f, view_rect_.size(), view_rect_));
+    cc::SurfaceId surface_id =
+        view_->GetDelegatedFrameHost()->SurfaceIdForTesting();
+    if (!surface_id.is_null())
+      view_->GetDelegatedFrameHost()->WillDrawSurface(surface_id, view_rect_);
     ASSERT_TRUE(view_->last_copy_request_);
   }
 
   void ReleaseSwappedFrame() {
     scoped_ptr<cc::CopyOutputRequest> request =
-        view_->last_copy_request_.Pass();
+        std::move(view_->last_copy_request_);
     request->SendTextureResult(view_rect_.size(), request->texture_mailbox(),
                                scoped_ptr<cc::SingleReleaseCallback>());
     RunLoopUntilCallback();
@@ -2374,7 +2409,8 @@ TEST_F(RenderWidgetHostViewAuraCopyRequestTest, DestroyedAfterCopyRequest) {
 
   OnSwapCompositorFrame();
   EXPECT_EQ(1, callback_count_);
-  scoped_ptr<cc::CopyOutputRequest> request = view_->last_copy_request_.Pass();
+  scoped_ptr<cc::CopyOutputRequest> request =
+      std::move(view_->last_copy_request_);
 
   // Destroy the RenderWidgetHostViewAura and ImageTransportFactory.
   TearDownEnvironment();
@@ -2986,13 +3022,13 @@ TEST_F(RenderWidgetHostViewAuraOverscrollTest, OverscrollWithTouchEvents) {
 
   // The test sends an intermingled sequence of touch and gesture events.
   PressTouchPoint(0, 1);
-  uint32 touch_press_event_id1 = SendTouchEvent();
+  uint32_t touch_press_event_id1 = SendTouchEvent();
   SendTouchEventACK(WebInputEvent::TouchStart,
                     INPUT_EVENT_ACK_STATE_NOT_CONSUMED, touch_press_event_id1);
   EXPECT_EQ(1U, GetSentMessageCountAndResetSink());
 
   MoveTouchPoint(0, 20, 5);
-  uint32 touch_move_event_id1 = SendTouchEvent();
+  uint32_t touch_move_event_id1 = SendTouchEvent();
   SendTouchEventACK(WebInputEvent::TouchMove,
                     INPUT_EVENT_ACK_STATE_NOT_CONSUMED, touch_move_event_id1);
   EXPECT_EQ(1U, GetSentMessageCountAndResetSink());
@@ -3456,7 +3492,7 @@ TEST_F(RenderWidgetHostViewAuraTest, KeyEvent) {
   view_->InitAsChild(NULL);
   view_->Show();
 
-  ui::KeyEvent key_event(ui::ET_KEY_PRESSED, ui::VKEY_A, ui::DomCode::KEY_A,
+  ui::KeyEvent key_event(ui::ET_KEY_PRESSED, ui::VKEY_A, ui::DomCode::US_A,
                          ui::EF_NONE);
   view_->OnKeyEvent(&key_event);
 

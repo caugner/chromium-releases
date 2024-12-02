@@ -4,12 +4,15 @@
 
 #include "content/browser/utility_process_host_impl.h"
 
+#include <utility>
+
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
+#include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/process/process_handle.h"
 #include "base/run_loop.h"
@@ -17,6 +20,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
+#include "build/build_config.h"
 #include "content/browser/browser_child_process_host_impl.h"
 #include "content/browser/mojo/mojo_application_host.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
@@ -88,7 +92,7 @@ class UtilitySandboxedProcessLauncherDelegate
     return !no_sandbox_ && exposed_dir_.empty();
   }
   base::EnvironmentMap GetEnvironment() override { return env_; }
-  base::ScopedFD TakeIpcFd() override { return ipc_fd_.Pass(); }
+  base::ScopedFD TakeIpcFd() override { return std::move(ipc_fd_); }
 #endif  // OS_WIN
 
   SandboxType GetSandboxType() override {
@@ -126,7 +130,6 @@ UtilityProcessHostImpl::UtilityProcessHostImpl(
     : client_(client),
       client_task_runner_(client_task_runner),
       is_batch_mode_(false),
-      is_mdns_enabled_(false),
       no_sandbox_(false),
       run_elevated_(false),
 #if defined(OS_LINUX)
@@ -171,10 +174,6 @@ void UtilityProcessHostImpl::EndBatchMode()  {
 
 void UtilityProcessHostImpl::SetExposedDir(const base::FilePath& dir) {
   exposed_dir_ = dir;
-}
-
-void UtilityProcessHostImpl::EnableMDns() {
-  is_mdns_enabled_ = true;
 }
 
 void UtilityProcessHostImpl::DisableSandbox() {
@@ -287,6 +286,11 @@ bool UtilityProcessHostImpl::StartProcess() {
     std::string locale = GetContentClient()->browser()->GetApplicationLocale();
     cmd_line->AppendSwitchASCII(switches::kLang, locale);
 
+#if defined(OS_WIN)
+    if (GetContentClient()->browser()->ShouldUseWindowsPrefetchArgument())
+      cmd_line->AppendArg(switches::kPrefetchArgumentOther);
+#endif  // defined(OS_WIN)
+
     if (no_sandbox_)
       cmd_line->AppendSwitch(switches::kNoSandbox);
 
@@ -313,9 +317,6 @@ bool UtilityProcessHostImpl::StartProcess() {
       cmd_line->AppendSwitchPath(switches::kUtilityProcessAllowedDir,
                                  exposed_dir_);
     }
-
-    if (is_mdns_enabled_)
-      cmd_line->AppendSwitch(switches::kUtilityProcessEnableMDns);
 
 #if defined(OS_WIN)
     // Let the utility process know if it is intended to be elevated.

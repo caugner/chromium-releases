@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "web/tests/FrameTestHelpers.h"
 
 #include "platform/testing/URLTestHelpers.h"
@@ -40,11 +39,12 @@
 #include "public/platform/WebURLRequest.h"
 #include "public/platform/WebURLResponse.h"
 #include "public/platform/WebUnitTestSupport.h"
-#include "public/web/WebRemoteFrame.h"
+#include "public/web/WebFrameWidget.h"
 #include "public/web/WebSettings.h"
 #include "public/web/WebTreeScopeType.h"
 #include "public/web/WebViewClient.h"
 #include "web/WebLocalFrameImpl.h"
+#include "web/WebRemoteFrameImpl.h"
 #include "wtf/StdLibExtras.h"
 
 namespace blink {
@@ -85,7 +85,7 @@ public:
         if (m_client->isLoading())
             Platform::current()->currentThread()->taskRunner()->postTask(BLINK_FROM_HERE, new ServeAsyncRequestsTask(m_client));
         else
-            Platform::current()->unitTestSupport()->exitRunLoop();
+            testing::exitRunLoop();
     }
 
 private:
@@ -95,7 +95,7 @@ private:
 void pumpPendingRequests(WebFrame* frame)
 {
     Platform::current()->currentThread()->taskRunner()->postTask(BLINK_FROM_HERE, new ServeAsyncRequestsTask(testClientForFrame(frame)));
-    Platform::current()->unitTestSupport()->enterRunLoop();
+    testing::enterRunLoop();
 }
 
 class LoadTask : public WebTaskRunner::Task {
@@ -230,7 +230,8 @@ void pumpPendingRequestsDoNotUse(WebFrame* frame)
 }
 
 WebViewHelper::WebViewHelper(SettingOverrider* settingOverrider)
-    : m_webView(0)
+    : m_webView(nullptr)
+    , m_webViewWidget(nullptr)
     , m_settingOverrider(settingOverrider)
 {
 }
@@ -263,9 +264,13 @@ WebViewImpl* WebViewHelper::initialize(bool enableJavascript, TestWebFrameClient
         m_webView->settings()->setDeviceSupportsMouse(false);
     if (m_settingOverrider)
         m_settingOverrider->overrideSettings(m_webView->settings());
-
+    m_webView->setDeviceScaleFactor(webViewClient->screenInfo().deviceScaleFactor);
     m_webView->setDefaultPageScaleLimits(1, 4);
-    m_webView->setMainFrame(WebLocalFrameImpl::create(WebTreeScopeType::Document, webFrameClient));
+    WebLocalFrame* frame = WebLocalFrameImpl::create(WebTreeScopeType::Document, webFrameClient);
+    m_webView->setMainFrame(frame);
+    // TODO(dcheng): The main frame widget currently has a special case.
+    // Eliminate this once WebView is no longer a WebWidget.
+    m_webViewWidget = blink::WebFrameWidget::create(webViewClient, m_webView, frame);
 
     return m_webView;
 }
@@ -281,10 +286,15 @@ WebViewImpl* WebViewHelper::initializeAndLoad(const std::string& url, bool enabl
 
 void WebViewHelper::reset()
 {
+    if (m_webViewWidget) {
+        m_webViewWidget->close();
+        m_webViewWidget = nullptr;
+    }
     if (m_webView) {
         ASSERT(m_webView->mainFrame()->isWebRemoteFrame() || !testClientForFrame(m_webView->mainFrame())->isLoading());
+        m_webView->willCloseLayerTreeView();
         m_webView->close();
-        m_webView = 0;
+        m_webView = nullptr;
     }
 }
 
@@ -333,7 +343,7 @@ void TestWebFrameClient::waitForLoadToComplete()
 }
 
 TestWebRemoteFrameClient::TestWebRemoteFrameClient()
-    : m_frame(WebRemoteFrame::create(WebTreeScopeType::Document, this))
+    : m_frame(WebRemoteFrameImpl::create(WebTreeScopeType::Document, this))
 {
 }
 

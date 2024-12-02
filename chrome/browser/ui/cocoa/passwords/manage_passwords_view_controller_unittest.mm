@@ -5,6 +5,7 @@
 #import "chrome/browser/ui/cocoa/passwords/manage_passwords_view_controller.h"
 
 #include "base/mac/foundation_util.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/cocoa/passwords/base_passwords_controller_test.h"
@@ -14,6 +15,9 @@
 #include "chrome/browser/ui/passwords/manage_passwords_ui_controller_mock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
+
+using testing::Return;
+using testing::ReturnRef;
 
 namespace {
 
@@ -32,11 +36,15 @@ class ManagePasswordsBubbleManageViewControllerTest
   ManagePasswordsBubbleManageViewController* controller() {
     if (!controller_) {
       controller_.reset([[ManagePasswordsBubbleManageViewController alloc]
-          initWithModel:model()
+          initWithModel:GetModelAndCreateIfNull()
                delegate:delegate()]);
       [controller_ loadView];
     }
     return controller_.get();
+  }
+
+  ManagePasswordsBubbleModel::DisplayReason GetDisplayReason() const override {
+    return ManagePasswordsBubbleModel::USER_ACTION;
   }
 
  private:
@@ -47,20 +55,23 @@ class ManagePasswordsBubbleManageViewControllerTest
 
 TEST_F(ManagePasswordsBubbleManageViewControllerTest,
        ShouldDismissWhenDoneClicked) {
+  SetUpManageState();
   [controller().doneButton performClick:nil];
   EXPECT_TRUE([delegate() dismissed]);
 }
 
 TEST_F(ManagePasswordsBubbleManageViewControllerTest,
        ShouldOpenPasswordsWhenManageClicked) {
+  SetUpManageState();
+  EXPECT_CALL(*ui_controller(), NavigateToPasswordManagerSettingsPage());
   [controller().manageButton performClick:nil];
   EXPECT_TRUE([delegate() dismissed]);
-  EXPECT_TRUE(ui_controller()->navigated_to_settings_page());
 }
 
 TEST_F(ManagePasswordsBubbleManageViewControllerTest,
        ShouldShowNoPasswordsWhenNoPasswordsExistForSite) {
-  EXPECT_TRUE(model()->local_credentials().empty());
+  SetUpManageState();
+  EXPECT_TRUE(GetModelAndCreateIfNull()->local_credentials().empty());
   EXPECT_TRUE([controller() noPasswordsView]);
   EXPECT_FALSE([controller() passwordsListController]);
 }
@@ -68,23 +79,26 @@ TEST_F(ManagePasswordsBubbleManageViewControllerTest,
 TEST_F(ManagePasswordsBubbleManageViewControllerTest,
        ShouldShowAllPasswordItemsWhenPasswordsExistForSite) {
   // Add a few password entries.
-  autofill::PasswordFormMap map;
-  scoped_ptr<autofill::PasswordForm> form1(new autofill::PasswordForm);
-  form1->username_value = base::ASCIIToUTF16("username1");
-  form1->password_value = base::ASCIIToUTF16("password1");
-  map.insert(base::ASCIIToUTF16("username1"), form1.Pass());
+  autofill::PasswordForm form1;
+  form1.username_value = base::ASCIIToUTF16("username1");
+  form1.password_value = base::ASCIIToUTF16("password1");
 
-  scoped_ptr<autofill::PasswordForm> form2(new autofill::PasswordForm);
-  form2->username_value = base::ASCIIToUTF16("username2");
-  form2->password_value = base::ASCIIToUTF16("password2");
-  map.insert(base::ASCIIToUTF16("username2"), form2.Pass());
+  autofill::PasswordForm form2;
+  form2.username_value = base::ASCIIToUTF16("username2");
+  form2.password_value = base::ASCIIToUTF16("password2");
 
   // Add the entries to the model.
-  ui_controller()->OnPasswordAutofilled(map, map.begin()->second->origin);
-  model()->set_state(password_manager::ui::MANAGE_STATE);
+  std::vector<const autofill::PasswordForm*> forms;
+  forms.push_back(&form1);
+  forms.push_back(&form2);
+  EXPECT_CALL(*ui_controller(), GetCurrentForms()).WillOnce(ReturnRef(forms));
+  GURL origin;
+  EXPECT_CALL(*ui_controller(), GetOrigin()).WillOnce(ReturnRef(origin));
+  EXPECT_CALL(*ui_controller(), GetState())
+      .WillOnce(Return(password_manager::ui::MANAGE_STATE));
 
   // Check the view state.
-  EXPECT_FALSE(model()->local_credentials().empty());
+  EXPECT_FALSE(GetModelAndCreateIfNull()->local_credentials().empty());
   ASSERT_TRUE([controller() passwordsListController]);
   EXPECT_FALSE([controller() noPasswordsView]);
   NSArray* items = [[controller() passwordsListController] itemViews];

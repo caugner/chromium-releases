@@ -9,6 +9,7 @@
         {
           "position": [8, 8],
           "bounds": [200, 200],
+          "shouldFlattenTransform": false,
           "drawsContent": true,
           "children": [
             {
@@ -62,6 +63,7 @@
               ]
             },
             {
+              "bounds": [200, 200],
               "children": [
                 {
                   "position": [0, 185],

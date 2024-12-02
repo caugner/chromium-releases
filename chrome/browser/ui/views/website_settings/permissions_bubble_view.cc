@@ -4,6 +4,9 @@
 
 #include "chrome/browser/ui/views/website_settings/permissions_bubble_view.h"
 
+#include <stddef.h>
+
+#include "base/macros.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/profiles/profile.h"
@@ -19,6 +22,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/url_formatter/elide_url.h"
+#include "grit/components_strings.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/combobox_model.h"

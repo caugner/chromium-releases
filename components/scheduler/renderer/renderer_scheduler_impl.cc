@@ -12,6 +12,7 @@
 #include "cc/output/begin_frame_args.h"
 #include "components/scheduler/base/task_queue_impl.h"
 #include "components/scheduler/base/task_queue_selector.h"
+#include "components/scheduler/base/virtual_time_domain.h"
 #include "components/scheduler/child/scheduler_tqm_delegate.h"
 #include "components/scheduler/renderer/webthread_impl_for_renderer_scheduler.h"
 
@@ -41,6 +42,7 @@ RendererSchedulerImpl::RendererSchedulerImpl(
                    TRACE_DISABLED_BY_DEFAULT("renderer.scheduler"),
                    "RendererSchedulerIdlePeriod",
                    base::TimeDelta()),
+      throttling_helper_(this, "renderer.scheduler"),
       render_widget_scheduler_signals_(this),
       control_task_runner_(helper_.ControlTaskRunner()),
       compositor_task_runner_(
@@ -124,7 +126,9 @@ RendererSchedulerImpl::MainThreadOnly::MainThreadOnly(
       timer_tasks_seem_expensive(false),
       touchstart_expected_soon(false),
       have_seen_a_begin_main_frame(false),
-      has_visible_render_widget_with_touch_handler(false) {}
+      has_visible_render_widget_with_touch_handler(false),
+      begin_frame_not_expected_soon(false),
+      expensive_task_blocking_allowed(true) {}
 
 RendererSchedulerImpl::MainThreadOnly::~MainThreadOnly() {}
 
@@ -148,10 +152,11 @@ void RendererSchedulerImpl::Shutdown() {
 }
 
 scoped_ptr<blink::WebThread> RendererSchedulerImpl::CreateMainThread() {
-  return make_scoped_ptr(new WebThreadImplForRendererScheduler(this)).Pass();
+  return make_scoped_ptr(new WebThreadImplForRendererScheduler(this));
 }
 
-scoped_refptr<TaskQueue> RendererSchedulerImpl::DefaultTaskRunner() {
+scoped_refptr<base::SingleThreadTaskRunner>
+RendererSchedulerImpl::DefaultTaskRunner() {
   return helper_.DefaultTaskRunner();
 }
 
@@ -175,6 +180,11 @@ RendererSchedulerImpl::LoadingTaskRunner() {
 scoped_refptr<TaskQueue> RendererSchedulerImpl::TimerTaskRunner() {
   helper_.CheckOnValidThread();
   return default_timer_task_runner_;
+}
+
+scoped_refptr<TaskQueue> RendererSchedulerImpl::ControlTaskRunner() {
+  helper_.CheckOnValidThread();
+  return helper_.ControlTaskRunner();
 }
 
 scoped_refptr<TaskQueue> RendererSchedulerImpl::NewLoadingTaskRunner(
@@ -245,6 +255,7 @@ void RendererSchedulerImpl::WillBeginFrame(const cc::BeginFrameArgs& args) {
   EndIdlePeriod();
   MainThreadOnly().estimated_next_frame_begin = args.frame_time + args.interval;
   MainThreadOnly().have_seen_a_begin_main_frame = true;
+  MainThreadOnly().begin_frame_not_expected_soon = false;
   MainThreadOnly().compositor_frame_interval = args.interval;
   {
     base::AutoLock lock(any_thread_lock_);
@@ -278,6 +289,7 @@ void RendererSchedulerImpl::BeginFrameNotExpectedSoon() {
   if (helper_.IsShutdown())
     return;
 
+  MainThreadOnly().begin_frame_not_expected_soon = true;
   idle_helper_.EnableLongIdlePeriod();
   {
     base::AutoLock lock(any_thread_lock_);
@@ -459,8 +471,8 @@ void RendererSchedulerImpl::UpdateForInputEventOnCompositorThread(
         }
         break;
 
-      case blink::WebInputEvent::GesturePinchBegin:
-      case blink::WebInputEvent::GestureScrollBegin:
+      case blink::WebInputEvent::GesturePinchUpdate:
+      case blink::WebInputEvent::GestureScrollUpdate:
         AnyThread().last_gesture_was_compositor_driven =
             input_event_state == InputEventState::EVENT_CONSUMED_BY_COMPOSITOR;
         AnyThread().awaiting_touch_start_response = false;
@@ -537,7 +549,7 @@ bool RendererSchedulerImpl::ShouldYieldForHighPriorityWork() {
 
     case UseCase::MAIN_THREAD_GESTURE:
     case UseCase::SYNCHRONIZED_GESTURE:
-      return !compositor_task_runner_->IsQueueEmpty() ||
+      return compositor_task_runner_->HasPendingImmediateWork() ||
              MainThreadOnly().touchstart_expected_soon;
 
     case UseCase::TOUCHSTART:
@@ -611,15 +623,20 @@ void RendererSchedulerImpl::UpdatePolicyLocked(UpdateType update_type) {
           MainThreadOnly().compositor_frame_interval);
   MainThreadOnly().expected_idle_duration = expected_idle_duration;
 
-  bool loading_tasks_seem_expensive =
-      MainThreadOnly().loading_task_cost_estimator.expected_task_duration() >
-      expected_idle_duration;
-  MainThreadOnly().loading_tasks_seem_expensive = loading_tasks_seem_expensive;
-
-  bool timer_tasks_seem_expensive =
-      MainThreadOnly().timer_task_cost_estimator.expected_task_duration() >
-      expected_idle_duration;
+  bool loading_tasks_seem_expensive = false;
+  bool timer_tasks_seem_expensive = false;
+  // Only deem tasks to be exensive (which may cause them to be preemptively
+  // blocked) if we are expecting frames.
+  if (!MainThreadOnly().begin_frame_not_expected_soon) {
+    loading_tasks_seem_expensive =
+        MainThreadOnly().loading_task_cost_estimator.expected_task_duration() >
+        expected_idle_duration;
+    timer_tasks_seem_expensive =
+        MainThreadOnly().timer_task_cost_estimator.expected_task_duration() >
+        expected_idle_duration;
+  }
   MainThreadOnly().timer_tasks_seem_expensive = timer_tasks_seem_expensive;
+  MainThreadOnly().loading_tasks_seem_expensive = loading_tasks_seem_expensive;
 
   // The |new_policy_duration| is the minimum of |expected_use_case_duration|
   // and |touchstart_expected_flag_valid_for_duration| unless one is zero in
@@ -703,6 +720,11 @@ void RendererSchedulerImpl::UpdatePolicyLocked(UpdateType update_type) {
       NOTREACHED();
   }
 
+  if (!MainThreadOnly().expensive_task_blocking_allowed) {
+    block_expensive_loading_tasks = false;
+    block_expensive_timer_tasks = false;
+  }
+
   // Don't block expensive tasks unless we have actually seen something.
   if (!MainThreadOnly().have_seen_a_begin_main_frame) {
     block_expensive_loading_tasks = false;
@@ -714,10 +736,6 @@ void RendererSchedulerImpl::UpdatePolicyLocked(UpdateType update_type) {
     block_expensive_loading_tasks = false;
     block_expensive_timer_tasks = false;
   }
-
-  // Expensive task blocking is currently disabled (crbug.com/574343).
-  block_expensive_loading_tasks = false;
-  block_expensive_timer_tasks = false;
 
   // Only block expensive tasks if we have seen a touch start, i.e. don't block
   // expensive timers on desktop because it's causing too many problems with
@@ -920,6 +938,8 @@ RendererSchedulerImpl::AsValueLocked(base::TimeTicks optional_now) const {
                     MainThreadOnly().loading_tasks_seem_expensive);
   state->SetBoolean("timer_tasks_seem_expensive",
                     MainThreadOnly().timer_tasks_seem_expensive);
+  state->SetBoolean("begin_frame_not_expected_soon",
+                    MainThreadOnly().begin_frame_not_expected_soon);
   state->SetBoolean("touchstart_expected_soon",
                     MainThreadOnly().touchstart_expected_soon);
   state->SetString("idle_period_state",
@@ -1060,6 +1080,22 @@ double RendererSchedulerImpl::CurrentTimeSeconds() const {
 double RendererSchedulerImpl::MonotonicallyIncreasingTimeSeconds() const {
   return helper_.scheduler_tqm_delegate()->NowTicks().ToInternalValue() /
          static_cast<double>(base::Time::kMicrosecondsPerSecond);
+}
+
+void RendererSchedulerImpl::RegisterTimeDomain(TimeDomain* time_domain) {
+  helper_.RegisterTimeDomain(time_domain);
+}
+
+void RendererSchedulerImpl::UnregisterTimeDomain(TimeDomain* time_domain) {
+  helper_.UnregisterTimeDomain(time_domain);
+}
+
+void RendererSchedulerImpl::SetExpensiveTaskBlockingAllowed(bool allowed) {
+  MainThreadOnly().expensive_task_blocking_allowed = allowed;
+}
+
+base::TickClock* RendererSchedulerImpl::tick_clock() const {
+  return helper_.scheduler_tqm_delegate().get();
 }
 
 }  // namespace scheduler

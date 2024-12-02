@@ -80,7 +80,6 @@ import org.chromium.chrome.browser.pageinfo.WebsiteSettingsPopup;
 import org.chromium.chrome.browser.preferences.privacy.PrivacyPreferencesManager;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
-import org.chromium.chrome.browser.ssl.ConnectionSecurityLevel;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.toolbar.ActionModeController;
 import org.chromium.chrome.browser.toolbar.ActionModeController.ActionBarDelegate;
@@ -92,6 +91,7 @@ import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.KeyNavigationUtil;
 import org.chromium.chrome.browser.util.ViewUtils;
 import org.chromium.chrome.browser.widget.TintedImageButton;
+import org.chromium.components.security_state.ConnectionSecurityLevel;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.accessibility.BrowserAccessibilityManager;
 import org.chromium.content_public.browser.LoadUrlParams;
@@ -128,9 +128,9 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
     // response (as opposed to treating it like a typed string in the Omnibox).
     private static final float VOICE_SEARCH_CONFIDENCE_NAVIGATE_THRESHOLD = 0.9f;
 
-    private static final int CONTENT_OVERLAY_COLOR = Color.argb(166, 0, 0, 0);
-    private static final int OMNIBOX_RESULTS_BG_COLOR = Color.rgb(245, 245, 246);
-    private static final int OMNIBOX_INCOGNITO_RESULTS_BG_COLOR = Color.rgb(50, 50, 50);
+    private static final int CONTENT_OVERLAY_COLOR = 0xA6000000;
+    private static final int OMNIBOX_RESULTS_BG_COLOR = 0xFFF5F5F6;
+    private static final int OMNIBOX_INCOGNITO_RESULTS_BG_COLOR = 0xFF323232;
 
     /**
      * URI schemes that ContentView can handle.
@@ -205,7 +205,6 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
     private boolean mSuggestionsShown;
     private boolean mUrlHasFocus;
     private boolean mUrlFocusedFromFakebox;
-    private boolean mHasRecordedUrlFocusSource;
 
     // Set to true when the user has started typing new input in the omnibox, set to false
     // when the omnibox loses focus or becomes empty.
@@ -277,7 +276,6 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
             if (mIgnoreURLBarModification) return;
 
             if (!mHasStartedNewOmniboxEditSession && mNativeInitialized) {
-                RecordUserAction.record("MobileFirstEditInOmnibox");
                 mAutocomplete.resetSession();
                 mHasStartedNewOmniboxEditSession = true;
                 mNewOmniboxEditSessionTimestamp = SystemClock.elapsedRealtime();
@@ -952,12 +950,13 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
     public void onUrlFocusChange(boolean hasFocus) {
         mUrlHasFocus = hasFocus;
         mUrlContainer.onUrlFocusChanged(hasFocus);
-        updateFocusSource(hasFocus);
         updateDeleteButtonVisibility();
         Tab currentTab = getCurrentTab();
         if (hasFocus) {
+            if (mNativeInitialized) RecordUserAction.record("FocusLocation");
             mUrlBar.deEmphasizeUrl();
         } else {
+            mUrlFocusedFromFakebox = false;
             hideSuggestions();
 
             // Focus change caused by a close-tab may result in an invalid current tab.
@@ -2388,37 +2387,6 @@ public class LocationBarLayout extends FrameLayout implements OnClickListener,
                     topResultQuery);
         }
         loadUrl(url, PageTransition.TYPED);
-    }
-
-    /**
-     * Tracks how the URL bar was focused (i.e. from the omnibox or the fakebox) and records a UMA
-     * stat for this. Should be called whenever the URL bar gains or loses focus.
-     * @param hasFocus Whether the URL bar now has focus.
-     */
-    private void updateFocusSource(boolean hasFocus) {
-        if (!hasFocus) {
-            mUrlFocusedFromFakebox = false;
-            mHasRecordedUrlFocusSource = false;
-            return;
-        }
-
-        // Record UMA event for how the URL bar was focused.
-        if (mHasRecordedUrlFocusSource) return;
-
-        Tab currentTab = getCurrentTab();
-        if (currentTab == null) return;
-
-        String url = currentTab.getUrl();
-        if (mUrlFocusedFromFakebox) {
-            RecordUserAction.record("MobileFocusedFakeboxOnNtp");
-        } else {
-            if (currentTab.isNativePage() && NewTabPage.isNTPUrl(url)) {
-                RecordUserAction.record("MobileFocusedOmniboxOnNtp");
-            } else {
-                RecordUserAction.record("MobileFocusedOmniboxNotOnNtp");
-            }
-        }
-        mHasRecordedUrlFocusSource = true;
     }
 
     @Override

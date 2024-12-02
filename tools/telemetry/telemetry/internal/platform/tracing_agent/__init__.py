@@ -20,31 +20,49 @@ class TracingAgent(object):
     self._platform_backend = platform_backend
 
   @classmethod
-  def IsSupported(cls, _platform_backend):
+  def IsSupported(cls, platform_backend):
+    del platform_backend  # unused
     return False
 
-  def Start(self, trace_options, category_filter, timeout):
+  def StartAgentTracing(self, config, timeout):
     """ Override to add tracing agent's custom logic to start tracing.
 
     Depending on trace_options and category_filter, the tracing agent may choose
     to start or not start tracing.
 
     Args:
-      trace_options: an instance of tracing_options.TracingOptions that
-        control which core tracing systems should be enabled.
-      category_filter: an instance of
-        tracing_category_filter.TracingCategoryFilter
+      config: tracing_config instance that contains trace_option and
+        category_filter
+        trace_options: an instance of tracing_options.TracingOptions that
+          control which core tracing systems should be enabled.
+        category_filter: an instance of
+          tracing_category_filter.TracingCategoryFilter
       timeout: number of seconds that this tracing agent should try to start
         tracing until time out.
 
     Returns:
-      True if tracing agent started succesfully.
+      True if tracing agent started successfully.
     """
     raise NotImplementedError
 
-  def Stop(self, trace_data_builder):
+  def StopAgentTracing(self, trace_data_builder):
     """ Override to add tracing agent's custom logic to stop tracing.
 
-    Stop() should guarantee tracing is stopped, even if there may be exception.
+    StopAgentTracing() should guarantee tracing is stopped, even if there may
+    be exception.
     """
+    raise NotImplementedError
+
+  def SupportsExplicitClockSync(self):
+    """ Override to indicate support of explicit clock syncing. """
+    return False
+
+  def RecordClockSyncMarker(self, sync_id):
+    """ Override to record clock sync marker.
+
+    Only override if supports explicit clock syncing.
+    Args:
+      sync_id: Unqiue id for sync event.
+    """
+    del sync_id # unused
     raise NotImplementedError

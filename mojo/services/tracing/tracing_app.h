@@ -5,17 +5,19 @@
 #ifndef MOJO_SERVICES_TRACING_TRACING_APP_H_
 #define MOJO_SERVICES_TRACING_TRACING_APP_H_
 
+#include <stdint.h>
+
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
-#include "mojo/application/public/cpp/application_delegate.h"
-#include "mojo/application/public/cpp/interface_factory.h"
 #include "mojo/common/weak_binding_set.h"
 #include "mojo/common/weak_interface_ptr_set.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "mojo/services/tracing/public/interfaces/tracing.mojom.h"
 #include "mojo/services/tracing/trace_data_sink.h"
 #include "mojo/services/tracing/trace_recorder_impl.h"
+#include "mojo/shell/public/cpp/application_delegate.h"
+#include "mojo/shell/public/cpp/interface_factory.h"
 
 namespace tracing {
 
@@ -49,13 +51,13 @@ class TracingApp
   void StopAndFlush() override;
 
   // StartupPerformanceDataCollector implementation.
-  void SetShellProcessCreationTime(int64 time) override;
-  void SetShellMainEntryPointTime(int64 time) override;
-  void SetBrowserMessageLoopStartTicks(int64 ticks) override;
-  void SetBrowserWindowDisplayTicks(int64 ticks) override;
-  void SetBrowserOpenTabsTimeDelta(int64 delta) override;
-  void SetFirstWebContentsMainFrameLoadTicks(int64 ticks) override;
-  void SetFirstVisuallyNonEmptyLayoutTicks(int64 ticks) override;
+  void SetShellProcessCreationTime(int64_t time) override;
+  void SetShellMainEntryPointTime(int64_t time) override;
+  void SetBrowserMessageLoopStartTicks(int64_t ticks) override;
+  void SetBrowserWindowDisplayTicks(int64_t ticks) override;
+  void SetBrowserOpenTabsTimeDelta(int64_t delta) override;
+  void SetFirstWebContentsMainFrameLoadTicks(int64_t ticks) override;
+  void SetFirstVisuallyNonEmptyLayoutTicks(int64_t ticks) override;
   void GetStartupPerformanceTimes(
       const GetStartupPerformanceTimesCallback& callback) override;
 

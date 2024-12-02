@@ -2,9 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stddef.h>
+
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
@@ -12,6 +15,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/histogram_tester.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
@@ -56,7 +60,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "google_apis/gaia/google_service_auth_error.h"
-#include "net/test/spawned_test_server/spawned_test_server.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
@@ -313,7 +317,7 @@ class AutofillDialogControllerTest : public InProcessBrowserTest {
   }
 
   scoped_ptr<AutofillDialogViewTester> GetViewTester() {
-    return AutofillDialogViewTester::For(controller()->view()).Pass();
+    return AutofillDialogViewTester::For(controller()->view());
   }
 
   TestAutofillDialogController* controller() { return controller_; }
@@ -394,9 +398,8 @@ class AutofillDialogControllerTest : public InProcessBrowserTest {
 
   // Loads an html page on a provided server, the causes it to launch rAc.
   // Returns whether rAc succesfully launched.
-  bool RunTestPage(const net::SpawnedTestServer& server) {
-    GURL url = server.GetURL(
-        "files/request_autocomplete/test_page.html");
+  bool RunTestPage(const net::EmbeddedTestServer& server) {
+    GURL url = server.GetURL("/request_autocomplete/test_page.html");
     ui_test_utils::NavigateToURL(browser(), url);
 
     // Pass through the broken SSL interstitial, if any.
@@ -422,10 +425,9 @@ class AutofillDialogControllerTest : public InProcessBrowserTest {
     return !!controller;
   }
 
-  void RunTestPageInIframe(const net::SpawnedTestServer& server) {
+  void RunTestPageInIframe(const net::EmbeddedTestServer& server) {
     InitializeDOMMessageQueue();
-    GURL iframe_url = server.GetURL(
-        "files/request_autocomplete/test_page.html");
+    GURL iframe_url = server.GetURL("/request_autocomplete/test_page.html");
 
     ui_test_utils::NavigateToURL(
         browser(), GURL(std::string("data:text/html,") +
@@ -525,7 +527,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, Submit) {
   AddAutofillProfileToProfile(controller()->profile(),
                               test::GetVerifiedProfile());
   scoped_ptr<AutofillDialogViewTester> view = AutofillDialogViewTester::For(
-      static_cast<TestAutofillDialogController*>(controller())->view());
+      controller()->view());
   view->SetTextContentsOfSuggestionInput(SECTION_CC, ASCIIToUTF16("123"));
   GetViewTester()->SubmitForTesting();
   RunMessageLoop();
@@ -888,8 +890,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, AutocompleteEvent) {
                               test::GetVerifiedProfile());
 
   scoped_ptr<AutofillDialogViewTester> view =
-      AutofillDialogViewTester::For(
-          static_cast<TestAutofillDialogController*>(controller)->view());
+      AutofillDialogViewTester::For(controller->view());
   view->SetTextContentsOfSuggestionInput(SECTION_CC, ASCIIToUTF16("123"));
   view->SubmitForTesting();
   ExpectDomMessage("success");
@@ -910,8 +911,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
                               test::GetVerifiedProfile());
 
   scoped_ptr<AutofillDialogViewTester> view =
-      AutofillDialogViewTester::For(
-          static_cast<TestAutofillDialogController*>(controller)->view());
+      AutofillDialogViewTester::For(controller->view());
   view->SetTextContentsOfSuggestionInput(SECTION_CC, ASCIIToUTF16("123"));
   view->SubmitForTesting();
   ExpectDomMessage("error: invalid");
@@ -934,8 +934,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
   AutofillDialogControllerImpl* controller =
       SetUpHtmlAndInvoke("<input autocomplete='cc-name'>");
   ASSERT_TRUE(controller);
-  AutofillDialogViewTester::For(
-      static_cast<TestAutofillDialogController*>(controller)->view())->
+  AutofillDialogViewTester::For(controller->view())->
           CancelForTesting();
   ExpectDomMessage("error: cancel");
 }
@@ -958,8 +957,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
                                                      &unused));
   ExpectDomMessage("iframe loaded");
 
-  AutofillDialogViewTester::For(
-      static_cast<TestAutofillDialogController*>(controller)->view())->
+  AutofillDialogViewTester::For(controller->view())->
           CancelForTesting();
   ExpectDomMessage("error: cancel");
 }
@@ -987,8 +985,7 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
                               test::GetVerifiedProfile());
 
   scoped_ptr<AutofillDialogViewTester> view =
-      AutofillDialogViewTester::For(
-          static_cast<TestAutofillDialogController*>(controller)->view());
+      AutofillDialogViewTester::For(controller->view());
   view->SetTextContentsOfSuggestionInput(SECTION_CC, ASCIIToUTF16("123"));
   view->SubmitForTesting();
   ExpectDomMessage("success");
@@ -1082,10 +1079,8 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
 
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
                        DoesWorkOnHttpWithFlag) {
-  net::SpawnedTestServer http_server(
-      net::SpawnedTestServer::TYPE_HTTP,
-      net::SpawnedTestServer::kLocalhost,
-      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  net::EmbeddedTestServer http_server;
+  http_server.ServeFilesFromSourceDirectory("chrome/test/data");
   ASSERT_TRUE(http_server.Start());
   EXPECT_TRUE(RunTestPage(http_server));
 }
@@ -1109,30 +1104,24 @@ class AutofillDialogControllerSecurityTest :
 
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerSecurityTest,
                        DoesntWorkOnHttp) {
-  net::SpawnedTestServer http_server(
-      net::SpawnedTestServer::TYPE_HTTP,
-      net::SpawnedTestServer::kLocalhost,
-      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  net::EmbeddedTestServer http_server;
+  http_server.ServeFilesFromSourceDirectory("chrome/test/data");
   ASSERT_TRUE(http_server.Start());
   EXPECT_FALSE(RunTestPage(http_server));
 }
 
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerSecurityTest,
                        DoesWorkOnHttpWithFlags) {
-  net::SpawnedTestServer https_server(
-      net::SpawnedTestServer::TYPE_HTTPS,
-      SSLOptions(SSLOptions::CERT_OK),
-      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  net::EmbeddedTestServer https_server(net::EmbeddedTestServer::TYPE_HTTPS);
+  https_server.ServeFilesFromSourceDirectory("chrome/test/data");
   ASSERT_TRUE(https_server.Start());
   EXPECT_TRUE(RunTestPage(https_server));
 }
 
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerSecurityTest,
                        DISABLED_DoesntWorkOnBrokenHttps) {
-  net::SpawnedTestServer https_server(
-      net::SpawnedTestServer::TYPE_HTTPS,
-      SSLOptions(SSLOptions::CERT_EXPIRED),
-      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  net::EmbeddedTestServer https_server(net::EmbeddedTestServer::TYPE_HTTPS);
+  https_server.ServeFilesFromSourceDirectory("chrome/test/data");
   ASSERT_TRUE(https_server.Start());
   EXPECT_FALSE(RunTestPage(https_server));
 }
@@ -1318,10 +1307,8 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, HideOnNavigate) {
 // Tests that the rAc dialog hides when the main frame is navigated, even if
 // it was invoked from a child frame.
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, HideOnNavigateMainFrame) {
-  net::SpawnedTestServer http_server(
-      net::SpawnedTestServer::TYPE_HTTP,
-      net::SpawnedTestServer::kLocalhost,
-      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  net::EmbeddedTestServer http_server;
+  http_server.ServeFilesFromSourceDirectory("chrome/test/data");
   ASSERT_TRUE(http_server.Start());
   RunTestPageInIframe(http_server);
 
@@ -1333,10 +1320,8 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, HideOnNavigateMainFrame) {
 
 // Tests that the rAc dialog hides when the iframe it's in is navigated.
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, HideOnNavigateIframe) {
-  net::SpawnedTestServer http_server(
-      net::SpawnedTestServer::TYPE_HTTP,
-      net::SpawnedTestServer::kLocalhost,
-      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  net::EmbeddedTestServer http_server;
+  http_server.ServeFilesFromSourceDirectory("chrome/test/data");
   ASSERT_TRUE(http_server.Start());
   RunTestPageInIframe(http_server);
 

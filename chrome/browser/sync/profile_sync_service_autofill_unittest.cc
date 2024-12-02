@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <set>
 #include <string>
 #include <utility>
@@ -14,9 +17,10 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
@@ -35,6 +39,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
+#include "components/autofill/core/browser/country_names.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/webdata/autocomplete_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_change.h"
@@ -162,9 +167,6 @@ class TestSyncClient : public sync_driver::FakeSyncClient {
   sync_driver::SyncService* GetSyncService() override {
     DCHECK(sync_service_);
     return sync_service_;
-  }
-  scoped_refptr<autofill::AutofillWebDataService> GetWebDataService() override {
-    return web_data_service_;
   }
   base::WeakPtr<syncer::SyncableService> GetSyncableServiceForType(
       syncer::ModelType type) override {
@@ -428,7 +430,9 @@ class ProfileSyncServiceAutofillTest
   ProfileSyncServiceAutofillTest()
       : profile_manager_(TestingBrowserProcess::GetGlobal()),
         debug_ptr_factory_(this) {
+    autofill::CountryNames::SetLocaleString("en-US");
   }
+
   ~ProfileSyncServiceAutofillTest() override {}
 
   void SetUp() override {
@@ -529,7 +533,7 @@ class ProfileSyncServiceAutofillTest
 
     sync_service_->RegisterDataTypeController(CreateDataTypeController(type));
     sync_service_->Initialize();
-    base::MessageLoop::current()->Run();
+    base::RunLoop().Run();
 
     // It's possible this test triggered an unrecoverable error, in which case
     // we can't get the sync count.
@@ -583,7 +587,7 @@ class ProfileSyncServiceAutofillTest
       return false;
     }
 
-    int64 child_id = autofill_root.GetFirstChildId();
+    int64_t child_id = autofill_root.GetFirstChildId();
     while (child_id != syncer::kInvalidId) {
       syncer::ReadNode child_node(&trans);
       if (child_node.InitByIdLookup(child_id) != BaseNode::INIT_OK)
@@ -606,7 +610,7 @@ class ProfileSyncServiceAutofillTest
         AutofillProfile p;
         p.set_guid(autofill.profile().guid());
         AutofillProfileSyncableService::OverwriteProfileWithServerData(
-            autofill.profile(), &p, "en-US");
+            autofill.profile(), &p);
         profiles->push_back(p);
       }
       child_id = child_node.GetSuccessorId();
@@ -622,7 +626,7 @@ class ProfileSyncServiceAutofillTest
       return false;
     }
 
-    int64 child_id = autofill_root.GetFirstChildId();
+    int64_t child_id = autofill_root.GetFirstChildId();
     while (child_id != syncer::kInvalidId) {
       syncer::ReadNode child_node(&trans);
       if (child_node.InitByIdLookup(child_id) != BaseNode::INIT_OK)
@@ -632,8 +636,8 @@ class ProfileSyncServiceAutofillTest
           child_node.GetEntitySpecifics().autofill_profile());
         AutofillProfile p;
         p.set_guid(autofill.guid());
-        AutofillProfileSyncableService::OverwriteProfileWithServerData(
-            autofill, &p, "en-US");
+        AutofillProfileSyncableService::OverwriteProfileWithServerData(autofill,
+                                                                       &p);
         profiles->push_back(p);
       child_id = child_node.GetSuccessorId();
     }
@@ -678,12 +682,12 @@ class ProfileSyncServiceAutofillTest
       return new AutofillDataTypeController(
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
-          base::Bind(&base::DoNothing), sync_client_.get());
+          base::Bind(&base::DoNothing), sync_client_.get(), web_data_service_);
     } else {
       return new AutofillProfileDataTypeController(
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
-          base::Bind(&base::DoNothing), sync_client_.get());
+          base::Bind(&base::DoNothing), sync_client_.get(), web_data_service_);
     }
   }
 
@@ -827,15 +831,7 @@ class FakeServerUpdater : public base::RefCountedThreadSafe<FakeServerUpdater> {
     }
   }
 
-  void CreateNewEntryAndWait(const AutofillEntry& entry) {
-    entry_ = entry;
-    ASSERT_FALSE(BrowserThread::CurrentlyOn(BrowserThread::DB));
-    is_finished_.Reset();
-    if (!BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-         base::Bind(&FakeServerUpdater::Update, this))) {
-      NOTREACHED() << "Failed to post task to the db thread.";
-      return;
-    }
+  void WaitForUpdateCompletion() {
     is_finished_.Wait();
   }
 
@@ -1269,8 +1265,7 @@ TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeRemoveProfile) {
   ASSERT_EQ(0U, new_sync_profiles.size());
 }
 
-// http://crbug.com/57884
-TEST_F(ProfileSyncServiceAutofillTest, DISABLED_ServerChangeRace) {
+TEST_F(ProfileSyncServiceAutofillTest, ServerChangeRace) {
   // Once for MergeDataAndStartSyncing() and twice for ProcessSyncChanges(), via
   // LoadAutofillData().
   EXPECT_CALL(autofill_table_, GetAllAutofillEntries(_)).
@@ -1305,7 +1300,12 @@ TEST_F(ProfileSyncServiceAutofillTest, DISABLED_ServerChangeRace) {
 
   // Make another entry to ensure nothing broke afterwards and wait for finish
   // to clean up.
-  updater->CreateNewEntryAndWait(MakeAutofillEntry("server2", "entry2", 3));
+  updater->WaitForUpdateCompletion();
+  updater->CreateNewEntry(MakeAutofillEntry("server2", "entry2", 3));
+  updater->WaitForUpdateCompletion();
+
+  // Let callbacks posted on UI thread execute.
+  base::RunLoop().RunUntilIdle();
 
   std::vector<AutofillEntry> sync_entries;
   std::vector<AutofillProfile> sync_profiles;

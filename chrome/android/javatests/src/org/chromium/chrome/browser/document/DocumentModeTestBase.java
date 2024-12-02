@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.document;
 
+import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
@@ -46,7 +47,7 @@ import java.util.concurrent.Callable;
 @MinAndroidSdkLevel(Build.VERSION_CODES.LOLLIPOP)
 @DisableInTabbedMode
 public class DocumentModeTestBase extends MultiActivityTestBase {
-    protected static final String TAG = "cr.document";
+    protected static final String TAG = "document";
 
     private static class TestTabObserver extends EmptyTabObserver {
         private ContextMenu mContextMenu;
@@ -164,7 +165,7 @@ public class DocumentModeTestBase extends MultiActivityTestBase {
         ApplicationTestUtils.waitUntilChromeInForeground();
 
         // Wait until the selector is ready and the Tabs have been added to the DocumentTabModel.
-        assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
+        CriteriaHelper.pollForCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 if (!ChromeApplication.isDocumentTabModelSelectorInitializedForTests()) {
@@ -178,7 +179,7 @@ public class DocumentModeTestBase extends MultiActivityTestBase {
                 if (selector.getCurrentTabId() == tabId) return false;
                 return true;
             }
-        }));
+        });
 
         if (launchedInBackground) {
             ChromeTabUtils.waitForTabPageLoaded(newActivity.getActivityTab(), (String) null);
@@ -205,7 +206,7 @@ public class DocumentModeTestBase extends MultiActivityTestBase {
 
         openLinkInNewTabViaContextMenu(false, false);
 
-        assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
+        CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 if (expectedTabCount != tabModel.getCount()) return false;
@@ -213,7 +214,7 @@ public class DocumentModeTestBase extends MultiActivityTestBase {
                 if (expectedTabId != selector.getCurrentTabId()) return false;
                 return true;
             }
-        }));
+        });
 
         assertEquals(expectedActivity, ApplicationStatus.getLastTrackedFocusedActivity());
     }
@@ -249,12 +250,12 @@ public class DocumentModeTestBase extends MultiActivityTestBase {
             }
         });
         TouchCommon.longPressView(view);
-        assertTrue(CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
+        CriteriaHelper.pollForUIThreadCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 return observer.mContextMenu != null;
             }
-        }));
+        });
         activity.getActivityTab().removeObserver(observer);
 
         // Select the "open in new tab" option.
@@ -283,10 +284,10 @@ public class DocumentModeTestBase extends MultiActivityTestBase {
     /**
      * Switches to the specified tab and waits until its activity is brought to the foreground.
      */
-    protected void switchToTab(final DocumentTab tab) throws Exception {
+    protected void switchToTab(final Tab tab) throws Exception {
         final TabModel tabModel =
                 ChromeApplication.getDocumentTabModelSelector().getCurrentModel();
-        assertTrue(CriteriaHelper.pollForCriteria(new Criteria() {
+        CriteriaHelper.pollForCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 // http://crbug.com/509866: TabModelUtils#setIndex() sometimes fails.
@@ -299,10 +300,11 @@ public class DocumentModeTestBase extends MultiActivityTestBase {
                     }
                 });
 
-                return ApplicationStatus.getStateForActivity(tab.getActivity())
-                        == ActivityState.RESUMED;
+                Activity activity = tab.getWindowAndroid().getActivity().get();
+                if (activity == null) return false;
+                return ApplicationStatus.getStateForActivity(activity) == ActivityState.RESUMED;
             }
-        }));
+        });
     }
 
     /**

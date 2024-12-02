@@ -5,11 +5,13 @@
 #ifndef NET_BASE_NETWORK_QUALITY_ESTIMATOR_H_
 #define NET_BASE_NETWORK_QUALITY_ESTIMATOR_H_
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include <deque>
 #include <map>
 #include <string>
+#include <tuple>
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
@@ -201,7 +203,7 @@ class NET_EXPORT_PRIVATE NetworkQualityEstimator
 
     // Overloaded because NetworkID is used as key in a map.
     bool operator<(const NetworkID& other) const {
-      return type < other.type || (type == other.type && id < other.id);
+      return std::tie(type, id) < std::tie(other.type, other.id);
     }
 
     // Connection type of the network.

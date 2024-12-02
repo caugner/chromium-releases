@@ -14,6 +14,7 @@
 #include "base/android/library_loader/library_loader_hooks.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "components/cronet/android/chromium_url_request.h"
 #include "components/cronet/android/chromium_url_request_context.h"
@@ -28,7 +29,7 @@
 #include "url/url_util.h"
 
 #if defined(USE_ICU_ALTERNATIVES_ON_ANDROID)
-#include "url/android/url_jni_registrar.h"
+#include "url/android/url_jni_registrar.h"  // nogncheck
 #else
 #include "base/i18n/icu_util.h"
 #endif
@@ -84,13 +85,6 @@ jint CronetOnLoad(JavaVM* vm, void* reserved) {
 
 void CronetOnUnLoad(JavaVM* jvm, void* reserved) {
   base::android::LibraryLoaderExitHook();
-}
-
-void CronetInitApplicationContext(JNIEnv* env,
-                                  const JavaParamRef<jclass>& jcaller,
-                                  const JavaParamRef<jobject>& japp_context) {
-  // Set application context.
-  base::android::InitApplicationContext(env, japp_context);
 }
 
 void CronetInitOnMainThread(JNIEnv* env, const JavaParamRef<jclass>& jcaller) {

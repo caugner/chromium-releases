@@ -18,7 +18,6 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#include "config.h"
 #include "core/page/PrintContext.h"
 
 #include "core/frame/FrameView.h"
@@ -151,6 +150,9 @@ void PrintContext::computePageRectsWithPageSizeInternal(const FloatSize& pageSiz
 
 void PrintContext::begin(float width, float height)
 {
+    ASSERT(width > 0);
+    ASSERT(height > 0);
+
     // This function can be called multiple times to adjust printing parameters without going back to screen mode.
     m_isPrinting = true;
 
@@ -244,7 +246,10 @@ void PrintContext::outputLinkedDestinations(GraphicsContext& context, const IntR
         if (!layoutObject || !layoutObject->frameView())
             continue;
         IntRect boundingBox = layoutObject->absoluteBoundingBoxRect();
-        IntPoint point = layoutObject->frameView()->convertToContainingWindow(boundingBox.location());
+        // TODO(bokan): boundingBox looks to be in content coordinates but
+        // convertToRootFrame doesn't apply scroll offsets when converting up to
+        // the root frame.
+        IntPoint point = layoutObject->frameView()->convertToRootFrame(boundingBox.location());
         if (!pageRect.contains(point))
             continue;
         point.clampNegativeToZero();
@@ -256,8 +261,9 @@ String PrintContext::pageProperty(LocalFrame* frame, const char* propertyName, i
 {
     Document* document = frame->document();
     PrintContext printContext(frame);
-    printContext.begin(800); // Any width is OK here.
-    document->updateLayout();
+    // Any non-zero size is OK here. We don't care about actual layout. We just want to collect
+    // @page rules and figure out what declarations apply on a given page (that may or may not exist).
+    printContext.begin(800, 1000);
     RefPtr<ComputedStyle> style = document->styleForPage(pageNumber);
 
     // Implement formatters for properties we care about.

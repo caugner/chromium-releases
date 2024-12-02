@@ -12,6 +12,7 @@
 #include "chrome/browser/ui/webui/media_router/media_cast_mode.h"
 #include "chrome/browser/ui/webui/media_router/media_sink_with_cast_modes.h"
 #include "content/public/browser/web_ui_message_handler.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace base {
 class DictionaryValue;
@@ -32,15 +33,20 @@ class MediaRouterWebUIMessageHandler : public content::WebUIMessageHandler {
 
   // Methods to update the status displayed by the dialog.
   void UpdateSinks(const std::vector<MediaSinkWithCastModes>& sinks);
-  void UpdateRoutes(const std::vector<MediaRoute>& routes);
+  void UpdateRoutes(const std::vector<MediaRoute>& routes,
+                    const std::vector<MediaRoute::Id>& joinable_route_ids);
   void UpdateCastModes(const CastModeSet& cast_modes,
                        const std::string& source_host);
   void OnCreateRouteResponseReceived(const MediaSink::Id& sink_id,
-                                     const MediaRoute* route);
+                                     const MediaRoute::Id& route_id);
 
   // Does not take ownership of |issue|. Note that |issue| can be nullptr, when
   // there are no more issues.
   void UpdateIssue(const Issue* issue);
+
+  // Updates the maximum dialog height to allow the WebUI properly scale when
+  // the browser window changes.
+  void UpdateMaxDialogHeight(int height);
 
   // Notifies the dialog that the route creation attempt timed out.
   void NotifyRouteCreationTimeout();
@@ -50,15 +56,24 @@ class MediaRouterWebUIMessageHandler : public content::WebUIMessageHandler {
   void RegisterMessages() override;
 
   // Handlers for JavaScript messages.
-  // In all cases, |args| consists of a single DictionaryValue containing the
-  // actual parameters.
   // See media_router_ui_interface.js for documentation on parameters.
   void OnRequestInitialData(const base::ListValue* args);
   void OnCreateRoute(const base::ListValue* args);
+  void OnAcknowledgeFirstRunFlow(const base::ListValue* args);
   void OnActOnIssue(const base::ListValue* args);
   void OnCloseRoute(const base::ListValue* args);
+  void OnJoinRoute(const base::ListValue* args);
   void OnCloseDialog(const base::ListValue* args);
+  void OnReportClickedSinkIndex(const base::ListValue* args);
+  void OnReportInitialAction(const base::ListValue* args);
+  void OnReportInitialState(const base::ListValue* args);
+  void OnReportNavigateToView(const base::ListValue* args);
+  void OnReportRouteCreation(const base::ListValue* args);
+  void OnReportSelectedCastMode(const base::ListValue* args);
   void OnReportSinkCount(const base::ListValue* args);
+  void OnReportTimeToClickSink(const base::ListValue* args);
+  void OnReportTimeToInitialActionClose(const base::ListValue* args);
+  void OnInitialDataReceived(const base::ListValue* args);
 
   // Performs an action for an Issue of |type|.
   // |args| contains additional parameter that varies based on |type|.

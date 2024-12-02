@@ -25,6 +25,8 @@ public:
         ASSERT(!item || item.isText());
     }
 
+    explicit LineLayoutText(std::nullptr_t) : LineLayoutItem(nullptr) { }
+
     LineLayoutText() { }
 
     InlineTextBox* firstTextBox() const
@@ -125,11 +127,6 @@ public:
     float hyphenWidth(const Font& font, TextDirection textDirection)
     {
         return toText()->hyphenWidth(font, textDirection);
-    }
-
-    SelectionState selectionState() const
-    {
-        return toText()->selectionState();
     }
 
     void selectionStartEnd(int& spos, int& epos) const

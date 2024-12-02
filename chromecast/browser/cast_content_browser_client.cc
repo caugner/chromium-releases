@@ -4,14 +4,19 @@
 
 #include "chromecast/browser/cast_content_browser_client.h"
 
+#include <stddef.h>
 #include <string>
+#include <utility>
 
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/files/scoped_file.h"
 #include "base/i18n/rtl.h"
+#include "base/macros.h"
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
+#include "chromecast/base/cast_constants.h"
 #include "chromecast/base/cast_paths.h"
 #include "chromecast/base/chromecast_switches.h"
 #include "chromecast/browser/cast_browser_context.h"
@@ -159,9 +164,7 @@ net::URLRequestContextGetter* CastContentBrowserClient::CreateRequestContext(
     content::ProtocolHandlerMap* protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors) {
   return url_request_context_factory_->CreateMainGetter(
-      browser_context,
-      protocol_handlers,
-      request_interceptors.Pass());
+      browser_context, protocol_handlers, std::move(request_interceptors));
 }
 
 bool CastContentBrowserClient::IsHandledURL(const GURL& url) {
@@ -169,11 +172,12 @@ bool CastContentBrowserClient::IsHandledURL(const GURL& url) {
     return false;
 
   static const char* const kProtocolList[] = {
-      url::kBlobScheme,
-      url::kFileSystemScheme,
-      content::kChromeUIScheme,
-      content::kChromeDevToolsScheme,
-      url::kDataScheme,
+    content::kChromeUIScheme,
+    content::kChromeDevToolsScheme,
+    kChromeResourceScheme,
+    url::kBlobScheme,
+    url::kDataScheme,
+    url::kFileSystemScheme,
   };
 
   const std::string& scheme = url.scheme();
@@ -262,8 +266,7 @@ CastContentBrowserClient::CreateQuotaPermissionContext() {
 }
 
 void CastContentBrowserClient::AllowCertificateError(
-    int render_process_id,
-    int render_view_id,
+    content::WebContents* web_contents,
     int cert_error,
     const net::SSLInfo& ssl_info,
     const GURL& request_url,
@@ -408,6 +411,11 @@ void CastContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
 }
 
 #endif  // defined(OS_ANDROID)
+
+void CastContentBrowserClient::GetAdditionalWebUISchemes(
+    std::vector<std::string>* additional_schemes) {
+  additional_schemes->push_back(kChromeResourceScheme);
+}
 
 #if defined(OS_ANDROID) && defined(VIDEO_HOLE)
 content::ExternalVideoSurfaceContainer*

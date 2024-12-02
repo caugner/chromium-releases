@@ -1,4 +1,4 @@
-#  Copyright 2014 The Chromium Authors. All rights reserved.
+# Copyright 2014 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -267,7 +267,14 @@ def RunBenchmark(benchmark, finder_options):
 
   possible_browser = browser_finder.FindBrowser(finder_options)
   if possible_browser and benchmark.ShouldDisable(possible_browser):
-    return 1
+    logging.warning('%s is disabled on the selected browser', benchmark.Name())
+    if finder_options.run_disabled_tests:
+      logging.warning(
+          'Running benchmark anyway due to: --also-run-disabled-tests')
+    else:
+      logging.warning(
+          'Try --also-run-disabled-tests to force the benchmark to run.')
+      return 1
 
   pt = benchmark.CreatePageTest(finder_options)
   pt.__name__ = benchmark.__class__.__name__

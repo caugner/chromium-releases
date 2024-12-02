@@ -33,6 +33,8 @@
 #define ShapeResultInlineHeaders_h
 
 #include "platform/fonts/shaping/ShapeResult.h"
+#include "wtf/Allocator.h"
+#include "wtf/Noncopyable.h"
 
 #include <hb.h>
 
@@ -44,6 +46,7 @@ class SimpleFontData;
 class HarfBuzzShaper;
 
 struct HarfBuzzRunGlyphData {
+    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
     uint16_t glyph;
     uint16_t characterIndex;
     float advance;
@@ -51,13 +54,15 @@ struct HarfBuzzRunGlyphData {
 };
 
 struct ShapeResult::RunInfo {
+    USING_FAST_MALLOC(RunInfo);
+    WTF_MAKE_NONCOPYABLE(RunInfo);
+public:
     RunInfo(const SimpleFontData* font, hb_direction_t dir, hb_script_t script,
         unsigned startIndex, unsigned numGlyphs, unsigned numCharacters)
         : m_fontData(const_cast<SimpleFontData*>(font)), m_direction(dir)
-        , m_script(script), m_startIndex(startIndex)
-        , m_numCharacters(numCharacters) , m_numGlyphs(numGlyphs), m_width(0.0f)
+        , m_script(script), m_glyphData(numGlyphs), m_startIndex(startIndex)
+        , m_numCharacters(numCharacters), m_width(0.0f)
     {
-        m_glyphData.resize(m_numGlyphs);
     }
 
     bool rtl() const { return HB_DIRECTION_IS_BACKWARD(m_direction); }
@@ -77,13 +82,18 @@ struct ShapeResult::RunInfo {
         return m_startIndex + m_glyphData[i].characterIndex;
     }
 
+    // For memory reporting.
+    size_t byteSize() const
+    {
+        return sizeof(this) + m_glyphData.size() * sizeof(HarfBuzzRunGlyphData);
+    }
+
     RefPtr<SimpleFontData> m_fontData;
     hb_direction_t m_direction;
     hb_script_t m_script;
     Vector<HarfBuzzRunGlyphData> m_glyphData;
     unsigned m_startIndex;
     unsigned m_numCharacters;
-    unsigned m_numGlyphs;
     float m_width;
 };
 

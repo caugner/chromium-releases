@@ -873,6 +873,8 @@ SlideMode.prototype.onSplice_ = function(event) {
         this.printButton_.disabled = true;
         this.editButton_.disabled = true;
         this.errorBanner_.show('GALLERY_NO_IMAGES');
+        if (this.isEditing())
+          this.toggleEditor();
       }.bind(this));
       return;
     }
@@ -883,9 +885,12 @@ SlideMode.prototype.onSplice_ = function(event) {
     if (!displayedItemNotRemvoed) {
       // There is the next item, select it. Otherwise, select the last item.
       var nextIndex = Math.min(event.index, this.dataModel_.length - 1);
-      // To force to dispatch a selection change event, clear selection before.
-      this.selectionModel_.clear();
+      // To force to dispatch a selection change event, unselect all before.
+      this.selectionModel_.unselectAll();
       this.select(nextIndex);
+      // If the removed image was edit, leave the editing mode.
+      if (this.isEditing())
+        this.toggleEditor();
     }
   }.bind(this), 0);
 };

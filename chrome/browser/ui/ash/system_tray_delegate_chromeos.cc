@@ -4,9 +4,11 @@
 
 #include "chrome/browser/ui/ash/system_tray_delegate_chromeos.h"
 
+#include <stddef.h>
 #include <algorithm>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ash/ash_switches.h"
@@ -19,6 +21,7 @@
 #include "ash/shell_delegate.h"
 #include "ash/shell_window_ids.h"
 #include "ash/system/bluetooth/bluetooth_observer.h"
+#include "ash/system/chromeos/power/power_status.h"
 #include "ash/system/chromeos/session/logout_button_observer.h"
 #include "ash/system/chromeos/shutdown_policy_observer.h"
 #include "ash/system/date/clock_observer.h"
@@ -74,7 +77,6 @@
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/ash/networking_config_delegate_chromeos.h"
 #include "chrome/browser/ui/ash/system_tray_delegate_utils.h"
-#include "chrome/browser/ui/ash/user_accounts_delegate_chromeos.h"
 #include "chrome/browser/ui/ash/volume_controller_chromeos.h"
 #include "chrome/browser/ui/ash/vpn_delegate_chromeos.h"
 #include "chrome/browser/ui/browser.h"
@@ -472,6 +474,16 @@ void SystemTrayDelegateChromeOS::ShowDisplaySettings() {
   ShowSettingsSubPageForActiveUser(kDisplaySettingsSubPageName);
 }
 
+void SystemTrayDelegateChromeOS::ShowPowerSettings() {
+  if (!(switches::PowerOverlayEnabled() ||
+        (ash::PowerStatus::Get()->IsBatteryPresent() &&
+         ash::PowerStatus::Get()->SupportsDualRoleDevices()))) {
+    return;
+  }
+  content::RecordAction(base::UserMetricsAction("Tray_ShowPowerOptions"));
+  ShowSettingsSubPageForActiveUser(chrome::kPowerOptionsSubPage);
+}
+
 void SystemTrayDelegateChromeOS::ShowChromeSlow() {
   chrome::ScopedTabbedBrowserDisplayer displayer(
       ProfileManager::GetPrimaryUserProfile(), chrome::HOST_DESKTOP_TYPE_ASH);
@@ -822,23 +834,6 @@ void SystemTrayDelegateChromeOS::ActiveUserWasChanged() {
 
 bool SystemTrayDelegateChromeOS::IsSearchKeyMappedToCapsLock() {
   return search_key_mapped_to_ == input_method::kCapsLockKey;
-}
-
-ash::tray::UserAccountsDelegate*
-SystemTrayDelegateChromeOS::GetUserAccountsDelegate(
-    const AccountId& account_id) {
-  auto it = accounts_delegates_.find(account_id);
-  if (it == accounts_delegates_.end()) {
-    const user_manager::User* user =
-        user_manager::UserManager::Get()->FindUser(account_id);
-    Profile* user_profile = ProfileHelper::Get()->GetProfileByUserUnsafe(user);
-    CHECK(user_profile);
-    accounts_delegates_.set(
-        account_id, scoped_ptr<ash::tray::UserAccountsDelegate>(
-                        new UserAccountsDelegateChromeOS(user_profile)));
-    it = accounts_delegates_.find(account_id);
-  }
-  return it->second;
 }
 
 void SystemTrayDelegateChromeOS::AddCustodianInfoTrayObserver(
@@ -1236,7 +1231,7 @@ void SystemTrayDelegateChromeOS::OnStartBluetoothDiscoverySession(
   if (!should_run_bluetooth_discovery_)
     return;
   VLOG(1) << "Claiming new Bluetooth device discovery session.";
-  bluetooth_discovery_session_ = discovery_session.Pass();
+  bluetooth_discovery_session_ = std::move(discovery_session);
   GetSystemTrayNotifier()->NotifyBluetoothDiscoveringChanged();
 }
 

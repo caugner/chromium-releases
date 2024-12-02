@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "modules/notifications/Notification.h"
 
 #include "bindings/core/v8/ExceptionState.h"
@@ -85,11 +84,15 @@ Notification* Notification::create(ExecutionContext* context, const String& titl
     }
 
     String insecureOriginMessage;
-    UseCounter::Feature feature = context->isSecureContext(insecureOriginMessage)
-        ? UseCounter::NotificationSecureOrigin
-        : UseCounter::NotificationInsecureOrigin;
-
-    UseCounter::count(context, feature);
+    if (context->isSecureContext(insecureOriginMessage)) {
+        UseCounter::count(context, UseCounter::NotificationSecureOrigin);
+        if (context->isDocument())
+            UseCounter::countCrossOriginIframe(*toDocument(context),  UseCounter::NotificationAPISecureOriginIframe);
+    } else {
+        UseCounter::count(context, UseCounter::NotificationInsecureOrigin);
+        if (context->isDocument())
+            UseCounter::countCrossOriginIframe(*toDocument(context),  UseCounter::NotificationAPIInsecureOriginIframe);
+    }
 
     WebNotificationData data = createWebNotificationData(context, title, options, exceptionState);
     if (exceptionState.hadException())
@@ -117,7 +120,7 @@ Notification::Notification(ExecutionContext* context, const WebNotificationData&
     , m_data(data)
     , m_persistentId(kInvalidPersistentId)
     , m_state(NotificationStateIdle)
-    , m_asyncRunner(this, &Notification::show)
+    , m_asyncRunner(AsyncMethodRunner<Notification>::create(this, &Notification::show))
 {
     ASSERT(notificationManager());
 }
@@ -129,9 +132,9 @@ Notification::~Notification()
 void Notification::scheduleShow()
 {
     ASSERT(m_state == NotificationStateIdle);
-    ASSERT(!m_asyncRunner.isActive());
+    ASSERT(!m_asyncRunner->isActive());
 
-    m_asyncRunner.runAsync();
+    m_asyncRunner->runAsync();
 }
 
 void Notification::show()
@@ -355,16 +358,17 @@ void Notification::stop()
 
     m_state = NotificationStateClosed;
 
-    m_asyncRunner.stop();
+    m_asyncRunner->stop();
 }
 
 bool Notification::hasPendingActivity() const
 {
-    return m_state == NotificationStateShowing || m_asyncRunner.isActive();
+    return m_state == NotificationStateShowing || m_asyncRunner->isActive();
 }
 
 DEFINE_TRACE(Notification)
 {
+    visitor->trace(m_asyncRunner);
     RefCountedGarbageCollectedEventTargetWithInlineData<Notification>::trace(visitor);
     ActiveDOMObject::trace(visitor);
 }

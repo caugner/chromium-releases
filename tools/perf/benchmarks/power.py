@@ -68,6 +68,11 @@ class PowerGpuRasterizationTypical10Mobile(perf_benchmark.PerfBenchmark):
   def Name(cls):
     return 'power.gpu_rasterization.typical_10_mobile'
 
+  @classmethod
+  def ShouldDisable(cls, possible_browser):
+    return cls.IsSvelte(possible_browser)  # http://crbug.com/563968
+
+
 @benchmark.Enabled('mac')
 class PowerTop10(perf_benchmark.PerfBenchmark):
   """Top 10 quiescent power test."""
@@ -98,7 +103,6 @@ class PowerGpuRasterizationTop10(perf_benchmark.PerfBenchmark):
 
 
 @benchmark.Enabled('mac')
-@benchmark.Disabled('reference') # crbug.com/547833
 class PowerTop25(perf_benchmark.PerfBenchmark):
   """Top 25 quiescent power test."""
   test = power.QuiescentPower
@@ -121,7 +125,6 @@ class PowerTop25(perf_benchmark.PerfBenchmark):
     return stories
 
 @benchmark.Enabled('mac')
-@benchmark.Disabled('reference') # crbug.com/549302
 class PowerGpuRasterizationTop25(perf_benchmark.PerfBenchmark):
   """Top 25 quiescent power test with GPU rasterization enabled."""
   tag = 'gpu_rasterization'

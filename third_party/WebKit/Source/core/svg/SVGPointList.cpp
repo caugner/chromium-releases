@@ -18,7 +18,6 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#include "config.h"
 #include "core/svg/SVGPointList.h"
 
 #include "core/svg/SVGAnimationElement.h"
@@ -28,8 +27,6 @@
 #include "wtf/text/WTFString.h"
 
 namespace blink {
-
-DEFINE_SVG_PROPERTY_TYPE_CASTS(SVGPointList);
 
 SVGPointList::SVGPointList()
 {
@@ -91,11 +88,11 @@ bool SVGPointList::parse(const CharType*& ptr, const CharType* end)
     }
 }
 
-void SVGPointList::setValueAsString(const String& value, ExceptionState& exceptionState)
+SVGParsingError SVGPointList::setValueAsString(const String& value)
 {
     if (value.isEmpty()) {
         clear();
-        return;
+        return NoError;
     }
 
     bool valid = false;
@@ -108,9 +105,7 @@ void SVGPointList::setValueAsString(const String& value, ExceptionState& excepti
         const UChar* end = ptr + value.length();
         valid = parse(ptr, end);
     }
-
-    if (!valid)
-        exceptionState.throwDOMException(SyntaxError, "Problem parsing points=\""+value+"\"");
+    return valid ? NoError : ParsingAttributeFailedError;
 }
 
 void SVGPointList::add(PassRefPtrWillBeRawPtr<SVGPropertyBase> other, SVGElement* contextElement)

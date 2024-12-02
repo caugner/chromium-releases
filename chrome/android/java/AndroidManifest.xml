@@ -261,12 +261,6 @@ by a child template that "extends" this file.
             android:windowSoftInputMode="stateHidden|adjustPan"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc">
             <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="chrome" android:host="editbookmark" />
-            </intent-filter>
-            <intent-filter>
                 <!-- This is sent by the BrowserProviderProxy as a result of
                      calls to android.provider.Browser.saveBookmark(). -->
                 <action android:name="{{ manifest_package }}.ADDBOOKMARK" />
@@ -408,8 +402,24 @@ by a child template that "extends" this file.
         <activity android:name="org.chromium.chrome.browser.physicalweb.ListUrlsActivity"
             android:label="@string/physical_web_list_urls_activity_title"
             android:theme="@style/PhysicalWebNearbyUrlsListStyle"
+            android:autoRemoveFromRecents="true"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc"
+            android:exported="false" >
+        </activity>
+
+        <!-- Opt-in activity for Physical Web -->
+        <activity android:name="org.chromium.chrome.browser.physicalweb.PhysicalWebOptInActivity"
+            android:label="@string/physical_web_list_urls_activity_title"
+            android:theme="@style/PhysicalWebOptInStyle"
+            android:autoRemoveFromRecents="true"
             android:exported="false">
         </activity>
+
+        <!-- Broadcast receiver that will clean up Physical web notifications at scheduled
+             intervals -->
+        <receiver android:name="org.chromium.chrome.browser.physicalweb.ClearNotificationAlarmReceiver"
+            android:exported="false">
+        </receiver>
 
         <!-- Providers for chrome data. -->
         <provider android:name="org.chromium.chrome.browser.ChromeBrowserProvider"
@@ -428,6 +438,12 @@ by a child template that "extends" this file.
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <provider android:name="org.chromium.chrome.browser.superviseduser.SupervisedUserContentProvider"
+            android:authorities="{{ manifest_package }}.SupervisedUserProvider"
+            android:permission="android.permission.INTERNET"
+            android:exported="true">
+        </provider>
+
         <!-- Sync adapter for browser invalidation. -->
         <service android:name="org.chromium.chrome.browser.invalidation.ChromeBrowserSyncAdapterService"
             android:exported="false">
@@ -444,6 +460,11 @@ by a child template that "extends" this file.
                 <action android:name="android.accounts.LOGIN_ACCOUNTS_CHANGED" />
             </intent-filter>
         </receiver>
+
+        <!-- Download service -->
+        <service android:name="org.chromium.chrome.browser.download.DownloadNotificationService"
+            android:exported="false">
+        </service>
 
         <!-- Precache service.
         Not enabled on Stable or Work channels. This is currently an experiment
@@ -603,15 +624,23 @@ by a child template that "extends" this file.
             android:process=":sandboxed_process{{ i }}"
             android:permission="{{ manifest_package }}.permission.CHILD_SERVICE"
             android:isolatedProcess="true"
-            android:exported="false" />
+            android:exported="{{sandboxed_service_exported|default(false)}}"
+            {% if (sandboxed_service_exported|default(false)) == 'true' %}
+            tools:ignore="ExportedService"
+            {% endif %}
+            {{sandboxed_service_extra_flags|default('')}} />
         {% endfor %}
 
         {% set num_privileged_services = 3 %}
         <meta-data android:name="org.chromium.content.browser.NUM_PRIVILEGED_SERVICES"
             android:value="{{ num_privileged_services }}"/>
         {% for i in range(num_privileged_services) %}
+        {% set privileged_process_name = ':privileged_process%d' % i %}
+        <!-- TODO(tedchoc): Omit this for release builds as MultiDex is debug only. --> 
+        <meta-data android:name="{{ manifest_package }}{{ privileged_process_name }}.ignore_multidex"
+android:value="true" />
         <service android:name="org.chromium.content.app.PrivilegedProcessService{{ i }}"
-            android:process=":privileged_process{{ i }}"
+            android:process="{{ privileged_process_name }}"
             android:permission="{{ manifest_package }}.permission.CHILD_SERVICE"
             android:isolatedProcess="false"
             android:exported="false" />

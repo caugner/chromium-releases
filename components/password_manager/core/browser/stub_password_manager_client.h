@@ -5,7 +5,9 @@
 #ifndef COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_STUB_PASSWORD_MANAGER_CLIENT_H_
 #define COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_STUB_PASSWORD_MANAGER_CLIENT_H_
 
+#include "base/macros.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
+#include "components/password_manager/core/browser/stub_log_manager.h"
 
 namespace password_manager {
 
@@ -36,6 +38,7 @@ class StubPasswordManagerClient : public PasswordManagerClient {
   PasswordStore* GetPasswordStore() const override;
   const GURL& GetLastCommittedEntryURL() const override;
   const CredentialsFilter* GetStoreResultFilter() const override;
+  const LogManager* GetLogManager() const override;
 
  private:
   // This filter does not filter out anything, it is a dummy implementation of
@@ -51,6 +54,7 @@ class StubPasswordManagerClient : public PasswordManagerClient {
   };
 
   const PassThroughCredentialsFilter credentials_filter_;
+  StubLogManager log_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(StubPasswordManagerClient);
 };

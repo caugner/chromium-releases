@@ -4,6 +4,8 @@
 
 #include "chrome/browser/android/popular_sites.h"
 
+#include <stddef.h>
+
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
@@ -172,7 +174,7 @@ scoped_ptr<std::vector<PopularSites::Site>> ReadAndParseJsonFile(
                                         GURL(thumbnail_url)));
   }
 
-  return sites.Pass();
+  return sites;
 }
 
 }  // namespace

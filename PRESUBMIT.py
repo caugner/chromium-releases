@@ -64,8 +64,8 @@ _TEST_ONLY_WARNING = (
 
 _INCLUDE_ORDER_WARNING = (
     'Your #include order seems to be broken. Remember to use the right '
-    'collation (LC_COLLATE=C) and check\nhttps://google-styleguide.googlecode'
-    '.com/svn/trunk/cppguide.html#Names_and_Order_of_Includes')
+    'collation (LC_COLLATE=C) and check\nhttps://google.github.io/styleguide/'
+    'cppguide.html#Names_and_Order_of_Includes')
 
 _BANNED_OBJC_FUNCTIONS = (
     (
@@ -164,7 +164,9 @@ _BANNED_CPP_FUNCTIONS = (
       ),
       True,
       (
+        r"^base[\\\/]process[\\\/]process_linux\.cc$",
         r"^base[\\\/]process[\\\/]process_metrics_linux\.cc$",
+        r"^blimp[\\\/]engine[\\\/]browser[\\\/]blimp_browser_main_parts\.cc$",
         r"^chrome[\\\/]browser[\\\/]chromeos[\\\/]boot_times_recorder\.cc$",
         r"^chrome[\\\/]browser[\\\/]chromeos[\\\/]"
             "customization_document_browsertest\.cc$",
@@ -177,7 +179,7 @@ _BANNED_CPP_FUNCTIONS = (
         r"^net[\\\/]url_request[\\\/]test_url_fetcher_factory\.cc$",
         r"^remoting[\\\/]host[\\\/]gnubby_auth_handler_posix\.cc$",
         r"^ui[\\\/]ozone[\\\/]platform[\\\/]drm[\\\/]host[\\\/]"
-            "drm_display_host_manager\.cc$",
+            "drm_display_host_manager_core\.cc$",
       ),
     ),
     (
@@ -900,7 +902,8 @@ def _CheckHardcodedGoogleHostsInLowerLayers(input_api, output_api):
                   _TEST_CODE_EXCLUDED_PATHS +
                   input_api.DEFAULT_BLACK_LIST))
 
-  base_pattern = '"[^"]*google\.com[^"]*"'
+  base_pattern = ('"[^"]*(google|googleapis|googlezip|googledrive|appspot)'
+                  '\.(com|net)[^"]*"')
   comment_pattern = input_api.re.compile('//.*%s' % base_pattern)
   pattern = input_api.re.compile(base_pattern)
   problems = []  # items are (filename, line_number, line)
@@ -1536,31 +1539,6 @@ def _CheckSingletonInHeaders(input_api, output_api):
   return []
 
 
-def _CheckBaseMacrosInHeaders(input_api, output_api):
-  """Check for base/macros.h if DISALLOW_* macro is used."""
-
-  disallows = ('DISALLOW_ASSIGN', 'DISALLOW_COPY', 'DISALLOW_EVIL')
-  macros = '#include "base/macros.h"'
-  basictypes = '#include "base/basictypes.h"'
-
-  files = []
-  for f in input_api.AffectedSourceFiles(None):
-    if not f.LocalPath().endswith('.h'):
-      continue
-    for line_num, line in f.ChangedContents():
-      if line.lstrip().startswith('//'):  # Strip C++ comment.
-        continue
-      if any(d in line for d in disallows):
-        contents = input_api.ReadFile(f)
-        if not (macros in contents or basictypes in contents):
-          files.append(f)
-          break
-
-  msg = ('The following files appear to be using DISALLOW_* macros.\n'
-         'Please #include "base/macros.h" in them.')
-  return [output_api.PresubmitError(msg, files)] if files else []
-
-
 _DEPRECATED_CSS = [
   # Values
   ( "-webkit-box", "flex" ),
@@ -1599,6 +1577,7 @@ def _CheckNoDeprecatedCSS(input_api, output_api):
                 (r"^chrome/common/extensions/docs",
                  r"^chrome/docs",
                  r"^components/dom_distiller/core/css/distilledpage_ios.css",
+                 r"^components/flags_ui/resources/apple_flags.css",
                  r"^native_client_sdk"))
   file_filter = lambda f: input_api.FilterSourceFile(
       f, white_list=file_inclusion_pattern, black_list=black_list)
@@ -1673,7 +1652,7 @@ def _CommonChecks(input_api, output_api):
   results.extend(_CheckForInvalidOSMacros(input_api, output_api))
   results.extend(_CheckForInvalidIfDefinedMacros(input_api, output_api))
   # TODO(danakj): Remove this when base/move.h is removed.
-  results.extend(_CheckForUsingSideEffectsOfPass(input_api, output_api))
+  results.extend(_CheckForUsingPass(input_api, output_api))
   results.extend(_CheckAddedDepsHaveTargetApprovals(input_api, output_api))
   results.extend(
       input_api.canned_checks.CheckChangeHasNoTabs(
@@ -1691,7 +1670,6 @@ def _CommonChecks(input_api, output_api):
   results.extend(_CheckForCopyrightedCode(input_api, output_api))
   results.extend(_CheckForWindowsLineEndings(input_api, output_api))
   results.extend(_CheckSingletonInHeaders(input_api, output_api))
-  results.extend(_CheckBaseMacrosInHeaders(input_api, output_api))
 
   if any('PRESUBMIT.py' == f.LocalPath() for f in input_api.AffectedFiles()):
     results.extend(input_api.canned_checks.RunUnitTestsInDirectory(
@@ -1838,17 +1816,17 @@ def _CheckForInvalidIfDefinedMacros(input_api, output_api):
       bad_macros)]
 
 
-def _CheckForUsingSideEffectsOfPass(input_api, output_api):
+def _CheckForUsingPass(input_api, output_api):
   """Check all affected files for using side effects of Pass."""
   errors = []
   for f in input_api.AffectedFiles():
     if f.LocalPath().endswith(('.h', '.c', '.cc', '.m', '.mm')):
       for lnum, line in f.ChangedContents():
-        # Disallow Foo(*my_scoped_thing.Pass()); See crbug.com/418297.
-        if input_api.re.search(r'\*[a-zA-Z0-9_]+\.Pass\(\)', line):
+        # Warn on any use of foo.Pass().
+        if input_api.re.search(r'[a-zA-Z0-9_]+\.Pass\(\)', line):
           errors.append(output_api.PresubmitError(
-            ('%s:%d uses *foo.Pass() to delete the contents of scoped_ptr. ' +
-             'See crbug.com/418297.') % (f.LocalPath(), lnum)))
+              ('%s:%d uses Pass(); please use std::move() instead. ' +
+               'See crbug.com/557422.') % (f.LocalPath(), lnum)))
   return errors
 
 

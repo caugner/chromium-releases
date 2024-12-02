@@ -11,6 +11,7 @@
 
 #include "build/build_config.h"
 
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
@@ -123,7 +124,8 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // PasswordStoreConsumer:
   void OnGetPasswordStoreResults(
       ScopedVector<autofill::PasswordForm> results) override;
-  void OnGetSiteStatistics(ScopedVector<InteractionsStats> stats) override;
+  void OnGetSiteStatistics(
+      scoped_ptr<std::vector<scoped_ptr<InteractionsStats>>> stats) override;
 
   // A user opted to 'never remember' passwords for this form.
   // Blacklist it so that from now on when it is seen we ignore it.
@@ -143,7 +145,6 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // Handles save-as-new or update of the form managed by this manager.
   // Note the basic data of updated_credentials must match that of
   // observed_form_ (e.g DoesManage(pending_credentials_) == true).
-  // TODO: Make this private once we switch to the new UI.
   void Save();
 
   // Update the password store entry for |credentials_to_update|, using the
@@ -182,6 +183,10 @@ class PasswordFormManager : public PasswordStoreConsumer {
 
   bool password_overridden() const { return password_overridden_; }
 
+  bool retry_password_form_password_update() const {
+    return retry_password_form_password_update_;
+  }
+
   // Called if the user could generate a password for this form.
   void MarkGenerationAvailable() { generation_available_ = true; }
 
@@ -208,13 +213,11 @@ class PasswordFormManager : public PasswordStoreConsumer {
     // Just need to update the internal states.
     state_ = MATCHING_PHASE;
   }
-
-  // TODO(vasilii): remove the unit test restriction when it's needed in
-  // production code.
-  const std::vector<InteractionsStats*>& interactions_stats() const {
-    return interactions_stats_.get();
-  }
 #endif
+
+  const std::vector<scoped_ptr<InteractionsStats>>& interactions_stats() const {
+    return interactions_stats_;
+  }
 
   const autofill::PasswordForm& observed_form() const { return observed_form_; }
 
@@ -400,6 +403,10 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // from password store.
   void CreatePendingCredentials();
 
+  // Create pending credentials from provisionally saved form when this form
+  // represents credentials that were not previosly saved.
+  void CreatePendingCredentialsForNewCredentials();
+
   // If |pending_credentials_.username_value| is not empty, iterates over all
   // forms from |best_matches_| and deletes from the password store all which
   // are not PSL-matched, have an empty username, and a password equal to
@@ -412,6 +419,15 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // and nullptr otherwise.
   autofill::PasswordForm* FindBestMatchForUpdatePassword(
       const base::string16& password) const;
+
+  // Try to find best matched to |form| from |best_matches_| by the rules:
+  // 1. If there is an element in |best_matches_| with the same username then
+  // return it;
+  // 2. If |form| has no username and there is an element from |best_matches_|
+  // with the same password as in |form| then return it;
+  // 3. Otherwise return nullptr.
+  autofill::PasswordForm* FindBestSavedMatch(
+      const autofill::PasswordForm* form) const;
 
   // Set of nonblacklisted PasswordForms from the DB that best match the form
   // being managed by this. Use a map instead of vector, because we most
@@ -430,7 +446,7 @@ class PasswordFormManager : public PasswordStoreConsumer {
   const autofill::PasswordForm observed_form_;
 
   // Statistics for the current domain.
-  ScopedVector<InteractionsStats> interactions_stats_;
+  std::vector<scoped_ptr<InteractionsStats>> interactions_stats_;
 
   // Stores a submitted form.
   scoped_ptr<const autofill::PasswordForm> provisionally_saved_form_;
@@ -458,6 +474,13 @@ class PasswordFormManager : public PasswordStoreConsumer {
 
   // Whether the saved password was overridden.
   bool password_overridden_;
+
+  // A form is considered to be "retry" password if it has only one field which
+  // is a current password field.
+  // This variable is true if the password passed through ProvisionallySave() is
+  // a password that is not equal to any password from stored for this origin
+  // credentials and it was entered on a retry password form.
+  bool retry_password_form_password_update_;
 
   // Whether the user can choose to generate a password for this form.
   bool generation_available_;

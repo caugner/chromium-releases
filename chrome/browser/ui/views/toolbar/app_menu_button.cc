@@ -5,14 +5,15 @@
 #include "chrome/browser/ui/views/toolbar/app_menu_button.h"
 
 #include "base/location.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/toolbar/app_menu_model.h"
 #include "chrome/browser/ui/views/extensions/browser_action_drag_data.h"
-#include "chrome/browser/ui/views/layout_constants.h"
 #include "chrome/browser/ui/views/toolbar/app_menu.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "extensions/common/feature_switch.h"
@@ -24,8 +25,7 @@
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/vector_icons_public.h"
 #include "ui/keyboard/keyboard_controller.h"
-#include "ui/views/animation/ink_drop_animation_controller.h"
-#include "ui/views/animation/ink_drop_animation_controller_factory.h"
+#include "ui/views/animation/button_ink_drop_delegate.h"
 #include "ui/views/controls/button/label_button_border.h"
 #include "ui/views/controls/menu/menu_listener.h"
 #include "ui/views/metrics.h"
@@ -37,15 +37,15 @@ bool AppMenuButton::g_open_app_immediately_for_testing = false;
 AppMenuButton::AppMenuButton(ToolbarView* toolbar_view)
     : views::MenuButton(NULL, base::string16(), toolbar_view, false),
       severity_(AppMenuIconPainter::SEVERITY_NONE),
-      ink_drop_animation_controller_(
-          views::InkDropAnimationControllerFactory::
-              CreateInkDropAnimationController(this)),
       toolbar_view_(toolbar_view),
       allow_extension_dragging_(
           extensions::FeatureSwitch::extension_action_redesign()
               ->IsEnabled()),
       destroyed_(nullptr),
+      margin_trailing_(0),
+      ink_drop_delegate_(new views::ButtonInkDropDelegate(this, this)),
       weak_factory_(this) {
+  set_ink_drop_delegate(ink_drop_delegate_.get());
   if (!ui::MaterialDesignController::IsModeMaterial())
     icon_painter_.reset(new AppMenuIconPainter(this));
 
@@ -53,11 +53,8 @@ AppMenuButton::AppMenuButton(ToolbarView* toolbar_view)
   const int kInkDropLargeCornerRadius = 5;
   const int kInkDropSmallSize = 24;
   const int kInkDropSmallCornerRadius = 2;
-
-  ink_drop_animation_controller_->SetInkDropSize(
-      gfx::Size(kInkDropLargeSize, kInkDropLargeSize),
-      kInkDropLargeCornerRadius,
-      gfx::Size(kInkDropSmallSize, kInkDropSmallSize),
+  ink_drop_delegate()->SetInkDropSize(
+      kInkDropLargeSize, kInkDropLargeCornerRadius, kInkDropSmallSize,
       kInkDropSmallCornerRadius);
 }
 
@@ -107,13 +104,21 @@ void AppMenuButton::ShowMenu(bool for_drop) {
   bool destroyed = false;
   destroyed_ = &destroyed;
 
-  ink_drop_animation_controller_->AnimateToState(
-      views::InkDropState::ACTIVATED);
+  ink_drop_delegate()->OnAction(views::InkDropState::ACTIVATED);
+
+  base::TimeTicks menu_open_time = base::TimeTicks::Now();
   menu_->RunMenu(this);
 
+  if (!for_drop) {
+    // Record the time-to-action for the menu. We don't record in the case of a
+    // drag-and-drop command because menus opened for drag-and-drop don't block
+    // the message loop.
+    UMA_HISTOGRAM_TIMES("Toolbar.AppMenuTimeToAction",
+                        base::TimeTicks::Now() - menu_open_time);
+  }
+
   if (!destroyed) {
-    ink_drop_animation_controller_->AnimateToState(
-        views::InkDropState::DEACTIVATED);
+    ink_drop_delegate()->OnAction(views::InkDropState::DEACTIVATED);
     destroyed_ = nullptr;
   }
 }
@@ -139,7 +144,7 @@ void AppMenuButton::RemoveMenuListener(views::MenuListener* listener) {
 gfx::Size AppMenuButton::GetPreferredSize() const {
   if (ui::MaterialDesignController::IsModeMaterial()) {
     gfx::Size size(image()->GetPreferredSize());
-    ui::ThemeProvider* provider = GetThemeProvider();
+    const ui::ThemeProvider* provider = GetThemeProvider();
     if (provider) {
       gfx::Insets insets(GetLayoutInsets(TOOLBAR_BUTTON));
       size.Enlarge(insets.width(), insets.height());
@@ -157,7 +162,7 @@ void AppMenuButton::ScheduleAppMenuIconPaint() {
 
 void AppMenuButton::UpdateIcon() {
   DCHECK(ui::MaterialDesignController::IsModeMaterial());
-  SkColor color = SK_ColorRED;
+  SkColor color = gfx::kPlaceholderColor;
   switch (severity_) {
     case AppMenuIconPainter::SEVERITY_NONE:
       color = GetThemeProvider()->GetColor(
@@ -181,25 +186,63 @@ void AppMenuButton::UpdateIcon() {
                                  color));
 }
 
+void AppMenuButton::SetTrailingMargin(int margin) {
+  margin_trailing_ = margin;
+
+  UpdateThemedBorder();
+
+  const int inset = LabelButton::kFocusRectInset;
+  SetFocusPainter(views::Painter::CreateDashedFocusPainterWithInsets(
+      gfx::Insets(inset, inset, inset, inset + margin)));
+  InvalidateLayout();
+}
+
 void AppMenuButton::AddInkDropLayer(ui::Layer* ink_drop_layer) {
-  SetPaintToLayer(true);
   image()->SetPaintToLayer(true);
   image()->SetFillsBoundsOpaquely(false);
-
-  layer()->Add(ink_drop_layer);
-  layer()->StackAtBottom(ink_drop_layer);
+  views::MenuButton::AddInkDropLayer(ink_drop_layer);
 }
 
 void AppMenuButton::RemoveInkDropLayer(ui::Layer* ink_drop_layer) {
-  layer()->Remove(ink_drop_layer);
-
+  views::MenuButton::RemoveInkDropLayer(ink_drop_layer);
   image()->SetFillsBoundsOpaquely(true);
   image()->SetPaintToLayer(false);
-  SetPaintToLayer(false);
+}
+
+gfx::Point AppMenuButton::CalculateInkDropCenter() const {
+  // ToolbarView extends the bounds of the app button to the right in maximized
+  // mode. So instead of using the center point of local bounds, we use the
+  // center point (adjusted for RTL layouts) of the preferred size, which
+  // doesn't change in maximized mode.
+  const int visible_width = GetPreferredSize().width();
+  return gfx::Point(
+      (GetMirroredXWithWidthInView(0, visible_width) + visible_width) / 2,
+      height() / 2);
 }
 
 const char* AppMenuButton::GetClassName() const {
   return "AppMenuButton";
+}
+
+scoped_ptr<views::LabelButtonBorder> AppMenuButton::CreateDefaultBorder()
+    const {
+  scoped_ptr<views::LabelButtonBorder> border =
+      MenuButton::CreateDefaultBorder();
+
+  // Adjust border insets to follow the margin change,
+  // which will be reflected in where the border is painted
+  // through GetThemePaintRect().
+  gfx::Insets insets(border->GetInsets());
+  insets += gfx::Insets(0, 0, 0, margin_trailing_);
+  border->set_insets(insets);
+
+  return border;
+}
+
+gfx::Rect AppMenuButton::GetThemePaintRect() const {
+  gfx::Rect rect(MenuButton::GetThemePaintRect());
+  rect.Inset(0, 0, margin_trailing_, 0);
+  return rect;
 }
 
 bool AppMenuButton::GetDropFormats(
@@ -221,16 +264,6 @@ bool AppMenuButton::CanDrop(const ui::OSExchangeData& data) {
       BrowserActionDragData::CanDrop(data,
                                      toolbar_view_->browser()->profile()) :
       views::View::CanDrop(data);
-}
-
-void AppMenuButton::Layout() {
-  MenuButton::Layout();
-
-  // ToolbarView extends the bounds of the app button to the right in maximized
-  // mode. So instead of using the center point of local bounds, we use the
-  // center point of preferred size which doesn't change in maximized mode.
-  ink_drop_animation_controller_->SetInkDropCenter(
-      gfx::Rect(GetPreferredSize()).CenterPoint());
 }
 
 void AppMenuButton::OnDragEntered(const ui::DropTargetEvent& event) {
@@ -265,6 +298,10 @@ void AppMenuButton::OnPaint(gfx::Canvas* canvas) {
   views::MenuButton::OnPaint(canvas);
   if (ui::MaterialDesignController::IsModeMaterial())
     return;
-  icon_painter_->Paint(canvas, GetThemeProvider(), gfx::Rect(size()),
+  // Use GetPreferredSize() to center the icon inside the visible bounds rather
+  // than the whole size() (which may refer to hit test region extended to the
+  // end of the toolbar in maximized mode).
+  icon_painter_->Paint(canvas, GetThemeProvider(),
+                       gfx::Rect(GetPreferredSize()),
                        AppMenuIconPainter::BEZEL_NONE);
 }

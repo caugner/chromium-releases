@@ -4,12 +4,14 @@
 
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 
+#include <stddef.h>
+
 #include <algorithm>
 #include <functional>
 #include <map>
 #include <utility>
 
-#include "base/basictypes.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_split.h"
@@ -158,6 +160,7 @@ const struct EnglishToResouceId {
     {"xkb:is::ice", IDS_STATUSBAR_LAYOUT_ICELANDIC},
     {"xkb:it::ita", IDS_STATUSBAR_LAYOUT_ITALY},
     {"xkb:jp::jpn", IDS_STATUSBAR_LAYOUT_JAPAN},
+    {"xkb:kz::kaz", IDS_STATUSBAR_LAYOUT_KAZAKH},
     {"xkb:latam::spa", IDS_STATUSBAR_LAYOUT_LATIN_AMERICAN},
     {"xkb:lt::lit", IDS_STATUSBAR_LAYOUT_LITHUANIA},
     {"xkb:lv:apostrophe:lav", IDS_STATUSBAR_LAYOUT_LATVIA},
@@ -188,6 +191,8 @@ const struct EnglishToResouceId {
     {"xkb:us:intl:eng", IDS_STATUSBAR_LAYOUT_USA_INTERNATIONAL},
     {"xkb:us:intl:nld", IDS_STATUSBAR_LAYOUT_USA_INTERNATIONAL},
     {"xkb:us:intl:por", IDS_STATUSBAR_LAYOUT_USA_INTERNATIONAL},
+    {"xkb:us:workman-intl:eng", IDS_STATUSBAR_LAYOUT_USA_WORKMAN_INTERNATIONAL},
+    {"xkb:us:workman:eng", IDS_STATUSBAR_LAYOUT_USA_WORKMAN},
 };
 const size_t kEnglishToResourceIdArraySize =
     arraysize(kEnglishToResourceIdArray);
@@ -201,6 +206,7 @@ const struct InputMethodNameMap {
 } kInputMethodNameMap[] = {
     {"__MSG_INPUTMETHOD_ARRAY__", IDS_IME_NAME_INPUTMETHOD_ARRAY},
     {"__MSG_INPUTMETHOD_CANGJIE__", IDS_IME_NAME_INPUTMETHOD_CANGJIE},
+    {"__MSG_INPUTMETHOD_CANTONESE__", IDS_IME_NAME_INPUTMETHOD_CANTONESE},
     {"__MSG_INPUTMETHOD_DAYI__", IDS_IME_NAME_INPUTMETHOD_DAYI},
     {"__MSG_INPUTMETHOD_HANGUL_2_SET__", IDS_IME_NAME_INPUTMETHOD_HANGUL_2_SET},
     {"__MSG_INPUTMETHOD_HANGUL_3_SET_390__",
@@ -267,6 +273,7 @@ const struct InputMethodNameMap {
     {"__MSG_KEYBOARD_JAPANESE__", IDS_IME_NAME_KEYBOARD_JAPANESE},
     {"__MSG_KEYBOARD_KANNADA_PHONETIC__",
      IDS_IME_NAME_KEYBOARD_KANNADA_PHONETIC},
+    {"__MSG_KEYBOARD_KAZAKH__", IDS_IME_NAME_KEYBOARD_KAZAKH},
     {"__MSG_KEYBOARD_KHMER__", IDS_IME_NAME_KEYBOARD_KHMER},
     {"__MSG_KEYBOARD_LAO__", IDS_IME_NAME_KEYBOARD_LAO},
     {"__MSG_KEYBOARD_LATIN_AMERICAN__", IDS_IME_NAME_KEYBOARD_LATIN_AMERICAN},
@@ -329,6 +336,9 @@ const struct InputMethodNameMap {
     {"__MSG_KEYBOARD_US_EXTENDED__", IDS_IME_NAME_KEYBOARD_US_EXTENDED},
     {"__MSG_KEYBOARD_US_INTERNATIONAL__",
      IDS_IME_NAME_KEYBOARD_US_INTERNATIONAL},
+    {"__MSG_KEYBOARD_US_WORKMAN_INTERNATIONAL__",
+     IDS_IME_NAME_KEYBOARD_US_WORKMAN_INTERNATIONAL},
+    {"__MSG_KEYBOARD_US_WORKMAN__", IDS_IME_NAME_KEYBOARD_US_WORKMAN},
     {"__MSG_KEYBOARD_US__", IDS_IME_NAME_KEYBOARD_US},
     {"__MSG_KEYBOARD_VIETNAMESE_TCVN__", IDS_IME_NAME_KEYBOARD_VIETNAMESE_TCVN},
     {"__MSG_KEYBOARD_VIETNAMESE_TELEX__",

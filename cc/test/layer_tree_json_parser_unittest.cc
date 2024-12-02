@@ -4,6 +4,8 @@
 
 #include "cc/test/layer_tree_json_parser.h"
 
+#include <stddef.h>
+
 #include "cc/layers/layer.h"
 #include "cc/test/fake_impl_task_runner_provider.h"
 #include "cc/test/fake_layer_tree_host.h"
@@ -50,7 +52,7 @@ bool LayerTreesMatch(LayerImpl* const layer_impl,
 
   for (size_t i = 0; i < layer_impl->children().size(); ++i) {
     RETURN_IF_EXPECTATION_FAILS(EXPECT_TRUE(LayerTreesMatch(
-        layer_impl->children()[i], layer->children()[i].get())));
+        layer_impl->children()[i].get(), layer->children()[i].get())));
   }
 
   return true;
@@ -83,9 +85,9 @@ TEST_F(LayerTreeJsonParserSanityCheck, Basic) {
   child->SetHaveWheelEventHandlers(true);
   child->SetHaveScrollEventHandlers(true);
 
-  parent->AddChild(child.Pass());
-  root_impl->AddChild(parent.Pass());
-  tree->SetRootLayer(root_impl.Pass());
+  parent->AddChild(std::move(child));
+  root_impl->AddChild(std::move(parent));
+  tree->SetRootLayer(std::move(root_impl));
 
   std::string json = host_impl.LayerTreeAsJson();
   scoped_refptr<Layer> root = ParseTreeFromJson(json, NULL);
@@ -112,8 +114,8 @@ TEST_F(LayerTreeJsonParserSanityCheck, EventHandlerRegions) {
   touch_region.Union(gfx::Rect(40, 10, 20, 20));
   touch_layer->SetTouchEventHandlerRegion(touch_region);
 
-  root_impl->AddChild(touch_layer.Pass());
-  tree->SetRootLayer(root_impl.Pass());
+  root_impl->AddChild(std::move(touch_layer));
+  tree->SetRootLayer(std::move(root_impl));
 
   std::string json = host_impl.LayerTreeAsJson();
   scoped_refptr<Layer> root = ParseTreeFromJson(json, NULL);

@@ -4,6 +4,8 @@
 
 #include "cc/playback/display_list_raster_source.h"
 
+#include <stddef.h>
+
 #include "base/trace_event/trace_event.h"
 #include "cc/base/region.h"
 #include "cc/debug/debug_colors.h"
@@ -217,11 +219,10 @@ size_t DisplayListRasterSource::GetPictureMemoryUsage() const {
          painter_reported_memory_usage_;
 }
 
-void DisplayListRasterSource::PerformSolidColorAnalysis(
+bool DisplayListRasterSource::PerformSolidColorAnalysis(
     const gfx::Rect& content_rect,
     float contents_scale,
-    DisplayListRasterSource::SolidColorAnalysis* analysis) const {
-  DCHECK(analysis);
+    SkColor* color) const {
   TRACE_EVENT0("cc", "DisplayListRasterSource::PerformSolidColorAnalysis");
 
   gfx::Rect layer_rect =
@@ -230,7 +231,7 @@ void DisplayListRasterSource::PerformSolidColorAnalysis(
   layer_rect.Intersect(gfx::Rect(size_));
   skia::AnalysisCanvas canvas(layer_rect.width(), layer_rect.height());
   RasterForAnalysis(&canvas, layer_rect, 1.0f);
-  analysis->is_solid_color = canvas.GetColorIfSolid(&analysis->solid_color);
+  return canvas.GetColorIfSolid(color);
 }
 
 void DisplayListRasterSource::GetDiscardableImagesInRect(
@@ -239,6 +240,11 @@ void DisplayListRasterSource::GetDiscardableImagesInRect(
     std::vector<DrawImage>* images) const {
   DCHECK_EQ(0u, images->size());
   display_list_->GetDiscardableImagesInRect(layer_rect, raster_scale, images);
+}
+
+bool DisplayListRasterSource::HasDiscardableImageInRect(
+    const gfx::Rect& layer_rect) const {
+  return display_list_ && display_list_->HasDiscardableImageInRect(layer_rect);
 }
 
 bool DisplayListRasterSource::CoversRect(const gfx::Rect& layer_rect) const {

@@ -75,7 +75,7 @@ public class ReaderModeManager extends TabModelSelectorTabObserver
     private int mTabId;
 
     // The ReaderModePanel that this class is managing.
-    private ReaderModePanel mReaderModePanel;
+    protected ReaderModePanel mReaderModePanel;
 
     // The ChromeActivity that this panel exists in.
     private ChromeActivity mChromeActivity;
@@ -111,7 +111,7 @@ public class ReaderModeManager extends TabModelSelectorTabObserver
         }
         mTabStatusMap.clear();
 
-        DomDistillerUIUtils.destroy();
+        DomDistillerUIUtils.destroy(this);
 
         mChromeActivity = null;
         mReaderModePanel = null;
@@ -316,12 +316,8 @@ public class ReaderModeManager extends TabModelSelectorTabObserver
         return tab.getWebContents();
     }
 
-    /**
-     * This is a proxy method for those with access to the ReaderModeManagerDelegate to close the
-     * panel.
-     */
     @Override
-    public void closePanel(StateChangeReason reason, boolean animate) {
+    public void closeReaderPanel(StateChangeReason reason, boolean animate) {
         if (mReaderModePanel == null) return;
         mReaderModePanel.closePanel(reason, animate);
     }
@@ -391,12 +387,12 @@ public class ReaderModeManager extends TabModelSelectorTabObserver
      * showing.
      * @param reason The reason the panel is requesting to be shown.
      */
-    private void requestReaderPanelShow(StateChangeReason reason) {
+    protected void requestReaderPanelShow(StateChangeReason reason) {
         int currentTabId = mTabModelSelector.getCurrentTabId();
         if (currentTabId == Tab.INVALID_TAB_ID) return;
 
         if (mReaderModePanel == null || !mTabStatusMap.containsKey(currentTabId)
-                || mTabStatusMap.get(currentTabId).getStatus() == NOT_POSSIBLE
+                || mTabStatusMap.get(currentTabId).getStatus() != POSSIBLE
                 || mTabStatusMap.get(currentTabId).isDismissed()
                 || mIsInfobarContainerShown
                 || mIsFindToolbarShowing
@@ -408,23 +404,12 @@ public class ReaderModeManager extends TabModelSelectorTabObserver
     }
 
     /**
-     * A wrapper for the close method of the Reader Mode panel that checks for null and can be
-     * overridden for testing.
-     * @param reason The reason the panel is closing.
-     * @param animate True if the panel should animate closed.
-     */
-    private void closeReaderPanel(StateChangeReason reason, boolean animate) {
-        if (mReaderModePanel == null) return;
-        mReaderModePanel.closePanel(reason, animate);
-    }
-
-    /**
      * Orientation change event handler. Simply close the panel.
      */
     public void onOrientationChange() {
-        // Close to reset the panel then immediately show again.
-        closeReaderPanel(StateChangeReason.UNKNOWN, false);
-        requestReaderPanelShow(StateChangeReason.UNKNOWN);
+        if (mReaderModePanel != null) {
+            mReaderModePanel.onOrientationChanged();
+        }
     }
 
     /**

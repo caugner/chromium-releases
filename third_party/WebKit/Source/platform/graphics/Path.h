@@ -37,8 +37,6 @@
 #include "wtf/Allocator.h"
 #include "wtf/Forward.h"
 
-class SkPath;
-
 namespace blink {
 
 class AffineTransform;
@@ -76,14 +74,15 @@ public:
     Path& operator=(const SkPath&);
     bool operator==(const Path&) const;
 
-    bool contains(const FloatPoint&, WindRule = RULE_NONZERO) const;
+    bool contains(const FloatPoint&) const;
+    bool contains(const FloatPoint&, WindRule) const;
     bool strokeContains(const FloatPoint&, const StrokeData&) const;
     FloatRect boundingRect() const;
     FloatRect strokeBoundingRect(const StrokeData&) const;
 
     float length() const;
-    FloatPoint pointAtLength(float length, bool& ok) const;
-    bool pointAndNormalAtLength(float length, FloatPoint&, float&) const;
+    FloatPoint pointAtLength(float length) const;
+    void pointAndNormalAtLength(float length, FloatPoint&, float&) const;
 
     // Helper for computing a sequence of positions and normals (normal angles) on a path.
     // The best possible access pattern will be one where the |length| value is
@@ -93,10 +92,11 @@ public:
     // state-less method on Path.
     class PLATFORM_EXPORT PositionCalculator {
         WTF_MAKE_NONCOPYABLE(PositionCalculator);
+        USING_FAST_MALLOC(PositionCalculator);
     public:
         explicit PositionCalculator(const Path&);
 
-        bool pointAndNormalAtLength(float length, FloatPoint&, float&);
+        void pointAndNormalAtLength(float length, FloatPoint&, float&);
 
     private:
         SkPath m_path;
@@ -143,7 +143,6 @@ public:
     void transform(const AffineTransform&);
 
     void addPathForRoundedRect(const FloatRect&, const FloatSize& topLeftRadius, const FloatSize& topRightRadius, const FloatSize& bottomLeftRadius, const FloatSize& bottomRightRadius);
-    void addBeziersForRoundedRect(const FloatRect&, const FloatSize& topLeftRadius, const FloatSize& topRightRadius, const FloatSize& bottomLeftRadius, const FloatSize& bottomRightRadius);
 
     bool subtractPath(const Path&);
 

@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/network_screen_handler.h"
 
+#include <stddef.h>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
@@ -20,6 +22,8 @@
 #include "chrome/browser/chromeos/login/screens/core_oobe_actor.h"
 #include "chrome/browser/chromeos/login/screens/network_model.h"
 #include "chrome/browser/chromeos/login/ui/input_events_blocker.h"
+#include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
+#include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/chromeos/system/timezone_util.h"
 #include "chrome/browser/ui/webui/chromeos/login/l10n_util.h"
@@ -30,6 +34,7 @@
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_state_handler.h"
 #include "components/login/localized_values_builder.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
@@ -183,7 +188,7 @@ void NetworkScreenHandler::GetAdditionalParameters(
     language_list.reset(GetMinimalUILanguageList().release());
 
   // GetAdditionalParameters() is called when OOBE language is updated.
-  // This happens in two diferent cases:
+  // This happens in three different cases:
   //
   // 1) User selects new locale on OOBE screen. We need to sync active input
   // methods with locale, so EnableLoginLayouts() is needed.
@@ -202,8 +207,21 @@ void NetworkScreenHandler::GetAdditionalParameters(
   // So we need to disable activation of login layouts if we are already in
   // active user session.
   //
+  // 3) This is the bootstrapping process for the remora/"Slave" device. The
+  // locale & input of the remora/"Slave" device is set up by a shark/"Master"
+  // device. In this case we don't want EnableLoginLayout() to reset the input
+  // method to the hardware default method.
+  const bool is_remora = g_browser_process->platform_part()
+                             ->browser_policy_connector_chromeos()
+                             ->GetDeviceCloudPolicyManager()
+                             ->IsRemoraRequisition();
+
+  const bool is_slave = base::CommandLine::ForCurrentProcess()->HasSwitch(
+      chromeos::switches::kOobeBootstrappingSlave);
+
   const bool enable_layouts =
-      !user_manager::UserManager::Get()->IsUserLoggedIn();
+      !user_manager::UserManager::Get()->IsUserLoggedIn() && !is_slave &&
+      !is_remora;
 
   dict->Set("languageList", language_list.release());
   dict->Set(
@@ -232,7 +250,7 @@ base::ListValue* NetworkScreenHandler::GetTimezoneList() {
   CrosSettings::Get()->GetString(kSystemTimezone, &current_timezone_id);
 
   scoped_ptr<base::ListValue> timezone_list(new base::ListValue);
-  scoped_ptr<base::ListValue> timezones = system::GetTimezoneList().Pass();
+  scoped_ptr<base::ListValue> timezones = system::GetTimezoneList();
   for (size_t i = 0; i < timezones->GetSize(); ++i) {
     const base::ListValue* timezone = NULL;
     CHECK(timezones->GetList(i, &timezone));

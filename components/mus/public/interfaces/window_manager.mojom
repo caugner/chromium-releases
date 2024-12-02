@@ -12,34 +12,32 @@ struct WindowManagerConfig {
   array<Display> displays;
   mojo.Insets normal_client_area_insets;
   mojo.Insets maximized_client_area_insets;
+  // Max width needed to display the buttons on the title bar. The buttons are
+  // aligned to the trailing edge of the titlebar.
+  // TODO(sky): this API is very narrow, and assumes a particular config.
+  uint32 max_title_bar_button_width;
 };
 
 // Represents a core interface that should be implemented by any window manager
 // built on top of Mus.
-// For security reasons, methods that take window_ids can only pass window ids
-// created by calls to OpenWindow() from the *same connection* to the window
-// manager. The callback indicates success or failure.
 interface WindowManager {
-  // The window bounds as set by user input. Type: gfx::Rect.
-  const string kUserSetBounds_Property = "prop:user-set-bounds";
   // The window's preferred size as defined by its content. Type: gfx::Size.
   const string kPreferredSize_Property = "prop:preferred-size";
-  // The window's show state. Type: ShowState.
-  const string kShowState_Property = "prop:show-state";
   // The window's resize behavior. Type: ResizeBehavior.
   const string kResizeBehavior_Property = "prop:resize-behavior";
+  // Bounds the window is restored to. Type: gfx::Rect.
+  const string kRestoreBounds_Property = "prop:restore-bounds";
+  // Shadow style for the window. Type: mojom::ShadowStyle.
+  const string kShadowStyle_Property = "prop:shadow-style";
+  // The window's show state. Type: ShowState.
+  const string kShowState_Property = "prop:show-state";
+  // The window bounds as set by user input. Type: gfx::Rect.
+  const string kUserSetBounds_Property = "prop:user-set-bounds";
+  const string kWindowType_Property = "prop:window-type";
+  // The window's title. Type: mojom::String
+  const string kWindowTitle_Property = "prop:window-title";
 
   OpenWindow(WindowTreeClient client, map<string, array<uint8>> properties);
-
-  // Updates the window's preferred size and triggers a relayout of the window
-  // within its container.
-  SetPreferredSize(uint32 window_id, mojo.Size size) =>
-      (WindowManagerErrorCode result);
-
-  SetShowState(uint32 window_id, ShowState show_state) =>
-      (WindowManagerErrorCode result);
-
-  SetResizeBehavior(uint32 window_id, ResizeBehavior resize_behavior);
 
   GetConfig() => (WindowManagerConfig config);
 };

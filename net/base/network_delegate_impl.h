@@ -147,13 +147,6 @@ class NET_EXPORT NetworkDelegateImpl : public NetworkDelegate {
   // a virtual method call.
   void OnURLRequestDestroyed(URLRequest* request) override;
 
-  // Called when the current job for |request| is orphaned. This is a temporary
-  // callback to diagnose https://crbug.com/289715 and may not be used for other
-  // purposes. Note that it may be called after OnURLRequestDestroyed.
-  //
-  // TODO(davidben): Remove this once data has been gathered.
-  void OnURLRequestJobOrphaned(URLRequest* request) override;
-
   // Corresponds to ProxyResolverJSBindings::OnError.
   void OnPACScriptError(int line_number, const base::string16& error) override;
 
@@ -212,6 +205,7 @@ class NET_EXPORT NetworkDelegateImpl : public NetworkDelegate {
   // first-party cookies and cookie prefixes. https://crbug.com/459154,
   // https://crbug.com/541511
   bool OnAreExperimentalCookieFeaturesEnabled() const override;
+  bool OnAreStrictSecureCookiesEnabled() const override;
 
   // Called when the |referrer_url| for requesting |target_url| during handling
   // of the |request| is does not comply with the referrer policy (e.g. a

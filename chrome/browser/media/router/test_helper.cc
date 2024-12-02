@@ -17,8 +17,9 @@ MockMediaSinksObserver::MockMediaSinksObserver(MediaRouter* router,
 MockMediaSinksObserver::~MockMediaSinksObserver() {
 }
 
-MockMediaRoutesObserver::MockMediaRoutesObserver(MediaRouter* router)
-    : MediaRoutesObserver(router) {
+MockMediaRoutesObserver::MockMediaRoutesObserver(MediaRouter* router,
+    const MediaSource::Id source_id)
+    : MediaRoutesObserver(router, source_id) {
 }
 MockMediaRoutesObserver::~MockMediaRoutesObserver() {
 }
@@ -28,12 +29,10 @@ MockEventPageTracker::MockEventPageTracker() {
 MockEventPageTracker::~MockEventPageTracker() {
 }
 
-MockPresentationConnectionStateObserver::
-    MockPresentationConnectionStateObserver(MediaRouter* router,
-                                            const MediaRoute::Id& route_id)
-    : PresentationConnectionStateObserver(router, route_id) {}
+MockPresentationConnectionStateChangedCallback::
+    MockPresentationConnectionStateChangedCallback() = default;
 
-MockPresentationConnectionStateObserver::
-    ~MockPresentationConnectionStateObserver() = default;
+MockPresentationConnectionStateChangedCallback::
+    ~MockPresentationConnectionStateChangedCallback() = default;
 
 }  // namespace media_router

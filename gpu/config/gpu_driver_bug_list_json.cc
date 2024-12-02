@@ -19,7 +19,7 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
 {
   "name": "gpu driver bug list",
   // Please update the version number whenever you change this file.
-  "version": "8.32",
+  "version": "8.46",
   "entries": [
     {
       "id": 1,
@@ -1268,10 +1268,10 @@ LONG_STRING_CONST(
     {
       "id": 109,
       "description": "MakeCurrent is slow on Linux with NVIDIA drivers",
+      "vendor_id": "0x10de",
       "os": {
         "type": "linux"
       },
-      "gl_vendor": "NVIDIA.*",
       "features": [
         "use_virtualized_gl_contexts"
       ]
@@ -1451,7 +1451,7 @@ LONG_STRING_CONST(
         "type": "android"
       },
       "driver_version": {
-        "op": "=",
+        "op": ">=",
         "value": "103.0"
       },
       "gl_renderer": "Adreno \\(TM\\) 4.*",
@@ -1524,7 +1524,10 @@ LONG_STRING_CONST(
       "id": 130,
       "description": "NVIDIA fails glReadPixels from incomplete cube map texture",
       "cr_bugs": [518889],
-      "gl_vendor": "NVIDIA.*",
+      "vendor_id": "0x10de",
+      "os": {
+        "type": "linux"
+      },
       "features": [
         "force_cube_complete"
       ]
@@ -1595,6 +1598,145 @@ LONG_STRING_CONST(
       "features": [
         "disable_overlay_ca_layers",
         "disable_post_sub_buffers_for_onscreen_surfaces"
+      ]
+    },
+    {
+      "id": 136,
+      "description": "glGenerateMipmap fails if the zero texture level is not set on some Mac drivers",
+      "cr_bugs": [560499],
+      "os": {
+        "type": "macosx"
+      },
+      "features": [
+        "set_zero_level_before_generating_mipmap"
+      ]
+    },
+    {
+      "id": 137,
+      "description": "NVIDIA fails glReadPixels from incomplete cube map texture",
+      "cr_bugs": [518889],
+      "os": {
+        "type": "android"
+      },
+      "gl_vendor": "NVIDIA.*",
+      "features": [
+        "force_cube_complete"
+      ]
+    },
+    {
+      "id": 138,
+      "description": "NVIDIA drivers before 346 lack features in NV_path_rendering and related extensions to implement driver level path rendering.",
+      "cr_bugs": [344330],
+      "os": {
+        "type": "android"
+      },
+      "gl_vendor": "NVIDIA.*",
+      "driver_version": {
+        "op": "<",
+        "value": "346"
+      },
+      "features": [
+        "disable_gl_path_rendering"
+      ]
+    },
+    {
+      "id": 139,
+      "description": "Mesa drivers wrongly report supporting GL_EXT_texture_rg with GLES 2.0 prior version 11.1",
+      "cr_bugs": [545904],
+      "os": {
+        "type": "linux"
+      },
+      "driver_vendor": "Mesa",
+      "driver_version": {
+        "op": "<",
+        "value": "11.1"
+      },
+      "gl_type": "gles",
+      "gl_version": {
+        "op": "<",
+        "value": "3.0"
+      },
+      "disabled_extensions": [
+        "GL_EXT_texture_rg"
+      ]
+    },
+    {
+      "id": 140,
+      "description": "glReadPixels fails on FBOs with SRGB_ALPHA textures, Nexus 5X",
+      "cr_bugs": [550292, 565179],
+      "os": {
+        "type": "android"
+        // Originally on Android 6.0. Expect it to fail in later versions.
+      },
+      "gl_vendor": "Qualcomm",
+      "gl_renderer": "Adreno \\(TM\\) 4.*", // Originally on 418.
+      "features": [
+        "disable_ext_srgb"
+      ]
+    },
+    {
+      "id": 141,
+      "cr_bugs": [570897],
+      "description": "Framebuffer discarding can hurt performance on non-tilers",
+      "os": {
+        "type": "win"
+      },
+      "features": [
+        "disable_discard_framebuffer"
+      ]
+    },
+    {
+      "id": 142,
+      "cr_bugs": [563714],
+      "description": "Pack parameters work incorrectly with pack buffer bound",
+      "os": {
+        "type": "linux"
+      },
+      "vendor_id": "0x10de",
+      "gl_vendor": "NVIDIA.*",
+      "features": [
+        "pack_parameters_workaround_with_pack_buffer"
+      ]
+    },
+    {
+      "id": 143,
+      "description": "Timer queries crash on Intel GPUs on Linux",
+      "cr_bugs": [540543, 576991],
+      "os": {
+        "type": "linux"
+      },
+      "vendor_id": "0x8086",
+      "driver_vendor": "Mesa",
+      "disabled_extensions": [
+        "GL_ARB_timer_query",
+        "GL_EXT_timer_query"
+      ]
+    },
+    {
+      "id": 145,
+      "cr_bugs": [585250],
+      "description": "EGLImage ref counting across EGLContext/threads is broken",
+      "os": {
+        "type": "android"
+      },
+      "gl_vendor": "Qualcomm.*",
+      "gl_renderer": "Adreno \\(TM\\) 4.*",
+      "driver_version": {
+        "op": "<",
+        "value": "141.0"
+      },
+      "features": [
+        "broken_egl_image_ref_counting"
+      ]
+    },
+    {
+      "id": 147,
+      "description": "Limit max texure size to 4096 on all of Android",
+      "os": {
+        "type": "android"
+      },
+      "features": [
+        "max_texture_size_limit_4096"
       ]
     }
   ]

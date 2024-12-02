@@ -4,6 +4,8 @@
 
 #include "media/filters/decoder_stream.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/location.h"
@@ -49,12 +51,13 @@ DecoderStream<StreamType>::DecoderStream(
       state_(STATE_UNINITIALIZED),
       stream_(NULL),
       decoder_selector_(new DecoderSelector<StreamType>(task_runner,
-                                                        decoders.Pass(),
+                                                        std::move(decoders),
                                                         media_log)),
       decoded_frames_since_fallback_(0),
       active_splice_(false),
       decoding_eos_(false),
       pending_decode_requests_(0),
+      duration_tracker_(8),
       weak_factory_(this) {}
 
 template <DemuxerStream::Type StreamType>
@@ -214,6 +217,13 @@ bool DecoderStream<StreamType>::CanDecodeMore() const {
 }
 
 template <DemuxerStream::Type StreamType>
+base::TimeDelta DecoderStream<StreamType>::AverageDuration() const {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  return duration_tracker_.count() ? duration_tracker_.Average()
+                                   : base::TimeDelta();
+}
+
+template <DemuxerStream::Type StreamType>
 void DecoderStream<StreamType>::SelectDecoder(
     const SetCdmReadyCB& set_cdm_ready_cb) {
   decoder_selector_->SelectDecoder(
@@ -243,11 +253,11 @@ void DecoderStream<StreamType>::OnDecoderSelected(
     DCHECK(decoder_);
   }
 
-  previous_decoder_ = decoder_.Pass();
+  previous_decoder_ = std::move(decoder_);
   decoded_frames_since_fallback_ = 0;
-  decoder_ = selected_decoder.Pass();
+  decoder_ = std::move(selected_decoder);
   if (decrypting_demuxer_stream) {
-    decrypting_demuxer_stream_ = decrypting_demuxer_stream.Pass();
+    decrypting_demuxer_stream_ = std::move(decrypting_demuxer_stream);
     stream_ = decrypting_demuxer_stream_.get();
   }
 
@@ -306,6 +316,8 @@ void DecoderStream<StreamType>::Decode(
 
   if (buffer->end_of_stream())
     decoding_eos_ = true;
+  else if (buffer->duration() != kNoTimestamp())
+    duration_tracker_.AddSample(buffer->duration());
 
   ++pending_decode_requests_;
   decoder_->Decode(buffer,
@@ -516,8 +528,9 @@ void DecoderStream<StreamType>::ReinitializeDecoder() {
   DCHECK_EQ(pending_decode_requests_, 0);
 
   state_ = STATE_REINITIALIZING_DECODER;
+  // Decoders should not need CDMs during reinitialization.
   DecoderStreamTraits<StreamType>::InitializeDecoder(
-      decoder_.get(), stream_,
+      decoder_.get(), stream_, SetCdmReadyCB(),
       base::Bind(&DecoderStream<StreamType>::OnDecoderReinitialized,
                  weak_factory_.GetWeakPtr()),
       base::Bind(&DecoderStream<StreamType>::OnDecodeOutputReady,
@@ -540,8 +553,8 @@ void DecoderStream<StreamType>::OnDecoderReinitialized(bool success) {
     // Reinitialization failed. Try to fall back to one of the remaining
     // decoders. This will consume at least one decoder so doing it more than
     // once is safe.
-    // For simplicity, don't attempt to fall back to a decryptor. Calling this
-    // with a null callback ensures that one won't be selected.
+    // For simplicity, don't attempt to fall back to a decrypting decoder.
+    // Calling this with a null callback ensures that one won't be selected.
     SelectDecoder(SetCdmReadyCB());
   } else {
     CompleteDecoderReinitialization(true);

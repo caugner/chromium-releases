@@ -16,7 +16,9 @@ cd "$(dirname "$0")"
 rm -rf components components-chromium
 rm -rf ../../web-animations-js/sources
 
-bower install
+bower install --no-color
+
+rm components/*/.travis.yml
 
 mv components/web-animations-js ../../web-animations-js/sources
 cp ../../web-animations-js/sources/COPYING ../../web-animations-js/LICENSE
@@ -52,7 +54,7 @@ find components/iron-selector -type f -exec chmod -x {} \;
 # Remove carriage returns to make CQ happy.
 find components -type f \( -name \*.html -o -name \*.css -o -name \*.js\
   -o -name \*.md -o -name \*.sh -o -name \*.json -o -name \*.gitignore\
-  -o -name \*.bat \) -print0 | xargs -0 sed -i -e $'s/\r$//g'
+  -o -name \*.bat -o -name \*.svg \) -print0 | xargs -0 sed -i -e $'s/\r$//g'
 
 # Resolve a unicode encoding issue in dom-innerHTML.html.
 NBSP=$(python -c 'print u"\u00A0".encode("utf-8")')
@@ -64,3 +66,25 @@ sed -i 's/['"$NBSP"']/\\u00A0/g' components/polymer/polymer-mini.html
 # and apply additional chrome specific patches. NOTE: Where possible create
 # a Polymer issue and/or pull request to minimize these patches.
 patch -p1 < chromium.patch
+
+new=$(git status --porcelain components-chromium | grep '^??' | \
+      cut -d' ' -f2 | egrep '\.(html|js|css)$')
+
+if [[ ! -z "${new}" ]]; then
+  echo
+  echo 'These files appear to have been added:'
+  echo "${new}" | sed 's/^/  /'
+fi
+
+deleted=$(git status --porcelain components-chromium | grep '^.D' | \
+          sed 's/^.//' | cut -d' ' -f2 | egrep '\.(html|js|css)$')
+
+if [[ ! -z "${deleted}" ]]; then
+  echo
+  echo 'These files appear to have been removed:'
+  echo "${deleted}" | sed 's/^/  /'
+fi
+
+if [[ ! -z "${new}${deleted}" ]]; then
+  echo
+fi

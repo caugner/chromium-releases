@@ -5,10 +5,14 @@
 #ifndef CONTENT_RENDERER_MEDIA_ANDROID_MEDIA_SOURCE_DELEGATE_H_
 #define CONTENT_RENDERER_MEDIA_ANDROID_MEDIA_SOURCE_DELEGATE_H_
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <string>
 #include <vector>
 
 #include "base/callback.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -106,8 +110,8 @@ class MediaSourceDelegate : public media::DemuxerHost {
 
  private:
   // Methods inherited from DemuxerHost.
-  void AddBufferedTimeRange(base::TimeDelta start,
-                            base::TimeDelta end) override;
+  void OnBufferedTimeRangesChanged(
+      const media::Ranges<base::TimeDelta>& ranges) override;
   void SetDuration(base::TimeDelta duration) override;
   void OnDemuxerError(media::PipelineStatus status) override;
   void AddTextStream(media::DemuxerStream* text_stream,
@@ -139,7 +143,7 @@ class MediaSourceDelegate : public media::DemuxerHost {
 
   void OnDemuxerOpened();
   void OnEncryptedMediaInitData(media::EmeInitDataType init_data_type,
-                                const std::vector<uint8>& init_data);
+                                const std::vector<uint8_t>& init_data);
   void NotifyDemuxerReady();
 
   // Stops and clears objects on the media thread.

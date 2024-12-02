@@ -344,13 +344,15 @@ class MetaBuildWrapper(object):
     }
 
   def Lookup(self):
-    self.ReadConfigFile()
-    config = self.ConfigFromArgs()
-    if not config in self.configs:
-      raise MBErr('Config "%s" not found in %s' %
-                  (config, self.args.config_file))
+    vals = self.ReadBotConfig()
+    if not vals:
+      self.ReadConfigFile()
+      config = self.ConfigFromArgs()
+      if not config in self.configs:
+        raise MBErr('Config "%s" not found in %s' %
+                    (config, self.args.config_file))
 
-    vals = self.FlattenConfig(config)
+      vals = self.FlattenConfig(config)
 
     # Do some basic sanity checking on the config so that we
     # don't have to do this in every caller.
@@ -359,6 +361,29 @@ class MetaBuildWrapper(object):
         'Unknown meta-build type "%s"' % vals['gn_args'])
 
     return vals
+
+  def ReadBotConfig(self):
+    if not self.args.master or not self.args.builder:
+      return {}
+    path = self.PathJoin(self.chromium_src_dir, 'ios', 'build', 'bots',
+                         self.args.master, self.args.builder + '.json')
+    if not self.Exists(path):
+      return {}
+
+    contents = json.loads(self.ReadFile(path))
+    gyp_vals = contents.get('GYP_DEFINES', {})
+    if isinstance(gyp_vals, dict):
+      gyp_defines = ' '.join('%s=%s' % (k, v) for k, v in gyp_vals.items())
+    else:
+      gyp_defines = ' '.join(gyp_vals)
+    gn_args = ' '.join(contents.get('gn_args', []))
+
+    return {
+        'type': contents.get('mb_type', ''),
+        'gn_args': gn_args,
+        'gyp_defines': gyp_defines,
+        'gyp_crosscompile': False,
+    }
 
   def ReadConfigFile(self):
     if not self.Exists(self.args.config_file):
@@ -620,7 +645,8 @@ class MetaBuildWrapper(object):
   def RunGYPAnalyze(self, vals):
     output_dir = self.ParseGYPConfigPath(self.args.path[0])
     if self.args.verbose:
-      inp = self.ReadInputJSON(['files', 'targets'])
+      inp = self.ReadInputJSON(['files', 'test_targets',
+                                'additional_compile_targets'])
       self.Print()
       self.Print('analyze input:')
       self.PrintJSON(inp)
@@ -757,6 +783,7 @@ class MetaBuildWrapper(object):
     # Ensure that we have an environment that only contains
     # the exact values of the GYP variables we need.
     env = os.environ.copy()
+    env['GYP_GENERATORS'] = 'ninja'
     if 'GYP_CHROMIUM_NO_ACTION' in env:
       del env['GYP_CHROMIUM_NO_ACTION']
     if 'GYP_CROSSCOMPILE' in env:
@@ -773,27 +800,20 @@ class MetaBuildWrapper(object):
     if ret:
       return ret
 
-    # TODO(dpranke): add 'test_targets' and 'additional_compile_targets'
-    # as required keys once the recipe has been converted over.
-    # See crbug.com/552146.
-    inp = self.ReadInputJSON(['files'])
+    inp = self.ReadInputJSON(['files', 'test_targets',
+                              'additional_compile_targets'])
     if self.args.verbose:
       self.Print()
       self.Print('analyze input:')
       self.PrintJSON(inp)
       self.Print()
 
-    use_new_logic = ('test_targets' in inp and
-                     'additional_compile_targets' in inp)
-    if use_new_logic:
-      # TODO(crbug.com/555273) - currently GN treats targets and
-      # additional_compile_targets identically since we can't tell the
-      # difference between a target that is a group in GN and one that isn't.
-      # We should eventually fix this and treat the two types differently.
-      targets = (set(inp['test_targets']) |
-                 set(inp['additional_compile_targets']))
-    else:
-      targets = set(inp['targets'])
+    # TODO(crbug.com/555273) - currently GN treats targets and
+    # additional_compile_targets identically since we can't tell the
+    # difference between a target that is a group in GN and one that isn't.
+    # We should eventually fix this and treat the two types differently.
+    targets = (set(inp['test_targets']) |
+               set(inp['additional_compile_targets']))
 
     output_path = self.args.output_path[0]
 
@@ -802,14 +822,11 @@ class MetaBuildWrapper(object):
     # since we can't deal with it yet.
     if (any(f.endswith('.gn') or f.endswith('.gni') for f in inp['files']) or
         'all' in targets):
-      if use_new_logic:
-        self.WriteJSON({
-              'status': 'Found dependency (all)',
-              'compile_targets': sorted(targets),
-              'test_targets': sorted(targets & set(inp['test_targets'])),
-            }, output_path)
-      else:
-        self.WriteJSON({'status': 'Found dependency (all)'}, output_path)
+      self.WriteJSON({
+            'status': 'Found dependency (all)',
+            'compile_targets': sorted(targets),
+            'test_targets': sorted(targets & set(inp['test_targets'])),
+          }, output_path)
       return 0
 
     # This shouldn't normally happen, but could due to unusual race conditions,
@@ -817,18 +834,11 @@ class MetaBuildWrapper(object):
     # the patch has landed.
     if not inp['files']:
       self.Print('Warning: No files modified in patch, bailing out early.')
-      if use_new_logic:
-        self.WriteJSON({
-              'status': 'No dependency',
-              'compile_targets': [],
-              'test_targets': [],
-            }, output_path)
-      else:
-        self.WriteJSON({
-              'status': 'No dependency',
-              'targets': [],
-              'build_targets': [],
-            }, output_path)
+      self.WriteJSON({
+            'status': 'No dependency',
+            'compile_targets': [],
+            'test_targets': [],
+          }, output_path)
       return 0
 
     ret = 0
@@ -869,32 +879,18 @@ class MetaBuildWrapper(object):
       self.RemoveFile(response_file.name)
 
     if matching_targets:
-      if use_new_logic:
-        self.WriteJSON({
-              'status': 'Found dependency',
-              'compile_targets': sorted(matching_targets),
-              'test_targets': sorted(matching_targets &
-                                     set(inp['test_targets'])),
-            }, output_path)
-      else:
-        self.WriteJSON({
+      self.WriteJSON({
             'status': 'Found dependency',
-            'targets': sorted(matching_targets),
-            'build_targets': sorted(matching_targets),
-        }, output_path)
+            'compile_targets': sorted(matching_targets),
+            'test_targets': sorted(matching_targets &
+                                   set(inp['test_targets'])),
+          }, output_path)
     else:
-      if use_new_logic:
-        self.WriteJSON({
-            'status': 'No dependency',
-            'compile_targets': [],
-            'test_targets': [],
-        }, output_path)
-      else:
-        self.WriteJSON({
-            'status': 'No dependency',
-            'targets': [],
-            'build_targets': [],
-        }, output_path)
+      self.WriteJSON({
+          'status': 'No dependency',
+          'compile_targets': [],
+          'test_targets': [],
+      }, output_path)
 
     if self.args.verbose:
       outp = json.loads(self.ReadFile(output_path))

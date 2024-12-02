@@ -23,11 +23,6 @@ interface ExternalNavigationDelegate {
     List<ComponentName> queryIntentActivities(Intent intent);
 
     /**
-     * Determine if the given intent can be resolved to at least one activity.
-     */
-    boolean canResolveActivity(Intent intent);
-
-    /**
      * Determine if Chrome is the default or only handler for a given intent. If true, Chrome
      * will handle the intent when started.
      */
@@ -66,10 +61,11 @@ interface ExternalNavigationDelegate {
             boolean needsToCloseTab);
 
     /**
+     * @param url The requested url.
      * @param tab The current tab.
      * @return Whether we should block the navigation and request file access before proceeding.
      */
-    boolean shouldRequestFileAccess(Tab tab);
+    boolean shouldRequestFileAccess(String url, Tab tab);
 
     /**
      * Trigger a UI affordance that will ask the user to grant file access.  After the access
@@ -103,4 +99,9 @@ interface ExternalNavigationDelegate {
      * Check if Chrome is running in document mode.
      */
     boolean isDocumentMode();
+
+    /**
+     * @return Default SMS application's package name. Null if there isn't any.
+     */
+    String getDefaultSmsPackageName();
 }

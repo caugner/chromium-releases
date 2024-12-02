@@ -6,6 +6,8 @@
 
 #import <Foundation/Foundation.h>
 
+#include <utility>
+
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
@@ -16,6 +18,7 @@
 #include "base/mac/bind_objc_block.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/scoped_block.h"
+#include "base/macros.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/path_service.h"
 #include "base/prefs/json_pref_store.h"
@@ -197,7 +200,7 @@ void CrNetEnvironment::StartNetLogInternal(
 
   net_log_observer_.reset(new net::WriteToFileNetLogObserver());
   net_log_observer_->set_capture_mode(capture_mode);
-  net_log_observer_->StartObserving(net_log_.get(), file.Pass(), nullptr,
+  net_log_observer_->StartObserving(net_log_.get(), std::move(file), nullptr,
                                     nullptr);
 }
 
@@ -406,7 +409,7 @@ void CrNetEnvironment::InitializeOnNetworkThread() {
           .release());
   main_context_->set_proxy_service(
       net::ProxyService::CreateUsingSystemProxyResolver(
-          proxy_config_service_.Pass(), 0, nullptr)
+          std::move(proxy_config_service_), 0, nullptr)
           .release());
 
   // Cache
@@ -428,7 +431,6 @@ void CrNetEnvironment::InitializeOnNetworkThread() {
   params.channel_id_service = main_context_->channel_id_service();
   params.transport_security_state = main_context_->transport_security_state();
   params.proxy_service = main_context_->proxy_service();
-  params.ssl_session_cache_shard = "";
   params.ssl_config_service = main_context_->ssl_config_service();
   params.http_auth_handler_factory = main_context_->http_auth_handler_factory();
   params.network_delegate = main_context_->network_delegate();
@@ -455,9 +457,9 @@ void CrNetEnvironment::InitializeOnNetworkThread() {
   //                See https://crbug.com/523858.
   net::HttpNetworkSession* http_network_session =
       new net::HttpNetworkSession(params);
-  net::HttpCache* main_cache = new net::HttpCache(
-      http_network_session, main_backend.Pass(),
-      true /* set_up_quic_server_info */);
+  net::HttpCache* main_cache =
+      new net::HttpCache(http_network_session, std::move(main_backend),
+                         true /* set_up_quic_server_info */);
   main_context_->set_http_transaction_factory(main_cache);
 
   // Cookies

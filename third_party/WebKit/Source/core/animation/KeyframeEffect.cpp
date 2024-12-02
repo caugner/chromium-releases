@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/animation/KeyframeEffect.h"
 
 #include "bindings/core/v8/Dictionary.h"
@@ -98,6 +97,8 @@ void KeyframeEffect::attach(Animation* animation)
     if (m_target) {
         m_target->ensureElementAnimations().animations().add(animation);
         m_target->setNeedsAnimationStyleRecalc();
+        if (RuntimeEnabledFeatures::webAnimationsSVGEnabled() && m_target->isSVGElement())
+            toSVGElement(m_target)->setWebAnimationsPending();
     }
     AnimationEffect::attach(animation);
 }
@@ -209,6 +210,8 @@ void KeyframeEffect::clearEffects()
     m_sampledEffect = nullptr;
     restartAnimationOnCompositor();
     m_target->setNeedsAnimationStyleRecalc();
+    if (RuntimeEnabledFeatures::webAnimationsSVGEnabled() && m_target->isSVGElement())
+        toSVGElement(*m_target).clearWebAnimatedAttributes();
     invalidate();
 }
 

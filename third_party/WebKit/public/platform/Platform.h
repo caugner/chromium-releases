@@ -61,6 +61,7 @@ namespace blink {
 
 class WebAudioBus;
 class WebBlobRegistry;
+class WebCanvasCaptureHandler;
 class WebClipboard;
 class WebCompositorSupport;
 class WebConvertableToTraceFormat;
@@ -82,6 +83,7 @@ class WebMIDIAccessorClient;
 class WebMediaRecorderHandler;
 class WebMediaStreamCenter;
 class WebMediaStreamCenterClient;
+class WebMediaStreamTrack;
 class WebMemoryDumpProvider;
 class WebMessagePortChannel;
 class WebMimeRegistry;
@@ -249,10 +251,11 @@ public:
     // Returns a base64 encoded signed copy of a public key from a newly
     // generated key pair and the supplied challenge string. keySizeindex
     // specifies the strength of the key.
-    virtual WebString signedPublicKeyAndChallengeString(unsigned keySizeIndex,
-                                                        const WebString& challenge,
-                                                        const WebURL& url) { return WebString(); }
-
+    virtual WebString signedPublicKeyAndChallengeString(
+        unsigned keySizeIndex, const WebString& challenge, const WebURL& url, const WebURL& topOrigin)
+    {
+        return WebString();
+    }
 
     // Memory --------------------------------------------------------------
 
@@ -270,20 +273,8 @@ public:
     // zero, if there is no limit.
     virtual size_t virtualMemoryLimitMB() { return 0; }
 
-    // True when Blink runs on low end devices.
-    virtual bool isLowEndDeviceMode() { return false; }
-
     // Return the number of of processors of the current machine.
     virtual size_t numberOfProcessors() { return 0; }
-
-    // Returns private and shared usage, in bytes. Private bytes is the amount of
-    // memory currently allocated to this process that cannot be shared. Returns
-    // false on platform specific error conditions.
-    virtual bool processMemorySizesInBytes(size_t* privateBytes, size_t* sharedBytes) { return false; }
-
-    // Reports number of bytes used by memory allocator for internal needs.
-    // Returns true if the size has been reported, or false otherwise.
-    virtual bool memoryAllocatorWasteInBytes(size_t*) { return false; }
 
     // Allocates discardable memory. May return nullptr, even if the platform supports
     // discardable memory. If nonzero, however, then the WebDiscardableMmeory is
@@ -327,7 +318,7 @@ public:
     virtual WebString userAgent() { return WebString(); }
 
     // A suggestion to cache this metadata in association with this URL.
-    virtual void cacheMetadata(const WebURL&, int64 responseTime, const char* data, size_t dataSize) { }
+    virtual void cacheMetadata(const WebURL&, int64_t responseTime, const char* data, size_t dataSize) { }
 
     // Returns the decoded data url if url had a supported mimetype and parsing was successful.
     virtual WebData parseDataURL(const WebURL&, WebString& mimetype, WebString& charset) { return WebData(); }
@@ -433,15 +424,12 @@ public:
     // it is recommended that the fixed point be no further in the past than the epoch.
     virtual double monotonicallyIncreasingTimeSeconds() { return 0; }
 
-    // System trace time in seconds. For example, on Chrome OS, this timestamp should be
-    // synchronized with ftrace timestamps.
-    virtual double systemTraceTime() { return 0; }
-
-    // WebKit clients must implement this funcion if they use cryptographic randomness.
-    virtual void cryptographicallyRandomValues(unsigned char* buffer, size_t length) = 0;
-
     // Returns an interface to the main thread. Can be null if blink was initialized on a thread without a message loop.
     BLINK_PLATFORM_EXPORT WebThread* mainThread() const;
+
+    // Returns an interface to the compositor thread. This can be null if the
+    // renderer was created with threaded rendering desabled.
+    virtual WebThread* compositorThread() const { return 0; }
 
     // Vibration -----------------------------------------------------------
 
@@ -582,6 +570,17 @@ public:
     // Must be called on the thread that called registerMemoryDumpProvider().
     virtual void unregisterMemoryDumpProvider(blink::WebMemoryDumpProvider*) { }
 
+    class TraceLogEnabledStateObserver {
+    public:
+        virtual ~TraceLogEnabledStateObserver() = default;
+        virtual void onTraceLogEnabled() = 0;
+        virtual void onTraceLogDisabled() = 0;
+    };
+
+    // Register or unregister a trace log state observer. Does not take ownership.
+    virtual void addTraceLogEnabledStateObserver(TraceLogEnabledStateObserver*) {}
+    virtual void removeTraceLogEnabledStateObserver(TraceLogEnabledStateObserver*) {}
+
     // Returns a newly allocated WebProcessMemoryDump instance.
     virtual blink::WebProcessMemoryDump* createProcessMemoryDump() { return nullptr; }
 
@@ -638,10 +637,12 @@ public:
     // May return null if WebRTC functionality is not avaliable or out of resources.
     virtual WebMediaStreamCenter* createMediaStreamCenter(WebMediaStreamCenterClient*) { return nullptr; }
 
+    // Creates an WebCanvasCaptureHandler to capture Canvas output.
+    virtual WebCanvasCaptureHandler* createCanvasCaptureHandler(const WebSize&, double, WebMediaStreamTrack*) { return nullptr; }
     // WebWorker ----------------------------------------------------------
 
-    virtual void didStartWorkerRunLoop() { }
-    virtual void didStopWorkerRunLoop() { }
+    virtual void didStartWorkerThread() { }
+    virtual void willStopWorkerThread() { }
 
     // WebCrypto ----------------------------------------------------------
 

@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "platform/heap/Heap.h"
 
 #include "platform/ScriptForbiddenScope.h"
@@ -48,7 +47,6 @@
 #include "wtf/LeakAnnotations.h"
 #include "wtf/MainThread.h"
 #include "wtf/Partitions.h"
-#include "wtf/PassOwnPtr.h"
 
 namespace blink {
 
@@ -215,6 +213,12 @@ void Heap::doShutdown()
     GCInfoTable::shutdown();
     ThreadState::shutdown();
     ASSERT(Heap::allocatedSpace() == 0);
+}
+
+CrossThreadPersistentRegion& Heap::crossThreadPersistentRegion()
+{
+    DEFINE_THREAD_SAFE_STATIC_LOCAL(CrossThreadPersistentRegion, persistentRegion, new CrossThreadPersistentRegion());
+    return persistentRegion;
 }
 
 #if ENABLE(ASSERT)
@@ -397,9 +401,7 @@ void Heap::collectGarbage(BlinkGC::StackState stackState, BlinkGC::GCType gcType
 
     // Resume all parked threads upon leaving this scope.
     ResumeThreadScope resumeThreads(gcType);
-
-    if (state->isMainThread())
-        ScriptForbiddenScope::enter();
+    ScriptForbiddenIfMainThreadScope scriptForbidden;
 
     TRACE_EVENT2("blink_gc", "Heap::collectGarbage",
         "lazySweeping", gcType == BlinkGC::GCWithoutSweep,
@@ -462,9 +464,6 @@ void Heap::collectGarbage(BlinkGC::StackState stackState, BlinkGC::GCType gcType
         s_gcGeneration = 1;
     }
 #endif
-
-    if (state->isMainThread())
-        ScriptForbiddenScope::exit();
 }
 
 void Heap::collectGarbageForTerminatingThread(ThreadState* state)
@@ -661,7 +660,7 @@ BasePage* Heap::lookup(Address address)
 
 static Mutex& regionTreeMutex()
 {
-    AtomicallyInitializedStaticReference(Mutex, mutex, new Mutex);
+    DEFINE_THREAD_SAFE_STATIC_LOCAL(Mutex, mutex, new Mutex);
     return mutex;
 }
 
@@ -679,64 +678,6 @@ void Heap::addPageMemoryRegion(PageMemoryRegion* region)
 {
     MutexLocker locker(regionTreeMutex());
     RegionTree::add(new RegionTree(region), &s_regionTree);
-}
-
-PageMemoryRegion* Heap::RegionTree::lookup(Address address)
-{
-    RegionTree* current = s_regionTree;
-    while (current) {
-        Address base = current->m_region->base();
-        if (address < base) {
-            current = current->m_left;
-            continue;
-        }
-        if (address >= base + current->m_region->size()) {
-            current = current->m_right;
-            continue;
-        }
-        ASSERT(current->m_region->contains(address));
-        return current->m_region;
-    }
-    return nullptr;
-}
-
-void Heap::RegionTree::add(RegionTree* newTree, RegionTree** context)
-{
-    ASSERT(newTree);
-    Address base = newTree->m_region->base();
-    for (RegionTree* current = *context; current; current = *context) {
-        ASSERT(!current->m_region->contains(base));
-        context = (base < current->m_region->base()) ? &current->m_left : &current->m_right;
-    }
-    *context = newTree;
-}
-
-void Heap::RegionTree::remove(PageMemoryRegion* region, RegionTree** context)
-{
-    ASSERT(region);
-    ASSERT(context);
-    Address base = region->base();
-    RegionTree* current = *context;
-    for (; current; current = *context) {
-        if (region == current->m_region)
-            break;
-        context = (base < current->m_region->base()) ? &current->m_left : &current->m_right;
-    }
-
-    // Shutdown via detachMainThread might not have populated the region tree.
-    if (!current)
-        return;
-
-    *context = nullptr;
-    if (current->m_left) {
-        add(current->m_left, context);
-        current->m_left = nullptr;
-    }
-    if (current->m_right) {
-        add(current->m_right, context);
-        current->m_right = nullptr;
-    }
-    delete current;
 }
 
 void Heap::resetHeapCounters()
@@ -761,7 +702,7 @@ HeapDoesNotContainCache* Heap::s_heapDoesNotContainCache;
 bool Heap::s_shutdownCalled = false;
 FreePagePool* Heap::s_freePagePool;
 OrphanedPagePool* Heap::s_orphanedPagePool;
-Heap::RegionTree* Heap::s_regionTree = nullptr;
+RegionTree* Heap::s_regionTree = nullptr;
 size_t Heap::s_allocatedSpace = 0;
 size_t Heap::s_allocatedObjectSize = 0;
 size_t Heap::s_objectSizeAtLastGC = 0;

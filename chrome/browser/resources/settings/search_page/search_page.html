@@ -8,24 +8,25 @@
 
 <dom-module id="settings-search-page">
   <link rel="import" type="css"
-      href="chrome://md-settings/settings_page/settings_page.css">
+      href="chrome://md-settings/settings_shared.css">
   <link rel="import" type="css" href="search_page.css">
   <template>
     <settings-animated-pages id="pages" current-route="{{currentRoute}}"
         section="search">
       <neon-animatable id="main">
-        <p i18n-content="searchExplanation"></p>
-
-        <div class="search-engines">
-          <select id="searchEnginesMenu" on-change="defaultEngineGuidChanged_">
+        <div class="settings-box split">
+          <p class="start" i18n-content="searchExplanation"></p>
+          <select id="searchEnginesMenu"
+                on-change="defaultEngineGuidChanged_">
             <template is="dom-repeat" items="[[searchEngines]]">
-              <option value="[[item.guid]]">{{item.name}}</option>
+              <option value="[[item.guid]]">[[item.name]]</option>
             </template>
           </select>
-
-          <paper-button class="search-engines"
+        </div>
+        <div class="settings-box">
+          <paper-button class="link-button"
               i18n-content="searchManageButtonLabel"
-              on-tap="onSearchEnginesTap_" raised>
+              on-tap="onSearchEnginesTap_">
           </paper-button>
         </div>
       </neon-animatable>
@@ -33,16 +34,6 @@
         <settings-subheader i18n-values="page-title:searchEnginesLabel">
         </settings-subheader>
         <settings-search-engines-page></settings-search-engines-page>
-        <paper-button class="search-engines-advanced"
-            i18n-content="advancedPageTitle"
-            on-tap="onSearchEnginesAdvancedTap_" raised>
-        </paper-button>
-      </neon-animatable>
-      <neon-animatable id="search-engines-advanced">
-        <!-- This sub-subpage is purely a placeholder to provide an example. -->
-        <settings-subheader i18n-values="page-title:searchEnginesLabel">
-        </settings-subheader>
-        <p i18n-content="searchExplanation"></p>
       </neon-animatable>
     </settings-animated-pages>
   </template>

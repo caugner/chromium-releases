@@ -13,10 +13,6 @@ Running: testSourceURLComment
 function keepAlive() {}
 hasSourceURL: true
 
-Running: testDeprecatedSourceURLComment
-function keepAlive() {}
-hasSourceURL: true
-
 Running: testSourceURLAndMappingURLComment
 function keepAlive() {}
 //# sourceMappingURL=sourceMappingURL.map
@@ -29,5 +25,11 @@ hasSourceURL: true
 
 Running: testNonRelativeURL
 function relativeURLScript() {}
+hasSourceURL: true
+
+Running: testMultipleSourceURLComment
+
+//# sourceURL=evalURL2.js
+function keepAlive() {}
 hasSourceURL: true
 

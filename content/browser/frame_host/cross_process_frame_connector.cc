@@ -13,6 +13,7 @@
 #include "content/browser/frame_host/render_frame_proxy_host.h"
 #include "content/browser/frame_host/render_widget_host_view_child_frame.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
+#include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/common/frame_messages.h"
@@ -43,6 +44,7 @@ bool CrossProcessFrameConnector::OnMessageReceived(const IPC::Message& msg) {
                         OnReclaimCompositorResources)
     IPC_MESSAGE_HANDLER(FrameHostMsg_ForwardInputEvent, OnForwardInputEvent)
     IPC_MESSAGE_HANDLER(FrameHostMsg_FrameRectChanged, OnFrameRectChanged)
+    IPC_MESSAGE_HANDLER(FrameHostMsg_VisibilityChanged, OnVisibilityChanged)
     IPC_MESSAGE_HANDLER(FrameHostMsg_InitializeChildFrame,
                         OnInitializeChildFrame)
     IPC_MESSAGE_HANDLER(FrameHostMsg_SatisfySequence, OnSatisfySequence)
@@ -75,7 +77,7 @@ void CrossProcessFrameConnector::RenderProcessGone() {
 }
 
 void CrossProcessFrameConnector::ChildFrameCompositorFrameSwapped(
-    uint32 output_surface_id,
+    uint32_t output_surface_id,
     int host_id,
     int route_id,
     scoped_ptr<cc::CompositorFrame> frame) {
@@ -170,6 +172,17 @@ void CrossProcessFrameConnector::UpdateCursor(const WebCursor& cursor) {
     root_view->UpdateCursor(cursor);
 }
 
+void CrossProcessFrameConnector::TransformPointToRootCoordSpace(
+    const gfx::Point& point,
+    cc::SurfaceId surface_id,
+    gfx::Point* transformed_point) {
+  RenderWidgetHostViewBase* root_view = GetRootRenderWidgetHostView();
+  *transformed_point = point;
+  if (root_view)
+    root_view->TransformPointToLocalCoordSpace(point, surface_id,
+                                               transformed_point);
+}
+
 bool CrossProcessFrameConnector::HasFocus() {
   RenderWidgetHostViewBase* root_view = GetRootRenderWidgetHostView();
   if (root_view)
@@ -214,6 +227,16 @@ void CrossProcessFrameConnector::OnFrameRectChanged(
     const gfx::Rect& frame_rect) {
   if (!frame_rect.size().IsEmpty())
     SetSize(frame_rect);
+}
+
+void CrossProcessFrameConnector::OnVisibilityChanged(bool visible) {
+  if (!view_)
+    return;
+
+  if (visible)
+    view_->Show();
+  else
+    view_->Hide();
 }
 
 void CrossProcessFrameConnector::SetDeviceScaleFactor(float scale_factor) {

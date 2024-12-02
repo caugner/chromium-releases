@@ -25,7 +25,6 @@
  *
  */
 
-#include "config.h"
 #include "core/events/MessageEvent.h"
 
 #include "bindings/core/v8/ExceptionMessages.h"
@@ -226,12 +225,12 @@ v8::Local<v8::Object> MessageEvent::associateWithWrapper(v8::Isolate* isolate, c
     case MessageEvent::DataTypeSerializedScriptValue:
         break;
     case MessageEvent::DataTypeString:
-        V8HiddenValue::setHiddenValue(isolate, wrapper, V8HiddenValue::stringData(isolate), v8String(isolate, dataAsString()));
+        V8HiddenValue::setHiddenValue(ScriptState::current(isolate), wrapper, V8HiddenValue::stringData(isolate), v8String(isolate, dataAsString()));
         break;
     case MessageEvent::DataTypeBlob:
         break;
     case MessageEvent::DataTypeArrayBuffer:
-        V8HiddenValue::setHiddenValue(isolate, wrapper, V8HiddenValue::arrayBufferData(isolate), toV8(dataAsArrayBuffer(), wrapper, isolate));
+        V8HiddenValue::setHiddenValue(ScriptState::current(isolate), wrapper, V8HiddenValue::arrayBufferData(isolate), toV8(dataAsArrayBuffer(), wrapper, isolate));
         break;
     }
 

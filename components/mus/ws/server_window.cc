@@ -5,6 +5,7 @@
 #include "components/mus/ws/server_window.h"
 
 #include <inttypes.h>
+#include <stddef.h>
 
 #include "base/strings/stringprintf.h"
 #include "components/mus/common/transient_window_utils.h"
@@ -18,13 +19,21 @@ namespace mus {
 namespace ws {
 
 ServerWindow::ServerWindow(ServerWindowDelegate* delegate, const WindowId& id)
+    : ServerWindow(delegate, id, Properties()) {}
+
+ServerWindow::ServerWindow(ServerWindowDelegate* delegate,
+                           const WindowId& id,
+                           const Properties& properties)
     : delegate_(delegate),
       id_(id),
       parent_(nullptr),
       stacking_target_(nullptr),
       transient_parent_(nullptr),
       visible_(false),
+      cursor_id_(mojom::CURSOR_NULL),
       opacity_(1),
+      can_focus_(true),
+      properties_(properties),
       // Don't notify newly added observers during notification. This causes
       // problems for code that adds an observer as part of an observer
       // notification (such as ServerWindowDrawTracker).
@@ -34,8 +43,7 @@ ServerWindow::ServerWindow(ServerWindowDelegate* delegate, const WindowId& id)
 }
 
 ServerWindow::~ServerWindow() {
-  FOR_EACH_OBSERVER(ServerWindowObserver, observers_,
-                    OnWillDestroyWindow(this));
+  FOR_EACH_OBSERVER(ServerWindowObserver, observers_, OnWindowDestroying(this));
 
   if (transient_parent_)
     transient_parent_->RemoveTransientWindow(this);
@@ -67,8 +75,8 @@ void ServerWindow::RemoveObserver(ServerWindowObserver* observer) {
 void ServerWindow::CreateSurface(mojom::SurfaceType surface_type,
                                  mojo::InterfaceRequest<mojom::Surface> request,
                                  mojom::SurfaceClientPtr client) {
-  GetOrCreateSurfaceManager()->CreateSurface(surface_type, request.Pass(),
-                                             client.Pass());
+  GetOrCreateSurfaceManager()->CreateSurface(surface_type, std::move(request),
+                                             std::move(client));
 }
 
 void ServerWindow::Add(ServerWindow* child) {
@@ -152,14 +160,19 @@ void ServerWindow::SetBounds(const gfx::Rect& bounds) {
                     OnWindowBoundsChanged(this, old_bounds, bounds));
 }
 
-void ServerWindow::SetClientArea(const gfx::Insets& insets) {
-  if (client_area_ == insets)
+void ServerWindow::SetClientArea(
+    const gfx::Insets& insets,
+    const std::vector<gfx::Rect>& additional_client_areas) {
+  if (client_area_ == insets &&
+      additional_client_areas == additional_client_areas_) {
     return;
+  }
 
-  const gfx::Insets old_client_area = client_area_;
+  additional_client_areas_ = additional_client_areas;
   client_area_ = insets;
-  FOR_EACH_OBSERVER(ServerWindowObserver, observers_,
-                    OnWindowClientAreaChanged(this, old_client_area, insets));
+  FOR_EACH_OBSERVER(
+      ServerWindowObserver, observers_,
+      OnWindowClientAreaChanged(this, insets, additional_client_areas));
 }
 
 const ServerWindow* ServerWindow::GetRoot() const {
@@ -254,6 +267,15 @@ void ServerWindow::SetOpacity(float value) {
   delegate_->OnScheduleWindowPaint(this);
 }
 
+void ServerWindow::SetPredefinedCursor(mus::mojom::Cursor value) {
+  if (value == cursor_id_)
+    return;
+  cursor_id_ = value;
+  FOR_EACH_OBSERVER(
+      ServerWindowObserver, observers_,
+      OnWindowPredefinedCursorChanged(this, static_cast<int32_t>(value)));
+}
+
 void ServerWindow::SetTransform(const gfx::Transform& transform) {
   if (transform_ == transform)
     return;
@@ -322,6 +344,14 @@ ServerWindowSurfaceManager* ServerWindow::GetOrCreateSurfaceManager() {
   if (!surface_manager_.get())
     surface_manager_.reset(new ServerWindowSurfaceManager(this));
   return surface_manager_.get();
+}
+
+void ServerWindow::SetUnderlayOffset(const gfx::Vector2d& offset) {
+  if (offset == underlay_offset_)
+    return;
+
+  underlay_offset_ = offset;
+  delegate_->OnScheduleWindowPaint(this);
 }
 
 #if !defined(NDEBUG)

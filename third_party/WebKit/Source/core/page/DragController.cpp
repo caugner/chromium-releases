@@ -24,7 +24,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/page/DragController.h"
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
@@ -116,7 +115,7 @@ static PlatformMouseEvent createMouseEvent(DragData* dragData)
     return PlatformMouseEvent(dragData->clientPosition(), dragData->globalPosition(),
         LeftButton, PlatformEvent::MouseMoved, 0,
         static_cast<PlatformEvent::Modifiers>(dragData->modifiers()),
-        PlatformMouseEvent::RealOrIndistinguishable, currentTime());
+        PlatformMouseEvent::RealOrIndistinguishable, monotonicallyIncreasingTime());
 }
 
 static DataTransfer* createDraggingDataTransfer(DataTransferAccessPolicy policy, DragData* dragData)
@@ -243,7 +242,7 @@ bool DragController::performDrag(DragData* dragData)
             // Sending an event can result in the destruction of the view and part.
             DataTransfer* dataTransfer = createDraggingDataTransfer(DataTransferReadable, dragData);
             dataTransfer->setSourceOperation(dragData->draggingSourceOperationMask());
-            preventedDefault = mainFrame->eventHandler().performDragAndDrop(createMouseEvent(dragData), dataTransfer);
+            preventedDefault = mainFrame->eventHandler().performDragAndDrop(createMouseEvent(dragData), dataTransfer) != WebInputEventResult::NotHandled;
             dataTransfer->setAccessPolicy(DataTransferNumb); // Invalidate clipboard here for security
         }
         if (preventedDefault) {
@@ -602,7 +601,7 @@ bool DragController::tryDHTMLDrag(DragData* dragData, DragOperation& operation)
     dataTransfer->setSourceOperation(srcOpMask);
 
     PlatformMouseEvent event = createMouseEvent(dragData);
-    if (!mainFrame->eventHandler().updateDragAndDrop(event, dataTransfer)) {
+    if (mainFrame->eventHandler().updateDragAndDrop(event, dataTransfer) == WebInputEventResult::NotHandled) {
         dataTransfer->setAccessPolicy(DataTransferNumb); // invalidate clipboard here for security
         return false;
     }
@@ -797,7 +796,7 @@ static PassOwnPtr<DragImage> dragImageForImage(Element* element, Image* image, c
     IntPoint origin;
 
     InterpolationQuality interpolationQuality = element->ensureComputedStyle()->imageRendering() == ImageRenderingPixelated ? InterpolationNone : InterpolationHigh;
-    RespectImageOrientationEnum shouldRespectImageOrientation = element->layoutObject() ? element->layoutObject()->shouldRespectImageOrientation() : DoNotRespectImageOrientation;
+    RespectImageOrientationEnum shouldRespectImageOrientation = LayoutObject::shouldRespectImageOrientation(element->layoutObject());
     ImageOrientation orientation;
 
     if (shouldRespectImageOrientation == RespectImageOrientation && image->isBitmapImage())

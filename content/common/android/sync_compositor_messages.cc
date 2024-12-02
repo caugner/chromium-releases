@@ -7,7 +7,9 @@
 namespace content {
 
 SyncCompositorCommonBrowserParams::SyncCompositorCommonBrowserParams()
-    : bytes_limit(0u) {}
+    : bytes_limit(0u),
+      update_root_scroll_offset(false),
+      begin_frame_source_paused(false) {}
 
 SyncCompositorCommonBrowserParams::~SyncCompositorCommonBrowserParams() {}
 
@@ -28,6 +30,13 @@ SyncCompositorDemandDrawHwParams::SyncCompositorDemandDrawHwParams(
       transform_for_tile_priority(transform_for_tile_priority) {}
 
 SyncCompositorDemandDrawHwParams::~SyncCompositorDemandDrawHwParams() {}
+
+SyncCompositorSetSharedMemoryParams::SyncCompositorSetSharedMemoryParams()
+    : buffer_size(0u) {}
+
+SyncCompositorDemandDrawSwParams::SyncCompositorDemandDrawSwParams() {}
+
+SyncCompositorDemandDrawSwParams::~SyncCompositorDemandDrawSwParams() {}
 
 SyncCompositorCommonRendererParams::SyncCompositorCommonRendererParams()
     : version(0u),

@@ -46,7 +46,10 @@
       # GN version: //chrome:chrome_initial
       'target_name': 'chrome_initial',
       'type': 'executable',
-      'dependencies' : [ '../chrome/common_constants.gyp:version_header', ],
+      'dependencies' : [
+        '../chrome/common_constants.gyp:version_header',
+        '../chrome/chrome_features.gyp:chrome_common_features',
+      ],
       # Name the exe chrome.exe, not chrome_initial.exe.
       'product_name': 'chrome',
       'mac_bundle': 1,
@@ -68,12 +71,10 @@
         'app/chrome_watcher_client_win.h',
         'app/chrome_watcher_command_line_win.cc',
         'app/chrome_watcher_command_line_win.h',
-        'app/main_dll_loader_win.cc',
-        'app/main_dll_loader_win.h',
         'app/kasko_client.cc',
         'app/kasko_client.h',
-        'app/signature_validator_win.cc',
-        'app/signature_validator_win.h',
+        'app/main_dll_loader_win.cc',
+        'app/main_dll_loader_win.h',
       ],
       'mac_bundle_resources': [
         'app/app-Info.plist',
@@ -102,12 +103,17 @@
             'chrome_watcher',
             'chrome_watcher_client',
             '../components/components.gyp:browser_watcher_client',
+            '../components/components.gyp:crash_component',
+            '../third_party/crashpad/crashpad/handler/handler.gyp:crashpad_handler_lib',
+            '../third_party/kasko/kasko.gyp:kasko',
+          ],
+          'sources': [
+            'app/chrome_crash_reporter_client.cc',
+            'app/chrome_crash_reporter_client.h',
           ],
           'conditions': [
-            ['kasko==1', {
-              'dependencies': [
-                'kasko_dll',
-              ],
+            ['win_console_app==1', {
+              'defines': ['WIN_CONSOLE_APP'],
             }],
           ],
         }],
@@ -418,15 +424,16 @@
             '../chrome_elf/chrome_elf.gyp:chrome_elf',
             '../components/components.gyp:crash_component',
             '../components/components.gyp:crash_core_common',
+            '../components/components.gyp:flags_ui_switches',
+            '../components/components.gyp:startup_metric_utils_common',
             '../sandbox/sandbox.gyp:sandbox',
+            '../third_party/kasko/kasko.gyp:kasko_features',
             '../ui/gfx/gfx.gyp:gfx',
             '../win8/metro_driver/metro_driver.gyp:metro_driver',
             '../win8/delegate_execute/delegate_execute.gyp:*',
           ],
           'sources': [
             '<(SHARED_INTERMEDIATE_DIR)/chrome_version/chrome_exe_version.rc',
-            'app/chrome_crash_reporter_client.cc',
-            'app/chrome_crash_reporter_client.h',
             'app/chrome_exe.rc',
             'common/crash_keys.cc',
             'common/crash_keys.h',
@@ -445,14 +452,10 @@
                 'ole32.dll',
                 'oleaut32.dll',
               ],
-              'AdditionalDependencies': [
-                'wintrust.lib',
-                'crypt32.lib'
-              ],
               'conditions': [
-                ['asan==0', {
-                  # Set /SUBSYSTEM:WINDOWS for chrome.exe itself, except for the
-                  # AddressSanitizer build where console output is important.
+                ['win_console_app==0', {
+                  # Set /SUBSYSTEM:WINDOWS for chrome.exe itself, unless a
+                  # console build has been requested.
                   'SubSystem': '2',
                 }],
               ],
@@ -549,6 +552,7 @@
                 '../breakpad/breakpad.gyp:breakpad_sender_win64',
                 '../components/components.gyp:breakpad_win64',
                 '../components/components.gyp:crash_core_common_win64',
+                '../components/components.gyp:flags_ui_switches_win64',
                 '../chrome/common_constants.gyp:common_constants_win64',
                 '../components/nacl.gyp:nacl_win64',
                 '../crypto/crypto.gyp:crypto_nacl_win64',

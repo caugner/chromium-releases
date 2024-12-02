@@ -7,11 +7,6 @@
 <script>
 function test()
 {
-    function dumpNavigator(sourcesNavigatorView)
-    {
-        InspectorTest.dumpNavigatorView(sourcesNavigatorView, "sources", "  ");
-    }
-
     function createNavigatorView(constructor)
     {
         var navigatorView = new constructor();
@@ -28,32 +23,22 @@ function test()
     function addUISourceCode(url, isContentScript)
     {
         var contentProvider = new WebInspector.StaticContentProvider(WebInspector.resourceTypes.Script, "");
-        var uiSourceCode = InspectorTest.testNetworkProject.addFileForURL(url, contentProvider, isContentScript);
+        var uiSourceCode = InspectorTest.testNetworkProject.addFileForURL(url, contentProvider, InspectorTest.mainFrame(), isContentScript);
         uiSourceCodes.push(uiSourceCode);
-    }
-
-    function dumpNavigator()
-    {
-        InspectorTest.dumpNavigatorView(sourcesNavigatorView, "sources", "  ");
-        InspectorTest.dumpNavigatorView(contentScriptsNavigatorView, "contentScripts", "  ");
     }
 
     function dumpScriptsList()
     {
-        InspectorTest.addResult("");
-        dumpNavigator();
-
-        sourcesNavigatorView.revealUISourceCode(uiSourceCodes[0]);
-        contentScriptsNavigatorView.revealUISourceCode(uiSourceCodes[0]);
-
-        dumpNavigator();
+        InspectorTest.dumpNavigatorViewInAllModes(sourcesNavigatorView);
+        InspectorTest.dumpNavigatorViewInAllModes(contentScriptsNavigatorView);
 
         for (var i = 0; i < uiSourceCodes.length; ++i) {
             sourcesNavigatorView.revealUISourceCode(uiSourceCodes[i]);
             contentScriptsNavigatorView.revealUISourceCode(uiSourceCodes[i]);
         }
 
-        dumpNavigator();
+        InspectorTest.dumpNavigatorViewInAllModes(sourcesNavigatorView);
+        InspectorTest.dumpNavigatorViewInAllModes(contentScriptsNavigatorView);
     }
 
     var scripts = [

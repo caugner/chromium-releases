@@ -10,7 +10,6 @@ import os
 import sys
 
 VALID_TOOLCHAINS = [
-  'bionic',
   'clang-newlib',
   'newlib',
   'glibc',
@@ -43,6 +42,7 @@ DSC_FORMAT = {
                   'linker-script'],
                  True),
         'SOURCES': (list, '', True),
+        'EXTRA_SOURCES': (list, '', False),
         'CFLAGS': (list, '', False),
         'CFLAGS_GCC': (list, '', False),
         'CXXFLAGS': (list, '', False),

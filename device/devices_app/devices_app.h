@@ -5,12 +5,14 @@
 #ifndef DEVICE_DEVICES_DEVICES_APP_H_
 #define DEVICE_DEVICES_DEVICES_APP_H_
 
+#include <stddef.h>
+
 #include "base/cancelable_callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "mojo/application/public/cpp/application_delegate.h"
-#include "mojo/application/public/cpp/interface_factory.h"
+#include "mojo/shell/public/cpp/application_delegate.h"
+#include "mojo/shell/public/cpp/interface_factory.h"
 
 namespace mojo {
 class ApplicationImpl;

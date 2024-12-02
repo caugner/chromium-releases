@@ -2,9 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stddef.h>
+
 #include "base/auto_reset.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_reader.h"
+#include "base/macros.h"
 #include "base/prefs/pref_service.h"
 #include "base/values.h"
 #include "chrome/browser/download/download_item_model.h"
@@ -17,6 +20,7 @@
 #include "content/public/test/mock_download_item.h"
 #include "content/public/test/mock_download_manager.h"
 #include "content/public/test/test_utils.h"
+#include "net/test/embedded_test_server/embedded_test_server.h"
 
 namespace {
 
@@ -129,7 +133,7 @@ class DownloadsDOMHandlerTest : public InProcessBrowserTest {
     browser()->profile()->GetPrefs()->SetFilePath(
         prefs::kDownloadDefaultDirectory,
         downloads_directory_.path());
-    CHECK(test_server()->Start());
+    CHECK(embedded_test_server()->Start());
     mock_handler_->HandleGetDownloads(nullptr);
   }
 
@@ -138,7 +142,7 @@ class DownloadsDOMHandlerTest : public InProcessBrowserTest {
   }
 
   void DownloadAnItem() {
-    GURL url = test_server()->GetURL("files/downloads/image.jpg");
+    GURL url = embedded_test_server()->GetURL("/downloads/image.jpg");
     std::vector<GURL> url_chain;
     url_chain.push_back(url);
     base::Time current(base::Time::Now());

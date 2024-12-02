@@ -36,13 +36,18 @@ WebInspector.ViewportControl = function(provider)
 {
     this.element = createElement("div");
     this.element.style.overflow = "auto";
-    this._topGapElement = this.element.createChild("div", "viewport-control-gap-element");
-    this._topGapElement.textContent = ".";
+    this._topGapElement = this.element.createChild("div");
     this._topGapElement.style.height = "0px";
+    this._topGapElement.style.color = "transparent";
     this._contentElement = this.element.createChild("div");
-    this._bottomGapElement = this.element.createChild("div", "viewport-control-gap-element");
-    this._bottomGapElement.textContent = ".";
+    this._bottomGapElement = this.element.createChild("div");
     this._bottomGapElement.style.height = "0px";
+    this._bottomGapElement.style.color = "transparent";
+
+    // Text content needed for range intersection checks in _updateSelectionModel.
+    // Use Unicode ZERO WIDTH NO-BREAK SPACE, which avoids contributing any height to the element's layout overflow.
+    this._topGapElement.textContent = "\uFEFF";
+    this._bottomGapElement.textContent = "\uFEFF";
 
     this._provider = provider;
     this.element.addEventListener("scroll", this._onScroll.bind(this), false);
@@ -373,8 +378,7 @@ WebInspector.ViewportControl.prototype = {
         if (!this._visibleHeight())
             return;  // Do nothing for invisible controls.
 
-        var itemCount = this._provider.itemCount();
-        if (!itemCount) {
+        if (!this._provider.itemCount()) {
             for (var i = 0; i < this._renderedItems.length; ++i)
                 this._renderedItems[i].willHide();
             this._renderedItems = [];
@@ -394,18 +398,18 @@ WebInspector.ViewportControl.prototype = {
         this._scrolledToBottom = this.element.isScrolledToBottom();
         var isInvalidating = !this._cumulativeHeights;
 
-        if (this._cumulativeHeights && itemCount !== this._cumulativeHeights.length)
-            delete this._cumulativeHeights;
         for (var i = 0; i < this._renderedItems.length; ++i) {
             // Tolerate 1-pixel error due to double-to-integer rounding errors.
             if (this._cumulativeHeights && Math.abs(this._cachedItemHeight(this._firstVisibleIndex + i) - this._renderedItems[i].element().offsetHeight) > 1)
                 delete this._cumulativeHeights;
         }
         this._rebuildCumulativeHeightsIfNeeded();
+        var itemCount = this._cumulativeHeights.length;
         var oldFirstVisibleIndex = this._firstVisibleIndex;
         var oldLastVisibleIndex = this._lastVisibleIndex;
 
-        var shouldStickToBottom = this._stickToBottom && this._scrolledToBottom;
+        var shouldStickToBottom = isInvalidating && this._stickToBottom && this._scrolledToBottom;
+
         if (shouldStickToBottom) {
             this._lastVisibleIndex = itemCount - 1;
             this._firstVisibleIndex = Math.max(itemCount - Math.ceil(visibleHeight / this._provider.minimumRowHeight()), 0);

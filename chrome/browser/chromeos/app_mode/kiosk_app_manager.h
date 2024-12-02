@@ -5,12 +5,13 @@
 #ifndef CHROME_BROWSER_CHROMEOS_APP_MODE_KIOSK_APP_MANAGER_H_
 #define CHROME_BROWSER_CHROMEOS_APP_MODE_KIOSK_APP_MANAGER_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
-#include "base/basictypes.h"
 #include "base/callback_forward.h"
 #include "base/lazy_instance.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/observer_list.h"
@@ -228,7 +229,7 @@ class KioskAppManager : public KioskAppDataDelegate,
 
  private:
   friend struct base::DefaultLazyInstanceTraits<KioskAppManager>;
-  friend struct base::DefaultDeleter<KioskAppManager>;
+  friend std::default_delete<KioskAppManager>;
   friend class KioskAppManagerTest;
   friend class KioskTest;
   friend class KioskUpdateTest;

@@ -42,22 +42,21 @@ source_set("shell") {
 
   public_deps = [
     "//base",
-    "//mojo/application/public/interfaces",
     "//mojo/common",
     "//mojo/public/cpp/bindings",
     "//mojo/services/network/public/interfaces",
     "//mojo/services/updater",
+    "//mojo/shell/public/interfaces",
     "//url",
   ]
   deps = [
-    ":interfaces",
     "//base/third_party/dynamic_annotations",
     "//crypto:crypto",
-    "//mojo/application/public/cpp:sources",
-    "//url",
-    "//third_party/mojo/src/mojo/edk/system",
     "//mojo/environment:chromium",
+    "//mojo/shell/public/cpp:sources",
     "//mojo/util:filename_util",
+    "//third_party/mojo/src/mojo/edk/system",
+    "//url",
   ]
 }
 
@@ -73,21 +72,21 @@ source_set("test_support") {
   deps = [
     ":shell",
     ":test_bindings",
-    "//mojo/application/public/cpp",
-    "//mojo/application/public/interfaces",
+    "//mojo/shell/public/cpp",
+    "//mojo/shell/public/interfaces",
     "//testing/gtest",
   ]
 }
 
 test("mojo_shell_unittests") {
   sources = [
-    "../fetcher/about_fetcher_unittest.cc",
-    "../fetcher/data_fetcher_unittest.cc",
-    "../fetcher/network_fetcher_unittest.cc",
-    "../fetcher/url_resolver_unittest.cc",
     "application_manager_unittest.cc",
     "capability_filter_unittest.cc",
     "data_pipe_peek_unittest.cc",
+    "fetcher/about_fetcher_unittest.cc",
+    "fetcher/data_fetcher_unittest.cc",
+    "fetcher/network_fetcher_unittest.cc",
+    "fetcher/url_resolver_unittest.cc",
     "query_util_unittest.cc",
   ]
 
@@ -96,13 +95,14 @@ test("mojo_shell_unittests") {
     ":test_bindings",
     ":test_support",
     "//base",
-    "//mojo/application/public/cpp",
-    "//mojo/fetcher",
-    "//mojo/package_manager",
+    "//mojo/edk/system:test_utils",
     "//mojo/public/cpp/system",
+    "//mojo/shell/fetcher",
+    "//mojo/shell/package_manager",
+    "//mojo/shell/public/cpp",
     "//mojo/util:filename_util",
-    "//third_party/mojo/src/mojo/edk/test:run_all_unittests",
     "//testing/gtest",
+    "//third_party/mojo/src/mojo/edk/test:run_all_unittests",
     "//url",
   ]
 }
@@ -112,12 +112,6 @@ mojom("test_bindings") {
     "application_manager_apptests.mojom",
     "capability_filter_unittest.mojom",
     "test.mojom",
-  ]
-}
-
-mojom("interfaces") {
-  sources = [
-    "application_manager.mojom",
   ]
 }
 
@@ -133,10 +127,11 @@ mojo_native_application("apptests") {
     ":test_bindings",
     "//base",
     "//base/test:test_config",
-    "//mojo/application/public/cpp:sources",
-    "//mojo/application/public/cpp:test_support",
     "//mojo/common:common_base",
     "//mojo/converters/network",
+    "//mojo/shell/public/cpp:sources",
+    "//mojo/shell/public/cpp:test_support",
+    "//mojo/shell/public/interfaces",
   ]
 
   data_deps = [
@@ -156,12 +151,13 @@ executable("application_manager_apptest_driver") {
     ":test_bindings",
     "//base",
     "//base:base_static",
-    "//mojo/application/public/cpp",
+    "//build/config/sanitizers:deps",
     "//mojo/common:common_base",
     "//mojo/converters/network",
     "//mojo/runner:init",
     "//mojo/runner/child:test_native_main",
-    "//mojo/shell:interfaces",
+    "//mojo/shell/public/cpp",
+    "//mojo/shell/public/interfaces",
     "//third_party/mojo/src/mojo/edk/system",
   ]
 }
@@ -176,9 +172,10 @@ executable("application_manager_apptest_target") {
   deps = [
     ":test_bindings",
     "//base",
-    "//mojo/application/public/cpp",
+    "//build/config/sanitizers:deps",
     "//mojo/common:common_base",
     "//mojo/converters/network",
     "//mojo/runner/child:test_native_main",
+    "//mojo/shell/public/cpp",
   ]
 }

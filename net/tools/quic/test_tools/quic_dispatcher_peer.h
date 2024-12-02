@@ -7,6 +7,7 @@
 
 #include "net/tools/quic/quic_dispatcher.h"
 
+#include "base/macros.h"
 #include "net/base/ip_endpoint.h"
 
 namespace net {
@@ -27,10 +28,6 @@ class QuicDispatcherPeer {
                         QuicPacketWriterWrapper* writer);
 
   static QuicPacketWriter* GetWriter(QuicDispatcher* dispatcher);
-
-  static void SetPacketWriterFactory(
-      QuicDispatcher* dispatcher,
-      QuicDispatcher::PacketWriterFactory* packet_writer_factory);
 
   static QuicConnectionHelperInterface* GetHelper(QuicDispatcher* dispatcher);
 

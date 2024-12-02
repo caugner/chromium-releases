@@ -4,6 +4,10 @@
 
 #include "mojo/converters/input_events/input_events_type_converters.h"
 
+#include <stdint.h>
+
+#include <utility>
+
 #if defined(USE_X11)
 #include <X11/extensions/XInput2.h>
 #include <X11/Xlib.h>
@@ -37,6 +41,9 @@ ui::EventType MojoMouseEventTypeToUIEvent(const mus::mojom::EventPtr& event) {
         return ui::ET_MOUSE_DRAGGED;
       }
       return ui::ET_MOUSE_MOVED;
+
+    case mus::mojom::EVENT_TYPE_MOUSE_EXIT:
+      return ui::ET_MOUSE_EXITED;
 
     default:
       NOTREACHED();
@@ -83,46 +90,57 @@ void SetPointerDataLocationFromEvent(const ui::LocatedEvent& located_event,
 
 }  // namespace
 
-COMPILE_ASSERT(static_cast<int32>(mus::mojom::EVENT_FLAGS_NONE) ==
-                   static_cast<int32>(ui::EF_NONE),
-               event_flags_should_match);
-COMPILE_ASSERT(static_cast<int32>(mus::mojom::EVENT_FLAGS_CAPS_LOCK_DOWN) ==
-                   static_cast<int32>(ui::EF_CAPS_LOCK_DOWN),
-               event_flags_should_match);
-COMPILE_ASSERT(static_cast<int32>(mus::mojom::EVENT_FLAGS_SHIFT_DOWN) ==
-                   static_cast<int32>(ui::EF_SHIFT_DOWN),
-               event_flags_should_match);
-COMPILE_ASSERT(static_cast<int32>(mus::mojom::EVENT_FLAGS_CONTROL_DOWN) ==
-                   static_cast<int32>(ui::EF_CONTROL_DOWN),
-               event_flags_should_match);
-COMPILE_ASSERT(static_cast<int32>(mus::mojom::EVENT_FLAGS_ALT_DOWN) ==
-                   static_cast<int32>(ui::EF_ALT_DOWN),
-               event_flags_should_match);
-COMPILE_ASSERT(static_cast<int32>(mus::mojom::EVENT_FLAGS_LEFT_MOUSE_BUTTON) ==
-                   static_cast<int32>(ui::EF_LEFT_MOUSE_BUTTON),
-               event_flags_should_match);
-COMPILE_ASSERT(
-    static_cast<int32>(mus::mojom::EVENT_FLAGS_MIDDLE_MOUSE_BUTTON) ==
-        static_cast<int32>(ui::EF_MIDDLE_MOUSE_BUTTON),
-    event_flags_should_match);
-COMPILE_ASSERT(static_cast<int32>(mus::mojom::EVENT_FLAGS_RIGHT_MOUSE_BUTTON) ==
-                   static_cast<int32>(ui::EF_RIGHT_MOUSE_BUTTON),
-               event_flags_should_match);
-COMPILE_ASSERT(static_cast<int32>(mus::mojom::EVENT_FLAGS_COMMAND_DOWN) ==
-                   static_cast<int32>(ui::EF_COMMAND_DOWN),
-               event_flags_should_match);
-COMPILE_ASSERT(static_cast<int32>(mus::mojom::EVENT_FLAGS_EXTENDED) ==
-                   static_cast<int32>(ui::EF_EXTENDED),
-               event_flags_should_match);
-COMPILE_ASSERT(static_cast<int32>(mus::mojom::EVENT_FLAGS_IS_SYNTHESIZED) ==
-                   static_cast<int32>(ui::EF_IS_SYNTHESIZED),
-               event_flags_should_match);
-COMPILE_ASSERT(static_cast<int32>(mus::mojom::EVENT_FLAGS_ALTGR_DOWN) ==
-                   static_cast<int32>(ui::EF_ALTGR_DOWN),
-               event_flags_should_match);
-COMPILE_ASSERT(static_cast<int32>(mus::mojom::EVENT_FLAGS_MOD3_DOWN) ==
-                   static_cast<int32>(ui::EF_MOD3_DOWN),
-               event_flags_should_match);
+static_assert(static_cast<int32_t>(mus::mojom::EVENT_FLAGS_NONE) ==
+                  static_cast<int32_t>(ui::EF_NONE),
+              "EVENT_FLAGS must match");
+static_assert(static_cast<int32_t>(mus::mojom::EVENT_FLAGS_IS_SYNTHESIZED) ==
+                  static_cast<int32_t>(ui::EF_IS_SYNTHESIZED),
+              "EVENT_FLAGS must match");
+static_assert(static_cast<int32_t>(mus::mojom::EVENT_FLAGS_SHIFT_DOWN) ==
+                  static_cast<int32_t>(ui::EF_SHIFT_DOWN),
+              "EVENT_FLAGS must match");
+static_assert(static_cast<int32_t>(mus::mojom::EVENT_FLAGS_CONTROL_DOWN) ==
+                  static_cast<int32_t>(ui::EF_CONTROL_DOWN),
+              "EVENT_FLAGS must match");
+static_assert(static_cast<int32_t>(mus::mojom::EVENT_FLAGS_ALT_DOWN) ==
+                  static_cast<int32_t>(ui::EF_ALT_DOWN),
+              "EVENT_FLAGS must match");
+static_assert(static_cast<int32_t>(mus::mojom::EVENT_FLAGS_COMMAND_DOWN) ==
+                  static_cast<int32_t>(ui::EF_COMMAND_DOWN),
+              "EVENT_FLAGS must match");
+static_assert(static_cast<int32_t>(mus::mojom::EVENT_FLAGS_ALTGR_DOWN) ==
+                  static_cast<int32_t>(ui::EF_ALTGR_DOWN),
+              "EVENT_FLAGS must match");
+static_assert(static_cast<int32_t>(mus::mojom::EVENT_FLAGS_MOD3_DOWN) ==
+                  static_cast<int32_t>(ui::EF_MOD3_DOWN),
+              "EVENT_FLAGS must match");
+static_assert(static_cast<int32_t>(mus::mojom::EVENT_FLAGS_NUM_LOCK_ON) ==
+                  static_cast<int32_t>(ui::EF_NUM_LOCK_ON),
+              "EVENT_FLAGS must match");
+static_assert(static_cast<int32_t>(mus::mojom::EVENT_FLAGS_CAPS_LOCK_ON) ==
+                  static_cast<int32_t>(ui::EF_CAPS_LOCK_ON),
+              "EVENT_FLAGS must match");
+static_assert(static_cast<int32_t>(mus::mojom::EVENT_FLAGS_SCROLL_LOCK_ON) ==
+                  static_cast<int32_t>(ui::EF_SCROLL_LOCK_ON),
+              "EVENT_FLAGS must match");
+static_assert(static_cast<int32_t>(mus::mojom::EVENT_FLAGS_LEFT_MOUSE_BUTTON) ==
+                  static_cast<int32_t>(ui::EF_LEFT_MOUSE_BUTTON),
+              "EVENT_FLAGS must match");
+static_assert(
+    static_cast<int32_t>(mus::mojom::EVENT_FLAGS_MIDDLE_MOUSE_BUTTON) ==
+        static_cast<int32_t>(ui::EF_MIDDLE_MOUSE_BUTTON),
+    "EVENT_FLAGS must match");
+static_assert(
+    static_cast<int32_t>(mus::mojom::EVENT_FLAGS_RIGHT_MOUSE_BUTTON) ==
+        static_cast<int32_t>(ui::EF_RIGHT_MOUSE_BUTTON),
+    "EVENT_FLAGS must match");
+static_assert(static_cast<int32_t>(mus::mojom::EVENT_FLAGS_BACK_MOUSE_BUTTON) ==
+                  static_cast<int32_t>(ui::EF_BACK_MOUSE_BUTTON),
+              "EVENT_FLAGS must match");
+static_assert(
+    static_cast<int32_t>(mus::mojom::EVENT_FLAGS_FORWARD_MOUSE_BUTTON) ==
+        static_cast<int32_t>(ui::EF_FORWARD_MOUSE_BUTTON),
+    "EVENT_FLAGS must match");
 
 // static
 mus::mojom::EventType
@@ -136,9 +154,11 @@ TypeConverter<mus::mojom::EventType, ui::EventType>::Convert(
     case ui::ET_MOUSE_DRAGGED:
     case ui::ET_MOUSE_MOVED:
     case ui::ET_MOUSE_ENTERED:
-    case ui::ET_MOUSE_EXITED:
     case ui::ET_TOUCH_MOVED:
       return mus::mojom::EVENT_TYPE_POINTER_MOVE;
+
+    case ui::ET_MOUSE_EXITED:
+      return mus::mojom::EVENT_TYPE_MOUSE_EXIT;
 
     case ui::ET_MOUSEWHEEL:
       return mus::mojom::EVENT_TYPE_WHEEL;
@@ -179,11 +199,11 @@ mus::mojom::EventPtr TypeConverter<mus::mojom::EventPtr, ui::Event>::Convert(
         static_cast<const ui::LocatedEvent*>(&input);
     mus::mojom::PointerDataPtr pointer_data(mus::mojom::PointerData::New());
     // TODO(sky): come up with a better way to handle this.
-    pointer_data->pointer_id = std::numeric_limits<int32>::max();
+    pointer_data->pointer_id = std::numeric_limits<int32_t>::max();
     pointer_data->kind = mus::mojom::POINTER_KIND_MOUSE;
     mus::mojom::LocationDataPtr location_data(mus::mojom::LocationData::New());
     SetPointerDataLocationFromEvent(*located_event, location_data.get());
-    pointer_data->location = location_data.Pass();
+    pointer_data->location = std::move(location_data);
 
     if (input.IsMouseWheelEvent()) {
       const ui::MouseWheelEvent* wheel_event =
@@ -207,9 +227,9 @@ mus::mojom::EventPtr TypeConverter<mus::mojom::EventPtr, ui::Event>::Convert(
         wheel_data->delta_y = wheel_event->y_offset();
         wheel_data->delta_z = 0;
       }
-      pointer_data->wheel_data = wheel_data.Pass();
+      pointer_data->wheel_data = std::move(wheel_data);
     }
-    event->pointer_data = pointer_data.Pass();
+    event->pointer_data = std::move(pointer_data);
   } else if (input.IsTouchEvent()) {
     const ui::TouchEvent* touch_event =
         static_cast<const ui::TouchEvent*>(&input);
@@ -219,7 +239,7 @@ mus::mojom::EventPtr TypeConverter<mus::mojom::EventPtr, ui::Event>::Convert(
     pointer_data->kind = mus::mojom::POINTER_KIND_TOUCH;
     mus::mojom::LocationDataPtr location_data(mus::mojom::LocationData::New());
     SetPointerDataLocationFromEvent(*touch_event, location_data.get());
-    pointer_data->location = location_data.Pass();
+    pointer_data->location = std::move(location_data);
 
     mus::mojom::BrushDataPtr brush_data(mus::mojom::BrushData::New());
 
@@ -230,8 +250,8 @@ mus::mojom::EventPtr TypeConverter<mus::mojom::EventPtr, ui::Event>::Convert(
     brush_data->pressure = touch_event->pointer_details().force();
     brush_data->tilt_y = 0;
     brush_data->tilt_z = 0;
-    pointer_data->brush_data = brush_data.Pass();
-    event->pointer_data = pointer_data.Pass();
+    pointer_data->brush_data = std::move(brush_data);
+    event->pointer_data = std::move(pointer_data);
 
     // TODO(rjkroege): Plumb raw pointer events on windows.
     // TODO(rjkroege): Handle force-touch on MacOS
@@ -259,9 +279,9 @@ mus::mojom::EventPtr TypeConverter<mus::mojom::EventPtr, ui::Event>::Convert(
       key_data->text = key_event->GetText();
       key_data->unmodified_text = key_event->GetUnmodifiedText();
     }
-    event->key_data = key_data.Pass();
+    event->key_data = std::move(key_data);
   }
-  return event.Pass();
+  return event;
 }
 
 // static
@@ -307,12 +327,13 @@ TypeConverter<scoped_ptr<ui::Event>, mus::mojom::EventPtr>::Convert(
               static_cast<int32_t>(input->key_data->windows_key_code),
               input->key_data->text,
               input->key_data->unmodified_text)));
-      return key_event.Pass();
+      return std::move(key_event);
     }
     case mus::mojom::EVENT_TYPE_POINTER_DOWN:
     case mus::mojom::EVENT_TYPE_POINTER_UP:
     case mus::mojom::EVENT_TYPE_POINTER_MOVE:
-    case mus::mojom::EVENT_TYPE_POINTER_CANCEL: {
+    case mus::mojom::EVENT_TYPE_POINTER_CANCEL:
+    case mus::mojom::EVENT_TYPE_MOUSE_EXIT: {
       switch (input->pointer_data->kind) {
         case mus::mojom::POINTER_KIND_MOUSE: {
           // TODO: last flags isn't right. Need to send changed_flags.
@@ -322,7 +343,7 @@ TypeConverter<scoped_ptr<ui::Event>, mus::mojom::EventPtr>::Convert(
               ui::EventFlags(input->flags)));
           event->set_location_f(location);
           event->set_root_location_f(screen_location);
-          return event.Pass();
+          return std::move(event);
         } break;
         case mus::mojom::POINTER_KIND_TOUCH: {
           DCHECK(input->pointer_data->brush_data);
@@ -335,7 +356,7 @@ TypeConverter<scoped_ptr<ui::Event>, mus::mojom::EventPtr>::Convert(
               input->pointer_data->brush_data->pressure));
           touch_event->set_location_f(location);
           touch_event->set_root_location_f(screen_location);
-          return touch_event.Pass();
+          return std::move(touch_event);
         } break;
         case mus::mojom::POINTER_KIND_PEN:
           NOTIMPLEMENTED();
@@ -354,7 +375,7 @@ TypeConverter<scoped_ptr<ui::Event>, mus::mojom::EventPtr>::Convert(
           *pre_wheel_event,
           static_cast<int>(input->pointer_data->wheel_data->delta_x),
           static_cast<int>(input->pointer_data->wheel_data->delta_y)));
-      return wheel_event.Pass();
+      return std::move(wheel_event);
     } break;
 
     default:

@@ -4,9 +4,12 @@
 
 #include "chrome/browser/search/local_ntp_source.h"
 
+#include <stddef.h>
+
 #include "base/command_line.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
@@ -14,6 +17,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "chrome/browser/search/instant_io_context.h"
 #include "chrome/browser/search/local_files_ntp_source.h"
 #include "chrome/browser/search/search.h"
@@ -62,7 +66,6 @@ const struct Resource{
     {"images/close_2_white.png", IDR_CLOSE_2_MASK, "image/png"},
     {"images/close_3_mask.png", IDR_CLOSE_3_MASK, "image/png"},
     {"images/close_4_button.png", IDR_CLOSE_4_BUTTON, "image/png"},
-    {"images/google_logo.png", IDR_LOCAL_NTP_IMAGES_LOGO_PNG, "image/png"},
     {"images/ntp_default_favicon.png", IDR_NTP_DEFAULT_FAVICON, "image/png"},
 };
 
@@ -138,7 +141,7 @@ scoped_ptr<base::DictionaryValue> GetTranslatedStrings(bool is_google) {
   if (is_google)
     AddGoogleSearchboxPlaceholderString(translated_strings.get());
 
-  return translated_strings.Pass();
+  return translated_strings;
 }
 
 // Returns a JS dictionary of configuration data for the local NTP.
@@ -164,9 +167,9 @@ std::string GetConfigData(Profile* profile) {
 }
 
 std::string GetThemeCSS(Profile* profile) {
-  ThemeService* theme_service = ThemeServiceFactory::GetForProfile(profile);
   SkColor background_color =
-      theme_service->GetColor(ThemeProperties::COLOR_NTP_BACKGROUND);
+      ThemeService::GetThemeProviderForProfile(profile)
+          .GetColor(ThemeProperties::COLOR_NTP_BACKGROUND);
 
   return base::StringPrintf("body { background-color: #%02X%02X%02X; }",
                             SkColorGetR(background_color),
@@ -208,7 +211,7 @@ void LocalNtpSource::StartDataRequest(
     return;
   }
 
-#if !defined(GOOGLE_CHROME_BUILD)
+#if !defined(GOOGLE_CHROME_BUILD) && !defined(OS_IOS)
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kLocalNtpReload)) {
     if (stripped_path == "local-ntp.html" || stripped_path == "local-ntp.js" ||
@@ -218,7 +221,7 @@ void LocalNtpSource::StartDataRequest(
       return;
     }
   }
-#endif
+#endif  // !defined(GOOGLE_CHROME_BUILD) && !defined(OS_IOS)
 
   float scale = 1.0f;
   std::string filename;

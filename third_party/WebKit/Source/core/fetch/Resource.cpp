@@ -21,7 +21,6 @@
     Boston, MA 02110-1301, USA.
 */
 
-#include "config.h"
 #include "core/fetch/Resource.h"
 
 #include "core/fetch/CachedMetadata.h"
@@ -44,7 +43,9 @@
 #include "wtf/MathExtras.h"
 #include "wtf/StdLibExtras.h"
 #include "wtf/Vector.h"
+#include "wtf/WeakPtr.h"
 #include "wtf/text/CString.h"
+#include <algorithm>
 
 using namespace WTF;
 
@@ -147,6 +148,9 @@ Resource::Resource(const ResourceRequest& request, Type type)
     : m_resourceRequest(request)
     , m_responseTimestamp(currentTime())
     , m_cancelTimer(this, &Resource::cancelTimerFired)
+#if !ENABLE(OILPAN)
+    , m_weakPtrFactory(this)
+#endif
     , m_loadFinishTime(0)
     , m_identifier(0)
     , m_encodedSize(0)
@@ -248,7 +252,7 @@ void Resource::checkNotify()
         c->notifyFinished(this);
 }
 
-void Resource::appendData(const char* data, unsigned length)
+void Resource::appendData(const char* data, size_t length)
 {
     TRACE_EVENT0("blink", "Resource::appendData");
     ASSERT(m_revalidatingRequest.isNull());
@@ -514,6 +518,15 @@ void Resource::clearCachedMetadata(CachedMetadataHandler::CacheType cacheType)
 
     if (cacheType == CachedMetadataHandler::SendToPlatform)
         Platform::current()->cacheMetadata(m_response.url(), m_response.responseTime(), 0, 0);
+}
+
+WeakPtrWillBeRawPtr<Resource> Resource::asWeakPtr()
+{
+#if ENABLE(OILPAN)
+    return this;
+#else
+    return m_weakPtrFactory.createWeakPtr();
+#endif
 }
 
 bool Resource::canDelete() const
@@ -924,7 +937,7 @@ bool Resource::hasCacheControlNoStoreHeader()
 
 bool Resource::hasVaryHeader() const
 {
-    return !m_response.httpHeaderField("Vary").isNull();
+    return !m_response.httpHeaderField(HTTPNames::Vary).isNull();
 }
 
 bool Resource::mustRevalidateDueToCacheHeaders()
@@ -997,6 +1010,12 @@ ResourcePriority Resource::priorityFromClients()
 
 Resource::ResourceCallback* Resource::ResourceCallback::callbackHandler()
 {
+    // Oilpan + LSan: as the callbackHandler() singleton is used by Resource
+    // and ResourcePtr finalizers, it cannot be released upon shutdown in
+    // preparation for leak detection.
+    //
+    // Keep it out of LSan's reach instead.
+    LEAK_SANITIZER_DISABLED_SCOPE;
     DEFINE_STATIC_LOCAL(OwnPtrWillBePersistent<ResourceCallback>, callbackHandler, (adoptPtrWillBeNoop(new ResourceCallback)));
     return callbackHandler.get();
 }
@@ -1098,14 +1117,14 @@ const char* Resource::resourceTypeToString(Type type, const FetchInitiatorInfo& 
         return "Link prefetch resource";
     case Resource::LinkSubresource:
         return "Link subresource";
-    case Resource::LinkPreload:
-        return "Link preload";
     case Resource::TextTrack:
         return "Text track";
     case Resource::ImportResource:
         return "Imported resource";
     case Resource::Media:
         return "Media";
+    case Resource::Manifest:
+        return "Manifest";
     }
     ASSERT_NOT_REACHED();
     return initatorTypeNameToString(initiatorInfo.name);
@@ -1113,16 +1132,31 @@ const char* Resource::resourceTypeToString(Type type, const FetchInitiatorInfo& 
 
 bool Resource::shouldBlockLoadEvent() const
 {
-    return !m_avoidBlockingOnLoad && isNonBlockingResourceType();
+    return !m_avoidBlockingOnLoad && isLoadEventBlockingResourceType();
 }
 
-bool Resource::isNonBlockingResourceType() const
+bool Resource::isLoadEventBlockingResourceType() const
 {
-    return type() != LinkPrefetch
-        && type() != LinkSubresource
-        && type() != Media
-        && type() != Raw
-        && type() != TextTrack;
+    switch (m_type) {
+    case Resource::MainResource:
+    case Resource::Image:
+    case Resource::CSSStyleSheet:
+    case Resource::Script:
+    case Resource::Font:
+    case Resource::SVGDocument:
+    case Resource::XSLStyleSheet:
+    case Resource::ImportResource:
+        return true;
+    case Resource::Raw:
+    case Resource::LinkPrefetch:
+    case Resource::LinkSubresource:
+    case Resource::TextTrack:
+    case Resource::Media:
+    case Resource::Manifest:
+        return false;
+    }
+    ASSERT_NOT_REACHED();
+    return false;
 }
 
 #if !LOG_DISABLED
@@ -1149,14 +1183,14 @@ const char* ResourceTypeName(Resource::Type type)
         return "LinkPrefetch";
     case Resource::LinkSubresource:
         return "LinkSubresource";
-    case Resource::LinkPreload:
-        return "LinkPreload";
     case Resource::TextTrack:
         return "TextTrack";
     case Resource::ImportResource:
         return "ImportResource";
     case Resource::Media:
         return "Media";
+    case Resource::Manifest:
+        return "Manifest";
     }
     ASSERT_NOT_REACHED();
     return "Unknown";

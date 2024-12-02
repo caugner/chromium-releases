@@ -4,6 +4,7 @@
 
 #include "cc/animation/element_animations.h"
 
+#include "base/macros.h"
 #include "cc/animation/animation_host.h"
 #include "cc/animation/animation_player.h"
 #include "cc/animation/animation_registrar.h"
@@ -255,6 +256,17 @@ void ElementAnimations::NotifyAnimationFinished(
        node != players_list_->end(); node = node->next()) {
     AnimationPlayer* player = node->value();
     player->NotifyAnimationFinished(monotonic_time, target_property, group);
+  }
+}
+
+void ElementAnimations::NotifyAnimationAborted(
+    base::TimeTicks monotonic_time,
+    Animation::TargetProperty target_property,
+    int group) {
+  for (PlayersListNode* node = players_list_->head();
+       node != players_list_->end(); node = node->next()) {
+    AnimationPlayer* player = node->value();
+    player->NotifyAnimationAborted(monotonic_time, target_property, group);
   }
 }
 

@@ -24,7 +24,10 @@
     ],
     "AutomaticTabDiscarding": [
         {
-            "group_name": "Enabled"
+            "enable_features": [
+                "AutomaticTabDiscarding"
+            ],
+            "group_name": "Enabled_Once"
         }
     ],
     "BrowserBlacklist": [
@@ -44,12 +47,23 @@
     ],
     "ChromeDashboard": [
         {
+            "group_name": "Enabled"
+        },
+        {
             "group_name": "Default"
         }
     ],
     "ChromotingQUIC": [
         {
             "group_name": "Enabled"
+        }
+    ],
+    "DataReductionProxyConfigService": [
+        {
+            "group_name": "Enabled",
+            "params": {
+                "minimum_refresh_interval_on_success_msec": "21600000"
+            }
         }
     ],
     "EnableGoogleCachedCopyTextExperiment": [
@@ -131,6 +145,11 @@
             "group_name": "Enabled"
         }
     ],
+    "PasswordBranding": [
+        {
+            "group_name": "SmartLockBrandingSavePromptOnly"
+        }
+    ],
     "PasswordGeneration": [
         {
             "group_name": "Disabled"
@@ -180,7 +199,7 @@
     ],
     "SRTPromptFieldTrial": [
         {
-            "group_name": "Default"
+            "group_name": "On"
         }
     ],
     "SafeBrowsingReportPhishingErrorLink": [
@@ -194,6 +213,22 @@
             "group_name": "Disabled"
         }
     ],
+    "SafeBrowsingUnverifiedDownloads": [
+        {
+            "group_name": "DisableByParameterExe",
+            "params": {
+                "blacklist": ".exe"
+            }
+        }
+    ],
+    "SafeBrowsingUpdateFrequency": [
+        {
+            "group_name": "UpdateTime15m",
+            "params": {
+                "NextUpdateIntervalInMinutes": "15"
+            }
+        }
+    ],
     "SdchPersistence": [
         {
             "group_name": "Enabled"
@@ -202,6 +237,16 @@
     "SettingsEnforcement": [
         {
             "group_name": "enforce_always_with_extensions_and_dse"
+        }
+    ],
+    "SpdyEnableDependencies": [
+        {
+            "group_name": "Enable"
+        }
+    ],
+    "StrictSecureCookies": [
+        {
+            "group_name": "Enabled"
         }
     ],
     "SyncHttpContentCompression": [
@@ -217,9 +262,9 @@
             "group_name": "Enabled"
         }
     ],
-    "UseDelayAgnosticAEC": [
+    "TriggeredResetFieldTrial": [
         {
-            "group_name": "DefaultEnabled"
+            "group_name": "On"
         }
     ],
     "VarationsServiceControl": [
@@ -228,6 +273,11 @@
             "params": {
                 "fetch_period_min": "30"
             }
+        }
+    ],
+    "WebFontsIntervention": [
+        {
+            "group_name": "Enabled"
         }
     ],
     "WebRTC-LocalIPPermissionCheck": [

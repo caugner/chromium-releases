@@ -10,7 +10,13 @@ import socket
 import sys
 import time
 
+from catapult_base import util as catapult_util
+
 from telemetry.core import exceptions
+
+
+IsRunningOnCrosDevice = catapult_util.IsRunningOnCrosDevice
+GetCatapultDir = catapult_util.GetCatapultDir
 
 
 def GetBaseDir():
@@ -23,17 +29,15 @@ def GetBaseDir():
 
 def GetTelemetryDir():
   return os.path.normpath(os.path.join(
-      __file__, '..', '..', '..'))
+      os.path.abspath(__file__), '..', '..', '..'))
 
 
 def GetTelemetryThirdPartyDir():
-  return os.path.normpath(os.path.join(
-      __file__, '..', '..', '..', 'third_party'))
+  return os.path.join(GetTelemetryDir(), 'third_party')
 
 
 def GetUnittestDataDir():
-  return os.path.join(GetTelemetryDir(),
-                      'telemetry', 'internal', 'testing')
+  return os.path.join(GetTelemetryDir(), 'telemetry', 'internal', 'testing')
 
 
 def GetChromiumSrcDir():
@@ -41,9 +45,12 @@ def GetChromiumSrcDir():
 
 
 _counter = [0]
+
+
 def _GetUniqueModuleName():
   _counter[0] += 1
   return "page_set_module_" + str(_counter[0])
+
 
 def GetPythonPageSetModule(file_path):
   return imp.load_source(_GetUniqueModuleName(), file_path)
@@ -82,11 +89,11 @@ def WaitFor(condition, timeout):
       raise exceptions.TimeoutException('Timed out while waiting %ds for %s.' %
                                         (timeout, GetConditionString()))
     if last_output_elapsed_time > output_interval:
-      logging.info('Continuing to wait %ds for %s. Elapsed: %ds.',
-                   timeout, GetConditionString(), elapsed_time)
+      logging.info('Continuing to wait %ds for %s. Elapsed: %ds.', timeout,
+                   GetConditionString(), elapsed_time)
       last_output_time = time.time()
-    poll_interval = min(max(elapsed_time / 10., min_poll_interval),
-                        max_poll_interval)
+    poll_interval = min(
+        max(elapsed_time / 10., min_poll_interval), max_poll_interval)
     time.sleep(poll_interval)
 
 
@@ -95,6 +102,7 @@ class PortKeeper(object):
 
   Before actually use the port, you must call Release().
   """
+
   def __init__(self):
     self._temp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     self._temp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -154,13 +162,3 @@ def GetSequentialFileName(base_name):
       break
     index = index + 1
   return output_name
-
-def IsRunningOnCrosDevice():
-  """Returns True if we're on a ChromeOS device."""
-  lsb_release = '/etc/lsb-release'
-  if sys.platform.startswith('linux') and os.path.exists(lsb_release):
-    with open(lsb_release, 'r') as f:
-      res = f.read()
-      if res.count('CHROMEOS_RELEASE_NAME'):
-        return True
-  return False

@@ -8,15 +8,15 @@
 
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/ui/chrome_style.h"
+#import "chrome/browser/ui/cocoa/passwords/passwords_bubble_utils.h"
 #include "chrome/browser/ui/passwords/manage_passwords_bubble_model.h"
+#include "grit/components_strings.h"
 #include "grit/generated_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "ui/base/cocoa/controls/hyperlink_text_view.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/font_list.h"
-
-using namespace password_manager::mac::ui;
 
 @interface ManagePasswordsBubbleConfirmationViewController ()
 - (void)onOKClicked:(id)sender;
@@ -79,10 +79,10 @@ using namespace password_manager::mac::ui;
           withFont:font
       messageColor:textColor];
   NSColor* linkColor =
-      gfx::SkColorToCalibratedNSColor(chrome_style::GetLinkColor());
+      skia::SkColorToCalibratedNSColor(chrome_style::GetLinkColor());
   [confirmationText_
       addLinkRange:model_->save_confirmation_link_range().ToNSRange()
-           withURL:@"about:blank"  // using a link here is bad ui
+           withURL:nil
          linkColor:linkColor];
   [confirmationText_ setDelegate:self];
   [[confirmationText_ textContainer] setLineFragmentPadding:0.0f];

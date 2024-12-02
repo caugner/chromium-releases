@@ -10,6 +10,7 @@ media_router_integration_test_resources = [
   "resources/fail_reconnect_session.html",
   "resources/fail_reconnect_session.json",
   "resources/no_provider.json",
+  "resources/route_creation_timed_out.json",
 ]
 
 # GYP version: chrome/test/media_router/media_router_tests.gypi:
@@ -31,6 +32,7 @@ source_set("media_router_browsertests") {
     "media_router_base_browsertest.h",
     "media_router_e2e_browsertest.cc",
     "media_router_e2e_browsertest.h",
+    "media_router_e2e_ui_browsertest.cc",
     "media_router_integration_browsertest.cc",
     "media_router_integration_browsertest.h",
     "media_router_integration_ui_browsertest.cc",

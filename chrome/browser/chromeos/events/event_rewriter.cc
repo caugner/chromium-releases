@@ -4,6 +4,8 @@
 
 #include "chrome/browser/chromeos/events/event_rewriter.h"
 
+#include <stddef.h>
+
 #include <vector>
 
 #include "ash/sticky_keys/sticky_keys_controller.h"
@@ -111,6 +113,11 @@ const struct ModifierRemapping {
      input_method::kEscapeKey,
      nullptr,
      {ui::EF_NONE, ui::DomCode::ESCAPE, ui::DomKey::ESCAPE, ui::VKEY_ESCAPE}},
+    {ui::EF_NONE,
+     input_method::kBackspaceKey,
+     nullptr,
+     {ui::EF_NONE, ui::DomCode::BACKSPACE, ui::DomKey::BACKSPACE,
+      ui::VKEY_BACK}},
     {ui::EF_NONE,
      input_method::kNumModifierKeys,
      prefs::kLanguageRemapDiamondKeyTo,
@@ -742,7 +749,7 @@ bool EventRewriter::RewriteModifierKeys(const ui::KeyEvent& key_event,
     // XK_ISO_Level3_Shift with Mod3Mask, not XF86XK_Launch7).
     case ui::DomCode::F16:
     case ui::DomCode::CAPS_LOCK:
-      characteristic_flag = ui::EF_CAPS_LOCK_DOWN;
+      characteristic_flag = ui::EF_CAPS_LOCK_ON;
       remapped_key =
           GetRemappedKey(prefs::kLanguageRemapCapsLockKeyTo, *pref_service);
       break;
@@ -784,7 +791,7 @@ bool EventRewriter::RewriteModifierKeys(const ui::KeyEvent& key_event,
     incoming.flags |= characteristic_flag;
     characteristic_flag = remapped_key->flag;
     if (remapped_key->remap_to == input_method::kCapsLockKey)
-      characteristic_flag |= ui::EF_CAPS_LOCK_DOWN;
+      characteristic_flag |= ui::EF_CAPS_LOCK_ON;
     state->code = RelocateModifier(
         state->code, ui::KeycodeConverter::DomCodeToLocation(incoming.code));
   }

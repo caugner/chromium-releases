@@ -22,13 +22,13 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#include "config.h"
 #include "core/dom/Node.h"
 
 #include "bindings/core/v8/DOMDataStore.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8DOMWrapper.h"
 #include "core/HTMLNames.h"
+#include "core/css/CSSSelector.h"
 #include "core/css/resolver/StyleResolver.h"
 #include "core/dom/AXObjectCache.h"
 #include "core/dom/Attr.h"
@@ -78,6 +78,7 @@
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLDialogElement.h"
 #include "core/html/HTMLFrameOwnerElement.h"
+#include "core/html/HTMLSlotElement.h"
 #include "core/input/EventHandler.h"
 #include "core/layout/LayoutBox.h"
 #include "core/page/ContextMenuController.h"
@@ -109,7 +110,7 @@ static_assert(sizeof(Node) <= sizeof(SameSizeAsNode), "Node should stay small");
 void* Node::operator new(size_t size)
 {
     ASSERT(isMainThread());
-    return partitionAlloc(WTF::Partitions::nodePartition(), size);
+    return partitionAlloc(WTF::Partitions::nodePartition(), size, "blink::Node");
 }
 
 void Node::operator delete(void* ptr)
@@ -906,7 +907,6 @@ void Node::detach(const AttachContext& context)
     if (layoutObject())
         layoutObject()->destroyAndCleanupAnonymousWrappers();
     setLayoutObject(nullptr);
-
     setStyleChange(NeedsReattachStyleChange);
     clearChildNeedsStyleInvalidation();
 }
@@ -953,12 +953,48 @@ bool Node::canStartSelection() const
         if (style.userDrag() == DRAG_ELEMENT && style.userSelect() == SELECT_NONE)
             return false;
     }
-    return parentOrShadowHostNode() ? parentOrShadowHostNode()->canStartSelection() : true;
+    ContainerNode* parent = ComposedTreeTraversal::parent(*this);
+    return parent ? parent->canStartSelection() : true;
 }
 
 bool Node::canParticipateInComposedTree() const
 {
-    return !isShadowRoot() && !isActiveInsertionPoint(*this);
+    return !isShadowRoot() && !isSlotOrActiveInsertionPoint();
+}
+
+bool Node::isSlotOrActiveInsertionPoint() const
+{
+    return isHTMLSlotElement(*this) || isActiveInsertionPoint(*this);
+}
+
+bool Node::isInV1ShadowTree() const
+{
+    ShadowRoot* shadowRoot = containingShadowRoot();
+    return shadowRoot && shadowRoot->isV1();
+}
+
+bool Node::isInV0ShadowTree() const
+{
+    ShadowRoot* shadowRoot = containingShadowRoot();
+    return shadowRoot && !shadowRoot->isV1();
+}
+
+ElementShadow* Node::parentElementShadow() const
+{
+    Element* parent = parentElement();
+    return parent ? parent->shadow() : nullptr;
+}
+
+bool Node::isChildOfV1ShadowHost() const
+{
+    ElementShadow* parentShadow = parentElementShadow();
+    return parentShadow && parentShadow->isV1();
+}
+
+bool Node::isChildOfV0ShadowHost() const
+{
+    ElementShadow* parentShadow = parentElementShadow();
+    return parentShadow && !parentShadow->isV1();
 }
 
 Element* Node::shadowHost() const
@@ -1053,9 +1089,9 @@ Document* Node::ownerDocument() const
     return doc == this ? nullptr : doc;
 }
 
-KURL Node::baseURI() const
+const KURL& Node::baseURI() const
 {
-    return parentNode() ? parentNode()->baseURI() : KURL();
+    return document().baseURL();
 }
 
 bool Node::isEqualNode(Node* other) const
@@ -2005,11 +2041,6 @@ bool Node::dispatchDOMActivateEvent(int detail, PassRefPtrWillBeRawPtr<Event> un
     return event->defaultHandled();
 }
 
-bool Node::dispatchKeyEvent(const PlatformKeyboardEvent& nativeEvent)
-{
-    return dispatchEvent(KeyboardEvent::create(nativeEvent, document().domWindow()));
-}
-
 bool Node::dispatchMouseEvent(const PlatformMouseEvent& nativeEvent, const AtomicString& eventType,
     int detail, Node* relatedTarget)
 {
@@ -2017,22 +2048,9 @@ bool Node::dispatchMouseEvent(const PlatformMouseEvent& nativeEvent, const Atomi
     return dispatchEvent(event);
 }
 
-bool Node::dispatchGestureEvent(const PlatformGestureEvent& event)
-{
-    RefPtrWillBeRawPtr<GestureEvent> gestureEvent = GestureEvent::create(document().domWindow(), event);
-    if (!gestureEvent.get())
-        return false;
-    return dispatchEvent(gestureEvent);
-}
-
 void Node::dispatchSimulatedClick(Event* underlyingEvent, SimulatedClickMouseEventOptions eventOptions, SimulatedClickCreationScope scope)
 {
     EventDispatcher::dispatchSimulatedClick(*this, underlyingEvent, eventOptions, scope);
-}
-
-bool Node::dispatchWheelEvent(const PlatformWheelEvent& event)
-{
-    return dispatchEvent(WheelEvent::create(event, document().domWindow()));
 }
 
 void Node::dispatchInputEvent()
@@ -2212,11 +2230,29 @@ PassRefPtrWillBeRawPtr<StaticNodeList> Node::getDestinationInsertionPoints()
     for (size_t i = 0; i < insertionPoints.size(); ++i) {
         InsertionPoint* insertionPoint = insertionPoints[i];
         ASSERT(insertionPoint->containingShadowRoot());
-        if (!insertionPoint->containingShadowRoot()->isOpen())
+        if (!insertionPoint->containingShadowRoot()->isOpenOrV0())
             break;
         filteredInsertionPoints.append(insertionPoint);
     }
     return StaticNodeList::adopt(filteredInsertionPoints);
+}
+
+HTMLSlotElement* Node::assignedSlot() const
+{
+    ASSERT(!needsDistributionRecalc());
+    if (ElementShadow* shadow = parentElementShadow())
+        return shadow->assignedSlotFor(*this);
+    return nullptr;
+}
+
+HTMLSlotElement* Node::assignedSlotForBinding()
+{
+    updateDistribution();
+    if (ElementShadow* shadow = parentElementShadow()) {
+        if (shadow->isV1() && shadow->isOpenOrV0())
+            return shadow->assignedSlotFor(*this);
+    }
+    return nullptr;
 }
 
 void Node::setFocus(bool flag)
@@ -2281,7 +2317,7 @@ void Node::setCustomElementState(CustomElementState newState)
     setFlag(newState == Upgraded, CustomElementUpgradedFlag);
 
     if (oldState == NotCustomElement || newState == Upgraded)
-        setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::createWithExtraData(StyleChangeReason::PseudoClass, StyleChangeExtraData::Unresolved)); // :unresolved has changed
+        toElement(this)->pseudoStateChanged(CSSSelector::PseudoUnresolved);
 }
 
 DEFINE_TRACE(Node)

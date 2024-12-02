@@ -280,6 +280,16 @@ public class ReaderModePanel extends OverlayPanel {
     }
 
     @Override
+    public float getOffsetY() {
+        // Do not attempt to auto-hide the reader mode bar if the toolbar is less than a certain
+        // height.
+        boolean shouldAutoHide = getToolbarHeight() >= getBarHeightPeeking();
+        // This will cause the reader mode bar to behave like the top controls; sliding out of
+        // view as the page scrolls.
+        return super.getOffsetY() + (shouldAutoHide ? getTopControlsOffsetDp() : 0.0f);
+    }
+
+    @Override
     public float getArrowIconOpacity() {
         // TODO(mdjones): This will not be needed once Reader Mode has its own scene layer.
         // Never show the arrow icon.

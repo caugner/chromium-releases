@@ -11,6 +11,7 @@
 
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
+#include "build/build_config.h"
 #include "content/public/browser/content_browser_client.h"
 
 class PrefService;
@@ -106,8 +107,7 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
   std::string GetApplicationLocale() override;
   content::QuotaPermissionContext* CreateQuotaPermissionContext() override;
   void AllowCertificateError(
-      int render_process_id,
-      int render_view_id,
+      content::WebContents* web_contents,
       int cert_error,
       const net::SSLInfo& ssl_info,
       const GURL& request_url,
@@ -152,6 +152,8 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
       int child_process_id,
       content::FileDescriptorInfo* mappings) override;
 #endif  // defined(OS_ANDROID)
+  void GetAdditionalWebUISchemes(
+      std::vector<std::string>* additional_schemes) override;
 #if defined(OS_ANDROID) && defined(VIDEO_HOLE)
   content::ExternalVideoSurfaceContainer*
   OverrideCreateExternalVideoSurfaceContainer(

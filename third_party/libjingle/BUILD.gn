@@ -31,7 +31,7 @@ config("jingle_unexported_configs") {
     "../../testing/gtest/include",
     "../../third_party",
     "../../third_party/libyuv/include",
-    "../../third_party/usrsctp",
+    "../../third_party/usrsctp/usrsctplib",
   ]
 
   if (is_win && current_cpu == "x86") {
@@ -109,8 +109,8 @@ group("jingle_deps") {
   ]
   deps = [
     "//base",
-    "//net",
     "//crypto:platform",
+    "//net",
   ]
 }
 
@@ -233,8 +233,8 @@ static_library("libjingle") {
     ":jingle_deps",
   ]
   deps = [
-    "//third_party/webrtc/base:rtc_base",
     ":libjingle_p2p_constants",
+    "//third_party/webrtc/base:rtc_base",
   ]
 
   # From libjingle_common.gypi's conditions list.
@@ -287,7 +287,7 @@ if (enable_webrtc) {
     ]
     configs += [ ":jingle_unexported_configs" ]
     public_configs = [ ":jingle_public_configs" ]
-    deps = [
+    public_deps = [
       ":libjingle_webrtc_common",
     ]
   }
@@ -321,10 +321,10 @@ if (enable_webrtc) {
       "source/talk/app/webrtc/mediastreamhandler.cc",
       "source/talk/app/webrtc/mediastreamhandler.h",
       "source/talk/app/webrtc/mediastreaminterface.h",
+      "source/talk/app/webrtc/mediastreamobserver.cc",
+      "source/talk/app/webrtc/mediastreamobserver.h",
       "source/talk/app/webrtc/mediastreamprovider.h",
       "source/talk/app/webrtc/mediastreamproxy.h",
-      "source/talk/app/webrtc/mediastreamsignaling.cc",
-      "source/talk/app/webrtc/mediastreamsignaling.h",
       "source/talk/app/webrtc/mediastreamtrack.h",
       "source/talk/app/webrtc/mediastreamtrackproxy.h",
       "source/talk/app/webrtc/notifier.h",
@@ -337,6 +337,8 @@ if (enable_webrtc) {
       "source/talk/app/webrtc/portallocatorfactory.h",
       "source/talk/app/webrtc/remoteaudiosource.cc",
       "source/talk/app/webrtc/remoteaudiosource.h",
+      "source/talk/app/webrtc/remoteaudiotrack.cc",
+      "source/talk/app/webrtc/remoteaudiotrack.h",
       "source/talk/app/webrtc/remotevideocapturer.cc",
       "source/talk/app/webrtc/remotevideocapturer.h",
       "source/talk/app/webrtc/rtpreceiver.cc",
@@ -494,8 +496,8 @@ if (enable_webrtc) {
     ]
 
     deps = [
-      "//third_party/webrtc/base:rtc_base",
       ":libjingle_webrtc_common",
+      "//third_party/webrtc/base:rtc_base",
     ]
   }
 }  # enable_webrtc

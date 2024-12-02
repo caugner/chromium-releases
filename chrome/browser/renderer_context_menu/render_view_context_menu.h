@@ -86,7 +86,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
 
  private:
   friend class RenderViewContextMenuTest;
-  friend class RenderViewContextMenuPrefsTest;
+  friend class TestRenderViewContextMenu;
 
   static bool IsDevToolsURL(const GURL& url);
   static bool IsInternalResourcesURL(const GURL& url);

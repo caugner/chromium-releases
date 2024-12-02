@@ -5,12 +5,14 @@
 #ifndef NET_HTTP_HTTP_NETWORK_SESSION_H_
 #define NET_HTTP_HTTP_NETWORK_SESSION_H_
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <set>
 #include <string>
 #include <unordered_set>
 #include <vector>
 
-#include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
@@ -30,7 +32,7 @@ class Value;
 
 namespace net {
 
-class CertPolicyEnforcer;
+class CTPolicyEnforcer;
 class CertVerifier;
 class ChannelIDService;
 class ClientSocketFactory;
@@ -67,12 +69,11 @@ class NET_EXPORT HttpNetworkSession
     ClientSocketFactory* client_socket_factory;
     HostResolver* host_resolver;
     CertVerifier* cert_verifier;
-    CertPolicyEnforcer* cert_policy_enforcer;
+    CTPolicyEnforcer* ct_policy_enforcer;
     ChannelIDService* channel_id_service;
     TransportSecurityState* transport_security_state;
     CTVerifier* cert_transparency_verifier;
     ProxyService* proxy_service;
-    std::string ssl_session_cache_shard;
     SSLConfigService* ssl_config_service;
     HttpAuthHandlerFactory* http_auth_handler_factory;
     NetworkDelegate* network_delegate;
@@ -81,8 +82,8 @@ class NET_EXPORT HttpNetworkSession
     HostMappingRules* host_mapping_rules;
     SocketPerformanceWatcherFactory* socket_performance_watcher_factory;
     bool ignore_certificate_errors;
-    uint16 testing_fixed_http_port;
-    uint16 testing_fixed_https_port;
+    uint16_t testing_fixed_http_port;
+    uint16_t testing_fixed_https_port;
     bool enable_tcp_fast_open_for_ssl;
 
     // Compress SPDY headers.
@@ -114,6 +115,9 @@ class NET_EXPORT HttpNetworkSession
 
     // Enables NPN support.  Note that ALPN is always enabled.
     bool enable_npn;
+
+    // Enables Brotli Content-Encoding support.
+    bool enable_brotli;
 
     // Enables QUIC support.
     bool enable_quic;
@@ -150,8 +154,9 @@ class NET_EXPORT HttpNetworkSession
     // Delay starting a TCP connection when QUIC believes it can speak
     // 0-RTT to a server.
     bool quic_delay_tcp_race;
-    // Store server configs in HttpServerProperties, instead of the disk cache.
-    bool quic_store_server_configs_in_properties;
+    // Maximum number of server configs that are to be stored in
+    // HttpServerProperties, instead of the disk cache.
+    size_t quic_max_server_configs_stored_in_properties;
     // If not empty, QUIC will be used for all connections to this origin.
     HostPortPair origin_to_force_quic_on;
     // Source of time for QUIC connections. Will be owned by QuicStreamFactory.
@@ -174,9 +179,15 @@ class NET_EXPORT HttpNetworkSession
     QuicTagVector quic_connection_options;
     // If true, all QUIC sessions are closed when any local IP address changes.
     bool quic_close_sessions_on_ip_change;
+    // Specifes QUIC idle connection state lifetime.
+    int quic_idle_connection_timeout_seconds;
+    // If true, disable preconnections if QUIC can do 0RTT.
+    bool quic_disable_preconnect_if_0rtt;
     // List of hosts for which QUIC is explicitly whitelisted.
     std::unordered_set<std::string> quic_host_whitelist;
-
+    // If true, active QUIC sessions may be migrated onto new IPs when network
+    // changes.
+    bool quic_migrate_sessions_on_network_change;
     ProxyDelegate* proxy_delegate;
   };
 

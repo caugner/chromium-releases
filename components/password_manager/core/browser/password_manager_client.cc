@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/macros.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
 
 namespace password_manager {
@@ -27,18 +28,6 @@ void PasswordManagerClient::PasswordWasAutofilled(
 
 PasswordSyncState PasswordManagerClient::GetPasswordSyncState() const {
   return NOT_SYNCING_PASSWORDS;
-}
-
-void PasswordManagerClient::OnLogRouterAvailabilityChanged(
-    bool router_can_be_used) {
-}
-
-void PasswordManagerClient::LogSavePasswordProgress(
-    const std::string& text) const {
-}
-
-bool PasswordManagerClient::IsLoggingActive() const {
-  return false;
 }
 
 bool PasswordManagerClient::WasLastNavigationHTTPError() const {
@@ -89,6 +78,10 @@ const GURL& PasswordManagerClient::GetMainFrameURL() const {
 
 bool PasswordManagerClient::IsUpdatePasswordUIEnabled() const {
   return false;
+}
+
+const LogManager* PasswordManagerClient::GetLogManager() const {
+  return nullptr;
 }
 
 }  // namespace password_manager

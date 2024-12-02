@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stddef.h>
+
 #include "chrome/browser/media/router/media_router_type_converters.h"
 
 using media_router::interfaces::IssuePtr;
@@ -59,8 +61,14 @@ media_router::interfaces::MediaSink::IconType SinkIconTypeToMojo(
 media_router::MediaSink
 TypeConverter<media_router::MediaSink, MediaSinkPtr>::Convert(
     const MediaSinkPtr& input) {
-  return media_router::MediaSink(input->sink_id, input->name,
-                                 SinkIconTypeFromMojo(input->icon_type));
+  media_router::MediaSink sink(input->sink_id, input->name,
+                               SinkIconTypeFromMojo(input->icon_type));
+  if (!input->description.get().empty())
+    sink.set_description(input->description);
+  if (!input->domain.get().empty())
+    sink.set_domain(input->domain);
+
+  return sink;
 }
 
 // static
@@ -132,6 +140,8 @@ media_router::Issue TypeConverter<media_router::Issue, IssuePtr>::Convert(
 content::PresentationConnectionState PresentationConnectionStateFromMojo(
     PresentationConnectionState state) {
   switch (state) {
+    case PresentationConnectionState::PRESENTATION_CONNECTION_STATE_CONNECTING:
+      return content::PRESENTATION_CONNECTION_STATE_CONNECTING;
     case PresentationConnectionState::PRESENTATION_CONNECTION_STATE_CONNECTED:
       return content::PRESENTATION_CONNECTION_STATE_CONNECTED;
     case PresentationConnectionState::PRESENTATION_CONNECTION_STATE_CLOSED:

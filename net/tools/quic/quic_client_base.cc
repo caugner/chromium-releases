@@ -13,10 +13,12 @@ namespace tools {
 QuicClientBase::QuicClientBase(const QuicServerId& server_id,
                                const QuicVersionVector& supported_versions,
                                const QuicConfig& config,
+                               QuicConnectionHelperInterface* helper,
                                ProofVerifier* proof_verifier)
     : server_id_(server_id),
       config_(config),
       crypto_config_(proof_verifier),
+      helper_(helper),
       supported_versions_(supported_versions),
       initial_max_packet_length_(0),
       num_stateless_rejects_received_(0),
@@ -32,17 +34,6 @@ bool QuicClientBase::Initialize() {
   connection_error_ = QUIC_NO_ERROR;
   connected_or_attempting_connect_ = false;
   return true;
-}
-
-QuicClientBase::DummyPacketWriterFactory::DummyPacketWriterFactory(
-    QuicPacketWriter* writer)
-    : writer_(writer) {}
-
-QuicClientBase::DummyPacketWriterFactory::~DummyPacketWriterFactory() {}
-
-QuicPacketWriter* QuicClientBase::DummyPacketWriterFactory::Create(
-    QuicConnection* /*connection*/) const {
-  return writer_;
 }
 
 ProofVerifier* QuicClientBase::proof_verifier() const {
@@ -69,7 +60,7 @@ QuicSpdyClientStream* QuicClientBase::CreateReliableClientStream() {
     return nullptr;
   }
 
-  return session_->CreateOutgoingDynamicStream();
+  return session_->CreateOutgoingDynamicStream(kDefaultPriority);
 }
 
 void QuicClientBase::WaitForStreamToClose(QuicStreamId id) {

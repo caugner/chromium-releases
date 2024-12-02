@@ -4,6 +4,10 @@
 
 #import "ios/web/shell/view_controller.h"
 
+#include <stdint.h>
+
+#include <utility>
+
 #include "base/mac/objc_property_releaser.h"
 #import "base/mac/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
@@ -26,16 +30,15 @@
 #include "ui/base/page_transition_types.h"
 
 namespace {
-// Returns true if WKWebView should be used instead of UIWebView.
-// TODO(stuartmorgan): Decide on a better way to control this.
+// Returns true if WKWebView is supported.
 bool UseWKWebView() {
-#if defined(FORCE_ENABLE_WKWEBVIEW)
   return web::IsWKWebViewSupported();
-#else
-  return false;
-#endif
 }
 }
+
+NSString* const kWebShellBackButtonAccessibilityLabel = @"Back";
+NSString* const kWebShellForwardButtonAccessibilityLabel = @"Forward";
+NSString* const kWebShellAddressFieldAccessibilityLabel = @"Address field";
 
 @interface ViewController ()<CRWWebUserInterfaceDelegate> {
   web::BrowserState* _browserState;
@@ -82,6 +85,7 @@ bool UseWKWebView() {
   [back addTarget:self
                 action:@selector(back)
       forControlEvents:UIControlEventTouchUpInside];
+  [back setAccessibilityLabel:kWebShellBackButtonAccessibilityLabel];
 
   UIButton* forward = [UIButton buttonWithType:UIButtonTypeCustom];
   [forward setImage:[UIImage imageNamed:@"toolbar_forward"]
@@ -92,6 +96,7 @@ bool UseWKWebView() {
   [forward addTarget:self
                 action:@selector(forward)
       forControlEvents:UIControlEventTouchUpInside];
+  [forward setAccessibilityLabel:kWebShellForwardButtonAccessibilityLabel];
 
   base::scoped_nsobject<UITextField> field([[UITextField alloc]
       initWithFrame:CGRectMake(88, 6, CGRectGetWidth([_toolbarView frame]) - 98,
@@ -103,6 +108,7 @@ bool UseWKWebView() {
   [field setAutoresizingMask:UIViewAutoresizingFlexibleWidth];
   [field setKeyboardType:UIKeyboardTypeWebSearch];
   [field setAutocorrectionType:UITextAutocorrectionTypeNo];
+  [field setAccessibilityLabel:kWebShellAddressFieldAccessibilityLabel];
   [field setClearButtonMode:UITextFieldViewModeWhileEditing];
   self.field = field;
 
@@ -117,7 +123,8 @@ bool UseWKWebView() {
   webState->GetNavigationManagerImpl().InitializeSession(nil, nil, NO, 0);
   web::WebViewType webViewType =
       UseWKWebView() ? web::WK_WEB_VIEW_TYPE : web::UI_WEB_VIEW_TYPE;
-  _webController.reset(web::CreateWebController(webViewType, webState.Pass()));
+  _webController.reset(
+      web::CreateWebController(webViewType, std::move(webState)));
   [_webController setDelegate:self];
   [_webController setUIDelegate:self];
   [_webController setWebUsageEnabled:YES];
@@ -279,9 +286,7 @@ bool UseWKWebView() {
   return nil;
 }
 
-- (CRWWebController*)webPageOrderedOpenBlankWithReferrer:
-                         (const web::Referrer&)referrer
-                                            inBackground:(BOOL)inBackground {
+- (CRWWebController*)webPageOrderedOpen {
   return nil;
 }
 

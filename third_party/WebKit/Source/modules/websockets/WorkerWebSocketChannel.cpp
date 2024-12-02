@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "modules/websockets/WorkerWebSocketChannel.h"
 
 #include "bindings/core/v8/ScriptCallStackFactory.h"
@@ -474,11 +473,6 @@ bool Bridge::waitForMethodCompletion(PassOwnPtr<ExecutionContextTask> task)
     m_syncHelper->wait();
     // This is checking whether a shutdown event is fired or not.
     return !m_workerGlobalScope->thread()->terminated();
-}
-
-void Bridge::peerShouldBeDisconnected()
-{
-    RELEASE_ASSERT(!m_peer);
 }
 
 DEFINE_TRACE(Bridge)

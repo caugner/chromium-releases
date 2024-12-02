@@ -30,8 +30,6 @@ from telemetry.testing import options_for_unittests
 from telemetry.testing import system_stub
 
 
-# pylint: disable=bad-super-call
-
 SIMPLE_CREDENTIALS_STRING = """
 {
   "test": {
@@ -40,7 +38,10 @@ SIMPLE_CREDENTIALS_STRING = """
   }
 }
 """
+
+
 class DummyTest(page_test.PageTest):
+
   def ValidateAndMeasurePage(self, *_):
     pass
 
@@ -51,11 +52,15 @@ def SetUpStoryRunnerArguments(options):
   options.MergeDefaultValues(parser.get_default_values())
   story_runner.ProcessCommandLineArgs(parser, options)
 
+
 class EmptyMetadataForTest(benchmark.BenchmarkMetadata):
+
   def __init__(self):
     super(EmptyMetadataForTest, self).__init__('')
 
+
 class StubCredentialsBackend(object):
+
   def __init__(self, login_return_value):
     self.did_get_login = False
     self.did_get_login_no_longer_needed = False
@@ -143,6 +148,7 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
         'file://blank.html', story_set, base_dir=util.GetUnittestDataDir()))
 
     class Test(page_test.PageTest):
+
       def __init__(self, *args):
         super(Test, self).__init__(
             *args, needs_browser_restart_after_each_page=True)
@@ -179,6 +185,7 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
         'file://blank.html', story_set, base_dir=util.GetUnittestDataDir()))
 
     class Test(page_test.PageTest):
+
       def __init__(self, *args, **kwargs):
         super(Test, self).__init__(*args, **kwargs)
         self.browser_starts = 0
@@ -205,16 +212,16 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
     self.CaptureFormattedException()
     credentials_backend = StubCredentialsBackend(login_return_value=False)
     did_run = self.runCredentialsTest(credentials_backend)
-    assert credentials_backend.did_get_login == True
-    assert credentials_backend.did_get_login_no_longer_needed == False
-    assert did_run == False
+    assert credentials_backend.did_get_login
+    assert not credentials_backend.did_get_login_no_longer_needed
+    assert not did_run
     self.assertFormattedExceptionIsEmpty()
 
   def testCredentialsWhenLoginSucceeds(self):
     credentials_backend = StubCredentialsBackend(login_return_value=True)
     did_run = self.runCredentialsTest(credentials_backend)
-    assert credentials_backend.did_get_login == True
-    assert credentials_backend.did_get_login_no_longer_needed == True
+    assert credentials_backend.did_get_login
+    assert credentials_backend.did_get_login_no_longer_needed
     assert did_run
 
   def runCredentialsTest(self, credentials_backend):
@@ -224,14 +231,15 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
     try:
       with tempfile.NamedTemporaryFile(delete=False) as f:
         page = page_module.Page(
-        'file://blank.html', story_set, base_dir=util.GetUnittestDataDir(),
-        credentials_path=f.name)
+            'file://blank.html', story_set, base_dir=util.GetUnittestDataDir(),
+            credentials_path=f.name)
         page.credentials = "test"
         story_set.AddStory(page)
 
         f.write(SIMPLE_CREDENTIALS_STRING)
 
       class TestThatInstallsCredentialsBackend(page_test.PageTest):
+
         def __init__(self, credentials_backend):
           super(TestThatInstallsCredentialsBackend, self).__init__()
           self._credentials_backend = credentials_backend
@@ -263,7 +271,8 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
     story_set.AddStory(page)
 
     class TestUserAgent(page_test.PageTest):
-      def ValidateAndMeasurePage(self, _1, tab, _2):
+      def ValidateAndMeasurePage(self, page, tab, results):
+        del page, results  # unused
         actual_user_agent = tab.EvaluateJavaScript('window.navigator.userAgent')
         expected_user_agent = user_agent.UA_TYPE_MAPPING['tablet']
         assert actual_user_agent.strip() == expected_user_agent
@@ -271,7 +280,7 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
         # This is so we can check later that the test actually made it into this
         # function. Previously it was timing out before even getting here, which
         # should fail, but since it skipped all the asserts, it slipped by.
-        self.hasRun = True # pylint: disable=W0201
+        self.hasRun = True  # pylint: disable=attribute-defined-outside-init
 
     test = TestUserAgent()
     options = options_for_unittests.GetCopy()
@@ -292,10 +301,12 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
     story_set.AddStory(page)
 
     class TestOneTab(page_test.PageTest):
+
       def DidStartBrowser(self, browser):
         browser.tabs.New()
 
-      def ValidateAndMeasurePage(self, _, tab, __):
+      def ValidateAndMeasurePage(self, page, tab, results):
+        del page, results  # unused
         assert len(tab.browser.tabs) == 1
 
     test = TestOneTab()
@@ -315,10 +326,12 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
     story_set.AddStory(page)
 
     class TestMultiTabs(page_test.PageTest):
-      def TabForPage(self, _, browser):
+      def TabForPage(self, page, browser):
+        del page  # unused
         return browser.tabs.New()
 
-      def ValidateAndMeasurePage(self, _, tab, __):
+      def ValidateAndMeasurePage(self, page, tab, results):
+        del page, results  # unused
         assert len(tab.browser.tabs) == 2
 
     test = TestMultiTabs()
@@ -338,6 +351,7 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
     story_set.AddStory(page)
 
     class TestBeforeLaunch(page_test.PageTest):
+
       def __init__(self):
         super(TestBeforeLaunch, self).__init__()
         self._did_call_will_start = False
@@ -364,7 +378,9 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
 
   def testRunPageWithStartupUrl(self):
     num_times_browser_closed = [0]
+
     class TestSharedState(shared_page_state.SharedPageState):
+
       def _StopBrowser(self):
         super(TestSharedState, self)._StopBrowser()
         num_times_browser_closed[0] += 1
@@ -375,6 +391,7 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
     story_set.AddStory(page)
 
     class Measurement(page_test.PageTest):
+
       def __init__(self):
         super(Measurement, self).__init__()
 
@@ -404,6 +421,7 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
     story_set.AddStory(page)
 
     class Test(page_test.PageTest):
+
       def __init__(self):
         super(Test, self).__init__()
         self.did_call_clean_up = False
@@ -414,7 +432,6 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
       def DidRunPage(self, platform):
         del platform  # unused
         self.did_call_clean_up = True
-
 
     test = Test()
     options = options_for_unittests.GetCopy()
@@ -430,8 +447,10 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
     story_set = story.StorySet()
 
     class UnrunnableSharedState(shared_page_state.SharedPageState):
-      def CanRunOnBrowser(self, _, dummy):
+      def CanRunOnBrowser(self, browser_info, page):
+        del browser_info, page  # unused
         return False
+
       def ValidateAndMeasurePage(self, _):
         pass
 
@@ -441,14 +460,17 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
         shared_page_state_class=UnrunnableSharedState))
 
     class Test(page_test.PageTest):
+
       def __init__(self, *args, **kwargs):
         super(Test, self).__init__(*args, **kwargs)
         self.will_navigate_to_page_called = False
 
-      def ValidateAndMeasurePage(self, *_args):
+      def ValidateAndMeasurePage(self, *args):
+        del args  # unused
         raise Exception('Exception should not be thrown')
 
-      def WillNavigateToPage(self, _1, _2):
+      def WillNavigateToPage(self, page, tab):
+        del page, tab  # unused
         self.will_navigate_to_page_called = True
 
     test = Test()
@@ -469,6 +491,7 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
         'file://blank.html', story_set, base_dir=util.GetUnittestDataDir()))
 
     class Measurement(page_test.PageTest):
+
       def ValidateAndMeasurePage(self, page, tab, results):
         pass
 
@@ -494,6 +517,7 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
 
   def _RunPageTestThatRaisesAppCrashException(self, test, max_failures):
     class TestPage(page_module.Page):
+
       def RunNavigateSteps(self, _):
         raise exceptions.AppCrashException
 
@@ -508,18 +532,21 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
     SetUpStoryRunnerArguments(options)
     results = results_options.CreateResults(EmptyMetadataForTest(), options)
     story_runner.Run(test, story_set, options, results,
-                          max_failures=max_failures)
+                     max_failures=max_failures)
     return results
 
   def testSingleTabMeansCrashWillCauseFailureValue(self):
     self.CaptureFormattedException()
+
     class SingleTabTest(page_test.PageTest):
       # Test is not multi-tab because it does not override TabForPage.
+
       def ValidateAndMeasurePage(self, *_):
         pass
 
     test = SingleTabTest()
-    results = self._RunPageTestThatRaisesAppCrashException(test, max_failures=1)
+    results = self._RunPageTestThatRaisesAppCrashException(
+        test, max_failures=1)
     self.assertEquals([], GetSuccessfulPageRuns(results))
     self.assertEquals(2, len(results.failures))  # max_failures + 1
     self.assertFormattedExceptionIsEmpty()
@@ -527,10 +554,13 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
   @decorators.Enabled('has tabs')
   def testMultipleTabsMeansCrashRaises(self):
     self.CaptureFormattedException()
+
     class MultipleTabsTest(page_test.PageTest):
       # Test *is* multi-tab because it overrides TabForPage.
+
       def TabForPage(self, page, browser):
         return browser.tabs.New()
+
       def ValidateAndMeasurePage(self, *_):
         pass
 
@@ -542,8 +572,10 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
   def testWebPageReplay(self):
     story_set = example_domain.ExampleDomainPageSet()
     body = []
+
     class TestWpr(page_test.PageTest):
-      def ValidateAndMeasurePage(self, _, tab, __):
+      def ValidateAndMeasurePage(self, page, tab, results):
+        del page, results  # unused
         body.append(tab.EvaluateJavaScript('document.body.innerText'))
     test = TestWpr()
     options = options_for_unittests.GetCopy()
@@ -568,7 +600,9 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
     platform_screenshot_supported = [False]
     tab_screenshot_supported = [False]
     chrome_version_screen_shot = [None]
+
     class FailingTestPage(page_module.Page):
+
       def RunNavigateSteps(self, action_runner):
         action_runner.Navigate(self._url)
         platform_screenshot_supported[0] = (
@@ -606,7 +640,9 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
 
   def testNoProfilingFilesCreatedForPageByDefault(self):
     self.CaptureFormattedException()
+
     class FailingTestPage(page_module.Page):
+
       def RunNavigateSteps(self, action_runner):
         action_runner.Navigate(self._url)
         raise exceptions.AppCrashException
@@ -627,6 +663,7 @@ class ActualPageRunEndToEndTests(unittest.TestCase):
 
 
 class FakePageRunEndToEndTests(unittest.TestCase):
+
   def setUp(self):
     self.options = fakes.CreateBrowserFinderOptions()
     self.options.output_formats = ['none']
@@ -637,6 +674,7 @@ class FakePageRunEndToEndTests(unittest.TestCase):
     self.options.browser_options.take_screenshot_for_failed_page = True
 
     class FailingTestPage(page_module.Page):
+
       def RunNavigateSteps(self, action_runner):
         raise exceptions.AppCrashException
 
@@ -662,6 +700,7 @@ class FakePageRunEndToEndTests(unittest.TestCase):
     self.options.browser_options.take_screenshot_for_failed_page = True
 
     class FailingTestPage(page_module.Page):
+
       def RunNavigateSteps(self, action_runner):
         raise exceptions.AppCrashException
     story_set = story.StorySet()
@@ -682,7 +721,7 @@ class FakePageRunEndToEndTests(unittest.TestCase):
     try:
       actual_screenshot_img = image_util.FromPngFile(screenshot_file_path)
       self.assertTrue(image_util.AreEqual(
-        image_util.FromBase64Png(expected_png_base64),
-        actual_screenshot_img))
+                      image_util.FromBase64Png(expected_png_base64),
+                      actual_screenshot_img))
     finally:  # Must clean up screenshot file if exists.
       os.remove(screenshot_file_path)

@@ -29,8 +29,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-
 #include "core/inspector/InspectorLayerTreeAgent.h"
 
 #include "core/dom/DOMNodeIds.h"
@@ -159,6 +157,7 @@ InspectorLayerTreeAgent::~InspectorLayerTreeAgent()
 
 DEFINE_TRACE(InspectorLayerTreeAgent)
 {
+    visitor->trace(m_inspectedFrames);
     InspectorBaseAgent::trace(visitor);
 }
 
@@ -189,7 +188,7 @@ void InspectorLayerTreeAgent::layerTreeDidChange()
     frontend()->layerTreeDidChange(buildLayerTree());
 }
 
-void InspectorLayerTreeAgent::didPaint(LayoutObject*, const GraphicsLayer* graphicsLayer, GraphicsContext*, const LayoutRect& rect)
+void InspectorLayerTreeAgent::didPaint(LayoutObject*, const GraphicsLayer* graphicsLayer, GraphicsContext&, const LayoutRect& rect)
 {
     // Should only happen for FrameView paints when compositing is off. Consider different instrumentation method for that.
     if (!graphicsLayer)
@@ -320,16 +319,18 @@ void InspectorLayerTreeAgent::compositingReasons(ErrorString* errorString, const
 void InspectorLayerTreeAgent::makeSnapshot(ErrorString* errorString, const String& layerId, String* snapshotId)
 {
     GraphicsLayer* layer = layerById(errorString, layerId);
-    if (!layer)
+    if (!layer || !layer->drawsContent())
         return;
 
     IntSize size = expandedIntSize(layer->size());
 
-    SkPictureBuilder pictureBuilder(FloatRect(0, 0, size.width(), size.height()));
     IntRect interestRect(IntPoint(0, 0), size);
-    layer->paint(pictureBuilder.context(), &interestRect);
+    layer->paint(&interestRect);
 
-    RefPtr<PictureSnapshot> snapshot = adoptRef(new PictureSnapshot(pictureBuilder.endRecording()));
+    GraphicsContext context(layer->paintController());
+    context.beginRecording(interestRect);
+    layer->paintController().paintArtifact().replay(context);
+    RefPtr<PictureSnapshot> snapshot = adoptRef(new PictureSnapshot(context.endRecording()));
 
     *snapshotId = String::number(++s_lastSnapshotId);
     bool newEntry = m_snapshotById.add(*snapshotId, snapshot).isNewEntry;

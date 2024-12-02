@@ -23,7 +23,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "web/LinkHighlightImpl.h"
 
 #include "core/dom/LayoutTreeBuilderTraversal.h"
@@ -53,6 +52,7 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
 #include "third_party/skia/include/utils/SkMatrix44.h"
+#include "ui/gfx/geometry/rect.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebSettingsImpl.h"
 #include "web/WebViewImpl.h"
@@ -96,7 +96,6 @@ LinkHighlightImpl::LinkHighlightImpl(Node* node, WebViewImpl* owningWebViewImpl)
     m_contentLayer->layer()->setDrawsContent(true);
     m_contentLayer->layer()->setOpacity(1);
     m_geometryNeedsUpdate = true;
-    updateGeometry();
 }
 
 LinkHighlightImpl::~LinkHighlightImpl()
@@ -129,12 +128,12 @@ void LinkHighlightImpl::releaseResources()
     m_node.clear();
 }
 
-void LinkHighlightImpl::attachLinkHighlightToCompositingLayer(const LayoutBoxModelObject* paintInvalidationContainer)
+void LinkHighlightImpl::attachLinkHighlightToCompositingLayer(const LayoutBoxModelObject& paintInvalidationContainer)
 {
-    GraphicsLayer* newGraphicsLayer = paintInvalidationContainer->layer()->graphicsLayerBacking();
+    GraphicsLayer* newGraphicsLayer = paintInvalidationContainer.layer()->graphicsLayerBacking();
     // FIXME: There should always be a GraphicsLayer. See crbug.com/431961.
     if (newGraphicsLayer && !newGraphicsLayer->drawsContent())
-        newGraphicsLayer = paintInvalidationContainer->layer()->graphicsLayerBackingForScrolling();
+        newGraphicsLayer = paintInvalidationContainer.layer()->graphicsLayerBackingForScrolling();
     if (!newGraphicsLayer)
         return;
 
@@ -149,10 +148,9 @@ void LinkHighlightImpl::attachLinkHighlightToCompositingLayer(const LayoutBoxMod
     }
 }
 
-static void convertTargetSpaceQuadToCompositedLayer(const FloatQuad& targetSpaceQuad, LayoutObject* targetLayoutObject, const LayoutBoxModelObject* paintInvalidationContainer, FloatQuad& compositedSpaceQuad)
+static void convertTargetSpaceQuadToCompositedLayer(const FloatQuad& targetSpaceQuad, LayoutObject* targetLayoutObject, const LayoutBoxModelObject& paintInvalidationContainer, FloatQuad& compositedSpaceQuad)
 {
     ASSERT(targetLayoutObject);
-    ASSERT(paintInvalidationContainer);
     for (unsigned i = 0; i < 4; ++i) {
         IntPoint point;
         switch (i) {
@@ -164,9 +162,9 @@ static void convertTargetSpaceQuadToCompositedLayer(const FloatQuad& targetSpace
 
         // FIXME: this does not need to be absolute, just in the paint invalidation container's space.
         point = targetLayoutObject->frame()->view()->contentsToRootFrame(point);
-        point = paintInvalidationContainer->frame()->view()->rootFrameToContents(point);
-        FloatPoint floatPoint = paintInvalidationContainer->absoluteToLocal(point, UseTransforms);
-        PaintLayer::mapPointToPaintBackingCoordinates(paintInvalidationContainer, floatPoint);
+        point = paintInvalidationContainer.frame()->view()->rootFrameToContents(point);
+        FloatPoint floatPoint = paintInvalidationContainer.absoluteToLocal(point, UseTransforms);
+        PaintLayer::mapPointToPaintBackingCoordinates(&paintInvalidationContainer, floatPoint);
 
         switch (i) {
         case 0: compositedSpaceQuad.setP1(floatPoint); break;
@@ -208,16 +206,15 @@ void LinkHighlightImpl::computeQuads(const Node& node, Vector<FloatQuad>& outQua
     }
 }
 
-bool LinkHighlightImpl::computeHighlightLayerPathAndPosition(const LayoutBoxModelObject* paintInvalidationContainer)
+bool LinkHighlightImpl::computeHighlightLayerPathAndPosition(const LayoutBoxModelObject& paintInvalidationContainer)
 {
     if (!m_node || !m_node->layoutObject() || !m_currentGraphicsLayer)
         return false;
-    ASSERT(paintInvalidationContainer);
 
     // FIXME: This is defensive code to avoid crashes such as those described in
     // crbug.com/440887. This should be cleaned up once we fix the root cause of
     // of the paint invalidation container not being composited.
-    if (!paintInvalidationContainer->layer()->compositedLayerMapping() && !paintInvalidationContainer->layer()->groupedMapping())
+    if (!paintInvalidationContainer.layer()->compositedLayerMapping() && !paintInvalidationContainer.layer()->groupedMapping())
         return false;
 
     // Get quads for node in absolute coordinates.
@@ -260,14 +257,19 @@ bool LinkHighlightImpl::computeHighlightLayerPathAndPosition(const LayoutBoxMode
     return pathHasChanged;
 }
 
-void LinkHighlightImpl::paintContents(WebDisplayItemList* webDisplayItemList, const WebRect& webClipRect, WebContentLayerClient::PaintingControlSetting paintingControl)
+gfx::Rect LinkHighlightImpl::paintableRegion()
+{
+    return gfx::Rect(0, 0, contentLayer()->layer()->bounds().width, contentLayer()->layer()->bounds().height);
+}
+
+void LinkHighlightImpl::paintContents(WebDisplayItemList* webDisplayItemList, WebContentLayerClient::PaintingControlSetting paintingControl)
 {
     if (!m_node || !m_node->layoutObject())
         return;
 
     SkPictureRecorder recorder;
-    SkCanvas* canvas = recorder.beginRecording(webClipRect.width, webClipRect.height);
-    canvas->translate(-webClipRect.x, -webClipRect.y);
+    gfx::Rect visualRect = paintableRegion();
+    SkCanvas* canvas = recorder.beginRecording(visualRect.width(), visualRect.height());
 
     SkPaint paint;
     paint.setStyle(SkPaint::kFill_Style);
@@ -276,8 +278,7 @@ void LinkHighlightImpl::paintContents(WebDisplayItemList* webDisplayItemList, co
     canvas->drawPath(m_path.skPath(), paint);
 
     RefPtr<const SkPicture> picture = adoptRef(recorder.endRecording());
-    // TODO(wkorman): Pass actual visual rect with the drawing item.
-    webDisplayItemList->appendDrawingItem(IntRect(), picture.get());
+    webDisplayItemList->appendDrawingItem(WebRect(visualRect.x(), visualRect.y(), visualRect.width(), visualRect.height()), picture.get());
 }
 
 void LinkHighlightImpl::startHighlightAnimationIfNeeded()
@@ -347,17 +348,18 @@ void LinkHighlightImpl::updateGeometry()
     m_geometryNeedsUpdate = false;
 
     bool hasLayoutObject = m_node && m_node->layoutObject();
-    const LayoutBoxModelObject* paintInvalidationContainer = hasLayoutObject ? m_node->layoutObject()->containerForPaintInvalidation() : 0;
-    if (paintInvalidationContainer)
+    if (hasLayoutObject) {
+        const LayoutBoxModelObject& paintInvalidationContainer = m_node->layoutObject()->containerForPaintInvalidation();
         attachLinkHighlightToCompositingLayer(paintInvalidationContainer);
-    if (paintInvalidationContainer && computeHighlightLayerPathAndPosition(paintInvalidationContainer)) {
-        // We only need to invalidate the layer if the highlight size has changed, otherwise
-        // we can just re-position the layer without needing to repaint.
-        m_contentLayer->layer()->invalidate();
+        if (computeHighlightLayerPathAndPosition(paintInvalidationContainer)) {
+            // We only need to invalidate the layer if the highlight size has changed, otherwise
+            // we can just re-position the layer without needing to repaint.
+            m_contentLayer->layer()->invalidate();
 
-        if (m_currentGraphicsLayer && m_currentGraphicsLayer->isTrackingPaintInvalidations())
-            m_currentGraphicsLayer->trackPaintInvalidationRect(FloatRect(layer()->position().x, layer()->position().y, layer()->bounds().width, layer()->bounds().height));
-    } else if (!hasLayoutObject) {
+            if (m_currentGraphicsLayer && m_currentGraphicsLayer->isTrackingPaintInvalidations())
+                m_currentGraphicsLayer->trackPaintInvalidationRect(FloatRect(layer()->position().x, layer()->position().y, layer()->bounds().width, layer()->bounds().height));
+        }
+    } else {
         clearGraphicsLayerLinkHighlightPointer();
         releaseResources();
     }

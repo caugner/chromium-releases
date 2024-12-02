@@ -11,21 +11,23 @@
           "position": [18, 18],
           "bounds": [206, 126],
           "contentsOpaque": true,
+          "shouldFlattenTransform": false,
           "drawsContent": true,
           "backgroundColor": "#CCCCCC",
           "children": [
             {
               "position": [1, 1],
               "bounds": [189, 124],
+              "shouldFlattenTransform": false,
               "children": [
                 {
                   "bounds": [189, 308],
-                  "shouldFlattenTransform": false,
                   "drawsContent": true
                 }
               ]
             },
             {
+              "bounds": [206, 126],
               "children": [
                 {
                   "position": [190, 1],
@@ -45,21 +47,23 @@
           "position": [248, 18],
           "bounds": [206, 126],
           "contentsOpaque": true,
+          "shouldFlattenTransform": false,
           "drawsContent": true,
           "backgroundColor": "#CCCCCC",
           "children": [
             {
               "position": [1, 1],
               "bounds": [189, 124],
+              "shouldFlattenTransform": false,
               "children": [
                 {
                   "bounds": [189, 308],
-                  "shouldFlattenTransform": false,
                   "drawsContent": true
                 }
               ]
             },
             {
+              "bounds": [206, 126],
               "children": [
                 {
                   "position": [190, 1],

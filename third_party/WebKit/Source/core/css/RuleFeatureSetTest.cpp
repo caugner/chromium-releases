@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "core/css/RuleFeature.h"
 
 #include "core/css/CSSSelectorList.h"
@@ -16,7 +15,7 @@
 #include "core/html/HTMLDocument.h"
 #include "core/html/HTMLElement.h"
 #include "core/html/HTMLHtmlElement.h"
-#include <gtest/gtest.h>
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
 
@@ -38,10 +37,9 @@ public:
 
     void updateInvalidationSets(const String& selectorText)
     {
-        CSSSelectorList selectorList;
-        CSSParser::parseSelector(strictCSSParserContext(), selectorText, selectorList);
+        CSSSelectorList selectorList = CSSParser::parseSelector(strictCSSParserContext(), selectorText);
 
-        RefPtrWillBeRawPtr<StyleRule> styleRule = StyleRule::create(selectorList, MutableStylePropertySet::create(HTMLStandardMode));
+        RefPtrWillBeRawPtr<StyleRule> styleRule = StyleRule::create(std::move(selectorList), MutableStylePropertySet::create(HTMLStandardMode));
         RuleData ruleData(styleRule.get(), 0, 0, RuleHasNoSpecialState);
         m_ruleFeatureSet.updateInvalidationSets(ruleData);
     }
@@ -321,6 +319,22 @@ TEST_F(RuleFeatureSetTest, tagName)
     InvalidationLists invalidationLists;
     collectInvalidationSetsForPseudoClass(invalidationLists, CSSSelector::PseudoValid);
     expectTagNameInvalidation("e", invalidationLists.descendants);
+}
+
+TEST_F(RuleFeatureSetTest, contentPseudo)
+{
+    updateInvalidationSets(".a ::content .b");
+    updateInvalidationSets(".a .c");
+
+    InvalidationLists invalidationLists;
+    collectInvalidationSetsForClass(invalidationLists, "a");
+    expectClassInvalidation("c", invalidationLists.descendants);
+
+    updateInvalidationSets(".a .b");
+
+    invalidationLists.descendants.clear();
+    collectInvalidationSetsForClass(invalidationLists, "a");
+    expectClassesInvalidation("b", "c", invalidationLists.descendants);
 }
 
 } // namespace blink

@@ -6,18 +6,18 @@
       "contentsOpaque": true,
       "drawsContent": true,
       "repaintRects": [
+        [785, 585, 15, 15],
+        [785, 0, 15, 585],
         [8, 52, 784, 20],
         [8, 52, 769, 20],
         [8, 16, 2000, 2072],
         [8, 16, 784, 20],
         [8, 16, 769, 20],
+        [0, 585, 785, 15],
         [0, 0, 2008, 2096],
         [0, 0, 785, 585]
       ],
       "paintInvalidationClients": [
-        "HorizontalScrollbar",
-        "HorizontalScrollbar",
-        "VerticalScrollbar",
         "RootInlineBox",
         "InlineTextBox 'You should see both vertical and horizontal scrollbars.'",
         "RootInlineBox",
@@ -28,7 +28,11 @@
         "LayoutView #document",
         "LayoutBlockFlow BODY",
         "LayoutBlockFlow P",
-        "LayoutBlockFlow P"
+        "RootInlineBox",
+        "LayoutBlockFlow P",
+        "RootInlineBox",
+        "LayoutView #document",
+        "LayoutView #document"
       ]
     }
   ]

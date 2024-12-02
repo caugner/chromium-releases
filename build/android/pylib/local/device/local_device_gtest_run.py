@@ -69,31 +69,6 @@ def PullAppFilesImpl(device, package, files, directory):
     device.PullFile(device_file, host_file)
 
 
-def _ExtractTestsFromFilter(gtest_filter):
-  """Returns the list of tests specified by the given filter.
-
-  Returns:
-    None if the device should be queried for the test list instead.
-  """
-  # Empty means all tests, - means exclude filter.
-  if not gtest_filter or '-' in gtest_filter:
-    return None
-
-  patterns = gtest_filter.split(':')
-  # For a single pattern, allow it even if it has a wildcard so long as the
-  # wildcard comes at the end and there is at least one . to prove the scope is
-  # not too large.
-  # This heuristic is not necessarily faster, but normally is.
-  if len(patterns) == 1 and patterns[0].endswith('*'):
-    no_suffix = patterns[0].rstrip('*')
-    if '*' not in no_suffix and '.' in no_suffix:
-      return patterns
-
-  if '*' in gtest_filter:
-    return None
-  return [p for p in patterns if p]  # Ignore empty entries.
-
-
 class _ApkDelegate(object):
   def __init__(self, test_instance):
     self._activity = test_instance.activity
@@ -122,7 +97,8 @@ class _ApkDelegate(object):
     params = install_wrapper.GetInstallParameters()
 
     installer.Install(device, self._apk_helper, split_globs=params['splits'],
-                      lib_dir=params['lib_dir'], dex_files=params['dex_files'])
+                      native_libs=params['native_libs'],
+                      dex_files=params['dex_files'])
 
   def Run(self, test, device, flags=None, **kwargs):
     extras = dict(self._extras)
@@ -249,7 +225,8 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
 
   #override
   def SetUp(self):
-    @local_device_test_run.handle_shard_failures
+    @local_device_test_run.handle_shard_failures_with(
+        on_failure=self._env.BlacklistDevice)
     def individual_device_set_up(dev):
       def install_apk():
         # Install test APK.
@@ -303,13 +280,6 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
 
   #override
   def _GetTests(self):
-    # When the exact list of tests to run is given via command-line (e.g. when
-    # locally iterating on a specific test), skip querying the device (which
-    # takes ~3 seconds).
-    tests = _ExtractTestsFromFilter(self._test_instance.gtest_filter)
-    if tests:
-      return tests
-
     # Even when there's only one device, it still makes sense to retrieve the
     # test list so that tests can be split up and run in batches rather than all
     # at once (since test output is not streamed).

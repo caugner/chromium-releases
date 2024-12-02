@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/process/process.h"
@@ -46,6 +46,7 @@ class P2PSyncRefresher;
 
 namespace base {
 class CommandLine;
+class ScopedTempDir;
 }
 
 namespace fake_server {
@@ -87,12 +88,7 @@ class SyncTest : public InProcessBrowserTest {
     // TODO(pvalenzuela): Delete this value when all TWO_CLIENT_LEGACY tests are
     // compatible with FakeServer and switched to TWO_CLIENT. See
     // crbug.com/323265.
-    TWO_CLIENT_LEGACY,
-
-    // Tests where three or more client profiles are synced with the server.
-    // Typically, these tests create client side races and verify that sync
-    // works.
-    MULTIPLE_CLIENT
+    TWO_CLIENT_LEGACY
   };
 
   // The type of server we're running against.
@@ -274,6 +270,10 @@ class SyncTest : public InProcessBrowserTest {
   // before the Profile object is created.
   void SetPreexistingPreferencesFileContents(const std::string& contents);
 
+  // Helper to ProfileManager::CreateProfileAsync that creates a new profile
+  // used for UI Signin. Blocks until profile is created.
+  static Profile* MakeProfileForUISignin(base::FilePath profile_path);
+
   // GAIA account used by the test case.
   std::string username_;
 
@@ -287,14 +287,11 @@ class SyncTest : public InProcessBrowserTest {
   scoped_ptr<fake_server::FakeServer> fake_server_;
 
  private:
-  // Helper to ProfileManager::CreateProfileAsync that creates a new profile
-  // used for UI Signin. Blocks until profile is created. If
-  // |path_outside_user_data_dir| is true then profile's path is created outside
-  // user data dir which allows signing-in multiple profiles to same account.
-  static Profile* MakeProfileForUISignin(const base::FilePath::StringType name,
-                                         bool path_outside_user_data_dir);
+  // Handles Profile creation for given index. Profile's path and type is
+  // determined at runtime based on server type.
+  void CreateProfile(int index);
 
-  // Callback for CreateNewProfile() method. It runs the quit_closure once
+  // Callback for MakeProfileForUISignin() method. It runs the quit_closure once
   // profile is created successfully.
   static void CreateProfileCallback(const base::Closure& quit_closure,
                                     Profile* profile,
@@ -302,7 +299,7 @@ class SyncTest : public InProcessBrowserTest {
 
   // Helper to Profile::CreateProfile that handles path creation. It creates
   // a profile then registers it as a testing profile.
-  Profile* MakeProfile(const base::FilePath::StringType name);
+  Profile* MakeTestProfile(base::FilePath profile_path);
 
   // Helper method used to create a Gaia account at runtime.
   // This function should only be called when running against external servers
@@ -372,8 +369,8 @@ class SyncTest : public InProcessBrowserTest {
   // Helper class to whitelist the notification port.
   scoped_ptr<net::ScopedPortException> xmpp_port_;
 
-  // Used to differentiate between single-client, two-client, multi-client and
-  // many-client tests.
+  // Used to differentiate between single-client and two-client tests as well
+  // as wher the in-process FakeServer is used.
   TestType test_type_;
 
   // Tells us what kind of server we're using (some tests run only on certain
@@ -387,6 +384,11 @@ class SyncTest : public InProcessBrowserTest {
   // data contained within its own subdirectory under the chrome user data
   // directory. Profiles are owned by the ProfileManager.
   std::vector<Profile*> profiles_;
+
+  // Collection of profile paths used by a test. Each profile has a unique path
+  // which should be cleaned up at test shutdown. Profile paths inside the
+  // default user data dir gets deleted at InProcessBrowserTest teardown.
+  std::vector<base::ScopedTempDir*> tmp_profile_paths_;
 
   // Collection of pointers to the browser objects used by a test. One browser
   // instance is created for each sync profile. Browser object lifetime is

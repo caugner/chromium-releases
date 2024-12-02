@@ -48,7 +48,20 @@ IOSSerializedNavigationBuilder::ToNavigationItem(
     item->GetFavicon().url = navigation->favicon_url_;
   }
 
-  return item.Pass();
+  return item;
+}
+
+// static
+ScopedVector<web::NavigationItem>
+IOSSerializedNavigationBuilder::ToNavigationItems(
+    const std::vector<SerializedNavigationEntry>& navigations) {
+  ScopedVector<web::NavigationItem> items;
+  for (std::vector<SerializedNavigationEntry>::const_iterator it =
+           navigations.begin();
+       it != navigations.end(); ++it) {
+    items.push_back(ToNavigationItem(&(*it)).release());
+  }
+  return items;
 }
 
 }  // namespace sessions

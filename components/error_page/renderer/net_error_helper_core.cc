@@ -4,8 +4,10 @@
 
 #include "components/error_page/renderer/net_error_helper_core.h"
 
+#include <stddef.h>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -16,12 +18,14 @@
 #include "base/json/json_writer.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/memory/scoped_vector.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "components/error_page/common/error_page_params.h"
 #include "components/url_formatter/url_formatter.h"
 #include "content/public/common/url_constants.h"
@@ -38,11 +42,17 @@ namespace error_page {
 
 namespace {
 
+// |NetErrorNavigationCorrectionTypes| enum id for Web search query.
+// Other correction types uses the |kCorrectionResourceTable| array order.
+const int kWebSearchQueryUMAId = 100;
+
 struct CorrectionTypeToResourceTable {
   int resource_id;
   const char* correction_type;
 };
 
+// Note: Ordering should be the same as |NetErrorNavigationCorrectionTypes| enum
+// in histograms.xml.
 const CorrectionTypeToResourceTable kCorrectionResourceTable[] = {
   {IDS_ERRORPAGES_SUGGESTION_VISIT_GOOGLE_CACHE, "cachedPage"},
   // "reloadPage" is has special handling.
@@ -219,7 +229,7 @@ std::string CreateFixUrlRequestBody(
   scoped_ptr<base::DictionaryValue> params(new base::DictionaryValue());
   params->SetString("urlQuery", PrepareUrlForUpload(error.unreachableURL));
   return CreateRequestBody("linkdoctor.fixurl.fixurl", error_param,
-                           correction_params, params.Pass());
+                           correction_params, std::move(params));
 }
 
 std::string CreateClickTrackingUrlRequestBody(
@@ -244,7 +254,7 @@ std::string CreateClickTrackingUrlRequestBody(
   params->SetString("fingerprint", response.fingerprint);
 
   return CreateRequestBody("linkdoctor.fixurl.clicktracking", error_param,
-                           correction_params, params.Pass());
+                           correction_params, std::move(params));
 }
 
 base::string16 FormatURLForDisplay(const GURL& url, bool is_rtl,
@@ -268,7 +278,13 @@ scoped_ptr<NavigationCorrectionResponse> ParseNavigationCorrectionResponse(
   base::JSONValueConverter<NavigationCorrectionResponse> converter;
   if (!parsed || !converter.Convert(*parsed, response.get()))
     response.reset();
-  return response.Pass();
+  return response;
+}
+
+void LogCorrectionTypeShown(int type_id) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "Net.ErrorPageCounts.NavigationCorrectionLinksShown", type_id,
+      kWebSearchQueryUMAId + 1);
 }
 
 scoped_ptr<ErrorPageParams> CreateErrorPageParams(
@@ -302,11 +318,12 @@ scoped_ptr<ErrorPageParams> CreateErrorPageParams(
     }
 
     if ((*it)->correction_type == "webSearchQuery") {
-      // If there are mutliple searches suggested, use the first suggestion.
+      // If there are multiple searches suggested, use the first suggestion.
       if (params->search_terms.empty()) {
         params->search_url = correction_params.search_url;
         params->search_terms = (*it)->url_correction;
         params->search_tracking_id = tracking_id;
+        LogCorrectionTypeShown(kWebSearchQueryUMAId);
       }
       continue;
     }
@@ -337,13 +354,14 @@ scoped_ptr<ErrorPageParams> CreateErrorPageParams(
       suggest->SetInteger("type", static_cast<int>(correction_index));
 
       params->override_suggestions->Append(suggest);
+      LogCorrectionTypeShown(static_cast<int>(correction_index));
       break;
     }
   }
 
   if (params->override_suggestions->empty() && !params->search_url.is_valid())
     params.reset();
-  return params.Pass();
+  return params;
 }
 
 void ReportAutoReloadSuccess(const blink::WebURLError& error, size_t count) {
@@ -364,6 +382,31 @@ void ReportAutoReloadFailure(const blink::WebURLError& error, size_t count) {
   UMA_HISTOGRAM_SPARSE_SLOWLY("Net.AutoReload.ErrorAtStop", -error.reason);
   UMA_HISTOGRAM_COUNTS("Net.AutoReload.CountAtStop",
                        static_cast<base::HistogramBase::Sample>(count));
+}
+
+// Tracks navigation correction service usage in UMA to enable more in depth
+// analysis.
+void TrackClickUMA(std::string type_id) {
+  // Web search suggestion isn't in |kCorrectionResourceTable| array.
+  if (type_id == "webSearchQuery") {
+    UMA_HISTOGRAM_ENUMERATION(
+       "Net.ErrorPageCounts.NavigationCorrectionLinksUsed",
+       kWebSearchQueryUMAId, kWebSearchQueryUMAId + 1);
+    return;
+  }
+
+  size_t correction_index;
+  for (correction_index = 0;
+       correction_index < arraysize(kCorrectionResourceTable);
+       ++correction_index) {
+    if (kCorrectionResourceTable[correction_index].correction_type ==
+        type_id) {
+      UMA_HISTOGRAM_ENUMERATION(
+         "Net.ErrorPageCounts.NavigationCorrectionLinksUsed",
+         static_cast<int>(correction_index), kWebSearchQueryUMAId + 1);
+      break;
+    }
+  }
 }
 
 }  // namespace
@@ -808,10 +851,8 @@ void NetErrorHelperCore::OnNavigationCorrectionsFetched(
     delegate_->GenerateLocalizedErrorPage(
         pending_error_page_info_->error,
         pending_error_page_info_->was_failed_post,
-        can_show_network_diagnostics_dialog_,
-        GetOfflinePageStatus(),
-        params.Pass(),
-        &pending_error_page_info_->reload_button_in_page,
+        can_show_network_diagnostics_dialog_, GetOfflinePageStatus(),
+        std::move(params), &pending_error_page_info_->reload_button_in_page,
         &pending_error_page_info_->show_saved_copy_button_in_page,
         &pending_error_page_info_->show_cached_copy_button_in_page,
         &pending_error_page_info_->show_offline_pages_button_in_page,
@@ -1019,6 +1060,8 @@ void NetErrorHelperCore::TrackClick(int tracking_id) {
   // Only report a clicked link once.
   if (committed_error_page_info_->clicked_corrections.count(tracking_id))
     return;
+
+  TrackClickUMA(response->corrections[tracking_id]->correction_type);
 
   committed_error_page_info_->clicked_corrections.insert(tracking_id);
   std::string request_body = CreateClickTrackingUrlRequestBody(

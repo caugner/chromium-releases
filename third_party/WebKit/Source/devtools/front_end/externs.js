@@ -200,6 +200,12 @@ DevToolsHost.ContextMenuDescriptor;
 DevToolsHost.zoomFactor = function() { }
 
 /**
+ * @param {number} length
+ * @return {number}
+ */
+DevToolsHost.convertLengthForEmbedder = function(length) { }
+
+/**
  * @param {string} origin
  * @param {string} script
  */
@@ -311,6 +317,10 @@ Adb.Device;
 Adb.PortForwardingConfig;
 /** @typedef {!{port: string, address: string}} */
 Adb.PortForwardingRule;
+/** @typedef {{ports: !Object<string, number>, browserId: string}} */
+Adb.DevicePortForwardingStatus;
+/** @typedef {!Object<string, !Adb.DevicePortForwardingStatus>} */
+Adb.PortForwardingStatus;
 
 /**
  * @constructor

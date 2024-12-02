@@ -4,9 +4,12 @@
 
 #include "chrome/browser/safe_browsing/protocol_manager.h"
 
+#include <utility>
+
+#include "base/base64.h"
 #include "base/environment.h"
 #include "base/logging.h"
-#include "base/memory/scoped_vector.h"
+#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/profiler/scoped_tracker.h"
@@ -88,7 +91,13 @@ static const int kSbMaxUpdateWaitSec = 30;
 // Maximum back off multiplier.
 static const size_t kSbMaxBackOff = 8;
 
-const char kUmaHashResponseMetricName[] = "SB2.GetHashResponseOrErrorCode";
+const char kGetHashUmaResponseMetricName[] = "SB2.GetHashResponseOrErrorCode";
+const char kGetChunkUmaResponseMetricName[] = "SB2.GetChunkResponseOrErrorCode";
+const char kUmaV4ResponseMetricName[] =
+    "SafeBrowsing.GetV4HashHttpResponseOrErrorCode";
+
+// The V4 URL prefix where browser fetches hashes from the V4 server.
+const char kSbV4UrlPrefix[] = "https://safebrowsing.googleapis.com/v4";
 
 // The default SBProtocolManagerFactory.
 class SBProtocolManagerFactoryImpl : public SBProtocolManagerFactory {
@@ -127,6 +136,35 @@ SafeBrowsingProtocolManager* SafeBrowsingProtocolManager::Create(
                                          config);
 }
 
+// static
+// Backoff interval is MIN(((2^(n-1))*15 minutes) * (RAND + 1), 24 hours) where
+// n is the number of consecutive errors.
+base::TimeDelta SafeBrowsingProtocolManager::GetNextV4BackOffInterval(
+    size_t* error_count,
+    size_t* multiplier) {
+  DCHECK(multiplier && error_count);
+  (*error_count)++;
+  if (*error_count > 1 && *error_count < 9) {
+    // With error count 9 and above we will hit the 24 hour max interval.
+    // Cap the multiplier here to prevent integer overflow errors.
+    *multiplier *= 2;
+  }
+  base::TimeDelta next = base::TimeDelta::FromMinutes(
+      *multiplier * (1 + base::RandDouble()) * 15);
+
+  base::TimeDelta day = base::TimeDelta::FromHours(24);
+
+  if (next < day)
+    return next;
+  else
+    return day;
+}
+
+void SafeBrowsingProtocolManager::ResetGetHashV4Errors() {
+  gethash_v4_error_count_ = 0;
+  gethash_v4_back_off_mult_ = 1;
+}
+
 SafeBrowsingProtocolManager::SafeBrowsingProtocolManager(
     SafeBrowsingProtocolManagerDelegate* delegate,
     net::URLRequestContextGetter* request_context_getter,
@@ -135,12 +173,15 @@ SafeBrowsingProtocolManager::SafeBrowsingProtocolManager(
       request_type_(NO_REQUEST),
       update_error_count_(0),
       gethash_error_count_(0),
+      gethash_v4_error_count_(0),
       update_back_off_mult_(1),
       gethash_back_off_mult_(1),
+      gethash_v4_back_off_mult_(1),
       next_update_interval_(base::TimeDelta::FromSeconds(
           base::RandInt(kSbTimerStartIntervalSecMin,
                         kSbTimerStartIntervalSecMax))),
       chunk_pending_to_write_(false),
+      next_gethash_v4_time_(Time::FromDoubleT(0)),
       version_(config.version),
       update_size_(0),
       client_name_(config.client_name),
@@ -177,6 +218,13 @@ void SafeBrowsingProtocolManager::RecordGetHashResult(bool is_download,
   }
 }
 
+// static
+void SafeBrowsingProtocolManager::RecordGetV4HashResult(
+    ResultType result_type) {
+  UMA_HISTOGRAM_ENUMERATION("SafeBrowsing.GetV4HashResult", result_type,
+                            GET_HASH_RESULT_MAX);
+}
+
 void SafeBrowsingProtocolManager::RecordHttpResponseOrErrorCode(
     const char* metric_name,
     const net::URLRequestStatus& status,
@@ -194,6 +242,10 @@ SafeBrowsingProtocolManager::~SafeBrowsingProtocolManager() {
   STLDeleteContainerPairFirstPointers(hash_requests_.begin(),
                                       hash_requests_.end());
   hash_requests_.clear();
+
+  STLDeleteContainerPairFirstPointers(v4_hash_requests_.begin(),
+                                      v4_hash_requests_.end());
+  v4_hash_requests_.clear();
 }
 
 // We can only have one update or chunk request outstanding, but there may be
@@ -229,6 +281,139 @@ void SafeBrowsingProtocolManager::GetFullHash(
   fetcher->Start();
 }
 
+std::string SafeBrowsingProtocolManager::GetV4HashRequest(
+    const std::vector<SBPrefix>& prefixes,
+    const std::vector<PlatformType>& platforms,
+    ThreatType threat_type) {
+  // Build the request. Client info and client states are not added to the
+  // request protocol buffer. Client info is passed as params in the url.
+  FindFullHashesRequest req;
+  ThreatInfo* info = req.mutable_threat_info();
+  info->add_threat_types(threat_type);
+  info->add_threat_entry_types(URL_EXPRESSION);
+  for (const PlatformType p : platforms) {
+    info->add_platform_types(p);
+  }
+  for (const SBPrefix& prefix : prefixes) {
+    std::string hash(reinterpret_cast<const char*>(&prefix), sizeof(SBPrefix));
+    info->add_threat_entries()->set_hash(hash);
+  }
+
+  // Serialize and Base64 encode.
+  std::string req_data, req_base64;
+  req.SerializeToString(&req_data);
+  base::Base64Encode(req_data, &req_base64);
+
+  return req_base64;
+}
+
+bool SafeBrowsingProtocolManager::ParseV4HashResponse(
+    const std::string& data,
+    std::vector<SBFullHashResult>* full_hashes,
+    base::TimeDelta* negative_cache_duration) {
+  FindFullHashesResponse response;
+
+  if (!response.ParseFromString(data)) {
+    // TODO(kcarattini): Add UMA.
+    return false;
+  }
+
+  if (response.has_negative_cache_duration()) {
+    // Seconds resolution is good enough so we ignore the nanos field.
+    *negative_cache_duration = base::TimeDelta::FromSeconds(
+        response.negative_cache_duration().seconds());
+  }
+
+  if (response.has_minimum_wait_duration()) {
+    // Seconds resolution is good enough so we ignore the nanos field.
+    next_gethash_v4_time_ = Time::Now() + base::TimeDelta::FromSeconds(
+        response.minimum_wait_duration().seconds());
+  }
+
+  // Loop over the threat matches and fill in full_hashes.
+  for (const ThreatMatch& match : response.matches()) {
+    // Make sure the platform and threat entry type match.
+    if (!(match.has_threat_entry_type() &&
+          match.threat_entry_type() == URL_EXPRESSION &&
+          match.has_threat())) {
+      continue;
+    }
+
+    // Fill in the full hash.
+    SBFullHashResult result;
+    result.hash = StringToSBFullHash(match.threat().hash());
+
+    if (match.has_cache_duration()) {
+      // Seconds resolution is good enough so we ignore the nanos field.
+      result.cache_duration = base::TimeDelta::FromSeconds(
+          match.cache_duration().seconds());
+    }
+
+    // Different threat types will handle the metadata differently.
+    if (match.has_threat_type() && match.threat_type() == API_ABUSE &&
+        match.has_platform_type() &&
+        match.platform_type() == CHROME_PLATFORM &&
+        match.has_threat_entry_metadata()) {
+      // For API Abuse, store a csv of the returned permissions.
+      for (const ThreatEntryMetadata::MetadataEntry& m :
+               match.threat_entry_metadata().entries()) {
+        if (m.key() == "permission") {
+          result.metadata += m.value() + ",";
+        }
+      }
+    } else {
+      // TODO(kcarattini): Add UMA for unexpected threat type match.
+      return false;
+    }
+
+    full_hashes->push_back(result);
+  }
+  return true;
+}
+
+void SafeBrowsingProtocolManager::GetV4FullHashes(
+    const std::vector<SBPrefix>& prefixes,
+    const std::vector<PlatformType>& platforms,
+    ThreatType threat_type,
+    FullHashCallback callback) {
+  DCHECK(CalledOnValidThread());
+  // We need to wait the minimum waiting duration, and if we are in backoff,
+  // we need to check if we're past the next allowed time. If we are, we can
+  // proceed with the request. If not, we are required to return empty results
+  // (i.e. treat the page as safe).
+  if (Time::Now() <= next_gethash_v4_time_) {
+    if (gethash_v4_error_count_) {
+      RecordGetV4HashResult(GET_HASH_BACKOFF_ERROR);
+    } else {
+      RecordGetV4HashResult(GET_HASH_MIN_WAIT_DURATION_ERROR);
+    }
+    std::vector<SBFullHashResult> full_hashes;
+    callback.Run(full_hashes, base::TimeDelta());
+    return;
+  }
+
+  std::string req_base64 = GetV4HashRequest(prefixes, platforms, threat_type);
+  GURL gethash_url = GetV4HashUrl(req_base64);
+
+  net::URLFetcher* fetcher =
+      net::URLFetcher::Create(url_fetcher_id_++, gethash_url,
+                              net::URLFetcher::GET, this)
+          .release();
+  v4_hash_requests_[fetcher] = FullHashDetails(callback,
+                                               false  /* is_download */);
+
+  fetcher->SetLoadFlags(net::LOAD_DISABLE_CACHE);
+  fetcher->SetRequestContext(request_context_getter_.get());
+  fetcher->Start();
+}
+
+void SafeBrowsingProtocolManager::GetFullHashesWithApis(
+    const std::vector<SBPrefix>& prefixes,
+    FullHashCallback callback) {
+  std::vector<PlatformType> platform = {CHROME_PLATFORM};
+  GetV4FullHashes(prefixes, platform, API_ABUSE, callback);
+}
+
 void SafeBrowsingProtocolManager::GetNextUpdate() {
   DCHECK(CalledOnValidThread());
   if (request_.get() || request_type_ != NO_REQUEST)
@@ -253,13 +438,14 @@ void SafeBrowsingProtocolManager::OnURLFetchComplete(
   scoped_ptr<const net::URLFetcher> fetcher;
 
   HashRequests::iterator it = hash_requests_.find(source);
+  HashRequests::iterator v4_it = v4_hash_requests_.find(source);
   int response_code = source->GetResponseCode();
   net::URLRequestStatus status = source->GetStatus();
-  RecordHttpResponseOrErrorCode(kUmaHashResponseMetricName, status,
-                                response_code);
+
   if (it != hash_requests_.end()) {
     // GetHash response.
-    fetcher.reset(it->first);
+    RecordHttpResponseOrErrorCode(kGetHashUmaResponseMetricName, status,
+                                  response_code);
     const FullHashDetails& details = it->second;
     std::vector<SBFullHashResult> full_hashes;
     base::TimeDelta cache_lifetime;
@@ -302,8 +488,48 @@ void SafeBrowsingProtocolManager::OnURLFetchComplete(
     details.callback.Run(full_hashes, cache_lifetime);
 
     hash_requests_.erase(it);
+  } else if (v4_it != v4_hash_requests_.end()) {
+    // V4 FindFullHashes response.
+    // TODO(kcarattini): Consider pulling all the V4 handling out into a
+    // separate V4ProtocolManager class.
+    RecordHttpResponseOrErrorCode(kUmaV4ResponseMetricName, status,
+                                  response_code);
+    const FullHashDetails& details = v4_it->second;
+    std::vector<SBFullHashResult> full_hashes;
+    base::TimeDelta negative_cache_duration;
+    if (status.is_success() && response_code == net::HTTP_OK) {
+      RecordGetV4HashResult(GET_HASH_STATUS_200);
+      ResetGetHashV4Errors();
+      std::string data;
+      source->GetResponseAsString(&data);
+      if (!ParseV4HashResponse(data, &full_hashes, &negative_cache_duration)) {
+        full_hashes.clear();
+        RecordGetV4HashResult(GET_HASH_PARSE_ERROR);
+      }
+    } else {
+      HandleGetHashV4Error(Time::Now());
+
+      DVLOG(1) << "SafeBrowsing GetEncodedFullHashes request for: " <<
+          source->GetURL() << " failed with error: " << status.error() <<
+          " and response code: " << response_code;
+
+      if (status.status() == net::URLRequestStatus::FAILED) {
+        RecordGetV4HashResult(GET_HASH_NETWORK_ERROR);
+      } else {
+        RecordGetV4HashResult(GET_HASH_HTTP_ERROR);
+      }
+    }
+
+    // Invoke the callback with full_hashes, even if there was a parse error or
+    // an error response code (in which case full_hashes will be empty). The
+    // caller can't be blocked indefinitely.
+    details.callback.Run(full_hashes, negative_cache_duration);
+
+    v4_hash_requests_.erase(v4_it);
   } else {
     // Update or chunk response.
+    RecordHttpResponseOrErrorCode(kGetChunkUmaResponseMetricName, status,
+                                  response_code);
     fetcher.reset(request_.release());
 
     if (request_type_ == UPDATE_REQUEST ||
@@ -394,10 +620,10 @@ void SafeBrowsingProtocolManager::OnURLFetchComplete(
       }
       UpdateFinished(false);
     }
-  }
 
-  // Get the next chunk if available.
-  IssueChunkRequest();
+    // Get the next chunk if available.
+    IssueChunkRequest();
+  }
 }
 
 bool SafeBrowsingProtocolManager::HandleServiceResponse(const GURL& url,
@@ -448,7 +674,7 @@ bool SafeBrowsingProtocolManager::HandleServiceResponse(const GURL& url,
 
       // Chunks to delete from our storage.
       if (!chunk_deletes->empty())
-        delegate_->DeleteChunks(chunk_deletes.Pass());
+        delegate_->DeleteChunks(std::move(chunk_deletes));
 
       break;
     }
@@ -457,8 +683,8 @@ bool SafeBrowsingProtocolManager::HandleServiceResponse(const GURL& url,
                           base::Time::Now() - chunk_request_start_);
 
       const ChunkUrl chunk_url = chunk_request_urls_.front();
-      scoped_ptr<ScopedVector<SBChunkData>> chunks(
-          new ScopedVector<SBChunkData>);
+      scoped_ptr<std::vector<scoped_ptr<SBChunkData>>> chunks(
+          new std::vector<scoped_ptr<SBChunkData>>);
       UMA_HISTOGRAM_COUNTS("SB2.ChunkSize", length);
       update_size_ += length;
       if (!ParseChunk(data, length, chunks.get()))
@@ -468,7 +694,7 @@ bool SafeBrowsingProtocolManager::HandleServiceResponse(const GURL& url,
       if (!chunks->empty()) {
         chunk_pending_to_write_ = true;
         delegate_->AddChunks(
-            chunk_url.list_name, chunks.Pass(),
+            chunk_url.list_name, std::move(chunks),
             base::Bind(&SafeBrowsingProtocolManager::OnAddChunksComplete,
                        base::Unretained(this)));
       }
@@ -709,6 +935,13 @@ void SafeBrowsingProtocolManager::HandleGetHashError(const Time& now) {
   next_gethash_time_ = now + next;
 }
 
+void SafeBrowsingProtocolManager::HandleGetHashV4Error(const Time& now) {
+  DCHECK(CalledOnValidThread());
+  base::TimeDelta next = GetNextV4BackOffInterval(
+      &gethash_v4_error_count_, &gethash_v4_back_off_mult_);
+  next_gethash_v4_time_ = now + next;
+}
+
 void SafeBrowsingProtocolManager::UpdateFinished(bool success) {
   UpdateFinished(success, !success);
 }
@@ -756,6 +989,15 @@ GURL SafeBrowsingProtocolManager::GetHashUrl(bool is_extended_reporting) const {
   std::string url = SafeBrowsingProtocolManagerHelper::ComposeUrl(
       url_prefix_, "gethash", client_name_, version_, additional_query_,
       is_extended_reporting);
+  return GURL(url);
+}
+
+// The API hash call uses the pver4 Safe Browsing server.
+GURL SafeBrowsingProtocolManager::GetV4HashUrl(
+    const std::string& request_base64) const {
+  std::string url = SafeBrowsingProtocolManagerHelper::ComposePver4Url(
+      kSbV4UrlPrefix, "encodedFullHashes",
+      request_base64, client_name_, version_);
   return GURL(url);
 }
 

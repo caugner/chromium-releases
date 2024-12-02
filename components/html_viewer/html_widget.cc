@@ -4,6 +4,9 @@
 
 #include "components/html_viewer/html_widget.h"
 
+#include <stdint.h>
+#include <utility>
+
 #include "base/command_line.h"
 #include "components/html_viewer/blink_settings.h"
 #include "components/html_viewer/global_state.h"
@@ -12,8 +15,8 @@
 #include "components/html_viewer/web_layer_tree_view_impl.h"
 #include "components/html_viewer/web_storage_namespace_impl.h"
 #include "components/mus/public/cpp/window.h"
-#include "mojo/application/public/cpp/application_impl.h"
 #include "mojo/services/tracing/public/interfaces/tracing.mojom.h"
+#include "mojo/shell/public/cpp/application_impl.h"
 #include "third_party/WebKit/public/web/WebFrameWidget.h"
 #include "third_party/WebKit/public/web/WebSettings.h"
 #include "third_party/WebKit/public/web/WebView.h"
@@ -35,11 +38,9 @@ void InitializeWebLayerTreeView(WebLayerTreeViewImpl* web_layer_tree_view,
                                 mus::Window* window,
                                 blink::WebWidget* widget) {
   DCHECK(window);
-  mojo::URLRequestPtr request(mojo::URLRequest::New());
-  request->url = mojo::String::From("mojo:mus");
   mus::mojom::GpuPtr gpu_service;
-  app->ConnectToService(request.Pass(), &gpu_service);
-  web_layer_tree_view->Initialize(gpu_service.Pass(), window, widget);
+  app->ConnectToService("mojo:mus", &gpu_service);
+  web_layer_tree_view->Initialize(std::move(gpu_service), window, widget);
 }
 
 void UpdateWebViewSizeFromViewSize(mus::Window* window,
@@ -126,7 +127,7 @@ void HTMLWidgetRootLocal::didMeaningfulLayout(
     blink::WebMeaningfulLayout layout_type) {
   static bool called = false;
   if (!called && layout_type == blink::WebMeaningfulLayout::VisuallyNonEmpty) {
-    const int64 ticks = base::TimeTicks::Now().ToInternalValue();
+    const int64_t ticks = base::TimeTicks::Now().ToInternalValue();
     tracing::StartupPerformanceDataCollectorPtr collector =
         StatsCollectionController::ConnectToDataCollector(app_);
     if (collector)

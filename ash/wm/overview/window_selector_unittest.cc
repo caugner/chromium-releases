@@ -30,7 +30,6 @@
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/wm_event.h"
-#include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_vector.h"
@@ -125,7 +124,7 @@ class WindowSelectorTest : public test::AshTestBase {
     widget->Init(params);
     widget->Show();
     ParentWindowInPrimaryRootWindow(widget->GetNativeWindow());
-    return widget.Pass();
+    return widget;
   }
 
   aura::Window* CreatePanelWindow(const gfx::Rect& bounds) {
@@ -739,8 +738,7 @@ TEST_F(WindowSelectorTest, WindowDoesNotReceiveEvents) {
 
   // The event should target the window because we are still not in overview
   // mode.
-  EXPECT_EQ(window, static_cast<aura::Window*>(
-      targeter->FindTargetForEvent(root_target, &event1)));
+  EXPECT_EQ(window.get(), targeter->FindTargetForEvent(root_target, &event1));
 
   ToggleOverview();
 
@@ -751,8 +749,7 @@ TEST_F(WindowSelectorTest, WindowDoesNotReceiveEvents) {
                         ui::EventTimeForNow(), ui::EF_NONE, ui::EF_NONE);
 
   // Now the transparent window should be intercepting this event.
-  EXPECT_NE(window, static_cast<aura::Window*>(
-        targeter->FindTargetForEvent(root_target, &event2)));
+  EXPECT_NE(window.get(), targeter->FindTargetForEvent(root_target, &event2));
 }
 
 // Tests that clicking on the close button effectively closes the window.

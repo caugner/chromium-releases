@@ -7,7 +7,7 @@ import sys
 import unittest
 import StringIO
 
-import mock # pylint: disable=F0401
+import mock # pylint: disable=import-error
 
 import fetch_benchmark_deps
 
@@ -25,7 +25,7 @@ class FetchBenchmarkDepsUnittest(unittest.TestCase):
   """
 
   def setUp(self):
-    """Override sys.argv as if it is called from commnad line."""
+    """Override sys.argv as if it is called from command line."""
     self._argv = sys.argv
     sys.argv = ['./fetch_benchmark_deps', '']
 

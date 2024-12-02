@@ -23,7 +23,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "core/html/HTMLMediaElement.h"
 
 #include "bindings/core/v8/ExceptionState.h"
@@ -72,9 +71,12 @@
 #include "platform/MIMETypeRegistry.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/UserGestureIndicator.h"
+#include "platform/audio/AudioBus.h"
+#include "platform/audio/AudioSourceProviderClient.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/Platform.h"
+#include "public/platform/WebAudioSourceProvider.h"
 #include "public/platform/WebContentDecryptionModule.h"
 #include "public/platform/WebInbandTextTrack.h"
 #include "wtf/CurrentTime.h"
@@ -83,11 +85,6 @@
 #include "wtf/text/CString.h"
 #include <limits>
 
-#if ENABLE(WEB_AUDIO)
-#include "platform/audio/AudioBus.h"
-#include "platform/audio/AudioSourceProviderClient.h"
-#include "public/platform/WebAudioSourceProvider.h"
-#endif
 
 namespace blink {
 
@@ -152,7 +149,6 @@ static void removeElementFromDocumentMap(HTMLMediaElement* element, Document* do
 class AudioSourceProviderClientLockScope {
     STACK_ALLOCATED();
 public:
-#if ENABLE(WEB_AUDIO)
     AudioSourceProviderClientLockScope(HTMLMediaElement& element)
         : m_client(element.audioSourceNode())
     {
@@ -167,10 +163,6 @@ public:
 
 private:
     Member<AudioSourceProviderClient> m_client;
-#else
-    explicit AudioSourceProviderClientLockScope(HTMLMediaElement&) { }
-    ~AudioSourceProviderClientLockScope() { }
-#endif
 };
 
 static const AtomicString& AudioKindToString(WebMediaPlayerClient::AudioTrackKind kind)
@@ -343,9 +335,7 @@ HTMLMediaElement::HTMLMediaElement(const QualifiedName& tagName, Document& docum
     , m_audioTracks(AudioTrackList::create(*this))
     , m_videoTracks(VideoTrackList::create(*this))
     , m_textTracks(nullptr)
-#if ENABLE(WEB_AUDIO)
     , m_audioSourceNode(nullptr)
-#endif
     , m_autoplayHelper(*this)
 {
 #if ENABLE(OILPAN)
@@ -384,14 +374,7 @@ HTMLMediaElement::~HTMLMediaElement()
     removeElementFromDocumentMap(this, &document());
 
     // Destroying the player may cause a resource load to be canceled,
-    // which could result in userCancelledLoad() being called back.
-    // Setting m_isFinalizing ensures that such a call will not cause
-    // us to dispatch an abort event, which would result in a crash.
-    // See http://crbug.com/233654 for more details.
-    m_isFinalizing = true;
-
-    // Destroying the player may cause a resource load to be canceled,
-    // which could result in Document::dispatchWindowLoadEvent() being
+    // which could result in LocalDOMWindow::dispatchWindowLoadEvent() being
     // called via ResourceFetch::didLoadResource() then
     // FrameLoader::checkCompleted(). To prevent load event dispatching during
     // object destruction, we use Document::incrementLoadEventDelayCount().
@@ -403,13 +386,11 @@ HTMLMediaElement::~HTMLMediaElement()
     document().decrementLoadEventDelayCount();
 #endif
 
-#if ENABLE(WEB_AUDIO)
     // m_audioSourceNode is explicitly cleared by AudioNode::dispose().
     // Since AudioNode::dispose() is guaranteed to be always called before
     // the AudioNode is destructed, m_audioSourceNode is explicitly cleared
     // even if the AudioNode and the HTMLMediaElement die together.
     ASSERT(!m_audioSourceNode);
-#endif
 }
 
 #if ENABLE(OILPAN)
@@ -474,10 +455,12 @@ void HTMLMediaElement::didMoveToNewDocument(Document& oldDocument)
 
     // FIXME: This is a temporary fix to prevent this object from causing the
     // MediaPlayer to dereference LocalFrame and FrameLoader pointers from the
-    // previous document. A proper fix would provide a mechanism to allow this
-    // object to refresh the MediaPlayer's LocalFrame and FrameLoader references on
+    // previous document. This restarts the load, as if the src attribute had been set.
+    // A proper fix would provide a mechanism to allow this object to refresh
+    // the MediaPlayer's LocalFrame and FrameLoader references on
     // document changes so that playback can be resumed properly.
-    userCancelledLoad();
+    clearMediaPlayer(LoadMediaResource);
+    scheduleDelayedAction(LoadMediaResource);
 
     // Decrement the load event delay count on oldDocument now that m_webMediaPlayer has been destroyed
     // and there is no risk of dispatching a load event from within the destructor.
@@ -501,7 +484,7 @@ bool HTMLMediaElement::isMouseFocusable() const
     return false;
 }
 
-void HTMLMediaElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+void HTMLMediaElement::parseAttribute(const QualifiedName& name, const AtomicString& oldValue, const AtomicString& value)
 {
     if (name == srcAttr) {
         // Trigger a reload, as long as the 'src' attribute is present.
@@ -513,8 +496,10 @@ void HTMLMediaElement::parseAttribute(const QualifiedName& name, const AtomicStr
         configureMediaControls();
     } else if (name == preloadAttr) {
         setPlayerPreload();
+    } else if (name == disableremoteplaybackAttr) {
+        UseCounter::count(document(), UseCounter::DisableRemotePlaybackAttribute);
     } else {
-        HTMLElement::parseAttribute(name, value);
+        HTMLElement::parseAttribute(name, oldValue, value);
     }
 }
 
@@ -562,7 +547,7 @@ void HTMLMediaElement::removedFrom(ContainerNode* insertionPoint)
     if (insertionPoint->inActiveDocument()) {
         configureMediaControls();
         if (m_networkState > NETWORK_EMPTY)
-            pause();
+            pauseInternal();
     }
 }
 
@@ -937,10 +922,8 @@ void HTMLMediaElement::loadResource(const KURL& url, ContentType& contentType, c
     // cache is an internal detail not exposed through the media element API.
     m_currentSrc = url;
 
-#if ENABLE(WEB_AUDIO)
     if (m_audioSourceNode)
         m_audioSourceNode->onCurrentSrcChanged(m_currentSrc);
-#endif
 
     WTF_LOG(Media, "HTMLMediaElement::loadResource(%p) - m_currentSrc -> %s", this, urlForLoggingMedia(m_currentSrc).utf8().data());
 
@@ -1036,10 +1019,8 @@ void HTMLMediaElement::startPlayerLoad()
 
     if (layoutObject())
         layoutObject()->setShouldDoFullPaintInvalidation();
-#if ENABLE(WEB_AUDIO)
     // Make sure if we create/re-create the WebMediaPlayer that we update our wrapper.
     m_audioSourceProvider.wrap(m_webMediaPlayer->audioSourceProvider());
-#endif
     m_webMediaPlayer->setVolume(effectiveMediaVolume());
 
     m_webMediaPlayer->setPoster(posterImageURL());
@@ -1116,6 +1097,8 @@ void HTMLMediaElement::startDeferredLoad()
         executeDeferredLoad();
         return;
     }
+    if (m_deferredLoadState == ExecuteOnStopDelayingLoadEventTask)
+        return;
     ASSERT(m_deferredLoadState == WaitingForStopDelayingLoadEventTask);
     m_deferredLoadState = ExecuteOnStopDelayingLoadEventTask;
 }
@@ -1556,6 +1539,7 @@ void HTMLMediaElement::setReadyState(ReadyState state)
                 invalidateCachedTime();
                 scheduleEvent(EventTypeNames::play);
                 scheduleEvent(EventTypeNames::playing);
+                m_autoplaying = false;
             }
         }
 
@@ -1909,7 +1893,7 @@ void HTMLMediaElement::setPreload(const AtomicString& preload)
 WebMediaPlayer::Preload HTMLMediaElement::preloadType() const
 {
     // Force preload to none for cellular connections.
-    if (networkStateNotifier().connectionType() == WebConnectionTypeCellular) {
+    if (networkStateNotifier().isCellularConnectionType()) {
         UseCounter::count(document(), UseCounter::HTMLMediaElementPreloadForcedNone);
         return WebMediaPlayer::PreloadNone;
     }
@@ -1974,6 +1958,12 @@ void HTMLMediaElement::playInternal()
 {
     WTF_LOG(Media, "HTMLMediaElement::playInternal(%p)", this);
 
+    // Always return the buffering strategy to normal when not paused,
+    // regardless of the cause. (In contrast with aggressive buffering which is
+    // only enabled by pause(), not pauseInternal().)
+    if (webMediaPlayer())
+        webMediaPlayer()->setBufferingStrategy(WebMediaPlayer::BufferingStrategy::Normal);
+
     // 4.8.10.9. Playing the media resource
     if (m_networkState == NETWORK_EMPTY)
         scheduleDelayedAction(LoadMediaResource);
@@ -2022,6 +2012,18 @@ bool HTMLMediaElement::isBailout() const
 void HTMLMediaElement::pause()
 {
     WTF_LOG(Media, "HTMLMediaElement::pause(%p)", this);
+
+    // Only buffer aggressively on a user-initiated pause. Other types of pauses
+    // (which go directly to pauseInternal()) should not cause this behavior.
+    if (webMediaPlayer() && UserGestureIndicator::processingUserGesture())
+        webMediaPlayer()->setBufferingStrategy(WebMediaPlayer::BufferingStrategy::Aggressive);
+
+    pauseInternal();
+}
+
+void HTMLMediaElement::pauseInternal()
+{
+    WTF_LOG(Media, "HTMLMediaElement::pauseInternal(%p)", this);
 
     if (m_networkState == NETWORK_EMPTY)
         scheduleDelayedAction(LoadMediaResource);
@@ -2168,7 +2170,7 @@ void HTMLMediaElement::playbackProgressTimerFired(Timer<HTMLMediaElement>*)
         if (!m_paused) {
             UseCounter::count(document(), UseCounter::HTMLMediaElementPauseAtFragmentEnd);
             // changes paused to true and fires a simple event named pause at the media element.
-            pause();
+            pauseInternal();
         }
     }
 
@@ -2780,7 +2782,7 @@ void HTMLMediaElement::playbackStateChanged()
         return;
 
     if (webMediaPlayer()->paused())
-        pause();
+        pauseInternal();
     else
         playInternal();
 }
@@ -2975,59 +2977,11 @@ void HTMLMediaElement::stopPeriodicTimers()
     m_playbackProgressTimer.stop();
 }
 
-void HTMLMediaElement::userCancelledLoad()
-{
-    WTF_LOG(Media, "HTMLMediaElement::userCancelledLoad(%p)", this);
-
-    // If the media data fetching process is aborted by the user:
-
-    // 1 - The user agent should cancel the fetching process.
-    clearMediaPlayer(-1);
-    // Reset m_readyState and m_readyStateMaximum since m_webMediaPlayer is gone.
-    ReadyState readyState = m_readyState;
-    m_readyState = HAVE_NOTHING;
-    m_readyStateMaximum = HAVE_NOTHING;
-
-    // TODO(srirama.m): Investigate if this condition can be dropped entirely without any issues.
-    if (m_networkState == NETWORK_EMPTY || m_completelyLoaded || m_isFinalizing)
-        return;
-
-    // 2 - Set the error attribute to a new MediaError object whose code attribute is set to MEDIA_ERR_ABORTED.
-    m_error = MediaError::create(MediaError::MEDIA_ERR_ABORTED);
-
-    // 3 - Queue a task to fire a simple event named error at the media element.
-    scheduleEvent(EventTypeNames::abort);
-
-    // 4 - If the media element's readyState attribute has a value equal to HAVE_NOTHING, set the
-    // element's networkState attribute to the NETWORK_EMPTY value and queue a task to fire a
-    // simple event named emptied at the element. Otherwise, set the element's networkState
-    // attribute to the NETWORK_IDLE value.
-    if (readyState == HAVE_NOTHING) {
-        setNetworkState(NETWORK_EMPTY);
-        scheduleEvent(EventTypeNames::emptied);
-    } else {
-        setNetworkState(NETWORK_IDLE);
-    }
-
-    // 5 - Set the element's delaying-the-load-event flag to false. This stops delaying the load event.
-    setShouldDelayLoadEvent(false);
-
-    // 6 - Abort the overall resource selection algorithm.
-    m_currentSourceNode = nullptr;
-
-    invalidateCachedTime();
-    cueTimeline().updateActiveCues(0);
-}
-
 void HTMLMediaElement::clearMediaPlayerAndAudioSourceProviderClientWithoutLocking()
 {
-#if ENABLE(WEB_AUDIO)
     audioSourceProvider().setClient(nullptr);
-#endif
     if (m_webMediaPlayer) {
-#if ENABLE(WEB_AUDIO)
         m_audioSourceProvider.wrap(nullptr);
-#endif
         m_webMediaPlayer.clear();
     }
 }
@@ -3067,13 +3021,19 @@ void HTMLMediaElement::stop()
 
     recordMetricsIfPausing();
 
-    // Close the async event queue so that no events are enqueued by userCancelledLoad.
+    // Close the async event queue so that no events are enqueued.
     cancelPendingEventsAndCallbacks();
     m_asyncEventQueue->close();
 
-    userCancelledLoad();
-
     // Stop the playback without generating events
+    clearMediaPlayer(-1);
+    m_readyState = HAVE_NOTHING;
+    m_readyStateMaximum = HAVE_NOTHING;
+    setNetworkState(NETWORK_EMPTY);
+    setShouldDelayLoadEvent(false);
+    m_currentSourceNode = nullptr;
+    invalidateCachedTime();
+    cueTimeline().updateActiveCues(0);
     m_playing = false;
     m_paused = true;
     m_seeking = false;
@@ -3445,13 +3405,10 @@ void HTMLMediaElement::resetMediaPlayerAndMediaSource()
     m_remoteRoutesAvailable = false;
     m_playingRemotely = false;
 
-#if ENABLE(WEB_AUDIO)
     if (m_audioSourceNode)
         audioSourceProvider().setClient(m_audioSourceNode);
-#endif
 }
 
-#if ENABLE(WEB_AUDIO)
 void HTMLMediaElement::setAudioSourceNode(AudioSourceProviderClient* sourceNode)
 {
     ASSERT(isMainThread());
@@ -3460,7 +3417,6 @@ void HTMLMediaElement::setAudioSourceNode(AudioSourceProviderClient* sourceNode)
     AudioSourceProviderClientLockScope scope(*this);
     audioSourceProvider().setClient(m_audioSourceNode);
 }
-#endif
 
 void HTMLMediaElement::setAllowHiddenVolumeControls(bool allow)
 {
@@ -3531,10 +3487,8 @@ DEFINE_TRACE(HTMLMediaElement)
     visitor->trace(m_cueTimeline);
     visitor->trace(m_textTracks);
     visitor->trace(m_textTracksWhenResourceSelectionBegan);
-#if ENABLE(WEB_AUDIO)
     visitor->trace(m_audioSourceProvider);
     visitor->template registerWeakMembers<HTMLMediaElement, &HTMLMediaElement::clearWeakMembers>(this);
-#endif
     visitor->trace(m_autoplayHelper);
     HeapSupplementable<HTMLMediaElement>::trace(visitor);
 #endif
@@ -3610,7 +3564,6 @@ void HTMLMediaElement::triggerAutoplayViewportCheckForTesting()
     m_autoplayHelper.triggerAutoplayViewportCheckForTesting();
 }
 
-#if ENABLE(WEB_AUDIO)
 void HTMLMediaElement::clearWeakMembers(Visitor* visitor)
 {
     if (!Heap::isHeapObjectAlive(m_audioSourceNode))
@@ -3676,6 +3629,5 @@ DEFINE_TRACE(HTMLMediaElement::AudioSourceProviderImpl)
 {
     visitor->trace(m_client);
 }
-#endif
 
 }

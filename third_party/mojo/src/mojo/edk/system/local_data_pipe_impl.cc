@@ -11,8 +11,9 @@
 #include "third_party/mojo/src/mojo/edk/system/local_data_pipe_impl.h"
 
 #include <string.h>
-
 #include <algorithm>
+#include <limits>
+#include <utility>
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -170,7 +171,7 @@ bool LocalDataPipeImpl::ProducerEndSerialize(
 
   if (!consumer_open()) {
     // Case 1: The consumer is closed.
-    s->consumer_num_bytes = static_cast<size_t>(-1);
+    s->consumer_num_bytes = static_cast<uint32_t>(-1);
     *actual_size = sizeof(SerializedDataPipeProducerDispatcher);
     return true;
   }
@@ -178,7 +179,8 @@ bool LocalDataPipeImpl::ProducerEndSerialize(
   // Case 2: The consumer isn't closed. We'll replace ourselves with a
   // |RemoteProducerDataPipeImpl|.
 
-  s->consumer_num_bytes = current_num_bytes_;
+  DCHECK(current_num_bytes_ < std::numeric_limits<uint32_t>::max());
+  s->consumer_num_bytes = static_cast<uint32_t>(current_num_bytes_);
   // Note: We don't use |port|.
   scoped_refptr<ChannelEndpoint> channel_endpoint =
       channel->SerializeEndpointWithLocalPeer(destination_for_endpoint, nullptr,
@@ -186,7 +188,7 @@ bool LocalDataPipeImpl::ProducerEndSerialize(
   // Note: Keep |*this| alive until the end of this method, to make things
   // slightly easier on ourselves.
   scoped_ptr<DataPipeImpl> self(owner()->ReplaceImplNoLock(make_scoped_ptr(
-      new RemoteProducerDataPipeImpl(channel_endpoint.get(), buffer_.Pass(),
+      new RemoteProducerDataPipeImpl(channel_endpoint.get(), std::move(buffer_),
                                      start_index_, current_num_bytes_))));
 
   *actual_size = sizeof(SerializedDataPipeProducerDispatcher) +
@@ -364,7 +366,7 @@ bool LocalDataPipeImpl::ConsumerEndSerialize(
   // slightly easier on ourselves.
   scoped_ptr<DataPipeImpl> self(owner()->ReplaceImplNoLock(make_scoped_ptr(
       new RemoteConsumerDataPipeImpl(channel_endpoint.get(), old_num_bytes,
-                                     buffer_.Pass(), start_index_))));
+                                     std::move(buffer_), start_index_))));
 
   *actual_size = sizeof(SerializedDataPipeConsumerDispatcher) +
                  channel->GetSerializedEndpointSize();

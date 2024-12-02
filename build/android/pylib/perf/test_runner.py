@@ -62,11 +62,13 @@ import zipfile
 
 from devil.android import battery_utils
 from devil.android import device_errors
+from devil.android import forwarder
+from devil.constants import exit_codes
 from devil.utils import cmd_helper
 from pylib import constants
-from pylib import forwarder
 from pylib.base import base_test_result
 from pylib.base import base_test_runner
+from pylib.constants import host_paths
 
 
 # Regex for the master branch commit position.
@@ -74,6 +76,7 @@ _GIT_CR_POS_RE = re.compile(r'^Cr-Commit-Position: refs/heads/master@{#(\d+)}$')
 
 
 def _GetChromiumRevision():
+  # pylint: disable=line-too-long
   """Get the git hash and commit position of the chromium master branch.
 
   See: https://chromium.googlesource.com/chromium/tools/build/+/master/scripts/slave/runtest.py#212
@@ -81,9 +84,10 @@ def _GetChromiumRevision():
   Returns:
     A dictionary with 'revision' and 'commit_pos' keys.
   """
+  # pylint: enable=line-too-long
   status, output = cmd_helper.GetCmdStatusAndOutput(
       ['git', 'log', '-n', '1', '--pretty=format:%H%n%B', 'HEAD'],
-      constants.DIR_SOURCE_ROOT)
+      host_paths.DIR_SOURCE_ROOT)
   revision = None
   commit_pos = None
   if not status:
@@ -141,7 +145,7 @@ def PrintTestOutput(test_name, json_file_name=None, archive_file_name=None):
   """
   persisted_result = GetPersistedResult(test_name)
   if not persisted_result:
-    return 1
+    return exit_codes.INFRA
   logging.info('*' * 80)
   logging.info('Output from:')
   logging.info(persisted_result['cmd'])
@@ -369,9 +373,9 @@ class TestRunner(base_test_runner.BaseTestRunner):
       # Just print a heart-beat so that the outer buildbot scripts won't timeout
       # without response.
       logfile = _HeartBeatLogger()
-    cwd = os.path.abspath(constants.DIR_SOURCE_ROOT)
+    cwd = os.path.abspath(host_paths.DIR_SOURCE_ROOT)
     if full_cmd.startswith('src/'):
-      cwd = os.path.abspath(os.path.join(constants.DIR_SOURCE_ROOT, os.pardir))
+      cwd = os.path.abspath(os.path.join(host_paths.DIR_SOURCE_ROOT, os.pardir))
     try:
       exit_code, output = cmd_helper.GetCmdStatusAndOutputWithTimeout(
           full_cmd, timeout, cwd=cwd, shell=True, logfile=logfile)

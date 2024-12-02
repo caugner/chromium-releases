@@ -20,11 +20,11 @@
         "RootInlineBox",
         "InlineTextBox 'AAAA AAAA AAAA'",
         "InlineTextBox 'AAAA AAAA'",
-        "VerticalScrollbar",
         "LayoutView #document",
         "LayoutView #document",
         "LayoutBlockFlow HTML",
         "LayoutBlockFlow BODY",
+        "RootInlineBox",
         "LayoutText #text",
         "InlineTextBox 'AAAA AAAA AAAA AAAA AAAA'"
       ]
@@ -49,11 +49,11 @@
         [0, 0, 300, 300]
       ],
       "paintInvalidationClients": [
-        "HorizontalScrollbar",
         "LayoutView #document",
         "LayoutView #document",
         "LayoutBlockFlow HTML",
         "LayoutBlockFlow BODY",
+        "RootInlineBox",
         "LayoutText #text",
         "InlineTextBox 'AAAA AAAA AAAA AAAA AAAA'"
       ]
@@ -84,6 +84,7 @@
         "LayoutView #document",
         "LayoutBlockFlow HTML",
         "LayoutBlockFlow BODY",
+        "RootInlineBox",
         "LayoutText #text",
         "InlineTextBox 'AAAA AAAA AAAA AAAA'",
         "InlineTextBox 'AAAA'"
@@ -113,6 +114,7 @@
         "LayoutView #document",
         "LayoutBlockFlow HTML",
         "LayoutBlockFlow BODY",
+        "RootInlineBox",
         "LayoutText #text",
         "InlineTextBox 'AAAA AAAA AAAA AAAA'",
         "InlineTextBox 'AAAA'"

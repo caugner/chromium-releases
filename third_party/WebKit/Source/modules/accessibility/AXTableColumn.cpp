@@ -26,7 +26,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "modules/accessibility/AXTableColumn.h"
 
 #include "core/layout/LayoutTableCell.h"
@@ -137,6 +136,7 @@ bool AXTableColumn::computeAccessibilityIsIgnored(IgnoredReasons* ignoredReasons
 
 void AXTableColumn::addChildren()
 {
+    ASSERT(!isDetached());
     ASSERT(!m_haveChildren);
 
     m_haveChildren = true;

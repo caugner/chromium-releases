@@ -5,6 +5,7 @@
 #include "content/browser/renderer_host/input/input_router_impl.h"
 
 #include <math.h>
+#include <utility>
 
 #include "base/auto_reset.h"
 #include "base/command_line.h"
@@ -15,6 +16,7 @@
 #include "content/browser/renderer_host/input/input_router_client.h"
 #include "content/browser/renderer_host/input/touch_event_queue.h"
 #include "content/browser/renderer_host/input/touchpad_tap_suppression_controller.h"
+#include "content/browser/renderer_host/input/web_input_event_util.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/edit_command.h"
 #include "content/common/input/input_event_ack_state.h"
@@ -77,7 +79,8 @@ InputRouterImpl::InputRouterImpl(IPC::Sender* sender,
       flush_requested_(false),
       active_renderer_fling_count_(0),
       touch_event_queue_(this, config.touch_config),
-      gesture_event_queue_(this, this, config.gesture_config) {
+      gesture_event_queue_(this, this, config.gesture_config),
+      device_scale_factor_(1.f) {
   DCHECK(sender);
   DCHECK(client);
   DCHECK(ack_handler);
@@ -94,9 +97,9 @@ bool InputRouterImpl::SendInput(scoped_ptr<IPC::Message> message) {
     // Check for types that require an ACK.
     case InputMsg_SelectRange::ID:
     case InputMsg_MoveRangeSelectionExtent::ID:
-      return SendSelectMessage(message.Pass());
+      return SendSelectMessage(std::move(message));
     case InputMsg_MoveCaret::ID:
-      return SendMoveCaret(message.Pass());
+      return SendMoveCaret(std::move(message));
     case InputMsg_HandleInputEvent::ID:
       NOTREACHED() << "WebInputEvents should never be sent via SendInput.";
       return false;
@@ -258,6 +261,10 @@ bool InputRouterImpl::HasPendingEvents() const {
          active_renderer_fling_count_ > 0;
 }
 
+void InputRouterImpl::SetDeviceScaleFactor(float device_scale_factor) {
+  device_scale_factor_ = device_scale_factor;
+}
+
 bool InputRouterImpl::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(InputRouterImpl, message)
@@ -322,7 +329,7 @@ bool InputRouterImpl::SendSelectMessage(
 bool InputRouterImpl::SendMoveCaret(scoped_ptr<IPC::Message> message) {
   DCHECK(message->type() == InputMsg_MoveCaret::ID);
   if (move_caret_pending_) {
-    next_move_caret_ = message.Pass();
+    next_move_caret_ = std::move(message);
     return true;
   }
 
@@ -412,12 +419,17 @@ bool InputRouterImpl::OfferToClient(const WebInputEvent& input_event,
 
 bool InputRouterImpl::OfferToRenderer(const WebInputEvent& input_event,
                                       const ui::LatencyInfo& latency_info) {
-  if (Send(new InputMsg_HandleInputEvent(routing_id(), &input_event,
+  scoped_ptr<blink::WebInputEvent> event_in_viewport =
+      ConvertWebInputEventToViewport(input_event, device_scale_factor_);
+  const WebInputEvent* event_to_send =
+      event_in_viewport ? event_in_viewport.get() : &input_event;
+
+  if (Send(new InputMsg_HandleInputEvent(routing_id(), event_to_send,
                                          latency_info))) {
     // Ack messages for ignored ack event types should never be sent by the
     // renderer. Consequently, such event types should not affect event time
     // or in-flight event count metrics.
-    if (WebInputEventTraits::WillReceiveAckFromRenderer(input_event)) {
+    if (WebInputEventTraits::WillReceiveAckFromRenderer(*event_to_send)) {
       input_event_start_time_ = TimeTicks::Now();
       client_->IncrementInFlightEventCount();
     }
@@ -449,7 +461,7 @@ void InputRouterImpl::OnDidOverscroll(const DidOverscrollParams& params) {
 void InputRouterImpl::OnMsgMoveCaretAck() {
   move_caret_pending_ = false;
   if (next_move_caret_)
-    SendMoveCaret(next_move_caret_.Pass());
+    SendMoveCaret(std::move(next_move_caret_));
 }
 
 void InputRouterImpl::OnSelectMessageAck() {
@@ -459,7 +471,7 @@ void InputRouterImpl::OnSelectMessageAck() {
         make_scoped_ptr(pending_select_messages_.front());
     pending_select_messages_.pop_front();
 
-    SendSelectMessage(next_message.Pass());
+    SendSelectMessage(std::move(next_message));
   }
 }
 
@@ -504,7 +516,7 @@ void InputRouterImpl::OnDidStopFlinging() {
 void InputRouterImpl::ProcessInputEventAck(WebInputEvent::Type event_type,
                                            InputEventAckState ack_result,
                                            const ui::LatencyInfo& latency_info,
-                                           uint32 unique_touch_event_id,
+                                           uint32_t unique_touch_event_id,
                                            AckSource ack_source) {
   TRACE_EVENT2("input", "InputRouterImpl::ProcessInputEventAck",
                "type", WebInputEventTraits::GetName(event_type),
@@ -574,8 +586,8 @@ void InputRouterImpl::ProcessMouseAck(blink::WebInputEvent::Type type,
 
   if (next_mouse_move_) {
     DCHECK(next_mouse_move_->event.type == WebInputEvent::MouseMove);
-    scoped_ptr<MouseEventWithLatencyInfo> next_mouse_move
-        = next_mouse_move_.Pass();
+    scoped_ptr<MouseEventWithLatencyInfo> next_mouse_move =
+        std::move(next_mouse_move_);
     SendMouseEvent(*next_mouse_move);
   }
 }
@@ -619,7 +631,7 @@ void InputRouterImpl::ProcessGestureAck(WebInputEvent::Type type,
 
 void InputRouterImpl::ProcessTouchAck(InputEventAckState ack_result,
                                       const ui::LatencyInfo& latency,
-                                      uint32 unique_touch_event_id) {
+                                      uint32_t unique_touch_event_id) {
   // |touch_event_queue_| will forward to OnTouchEventAck when appropriate.
   touch_event_queue_.ProcessTouchAck(ack_result, latency,
                                      unique_touch_event_id);

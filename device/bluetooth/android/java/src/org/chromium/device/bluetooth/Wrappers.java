@@ -11,6 +11,7 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
@@ -43,13 +44,14 @@ import java.util.UUID;
 @JNINamespace("device")
 @TargetApi(Build.VERSION_CODES.LOLLIPOP)
 class Wrappers {
-    private static final String TAG = "cr.Bluetooth";
+    private static final String TAG = "Bluetooth";
 
     /**
      * Wraps android.bluetooth.BluetoothAdapter.
      */
     static class BluetoothAdapterWrapper {
         private final BluetoothAdapter mAdapter;
+        protected final ContextWrapper mContext;
         protected final BluetoothLeScannerWrapper mScanner;
 
         /**
@@ -92,15 +94,20 @@ class Wrappers {
                 Log.i(TAG, "BluetoothAdapterWrapper.create failed: Default adapter not found.");
                 return null;
             } else {
-                return new BluetoothAdapterWrapper(adapter,
-                        new BluetoothLeScannerWrapper(context, adapter.getBluetoothLeScanner()));
+                return new BluetoothAdapterWrapper(adapter, new ContextWrapper(context),
+                        new BluetoothLeScannerWrapper(adapter.getBluetoothLeScanner()));
             }
         }
 
-        public BluetoothAdapterWrapper(
-                BluetoothAdapter adapter, BluetoothLeScannerWrapper scanner) {
+        public BluetoothAdapterWrapper(BluetoothAdapter adapter, ContextWrapper context,
+                BluetoothLeScannerWrapper scanner) {
             mAdapter = adapter;
+            mContext = context;
             mScanner = scanner;
+        }
+
+        public ContextWrapper getContext() {
+            return mContext;
         }
 
         public BluetoothLeScannerWrapper getBluetoothLeScanner() {
@@ -129,29 +136,31 @@ class Wrappers {
     }
 
     /**
+     * Wraps android.content.Context.
+     */
+    static class ContextWrapper {
+        private final Context mContext;
+
+        public ContextWrapper(Context context) {
+            mContext = context;
+        }
+
+        public boolean checkPermission(String permission) {
+            return mContext.checkPermission(permission, Process.myPid(), Process.myUid())
+                    == PackageManager.PERMISSION_GRANTED;
+        }
+    }
+
+    /**
      * Wraps android.bluetooth.BluetoothLeScanner.
      */
     static class BluetoothLeScannerWrapper {
-        private final Context mContext;
         private final BluetoothLeScanner mScanner;
         private final HashMap<ScanCallbackWrapper, ForwardScanCallbackToWrapper> mCallbacks;
 
-        public BluetoothLeScannerWrapper(Context context, BluetoothLeScanner scanner) {
-            mContext = context;
+        public BluetoothLeScannerWrapper(BluetoothLeScanner scanner) {
             mScanner = scanner;
             mCallbacks = new HashMap<ScanCallbackWrapper, ForwardScanCallbackToWrapper>();
-        }
-
-        // Returns true if we have permission to get results from a scan.
-        public boolean canScan() {
-            int myPid = Process.myPid();
-            int myUid = Process.myUid();
-            return mContext.checkPermission(
-                           Manifest.permission.ACCESS_COARSE_LOCATION, myPid, myUid)
-                    == PackageManager.PERMISSION_GRANTED
-                    || mContext.checkPermission(
-                               Manifest.permission.ACCESS_FINE_LOCATION, myPid, myUid)
-                    == PackageManager.PERMISSION_GRANTED;
         }
 
         public void startScan(
@@ -243,11 +252,15 @@ class Wrappers {
         private final BluetoothDevice mDevice;
         private final HashMap<BluetoothGattCharacteristic, BluetoothGattCharacteristicWrapper>
                 mCharacteristicsToWrappers;
+        private final HashMap<BluetoothGattDescriptor, BluetoothGattDescriptorWrapper>
+                mDescriptorsToWrappers;
 
         public BluetoothDeviceWrapper(BluetoothDevice device) {
             mDevice = device;
             mCharacteristicsToWrappers =
                     new HashMap<BluetoothGattCharacteristic, BluetoothGattCharacteristicWrapper>();
+            mDescriptorsToWrappers =
+                    new HashMap<BluetoothGattDescriptor, BluetoothGattDescriptorWrapper>();
         }
 
         public BluetoothGattWrapper connectGatt(
@@ -317,6 +330,10 @@ class Wrappers {
         boolean writeCharacteristic(BluetoothGattCharacteristicWrapper characteristic) {
             return mGatt.writeCharacteristic(characteristic.mCharacteristic);
         }
+
+        boolean writeDescriptor(BluetoothGattDescriptorWrapper descriptor) {
+            return mGatt.writeDescriptor(descriptor.mDescriptor);
+        }
     }
 
     /**
@@ -335,6 +352,14 @@ class Wrappers {
                 BluetoothDeviceWrapper deviceWrapper) {
             mWrapperCallback = wrapperCallback;
             mDeviceWrapper = deviceWrapper;
+        }
+
+        @Override
+        public void onCharacteristicChanged(
+                BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
+            Log.i(TAG, "wrapper onCharacteristicChanged.");
+            mWrapperCallback.onCharacteristicChanged(
+                    mDeviceWrapper.mCharacteristicsToWrappers.get(characteristic));
         }
 
         @Override
@@ -373,6 +398,8 @@ class Wrappers {
      * call.
      */
     abstract static class BluetoothGattCallbackWrapper {
+        public abstract void onCharacteristicChanged(
+                BluetoothGattCharacteristicWrapper characteristic);
         public abstract void onCharacteristicRead(
                 BluetoothGattCharacteristicWrapper characteristic, int status);
         public abstract void onCharacteristicWrite(
@@ -402,7 +429,8 @@ class Wrappers {
                 BluetoothGattCharacteristicWrapper characteristicWrapper =
                         mDeviceWrapper.mCharacteristicsToWrappers.get(characteristic);
                 if (characteristicWrapper == null) {
-                    characteristicWrapper = new BluetoothGattCharacteristicWrapper(characteristic);
+                    characteristicWrapper =
+                            new BluetoothGattCharacteristicWrapper(characteristic, mDeviceWrapper);
                     mDeviceWrapper.mCharacteristicsToWrappers.put(
                             characteristic, characteristicWrapper);
                 }
@@ -424,10 +452,47 @@ class Wrappers {
      * Wraps android.bluetooth.BluetoothGattCharacteristic.
      */
     static class BluetoothGattCharacteristicWrapper {
-        private final BluetoothGattCharacteristic mCharacteristic;
+        final BluetoothGattCharacteristic mCharacteristic;
+        final BluetoothDeviceWrapper mDeviceWrapper;
 
-        public BluetoothGattCharacteristicWrapper(BluetoothGattCharacteristic characteristic) {
+        public BluetoothGattCharacteristicWrapper(
+                BluetoothGattCharacteristic characteristic, BluetoothDeviceWrapper deviceWrapper) {
             mCharacteristic = characteristic;
+            mDeviceWrapper = deviceWrapper;
+        }
+
+        public BluetoothGattDescriptorWrapper getDescriptor(UUID uuid) {
+            BluetoothGattDescriptor descriptor = mCharacteristic.getDescriptor(uuid);
+            if (descriptor == null) {
+                return null;
+            }
+
+            BluetoothGattDescriptorWrapper descriptorWrapper =
+                    mDeviceWrapper.mDescriptorsToWrappers.get(descriptor);
+
+            if (descriptorWrapper == null) {
+                descriptorWrapper = new BluetoothGattDescriptorWrapper(descriptor);
+                mDeviceWrapper.mDescriptorsToWrappers.put(descriptor, descriptorWrapper);
+            }
+            return descriptorWrapper;
+        }
+
+        public List<BluetoothGattDescriptorWrapper> getDescriptors() {
+            List<BluetoothGattDescriptor> descriptors = mCharacteristic.getDescriptors();
+
+            ArrayList<BluetoothGattDescriptorWrapper> descriptorsWrapped =
+                    new ArrayList<BluetoothGattDescriptorWrapper>(descriptors.size());
+
+            for (BluetoothGattDescriptor descriptor : descriptors) {
+                BluetoothGattDescriptorWrapper descriptorWrapper =
+                        mDeviceWrapper.mDescriptorsToWrappers.get(descriptor);
+                if (descriptorWrapper == null) {
+                    descriptorWrapper = new BluetoothGattDescriptorWrapper(descriptor);
+                    mDeviceWrapper.mDescriptorsToWrappers.put(descriptor, descriptorWrapper);
+                }
+                descriptorsWrapped.add(descriptorWrapper);
+            }
+            return descriptorsWrapped;
         }
 
         public int getInstanceId() {
@@ -448,6 +513,29 @@ class Wrappers {
 
         public boolean setValue(byte[] value) {
             return mCharacteristic.setValue(value);
+        }
+    }
+
+    /**
+     * Wraps android.bluetooth.BluetoothGattDescriptor.
+     */
+    static class BluetoothGattDescriptorWrapper {
+        private final BluetoothGattDescriptor mDescriptor;
+
+        public BluetoothGattDescriptorWrapper(BluetoothGattDescriptor descriptor) {
+            mDescriptor = descriptor;
+        }
+
+        public UUID getUuid() {
+            return mDescriptor.getUuid();
+        }
+
+        public byte[] getValue() {
+            return mDescriptor.getValue();
+        }
+
+        public boolean setValue(byte[] value) {
+            return mDescriptor.setValue(value);
         }
     }
 }

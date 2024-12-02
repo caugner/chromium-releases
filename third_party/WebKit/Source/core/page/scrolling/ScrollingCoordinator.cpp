@@ -23,8 +23,6 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-
 #include "core/page/scrolling/ScrollingCoordinator.h"
 
 #include "core/dom/Document.h"
@@ -59,6 +57,7 @@
 #include "public/platform/WebCompositorAnimationTimeline.h"
 #include "public/platform/WebCompositorSupport.h"
 #include "public/platform/WebLayerPositionConstraint.h"
+#include "public/platform/WebLayerTreeView.h"
 #include "public/platform/WebScrollbarLayer.h"
 #include "public/platform/WebScrollbarThemeGeometry.h"
 #include "public/platform/WebScrollbarThemePainter.h"
@@ -94,7 +93,6 @@ ScrollingCoordinator::ScrollingCoordinator(Page* page)
     , m_wasFrameScrollable(false)
     , m_lastMainThreadScrollingReasons(0)
 {
-    createProgrammaticScrollAnimatorTimeline();
 }
 
 ScrollingCoordinator::~ScrollingCoordinator()
@@ -124,7 +122,7 @@ void ScrollingCoordinator::setShouldHandleScrollGestureOnMainThreadRegion(const 
     }
 }
 
-void ScrollingCoordinator::notifyLayoutUpdated()
+void ScrollingCoordinator::notifyGeometryChanged()
 {
     m_scrollGestureRegionIsDirty = true;
     m_touchEventTargetRectsAreDirty = true;
@@ -143,7 +141,7 @@ void ScrollingCoordinator::scrollableAreasDidChange()
         return;
 
     // Layout may update scrollable area bounding boxes. It also sets the same dirty
-    // flag making this one redundant (See |ScrollingCoordinator::notifyLayoutUpdated|).
+    // flag making this one redundant (See |ScrollingCoordinator::notifyGeometryChanged|).
     // So if layout is expected, ignore this call allowing scrolling coordinator
     // to be notified post-layout to recompute gesture regions.
     if (m_page->deprecatedLocalMainFrame()->view()->needsLayout())
@@ -276,13 +274,13 @@ void ScrollingCoordinator::removeWebScrollbarLayer(ScrollableArea* scrollableAre
         GraphicsLayer::unregisterContentsLayer(scrollbarLayer->layer());
 }
 
-static PassOwnPtr<WebScrollbarLayer> createScrollbarLayer(Scrollbar* scrollbar, float deviceScaleFactor)
+static PassOwnPtr<WebScrollbarLayer> createScrollbarLayer(Scrollbar& scrollbar, float deviceScaleFactor)
 {
-    ScrollbarTheme* theme = scrollbar->theme();
+    ScrollbarTheme& theme = scrollbar.theme();
     WebScrollbarThemePainter painter(theme, scrollbar, deviceScaleFactor);
     OwnPtr<WebScrollbarThemeGeometry> geometry(WebScrollbarThemeGeometryNative::create(theme));
 
-    OwnPtr<WebScrollbarLayer> scrollbarLayer = adoptPtr(Platform::current()->compositorSupport()->createScrollbarLayer(WebScrollbarImpl::create(scrollbar), painter, geometry.leakPtr()));
+    OwnPtr<WebScrollbarLayer> scrollbarLayer = adoptPtr(Platform::current()->compositorSupport()->createScrollbarLayer(WebScrollbarImpl::create(&scrollbar), painter, geometry.leakPtr()));
     GraphicsLayer::registerContentsLayer(scrollbarLayer->layer());
     return scrollbarLayer.release();
 }
@@ -352,8 +350,8 @@ void ScrollingCoordinator::scrollableAreaScrollbarLayerDidChange(ScrollableArea*
     }
 
     if (scrollbarGraphicsLayer) {
-        Scrollbar* scrollbar = orientation == HorizontalScrollbar ? scrollableArea->horizontalScrollbar() : scrollableArea->verticalScrollbar();
-        if (scrollbar->isCustomScrollbar()) {
+        Scrollbar& scrollbar = orientation == HorizontalScrollbar ? *scrollableArea->horizontalScrollbar() : *scrollableArea->verticalScrollbar();
+        if (scrollbar.isCustomScrollbar()) {
             detachScrollbarLayer(scrollbarGraphicsLayer);
             return;
         }
@@ -365,7 +363,7 @@ void ScrollingCoordinator::scrollableAreaScrollbarLayerDidChange(ScrollableArea*
             OwnPtr<WebScrollbarLayer> webScrollbarLayer;
             if (settings->useSolidColorScrollbars()) {
                 ASSERT(RuntimeEnabledFeatures::overlayScrollbarsEnabled());
-                webScrollbarLayer = createSolidColorScrollbarLayer(orientation, scrollbar->theme()->thumbThickness(scrollbar), scrollbar->theme()->trackPosition(scrollbar), scrollableArea->shouldPlaceVerticalScrollbarOnLeft());
+                webScrollbarLayer = createSolidColorScrollbarLayer(orientation, scrollbar.theme().thumbThickness(scrollbar), scrollbar.theme().trackPosition(scrollbar), scrollableArea->shouldPlaceVerticalScrollbarOnLeft());
             } else {
                 webScrollbarLayer = createScrollbarLayer(scrollbar, m_page->deviceScaleFactor());
             }
@@ -377,7 +375,7 @@ void ScrollingCoordinator::scrollableAreaScrollbarLayerDidChange(ScrollableArea*
 
         // Root layer non-overlay scrollbars should be marked opaque to disable
         // blending.
-        bool isOpaqueScrollbar = !scrollbar->isOverlayScrollbar();
+        bool isOpaqueScrollbar = !scrollbar.isOverlayScrollbar();
         scrollbarGraphicsLayer->setContentsOpaque(isMainFrame && isOpaqueScrollbar);
     } else
         removeWebScrollbarLayer(scrollableArea, orientation);
@@ -495,7 +493,7 @@ static void projectRectsToGraphicsLayerSpaceRecursive(
         for (size_t i = 0; i < layerIter->value.size(); ++i) {
             LayoutRect rect = layerIter->value[i];
             if (compositedLayer != curLayer) {
-                FloatQuad compositorQuad = geometryMap.mapToContainer(FloatRect(rect), compositedLayer->layoutObject());
+                FloatQuad compositorQuad = geometryMap.mapToAncestor(FloatRect(rect), compositedLayer->layoutObject());
                 rect = LayoutRect(compositorQuad.boundingBox());
                 // If the enclosing composited layer itself is scrolled, we have to undo the subtraction
                 // of its scroll offset since we want the offset relative to the scrolling content, not
@@ -720,16 +718,26 @@ void ScrollingCoordinator::setShouldUpdateScrollLayerPositionOnMainThread(MainTh
     }
 }
 
-void ScrollingCoordinator::willCloseLayerTreeView()
+void ScrollingCoordinator::layerTreeViewInitialized(WebLayerTreeView& layerTreeView)
 {
-    destroyProgrammaticScrollAnimatorTimeline();
+    if (RuntimeEnabledFeatures::compositorAnimationTimelinesEnabled() && Platform::current()->isThreadedAnimationEnabled()) {
+        ASSERT(Platform::current()->compositorSupport());
+        m_programmaticScrollAnimatorTimeline = adoptPtr(Platform::current()->compositorSupport()->createAnimationTimeline());
+        layerTreeView.attachCompositorAnimationTimeline(m_programmaticScrollAnimatorTimeline.get());
+    }
+}
+
+void ScrollingCoordinator::willCloseLayerTreeView(WebLayerTreeView& layerTreeView)
+{
+    if (m_programmaticScrollAnimatorTimeline) {
+        layerTreeView.detachCompositorAnimationTimeline(m_programmaticScrollAnimatorTimeline.get());
+        m_programmaticScrollAnimatorTimeline.clear();
+    }
 }
 
 void ScrollingCoordinator::willBeDestroyed()
 {
     ASSERT(m_page);
-
-    destroyProgrammaticScrollAnimatorTimeline();
 
     m_page = nullptr;
     for (const auto& scrollbar : m_horizontalScrollbars)
@@ -955,7 +963,7 @@ void ScrollingCoordinator::frameViewRootLayerDidChange(FrameView* frameView)
     if (!coordinatesScrollingForFrameView(frameView))
         return;
 
-    notifyLayoutUpdated();
+    notifyGeometryChanged();
     updateHaveWheelEventHandlers();
     updateHaveScrollEventHandlers();
 }
@@ -972,7 +980,7 @@ void ScrollingCoordinator::handleWheelEventPhase(PlatformWheelEventPhase phase)
     if (!frameView)
         return;
 
-    frameView->scrollAnimator()->handleWheelEventPhase(phase);
+    frameView->scrollAnimator().handleWheelEventPhase(phase);
 }
 #endif
 
@@ -1073,28 +1081,6 @@ bool ScrollingCoordinator::frameViewIsDirty() const
     if (WebLayer* scrollLayer = frameView ? toWebLayer(frameView->layerForScrolling()) : nullptr)
         return WebSize(frameView->contentsSize()) != scrollLayer->bounds();
     return false;
-}
-
-void ScrollingCoordinator::createProgrammaticScrollAnimatorTimeline()
-{
-    if (RuntimeEnabledFeatures::compositorAnimationTimelinesEnabled() && Platform::current()->isThreadedAnimationEnabled()) {
-        ASSERT(m_page);
-        if (m_page->mainFrame()->isLocalFrame()) {
-            ASSERT(Platform::current()->compositorSupport());
-            m_programmaticScrollAnimatorTimeline = adoptPtr(Platform::current()->compositorSupport()->createAnimationTimeline());
-            m_page->chromeClient().attachCompositorAnimationTimeline(m_programmaticScrollAnimatorTimeline.get(), toLocalFrame(m_page->mainFrame()));
-        }
-    }
-}
-
-void ScrollingCoordinator::destroyProgrammaticScrollAnimatorTimeline()
-{
-    if (m_programmaticScrollAnimatorTimeline) {
-        ASSERT(m_page);
-        ASSERT(m_page->mainFrame()->isLocalFrame());
-        m_page->chromeClient().detachCompositorAnimationTimeline(m_programmaticScrollAnimatorTimeline.get(), toLocalFrame(m_page->mainFrame()));
-        m_programmaticScrollAnimatorTimeline.clear();
-    }
 }
 
 } // namespace blink

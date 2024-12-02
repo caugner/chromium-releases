@@ -21,6 +21,10 @@
       'browser/extensions/api/file_system/request_file_system_notification.h',
       'browser/extensions/api/input_ime/input_ime_api.cc',
       'browser/extensions/api/input_ime/input_ime_api.h',
+      'browser/extensions/api/input_ime/input_ime_api_chromeos.cc',
+      'browser/extensions/api/input_ime/input_ime_api_chromeos.h',
+      'browser/extensions/api/input_ime/input_ime_event_router_base.cc',
+      'browser/extensions/api/input_ime/input_ime_event_router_base.h',
       'browser/extensions/api/log_private/filter_handler.cc',
       'browser/extensions/api/log_private/filter_handler.h',
       'browser/extensions/api/log_private/log_parser.cc',
@@ -64,8 +68,25 @@
       'browser/extensions/api/messaging/native_message_process_host.h',
       'browser/extensions/api/messaging/native_process_launcher.cc',
       'browser/extensions/api/messaging/native_process_launcher.h',
+      'browser/extensions/api/messaging/native_process_launcher_android.cc',
       'browser/extensions/api/messaging/native_process_launcher_posix.cc',
       'browser/extensions/api/messaging/native_process_launcher_win.cc',
+    ],
+    'chrome_browser_extensions_service_discovery_sources': [
+      'browser/extensions/api/gcd_private/gcd_private_api.cc',
+      'browser/extensions/api/gcd_private/gcd_private_api.h',
+      'browser/extensions/api/gcd_private/privet_v3_context_getter.cc',
+      'browser/extensions/api/gcd_private/privet_v3_context_getter.h',
+      'browser/extensions/api/gcd_private/privet_v3_session.cc',
+      'browser/extensions/api/gcd_private/privet_v3_session.h',
+      'browser/extensions/api/mdns/dns_sd_delegate.cc',
+      'browser/extensions/api/mdns/dns_sd_delegate.h',
+      'browser/extensions/api/mdns/dns_sd_device_lister.cc',
+      'browser/extensions/api/mdns/dns_sd_device_lister.h',
+      'browser/extensions/api/mdns/dns_sd_registry.cc',
+      'browser/extensions/api/mdns/dns_sd_registry.h',
+      'browser/extensions/api/mdns/mdns_api.cc',
+      'browser/extensions/api/mdns/mdns_api.h',
     ],
     'chrome_browser_extensions_enabled_sources': [
       'browser/apps/app_launch_for_metro_restart_win.cc',
@@ -74,10 +95,6 @@
       'browser/apps/app_url_redirector.h',
       'browser/apps/app_window_registry_util.cc',
       'browser/apps/app_window_registry_util.h',
-      'browser/apps/ephemeral_app_service.cc',
-      'browser/apps/ephemeral_app_service.h',
-      'browser/apps/ephemeral_app_service_factory.cc',
-      'browser/apps/ephemeral_app_service_factory.h',
       'browser/apps/install_chrome_app.cc',
       'browser/apps/install_chrome_app.h',
       'browser/apps/per_app_settings_service.cc',
@@ -291,12 +308,6 @@
       'browser/extensions/api/file_system/file_system_api.h',
       'browser/extensions/api/font_settings/font_settings_api.cc',
       'browser/extensions/api/font_settings/font_settings_api.h',
-      'browser/extensions/api/gcd_private/gcd_private_api.cc',
-      'browser/extensions/api/gcd_private/gcd_private_api.h',
-      'browser/extensions/api/gcd_private/privet_v3_context_getter.cc',
-      'browser/extensions/api/gcd_private/privet_v3_context_getter.h',
-      'browser/extensions/api/gcd_private/privet_v3_session.cc',
-      'browser/extensions/api/gcd_private/privet_v3_session.h',
       'browser/extensions/api/gcm/gcm_api.cc',
       'browser/extensions/api/gcm/gcm_api.h',
       'browser/extensions/api/history/history_api.cc',
@@ -359,14 +370,6 @@
       'browser/extensions/api/location/location_manager.h',
       'browser/extensions/api/management/chrome_management_api_delegate.cc',
       'browser/extensions/api/management/chrome_management_api_delegate.h',
-      'browser/extensions/api/mdns/dns_sd_delegate.cc',
-      'browser/extensions/api/mdns/dns_sd_delegate.h',
-      'browser/extensions/api/mdns/dns_sd_device_lister.cc',
-      'browser/extensions/api/mdns/dns_sd_device_lister.h',
-      'browser/extensions/api/mdns/dns_sd_registry.cc',
-      'browser/extensions/api/mdns/dns_sd_registry.h',
-      'browser/extensions/api/mdns/mdns_api.cc',
-      'browser/extensions/api/mdns/mdns_api.h',
       'browser/extensions/api/media_galleries/media_galleries_api.cc',
       'browser/extensions/api/media_galleries/media_galleries_api.h',
       'browser/extensions/api/messaging/extension_message_port.cc',
@@ -615,6 +618,8 @@
       'browser/extensions/component_extensions_whitelist/whitelist.h',
       'browser/extensions/component_loader.cc',
       'browser/extensions/component_loader.h',
+      'browser/extensions/component_migration_helper.cc',
+      'browser/extensions/component_migration_helper.h',
       'browser/extensions/context_menu_matcher.cc',
       'browser/extensions/context_menu_matcher.h',
       'browser/extensions/convert_user_script.cc',
@@ -685,6 +690,8 @@
       'browser/extensions/extension_icon_manager.h',
       'browser/extensions/extension_install_checker.cc',
       'browser/extensions/extension_install_checker.h',
+      'browser/extensions/extension_install_error_menu_item_id_provider.h',
+      'browser/extensions/extension_install_error_menu_item_id_provider.cc',
       'browser/extensions/extension_install_prompt.cc',
       'browser/extensions/extension_install_prompt.h',
       'browser/extensions/extension_install_prompt_show_params.cc',
@@ -935,6 +942,14 @@
       'browser/extensions/api/storage/policy_value_store.cc',
       'browser/extensions/api/storage/policy_value_store.h',
     ],
+    'chrome_browser_extensions_input_ime_linux_win_sources': [
+      'browser/extensions/api/input_ime/input_ime_api.cc',
+      'browser/extensions/api/input_ime/input_ime_api.h',
+      'browser/extensions/api/input_ime/input_ime_api_nonchromeos.cc',
+      'browser/extensions/api/input_ime/input_ime_api_nonchromeos.h',
+      'browser/extensions/api/input_ime/input_ime_event_router_base.cc',
+      'browser/extensions/api/input_ime/input_ime_event_router_base.h',
+    ],
   },
   # ----------------------------------------------------------------------------
   # Note on GN build: everything below here is duplicated in
@@ -955,6 +970,7 @@
       # browser, then we can clean up these dependencies.
       'dependencies': [
         'browser/extensions/api/api_registration.gyp:chrome_api_registration',
+        'chrome_features.gyp:chrome_common_features',
         'chrome_resources.gyp:chrome_extra_resources',
         'chrome_resources.gyp:chrome_resources',
         'chrome_resources.gyp:chrome_strings',
@@ -1036,6 +1052,11 @@
             '<@(chrome_browser_extensions_non_chromeos_sources)',
           ],
         }],
+        ['enable_service_discovery==1', {
+          'sources': [
+            '<@(chrome_browser_extensions_service_discovery_sources)',
+          ],
+        }],
         ['use_ash==1', {
           'sources': [
             'browser/extensions/api/tabs/ash_panel_contents.cc',
@@ -1071,6 +1092,11 @@
                 '../ui/events/platform/x11/x11_events_platform.gyp:x11_events_platform',
               ],
             }],
+            ['chromeos==0', {
+              'sources': [
+                '<@(chrome_browser_extensions_input_ime_linux_win_sources)',
+              ],
+            }],
           ],
         }],
         ['configuration_policy==1', {
@@ -1096,12 +1122,8 @@
             '../third_party/iaccessible2/iaccessible2.gyp:iaccessible2',
             '../third_party/isimpledom/isimpledom.gyp:isimpledom',
           ],
-          'conditions': [
-            ['win_use_allocator_shim==1', {
-              'dependencies': [
-                '<(allocator_target)',
-              ],
-            }],
+          'sources': [
+            '<@(chrome_browser_extensions_input_ime_linux_win_sources)',
           ],
         }, {  # 'OS!="win"
           'conditions': [

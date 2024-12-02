@@ -30,6 +30,7 @@ class WebLocalFrame;
 class WebMediaStream;
 class WebPlugin;
 struct WebPluginParams;
+struct WebPoint;
 struct WebRect;
 struct WebSize;
 struct WebURLError;
@@ -160,6 +161,9 @@ class WebTestDelegate {
   // Controls the device scale factor of the main WebView for hidpi tests.
   virtual void SetDeviceScaleFactor(float factor) = 0;
 
+  // Enable zoom-for-dsf option.
+  virtual void EnableUseZoomForDSF() = 0;
+
   // Change the device color profile while running a layout test.
   virtual void SetDeviceColorProfile(const std::string& name) = 0;
 
@@ -250,7 +254,10 @@ class WebTestDelegate {
   virtual void ResetPermissions() = 0;
 
   // Add content MediaStream classes to the Blink MediaStream ones.
-  virtual bool AddMediaStreamSourceAndTrack(blink::WebMediaStream* stream) = 0;
+  virtual bool AddMediaStreamVideoSourceAndTrack(
+      blink::WebMediaStream* stream) = 0;
+  virtual bool AddMediaStreamAudioSourceAndTrack(
+      blink::WebMediaStream* stream) = 0;
 
   virtual cc::SharedBitmapManager* GetSharedBitmapManager() = 0;
 
@@ -277,6 +284,10 @@ class WebTestDelegate {
     const blink::WebPluginParams& params) = 0;
 
   virtual void OnWebTestProxyBaseDestroy(WebTestProxyBase* proxy) = 0;
+
+  // Convert the position in DIP to native coordinates.
+  virtual blink::WebPoint ConvertDIPToNative(
+      const blink::WebPoint& point_in_dip) const = 0;
 };
 
 }  // namespace test_runner

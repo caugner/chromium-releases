@@ -4,6 +4,9 @@
 
 #include "components/html_viewer/web_layer_tree_view_impl.h"
 
+#include <stddef.h>
+#include <utility>
+
 #include "base/thread_task_runner_handle.h"
 #include "cc/blink/web_layer_impl.h"
 #include "cc/layers/layer.h"
@@ -40,6 +43,9 @@ WebLayerTreeViewImpl::WebLayerTreeViewImpl(
   // For web contents, layer transforms should scale up the contents of layers
   // to keep content always crisp when possible.
   settings.layer_transforms_should_scale_layer_contents = true;
+
+  // Use new animation system (cc::AnimationHost).
+  settings.use_compositor_animation_timelines = true;
 
   // TODO(rjkroege): Not having a shared tile transport breaks
   // software compositing. Add bitmap transport support.
@@ -117,7 +123,7 @@ void WebLayerTreeViewImpl::ApplyViewportDeltas(
 
 void WebLayerTreeViewImpl::RequestNewOutputSurface() {
   if (output_surface_.get())
-    layer_tree_host_->SetOutputSurface(output_surface_.Pass());
+    layer_tree_host_->SetOutputSurface(std::move(output_surface_));
 }
 
 void WebLayerTreeViewImpl::DidFailToInitializeOutputSurface() {

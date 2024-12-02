@@ -48,6 +48,8 @@
     # through GYP_DEFINES.
     'variables': {
       # Enables the Oilpan garbage-collection infrastructure.
+      # If you update the default value below, be sure to update the one in
+      # ../config.gyp, too!
       'enable_oilpan%': 0,
       'detailed_memory_infra%': 0,
       'blink_logging_always_on%': 0,
@@ -58,10 +60,20 @@
         # Use concatenated HRTF impulse responses
         'feature_defines': ['WTF_USE_CONCATENATED_IMPULSE_RESPONSES=1'],
       }],
-      ['OS!="android"', {
+      ['OS=="android"', {
+        'feature_defines': [
+          'WTF_USE_LOW_QUALITY_IMAGE_INTERPOLATION=1'
+        ],
+      }, { # OS!=android
         'feature_defines': [
           'ENABLE_INPUT_MULTIPLE_FIELDS_UI=1',
-          'ENABLE_WEB_AUDIO=1'
+          'WTF_USE_ICCJPEG=1',
+          'WTF_USE_QCMSLIB=1'
+        ],
+      }],
+      ['OS=="mac"', {
+        'feature_defines': [
+          'WTF_USE_NEW_THEME=1'
         ],
       }],
       # Mac OS X uses Accelerate.framework FFT by default instead of FFmpeg.
@@ -73,9 +85,6 @@
       ['OS=="android" and use_openmax_dl_fft!=0', {
         'feature_defines': [
           'WTF_USE_WEBAUDIO_OPENMAX_DL_FFT=1',
-          # Enabling the FFT is enough to enable WebAudio support to
-          # allow most WebAudio features to work on Android.
-          'ENABLE_WEB_AUDIO=1',
         ],
       }],
       ['use_default_render_theme==1', {

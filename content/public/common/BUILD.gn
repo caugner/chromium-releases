@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chromecast_build.gni")
 import("//build/config/features.gni")
 import("//content/common/common.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
@@ -42,6 +43,15 @@ source_set("content_descriptors") {
 # component export flags won't be consistent.
 config("static_switches_defines") {
   defines = [ "COMPILE_CONTENT_STATICALLY" ]
+}
+
+# Set in GN builds, triggering behavior in content when run from an external
+# Mojo shell.
+config("mojo_shell_client") {
+  # This configuration has only been tested on these platforms.
+  if ((is_win || is_linux || is_chromeos) && !is_chromecast) {
+    defines = [ "MOJO_SHELL_CLIENT" ]
+  }
 }
 
 # This target allows you to use the content_switches constants and statically

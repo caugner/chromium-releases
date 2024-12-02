@@ -4,6 +4,11 @@
 
 #import "ios/web/web_state/ui/crw_ui_web_view_web_controller.h"
 
+#include <stddef.h>
+#include <stdint.h>
+
+#include <utility>
+
 #import "base/ios/ios_util.h"
 #import "base/ios/ns_error_util.h"
 #import "base/ios/weak_nsobject.h"
@@ -11,6 +16,7 @@
 #include "base/json/string_escape.h"
 #include "base/mac/bind_objc_block.h"
 #import "base/mac/scoped_nsobject.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_util.h"
@@ -24,7 +30,7 @@
 #include "ios/web/net/clients/crw_redirect_network_client_factory.h"
 #import "ios/web/net/crw_url_verifying_protocol_handler.h"
 #include "ios/web/net/request_group_util.h"
-#include "ios/web/public/url_scheme_util.h"
+#import "ios/web/public/url_scheme_util.h"
 #include "ios/web/public/web_client.h"
 #import "ios/web/public/web_state/ui/crw_web_view_content_view.h"
 #import "ios/web/ui_web_view_util.h"
@@ -46,17 +52,17 @@ namespace web {
 // available for the purpose of performance tests.
 // Frequency for the continuous checks when a reset in the page object is
 // anticipated shortly. In milliseconds.
-const int64 kContinuousCheckIntervalMSHigh = 100;
+const int64_t kContinuousCheckIntervalMSHigh = 100;
 
 // The maximum duration that the CRWWebController can run in high-frequency
 // check mode before being changed back to the low frequency.
-const int64 kContinuousCheckHighFrequencyMSMaxDuration = 5000;
+const int64_t kContinuousCheckHighFrequencyMSMaxDuration = 5000;
 
 // Frequency for the continuous checks when a reset in the page object is not
 // anticipated; checks are only made as a precaution.
 // The URL could be out of date for this many milliseconds, so this should not
 // be increased without careful consideration.
-const int64 kContinuousCheckIntervalMSLow = 3000;
+const int64_t kContinuousCheckIntervalMSLow = 3000;
 
 }  // namespace web
 
@@ -181,6 +187,9 @@ const int64 kContinuousCheckIntervalMSLow = 3000;
 // indicating it was expected.
 - (void)generateMissingLoadRequestWithURL:(const GURL&)currentURL
                                  referrer:(const web::Referrer&)referrer;
+
+// Registers the current user agent with the web view.
+- (void)registerUserAgent;
 
 // Returns a child scripting CRWWebController with the given window name.
 - (id<CRWWebControllerScripting>)scriptingInterfaceForWindowNamed:
@@ -321,7 +330,7 @@ const size_t kMaxMessageQueueSize = 262144;
 @implementation CRWUIWebViewWebController
 
 - (instancetype)initWithWebState:(scoped_ptr<web::WebStateImpl>)webState {
-  self = [super initWithWebState:webState.Pass()];
+  self = [super initWithWebState:std::move(webState)];
   if (self) {
     _jsInvokeParameterQueue.reset([[CRWJSInvokeParameterQueue alloc] init]);
 
@@ -428,6 +437,14 @@ const size_t kMaxMessageQueueSize = 262144;
   }
 }
 
+- (void)restoreStateAfterURLRejection {
+  // Re-register the user agent, because UIWebView will sometimes try to read
+  // the agent again from a saved search result page in which no other page has
+  // yet been loaded. See crbug.com/260370.
+  [self registerUserAgent];
+  [super restoreStateAfterURLRejection];
+}
+
 #pragma mark -
 #pragma mark Testing-Only Methods
 
@@ -528,12 +545,6 @@ const size_t kMaxMessageQueueSize = 262144;
   return url;
 }
 
-- (void)registerUserAgent {
-  web::BuildAndRegisterUserAgentForUIWebView(
-      self.webStateImpl->GetRequestGroupID(),
-      [self useDesktopUserAgent]);
-}
-
 - (BOOL)isCurrentNavigationItemPOST {
   DCHECK([self currentSessionEntry]);
   NSData* currentPOSTData =
@@ -629,6 +640,11 @@ const size_t kMaxMessageQueueSize = 262144;
 
 - (void)loadRequestForCurrentNavigationItem {
   DCHECK(self.webView && !self.nativeController);
+
+  // Re-register the user agent, because UIWebView sometimes loses it.
+  // See crbug.com/228397.
+  [self registerUserAgent];
+
   NSMutableURLRequest* request = [self requestForCurrentNavigationItem];
 
   ProceduralBlock GETBlock = ^{
@@ -1395,6 +1411,11 @@ const size_t kMaxMessageQueueSize = 262144;
   }
 
   [self registerLoadRequest:currentURL referrer:referrer transition:transition];
+}
+
+- (void)registerUserAgent {
+  web::BuildAndRegisterUserAgentForUIWebView(
+      self.webStateImpl->GetRequestGroupID(), [self useDesktopUserAgent]);
 }
 
 - (id<CRWWebControllerScripting>)scriptingInterfaceForWindowNamed:

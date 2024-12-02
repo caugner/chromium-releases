@@ -4,8 +4,10 @@
 
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 
+#include <stddef.h>
 #include <algorithm>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ash/ash_switches.h"
@@ -17,10 +19,12 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/ui/ash/chrome_launcher_prefs.h"
@@ -245,7 +249,7 @@ class TestV2AppLauncherItemController : public LauncherItemController {
         new ChromeLauncherAppMenuItem(base::string16(), NULL, false));
     items.push_back(
         new ChromeLauncherAppMenuItem(base::string16(), NULL, false));
-    return items.Pass();
+    return items;
   }
   ui::MenuModel* CreateContextMenu(aura::Window* root_window) override {
     return NULL;
@@ -254,6 +258,9 @@ class TestV2AppLauncherItemController : public LauncherItemController {
     return NULL;
   }
   bool IsDraggable() override { return false; }
+  bool CanPin() const override {
+    return launcher_controller()->CanPin(app_id());
+  }
   bool ShouldShowTooltip() override { return false; }
 
  private:
@@ -333,11 +340,11 @@ class ChromeLauncherControllerTest : public BrowserWithTestWindowTest {
                                     extension_misc::kGmailAppId,
                                     &error);
 
-    // Fake search extension.
+    // Fake google docs extension.
     extension4_ = Extension::Create(base::FilePath(), Manifest::UNPACKED,
                                     manifest,
                                     Extension::NO_FLAGS,
-                                    extension_misc::kGoogleSearchAppId,
+                                    extension_misc::kGoogleDocAppId,
                                     &error);
     extension5_ = Extension::Create(base::FilePath(), Manifest::UNPACKED,
                                     manifest,
@@ -645,7 +652,7 @@ class ChromeLauncherControllerTest : public BrowserWithTestWindowTest {
     aura::client::ParentWindowWithContext(window.get(), GetContext(),
                                           gfx::Rect(200, 200));
 
-    return new TestBrowserWindowAura(window.Pass());
+    return new TestBrowserWindowAura(std::move(window));
   }
 
   DISALLOW_COPY_AND_ASSIGN(ChromeLauncherControllerTest);
@@ -860,7 +867,7 @@ class MultiProfileMultiBrowserShelfLayoutChromeLauncherControllerTest
     browser->window()->Show();
     NavigateAndCommitActiveTabWithTitle(browser.get(), GURL(url),
                                         ASCIIToUTF16(title));
-    return browser.Pass();
+    return browser;
   }
 
   // Creates a running V1 application.
@@ -939,6 +946,52 @@ TEST_F(ChromeLauncherControllerTest, DefaultApps) {
   EXPECT_EQ("AppList, Chrome, App3", GetPinnedAppStatus());
   EXPECT_FALSE(launcher_controller_->IsAppPinned(extension1_->id()));
   EXPECT_FALSE(launcher_controller_->IsAppPinned(extension2_->id()));
+}
+
+/*
+ * Test ChromeLauncherController correctly merges policy pinned apps
+ * and user pinned apps
+ */
+TEST_F(ChromeLauncherControllerTest, MergePolicyAndUserPrefPinnedApps) {
+  InitLauncherController();
+
+  base::ListValue user_pref_value;
+  extension_service_->AddExtension(extension1_.get());
+  extension_service_->AddExtension(extension3_.get());
+  extension_service_->AddExtension(extension4_.get());
+  extension_service_->AddExtension(extension5_.get());
+  // extension 1, 3 are pinned by user
+  InsertPrefValue(&user_pref_value, 0, extension1_->id());
+  InsertPrefValue(&user_pref_value, 1, extension3_->id());
+  profile()->GetTestingPrefService()->SetUserPref(prefs::kPinnedLauncherApps,
+                                                  user_pref_value.DeepCopy());
+
+  base::ListValue policy_value;
+  // extension 2 4 are pinned by policy
+  InsertPrefValue(&policy_value, 0, extension2_->id());
+  InsertPrefValue(&policy_value, 1, extension4_->id());
+  profile()->GetTestingPrefService()->SetManagedPref(
+      prefs::kPolicyPinnedLauncherApps, policy_value.DeepCopy());
+
+  SetShelfChromeIconIndex(1);
+
+  EXPECT_TRUE(launcher_controller_->IsAppPinned(extension1_->id()));
+  // 2 is not pinned as it's not installed
+  EXPECT_FALSE(launcher_controller_->IsAppPinned(extension2_->id()));
+  EXPECT_TRUE(launcher_controller_->IsAppPinned(extension3_->id()));
+  EXPECT_TRUE(launcher_controller_->IsAppPinned(extension4_->id()));
+  // install extension 2 and check
+  extension_service_->AddExtension(extension2_.get());
+  EXPECT_TRUE(launcher_controller_->IsAppPinned(extension2_->id()));
+
+  // Check user can manually pin or unpin these apps
+  EXPECT_TRUE(launcher_controller_->CanPin(extension1_->id()));
+  EXPECT_FALSE(launcher_controller_->CanPin(extension2_->id()));
+  EXPECT_TRUE(launcher_controller_->CanPin(extension3_->id()));
+  EXPECT_FALSE(launcher_controller_->CanPin(extension4_->id()));
+
+  // Check the order of shelf pinned apps
+  EXPECT_EQ("AppList, App2, App4, App1, Chrome, App3", GetPinnedAppStatus());
 }
 
 // Check that the restauration of launcher items is happening in the same order

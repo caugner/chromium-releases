@@ -49,6 +49,11 @@ InspectorTest.evaluateInPage = function(code, callback)
     InspectorTest.RuntimeAgent.evaluate(code, "console", false, mycallback);
 }
 
+InspectorTest.evaluateInPagePromise = function(code)
+{
+    return new Promise(succ => InspectorTest.evaluateInPage(code, succ));
+}
+
 InspectorTest.evaluateInPageWithTimeout = function(code)
 {
     // FIXME: we need a better way of waiting for chromium events to happen
@@ -408,6 +413,43 @@ InspectorTest.expandAndDumpEventListeners = function(eventListenersView, updateC
     }
 }
 
+InspectorTest.dumpNavigatorView = function(navigatorView)
+{
+    dumpNavigatorTreeOutline(navigatorView._scriptsTree);
+
+    function dumpNavigatorTreeElement(prefix, treeElement)
+    {
+        InspectorTest.addResult(prefix + treeElement.title);
+        treeElement.expand();
+        var children = treeElement.children();
+        for (var i = 0; i < children.length; ++i)
+            dumpNavigatorTreeElement(prefix + "  ", children[i]);
+    }
+
+    function dumpNavigatorTreeOutline(treeOutline)
+    {
+        var children = treeOutline.rootElement().children();
+        for (var i = 0; i < children.length; ++i)
+            dumpNavigatorTreeElement("", children[i]);
+    }
+}
+
+InspectorTest.dumpNavigatorViewInAllModes = function(view)
+{
+    ["frame", "frame/domain", "frame/domain/folder", "domain", "domain/folder"].forEach(InspectorTest.dumpNavigatorViewInMode.bind(InspectorTest, view));
+}
+
+InspectorTest.dumpNavigatorViewInMode = function(view, mode)
+{
+    InspectorTest.addResult(view instanceof WebInspector.SourcesNavigatorView ? "Sources:" : "Content Scripts:");
+    view._groupByFrame = mode.includes("frame");
+    view._groupByDomain = mode.includes("domain");
+    view._groupByFolder = mode.includes("folder");
+    view._resetForTest();
+    InspectorTest.addResult("-------- Setting mode: [" + mode + "]");
+    InspectorTest.dumpNavigatorView(view);
+}
+
 InspectorTest.assertGreaterOrEqual = function(a, b, message)
 {
     if (a < b)
@@ -511,6 +553,23 @@ InspectorTest.assertEquals = function(expected, found, message)
 InspectorTest.assertTrue = function(found, message)
 {
     InspectorTest.assertEquals(true, !!found, message);
+}
+
+InspectorTest.wrapListener = function(func)
+{
+    function wrapper()
+    {
+        var wrapArgs = arguments;
+        var wrapThis = this;
+        // Give a chance to other listeners.
+        setTimeout(apply, 0);
+
+        function apply()
+        {
+            func.apply(wrapThis, wrapArgs);
+        }
+    }
+    return wrapper;
 }
 
 InspectorTest.safeWrap = function(func, onexception)
@@ -677,6 +736,11 @@ InspectorTest.clearSpecificInfoFromStackFrames = function(text)
 InspectorTest.hideInspectorView = function()
 {
     WebInspector.inspectorView.element.setAttribute("style", "display:none !important");
+}
+
+InspectorTest.mainFrame = function()
+{
+    return InspectorTest.mainTarget.resourceTreeModel.mainFrame;
 }
 
 InspectorTest.StringOutputStream = function(callback)

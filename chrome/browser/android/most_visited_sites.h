@@ -6,12 +6,14 @@
 #define CHROME_BROWSER_ANDROID_MOST_VISITED_SITES_H_
 
 #include <jni.h>
+#include <stddef.h>
 
 #include <string>
 #include <vector>
 
 #include "base/android/scoped_java_ref.h"
 #include "base/compiler_specific.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
@@ -37,25 +39,29 @@ class MostVisitedSites : public sync_driver::SyncServiceObserver,
                          public history::TopSitesObserver {
  public:
   explicit MostVisitedSites(Profile* profile);
-  void Destroy(JNIEnv* env, jobject obj);
-  void SetMostVisitedURLsObserver(JNIEnv* env,
-                                  jobject obj,
-                                  jobject j_observer,
-                                  jint num_sites);
+  void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
+  void SetMostVisitedURLsObserver(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jobject>& j_observer,
+      jint num_sites);
   void GetURLThumbnail(JNIEnv* env,
-                       jobject obj,
-                       jstring url,
-                       jobject j_callback);
+                       const base::android::JavaParamRef<jobject>& obj,
+                       const base::android::JavaParamRef<jstring>& url,
+                       const base::android::JavaParamRef<jobject>& j_callback);
 
-  void BlacklistUrl(JNIEnv* env, jobject obj, jstring j_url);
-  void RecordTileTypeMetrics(JNIEnv* env,
-                             jobject obj,
-                             jintArray jtile_types,
-                             jboolean is_icon_mode);
-  void RecordOpenedMostVisitedItem(JNIEnv* env,
-                                   jobject obj,
-                                   jint index,
-                                   jint tile_type);
+  void BlacklistUrl(JNIEnv* env,
+                    const base::android::JavaParamRef<jobject>& obj,
+                    const base::android::JavaParamRef<jstring>& j_url);
+  void RecordTileTypeMetrics(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jintArray>& jtile_types);
+  void RecordOpenedMostVisitedItem(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      jint index,
+      jint tile_type);
 
   // sync_driver::SyncServiceObserver implementation.
   void OnStateChanged() override;

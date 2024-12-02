@@ -4,11 +4,14 @@
 
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 
+#include <stdint.h>
+
 #include <string>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/metrics/field_trial.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -35,19 +38,13 @@
 #include "extensions/common/manifest_handlers/default_locale_handler.h"
 #endif
 
-#if defined(USE_TCMALLOC)
-#include "chrome/browser/browser_about_handler.h"
-#endif
-
 using content::BrowserThread;
 using blink::WebCache;
 
 namespace {
 
-const uint32 kFilteredMessageClasses[] = {
-  ChromeMsgStart,
-  ContentSettingsMsgStart,
-  NetworkHintsMsgStart,
+const uint32_t kFilteredMessageClasses[] = {
+    ChromeMsgStart, ContentSettingsMsgStart, NetworkHintsMsgStart,
 };
 
 }  // namespace

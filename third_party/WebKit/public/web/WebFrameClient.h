@@ -67,6 +67,7 @@ class WebColorChooser;
 class WebColorChooserClient;
 class WebContentDecryptionModule;
 class WebCookieJar;
+class WebCString;
 class WebDataSource;
 class WebEncryptedMediaClient;
 class WebExternalPopupMenu;
@@ -177,6 +178,9 @@ public:
     // This frame's name has changed.
     virtual void didChangeName(WebLocalFrame*, const WebString&) { }
 
+    // This frame has been set to enforce strict mixed content checking.
+    virtual void didEnforceStrictMixedContentChecking() {}
+
     // The sandbox flags have changed for a child frame of this frame.
     virtual void didChangeSandboxFlags(WebFrame* childFrame, WebSandboxFlags flags) { }
 
@@ -220,6 +224,7 @@ public:
         WebNavigationType navigationType;
         WebNavigationPolicy defaultPolicy;
         bool replacesCurrentHistoryItem;
+        bool isHistoryNavigationInNewChildFrame;
 
         NavigationPolicyInfo(WebURLRequest& urlRequest)
             : extraData(nullptr)
@@ -227,6 +232,7 @@ public:
             , navigationType(WebNavigationTypeOther)
             , defaultPolicy(WebNavigationPolicyIgnore)
             , replacesCurrentHistoryItem(false)
+            , isHistoryNavigationInNewChildFrame(false)
         {
         }
     };
@@ -238,7 +244,7 @@ public:
 
     // During a history navigation, we may choose to load new subframes from history as well.
     // This returns such a history item if appropriate.
-    virtual WebHistoryItem historyItemForNewChildFrame(WebFrame*) { return WebHistoryItem(); }
+    virtual WebHistoryItem historyItemForNewChildFrame() { return WebHistoryItem(); }
 
     // Whether the client is handling a navigation request.
     virtual bool hasPendingNavigation(WebLocalFrame*) { return false; }
@@ -447,11 +453,15 @@ public:
     // A PingLoader was created, and a request dispatched to a URL.
     virtual void didDispatchPingLoader(WebLocalFrame*, const WebURL&) { }
 
+    // This frame has displayed inactive content (such as an image) from
+    // a connection with certificate errors.
+    virtual void didDisplayContentWithCertificateErrors(const WebURL& url, const WebCString& securityInfo, const WebURL& mainResourceUrl, const WebCString& mainResourceSecurityInfo) {}
+    // This frame has run active content (such as a script) from a
+    // connection with certificate errors.
+    virtual void didRunContentWithCertificateErrors(const WebURL& url, const WebCString& securityInfo, const WebURL& mainResourceUrl, const WebCString& mainResourceSecurityInfo) {}
+
     // A performance timing event (e.g. first paint) occurred
     virtual void didChangePerformanceTiming() { }
-
-    // The loaders in this frame have been stopped.
-    virtual void didAbortLoading(WebLocalFrame*) { }
 
 
     // Script notifications ------------------------------------------------

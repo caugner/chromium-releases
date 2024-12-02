@@ -13,8 +13,10 @@
 #include <string>
 
 #include "base/command_line.h"
+#include "base/metrics/field_trial.h"
 #include "base/strings/string_util.h"
-#include "components/enhanced_bookmarks/enhanced_bookmark_features.h"
+#include "components/autofill/core/common/autofill_switches.h"
+#include "components/enhanced_bookmarks/enhanced_bookmark_switches_ios.h"
 #include "components/variations/variations_associated_data.h"
 #include "ios/chrome/browser/chrome_switches.h"
 #include "ios/web/public/web_view_creation_util.h"
@@ -23,6 +25,8 @@ namespace {
 NSString* const kEnableAlertOnBackgroundUpload =
     @"EnableAlertsOnBackgroundUpload";
 NSString* const kEnableViewCopyPasswords = @"EnableViewCopyPasswords";
+NSString* const kHeuristicsForPasswordGeneration =
+    @"HeuristicsForPasswordGeneration";
 const char* const kWKWebViewTrialName = "IOSUseWKWebView";
 
 enum class WKWebViewEligibility {
@@ -44,7 +48,24 @@ bool IsAlertOnBackgroundUploadEnabled() {
 }
 
 bool IsBookmarkCollectionEnabled() {
-  return enhanced_bookmarks::IsEnhancedBookmarksEnabled();
+  // kEnhancedBookmarksExperiment flag could have values "", "1" and "0".
+  // "" - default, "0" - user opted out, "1" - user opted in.  Tests also use
+  // the command line flag to force enhanced bookmark to be on.
+  // If none is specified, the finch experiment is checked. If not disabled in
+  // finch, the default is opt-in.
+  std::string switch_value =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kEnhancedBookmarksExperiment);
+  if (switch_value == "1")
+    return true;
+  if (switch_value == "0")
+    return false;
+
+  // Check if the finch experiment is turned on.
+  std::string group_name =
+      base::FieldTrialList::FindFullName("IOSNewBookmarksUI");
+  return !base::StartsWith(group_name, "Disabled",
+                           base::CompareCase::INSENSITIVE_ASCII);
 }
 
 void SetWKWebViewTrialEligibility(bool eligible) {
@@ -121,27 +142,7 @@ bool CanCheckWKWebViewExperiment() {
 }
 
 bool IsWKWebViewEnabled() {
-  if (!CanCheckWKWebViewExperiment()) {
-    return false;
-  }
-
-  // Now that it's been established that user is a candidate, set up the trial
-  // by checking the group.
-  std::string group_name =
-      base::FieldTrialList::FindFullName(kWKWebViewTrialName);
-
-  // Check if the experimental flag is turned on.
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEnableIOSWKWebView))
-    return true;
-  else if (command_line->HasSwitch(switches::kDisableIOSWKWebView))
-    return false;
-
-  // Check if the finch experiment is turned on.
-  return !base::StartsWith(group_name, "Disabled",
-                           base::CompareCase::INSENSITIVE_ASCII) &&
-         !base::StartsWith(group_name, "Control",
-                           base::CompareCase::INSENSITIVE_ASCII);
+  return true;
 }
 
 bool IsTargetedToWKWebViewExperimentControlGroup() {
@@ -171,17 +172,50 @@ std::string GetWKWebViewSearchParams() {
   return variations::GetVariationParamValue(kWKWebViewTrialName, "esrch");
 }
 
-bool AreKeyboardCommandsEnabled() {
-  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableKeyboardCommands);
-}
-
 bool IsViewCopyPasswordsEnabled() {
   NSString* viewCopyPasswordFlag = [[NSUserDefaults standardUserDefaults]
       objectForKey:kEnableViewCopyPasswords];
   if ([viewCopyPasswordFlag isEqualToString:@"Enabled"])
     return true;
   return false;
+}
+
+bool IsPasswordGenerationEnabled() {
+  // This call activates the field trial, if needed, so it must come before any
+  // early returns.
+  std::string group_name =
+      base::FieldTrialList::FindFullName("PasswordGeneration");
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kEnableIOSPasswordGeneration))
+    return true;
+  if (command_line->HasSwitch(switches::kDisableIOSPasswordGeneration))
+    return false;
+  return group_name != "Disabled";
+}
+
+bool UseOnlyLocalHeuristicsForPasswordGeneration() {
+  if ([[NSUserDefaults standardUserDefaults]
+          boolForKey:kHeuristicsForPasswordGeneration]) {
+    return true;
+  }
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  return command_line->HasSwitch(
+      autofill::switches::kLocalHeuristicsOnlyForPasswordGeneration);
+}
+
+bool IsTabSwitcherEnabled() {
+  // Check if the experimental flag is forced on or off.
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kEnableTabSwitcher)) {
+    return true;
+  } else if (command_line->HasSwitch(switches::kDisableTabSwitcher)) {
+    return false;
+  }
+
+  // Check if the finch experiment is turned on.
+  std::string group_name = base::FieldTrialList::FindFullName("IOSTabSwitcher");
+  return base::StartsWith(group_name, "Enabled",
+                          base::CompareCase::INSENSITIVE_ASCII);
 }
 
 }  // namespace experimental_flags

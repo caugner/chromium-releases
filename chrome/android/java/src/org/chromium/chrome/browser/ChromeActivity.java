@@ -24,7 +24,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Looper;
 import android.os.MessageQueue;
-import android.os.Process;
 import android.os.SystemClock;
 import android.preference.PreferenceManager;
 import android.support.v7.app.AlertDialog;
@@ -44,10 +43,11 @@ import android.view.inputmethod.InputMethodInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.view.inputmethod.InputMethodSubtype;
 
+import org.chromium.base.ActivityState;
 import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.ApplicationStatus;
 import org.chromium.base.BaseSwitches;
 import org.chromium.base.CommandLine;
-import org.chromium.base.Log;
 import org.chromium.base.SysUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.VisibleForTesting;
@@ -61,7 +61,6 @@ import org.chromium.chrome.browser.appmenu.AppMenuHandler;
 import org.chromium.chrome.browser.appmenu.AppMenuObserver;
 import org.chromium.chrome.browser.appmenu.AppMenuPropertiesDelegate;
 import org.chromium.chrome.browser.bookmark.BookmarksBridge.BookmarkModelObserver;
-import org.chromium.chrome.browser.bookmark.ManageBookmarkActivity;
 import org.chromium.chrome.browser.compositor.CompositorViewHolder;
 import org.chromium.chrome.browser.compositor.layouts.Layout;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManager;
@@ -88,10 +87,10 @@ import org.chromium.chrome.browser.init.AsyncInitializationActivity;
 import org.chromium.chrome.browser.metrics.LaunchMetrics;
 import org.chromium.chrome.browser.metrics.StartupMetrics;
 import org.chromium.chrome.browser.metrics.UmaSessionStats;
-import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.nfc.BeamController;
 import org.chromium.chrome.browser.nfc.BeamProvider;
 import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
+import org.chromium.chrome.browser.omaha.UpdateMenuItemHelper;
 import org.chromium.chrome.browser.pageinfo.WebsiteSettingsPopup;
 import org.chromium.chrome.browser.partnercustomizations.PartnerBrowserCustomizations;
 import org.chromium.chrome.browser.preferences.ChromePreferenceManager;
@@ -100,14 +99,11 @@ import org.chromium.chrome.browser.preferences.PreferencesLauncher;
 import org.chromium.chrome.browser.printing.TabPrinter;
 import org.chromium.chrome.browser.share.ShareHelper;
 import org.chromium.chrome.browser.snackbar.DataUseSnackbarController;
-import org.chromium.chrome.browser.snackbar.LoFiBarPopupController;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarManageable;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
 import org.chromium.chrome.browser.sync.SyncController;
-import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.tabmodel.ChromeTabCreator;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModel;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager;
@@ -123,11 +119,12 @@ import org.chromium.chrome.browser.util.ColorUtils;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.webapps.AddToHomescreenDialog;
 import org.chromium.chrome.browser.widget.ControlContainer;
-import org.chromium.content.browser.ContentReadbackHandler;
 import org.chromium.content.browser.ContentVideoView;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.common.ContentSwitches;
+import org.chromium.content_public.browser.ContentBitmapCallback;
 import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.readback_types.ReadbackResponse;
 import org.chromium.policy.CombinedPolicyProvider.PolicyChangeListener;
 import org.chromium.printing.PrintManagerDelegateImpl;
@@ -176,7 +173,8 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
      * Timeout in ms for reading PartnerBrowserCustomizations provider.
      */
     private static final int PARTNER_BROWSER_CUSTOMIZATIONS_TIMEOUT_MS = 10000;
-    private static final String TAG = "cr.ChromeActivity";
+    private static final String TAG = "ChromeActivity";
+    private static final Rect EMPTY_RECT = new Rect();
 
     private TabModelSelector mTabModelSelector;
     private TabModelSelectorTabObserver mTabModelSelectorTabObserver;
@@ -187,7 +185,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     private ContextReporter mContextReporter;
     protected GSAServiceClient mGSAServiceClient;
 
-    private boolean mPartnerBrowserRefreshNeeded = false;
+    private boolean mPartnerBrowserRefreshNeeded;
 
     protected IntentHandler mIntentHandler;
 
@@ -209,7 +207,6 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     private ContextualSearchManager mContextualSearchManager;
     private ReaderModeManager mReaderModeManager;
     private SnackbarManager mSnackbarManager;
-    private LoFiBarPopupController mLoFiBarPopupController;
     private DataUseSnackbarController mDataUseSnackbarController;
     private AppMenuPropertiesDelegate mAppMenuPropertiesDelegate;
     private AppMenuHandler mAppMenuHandler;
@@ -218,8 +215,6 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
 
     // Time in ms that it took took us to inflate the initial layout
     private long mInflateInitialLayoutDurationMs;
-
-    private final Locale mCurrentLocale = Locale.getDefault();
 
     private AssistStatusHandler mAssistStatusHandler;
 
@@ -245,6 +240,12 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     @Override
     public void preInflationStartup() {
         super.preInflationStartup();
+
+        // Force a partner customizations refresh if it has yet to be initialized.  This can happen
+        // if Chrome is killed and you refocus a previous activity from Android recents, which does
+        // not go through ChromeLauncherActivity that would have normally triggered this.
+        mPartnerBrowserRefreshNeeded = !PartnerBrowserCustomizations.isInitialized();
+
         ApplicationInitialization.enableFullscreenFlags(
                 getResources(), this, getControlContainerHeightResource());
         getWindow().setBackgroundDrawable(getBackgroundDrawable());
@@ -258,8 +259,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         mWindowAndroid = ((ChromeApplication) getApplicationContext())
                 .createActivityWindowAndroid(this);
         mWindowAndroid.restoreInstanceState(getSavedInstanceState());
-        mSnackbarManager = new SnackbarManager(this);
-        mLoFiBarPopupController = new LoFiBarPopupController(this, getSnackbarManager());
+        mSnackbarManager = new SnackbarManager(getWindow());
         mDataUseSnackbarController = new DataUseSnackbarController(this, getSnackbarManager());
 
         mAssistStatusHandler = createAssistStatusHandler();
@@ -367,8 +367,20 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         mAppMenuHandler.addObserver(new AppMenuObserver() {
             @Override
             public void onMenuVisibilityChanged(boolean isVisible) {
+                if (isVisible && !isInOverviewMode()) {
+                    // The app menu badge should be removed the first time the menu is opened.
+                    if (mToolbarManager.getToolbar().isShowingAppMenuUpdateBadge()) {
+                        mToolbarManager.getToolbar().removeAppMenuUpdateBadge(true);
+                        mCompositorViewHolder.requestRender();
+                    }
+                }
                 if (!isVisible) {
                     mAppMenuPropertiesDelegate.onMenuDismissed();
+                    MenuItem updateMenuItem = mAppMenuHandler.getAppMenu().getMenu().findItem(
+                            R.id.update_menu_id);
+                    if (updateMenuItem != null && updateMenuItem.isVisible()) {
+                        UpdateMenuItemHelper.getInstance().onMenuDismissed();
+                    }
                 }
             }
         });
@@ -466,34 +478,12 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         if (mTabModelSelectorTabObserver != null) mTabModelSelectorTabObserver.destroy();
         mTabModelSelectorTabObserver = new TabModelSelectorTabObserver(tabModelSelector) {
             @Override
-            public void onPageLoadStarted(Tab tab, String url) {
-                if (DataUseTabUIManager.checkDataUseTrackingStarted(tab)) {
-                    mDataUseSnackbarController.showDataUseTrackingStartedBar();
-                } else if (DataUseTabUIManager.checkDataUseTrackingEnded(tab)
-                        && DataUseTabUIManager
-                                .getOptedOutOfDataUseDialog(getApplicationContext())) {
-                    mDataUseSnackbarController.showDataUseTrackingEndedBar();
-                }
-            }
-
-            @Override
             public void didFirstVisuallyNonEmptyPaint(Tab tab) {
-                if (!tab.isNativePage() && !tab.isIncognito()
-                        && DataReductionProxySettings.getInstance().wasLoFiModeActiveOnMainFrame()
-                        && DataReductionProxySettings.getInstance().canUseDataReductionProxy(
-                                tab.getUrl())) {
-                    if (tab.isHidden()) {
-                        TabObserver tabObserver = new EmptyTabObserver() {
-                            @Override
-                            public void onShown(Tab tab) {
-                                mLoFiBarPopupController.showLoFiBar(tab);
-                                tab.removeObserver(this);
-                            }
-                        };
-                        tab.addObserver(tabObserver);
-                        return;
-                    }
-                    mLoFiBarPopupController.showLoFiBar(tab);
+                if (DataUseTabUIManager.checkAndResetDataUseTrackingStarted(tab)) {
+                    mDataUseSnackbarController.showDataUseTrackingStartedBar();
+                } else if (DataUseTabUIManager.getOptedOutOfDataUseDialog(getApplicationContext())
+                        && DataUseTabUIManager.checkAndResetDataUseTrackingEnded(tab)) {
+                    mDataUseSnackbarController.showDataUseTrackingEndedBar();
                 }
             }
 
@@ -504,26 +494,22 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
 
             @Override
             public void onHidden(Tab tab) {
-                mLoFiBarPopupController.dismissLoFiBar();
                 mDataUseSnackbarController.dismissDataUseBar();
             }
 
             @Override
             public void onDestroyed(Tab tab) {
-                mLoFiBarPopupController.dismissLoFiBar();
                 mDataUseSnackbarController.dismissDataUseBar();
             }
 
             @Override
             public void onLoadStopped(Tab tab, boolean toDifferentDocument) {
                 postDeferredStartupIfNeeded();
-                showUpdateInfoBarIfNecessary();
             }
 
             @Override
             public void onPageLoadFinished(Tab tab) {
                 postDeferredStartupIfNeeded();
-                showUpdateInfoBarIfNecessary();
                 OfflinePageUtils.showOfflineSnackbarIfNecessary(ChromeActivity.this, tab);
             }
 
@@ -554,9 +540,8 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     @Override
     public void onStartWithNative() {
         super.onStartWithNative();
+        UpdateMenuItemHelper.getInstance().onStart();
         getChromeApplication().onStartWithNative();
-        Tab tab = getActivityTab();
-        if (tab != null) tab.onActivityStart();
         FeatureUtilities.setDocumentModeEnabled(FeatureUtilities.isDocumentMode(this));
         WarmupManager.getInstance().clearWebContentsIfNecessary();
 
@@ -568,6 +553,19 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             ContextReporter.reportStatus(ContextReporter.STATUS_GSA_NOT_AVAILABLE);
         }
         mCompositorViewHolder.resetFlags();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        Tab tab = getActivityTab();
+        if (tab == null) return;
+        if (hasFocus) {
+            tab.onActivityShown();
+        } else {
+            boolean stopped = ApplicationStatus.getStateForActivity(this) == ActivityState.STOPPED;
+            if (stopped) tab.onActivityHidden();
+        }
     }
 
     /**
@@ -584,9 +582,11 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     private void createContextReporterIfNeeded() {
         if (mContextReporter != null || getActivityTab() == null) return;
 
-        ProfileSyncService syncService = ProfileSyncService.get();
+        final SyncController syncController = SyncController.get(this);
+        final ProfileSyncService syncService = ProfileSyncService.get();
 
-        if (SyncController.get(this).isSyncingUrlsWithKeystorePassphrase()) {
+        if (syncController != null && syncController.isSyncingUrlsWithKeystorePassphrase()) {
+            assert syncService != null;
             mContextReporter = ((ChromeApplication) getApplicationContext()).createGsaHelper()
                     .getContextReporter(this);
 
@@ -600,7 +600,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             ContextReporter.reportSyncStatus(syncService);
         }
 
-        if (mSyncStateChangedListener == null) {
+        if (mSyncStateChangedListener == null && syncService != null) {
             mSyncStateChangedListener = new ProfileSyncService.SyncStateChangedListener() {
                 @Override
                 public void syncStateChanged() {
@@ -631,14 +631,16 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     @Override
     public void onStopWithNative() {
         Tab tab = getActivityTab();
-        if (tab != null) tab.onActivityStop();
+        if (tab != null && !hasWindowFocus()) tab.onActivityHidden();
         if (mAppMenuHandler != null) mAppMenuHandler.hideAppMenu();
         if (mGSAServiceClient != null) {
             mGSAServiceClient.disconnect();
             mGSAServiceClient = null;
             if (mSyncStateChangedListener != null) {
                 ProfileSyncService syncService = ProfileSyncService.get();
-                syncService.removeSyncStateChangedListener(mSyncStateChangedListener);
+                if (syncService != null) {
+                    syncService.removeSyncStateChangedListener(mSyncStateChangedListener);
+                }
                 mSyncStateChangedListener = null;
             }
         }
@@ -677,7 +679,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             }
         });
 
-        getChromeApplication().getUpdateInfoBarHelper().checkForUpdateOnBackgroundThread(this);
+        UpdateMenuItemHelper.getInstance().checkForUpdateOnBackgroundThread(this);
 
         removeSnapshotDatabase();
         if (mToolbarManager != null) {
@@ -805,16 +807,6 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         }
 
         super.onDestroy();
-
-        if (!Locale.getDefault().equals(mCurrentLocale)) {
-            // This is a hack to relaunch renderer processes. Killing the main process also kills
-            // its dependent (renderer) processes, and Android's activity manager service seems to
-            // still relaunch the activity even when process dies in onDestroy().
-            // TODO(changwan): Implement a more generic and safe relaunch mechanism, like killing
-            //                 dependent processes in onDestroy() and launching them at onCreate().
-            Log.w(TAG, "Forcefully killing process...");
-            Process.killProcess(Process.myPid());
-        }
     }
 
     /**
@@ -879,6 +871,9 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     protected void onAccessibilityModeChanged(boolean enabled) {
         InfoBarContainer.setIsAllowedToAutoHide(!enabled);
         if (mToolbarManager != null) mToolbarManager.onAccessibilityStatusChanged(enabled);
+        if (mContextualSearchManager != null) {
+            mContextualSearchManager.onAccessibilityModeChanged(enabled);
+        }
     }
 
     @Override
@@ -892,21 +887,18 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     /**
      * Triggered when the share menu item is selected.
      * This creates and shows a share intent picker dialog or starts a share intent directly.
-     *
-     * @param currentTab The {@link Tab} a user is watching.
      * @param shareDirectly Whether it should share directly with the activity that was most
      *                      recently used to share.
      * @param isIncognito Whether currentTab is incognito.
      */
-    public void onShareMenuItemSelected(final Tab currentTab,
-            final boolean shareDirectly, boolean isIncognito) {
+    public void onShareMenuItemSelected(final boolean shareDirectly, boolean isIncognito) {
+        final Tab currentTab = getActivityTab();
         if (currentTab == null) return;
 
         final Activity mainActivity = this;
-        ContentReadbackHandler.GetBitmapCallback bitmapCallback =
-                new ContentReadbackHandler.GetBitmapCallback() {
+        ContentBitmapCallback callback = new ContentBitmapCallback() {
                     @Override
-                    public void onFinishGetBitmap(Bitmap bitmap, int reponse) {
+                    public void onFinishGetBitmap(Bitmap bitmap, int response) {
                         ShareHelper.share(shareDirectly, mainActivity, currentTab.getTitle(),
                                 currentTab.getUrl(), bitmap);
                         if (shareDirectly) {
@@ -916,12 +908,11 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
                         }
                     }
                 };
-        ContentReadbackHandler readbackHandler = getContentReadbackHandler();
-        if (isIncognito || readbackHandler == null || currentTab.getContentViewCore() == null) {
-            bitmapCallback.onFinishGetBitmap(null, ReadbackResponse.SURFACE_UNAVAILABLE);
+        if (isIncognito || currentTab.getWebContents() == null) {
+            callback.onFinishGetBitmap(null, ReadbackResponse.SURFACE_UNAVAILABLE);
         } else {
-            readbackHandler.getContentBitmapAsync(1, new Rect(), currentTab.getContentViewCore(),
-                    Bitmap.Config.ARGB_8888, bitmapCallback);
+            currentTab.getWebContents().getContentBitmapAsync(
+                    Bitmap.Config.ARGB_8888, 1.f, EMPTY_RECT, callback);
         }
     }
 
@@ -1007,13 +998,6 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     }
 
     /**
-     * @return Whether the update infobar may be shown.
-     */
-    public boolean mayShowUpdateInfoBar() {
-        return true;
-    }
-
-    /**
      * Add the specified tab to bookmarks or allows to edit the bookmark if the specified tab is
      * already bookmarked. If a new bookmark is added, a snackbar will be shown.
      * @param tabToBookmark The tab that needs to be bookmarked.
@@ -1023,7 +1007,11 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             return;
         }
 
-        assert mToolbarManager.getBookmarksBridge().isEditBookmarksEnabled();
+        // Defense in depth against the UI being erroneously enabled.
+        if (!mToolbarManager.getBookmarksBridge().isEditBookmarksEnabled()) {
+            assert false;
+            return;
+        }
 
         // Note the use of getUserBookmarkId() over getBookmarkId() here: Managed bookmarks can't be
         // edited. If the current URL is only bookmarked by managed bookmarks, this will return
@@ -1031,38 +1019,17 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         // TODO(bauerb): This does not take partner bookmarks into account.
         final long bookmarkId = tabToBookmark.getUserBookmarkId();
 
-        if (EnhancedBookmarkUtils.isEnhancedBookmarkEnabled()) {
-            final EnhancedBookmarksModel bookmarkModel = new EnhancedBookmarksModel();
-            if (bookmarkModel.isBookmarkModelLoaded()) {
-                EnhancedBookmarkUtils.addOrEditBookmark(bookmarkId, bookmarkModel,
-                        tabToBookmark, getSnackbarManager(), ChromeActivity.this);
-            } else if (mBookmarkObserver == null) {
-                mBookmarkObserver = new BookmarkModelObserver() {
-                    @Override
-                    public void bookmarkModelChanged() {}
-
-                    @Override
-                    public void bookmarkModelLoaded() {
-                        EnhancedBookmarkUtils.addOrEditBookmark(bookmarkId, bookmarkModel,
-                                tabToBookmark, getSnackbarManager(), ChromeActivity.this);
-                        bookmarkModel.removeObserver(this);
-                    }
-                };
-                bookmarkModel.addObserver(mBookmarkObserver);
+        final EnhancedBookmarksModel bookmarkModel = new EnhancedBookmarksModel();
+        bookmarkModel.runAfterBookmarkModelLoaded(new Runnable() {
+            @Override
+            public void run() {
+                // Gives up the bookmarking if the tab is being destroyed.
+                if (!tabToBookmark.isClosing() && tabToBookmark.isInitialized()) {
+                    EnhancedBookmarkUtils.addOrEditBookmark(bookmarkId, bookmarkModel,
+                            tabToBookmark, getSnackbarManager(), ChromeActivity.this);
+                }
             }
-        } else {
-            Intent intent = new Intent(this, ManageBookmarkActivity.class);
-            if (bookmarkId == ChromeBrowserProviderClient.INVALID_BOOKMARK_ID) {
-                intent.putExtra(ManageBookmarkActivity.BOOKMARK_INTENT_IS_FOLDER, false);
-                intent.putExtra(ManageBookmarkActivity.BOOKMARK_INTENT_TITLE,
-                        tabToBookmark.getTitle());
-                intent.putExtra(ManageBookmarkActivity.BOOKMARK_INTENT_URL, tabToBookmark.getUrl());
-            } else {
-                intent.putExtra(ManageBookmarkActivity.BOOKMARK_INTENT_IS_FOLDER, false);
-                intent.putExtra(ManageBookmarkActivity.BOOKMARK_INTENT_ID, bookmarkId);
-            }
-            startActivity(intent);
-        }
+        });
     }
 
     /**
@@ -1188,17 +1155,17 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     }
 
     /**
-     * @return The content readback handler, may be null.
-     */
-    public ContentReadbackHandler getContentReadbackHandler() {
-        return mCompositorViewHolder.getContentReadbackHandler();
-    }
-
-    /**
      * @return The {@code ContextualSearchManager} or {@code null} if none;
      */
     public ContextualSearchManager getContextualSearchManager() {
         return mContextualSearchManager;
+    }
+
+    /**
+     * @return The {@code ReaderModeManager} or {@code null} if none;
+     */
+    public ReaderModeManager getReaderModeManager() {
+        return mReaderModeManager;
     }
 
     /**
@@ -1347,6 +1314,19 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     }
 
     /**
+     * Callback after UpdateMenuItemHelper#checkForUpdateOnBackgroundThread is complete.
+     * @param updateAvailable Whether an update is available.
+     */
+    public void onCheckForUpdate(boolean updateAvailable) {
+        if (UpdateMenuItemHelper.getInstance().shouldShowToolbarBadge(this)) {
+            mToolbarManager.getToolbar().showAppMenuUpdateBadge();
+            mCompositorViewHolder.requestRender();
+        } else {
+            mToolbarManager.getToolbar().removeAppMenuUpdateBadge(false);
+        }
+    }
+
+    /**
      * Handles menu item selection and keyboard shortcuts.
      *
      * @param id The ID of the selected menu item (defined in main_menu.xml) or
@@ -1360,6 +1340,11 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             RecordUserAction.record("MobileMenuSettings");
         } else if (id == R.id.show_menu) {
             showAppMenuForKeyboardEvent();
+        }
+
+        if (id == R.id.update_menu_id) {
+            UpdateMenuItemHelper.getInstance().onMenuItemClicked(this);
+            return true;
         }
 
         // All the code below assumes currentTab is not null, so return early if it is null.
@@ -1390,7 +1375,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             RecordUserAction.record("MobileMenuHistory");
             StartupMetrics.getInstance().recordOpenedHistory();
         } else if (id == R.id.share_menu_id || id == R.id.direct_share_menu_id) {
-            onShareMenuItemSelected(currentTab, id == R.id.direct_share_menu_id,
+            onShareMenuItemSelected(id == R.id.direct_share_menu_id,
                     getCurrentTabModel().isIncognito());
         } else if (id == R.id.print_id) {
             PrintingController printingController = getChromeApplication().getPrintingController();
@@ -1501,10 +1486,6 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         }
     }
 
-    private void showUpdateInfoBarIfNecessary() {
-        getChromeApplication().getUpdateInfoBarHelper().showUpdateInfobarIfNecessary(this);
-    }
-
     /**
      * Determines whether the ContentView is currently visible and not hidden by an overlay
      * @return true if the ContentView is fully hidden by another view (i.e. the tab stack)
@@ -1554,11 +1535,11 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         }
         RecordHistogram.recordCountHistogram("InputMethod.ActiveCount", uniqueLanguages.size());
 
-        InputMethodSubtype current = imm.getCurrentInputMethodSubtype();
-        Locale currentSystemLocale = Locale.getDefault();
-        if (current.getLocale() != null && Locale.getDefault() != null) {
-            boolean match = currentSystemLocale.getLanguage().equalsIgnoreCase(
-                    current.getLocale().split("_")[0]);
+        InputMethodSubtype currentSubtype = imm.getCurrentInputMethodSubtype();
+        Locale systemLocale = Locale.getDefault();
+        if (currentSubtype != null && currentSubtype.getLocale() != null && systemLocale != null) {
+            String keyboardLanguage = currentSubtype.getLocale().split("_")[0];
+            boolean match = systemLocale.getLanguage().equalsIgnoreCase(keyboardLanguage);
             RecordHistogram.recordBooleanHistogram("InputMethod.MatchesSystemLanguage", match);
         }
     }
@@ -1585,6 +1566,18 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
                     getComponentName().flattenToString(),
                     true /* hardwareAccelerated */);
         }
+    }
+
+    /**
+     * @see Activity#onContextMenuClosed(Menu)
+     */
+    @Override
+    public void onContextMenuClosed(Menu menu) {
+        final Tab currentTab = getActivityTab();
+        if (currentTab == null) return;
+        WebContents webContents = currentTab.getWebContents();
+        if (webContents == null) return;
+        webContents.onContextMenuClosed();
     }
 
     private void enableHardwareAcceleration() {

@@ -10,7 +10,10 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -29,6 +32,7 @@
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/linux_util.h"
+#include "base/macros.h"
 #include "base/path_service.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/posix/global_descriptors.h"
@@ -72,7 +76,7 @@
 // where we either a) know the call cannot fail, or b) there is nothing we
 // can do when a call fails, we mark the return code as ignored. This avoids
 // spurious compiler warnings.
-#define IGNORE_RET(x) do { if (x); } while (0)
+#define IGNORE_RET(x) ignore_result(x)
 
 using crash_reporter::GetCrashReporterClient;
 using google_breakpad::ExceptionHandler;
@@ -96,8 +100,10 @@ ExceptionHandler* g_breakpad = nullptr;
 const char* g_asan_report_str = nullptr;
 #endif
 #if defined(OS_ANDROID)
+const char kWebViewProcessType[] = "webview";
 char* g_process_type = nullptr;
 ExceptionHandler* g_microdump = nullptr;
+int g_signal_code_pipe_fd = -1;
 
 class MicrodumpInfo {
  public:
@@ -737,31 +743,23 @@ bool MicrodumpCrashDone(const MinidumpDescriptor& minidump,
 
   const bool is_browser_process = (context != nullptr);
   return FinalizeCrashDoneAndroid(is_browser_process);
- }
+}
 
-// The microdump handler does NOT upload anything. It just dumps out on the
-// system console (logcat) a restricted and serialized variant of a minidump.
-// See crbug.com/410294 for more details.
-void InitMicrodumpCrashHandlerIfNecessary(const std::string& process_type) {
-  if (!GetCrashReporterClient()->ShouldEnableBreakpadMicrodumps())
-    return;
-
-  VLOG(1) << "Enabling microdumps crash handler (process_type:"
-          << process_type << ")";
-
-  // The exception handler runs in a compromised context and cannot use c_str()
-  // as that would require the heap. Therefore, we have to guarantee that the
-  // build fingerprint and product info pointers are always valid.
-  const char* product_name = nullptr;
-  const char* product_version = nullptr;
-  GetCrashReporterClient()->GetProductNameAndVersion(&product_name,
-                                                     &product_version);
-
-  const char* android_build_fp =
-      base::android::BuildInfo::GetInstance()->android_build_fp();
-
-  g_microdump_info.Get().Initialize(process_type, product_name, product_version,
-                                    android_build_fp);
+bool WriteSignalCodeToPipe(const void* crash_context,
+                           size_t crash_context_size,
+                           void* context) {
+  if (g_signal_code_pipe_fd == -1)
+    return false;
+  int signo = INT_MAX;
+  if (crash_context_size == sizeof(ExceptionHandler::CrashContext)) {
+    const ExceptionHandler::CrashContext* eh_context =
+        static_cast<const ExceptionHandler::CrashContext*>(crash_context);
+    signo = eh_context->siginfo.si_signo;
+  }
+  sys_write(g_signal_code_pipe_fd, &signo, sizeof(signo));
+  IGNORE_RET(sys_close(g_signal_code_pipe_fd));
+  g_signal_code_pipe_fd = -1;
+  return false;
 }
 
 bool CrashDoneInProcessNoUpload(
@@ -855,7 +853,8 @@ void MicrodumpInfo::Initialize(const std::string& process_type,
                                const char* android_build_fp) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!g_microdump);
-  bool is_browser_process = process_type.empty() || process_type == "webview";
+  bool is_browser_process =
+      process_type.empty() || process_type == kWebViewProcessType;
 
   MinidumpDescriptor descriptor(MinidumpDescriptor::kMicrodumpOnConsole);
 
@@ -884,7 +883,7 @@ void MicrodumpInfo::Initialize(const std::string& process_type,
                            true,  // Install handlers.
                            -1);   // Server file descriptor. -1 for in-process.
 
-  if (process_type == "webview") {
+  if (process_type == kWebViewProcessType) {
     // We do not use |DumpProcess()| for handling programatically
     // generated dumps for WebView because we only know the file
     // descriptor to which we are dumping at the time of the call to
@@ -894,6 +893,11 @@ void MicrodumpInfo::Initialize(const std::string& process_type,
     // time.
     base::debug::SetDumpWithoutCrashingFunction(
         &GenerateMinidumpOnDemandForAndroid);
+  } else if (!process_type.empty()) {
+    g_signal_code_pipe_fd =
+        GetCrashReporterClient()->GetAndroidMinidumpDescriptor();
+    if (g_signal_code_pipe_fd != -1)
+      g_microdump->set_crash_handler(WriteSignalCodeToPipe);
   }
 }
 
@@ -1856,6 +1860,31 @@ void InitNonBrowserCrashReporterForAndroid(const std::string& process_type) {
       EnableNonBrowserCrashDumping(process_type, minidump_fd);
     }
   }
+}
+
+// The microdump handler does NOT upload anything. It just dumps out on the
+// system console (logcat) a restricted and serialized variant of a minidump.
+// See crbug.com/410294 for more details.
+void InitMicrodumpCrashHandlerIfNecessary(const std::string& process_type) {
+  if (!GetCrashReporterClient()->ShouldEnableBreakpadMicrodumps())
+    return;
+
+  VLOG(1) << "Enabling microdumps crash handler (process_type:"
+          << process_type << ")";
+
+  // The exception handler runs in a compromised context and cannot use c_str()
+  // as that would require the heap. Therefore, we have to guarantee that the
+  // build fingerprint and product info pointers are always valid.
+  const char* product_name = nullptr;
+  const char* product_version = nullptr;
+  GetCrashReporterClient()->GetProductNameAndVersion(&product_name,
+                                                     &product_version);
+
+  const char* android_build_fp =
+      base::android::BuildInfo::GetInstance()->android_build_fp();
+
+  g_microdump_info.Get().Initialize(process_type, product_name, product_version,
+                                    android_build_fp);
 }
 
 void AddGpuFingerprintToMicrodumpCrashHandler(

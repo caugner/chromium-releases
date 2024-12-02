@@ -9,6 +9,7 @@
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
@@ -431,7 +432,8 @@ void FullscreenController::ToggleFullscreenModeInternal(
   // FullscreenWithoutChrome and FullscreenWithToolbar.
   if (exclusive_access_context->IsFullscreen() &&
       !IsWindowFullscreenForTabOrPending() &&
-      exclusive_access_context->SupportsFullscreenWithToolbar()) {
+      exclusive_access_context->SupportsFullscreenWithToolbar() &&
+      IsExtensionFullscreenOrPending()) {
     if (option == BROWSER_WITH_TOOLBAR) {
       enter_fullscreen = enter_fullscreen ||
                          !exclusive_access_context->IsFullscreenWithToolbar();

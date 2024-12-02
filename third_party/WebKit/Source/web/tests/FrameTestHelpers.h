@@ -47,6 +47,9 @@
 
 namespace blink {
 
+class WebFrameWidget;
+class WebRemoteFrameImpl;
+
 namespace FrameTestHelpers {
 
 class TestWebFrameClient;
@@ -85,7 +88,7 @@ public:
     {
         Settings::setMockScrollbarsEnabled(true);
         RuntimeEnabledFeatures::setOverlayScrollbarsEnabled(true);
-        EXPECT_TRUE(ScrollbarTheme::theme()->usesOverlayScrollbars());
+        EXPECT_TRUE(ScrollbarTheme::theme().usesOverlayScrollbars());
     }
 
     ~UseMockScrollbarSettings()
@@ -122,6 +125,7 @@ public:
 
 private:
     WebViewImpl* m_webView;
+    WebFrameWidget* m_webViewWidget;
     SettingOverrider* m_settingOverrider;
     UseMockScrollbarSettings m_mockScrollbarSettings;
 };
@@ -150,7 +154,7 @@ class TestWebRemoteFrameClient : public WebRemoteFrameClient {
 public:
     TestWebRemoteFrameClient();
 
-    WebRemoteFrame* frame() const { return m_frame; }
+    WebRemoteFrameImpl* frame() const { return m_frame; }
 
     // WebRemoteFrameClient overrides:
     void frameDetached(DetachType) override;
@@ -161,7 +165,7 @@ public:
         WebDOMMessageEvent) override { }
 
 private:
-    WebRemoteFrame* const m_frame;
+    RawPtrWillBePersistent<WebRemoteFrameImpl> const m_frame;
 };
 
 class TestWebViewClient : public WebViewClient {

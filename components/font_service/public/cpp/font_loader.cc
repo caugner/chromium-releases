@@ -4,12 +4,14 @@
 
 #include "components/font_service/public/cpp/font_loader.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/trace_event/trace_event.h"
 #include "components/font_service/public/cpp/font_service_thread.h"
-#include "mojo/application/public/cpp/application_impl.h"
-#include "mojo/application/public/cpp/connect.h"
-#include "mojo/application/public/interfaces/shell.mojom.h"
+#include "mojo/shell/public/cpp/application_impl.h"
+#include "mojo/shell/public/cpp/connect.h"
+#include "mojo/shell/public/interfaces/shell.mojom.h"
 
 namespace font_service {
 namespace {
@@ -21,21 +23,20 @@ FontLoader::FontLoader(mojo::Shell* shell) {
   mojo::URLRequestPtr request(mojo::URLRequest::New());
   request->url = mojo::String::From("mojo:font_service");
   FontServicePtr font_service;
-  shell->ConnectToApplication(request.Pass(), GetProxy(&font_service_provider),
-                              nullptr, nullptr,
+  shell->ConnectToApplication(std::move(request),
+                              GetProxy(&font_service_provider), nullptr,
+                              mojo::CreatePermissiveCapabilityFilter(),
                               base::Bind(&OnGotContentHandlerID));
   mojo::ConnectToService(font_service_provider.get(), &font_service);
 
-  thread_ = new internal::FontServiceThread(font_service.Pass());
+  thread_ = new internal::FontServiceThread(std::move(font_service));
 }
 
 FontLoader::FontLoader(mojo::ApplicationImpl* application_impl) {
-  mojo::URLRequestPtr request(mojo::URLRequest::New());
-  request->url = mojo::String::From("mojo:font_service");
   FontServicePtr font_service;
-  application_impl->ConnectToService(request.Pass(), &font_service);
+  application_impl->ConnectToService("mojo:font_service", &font_service);
 
-  thread_ = new internal::FontServiceThread(font_service.Pass());
+  thread_ = new internal::FontServiceThread(std::move(font_service));
 }
 
 FontLoader::~FontLoader() {}

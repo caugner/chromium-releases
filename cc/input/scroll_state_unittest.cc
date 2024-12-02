@@ -23,7 +23,9 @@ TEST_F(ScrollStateTest, ConsumeDeltaNative) {
   const float delta_x_to_consume = 1.2f;
   const float delta_y_to_consume = 2.3f;
 
-  ScrollState scrollState(delta_x, delta_y, 0, 0, false /* should_propagate */,
+  ScrollState scrollState(delta_x, delta_y, 0, 0, false /* is_beginning */,
+                          false /* is_inertial */, false /* is_ending */,
+                          false /* should_propagate */,
                           false /* delta_consumed_for_scroll_sequence */,
                           false /* is_direct_manipulation */);
   EXPECT_FLOAT_EQ(delta_x, scrollState.delta_x());
@@ -55,7 +57,7 @@ TEST_F(ScrollStateTest, ConsumeDeltaNative) {
 }
 
 TEST_F(ScrollStateTest, CurrentNativeScrollingScrollable) {
-  ScrollState scrollState(0, 0, 0, 0, false, false, false);
+  ScrollState scrollState(0, 0, 0, 0, false, false, false, false, false, false);
 
   FakeImplTaskRunnerProvider task_runner_provider;
   TestSharedBitmapManager shared_bitmap_manager;
@@ -66,11 +68,11 @@ TEST_F(ScrollStateTest, CurrentNativeScrollingScrollable) {
   scoped_ptr<LayerImpl> layer_impl =
       LayerImpl::Create(host_impl.active_tree(), 1);
   scrollState.set_current_native_scrolling_layer(layer_impl.get());
-  EXPECT_EQ(layer_impl, scrollState.current_native_scrolling_layer());
+  EXPECT_EQ(layer_impl.get(), scrollState.current_native_scrolling_layer());
 }
 
 TEST_F(ScrollStateTest, FullyConsumed) {
-  ScrollState scrollState(1, 3, 0, 0, 0, false, false);
+  ScrollState scrollState(1, 3, 0, 0, 0, false, false, false, false, false);
   EXPECT_FALSE(scrollState.FullyConsumed());
 
   scrollState.ConsumeDelta(1, 3);

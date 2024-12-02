@@ -4,6 +4,8 @@
 
 #include "components/password_manager/content/browser/credential_manager_dispatcher.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
@@ -66,19 +68,30 @@ void CredentialManagerDispatcher::OnStore(
       credential, web_contents()->GetLastCommittedURL().GetOrigin()));
   form->skip_zero_click = !IsZeroClickAllowed();
 
-  // TODO(mkwst): This is a stub; we should be checking the PasswordStore to
-  // determine whether or not the credential exists, and calling UpdateLogin
-  // accordingly.
   form_manager_.reset(new CredentialManagerPasswordFormManager(
       client_, GetDriver(), *form, this));
 }
 
 void CredentialManagerDispatcher::OnProvisionalSaveComplete() {
   DCHECK(form_manager_);
-  if (client_->IsSavingAndFillingEnabledForCurrentPage()) {
+  DCHECK(client_->IsSavingAndFillingEnabledForCurrentPage());
+
+  if (form_manager_->IsNewLogin()) {
+    // If the PasswordForm we were given does not match an existing
+    // PasswordForm, ask the user if they'd like to save.
     client_->PromptUserToSaveOrUpdatePassword(
-        form_manager_.Pass(), CredentialSourceType::CREDENTIAL_SOURCE_API,
+        std::move(form_manager_), CredentialSourceType::CREDENTIAL_SOURCE_API,
         false);
+  } else {
+    // Otherwise, update the existing form, as we've been told by the site
+    // that the new PasswordForm is a functioning credential for the user.
+    // We use 'PasswordFormManager::Update(PasswordForm&)' here rather than
+    // 'PasswordFormManager::UpdateLogin', as we need to port over the
+    // 'skip_zero_click' state to ensure that we don't accidentally start
+    // signing users in just because the site asks us to. The simplest way
+    // to do so is simply to update the password field of the existing
+    // credential.
+    form_manager_->Update(*form_manager_->preferred_match());
   }
 }
 
@@ -139,9 +152,8 @@ void CredentialManagerDispatcher::OnRequestCredential(
         new CredentialManagerMsg_RejectCredentialRequest(
             web_contents()->GetRenderViewHost()->GetRoutingID(), request_id,
             pending_request_
-                ? blink::WebCredentialManagerError::ErrorTypePendingRequest
-                : blink::WebCredentialManagerError::
-                      ErrorTypePasswordStoreUnavailable));
+                ? blink::WebCredentialManagerPendingRequestError
+                : blink::WebCredentialManagerPasswordStoreUnavailableError));
     return;
   }
 

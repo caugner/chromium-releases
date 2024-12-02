@@ -22,6 +22,7 @@ source_set("version_info") {
   ]
 
   deps = [
+    ":generate_version_info",
     "//base",
     "//components/strings",
   ]
@@ -30,14 +31,9 @@ source_set("version_info") {
     defines = [ "USE_UNOFFICIAL_VERSION_NUMBER" ]
     deps += [ "//ui/base" ]
   }
-
-  public_deps = [
-    ":generate_version_info",
-  ]
 }
 
 process_version("generate_version_info") {
-  visibility = [ ":version_info" ]
   template_file = "version_info_values.h.version"
   output = "$target_gen_dir/version_info_values.h"
 

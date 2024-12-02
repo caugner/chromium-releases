@@ -11,8 +11,8 @@ import android.widget.BaseAdapter;
 import android.widget.TextView;
 
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.enhancedbookmarks.EnhancedBookmarkManager.UIState;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
+import org.chromium.chrome.browser.offlinepages.OfflinePageUtils;
 import org.chromium.components.bookmarks.BookmarkId;
 
 import java.util.ArrayList;
@@ -204,9 +204,9 @@ class EnhancedBookmarkDrawerListViewAdapter extends BaseAdapter {
      * Get item position of the given mode.
      */
     int getItemPosition(int state, Object modeDetail) {
-        if (state == UIState.STATE_ALL_BOOKMARKS) {
+        if (state == EnhancedBookmarkUIState.STATE_ALL_BOOKMARKS) {
             return 0;
-        } else if (state == UIState.STATE_FOLDER) {
+        } else if (state == EnhancedBookmarkUIState.STATE_FOLDER) {
             Set<BookmarkId> topLevelFolderParents = new HashSet<>();
             topLevelFolderParents.addAll(mDelegate.getModel().getTopLevelFolderParentIDs());
             topLevelFolderParents.add(mDesktopNodeId);
@@ -224,7 +224,7 @@ class EnhancedBookmarkDrawerListViewAdapter extends BaseAdapter {
                 topFolderId = parentId;
             }
             return positionOfBookmarkId(topFolderId);
-        } else if (state == UIState.STATE_FILTER) {
+        } else if (state == EnhancedBookmarkUIState.STATE_FILTER) {
             EnhancedBookmarkFilter filter = (EnhancedBookmarkFilter) modeDetail;
             return positionOfItem(new Item(filter));
         }
@@ -327,10 +327,8 @@ class EnhancedBookmarkDrawerListViewAdapter extends BaseAdapter {
 
         switch (item.mType) {
             case TYPE_ALL_ITEMS:
-                title = listItemView.getContext().getResources()
-                        .getString(OfflinePageBridge.isEnabled()
-                                ? R.string.offline_pages_all_items
-                                : R.string.enhanced_bookmark_drawer_all_items);
+                title = listItemView.getContext().getResources().getString(
+                        OfflinePageUtils.getStringId(R.string.enhanced_bookmark_drawer_all_items));
                 iconDrawableId = R.drawable.btn_star;
                 break;
             case TYPE_FOLDER:

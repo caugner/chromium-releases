@@ -4,6 +4,8 @@
 
 #include "chromecast/browser/metrics/external_metrics.h"
 
+#include <stddef.h>
+
 #include <string>
 
 #include "base/bind.h"
@@ -129,7 +131,8 @@ int ExternalMetrics::CollectEvents() {
                                              sample.sample(),
                                              sample.min(),
                                              sample.max(),
-                                             sample.bucket_count());
+                                             sample.bucket_count(),
+                                             1);
         break;
       case ::metrics::MetricSample::LINEAR_HISTOGRAM:
         if (!CheckLinearValues(sample.name(), sample.max())) {

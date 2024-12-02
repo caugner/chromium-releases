@@ -28,7 +28,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
 #include "bindings/core/v8/V8GCController.h"
 
 #include "bindings/core/v8/RetainedDOMInfo.h"
@@ -235,7 +234,10 @@ private:
     }
 
     v8::Isolate* m_isolate;
-    WillBePersistentHeapVector<RawPtrWillBeMember<Node>> m_groupsWhichNeedRetainerInfo;
+    // v8 guarantees that Blink will not regain control while a v8 GC runs
+    // (=> no Oilpan GCs will be triggered), hence raw, untraced members
+    // can safely be kept here.
+    Vector<RawPtrWillBeUntracedMember<Node>> m_groupsWhichNeedRetainerInfo;
     int m_domObjectsWithPendingActivity;
     bool m_liveRootGroupIdSet;
     bool m_constructRetainedObjectInfos;
@@ -259,7 +261,7 @@ void visitWeakHandlesForMinorGC(v8::Isolate* isolate)
 void objectGroupingForMajorGC(v8::Isolate* isolate, bool constructRetainedObjectInfos)
 {
     MajorGCWrapperVisitor visitor(isolate, constructRetainedObjectInfos);
-    v8::V8::VisitHandlesWithClassIds(isolate, &visitor);
+    isolate->VisitHandlesWithClassIds(&visitor);
     visitor.notifyFinished();
 }
 
@@ -279,18 +281,19 @@ void gcPrologueForMajorGC(v8::Isolate* isolate, bool constructRetainedObjectInfo
 
 }
 
-void V8GCController::gcPrologue(v8::GCType type, v8::GCCallbackFlags flags)
+void V8GCController::gcPrologue(v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags)
 {
+    if (isMainThread())
+        ScriptForbiddenScope::enter();
+
+    // TODO(haraken): A GC callback is not allowed to re-enter V8. This means
+    // that it's unsafe to run Oilpan's GC in the GC callback because it may
+    // run finalizers that call into V8. To avoid the risk, we should post
+    // a task to schedule the Oilpan's GC.
+    // (In practice, there is no finalizer that calls into V8 and thus is safe.)
     if (ThreadState::current())
         ThreadState::current()->willStartV8GC();
 
-    if (isMainThread()) {
-        ScriptForbiddenScope::enter();
-    }
-
-    // TODO(haraken): It would be nice if the GC callbacks passed the Isolate
-    // directly.
-    v8::Isolate* isolate = v8::Isolate::GetCurrent();
     v8::HandleScope scope(isolate);
     switch (type) {
     case v8::kGCTypeScavenge:
@@ -324,17 +327,15 @@ void V8GCController::gcPrologue(v8::GCType type, v8::GCCallbackFlags flags)
     }
 }
 
-void V8GCController::gcEpilogue(v8::GCType type, v8::GCCallbackFlags flags)
+void V8GCController::gcEpilogue(v8::Isolate* isolate, v8::GCType type, v8::GCCallbackFlags flags)
 {
-    // TODO(haraken): It would be nice if the GC callbacks passed the Isolate
-    // directly.
-    v8::Isolate* isolate = v8::Isolate::GetCurrent();
     switch (type) {
     case v8::kGCTypeScavenge:
         TRACE_EVENT_END1("devtools.timeline,v8", "MinorGC", "usedHeapSizeAfter", usedHeapSize(isolate));
         if (isMainThread()) {
             TRACE_EVENT_SET_NONCONST_SAMPLING_STATE(V8PerIsolateData::from(isolate)->previousSamplingState());
         }
+        // TODO(haraken): Remove this. See the comment in gcPrologue.
         if (ThreadState::current())
             ThreadState::current()->scheduleV8FollowupGCIfNeeded(BlinkGC::V8MinorGC);
         break;
@@ -355,6 +356,7 @@ void V8GCController::gcEpilogue(v8::GCType type, v8::GCCallbackFlags flags)
         if (isMainThread()) {
             TRACE_EVENT_SET_NONCONST_SAMPLING_STATE(V8PerIsolateData::from(isolate)->previousSamplingState());
         }
+        // TODO(haraken): Remove this. See the comment in gcPrologue.
         if (ThreadState::current())
             ThreadState::current()->scheduleV8FollowupGCIfNeeded(BlinkGC::V8MajorGC);
         break;
@@ -383,8 +385,13 @@ void V8GCController::gcEpilogue(v8::GCType type, v8::GCCallbackFlags flags)
         Heap::collectGarbage(BlinkGC::HeapPointersOnStack, BlinkGC::GCWithSweep, BlinkGC::ForcedGC);
 
         // Forces a precise GC at the end of the current event loop.
-        if (ThreadState::current())
+        if (ThreadState::current()) {
+            // Temporary asserts to diagnose crbug.com/571207's failure to transition
+            // to FullGCScheduled.
+            RELEASE_ASSERT(!ThreadState::current()->isSweepingInProgress());
+            RELEASE_ASSERT(!ThreadState::current()->isInGC());
             ThreadState::current()->setGCState(ThreadState::FullGCScheduled);
+        }
     }
 
     TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "UpdateCounters", TRACE_EVENT_SCOPE_THREAD, "data", InspectorUpdateCountersEvent::data());
@@ -449,7 +456,7 @@ private:
 void V8GCController::traceDOMWrappers(v8::Isolate* isolate, Visitor* visitor)
 {
     DOMWrapperTracer tracer(visitor);
-    v8::V8::VisitHandlesWithClassIds(isolate, &tracer);
+    isolate->VisitHandlesWithClassIds(&tracer);
 }
 
 } // namespace blink

@@ -4,6 +4,8 @@
 
 #include "components/cronet/url_request_context_config.h"
 
+#include "base/values.h"
+#include "net/cert/cert_verifier.h"
 #include "net/http/http_network_session.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_config_service_fixed.h"
@@ -14,27 +16,46 @@
 namespace cronet {
 
 TEST(URLRequestContextConfigTest, SetQuicExperimentalOptions) {
-  URLRequestContextConfig config;
+  URLRequestContextConfig config(
+      // Enable QUIC.
+      true,
+      // Enable SPDY.
+      true,
+      // Enable SDCH.
+      false,
+      // Type of http cache.
+      URLRequestContextConfig::HttpCacheType::DISK,
+      // Max size of http cache in bytes.
+      1024000,
+      // Disable caching for HTTP responses. Other information may be stored in
+      // the cache.
+      false,
+      // Storage path for http cache and cookie storage.
+      "/data/data/org.chromium.net/app_cronet_test/test_storage",
+      // User-Agent request header field.
+      "fake agent",
+      // JSON encoded experimental options.
+      "{\"QUIC\":{\"max_server_configs_stored_in_properties\":2,"
+      "\"delay_tcp_race\":true,"
+      "\"max_number_of_lossy_connections\":10,"
+      "\"packet_loss_threshold\":0.5,"
+      "\"idle_connection_timeout_seconds\":300,"
+      "\"connection_options\":\"TIME,TBBR,REJ\"},"
+      "\"AsyncDNS\":{\"enable\":true}}",
+      // Data reduction proxy key.
+      "",
+      // Data reduction proxy.
+      "",
+      // Fallback data reduction proxy.
+      "",
+      // Data reduction proxy secure proxy check URL.
+      "",
+      // MockCertVerifier to use for testing purposes.
+      scoped_ptr<net::CertVerifier>());
 
-  std::string args =
-      "{\"QUIC_HINTS\":[{\"QUIC_HINT_ALT_PORT\":6121,\"QUIC_HINT_PORT\":6121,"
-      "\"QUIC_HINT_HOST\":\"test.example.com\"}],"
-      "\"HTTP_CACHE\":\"HTTP_CACHE_DISK\",\"ENABLE_SDCH\":false,"
-      "\"ENABLE_LEGACY_MODE\":false,\"HTTP_CACHE_MAX_SIZE\":1024000,"
-      "\"NATIVE_LIBRARY_NAME\":\"cronet_tests\",\"USER_AGENT\":\"fake agent\","
-      "\"STORAGE_PATH\":"
-      "\"\\/data\\/data\\/org.chromium.net\\/app_cronet_test\\/test_storage\","
-      "\"ENABLE_SPDY\":true,"
-      "\"ENABLE_QUIC\":true,\"LOAD_DISABLE_CACHE\":true,"
-      "\"EXPERIMENTAL_OPTIONS\":"
-      "\"{\\\"QUIC\\\":{\\\"store_server_configs_in_properties\\\":true,"
-      "\\\"delay_tcp_race\\\":true,"
-      "\\\"max_number_of_lossy_connections\\\":10,"
-      "\\\"packet_loss_threshold\\\":0.5,"
-      "\\\"connection_options\\\":\\\"TIME,TBBR,REJ\\\"}}\"}";
-  config.LoadFromJSON(args);
   net::URLRequestContextBuilder builder;
-  config.ConfigureURLRequestContextBuilder(&builder);
+  net::NetLog net_log;
+  config.ConfigureURLRequestContextBuilder(&builder, &net_log);
   // Set a ProxyConfigService to avoid DCHECK failure when building.
   builder.set_proxy_config_service(make_scoped_ptr(
       new net::ProxyConfigServiceFixed(net::ProxyConfig::CreateDirect())));
@@ -48,8 +69,8 @@ TEST(URLRequestContextConfigTest, SetQuicExperimentalOptions) {
   quic_connection_options.push_back(net::kREJ);
   EXPECT_EQ(quic_connection_options, params->quic_connection_options);
 
-  // Check store_server_configs_in_properties.
-  EXPECT_TRUE(params->quic_store_server_configs_in_properties);
+  // Check max_server_configs_stored_in_properties.
+  EXPECT_EQ(2u, params->quic_max_server_configs_stored_in_properties);
 
   // Check delay_tcp_race.
   EXPECT_TRUE(params->quic_delay_tcp_race);
@@ -57,6 +78,12 @@ TEST(URLRequestContextConfigTest, SetQuicExperimentalOptions) {
   // Check max_number_of_lossy_connections and packet_loss_threshold.
   EXPECT_EQ(10, params->quic_max_number_of_lossy_connections);
   EXPECT_FLOAT_EQ(0.5f, params->quic_packet_loss_threshold);
+
+  // Check idle_connection_timeout_seconds.
+  EXPECT_EQ(300, params->quic_idle_connection_timeout_seconds);
+
+  // Check AsyncDNS resolver is enabled.
+  EXPECT_TRUE(context->host_resolver()->GetDnsConfigAsValue());
 }
 
 }  // namespace cronet

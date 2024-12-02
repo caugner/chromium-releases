@@ -22,12 +22,10 @@
 #include "chrome/browser/extensions/location_bar_controller.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/search/instant_service.h"
-#include "chrome/browser/search/instant_service_factory.h"
-#include "chrome/browser/search/search.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/translate/translate_service.h"
+#include "chrome/browser/ui/autofill/save_card_bubble_controller_impl.h"
 #include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/content_settings/content_setting_bubble_cocoa.h"
@@ -41,6 +39,7 @@
 #import "chrome/browser/ui/cocoa/location_bar/location_icon_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/manage_passwords_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/page_action_decoration.h"
+#import "chrome/browser/ui/cocoa/location_bar/save_credit_card_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/selected_keyword_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/star_decoration.h"
 #import "chrome/browser/ui/cocoa/location_bar/translate_decoration.h"
@@ -51,7 +50,6 @@
 #include "chrome/browser/ui/content_settings/content_setting_image_model.h"
 #include "chrome/browser/ui/passwords/manage_passwords_ui_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/toolbar/chrome_toolbar_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
@@ -97,6 +95,8 @@ LocationBarViewMac::LocationBarViewMac(AutocompleteTextField* field,
       selected_keyword_decoration_(new SelectedKeywordDecoration()),
       ev_bubble_decoration_(
           new EVBubbleDecoration(location_icon_decoration_.get())),
+      save_credit_card_decoration_(
+          new SaveCreditCardDecoration(command_updater)),
       star_decoration_(new StarDecoration(command_updater)),
       translate_decoration_(new TranslateDecoration(command_updater)),
       zoom_decoration_(new ZoomDecoration(this)),
@@ -188,7 +188,17 @@ void LocationBarViewMac::UpdateManagePasswordsIconAndBubble() {
 }
 
 void LocationBarViewMac::UpdateSaveCreditCardIcon() {
-  NOTIMPLEMENTED();
+  WebContents* web_contents = GetWebContents();
+  if (!web_contents)
+    return;
+
+  // |controller| may be nullptr due to lazy initialization.
+  autofill::SaveCardBubbleControllerImpl* controller =
+      autofill::SaveCardBubbleControllerImpl::FromWebContents(web_contents);
+  bool enabled = controller && controller->IsIconVisible();
+  command_updater()->UpdateCommandEnabled(IDC_SAVE_CREDIT_CARD_FOR_PAGE,
+                                          enabled);
+  save_credit_card_decoration_->SetVisible(enabled);
 }
 
 void LocationBarViewMac::UpdatePageActions() {
@@ -354,6 +364,10 @@ NSPoint LocationBarViewMac::GetBookmarkBubblePoint() const {
   return [field_ bubblePointForDecoration:star_decoration_.get()];
 }
 
+NSPoint LocationBarViewMac::GetSaveCreditCardBubblePoint() const {
+  return [field_ bubblePointForDecoration:save_credit_card_decoration_.get()];
+}
+
 NSPoint LocationBarViewMac::GetTranslateBubblePoint() const {
   return [field_ bubblePointForDecoration:translate_decoration_.get()];
 }
@@ -394,6 +408,7 @@ void LocationBarViewMac::Layout() {
   [cell addRightDecoration:star_decoration_.get()];
   [cell addRightDecoration:translate_decoration_.get()];
   [cell addRightDecoration:zoom_decoration_.get()];
+  [cell addRightDecoration:save_credit_card_decoration_.get()];
   [cell addRightDecoration:manage_passwords_decoration_.get()];
 
   // Note that display order is right to left.
@@ -425,16 +440,14 @@ void LocationBarViewMac::Layout() {
   }
 
   const bool is_keyword_hint = omnibox_view_->model()->is_keyword_hint();
-  ChromeToolbarModel* chrome_toolbar_model =
-      static_cast<ChromeToolbarModel*>(GetToolbarModel());
   if (!keyword.empty() && !is_keyword_hint) {
     // Switch from location icon to keyword mode.
     location_icon_decoration_->SetVisible(false);
     selected_keyword_decoration_->SetVisible(true);
     selected_keyword_decoration_->SetKeyword(short_name, is_extension_keyword);
     selected_keyword_decoration_->SetImage(GetKeywordImage(keyword));
-  } else if (chrome_toolbar_model->GetSecurityLevel(false) ==
-             SecurityStateModel::EV_SECURE) {
+  } else if (GetToolbarModel()->GetSecurityLevel(false) ==
+             security_state::SecurityStateModel::EV_SECURE) {
     // Switch from location icon to show the EV bubble instead.
     location_icon_decoration_->SetVisible(false);
     ev_bubble_decoration_->SetVisible(true);
@@ -516,6 +529,7 @@ void LocationBarViewMac::ResetTabState(WebContents* contents) {
 void LocationBarViewMac::Update(const WebContents* contents) {
   UpdateManagePasswordsIconAndBubble();
   UpdateBookmarkStarVisibility();
+  UpdateSaveCreditCardIcon();
   UpdateTranslateDecoration();
   UpdateZoomDecoration(/*default_zoom_changed=*/false);
   RefreshPageActionDecorations();
@@ -538,13 +552,6 @@ void LocationBarViewMac::OnChanged() {
   location_icon_decoration_->SetImage(image);
   ev_bubble_decoration_->SetImage(image);
   Layout();
-
-  InstantService* instant_service =
-      InstantServiceFactory::GetForProfile(profile());
-  if (instant_service) {
-    gfx::Rect bounds(NSRectToCGRect([field_ frame]));
-    instant_service->OnOmniboxStartMarginChanged(bounds.x());
-  }
 }
 
 void LocationBarViewMac::OnSetFocus() {

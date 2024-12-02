@@ -5,6 +5,7 @@
 #include "net/http/http_network_transaction.h"
 
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -60,6 +61,7 @@
 #include "net/spdy/spdy_session_pool.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_connection_status_flags.h"
+#include "net/ssl/ssl_private_key.h"
 #include "url/gurl.h"
 #include "url/url_canon.h"
 
@@ -108,8 +110,8 @@ scoped_ptr<base::Value> NetLogSSLVersionFallbackCallback(
     const GURL* url,
     int net_error,
     SSLFailureState ssl_failure_state,
-    uint16 version_before,
-    uint16 version_after,
+    uint16_t version_before,
+    uint16_t version_after,
     NetLogCaptureMode /* capture_mode */) {
   scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetString("host_and_port", GetHostAndPort(*url));
@@ -117,7 +119,7 @@ scoped_ptr<base::Value> NetLogSSLVersionFallbackCallback(
   dict->SetInteger("ssl_failure_state", ssl_failure_state);
   dict->SetInteger("version_before", version_before);
   dict->SetInteger("version_after", version_after);
-  return dict.Pass();
+  return std::move(dict);
 }
 
 scoped_ptr<base::Value> NetLogSSLCipherFallbackCallback(
@@ -127,7 +129,7 @@ scoped_ptr<base::Value> NetLogSSLCipherFallbackCallback(
   scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetString("host_and_port", GetHostAndPort(*url));
   dict->SetInteger("net_error", net_error);
-  return dict.Pass();
+  return std::move(dict);
 }
 
 }  // namespace
@@ -152,7 +154,8 @@ HttpNetworkTransaction::HttpNetworkTransaction(RequestPriority priority,
       total_sent_bytes_(0),
       next_state_(STATE_NONE),
       establishing_tunnel_(false),
-      websocket_handshake_stream_base_create_helper_(NULL) {
+      websocket_handshake_stream_base_create_helper_(NULL),
+      net_error_details_() {
   session->ssl_config_service()->GetSSLConfig(&server_ssl_config_);
   session->GetAlpnProtos(&server_ssl_config_.alpn_protos);
   session->GetNpnProtos(&server_ssl_config_.npn_protos);
@@ -220,7 +223,9 @@ int HttpNetworkTransaction::RestartIgnoringLastError(
 }
 
 int HttpNetworkTransaction::RestartWithCertificate(
-    X509Certificate* client_cert, const CompletionCallback& callback) {
+    X509Certificate* client_cert,
+    SSLPrivateKey* client_private_key,
+    const CompletionCallback& callback) {
   // In HandleCertificateRequest(), we always tear down existing stream
   // requests to force a new connection.  So we shouldn't have one here.
   DCHECK(!stream_request_.get());
@@ -231,8 +236,10 @@ int HttpNetworkTransaction::RestartWithCertificate(
       &proxy_ssl_config_ : &server_ssl_config_;
   ssl_config->send_client_cert = true;
   ssl_config->client_cert = client_cert;
+  ssl_config->client_private_key = client_private_key;
   session_->ssl_client_auth_cache()->Add(
-      response_.cert_request_info->host_and_port, client_cert);
+      response_.cert_request_info->host_and_port, client_cert,
+      client_private_key);
   // Reset the other member variables.
   // Note: this is necessary only with SSL renegotiation.
   ResetStateForRestart();
@@ -460,6 +467,13 @@ bool HttpNetworkTransaction::GetRemoteEndpoint(IPEndPoint* endpoint) const {
   return true;
 }
 
+void HttpNetworkTransaction::PopulateNetErrorDetails(
+    NetErrorDetails* details) const {
+  *details = net_error_details_;
+  if (stream_)
+    stream_->PopulateNetErrorDetails(details);
+}
+
 void HttpNetworkTransaction::SetPriority(RequestPriority priority) {
   priority_ = priority;
   if (stream_request_)
@@ -509,6 +523,13 @@ void HttpNetworkTransaction::OnStreamReady(const SSLConfig& used_ssl_config,
   if (response_.was_fetched_via_proxy && !proxy_info_.is_empty())
     response_.proxy_server = proxy_info_.proxy_server().host_port_pair();
   OnIOComplete(OK);
+}
+
+void HttpNetworkTransaction::OnBidirectionalStreamJobReady(
+    const SSLConfig& used_ssl_config,
+    const ProxyInfo& used_proxy_info,
+    BidirectionalStreamJob* stream_job) {
+  NOTREACHED();
 }
 
 void HttpNetworkTransaction::OnWebSocketHandshakeStreamReady(
@@ -603,6 +624,10 @@ void HttpNetworkTransaction::OnHttpsProxyTunnelResponse(
   stream_.reset(stream);
   stream_request_.reset();  // we're done with the stream request
   OnIOComplete(ERR_HTTPS_PROXY_TUNNEL_RESPONSE);
+}
+
+void HttpNetworkTransaction::OnQuicBroken() {
+  net_error_details_.quic_broken = true;
 }
 
 void HttpNetworkTransaction::GetConnectionAttempts(
@@ -840,7 +865,7 @@ int HttpNetworkTransaction::DoInitStreamComplete(int result) {
       total_received_bytes_ += stream_->GetTotalReceivedBytes();
       total_sent_bytes_ += stream_->GetTotalSentBytes();
     }
-    stream_.reset();
+    CacheNetErrorDetailsAndResetStream();
   }
 
   return result;
@@ -1215,7 +1240,7 @@ int HttpNetworkTransaction::HandleCertificateRequest(int error) {
     total_received_bytes_ += stream_->GetTotalReceivedBytes();
     total_sent_bytes_ += stream_->GetTotalSentBytes();
     stream_->Close(true);
-    stream_.reset();
+    CacheNetErrorDetailsAndResetStream();
   }
 
   // The server is asking for a client certificate during the initial
@@ -1226,8 +1251,10 @@ int HttpNetworkTransaction::HandleCertificateRequest(int error) {
   // to provide one for this server before, use the past decision
   // automatically.
   scoped_refptr<X509Certificate> client_cert;
+  scoped_refptr<SSLPrivateKey> client_private_key;
   bool found_cached_cert = session_->ssl_client_auth_cache()->Lookup(
-      response_.cert_request_info->host_and_port, &client_cert);
+      response_.cert_request_info->host_and_port, &client_cert,
+      &client_private_key);
   if (!found_cached_cert)
     return error;
 
@@ -1251,6 +1278,7 @@ int HttpNetworkTransaction::HandleCertificateRequest(int error) {
       &proxy_ssl_config_ : &server_ssl_config_;
   ssl_config->send_client_cert = true;
   ssl_config->client_cert = client_cert;
+  ssl_config->client_private_key = client_private_key;
   next_state_ = STATE_CREATE_STREAM;
   // Reset the other member variables.
   // Note: this is necessary only with SSL renegotiation.
@@ -1303,7 +1331,7 @@ int HttpNetworkTransaction::HandleSSLHandshakeError(int error) {
   }
 
   bool should_fallback = false;
-  uint16 version_max = server_ssl_config_.version_max;
+  uint16_t version_max = server_ssl_config_.version_max;
 
   switch (error) {
     case ERR_CONNECTION_CLOSED:
@@ -1441,7 +1469,7 @@ void HttpNetworkTransaction::ResetStateForRestart() {
     total_received_bytes_ += stream_->GetTotalReceivedBytes();
     total_sent_bytes_ += stream_->GetTotalSentBytes();
   }
-  stream_.reset();
+  CacheNetErrorDetailsAndResetStream();
 }
 
 void HttpNetworkTransaction::ResetStateForAuthRestart() {
@@ -1456,6 +1484,14 @@ void HttpNetworkTransaction::ResetStateForAuthRestart() {
   response_ = HttpResponseInfo();
   establishing_tunnel_ = false;
   remote_endpoint_ = IPEndPoint();
+  net_error_details_.quic_broken = false;
+  net_error_details_.quic_connection_error = QUIC_NO_ERROR;
+}
+
+void HttpNetworkTransaction::CacheNetErrorDetailsAndResetStream() {
+  if (stream_)
+    stream_->PopulateNetErrorDetails(&net_error_details_);
+  stream_.reset();
 }
 
 void HttpNetworkTransaction::RecordSSLFallbackMetrics(int result) {
@@ -1545,7 +1581,7 @@ bool HttpNetworkTransaction::ShouldResendRequest() const {
 void HttpNetworkTransaction::ResetConnectionAndRequestForResend() {
   if (stream_.get()) {
     stream_->Close(true);
-    stream_.reset();
+    CacheNetErrorDetailsAndResetStream();
   }
 
   // We need to clear request_headers_ because it contains the real request

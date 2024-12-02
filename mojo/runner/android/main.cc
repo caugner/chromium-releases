@@ -112,8 +112,6 @@ static void Init(JNIEnv* env,
              base::android::ConvertJavaStringToUTF8(env, j_tmp_dir).c_str(), 1);
   DCHECK_EQ(return_value, 0);
 
-  base::android::InitApplicationContext(env, activity);
-
   std::vector<std::string> parameters;
   parameters.push_back(
       base::android::ConvertJavaStringToUTF8(env, mojo_shell_path));
@@ -184,10 +182,6 @@ Context* GetContext() {
 int main(int argc, char** argv) {
   base::AtExitManager at_exit;
   base::CommandLine::Init(argc, argv);
-
-#if !defined(OFFICIAL_BUILD)
-  base::debug::EnableInProcessStackDumping();
-#endif
 
   mojo::runner::InitializeLogging();
   return mojo::runner::ChildProcessMain();

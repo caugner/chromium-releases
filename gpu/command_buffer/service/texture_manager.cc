@@ -4,12 +4,16 @@
 
 #include "gpu/command_buffer/service/texture_manager.h"
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <algorithm>
 #include <set>
 #include <utility>
 
 #include "base/bits.h"
 #include "base/lazy_instance.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
@@ -21,7 +25,9 @@
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/mailbox_manager.h"
 #include "gpu/command_buffer/service/memory_tracking.h"
+#include "ui/gl/gl_context.h"
 #include "ui/gl/gl_implementation.h"
+#include "ui/gl/gl_state_restorer.h"
 #include "ui/gl/gl_version_info.h"
 #include "ui/gl/trace_util.h"
 
@@ -310,6 +316,7 @@ Texture::Texture(GLuint service_id)
     : mailbox_manager_(NULL),
       memory_tracking_ref_(NULL),
       service_id_(service_id),
+      owned_service_id_(service_id),
       cleared_(true),
       num_uncleared_mips_(0),
       num_npot_faces_(0),
@@ -338,8 +345,7 @@ Texture::Texture(GLuint service_id)
       has_images_(false),
       estimated_size_(0),
       can_render_condition_(CAN_RENDER_ALWAYS),
-      texture_max_anisotropy_initialized_(false) {
-}
+      texture_max_anisotropy_initialized_(false) {}
 
 Texture::~Texture() {
   if (mailbox_manager_)
@@ -363,10 +369,8 @@ void Texture::RemoveTextureRef(TextureRef* ref, bool have_context) {
   size_t result = refs_.erase(ref);
   DCHECK_EQ(result, 1u);
   if (refs_.empty()) {
-    if (have_context) {
-      GLuint id = service_id();
-      glDeleteTextures(1, &id);
-    }
+    if (have_context)
+      glDeleteTextures(1, &owned_service_id_);
     delete this;
   } else if (memory_tracking_ref_ == NULL) {
     // TODO(piman): tune ownership semantics for cross-context group shared
@@ -424,11 +428,12 @@ Texture::CanRenderCondition Texture::GetCanRenderCondition() const {
     return CAN_RENDER_ALWAYS;
 
   if (target_ != GL_TEXTURE_EXTERNAL_OES) {
-    if (face_infos_.empty()) {
+    if (face_infos_.empty() ||
+        static_cast<size_t>(base_level_) >= face_infos_[0].level_infos.size()) {
       return CAN_RENDER_NEVER;
     }
-
-    const Texture::LevelInfo& first_face = face_infos_[0].level_infos[0];
+    const Texture::LevelInfo& first_face =
+        face_infos_[0].level_infos[base_level_];
     if (first_face.width == 0 ||
         first_face.height == 0 ||
         first_face.depth == 0) {
@@ -531,7 +536,7 @@ bool Texture::MarkMipmapsGenerated(
   }
   for (size_t ii = 0; ii < face_infos_.size(); ++ii) {
     const Texture::FaceInfo& face_info = face_infos_[ii];
-    const Texture::LevelInfo& level0_info = face_info.level_infos[0];
+    const Texture::LevelInfo& level0_info = face_info.level_infos[base_level_];
     GLsizei width = level0_info.width;
     GLsizei height = level0_info.height;
     GLsizei depth = level0_info.depth;
@@ -539,7 +544,8 @@ bool Texture::MarkMipmapsGenerated(
                                GLES2Util::IndexToGLFaceTarget(ii);
 
     const GLsizei num_mips = face_info.num_mip_levels;
-    for (GLsizei level = 1; level < num_mips; ++level) {
+    for (GLsizei level = base_level_ + 1;
+         level < base_level_ + num_mips; ++level) {
       width = std::max(1, width >> 1);
       height = std::max(1, height >> 1);
       depth = std::max(1, depth >> 1);
@@ -589,7 +595,7 @@ bool Texture::CanGenerateMipmaps(
 
   // Can't generate mips for depth or stencil textures.
   const Texture::LevelInfo& base = face_infos_[0].level_infos[base_level_];
-  uint32 channels = GLES2Util::GetChannelsForFormat(base.format);
+  uint32_t channels = GLES2Util::GetChannelsForFormat(base.format);
   if (channels & (GLES2Util::kDepth | GLES2Util::kStencil)) {
     return false;
   }
@@ -639,9 +645,9 @@ bool Texture::TextureFaceComplete(const Texture::LevelInfo& first_face,
   return complete;
 }
 
-bool Texture::TextureMipComplete(const Texture::LevelInfo& level0_face,
+bool Texture::TextureMipComplete(const Texture::LevelInfo& base_level_face,
                                  GLenum target,
-                                 GLint level,
+                                 GLint level_diff,
                                  GLenum internal_format,
                                  GLsizei width,
                                  GLsizei height,
@@ -649,17 +655,18 @@ bool Texture::TextureMipComplete(const Texture::LevelInfo& level0_face,
                                  GLenum format,
                                  GLenum type) {
   bool complete = (target != 0);
-  if (level != 0) {
-    const GLsizei mip_width = std::max(1, level0_face.width >> level);
-    const GLsizei mip_height = std::max(1, level0_face.height >> level);
-    const GLsizei mip_depth = std::max(1, level0_face.depth >> level);
+  if (level_diff > 0) {
+    const GLsizei mip_width = std::max(1, base_level_face.width >> level_diff);
+    const GLsizei mip_height =
+        std::max(1, base_level_face.height >> level_diff);
+    const GLsizei mip_depth = std::max(1, base_level_face.depth >> level_diff);
 
     complete &= (width == mip_width &&
                  height == mip_height &&
                  depth == mip_depth &&
-                 internal_format == level0_face.internal_format &&
-                 format == level0_face.format &&
-                 type == level0_face.type);
+                 internal_format == base_level_face.internal_format &&
+                 format == base_level_face.format &&
+                 type == base_level_face.type);
   }
   return complete;
 }
@@ -771,6 +778,41 @@ void Texture::IncAllFramebufferStateChangeCount() {
     (*it)->manager()->IncFramebufferStateChangeCount();
 }
 
+void Texture::UpdateBaseLevel(GLint base_level) {
+  if (base_level_ == base_level)
+    return;
+  base_level_ = base_level;
+
+  UpdateNumMipLevels();
+}
+
+void Texture::UpdateMaxLevel(GLint max_level) {
+  if (max_level_ == max_level)
+    return;
+  max_level_ = max_level;
+
+  UpdateNumMipLevels();
+}
+
+void Texture::UpdateNumMipLevels() {
+  if (face_infos_.empty())
+    return;
+
+  for (size_t ii = 0; ii < face_infos_.size(); ++ii) {
+    Texture::FaceInfo& face_info = face_infos_[ii];
+    if (static_cast<size_t>(base_level_) >= face_info.level_infos.size())
+      continue;
+    const Texture::LevelInfo& info = face_info.level_infos[base_level_];
+    face_info.num_mip_levels = std::min(
+        std::max(0, max_level_ - base_level_ + 1),
+        TextureManager::ComputeMipMapCount(
+            target_, info.width, info.height, info.depth));
+  }
+
+  // mipmap-completeness needs to be re-evaluated.
+  texture_mips_dirty_ = true;
+}
+
 void Texture::SetLevelInfo(const FeatureInfo* feature_info,
                            GLenum target,
                            GLint level,
@@ -804,10 +846,11 @@ void Texture::SetLevelInfo(const FeatureInfo* feature_info,
       info.depth != depth ||
       info.format != format ||
       info.type != type) {
-    if (level == 0) {
+    if (level == base_level_) {
       // Calculate the mip level count.
-      face_infos_[face_index].num_mip_levels =
-        TextureManager::ComputeMipMapCount(target_, width, height, depth);
+      face_infos_[face_index].num_mip_levels = std::min(
+          std::max(0, max_level_ - base_level_ + 1),
+          TextureManager::ComputeMipMapCount(target_, width, height, depth));
 
       // Update NPOT face count for the first level.
       bool prev_npot = TextureIsNPOT(info.width, info.height, info.depth);
@@ -837,7 +880,7 @@ void Texture::SetLevelInfo(const FeatureInfo* feature_info,
 
   estimated_size_ -= info.estimated_size;
   GLES2Util::ComputeImageDataSizes(
-      width, height, 1, format, type, 4, &info.estimated_size, NULL, NULL);
+      width, height, depth, format, type, 4, &info.estimated_size, NULL, NULL);
   estimated_size_ += info.estimated_size;
 
   max_level_set_ = std::max(max_level_set_, level);
@@ -865,9 +908,9 @@ bool Texture::ValidForTexture(
   if (level >= 0 && face_index < face_infos_.size() &&
       static_cast<size_t>(level) < face_infos_[face_index].level_infos.size()) {
     const LevelInfo& info = face_infos_[face_index].level_infos[level];
-    int32 max_x;
-    int32 max_y;
-    int32 max_z;
+    int32_t max_x;
+    int32_t max_y;
+    int32_t max_z;
     return SafeAddInt32(xoffset, width, &max_x) &&
            SafeAddInt32(yoffset, height, &max_y) &&
            SafeAddInt32(zoffset, depth, &max_z) &&
@@ -985,13 +1028,13 @@ GLenum Texture::SetParameteri(
       if (param < 0) {
         return GL_INVALID_VALUE;
       }
-      base_level_ = param;
+      UpdateBaseLevel(param);
       break;
     case GL_TEXTURE_MAX_LEVEL:
       if (param < 0) {
         return GL_INVALID_VALUE;
       }
-      max_level_ = param;
+      UpdateMaxLevel(param);
       break;
     case GL_TEXTURE_MAX_ANISOTROPY_EXT:
       if (param < 1) {
@@ -1054,7 +1097,8 @@ void Texture::Update(const FeatureInfo* feature_info) {
   // Assume GL_TEXTURE_EXTERNAL_OES textures are npot, all others
   npot_ = (target_ == GL_TEXTURE_EXTERNAL_OES) || (num_npot_faces_ > 0);
 
-  if (face_infos_.empty()) {
+  if (face_infos_.empty() ||
+      static_cast<size_t>(base_level_) >= face_infos_[0].level_infos.size()) {
     texture_complete_ = false;
     cube_complete_ = false;
     return;
@@ -1062,7 +1106,7 @@ void Texture::Update(const FeatureInfo* feature_info) {
 
   // Update texture_complete and cube_complete status.
   const Texture::FaceInfo& first_face = face_infos_[0];
-  const Texture::LevelInfo& first_level = first_face.level_infos[0];
+  const Texture::LevelInfo& first_level = first_face.level_infos[base_level_];
   const GLsizei levels_needed = first_face.num_mip_levels;
 
   texture_complete_ =
@@ -1087,16 +1131,17 @@ void Texture::Update(const FeatureInfo* feature_info) {
   bool texture_level0_complete = true;
   if (cube_complete_ && texture_level0_dirty_) {
     for (size_t ii = 0; ii < face_infos_.size(); ++ii) {
-      const Texture::LevelInfo& level0 = face_infos_[ii].level_infos[0];
+      const Texture::LevelInfo& face_base_level =
+          face_infos_[ii].level_infos[base_level_];
       if (!TextureFaceComplete(first_level,
                                ii,
-                               level0.target,
-                               level0.internal_format,
-                               level0.width,
-                               level0.height,
-                               level0.depth,
-                               level0.format,
-                               level0.type)) {
+                               face_base_level.target,
+                               face_base_level.internal_format,
+                               face_base_level.width,
+                               face_base_level.height,
+                               face_base_level.depth,
+                               face_base_level.format,
+                               face_base_level.type)) {
         texture_level0_complete = false;
         break;
       }
@@ -1110,12 +1155,14 @@ void Texture::Update(const FeatureInfo* feature_info) {
     for (size_t ii = 0; ii < face_infos_.size() && texture_mips_complete;
          ++ii) {
       const Texture::FaceInfo& face_info = face_infos_[ii];
-      const Texture::LevelInfo& level0 = face_info.level_infos[0];
+      const Texture::LevelInfo& base_level_info =
+          face_info.level_infos[base_level_];
       for (GLsizei jj = 1; jj < levels_needed; ++jj) {
-        const Texture::LevelInfo& level_info = face_infos_[ii].level_infos[jj];
-        if (!TextureMipComplete(level0,
+        const Texture::LevelInfo& level_info =
+            face_infos_[ii].level_infos[base_level_ + jj];
+        if (!TextureMipComplete(base_level_info,
                                 level_info.target,
-                                jj,
+                                jj,  // level - base_level_
                                 level_info.internal_format,
                                 level_info.width,
                                 level_info.height,
@@ -1140,7 +1187,8 @@ bool Texture::ClearRenderableLevels(GLES2Decoder* decoder) {
 
   for (size_t ii = 0; ii < face_infos_.size(); ++ii) {
     const Texture::FaceInfo& face_info = face_infos_[ii];
-    for (GLint jj = 0; jj < face_info.num_mip_levels; ++jj) {
+    for (GLint jj = base_level_;
+         jj < base_level_ + face_info.num_mip_levels; ++jj) {
       const Texture::LevelInfo& info = face_info.level_infos[jj];
       if (info.target != 0) {
         if (!ClearLevel(decoder, info.target, jj)) {
@@ -1168,6 +1216,7 @@ gfx::Rect Texture::GetLevelClearedRect(GLenum target, GLint level) const {
 bool Texture::IsLevelCleared(GLenum target, GLint level) const {
   size_t face_index = GLES2Util::GLTargetToFaceIndex(target);
   if (face_index >= face_infos_.size() ||
+      level < base_level_ ||
       level >= static_cast<GLint>(face_infos_[face_index].level_infos.size())) {
     return true;
   }
@@ -1190,6 +1239,7 @@ bool Texture::ClearLevel(
   DCHECK(decoder);
   size_t face_index = GLES2Util::GLTargetToFaceIndex(target);
   if (face_index >= face_infos_.size() ||
+      level < base_level_ ||
       level >= static_cast<GLint>(face_infos_[face_index].level_infos.size())) {
     return true;
   }
@@ -1252,6 +1302,7 @@ void Texture::SetLevelImage(GLenum target,
   DCHECK_EQ(info.level, level);
   info.image = image;
   info.image_state = state;
+
   UpdateCanRenderCondition();
   UpdateHasImages();
 }
@@ -1317,6 +1368,30 @@ void Texture::DumpLevelMemory(base::trace_event::ProcessMemoryDump* pmd,
   }
 }
 
+void Texture::SetUnownedServiceId(GLuint service_id) {
+  GLuint new_service_id = service_id;
+
+  // Take no action if this isn't an OES_EXTERNAL texture.
+  if (target_ && target_ != GL_TEXTURE_EXTERNAL_OES)
+    return;
+
+  if (!service_id)
+    new_service_id = owned_service_id_;
+
+  if (service_id_ != new_service_id) {
+    service_id_ = new_service_id;
+    IncrementManagerServiceIdGeneration();
+    if (gfx::GLContext* context = gfx::GLContext::GetCurrent()) {
+      // It would be preferable to pass in the decoder, and ask it to do this
+      // instead.  However, there are several cases, such as TextureDefinition,
+      // that show up without a clear context owner.  So, instead, we use the
+      // current state's state restorer.
+      if (gfx::GLStateRestorer* restorer = context->GetGLStateRestorer())
+        restorer->RestoreAllExternalTextureBindingsIfNeeded();
+    }
+  }
+}
+
 TextureRef::TextureRef(TextureManager* manager,
                        GLuint client_id,
                        Texture* texture)
@@ -1376,7 +1451,8 @@ TextureManager::TextureManager(MemoryTracker* memory_tracker,
       num_uncleared_mips_(0),
       num_images_(0),
       texture_count_(0),
-      have_context_(true) {
+      have_context_(true),
+      current_service_id_generation_(0) {
   for (int ii = 0; ii < kNumDefaultTextures; ++ii) {
     black_texture_ids_[ii] = 0;
   }
@@ -1423,7 +1499,7 @@ scoped_refptr<TextureRef>
     TextureManager::CreateDefaultAndBlackTextures(
         GLenum target,
         GLuint* black_texture) {
-  static uint8 black[] = {0, 0, 0, 255};
+  static uint8_t black[] = {0, 0, 0, 255};
 
   // Sampling a texture not associated with any EGLImage sibling will return
   // black values according to the spec.
@@ -1806,7 +1882,7 @@ bool TextureManager::ValidateTextureParameters(
     return false;
   }
   if (!feature_info_->IsES3Enabled()) {
-    uint32 channels = GLES2Util::GetChannelsForFormat(format);
+    uint32_t channels = GLES2Util::GetChannelsForFormat(format);
     if ((channels & (GLES2Util::kDepth | GLES2Util::kStencil)) != 0 && level) {
       ERRORSTATE_SET_GL_ERROR(
           error_state, GL_INVALID_OPERATION, function_name,
@@ -2213,6 +2289,13 @@ void TextureManager::DoTexImage(
     }
   }
   GLenum error = ERRORSTATE_PEEK_GL_ERROR(error_state, function_name);
+  if (args.command_type == DoTexImageArguments::kTexImage3D) {
+    UMA_HISTOGRAM_CUSTOM_ENUMERATION("GPU.Error.TexImage3D", error,
+        GetAllGLErrors());
+  } else {
+    UMA_HISTOGRAM_CUSTOM_ENUMERATION("GPU.Error.TexImage2D", error,
+        GetAllGLErrors());
+  }
   if (error == GL_NO_ERROR) {
     SetLevelInfo(
         texture_ref, args.target, args.level, args.internal_format, args.width,
@@ -2321,6 +2404,268 @@ void TextureManager::DumpTextureRef(base::trace_event::ProcessMemoryDump* pmd,
   // gl/textures/client_X/texture_Y dump.
   ref->texture()->DumpLevelMemory(pmd, memory_tracker_->ClientTracingId(),
                                   dump_name);
+}
+
+GLenum TextureManager::ExtractFormatFromStorageFormat(GLenum internalformat) {
+  switch (internalformat) {
+    case GL_R8:
+    case GL_R8_SNORM:
+    case GL_R16F:
+    case GL_R32F:
+      return GL_RED;
+    case GL_R8UI:
+    case GL_R8I:
+    case GL_R16UI:
+    case GL_R16I:
+    case GL_R32UI:
+    case GL_R32I:
+      return GL_RED_INTEGER;
+    case GL_RG8:
+    case GL_RG8_SNORM:
+    case GL_RG16F:
+    case GL_RG32F:
+      return GL_RG;
+    case GL_RG8UI:
+    case GL_RG8I:
+    case GL_RG16UI:
+    case GL_RG16I:
+    case GL_RG32UI:
+    case GL_RG32I:
+      return GL_RG_INTEGER;
+    case GL_ATC_RGB_AMD:
+    case GL_COMPRESSED_RGB_PVRTC_2BPPV1_IMG:
+    case GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG:
+    case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:
+    case GL_ETC1_RGB8_OES:
+    case GL_RGB:
+    case GL_RGB8:
+    case GL_SRGB8:
+    case GL_R11F_G11F_B10F:
+    case GL_RGB565:
+    case GL_RGB8_SNORM:
+    case GL_RGB9_E5:
+    case GL_RGB16F:
+    case GL_RGB32F:
+      return GL_RGB;
+    case GL_RGB8UI:
+    case GL_RGB8I:
+    case GL_RGB16UI:
+    case GL_RGB16I:
+    case GL_RGB32UI:
+    case GL_RGB32I:
+      return GL_RGB_INTEGER;
+    case GL_ATC_RGBA_EXPLICIT_ALPHA_AMD:
+    case GL_ATC_RGBA_INTERPOLATED_ALPHA_AMD:
+    case GL_COMPRESSED_RGBA_PVRTC_2BPPV1_IMG:
+    case GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG:
+    case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
+    case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+    case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+    case GL_RGBA:
+    case GL_RGBA8:
+    case GL_SRGB8_ALPHA8:
+    case GL_RGBA8_SNORM:
+    case GL_RGBA4:
+    case GL_RGB5_A1:
+    case GL_RGB10_A2:
+    case GL_RGBA16F:
+    case GL_RGBA32F:
+      return GL_RGBA;
+    case GL_RGBA8UI:
+    case GL_RGBA8I:
+    case GL_RGB10_A2UI:
+    case GL_RGBA16UI:
+    case GL_RGBA16I:
+    case GL_RGBA32UI:
+    case GL_RGBA32I:
+      return GL_RGBA_INTEGER;
+    case GL_DEPTH_COMPONENT16:
+    case GL_DEPTH_COMPONENT24:
+    case GL_DEPTH_COMPONENT32F:
+      return GL_DEPTH_COMPONENT;
+    case GL_DEPTH24_STENCIL8:
+    case GL_DEPTH32F_STENCIL8:
+      return GL_DEPTH_STENCIL;
+    case GL_LUMINANCE_ALPHA:
+    case GL_LUMINANCE8_ALPHA8_EXT:
+      return GL_LUMINANCE_ALPHA;
+    case GL_LUMINANCE:
+    case GL_LUMINANCE8_EXT:
+      return GL_LUMINANCE;
+    case GL_ALPHA:
+    case GL_ALPHA8_EXT:
+      return GL_ALPHA;
+    case GL_ALPHA32F_EXT:
+      return GL_ALPHA;
+    case GL_LUMINANCE32F_EXT:
+      return GL_LUMINANCE;
+    case GL_LUMINANCE_ALPHA32F_EXT:
+      return GL_LUMINANCE_ALPHA;
+    case GL_ALPHA16F_EXT:
+      return GL_ALPHA;
+    case GL_LUMINANCE16F_EXT:
+      return GL_LUMINANCE;
+    case GL_LUMINANCE_ALPHA16F_EXT:
+      return GL_LUMINANCE_ALPHA;
+    case GL_BGRA8_EXT:
+      return GL_BGRA_EXT;
+    default:
+      return GL_NONE;
+  }
+}
+
+GLenum TextureManager::ExtractTypeFromStorageFormat(GLenum internalformat) {
+  switch (internalformat) {
+    case GL_RGB:
+    case GL_RGBA:
+    case GL_LUMINANCE_ALPHA:
+    case GL_LUMINANCE:
+    case GL_ALPHA:
+    case GL_R8:
+      return GL_UNSIGNED_BYTE;
+    case GL_R8_SNORM:
+      return GL_BYTE;
+    case GL_R16F:
+      return GL_HALF_FLOAT;
+    case GL_R32F:
+      return GL_FLOAT;
+    case GL_R8UI:
+      return GL_UNSIGNED_BYTE;
+    case GL_R8I:
+      return GL_BYTE;
+    case GL_R16UI:
+      return GL_UNSIGNED_SHORT;
+    case GL_R16I:
+      return GL_SHORT;
+    case GL_R32UI:
+      return GL_UNSIGNED_INT;
+    case GL_R32I:
+      return GL_INT;
+    case GL_RG8:
+      return GL_UNSIGNED_BYTE;
+    case GL_RG8_SNORM:
+      return GL_BYTE;
+    case GL_RG16F:
+      return GL_HALF_FLOAT;
+    case GL_RG32F:
+      return GL_FLOAT;
+    case GL_RG8UI:
+      return GL_UNSIGNED_BYTE;
+    case GL_RG8I:
+      return GL_BYTE;
+    case GL_RG16UI:
+      return GL_UNSIGNED_SHORT;
+    case GL_RG16I:
+      return GL_SHORT;
+    case GL_RG32UI:
+      return GL_UNSIGNED_INT;
+    case GL_RG32I:
+      return GL_INT;
+    case GL_RGB8:
+    case GL_SRGB8:
+      return GL_UNSIGNED_BYTE;
+    case GL_R11F_G11F_B10F:
+      return GL_UNSIGNED_INT_10F_11F_11F_REV;
+    case GL_RGB565:
+      return GL_UNSIGNED_SHORT_5_6_5;
+    case GL_RGB8_SNORM:
+      return GL_BYTE;
+    case GL_RGB9_E5:
+      return GL_UNSIGNED_INT_5_9_9_9_REV;
+    case GL_RGB16F:
+      return GL_HALF_FLOAT;
+    case GL_RGB32F:
+      return GL_FLOAT;
+    case GL_RGB8UI:
+      return GL_UNSIGNED_BYTE;
+    case GL_RGB8I:
+      return GL_BYTE;
+    case GL_RGB16UI:
+      return GL_UNSIGNED_SHORT;
+    case GL_RGB16I:
+      return GL_SHORT;
+    case GL_RGB32UI:
+      return GL_UNSIGNED_INT;
+    case GL_RGB32I:
+      return GL_INT;
+    case GL_RGBA8:
+      return GL_UNSIGNED_BYTE;
+    case GL_SRGB8_ALPHA8:
+      return GL_UNSIGNED_BYTE;
+    case GL_RGBA8_SNORM:
+      return GL_BYTE;
+    case GL_RGBA4:
+      return GL_UNSIGNED_SHORT_4_4_4_4;
+    case GL_RGB10_A2:
+      return GL_UNSIGNED_INT_2_10_10_10_REV;
+    case GL_RGB5_A1:
+      return GL_UNSIGNED_SHORT_5_5_5_1;
+    case GL_RGBA16F:
+      return GL_HALF_FLOAT;
+    case GL_RGBA32F:
+      return GL_FLOAT;
+    case GL_RGBA8UI:
+      return GL_UNSIGNED_BYTE;
+    case GL_RGBA8I:
+      return GL_BYTE;
+    case GL_RGB10_A2UI:
+      return GL_UNSIGNED_INT_2_10_10_10_REV;
+    case GL_RGBA16UI:
+      return GL_UNSIGNED_SHORT;
+    case GL_RGBA16I:
+      return GL_SHORT;
+    case GL_RGBA32I:
+      return GL_INT;
+    case GL_RGBA32UI:
+      return GL_UNSIGNED_INT;
+    case GL_DEPTH_COMPONENT16:
+      return GL_UNSIGNED_SHORT;
+    case GL_DEPTH_COMPONENT24:
+      return GL_UNSIGNED_INT;
+    case GL_DEPTH_COMPONENT32F:
+      return GL_FLOAT;
+    case GL_DEPTH24_STENCIL8:
+      return GL_UNSIGNED_INT_24_8;
+    case GL_DEPTH32F_STENCIL8:
+      return GL_FLOAT_32_UNSIGNED_INT_24_8_REV;
+    case GL_LUMINANCE8_ALPHA8_EXT:
+      return GL_UNSIGNED_BYTE;
+    case GL_LUMINANCE8_EXT:
+      return GL_UNSIGNED_BYTE;
+    case GL_ALPHA8_EXT:
+      return GL_UNSIGNED_BYTE;
+    case GL_ALPHA32F_EXT:
+      return GL_FLOAT;
+    case GL_LUMINANCE32F_EXT:
+      return GL_FLOAT;
+    case GL_LUMINANCE_ALPHA32F_EXT:
+      return GL_FLOAT;
+    case GL_ALPHA16F_EXT:
+      return GL_HALF_FLOAT_OES;
+    case GL_LUMINANCE16F_EXT:
+      return GL_HALF_FLOAT_OES;
+    case GL_LUMINANCE_ALPHA16F_EXT:
+      return GL_HALF_FLOAT_OES;
+    case GL_BGRA8_EXT:
+      return GL_UNSIGNED_BYTE;
+    default:
+      return GL_NONE;
+  }
+}
+
+void Texture::IncrementManagerServiceIdGeneration() {
+  for (auto ref : refs_) {
+    TextureManager* manager = ref->manager();
+    manager->IncrementServiceIdGeneration();
+  }
+}
+
+uint32_t TextureManager::GetServiceIdGeneration() const {
+  return current_service_id_generation_;
+}
+
+void TextureManager::IncrementServiceIdGeneration() {
+  current_service_id_generation_++;
 }
 
 }  // namespace gles2

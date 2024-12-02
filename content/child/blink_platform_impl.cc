@@ -8,15 +8,14 @@
 
 #include <vector>
 
-#include "base/allocator/allocator_extension.h"
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
-#include "base/process/process_metrics.h"
 #include "base/rand_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
@@ -27,12 +26,14 @@
 #include "base/sys_info.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/platform_thread.h"
+#include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "base/trace_event/memory_allocator_dump_guid.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/trace_event.h"
 #include "blink/public/resources/grit/blink_image_resources.h"
 #include "blink/public/resources/grit/blink_resources.h"
+#include "build/build_config.h"
 #include "components/mime_util/mime_util.h"
 #include "components/scheduler/child/web_task_runner_impl.h"
 #include "components/scheduler/child/webthread_impl_for_worker_scheduler.h"
@@ -56,7 +57,7 @@
 #include "content/child/web_url_loader_impl.h"
 #include "content/child/web_url_request_util.h"
 #include "content/child/websocket_bridge.h"
-#include "content/child/worker_task_runner.h"
+#include "content/child/worker_thread_registry.h"
 #include "content/public/common/content_client.h"
 #include "net/base/data_url.h"
 #include "net/base/ip_address_number.h"
@@ -82,6 +83,7 @@ using blink::WebThemeEngine;
 using blink::WebURL;
 using blink::WebURLError;
 using blink::WebURLLoader;
+using scheduler::WebThreadImplForWorkerScheduler;
 
 namespace content {
 
@@ -434,6 +436,22 @@ static int ToMessageID(WebLocalizedString::Name name) {
   return -1;
 }
 
+class TraceLogObserverAdapter
+    : public base::trace_event::TraceLog::EnabledStateObserver {
+ public:
+  TraceLogObserverAdapter(
+      blink::Platform::TraceLogEnabledStateObserver* observer)
+      : observer_(observer) {}
+
+  void OnTraceLogEnabled() override { observer_->onTraceLogEnabled(); }
+
+  void OnTraceLogDisabled() override { observer_->onTraceLogDisabled(); }
+
+ private:
+  blink::Platform::TraceLogEnabledStateObserver* observer_;
+  DISALLOW_COPY_AND_ASSIGN(TraceLogObserverAdapter);
+};
+
 // TODO(skyostil): Ensure that we always have an active task runner when
 // constructing the platform.
 BlinkPlatformImpl::BlinkPlatformImpl()
@@ -444,7 +462,8 @@ BlinkPlatformImpl::BlinkPlatformImpl()
 
 BlinkPlatformImpl::BlinkPlatformImpl(
     scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner)
-    : main_thread_task_runner_(main_thread_task_runner) {
+    : main_thread_task_runner_(main_thread_task_runner),
+      compositor_thread_(nullptr) {
   InternalInit();
 }
 
@@ -464,9 +483,21 @@ void BlinkPlatformImpl::InternalInit() {
   }
 }
 
-void BlinkPlatformImpl::UpdateWebThreadTLS(blink::WebThread* thread) {
+void BlinkPlatformImpl::WaitUntilWebThreadTLSUpdate(
+    scheduler::WebThreadBase* thread) {
+  base::WaitableEvent event(false, false);
+  thread->TaskRunner()->PostTask(
+      FROM_HERE,
+      base::Bind(&BlinkPlatformImpl::UpdateWebThreadTLS, base::Unretained(this),
+                 base::Unretained(thread), base::Unretained(&event)));
+  event.Wait();
+}
+
+void BlinkPlatformImpl::UpdateWebThreadTLS(blink::WebThread* thread,
+                                           base::WaitableEvent* event) {
   DCHECK(!current_thread_slot_.Get());
   current_thread_slot_.Set(thread);
+  event->Signal();
 }
 
 BlinkPlatformImpl::~BlinkPlatformImpl() {
@@ -531,12 +562,18 @@ bool BlinkPlatformImpl::portAllowed(const blink::WebURL& url) const {
 }
 
 blink::WebThread* BlinkPlatformImpl::createThread(const char* name) {
-  scheduler::WebThreadImplForWorkerScheduler* thread =
-      new scheduler::WebThreadImplForWorkerScheduler(name);
-  thread->TaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&BlinkPlatformImpl::UpdateWebThreadTLS,
-                            base::Unretained(this), thread));
-  return thread;
+  scoped_ptr<WebThreadImplForWorkerScheduler> thread(
+      new WebThreadImplForWorkerScheduler(name));
+  thread->Init();
+  WaitUntilWebThreadTLSUpdate(thread.get());
+  return thread.release();
+}
+
+void BlinkPlatformImpl::SetCompositorThread(
+    scheduler::WebThreadBase* compositor_thread) {
+  compositor_thread_ = compositor_thread;
+  if (compositor_thread_)
+    WaitUntilWebThreadTLSUpdate(compositor_thread_);
 }
 
 blink::WebThread* BlinkPlatformImpl::currentThread() {
@@ -558,8 +595,7 @@ blink::WebWaitableEvent* BlinkPlatformImpl::waitMultipleEvents(
   std::vector<base::WaitableEvent*> events;
   for (size_t i = 0; i < web_events.size(); ++i)
     events.push_back(static_cast<WebWaitableEventImpl*>(web_events[i])->impl());
-  size_t idx = base::WaitableEvent::WaitMany(
-      vector_as_array(&events), events.size());
+  size_t idx = base::WaitableEvent::WaitMany(events.data(), events.size());
   DCHECK_LT(idx, web_events.size());
   return web_events[idx];
 }
@@ -655,43 +691,7 @@ blink::Platform::TraceEventHandle BlinkPlatformImpl::addTraceEvent(
       base::TimeTicks() + base::TimeDelta::FromSecondsD(timestamp);
   base::trace_event::TraceEventHandle handle =
       TRACE_EVENT_API_ADD_TRACE_EVENT_WITH_THREAD_ID_AND_TIMESTAMP(
-          phase, category_group_enabled, name, id, trace_event_internal::kNoId,
-          bind_id, base::PlatformThread::CurrentId(), timestamp_tt, num_args,
-          arg_names, arg_types, arg_values, convertable_wrappers, flags);
-  blink::Platform::TraceEventHandle result;
-  memcpy(&result, &handle, sizeof(result));
-  return result;
-}
-
-blink::Platform::TraceEventHandle BlinkPlatformImpl::addTraceEvent(
-    char phase,
-    const unsigned char* category_group_enabled,
-    const char* name,
-    unsigned long long id,
-    double timestamp,
-    int num_args,
-    const char** arg_names,
-    const unsigned char* arg_types,
-    const unsigned long long* arg_values,
-    blink::WebConvertableToTraceFormat* convertable_values,
-    unsigned char flags) {
-  scoped_refptr<base::trace_event::ConvertableToTraceFormat>
-      convertable_wrappers[2];
-  if (convertable_values) {
-    size_t size = std::min(static_cast<size_t>(num_args),
-                           arraysize(convertable_wrappers));
-    for (size_t i = 0; i < size; ++i) {
-      if (arg_types[i] == TRACE_VALUE_TYPE_CONVERTABLE) {
-        convertable_wrappers[i] =
-            new ConvertableToTraceFormatWrapper(convertable_values[i]);
-      }
-    }
-  }
-  base::TimeTicks timestamp_tt =
-      base::TimeTicks() + base::TimeDelta::FromSecondsD(timestamp);
-  base::trace_event::TraceEventHandle handle =
-      TRACE_EVENT_API_ADD_TRACE_EVENT_WITH_THREAD_ID_AND_TIMESTAMP(
-          phase, category_group_enabled, name, id, trace_event_internal::kNoId,
+          phase, category_group_enabled, name, id, bind_id,
           base::PlatformThread::CurrentId(), timestamp_tt, num_args, arg_names,
           arg_types, arg_values, convertable_wrappers, flags);
   blink::Platform::TraceEventHandle result;
@@ -741,6 +741,26 @@ blink::Platform::WebMemoryAllocatorDumpGuid
 BlinkPlatformImpl::createWebMemoryAllocatorDumpGuid(
     const blink::WebString& guidStr) {
   return base::trace_event::MemoryAllocatorDumpGuid(guidStr.utf8()).ToUint64();
+}
+
+void BlinkPlatformImpl::addTraceLogEnabledStateObserver(
+    TraceLogEnabledStateObserver* observer) {
+  TraceLogObserverAdapter* adapter = new TraceLogObserverAdapter(observer);
+  bool did_insert =
+      trace_log_observers_.add(observer, make_scoped_ptr(adapter)).second;
+  DCHECK(did_insert);
+  base::trace_event::TraceLog::GetInstance()->AddEnabledStateObserver(adapter);
+}
+
+void BlinkPlatformImpl::removeTraceLogEnabledStateObserver(
+    TraceLogEnabledStateObserver* observer) {
+  scoped_ptr<TraceLogObserverAdapter> adapter =
+      trace_log_observers_.take_and_erase(observer);
+  DCHECK(adapter);
+  DCHECK(base::trace_event::TraceLog::GetInstance()->HasEnabledStateObserver(
+      adapter.get()));
+  base::trace_event::TraceLog::GetInstance()->RemoveEnabledStateObserver(
+      adapter.get());
 }
 
 namespace {
@@ -921,9 +941,6 @@ const DataResource kDataResources[] = {
     {"html.css", IDR_UASTYLE_HTML_CSS, ui::SCALE_FACTOR_NONE},
     {"quirks.css", IDR_UASTYLE_QUIRKS_CSS, ui::SCALE_FACTOR_NONE},
     {"view-source.css", IDR_UASTYLE_VIEW_SOURCE_CSS, ui::SCALE_FACTOR_NONE},
-    {"themeChromium.css",
-     IDR_UASTYLE_THEME_CHROMIUM_CSS,
-     ui::SCALE_FACTOR_NONE},
 #if defined(OS_ANDROID)
     {"themeChromiumAndroid.css",
      IDR_UASTYLE_THEME_CHROMIUM_ANDROID_CSS,
@@ -940,9 +957,6 @@ const DataResource kDataResources[] = {
      IDR_UASTYLE_THEME_CHROMIUM_LINUX_CSS,
      ui::SCALE_FACTOR_NONE},
 #endif
-    {"themeChromiumSkia.css",
-     IDR_UASTYLE_THEME_CHROMIUM_SKIA_CSS,
-     ui::SCALE_FACTOR_NONE},
     {"themeInputMultipleFields.css",
      IDR_UASTYLE_THEME_INPUT_MULTIPLE_FIELDS_CSS,
      ui::SCALE_FACTOR_NONE},
@@ -1083,13 +1097,8 @@ double BlinkPlatformImpl::monotonicallyIncreasingTimeSeconds() {
       static_cast<double>(base::Time::kMicrosecondsPerSecond);
 }
 
-double BlinkPlatformImpl::systemTraceTime() {
-  return (base::TimeTicks::Now() - base::TimeTicks()).InSecondsF();
-}
-
-void BlinkPlatformImpl::cryptographicallyRandomValues(
-    unsigned char* buffer, size_t length) {
-  base::RandBytes(buffer, length);
+blink::WebThread* BlinkPlatformImpl::compositorThread() const {
+  return compositor_thread_;
 }
 
 blink::WebGestureCurve* BlinkPlatformImpl::createFlingAnimationCurve(
@@ -1102,17 +1111,12 @@ blink::WebGestureCurve* BlinkPlatformImpl::createFlingAnimationCurve(
              IsMainThread()).release();
 }
 
-void BlinkPlatformImpl::didStartWorkerRunLoop() {
-  WorkerTaskRunner* worker_task_runner = WorkerTaskRunner::Instance();
-  worker_task_runner->DidStartWorkerRunLoop();
+void BlinkPlatformImpl::didStartWorkerThread() {
+  WorkerThreadRegistry::Instance()->DidStartCurrentWorkerThread();
 }
 
-void BlinkPlatformImpl::didStopWorkerRunLoop() {
-  // TODO(kalman): blink::Platform::didStopWorkerRunLoop should be called
-  // willStopWorkerRunLoop, because at this point the run loop hasn't been
-  // stopped. WillStopWorkerRunLoop is the correct name.
-  WorkerTaskRunner* worker_task_runner = WorkerTaskRunner::Instance();
-  worker_task_runner->WillStopWorkerRunLoop();
+void BlinkPlatformImpl::willStopWorkerThread() {
+  WorkerThreadRegistry::Instance()->WillStopCurrentWorkerThread();
 }
 
 blink::WebCrypto* BlinkPlatformImpl::crypto() {
@@ -1211,7 +1215,8 @@ bool BlinkPlatformImpl::databaseSetFileSize(
 blink::WebString BlinkPlatformImpl::signedPublicKeyAndChallengeString(
     unsigned key_size_index,
     const blink::WebString& challenge,
-    const blink::WebURL& url) {
+    const blink::WebURL& url,
+    const blink::WebURL& top_origin) {
   return blink::WebString("");
 }
 
@@ -1243,24 +1248,8 @@ size_t BlinkPlatformImpl::virtualMemoryLimitMB() {
   return static_cast<size_t>(base::SysInfo::AmountOfVirtualMemoryMB());
 }
 
-bool BlinkPlatformImpl::isLowEndDeviceMode() {
-  return base::SysInfo::IsLowEndDevice();
-}
-
 size_t BlinkPlatformImpl::numberOfProcessors() {
   return static_cast<size_t>(base::SysInfo::NumberOfProcessors());
-}
-
-bool BlinkPlatformImpl::processMemorySizesInBytes(
-    size_t* private_bytes,
-    size_t* shared_bytes) {
-  scoped_ptr<base::ProcessMetrics> current_process_metrics(
-      base::ProcessMetrics::CreateCurrentProcessMetrics());
-  return current_process_metrics->GetMemoryBytes(private_bytes, shared_bytes);
-}
-
-bool BlinkPlatformImpl::memoryAllocatorWasteInBytes(size_t* size) {
-  return base::allocator::GetAllocatorWasteSize(size);
 }
 
 blink::WebDiscardableMemory*

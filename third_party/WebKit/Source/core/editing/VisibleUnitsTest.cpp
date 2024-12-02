@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "core/editing/VisibleUnits.h"
 
 #include "core/dom/Text.h"
@@ -65,6 +64,26 @@ TEST_F(VisibleUnitsTest, absoluteCaretBoundsOf)
 
     EXPECT_FALSE(boundsInDOMTree.isEmpty());
     EXPECT_EQ(boundsInDOMTree, boundsInComposedTree);
+}
+
+TEST_F(VisibleUnitsTest, caretMinOffset)
+{
+    const char* bodyContent = "<p id=one>one</p>";
+    setBodyContent(bodyContent);
+
+    RefPtrWillBeRawPtr<Element> one = document().getElementById("one");
+
+    EXPECT_EQ(0, caretMinOffset(one->firstChild()));
+}
+
+TEST_F(VisibleUnitsTest, caretMinOffsetWithFirstLetter)
+{
+    const char* bodyContent = "<style>#one:first-letter { font-size: 200%; }</style><p id=one>one</p>";
+    setBodyContent(bodyContent);
+
+    RefPtrWillBeRawPtr<Element> one = document().getElementById("one");
+
+    EXPECT_EQ(0, caretMinOffset(one->firstChild()));
 }
 
 TEST_F(VisibleUnitsTest, characterAfter)

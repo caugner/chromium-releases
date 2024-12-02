@@ -282,9 +282,9 @@ InspectorTest.selectNodeAndWaitForStylesWithComputed = function(idValue, callbac
     callback = InspectorTest.safeWrap(callback);
     InspectorTest.selectNodeAndWaitForStyles(idValue, onSidebarRendered);
 
-    function onSidebarRendered()
+    function onSidebarRendered(node)
     {
-        InspectorTest.computedStyleWidget().doUpdate().then(callback);
+        InspectorTest.computedStyleWidget().doUpdate().then(callback.bind(null, node));
     }
 }
 
@@ -297,7 +297,7 @@ InspectorTest.filterMatchedStyles = function(text)
 {
     var regex = text ? new RegExp(text, "i") : null;
     InspectorTest.addResult("Filtering styles by: " + text);
-    WebInspector.panels.elements.sidebarPanes.styles._onFilterChanged(regex);
+    WebInspector.panels.elements.sidebarPanes.styles.onFilterChanged(regex);
 }
 
 InspectorTest.dumpRenderedMatchedStyles = function()
@@ -373,19 +373,23 @@ function printStyleSection(section, omitLonghands, includeSelectorGroupMarks)
     if (!section)
         return;
     InspectorTest.addResult("[expanded] " + (section.element.classList.contains("no-affect") ? "[no-affect] " : ""));
-    var chainEntries = section._titleElement.querySelectorAll(".media-list .media");
-    chainEntries = Array.prototype.slice.call(chainEntries);
-    if (section._titleElement.children[1])
-        chainEntries.push(section._titleElement.children[1]);
 
-    for (var j = 0; j < chainEntries.length; ++j) {
-        var chainEntry = chainEntries[j];
-        var entryLine = includeSelectorGroupMarks ? buildMarkedSelectors(chainEntry.children[1]) : chainEntry.children[1].textContent;
-        if (chainEntry.children[2])
-            entryLine += " " + chainEntry.children[2].textContent;
-        entryLine += " (" + extractText(chainEntry.children[0]) + ")";
-        InspectorTest.addResult(entryLine);
+    var medias = section._titleElement.querySelectorAll(".media-list .media");
+    for (var i = 0; i < medias.length; ++i) {
+        var media = medias[i];
+        InspectorTest.addResult(media.textContent);
     }
+    var selector = section._titleElement.querySelector(".selector");
+    var selectorText = includeSelectorGroupMarks ? buildMarkedSelectors(selector) : selector.textContent;
+    // Dump " {".
+    selectorText += selector.nextSibling.textContent;
+    var anchor = section._titleElement.querySelector(".styles-section-subtitle");
+    if (anchor) {
+        var anchorText = extractText(anchor);
+        selectorText += String.sprintf(" (%s)", anchorText);
+    }
+    InspectorTest.addResult(selectorText);
+
     InspectorTest.dumpStyleTreeOutline(section.propertiesTreeOutline, omitLonghands ? 1 : 2);
     InspectorTest.addResult("");
 }
@@ -916,7 +920,7 @@ InspectorTest.matchingSelectors = function(rule)
 {
     var selectors = [];
     for (var i = 0; i < rule.matchingSelectors.length; ++i)
-        selectors.push(rule.selectors[rule.matchingSelectors[i]].value);
+        selectors.push(rule.selectors[rule.matchingSelectors[i]].text);
     return "[" + selectors.join(", ") + "]";
 }
 
@@ -965,14 +969,10 @@ InspectorTest.waitForAnimationAdded = function(callback)
 
 InspectorTest.dumpAnimationTimeline = function(timeline)
 {
-    for (var nodeUI of timeline._nodesMap.values()) {
-        for (nodeRow of nodeUI._rows) {
-            for (var ui of nodeRow.animations) {
-                InspectorTest.addResult(ui.animation().type());
-                InspectorTest.addResult(ui._nameElement.outerHTML);
-                InspectorTest.addResult(ui._svg.outerHTML);
-            }
-        }
+    for (var ui of timeline._uiAnimations) {
+        InspectorTest.addResult(ui.animation().type());
+        InspectorTest.addResult(ui._nameElement.innerHTML);
+        InspectorTest.addResult(ui._svg.innerHTML);
     }
 }
 

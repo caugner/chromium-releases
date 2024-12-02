@@ -3,6 +3,9 @@
 // found in the LICENSE file.
 
 #include <math.h>
+#include <stddef.h>
+#include <stdint.h>
+
 #include <cstdlib>
 
 #include "base/bind.h"
@@ -10,11 +13,13 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
 #include "base/process/process_handle.h"
 #include "base/single_thread_task_runner.h"
+#include "base/stl_util.h"
 #include "base/strings/pattern.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
@@ -459,6 +464,11 @@ void TraceWithAllMacroVariants(WaitableEvent* task_complete_event) {
                    "a", 30000,
                    "b", 1415);
 
+    TRACE_COUNTER_WITH_TIMESTAMP1("all", "TRACE_COUNTER_WITH_TIMESTAMP1 call",
+                                  42, 31415);
+    TRACE_COUNTER_WITH_TIMESTAMP2("all", "TRACE_COUNTER_WITH_TIMESTAMP2 call",
+                                  42, "a", 30000, "b", 1415);
+
     TRACE_COUNTER_ID1("all", "TRACE_COUNTER_ID1 call", 0x319009, 31415);
     TRACE_COUNTER_ID2("all", "TRACE_COUNTER_ID2 call", 0x319009,
                       "a", 30000, "b", 1415);
@@ -653,6 +663,39 @@ void ValidateAllTraceMacrosCreatedData(const ListValue& trace_parsed) {
 
     EXPECT_TRUE((item && item->GetInteger("args.b", &value)));
     EXPECT_EQ(1415, value);
+  }
+
+  EXPECT_FIND_("TRACE_COUNTER_WITH_TIMESTAMP1 call");
+  {
+    std::string ph;
+    EXPECT_TRUE((item && item->GetString("ph", &ph)));
+    EXPECT_EQ("C", ph);
+
+    int value;
+    EXPECT_TRUE((item && item->GetInteger("args.value", &value)));
+    EXPECT_EQ(31415, value);
+
+    int ts;
+    EXPECT_TRUE((item && item->GetInteger("ts", &ts)));
+    EXPECT_EQ(42, ts);
+  }
+
+  EXPECT_FIND_("TRACE_COUNTER_WITH_TIMESTAMP2 call");
+  {
+    std::string ph;
+    EXPECT_TRUE((item && item->GetString("ph", &ph)));
+    EXPECT_EQ("C", ph);
+
+    int value;
+    EXPECT_TRUE((item && item->GetInteger("args.a", &value)));
+    EXPECT_EQ(30000, value);
+
+    EXPECT_TRUE((item && item->GetInteger("args.b", &value)));
+    EXPECT_EQ(1415, value);
+
+    int ts;
+    EXPECT_TRUE((item && item->GetInteger("ts", &ts)));
+    EXPECT_EQ(42, ts);
   }
 
   EXPECT_FIND_("TRACE_COUNTER_ID1 call");
@@ -1094,7 +1137,7 @@ TEST_F(TraceEventTestFixture, AddMetadataEvent) {
 
   class Convertable : public ConvertableToTraceFormat {
    public:
-    Convertable(int* num_calls) : num_calls_(num_calls) {}
+    explicit Convertable(int* num_calls) : num_calls_(num_calls) {}
     void AppendAsTraceFormat(std::string* out) const override {
       (*num_calls_)++;
       out->append("\"metadata_value\"");
@@ -1164,24 +1207,15 @@ TEST_F(TraceEventTestFixture, Categories) {
   EndTraceAndFlush();
   std::vector<std::string> cat_groups;
   TraceLog::GetInstance()->GetKnownCategoryGroups(&cat_groups);
-  EXPECT_TRUE(std::find(cat_groups.begin(),
-                        cat_groups.end(), "c1") != cat_groups.end());
-  EXPECT_TRUE(std::find(cat_groups.begin(),
-                        cat_groups.end(), "c2") != cat_groups.end());
-  EXPECT_TRUE(std::find(cat_groups.begin(),
-                        cat_groups.end(), "c3") != cat_groups.end());
-  EXPECT_TRUE(std::find(cat_groups.begin(),
-                        cat_groups.end(), "c4") != cat_groups.end());
-  EXPECT_TRUE(std::find(cat_groups.begin(),
-                        cat_groups.end(), "c5,c6") != cat_groups.end());
-  EXPECT_TRUE(std::find(cat_groups.begin(),
-                        cat_groups.end(), "c7,c8") != cat_groups.end());
-  EXPECT_TRUE(std::find(cat_groups.begin(),
-                        cat_groups.end(),
-                        "disabled-by-default-c9") != cat_groups.end());
+  EXPECT_TRUE(ContainsValue(cat_groups, "c1"));
+  EXPECT_TRUE(ContainsValue(cat_groups, "c2"));
+  EXPECT_TRUE(ContainsValue(cat_groups, "c3"));
+  EXPECT_TRUE(ContainsValue(cat_groups, "c4"));
+  EXPECT_TRUE(ContainsValue(cat_groups, "c5,c6"));
+  EXPECT_TRUE(ContainsValue(cat_groups, "c7,c8"));
+  EXPECT_TRUE(ContainsValue(cat_groups, "disabled-by-default-c9"));
   // Make sure metadata isn't returned.
-  EXPECT_TRUE(std::find(cat_groups.begin(),
-                        cat_groups.end(), "__metadata") == cat_groups.end());
+  EXPECT_FALSE(ContainsValue(cat_groups, "__metadata"));
 
   const std::vector<std::string> empty_categories;
   std::vector<std::string> included_categories;
@@ -2595,7 +2629,7 @@ TEST_F(TraceEventTestFixture, TraceBufferRingBufferGetReturnChunk) {
   TraceBuffer* buffer = TraceLog::GetInstance()->trace_buffer();
   size_t capacity = buffer->Capacity();
   size_t num_chunks = capacity / TraceBufferChunk::kTraceBufferChunkSize;
-  uint32 last_seq = 0;
+  uint32_t last_seq = 0;
   size_t chunk_index;
   EXPECT_EQ(0u, buffer->Size());
 

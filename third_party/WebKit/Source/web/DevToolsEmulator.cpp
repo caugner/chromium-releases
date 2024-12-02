@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "web/DevToolsEmulator.h"
 
 #include "core/frame/FrameHost.h"
@@ -11,7 +10,6 @@
 #include "core/page/Page.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "public/platform/WebLayerTreeView.h"
-#include "public/web/WebDeviceEmulationParams.h"
 #include "web/InspectorEmulationAgent.h"
 #include "web/WebInputEventConversion.h"
 #include "web/WebLocalFrameImpl.h"
@@ -193,6 +191,17 @@ void DevToolsEmulator::setPrimaryHoverType(HoverType hoverType)
 
 void DevToolsEmulator::enableDeviceEmulation(const WebDeviceEmulationParams& params)
 {
+    if (m_deviceMetricsEnabled
+        && m_emulationParams.viewSize == params.viewSize
+        && m_emulationParams.screenPosition == params.screenPosition
+        && m_emulationParams.deviceScaleFactor == params.deviceScaleFactor
+        && m_emulationParams.offset == params.offset
+        && m_emulationParams.scale == params.scale) {
+        return;
+    }
+
+    m_emulationParams = params;
+
     if (!m_deviceMetricsEnabled) {
         m_deviceMetricsEnabled = true;
         if (params.viewSize.width || params.viewSize.height)
@@ -209,8 +218,12 @@ void DevToolsEmulator::enableDeviceEmulation(const WebDeviceEmulationParams& par
 
     m_webViewImpl->setCompositorDeviceScaleFactorOverride(params.deviceScaleFactor);
     m_webViewImpl->setRootLayerTransform(WebSize(params.offset.x, params.offset.y), params.scale);
-    if (Document* document = m_webViewImpl->mainFrameImpl()->frame()->document())
-        document->mediaQueryAffectingValueChanged();
+    // TODO(dgozman): mainFrameImpl() is null when it's remote. Figure out how
+    // we end up with enabling emulation in this case.
+    if (m_webViewImpl->mainFrameImpl()) {
+        if (Document* document = m_webViewImpl->mainFrameImpl()->frame()->document())
+            document->mediaQueryAffectingValueChanged();
+    }
 }
 
 void DevToolsEmulator::disableDeviceEmulation()
@@ -226,8 +239,16 @@ void DevToolsEmulator::disableDeviceEmulation()
     m_webViewImpl->setCompositorDeviceScaleFactorOverride(0.f);
     m_webViewImpl->setRootLayerTransform(WebSize(0.f, 0.f), 1.f);
     m_webViewImpl->setPageScaleFactor(1.f);
-    if (Document* document = m_webViewImpl->mainFrameImpl()->frame()->document())
-        document->mediaQueryAffectingValueChanged();
+    // mainFrameImpl() could be null during cleanup or remote <-> local swap.
+    if (m_webViewImpl->mainFrameImpl()) {
+        if (Document* document = m_webViewImpl->mainFrameImpl()->frame()->document())
+            document->mediaQueryAffectingValueChanged();
+    }
+}
+
+bool DevToolsEmulator::resizeIsDeviceSizeChange()
+{
+    return m_deviceMetricsEnabled && m_emulateMobileEnabled;
 }
 
 void DevToolsEmulator::enableMobileEmulation()
@@ -249,11 +270,16 @@ void DevToolsEmulator::enableMobileEmulation()
     m_webViewImpl->page()->settings().setPrimaryPointerType(PointerTypeCoarse);
     m_webViewImpl->page()->settings().setAvailableHoverTypes(HoverTypeOnDemand);
     m_webViewImpl->page()->settings().setPrimaryHoverType(HoverTypeOnDemand);
+    m_webViewImpl->page()->settings().setResizeIsDeviceSizeChange(true);
     m_webViewImpl->setZoomFactorOverride(1);
 
     m_originalDefaultMinimumPageScaleFactor = m_webViewImpl->defaultMinimumPageScaleFactor();
     m_originalDefaultMaximumPageScaleFactor = m_webViewImpl->defaultMaximumPageScaleFactor();
     m_webViewImpl->setDefaultPageScaleLimits(0.25f, 5);
+    // TODO(dgozman): mainFrameImpl() is null when it's remote. Figure out how
+    // we end up with enabling emulation in this case.
+    if (m_webViewImpl->mainFrameImpl())
+        m_webViewImpl->mainFrameImpl()->frameView()->layout();
 }
 
 void DevToolsEmulator::disableMobileEmulation()
@@ -273,11 +299,15 @@ void DevToolsEmulator::disableMobileEmulation()
     m_webViewImpl->page()->settings().setPrimaryPointerType(m_embedderPrimaryPointerType);
     m_webViewImpl->page()->settings().setAvailableHoverTypes(m_embedderAvailableHoverTypes);
     m_webViewImpl->page()->settings().setPrimaryHoverType(m_embedderPrimaryHoverType);
+    m_webViewImpl->page()->settings().setResizeIsDeviceSizeChange(false);
     m_webViewImpl->setZoomFactorOverride(0);
     m_emulateMobileEnabled = false;
     m_webViewImpl->setDefaultPageScaleLimits(
         m_originalDefaultMinimumPageScaleFactor,
         m_originalDefaultMaximumPageScaleFactor);
+    // mainFrameImpl() could be null during cleanup or remote <-> local swap.
+    if (m_webViewImpl->mainFrameImpl())
+        m_webViewImpl->mainFrameImpl()->frameView()->layout();
 }
 
 void DevToolsEmulator::setTouchEventEmulationEnabled(bool enabled)
@@ -298,7 +328,14 @@ void DevToolsEmulator::setTouchEventEmulationEnabled(bool enabled)
         m_webViewImpl->page()->settings().setMaxTouchPoints(enabled ? 1 : m_originalMaxTouchPoints);
     }
     m_touchEventEmulationEnabled = enabled;
-    m_webViewImpl->mainFrameImpl()->frameView()->layout();
+    // TODO(dgozman): mainFrameImpl() check in this class should be unnecessary.
+    // It is only needed when we reattach and restore InspectorEmulationAgent,
+    // which happens before everything has been setup correctly, and therefore
+    // fails during remote -> local main frame transition.
+    // We should instead route emulation from browser through the WebViewImpl
+    // to the local main frame, and remove InspectorEmulationAgent entirely.
+    if (m_webViewImpl->mainFrameImpl())
+        m_webViewImpl->mainFrameImpl()->frameView()->layout();
 }
 
 void DevToolsEmulator::setScriptExecutionDisabled(bool scriptExecutionDisabled)

@@ -1,15 +1,16 @@
 if (self.importScripts) {
   importScripts('../resources/fetch-test-helpers.js');
+  importScripts('/streams/resources/rs-utils.js');
 }
 
-function readStream(reader, values) {
-  reader.read().then(function(r) {
-      if (!r.done) {
-        values.push(r.value);
-        readStream(reader, values);
-      }
-    });
-  return reader.closed;
+function isLocked(stream) {
+  try {
+    var reader = stream.getReader();
+    reader.releaseLock();
+    return false;
+  } catch(e) {
+    return true;
+  }
 }
 
 promise_test(function(test) {
@@ -25,14 +26,13 @@ promise_test(function(test) {
     }, 'FetchTextAfterAccessingStreamTest');
 
 promise_test(function(test) {
-    var chunks = [];
     var actual = '';
     return fetch('/fetch/resources/doctype.html')
       .then(function(response) {
           r = response;
-          return readStream(response.body.getReader(), chunks);
+          return readableStreamToArray(response.body);
         })
-      .then(function() {
+      .then(function(chunks) {
           var decoder = new TextDecoder();
           for (var chunk of chunks) {
             actual += decoder.decode(chunk, {stream: true});
@@ -63,55 +63,90 @@ promise_test(function(test) {
     }, 'FetchTwiceTest');
 
 promise_test(function(test) {
+    var response;
     return fetch('/fetch/resources/doctype.html')
-      .then(function(response) {
-          return response.arrayBuffer();
+      .then(function(res) {
+          response = res;
+          assert_false(response.bodyUsed);
+          var p = response.arrayBuffer();
+          assert_true(response.bodyUsed);
+          assert_true(isLocked(response.body));
+          return p;
         })
       .then(function(b) {
+          assert_true(isLocked(response.body));
           assert_equals(b.byteLength, 16);
         })
     }, 'ArrayBufferTest');
 
 promise_test(function(test) {
+    var response;
     return fetch('/fetch/resources/doctype.html')
-      .then(function(response) {
-          return response.blob();
+      .then(function(res) {
+          response = res;
+          assert_false(response.bodyUsed);
+          var p = response.blob();
+          assert_true(response.bodyUsed);
+          assert_true(isLocked(response.body));
+          return p;
         })
       .then(function(blob) {
+          assert_true(isLocked(response.body));
           assert_equals(blob.size, 16);
           assert_equals(blob.type, 'text/html');
         })
     }, 'BlobTest');
 
 promise_test(function(test) {
+    var response;
     return fetch('/fetch/resources/doctype.html')
-      .then(function(response) {
-          return response.json();
+      .then(function(res) {
+          response = res;
+          assert_false(response.bodyUsed);
+          var p = response.json();
+          assert_true(response.bodyUsed);
+          assert_true(isLocked(response.body));
+          return p;
         })
       .then(
         test.unreached_func('json() must fail'),
         function(e) {
+          assert_true(isLocked(response.body));
           assert_equals(e.name, 'SyntaxError', 'expected JSON error');
         })
     }, 'JSONFailedTest');
 
 promise_test(function(test) {
+    var response;
     return fetch('/fetch/resources/simple.json')
-      .then(function(response) {
-          return response.json();
+      .then(function(res) {
+          response = res;
+          assert_false(response.bodyUsed);
+          var p = response.json();
+          assert_true(response.bodyUsed);
+          assert_true(isLocked(response.body));
+          return p;
         })
       .then(function(json) {
+          assert_true(isLocked(response.body));
           assert_equals(json['a'], 1);
           assert_equals(json['b'], 2);
         })
     }, 'JSONTest');
 
 promise_test(function(test) {
+    var response;
     return fetch('/fetch/resources/doctype.html')
-      .then(function(response) {
-          return response.text();
+      .then(function(res) {
+          response = res;
+          assert_false(response.bodyUsed);
+          var p = response.text();
+          assert_true(response.bodyUsed);
+          assert_true(isLocked(response.body));
+          return p;
         })
       .then(function(text) {
+          assert_true(isLocked(response.body));
           assert_equals(text, '<!DOCTYPE html>\n');
         })
     }, 'TextTest');
@@ -119,7 +154,10 @@ promise_test(function(test) {
 promise_test(function(test) {
     return fetch('/fetch/resources/non-ascii.txt')
       .then(function(response) {
-          return response.text();
+          assert_false(response.bodyUsed);
+          var p = response.text();
+          assert_true(response.bodyUsed);
+          return p;
         })
       .then(function(text) {
           assert_equals(text, '\u4e2d\u6587 Gem\u00fcse\n');
@@ -127,37 +165,129 @@ promise_test(function(test) {
     }, 'NonAsciiTextTest');
 
 promise_test(function(test) {
-    var expected = '';
-    for (var i = 0; i < 100; ++i)
-        expected += i;
+    return fetch('/fetch/resources/bom-utf-8.php')
+      .then(function(response) { return response.text(); })
+      .then(function(text) {
+          assert_equals(text, '\u4e09\u6751\u304b\u306a\u5b50',
+                        'utf-8 string with BOM is decoded as utf-8 and ' +
+                        'BOM is not included in the decoded result.');
+        })
+    }, 'BOMUTF8Test');
 
-    var decoder = new TextDecoder();
-    var actual = '';
-    var response;
-    var reader;
-    return fetch('/fetch/resources/progressive.php')
-      .then(function(res) {
-          response = res;
-          reader = response.body.getReader();
-          return reader.read();
+promise_test(function(test) {
+    return fetch('/fetch/resources/bom-utf-16le.php')
+      .then(function(response) { return response.text(); })
+      .then(function(text) {
+          assert_equals(text, '\ufffd\ufffd\tNQgK0j0P[',
+                        'utf-16le string is decoded as if utf-8 ' +
+                        'even if the data has utf-16le BOM.');
         })
-      .then(function(r) {
-          assert_false(r.done);
-          actual += decoder.decode(r.value, {stream: true});
+    }, 'BOMUTF16LETest');
+
+promise_test(function(test) {
+    return fetch('/fetch/resources/bom-utf-16be.php')
+      .then(function(response) { return response.text(); })
+      .then(function(text) {
+          assert_equals(text, '\ufffd\ufffdN\tgQ0K0j[P',
+                        'utf-16be string is decoded as if utf-8 ' +
+                        'even if the data has utf-16be BOM.');
         })
-      .then(function() {
-          return response.text().then(unreached_fulfillment(test), function() {
-              // response.text() should fail because we have a reader.
-            });
-        })
-      .then(function() {
-          reader.releaseLock();
-          return response.arrayBuffer();
-        })
-      .then(function(buffer) {
-          actual += decoder.decode(buffer);
-          assert_equals(actual, expected);
-        })
-    }, 'PartiallyReadFromStreamAndReadArrayBufferTest');
+    }, 'BOMUTF16BETest');
+
+test(t => {
+    var req = new Request('/');
+    assert_false(req.bodyUsed);
+    req.text();
+    assert_false(req.bodyUsed);
+  }, 'BodyUsedShouldNotBeSetForNullBody');
+
+test(t => {
+    var req = new Request('/', {method: 'POST', body: ''});
+    assert_false(req.bodyUsed);
+    req.text();
+    assert_true(req.bodyUsed);
+  }, 'BodyUsedShouldBeSetForEmptyBody');
+
+test(t => {
+    var res = new Response('');
+    assert_false(res.bodyUsed);
+    var reader = res.body.getReader();
+    assert_false(res.bodyUsed);
+    reader.read();
+    assert_true(res.bodyUsed);
+  }, 'BodyUsedShouldBeSetWhenRead');
+
+test(t => {
+    var res = new Response('');
+    assert_false(res.bodyUsed);
+    var reader = res.body.getReader();
+    assert_false(res.bodyUsed);
+    reader.cancel();
+    assert_true(res.bodyUsed);
+  }, 'BodyUsedShouldBeSetWhenCancelled');
+
+promise_test(t => {
+    var res = new Response('');
+    res.body.cancel();
+    return res.arrayBuffer().then(unreached_fulfillment(t), e => {
+        assert_equals(e.name, 'TypeError');
+      });
+  }, 'Used => arrayBuffer');
+
+promise_test(t => {
+    var res = new Response('');
+    res.body.cancel();
+    return res.blob().then(unreached_fulfillment(t), e => {
+        assert_equals(e.name, 'TypeError');
+      });
+  }, 'Used => blob');
+
+promise_test(t => {
+    var res = new Response('');
+    res.body.cancel();
+    return res.json().then(unreached_fulfillment(t), e => {
+        assert_equals(e.name, 'TypeError');
+      });
+  }, 'Used => json');
+
+promise_test(t => {
+    var res = new Response('');
+    res.body.cancel();
+    return res.text().then(unreached_fulfillment(t), e => {
+        assert_equals(e.name, 'TypeError');
+      });
+  }, 'Used => text');
+
+promise_test(t => {
+    var res = new Response('');
+    res.body.getReader();
+    return res.arrayBuffer().then(unreached_fulfillment(t), e => {
+        assert_equals(e.name, 'TypeError');
+      });
+  }, 'Locked => arrayBuffer');
+
+promise_test(t => {
+    var res = new Response('');
+    res.body.getReader();
+    return res.blob().then(unreached_fulfillment(t), e => {
+        assert_equals(e.name, 'TypeError');
+      });
+  }, 'Locked => blob');
+
+promise_test(t => {
+    var res = new Response('');
+    res.body.getReader();
+    return res.json().then(unreached_fulfillment(t), e => {
+        assert_equals(e.name, 'TypeError');
+      });
+  }, 'Locked => json');
+
+promise_test(t => {
+    var res = new Response('');
+    res.body.getReader();
+    return res.text().then(unreached_fulfillment(t), e => {
+        assert_equals(e.name, 'TypeError');
+      });
+  }, 'Locked => text');
 
 done();

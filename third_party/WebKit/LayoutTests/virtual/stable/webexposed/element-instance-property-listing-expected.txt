@@ -1,3 +1,4 @@
+CONSOLE WARNING: The <keygen> element is deprecated and will be removed in M54, around October 2016. See https://www.chromestatus.com/features/5716060992962560 for more details.
 This test documents all properties on all element instances.
 
 On success, you will see a series of "PASS" messages, followed by "TEST COMPLETE".
@@ -281,6 +282,7 @@ html element audio
     property currentTime
     property defaultMuted
     property defaultPlaybackRate
+    property disableRemotePlayback
     property duration
     property ended
     property error
@@ -300,6 +302,8 @@ html element audio
     property seekable
     property seeking
     property setMediaKeys
+    property setSinkId
+    property sinkId
     property src
     property textTracks
     property volume
@@ -330,7 +334,9 @@ html element body
     property onpagehide
     property onpageshow
     property onpopstate
+    property onrejectionhandled
     property onstorage
+    property onunhandledrejection
     property onunload
     property text
     property vLink
@@ -471,7 +477,9 @@ html element frameset
     property onpagehide
     property onpageshow
     property onpopstate
+    property onrejectionhandled
     property onstorage
+    property onunhandledrejection
     property onunload
     property rows
 html element h1
@@ -990,6 +998,7 @@ html element video
     property currentTime
     property defaultMuted
     property defaultPlaybackRate
+    property disableRemotePlayback
     property duration
     property ended
     property error
@@ -1011,6 +1020,8 @@ html element video
     property seekable
     property seeking
     property setMediaKeys
+    property setSinkId
+    property sinkId
     property src
     property textTracks
     property videoHeight

@@ -7,9 +7,12 @@
 
 #include "components/omnibox/browser/omnibox_view.h"
 
+#include <utility>
+
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/omnibox_client.h"
 #include "components/omnibox/browser/omnibox_edit_controller.h"
@@ -81,10 +84,18 @@ int OmniboxView::GetIcon() const {
   return (id == IDR_OMNIBOX_HTTP) ? IDR_LOCATION_BAR_HTTP : id;
 }
 
-gfx::VectorIconId OmniboxView::GetVectorIcon() const {
+gfx::VectorIconId OmniboxView::GetVectorIcon(bool invert) const {
 #if !defined(OS_ANDROID) && !defined(OS_MACOSX) && !defined(OS_IOS)
-  if (!IsEditingOrEmpty())
-    return controller_->GetToolbarModel()->GetVectorIcon();
+  if (!IsEditingOrEmpty()) {
+    gfx::VectorIconId id = controller_->GetToolbarModel()->GetVectorIcon();
+    if (invert) {
+      if (id == gfx::VectorIconId::LOCATION_BAR_HTTPS_VALID)
+        return gfx::VectorIconId::LOCATION_BAR_HTTPS_VALID_INVERT;
+      if (id == gfx::VectorIconId::LOCATION_BAR_HTTPS_INVALID)
+        return gfx::VectorIconId::LOCATION_BAR_HTTPS_INVALID_INVERT;
+    }
+    return id;
+  }
   // Reuse the dropdown icons...
   gfx::VectorIconId id = AutocompleteMatch::TypeToVectorIcon(
       model_ ? model_->CurrentTextType()
@@ -167,8 +178,7 @@ OmniboxView::OmniboxView(OmniboxEditController* controller,
     : controller_(controller) {
   // |client| can be null in tests.
   if (client) {
-    model_.reset(
-        new OmniboxEditModel(this, controller, client.Pass()));
+    model_.reset(new OmniboxEditModel(this, controller, std::move(client)));
   }
 }
 

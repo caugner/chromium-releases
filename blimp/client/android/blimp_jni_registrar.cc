@@ -8,22 +8,27 @@
 #include "blimp/client/android/blimp_library_loader.h"
 #include "blimp/client/android/blimp_view.h"
 #include "blimp/client/android/toolbar.h"
+#include "blimp/client/session/blimp_client_session_android.h"
+#include "blimp/client/session/tab_control_feature_android.h"
 
+namespace blimp {
+namespace client {
 namespace {
 
 base::android::RegistrationMethod kBlimpRegistrationMethods[] = {
-    {"BlimpLibraryLoader", blimp::RegisterBlimpLibraryLoaderJni},
-    {"Toolbar", blimp::Toolbar::RegisterJni},
-    {"BlimpView", blimp::BlimpView::RegisterJni},
+    {"BlimpLibraryLoader", RegisterBlimpLibraryLoaderJni},
+    {"Toolbar", Toolbar::RegisterJni},
+    {"BlimpView", BlimpView::RegisterJni},
+    {"BlimpClientSessionAndroid", BlimpClientSessionAndroid::RegisterJni},
+    {"TabControlFeatureAndroid", TabControlFeatureAndroid::RegisterJni},
 };
 
 }  // namespace
-
-namespace blimp {
 
 bool RegisterBlimpJni(JNIEnv* env) {
   return base::android::RegisterNativeMethods(
       env, kBlimpRegistrationMethods, arraysize(kBlimpRegistrationMethods));
 }
 
+}  // namespace client
 }  // namespace blimp

@@ -27,14 +27,15 @@ HoleFrameFactory::HoleFrameFactory(
     gl->BindTexture(GL_TEXTURE_2D, texture_);
     image_id_ = gl->CreateGpuMemoryBufferImageCHROMIUM(1, 1, GL_RGBA,
                                                        GL_READ_WRITE_CHROMIUM);
-    if (image_id_) {
-      gl->BindTexImage2DCHROMIUM(GL_TEXTURE_2D, image_id_);
+    CHECK(image_id_);
+    gl->BindTexImage2DCHROMIUM(GL_TEXTURE_2D, image_id_);
 
-      gl->GenMailboxCHROMIUM(mailbox_.name);
-      gl->ProduceTextureDirectCHROMIUM(texture_, GL_TEXTURE_2D, mailbox_.name);
+    gl->GenMailboxCHROMIUM(mailbox_.name);
+    gl->ProduceTextureDirectCHROMIUM(texture_, GL_TEXTURE_2D, mailbox_.name);
 
-      sync_token_ = gpu::SyncToken(gl->InsertSyncPointCHROMIUM());
-    }
+    const GLuint64 fence_sync = gl->InsertFenceSyncCHROMIUM();
+    gl->ShallowFlushCHROMIUM();
+    gl->GenSyncTokenCHROMIUM(fence_sync, sync_token_.GetData());
   }
 }
 
@@ -45,17 +46,15 @@ HoleFrameFactory::~HoleFrameFactory() {
     CHECK(lock);
     gpu::gles2::GLES2Interface* gl = lock->ContextGL();
     gl->BindTexture(GL_TEXTURE_2D, texture_);
-    if (image_id_)
-      gl->ReleaseTexImage2DCHROMIUM(GL_TEXTURE_2D, image_id_);
+    gl->ReleaseTexImage2DCHROMIUM(GL_TEXTURE_2D, image_id_);
     gl->DeleteTextures(1, &texture_);
-    if (image_id_)
-      gl->DestroyImageCHROMIUM(image_id_);
+    gl->DestroyImageCHROMIUM(image_id_);
   }
 }
 
 scoped_refptr<::media::VideoFrame> HoleFrameFactory::CreateHoleFrame(
     const gfx::Size& size) {
-  if (texture_ && image_id_) {
+  if (texture_) {
     scoped_refptr<::media::VideoFrame> frame =
         ::media::VideoFrame::WrapNativeTexture(
             ::media::PIXEL_FORMAT_XRGB,
@@ -65,6 +64,7 @@ scoped_refptr<::media::VideoFrame> HoleFrameFactory::CreateHoleFrame(
             gfx::Rect(size),     // visible rect
             size,                // natural size
             base::TimeDelta());  // timestamp
+    CHECK(frame);
     frame->metadata()->SetBoolean(::media::VideoFrameMetadata::ALLOW_OVERLAY,
                                   true);
     return frame;

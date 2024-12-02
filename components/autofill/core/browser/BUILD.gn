@@ -68,6 +68,10 @@ source_set("browser") {
     "card_unmask_delegate.h",
     "contact_info.cc",
     "contact_info.h",
+    "country_data.cc",
+    "country_data.h",
+    "country_names.cc",
+    "country_names.h",
     "credit_card.cc",
     "credit_card.h",
     "credit_card_field.cc",
@@ -84,6 +88,8 @@ source_set("browser") {
     "form_group.h",
     "form_structure.cc",
     "form_structure.h",
+    "legal_message_line.cc",
+    "legal_message_line.h",
     "name_field.cc",
     "name_field.h",
     "options_util.cc",
@@ -142,6 +148,23 @@ source_set("browser") {
     "webdata/autofill_webdata_service_observer.h",
   ]
 
+  if (is_ios) {
+    sources += [
+      "autofill_field_trial_ios.cc",
+      "autofill_field_trial_ios.h",
+      "keyboard_accessory_metrics_logger.h",
+      "keyboard_accessory_metrics_logger.mm",
+    ]
+  }
+
+  if (is_ios || is_android) {
+    sources += [
+      "autofill_save_card_infobar_delegate_mobile.cc",
+      "autofill_save_card_infobar_delegate_mobile.h",
+      "autofill_save_card_infobar_mobile.h",
+    ]
+  }
+
   configs += [ "//build/config:precompiled_headers" ]
 
   deps = [
@@ -149,7 +172,6 @@ source_set("browser") {
     "//base:i18n",
     "//base:prefs",
     "//components/autofill/core/common",
-    "//components/compression",
     "//components/data_use_measurement/core",
     "//components/infobars/core",
     "//components/keyed_service/core",
@@ -172,7 +194,9 @@ source_set("browser") {
     "//third_party/icu",
     "//third_party/libaddressinput:util",
     "//third_party/libphonenumber",
-    "//third_party/libjingle",
+    "//third_party/libxml",
+    "//third_party/re2",
+    "//third_party/zlib:compression_utils",
     "//ui/base",
     "//ui/gfx",
     "//ui/gfx/geometry",
@@ -207,8 +231,11 @@ source_set("test_support") {
     "test_personal_data_manager.h",
   ]
 
-  deps = [
+  public_deps = [
     ":browser",
+  ]
+
+  deps = [
     "//base",
     "//base:prefs",
     "//base:prefs_test_support",
@@ -224,6 +251,7 @@ source_set("test_support") {
     "//google_apis:test_support",
     "//skia",
     "//testing/gtest",
+    "//ui/gfx:test_support",
     "//ui/gfx/geometry",
   ]
 }
@@ -248,10 +276,12 @@ source_set("unit_tests") {
     "autofill_type_unittest.cc",
     "autofill_xml_parser_unittest.cc",
     "contact_info_unittest.cc",
+    "country_names_unittest.cc",
     "credit_card_field_unittest.cc",
     "credit_card_unittest.cc",
     "form_field_unittest.cc",
     "form_structure_unittest.cc",
+    "legal_message_line_unittest.cc",
     "name_field_unittest.cc",
     "options_util_unittest.cc",
     "password_generator_unittest.cc",
@@ -276,7 +306,6 @@ source_set("unit_tests") {
     "//base:prefs_test_support",
     "//base/test:test_support",
     "//components/autofill/core/common",
-    "//components/compression",
     "//components/os_crypt",
     "//components/rappor:test_support",
     "//components/resources",
@@ -299,7 +328,7 @@ source_set("unit_tests") {
     "//testing/gtest",
     "//third_party/libaddressinput:util",
     "//third_party/libphonenumber",
-    "//third_party/libjingle",
+    "//third_party/zlib:compression_utils",
     "//ui/base",
     "//url",
   ]

@@ -8,20 +8,19 @@ import logging
 import os
 import pickle
 import re
-import sys
 
 from devil.android import apk_helper
 from devil.android import md5sum
 from pylib import constants
 from pylib.base import base_test_result
 from pylib.base import test_instance
+from pylib.constants import host_paths
 from pylib.instrumentation import test_result
 from pylib.instrumentation import instrumentation_parser
 from pylib.utils import proguard
 
-sys.path.append(
-    os.path.join(constants.DIR_SOURCE_ROOT, 'build', 'util', 'lib', 'common'))
-import unittest_util # pylint: disable=import-error
+with host_paths.SysPath(host_paths.BUILD_COMMON_PATH):
+  import unittest_util # pylint: disable=import-error
 
 # Ref: http://developer.android.com/reference/android/app/Activity.html
 _ACTIVITY_RESULT_CANCELED = 0
@@ -33,9 +32,6 @@ _DEFAULT_ANNOTATIONS = [
     'EnormousTest', 'IntegrationTest']
 _EXCLUDE_UNLESS_REQUESTED_ANNOTATIONS = [
     'DisabledTest', 'FlakyTest']
-_EXTRA_ENABLE_HTTP_SERVER = (
-    'org.chromium.chrome.test.ChromeInstrumentationTestRunner.'
-        + 'EnableTestHttpServer')
 _EXTRA_DRIVER_TEST_LIST = (
     'org.chromium.test.driver.OnDeviceInstrumentationDriver.TestList')
 _EXTRA_DRIVER_TEST_LIST_FILE = (
@@ -44,6 +40,9 @@ _EXTRA_DRIVER_TARGET_PACKAGE = (
     'org.chromium.test.driver.OnDeviceInstrumentationDriver.TargetPackage')
 _EXTRA_DRIVER_TARGET_CLASS = (
     'org.chromium.test.driver.OnDeviceInstrumentationDriver.TargetClass')
+_EXTRA_TIMEOUT_SCALE = (
+    'org.chromium.test.driver.OnDeviceInstrumentationDriver.TimeoutScale')
+
 _PARAMETERIZED_TEST_ANNOTATION = 'ParameterizedTest'
 _PARAMETERIZED_TEST_SET_ANNOTATION = 'ParameterizedTest$Set'
 _NATIVE_CRASH_RE = re.compile('native crash', re.IGNORECASE)
@@ -163,12 +162,12 @@ def ParseCommandLineFlagParameters(annotations):
   """
   ParamsTuple = collections.namedtuple('ParamsTuple', ['add', 'remove'])
   parameterized_tests = []
-  if _PARAMETERIZED_TEST_ANNOTATION in annotations:
-    parameterized_tests = [annotations[_PARAMETERIZED_TEST_ANNOTATION]]
-  elif _PARAMETERIZED_TEST_SET_ANNOTATION in annotations:
+  if _PARAMETERIZED_TEST_SET_ANNOTATION in annotations:
     if annotations[_PARAMETERIZED_TEST_SET_ANNOTATION]:
       parameterized_tests = annotations[
         _PARAMETERIZED_TEST_SET_ANNOTATION].get('tests', [])
+  elif _PARAMETERIZED_TEST_ANNOTATION in annotations:
+    parameterized_tests = [annotations[_PARAMETERIZED_TEST_ANNOTATION]]
   else:
     return None
 
@@ -226,6 +225,9 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     self._driver_package = None
     self._driver_name = None
     self._initializeDriverAttributes()
+
+    self._timeout_scale = None
+    self._initializeTestControlAttributes(args)
 
   def _initializeApkAttributes(self, args, error_func):
     if args.apk_under_test.endswith('.apk'):
@@ -342,6 +344,10 @@ class InstrumentationTestInstance(test_instance.TestInstance):
       with open(args.device_flags_file) as device_flags_file:
         stripped_lines = (l.strip() for l in device_flags_file)
         self._flags.extend([flag for flag in stripped_lines if flag])
+    if (hasattr(args, 'strict_mode') and
+        args.strict_mode and
+        args.strict_mode != 'off'):
+      self._flags.append('--strict-mode=' + args.strict_mode)
 
   def _initializeDriverAttributes(self):
     self._driver_apk = os.path.join(
@@ -353,6 +359,9 @@ class InstrumentationTestInstance(test_instance.TestInstance):
       self._driver_name = driver_apk.GetInstrumentationName()
     else:
       self._driver_apk = None
+
+  def _initializeTestControlAttributes(self, args):
+    self._timeout_scale = args.timeout_scale or 1
 
   @property
   def additional_apks(self):
@@ -414,6 +423,10 @@ class InstrumentationTestInstance(test_instance.TestInstance):
   def test_runner(self):
     return self._test_runner
 
+  @property
+  def timeout_scale(self):
+    return self._timeout_scale
+
   #override
   def TestType(self):
     return 'instrumentation'
@@ -431,7 +444,7 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     if self._test_data:
       for t in self._test_data:
         device_rel_path, host_rel_path = t.split(':')
-        host_abs_path = os.path.join(constants.DIR_SOURCE_ROOT, host_rel_path)
+        host_abs_path = os.path.join(host_paths.DIR_SOURCE_ROOT, host_rel_path)
         self._data_deps.extend(
             [(host_abs_path,
               [None, 'chrome', 'test', 'data', device_rel_path])])
@@ -585,17 +598,12 @@ class InstrumentationTestInstance(test_instance.TestInstance):
           new_tests.append(parameterized_t)
     return tests + new_tests
 
-  @staticmethod
-  def GetHttpServerEnvironmentVars():
-    return {
-      _EXTRA_ENABLE_HTTP_SERVER: None,
-    }
-
   def GetDriverEnvironmentVars(
       self, test_list=None, test_list_file_path=None):
     env = {
       _EXTRA_DRIVER_TARGET_PACKAGE: self.test_package,
       _EXTRA_DRIVER_TARGET_CLASS: self.test_runner,
+      _EXTRA_TIMEOUT_SCALE: self._timeout_scale,
     }
 
     if test_list:

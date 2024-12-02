@@ -14,9 +14,10 @@
 
 namespace blink {
 
+class MediaMetadata;
 class ScriptState;
 
-class MODULES_EXPORT MediaSession
+class MODULES_EXPORT MediaSession final
     : public GarbageCollectedFinalized<MediaSession>
     , public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
@@ -26,7 +27,10 @@ public:
     ScriptPromise activate(ScriptState*);
     ScriptPromise deactivate(ScriptState*);
 
-    DEFINE_INLINE_TRACE() { }
+    void setMetadata(MediaMetadata*);
+    MediaMetadata* metadata() const;
+
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     friend class MediaSessionTest;
@@ -34,6 +38,7 @@ private:
     explicit MediaSession(PassOwnPtr<WebMediaSession>);
 
     OwnPtr<WebMediaSession> m_webMediaSession;
+    Member<MediaMetadata> m_metadata;
 };
 
 } // namespace blink

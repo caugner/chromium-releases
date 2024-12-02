@@ -29,8 +29,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-
 #include "modules/mediastream/UserMediaRequest.h"
 
 #include "bindings/core/v8/Dictionary.h"
@@ -50,7 +48,7 @@
 
 namespace blink {
 
-static WebMediaConstraints parseOptions(const BooleanOrMediaTrackConstraintSet& options, ExceptionState& exceptionState)
+static WebMediaConstraints parseOptions(const BooleanOrMediaTrackConstraintSet& options, MediaErrorState& errorState)
 {
     WebMediaConstraints constraints;
 
@@ -58,7 +56,7 @@ static WebMediaConstraints parseOptions(const BooleanOrMediaTrackConstraintSet& 
     if (options.isNull()) {
         // Do nothing.
     } else if (options.isMediaTrackConstraintSet()) {
-        constraints = MediaConstraintsImpl::create(options.getAsMediaTrackConstraintSet(), exceptionState);
+        constraints = MediaConstraintsImpl::create(options.getAsMediaTrackConstraintSet(), errorState);
     } else {
         ASSERT(options.isBoolean());
         if (options.getAsBoolean()) {
@@ -69,18 +67,18 @@ static WebMediaConstraints parseOptions(const BooleanOrMediaTrackConstraintSet& 
     return constraints;
 }
 
-UserMediaRequest* UserMediaRequest::create(ExecutionContext* context, UserMediaController* controller, const MediaStreamConstraints& options, NavigatorUserMediaSuccessCallback* successCallback, NavigatorUserMediaErrorCallback* errorCallback, ExceptionState& exceptionState)
+UserMediaRequest* UserMediaRequest::create(ExecutionContext* context, UserMediaController* controller, const MediaStreamConstraints& options, NavigatorUserMediaSuccessCallback* successCallback, NavigatorUserMediaErrorCallback* errorCallback, MediaErrorState& errorState)
 {
-    WebMediaConstraints audio = parseOptions(options.audio(), exceptionState);
-    if (exceptionState.hadException())
+    WebMediaConstraints audio = parseOptions(options.audio(), errorState);
+    if (errorState.hadException())
         return nullptr;
 
-    WebMediaConstraints video = parseOptions(options.video(), exceptionState);
-    if (exceptionState.hadException())
+    WebMediaConstraints video = parseOptions(options.video(), errorState);
+    if (errorState.hadException())
         return nullptr;
 
     if (audio.isNull() && video.isNull()) {
-        exceptionState.throwDOMException(SyntaxError, "At least one of audio and video must be requested");
+        errorState.throwDOMException(SyntaxError, "At least one of audio and video must be requested");
         return nullptr;
     }
 
@@ -127,6 +125,7 @@ bool UserMediaRequest::isSecureContextUse(String& errorMessage)
 
     if (document->isSecureContext(errorMessage)) {
         UseCounter::count(document->frame(), UseCounter::GetUserMediaSecureOrigin);
+        UseCounter::countCrossOriginIframe(*document, UseCounter::GetUserMediaSecureOriginIframe);
         OriginsUsingFeatures::countAnyWorld(*document, OriginsUsingFeatures::Feature::GetUserMediaSecureOrigin);
         return true;
     }
@@ -134,6 +133,7 @@ bool UserMediaRequest::isSecureContextUse(String& errorMessage)
     // While getUserMedia is blocked on insecure origins, we still want to
     // count attempts to use it.
     UseCounter::countDeprecation(document->frame(), UseCounter::GetUserMediaInsecureOrigin);
+    UseCounter::countCrossOriginIframe(*document, UseCounter::GetUserMediaInsecureOriginIframe);
     OriginsUsingFeatures::countAnyWorld(*document, OriginsUsingFeatures::Feature::GetUserMediaInsecureOrigin);
     return false;
 }

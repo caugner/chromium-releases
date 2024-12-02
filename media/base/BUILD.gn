@@ -108,6 +108,8 @@ source_set("base") {
     "key_systems.h",
     "key_systems_support_uma.cc",
     "key_systems_support_uma.h",
+    "loopback_audio_converter.cc",
+    "loopback_audio_converter.h",
     "media.cc",
     "media.h",
     "media_client.cc",
@@ -182,6 +184,8 @@ source_set("base") {
     "video_capture_types.h",
     "video_capturer_source.cc",
     "video_capturer_source.h",
+    "video_codecs.cc",
+    "video_codecs.h",
     "video_decoder.cc",
     "video_decoder.h",
     "video_decoder_config.cc",
@@ -209,8 +213,8 @@ source_set("base") {
   defines = []
   public_deps = []
   deps = [
-    "//ui/events:events_base",
     "//skia",
+    "//ui/events:events_base",
   ]
   libs = []
   configs += [
@@ -358,8 +362,8 @@ source_set("test_support") {
   ]
   configs += [ "//media:media_config" ]
   deps = [
-    "//testing/gmock",
     "//media:shared_memory_support",
+    "//testing/gmock",
   ]
 }
 
@@ -388,6 +392,7 @@ source_set("unittests") {
     "callback_holder_unittest.cc",
     "channel_mixer_unittest.cc",
     "channel_mixing_matrix_unittest.cc",
+    "container_names_unittest.cc",
     "data_buffer_unittest.cc",
     "decoder_buffer_queue_unittest.cc",
     "decoder_buffer_unittest.cc",
@@ -441,9 +446,7 @@ source_set("unittests") {
     ]
   }
 
-  if (!is_android) {
-    sources += [ "container_names_unittest.cc" ]
-  } else {
+  if (is_android) {
     deps += [ "//ui/gl" ]
   }
 

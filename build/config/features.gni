@@ -25,6 +25,7 @@ declare_args() {
   # Multicast DNS.
   enable_mdns = is_win || is_linux
 
+  enable_extensions = !is_android && !is_ios
   enable_plugins = (!is_android && !is_ios) || is_chromecast
   enable_pdf = !is_android && !is_ios && !is_chromecast
 
@@ -32,17 +33,16 @@ declare_args() {
   # TODO(GYP): Get NaCl linking on other platforms.
   # Also, see if we can always get rid of enable_nacl_untrusted and
   # enable_pnacl and always build them if enable_nacl is true.
-  # The "is_nacl" part of the condition is needed to ensure that
-  # the untrusted code is built properly; arguably it should be
-  # guarded by "is_nacl" directly rather than enable_nacl_untrusted, but
-  # this will go away when Mac and Win are working and we can just use
-  # the commented out logic.
-  # Eventually we want this to be:
-  #   enable_nacl = !is_ios && !is_android && !is_chromecast
-  enable_nacl = (is_mac || (is_linux && !is_chromeos) || is_nacl) &&
-                current_cpu != "mipsel" && !is_chromecast
-  enable_nacl_untrusted = enable_nacl
-  enable_pnacl = enable_nacl_untrusted
+  # Eventually we want this to be just the first line.
+  enable_nacl = !is_ios && !is_android && !is_chromecast &&
+                current_cpu != "mipsel" && !(is_win && current_cpu != "x64")
+
+  # These default to the non-Boolean "" so that code below can default
+  # them to the explicitly-set value of enable_nacl, whereas initializing
+  # them here uses the default value of enable_nacl above and ignores any
+  # args.gn setting.
+  enable_nacl_untrusted = ""
+  enable_pnacl = ""
 
   # If debug_devtools is set to true, JavaScript files for DevTools are stored
   # as is and loaded from disk. Otherwise, a concatenated file is stored in
@@ -52,7 +52,7 @@ declare_args() {
 
   # Enables WebRTC.
   # TODO(GYP) make mac work.
-  enable_webrtc = !is_ios && !is_mac
+  enable_webrtc = !is_ios
 
   # Enables the Media Router.
   enable_media_router = !is_ios
@@ -63,7 +63,6 @@ declare_args() {
   # proprietary codecs.
   proprietary_codecs = is_android || is_chrome_branded || is_chromecast
 
-  # TODO(GYP) This should be enabled on ios as well.
   enable_configuration_policy = !is_ios
 
   # Enables support for background apps.
@@ -82,8 +81,6 @@ declare_args() {
   enable_supervised_users = !is_ios
 
   enable_autofill_dialog = !is_ios
-
-  enable_google_now = !is_ios && !is_android
 
   enable_one_click_signin = is_win || is_mac || (is_linux && !is_chromeos)
 
@@ -118,6 +115,18 @@ declare_args() {
   fieldtrial_testing_like_official_build = is_chrome_branded
 
   use_cups = (is_desktop_linux || is_mac) && !is_chromecast && !is_headless
+
+  # Enables Wi-Fi Display functionality
+  enable_wifi_display = false
+}
+
+# Default these based on the explicit value of enable_nacl, not just
+# the default value seen inside the declare_args() context.
+if (enable_nacl_untrusted == "") {
+  enable_nacl_untrusted = enable_nacl
+}
+if (enable_pnacl == "") {
+  enable_pnacl = enable_nacl
 }
 
 # Additional dependent variables -----------------------------------------------
@@ -163,14 +172,9 @@ enable_web_speech = !is_android && !is_ios
 
 use_dbus = is_linux && !is_chromecast && !is_headless
 
-enable_extensions = !is_android && !is_ios
-
 enable_task_manager = !is_ios && !is_android
 
 enable_themes = !is_android && !is_ios
-
-# TODO(scottmg) remove this when we've fixed printing.
-win_pdf_metafile_for_printing = true
 
 # Whether we are using the rlz library or not.  Platforms like Android send
 # rlz codes for searches but do not use the library.
@@ -194,9 +198,6 @@ use_brlapi = is_chromeos
 # Option controlling the use of GConf (the classic GNOME configuration
 # system).
 use_gconf = is_linux && !is_chromeos && !is_chromecast && !is_headless
-
-# Whether to back up data before sync.
-enable_pre_sync_backup = is_win || is_mac || (is_linux && !is_chromeos)
 
 # Enable WebVR support by default on Android
 # Still requires command line flag to access API

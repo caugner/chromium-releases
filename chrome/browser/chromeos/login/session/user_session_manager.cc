@@ -4,7 +4,11 @@
 
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 
+#include <stddef.h>
+
+#include <set>
 #include <string>
+#include <vector>
 
 #include "base/base_paths.h"
 #include "base/bind.h"
@@ -72,6 +76,7 @@
 #include "chrome/browser/supervised_user/child_accounts/child_account_service.h"
 #include "chrome/browser/supervised_user/child_accounts/child_account_service_factory.h"
 #include "chrome/browser/ui/app_list/start_page_service.h"
+#include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
@@ -87,6 +92,8 @@
 #include "chromeos/network/portal_detector/network_portal_detector.h"
 #include "chromeos/network/portal_detector/network_portal_detector_strategy.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "components/arc/arc_bridge_service.h"
+#include "components/arc/arc_service_manager.h"
 #include "components/component_updater/component_updater_service.h"
 #include "components/flags_ui/pref_service_flags_storage.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
@@ -94,6 +101,7 @@
 #include "components/signin/core/account_id/account_id.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/signin_manager_base.h"
+#include "components/user_manager/known_user.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_type.h"
@@ -254,7 +262,7 @@ base::CommandLine CreatePerSessionCommandLine(Profile* profile) {
   base::CommandLine user_flags(base::CommandLine::NO_PROGRAM);
   flags_ui::PrefServiceFlagsStorage flags_storage_(profile->GetPrefs());
   about_flags::ConvertFlagsToSwitches(&flags_storage_, &user_flags,
-                                      about_flags::kAddSentinels);
+                                      flags_ui::kAddSentinels);
   return user_flags;
 }
 
@@ -478,8 +486,8 @@ void UserSessionManager::StartSession(
   NotifyUserLoggedIn();
 
   if (!user_context.GetDeviceId().empty()) {
-    user_manager::UserManager::Get()->SetKnownUserDeviceId(
-        user_context.GetAccountId(), user_context.GetDeviceId());
+    user_manager::known_user::SetDeviceId(user_context.GetAccountId(),
+                                          user_context.GetDeviceId());
   }
 
   PrepareProfile();
@@ -876,8 +884,8 @@ void UserSessionManager::PreStartSession() {
 void UserSessionManager::StoreUserContextDataBeforeProfileIsCreated() {
   // Store obfuscated GAIA ID.
   if (!user_context_.GetGaiaID().empty()) {
-    user_manager::UserManager::Get()->UpdateGaiaID(user_context_.GetAccountId(),
-                                                   user_context_.GetGaiaID());
+    user_manager::known_user::UpdateGaiaID(user_context_.GetAccountId(),
+                                           user_context_.GetGaiaID());
   }
 }
 
@@ -964,7 +972,7 @@ void UserSessionManager::InitProfilePreferences(
         user_manager::UserManager::Get()->GetActiveUser();
     std::string supervised_user_sync_id =
         ChromeUserManager::Get()->GetSupervisedUserManager()->GetUserSyncId(
-            active_user->email());
+            active_user->GetAccountId().GetUserEmail());
     profile->GetPrefs()->SetString(prefs::kSupervisedUserId,
                                    supervised_user_sync_id);
   } else if (user_manager::UserManager::Get()->
@@ -993,10 +1001,11 @@ void UserSessionManager::InitProfilePreferences(
 
     // Backfill GAIA ID in user prefs stored in Local State.
     std::string tmp_gaia_id;
-    user_manager::UserManager* user_manager = user_manager::UserManager::Get();
-    if (!user_manager->FindGaiaID(user_context.GetAccountId(), &tmp_gaia_id) &&
+    if (!user_manager::known_user::FindGaiaID(user_context.GetAccountId(),
+                                              &tmp_gaia_id) &&
         !gaia_id.empty()) {
-      user_manager->UpdateGaiaID(user_context.GetAccountId(), gaia_id);
+      user_manager::known_user::UpdateGaiaID(user_context.GetAccountId(),
+                                             gaia_id);
     }
   }
 }
@@ -1029,14 +1038,14 @@ void UserSessionManager::UserProfileInitialized(Profile* profile,
     // authentication cookies set by a SAML IdP on subsequent logins after the
     // first.
     bool transfer_saml_auth_cookies_on_subsequent_login = false;
-    if (has_auth_cookies_ &&
-        g_browser_process->platform_part()
-                ->browser_policy_connector_chromeos()
-                ->GetUserAffiliation(account_id.GetUserEmail()) ==
-            policy::USER_AFFILIATION_MANAGED) {
-      CrosSettings::Get()->GetBoolean(
-          kAccountsPrefTransferSAMLCookies,
-          &transfer_saml_auth_cookies_on_subsequent_login);
+    if (has_auth_cookies_) {
+      const user_manager::User* user =
+          user_manager::UserManager::Get()->FindUser(account_id);
+      if (user->IsAffiliated()) {
+        CrosSettings::Get()->GetBoolean(
+            kAccountsPrefTransferSAMLCookies,
+            &transfer_saml_auth_cookies_on_subsequent_login);
+      }
     }
 
     // Transfers authentication-related data from the profile that was used for
@@ -1102,7 +1111,8 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
   if (user_manager->IsLoggedInAsUserWithGaiaAccount()) {
     if (user_context_.GetAuthFlow() == UserContext::AUTH_FLOW_GAIA_WITH_SAML)
-      user_manager->UpdateUsingSAML(user_context_.GetAccountId(), true);
+      user_manager::known_user::UpdateUsingSAML(user_context_.GetAccountId(),
+                                                true);
     SAMLOfflineSigninLimiter* saml_offline_signin_limiter =
         SAMLOfflineSigninLimiterFactory::GetForProfile(profile);
     if (saml_offline_signin_limiter)
@@ -1129,6 +1139,13 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
     InitializeCerts(profile);
     InitializeCRLSetFetcher(user);
     InitializeEVCertificatesWhitelistComponent(user);
+
+    if (arc::ArcBridgeService::GetEnabled(
+            base::CommandLine::ForCurrentProcess())) {
+      DCHECK(arc::ArcServiceManager::Get());
+      arc::ArcServiceManager::Get()->OnPrimaryUserProfilePrepared(
+          multi_user_util::GetAccountIdFromProfile(profile));
+    }
   }
 
   UpdateEasyUnlockKeys(user_context_);
@@ -1405,7 +1422,7 @@ void UserSessionManager::OnRestoreActiveSessions(
 
   // One profile has been already loaded on browser start.
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
-  DCHECK(user_manager->GetLoggedInUsers().size() == 1);
+  DCHECK_EQ(1u, user_manager->GetLoggedInUsers().size());
   DCHECK(user_manager->GetActiveUser());
   std::string active_user_id = user_manager->GetActiveUser()->email();
 
@@ -1775,8 +1792,7 @@ void UserSessionManager::Shutdown() {
 
 void UserSessionManager::CreateTokenUtilIfMissing() {
   if (!token_handle_util_.get())
-    token_handle_util_.reset(
-        new TokenHandleUtil(user_manager::UserManager::Get()));
+    token_handle_util_.reset(new TokenHandleUtil());
 }
 
 }  // namespace chromeos

@@ -4,6 +4,9 @@
 
 #include "cc/output/gl_renderer.h"
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include <algorithm>
 #include <limits>
 #include <set>
@@ -11,12 +14,14 @@
 #include <vector>
 
 #include "base/logging.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "build/build_config.h"
 #include "base/trace_event/trace_event.h"
+#include "build/build_config.h"
+#include "cc/base/container_util.h"
 #include "cc/base/math_util.h"
 #include "cc/output/compositor_frame.h"
 #include "cc/output/compositor_frame_metadata.h"
@@ -48,7 +53,6 @@
 #include "third_party/skia/include/gpu/GrContext.h"
 #include "third_party/skia/include/gpu/GrTexture.h"
 #include "third_party/skia/include/gpu/GrTextureProvider.h"
-#include "third_party/skia/include/gpu/SkGrTexturePixelRef.h"
 #include "third_party/skia/include/gpu/gl/GrGLInterface.h"
 #include "ui/gfx/geometry/quad_f.h"
 #include "ui/gfx/geometry/rect_conversions.h"
@@ -347,6 +351,8 @@ GLRenderer::GLRenderer(RendererClient* client,
 
   capabilities_.using_partial_swap =
       settings_->partial_swap_enabled && context_caps.gpu.post_sub_buffer;
+  capabilities_.allow_empty_swap = capabilities_.using_partial_swap ||
+                                   context_caps.gpu.commit_overlay_planes;
 
   DCHECK(!context_caps.gpu.iosurface || context_caps.gpu.texture_rectangle);
 
@@ -376,14 +382,13 @@ GLRenderer::GLRenderer(RendererClient* client,
 
 GLRenderer::~GLRenderer() {
   while (!pending_async_read_pixels_.empty()) {
-    PendingAsyncReadPixels* pending_read = pending_async_read_pixels_.back();
+    PendingAsyncReadPixels* pending_read =
+        pending_async_read_pixels_.back().get();
     pending_read->finished_read_pixels_callback.Cancel();
     pending_async_read_pixels_.pop_back();
   }
 
-  previous_swap_overlay_resources_.clear();
-  in_use_overlay_resources_.clear();
-
+  swapped_overlay_resources_.clear();
   CleanupSharedObjects();
 }
 
@@ -393,8 +398,6 @@ const RendererCapabilitiesImpl& GLRenderer::Capabilities() const {
 
 void GLRenderer::DidChangeVisibility() {
   EnforceMemoryPolicy();
-
-  context_support_->SetSurfaceVisible(visible());
 
   // If we are not visible, we ask the context to aggressively free resources.
   context_support_->SetAggressivelyFreeResources(!visible());
@@ -474,12 +477,12 @@ void GLRenderer::BeginDrawingFrame(DrawingFrame* frame) {
       if (pending_sync_queries_.front()->IsPending())
         break;
 
-      available_sync_queries_.push_back(pending_sync_queries_.take_front());
+      available_sync_queries_.push_back(PopFront(&pending_sync_queries_));
     }
 
     current_sync_query_ = available_sync_queries_.empty()
                               ? make_scoped_ptr(new SyncQuery(gl_))
-                              : available_sync_queries_.take_front();
+                              : PopFront(&available_sync_queries_);
 
     read_lock_fence = current_sync_query_->Begin();
   } else {
@@ -619,29 +622,19 @@ static skia::RefPtr<SkImage> ApplyImageFilter(
   backend_texture_description.fConfig = kSkia8888_GrPixelConfig;
   backend_texture_description.fTextureHandle = lock.texture_id();
   backend_texture_description.fOrigin = kBottomLeft_GrSurfaceOrigin;
-  skia::RefPtr<GrTexture> texture = skia::AdoptRef(
-      use_gr_context->context()->textureProvider()->wrapBackendTexture(
-          backend_texture_description));
-  if (!texture) {
+
+  skia::RefPtr<SkImage> srcImage = skia::AdoptRef(SkImage::NewFromTexture(
+      use_gr_context->context(), backend_texture_description));
+  if (!srcImage.get()) {
     TRACE_EVENT_INSTANT0("cc",
                          "ApplyImageFilter wrap background texture failed",
                          TRACE_EVENT_SCOPE_THREAD);
     return skia::RefPtr<SkImage>();
   }
 
-  SkImageInfo src_info =
-      SkImageInfo::MakeN32Premul(source_texture_resource->size().width(),
-                                 source_texture_resource->size().height());
-  // Place the platform texture inside an SkBitmap.
-  SkBitmap source;
-  source.setInfo(src_info);
-  skia::RefPtr<SkGrPixelRef> pixel_ref =
-      skia::AdoptRef(new SkGrPixelRef(src_info, texture.get()));
-  source.setPixelRef(pixel_ref.get());
-
   // Create surface to draw into.
   SkImageInfo dst_info =
-      SkImageInfo::MakeN32Premul(source.width(), source.height());
+      SkImageInfo::MakeN32Premul(srcImage->width(), srcImage->height());
   skia::RefPtr<SkSurface> surface = skia::AdoptRef(SkSurface::NewRenderTarget(
       use_gr_context->context(), SkSurface::kYes_Budgeted, dst_info, 0));
   if (!surface) {
@@ -649,27 +642,29 @@ static skia::RefPtr<SkImage> ApplyImageFilter(
                          TRACE_EVENT_SCOPE_THREAD);
     return skia::RefPtr<SkImage>();
   }
-  skia::RefPtr<SkCanvas> canvas = skia::SharePtr(surface->getCanvas());
-
-  // Draw the source bitmap through the filter to the canvas.
-  SkPaint paint;
-  paint.setImageFilter(filter);
-  canvas->clear(SK_ColorTRANSPARENT);
 
   // The origin of the filter is top-left and the origin of the source is
   // bottom-left, but the orientation is the same, so we must translate the
   // filter so that it renders at the bottom of the texture to avoid
   // misregistration.
-  int y_translate = source.height() - rect.height() - rect.origin().y();
-  canvas->translate(-rect.origin().x(), y_translate);
-  canvas->scale(scale.x(), scale.y());
-  canvas->drawSprite(source, 0, 0, &paint);
+  int y_translate = source_texture_resource->size().height() - rect.height() -
+                    rect.origin().y();
+  SkMatrix localM;
+  localM.setTranslate(-rect.origin().x(), y_translate);
+  localM.preScale(scale.x(), scale.y());
+  skia::RefPtr<SkImageFilter> localIMF =
+      skia::AdoptRef(filter->newWithLocalMatrix(localM));
+
+  SkPaint paint;
+  paint.setImageFilter(localIMF.get());
+  surface->getCanvas()->drawImage(srcImage.get(), 0, 0, &paint);
 
   skia::RefPtr<SkImage> image = skia::AdoptRef(surface->newImageSnapshot());
   if (!image || !image->isTextureBacked()) {
     return skia::RefPtr<SkImage>();
   }
 
+  CHECK(image->isTextureBacked());
   return image;
 }
 
@@ -845,7 +840,7 @@ scoped_ptr<ScopedResource> GLRenderer::GetBackdropTexture(
                                              device_background_texture->id());
     GetFramebufferTexture(lock.texture_id(), RGBA_8888, bounding_rect);
   }
-  return device_background_texture.Pass();
+  return device_background_texture;
 }
 
 skia::RefPtr<SkImage> GLRenderer::ApplyBackgroundFilters(
@@ -2442,7 +2437,7 @@ void GLRenderer::FinishDrawingFrame(DrawingFrame* frame) {
   if (use_sync_query_) {
     DCHECK(current_sync_query_);
     current_sync_query_->End();
-    pending_sync_queries_.push_back(current_sync_query_.Pass());
+    pending_sync_queries_.push_back(std::move(current_sync_query_));
   }
 
   current_framebuffer_lock_ = nullptr;
@@ -2451,6 +2446,7 @@ void GLRenderer::FinishDrawingFrame(DrawingFrame* frame) {
   gl_->Disable(GL_BLEND);
   blend_shadow_ = false;
 
+  ScheduleCALayers(frame);
   ScheduleOverlays(frame);
 }
 
@@ -2494,7 +2490,7 @@ void GLRenderer::CopyCurrentRenderPassToBitmap(
   gfx::Rect copy_rect = frame->current_render_pass->output_rect;
   if (request->has_area())
     copy_rect.Intersect(request->area());
-  GetFramebufferPixelsAsync(frame, copy_rect, request.Pass());
+  GetFramebufferPixelsAsync(frame, copy_rect, std::move(request));
 }
 
 void GLRenderer::ToGLMatrix(float* gl_matrix, const gfx::Transform& transform) {
@@ -2616,22 +2612,33 @@ void GLRenderer::SwapBuffers(const CompositorFrameMetadata& metadata) {
         gfx::Rect(swap_buffer_rect_.x(),
                   FlippedRootFramebuffer() ? flipped_y_pos_of_rect_bottom
                                            : swap_buffer_rect_.y(),
-                  swap_buffer_rect_.width(),
-                  swap_buffer_rect_.height());
+                  swap_buffer_rect_.width(), swap_buffer_rect_.height());
   } else {
-    compositor_frame.gl_frame_data->sub_buffer_rect =
-        gfx::Rect(output_surface_->SurfaceSize());
+    // Expand the swap rect to the full surface unless it's empty, and empty
+    // swap is allowed.
+    if (!swap_buffer_rect_.IsEmpty() || !capabilities_.allow_empty_swap) {
+      swap_buffer_rect_ = gfx::Rect(surface_size);
+    }
+    compositor_frame.gl_frame_data->sub_buffer_rect = swap_buffer_rect_;
   }
   output_surface_->SwapBuffers(&compositor_frame);
 
-  // We always hold onto resources for an extra frame, to make sure we don't
-  // update the buffer while it's being scanned out.
-  previous_swap_overlay_resources_.clear();
-  previous_swap_overlay_resources_.swap(in_use_overlay_resources_);
-
-  in_use_overlay_resources_.swap(pending_overlay_resources_);
-
+  // We always hold onto resources until an extra frame has swapped, to make
+  // sure we don't update the buffer while it's being scanned out.
+  swapped_overlay_resources_.push_back(std::move(pending_overlay_resources_));
+  pending_overlay_resources_.clear();
+  if (!settings_->release_overlay_resources_on_swap_complete &&
+      swapped_overlay_resources_.size() > 2) {
+    swapped_overlay_resources_.pop_front();
+  }
   swap_buffer_rect_ = gfx::Rect();
+}
+
+void GLRenderer::SwapBuffersComplete() {
+  if (settings_->release_overlay_resources_on_swap_complete &&
+      !swapped_overlay_resources_.empty()) {
+    swapped_overlay_resources_.pop_front();
+  }
 }
 
 void GLRenderer::EnforceMemoryPolicy() {
@@ -2711,7 +2718,12 @@ void GLRenderer::GetFramebufferPixelsAsync(
     }
     GetFramebufferTexture(texture_id, RGBA_8888, window_rect);
 
-    gpu::SyncToken sync_token(gl_->InsertSyncPointCHROMIUM());
+    const GLuint64 fence_sync = gl_->InsertFenceSyncCHROMIUM();
+    gl_->ShallowFlushCHROMIUM();
+
+    gpu::SyncToken sync_token;
+    gl_->GenSyncTokenCHROMIUM(fence_sync, sync_token.GetData());
+
     TextureMailbox texture_mailbox(mailbox, sync_token, GL_TEXTURE_2D);
 
     scoped_ptr<SingleReleaseCallback> release_callback;
@@ -2723,17 +2735,17 @@ void GLRenderer::GetFramebufferPixelsAsync(
       gl_->DeleteTextures(1, &texture_id);
     }
 
-    request->SendTextureResult(
-        window_rect.size(), texture_mailbox, release_callback.Pass());
+    request->SendTextureResult(window_rect.size(), texture_mailbox,
+                               std::move(release_callback));
     return;
   }
 
   DCHECK(request->force_bitmap_result());
 
   scoped_ptr<PendingAsyncReadPixels> pending_read(new PendingAsyncReadPixels);
-  pending_read->copy_request = request.Pass();
+  pending_read->copy_request = std::move(request);
   pending_async_read_pixels_.insert(pending_async_read_pixels_.begin(),
-                                    pending_read.Pass());
+                                    std::move(pending_read));
 
   bool do_workaround = NeedsIOSurfaceReadbackWorkaround();
 
@@ -2831,21 +2843,21 @@ void GLRenderer::FinishedReadback(unsigned source_buffer,
     ++iter;
 
   DCHECK(iter != reverse_end);
-  PendingAsyncReadPixels* current_read = *iter;
+  PendingAsyncReadPixels* current_read = iter->get();
 
-  uint8* src_pixels = NULL;
+  uint8_t* src_pixels = NULL;
   scoped_ptr<SkBitmap> bitmap;
 
   if (source_buffer != 0) {
     gl_->BindBuffer(GL_PIXEL_PACK_TRANSFER_BUFFER_CHROMIUM, source_buffer);
-    src_pixels = static_cast<uint8*>(gl_->MapBufferCHROMIUM(
+    src_pixels = static_cast<uint8_t*>(gl_->MapBufferCHROMIUM(
         GL_PIXEL_PACK_TRANSFER_BUFFER_CHROMIUM, GL_READ_ONLY));
 
     if (src_pixels) {
       bitmap.reset(new SkBitmap);
       bitmap->allocN32Pixels(size.width(), size.height());
       scoped_ptr<SkAutoLockPixels> lock(new SkAutoLockPixels(*bitmap));
-      uint8* dest_pixels = static_cast<uint8*>(bitmap->getPixels());
+      uint8_t* dest_pixels = static_cast<uint8_t*>(bitmap->getPixels());
 
       size_t row_bytes = size.width() * 4;
       int num_rows = size.height();
@@ -2873,7 +2885,7 @@ void GLRenderer::FinishedReadback(unsigned source_buffer,
   }
 
   if (bitmap)
-    current_read->copy_request->SendBitmapResult(bitmap.Pass());
+    current_read->copy_request->SendBitmapResult(std::move(bitmap));
 
   // Conversion from reverse iterator to iterator:
   // Iterator |iter.base() - 1| points to the same element with reverse iterator
@@ -2913,8 +2925,8 @@ void GLRenderer::BindFramebufferToOutputSurface(DrawingFrame* frame) {
   output_surface_->BindFramebuffer();
 
   if (output_surface_->HasExternalStencilTest()) {
+    output_surface_->ApplyExternalStencil();
     SetStencilEnabled(true);
-    gl_->StencilFunc(GL_EQUAL, 1, 1);
   } else {
     SetStencilEnabled(false);
   }
@@ -3522,6 +3534,40 @@ void GLRenderer::RestoreFramebuffer(DrawingFrame* frame) {
 
 bool GLRenderer::IsContextLost() {
   return gl_->GetGraphicsResetStatusKHR() != GL_NO_ERROR;
+}
+
+void GLRenderer::ScheduleCALayers(DrawingFrame* frame) {
+  for (const CALayerOverlay& ca_layer_overlay : frame->ca_layer_overlay_list) {
+    unsigned texture_id = 0;
+    if (ca_layer_overlay.contents_resource_id) {
+      pending_overlay_resources_.push_back(
+          make_scoped_ptr(new ResourceProvider::ScopedReadLockGL(
+              resource_provider_, ca_layer_overlay.contents_resource_id)));
+      texture_id = pending_overlay_resources_.back()->texture_id();
+    }
+    GLfloat contents_rect[4] = {
+        ca_layer_overlay.contents_rect.x(), ca_layer_overlay.contents_rect.y(),
+        ca_layer_overlay.contents_rect.width(),
+        ca_layer_overlay.contents_rect.height(),
+    };
+    GLfloat bounds_rect[4] = {
+        ca_layer_overlay.bounds_rect.x(), ca_layer_overlay.bounds_rect.y(),
+        ca_layer_overlay.bounds_rect.width(),
+        ca_layer_overlay.bounds_rect.height(),
+    };
+    GLboolean is_clipped = ca_layer_overlay.is_clipped;
+    GLfloat clip_rect[4] = {ca_layer_overlay.clip_rect.x(),
+                            ca_layer_overlay.clip_rect.y(),
+                            ca_layer_overlay.clip_rect.width(),
+                            ca_layer_overlay.clip_rect.height()};
+    GLint sorting_context_id = ca_layer_overlay.sorting_context_id;
+    GLfloat transform[16];
+    ca_layer_overlay.transform.asColMajorf(transform);
+    gl_->ScheduleCALayerCHROMIUM(
+        texture_id, contents_rect, ca_layer_overlay.opacity,
+        ca_layer_overlay.background_color, ca_layer_overlay.edge_aa_mask,
+        bounds_rect, is_clipped, clip_rect, sorting_context_id, transform);
+  }
 }
 
 void GLRenderer::ScheduleOverlays(DrawingFrame* frame) {

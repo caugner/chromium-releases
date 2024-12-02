@@ -76,7 +76,7 @@ class PossibleAndroidBrowser(possible_browser.PossibleBrowser):
          browser_type)
     self._platform = android_platform
     self._platform_backend = (
-        android_platform._platform_backend)  # pylint: disable=W0212
+        android_platform._platform_backend)  # pylint: disable=protected-access
     self._backend_settings = backend_settings
     self._local_apk = None
 
@@ -165,7 +165,8 @@ def CanPossiblyHandlePath(target_path):
   return os.path.splitext(target_path.lower())[1] == '.apk'
 
 
-def FindAllBrowserTypes(_options):
+def FindAllBrowserTypes(options):
+  del options  # unused
   return CHROME_PACKAGE_NAMES.keys() + ['exact']
 
 

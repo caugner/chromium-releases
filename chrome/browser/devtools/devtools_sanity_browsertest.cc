@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <stddef.h>
+
 #include "base/bind.h"
 #include "base/cancelable_callback.h"
 #include "base/command_line.h"
@@ -13,16 +15,19 @@
 #include "base/prefs/pref_service.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_timeouts.h"
 #include "base/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/devtools/device/tcp_device_provider.h"
 #include "chrome/browser/devtools/devtools_window_testing.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/test_extension_dir.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
@@ -55,6 +60,8 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/common/switches.h"
+#include "extensions/common/value_builder.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
 #include "ui/compositor/compositor_switches.h"
 #include "ui/gl/gl_switches.h"
@@ -69,6 +76,7 @@ using content::RenderViewHost;
 using content::WebContents;
 using content::WorkerService;
 using content::WorkerServiceObserver;
+using extensions::Extension;
 
 namespace {
 
@@ -131,11 +139,27 @@ void SwitchToPanel(DevToolsWindow* window, const char* panel) {
   DispatchOnTestSuite(window, "switchToPanel", panel);
 }
 
+// Version of SwitchToPanel that works with extension-created panels.
+void SwitchToExtensionPanel(DevToolsWindow* window,
+                            const Extension* devtools_extension,
+                            const char* panel_name) {
+  // The full name is the concatenation of the extension URL (stripped of its
+  // trailing '/') and the |panel_name| that was passed to panels.create().
+  std::string prefix = base::TrimString(devtools_extension->url().spec(), "/",
+                                        base::TRIM_TRAILING)
+                           .as_string();
+  SwitchToPanel(window, (prefix + panel_name).c_str());
+}
+
 }  // namespace
 
 class DevToolsSanityTest : public InProcessBrowserTest {
  public:
   DevToolsSanityTest() : window_(NULL) {}
+
+  void SetUpOnMainThread() override {
+    host_resolver()->AddRule("*", "127.0.0.1");
+  }
 
  protected:
   void RunTest(const std::string& test_name, const std::string& test_page) {
@@ -145,12 +169,12 @@ class DevToolsSanityTest : public InProcessBrowserTest {
   }
 
   void LoadTestPage(const std::string& test_page) {
-    GURL url = test_server()->GetURL(test_page);
+    GURL url = spawned_test_server()->GetURL(test_page);
     ui_test_utils::NavigateToURL(browser(), url);
   }
 
   void OpenDevToolsWindow(const std::string& test_page, bool is_docked) {
-    ASSERT_TRUE(test_server()->Start());
+    ASSERT_TRUE(spawned_test_server()->Start());
     LoadTestPage(test_page);
 
     window_ = DevToolsWindowTesting::OpenDevToolsWindowSync(GetInspectedTab(),
@@ -337,8 +361,7 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
     ASSERT_TRUE(LoadExtensionFromPath(path)) << "Failed to load extension.";
   }
 
- private:
-  bool LoadExtensionFromPath(const base::FilePath& path) {
+  const Extension* LoadExtensionFromPath(const base::FilePath& path) {
     ExtensionService* service = extensions::ExtensionSystem::Get(
         browser()->profile())->extension_service();
     extensions::ExtensionRegistry* registry =
@@ -359,9 +382,26 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
     }
     size_t num_after = registry->enabled_extensions().size();
     if (num_after != (num_before + 1))
-      return false;
+      return nullptr;
 
-    return WaitForExtensionViewsToLoad();
+    if (!WaitForExtensionViewsToLoad())
+      return nullptr;
+
+    return GetExtensionByPath(registry->enabled_extensions(), path);
+  }
+
+ private:
+  const Extension* GetExtensionByPath(
+      const extensions::ExtensionSet& extensions,
+      const base::FilePath& path) {
+    base::FilePath extension_path = base::MakeAbsoluteFilePath(path);
+    EXPECT_TRUE(!extension_path.empty());
+    for (const scoped_refptr<const Extension>& extension : extensions) {
+      if (extension->path() == extension_path) {
+        return extension.get();
+      }
+    }
+    return nullptr;
   }
 
   bool WaitForExtensionViewsToLoad() {
@@ -484,8 +524,8 @@ class WorkerDevToolsSanityTest : public InProcessBrowserTest {
   void RunTest(const char* test_name,
                const char* test_page,
                const char* worker_path) {
-    ASSERT_TRUE(test_server()->Start());
-    GURL url = test_server()->GetURL(test_page);
+    ASSERT_TRUE(spawned_test_server()->Start());
+    GURL url = spawned_test_server()->GetURL(test_page);
     ui_test_utils::NavigateToURL(browser(), url);
 
     scoped_refptr<WorkerData> worker_data =
@@ -616,7 +656,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest,
 // Disabled because of http://crbug.com/410327
 IN_PROC_BROWSER_TEST_F(DevToolsUnresponsiveBeforeUnloadTest,
                        DISABLED_TestUndockedDevToolsUnresponsive) {
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(spawned_test_server()->Start());
   LoadTestPage(kDebuggerTestPage);
   DevToolsWindow* devtools_window = OpenDevToolWindowOnWebContents(
       GetInspectedTab(), false);
@@ -639,7 +679,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsUnresponsiveBeforeUnloadTest,
 // @see http://crbug.com/323031
 IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest,
                        TestWorkerWindowClosing) {
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(spawned_test_server()->Start());
   LoadTestPage(kDebuggerTestPage);
   DevToolsWindow* devtools_window = OpenDevToolWindowOnWebContents(
       GetInspectedTab(), false);
@@ -653,7 +693,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest,
 // Disabled because of http://crbug.com/497857
 IN_PROC_BROWSER_TEST_F(DevToolsBeforeUnloadTest,
                        DISABLED_TestDevToolsOnDevTools) {
-  ASSERT_TRUE(test_server()->Start());
+  ASSERT_TRUE(spawned_test_server()->Start());
   LoadTestPage(kDebuggerTestPage);
 
   std::vector<DevToolsWindow*> windows;
@@ -734,6 +774,68 @@ IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest,
                        TestDevToolsExtensionAPI) {
   LoadExtension("devtools_extension");
   RunTest("waitForTestResultsInConsole", std::string());
+}
+
+// Tests a chrome.devtools extension panel that embeds an http:// iframe.
+IN_PROC_BROWSER_TEST_F(DevToolsExtensionTest, DevToolsExtensionWithHttpIframe) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  // Our extension must load an URL from the test server, whose port is only
+  // known at runtime. So, to embed the URL, we must dynamically generate the
+  // extension, rather than loading it from static content.
+  scoped_ptr<extensions::TestExtensionDir> dir(
+      new extensions::TestExtensionDir());
+
+  extensions::DictionaryBuilder manifest;
+  dir->WriteManifest(extensions::DictionaryBuilder()
+                         .Set("name", "Devtools Panel w/ HTTP Iframe")
+                         .Set("version", "1")
+                         .Set("manifest_version", 2)
+                         .Set("devtools_page", "devtools.html")
+                         .ToJSON());
+
+  dir->WriteFile(
+      FILE_PATH_LITERAL("devtools.html"),
+      "<html><head><script src='devtools.js'></script></head></html>");
+
+  dir->WriteFile(
+      FILE_PATH_LITERAL("devtools.js"),
+      "chrome.devtools.panels.create('iframe_panel',\n"
+      "    null,\n"
+      "    'panel.html',\n"
+      "    function(panel) {\n"
+      "      chrome.devtools.inspectedWindow.eval('console.log(\"PASS\")');\n"
+      "    }\n"
+      ");\n");
+
+  GURL http_iframe =
+      embedded_test_server()->GetURL("a.com", "/popup_iframe.html");
+  dir->WriteFile(FILE_PATH_LITERAL("panel.html"),
+                 "<html><body>Extension panel.<iframe src='" +
+                     http_iframe.spec() + "'></iframe>");
+
+  // Install the extension.
+  const Extension* extension = LoadExtensionFromPath(dir->unpacked_path());
+  ASSERT_TRUE(extension);
+
+  // Open a devtools window.
+  OpenDevToolsWindow(kDebuggerTestPage, false);
+
+  // Wait for the panel extension to finish loading -- it'll output 'PASS'
+  // when it's installed. waitForTestResultsInConsole waits until that 'PASS'.
+  RunTestFunction(window_, "waitForTestResultsInConsole");
+
+  // Now that we know the panel is loaded, switch to it. We'll wait until we
+  // see a 'DONE' message sent from popup_iframe.html, indicating that it
+  // loaded successfully.
+  content::DOMMessageQueue message_queue;
+  SwitchToExtensionPanel(window_, extension, "iframe_panel");
+  std::string message;
+  while (true) {
+    ASSERT_TRUE(message_queue.WaitForMessage(&message));
+    if (message == "\"DONE\"")
+      break;
+  }
 }
 
 // Disabled on Windows due to flakiness. http://crbug.com/183649
@@ -838,7 +940,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestSettings) {
 // DevToolsWindow and results in inspected page navigation.
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestDevToolsExternalNavigation) {
   OpenDevToolsWindow(kDebuggerTestPage, true);
-  GURL url = test_server()->GetURL(kNavigateBackTestPage);
+  GURL url = spawned_test_server()->GetURL(kNavigateBackTestPage);
   ui_test_utils::UrlLoadObserver observer(url,
       content::NotificationService::AllSources());
   ASSERT_TRUE(content::ExecuteScript(
@@ -933,11 +1035,10 @@ IN_PROC_BROWSER_TEST_F(WorkerDevToolsSanityTest, InspectSharedWorker) {
   RunTest("testSharedWorker", kSharedWorkerTestPage, kSharedWorkerTestWorker);
 }
 
-// Disabled, crashes under Dr.Memory and ASan, http://crbug.com/432444.
 IN_PROC_BROWSER_TEST_F(WorkerDevToolsSanityTest,
-                       DISABLED_PauseInSharedWorkerInitialization) {
-  ASSERT_TRUE(test_server()->Start());
-  GURL url = test_server()->GetURL(kReloadSharedWorkerTestPage);
+                       PauseInSharedWorkerInitialization) {
+  ASSERT_TRUE(spawned_test_server()->Start());
+  GURL url = spawned_test_server()->GetURL(kReloadSharedWorkerTestPage);
   ui_test_utils::NavigateToURL(browser(), url);
 
   scoped_refptr<WorkerData> worker_data =
@@ -1026,7 +1127,7 @@ class DevToolsPixelOutputTests : public DevToolsSanityTest {
 
 // This test enables switches::kUseGpuInTests which causes false positives
 // with MemorySanitizer.
-#if defined(MEMORY_SANITIZER) || \
+#if defined(MEMORY_SANITIZER) || defined(ADDRESS_SANITIZER) || \
     (defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD))
 #define MAYBE_TestScreenshotRecording DISABLED_TestScreenshotRecording
 #else

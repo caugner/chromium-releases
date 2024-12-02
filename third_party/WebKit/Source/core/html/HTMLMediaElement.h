@@ -33,20 +33,14 @@
 #include "core/html/HTMLElement.h"
 #include "core/html/track/TextTrack.h"
 #include "platform/Supplementable.h"
+#include "platform/audio/AudioSourceProvider.h"
+#include "public/platform/WebAudioSourceProviderClient.h"
 #include "public/platform/WebMediaPlayerClient.h"
 #include "public/platform/WebMimeRegistry.h"
 
-#if ENABLE(WEB_AUDIO)
-#include "platform/audio/AudioSourceProvider.h"
-#include "public/platform/WebAudioSourceProviderClient.h"
-#endif
-
 namespace blink {
 
-#if ENABLE(WEB_AUDIO)
 class AudioSourceProviderClient;
-class WebAudioSourceProvider;
-#endif
 class AudioTrackList;
 class ContentType;
 class CueTimeline;
@@ -63,6 +57,7 @@ class TextTrackList;
 class TimeRanges;
 class URLRegistry;
 class VideoTrackList;
+class WebAudioSourceProvider;
 class WebInbandTextTrack;
 class WebLayer;
 
@@ -77,9 +72,7 @@ public:
     static bool isMediaStreamURL(const String& url);
 
     DECLARE_VIRTUAL_TRACE();
-#if ENABLE(WEB_AUDIO)
     void clearWeakMembers(Visitor*);
-#endif
     WebMediaPlayer* webMediaPlayer() const
     {
         return m_webMediaPlayer.get();
@@ -233,12 +226,10 @@ public:
     // ActiveDOMObject functions.
     bool hasPendingActivity() const final;
 
-#if ENABLE(WEB_AUDIO)
     AudioSourceProviderClient* audioSourceNode() { return m_audioSourceNode; }
     void setAudioSourceNode(AudioSourceProviderClient*);
 
     AudioSourceProvider& audioSourceProvider() { return m_audioSourceProvider; }
-#endif
 
     enum InvalidURLAction { DoNothing, Complain };
     bool isSafeToLoadURL(const KURL&, InvalidURLAction);
@@ -268,7 +259,7 @@ protected:
     void dispose();
 #endif
 
-    void parseAttribute(const QualifiedName&, const AtomicString&) override;
+    void parseAttribute(const QualifiedName&, const AtomicString&, const AtomicString&) override;
     void finishParsingChildren() final;
     bool isURLAttribute(const Attribute&) const override;
     void attach(const AttachContext& = AttachContext()) override;
@@ -356,7 +347,6 @@ private:
     WebMediaPlayer::LoadType loadType() const;
     void scheduleNextSourceChild();
     void loadNextSourceChild();
-    void userCancelledLoad();
     void clearMediaPlayer(int flags);
     void clearMediaPlayerAndAudioSourceProviderClientWithoutLocking();
     bool havePotentialSourceChild();
@@ -382,6 +372,9 @@ private:
 
     // This does not check user gesture restrictions.
     void playInternal();
+
+    // This does not change the buffering strategy.
+    void pauseInternal();
 
     // If we are about to enter a paused state, call this to record
     // autoplay metrics.  If we were already in a stopped state, then
@@ -453,10 +446,10 @@ private:
     // TODO(liberato): remove once autoplay gesture override experiment concludes.
     void triggerAutoplayViewportCheckForTesting();
 
-    Timer<HTMLMediaElement> m_loadTimer;
-    Timer<HTMLMediaElement> m_progressEventTimer;
-    Timer<HTMLMediaElement> m_playbackProgressTimer;
-    Timer<HTMLMediaElement> m_audioTracksTimer;
+    UnthrottledTimer<HTMLMediaElement> m_loadTimer;
+    UnthrottledTimer<HTMLMediaElement> m_progressEventTimer;
+    UnthrottledTimer<HTMLMediaElement> m_playbackProgressTimer;
+    UnthrottledTimer<HTMLMediaElement> m_audioTracksTimer;
     PersistentWillBeMember<TimeRanges> m_playedTimeRanges;
     OwnPtrWillBeMember<GenericEventQueue> m_asyncEventQueue;
 
@@ -564,7 +557,6 @@ private:
 
     OwnPtrWillBeMember<CueTimeline> m_cueTimeline;
 
-#if ENABLE(WEB_AUDIO)
     // This is a weak reference, since m_audioSourceNode holds a reference to us.
     // FIXME: Oilpan: Consider making this a strongly traced pointer with oilpan where strong cycles are not a problem.
     GC_PLUGIN_IGNORE("http://crbug.com/404577")
@@ -618,11 +610,11 @@ private:
     };
 
     AudioSourceProviderImpl m_audioSourceProvider;
-#endif
 
     friend class Internals;
     friend class TrackDisplayUpdateScope;
     friend class AutoplayExperimentHelper;
+    friend class MediaControlsTest;
 
     AutoplayExperimentHelper m_autoplayHelper;
 

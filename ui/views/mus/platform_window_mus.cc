@@ -4,6 +4,7 @@
 
 #include "ui/views/mus/platform_window_mus.h"
 
+#include "build/build_config.h"
 #include "components/mus/public/cpp/property_type_converters.h"
 #include "components/mus/public/cpp/window_property.h"
 #include "components/mus/public/interfaces/window_manager.mojom.h"
@@ -14,33 +15,59 @@
 namespace views {
 
 namespace {
-void WindowManagerCallback(mus::mojom::WindowManagerErrorCode error_code) {}
+static uint32_t accelerated_widget_count = 1;
+
 }  // namespace
 
 PlatformWindowMus::PlatformWindowMus(ui::PlatformWindowDelegate* delegate,
                                      mus::Window* mus_window)
     : delegate_(delegate),
       mus_window_(mus_window),
-      show_state_(mus::mojom::SHOW_STATE_RESTORED) {
+      show_state_(mus::mojom::SHOW_STATE_RESTORED),
+      last_cursor_(mus::mojom::CURSOR_NULL),
+      has_capture_(false),
+      mus_window_destroyed_(false) {
   DCHECK(delegate_);
   DCHECK(mus_window_);
   mus_window_->AddObserver(this);
+  mus_window_->set_input_event_handler(this);
 
+  // We need accelerated widget numbers to be different for each
+  // window and fit in the smallest sizeof(AcceleratedWidget) uint32_t
+  // has this property.
+#if defined(OS_WIN) || defined(OS_ANDROID)
   delegate_->OnAcceleratedWidgetAvailable(
-      gfx::kNullAcceleratedWidget,
+      reinterpret_cast<gfx::AcceleratedWidget>(accelerated_widget_count++),
       mus_window_->viewport_metrics().device_pixel_ratio);
+#else
+  delegate_->OnAcceleratedWidgetAvailable(
+      static_cast<gfx::AcceleratedWidget>(accelerated_widget_count++),
+      mus_window_->viewport_metrics().device_pixel_ratio);
+#endif
 }
 
 PlatformWindowMus::~PlatformWindowMus() {
   if (!mus_window_)
     return;
   mus_window_->RemoveObserver(this);
-  mus_window_->Destroy();
+  mus_window_->set_input_event_handler(nullptr);
+  if (!mus_window_destroyed_)
+    mus_window_->Destroy();
 }
-
 
 void PlatformWindowMus::Activate() {
   mus_window_->SetFocus();
+}
+
+void PlatformWindowMus::SetCursorById(mus::mojom::Cursor cursor) {
+  if (last_cursor_ != cursor) {
+    // The ui::PlatformWindow interface uses ui::PlatformCursor at this level,
+    // instead of ui::Cursor. All of the cursor abstractions in ui right now are
+    // sort of leaky; despite being nominally cross platform, they all drop down
+    // to platform types almost immediately, which makes them unusable as
+    // transport types.
+    mus_window_->SetPredefinedCursor(cursor);
+  }
 }
 
 void PlatformWindowMus::Show() {
@@ -68,10 +95,14 @@ void PlatformWindowMus::SetTitle(const base::string16& title) {
 }
 
 void PlatformWindowMus::SetCapture() {
+  // TODO(sky): this is wrong, need real capture api.
+  has_capture_ = true;
   NOTIMPLEMENTED();
 }
 
 void PlatformWindowMus::ReleaseCapture() {
+  // TODO(sky): this is wrong, need real capture api.
+  has_capture_ = false;
   NOTIMPLEMENTED();
 }
 
@@ -108,14 +139,22 @@ ui::PlatformImeController* PlatformWindowMus::GetPlatformImeController() {
 }
 
 void PlatformWindowMus::SetShowState(mus::mojom::ShowState show_state) {
-  WindowManagerConnection::Get()->window_manager()->SetShowState(
-      mus_window_->id(), show_state, base::Bind(&WindowManagerCallback));
+  mus_window_->SetSharedProperty<int32_t>(
+      mus::mojom::WindowManager::kShowState_Property, show_state);
 }
 
 void PlatformWindowMus::OnWindowDestroyed(mus::Window* window) {
   DCHECK_EQ(mus_window_, window);
+  mus_window_destroyed_ = true;
+#ifndef NDEBUG
+  weak_factory_.reset(new base::WeakPtrFactory<PlatformWindowMus>(this));
+  base::WeakPtr<PlatformWindowMus> weak_ptr = weak_factory_->GetWeakPtr();
+#endif
   delegate_->OnClosed();
-  mus_window_ = nullptr;
+  // |this| has been destroyed at this point.
+#ifndef NDEBUG
+  DCHECK(!weak_ptr);
+#endif
 }
 
 void PlatformWindowMus::OnWindowBoundsChanged(mus::Window* window,
@@ -132,10 +171,11 @@ void PlatformWindowMus::OnWindowFocusChanged(mus::Window* gained_focus,
     delegate_->OnActivationChanged(false);
 }
 
-void PlatformWindowMus::OnWindowInputEvent(mus::Window* view,
-                                           const mus::mojom::EventPtr& event) {
-  scoped_ptr<ui::Event> ui_event(event.To<scoped_ptr<ui::Event>>());
-  delegate_->DispatchEvent(ui_event.get());
+void PlatformWindowMus::OnWindowPredefinedCursorChanged(
+    mus::Window* window,
+    mus::mojom::Cursor cursor) {
+  DCHECK_EQ(window, mus_window_);
+  last_cursor_ = cursor;
 }
 
 void PlatformWindowMus::OnWindowSharedPropertyChanged(
@@ -169,6 +209,23 @@ void PlatformWindowMus::OnWindowSharedPropertyChanged(
       break;
   }
   delegate_->OnWindowStateChanged(state);
+}
+
+void PlatformWindowMus::OnRequestClose(mus::Window* window) {
+  delegate_->OnCloseRequest();
+}
+
+void PlatformWindowMus::OnWindowInputEvent(
+    mus::Window* view,
+    mus::mojom::EventPtr event,
+    scoped_ptr<base::Closure>* ack_callback) {
+  // It's possible dispatching the event will spin a nested message loop. Ack
+  // the callback now, otherwise we appear unresponsive for the life of the
+  // nested message loop.
+  (*ack_callback)->Run();
+  ack_callback->reset();
+  scoped_ptr<ui::Event> ui_event(event.To<scoped_ptr<ui::Event>>());
+  delegate_->DispatchEvent(ui_event.get());
 }
 
 }  // namespace views

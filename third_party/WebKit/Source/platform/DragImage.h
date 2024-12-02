@@ -32,6 +32,7 @@
 #include "platform/graphics/ImageOrientation.h"
 #include "platform/graphics/paint/DisplayItemClient.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "wtf/Allocator.h"
 #include "wtf/Forward.h"
 
 class SkImage;
@@ -43,6 +44,8 @@ class Image;
 class KURL;
 
 class PLATFORM_EXPORT DragImage {
+    USING_FAST_MALLOC(DragImage);
+    WTF_MAKE_NONCOPYABLE(DragImage);
 public:
     static PassOwnPtr<DragImage> create(Image*,
         RespectImageOrientationEnum = DoNotRespectImageOrientation, float deviceScaleFactor = 1,
@@ -64,8 +67,6 @@ public:
 
 private:
     DragImage(const SkBitmap&, float resolutionScale, InterpolationQuality);
-
-    DisplayItemClient displayItemClient() const { return toDisplayItemClient(this); }
 
     SkBitmap m_bitmap;
     float m_resolutionScale;

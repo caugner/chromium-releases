@@ -18,6 +18,7 @@
 #include "ui/gfx/text_constants.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/strings/grit/ui_strings.h"
+#include "ui/views/animation/ink_drop_delegate.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/mouse_constants.h"
@@ -125,6 +126,8 @@ bool MenuButton::Activate() {
     // We don't set our state here. It's handled in the MenuController code or
     // by our click listener.
 
+    if (ink_drop_delegate())
+      ink_drop_delegate()->OnAction(InkDropState::QUICK_ACTION);
     listener_->OnMenuButtonClicked(this, menu_position);
 
     if (destroyed) {
@@ -179,6 +182,8 @@ bool MenuButton::OnMousePressed(const ui::MouseEvent& event) {
     TimeDelta delta = TimeTicks::Now() - menu_closed_time_;
     if (delta.InMilliseconds() > kMinimumMsBetweenButtonClicks)
       return Activate();
+    if (ink_drop_delegate())
+      ink_drop_delegate()->OnAction(InkDropState::ACTION_PENDING);
   }
   return true;
 }
@@ -188,6 +193,8 @@ void MenuButton::OnMouseReleased(const ui::MouseEvent& event) {
       HitTestPoint(event.location()) && !InDrag()) {
     Activate();
   } else {
+    if (ink_drop_delegate())
+      ink_drop_delegate()->OnAction(InkDropState::HIDDEN);
     LabelButton::OnMouseReleased(event);
   }
 }
@@ -262,6 +269,13 @@ bool MenuButton::OnKeyReleased(const ui::KeyEvent& event) {
   // you press space and clicks it when you release space.  For a MenuButton
   // we always activate the menu on key press.
   return false;
+}
+
+bool MenuButton::AcceleratorPressed(const ui::Accelerator& accelerator) {
+  // CustomButton::AcceleratorPressed ends up in NotifyClick, which doesn't work
+  // for menu buttons.
+  Activate();
+  return true;
 }
 
 void MenuButton::GetAccessibleState(ui::AXViewState* state) {

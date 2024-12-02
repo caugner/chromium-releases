@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "config.h"
 #include "core/paint/PaintPropertyTreeBuilder.h"
 
 #include "core/frame/FrameView.h"
 #include "core/layout/LayoutView.h"
 #include "core/paint/ObjectPaintProperties.h"
 #include "core/paint/PaintLayer.h"
+#include "platform/graphics/paint/ClipPaintPropertyNode.h"
 #include "platform/graphics/paint/TransformPaintPropertyNode.h"
 #include "platform/transforms/TransformationMatrix.h"
 
@@ -21,8 +21,11 @@ namespace blink {
 struct PaintPropertyTreeBuilderContext {
     PaintPropertyTreeBuilderContext()
         : currentTransform(nullptr)
+        , currentClip(nullptr)
         , transformForOutOfFlowPositioned(nullptr)
+        , clipForOutOfFlowPositioned(nullptr)
         , transformForFixedPositioned(nullptr)
+        , clipForFixedPositioned(nullptr)
         , currentEffect(nullptr) { }
 
     // The combination of a transform and paint offset describes a linear space.
@@ -31,18 +34,30 @@ struct PaintPropertyTreeBuilderContext {
     // the space with its own layout location.
     TransformPaintPropertyNode* currentTransform;
     LayoutPoint paintOffset;
+    // The clip node describes the accumulated raster clip for the current subtree.
+    // Note that the computed raster region in canvas space for a clip node is independent from
+    // the transform and paint offset above. Also the actual raster region may be affected
+    // by layerization and occlusion tracking.
+    ClipPaintPropertyNode* currentClip;
 
     // Separate context for out-of-flow positioned and fixed positioned elements are needed
-    // because they don't use DOM parent as their positioning parent (i.e. containing block).
+    // because they don't use DOM parent as their containing block.
     // These additional contexts normally pass through untouched, and are only copied from
-    // the main context when the current element serves as the positioning parent of corresponding
+    // the main context when the current element serves as the containing block of corresponding
     // positioned descendants.
+    // Overflow clips are also inherited by containing block tree instead of DOM tree, thus they
+    // are included in the additional context too.
     TransformPaintPropertyNode* transformForOutOfFlowPositioned;
     LayoutPoint paintOffsetForOutOfFlowPositioned;
+    ClipPaintPropertyNode* clipForOutOfFlowPositioned;
 
     TransformPaintPropertyNode* transformForFixedPositioned;
     LayoutPoint paintOffsetForFixedPositioned;
+    ClipPaintPropertyNode* clipForFixedPositioned;
 
+    // The effect hierarchy is applied by the stacking context tree. It is guaranteed that every
+    // DOM descendant is also a stacking context descendant. Therefore, we don't need extra
+    // bookkeeping for effect nodes and can generate the effect tree from a DOM-order traversal.
     EffectPaintPropertyNode* currentEffect;
 };
 
@@ -64,6 +79,10 @@ void PaintPropertyTreeBuilder::walk(FrameView& frameView, const PaintPropertyTre
     localContext.transformForFixedPositioned = newTransformNodeForPreTranslation.get();
     localContext.paintOffsetForFixedPositioned = LayoutPoint();
 
+    FloatRoundedRect contentClip(IntRect(IntPoint(), frameView.visibleContentSize()));
+    RefPtr<ClipPaintPropertyNode> newClipNodeForContentClip = ClipPaintPropertyNode::create(newTransformNodeForPreTranslation.get(), contentClip, localContext.currentClip);
+    localContext.currentClip = localContext.clipForOutOfFlowPositioned = localContext.clipForFixedPositioned = newClipNodeForContentClip.get();
+
     // This is going away in favor of Settings::rootLayerScrolls.
     DoubleSize scrollOffset = frameView.scrollOffsetDouble();
     TransformationMatrix frameScroll;
@@ -74,48 +93,68 @@ void PaintPropertyTreeBuilder::walk(FrameView& frameView, const PaintPropertyTre
 
     frameView.setPreTranslation(newTransformNodeForPreTranslation.release());
     frameView.setScrollTranslation(newTransformNodeForScrollTranslation.release());
+    frameView.setContentClip(newClipNodeForContentClip.release());
 
     if (LayoutView* layoutView = frameView.layoutView())
         walk(*layoutView, localContext);
+
+    for (Frame* child = frameView.frame().tree().firstChild(); child; child = child->tree().nextSibling()) {
+        if (!child->isLocalFrame())
+            continue;
+        if (FrameView* childView = toLocalFrame(child)->view())
+            walk(*childView, localContext);
+    }
 }
 
-static void deriveBorderBoxFromContainerContext(const LayoutBoxModelObject& object, PaintPropertyTreeBuilderContext& context)
+static void deriveBorderBoxFromContainerContext(const LayoutObject& object, PaintPropertyTreeBuilderContext& context)
 {
+    if (!object.isBoxModelObject())
+        return;
+
+    const LayoutBoxModelObject& boxModelObject = toLayoutBoxModelObject(object);
+
     // TODO(trchen): There is some insanity going on with tables. Double check results.
     switch (object.styleRef().position()) {
     case StaticPosition:
         break;
     case RelativePosition:
-        context.paintOffset += object.offsetForInFlowPosition();
+        context.paintOffset += boxModelObject.offsetForInFlowPosition();
         break;
     case AbsolutePosition:
         context.currentTransform = context.transformForOutOfFlowPositioned;
         context.paintOffset = context.paintOffsetForOutOfFlowPositioned;
+        context.currentClip = context.clipForOutOfFlowPositioned;
         break;
     case StickyPosition:
-        context.paintOffset += object.offsetForInFlowPosition();
+        context.paintOffset += boxModelObject.offsetForInFlowPosition();
         break;
     case FixedPosition:
         context.currentTransform = context.transformForFixedPositioned;
         context.paintOffset = context.paintOffsetForFixedPositioned;
+        context.currentClip = context.clipForFixedPositioned;
         break;
     default:
         ASSERT_NOT_REACHED();
     }
-    if (object.isBox())
-        context.paintOffset += toLayoutBox(object).locationOffset();
+    if (boxModelObject.isBox())
+        context.paintOffset += toLayoutBox(boxModelObject).locationOffset();
 }
 
-static PassRefPtr<TransformPaintPropertyNode> createPaintOffsetTranslationIfNeeded(const LayoutBoxModelObject& object, PaintPropertyTreeBuilderContext& context)
+static PassRefPtr<TransformPaintPropertyNode> createPaintOffsetTranslationIfNeeded(const LayoutObject& object, PaintPropertyTreeBuilderContext& context)
 {
-    // TODO(trchen): Eliminate PaintLayer dependency.
-    bool shouldCreatePaintOffsetTranslationNode = object.layer() && object.layer()->paintsWithTransform(GlobalPaintNormalPhase);
+    bool shouldCreatePaintOffsetTranslationNode = false;
+    if (object.isSVGRoot()) {
+        // SVG doesn't use paint offset internally so emit a paint offset at the html->svg boundary.
+        shouldCreatePaintOffsetTranslationNode = true;
+    } else if (object.isBoxModelObject()) {
+        // TODO(trchen): Eliminate PaintLayer dependency.
+        PaintLayer* layer = toLayoutBoxModelObject(object).layer();
+        shouldCreatePaintOffsetTranslationNode = layer && layer->paintsWithTransform(GlobalPaintNormalPhase);
+    }
 
     if (context.paintOffset == LayoutPoint() || !shouldCreatePaintOffsetTranslationNode)
         return nullptr;
 
-    TransformationMatrix matrix;
-    matrix.translate(context.paintOffset.x(), context.paintOffset.y());
     RefPtr<TransformPaintPropertyNode> newTransformNodeForPaintOffsetTranslation = TransformPaintPropertyNode::create(
         TransformationMatrix().translate(context.paintOffset.x(), context.paintOffset.y()),
         FloatPoint3D(), context.currentTransform);
@@ -134,8 +173,20 @@ static FloatPoint3D transformOrigin(const LayoutBox& box)
         style.transformOriginZ());
 }
 
-static PassRefPtr<TransformPaintPropertyNode> createTransformIfNeeded(const LayoutBoxModelObject& object, PaintPropertyTreeBuilderContext& context)
+static PassRefPtr<TransformPaintPropertyNode> createTransformIfNeeded(const LayoutObject& object, PaintPropertyTreeBuilderContext& context)
 {
+    if (object.isSVG() && !object.isSVGRoot()) {
+        const AffineTransform& transform = object.localToParentTransform();
+        if (transform.isIdentity())
+            return nullptr;
+
+        // SVG's transform origin is baked into the localToParentTransform.
+        RefPtr<TransformPaintPropertyNode> newTransformNodeForTransform = TransformPaintPropertyNode::create(
+            transform, FloatPoint3D(0, 0, 0), context.currentTransform);
+        context.currentTransform = newTransformNodeForTransform.get();
+        return newTransformNodeForTransform.release();
+    }
+
     const ComputedStyle& style = object.styleRef();
     if (!object.isBox() || !style.hasTransform())
         return nullptr;
@@ -151,14 +202,49 @@ static PassRefPtr<TransformPaintPropertyNode> createTransformIfNeeded(const Layo
     return newTransformNodeForTransform.release();
 }
 
-static PassRefPtr<EffectPaintPropertyNode> createEffectIfNeeded(const LayoutBoxModelObject& object, PaintPropertyTreeBuilderContext& context)
+static PassRefPtr<EffectPaintPropertyNode> createEffectIfNeeded(const LayoutObject& object, PaintPropertyTreeBuilderContext& context)
 {
     const ComputedStyle& style = object.styleRef();
-    if (!object.isBox() || !style.hasOpacity())
+    if (!style.hasOpacity())
         return nullptr;
     RefPtr<EffectPaintPropertyNode> newEffectNode = EffectPaintPropertyNode::create(style.opacity(), context.currentEffect);
     context.currentEffect = newEffectNode.get();
     return newEffectNode.release();
+}
+
+static PassRefPtr<ClipPaintPropertyNode> createOverflowClipIfNeeded(const LayoutObject& object, PaintPropertyTreeBuilderContext& context)
+{
+    if (!object.isBox())
+        return nullptr;
+    const LayoutBox& box = toLayoutBox(object);
+
+    // The <input> elements can't have contents thus CSS overflow property doesn't apply.
+    // However for layout purposes we do generate child layout objects for them, e.g. button label.
+    // We should clip the overflow from those children. This is called control clip and we
+    // technically treat them like overflow clip.
+    LayoutRect clipRect;
+    if (box.hasControlClip())
+        clipRect = box.controlClipRect(context.paintOffset);
+    else if (box.hasOverflowClip())
+        clipRect = box.overflowClipRect(context.paintOffset);
+    else
+        return nullptr;
+
+    RefPtr<ClipPaintPropertyNode> newClipNodeForBorderRadiusClip;
+    const ComputedStyle& style = box.styleRef();
+    if (style.hasBorderRadius()) {
+        newClipNodeForBorderRadiusClip = ClipPaintPropertyNode::create(
+            context.currentTransform,
+            style.getRoundedInnerBorderFor(LayoutRect(context.paintOffset, box.size())),
+            context.currentClip);
+    }
+
+    RefPtr<ClipPaintPropertyNode> newClipNodeForOverflowClip = ClipPaintPropertyNode::create(
+        context.currentTransform,
+        FloatRoundedRect(FloatRect(clipRect)),
+        newClipNodeForBorderRadiusClip ? newClipNodeForBorderRadiusClip.release() : context.currentClip);
+    context.currentClip = newClipNodeForOverflowClip.get();
+    return newClipNodeForOverflowClip.release();
 }
 
 static FloatPoint perspectiveOrigin(const LayoutBox& box)
@@ -170,7 +256,7 @@ static FloatPoint perspectiveOrigin(const LayoutBox& box)
         floatValueForLength(style.perspectiveOriginY(), borderBoxSize.height()));
 }
 
-static PassRefPtr<TransformPaintPropertyNode> createPerspectiveIfNeeded(const LayoutBoxModelObject& object, PaintPropertyTreeBuilderContext& context)
+static PassRefPtr<TransformPaintPropertyNode> createPerspectiveIfNeeded(const LayoutObject& object, PaintPropertyTreeBuilderContext& context)
 {
     const ComputedStyle& style = object.styleRef();
     if (!object.isBox() || !style.hasPerspective())
@@ -183,12 +269,12 @@ static PassRefPtr<TransformPaintPropertyNode> createPerspectiveIfNeeded(const La
     return newTransformNodeForPerspective.release();
 }
 
-static PassRefPtr<TransformPaintPropertyNode> createScrollTranslationIfNeeded(const LayoutBoxModelObject& object, PaintPropertyTreeBuilderContext& context)
+static PassRefPtr<TransformPaintPropertyNode> createScrollTranslationIfNeeded(const LayoutObject& object, PaintPropertyTreeBuilderContext& context)
 {
-    if (!object.hasOverflowClip())
+    if (!object.isBoxModelObject() || !object.hasOverflowClip())
         return nullptr;
 
-    PaintLayer* layer = object.layer();
+    PaintLayer* layer = toLayoutBoxModelObject(object).layer();
     ASSERT(layer);
     DoubleSize scrollOffset = layer->scrollableArea()->scrollOffset();
     if (scrollOffset.isZero() && !layer->scrollsOverflow())
@@ -201,39 +287,47 @@ static PassRefPtr<TransformPaintPropertyNode> createScrollTranslationIfNeeded(co
     return newTransformNodeForScrollTranslation.release();
 }
 
-static void updateOutOfFlowContext(const LayoutBoxModelObject& object, PaintPropertyTreeBuilderContext& context)
+static void updateOutOfFlowContext(const LayoutObject& object, bool createdNewTransform, PaintPropertyTreeBuilderContext& context)
 {
-    const ComputedStyle& style = object.styleRef();
-    bool hasTransform = object.isBox() && style.hasTransform();
-    if (style.position() != StaticPosition || hasTransform) {
+    // At the html->svg boundary (see: createPaintOffsetTranslationIfNeeded) the currentTransform is
+    // up-to-date for all children of the svg root element. Additionally, inside SVG, all positioning
+    // uses transforms. Therefore, we only need to check createdNewTransform and isSVGRoot() to
+    // ensure out-of-flow and fixed positioning is correct at the svg->html boundary.
+
+    if (object.isPositioned() || createdNewTransform || object.isSVGRoot()) {
         context.transformForOutOfFlowPositioned = context.currentTransform;
         context.paintOffsetForOutOfFlowPositioned = context.paintOffset;
+        context.clipForOutOfFlowPositioned = context.currentClip;
     }
-    if (hasTransform) {
+
+    if (createdNewTransform || object.isSVGRoot()) {
         context.transformForFixedPositioned = context.currentTransform;
         context.paintOffsetForFixedPositioned = context.paintOffset;
+        context.clipForFixedPositioned = context.currentClip;
     }
 }
 
-void PaintPropertyTreeBuilder::walk(LayoutBoxModelObject& object, const PaintPropertyTreeBuilderContext& context)
+void PaintPropertyTreeBuilder::walk(LayoutObject& object, const PaintPropertyTreeBuilderContext& context)
 {
-    ASSERT(object.isBox() != object.isLayoutInline()); // Either or.
-
     PaintPropertyTreeBuilderContext localContext(context);
 
     deriveBorderBoxFromContainerContext(object, localContext);
     RefPtr<TransformPaintPropertyNode> newTransformNodeForPaintOffsetTranslation = createPaintOffsetTranslationIfNeeded(object, localContext);
     RefPtr<TransformPaintPropertyNode> newTransformNodeForTransform = createTransformIfNeeded(object, localContext);
     RefPtr<EffectPaintPropertyNode> newEffectNode = createEffectIfNeeded(object, localContext);
+    RefPtr<ClipPaintPropertyNode> newClipNodeForOverflowClip = createOverflowClipIfNeeded(object, localContext);
+    // TODO(trchen): Insert flattening transform here, as specified by
+    // http://www.w3.org/TR/css3-transforms/#transform-style-property
     RefPtr<TransformPaintPropertyNode> newTransformNodeForPerspective = createPerspectiveIfNeeded(object, localContext);
     RefPtr<TransformPaintPropertyNode> newTransformNodeForScrollTranslation = createScrollTranslationIfNeeded(object, localContext);
-    updateOutOfFlowContext(object, localContext);
+    updateOutOfFlowContext(object, newTransformNodeForTransform, localContext);
 
-    if (newTransformNodeForPaintOffsetTranslation || newTransformNodeForTransform || newEffectNode || newTransformNodeForPerspective || newTransformNodeForScrollTranslation) {
+    if (newTransformNodeForPaintOffsetTranslation || newTransformNodeForTransform || newEffectNode || newClipNodeForOverflowClip || newTransformNodeForPerspective || newTransformNodeForScrollTranslation) {
         OwnPtr<ObjectPaintProperties> updatedPaintProperties = ObjectPaintProperties::create(
             newTransformNodeForPaintOffsetTranslation.release(),
             newTransformNodeForTransform.release(),
             newEffectNode.release(),
+            newClipNodeForOverflowClip.release(),
             newTransformNodeForPerspective.release(),
             newTransformNodeForScrollTranslation.release());
         object.setObjectPaintProperties(updatedPaintProperties.release());
@@ -241,17 +335,9 @@ void PaintPropertyTreeBuilder::walk(LayoutBoxModelObject& object, const PaintPro
         object.clearObjectPaintProperties();
     }
 
-    // TODO(trchen): Walk subframes for LayoutFrame.
-
-    // TODO(trchen): Implement SVG walk.
-    if (object.isSVGRoot()) {
-        return;
-    }
-
     for (LayoutObject* child = object.slowFirstChild(); child; child = child->nextSibling()) {
-        if (child->isText())
-            continue;
-        walk(toLayoutBoxModelObject(*child), localContext);
+        if (child->isBoxModelObject() || child->isSVG())
+            walk(*child, localContext);
     }
 }
 

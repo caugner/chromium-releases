@@ -197,7 +197,7 @@
       "sequence": {
         "cvoxModifier": true,
         "keys": {
-          "keyCode": [67]
+          "keyCode": [76]
         }
       }
     },
@@ -314,6 +314,16 @@
         "keys": {
           "keyCode": [65, 65]
         }
+      }
+    },
+    {
+      "command": "toggleStickyMode",
+      "sequence": {
+        "cvoxModifier": true,
+        "keys": {
+          "keyCode": [91]
+        },
+        "doubleTap": true
       }
     }
   ]
