@@ -215,11 +215,13 @@ base::Value::Dict CreateCapabilities(Session* session,
       "%s.%sVersion", base::ToLowerASCII(kBrowserShortName).c_str(),
       base::ToLowerASCII(kChromeDriverProductShortName).c_str());
   caps.SetByDottedPath(chrome_driver_version_key, kChromeDriverVersion);
-  const std::string debugger_address_key =
-      base::StringPrintf("%s.debuggerAddress", kChromeDriverOptionsKeyPrefixed);
-  caps.SetByDottedPath(debugger_address_key, session->chrome->GetBrowserInfo()
-                                                 ->debugger_endpoint.Address()
-                                                 .ToString());
+  if (session->chrome->GetBrowserInfo()->debugger_endpoint.IsValid()) {
+    const std::string debugger_address_key = base::StringPrintf(
+        "%s.debuggerAddress", kChromeDriverOptionsKeyPrefixed);
+    caps.SetByDottedPath(debugger_address_key, session->chrome->GetBrowserInfo()
+                                                   ->debugger_endpoint.Address()
+                                                   .ToString());
+  }
   ChromeDesktopImpl* desktop = nullptr;
   Status status = session->chrome->GetAsDesktop(&desktop);
   if (status.IsOk()) {
@@ -258,31 +260,14 @@ base::Value::Dict CreateCapabilities(Session* session,
   return caps;
 }
 
-Status CheckSessionCreated(Session* session) {
-  WebView* web_view = nullptr;
-  Status status = session->GetTargetWindow(&web_view);
-  if (status.IsError())
-    return Status(kSessionNotCreated, status);
-
-  base::Value::List args;
-  std::unique_ptr<base::Value> result(new base::Value(0));
-  status = web_view->CallFunction(session->GetCurrentFrameId(),
-                                  "function(s) { return 1; }", args, &result);
-  if (status.IsError())
-    return Status(kSessionNotCreated, status);
-
-  if (!result->is_int() || result->GetInt() != 1) {
-    return Status(kSessionNotCreated,
-                  "unexpected response from browser");
-  }
-
-  return Status(kOk);
-}
-
 Status InitSessionHelper(const InitSessionParams& bound_params,
                          Session* session,
                          const base::Value::Dict& params,
                          std::unique_ptr<base::Value>* value) {
+  if (!bound_params.device_manager) {
+    return Status{kSessionNotCreated, "device manager cannot be null"};
+  }
+
   const base::Value::Dict* desired_caps;
   base::Value::Dict merged_caps;
 
@@ -324,9 +309,9 @@ Status InitSessionHelper(const InitSessionParams& bound_params,
 
   status =
       LaunchChrome(bound_params.url_loader_factory, bound_params.socket_factory,
-                   bound_params.device_manager, capabilities,
-                   std::move(devtools_event_listeners), &session->chrome,
-                   session->w3c_compliant);
+                   *bound_params.device_manager, capabilities,
+                   std::move(devtools_event_listeners), session->w3c_compliant,
+                   session->chrome);
 
   if (status.IsError())
     return status;
@@ -357,10 +342,6 @@ Status InitSessionHelper(const InitSessionParams& bound_params,
   } else {
     *value = std::make_unique<base::Value>(session->capabilities->Clone());
   }
-
-  status = CheckSessionCreated(session);
-  if (status.IsError())
-    return status;
 
   if (session->webSocketUrl) {
     WebView* web_view = nullptr;
@@ -475,8 +456,9 @@ Status ConfigureSession(Session* session,
 
 Status ConfigureHeadlessSession(Session* session,
                                 const Capabilities& capabilities) {
-  if (!session->chrome->GetBrowserInfo()->is_headless)
+  if (!session->chrome->GetBrowserInfo()->is_headless_shell) {
     return Status(kOk);
+  }
 
   const std::string* download_directory = nullptr;
   if (capabilities.prefs) {

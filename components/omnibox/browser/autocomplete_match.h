@@ -520,6 +520,9 @@ struct AutocompleteMatch {
   // providers.
   bool IsOnDeviceSearchSuggestion() const;
 
+  // Returns true if the match is eligible to be re-scored by ML Url scoring.
+  bool IsUrlScoringEligible() const;
+
   // Filter OmniboxActions based on the supplied qualifiers.
   // The order of the supplied qualifiers determines the preference.
   void FilterOmniboxActions(
@@ -869,6 +872,12 @@ struct AutocompleteMatch {
   // this flag is true, this match is an "extra" suggestion that would've
   // originally been culled by the provider.
   bool culled_by_provider = false;
+
+  // True for shortcut suggestions that were boosted. Used for grouping logic.
+  // TODO(manukh): Remove this field and use `suggestion_group_id` once grouping
+  //   launches. In the meantime, shortcut grouping won't work for users in the
+  //   grouping experiments.
+  bool shortcut_boosted = false;
 
   // So users of AutocompleteMatch can use the same ellipsis that it uses.
   static const char16_t kEllipsis[];

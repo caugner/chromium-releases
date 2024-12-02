@@ -107,6 +107,7 @@ enum class Channel;
 
 class ChromeDirectSocketsDelegate;
 class ChromeHidDelegate;
+class ChromePrivateNetworkDeviceDelegate;
 class ChromeSerialDelegate;
 class ChromeUsbDelegate;
 class ChromeWebAuthenticationDelegate;
@@ -275,6 +276,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   bool MayDeleteServiceWorkerRegistration(
       const GURL& scope,
       content::BrowserContext* browser_context) override;
+  bool ShouldTryToUpdateServiceWorkerRegistration(
+      const GURL& scope,
+      content::BrowserContext* browser_context) override;
   void UpdateEnabledBlinkRuntimeFeaturesInIsolatedWorker(
       content::BrowserContext* context,
       const GURL& script_url,
@@ -382,6 +386,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   bool ShouldDenyRequestOnCertificateError(const GURL main_page_url) override;
 #endif
   base::OnceClosure SelectClientCertificate(
+      content::BrowserContext* browser_context,
       content::WebContents* web_contents,
       net::SSLCertRequestInfo* cert_request_info,
       net::ClientCertIdentityList client_certs,
@@ -422,6 +427,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   base::FilePath GetGraphiteDawnDiskCacheDirectory() override;
   base::FilePath GetNetLogDefaultDirectory() override;
   base::FilePath GetFirstPartySetsDirectory() override;
+  absl::optional<base::FilePath> GetLocalTracesDirectory() override;
   void DidCreatePpapiPlugin(content::BrowserPpapiHost* browser_host) override;
   content::BrowserPpapiHost* GetExternalBrowserPpapiHost(
       int plugin_process_id) override;
@@ -649,6 +655,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                                    const std::string& mime_type) override;
   content::BluetoothDelegate* GetBluetoothDelegate() override;
   content::UsbDelegate* GetUsbDelegate() override;
+  content::PrivateNetworkDeviceDelegate* GetPrivateNetworkDeviceDelegate()
+      override;
 #if !BUILDFLAG(IS_ANDROID)
   void CreateDeviceInfoService(
       content::RenderFrameHost* render_frame_host,
@@ -770,11 +778,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                               const url::Origin& requesting_origin,
                               const url::Origin& embedding_origin) override;
 
-  bool ArePersistentMediaDeviceIDsAllowed(
-      content::BrowserContext* browser_context,
-      const GURL& scope,
+  void GetMediaDeviceIDSalt(
+      content::RenderFrameHost* rfh,
       const net::SiteForCookies& site_for_cookies,
-      const absl::optional<url::Origin>& top_frame_origin) override;
+      const blink::StorageKey& storage_key,
+      base::OnceCallback<void(bool, const std::string&)> callback) override;
 
 #if !BUILDFLAG(IS_ANDROID)
   base::OnceClosure FetchRemoteSms(
@@ -810,7 +818,7 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const GURL& url) override;
   bool ShouldServiceWorkerInheritPolicyContainerFromCreator(
       const GURL& url) override;
-  bool ShouldAllowInsecureLocalNetworkRequests(
+  bool ShouldAllowInsecurePrivateNetworkRequests(
       content::BrowserContext* browser_context,
       const url::Origin& origin) override;
   bool IsJitDisabledForSite(content::BrowserContext* browser_context,
@@ -836,7 +844,8 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   StartupData* startup_data() { return &startup_data_; }
 
   std::unique_ptr<content::IdentityRequestDialogController>
-  CreateIdentityRequestDialogController() override;
+  CreateIdentityRequestDialogController(
+      content::WebContents* web_contents) override;
 
 #if !BUILDFLAG(IS_ANDROID)
   base::TimeDelta GetKeepaliveTimerTimeout(content::BrowserContext* context);
@@ -856,6 +865,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
   std::unique_ptr<content::PrefetchServiceDelegate>
   CreatePrefetchServiceDelegate(
       content::BrowserContext* browser_context) override;
+
+  std::unique_ptr<content::PrerenderWebContentsDelegate>
+  CreatePrerenderWebContentsDelegate() override;
 
   void OnWebContentsCreated(content::WebContents* web_contents) override;
 
@@ -908,6 +920,11 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       const net::SiteForCookies& site_for_cookies,
       const absl::optional<url::Origin>& top_frame_origin,
       const net::CookieSettingOverrides overrides) override;
+
+  void GetCloudIdentifiers(
+      const storage::FileSystemURL& url,
+      content::FileSystemAccessPermissionContext::HandleType handle_type,
+      GetCloudIdentifiersCallback callback) override;
 
  protected:
   static bool HandleWebUI(GURL* url, content::BrowserContext* browser_context);
@@ -1038,10 +1055,12 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
 #endif
   std::unique_ptr<permissions::BluetoothDelegateImpl> bluetooth_delegate_;
   std::unique_ptr<ChromeUsbDelegate> usb_delegate_;
+  std::unique_ptr<ChromePrivateNetworkDeviceDelegate>
+      private_network_device_delegate_;
 
 #if BUILDFLAG(IS_CHROMEOS)
   std::unique_ptr<content::SmartCardDelegate> smart_card_delegate_;
-#endif
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(ENABLE_VR)
   std::unique_ptr<vr::ChromeXrIntegrationClient> xr_integration_client_;

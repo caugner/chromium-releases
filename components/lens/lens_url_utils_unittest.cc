@@ -83,6 +83,17 @@ TEST(LensUrlUtilsTest, GetRegionSearchCompanionQueryParameterTest) {
               MatchesRegex("ep=crs&re=csc&s=4&source=chrome.gsc&st=\\d+"));
 }
 
+TEST(LensUrlUtilsTest, GetCompanionRegionSearchQueryParameterTest) {
+  lens::EntryPoint csc_region_search_ep =
+      lens::EntryPoint::COMPANION_REGION_SEARCH;
+  std::string query_param = lens::GetQueryParametersForLensRequest(
+      csc_region_search_ep, /*is_lens_side_panel_request=*/true,
+      /*is_full_screen_region_search_request=*/false,
+      /*is_companion_request=*/true);
+  EXPECT_THAT(query_param,
+              MatchesRegex("ep=cscidr&re=csc&s=4&source=chrome.gsc&st=\\d+"));
+}
+
 TEST(LensUrlUtilsTest, GetImageSearchSidePanelQueryParameterTest) {
   lens::EntryPoint lens_image_search_ep =
       lens::EntryPoint::CHROME_SEARCH_WITH_GOOGLE_LENS_CONTEXT_MENU_ITEM;
@@ -294,6 +305,18 @@ TEST(LensUrlUtilsTest, AppendNonSidePanelSettingsRemovesViewportSizeTest) {
       original_url, lens_image_search_ep, re,
       /*is_side_panel_request=*/false);
   EXPECT_THAT(url.query(), MatchesRegex("p=123&ep=ccm&re=df&s=4&st=\\d+"));
+}
+
+TEST(LensUrlUtilsTest, AppendStartTimeUpdatesParamForLensUrlTest) {
+  GURL original_url = GURL("https://lens.google.com/search?p=123");
+  GURL url = lens::AppendOrReplaceStartTimeIfLensRequest(original_url);
+  EXPECT_THAT(url.query(), MatchesRegex("p=123&st=\\d+"));
+}
+
+TEST(LensUrlUtilsTest, AppendStartTimeIgnoresNonLensUrlTest) {
+  GURL original_url = GURL("https://not-lens.com/search?p=123");
+  GURL url = lens::AppendOrReplaceStartTimeIfLensRequest(original_url);
+  EXPECT_THAT(url.query(), MatchesRegex("p=123"));
 }
 
 }  // namespace lens

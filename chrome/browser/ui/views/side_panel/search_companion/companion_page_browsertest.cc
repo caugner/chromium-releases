@@ -46,6 +46,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/feature_engagement/public/feature_constants.h"
+#include "components/lens/lens_features.h"
 #include "components/optimization_guide/core/test_model_info_builder.h"
 #include "components/optimization_guide/core/test_optimization_guide_model_provider.h"
 #include "components/optimization_guide/proto/visual_search_model_metadata.pb.h"
@@ -71,6 +72,7 @@
 #include "chrome/browser/extensions/tab_helper.h"
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
+using side_panel::mojom::LoadingState;
 using side_panel::mojom::MethodType;
 using side_panel::mojom::PromoAction;
 using side_panel::mojom::PromoType;
@@ -162,6 +164,7 @@ struct CompanionScriptBuilder {
   absl::optional<std::string> text_directive;
   absl::optional<std::vector<std::string>> cq_text_directives;
   absl::optional<int> click_position;
+  absl::optional<LoadingState> loading_state;
 
   // Useful in case chrome sends a postmessage in response. Companion waits for
   // the message in response and resolves the promise that was sent back to
@@ -253,6 +256,11 @@ struct CompanionScriptBuilder {
          << base::NumberToString(click_position.value()) << ";";
     }
 
+    if (loading_state.has_value()) {
+      ss << "message['companionLoadingState'] = "
+         << base::NumberToString(static_cast<size_t>(loading_state.value()))
+         << ";";
+    }
     ss << "window.parent.postMessage(message, '*');";
 
     if (wait_for_message) {
@@ -505,6 +513,14 @@ class CompanionPageBrowserTest : public InProcessBrowserTest {
         companion_server_.GetURL("/upload").spec();
 
     std::vector<base::test::FeatureRefAndParams> enabled_features;
+    std::vector<base::test::FeatureRef> disabled_features;
+    if (enable_feature_lens_standalone_) {
+      enabled_features.emplace_back(base::test::FeatureRefAndParams(
+          lens::features::kLensStandalone, /*params*/ {}));
+    } else {
+      disabled_features.emplace_back(lens::features::kLensStandalone);
+    }
+
     if (enable_feature_side_panel_companion_) {
       enabled_features.emplace_back(
           companion::features::internal::kSidePanelCompanion, params);
@@ -521,7 +537,7 @@ class CompanionPageBrowserTest : public InProcessBrowserTest {
         params2);
 
     feature_list_.InitWithFeaturesAndParameters(enabled_features,
-                                                /*disabled_features=*/{});
+                                                disabled_features);
   }
 
   virtual std::string ShouldOpenLinkInCurrentTab() { return "false"; }
@@ -603,6 +619,7 @@ class CompanionPageBrowserTest : public InProcessBrowserTest {
   std::string last_targetlang_;
   bool enable_feature_side_panel_companion_ = true;
   bool enable_feature_visual_search_ = true;
+  bool enable_feature_lens_standalone_ = true;
 };
 
 IN_PROC_BROWSER_TEST_F(CompanionPageBrowserTest, InitialNavigationWithoutMsbb) {
@@ -965,6 +982,10 @@ IN_PROC_BROWSER_TEST_F(CompanionPageBrowserTest,
   EXPECT_EQ(side_panel_coordinator()->GetCurrentEntryId(),
             SidePanelEntry::Id::kSearchCompanion);
 
+  CompanionScriptBuilder builder(MethodType::kCompanionLoadingState);
+  builder.loading_state = LoadingState::kStartedLoading;
+  EXPECT_TRUE(ExecJs(builder.Build()));
+
   // TODO(b/289113873) - Fix model flakiness for all platforms.
   // Reading models is flaky on certain platform, using this temporary path
   // check as a proxy; however, this should be done in a better way long-term.
@@ -972,14 +993,25 @@ IN_PROC_BROWSER_TEST_F(CompanionPageBrowserTest,
   base::File model_file(model_file_path(),
                         base::File::FLAG_OPEN | base::File::FLAG_READ);
   if (base::PathExists(model_file_path()) && model_file.IsValid()) {
-    WaitForHistogram("Companion.VisualSearch.ClassificationResultsSize");
+    WaitForHistogram("Companion.VisualQuery.SendVisualResultSuccess");
     histogram_tester.ExpectBucketCount(
         "Companion.VisualQuery.ClassifierModelAvailable", true, 1);
     histogram_tester.ExpectBucketCount(
-        "Companion.VisualSearch.ClassificationResultsSize", 1, 1);
+        "Companion.VisualQuery.ClassificationResultsSize", 1, 1);
     histogram_tester.ExpectBucketCount(
         "Companion.VisualSearch.EndClassificationSuccess", true, 1);
+    histogram_tester.ExpectBucketCount(
+        "Companion.VisualQuery.SendVisualResultSuccess", true, 1);
   }
+
+  CompanionScriptBuilder builder2(MethodType::kCompanionLoadingState);
+  builder2.loading_state = LoadingState::kFinishedLoading;
+  EXPECT_TRUE(ExecJs(builder2.Build()));
+
+  // Verifies that we don't trigger the false state because we successfully
+  // processed the image and sent result before receiving |kFinishedLoading|.
+  histogram_tester.ExpectBucketCount(
+      "Companion.VisualQuery.SendVisualResultSuccess", false, 0);
 
   side_panel_coordinator()->Close();
   // TODO(b/289113873) - Update iFrame to show UI and verify image bytes.
@@ -1685,6 +1717,29 @@ IN_PROC_BROWSER_TEST_F(CompanionPageBrowserTest,
       static_cast<int>(SidePanelOpenTrigger::kPinnedEntryToolbarButton));
 }
 
+IN_PROC_BROWSER_TEST_F(CompanionPageBrowserTest,
+                       RefreshCompanionPageMessageDoesReload) {
+  EnableSignInMsbbExps(/*signed_in=*/true, /*msbb=*/true, /*exps=*/true);
+
+  // Load a page on the active tab and open companion side panel
+  ASSERT_TRUE(
+      ui_test_utils::NavigateToURL(browser(), CreateUrl(kHost, kRelativeUrl1)));
+  side_panel_coordinator()->Show(SidePanelEntry::Id::kSearchCompanion);
+  WaitForCompanionToBeLoaded();
+  auto proto = GetLastCompanionProtoFromUrlLoad();
+  EXPECT_TRUE(proto.has_value());
+  EXPECT_EQ(proto->page_url(), CreateUrl(kHost, kRelativeUrl1));
+
+  // Simulate a message to refresh companion page.
+  CompanionScriptBuilder builder(MethodType::kRefreshCompanionPage);
+  EXPECT_TRUE(ExecJs(builder.Build()));
+
+  WaitForCompanionIframeReload();
+  proto = GetLastCompanionProtoFromUrlLoad();
+  EXPECT_TRUE(proto.has_value());
+  EXPECT_EQ(proto->page_url(), CreateUrl(kHost, kRelativeUrl1));
+}
+
 class CompanionPageDisabledBrowserTest : public CompanionPageBrowserTest {
  public:
   CompanionPageDisabledBrowserTest() : CompanionPageBrowserTest() {
@@ -1891,13 +1946,23 @@ class SidePanelCompanion2BrowserEnabledTest : public CompanionPageBrowserTest {
 
     std::vector<base::test::FeatureRefAndParams> enabled_features;
     std::vector<base::test::FeatureRef> disabled_features;
+    if (enable_feature_lens_standalone_) {
+      enabled_features.emplace_back(base::test::FeatureRefAndParams(
+          lens::features::kLensStandalone, /*params*/ {}));
+    } else {
+      disabled_features.emplace_back(lens::features::kLensStandalone);
+    }
 
     if (enable_feature_side_panel_companion_) {
       enabled_features.emplace_back(
           companion::features::internal::kSidePanelCompanion2, enabled_params);
       feature_list_.InitWithFeaturesAndParameters(enabled_features,
                                                   disabled_features);
-      EXPECT_TRUE(companion::IsCompanionFeatureEnabled());
+      if (enable_feature_lens_standalone_) {
+        EXPECT_TRUE(companion::IsCompanionFeatureEnabled());
+      } else {
+        EXPECT_FALSE(companion::IsCompanionFeatureEnabled());
+      }
     } else {
       disabled_features.emplace_back(
           companion::features::internal::kSidePanelCompanion);
@@ -1946,4 +2011,21 @@ IN_PROC_BROWSER_TEST_F(SidePanelCompanion2BrowserEnabledTest, FeatureEnabled) {
   EXPECT_EQ(side_panel_coordinator()->GetCurrentEntryId(),
             SidePanelEntry::Id::kSearchCompanion);
   EXPECT_EQ(1u, requests_received_on_server());
+}
+
+class LensStandaloneDisabledBrowserTest : public CompanionPageBrowserTest {
+ public:
+  LensStandaloneDisabledBrowserTest() : CompanionPageBrowserTest() {
+    enable_feature_lens_standalone_ = false;
+  }
+};
+
+// Verifies the behavior when Lens standalone feature is disabled but the side
+// panel Companion flag is enabled.
+IN_PROC_BROWSER_TEST_F(
+    LensStandaloneDisabledBrowserTest,
+    CompanionFeatureStatusWhenLensStandaloneFeatureDisabled) {
+  EXPECT_TRUE(base::FeatureList::IsEnabled(
+      companion::features::internal::kSidePanelCompanion));
+  EXPECT_FALSE(companion::IsCompanionFeatureEnabled());
 }
