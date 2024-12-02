@@ -10,8 +10,11 @@ import {assert} from 'chrome://resources/js/assert_ts.js';
 import {listenOnce} from 'chrome://resources/js/util_ts.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
+import {Cart} from '../../cart.mojom-webui.js';
 import {Cluster, URLVisit} from '../../history_cluster_types.mojom-webui.js';
+import {LayoutType} from '../../history_clusters.mojom-webui.js';
 import {I18nMixin, loadTimeData} from '../../i18n_setup.js';
+import {NewTabPageProxy} from '../../new_tab_page_proxy.js';
 import {InfoDialogElement} from '../info_dialog';
 import {ModuleDescriptor} from '../module_descriptor.js';
 
@@ -25,19 +28,6 @@ export const LAYOUT_2_MIN_IMAGE_VISITS = 1;
 export const LAYOUT_2_MIN_VISITS = 3;
 export const LAYOUT_3_MIN_IMAGE_VISITS = 2;
 export const LAYOUT_3_MIN_VISITS = 4;
-export const MIN_RELATED_SEARCHES = 3;
-
-/**
- * Available module UI layouts. This enum must match the numbering for
- * NTPHistoryClustersModuleDisplayLayout in enums.xml. These values are
- * persisted to logs. Entries should not be renumbered, removed or reused.
- */
-export enum HistoryClusterLayoutType {
-  NONE = 0,
-  LAYOUT_1 = 1,  // 2 image visits
-  LAYOUT_2 = 2,  // 1 image visit & 2 non-image visits
-  LAYOUT_3 = 3,  // 2 image visits & 2 non-image visits
-}
 
 /**
  * Available module element types. This enum must match the numbering for
@@ -48,6 +38,7 @@ export enum HistoryClusterElementType {
   VISIT = 0,
   SUGGEST = 1,
   SHOW_ALL = 2,
+  CART = 3,
 }
 
 /**
@@ -85,16 +76,27 @@ export class HistoryClustersModuleElement extends I18nMixin
       /** The cluster displayed by this element. */
       cluster: Object,
 
+      /** The cart displayed by this element, could be null. */
+      cart: {
+        type: Object,
+        value: null,
+      },
+
       searchResultPage: Object,
     };
   }
 
   cluster: Cluster;
-  layoutType: HistoryClusterLayoutType;
+  cart: Cart|null;
+  layoutType: LayoutType;
   searchResultPage: URLVisit;
+  private setDisabledModulesListenerId_: number|null = null;
 
   override ready() {
     super.ready();
+
+    HistoryClustersProxyImpl.getInstance().handler.recordLayoutTypeShown(
+        this.layoutType, this.cluster.id);
 
     listenOnce(window, 'unload', () => {
       const visitTiles: TileModuleElement[] = Array.from(
@@ -112,7 +114,37 @@ export class HistoryClustersModuleElement extends I18nMixin
     });
   }
 
-  private isLayout_(type: HistoryClusterLayoutType): boolean {
+  override connectedCallback() {
+    super.connectedCallback();
+
+    if (loadTimeData.getBoolean(
+            'modulesChromeCartInHistoryClustersModuleEnabled')) {
+      this.setDisabledModulesListenerId_ =
+          NewTabPageProxy.getInstance()
+              .callbackRouter.setDisabledModules.addListener(
+                  async (_: boolean, ids: string[]) => {
+                    if (ids.includes('chrome_cart')) {
+                      this.cart = null;
+                    } else if (!this.cart) {
+                      const {cart} =
+                          await HistoryClustersProxyImpl.getInstance()
+                              .handler.getCartForCluster(this.cluster);
+                      this.cart = cart;
+                    }
+                  });
+    }
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+
+    if (this.setDisabledModulesListenerId_) {
+      NewTabPageProxy.getInstance().callbackRouter.removeListener(
+          this.setDisabledModulesListenerId_);
+    }
+  }
+
+  private isLayout_(type: LayoutType): boolean {
     return type === this.layoutType;
   }
 
@@ -126,14 +158,19 @@ export class HistoryClustersModuleElement extends I18nMixin
     this.recordClick_(HistoryClusterElementType.SUGGEST);
   }
 
+  private onCartTileClick_() {
+    this.recordClick_(HistoryClusterElementType.CART);
+  }
+
   private recordClick_(type: HistoryClusterElementType) {
     chrome.metricsPrivate.recordEnumerationValue(
         `NewTabPage.HistoryClusters.Layout${this.layoutType}.Click`, type,
         Object.keys(HistoryClusterElementType).length);
+    HistoryClustersProxyImpl.getInstance().handler.recordClick(this.cluster.id);
   }
 
   private recordTileClickIndex_(tile: HTMLElement, tileType: string) {
-    assert(this.layoutType !== HistoryClusterLayoutType.NONE);
+    assert(this.layoutType !== LayoutType.kNone);
     const index = Array.from(tile.parentNode!.children).indexOf(tile);
     chrome.metricsPrivate.recordValue(
         {
@@ -190,15 +227,21 @@ export class HistoryClustersModuleElement extends I18nMixin
         visit => visit.normalizedUrl);
     HistoryClustersProxyImpl.getInstance().handler.openUrlsInTabGroup(urls);
   }
+
+  private shouldShowCartTile_(cart: Object): boolean {
+    return loadTimeData.getBoolean(
+               'modulesChromeCartInHistoryClustersModuleEnabled') &&
+        !!cart;
+  }
 }
 
 customElements.define(
     HistoryClustersModuleElement.is, HistoryClustersModuleElement);
 
-function recordSelectedLayout(option: HistoryClusterLayoutType) {
+function recordSelectedLayout(option: LayoutType) {
   chrome.metricsPrivate.recordEnumerationValue(
       'NewTabPage.HistoryClusters.DisplayLayout', option,
-      Object.keys(HistoryClusterLayoutType).length);
+      Object.keys(LayoutType).length);
 }
 
 function processLayoutVisits(
@@ -221,20 +264,27 @@ function processLayoutVisits(
 }
 
 async function createElement(): Promise<HistoryClustersModuleElement|null> {
-  const data =
-      await HistoryClustersProxyImpl.getInstance().handler.getCluster();
-  // Do not show module if no cluster or not enough related search results.
-  if (!data.cluster ||
-      data.cluster.relatedSearches.length < MIN_RELATED_SEARCHES) {
-    recordSelectedLayout(HistoryClusterLayoutType.NONE);
+  const {clusters} =
+      await HistoryClustersProxyImpl.getInstance().handler.getClusters();
+  // Do not show module if there are no clusters.
+  if (clusters.length === 0) {
+    recordSelectedLayout(LayoutType.kNone);
     return null;
   }
 
   const element = new HistoryClustersModuleElement();
-  element.cluster = data.cluster!;
+  element.cluster = clusters[0];
+  // Initialize the cart element when the feature is enabled.
+  if (loadTimeData.getBoolean(
+          'modulesChromeCartInHistoryClustersModuleEnabled')) {
+    const {cart} =
+        await HistoryClustersProxyImpl.getInstance().handler.getCartForCluster(
+            clusters[0]);
+    element.cart = cart;
+  }
   // Pull out the SRP to be used in the header and to open the cluster
   // in tab group.
-  element.searchResultPage = data.cluster!.visits[0];
+  element.searchResultPage = clusters[0]!.visits[0];
 
   // History cluster visits minus the SRP that is included, since the SRP
   // isn't used in the layout.
@@ -253,25 +303,25 @@ async function createElement(): Promise<HistoryClustersModuleElement|null> {
     // Decide which one to use by checking if there are enough total
     // visits for layout 3.
     if (visitCount >= LAYOUT_3_MIN_VISITS) {
-      element.layoutType = HistoryClusterLayoutType.LAYOUT_3;
+      element.layoutType = LayoutType.kLayout3;
       element.cluster.visits = processLayoutVisits(
           visits, LAYOUT_3_MIN_VISITS, LAYOUT_3_MIN_IMAGE_VISITS);
     } else {
       // If we have enough image visits, we have enough total visits
       // for layout 1, since all visits shown are image visits.
-      element.layoutType = HistoryClusterLayoutType.LAYOUT_1;
+      element.layoutType = LayoutType.kLayout1;
       element.cluster.visits = processLayoutVisits(
           visits, LAYOUT_1_MIN_VISITS, LAYOUT_1_MIN_IMAGE_VISITS);
     }
   } else if (
       imageCount === LAYOUT_2_MIN_IMAGE_VISITS &&
       visitCount >= LAYOUT_2_MIN_VISITS) {
-    element.layoutType = HistoryClusterLayoutType.LAYOUT_2;
+    element.layoutType = LayoutType.kLayout2;
     element.cluster.visits = processLayoutVisits(
         visits, LAYOUT_2_MIN_VISITS, LAYOUT_2_MIN_IMAGE_VISITS);
   } else {
     // If the data doesn't fit any layout, don't show the module.
-    recordSelectedLayout(HistoryClusterLayoutType.NONE);
+    recordSelectedLayout(LayoutType.kNone);
     return null;
   }
 
