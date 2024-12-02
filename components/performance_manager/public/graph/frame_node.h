@@ -5,8 +5,8 @@
 #ifndef COMPONENTS_PERFORMANCE_MANAGER_PUBLIC_GRAPH_FRAME_NODE_H_
 #define COMPONENTS_PERFORMANCE_MANAGER_PUBLIC_GRAPH_FRAME_NODE_H_
 
-#include "base/callback_forward.h"
 #include "base/containers/flat_set.h"
+#include "base/functional/callback_forward.h"
 #include "base/types/strong_alias.h"
 #include "components/performance_manager/public/execution_context_priority/execution_context_priority.h"
 #include "components/performance_manager/public/graph/node.h"
@@ -202,6 +202,11 @@ class FrameNode : public Node {
   // Returns true if at least one form of the frame has been interacted with.
   virtual bool HadFormInteraction() const = 0;
 
+  // Returns true if the user has made edits to the page. This is a superset of
+  // `HadFormInteraction()` but also includes changes to `contenteditable`
+  // elements.
+  virtual bool HadUserEdits() const = 0;
+
   // Returns true if the frame is audible, false otherwise.
   virtual bool IsAudible() const = 0;
 
@@ -222,6 +227,11 @@ class FrameNode : public Node {
   // kilobytes. This is an estimate because RSS is computed by process, and a
   // process can host multiple frames.
   virtual uint64_t GetResidentSetKbEstimate() const = 0;
+
+  // Returns the most recently estimated private footprint of the frame, in
+  // kilobytes. This is an estimate because it is computed by process, and a
+  // process can host multiple frames.
+  virtual uint64_t GetPrivateFootprintKbEstimate() const = 0;
 };
 
 // Pure virtual observer interface. Derive from this if you want to be forced to
@@ -280,6 +290,12 @@ class FrameNodeObserver {
   // Called when the frame receives a form interaction.
   virtual void OnHadFormInteractionChanged(const FrameNode* frame_node) = 0;
 
+  // Called the first time the user has edited the content of an element. This
+  // is a superset of `OnHadFormInteractionChanged()`: form interactions trigger
+  // both events but changes to e.g. a `<div>` with the `contenteditable`
+  // property will only trigger `OnHadUserEditsChanged()`.
+  virtual void OnHadUserEditsChanged(const FrameNode* frame_node) = 0;
+
   // Invoked when the IsAudible property changes.
   virtual void OnIsAudibleChanged(const FrameNode* frame_node) = 0;
 
@@ -335,6 +351,7 @@ class FrameNode::ObserverDefaultImpl : public FrameNodeObserver {
       const FrameNode* frame_node,
       const PriorityAndReason& previous_value) override {}
   void OnHadFormInteractionChanged(const FrameNode* frame_node) override {}
+  void OnHadUserEditsChanged(const FrameNode* frame_node) override {}
   void OnIsAudibleChanged(const FrameNode* frame_node) override {}
   void OnViewportIntersectionChanged(const FrameNode* frame_node) override {}
   void OnFrameVisibilityChanged(const FrameNode* frame_node,
