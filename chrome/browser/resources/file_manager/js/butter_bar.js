@@ -125,15 +125,19 @@ ButterBar.prototype.update_ = function(message, opt_options) {
     }.bind(this), timeout);
   }
 
-  this.butter_.querySelector('.butter-message').textContent = message;
+  var butterMessage = this.butter_.querySelector('.butter-message');
+   butterMessage.textContent = message;
   if (message && !this.isVisible_()) {
     // The butter bar is made visible on the first non-empty message.
     this.butter_.classList.add('visible');
     this.lastShowTime_ = Date.now();
   }
   if (opt_options && 'progress' in opt_options) {
+    butterMessage.classList.add('single-line');
     this.butter_.querySelector('.progress-track').style.width =
         (opt_options.progress * 100) + '%';
+  } else {
+    butterMessage.classList.remove('single-line');
   }
 };
 
@@ -154,6 +158,7 @@ ButterBar.prototype.hide_ = function(opt_force) {
 
   if (opt_force || delay <= 0) {
     this.butter_.classList.remove('visible');
+    this.butter_.querySelector('.progress-bar').hidden = true;
   } else {
     // Reschedule hide to comply with the minimal display time.
     this.hideTimeout_ = setTimeout(function() {
@@ -285,7 +290,7 @@ ButterBar.prototype.onCopyProgress_ = function(event) {
         this.showError_(strf(this.transferType_() +
                              '_TARGET_EXISTS_ERROR', name));
       } else if (event.error.reason === 'FILESYSTEM_ERROR') {
-        if (event.error.data.toGDrive &&
+        if (event.error.data.toDrive &&
             event.error.data.code === FileError.QUOTA_EXCEEDED_ERR) {
           // The alert will be shown in FileManager.onCopyProgress_.
           this.hide_();

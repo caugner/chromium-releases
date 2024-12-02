@@ -45,7 +45,7 @@
   # anything to be done in this file (instead of a higher-level .gyp file).
   'targets': [
     {
-      'target_name': 'widevinecdmplugin',
+      'target_name': 'widevinecdmadapter',
       'type': 'none',
       'conditions': [
         [ 'branding == "Chrome"', {
@@ -56,7 +56,7 @@
           ],
           'sources': [
             '<(DEPTH)/webkit/media/crypto/ppapi/cdm_wrapper.cc',
-            '<(DEPTH)/webkit/media/crypto/ppapi/content_decryption_module.h',
+            '<(DEPTH)/webkit/media/crypto/ppapi/cdm/content_decryption_module.h',
             '<(DEPTH)/webkit/media/crypto/ppapi/linked_ptr.h',
           ],
           'conditions': [
@@ -67,6 +67,12 @@
               'ldflags': ['-Wl,-rpath=\$$ORIGIN'],
             }],
             [ 'chromeos == 1 and target_arch == "arm"', {
+              'libraries': [
+                # Copied by widevine_cdm_binaries.
+                '<(PRODUCT_DIR)/libwidevinecdm.so',
+              ],
+            }],
+            [ 'chromeos == 0 and OS == "linux" and target_arch == "x64"', {
               'libraries': [
                 # Copied by widevine_cdm_binaries.
                 '<(PRODUCT_DIR)/libwidevinecdm.so',
