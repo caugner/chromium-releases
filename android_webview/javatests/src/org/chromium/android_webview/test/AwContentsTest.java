@@ -11,6 +11,7 @@ import static org.chromium.android_webview.test.AwActivityTestRule.WAIT_TIMEOUT_
 import static org.chromium.android_webview.test.OnlyRunIn.ProcessMode.MULTI_PROCESS;
 import static org.chromium.android_webview.test.OnlyRunIn.ProcessMode.SINGLE_PROCESS;
 
+import android.annotation.SuppressLint;
 import android.content.ComponentCallbacks2;
 import android.content.Context;
 import android.graphics.Bitmap;
@@ -23,6 +24,7 @@ import android.os.Looper;
 import android.os.Message;
 import android.util.Pair;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.webkit.JavascriptInterface;
 
@@ -40,6 +42,8 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.UseParametersRunnerFactory;
 
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwRenderProcess;
@@ -85,21 +89,24 @@ import java.util.function.BiFunction;
 import java.util.function.Predicate;
 
 /** AwContents tests. */
-@RunWith(AwJUnit4ClassRunner.class)
+@RunWith(Parameterized.class)
+@UseParametersRunnerFactory(AwJUnit4ClassRunnerWithParameters.Factory.class)
 @DoNotBatch(reason = "Tests that need browser start are incompatible with @Batch")
-public class AwContentsTest {
-
+public class AwContentsTest extends AwParameterizedTest {
     private static final String TAG = "AwContentsTest";
 
-    @Rule
-    public AwActivityTestRule mActivityTestRule =
-            new AwActivityTestRule() {
-                // Allow specific tests to use vulkan.
-                @Override
-                public boolean needsBrowserProcessStarted() {
-                    return false;
-                }
-            };
+    @Rule public AwActivityTestRule mActivityTestRule;
+
+    public AwContentsTest(AwSettingsMutation param) {
+        mActivityTestRule =
+                new AwActivityTestRule(param.getMutation()) {
+                    // Allow specific tests to use vulkan.
+                    @Override
+                    public boolean needsBrowserProcessStarted() {
+                        return false;
+                    }
+                };
+    }
 
     @Rule public FakeTimeTestRule mFakeTimeTestRule = new FakeTimeTestRule();
     @Rule public TestRule mProcessor = new Features.InstrumentationProcessor();
@@ -356,6 +363,7 @@ public class AwContentsTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView"})
+    @SkipMutations(reason = "This test depends on AwSettings.setCacheMode()")
     public void testClearCacheMemoryAndDisk() throws Throwable {
         mActivityTestRule.startBrowserProcess();
         final AwTestContainerView testContainer =
@@ -473,6 +481,7 @@ public class AwContentsTest {
     @Test
     @Feature({"AndroidWebView", "Downloads"})
     @SmallTest
+    @SkipMutations(reason = "This test depends on AwSettings.setUserAgentString()")
     public void testDownload() throws Throwable {
         downloadAndCheck(null);
     }
@@ -1573,8 +1582,8 @@ public class AwContentsTest {
             // Main frame has green color at the top half, and iframe in the bottom half.
             final String pageHtml =
                     "<html><body><div"
-                        + " style=\"width:100%;height:50%;background-color:rgb(0,255,0);\"></div><iframe"
-                        + " style=\"width:100%;height:50%;\" src=\""
+                            + " style=\"width:100%;height:50%;background-color:rgb(0,255,0);\"></div><iframe"
+                            + " style=\"width:100%;height:50%;\" src=\""
                             + iframePath
                             + "\"></iframe>"
                             + "</body></html>";
@@ -2021,5 +2030,42 @@ public class AwContentsTest {
                         mContentsClient,
                         "window.injectionDemo ? 'exists unexpectedly' : 'does not exist';");
         Assert.assertEquals("\"does not exist\"", result);
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    @SuppressLint("WrongConstant")
+    // crbug.com/1493531
+    public void testInvalidTouchEventIsRemoved() {
+        mActivityTestRule.startBrowserProcess();
+        AwContents awContents =
+                mActivityTestRule
+                        .createAwTestContainerViewOnMainSync(mContentsClient)
+                        .getAwContents();
+        MotionEvent.PointerProperties properties = new MotionEvent.PointerProperties();
+        properties.id = 1;
+        properties.toolType = 20;
+        // Create a motion event with one pointer with tool type set to 20.
+        MotionEvent event =
+                MotionEvent.obtain(
+                        0L,
+                        0L,
+                        0,
+                        1,
+                        new MotionEvent.PointerProperties[] {properties},
+                        new MotionEvent.PointerCoords[] {new MotionEvent.PointerCoords()},
+                        0,
+                        0,
+                        0f,
+                        0f,
+                        0,
+                        0,
+                        0,
+                        0);
+        HistogramWatcher watcher =
+                HistogramWatcher.newSingleRecordWatcher("Input.UnrecognizedToolType.Android", 20);
+        Assert.assertFalse(awContents.onTouchEvent(event));
+        watcher.assertExpected();
     }
 }

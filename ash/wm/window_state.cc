@@ -27,7 +27,6 @@
 #include "ash/wm/splitview/split_view_constants.h"
 #include "ash/wm/splitview/split_view_controller.h"
 #include "ash/wm/splitview/split_view_utils.h"
-#include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ash/wm/window_animations.h"
 #include "ash/wm/window_positioning_utils.h"
 #include "ash/wm/window_properties.h"
@@ -129,7 +128,7 @@ bool CanRestoreState(WindowStateType current_state,
 }
 
 bool IsTabletModeEnabled() {
-  return Shell::Get()->tablet_mode_controller()->InTabletMode();
+  return display::Screen::GetScreen()->InTabletMode();
 }
 
 bool IsToplevelContainer(aura::Window* window) {
@@ -527,7 +526,7 @@ void WindowState::OnWMEvent(const WMEvent* event) {
   if (snap_event) {
     // Save `event` requested snap ratio.
     const float target_snap_ratio = snap_event->snap_ratio();
-    snap_ratio_ = absl::make_optional(target_snap_ratio);
+    snap_ratio_ = std::make_optional(target_snap_ratio);
     if (IsPartial(target_snap_ratio)) {
       partial_start_time_ = base::TimeTicks::Now();
     } else {
@@ -677,7 +676,7 @@ std::unique_ptr<WindowState::State> WindowState::SetStateObject(
 void WindowState::UpdateSnapRatio() {
   if (!IsSnapped())
     return;
-  snap_ratio_ = absl::make_optional(GetCurrentSnapRatio(window_));
+  snap_ratio_ = std::make_optional(GetCurrentSnapRatio(window_));
   // If the snap ratio was adjusted, partial may have ended.
   MaybeRecordPartialDuration();
 }
@@ -885,17 +884,15 @@ void WindowState::SetBoundsInScreen(const gfx::Rect& bounds_in_screen) {
 
 void WindowState::AdjustSnappedBoundsForDisplayWorkspaceChange(
     gfx::Rect* bounds) {
-  auto* tablet_mode_controller = Shell::Get()->tablet_mode_controller();
-  const bool in_tablet =
-      tablet_mode_controller && tablet_mode_controller->InTabletMode();
-
   // Tablet mode should use bounds calculation in SplitViewController.
   // However, transient state from transitioning clamshell to tablet mode
   // might end up calling this function during work area changes, so we avoid
   // unnecessary task in that case when it will be overwritten by tablet mode
   // work.
-  if (is_dragged() || !IsSnapped() || in_tablet)
+  if (is_dragged() || !IsSnapped() ||
+      display::Screen::GetScreen()->InTabletMode()) {
     return;
+  }
   gfx::Rect maximized_bounds =
       screen_util::GetMaximizedWindowBoundsInParent(window_);
 
@@ -942,7 +939,7 @@ void WindowState::UpdateWindowPropertiesFromStateType() {
     const gfx::Size& size = window_->bounds().size();
     // WindowManager manages the window opacity. Make it opaque unless
     // the window has rounded corners.
-    if (chromeos::ShouldHaveRoundedWindow(GetStateType())) {
+    if (chromeos::ShouldWindowStateHaveRoundedCorners(GetStateType())) {
       window_->SetTransparent(true);
       window_->SetOpaqueRegionsForOcclusion({gfx::Rect(size)});
     } else {
@@ -1013,7 +1010,8 @@ void WindowState::SetBoundsDirect(const gfx::Rect& bounds) {
     // Changing the size of the PIP window can detach it from one of the edges
     // of the screen, which makes the snap fraction logic fail. Ensure to snap
     // it again.
-    if (IsPip() && !is_dragged()) {
+    if (IsPip() && !is_dragged() &&
+        !Shell::Get()->pip_controller()->is_tucked()) {
       wm::ConvertRectToScreen(window_->GetRootWindow(), &actual_new_bounds);
       actual_new_bounds = CollisionDetectionUtils::GetRestingPosition(
           display, actual_new_bounds,
@@ -1049,7 +1047,7 @@ void WindowState::SetBoundsDirectAnimated(const gfx::Rect& bounds,
 }
 
 void WindowState::SetBoundsDirectCrossFade(const gfx::Rect& new_bounds,
-                                           absl::optional<bool> float_state) {
+                                           std::optional<bool> float_state) {
   // Some test results in invoking CrossFadeToBounds when window is not visible.
   // No animation is necessary in that case, thus just change the bounds and
   // quit.
@@ -1091,6 +1089,12 @@ void WindowState::OnPrePipStateChange(WindowStateType old_window_state_type) {
   const bool was_pip = old_window_state_type == WindowStateType::kPip;
   auto* const pip_controller = Shell::Get()->pip_controller();
   if (IsPip()) {
+    // Set this window to `PipController`.
+    // The window has to be set to the controller before
+    // `widget->Deactivate()` because this sometimes calls
+    // `PipController::UpdatePipBounds()`.
+    pip_controller->SetPipWindow(window_);
+
     CollisionDetectionUtils::MarkWindowPriorityForCollisionDetection(
         window_, CollisionDetectionUtils::RelativePriority::kPictureInPicture);
     // widget may not exit in some unit tests.
@@ -1103,12 +1107,6 @@ void WindowState::OnPrePipStateChange(WindowStateType old_window_state_type) {
     }
     wm::SetWindowVisibilityAnimationType(
         window_, WINDOW_VISIBILITY_ANIMATION_TYPE_FADE_IN_SLIDE_OUT);
-
-    // Add this window to `PipController`.
-    // `window_state->NotifyPreStateTypeChange()` because that triggers
-    // `PipController::UpdatePipBounds()` which needs the target to be
-    // set.
-    pip_controller->SetPipWindow(window_);
 
     // There may already be a system ui window on the initial position.
     pip_controller->UpdatePipBounds();
@@ -1136,7 +1134,7 @@ void WindowState::OnPrePipStateChange(WindowStateType old_window_state_type) {
     window_->ClearProperty(ash::kExcludeInMruKey);
 
     // Unset PiP window when exiting PiP state to another state.
-    pip_controller->UnsetPipWindow();
+    pip_controller->UnsetPipWindow(window_);
   }
   // PIP uses the snap fraction to place the PIP window at the correct position
   // after screen rotation, system UI area change, etc. Make sure to reset this
@@ -1379,14 +1377,22 @@ void WindowState::OnWindowParentChanged(aura::Window* window,
 
 void WindowState::OnWindowVisibilityChanged(aura::Window* window,
                                             bool visible) {
-  // If this window is a PiP and its SnapFraction is null.
-  // Note that, at this point, ARC PiP may not be ready as visibility can be
-  // updated when it transitions from minimized to PiP. In this case, snap
-  // fraction is updated in `ClientControlledShellSurface::OnPostWidgetCommit`.
-  if (window == window_ && visible && IsPip() &&
-      !PipPositioner::HasSnapFraction(this) && !IsArcWindow(window)) {
-    PipPositioner::SaveSnapFraction(this, window_->GetBoundsInScreen());
+  if (IsPip() && window == window_) {
+    if (visible) {
+      // If this window is a PiP and its SnapFraction is null.
+      // Note that, at this point, ARC PiP may not be ready as visibility can be
+      // updated when it transitions from minimized to PiP. In this case, snap
+      // fraction is updated in
+      // `ClientControlledShellSurface::OnPostWidgetCommit`.
+      if (!PipPositioner::HasSnapFraction(this) && !IsArcWindow(window)) {
+        PipPositioner::SaveSnapFraction(this, window_->GetBoundsInScreen());
+      }
+      Shell::Get()->pip_controller()->SetPipWindow(window);
+    } else {
+      Shell::Get()->pip_controller()->UnsetPipWindow(window);
+    }
   }
+
   // From here, we are only interested if the parent visibility changes, i.e.
   // desk changes.
   if (window != window_->parent()) {

@@ -13,6 +13,7 @@ class PolicyService;
 }
 
 class PrefService;
+struct TemplateURLData;
 class TemplateURLService;
 
 namespace search_engines {
@@ -20,8 +21,11 @@ namespace search_engines {
 extern const char kSearchEngineChoiceScreenProfileInitConditionsHistogram[];
 extern const char kSearchEngineChoiceScreenNavigationConditionsHistogram[];
 extern const char kSearchEngineChoiceScreenEventsHistogram[];
-extern const char kDefaultSearchEngineChoiceLocationHistogram[];
 extern const char kSearchEngineChoiceScreenDefaultSearchEngineTypeHistogram[];
+extern const char kSearchEngineChoiceWipeReasonHistogram[];
+extern const char kSearchEngineChoiceRepromptHistogram[];
+extern const char kSearchEngineChoiceRepromptWildcardHistogram[];
+extern const char kSearchEngineChoiceRepromptSpecificCountryHistogram[];
 
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
@@ -37,14 +41,20 @@ enum class SearchEngineChoiceScreenConditions {
   // The profile is out of scope.
   kProfileOutOfScope = 4,
   // An extension controls the default search engine.
-  kExtensionContolled = 5,
+  kExtensionControlled = 5,
   // The user is eligible to see the screen at the next opportunity.
   kEligible = 6,
   // The choice has already been completed.
   kAlreadyCompleted = 7,
   // The browser type is unsupported.
   kUnsupportedBrowserType = 8,
-  kMaxValue = kUnsupportedBrowserType,
+  // The feature can't run, it is disabled by local or remote configuration.
+  kFeatureSuppressed = 9,
+  // Some other dialog is showing and interfering with the choice one.
+  kSuppressedByOtherDialog = 10,
+  // The browser window can't fit the dialog's smallest variant.
+  kBrowserWindowTooSmall = 11,
+  kMaxValue = kBrowserWindowTooSmall,
 };
 
 // These values are persisted to logs. Entries should not be renumbered and
@@ -64,12 +74,21 @@ enum class SearchEngineChoiceScreenEvents {
   kLearnMoreWasDisplayed = 5,
   // The "Learn more" screen was displayed on the FRE-specific screen.
   kFreLearnMoreWasDisplayed = 6,
-  kMaxValue = kFreLearnMoreWasDisplayed,
+  // The profile creation specific flavor of the screen was displayed.
+  kProfileCreationChoiceScreenWasDisplayed = 7,
+  // The user clicked `Set as default` on the profile creation specific screen.
+  kProfileCreationDefaultWasSet = 8,
+  // The "Learn more" screen was displayed on the profile creation specific
+  // screen.
+  kProfileCreationLearnMoreDisplayed = 9,
+  kMaxValue = kProfileCreationLearnMoreDisplayed,
 };
 
 // Profile properties that need to be passed to
 // `ShouldShowChoiceScreen`. This is due to the fact that
 // the 'Profile' class is different between platforms.
+// TODO(b/312115939): Rename `is_regular_profile` to something like
+// `is_eligible_profile`.
 struct ProfileProperties {
   bool is_regular_profile = false;
   raw_ptr<PrefService> pref_service;
@@ -101,18 +120,76 @@ enum class ChoiceMadeLocation {
   kMaxValue = kChoiceScreen,
 };
 
+// The cause for wiping the search engine choice preferences. Only used for
+// metrics.
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class WipeSearchEngineChoiceReason {
+  kProfileWipe = 0,
+  kMissingChoiceVersion = 1,
+  kInvalidChoiceVersion = 2,
+  kReprompt = 3,
+
+  kMaxValue = kReprompt,
+};
+
+// Exposed for testing.
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class RepromptResult {
+  // Reprompt.
+  kReprompt = 0,
+
+  // Cases below do not reprompt.
+  //
+  // Wrong JSON syntax.
+  kInvalidDictionary = 1,
+  // There was no applicable key (specific country or wildcard).
+  kNoDictionaryKey = 2,
+  // The reprompt version could not be parsed.
+  kInvalidVersion = 3,
+  // Chrome older than the requested version, reprompting would not make the
+  // version recent enough.
+  kChromeTooOld = 4,
+  // The choice was made recently enough.
+  kRecentChoice = 5,
+
+  kMaxValue = kRecentChoice,
+};
+
 // Whether the choice screen flag is generally enabled for the specific flow.
 bool IsChoiceScreenFlagEnabled(ChoicePromo promo);
 
 // Returns which version of the settings screen for the default search engine
 // setting should be shown.
+// TODO(b/306367986): Restrict this function to iOS.
 bool ShouldShowUpdatedSettings(PrefService& profile_prefs);
 
 // Returns whether the search engine choice screen can be displayed or not based
 // on device policies and profile properties.
+// TODO(b/306367986): Restrict this function to iOS.
 bool ShouldShowChoiceScreen(const policy::PolicyService& policy_service,
                             const ProfileProperties& profile_properties,
                             TemplateURLService* template_url_service);
+
+// Returns the choice screen eligibility condition most relevant for the profile
+// associated with `profile_prefs` and `template_url_service`.
+// Only checks dynamic conditions, that can change from one call to the other
+// during a profile's lifetime. Should be checked right before showing a choice
+// screen.
+SearchEngineChoiceScreenConditions GetDynamicChoiceScreenConditions(
+    const PrefService& profile_prefs,
+    const TemplateURLService& template_url_service);
+
+// Returns the choice screen eligibility condition most relevant for the profile
+// described by `profile_properties`.
+// Only checks static conditions, such that if a non-eligible condition is
+// returned, it would take at least a restart for the state to change. So this
+// state can be checked and cached ahead of showing a choice screen.
+SearchEngineChoiceScreenConditions GetStaticChoiceScreenConditions(
+    const policy::PolicyService& policy_service,
+    const ProfileProperties& profile_properties,
+    const TemplateURLService& template_url_service);
 
 // Returns the country ID to use in the context of any search engine choice
 // logic. If `profile_prefs` are null, returns
@@ -130,11 +207,9 @@ bool IsEeaChoiceCountry(int country_id);
 // Records the location from which the choice was made and the search engine
 // that was chosen.
 // The function should be called after the default search engine has been set.
-// TODO(b/307713013): Remove the default value for `template_url_service` once
-// the function is used on the iOS side.
 void RecordChoiceMade(PrefService* profile_prefs,
                       ChoiceMadeLocation choice_location,
-                      TemplateURLService* template_url_service = nullptr);
+                      TemplateURLService* template_url_service);
 
 // Records the specified choice screen condition at profile initialization.
 void RecordChoiceScreenProfileInitCondition(
@@ -146,6 +221,29 @@ void RecordChoiceScreenEvent(SearchEngineChoiceScreenEvents event);
 // Records the type of the default search engine that was chosen by the user
 // in the search engine choice screen or in the settings page.
 void RecordChoiceScreenDefaultSearchProviderType(SearchEngineType engine_type);
+
+// Clears the search engine choice prefs, such as the timestamp and the Chrome
+// version, to ensure the choice screen is shown again.
+void WipeSearchEngineChoicePrefs(PrefService& profile_prefs,
+                                 WipeSearchEngineChoiceReason reason);
+
+#if !BUILDFLAG(IS_ANDROID)
+// Returns the engine marketing snippet string resource id or -1 if the snippet
+// was not found.
+// The function definition is generated in `generated_marketing_snippets.cc`.
+// `engine_keyword` is the search engine keyword.
+int GetMarketingSnippetResourceId(const std::u16string& engine_keyword);
+
+// Returns the marketing snippet string or the fallback string if the search
+// engine didn't provide its own.
+std::u16string GetMarketingSnippetString(
+    const TemplateURLData& template_url_data);
+#endif
+
+// Checks if the search engine choice should be prompted again, based on
+// experiment parameters. If a reprompt is needed, some preferences related to
+// the choice are cleared, which triggers a reprompt on the next page load.
+void PreprocessPrefsForReprompt(PrefService& profile_prefs);
 
 }  // namespace search_engines
 

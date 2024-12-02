@@ -594,6 +594,10 @@ struct MLConfig {
   // Omnibox URL scoring signals for logging or ML scoring.
   bool enable_scoring_signals_annotators{false};
 
+  // If true, document suggestions from the shortcut provider will include
+  // shortcut signals.
+  bool shortcut_document_signals{false};
+
   // If true, runs the ML scoring model to assign new relevance scores to the
   // URL suggestions and reranks them.
   // Equivalent to omnibox::kMlUrlScoring.
@@ -743,7 +747,7 @@ constexpr base::FeatureParam<bool> kQueryTilesShowAboveTrends(
 constexpr base::FeatureParam<bool> kActionsInSuggestPromoteEntitySuggestion(
     &omnibox::kActionsInSuggest,
     "PromoteEntitySuggestion",
-    false);
+    !!BUILDFLAG(IS_ANDROID));
 
 // Specifies which actions in suggest will be offered to users.
 constexpr base::FeatureParam<omnibox::ActionInfo::ActionType>::Option

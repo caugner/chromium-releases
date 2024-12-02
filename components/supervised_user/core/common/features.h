@@ -35,8 +35,8 @@ bool CanDisplayFirstTimeInterstitialBanner();
 // Experiments to enable proto fetchers
 BASE_DECLARE_FEATURE(kEnableProtoApiForClassifyUrl);
 
-// Instead of manually implementing the process, use the proto_fetcher.cc's one.
-BASE_DECLARE_FEATURE(kUseBuiltInRetryingMechanismForListFamilyMembers);
+// Request priority experiment for ClassifyUrl (for critical path of rendering).
+BASE_DECLARE_FEATURE(kHighestRequestPriorityForClassifyUrl);
 
 // Enable different web sign in interception behaviour for supervised users:
 //
@@ -52,6 +52,9 @@ BASE_DECLARE_FEATURE(kCustomWebSignInInterceptForSupervisedUsers);
 // latencies.
 BASE_DECLARE_FEATURE(kShadowKidsApiWithSafeSites);
 
+// Forces Safe Search for supervised users.
+BASE_DECLARE_FEATURE(kForceGoogleSafeSearchForSupervisedUsers);
+
 // Returns whether local parent approvals on Family Link user's device are
 // enabled.
 // Local web approvals are only available when refreshed version of web
@@ -60,10 +63,6 @@ bool IsLocalWebApprovalsEnabled();
 
 // Returns whether the ClassifyUrl call uses proto apis.
 bool IsProtoApiForClassifyUrlEnabled();
-
-// Decides whether to use built-in configurable mechanism, instead of manually
-// programmed.
-bool IsRetryMechanismForListFamilyMembersEnabled();
 
 // Returns true if child account supervision features should be enabled for this
 // client.

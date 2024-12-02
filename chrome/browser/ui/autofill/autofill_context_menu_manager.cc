@@ -11,9 +11,11 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/user_education/scoped_new_badge_tracker.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/autofill/content/browser/content_autofill_client.h"
 #include "components/autofill/content/browser/content_autofill_driver.h"
 #include "components/autofill/core/browser/autofill_feedback_data.h"
 #include "components/autofill/core/browser/browser_autofill_manager.h"
@@ -118,12 +120,10 @@ bool AutofillContextMenuManager::IsAutofillCustomCommandId(
 AutofillContextMenuManager::AutofillContextMenuManager(
     PersonalDataManager* personal_data_manager,
     RenderViewContextMenuBase* delegate,
-    ui::SimpleMenuModel* menu_model,
-    Browser* browser)
+    ui::SimpleMenuModel* menu_model)
     : personal_data_manager_(personal_data_manager),
       menu_model_(menu_model),
-      delegate_(delegate),
-      browser_(browser) {
+      delegate_(delegate) {
   DCHECK(delegate_);
   params_ = delegate_->params();
 }
@@ -151,9 +151,7 @@ void AutofillContextMenuManager::AppendItems() {
   }
 
   // Includes the option of submitting feedback on Autofill.
-  if (personal_data_manager_->IsAutofillEnabled() &&
-      base::FeatureList::IsEnabled(features::kAutofillFeedback) &&
-      IsLikelyDogfoodClient()) {
+  if (personal_data_manager_->IsAutofillEnabled() && IsLikelyDogfoodClient()) {
     menu_model_->AddItemWithStringIdAndIcon(
         IDC_CONTENT_CONTEXT_AUTOFILL_FEEDBACK,
         IDS_CONTENT_CONTEXT_AUTOFILL_FEEDBACK,
@@ -193,13 +191,12 @@ void AutofillContextMenuManager::ExecuteCommand(int command_id) {
   }
 
   if (command_id == IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_ADDRESS) {
-    ExecuteFallbackForAutocompleteUnrecognizedCommand(manager);
+    ExecuteFallbackForAddressesCommand(manager);
     return;
   }
 
   if (command_id == IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PAYMENTS) {
-    // TODO(crbug.com/1493361): Render payments suggestions.
-    NOTIMPLEMENTED();
+    ExecuteFallbackForPaymentsCommand(manager);
     return;
   }
 }
@@ -207,8 +204,11 @@ void AutofillContextMenuManager::ExecuteCommand(int command_id) {
 void AutofillContextMenuManager::ExecuteAutofillFeedbackCommand(
     const LocalFrameToken& frame_token,
     AutofillManager& manager) {
+  // The cast is safe since the context menu is only available on Desktop.
+  auto& client = static_cast<ContentAutofillClient&>(manager.client());
+  Browser* browser = chrome::FindBrowserWithTab(&client.GetWebContents());
   chrome::ShowFeedbackPage(
-      browser_, chrome::kFeedbackSourceAutofillContextMenu,
+      browser, chrome::kFeedbackSourceAutofillContextMenu,
       /*description_template=*/std::string(),
       /*description_placeholder_text=*/kFeedbackPlaceholder,
       /*category_tag=*/"dogfood_autofill_feedback",
@@ -219,9 +219,8 @@ void AutofillContextMenuManager::ExecuteAutofillFeedbackCommand(
           LoadTriggerFormAndFieldLogs(manager, frame_token, params_)));
 }
 
-void AutofillContextMenuManager::
-    ExecuteFallbackForAutocompleteUnrecognizedCommand(
-        AutofillManager& manager) {
+void AutofillContextMenuManager::ExecuteFallbackForAddressesCommand(
+    AutofillManager& manager) {
   auto& driver = static_cast<ContentAutofillDriver&>(manager.driver());
   if (!ShouldAddAddressManualFallbackForAutocompleteUnrecognized(driver)) {
     // Do nothing if the target field is not on address form field with
@@ -244,6 +243,15 @@ void AutofillContextMenuManager::
       .ContextMenuEntryAccepted(
           /*address_field_has_ac_unrecognized=*/field
               ->ShouldSuppressSuggestionsAndFillingByDefault());
+}
+
+void AutofillContextMenuManager::ExecuteFallbackForPaymentsCommand(
+    AutofillManager& manager) {
+  auto& driver = static_cast<ContentAutofillDriver&>(manager.driver());
+  driver.browser_events().RendererShouldTriggerSuggestions(
+      FieldGlobalId(driver.GetFrameToken(),
+                    FieldRendererId(params_.field_renderer_id)),
+      AutofillSuggestionTriggerSource::kManualFallbackPayments);
 }
 
 void AutofillContextMenuManager::MaybeAddAutofillManualFallbackItems(
@@ -327,7 +335,11 @@ void AutofillContextMenuManager::LogManualFallbackContextMenuEntryShown(
     ContentAutofillDriver& driver) {
   AutofillField* field =
       GetAutofillField(driver.GetAutofillManager(), driver.GetFrameToken());
-  CHECK(field);
+  if (!field) {
+    // `field` can be null when the user clicks on the correct input form field,
+    // which is not extracted by the BrowserAutofillManager.
+    return;
+  }
 
   static_cast<BrowserAutofillManager&>(driver.GetAutofillManager())
       .GetAutocompleteUnrecognizedFallbackEventLogger()

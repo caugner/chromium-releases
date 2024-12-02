@@ -176,6 +176,7 @@
 #include "third_party/blink/renderer/core/editing/markers/document_marker_controller.h"
 #include "third_party/blink/renderer/core/editing/position_with_affinity.h"
 #include "third_party/blink/renderer/core/editing/serializers/serialization.h"
+#include "third_party/blink/renderer/core/event_type_names.h"
 #include "third_party/blink/renderer/core/events/before_unload_event.h"
 #include "third_party/blink/renderer/core/events/event_factory.h"
 #include "third_party/blink/renderer/core/events/event_util.h"
@@ -201,6 +202,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/page_dismissal_scope.h"
 #include "third_party/blink/renderer/core/frame/performance_monitor.h"
+#include "third_party/blink/renderer/core/frame/picture_in_picture_controller.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/viewport_data.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
@@ -229,6 +231,7 @@
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 #include "third_party/blink/renderer/core/html/html_head_element.h"
 #include "third_party/blink/renderer/core/html/html_html_element.h"
+#include "third_party/blink/renderer/core/html/html_image_element.h"
 #include "third_party/blink/renderer/core/html/html_link_element.h"
 #include "third_party/blink/renderer/core/html/html_meta_element.h"
 #include "third_party/blink/renderer/core/html/html_object_element.h"
@@ -243,8 +246,6 @@
 #include "third_party/blink/renderer/core/html/parser/text_resource_decoder.h"
 #include "third_party/blink/renderer/core/html/parser/text_resource_decoder_builder.h"
 #include "third_party/blink/renderer/core/html/plugin_document.h"
-#include "third_party/blink/renderer/core/html/portal/document_portals.h"
-#include "third_party/blink/renderer/core/html/portal/portal_contents.h"
 #include "third_party/blink/renderer/core/html/window_name_collection.h"
 #include "third_party/blink/renderer/core/html_element_factory.h"
 #include "third_party/blink/renderer/core/html_element_type_helpers.h"
@@ -310,6 +311,7 @@
 #include "third_party/blink/renderer/core/script/detect_javascript_frameworks.h"
 #include "third_party/blink/renderer/core/script/script_runner.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
+#include "third_party/blink/renderer/core/scroll/snap_event.h"
 #include "third_party/blink/renderer/core/speculation_rules/document_speculation_rules.h"
 #include "third_party/blink/renderer/core/svg/svg_document_extensions.h"
 #include "third_party/blink/renderer/core/svg/svg_script_element.h"
@@ -844,8 +846,10 @@ Document::Document(const DocumentInit& initializer,
               : nullptr),
       data_(MakeGarbageCollected<DocumentData>(GetExecutionContext())) {
   DCHECK(agent_);
-  if (base::FeatureList::IsEnabled(features::kDelayAsyncScriptExecution))
+  if (base::FeatureList::IsEnabled(features::kDelayAsyncScriptExecution) &&
+      features::kDelayAsyncScriptExecutionDelayByDefaultParam.Get()) {
     script_runner_delayer_->Activate();
+  }
 
   if (GetFrame()) {
     DCHECK(GetFrame()->GetPage());
@@ -2348,7 +2352,7 @@ void Document::UpdateStyle() {
 
   LayoutView* layout_view = GetLayoutView();
   layout_view->UpdateMarkersAndCountersAfterStyleChange();
-  layout_view->RecalcLayoutOverflow();
+  layout_view->RecalcScrollableOverflow();
 
 #if DCHECK_IS_ON()
   AssertNodeClean(*this);
@@ -2658,12 +2662,8 @@ void Document::UpdateStyleAndLayout(DocumentUpdateReason reason) {
   if (LocalFrameView* frame_view_anchored = View())
     frame_view_anchored->PerformScrollAnchoringAdjustments();
 
-  if (RuntimeEnabledFeatures::LayoutNewSnapLogicEnabled()) {
-    if (frame_view) {
-      frame_view->ExecutePendingSnapUpdates();
-    }
-  } else {
-    PerformScrollSnappingTasks();
+  if (frame_view) {
+    frame_view->ExecutePendingSnapUpdates();
   }
 
   if (reason != DocumentUpdateReason::kBeginMainFrame && frame_view)
@@ -2944,7 +2944,9 @@ void Document::Shutdown() {
     }
   }
 
-  GetFontMatchingMetrics()->PublishAllMetrics();
+  if (font_matching_metrics_) {
+    font_matching_metrics_->PublishAllMetrics();
+  }
 
   GetViewportData().Shutdown();
 
@@ -3855,10 +3857,6 @@ void Document::ImplicitClose() {
   if (SvgExtensions())
     AccessSVGExtensions().StartAnimations();
 
-  if (lazy_load_image_observer_) {
-    lazy_load_image_observer_->DocumentOnLoadFinished(this);
-  }
-
   if (base::FeatureList::IsEnabled(
           blink::features::kSpeculativeServiceWorkerWarmUp)) {
     if (auto* observer =
@@ -3879,13 +3877,6 @@ static bool AllDescendantsAreComplete(Document* document) {
       return false;
   }
 
-  if (auto* portals = DocumentPortals::Get(*document)) {
-    for (PortalContents* portal : portals->GetPortals()) {
-      auto* portal_frame = portal->GetFrame();
-      if (portal_frame && portal_frame->IsLoading())
-        return false;
-    }
-  }
   return true;
 }
 
@@ -4740,6 +4731,10 @@ bool Document::IsHttpRefreshScheduledWithin(base::TimeDelta interval) {
   return http_refresh_scheduler_->IsScheduledWithin(interval);
 }
 
+bool Document::HasDocumentPictureInPictureWindow() const {
+  return PictureInPictureController::HasDocumentPictureInPictureWindow(*this);
+}
+
 network::mojom::ReferrerPolicy Document::GetReferrerPolicy() const {
   return GetExecutionContext() ? GetExecutionContext()->GetReferrerPolicy()
                                : network::mojom::ReferrerPolicy::kDefault;
@@ -4989,6 +4984,42 @@ void Document::ObserveForIntrinsicSize(Element* element) {
 void Document::UnobserveForIntrinsicSize(Element* element) {
   if (intrinsic_size_observer_)
     intrinsic_size_observer_->unobserve(element);
+}
+
+class LazyLoadedAutoSizedImgResizeObserverDelegate final
+    : public ResizeObserver::Delegate {
+  void OnResize(const HeapVector<Member<ResizeObserverEntry>>& entries) final {
+    for (const auto& entry : entries) {
+      DCHECK(entry->contentRect());
+      if (auto* img = DynamicTo<HTMLImageElement>(entry->target())) {
+        img->OnResize();
+      }
+    }
+  }
+
+  ResizeObserver::DeliveryTime Delivery() const final {
+    return ResizeObserver::DeliveryTime::kBeforeOthers;
+  }
+};
+
+ResizeObserver& Document::GetLazyLoadedAutoSizedImgObserver() {
+  if (!lazy_loaded_auto_sized_img_observer_) {
+    lazy_loaded_auto_sized_img_observer_ = ResizeObserver::Create(
+        domWindow(),
+        MakeGarbageCollected<LazyLoadedAutoSizedImgResizeObserverDelegate>());
+  }
+
+  return *lazy_loaded_auto_sized_img_observer_;
+}
+
+void Document::ObserveForLazyLoadedAutoSizedImg(HTMLImageElement* img) {
+  GetLazyLoadedAutoSizedImgObserver().observe(img);
+}
+
+void Document::UnobserveForLazyLoadedAutoSizedImg(HTMLImageElement* img) {
+  if (lazy_loaded_auto_sized_img_observer_) {
+    lazy_loaded_auto_sized_img_observer_->unobserve(img);
+  }
 }
 
 Document* Document::CloneDocumentWithoutChildren() const {
@@ -5795,6 +5826,23 @@ void Document::EnqueueOverscrollEventForNode(Node* target,
   scripted_animation_controller_->EnqueuePerFrameEvent(overscroll_event);
 }
 
+void Document::EnqueueSnapChangedEvent(Node* target,
+                                       HeapVector<Member<Node>>& snap_targets) {
+  Event* snapchanged_event =
+      SnapEvent::Create(event_type_names::kSnapchanged, snap_targets);
+  snapchanged_event->SetTarget(target);
+  scripted_animation_controller_->EnqueuePerFrameEvent(snapchanged_event);
+}
+
+void Document::EnqueueSnapChangingEvent(
+    Node* target,
+    HeapVector<Member<Node>>& snap_targets) {
+  Event* snapchanging_event =
+      SnapEvent::Create(event_type_names::kSnapchanging, snap_targets);
+  snapchanging_event->SetTarget(target);
+  scripted_animation_controller_->EnqueuePerFrameEvent(snapchanging_event);
+}
+
 void Document::EnqueueResizeEvent() {
   Event* event = Event::Create(event_type_names::kResize);
   event->SetTarget(domWindow());
@@ -5841,7 +5889,7 @@ Event* Document::createEvent(ScriptState* script_state,
   Event* event = nullptr;
   ExecutionContext* execution_context = ExecutionContext::From(script_state);
   for (const auto& factory : EventFactories()) {
-    event = factory->Create(execution_context, event_type);
+    event = factory->Create(script_state, execution_context, event_type);
     if (event) {
       // createEvent for TouchEvent should throw DOM exception if touch event
       // feature detection is not enabled. See crbug.com/392584#c22
@@ -6233,8 +6281,19 @@ net::SiteForCookies Document::SiteForCookies() const {
   if (!origin)
     return net::SiteForCookies();
 
-  net::SiteForCookies candidate =
-      net::SiteForCookies::FromOrigin(origin->ToUrlOrigin());
+  // Fake a 1P site for cookies for top-level documents that are rendering media
+  // like images or video. We do so because when third-party cookie blocking is
+  // enabled, access-controlled media cannot be rendered. We only make this
+  // exception in this special case to minimize security/privacy risk.
+  url::Origin url_origin = origin->ToUrlOrigin();
+  if (url_origin.opaque() &&
+      !url_origin.GetTupleOrPrecursorTupleIfOpaque().host().empty() &&
+      override_site_for_cookies_for_csp_media_) {
+    return net::SiteForCookies::FromOrigin(url::Origin::Create(
+        url_origin.GetTupleOrPrecursorTupleIfOpaque().GetURL()));
+  }
+
+  net::SiteForCookies candidate = net::SiteForCookies::FromOrigin(url_origin);
 
   if (SchemeRegistry::ShouldTreatURLSchemeAsFirstPartyWhenTopLevel(
           origin->Protocol())) {
@@ -7389,6 +7448,14 @@ void Document::MaybeExecuteDelayedAsyncScripts(
         script_runner_delayer_->Activate();
       }
       break;
+    case features::DelayAsyncScriptDelayType::kTillFirstLcpCandidate:
+      // Notify the ScriptRunner if a LCP candidate is reported.
+      if (milestone == MilestoneForDelayedAsyncScript::kLcpCandidate) {
+        // Flush all async scripts that are already prepared but forced to be
+        // delayed.
+        script_runner_delayer_->Deactivate();
+      }
+      break;
   }
 }
 
@@ -7876,8 +7943,10 @@ Document::EnsureDocumentExplicitRootIntersectionObserverData() {
 }
 
 const ScriptRegexp& Document::EnsureEmailRegexp() const {
-  if (!data_->email_regexp_)
-    data_->email_regexp_ = EmailInputType::CreateEmailRegexp();
+  if (!data_->email_regexp_) {
+    data_->email_regexp_ =
+        EmailInputType::CreateEmailRegexp(GetAgent().isolate());
+  }
   return *data_->email_regexp_;
 }
 
@@ -7898,8 +7967,7 @@ void Document::AddConsoleMessage(ConsoleMessage* message,
 
 void Document::AddToTopLayer(Element* element, const Element* before) {
   if (element->IsInTopLayer()) {
-    if (RuntimeEnabledFeatures::CSSTopLayerForTransitionsEnabled() &&
-        IsScheduledForTopLayerRemoval(element)) {
+    if (IsScheduledForTopLayerRemoval(element)) {
       // Since the html spec currently says close() should remove the dialog
       // element from the top layer immediately, we need to remove any
       // transitioning elements out of the top layer in order to keep the
@@ -7936,10 +8004,6 @@ void Document::AddToTopLayer(Element* element, const Element* before) {
 
 void Document::ScheduleForTopLayerRemoval(Element* element,
                                           TopLayerReason reason) {
-  if (!RuntimeEnabledFeatures::CSSTopLayerForTransitionsEnabled()) {
-    RemoveFromTopLayerImmediately(element);
-    return;
-  }
   if (!element->IsInTopLayer()) {
     return;
   }
@@ -7965,7 +8029,6 @@ void Document::RemoveFinishedTopLayerElements() {
   if (top_layer_elements_pending_removal_.empty()) {
     return;
   }
-  DCHECK(RuntimeEnabledFeatures::CSSTopLayerForTransitionsEnabled());
   HeapVector<Member<Element>> to_remove;
   for (const auto& pending_removal : top_layer_elements_pending_removal_) {
     Element* element = pending_removal->element;
@@ -7986,12 +8049,10 @@ void Document::RemoveFromTopLayerImmediately(Element* element) {
   wtf_size_t position = top_layer_elements_.Find(element);
   DCHECK_NE(position, kNotFound);
   top_layer_elements_.EraseAt(position);
-  if (RuntimeEnabledFeatures::CSSTopLayerForTransitionsEnabled()) {
-    for (unsigned i = 0; i < top_layer_elements_pending_removal_.size(); i++) {
-      if (top_layer_elements_pending_removal_[i]->element == element) {
-        top_layer_elements_pending_removal_.EraseAt(i);
-        break;
-      }
+  for (unsigned i = 0; i < top_layer_elements_pending_removal_.size(); i++) {
+    if (top_layer_elements_pending_removal_[i]->element == element) {
+      top_layer_elements_pending_removal_.EraseAt(i);
+      break;
     }
   }
   element->SetIsInTopLayer(false);
@@ -8190,21 +8251,6 @@ bool Document::ForceSynchronousParsingForTesting() {
   return g_force_synchronous_parsing_for_testing;
 }
 
-SnapCoordinator& Document::GetSnapCoordinator() {
-  if (!snap_coordinator_)
-    snap_coordinator_ = MakeGarbageCollected<SnapCoordinator>();
-
-  return *snap_coordinator_;
-}
-
-void Document::PerformScrollSnappingTasks() {
-  DCHECK(!RuntimeEnabledFeatures::LayoutNewSnapLogicEnabled());
-  SnapCoordinator& snap_coordinator = GetSnapCoordinator();
-  if (!snap_coordinator.AnySnapContainerDataNeedsUpdate())
-    return;
-  snap_coordinator.UpdateAllSnapContainerDataIfNeeded();
-}
-
 void Document::UpdateHoverActiveState(bool is_active,
                                       bool update_active_chain,
                                       Element* inner_element) {
@@ -8356,13 +8402,11 @@ Locale& Document::GetCachedLocale(const AtomicString& locale) {
 }
 
 AnimationClock& Document::GetAnimationClock() {
-  DCHECK(GetPage());
-  return GetPage()->Animator().Clock();
+  return animation_clock_;
 }
 
 const AnimationClock& Document::GetAnimationClock() const {
-  DCHECK(GetPage());
-  return GetPage()->Animator().Clock();
+  return animation_clock_;
 }
 
 Document& Document::EnsureTemplateDocument() {
@@ -8391,14 +8435,19 @@ Document& Document::EnsureTemplateDocument() {
   return *template_document_.Get();
 }
 
-void Document::DidAddOrRemoveFormRelatedElement(Element* element) {
-  if (!GetFrame() || !GetFrame()->GetPage() || !HasFinishedParsing())
+void Document::DidChangeFormRelatedElementDynamically(
+    HTMLElement* element,
+    WebFormRelatedChangeType form_related_change) {
+  if (!GetFrame() || !GetFrame()->GetPage() || !HasFinishedParsing() ||
+      !GetFrame()->IsAttached()) {
     return;
+  }
 
   GetFrame()
       ->GetPage()
       ->GetChromeClient()
-      .DidAddOrRemoveFormRelatedElementsAfterLoad(GetFrame());
+      .DidChangeFormRelatedElementDynamically(GetFrame(), element,
+                                              form_related_change);
 }
 
 float Document::DevicePixelRatio() const {
@@ -8758,6 +8807,14 @@ StylePropertyMapReadOnly* Document::RemoveComputedStyleMapItem(
   return element_computed_style_map_.Take(element);
 }
 
+void Document::DelayAsyncScriptExecution() {
+  script_runner_delayer_->Activate();
+}
+
+void Document::ResumeAsyncScriptExecution() {
+  script_runner_delayer_->Deactivate();
+}
+
 void Document::Trace(Visitor* visitor) const {
   visitor->Trace(doc_type_);
   visitor->Trace(implementation_);
@@ -8822,7 +8879,6 @@ void Document::Trace(Visitor* visitor) const {
   visitor->Trace(agent_);
   visitor->Trace(canvas_font_cache_);
   visitor->Trace(intersection_observer_controller_);
-  visitor->Trace(snap_coordinator_);
   visitor->Trace(property_registry_);
   visitor->Trace(policy_);
   visitor->Trace(slot_assignment_engine_);
@@ -8841,6 +8897,7 @@ void Document::Trace(Visitor* visitor) const {
   visitor->Trace(meta_theme_color_elements_);
   visitor->Trace(unassociated_listed_elements_);
   visitor->Trace(intrinsic_size_observer_);
+  visitor->Trace(lazy_loaded_auto_sized_img_observer_);
   visitor->Trace(anchor_element_interaction_tracker_);
   visitor->Trace(focused_element_change_observers_);
   visitor->Trace(pending_link_header_preloads_);
@@ -9018,6 +9075,12 @@ bool Document::InDarkMode() {
              mojom::blink::PreferredColorScheme::kDark;
 }
 
+const ui::ColorProvider* Document::GetColorProviderForPainting(
+    mojom::blink::ColorScheme color_scheme) const {
+  return GetPage()->GetColorProviderForPainting(
+      color_scheme, in_forced_colors_mode_);
+}
+
 void Document::CountUse(mojom::WebFeature feature) const {
   if (execution_context_)
     execution_context_->CountUse(feature);
@@ -9097,8 +9160,6 @@ void Document::ActivateForPrerendering(
     const mojom::blink::PrerenderPageActivationParams& params) {
   TRACE_EVENT0("navigation", "Document::ActivateForPrerendering");
 
-  // TODO(bokan): Portals will change this assumption since they mean an active
-  // document can be "adopted" into a portal.
   DCHECK(is_prerendering_);
   is_prerendering_ = false;
 
@@ -9143,9 +9204,22 @@ void Document::RunPostPrerenderingActivationSteps() {
   post_prerendering_activation_callbacks_.clear();
 }
 
+void Document::AddLCPPredictedCallback(LCPCallback callback) {
+  lcp_predicted_callbacks_.push_back(std::move(callback));
+}
+
+void Document::RunLCPPredictedCallbacks(const Element& lcp_element) {
+  Vector<LCPCallback> callbacks;
+  callbacks.swap(lcp_predicted_callbacks_);
+  for (auto& callback : callbacks) {
+    std::move(callback).Run(lcp_element);
+  }
+}
+
 bool Document::InStyleRecalc() const {
   return lifecycle_.GetState() == DocumentLifecycle::kInStyleRecalc ||
          style_engine_->InContainerQueryStyleRecalc() ||
+         style_engine_->InPositionFallbackStyleRecalc() ||
          style_engine_->InEnsureComputedStyle();
 }
 
@@ -9249,10 +9323,7 @@ void Document::EnqueuePageRevealEvent() {
   CHECK(RuntimeEnabledFeatures::PageRevealEventEnabled());
   CHECK(dom_window_);
 
-  DOMViewTransition* dom_view_transition =
-      ViewTransitionUtils::GetTransitionScriptDelegate(*this);
-  auto* page_reveal_event =
-      MakeGarbageCollected<PageRevealEvent>(dom_view_transition);
+  auto* page_reveal_event = MakeGarbageCollected<PageRevealEvent>();
   page_reveal_event->SetTarget(dom_window_);
   page_reveal_event->SetCurrentTarget(dom_window_);
   EnqueueAnimationFrameEvent(page_reveal_event);
@@ -9268,6 +9339,14 @@ Resource* Document::GetPendingLinkPreloadForTesting(const KURL& url) {
   return nullptr;
 }
 
+void Document::SetLcpElementFoundInHtml(bool found) {
+  data_->lcpp_encountered_lcp_in_html = found;
+}
+
+bool Document::IsLcpElementFoundInHtml() {
+  return data_->lcpp_encountered_lcp_in_html;
+}
+
 // static
 Document* Document::parseHTMLUnsafe(ExecutionContext* context,
                                     const String& html) {
@@ -9281,6 +9360,15 @@ Document* Document::parseHTMLUnsafe(ExecutionContext* context,
   doc->SetContent(html);
   doc->SetMimeType(AtomicString(kTextHtml));
   return doc;
+}
+
+void Document::SetOverrideSiteForCookiesForCSPMedia(bool value) {
+  CHECK(IsMediaDocument());
+  // Only top-level documents can use this method.
+  if (!GetFrame() || !GetFrame()->IsMainFrame()) {
+    return;
+  }
+  override_site_for_cookies_for_csp_media_ = value;
 }
 
 template class CORE_TEMPLATE_EXPORT Supplement<Document>;

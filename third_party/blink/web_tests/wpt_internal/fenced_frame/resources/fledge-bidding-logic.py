@@ -50,9 +50,12 @@ def main(request, response):
     register_ad_beacon = ''
     if automatic_beacon is not None:
         register_ad_beacon = ('''registerAdBeacon({
-        'reserved.top_navigation':
+        'reserved.top_navigation_start':
         browserSignals.interestGroupOwner +
-        '/wpt_internal/fenced_frame/resources/automatic-beacon-store.py'
+        '/wpt_internal/fenced_frame/resources/automatic-beacon-store.py?type=reserved.top_navigation_start',
+        'reserved.top_navigation_commit':
+        browserSignals.interestGroupOwner +
+        '/wpt_internal/fenced_frame/resources/automatic-beacon-store.py?type=reserved.top_navigation_commit'
       });
     ''')
 

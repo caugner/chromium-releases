@@ -167,7 +167,7 @@ std::unique_ptr<net::CanonicalCookie> ToCanonicalCookie(
           path.Utf8(), base::Time() /*creation*/, expires,
           base::Time() /*last_access*/, true /*secure*/, false /*http_only*/,
           same_site, net::CookiePriority::COOKIE_PRIORITY_DEFAULT,
-          /*same_party=*/false, cookie_partition_key, &status_out);
+          cookie_partition_key, &status_out);
 
   // TODO(crbug.com/1310444): Improve serialization validation comments and
   // associate them with ExceptionState codes.
@@ -436,11 +436,18 @@ ScriptPromise CookieStore::DoRead(
     return ScriptPromise();
   }
 
+  bool is_ad_tagged = false;
+  if (auto* window = DynamicTo<LocalDOMWindow>(context)) {
+    if (auto* local_frame = window->GetFrame()) {
+      is_ad_tagged = local_frame->IsAdFrame();
+    }
+  }
+
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(
       script_state, exception_state.GetContext());
   backend_->GetAllForUrl(
       cookie_url, default_site_for_cookies_, default_top_frame_origin_,
-      context->HasStorageAccess(), std::move(backend_options),
+      context->HasStorageAccess(), std::move(backend_options), is_ad_tagged,
       WTF::BindOnce(backend_result_converter, WrapPersistent(resolver)));
   return resolver->Promise();
 }

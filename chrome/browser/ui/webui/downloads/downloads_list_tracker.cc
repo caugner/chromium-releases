@@ -76,6 +76,8 @@ downloads::mojom::DangerType GetDangerType(
       return downloads::mojom::DangerType::kPotentiallyUnwanted;
     case download::DOWNLOAD_DANGER_TYPE_ASYNC_SCANNING:
       return downloads::mojom::DangerType::kAsyncScanning;
+    case download::DOWNLOAD_DANGER_TYPE_ASYNC_LOCAL_PASSWORD_SCANNING:
+      return downloads::mojom::DangerType::kAsyncLocalPasswordScanning;
     case download::DOWNLOAD_DANGER_TYPE_BLOCKED_PASSWORD_PROTECTED:
       return downloads::mojom::DangerType::kBlockedPasswordProtected;
     case download::DOWNLOAD_DANGER_TYPE_BLOCKED_TOO_LARGE:
@@ -133,9 +135,11 @@ std::u16string GetFormattedDisplayUrl(const GURL& url) {
   std::u16string result = url_formatter::FormatUrlForSecurityDisplay(url);
   // Truncate long URL to avoid surpassing mojo data limit (c.f.
   // crbug.com/1070451). If it's really this long, the user won't be able to see
-  // the end of it anyway.
+  // the whole thing anyway. We truncate the beginning so that the end of it is
+  // shown, which contains the eTLD+1.
+  // Note: This may truncate the scheme part of the URL.
   if (result.size() > url::kMaxURLChars) {
-    result.resize(url::kMaxURLChars);
+    result = result.substr(result.size() - url::kMaxURLChars);
   }
   return result;
 }
@@ -328,6 +332,10 @@ downloads::mojom::DataPtr DownloadsListTracker::CreateDownloadData(
           download::DOWNLOAD_DANGER_TYPE_PROMPT_FOR_SCANNING) {
         state = downloads::mojom::State::kPromptForScanning;
       } else if (download_item->GetDangerType() ==
+                 download::
+                     DOWNLOAD_DANGER_TYPE_PROMPT_FOR_LOCAL_PASSWORD_SCANNING) {
+        state = downloads::mojom::State::kPromptForLocalPasswordScanning;
+      } else if (download_item->GetDangerType() ==
                  download::DOWNLOAD_DANGER_TYPE_ASYNC_SCANNING) {
         state = downloads::mojom::State::kAsyncScanning;
       } else if (download_item->IsDangerous()) {
@@ -396,15 +404,13 @@ downloads::mojom::DataPtr DownloadsListTracker::CreateDownloadData(
   file_value->retry = retry;
   file_value->state = *state;
 
+  // Note that the safe_browsing_state is the state of the download's profile
+  // *now* whereas the presence of a verdict was determined when the download
+  // happened, so they are not necessarily related.
   file_value->safe_browsing_state =
       GetSafeBrowsingState(download_model.profile());
   file_value->has_safe_browsing_verdict =
       WasSafeBrowsingVerdictObtained(download_item);
-  // If there is no safe browsing protection, the item should not have a safe
-  // browsing verdict.
-  CHECK(!file_value->has_safe_browsing_verdict ||
-        file_value->safe_browsing_state !=
-            downloads::mojom::SafeBrowsingState::kNoSafeBrowsing);
 
   return file_value;
 }

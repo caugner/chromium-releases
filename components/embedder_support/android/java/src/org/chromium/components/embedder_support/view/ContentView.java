@@ -28,6 +28,7 @@ import androidx.annotation.Nullable;
 import org.chromium.base.ObserverList;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.compat.ApiHelperForO;
+import org.chromium.components.embedder_support.util.TouchEventFilter;
 import org.chromium.content_public.browser.ImeAdapter;
 import org.chromium.content_public.browser.RenderCoordinates;
 import org.chromium.content_public.browser.SmartClipProvider;
@@ -51,15 +52,17 @@ import java.util.function.Supplier;
  * In other words, any children added to this are *not* accessible.
  */
 public class ContentView extends FrameLayout
-        implements ViewEventSink.InternalAccessDelegate, SmartClipProvider,
-                   OnHierarchyChangeListener, OnSystemUiVisibilityChangeListener, OnDragListener,
-                   DragEventDispatchDestination {
+        implements ViewEventSink.InternalAccessDelegate,
+                SmartClipProvider,
+                OnHierarchyChangeListener,
+                OnSystemUiVisibilityChangeListener,
+                OnDragListener,
+                DragEventDispatchDestination {
     // Default value to signal that the ContentView's size need not be overridden.
     public static final int DEFAULT_MEASURE_SPEC =
             MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
 
-    @Nullable
-    private WebContents mWebContents;
+    @Nullable private WebContents mWebContents;
     private boolean mIsObscuredForAccessibility;
     private final ObserverList<OnHierarchyChangeListener> mHierarchyChangeListeners =
             new ObserverList<>();
@@ -67,18 +70,17 @@ public class ContentView extends FrameLayout
             new ObserverList<>();
     private final ObserverList<OnDragListener> mOnDragListeners = new ObserverList<>();
     private ViewEventSink mViewEventSink;
-    @Nullable
-    private Supplier<PointerIcon> mStylusWritingIconSupplier;
+    @Nullable private Supplier<PointerIcon> mStylusWritingIconSupplier;
 
     /**
      * The desired size of this view in {@link MeasureSpec}. Set by the host
      * when it should be different from that of the parent.
      */
     private int mDesiredWidthMeasureSpec = DEFAULT_MEASURE_SPEC;
+
     private int mDesiredHeightMeasureSpec = DEFAULT_MEASURE_SPEC;
 
-    @Nullable
-    private final EventOffsetHandler mEventOffsetHandler;
+    @Nullable private final EventOffsetHandler mEventOffsetHandler;
     private EventOffsetHandler mDragDropEventOffsetHandler;
     private boolean mDeferKeepScreenOnChanges;
     private Boolean mPendingKeepScreenOnValue;
@@ -90,8 +92,10 @@ public class ContentView extends FrameLayout
      * @param webContents The WebContents managing this content view.
      * @return an instance of a ContentView.
      */
-    public static ContentView createContentView(Context context,
-            @Nullable EventOffsetHandler eventOffsetHandler, @Nullable WebContents webContents) {
+    public static ContentView createContentView(
+            Context context,
+            @Nullable EventOffsetHandler eventOffsetHandler,
+            @Nullable WebContents webContents) {
         return new ContentView(context, eventOffsetHandler, webContents);
     }
 
@@ -126,8 +130,9 @@ public class ContentView extends FrameLayout
     }
 
     protected WebContentsAccessibility getWebContentsAccessibility() {
-        return webContentsAttached() ? WebContentsAccessibility.fromWebContents(mWebContents)
-                                     : null;
+        return webContentsAttached()
+                ? WebContentsAccessibility.fromWebContents(mWebContents)
+                : null;
     }
 
     public WebContents getWebContents() {
@@ -151,9 +156,7 @@ public class ContentView extends FrameLayout
         if (wasObscured) setIsObscuredForAccessibility(true);
     }
 
-    /**
-     * Control whether WebContentsAccessibility will respond to accessibility requests.
-     */
+    /** Control whether WebContentsAccessibility will respond to accessibility requests. */
     public void setIsObscuredForAccessibility(boolean isObscured) {
         if (mIsObscuredForAccessibility == isObscured) return;
         mIsObscuredForAccessibility = isObscured;
@@ -183,7 +186,7 @@ public class ContentView extends FrameLayout
      */
     public void setEventOffsetHandlerForDragDrop(EventOffsetHandler handler) {
         assert mDragDropEventOffsetHandler == null || handler == null
-            : "Non-null DragDropEventOffsetHandler was overwritten with another.";
+                : "Non-null DragDropEventOffsetHandler was overwritten with another.";
         mDragDropEventOffsetHandler = handler;
     }
 
@@ -401,6 +404,7 @@ public class ContentView extends FrameLayout
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        if (TouchEventFilter.hasInvalidToolType(event)) return false;
         EventForwarder forwarder = getEventForwarder();
         boolean ret = forwarder != null ? forwarder.onTouchEvent(event) : false;
         if (mEventOffsetHandler != null) mEventOffsetHandler.onTouchEvent(event);

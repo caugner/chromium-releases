@@ -22,6 +22,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
+#include "components/content_settings/core/common/features.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/feature_engagement/public/feature_constants.h"
 #include "components/privacy_sandbox/privacy_sandbox_features.h"
@@ -104,9 +105,28 @@ base::test::FeatureRefAndParams ControlFeatures() {
            {tpcd::experiment::kForceEligibleForTestingName, "true"}}};
 }
 
+base::test::FeatureRefAndParams ControlFeaturesWithSilentOnboarding() {
+  return {features::kCookieDeprecationFacilitatedTesting,
+          {
+              {tpcd::experiment::kDisable3PCookiesName, "false"},
+              {tpcd::experiment::kForceEligibleForTestingName, "true"},
+              {tpcd::experiment::kEnableSilentOnboardingName, "true"},
+          }};
+}
+
 std::vector<base::test::FeatureRefAndParams> HatsImmediateControlFeatures() {
   return {
       ControlFeatures(),
+      {features::kTrackingProtectionSentimentSurvey,
+       {{"tracking-protection-immediate-over-delayed-probability", "1"},
+        {"tracking-protection-control-immediate-probability", "1.0"},
+        {"tracking-protection-control-immediate-trigger-id", "trigger-1"}}}};
+}
+
+std::vector<base::test::FeatureRefAndParams>
+HatsImmediateControlFeaturesWithSilentOnboarding() {
+  return {
+      ControlFeaturesWithSilentOnboarding(),
       {features::kTrackingProtectionSentimentSurvey,
        {{"tracking-protection-immediate-over-delayed-probability", "1"},
         {"tracking-protection-control-immediate-probability", "1.0"},
@@ -157,13 +177,45 @@ std::vector<base::test::FeatureRefAndParams> HatsDelayedModeBPrimeFeatures() {
         {"tracking-protection-treatment-delayed-trigger-id", "trigger-1"}}}};
 }
 
+void ExpectSurveyGroupHistogramEmitted(
+    TrackingProtectionOnboarding::SentimentSurveyGroup group,
+    base::HistogramTester* histogram_tester) {
+  TrackingProtectionOnboarding::SentimentSurveyGroupMetrics metric_group;
+  switch (group) {
+    case TrackingProtectionOnboarding::SentimentSurveyGroup::kNotSet:
+      return;
+    case TrackingProtectionOnboarding::SentimentSurveyGroup::kControlImmediate:
+      metric_group = TrackingProtectionOnboarding::SentimentSurveyGroupMetrics::
+          kControlImmediate;
+      break;
+    case TrackingProtectionOnboarding::SentimentSurveyGroup::kControlDelayed:
+      metric_group = TrackingProtectionOnboarding::SentimentSurveyGroupMetrics::
+          kControlDelayed;
+      break;
+    case TrackingProtectionOnboarding::SentimentSurveyGroup::
+        kTreatmentImmediate:
+      metric_group = TrackingProtectionOnboarding::SentimentSurveyGroupMetrics::
+          kTreatmentImmediate;
+      break;
+    case TrackingProtectionOnboarding::SentimentSurveyGroup::kTreatmentDelayed:
+      metric_group = TrackingProtectionOnboarding::SentimentSurveyGroupMetrics::
+          kTreatmentDelayed;
+  }
+
+  histogram_tester->ExpectBucketCount(
+      "PrivacySandbox.TrackingProtection.SentimentSurvey."
+      "HatsGroupRegisteredAndEligible",
+      metric_group, 1);
+}
+
 }  // namespace
 
 class TrackingProtectionBaseNoticeBrowserTest : public InProcessBrowserTest {
  protected:
   explicit TrackingProtectionBaseNoticeBrowserTest(
-      const std::vector<base::test::FeatureRef>& enabled_features) {
-    feature_list_.InitAndEnableFeatures(enabled_features);
+      const std::vector<base::test::FeatureRef>& enabled_features,
+      const std::vector<base::test::FeatureRef>& disabled_features = {}) {
+    feature_list_.InitAndEnableFeatures(enabled_features, disabled_features);
   }
 
   void SetUpOnMainThread() override {
@@ -186,6 +238,7 @@ class TrackingProtectionBaseNoticeBrowserTest : public InProcessBrowserTest {
   }
 
   virtual std::vector<base::test::FeatureRef> EnabledFeatures() = 0;
+  virtual std::vector<base::test::FeatureRef> DisabledFeatures() = 0;
 
   net::EmbeddedTestServer https_server_{net::EmbeddedTestServer::TYPE_HTTPS};
   base::HistogramTester histogram_tester_;
@@ -198,11 +251,17 @@ class TrackingProtectionOnboardingNoticeBrowserTest
     : public TrackingProtectionBaseNoticeBrowserTest {
  protected:
   TrackingProtectionOnboardingNoticeBrowserTest()
-      : TrackingProtectionBaseNoticeBrowserTest(EnabledFeatures()) {}
+      : TrackingProtectionBaseNoticeBrowserTest(EnabledFeatures(),
+                                                DisabledFeatures()) {}
 
   std::vector<base::test::FeatureRef> EnabledFeatures() override {
     return {feature_engagement::kIPHTrackingProtectionOnboardingFeature,
             feature_engagement::kIPHTrackingProtectionOffboardingFeature};
+  }
+
+  std::vector<base::test::FeatureRef> DisabledFeatures() override {
+    return {privacy_sandbox::kTrackingProtectionOnboardingRollback,
+            features::kCookieDeprecationFacilitatedTesting};
   }
 
   bool IsOnboardingPromoActive(Browser* browser) {
@@ -665,12 +724,19 @@ class TrackingProtectionOffboardingNoticeBrowserTest
     : public TrackingProtectionBaseNoticeBrowserTest {
  protected:
   TrackingProtectionOffboardingNoticeBrowserTest()
-      : TrackingProtectionBaseNoticeBrowserTest(EnabledFeatures()) {}
+      : TrackingProtectionBaseNoticeBrowserTest(EnabledFeatures(),
+                                                DisabledFeatures()) {}
 
   std::vector<base::test::FeatureRef> EnabledFeatures() override {
     return {privacy_sandbox::kTrackingProtectionOnboardingRollback,
             feature_engagement::kIPHTrackingProtectionOnboardingFeature,
             feature_engagement::kIPHTrackingProtectionOffboardingFeature};
+  }
+
+  std::vector<base::test::FeatureRef> DisabledFeatures() override {
+    // This feature is irrelevant for these tests, disabling to avoid
+    // interplaying with the tests.
+    return {features::kCookieDeprecationFacilitatedTesting};
   }
 
   bool IsOnboardingPromoActive(Browser* browser) {
@@ -1052,6 +1118,33 @@ IN_PROC_BROWSER_TEST_F(TrackingProtectionOffboardingNoticeBrowserTest,
       true, 1);
 }
 
+IN_PROC_BROWSER_TEST_F(TrackingProtectionOffboardingNoticeBrowserTest,
+                       PRE_StopsObserving) {
+  onboarding_service()->MaybeMarkEligible();
+  onboarding_service()->NoticeShown(NoticeType::kOnboarding);
+}
+
+IN_PROC_BROWSER_TEST_F(TrackingProtectionOffboardingNoticeBrowserTest,
+                       StopsObserving) {
+  // Setup
+  auto lock = BrowserFeaturePromoController::BlockActiveWindowCheckForTesting();
+  WaitForFeatureEngagement(browser());
+
+  // Navigates to eligible page.
+  browser()->window()->Activate();
+  ui_test_utils::NavigateToURLWithDispositionBlockUntilNavigationsComplete(
+      browser(), https_server_.GetURL("a.test", "/empty.html"), 1,
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+
+  EXPECT_TRUE(TabStripModelObserver::IsObservingAny(notice_service()));
+  PressPromoButton(browser());
+  // Verification - Observation stops
+  EXPECT_FALSE(TabStripModelObserver::IsObservingAny(notice_service()));
+  EXPECT_FALSE(privacy_sandbox::TrackingProtectionNoticeService::TabHelper::
+                   IsHelperNeeded(browser()->profile()));
+}
+
 struct TrackingProtectionSurveyTestData {
   // Inputs
   std::vector<base::test::FeatureRefAndParams> features;
@@ -1060,6 +1153,7 @@ struct TrackingProtectionSurveyTestData {
   bool has_topics_enabled = false;
   bool has_fledge_enabled = false;
   bool has_measurement_enabled = false;
+  std::optional<bool> should_silently_onboard = std::nullopt;
   std::optional<NoticeAction> ack_action = std::nullopt;
   base::TimeDelta to_start_survey;
   base::TimeDelta after_end_of_survey;
@@ -1074,7 +1168,9 @@ class TrackingProtectionHatsBaseTest : public InProcessBrowserTest {
   explicit TrackingProtectionHatsBaseTest(
       const std::vector<base::test::FeatureRefAndParams>&
           allow_and_enable_features) {
-    feature_list_.InitWithFeaturesAndParameters(allow_and_enable_features, {});
+    feature_list_.InitWithFeaturesAndParameters(
+        allow_and_enable_features,
+        {content_settings::features::kTrackingProtection3pcd});
   }
 
   void SetUpOnMainThread() override {
@@ -1112,6 +1208,7 @@ class TrackingProtectionHatsBrowserTest
  protected:
   TrackingProtectionHatsBrowserTest()
       : TrackingProtectionHatsBaseTest(EnabledFeaturesWithParams()) {}
+  base::HistogramTester histogram_tester_;
 
   std::vector<base::test::FeatureRefAndParams> EnabledFeaturesWithParams()
       override {
@@ -1145,6 +1242,14 @@ IN_PROC_BROWSER_TEST_P(TrackingProtectionHatsBrowserTest,
       prefs::kPrivacySandboxM1AdMeasurementEnabled,
       params.has_measurement_enabled);
 
+  if (params.should_silently_onboard) {
+    {
+      base::subtle::ScopedTimeClockOverrides override([]() { return Now(); },
+                                                      nullptr, nullptr);
+      onboarding_service()->MaybeMarkSilentEligible();
+      onboarding_service()->SilentOnboardingNoticeShown();
+    }
+  }
   // Ack if necessary.
   if (params.ack_action.has_value()) {
     // Onboarding first
@@ -1195,6 +1300,8 @@ IN_PROC_BROWSER_TEST_P(TrackingProtectionHatsBrowserTest,
     // Navigation actually triggering the survey;
     ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(),
                                              GURL(chrome::kChromeUINewTabURL)));
+
+    ExpectSurveyGroupHistogramEmitted(params.group, &histogram_tester_);
 
     testing::Mock::VerifyAndClearExpectations(mock_hats_service_);
   }
@@ -1263,6 +1370,19 @@ INSTANTIATE_TEST_SUITE_P(
             .has_topics_enabled = false,
             .has_fledge_enabled = false,
             .has_measurement_enabled = false,
+            .to_start_survey = base::Minutes(5),
+            .after_end_of_survey = base::Minutes(65),
+            .trigger_id = kHatsSurveyTriggerTrackingProtectionControlImmediate,
+            .group = SentimentSurveyGroup::kControlImmediate,
+        },
+        // Immediate Control with silent onbaording. No Ads API Enabled
+        TrackingProtectionSurveyTestData{
+            .features = HatsImmediateControlFeaturesWithSilentOnboarding(),
+            .has_cookie_controls_3pc_blocked = true,
+            .has_topics_enabled = false,
+            .has_fledge_enabled = false,
+            .has_measurement_enabled = false,
+            .should_silently_onboard = true,
             .to_start_survey = base::Minutes(5),
             .after_end_of_survey = base::Minutes(65),
             .trigger_id = kHatsSurveyTriggerTrackingProtectionControlImmediate,
@@ -1392,6 +1512,231 @@ IN_PROC_BROWSER_TEST_F(TrackingProtectionHatsIneligibleClientBrowserTest,
     EXPECT_CALL(*mock_hats_service_, LaunchSurvey).Times(0);
     testing::Mock::VerifyAndClearExpectations(mock_hats_service_);
   }
+}
+
+class TrackingProtectionSilentOnboardingNoticeBrowserTest
+    : public TrackingProtectionOnboardingNoticeBrowserTest {};
+
+// Navigation
+
+// Profile marked eligible, then the user navigates to a new Secure HTTPS tab
+// with the lock button.
+// Should be shown the notice
+IN_PROC_BROWSER_TEST_F(TrackingProtectionSilentOnboardingNoticeBrowserTest,
+                       NewTabEligiblePage) {
+  // Setup
+  auto lock = BrowserFeaturePromoController::BlockActiveWindowCheckForTesting();
+  WaitForFeatureEngagement(browser());
+  onboarding_service()->MaybeMarkSilentEligible();
+
+  browser()->window()->Activate();
+  // Action: Navigate to an HTTPS eligible page in current tab.
+  ui_test_utils::NavigateToURLWithDispositionBlockUntilNavigationsComplete(
+      browser(), https_server_.GetURL("a.test", "/empty.html"), 1,
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+
+  // Verification
+  // Profile is Onboarded
+  EXPECT_EQ(onboarding_service()->GetSilentOnboardingStatus(),
+            privacy_sandbox::TrackingProtectionOnboarding::
+                SilentOnboardingStatus::kOnboarded);
+}
+
+// Profile Marked eligible, added navigation to a new eligible background tab
+// Current tab is eligible.
+// Does not show the notice as the current tab was created before eligibility,
+// therefore not tracked, and the new navigation happened in an inactive tab.
+IN_PROC_BROWSER_TEST_F(TrackingProtectionSilentOnboardingNoticeBrowserTest,
+                       NewBackgroundTabEligiblePage) {
+  // Setup
+  auto lock = BrowserFeaturePromoController::BlockActiveWindowCheckForTesting();
+  WaitForFeatureEngagement(browser());
+  onboarding_service()->MaybeMarkSilentEligible();
+
+  browser()->window()->Activate();
+  // Action: Navigate to an HTTPS eligible page in current tab and New
+  // background tab.
+  ui_test_utils::NavigateToURLWithDispositionBlockUntilNavigationsComplete(
+      browser(), https_server_.GetURL("a.test", "/empty.html"), 1,
+      WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+
+  ui_test_utils::NavigateToURLWithDispositionBlockUntilNavigationsComplete(
+      browser(), https_server_.GetURL("a.test", "/empty.html"), 1,
+      WindowOpenDisposition::NEW_BACKGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+
+  // Verification
+  // Profile stays Eligible
+  EXPECT_EQ(onboarding_service()->GetSilentOnboardingStatus(),
+            privacy_sandbox::TrackingProtectionOnboarding::
+                SilentOnboardingStatus::kEligible);
+  histogram_tester_.ExpectBucketCount(
+      "PrivacySandbox.TrackingProtection.SilentOnboarding.NoticeServiceEvent",
+      privacy_sandbox::TrackingProtectionNoticeService::
+          TrackingProtectionMetricsNoticeEvent::kInactiveWebcontentUpdated,
+      1);
+}
+
+// Profile Marked eligible, added navigation to a new Ineligible Foreground tab
+// Does not silently onboard the profile as the page isn't eligible.
+IN_PROC_BROWSER_TEST_F(TrackingProtectionSilentOnboardingNoticeBrowserTest,
+                       NewTabIneligiblePage) {
+  // Setup
+  auto lock = BrowserFeaturePromoController::BlockActiveWindowCheckForTesting();
+  WaitForFeatureEngagement(browser());
+  onboarding_service()->MaybeMarkSilentEligible();
+
+  browser()->window()->Activate();
+  // Action: Navigate to an HTTP ineligible page in current tab. ( No lock icon)
+  ui_test_utils::NavigateToURLWithDispositionBlockUntilNavigationsComplete(
+      browser(), embedded_test_server()->GetURL("a.test", "/empty.html"), 1,
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+
+  // Verification
+  // Profile stays Eligible
+  EXPECT_EQ(onboarding_service()->GetSilentOnboardingStatus(),
+            privacy_sandbox::TrackingProtectionOnboarding::
+                SilentOnboardingStatus::kEligible);
+}
+
+// Switching between eligible/ineligible tabs silently onboards the profile
+// accordingly.
+IN_PROC_BROWSER_TEST_F(TrackingProtectionSilentOnboardingNoticeBrowserTest,
+                       SwitchesTabs) {
+  // Setup
+  auto lock = BrowserFeaturePromoController::BlockActiveWindowCheckForTesting();
+  WaitForFeatureEngagement(browser());
+
+  browser()->window()->Activate();
+  //  Navigate to an HTTPS eligible page in current tab
+  ui_test_utils::NavigateToURLWithDispositionBlockUntilNavigationsComplete(
+      browser(), https_server_.GetURL("a.test", "/empty.html"), 1,
+      WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+  // Creates new background tab and navigates to Ineligible page.
+  ui_test_utils::NavigateToURLWithDispositionBlockUntilNavigationsComplete(
+      browser(), embedded_test_server()->GetURL("b.test", "/empty.html"), 1,
+      WindowOpenDisposition::NEW_BACKGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+
+  // Action: Profile becomes eligible.
+  onboarding_service()->MaybeMarkSilentEligible();
+
+  // This selects the second tab (ineligible). Promo shouldn't show, and profile
+  // not yet onboarded.
+  browser()->tab_strip_model()->SelectNextTab();
+  EXPECT_EQ(onboarding_service()->GetSilentOnboardingStatus(),
+            privacy_sandbox::TrackingProtectionOnboarding::
+                SilentOnboardingStatus::kEligible);
+
+  // Goes back to eligible tab. Promo will show, and profile is onboarded.
+  browser()->tab_strip_model()->SelectPreviousTab();
+  EXPECT_EQ(onboarding_service()->GetSilentOnboardingStatus(),
+            privacy_sandbox::TrackingProtectionOnboarding::
+                SilentOnboardingStatus::kOnboarded);
+
+  // Goes to the ineligible tab again. Profile remains onboarded.
+  browser()->tab_strip_model()->SelectNextTab();
+  EXPECT_EQ(onboarding_service()->GetSilentOnboardingStatus(),
+            privacy_sandbox::TrackingProtectionOnboarding::
+                SilentOnboardingStatus::kOnboarded);
+}
+
+// Popup to eligible page does not show the notice.
+IN_PROC_BROWSER_TEST_F(TrackingProtectionSilentOnboardingNoticeBrowserTest,
+                       NewPopupEligiblePage) {
+  // Setup
+  auto lock = BrowserFeaturePromoController::BlockActiveWindowCheckForTesting();
+  WaitForFeatureEngagement(browser());
+  onboarding_service()->MaybeMarkSilentEligible();
+
+  browser()->window()->Activate();
+  ui_test_utils::NavigateToURLWithDispositionBlockUntilNavigationsComplete(
+      browser(), https_server_.GetURL("a.test", "/empty.html"), 1,
+      WindowOpenDisposition::NEW_POPUP,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+
+  // Verification
+  // Profile is not onboarded - remains eligible.
+  EXPECT_EQ(onboarding_service()->GetSilentOnboardingStatus(),
+            privacy_sandbox::TrackingProtectionOnboarding::
+                SilentOnboardingStatus::kEligible);
+  histogram_tester_.ExpectBucketCount(
+      "PrivacySandbox.TrackingProtection.SilentOnboarding.NoticeServiceEvent",
+      privacy_sandbox::TrackingProtectionNoticeService::
+          TrackingProtectionMetricsNoticeEvent::kBrowserTypeNonNormal,
+      1);
+}
+
+// Observation
+
+// Profile is ineligible. Notice Service is not observing tab changes.
+IN_PROC_BROWSER_TEST_F(TrackingProtectionSilentOnboardingNoticeBrowserTest,
+                       DoesntStartObserving) {
+  EXPECT_FALSE(TabStripModelObserver::IsObservingAny(notice_service()));
+  EXPECT_FALSE(privacy_sandbox::TrackingProtectionNoticeService::TabHelper::
+                   IsHelperNeeded(browser()->profile()));
+}
+
+// Profile is eligible. Notice service is observing tab changes.
+IN_PROC_BROWSER_TEST_F(TrackingProtectionSilentOnboardingNoticeBrowserTest,
+                       StartsObserving) {
+  // Action
+  onboarding_service()->MaybeMarkSilentEligible();
+  browser()->window()->Activate();
+  // Verification
+  EXPECT_TRUE(TabStripModelObserver::IsObservingAny(notice_service()));
+  EXPECT_TRUE(privacy_sandbox::TrackingProtectionNoticeService::TabHelper::
+                  IsHelperNeeded(browser()->profile()));
+}
+
+// Notice is shown. Notice Service stops observing tab changes.
+IN_PROC_BROWSER_TEST_F(TrackingProtectionSilentOnboardingNoticeBrowserTest,
+                       StopsObserving) {
+  // Setup
+  auto lock = BrowserFeaturePromoController::BlockActiveWindowCheckForTesting();
+  WaitForFeatureEngagement(browser());
+  // Action
+  onboarding_service()->MaybeMarkSilentEligible();
+  // Navigates to eligible page.
+  browser()->window()->Activate();
+  ui_test_utils::NavigateToURLWithDispositionBlockUntilNavigationsComplete(
+      browser(), https_server_.GetURL("a.test", "/empty.html"), 1,
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+
+  // Verification - Observation stops
+  EXPECT_FALSE(TabStripModelObserver::IsObservingAny(notice_service()));
+  EXPECT_FALSE(privacy_sandbox::TrackingProtectionNoticeService::TabHelper::
+                   IsHelperNeeded(browser()->profile()));
+
+  // Once the notice object is created, the tab strip tracker is initialized but
+  // in this test we press the promo button, which also causes the
+  // tracker to be reset again.
+  histogram_tester_.ExpectBucketCount(
+      "PrivacySandbox.TrackingProtection.NoticeService."
+      "IsObservingTabStripModel",
+      true, 1);
+  histogram_tester_.ExpectBucketCount(
+      "PrivacySandbox.TrackingProtection.NoticeService."
+      "IsObservingTabStripModel",
+      false, 1);
+}
+
+// Profile is onboarded. Notice Service is not observing tab changes.
+IN_PROC_BROWSER_TEST_F(TrackingProtectionSilentOnboardingNoticeBrowserTest,
+                       OnboardedProfileDoesntStartObserving) {
+  onboarding_service()->MaybeMarkSilentEligible();
+  // Telling the OnboardingService that the notice has been shown so it marks
+  // the profile as Onboarded.
+  onboarding_service()->SilentOnboardingNoticeShown();
+
+  EXPECT_FALSE(TabStripModelObserver::IsObservingAny(notice_service()));
+  EXPECT_FALSE(privacy_sandbox::TrackingProtectionNoticeService::TabHelper::
+                   IsHelperNeeded(browser()->profile()));
 }
 
 }  // namespace privacy_sandbox

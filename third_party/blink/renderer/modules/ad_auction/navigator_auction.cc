@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "base/check.h"
+#include "base/containers/contains.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/time/time.h"
@@ -17,6 +18,8 @@
 #include "base/types/pass_key.h"
 #include "base/unguessable_token.h"
 #include "base/uuid.h"
+#include "components/aggregation_service/aggregation_coordinator_utils.h"
+#include "components/aggregation_service/features.h"
 #include "mojo/public/cpp/bindings/map_traits_wtf_hash_map.h"
 #include "third_party/abseil-cpp/absl/numeric/int128.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -27,6 +30,7 @@
 #include "third_party/blink/public/common/interest_group/ad_auction_constants.h"
 #include "third_party/blink/public/common/interest_group/ad_auction_currencies.h"
 #include "third_party/blink/public/common/interest_group/ad_display_size_utils.h"
+#include "third_party/blink/public/common/interest_group/interest_group.h"
 #include "third_party/blink/public/mojom/interest_group/interest_group_types.mojom-blink.h"
 #include "third_party/blink/public/mojom/parakeet/ad_request.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink.h"
@@ -51,6 +55,7 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_auction_ad_interest_group_size.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_auction_additional_bid_signature.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_auction_report_buyers_config.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_protected_audience_private_aggregation_config.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_union_adproperties_adpropertiessequence.h"
 #include "third_party/blink/renderer/core/dom/abort_signal.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -447,7 +452,7 @@ bool Jsonify(const ScriptState& script_state,
     return false;
   }
 
-  output = ToCoreString(v8_string);
+  output = ToCoreString(script_state.GetIsolate(), v8_string);
   // JSON.stringify can fail to produce a string value in one of two ways: it
   // can throw an exception (as with unserializable objects), or it can return
   // `undefined` (as with e.g. passing a function). If JSON.stringify returns
@@ -735,6 +740,20 @@ bool CopyTrustedBiddingSignalsKeysFromIdlToMojo(
   return true;
 }
 
+bool CopyTrustedBiddingSignalsSlotSizeModeFromIdlToMojo(
+    const AuctionAdInterestGroup& input,
+    mojom::blink::InterestGroup& output) {
+  if (!input.hasTrustedBiddingSignalsSlotSizeMode()) {
+    output.trusted_bidding_signals_slot_size_mode =
+        mojom::blink::InterestGroup::TrustedBiddingSignalsSlotSizeMode::kNone;
+  } else {
+    output.trusted_bidding_signals_slot_size_mode =
+        blink::InterestGroup::ParseTrustedBiddingSignalsSlotSizeMode(
+            input.trustedBiddingSignalsSlotSizeMode());
+  }
+  return true;
+}
+
 bool CopyUserBiddingSignalsFromIdlToMojo(const ScriptState& script_state,
                                          ExceptionState& exception_state,
                                          const AuctionAdInterestGroup& input,
@@ -933,29 +952,58 @@ bool CopyAdditionalBidKeyFromIdlToMojo(
   return true;
 }
 
-bool CopyAggregationCoordinatorOriginFromIdlToMojo(
-    const ExecutionContext& execution_context,
+bool GetAggregationCoordinatorFromConfig(
     ExceptionState& exception_state,
-    const AuctionAdInterestGroup& input,
-    mojom::blink::InterestGroup& output) {
-  if (!input.hasAggregationCoordinatorOrigin()) {
+    const ProtectedAudiencePrivateAggregationConfig& config,
+    scoped_refptr<const SecurityOrigin>& aggregation_coordinator_origin_out) {
+  if (!config.hasAggregationCoordinatorOrigin()) {
+    return true;
+  }
+
+  if (!base::FeatureList::IsEnabled(
+          blink::features::kPrivateAggregationApiMultipleCloudProviders) ||
+      !base::FeatureList::IsEnabled(
+          aggregation_service::kAggregationServiceMultipleCloudProviders)) {
+    // Ignore the specified aggregation coordinator unless the feature is
+    // enabled.
     return true;
   }
 
   scoped_refptr<const SecurityOrigin> aggregation_coordinator_origin =
-      ParseOrigin(input.aggregationCoordinatorOrigin());
+      ParseOrigin(config.aggregationCoordinatorOrigin());
   if (!aggregation_coordinator_origin) {
-    exception_state.ThrowTypeError(String::Format(
-        "aggregationCoordinatorOrigin '%s' for AuctionAdInterestGroup with "
-        "name '%s' must be a valid https origin.",
-        input.aggregationCoordinatorOrigin().Utf8().c_str(),
-        input.name().Utf8().c_str()));
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kSyntaxError,
+        String::Format(
+            "aggregationCoordinatorOrigin '%s' must be a valid https origin.",
+            config.aggregationCoordinatorOrigin().Utf8().c_str()));
     return false;
   }
-
-  output.aggregation_coordinator_origin =
+  if (!aggregation_service::IsAggregationCoordinatorOriginAllowed(
+          aggregation_coordinator_origin->ToUrlOrigin())) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kDataError,
+        String::Format("aggregationCoordinatorOrigin '%s' is not a recognized "
+                       "coordinator origin.",
+                       config.aggregationCoordinatorOrigin().Utf8().c_str()));
+    return false;
+  }
+  aggregation_coordinator_origin_out =
       std::move(aggregation_coordinator_origin);
   return true;
+}
+
+bool CopyAggregationCoordinatorOriginFromIdlToMojo(
+    ExceptionState& exception_state,
+    const AuctionAdInterestGroup& input,
+    mojom::blink::InterestGroup& output) {
+  if (!input.hasPrivateAggregationConfig()) {
+    return true;
+  }
+
+  return GetAggregationCoordinatorFromConfig(
+      exception_state, *input.privateAggregationConfig(),
+      output.aggregation_coordinator_origin);
 }
 
 // createAdRequest copy functions.
@@ -1540,22 +1588,13 @@ bool CopyAggregationCoordinatorOriginFromIdlToMojo(
     ExceptionState& exception_state,
     const AuctionAdConfig& input,
     mojom::blink::AuctionAdConfig& output) {
-  if (!input.hasAggregationCoordinatorOrigin()) {
+  if (!input.hasPrivateAggregationConfig()) {
     return true;
   }
 
-  scoped_refptr<const SecurityOrigin> aggregation_coordinator_origin =
-      ParseOrigin(input.aggregationCoordinatorOrigin());
-  if (!aggregation_coordinator_origin) {
-    exception_state.ThrowTypeError(String::Format(
-        "aggregationCoordinatorOrigin '%s' must be a valid https origin.",
-        input.aggregationCoordinatorOrigin().Utf8().c_str()));
-    return false;
-  }
-
-  output.aggregation_coordinator_origin =
-      std::move(aggregation_coordinator_origin);
-  return true;
+  return GetAggregationCoordinatorFromConfig(
+      exception_state, *input.privateAggregationConfig(),
+      output.aggregation_coordinator_origin);
 }
 
 // Returns nullopt + sets exception on failure, or returns a concrete value.
@@ -1994,44 +2033,119 @@ bool CopyRequiredSellerSignalsFromIdlToMojo(
   return true;
 }
 
+mojom::blink::AdSizePtr ParseAdSize(const AuctionAdConfig& input,
+                                    const AuctionAdInterestGroupSize& size,
+                                    const char* field_name,
+                                    ExceptionState& exception_state) {
+  auto [width_val, width_units] =
+      blink::ParseAdSizeString(size.width().Ascii());
+  auto [height_val, height_units] =
+      blink::ParseAdSizeString(size.height().Ascii());
+  if (width_units == blink::AdSize::LengthUnit::kInvalid) {
+    exception_state.ThrowTypeError(ErrorInvalidAuctionConfig(
+        input, String::Format("%s width", field_name), size.width(),
+        "must use units '', 'px', 'sw', or 'sh'."));
+    return mojom::blink::AdSizePtr();
+  }
+  if (height_units == blink::AdSize::LengthUnit::kInvalid) {
+    exception_state.ThrowTypeError(ErrorInvalidAuctionConfig(
+        input, String::Format("%s height", field_name), size.height(),
+        "must use units '', 'px', 'sw', or 'sh'."));
+    return mojom::blink::AdSizePtr();
+  }
+  if (width_val <= 0 || !std::isfinite(width_val)) {
+    exception_state.ThrowTypeError(ErrorInvalidAuctionConfig(
+        input, String::Format("%s width", field_name), size.width(),
+        "must be finite and positive."));
+    return mojom::blink::AdSizePtr();
+  }
+  if (height_val <= 0 || !std::isfinite(height_val)) {
+    exception_state.ThrowTypeError(ErrorInvalidAuctionConfig(
+        input, String::Format("%s height", field_name), size.height(),
+        "must be finite and positive."));
+    return mojom::blink::AdSizePtr();
+  }
+  return mojom::blink::AdSize::New(width_val, width_units, height_val,
+                                   height_units);
+}
+
 bool CopyRequestedSizeFromIdlToMojo(const ExecutionContext& execution_context,
                                     ExceptionState& exception_state,
                                     const AuctionAdConfig& input,
                                     mojom::blink::AuctionAdConfig& output) {
+  // This must be called before CopyAllSlotsRequestedSizesFromIdlToMojo().
+  DCHECK(
+      !output.auction_ad_config_non_shared_params->all_slots_requested_sizes);
   if (!input.hasRequestedSize()) {
     return true;
   }
-  auto [width_val, width_units] =
-      blink::ParseAdSizeString(input.requestedSize()->width().Ascii());
-  auto [height_val, height_units] =
-      blink::ParseAdSizeString(input.requestedSize()->height().Ascii());
-  if (width_units == blink::AdSize::LengthUnit::kInvalid) {
-    exception_state.ThrowTypeError(ErrorInvalidAuctionConfig(
-        input, "requestedSize width", input.requestedSize()->width(),
-        "must use units '', 'px', 'sw', or 'sh'."));
+
+  mojom::blink::AdSizePtr size = ParseAdSize(input, *input.requestedSize(),
+                                             "requestedSize", exception_state);
+  if (!size) {
     return false;
   }
-  if (height_units == blink::AdSize::LengthUnit::kInvalid) {
-    exception_state.ThrowTypeError(ErrorInvalidAuctionConfig(
-        input, "requestedSize height", input.requestedSize()->height(),
-        "must use units '', 'px', 'sw', or 'sh'."));
+
+  output.auction_ad_config_non_shared_params->requested_size = std::move(size);
+  return true;
+}
+
+// This must be called after CopyRequestedSizeFromIdlToMojo(), since it verifies
+// that if both `all_slots_requested_sizes` and `requested_size` are set, then
+// the former contains the latter.
+bool CopyAllSlotsRequestedSizesFromIdlToMojo(
+    const ExecutionContext& execution_context,
+    ExceptionState& exception_state,
+    const AuctionAdConfig& input,
+    mojom::blink::AuctionAdConfig& output) {
+  if (!input.hasAllSlotsRequestedSizes()) {
+    return true;
+  }
+
+  if (input.allSlotsRequestedSizes().empty()) {
+    exception_state.ThrowTypeError(
+        String::Format("allSlotsRequestedSizes for AuctionAdConfig with seller "
+                       "'%s' may not be empty.",
+                       input.seller().Utf8().c_str()));
     return false;
   }
-  if (width_val <= 0 || !std::isfinite(width_val)) {
-    exception_state.ThrowTypeError(ErrorInvalidAuctionConfig(
-        input, "requestedSize width", input.requestedSize()->width(),
-        "must be finite and positive."));
+
+  std::set<mojom::blink::AdSize> distinct_sizes;
+  output.auction_ad_config_non_shared_params->all_slots_requested_sizes
+      .emplace();
+  for (const auto& unparsed_size : input.allSlotsRequestedSizes()) {
+    mojom::blink::AdSizePtr size = ParseAdSize(
+        input, *unparsed_size, "allSlotsRequestedSizes", exception_state);
+    if (!size) {
+      return false;
+    }
+
+    if (!distinct_sizes.insert(*size).second) {
+      exception_state.ThrowTypeError(ErrorInvalidAuctionConfig(
+          input, "allSlotsRequestedSizes",
+          String::Format(R"({"width": "%s", "height": "%s"})",
+                         unparsed_size->width().Utf8().c_str(),
+                         unparsed_size->height().Utf8().c_str()),
+          "must be distinct from other sizes in the list."));
+      return false;
+    }
+
+    output.auction_ad_config_non_shared_params->all_slots_requested_sizes
+        ->emplace_back(std::move(size));
+  }
+
+  // If `requested_size` is set, `all_slots_requested_sizes` must include it.
+  if (output.auction_ad_config_non_shared_params->requested_size &&
+      !base::Contains(
+          distinct_sizes,
+          *output.auction_ad_config_non_shared_params->requested_size)) {
+    exception_state.ThrowTypeError(String::Format(
+        "allSlotsRequestedSizes for AuctionAdConfig with seller '%s' must "
+        "contain requestedSize as an element when requestedSize is set.",
+        input.seller().Utf8().c_str()));
     return false;
   }
-  if (height_val <= 0 || !std::isfinite(height_val)) {
-    exception_state.ThrowTypeError(ErrorInvalidAuctionConfig(
-        input, "requestedSize height", input.requestedSize()->height(),
-        "must be finite and positive."));
-    return false;
-  }
-  output.auction_ad_config_non_shared_params->requested_size =
-      mojom::blink::AdSize::New(width_val, width_units, height_val,
-                                height_units);
+
   return true;
 }
 
@@ -2105,6 +2219,8 @@ mojom::blink::AuctionAdConfigPtr IdlAuctionConfigToMojo(
                                               *mojo_config) ||
       !CopyRequestedSizeFromIdlToMojo(context, exception_state, config,
                                       *mojo_config) ||
+      !CopyAllSlotsRequestedSizesFromIdlToMojo(context, exception_state, config,
+                                               *mojo_config) ||
       !CopyAuctionNonceFromIdlToMojo(context, exception_state, config,
                                      *mojo_config) ||
       !CopyAdditionalBidsFromIdlToMojo(auction_handle, auction_id.get(),
@@ -2140,14 +2256,6 @@ mojom::blink::AuctionAdConfigPtr IdlAuctionConfigToMojo(
                                               config, *mojo_config);
   CopyPerBuyerCurrenciesFromIdlToMojo(auction_handle, auction_id.get(), config,
                                       *mojo_config);
-
-  if (mojo_config->server_response && !is_top_level) {
-    // TODO(1457241): Add support for multi-level auctions including server-side
-    // auctions.
-    exception_state.ThrowTypeError(
-        "Only top-level auctions may have 'serverResponse'.");
-    return mojom::blink::AuctionAdConfigPtr();
-  }
 
   if (config.hasSellerTimeout()) {
     mojo_config->auction_ad_config_non_shared_params->seller_timeout =
@@ -2196,10 +2304,10 @@ mojom::blink::AuctionAdConfigPtr IdlAuctionConfigToMojo(
             "nested componentAuctions.");
         return mojom::blink::AuctionAdConfigPtr();
       }
-      // We need decision logic for component auctions even if they have a
-      // server response. We perform reporting client-side for component
-      // auctions.
-      if (!idl_component_auction->hasDecisionLogicURL()) {
+      // We need decision logic for component auctions unless they have a
+      // server response.
+      if (!idl_component_auction->hasDecisionLogicURL() &&
+          !idl_component_auction->hasServerResponse()) {
         exception_state.ThrowTypeError(ErrorMissingRequired(
             "ad auction config decisionLogicURL or serverResponse"));
         return mojom::blink::AuctionAdConfigPtr();
@@ -2921,62 +3029,36 @@ ScriptPromise NavigatorAuction::joinAdInterestGroup(
   }
 
   if (!CopySellerCapabilitiesFromIdlToMojo(*context, exception_state, *group,
-                                           *mojo_group)) {
-    return ScriptPromise();
-  }
-  if (!CopyExecutionModeFromIdlToMojo(*context, exception_state, *group,
-                                      *mojo_group)) {
-    return ScriptPromise();
-  }
-  if (!CopyBiddingLogicUrlFromIdlToMojo(*context, exception_state, *group,
-                                        *mojo_group)) {
-    return ScriptPromise();
-  }
-  if (!CopyWasmHelperUrlFromIdlToMojo(*context, exception_state, *group,
-                                      *mojo_group)) {
-    return ScriptPromise();
-  }
-  if (!CopyUpdateUrlFromIdlToMojo(*context, exception_state, *group,
-                                  *mojo_group)) {
-    return ScriptPromise();
-  }
-  if (!CopyTrustedBiddingSignalsUrlFromIdlToMojo(*context, exception_state,
-                                                 *group, *mojo_group)) {
-    return ScriptPromise();
-  }
-  if (!CopyTrustedBiddingSignalsKeysFromIdlToMojo(*group, *mojo_group)) {
-    return ScriptPromise();
-  }
-  if (!CopyUserBiddingSignalsFromIdlToMojo(*script_state, exception_state,
-                                           *group, *mojo_group)) {
-    return ScriptPromise();
-  }
-  if (!CopyAdsFromIdlToMojo(*context, *script_state, exception_state, *group,
-                            *mojo_group)) {
-    return ScriptPromise();
-  }
-  if (!CopyAdComponentsFromIdlToMojo(*context, *script_state, exception_state,
-                                     *group, *mojo_group)) {
-    return ScriptPromise();
-  }
-  if (!CopyAdSizesFromIdlToMojo(*context, *script_state, exception_state,
-                                *group, *mojo_group)) {
-    return ScriptPromise();
-  }
-  if (!CopySizeGroupsFromIdlToMojo(*context, *script_state, exception_state,
-                                   *group, *mojo_group)) {
-    return ScriptPromise();
-  }
-  if (!CopyAuctionServerRequestFlagsFromIdlToMojo(*context, exception_state,
-                                                  *group, *mojo_group)) {
-    return ScriptPromise();
-  }
-  if (!CopyAdditionalBidKeyFromIdlToMojo(*context, exception_state, *group,
-                                         *mojo_group)) {
-    return ScriptPromise();
-  }
-  if (!CopyAggregationCoordinatorOriginFromIdlToMojo(*context, exception_state,
-                                                     *group, *mojo_group)) {
+                                           *mojo_group) ||
+      !CopyExecutionModeFromIdlToMojo(*context, exception_state, *group,
+                                      *mojo_group) ||
+      !CopyBiddingLogicUrlFromIdlToMojo(*context, exception_state, *group,
+                                        *mojo_group) ||
+      !CopyWasmHelperUrlFromIdlToMojo(*context, exception_state, *group,
+                                      *mojo_group) ||
+      !CopyUpdateUrlFromIdlToMojo(*context, exception_state, *group,
+                                  *mojo_group) ||
+      !CopyTrustedBiddingSignalsUrlFromIdlToMojo(*context, exception_state,
+                                                 *group, *mojo_group) ||
+      !CopyTrustedBiddingSignalsKeysFromIdlToMojo(*group, *mojo_group) ||
+      !CopyTrustedBiddingSignalsSlotSizeModeFromIdlToMojo(*group,
+                                                          *mojo_group) ||
+      !CopyUserBiddingSignalsFromIdlToMojo(*script_state, exception_state,
+                                           *group, *mojo_group) ||
+      !CopyAdsFromIdlToMojo(*context, *script_state, exception_state, *group,
+                            *mojo_group) ||
+      !CopyAdComponentsFromIdlToMojo(*context, *script_state, exception_state,
+                                     *group, *mojo_group) ||
+      !CopyAdSizesFromIdlToMojo(*context, *script_state, exception_state,
+                                *group, *mojo_group) ||
+      !CopySizeGroupsFromIdlToMojo(*context, *script_state, exception_state,
+                                   *group, *mojo_group) ||
+      !CopyAuctionServerRequestFlagsFromIdlToMojo(*context, exception_state,
+                                                  *group, *mojo_group) ||
+      !CopyAdditionalBidKeyFromIdlToMojo(*context, exception_state, *group,
+                                         *mojo_group) ||
+      !CopyAggregationCoordinatorOriginFromIdlToMojo(exception_state, *group,
+                                                     *mojo_group)) {
     return ScriptPromise();
   }
 
@@ -3776,7 +3858,7 @@ void NavigatorAuction::AuctionHandle::AuctionComplete(
     } else {
       // TODO(morlovich): It would probably be better to wire something more
       // precise.
-      resolver->Reject(
+      resolver->RejectWithTypeError(
           "Promise argument rejected or resolved to invalid value.");
     }
   } else if (result_config) {

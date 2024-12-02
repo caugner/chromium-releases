@@ -359,21 +359,27 @@ void PageLoadMetricsForwardObserver::OnSubFrameDeleted(int frame_tree_node_id) {
 void PageLoadMetricsForwardObserver::OnCookiesRead(
     const GURL& url,
     const GURL& first_party_url,
-    bool blocked_by_policy) {
+    bool blocked_by_policy,
+    bool is_ad_tagged,
+    const net::CookieSettingOverrides& cookie_setting_overrides) {
   if (!parent_observer_)
     return;
-  parent_observer_->OnCookiesRead(url, first_party_url, blocked_by_policy);
+  parent_observer_->OnCookiesRead(url, first_party_url, blocked_by_policy,
+                                  is_ad_tagged, cookie_setting_overrides);
 }
 
 void PageLoadMetricsForwardObserver::OnCookieChange(
     const GURL& url,
     const GURL& first_party_url,
     const net::CanonicalCookie& cookie,
-    bool blocked_by_policy) {
+    bool blocked_by_policy,
+    bool is_ad_tagged,
+    const net::CookieSettingOverrides& cookie_setting_overrides) {
   if (!parent_observer_)
     return;
   parent_observer_->OnCookieChange(url, first_party_url, cookie,
-                                   blocked_by_policy);
+                                   blocked_by_policy, is_ad_tagged,
+                                   cookie_setting_overrides);
 }
 
 void PageLoadMetricsForwardObserver::OnStorageAccessed(
@@ -392,13 +398,11 @@ void PageLoadMetricsForwardObserver::OnPrefetchLikely() {
   NOTREACHED();
 }
 
-void PageLoadMetricsForwardObserver::DidActivatePortal(
-    base::TimeTicks activation_time) {
-  NOTREACHED() << "Not supported.";
-}
-
 void PageLoadMetricsForwardObserver::DidActivatePrerenderedPage(
     content::NavigationHandle* navigation_handle) {}
+
+void PageLoadMetricsForwardObserver::DidActivatePreviewedPage(
+    base::TimeTicks activation_time) {}
 
 void PageLoadMetricsForwardObserver::OnV8MemoryChanged(
     const std::vector<MemoryUpdate>& memory_updates) {

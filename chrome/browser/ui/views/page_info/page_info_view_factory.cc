@@ -154,13 +154,10 @@ std::unique_ptr<views::View> PageInfoViewFactory::CreatePermissionPageView(
 
 std::unique_ptr<views::View>
 PageInfoViewFactory::CreateAdPersonalizationPageView() {
-  const auto header_id =
-      base::FeatureList::IsEnabled(privacy_sandbox::kPrivacySandboxSettings4)
-          ? IDS_PAGE_INFO_AD_PRIVACY_HEADER
-          : IDS_PAGE_INFO_AD_PERSONALIZATION_HEADER;
   return std::make_unique<PageInfoSubpageView>(
-      CreateSubpageHeader(l10n_util::GetStringUTF16(header_id),
-                          presenter_->GetSubjectNameForDisplay()),
+      CreateSubpageHeader(
+          l10n_util::GetStringUTF16(IDS_PAGE_INFO_AD_PRIVACY_HEADER),
+          presenter_->GetSubjectNameForDisplay()),
       std::make_unique<PageInfoAdPersonalizationContentView>(presenter_,
                                                              ui_delegate_));
 }
@@ -224,6 +221,7 @@ std::unique_ptr<views::View> PageInfoViewFactory::CreateSubpageHeader(
     title_label->SetTextStyle(views::style::STYLE_HEADLINE_4);
   }
   title_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  title_label->SetID(VIEW_ID_PAGE_INFO_SUBPAGE_TITLE);
 
   if (!subtitle.empty()) {
     auto* subtitle_label =
@@ -271,8 +269,8 @@ const ui::ImageModel PageInfoViewFactory::GetPermissionIcon(
     const gfx::VectorIcon* icon = nullptr;
     switch (info.type) {
       case ContentSettingsType::COOKIES:
-        icon = show_blocked_badge ? &vector_icons::kCookieOffChromeRefreshIcon
-                                  : &vector_icons::kCookieChromeRefreshIcon;
+        icon = show_blocked_badge ? &vector_icons::kDatabaseOffIcon
+                                  : &vector_icons::kDatabaseIcon;
         break;
       case ContentSettingsType::FEDERATED_IDENTITY_API:
         icon = show_blocked_badge
@@ -417,7 +415,7 @@ const ui::ImageModel PageInfoViewFactory::GetPermissionIcon(
   const gfx::VectorIcon* icon = &gfx::kNoneIcon;
   switch (info.type) {
     case ContentSettingsType::COOKIES:
-      icon = &vector_icons::kCookieIcon;
+      icon = &vector_icons::kDatabaseIcon;
       break;
     case ContentSettingsType::FEDERATED_IDENTITY_API:
       icon = &vector_icons::kAccountCircleIcon;
@@ -687,6 +685,13 @@ const ui::ImageModel PageInfoViewFactory::GetBlockingThirdPartyCookiesIcon() {
   return GetImageModel(features::IsChromeRefresh2023()
                            ? views::kEyeCrossedRefreshIcon
                            : views::kEyeCrossedIcon);
+}
+
+// static
+const ui::ImageModel PageInfoViewFactory::GetCookiesAndSiteDataIcon() {
+  return GetImageModel(features::IsChromeRefresh2023()
+                           ? vector_icons::kCookieChromeRefreshIcon
+                           : vector_icons::kCookieIcon);
 }
 
 // static

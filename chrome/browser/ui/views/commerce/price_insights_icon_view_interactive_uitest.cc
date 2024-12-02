@@ -9,8 +9,8 @@
 #include "chrome/browser/commerce/shopping_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
-#include "chrome/browser/ui/commerce/price_tracking/mock_shopping_list_ui_tab_helper.h"
-#include "chrome/browser/ui/commerce/price_tracking/shopping_list_ui_tab_helper.h"
+#include "chrome/browser/ui/commerce/commerce_ui_tab_helper.h"
+#include "chrome/browser/ui/commerce/mock_commerce_ui_tab_helper.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -32,7 +32,6 @@ DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kShoppingTab);
 const char kShoppingURL[] = "/shopping.html";
 const char kNonShoppingURL[] = "/non-shopping.html";
 const char kProductClusterTitle[] = "Product Cluster Title";
-int kIconExpandedMaxTimesLast28days = 3;
 
 std::unique_ptr<net::test_server::HttpResponse> BasicResponse(
     const net::test_server::HttpRequest& request) {
@@ -151,10 +150,6 @@ IN_PROC_BROWSER_TEST_F(PriceInsightsIconViewInteractiveTest,
   EXPECT_CALL(*mock_shopping_service_, GetProductInfoForUrl);
   EXPECT_CALL(*mock_shopping_service_, GetPriceInsightsInfoForUrl);
 
-  base::HistogramTester histogram_tester;
-  histogram_tester.ExpectTotalCount(
-      "Commerce.PriceInsights.OmniboxIconClickedAfterLabelShown", 0);
-
   RunTestSequence(
       InstrumentTab(kShoppingTab),
       NavigateWebContents(kShoppingTab,
@@ -168,9 +163,6 @@ IN_PROC_BROWSER_TEST_F(PriceInsightsIconViewInteractiveTest,
       // Click on the action chip again to close the side panel
       PressButton(kPriceInsightsChipElementId),
       WaitForHide(kSidePanelElementId), FlushEvents());
-
-  histogram_tester.ExpectTotalCount(
-      "Commerce.PriceInsights.OmniboxIconClickedAfterLabelShown", 2);
 }
 
 IN_PROC_BROWSER_TEST_F(PriceInsightsIconViewInteractiveTest,
@@ -242,36 +234,36 @@ class PriceInsightsIconViewEngagementTest
                           expected_to_show_label));
   }
 
-  void VerifyIconExpandedOncePerDay() {
+  void VerifyIconExpanded() {
     base::HistogramTester histogram_tester;
-    histogram_tester.ExpectTotalCount(
-        "Commerce.PriceInsights.OmniboxIconShownLabel", 0);
+    histogram_tester.ExpectTotalCount("Commerce.PriceInsights.OmniboxIconShown",
+                                      0);
 
     NavigateToANonShoppingPage();
-    histogram_tester.ExpectTotalCount(
-        "Commerce.PriceInsights.OmniboxIconShownLabel", 0);
+    histogram_tester.ExpectTotalCount("Commerce.PriceInsights.OmniboxIconShown",
+                                      0);
 
     NavigateToAShoppingPage(/*expected_to_show_label=*/true);
-    histogram_tester.ExpectTotalCount(
-        "Commerce.PriceInsights.OmniboxIconShownLabel", 1);
+    histogram_tester.ExpectTotalCount("Commerce.PriceInsights.OmniboxIconShown",
+                                      1);
     histogram_tester.ExpectBucketCount(
-        "Commerce.PriceInsights.OmniboxIconShownLabel", 1, 1);
+        "Commerce.PriceInsights.OmniboxIconShown", 1, 1);
 
     NavigateToANonShoppingPage();
-    histogram_tester.ExpectTotalCount(
-        "Commerce.PriceInsights.OmniboxIconShownLabel", 1);
+    histogram_tester.ExpectTotalCount("Commerce.PriceInsights.OmniboxIconShown",
+                                      1);
     histogram_tester.ExpectBucketCount(
-        "Commerce.PriceInsights.OmniboxIconShownLabel", 1, 1);
+        "Commerce.PriceInsights.OmniboxIconShown", 1, 1);
 
-    NavigateToAShoppingPage(/*expected_to_show_label=*/false);
-    histogram_tester.ExpectTotalCount(
-        "Commerce.PriceInsights.OmniboxIconShownLabel", 2);
+    NavigateToAShoppingPage(/*expected_to_show_label=*/true);
+    histogram_tester.ExpectTotalCount("Commerce.PriceInsights.OmniboxIconShown",
+                                      2);
     histogram_tester.ExpectBucketCount(
-        "Commerce.PriceInsights.OmniboxIconShownLabel", 0, 1);
+        "Commerce.PriceInsights.OmniboxIconShown", 1, 2);
     EXPECT_THAT(
         histogram_tester.GetAllSamples(
-            "Commerce.PriceInsights.OmniboxIconShownLabel"),
-        BucketsAre(base::Bucket(0, 1), base::Bucket(1, 1), base::Bucket(2, 0)));
+            "Commerce.PriceInsights.OmniboxIconShown"),
+        BucketsAre(base::Bucket(0, 0), base::Bucket(1, 2), base::Bucket(2, 0)));
   }
 
  protected:
@@ -281,33 +273,11 @@ class PriceInsightsIconViewEngagementTest
   feature_engagement::test::ScopedIphFeatureList test_features_;
 };
 
-IN_PROC_BROWSER_TEST_F(PriceInsightsIconViewEngagementTest,
-                       ExpandedIconShownOncePerDayOnly) {
+IN_PROC_BROWSER_TEST_F(PriceInsightsIconViewEngagementTest, ExpandedIconShown) {
   EXPECT_CALL(*mock_shopping_service_, GetProductInfoForUrl)
       .Times(testing::AnyNumber());
   EXPECT_CALL(*mock_shopping_service_, GetPriceInsightsInfoForUrl)
       .Times(testing::AnyNumber());
 
-  VerifyIconExpandedOncePerDay();
-}
-
-IN_PROC_BROWSER_TEST_F(PriceInsightsIconViewEngagementTest,
-                       ExpandedIconShownMaxTimesLast28days) {
-  EXPECT_CALL(*mock_shopping_service_, GetProductInfoForUrl)
-      .Times(testing::AnyNumber());
-  EXPECT_CALL(*mock_shopping_service_, GetPriceInsightsInfoForUrl)
-      .Times(testing::AnyNumber());
-  while (kIconExpandedMaxTimesLast28days--) {
-    VerifyIconExpandedOncePerDay();
-    // Advance one day
-    test_clock_.Advance(base::Days(1));
-  }
-  // Icon should not expanded after the max has reach.
-  NavigateToANonShoppingPage();
-  NavigateToAShoppingPage(/*expected_to_show_label=*/false);
-
-  // Advance 28 days, icon should expand again.
-  test_clock_.Advance(base::Days(28));
-  NavigateToANonShoppingPage();
-  NavigateToAShoppingPage(/*expected_to_show_label=*/true);
+  VerifyIconExpanded();
 }

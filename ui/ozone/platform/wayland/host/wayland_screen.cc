@@ -14,6 +14,7 @@
 #include "build/chromeos_buildflags.h"
 #include "components/device_event_log/device_event_log.h"
 #include "ui/base/linux/linux_desktop.h"
+#include "ui/base/pointer/touch_ui_controller.h"
 #include "ui/display/display.h"
 #include "ui/display/display_finder.h"
 #include "ui/display/display_list.h"
@@ -100,9 +101,10 @@ WaylandScreen::WaylandScreen(WaylandConnection* connection)
       // Enable that back when the issue is resolved.
 #endif  // !BUILDFLAG(IS_CHROMEOS_LACROS)
 
-    // TODO(b/297885530): Change buffer format to RGBA_F16 once that format is
-    //  supported for overlay delegation to Ash.
-    if (format == gfx::BufferFormat::RGBA_1010102)
+    if (format == gfx::BufferFormat::RGBA_F16)
+      image_format_hdr_ = format;
+
+    if (!image_format_hdr_ && format == gfx::BufferFormat::RGBA_1010102)
       image_format_hdr_ = format;
 
     if (!image_format_alpha_ && format == gfx::BufferFormat::BGRA_8888)
@@ -551,6 +553,10 @@ base::Value::List WaylandScreen::GetGpuExtraInfo(
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
 void WaylandScreen::OnTabletStateChanged(display::TabletState tablet_state) {
   tablet_state_ = tablet_state;
+
+  ui::TouchUiController::Get()->OnTabletModeToggled(
+      tablet_state == display::TabletState::kInTabletMode ||
+      tablet_state == display::TabletState::kEnteringTabletMode);
 
   auto* observer_list = display_list_.observers();
   for (auto& observer : *observer_list)
