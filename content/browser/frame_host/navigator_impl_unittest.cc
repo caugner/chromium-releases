@@ -237,13 +237,22 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   EXPECT_FALSE(request->begin_params().has_user_gesture);
   EXPECT_EQ(kUrl2, request->common_params().url);
   EXPECT_FALSE(request->browser_initiated());
-  EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
+  if (SiteIsolationPolicy::AreCrossProcessFramesPossible()) {
+    EXPECT_TRUE(GetSpeculativeRenderFrameHost(node));
+  } else {
+    EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
+  }
 
   // Have the current RenderFrameHost commit the navigation.
   scoped_refptr<ResourceResponse> response(new ResourceResponse);
   GetLoaderForNavigationRequest(request)
       ->CallOnResponseStarted(response, MakeEmptyStream());
-  EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  if (SiteIsolationPolicy::AreCrossProcessFramesPossible()) {
+    EXPECT_TRUE(
+        DidRenderFrameHostRequestCommit(GetSpeculativeRenderFrameHost(node)));
+  } else {
+    EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  }
   EXPECT_TRUE(main_test_rfh()->is_loading());
   EXPECT_FALSE(node->navigation_request());
 
@@ -622,14 +631,24 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   // Confirm that the first loader got destroyed.
   EXPECT_FALSE(loader1);
 
-  // Confirm that the speculative RenderFrameHost was destroyed.
-  EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
+  // Confirm that the speculative RenderFrameHost was destroyed in the non
+  // SitePerProcess case.
+  if (SiteIsolationPolicy::AreCrossProcessFramesPossible()) {
+    EXPECT_TRUE(GetSpeculativeRenderFrameHost(node));
+  } else {
+    EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
+  }
 
   // Have the RenderFrameHost commit the navigation.
   scoped_refptr<ResourceResponse> response(new ResourceResponse);
   GetLoaderForNavigationRequest(request2)
       ->CallOnResponseStarted(response, MakeEmptyStream());
-  EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  if (SiteIsolationPolicy::AreCrossProcessFramesPossible()) {
+    EXPECT_TRUE(
+        DidRenderFrameHostRequestCommit(GetSpeculativeRenderFrameHost(node)));
+  } else {
+    EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  }
 
   // Commit the navigation.
   main_test_rfh()->SendNavigate(1, 0, true, kUrl2);
@@ -660,7 +679,11 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   EXPECT_EQ(kUrl1, request1->common_params().url);
   EXPECT_FALSE(request1->browser_initiated());
   EXPECT_TRUE(request1->begin_params().has_user_gesture);
-  EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
+  if (SiteIsolationPolicy::AreCrossProcessFramesPossible()) {
+    EXPECT_TRUE(GetSpeculativeRenderFrameHost(node));
+  } else {
+    EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
+  }
 
   // Now receive a renderer-initiated non-user-initiated request. Nothing should
   // change.
@@ -671,13 +694,22 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   EXPECT_EQ(kUrl1, request2->common_params().url);
   EXPECT_FALSE(request2->browser_initiated());
   EXPECT_TRUE(request2->begin_params().has_user_gesture);
-  EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
+  if (SiteIsolationPolicy::AreCrossProcessFramesPossible()) {
+    EXPECT_TRUE(GetSpeculativeRenderFrameHost(node));
+  } else {
+    EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
+  }
 
   // Have the RenderFrameHost commit the navigation.
   scoped_refptr<ResourceResponse> response(new ResourceResponse);
   GetLoaderForNavigationRequest(request2)
       ->CallOnResponseStarted(response, MakeEmptyStream());
-  EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  if (SiteIsolationPolicy::AreCrossProcessFramesPossible()) {
+    EXPECT_TRUE(
+        DidRenderFrameHostRequestCommit(GetSpeculativeRenderFrameHost(node)));
+  } else {
+    EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  }
 
   // Commit the navigation.
   main_test_rfh()->SendNavigate(1, 0, true, kUrl1);
@@ -753,7 +785,11 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   EXPECT_EQ(kUrl1, request1->common_params().url);
   EXPECT_FALSE(request1->browser_initiated());
   EXPECT_FALSE(request1->begin_params().has_user_gesture);
-  EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
+  if (SiteIsolationPolicy::AreCrossProcessFramesPossible()) {
+    EXPECT_TRUE(GetSpeculativeRenderFrameHost(node));
+  } else {
+    EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
+  }
   base::WeakPtr<TestNavigationURLLoader> loader1 =
       GetLoaderForNavigationRequest(request1)->AsWeakPtr();
   EXPECT_TRUE(loader1);
@@ -764,7 +800,11 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   EXPECT_EQ(kUrl2, request2->common_params().url);
   EXPECT_FALSE(request2->browser_initiated());
   EXPECT_FALSE(request2->begin_params().has_user_gesture);
-  EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
+  if (SiteIsolationPolicy::AreCrossProcessFramesPossible()) {
+    EXPECT_TRUE(GetSpeculativeRenderFrameHost(node));
+  } else {
+    EXPECT_FALSE(GetSpeculativeRenderFrameHost(node));
+  }
 
   // Confirm that the first loader got destroyed.
   EXPECT_FALSE(loader1);
@@ -773,7 +813,12 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
   scoped_refptr<ResourceResponse> response(new ResourceResponse);
   GetLoaderForNavigationRequest(request2)
       ->CallOnResponseStarted(response, MakeEmptyStream());
-  EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  if (SiteIsolationPolicy::AreCrossProcessFramesPossible()) {
+    EXPECT_TRUE(
+        DidRenderFrameHostRequestCommit(GetSpeculativeRenderFrameHost(node)));
+  } else {
+    EXPECT_TRUE(DidRenderFrameHostRequestCommit(main_test_rfh()));
+  }
 
   // Commit the navigation.
   main_test_rfh()->SendNavigate(1, 0, true, kUrl2);
@@ -1144,6 +1189,36 @@ TEST_F(NavigatorTestWithBrowserSideNavigation,
     // unrelated to the current SiteInstance.
     EXPECT_EQ(unrelated_instance.get(), converted_instance_2);
   }
+}
+
+namespace {
+void SetWithinPage(const GURL& url,
+                   FrameHostMsg_DidCommitProvisionalLoad_Params* params) {
+  params->was_within_same_page = true;
+  params->url = url;
+}
+}
+
+// A renderer process might try and claim that a cross site navigation was
+// within the same page by setting was_within_same_page = true for
+// FrameHostMsg_DidCommitProvisionalLoad. Such case should be detected on the
+// browser side and the renderer process should be killed.
+TEST_F(NavigatorTestWithBrowserSideNavigation, CrossSiteClaimWithinPage) {
+  const GURL kUrl1("http://www.chromium.org/");
+  const GURL kUrl2("http://www.google.com/");
+
+  contents()->NavigateAndCommit(kUrl1);
+  FrameTreeNode* node = main_test_rfh()->frame_tree_node();
+
+  // Navigate to a different site.
+  int entry_id = RequestNavigation(node, kUrl2);
+  main_test_rfh()->PrepareForCommit();
+
+  // Claim that the navigation was within same page.
+  int bad_msg_count = process()->bad_msg_count();
+  GetSpeculativeRenderFrameHost(node)->SendNavigateWithModificationCallback(
+      0, entry_id, true, kUrl2, base::Bind(SetWithinPage, kUrl1));
+  EXPECT_EQ(process()->bad_msg_count(), bad_msg_count + 1);
 }
 
 }  // namespace content

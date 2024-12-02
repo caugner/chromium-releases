@@ -23,7 +23,7 @@ InspectorTest.dumpComputedStyle = function()
             continue;
         var dumpText = "";
         dumpText += treeElement.title.querySelector(".property-name").textContent;
-        dumpText += ": ";
+        dumpText += " ";
         dumpText += treeElement.title.querySelector(".property-value").textContent;
         InspectorTest.addResult(dumpText);
         for (var trace of treeElement.children()) {
@@ -379,7 +379,7 @@ function printStyleSection(section, omitLonghands, includeSelectorGroupMarks)
         var media = medias[i];
         InspectorTest.addResult(media.textContent);
     }
-    var selector = section._titleElement.querySelector(".selector");
+    var selector = section._titleElement.querySelector(".selector") || section._titleElement.querySelector(".keyframe-key");
     var selectorText = includeSelectorGroupMarks ? buildMarkedSelectors(selector) : selector.textContent;
     // Dump " {".
     selectorText += selector.nextSibling.textContent;

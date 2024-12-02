@@ -14,6 +14,7 @@
 #include "cc/trees/damage_tracker.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_host_common.h"
+#include "cc/trees/layer_tree_impl.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 
 namespace cc {
@@ -70,7 +71,7 @@ void DebugRectHistory::SavePaintRects(LayerImpl* layer) {
   // not. Therefore we traverse recursively over all layers, not just the render
   // surface list.
 
-  Region invalidation_region = layer->GetInvalidationRegion();
+  Region invalidation_region = layer->GetInvalidationRegionForDebugging();
   if (!invalidation_region.IsEmpty() && layer->DrawsContent()) {
     for (Region::Iterator it(invalidation_region); it.has_rect(); it.next()) {
       debug_rects_.push_back(DebugRect(
@@ -180,8 +181,14 @@ void DebugRectHistory::SaveWheelEventHandlerRects(LayerImpl* layer) {
 }
 
 void DebugRectHistory::SaveWheelEventHandlerRectsCallback(LayerImpl* layer) {
-  if (!layer->have_wheel_event_handlers())
+  EventListenerProperties event_properties =
+      layer->layer_tree_impl()->event_listener_properties(
+          EventListenerClass::kMouseWheel);
+  if (event_properties == EventListenerProperties::kNone ||
+      (layer->layer_tree_impl()->settings().use_mouse_wheel_gestures &&
+       event_properties == EventListenerProperties::kPassive)) {
     return;
+  }
 
   debug_rects_.push_back(
       DebugRect(WHEEL_EVENT_HANDLER_RECT_TYPE,
@@ -196,7 +203,7 @@ void DebugRectHistory::SaveScrollEventHandlerRects(LayerImpl* layer) {
 }
 
 void DebugRectHistory::SaveScrollEventHandlerRectsCallback(LayerImpl* layer) {
-  if (!layer->have_scroll_event_handlers())
+  if (!layer->layer_tree_impl()->have_scroll_event_handlers())
     return;
 
   debug_rects_.push_back(

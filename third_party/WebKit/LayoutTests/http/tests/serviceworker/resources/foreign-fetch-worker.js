@@ -1,7 +1,9 @@
 self.addEventListener('install', function(event) {
-    event.registerForeignFetchScopes([registration.scope + '/intercept']);
+    var origins = JSON.parse(decodeURIComponent(location.search.substring(1)));
+    event.registerForeignFetchScopes([registration.scope + '/intercept'],
+                                     origins);
   });
 
-self.addEventListener('fetch', function(event) {
+self.addEventListener('foreignfetch', function(event) {
     event.respondWith(new Response('Foreign Fetch'));
   });

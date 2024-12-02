@@ -53,6 +53,17 @@ class WebGraphicsContext3D;
 class WebGraphicsContext3DProvider;
 class SharedContextRateLimiter;
 
+#if OS(MACOSX)
+// Canvas hibernation is currently disabled on MacOS X due to a bug that causes content loss
+// TODO: Find a better fix for crbug.com/588434
+#define CANVAS2D_HIBERNATION_ENABLED 0
+#else
+#define CANVAS2D_HIBERNATION_ENABLED 1
+#endif
+
+// TODO: Fix background rendering and remove this workaround. crbug.com/600386
+#define CANVAS2D_BACKGROUND_RENDER_SWITCH_TO_CPU 0
+
 class PLATFORM_EXPORT Canvas2DLayerBridge : public WebExternalTextureLayerClient, public WebThread::TaskObserver, public RefCounted<Canvas2DLayerBridge> {
     WTF_MAKE_NONCOPYABLE(Canvas2DLayerBridge);
 public:
@@ -76,7 +87,7 @@ public:
     void willOverwriteAllPixels();
     void willOverwriteCanvas();
     SkCanvas* canvas();
-    void disableDeferral();
+    void disableDeferral(DisableDeferralReason);
     bool checkSurfaceValid();
     bool restoreSurface();
     WebLayer* layer() const;
@@ -95,7 +106,7 @@ public:
     void hibernate();
     bool isHibernating() const { return m_hibernationImage; }
 
-    PassRefPtr<SkImage> newImageSnapshot(AccelerationHint);
+    PassRefPtr<SkImage> newImageSnapshot(AccelerationHint, SnapshotReason);
 
     // The values of the enum entries must not change because they are used for
     // usage metrics histograms. New values can be added to the end.
@@ -162,6 +173,7 @@ private:
     bool m_renderingTaskCompletedForCurrentFrame;
     bool m_softwareRenderingWhileHidden;
     bool m_surfaceCreationFailedAtLeastOnce = false;
+    bool m_hibernationScheduled = false;
 
     friend class Canvas2DLayerBridgeTest;
 

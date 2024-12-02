@@ -53,7 +53,7 @@ class CC_EXPORT PictureLayerImpl
   void ReleaseResources() override;
   void RecreateResources() override;
   skia::RefPtr<SkPicture> GetPicture() override;
-  Region GetInvalidationRegion() override;
+  Region GetInvalidationRegionForDebugging() override;
 
   // PictureLayerTilingClient overrides.
   ScopedTilePtr CreateTile(const Tile::CreateInfo& info) override;
@@ -150,6 +150,7 @@ class CC_EXPORT PictureLayerImpl
   float raster_contents_scale_;
   float low_res_raster_contents_scale_;
 
+  bool raster_source_scale_is_fixed_;
   bool was_screen_space_transform_animating_;
   bool only_used_low_res_last_append_quads_;
   const bool is_mask_;

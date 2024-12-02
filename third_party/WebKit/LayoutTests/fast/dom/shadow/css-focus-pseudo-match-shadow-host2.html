@@ -22,9 +22,9 @@ function buildSingleShadowTree(delegatesFocus) {
             createDOM('input', {'id': 'outer-input'}),
             createDOM('div', {'id': 'shadow-host'},
                 createDOM('input', {'id': 'lightdom-input'}),
-                createShadowRoot(
-                    {'delegatesFocus': delegatesFocus},
-                    createDOM('content'),
+                attachShadow(
+                    {'mode': 'open', 'delegatesFocus': delegatesFocus},
+                    createDOM('slot'),
                     createDOM('input', {'id': 'inner-input'})))));
 
     sandbox.offsetTop;
@@ -36,7 +36,7 @@ function testSingleShadow() {
 
     var host = document.querySelector('#shadow-host');
     var lightdomInput = document.querySelector('#lightdom-input');
-    var innerInput = getNodeInTreeOfTrees('shadow-host/inner-input');
+    var innerInput = getNodeInComposedTree('shadow-host/inner-input');
     var outerInput = document.querySelector('#outer-input');
 
     outerInput.focus();
@@ -76,7 +76,7 @@ function testSingleShadow() {
 
     var host = document.querySelector('#shadow-host');
     var lightdomInput = document.querySelector('#lightdom-input');
-    var innerInput = getNodeInTreeOfTrees('shadow-host/inner-input');
+    var innerInput = getNodeInComposedTree('shadow-host/inner-input');
     var outerInput = document.querySelector('#outer-input');
 
     outerInput.focus();

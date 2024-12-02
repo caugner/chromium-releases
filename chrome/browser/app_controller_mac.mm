@@ -16,7 +16,6 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/sys_string_conversions.h"
@@ -53,7 +52,7 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_iterator.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_mac.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
@@ -86,6 +85,7 @@
 #include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/handoff/handoff_manager.h"
 #include "components/handoff/handoff_utility.h"
+#include "components/prefs/pref_service.h"
 #include "components/sessions/core/tab_restore_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
@@ -128,8 +128,7 @@ bool g_is_opening_new_window = false;
 // there are only minimized windows), it will unminimize it.
 Browser* ActivateBrowser(Profile* profile) {
   Browser* browser = chrome::FindLastActiveWithProfile(
-      profile->IsGuestSession() ? profile->GetOffTheRecordProfile() : profile,
-      chrome::HOST_DESKTOP_TYPE_NATIVE);
+      profile->IsGuestSession() ? profile->GetOffTheRecordProfile() : profile);
   if (browser)
     browser->window()->Activate();
   return browser;
@@ -140,7 +139,7 @@ Browser* ActivateBrowser(Profile* profile) {
 Browser* CreateBrowser(Profile* profile) {
   {
     base::AutoReset<bool> auto_reset_in_run(&g_is_opening_new_window, true);
-    chrome::NewEmptyWindow(profile, chrome::HOST_DESKTOP_TYPE_NATIVE);
+    chrome::NewEmptyWindow(profile);
   }
 
   Browser* browser = chrome::GetLastActiveBrowser();
@@ -490,7 +489,7 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
 
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)app {
   // If there are no windows, quit immediately.
-  if (chrome::BrowserIterator().done() &&
+  if (BrowserList::GetInstance()->empty() &&
       !AppWindowRegistryUtil::IsAppWindowVisibleInAnyProfile(0)) {
     return NSTerminateNow;
   }
@@ -536,10 +535,8 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
 }
 
 - (void)didEndMainMessageLoop {
-  DCHECK_EQ(0u, chrome::GetBrowserCount([self lastProfile],
-                                        chrome::HOST_DESKTOP_TYPE_NATIVE));
-  if (!chrome::GetBrowserCount([self lastProfile],
-                               chrome::HOST_DESKTOP_TYPE_NATIVE)) {
+  DCHECK_EQ(0u, chrome::GetBrowserCount([self lastProfile]));
+  if (!chrome::GetBrowserCount([self lastProfile])) {
     // As we're shutting down, we need to nuke the TabRestoreService, which
     // will start the shutdown of the NavigationControllers and allow for
     // proper shutdown. If we don't do this, Chrome won't shut down cleanly,
@@ -635,10 +632,8 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   // completed, raise browser windows.
   reopenTime_ = base::TimeTicks();
   std::set<NSWindow*> browserWindows;
-  for (chrome::BrowserIterator iter; !iter.done(); iter.Next()) {
-    Browser* browser = *iter;
+  for (auto* browser : *BrowserList::GetInstance())
     browserWindows.insert(browser->window()->GetNativeWindow());
-  }
   if (!browserWindows.empty()) {
     ui::FocusWindowSetOnCurrentSpace(browserWindows);
   }
@@ -779,8 +774,7 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
 
   startupComplete_ = YES;
 
-  Browser* browser =
-      FindLastActiveWithHostDesktopType(chrome::HOST_DESKTOP_TYPE_NATIVE);
+  Browser* browser = chrome::FindLastActive();
   content::WebContents* activeWebContents = nullptr;
   if (browser)
     activeWebContents = browser->tab_strip_model()->GetActiveWebContents();
@@ -855,11 +849,9 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
       if ([self userWillWaitForInProgressDownloads:downloadCount]) {
         // Create a new browser window (if necessary) and navigate to the
         // downloads page if the user chooses to wait.
-        Browser* browser = chrome::FindBrowserWithProfile(
-            profiles[i], chrome::HOST_DESKTOP_TYPE_NATIVE);
+        Browser* browser = chrome::FindBrowserWithProfile(profiles[i]);
         if (!browser) {
-          browser = new Browser(Browser::CreateParams(
-              profiles[i], chrome::HOST_DESKTOP_TYPE_NATIVE));
+          browser = new Browser(Browser::CreateParams(profiles[i]));
           browser->window()->Show();
         }
         DCHECK(browser);
@@ -1080,9 +1072,7 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
       CreateBrowser(lastProfile->GetOffTheRecordProfile());
       break;
     case IDC_RESTORE_TAB:
-      // There is only the native desktop on Mac.
-      chrome::OpenWindowWithRestoredTabs(lastProfile,
-                                         chrome::HOST_DESKTOP_TYPE_NATIVE);
+      chrome::OpenWindowWithRestoredTabs(lastProfile);
       break;
     case IDC_OPEN_FILE:
       chrome::ExecuteCommand(CreateBrowser(lastProfile), IDC_OPEN_FILE);
@@ -1201,8 +1191,7 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   // notifications so we still need to open a new window.
   if (hasVisibleWindows) {
     std::set<NSWindow*> browserWindows;
-    for (chrome::BrowserIterator iter; !iter.done(); iter.Next()) {
-      Browser* browser = *iter;
+    for (auto* browser : *BrowserList::GetInstance()) {
       // When focusing Chrome, don't focus any browser windows associated with
       // a currently running app shim, so ignore them.
       if (browser && browser->is_app()) {
@@ -1390,8 +1379,7 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   Browser* browser = chrome::GetLastActiveBrowser();
   // if no browser window exists then create one with no tabs to be filled in
   if (!browser) {
-    browser = new Browser(Browser::CreateParams(
-        [self lastProfile], chrome::HOST_DESKTOP_TYPE_NATIVE));
+    browser = new Browser(Browser::CreateParams([self lastProfile]));
     browser->window()->Show();
   }
 
@@ -1399,7 +1387,7 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   chrome::startup::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
       chrome::startup::IS_FIRST_RUN : chrome::startup::IS_NOT_FIRST_RUN;
   StartupBrowserCreatorImpl launch(base::FilePath(), dummy, first_run);
-  launch.OpenURLsInBrowser(browser, false, urls, browser->host_desktop_type());
+  launch.OpenURLsInBrowser(browser, false, urls);
 }
 
 - (void)getUrl:(NSAppleEventDescriptor*)event

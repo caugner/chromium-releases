@@ -11,8 +11,10 @@ namespace content {
 // There are security implications associated with introducing new schemes.
 const char kChromeDevToolsScheme[] = "chrome-devtools";
 const char kChromeUIScheme[] = "chrome";
+const char kExeScheme[] = "exe";
 const char kGuestScheme[] = "chrome-guest";
 const char kMetadataScheme[] = "metadata";
+const char kMojoScheme[] = "mojo";
 const char kSwappedOutScheme[] = "swappedout";
 const char kViewSourceScheme[] = "view-source";
 #if defined(OS_CHROMEOS)
@@ -41,6 +43,7 @@ const char kChromeUIBadCastCrashURL[] = "chrome://badcastcrash";
 const char kChromeUIBrowserCrashURL[] = "chrome://inducebrowsercrashforrealz";
 const char kChromeUIBrowserUIHang[] = "chrome://uithreadhang";
 const char kChromeUICrashURL[] = "chrome://crash";
+const char kChromeUIDelayedBrowserUIHang[] = "chrome://delayeduithreadhang";
 const char kChromeUIDumpURL[] = "chrome://crashdump";
 const char kChromeUIGpuCleanURL[] = "chrome://gpuclean";
 const char kChromeUIGpuCrashURL[] = "chrome://gpucrash";

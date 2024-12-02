@@ -2,11 +2,11 @@ function test() {
     InspectorTest.addConsoleSniffer(addMessage);
 
     function addMessage(message) {
-        var viewMessages = WebInspector.ConsolePanel._view()._visibleViewMessages;
+        var viewMessages = WebInspector.ConsoleView.instance()._visibleViewMessages;
         for (var i = 0; i < viewMessages.length; ++i) {
             var m = viewMessages[i].consoleMessage();
             InspectorTest.addResult("Message[" + i + "]: " + WebInspector.displayNameForURL(m.url) + ":" + m.line + " " + m.messageText);
-            var trace = m.stackTrace;
+            var trace = m.stackTrace ? m.stackTrace.callFrames : null;
             if (!trace) {
                 InspectorTest.addResult("FAIL: no stack trace attached to message #" + i);
             } else {
