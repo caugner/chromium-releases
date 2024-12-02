@@ -272,6 +272,7 @@ interface CDATASection : Text
     attribute @@toStringTag
     method constructor
 interface CSS
+    static getter paintWorklet
     static method escape
     static method supports
     attribute @@toStringTag
@@ -1107,7 +1108,6 @@ interface Document : Node
     method write
     method writeln
     setter alinkColor
-    setter all
     setter bgColor
     setter body
     setter cookie
@@ -1551,6 +1551,7 @@ interface HTMLAnchorElement : HTMLElement
     getter protocol
     getter referrerPolicy
     getter rel
+    getter relList
     getter rev
     getter search
     getter shape
@@ -1576,6 +1577,7 @@ interface HTMLAnchorElement : HTMLElement
     setter protocol
     setter referrerPolicy
     setter rel
+    setter relList
     setter rev
     setter search
     setter shape
@@ -1601,6 +1603,7 @@ interface HTMLAreaElement : HTMLElement
     getter protocol
     getter referrerPolicy
     getter rel
+    getter relList
     getter search
     getter shape
     getter target
@@ -1622,6 +1625,7 @@ interface HTMLAreaElement : HTMLElement
     setter protocol
     setter referrerPolicy
     setter rel
+    setter relList
     setter search
     setter shape
     setter target
@@ -2205,6 +2209,7 @@ interface HTMLImageElement : HTMLElement
     getter complete
     getter crossOrigin
     getter currentSrc
+    getter decoding
     getter height
     getter hspace
     getter isMap
@@ -2228,6 +2233,7 @@ interface HTMLImageElement : HTMLElement
     setter alt
     setter border
     setter crossOrigin
+    setter decoding
     setter height
     setter hspace
     setter isMap
@@ -2630,7 +2636,6 @@ interface HTMLOptionsCollection : HTMLCollection
     method @@iterator
     method add
     method constructor
-    method namedItem
     method remove
     setter length
     setter selectedIndex
@@ -2761,6 +2766,7 @@ interface HTMLShadowElement : HTMLElement
 interface HTMLSlotElement : HTMLElement
     attribute @@toStringTag
     getter name
+    method assignedElements
     method assignedNodes
     method constructor
     setter name
@@ -3205,6 +3211,7 @@ interface Image
     getter complete
     getter crossOrigin
     getter currentSrc
+    getter decoding
     getter height
     getter hspace
     getter isMap
@@ -3228,6 +3235,7 @@ interface Image
     setter alt
     setter border
     setter crossOrigin
+    setter decoding
     setter height
     setter hspace
     setter isMap
@@ -3760,6 +3768,7 @@ interface NetworkInformation : EventTarget
     getter effectiveType
     getter onchange
     getter rtt
+    getter saveData
     method constructor
     setter onchange
 interface Node : EventTarget
@@ -4034,6 +4043,7 @@ interface PerformanceLongTaskTiming : PerformanceEntry
     attribute @@toStringTag
     getter attribution
     method constructor
+    method toJSON
 interface PerformanceMark : PerformanceEntry
     attribute @@toStringTag
     method constructor
@@ -4069,6 +4079,7 @@ interface PerformanceObserver
     method constructor
     method disconnect
     method observe
+    method takeRecords
 interface PerformanceObserverEntryList
     attribute @@toStringTag
     method constructor
@@ -4095,9 +4106,18 @@ interface PerformanceResourceTiming : PerformanceEntry
     getter responseEnd
     getter responseStart
     getter secureConnectionStart
+    getter serverTiming
     getter transferSize
     getter workerStart
     method constructor
+    method toJSON
+interface PerformanceServerTiming
+    attribute @@toStringTag
+    getter description
+    getter duration
+    getter name
+    method constructor
+    method toJSON
 interface PerformanceTiming
     attribute @@toStringTag
     getter connectEnd
@@ -4385,6 +4405,7 @@ interface RTCRtpSender
     attribute @@toStringTag
     getter track
     method constructor
+    method replaceTrack
 interface RTCSessionDescription
     attribute @@toStringTag
     getter sdp
@@ -4479,6 +4500,7 @@ interface Request
     getter bodyUsed
     getter cache
     getter credentials
+    getter destination
     getter headers
     getter integrity
     getter method
@@ -5175,6 +5197,7 @@ interface SVGGraphicsElement : SVGElement
     method getScreenCTM
 interface SVGImageElement : SVGGraphicsElement
     attribute @@toStringTag
+    getter decoding
     getter height
     getter href
     getter preserveAspectRatio
@@ -5183,6 +5206,7 @@ interface SVGImageElement : SVGGraphicsElement
     getter y
     method constructor
     method decode
+    setter decoding
 interface SVGLength
     attribute @@toStringTag
     attribute SVG_LENGTHTYPE_CM
@@ -5886,6 +5910,7 @@ interface TaskAttributionTiming : PerformanceEntry
     getter containerSrc
     getter containerType
     method constructor
+    method toJSON
 interface Text : CharacterData
     attribute @@toStringTag
     getter assignedSlot
@@ -7641,6 +7666,10 @@ interface Worker : EventTarget
     method terminate
     setter onerror
     setter onmessage
+interface Worklet
+    attribute @@toStringTag
+    method addModule
+    method constructor
 interface WritableStream
     getter locked
     method abort

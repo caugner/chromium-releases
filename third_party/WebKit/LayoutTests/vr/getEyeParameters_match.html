@@ -10,7 +10,7 @@
 <script src="resources/presentation-setup.js"></script>
 <script>
 let fakeDisplays = fakeVRDisplays();
-let fakeDisplay = fakeDisplays["FakeMagicWindowOnly"];
+let fakeDisplay = fakeDisplays["Pixel"];
 
 vr_test( (t) => {
   return navigator.getVRDisplays().then( (displays) => {
@@ -20,7 +20,7 @@ vr_test( (t) => {
       t.step( () => {
         assert_equals(actual.offset.length, expected.offset.length);
         for (let i = 0; i < expected.offset.length; i++) {
-          assert_approx_equals(actual.offset[i], actual.offset[i],
+          assert_approx_equals(actual.offset[i], expected.offset[i],
               FLOAT_EPSILON);
         }
 

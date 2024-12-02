@@ -21,7 +21,6 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter downloaded
 [Worker]     getter id
 [Worker]     getter onprogress
-[Worker]     getter totalDownloadSize
 [Worker]     getter uploadTotal
 [Worker]     getter uploaded
 [Worker]     method abort
@@ -637,6 +636,16 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter width
 [Worker]     method constructor
 [Worker]     method getColorSettings
+[Worker] interface Lock
+[Worker]     attribute @@toStringTag
+[Worker]     getter mode
+[Worker]     getter name
+[Worker]     method constructor
+[Worker] interface LockManager
+[Worker]     attribute @@toStringTag
+[Worker]     method acquire
+[Worker]     method constructor
+[Worker]     method query
 [Worker] interface MessageChannel
 [Worker]     attribute @@toStringTag
 [Worker]     getter port1
@@ -891,6 +900,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     method constructor
 [Worker]     method disconnect
 [Worker]     method observe
+[Worker]     method takeRecords
 [Worker] interface PerformanceObserverEntryList
 [Worker]     attribute @@toStringTag
 [Worker]     method constructor
@@ -918,6 +928,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter transferSize
 [Worker]     getter workerStart
 [Worker]     method constructor
+[Worker]     method toJSON
 [Worker] interface PerformanceServerTiming
 [Worker]     attribute @@toStringTag
 [Worker]     getter description
@@ -983,6 +994,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter bodyUsed
 [Worker]     getter cache
 [Worker]     getter credentials
+[Worker]     getter destination
 [Worker]     getter headers
 [Worker]     getter integrity
 [Worker]     getter keepalive
@@ -2451,7 +2463,9 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter appVersion
 [Worker]     getter budget
 [Worker]     getter connection
+[Worker]     getter deviceMemory
 [Worker]     getter hardwareConcurrency
+[Worker]     getter locks
 [Worker]     getter onLine
 [Worker]     getter permissions
 [Worker]     getter platform

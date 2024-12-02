@@ -259,6 +259,7 @@ html element a
     property protocol
     property referrerPolicy
     property rel
+    property relList
     property rev
     property search
     property shape
@@ -287,6 +288,7 @@ html element area
     property protocol
     property referrerPolicy
     property rel
+    property relList
     property search
     property shape
     property target
@@ -582,6 +584,7 @@ html element img
     property crossOrigin
     property currentSrc
     property decode
+    property decoding
     property height
     property hspace
     property isMap
@@ -857,6 +860,7 @@ html element select
 html element shadow
     property getDistributedNodes
 html element slot
+    property assignedElements
     property assignedNodes
     property name
 html element small
@@ -1735,6 +1739,7 @@ svg element g
     property transform
 svg element image
     property decode
+    property decoding
     property farthestViewportElement
     property getBBox
     property getCTM

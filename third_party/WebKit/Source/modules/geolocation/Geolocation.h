@@ -49,9 +49,11 @@ class Document;
 class LocalFrame;
 class ExecutionContext;
 
-class MODULES_EXPORT Geolocation final : public ScriptWrappable,
-                                         public ContextLifecycleObserver,
-                                         public PageVisibilityObserver {
+class MODULES_EXPORT Geolocation final
+    : public ScriptWrappable,
+      public ActiveScriptWrappable<Geolocation>,
+      public ContextLifecycleObserver,
+      public PageVisibilityObserver {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(Geolocation);
 
@@ -97,8 +99,15 @@ class MODULES_EXPORT Geolocation final : public ScriptWrappable,
   // Discards the notifier if it is a oneshot because it timed it.
   void RequestTimedOut(GeoNotifier*);
 
+  // Returns true if this geolocation still owns the given notifier.
+  bool DoesOwnNotifier(GeoNotifier*) const;
+
   // Inherited from PageVisibilityObserver.
   void PageVisibilityChanged() override;
+
+  // TODO(yukishiino): This is a short-term speculative fix for
+  // crbug.com/792604. Remove this once the bug is fixed.
+  bool HasPendingActivity() const final;
 
  private:
   explicit Geolocation(ExecutionContext*);

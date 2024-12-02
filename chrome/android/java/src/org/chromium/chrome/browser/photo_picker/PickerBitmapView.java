@@ -110,6 +110,9 @@ public class PickerBitmapView extends SelectableItemView<PickerBitmap> {
 
     @Override
     public void onClick() {
+        if (mBitmapDetails == null)
+            return; // Clicks are disabled until initialize() has been called.
+
         if (isGalleryTile()) {
             mCategoryView.showGallery();
             return;
@@ -141,6 +144,13 @@ public class PickerBitmapView extends SelectableItemView<PickerBitmap> {
 
     @Override
     public void onSelectionStateChange(List<PickerBitmap> selectedItems) {
+        // If the user cancels the dialog before this object has initialized,
+        // the SelectionDelegate will try to notify us that all selections have
+        // been cleared. However, we don't need to process that message and, in
+        // fact, we can't do so because isPictureTile relies on mBitmapDetails
+        // being initialized.
+        if (mBitmapDetails == null) return;
+
         updateSelectionState();
 
         if (!isPictureTile()) return;

@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/gaia_screen_handler.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/feature_list.h"
@@ -25,6 +27,7 @@
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/net/network_portal_detector_impl.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
+#include "chrome/browser/chromeos/policy/untrusted_authority_certs_cache.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/io_thread.h"
@@ -32,6 +35,7 @@
 #include "chrome/browser/ui/webui/chromeos/login/active_directory_password_change_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/enrollment_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
+#include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/signin/signin_utils.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_features.h"
@@ -298,31 +302,39 @@ void GaiaScreenHandler::DisableRestrictiveProxyCheckForTest() {
 }
 
 void GaiaScreenHandler::LoadGaia(const GaiaContext& context) {
+  // Start a new session with SigninPartitionManager, generating a unique
+  // StoragePartition.
+  login::SigninPartitionManager* signin_partition_manager =
+      login::SigninPartitionManager::Factory::GetForBrowserContext(
+          Profile::FromWebUI(web_ui()));
+  signin_partition_manager->StartSigninSession(
+      web_ui()->GetWebContents(),
+      base::BindOnce(&GaiaScreenHandler::LoadGaiaWithPartition,
+                     weak_factory_.GetWeakPtr(), context));
+}
+
+void GaiaScreenHandler::LoadGaiaWithPartition(
+    const GaiaContext& context,
+    const std::string& partition_name) {
   std::unique_ptr<std::string> version = std::make_unique<std::string>();
   std::unique_ptr<bool> consent = std::make_unique<bool>();
   base::OnceClosure get_version_and_consent =
       base::BindOnce(&GetVersionAndConsent, base::Unretained(version.get()),
                      base::Unretained(consent.get()));
   base::OnceClosure load_gaia = base::BindOnce(
-      &GaiaScreenHandler::LoadGaiaWithVersionAndConsent,
-      weak_factory_.GetWeakPtr(), context, base::Owned(version.release()),
-      base::Owned(consent.release()));
+      &GaiaScreenHandler::LoadGaiaWithPartitionAndVersionAndConsent,
+      weak_factory_.GetWeakPtr(), context, partition_name,
+      base::Owned(version.release()), base::Owned(consent.release()));
   base::PostTaskWithTraitsAndReply(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
       std::move(get_version_and_consent), std::move(load_gaia));
 }
 
-void GaiaScreenHandler::LoadGaiaWithVersionAndConsent(
+void GaiaScreenHandler::LoadGaiaWithPartitionAndVersionAndConsent(
     const GaiaContext& context,
+    const std::string& partition_name,
     const std::string* platform_version,
     const bool* collect_stats_consent) {
-  // Start a new session with SigninPartitionManager, generating a a unique
-  // StoragePartition.
-  login::SigninPartitionManager* signin_partition_manager =
-      login::SigninPartitionManager::Factory::GetForBrowserContext(
-          Profile::FromWebUI(web_ui()));
-  signin_partition_manager->StartSigninSession(web_ui()->GetWebContents());
-
   base::DictionaryValue params;
 
   params.SetBoolean("forceReload", context.force_reload);
@@ -338,7 +350,7 @@ void GaiaScreenHandler::LoadGaiaWithVersionAndConsent(
   params.SetInteger("screenMode", screen_mode);
 
   if (screen_mode == GAIA_SCREEN_MODE_AD && !authpolicy_login_helper_)
-    authpolicy_login_helper_ = base::MakeUnique<AuthPolicyLoginHelper>();
+    authpolicy_login_helper_ = std::make_unique<AuthPolicyLoginHelper>();
 
   if (screen_mode != GAIA_SCREEN_MODE_OFFLINE) {
     const std::string app_locale = g_browser_process->GetApplicationLocale();
@@ -398,8 +410,8 @@ void GaiaScreenHandler::LoadGaiaWithVersionAndConsent(
   // sending device statistics.
   if (*collect_stats_consent)
     params.SetString("lsbReleaseBoard", base::SysInfo::GetLsbReleaseBoard());
-  params.SetString("webviewPartitionName",
-                   signin_partition_manager->GetCurrentStoragePartitionName());
+
+  params.SetString("webviewPartitionName", partition_name);
 
   frame_state_ = FRAME_STATE_LOADING;
   CallJS("loadAuthExtension", params);
@@ -517,6 +529,9 @@ void GaiaScreenHandler::RegisterMessages() {
               &GaiaScreenHandler::HandleCompleteAdAuthentication);
   AddCallback("cancelAdAuthentication",
               &GaiaScreenHandler::HandleCancelActiveDirectoryAuth);
+
+  // Allow UMA metrics collection from JS.
+  web_ui()->AddMessageHandler(std::make_unique<MetricsHandler>());
 }
 
 void GaiaScreenHandler::OnPortalDetectionCompleted(
@@ -929,6 +944,18 @@ void GaiaScreenHandler::ShowGaiaScreenIfReady() {
     } else if (!owner_im.empty()) {
       gaia_ime_state->ChangeInputMethod(owner_im, false /* show_message */);
     }
+  }
+
+  if (!untrusted_authority_certs_cache_) {
+    // Make additional untrusted authority certificates available for client
+    // certificate discovery in case a SAML flow is used which requires a client
+    // certificate to be present.
+    // When the WebUI is destroyed, |untrusted_authority_certs_cache_| will go
+    // out of scope and the certificates will not be held in memory anymore.
+    untrusted_authority_certs_cache_ =
+        std::make_unique<policy::UntrustedAuthorityCertsCache>(
+            policy::UntrustedAuthorityCertsCache::
+                GetUntrustedAuthoritiesFromDeviceOncPolicy());
   }
 
   LoadAuthExtension(!gaia_silent_load_ /* force */, false /* offline */);

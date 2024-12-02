@@ -3,6 +3,16 @@
     {
       "name": "LayoutView #document",
       "bounds": [800, 600],
+      "backgroundColor": "#FFFFFF"
+    },
+    {
+      "name": "Scrolling Layer",
+      "bounds": [800, 600],
+      "drawsContent": false
+    },
+    {
+      "name": "Scrolling Contents Layer",
+      "bounds": [800, 600],
       "contentsOpaque": true,
       "backgroundColor": "#FFFFFF",
       "paintInvalidations": [
@@ -173,76 +183,6 @@
         },
         {
           "object": "InlineTextBox '\n'",
-          "rect": [8, 61, 48, 185],
-          "reason": "style change"
-        },
-        {
-          "object": "InlineTextBox '\n'",
-          "rect": [8, 61, 48, 185],
-          "reason": "style change"
-        },
-        {
-          "object": "InlineTextBox '\n'",
-          "rect": [8, 61, 48, 185],
-          "reason": "style change"
-        },
-        {
-          "object": "InlineTextBox '\n'",
-          "rect": [8, 61, 48, 185],
-          "reason": "style change"
-        },
-        {
-          "object": "InlineTextBox '\n'",
-          "rect": [8, 61, 48, 185],
-          "reason": "style change"
-        },
-        {
-          "object": "InlineTextBox '\n'",
-          "rect": [8, 61, 48, 185],
-          "reason": "style change"
-        },
-        {
-          "object": "InlineTextBox '\n'",
-          "rect": [8, 61, 48, 185],
-          "reason": "style change"
-        },
-        {
-          "object": "InlineTextBox '\n'",
-          "rect": [8, 61, 48, 185],
-          "reason": "style change"
-        },
-        {
-          "object": "InlineTextBox '  Text'",
-          "rect": [8, 61, 48, 185],
-          "reason": "style change"
-        },
-        {
-          "object": "InlineTextBox '  Text'",
-          "rect": [8, 61, 48, 185],
-          "reason": "style change"
-        },
-        {
-          "object": "InlineTextBox '  Text'",
-          "rect": [8, 61, 48, 185],
-          "reason": "style change"
-        },
-        {
-          "object": "InlineTextBox '  Text'",
-          "rect": [8, 61, 48, 185],
-          "reason": "style change"
-        },
-        {
-          "object": "InlineTextBox '  Text'",
-          "rect": [8, 61, 48, 185],
-          "reason": "style change"
-        },
-        {
-          "object": "InlineTextBox '  Text'",
-          "rect": [8, 61, 48, 185],
-          "reason": "style change"
-        },
-        {
-          "object": "InlineTextBox '  Text'",
           "rect": [8, 61, 48, 185],
           "reason": "style change"
         },

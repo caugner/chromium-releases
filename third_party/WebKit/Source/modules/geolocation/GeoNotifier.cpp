@@ -57,12 +57,12 @@ void GeoNotifier::SetFatalError(PositionError* error) {
   fatal_error_ = error;
   // An existing timer may not have a zero timeout.
   timer_.Stop();
-  timer_.StartOneShot(TimeDelta(), BLINK_FROM_HERE);
+  timer_.StartOneShot(TimeDelta(), FROM_HERE);
 }
 
 void GeoNotifier::SetUseCachedPosition() {
   use_cached_position_ = true;
-  timer_.StartOneShot(TimeDelta(), BLINK_FROM_HERE);
+  timer_.StartOneShot(TimeDelta(), FROM_HERE);
 }
 
 void GeoNotifier::RunSuccessCallback(Geoposition* position) {
@@ -75,7 +75,7 @@ void GeoNotifier::RunErrorCallback(PositionError* error) {
 }
 
 void GeoNotifier::StartTimer() {
-  timer_.StartOneShot(options_.timeout() / 1000.0, BLINK_FROM_HERE);
+  timer_.StartOneShot(options_.timeout() / 1000.0, FROM_HERE);
 }
 
 void GeoNotifier::StopTimer() {
@@ -89,6 +89,15 @@ void GeoNotifier::TimerFired(TimerBase*) {
   // has already gone.  Check it first.
   if (!geolocation_->GetExecutionContext()) {
     return;  // Do not invoke anything because of no execution context.
+  }
+  // TODO(yukishiino): Remove this check once we understand the cause.
+  // https://crbug.com/792604
+  CHECK(!geolocation_->GetExecutionContext()->IsContextDestroyed());
+  // As the timer fires asynchronously, it's possible that |geolocation_|
+  // no longer owns this notifier, i.e. |geolocation_| is no longer performing
+  // wrapper-tracing. In that case, the underlying V8 function may not be alive.
+  if (!geolocation_->DoesOwnNotifier(this)) {
+    return;  // Do not invoke anything because of no owner geolocation.
   }
 
   // Test for fatal error first. This is required for the case where the

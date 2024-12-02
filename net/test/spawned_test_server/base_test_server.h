@@ -217,6 +217,10 @@ class BaseTestServer {
     // auto-generated leaf certificate when |server_certificate==CERT_AUTO|.
     uint64_t cert_serial = 0;
 
+    // If not empty, |cert_common_name| will be the common name of the
+    // auto-generated leaf certificate when |server_certificate==CERT_AUTO|.
+    std::string cert_common_name;
+
     // True if a CertificateRequest should be sent to the client during
     // handshaking.
     bool request_client_certificate = false;
@@ -366,6 +370,11 @@ class BaseTestServer {
     no_anonymous_ftp_user_ = no_anonymous_ftp_user;
   }
 
+  // Redirect proxied CONNECT requests to localhost.
+  void set_redirect_connect_to_localhost(bool redirect_connect_to_localhost) {
+    redirect_connect_to_localhost_ = redirect_connect_to_localhost;
+  }
+
   // Marks the root certificate of an HTTPS test server as trusted for
   // the duration of tests.
   bool LoadTestRootCert() const WARN_UNUSED_RESULT;
@@ -376,6 +385,7 @@ class BaseTestServer {
  protected:
   virtual ~BaseTestServer();
   Type type() const { return type_; }
+  const SSLOptions& ssl_options() const { return ssl_options_; }
 
   bool started() const { return started_; }
 
@@ -448,6 +458,9 @@ class BaseTestServer {
 
   // Disable creation of anonymous FTP user?
   bool no_anonymous_ftp_user_ = false;
+
+  // Redirect proxied CONNECT requests to localhost?
+  bool redirect_connect_to_localhost_ = false;
 
   std::unique_ptr<ScopedPortException> allowed_port_;
 
