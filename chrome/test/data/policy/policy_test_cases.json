@@ -885,6 +885,18 @@
     "note": "There is a pref behind this setting, but due to the fact that tests override the default with a command-line flag on some trybots, this setting cannot be verified with the common test."
   },
 
+  "IsolateOriginsAndroid": {
+    "os": ["android"],
+    "test_policy": { "IsolateOriginsAndroid": "" },
+    "note": "There is a pref behind this setting, but due to the fact that tests override the default with a command-line flag on some trybots, this setting cannot be verified with the common test."
+  },
+
+  "SitePerProcessAndroid": {
+    "os": ["android"],
+    "test_policy": { "SitePerProcessAndroid": false },
+    "note": "There is a pref behind this setting, but due to the fact that tests override the default with a command-line flag on some trybots, this setting cannot be verified with the common test."
+  },
+
   "WebDriverOverridesIncompatiblePolicies": {
     "os": ["win", "linux", "mac"],
     "test_policy": { "WebDriverOverridesIncompatiblePolicies": true },
@@ -1028,11 +1040,26 @@
     "os": ["win", "linux", "mac", "chromeos"],
     "test_policy": { "DeveloperToolsDisabled": true },
     "pref_mappings": [
-      { "pref": "devtools.disabled",
+      { "pref": "devtools.availability",
         "indicator_test_url": "chrome://extensions-frame/",
         "indicator_selector": "#dev-toggle-disabled-by-policy-indicator",
         "indicator_tests": [
-          { "policy": { "DeveloperToolsDisabled": true } }
+          { "policy": { "DeveloperToolsDisabled": true },
+	    "value": 2 }
+        ]
+      }
+    ]
+  },
+
+  "DeveloperToolsAvailability": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "DeveloperToolsAvailability": 2 },
+    "pref_mappings": [
+      { "pref": "devtools.availability",
+        "indicator_test_url": "chrome://extensions-frame/",
+        "indicator_selector": "#dev-toggle-disabled-by-policy-indicator",
+        "indicator_tests": [
+          { "policy": { "DeveloperToolsAvailability": 2 } }
         ]
       }
     ]
@@ -1770,6 +1797,26 @@
     "note": "TODO(bartfab): Flag this with can_be_recommended when http://crbug.com/106682 is fixed."
   },
 
+  "WebUsbAskForUrls": {
+    "os": ["win", "linux", "mac", "chromeos", "android"],
+    "test_policy": { "WebUsbAskForUrls": ["[*.]google.com"] },
+    "pref_mappings": [
+      { "pref": "profile.managed_web_usb_ask_for_urls" }
+    ],
+
+    "note": "TODO(reillyg): Add indicator tests. TODO(bartfab): Flag this with can_be_recommended when http://crbug.com/106682 is fixed."
+  },
+
+  "WebUsbBlockedForUrls": {
+    "os": ["win", "linux", "mac", "chromeos", "android"],
+    "test_policy": { "WebUsbBlockedForUrls": ["[*.]google.com"] },
+    "pref_mappings": [
+      { "pref": "profile.managed_web_usb_blocked_for_urls" }
+    ],
+
+    "note": "TODO(reillyg): Add indicator tests. TODO(bartfab): Flag this with can_be_recommended when http://crbug.com/106682 is fixed."
+  },
+
   "Disable3DAPIs": {
     "os": ["win", "linux", "mac", "chromeos"],
     "test_policy": { "Disable3DAPIs": true },
@@ -2111,7 +2158,7 @@
   },
 
   "HideWebStoreIcon": {
-    "os": ["win", "linux", "mac"],
+    "os": ["win", "linux", "mac", "chromeos"],
     "test_policy": { "HideWebStoreIcon": true },
     "pref_mappings": [
       { "pref": "hide_web_store_icon" }
@@ -3032,21 +3079,11 @@
   },
 
   "ArcBackupRestoreEnabled": {
-    "os": ["chromeos"],
-    "can_be_recommended": false,
-    "test_policy": { "ArcBackupRestoreEnabled": false },
-    "pref_mappings": [
-      { "pref": "arc.backup_restore.enabled" }
-    ]
+    "note": "This policy has been removed. See https://bugs.chromium.org/p/chromium/issues/detail?id=845962"
   },
 
   "ArcLocationServiceEnabled": {
-    "os": ["chromeos"],
-    "can_be_recommended": false,
-    "test_policy": { "ArcLocationServiceEnabled": false },
-    "pref_mappings": [
-      { "pref": "arc.location_service.enabled" }
-    ]
+    "note": "This policy has been removed. See https://bugs.chromium.org/p/chromium/issues/detail?id=845962"
   },
 
   "ReportArcStatusEnabled": {
@@ -3580,9 +3617,6 @@
   "PasswordProtectionWarningTrigger": {
   },
 
-  "PasswordProtectionRiskTrigger": {
-  },
-
   "DeviceOffHours": {
     "os": ["chromeos"],
     "test_policy": {"DeviceOffHours": {"intervals": [{"start" : {"day_of_week" : 1, "time": 12840000}, "end": {"day_of_week" : 1, "time": 21720000}}], "timezone" : "GMT", "ignored_policy_proto_tags": [8, 3]}}
@@ -3623,6 +3657,29 @@
     ]
   },
 
+  "DeviceSamlLoginAuthenticationType": {
+  },
+
+  "ChromeCleanupEnabled": {
+    "os": ["win"],
+    "test_policy": { "ChromeCleanupEnabled": true },
+    "pref_mappings": [
+      { "pref": "software_reporter.enabled",
+        "local_state": true
+      }
+    ]
+  },
+
+  "ChromeCleanupReportingEnabled": {
+    "os": ["win"],
+    "test_policy": { "ChromeCleanupReportingEnabled": false },
+    "pref_mappings": [
+      { "pref": "software_reporter.reporting",
+        "local_state": true
+      }
+    ]
+  },
+
   "SafeBrowsingWhitelistDomains": {
   },
 
@@ -3653,13 +3710,7 @@
   },
 
   "TabUnderAllowed": {
-    "os": ["win", "linux", "mac", "chromeos"],
-    "test_policy": {
-      "TabUnderAllowed": false
-    },
-    "pref_mappings": [
-      { "pref": "tab_under_allowed"}
-    ]
+    "note": "This policy is deprecated and removed since Chrome 68."
   },
 
   "ArcAppInstallEventLoggingEnabled": {
@@ -3670,11 +3721,16 @@
     ]
   },
 
+  "UsageTimeLimit": {
+    "note": "TODO(hgrandinetti): Re-enable the test once the feature is no longer behind an experiment flag (crbug.com/849738)"
+  },
+
   "EnableSyncConsent": {
     "os": ["chromeos"],
     "test_policy": { "EnableSyncConsent": false },
     "pref_mappings": [{ "pref": "sync_consent.enabled" }]
   },
+
 
   "----- Chrome Frame policies -------------------------------------------": {},
 
@@ -3700,5 +3756,26 @@
   },
 
   "SkipMetadataCheck": {
+  },
+
+  "AllowedLocales": {
+  },
+
+  "ArcBackupRestoreServiceEnabled": {
+    "os": ["chromeos"],
+    "can_be_recommended": false,
+    "test_policy": { "ArcBackupRestoreServiceEnabled": 0 },
+    "pref_mappings": [
+      { "pref": "arc.backup_restore.enabled" }
+    ]
+  },
+
+  "ArcGoogleLocationServicesEnabled": {
+    "os": ["chromeos"],
+    "can_be_recommended": false,
+    "test_policy": { "ArcGoogleLocationServicesEnabled": 0 },
+    "pref_mappings": [
+      { "pref": "arc.location_service.enabled" }
+    ]
   }
 }

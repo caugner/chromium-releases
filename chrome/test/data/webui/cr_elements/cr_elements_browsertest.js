@@ -58,9 +58,8 @@ CrElementsLazyRenderTest.prototype = {
       'chrome://resources/cr_elements/cr_lazy_render/cr_lazy_render.html',
 
   /** @override */
-  extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
-    'cr_lazy_render_tests.js'
-  ]),
+  extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat(
+      ['cr_lazy_render_tests.js']),
 };
 
 TEST_F('CrElementsLazyRenderTest', 'All', function() {
@@ -77,8 +76,7 @@ CrElementsProfileAvatarSelectorTest.prototype = {
   __proto__: CrElementsBrowserTest.prototype,
 
   /** @override */
-  browsePreload:
-      'chrome://resources/cr_elements/cr_profile_avatar_selector/' +
+  browsePreload: 'chrome://resources/cr_elements/cr_profile_avatar_selector/' +
       'cr_profile_avatar_selector.html',
 
   /** @override */
@@ -309,21 +307,22 @@ TEST_F('CrElementsToastTest', 'All', function() {
  * @constructor
  * @extends {CrElementsBrowserTest}
  */
-function CrElementsToggleTest() {}
+function CrElementsRadioButtonTest() {}
 
-CrElementsToggleTest.prototype = {
+CrElementsRadioButtonTest.prototype = {
   __proto__: CrElementsBrowserTest.prototype,
 
   /** @override */
-  browsePreload: 'chrome://resources/cr_elements/cr_toggle/cr_toggle.html',
+  browsePreload:
+      'chrome://resources/cr_elements/cr_radio_button/cr_radio_button.html',
 
   /** @override */
   extraLibraries: CrElementsBrowserTest.prototype.extraLibraries.concat([
     '../settings/test_util.js',
-    'cr_toggle_test.js',
+    'cr_radio_button_test.js',
   ]),
 };
 
-TEST_F('CrElementsToggleTest', 'All', function() {
+TEST_F('CrElementsRadioButtonTest', 'All', function() {
   mocha.run();
 });

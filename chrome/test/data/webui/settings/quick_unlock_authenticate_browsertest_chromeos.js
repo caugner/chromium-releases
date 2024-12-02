@@ -71,8 +71,9 @@ cr.define('settings_people_page_quick_unlock', function() {
         fakeUma = new settings.FakeQuickUnlockUma();
 
         testElement = document.createElement('settings-password-prompt-dialog');
-        testElement.quickUnlockPrivate_ = quickUnlockPrivateApi;
+        testElement.quickUnlockPrivate = quickUnlockPrivateApi;
         testElement.writeUma_ = fakeUma.recordProgress.bind(fakeUma);
+        Polymer.dom.flush();
         document.body.appendChild(testElement);
 
         passwordElement = getFromElement('#passwordInput');
@@ -90,8 +91,8 @@ cr.define('settings_people_page_quick_unlock', function() {
         quickUnlockPrivateApi.activeModes = [QuickUnlockMode.PIN];
         passwordElement.value = 'foo';
         testElement.submitPassword_();
-        assertDeepEquals([QuickUnlockMode.PIN],
-                         quickUnlockPrivateApi.activeModes);
+        assertDeepEquals(
+            [QuickUnlockMode.PIN], quickUnlockPrivateApi.activeModes);
         assertDeepEquals([], quickUnlockPrivateApi.credentials);
       });
 
@@ -99,13 +100,16 @@ cr.define('settings_people_page_quick_unlock', function() {
         const confirmButton = getFromElement('#passwordInput');
         quickUnlockPrivateApi.accountPassword = 'bar';
         passwordElement.value = 'foo';
+        Polymer.dom.flush();
+
         MockInteractions.tap(
             getFromElement('paper-button[class="action-button"]'));
 
-        assertEquals(0, passwordElement.inputElement.selectionStart);
+        assertEquals(
+            0, passwordElement.inputElement.inputElement.selectionStart);
         assertEquals(
             passwordElement.value.length,
-            passwordElement.inputElement.selectionEnd);
+            passwordElement.inputElement.inputElement.selectionEnd);
       });
 
       test('TapConfirmButtonWithWrongPasswordRestoresFocus', function() {
@@ -126,8 +130,10 @@ cr.define('settings_people_page_quick_unlock', function() {
         passwordElement.value = 'foo';
         testElement.submitPassword_();
 
-        assertEquals(0, fakeUma.getHistogramValue(
-            LockScreenProgress.ENTER_PASSWORD_CORRECTLY));
+        assertEquals(
+            0,
+            fakeUma.getHistogramValue(
+                LockScreenProgress.ENTER_PASSWORD_CORRECTLY));
         assertFalse(!!testElement.setModes);
       });
 
@@ -139,8 +145,10 @@ cr.define('settings_people_page_quick_unlock', function() {
         passwordElement.value = 'foo';
         testElement.submitPassword_();
 
-        assertEquals(1, fakeUma.getHistogramValue(
-            LockScreenProgress.ENTER_PASSWORD_CORRECTLY));
+        assertEquals(
+            1,
+            fakeUma.getHistogramValue(
+                LockScreenProgress.ENTER_PASSWORD_CORRECTLY));
         assertTrue(!!testElement.setModes);
       });
 
@@ -156,6 +164,18 @@ cr.define('settings_people_page_quick_unlock', function() {
           done();
         }, 0);
       });
+
+      // Tests that he confirm button is diabled when there is nothing entered.
+      test('ConfirmButtonDisabled', function() {
+        let confirmButton = testElement.$$('#confirmButton');
+        assertTrue(!!confirmButton);
+        assertTrue(confirmButton.disabled);
+
+        passwordElement.value = 'foo';
+        assertFalse(!!confirmButton.disabled);
+        passwordElement.value = '';
+        assertTrue(confirmButton.disabled);
+      });
     });
   }
 
@@ -169,16 +189,17 @@ cr.define('settings_people_page_quick_unlock', function() {
       const noneRadioButton = null;
 
       /**
-       * Asserts that only the given radio button is active and all of the
-       * others are inactive.
+       * Asserts that only the given radio button is checked and all of the
+       * others are unchecked.
        * @param {Element} radioButton
        */
-      function assertRadioButtonActive(radioButton) {
+      function assertRadioButtonChecked(radioButton) {
         function doAssert(element, name) {
           if (radioButton == element)
-            assertTrue(element.active, 'Expected ' + name + ' to be active');
+            assertTrue(element.checked, 'Expected ' + name + ' to be checked');
           else
-            assertFalse(element.active, 'Expected ' + name + ' to be inactive');
+            assertFalse(
+                element.checked, 'Expected ' + name + ' to be unchecked');
         }
 
         doAssert(passwordRadioButton, 'passwordButton');
@@ -241,7 +262,7 @@ cr.define('settings_people_page_quick_unlock', function() {
           // Create choose-method element.
           testElement = document.createElement('settings-lock-screen');
           testElement.settingsPrivate_ = fakeSettings;
-          testElement.quickUnlockPrivate_ = quickUnlockPrivateApi;
+          testElement.quickUnlockPrivate = quickUnlockPrivateApi;
           testElement.prefs = prefElement.prefs;
           testElement.writeUma_ = fakeUma.recordProgress.bind(fakeUma);
 
@@ -255,9 +276,9 @@ cr.define('settings_people_page_quick_unlock', function() {
               });
 
           passwordRadioButton =
-              getFromElement('paper-radio-button[name="password"]');
+              getFromElement('cr-radio-button[name="password"]');
           pinPasswordRadioButton =
-              getFromElement('paper-radio-button[name="pin+password"]');
+              getFromElement('cr-radio-button[name="pin+password"]');
 
           done();
         });
@@ -267,7 +288,7 @@ cr.define('settings_people_page_quick_unlock', function() {
       // quickUnlockPrivate calls.
       test('ShowingScreenDoesNotModifyPrefs', function() {
         assertTrue(getLockScreenPref());
-        assertRadioButtonActive(passwordRadioButton);
+        assertRadioButtonChecked(passwordRadioButton);
         assertDeepEquals([], quickUnlockPrivateApi.activeModes);
       });
 
@@ -293,11 +314,11 @@ cr.define('settings_people_page_quick_unlock', function() {
       // prefs.
       test('TappingButtonsChangesUnderlyingState', function() {
         function togglePin() {
-          assertRadioButtonActive(passwordRadioButton);
+          assertRadioButtonChecked(passwordRadioButton);
 
           // Tap pin+password button.
           MockInteractions.tap(pinPasswordRadioButton);
-          assertRadioButtonActive(pinPasswordRadioButton);
+          assertRadioButtonChecked(pinPasswordRadioButton);
           assertTrue(isSetupPinButtonVisible());
           assertDeepEquals([], quickUnlockPrivateApi.activeModes);
 
@@ -306,7 +327,7 @@ cr.define('settings_people_page_quick_unlock', function() {
 
           // Tap password button and verify quick unlock is disabled.
           MockInteractions.tap(passwordRadioButton);
-          assertRadioButtonActive(passwordRadioButton);
+          assertRadioButtonChecked(passwordRadioButton);
           assertFalse(isSetupPinButtonVisible());
           assertDeepEquals([], quickUnlockPrivateApi.activeModes);
         }
@@ -326,32 +347,36 @@ cr.define('settings_people_page_quick_unlock', function() {
       // will update to show quick unlock is active.
       test('EnablingQuickUnlockChangesButtonState', function() {
         setActiveModes([QuickUnlockMode.PIN]);
-        assertRadioButtonActive(pinPasswordRadioButton);
+        assertRadioButtonChecked(pinPasswordRadioButton);
         assertTrue(isSetupPinButtonVisible());
 
         setActiveModes([]);
-        assertRadioButtonActive(passwordRadioButton);
+        assertRadioButtonChecked(passwordRadioButton);
         assertDeepEquals([], quickUnlockPrivateApi.activeModes);
       });
 
       // Tapping the PIN configure button opens up the setup PIN dialog, and
       // records a chose pin or password uma.
       test('TappingConfigureOpensSetupPin', function() {
-        assertEquals(0, fakeUma.getHistogramValue(
-            LockScreenProgress.CHOOSE_PIN_OR_PASSWORD));
-        assertRadioButtonActive(passwordRadioButton);
+        assertEquals(
+            0,
+            fakeUma.getHistogramValue(
+                LockScreenProgress.CHOOSE_PIN_OR_PASSWORD));
+        assertRadioButtonChecked(passwordRadioButton);
 
         MockInteractions.tap(pinPasswordRadioButton);
         assertTrue(isSetupPinButtonVisible());
-        assertRadioButtonActive(pinPasswordRadioButton);
+        assertRadioButtonChecked(pinPasswordRadioButton);
 
         Polymer.dom.flush();
         MockInteractions.tap(getFromElement('#setupPinButton'));
         Polymer.dom.flush();
         const setupPinDialog = getFromElement('#setupPin');
         assertTrue(setupPinDialog.$$('#dialog').open);
-        assertEquals(1, fakeUma.getHistogramValue(
-            LockScreenProgress.CHOOSE_PIN_OR_PASSWORD));
+        assertEquals(
+            1,
+            fakeUma.getHistogramValue(
+                LockScreenProgress.CHOOSE_PIN_OR_PASSWORD));
       });
     });
   }
@@ -528,20 +553,20 @@ cr.define('settings_people_page_quick_unlock', function() {
       test('SubmittingPinCallsQuickUnlockApi', function() {
         // Entering the same (even weak) pin twice calls the quick unlock API
         // and sets up a PIN.
-        assertEquals(0, fakeUma.getHistogramValue(
-            LockScreenProgress.ENTER_PIN));
-        assertEquals(0, fakeUma.getHistogramValue(
-            LockScreenProgress.CONFIRM_PIN));
+        assertEquals(
+            0, fakeUma.getHistogramValue(LockScreenProgress.ENTER_PIN));
+        assertEquals(
+            0, fakeUma.getHistogramValue(LockScreenProgress.CONFIRM_PIN));
         pinKeyboard.value = '1111';
         MockInteractions.tap(continueButton);
-        assertEquals(1, fakeUma.getHistogramValue(
-            LockScreenProgress.ENTER_PIN));
+        assertEquals(
+            1, fakeUma.getHistogramValue(LockScreenProgress.ENTER_PIN));
 
         pinKeyboard.value = '1111';
         MockInteractions.tap(continueButton);
 
-        assertEquals(1, fakeUma.getHistogramValue(
-            LockScreenProgress.CONFIRM_PIN));
+        assertEquals(
+            1, fakeUma.getHistogramValue(LockScreenProgress.CONFIRM_PIN));
         assertDeepEquals(['PIN'], quickUnlockPrivateApi.activeModes);
         assertDeepEquals(['1111'], quickUnlockPrivateApi.credentials);
       });

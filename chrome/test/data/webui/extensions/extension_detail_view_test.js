@@ -55,7 +55,7 @@ cr.define('extension_detail_view_tests', function() {
       extension_test_util.testIcons(item);
 
       var testIsVisible = extension_test_util.isVisible.bind(null, item);
-      expectTrue(testIsVisible('#close-button'));
+      expectTrue(testIsVisible('#closeButton'));
       expectTrue(testIsVisible('#icon'));
       expectTrue(testIsVisible('#enable-toggle'));
       expectFalse(testIsVisible('#extensions-options'));
@@ -207,12 +207,10 @@ cr.define('extension_detail_view_tests', function() {
       mockDelegate.testClickingCalls(
           item.$$('#remove-extension'), 'deleteItem', [extensionData.id]);
       mockDelegate.testClickingCalls(
-          item.$$('#load-path > a[is=\'action-link\']'),
-          'showInFolder', [extensionData.id]);
+          item.$$('#load-path > a[is=\'action-link\']'), 'showInFolder',
+          [extensionData.id]);
       mockDelegate.testClickingCalls(
-          item.$$('#reload-button'),
-          'reloadItem',
-          [extensionData.id],
+          item.$$('#reload-button'), 'reloadItem', [extensionData.id],
           Promise.resolve());
     });
 

@@ -26,11 +26,6 @@
         {
           "object": "LayoutTextControl INPUT id='root'",
           "rect": [0, 0, 70, 24],
-          "reason": "appeared"
-        },
-        {
-          "object": "LayoutTextControl INPUT id='root'",
-          "rect": [0, 0, 70, 24],
           "reason": "paint property change"
         },
         {
@@ -56,7 +51,7 @@
         {
           "object": "Caret",
           "rect": [65, 4, 1, 16],
-          "reason": "appeared"
+          "reason": "chunk appeared"
         }
       ]
     }

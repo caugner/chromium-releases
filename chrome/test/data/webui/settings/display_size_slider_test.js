@@ -15,10 +15,7 @@ suite('DisplaySizeSlider', function() {
     const tickValues = [2, 4, 8, 16, 32, 64, 128];
     ticks = [];
     for (let i = 0; i < tickValues.length; i++) {
-      ticks.push({
-        value: tickValues[i],
-        label: tickValues[i].toString()
-      });
+      ticks.push({value: tickValues[i], label: tickValues[i].toString()});
     }
 
     slider = document.createElement('display-size-slider');
@@ -79,8 +76,9 @@ suite('DisplaySizeSlider', function() {
     expectedIndex -= 1;
     expectEquals(expectedIndex, slider.index);
     expectedLeftPercentage = (expectedIndex * 100) / (ticks.length - 1);
-    expectEquals(Math.round(expectedLeftPercentage),
-                 Math.round(parseFloat(slider.$.sliderKnob.style.left)));
+    expectEquals(
+        Math.round(expectedLeftPercentage),
+        Math.round(parseFloat(slider.$.sliderKnob.style.left)));
     expectEquals(ticks[expectedIndex].value, slider.pref.value);
 
   });
@@ -140,8 +138,9 @@ suite('DisplaySizeSlider', function() {
     expectEquals(newIndex, slider.index);
 
     let expectedLeftPercentage = (newIndex * 100) / (ticks.length - 1);
-    expectEquals(Math.round(expectedLeftPercentage),
-                 Math.round(parseFloat(slider.$.sliderKnob.style.left)));
+    expectEquals(
+        Math.round(expectedLeftPercentage),
+        Math.round(parseFloat(slider.$.sliderKnob.style.left)));
   });
 
   test('check label values', function() {
@@ -179,18 +178,23 @@ suite('DisplaySizeSlider', function() {
   });
 
   test('mouse interactions with the slider knobs', function() {
+    let dragEventReceived = false;
+    let valueInEvent = null;
+    slider.addEventListener('immediate-value-changed', function(e) {
+      dragEventReceived = true;
+      valueInEvent = e.detail.value;
+    });
+
     let oldIndex = slider.index;
     const sliderKnob = slider.$.sliderKnob;
     // Width of each tick.
     const tickWidth = slider.$.sliderBar.offsetWidth / (ticks.length - 1);
-
+    assertFalse(dragEventReceived);
     MockInteractions.down(sliderKnob);
+    assertFalse(dragEventReceived);
 
     let currentPos = MockInteractions.middleOfNode(sliderKnob);
-    let nextPos = {
-      x: currentPos.x + tickWidth,
-      y: currentPos.y
-    };
+    let nextPos = {x: currentPos.x + tickWidth, y: currentPos.y};
     MockInteractions.move(sliderKnob, currentPos, nextPos);
 
     // Mouse is still down. So the slider should still be expanded.
@@ -205,7 +209,17 @@ suite('DisplaySizeSlider', function() {
     // The mouse is still down, so the pref should not be updated.
     expectEquals(ticks[oldIndex].value, slider.pref.value);
 
+    // The event should be fired while dragging the knob.
+    assertTrue(dragEventReceived);
+    dragEventReceived = false;
+
+    // The value sent by the event must be the current value of the slider.
+    expectEquals(ticks[slider.index].value, valueInEvent);
+
     MockInteractions.up(sliderKnob);
+
+    // There should be no event fired when the knob is not being dragged.
+    assertFalse(dragEventReceived);
 
     // Now that the mouse is down, the pref value should be updated.
     expectEquals(ticks[oldIndex + 1].value, slider.pref.value);
@@ -229,6 +243,13 @@ suite('DisplaySizeSlider', function() {
   });
 
   test('mouse interaction with the bar', function() {
+    let dragEventReceived = false;
+    let valueInEvent = null;
+    slider.addEventListener('immediate-value-changed', function(e) {
+      dragEventReceived = true;
+      valueInEvent = e.detail.value;
+    });
+
     const sliderBar = slider.$.sliderBar;
     const sliderBarOrigin = {
       x: sliderBar.getBoundingClientRect().x,
@@ -241,6 +262,12 @@ suite('DisplaySizeSlider', function() {
     // Mouse down on the left end of the slider bar should move the knob there.
     expectEquals(0, slider.index);
     expectEquals(0, Math.round(parseFloat(slider.$.sliderKnob.style.left)));
+
+    // Mouse down must trigger a drag event since we are essentially dragging
+    // the knob.
+    assertTrue(dragEventReceived);
+    expectEquals(ticks[slider.index].value, valueInEvent);
+    dragEventReceived = false;
 
     // However the pref value should not update until the mouse is released.
     expectEquals(ticks[oldIndex].value, slider.pref.value);
@@ -258,19 +285,21 @@ suite('DisplaySizeSlider', function() {
       y: sliderBarOrigin.y
     };
 
+    // The slider has not yet started dragging.
+    assertFalse(slider.dragging);
+
     oldIndex = slider.index;
     // Clicking at the 3rd index position on the slider bar should update the
     // knob.
     MockInteractions.down(sliderBar, sliderBarPos);
     let expectedLeftPercentage =
         (tickWidth * expectedIndex * 100) / sliderBar.offsetWidth;
-    expectEquals(Math.round(expectedLeftPercentage),
-                 Math.round(parseFloat(slider.$.sliderKnob.style.left)));
+    expectEquals(
+        Math.round(expectedLeftPercentage),
+        Math.round(parseFloat(slider.$.sliderKnob.style.left)));
     expectEquals(expectedIndex, slider.index);
     expectEquals(ticks[oldIndex].value, slider.pref.value);
 
-    // The slider has not yet started dragging.
-    assertFalse(slider.dragging);
 
     expectedIndex = 5;
     const nextSliderBarPos = {
@@ -281,10 +310,14 @@ suite('DisplaySizeSlider', function() {
     expectEquals(expectedIndex, slider.index);
     expectedLeftPercentage =
         (tickWidth * expectedIndex * 100) / sliderBar.offsetWidth;
-    expectEquals(Math.round(expectedLeftPercentage),
-                 Math.round(parseFloat(slider.$.sliderKnob.style.left)));
+    expectEquals(
+        Math.round(expectedLeftPercentage),
+        Math.round(parseFloat(slider.$.sliderKnob.style.left)));
 
     expectEquals(ticks[oldIndex].value, slider.pref.value);
+
+    assertTrue(dragEventReceived);
+    expectEquals(ticks[slider.index].value, valueInEvent);
 
     MockInteractions.up(sliderBar);
     expectEquals(ticks[expectedIndex].value, slider.pref.value);

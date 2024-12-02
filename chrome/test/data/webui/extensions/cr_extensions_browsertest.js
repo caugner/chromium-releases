@@ -8,8 +8,8 @@
 var ROOT_PATH = '../../../../../';
 
 // Polymer BrowserTest fixture.
-GEN_INCLUDE([
-    ROOT_PATH + 'chrome/test/data/webui/polymer_browser_test_base.js']);
+GEN_INCLUDE(
+    [ROOT_PATH + 'chrome/test/data/webui/polymer_browser_test_base.js']);
 GEN('#include "chrome/browser/ui/webui/extensions/' +
     'extension_settings_browsertest.h"');
 GEN('#include "chrome/common/chrome_features.h"');
@@ -226,11 +226,9 @@ TEST_F('CrExtensionsDetailViewTest', 'LayoutSource', function() {
   this.runMochaTest(extension_detail_view_tests.TestNames.LayoutSource);
 });
 
-TEST_F(
-    'CrExtensionsDetailViewTest', 'ClickableElements', function() {
-      this.runMochaTest(
-          extension_detail_view_tests.TestNames.ClickableElements);
-    });
+TEST_F('CrExtensionsDetailViewTest', 'ClickableElements', function() {
+  this.runMochaTest(extension_detail_view_tests.TestNames.ClickableElements);
+});
 
 TEST_F('CrExtensionsDetailViewTest', 'IndicatorTest', function() {
   this.runMochaTest(extension_detail_view_tests.TestNames.Indicator);
@@ -476,6 +474,10 @@ TEST_F('CrExtensionsShortcutTest', 'KeyStrokeToString', function() {
   this.runMochaTest(extension_shortcut_tests.TestNames.IsValidKeyCode);
 });
 
+TEST_F('CrExtensionsShortcutTest', 'ScopeChange', function() {
+  this.runMochaTest(extension_shortcut_tests.TestNames.ScopeChange);
+});
+
 var CrExtensionsShortcutInputTest = class extends CrExtensionsBrowserTest {
   /** @override */
   get browsePreload() {
@@ -520,7 +522,14 @@ TEST_F('CrExtensionsPackDialogTest', 'Interaction', function() {
   this.runMochaTest(extension_pack_dialog_tests.TestNames.Interaction);
 });
 
-TEST_F('CrExtensionsPackDialogTest', 'PackSuccess', function() {
+// Disabling on Windows due to flaky timeout on some build bots.
+// http://crbug.com/832885
+GEN('#if defined(OS_WIN)');
+GEN('#define MAYBE_PackSuccess DISABLED_PackSuccess');
+GEN('#else');
+GEN('#define MAYBE_PackSuccess PackSuccess');
+GEN('#endif');
+TEST_F('CrExtensionsPackDialogTest', 'MAYBE_PackSuccess', function() {
   this.runMochaTest(extension_pack_dialog_tests.TestNames.PackSuccess);
 });
 
