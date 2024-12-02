@@ -21,6 +21,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/process/memory.h"
@@ -29,6 +30,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "base/win/process_startup_helper.h"
@@ -45,6 +47,7 @@
 #include "chrome/installer/setup/install.h"
 #include "chrome/installer/setup/install_worker.h"
 #include "chrome/installer/setup/installer_crash_reporting.h"
+#include "chrome/installer/setup/installer_metrics.h"
 #include "chrome/installer/setup/setup_constants.h"
 #include "chrome/installer/setup/setup_util.h"
 #include "chrome/installer/setup/uninstall.h"
@@ -69,6 +72,10 @@
 #include "chrome/installer/util/self_cleaning_temp_dir.h"
 #include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/user_experiment.h"
+#include "chrome/installer/util/util_constants.h"
+#include "components/crash/content/app/crash_switches.h"
+#include "components/crash/content/app/run_as_crashpad_handler_win.h"
+#include "content/public/common/content_switches.h"
 
 #if defined(GOOGLE_CHROME_BUILD)
 #include "chrome/installer/util/updating_app_registration_data.h"
@@ -246,6 +253,7 @@ bool UncompressAndPatchChromeArchive(
     installer::InstallStatus* install_status,
     const base::Version& previous_version) {
   installer_state.UpdateStage(installer::UNCOMPRESSING);
+  base::TimeTicks start_time = base::TimeTicks::Now();
   if (!archive_helper->Uncompress(NULL)) {
     *install_status = installer::UNCOMPRESSION_FAILED;
     installer_state.WriteInstallerResult(*install_status,
@@ -253,13 +261,24 @@ bool UncompressAndPatchChromeArchive(
                                          NULL);
     return false;
   }
+  base::TimeDelta elapsed_time = base::TimeTicks::Now() - start_time;
+
+  bool has_full_archive = base::PathExists(archive_helper->target());
+  UMA_HISTOGRAM_BOOLEAN("Setup.Install.HasArchivePatch", !has_full_archive);
 
   // Short-circuit if uncompression produced the uncompressed archive rather
   // than a patch file.
-  if (base::PathExists(archive_helper->target())) {
+  if (has_full_archive) {
     *archive_type = installer::FULL_ARCHIVE_TYPE;
+    // Uncompression alone hopefully takes less than 3 minutes even on slow
+    // machines.
+    UMA_HISTOGRAM_MEDIUM_TIMES("Setup.Install.UncompressFullArchiveTime",
+                               elapsed_time);
     return true;
   }
+
+  UMA_HISTOGRAM_MEDIUM_TIMES("Setup.Install.UncompressArchivePatchTime",
+                             elapsed_time);
 
   // Find the installed version's archive to serve as the source for patching.
   base::FilePath patch_source(installer::FindArchiveToPatch(original_state,
@@ -276,6 +295,9 @@ bool UncompressAndPatchChromeArchive(
   archive_helper->set_patch_source(patch_source);
 
   // Try courgette first. Failing that, try bspatch.
+  // Patch application sometimes takes a very long time, so use 100 buckets for
+  // up to an hour.
+  SCOPED_UMA_HISTOGRAM_LONG_TIMER("Setup.Install.ApplyArchivePatchTime");
   installer_state.UpdateStage(installer::ENSEMBLE_PATCHING);
   if (!archive_helper->EnsemblePatch()) {
     installer_state.UpdateStage(installer::BINARY_PATCHING);
@@ -356,9 +378,6 @@ installer::InstallStatus RenameChromeExecutables(
                                     temp_path.path().value(),
                                     WorkItem::ALWAYS_MOVE);
   install_list->AddDeleteTreeWorkItem(chrome_new_exe, temp_path.path());
-  // old_chrome.exe is still in use in most cases, so ignore failures here.
-  install_list->AddDeleteTreeWorkItem(chrome_old_exe, temp_path.path())->
-      set_ignore_failure(true);
 
   // Add work items to delete the "opv", "cpv", and "cmd" values from all
   // products we're operating on (which including the multi-install binaries).
@@ -382,6 +401,12 @@ installer::InstallStatus RenameChromeExecutables(
                                             KEY_WOW64_32KEY,
                                             google_update::kRegRenameCmdField);
   }
+  // old_chrome.exe is still in use in most cases, so ignore failures here.
+  // Make sure this is the last item in the list because it cannot be rolled
+  // back.
+  install_list->AddDeleteTreeWorkItem(chrome_old_exe, temp_path.path())->
+      set_ignore_failure(true);
+
   installer::InstallStatus ret = installer::RENAME_SUCCESSFUL;
   if (!install_list->Do()) {
     LOG(ERROR) << "Renaming of executables failed. Rolling back any changes.";
@@ -1415,6 +1440,7 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
   }
 
   // Unpack the uncompressed archive.
+  base::TimeTicks start_time = base::TimeTicks::Now();
   if (LzmaUtil::UnPackArchive(uncompressed_archive.value(),
                               unpack_path.value(),
                               NULL)) {
@@ -1424,6 +1450,8 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
         NULL);
     return UNPACKING_FAILED;
   }
+  UMA_HISTOGRAM_MEDIUM_TIMES("Setup.Install.UnpackFullArchiveTime",
+                             base::TimeTicks::Now() - start_time);
 
   VLOG(1) << "unpacked to " << unpack_path.value();
   base::FilePath src_path(
@@ -1621,9 +1649,21 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
   if (!installer::IsProcessorSupported())
     return installer::CPU_NOT_SUPPORTED;
 
+  // Persist histograms so they can be uploaded later.
+  installer::BeginPersistentHistogramStorage();
+
   // The exit manager is in charge of calling the dtors of singletons.
   base::AtExitManager exit_manager;
   base::CommandLine::Init(0, NULL);
+
+  std::string process_type =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kProcessType);
+
+  if (process_type == crash_reporter::switches::kCrashpadHandler) {
+    return crash_reporter::RunAsCrashpadHandler(
+        *base::CommandLine::ForCurrentProcess());
+  }
 
   // install_util uses chrome paths.
   chrome::RegisterPathProvider();
@@ -1657,10 +1697,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
 
   const bool is_uninstall = cmd_line.HasSwitch(installer::switches::kUninstall);
 
-  // Check to make sure current system is WinXP or later. If not, log
+  // Check to make sure current system is Win7 or later. If not, log
   // error message and get out.
   if (!InstallUtil::IsOSSupported()) {
-    LOG(ERROR) << "Chrome only supports Windows XP or later.";
+    LOG(ERROR) << "Chrome only supports Windows 7 or later.";
     installer_state.WriteInstallerResult(
         installer::OS_NOT_SUPPORTED, IDS_INSTALL_OS_NOT_SUPPORTED_BASE, NULL);
     return installer::OS_NOT_SUPPORTED;
@@ -1770,6 +1810,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
     return_code = InstallUtil::GetInstallReturnCode(install_status);
   }
 
+  installer::EndPersistentHistogramStorage(installer_state.target_path());
   VLOG(1) << "Installation complete, returning: " << return_code;
 
   return return_code;

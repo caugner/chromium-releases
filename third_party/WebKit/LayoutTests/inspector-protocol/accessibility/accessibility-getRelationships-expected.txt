@@ -22,6 +22,41 @@ Ginger Ale
         "type": "role",
         "value": "radiogroup"
       },
+      "name": {
+        "type": "computedString",
+        "value": "Lunch Options",
+        "sources": [
+          {
+            "type": "relatedElement",
+            "value": {
+              "type": "computedString",
+              "value": "Lunch Options"
+            },
+            "attribute": "aria-labelledby",
+            "attributeValue": {
+              "type": "idrefList",
+              "value": "rg1_label",
+              "relatedNodes": [
+                {
+                  "idref": "rg1_label",
+                  "text": "Lunch Options",
+                  "nodeResult": "h3#rg1_label"
+                }
+              ]
+            }
+          },
+          {
+            "type": "attribute",
+            "attribute": "aria-label",
+            "superseded": true
+          },
+          {
+            "type": "attribute",
+            "attribute": "title",
+            "superseded": true
+          }
+        ]
+      },
       "properties": [
         {
           "name": "required",
@@ -45,48 +80,17 @@ Ginger Ale
         {
           "name": "labelledby",
           "value": {
-            "type": "idrefList",
+            "type": "nodeList",
             "relatedNodes": [
               {
                 "idref": "rg1_label",
+                "text": "Lunch Options",
                 "nodeResult": "h3#rg1_label"
               }
-            ],
-            "value": "rg1_label"
+            ]
           }
         }
-      ],
-      "name": {
-        "type": "computedString",
-        "value": "Lunch Options",
-        "sources": [
-          {
-            "type": "relatedElement",
-            "value": {
-              "type": "idrefList",
-              "relatedNodes": [
-                {
-                  "idref": "rg1_label",
-                  "text": "Lunch Options",
-                  "nodeResult": "h3#rg1_label"
-                }
-              ],
-              "value": "rg1_label"
-            },
-            "attribute": "aria-labelledby"
-          },
-          {
-            "type": "attribute",
-            "attribute": "aria-label",
-            "superseded": true
-          },
-          {
-            "type": "attribute",
-            "attribute": "title",
-            "superseded": true
-          }
-        ]
-      }
+      ]
     }
   }
 }
@@ -100,28 +104,6 @@ Ginger Ale
         "type": "role",
         "value": "radiogroup"
       },
-      "properties": [
-        {
-          "name": "required",
-          "value": {
-            "type": "boolean",
-            "value": false
-          }
-        },
-        {
-          "name": "labelledby",
-          "value": {
-            "type": "idrefList",
-            "relatedNodes": [
-              {
-                "idref": "rg2_label",
-                "nodeResult": "h3#rg2_label"
-              }
-            ],
-            "value": "rg2_label"
-          }
-        }
-      ],
       "name": {
         "type": "computedString",
         "value": "Drink Options",
@@ -129,17 +111,21 @@ Ginger Ale
           {
             "type": "relatedElement",
             "value": {
+              "type": "computedString",
+              "value": "Drink Options"
+            },
+            "attribute": "aria-labelledby",
+            "attributeValue": {
               "type": "idrefList",
+              "value": "rg2_label",
               "relatedNodes": [
                 {
                   "idref": "rg2_label",
                   "text": "Drink Options",
                   "nodeResult": "h3#rg2_label"
                 }
-              ],
-              "value": "rg2_label"
-            },
-            "attribute": "aria-labelledby"
+              ]
+            }
           },
           {
             "type": "attribute",
@@ -152,7 +138,29 @@ Ginger Ale
             "superseded": true
           }
         ]
-      }
+      },
+      "properties": [
+        {
+          "name": "required",
+          "value": {
+            "type": "boolean",
+            "value": false
+          }
+        },
+        {
+          "name": "labelledby",
+          "value": {
+            "type": "nodeList",
+            "relatedNodes": [
+              {
+                "idref": "rg2_label",
+                "text": "Drink Options",
+                "nodeResult": "h3#rg2_label"
+              }
+            ]
+          }
+        }
+      ]
     }
   }
 }

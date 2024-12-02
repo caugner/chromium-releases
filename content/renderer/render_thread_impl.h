@@ -26,7 +26,7 @@
 #include "content/common/content_export.h"
 #include "content/common/frame_replication_state.h"
 #include "content/common/gpu/client/gpu_channel_host.h"
-#include "content/common/gpu/gpu_result_codes.h"
+#include "content/common/storage_partition_service.mojom.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/renderer/gpu/compositor_dependencies.h"
 #include "net/base/network_change_notifier.h"
@@ -58,6 +58,7 @@ class Thread;
 
 namespace cc {
 class ContextProvider;
+class ImageSerializationProcessor;
 class TaskGraphRunner;
 }
 
@@ -179,8 +180,6 @@ class CONTENT_EXPORT RenderThreadImpl
   void SetResourceDispatcherDelegate(
       ResourceDispatcherDelegate* delegate) override;
   void EnsureWebKitInitialized() override;
-  void RecordAction(const base::UserMetricsAction& action) override;
-  void RecordComputedAction(const std::string& action) override;
   scoped_ptr<base::SharedMemory> HostAllocateSharedMemoryBuffer(
       size_t buffer_size) override;
   cc::SharedBitmapManager* GetSharedBitmapManager() override;
@@ -216,6 +215,7 @@ class CONTENT_EXPORT RenderThreadImpl
   cc::ContextProvider* GetSharedMainThreadContextProvider() override;
   scoped_ptr<cc::BeginFrameSource> CreateExternalBeginFrameSource(
       int routing_id) override;
+  cc::ImageSerializationProcessor* GetImageSerializationProcessor() override;
   cc::TaskGraphRunner* GetTaskGraphRunner() override;
   bool AreImageDecodeTasksEnabled() override;
   bool IsThreadedAnimationEnabled() override;
@@ -295,7 +295,11 @@ class CONTENT_EXPORT RenderThreadImpl
     return sync_compositor_message_filter_.get();
   }
 
+  static void SetStreamTextureFactory(
+      scoped_refptr<StreamTextureFactory> factory);
+
   scoped_refptr<StreamTextureFactory> GetStreamTexureFactory();
+  bool EnableStreamTextureCopy();
 #endif
 
   // Creates the embedder implementation of WebMediaStreamCenter.
@@ -447,8 +451,10 @@ class CONTENT_EXPORT RenderThreadImpl
 
   void RegisterPendingRenderFrameConnect(
       int routing_id,
-      mojo::InterfaceRequest<mojo::ServiceProvider> services,
-      mojo::ServiceProviderPtr exposed_services);
+      mojo::shell::mojom::InterfaceProviderRequest services,
+      mojo::shell::mojom::InterfaceProviderPtr exposed_services);
+
+  StoragePartitionService* GetStoragePartitionService();
 
  protected:
   RenderThreadImpl(const InProcessChildThreadParams& params,
@@ -462,15 +468,14 @@ class CONTENT_EXPORT RenderThreadImpl
   // ChildThread
   bool OnControlMessageReceived(const IPC::Message& msg) override;
   void OnProcessBackgrounded(bool backgrounded) override;
+  void RecordAction(const base::UserMetricsAction& action) override;
+  void RecordComputedAction(const std::string& action) override;
 
   // GpuChannelHostFactory implementation:
   bool IsMainThread() override;
   scoped_refptr<base::SingleThreadTaskRunner> GetIOThreadTaskRunner() override;
   scoped_ptr<base::SharedMemory> AllocateSharedMemory(size_t size) override;
-  CreateCommandBufferResult CreateViewCommandBuffer(
-      int32_t surface_id,
-      const GPUCreateCommandBufferConfig& init_params,
-      int32_t route_id) override;
+  gfx::GLSurfaceHandle GetSurfaceHandle(int32_t surface_id) override;
 
   void Init();
 
@@ -664,6 +669,7 @@ class CONTENT_EXPORT RenderThreadImpl
   bool is_partial_raster_enabled_;
   bool is_elastic_overscroll_enabled_;
   std::vector<unsigned> use_image_texture_targets_;
+  std::vector<unsigned> use_video_frame_image_texture_targets_;
   bool are_image_decode_tasks_enabled_;
   bool is_threaded_animation_enabled_;
 
@@ -672,14 +678,16 @@ class CONTENT_EXPORT RenderThreadImpl
    public:
     PendingRenderFrameConnect(
         int routing_id,
-        mojo::InterfaceRequest<mojo::ServiceProvider> services,
-        mojo::ServiceProviderPtr exposed_services);
+        mojo::shell::mojom::InterfaceProviderRequest services,
+        mojo::shell::mojom::InterfaceProviderPtr exposed_services);
 
-    mojo::InterfaceRequest<mojo::ServiceProvider>& services() {
+    mojo::shell::mojom::InterfaceProviderRequest& services() {
       return services_;
     }
 
-    mojo::ServiceProviderPtr& exposed_services() { return exposed_services_; }
+    mojo::shell::mojom::InterfaceProviderPtr& exposed_services() {
+      return exposed_services_;
+    }
 
    private:
     friend class base::RefCounted<PendingRenderFrameConnect>;
@@ -690,13 +698,15 @@ class CONTENT_EXPORT RenderThreadImpl
     void OnConnectionError();
 
     int routing_id_;
-    mojo::InterfaceRequest<mojo::ServiceProvider> services_;
-    mojo::ServiceProviderPtr exposed_services_;
+    mojo::shell::mojom::InterfaceProviderRequest services_;
+    mojo::shell::mojom::InterfaceProviderPtr exposed_services_;
   };
 
   typedef std::map<int, scoped_refptr<PendingRenderFrameConnect>>
       PendingRenderFrameConnectMap;
   PendingRenderFrameConnectMap pending_render_frame_connects_;
+
+  StoragePartitionServicePtr storage_partition_service_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderThreadImpl);
 };

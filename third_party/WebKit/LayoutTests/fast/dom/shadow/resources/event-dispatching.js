@@ -5,19 +5,21 @@ function moveMouseOver(element)
     if (!window.eventSender || !window.internals)
         return;
 
-    var x = element.offsetLeft + element.offsetWidth / 2;
+    var rect = element.getBoundingClientRect();
+    var x = rect.left + rect.width / 2;
     var y;
     if (element.hasChildNodes() || window.internals.shadowRoot(element))
-        y = element.offsetTop + defaultPaddingSize / 2;
+        y = rect.top + defaultPaddingSize / 2;
     else
-        y = element.offsetTop + element.offsetHeight / 2;
+        y = rect.top + rect.height / 2;
     eventSender.mouseMoveTo(x, y);
 }
 
 function touchLocation(node)
 {
-    var x = node.offsetLeft + 5;
-    var y = node.offsetTop + defaultPaddingSize + 5;
+    var rect = node.getBoundingClientRect();
+    var x = rect.left + 5;
+    var y = rect.top + defaultPaddingSize + 5;
     eventSender.addTouchPoint(x, y);
     eventSender.touchStart();
     eventSender.leapForward(100);
@@ -30,9 +32,11 @@ function selectTextNode(node)
     getSelection().setBaseAndExtent(node, 0, node, node.length);
 }
 
-function dragMouse(node) {
-    var x = node.offsetLeft + 5;
-    var y = node.offsetTop + defaultPaddingSize + 5;
+function dragMouse(node)
+{
+    var rect = node.getBoundingClientRect();
+    var x = rect.left + 5;
+    var y = rect.top + defaultPaddingSize + 5;
 
     eventSender.mouseMoveTo(x, y);
     eventSender.mouseDown();
@@ -42,9 +46,11 @@ function dragMouse(node) {
     eventSender.mouseMoveTo(x, y);
 }
 
-function scrollMouseWheel(node) {
-    var x = node.offsetLeft + 5;
-    var y = node.offsetTop + defaultPaddingSize + 5;
+function scrollMouseWheel(node)
+{
+    var rect = node.getBoundingClientRect();
+    var x = rect.left + 5;
+    var y = rect.top + defaultPaddingSize + 5;
     eventSender.mouseMoveTo(x, y);
     eventSender.mouseScrollBy(0, 120);
 }
@@ -116,20 +122,10 @@ function dumpTouchList(touches) {
     return result;
 }
 
-function dumpComposedShadowTree(node, indent)
-{
-    indent = indent || "";
-    var output = indent + dumpNode(node) + "\n";
-    var child;
-    for (child = internals.firstChildInComposedTree(node); child; child = internals.nextSiblingInComposedTree(child))
-         output += dumpComposedShadowTree(child, indent + "\t");
-    return output;
-}
-
 function addEventListeners(nodes)
 {
     for (var i = 0; i < nodes.length; ++i) {
-        addEventListenersToNode(getNodeInTreeOfTrees(nodes[i]));
+        addEventListenersToNode(getNodeInComposedTree(nodes[i]));
     }
 }
 
@@ -164,10 +160,10 @@ function moveMouse(oldElementId, newElementId)
 {
     clearEventRecords();
     debug('\n' + 'Moving mouse from ' + oldElementId + ' to ' + newElementId);
-    moveMouseOver(getNodeInTreeOfTrees(oldElementId));
+    moveMouseOver(getNodeInComposedTree(oldElementId));
 
     clearEventRecords();
-    moveMouseOver(getNodeInTreeOfTrees(newElementId));
+    moveMouseOver(getNodeInComposedTree(newElementId));
 
     debugDispatchedEvent('mouseout');
     debugDispatchedEvent('mouseover');
@@ -179,13 +175,13 @@ function clickElement(elementId)
     debug('\n' + 'Click ' + elementId);
     var clickEvent = document.createEvent("MouseEvents");
     clickEvent.initMouseEvent('click', true, false, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
-    getNodeInTreeOfTrees(elementId).dispatchEvent(clickEvent);
+    getNodeInComposedTree(elementId).dispatchEvent(clickEvent);
     debugDispatchedEvent('click');
 }
 
 function showSandboxTree()
 {
     var sandbox = document.getElementById('sandbox');
-    sandbox.offsetLeft;
-    debug('\n\nComposed Shadow Tree will be:\n' + dumpComposedShadowTree(sandbox));
+    sandbox.clientLeft;
+    debug('\n\nFlat Tree will be:\n' + dumpFlatTree(sandbox));
 }

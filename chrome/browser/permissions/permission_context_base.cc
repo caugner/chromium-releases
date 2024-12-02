@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/logging.h"
-#include "base/prefs/pref_service.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
@@ -19,6 +18,7 @@
 #include "chrome/common/pref_names.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/browser/website_settings_registry.h"
+#include "components/prefs/pref_service.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
@@ -61,7 +61,6 @@ void PermissionContextBase::RequestPermission(
     content::WebContents* web_contents,
     const PermissionRequestID& id,
     const GURL& requesting_frame,
-    bool user_gesture,
     const BrowserPermissionCallback& callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
@@ -113,7 +112,7 @@ void PermissionContextBase::RequestPermission(
                                          embedding_origin, profile_);
 
   DecidePermission(web_contents, id, requesting_origin, embedding_origin,
-                   user_gesture, callback);
+                   callback);
 }
 
 ContentSetting PermissionContextBase::GetPermissionStatus(
@@ -165,7 +164,6 @@ void PermissionContextBase::DecidePermission(
     const PermissionRequestID& id,
     const GURL& requesting_origin,
     const GURL& embedding_origin,
-    bool user_gesture,
     const BrowserPermissionCallback& callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
@@ -178,7 +176,7 @@ void PermissionContextBase::DecidePermission(
     return;
   scoped_ptr<PermissionBubbleRequest> request_ptr(
       new PermissionBubbleRequestImpl(
-          requesting_origin, user_gesture, permission_type_,
+          requesting_origin, permission_type_,
           profile_->GetPrefs()->GetString(prefs::kAcceptLanguages),
           base::Bind(&PermissionContextBase::PermissionDecided,
                      weak_factory_.GetWeakPtr(), id, requesting_origin,

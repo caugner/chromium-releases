@@ -32,6 +32,7 @@ class WebContentsObserverProxy : public WebContentsObserver {
  private:
   void RenderViewReady() override;
   void RenderProcessGone(base::TerminationStatus termination_status) override;
+  void DidFinishNavigation(NavigationHandle* navigation_handle) override;
   void DidStartLoading() override;
   void DidStopLoading() override;
   void DidFailProvisionalLoad(RenderFrameHost* render_frame_host,
@@ -83,6 +84,7 @@ class WebContentsObserverProxy : public WebContentsObserver {
                            bool was_ignored_by_handler);
 
   base::android::ScopedJavaGlobalRef<jobject> java_observer_;
+  GURL base_url_of_last_started_data_url_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsObserverProxy);
 };

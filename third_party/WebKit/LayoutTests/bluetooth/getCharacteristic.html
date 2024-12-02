@@ -10,8 +10,9 @@ test(t => { assert_true(window.testRunner instanceof Object); t.done(); },
 
 promise_test(() => {
   testRunner.setBluetoothMockDataSet('HeartRateAdapter');
-  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}]})
-    .then(device => device.connectGATT())
+  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}],
+                                   optionalServices: ['generic_access']})
+    .then(device => device.gatt.connect())
     .then(gattServer => gattServer.getPrimaryService('generic_access'))
     .then(service => {
       testRunner.setBluetoothMockDataSet('EmptyAdapter');
@@ -25,8 +26,9 @@ promise_test(() => {
 
 promise_test(() => {
   testRunner.setBluetoothMockDataSet('HeartRateAdapter');
-  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}]})
-    .then(device => device.connectGATT())
+  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}],
+                                   optionalServices: ['generic_access']})
+    .then(device => device.gatt.connect())
     .then(gattService => gattService.getPrimaryService('generic_access'))
     .then(service => {
       testRunner.setBluetoothMockDataSet('MissingServiceHeartRateAdapter');
@@ -38,13 +40,13 @@ promise_test(() => {
     });
 }, 'Service is removed. Reject with InvalidStateError.');
 
-
 promise_test(() => {
   testRunner.setBluetoothMockDataSet('HeartRateAdapter');
-  let expected = new DOMException('Characteristic not found in device.',
+  let expected = new DOMException('No Characteristics with specified UUID found in Service.',
                                   'NotFoundError');
-  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}]})
-    .then(device => device.connectGATT())
+  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}],
+                                   optionalServices: ['generic_access']})
+    .then(device => device.gatt.connect())
     .then(gattServer => gattServer.getPrimaryService('generic_access'))
     .then(service => Promise.all(
       [assert_promise_rejects_with_message(
@@ -57,8 +59,9 @@ promise_test(() => {
 
 promise_test(() => {
   testRunner.setBluetoothMockDataSet('HeartRateAdapter');
-  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}]})
-    .then(device => device.connectGATT())
+  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}],
+                                   optionalServices: ['generic_access']})
+    .then(device => device.gatt.connect())
     .then(gattServer => gattServer.getPrimaryService('generic_access'))
     .then(service => Promise.all(
       [service.getCharacteristic(device_name.alias),
@@ -75,8 +78,9 @@ promise_test(() => {
 
 promise_test(() => {
   testRunner.setBluetoothMockDataSet('HeartRateAdapter');
-  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}]})
-    .then(device => device.connectGATT())
+  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}],
+                                   optionalServices: ['generic_access']})
+    .then(device => device.gatt.connect())
     .then(gattServer => gattServer.getPrimaryService('generic_access'))
     .then(services => Promise.all(
       [services.getCharacteristic(device_name.alias),
@@ -99,14 +103,15 @@ promise_test(() => {
 
 promise_test(() => {
   testRunner.setBluetoothMockDataSet('HeartRateAdapter');
-  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}]})
-    .then(device => device.connectGATT())
+  return requestDeviceWithKeyDown({filters: [{services: ['heart_rate']}],
+                                   optionalServices: ['generic_access']})
+    .then(device => device.gatt.connect())
     .then(gattServer => gattServer.getPrimaryService('generic_access'))
     .then(service => {
       return assert_promise_rejects_with_message(
         service.getCharacteristic('wrong_name'), new DOMException(
           'Failed to execute \'getCharacteristic\' on ' +
-          '\'BluetoothGATTService\': Invalid Characteristic name: ' +
+          '\'BluetoothRemoteGATTService\': Invalid Characteristic name: ' +
           '\'wrong_name\'. ' +
           'It must be a valid UUID alias (e.g. 0x1234), ' +
           'UUID (lowercase hex characters e.g. ' +

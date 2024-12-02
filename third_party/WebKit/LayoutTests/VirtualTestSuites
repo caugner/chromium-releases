@@ -12,7 +12,7 @@
   },
   {
     "prefix": "threaded",
-    "base": "fast/canvas/toBlob",
+    "base": "fast/canvas-toBlob",
     "args": ["--enable-threaded-compositing"]
   },
   {
@@ -190,12 +190,27 @@
   },
   {
     "prefix": "spv2",
-    "base": "paint",
+    "base": "compositing",
     "args": ["--enable-slimming-paint-v2"]
   },
   {
     "prefix": "spv2",
     "base": "fast/block",
+    "args": ["--enable-slimming-paint-v2"]
+  },
+  {
+    "prefix": "spv2",
+    "base": "fast/borders",
+    "args": ["--enable-slimming-paint-v2"]
+  },
+  {
+    "prefix": "spv2",
+    "base": "paint",
+    "args": ["--enable-slimming-paint-v2"]
+  },
+  {
+    "prefix": "spv2",
+    "base": "svg",
     "args": ["--enable-slimming-paint-v2"]
   },
   {
