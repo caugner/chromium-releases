@@ -35,6 +35,7 @@
 #include "third_party/blink/public/common/frame/user_activation_state.h"
 #include "third_party/blink/public/common/frame/user_activation_update_source.h"
 #include "third_party/blink/public/mojom/ad_tagging/ad_frame.mojom-blink.h"
+#include "third_party/blink/public/mojom/frame/frame_owner_properties.mojom-blink-forward.h"
 #include "third_party/blink/public/web/web_frame_load_type.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/frame/frame_lifecycle.h"
@@ -45,6 +46,7 @@
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
 #include "third_party/blink/renderer/platform/graphics/touch_action.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
@@ -55,6 +57,8 @@ class DOMWrapperWorld;
 class Document;
 class FrameClient;
 class FrameOwner;
+class FrameScheduler;
+class FormSubmission;
 class HTMLFrameOwnerElement;
 class LayoutEmbeddedContent;
 class LocalFrame;
@@ -75,7 +79,7 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
  public:
   virtual ~Frame();
 
-  virtual void Trace(blink::Visitor*);
+  virtual void Trace(Visitor*);
 
   virtual bool IsLocalFrame() const = 0;
   virtual bool IsRemoteFrame() const = 0;
@@ -101,13 +105,23 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // reach out to site-isolation-dev@chromium.org.
   bool IsMainFrame() const;
 
-  // Note that the result of this function should not be cached: a frame is
-  // not necessarily detached when it is navigated, so the return value can
-  // change.
-  // In addition, this function will always return true for a detached frame.
+  // Returns true if and only if:
+  // - this frame is a subframe
+  // - it is cross-origin to the main frame
+  //
+  // Important notes:
+  // - This function is not appropriate for determining if a subframe is
+  //   cross-origin to its parent (see: |IsCrossOriginToParentFrame|).
+  // - The return value must NOT be cached. A frame can be reused across
+  //   navigations, so the return value can change over time.
+  // - The return value is inaccurate for a detached frame: it always
+  //   returns true when the frame is detached.
   // TODO(dcheng): Move this to LocalDOMWindow and figure out the right
   // behavior for detached windows.
-  bool IsCrossOriginSubframe() const;
+  bool IsCrossOriginToMainFrame() const;
+  // Returns true if this frame is a subframe and is cross-origin to the parent
+  // frame. See |IsCrossOriginToMainFrame| for important notes.
+  bool IsCrossOriginToParentFrame() const;
 
   FrameOwner* Owner() const;
   void SetOwner(FrameOwner*);
@@ -260,8 +274,15 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   bool GetVisibleToHitTesting() const { return visible_to_hit_testing_; }
   void UpdateVisibleToHitTesting();
 
+  void ScheduleFormSubmission(FrameScheduler* scheduler,
+                              FormSubmission* form_submission);
+  void CancelFormSubmission();
+
   // Called when the focus controller changes the focus to this frame.
   virtual void DidFocus() = 0;
+
+  virtual IntSize GetMainFrameViewportSize() const = 0;
+  virtual IntPoint GetMainFrameScrollOffset() const = 0;
 
  protected:
   // |inheriting_agent_factory| should basically be set to the parent frame or
@@ -292,6 +313,9 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   virtual void DidChangeVisibleToHitTesting() = 0;
 
   void FocusImpl();
+
+  void ApplyFrameOwnerProperties(
+      mojom::blink::FrameOwnerPropertiesPtr properties);
 
   mutable FrameTree tree_node_;
 
@@ -352,6 +376,12 @@ class CORE_EXPORT Frame : public GarbageCollected<Frame> {
   // The sticky user activation state of the current frame before eTLD+1
   // navigation.  This is used in autoplay.
   bool had_sticky_user_activation_before_nav_ = false;
+
+  // This task is used for the async step in form submission when a form is
+  // targeting this frame. http://html.spec.whatwg.org/C/#plan-to-navigate
+  // The reason it is stored here is so that it can handle both LocalFrames and
+  // RemoteFrames, and so it can be canceled by FrameLoader.
+  TaskHandle form_submit_navigation_task_;
 };
 
 inline FrameClient* Frame::Client() const {

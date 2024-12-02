@@ -20,7 +20,7 @@
 #include "chrome/browser/web_applications/web_app_registrar.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
-#include "components/services/app_service/public/cpp/file_handler_info.h"
+#include "components/services/app_service/public/cpp/file_handler.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_rep_default.h"
 
@@ -36,11 +36,17 @@ WebAppShortcutManager::WebAppShortcutManager(
 
 WebAppShortcutManager::~WebAppShortcutManager() = default;
 
-std::unique_ptr<ShortcutInfo> WebAppShortcutManager::BuildShortcutInfo(
-    const AppId& app_id) {
+void WebAppShortcutManager::OnWebAppWillBeUninstalled(const AppId& app_id) {
   const WebApp* app = GetWebAppRegistrar().GetAppById(app_id);
   DCHECK(app);
-  return BuildShortcutInfoForWebApp(app);
+
+  std::unique_ptr<ShortcutInfo> shortcut_info = BuildShortcutInfoForWebApp(app);
+  base::FilePath shortcut_data_dir =
+      internals::GetShortcutDataDir(*shortcut_info);
+
+  internals::PostShortcutIOTask(
+      base::BindOnce(&internals::DeletePlatformShortcuts, shortcut_data_dir),
+      std::move(shortcut_info));
 }
 
 void WebAppShortcutManager::GetShortcutInfoForApp(
@@ -121,12 +127,12 @@ std::unique_ptr<ShortcutInfo> WebAppShortcutManager::BuildShortcutInfoForWebApp(
   shortcut_info->profile_name =
       profile()->GetPrefs()->GetString(prefs::kProfileName);
 
-  if (const std::vector<apps::FileHandlerInfo>* file_handler_infos =
+  if (const apps::FileHandlers* file_handlers =
           file_handler_manager_->GetEnabledFileHandlers(app->app_id())) {
     shortcut_info->file_handler_extensions =
-        GetFileExtensionsFromFileHandlers(*file_handler_infos);
+        GetFileExtensionsFromFileHandlers(*file_handlers);
     shortcut_info->file_handler_mime_types =
-        GetMimeTypesFromFileHandlers(*file_handler_infos);
+        GetMimeTypesFromFileHandlers(*file_handlers);
   }
 
   return shortcut_info;

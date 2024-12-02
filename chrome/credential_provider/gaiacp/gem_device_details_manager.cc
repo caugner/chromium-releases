@@ -49,6 +49,10 @@ const char kIsAdJoinedUserParameterName[] = "is_ad_joined_user";
 const char kMacAddressParameterName[] = "wlan_mac_addr";
 const char kUploadDeviceDetailsResponseDeviceResourceIdParameterName[] =
     "deviceResourceId";
+const char kOsVersion[] = "os_edition";
+
+// Maximum number of retries if a HTTP call to the backend fails.
+constexpr unsigned int kMaxNumHttpRetries = 3;
 }  // namespace
 
 // static
@@ -93,6 +97,11 @@ HRESULT GemDeviceDetailsManager::UploadDeviceDetails(
     return hr;
   }
   std::vector<std::string> mac_addresses = GetMacAddresses();
+
+  // Get OS version of the windows device.
+  std::string version;
+  GetOsVersion(&version);
+
   base::Value mac_address_value_list(base::Value::Type::LIST);
   for (const std::string& mac_address : mac_addresses)
     mac_address_value_list.Append(base::Value(mac_address));
@@ -114,12 +123,10 @@ HRESULT GemDeviceDetailsManager::UploadDeviceDetails(
                             OSUserManager::Get()->IsUserDomainJoined(sid));
   request_dict_->SetKey(kMacAddressParameterName,
                         std::move(mac_address_value_list));
+  request_dict_->SetStringKey(kOsVersion, version);
 
-  wchar_t known_resource_id[512];
-  ULONG known_resource_id_size = base::size(known_resource_id);
-  hr = GetUserProperty(sid, kRegUserDeviceResourceId, known_resource_id,
-                       &known_resource_id_size);
-  if (SUCCEEDED(hr) && known_resource_id_size > 0) {
+  base::string16 known_resource_id = GetUserDeviceResourceId(sid);
+  if (!known_resource_id.empty()) {
     request_dict_->SetStringKey(
         kUploadDeviceDetailsRequestDeviceResourceIdParameterName,
         base::UTF16ToUTF8(known_resource_id));
@@ -130,19 +137,12 @@ HRESULT GemDeviceDetailsManager::UploadDeviceDetails(
   hr = WinHttpUrlFetcher::BuildRequestAndFetchResultFromHttpService(
       GemDeviceDetailsManager::Get()->GetGemServiceUploadDeviceDetailsUrl(),
       access_token, {}, *request_dict_, upload_device_details_request_timeout_,
-      &request_result);
+      kMaxNumHttpRetries, &request_result);
 
   if (FAILED(hr)) {
     LOGFN(ERROR) << "BuildRequestAndFetchResultFromHttpService hr="
                  << putHR(hr);
     return E_FAIL;
-  }
-
-  base::Value* error_detail =
-      request_result->FindDictKey(kErrorKeyInRequestResult);
-  if (error_detail) {
-    LOGFN(ERROR) << "error=" << *error_detail;
-    hr = E_FAIL;
   }
 
   std::string* resource_id = request_result->FindStringKey(

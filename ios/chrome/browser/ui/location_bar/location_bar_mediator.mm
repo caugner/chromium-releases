@@ -162,7 +162,7 @@
     didChangeActiveWebState:(web::WebState*)newWebState
                 oldWebState:(web::WebState*)oldWebState
                     atIndex:(int)atIndex
-                     reason:(int)reason {
+                     reason:(ActiveWebStateChangeReason)reason {
   DCHECK_EQ(_webStateList, webStateList);
   self.webState = newWebState;
   [self.consumer defocusOmnibox];
@@ -272,7 +272,7 @@
 - (void)notifyConsumerOfChangedLocation {
   [self.consumer updateLocationText:[self currentLocationString]
                            clipTail:[self locationShouldClipTail]];
-  GURL URL = self.webState->GetVisibleURL();
+  GURL URL = self.webState ? self.webState->GetVisibleURL() : GURL::EmptyGURL();
   BOOL isNTP = IsURLNewTabPage(URL);
   if (isNTP) {
     [self.consumer updateAfterNavigatingToNTP];
@@ -300,7 +300,7 @@
   if (self.webContentAreaShowingHTTPAuthDialog)
     return YES;
   GURL url = self.locationBarModel->GetURL();
-  return url.SchemeIs(url::kDataScheme);
+  return url.SchemeIs(url::kDataScheme) || url.SchemeIs(url::kBlobScheme);
 }
 
 #pragma mark Security status icon helpers
@@ -321,7 +321,7 @@
 
 // Returns a location icon for offline pages.
 - (UIImage*)imageForOfflinePage {
-  return [[UIImage imageNamed:@"location_bar_offline"]
+  return [[UIImage imageNamed:@"location_bar_connection_offline"]
       imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
 }
 
@@ -340,6 +340,10 @@
   // are displayed over the web content area.
   if (self.webContentAreaShowingOverlay)
     return NO;
+
+  if (!self.webState) {
+    return NO;
+  }
 
   const GURL& URL = self.webState->GetLastCommittedURL();
   return URL.is_valid() && !web::GetWebClient()->IsAppSpecificURL(URL);

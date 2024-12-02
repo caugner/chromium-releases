@@ -127,6 +127,10 @@ class ASH_EXPORT LoginPasswordView : public views::View,
   void OnCapsLockChanged(bool enabled) override;
   void OnKeyboardLayoutNameChanged(const std::string&) override {}
 
+  // Submits the current password field text to mojo call and resets the text
+  // field.
+  void SubmitPassword();
+
  private:
   class EasyUnlockIcon;
   friend class TestApi;
@@ -137,10 +141,6 @@ class ASH_EXPORT LoginPasswordView : public views::View,
   // Enables/disables the submit button and changes the color of the separator
   // based on if the view is enabled.
   void UpdateUiState();
-
-  // Submits the current password field text to mojo call and resets the text
-  // field.
-  void SubmitPassword();
 
   OnPasswordSubmit on_submit_;
   OnPasswordTextChanged on_password_text_changed_;

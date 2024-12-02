@@ -30,8 +30,8 @@ const base::FilePath::CharType kVerifiedContentsFilename[] =
     FILE_PATH_LITERAL("verified_contents.json");
 const base::FilePath::CharType kComputedHashesFilename[] =
     FILE_PATH_LITERAL("computed_hashes.json");
-const base::FilePath::CharType kIndexedRulesetFilename[] =
-    FILE_PATH_LITERAL("generated_indexed_ruleset");
+const base::FilePath::CharType kIndexedRulesetDirectory[] =
+    FILE_PATH_LITERAL("generated_indexed_rulesets");
 
 const char kInstallDirectoryName[] = "Extensions";
 
@@ -120,6 +120,11 @@ const char kCameraAppId[] = "hfhhnacclhffhdffklopdkcgdhifgngh";
 const char kCameraAppDevId[] = "flgnmkgjffmkephdokeeliiopbjaafpm";
 const char kChromeAppId[] = "mgndgikekgjfcpckkfioiadnlibdjbkf";
 const char kFilesManagerAppId[] = "hhaomjibdihmijegdhdafkllkbggdgoj";
+const char kCalculatorAppId[] = "joodangkbfjnajiiifokapkpmhfnpleo";
+const char kCalendarDemoAppId[] = "fpgfohogebplgnamlafljlcidjedbdeb";
+const char kGoogleDocsDemoAppId[] = "chdaoodbokekbiiphekbfjdmiodccljl";
+const char kGoogleSheetsDemoAppId[] = "nifkmgcdokhkjghdlgflonppnefddien";
+const char kGoogleSlidesDemoAppId[] = "hdmobeajeoanbanmdlabnbnlopepchip";
 const char kGoogleKeepAppId[] = "hmjkmjkepdijhoojdojkdfohbdgmmhki";
 const char kYoutubeAppId[] = "blpcfgokakmgnkcojhhkbfbldkacnbeo";
 const char kGeniusAppId[] = "ljoammodoonkhnehlncldjelhidljdpi";
@@ -129,11 +134,11 @@ const char kGeniusAppId[] = "ljoammodoonkhnehlncldjelhidljdpi";
 const char kHighlightsAppId[] = "lpmakjfjcconjeehbidjclhdlpjmfjjj";
 const char kHighlightsEveAppId[] = "iggildboghmjpbjcpmobahnkmoefkike";
 const char kHighlightsNocturneAppId[] = "elhbopodaklenjkeihkdhhfaghalllba";
-const char kHighlightsAltAppId[] = "gjeelkjnolfmhphfhhjokaijbicopfln";
+const char kHighlightsAtlasAppId[] = "gjeelkjnolfmhphfhhjokaijbicopfln";
 const char kScreensaverAppId[] = "mnoijifedipmbjaoekhadjcijipaijjc";
 const char kScreensaverEveAppId[] = "gdobaoeekhiklaljmhladjfdfkigampc";
 const char kScreensaverNocturneAppId[] = "lminefdanffajachfahfpmphfkhahcnj";
-const char kScreensaverAltAppId[] = "bnabjkecnachpogjlfilfcnlpcmacglh";
+const char kScreensaverAtlasAppId[] = "bnabjkecnachpogjlfilfcnlpcmacglh";
 const char kScreensaverKukuiAppId[] = "fafhbhdboeiciklpkminlncemohljlkj";
 
 bool IsSystemUIApp(base::StringPiece extension_id) {
@@ -145,11 +150,11 @@ bool IsSystemUIApp(base::StringPiece extension_id) {
       kFilesManagerAppId,
       kHighlightsEveAppId,
       kHighlightsNocturneAppId,
-      kHighlightsAltAppId,
+      kHighlightsAtlasAppId,
       kHighlightsAppId,
       kScreensaverEveAppId,
       kScreensaverNocturneAppId,
-      kScreensaverAltAppId,
+      kScreensaverAtlasAppId,
       kScreensaverAppId,
       // clang-format on
   };

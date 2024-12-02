@@ -171,13 +171,33 @@ const HeapVector<Member<Element>> HTMLSlotElement::AssignedElementsForBinding(
   return elements;
 }
 
-void HTMLSlotElement::assign(HeapVector<Member<Node>> nodes) {
-  if (SupportsAssignment())
-    ContainingShadowRoot()->GetSlotAssignment().SetNeedsAssignmentRecalc();
+void HTMLSlotElement::assign(HeapVector<Member<Node>> nodes,
+                             ExceptionState& exception_state) {
+  if (!SupportsAssignment() || !ContainingShadowRoot()->IsManualSlotting()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kNotAllowedError,
+        "This shadow root does not support manual slot assignment.");
+    return;
+  }
+
   assigned_nodes_candidates_.clear();
+  auto* host = OwnerShadowHost();
+  bool has_invalid_node = false;
   for (auto& node : nodes) {
+    if (node->parentNode() != host) {
+      exception_state.ThrowDOMException(
+          DOMExceptionCode::kNotAllowedError,
+          "Node:  '" + node->nodeName() +
+              "' is invalid for manual slot assignment.");
+      assigned_nodes_candidates_.clear();
+      has_invalid_node = true;
+      break;
+    }
     assigned_nodes_candidates_.insert(node);
   }
+
+  if (!has_invalid_node)
+    ContainingShadowRoot()->GetSlotAssignment().SetNeedsAssignmentRecalc();
 }
 
 void HTMLSlotElement::AppendAssignedNode(Node& host_child) {
@@ -197,6 +217,11 @@ void HTMLSlotElement::ClearAssignedNodesAndFlatTreeChildren() {
 void HTMLSlotElement::UpdateFlatTreeNodeDataForAssignedNodes() {
   Node* previous = nullptr;
   for (auto& current : assigned_nodes_) {
+    bool flat_tree_parent_changed = false;
+    if (!current->NeedsStyleRecalc() && !current->GetComputedStyle()) {
+      if (auto* node_data = current->GetFlatTreeNodeData())
+        flat_tree_parent_changed = !node_data->AssignedSlot();
+    }
     FlatTreeNodeData& flat_tree_node_data = current->EnsureFlatTreeNodeData();
     flat_tree_node_data.SetAssignedSlot(this);
     flat_tree_node_data.SetPreviousInAssignedNodes(previous);
@@ -205,6 +230,8 @@ void HTMLSlotElement::UpdateFlatTreeNodeDataForAssignedNodes() {
       previous->GetFlatTreeNodeData()->SetNextInAssignedNodes(current);
     }
     previous = current;
+    if (flat_tree_parent_changed)
+      current->FlatTreeParentChanged();
   }
   if (previous) {
     DCHECK(previous->GetFlatTreeNodeData());
