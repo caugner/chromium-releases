@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,22 @@
 #include <limits>
 
 #include "base/i18n/rtl.h"
+#include "base/logging.h"
+#include "base/scoped_ptr.h"
+#include "base/win/scoped_gdi_object.h"
+#include "skia/ext/bitmap_platform_device.h"
+#include "skia/ext/skia_utils_win.h"
 #include "third_party/skia/include/core/SkShader.h"
+#include "ui/gfx/color_utils.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/rect.h"
 
 namespace {
+
+static inline int Round(double x) {
+  // Why oh why is this not in a standard header?
+  return static_cast<int>(floor(x + 0.5));
+}
 
 // We make sure that LTR text we draw in an RTL context is modified
 // appropriately to make sure it maintains it LTR orientation.
@@ -124,6 +135,144 @@ int ComputeFormatFlags(int flags, const string16& text) {
   return f;
 }
 
+// Changes the alpha of the given bitmap.
+// If |fade_to_right| is true then the rect fades from opaque to clear,
+// otherwise the rect fades from clear to opaque.
+void FadeBitmapRect(skia::BitmapPlatformDevice& bmp_device,
+                    const gfx::Rect& rect,
+                    bool fade_to_right) {
+  SkBitmap bmp = bmp_device.accessBitmap(true);
+  DCHECK_EQ(SkBitmap::kARGB_8888_Config, bmp.config());
+  SkAutoLockPixels lock(bmp);
+  float total_width = static_cast<float>(rect.width());
+
+  for (int x = rect.x(); x < rect.right(); x++) {
+    float cur_width = static_cast<float>(fade_to_right ?
+        rect.right() - x :  x - rect.x());
+    // We want the fade effect to go from 0.2 to 1.0.
+    float alpha_percent = ((cur_width / total_width) * 0.8f) + 0.2f;
+
+    for (int y = rect.y(); y < rect.bottom(); y++) {
+      SkColor color = bmp.getColor(x, y);
+      SkAlpha alpha = static_cast<SkAlpha>(SkColorGetA(color) * alpha_percent);
+      *bmp.getAddr32(x, y) = SkPreMultiplyColor(SkColorSetA(color, alpha));
+    }
+  }
+}
+
+// DrawText() doesn't support alpha channels. To create a transparent background
+// this function draws black on white. It then uses the intensity of black
+// to determine how much alpha to use. The text is drawn in |gfx_text_rect| and
+// clipped to |gfx_draw_rect|.
+void DrawTextAndClearBackground(skia::BitmapPlatformDevice& bmp_device,
+                                HFONT font,
+                                COLORREF text_color,
+                                const string16& text,
+                                int flags,
+                                const gfx::Rect& gfx_text_rect,
+                                const gfx::Rect& gfx_draw_rect) {
+  HDC hdc = bmp_device.BeginPlatformPaint();
+
+  // Clear the background by filling with white.
+  HBRUSH fill_brush = static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));
+  HANDLE old_brush = SelectObject(hdc, fill_brush);
+  RECT draw_rect = gfx_draw_rect.ToRECT();
+  FillRect(hdc, &draw_rect, fill_brush);
+  SelectObject(hdc, old_brush);
+
+  // Set black text with trasparent background.
+  SetBkMode(hdc, TRANSPARENT);
+  SetTextColor(hdc, 0);
+
+  // Draw the text.
+  int save_dc_id = SaveDC(hdc);
+  // Clip the text to the draw destination.
+  IntersectClipRect(hdc, draw_rect.left, draw_rect.top,
+                    draw_rect.right, draw_rect.bottom);
+  SelectObject(hdc, font);
+  RECT text_rect = gfx_text_rect.ToRECT();
+  DoDrawText(hdc, text, &text_rect,
+             ComputeFormatFlags(flags, text));
+  RestoreDC(hdc, save_dc_id);
+
+  BYTE text_color_r = GetRValue(text_color);
+  BYTE text_color_g = GetGValue(text_color);
+  BYTE text_color_b = GetBValue(text_color);
+
+  SkBitmap bmp = bmp_device.accessBitmap(true);
+  DCHECK_EQ(SkBitmap::kARGB_8888_Config, bmp.config());
+  SkAutoLockPixels lock(bmp);
+
+  // At this point the bitmap has black text on white.
+  // The intensity of black tells us the alpha value of the text.
+  for (int y = draw_rect.top; y < draw_rect.bottom; y++) {
+    for (int x = draw_rect.left; x < draw_rect.right; x++) {
+      // Gets the color directly. DrawText doesn't premultiply alpha so
+      // using SkBitmap::getColor() won't work here.
+      SkColor color = *bmp.getAddr32(x, y);
+      // Calculate the alpha using the luminance. Since this is black text
+      // on a white background the luminosity must be inverted.
+      BYTE alpha = 0xFF - color_utils::GetLuminanceForColor(color);
+      *bmp.getAddr32(x, y) = SkPreMultiplyColor(
+          SkColorSetARGB(alpha, text_color_r, text_color_g, text_color_b));
+    }
+  }
+
+  bmp_device.EndPlatformPaint();
+}
+
+// Draws the given text with a fade out gradient. |bmp_device| is a bitmap
+// that is used to temporary drawing. The text is drawn in |text_rect| and
+// clipped to |draw_rect|.
+void DrawTextGradientPart(HDC hdc,
+                          skia::BitmapPlatformDevice& bmp_device,
+                          const string16& text,
+                          const SkColor& color,
+                          HFONT font,
+                          const gfx::Rect& text_rect,
+                          const gfx::Rect& draw_rect,
+                          bool fade_to_right,
+                          int flags) {
+  DrawTextAndClearBackground(bmp_device, font, skia::SkColorToCOLORREF(color),
+                             text, flags, text_rect, draw_rect);
+  FadeBitmapRect(bmp_device, draw_rect, fade_to_right);
+  BLENDFUNCTION blend = {AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+
+  HDC bmp_hdc = bmp_device.BeginPlatformPaint();
+  AlphaBlend(hdc, draw_rect.x(), draw_rect.y(), draw_rect.width(),
+             draw_rect.height(), bmp_hdc, draw_rect.x(), draw_rect.y(),
+             draw_rect.width(), draw_rect.height(), blend);
+  bmp_device.EndPlatformPaint();
+}
+
+enum PrimarySide {
+  PrimaryOnLeft,
+  PrimaryOnRight,
+};
+
+// Divides |rect| horizontally into a |primary| of width |primary_width| and a
+// |secondary| taking up the remainder.
+void DivideRect(const gfx::Rect& rect,
+                PrimarySide primary_side,
+                int primary_width,
+                gfx::Rect* primary,
+                gfx::Rect* secondary) {
+  *primary = rect;
+  *secondary = rect;
+  int remainder = rect.width() - primary_width;
+
+  switch (primary_side) {
+    case PrimaryOnLeft:
+      primary->Inset(0, 0, remainder, 0);
+      secondary->Inset(primary_width, 0, 0, 0);
+      break;
+    case PrimaryOnRight:
+      primary->Inset(remainder, 0, 0, 0);
+      secondary->Inset(0, 0, primary_width, 0);
+      break;
+  }
+}
+
 }  // anonymous namespace
 
 namespace gfx {
@@ -182,7 +331,13 @@ void CanvasSkia::DrawStringInt(const string16& text,
                                const SkColor& color,
                                int x, int y, int w, int h,
                                int flags) {
-  if (!IntersectsClipRectInt(x, y, w, h))
+  SkRect fclip;
+  if (!getClipBounds(&fclip))
+    return;
+  RECT text_bounds = { x, y, x + w, y + h };
+  SkIRect clip;
+  fclip.round(&clip);
+  if (!clip.intersect(skia::RECTToSkIRect(text_bounds)))
     return;
 
   // Clamp the max amount of text we'll draw to 32K.  There seem to be bugs in
@@ -192,7 +347,6 @@ void CanvasSkia::DrawStringInt(const string16& text,
   const int kMaxStringLength = 32768 - 1;  // So the trailing \0 fits in 32K.
   string16 clamped_string(text.substr(0, kMaxStringLength));
 
-  RECT text_bounds = { x, y, x + w, y + h };
   HDC dc = beginPlatformPaint();
   SetBkMode(dc, TRANSPARENT);
   HFONT old_font = (HFONT)SelectObject(dc, font);
@@ -211,7 +365,8 @@ void CanvasSkia::DrawStringInt(const string16& text,
   // Windows will have cleared the alpha channel of the text we drew. Assume
   // we're drawing to an opaque surface, or at least the text rect area is
   // opaque.
-  getTopPlatformDevice().makeOpaque(x, y, w, h);
+  getTopPlatformDevice().makeOpaque(clip.fLeft, clip.fTop,
+                                    clip.width(), clip.height());
 }
 
 void CanvasSkia::DrawStringInt(const string16& text,
@@ -296,6 +451,134 @@ void CanvasSkia::DrawStringWithHalo(const string16& text,
 
   // Draw the halo bitmap with blur.
   DrawBitmapInt(text_bitmap, x - 1, y - 1);
+}
+
+ui::TextureID CanvasSkia::GetTextureID() {
+  // TODO(wjmaclean)
+  return 0;
+}
+
+void CanvasSkia::DrawFadeTruncatingString(
+      const string16& text,
+      CanvasSkia::TruncateFadeMode truncate_mode,
+      size_t desired_characters_to_truncate_from_head,
+      const gfx::Font& font,
+      const SkColor& color,
+      const gfx::Rect& display_rect) {
+  int flags = NO_ELLIPSIS;
+
+  // If the whole string fits in the destination then just draw it directly.
+  int total_string_width;
+  int total_string_height;
+  SizeStringInt(text, font, &total_string_width, &total_string_height,
+                flags | TEXT_VALIGN_TOP);
+
+  if (total_string_width <= display_rect.width()) {
+    DrawStringInt(text, font, color, display_rect.x(), display_rect.y(),
+                  display_rect.width(), display_rect.height(), 0);
+    return;
+  }
+
+  int average_character_width = font.GetAverageCharacterWidth();
+  int clipped_string_width = total_string_width - display_rect.width();
+
+  // Clip the string by drawing it to the left by |offset_x|.
+  int offset_x = 0;
+  switch (truncate_mode) {
+    case TruncateFadeHead:
+      offset_x = clipped_string_width;
+      break;
+    case TruncateFadeHeadAndTail:
+      DCHECK_GT(desired_characters_to_truncate_from_head, 0u);
+      // Get the width of the beginning of the string we're clipping.
+      string16 clipped_head_string =
+          text.substr(0, desired_characters_to_truncate_from_head);
+      int clipped_width;
+      int clipped_height;
+      SizeStringInt(clipped_head_string, font,
+                    &clipped_width, &clipped_height, flags);
+
+      // This is the offset at which we start drawing. This causes the
+      // beginning of the string to get clipped.
+      offset_x = clipped_width;
+
+      // Due to the fade effect the first character is hard to see.
+      // We want to make sure that the first character starting at
+      // |desired_characters_to_truncate_from_head| is readable so we reduce
+      // the offset by a little bit.
+      offset_x = std::max(0, Round(offset_x - average_character_width * 2));
+
+      // If the offset is so large that there's empty space at the tail
+      // then reduce the offset so we can use up the empty space.
+      offset_x = std::min(offset_x, clipped_string_width);
+      break;
+  }
+  bool is_truncating_head = offset_x > 0;
+  bool is_truncating_tail = clipped_string_width > offset_x;
+
+  bool is_rtl = (ComputeFormatFlags(flags, text) & DT_RTLREADING) != 0;
+  // |is_rtl| tells us if the given text is right to left or not. |is_rtl| can
+  // be false even if the UI is set to a right to left language.
+  // Now, normally, we right align all text if the UI is set to a right to
+  // left language. In this case though we don't want that because we render
+  // the ends of the string ourselves.
+  if (!is_rtl)
+    flags |= TEXT_ALIGN_LEFT;
+
+  // Fade in/out about 2.5 characters of the beginning/end of the string.
+  // The .5 here is helpful if one of the characters is a space.
+  // Use a quarter of the display width if the string is very short.
+  int gradient_width = Round(std::min(average_character_width * 2.5,
+                                      display_rect.width() / 4.0));
+
+  // Move the origin to |display_rect.origin()|. This simplifies all the
+  // drawing so that both the source and destination can be (0,0).
+  save(kMatrix_SaveFlag);
+  TranslateInt(display_rect.x(), display_rect.y());
+
+  gfx::Rect solid_part(gfx::Point(), display_rect.size());
+  gfx::Rect head_part;
+  gfx::Rect tail_part;
+  if (is_truncating_head)
+    DivideRect(solid_part, is_rtl ? PrimaryOnRight : PrimaryOnLeft,
+               gradient_width, &head_part, &solid_part);
+  if (is_truncating_tail)
+    DivideRect(solid_part, is_rtl ? PrimaryOnLeft : PrimaryOnRight,
+               gradient_width, &tail_part, &solid_part);
+
+  // Grow |display_rect| by |offset_x|.
+  gfx::Rect text_rect(gfx::Point(), display_rect.size());
+  if (!is_rtl)
+    text_rect.set_x(text_rect.x() - offset_x);
+  text_rect.set_width(text_rect.width() + offset_x);
+
+  // Create a temporary bitmap to draw the gradient to.
+  scoped_ptr<skia::BitmapPlatformDevice> gradient_bitmap(
+      skia::BitmapPlatformDevice::create(
+          display_rect.width(), display_rect.height(), false, NULL));
+  DCHECK(gradient_bitmap.get());
+
+  HDC hdc = beginPlatformPaint();
+  if (is_truncating_head)
+    DrawTextGradientPart(hdc, *gradient_bitmap, text, color,
+                         font.GetNativeFont(), text_rect, head_part, is_rtl,
+                         flags);
+  if (is_truncating_tail)
+    DrawTextGradientPart(hdc, *gradient_bitmap, text, color,
+                         font.GetNativeFont(), text_rect, tail_part, !is_rtl,
+                         flags);
+  endPlatformPaint();
+
+  // Draw the solid part.
+  save(kClip_SaveFlag);
+  ClipRectInt(solid_part.x(), solid_part.y(),
+              solid_part.width(), solid_part.height());
+  DrawStringInt(text, font, color,
+                text_rect.x(), text_rect.y(),
+                text_rect.width(), text_rect.height(),
+                flags);
+  restore();
+  restore();
 }
 
 }  // namespace gfx

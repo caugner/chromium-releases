@@ -17,17 +17,17 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/format_macros.h"
+#include "base/memory/scoped_temp_dir.h"
 #include "base/message_loop.h"
 #include "base/platform_file.h"
-#include "base/scoped_temp_dir.h"
 #include "base/string_piece.h"
-#include "base/threading/thread.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/http/http_request_headers.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_path_manager.h"
 
 namespace fileapi {
@@ -35,6 +35,21 @@ namespace {
 
 // We always use the TEMPORARY FileSystem in this test.
 static const char kFileSystemURLPrefix[] = "filesystem:http://remote/temporary/";
+
+class TestSpecialStoragePolicy : public quota::SpecialStoragePolicy {
+ public:
+  virtual bool IsStorageProtected(const GURL& origin) {
+    return false;
+  }
+
+  virtual bool IsStorageUnlimited(const GURL& origin) {
+    return true;
+  }
+
+  virtual bool IsFileHandler(const std::string& extension_id) {
+    return true;
+  }
+};
 
 class FileSystemDirURLRequestJobTest : public testing::Test {
  protected:
@@ -46,22 +61,25 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
   virtual void SetUp() {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
-    // We use the main thread so that we can get the root path synchronously.
-    // TODO(adamk): Run this on the FILE thread we've created as well.
-    path_manager_.reset(new FileSystemPathManager(
-        base::MessageLoopProxy::CreateForCurrentThread(),
-        temp_dir_.path(), false, false));
+    file_thread_proxy_ = base::MessageLoopProxy::CreateForCurrentThread();
 
-    path_manager_->GetFileSystemRootPath(
+    special_storage_policy_ = new TestSpecialStoragePolicy();
+    file_system_context_ =
+        new FileSystemContext(
+            base::MessageLoopProxy::CreateForCurrentThread(),
+            base::MessageLoopProxy::CreateForCurrentThread(),
+            special_storage_policy_,
+            FilePath(), false /* is_incognito */,
+            false, true,
+            new FileSystemPathManager(
+                    file_thread_proxy_, temp_dir_.path(),
+                    NULL, false, false));
+
+    file_system_context_->path_manager()->ValidateFileSystemRootAndGetURL(
         GURL("http://remote/"), kFileSystemTypeTemporary, true,  // create
         callback_factory_.NewCallback(
             &FileSystemDirURLRequestJobTest::OnGetRootPath));
     MessageLoop::current()->RunAllPending();
-
-    file_thread_.reset(
-        new base::Thread("FileSystemDirURLRequestJobTest FILE Thread"));
-    base::Thread::Options options(MessageLoop::TYPE_IO, 0);
-    file_thread_->StartWithOptions(options);
 
     net::URLRequest::RegisterProtocolFactory(
         "filesystem", &FileSystemDirURLRequestJobFactory);
@@ -72,7 +90,6 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
     request_.reset(NULL);
     delegate_.reset(NULL);
 
-    file_thread_.reset(NULL);
     net::URLRequest::RegisterProtocolFactory("filesystem", NULL);
   }
 
@@ -86,8 +103,9 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
     delegate_.reset(new TestDelegate());
     delegate_->set_quit_on_redirect(true);
     request_.reset(new net::URLRequest(url, delegate_.get()));
-    job_ = new FileSystemDirURLRequestJob(request_.get(), path_manager_.get(),
-                                          file_thread_->message_loop_proxy());
+    job_ = new FileSystemDirURLRequestJob(request_.get(),
+                                          file_system_context_.get(),
+                                          file_thread_proxy_);
 
     request_->Start();
     ASSERT_TRUE(request_->is_pending());  // verify that we're starting async
@@ -116,8 +134,9 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
   FilePath root_path_;
   scoped_ptr<net::URLRequest> request_;
   scoped_ptr<TestDelegate> delegate_;
-  scoped_ptr<FileSystemPathManager> path_manager_;
-  scoped_ptr<base::Thread> file_thread_;
+  scoped_refptr<TestSpecialStoragePolicy> special_storage_policy_;
+  scoped_refptr<FileSystemContext> file_system_context_;
+  scoped_refptr<base::MessageLoopProxy> file_thread_proxy_;
 
   MessageLoop message_loop_;
   base::ScopedCallbackFactory<FileSystemDirURLRequestJobTest> callback_factory_;

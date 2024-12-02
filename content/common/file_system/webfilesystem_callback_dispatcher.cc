@@ -10,6 +10,7 @@
 #include "base/file_util_proxy.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
+#include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystem.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystemCallbacks.h"
@@ -33,7 +34,7 @@ void WebFileSystemCallbackDispatcher::DidSucceed() {
 }
 
 void WebFileSystemCallbackDispatcher::DidReadMetadata(
-    const base::PlatformFileInfo& file_info) {
+    const base::PlatformFileInfo& file_info, const FilePath& platform_path) {
   WebFileInfo web_file_info;
   web_file_info.modificationTime = file_info.last_modified.ToDoubleT();
   web_file_info.length = file_info.size;
@@ -41,6 +42,8 @@ void WebFileSystemCallbackDispatcher::DidReadMetadata(
     web_file_info.type = WebFileInfo::TypeDirectory;
   else
     web_file_info.type = WebFileInfo::TypeFile;
+  web_file_info.platformPath =
+    webkit_glue::FilePathToWebString(platform_path);
   callbacks_->didReadMetadata(web_file_info);
 }
 
@@ -56,9 +59,9 @@ void WebFileSystemCallbackDispatcher::DidReadDirectory(
 }
 
 void WebFileSystemCallbackDispatcher::DidOpenFileSystem(
-    const std::string& name, const FilePath& root_path) {
-  callbacks_->didOpenFileSystem(UTF8ToUTF16(name),
-                                webkit_glue::FilePathToWebString(root_path));
+    const std::string& name, const GURL& root) {
+  callbacks_->didOpenFileSystem(
+      UTF8ToUTF16(name), UTF8ToUTF16(root.spec()));
 }
 
 void WebFileSystemCallbackDispatcher::DidFail(

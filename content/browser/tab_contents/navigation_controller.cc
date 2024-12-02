@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,21 +15,23 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/navigation_types.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/render_messages_params.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/child_process_security_policy.h"
 #include "content/browser/in_process_webkit/session_storage_namespace.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/interstitial_page.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
+#include "content/common/content_constants.h"
+#include "content/common/navigation_types.h"
+#include "content/common/notification_service.h"
+#include "content/common/view_messages.h"
 #include "grit/app_resources.h"
 #include "net/base/escape.h"
-#include "net/base/net_util.h"
 #include "net/base/mime_util.h"
+#include "net/base/net_util.h"
 #include "webkit/glue/webkit_glue.h"
 
 namespace {
@@ -107,7 +109,7 @@ bool AreURLsInPageNavigation(const GURL& existing_url, const GURL& new_url) {
 
 // static
 size_t NavigationController::max_entry_count_ =
-    chrome::kMaxSessionHistoryEntries;
+    content::kMaxSessionHistoryEntries;
 
 // static
 bool NavigationController::check_for_repost_ = true;
@@ -128,8 +130,10 @@ NavigationController::NavigationController(
       session_storage_namespace_(session_storage_namespace),
       pending_reload_(NO_RELOAD) {
   DCHECK(profile_);
-  if (!session_storage_namespace_)
-    session_storage_namespace_ = new SessionStorageNamespace(profile_);
+  if (!session_storage_namespace_) {
+    session_storage_namespace_ = new SessionStorageNamespace(
+        profile_->GetWebKitContext());
+  }
 }
 
 NavigationController::~NavigationController() {
@@ -253,10 +257,25 @@ NavigationEntry* NavigationController::GetEntryWithPageID(
 }
 
 void NavigationController::LoadEntry(NavigationEntry* entry) {
+  // Don't navigate to URLs disabled by policy. This prevents showing the URL
+  // on the Omnibar when it is also going to be blocked by
+  // ChildProcessSecurityPolicy::CanRequestURL.
+  ChildProcessSecurityPolicy *policy =
+      ChildProcessSecurityPolicy::GetInstance();
+  if (policy->IsDisabledScheme(entry->url().scheme()) ||
+      policy->IsDisabledScheme(entry->virtual_url().scheme())) {
+    VLOG(1) << "URL not loaded because the scheme is blocked by policy: "
+            << entry->url();
+    delete entry;
+    return;
+  }
+
   // Handle non-navigational URLs that popup dialogs and such, these should not
   // actually navigate.
-  if (HandleNonNavigationAboutURL(entry->url()))
+  if (HandleNonNavigationAboutURL(entry->url())) {
+    delete entry;
     return;
+  }
 
   // When navigating to a new page, we don't know for sure if we will actually
   // end up leaving the current page.  The new page load could for example
@@ -430,15 +449,9 @@ void NavigationController::GoToOffset(int offset) {
 
 void NavigationController::RemoveEntryAtIndex(int index,
                                               const GURL& default_url) {
-  int size = static_cast<int>(entries_.size());
-  DCHECK(index < size);
-
-  DiscardNonCommittedEntries();
-
-  entries_.erase(entries_.begin() + index);
-
-  if (last_committed_entry_index_ == index) {
-    last_committed_entry_index_--;
+  bool is_current = index == last_committed_entry_index_;
+  RemoveEntryAtIndexInternal(index);
+  if (is_current) {
     // We removed the currently shown entry, so we have to load something else.
     if (last_committed_entry_index_ != -1) {
       pending_entry_index_ = last_committed_entry_index_;
@@ -448,8 +461,6 @@ void NavigationController::RemoveEntryAtIndex(int index,
       LoadURL(default_url.is_empty() ? GURL("about:blank") : default_url,
               GURL(), PageTransition::START_PAGE);
     }
-  } else if (last_committed_entry_index_ > index) {
-    last_committed_entry_index_--;
   }
 }
 
@@ -502,15 +513,12 @@ bool NavigationController::RendererDidNavigate(
     details->previous_entry_index = -1;
   }
 
-  // Assign the current site instance to any pending entry, so we can find it
-  // later by calling GetEntryIndexWithPageID. We only care about this if the
-  // pending entry is an existing navigation and not a new one (or else we
-  // wouldn't care about finding it with GetEntryIndexWithPageID).
-  //
-  // TODO(brettw) this seems slightly bogus as we don't really know if the
-  // pending entry is what this navigation is for. There is a similar TODO
-  // w.r.t. the pending entry in RendererDidNavigateToNewPage.
-  if (pending_entry_index_ >= 0) {
+  // The pending_entry has no SiteInstance when we are restoring an entry.  We
+  // must fill it in here so we can find the entry later by calling
+  // GetEntryIndexWithPageID.  In all other cases, the SiteInstance should be
+  // assigned already and we shouldn't change it.
+  if (pending_entry_index_ >= 0 && !pending_entry_->site_instance()) {
+    DCHECK(pending_entry_->restore_type() != NavigationEntry::RESTORE_NONE);
     pending_entry_->set_site_instance(tab_contents_->GetSiteInstance());
     pending_entry_->set_restore_type(NavigationEntry::RESTORE_NONE);
   }
@@ -542,8 +550,15 @@ bool NavigationController::RendererDidNavigate(
         return false;
       break;
     case NavigationType::NAV_IGNORE:
-      // There is nothing we can do with this navigation, so we just return to
+      // If a pending navigation was in progress, this canceled it.  We should
+      // discard it and make sure it is removed from the URL bar.  After that,
+      // there is nothing we can do with this navigation, so we just return to
       // the caller that nothing has happened.
+      if (pending_entry_) {
+        DiscardNonCommittedEntries();
+        extra_invalidate_flags |= TabContents::INVALIDATE_URL;
+        tab_contents_->NotifyNavigationStateChanged(extra_invalidate_flags);
+      }
       return false;
     default:
       NOTREACHED();
@@ -554,6 +569,9 @@ bool NavigationController::RendererDidNavigate(
   DCHECK(!params.content_state.empty());
   NavigationEntry* active_entry = GetActiveEntry();
   active_entry->set_content_state(params.content_state);
+
+  // The active entry's SiteInstance should match our SiteInstance.
+  DCHECK(active_entry->site_instance() == tab_contents_->GetSiteInstance());
 
   // WebKit doesn't set the "auto" transition on meta refreshes properly (bug
   // 1051891) so we manually set it for redirects which we normally treat as
@@ -647,14 +665,15 @@ NavigationType::Type NavigationController::ClassifyNavigation(
   // Anything below here we know is a main frame navigation.
   if (pending_entry_ &&
       existing_entry != pending_entry_ &&
-      pending_entry_->page_id() == -1) {
+      pending_entry_->page_id() == -1 &&
+      existing_entry == GetLastCommittedEntry()) {
     // In this case, we have a pending entry for a URL but WebCore didn't do a
     // new navigation. This happens when you press enter in the URL bar to
     // reload. We will create a pending entry, but WebKit will convert it to
     // a reload since it's the same page and not create a new entry for it
     // (the user doesn't want to have a new back/forward entry when they do
-    // this). In this case, we want to just ignore the pending entry and go
-    // back to where we were (the "existing entry").
+    // this). If this matches the last committed entry, we want to just ignore
+    // the pending entry and go back to where we were (the "existing entry").
     return NavigationType::SAME_PAGE;
   }
 
@@ -699,9 +718,7 @@ void NavigationController::RendererDidNavigateToNewPage(
   if (pending_entry_) {
     // TODO(brettw) this assumes that the pending entry is appropriate for the
     // new page that was just loaded. I don't think this is necessarily the
-    // case! We should have some more tracking to know for sure. This goes along
-    // with a similar TODO at the top of RendererDidNavigate where we blindly
-    // set the site instance on the pending entry.
+    // case! We should have some more tracking to know for sure.
     new_entry = new NavigationEntry(*pending_entry_);
 
     // Don't use the page type from the pending entry. Some interstitial page
@@ -752,11 +769,14 @@ void NavigationController::RendererDidNavigateToExistingPage(
 
   // The entry we found in the list might be pending if the user hit
   // back/forward/reload. This load should commit it (since it's already in the
-  // list, we can just discard the pending pointer).
+  // list, we can just discard the pending pointer).  We should also discard the
+  // pending entry if it corresponds to a different navigation, since that one
+  // is now likely canceled.  If it is not canceled, we will treat it as a new
+  // navigation when it arrives, which is also ok.
   //
   // Note that we need to use the "internal" version since we don't want to
   // actually change any other state, just kill the pointer.
-  if (entry == pending_entry_)
+  if (pending_entry_)
     DiscardNonCommittedEntriesInternal();
 
   // If a transient entry was removed, the indices might have changed, so we
@@ -933,13 +953,31 @@ void NavigationController::CopyStateFrom(const NavigationController& source) {
   FinishRestore(source.last_committed_entry_index_, false);
 }
 
-void NavigationController::CopyStateFromAndPrune(NavigationController* source) {
+void NavigationController::CopyStateFromAndPrune(NavigationController* source,
+                                                 bool remove_first_entry) {
   // This code is intended for use when the last entry is the active entry.
   DCHECK((transient_entry_index_ != -1 &&
           transient_entry_index_ == entry_count() - 1) ||
          (pending_entry_ && (pending_entry_index_ == -1 ||
                              pending_entry_index_ == entry_count() - 1)) ||
          (!pending_entry_ && last_committed_entry_index_ == entry_count() - 1));
+
+  if (remove_first_entry && entry_count()) {
+    // Save then restore the pending entry (RemoveEntryAtIndexInternal chucks
+    // the pending entry).
+    NavigationEntry* pending_entry = pending_entry_;
+    pending_entry_ = NULL;
+    int pending_entry_index = pending_entry_index_;
+    RemoveEntryAtIndexInternal(0);
+    // Restore the pending entry.
+    if (pending_entry_index != -1) {
+      pending_entry_index_ = pending_entry_index - 1;
+      if (pending_entry_index_ != -1)
+        pending_entry_ = entries_[pending_entry_index_].get();
+    } else if (pending_entry) {
+      pending_entry_ = pending_entry;
+    }
+  }
 
   // Remove all the entries leaving the active entry.
   PruneAllButActive();
@@ -1003,6 +1041,18 @@ void NavigationController::PruneAllButActive() {
     // so the interstitial triggers a reload if the user doesn't proceed.
     tab_contents_->interstitial_page()->set_reload_on_dont_proceed(true);
   }
+}
+
+void NavigationController::RemoveEntryAtIndexInternal(int index) {
+  DCHECK(index < entry_count());
+
+  DiscardNonCommittedEntries();
+
+  entries_.erase(entries_.begin() + index);
+  if (last_committed_entry_index_ == index)
+    last_committed_entry_index_--;
+  else if (last_committed_entry_index_ > index)
+    last_committed_entry_index_--;
 }
 
 void NavigationController::DiscardNonCommittedEntries() {

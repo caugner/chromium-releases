@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,13 +24,14 @@ COMPILE_ASSERT((kBoxWidth % kSpeed == 0) && (kWidth % kSpeed == 0) &&
 
 static const int kBytesPerPixel = 4;  // 32 bit RGB is 4 bytes per pixel.
 
-CapturerFake::CapturerFake(MessageLoop* message_loop)
-    : Capturer(message_loop),
-      bytes_per_row_(0),
+CapturerFake::CapturerFake()
+    : bytes_per_row_(0),
       box_pos_x_(0),
       box_pos_y_(0),
       box_speed_x_(kSpeed),
-      box_speed_y_(kSpeed) {
+      box_speed_y_(kSpeed),
+      current_buffer_(0),
+      pixel_format_(media::VideoFrame::RGB32) {
   ScreenConfigurationChanged();
 }
 
@@ -38,50 +39,78 @@ CapturerFake::~CapturerFake() {
 }
 
 void CapturerFake::ScreenConfigurationChanged() {
-  width_ = kWidth;
-  height_ = kHeight;
-  bytes_per_row_ = width_ * kBytesPerPixel;
+  size_ = gfx::Size(kWidth, kHeight);
+  bytes_per_row_ = size_.width() * kBytesPerPixel;
   pixel_format_ = media::VideoFrame::RGB32;
 
   // Create memory for the buffers.
-  int buffer_size = height_ * bytes_per_row_;
+  int buffer_size = size_.height() * bytes_per_row_;
   for (int i = 0; i < kNumBuffers; i++) {
     buffers_[i].reset(new uint8[buffer_size]);
   }
 }
 
-void CapturerFake::CalculateInvalidRects() {
-  GenerateImage();
-  InvalidateFullScreen(width_, height_);
+media::VideoFrame::Format CapturerFake::pixel_format() const {
+  return pixel_format_;
 }
 
-void CapturerFake::CaptureRects(const InvalidRects& rects,
-                                CaptureCompletedCallback* callback) {
+void CapturerFake::ClearInvalidRects() {
+  helper.ClearInvalidRects();
+}
+
+void CapturerFake::InvalidateRects(const InvalidRects& inval_rects) {
+  helper.InvalidateRects(inval_rects);
+}
+
+void CapturerFake::InvalidateScreen(const gfx::Size& size) {
+  helper.InvalidateScreen(size);
+}
+
+void CapturerFake::InvalidateFullScreen() {
+  helper.InvalidateFullScreen();
+}
+
+void CapturerFake::CaptureInvalidRects(CaptureCompletedCallback* callback) {
+  scoped_ptr<CaptureCompletedCallback> callback_deleter(callback);
+
+  GenerateImage();
+  InvalidateScreen(size_);
+
+  InvalidRects inval_rects;
+  helper.SwapInvalidRects(inval_rects);
+
   DataPlanes planes;
   planes.data[0] = buffers_[current_buffer_].get();
+  current_buffer_ = (current_buffer_ + 1) % kNumBuffers;
   planes.strides[0] = bytes_per_row_;
 
   scoped_refptr<CaptureData> capture_data(new CaptureData(planes,
-                                                          width_,
-                                                          height_,
+                                                          size_,
                                                           pixel_format_));
-  capture_data->mutable_dirty_rects() = rects;
-  FinishCapture(capture_data, callback);
+  capture_data->mutable_dirty_rects() = inval_rects;
+
+  helper.set_size_most_recent(capture_data->size());
+
+  callback->Run(capture_data);
+}
+
+const gfx::Size& CapturerFake::size_most_recent() const {
+  return helper.size_most_recent();
 }
 
 void CapturerFake::GenerateImage() {
   memset(buffers_[current_buffer_].get(), 0xff,
-         width_ * height_ * kBytesPerPixel);
+         size_.width() * size_.height() * kBytesPerPixel);
 
   uint8* row = buffers_[current_buffer_].get() +
-      (box_pos_y_ * width_ + box_pos_x_) * kBytesPerPixel;
+      (box_pos_y_ * size_.width() + box_pos_x_) * kBytesPerPixel;
 
   box_pos_x_ += box_speed_x_;
-  if (box_pos_x_ + kBoxWidth >= width_ || box_pos_x_ == 0)
+  if (box_pos_x_ + kBoxWidth >= size_.width() || box_pos_x_ == 0)
     box_speed_x_ = -box_speed_x_;
 
   box_pos_y_ += box_speed_y_;
-  if (box_pos_y_ + kBoxHeight >= height_ || box_pos_y_ == 0)
+  if (box_pos_y_ + kBoxHeight >= size_.height() || box_pos_y_ == 0)
     box_speed_y_ = -box_speed_y_;
 
   // Draw rectangle with the following colors in it's corners:

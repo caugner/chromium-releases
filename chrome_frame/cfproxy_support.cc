@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <vector>
 #include "base/atomic_sequence_num.h"
 #include "base/command_line.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/process_util.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/common/chrome_switches.h"
@@ -24,10 +25,6 @@ void DispatchReplyFail(uint32 type,
       break;
     case AutomationMsg_ConnectExternalTab::ID:
       delegate->Completed_ConnectToTab(false, NULL, NULL, 0, 0);
-      break;
-    case AutomationMsg_InstallExtension::ID:
-      delegate->Completed_InstallExtension(false,
-          AUTOMATION_MSG_EXTENSION_INSTALL_FAILED, ctx);
       break;
   }
 }
@@ -57,32 +54,6 @@ bool DispatchReplyOk(const IPC::Message* reply_msg, uint32 type,
         delegate->Completed_ConnectToTab(true, out.a, out.b, out.c, out.d);
       }
       return true;
-    }
-
-    case AutomationMsg_InstallExtension::ID: {
-      // Tuple1<AutomationMsg_ExtensionResponseValues> out;
-      TupleTypes<AutomationMsg_InstallExtension::ReplyParam>::ValueTuple out;
-      if (ReadParam(reply_msg, &iter, &out))
-        delegate->Completed_InstallExtension(true, out.a, ctx);
-      return true;
-    }
-
-    case AutomationMsg_LoadExpandedExtension::ID: {
-      // Tuple1<AutomationMsg_ExtensionResponseValues> out;
-      TupleTypes<AutomationMsg_LoadExpandedExtension::ReplyParam>::ValueTuple
-          out;
-      if (ReadParam(reply_msg, &iter, &out))
-        delegate->Completed_LoadExpandedExtension(true, out.a, ctx);
-      break;
-    }
-
-    case AutomationMsg_GetEnabledExtensions::ID: {
-      // Tuple1<std::vector<FilePath> >
-      TupleTypes<AutomationMsg_GetEnabledExtensions::ReplyParam>::ValueTuple
-          out;
-      if (ReadParam(reply_msg, &iter, &out))
-        delegate->Completed_GetEnabledExtensions(true, &out.a);
-      break;
     }
   }  // switch
 
@@ -177,12 +148,6 @@ void Interface2IPCMessage::Tab_ProcessAccelerator(int tab, const MSG& msg) {
 // Misc.
 void Interface2IPCMessage::Tab_OnHostMoved(int tab) {
   sender_->Send(new AutomationMsg_BrowserMove(tab));
-}
-
-void Interface2IPCMessage::Tab_SetEnableExtensionAutomation(int tab,
-    const std::vector<std::string>& functions_enabled) {
-  sender_->Send(new AutomationMsg_SetEnableExtensionAutomation(tab,
-                functions_enabled));
 }
 
 void DelegateHolder::AddDelegate(ChromeProxyDelegate* p) {

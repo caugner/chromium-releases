@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Implementation of Pipeline.
+// Implementation of Pipeline & PipelineStatusNotification (an async-to-sync
+// callback adapter).
 
 #ifndef MEDIA_BASE_PIPELINE_IMPL_H_
 #define MEDIA_BASE_PIPELINE_IMPL_H_
@@ -12,9 +13,11 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
+#include "base/synchronization/condition_variable.h"
+#include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
 #include "base/time.h"
 #include "media/base/clock.h"
@@ -24,6 +27,32 @@
 
 namespace media {
 
+// Adapter for using asynchronous Pipeline methods in code that wants to run
+// synchronously.  To use, construct an instance of this class and pass the
+// |Callback()| to the Pipeline method requiring a callback.  Then Wait() for
+// the callback to get fired and call status() to see what the callback's
+// argument was.  This object is for one-time use; call |Callback()| exactly
+// once.
+class PipelineStatusNotification {
+ public:
+  PipelineStatusNotification();
+  ~PipelineStatusNotification();
+
+  // See class-level comment for usage.
+  media::PipelineStatusCallback* Callback();
+  void Notify(media::PipelineStatus status);
+  void Wait();
+  media::PipelineStatus status();
+
+ private:
+  base::Lock lock_;
+  base::ConditionVariable cv_;
+  media::PipelineStatus status_;
+  bool notified_;
+  scoped_ptr<media::PipelineStatusCallback> callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(PipelineStatusNotification);
+};
 
 // PipelineImpl runs the media pipeline.  Filters are created and called on the
 // message loop injected into this object. PipelineImpl works like a state
@@ -67,22 +96,25 @@ class PipelineImpl : public Pipeline, public FilterHost {
   explicit PipelineImpl(MessageLoop* message_loop);
 
   // Pipeline implementation.
-  virtual void Init(PipelineCallback* ended_callback,
-                    PipelineCallback* error_callback,
-                    PipelineCallback* network_callback);
+  virtual void Init(PipelineStatusCallback* ended_callback,
+                    PipelineStatusCallback* error_callback,
+                    PipelineStatusCallback* network_callback);
   virtual bool Start(FilterCollection* filter_collection,
                      const std::string& uri,
-                     PipelineCallback* start_callback);
-  virtual void Stop(PipelineCallback* stop_callback);
-  virtual void Seek(base::TimeDelta time, PipelineCallback* seek_callback);
+                     PipelineStatusCallback* start_callback);
+  virtual void Stop(PipelineStatusCallback* stop_callback);
+  virtual void Seek(base::TimeDelta time,
+                    PipelineStatusCallback* seek_callback);
   virtual bool IsRunning() const;
   virtual bool IsInitialized() const;
   virtual bool IsNetworkActive() const;
-  virtual bool IsRendered(const std::string& major_mime_type) const;
+  virtual bool HasAudio() const;
+  virtual bool HasVideo() const;
   virtual float GetPlaybackRate() const;
   virtual void SetPlaybackRate(float playback_rate);
   virtual float GetVolume() const;
   virtual void SetVolume(float volume);
+  virtual void SetPreload(Preload preload);
   virtual base::TimeDelta GetCurrentTime() const;
   virtual base::TimeDelta GetBufferedTime();
   virtual base::TimeDelta GetMediaDuration() const;
@@ -91,7 +123,6 @@ class PipelineImpl : public Pipeline, public FilterHost {
   virtual void GetVideoSize(size_t* width_out, size_t* height_out) const;
   virtual bool IsStreaming() const;
   virtual bool IsLoaded() const;
-  virtual PipelineError GetError() const;
   virtual PipelineStatistics GetStatistics() const;
 
   void SetClockForTesting(Clock* clock);
@@ -100,7 +131,6 @@ class PipelineImpl : public Pipeline, public FilterHost {
   // Pipeline states, as described above.
   enum State {
     kCreated,
-    kInitDataSource,
     kInitDemuxer,
     kInitAudioDecoder,
     kInitAudioRenderer,
@@ -155,7 +185,7 @@ class PipelineImpl : public Pipeline, public FilterHost {
   State FindNextState(State current);
 
   // FilterHost implementation.
-  virtual void SetError(PipelineError error);
+  virtual void SetError(PipelineStatus error);
   virtual base::TimeDelta GetTime() const;
   virtual base::TimeDelta GetDuration() const;
   virtual void SetTime(base::TimeDelta time);
@@ -171,13 +201,6 @@ class PipelineImpl : public Pipeline, public FilterHost {
   virtual void DisableAudioRenderer();
   virtual void SetCurrentReadPosition(int64 offset);
   virtual int64 GetCurrentReadPosition();
-
-  // Method called during initialization to insert a mime type into the
-  // |rendered_mime_types_| set.
-  void InsertRenderedMimeType(const std::string& major_mime_type);
-
-  // Method called during initialization to determine if we rendered anything.
-  bool HasRenderedMimeTypes() const;
 
   // Callback executed by filters upon completing initialization.
   void OnFilterInitialize();
@@ -197,7 +220,7 @@ class PipelineImpl : public Pipeline, public FilterHost {
   // message loop.
   void StartTask(FilterCollection* filter_collection,
                  const std::string& url,
-                 PipelineCallback* start_callback);
+                 PipelineStatusCallback* start_callback);
 
   // InitializeTask() performs initialization in multiple passes. It is executed
   // as a result of calling Start() or InitializationComplete() that advances
@@ -206,11 +229,11 @@ class PipelineImpl : public Pipeline, public FilterHost {
   void InitializeTask();
 
   // Stops and destroys all filters, placing the pipeline in the kStopped state.
-  void StopTask(PipelineCallback* stop_callback);
+  void StopTask(PipelineStatusCallback* stop_callback);
 
   // Carries out stopping and destroying all filters, placing the pipeline in
   // the kError state.
-  void ErrorChangedTask(PipelineError error);
+  void ErrorChangedTask(PipelineStatus error);
 
   // Carries out notifying filters that the playback rate has changed.
   void PlaybackRateChangedTask(float playback_rate);
@@ -218,8 +241,14 @@ class PipelineImpl : public Pipeline, public FilterHost {
   // Carries out notifying filters that the volume has changed.
   void VolumeChangedTask(float volume);
 
+  // Returns media preload value.
+  virtual Preload GetPreload() const;
+
+  // Carries out notifying filters that the preload value has changed.
+  void PreloadChangedTask(Preload preload);
+
   // Carries out notifying filters that we are seeking to a new timestamp.
-  void SeekTask(base::TimeDelta time, PipelineCallback* seek_callback);
+  void SeekTask(base::TimeDelta time, PipelineStatusCallback* seek_callback);
 
   // Carries out handling a notification from a filter that it has ended.
   void NotifyEndedTask();
@@ -251,8 +280,8 @@ class PipelineImpl : public Pipeline, public FilterHost {
 
   // The following initialize methods are used to select a specific type of
   // Filter object from FilterCollection and initialize it asynchronously.
-  void InitializeDataSource();
-  void InitializeDemuxer(const scoped_refptr<DataSource>& data_source);
+  void InitializeDemuxer();
+  void OnDemuxerBuilt(PipelineStatus status, Demuxer* demuxer);
 
   // Returns true if the asynchronous action of creating decoder has started.
   // Returns false if this method did nothing because the corresponding
@@ -266,11 +295,6 @@ class PipelineImpl : public Pipeline, public FilterHost {
   // stream does not exist.
   bool InitializeAudioRenderer(const scoped_refptr<AudioDecoder>& decoder);
   bool InitializeVideoRenderer(const scoped_refptr<VideoDecoder>& decoder);
-
-  // Helper to find the demuxer of |major_mime_type| from Demuxer.
-  scoped_refptr<DemuxerStream> FindDemuxerStream(
-      const scoped_refptr<Demuxer>& demuxer,
-      std::string major_mime_type);
 
   // Kicks off destroying filters. Called by StopTask() and ErrorChangedTask().
   // When we start to tear down the pipeline, we will consider two cases:
@@ -306,6 +330,9 @@ class PipelineImpl : public Pipeline, public FilterHost {
   // Whether or not an error triggered the teardown.
   bool error_caused_teardown_;
 
+  // Whether or not a playback rate change should be done once seeking is done.
+  bool playback_rate_change_pending_;
+
   // Duration of the media in microseconds.  Set by filters.
   base::TimeDelta duration_;
 
@@ -338,10 +365,18 @@ class PipelineImpl : public Pipeline, public FilterHost {
   // filters.
   float volume_;
 
+  // Current value of preload attribute. This value is set immediately via
+  // SetPreload() and a task is dispatched on the message loop to notify the
+  // filters.
+  Preload preload_;
+
   // Current playback rate (>= 0.0f).  This value is set immediately via
   // SetPlaybackRate() and a task is dispatched on the message loop to notify
   // the filters.
   float playback_rate_;
+
+  // Playback rate to set when the current seek has finished.
+  float pending_playback_rate_;
 
   // Reference clock.  Keeps track of current playback time.  Uses system
   // clock and linear interpolation, but can have its time manually set
@@ -357,11 +392,11 @@ class PipelineImpl : public Pipeline, public FilterHost {
   // the pipeline is operating correctly. Any other value indicates that the
   // pipeline is stopped or is stopping.  Clients can call the Stop() method to
   // reset the pipeline state, and restore this to PIPELINE_OK.
-  PipelineError error_;
+  PipelineStatus status_;
 
-  // Vector of major mime types that have been rendered by this pipeline.
-  typedef std::set<std::string> RenderedMimeTypesSet;
-  RenderedMimeTypesSet rendered_mime_types_;
+  // Whether the media contains rendered audio and video streams.
+  bool has_audio_;
+  bool has_video_;
 
   // The following data members are only accessed by tasks posted to
   // |message_loop_|.
@@ -392,11 +427,11 @@ class PipelineImpl : public Pipeline, public FilterHost {
   std::string url_;
 
   // Callbacks for various pipeline operations.
-  scoped_ptr<PipelineCallback> seek_callback_;
-  scoped_ptr<PipelineCallback> stop_callback_;
-  scoped_ptr<PipelineCallback> ended_callback_;
-  scoped_ptr<PipelineCallback> error_callback_;
-  scoped_ptr<PipelineCallback> network_callback_;
+  scoped_ptr<PipelineStatusCallback> seek_callback_;
+  scoped_ptr<PipelineStatusCallback> stop_callback_;
+  scoped_ptr<PipelineStatusCallback> ended_callback_;
+  scoped_ptr<PipelineStatusCallback> error_callback_;
+  scoped_ptr<PipelineStatusCallback> network_callback_;
 
   // Reference to the filter(s) that constitute the pipeline.
   scoped_refptr<Filter> pipeline_filter_;
@@ -405,6 +440,9 @@ class PipelineImpl : public Pipeline, public FilterHost {
   // when playback has finished.
   scoped_refptr<AudioRenderer> audio_renderer_;
   scoped_refptr<VideoRenderer> video_renderer_;
+
+  // Demuxer reference used for setting the preload value.
+  scoped_refptr<Demuxer> demuxer_;
 
   // Helper class that stores filter references during pipeline
   // initialization.

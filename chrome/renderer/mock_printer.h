@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,14 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "printing/image.h"
+#include "ui/gfx/size.h"
 
-struct ViewMsg_Print_Params;
-struct ViewMsg_PrintPages_Params;
-struct ViewHostMsg_DidPrintPage_Params;
+struct PrintMsg_Print_Params;
+struct PrintMsg_PrintPages_Params;
+struct PrintHostMsg_DidPrintPage_Params;
 
 // A class which represents an output page used in the MockPrinter class.
 // The MockPrinter class stores output pages in a vector, so, this class
@@ -66,16 +67,16 @@ class MockPrinter {
 
   // Functions that changes settings of a pseudo printer.
   void ResetPrinter();
-  void SetDefaultPrintSettings(const ViewMsg_Print_Params& params);
+  void SetDefaultPrintSettings(const PrintMsg_Print_Params& params);
 
   // Functions that handles IPC events.
-  void GetDefaultPrintSettings(ViewMsg_Print_Params* params);
+  void GetDefaultPrintSettings(PrintMsg_Print_Params* params);
   void ScriptedPrint(int cookie,
                      int expected_pages_count,
                      bool has_selection,
-                     ViewMsg_PrintPages_Params* settings);
+                     PrintMsg_PrintPages_Params* settings);
   void SetPrintedPagesCount(int cookie, int number_pages);
-  void PrintPage(const ViewHostMsg_DidPrintPage_Params& params);
+  void PrintPage(const PrintHostMsg_DidPrintPage_Params& params);
 
   // Functions that retrieve the output pages.
   Status GetPrinterStatus() const { return printer_status_; }
@@ -99,8 +100,10 @@ class MockPrinter {
 
  private:
   // In pixels according to dpi_x and dpi_y.
-  int printable_width_;
-  int printable_height_;
+  gfx::Size page_size_;
+  gfx::Size printable_size_;
+  int margin_left_;
+  int margin_top_;
 
   // Specifies dots per inch.
   double dpi_;

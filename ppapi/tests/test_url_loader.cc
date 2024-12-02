@@ -49,6 +49,7 @@ void TestURLLoader::RunTest() {
   RUN_TEST(CustomRequestHeader);
   RUN_TEST(IgnoresBogusContentLength);
   RUN_TEST(SameOriginRestriction);
+  RUN_TEST(CrossOriginRequest);
   RUN_TEST(StreamToFile);
   RUN_TEST(AuditURLRedirect);
   RUN_TEST(AbortCalls);
@@ -62,7 +63,7 @@ std::string TestURLLoader::ReadEntireFile(pp::FileIO_Dev* file_io,
 
   for (;;) {
     int32_t rv = file_io->Read(offset, buf, sizeof(buf), callback);
-    if (rv == PP_ERROR_WOULDBLOCK)
+    if (rv == PP_OK_COMPLETIONPENDING)
       rv = callback.WaitForResult();
     if (rv < 0)
       return ReportError("FileIO::Read", rv);
@@ -82,7 +83,7 @@ std::string TestURLLoader::ReadEntireResponseBody(pp::URLLoader* loader,
 
   for (;;) {
     int32_t rv = loader->ReadResponseBody(buf, sizeof(buf), callback);
-    if (rv == PP_ERROR_WOULDBLOCK)
+    if (rv == PP_OK_COMPLETIONPENDING)
       rv = callback.WaitForResult();
     if (rv < 0)
       return ReportError("URLLoader::ReadResponseBody", rv);
@@ -101,7 +102,7 @@ std::string TestURLLoader::LoadAndCompareBody(
 
   pp::URLLoader loader(*instance_);
   int32_t rv = loader.Open(request, callback);
-  if (rv == PP_ERROR_WOULDBLOCK)
+  if (rv == PP_OK_COMPLETIONPENDING)
     rv = callback.WaitForResult();
   if (rv != PP_OK)
     return ReportError("URLLoader::Open", rv);
@@ -198,7 +199,7 @@ std::string TestURLLoader::TestStreamToFile() {
 
   pp::URLLoader loader(*instance_);
   int32_t rv = loader.Open(request, callback);
-  if (rv == PP_ERROR_WOULDBLOCK)
+  if (rv == PP_OK_COMPLETIONPENDING)
     rv = callback.WaitForResult();
   if (rv != PP_OK)
     return ReportError("URLLoader::Open", rv);
@@ -215,7 +216,7 @@ std::string TestURLLoader::TestStreamToFile() {
     return "URLResponseInfo::GetBody returned null";
 
   rv = loader.FinishStreamingToFile(callback);
-  if (rv == PP_ERROR_WOULDBLOCK)
+  if (rv == PP_OK_COMPLETIONPENDING)
     rv = callback.WaitForResult();
   if (rv != PP_OK)
     return ReportError("URLLoader::FinishStreamingToFile", rv);
@@ -223,7 +224,7 @@ std::string TestURLLoader::TestStreamToFile() {
 
   pp::FileIO_Dev reader;
   rv = reader.Open(body, PP_FILEOPENFLAG_READ, callback);
-  if (rv == PP_ERROR_WOULDBLOCK)
+  if (rv == PP_OK_COMPLETIONPENDING)
     rv = callback.WaitForResult();
   if (rv != PP_OK)
     return ReportError("FileIO::Open", rv);
@@ -255,7 +256,7 @@ std::string TestURLLoader::TestSameOriginRestriction() {
 
   pp::URLLoader loader(*instance_);
   int32_t rv = loader.Open(request, callback);
-  if (rv == PP_ERROR_WOULDBLOCK)
+  if (rv == PP_OK_COMPLETIONPENDING)
     rv = callback.WaitForResult();
 
   // We expect a failure.
@@ -266,6 +267,26 @@ std::string TestURLLoader::TestSameOriginRestriction() {
       return ReportError("URLLoader::Open()", rv);
     }
   }
+
+  PASS();
+}
+
+std::string TestURLLoader::TestCrossOriginRequest() {
+  pp::URLRequestInfo request;
+  // Create a URL that will be considered to be a different origin.
+  request.SetURL("http://127.0.0.1/test_url_loader_data/hello.txt");
+  request.SetAllowCrossOriginRequests(true);
+
+  TestCompletionCallback callback(instance_->pp_instance());
+
+  pp::URLLoader loader(*instance_);
+  int32_t rv = loader.Open(request, callback);
+  if (rv == PP_ERROR_WOULDBLOCK)
+    rv = callback.WaitForResult();
+
+  // We expect success since we allowed a cross-origin request.
+  if (rv == PP_ERROR_NOACCESS)
+    return ReportError("URLLoader::Open()", rv);
 
   PASS();
 }
@@ -282,7 +303,7 @@ std::string TestURLLoader::TestAuditURLRedirect() {
 
   pp::URLLoader loader(*instance_);
   int32_t rv = loader.Open(request, callback);
-  if (rv == PP_ERROR_WOULDBLOCK)
+  if (rv == PP_OK_COMPLETIONPENDING)
     rv = callback.WaitForResult();
   if (rv != PP_OK)
     return ReportError("URLLoader::Open", rv);
@@ -314,7 +335,7 @@ std::string TestURLLoader::TestAbortCalls() {
     rv = pp::URLLoader(*instance_).Open(request, callback);
     if (callback.run_count() > 0)
       return "URLLoader::Open ran callback synchronously.";
-    if (rv == PP_ERROR_WOULDBLOCK) {
+    if (rv == PP_OK_COMPLETIONPENDING) {
       rv = callback.WaitForResult();
       if (rv != PP_ERROR_ABORTED)
         return "URLLoader::Open not aborted.";
@@ -329,7 +350,7 @@ std::string TestURLLoader::TestAbortCalls() {
     {
       pp::URLLoader loader(*instance_);
       rv = loader.Open(request, callback);
-      if (rv == PP_ERROR_WOULDBLOCK)
+      if (rv == PP_OK_COMPLETIONPENDING)
         rv = callback.WaitForResult();
       if (rv != PP_OK)
         return ReportError("URLLoader::Open", rv);
@@ -337,7 +358,7 @@ std::string TestURLLoader::TestAbortCalls() {
       callback.reset_run_count();
       rv = loader.ReadResponseBody(buf, sizeof(buf), callback);
     }  // Destroy |loader|.
-    if (rv == PP_ERROR_WOULDBLOCK) {
+    if (rv == PP_OK_COMPLETIONPENDING) {
       // Save a copy and make sure |buf| doesn't get written to.
       char buf_copy[2];
       memcpy(&buf_copy, &buf, sizeof(buf));

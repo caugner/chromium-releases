@@ -4,10 +4,10 @@
 
 #include "chrome/renderer/autofill/password_autofill_manager.h"
 
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/scoped_ptr.h"
 #include "chrome/common/autofill_messages.h"
-#include "chrome/renderer/render_view.h"
+#include "content/renderer/render_view.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFormElement.h"
@@ -52,7 +52,7 @@ static bool FindFormInputElements(WebKit::WebFormElement* fe,
   // form; it can't be the right one.
   for (size_t j = 0; j < data.fields.size(); j++) {
     WebKit::WebVector<WebKit::WebNode> temp_elements;
-    fe->getNamedElements(data.fields[j].name(), temp_elements);
+    fe->getNamedElements(data.fields[j].name, temp_elements);
 
     // Match the first input element, if any.
     // |getNamedElements| may return non-input elements where the names match,
@@ -73,7 +73,7 @@ static bool FindFormInputElements(WebKit::WebFormElement* fe,
         // one suffices and if some function needs to deal with multiple
         // matching elements it can get at them through the FormElement*.
         // Note: This assignment adds a reference to the InputElement.
-        result->input_elements[data.fields[j].name()] =
+        result->input_elements[data.fields[j].name] =
             temp_elements[i].to<WebKit::WebInputElement>();
         found_input = true;
       }
@@ -120,8 +120,14 @@ void FindFormElements(WebKit::WebView* view,
 
     for (size_t i = 0; i < forms.size(); ++i) {
       WebKit::WebFormElement fe = forms[i];
-      // Action URL must match.
+
       GURL full_action(f->document().completeURL(fe.action()));
+      if (full_action.is_empty()) {
+        // The default action URL is the form's origin.
+        full_action = full_origin;
+      }
+
+      // Action URL must match.
       if (data.action != full_action.ReplaceComponents(rep))
         continue;
 
@@ -137,41 +143,38 @@ void FindFormElements(WebKit::WebView* view,
   }
 }
 
-bool FillForm(FormElements* fe, const webkit_glue::FormData& data) {
+bool IsElementEditable(const WebKit::WebInputElement& element) {
+  return element.isEnabled() && !element.isReadOnly();
+}
+
+void FillForm(FormElements* fe, const webkit_glue::FormData& data) {
   if (!fe->form_element.autoComplete())
-    return false;
+    return;
 
   std::map<string16, string16> data_map;
   for (size_t i = 0; i < data.fields.size(); i++)
-    data_map[data.fields[i].name()] = data.fields[i].value();
+    data_map[data.fields[i].name] = data.fields[i].value;
 
   for (FormInputElementMap::iterator it = fe->input_elements.begin();
        it != fe->input_elements.end(); ++it) {
     WebKit::WebInputElement element = it->second;
     // Don't fill a form that has pre-filled values.
     if (!element.value().isEmpty())
-      return false;
+      return;
   }
 
   for (FormInputElementMap::iterator it = fe->input_elements.begin();
        it != fe->input_elements.end(); ++it) {
     WebKit::WebInputElement element = it->second;
     DCHECK(element.value().isEmpty());
-    if (element.isPasswordField() &&
-        (!element.isEnabledFormControl() || element.hasAttribute("readonly"))) {
-      continue;  // Don't fill uneditable password fields.
-    }
+    if (!IsElementEditable(element))
+      continue;  // Don't fill uneditable fields.
+
     // TODO(tkent): Check maxlength and pattern.
     element.setValue(data_map[it->first]);
     element.setAutofilled(true);
     element.dispatchFormControlChangeEvent();
   }
-
-  return false;
-}
-
-bool IsElementEditable(const WebKit::WebInputElement& element) {
-  return element.isEnabledFormControl() && !element.hasAttribute("readonly");
 }
 
 void SetElementAutofilled(WebKit::WebInputElement* element, bool autofilled) {
@@ -253,9 +256,9 @@ bool PasswordAutofillManager::TextDidChangeInTextField(
   if (iter->second.fill_data.wait_for_username)
     return false;
 
-  if (!element.isEnabledFormControl() ||
+  if (!IsElementEditable(element) ||
       !element.isText() ||
-      !element.autoComplete() || element.isReadOnly()) {
+      !element.autoComplete()) {
     return false;
   }
 
@@ -297,7 +300,7 @@ bool PasswordAutofillManager::TextFieldHandlingKeyDown(
   return true;
 }
 
-bool PasswordAutofillManager::DidAcceptAutoFillSuggestion(
+bool PasswordAutofillManager::DidAcceptAutofillSuggestion(
     const WebKit::WebNode& node,
     const WebKit::WebString& value) {
   WebKit::WebInputElement input;
@@ -312,7 +315,7 @@ bool PasswordAutofillManager::DidAcceptAutoFillSuggestion(
                                  password.fill_data, true, true);
 }
 
-bool PasswordAutofillManager::DidSelectAutoFillSuggestion(
+bool PasswordAutofillManager::DidSelectAutofillSuggestion(
     const WebKit::WebNode& node) {
   WebKit::WebInputElement input;
   PasswordInfo password;
@@ -348,17 +351,17 @@ void PasswordAutofillManager::SendPasswordForms(WebKit::WebFrame* frame,
     return;
 
   if (only_visible) {
-    Send(new AutoFillHostMsg_PasswordFormsVisible(
+    Send(new AutofillHostMsg_PasswordFormsVisible(
         routing_id(), password_forms));
   } else {
-    Send(new AutoFillHostMsg_PasswordFormsFound(routing_id(), password_forms));
+    Send(new AutofillHostMsg_PasswordFormsFound(routing_id(), password_forms));
   }
 }
 
 bool PasswordAutofillManager::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PasswordAutofillManager, message)
-    IPC_MESSAGE_HANDLER(AutoFillMsg_FillPasswordForm, OnFillPasswordForm)
+    IPC_MESSAGE_HANDLER(AutofillMsg_FillPasswordForm, OnFillPasswordForm)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -409,15 +412,19 @@ void PasswordAutofillManager::OnFillPasswordForm(
     // Attach autocomplete listener to enable selecting alternate logins.
     // First, get pointers to username element.
     WebKit::WebInputElement username_element =
-        form_elements->input_elements[form_data.basic_data.fields[0].name()];
+        form_elements->input_elements[form_data.basic_data.fields[0].name];
 
     // Get pointer to password element. (We currently only support single
     // password forms).
     WebKit::WebInputElement password_element =
-        form_elements->input_elements[form_data.basic_data.fields[1].name()];
+        form_elements->input_elements[form_data.basic_data.fields[1].name];
 
-    DCHECK(login_to_password_info_.find(username_element) ==
-        login_to_password_info_.end());
+    // We might have already filled this form if there are two <form> elements
+    // with identical markup.
+    if (login_to_password_info_.find(username_element) !=
+        login_to_password_info_.end())
+      continue;
+
     PasswordInfo password_info;
     password_info.fill_data = form_data;
     password_info.password_field = password_element;
@@ -432,8 +439,8 @@ void PasswordAutofillManager::GetSuggestions(
     const webkit_glue::PasswordFormFillData& fill_data,
     const string16& input,
     std::vector<string16>* suggestions) {
-  if (StartsWith(fill_data.basic_data.fields[0].value(), input, false))
-    suggestions->push_back(fill_data.basic_data.fields[0].value());
+  if (StartsWith(fill_data.basic_data.fields[0].value, input, false))
+    suggestions->push_back(fill_data.basic_data.fields[0].value);
 
   webkit_glue::PasswordFormFillData::LoginCollection::const_iterator iter;
   for (iter = fill_data.additional_logins.begin();
@@ -460,8 +467,8 @@ bool PasswordAutofillManager::ShowSuggestionPopup(
   std::vector<string16> labels(suggestions.size());
   std::vector<string16> icons(suggestions.size());
   std::vector<int> ids(suggestions.size(), 0);
-  webview->applyAutoFillSuggestions(user_input, suggestions, labels, icons, ids,
-                                    -1);
+  webview->applyAutoFillSuggestions(
+      user_input, suggestions, labels, icons, ids, -1);
   return true;
 }
 
@@ -477,10 +484,10 @@ bool PasswordAutofillManager::FillUserNameAndPassword(
   string16 password;
 
   // Look for any suitable matches to current field text.
-  if (DoUsernamesMatch(fill_data.basic_data.fields[0].value(), current_username,
+  if (DoUsernamesMatch(fill_data.basic_data.fields[0].value, current_username,
                        exact_username_match)) {
-    username = fill_data.basic_data.fields[0].value();
-    password = fill_data.basic_data.fields[1].value();
+    username = fill_data.basic_data.fields[0].value;
+    password = fill_data.basic_data.fields[1].value;
   } else {
     // Scan additional logins for a match.
     webkit_glue::PasswordFormFillData::LoginCollection::const_iterator iter;

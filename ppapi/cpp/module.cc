@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,6 +28,7 @@
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_var.h"
 #include "ppapi/c/ppp_instance.h"
+#include "ppapi/c/ppp_messaging.h"
 #include "ppapi/cpp/common.h"
 #include "ppapi/cpp/url_loader.h"
 #include "ppapi/cpp/instance.h"
@@ -134,6 +135,20 @@ static PPP_Instance instance_interface = {
   &Instance_GetInstanceObject
 };
 
+void Messaging_HandleMessage(PP_Instance pp_instance, PP_Var var) {
+  Module* module_singleton = Module::Get();
+  if (!module_singleton)
+    return;
+  Instance* instance = module_singleton->InstanceForPPInstance(pp_instance);
+  if (!instance)
+    return;
+  instance->HandleMessage(Var(Var::PassRef(), var));
+}
+
+static PPP_Messaging instance_messaging_interface = {
+  &Messaging_HandleMessage
+};
+
 // Module ----------------------------------------------------------------------
 
 Module::Module() : pp_module_(0), get_browser_interface_(NULL), core_(NULL) {
@@ -151,6 +166,9 @@ bool Module::Init() {
 const void* Module::GetPluginInterface(const char* interface_name) {
   if (strcmp(interface_name, PPP_INSTANCE_INTERFACE) == 0)
     return &instance_interface;
+
+  if (strcmp(interface_name, PPP_MESSAGING_INTERFACE) == 0)
+    return &instance_messaging_interface;
 
   // Now see if anything was dynamically registered.
   InterfaceMap::const_iterator found = additional_interfaces_.find(

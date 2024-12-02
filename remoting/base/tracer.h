@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,11 +53,11 @@
 
 #include <string>
 
-#include "base/ref_counted.h"
-#include "base/singleton.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/singleton.h"
 #include "base/synchronization/lock.h"
 #include "base/task.h"
-#include "base/scoped_ptr.h"
 #include "remoting/proto/trace.pb.h"
 
 namespace remoting {
@@ -115,7 +115,7 @@ class TraceContext {
   DISALLOW_COPY_AND_ASSIGN(TraceContext);
 };
 
-// Used to create a new tracer that NewRunnableMethod can propogate from.
+// Used to create a new tracer that NewRunnableMethod can propagate from.
 //
 // Declare this at the logical start of a "trace."  Calls to NewTracedMethod
 // that are done with the ScopedTracer object is alive will take a reference

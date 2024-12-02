@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,19 +15,19 @@
 #include <map>
 #include <string>
 
-#include "base/scoped_ptr.h"
-#include "base/scoped_comptr_win.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/threading/thread.h"
+#include "base/win/scoped_comptr.h"
 
 #include "chrome_frame/chrome_frame_activex_base.h"
 #include "chrome_frame/com_type_info_holder.h"
+#include "chrome_frame/extra_system_apis.h"
 #include "chrome_frame/find_dialog.h"
 #include "chrome_frame/html_private_window_impl.h"
 #include "chrome_frame/html_window_impl.h"
 #include "chrome_frame/in_place_menu.h"
 #include "chrome_frame/ole_document_impl.h"
 #include "chrome_frame/resource.h"
-#include "chrome_frame/extra_system_apis.h"
 #include "chrome_frame/utils.h"
 
 class Thread;
@@ -365,6 +365,7 @@ END_EXEC_COMMAND_MAP()
       const GURL& url_to_open, const GURL& referrer, int open_disposition);
   virtual void OnAttachExternalTab(const AttachExternalTabParams& params);
   virtual void OnGoToHistoryEntryOffset(int offset);
+  virtual void OnMoveWindow(const gfx::Rect& dimensions);
 
   // A helper method that updates our internal navigation state
   // as well as IE's navigation state (viz Title and current URL).
@@ -436,10 +437,6 @@ END_EXEC_COMMAND_MAP()
   LRESULT OnSetFocus(UINT message, WPARAM wparam, LPARAM lparam,
                      BOOL& handled);
 
-  // Sets the dimensions on the IE window. These dimensions are parsed out from
-  // the information passed in from Chrome during window.open.
-  void SetWindowDimensions();
-
   // Returns true if the NavigationInfo object passed in represents a new
   // navigation initiated by the renderer.
   bool IsNewNavigation(const NavigationInfo& new_navigation_info,
@@ -470,7 +467,7 @@ END_EXEC_COMMAND_MAP()
   // a new ChromeActiveDocument instance is taking its place.
   bool is_automation_client_reused_;
 
-  ScopedComPtr<INewWindowManager> popup_manager_;
+  base::win::ScopedComPtr<INewWindowManager> popup_manager_;
   bool popup_allowed_;
   HACCEL accelerator_table_;
 
@@ -481,8 +478,6 @@ END_EXEC_COMMAND_MAP()
   UrlmonUrlRequestManager::PrivacyInfo::PrivacyRecords::iterator
       next_privacy_record_;
 
-  // Dimensions of the window. Used only when opening popups.
-  gfx::Rect dimensions_;
  public:
   OLEINPLACEFRAMEINFO frame_info_;
 };

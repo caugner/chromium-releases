@@ -8,7 +8,7 @@
 #include <map>
 #include <utility>
 
-#include "base/linked_ptr.h"
+#include "base/memory/linked_ptr.h"
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_stdint.h"
@@ -74,11 +74,6 @@ class PluginResourceTracker {
 
   void ReleasePluginResourceRef(const PP_Resource& var,
                                 bool notify_browser_on_release);
-
-  // Sends a ReleaseResource message to the host corresponding to the given
-  // resource.
-  void SendReleaseResourceToHost(PP_Resource resource_id,
-                                 PluginResource* resource);
 
   // Map of plugin resource IDs to the information tracking that resource.
   typedef std::map<PP_Resource, ResourceInfo> ResourceMap;

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,8 @@
 #include <string>
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/shader_translator.h"
 
@@ -31,13 +31,6 @@ class ShaderManager {
    public:
     typedef scoped_refptr<ShaderInfo> Ref;
     typedef ShaderTranslator::VariableInfo VariableInfo;
-
-    explicit ShaderInfo(GLuint service_id, GLenum shader_type)
-        : use_count_(0),
-          service_id_(service_id),
-          shader_type_(shader_type),
-          valid_(false) {
-    }
 
     void Update(const char* source) {
       source_.reset(source ? new std::string(source) : NULL);
@@ -84,21 +77,13 @@ class ShaderManager {
 
     friend class base::RefCounted<ShaderInfo>;
     friend class ShaderManager;
-    ~ShaderInfo() { }
 
-    void IncUseCount() {
-      ++use_count_;
-    }
+    ShaderInfo(GLuint service_id, GLenum shader_type);
+    ~ShaderInfo();
 
-    void DecUseCount() {
-      --use_count_;
-      DCHECK_GE(use_count_, 0);
-    }
-
-    void MarkAsDeleted() {
-      DCHECK_NE(service_id_, 0u);
-      service_id_ = 0;
-    }
+    void IncUseCount();
+    void DecUseCount();
+    void MarkAsDeleted();
 
     int use_count_;
 
@@ -147,6 +132,9 @@ class ShaderManager {
   // Unmark a shader as used. If it has been deleted and is not used
   // then we free the info.
   void UnuseShader(ShaderInfo* info);
+
+  // Check if a ShaderInfo is owned by this ShaderManager.
+  bool IsOwned(ShaderInfo* info);
 
  private:
   // Info for each shader by service side shader Id.

@@ -9,9 +9,11 @@
 #include "base/command_line.h"
 #include "content/common/child_process.h"
 #include "content/common/child_process_messages.h"
+#include "content/common/child_trace_message_filter.h"
 #include "content/common/content_switches.h"
 #include "content/common/file_system/file_system_dispatcher.h"
 #include "content/common/notification_service.h"
+#include "content/common/quota_dispatcher.h"
 #include "content/common/resource_dispatcher.h"
 #include "content/common/socket_stream_dispatcher.h"
 #include "ipc/ipc_logging.h"
@@ -52,10 +54,17 @@ void ChildThread::Init() {
   resource_dispatcher_.reset(new ResourceDispatcher(this));
   socket_stream_dispatcher_.reset(new SocketStreamDispatcher());
   file_system_dispatcher_.reset(new FileSystemDispatcher());
+  quota_dispatcher_.reset(new QuotaDispatcher());
 
   sync_message_filter_ =
       new IPC::SyncMessageFilter(ChildProcess::current()->GetShutDownEvent());
   channel_->AddFilter(sync_message_filter_.get());
+
+#if !defined(NACL_WIN64)
+  // This brings in a depenency on gpu, which isn't linked in with NaCl's win64
+  // build.
+  channel_->AddFilter(new ChildTraceMessageFilter());
+#endif
 
   // When running in unit tests, there is already a NotificationService object.
   // Since only one can exist at a time per thread, check first.
@@ -119,11 +128,8 @@ IPC::Channel::Listener* ChildThread::ResolveRoute(int32 routing_id) {
 }
 
 webkit_glue::ResourceLoaderBridge* ChildThread::CreateBridge(
-    const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info,
-    int host_renderer_id,
-    int host_render_view_id) {
-  return resource_dispatcher()->
-      CreateBridge(request_info, host_renderer_id, host_render_view_id);
+    const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info) {
+  return resource_dispatcher()->CreateBridge(request_info);
 }
 
 ResourceDispatcher* ChildThread::resource_dispatcher() {
@@ -145,6 +151,8 @@ bool ChildThread::OnMessageReceived(const IPC::Message& msg) {
   if (socket_stream_dispatcher_->OnMessageReceived(msg))
     return true;
   if (file_system_dispatcher_->OnMessageReceived(msg))
+    return true;
+  if (quota_dispatcher_->OnMessageReceived(msg))
     return true;
 
   bool handled = true;

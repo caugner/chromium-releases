@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <vector>
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/ref_counted.h"
+#include "base/memory/ref_counted.h"
 #include "gpu/command_buffer/service/gl_utils.h"
 
 namespace gpu {
@@ -40,7 +40,25 @@ class TextureManager {
           max_level_set_(-1),
           texture_complete_(false),
           cube_complete_(false),
-          npot_(false) {
+          npot_(false),
+          has_been_bound_(false),
+          owned_(true) {
+    }
+
+    GLenum min_filter() const {
+      return min_filter_;
+    }
+
+    GLenum mag_filter() const {
+      return mag_filter_;
+    }
+
+    GLenum wrap_s() const {
+      return wrap_s_;
+    }
+
+    GLenum wrap_t() const {
+      return wrap_t_;
     }
 
     // True if this texture meets all the GLES2 criteria for rendering.
@@ -107,6 +125,10 @@ class TextureManager {
 
     bool IsValid() const {
       return target() && !IsDeleted();
+    }
+
+    void SetNotOwned() {
+      owned_ = false;
     }
 
    private:
@@ -216,6 +238,10 @@ class TextureManager {
 
     // Whether this texture has ever been bound.
     bool has_been_bound_;
+
+    // Whether the associated context group owns this texture and should delete
+    // it.
+    bool owned_;
 
     DISALLOW_COPY_AND_ASSIGN(TextureInfo);
   };

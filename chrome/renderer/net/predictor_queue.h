@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,7 +28,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 
 class DnsQueue {
  public:
@@ -48,11 +48,7 @@ class DnsQueue {
   ~DnsQueue(void);
 
   size_t Size() const { return size_; }
-  void Clear() {
-    size_ = 0;
-    readable_ = writeable_;
-    Validate();
-  }
+  void Clear();
 
   // Push takes an unterminated string of the given length
   // and inserts it into the queue for later

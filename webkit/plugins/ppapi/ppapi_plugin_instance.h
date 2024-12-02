@@ -11,9 +11,10 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
+#include "googleurl/src/gurl.h"
 #include "ppapi/c/dev/pp_cursor_type_dev.h"
 #include "ppapi/c/dev/ppp_graphics_3d_dev.h"
 #include "ppapi/c/dev/ppp_printing_dev.h"
@@ -27,11 +28,15 @@
 typedef struct NPObject NPObject;
 struct PP_Var;
 struct PPB_Instance;
+struct PPB_Instance_Private;
 struct PPB_Find_Dev;
 struct PPB_Fullscreen_Dev;
+struct PPB_Messaging;
 struct PPB_Zoom_Dev;
 struct PPP_Find_Dev;
 struct PPP_Instance;
+struct PPP_Instance_Private;
+struct PPP_Messaging;
 struct PPP_Pdf;
 struct PPP_Selection_Dev;
 struct PPP_Zoom_Dev;
@@ -53,6 +58,7 @@ namespace webkit {
 namespace ppapi {
 
 class FullscreenContainer;
+class MessageChannel;
 class ObjectVar;
 class PluginDelegate;
 class PluginModule;
@@ -61,6 +67,7 @@ class PPB_Graphics2D_Impl;
 class PPB_ImageData_Impl;
 class PPB_Surface3D_Impl;
 class PPB_URLLoader_Impl;
+class PPB_URLRequestInfo_Impl;
 class Resource;
 
 // Represents one time a plugin appears on one web page.
@@ -72,18 +79,23 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
   PluginInstance(PluginDelegate* delegate,
                  PluginModule* module,
                  const PPP_Instance* instance_interface);
+
+  // Delete should be called by the WebPlugin before this destructor.
   ~PluginInstance();
 
   static const PPB_Instance* GetInterface();
+  static const PPB_Instance_Private* GetPrivateInterface();
 
   // Returns a pointer to the interface implementing PPB_Find that is
   // exposed to the plugin.
   static const PPB_Find_Dev* GetFindInterface();
   static const PPB_Fullscreen_Dev* GetFullscreenInterface();
+  static const PPB_Messaging* GetMessagingInterface();
   static const PPB_Zoom_Dev* GetZoomInterface();
 
   PluginDelegate* delegate() const { return delegate_; }
   PluginModule* module() const { return module_.get(); }
+  MessageChannel& message_channel() { return *message_channel_; }
 
   WebKit::WebPluginContainer* container() const { return container_; }
 
@@ -97,6 +109,12 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
   // Returns the PP_Instance uniquely identifying this instance. Guaranteed
   // nonzero.
   PP_Instance pp_instance() const { return pp_instance_; }
+
+  // Does some pre-destructor cleanup on the instance. This is necessary
+  // because some cleanup depends on the plugin instance still existing (like
+  // calling the plugin's DidDestroy function). This function is called from
+  // the WebPlugin implementation when WebKit is about to remove the plugin.
+  void Delete();
 
   // Paints the current backing store to the web page.
   void Paint(WebKit::WebCanvas* canvas,
@@ -125,19 +143,24 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
   // Called when the out-of-process plugin implementing this instance crashed.
   void InstanceCrashed();
 
-  // PPB_Instance implementation.
+  // PPB_Instance and PPB_Instance_Private implementation.
   PP_Var GetWindowObject();
   PP_Var GetOwnerElementObject();
   bool BindGraphics(PP_Resource graphics_id);
+  const GURL& plugin_url() const { return plugin_url_; }
   bool full_frame() const { return full_frame_; }
-  bool SetCursor(PP_CursorType_Dev type);
+  // If |type| is not PP_CURSORTYPE_CUSTOM, |custom_image| and |hot_spot| are
+  // ignored.
+  bool SetCursor(PP_CursorType_Dev type,
+                 PP_Resource custom_image,
+                 const PP_Point* hot_spot);
   PP_Var ExecuteScript(PP_Var script, PP_Var* exception);
 
-  // PPP_Instance pass-through.
-  void Delete();
+  // PPP_Instance and PPP_Instance_Private pass-through.
   bool Initialize(WebKit::WebPluginContainer* container,
                   const std::vector<std::string>& arg_names,
                   const std::vector<std::string>& arg_values,
+                  const GURL& plugin_url,
                   bool full_frame);
   bool HandleDocumentLoad(PPB_URLLoader_Impl* loader);
   bool HandleInputEvent(const WebKit::WebInputEvent& event,
@@ -208,7 +231,13 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
   void SetFullscreen(bool fullscreen, bool delay_report);
 
   // Implementation of PPB_Flash.
-  bool NavigateToURL(const char* url, const char* target);
+  int32_t Navigate(PPB_URLRequestInfo_Impl* request,
+                   const char* target,
+                   bool from_user_action);
+
+  // Implementation of PPB_Messaging and PPP_Messaging.
+  void PostMessage(PP_Var message);
+  void HandleMessage(PP_Var message);
 
   PluginDelegate::PlatformContext3D* CreateContext3D();
 
@@ -228,10 +257,16 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
   // embedded in a page).
   bool IsFullPagePlugin() const;
 
+  FullscreenContainer* fullscreen_container() const {
+    return fullscreen_container_;
+  }
+
  private:
   bool LoadFindInterface();
+  bool LoadMessagingInterface();
   bool LoadPdfInterface();
   bool LoadSelectionInterface();
+  bool LoadPrivateInterface();
   bool LoadZoomInterface();
 
   // Determines if we think the plugin has focus, both content area and webkit
@@ -267,6 +302,11 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
   // Returns NULL if bound graphics is not a 3D surface.
   PPB_Surface3D_Impl* bound_graphics_3d() const;
 
+  // Sets the id of the texture that the plugin draws to. The id is in the
+  // compositor space so it can use it to composite with rest of the page.
+  // A value of zero indicates the plugin is not backed by a texture.
+  void setBackingTextureId(unsigned int id);
+
   // Internal helper function for PrintPage().
   bool PrintPageHelper(PP_PrintPageNumberRange_Dev* page_ranges,
                        int num_ranges,
@@ -280,6 +320,9 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
 
   // NULL until we have been initialized.
   WebKit::WebPluginContainer* container_;
+
+  // Plugin URL.
+  GURL plugin_url_;
 
   // Indicates whether this is a full frame instance, which means it represents
   // an entire document rather than an embed tag.
@@ -310,9 +353,15 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
 
   // The plugin-provided interfaces.
   const PPP_Find_Dev* plugin_find_interface_;
+  const PPP_Messaging* plugin_messaging_interface_;
   const PPP_Pdf* plugin_pdf_interface_;
+  const PPP_Instance_Private* plugin_private_interface_;
   const PPP_Selection_Dev* plugin_selection_interface_;
   const PPP_Zoom_Dev* plugin_zoom_interface_;
+
+  // A flag to indicate whether we have asked this plugin instance for its
+  // messaging interface, so that we can ask only once.
+  bool checked_for_plugin_messaging_interface_;
 
   // This is only valid between a successful PrintBegin call and a PrintEnd
   // call.
@@ -357,6 +406,13 @@ class PluginInstance : public base::RefCounted<PluginInstance> {
 
   // True if we are in fullscreen mode. Note: it is false during the transition.
   bool fullscreen_;
+
+  // The MessageChannel used to implement bidirectional postMessage for the
+  // instance.
+  scoped_ptr<MessageChannel> message_channel_;
+
+  // Bitmap for crashed plugin. Lazily initialized, non-owning pointer.
+  SkBitmap* sad_plugin_;
 
   typedef std::set<PluginObject*> PluginObjectSet;
   PluginObjectSet live_plugin_objects_;

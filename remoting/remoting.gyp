@@ -105,26 +105,16 @@
         '../media/base/yuv_convert.h',
         '../media/base/yuv_row.h',
         '../media/base/yuv_row_table.cc',
+        '../media/base/yuv_row_win.cc',
+        '../media/base/yuv_row_posix.cc',
       ],
-      'conditions': [
-        ['OS=="win"', {
-          'sources': [
-            '../media/base/yuv_row_win.cc',
-          ],
-        }],
-        ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="mac"', {
-          'sources': [
-            '../media/base/yuv_row_posix.cc',
-          ],
-        }],
-      ],  # end of 'conditions'
     },  # end of target 'chromoting_plugin'
 
     {
       'target_name': 'chromoting_base',
       'type': '<(library)',
       'dependencies': [
-        '../ui/gfx/gfx.gyp:gfx',
+        '../ui/ui.gyp:ui_gfx',
         '../media/media.gyp:media',
         '../third_party/protobuf/protobuf.gyp:protobuf_lite',
         '../third_party/libvpx/libvpx.gyp:libvpx_include',
@@ -169,6 +159,10 @@
         'base/encoder_vp8.h',
         'base/encoder_row_based.cc',
         'base/encoder_row_based.h',
+        'base/rate_counter.cc',
+        'base/rate_counter.h',
+        'base/running_average.cc',
+        'base/running_avarage.h',
         'base/tracer.cc',
         'base/tracer.h',
         'base/types.h',
@@ -195,57 +189,62 @@
         'chromoting_jingle_glue',
         'chromoting_protocol',
         'differ_block',
+        '../crypto/crypto.gyp:crypto',
       ],
       'sources': [
         'host/access_verifier.cc',
         'host/access_verifier.h',
-        'host/capturer.cc',
         'host/capturer.h',
+        'host/capturer_helper.cc',
+        'host/capturer_helper.h',
         'host/capturer_fake.cc',
         'host/capturer_fake.h',
+        'host/capturer_linux.cc',
+        'host/capturer_mac.cc',
+        'host/capturer_win.cc',
         'host/chromoting_host.cc',
         'host/chromoting_host.h',
         'host/chromoting_host_context.cc',
         'host/chromoting_host_context.h',
+        'host/client_session.cc',
+        'host/client_session.h',
+        'host/curtain.h',
+        'host/curtain_linux.cc',
+        'host/curtain_mac.cc',
+        'host/curtain_win.cc',
         'host/desktop_environment.cc',
         'host/desktop_environment.h',
         'host/differ.h',
         'host/differ.cc',
-        'host/screen_recorder.cc',
-        'host/screen_recorder.h',
+        'host/event_executor.h',
+        'host/event_executor_linux.cc',
+        'host/event_executor_mac.cc',
+        'host/event_executor_win.cc',
         'host/heartbeat_sender.cc',
         'host/heartbeat_sender.h',
         'host/host_config.cc',
         'host/host_config.h',
         'host/host_key_pair.cc',
         'host/host_key_pair.h',
-        'host/json_host_config.cc',
-        'host/json_host_config.h',
         'host/in_memory_host_config.cc',
         'host/in_memory_host_config.h',
+        'host/json_host_config.cc',
+        'host/json_host_config.h',
+        'host/screen_recorder.cc',
+        'host/screen_recorder.h',
         'host/user_authenticator.h',
+        'host/user_authenticator_linux.cc',
+        'host/user_authenticator_mac.cc',
+        'host/user_authenticator_win.cc',
       ],
       'conditions': [
-        ['OS=="win"', {
-          'sources': [
-            'host/capturer_gdi.cc',
-            'host/capturer_gdi.h',
-            'host/event_executor_win.cc',
-            'host/event_executor_win.h',
-            'host/user_authenticator_fake.cc',
-            'host/user_authenticator_fake.h',
-            'host/user_authenticator_win.cc',
-          ],
-        }],
         ['OS=="linux"', {
+          'dependencies': [
+            '../build/linux/system.gyp:gtk',
+          ],
           'sources': [
-            'host/capturer_linux.cc',
-            'host/capturer_linux.h',
-            'host/event_executor_linux.cc',
-            'host/event_executor_linux.h',
-            'host/user_authenticator_pam.cc',
-            'host/user_authenticator_pam.h',
-            'host/user_authenticator_linux.cc'
+            'host/x_server_pixel_buffer.cc',
+            'host/x_server_pixel_buffer.h',
           ],
           'link_settings': {
             'libraries': [
@@ -253,18 +252,11 @@
               '-lXdamage',
               '-lXtst',
               '-lpam',
+              '-lXext'
             ],
           },
         }],
         ['OS=="mac"', {
-          'sources': [
-            'host/capturer_mac.cc',
-            'host/capturer_mac.h',
-            'host/event_executor_mac.cc',
-            'host/event_executor_mac.h',
-            'host/user_authenticator_mac.cc',
-            'host/user_authenticator_mac.h',
-          ],
           'link_settings': {
             'libraries': [
               '$(SDKROOT)/System/Library/Frameworks/OpenGL.framework',
@@ -285,6 +277,8 @@
       'sources': [
         'client/chromoting_client.cc',
         'client/chromoting_client.h',
+        'client/chromoting_stats.cc',
+        'client/chromoting_stats.h',
         'client/chromoting_view.cc',
         'client/chromoting_view.h',
         'client/client_config.h',
@@ -326,6 +320,7 @@
         'chromoting_base',
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
+        '../crypto/crypto.gyp:crypto',
       ],
       'sources': [
         'host/keygen_main.cc',
@@ -336,6 +331,7 @@
       'target_name': 'chromoting_jingle_glue',
       'type': '<(library)',
       'dependencies': [
+        '../jingle/jingle.gyp:jingle_glue',
         '../jingle/jingle.gyp:notifier',
         '../third_party/libjingle/libjingle.gyp:libjingle',
         '../third_party/libjingle/libjingle.gyp:libjingle_p2p',
@@ -346,8 +342,6 @@
         '../third_party/libjingle/libjingle.gyp:libjingle_p2p',
       ],
       'sources': [
-        'jingle_glue/channel_socket_adapter.cc',
-        'jingle_glue/channel_socket_adapter.h',
         'jingle_glue/http_port_allocator.cc',
         'jingle_glue/http_port_allocator.h',
         'jingle_glue/iq_request.cc',
@@ -356,14 +350,10 @@
         'jingle_glue/jingle_client.h',
         'jingle_glue/jingle_thread.cc',
         'jingle_glue/jingle_thread.h',
-        'jingle_glue/stream_socket_adapter.cc',
-        'jingle_glue/stream_socket_adapter.h',
         'jingle_glue/ssl_adapter.h',
         'jingle_glue/ssl_adapter.cc',
         'jingle_glue/ssl_socket_adapter.cc',
         'jingle_glue/ssl_socket_adapter.h',
-        'jingle_glue/utils.cc',
-        'jingle_glue/utils.h',
         'jingle_glue/xmpp_proxy.h',
         'jingle_glue/xmpp_socket_adapter.cc',
         'jingle_glue/xmpp_socket_adapter.h',
@@ -376,6 +366,8 @@
       'dependencies': [
         'chromoting_base',
         'chromoting_jingle_glue',
+        '../crypto/crypto.gyp:crypto',
+        '../jingle/jingle.gyp:jingle_glue',
       ],
       'export_dependent_settings': [
         'chromoting_jingle_glue',
@@ -387,7 +379,6 @@
         'protocol/client_control_Sender.h',
         'protocol/client_message_dispatcher.cc',
         'protocol/client_message_dispatcher.h',
-        'protocol/client_stub.cc',
         'protocol/client_stub.h',
         'protocol/connection_to_client.cc',
         'protocol/connection_to_client.h',
@@ -397,11 +388,9 @@
         'protocol/host_control_sender.h',
         'protocol/host_message_dispatcher.cc',
         'protocol/host_message_dispatcher.h',
-        'protocol/host_stub.cc',
         'protocol/host_stub.h',
         'protocol/input_sender.cc',
         'protocol/input_sender.h',
-        'protocol/input_stub.cc',
         'protocol/input_stub.h',
         'protocol/jingle_session.cc',
         'protocol/jingle_session.h',
@@ -512,7 +501,7 @@
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:test_support_base',
-        '../ui/gfx/gfx.gyp:gfx',
+        '../ui/ui.gyp:ui_gfx',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
       ],
@@ -533,10 +522,12 @@
         'base/base_mock_objects.h',
 # BUG57351        'client/chromoting_view_unittest.cc',
         'host/access_verifier_unittest.cc',
+        'host/capturer_linux_unittest.cc',
+        'host/capturer_mac_unittest.cc',
+        'host/capturer_win_unittest.cc',
         'host/chromoting_host_context_unittest.cc',
         'host/chromoting_host_unittest.cc',
-        'host/desktop_environment_fake.cc',
-        'host/desktop_environment_fake.h',
+        'host/client_session_unittest.cc',
         'host/differ_block_unittest.cc',
         'host/differ_unittest.cc',
         'host/heartbeat_sender_unittest.cc',
@@ -546,13 +537,9 @@
         'host/json_host_config_unittest.cc',
         'host/screen_recorder_unittest.cc',
         'host/test_key_pair.h',
-        'jingle_glue/channel_socket_adapter_unittest.cc',
         'jingle_glue/iq_request_unittest.cc',
         'jingle_glue/jingle_client_unittest.cc',
-        'jingle_glue/jingle_glue_mock_objects.cc',
-        'jingle_glue/jingle_glue_mock_objects.h',
         'jingle_glue/jingle_thread_unittest.cc',
-        'jingle_glue/stream_socket_adapter_unittest.cc',
         'protocol/connection_to_client_unittest.cc',
         'protocol/fake_session.cc',
         'protocol/fake_session.h',
@@ -568,21 +555,14 @@
         'run_all_unittests.cc',
       ],
       'conditions': [
-        ['OS=="win"', {
-          'sources': [
-            'host/capturer_gdi_unittest.cc',
-          ],
-        }],
         ['OS=="linux"', {
           'dependencies': [
+            '../app/app.gyp:app_base',
             # Needed for the following #include chain:
             #   base/run_all_unittests.cc
             #   ../base/test_suite.h
             #   gtk/gtk.h
             '../build/linux/system.gyp:gtk',
-          ],
-          'sources': [
-            'host/capturer_linux_unittest.cc',
           ],
           'conditions': [
             [ 'linux_use_tcmalloc==1', {
@@ -591,11 +571,6 @@
                 ],
               },
             ],
-          ],
-        }],
-        ['OS=="mac"', {
-          'sources': [
-            'host/capturer_mac_unittest.cc',
           ],
         }],
         ['target_arch=="arm"', {

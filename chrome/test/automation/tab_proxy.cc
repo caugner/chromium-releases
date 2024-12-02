@@ -11,9 +11,10 @@
 #include "base/threading/platform_thread.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/automation_messages.h"
-#include "chrome/common/json_value_serializer.h"
+#include "chrome/test/automation/automation_json_requests.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
+#include "content/common/json_value_serializer.h"
 #include "googleurl/src/gurl.h"
 
 TabProxy::TabProxy(AutomationMessageSender* sender,
@@ -360,15 +361,6 @@ DOMElementProxyRef TabProxy::GetDOMDocument() {
   if (!ExecuteJavaScriptAndGetReturn("document", &element_handle))
     return NULL;
   return GetObjectProxy<DOMElementProxy>(element_handle);
-}
-
-bool TabProxy::SetEnableExtensionAutomation(
-    const std::vector<std::string>& functions_enabled) {
-  if (!is_valid())
-    return false;
-
-  return sender_->Send(new AutomationMsg_SetEnableExtensionAutomation(
-      handle_, functions_enabled));
 }
 
 bool TabProxy::GetConstrainedWindowCount(int* count) const {
@@ -746,10 +738,14 @@ bool TabProxy::CaptureEntirePageAsPNG(const FilePath& path) {
   if (!is_valid())
     return false;
 
-  bool succeeded = false;
-  sender_->Send(new AutomationMsg_CaptureEntirePageAsPNG(handle_, path,
-                                                         &succeeded));
-  return succeeded;
+  int browser_index, tab_index;
+  if (!SendGetIndicesFromTabHandleJSONRequest(
+         sender_, handle_, &browser_index, &tab_index)) {
+    return false;
+  }
+
+  return SendCaptureEntirePageJSONRequest(sender_, browser_index,
+                                          tab_index, path);
 }
 
 #if defined(OS_WIN)

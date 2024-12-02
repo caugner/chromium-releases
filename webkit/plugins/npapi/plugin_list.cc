@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,10 +29,14 @@ FilePath::CharType kDefaultPluginLibraryName[] =
 // Some version ranges can be shared across operating systems. This should be
 // done where possible to avoid duplication.
 static const VersionRangeDefinition kFlashVersionRange[] = {
-    { "", "", "10.2.152", false }
+    { "", "", "10.2.153", false }
 };
 static const VersionRangeDefinition kShockwaveVersionRange[] = {
     { "",  "", "11.5.9.620", true }
+};
+static const VersionRangeDefinition kSilverlightVersionRange[] = {
+    { "0", "4", "3.0.50611.0", false },
+    { "4", "5", "", false }
 };
 
 // Similarly, try and share the group definition for plug-ins that are
@@ -46,6 +50,11 @@ static const PluginGroupDefinition kShockwaveDefinition = {
     kShockwaveVersionRange, arraysize(kShockwaveVersionRange),
     "http://www.adobe.com/shockwave/download/" };
 
+static const PluginGroupDefinition kSilverlightDefinition = {
+    "silverlight", PluginGroup::kSilverlightGroupName, "Silverlight",
+    kSilverlightVersionRange, arraysize(kSilverlightVersionRange),
+    "http://www.microsoft.com/getsilverlight/" };
+
 #if defined(OS_MACOSX)
 // Plugin Groups for Mac.
 // Plugins are listed here as soon as vulnerabilities and solutions
@@ -54,11 +63,8 @@ static const VersionRangeDefinition kQuicktimeVersionRange[] = {
     { "", "", "7.6.6", true }
 };
 static const VersionRangeDefinition kJavaVersionRange[] = {
-    { "13.0", "14.0", "13.3.0", true }  // Snow Leopard
-};
-static const VersionRangeDefinition kSilverlightVersionRange[] = {
-    { "0", "4", "3.0.50106.0", false },
-    { "4", "5", "", false }
+    { "0", "13.0", "12.8.0", true },  // Leopard
+    { "13.0", "14.0", "13.4.0", true }  // Snow Leopard
 };
 static const VersionRangeDefinition kFlip4MacVersionRange[] = {
     { "", "", "2.2.1", false }
@@ -73,9 +79,7 @@ static const PluginGroupDefinition kGroupDefinitions[] = {
   { "java-runtime-environment", PluginGroup::kJavaGroupName, "Java",
     kJavaVersionRange, arraysize(kJavaVersionRange),
     "http://support.apple.com/kb/HT1338" },
-  { "silverlight", "Silverlight", "Silverlight", kSilverlightVersionRange,
-    arraysize(kSilverlightVersionRange),
-    "http://www.microsoft.com/getsilverlight/" },
+  kSilverlightDefinition,
   { "flip4mac", "Flip4Mac", "Flip4Mac", kFlip4MacVersionRange,
     arraysize(kFlip4MacVersionRange),
     "http://www.telestream.net/flip4mac-wmv/overview.htm" },
@@ -91,14 +95,12 @@ static const VersionRangeDefinition kQuicktimeVersionRange[] = {
 static const VersionRangeDefinition kJavaVersionRange[] = {
     { "0", "7", "6.0.240", true }  // "240" is not a typo.
 };
+// This is up to date with
+// http://www.adobe.com/support/security/bulletins/apsb11-08.html
 static const VersionRangeDefinition kAdobeReaderVersionRange[] = {
     { "10", "11", "10.0.1", false },
-    { "9", "10", "9.4.2", false },
+    { "9", "10", "9.4.4", false },
     { "0", "9", "8.2.6", false }
-};
-static const VersionRangeDefinition kSilverlightVersionRange[] = {
-    { "0", "4", "3.0.50106.0", false },
-    { "4", "5", "", false }
 };
 static const VersionRangeDefinition kDivXVersionRange[] = {
     { "", "", "1.4.3.4", false }
@@ -112,21 +114,20 @@ static const PluginGroupDefinition kGroupDefinitions[] = {
     kQuicktimeVersionRange, arraysize(kQuicktimeVersionRange),
     "http://www.apple.com/quicktime/download/" },
   { "java-runtime-environment", PluginGroup::kJavaGroupName, "Java",
-    kJavaVersionRange, arraysize(kJavaVersionRange), "http://www.java.com/" },
+    kJavaVersionRange, arraysize(kJavaVersionRange),
+    "http://www.java.com/download" },
   { "adobe-reader", PluginGroup::kAdobeReaderGroupName, "Adobe Acrobat",
     kAdobeReaderVersionRange, arraysize(kAdobeReaderVersionRange),
     "http://get.adobe.com/reader/" },
-  { "silverlight", "Silverlight", "Silverlight", kSilverlightVersionRange,
-    arraysize(kSilverlightVersionRange),
-    "http://www.microsoft.com/getsilverlight/" },
+  kSilverlightDefinition,
   kShockwaveDefinition,
   { "divx-player", "DivX Player", "DivX Web Player", kDivXVersionRange,
     arraysize(kDivXVersionRange),
     "http://download.divx.com/divx/autoupdate/player/"
     "DivXWebPlayerInstaller.exe" },
-  { "realplayer", "RealPlayer", "RealPlayer",
+  { "realplayer", PluginGroup::kRealPlayerGroupName, "RealPlayer",
     kRealPlayerVersionRange, arraysize(kRealPlayerVersionRange),
-    "http://www.real.com/realplayer/downloads" },
+    "http://www.real.com/realplayer/download" },
   // These are here for grouping, no vulnerabilities known.
   { "windows-media-player", "Windows Media Player", "Windows Media Player",
     NULL, 0, "" },
@@ -210,7 +211,9 @@ void PluginList::RegisterInternalPlugin(const WebPluginInfo& info) {
   InternalPlugin plugin = { info, entry_points };
 
   base::AutoLock lock(lock_);
-  internal_plugins_.push_back(plugin);
+  // Newer registrations go earlier in the list so they can override the MIME
+  // types of older registrations.
+  internal_plugins_.insert(internal_plugins_.begin(), plugin);
 }
 
 void PluginList::RegisterInternalPlugin(const FilePath& filename,

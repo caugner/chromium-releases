@@ -4,11 +4,9 @@
 
 #include "webkit/plugins/npapi/plugin_host.h"
 
-#include "app/gfx/gl/gl_context.h"
-#include "app/gfx/gl/gl_implementation.h"
 #include "base/file_util.h"
 #include "base/logging.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
@@ -19,6 +17,8 @@
 #include "third_party/npapi/bindings/npruntime.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
+#include "ui/gfx/gl/gl_context.h"
+#include "ui/gfx/gl/gl_implementation.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/npapi/default_plugin_shared.h"
 #include "webkit/plugins/npapi/npapi_extension_thunk.h"
@@ -693,6 +693,10 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
   switch (static_cast<int>(variable)) {
     case NPNVWindowNPObject: {
       scoped_refptr<PluginInstance> plugin(FindInstance(id));
+      if (!plugin.get()) {
+        NOTREACHED();
+        return NPERR_INVALID_INSTANCE_ERROR;
+      }
       NPObject *np_object = plugin->webplugin()->GetWindowScriptNPObject();
       // Return value is expected to be retained, as
       // described here:
@@ -709,6 +713,10 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
     }
     case NPNVPluginElementNPObject: {
       scoped_refptr<PluginInstance> plugin(FindInstance(id));
+      if (!plugin.get()) {
+        NOTREACHED();
+        return NPERR_INVALID_INSTANCE_ERROR;
+      }
       NPObject *np_object = plugin->webplugin()->GetPluginElement();
       // Return value is expected to be retained, as
       // described here:
@@ -728,7 +736,7 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
       scoped_refptr<PluginInstance> plugin = FindInstance(id);
       if (!plugin.get()) {
         NOTREACHED();
-        return NPERR_GENERIC_ERROR;
+        return NPERR_INVALID_INSTANCE_ERROR;
       }
       gfx::PluginWindowHandle handle = plugin->window_handle();
       *((void**)value) = (void*)handle;
@@ -763,6 +771,10 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
     case NPNVprivateModeBool: {
       NPBool* private_mode = reinterpret_cast<NPBool*>(value);
       scoped_refptr<PluginInstance> plugin(FindInstance(id));
+      if (!plugin.get()) {
+        NOTREACHED();
+        return NPERR_INVALID_INSTANCE_ERROR;
+      }
       *private_mode = plugin->webplugin()->IsOffTheRecord();
       rv = NPERR_NO_ERROR;
       break;
@@ -778,6 +790,10 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
       // with the variable definition, in order to avoid duplicate case clauses
       // in this big switch statement.
       scoped_refptr<PluginInstance> plugin(FindInstance(id));
+      if (!plugin.get()) {
+        NOTREACHED();
+        return NPERR_INVALID_INSTANCE_ERROR;
+      }
       if (plugin->plugin_lib()->plugin_info().path.value() ==
             webkit::npapi::kDefaultPluginLibraryName) {
         plugin->webplugin()->OnMissingPluginStatus(variable -
@@ -789,6 +805,10 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
     case NPNVpluginDrawingModel: {
       // return the drawing model that was negotiated when we initialized.
       scoped_refptr<PluginInstance> plugin(FindInstance(id));
+      if (!plugin.get()) {
+        NOTREACHED();
+        return NPERR_INVALID_INSTANCE_ERROR;
+      }
       *reinterpret_cast<int*>(value) = plugin->drawing_model();
       rv = NPERR_NO_ERROR;
       break;
@@ -869,6 +889,10 @@ NPError NPN_SetValue(NPP id, NPPVariable variable, void* value) {
   // Allows the plugin to set various modes
 
   scoped_refptr<PluginInstance> plugin(FindInstance(id));
+  if (!plugin.get()) {
+    NOTREACHED();
+    return NPERR_INVALID_INSTANCE_ERROR;
+  }
   switch(variable) {
     case NPPVpluginWindowBool: {
       // Sets windowless mode for display of the plugin

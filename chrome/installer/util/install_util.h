@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -21,12 +21,6 @@
 
 class Version;
 class WorkItemList;
-
-namespace base {
-namespace win {
-class RegKey;
-}  // namespace win
-}  // namespace base
 
 // This is a utility class that provides common installation related
 // utility methods that can be used by installer and also unit tested
@@ -64,10 +58,21 @@ class InstallUtil {
                                    int string_resource_id,
                                    const std::wstring* const launch_cmd);
 
+  // Update the installer stage reported by Google Update.  |state_key_path|
+  // should be obtained via the state_key method of an InstallerState instance
+  // created before the machine state is modified by the installer.
+  static void UpdateInstallerStage(bool system_install,
+                                   const std::wstring& state_key_path,
+                                   installer::InstallerStage stage);
+
   // Returns true if this installation path is per user, otherwise returns
   // false (per machine install, meaning: the exe_path contains path to
   // Program Files).
   static bool IsPerUserInstall(const wchar_t* const exe_path);
+
+  // Returns true if the installation represented by the pair of |dist| and
+  // |system_level| is a multi install.
+  static bool IsMultiInstall(BrowserDistribution* dist, bool system_install);
 
   // Returns true if this is running setup process for Chrome SxS (as
   // indicated by the presence of --chrome-sxs on the command line) or if this
@@ -96,13 +101,52 @@ class InstallUtil {
                                        WorkItemList* registration_list);
 
   // Deletes the registry key at path key_path under the key given by root_key.
-  static bool DeleteRegistryKey(base::win::RegKey& root_key,
-                                const std::wstring& key_path);
+  static bool DeleteRegistryKey(HKEY root_key, const std::wstring& key_path);
 
   // Deletes the registry value named value_name at path key_path under the key
   // given by reg_root.
   static bool DeleteRegistryValue(HKEY reg_root, const std::wstring& key_path,
                                   const std::wstring& value_name);
+
+  // An interface to a predicate function for use by DeleteRegistryKeyIf and
+  // DeleteRegistryValueIf.
+  class RegistryValuePredicate {
+   public:
+    virtual ~RegistryValuePredicate() { }
+    virtual bool Evaluate(const std::wstring& value) const = 0;
+  };
+
+  // Deletes the key |key_to_delete_path| under |root_key| iff the value
+  // |value_name| in the key |key_to_test_path| under |root_key| satisfies
+  // |predicate|.  |value_name| must be an empty string to test the key's
+  // default value.  Returns false if the value satisfied the predicate but
+  // could not be deleted, otherwise returns true.
+  static bool DeleteRegistryKeyIf(HKEY root_key,
+                                  const std::wstring& key_to_delete_path,
+                                  const std::wstring& key_to_test_path,
+                                  const wchar_t* value_name,
+                                  const RegistryValuePredicate& predicate);
+
+  // Deletes the value |value_name| in the key |key_path| under |root_key| iff
+  // its current value satisfies |predicate|.  |value_name| must be an empty
+  // string to test the key's default value.    Returns false if the value
+  // satisfied the predicate but could not be deleted, otherwise returns true.
+  static bool DeleteRegistryValueIf(HKEY root_key,
+                                    const wchar_t* key_path,
+                                    const wchar_t* value_name,
+                                    const RegistryValuePredicate& predicate);
+
+  // A predicate that performs a case-sensitive string comparison.
+  class ValueEquals : public RegistryValuePredicate {
+   public:
+    explicit ValueEquals(const std::wstring& value_to_match)
+        : value_to_match_(value_to_match) { }
+    virtual bool Evaluate(const std::wstring& value) const OVERRIDE;
+   protected:
+    std::wstring value_to_match_;
+   private:
+    DISALLOW_COPY_AND_ASSIGN(ValueEquals);
+  };
 
   // Returns zero on install success, or an InstallStatus value otherwise.
   static int GetInstallReturnCode(installer::InstallStatus install_status);

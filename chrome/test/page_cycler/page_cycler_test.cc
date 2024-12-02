@@ -328,29 +328,13 @@ class PageCyclerReferenceTest : public PageCyclerTest {
   }
 
   void RunTest(const char* graph, const char* name, bool use_http) {
-    std::wstring pages;
-    std::string timings;
-    size_t start_size = base::GetSystemCommitCharge();
-    RunPageCycler(name, &pages, &timings, use_http);
-    if (timings.empty())
-      return;
-    size_t stop_size = base::GetSystemCommitCharge();
-
-    if (!print_times_only_) {
-      PrintMemoryUsageInfo("_ref");
-      PrintIOPerfInfo("_ref");
-      PrintSystemCommitCharge("_ref", stop_size - start_size,
-                              false /* not important */);
-    }
-
-    PrintResultList(graph, "", "t_ref", timings, "ms",
-                    true /* important */);
+    // Run the test.
+    PageCyclerTest::RunTestWithSuffix(graph, name, use_http, "_ref");
   }
 };
 
 class PageCyclerExtensionTest : public PageCyclerTest {
  public:
-  void SetUp() {}
   void RunTest(const char* graph, const char* extension_profile,
                const char* output_suffix, const char* name, bool use_http) {
     // Set up the extension profile directory.
@@ -363,8 +347,17 @@ class PageCyclerExtensionTest : public PageCyclerTest {
     set_template_user_data(data_dir);
 
     // Now run the test.
-    PageCyclerTest::SetUp();
     PageCyclerTest::RunTestWithSuffix(graph, name, use_http, output_suffix);
+  }
+};
+
+class PageCyclerExtensionWebRequestTest : public PageCyclerExtensionTest {
+ public:
+  PageCyclerExtensionWebRequestTest()
+      : PageCyclerExtensionTest()
+  {
+    // Enable experimental extension APIs for webrequest tests.
+    launch_arguments_.AppendSwitch(switches::kEnableExperimentalExtensionApis);
   }
 };
 
@@ -550,11 +543,21 @@ TEST_F(PageCyclerExtensionTest, name##10) { \
   RunTest("times", "content_scripts10", "_extcs10", test, false); \
 }
 
+// This macro lets us define tests with an extension that listens to the
+// webrequest.onBeforeRequest. It measures the effect that a blocking event
+// for every request has on page cycle time.
+#define PAGE_CYCLER_EXTENSIONS_WEBREQUEST_FILE_TESTS(test, name) \
+TEST_F(PageCyclerExtensionWebRequestTest, name) { \
+  RunTest("times", "extension_webrequest", "_extwr", test, false); \
+}
+
 // file-URL tests
 PAGE_CYCLER_FILE_TESTS("moz", MozFile);
 PAGE_CYCLER_EXTENSIONS_FILE_TESTS("moz", MozFile);
+PAGE_CYCLER_EXTENSIONS_WEBREQUEST_FILE_TESTS("moz", MozFile)
 PAGE_CYCLER_FILE_TESTS("intl1", Intl1File);
 PAGE_CYCLER_FILE_TESTS("intl2", Intl2File);
+PAGE_CYCLER_EXTENSIONS_WEBREQUEST_FILE_TESTS("intl2", Intl2File);
 PAGE_CYCLER_FILE_TESTS("dom", DomFile);
 PAGE_CYCLER_FILE_TESTS("dhtml", DhtmlFile);
 PAGE_CYCLER_FILE_TESTS("morejs", MorejsFile);

@@ -1,17 +1,17 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/browser_url_handler.h"
-#include "chrome/common/dom_storage_common.h"
-#include "chrome/common/render_messages.h"
-#include "chrome/common/render_messages_params.h"
 #include "chrome/test/testing_profile.h"
 #include "content/browser/renderer_host/test_backing_store.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/common/content_client.h"
+#include "content/common/dom_storage_common.h"
+#include "content/common/view_messages.h"
 #include "ui/gfx/rect.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
@@ -46,7 +46,8 @@ TestRenderViewHost::TestRenderViewHost(SiteInstance* instance,
                      kInvalidSessionStorageNamespaceId),
       render_view_created_(false),
       delete_counter_(NULL),
-      simulate_fetch_via_proxy_(false) {
+      simulate_fetch_via_proxy_(false),
+      contents_mime_type_("text/html") {
   // For normal RenderViewHosts, this is freed when |Shutdown()| is called.
   // For TestRenderViewHost, the view is explicitly deleted in the destructor
   // below, because TestRenderWidgetHostView::Destroy() doesn't |delete this|.
@@ -95,7 +96,7 @@ void TestRenderViewHost::SendNavigateWithTransition(
   params.password_form = PasswordForm();
   params.security_info = std::string();
   params.gesture = NavigationGestureUser;
-  params.contents_mime_type = std::string();
+  params.contents_mime_type = contents_mime_type_;
   params.is_post = false;
   params.was_within_same_page = false;
   params.http_status_code = 0;
@@ -110,6 +111,10 @@ void TestRenderViewHost::SendNavigateWithTransition(
 
 void TestRenderViewHost::set_simulate_fetch_via_proxy(bool proxy) {
   simulate_fetch_via_proxy_ = proxy;
+}
+
+void TestRenderViewHost::set_contents_mime_type(const std::string& mime_type) {
+  contents_mime_type_ = mime_type;
 }
 
 TestRenderWidgetHostView::TestRenderWidgetHostView(RenderWidgetHost* rwh)
@@ -237,7 +242,7 @@ void TestRenderWidgetHostView::ShowCompositorHostWindow(bool show) {
 }
 #endif
 
-gfx::PluginWindowHandle TestRenderWidgetHostView::AcquireCompositingSurface() {
+gfx::PluginWindowHandle TestRenderWidgetHostView::GetCompositingSurface() {
   return gfx::kNullPluginWindow;
 }
 
@@ -281,7 +286,7 @@ RenderViewHostTestHarness::~RenderViewHostTestHarness() {
 }
 
 NavigationController& RenderViewHostTestHarness::controller() {
-  return contents_->controller();
+  return contents()->controller();
 }
 
 TestTabContents* RenderViewHostTestHarness::contents() {
@@ -289,12 +294,12 @@ TestTabContents* RenderViewHostTestHarness::contents() {
 }
 
 TestRenderViewHost* RenderViewHostTestHarness::rvh() {
-  return static_cast<TestRenderViewHost*>(contents_->render_view_host());
+  return static_cast<TestRenderViewHost*>(contents()->render_view_host());
 }
 
 TestRenderViewHost* RenderViewHostTestHarness::pending_rvh() {
   return static_cast<TestRenderViewHost*>(
-      contents_->render_manager()->pending_render_view_host());
+      contents()->render_manager()->pending_render_view_host());
 }
 
 TestRenderViewHost* RenderViewHostTestHarness::active_rvh() {
@@ -312,7 +317,11 @@ MockRenderProcessHost* RenderViewHostTestHarness::process() {
 }
 
 void RenderViewHostTestHarness::DeleteContents() {
-  contents_.reset();
+  SetContents(NULL);
+}
+
+void RenderViewHostTestHarness::SetContents(TestTabContents* contents) {
+  contents_.reset(contents);
 }
 
 TestTabContents* RenderViewHostTestHarness::CreateTestTabContents() {
@@ -338,11 +347,11 @@ void RenderViewHostTestHarness::Reload() {
 }
 
 void RenderViewHostTestHarness::SetUp() {
-  contents_.reset(CreateTestTabContents());
+  SetContents(CreateTestTabContents());
 }
 
 void RenderViewHostTestHarness::TearDown() {
-  contents_.reset();
+  SetContents(NULL);
 
   // Make sure that we flush any messages related to TabContents destruction
   // before we destroy the profile.

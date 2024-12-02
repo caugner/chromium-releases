@@ -10,11 +10,14 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/native_library.h"
 #include "base/process.h"
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
-#include "base/weak_ptr.h"
+#include "ppapi/c/pp_bool.h"
+#include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_module.h"
 #include "ppapi/c/ppb.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
@@ -73,6 +76,7 @@ class PluginModule : public base::RefCounted<PluginModule>,
   // all plugin modules. In practice it will be a global singleton that
   // tracks which modules are alive.
   PluginModule(const std::string& name,
+               const FilePath& path,
                PluginDelegate::ModuleLifetime* lifetime_delegate);
 
   ~PluginModule();
@@ -101,6 +105,7 @@ class PluginModule : public base::RefCounted<PluginModule>,
   PP_Module pp_module() const { return pp_module_; }
 
   const std::string& name() const { return name_; }
+  const FilePath& path() const { return path_; }
 
   PluginInstance* CreateInstance(PluginDelegate* delegate);
 
@@ -126,6 +131,24 @@ class PluginModule : public base::RefCounted<PluginModule>,
   // release relevant resources and update all affected instances.
   void PluginCrashed();
 
+  bool is_crashed() const { return is_crashed_; }
+
+  // Reserves the given instance is unique within the plugin, checking for
+  // collisions. See PPB_Proxy_Private for more information.
+  //
+  // The setter will set the callback which is set up when the proxy
+  // initializes. The Reserve function will call the previously set callback if
+  // it exists to validate the ID. If the callback has not been set (such as
+  // for in-process plugins), the Reserve function will assume that the ID is
+  // usable and will return true.
+  void SetReserveInstanceIDCallback(
+      PP_Bool (*reserve)(PP_Module, PP_Instance));
+  bool ReserveInstanceID(PP_Instance instance);
+
+  // These should only be called from the main thread.
+  void SetBroker(PluginDelegate::PpapiBroker* broker);
+  PluginDelegate::PpapiBroker* GetBroker();
+
  private:
   // Calls the InitializeModule entrypoint. The entrypoint must have been
   // set and the plugin must not be out of process (we don't maintain
@@ -148,6 +171,10 @@ class PluginModule : public base::RefCounted<PluginModule>,
   // entry_points_ aren't valid.
   scoped_ptr<PluginDelegate::OutOfProcessProxy> out_of_process_proxy_;
 
+  // Non-owning pointer to the broker for this plugin module, if one exists.
+  // It is populated and cleared in the main thread.
+  PluginDelegate::PpapiBroker* broker_;
+
   // Holds a reference to the base::NativeLibrary handle if this PluginModule
   // instance wraps functions loaded from a library.  Can be NULL.  If
   // |library_| is non-NULL, PluginModule will attempt to unload the library
@@ -159,13 +186,16 @@ class PluginModule : public base::RefCounted<PluginModule>,
   // presence of the out_of_process_proxy_ value.
   EntryPoints entry_points_;
 
-  // The name of the module.
+  // The name and file location of the module.
   const std::string name_;
+  const FilePath path_;
 
   // Non-owning pointers to all instances associated with this module. When
   // there are no more instances, this object should be deleted.
   typedef std::set<PluginInstance*> PluginInstanceSet;
   PluginInstanceSet instances_;
+
+  PP_Bool (*reserve_instance_id_)(PP_Module, PP_Instance);
 
   DISALLOW_COPY_AND_ASSIGN(PluginModule);
 };

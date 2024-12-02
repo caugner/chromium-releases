@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,11 +17,10 @@
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
-#include "base/ref_counted.h"
+#include "base/memory/ref_counted.h"
 #include "base/task.h"
 #include "ipc/ipc_channel.h"
 #include "chrome/service/service_child_process_host.h"
-#include "printing/native_metafile.h"
 
 class CommandLine;
 class ScopedTempDir;
@@ -35,6 +34,7 @@ class Rect;
 }  // namespace gfx
 
 namespace printing {
+class Emf;
 struct PageRange;
 struct PrinterCapsAndDefaults;
 }  // namespace printing
@@ -57,7 +57,7 @@ class ServiceUtilityProcessHost : public ServiceChildProcessHost {
     // Called when at least one page in the specified PDF has been rendered
     // successfully into |metafile|.
     virtual void OnRenderPDFPagesToMetafileSucceeded(
-        const printing::NativeMetafile& metafile,
+        const printing::Emf& metafile,
         int highest_rendered_page_number) {}
     // Called when no page in the passed in PDF could be rendered.
     virtual void OnRenderPDFPagesToMetafileFailed() {}
@@ -130,7 +130,7 @@ class ServiceUtilityProcessHost : public ServiceChildProcessHost {
   bool MessageForClient(const IPC::Message& message);
 
 #if defined(OS_WIN)  // This hack is Windows-specific.
-  void OnPreCacheFont(LOGFONT font);
+  void OnPreCacheFont(const LOGFONT& font);
 #endif  // defined(OS_WIN)
 
   // A pointer to our client interface, who will be informed of progress.

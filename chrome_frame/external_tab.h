@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,15 +9,17 @@
 #include <windows.h>
 #include <atlbase.h>
 #include <atlwin.h>
-#include <vector>
+
 #include <string>
-#include "base/scoped_comptr_win.h"
-#include "base/scoped_ptr.h"
+#include <vector>
+
+#include "base/memory/scoped_ptr.h"
 #include "base/time.h"
+#include "base/win/scoped_comptr.h"
 #include "chrome/common/automation_constants.h"
-#include "chrome/common/page_zoom.h"
 #include "chrome_frame/cfproxy.h"
 #include "chrome_frame/task_marshaller.h"
+#include "content/common/page_zoom.h"
 #include "googleurl/src/gurl.h"
 
 class Task;
@@ -33,6 +35,11 @@ struct NavigationInfo;
 struct MiniContextMenuParams;
 }
 
+namespace gfx {
+class Rect;
+}
+
+
 // This is the delegate/callback interface that has to be implemented
 // by the customers of ExternalTabProxy class.
 class UIDelegate {
@@ -40,9 +47,9 @@ class UIDelegate {
   virtual void OnNavigationStateChanged(
       int flags, const NavigationInfo& nav_info) = 0;
   virtual void OnUpdateTargetUrl(const std::wstring& new_target_url) = 0;
-  virtual void OnExtensionInstalled(const FilePath& path, void* user_data,
-      AutomationMsg_ExtensionResponseValues response) = 0;
   virtual void OnLoad(const GURL& url) = 0;
+  virtual void OnMoveWindow(const gfx::Rect& pos) = 0;
+
   virtual void OnMessageFromChromeFrame(
       const std::string& message, const std::string& origin,
       const std::string& target) = 0;
@@ -107,12 +114,6 @@ class ExternalTabProxy : public CWindowImpl<ExternalTabProxy>,
       const std::string& origin, const std::string& target);
   virtual void ChromeFrameHostMoved();
 
-  virtual void SetEnableExtensionAutomation(
-      const std::vector<std::string>& functions_enabled);
-  virtual void InstallExtension(const FilePath& crx_path, void* user_data);
-  virtual void LoadExpandedExtension(const FilePath& path, void* user_data);
-  virtual void GetEnabledExtensions(void* user_data);
-
   // Attaches an existing external tab to this automation client instance.
   virtual void ConnectToExternalTab(uint64 external_tab_cookie);
   virtual void BlockExternalTab(uint64 cookie);
@@ -140,12 +141,6 @@ class ExternalTabProxy : public CWindowImpl<ExternalTabProxy>,
       HWND tab_window, int tab_handle, int session_id);
   virtual void Completed_Navigate(bool success,
       enum AutomationMsg_NavigationResponseValues res);
-  virtual void Completed_InstallExtension(bool success,
-      enum AutomationMsg_ExtensionResponseValues res, SyncMessageContext* ctx);
-  virtual void Completed_LoadExpandedExtension(bool success,
-      enum AutomationMsg_ExtensionResponseValues res, SyncMessageContext* ctx);
-  virtual void Completed_GetEnabledExtensions(bool success,
-      const std::vector<FilePath>* extensions);
 
   // Network requests from Chrome.
   virtual void OnNetwork_Start(
@@ -163,6 +158,7 @@ class ExternalTabProxy : public CWindowImpl<ExternalTabProxy>,
   virtual void OnNavigationFailed(int error_code, const GURL& gurl);
   virtual void OnDidNavigate(const NavigationInfo& navigation_info);
   virtual void OnTabLoaded(const GURL& url);
+  virtual void OnMoveWindow(const gfx::Rect& pos);
 
   virtual void OnOpenURL(const GURL& url_to_open, const GURL& referrer,
                          int open_disposition);

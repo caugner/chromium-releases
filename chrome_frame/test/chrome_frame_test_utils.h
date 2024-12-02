@@ -14,14 +14,14 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
-#include "base/scoped_comptr_win.h"
-#include "base/scoped_ptr.h"
 #include "base/win/registry.h"
+#include "base/win/scoped_comptr.h"
 
-#include "chrome_frame/test_utils.h"
 #include "chrome_frame/test/simulate_input.h"
+#include "chrome_frame/test_utils.h"
 #include "chrome_frame/utils.h"
 
 // Include without path to make GYP build see it.
@@ -118,7 +118,7 @@ class HungCOMCallDetector
   }
 
   void TearDown() {
-    ScopedComPtr<IMessageFilter> prev_filter;
+    base::win::ScopedComPtr<IMessageFilter> prev_filter;
     CoRegisterMessageFilter(prev_filter_.get(), prev_filter.Receive());
     DestroyWindow();
     m_hWnd = NULL;
@@ -141,8 +141,7 @@ class HungCOMCallDetector
                                     DWORD tick_count,
                                     DWORD pending_type) {
     MSG msg = {0};
-    if (PeekMessage(&msg, m_hWnd, WM_TIMER, WM_TIMER, PM_NOREMOVE)) {
-      is_hung_ = true;
+    if (is_hung_) {
       return PENDINGMSG_CANCELCALL;
     }
     return PENDINGMSG_WAITDEFPROCESS;
@@ -153,6 +152,7 @@ class HungCOMCallDetector
   }
 
   LRESULT OnTimer(UINT msg, WPARAM wp, LPARAM lp, BOOL& handled) {  // NOLINT
+    is_hung_ = true;
     return 1;
   }
 
@@ -176,13 +176,13 @@ class HungCOMCallDetector
     }
 
     static const int kHungDetectTimerId = 0x0000baba;
-    SetTimer(kHungDetectTimerId, 1000 * (timeout_seconds + 2), NULL);
+    SetTimer(kHungDetectTimerId, 1000 * (timeout_seconds + 40), NULL);
     return S_OK;
   }
 
   // used to detect if outgoing COM calls hung.
   bool is_hung_;
-  ScopedComPtr<IMessageFilter> prev_filter_;
+  base::win::ScopedComPtr<IMessageFilter> prev_filter_;
 };
 
 // MessageLoopForUI wrapper that runs only for a limited time.
@@ -331,6 +331,9 @@ bool KillProcesses(const std::wstring& executable_name, int exit_code,
 
 // Returns the type of test bed, PER_USER or SYSTEM_LEVEL.
 ScopedChromeFrameRegistrar::RegistrationType GetTestBedType();
+
+// Clears IE8 session restore history.
+void ClearIESessionHistory();
 
 }  // namespace chrome_frame_test
 

@@ -10,8 +10,7 @@
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/renderer/render_process.h"
-#include "chrome/renderer/render_thread.h"
+#include "content/renderer/render_thread.h"
 
 // TODO(raman): Before renderer shuts down send final snapshot lists.
 
@@ -31,6 +30,20 @@ void RendererHistogramSnapshots::SendHistograms(int sequence_number) {
   RenderThread::current()->message_loop()->PostTask(FROM_HERE,
       renderer_histogram_snapshots_factory_.NewRunnableMethod(
           &RendererHistogramSnapshots::UploadAllHistrograms, sequence_number));
+}
+
+bool RendererHistogramSnapshots::OnControlMessageReceived(
+    const IPC::Message& message) {
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(RendererHistogramSnapshots, message)
+    IPC_MESSAGE_HANDLER(ViewMsg_GetRendererHistograms, OnGetRendererHistograms)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+  return handled;
+}
+
+void RendererHistogramSnapshots::OnGetRendererHistograms(int sequence_number) {
+  SendHistograms(sequence_number);
 }
 
 void RendererHistogramSnapshots::UploadAllHistrograms(int sequence_number) {

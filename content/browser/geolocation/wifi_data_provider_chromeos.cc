@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
+#include "content/browser/browser_thread.h"
 
 namespace {
 // The time periods between successive polls of the wifi data.
@@ -72,10 +73,36 @@ WifiDataProviderImplBase* WifiDataProvider::DefaultFactoryFunction() {
   return new WifiDataProviderChromeOs();
 }
 
-WifiDataProviderChromeOs::WifiDataProviderChromeOs() {
+WifiDataProviderChromeOs::WifiDataProviderChromeOs() :
+    started_(false) {
 }
 
 WifiDataProviderChromeOs::~WifiDataProviderChromeOs() {
+}
+
+bool WifiDataProviderChromeOs::StartDataProvider() {
+  DCHECK(CalledOnClientThread());
+
+  DCHECK(polling_policy_ == NULL);
+  polling_policy_.reset(NewPollingPolicy());
+  DCHECK(polling_policy_ != NULL);
+
+  ScheduleStart();
+  return true;
+}
+
+void WifiDataProviderChromeOs::StopDataProvider() {
+  DCHECK(CalledOnClientThread());
+
+  polling_policy_.reset();
+  ScheduleStop();
+}
+
+bool WifiDataProviderChromeOs::GetData(WifiData* data) {
+  DCHECK(CalledOnClientThread());
+  DCHECK(data);
+  *data = wifi_data_;
+  return is_first_scan_complete_;
 }
 
 WifiDataProviderCommon::WlanApiInterface*
@@ -97,4 +124,110 @@ PollingPolicyInterface* WifiDataProviderChromeOs::NewPollingPolicy() {
                                   kNoChangePollingIntervalMilliseconds,
                                   kTwoNoChangePollingIntervalMilliseconds,
                                   kNoWifiPollingIntervalMilliseconds>;
+}
+
+void WifiDataProviderChromeOs::DoStartTaskOnUIThread() {
+  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  wlan_api_.reset(NewWlanApi());
+  if (wlan_api_ == NULL) {
+    client_loop()->PostTask(FROM_HERE, NewRunnableMethod(
+        this, &WifiDataProviderChromeOs::DidStartFailed));
+    return;
+  }
+  DoWifiScanTaskOnUIThread();
+}
+
+void WifiDataProviderChromeOs::DoStopTaskOnUIThread() {
+  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  wlan_api_.reset();
+}
+
+void WifiDataProviderChromeOs::DidStartFailed() {
+  CHECK(CalledOnClientThread());
+  // Error! Can't do scans, so don't try and schedule one.
+  is_first_scan_complete_ = true;
+}
+
+void WifiDataProviderChromeOs::DoWifiScanTaskOnUIThread() {
+  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  // This method could be scheduled after a DoStopTaskOnUIThread.
+  if (!wlan_api_.get())
+    return;
+
+  WifiData new_data;
+
+  if (!wlan_api_->GetAccessPointData(&new_data.access_point_data)) {
+    client_loop()->PostTask(FROM_HERE, NewRunnableMethod(
+        this, &WifiDataProviderChromeOs::DidWifiScanTaskNoResults));
+  }
+  else {
+    client_loop()->PostTask(FROM_HERE, NewRunnableMethod(
+        this, &WifiDataProviderChromeOs::DidWifiScanTask,
+        new_data));
+  }
+}
+
+void WifiDataProviderChromeOs::DidWifiScanTaskNoResults() {
+  DCHECK(CalledOnClientThread());
+  // Schedule next scan if started (StopDataProvider could have been called
+  // in between DoWifiScanTaskOnUIThread and this method).
+  if (started_)
+    ScheduleNextScan(polling_policy_->NoWifiInterval());
+  MaybeNotifyListeners(false);
+}
+
+void WifiDataProviderChromeOs::DidWifiScanTask(const WifiData& new_data) {
+  DCHECK(CalledOnClientThread());
+  bool update_available = wifi_data_.DiffersSignificantly(new_data);
+  wifi_data_ = new_data;
+  // Schedule next scan if started (StopDataProvider could have been called
+  // in between DoWifiScanTaskOnUIThread and this method).
+  if (started_) {
+    polling_policy_->UpdatePollingInterval(update_available);
+    ScheduleNextScan(polling_policy_->PollingInterval());
+  }
+  MaybeNotifyListeners(update_available);
+}
+
+void WifiDataProviderChromeOs::MaybeNotifyListeners(bool update_available) {
+  if (update_available || !is_first_scan_complete_) {
+    is_first_scan_complete_ = true;
+    NotifyListeners();
+  }
+}
+
+void WifiDataProviderChromeOs::ScheduleNextScan(int interval) {
+  DCHECK(CalledOnClientThread());
+  DCHECK(started_);
+  BrowserThread::PostDelayedTask(
+      BrowserThread::UI,
+      FROM_HERE,
+      NewRunnableMethod(this,
+                        &WifiDataProviderChromeOs::DoWifiScanTaskOnUIThread),
+      interval);
+}
+
+void WifiDataProviderChromeOs::ScheduleStop() {
+  DCHECK(CalledOnClientThread());
+  DCHECK(started_);
+  started_ = false;
+  BrowserThread::PostTask(
+      BrowserThread::UI,
+      FROM_HERE,
+      NewRunnableMethod(this,
+                        &WifiDataProviderChromeOs::DoStopTaskOnUIThread));
+}
+
+void WifiDataProviderChromeOs::ScheduleStart() {
+  DCHECK(CalledOnClientThread());
+  DCHECK(!started_);
+  started_ = true;
+  // Perform first scan ASAP regardless of the polling policy. If this scan
+  // fails we'll retry at a rate in line with the polling policy.
+  BrowserThread::PostTask(
+      BrowserThread::UI,
+      FROM_HERE,
+      NewRunnableMethod(this,
+                        &WifiDataProviderChromeOs::DoStartTaskOnUIThread));
 }

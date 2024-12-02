@@ -12,10 +12,13 @@
 
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/base/range/range.h"
 #include "ui/gfx/insets.h"
 #include "views/controls/native/native_view_host.h"
 #include "views/controls/textfield/native_textfield_wrapper.h"
+#include "views/controls/textfield/textfield_controller.h"
 #include "views/widget/widget.h"
 
 #if defined(OS_LINUX)
@@ -24,8 +27,8 @@
 #include "base/win/win_util.h"
 // TODO(beng): this should be removed when the OS_WIN hack from
 // ViewHierarchyChanged is removed.
-#include "views/controls/textfield/native_textfield_win.h"
 #include "views/controls/textfield/native_textfield_views.h"
+#include "views/controls/textfield/native_textfield_win.h"
 #include "views/events/event_utils_win.h"
 #endif
 
@@ -33,27 +36,6 @@ namespace views {
 
 // static
 const char Textfield::kViewClassName[] = "views/Textfield";
-
-/////////////////////////////////////////////////////////////////////////////
-// TextRange
-
-TextRange::TextRange(size_t start, size_t end)
-    : start_(start),
-      end_(end) {
-}
-
-size_t TextRange::GetMin() const {
-  return std::min(start_, end_);
-}
-
-size_t TextRange::GetMax() const {
-  return std::max(start_, end_);
-}
-
-void TextRange::SetRange(size_t start, size_t end) {
-  start_ = start;
-  end_ = end;
-}
 
 /////////////////////////////////////////////////////////////////////////////
 // Textfield
@@ -97,11 +79,11 @@ Textfield::Textfield(StyleFlags style)
 Textfield::~Textfield() {
 }
 
-void Textfield::SetController(Controller* controller) {
+void Textfield::SetController(TextfieldController* controller) {
   controller_ = controller;
 }
 
-Textfield::Controller* Textfield::GetController() const {
+TextfieldController* Textfield::GetController() const {
   return controller_;
 }
 
@@ -157,6 +139,13 @@ string16 Textfield::GetSelectedText() const {
 void Textfield::ClearSelection() const {
   if (native_wrapper_)
     native_wrapper_->ClearSelection();
+}
+
+bool Textfield::HasSelection() const {
+  ui::Range range;
+  if (native_wrapper_)
+    native_wrapper_->GetSelectedRange(&range);
+  return !range.is_empty();
 }
 
 void Textfield::SetTextColor(SkColor color) {
@@ -255,20 +244,26 @@ void Textfield::UpdateAllProperties() {
 }
 
 void Textfield::SyncText() {
-  if (native_wrapper_)
-    text_ = native_wrapper_->GetText();
+  if (native_wrapper_) {
+    string16 new_text = native_wrapper_->GetText();
+    if (new_text != text_) {
+      text_ = new_text;
+      if (controller_)
+        controller_->ContentsChanged(this, text_);
+    }
+  }
 }
 
 bool Textfield::IsIMEComposing() const {
   return native_wrapper_ && native_wrapper_->IsIMEComposing();
 }
 
-void Textfield::GetSelectedRange(TextRange* range) const {
+void Textfield::GetSelectedRange(ui::Range* range) const {
   DCHECK(native_wrapper_);
   native_wrapper_->GetSelectedRange(range);
 }
 
-void Textfield::SelectRange(const TextRange& range) {
+void Textfield::SelectRange(const ui::Range& range) {
   DCHECK(native_wrapper_);
   native_wrapper_->SelectRange(range);
 }
@@ -276,6 +271,10 @@ void Textfield::SelectRange(const TextRange& range) {
 size_t Textfield::GetCursorPosition() const {
   DCHECK(native_wrapper_);
   return native_wrapper_->GetCursorPosition();
+}
+
+void Textfield::SetAccessibleName(const string16& name) {
+  accessible_name_ = name;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -358,31 +357,24 @@ void Textfield::OnBlur() {
     native_wrapper_->HandleBlur();
 }
 
-AccessibilityTypes::Role Textfield::GetAccessibleRole() {
-  return AccessibilityTypes::ROLE_TEXT;
-}
-
-AccessibilityTypes::State Textfield::GetAccessibleState() {
-  int state = 0;
+void Textfield::GetAccessibleState(ui::AccessibleViewState* state) {
+  state->role = ui::AccessibilityTypes::ROLE_TEXT;
+  state->name = accessible_name_;
   if (read_only())
-    state |= AccessibilityTypes::STATE_READONLY;
+    state->state |= ui::AccessibilityTypes::STATE_READONLY;
   if (IsPassword())
-    state |= AccessibilityTypes::STATE_PROTECTED;
-  return state;
-}
+    state->state |= ui::AccessibilityTypes::STATE_PROTECTED;
+  state->value = text_;
 
-void Textfield::GetSelectionBounds(int* start_index, int* end_index) {
   DCHECK(native_wrapper_);
-  TextRange range;
+  ui::Range range;
   native_wrapper_->GetSelectedRange(&range);
-  *start_index = range.start();
-  *end_index = range.end();
+  state->selection_start = range.start();
+  state->selection_end = range.end();
 }
 
-string16 Textfield::GetAccessibleValue() {
-  if (!text_.empty())
-    return text_;
-  return string16();
+TextInputClient* Textfield::GetTextInputClient() {
+  return native_wrapper_ ? native_wrapper_->GetTextInputClient() : NULL;
 }
 
 void Textfield::SetEnabled(bool enabled) {

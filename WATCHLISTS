@@ -53,7 +53,9 @@
         'chrome/common/render.*',
     },
     'tab_contents': {
-      'filepath': 'chrome/browser/tab_contents/.*',
+      'filepath': 'chrome/browser/tab_contents/.*|'\
+        'content/browser/tab_contents/.*|'\
+        'chrome/browser/ui/tab_contents/.*',
     },
     'webkit': {
       'filepath': 'webkit/.*',
@@ -68,6 +70,9 @@
     },
     'net': {
       'filepath': 'net/.*',
+    },
+    'net_error_list': {
+      'filepath': 'net/base/net_error_list.h',
     },
     'ftp': {
       'filepath': 'ftp',
@@ -143,13 +148,16 @@
         'chrome/browser/net/sqlite_persistent_cookie_store.*',
     },
     'autofill': {
-      'filepath': 'chrome/app/nibs/AutoFill.*|'\
-        'chrome/browser/autofill/.*|'\
+      'filepath': 'chrome/browser/autofill/.*|'\
         'chrome/browser/resources/options/autofill_.*|'\
         'chrome/browser/sync/glue/autofill_.*|'\
-        'chrome/browser/ui/views/autofill_.*|'\
-        'chrome/browser/webui/options/autofill_.*|'\
-        'chrome/renderer/autofill/.*',
+        'chrome/browser/ui/webui/options/autofill_.*|'\
+        'chrome/renderer/autofill/.*|'\
+        'chrome/test/data/autofill/.*|'\
+        'chrome/test/data/autofill/heuristics/input/.*|'\
+        'chrome/test/data/autofill/heuristics/output/.*|'\
+        'chrome/test/data/autofill/merge/input/.*|'\
+        'chrome/test/data/autofill/merge/output/.*',
     },
     'webdata': {
       'filepath': 'chrome/browser/webdata/.*',
@@ -180,6 +188,22 @@
     'chromedriver': {
       'filepath': 'chrome/test/webdriver|third_party/webdriver'
     },
+    'dom_login' : {
+      'filepath': 'chrome/browser/chromeos/frame/.*dom.*' \
+                  '|chrome/browser/chromeos/login/.*dom.*'  \
+                  '|chrome/browser/chromeos/login/.*login_display.*' \
+                  '|chrome/browser/chromeos/login/existing_user_controller.*' \
+                  '|chrome/browser/resources/login.html' \
+                  '|chrome/browser/ui/webui/chromeos/login/.*'
+    },
+    'filebrowse' : {
+      'filepath': 'file_browser' \
+                  '|file_manager' \
+                  '|filebrowse'
+    },
+    'imageburner' : {
+      'filepath': 'imageburner'
+    },
   },
 
   'WATCHLISTS': {
@@ -197,7 +221,7 @@
     'history': ['brettw-cc@chromium.org'],
     'renderer': ['darin-cc@chromium.org',
                  'brettw-cc@chromium.org'],
-    'tab_contents': ['brettw-cc@chromium.org'],
+    'tab_contents': ['brettw-cc@chromium.org', 'avi@chromium.org'],
     'webkit': ['darin-cc@chromium.org'],
     'plugin': ['darin-cc@chromium.org', 'jam@chromium.org',
                'stuartmorgan+watch@chromium.org'],
@@ -206,6 +230,7 @@
                   'erikkay@chromium.org',
                   'pam+watch@chromium.org'],
     'net': ['darin-cc@chromium.org', 'cbentzel+watch@chromium.org'],
+    'net_error_list': ['mmenke@chromium.org'],
     'ftp': ['phajdan.jr@chromium.org'],
     'media': ['acolwell@chromium.org', 'ajwong+watch@chromium.org',
               'annacc@chromium.org', 'ddorwin+watch@chromium.org',
@@ -235,7 +260,7 @@
                  'simonmorris+watch@chromium.org',
                  'wez+watch@chromium.org'],
     'cookie_monster': ['rdsmith@chromium.org'],
-    'autofill': ['dhollowa@chromium.org', 'jhawkins@chromium.org',
+    'autofill': ['dhollowa@chromium.org', 'georgey@chromium.org',
                  'isherman@chromium.org'],
     'webdata': ['dhollowa@chromium.org'],
     'i18n': ['jshin+watch@chromium.org'],
@@ -246,5 +271,8 @@
     'pepper_api': ['piman+watch@chromium.org'],
     'prerender': ['cbentzel+watch@chromium.org', 'tburkard+watch@chromium.org'],
     'chromedriver': ['kkania@chromium.org'],
+    'dom_login': ['rharrison@chromium.org'],
+    'imageburner': ['achuith+watch@chromium.org', 'tbarzic+watch@chromium.org'],
+    'filebrowse': ['achuith+watch@chromium.org', 'rginda+watch@chromium.org'],
   },
 }

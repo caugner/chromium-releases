@@ -2221,7 +2221,8 @@ TEST(GLES2FormatTest, TexSubImage2D) {
       static_cast<GLenum>(17),
       static_cast<GLenum>(18),
       static_cast<uint32>(19),
-      static_cast<uint32>(20));
+      static_cast<uint32>(20),
+      static_cast<GLboolean>(21));
   EXPECT_EQ(static_cast<uint32>(TexSubImage2D::kCmdId),
             cmd.header.command);
   EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
@@ -2237,6 +2238,7 @@ TEST(GLES2FormatTest, TexSubImage2D) {
   EXPECT_EQ(static_cast<GLenum>(18), cmd.type);
   EXPECT_EQ(static_cast<uint32>(19), cmd.pixels_shm_id);
   EXPECT_EQ(static_cast<uint32>(20), cmd.pixels_shm_offset);
+  EXPECT_EQ(static_cast<GLboolean>(21), cmd.internal);
 }
 
 // TODO(gman): Implement test for TexSubImage2DImmediate
@@ -3504,6 +3506,32 @@ TEST(GLES2FormatTest, RequestExtensionCHROMIUM) {
   EXPECT_EQ(static_cast<char*>(next_cmd),
             reinterpret_cast<char*>(&cmd) + sizeof(cmd));
   EXPECT_EQ(static_cast<uint32>(11), cmd.bucket_id);
+}
+
+TEST(GLES2FormatTest, SetLatchCHROMIUM) {
+  SetLatchCHROMIUM cmd = { { 0 } };
+  void* next_cmd = cmd.Set(
+      &cmd,
+      static_cast<GLuint>(11));
+  EXPECT_EQ(static_cast<uint32>(SetLatchCHROMIUM::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<char*>(next_cmd),
+            reinterpret_cast<char*>(&cmd) + sizeof(cmd));
+  EXPECT_EQ(static_cast<GLuint>(11), cmd.latch_id);
+}
+
+TEST(GLES2FormatTest, WaitLatchCHROMIUM) {
+  WaitLatchCHROMIUM cmd = { { 0 } };
+  void* next_cmd = cmd.Set(
+      &cmd,
+      static_cast<GLuint>(11));
+  EXPECT_EQ(static_cast<uint32>(WaitLatchCHROMIUM::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<char*>(next_cmd),
+            reinterpret_cast<char*>(&cmd) + sizeof(cmd));
+  EXPECT_EQ(static_cast<GLuint>(11), cmd.latch_id);
 }
 
 #endif  // GPU_COMMAND_BUFFER_COMMON_GLES2_CMD_FORMAT_TEST_AUTOGEN_H_

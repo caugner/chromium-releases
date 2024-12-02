@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include "media/audio/audio_util.h"
 #include "media/base/filters.h"
 #include "media/ffmpeg/ffmpeg_common.h"
-#include "media/ffmpeg/ffmpeg_util.h"
 #include "media/filters/ffmpeg_glue.h"
 
 namespace media {
@@ -37,7 +36,7 @@ int AudioFileReader::sample_rate() const {
 
 base::TimeDelta AudioFileReader::duration() const {
   const AVRational av_time_base = {1, AV_TIME_BASE};
-  return ConvertTimestamp(av_time_base, format_context_->duration);
+  return ConvertFromTimeBase(av_time_base, format_context_->duration);
 }
 
 int64 AudioFileReader::number_of_frames() const {

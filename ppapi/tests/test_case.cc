@@ -9,6 +9,7 @@
 #include "ppapi/tests/test_utils.h"
 #include "ppapi/tests/testing_instance.h"
 
+// static
 std::string TestCase::MakeFailureMessage(const char* file,
                                          int line,
                                          const char* cmd) {
@@ -33,6 +34,8 @@ pp::Var TestCase::GetTestObject() {
   }
   return test_object_;
 }
+
+void TestCase::HandleMessage(const pp::Var& message_data) {}
 
 pp::deprecated::ScriptableObject* TestCase::CreateTestObject() {
   return NULL;

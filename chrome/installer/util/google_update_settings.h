@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -86,9 +86,16 @@ class GoogleUpdateSettings {
   // true if this operation succeeded.
   static bool ClearReferral();
 
+  // Set did_run "dr" in the client state value. This is used to measure
+  // active users. Returns false if writting to the registry failed.
+  static bool UpdateDidRunState(bool did_run, bool system_level);
+
+
   // Return a human readable modifier for the version string, e.g.
   // the channel (dev, beta, stable). Returns true if this operation succeeded,
-  // on success, channel contains one of "", "unknown", "dev" or "beta".
+  // on success, channel contains one of "", "unknown", "dev" or "beta" (unless
+  // it is a multi-install product, in which case it will return "m",
+  // "unknown-m", "dev-m", or "beta-m").
   static bool GetChromeChannel(bool system_install, std::wstring* channel);
 
   // This method changes the Google Update "ap" value to move the installation
@@ -142,6 +149,11 @@ class GoogleUpdateSettings {
 
   // True if a build is strictly organic, according to its brand code.
   static bool IsOrganic(const std::wstring& brand);
+
+  // True if a build should run as organic in the first run process. This uses
+  // a slightly different set of brand codes from the standard IsOrganic
+  // method.
+  static bool IsOrganicFirstRun(const std::wstring& brand);
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(GoogleUpdateSettings);

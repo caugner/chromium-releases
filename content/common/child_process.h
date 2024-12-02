@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/threading/thread.h"
 #include "base/synchronization/waitable_event.h"
 
@@ -18,11 +18,15 @@ class ChildThread;
 class ChildProcess {
  public:
   // Child processes should have an object that derives from this class.
+  // Normally you would immediately call set_main_thread after construction.
   ChildProcess();
   virtual ~ChildProcess();
 
-  // Getter for the child process' main thread.
+  // May be NULL if the main thread hasn't been set explicitly.
   ChildThread* main_thread();
+
+  // Sets the object associated with the main thread of this process.
+  // Takes ownership of the pointer.
   void set_main_thread(ChildThread* thread);
 
   MessageLoop* io_message_loop() { return io_thread_.message_loop(); }
@@ -48,7 +52,7 @@ class ChildProcess {
   // Getter for the one ChildProcess object for this process.
   static ChildProcess* current() { return child_process_; }
 
-  static void WaitForDebugger(const std::wstring& label);
+  static void WaitForDebugger(const std::string& label);
  private:
   int ref_count_;
 

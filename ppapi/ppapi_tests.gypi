@@ -1,4 +1,4 @@
-# Copyright (c) 2010 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -144,6 +144,15 @@
 #      ],
 #    },
 #    {
+#      'target_name': 'ppapi_example_post_message',
+#      'dependencies': [
+#        'ppapi_example_skeleton',
+#      ],
+#      'sources': [
+#        'examples/scripting/post_message.cc',
+#      ],
+#    },
+#    {
 #      'target_name': 'ppapi_example_scroll',
 #      'dependencies': [
 #        'ppapi_example_skeleton',
@@ -159,6 +168,20 @@
 #      ],
 #      'sources': [
 #        'examples/font/simple_font.cc',
+#      ],
+#    },
+#   {
+#      'target_name': 'ppapi_example_gles2',
+#      'dependencies': [
+#        'ppapi_example_skeleton',
+#        'ppapi_gles2',
+#        'lib/gl/gl.gyp:ppapi_egl',
+#      ],
+#      'include_dirs': [
+#        'lib/gl/include',
+#      ],
+#      'sources': [
+#        'examples/gles2/gles2.cc',
 #      ],
 #    },
     {
@@ -181,8 +204,6 @@
         'tests/test_c_includes.c',
         'tests/test_char_set.cc',
         'tests/test_char_set.h',
-        'tests/test_class.cc',
-        'tests/test_class.h',
         'tests/test_cpp_includes.cc',
         'tests/test_directory_reader.cc',
         'tests/test_directory_reader.h',
@@ -198,6 +219,8 @@
         'tests/test_image_data.h',
         'tests/test_paint_aggregator.cc',
         'tests/test_paint_aggregator.h',
+        'tests/test_post_message.cc',
+        'tests/test_post_message.h',
         'tests/test_scrollbar.cc',
         'tests/test_scrollbar.h',
         'tests/test_struct_sizes.c',
@@ -209,8 +232,8 @@
         'tests/test_url_util.h',
         'tests/test_utils.cc',
         'tests/test_utils.h',
-        'tests/test_var.cc',
-        'tests/test_var.h',
+        'tests/test_video_decoder.cc',
+        'tests/test_video_decoder.h',
 
         # Deprecated test cases.
         'tests/test_instance_deprecated.cc',

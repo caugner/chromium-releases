@@ -15,12 +15,13 @@
 
 #include <string>
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/common/notification_service.h"
+#include "content/common/notification_service.h"
 
 class IOThread;
 class GoogleURLTracker;
+class NotificationUIManager;
 class PrefService;
 class WatchDogThread;
 
@@ -59,6 +60,8 @@ class TestingBrowserProcess : public BrowserProcess {
 
   virtual base::Thread* cache_thread();
 
+  virtual base::Thread* gpu_thread();
+
   virtual WatchDogThread* watchdog_thread();
 
   virtual ProfileManager* profile_manager();
@@ -79,6 +82,13 @@ class TestingBrowserProcess : public BrowserProcess {
 
   virtual safe_browsing::ClientSideDetectionService*
       safe_browsing_detection_service();
+
+  virtual net::URLRequestContextGetter* system_request_context();
+
+#if defined(OS_CHROMEOS)
+  virtual chromeos::ProxyConfigServiceImpl*
+      chromeos_proxy_config_service_impl();
+#endif  // defined(OS_CHROMEOS)
 
   virtual ui::Clipboard* clipboard();
 
@@ -124,8 +134,6 @@ class TestingBrowserProcess : public BrowserProcess {
   virtual void StartAutoupdateTimer() {}
 #endif
 
-  virtual bool have_inspector_files() const;
-
   virtual ChromeNetLog* net_log();
 
 #if defined(IPC_MESSAGE_LOG_ENABLED)
@@ -147,6 +155,7 @@ class TestingBrowserProcess : public BrowserProcess {
   scoped_ptr<policy::BrowserPolicyConnector> browser_policy_connector_;
   scoped_ptr<GoogleURLTracker> google_url_tracker_;
   scoped_ptr<ProfileManager> profile_manager_;
+  scoped_ptr<NotificationUIManager> notification_ui_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(TestingBrowserProcess);
 };

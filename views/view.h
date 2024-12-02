@@ -15,18 +15,16 @@
 #include <vector>
 
 #include "base/i18n/rtl.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "views/accelerator.h"
-#include "views/accessibility/accessibility_types.h"
 #include "views/background.h"
 #include "views/border.h"
 
 using ui::OSExchangeData;
 
-class ViewAccessibility;
 
 namespace gfx {
 class Canvas;
@@ -35,10 +33,18 @@ class Path;
 }
 
 namespace ui {
+struct AccessibleViewState;
+class Compositor;
 class ThemeProvider;
 class Transform;
+
+typedef unsigned int TextureID;
 }
 using ui::ThemeProvider;
+
+#if defined(OS_WIN)
+class NativeViewAccessibilityWin;
+#endif
 
 namespace views {
 
@@ -46,9 +52,11 @@ class Background;
 class Border;
 class FocusManager;
 class FocusTraversable;
+class InputMethod;
 class LayoutManager;
 class RootView;
 class ScrollView;
+class TextInputClient;
 class Widget;
 class Window;
 
@@ -127,6 +135,9 @@ class DragController {
 //
 //   It is up to the subclass to implement Painting and storage of subclass -
 //   specific properties and functionality.
+//
+//   Unless otherwise documented, views is not thread safe and should only be
+//   accessed from the main thread.
 //
 /////////////////////////////////////////////////////////////////////////////
 class View : public AcceleratorTarget {
@@ -248,9 +259,6 @@ class View : public AcceleratorTarget {
   void SetPosition(const gfx::Point& position);
   void SetX(int x);
   void SetY(int y);
-
-  // Override to be notified when the bounds of the view have changed.
-  virtual void OnBoundsChanged();
 
   // No transformation is applied on the size or the locations.
   const gfx::Rect& bounds() const { return bounds_; }
@@ -526,13 +534,14 @@ class View : public AcceleratorTarget {
   // The background object is owned by this object and may be NULL.
   void set_background(Background* b) { background_.reset(b); }
   const Background* background() const { return background_.get(); }
+  Background* background() { return background_.get(); }
 
   // The border object is owned by this object and may be NULL.
   void set_border(Border* b) { border_.reset(b); }
   const Border* border() const { return border_.get(); }
 
   // Get the theme provider from the parent widget.
-  ThemeProvider* GetThemeProvider() const;
+  virtual ThemeProvider* GetThemeProvider() const;
 
   // RTL painting --------------------------------------------------------------
 
@@ -561,6 +570,11 @@ class View : public AcceleratorTarget {
   void EnableCanvasFlippingForRTLUI(bool enable) {
     flip_canvas_on_paint_for_rtl_ui_ = enable;
   }
+
+  // Accelerated painting ------------------------------------------------------
+
+  // Enable/Disable accelerated compositing.
+  static void set_use_acceleration_when_possible(bool use);
 
   // Input ---------------------------------------------------------------------
   // The points (and mouse locations) in the following functions are in the
@@ -613,19 +627,20 @@ class View : public AcceleratorTarget {
   // This method is invoked when the user releases the mouse
   // button. The event is in the receiver's coordinate system.
   //
-  // If canceled is true it indicates the mouse press/drag was canceled by a
-  // system/user gesture.
-  //
   // Default implementation notifies the ContextMenuController is appropriate.
   // Subclasses that wish to honor the ContextMenuController should invoke
   // super.
-  virtual void OnMouseReleased(const MouseEvent& event, bool canceled);
+  virtual void OnMouseReleased(const MouseEvent& event);
+
+  // This method is invoked when the mouse press/drag was canceled by a
+  // system/user gesture.
+  virtual void OnMouseCaptureLost();
 
   // This method is invoked when the mouse is above this control
   // The event is in the receiver's coordinate system.
   //
   // Default implementation does nothing. Override as needed.
-  virtual void OnMouseMoved(const MouseEvent& e);
+  virtual void OnMouseMoved(const MouseEvent& event);
 
   // This method is invoked when the mouse enters this control.
   //
@@ -667,14 +682,23 @@ class View : public AcceleratorTarget {
   // Subclasser should return true if the event has been processed and false
   // otherwise. If the event has not been processed, the parent will be given a
   // chance.
-  virtual bool OnKeyPressed(const KeyEvent& e);
-  virtual bool OnKeyReleased(const KeyEvent& e);
+  virtual bool OnKeyPressed(const KeyEvent& event);
+  virtual bool OnKeyReleased(const KeyEvent& event);
 
   // Invoked when the user uses the mousewheel. Implementors should return true
   // if the event has been processed and false otherwise. This message is sent
   // if the view is focused. If the event has not been processed, the parent
   // will be given a chance.
-  virtual bool OnMouseWheel(const MouseWheelEvent& e);
+  virtual bool OnMouseWheel(const MouseWheelEvent& event);
+
+  // Returns the View's TextInputClient instance or NULL if the View doesn't
+  // support text input.
+  virtual TextInputClient* GetTextInputClient();
+
+  // Convenience method to retrieve the InputMethod associated with the
+  // Widget that contains this view. Returns NULL if this view is not part of a
+  // view hierarchy with a Widget.
+  virtual InputMethod* GetInputMethod();
 
   // Accelerators --------------------------------------------------------------
 
@@ -756,7 +780,7 @@ class View : public AcceleratorTarget {
   // have it processed as an accelerator (if any) or as a tab traversal (if the
   // key event is for the TAB key).  In that case, OnKeyPressed will
   // subsequently be invoked for that event.
-  virtual bool SkipDefaultKeyEventProcessing(const KeyEvent& e);
+  virtual bool SkipDefaultKeyEventProcessing(const KeyEvent& event);
 
   // Subclasses that contain traversable children that are not directly
   // accessible through the children hierarchy should return the associated
@@ -873,51 +897,15 @@ class View : public AcceleratorTarget {
   static bool ExceededDragThreshold(int delta_x, int delta_y);
 
   // Accessibility -------------------------------------------------------------
-  // TODO(ctguil): Move all this out to a AccessibleInfo wrapper class.
 
-  // Notify the platform specific accessibility client of changes in the user
-  // interface.  This will always raise native notifications.
-  virtual void NotifyAccessibilityEvent(AccessibilityTypes::Event event_type);
+  // Modifies |state| to reflect the current accessible state of this view.
+  virtual void GetAccessibleState(ui::AccessibleViewState* state) { }
 
-  // Raise an accessibility notification with an option to also raise a native
-  // notification.
-  virtual void NotifyAccessibilityEvent(AccessibilityTypes::Event event_type,
-      bool send_native_event);
-
-  // Returns the MSAA default action of the current view. The string returned
-  // describes the default action that will occur when executing
-  // IAccessible::DoDefaultAction. For instance, default action of a button is
-  // 'Press'.
-  virtual string16 GetAccessibleDefaultAction();
-
-  // Returns a string containing the mnemonic, or the keyboard shortcut, for a
-  // given control.
-  virtual string16 GetAccessibleKeyboardShortcut();
-
-  // Returns a brief, identifying string, containing a unique, readable name of
-  // a given control. Sets the input string appropriately, and returns true if
-  // successful.
-  bool GetAccessibleName(string16* name);
-
-  // Returns the accessibility role of the current view. The role is what
-  // assistive technologies (ATs) use to determine what behavior to expect from
-  // a given control.
-  virtual AccessibilityTypes::Role GetAccessibleRole();
-
-  // Returns the accessibility state of the current view.
-  virtual AccessibilityTypes::State GetAccessibleState();
-
-  // Returns the current value associated with a view.
-  virtual string16 GetAccessibleValue();
-
-  // Assigns a string name to the given control. Needed as a View does not know
-  // which name will be associated with it until it is created to be a
-  // certain type.
-  void SetAccessibleName(const string16& name);
-
-  // Returns an instance of the (platform-specific) accessibility interface for
-  // the View.
-  ViewAccessibility* GetViewAccessibility();
+#if defined(OS_WIN)
+  // Returns an instance of the Windows-specific accessibility interface
+  // for this View.
+  NativeViewAccessibilityWin* GetNativeViewAccessibilityWin();
+#endif
 
   // Scrolling -----------------------------------------------------------------
   // TODO(beng): Figure out if this can live somewhere other than View, i.e.
@@ -955,6 +943,9 @@ class View : public AcceleratorTarget {
 
  protected:
   // Size and disposition ------------------------------------------------------
+
+  // Override to be notified when the bounds of the view have changed.
+  virtual void OnBoundsChanged(const gfx::Rect& previous_bounds);
 
   // Called when the preferred size of a child view changed.  This gives the
   // parent an opportunity to do a fresh layout if that makes sense.
@@ -1048,6 +1039,11 @@ class View : public AcceleratorTarget {
   // Override to paint a focus border (usually a dotted rectangle) around
   // relevant contents.
   virtual void OnPaintFocusBorder(gfx::Canvas* canvas);
+
+  // Accelerated painting ------------------------------------------------------
+
+  // Performs accelerated painting using the compositor.
+  virtual void PaintComposite(ui::Compositor* compositor);
 
   // Input ---------------------------------------------------------------------
 
@@ -1200,7 +1196,7 @@ class View : public AcceleratorTarget {
 
   // Responsible for propagating bounds change notifications to relevant
   // views.
-  void BoundsChanged();
+  void BoundsChanged(const gfx::Rect& previous_bounds);
 
   // Visible bounds notification registration.
   // When a view is added to a hierarchy, it and all its children are asked if
@@ -1248,14 +1244,14 @@ class View : public AcceleratorTarget {
 
   // RootView invokes these. These in turn invoke the appropriate OnMouseXXX
   // method. If a drag is detected, DoDrag is invoked.
-  bool ProcessMousePressed(const MouseEvent& e, DragInfo* drop_info);
-  bool ProcessMouseDragged(const MouseEvent& e, DragInfo* drop_info);
-  void ProcessMouseReleased(const MouseEvent& e, bool canceled);
+  bool ProcessMousePressed(const MouseEvent& event, DragInfo* drop_info);
+  bool ProcessMouseDragged(const MouseEvent& event, DragInfo* drop_info);
+  void ProcessMouseReleased(const MouseEvent& event);
 
 #if defined(TOUCH_UI)
   // RootView will invoke this with incoming TouchEvents. Returns the
   // the result of OnTouchEvent.
-  TouchStatus ProcessTouchEvent(const TouchEvent& e);
+  TouchStatus ProcessTouchEvent(const TouchEvent& event);
 #endif
 
   // Accelerators --------------------------------------------------------------
@@ -1299,7 +1295,7 @@ class View : public AcceleratorTarget {
   // Starts a drag and drop operation originating from this view. This invokes
   // WriteDragData to write the data and GetDragOperations to determine the
   // supported drag operations. When done, OnDragDone is invoked.
-  void DoDrag(const MouseEvent& e, const gfx::Point& press_pt);
+  void DoDrag(const MouseEvent& event, const gfx::Point& press_pt);
 
   //////////////////////////////////////////////////////////////////////////////
 
@@ -1366,6 +1362,16 @@ class View : public AcceleratorTarget {
   // right-to-left locales for this View.
   bool flip_canvas_on_paint_for_rtl_ui_;
 
+  // Accelerated painting ------------------------------------------------------
+
+  // Each transformed view will maintain its own canvas.
+  scoped_ptr<gfx::Canvas> canvas_;
+
+  // Texture ID used for accelerated painting.
+  // TODO(sadrul): This will eventually be replaced by an abstract texture
+  //               object.
+  ui::TextureID texture_id_;
+
   // Accelerators --------------------------------------------------------------
 
   // true if when we were added to hierarchy we were without focus manager
@@ -1400,12 +1406,9 @@ class View : public AcceleratorTarget {
 
   // Accessibility -------------------------------------------------------------
 
-  // Name for this view, which can be retrieved by accessibility APIs.
-  string16 accessible_name_;
-
 #if defined(OS_WIN)
-  // The accessibility implementation for this View.
-  scoped_refptr<ViewAccessibility> view_accessibility_;
+  // The Windows-specific accessibility implementation for this View.
+  scoped_refptr<NativeViewAccessibilityWin> native_view_accessibility_win_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(View);

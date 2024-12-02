@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
 #include "media/base/callback.h"
@@ -19,11 +19,12 @@
 #include "media/base/media_switches.h"
 #include "media/base/message_loop_factory_impl.h"
 #include "media/base/pipeline_impl.h"
+#include "media/filters/adaptive_demuxer.h"
 #include "media/filters/audio_renderer_impl.h"
 #include "media/filters/ffmpeg_audio_decoder.h"
-#include "media/filters/ffmpeg_demuxer.h"
+#include "media/filters/ffmpeg_demuxer_factory.h"
 #include "media/filters/ffmpeg_video_decoder.h"
-#include "media/filters/file_data_source.h"
+#include "media/filters/file_data_source_factory.h"
 #include "media/filters/null_audio_renderer.h"
 #include "media/filters/omx_video_decoder.h"
 
@@ -52,9 +53,17 @@ Display* g_display = NULL;
 Window g_window = 0;
 bool g_running = false;
 
-void Quit(MessageLoop* message_loop) {
-  message_loop->PostTask(FROM_HERE, new MessageLoop::QuitTask());
-}
+class MessageLoopQuitter {
+ public:
+  explicit MessageLoopQuitter(MessageLoop* loop) : loop_(loop) {}
+  void Quit(media::PipelineStatus status) {
+    loop_->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+    delete this;
+  }
+ private:
+  MessageLoop* loop_;
+  DISALLOW_COPY_AND_ASSIGN(MessageLoopQuitter);
+};
 
 // Initialize X11. Returns true if successful. This method creates the X11
 // window. Further initialization is done in X11VideoRenderer.
@@ -103,9 +112,10 @@ bool InitPipeline(MessageLoop* message_loop,
   // Create our filter factories.
   scoped_ptr<media::FilterCollection> collection(
       new media::FilterCollection());
-  collection->AddDataSource(new media::FileDataSource());
-  collection->AddDemuxer(new media::FFmpegDemuxer(
-      message_loop_factory->GetMessageLoop("DemuxThread")));
+  collection->SetDemuxerFactory(
+      new media::AdaptiveDemuxerFactory(
+          new media::FFmpegDemuxerFactory(
+              new media::FileDataSourceFactory(), message_loop)));
   collection->AddAudioDecoder(new media::FFmpegAudioDecoder(
       message_loop_factory->GetMessageLoop("AudioDecoderThread")));
   if (CommandLine::ForCurrentProcess()->HasSwitch(
@@ -127,22 +137,20 @@ bool InitPipeline(MessageLoop* message_loop,
   else
     collection->AddAudioRenderer(new media::NullAudioRenderer());
 
-  // Creates the pipeline and start it.
+  // Create the pipeline and start it.
   *pipeline = new media::PipelineImpl(message_loop);
-  (*pipeline)->Start(collection.release(), filename, NULL);
+  media::PipelineStatusNotification note;
+  (*pipeline)->Start(collection.release(), filename, note.Callback());
 
   // Wait until the pipeline is fully initialized.
-  while (true) {
-    base::PlatformThread::Sleep(100);
-    if ((*pipeline)->IsInitialized())
-      break;
-    if ((*pipeline)->GetError() != media::PIPELINE_OK) {
-      (*pipeline)->Stop(NULL);
-      return false;
-    }
+  note.Wait();
+  if (note.status() != media::PIPELINE_OK) {
+    std::cout << "InitPipeline: " << note.status() << std::endl;
+    (*pipeline)->Stop(NULL);
+    return false;
   }
 
-  // And starts the playback.
+  // And start the playback.
   (*pipeline)->SetPlaybackRate(1.0f);
   return true;
 }
@@ -156,10 +164,10 @@ void PeriodicalUpdate(
     MessageLoop* message_loop,
     bool audio_only) {
   if (!g_running) {
-    // interrupt signal is received during lat time period.
+    // interrupt signal was received during last time period.
     // Quit message_loop only when pipeline is fully stopped.
-    pipeline->Stop(media::TaskToCallbackAdapter::NewCallback(
-        NewRunnableFunction(Quit, message_loop)));
+    MessageLoopQuitter* quitter = new MessageLoopQuitter(message_loop);
+    pipeline->Stop(NewCallback(quitter, &MessageLoopQuitter::Quit));
     return;
   }
 
@@ -199,8 +207,8 @@ void PeriodicalUpdate(
           if (key == XK_Escape) {
             g_running = false;
             // Quit message_loop only when pipeline is fully stopped.
-            pipeline->Stop(media::TaskToCallbackAdapter::NewCallback(
-                NewRunnableFunction(Quit, message_loop)));
+            MessageLoopQuitter* quitter = new MessageLoopQuitter(message_loop);
+            pipeline->Stop(NewCallback(quitter, &MessageLoopQuitter::Quit));
             return;
           } else if (key == XK_space) {
             if (pipeline->GetPlaybackRate() < 0.01f) // paused
@@ -242,6 +250,13 @@ int main(int argc, char** argv) {
   bool enable_audio = CommandLine::ForCurrentProcess()->HasSwitch("audio");
   bool audio_only = false;
 
+  logging::InitLogging(
+      NULL,
+      logging::LOG_ONLY_TO_SYSTEM_DEBUG_LOG,
+      logging::LOCK_LOG_FILE,  // Ignored.
+      logging::DELETE_OLD_LOG_FILE,  // Ignored.
+      logging::DISABLE_DCHECK_FOR_NON_OFFICIAL_RELEASE_BUILDS);
+
   // Install the signal handler.
   signal(SIGTERM, &TerminateHandler);
   signal(SIGINT, &TerminateHandler);
@@ -266,7 +281,7 @@ int main(int argc, char** argv) {
     g_running = true;
 
     // Check if video is present.
-    audio_only = !pipeline->IsRendered(media::mime_type::kMajorTypeVideo);
+    audio_only = !pipeline->HasVideo();
 
     message_loop.PostTask(FROM_HERE,
         NewRunnableFunction(PeriodicalUpdate, pipeline,

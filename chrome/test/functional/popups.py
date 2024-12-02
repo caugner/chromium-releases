@@ -1,10 +1,10 @@
 #!/usr/bin/python
-
 # Copyright (c) 2010 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 import os
+import logging
 
 import pyauto_functional  # Must be imported before pyauto
 import pyauto
@@ -29,7 +29,7 @@ class PopupsTest(pyauto.PyUITest):
     self.assertFalse(self.GetBlockedPopupsInfo(),
                      msg='Should have no blocked popups on startup')
     file_url = self.GetFileURLForPath(os.path.join(
-        self.DataDir(), 'popup_blocker', 'popup-blocked-to-post-blank.html'))
+        self.DataDir(), 'popup_blocker', 'popup-window-open.html'))
     self.NavigateToURL(file_url)
     blocked_popups = self.GetBlockedPopupsInfo()
     self.assertEqual(1, len(blocked_popups), msg='Popup not blocked')
@@ -39,7 +39,7 @@ class PopupsTest(pyauto.PyUITest):
   def testLaunchBlockedPopup(self):
     """Verify that a blocked popup can be unblocked."""
     file_url = self.GetFileURLForPath(os.path.join(
-        self.DataDir(), 'popup_blocker', 'popup-blocked-to-post-blank.html'))
+        self.DataDir(), 'popup_blocker', 'popup-window-open.html'))
     self.NavigateToURL(file_url)
     self.assertEqual(1, len(self.GetBlockedPopupsInfo()))
     self.UnblockAndLaunchBlockedPopup(0)
@@ -54,7 +54,7 @@ class PopupsTest(pyauto.PyUITest):
     """Verify popup blocking is enabled in incognito windows."""
     self.RunCommand(pyauto.IDC_NEW_INCOGNITO_WINDOW)
     file_url = self.GetFileURLForPath(os.path.join(
-        self.DataDir(), 'popup_blocker', 'popup-blocked-to-post-blank.html'))
+        self.DataDir(), 'popup_blocker', 'popup-window-open.html'))
     self.NavigateToURL(file_url, 1, 0)
     blocked_popups = self.GetBlockedPopupsInfo(tab_index=0, windex=1)
     self.assertEqual(1, len(blocked_popups), msg='Popup not blocked')
@@ -62,17 +62,81 @@ class PopupsTest(pyauto.PyUITest):
   def testLaunchBlockedPopupInIncognito(self):
     """Verify that a blocked popup can be unblocked in incognito."""
     self.RunCommand(pyauto.IDC_NEW_INCOGNITO_WINDOW)
+    self.assertTrue(2, self.GetBrowserWindowCount())
     file_url = self.GetFileURLForPath(os.path.join(
-        self.DataDir(), 'popup_blocker', 'popup-blocked-to-post-blank.html'))
+        self.DataDir(), 'popup_blocker', 'popup-window-open.html'))
     self.NavigateToURL(file_url, 1, 0)
-    self.assertEqual(1, len(self.GetBlockedPopupsInfo(tab_index=0, windex=1)))
+    self.assertEquals('Popup created using window.open',
+                      self.GetActiveTabTitle(window_index=1))
+    # Wait until the popup is blocked
+    self.assertTrue(self.WaitUntil(lambda:
+        len(self.GetBlockedPopupsInfo(tab_index=0, windex=1)) is 1),
+        msg='Popup not blocked')
     self.UnblockAndLaunchBlockedPopup(0, tab_index=0, windex=1)
     # Verify that no more popups are blocked
     self.assertFalse(self.GetBlockedPopupsInfo(tab_index=0, windex=1))
     # Verify that popup window was created
     self.assertEqual(3, self.GetBrowserWindowCount(),
                      msg='Popup could not be launched');
-    self.assertEqual('Popup Success!', self.GetActiveTabTitle(2))
+    # Wait until popup title is read correctly.
+    self.assertTrue(self.WaitUntil(lambda:
+        self.GetActiveTabTitle(2), expect_retval='Popup Success!'),
+        msg='Popup title is wrong.')
+
+  def testMultiplePopups(self):
+    """Verify multiple popups are blocked."""
+    url = self.GetHttpURLForDataPath(
+        os.path.join('pyauto_private', 'popup_blocker',
+                     'PopupTest1.html'))
+    self.NavigateToURL(url)
+    self.assertEqual(6, len(self.GetBlockedPopupsInfo()),
+                     msg='Did not block 6 popups.')
+
+  def testPopupBlockedEverySec(self):
+    """Verify that a popup is blocked every second."""
+    url = self.GetHttpURLForDataPath(
+        os.path.join('pyauto_private', 'popup_blocker',
+                     'PopupTest4.html'))
+    self.NavigateToURL(url)
+    self.assertTrue(self.WaitUntil(lambda: len(self.GetBlockedPopupsInfo()),
+                                   expect_retval=2))
+
+  def _SetPopupsException(self):
+    """Set an exception to allow popups from www.popuptest.com."""
+    value = {'[*.]www.popuptest.com': {'popups': 1}}
+    return self.SetPrefs(pyauto.kContentSettingsPatterns, value)
+
+  def testAllowPopupsFromExternalSite(self):
+    """Verify that popups are allowed from an external website."""
+    self._SetPopupsException()
+    self.NavigateToURL('http://www.popuptest.com/popuptest1.html')
+    self.assertEqual(7, self.GetBrowserWindowCount(),
+                     msg='Popups did not launch from the external site.')
+
+  def testPopupsLaunchUponBrowserBackButton(self):
+    """Verify that popups are launched on browser back button."""
+    self._SetPopupsException()
+    url = self.GetHttpURLForDataPath(
+        os.path.join('popup_blocker', 'popup-blocked-to-post-blank.html'))
+    self.NavigateToURL(url)
+    self.NavigateToURL('http://www.popuptest.com/popuptest1.html')
+    self.assertEqual(7, self.GetBrowserWindowCount(),
+                     msg='Popups did not launch from the external site.')
+    self.GetBrowserWindow(0).GetTab(0).GoBack()
+    # Check if two additional popups launch when navigating away from the page.
+    self.assertEqual(9, self.GetBrowserWindowCount(),
+                     msg='Additional popups did not launch.')
+
+  def testPopupsLaunchWhenTabIsClosed(self):
+    """Verify popups are launched when closing a tab."""
+    self._SetPopupsException()
+    self.AppendTab(pyauto.GURL('http://www.popuptest.com/popuptest12.html'))
+    self.assertEqual(4, self.GetBrowserWindowCount(),
+                     msg='Popups did not launch from the external site.')
+    self.GetBrowserWindow(0).GetTab(1).Close(True)
+    # Check if last popup is launched when the tab is closed.
+    self.assertEqual(5, self.GetBrowserWindowCount(),
+                     msg='Last popup did not launch when the tab is closed.')
 
 
 if __name__ == '__main__':

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,8 @@
 #define GPU_COMMAND_BUFFER_COMMON_GL_MOCK_H_
 #pragma once
 
-#include "app/gfx/gl/gl_interface.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "ui/gfx/gl/gl_interface.h"
 
 namespace gfx {
 
@@ -260,6 +260,8 @@ class MockGLInterface : public GLInterface {
 
   MOCK_METHOD1(LinkProgram, void(GLuint program));
 
+  MOCK_METHOD2(MapBuffer, void*(GLenum target, GLenum access));
+
   MOCK_METHOD2(PixelStorei, void(GLenum pname, GLint param));
 
   MOCK_METHOD2(PolygonOffset, void(GLfloat factor, GLfloat units));
@@ -375,6 +377,8 @@ class MockGLInterface : public GLInterface {
   MOCK_METHOD4(UniformMatrix4fv, void(
       GLint location, GLsizei count, GLboolean transpose,
       const GLfloat* value));
+
+  MOCK_METHOD1(UnmapBuffer, GLboolean(GLenum target));
 
   MOCK_METHOD1(UseProgram, void(GLuint program));
 

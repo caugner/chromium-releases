@@ -176,9 +176,8 @@ int32_t PPB_Flash_Menu_Impl::Show(const PP_Point* location,
   }
 
   int32_t rv = instance()->delegate()->ShowContextMenu(
-      this, gfx::Point(instance()->position().x() + location->x,
-                       instance()->position().y() + location->y));
-  if (rv == PP_ERROR_WOULDBLOCK) {
+      instance(), this, gfx::Point(location->x, location->y));
+  if (rv == PP_OK_COMPLETIONPENDING) {
     // Record callback and output buffers.
     callback_ = new TrackedCompletionCallback(
         instance()->module()->GetCallbackTracker(), resource_id, callback);

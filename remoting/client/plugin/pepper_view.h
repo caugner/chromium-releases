@@ -10,7 +10,7 @@
 #ifndef REMOTING_CLIENT_PLUGIN_PEPPER_VIEW_H_
 #define REMOTING_CLIENT_PLUGIN_PEPPER_VIEW_H_
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/task.h"
 #include "media/base/video_frame.h"
 #include "ppapi/cpp/graphics_2d.h"
@@ -54,7 +54,7 @@ class PepperView : public ChromotingView,
                                     Task* done);
 
  private:
-  void OnPaintDone();
+  void OnPaintDone(base::Time paint_start);
   void PaintFrame(media::VideoFrame* frame, UpdatedRects* rects);
 
   // Reference to the creating plugin instance. Needed for interacting with
@@ -66,6 +66,9 @@ class PepperView : public ChromotingView,
   ClientContext* const context_;
 
   pp::Graphics2D graphics2d_;
+
+  // A backing store that saves the current desktop image.
+  scoped_ptr<pp::ImageData> backing_store_;
 
   int viewport_width_;
   int viewport_height_;

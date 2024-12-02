@@ -24,61 +24,45 @@
 {
   'all': [
     'children_finding_tests',
+    # Cookie tests try to set the domain explicitly to 'localhost', which
+    # is not allowed.
 #   'cookie_tests',
-#   'correct_event_firing_tests',
+    'correct_event_firing_tests',
     'driver_element_finding_test',
     'element_attribute_tests',
-#   'executing_async_javascript_test',
+    # Async execution has not been implemented.
+    # 'executing_async_javascript_test',
     'executing_javascript_test',
     'form_handling_tests',
-    # The following require the click command.
-    '-form_handling_tests.FormHandlingTests.testClickingOnUnclickableElementsDoesNothing',
-    '-form_handling_tests.FormHandlingTests.testShouldBeAbleToClickImageButtons',
-    '-form_handling_tests.FormHandlingTests.testShouldBeAbleToSelectARadioButtonByClickingOnIt',
+    # This test is flaky, probably because of form submission race.
     '-form_handling_tests.FormHandlingTests.testShouldClickOnSubmitInputElements',
-    # The following are all suppressed because the submit command currently does
-    # not wait for post-submit navigation events to complete.
-    '-form_handling_tests.FormHandlingTests.testShouldBeAbleToSubmitForms',
-    '-form_handling_tests.FormHandlingTests.testShouldSubmitAFormWhenAnyElementWihinThatFormIsSubmitted',
-    '-form_handling_tests.FormHandlingTests.testShouldSubmitAFormWhenAnyInputElementWithinThatFormIsSubmitted',
-    # Test fails from a bug in the WebDriver python bindings. This bug has been
-    # fixed in the WebDriver tree:
-    # http://code.google.com/p/selenium/source/detail?r=11480
-    '-form_handling_tests.FormHandlingTests.testShouldThrowAnExceptionWhenSelectingAnUnselectableElement',
     'frame_switching_tests',
+    # Test is asserting the wrong thing.
+    '-frame_switching_tests.FrameSwitchingTest.testShouldReturnFrameTitleNotWindowTitle',
     'implicit_waits_tests',
-    # Depends on click.
-    '-implicit_waits_tests.ImplicitWaitTest.testShouldImplicitlyWaitForASingleElement',
-    '-implicit_waits_tests.ImplicitWaitTest.testShouldImplicitlyWaitUntilAtLeastOneElementIsFoundWhenSearchingForMany',
-    '-implicit_waits_tests.ImplicitWaitTest.testShouldReturnAfterFirstAttemptToFindManyAfterDisablingImplicitWaits',
     'page_loading_tests',
-    # testShouldReturnWhenGettingAUrlThatDoesNotResolve causes the test after
-    # to fail when run in xvfb: crbug.com/72027.
-    '-page_loading_tests.PageLoadingTests.testShouldReturnWhenGettingAUrlThatDoesNotResolve',
+    # Flaky. crbug.com/77495.
     '-page_loading_tests.PageLoadingTests.testShouldBeAbleToNavigateBackInTheBrowserHistory',
-    '-page_loading_tests.PageLoadingTests.testShouldBeAbleToNavigateBackInTheBrowserHistoryInPresenceOfIframes',
+    # Flaky. crbug.com/77495.
     '-page_loading_tests.PageLoadingTests.testShouldBeAbleToNavigateForwardsInTheBrowserHistory',
-    # This test is flaky.
-    '-page_loading_tests.PageLoadingTests.testShouldWaitForDocumentToBeLoaded',
+    # This test causes the test after to fail occassionally. See
+    # crbug.com/72027. This is because we are not waiting for navigation
+    # error pages.
+    '-page_loading_tests.PageLoadingTests.testShouldReturnWhenGettingAUrlThatDoesNotResolve',
     'rendered_webelement_tests',
-    # Test is flaky. Sometimes can't find an element.
-    '-rendered_webelement_tests.RenderedWebElementTests.testShouldCorrectlyIdentifyThatAnElementHasWidth',
     # Test expects a color keyword, but a rgba tuple is returned.
     '-rendered_webelement_tests.RenderedWebElementTests.testShouldAllowInheritedStylesToBeUsed',
     # Test expects hex color, but a rgb tuple is returned.
     '-rendered_webelement_tests.RenderedWebElementTests.testShouldPickUpStyleOfAnElement',
     'select_element_handling_tests',
     'stale_reference_tests',
-    # Test requires click command.
-    '-stale_reference_tests.StaleReferenceTests.testOldPage',
-#   'text_handling_tests',
+    'text_handling_tests',
+    # Chrome bug/oddity. See crbug.com/76111.
+    '-text_handling_tests.TextHandlingTests.testShouldBeAbleToSetMoreThanOneLineOfTextInATextArea',
+    # See issue 1225 on the webdriver OSS tracker.
+    '-text_handling_tests.TextHandlingTests.testShouldReturnEmptyStringWhenTagIsSelfClosing',
     'typing_tests',
     'visibility_tests',
-    # Depends on click.
-    '-visibility_tests.VisibilityTests.testShouldModifyTheVisibilityOfAnElementDynamically',
-    '-visibility_tests.VisibilityTests.testShouldNotBeAbleToClickOnAnElementThatIsNotDisplayed',
-    # Bug in typing: element is not verified before typing.
-    '-visibility_tests.VisibilityTests.testShouldNotBeAbleToTypeAnElementThatIsNotDisplayed',
   ],
 
   'win': [

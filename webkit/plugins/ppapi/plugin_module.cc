@@ -10,12 +10,14 @@
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
 #include "base/logging.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/time.h"
 #include "ppapi/c/dev/ppb_buffer_dev.h"
 #include "ppapi/c/dev/ppb_char_set_dev.h"
 #include "ppapi/c/dev/ppb_context_3d_dev.h"
 #include "ppapi/c/dev/ppb_context_3d_trusted_dev.h"
+#include "ppapi/c/dev/ppb_console_dev.h"
+#include "ppapi/c/dev/ppb_crypto_dev.h"
 #include "ppapi/c/dev/ppb_cursor_control_dev.h"
 #include "ppapi/c/dev/ppb_directory_reader_dev.h"
 #include "ppapi/c/dev/ppb_file_io_dev.h"
@@ -38,11 +40,11 @@
 #include "ppapi/c/pp_module.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_var.h"
-#include "ppapi/c/ppb_class.h"
 #include "ppapi/c/ppb_core.h"
 #include "ppapi/c/ppb_graphics_2d.h"
 #include "ppapi/c/ppb_image_data.h"
 #include "ppapi/c/ppb_instance.h"
+#include "ppapi/c/ppb_messaging.h"
 #include "ppapi/c/ppb_url_loader.h"
 #include "ppapi/c/ppb_url_request_info.h"
 #include "ppapi/c/ppb_url_response_info.h"
@@ -54,17 +56,22 @@
 #include "ppapi/c/private/ppb_flash_file.h"
 #include "ppapi/c/private/ppb_flash_menu.h"
 #include "ppapi/c/private/ppb_flash_net_connector.h"
+#include "ppapi/c/private/ppb_instance_private.h"
 #include "ppapi/c/private/ppb_pdf.h"
 #include "ppapi/c/private/ppb_proxy_private.h"
 #include "ppapi/c/private/ppb_nacl_private.h"
+#include "ppapi/c/trusted/ppb_broker_trusted.h"
 #include "ppapi/c/trusted/ppb_image_data_trusted.h"
 #include "ppapi/c/trusted/ppb_url_loader_trusted.h"
 #include "webkit/plugins/ppapi/callbacks.h"
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppb_audio_impl.h"
+#include "webkit/plugins/ppapi/ppb_broker_impl.h"
 #include "webkit/plugins/ppapi/ppb_buffer_impl.h"
 #include "webkit/plugins/ppapi/ppb_char_set_impl.h"
+#include "webkit/plugins/ppapi/ppb_console_impl.h"
+#include "webkit/plugins/ppapi/ppb_crypto_impl.h"
 #include "webkit/plugins/ppapi/ppb_cursor_control_impl.h"
 #include "webkit/plugins/ppapi/ppb_directory_reader_impl.h"
 #include "webkit/plugins/ppapi/ppb_file_chooser_impl.h"
@@ -92,7 +99,6 @@
 #include "webkit/plugins/ppapi/ppb_widget_impl.h"
 #include "webkit/plugins/ppapi/resource_tracker.h"
 #include "webkit/plugins/ppapi/var.h"
-#include "webkit/plugins/ppapi/var_object_class.h"
 
 #ifdef ENABLE_GPU
 #include "webkit/plugins/ppapi/ppb_context_3d_impl.h"
@@ -126,17 +132,17 @@ base::MessageLoopProxy* GetMainThreadMessageLoop() {
 
 void AddRefResource(PP_Resource resource) {
   if (!ResourceTracker::Get()->AddRefResource(resource)) {
-    DLOG(WARNING) << "AddRefResource()ing a nonexistent resource";
+    DLOG(WARNING) << "AddRefResource()ing a nonexistent resource " << resource;
   }
 }
 
 void ReleaseResource(PP_Resource resource) {
   if (!ResourceTracker::Get()->UnrefResource(resource)) {
-    DLOG(WARNING) << "ReleaseResource()ing a nonexistent resource";
+    DLOG(WARNING) << "ReleaseResource()ing a nonexistent resource " << resource;
   }
 }
 
-void* MemAlloc(size_t num_bytes) {
+void* MemAlloc(uint32_t num_bytes) {
   return malloc(num_bytes);
 }
 
@@ -216,6 +222,9 @@ const PPB_Testing_Dev testing_interface = {
 // GetInterface ----------------------------------------------------------------
 
 const void* GetInterface(const char* name) {
+  // All interfaces should be used on the main thread.
+  DCHECK(IsMainThread());
+
   // Please keep alphabetized by interface macro name with "special" stuff at
   // the bottom.
   if (strcmp(name, PPB_AUDIO_CONFIG_INTERFACE) == 0)
@@ -224,14 +233,18 @@ const void* GetInterface(const char* name) {
     return PPB_Audio_Impl::GetInterface();
   if (strcmp(name, PPB_AUDIO_TRUSTED_INTERFACE) == 0)
     return PPB_Audio_Impl::GetTrustedInterface();
+  if (strcmp(name, PPB_BROKER_TRUSTED_INTERFACE) == 0)
+    return PPB_Broker_Impl::GetTrustedInterface();
   if (strcmp(name, PPB_BUFFER_DEV_INTERFACE) == 0)
     return PPB_Buffer_Impl::GetInterface();
   if (strcmp(name, PPB_CHAR_SET_DEV_INTERFACE) == 0)
     return PPB_CharSet_Impl::GetInterface();
-  if (strcmp(name, PPB_CLASS_INTERFACE) == 0)
-    return VarObjectClass::GetInterface();
+  if (strcmp(name, PPB_CONSOLE_DEV_INTERFACE) == 0)
+    return PPB_Console_Impl::GetInterface();
   if (strcmp(name, PPB_CORE_INTERFACE) == 0)
     return &core_interface;
+  if (strcmp(name, PPB_CRYPTO_DEV_INTERFACE) == 0)
+    return PPB_Crypto_Impl::GetInterface();
   if (strcmp(name, PPB_CURSOR_CONTROL_DEV_INTERFACE) == 0)
     return GetCursorControlInterface();
   if (strcmp(name, PPB_DIRECTORYREADER_DEV_INTERFACE) == 0)
@@ -272,6 +285,10 @@ const void* GetInterface(const char* name) {
     return PPB_ImageData_Impl::GetTrustedInterface();
   if (strcmp(name, PPB_INSTANCE_INTERFACE) == 0)
     return PluginInstance::GetInterface();
+  if (strcmp(name, PPB_INSTANCE_PRIVATE_INTERFACE) == 0)
+    return PluginInstance::GetPrivateInterface();
+  if (strcmp(name, PPB_MESSAGING_INTERFACE) == 0)
+    return PluginInstance::GetMessagingInterface();
   if (strcmp(name, PPB_PDF_INTERFACE) == 0)
     return PPB_PDF_Impl::GetInterface();
   if (strcmp(name, PPB_PROXY_PRIVATE_INTERFACE) == 0)
@@ -377,12 +394,16 @@ PluginModule::EntryPoints::EntryPoints()
 // PluginModule ----------------------------------------------------------------
 
 PluginModule::PluginModule(const std::string& name,
+                           const FilePath& path,
                            PluginDelegate::ModuleLifetime* lifetime_delegate)
     : lifetime_delegate_(lifetime_delegate),
       callback_tracker_(new CallbackTracker),
       is_crashed_(false),
+      broker_(NULL),
       library_(NULL),
-      name_(name) {
+      name_(name),
+      path_(path),
+      reserve_instance_id_(NULL) {
   pp_module_ = ResourceTracker::Get()->AddModule(this);
   GetMainThreadMessageLoop();  // Initialize the main thread message loop.
   GetLivePluginSet()->insert(this);
@@ -417,7 +438,7 @@ bool PluginModule::InitAsInternalPlugin(const EntryPoints& entry_points) {
 }
 
 bool PluginModule::InitAsLibrary(const FilePath& path) {
-  base::NativeLibrary library = base::LoadNativeLibrary(path);
+  base::NativeLibrary library = base::LoadNativeLibrary(path, NULL);
   if (!library)
     return false;
 
@@ -505,6 +526,27 @@ void PluginModule::PluginCrashed() {
   lifetime_delegate_->PluginModuleDead(this);
 }
 
+void PluginModule::SetReserveInstanceIDCallback(
+    PP_Bool (*reserve)(PP_Module, PP_Instance)) {
+  DCHECK(!reserve_instance_id_) << "Only expect one set.";
+  reserve_instance_id_ = reserve;
+}
+
+bool PluginModule::ReserveInstanceID(PP_Instance instance) {
+  if (reserve_instance_id_)
+    return PPBoolToBool(reserve_instance_id_(pp_module_, instance));
+  return true;  // Instance ID is usable.
+}
+
+void PluginModule::SetBroker(PluginDelegate::PpapiBroker* broker) {
+  DCHECK(!broker_ || !broker);
+  broker_ = broker;
+}
+
+PluginDelegate::PpapiBroker* PluginModule::GetBroker(){
+  return broker_;
+}
+
 bool PluginModule::InitializeModule() {
   DCHECK(!out_of_process_proxy_.get()) << "Don't call for proxied modules.";
   int retval = entry_points_.initialize_module(pp_module(), &GetInterface);
@@ -517,4 +559,3 @@ bool PluginModule::InitializeModule() {
 
 }  // namespace ppapi
 }  // namespace webkit
-

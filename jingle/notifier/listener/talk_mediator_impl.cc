@@ -1,38 +1,34 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "jingle/notifier/listener/talk_mediator_impl.h"
 
 #include "base/logging.h"
-#include "jingle/notifier/listener/mediator_thread_impl.h"
-#include "talk/base/cryptstring.h"
-#include "talk/xmpp/xmppclientsettings.h"
-#include "talk/xmpp/xmppengine.h"
+#include "base/message_loop.h"
+#include "jingle/notifier/base/notifier_options_util.h"
 
 namespace notifier {
 
 TalkMediatorImpl::TalkMediatorImpl(
-    MediatorThread* mediator_thread, bool invalidate_xmpp_auth_token,
-    bool allow_insecure_connection)
+    MediatorThread* mediator_thread,
+    const NotifierOptions& notifier_options)
     : delegate_(NULL),
       mediator_thread_(mediator_thread),
-      invalidate_xmpp_auth_token_(invalidate_xmpp_auth_token),
-      allow_insecure_connection_(allow_insecure_connection) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+      notifier_options_(notifier_options),
+      construction_message_loop_(MessageLoop::current()),
+      method_message_loop_(NULL) {
   mediator_thread_->Start();
   state_.started = 1;
 }
 
 TalkMediatorImpl::~TalkMediatorImpl() {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
-  if (state_.started) {
-    Logout();
-  }
+  DCHECK_EQ(MessageLoop::current(), construction_message_loop_);
+  DCHECK(!state_.started);
 }
 
 bool TalkMediatorImpl::Login() {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  CheckOrSetValidThread();
   // Connect to the mediator thread and start processing messages.
   mediator_thread_->AddObserver(this);
   if (state_.initialized && !state_.logging_in && !state_.logged_in) {
@@ -44,12 +40,11 @@ bool TalkMediatorImpl::Login() {
 }
 
 bool TalkMediatorImpl::Logout() {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  CheckOrSetValidThread();
   if (state_.started) {
     state_.started = 0;
     state_.logging_in = 0;
     state_.logged_in = 0;
-    state_.subscribed = 0;
     // We do not want to be called back during logout since we may be
     // closing.
     mediator_thread_->RemoveObserver(this);
@@ -59,62 +54,47 @@ bool TalkMediatorImpl::Logout() {
   return false;
 }
 
-bool TalkMediatorImpl::SendNotification(const OutgoingNotificationData& data) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
-  if (state_.logged_in && state_.subscribed) {
-    mediator_thread_->SendNotification(data);
-    return true;
-  }
-  return false;
+void TalkMediatorImpl::SendNotification(const Notification& data) {
+  CheckOrSetValidThread();
+  mediator_thread_->SendNotification(data);
 }
 
 void TalkMediatorImpl::SetDelegate(TalkMediator::Delegate* delegate) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  DCHECK_EQ(MessageLoop::current(), construction_message_loop_);
   delegate_ = delegate;
 }
 
-bool TalkMediatorImpl::SetAuthToken(const std::string& email,
+void TalkMediatorImpl::SetAuthToken(const std::string& email,
                                     const std::string& token,
                                     const std::string& token_service) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  CheckOrSetValidThread();
+  xmpp_settings_ =
+      MakeXmppClientSettings(notifier_options_, email, token, token_service);
 
-  // Verify that we can create a JID from the email provided.
-  buzz::Jid jid = buzz::Jid(email);
-  if (jid.node().empty() || !jid.IsValid()) {
-    return false;
-  }
-
-  // Construct the XmppSettings object for login to buzz.
-  xmpp_settings_.set_user(jid.node());
-  xmpp_settings_.set_resource("chrome-sync");
-  xmpp_settings_.set_host(jid.domain());
-  xmpp_settings_.set_use_tls(true);
-  xmpp_settings_.set_auth_cookie(invalidate_xmpp_auth_token_ ?
-                                 token + "bogus" : token);
-  xmpp_settings_.set_token_service(token_service);
-  if (allow_insecure_connection_) {
-    xmpp_settings_.set_allow_plain(true);
-    xmpp_settings_.set_use_tls(false);
+  // The auth token got updated and we are already in the logging_in or
+  // logged_in state. Update the token.
+  if (state_.logging_in || state_.logged_in) {
+    mediator_thread_->UpdateXmppSettings(xmpp_settings_);
   }
 
   state_.initialized = 1;
-  return true;
 }
 
-void TalkMediatorImpl::AddSubscribedServiceUrl(
-    const std::string& service_url) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
-  subscribed_services_list_.push_back(service_url);
+void TalkMediatorImpl::AddSubscription(const Subscription& subscription) {
+  CheckOrSetValidThread();
+  subscriptions_.push_back(subscription);
   if (state_.logged_in) {
     VLOG(1) << "Resubscribing for updates, a new service got added";
-    mediator_thread_->SubscribeForUpdates(subscribed_services_list_);
+    mediator_thread_->SubscribeForUpdates(subscriptions_);
   }
 }
 
 
 void TalkMediatorImpl::OnConnectionStateChange(bool logged_in) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
-  state_.logging_in = 0;
+  CheckOrSetValidThread();
+  // If we just lost connection, then the MediatorThread implementation will
+  // try to log in again. We need to set state_.logging_in to true in that case.
+  state_.logging_in = !logged_in;
   state_.logged_in = logged_in;
   if (logged_in) {
     VLOG(1) << "P2P: Logged in.";
@@ -122,7 +102,7 @@ void TalkMediatorImpl::OnConnectionStateChange(bool logged_in) {
     // SubscribeForUpdates.
     mediator_thread_->ListenForUpdates();
     // Now subscribe for updates to all the services we are interested in
-    mediator_thread_->SubscribeForUpdates(subscribed_services_list_);
+    mediator_thread_->SubscribeForUpdates(subscriptions_);
   } else {
     VLOG(1) << "P2P: Logged off.";
     OnSubscriptionStateChange(false);
@@ -130,27 +110,34 @@ void TalkMediatorImpl::OnConnectionStateChange(bool logged_in) {
 }
 
 void TalkMediatorImpl::OnSubscriptionStateChange(bool subscribed) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
-  state_.subscribed = subscribed;
+  CheckOrSetValidThread();
   VLOG(1) << "P2P: " << (subscribed ? "subscribed" : "unsubscribed");
   if (delegate_)
     delegate_->OnNotificationStateChange(subscribed);
 }
 
 void TalkMediatorImpl::OnIncomingNotification(
-    const IncomingNotificationData& notification_data) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+    const Notification& notification) {
+  CheckOrSetValidThread();
   VLOG(1) << "P2P: Updates are available on the server.";
   if (delegate_)
-    delegate_->OnIncomingNotification(notification_data);
+    delegate_->OnIncomingNotification(notification);
 }
 
 void TalkMediatorImpl::OnOutgoingNotification() {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
+  CheckOrSetValidThread();
   VLOG(1) << "P2P: Peers were notified that updates are available on the "
              "server.";
   if (delegate_)
     delegate_->OnOutgoingNotification();
+}
+
+void TalkMediatorImpl::CheckOrSetValidThread() {
+  if (method_message_loop_) {
+    DCHECK_EQ(MessageLoop::current(), method_message_loop_);
+  } else {
+    method_message_loop_ = MessageLoop::current();
+  }
 }
 
 }  // namespace notifier

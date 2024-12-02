@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,12 +49,12 @@ bool PlatformCanvas::initialize(CGContextRef context,
       context, width, height, is_opaque));
 }
 
-CGContextRef PlatformCanvas::beginPlatformPaint() {
-  return getTopPlatformDevice().GetBitmapContext();
+CGContextRef PlatformCanvas::beginPlatformPaint() const {
+  return getTopPlatformDevice().BeginPlatformPaint();
 }
 
-void PlatformCanvas::endPlatformPaint() {
-  // Flushing will be done in onAccessBitmap.
+void PlatformCanvas::endPlatformPaint() const {
+  getTopPlatformDevice().EndPlatformPaint();
 }
 
 }  // namespace skia

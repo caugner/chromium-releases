@@ -9,14 +9,17 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/common/net/url_fetcher.h"
-#include "chrome/common/speech_input_result.h"
+#include "content/common/speech_input_result.h"
 #include "googleurl/src/gurl.h"
 
 class URLFetcher;
+
+namespace net {
 class URLRequestContextGetter;
+}
 
 namespace speech_input {
 
@@ -38,7 +41,7 @@ class SpeechRecognitionRequest : public URLFetcher::Delegate {
   };
 
   // |url| is the server address to which the request wil be sent.
-  SpeechRecognitionRequest(URLRequestContextGetter* context,
+  SpeechRecognitionRequest(net::URLRequestContextGetter* context,
                            Delegate* delegate);
 
   virtual ~SpeechRecognitionRequest();
@@ -66,7 +69,7 @@ class SpeechRecognitionRequest : public URLFetcher::Delegate {
                                   const std::string& data);
 
  private:
-  scoped_refptr<URLRequestContextGetter> url_context_;
+  scoped_refptr<net::URLRequestContextGetter> url_context_;
   Delegate* delegate_;
   scoped_ptr<URLFetcher> url_fetcher_;
 

@@ -4,14 +4,21 @@
 
 #include "views/events/event.h"
 
+#include <gdk/gdk.h>
 #include <gdk/gdkx.h>
 #if defined(HAVE_XINPUT2)
 #include <X11/extensions/XInput2.h>
 #endif
+#include <X11/Xlib.h>
 
+#include "base/utf_string_conversions.h"
 #include "ui/base/keycodes/keyboard_code_conversion_x.h"
 #include "views/widget/root_view.h"
 #include "views/widget/widget_gtk.h"
+
+#if defined(HAVE_XINPUT2)
+#include "views/touchui/touch_factory.h"
+#endif
 
 namespace views {
 
@@ -96,17 +103,6 @@ ui::EventType GetTouchEventType(XEvent* xev) {
   return ui::ET_UNKNOWN;
 }
 
-gfx::Point GetTouchEventLocation(XEvent* xev) {
-  XIDeviceEvent* xiev = static_cast<XIDeviceEvent*>(xev->xcookie.data);
-  return gfx::Point(xiev->event_x, xiev->event_y);
-}
-
-int GetTouchEventFlags(XEvent* xev) {
-  XIDeviceEvent* xiev = static_cast<XIDeviceEvent*>(xev->xcookie.data);
-  return GetButtonMaskForX2Event(xiev) |
-         GetEventFlagsFromXState(xiev->mods.effective);
-}
-
 int GetTouchIDFromXEvent(XEvent* xev) {
   // TODO(sad): How we determine the touch-id from the event is as yet
   // undecided.
@@ -171,7 +167,7 @@ int GetMouseWheelOffset(XEvent* xev) {
   return xev->xbutton.button == 4 ? kWheelScrollAmount : -kWheelScrollAmount;
 }
 
-gfx::Point GetMouseEventLocation(XEvent* xev) {
+gfx::Point GetEventLocation(XEvent* xev) {
   switch (xev->type) {
     case ButtonPress:
     case ButtonRelease:
@@ -193,7 +189,7 @@ gfx::Point GetMouseEventLocation(XEvent* xev) {
   return gfx::Point();
 }
 
-int GetMouseEventFlags(XEvent* xev) {
+int GetLocatedEventFlags(XEvent* xev, bool touch) {
   switch (xev->type) {
     case ButtonPress:
     case ButtonRelease:
@@ -211,7 +207,7 @@ int GetMouseEventFlags(XEvent* xev) {
         case XI_ButtonRelease:
           return GetButtonMaskForX2Event(xievent) |
                  GetEventFlagsFromXState(xievent->mods.effective) |
-                 GetEventFlagsForButton(xievent->detail);
+                 (touch ? 0 : GetEventFlagsForButton(xievent->detail));
 
         case XI_Motion:
            return GetButtonMaskForX2Event(xievent) |
@@ -222,6 +218,65 @@ int GetMouseEventFlags(XEvent* xev) {
   }
 
   return 0;
+}
+
+uint16 GetCharacterFromXKeyEvent(XKeyEvent* key) {
+  char buf[6];
+  int bytes_written = XLookupString(key, buf, 6, NULL, NULL);
+  DCHECK_LE(bytes_written, 6);
+
+  string16 result;
+  return (bytes_written > 0 && UTF8ToUTF16(buf, bytes_written, &result) &&
+          result.length() == 1) ? result[0] : 0;
+}
+
+float GetTouchRadiusFromXEvent(XEvent* xev) {
+  float diameter = 0.0;
+
+#if defined(HAVE_XINPUT2)
+  TouchFactory* touch_factory = TouchFactory::GetInstance();
+  touch_factory->ExtractTouchParam(*xev, TouchFactory::TP_TOUCH_MAJOR,
+                                   &diameter);
+#endif
+
+  return diameter / 2.0;
+}
+
+float GetTouchAngleFromXEvent(XEvent* xev) {
+  float angle = 0.0;
+
+#if defined(HAVE_XINPUT2)
+  TouchFactory* touch_factory = TouchFactory::GetInstance();
+  touch_factory->ExtractTouchParam(*xev, TouchFactory::TP_ORIENTATION,
+                                   &angle);
+#endif
+
+  return angle;
+}
+
+
+float GetTouchRatioFromXEvent(XEvent* xev) {
+  float ratio = 1.0;
+
+#if defined(HAVE_XINPUT2)
+  TouchFactory* touch_factory = TouchFactory::GetInstance();
+  float major_v = -1.0;
+  float minor_v = -1.0;
+
+  if (!touch_factory->ExtractTouchParam(*xev,
+                                        TouchFactory::TP_TOUCH_MAJOR,
+                                        &major_v) ||
+      !touch_factory->ExtractTouchParam(*xev,
+                                        TouchFactory::TP_TOUCH_MINOR,
+                                        &minor_v))
+    return ratio;
+
+  // In case minor axis exists but is zero.
+  if (minor_v > 0.0)
+    ratio = major_v / minor_v;
+#endif
+
+  return ratio;
 }
 
 }  // namespace
@@ -243,9 +298,9 @@ LocatedEvent::LocatedEvent(NativeEvent2 native_event_2,
                            FromNativeEvent2 from_native)
     : Event(native_event_2,
             EventTypeFromNative(native_event_2),
-            GetEventFlagsFromXState(native_event_2->xbutton.state),
+            GetLocatedEventFlags(native_event_2, false),
             from_native),
-      location_(GetMouseEventLocation(native_event_2)) {
+      location_(GetEventLocation(native_event_2)) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -259,12 +314,39 @@ KeyEvent::KeyEvent(NativeEvent2 native_event_2, FromNativeEvent2 from_native)
       key_code_(ui::KeyboardCodeFromXKeyEvent(native_event_2)) {
 }
 
+uint16 KeyEvent::GetCharacter() const {
+  if (!native_event_2())
+    return GetCharacterFromKeyCode(key_code_, flags());
+
+  DCHECK(native_event_2()->type == KeyPress ||
+         native_event_2()->type == KeyRelease);
+
+  uint16 ch = GetCharacterFromXKeyEvent(&native_event_2()->xkey);
+  return ch ? ch : GetCharacterFromKeyCode(key_code_, flags());
+}
+
+uint16 KeyEvent::GetUnmodifiedCharacter() const {
+  if (!native_event_2())
+    return GetCharacterFromKeyCode(key_code_, flags() & ui::EF_SHIFT_DOWN);
+
+  DCHECK(native_event_2()->type == KeyPress ||
+         native_event_2()->type == KeyRelease);
+
+  XKeyEvent key = native_event_2()->xkey;
+
+  static const unsigned int kIgnoredModifiers = ControlMask | LockMask |
+      Mod1Mask | Mod2Mask | Mod3Mask | Mod4Mask | Mod5Mask;
+
+  // We can't use things like (key.state & ShiftMask), as it may mask out bits
+  // used by X11 internally.
+  key.state &= ~kIgnoredModifiers;
+  uint16 ch = GetCharacterFromXKeyEvent(&key);
+  return ch ? ch :
+      GetCharacterFromKeyCode(key_code_, flags() & ui::EF_SHIFT_DOWN);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // MouseEvent, public:
-
-MouseEvent::MouseEvent(NativeEvent native_event)
-    : LocatedEvent(native_event) {
-}
 
 MouseEvent::MouseEvent(NativeEvent2 native_event_2,
                        FromNativeEvent2 from_native)
@@ -276,7 +358,7 @@ MouseEvent::MouseEvent(NativeEvent2 native_event_2,
 
 MouseWheelEvent::MouseWheelEvent(NativeEvent2 native_event_2,
                                  FromNativeEvent2 from_native)
-    : LocatedEvent(native_event_2, from_native),
+    : MouseEvent(native_event_2, from_native),
       offset_(GetMouseWheelOffset(native_event_2)) {
 }
 
@@ -284,11 +366,15 @@ MouseWheelEvent::MouseWheelEvent(NativeEvent2 native_event_2,
 // TouchEvent, public:
 
 #if defined(HAVE_XINPUT2)
-TouchEvent::TouchEvent(XEvent* xev)
-    : LocatedEvent(GetTouchEventType(xev),
-                   GetTouchEventLocation(xev),
-                   GetTouchEventFlags(xev)),
-      touch_id_(GetTouchIDFromXEvent(xev)) {
+TouchEvent::TouchEvent(NativeEvent2 native_event_2,
+                       FromNativeEvent2 from_native)
+    : LocatedEvent(GetTouchEventType(native_event_2),
+                   GetEventLocation(native_event_2),
+                   GetLocatedEventFlags(native_event_2, true)),
+      touch_id_(GetTouchIDFromXEvent(native_event_2)),
+      radius_(GetTouchRadiusFromXEvent(native_event_2)),
+      angle_(GetTouchAngleFromXEvent(native_event_2)),
+      ratio_(GetTouchRatioFromXEvent(native_event_2)) {
 }
 #endif
 

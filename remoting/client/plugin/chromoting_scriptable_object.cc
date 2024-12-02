@@ -8,6 +8,7 @@
 #include "base/stringprintf.h"
 #include "ppapi/cpp/var.h"
 #include "remoting/client/client_config.h"
+#include "remoting/client/chromoting_stats.h"
 #include "remoting/client/plugin/chromoting_instance.h"
 #include "remoting/client/plugin/pepper_xmpp_proxy.h"
 
@@ -26,6 +27,11 @@ const char kLoginChallenge[] = "loginChallenge";
 const char kSendIq[] = "sendIq";
 const char kQualityAttribute[] = "quality";
 const char kStatusAttribute[] = "status";
+const char kVideoBandwidthAttribute[] = "videoBandwidth";
+const char kVideoCaptureLatencyAttribute[] = "videoCaptureLatency";
+const char kVideoEncodeLatencyAttribute[] = "videoEncodeLatency";
+const char kVideoDecodeLatencyAttribute[] = "videoDecodeLatency";
+const char kVideoRenderLatencyAttribute[] = "videoRenderLatency";
 
 }  // namespace
 
@@ -68,6 +74,13 @@ void ChromotingScriptableObject::Init() {
   AddAttribute(kSendIq, Var());
   AddAttribute(kDesktopWidth, Var(0));
   AddAttribute(kDesktopHeight, Var(0));
+
+  // Statistics.
+  AddAttribute(kVideoBandwidthAttribute, Var());
+  AddAttribute(kVideoCaptureLatencyAttribute, Var());
+  AddAttribute(kVideoEncodeLatencyAttribute, Var());
+  AddAttribute(kVideoDecodeLatencyAttribute, Var());
+  AddAttribute(kVideoRenderLatencyAttribute, Var());
 
   AddMethod("connect", &ChromotingScriptableObject::DoConnect);
   AddMethod("connectSandboxed",
@@ -125,6 +138,20 @@ Var ChromotingScriptableObject::GetProperty(const Var& name, Var* exception) {
   if (iter == property_names_.end()) {
     return ScriptableObject::GetProperty(name, exception);
   }
+
+  // If this is a statistics attribute then return the value from
+  // ChromotingStats structure.
+  ChromotingStats* stats = instance_->GetStats();
+  if (name.AsString() == kVideoBandwidthAttribute)
+    return stats ? stats->video_bandwidth()->Rate() : Var();
+  if (name.AsString() == kVideoCaptureLatencyAttribute)
+    return stats ? stats->video_capture_ms()->Average() : Var();
+  if (name.AsString() == kVideoEncodeLatencyAttribute)
+    return stats ? stats->video_encode_ms()->Average() : Var();
+  if (name.AsString() == kVideoDecodeLatencyAttribute)
+    return stats ? stats->video_decode_ms()->Average() : Var();
+  if (name.AsString() == kVideoRenderLatencyAttribute)
+    return stats ? stats->video_paint_ms()->Average() : Var();
 
   // TODO(ajwong): This incorrectly return a null object if a function
   // property is requested.

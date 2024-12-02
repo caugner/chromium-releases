@@ -10,8 +10,10 @@
 #include "base/basictypes.h"
 #include "base/file_util_proxy.h"
 #include "base/id_map.h"
+#include "base/process.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_message.h"
+#include "ipc/ipc_platform_file.h"
 #include "webkit/fileapi/file_system_callback_dispatcher.h"
 #include "webkit/fileapi/file_system_types.h"
 
@@ -38,59 +40,68 @@ class FileSystemDispatcher : public IPC::Channel::Listener {
                       long long size,
                       bool create,
                       fileapi::FileSystemCallbackDispatcher* dispatcher);
-  bool Move(const FilePath& src_path,
-            const FilePath& dest_path,
+  bool Move(const GURL& src_path,
+            const GURL& dest_path,
             fileapi::FileSystemCallbackDispatcher* dispatcher);
-  bool Copy(const FilePath& src_path,
-            const FilePath& dest_path,
+  bool Copy(const GURL& src_path,
+            const GURL& dest_path,
             fileapi::FileSystemCallbackDispatcher* dispatcher);
-  bool Remove(const FilePath& path,
+  bool Remove(const GURL& path,
               bool recursive,
               fileapi::FileSystemCallbackDispatcher* dispatcher);
-  bool ReadMetadata(const FilePath& path,
+  bool ReadMetadata(const GURL& path,
                     fileapi::FileSystemCallbackDispatcher* dispatcher);
-  bool Create(const FilePath& path,
+  bool Create(const GURL& path,
               bool exclusive,
               bool is_directory,
               bool recursive,
               fileapi::FileSystemCallbackDispatcher* dispatcher);
-  bool Exists(const FilePath& path,
+  bool Exists(const GURL& path,
               bool for_directory,
               fileapi::FileSystemCallbackDispatcher* dispatcher);
-  bool ReadDirectory(const FilePath& path,
+  bool ReadDirectory(const GURL& path,
                      fileapi::FileSystemCallbackDispatcher* dispatcher);
-  bool Truncate(const FilePath& path,
+  bool Truncate(const GURL& path,
                 int64 offset,
                 int* request_id_out,
                 fileapi::FileSystemCallbackDispatcher* dispatcher);
-  bool Write(const FilePath& path,
+  bool Write(const GURL& path,
              const GURL& blob_url,
              int64 offset,
              int* request_id_out,
              fileapi::FileSystemCallbackDispatcher* dispatcher);
   bool Cancel(int request_id_to_cancel,
               fileapi::FileSystemCallbackDispatcher* dispatcher);
-  bool TouchFile(const FilePath& file_path,
+  bool TouchFile(const GURL& file_path,
                  const base::Time& last_access_time,
                  const base::Time& last_modified_time,
                  fileapi::FileSystemCallbackDispatcher* dispatcher);
 
+  // This returns a raw open PlatformFile, unlike the above, which are
+  // self-contained operations.
+  bool OpenFile(const GURL& file_path,
+                int file_flags,  // passed to FileUtilProxy::CreateOrOpen
+                fileapi::FileSystemCallbackDispatcher* dispatcher);
  private:
   // Message handlers.
   void OnOpenComplete(
       int request_id,
       bool accepted,
       const std::string& name,
-      const FilePath& root_path);
+      const GURL& root);
   void OnDidSucceed(int request_id);
   void OnDidReadMetadata(int request_id,
-                         const base::PlatformFileInfo& file_info);
+                         const base::PlatformFileInfo& file_info,
+                         const FilePath& platform_path);
   void OnDidReadDirectory(
       int request_id,
       const std::vector<base::FileUtilProxy::Entry>& entries,
       bool has_more);
   void OnDidFail(int request_id, base::PlatformFileError error_code);
   void OnDidWrite(int request_id, int64 bytes, bool complete);
+  void OnDidOpenFile(
+      int request_id,
+      IPC::PlatformFileForTransit file);
 
   IDMap<fileapi::FileSystemCallbackDispatcher, IDMapOwnPointer> dispatchers_;
 

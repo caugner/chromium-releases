@@ -13,7 +13,7 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/file_path.h"
-#include "base/ref_counted.h"
+#include "base/memory/ref_counted.h"
 #include "webkit/fileapi/file_system_types.h"
 
 class GURL;
@@ -24,11 +24,10 @@ class MessageLoopProxy;
 
 namespace fileapi {
 
-// Owned by the SandboxedFileSystemContext, which is a per-profile
-// instance, and has the same lifetime as the SandboxedFileSystemContext.
-// It's going to be created and destroyed on the IO thread in chrome.
-// (The destruction on the same thread where it is created was guaranteed
-// by its owner, SandboxedFileSystemContext.)
+// Owned by the FileSystemContext, which is a per-profile instance, and has the
+// same lifetime as the FileSystemContext.  It's going to be created and
+// destroyed on the IO thread in chrome.  (The destruction on the same thread
+// where it is created was guaranteed by its owner, FileSystemContext.)
 class FileSystemUsageTracker {
  public:
   FileSystemUsageTracker(

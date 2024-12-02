@@ -13,21 +13,19 @@
 #include <string>
 #include <vector>
 
-#include "app/surface/transport_dib.h"
 #include "base/file_path.h"
-#include "base/linked_ptr.h"
+#include "base/memory/linked_ptr.h"
+#include "base/shared_memory.h"
 #include "base/string16.h"
 #include "base/task.h"
 #include "build/build_config.h"
-#include "chrome/browser/net/resolve_proxy_msg_helper.h"
 #include "chrome/common/content_settings.h"
 #include "content/browser/browser_message_filter.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
-#include "ui/base/clipboard/clipboard.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/surface/transport_dib.h"
 
 class ChromeURLRequestContext;
 struct FontDescriptor;
@@ -36,9 +34,24 @@ class HostZoomMap;
 class NotificationsPrefsCache;
 class Profile;
 class RenderWidgetHelper;
-class URLRequestContextGetter;
 struct ViewHostMsg_CreateWindow_Params;
 struct ViewHostMsg_CreateWorker_Params;
+
+namespace WebKit {
+struct WebScreenInfo;
+}
+
+namespace gfx {
+class Rect;
+}
+namespace base {
+class SharedMemory;
+}
+
+namespace net {
+class CookieStore;
+class URLRequestContextGetter;
+}
 
 namespace webkit {
 namespace npapi {
@@ -46,26 +59,20 @@ struct WebPluginInfo;
 }
 }
 
-namespace base {
-class SharedMemory;
-}
-
-namespace net {
-class CookieStore;
-}
-
 // This class filters out incoming IPC messages for the renderer process on the
 // IPC thread.
-class RenderMessageFilter : public BrowserMessageFilter,
-                            public ResolveProxyMsgHelper::Delegate {
+class RenderMessageFilter : public BrowserMessageFilter {
  public:
   // Create the filter.
   RenderMessageFilter(int render_process_id,
                       PluginService* plugin_service,
                       Profile* profile,
+                      net::URLRequestContextGetter* request_context,
                       RenderWidgetHelper* render_widget_helper);
 
   // BrowserMessageFilter methods:
+  virtual void OverrideThreadForMessage(const IPC::Message& message,
+                                        BrowserThread::ID* thread);
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok);
   virtual void OnDestruct() const;
@@ -74,7 +81,7 @@ class RenderMessageFilter : public BrowserMessageFilter,
   ResourceDispatcherHost* resource_dispatcher_host() {
     return resource_dispatcher_host_;
   }
-  bool off_the_record() { return off_the_record_; }
+  bool incognito() { return incognito_; }
 
   // Returns either the extension net::URLRequestContext or regular
   // net::URLRequestContext depending on whether |url| is an extension URL.
@@ -108,7 +115,7 @@ class RenderMessageFilter : public BrowserMessageFilter,
                       const std::string& cookieName);
   void OnCookiesEnabled(const GURL& url,
                         const GURL& first_party_for_cookies,
-                        IPC::Message* reply_msg);
+                        bool* cookies_enabled);
   void OnPluginFileDialog(const IPC::Message& msg,
                           bool multiple_files,
                           const std::wstring& title,
@@ -129,102 +136,44 @@ class RenderMessageFilter : public BrowserMessageFilter,
 
 #if !defined(OS_MACOSX)
   // Not handled in the IO thread on Mac.
-  void OnGetScreenInfo(gfx::NativeViewId window, IPC::Message* reply);
+  void OnGetScreenInfo(gfx::NativeViewId window,
+                       WebKit::WebScreenInfo* results);
+  void OnGetWindowRect(gfx::NativeViewId window, gfx::Rect* rect);
+  void OnGetRootWindowRect(gfx::NativeViewId window, gfx::Rect* rect);
 #endif
-  void OnGetPlugins(bool refresh, IPC::Message* reply_msg);
-  void OnGetPluginsOnFileThread(bool refresh, IPC::Message* reply_msg);
+  void OnGetPlugins(bool refresh,
+                    std::vector<webkit::npapi::WebPluginInfo>* plugins);
   void OnGetPluginInfo(int routing_id,
                        const GURL& url,
                        const GURL& policy_url,
                        const std::string& mime_type,
-                       IPC::Message* reply_msg);
-  void OnGetPluginInfoOnFileThread(int render_view_id,
-                                   const GURL& url,
-                                   const GURL& policy_url,
-                                   const std::string& mime_type,
-                                   IPC::Message* reply_msg);
-  void OnGotPluginInfo(bool found,
-                       const webkit::npapi::WebPluginInfo& info,
-                       const std::string& actual_mime_type,
-                       const GURL& policy_url,
-                       IPC::Message* reply_msg);
+                       bool* found,
+                       webkit::npapi::WebPluginInfo* info,
+                       int* setting,
+                       std::string* actual_mime_type);
   void OnOpenChannelToPlugin(int routing_id,
                              const GURL& url,
                              const std::string& mime_type,
                              IPC::Message* reply_msg);
   void OnOpenChannelToPepperPlugin(const FilePath& path,
                                    IPC::Message* reply_msg);
-  void OnLaunchNaCl(const std::wstring& url,
-                    int channel_descriptor,
-                    IPC::Message* reply_msg);
+  void OnOpenChannelToPpapiBroker(int routing_id,
+                                  int request_id,
+                                  const FilePath& path);
   void OnGenerateRoutingID(int* route_id);
   void OnDownloadUrl(const IPC::Message& message,
                      const GURL& url,
                      const GURL& referrer);
-  void OnPlatformCheckSpelling(const string16& word, int tag, bool* correct);
-  void OnPlatformFillSuggestionList(const string16& word,
-                                    std::vector<string16>* suggestions);
-  void OnGetDocumentTag(IPC::Message* reply_msg);
-  void OnDocumentWithTagClosed(int tag);
-  void OnShowSpellingPanel(bool show);
-  void OnUpdateSpellingPanelWithMisspelledWord(const string16& word);
-  void OnDnsPrefetch(const std::vector<std::string>& hostnames);
-  void OnRendererHistograms(int sequence_number,
-                            const std::vector<std::string>& histogram_info);
-#if defined(USE_TCMALLOC)
-  void OnRendererTcmalloc(base::ProcessId pid, const std::string& output);
-#endif
-  void OnReceiveContextMenuMsg(const IPC::Message& msg);
-  // Clipboard messages
-  void OnClipboardWriteObjectsAsync(const ui::Clipboard::ObjectMap& objects);
-  void OnClipboardWriteObjectsSync(const ui::Clipboard::ObjectMap& objects,
-                                   base::SharedMemoryHandle bitmap_handle);
-
-  void OnClipboardIsFormatAvailable(ui::Clipboard::FormatType format,
-                                    ui::Clipboard::Buffer buffer,
-                                    IPC::Message* reply);
-  void OnClipboardReadText(ui::Clipboard::Buffer buffer, IPC::Message* reply);
-  void OnClipboardReadAsciiText(ui::Clipboard::Buffer buffer,
-                                IPC::Message* reply);
-  void OnClipboardReadHTML(ui::Clipboard::Buffer buffer, IPC::Message* reply);
-#if defined(OS_MACOSX)
-  void OnClipboardFindPboardWriteString(const string16& text);
-#endif
-  void OnClipboardReadAvailableTypes(ui::Clipboard::Buffer buffer,
-                                     IPC::Message* reply);
-  void OnClipboardReadData(ui::Clipboard::Buffer buffer, const string16& type,
-                           IPC::Message* reply);
-  void OnClipboardReadFilenames(ui::Clipboard::Buffer buffer,
-                                IPC::Message* reply);
-
   void OnCheckNotificationPermission(const GURL& source_url,
                                      int* permission_level);
 
-#if !defined(OS_MACOSX)
-  // Not handled in the IO thread on Mac.
-  void OnGetWindowRect(gfx::NativeViewId window, IPC::Message* reply);
-  void OnGetRootWindowRect(gfx::NativeViewId window, IPC::Message* reply);
-#endif
-
   void OnRevealFolderInOS(const FilePath& path);
-  void OnGetCPBrowsingContext(uint32* context);
 
-  // Used to ask the browser to allocate a block of shared memory for the
+// Used to ask the browser to allocate a block of shared memory for the
   // renderer to send back data in, since shared memory can't be created
   // in the renderer on POSIX due to the sandbox.
   void OnAllocateSharedMemoryBuffer(uint32 buffer_size,
                                     base::SharedMemoryHandle* handle);
-
-  void OnResourceTypeStats(const WebKit::WebCache::ResourceTypeStats& stats);
-  static void OnResourceTypeStatsOnUIThread(
-      const WebKit::WebCache::ResourceTypeStats&,
-      base::ProcessId renderer_id);
-
-  void OnV8HeapStats(int v8_memory_allocated, int v8_memory_used);
-  static void OnV8HeapStatsOnUIThread(int v8_memory_allocated,
-                                      int v8_memory_used,
-                                      base::ProcessId renderer_id);
-
   void OnDidZoomURL(const IPC::Message& message,
                     double zoom_level,
                     bool remember,
@@ -237,38 +186,16 @@ class RenderMessageFilter : public BrowserMessageFilter,
 
   void OnResolveProxy(const GURL& url, IPC::Message* reply_msg);
 
-  // ResolveProxyMsgHelper::Delegate implementation:
-  virtual void OnResolveProxyCompleted(IPC::Message* reply_msg,
-                                       int result,
-                                       const std::string& proxy_list);
-
   // Browser side transport DIB allocation
   void OnAllocTransportDIB(size_t size,
                            bool cache_in_browser,
                            TransportDIB::Handle* result);
   void OnFreeTransportDIB(TransportDIB::Id dib_id);
-
-  void OnOpenChannelToExtension(int routing_id,
-                                const std::string& source_extension_id,
-                                const std::string& target_extension_id,
-                                const std::string& channel_name, int* port_id);
-  void OpenChannelToExtensionOnUIThread(int source_process_id,
-                                        int source_routing_id,
-                                        int receiver_port_id,
-                                        const std::string& source_extension_id,
-                                        const std::string& target_extension_id,
-                                        const std::string& channel_name);
-  void OnOpenChannelToTab(int routing_id, int tab_id,
-                          const std::string& extension_id,
-                          const std::string& channel_name, int* port_id);
-  void OpenChannelToTabOnUIThread(int source_process_id, int source_routing_id,
-                                  int receiver_port_id,
-                                  int tab_id, const std::string& extension_id,
-                                  const std::string& channel_name);
-
   void OnCloseCurrentConnections();
   void OnSetCacheMode(bool enabled);
   void OnClearCache(bool preserve_ssl_host_info, IPC::Message* reply_msg);
+  void OnClearHostResolverCache(int* result);
+  void OnClearPredictorCache(int* result);
   void OnCacheableMetadataAvailable(const GURL& url,
                                     double expected_response_time,
                                     const std::vector<char>& data);
@@ -280,13 +207,6 @@ class RenderMessageFilter : public BrowserMessageFilter,
       const std::string& challenge_string,
       const GURL& url,
       IPC::Message* reply_msg);
-  void OnGetExtensionMessageBundle(const std::string& extension_id,
-                                   IPC::Message* reply_msg);
-  void OnGetExtensionMessageBundleOnFileThread(
-      const FilePath& extension_path,
-      const std::string& extension_id,
-      const std::string& default_locale,
-      IPC::Message* reply_msg);
   void OnAsyncOpenFile(const IPC::Message& msg,
                        const FilePath& path,
                        int flags,
@@ -296,35 +216,8 @@ class RenderMessageFilter : public BrowserMessageFilter,
                                  int message_id,
                                  int routing_id);
 
-#if defined(USE_X11)
-  void DoOnGetScreenInfo(gfx::NativeViewId view, IPC::Message* reply_msg);
-  void DoOnGetWindowRect(gfx::NativeViewId view, IPC::Message* reply_msg);
-  void DoOnGetRootWindowRect(gfx::NativeViewId view, IPC::Message* reply_msg);
-  void DoOnClipboardIsFormatAvailable(ui::Clipboard::FormatType format,
-                                      ui::Clipboard::Buffer buffer,
-                                      IPC::Message* reply_msg);
-  void DoOnClipboardReadText(ui::Clipboard::Buffer buffer,
-                             IPC::Message* reply_msg);
-  void DoOnClipboardReadAsciiText(ui::Clipboard::Buffer buffer,
-                                  IPC::Message* reply_msg);
-  void DoOnClipboardReadHTML(ui::Clipboard::Buffer buffer,
-                             IPC::Message* reply_msg);
-  void DoOnClipboardReadAvailableTypes(ui::Clipboard::Buffer buffer,
-                                       IPC::Message* reply_msg);
-  void DoOnClipboardReadData(ui::Clipboard::Buffer buffer, const string16& type,
-                             IPC::Message* reply_msg);
-  void DoOnClipboardReadFilenames(ui::Clipboard::Buffer buffer,
-                                  IPC::Message* reply_msg);
-#endif
-
   bool CheckBenchmarkingEnabled() const;
   bool CheckPreparsedJsCachingEnabled() const;
-
-  // We have our own clipboard because we want to access the clipboard on the
-  // IO thread instead of forwarding (possibly synchronous) messages to the UI
-  // thread. This instance of the clipboard should be accessed only on the IO
-  // thread.
-  static ui::Clipboard* GetClipboard();
 
   // Cached resource request dispatcher host and plugin service, guaranteed to
   // be non-null if Init succeeds. We do not own the objects, they are managed
@@ -340,15 +233,11 @@ class RenderMessageFilter : public BrowserMessageFilter,
   // access it on other threads.
   HostContentSettingsMap* content_settings_;
 
-  // Helper class for handling PluginProcessHost_ResolveProxy messages (manages
-  // the requests to the proxy service).
-  ResolveProxyMsgHelper resolve_proxy_msg_helper_;
-
   // Contextual information to be used for requests created here.
-  scoped_refptr<URLRequestContextGetter> request_context_;
+  scoped_refptr<net::URLRequestContextGetter> request_context_;
 
   // A request context that holds a cookie store for chrome-extension URLs.
-  scoped_refptr<URLRequestContextGetter> extensions_request_context_;
+  scoped_refptr<net::URLRequestContextGetter> extensions_request_context_;
 
   scoped_refptr<RenderWidgetHelper> render_widget_helper_;
 
@@ -359,10 +248,11 @@ class RenderMessageFilter : public BrowserMessageFilter,
   // Handles zoom-related messages.
   scoped_refptr<HostZoomMap> host_zoom_map_;
 
-  // Whether this process is used for off the record tabs.
-  bool off_the_record_;
+  // Whether this process is used for incognito tabs.
+  bool incognito_;
 
-  base::TimeTicks last_plugin_refresh_time_;  // Initialized to 0.
+  // Initialized to 0, accessed on FILE thread only.
+  base::TimeTicks last_plugin_refresh_time_;
 
   scoped_refptr<WebKitContext> webkit_context_;
 
@@ -435,19 +325,6 @@ class GetCookiesCompletion : public net::CompletionCallback {
   int render_view_id_;
   bool raw_cookies_;
   scoped_refptr<net::CookieStore> cookie_store_;
-};
-
-class CookiesEnabledCompletion : public net::CompletionCallback {
- public:
-  CookiesEnabledCompletion(IPC::Message* reply_msg,
-                           RenderMessageFilter* filter);
-  virtual ~CookiesEnabledCompletion();
-
-  virtual void RunWithParams(const Tuple1<int>& params);
-
- private:
-  IPC::Message* reply_msg_;
-  scoped_refptr<RenderMessageFilter> filter_;
 };
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_RENDER_MESSAGE_FILTER_H_

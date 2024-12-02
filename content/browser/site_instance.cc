@@ -4,12 +4,13 @@
 
 #include "content/browser/site_instance.h"
 
-#include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/renderer_host/browser_render_process_host.h"
-#include "chrome/common/notification_service.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browsing_instance.h"
+#include "content/browser/content_browser_client.h"
+#include "content/browser/renderer_host/browser_render_process_host.h"
 #include "content/browser/webui/web_ui_factory.h"
+#include "content/common/notification_service.h"
+#include "content/common/content_client.h"
 #include "net/base/registry_controlled_domain.h"
 
 // We treat javascript:, about:crash, about:hang, and about:shorthang as the
@@ -188,18 +189,7 @@ bool SiteInstance::IsSameWebSite(Profile* profile,
 
 /*static*/
 GURL SiteInstance::GetEffectiveURL(Profile* profile, const GURL& url) {
-  if (!profile || !profile->GetExtensionService())
-    return url;
-
-  const Extension* extension =
-      profile->GetExtensionService()->GetExtensionByWebExtent(url);
-  if (extension) {
-    // If the URL is part of an extension's web extent, convert it to an
-    // extension URL.
-    return extension->GetResourceURL(url.path());
-  } else {
-    return url;
-  }
+  return content::GetContentClient()->browser()->GetEffectiveURL(profile, url);
 }
 
 /*static*/
@@ -211,7 +201,7 @@ RenderProcessHost::Type SiteInstance::RendererTypeForURL(const GURL& url) {
     return RenderProcessHost::TYPE_EXTENSION;
 
   // TODO(erikkay) creis recommends using UseWebUIForURL instead.
-  if (WebUIFactory::HasWebUIScheme(url))
+  if (content::WebUIFactory::Get()->HasWebUIScheme(url))
     return RenderProcessHost::TYPE_WEBUI;
 
   return RenderProcessHost::TYPE_NORMAL;

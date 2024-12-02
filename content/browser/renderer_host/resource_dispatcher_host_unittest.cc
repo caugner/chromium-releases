@@ -7,11 +7,10 @@
 #include "base/file_path.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
-#include "chrome/common/chrome_plugin_lib.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/render_messages_params.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/child_process_security_policy.h"
+#include "content/browser/mock_resource_context.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "content/browser/renderer_host/resource_handler.h"
@@ -76,8 +75,6 @@ static ResourceHostMsg_Request CreateResourceRequest(
   request.request_context = 0;
   request.appcache_host_id = appcache::kNoHostId;
   request.download_to_file = false;
-  request.host_renderer_id = -1;
-  request.host_render_view_id = -1;
   return request;
 }
 
@@ -125,6 +122,15 @@ void ResourceIPCAccumulator::GetClassifiedMessages(ClassifiedMessages* msgs) {
   }
 }
 
+class MockURLRequestContextSelector
+    : public ResourceMessageFilter::URLRequestContextSelector {
+ public:
+  virtual net::URLRequestContext* GetRequestContext(
+      ResourceType::Type request_type) {
+    return NULL;
+  }
+};
+
 // This class forwards the incoming messages to the ResourceDispatcherHostTest.
 // This is used to emulate different sub-processes, since this filter will
 // have a different ID than the original. For the test, we want all the incoming
@@ -134,6 +140,8 @@ class ForwardingFilter : public ResourceMessageFilter {
   explicit ForwardingFilter(IPC::Message::Sender* dest)
     : ResourceMessageFilter(ChildProcessInfo::GenerateChildProcessUniqueId(),
                             ChildProcessInfo::RENDER_PROCESS,
+                            &content::MockResourceContext::GetInstance(),
+                            new MockURLRequestContextSelector,
                             NULL),
       dest_(dest) {
     OnChannelConnected(base::GetCurrentProcId());
@@ -156,9 +164,10 @@ class ResourceDispatcherHostTest : public testing::Test,
                                    public IPC::Message::Sender {
  public:
   ResourceDispatcherHostTest()
-      : ALLOW_THIS_IN_INITIALIZER_LIST(filter_(new ForwardingFilter(this))),
-        ui_thread_(BrowserThread::UI, &message_loop_),
+      : ui_thread_(BrowserThread::UI, &message_loop_),
         io_thread_(BrowserThread::IO, &message_loop_),
+        ALLOW_THIS_IN_INITIALIZER_LIST(filter_(new ForwardingFilter(this))),
+        host_(ResourceQueue::DelegateSet()),
         old_factory_(NULL),
         resource_type_(ResourceType::SUB_RESOURCE) {
   }
@@ -192,10 +201,6 @@ class ResourceDispatcherHostTest : public testing::Test,
     host_.Shutdown();
 
     ChildProcessSecurityPolicy::GetInstance()->Remove(0);
-
-    // The plugin lib is automatically loaded during these test
-    // and we want a clean environment for other tests.
-    ChromePluginLib::UnloadAllPlugins();
 
     // Flush the message loop to make Purify happy.
     message_loop_.RunAllPending();
@@ -259,10 +264,10 @@ class ResourceDispatcherHostTest : public testing::Test,
     }
   }
 
-  scoped_refptr<ForwardingFilter> filter_;
   MessageLoopForIO message_loop_;
   BrowserThread ui_thread_;
   BrowserThread io_thread_;
+  scoped_refptr<ForwardingFilter> filter_;
   ResourceDispatcherHost host_;
   ResourceIPCAccumulator accum_;
   std::string response_headers_;
@@ -939,6 +944,44 @@ TEST_F(ResourceDispatcherHostTest, ForbiddenDownload) {
   EXPECT_EQ(net::ERR_FILE_NOT_FOUND, status.os_error());
 }
 
+// Test for http://crbug.com/76202 .  We don't want to destroy a
+// download request prematurely when processing a cancellation from
+// the renderer.
+TEST_F(ResourceDispatcherHostTest, IgnoreCancelForDownloads) {
+  EXPECT_EQ(0, host_.pending_requests());
+
+  int render_view_id = 0;
+  int request_id = 1;
+
+  std::string response("HTTP\n"
+                       "Content-disposition: attachment; filename=foo\n\n");
+  std::string raw_headers(net::HttpUtil::AssembleRawHeaders(response.data(),
+                                                            response.size()));
+  std::string response_data("01234567890123456789\x01foobar");
+
+  SetResponse(raw_headers, response_data);
+  SetResourceType(ResourceType::MAIN_FRAME);
+  HandleScheme("http");
+
+  MakeTestRequest(render_view_id, request_id, GURL("http://example.com/blah"));
+  // Return some data so that the request is identified as a download
+  // and the proper resource handlers are created.
+  EXPECT_TRUE(net::URLRequestTestJob::ProcessOnePendingMessage());
+
+  // And now simulate a cancellation coming from the renderer.
+  ResourceHostMsg_CancelRequest msg(filter_->child_id(), request_id);
+  bool msg_was_ok;
+  host_.OnMessageReceived(msg, filter_.get(), &msg_was_ok);
+
+  // Since the request had already started processing as a download,
+  // the cancellation above should have been ignored and the request
+  // should still be alive.
+  EXPECT_EQ(1, host_.pending_requests());
+
+  while (net::URLRequestTestJob::ProcessOnePendingMessage()) {}
+  EXPECT_EQ(0, host_.GetOutstandingRequestsMemoryCost(0));
+}
+
 class DummyResourceHandler : public ResourceHandler {
  public:
   DummyResourceHandler() {}
@@ -979,26 +1022,4 @@ class DummyResourceHandler : public ResourceHandler {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DummyResourceHandler);
-};
-
-class ApplyExtensionLocalizationFilterTest : public testing::Test {
- protected:
-  void SetUp() {
-    url_.reset(new GURL(
-        "chrome-extension://behllobkkfkfnphdnhnkndlbkcpglgmj/popup.html"));
-    resource_type_ = ResourceType::STYLESHEET;
-    resource_handler_.reset(new DummyResourceHandler());
-    request_info_.reset(CreateNewResourceRequestInfo());
-  }
-
-  ResourceDispatcherHostRequestInfo* CreateNewResourceRequestInfo() {
-    return new ResourceDispatcherHostRequestInfo(
-        resource_handler_.get(), ChildProcessInfo::RENDER_PROCESS, 0, 0, 0,
-        ResourceType::STYLESHEET, 0U, false, false, false, -1, -1);
-  }
-
-  scoped_ptr<GURL> url_;
-  ResourceType::Type resource_type_;
-  scoped_ptr<DummyResourceHandler> resource_handler_;
-  scoped_ptr<ResourceDispatcherHostRequestInfo> request_info_;
 };

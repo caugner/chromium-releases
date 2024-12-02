@@ -828,20 +828,22 @@
   void TexSubImage2D(
       GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width,
       GLsizei height, GLenum format, GLenum type, uint32 pixels_shm_id,
-      uint32 pixels_shm_offset) {
+      uint32 pixels_shm_offset, GLboolean internal) {
     gles2::TexSubImage2D& c = GetCmdSpace<gles2::TexSubImage2D>();
     c.Init(
         target, level, xoffset, yoffset, width, height, format, type,
-        pixels_shm_id, pixels_shm_offset);
+        pixels_shm_id, pixels_shm_offset, internal);
   }
 
   void TexSubImage2DImmediate(
       GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width,
-      GLsizei height, GLenum format, GLenum type) {
+      GLsizei height, GLenum format, GLenum type, GLboolean internal) {
     const uint32 s = 0;  // TODO(gman): compute correct size
     gles2::TexSubImage2DImmediate& c =
         GetImmediateCmdSpaceTotalSize<gles2::TexSubImage2DImmediate>(s);
-    c.Init(target, level, xoffset, yoffset, width, height, format, type);
+    c.Init(
+        target, level, xoffset, yoffset, width, height, format, type,
+        internal);
   }
 
   void Uniform1f(GLint location, GLfloat x) {
@@ -1213,6 +1215,16 @@
     gles2::RequestExtensionCHROMIUM& c =
         GetCmdSpace<gles2::RequestExtensionCHROMIUM>();
     c.Init(bucket_id);
+  }
+
+  void SetLatchCHROMIUM(GLuint latch_id) {
+    gles2::SetLatchCHROMIUM& c = GetCmdSpace<gles2::SetLatchCHROMIUM>();
+    c.Init(latch_id);
+  }
+
+  void WaitLatchCHROMIUM(GLuint latch_id) {
+    gles2::WaitLatchCHROMIUM& c = GetCmdSpace<gles2::WaitLatchCHROMIUM>();
+    c.Init(latch_id);
   }
 
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_CMD_HELPER_AUTOGEN_H_

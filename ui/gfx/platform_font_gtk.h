@@ -6,7 +6,7 @@
 #define UI_GFX_PLATFORM_FONT_GTK_
 #pragma once
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "ui/gfx/platform_font.h"
 
@@ -26,6 +26,11 @@ class PlatformFontGtk : public PlatformFont {
   // Converts |gfx_font| to a new pango font. Free the returned font with
   // pango_font_description_free().
   static PangoFontDescription* PangoFontFromGfxFont(const gfx::Font& gfx_font);
+
+  // Resets and reloads the cached system font used by the default constructor.
+  // This function is useful when the system font has changed, for example, when
+  // the locale has changed.
+  static void ReloadDefaultFont();
 
   // Position as an offset from the height of the drawn text, used to draw
   // an underline. This is a negative number, so the underline would be

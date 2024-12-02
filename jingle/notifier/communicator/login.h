@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,10 +7,12 @@
 
 #include <string>
 
-#include "base/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/time.h"
 #include "base/timer.h"
-#include "base/weak_ptr.h"
+#include "jingle/notifier/base/server_information.h"
 #include "jingle/notifier/communicator/single_login_attempt.h"
 #include "net/base/network_change_notifier.h"
 #include "talk/xmpp/xmppengine.h"
@@ -22,8 +24,7 @@ class XmppClientSettings;
 }  // namespace buzz
 
 namespace net {
-class CertVerifier;
-class HostResolver;
+class URLRequestContextGetter;
 }  // namespace net
 
 namespace talk_base {
@@ -35,7 +36,6 @@ namespace notifier {
 
 class ConnectionOptions;
 class LoginSettings;
-struct ServerInformation;
 
 // Workaround for MSVS 2005 bug that fails to handle inheritance from a nested
 // class properly if it comes directly on a base class list.
@@ -60,14 +60,17 @@ class Login : public net::NetworkChangeNotifier::IPAddressObserver,
   Login(Delegate* delegate,
         const buzz::XmppClientSettings& user_settings,
         const ConnectionOptions& options,
-        net::HostResolver* host_resolver,
-        net::CertVerifier* cert_verifier,
-        ServerInformation* server_list,
-        int server_count,
-        bool try_ssltcp_first);
+        const scoped_refptr<net::URLRequestContextGetter>&
+            request_context_getter,
+        const ServerList& servers,
+        bool try_ssltcp_first,
+        const std::string& auth_mechanism);
   virtual ~Login();
 
   void StartConnection();
+  // The updated settings only take effect the next time StartConnection
+  // is called.
+  void UpdateXmppSettings(const buzz::XmppClientSettings& user_settings);
 
   // net::NetworkChangeNotifier::IPAddressObserver implementation.
   virtual void OnIPAddressChanged();
@@ -108,6 +111,10 @@ class Login : public net::NetworkChangeNotifier::IPAddressObserver,
 
   DISALLOW_COPY_AND_ASSIGN(Login);
 };
+
+// Workaround for MSVS 2005 bug that fails to handle inheritance from a nested
+// class properly if it comes directly on a base class list.
+typedef Login::Delegate LoginDelegate;
 
 }  // namespace notifier
 

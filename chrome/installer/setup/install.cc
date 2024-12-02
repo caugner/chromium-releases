@@ -12,8 +12,8 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/installer/setup/setup_constants.h"
@@ -262,6 +262,8 @@ installer::InstallStatus InstallNewVersion(
     scoped_ptr<Version>* current_version) {
   DCHECK(current_version);
 
+  installer_state.UpdateStage(installer::BUILDING);
+
   current_version->reset(installer_state.GetCurrentVersion(original_state));
   scoped_ptr<WorkItemList> install_list(WorkItem::CreateWorkItemList());
 
@@ -281,7 +283,10 @@ installer::InstallStatus InstallNewVersion(
   FilePath new_chrome_exe(
       installer_state.target_path().Append(installer::kChromeNewExe));
 
+  installer_state.UpdateStage(installer::EXECUTING);
+
   if (!install_list->Do()) {
+    installer_state.UpdateStage(installer::ROLLINGBACK);
     installer::InstallStatus result =
         file_util::PathExists(new_chrome_exe) && current_version->get() &&
         new_version.Equals(*current_version->get()) ?
@@ -292,6 +297,8 @@ installer::InstallStatus InstallNewVersion(
     LOG(ERROR) << "Rollback complete. ";
     return result;
   }
+
+  installer_state.UpdateStage(installer::FINISHING);
 
   installer::RefreshElevationPolicy();
 
@@ -358,6 +365,10 @@ InstallStatus InstallOrUpdateProduct(
   // TODO(robertshield): Everything below this line should instead be captured
   // by WorkItems.
   if (!InstallUtil::GetInstallReturnCode(result)) {
+    // Update the modifiers on the channel values for the product(s) being
+    // installed and for the binaries in case of multi-install.
+    installer_state.UpdateChannels();
+
     if (result == FIRST_INSTALL_SUCCESS && !prefs_path.empty())
       CopyPreferenceFileForFirstRun(installer_state, prefs_path);
 
@@ -400,8 +411,10 @@ InstallStatus InstallOrUpdateProduct(
           make_chrome_default || force_chrome_default_for_user);
     }
 
-    installer_state.RemoveOldVersionDirectories(existing_version.get() ?
-        *existing_version.get() : new_version, install_temp_path);
+    installer_state.RemoveOldVersionDirectories(
+        new_version,
+        existing_version.get(),
+        install_temp_path);
   }
 
   return result;

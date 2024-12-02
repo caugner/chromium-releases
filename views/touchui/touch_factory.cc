@@ -5,8 +5,11 @@
 #include "views/touchui/touch_factory.h"
 
 #include <X11/cursorfont.h>
+#include <X11/extensions/XInput.h>
 #include <X11/extensions/XInput2.h>
+#include <X11/extensions/XIproto.h>
 
+#include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "ui/base/x/x11_util.h"
@@ -15,6 +18,54 @@
 static int kCursorIdleSeconds = 5;
 
 namespace views {
+
+namespace {
+
+// Given the TouchParam, return the correspoding valuator index using
+// the X device information through Atom name matching.
+char FindTPValuator(Display* display,
+                    XIDeviceInfo* info,
+                    TouchFactory::TouchParam touch_param) {
+  // Lookup table for mapping TouchParam to Atom string used in X.
+  // A full set of Atom strings can be found at xserver-properties.h.
+  static struct {
+    TouchFactory::TouchParam tp;
+    const char* atom;
+  } kTouchParamAtom[] = {
+    { TouchFactory::TP_TOUCH_MAJOR, "Abs MT Touch Major" },
+    { TouchFactory::TP_TOUCH_MINOR, "Abs MT Touch Minor" },
+    { TouchFactory::TP_ORIENTATION, "Abs MT Orientation" },
+    { TouchFactory::TP_LAST_ENTRY, NULL },
+  };
+
+  const char* atom_tp = NULL;
+
+  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTouchParamAtom); i++) {
+    if (touch_param == kTouchParamAtom[i].tp) {
+      atom_tp = kTouchParamAtom[i].atom;
+      break;
+    }
+  }
+
+  if (!atom_tp)
+    return -1;
+
+  for (int i = 0; i < info->num_classes; i++) {
+    if (info->classes[i]->type != XIValuatorClass)
+      continue;
+    XIValuatorClassInfo* v =
+        reinterpret_cast<XIValuatorClassInfo*>(info->classes[i]);
+
+    const char* atom = XGetAtomName(display, v->label);
+
+    if (atom && strcmp(atom, atom_tp) == 0)
+      return v->number;
+  }
+
+  return -1;
+}
+
+}  // namespace
 
 // static
 TouchFactory* TouchFactory::GetInstance() {
@@ -36,6 +87,26 @@ TouchFactory::TouchFactory()
   arrow_cursor_ = XCreateFontCursor(display, XC_arrow);
 
   SetCursorVisible(false, false);
+
+  // Detect touch devices.
+  // NOTE: The new API for retrieving the list of devices (XIQueryDevice) does
+  // not provide enough information to detect a touch device. As a result, the
+  // old version of query function (XListInputDevices) is used instead.
+  // If XInput2 is not supported, this will return null (with count of -1) so
+  // we assume there cannot be any touch devices.
+  int count = 0;
+  XDeviceInfo* devlist = XListInputDevices(display, &count);
+  for (int i = 0; i < count; i++) {
+    const char* devtype = XGetAtomName(display, devlist[i].type);
+    if (devtype && !strcmp(devtype, XI_TOUCHSCREEN)) {
+      touch_device_lookup_[devlist[i].id] = true;
+      touch_device_list_.push_back(devlist[i].id);
+    }
+  }
+  if (devlist)
+    XFreeDeviceList(devlist);
+
+  SetupValuator();
 }
 
 TouchFactory::~TouchFactory() {
@@ -55,9 +126,11 @@ void TouchFactory::SetTouchDeviceList(
     touch_device_lookup_[*iter] = true;
     touch_device_list_.push_back(*iter);
   }
+
+  SetupValuator();
 }
 
-bool TouchFactory::IsTouchDevice(unsigned deviceid) {
+bool TouchFactory::IsTouchDevice(unsigned deviceid) const {
   return deviceid < touch_device_lookup_.size() ?
       touch_device_lookup_[deviceid] : false;
 }
@@ -123,6 +196,44 @@ void TouchFactory::SetCursorVisible(bool show, bool start_timer) {
   } else {
     XDefineCursor(display, window, invisible_cursor_);
   }
+}
+
+void TouchFactory::SetupValuator() {
+  memset(valuator_lookup_, -1, sizeof(valuator_lookup_));
+
+  Display* display = ui::GetXDisplay();
+  int ndevice;
+  XIDeviceInfo* info_list = XIQueryDevice(display, XIAllDevices, &ndevice);
+
+  for (int i = 0; i < ndevice; i++) {
+    XIDeviceInfo* info = info_list + i;
+
+    if (!IsTouchDevice(info->deviceid))
+      continue;
+
+    for (int i = 0; i < TP_LAST_ENTRY; i++) {
+      TouchParam tp = static_cast<TouchParam>(i);
+      valuator_lookup_[info->deviceid][i] = FindTPValuator(display, info, tp);
+    }
+  }
+
+  if (info_list)
+    XIFreeDeviceInfo(info_list);
+}
+
+bool TouchFactory::ExtractTouchParam(const XEvent& xev,
+                                     TouchParam tp,
+                                     float* value) {
+  XIDeviceEvent* xiev = static_cast<XIDeviceEvent*>(xev.xcookie.data);
+  if (xiev->sourceid >= kMaxDeviceNum)
+    return false;
+  int v = valuator_lookup_[xiev->sourceid][tp];
+  if (v >= 0 && XIMaskIsSet(xiev->valuators.mask, v)) {
+    *value = xiev->valuators.values[v];
+    return true;
+  }
+
+  return false;
 }
 
 }  // namespace views

@@ -34,24 +34,24 @@ ui::EventType EventTypeFromNative(NativeEvent native_event) {
     case WM_KEYUP:
     case WM_SYSKEYUP:
       return ui::ET_KEY_RELEASED;
+    case WM_LBUTTONDBLCLK:
     case WM_LBUTTONDOWN:
+    case WM_MBUTTONDBLCLK:
     case WM_MBUTTONDOWN:
+    case WM_NCLBUTTONDBLCLK:
     case WM_NCLBUTTONDOWN:
+    case WM_NCMBUTTONDBLCLK:
     case WM_NCMBUTTONDOWN:
+    case WM_NCRBUTTONDBLCLK:
     case WM_NCRBUTTONDOWN:
+    case WM_RBUTTONDBLCLK:
     case WM_RBUTTONDOWN:
       return ui::ET_MOUSE_PRESSED;
-    case WM_LBUTTONDBLCLK:
     case WM_LBUTTONUP:
-    case WM_MBUTTONDBLCLK:
     case WM_MBUTTONUP:
-    case WM_NCLBUTTONDBLCLK:
     case WM_NCLBUTTONUP:
-    case WM_NCMBUTTONDBLCLK:
     case WM_NCMBUTTONUP:
-    case WM_NCRBUTTONDBLCLK:
     case WM_NCRBUTTONUP:
-    case WM_RBUTTONDBLCLK:
     case WM_RBUTTONUP:
       return ui::ET_MOUSE_RELEASED;
     case WM_MOUSEMOVE:
@@ -215,6 +215,17 @@ KeyEvent::KeyEvent(NativeEvent2 native_event_2, FromNativeEvent2 from_native)
   // No one should ever call this on Windows.
   // TODO(beng): remove once we rid views of Gtk/Gdk.
   NOTREACHED();
+}
+
+uint16 KeyEvent::GetCharacter() const {
+  return (native_event().message == WM_CHAR) ? key_code_ :
+      GetCharacterFromKeyCode(key_code_, flags());
+}
+
+uint16 KeyEvent::GetUnmodifiedCharacter() const {
+  // Looks like there is no way to get unmodified character on Windows.
+  return (native_event().message == WM_CHAR) ? key_code_ :
+      GetCharacterFromKeyCode(key_code_, flags() & ui::EF_SHIFT_DOWN);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

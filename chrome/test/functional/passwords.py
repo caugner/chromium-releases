@@ -3,6 +3,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import os
+
 import pyauto_functional  # Must be imported before pyauto
 import pyauto
 import test_utils
@@ -184,6 +186,90 @@ class PasswordTest(pyauto.PyUITest):
     self.GetBrowserWindow(0).GetTab(0).Reload()
     self.assertTrue(self.WaitForInfobarCount(0))
     self.assertFalse(self.GetBrowserInfo()['windows'][0]['tabs'][0]['infobars'])
+
+  def testPasswdInfoNotStoredWhenAutocompleteOff(self):
+    """Verify that password infobar does not appear when autocomplete is off.
+
+    If the password field has autocomplete turned off, then the password infobar
+    should not offer to save the password info.
+    """
+    password_info = {'Email': 'test@google.com',
+                     'Passwd': 'test12345'}
+
+    url = self.GetHttpURLForDataPath(
+        os.path.join('password', 'password_autocomplete_off_test.html'))
+    self.NavigateToURL(url)
+    for key, value in password_info.iteritems():
+      script = ('document.getElementById("%s").value = "%s"; '
+                'window.domAutomationController.send("done");') % (key, value)
+      self.ExecuteJavascript(script, 0, 0)
+    js_code = """
+      document.getElementById("loginform").submit();
+      window.addEventListener("unload", function() {
+        window.domAutomationController.send("done");
+      });
+    """
+    self.ExecuteJavascript(js_code, 0, 0)
+    # Wait until the form is submitted and the page completes loading.
+    self.WaitUntil(
+        lambda: self.GetDOMValue('document.readyState'),
+        expect_retval='complete')
+    password_infobar = (
+        self.GetBrowserInfo()['windows'][0]['tabs'][0]['infobars'])
+    self.assertFalse(password_infobar,
+                     msg='Save password infobar offered to save password info.')
+
+  def _SendCharToPopulateField(self, char, tab_index=0, windex=0):
+    """Simulate a char being typed into a field.
+
+    Args:
+      char: the char value to be typed into the field.
+      tab_index: tab index to work on. Defaults to 0 (first tab).
+      windex: window index to work on. Defaults to 0 (first window).
+    """
+    CHAR_KEYPRESS = ord((char).upper())  # ASCII char key press.
+    KEY_DOWN_TYPE = 0  # kRawKeyDownType
+    KEY_UP_TYPE = 3  # kKeyUpType
+
+    self.SendWebkitKeyEvent(KEY_DOWN_TYPE, CHAR_KEYPRESS, tab_index, windex)
+    self.SendWebkitCharEvent(char, tab_index, windex)
+    self.SendWebkitKeyEvent(KEY_UP_TYPE, CHAR_KEYPRESS, tab_index, windex)
+
+  def testClearFetchedCredForNewUserName(self):
+    """Verify that the fetched credentials are cleared for a new username.
+
+    This test requires sending key events rather than pasting a new username
+    into the Email field.
+    """
+    user_creds = self._ConstructPasswordDictionary(
+        'user1@example.com', 'test1.password',
+        'https://www.google.com/',
+        'https://www.google.com/accounts/ServiceLogin',
+        'username', 'password',
+        'https://www.google.com/accounts/ServiceLogin')
+
+    url = 'https://www.google.com/accounts/ServiceLogin'
+    self.AddSavedPassword(user_creds)
+    self.NavigateToURL(url)
+    self.WaitUntil(
+        lambda: self.GetDOMValue('document.readyState'),
+        expect_retval='complete')
+    test_utils.VerifyGoogleAccountCredsFilled(
+        self, user_creds['username_value'], user_creds['password_value'],
+        tab_index=0, windex=0)
+    clear_username_field = (
+        'document.getElementById("Email").value = ""; '
+        'window.domAutomationController.send("done");')
+    set_focus = (
+        'document.getElementById("Email").focus(); '
+        'window.domAutomationController.send("done");')
+    self.ExecuteJavascript(clear_username_field, 0, 0)
+    self.ExecuteJavascript(set_focus, 0, 0)
+    self._SendCharToPopulateField('t', tab_index=0, windex=0)
+    passwd_value = self.GetDOMValue('document.getElementById("Passwd").value')
+    self.assertFalse(passwd_value,
+                     msg='Password field not empty for new username.')
+    test_utils.ClearPasswords(self)
 
 
 if __name__ == '__main__':

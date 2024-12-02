@@ -7,22 +7,28 @@
 #include <vector>
 
 #include "base/json/json_reader.h"
+#include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/values.h"
-#include "chrome/common/net/url_request_context_getter.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
 
 const char* const kDefaultSpeechRecognitionUrl =
-    "https://www.google.com/speech-api/v1/recognize?client=chromium&";
+    "https://www.google.com/speech-api/v1/recognize?xjerr=1&client=chromium&"
+    "pfilter=2&";
 const char* const kHypothesesString = "hypotheses";
 const char* const kUtteranceString = "utterance";
 const char* const kConfidenceString = "confidence";
+
+// TODO(satish): Remove this hardcoded value once the page is allowed to
+// set this via an attribute.
+const int kMaxResults = 6;
 
 bool ParseServerResponse(const std::string& response_body,
                          speech_input::SpeechInputResultArray* result) {
@@ -62,10 +68,6 @@ bool ParseServerResponse(const std::string& response_body,
     return false;
   }
   const ListValue* hypotheses_list = static_cast<ListValue*>(hypotheses_value);
-  if (hypotheses_list->GetSize() == 0) {
-    VLOG(1) << "ParseServerResponse: hypotheses list is empty.";
-    return false;
-  }
 
   size_t index = 0;
   for (; index < hypotheses_list->GetSize(); ++index) {
@@ -112,7 +114,7 @@ namespace speech_input {
 int SpeechRecognitionRequest::url_fetcher_id_for_tests = 0;
 
 SpeechRecognitionRequest::SpeechRecognitionRequest(
-    URLRequestContextGetter* context, Delegate* delegate)
+    net::URLRequestContextGetter* context, Delegate* delegate)
     : url_context_(context),
       delegate_(delegate) {
   DCHECK(delegate);
@@ -149,9 +151,7 @@ void SpeechRecognitionRequest::Start(const std::string& language,
     parts.push_back("lm=" + EscapeQueryParamValue(grammar, true));
   if (!hardware_info.empty())
     parts.push_back("xhw=" + EscapeQueryParamValue(hardware_info, true));
-  // TODO(satish): Remove this hardcoded value once the page is allowed to
-  // set this via an attribute.
-  parts.push_back("maxresults=3");
+  parts.push_back("maxresults=" + base::IntToString(kMaxResults));
 
   GURL url(std::string(kDefaultSpeechRecognitionUrl) + JoinString(parts, '&'));
 

@@ -1,10 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/service/texture_manager.h"
 
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "gpu/GLES2/gles2_command_buffer.h"
 #include "gpu/command_buffer/common/gl_mock.h"
 #include "gpu/command_buffer/service/feature_info.h"
@@ -93,6 +93,29 @@ TEST_F(TextureManagerTest, Basic) {
   EXPECT_TRUE(manager_.GetTextureInfo(kClient1Id) == NULL);
 }
 
+TEST_F(TextureManagerTest, SetParameter) {
+  const GLuint kClient1Id = 1;
+  const GLuint kService1Id = 11;
+  EXPECT_FALSE(manager_.HaveUnrenderableTextures());
+  // Check we can create texture.
+  manager_.CreateTextureInfo(&feature_info_, kClient1Id, kService1Id);
+  // Check texture got created.
+  TextureManager::TextureInfo* info = manager_.GetTextureInfo(kClient1Id);
+  ASSERT_TRUE(info != NULL);
+  manager_.SetParameter(
+      &feature_info_, info, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  EXPECT_EQ(static_cast<GLenum>(GL_NEAREST), info->min_filter());
+  manager_.SetParameter(
+      &feature_info_, info, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  EXPECT_EQ(static_cast<GLenum>(GL_NEAREST), info->mag_filter());
+  manager_.SetParameter(
+      &feature_info_, info, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  EXPECT_EQ(static_cast<GLenum>(GL_CLAMP_TO_EDGE), info->wrap_s());
+  manager_.SetParameter(
+      &feature_info_, info, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  EXPECT_EQ(static_cast<GLenum>(GL_CLAMP_TO_EDGE), info->wrap_t());
+}
+
 TEST_F(TextureManagerTest, Destroy) {
   const GLuint kClient1Id = 1;
   const GLuint kService1Id = 11;
@@ -110,6 +133,28 @@ TEST_F(TextureManagerTest, Destroy) {
       .RetiresOnSaturation();
   manager_.Destroy(true);
   // Check that resources got freed.
+  info1 = manager_.GetTextureInfo(kClient1Id);
+  ASSERT_TRUE(info1 == NULL);
+}
+
+TEST_F(TextureManagerTest, DestroyUnowned) {
+  const GLuint kClient1Id = 1;
+  const GLuint kService1Id = 11;
+  EXPECT_FALSE(manager_.HaveUnrenderableTextures());
+  // Check we can create texture.
+  TextureManager::TextureInfo* created_info =
+      manager_.CreateTextureInfo(&feature_info_, kClient1Id, kService1Id);
+  created_info->SetNotOwned();
+
+  // Check texture got created.
+  TextureManager::TextureInfo* info1 = manager_.GetTextureInfo(kClient1Id);
+  ASSERT_TRUE(info1 != NULL);
+  EXPECT_CALL(*gl_, DeleteTextures(4, _))
+      .Times(1)
+      .RetiresOnSaturation();
+
+  // Check that it is not freed if it is not owned.
+  manager_.Destroy(true);
   info1 = manager_.GetTextureInfo(kClient1Id);
   ASSERT_TRUE(info1 == NULL);
 }
@@ -241,6 +286,10 @@ TEST_F(TextureInfoTest, Basic) {
   EXPECT_FALSE(info_->CanGenerateMipmaps(&feature_info_));
   EXPECT_FALSE(info_->npot());
   EXPECT_FALSE(info_->CanRender(&feature_info_));
+  EXPECT_EQ(static_cast<GLenum>(GL_NEAREST_MIPMAP_LINEAR), info_->min_filter());
+  EXPECT_EQ(static_cast<GLenum>(GL_LINEAR), info_->mag_filter());
+  EXPECT_EQ(static_cast<GLenum>(GL_REPEAT), info_->wrap_s());
+  EXPECT_EQ(static_cast<GLenum>(GL_REPEAT), info_->wrap_t());
   EXPECT_TRUE(manager_.HaveUnrenderableTextures());
 }
 

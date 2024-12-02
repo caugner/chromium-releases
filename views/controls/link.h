@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,16 +46,16 @@ class Link : public Label {
   const LinkController* GetController();
 
   // Overridden from View:
-  virtual bool OnMousePressed(const MouseEvent& event);
-  virtual bool OnMouseDragged(const MouseEvent& event);
-  virtual void OnMouseReleased(const MouseEvent& event,
-                               bool canceled);
-  virtual bool OnKeyPressed(const KeyEvent& e);
-  virtual bool SkipDefaultKeyEventProcessing(const KeyEvent& e);
+  virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
+  virtual bool OnMouseDragged(const MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
+  virtual void OnMouseCaptureLost() OVERRIDE;
+  virtual bool OnKeyPressed(const KeyEvent& event) OVERRIDE;
+  virtual bool SkipDefaultKeyEventProcessing(const KeyEvent& event) OVERRIDE;
+  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
-  // Accessibility accessors, overridden from View:
-  virtual AccessibilityTypes::Role GetAccessibleRole();
-  virtual void SetFont(const gfx::Font& font);
+  // Overridden from Label:
+  virtual void SetFont(const gfx::Font& font) OVERRIDE;
 
   // Set whether the link is enabled.
   virtual void SetEnabled(bool f);

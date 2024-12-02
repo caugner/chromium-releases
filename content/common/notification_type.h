@@ -35,7 +35,7 @@ class NotificationType {
 
     // This is sent when the user does a gesture resulting in a noteworthy
     // action taking place. This is typically used for logging. The source is
-    // the profile, and the details is a wstring identifying the action.
+    // the profile, and the details is a string identifying the action.
     USER_ACTION,
 
     // NavigationController ----------------------------------------------------
@@ -101,30 +101,6 @@ class NotificationType {
     // are optional.
     LOAD_STOP,
 
-    // A frame is staring a provisional load.  The source is a
-    // Source<NavigationController> corresponding to the tab in which the load
-    // occurs.  Details is a ProvisionalLoadDetails object.
-    FRAME_PROVISIONAL_LOAD_START,
-
-    // The provisional load for a frame was committed. The source is a
-    // NavigationController corresponding to the tab in which the load occurred.
-    // Details is a ProvisionalLoadDetails object. In contrast to
-    // NAV_ENTRY_COMMITTED, this notification is sent when the load was
-    // committed, even if no navigation entry was committed (such as
-    // AUTO_SUBFRAME navigations).
-    FRAME_PROVISIONAL_LOAD_COMMITTED,
-
-    // The DOM for a frame was fully constructed, but referenced resources
-    // might not be fully loaded yet. The source is a
-    // Source<NavigationController> corresponding to the tab in which the load
-    // occurred. Details are the int64 frame ID.
-    FRAME_DOM_CONTENT_LOADED,
-
-    // The frame finished loading. The source is a Source<NavigationController>
-    // corresponding to the tab in which the load occurred. Details are the
-    // int64 frame ID.
-    FRAME_DID_FINISH_LOAD,
-
     // Content was loaded from an in-memory cache.  The source will be a
     // Source<NavigationController> corresponding to the tab in which the load
     // occurred.  Details in the form of a LoadFromMemoryCacheDetails object
@@ -188,6 +164,13 @@ class NotificationType {
     // The source will be the navigation controller associated with the state
     // change.  There are no details.
     SSL_INTERNAL_STATE_CHANGED,
+
+    // The user accepted or dismissed a SSL client authentication request.
+    // The source is a Source<SSLClientAuthHandler>.  Details is a
+    // SSLClientAuthNotificationDetails which records specifies which
+    // SSLCertRequestInfo the request was for and which X509Certificate was
+    // selected (if any).
+    SSL_CLIENT_AUTH_CERT_SELECTED,
 
     // Views -------------------------------------------------------------------
 
@@ -285,10 +268,7 @@ class NotificationType {
     // actual snapshot.
     TAB_SNAPSHOT_TAKEN,
 
-    // Send after the code is run in specified tab.
-    TAB_CODE_EXECUTED,
-
-    // The user has changed the browser theme.
+    // The user has changed the browser theme.  There are no details.
     BROWSER_THEME_CHANGED,
 
     // Sent when the renderer returns focus to the browser, as part of focus
@@ -399,7 +379,7 @@ class NotificationType {
     TAB_CONTENTS_DESTROYED,
 
     // This notification is sent when TabContents::SetAppExtension is invoked.
-    // The source is the TabContents SetAppExtension was invoked on.
+    // The source is the ExtensionTabHelper SetAppExtension was invoked on.
     TAB_CONTENTS_APPLICATION_EXTENSION_CHANGED,
 
     // A RenderViewHost was created for a TabContents. The source is the
@@ -462,15 +442,6 @@ class NotificationType {
     // the details are not used.
     RENDER_WIDGET_HOST_DID_PAINT,
 
-    // Indicates the RenderWidgetHost is about to destroy the backing store. The
-    // backing store will still be valid when this call is made. The source is
-    // the RenderWidgetHost, the details is the BackingStore.
-    RENDER_WIDGET_HOST_WILL_DESTROY_BACKING_STORE,
-
-    // Indicates that the RenderWidgetHost just updated the backing store. The
-    // source is the RenderWidgetHost, the details are not used.
-    RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE,
-
     // This notifies the observer that a PaintAtSizeACK was received. The source
     // is the RenderWidgetHost, the details are an instance of
     // RenderWidgetHost::PaintAtSizeAckDetails.
@@ -483,7 +454,8 @@ class NotificationType {
     // Used only in testing.
     RENDER_WIDGET_HOST_DID_RECEIVE_INPUT_EVENT_ACK,
 
-    // Sent from ~RenderViewHost. The source is the TabContents.
+    // Sent from ~RenderViewHost. The source is the RenderViewHost, the details
+    // unused.
     RENDER_VIEW_HOST_DELETED,
 
     // Sent from RenderViewHost::ClosePage.  The hosted RenderView has
@@ -564,6 +536,10 @@ class NotificationType {
     // The background contents is being deleted. The source is the
     // parent Profile, and the details are the BackgroundContents being deleted.
     BACKGROUND_CONTENTS_DELETED,
+
+    // The background contents has crashed. The source is the parent Profile,
+    // and the details are the BackgroundContents.
+    BACKGROUND_CONTENTS_TERMINATED,
 
     // Child Processes ---------------------------------------------------------
 
@@ -682,14 +658,9 @@ class NotificationType {
     HISTORY_KEYWORD_SEARCH_TERM_UPDATED,
 
     // Sent by history when the favicon of a URL changes.  The source is the
-    // profile, and the details is history::FavIconChangeDetails (see
+    // profile, and the details is history::FaviconChangeDetails (see
     // history_notifications.h).
     FAVICON_CHANGED,
-
-    // Sent by history if there is a problem reading the profile.  The details
-    // is an int that's one of the message IDs in the string table.  The active
-    // browser window should notify the user of this error.
-    PROFILE_ERROR,
 
     // Sent after an incognito profile has been created. The details are none
     // and the source is the new profile.
@@ -865,10 +836,6 @@ class NotificationType {
     // Sent when an extension install turns out to not be a theme.
     NO_THEME_DETECTED,
 
-    // Sent when a new theme is installed. The details are an Extension, and the
-    // source is a Profile.
-    THEME_INSTALLED,
-
     // Sent when new extensions are installed. The details are an Extension, and
     // the source is a Profile.
     EXTENSION_INSTALLED,
@@ -877,9 +844,19 @@ class NotificationType {
     // details about why the install failed.
     EXTENSION_INSTALL_ERROR,
 
+    // Sent when an extension install is not allowed, as indicated by
+    // PendingExtensionInfo::ShouldAllowInstall. The details are an Extension,
+    // and the source is a Profile.
+    EXTENSION_INSTALL_NOT_ALLOWED,
+
     // Sent when an extension has been uninstalled.  The details are
     // an UninstalledExtensionInfo struct and the source is a Profile.
     EXTENSION_UNINSTALLED,
+
+    // Sent when an extension uninstall is not allowed because the extension is
+    // not user manageable.  The details are an Extension, and the source is a
+    // Profile.
+    EXTENSION_UNINSTALL_NOT_ALLOWED,
 
     // Sent when an extension is unloaded. This happens when an extension is
     // uninstalled or disabled. The details are an UnloadedExtensionInfo, and
@@ -992,6 +969,21 @@ class NotificationType {
     // object.
     EXTENSION_PREF_CHANGED,
 
+    // Sent when the extension updater starts checking for updates to installed
+    // extensions. The source is a Profile, and there are no details.
+    EXTENSION_UPDATING_STARTED,
+
+    // Sent when the extension updater is finished checking for updates to
+    // installed extensions. The source is a Profile, and there are no details.
+    // NOTE: It's possible that there are extension updates still being
+    // installed by the extension service at the time this notification fires.
+    EXTENSION_UPDATING_FINISHED,
+
+    // The extension updater found an update and will attempt to download and
+    // install it. The source is a Profile, and the details are an extension id
+    // (const std::string).
+    EXTENSION_UPDATE_FOUND,
+
     // Desktop Notifications ---------------------------------------------------
 
     // This notification is sent when a balloon is connected to a renderer
@@ -1015,7 +1007,7 @@ class NotificationType {
     // key of the entry that was affected.
     AUTOFILL_ENTRIES_CHANGED,
 
-    // Sent when an AutoFillProfile has been added/removed/updated in the
+    // Sent when an AutofillProfile has been added/removed/updated in the
     // WebDatabase.  The detail is an AutofillProfileChange.
     AUTOFILL_PROFILE_CHANGED,
 
@@ -1053,10 +1045,9 @@ class NotificationType {
     // other modules of interest). No details are expected.
     MODULE_LIST_ENUMERATED,
 
-    // Sent when Chrome detects an incompatible module. Details is a boolean
-    // specifying true if one or more confirmed bad modules were found or false
-    // if only suspected bad modules were found.
-    MODULE_INCOMPATIBILITY_DETECTED,
+    // Sent when Chrome is done scanning the module list and when the user has
+    // acknowledged the module incompatibility. No details are expected.
+    MODULE_INCOMPATIBILITY_BADGE_CHANGE,
 
     // Background App Tracking Notifications -----------------------------------
     // Sent when the state of the background page tracker has changed (the
@@ -1124,11 +1115,8 @@ class NotificationType {
 
     // Sync --------------------------------------------------------------------
 
-    // Sent when the sync backend has been paused.
-    SYNC_PAUSED,
-
-    // Sent when the sync backend has been resumed.
-    SYNC_RESUMED,
+    // Sent when the syncer is blocked configuring.
+    SYNC_CONFIGURE_BLOCKED,
 
     // The sync service has started the configuration process.
     SYNC_CONFIGURE_START,
@@ -1200,13 +1188,13 @@ class NotificationType {
     // object.
     GOOGLE_SIGNIN_FAILED,
 
-    // AutoFill Notifications --------------------------------------------------
+    // Autofill Notifications --------------------------------------------------
 
-    // Sent when a popup with AutoFill suggestions is shown in the renderer.
+    // Sent when a popup with Autofill suggestions is shown in the renderer.
     // The source is the corresponding RenderViewHost. There are not details.
     AUTOFILL_DID_SHOW_SUGGESTIONS,
 
-    // Sent when a form is previewed or filled with AutoFill suggestions.
+    // Sent when a form is previewed or filled with Autofill suggestions.
     // The source is the corresponding RenderViewHost. There are not details.
     AUTOFILL_DID_FILL_FORM_DATA,
 
@@ -1259,13 +1247,26 @@ class NotificationType {
     // os device has failed.
     OWNER_KEY_FETCH_ATTEMPT_FAILED,
 
-    // Sent after device was successfully owned.
-    OWNERSHIP_TAKEN,
+    // Sent after UserManager checked ownership status of logged in user.
+    OWNERSHIP_CHECKED,
 
     // This is sent to a ChromeOS settings observer when a system setting is
     // changed. The source is the CrosSettings and the details a std::string of
     // the changed setting.
     SYSTEM_SETTING_CHANGED,
+
+    // Sent by SIM unlock dialog when it has finished with the process of
+    // updating RequirePin setting. RequirePin setting might have been changed
+    // to a new value or update might have been canceled.
+    // In either case notification is sent and details contain a bool
+    // that represents current value.
+    REQUIRE_PIN_SETTING_CHANGE_ENDED,
+
+    // Sent by SIM unlock dialog when it has finished the EnterPin or
+    // EnterPuk dialog, either because the user cancelled, or entered a
+    // PIN or PUK.
+    ENTER_PIN_ENDED,
+
 #endif
 
     // Sent before the repost form warning is brought up.
@@ -1293,6 +1294,11 @@ class NotificationType {
     // Sent each time the InstantController shows the InstantLoader.
     INSTANT_CONTROLLER_SHOWN,
 
+    // Sent when the instant loader determines whether the page supports the
+    // instant API or not. The details is a boolean indicating if the page
+    // supports instant. The source is not used.
+    INSTANT_SUPPORT_DETERMINED,
+
     // Password Store ----------------------------------------------------------
     // This notification is sent whenenever login entries stored in the password
     // store are changed. The detail of this notification is a list of changes
@@ -1303,6 +1309,22 @@ class NotificationType {
 
     // Sent when the applications in the NTP app launcher have been reordered.
     EXTENSION_LAUNCHER_REORDERED,
+
+    // Prerender notifications -------------------------------------------------
+    // Sent when a prerender::PrerenderContents starts prerendering. Source is
+    // the process/route id pair for the RenderViewHost. There are no details.
+    PRERENDER_CONTENTS_STARTED,
+
+    // Sent when a prerender::PrerenderContents object is destroyed. Source is
+    // the process/route id pair for the RenderViewHost. There are no details.
+    PRERENDER_CONTENTS_DESTROYED,
+
+    // Sent when a prerender::PrerenderContents is used. Source is the
+    // process/route id pair for the RenderViewHost. There are no details.
+    PRERENDER_CONTENTS_USED,
+
+    // Sent when a new web store promo has been loaded.
+    WEB_STORE_PROMO_LOADED,
 
     // Count (must be last) ----------------------------------------------------
     // Used to determine the number of notification types.  Not valid as

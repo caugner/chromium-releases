@@ -4,6 +4,9 @@
 
 #include "content/browser/webui/web_ui_browsertest.h"
 
+#include <string>
+#include <vector>
+
 #include "base/path_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_paths.h"
@@ -15,18 +18,31 @@
 static const FilePath::CharType* kWebUILibraryJS =
     FILE_PATH_LITERAL("test_api.js");
 static const FilePath::CharType* kWebUITestFolder = FILE_PATH_LITERAL("webui");
+static std::vector<std::string> error_messages_;
+
+// Intercepts all log messages.
+bool LogHandler(int severity,
+                const char* file,
+                int line,
+                size_t message_start,
+                const std::string& str) {
+  if (severity == logging::LOG_ERROR)
+    error_messages_.push_back(str);
+  return true;
+}
 
 WebUIBrowserTest::~WebUIBrowserTest() {}
 
-bool WebUIBrowserTest::RunWebUITest(const FilePath::CharType* src_path) {
-  std::string content;
-  BuildJavaScriptTest(FilePath(src_path), &content);
-  SetupHandlers();
-  return test_handler_->Execute(content);
+bool WebUIBrowserTest::RunJavascriptFunction(const std::string& function_name) {
+  return RunJavascriptUsingHandler(function_name, false);
+}
+
+bool WebUIBrowserTest::RunJavascriptTest(const std::string& test_name) {
+  return RunJavascriptUsingHandler(test_name, true);
 }
 
 WebUIBrowserTest::WebUIBrowserTest()
-    : test_handler_(new WebUIHandlerBrowserTest()) {}
+    : test_handler_(new WebUITestHandler()) {}
 
 void WebUIBrowserTest::SetUpInProcessBrowserTestFixture() {
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data_directory_));
@@ -36,25 +52,51 @@ void WebUIBrowserTest::SetUpInProcessBrowserTestFixture() {
   FilePath resources_pack_path;
   PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
   ResourceBundle::AddDataPackToSharedInstance(resources_pack_path);
+
+  AddLibrary(kWebUILibraryJS);
 }
 
 WebUIMessageHandler* WebUIBrowserTest::GetMockMessageHandler() {
   return NULL;
 }
 
-void WebUIBrowserTest::BuildJavaScriptTest(const FilePath& src_path,
-                                           std::string* content) {
+void WebUIBrowserTest::BuildJavascriptLibraries(std::string* content) {
   ASSERT_TRUE(content != NULL);
   std::string library_content, src_content;
-  ASSERT_TRUE(file_util::ReadFileToString(
-      test_data_directory_.Append(FilePath(kWebUILibraryJS)),
-          &library_content));
-  ASSERT_TRUE(file_util::ReadFileToString(
-      test_data_directory_.Append(src_path), &src_content));
 
-  content->append(library_content);
-  content->append(";\n");
-  content->append(src_content);
+  std::vector<FilePath>::iterator user_libraries_iterator;
+  for (user_libraries_iterator = user_libraries.begin();
+       user_libraries_iterator != user_libraries.end();
+       ++user_libraries_iterator) {
+    ASSERT_TRUE(file_util::ReadFileToString(
+        test_data_directory_.Append(*user_libraries_iterator),
+            &library_content));
+    content->append(library_content);
+    content->append(";\n");
+  }
+}
+
+bool WebUIBrowserTest::RunJavascriptUsingHandler(
+    const std::string& function_name, bool is_test) {
+  std::string content;
+  BuildJavascriptLibraries(&content);
+
+  if (!function_name.empty()) {
+    std::string called_function = is_test ? "runTest(" + function_name + ");" :
+                                            function_name + "()";
+    content.append(called_function);
+  }
+  SetupHandlers();
+  logging::SetLogMessageHandler(&LogHandler);
+  bool result = test_handler_->RunJavascript(content, is_test);
+  logging::SetLogMessageHandler(NULL);
+
+  if (error_messages_.size() > 0) {
+    LOG(ERROR) << "Encountered javascript console error(s)";
+    result = false;
+    error_messages_.clear();
+  }
+  return result;
 }
 
 void WebUIBrowserTest::SetupHandlers() {
@@ -68,10 +110,18 @@ void WebUIBrowserTest::SetupHandlers() {
     GetMockMessageHandler()->Attach(web_ui_instance);
 }
 
+void WebUIBrowserTest::AddLibrary(const FilePath::CharType* library_path) {
+  user_libraries.push_back(FilePath(library_path));
+}
+
 IN_PROC_BROWSER_TEST_F(WebUIBrowserTest, TestSamplePass) {
+  AddLibrary(FILE_PATH_LITERAL("sample_downloads.js"));
+
   // Navigate to UI.
   // TODO(dtseng): make accessor for subclasses to return?
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIDownloadsURL));
 
-  ASSERT_TRUE(RunWebUITest(FILE_PATH_LITERAL("sample_downloads.js")));
+  ASSERT_TRUE(RunJavascriptTest("testAssertFalse"));
+  ASSERT_TRUE(RunJavascriptTest("testInitialFocus"));
+  ASSERT_FALSE(RunJavascriptTest("testConsoleError"));
 }

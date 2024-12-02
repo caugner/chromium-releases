@@ -8,21 +8,24 @@
 
 #include <set>
 
-#include "app/surface/transport_dib.h"
 #include "base/id_map.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/process.h"
 #include "base/process_util.h"
-#include "base/scoped_ptr.h"
 #include "base/time.h"
 #include "chrome/common/visitedlink_common.h"
 #include "ipc/ipc_sync_channel.h"
+#include "ui/gfx/surface/transport_dib.h"
 
 class Profile;
-class URLRequestContextGetter;
 struct ViewMsg_ClosePage_Params;
 
 namespace base {
 class SharedMemory;
+}
+
+namespace net {
+class URLRequestContextGetter;
 }
 
 // Virtual interface that represents the browser side of the browser <->
@@ -110,6 +113,8 @@ class RenderProcessHost : public IPC::Channel::Sender,
   IPC::Channel::Listener* GetListenerByID(int routing_id) {
     return listeners_.Lookup(routing_id);
   }
+
+  IPC::SyncChannel* channel() { return channel_.get(); }
 
   // Called to inform the render process host of a new "max page id" for a
   // render view host.  The render process host computes the largest page id

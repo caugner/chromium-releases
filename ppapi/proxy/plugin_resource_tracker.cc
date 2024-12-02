@@ -1,11 +1,11 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ppapi/proxy/plugin_resource_tracker.h"
 
 #include "base/logging.h"
-#include "base/singleton.h"
+#include "base/memory/singleton.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/plugin_resource.h"
@@ -120,24 +120,24 @@ void PluginResourceTracker::ReleasePluginResourceRef(
     return;
   found->second.ref_count--;
   if (found->second.ref_count == 0) {
-    PluginResource* plugin_resource = found->second.resource.get();
-    if (notify_browser_on_release)
-      SendReleaseResourceToHost(resource, plugin_resource);
-    host_resource_map_.erase(plugin_resource->host_resource());
+    // Keep a reference while removing in case the destructor ends up
+    // re-entering. That way, when the destructor is called, it's out of the
+    // maps.
+    linked_ptr<PluginResource> plugin_resource = found->second.resource;
+    PluginDispatcher* dispatcher =
+        PluginDispatcher::GetForInstance(plugin_resource->instance());
+    HostResource host_resource = plugin_resource->host_resource();
+    host_resource_map_.erase(host_resource);
     resource_map_.erase(found);
-  }
-}
+    plugin_resource.reset();
 
-void PluginResourceTracker::SendReleaseResourceToHost(
-    PP_Resource resource_id,
-    PluginResource* resource) {
-  PluginDispatcher* dispatcher =
-      PluginDispatcher::GetForInstance(resource->instance());
-  if (dispatcher) {
-    dispatcher->Send(new PpapiHostMsg_PPBCore_ReleaseResource(
-        INTERFACE_ID_PPB_CORE, resource->host_resource()));
-  } else {
-    NOTREACHED();
+    // dispatcher can be NULL if the plugin held on to a resource after the
+    // instance was destroyed. In that case the browser-side resource has
+    // already been freed correctly on the browser side.
+    if (notify_browser_on_release && dispatcher) {
+      dispatcher->Send(new PpapiHostMsg_PPBCore_ReleaseResource(
+          INTERFACE_ID_PPB_CORE, host_resource));
+    }
   }
 }
 

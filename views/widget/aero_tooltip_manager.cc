@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,7 @@
 
 #include "base/message_loop.h"
 #include "ui/base/l10n/l10n_util_win.h"
+#include "ui/base/win/hwnd_util.h"
 #include "ui/gfx/point.h"
 
 namespace views {
@@ -28,6 +29,12 @@ AeroTooltipManager::~AeroTooltipManager() {
 }
 
 void AeroTooltipManager::OnMouse(UINT u_msg, WPARAM w_param, LPARAM l_param) {
+  if (u_msg == WM_MOUSELEAVE) {
+    last_mouse_pos_.SetPoint(-1, -1);
+    UpdateTooltip();
+    return;
+  }
+
   if (initial_timer_)
     initial_timer_->Disown();
 
@@ -62,11 +69,6 @@ void AeroTooltipManager::OnMouse(UINT u_msg, WPARAM w_param, LPARAM l_param) {
   }
 }
 
-void AeroTooltipManager::OnMouseLeave() {
-  last_mouse_pos_.SetPoint(-1, -1);
-  UpdateTooltip();
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // AeroTooltipManager, private:
 
@@ -76,6 +78,7 @@ void AeroTooltipManager::Init() {
       WS_EX_TRANSPARENT | l10n_util::GetExtendedTooltipStyles(),
       TOOLTIPS_CLASS, NULL, TTS_NOPREFIX, 0, 0, 0, 0,
       GetParent(), NULL, NULL, NULL);
+  ui::CheckWindowCreated(tooltip_hwnd_);
 
   l10n_util::AdjustUIFontForWindow(tooltip_hwnd_);
 

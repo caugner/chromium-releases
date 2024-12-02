@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 #include "base/utf_string_conversions.h"
-#include "chrome/common/net/url_request_context_getter.h"
 #include "chrome/common/net/test_url_fetcher_factory.h"
 #include "content/browser/speech/speech_recognition_request.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -80,6 +80,11 @@ TEST_F(SpeechRecognitionRequestTest, BasicTest) {
   EXPECT_EQ(0.9, result_[0].confidence);
   EXPECT_EQ(ASCIIToUTF16("123456"), result_[1].utterance);
   EXPECT_EQ(0.5, result_[1].confidence);
+
+  // Zero results.
+  CreateAndTestRequest(true, "{\"hypotheses\":[]}");
+  EXPECT_FALSE(error_);
+  EXPECT_EQ(0U, result_.size());
 
   // Http failure case.
   CreateAndTestRequest(false, "");

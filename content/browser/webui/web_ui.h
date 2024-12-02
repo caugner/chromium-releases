@@ -12,7 +12,7 @@
 
 #include "base/callback.h"
 #include "base/string16.h"
-#include "chrome/common/page_transition_types.h"
+#include "content/common/page_transition_types.h"
 
 class DictionaryValue;
 class WebUIMessageHandler;
@@ -22,11 +22,7 @@ class Profile;
 class RenderViewHost;
 class TabContents;
 class Value;
-struct ViewHostMsg_DomMessage_Params;
-
-namespace ui {
-class ThemeProvider;
-}
+struct ExtensionHostMsg_DomMessage_Params;
 
 // A WebUI sets up the datasources and message handlers for a given HTML-based
 // UI. It is contained by a WebUIManager.
@@ -57,7 +53,8 @@ class WebUI {
   virtual void DidBecomeActiveForReusedRenderView() {}
 
   // Called from TabContents.
-  virtual void ProcessWebUIMessage(const ViewHostMsg_DomMessage_Params& params);
+  virtual void ProcessWebUIMessage(
+      const ExtensionHostMsg_DomMessage_Params& params);
 
   // Used by WebUIMessageHandlers.
   typedef Callback1<const ListValue*>::Type MessageCallback;
@@ -119,28 +116,29 @@ class WebUI {
   // the renderer.  This is asynchronous; there's no way to get the result
   // of the call, and should be thought of more like sending a message to
   // the page.
+  // All function names in WebUI must consist of only ASCII characters.
   // There are variants for calls with more arguments.
-  void CallJavascriptFunction(const std::wstring& function_name);
-  void CallJavascriptFunction(const std::wstring& function_name,
+  void CallJavascriptFunction(const std::string& function_name);
+  void CallJavascriptFunction(const std::string& function_name,
                               const Value& arg);
-  void CallJavascriptFunction(const std::wstring& function_name,
+  void CallJavascriptFunction(const std::string& function_name,
                               const Value& arg1,
                               const Value& arg2);
-  void CallJavascriptFunction(const std::wstring& function_name,
+  void CallJavascriptFunction(const std::string& function_name,
                               const Value& arg1,
                               const Value& arg2,
                               const Value& arg3);
-  void CallJavascriptFunction(const std::wstring& function_name,
+  void CallJavascriptFunction(const std::string& function_name,
                               const Value& arg1,
                               const Value& arg2,
                               const Value& arg3,
                               const Value& arg4);
-  void CallJavascriptFunction(const std::wstring& function_name,
+  void CallJavascriptFunction(const std::string& function_name,
                               const std::vector<const Value*>& args);
 
-  ui::ThemeProvider* GetThemeProvider() const;
-
   // May be overridden by WebUI's which do not have a tab contents.
+  // TODO(estade): removing this Profile dependency is predicated on reworking
+  // TabContents's Profile ownership.
   virtual Profile* GetProfile() const;
 
   // May be overridden by WebUI's which do not have a tab contents.
@@ -148,12 +146,20 @@ class WebUI {
 
   TabContents* tab_contents() const { return tab_contents_; }
 
+  // An opaque identifier used to identify a WebUI. This can only be compared to
+  // kNoWebUI or other WebUI types. See GetWebUIType.
+  typedef void* TypeID;
+
+  // A special WebUI type that signifies that a given page would not use the
+  // Web UI system.
+  static const TypeID kNoWebUI;
+
  protected:
   void AddMessageHandler(WebUIMessageHandler* handler);
 
   // Execute a string of raw Javascript on the page.  Overridable for
   // testing purposes.
-  virtual void ExecuteJavascript(const std::wstring& javascript);
+  virtual void ExecuteJavascript(const string16& javascript);
 
   // Options that may be overridden by individual Web UI implementations. The
   // bool options default to false. See the public getters for more information.
@@ -210,7 +216,7 @@ class WebUIMessageHandler {
   bool ExtractIntegerValue(const ListValue* value, int* out_int);
 
   // Extract a string value from a list Value.
-  std::wstring ExtractStringValue(const ListValue* value);
+  string16 ExtractStringValue(const ListValue* value);
 
   WebUI* web_ui_;
 

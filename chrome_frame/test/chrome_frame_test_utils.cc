@@ -8,22 +8,24 @@
 #include <atlmisc.h>
 #include <iepmapi.h>
 #include <sddl.h>
+#include <shlobj.h>
 
 #include "base/command_line.h"
 #include "base/file_path.h"
+#include "base/file_util.h"
 #include "base/file_version_info.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/scoped_ptr.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome_frame/utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/clipboard/clipboard.h"
@@ -233,6 +235,10 @@ base::ProcessHandle LaunchIEOnVista(const std::wstring& url) {
 }
 
 base::ProcessHandle LaunchIE(const std::wstring& url) {
+  if (GetInstalledIEVersion() >= IE_8) {
+    chrome_frame_test::ClearIESessionHistory();
+  }
+
   if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
     return LaunchIEOnVista(url);
   }
@@ -242,7 +248,7 @@ base::ProcessHandle LaunchIE(const std::wstring& url) {
 int CloseAllIEWindows() {
   int ret = 0;
 
-  ScopedComPtr<IShellWindows> windows;
+  base::win::ScopedComPtr<IShellWindows> windows;
   HRESULT hr = ::CoCreateInstance(__uuidof(ShellWindows), NULL, CLSCTX_ALL,
       IID_IShellWindows, reinterpret_cast<void**>(windows.Receive()));
   DCHECK(SUCCEEDED(hr));
@@ -252,10 +258,10 @@ int CloseAllIEWindows() {
     windows->get_Count(&count);
     VARIANT i = { VT_I4 };
     for (i.lVal = 0; i.lVal < count; ++i.lVal) {
-      ScopedComPtr<IDispatch> folder;
+      base::win::ScopedComPtr<IDispatch> folder;
       windows->Item(i, folder.Receive());
       if (folder != NULL) {
-        ScopedComPtr<IWebBrowser2> browser;
+        base::win::ScopedComPtr<IWebBrowser2> browser;
         if (SUCCEEDED(browser.QueryFrom(folder))) {
           bool is_ie = true;
           HWND window = NULL;
@@ -370,6 +376,10 @@ HRESULT LaunchIEAsComServer(IWebBrowser2** web_browser) {
   if (!web_browser)
     return E_INVALIDARG;
 
+  if (GetInstalledIEVersion() >= IE_8) {
+    chrome_frame_test::ClearIESessionHistory();
+  }
+
   AllowSetForegroundWindow(ASFW_ANY);
 
   HRESULT hr = S_OK;
@@ -383,7 +393,7 @@ HRESULT LaunchIEAsComServer(IWebBrowser2** web_browser) {
   if (base::win::GetVersion() == base::win::VERSION_VISTA &&
       GetInstalledIEVersion() == IE_7) {
     // Create medium integrity browser that will launch IE broker.
-    ScopedComPtr<IWebBrowser2> medium_integrity_browser;
+    base::win::ScopedComPtr<IWebBrowser2> medium_integrity_browser;
     hr = medium_integrity_browser.CreateInstance(CLSID_InternetExplorer, NULL,
                                                  CLSCTX_LOCAL_SERVER);
     if (FAILED(hr))
@@ -679,6 +689,16 @@ ScopedChromeFrameRegistrar::RegistrationType GetTestBedType() {
   } else {
     return ScopedChromeFrameRegistrar::SYSTEM_LEVEL;
   }
+}
+
+void ClearIESessionHistory() {
+  wchar_t local_app_data_path[MAX_PATH + 1] = {0};
+  SHGetFolderPath(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT,
+                  local_app_data_path);
+
+  std::wstring session_history_path = local_app_data_path;
+  session_history_path += L"\\Microsoft\\Internet Explorer\\Recovery";
+  file_util::Delete(session_history_path, true);
 }
 
 }  // namespace chrome_frame_test

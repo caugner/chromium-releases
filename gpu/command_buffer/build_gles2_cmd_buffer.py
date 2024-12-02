@@ -211,6 +211,8 @@ GL_APICALL void         GL_APIENTRY glCopyTextureToParentTextureCHROMIUM (GLidBi
 GL_APICALL void         GL_APIENTRY glResizeCHROMIUM (GLuint width, GLuint height);
 GL_APICALL const GLchar* GL_APIENTRY glGetRequestableExtensionsCHROMIUM (void);
 GL_APICALL void         GL_APIENTRY glRequestExtensionCHROMIUM (const char* extension);
+GL_APICALL void         GL_APIENTRY glSetLatchCHROMIUM (GLuint latch_id);
+GL_APICALL void         GL_APIENTRY glWaitLatchCHROMIUM (GLuint latch_id);
 """
 
 # This is the list of all commmands that will be generated and their Id.
@@ -414,6 +416,8 @@ _CMD_ID_TABLE = {
   'ResizeCHROMIUM':                                            448,
   'GetRequestableExtensionsCHROMIUM':                          449,
   'RequestExtensionCHROMIUM':                                  450,
+  'SetLatchCHROMIUM':                                          451,
+  'WaitLatchCHROMIUM':                                         452,
 }
 
 # This is a list of enum names and their valid values. It is used to map
@@ -780,15 +784,15 @@ _ENUM_LISTS = {
   'RenderBufferParameter': {
     'type': 'GLenum',
     'valid': [
-      'GL_RENDERBUFFER_WIDTH',
-      'GL_RENDERBUFFER_HEIGHT',
-      'GL_RENDERBUFFER_INTERNAL_FORMAT',
       'GL_RENDERBUFFER_RED_SIZE',
       'GL_RENDERBUFFER_GREEN_SIZE',
       'GL_RENDERBUFFER_BLUE_SIZE',
       'GL_RENDERBUFFER_ALPHA_SIZE',
       'GL_RENDERBUFFER_DEPTH_SIZE',
       'GL_RENDERBUFFER_STENCIL_SIZE',
+      'GL_RENDERBUFFER_WIDTH',
+      'GL_RENDERBUFFER_HEIGHT',
+      'GL_RENDERBUFFER_INTERNAL_FORMAT',
     ],
   },
   'ShaderParameter': {
@@ -1093,6 +1097,7 @@ _FUNCTION_INFO = {
     'gl_test_func': 'glCheckFramebufferStatusEXT',
     'result': ['GLenum'],
   },
+  'Clear': {'decoder_func': 'DoClear'},
   'ClearColor': {'decoder_func': 'DoClearColor'},
   'ClearDepthf': {
     'decoder_func': 'DoClearDepthf',
@@ -1489,8 +1494,11 @@ _FUNCTION_INFO = {
     'decoder_func': 'DoTexParameteriv',
   },
   'TexSubImage2D': {
-    'type': 'Data',
-    'decoder_func': 'DoTexSubImage2D',
+    'type': 'Manual',
+    'immediate': True,
+    'cmd_args': 'GLenum target, GLint level, GLint xoffset, GLint yoffset, '
+                'GLsizei width, GLsizei height, GLenum format, GLenum type, '
+                'const void* pixels, GLboolean internal'
   },
   'Uniform1f': {'type': 'PUTXn', 'data_type': 'GLfloat', 'count': 1},
   'Uniform1fv': {
@@ -1514,7 +1522,12 @@ _FUNCTION_INFO = {
     'count': 2,
     'decoder_func': 'DoUniform2fv',
   },
-  'Uniform2iv': {'type': 'PUTn', 'data_type': 'GLint', 'count': 2},
+  'Uniform2iv': {
+    'type': 'PUTn',
+    'data_type': 'GLint',
+    'count': 2,
+    'decoder_func': 'DoUniform2iv',
+  },
   'Uniform3f': {'type': 'PUTXn', 'data_type': 'GLfloat', 'count': 3},
   'Uniform3fv': {
     'type': 'PUTn',
@@ -1522,7 +1535,12 @@ _FUNCTION_INFO = {
     'count': 3,
     'decoder_func': 'DoUniform3fv',
   },
-  'Uniform3iv': {'type': 'PUTn', 'data_type': 'GLint', 'count': 3},
+  'Uniform3iv': {
+    'type': 'PUTn',
+    'data_type': 'GLint',
+    'count': 3,
+    'decoder_func': 'DoUniform3iv',
+  },
   'Uniform4f': {
     'type': 'PUTXn', 'data_type': 'GLfloat', 'count': 4
   },
@@ -1532,10 +1550,30 @@ _FUNCTION_INFO = {
     'count': 4,
     'decoder_func': 'DoUniform4fv',
   },
-  'Uniform4iv': {'type': 'PUTn', 'data_type': 'GLint', 'count': 4},
-  'UniformMatrix2fv': {'type': 'PUTn', 'data_type': 'GLfloat', 'count': 4},
-  'UniformMatrix3fv': {'type': 'PUTn', 'data_type': 'GLfloat', 'count': 9},
-  'UniformMatrix4fv': {'type': 'PUTn', 'data_type': 'GLfloat', 'count': 16},
+  'Uniform4iv': {
+    'type': 'PUTn',
+    'data_type': 'GLint',
+    'count': 4,
+    'decoder_func': 'DoUniform4iv',
+  },
+  'UniformMatrix2fv': {
+    'type': 'PUTn',
+    'data_type': 'GLfloat',
+    'count': 4,
+    'decoder_func': 'DoUniformMatrix2fv',
+  },
+  'UniformMatrix3fv': {
+    'type': 'PUTn',
+    'data_type': 'GLfloat',
+    'count': 9,
+    'decoder_func': 'DoUniformMatrix3fv',
+  },
+  'UniformMatrix4fv': {
+    'type': 'PUTn',
+    'data_type': 'GLfloat',
+    'count': 16,
+    'decoder_func': 'DoUniformMatrix4fv',
+  },
   'UnmapBufferSubDataCHROMIUM': {
     'gen_cmd': False,
     'extension': True,
@@ -1609,6 +1647,12 @@ _FUNCTION_INFO = {
     'cmd_args': 'uint32 bucket_id',
     'extension': True,
     'chromium': True,
+  },
+  'SetLatchCHROMIUM': {
+    'type': 'Custom',
+  },
+  'WaitLatchCHROMIUM': {
+    'type': 'Custom',
   },
 }
 
@@ -3435,8 +3479,46 @@ class PUTnHandler(TypeHandler):
   def __init__(self):
     TypeHandler.__init__(self)
 
+  def WriteServiceUnitTest(self, func, file):
+    """Overridden from TypeHandler."""
+    TypeHandler.WriteServiceUnitTest(self, func, file)
+
+    valid_test = """
+TEST_F(%(test_name)s, %(name)sValidArgsCountTooLarge) {
+  EXPECT_CALL(*gl_, %(gl_func_name)s(%(gl_args)s));
+  SpecializedSetup<%(name)s, 0>(true);
+  %(name)s cmd;
+  cmd.Init(%(args)s);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+"""
+    gl_arg_strings = []
+    arg_strings = []
+    count = 0
+    for arg in func.GetOriginalArgs():
+      # hardcoded to match unit tests.
+      if count == 0:
+        # the location of the second element of the first uniform.
+        gl_arg_strings.append("3")
+        arg_strings.append("3")
+      elif count == 1:
+        # the number of elements that gl will be called with.
+        gl_arg_strings.append("2")
+        # the number of elements requested in the command.
+        arg_strings.append("5")
+      else:
+        gl_arg_strings.append(arg.GetValidGLArg(count, 0))
+        arg_strings.append(arg.GetValidArg(count, 0))
+      count += 1
+    extra = {
+      'gl_args': ", ".join(gl_arg_strings),
+      'args': ", ".join(arg_strings),
+    }
+    self.WriteValidUnitTest(func, file, valid_test, extra)
+
   def WriteImmediateServiceUnitTest(self, func, file):
-    """Writes the service unit test for a command."""
+    """Overridden from TypeHandler."""
     valid_test = """
 TEST_F(%(test_name)s, %(name)sValidArgs) {
   %(name)s& cmd = *GetImmediateAs<%(name)s>();

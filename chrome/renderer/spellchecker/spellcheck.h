@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,14 @@
 #include <string>
 #include <vector>
 
+#include "base/gtest_prod_util.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/platform_file.h"
-#include "base/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/time.h"
 #include "chrome/renderer/spellchecker/spellcheck_worditerator.h"
+#include "content/renderer/render_process_observer.h"
+#include "ipc/ipc_platform_file.h"
 #include "unicode/uscript.h"
 
 class Hunspell;
@@ -24,15 +27,14 @@ class MemoryMappedFile;
 
 // TODO(morrita): Needs reorg with SpellCheckProvider.
 // See http://crbug.com/73699.
-class SpellCheck {
+class SpellCheck : public RenderProcessObserver {
  public:
   SpellCheck();
-
   ~SpellCheck();
 
   void Init(base::PlatformFile file,
             const std::vector<std::string>& custom_words,
-            const std::string language);
+            const std::string& language);
 
   // SpellCheck a word.
   // Returns true if spelled correctly, false otherwise.
@@ -59,14 +61,6 @@ class SpellCheck {
   // behind its command line flag.
   string16 GetAutoCorrectionWord(const string16& word, int tag);
 
-  // Turn auto spell correct support ON or OFF.
-  // |turn_on| = true means turn ON; false means turn OFF.
-  void EnableAutoSpellCorrect(bool turn_on);
-
-  // Add a word to the custom list. This may be called before or after
-  // |hunspell_| has been initialized.
-  void WordAdded(const std::string& word);
-
   // Returns true if the spellchecker delegate checking to a system-provided
   // checker on the browser process.
   bool is_using_platform_spelling_engine() const {
@@ -74,6 +68,19 @@ class SpellCheck {
   }
 
  private:
+  FRIEND_TEST(SpellCheckTest, GetAutoCorrectionWord_EN_US);
+
+  // RenderProcessObserver implementation:
+  virtual bool OnControlMessageReceived(const IPC::Message& message);
+
+  // Message handlers.
+  void OnInit(IPC::PlatformFileForTransit bdict_file,
+              const std::vector<std::string>& custom_words,
+              const std::string& language,
+              bool auto_spell_correct);
+  void OnWordAdded(const std::string& word);
+  void OnEnableAutoSpellCorrect(bool enable);
+
   // Initializes the Hunspell dictionary, or does nothing if |hunspell_| is
   // non-null. This blocks.
   void InitializeHunspell();

@@ -1,4 +1,4 @@
-// Copyright (c) 2006-2008 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 
 #include <vector>
 
-#include "SkDevice.h"
+#include "third_party/skia/include/core/SkDevice.h"
 
 class SkMatrix;
 class SkPath;
@@ -23,14 +23,17 @@ namespace skia {
 // to. It also provides functionality to play well with GDI drawing functions.
 // This class is abstract and must be subclassed. It provides the basic
 // interface to implement it either with or without a bitmap backend.
-class PlatformDevice : public SkDevice {
+class SK_API PlatformDevice : public SkDevice {
  public:
   typedef HDC PlatformSurface;
 
   // The DC that corresponds to the bitmap, used for GDI operations drawing
   // into the bitmap. This is possibly heavyweight, so it should be existant
   // only during one pass of rendering.
-  virtual HDC getBitmapDC() = 0;
+  virtual PlatformSurface BeginPlatformPaint() = 0;
+
+  // Finish a previous call to beginPlatformPaint.
+  virtual void EndPlatformPaint();
 
   // Draws to the given screen DC, if the bitmap DC doesn't exist, this will
   // temporarily create it. However, if you have created the bitmap DC, it will
@@ -44,6 +47,9 @@ class PlatformDevice : public SkDevice {
 
   // Returns if the preferred rendering engine is vectorial or bitmap based.
   virtual bool IsVectorial() = 0;
+
+  // Returns if GDI is allowed to render text to this device.
+  virtual bool IsNativeFontRenderingAllowed() { return true; }
 
   // Initializes the default settings and colors in a device context.
   static void InitializeDC(HDC context);

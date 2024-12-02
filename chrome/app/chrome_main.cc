@@ -5,7 +5,6 @@
 #include "chrome/app/chrome_main.h"
 
 #include "app/app_paths.h"
-#include "app/app_switches.h"
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
@@ -14,28 +13,34 @@
 #include "base/message_loop.h"
 #include "base/metrics/stats_counters.h"
 #include "base/metrics/stats_table.h"
-#include "base/nss_util.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "crypto/nss_util.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/diagnostics/diagnostics_main.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_counters.h"
+#include "chrome/common/chrome_content_client.h"
+#include "chrome/common/chrome_content_plugin_client.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/logging_chrome.h"
-#include "chrome/common/main_function_params.h"
 #include "chrome/common/profiling.h"
-#include "chrome/common/sandbox_init_wrapper.h"
-#include "chrome/common/set_process_title.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/renderer/chrome_content_renderer_client.h"
 #include "content/browser/renderer_host/render_process_host.h"
+#include "content/common/content_client.h"
+#include "content/common/content_counters.h"
+#include "content/common/content_paths.h"
+#include "content/common/main_function_params.h"
+#include "content/common/sandbox_init_wrapper.h"
+#include "content/common/set_process_title.h"
 #include "ipc/ipc_switches.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
@@ -67,6 +72,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
+#include "base/sys_info.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #endif
 
@@ -79,11 +85,16 @@
 #include "ui/base/x/x11_util.h"
 #endif
 
+#if defined(USE_LINUX_BREAKPAD)
+#include "chrome/app/breakpad_linux.h"
+#endif
+
 extern int BrowserMain(const MainFunctionParams&);
 extern int RendererMain(const MainFunctionParams&);
 extern int GpuMain(const MainFunctionParams&);
 extern int PluginMain(const MainFunctionParams&);
 extern int PpapiPluginMain(const MainFunctionParams&);
+extern int PpapiBrokerMain(const MainFunctionParams&);
 extern int WorkerMain(const MainFunctionParams&);
 extern int NaClMain(const MainFunctionParams&);
 extern int UtilityMain(const MainFunctionParams&);
@@ -152,6 +163,9 @@ static void AdjustLinuxOOMScore(const std::string& process_type) {
   if (process_type == switches::kPluginProcess ||
       process_type == switches::kPpapiPluginProcess) {
     score = kPluginScore;
+  } else if (process_type == switches::kPpapiBrokerProcess) {
+    // Kill the broker before the plugin.
+    score = kPluginScore + 1;
   } else if (process_type == switches::kUtilityProcess ||
              process_type == switches::kWorkerProcess ||
              process_type == switches::kGpuProcess ||
@@ -203,7 +217,24 @@ void EnableHeapProfiler(const CommandLine& command_line) {
 #endif
 }
 
-void CommonSubprocessInit() {
+void InitializeChromeContentRendererClient() {
+#if !defined(NACL_WIN64)  // We don't build the renderer code on win nacl64.
+  static chrome::ChromeContentRendererClient chrome_content_renderer_client;
+  content::GetContentClient()->set_renderer(&chrome_content_renderer_client);
+#endif
+}
+
+void InitializeChromeContentClient(const std::string& process_type) {
+  if (process_type == switches::kPluginProcess) {
+    static chrome::ChromeContentPluginClient chrome_content_plugin_client;
+    content::GetContentClient()->set_plugin(&chrome_content_plugin_client);
+  } else if (process_type == switches::kRendererProcess ||
+             process_type == switches::kExtensionProcess) {
+    InitializeChromeContentRendererClient();
+  }
+}
+
+void CommonSubprocessInit(const std::string& process_type) {
 #if defined(OS_WIN)
   // HACK: Let Windows know that we have started.  This is needed to suppress
   // the IDC_APPSTARTING cursor from being displayed for a prolonged period
@@ -223,6 +254,8 @@ void CommonSubprocessInit() {
   // surface UI -- but it's likely they get this wrong too so why not.
   setlocale(LC_NUMERIC, "C");
 #endif
+
+  InitializeChromeContentClient(process_type);
 }
 
 // Returns true if this subprocess type needs the ResourceBundle initialized
@@ -259,7 +292,8 @@ void SetMacProcessName(const std::string& process_type) {
   int name_id = 0;
   if (process_type == switches::kRendererProcess) {
     name_id = IDS_RENDERER_APP_NAME;
-  } else if (process_type == switches::kPluginProcess) {
+  } else if (process_type == switches::kPluginProcess ||
+             process_type == switches::kPpapiPluginProcess) {
     name_id = IDS_PLUGIN_APP_NAME;
   } else if (process_type == switches::kExtensionProcess) {
     name_id = IDS_WORKER_APP_NAME;
@@ -399,6 +433,14 @@ int RunZygote(const MainFunctionParams& main_function_params) {
   std::string process_type =
       command_line.GetSwitchValueASCII(switches::kProcessType);
 
+#if defined(USE_LINUX_BREAKPAD)
+  // Needs to be called after we have chrome::DIR_USER_DATA.  BrowserMain sets
+  // this up for the browser process in a different manner.
+  InitCrashReporter();
+#endif
+
+  InitializeChromeContentClient(process_type);
+
   for (size_t i = 0; i < arraysize(kMainFunctions); ++i) {
     if (process_type == kMainFunctions[i].name)
       return kMainFunctions[i].function(main_params);
@@ -423,6 +465,7 @@ int RunNamedProcessTypeMain(const std::string& process_type,
     { switches::kPluginProcess,      PluginMain },
     { switches::kWorkerProcess,      WorkerMain },
     { switches::kPpapiPluginProcess, PpapiPluginMain },
+    { switches::kPpapiBrokerProcess, PpapiBrokerMain },
     { switches::kUtilityProcess,     UtilityMain },
     { switches::kGpuProcess,         GpuMain },
     { switches::kServiceProcess,     ServiceProcessMain },
@@ -555,13 +598,26 @@ int ChromeMain(int argc, char** argv) {
   SetupCRT(command_line);
 
 #if defined(USE_NSS)
-  base::EarlySetupForNSSInit();
+  crypto::EarlySetupForNSSInit();
 #endif
 
   // Initialize the Chrome path provider.
   app::RegisterPathProvider();
   ui::RegisterPathProvider();
   chrome::RegisterPathProvider();
+  content::RegisterPathProvider();
+
+#if defined(OS_MACOSX)
+  // On the Mac, the child executable lives at a predefined location within
+  // the app bundle's versioned directory.
+  PathService::Override(content::CHILD_PROCESS_EXE,
+      chrome::GetVersionedDirectory().
+          Append(chrome::kHelperProcessExecutablePath));
+#endif
+
+  // Initialize the content client which that code uses to talk to Chrome.
+  chrome::ChromeContentClient chrome_content_client;
+  content::SetContentClient(&chrome_content_client);
 
   // Notice a user data directory override if any
   FilePath user_data_dir =
@@ -629,7 +685,7 @@ int ChromeMain(int argc, char** argv) {
   InitializeStatsTable(browser_pid, command_line);
 
   base::StatsScope<base::StatsCounterTimer>
-      startup_timer(chrome::Counters::chrome_main());
+      startup_timer(content::Counters::chrome_main());
 
   // Enable the heap profiler as early as possible!
   EnableHeapProfiler(command_line);
@@ -638,25 +694,23 @@ int ChromeMain(int argc, char** argv) {
   if (command_line.HasSwitch(switches::kMessageLoopHistogrammer))
     MessageLoop::EnableHistogrammer(true);
 
-  bool single_process =
-#if defined (GOOGLE_CHROME_BUILD)
-    // This is an unsupported and not fully tested mode, so don't enable it for
-    // official Chrome builds.
-    false;
-#else
-    command_line.HasSwitch(switches::kSingleProcess);
-#endif
-  if (single_process)
+  // Single-process is an unsupported and not fully tested mode, so
+  // don't enable it for official Chrome builds.
+#if !defined(GOOGLE_CHROME_BUILD)
+  if (command_line.HasSwitch(switches::kSingleProcess)) {
     RenderProcessHost::set_run_renderer_in_process(true);
 #if defined(OS_MACOSX)
-  // TODO(port-mac): This is from renderer_main_platform_delegate.cc.
-  // shess tried to refactor things appropriately, but it sprawled out
-  // of control because different platforms needed different styles of
-  // initialization.  Try again once we understand the process
-  // architecture needed and where it should live.
-  if (single_process)
+    // TODO(port-mac): This is from renderer_main_platform_delegate.cc.
+    // shess tried to refactor things appropriately, but it sprawled out
+    // of control because different platforms needed different styles of
+    // initialization.  Try again once we understand the process
+    // architecture needed and where it should live.
     InitWebCoreSystemInterface();
 #endif
+
+    InitializeChromeContentRendererClient();
+  }
+#endif  // GOOGLE_CHROME_BUILD
 
   bool icu_result = icu_util::Initialize();
   CHECK(icu_result);
@@ -699,7 +753,17 @@ int ChromeMain(int argc, char** argv) {
   }
 
   if (!process_type.empty())
-    CommonSubprocessInit();
+    CommonSubprocessInit(process_type);
+
+#if defined(OS_CHROMEOS)
+  {
+    // Read and cache ChromeOS version from file,
+    // to be used from inside the sandbox.
+    int32 major_version, minor_version, bugfix_version;
+    base::SysInfo::OperatingSystemVersionNumbers(
+        &major_version, &minor_version, &bugfix_version);
+  }
+#endif
 
   // Initialize the sandbox for this process.
   SandboxInitWrapper sandbox_wrapper;

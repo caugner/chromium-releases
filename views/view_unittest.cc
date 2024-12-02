@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,14 @@
 
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+#include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/path.h"
 #include "views/background.h"
+#include "views/controls/button/button_dropdown.h"
 #include "views/controls/button/checkbox.h"
 #include "views/controls/native/native_view_host.h"
 #include "views/controls/scroll_view.h"
@@ -37,6 +40,7 @@
 #include "views/touchui/gesture_manager.h"
 #endif
 
+using ::testing::_;
 using namespace views;
 
 namespace {
@@ -50,11 +54,8 @@ class ViewTest : public ViewsTestBase {
   }
 
   Widget* CreateWidget() {
-#if defined(OS_WIN)
-    return new WidgetWin();
-#elif defined(OS_LINUX)
-    return new WidgetGtk(WidgetGtk::TYPE_WINDOW);
-#endif
+    return Widget::CreateWidget(
+        Widget::CreateParams(Widget::CreateParams::TYPE_WINDOW));
   }
 };
 
@@ -148,16 +149,18 @@ class TestView : public View {
     accelerator_count_map_.clear();
   }
 
-  virtual void OnBoundsChanged();
-  virtual void ViewHierarchyChanged(bool is_add, View *parent, View *child);
-  virtual bool OnMousePressed(const MouseEvent& event);
-  virtual bool OnMouseDragged(const MouseEvent& event);
-  virtual void OnMouseReleased(const MouseEvent& event, bool canceled);
+  virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
+  virtual void ViewHierarchyChanged(
+      bool is_add, View *parent, View *child) OVERRIDE;
+  virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
+  virtual bool OnMouseDragged(const MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
 #if defined(TOUCH_UI)
   virtual TouchStatus OnTouchEvent(const TouchEvent& event);
 #endif
-  virtual void Paint(gfx::Canvas* canvas);
-  virtual bool AcceleratorPressed(const Accelerator& accelerator);
+  virtual void Paint(gfx::Canvas* canvas) OVERRIDE;
+  virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
+  virtual bool AcceleratorPressed(const Accelerator& accelerator) OVERRIDE;
 
   // OnBoundsChanged test
   bool did_change_bounds_;
@@ -173,7 +176,10 @@ class TestView : public View {
   int last_mouse_event_type_;
   gfx::Point location_;
 
-#if defined(TOUCH_UI)
+  // Painting
+  std::vector<gfx::Rect> scheduled_paint_rects_;
+
+  #if defined(TOUCH_UI)
   // TouchEvent
   int last_touch_event_type_;
   bool last_touch_event_was_handled_;
@@ -212,13 +218,23 @@ class MockGestureManager : public GestureManager {
   DISALLOW_COPY_AND_ASSIGN(MockGestureManager);
 };
 
+// A view subclass that ignores all touch events for testing purposes.
+class TestViewIgnoreTouch : public TestView {
+ public:
+  TestViewIgnoreTouch() : TestView() {
+  }
+
+  virtual ~TestViewIgnoreTouch() {}
+ private:
+  virtual TouchStatus OnTouchEvent(const TouchEvent& event);
+};
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // OnBoundsChanged
 ////////////////////////////////////////////////////////////////////////////////
 
-void TestView::OnBoundsChanged() {
+void TestView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
   did_change_bounds_ = true;
   new_bounds_ = bounds();
 }
@@ -338,7 +354,7 @@ bool TestView::OnMouseDragged(const MouseEvent& event) {
   return true;
 }
 
-void TestView::OnMouseReleased(const MouseEvent& event, bool canceled) {
+void TestView::OnMouseReleased(const MouseEvent& event) {
   last_mouse_event_type_ = event.type();
   location_.SetPoint(event.x(), event.y());
 }
@@ -445,6 +461,10 @@ View::TouchStatus TestView::OnTouchEvent(const TouchEvent& event) {
                                          TOUCH_STATUS_UNKNOWN;
 }
 
+View::TouchStatus TestViewIgnoreTouch::OnTouchEvent(const TouchEvent& event) {
+  return TOUCH_STATUS_UNKNOWN;
+}
+
 TEST_F(ViewTest, TouchEvent) {
   MockGestureManager* gm = new MockGestureManager();
 
@@ -453,6 +473,9 @@ TEST_F(ViewTest, TouchEvent) {
 
   TestView* v2 = new TestView();
   v2->SetBounds(100, 100, 100, 100);
+
+  TestView* v3 = new TestViewIgnoreTouch();
+  v3->SetBounds(0, 0, 100, 100);
 
   scoped_ptr<Widget> window(CreateWidget());
 #if defined(OS_WIN)
@@ -468,6 +491,10 @@ TEST_F(ViewTest, TouchEvent) {
   root->AddChildView(v1);
   root->SetGestureManager(gm);
   v1->AddChildView(v2);
+  v2->AddChildView(v3);
+
+  // |v3| completely obscures |v2|, but all the touch events on |v3| should
+  // reach |v2| because |v3| doesn't process any touch events.
 
   // Make sure if none of the views handle the touch event, the gesture manager
   // does.
@@ -479,7 +506,8 @@ TEST_F(ViewTest, TouchEvent) {
                        400,
                        400,
                        0, /* no flags */
-                       0  /* first finger touch */);
+                       0, /* first finger touch */
+                       1.0, 0.0, 1.0);
   root->OnTouchEvent(unhandled);
 
   EXPECT_EQ(v1->last_touch_event_type_, 0);
@@ -499,7 +527,8 @@ TEST_F(ViewTest, TouchEvent) {
                      110,
                      120,
                      0, /* no flags */
-                     0  /* first finger touch */);
+                     0, /* first finger touch */
+                     1.0, 0.0, 1.0);
   v2->last_touch_event_was_handled_ = true;
   root->OnTouchEvent(pressed);
 
@@ -521,7 +550,8 @@ TEST_F(ViewTest, TouchEvent) {
                      50,
                      40,
                      0, /* no flags */
-                     0  /* first finger touch */);
+                     0, /* first finger touch */
+                     1.0, 0.0, 1.0);
   root->OnTouchEvent(dragged);
   EXPECT_EQ(v2->last_touch_event_type_, ui::ET_TOUCH_MOVED);
   EXPECT_EQ(v2->location_.x(), -50);
@@ -536,7 +566,8 @@ TEST_F(ViewTest, TouchEvent) {
   // Released event out of bounds. Should still go to v2
   v1->Reset();
   v2->Reset();
-  TouchEvent released(ui::ET_TOUCH_RELEASED, 0, 0, 0, 0 /* first finger */);
+  TouchEvent released(ui::ET_TOUCH_RELEASED, 0, 0, 0, 0 /* first finger */,
+                      1.0, 0.0, 1.0);
   v2->last_touch_event_was_handled_ = true;
   root->OnTouchEvent(released);
   EXPECT_EQ(v2->last_touch_event_type_, ui::ET_TOUCH_RELEASED);
@@ -559,6 +590,11 @@ TEST_F(ViewTest, TouchEvent) {
 
 void TestView::Paint(gfx::Canvas* canvas) {
   canvas->AsCanvasSkia()->getClipBounds(&last_clip_);
+}
+
+void TestView::SchedulePaintInRect(const gfx::Rect& rect) {
+  scheduled_paint_rects_.push_back(rect);
+  View::SchedulePaintInRect(rect);
 }
 
 void CheckRect(const SkRect& check_rect, const SkRect& target_rect) {
@@ -1058,10 +1094,10 @@ TEST_F(ViewTest, HiddenViewWithAccelerator) {
 ////////////////////////////////////////////////////////////////////////////////
 // Mouse-wheel message rerouting
 ////////////////////////////////////////////////////////////////////////////////
-class ButtonTest : public NativeButton {
+class ButtonTest : public NativeButtonBase {
  public:
   ButtonTest(ButtonListener* listener, const std::wstring& label)
-      : NativeButton(listener, label) {
+      : NativeButtonBase(listener, label) {
   }
 
   HWND GetHWND() {
@@ -1182,14 +1218,48 @@ TEST_F(ViewTest, DISABLED_RerouteMouseWheelTest) {
 // Dialogs' default button
 ////////////////////////////////////////////////////////////////////////////////
 
+namespace ui {
+class MockMenuModel : public MenuModel {
+ public:
+  MOCK_CONST_METHOD0(HasIcons, bool());
+  MOCK_CONST_METHOD1(GetFirstItemIndex, int(gfx::NativeMenu native_menu));
+  MOCK_CONST_METHOD0(GetItemCount, int());
+  MOCK_CONST_METHOD1(GetTypeAt, ItemType(int index));
+  MOCK_CONST_METHOD1(GetCommandIdAt, int(int index));
+  MOCK_CONST_METHOD1(GetLabelAt, string16(int index));
+  MOCK_CONST_METHOD1(IsItemDynamicAt, bool(int index));
+  MOCK_CONST_METHOD1(GetLabelFontAt, const gfx::Font* (int index));
+  MOCK_CONST_METHOD2(GetAcceleratorAt, bool(int index,
+      ui::Accelerator* accelerator));
+  MOCK_CONST_METHOD1(IsItemCheckedAt, bool(int index));
+  MOCK_CONST_METHOD1(GetGroupIdAt, int(int index));
+  MOCK_METHOD2(GetIconAt, bool(int index, SkBitmap* icon));
+  MOCK_CONST_METHOD1(GetButtonMenuItemAt, ButtonMenuItemModel*(int index));
+  MOCK_CONST_METHOD1(IsEnabledAt, bool(int index));
+  MOCK_CONST_METHOD1(IsVisibleAt, bool(int index));
+  MOCK_CONST_METHOD1(GetSubmenuModelAt, MenuModel*(int index));
+  MOCK_METHOD1(HighlightChangedTo, void(int index));
+  MOCK_METHOD1(ActivatedAt, void(int index));
+  MOCK_METHOD2(ActivatedAtWithDisposition, void(int index,
+      int disposition));
+  MOCK_METHOD0(MenuWillShow, void());
+  MOCK_METHOD0(MenuClosed, void());
+  MOCK_METHOD1(SetMenuModelDelegate, void(MenuModelDelegate* delegate));
+  MOCK_METHOD3(GetModelAndIndexForCommandId, bool(int command_id,
+      MenuModel** model, int* index));
+};
+}
+
 class TestDialog : public DialogDelegate, public ButtonListener {
  public:
-  TestDialog()
+  explicit TestDialog(ui::MockMenuModel* mock_menu_model)
       : contents_(NULL),
         button1_(NULL),
         button2_(NULL),
         checkbox_(NULL),
+        button_drop_(NULL),
         last_pressed_button_(NULL),
+        mock_menu_model_(mock_menu_model),
         canceled_(false),
         oked_(false) {
   }
@@ -1202,12 +1272,14 @@ class TestDialog : public DialogDelegate, public ButtonListener {
   virtual View* GetContentsView() {
     if (!contents_) {
       contents_ = new View();
-      button1_ = new NativeButton(this, L"Button1");
-      button2_ = new NativeButton(this, L"Button2");
+      button1_ = new NativeButtonBase(this, L"Button1");
+      button2_ = new NativeButtonBase(this, L"Button2");
       checkbox_ = new Checkbox(L"My checkbox");
+      button_drop_ = new ButtonDropDown(this, mock_menu_model_);
       contents_->AddChildView(button1_);
       contents_->AddChildView(button2_);
       contents_->AddChildView(checkbox_);
+      contents_->AddChildView(button_drop_);
     }
     return contents_;
   }
@@ -1234,11 +1306,24 @@ class TestDialog : public DialogDelegate, public ButtonListener {
     last_pressed_button_ = NULL;
   }
 
+  // Set up expectations for methods that are called when an (empty) menu is
+  // shown from a drop down button.
+  void ExpectShowDropMenu() {
+    if (mock_menu_model_) {
+      EXPECT_CALL(*mock_menu_model_, HasIcons());
+      EXPECT_CALL(*mock_menu_model_, GetFirstItemIndex(_));
+      EXPECT_CALL(*mock_menu_model_, GetItemCount());
+      EXPECT_CALL(*mock_menu_model_, MenuClosed());
+    }
+  }
+
   View* contents_;
-  NativeButton* button1_;
-  NativeButton* button2_;
-  NativeButton* checkbox_;
+  NativeButtonBase* button1_;
+  NativeButtonBase* button2_;
+  NativeButtonBase* checkbox_;
+  ButtonDropDown* button_drop_;
   Button* last_pressed_button_;
+  ui::MockMenuModel* mock_menu_model_;
 
   bool canceled_;
   bool oked_;
@@ -1262,7 +1347,7 @@ class DefaultButtonTest : public ViewTest {
   }
 
   virtual void SetUp() {
-    test_dialog_ = new TestDialog();
+    test_dialog_ = new TestDialog(NULL);
     views::Window* window =
         views::Window::CreateChromeWindow(NULL, gfx::Rect(0, 0, 100, 100),
                                           test_dialog_);
@@ -1275,7 +1360,7 @@ class DefaultButtonTest : public ViewTest {
     cancel_button_ = client_view_->cancel_button();
   }
 
-  void SimularePressingEnterAndCheckDefaultButton(ButtonID button_id) {
+  void SimulatePressingEnterAndCheckDefaultButton(ButtonID button_id) {
     KeyEvent event(ui::ET_KEY_PRESSED, ui::VKEY_RETURN, 0);
     focus_manager_->OnKeyEvent(event);
     switch (button_id) {
@@ -1318,14 +1403,14 @@ TEST_F(DefaultButtonTest, DialogDefaultButtonTest) {
   EXPECT_TRUE(ok_button_->is_default());
 
   // Simulate pressing enter, that should trigger the OK button.
-  SimularePressingEnterAndCheckDefaultButton(OK);
+  SimulatePressingEnterAndCheckDefaultButton(OK);
 
   // Simulate focusing another button, it should become the default button.
   client_view_->FocusWillChange(ok_button_, test_dialog_->button1_);
   EXPECT_FALSE(ok_button_->is_default());
   EXPECT_TRUE(test_dialog_->button1_->is_default());
   // Simulate pressing enter, that should trigger button1.
-  SimularePressingEnterAndCheckDefaultButton(BUTTON1);
+  SimulatePressingEnterAndCheckDefaultButton(BUTTON1);
 
   // Now select something that is not a button, the OK should become the default
   // button again.
@@ -1333,7 +1418,7 @@ TEST_F(DefaultButtonTest, DialogDefaultButtonTest) {
                                 test_dialog_->checkbox_);
   EXPECT_TRUE(ok_button_->is_default());
   EXPECT_FALSE(test_dialog_->button1_->is_default());
-  SimularePressingEnterAndCheckDefaultButton(OK);
+  SimulatePressingEnterAndCheckDefaultButton(OK);
 
   // Select yet another button.
   client_view_->FocusWillChange(test_dialog_->checkbox_,
@@ -1341,14 +1426,14 @@ TEST_F(DefaultButtonTest, DialogDefaultButtonTest) {
   EXPECT_FALSE(ok_button_->is_default());
   EXPECT_FALSE(test_dialog_->button1_->is_default());
   EXPECT_TRUE(test_dialog_->button2_->is_default());
-  SimularePressingEnterAndCheckDefaultButton(BUTTON2);
+  SimulatePressingEnterAndCheckDefaultButton(BUTTON2);
 
   // Focus nothing.
   client_view_->FocusWillChange(test_dialog_->button2_, NULL);
   EXPECT_TRUE(ok_button_->is_default());
   EXPECT_FALSE(test_dialog_->button1_->is_default());
   EXPECT_FALSE(test_dialog_->button2_->is_default());
-  SimularePressingEnterAndCheckDefaultButton(OK);
+  SimulatePressingEnterAndCheckDefaultButton(OK);
 
   // Focus the cancel button.
   client_view_->FocusWillChange(NULL, cancel_button_);
@@ -1356,11 +1441,66 @@ TEST_F(DefaultButtonTest, DialogDefaultButtonTest) {
   EXPECT_TRUE(cancel_button_->is_default());
   EXPECT_FALSE(test_dialog_->button1_->is_default());
   EXPECT_FALSE(test_dialog_->button2_->is_default());
-  SimularePressingEnterAndCheckDefaultButton(CANCEL);
+  SimulatePressingEnterAndCheckDefaultButton(CANCEL);
 }
 
+class ButtonDropDownTest : public ViewTest {
+ public:
+  ButtonDropDownTest()
+      : test_dialog_(NULL),
+        button_as_view_(NULL) {
+  }
+
+  virtual void SetUp() {
+    test_dialog_ = new TestDialog(&mock_menu_model_);
+    views::Window* window =
+        views::Window::CreateChromeWindow(NULL, gfx::Rect(0, 0, 100, 100),
+                                          test_dialog_);
+    window->Show();
+    test_dialog_->button_drop_->SetBounds(0, 0, 100, 100);
+    // We have to cast the button back into a View in order to invoke it's
+    // OnMouseReleased method.
+    button_as_view_ = static_cast<View*>(test_dialog_->button_drop_);
+  }
+
+  TestDialog* test_dialog_;
+  ui::MockMenuModel mock_menu_model_;
+  // This is owned by test_dialog_.
+  View* button_as_view_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ButtonDropDownTest);
+};
+
+// Ensure that regular clicks on the drop down button still work. (i.e. - the
+// click events are processed and the listener gets the click)
+TEST_F(ButtonDropDownTest, RegularClickTest) {
+  MouseEvent press_event(ui::ET_MOUSE_PRESSED, 1, 1, ui::EF_LEFT_BUTTON_DOWN);
+  MouseEvent release_event(ui::ET_MOUSE_RELEASED, 1, 1,
+                           ui::EF_LEFT_BUTTON_DOWN);
+  button_as_view_->OnMousePressed(press_event);
+  button_as_view_->OnMouseReleased(release_event);
+  EXPECT_EQ(test_dialog_->last_pressed_button_, test_dialog_->button_drop_);
+}
+
+#if defined(OS_WIN)
+// Ensure that dragging downwards on the button shows the menu while keeping the
+// button depressed.
+TEST_F(ButtonDropDownTest, DragMenuTest) {
+  test_dialog_->last_pressed_button_ = NULL;
+  MouseEvent press_event(ui::ET_MOUSE_PRESSED, 1, 1, ui::EF_LEFT_BUTTON_DOWN);
+  MouseEvent drag_event(ui::ET_MOUSE_DRAGGED, 1, 99, ui::EF_LEFT_BUTTON_DOWN);
+  test_dialog_->ExpectShowDropMenu();
+  button_as_view_->OnMousePressed(press_event);
+  button_as_view_->OnMouseDragged(drag_event);
+  // The button should not get a press event as a result of the drag. This would
+  // revert the button into an unpressed state while the menu is open.
+  EXPECT_TRUE(test_dialog_->last_pressed_button_ == NULL);
+}
+#endif
+
 ////////////////////////////////////////////////////////////////////////////////
-// View hierachy / Visibility changes
+// View hierarchy / Visibility changes
 ////////////////////////////////////////////////////////////////////////////////
 /*
 TEST_F(ViewTest, ChangeVisibility) {
@@ -1372,7 +1512,7 @@ TEST_F(ViewTest, ChangeVisibility) {
   scoped_ptr<views::Widget> window(CreateWidget());
   window->Init(NULL, gfx::Rect(0, 0, 500, 300));
   views::RootView* root_view = window->GetRootView();
-  NativeButton* native = new NativeButton(NULL, L"Native");
+  NativeButtonBase* native = new NativeButtonBase(NULL, L"Native");
 
   root_view->SetContentsView(native);
   native->SetVisible(true);
@@ -1614,7 +1754,7 @@ TEST_F(ViewTest, TransformEvent) {
   EXPECT_EQ(10, v2->location_.y());
 
   MouseEvent released(ui::ET_MOUSE_RELEASED, 0, 0, 0);
-  root->OnMouseReleased(released, false);
+  root->OnMouseReleased(released);
 
   // Now rotate |v2| inside |v1| clockwise.
   v2->SetRotation(90.0);
@@ -1635,7 +1775,7 @@ TEST_F(ViewTest, TransformEvent) {
   EXPECT_EQ(10, v2->location_.x());
   EXPECT_EQ(20, v2->location_.y());
 
-  root->OnMouseReleased(released, false);
+  root->OnMouseReleased(released);
 
   v1->ResetTransform();
   v2->ResetTransform();
@@ -1666,7 +1806,7 @@ TEST_F(ViewTest, TransformEvent) {
   EXPECT_EQ(10, v3->location_.x());
   EXPECT_EQ(25, v3->location_.y());
 
-  root->OnMouseReleased(released, false);
+  root->OnMouseReleased(released);
 
   v1->ResetTransform();
   v2->ResetTransform();
@@ -1698,7 +1838,7 @@ TEST_F(ViewTest, TransformEvent) {
   EXPECT_EQ(10, v3->location_.x());
   EXPECT_EQ(25, v3->location_.y());
 
-  root->OnMouseReleased(released, false);
+  root->OnMouseReleased(released);
 
   widget->CloseNow();
 }
@@ -1778,3 +1918,26 @@ TEST_F(ViewTest, OnVisibleBoundsChanged) {
 }
 
 #endif
+
+////////////////////////////////////////////////////////////////////////////////
+// BoundsChanged()
+
+TEST_F(ViewTest, SetBoundsPaint) {
+  TestView* top_view = new TestView;
+  TestView* child_view = new TestView;
+
+  top_view->SetBounds(0, 0, 100, 100);
+  top_view->scheduled_paint_rects_.clear();
+  child_view->SetBounds(10, 10, 20, 20);
+  top_view->AddChildView(child_view);
+
+  top_view->scheduled_paint_rects_.clear();
+  child_view->SetBounds(30, 30, 20, 20);
+  EXPECT_EQ(2U, top_view->scheduled_paint_rects_.size());
+
+  // There should be 2 rects, spanning from (10, 10) to (50, 50).
+  gfx::Rect paint_rect =
+      top_view->scheduled_paint_rects_[0].Union(
+          top_view->scheduled_paint_rects_[1]);
+  EXPECT_EQ(gfx::Rect(10, 10, 40, 40), paint_rect);
+}

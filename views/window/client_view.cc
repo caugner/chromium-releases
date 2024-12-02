@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/logging.h"
+#include "ui/base/accessibility/accessible_view_state.h"
 #include "views/window/client_view.h"
 #if defined(OS_LINUX)
 #include "views/window/hit_test.h"
@@ -63,14 +64,14 @@ void ClientView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
   }
 }
 
-void ClientView::OnBoundsChanged() {
+void ClientView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
   // Overridden to do nothing. The NonClientView manually calls Layout on the
   // ClientView when it is itself laid out, see comment in
   // NonClientView::Layout.
 }
 
-AccessibilityTypes::Role ClientView::GetAccessibleRole() {
-  return AccessibilityTypes::ROLE_CLIENT;
+void ClientView::GetAccessibleState(ui::AccessibleViewState* state) {
+  state->role = ui::AccessibilityTypes::ROLE_CLIENT;
 }
 
 }  // namespace views

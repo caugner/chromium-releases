@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/scoped_ptr.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/global_request_id.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
@@ -75,7 +75,7 @@ class DummyResourceHandler : public ResourceHandler {
 ResourceDispatcherHostRequestInfo* GetRequestInfo(int request_id) {
   return new ResourceDispatcherHostRequestInfo(
       new DummyResourceHandler(), ChildProcessInfo::RENDER_PROCESS, 0, 0,
-      request_id, ResourceType::MAIN_FRAME, 0, false, false, false, -1, -1);
+      request_id, ResourceType::MAIN_FRAME, 0, false, false, false);
 }
 
 void InitializeQueue(ResourceQueue* queue, ResourceQueueDelegate* delegate) {
@@ -98,6 +98,9 @@ class NeverDelayingDelegate : public ResourceQueueDelegate {
   NeverDelayingDelegate() {
   }
 
+  virtual void Initialize(ResourceQueue* resource_queue) {
+  }
+
   virtual bool ShouldDelayRequest(
       net::URLRequest* request,
       const ResourceDispatcherHostRequestInfo& request_info,
@@ -114,8 +117,11 @@ class NeverDelayingDelegate : public ResourceQueueDelegate {
 
 class AlwaysDelayingDelegate : public ResourceQueueDelegate {
  public:
-  explicit AlwaysDelayingDelegate(ResourceQueue* resource_queue)
-      : resource_queue_(resource_queue) {
+  AlwaysDelayingDelegate() : resource_queue_(NULL) {
+  }
+
+  virtual void Initialize(ResourceQueue* resource_queue) {
+    resource_queue_ = resource_queue;
   }
 
   virtual bool ShouldDelayRequest(
@@ -205,7 +211,7 @@ TEST_F(ResourceQueueTest, NeverDelayingDelegate) {
 TEST_F(ResourceQueueTest, AlwaysDelayingDelegate) {
   ResourceQueue queue;
 
-  AlwaysDelayingDelegate delegate(&queue);
+  AlwaysDelayingDelegate delegate;
   InitializeQueue(&queue, &delegate);
 
   net::URLRequest request(GURL(kTestUrl), this);
@@ -224,7 +230,7 @@ TEST_F(ResourceQueueTest, AlwaysDelayingDelegate) {
 TEST_F(ResourceQueueTest, AlwaysDelayingDelegateAfterShutdown) {
   ResourceQueue queue;
 
-  AlwaysDelayingDelegate delegate(&queue);
+  AlwaysDelayingDelegate delegate;
   InitializeQueue(&queue, &delegate);
 
   net::URLRequest request(GURL(kTestUrl), this);
@@ -244,7 +250,7 @@ TEST_F(ResourceQueueTest, AlwaysDelayingDelegateAfterShutdown) {
 TEST_F(ResourceQueueTest, TwoDelegates) {
   ResourceQueue queue;
 
-  AlwaysDelayingDelegate always_delaying_delegate(&queue);
+  AlwaysDelayingDelegate always_delaying_delegate;
   NeverDelayingDelegate never_delaying_delegate;
   InitializeQueue(&queue, &always_delaying_delegate, &never_delaying_delegate);
 
@@ -264,7 +270,7 @@ TEST_F(ResourceQueueTest, TwoDelegates) {
 TEST_F(ResourceQueueTest, RemoveRequest) {
   ResourceQueue queue;
 
-  AlwaysDelayingDelegate delegate(&queue);
+  AlwaysDelayingDelegate delegate;
   InitializeQueue(&queue, &delegate);
 
   net::URLRequest request(GURL(kTestUrl), this);

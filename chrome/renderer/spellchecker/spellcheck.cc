@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/spellcheck_common.h"
-#include "chrome/renderer/render_thread.h"
+#include "chrome/common/spellcheck_messages.h"
 #include "third_party/hunspell/src/hunspell/hunspell.hxx"
 
 using base::TimeTicks;
@@ -26,9 +26,52 @@ SpellCheck::SpellCheck()
 SpellCheck::~SpellCheck() {
 }
 
+bool SpellCheck::OnControlMessageReceived(const IPC::Message& message) {
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(SpellCheck, message)
+    IPC_MESSAGE_HANDLER(SpellCheckMsg_Init, OnInit)
+    IPC_MESSAGE_HANDLER(SpellCheckMsg_WordAdded, OnWordAdded)
+    IPC_MESSAGE_HANDLER(SpellCheckMsg_EnableAutoSpellCorrect,
+                        OnEnableAutoSpellCorrect)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+
+  if (message.type() == ViewMsg_PurgeMemory::ID) {
+    delete this;
+    new SpellCheck();
+  }
+
+  return handled;
+}
+
+void SpellCheck::OnInit(IPC::PlatformFileForTransit bdict_file,
+                        const std::vector<std::string>& custom_words,
+                        const std::string& language,
+    bool auto_spell_correct) {
+  Init(IPC::PlatformFileForTransitToPlatformFile(bdict_file),
+       custom_words, language);
+  auto_spell_correct_turned_on_ = auto_spell_correct;
+}
+
+void SpellCheck::OnWordAdded(const std::string& word) {
+  if (is_using_platform_spelling_engine_)
+    return;
+
+  if (!hunspell_.get()) {
+    // Save it for later---add it when hunspell is initialized.
+    custom_words_.push_back(word);
+  } else {
+    AddWordToHunspell(word);
+  }
+}
+
+void SpellCheck::OnEnableAutoSpellCorrect(bool enable) {
+  auto_spell_correct_turned_on_ = enable;
+}
+
 void SpellCheck::Init(base::PlatformFile file,
                       const std::vector<std::string>& custom_words,
-                      const std::string language) {
+                      const std::string& language) {
   initialized_ = true;
   hunspell_.reset();
   bdict_file_.reset();
@@ -147,22 +190,6 @@ string16 SpellCheck::GetAutoCorrectionWord(const string16& word, int tag) {
   return autocorrect_word;
 }
 
-void SpellCheck::EnableAutoSpellCorrect(bool turn_on) {
-  auto_spell_correct_turned_on_ = turn_on;
-}
-
-void SpellCheck::WordAdded(const std::string& word) {
-  if (is_using_platform_spelling_engine_)
-    return;
-
-  if (!hunspell_.get()) {
-    // Save it for later---add it when hunspell is initialized.
-    custom_words_.push_back(word);
-  } else {
-    AddWordToHunspell(word);
-  }
-}
-
 void SpellCheck::InitializeHunspell() {
   if (hunspell_.get())
     return;
@@ -198,8 +225,7 @@ bool SpellCheck::InitializeIfNeeded() {
     return false;
 
   if (!initialized_) {
-    RenderThread::current()->Send(
-        new ViewHostMsg_SpellChecker_RequestDictionary);
+    Send(new SpellCheckHostMsg_RequestDictionary);
     initialized_ = true;
     return true;
   }
@@ -217,9 +243,8 @@ bool SpellCheck::CheckSpelling(const string16& word_to_check, int tag) {
   bool word_correct = false;
 
   if (is_using_platform_spelling_engine_) {
-    RenderThread::current()->Send(
-        new ViewHostMsg_SpellChecker_PlatformCheckSpelling(word_to_check, tag,
-                                                           &word_correct));
+    Send(new SpellCheckHostMsg_PlatformCheckSpelling(word_to_check, tag,
+                                                    &word_correct));
   } else {
     std::string word_to_check_utf8(UTF16ToUTF8(word_to_check));
     // Hunspell shouldn't let us exceed its max, but check just in case
@@ -243,9 +268,8 @@ void SpellCheck::FillSuggestionList(
     const string16& wrong_word,
     std::vector<string16>* optional_suggestions) {
   if (is_using_platform_spelling_engine_) {
-    RenderThread::current()->Send(
-        new ViewHostMsg_SpellChecker_PlatformFillSuggestionList(
-            wrong_word, optional_suggestions));
+    Send(new SpellCheckHostMsg_PlatformFillSuggestionList(
+        wrong_word, optional_suggestions));
     return;
   }
 

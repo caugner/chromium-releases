@@ -23,14 +23,10 @@
 
           # Disable touch support by default.
           'touchui%': 0,
-
-          # Disable file manager component extension by default.
-          'file_manager_extension%': 0,
         },
         # Copy conditionally-set variables out one scope.
         'chromeos%': '<(chromeos)',
         'touchui%': '<(touchui)',
-        'file_manager_extension%': '<(file_manager_extension)',
 
         # To do a shared build on linux we need to be able to choose between
         # type static_library and shared_library. We default to doing a static
@@ -65,7 +61,6 @@
       # Copy conditionally-set variables out one scope.
       'chromeos%': '<(chromeos)',
       'touchui%': '<(touchui)',
-      'file_manager_extension%': '<(file_manager_extension)',
       'host_arch%': '<(host_arch)',
       'library%': '<(library)',
       'toolkit_views%': '<(toolkit_views)',
@@ -95,6 +90,9 @@
       # Set to 1 to enable fast builds. It disables debug info for fastest
       # compilation.
       'fastbuild%': 0,
+
+       # Disable file manager component extension by default.
+      'file_manager_extension%': 0,
 
       # Python version.
       'python_ver%': '2.5',
@@ -166,6 +164,13 @@
           'enable_flapper_hacks%': 1,
         }, {
           'enable_flapper_hacks%': 0,
+        }],
+
+        # Enable file manager extension by default on Chrome OS.
+        ['chromeos==1', {
+          'file_manager_extension%': 1,
+        }, {
+          'file_manager_extension%': 0,
         }],
       ],
     },
@@ -385,6 +390,12 @@
     # Under development: http://crbug.com/68551
     'use_harfbuzz_ng%': 0,
 
+    # If debug_devtools is set to 1, JavaScript files for DevTools are
+    # stored as is and loaded from disk. Otherwise, a concatenated file
+    # is stored in resources.pak. It is still possible to load JS files
+    # from disk by passing --debug-devtools cmdline switch.
+    'debug_devtools%': 0,
+
     # Point to ICU directory.
     'icu_src_dir': '../third_party/icu',
 
@@ -452,6 +463,13 @@
           },{
             'msvs_large_module_debug_link_mode%': '2',  # Yes
           }],
+          ['MSVS_VERSION=="2010e" or MSVS_VERSION=="2008e" or MSVS_VERSION=="2005e"', {
+            'msvs_express%': 1,
+            'secure_atl%': 0,
+          },{
+            'msvs_express%': 0,
+            'secure_atl%': 1,
+          }],
         ],
         'nacl_win64_defines': [
           # This flag is used to minimize dependencies when building
@@ -481,7 +499,16 @@
         'use_gconf%': 1,
       }],
 
-      # Setup -D flags passed into grit.
+      # Set up -D and -E flags passed into grit.
+      ['branding=="Chrome"', {
+        # TODO(mmoss) The .grd files look for _google_chrome, but for
+        # consistency they should look for google_chrome_build like C++.
+        'grit_defines': ['-D', '_google_chrome',
+                         '-E', 'CHROMIUM_BUILD=google_chrome'],
+      }, {
+        'grit_defines': ['-D', '_chromium',
+                         '-E', 'CHROMIUM_BUILD=chromium'],
+      }],
       ['chromeos==1', {
         'grit_defines': ['-D', 'chromeos'],
       }],
@@ -829,7 +856,10 @@
       },
       'Debug_Base': {
         'abstract': 1,
-        'defines': ['DYNAMIC_ANNOTATIONS_ENABLED=1'],
+        'defines': [
+          'DYNAMIC_ANNOTATIONS_ENABLED=1',
+          'WTF_USE_DYNAMIC_ANNOTATIONS=1',
+        ],
         'xcode_settings': {
           'COPY_PHASE_STRIP': 'NO',
           'GCC_OPTIMIZATION_LEVEL': '<(mac_debug_optimization)',
@@ -905,9 +935,15 @@
         },
         'conditions': [
           ['release_valgrind_build==0', {
-            'defines': ['NVALGRIND', 'DYNAMIC_ANNOTATIONS_ENABLED=0'],
+            'defines': [
+              'NVALGRIND',
+              'DYNAMIC_ANNOTATIONS_ENABLED=0',
+            ],
           }, {
-            'defines': ['DYNAMIC_ANNOTATIONS_ENABLED=1'],
+            'defines': [
+              'DYNAMIC_ANNOTATIONS_ENABLED=1',
+              'WTF_USE_DYNAMIC_ANNOTATIONS=1',
+            ],
           }],
           ['win_use_allocator_shim==0', {
             'defines': ['NO_TCMALLOC'],
@@ -1217,6 +1253,7 @@
             'target_conditions': [
               ['_toolset=="target"', {
                 'cflags': [
+                  '-Wheader-hygiene',
                   # Clang spots more unused functions.
                   '-Wno-unused-function',
                   # Don't die on dtoa code that uses a char as an array index.
@@ -1350,6 +1387,7 @@
             ],
             ['clang==1', {
               'WARNING_CFLAGS': [
+                '-Wheader-hygiene',
                 # Don't die on dtoa code that uses a char as an array index.
                 # This is required solely for base/third_party/dmg_fp/dtoa.cc.
                 '-Wno-char-subscripts',
@@ -1446,7 +1484,6 @@
           '_CRT_RAND_S',
           'CERT_CHAIN_PARA_HAS_EXTRA_FIELDS',
           'WIN32_LEAN_AND_MEAN',
-          '_SECURE_ATL',
           '_ATL_NO_OPENGL',
           '_HAS_TR1=0',
         ],
@@ -1454,6 +1491,11 @@
           ['component=="static_library"', {
             'defines': [
               '_HAS_EXCEPTIONS=0',
+            ],
+          }],
+          ['secure_atl', {
+            'defines': [
+              '_SECURE_ATL',
             ],
           }],
         ],
@@ -1474,8 +1516,11 @@
             'WarnAsError': 'true',
             'DebugInformationFormat': '3',
             'conditions': [
-              [ 'msvs_multi_core_compile', {
+              ['msvs_multi_core_compile', {
                 'AdditionalOptions': ['/MP'],
+              }],
+              ['MSVS_VERSION=="2005e"', {
+                'AdditionalOptions': ['/w44068'], # Unknown pragma to 4 (ATL)
               }],
               ['component=="shared_library"', {
                 'ExceptionHandling': '1',  # /EHsc
@@ -1501,6 +1546,25 @@
               'usp10.lib',
               'psapi.lib',
               'dbghelp.lib',
+            ],
+            'conditions': [
+              ['msvs_express', {
+                # Explicitly required when using the ATL with express
+                'AdditionalDependencies': [
+                  'atlthunk.lib',
+                ],
+              }],
+              ['MSVS_VERSION=="2005e"', {
+                # Non-express versions link automatically to these
+                'AdditionalDependencies': [
+                  'advapi32.lib',
+                  'comdlg32.lib',
+                  'ole32.lib',
+                  'shell32.lib',
+                  'user32.lib',
+                  'winspool.lib',
+                ],
+              }],
             ],
             'AdditionalLibraryDirectories': [
               '<(DEPTH)/third_party/platformsdk_win7/files/Lib',

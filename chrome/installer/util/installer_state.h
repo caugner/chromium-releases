@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,10 +12,11 @@
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/logging.h"
-#include "base/scoped_ptr.h"
-#include "base/scoped_vector.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/product.h"
+#include "chrome/installer/util/util_constants.h"
 
 #if defined(OS_WIN)
 #include <windows.h>  // NOLINT
@@ -147,9 +148,11 @@ class InstallerState {
   // (for example <target_path>\Google\Chrome\Application\<Version>\Installer)
   FilePath GetInstallerDirectory(const Version& version) const;
 
-  // Try to delete all directories whose versions are lower than
-  // |latest_version|.
-  void RemoveOldVersionDirectories(const Version& latest_version,
+  // Try to delete all directories under |temp_path| whose versions are less
+  // than |new_version| and not equal to |existing_version|. |existing_version|
+  // may be NULL.
+  void RemoveOldVersionDirectories(const Version& new_version,
+                                   Version* existing_version,
                                    const FilePath& temp_path) const;
 
   // Adds to |com_dll_list| the list of COM DLLs that are to be registered
@@ -157,6 +160,13 @@ class InstallerState {
   void AddComDllList(std::vector<FilePath>* com_dll_list) const;
 
   bool SetChannelFlags(bool set, ChannelInfo* channel_info) const;
+
+  // See InstallUtil::UpdateInstallerStage.
+  void UpdateStage(installer::InstallerStage stage) const;
+
+  // For a MULTI_INSTALL or MULTI_UPDATE operation, updates the Google Update
+  // "ap" values for all products being operated on.
+  void UpdateChannels() const;
 
  protected:
   FilePath GetDefaultProductInstallPath(BrowserDistribution* dist) const;

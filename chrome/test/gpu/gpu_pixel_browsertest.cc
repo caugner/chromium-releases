@@ -1,12 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <string>
 #include <vector>
 
-#include "app/app_switches.h"
-#include "app/gfx/gl/gl_implementation.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
@@ -15,24 +13,25 @@
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "chrome/browser/gpu_data_manager.h"
-#include "chrome/browser/gpu_process_host_ui_shim.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/gpu_info.h"
 #include "chrome/test/in_process_browser_test.h"
 #include "chrome/test/test_launcher_utils.h"
 #include "chrome/test/ui_test_utils.h"
 #include "content/browser/gpu_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/gpu/gpu_info.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/gl/gl_implementation.h"
+#include "ui/gfx/gl/gl_switches.h"
 #include "ui/gfx/size.h"
 
 namespace {
@@ -84,52 +83,16 @@ void ResizeTabContainer(Browser* browser, const gfx::Size& desired_size) {
   browser->window()->SetBounds(window_rect);
 }
 
-// Observes when any GPU info has been collected and quits the current message
-// loop.
-class GPUInfoCollectedObserver {
- public:
-  explicit GPUInfoCollectedObserver(GpuProcessHostUIShim* gpu_host_shim)
-      : gpu_host_shim_(gpu_host_shim),
-        gpu_info_collected_(false) {
-    gpu_info_update_callback_ =
-        NewCallback(this, &GPUInfoCollectedObserver::OnGpuInfoCollected);
-    GpuDataManager::GetInstance()->
-        AddGpuInfoUpdateCallback(gpu_info_update_callback_);
-  }
-
-  void OnGpuInfoCollected() {
-    gpu_info_collected_ = true;
-    GpuDataManager::GetInstance()->
-        RemoveGpuInfoUpdateCallback(gpu_info_update_callback_);
-    delete gpu_info_update_callback_;
-    MessageLoopForUI::current()->Quit();
-  }
-
-  bool gpu_info_collected() { return gpu_info_collected_; }
-
- private:
-  GpuProcessHostUIShim* gpu_host_shim_;
-  Callback0::Type* gpu_info_update_callback_;
-  bool gpu_info_collected_;
-};
-
-// Collects info about the GPU. Iff the info is collected, |client_info| will be
-// set and true will be returned. This info may be partial or complete. This
-// will return false if we are running in a virtualized environment.
-bool CollectGPUInfo(GPUInfo* client_info) {
+// Obtains info about the GPU. Iff the info is collected, |client_info| will be
+// set and true will be returned. Here we only need vendor_id and device_id,
+// which should be always collected during browser startup, so no need to run
+// GPU information collection here.
+// This will return false if we are running in a virtualized environment.
+bool GetGPUInfo(GPUInfo* client_info) {
   CHECK(client_info);
-  GpuProcessHostUIShim* gpu_host_shim = GpuProcessHostUIShim::GetForRenderer(0);
-  if (!gpu_host_shim)
+  const GPUInfo& info = GpuDataManager::GetInstance()->gpu_info();
+  if (info.vendor_id == 0 || info.device_id == 0)
     return false;
-  GPUInfo info = gpu_host_shim->gpu_info();
-  if (info.level() == GPUInfo::kUninitialized) {
-    GPUInfoCollectedObserver observer(gpu_host_shim);
-    gpu_host_shim->CollectGpuInfoAsynchronously(GPUInfo::kPartial);
-    ui_test_utils::RunMessageLoop();
-    if (!observer.gpu_info_collected())
-      return false;
-    info = gpu_host_shim->gpu_info();
-  }
   *client_info = info;
   return true;
 }
@@ -219,12 +182,12 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
 #endif
     if (using_gpu_) {
       GPUInfo info;
-      if (!CollectGPUInfo(&info)) {
+      if (!GetGPUInfo(&info)) {
         LOG(ERROR) << "Could not get gpu info";
         return false;
       }
       img_name = base::StringPrintf("%s_%s_%04x-%04x.png",
-          img_name.c_str(), os_label, info.vendor_id(), info.device_id());
+          img_name.c_str(), os_label, info.vendor_id, info.device_id);
     } else {
       img_name = base::StringPrintf("%s_%s_mesa.png",
           img_name.c_str(), os_label);

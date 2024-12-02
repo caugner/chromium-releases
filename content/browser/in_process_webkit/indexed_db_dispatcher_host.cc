@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,17 +8,15 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/metrics/user_metrics.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/browser_render_process_host.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/indexed_db_messages.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/in_process_webkit/indexed_db_callbacks.h"
 #include "content/browser/in_process_webkit/indexed_db_database_callbacks.h"
 #include "content/browser/in_process_webkit/indexed_db_transaction_callbacks.h"
 #include "content/browser/renderer_host/render_message_filter.h"
 #include "content/browser/renderer_host/render_view_host_notification_task.h"
-#include "chrome/common/result_codes.h"
+#include "content/common/content_switches.h"
+#include "content/common/indexed_db_messages.h"
+#include "content/common/result_codes.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDOMStringList.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBCursor.h"
@@ -62,10 +60,11 @@ void DeleteOnWebKitThread(T* obj) {
 
 }
 
-IndexedDBDispatcherHost::IndexedDBDispatcherHost(int process_id,
-                                                 Profile* profile)
-    : webkit_context_(profile->GetWebKitContext()),
-      host_content_settings_map_(profile->GetHostContentSettingsMap()),
+IndexedDBDispatcherHost::IndexedDBDispatcherHost(
+    int process_id, WebKitContext* webkit_context,
+    HostContentSettingsMap* host_content_settings_map)
+    : webkit_context_(webkit_context),
+      host_content_settings_map_(host_content_settings_map),
       ALLOW_THIS_IN_INITIALIZER_LIST(database_dispatcher_host_(
           new DatabaseDispatcherHost(this))),
       ALLOW_THIS_IN_INITIALIZER_LIST(index_dispatcher_host_(
@@ -113,6 +112,8 @@ bool IndexedDBDispatcherHost::OnMessageReceived(const IPC::Message& message,
 
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT));
 
+  // TODO(dgrogan): The page cycler test can crash here because
+  // database_dispatcher_host_ becomes invalid.
   bool handled =
       database_dispatcher_host_->OnMessageReceived(message, message_was_ok) ||
       index_dispatcher_host_->OnMessageReceived(message, message_was_ok) ||
@@ -240,10 +241,20 @@ void IndexedDBDispatcherHost::OnIDBFactoryOpen(
       quota = 1024 * 1024 * 1024; // 1GB. More or less "unlimited".
   }
 
+  WebKit::WebIDBFactory::BackingStoreType backingStoreType
+      = WebKit::WebIDBFactory::DefaultBackingStore;
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kLevelDBIndexedDatabase)) {
+    backingStoreType = WebKit::WebIDBFactory::LevelDBBackingStore;
+  }
+
+
   Context()->GetIDBFactory()->open(
       params.name,
       new IndexedDBCallbacks<WebIDBDatabase>(this, params.response_id), origin,
-      NULL, webkit_glue::FilePathToWebString(indexed_db_path), quota);
+      NULL, webkit_glue::FilePathToWebString(indexed_db_path), quota,
+      backingStoreType);
 }
 
 void IndexedDBDispatcherHost::OnIDBFactoryDeleteDatabase(

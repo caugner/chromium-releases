@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/gtest_prod_util.h"
-#include "base/ref_counted.h"
+#include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "remoting/jingle_glue/iq_request.h"
 #include "remoting/jingle_glue/xmpp_proxy.h"
@@ -196,6 +196,12 @@ class JingleClient : public base::RefCountedThreadSafe<JingleClient>,
   void OnJingleInfo(const std::string& token,
                     const std::vector<std::string>& relay_hosts,
                     const std::vector<talk_base::SocketAddress>& stun_hosts);
+
+  // This must be set to true to enable NAT traversal. STUN/Relay
+  // servers are not used when NAT traversal is disabled, so P2P
+  // connection will works only when both peers are on the same
+  // network.
+  bool enable_nat_traversing_;
 
   // JingleThread used for the connection. Set in the constructor.
   JingleThread* thread_;

@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "chrome/renderer/render_view_observer.h"
+#include "content/renderer/render_view_observer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgentClient.h"
 
 namespace WebKit {
@@ -51,7 +51,6 @@ class DevToolsAgent : public RenderViewObserver,
                                           bool enabled);
   virtual void runtimePropertyChanged(const WebKit::WebString& name,
                                       const WebKit::WebString& value);
-  virtual WebKit::WebCString debuggerScriptSource();
   virtual WebKit::WebDevToolsAgentClient::WebKitClientMessageLoop*
       createClientMessageLoop();
   virtual bool exposeV8DebuggerProtocol();
@@ -63,6 +62,7 @@ class DevToolsAgent : public RenderViewObserver,
   void OnInspectElement(int x, int y);
   void OnSetApuAgentEnabled(bool enabled);
   void OnNavigate();
+  void OnSetupDevToolsClient();
 
   static std::map<int, DevToolsAgent*> agent_for_routing_id_;
 

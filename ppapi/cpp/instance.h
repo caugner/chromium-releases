@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -96,6 +96,16 @@ class Instance {
 
   /** See PPB_Instance.ExecuteScript. */
   Var ExecuteScript(const Var& script, Var* exception = NULL);
+
+  // These functions use the PPP_Messaging and PPB_Messaging interfaces, so that
+  // messaging can be done conveniently for a pp::Instance without using a
+  // separate C++ class.
+
+  /** See PPP_Messaging.HandleMessage. */
+  virtual void HandleMessage(const Var& message);
+  /** See PPB_Messaging.PostMessage. */
+  void PostMessage(const Var& message);
+
   // @}
 
   /**

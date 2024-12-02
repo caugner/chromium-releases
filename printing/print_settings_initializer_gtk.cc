@@ -9,7 +9,6 @@
 
 #include "base/string_piece.h"
 #include "base/utf_string_conversions.h"
-#include "printing/pdf_ps_metafile_cairo.h"
 #include "printing/print_settings.h"
 #include "printing/units.h"
 
@@ -34,9 +33,6 @@ void PrintSettingsInitializerGtk::InitPrintSettings(
   print_settings->ranges = new_ranges;
   print_settings->selection_only = print_selection_only;
 
-  GtkPageOrientation orientation = gtk_print_settings_get_orientation(settings);
-  print_settings->set_landscape(orientation == GTK_PAGE_ORIENTATION_LANDSCAPE);
-
   gfx::Size physical_size_device_units;
   gfx::Rect printable_area_device_units;
   int dpi = gtk_print_settings_get_resolution(settings);
@@ -51,9 +47,7 @@ void PrintSettingsInitializerGtk::InitPrintSettings(
         gtk_page_setup_get_page_width(page_setup, GTK_UNIT_INCH) * dpi,
         gtk_page_setup_get_page_height(page_setup, GTK_UNIT_INCH) * dpi);
   } else {
-    // Use dummy values if we cannot get valid values.
-    // TODO(jhawkins) Remove this hack when the Linux printing refactoring
-    // finishes.
+    // Use default values if we cannot get valid values from the print dialog.
     dpi = kPixelsPerInch;
     double page_width_in_pixel = 8.5 * dpi;
     double page_height_in_pixel = 11.0 * dpi;
@@ -61,22 +55,31 @@ void PrintSettingsInitializerGtk::InitPrintSettings(
         static_cast<int>(page_width_in_pixel),
         static_cast<int>(page_height_in_pixel));
     printable_area_device_units.SetRect(
-        static_cast<int>(
-            PdfPsMetafile::kLeftMarginInInch * dpi),
-        static_cast<int>(
-            PdfPsMetafile::kTopMarginInInch * dpi),
-        page_width_in_pixel -
-            (PdfPsMetafile::kLeftMarginInInch +
-             PdfPsMetafile::kRightMarginInInch) * dpi,
-        page_height_in_pixel -
-            (PdfPsMetafile::kTopMarginInInch +
-             PdfPsMetafile::kBottomMarginInInch) * dpi);
+        static_cast<int>(kLeftMarginInInch * dpi),
+        static_cast<int>(kTopMarginInInch * dpi),
+        page_width_in_pixel - (kLeftMarginInInch + kRightMarginInInch) * dpi,
+        page_height_in_pixel - (kTopMarginInInch + kBottomMarginInInch) * dpi);
   }
 
   print_settings->set_dpi(dpi);
   print_settings->SetPrinterPrintableArea(physical_size_device_units,
                                           printable_area_device_units,
                                           dpi);
+
+  // Note: With the normal GTK print dialog, when the user selects the landscape
+  // orientation, all that does is change the paper size. Which seems to be
+  // enough to render the right output and send it to the printer.
+  // The orientation value stays as portrait and does not actually affect
+  // printing.
+  // Thus this is only useful in print preview mode, where we manually set the
+  // orientation and change the paper size ourselves.
+  GtkPageOrientation orientation = gtk_print_settings_get_orientation(settings);
+  print_settings->SetOrientation(orientation == GTK_PAGE_ORIENTATION_LANDSCAPE);
 }
+
+const double PrintSettingsInitializerGtk::kTopMarginInInch = 0.25;
+const double PrintSettingsInitializerGtk::kBottomMarginInInch = 0.56;
+const double PrintSettingsInitializerGtk::kLeftMarginInInch = 0.25;
+const double PrintSettingsInitializerGtk::kRightMarginInInch = 0.25;
 
 }  // namespace printing

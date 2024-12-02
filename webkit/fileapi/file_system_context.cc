@@ -9,6 +9,7 @@
 #include "googleurl/src/gurl.h"
 #include "webkit/fileapi/file_system_path_manager.h"
 #include "webkit/fileapi/file_system_usage_tracker.h"
+#include "webkit/fileapi/sandbox_mount_point_provider.h"
 
 namespace fileapi {
 
@@ -19,16 +20,21 @@ FileSystemContext::FileSystemContext(
     const FilePath& profile_path,
     bool is_incognito,
     bool allow_file_access,
-    bool unlimited_quota)
+    bool unlimited_quota,
+    FileSystemPathManager* path_manager)
     : file_message_loop_(file_message_loop),
       io_message_loop_(io_message_loop),
       special_storage_policy_(special_storage_policy),
       allow_file_access_from_files_(allow_file_access),
       unlimited_quota_(unlimited_quota),
-      path_manager_(new FileSystemPathManager(
-          file_message_loop, profile_path, is_incognito, allow_file_access)),
+      path_manager_(path_manager),
       usage_tracker_(new FileSystemUsageTracker(
           file_message_loop, profile_path, is_incognito)) {
+  if (!path_manager) {
+    path_manager_.reset(new FileSystemPathManager(
+              file_message_loop, profile_path, special_storage_policy,
+              is_incognito, allow_file_access));
+  }
 }
 
 FileSystemContext::~FileSystemContext() {
@@ -50,8 +56,8 @@ void FileSystemContext::DeleteDataForOriginOnFileThread(
   DCHECK(file_message_loop_->BelongsToCurrentThread());
 
   std::string origin_identifier =
-      FileSystemPathManager::GetOriginIdentifierFromURL(origin_url);
-  FilePath path_for_origin = path_manager_->base_path().AppendASCII(
+      SandboxMountPointProvider::GetOriginIdentifierFromURL(origin_url);
+  FilePath path_for_origin = sandbox_provider()->base_path().AppendASCII(
       origin_identifier);
 
   file_util::Delete(path_for_origin, true /* recursive */);
@@ -63,6 +69,10 @@ void FileSystemContext::DeleteOnCorrectThread() const {
     return;
   }
   delete this;
+}
+
+SandboxMountPointProvider* FileSystemContext::sandbox_provider() const {
+  return path_manager_->sandbox_provider();
 }
 
 }  // namespace fileapi

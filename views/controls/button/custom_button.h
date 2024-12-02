@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,22 +44,16 @@ class CustomButton : public Button,
   // Starts throbbing. See HoverAnimation for a description of cycles_til_stop.
   void StartThrobbing(int cycles_til_stop);
 
+  // Stops throbbing immediately.
+  void StopThrobbing();
+
   // Set how long the hover animation will last for.
   void SetAnimationDuration(int duration);
-
-  // Overridden from View:
-  virtual AccessibilityTypes::State GetAccessibleState() OVERRIDE;
-  virtual void SetEnabled(bool enabled) OVERRIDE;
-  virtual bool IsEnabled() const OVERRIDE;
-  virtual bool IsFocusable() const OVERRIDE;
 
   void set_triggerable_event_flags(int triggerable_event_flags) {
     triggerable_event_flags_ = triggerable_event_flags;
   }
-
-  int triggerable_event_flags() const {
-    return triggerable_event_flags_;
-  }
+  int triggerable_event_flags() const { return triggerable_event_flags_; }
 
   // Sets whether |RequestFocus| should be invoked on a mouse press. The default
   // is true.
@@ -78,8 +72,29 @@ class CustomButton : public Button,
   // when it's disabled.
   bool IsMouseHovered() const;
 
-  // Returns views/CustomButton.
-  virtual std::string GetClassName() const;
+  // Overridden from View:
+  virtual void SetHotTracked(bool flag) OVERRIDE;
+  virtual bool IsHotTracked() const OVERRIDE;
+  virtual void SetEnabled(bool enabled) OVERRIDE;
+  virtual bool IsEnabled() const OVERRIDE;
+  virtual std::string GetClassName() const OVERRIDE;
+  virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
+  virtual bool OnMouseDragged(const MouseEvent& event) OVERRIDE;
+  virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
+  virtual void OnMouseCaptureLost() OVERRIDE;
+  virtual void OnMouseEntered(const MouseEvent& event) OVERRIDE;
+  virtual void OnMouseExited(const MouseEvent& event) OVERRIDE;
+  virtual void OnMouseMoved(const MouseEvent& event) OVERRIDE;
+  virtual bool OnKeyPressed(const KeyEvent& event) OVERRIDE;
+  virtual bool OnKeyReleased(const KeyEvent& event) OVERRIDE;
+  virtual bool AcceleratorPressed(const Accelerator& accelerator) OVERRIDE;
+  virtual void ShowContextMenu(const gfx::Point& p,
+                               bool is_mouse_gesture) OVERRIDE;
+  virtual void OnDragDone() OVERRIDE;
+  virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
+
+  // Overridden from ui::AnimationDelegate:
+  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
 
  protected:
   // Construct the Button with a Listener. See comment for Button's ctor.
@@ -87,35 +102,19 @@ class CustomButton : public Button,
 
   // Returns true if the event is one that can trigger notifying the listener.
   // This implementation returns true if the left mouse button is down.
-  virtual bool IsTriggerableEvent(const MouseEvent& e);
-
-  // Overridden from View:
-  virtual bool AcceleratorPressed(const Accelerator& accelerator) OVERRIDE;
-  virtual bool OnMousePressed(const MouseEvent& e) OVERRIDE;
-  virtual bool OnMouseDragged(const MouseEvent& e) OVERRIDE;
-  virtual void OnMouseReleased(const MouseEvent& e, bool canceled) OVERRIDE;
-  virtual void OnMouseEntered(const MouseEvent& e) OVERRIDE;
-  virtual void OnMouseMoved(const MouseEvent& e) OVERRIDE;
-  virtual void OnMouseExited(const MouseEvent& e) OVERRIDE;
-  virtual bool OnKeyPressed(const KeyEvent& e) OVERRIDE;
-  virtual bool OnKeyReleased(const KeyEvent& e) OVERRIDE;
-  virtual void OnDragDone() OVERRIDE;
-  virtual void ShowContextMenu(const gfx::Point& p,
-                               bool is_mouse_gesture) OVERRIDE;
-  virtual void ViewHierarchyChanged(bool is_add,
-                                    View* parent,
-                                    View* child) OVERRIDE;
-  virtual void SetHotTracked(bool flag) OVERRIDE;
-  virtual bool IsHotTracked() const OVERRIDE;
-  virtual void OnBlur() OVERRIDE;
-
-  // Overridden from ui::AnimationDelegate:
-  virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
+  virtual bool IsTriggerableEvent(const MouseEvent& event);
 
   // Returns true if the button should become pressed when the user
   // holds the mouse down over the button. For this implementation,
-  // we simply return IsTriggerableEvent(e).
-  virtual bool ShouldEnterPushedState(const MouseEvent& e);
+  // we simply return IsTriggerableEvent(event).
+  virtual bool ShouldEnterPushedState(const MouseEvent& event);
+
+  // Overridden from View:
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    View* parent,
+                                    View* child) OVERRIDE;
+  virtual bool IsFocusable() const OVERRIDE;
+  virtual void OnBlur() OVERRIDE;
 
   // The button state (defined in implementation)
   ButtonState state_;

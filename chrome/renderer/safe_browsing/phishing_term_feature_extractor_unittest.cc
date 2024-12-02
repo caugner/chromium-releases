@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,13 @@
 
 #include "base/callback.h"
 #include "base/hash_tables.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/scoped_ptr.h"
-#include "base/sha2.h"
 #include "base/string16.h"
 #include "base/stringprintf.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
+#include "crypto/sha2.h"
 #include "chrome/renderer/safe_browsing/features.h"
 #include "chrome/renderer/safe_browsing/mock_feature_extractor_clock.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -44,7 +44,7 @@ class PhishingTermFeatureExtractorTest : public ::testing::Test {
 
     for (base::hash_set<std::string>::iterator it = terms.begin();
          it != terms.end(); ++it) {
-      term_hashes_.insert(base::SHA256HashString(*it));
+      term_hashes_.insert(crypto::SHA256HashString(*it));
     }
 
     base::hash_set<std::string> words;
@@ -62,7 +62,7 @@ class PhishingTermFeatureExtractorTest : public ::testing::Test {
 
     for (base::hash_set<std::string>::iterator it = words.begin();
          it != words.end(); ++it) {
-      word_hashes_.insert(base::SHA256HashString(*it));
+      word_hashes_.insert(crypto::SHA256HashString(*it));
     }
 
     extractor_.reset(new PhishingTermFeatureExtractor(
@@ -187,9 +187,9 @@ TEST_F(PhishingTermFeatureExtractorTest, Continuation) {
   }
   page_text.append(ASCIIToUTF16("two"));
 
-  // Advance the clock 30 ms every 10 words processed, 10 ms between chunks.
+  // Advance the clock 15 ms every 10 words processed, 10 ms between chunks.
   // Note that this assumes kClockCheckGranularity = 10 and
-  // kMaxTimePerChunkMs = 50.
+  // kMaxTimePerChunkMs = 20.
   base::TimeTicks now = base::TimeTicks::Now();
   EXPECT_CALL(clock_, Now())
       // Time check at the start of extraction.
@@ -197,16 +197,16 @@ TEST_F(PhishingTermFeatureExtractorTest, Continuation) {
       // Time check at the start of the first chunk of work.
       .WillOnce(Return(now))
       // Time check after the first 10 words.
-      .WillOnce(Return(now + base::TimeDelta::FromMilliseconds(30)))
+      .WillOnce(Return(now + base::TimeDelta::FromMilliseconds(15)))
       // Time check after the next 10 words.  This is over the chunk
       // time limit, so a continuation task will be posted.
-      .WillOnce(Return(now + base::TimeDelta::FromMilliseconds(60)))
+      .WillOnce(Return(now + base::TimeDelta::FromMilliseconds(30)))
       // Time check at the start of the second chunk of work.
-      .WillOnce(Return(now + base::TimeDelta::FromMilliseconds(70)))
+      .WillOnce(Return(now + base::TimeDelta::FromMilliseconds(40)))
       // Time check after the next 10 words.
-      .WillOnce(Return(now + base::TimeDelta::FromMilliseconds(100)))
+      .WillOnce(Return(now + base::TimeDelta::FromMilliseconds(55)))
       // A final check for the histograms.
-      .WillOnce(Return(now + base::TimeDelta::FromMilliseconds(101)));
+      .WillOnce(Return(now + base::TimeDelta::FromMilliseconds(56)));
 
   FeatureMap expected_features;
   expected_features.AddBooleanFeature(features::kPageTerm +

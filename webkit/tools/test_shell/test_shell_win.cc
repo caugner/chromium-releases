@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,7 @@
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/file_util.h"
-#include "base/memory_debug.h"
+#include "base/memory/memory_debug.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/resource_util.h"
@@ -720,7 +720,6 @@ base::StringPiece GetDataResource(int resource_id) {
   case IDR_MEDIA_SOUND_DISABLED:
   case IDR_MEDIA_SLIDER_THUMB:
   case IDR_MEDIA_VOLUME_SLIDER_THUMB:
-  case IDR_DEVTOOLS_DEBUGGER_SCRIPT_JS:
   case IDR_INPUT_SPEECH:
   case IDR_INPUT_SPEECH_RECORDING:
   case IDR_INPUT_SPEECH_WAITING:

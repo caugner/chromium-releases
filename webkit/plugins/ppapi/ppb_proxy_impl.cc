@@ -7,6 +7,7 @@
 #include "ppapi/c/private/ppb_proxy_private.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
+#include "webkit/plugins/ppapi/ppb_url_loader_impl.h"
 #include "webkit/plugins/ppapi/resource.h"
 #include "webkit/plugins/ppapi/resource_tracker.h"
 
@@ -28,9 +29,40 @@ PP_Instance GetInstanceForResource(PP_Resource resource) {
   return obj->instance()->pp_instance();
 }
 
+void SetReserveInstanceIDCallback(PP_Module module,
+                                  PP_Bool (*reserve)(PP_Module, PP_Instance)) {
+  PluginModule* plugin_module = ResourceTracker::Get()->GetModule(module);
+  if (plugin_module)
+    plugin_module->SetReserveInstanceIDCallback(reserve);
+}
+
+int32_t GetURLLoaderBufferedBytes(PP_Resource url_loader) {
+ scoped_refptr<PPB_URLLoader_Impl> loader(
+      Resource::GetAs<PPB_URLLoader_Impl>(url_loader));
+  if (!loader)
+    return 0;
+  return loader->buffer_size();
+}
+
+void AddRefModule(PP_Module module) {
+  PluginModule* plugin_module = ResourceTracker::Get()->GetModule(module);
+  if (plugin_module)
+    plugin_module->AddRef();
+}
+
+void ReleaseModule(PP_Module module) {
+  PluginModule* plugin_module = ResourceTracker::Get()->GetModule(module);
+  if (plugin_module)
+    plugin_module->Release();
+}
+
 const PPB_Proxy_Private ppb_proxy = {
   &PluginCrashed,
-  &GetInstanceForResource
+  &GetInstanceForResource,
+  &SetReserveInstanceIDCallback,
+  &GetURLLoaderBufferedBytes,
+  &AddRefModule,
+  &ReleaseModule
 };
 
 }  // namespace

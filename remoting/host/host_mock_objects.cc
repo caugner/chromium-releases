@@ -6,13 +6,33 @@
 
 namespace remoting {
 
-MockCapturer::MockCapturer() : Capturer(NULL) {}
+MockCapturer::MockCapturer() {}
 
 MockCapturer::~MockCapturer() {}
+
+MockCurtain::MockCurtain() {}
+
+MockCurtain::~MockCurtain() {}
+
+MockEventExecutor::MockEventExecutor() {}
+
+MockEventExecutor::~MockEventExecutor() {}
+
+Curtain* Curtain::Create() {
+  return new MockCurtain();
+}
 
 MockChromotingHostContext::MockChromotingHostContext()
     : ChromotingHostContext(NULL) {}
 
 MockChromotingHostContext::~MockChromotingHostContext() {}
+
+MockClientSessionEventHandler::MockClientSessionEventHandler() {}
+
+MockClientSessionEventHandler::~MockClientSessionEventHandler() {}
+
+MockUserAuthenticator::MockUserAuthenticator() {}
+
+MockUserAuthenticator::~MockUserAuthenticator() {}
 
 }  // namespace remoting

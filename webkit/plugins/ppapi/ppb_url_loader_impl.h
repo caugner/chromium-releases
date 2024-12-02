@@ -7,8 +7,8 @@
 
 #include <deque>
 
-#include "base/ref_counted.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/trusted/ppb_url_loader_trusted.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoaderClient.h"
@@ -56,7 +56,7 @@ class PPB_URLLoader_Impl : public Resource, public WebKit::WebURLLoaderClient {
                          int64_t* total_bytes_to_be_sent);
   bool GetDownloadProgress(int64_t* bytes_received,
                            int64_t* total_bytes_to_be_received);
-  int32_t ReadResponseBody(char* buffer, int32_t bytes_to_read,
+  int32_t ReadResponseBody(void* buffer, int32_t bytes_to_read,
                            PP_CompletionCallback callback);
   int32_t FinishStreamingToFile(PP_CompletionCallback callback);
   void Close();
@@ -76,15 +76,21 @@ class PPB_URLLoader_Impl : public Resource, public WebKit::WebURLLoaderClient {
                                   const WebKit::WebURLResponse& response);
   virtual void didDownloadData(WebKit::WebURLLoader* loader,
                                int data_length);
+
   virtual void didReceiveData(WebKit::WebURLLoader* loader,
-                              const char* data,
-                              int data_length);
+                               const char* data,
+                               int data_length,
+                               int encoded_data_length);
   virtual void didFinishLoading(WebKit::WebURLLoader* loader,
                                 double finish_time);
   virtual void didFail(WebKit::WebURLLoader* loader,
                        const WebKit::WebURLError& error);
 
   PPB_URLResponseInfo_Impl* response_info() const { return response_info_; }
+
+  // Returns the number of bytes currently available for synchronous reading
+  // in the loader.
+  int32_t buffer_size() const { return buffer_.size(); }
 
  private:
   // Check that |callback| is valid (only non-blocking operation is supported)
@@ -93,7 +99,7 @@ class PPB_URLLoader_Impl : public Resource, public WebKit::WebURLLoaderClient {
   int32_t ValidateCallback(PP_CompletionCallback callback);
 
   // Sets up |callback| as the pending callback. This should only be called once
-  // it is certain that |PP_ERROR_WOULDBLOCK| will be returned.
+  // it is certain that |PP_OK_COMPLETIONPENDING| will be returned.
   void RegisterCallback(PP_CompletionCallback callback);
 
   void RunCallback(int32_t result);
@@ -102,8 +108,6 @@ class PPB_URLLoader_Impl : public Resource, public WebKit::WebURLLoaderClient {
 
   // Converts a WebURLResponse to a URLResponseInfo and saves it.
   void SaveResponse(const WebKit::WebURLResponse& response);
-
-  int32_t CanRequest(const WebKit::WebFrame* frame, const WebKit::WebURL& url);
 
   // Calls the status_callback_ (if any) with the current upload and download
   // progress. Call this function if you update any of these values to
@@ -133,6 +137,8 @@ class PPB_URLLoader_Impl : public Resource, public WebKit::WebURLLoaderClient {
   char* user_buffer_;
   size_t user_buffer_size_;
   int32_t done_status_;
+  bool is_streaming_to_file_;
+  bool is_asynchronous_load_suspended_;
 
   bool has_universal_access_;
 

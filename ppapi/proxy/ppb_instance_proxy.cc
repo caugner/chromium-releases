@@ -6,6 +6,7 @@
 
 #include "ppapi/c/pp_var.h"
 #include "ppapi/c/ppb_instance.h"
+#include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/plugin_resource.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
@@ -119,6 +120,12 @@ const InterfaceProxy::Info* PPB_Instance_Proxy::GetInfo() {
 }
 
 bool PPB_Instance_Proxy::OnMessageReceived(const IPC::Message& msg) {
+  // Prevent the dispatcher from going away during a call to ExecuteScript.
+  // This must happen OUTSIDE of ExecuteScript since the SerializedVars use
+  // the dispatcher upon return of the function (converting the
+  // SerializedVarReturnValue/OutParam to a SerializedVar in the destructor).
+  ScopedModuleReference death_grip(dispatcher());
+
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPB_Instance_Proxy, msg)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_GetWindowObject,
@@ -167,6 +174,11 @@ void PPB_Instance_Proxy::OnMsgExecuteScript(
     SerializedVarReceiveInput script,
     SerializedVarOutParam out_exception,
     SerializedVarReturnValue result) {
+  if (dispatcher()->IsPlugin())
+    NOTREACHED();
+  else
+    static_cast<HostDispatcher*>(dispatcher())->set_allow_plugin_reentrancy();
+
   result.Return(dispatcher(), ppb_instance_target()->ExecuteScript(
       instance,
       script.Get(dispatcher()),

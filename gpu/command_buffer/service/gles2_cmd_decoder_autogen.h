@@ -221,7 +221,7 @@ error::Error GLES2DecoderImpl::HandleCheckFramebufferStatus(
 error::Error GLES2DecoderImpl::HandleClear(
     uint32 immediate_data_size, const gles2::Clear& c) {
   GLbitfield mask = static_cast<GLbitfield>(c.mask);
-  glClear(mask);
+  DoClear(mask);
   return error::kNoError;
 }
 
@@ -1762,96 +1762,6 @@ error::Error GLES2DecoderImpl::HandleTexParameterivImmediate(
   return error::kNoError;
 }
 
-error::Error GLES2DecoderImpl::HandleTexSubImage2D(
-    uint32 immediate_data_size, const gles2::TexSubImage2D& c) {
-  GLenum target = static_cast<GLenum>(c.target);
-  GLint level = static_cast<GLint>(c.level);
-  GLint xoffset = static_cast<GLint>(c.xoffset);
-  GLint yoffset = static_cast<GLint>(c.yoffset);
-  GLsizei width = static_cast<GLsizei>(c.width);
-  GLsizei height = static_cast<GLsizei>(c.height);
-  GLenum format = static_cast<GLenum>(c.format);
-  GLenum type = static_cast<GLenum>(c.type);
-  uint32 data_size;
-  if (!GLES2Util::ComputeImageDataSize(
-      width, height, format, type, unpack_alignment_, &data_size)) {
-    return error::kOutOfBounds;
-  }
-  const void* pixels = GetSharedMemoryAs<const void*>(
-      c.pixels_shm_id, c.pixels_shm_offset, data_size);
-  if (!validators_->texture_target.IsValid(target)) {
-    SetGLError(GL_INVALID_ENUM, "glTexSubImage2D: target GL_INVALID_ENUM");
-    return error::kNoError;
-  }
-  if (width < 0) {
-    SetGLError(GL_INVALID_VALUE, "glTexSubImage2D: width < 0");
-    return error::kNoError;
-  }
-  if (height < 0) {
-    SetGLError(GL_INVALID_VALUE, "glTexSubImage2D: height < 0");
-    return error::kNoError;
-  }
-  if (!validators_->texture_format.IsValid(format)) {
-    SetGLError(GL_INVALID_ENUM, "glTexSubImage2D: format GL_INVALID_ENUM");
-    return error::kNoError;
-  }
-  if (!validators_->pixel_type.IsValid(type)) {
-    SetGLError(GL_INVALID_ENUM, "glTexSubImage2D: type GL_INVALID_ENUM");
-    return error::kNoError;
-  }
-  if (pixels == NULL) {
-    return error::kOutOfBounds;
-  }
-  DoTexSubImage2D(
-      target, level, xoffset, yoffset, width, height, format, type, pixels);
-  return error::kNoError;
-}
-
-error::Error GLES2DecoderImpl::HandleTexSubImage2DImmediate(
-    uint32 immediate_data_size, const gles2::TexSubImage2DImmediate& c) {
-  GLenum target = static_cast<GLenum>(c.target);
-  GLint level = static_cast<GLint>(c.level);
-  GLint xoffset = static_cast<GLint>(c.xoffset);
-  GLint yoffset = static_cast<GLint>(c.yoffset);
-  GLsizei width = static_cast<GLsizei>(c.width);
-  GLsizei height = static_cast<GLsizei>(c.height);
-  GLenum format = static_cast<GLenum>(c.format);
-  GLenum type = static_cast<GLenum>(c.type);
-  uint32 data_size;
-  if (!GLES2Util::ComputeImageDataSize(
-      width, height, format, type, unpack_alignment_, &data_size)) {
-    return error::kOutOfBounds;
-  }
-  const void* pixels = GetImmediateDataAs<const void*>(
-      c, data_size, immediate_data_size);
-  if (!validators_->texture_target.IsValid(target)) {
-    SetGLError(GL_INVALID_ENUM, "glTexSubImage2D: target GL_INVALID_ENUM");
-    return error::kNoError;
-  }
-  if (width < 0) {
-    SetGLError(GL_INVALID_VALUE, "glTexSubImage2D: width < 0");
-    return error::kNoError;
-  }
-  if (height < 0) {
-    SetGLError(GL_INVALID_VALUE, "glTexSubImage2D: height < 0");
-    return error::kNoError;
-  }
-  if (!validators_->texture_format.IsValid(format)) {
-    SetGLError(GL_INVALID_ENUM, "glTexSubImage2D: format GL_INVALID_ENUM");
-    return error::kNoError;
-  }
-  if (!validators_->pixel_type.IsValid(type)) {
-    SetGLError(GL_INVALID_ENUM, "glTexSubImage2D: type GL_INVALID_ENUM");
-    return error::kNoError;
-  }
-  if (pixels == NULL) {
-    return error::kOutOfBounds;
-  }
-  DoTexSubImage2D(
-      target, level, xoffset, yoffset, width, height, format, type, pixels);
-  return error::kNoError;
-}
-
 error::Error GLES2DecoderImpl::HandleUniform1f(
     uint32 immediate_data_size, const gles2::Uniform1f& c) {
   GLint location = static_cast<GLint>(c.location);
@@ -2012,7 +1922,7 @@ error::Error GLES2DecoderImpl::HandleUniform2iv(
   if (v == NULL) {
     return error::kOutOfBounds;
   }
-  glUniform2iv(location, count, v);
+  DoUniform2iv(location, count, v);
   return error::kNoError;
 }
 
@@ -2032,7 +1942,7 @@ error::Error GLES2DecoderImpl::HandleUniform2ivImmediate(
   if (v == NULL) {
     return error::kOutOfBounds;
   }
-  glUniform2iv(location, count, v);
+  DoUniform2iv(location, count, v);
   return error::kNoError;
 }
 
@@ -2107,7 +2017,7 @@ error::Error GLES2DecoderImpl::HandleUniform3iv(
   if (v == NULL) {
     return error::kOutOfBounds;
   }
-  glUniform3iv(location, count, v);
+  DoUniform3iv(location, count, v);
   return error::kNoError;
 }
 
@@ -2127,7 +2037,7 @@ error::Error GLES2DecoderImpl::HandleUniform3ivImmediate(
   if (v == NULL) {
     return error::kOutOfBounds;
   }
-  glUniform3iv(location, count, v);
+  DoUniform3iv(location, count, v);
   return error::kNoError;
 }
 
@@ -2204,7 +2114,7 @@ error::Error GLES2DecoderImpl::HandleUniform4iv(
   if (v == NULL) {
     return error::kOutOfBounds;
   }
-  glUniform4iv(location, count, v);
+  DoUniform4iv(location, count, v);
   return error::kNoError;
 }
 
@@ -2224,7 +2134,7 @@ error::Error GLES2DecoderImpl::HandleUniform4ivImmediate(
   if (v == NULL) {
     return error::kOutOfBounds;
   }
-  glUniform4iv(location, count, v);
+  DoUniform4iv(location, count, v);
   return error::kNoError;
 }
 
@@ -2247,7 +2157,7 @@ error::Error GLES2DecoderImpl::HandleUniformMatrix2fv(
   if (value == NULL) {
     return error::kOutOfBounds;
   }
-  glUniformMatrix2fv(location, count, transpose, value);
+  DoUniformMatrix2fv(location, count, transpose, value);
   return error::kNoError;
 }
 
@@ -2273,7 +2183,7 @@ error::Error GLES2DecoderImpl::HandleUniformMatrix2fvImmediate(
   if (value == NULL) {
     return error::kOutOfBounds;
   }
-  glUniformMatrix2fv(location, count, transpose, value);
+  DoUniformMatrix2fv(location, count, transpose, value);
   return error::kNoError;
 }
 
@@ -2296,7 +2206,7 @@ error::Error GLES2DecoderImpl::HandleUniformMatrix3fv(
   if (value == NULL) {
     return error::kOutOfBounds;
   }
-  glUniformMatrix3fv(location, count, transpose, value);
+  DoUniformMatrix3fv(location, count, transpose, value);
   return error::kNoError;
 }
 
@@ -2322,7 +2232,7 @@ error::Error GLES2DecoderImpl::HandleUniformMatrix3fvImmediate(
   if (value == NULL) {
     return error::kOutOfBounds;
   }
-  glUniformMatrix3fv(location, count, transpose, value);
+  DoUniformMatrix3fv(location, count, transpose, value);
   return error::kNoError;
 }
 
@@ -2345,7 +2255,7 @@ error::Error GLES2DecoderImpl::HandleUniformMatrix4fv(
   if (value == NULL) {
     return error::kOutOfBounds;
   }
-  glUniformMatrix4fv(location, count, transpose, value);
+  DoUniformMatrix4fv(location, count, transpose, value);
   return error::kNoError;
 }
 
@@ -2371,7 +2281,7 @@ error::Error GLES2DecoderImpl::HandleUniformMatrix4fvImmediate(
   if (value == NULL) {
     return error::kOutOfBounds;
   }
-  glUniformMatrix4fv(location, count, transpose, value);
+  DoUniformMatrix4fv(location, count, transpose, value);
   return error::kNoError;
 }
 

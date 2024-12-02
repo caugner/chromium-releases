@@ -4,7 +4,7 @@
 
 #include "content/browser/renderer_host/render_message_filter.h"
 
-#include "chrome/common/render_messages.h"
+#include "content/common/view_messages.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/win/WebScreenInfoFactory.h"
 
@@ -18,32 +18,23 @@ using WebKit::WebScreenInfoFactory;
 // so that we can eliminate the NativeViewId parameter.
 
 void RenderMessageFilter::OnGetWindowRect(gfx::NativeViewId window_id,
-                                          IPC::Message* reply_msg) {
+                                          gfx::Rect* rect) {
   HWND window = gfx::NativeViewFromId(window_id);
   RECT window_rect = {0};
   GetWindowRect(window, &window_rect);
-  gfx::Rect rect(window_rect);
-
-  ViewHostMsg_GetWindowRect::WriteReplyParams(reply_msg, rect);
-  Send(reply_msg);
+  *rect = window_rect;
 }
 
 void RenderMessageFilter::OnGetRootWindowRect(gfx::NativeViewId window_id,
-                                              IPC::Message* reply_msg) {
+                                              gfx::Rect* rect) {
   HWND window = gfx::NativeViewFromId(window_id);
   RECT window_rect = {0};
   HWND root_window = ::GetAncestor(window, GA_ROOT);
   GetWindowRect(root_window, &window_rect);
-  gfx::Rect rect(window_rect);
-
-  ViewHostMsg_GetRootWindowRect::WriteReplyParams(reply_msg, rect);
-  Send(reply_msg);
+  *rect = window_rect;
 }
 
 void RenderMessageFilter::OnGetScreenInfo(gfx::NativeViewId view,
-                                          IPC::Message* reply_msg) {
-  WebScreenInfo results =
-      WebScreenInfoFactory::screenInfo(gfx::NativeViewFromId(view));
-  ViewHostMsg_GetScreenInfo::WriteReplyParams(reply_msg, results);
-  Send(reply_msg);
+                                          WebKit::WebScreenInfo* results) {
+  *results = WebScreenInfoFactory::screenInfo(gfx::NativeViewFromId(view));
 }

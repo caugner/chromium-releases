@@ -225,8 +225,8 @@ class ChromeTests:
   def TestMedia(self):
     return self.SimpleTest("chrome", "media_unittests")
 
-  def TestNotifier(self):
-    return self.SimpleTest("chrome", "notifier_unit_tests")
+  def TestJingle(self):
+    return self.SimpleTest("chrome", "jingle_unittests")
 
   def TestPrinting(self):
     return self.SimpleTest("chrome", "printing_unittests")
@@ -263,6 +263,9 @@ class ChromeTests:
 
   def TestApp(self):
     return self.SimpleTest("chrome", "app_unittests")
+
+  def TestUIUnit(self):
+    return self.SimpleTest("chrome", "ui_unittests")
 
   def TestGfx(self):
     return self.SimpleTest("chrome", "gfx_unittests")
@@ -424,9 +427,10 @@ class ChromeTests:
     "ipc": TestIpc,              "ipc_tests": TestIpc,
     "interactive_ui": TestInteractiveUI,
     "layout": TestLayout,        "layout_tests": TestLayout,
+    "webkit": TestLayout,
     "media": TestMedia,          "media_unittests": TestMedia,
     "net": TestNet,              "net_unittests": TestNet,
-    "notifier": TestNotifier,    "notifier_unittests": TestNotifier,
+    "jingle": TestJingle,        "jingle_unittests": TestJingle,
     "printing": TestPrinting,    "printing_unittests": TestPrinting,
     "reliability": TestReliability, "reliability_tests": TestReliability,
     "remoting": TestRemoting,    "remoting_unittests": TestRemoting,
@@ -439,6 +443,7 @@ class ChromeTests:
     "ui": TestUI,                "ui_tests": TestUI,
     "unit": TestUnit,            "unit_tests": TestUnit,
     "app": TestApp,              "app_unittests": TestApp,
+    "ui_unit": TestUIUnit,       "ui_unittests": TestUIUnit,
     "gfx": TestGfx,              "gfx_unittests": TestGfx,
   }
 
