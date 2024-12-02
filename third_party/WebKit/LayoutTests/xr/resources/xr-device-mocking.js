@@ -31,9 +31,26 @@ function setPose(pose) {
   mockVRService.mockVRDisplays_[0].setPose(pose);
 }
 
+function setStageTransform(transform) {
+  mockVRService.mockVRDisplays_[0].setStageTransform(transform);
+}
+
 // Returns the submitted frame count for the first display
 function getSubmitFrameCount() {
   return mockVRService.mockVRDisplays_[0].getSubmitFrameCount();
+}
+
+// Returns the missing (not submitted) frame count for the first display
+function getMissingFrameCount() {
+  return mockVRService.mockVRDisplays_[0].getMissingFrameCount();
+}
+
+function addInputSource(input_source) {
+  return mockVRService.mockVRDisplays_[0].addInputSource(input_source);
+}
+
+function removeInputSource(input_source) {
+  return mockVRService.mockVRDisplays_[0].removeInputSource(input_source);
 }
 
 function fakeXRDevices() {
@@ -73,6 +90,7 @@ function fakeXRDevices() {
       stageParameters: null,
       leftEye: null,
       rightEye: null,
+      webxrDefaultFramebufferScale: 1.0,
     },
 
     FakeRoomScale: {
@@ -93,6 +111,7 @@ function fakeXRDevices() {
       },
       leftEye: generic_left_eye,
       rightEye: generic_right_eye,
+      webxrDefaultFramebufferScale: 1.0,
     },
 
     FakeGooglePixelPhone: {
@@ -113,8 +132,8 @@ function fakeXRDevices() {
           rightDegrees: 50.899,
         },
         offset: [-0.032, 0, 0],
-        renderWidth: 960,
-        renderHeight: 1080
+        renderWidth: 1920,
+        renderHeight: 2160
       },
       rightEye: {
         fieldOfView: {
@@ -124,9 +143,10 @@ function fakeXRDevices() {
           rightDegrees: 35.197
         },
         offset: [0.032, 0, 0],
-        renderWidth: 960,
-        renderHeight: 1080
-      }
+        renderWidth: 1920,
+        renderHeight: 2160
+      },
+      webxrDefaultFramebufferScale: 0.7,
     }
   };
 }
@@ -202,7 +222,7 @@ function perspectiveFromFieldOfView(fov, near, far) {
   return out;
 }
 
-function assert_matrices_approx_equal(matA, matB, epsilon = FLOAT_EPSILON) {
+function assert_matrices_approx_equal(matA, matB, epsilon = FLOAT_EPSILON, message = "") {
   if (matA == null && matB == null) {
     return;
   }
@@ -212,8 +232,32 @@ function assert_matrices_approx_equal(matA, matB, epsilon = FLOAT_EPSILON) {
 
   assert_equals(matA.length, 16);
   assert_equals(matB.length, 16);
+
+  let mismatched_element = -1;
   for (let i = 0; i < 16; ++i) {
-    assert_approx_equals(matA[i], matB[i], epsilon);
+    if (Math.abs(matA[i] - matB[i]) > epsilon) {
+      mismatched_element = i;
+      break;
+    }
+  }
+
+  if (mismatched_element > -1) {
+    let matA_str = "[";
+    let matB_str = "[";
+    for (let i = 0; i < 16; ++i) {
+      matA_str += matA[i] + (i < 15 ? ", " : "");
+      matB_str += matB[i] + (i < 15 ? ", " : "");
+    }
+    matA_str += "]";
+    matB_str += "]";
+
+    let error_message = message ? message + "\n" : "Matrix comparison failed.\n";
+    error_message += " Difference in element " + mismatched_element + " exceeded the given epsilon.\n";
+
+    error_message += " Matrix A: " + matA_str + "\n";
+    error_message += " Matrix B: " + matB_str + "\n";
+
+    assert_approx_equals(matA[mismatched_element], matB[mismatched_element], epsilon, error_message);
   }
 }
 
@@ -257,8 +301,30 @@ class MockDevice {
     });
   }
 
+  setStageTransform(value) {
+    if (value) {
+      if (!this.displayInfo_.stageParameters) {
+        this.displayInfo_.stageParameters = {
+          standingTransform: value,
+          sizeX: 1.5,
+          sizeZ: 1.5,
+        };
+      } else {
+        this.displayInfo_.stageParameters.standingTransform = value;
+      }
+    } else if (this.displayInfo_.stageParameters) {
+      this.displayInfo_.stageParameters = null;
+    }
+
+    this.displayClient_.onChanged(this.displayInfo_);
+  }
+
   getSubmitFrameCount() {
     return this.presentation_provider_.submit_frame_count_;
+  }
+
+  getMissingFrameCount() {
+    return this.presentation_provider_.missing_frame_count_;
   }
 
   forceActivate(reason) {
@@ -281,19 +347,36 @@ class MockDevice {
     this.service_.client_.onDisplayConnected(
         magicWindowPtr, displayPtr, clientRequest, this.displayInfo_);
   }
+
+  addInputSource(input_source) {
+    this.presentation_provider_.OnInputSourceAdded(input_source);
+  }
+
+  removeInputSource(input_source) {
+    this.presentation_provider_.OnInputSourceRemoved(input_source);
+  }
 }
 
 class MockVRPresentationProvider {
   constructor() {
     this.binding_ = new mojo.Binding(device.mojom.VRPresentationProvider, this);
     this.pose_ = null;
+    this.next_frame_id_ = 0;
     this.submit_frame_count_ = 0;
+    this.missing_frame_count_ = 0;
+
+    this.input_sources_ = [];
+    this.next_input_source_index_ = 1;
   }
 
   bind(client, request) {
     this.submitFrameClient_ = client;
     this.binding_.close();
     this.binding_.bind(request);
+  }
+
+  submitFrameMissing(frameId, mailboxHolder, timeWaited) {
+    this.missing_frame_count_++;
   }
 
   submitFrame(frameId, mailboxHolder, timeWaited) {
@@ -311,6 +394,13 @@ class MockVRPresentationProvider {
   getVSync() {
     if (this.pose_) {
       this.pose_.poseIndex++;
+
+      let input_states = [];
+      for (let i = 0; i < this.input_sources_.length; ++i) {
+        input_states.push(this.input_sources_[i].getInputSourceState());
+      }
+
+      this.pose_.inputState = input_states;
     }
 
     // Convert current document time to monotonic time.
@@ -324,7 +414,7 @@ class MockVRPresentationProvider {
       time: {
         microseconds: now,
       },
-      frameId: 0,
+      frameId: this.next_frame_id_++,
       status: device.mojom.VRPresentationProvider.VSyncStatus.SUCCESS,
     });
 
@@ -339,6 +429,7 @@ class MockVRPresentationProvider {
       linearVelocity: null,
       angularAcceleration: null,
       linearAcceleration: null,
+      inputState: null,
       poseIndex: 0
     };
   }
@@ -347,6 +438,22 @@ class MockVRPresentationProvider {
     for (var field in pose) {
       if (this.pose_.hasOwnProperty(field)) {
         this.pose_[field] = pose[field];
+      }
+    }
+  }
+
+  OnInputSourceAdded(input_source) {
+    let index = this.next_input_source_index_;
+    input_source.source_id_ = index;
+    this.next_input_source_index_++;
+    this.input_sources_.push(input_source);
+  }
+
+  OnInputSourceRemoved(input_source) {
+    for (let i = 0; i < this.input_sources_.length; ++i) {
+      if (input_source.source_id_ == this.input_sources_[i].source_id_) {
+        this.input_sources_.splice(i, 1);
+        break;
       }
     }
   }
@@ -391,5 +498,143 @@ class MockVRService {
 
     let device_number = this.mockVRDisplays_.length;
     return Promise.resolve({numberOfConnectedDevices: device_number});
+  }
+}
+
+class MockXRInputSource {
+  constructor() {
+    this.source_id_ = 0;
+    this.primary_input_pressed_ = false;
+    this.primary_input_clicked_ = false;
+    this.grip_ = null;
+
+    this.pointer_origin_ = "head";
+    this.pointer_offset_ = null;
+    this.emulated_position_ = false;
+    this.handedness_ = "";
+    this.desc_dirty_ = true;
+  }
+
+  get primaryInputPressed() {
+    return this.primary_input_pressed_;
+  }
+
+  set primaryInputPressed(value) {
+    if (this.primary_input_pressed_ && !value) {
+      this.primary_input_clicked_ = true;
+    }
+    this.primary_input_pressed_ = value;
+  }
+
+  get grip() {
+    if (this.grip_) {
+      return this.grip_.matrix;
+    }
+    return null;
+  }
+
+  set grip(value) {
+    if (!value) {
+      this.grip_ = null;
+      return;
+    }
+    this.grip_ = new gfx.mojom.Transform();
+    this.grip_.matrix = new Float32Array(value);
+  }
+
+  get pointerOrigin() {
+    return this.pointer_origin_;
+  }
+
+  set pointerOrigin(value) {
+    if (this.pointer_origin_ != value) {
+      this.desc_dirty_ = true;
+      this.pointer_origin_ = value;
+    }
+  }
+
+  get pointerOffset() {
+    if (this.pointer_offset_) {
+      return this.pointer_offset_.matrix;
+    }
+    return null;
+  }
+
+  set pointerOffset(value) {
+    this.desc_dirty_ = true;
+    if (!value) {
+      this.pointer_offset_ = null;
+      return;
+    }
+    this.pointer_offset_ = new gfx.mojom.Transform();
+    this.pointer_offset_.matrix = new Float32Array(value);
+  }
+
+  get emulatedPosition() {
+    return this.emulated_position_;
+  }
+
+  set emulatedPosition(value) {
+    if (this.emulated_position_ != value) {
+      this.desc_dirty_ = true;
+      this.emulated_position_ = value;
+    }
+  }
+
+  get handedness() {
+    return this.handedness_;
+  }
+
+  set handedness(value) {
+    if (this.handedness_ != value) {
+      this.desc_dirty_ = true;
+      this.handedness_ = value;
+    }
+  }
+
+  getInputSourceState() {
+    let input_state = new device.mojom.XRInputSourceState();
+
+    input_state.sourceId = this.source_id_;
+
+    input_state.primaryInputPressed = this.primary_input_pressed_;
+    input_state.primaryInputClicked = this.primary_input_clicked_;
+
+    input_state.grip = this.grip_;
+
+    if (this.desc_dirty_) {
+      let input_desc = new device.mojom.XRInputSourceDescription();
+
+      input_desc.emulatedPosition = this.emulated_position_;
+
+      switch (this.pointer_origin_) {
+        case "head":
+          input_desc.pointerOrigin = device.mojom.XRPointerOrigin.HEAD;
+          break;
+        case "hand":
+          input_desc.pointerOrigin = device.mojom.XRPointerOrigin.HAND;
+          break;
+      }
+
+      switch (this.handedness_) {
+        case "left":
+          input_desc.handedness = device.mojom.XRHandedness.LEFT;
+          break;
+        case "right":
+          input_desc.handedness = device.mojom.XRHandedness.RIGHT;
+          break;
+        default:
+          input_desc.handedness = device.mojom.XRHandedness.NONE;
+          break;
+      }
+
+      input_desc.pointerOffset = this.pointer_offset_;
+
+      input_state.description = input_desc;
+
+      this.desc_dirty_ = false;
+    }
+
+    return input_state;
   }
 }

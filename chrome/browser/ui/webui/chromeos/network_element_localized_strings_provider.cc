@@ -9,6 +9,7 @@
 #include "chrome/browser/chromeos/net/shill_error.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/login/login_state.h"
+#include "chromeos/network/network_connection_handler.h"
 #include "components/login/localized_values_builder.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
@@ -134,8 +135,11 @@ void AddOncLocalizedStrings(content::WebUIDataSource* html_source) {
       {"OncVPN-Host", IDS_ONC_VPN_HOST},
       {"OncVPN-IPsec-Group", IDS_ONC_VPN_IPSEC_GROUP},
       {"OncVPN-IPsec-PSK", IDS_ONC_VPN_IPSEC_PSK},
+      {"OncVPN-L2TP-Password", IDS_ONC_VPN_PASSWORD},
+      {"OncVPN-L2TP-Username", IDS_ONC_VPN_USERNAME},
       {"OncVPN-OpenVPN-OTP", IDS_ONC_VPN_OPENVPN_OTP},
-      {"OncVPN-Password", IDS_ONC_VPN_PASSWORD},
+      {"OncVPN-OpenVPN-Password", IDS_ONC_VPN_PASSWORD},
+      {"OncVPN-OpenVPN-Username", IDS_ONC_VPN_USERNAME},
       {"OncVPN-ThirdPartyVPN-ProviderName",
        IDS_ONC_VPN_THIRD_PARTY_VPN_PROVIDER_NAME},
       {"OncVPN-Type", IDS_ONC_VPN_TYPE},
@@ -144,7 +148,6 @@ void AddOncLocalizedStrings(content::WebUIDataSource* html_source) {
       {"OncVPN-Type_L2TP_IPsec_Cert", IDS_ONC_VPN_TYPE_L2TP_IPSEC_CERT},
       {"OncVPN-Type_OpenVPN", IDS_ONC_VPN_TYPE_OPENVPN},
       {"OncVPN-Type_ARCVPN", IDS_ONC_VPN_TYPE_ARCVPN},
-      {"OncVPN-Username", IDS_ONC_VPN_USERNAME},
       {"OncWiFi-Frequency", IDS_ONC_WIFI_FREQUENCY},
       {"OncWiFi-Passphrase", IDS_ONC_WIFI_PASSWORD},
       {"OncWiFi-SSID", IDS_ONC_WIFI_SSID},
@@ -247,6 +250,7 @@ void AddDetailsLocalizedStrings(content::WebUIDataSource* html_source) {
       {"networkNameserversGoogle",
        IDS_SETTINGS_INTERNET_NETWORK_NAMESERVERS_GOOGLE},
       {"networkProxyWpad", IDS_SETTINGS_INTERNET_NETWORK_PROXY_WPAD},
+      {"networkProxyWpadNone", IDS_SETTINGS_INTERNET_NETWORK_PROXY_WPAD_NONE},
   };
   for (const auto& entry : localized_strings)
     html_source->AddLocalizedString(entry.name, entry.id);
@@ -259,6 +263,7 @@ void AddConfigLocalizedStrings(content::WebUIDataSource* html_source) {
   } localized_strings[] = {
       {"networkCAUseDefault", IDS_SETTINGS_INTERNET_NETWORK_CA_USE_DEFAULT},
       {"networkCADoNotCheck", IDS_SETTINGS_INTERNET_NETWORK_CA_DO_NOT_CHECK},
+      {"networkNoUserCert", IDS_SETTINGS_INTERNET_NETWORK_NO_USER_CERT},
       {"networkCertificateName",
        IDS_SETTINGS_INTERNET_NETWORK_CERTIFICATE_NAME},
       {"networkCertificateNameHardwareBacked",
@@ -294,6 +299,8 @@ void AddErrorLocalizedStrings(content::WebUIDataSource* html_source) {
        IDS_NETWORK_ERROR_CANNOT_CHANGE_SHARED_CONFIG},
       {"Error.PolicyControlled", IDS_NETWORK_ERROR_POLICY_CONTROLLED},
       {"networkErrorNoUserCertificate", IDS_NETWORK_ERROR_NO_USER_CERT},
+      {NetworkConnectionHandler::kErrorPassphraseRequired,
+       IDS_NETWORK_ERROR_PASSPHRASE_REQUIRED},
       {"networkErrorUnknown", IDS_NETWORK_ERROR_UNKNOWN},
       // TODO(stevenjb): Move this id to settings_strings.grdp:
       {"networkErrorNotHardwareBacked",

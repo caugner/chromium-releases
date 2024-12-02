@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/containers/flat_set.h"
+#include "base/test/simple_test_tick_clock.h"
 #include "components/viz/common/surfaces/surface_id.h"
 #include "components/viz/service/frame_sinks/compositor_frame_sink_support.h"
 #include "components/viz/service/frame_sinks/frame_sink_manager_impl.h"
@@ -860,6 +861,63 @@ TEST_F(SurfaceSynchronizationTest, DropStaleReferencesAfterActivation) {
   // The parent will not immediately refer to the child until it submits a new
   // CompositorFrame with the reference.
   EXPECT_THAT(GetChildReferences(parent_id), IsEmpty());
+}
+
+// Verifies that LatencyInfo does not get too large after multiple resizes.
+TEST_F(SurfaceSynchronizationTest, LimitLatencyInfo) {
+  const SurfaceId parent_id1 = MakeSurfaceId(kParentFrameSink, 1);
+  const SurfaceId parent_id2 = MakeSurfaceId(kParentFrameSink, 2);
+  const ui::LatencyComponentType latency_type1 =
+      ui::BROWSER_SNAPSHOT_FRAME_NUMBER_COMPONENT;
+  const int64_t latency_id1 = 234;
+  const int64_t latency_sequence_number1 = 5645432;
+  const ui::LatencyComponentType latency_type2 = ui::TAB_SHOW_COMPONENT;
+  const int64_t latency_id2 = 31434351;
+  const int64_t latency_sequence_number2 = 663788;
+
+  // Submit a frame with latency info
+  ui::LatencyInfo info;
+  info.AddLatencyNumber(latency_type1, latency_id1, latency_sequence_number1);
+
+  CompositorFrameBuilder builder;
+  builder.AddDefaultRenderPass();
+  for (int i = 0; i < 60; ++i)
+    builder.AddLatencyInfo(info);
+  CompositorFrame frame = builder.Build();
+
+  parent_support().SubmitCompositorFrame(parent_id1.local_surface_id(),
+                                         std::move(frame));
+
+  // Verify that the old surface has an active frame and no pending frame.
+  Surface* old_surface = GetSurfaceForId(parent_id1);
+  ASSERT_NE(nullptr, old_surface);
+  EXPECT_TRUE(old_surface->HasActiveFrame());
+  EXPECT_FALSE(old_surface->HasPendingFrame());
+
+  // Submit another frame with some other latency info and a different
+  // LocalSurfaceId.
+  ui::LatencyInfo info2;
+  info2.AddLatencyNumber(latency_type2, latency_id2, latency_sequence_number2);
+
+  builder.AddDefaultRenderPass();
+  for (int i = 0; i < 60; ++i)
+    builder.AddLatencyInfo(info);
+  CompositorFrame frame2 = builder.Build();
+
+  parent_support().SubmitCompositorFrame(parent_id2.local_surface_id(),
+                                         std::move(frame2));
+
+  // Verify that the new surface has an active frame and no pending frames.
+  Surface* surface = GetSurfaceForId(parent_id2);
+  ASSERT_NE(nullptr, surface);
+  EXPECT_TRUE(surface->HasActiveFrame());
+  EXPECT_FALSE(surface->HasPendingFrame());
+
+  // Verify that the new surface has no latency info objects because it grew
+  // too large.
+  std::vector<ui::LatencyInfo> info_list;
+  surface->TakeLatencyInfo(&info_list);
+  EXPECT_EQ(0u, info_list.size());
 }
 
 // Checks whether the latency info are moved to the new surface from the old
@@ -2397,6 +2455,66 @@ TEST_F(SurfaceSynchronizationTest,
   // Verify that the old surface is now marked for destruction.
   EXPECT_TRUE(IsMarkedForDestruction(parent_id1));
   EXPECT_FALSE(IsMarkedForDestruction(parent_id2));
+}
+
+// This test verifies that CompositorFrameSinkSupport does not refer to
+// a valid but non-existant |last_activated_surface_id_|.
+TEST_F(SurfaceSynchronizationTest, SetPreviousFrameSurfaceDoesntCrash) {
+  const SurfaceId parent_id = MakeSurfaceId(kParentFrameSink, 1);
+  const SurfaceId parent_id2 = MakeSurfaceId(kParentFrameSink, 2);
+  const SurfaceId child_id1 = MakeSurfaceId(kChildFrameSink1, 1);
+
+  // The parent CompositorFrame is not blocked on anything and so it should
+  // immediately activate.
+  EXPECT_FALSE(parent_support().last_activated_surface_id().is_valid());
+  parent_support().SubmitCompositorFrame(parent_id.local_surface_id(),
+                                         MakeDefaultCompositorFrame());
+
+  // Verify that the parent CompositorFrame has activated.
+  EXPECT_FALSE(parent_surface()->has_deadline());
+  EXPECT_TRUE(parent_surface()->HasActiveFrame());
+  EXPECT_FALSE(parent_surface()->HasPendingFrame());
+  EXPECT_THAT(parent_surface()->activation_dependencies(), IsEmpty());
+  EXPECT_TRUE(parent_support().last_activated_surface_id().is_valid());
+
+  // Submit another CompositorFrame to |parent_id|, but this time block it
+  // on |child_id1|.
+  parent_support().SubmitCompositorFrame(
+      parent_id.local_surface_id(),
+      MakeCompositorFrame({child_id1}, empty_surface_ids(),
+                          std::vector<TransferableResource>(),
+                          MakeDefaultDeadline()));
+
+  // Verify that the surface has both a pending and activate CompositorFrame.
+  EXPECT_TRUE(parent_surface()->has_deadline());
+  EXPECT_TRUE(parent_surface()->HasActiveFrame());
+  EXPECT_TRUE(parent_surface()->HasPendingFrame());
+  EXPECT_THAT(parent_surface()->activation_dependencies(),
+              UnorderedElementsAre(child_id1));
+
+  // Evict the activated surface in the parent_support.
+  EXPECT_TRUE(parent_support().last_activated_surface_id().is_valid());
+  parent_support().EvictLastActivatedSurface();
+  EXPECT_FALSE(parent_support().last_activated_surface_id().is_valid());
+
+  // The CompositorFrame in the evicted |parent_id| activates here because it
+  // was blocked on |child_id1|.
+  child_support1().SubmitCompositorFrame(child_id1.local_surface_id(),
+                                         MakeDefaultCompositorFrame());
+
+  // parent_support will be informed of the activation of a CompositorFrame
+  // associated with |parent_id|.
+  EXPECT_TRUE(parent_support().last_activated_surface_id().is_valid());
+
+  // Perform a garbage collection. |parent_id| should no longer exist.
+  EXPECT_NE(nullptr, GetSurfaceForId(parent_id));
+  frame_sink_manager().surface_manager()->GarbageCollectSurfaces();
+  EXPECT_EQ(nullptr, GetSurfaceForId(parent_id));
+
+  // This should not crash as the previous surface was cleared in
+  // CompositorFrameSinkSupport.
+  parent_support().SubmitCompositorFrame(parent_id2.local_surface_id(),
+                                         MakeDefaultCompositorFrame());
 }
 
 }  // namespace test

@@ -74,8 +74,6 @@ class TabularContextMenuListAdapter extends BaseAdapter {
             if (viewHolder.mText == null) {
                 throw new IllegalStateException("Context text not found in new view inflation");
             }
-            viewHolder.mShareIcon =
-                    (ImageView) convertView.findViewById(R.id.context_menu_share_icon);
             viewHolder.mRightPadding =
                     (Space) convertView.findViewById(R.id.context_menu_right_padding);
 
@@ -89,19 +87,6 @@ class TabularContextMenuListAdapter extends BaseAdapter {
 
         final String titleText = menuItem.getTitle(mActivity);
         viewHolder.mText.setText(titleText);
-        viewHolder.mIcon.setVisibility(View.INVISIBLE);
-        viewHolder.mIcon.setImageDrawable(null);
-        Callback<Drawable> callback = new Callback<Drawable>() {
-            @Override
-            public void onResult(Drawable drawable) {
-                if (!TextUtils.equals(titleText, viewHolder.mText.getText())) return;
-                if (drawable != null) {
-                    viewHolder.mIcon.setVisibility(View.VISIBLE);
-                    viewHolder.mIcon.setImageDrawable(drawable);
-                }
-            }
-        };
-        menuItem.getDrawableAsync(mActivity, callback);
 
         if (menuItem instanceof ShareContextMenuItem) {
             StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
@@ -109,11 +94,11 @@ class TabularContextMenuListAdapter extends BaseAdapter {
                 final Pair<Drawable, CharSequence> shareInfo =
                         ((ShareContextMenuItem) menuItem).getShareInfo();
                 if (shareInfo.first != null) {
-                    viewHolder.mShareIcon.setImageDrawable(shareInfo.first);
-                    viewHolder.mShareIcon.setVisibility(View.VISIBLE);
-                    viewHolder.mShareIcon.setContentDescription(mActivity.getString(
+                    viewHolder.mIcon.setImageDrawable(shareInfo.first);
+                    viewHolder.mIcon.setVisibility(View.VISIBLE);
+                    viewHolder.mIcon.setContentDescription(mActivity.getString(
                             R.string.accessibility_menu_share_via, shareInfo.second));
-                    viewHolder.mShareIcon.setOnClickListener(new View.OnClickListener() {
+                    viewHolder.mIcon.setOnClickListener(new View.OnClickListener() {
                         @Override
                         public void onClick(View view) {
                             mOnDirectShare.onResult(
@@ -126,8 +111,24 @@ class TabularContextMenuListAdapter extends BaseAdapter {
                 StrictMode.setThreadPolicy(oldPolicy);
             }
         } else {
-            viewHolder.mShareIcon.setVisibility(View.GONE);
+            viewHolder.mIcon.setVisibility(View.GONE);
+            viewHolder.mIcon.setImageDrawable(null);
+            viewHolder.mIcon.setContentDescription(null);
+            viewHolder.mIcon.setOnClickListener(null);
             viewHolder.mRightPadding.setVisibility(View.VISIBLE);
+
+            Callback<Drawable> callback = drawable -> {
+                // If the current title does not match the title when triggering the callback,
+                // assume the View now represents a different view and do not update the icon.
+                if (!TextUtils.equals(titleText, viewHolder.mText.getText())) return;
+
+                if (drawable != null) {
+                    viewHolder.mIcon.setVisibility(View.VISIBLE);
+                    viewHolder.mIcon.setImageDrawable(drawable);
+                    viewHolder.mRightPadding.setVisibility(View.GONE);
+                }
+            };
+            menuItem.getDrawableAsync(mActivity, callback);
         }
 
         return convertView;
@@ -136,7 +137,6 @@ class TabularContextMenuListAdapter extends BaseAdapter {
     private static class ViewHolderItem {
         ImageView mIcon;
         TextView mText;
-        ImageView mShareIcon;
         Space mRightPadding;
     }
 }

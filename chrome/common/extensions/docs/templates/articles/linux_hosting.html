@@ -48,24 +48,24 @@
   hover over "More Tools" then select "Extensions"</span>.
 </p>
 <p>
-  On the Extensions Management Page, enable "Developer mode"
-  by checking the box in the top right-hand corner and
-  select the <strong>Pack extension...</strong> button.
+  On the Extensions Management Page,
+  enable Developer Mode by clicking the toggle switch
+  next to <strong>Developer mode</strong>.
+  Then select the <strong>PACK EXTENSION</strong> button.
 </p>
 
 <img src="{{static}}/images/packaging/packaging_devmode.png"
- height="100"
  alt="Developer Mode is Checked then Click Pack Extension">
 
 <p>
   Specify the path to the extension’s folder
   in the Extension root directory field then click the
-  <strong>Pack Extension</strong> button.
+  <strong>PACK EXTENSION</strong> button.
   Ignore the <strong>Private key</strong> field for a first-time package.
 </p>
 
 <img src="{{static}}/images/packaging/packaging_root.png"
- height="200"
+ height="300"
  alt="Specify Extension Path then Click Pack Extension">
 
 <p>
@@ -74,7 +74,7 @@
   which contains the extension’s private key.
 </p>
 <img src="{{static}}/images/packaging/packaging_files.png"
- height="200"
+ height="300"
  alt="Packaged Extension Files">
 
  <p>
@@ -82,7 +82,7 @@
    Keep the <code>.pem</code> file in a secret and secure place;
    it will be needed to <a href="#update">update</a> the extension.
  </p>
-<h3 id="update">Update a .crx package</h2>
+<h3 id="update">Update a .crx package</h3>
 
 <p>
   Update an extension's <code>.crx</code> file
@@ -106,18 +106,18 @@
 <p>
   Return to the
   <a href="/packaging#extension_management">Extensions Management Page</a>
-  and click the <b>Pack extension...</b> button.
+  and click the <b>PACK EXTENSION</b> button.
   Specify the path to the extensions directory and the location of private key.
 </p>
 
 <img src="{{static}}/images/packaging/packaging_updating.png"
- height="200"
+ height="300"
  alt="Updating Extension Files">
 <p>
   The page will provide the path for the updated packaged extension.
 </p>
  <img src="{{static}}/images/packaging/packaging_updated.png"
-  height="150"
+  height="200"
   alt="Updating Extension Files">
 
 <h3 id="packaging">Package through Command Line</h3>
@@ -136,7 +136,7 @@
   chrome.exe --pack-extension=C:\myext --pack-extension-key=C:\myext.pem
 </pre>
 
-<h2 id="hosting">Hosting</h1>
+<h2 id="hosting">Hosting</h2>
 
 <p>
   A server that hosts <code>.crx</code> files
@@ -317,16 +317,6 @@
 <img src="{{static}}/images/packaging/packaging_update_now.png"
  height="100"
  alt="Update Extensions Now">
-<p>
-  Another option is to use the --extensions-update-frequency command-line flag
-  to set a more frequent interval in seconds.
-  The follwoing command will make Google Chrome run checks every 45 seconds.
-</p>
-
-<pre>
-  chrome.exe <b>--extensions-update-frequency=45</b>
-</pre>
-
 <p>
   This will start checks for all installed extensions.
 </p>

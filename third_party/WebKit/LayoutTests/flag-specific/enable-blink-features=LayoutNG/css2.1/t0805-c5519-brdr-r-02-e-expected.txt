@@ -43,8 +43,8 @@ layer at (0,0) size 800x368
           LayoutNGListMarker (anonymous) at (-18,0) size 10x20
             LayoutText (anonymous) at (0,0) size 10x19
               text run at (0,0) width 10: "\x{2022} "
-          LayoutText {#text} at (0,0) size 516x199
-            text run at (0,0) width 516: "Yellow yellow yellow yellow yellow yellow yellow yellow yellow yellow yellow"
+          LayoutText {#text} at (0,0) size 515x199
+            text run at (0,0) width 515: "Yellow yellow yellow yellow yellow yellow yellow yellow yellow yellow yellow"
             text run at (0,20) width 513: "yellow yellow yellow yellow yellow yellow yellow yellow yellow yellow yellow"
             text run at (0,40) width 513: "yellow yellow yellow yellow yellow yellow yellow yellow yellow yellow yellow"
             text run at (0,60) width 513: "yellow yellow yellow yellow yellow yellow yellow yellow yellow yellow yellow"

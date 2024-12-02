@@ -180,8 +180,8 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
             text run at (17,17) width 130: "This is a left-floating"
             text run at (17,37) width 112: "paragraph (first in"
             text run at (17,57) width 50: "source)."
-        LayoutText {#text} at (381,5) size 543x39
-          text run at (381,5) width 361: " The floating elements within this DIV should not go any"
+        LayoutText {#text} at (382,5) size 543x39
+          text run at (382,5) width 360: " The floating elements within this DIV should not go any"
           text run at (199,25) width 489: "higher than the line-box containing the inline content which precedes them. * "
         LayoutNGBlockFlow (floating) {P} at (566,45) size 194x94 [bgcolor=#C0C0C0] [border: (1px solid #00FF00)]
           LayoutText {#text} at (17,17) size 139x59
@@ -199,8 +199,8 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
         LayoutText {#text} at (20,5) size 183x19
           text run at (20,5) width 183: "This is text within the DIV. *"
         LayoutImage (floating) {IMG} at (5,5) size 15x36 [border: (3px solid #000000)]
-        LayoutText {#text} at (202,5) size 686x39
-          text run at (202,5) width 504: " The floating images within this DIV should not go any higher than the line-box"
+        LayoutText {#text} at (203,5) size 686x39
+          text run at (203,5) width 503: " The floating images within this DIV should not go any higher than the line-box"
           text run at (20,25) width 335: "containing the inline content which precedes them. * "
         LayoutImage (floating) {IMG} at (745,25) size 15x36 [border: (3px solid #000000)]
         LayoutText {#text} at (355,25) size 738x59
@@ -215,8 +215,8 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
             text run at (17,17) width 130: "This is a left-floating"
             text run at (17,37) width 112: "paragraph (first in"
             text run at (17,57) width 50: "source)."
-        LayoutText {#text} at (381,5) size 543x39
-          text run at (381,5) width 361: " The floating elements within this DIV should not go any"
+        LayoutText {#text} at (382,5) size 543x39
+          text run at (382,5) width 360: " The floating elements within this DIV should not go any"
           text run at (199,25) width 489: "higher than the line-box containing the inline content which precedes them. * "
         LayoutNGBlockFlow (floating) {P} at (566,45) size 194x94 [bgcolor=#C0C0C0] [border: (1px solid #00FF00)]
           LayoutText {#text} at (17,17) size 139x59
@@ -255,8 +255,8 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
         LayoutText {#text} at (20,5) size 183x19
           text run at (20,5) width 183: "This is text within the DIV. *"
         LayoutImage (floating) {IMG} at (5,5) size 15x36 [border: (3px solid #000000)]
-        LayoutText {#text} at (202,5) size 671x39
-          text run at (202,5) width 504: " The floating images within this DIV should not go any higher than the line-box"
+        LayoutText {#text} at (203,5) size 671x39
+          text run at (203,5) width 503: " The floating images within this DIV should not go any higher than the line-box"
           text run at (35,25) width 335: "containing the inline content which precedes them. * "
         LayoutImage (floating) {IMG} at (745,25) size 15x36 [border: (3px solid #000000)]
         LayoutText {#text} at (370,25) size 318x19
@@ -490,8 +490,8 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                     text run at (17,17) width 130: "This is a left-floating"
                     text run at (17,37) width 112: "paragraph (first in"
                     text run at (17,57) width 50: "source)."
-                LayoutText {#text} at (381,5) size 516x39
-                  text run at (381,5) width 334: " The floating elements within this DIV should not go"
+                LayoutText {#text} at (382,5) size 516x39
+                  text run at (382,5) width 333: " The floating elements within this DIV should not go"
                   text run at (199,25) width 516: "any higher than the line-box containing the inline content which precedes them. * "
                 LayoutNGBlockFlow (floating) {P} at (544,45) size 194x94 [bgcolor=#C0C0C0] [border: (1px solid #00FF00)]
                   LayoutText {#text} at (17,17) size 139x59
@@ -508,8 +508,8 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                 LayoutText {#text} at (20,5) size 183x19
                   text run at (20,5) width 183: "This is text within the DIV. *"
                 LayoutImage (floating) {IMG} at (5,5) size 15x36 [border: (3px solid #000000)]
-                LayoutText {#text} at (202,5) size 686x39
-                  text run at (202,5) width 504: " The floating images within this DIV should not go any higher than the line-box"
+                LayoutText {#text} at (203,5) size 686x39
+                  text run at (203,5) width 503: " The floating images within this DIV should not go any higher than the line-box"
                   text run at (20,25) width 335: "containing the inline content which precedes them. * "
                 LayoutImage (floating) {IMG} at (723,25) size 15x36 [border: (3px solid #000000)]
                 LayoutText {#text} at (355,25) size 709x59
@@ -524,8 +524,8 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                     text run at (17,17) width 130: "This is a left-floating"
                     text run at (17,37) width 112: "paragraph (first in"
                     text run at (17,57) width 50: "source)."
-                LayoutText {#text} at (381,5) size 516x39
-                  text run at (381,5) width 334: " The floating elements within this DIV should not go"
+                LayoutText {#text} at (382,5) size 516x39
+                  text run at (382,5) width 333: " The floating elements within this DIV should not go"
                   text run at (199,25) width 516: "any higher than the line-box containing the inline content which precedes them. * "
                 LayoutNGBlockFlow (floating) {P} at (544,45) size 194x94 [bgcolor=#C0C0C0] [border: (1px solid #00FF00)]
                   LayoutText {#text} at (17,17) size 139x59
@@ -561,8 +561,8 @@ layer at (0,0) size 785x6798 backgroundClip at (0,0) size 785x600 clip at (0,0) 
                 LayoutText {#text} at (20,5) size 183x19
                   text run at (20,5) width 183: "This is text within the DIV. *"
                 LayoutImage (floating) {IMG} at (5,5) size 15x36 [border: (3px solid #000000)]
-                LayoutText {#text} at (202,5) size 671x39
-                  text run at (202,5) width 504: " The floating images within this DIV should not go any higher than the line-box"
+                LayoutText {#text} at (203,5) size 671x39
+                  text run at (203,5) width 503: " The floating images within this DIV should not go any higher than the line-box"
                   text run at (35,25) width 335: "containing the inline content which precedes them. * "
                 LayoutImage (floating) {IMG} at (723,25) size 15x36 [border: (3px solid #000000)]
                 LayoutText {#text} at (370,25) size 318x19
