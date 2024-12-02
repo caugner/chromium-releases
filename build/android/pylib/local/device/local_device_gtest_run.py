@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import imp
 import itertools
 import os
 import posixpath
@@ -9,6 +10,8 @@ import posixpath
 from devil.android import device_errors
 from devil.android import device_temp_file
 from devil.android import ports
+from devil.utils import reraiser_thread
+from incremental_install import installer
 from pylib import constants
 from pylib.gtest import gtest_test_instance
 from pylib.local import local_test_server_spawner
@@ -17,6 +20,7 @@ from pylib.local.device import local_device_test_run
 
 _COMMAND_LINE_FLAGS_SUPPORTED = True
 
+_MAX_INLINE_FLAGS_LENGTH = 50  # Arbitrarily chosen.
 _EXTRA_COMMAND_LINE_FILE = (
     'org.chromium.native_test.NativeTestActivity.CommandLineFile')
 _EXTRA_COMMAND_LINE_FLAGS = (
@@ -24,6 +28,9 @@ _EXTRA_COMMAND_LINE_FLAGS = (
 _EXTRA_TEST_LIST = (
     'org.chromium.native_test.NativeTestInstrumentationTestRunner'
         '.TestList')
+_EXTRA_TEST = (
+    'org.chromium.native_test.NativeTestInstrumentationTestRunner'
+        '.Test')
 
 _MAX_SHARD_SIZE = 256
 _SECONDS_TO_NANOS = int(1e9)
@@ -37,6 +44,15 @@ _SUITE_REQUIRES_TEST_SERVER_SPAWNER = [
   'components_browsertests', 'content_unittests', 'content_browsertests',
   'net_unittests', 'unit_tests'
 ]
+
+# No-op context manager. If we used Python 3, we could change this to
+# contextlib.ExitStack()
+class _NullContextManager(object):
+  def __enter__(self):
+    pass
+  def __exit__(self, *args):
+    pass
+
 
 # TODO(jbudorick): Move this inside _ApkDelegate once TestPackageApk is gone.
 def PullAppFilesImpl(device, package, files, directory):
@@ -52,19 +68,61 @@ def PullAppFilesImpl(device, package, files, directory):
         break
     device.PullFile(device_file, host_file)
 
+
+def _ExtractTestsFromFilter(gtest_filter):
+  """Returns the list of tests specified by the given filter.
+
+  Returns:
+    None if the device should be queried for the test list instead.
+  """
+  # Empty means all tests, - means exclude filter.
+  if not gtest_filter or '-' in gtest_filter:
+    return None
+
+  patterns = gtest_filter.split(':')
+  # For a single pattern, allow it even if it has a wildcard so long as the
+  # wildcard comes at the end and there is at least one . to prove the scope is
+  # not too large.
+  # This heuristic is not necessarily faster, but normally is.
+  if len(patterns) == 1 and patterns[0].endswith('*'):
+    no_suffix = patterns[0].rstrip('*')
+    if '*' not in no_suffix and '.' in no_suffix:
+      return patterns
+
+  if '*' in gtest_filter:
+    return None
+  return [p for p in patterns if p]  # Ignore empty entries.
+
+
 class _ApkDelegate(object):
   def __init__(self, test_instance):
     self._activity = test_instance.activity
-    self._apk = test_instance.apk
+    self._apk_helper = test_instance.apk_helper
     self._package = test_instance.package
     self._runner = test_instance.runner
     self._permissions = test_instance.permissions
-
+    self._suite = test_instance.suite
     self._component = '%s/%s' % (self._package, self._runner)
     self._extras = test_instance.extras
 
-  def Install(self, device):
-    device.Install(self._apk, permissions=self._permissions)
+  def Install(self, device, incremental=False):
+    if not incremental:
+      device.Install(self._apk_helper, reinstall=True,
+                     permissions=self._permissions)
+      return
+
+    installer_script = os.path.join(constants.GetOutDirectory(), 'bin',
+                                    'install_%s_apk_incremental' % self._suite)
+    try:
+      install_wrapper = imp.load_source('install_wrapper', installer_script)
+    except IOError:
+      raise Exception(('Incremental install script not found: %s\n'
+                       'Make sure to first build "%s_incremental"') %
+                      (installer_script, self._suite))
+    params = install_wrapper.GetInstallParameters()
+
+    installer.Install(device, self._apk_helper, split_globs=params['splits'],
+                      lib_dir=params['lib_dir'], dex_files=params['dex_files'])
 
   def Run(self, test, device, flags=None, **kwargs):
     extras = dict(self._extras)
@@ -78,17 +136,31 @@ class _ApkDelegate(object):
       extras[gtest_test_instance.EXTRA_SHARD_NANO_TIMEOUT] = int(
           kwargs['timeout'] * _SECONDS_TO_NANOS)
 
-    with device_temp_file.DeviceTempFile(device.adb) as command_line_file:
-      device.WriteFile(command_line_file.name, '_ %s' % flags if flags else '_')
-      extras[_EXTRA_COMMAND_LINE_FILE] = command_line_file.name
+    command_line_file = _NullContextManager()
+    if flags:
+      if len(flags) > _MAX_INLINE_FLAGS_LENGTH:
+        command_line_file = device_temp_file.DeviceTempFile(device.adb)
+        device.WriteFile(command_line_file.name, '_ %s' % flags)
+        extras[_EXTRA_COMMAND_LINE_FILE] = command_line_file.name
+      else:
+        extras[_EXTRA_COMMAND_LINE_FLAGS] = flags
 
-      with device_temp_file.DeviceTempFile(device.adb) as test_list_file:
-        if test:
-          device.WriteFile(test_list_file.name, '\n'.join(test))
-          extras[_EXTRA_TEST_LIST] = test_list_file.name
+    test_list_file = _NullContextManager()
+    if test:
+      if len(test) > 1:
+        test_list_file = device_temp_file.DeviceTempFile(device.adb)
+        device.WriteFile(test_list_file.name, '\n'.join(test))
+        extras[_EXTRA_TEST_LIST] = test_list_file.name
+      else:
+        extras[_EXTRA_TEST] = test[0]
 
+    with command_line_file, test_list_file:
+      try:
         return device.StartInstrumentation(
             self._component, extras=extras, raw=False, **kwargs)
+      except Exception:
+        device.ForceStop(self._package)
+        raise
 
   def PullAppFiles(self, device, files, directory):
     PullAppFilesImpl(device, self._package, files, directory)
@@ -111,7 +183,8 @@ class _ExeDelegate(object):
       self._deps_host_path = None
     self._test_run = tr
 
-  def Install(self, device):
+  def Install(self, device, incremental=False):
+    assert not incremental
     # TODO(jbudorick): Look into merging this with normal data deps pushing if
     # executables become supported on nonlocal environments.
     host_device_tuples = [(self._exe_host_path, self._exe_device_path)]
@@ -176,30 +249,43 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
 
   #override
   def SetUp(self):
-
     @local_device_test_run.handle_shard_failures
-    def individual_device_set_up(dev, host_device_tuples):
-      # Install test APK.
-      self._delegate.Install(dev)
+    def individual_device_set_up(dev):
+      def install_apk():
+        # Install test APK.
+        self._delegate.Install(dev, incremental=self._env.incremental_install)
 
-      # Push data dependencies.
-      external_storage = dev.GetExternalStoragePath()
-      host_device_tuples = [
-          (h, d if d is not None else external_storage)
-          for h, d in host_device_tuples]
-      dev.PushChangedFiles(host_device_tuples)
+      def push_test_data():
+        # Push data dependencies.
+        external_storage = dev.GetExternalStoragePath()
+        data_deps = self._test_instance.GetDataDependencies()
+        host_device_tuples = [
+            (h, d if d is not None else external_storage)
+            for h, d in data_deps]
+        dev.PushChangedFiles(host_device_tuples)
 
-      self._servers[str(dev)] = []
-      if self.TestPackage() in _SUITE_REQUIRES_TEST_SERVER_SPAWNER:
-        self._servers[str(dev)].append(
-            local_test_server_spawner.LocalTestServerSpawner(
-                ports.AllocateTestServerPort(), dev, self.GetTool(dev)))
+      def init_tool_and_start_servers():
+        tool = self.GetTool(dev)
+        tool.CopyFiles(dev)
+        tool.SetupEnvironment()
 
-      for s in self._servers[str(dev)]:
-        s.SetUp()
+        self._servers[str(dev)] = []
+        if self.TestPackage() in _SUITE_REQUIRES_TEST_SERVER_SPAWNER:
+          self._servers[str(dev)].append(
+              local_test_server_spawner.LocalTestServerSpawner(
+                  ports.AllocateTestServerPort(), dev, tool))
 
-    self._env.parallel_devices.pMap(individual_device_set_up,
-                                    self._test_instance.GetDataDependencies())
+        for s in self._servers[str(dev)]:
+          s.SetUp()
+
+      steps = (install_apk, push_test_data, init_tool_and_start_servers)
+      if self._env.concurrent_adb:
+        reraiser_thread.RunAsync(steps)
+      else:
+        for step in steps:
+          step()
+
+    self._env.parallel_devices.pMap(individual_device_set_up)
 
   #override
   def _ShouldShard(self):
@@ -217,30 +303,48 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
 
   #override
   def _GetTests(self):
-    @local_device_test_run.handle_shard_failures
+    # When the exact list of tests to run is given via command-line (e.g. when
+    # locally iterating on a specific test), skip querying the device (which
+    # takes ~3 seconds).
+    tests = _ExtractTestsFromFilter(self._test_instance.gtest_filter)
+    if tests:
+      return tests
+
+    # Even when there's only one device, it still makes sense to retrieve the
+    # test list so that tests can be split up and run in batches rather than all
+    # at once (since test output is not streamed).
+    @local_device_test_run.handle_shard_failures_with(
+        on_failure=self._env.BlacklistDevice)
     def list_tests(dev):
       tests = self._delegate.Run(
-          None, dev, flags='--gtest_list_tests', timeout=10)
+          None, dev, flags='--gtest_list_tests', timeout=20)
       tests = gtest_test_instance.ParseGTestListTests(tests)
       tests = self._test_instance.FilterTests(tests)
       return tests
 
+    # Query all devices in case one fails.
     test_lists = self._env.parallel_devices.pMap(list_tests).pGet(None)
-    tests = list(sorted(set().union(*[set(tl) for tl in test_lists if tl])))
-    return tests
+    # TODO(agrieve): Make this fail rather than return an empty list when
+    #     all devices fail.
+    return list(sorted(set().union(*[set(tl) for tl in test_lists if tl])))
 
   #override
   def _RunTest(self, device, test):
     # Run the test.
-    timeout = _TEST_TIMEOUT_SECONDS * self.GetTool(device).GetTimeoutScale()
+    timeout = (self._test_instance.shard_timeout
+               * self.GetTool(device).GetTimeoutScale())
     output = self._delegate.Run(
-        test, device, timeout=timeout, retries=0)
+        test, device, flags=self._test_instance.test_arguments,
+        timeout=timeout, retries=0)
     for s in self._servers[str(device)]:
       s.Reset()
     if self._test_instance.app_files:
       self._delegate.PullAppFiles(device, self._test_instance.app_files,
                                   self._test_instance.app_file_dir)
-    self._delegate.Clear(device)
+    # Clearing data when using incremental install wipes out cached optimized
+    # dex files (and shouldn't be necessary by tests anyways).
+    if not self._env.incremental_install:
+      self._delegate.Clear(device)
 
     # Parse the output.
     # TODO(jbudorick): Transition test scripts away from parsing stdout.
@@ -253,5 +357,8 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
     def individual_device_tear_down(dev):
       for s in self._servers.get(str(dev), []):
         s.TearDown()
+
+      tool = self.GetTool(dev)
+      tool.CleanUpEnvironment()
 
     self._env.parallel_devices.pMap(individual_device_tear_down)

@@ -17,7 +17,7 @@ class ApplicationImpl;
 }
 
 namespace mus {
-class View;
+class Window;
 }
 
 namespace html_viewer {
@@ -34,13 +34,13 @@ class HTMLWidget {
 
   virtual blink::WebWidget* GetWidget() = 0;
 
-  virtual void OnViewBoundsChanged(mus::View* view) = 0;
+  virtual void OnWindowBoundsChanged(mus::Window* window) = 0;
 };
 
 // Used for the root frame when the root frame is remote.
 class HTMLWidgetRootRemote : public HTMLWidget, public blink::WebViewClient {
  public:
-  HTMLWidgetRootRemote();
+  explicit HTMLWidgetRootRemote(GlobalState* global_state);
   ~HTMLWidgetRootRemote() override;
 
  private:
@@ -50,7 +50,7 @@ class HTMLWidgetRootRemote : public HTMLWidget, public blink::WebViewClient {
 
   // HTMLWidget:
   blink::WebWidget* GetWidget() override;
-  void OnViewBoundsChanged(mus::View* view) override;
+  void OnWindowBoundsChanged(mus::Window* window) override;
 
   blink::WebView* web_view_;
 
@@ -64,12 +64,12 @@ class HTMLWidgetRootLocal : public HTMLWidget, public blink::WebViewClient {
   struct CreateParams {
     CreateParams(mojo::ApplicationImpl* app,
                  GlobalState* global_state,
-                 mus::View* view);
+                 mus::Window* window);
     ~CreateParams();
 
     mojo::ApplicationImpl* app;
     GlobalState* global_state;
-    mus::View* view;
+    mus::Window* window;
   };
 
   HTMLWidgetRootLocal(CreateParams* create_params);
@@ -82,7 +82,7 @@ class HTMLWidgetRootLocal : public HTMLWidget, public blink::WebViewClient {
   virtual blink::WebStorageNamespace* createSessionStorageNamespace();
   virtual void initializeLayerTreeView();
   virtual blink::WebLayerTreeView* layerTreeView();
-  virtual void didFirstVisuallyNonEmptyLayout();
+  virtual void didMeaningfulLayout(blink::WebMeaningfulLayout layout_type);
   virtual void resetInputMethod();
   virtual void didHandleGestureEvent(const blink::WebGestureEvent& event,
                                      bool event_cancelled);
@@ -92,11 +92,11 @@ class HTMLWidgetRootLocal : public HTMLWidget, public blink::WebViewClient {
  private:
   // HTMLWidget:
   blink::WebWidget* GetWidget() override;
-  void OnViewBoundsChanged(mus::View* view) override;
+  void OnWindowBoundsChanged(mus::Window* window) override;
 
   mojo::ApplicationImpl* app_;
   GlobalState* global_state_;
-  mus::View* view_;
+  mus::Window* window_;
   blink::WebView* web_view_;
   scoped_ptr<WebLayerTreeViewImpl> web_layer_tree_view_impl_;
   scoped_ptr<ImeController> ime_controller_;
@@ -109,14 +109,14 @@ class HTMLWidgetLocalRoot : public HTMLWidget, public blink::WebWidgetClient {
  public:
   HTMLWidgetLocalRoot(mojo::ApplicationImpl* app,
                       GlobalState* global_state,
-                      mus::View* view,
+                      mus::Window* window,
                       blink::WebLocalFrame* web_local_frame);
   ~HTMLWidgetLocalRoot() override;
 
  private:
   // HTMLWidget:
   blink::WebWidget* GetWidget() override;
-  void OnViewBoundsChanged(mus::View* view) override;
+  void OnWindowBoundsChanged(mus::Window* window) override;
 
   // WebWidgetClient:
   virtual void initializeLayerTreeView();

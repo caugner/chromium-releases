@@ -20,7 +20,6 @@ SurfacesScheduler::SurfacesScheduler()
   scheduler_ = cc::Scheduler::Create(
       this, settings, 0, base::MessageLoop::current()->task_runner().get(),
       nullptr, compositor_timing_history.Pass());
-  scheduler_->SetCanStart();
   scheduler_->SetVisible(true);
   scheduler_->SetCanDraw(true);
   scheduler_->SetNeedsBeginMainFrame();
@@ -60,8 +59,9 @@ void SurfacesScheduler::WillBeginImplFrame(const cc::BeginFrameArgs& args) {}
 
 void SurfacesScheduler::DidFinishImplFrame() {}
 
-void SurfacesScheduler::ScheduledActionSendBeginMainFrame() {
-  scheduler_->NotifyBeginMainFrameStarted();
+void SurfacesScheduler::ScheduledActionSendBeginMainFrame(
+    const cc::BeginFrameArgs& args) {
+  scheduler_->NotifyBeginMainFrameStarted(base::TimeTicks());
   scheduler_->NotifyReadyToCommit();
 }
 

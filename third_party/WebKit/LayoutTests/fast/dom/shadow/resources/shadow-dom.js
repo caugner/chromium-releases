@@ -1,22 +1,29 @@
 function createShadowRoot()
 {
     var children = Array.prototype.slice.call(arguments);
-    if ((children[0] instanceof Object) && !(children[0] instanceof Node)) {
-        var attributes = {};
-        var parameter = {};
-        for (var key in children[0]) {
-            if (key == 'mode' || key == 'delegatesFocus')
-                parameter[key] = children[0][key];
-            else
-                attributes[key] = children[0][key];
-        }
-        return {'isShadowRoot': true,
-                'parameter': parameter,
-                'attributes': attributes,
-                'children': children.slice(1)};
-    }
+    if ((children[0] instanceof Object) && !(children[0] instanceof Node))
+        return attachShadow.apply(null, children);
     return {'isShadowRoot': true,
             'children': children};
+}
+
+// TODO(kochi): This is not pure attachShadow wrapper, but also handles createShadowRoot()
+// with attributes.
+function attachShadow()
+{
+    var children = Array.prototype.slice.call(arguments);
+    var attributes = {};
+    var parameter = {};
+    for (var key in children[0]) {
+        if (key == 'mode' || key == 'delegatesFocus')
+            parameter[key] = children[0][key];
+        else
+            attributes[key] = children[0][key];
+    }
+    return {'isShadowRoot': true,
+            'parameter': parameter,
+            'attributes': attributes,
+            'children': children.slice(1)};
 }
 
 function createUserAgentShadowRoot()
@@ -41,7 +48,7 @@ function createDOM(tagName, attributes)
                 shadowRoot = window.internals.createUserAgentShadowRoot(element);
             } else {
                 if (child.parameter && Object.keys(child.parameter).length > 0)
-                    shadowRoot = element.createShadowRoot(child.parameter);
+                    shadowRoot = element.attachShadow(child.parameter);
                 else
                     shadowRoot = element.createShadowRoot();
             }
@@ -63,10 +70,15 @@ function convertTemplatesToShadowRootsWithin(node) {
     var nodes = node.querySelectorAll("template");
     for (var i = 0; i < nodes.length; ++i) {
         var template = nodes[i];
-
+        var mode = template.getAttribute("data-mode");
         var parent = template.parentNode;
         parent.removeChild(template);
-        var shadowRoot = parent.createShadowRoot();
+        var shadowRoot;
+        if (!mode) {
+            shadowRoot = parent.createShadowRoot();
+        } else {
+            shadowRoot = parent.attachShadow({'mode': mode});
+        }
         if (template.id)
             shadowRoot.id = template.id;
         var fragments = document.importNode(template.content, true);
@@ -296,4 +308,37 @@ function backgroundColorShouldNotBe(selector, color)
     var text = 'backgroundColorOf(\'' + selector + '\')';
     var unevaledString = '"' + color.replace(/\\/g, "\\\\").replace(/"/g, "\"") + '"';
     shouldNotBe(text, unevaledString);
+}
+
+function getElementByIdConsideringShadowDOM(root, id) {
+    function iter(root, id) {
+        if (!root)
+            return null;
+
+        if (root.id == id)
+            return root;
+
+        // We don't collect div having a shadow root, since we cannot point it correctly.
+        // Such div should have an inner div to be pointed correctly.
+        for (var child = root.firstChild; child; child = child.nextSibling) {
+            var node = iter(child, id);
+            if (node != null)
+                return node;
+        }
+
+        if (root.nodeType != 1)
+            return null;
+
+        for (var shadowRoot = internals.youngestShadowRoot(root); shadowRoot; shadowRoot = shadowRoot.olderShadowRoot) {
+            var node = iter(shadowRoot, id);
+            if (node != null)
+                return node;
+        }
+
+        return null;
+    };
+
+    if (!window.internals)
+        return null;
+    return iter(root, id);
 }

@@ -7,11 +7,11 @@
 #include "base/metrics/histogram.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/passwords/manage_passwords_view_utils.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/infobars/core/infobar.h"
 #include "components/password_manager/core/browser/password_bubble_experiment.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
@@ -22,10 +22,7 @@
 namespace {
 
 int GetCancelButtonText(password_manager::CredentialSourceType source_type) {
-  return source_type ==
-      password_manager::CredentialSourceType::CREDENTIAL_SOURCE_API
-      ? IDS_PASSWORD_MANAGER_SAVE_PASSWORD_SMART_LOCK_NO_THANKS_BUTTON
-      : IDS_PASSWORD_MANAGER_BLACKLIST_BUTTON;
+  return IDS_PASSWORD_MANAGER_BLACKLIST_BUTTON;
 }
 
 }  // namespace
@@ -140,12 +137,7 @@ bool SavePasswordInfoBarDelegate::Accept() {
 
 bool SavePasswordInfoBarDelegate::Cancel() {
   DCHECK(form_to_save_.get());
-  if (source_type_ ==
-      password_manager::CredentialSourceType::CREDENTIAL_SOURCE_API) {
-    InfoBarDismissed();
-  } else {
-    form_to_save_->PermanentlyBlacklist();
-    infobar_response_ = password_manager::metrics_util::NEVER_REMEMBER_PASSWORD;
-  }
+  form_to_save_->PermanentlyBlacklist();
+  infobar_response_ = password_manager::metrics_util::NEVER_REMEMBER_PASSWORD;
   return true;
 }

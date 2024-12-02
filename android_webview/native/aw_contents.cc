@@ -63,7 +63,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/content_switches.h"
 #include "content/public/common/message_port_types.h"
 #include "content/public/common/renderer_preferences.h"
 #include "content/public/common/ssl_status.h"
@@ -153,7 +152,7 @@ AwContents* AwContents::FromWebContents(WebContents* web_contents) {
 
 // static
 AwContents* AwContents::FromID(int render_process_id, int render_view_id) {
-  const content::RenderViewHost* rvh =
+  content::RenderViewHost* rvh =
       content::RenderViewHost::FromID(render_process_id, render_view_id);
   if (!rvh) return NULL;
   content::WebContents* web_contents =
@@ -185,12 +184,12 @@ AwBrowserPermissionRequestDelegate* AwBrowserPermissionRequestDelegate::FromID(
 }
 
 AwContents::AwContents(scoped_ptr<WebContents> web_contents)
-    : web_contents_(web_contents.Pass()),
-      browser_view_renderer_(
+    : browser_view_renderer_(
           this,
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
           base::CommandLine::ForCurrentProcess()->HasSwitch(
               switches::kDisablePageVisibility)),
+      web_contents_(web_contents.Pass()),
       renderer_manager_key_(GLViewRendererManager::GetInstance()->NullKey()) {
   base::subtle::NoBarrier_AtomicIncrement(&g_instance_count, 1);
   icon_helper_.reset(new IconHelper(web_contents_.get()));
@@ -208,12 +207,8 @@ AwContents::AwContents(scoped_ptr<WebContents> web_contents)
       AwAutofillClient::FromWebContents(web_contents_.get());
   if (autofill_manager_delegate)
     InitAutofillIfNecessary(autofill_manager_delegate->GetSaveFormData());
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kSingleProcess)) {
-    // TODO(boliu): Figure out how to deal with this more nicely.
-    content::SynchronousCompositor::SetClientForWebContents(
-        web_contents_.get(), &browser_view_renderer_);
-  }
+  content::SynchronousCompositor::SetClientForWebContents(
+      web_contents_.get(), &browser_view_renderer_);
 }
 
 void AwContents::SetJavaPeers(JNIEnv* env,
@@ -287,18 +282,17 @@ void AwContents::SetAwAutofillClient(jobject client) {
 
 AwContents::~AwContents() {
   DCHECK_EQ(this, AwContents::FromWebContents(web_contents_.get()));
-  content::SynchronousCompositor::SetClientForWebContents(web_contents_.get(),
-                                                          NULL);
   web_contents_->RemoveUserData(kAwContentsUserDataKey);
   if (find_helper_.get())
     find_helper_->SetListener(NULL);
   if (icon_helper_.get())
     icon_helper_->SetListener(NULL);
-  base::subtle::NoBarrier_AtomicIncrement(&g_instance_count, -1);
+  base::subtle::Atomic32 instance_count =
+      base::subtle::NoBarrier_AtomicIncrement(&g_instance_count, -1);
   // When the last WebView is destroyed free all discardable memory allocated by
   // Chromium, because the app process may continue to run for a long time
   // without ever using another WebView.
-  if (base::subtle::NoBarrier_Load(&g_instance_count) == 0) {
+  if (instance_count == 0) {
     base::MemoryPressureListener::NotifyMemoryPressure(
         base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL);
   }
@@ -1005,7 +999,7 @@ gfx::Point AwContents::GetLocationOnScreen() {
   return gfx::Point(location[0], location[1]);
 }
 
-void AwContents::ScrollContainerViewTo(gfx::Vector2d new_value) {
+void AwContents::ScrollContainerViewTo(const gfx::Vector2d& new_value) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
@@ -1015,8 +1009,8 @@ void AwContents::ScrollContainerViewTo(gfx::Vector2d new_value) {
       env, obj.obj(), new_value.x(), new_value.y());
 }
 
-void AwContents::UpdateScrollState(gfx::Vector2d max_scroll_offset,
-                                   gfx::SizeF contents_size_dip,
+void AwContents::UpdateScrollState(const gfx::Vector2d& max_scroll_offset,
+                                   const gfx::SizeF& contents_size_dip,
                                    float page_scale_factor,
                                    float min_page_scale_factor,
                                    float max_page_scale_factor) {
@@ -1036,8 +1030,8 @@ void AwContents::UpdateScrollState(gfx::Vector2d max_scroll_offset,
                                     max_page_scale_factor);
 }
 
-void AwContents::DidOverscroll(gfx::Vector2d overscroll_delta,
-                               gfx::Vector2dF overscroll_velocity) {
+void AwContents::DidOverscroll(const gfx::Vector2d& overscroll_delta,
+                               const gfx::Vector2dF& overscroll_velocity) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);

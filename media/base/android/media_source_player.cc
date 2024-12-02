@@ -11,6 +11,7 @@
 #include "base/barrier_closure.h"
 #include "base/basictypes.h"
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
@@ -39,7 +40,6 @@ MediaSourcePlayer::MediaSourcePlayer(
       interpolator_(&default_tick_clock_),
       doing_browser_seek_(false),
       pending_seek_(false),
-      drm_bridge_(NULL),
       cdm_registration_id_(0),
       is_waiting_for_key_(false),
       key_added_while_decode_pending_(false),
@@ -69,9 +69,10 @@ MediaSourcePlayer::MediaSourcePlayer(
 
 MediaSourcePlayer::~MediaSourcePlayer() {
   Release();
-  DCHECK_EQ(!drm_bridge_, !cdm_registration_id_);
-  if (drm_bridge_) {
-    drm_bridge_->UnregisterPlayer(cdm_registration_id_);
+  DCHECK_EQ(!cdm_, !cdm_registration_id_);
+  if (cdm_) {
+    static_cast<MediaDrmBridge*>(cdm_.get())
+        ->UnregisterPlayer(cdm_registration_id_);
     cdm_registration_id_ = 0;
   }
 }
@@ -181,6 +182,8 @@ base::TimeDelta MediaSourcePlayer::GetDuration() {
 void MediaSourcePlayer::Release() {
   DVLOG(1) << __FUNCTION__;
 
+  media_stat_->StopAndReport(GetCurrentTime());
+
   audio_decoder_job_->ReleaseDecoderResources();
   video_decoder_job_->ReleaseDecoderResources();
 
@@ -267,13 +270,15 @@ void MediaSourcePlayer::OnMediaCryptoReady(
     bool /* needs_protected_surface */) {
   // Callback parameters are ignored in this player. They are intended for
   // MediaCodecPlayer which uses a different threading scheme.
-  DCHECK(!drm_bridge_->GetMediaCrypto().is_null());
+  DCHECK(!static_cast<MediaDrmBridge*>(cdm_.get())->GetMediaCrypto().is_null());
 
   // Retry decoder creation if the decoders are waiting for MediaCrypto.
   RetryDecoderCreation(true, true);
 }
 
-void MediaSourcePlayer::SetCdm(BrowserCdm* cdm) {
+void MediaSourcePlayer::SetCdm(const scoped_refptr<MediaKeys>& cdm) {
+  DCHECK(cdm);
+
   // Currently we don't support DRM change during the middle of playback, even
   // if the player is paused.
   // TODO(qinmin): support DRM change after playback has started.
@@ -283,25 +288,29 @@ void MediaSourcePlayer::SetCdm(BrowserCdm* cdm) {
             << "This is not well supported!";
   }
 
-  if (drm_bridge_) {
+  if (cdm_) {
     NOTREACHED() << "Currently we do not support resetting CDM.";
     return;
   }
 
+  cdm_ = cdm;
+
   // Only MediaDrmBridge will be set on MediaSourcePlayer.
-  drm_bridge_ = static_cast<MediaDrmBridge*>(cdm);
+  MediaDrmBridge* drm_bridge = static_cast<MediaDrmBridge*>(cdm_.get());
 
-  cdm_registration_id_ = drm_bridge_->RegisterPlayer(
+  // No need to set |cdm_unset_cb| since |this| holds a reference to the |cdm_|.
+  cdm_registration_id_ = drm_bridge->RegisterPlayer(
       base::Bind(&MediaSourcePlayer::OnKeyAdded, weak_this_),
-      base::Bind(&MediaSourcePlayer::OnCdmUnset, weak_this_));
+      base::Bind(&base::DoNothing));
 
-  audio_decoder_job_->SetDrmBridge(drm_bridge_);
-  video_decoder_job_->SetDrmBridge(drm_bridge_);
+  audio_decoder_job_->SetDrmBridge(drm_bridge);
+  video_decoder_job_->SetDrmBridge(drm_bridge);
 
-  if (drm_bridge_->GetMediaCrypto().is_null()) {
+  if (drm_bridge->GetMediaCrypto().is_null()) {
+    // Use BindToCurrentLoop to avoid reentrancy.
     MediaDrmBridge::MediaCryptoReadyCB cb = BindToCurrentLoop(
         base::Bind(&MediaSourcePlayer::OnMediaCryptoReady, weak_this_));
-    drm_bridge_->SetMediaCryptoReadyCB(cb);
+    drm_bridge->SetMediaCryptoReadyCB(cb);
     return;
   }
 
@@ -472,7 +481,8 @@ void MediaSourcePlayer::MediaDecoderCallback(
     DVLOG(1) << __FUNCTION__ << " : decode error";
     Release();
     manager()->OnError(player_id(), MEDIA_ERROR_DECODE);
-    media_stat_->StopAndReport(GetCurrentTime());
+    if (is_clock_manager)
+      media_stat_->StopAndReport(GetCurrentTime());
     return;
   }
 
@@ -492,7 +502,9 @@ void MediaSourcePlayer::MediaDecoderCallback(
   // any other pending events only after handling EOS detection.
   if (IsEventPending(SEEK_EVENT_PENDING)) {
     ProcessPendingEvents();
-    media_stat_->StopAndReport(GetCurrentTime());
+    // In case of Seek GetCurrentTime() already tells the time to seek to.
+    if (is_clock_manager && !doing_browser_seek_)
+      media_stat_->StopAndReport(current_presentation_timestamp);
     return;
   }
 
@@ -514,7 +526,8 @@ void MediaSourcePlayer::MediaDecoderCallback(
   }
 
   if (status == MEDIA_CODEC_OUTPUT_END_OF_STREAM) {
-    media_stat_->StopAndReport(GetCurrentTime());
+    if (is_clock_manager)
+      media_stat_->StopAndReport(GetCurrentTime());
     return;
   }
 
@@ -522,7 +535,8 @@ void MediaSourcePlayer::MediaDecoderCallback(
     if (is_clock_manager)
       interpolator_.StopInterpolating();
 
-    media_stat_->StopAndReport(GetCurrentTime());
+    if (is_clock_manager)
+      media_stat_->StopAndReport(GetCurrentTime());
     return;
   }
 
@@ -533,7 +547,8 @@ void MediaSourcePlayer::MediaDecoderCallback(
     } else {
       is_waiting_for_key_ = true;
       manager()->OnWaitingForDecryptionKey(player_id());
-      media_stat_->StopAndReport(GetCurrentTime());
+      if (is_clock_manager)
+        media_stat_->StopAndReport(GetCurrentTime());
     }
     return;
   }
@@ -552,7 +567,6 @@ void MediaSourcePlayer::MediaDecoderCallback(
   // in the middle of a seek or stop event and needs to wait for the IPCs to
   // come.
   if (status == MEDIA_CODEC_ABORT) {
-    media_stat_->StopAndReport(GetCurrentTime());
     return;
   }
 
@@ -744,7 +758,8 @@ void MediaSourcePlayer::OnPrefetchDone() {
   if (!interpolator_.interpolating())
     interpolator_.StartInterpolating();
 
-  media_stat_->Start(start_presentation_timestamp_);
+  if (!AudioFinished() || !VideoFinished())
+    media_stat_->Start(start_presentation_timestamp_);
 
   if (!AudioFinished())
     DecodeMoreAudio();
@@ -833,20 +848,6 @@ void MediaSourcePlayer::ResumePlaybackAfterKeyAdded() {
   // use previously received data.
   if (playing_)
     StartInternal();
-}
-
-void MediaSourcePlayer::OnCdmUnset() {
-  DVLOG(1) << __FUNCTION__;
-  DCHECK(drm_bridge_);
-  // TODO(xhwang): Currently this is only called during teardown. Support full
-  // detachment of CDM during playback. This will be needed when we start to
-  // support setMediaKeys(0) (see http://crbug.com/330324), or when we release
-  // MediaDrm when the video is paused, or when the device goes to sleep (see
-  // http://crbug.com/272421).
-  audio_decoder_job_->SetDrmBridge(NULL);
-  video_decoder_job_->SetDrmBridge(NULL);
-  cdm_registration_id_ = 0;
-  drm_bridge_ = NULL;
 }
 
 }  // namespace media

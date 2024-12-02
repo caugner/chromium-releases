@@ -14,7 +14,7 @@ namespace test {
 namespace {
 
 TEST(QuicProtocolTest, AdjustErrorForVersion) {
-  ASSERT_EQ(8, QUIC_STREAM_LAST_ERROR)
+  ASSERT_EQ(9, QUIC_STREAM_LAST_ERROR)
       << "Any additions to QuicRstStreamErrorCode require an addition to "
       << "AdjustErrorForVersion and this associated test.";
 
@@ -22,7 +22,7 @@ TEST(QuicProtocolTest, AdjustErrorForVersion) {
   // following.
   //  EXPECT_EQ(QUIC_RST_ACKNOWLEDGEMENT, AdjustErrorForVersion(
   //      QUIC_RST_ACKNOWLEDGEMENT,
-  //      QUIC_VERSION_24));
+  //      QUIC_VERSION_28));
 }
 
 TEST(QuicProtocolTest, MakeQuicTag) {

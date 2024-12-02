@@ -14,7 +14,7 @@
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/ui/app_list/app_list_view_delegate.h"
 #include "chrome/browser/ui/ash/app_list/app_list_service_ash.h"
-#include "chrome/browser/ui/ash/ash_keyboard_controller_proxy.h"
+#include "chrome/browser/ui/ash/chrome_keyboard_ui.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/launcher_context_menu.h"
 #include "chrome/browser/ui/ash/session_util.h"
@@ -34,6 +34,7 @@
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/display/display_configuration_observer.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/chromeos/system/input_device_settings.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "components/user_manager/user.h"
@@ -109,7 +110,7 @@ bool ChromeShellDelegate::IsMultiAccountEnabled() const {
 }
 
 bool ChromeShellDelegate::CanShowWindowForUser(aura::Window* window) const {
-  return ::CanShowWindowForUser(window, base::Bind(&::GetActiveBrowserContext));
+  return ::CanShowWindowForUser(window, base::Bind(&GetActiveBrowserContext));
 }
 
 bool ChromeShellDelegate::IsForceMaximizeOnFirstRun() const {
@@ -128,10 +129,6 @@ bool ChromeShellDelegate::IsForceMaximizeOnFirstRun() const {
 
 void ChromeShellDelegate::Exit() {
   chrome::AttemptUserExit();
-}
-
-content::BrowserContext* ChromeShellDelegate::GetActiveBrowserContext() {
-  return ::GetActiveBrowserContext();
 }
 
 app_list::AppListViewDelegate* ChromeShellDelegate::GetAppListViewDelegate() {
@@ -197,10 +194,20 @@ gfx::Image ChromeShellDelegate::GetDeprecatedAcceleratorImage() const {
       IDR_BLUETOOTH_KEYBOARD);
 }
 
-keyboard::KeyboardControllerProxy*
-    ChromeShellDelegate::CreateKeyboardControllerProxy() {
-  return new AshKeyboardControllerProxy(
-      ProfileManager::GetActiveUserProfile());
+void ChromeShellDelegate::ToggleTouchpad() {
+#if defined(OS_CHROMEOS)
+  chromeos::system::InputDeviceSettings::Get()->ToggleTouchpad();
+#endif  // defined(OS_CHROMEOS)
+}
+
+void ChromeShellDelegate::ToggleTouchscreen() {
+#if defined(OS_CHROMEOS)
+  chromeos::system::InputDeviceSettings::Get()->ToggleTouchscreen();
+#endif  // defined(OS_CHROMEOS)
+}
+
+keyboard::KeyboardUI* ChromeShellDelegate::CreateKeyboardUI() {
+  return new ChromeKeyboardUI(ProfileManager::GetActiveUserProfile());
 }
 
 void ChromeShellDelegate::VirtualKeyboardActivated(bool activated) {

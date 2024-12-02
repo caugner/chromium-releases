@@ -99,16 +99,16 @@ public class TabModelSelectorTabObserverTest extends NativeLibraryTestBase {
                 return false;
             }
         };
-        mNormalTabModel = new TabModelImpl(false, null, null, orderController, tabContentManager,
-                tabPersistentStore, delegate) {
+        mNormalTabModel = new TabModelImpl(false, null, null, null, orderController,
+                tabContentManager, tabPersistentStore, delegate) {
             @Override
             public boolean supportsPendingClosures() {
                 return false;
             }
         };
 
-        mIncognitoTabModel = new TabModelImpl(true, null, null, orderController, tabContentManager,
-                tabPersistentStore, delegate) {
+        mIncognitoTabModel = new TabModelImpl(true, null, null, null, orderController,
+                tabContentManager, tabPersistentStore, delegate) {
             @Override
             public boolean supportsPendingClosures() {
                 return false;
@@ -206,7 +206,7 @@ public class TabModelSelectorTabObserverTest extends NativeLibraryTestBase {
 
         // Exists to expose the method to the test.
         @Override
-        protected ObserverList.RewindableIterator<TabObserver> getTabObservers() {
+        public ObserverList.RewindableIterator<TabObserver> getTabObservers() {
             return super.getTabObservers();
         }
     }

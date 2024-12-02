@@ -54,7 +54,8 @@ template("test") {
                              ])
 
       deps = []
-      if (!defined(invoker.use_launcher) || invoker.use_launcher) {
+      if (!defined(invoker.use_default_launcher) ||
+          invoker.use_default_launcher) {
         deps += [ "//testing/android/native_test:native_test_native_code" ]
       }
       if (defined(invoker.deps)) {
@@ -78,17 +79,34 @@ template("test") {
       if (defined(invoker.apk_asset_location)) {
         asset_location = invoker.apk_asset_location
       }
+      if (defined(invoker.android_manifest)) {
+        android_manifest = invoker.android_manifest
+      }
+      if (defined(invoker.use_default_launcher)) {
+        use_default_launcher = invoker.use_default_launcher
+      }
     }
 
-    test_name = main_target_name
+    _test_name = main_target_name
     if (defined(invoker.output_name)) {
-      test_name = invoker.output_name
+      _test_name = invoker.output_name
     }
-    test_runner_script_name = "${test_name}__test_runner_script"
+    test_runner_script_name = "${_test_name}__test_runner_script"
     test_runner_script(test_runner_script_name) {
-      test_name = test_name
+      test_name = _test_name
       test_type = "gtest"
-      test_suite = test_name
+      test_suite = _test_name
+      if (defined(invoker.isolate_file)) {
+        isolate_file = invoker.isolate_file
+      }
+    }
+    incremental_test_runner_script_name =
+        "${_test_name}_incremental__test_runner_script"
+    test_runner_script(incremental_test_runner_script_name) {
+      test_name = "${_test_name}_incremental"
+      test_type = "gtest"
+      test_suite = _test_name
+      incremental_install = true
       if (defined(invoker.isolate_file)) {
         isolate_file = invoker.isolate_file
       }
@@ -100,8 +118,16 @@ template("test") {
         ":$test_runner_script_name",
       ]
       deps = [
-        ":$library_name",
         ":$apk_name",
+      ]
+    }
+    group("${target_name}_incremental") {
+      testonly = true
+      datadeps = [
+        ":$incremental_test_runner_script_name",
+      ]
+      deps = [
+        ":${apk_name}_incremental",
       ]
     }
   } else if (is_ios) {

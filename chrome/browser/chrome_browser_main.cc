@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/at_exit.h"
+#include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/crash_logging.h"
@@ -61,8 +62,8 @@
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/memory/tab_manager.h"
 #include "chrome/browser/metrics/field_trial_synchronizer.h"
-#include "chrome/browser/metrics/metrics_services_manager.h"
 #include "chrome/browser/metrics/thread_watcher.h"
+#include "chrome/browser/mojo_runner_util.h"
 #include "chrome/browser/nacl_host/nacl_browser_delegate_impl.h"
 #include "chrome/browser/net/crl_set_fetcher.h"
 #include "chrome/browser/performance_monitor/performance_monitor.h"
@@ -92,6 +93,7 @@
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
@@ -111,11 +113,13 @@
 #include "components/language_usage_metrics/language_usage_metrics.h"
 #include "components/metrics/call_stack_profile_metrics_provider.h"
 #include "components/metrics/metrics_service.h"
+#include "components/metrics/profiler/content/content_tracking_synchronizer_delegate.h"
 #include "components/metrics/profiler/tracking_synchronizer.h"
+#include "components/metrics_services_manager/metrics_services_manager.h"
 #include "components/nacl/browser/nacl_browser.h"
 #include "components/rappor/rappor_service.h"
 #include "components/signin/core/common/profile_management_switches.h"
-#include "components/startup_metric_utils/startup_metric_utils.h"
+#include "components/startup_metric_utils/browser/startup_metric_utils.h"
 #include "components/tracing/tracing_switches.h"
 #include "components/translate/content/browser/browser_cld_utils.h"
 #include "components/translate/content/common/cld_data_source.h"
@@ -188,7 +192,6 @@
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/shell_util.h"
-#include "components/browser_watcher/exit_funnel_win.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/gfx/win/dpi.h"
@@ -244,6 +247,10 @@
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
 #include "chrome/browser/chrome_webusb_browser_client.h"
 #include "components/webusb/webusb_detector.h"
+#endif
+
+#if defined(MOJO_RUNNER_CLIENT)
+#include "chrome/browser/mojo_runner_state.h"
 #endif
 
 using content::BrowserThread;
@@ -490,15 +497,8 @@ bool ProcessSingletonNotificationCallback(
     const base::CommandLine& command_line,
     const base::FilePath& current_directory) {
   // Drop the request if the browser process is already in shutdown path.
-  if (!g_browser_process || g_browser_process->IsShuttingDown()) {
-#if defined(OS_WIN)
-    browser_watcher::ExitFunnel::RecordSingleEvent(
-        chrome::kBrowserExitCodesRegistryPath,
-        L"ProcessSingletonIsShuttingDown");
-#endif  // defined(OS_WIN)
-
+  if (!g_browser_process || g_browser_process->IsShuttingDown())
     return false;
-  }
 
   if (command_line.HasSwitch(switches::kOriginalProcessStartTime)) {
     std::string start_time_string =
@@ -546,6 +546,18 @@ void LaunchDevToolsHandlerIfNeeded(const base::CommandLine& command_line) {
     }
   }
 }
+
+class ScopedMainMessageLoopRunEvent {
+ public:
+  ScopedMainMessageLoopRunEvent() {
+    TRACE_EVENT_ASYNC_BEGIN0(
+        "toplevel", "ChromeBrowserMainParts::MainMessageLoopRun", this);
+  }
+  ~ScopedMainMessageLoopRunEvent() {
+    TRACE_EVENT_ASYNC_END0("toplevel",
+                           "ChromeBrowserMainParts::MainMessageLoopRun", this);
+  }
+};
 
 }  // namespace
 
@@ -650,13 +662,6 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
                   << " list specified.";
   }
 
-#if defined(FIELDTRIAL_TESTING_ENABLED)
-  if (!command_line->HasSwitch(switches::kDisableFieldTrialTestingConfig) &&
-      !command_line->HasSwitch(switches::kForceFieldTrials) &&
-      !command_line->HasSwitch(variations::switches::kVariationsServerURL))
-    chrome_variations::AssociateDefaultFieldTrialConfig();
-#endif  // defined(FIELDTRIAL_TESTING_ENABLED)
-
   if (command_line->HasSwitch(switches::kForceVariationIds)) {
     // Create default variation ids which will always be included in the
     // X-Client-Data request header.
@@ -673,6 +678,14 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
   feature_list->InitializeFromCommandLine(
       command_line->GetSwitchValueASCII(switches::kEnableFeatures),
       command_line->GetSwitchValueASCII(switches::kDisableFeatures));
+
+#if defined(FIELDTRIAL_TESTING_ENABLED)
+  if (!command_line->HasSwitch(switches::kDisableFieldTrialTestingConfig) &&
+      !command_line->HasSwitch(switches::kForceFieldTrials) &&
+      !command_line->HasSwitch(variations::switches::kVariationsServerURL)) {
+    chrome_variations::AssociateDefaultFieldTrialConfig(feature_list.get());
+  }
+#endif  // defined(FIELDTRIAL_TESTING_ENABLED)
 
   variations::VariationsService* variations_service =
       browser_process_->variations_service();
@@ -754,8 +767,8 @@ void ChromeBrowserMainParts::RecordBrowserStartupTime() {
 #endif  // defined(OS_ANDROID)
 
   // Record collected startup metrics.
-  startup_metric_utils::RecordBrowserMainMessageLoopStart(base::Time::Now(),
-                                                          is_first_run);
+  startup_metric_utils::RecordBrowserMainMessageLoopStart(
+      base::TimeTicks::Now(), is_first_run);
 }
 
 // -----------------------------------------------------------------------------
@@ -1045,7 +1058,8 @@ int ChromeBrowserMainParts::PreCreateThreadsImpl() {
 
   // Initialize tracking synchronizer system.
   tracking_synchronizer_ = new metrics::TrackingSynchronizer(
-      make_scoped_ptr(new base::DefaultTickClock()));
+      make_scoped_ptr(new base::DefaultTickClock()),
+      base::Bind(&metrics::ContentTrackingSynchronizerDelegate::Create));
 
 #if defined(OS_MACOSX)
   // Get the Keychain API to register for distributed notifications on the main
@@ -1149,13 +1163,9 @@ void ChromeBrowserMainParts::PreBrowserStart() {
 #if defined(OS_CHROMEOS)
   g_browser_process->GetTabManager()->Start(false);
 #elif defined(OS_WIN) || defined(OS_MACOSX)
-  const std::string group_name =
-      base::FieldTrialList::FindFullName("AutomaticTabDiscarding");
-  if (parsed_command_line().HasSwitch(switches::kEnableTabDiscarding) ||
-      base::StartsWith(group_name, "Enabled", base::CompareCase::SENSITIVE)) {
-    bool enabled_once = base::StartsWith(group_name, "Enabled_Once",
-                                         base::CompareCase::SENSITIVE);
-    g_browser_process->GetTabManager()->Start(enabled_once);
+  if (base::FeatureList::IsEnabled(features::kAutomaticTabDiscarding)) {
+    // The default behavior is to only discard once (for now).
+    g_browser_process->GetTabManager()->Start(true);
   }
 #endif
 }
@@ -1179,8 +1189,10 @@ void ChromeBrowserMainParts::PostBrowserStart() {
 #endif  // defined(ENABLE_WEBRTC)
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
+  // WebUSB is an experimental web API. The sites these notifications will link
+  // to will only work if the experiment is enabled.
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableWebUsbNotifications)) {
+          switches::kEnableExperimentalWebPlatformFeatures)) {
     webusb_browser_client_.reset(new ChromeWebUsbBrowserClient());
     webusb_detector_.reset(
         new webusb::WebUsbDetector(webusb_browser_client_.get()));
@@ -1202,6 +1214,13 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
 
   SCOPED_UMA_HISTOGRAM_LONG_TIMER("Startup.PreMainMessageLoopRunImplLongTime");
   const base::TimeTicks start_time_step1 = base::TimeTicks::Now();
+
+#if defined(MOJO_RUNNER_CLIENT)
+  if (IsRunningInMojoRunner()) {
+    mojo_runner_state_.reset(new MojoRunnerState);
+    mojo_runner_state_->WaitForConnection();
+  }
+#endif  // defined(MOJO_RUNNER_CLIENT)
 
 #if defined(OS_WIN)
   // Windows parental controls calls can be slow, so we do an early init here
@@ -1734,7 +1753,10 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
 }
 
 bool ChromeBrowserMainParts::MainMessageLoopRun(int* result_code) {
-  TRACE_EVENT0("startup", "ChromeBrowserMainParts::MainMessageLoopRun");
+  // Trace the entry and exit of this method. We don't use the TRACE_EVENT0
+  // macro because the tracing infrastructure doesn't expect a synchronous event
+  // around the main loop of a thread.
+  ScopedMainMessageLoopRunEvent scoped_main_message_loop_run_event;
 #if defined(OS_ANDROID)
   // Chrome on Android does not use default MessageLoop. It has its own
   // Android specific MessageLoop

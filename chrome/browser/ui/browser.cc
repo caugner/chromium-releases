@@ -61,6 +61,7 @@
 #include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/memory/tab_manager_web_contents_data.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/pepper_broker_infobar_delegate.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
@@ -76,7 +77,6 @@
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/ssl/security_state_model.h"
-#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/tab_contents/retargeting_details.h"
@@ -131,7 +131,6 @@
 #include "chrome/browser/ui/tab_dialogs.h"
 #include "chrome/browser/ui/tab_helpers.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog.h"
-#include "chrome/browser/ui/tabs/tab_discard_state.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_utils.h"
@@ -157,13 +156,15 @@
 #include "components/app_modal/javascript_dialog_manager.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "components/bookmarks/common/bookmark_pref_names.h"
+#include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/favicon/content/content_favicon_driver.h"
 #include "components/history/core/browser/top_sites.h"
 #include "components/search/search.h"
 #include "components/sessions/core/session_types.h"
 #include "components/sessions/core/tab_restore_service.h"
-#include "components/startup_metric_utils/startup_metric_utils.h"
+#include "components/startup_metric_utils/browser/startup_metric_utils.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/ui/zoom/zoom_controller.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
@@ -177,6 +178,7 @@
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/security_style_explanation.h"
 #include "content/public/browser/security_style_explanations.h"
@@ -209,7 +211,6 @@
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "components/autofill/core/browser/autofill_ie_toolbar_import_win.h"
-#include "components/browser_watcher/exit_funnel_win.h"
 #include "ui/base/touch/touch_device.h"
 #include "ui/base/win/shell.h"
 #endif  // OS_WIN
@@ -220,6 +221,7 @@
 
 #if defined(USE_ASH)
 #include "ash/ash_switches.h"
+#include "ash/shell.h"
 #endif
 
 using base::TimeDelta;
@@ -714,13 +716,8 @@ void Browser::OnWindowClosing() {
   bool should_quit_if_last_browser =
       browser_shutdown::IsTryingToQuit() || !chrome::WillKeepAlive();
 
-  if (should_quit_if_last_browser && chrome::ShouldStartShutdown(this)) {
-#if defined(OS_WIN)
-    browser_watcher::ExitFunnel::RecordSingleEvent(
-          chrome::kBrowserExitCodesRegistryPath, L"LastWindowClose");
-#endif
+  if (should_quit_if_last_browser && ShouldStartShutdown())
     browser_shutdown::OnShutdownStarting(browser_shutdown::WINDOW_CLOSE);
-  }
 
   // Don't use GetForProfileIfExisting here, we want to force creation of the
   // session service so that user can restore what was open.
@@ -1054,7 +1051,10 @@ void Browser::ActiveTabChanged(WebContents* old_contents,
   exclusive_access_manager_->OnTabDetachedFromView(old_contents);
 
   // Discarded tabs always get reloaded.
-  if (TabDiscardState::IsDiscarded(new_contents))
+  // TODO(georgesak): Validate the usefulness of this. And if needed then move
+  // to TabManager.
+  if (g_browser_process->GetTabManager() &&
+      g_browser_process->GetTabManager()->IsTabDiscarded(new_contents))
     chrome::Reload(this, CURRENT_TAB);
 
   // If we have any update pending, do it now.
@@ -1136,9 +1136,9 @@ void Browser::TabReplacedAt(TabStripModel* tab_strip_model,
                 index,
                 (index == tab_strip_model_->active_index()));
 
-  int entry_count = new_contents->GetController().GetEntryCount();
-  if (entry_count > 0) {
+  if (!new_contents->GetController().IsInitialBlankNavigation()) {
     // Send out notification so that observers are updated appropriately.
+    int entry_count = new_contents->GetController().GetEntryCount();
     new_contents->GetController().NotifyEntryChanged(
         new_contents->GetController().GetEntryAtIndex(entry_count - 1));
   }
@@ -1185,7 +1185,8 @@ bool Browser::CanOverscrollContent() const {
   // horizontal scrolling. We are purposefully biased towards "no" here,
   // so that we don't waste resources capturing screenshots for horizontal
   // overscroll navigation unnecessarily.
-  bool allow_overscroll = ui::IsTouchDevicePresent();
+  bool allow_overscroll = ui::GetTouchScreensAvailability() ==
+      ui::TouchScreensAvailability::ENABLED;
 #elif defined(USE_AURA)
   bool allow_overscroll = true;
 #else
@@ -1396,6 +1397,14 @@ content::SecurityStyle Browser::GetSecurityStyle(
     }
   }
 
+  if (security_info.is_secure_protocol_and_ciphersuite) {
+    security_style_explanations->secure_explanations.push_back(
+        content::SecurityStyleExplanation(
+            l10n_util::GetStringUTF8(IDS_SECURE_PROTOCOL_AND_CIPHERSUITE),
+            l10n_util::GetStringUTF8(
+                IDS_SECURE_PROTOCOL_AND_CIPHERSUITE_DESCRIPTION)));
+  }
+
   return security_style;
 }
 
@@ -1416,7 +1425,7 @@ void Browser::OnWindowDidShow() {
     return;
   window_has_shown_ = true;
 
-  startup_metric_utils::RecordBrowserWindowDisplay(base::Time::Now());
+  startup_metric_utils::RecordBrowserWindowDisplay(base::TimeTicks::Now());
 
   // Nothing to do for non-tabbed windows.
   if (!is_type_tabbed())
@@ -1527,10 +1536,6 @@ void Browser::ActivateContents(WebContents* contents) {
   tab_strip_model_->ActivateTabAt(
       tab_strip_model_->GetIndexOfWebContents(contents), false);
   window_->Activate();
-}
-
-void Browser::DeactivateContents(WebContents* contents) {
-  window_->Deactivate();
 }
 
 void Browser::LoadingStateChanged(WebContents* source,
@@ -1663,8 +1668,9 @@ void Browser::ShowRepostFormWarningDialog(WebContents* source) {
 
 bool Browser::ShouldCreateWebContents(
     WebContents* web_contents,
-    int route_id,
-    int main_frame_route_id,
+    int32_t route_id,
+    int32_t main_frame_route_id,
+    int32_t main_frame_widget_route_id,
     WindowContainerType window_container_type,
     const std::string& frame_name,
     const GURL& target_url,
@@ -1672,13 +1678,9 @@ bool Browser::ShouldCreateWebContents(
     content::SessionStorageNamespace* session_storage_namespace) {
   if (window_container_type == WINDOW_CONTAINER_TYPE_BACKGROUND) {
     // If a BackgroundContents is created, suppress the normal WebContents.
-    return !MaybeCreateBackgroundContents(route_id,
-                                          main_frame_route_id,
-                                          web_contents,
-                                          frame_name,
-                                          target_url,
-                                          partition_id,
-                                          session_storage_namespace);
+    return !MaybeCreateBackgroundContents(
+        route_id, main_frame_route_id, main_frame_widget_route_id, web_contents,
+        frame_name, target_url, partition_id, session_storage_namespace);
   }
 
   return true;
@@ -2607,9 +2609,29 @@ bool Browser::ShouldHideUIForFullscreen() const {
   return window_ && window_->ShouldHideUIForFullscreen();
 }
 
+bool Browser::ShouldStartShutdown() const {
+  if (BrowserList::GetInstance(host_desktop_type())->size() > 1)
+    return false;
+#if defined(OS_WIN)
+  // On Windows 8 the desktop and ASH environments could be active
+  // at the same time.
+  // We should not start the shutdown process in the following cases:-
+  // 1. If the desktop type of the browser going away is ASH and there
+  //    are browser windows open in the desktop.
+  // 2. If the desktop type of the browser going away is desktop and the ASH
+  //    environment is still active.
+  if (host_desktop_type() == chrome::HOST_DESKTOP_TYPE_NATIVE)
+    return !ash::Shell::HasInstance();
+  if (host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH)
+    return BrowserList::GetInstance(chrome::HOST_DESKTOP_TYPE_NATIVE)->empty();
+#endif
+  return true;
+}
+
 bool Browser::MaybeCreateBackgroundContents(
-    int route_id,
-    int main_frame_route_id,
+    int32_t route_id,
+    int32_t main_frame_route_id,
+    int32_t main_frame_widget_route_id,
     WebContents* opener_web_contents,
     const std::string& frame_name,
     const GURL& target_url,
@@ -2672,15 +2694,11 @@ bool Browser::MaybeCreateBackgroundContents(
       content::SiteInstance::Create(opener_web_contents->GetBrowserContext());
 
   // Passed all the checks, so this should be created as a BackgroundContents.
-  BackgroundContents* contents =
-      service->CreateBackgroundContents(site_instance.get(),
-                                        route_id,
-                                        main_frame_route_id,
-                                        profile_,
-                                        frame_name,
-                                        base::ASCIIToUTF16(extension->id()),
-                                        partition_id,
-                                        session_storage_namespace);
+  BackgroundContents* contents = service->CreateBackgroundContents(
+      site_instance.get(), route_id, main_frame_route_id,
+      main_frame_widget_route_id, profile_, frame_name,
+      base::ASCIIToUTF16(extension->id()), partition_id,
+      session_storage_namespace);
 
   // When a separate process is used, the original renderer cannot access the
   // new window later, thus we need to navigate the window now.

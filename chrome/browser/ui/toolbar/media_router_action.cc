@@ -4,11 +4,13 @@
 
 #include "chrome/browser/ui/toolbar/media_router_action.h"
 
+#include "base/metrics/user_metrics.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/media/router/issue.h"
 #include "chrome/browser/media/router/media_route.h"
 #include "chrome/browser/media/router/media_router.h"
 #include "chrome/browser/media/router/media_router_factory.h"
+#include "chrome/browser/media/router/media_router_metrics.h"
 #include "chrome/browser/media/router/media_router_mojo_impl.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -25,9 +27,18 @@
 
 using media_router::MediaRouterDialogControllerImpl;
 
+namespace {
+
+media_router::MediaRouter* GetMediaRouter(Browser* browser) {
+  return media_router::MediaRouterFactory::GetApiForBrowserContext(
+      browser->profile());
+}
+
+}  // namespace
+
 MediaRouterAction::MediaRouterAction(Browser* browser)
     : media_router::IssuesObserver(GetMediaRouter(browser)),
-      media_router::MediaRoutesObserver(GetMediaRouter(browser)),
+      media_router::LocalMediaRoutesObserver(GetMediaRouter(browser)),
       media_router_active_icon_(
           ui::ResourceBundle::GetSharedInstance()
               .GetImageNamed(IDR_MEDIA_ROUTER_ACTIVE_ICON)),
@@ -48,9 +59,13 @@ MediaRouterAction::MediaRouterAction(Browser* browser)
       weak_ptr_factory_(this) {
   DCHECK(browser_);
   tab_strip_model_observer_.Add(browser_->tab_strip_model());
+
+  RegisterObserver();
+  OnHasLocalRouteUpdated(GetMediaRouter(browser)->HasLocalRoute());
 }
 
 MediaRouterAction::~MediaRouterAction() {
+  UnregisterObserver();
 }
 
 std::string MediaRouterAction::GetId() const {
@@ -117,9 +132,14 @@ ui::MenuModel* MediaRouterAction::GetContextMenu() {
 }
 
 bool MediaRouterAction::ExecuteAction(bool by_user) {
+  base::RecordAction(base::UserMetricsAction("MediaRouter_Icon_Click"));
+
   GetMediaRouterDialogController()->ShowMediaRouterDialog();
-  if (GetPlatformDelegate())
-    GetPlatformDelegate()->CloseOverflowMenuIfOpen();
+  if (GetPlatformDelegate()) {
+    media_router::MediaRouterMetrics::RecordMediaRouterDialogOrigin(
+        GetPlatformDelegate()->CloseOverflowMenuIfOpen() ?
+            media_router::OVERFLOW_MENU : media_router::TOOLBAR);
+  }
   return true;
 }
 
@@ -138,13 +158,8 @@ void MediaRouterAction::OnIssueUpdated(const media_router::Issue* issue) {
   MaybeUpdateIcon();
 }
 
-void MediaRouterAction::OnRoutesUpdated(
-    const std::vector<media_router::MediaRoute>& routes) {
-  has_local_route_ =
-      std::find_if(routes.begin(), routes.end(),
-                   [](const media_router::MediaRoute& route) {
-                      return route.is_local(); }) !=
-      routes.end();
+void MediaRouterAction::OnHasLocalRouteUpdated(bool has_local_route) {
+  has_local_route_ = has_local_route;
   MaybeUpdateIcon();
 }
 
@@ -193,11 +208,6 @@ MediaRouterAction::GetMediaRouterDialogController() {
   DCHECK(web_contents);
   return MediaRouterDialogControllerImpl::GetOrCreateForWebContents(
       web_contents);
-}
-
-media_router::MediaRouter* MediaRouterAction::GetMediaRouter(Browser* browser) {
-  return media_router::MediaRouterFactory::GetApiForBrowserContext(
-      static_cast<content::BrowserContext*>(browser->profile()));
 }
 
 MediaRouterActionPlatformDelegate* MediaRouterAction::GetPlatformDelegate() {

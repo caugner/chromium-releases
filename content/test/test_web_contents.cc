@@ -140,6 +140,7 @@ void TestWebContents::TestDidNavigateWithReferrer(
   params.was_within_same_page = false;
   params.is_post = false;
   params.page_state = PageState::CreateFromURL(url);
+  params.contents_mime_type = std::string("text/html");
 
   rfh->SendNavigateWithParams(&params);
 }
@@ -226,9 +227,9 @@ void TestWebContents::CommitPendingNavigation() {
   TestRenderFrameHost* rfh = GetPendingMainFrame();
   if (!rfh)
     rfh = old_rfh;
-  CHECK_IMPLIES(browser_side_navigation, rfh->is_loading());
-  CHECK_IMPLIES(browser_side_navigation,
-                !rfh->frame_tree_node()->navigation_request());
+  CHECK(!browser_side_navigation || rfh->is_loading());
+  CHECK(!browser_side_navigation ||
+        !rfh->frame_tree_node()->navigation_request());
 
   int page_id = entry->GetPageID();
   if (page_id == -1) {
@@ -301,11 +302,11 @@ void TestWebContents::TestDidFailLoadWithError(
 
 void TestWebContents::CreateNewWindow(
     SiteInstance* source_site_instance,
-    int route_id,
-    int main_frame_route_id,
+    int32_t route_id,
+    int32_t main_frame_route_id,
+    int32_t main_frame_widget_route_id,
     const ViewHostMsg_CreateWindow_Params& params,
-    SessionStorageNamespace* session_storage_namespace) {
-}
+    SessionStorageNamespace* session_storage_namespace) {}
 
 void TestWebContents::CreateNewWidget(int32 render_process_id,
                                       int32 route_id,

@@ -5,10 +5,10 @@
 #ifndef COMPONENTS_DOM_DISTILLER_CONTENT_BROWSER_DISTILLER_JAVASCRIPT_SERVICE_IMPL_H_
 #define COMPONENTS_DOM_DISTILLER_CONTENT_BROWSER_DISTILLER_JAVASCRIPT_SERVICE_IMPL_H_
 
-#include "components/dom_distiller/content/browser/external_feedback_reporter.h"
+#include "components/dom_distiller/content/browser/distiller_ui_handle.h"
 #include "components/dom_distiller/content/common/distiller_javascript_service.mojom.h"
-#include "third_party/mojo/src/mojo/public/cpp/bindings/string.h"
-#include "third_party/mojo/src/mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/string.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace dom_distiller {
 
@@ -17,7 +17,7 @@ class DistillerJavaScriptServiceImpl : public DistillerJavaScriptService {
  public:
   DistillerJavaScriptServiceImpl(
       content::RenderFrameHost* render_frame_host,
-      ExternalFeedbackReporter* external_feedback_reporter,
+      DistillerUIHandle* distiller_ui_handle,
       mojo::InterfaceRequest<DistillerJavaScriptService> request);
   ~DistillerJavaScriptServiceImpl() override;
 
@@ -31,18 +31,21 @@ class DistillerJavaScriptServiceImpl : public DistillerJavaScriptService {
   void HandleDistillerFeedbackCall(bool good) override;
 
   // Make a call into Android to close the overlay panel containing reader mode.
-  void HandleDistillerClosePanelCall() override;
+  void HandleDistillerClosePanelCall(bool animate) override;
+
+  // Show the Android view containing Reader Mode settings.
+  void HandleDistillerOpenSettingsCall() override;
 
  private:
   mojo::StrongBinding<DistillerJavaScriptService> binding_;
   content::RenderFrameHost* render_frame_host_;
-  ExternalFeedbackReporter* external_feedback_reporter_;
+  DistillerUIHandle* distiller_ui_handle_;
 };
 
 // static
 void CreateDistillerJavaScriptService(
     content::RenderFrameHost* render_frame_host,
-    ExternalFeedbackReporter* feedback_reporter,
+    DistillerUIHandle* distiller_ui_handle,
     mojo::InterfaceRequest<DistillerJavaScriptService> request);
 
 }  // namespace dom_distiller

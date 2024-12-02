@@ -948,7 +948,7 @@
           { "policy": { "DefaultCookiesSetting": 2 },
             "value": "block"},
           { "policy": { "DefaultCookiesSetting": 4 },
-            "value": "session"}
+            "value": "session_only"}
         ]
       }
     ],
@@ -1618,6 +1618,16 @@
     ]
   },
 
+  "DefaultPrinterSelection": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": {
+      "DefaultPrinterSelection": "{ 'kind': 'local', 'namePattern': '.*' }"
+    },
+    "pref_mappings": [
+      { "pref": "printing.default_destination_selection_rules" }
+    ]
+  },
+
   "BackgroundModeEnabled": {
     "os": ["win", "linux"],
     "can_be_recommended": true,
@@ -1788,6 +1798,16 @@
     "os": ["win", "linux", "mac", "chromeos"],
     "test_policy": { "SSLVersionFallbackMin": "tls1.2" },
     "pref_mappings": []
+  },
+
+  "RC4Enabled": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "RC4Enabled": true },
+    "pref_mappings": [
+      { "pref": "ssl.rc4_enabled",
+        "local_state": true
+      }
+    ]
   },
 
   "WelcomePageOnOSUpgradeEnabled": {
@@ -2315,6 +2335,14 @@
     "test_policy": { "SSLErrorOverrideAllowed": true },
     "pref_mappings": [
       { "pref": "ssl.error_override_allowed" }
+    ]
+  },
+
+  "AllowDinosaurEasterEgg": {
+    "os": ["win", "linux", "mac", "chromeos"],
+    "test_policy": { "AllowDinosaurEasterEgg": true },
+    "pref_mappings": [
+      { "pref": "allow_dinosaur_easter_egg"}
     ]
   },
 

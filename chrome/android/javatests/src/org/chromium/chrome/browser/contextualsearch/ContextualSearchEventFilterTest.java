@@ -13,13 +13,16 @@ import android.view.MotionEvent;
 import android.view.ViewConfiguration;
 
 import org.chromium.base.test.util.Feature;
+import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelContent;
+import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelManager;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel;
 import org.chromium.chrome.browser.compositor.eventfilter.MockEventFilterHost;
 import org.chromium.chrome.browser.compositor.layouts.LayoutUpdateHost;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.ContextualSearchEventFilter;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.EventFilterHost;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.GestureHandler;
+import org.chromium.chrome.browser.compositor.scene_layer.ContextualSearchSceneLayer;
 
 /**
  * Class responsible for testing the ContextualSearchEventFilter.
@@ -84,7 +87,7 @@ public class ContextualSearchEventFilterTest extends InstrumentationTestCase
             // Check that the event offset is correct.
             if (!mShouldLockHorizontalMotionInSearchContentView) {
                 float propagatedEventY = mEventPropagatedToSearchContentView.getY();
-                float offsetY = mContextualSearchPanel.getSearchContentViewOffsetY() * mDpToPx;
+                float offsetY = mContextualSearchPanel.getContentY() * mDpToPx;
                 assertEquals(propagatedEventY - offsetY, e.getY());
             }
 
@@ -104,8 +107,8 @@ public class ContextualSearchEventFilterTest extends InstrumentationTestCase
      */
     public class ContextualSearchEventFilterWrapper extends ContextualSearchEventFilter {
         public ContextualSearchEventFilterWrapper(Context context, EventFilterHost host,
-                GestureHandler handler, ContextualSearchPanel contextualSearchPanel) {
-            super(context, host, handler, contextualSearchPanel);
+                GestureHandler handler, OverlayPanelManager panelManager) {
+            super(context, host, handler, panelManager);
         }
 
         @Override
@@ -126,17 +129,23 @@ public class ContextualSearchEventFilterTest extends InstrumentationTestCase
     // --------------------------------------------------------------------------------------------
 
     /**
-     * MockContextualSearchPanel stops creation of ContentViewCores.
+     * Mocks the ContextualSearchPanel, so it doesn't create ContentViewCore.
      */
     public static class MockContextualSearchPanel extends ContextualSearchPanel {
 
-        public MockContextualSearchPanel(Context context, LayoutUpdateHost updateHost) {
-            super(context, updateHost);
+        public MockContextualSearchPanel(Context context, LayoutUpdateHost updateHost,
+                OverlayPanelManager panelManager) {
+            super(context, updateHost, panelManager);
         }
 
         @Override
         public OverlayPanelContent createNewOverlayPanelContent() {
             return new MockOverlayPanelContent();
+        }
+
+        @Override
+        protected ContextualSearchSceneLayer createNewContextualSearchSceneLayer() {
+            return null;
         }
 
         /**
@@ -149,6 +158,36 @@ public class ContextualSearchEventFilterTest extends InstrumentationTestCase
 
             @Override
             public void removeLastHistoryEntry(String url, long timeInMs) {}
+        }
+
+        @Override
+        protected float getPeekPromoHeight() {
+            // Android Views are not used in this test so we cannot get the actual height.
+            return 0.f;
+        }
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // MockOverlayPanelManager
+    // --------------------------------------------------------------------------------------------
+
+    /**
+     * OverlayPanelManager that always returns the MockContextualSearchPanel as the active
+     * panel.
+     */
+    private static class MockOverlayPanelManager extends OverlayPanelManager {
+        private OverlayPanel mPanel;
+
+        public MockOverlayPanelManager() {
+        }
+
+        public void setOverlayPanel(OverlayPanel panel) {
+            mPanel = panel;
+        }
+
+        @Override
+        public OverlayPanel getActivePanel() {
+            return mPanel;
         }
     }
 
@@ -166,9 +205,11 @@ public class ContextualSearchEventFilterTest extends InstrumentationTestCase
         mTouchSlopDp = ViewConfiguration.get(context).getScaledTouchSlop() / mDpToPx;
 
         EventFilterHost eventFilterHost = new MockEventFilterHostWrapper(context);
-        mContextualSearchPanel = new MockContextualSearchPanel(context, null);
+        MockOverlayPanelManager panelManager = new MockOverlayPanelManager();
+        mContextualSearchPanel = new MockContextualSearchPanel(context, null, panelManager);
+        panelManager.setOverlayPanel(mContextualSearchPanel);
         mEventFilter = new ContextualSearchEventFilterWrapper(context, eventFilterHost, this,
-                mContextualSearchPanel);
+                panelManager);
 
         mContextualSearchPanel.setSearchBarHeightForTesting(SEARCH_BAR_HEIGHT_DP);
         mContextualSearchPanel.setHeightForTesting(LAYOUT_HEIGHT_DP);

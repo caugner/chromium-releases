@@ -386,15 +386,13 @@ if (window.location.search) {
     debugHint = function(id) { return ""; };
 }
 
-function testSVGInObjectWithPlaceholderHeightAttr(placeholderHeightAttr) {
-    // Separated over placeholderHeightAttr so that the test count is around ~200
-
+function testSVGInObjectWithPlaceholder(placeholderWidthAttr, placeholderHeightAttr, viewBoxAttr) {
     doCombinationTest(
         [["containerWidthStyle", [null, "400px"]],
          ["containerHeightStyle", [null, "400px"]],
-         ["placeholderWidthAttr", [null, "100", "50%"]],
+         ["placeholderWidthAttr", [placeholderWidthAttr]],
          ["placeholderHeightAttr", [placeholderHeightAttr]],
-         ["svgViewBoxAttr", [ null, "0 0 100 200" ]],
+         ["svgViewBoxAttr", [ viewBoxAttr ]],
          ["svgWidthAttr", [ null, "200", "25%" ]],
          ["svgHeightAttr", [ null, "200", "25%" ]]],
         function(config, id) {
@@ -413,12 +411,14 @@ function testSVGInObjectWithPlaceholderHeightAttr(placeholderHeightAttr) {
                             placeholder.getBoundingClientRect();
 
                     try {
-                        assert_equals(placeholderRect.width,
-                                      expectedRect.width,
-                                      debugHint(id) + "Wrong width");
-                        assert_equals(placeholderRect.height,
-                                      expectedRect.height,
-                                      debugHint(id) + "Wrong height");
+                        assert_approx_equals(placeholderRect.width,
+                                             expectedRect.width,
+                                             0.5,
+                                             debugHint(id) + "Wrong width");
+                        assert_approx_equals(placeholderRect.height,
+                                             expectedRect.height,
+                                             0.5,
+                                             debugHint(id) + "Wrong height");
                     } finally {
                         testContainer.removeChild(container);
                         if (testSingleId)

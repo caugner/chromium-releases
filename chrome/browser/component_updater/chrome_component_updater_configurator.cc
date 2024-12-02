@@ -5,6 +5,7 @@
 #include "chrome/browser/component_updater/chrome_component_updater_configurator.h"
 
 #include <string>
+#include <vector>
 
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/version.h"
@@ -42,8 +43,6 @@ class ChromeConfigurator : public update_client::Configurator {
   bool DeltasEnabled() const override;
   bool UseBackgroundDownloader() const override;
   scoped_refptr<base::SequencedTaskRunner> GetSequencedTaskRunner()
-      const override;
-  scoped_refptr<base::SingleThreadTaskRunner> GetSingleThreadTaskRunner()
       const override;
 
  private:
@@ -124,18 +123,16 @@ bool ChromeConfigurator::UseBackgroundDownloader() const {
   return configurator_impl_.UseBackgroundDownloader();
 }
 
+// Returns a task runner to run blocking tasks. The task runner continues to run
+// after the browser shuts down, until the OS terminates the process. This
+// imposes certain requirements for the code using the task runner, such as
+// not accessing any global browser state while the code is running.
 scoped_refptr<base::SequencedTaskRunner>
 ChromeConfigurator::GetSequencedTaskRunner() const {
   return content::BrowserThread::GetBlockingPool()
       ->GetSequencedTaskRunnerWithShutdownBehavior(
           content::BrowserThread::GetBlockingPool()->GetSequenceToken(),
-          base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
-}
-
-scoped_refptr<base::SingleThreadTaskRunner>
-ChromeConfigurator::GetSingleThreadTaskRunner() const {
-  return content::BrowserThread::GetMessageLoopProxyForThread(
-      content::BrowserThread::FILE);
+          base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
 }
 
 }  // namespace

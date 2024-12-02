@@ -14,10 +14,25 @@ android_library("policy_java") {
   deps = [
     "//base:base_java",
   ]
-  java_files = _jni_sources + [
-    "java/src/org/chromium/policy/AbstractAppRestrictionsProvider.java",
-    "java/src/org/chromium/policy/AppRestrictionsProvider.java",
-    "java/src/org/chromium/policy/PolicyProvider.java",
+  java_files =
+      _jni_sources + [
+        "java/src/org/chromium/policy/AbstractAppRestrictionsProvider.java",
+        "java/src/org/chromium/policy/AppRestrictionsProvider.java",
+        "java/src/org/chromium/policy/PolicyProvider.java",
+      ]
+}
+
+# GYP: //components/components.gyp:policy_test_support_java
+android_library("policy_java_test_support") {
+  testonly = true
+  deps = [
+    "//base:base_java",
+    "//base:base_java_test_support",
+    ":policy_java",
+  ]
+  java_files = [
+    "javatests/src/org/chromium/policy/test/annotations/Policies.java",
+    "javatests/src/org/chromium/policy/test/PolicyData.java",
   ]
 }
 
@@ -26,4 +41,19 @@ generate_jni("jni_headers") {
   visibility = [ "//components/policy/*" ]
   sources = _jni_sources
   jni_package = "policy"
+}
+
+# GYP: //components/components_test.gyp:components_junit_tests
+junit_binary("components_policy_junit_tests") {
+  java_files = [
+    "junit/src/org/chromium/policy/AbstractAppRestrictionsProviderTest.java",
+    "junit/src/org/chromium/policy/CombinedPolicyProviderTest.java",
+    "junit/src/org/chromium/policy/test/annotations/PoliciesTest.java",
+  ]
+  deps = [
+    ":policy_java_test_support",
+    ":policy_java",
+    "//base:base_java",
+    "//third_party/junit:hamcrest",
+  ]
 }

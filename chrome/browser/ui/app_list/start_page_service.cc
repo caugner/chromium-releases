@@ -42,6 +42,7 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/speech_recognition_session_preamble.h"
 #include "content/public/browser/web_contents.h"
@@ -418,14 +419,7 @@ void StartPageService::AppListHidden() {
     UnloadContents();
 
   if (speech_recognizer_) {
-    speech_recognizer_->Stop();
-    speech_recognizer_.reset();
-
-    // When the SpeechRecognizer is destroyed above, we get stuck in the current
-    // speech state instead of being reset into the READY state. Reset the
-    // speech state explicitly so that speech works when the launcher is opened
-    // again.
-    OnSpeechRecognitionStateChanged(SPEECH_RECOGNITION_READY);
+    StopSpeechRecognition();
   }
 
 #if defined(OS_CHROMEOS)
@@ -433,7 +427,7 @@ void StartPageService::AppListHidden() {
 #endif
 }
 
-void StartPageService::ToggleSpeechRecognition(
+void StartPageService::StartSpeechRecognition(
     const scoped_refptr<content::SpeechRecognitionSessionPreamble>& preamble) {
   DCHECK(contents_);
   speech_button_toggled_manually_ = true;
@@ -454,6 +448,17 @@ void StartPageService::ToggleSpeechRecognition(
   }
 
   speech_recognizer_->Start(preamble);
+}
+
+void StartPageService::StopSpeechRecognition() {
+  // A call to Stop() isn't needed since deleting the recognizer implicitly
+  // stops.
+  speech_recognizer_.reset();
+
+  // When the SpeechRecognizer is destroyed above, we get stuck in the current
+  // speech state instead of being reset into the READY state. Reset the speech
+  // state explicitly so that speech works when the launcher is opened again.
+  OnSpeechRecognitionStateChanged(SPEECH_RECOGNITION_READY);
 }
 
 bool StartPageService::HotwordEnabled() {
@@ -634,8 +639,8 @@ void StartPageService::LoadStartPageURL() {
       ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
       std::string());
 
-  contents_->GetRenderViewHost()->GetView()->SetBackgroundColor(
-        SK_ColorTRANSPARENT);
+  contents_->GetRenderViewHost()->GetWidget()->GetView()->SetBackgroundColor(
+      SK_ColorTRANSPARENT);
 }
 
 void StartPageService::FetchDoodleJson() {
@@ -667,8 +672,8 @@ void StartPageService::OnURLFetchComplete(const net::URLFetcher* source) {
   JSONStringValueDeserializer deserializer(json_data_substr);
   deserializer.set_allow_trailing_comma(true);
   int error_code = 0;
-  scoped_ptr<base::Value> doodle_json(
-      deserializer.Deserialize(&error_code, nullptr));
+  scoped_ptr<base::Value> doodle_json =
+      deserializer.Deserialize(&error_code, nullptr);
 
   base::TimeDelta recheck_delay;
   if (error_code != 0) {

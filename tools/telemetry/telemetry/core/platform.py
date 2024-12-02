@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 import logging as real_logging
 import os
+import sys
 
 from telemetry.core import discover
 from telemetry.core import local_server
@@ -63,8 +64,9 @@ def GetPlatformForDevice(device, finder_options, logging=real_logging):
         return _remote_platforms[device.guid]
     return None
   except Exception:
+    current_exception = sys.exc_info()
     logging.error('Fail to create platform instance for %s.', device.name)
-    raise
+    raise current_exception[0], current_exception[1], current_exception[2]
 
 
 class Platform(object):
@@ -232,7 +234,6 @@ class Platform(object):
     energy consumption."""
     return self._platform_backend.CanMeasurePerApplicationPower()
 
-
   def StartMonitoringPower(self, browser):
     """Starts monitoring power utilization statistics.
 
@@ -290,6 +291,8 @@ class Platform(object):
 
   def IsMonitoringPower(self):
     """Returns true if power is currently being monitored, false otherwise."""
+    # TODO(rnephew): Remove when crbug.com/553601 is solved.
+    real_logging.info('IsMonitoringPower: %s', self._is_monitoring_power)
     return self._is_monitoring_power
 
   def CanMonitorNetworkData(self):
@@ -325,6 +328,24 @@ class Platform(object):
     Returns True if it is believed the attempt succeeded.
     """
     return self._platform_backend.CooperativelyShutdown(proc, app_name)
+
+  def CanTakeScreenshot(self):
+    return self._platform_backend.CanTakeScreenshot()
+
+  # TODO(nednguyen): Implement this on Mac, Linux & Win. (crbug.com/369490)
+  def TakeScreenshot(self, file_path):
+    """ Takes a screenshot of the platform and save to |file_path|.
+
+    Note that this method may not be supported on all platform, so check with
+    CanTakeScreenshot before calling this.
+
+    Args:
+      file_path: Where to save the screenshot to. If the platform is remote,
+        |file_path| is the path on the host platform.
+
+    Returns True if it is believed the attempt succeeded.
+    """
+    return self._platform_backend.TakeScreenshot(file_path)
 
   def StartLocalServer(self, server):
     """Starts a LocalServer and associates it with this platform.

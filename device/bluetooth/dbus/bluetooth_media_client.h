@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/macros.h"
 #include "base/values.h"
 #include "dbus/object_path.h"
 #include "dbus/property.h"

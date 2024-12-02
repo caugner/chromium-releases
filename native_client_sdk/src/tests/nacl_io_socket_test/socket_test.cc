@@ -219,7 +219,7 @@ TEST_F(SocketTestUDP, Bind) {
   EXPECT_EQ(EINVAL, Bind(sock2_, LOCAL_HOST, PORT1));
 }
 
-TEST_F(SocketTestUDP, SendRcv) {
+TEST_F(SocketTestUDP, SendRecv) {
   char outbuf[256];
   char inbuf[512];
 
@@ -252,7 +252,7 @@ TEST_F(SocketTestUDP, SendRcv) {
   EXPECT_EQ(0, memcmp(outbuf, inbuf, sizeof(outbuf)));
 }
 
-TEST_F(SocketTestUDP, SendRcvUnbound) {
+TEST_F(SocketTestUDP, SendRecvUnbound) {
   char outbuf[256];
   char inbuf[512];
 
@@ -405,6 +405,8 @@ TEST_F(SocketTestTCP, TCPConnectFails) {
 TEST_F(SocketTest, Getsockopt) {
   sock1_ = ki_socket(AF_INET, SOCK_STREAM, 0);
   EXPECT_GT(sock1_, -1);
+  sock2_ = ki_socket(AF_INET, SOCK_DGRAM, 0);
+  EXPECT_GT(sock1_, -1);
   int socket_error = 99;
   socklen_t len = sizeof(socket_error);
 
@@ -414,6 +416,20 @@ TEST_F(SocketTest, Getsockopt) {
                              &socket_error, &len));
   ASSERT_EQ(0, socket_error);
   ASSERT_EQ(sizeof(socket_error), len);
+
+  // Check SO_TYPE for TCP sockets
+  int socket_type = 0;
+  len = sizeof(socket_type);
+  ASSERT_EQ(0, ki_getsockopt(sock1_, SOL_SOCKET, SO_TYPE, &socket_type, &len));
+  ASSERT_EQ(SOCK_STREAM, socket_type);
+  ASSERT_EQ(sizeof(socket_type), len);
+
+  // Check SO_TYPE for UDP sockets
+  socket_type = 0;
+  len = sizeof(socket_type);
+  ASSERT_EQ(0, ki_getsockopt(sock2_, SOL_SOCKET, SO_TYPE, &socket_type, &len));
+  ASSERT_EQ(SOCK_DGRAM, socket_type);
+  ASSERT_EQ(sizeof(socket_type), len);
 
   // Test for an invalid option (-1)
   ASSERT_EQ(-1, ki_getsockopt(sock1_, SOL_SOCKET, -1, &socket_error, &len));
@@ -825,6 +841,11 @@ TEST_F(SocketTestTCP, SendRecvAfterRemoteShutdown) {
 
   // Close the new socket
   ASSERT_EQ(0, ki_close(new_sock));
+
+  // Sleep for 10 milliseconds. This is designed to allow the shutdown
+  // event to make its way to the client socket beofre the recv below().
+  // TODO(sbc): Find a way to test this that doesn't rely on arbitrary sleep.
+  usleep(100 * 1000);
 
   // Recv remainder
   int bytes_remaining = strlen(send_buf) - 10;

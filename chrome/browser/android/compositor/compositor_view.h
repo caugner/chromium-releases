@@ -83,6 +83,8 @@ class CompositorView : public content::CompositorClient,
                           jobject object,
                           jint toolbar_resource_id,
                           jint toolbar_background_color,
+                          jint url_bar_resource_id,
+                          jfloat url_bar_alpha,
                           jfloat top_offset,
                           jfloat brightness,
                           bool visible,
@@ -113,7 +115,7 @@ class CompositorView : public content::CompositorClient,
   void SetSceneLayer(JNIEnv* env, jobject object, jobject jscene_layer);
 
   // CompositorClient implementation:
-  void Layout() override;
+  void UpdateLayerTreeHost() override;
   void OnSwapBuffersCompleted(int pending_swap_buffers) override;
   ui::UIResourceProvider* GetUIResourceProvider();
 

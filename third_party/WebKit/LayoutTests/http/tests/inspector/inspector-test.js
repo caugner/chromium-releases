@@ -55,6 +55,18 @@ InspectorTest.evaluateInPageWithTimeout = function(code)
     InspectorTest.evaluateInPage("setTimeout(unescape('" + escape(code) + "'), 1)");
 }
 
+InspectorTest.evaluateFunctionInOverlay = function(func, callback)
+{
+    var expression = "testRunner.evaluateInWebInspectorOverlay(\"(\" + " + func + " + \")()\")";
+    var mainContext = InspectorTest.runtimeModel.executionContexts()[0];
+    mainContext.evaluate(expression, "", false, false, true, false, wrapCallback);
+
+    function wrapCallback(val, err, result)
+    {
+        callback(result.value)
+    }
+}
+
 var lastEvalId = 0;
 var pendingEvalRequests = {};
 
@@ -892,7 +904,6 @@ WebInspector.targetManager.observeTargets({
         InspectorTest.powerProfiler = target.powerProfiler;
         InspectorTest.cpuProfilerModel = target.cpuProfilerModel;
         InspectorTest.heapProfilerModel = target.heapProfilerModel;
-        InspectorTest.layerTreeModel = target.layerTreeModel;
         InspectorTest.animationModel = target.animationModel;
         InspectorTest.serviceWorkerCacheModel = target.serviceWorkerCacheModel;
         InspectorTest.serviceWorkerManager = target.serviceWorkerManager;
@@ -1012,6 +1023,7 @@ function runTest(enableWatchDogWhileDebugging)
 
         // 2. Show initial panel based on test path.
         var initialPanelByFolder = {
+            "animation": "elements",
             "audits": "audits",
             "console": "console",
             "elements": "elements",

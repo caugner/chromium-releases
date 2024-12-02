@@ -9,6 +9,9 @@
 #include <signal.h>
 #include <sys/prctl.h>
 #endif
+#if defined(OS_LINUX)
+#include <fontconfig/fontconfig.h>
+#endif
 
 #include "base/command_line.h"
 #include "base/files/file_util.h"
@@ -42,9 +45,9 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/common/content_switches.h"
+#include "gpu/command_buffer/service/gpu_switches.h"
 #include "media/audio/audio_manager.h"
 #include "media/audio/audio_manager_factory.h"
-#include "media/base/browser_cdm_factory.h"
 #include "media/base/media.h"
 #include "ui/compositor/compositor_switches.h"
 
@@ -167,6 +170,9 @@ DefaultCommandLineSwitch g_default_switches[] = {
   // Disables Chromecast-specific WiFi-related features on ATV for now.
   { switches::kNoWifi, "" },
   { switches::kDisableGestureRequirementForMediaPlayback, ""},
+#else
+  // GPU shader disk cache disabling is largely to conserve disk space.
+  { switches::kDisableGpuShaderDiskCache, "" },
 #endif
   // Always enable HTMLMediaElement logs.
   { switches::kBlinkPlatformLogChannels, "Media"},
@@ -213,13 +219,11 @@ void AddDefaultCommandLineSwitches(base::CommandLine* command_line) {
 
 CastBrowserMainParts::CastBrowserMainParts(
     const content::MainFunctionParams& parameters,
-    URLRequestContextFactory* url_request_context_factory,
-    scoped_ptr<::media::AudioManagerFactory> audio_manager_factory)
+    URLRequestContextFactory* url_request_context_factory)
     : BrowserMainParts(),
       cast_browser_process_(new CastBrowserProcess()),
       parameters_(parameters),
       url_request_context_factory_(url_request_context_factory),
-      audio_manager_factory_(audio_manager_factory.Pass()),
       net_log_(new CastNetLog()) {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   AddDefaultCommandLineSwitches(command_line);
@@ -235,10 +239,6 @@ void CastBrowserMainParts::PreMainMessageLoopStart() {
   // This call must also be before NetworkChangeNotifier, as it generates
   // Net/DNS metrics.
   metrics::PreregisterAllGroupedHistograms();
-
-  // Set the platform's implementation of AudioManagerFactory.
-  if (audio_manager_factory_)
-    ::media::AudioManager::SetFactory(audio_manager_factory_.release());
 
 #if defined(OS_ANDROID)
   net::NetworkChangeNotifier::SetFactory(
@@ -258,6 +258,23 @@ void CastBrowserMainParts::PostMainMessageLoopStart() {
 #endif  // defined(OS_ANDROID)
 }
 
+void CastBrowserMainParts::ToolkitInitialized() {
+#if defined(OS_LINUX)
+  // Without this call, the FontConfig library gets implicitly initialized
+  // on the first call to FontConfig. Since it's not safe to initialize it
+  // concurrently from multiple threads, we explicitly initialize it here
+  // to prevent races when there are multiple renderer's querying the library:
+  // http://crbug.com/404311
+  // Also, implicit initialization can cause a long delay on the first
+  // rendering if the font cache has to be regenerated for some reason. Doing it
+  // explicitly here helps in cases where the browser process is starting up in
+  // the background (resources have not yet been granted to cast) since it
+  // prevents the long delay the user would have seen on first rendering. Note
+  // that future calls to FcInit() are safe no-ops per the FontConfig interface.
+  FcInit();
+#endif
+}
+
 int CastBrowserMainParts::PreCreateThreads() {
 #if defined(OS_ANDROID)
   // GPU process is started immediately after threads are created, requiring
@@ -273,6 +290,12 @@ int CastBrowserMainParts::PreCreateThreads() {
   CHECK(PathService::Get(DIR_CAST_HOME, &home_dir));
   if (!base::CreateDirectory(home_dir))
     return 1;
+
+  // AudioManager is created immediately after threads are created, requiring
+  // AudioManagerFactory to be set beforehand.
+  scoped_ptr< ::media::AudioManagerFactory> audio_manager_factory =
+      cast_browser_process_->browser_client()->CreateAudioManagerFactory();
+  ::media::AudioManager::SetFactory(audio_manager_factory.release());
 #endif
 
 #if defined(USE_AURA)
@@ -307,12 +330,6 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
   const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
 #if defined(OS_ANDROID)
   ::media::SetMediaClientAndroid(new media::CastMediaClientAndroid());
-#else
-  if (cmd_line->HasSwitch(switches::kEnableCmaMediaPipeline)) {
-    scoped_ptr<::media::BrowserCdmFactory> cdm_factory =
-        cast_browser_process_->browser_client()->CreateBrowserCdmFactory();
-    ::media::SetBrowserCdmFactory(cdm_factory.release());
-  }
 #endif  // defined(OS_ANDROID)
 
   cast_browser_process_->SetConnectivityChecker(
@@ -339,9 +356,7 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
       new RemoteDebuggingServer(cast_browser_process_->browser_client()->
           EnableRemoteDebuggingImmediately())));
 
-  media::MediaMessageLoop::GetTaskRunner()->PostTask(
-      FROM_HERE,
-      base::Bind(&media::CastMediaShlib::Initialize, cmd_line->argv()));
+  media::CastMediaShlib::Initialize(cmd_line->argv());
   ::media::InitializeMediaLibrary();
 
   cast_browser_process_->SetCastService(

@@ -54,6 +54,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/translate/core/browser/language_state.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_details.h"
@@ -210,7 +211,7 @@ void BrowserWindowCocoa::SetBounds(const gfx::Rect& bounds) {
                                    real_bounds.width(),
                                    real_bounds.height());
   // Flip coordinates based on the primary screen.
-  NSScreen* screen = [[NSScreen screens] objectAtIndex:0];
+  NSScreen* screen = [[NSScreen screens] firstObject];
   cocoa_bounds.origin.y =
       NSHeight([screen frame]) - real_bounds.height() - real_bounds.y();
 
@@ -348,7 +349,7 @@ void BrowserWindowCocoa::ZoomChangedForActiveTab(bool can_show_bubble) {
 
 gfx::Rect BrowserWindowCocoa::GetRestoredBounds() const {
   // Flip coordinates based on the primary screen.
-  NSScreen* screen = [[NSScreen screens] objectAtIndex:0];
+  NSScreen* screen = [[NSScreen screens] firstObject];
   NSRect frame = [controller_ regularWindowFrame];
   gfx::Rect bounds(frame.origin.x, 0, NSWidth(frame), NSHeight(frame));
   bounds.set_y(NSHeight([screen frame]) - NSMaxY(frame));
@@ -626,6 +627,14 @@ void BrowserWindowCocoa::ShowBookmarkAppBubble(
   }
 
   callback.Run(false, web_app_info);
+}
+
+autofill::SaveCardBubbleView* BrowserWindowCocoa::ShowSaveCreditCardBubble(
+    content::WebContents* web_contents,
+    autofill::SaveCardBubbleController* controller,
+    bool user_gesture) {
+  NOTIMPLEMENTED();
+  return nullptr;
 }
 
 void BrowserWindowCocoa::ShowTranslateBubble(

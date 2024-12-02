@@ -9,23 +9,28 @@
 #include "base/memory/scoped_vector.h"
 #include "base/prefs/pref_value_map.h"
 #include "base/values.h"
-#include "chrome/browser/net/proxy_policy_handler.h"
 #include "chrome/browser/policy/managed_bookmarks_policy_handler.h"
 #include "chrome/browser/profiles/incognito_mode_policy_handler.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
+#include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/content_settings/core/common/pref_names.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
+#include "components/metrics/metrics_pref_names.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/policy/core/browser/autofill_policy_handler.h"
 #include "components/policy/core/browser/configuration_policy_handler.h"
 #include "components/policy/core/browser/configuration_policy_handler_list.h"
 #include "components/policy/core/browser/configuration_policy_handler_parameters.h"
+#include "components/policy/core/browser/proxy_policy_handler.h"
 #include "components/policy/core/browser/url_blacklist_policy_handler.h"
 #include "components/policy/core/common/policy_details.h"
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_pref_names.h"
 #include "components/policy/core/common/schema.h"
 #include "components/search_engines/default_search_policy_handler.h"
+#include "components/signin/core/common/signin_pref_names.h"
+#include "components/ssl_config/ssl_config_prefs.h"
 #include "components/translate/core/common/translate_pref_names.h"
 #include "components/variations/pref_names.h"
 #include "policy/policy_constants.h"
@@ -118,6 +123,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kDisablePrintPreview,
     prefs::kPrintPreviewDisabled,
     base::Value::TYPE_BOOLEAN },
+  { key::kDefaultPrinterSelection,
+    prefs::kPrintPreviewDefaultDestinationSelectionRules,
+    base::Value::TYPE_STRING },
   { key::kMetricsReportingEnabled,
     metrics::prefs::kMetricsReportingEnabled,
     base::Value::TYPE_BOOLEAN },
@@ -212,10 +220,10 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     prefs::kSigninAllowed,
     base::Value::TYPE_BOOLEAN },
   { key::kEnableOnlineRevocationChecks,
-    prefs::kCertRevocationCheckingEnabled,
+    ssl_config::prefs::kCertRevocationCheckingEnabled,
     base::Value::TYPE_BOOLEAN },
   { key::kRequireOnlineRevocationChecksForLocalAnchors,
-    prefs::kCertRevocationCheckingRequiredLocalAnchors,
+    ssl_config::prefs::kCertRevocationCheckingRequiredLocalAnchors,
     base::Value::TYPE_BOOLEAN },
   { key::kAuthSchemes,
     prefs::kAuthSchemes,
@@ -328,6 +336,9 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kHardwareAccelerationModeEnabled,
     prefs::kHardwareAccelerationModeEnabled,
     base::Value::TYPE_BOOLEAN },
+  { key::kAllowDinosaurEasterEgg,
+    prefs::kAllowDinosaurEasterEgg,
+    base::Value::TYPE_BOOLEAN },
 
 #if defined(ENABLE_SPELLCHECK)
   { key::kSpellCheckServiceEnabled,
@@ -363,8 +374,11 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     prefs::kForceEphemeralProfiles,
     base::Value::TYPE_BOOLEAN },
   { key::kSSLVersionFallbackMin,
-    prefs::kSSLVersionFallbackMin,
+    ssl_config::prefs::kSSLVersionFallbackMin,
     base::Value::TYPE_STRING },
+  { key::kRC4Enabled,
+    ssl_config::prefs::kRC4Enabled,
+    base::Value::TYPE_BOOLEAN },
 
 #if !defined(OS_MACOSX) && !defined(OS_IOS)
   { key::kFullscreenAllowed,

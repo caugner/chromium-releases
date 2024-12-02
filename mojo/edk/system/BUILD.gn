@@ -4,7 +4,7 @@
 
 import("../mojo_edk.gni")
 import("//testing/test.gni")
-import("../../../third_party/mojo/src/mojo/public/tools/bindings/mojom.gni")
+import("../../../mojo/public/tools/bindings/mojom.gni")
 
 if (is_android) {
   import("//build/config/android/config.gni")
@@ -22,13 +22,15 @@ mojom("master") {
   sources = [
     "master.mojom",
   ]
+
+  with_environment = false
 }
 
 static_library("system") {
-# TODO(use_chrome_edk): this should be a component to match third_party,
-# but since third_party includes it, we either make it a static library
-# or we have to change the export macros to be different than third_party.
-#component("system") {
+  # TODO(use_chrome_edk): this should be a component to match third_party,
+  # but since third_party includes it, we either make it a static library
+  # or we have to change the export macros to be different than third_party.
+  #component("system") {
   # TODO(use_chrome_edk): remove "2"
   output_name = "mojo_system_impl2"
 
@@ -55,6 +57,7 @@ static_library("system") {
     "handle_table.h",
     "mapping_table.cc",
     "mapping_table.h",
+
     #"master_impl.cc",
     #"master_impl.h",
     "message_in_transit.cc",
@@ -91,13 +94,14 @@ static_library("system") {
     "../embedder",
     "../embedder:delegates",
     "../embedder:platform",
-    "../../../third_party/mojo/src/mojo/public/c/system",
-    "../../../third_party/mojo/src/mojo/public/cpp/system",
+    "../../../mojo/public/c/system",
+    "../../../mojo/public/cpp/system",
   ]
 
   deps = [
     "//base",
     "//base/third_party/dynamic_annotations",
+
     #":master",
   ]
 
@@ -127,8 +131,8 @@ mojo_edk_source_set("test_utils") {
   ]
 
   public_deps = [
-    "//third_party/mojo/src/mojo/public/c/system",
-    "//third_party/mojo/src/mojo/public/cpp/system",
+    "//mojo/public/c/system",
+    "//mojo/public/cpp/system",
   ]
 
   deps = [
@@ -149,6 +153,7 @@ test("mojo_system_unittests2") {
     "core_unittest.cc",
     "data_pipe_unittest.cc",
     "dispatcher_unittest.cc",
+
     #"master_impl_unittest.cc",
 
     "message_in_transit_queue_unittest.cc",
@@ -160,7 +165,6 @@ test("mojo_system_unittests2") {
     "multiprocess_message_pipe_unittest.cc",
     "options_validation_unittest.cc",
     "platform_handle_dispatcher_unittest.cc",
-
     "raw_channel_unittest.cc",
     "run_all_unittests.cc",
     "shared_buffer_dispatcher_unittest.cc",
@@ -171,16 +175,19 @@ test("mojo_system_unittests2") {
   ]
 
   deps = [
-    ":system",
     ":test_utils",
 
     # TODO(use_chrome_edk): remove "2"
     "../embedder:embedder_unittests2",
-    "../../../third_party/mojo/src/mojo/public/cpp/environment:standalone",
+    "../../../mojo/public/cpp/environment:standalone",
     "../test:test_support",
     "//base",
     "//base/test:test_support",
     "//testing/gtest",
+
+    # TODO(use_chrome_edk): temporary since the Mojo wrapper primitives are
+    # declared in third party only for now.
+    "//third_party/mojo/src/mojo/edk/system",
   ]
 
   # TODO(use_chrome_edk): remove "2"
@@ -196,13 +203,16 @@ test("mojo_message_pipe_perftests2") {
   ]
 
   deps = [
-    ":system",
     ":test_utils",
     "../test:test_support",
     "../test:run_all_perftests",
-    "../../../third_party/mojo/src/mojo/public/cpp/environment:standalone",
+    "../../../mojo/public/cpp/environment:standalone",
     "//base",
     "//base/test:test_support",
     "//testing/gtest",
+
+    # TODO(use_chrome_edk): temporary since the Mojo wrapper primitives are
+    # declared in third party only for now.
+    "//third_party/mojo/src/mojo/edk/system",
   ]
 }

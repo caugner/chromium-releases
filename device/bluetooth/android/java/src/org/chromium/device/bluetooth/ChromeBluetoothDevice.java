@@ -11,9 +11,12 @@ import android.os.Build;
 import android.os.ParcelUuid;
 
 import org.chromium.base.Log;
+import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 
 /**
@@ -29,15 +32,21 @@ final class ChromeBluetoothDevice {
 
     private long mNativeBluetoothDeviceAndroid;
     final Wrappers.BluetoothDeviceWrapper mDevice;
-    private List<ParcelUuid> mUuidsFromScan;
+    private HashSet<String> mUuidsFromScan;
     Wrappers.BluetoothGattWrapper mBluetoothGatt;
     private final BluetoothGattCallbackImpl mBluetoothGattCallbackImpl;
+    final HashMap<Wrappers.BluetoothGattCharacteristicWrapper,
+            ChromeBluetoothRemoteGattCharacteristic> mWrapperToChromeCharacteristicsMap;
 
     private ChromeBluetoothDevice(
             long nativeBluetoothDeviceAndroid, Wrappers.BluetoothDeviceWrapper deviceWrapper) {
         mNativeBluetoothDeviceAndroid = nativeBluetoothDeviceAndroid;
         mDevice = deviceWrapper;
+        mUuidsFromScan = new HashSet<String>();
         mBluetoothGattCallbackImpl = new BluetoothGattCallbackImpl();
+        mWrapperToChromeCharacteristicsMap =
+                new HashMap<Wrappers.BluetoothGattCharacteristicWrapper,
+                        ChromeBluetoothRemoteGattCharacteristic>();
         Log.v(TAG, "ChromeBluetoothDevice created.");
     }
 
@@ -66,12 +75,14 @@ final class ChromeBluetoothDevice {
     // Implements BluetoothDeviceAndroid::UpdateAdvertisedUUIDs.
     @CalledByNative
     private boolean updateAdvertisedUUIDs(List<ParcelUuid> uuidsFromScan) {
-        if ((mUuidsFromScan == null && uuidsFromScan == null)
-                || (mUuidsFromScan != null && mUuidsFromScan.equals(uuidsFromScan))) {
+        if (uuidsFromScan == null) {
             return false;
         }
-        mUuidsFromScan = uuidsFromScan;
-        return true;
+        boolean uuidsUpdated = false;
+        for (ParcelUuid uuid : uuidsFromScan) {
+            uuidsUpdated |= mUuidsFromScan.add(uuid.toString());
+        }
+        return uuidsUpdated;
     }
 
     // Implements BluetoothDeviceAndroid::GetBluetoothClass.
@@ -95,16 +106,9 @@ final class ChromeBluetoothDevice {
     // Implements BluetoothDeviceAndroid::GetUUIDs.
     @CalledByNative
     private String[] getUuids() {
-        int uuidCount = (mUuidsFromScan != null) ? mUuidsFromScan.size() : 0;
-        String[] string_array = new String[uuidCount];
-        for (int i = 0; i < uuidCount; i++) {
-            string_array[i] = mUuidsFromScan.get(i).toString();
-        }
-
         // TODO(scheib): return merged list of UUIDs from scan results and,
         // after a device is connected, discoverServices. crbug.com/508648
-
-        return string_array;
+        return mUuidsFromScan.toArray(new String[mUuidsFromScan.size()]);
     }
 
     // Implements BluetoothDeviceAndroid::CreateGattConnectionImpl.
@@ -133,15 +137,86 @@ final class ChromeBluetoothDevice {
     // Implements callbacks related to a GATT connection.
     private class BluetoothGattCallbackImpl extends Wrappers.BluetoothGattCallbackWrapper {
         @Override
-        public void onConnectionStateChange(int status, int newState) {
+        public void onConnectionStateChange(final int status, final int newState) {
             Log.i(TAG, "onConnectionStateChange status:%d newState:%s", status,
                     (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED)
                             ? "Connected"
                             : "Disconnected");
-            if (mNativeBluetoothDeviceAndroid != 0) {
-                nativeOnConnectionStateChange(mNativeBluetoothDeviceAndroid, status,
-                        newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED);
+            if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
+                mBluetoothGatt.discoverServices();
             }
+            ThreadUtils.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    if (mNativeBluetoothDeviceAndroid != 0) {
+                        nativeOnConnectionStateChange(mNativeBluetoothDeviceAndroid, status,
+                                newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED);
+                    }
+                }
+            });
+        }
+
+        @Override
+        public void onServicesDiscovered(final int status) {
+            Log.i(TAG, "onServicesDiscovered status:%d==%s", status,
+                    status == android.bluetooth.BluetoothGatt.GATT_SUCCESS ? "OK" : "Error");
+            ThreadUtils.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    if (mNativeBluetoothDeviceAndroid != 0) {
+                        for (Wrappers.BluetoothGattServiceWrapper service :
+                                mBluetoothGatt.getServices()) {
+                            // Create an adapter unique service ID. getInstanceId only differs
+                            // between service instances with the same UUID on this device.
+                            String serviceInstanceId = getAddress() + "/"
+                                    + service.getUuid().toString() + "," + service.getInstanceId();
+                            nativeCreateGattRemoteService(
+                                    mNativeBluetoothDeviceAndroid, serviceInstanceId, service);
+                        }
+                        nativeOnGattServicesDiscovered(mNativeBluetoothDeviceAndroid);
+                    }
+                }
+            });
+        }
+
+        @Override
+        public void onCharacteristicRead(
+                final Wrappers.BluetoothGattCharacteristicWrapper characteristic,
+                final int status) {
+            ThreadUtils.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    ChromeBluetoothRemoteGattCharacteristic chromeCharacteristic =
+                            mWrapperToChromeCharacteristicsMap.get(characteristic);
+                    if (chromeCharacteristic == null) {
+                        // Android events arriving with no Chrome object is expected rarely: only
+                        // when the event races object destruction.
+                        Log.v(TAG, "onCharacteristicRead when chromeCharacteristic == null.");
+                    } else {
+                        chromeCharacteristic.onCharacteristicRead(status);
+                    }
+                }
+            });
+        }
+
+        @Override
+        public void onCharacteristicWrite(
+                final Wrappers.BluetoothGattCharacteristicWrapper characteristic,
+                final int status) {
+            ThreadUtils.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    ChromeBluetoothRemoteGattCharacteristic chromeCharacteristic =
+                            mWrapperToChromeCharacteristicsMap.get(characteristic);
+                    if (chromeCharacteristic == null) {
+                        // Android events arriving with no Chrome object is expected rarely: only
+                        // when the event races object destruction.
+                        Log.v(TAG, "onCharacteristicWrite when chromeCharacteristic == null.");
+                    } else {
+                        chromeCharacteristic.onCharacteristicWrite(status);
+                    }
+                }
+            });
         }
     }
 
@@ -151,4 +226,12 @@ final class ChromeBluetoothDevice {
     // Binds to BluetoothDeviceAndroid::OnConnectionStateChange.
     private native void nativeOnConnectionStateChange(
             long nativeBluetoothDeviceAndroid, int status, boolean connected);
+
+    // Binds to BluetoothDeviceAndroid::CreateGattRemoteService.
+    // TODO(http://crbug.com/505554): Replace 'Object' with specific type when JNI fixed.
+    private native void nativeCreateGattRemoteService(long nativeBluetoothDeviceAndroid,
+            String instanceId, Object bluetoothGattServiceWrapper);
+
+    // Binds to BluetoothDeviceAndroid::GattServicesDiscovered.
+    private native void nativeOnGattServicesDiscovered(long nativeBluetoothDeviceAndroid);
 }

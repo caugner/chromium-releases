@@ -11,6 +11,13 @@ gypi_values = exec_script("//build/gypi_to_gn.py",
                           "scope",
                           [ "../../chrome_browser_ui.gypi" ])
 
+config("ui_warnings") {
+  if (is_clang) {
+    # TODO(thakis): Remove this once http://crbug.com/383820 is figured out
+    cflags = [ "-Wno-nonnull" ]
+  }
+}
+
 source_set("ui") {
   output_name = "browser_ui"
 
@@ -19,6 +26,7 @@ source_set("ui") {
   libs = []
 
   configs += [
+    ":ui_warnings",
     "//build/config:precompiled_headers",
     "//build/config/compiler:wexit_time_destructors",
     "//third_party/WebKit/public:debug_devtools",
@@ -58,6 +66,7 @@ source_set("ui") {
     "//components/strings",
     "//components/toolbar",
     "//components/update_client",
+    "//components/version_ui",
     "//content/public/common",
     "//crypto",
     "//skia",
@@ -94,6 +103,7 @@ source_set("ui") {
       "//chrome/installer/util",
       "//components/autofill/content/browser:risk_proto",
       "//components/bubble:bubble",
+      "//components/crash/core/browser",
       "//components/net_log",
       "//components/page_load_metrics/browser",
       "//components/power",
@@ -123,7 +133,7 @@ source_set("ui") {
     deps += [ "//net" ]
   }
 
-  if (!is_android && !is_ios) {
+  if ((!is_android || use_aura) && !is_ios) {
     sources += rebase_path(gypi_values.chrome_browser_ui_non_mobile_sources,
                            ".",
                            "//chrome")
@@ -138,6 +148,10 @@ source_set("ui") {
       "//device/bluetooth",
       "//third_party/libusb",
     ]
+
+    if (is_android) {
+      deps -= [ "//third_party/libusb" ]
+    }
   }
 
   if (enable_basic_printing || enable_print_preview) {
@@ -165,7 +179,6 @@ source_set("ui") {
     deps += [
       "//chrome/browser/safe_browsing:chunk_proto",
       "//chrome/common/safe_browsing:proto",
-      "//chrome/browser/safe_browsing:report_proto",
     ]
   }
 
@@ -239,6 +252,17 @@ source_set("ui") {
                              ".",
                              "//chrome")
     }
+    if (is_android) {
+      sources +=
+          rebase_path(gypi_values.chrome_browser_ui_views_android_sources,
+                      ".",
+                      "//chrome")
+    }
+  } else {
+    # !toolkit_views
+    if (!is_ios) {
+      deps -= [ "//chrome/browser/ui/views" ]
+    }
   }
   if (use_aura && !use_ozone && is_desktop_linux) {
     deps += [
@@ -253,6 +277,15 @@ source_set("ui") {
     sources += rebase_path(gypi_values.chrome_browser_ui_desktop_sources,
                            ".",
                            "//chrome")
+    if (is_mac && !mac_views_browser) {
+      sources -= [
+        # This is not explicitly excluded in GYP, but I think the static
+        # library linking rules means it's never referenced when compiling in
+        # non-Views mode on Mac. It appears not to link in that case.
+        "views/profiles/new_avatar_button.cc",
+        "views/profiles/new_avatar_button.h",
+      ]
+    }
   }
   if (use_aura) {
     sources +=
@@ -262,6 +295,7 @@ source_set("ui") {
       "//ash/resources",
       "//ui/aura",
       "//ui/keyboard",
+      "//ui/keyboard:keyboard_with_content",
       "//ui/keyboard:resources",
       "//ui/wm",
     ]
@@ -291,17 +325,18 @@ source_set("ui") {
     deps += [
       "//chrome/browser:jni_headers",
       "//crypto:platform",
-      "//components/web_contents_delegate_android",
     ]
-    deps -= [
-      "//chrome/browser/ui/views",
-      "//ui/events",
-    ]
-    sources += rebase_path(gypi_values.chrome_browser_ui_android_sources,
-                           ".",
-                           "//chrome")
 
     defines += [ "CHROME_BUILD_ID=" + android_chrome_build_id ]
+
+    if (!use_aura) {
+      sources +=
+          rebase_path(gypi_values.chrome_browser_ui_android_non_aura_sources,
+                      ".",
+                      "//chrome")
+      deps += [ "//components/web_contents_delegate_android" ]
+      deps -= [ "//ui/events" ]
+    }
   }
 
   if (is_mac) {
@@ -422,7 +457,7 @@ source_set("ui") {
         rebase_path(gypi_values.chrome_browser_ui_autofill_dialog_sources,
                     ".",
                     "//chrome")
-    if (!is_android && !is_ios) {
+    if ((!is_android || use_aura) && !is_ios) {
       sources += rebase_path(
               gypi_values.chrome_browser_ui_autofill_dialog_non_mobile_sources,
               ".",
@@ -453,6 +488,16 @@ source_set("ui") {
     sources += rebase_path(gypi_values.chrome_browser_ui_media_router_sources,
                            ".",
                            "//chrome")
+    if (is_mac && !mac_views_browser) {
+      sources -= [
+        # This file is compiled on GYP but never referenced on Mac. Since it's
+        # in a static library, it never gets pulled in and we never try to link
+        # it (it doesn't link). In GN, source sets force us to get this rule
+        # correct.
+        "views/toolbar/media_router_action_platform_delegate_views.cc",
+        "views/toolbar/media_router_action_platform_delegate_views.h",
+      ]
+    }
     deps += [ "//chrome/browser/media/router" ]
   }
   if (enable_webrtc) {
@@ -521,11 +566,11 @@ source_set("test_support") {
     ]
   }
 
-  if (toolkit_views) {
-    sources += [ "views/find_bar_host_unittest_util_views.cc" ]
-    if (!is_mac) {
-      sources += [ "views/toolbar/browser_action_test_util_views.cc" ]
-    }
+  if (toolkit_views && (!is_mac || mac_views_browser)) {
+    sources += [
+      "views/find_bar_host_unittest_util_views.cc",
+      "views/toolbar/browser_action_test_util_views.cc",
+    ]
   }
 
   if (is_android) {
@@ -535,6 +580,8 @@ source_set("test_support") {
       "exclusive_access/fullscreen_controller_state_tests.h",
       "exclusive_access/fullscreen_controller_test.cc",
       "exclusive_access/fullscreen_controller_test.h",
+      "test/test_confirm_bubble_model.cc",
+      "test/test_confirm_bubble_model.h",
     ]
   }
 

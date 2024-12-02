@@ -45,7 +45,7 @@ class PlatformNotificationServiceImpl
       content::BrowserContext* browser_context,
       int64_t persistent_notification_id,
       const GURL& origin,
-      int action_index) const;
+      int action_index);
 
   // To be called when a persistent notification has been closed. The data
   // associated with the notification has to be pruned from the database in this
@@ -54,15 +54,15 @@ class PlatformNotificationServiceImpl
   void OnPersistentNotificationClose(
       content::BrowserContext* browser_context,
       int64_t persistent_notification_id,
-      const GURL& origin) const;
+      const GURL& origin,
+      bool by_user) const;
 
   // Returns the Notification UI Manager through which notifications can be
   // displayed to the user. Can be overridden for testing.
   NotificationUIManager* GetNotificationUIManager() const;
 
   // Open the Notification settings screen when clicking the right button.
-  // Returns |true| if the settings screen could be successfully opened.
-  bool OpenNotificationSettings(content::BrowserContext* browser_context);
+  void OpenNotificationSettings(content::BrowserContext* browser_context);
 
   // content::PlatformNotificationService implementation.
   blink::WebNotificationPermission CheckPermissionOnUIThread(

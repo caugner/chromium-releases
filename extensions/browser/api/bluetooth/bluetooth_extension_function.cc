@@ -6,10 +6,13 @@
 
 #include "base/memory/ref_counted.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/web_contents.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 #include "extensions/browser/api/bluetooth/bluetooth_api.h"
 #include "extensions/browser/api/bluetooth/bluetooth_event_router.h"
+#include "url/gurl.h"
 
 using content::BrowserThread;
 
@@ -57,6 +60,12 @@ bool BluetoothExtensionFunction::RunAsync() {
              browser_context());
 
   return true;
+}
+
+std::string BluetoothExtensionFunction::GetExtensionId() {
+  if (extension())
+    return extension()->id();
+  return render_frame_host()->GetLastCommittedURL().host();
 }
 
 void BluetoothExtensionFunction::RunOnAdapterReady(

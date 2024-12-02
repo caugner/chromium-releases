@@ -10,10 +10,11 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/time/time.h"
 #include "components/mus/public/cpp/types.h"
-#include "components/mus/public/cpp/view_observer.h"
+#include "components/mus/public/cpp/window_observer.h"
 #include "components/web_view/public/interfaces/frame.mojom.h"
-#include "third_party/mojo/src/mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/binding.h"
 
 class GURL;
 
@@ -27,61 +28,63 @@ namespace mojom {
 class FrameClient;
 }
 
-enum class ViewOwnership {
-  OWNS_VIEW,
-  DOESNT_OWN_VIEW,
+enum class WindowOwnership {
+  OWNS_WINDOW,
+  DOESNT_OWN_WINDOW,
 };
 
 // Frame represents an embedding in a frame. Frames own their children.
-// Frames automatically delete themself if the View the frame is associated
+// Frames automatically delete themself if the Window the frame is associated
 // with is deleted.
 //
-// In general each Frame has a View. When a new Frame is created by a client
-// there may be a small amount of time where the View is not yet known
-// (separate pipes are used for the view and frame, resulting in undefined
-// message ordering). In this case the view is null and will be set once we
-// see the view (OnTreeChanged()).
+// In general each Frame has a Window. When a new Frame is created by a client
+// there may be a small amount of time where the Window is not yet known
+// (separate pipes are used for the window and frame, resulting in undefined
+// message ordering). In this case the window is null and will be set once we
+// see the window (OnTreeChanged()).
 //
 // Each frame has an identifier of the app providing the FrameClient
 // (|app_id|). This id is used when servicing a request to navigate the frame.
 // When navigating, if the id of the new app matches that of the existing app,
 // then it is expected that the new FrameClient will take over rendering to the
-// existing view. Because of this a new ViewTreeClient is not obtained and
-// Embed() is not invoked on the View. The FrameClient can detect this case by
+// existing window. Because of this a new WindowTreeClient is not obtained and
+// Embed() is not invoked on the Window. The FrameClient can detect this case by
 // the argument |reuse_existing_view| supplied to OnConnect(). Typically the id
 // is that of content handler id, but this is left up to the FrameTreeDelegate
 // to decide.
-class Frame : public mus::ViewObserver, public mojom::Frame {
+class Frame : public mus::WindowObserver, public mojom::Frame {
  public:
   using ClientPropertyMap = std::map<std::string, std::vector<uint8_t>>;
+  using FindCallback = mojo::Callback<void(bool)>;
 
   Frame(FrameTree* tree,
-        mus::View* view,
+        mus::Window* window,
         uint32_t frame_id,
         uint32_t app_id,
-        ViewOwnership view_ownership,
+        WindowOwnership window_ownership,
         mojom::FrameClient* frame_client,
         scoped_ptr<FrameUserData> user_data,
         const ClientPropertyMap& client_properties);
   ~Frame() override;
 
   void Init(Frame* parent,
-            mojo::ViewTreeClientPtr view_tree_client,
-            mojo::InterfaceRequest<mojom::Frame> frame_request);
+            mus::mojom::WindowTreeClientPtr window_tree_client,
+            mojo::InterfaceRequest<mojom::Frame> frame_request,
+            base::TimeTicks navigation_start_time);
 
-  // Walks the View tree starting at |view| going up returning the first
-  // Frame that is associated with |view|. For example, if |view|
+  // Walks the Window tree starting at |window| going up returning the first
+  // Frame that is associated with |window|. For example, if |window|
   // has a Frame associated with it, then that is returned. Otherwise
-  // this checks view->parent() and so on.
-  static Frame* FindFirstFrameAncestor(mus::View* view);
+  // this checks window->parent() and so on.
+  static Frame* FindFirstFrameAncestor(mus::Window* window);
 
   FrameTree* tree() { return tree_; }
 
   Frame* parent() { return parent_; }
   const Frame* parent() const { return parent_; }
 
-  mus::View* view() { return view_; }
-  const mus::View* view() const { return view_; }
+  mus::Window* window() { return window_; }
+  const mus::Window* window() const { return window_; }
 
   uint32_t id() const { return id_; }
 
@@ -111,6 +114,18 @@ class Frame : public mus::ViewObserver, public mojom::Frame {
   // Returns the sum total of loading progress from this Frame and all of its
   // children, as well as the number of Frames accumulated.
   double GatherProgress(int* frame_count) const;
+
+  void Find(int32_t request_id,
+            const mojo::String& search_text,
+            mojom::FindOptionsPtr options,
+            bool wrap_within_frame,
+            const FindCallback& callback);
+  void StopFinding(bool clear_selection);
+  void HighlightFindResults(int32_t request_id,
+                            const mojo::String& search_text,
+                            mojom::FindOptionsPtr options,
+                            bool reset);
+  void StopHighlightingFindResults();
 
  private:
   friend class FrameTest;
@@ -144,8 +159,9 @@ class Frame : public mus::ViewObserver, public mojom::Frame {
   // (and assume the frame is being torn down) before the OnConnect().
   void InitClient(ClientType client_type,
                   scoped_ptr<FrameUserDataAndBinding> data_and_binding,
-                  mojo::ViewTreeClientPtr view_tree_client,
-                  mojo::InterfaceRequest<mojom::Frame> frame_request);
+                  mus::mojom::WindowTreeClientPtr window_tree_client,
+                  mojo::InterfaceRequest<mojom::Frame> frame_request,
+                  base::TimeTicks navigation_start_time);
 
   // Callback from OnConnect(). This does nothing (other than destroying
   // |data_and_binding|). See InitClient() for details as to why destruction of
@@ -159,17 +175,19 @@ class Frame : public mus::ViewObserver, public mojom::Frame {
   // Callback from Frame::OnWillNavigate(). Completes navigation.
   void OnWillNavigateAck(mojom::FrameClient* frame_client,
                          scoped_ptr<FrameUserData> user_data,
-                         mojo::ViewTreeClientPtr view_tree_client,
-                         uint32 app_id);
+                         mus::mojom::WindowTreeClientPtr window_tree_client,
+                         uint32 app_id,
+                         base::TimeTicks navigation_start_time);
 
   // Completes a navigation request; swapping the existing FrameClient to the
   // supplied arguments.
   void ChangeClient(mojom::FrameClient* frame_client,
                     scoped_ptr<FrameUserData> user_data,
-                    mojo::ViewTreeClientPtr view_tree_client,
-                    uint32 app_id);
+                    mus::mojom::WindowTreeClientPtr window_tree_client,
+                    uint32 app_id,
+                    base::TimeTicks navigation_start_time);
 
-  void SetView(mus::View* view);
+  void SetWindow(mus::Window* window);
 
   // Adds this to |frames| and recurses through the children calling the
   // same function.
@@ -179,14 +197,15 @@ class Frame : public mus::ViewObserver, public mojom::Frame {
   void Remove(Frame* node);
 
   // Starts a new navigation to |request|. The navigation proceeds as long
-  // as there is a View and once OnWillNavigate() has returned. If there is
-  // no View the navigation waits until the View is available.
+  // as there is a Window and once OnWillNavigate() has returned. If there is
+  // no Window the navigation waits until the Window is available.
   void StartNavigate(mojo::URLRequestPtr request);
   void OnCanNavigateFrame(const GURL& url,
+                          base::TimeTicks navigation_start_time,
                           uint32_t app_id,
                           mojom::FrameClient* frame_client,
                           scoped_ptr<FrameUserData> user_data,
-                          mojo::ViewTreeClientPtr view_tree_client);
+                          mus::mojom::WindowTreeClientPtr window_tree_client);
 
   // Notifies the client and all descendants as appropriate.
   void NotifyAdded(const Frame* source,
@@ -201,10 +220,10 @@ class Frame : public mus::ViewObserver, public mojom::Frame {
   void NotifyFrameLoadingStateChanged(const Frame* frame, bool loading);
   void NotifyDispatchFrameLoadEvent(const Frame* frame);
 
-  // mus::ViewObserver:
+  // mus::WindowObserver:
   void OnTreeChanged(const TreeChangeParams& params) override;
-  void OnViewDestroying(mus::View* view) override;
-  void OnViewEmbeddedAppDisconnected(mus::View* view) override;
+  void OnWindowDestroying(mus::Window* window) override;
+  void OnWindowEmbeddedAppDisconnected(mus::Window* window) override;
 
   // mojom::Frame:
   void PostMessageEventToFrame(uint32_t target_frame_id,
@@ -224,19 +243,24 @@ class Frame : public mus::ViewObserver, public mojom::Frame {
                        mojo::URLRequestPtr request) override;
   void DidNavigateLocally(const mojo::String& url) override;
   void DispatchLoadEventToParent() override;
+  void OnFindInFrameCountUpdated(int32_t request_id,
+                                 int32_t count,
+                                 bool final_update) override;
+  void OnFindInPageSelectionUpdated(int32_t request_id,
+                                    int32_t active_match_ordinal) override;
 
   FrameTree* const tree_;
   // WARNING: this may be null. See class description for details.
-  mus::View* view_;
-  // The connection id returned from ViewManager::Embed(). Frames created by
+  mus::Window* window_;
+  // The connection id returned from WindowManager::Embed(). Frames created by
   // way of OnCreatedFrame() inherit the id from the parent.
   mus::ConnectionSpecificId embedded_connection_id_;
-  // ID for the frame, which is the same as that of the view.
+  // ID for the frame, which is the same as that of the window.
   const uint32_t id_;
-  // ID of the app providing the FrameClient and ViewTreeClient.
+  // ID of the app providing the FrameClient and WindowTreeClient.
   uint32_t app_id_;
   Frame* parent_;
-  ViewOwnership view_ownership_;
+  WindowOwnership window_ownership_;
   std::vector<Frame*> children_;
   scoped_ptr<FrameUserData> user_data_;
 
@@ -247,7 +271,7 @@ class Frame : public mus::ViewObserver, public mojom::Frame {
 
   ClientPropertyMap client_properties_;
 
-  // StartNavigate() stores the request here if the view isn't available at
+  // StartNavigate() stores the request here if the window isn't available at
   // the time of StartNavigate().
   mojo::URLRequestPtr pending_navigate_;
 

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/macros.h"
 #include "base/observer_list.h"
 #include "base/values.h"
 #include "dbus/object_path.h"
@@ -36,6 +37,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterClient : public BluezDBusClient {
     scoped_ptr<uint16_t> pathloss;
     scoped_ptr<std::string> transport;
 
+   private:
     DISALLOW_COPY_AND_ASSIGN(DiscoveryFilter);
   };
 

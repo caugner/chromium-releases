@@ -83,10 +83,16 @@ source_set("browser") {
     "password_store_consumer.h",
     "password_store_default.cc",
     "password_store_default.h",
+    "password_store_factory_util.cc",
+    "password_store_factory_util.h",
+    "password_store_service.cc",
+    "password_store_service.h",
     "password_store_sync.cc",
     "password_store_sync.h",
     "password_syncable_service.cc",
     "password_syncable_service.h",
+    "password_ui_utils.cc",
+    "password_ui_utils.h",
     "psl_matching_helper.cc",
     "psl_matching_helper.h",
     "statistics_table.cc",
@@ -110,6 +116,7 @@ source_set("browser") {
     "//components/os_crypt",
     "//components/password_manager/core/common",
     "//components/strings",
+    "//components/sync_driver",
     "//components/url_formatter",
     "//net",
     "//sql",
@@ -157,11 +164,11 @@ source_set("test_support") {
 
   public_deps = [
     ":browser",
+    "//testing/gmock",
   ]
   deps = [
     "//base",
     "//components/autofill/core/common",
-    "//testing/gmock",
     "//testing/gtest",
   ]
 }
@@ -196,6 +203,7 @@ source_set("unit_tests") {
     "password_store_default_unittest.cc",
     "password_store_unittest.cc",
     "password_syncable_service_unittest.cc",
+    "password_ui_utils_unittest.cc",
     "psl_matching_helper_unittest.cc",
     "statistics_table_unittest.cc",
   ]

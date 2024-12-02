@@ -21,7 +21,6 @@
 #include "chrome/browser/push_messaging/push_messaging_app_identifier.h"
 #include "chrome/browser/push_messaging/push_messaging_constants.h"
 #include "chrome/browser/push_messaging/push_messaging_service_factory.h"
-#include "chrome/browser/services/gcm/gcm_profile_service.h"
 #include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/common/chrome_switches.h"
@@ -29,6 +28,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/gcm_driver/gcm_driver.h"
+#include "components/gcm_driver/gcm_profile_service.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/rappor/rappor_utils.h"
 #include "content/public/browser/browser_context.h"
@@ -101,25 +101,12 @@ bool UseBackgroundMode() {
 }  // namespace
 
 // static
-void PushMessagingServiceImpl::RegisterProfilePrefs(
-    user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterIntegerPref(prefs::kPushMessagingRegistrationCount, 0);
-  PushMessagingAppIdentifier::RegisterProfilePrefs(registry);
-}
-
-// static
 void PushMessagingServiceImpl::InitializeForProfile(Profile* profile) {
   // TODO(johnme): Consider whether push should be enabled in incognito.
   if (!profile || profile->IsOffTheRecord())
     return;
 
-  // TODO(johnme): If push becomes enabled in incognito (and this still uses a
-  // pref), be careful that this pref is read from the right profile, as prefs
-  // defined in a regular profile are visible in the corresponding incognito
-  // profile unless overridden.
-  // TODO(johnme): Make sure this pref doesn't get out of sync after crashes.
-  int count = profile->GetPrefs()->GetInteger(
-      prefs::kPushMessagingRegistrationCount);
+  int count = PushMessagingAppIdentifier::GetCount(profile);
   if (count <= 0)
     return;
 
@@ -141,6 +128,7 @@ PushMessagingServiceImpl::PushMessagingServiceImpl(Profile* profile)
 }
 
 PushMessagingServiceImpl::~PushMessagingServiceImpl() {
+  HostContentSettingsMapFactory::GetForProfile(profile_)->RemoveObserver(this);
 }
 
 void PushMessagingServiceImpl::IncreasePushSubscriptionCount(int add,
@@ -160,8 +148,6 @@ void PushMessagingServiceImpl::IncreasePushSubscriptionCount(int add,
     }
 #endif  // defined(ENABLE_BACKGROUND)
     push_subscription_count_ += add;
-    profile_->GetPrefs()->SetInteger(prefs::kPushMessagingRegistrationCount,
-                                     push_subscription_count_);
   }
 }
 
@@ -174,8 +160,6 @@ void PushMessagingServiceImpl::DecreasePushSubscriptionCount(int subtract,
   } else {
     push_subscription_count_ -= subtract;
     DCHECK(push_subscription_count_ >= 0);
-    profile_->GetPrefs()->SetInteger(prefs::kPushMessagingRegistrationCount,
-                                     push_subscription_count_);
   }
   if (push_subscription_count_ + pending_push_subscription_count_ == 0) {
     GetGCMDriver()->RemoveAppHandler(kPushMessagingAppIdentifierPrefix);
@@ -231,28 +215,9 @@ void PushMessagingServiceImpl::OnMessage(const std::string& app_id,
       "PushMessaging.MessageReceived.Origin",
       app_identifier.origin());
 
-  // The Push API only exposes a single string of data in the push event fired
-  // on the Service Worker. When developers send messages using GCM to the Push
-  // API and want to include a message payload, they must pass a single key-
-  // value pair, where the key is "data" and the value is the string they want
-  // to be passed to their Service Worker. For example, they could send the
-  // following JSON using the HTTPS GCM API:
-  // {
-  //     "registration_ids": ["FOO", "BAR"],
-  //     "data": {
-  //         "data": "BAZ",
-  //     },
-  //     "delay_while_idle": true,
-  // }
-  // TODO(johnme): Make sure this is clearly documented for developers.
   std::string data;
-  // TODO(peter): Message payloads are disabled pending mandatory encryption.
-  // https://crbug.com/449184
-  if (AreMessagePayloadsEnabled()) {
-    gcm::MessageData::const_iterator it = message.data.find("data");
-    if (it != message.data.end())
-      data = it->second;
-  }
+  if (AreMessagePayloadsEnabled() && message.decrypted)
+    data = message.raw_data;
 
   content::BrowserContext::DeliverPushMessage(
       profile_,
@@ -408,8 +373,8 @@ void PushMessagingServiceImpl::SubscribeFromWorker(
       PushMessagingAppIdentifier::Generate(requesting_origin,
                                            service_worker_registration_id);
 
-  if (profile_->GetPrefs()->GetInteger(
-          prefs::kPushMessagingRegistrationCount) >= kMaxRegistrations) {
+  if (push_subscription_count_ + pending_push_subscription_count_ >=
+      kMaxRegistrations) {
     SubscribeEndWithError(register_callback,
                           content::PUSH_REGISTRATION_STATUS_LIMIT_REACHED);
     return;
@@ -453,16 +418,16 @@ bool PushMessagingServiceImpl::SupportNonVisibleMessages() {
 void PushMessagingServiceImpl::SubscribeEnd(
     const content::PushMessagingService::RegisterCallback& callback,
     const std::string& subscription_id,
-    const std::vector<uint8_t>& curve25519dh,
+    const std::vector<uint8_t>& p256dh,
     content::PushRegistrationStatus status) {
-  callback.Run(subscription_id, curve25519dh, status);
+  callback.Run(subscription_id, p256dh, status);
 }
 
 void PushMessagingServiceImpl::SubscribeEndWithError(
     const content::PushMessagingService::RegisterCallback& callback,
     content::PushRegistrationStatus status) {
   SubscribeEnd(callback, std::string() /* subscription_id */,
-               std::vector<uint8_t>() /* curve25519dh */, status);
+               std::vector<uint8_t>() /* p256dh */, status);
 }
 
 void PushMessagingServiceImpl::DidSubscribe(

@@ -9,7 +9,6 @@ import android.text.Spanned;
 import android.text.TextUtils;
 import android.text.style.ClickableSpan;
 import android.view.View;
-import android.widget.TextView;
 
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.browser.ResourceId;
@@ -59,11 +58,9 @@ public class SavePasswordInfoBar extends ConfirmInfoBar {
         }
 
         if (!TextUtils.isEmpty(mFirstRunExperienceMessage)) {
-            // TODO(melandory): Implement correct (as in mocks) margin for the first run experience
-            // text.
-            TextView firstRunExperienceMessageView = new TextView(getContext());
-            firstRunExperienceMessageView.setText(mFirstRunExperienceMessage);
-            layout.setCustomContent(firstRunExperienceMessageView);
+            InfoBarControlLayout controlLayout = new InfoBarControlLayout(getContext());
+            controlLayout.addDescription(mFirstRunExperienceMessage);
+            layout.setCustomContent(controlLayout);
         }
     }
 }

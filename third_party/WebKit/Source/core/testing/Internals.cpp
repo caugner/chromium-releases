@@ -657,7 +657,7 @@ ShadowRoot* Internals::youngestShadowRoot(Element* host)
 {
     ASSERT(host);
     if (ElementShadow* shadow = host->shadow())
-        return shadow->youngestShadowRoot();
+        return &shadow->youngestShadowRoot();
     return 0;
 }
 
@@ -691,8 +691,8 @@ String Internals::shadowRootType(const Node* root, ExceptionState& exceptionStat
     switch (toShadowRoot(root)->type()) {
     case ShadowRootType::UserAgent:
         return String("UserAgentShadowRoot");
-    case ShadowRootType::OpenByDefault:
-        return String("OpenByDefaultShadowRoot");
+    case ShadowRootType::V0:
+        return String("V0ShadowRoot");
     case ShadowRootType::Open:
         return String("OpenShadowRoot");
     case ShadowRootType::Closed:
@@ -1997,19 +1997,19 @@ void Internals::forceFullRepaint(Document* document, ExceptionState& exceptionSt
 void Internals::startTrackingPaintInvalidationObjects()
 {
     ASSERT(RuntimeEnabledFeatures::slimmingPaintV2Enabled());
-    toLocalFrame(frame()->page()->mainFrame())->view()->layoutView()->layer()->graphicsLayerBacking()->displayItemList()->startTrackingPaintInvalidationObjects();
+    toLocalFrame(frame()->page()->mainFrame())->view()->layoutView()->layer()->graphicsLayerBacking()->paintController()->startTrackingPaintInvalidationObjects();
 }
 
 void Internals::stopTrackingPaintInvalidationObjects()
 {
     ASSERT(RuntimeEnabledFeatures::slimmingPaintV2Enabled());
-    toLocalFrame(frame()->page()->mainFrame())->view()->layoutView()->layer()->graphicsLayerBacking()->displayItemList()->stopTrackingPaintInvalidationObjects();
+    toLocalFrame(frame()->page()->mainFrame())->view()->layoutView()->layer()->graphicsLayerBacking()->paintController()->stopTrackingPaintInvalidationObjects();
 }
 
 Vector<String> Internals::trackedPaintInvalidationObjects()
 {
     ASSERT(RuntimeEnabledFeatures::slimmingPaintV2Enabled());
-    return toLocalFrame(frame()->page()->mainFrame())->view()->layoutView()->layer()->graphicsLayerBacking()->displayItemList()->trackedPaintInvalidationObjects();
+    return toLocalFrame(frame()->page()->mainFrame())->view()->layoutView()->layer()->graphicsLayerBacking()->paintController()->trackedPaintInvalidationObjects();
 }
 
 ClientRectList* Internals::draggableRegions(Document* document, ExceptionState& exceptionState)
@@ -2367,7 +2367,7 @@ void Internals::setFocused(bool focused)
 
 void Internals::setInitialFocus(bool reverse)
 {
-    frame()->document()->setFocusedElement(nullptr);
+    frame()->document()->clearFocusedElement();
     frame()->page()->focusController().setInitialFocus(reverse ? WebFocusTypeBackward : WebFocusTypeForward);
 }
 
@@ -2458,6 +2458,26 @@ void Internals::setVisualViewportOffset(int x, int y)
     frame()->host()->visualViewport().setLocation(FloatPoint(x, y));
 }
 
+int Internals::visualViewportHeight()
+{
+    return expandedIntSize(frame()->host()->visualViewport().visibleRect().size()).height();
+}
+
+int Internals::visualViewportWidth()
+{
+    return expandedIntSize(frame()->host()->visualViewport().visibleRect().size()).width();
+}
+
+double Internals::visualViewportScrollX()
+{
+    return frame()->view()->scrollableArea()->scrollPositionDouble().x();
+}
+
+double Internals::visualViewportScrollY()
+{
+    return frame()->view()->scrollableArea()->scrollPositionDouble().y();
+}
+
 ValueIterable<int>::IterationSource* Internals::startIteration(ScriptState*, ExceptionState&)
 {
     return new InternalsIterationSource();
@@ -2518,7 +2538,7 @@ bool Internals::setScrollbarVisibilityInScrollableArea(Node* node, bool visible)
     ScrollableArea* scrollableArea = layer->scrollableArea();
     if (!scrollableArea)
         return false;
-    ScrollAnimator* animator = layer->scrollableArea()->scrollAnimator();
+    ScrollAnimatorBase* animator = layer->scrollableArea()->scrollAnimator();
     if (!animator)
         return false;
 
@@ -2539,6 +2559,20 @@ double Internals::monotonicTimeToZeroBasedDocumentTime(double platformTime, Exce
     }
 
     return document->loader()->timing().monotonicTimeToZeroBasedDocumentTime(platformTime);
+}
+
+void Internals::setMediaElementNetworkState(HTMLMediaElement* mediaElement, int state)
+{
+    ASSERT(mediaElement);
+    ASSERT(state >= HTMLMediaElement::NetworkState::NETWORK_EMPTY);
+    ASSERT(state <= HTMLMediaElement::NetworkState::NETWORK_NO_SOURCE);
+    mediaElement->setNetworkState(static_cast<WebMediaPlayer::NetworkState>(state));
+}
+
+// TODO(liberato): remove once autoplay gesture override experiment concludes.
+void Internals::triggerAutoplayViewportCheck(HTMLMediaElement* element)
+{
+    element->triggerAutoplayViewportCheckForTesting();
 }
 
 } // namespace blink

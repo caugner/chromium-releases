@@ -181,6 +181,11 @@ import java.util.UUID;
     }
 
     @Override
+    public void replace(String word) {
+        nativeReplace(mNativeWebContentsAndroid, word);
+    }
+
+    @Override
     public void selectAll() {
         nativeSelectAll(mNativeWebContentsAndroid);
     }
@@ -229,6 +234,11 @@ import java.util.UUID;
     @Override
     public boolean isShowingInterstitialPage() {
         return nativeIsShowingInterstitialPage(mNativeWebContentsAndroid);
+    }
+
+    @Override
+    public boolean focusLocationBarByDefault() {
+        return nativeFocusLocationBarByDefault(mNativeWebContentsAndroid);
     }
 
     @Override
@@ -390,6 +400,12 @@ import java.util.UUID;
         return node;
     }
 
+    @CalledByNative
+    private static void setAccessibilitySnapshotSelection(
+            AccessibilitySnapshotNode node, int start, int end) {
+        node.setSelection(start, end);
+    }
+
     @Override
     public void addObserver(WebContentsObserver observer) {
         assert mNativeWebContentsAndroid != 0;
@@ -416,6 +432,7 @@ import java.util.UUID;
     private native void nativeCut(long nativeWebContentsAndroid);
     private native void nativeCopy(long nativeWebContentsAndroid);
     private native void nativePaste(long nativeWebContentsAndroid);
+    private native void nativeReplace(long nativeWebContentsAndroid, String word);
     private native void nativeSelectAll(long nativeWebContentsAndroid);
     private native void nativeUnselect(long nativeWebContentsAndroid);
     private native void nativeInsertCSS(long nativeWebContentsAndroid, String css);
@@ -426,6 +443,7 @@ import java.util.UUID;
     private native void nativeShowInterstitialPage(long nativeWebContentsAndroid,
             String url, long nativeInterstitialPageDelegateAndroid);
     private native boolean nativeIsShowingInterstitialPage(long nativeWebContentsAndroid);
+    private native boolean nativeFocusLocationBarByDefault(long nativeWebContentsAndroid);
     private native boolean nativeIsRenderWidgetHostViewReady(long nativeWebContentsAndroid);
     private native void nativeExitFullscreen(long nativeWebContentsAndroid);
     private native void nativeUpdateTopControlsState(long nativeWebContentsAndroid,

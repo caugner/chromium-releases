@@ -133,7 +133,9 @@ blink::WebURL WebTestDelegateImpl::RewriteLayoutTestsURL(
 }
 
 test_runner::TestPreferences* WebTestDelegateImpl::Preferences() {
-  return &prefs_;
+  if (!prefs_)
+    prefs_.reset(new test_runner::TestPreferences);
+  return prefs_.get();
 }
 
 void WebTestDelegateImpl::ApplyPreferences() {
@@ -170,6 +172,12 @@ void WebTestDelegateImpl::CloseDevTools() {
 void WebTestDelegateImpl::EvaluateInWebInspector(long call_id,
                                                  const std::string& script) {
   NOTIMPLEMENTED();
+}
+
+std::string WebTestDelegateImpl::EvaluateInWebInspectorOverlay(
+    const std::string& script) {
+  NOTIMPLEMENTED();
+  return std::string();
 }
 
 void WebTestDelegateImpl::ClearAllDatabases() {
@@ -308,6 +316,12 @@ void WebTestDelegateImpl::SetPermission(const std::string& permission_name,
 
 void WebTestDelegateImpl::ResetPermissions() {
   NOTIMPLEMENTED();
+}
+
+bool WebTestDelegateImpl::AddMediaStreamSourceAndTrack(
+    blink::WebMediaStream* stream) {
+  NOTIMPLEMENTED();
+  return false;
 }
 
 cc::SharedBitmapManager* WebTestDelegateImpl::GetSharedBitmapManager() {

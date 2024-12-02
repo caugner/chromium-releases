@@ -12,12 +12,14 @@ import android.view.View;
 import android.view.ViewGroup;
 
 import org.chromium.base.annotations.SuppressFBWarnings;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.BookmarksBridge.BookmarkItem;
-import org.chromium.chrome.browser.BookmarksBridge.BookmarkModelObserver;
+import org.chromium.chrome.browser.bookmark.BookmarksBridge.BookmarkItem;
+import org.chromium.chrome.browser.bookmark.BookmarksBridge.BookmarkModelObserver;
 import org.chromium.chrome.browser.enhancedbookmarks.EnhancedBookmarkManager.UIState;
 import org.chromium.chrome.browser.enhancedbookmarks.EnhancedBookmarkPromoHeader.PromoHeaderShowingChangeListener;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
+import org.chromium.chrome.browser.offlinepages.OfflinePageBridge.OfflinePageModelObserver;
 import org.chromium.chrome.browser.offlinepages.OfflinePageFreeUpSpaceCallback;
 import org.chromium.chrome.browser.offlinepages.OfflinePageFreeUpSpaceDialog;
 import org.chromium.chrome.browser.offlinepages.OfflinePageStorageSpaceHeader;
@@ -76,6 +78,8 @@ class EnhancedBookmarkItemsAdapter extends RecyclerView.Adapter<RecyclerView.Vie
             mDelegate.notifyStateChange(EnhancedBookmarkItemsAdapter.this);
         }
     };
+
+    private OfflinePageModelObserver mOfflinePageModelObserver;
 
     EnhancedBookmarkItemsAdapter(Context context) {
         mContext = context;
@@ -272,6 +276,24 @@ class EnhancedBookmarkItemsAdapter extends RecyclerView.Adapter<RecyclerView.Vie
         mPromoHeaderManager = new EnhancedBookmarkPromoHeader(mContext, this);
         OfflinePageBridge offlinePageBridge = mDelegate.getModel().getOfflinePageBridge();
         if (offlinePageBridge != null) {
+            mOfflinePageModelObserver = new OfflinePageModelObserver() {
+                @Override
+                public void offlinePageModelChanged() {
+                    mDelegate.notifyStateChange(EnhancedBookmarkItemsAdapter.this);
+                }
+
+                @Override
+                public void offlinePageDeleted(BookmarkId bookmarkId) {
+                    if (mDelegate.getCurrentState() == UIState.STATE_FILTER) {
+                        int deletedPosition = getPositionForBookmark(bookmarkId);
+                        if (deletedPosition >= 0) {
+                            removeItem(deletedPosition);
+                        }
+                    }
+                }
+            };
+            offlinePageBridge.addObserver(mOfflinePageModelObserver);
+
             mOfflineStorageHeader = new OfflinePageStorageSpaceHeader(
                     mContext, offlinePageBridge, new OfflinePageFreeUpSpaceCallback() {
                         @Override
@@ -295,14 +317,21 @@ class EnhancedBookmarkItemsAdapter extends RecyclerView.Adapter<RecyclerView.Vie
         mDelegate.removeUIObserver(this);
         mDelegate.getModel().removeObserver(mBookmarkModelObserver);
         mPromoHeaderManager.destroy();
-        if (mOfflineStorageHeader != null) {
+
+        OfflinePageBridge offlinePageBridge = mDelegate.getModel().getOfflinePageBridge();
+        if (offlinePageBridge != null) {
+            offlinePageBridge.removeObserver(mOfflinePageModelObserver);
             mOfflineStorageHeader.destroy();
         }
     }
 
     @Override
     public void onAllBookmarksStateSet() {
-        setBookmarks(null, mDelegate.getModel().getAllBookmarkIDsOrderedByCreationDate());
+        List<BookmarkId> bookmarkIds =
+                mDelegate.getModel().getAllBookmarkIDsOrderedByCreationDate();
+        RecordHistogram.recordCountHistogram("EnhancedBookmarks.AllBookmarksCount",
+                bookmarkIds.size());
+        setBookmarks(null, bookmarkIds);
     }
 
     @Override
@@ -314,7 +343,10 @@ class EnhancedBookmarkItemsAdapter extends RecyclerView.Adapter<RecyclerView.Vie
     @Override
     public void onFilterStateSet(EnhancedBookmarkFilter filter) {
         assert filter == EnhancedBookmarkFilter.OFFLINE_PAGES;
+        List<BookmarkId> bookmarkIds = mDelegate.getModel().getBookmarkIDsByFilter(filter);
+        RecordHistogram.recordCountHistogram("OfflinePages.OfflinePageCount", bookmarkIds.size());
         setBookmarks(null, mDelegate.getModel().getBookmarkIDsByFilter(filter));
+        mDelegate.getModel().getOfflinePageBridge().checkOfflinePageMetadata();
     }
 
     @Override

@@ -7,17 +7,11 @@ import("//build/config/compiler/compiler.gni")
 import("//build/config/crypto.gni")
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
-import("//build/module_args/v8.gni")
+import("//build_overrides/v8.gni")
 import("//testing/test.gni")
 import("//third_party/icu/config.gni")
 import("//third_party/protobuf/proto_library.gni")
-
-# TODO(cjhopman): //build/config/android/rules.gni also imports grit_rule.gni.
-# Currently, that file can't be imported multiple times.  Make this always
-# imported when http://crbug.com/393704 is fixed.
-if (!is_android) {
-  import("//tools/grit/grit_rule.gni")
-}
+import("//tools/grit/grit_rule.gni")
 
 if (is_android) {
   import("//build/config/android/config.gni")
@@ -32,9 +26,9 @@ gypi_values = exec_script("//build/gypi_to_gn.py",
                           "scope",
                           [ "net.gypi" ])
 
-# Disable Kerberos on ChromeOS, Android, iOS, and Chromecast, at least for now.
+# Disable Kerberos on ChromeOS, iOS, Chromecast and headless, at least for now.
 # It needs configuration (krb5.conf and so on).
-use_kerberos = !is_chromeos && !is_android && !is_ios && !is_chromecast
+use_kerberos = !is_chromeos && !is_ios && !is_chromecast && !is_headless
 
 # The way the cache uses mmap() is inefficient on some Android devices. If
 # this flag is set, we hackily avoid using mmap() in the disk cache. We are
@@ -61,6 +55,9 @@ config("net_config") {
   }
   if (disable_file_support) {
     defines += [ "DISABLE_FILE_SUPPORT" ]
+  }
+  if (disable_ftp_support) {
+    defines += [ "DISABLE_FTP_SUPPORT=1" ]
   }
 }
 
@@ -242,11 +239,13 @@ if (!is_nacl) {
         "cert/cert_database_openssl.cc",
         "cert/cert_verify_proc_openssl.cc",
         "cert/test_root_certs_openssl.cc",
+        "http/http_auth_gssapi_posix.cc",
+        "http/http_auth_gssapi_posix.h",
       ]
     }
   }
 
-  if (use_glib && !is_chromeos) {
+  if (use_glib && use_gconf && !is_chromeos) {
     net_shared_configs += [ "//build/config/linux:gconf" ]
     net_shared_deps += [ "//build/linux:gio" ]
   }
@@ -603,6 +602,8 @@ source_set("test_support") {
     "test/channel_id_test_util.h",
     "test/ct_test_util.cc",
     "test/ct_test_util.h",
+    "test/embedded_test_server/default_handlers.cc",
+    "test/embedded_test_server/default_handlers.h",
     "test/embedded_test_server/embedded_test_server.cc",
     "test/embedded_test_server/embedded_test_server.h",
     "test/embedded_test_server/http_connection.cc",
@@ -611,10 +612,8 @@ source_set("test_support") {
     "test/embedded_test_server/http_request.h",
     "test/embedded_test_server/http_response.cc",
     "test/embedded_test_server/http_response.h",
-    "test/embedded_test_server/stream_listen_socket.cc",
-    "test/embedded_test_server/stream_listen_socket.h",
-    "test/embedded_test_server/tcp_listen_socket.cc",
-    "test/embedded_test_server/tcp_listen_socket.h",
+    "test/embedded_test_server/request_handler_util.cc",
+    "test/embedded_test_server/request_handler_util.h",
     "test/event_waiter.h",
     "test/net_test_suite.cc",
     "test/net_test_suite.h",
@@ -747,9 +746,11 @@ if (use_v8_in_net) {
     ]
 
     defines = [ "NET_IMPLEMENTATION" ]
+
     configs += [
       "//build/config/compiler:no_size_t_to_int_warning",
       "//build/config/compiler:wexit_time_destructors",
+      "//v8:external_startup_data",
     ]
 
     public_deps = [
@@ -783,8 +784,8 @@ if (use_v8_in_net && !is_android) {
       ":net",
       "//base",
       "//mojo/common",
+      "//mojo/public/cpp/bindings",
       "//net/interfaces",
-      "//third_party/mojo/src/mojo/public/cpp/bindings",
 
       # NOTE(amistry): As long as we support in-process Mojo v8 PAC, we need
       # this dependency since in_process_mojo_proxy_resolver_factory creates
@@ -804,8 +805,8 @@ if (use_v8_in_net && !is_android) {
 
     public_deps = [
       ":net",
+      "//mojo/public/cpp/bindings",
       "//net/interfaces",
-      "//third_party/mojo/src/mojo/public/cpp/bindings",
     ]
   }
 
@@ -828,8 +829,8 @@ if (use_v8_in_net && !is_android) {
       ":mojo_type_converters",
       ":net",
       "//mojo/common",
+      "//mojo/public/cpp/bindings",
       "//net/interfaces",
-      "//third_party/mojo/src/mojo/public/cpp/bindings",
     ]
   }
 }
@@ -969,7 +970,7 @@ if (!is_ios && !is_android) {
         "//build/config/sanitizers:deps",
       ]
 
-      if (is_desktop_linux && use_gconf) {
+      if (is_desktop_linux && use_gconf && use_glib) {
         configs += [
           "//build/config/linux:gconf",
           "//build/config/linux:glib",
@@ -1049,7 +1050,6 @@ if (is_linux) {
       "tools/flip_server/flip_config.h",
       "tools/flip_server/http_interface.cc",
       "tools/flip_server/http_interface.h",
-      "tools/flip_server/loadtime_measurement.h",
       "tools/flip_server/mem_cache.cc",
       "tools/flip_server/mem_cache.h",
       "tools/flip_server/output_ordering.cc",
@@ -1204,6 +1204,7 @@ if (is_android) {
     sources = [
       "android/javatests/src/org/chromium/net/AndroidKeyStoreTestUtil.java",
       "test/android/javatests/src/org/chromium/net/test/DummySpnegoAuthenticator.java",
+      "test/android/javatests/src/org/chromium/net/test/EmbeddedTestServer.java",
     ]
     jni_package = "net/test"
   }
@@ -1452,12 +1453,14 @@ test("net_unittests") {
       "server/web_socket_encoder_unittest.cc",
       "websockets/websocket_basic_stream_test.cc",
       "websockets/websocket_channel_test.cc",
+      "websockets/websocket_deflate_parameters_test.cc",
       "websockets/websocket_deflate_predictor_impl_test.cc",
       "websockets/websocket_deflate_stream_test.cc",
       "websockets/websocket_deflater_test.cc",
       "websockets/websocket_end_to_end_test.cc",
       "websockets/websocket_errors_test.cc",
       "websockets/websocket_extension_parser_test.cc",
+      "websockets/websocket_extension_test.cc",
       "websockets/websocket_frame_parser_test.cc",
       "websockets/websocket_frame_test.cc",
       "websockets/websocket_handshake_challenge_test.cc",
@@ -1544,6 +1547,8 @@ test("net_unittests") {
     #      'action_name': 'copy_test_data',
     #      'variables': {
     #        'test_data_files': [
+    #          'data/certificate_policies_unittest/',
+    #          'data/name_constraints_unittest/',
     #          'data/ssl/certificates/',
     #          'data/test.html',
     #          'data/url_request_unittest/',
@@ -1590,10 +1595,18 @@ test("net_unittests") {
   }
 
   if (is_android) {
+    apk_deps = [
+      "//base:base_java_unittest_support",
+      "//net/android:net_java",
+      "//net/android:net_javatests",
+      "//net/android:net_java_test_support",
+      "//net/android:net_unittests_apk_resources",
+      "//v8:v8_external_startup_data_assets",
+    ]
+    android_manifest = "//net/android/unittest_support/AndroidManifest.xml"
     sources -= [
       # See bug http://crbug.com/344533.
       "disk_cache/blockfile/index_table_v3_unittest.cc",
-      "dns/dns_config_service_posix_unittest.cc",
     ]
     deps += [
       ":net_test_jni_headers",

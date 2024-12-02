@@ -4,11 +4,14 @@
 
 #include "components/web_view/web_view_impl.h"
 
+#include <queue>
+
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "components/devtools_service/public/cpp/switches.h"
-#include "components/mus/public/cpp/scoped_view_ptr.h"
-#include "components/mus/public/cpp/view.h"
-#include "components/mus/public/cpp/view_tree_connection.h"
+#include "components/mus/public/cpp/scoped_window_ptr.h"
+#include "components/mus/public/cpp/window.h"
+#include "components/mus/public/cpp/window_tree_connection.h"
 #include "components/web_view/client_initiated_frame_connection.h"
 #include "components/web_view/frame.h"
 #include "components/web_view/frame_connection.h"
@@ -44,6 +47,7 @@ WebViewImpl::WebViewImpl(mojo::ApplicationImpl* app,
       binding_(this, request.Pass()),
       root_(nullptr),
       content_(nullptr),
+      find_controller_(this),
       navigation_controller_(this) {
   if (EnableRemoteDebugging())
     devtools_agent_.reset(new FrameDevToolsAgent(app_, this));
@@ -55,13 +59,13 @@ WebViewImpl::~WebViewImpl() {
     content_->RemoveObserver(this);
   if (root_) {
     root_->RemoveObserver(this);
-    mus::ScopedViewPtr::DeleteViewOrViewManager(root_);
+    mus::ScopedWindowPtr::DeleteWindowOrWindowManager(root_);
   }
 }
 
 void WebViewImpl::OnLoad(const GURL& pending_url) {
-  // Frames are uniqued based on the id of the associated View. By creating a
-  // new View each time through we ensure the renderers get a clean id, rather
+  // Frames are uniqued based on the id of the associated Window. By creating a
+  // new Window each time through we ensure the renderers get a clean id, rather
   // than one they may know about and try to incorrectly use.
   if (content_) {
     content_->Destroy();
@@ -70,9 +74,8 @@ void WebViewImpl::OnLoad(const GURL& pending_url) {
 
   client_->TopLevelNavigationStarted(pending_url.spec());
 
-  content_ = root_->connection()->CreateView();
-  content_->SetBounds(*mojo::Rect::From(
-      gfx::Rect(0, 0, root_->bounds().width, root_->bounds().height)));
+  content_ = root_->connection()->NewWindow();
+  content_->SetBounds(gfx::Rect(root_->bounds().size()));
   root_->AddChild(content_);
   content_->SetVisible(true);
   content_->AddObserver(this);
@@ -80,8 +83,8 @@ void WebViewImpl::OnLoad(const GURL& pending_url) {
   scoped_ptr<PendingWebViewLoad> pending_load(pending_load_.Pass());
   scoped_ptr<FrameConnection> frame_connection(
       pending_load->frame_connection());
-  mojo::ViewTreeClientPtr view_tree_client =
-      frame_connection->GetViewTreeClient();
+  mus::mojom::WindowTreeClientPtr window_tree_client =
+      frame_connection->GetWindowTreeClient();
 
   Frame::ClientPropertyMap client_properties;
   if (devtools_agent_) {
@@ -94,8 +97,16 @@ void WebViewImpl::OnLoad(const GURL& pending_url) {
   mojom::FrameClient* frame_client = frame_connection->frame_client();
   const uint32_t content_handler_id = frame_connection->GetContentHandlerID();
   frame_tree_.reset(new FrameTree(content_handler_id, content_,
-                                  view_tree_client.Pass(), this, frame_client,
-                                  frame_connection.Pass(), client_properties));
+                                  window_tree_client.Pass(), this, frame_client,
+                                  frame_connection.Pass(), client_properties,
+                                  pending_load->navigation_start_time()));
+}
+
+void WebViewImpl::PreOrderDepthFirstTraverseTree(Frame* node,
+                                                 std::vector<Frame*>* output) {
+  output->push_back(node);
+  for (Frame* child : node->children())
+    PreOrderDepthFirstTraverseTree(child, output);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -105,9 +116,20 @@ void WebViewImpl::LoadRequest(mojo::URLRequestPtr request) {
   navigation_controller_.LoadURL(request.Pass());
 }
 
-void WebViewImpl::GetViewTreeClient(
-    mojo::InterfaceRequest<mojo::ViewTreeClient> view_tree_client) {
-  mus::ViewTreeConnection::Create(this, view_tree_client.Pass());
+void WebViewImpl::GetWindowTreeClient(
+    mojo::InterfaceRequest<mus::mojom::WindowTreeClient> window_tree_client) {
+  mus::WindowTreeConnection::Create(
+      this, window_tree_client.Pass(),
+      mus::WindowTreeConnection::CreateType::DONT_WAIT_FOR_EMBED);
+}
+
+void WebViewImpl::Find(const mojo::String& search_text,
+                       bool forward_direction) {
+  find_controller_.Find(search_text.To<std::string>(), forward_direction);
+}
+
+void WebViewImpl::StopFinding() {
+  find_controller_.StopFinding();
 }
 
 void WebViewImpl::GoBack() {
@@ -123,9 +145,9 @@ void WebViewImpl::GoForward() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// WebViewImpl, mus::ViewTreeDelegate implementation:
+// WebViewImpl, mus::WindowTreeDelegate implementation:
 
-void WebViewImpl::OnEmbed(mus::View* root) {
+void WebViewImpl::OnEmbed(mus::Window* root) {
   // We must have been granted embed root priviledges, otherwise we can't
   // Embed() in any descendants.
   DCHECK(root->connection()->IsEmbedRoot());
@@ -136,28 +158,23 @@ void WebViewImpl::OnEmbed(mus::View* root) {
     OnLoad(pending_load_->pending_url());
 }
 
-void WebViewImpl::OnConnectionLost(mus::ViewTreeConnection* connection) {
+void WebViewImpl::OnConnectionLost(mus::WindowTreeConnection* connection) {
   root_ = nullptr;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// WebViewImpl, mus::ViewObserver implementation:
+// WebViewImpl, mus::WindowObserver implementation:
 
-void WebViewImpl::OnViewBoundsChanged(mus::View* view,
-                                      const mojo::Rect& old_bounds,
-                                      const mojo::Rect& new_bounds) {
-  if (view != content_) {
-    mojo::Rect rect;
-    rect.width = new_bounds.width;
-    rect.height = new_bounds.height;
-    if (content_)
-      content_->SetBounds(rect);
-  }
+void WebViewImpl::OnWindowBoundsChanged(mus::Window* window,
+                                        const gfx::Rect& old_bounds,
+                                        const gfx::Rect& new_bounds) {
+  if (window != content_ && content_)
+    content_->SetBounds(gfx::Rect(new_bounds.size()));
 }
 
-void WebViewImpl::OnViewDestroyed(mus::View* view) {
-  // |FrameTree| cannot outlive the content view.
-  if (view == content_) {
+void WebViewImpl::OnWindowDestroyed(mus::Window* window) {
+  // |FrameTree| cannot outlive the content window.
+  if (window == content_) {
     frame_tree_.reset();
     content_ = nullptr;
   }
@@ -203,6 +220,32 @@ void WebViewImpl::DidCommitProvisionalLoad(Frame* frame) {
   navigation_controller_.FrameDidCommitProvisionalLoad(frame);
 }
 
+void WebViewImpl::DidNavigateLocally(Frame* source,
+                                     const GURL& url) {
+  navigation_controller_.FrameDidNavigateLocally(source, url);
+  if (source == frame_tree_->root())
+    client_->TopLevelNavigationStarted(url.spec());
+}
+
+void WebViewImpl::DidDestroyFrame(Frame* frame) {
+  find_controller_.DidDestroyFrame(frame);
+}
+
+void WebViewImpl::OnFindInFrameCountUpdated(int32_t request_id,
+                                            Frame* frame,
+                                            int32_t count,
+                                            bool final_update) {
+  find_controller_.OnFindInFrameCountUpdated(request_id, frame, count,
+                                             final_update);
+}
+
+void WebViewImpl::OnFindInPageSelectionUpdated(int32_t request_id,
+                                               Frame* frame,
+                                               int32_t active_match_ordinal) {
+  find_controller_.OnFindInPageSelectionUpdated(request_id, frame,
+                                                active_match_ordinal);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // WebViewImpl, FrameDevToolsAgentDelegate implementation:
 
@@ -227,6 +270,19 @@ void WebViewImpl::OnDidNavigate() {
                               navigation_controller_.CanGoForward()
                                   ? ButtonState::BUTTON_STATE_ENABLED
                                   : ButtonState::BUTTON_STATE_DISABLED);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// WebViewImpl, FindControllerDelegate implementation:
+
+std::vector<Frame*> WebViewImpl::GetAllFrames() {
+  std::vector<Frame*> all_frames;
+  PreOrderDepthFirstTraverseTree(frame_tree_->root(), &all_frames);
+  return all_frames;
+}
+
+mojom::WebViewClient* WebViewImpl::GetWebViewClient() {
+  return client_.get();
 }
 
 }  // namespace web_view

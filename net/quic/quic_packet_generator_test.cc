@@ -206,7 +206,6 @@ class QuicPacketGeneratorTest : public ::testing::TestWithParam<FecSendPolicy> {
     ASSERT_TRUE(packet.packet != nullptr);
     ASSERT_TRUE(simple_framer_.ProcessPacket(*packet.packet));
     EXPECT_TRUE(simple_framer_.header().fec_flag);
-    EXPECT_EQ(fec_group, simple_framer_.fec_data().fec_group);
   }
 
   QuicIOVector CreateData(size_t len) {
@@ -1218,7 +1217,35 @@ TEST_P(QuicPacketGeneratorTest, ResetFecGroupNoTimeout) {
     // FEC_ANY_TRIGGER.
     CheckPacketIsFec(8, 7);
   }
-  EXPECT_TRUE(creator_->IsFecProtected());
+  EXPECT_FALSE(creator_->IsFecProtected());
+
+  // Do the another send (with MAY_FEC_PROTECT) on a different stream id, which
+  // should not produce an FEC packet because the last FEC group has been
+  // closed.
+  {
+    InSequence dummy;
+    EXPECT_CALL(delegate_, OnSerializedPacket(_))
+        .WillOnce(Invoke(this, &QuicPacketGeneratorTest::SavePacket));
+    EXPECT_CALL(delegate_, OnSerializedPacket(_))
+        .WillOnce(Invoke(this, &QuicPacketGeneratorTest::SavePacket));
+    EXPECT_CALL(delegate_, OnSerializedPacket(_))
+        .WillOnce(Invoke(this, &QuicPacketGeneratorTest::SavePacket));
+  }
+  consumed = generator_.ConsumeData(9, CreateData(data_len), 0, true,
+                                    MAY_FEC_PROTECT, nullptr);
+  EXPECT_EQ(data_len, consumed.bytes_consumed);
+  EXPECT_TRUE(consumed.fin_consumed);
+  EXPECT_FALSE(generator_.HasQueuedFrames());
+  if (generator_.fec_send_policy() == FEC_ALARM_TRIGGER) {
+    CheckPacketHasSingleStreamFrame(6);
+    CheckPacketHasSingleStreamFrame(7);
+    CheckPacketHasSingleStreamFrame(8);
+  } else {
+    CheckPacketHasSingleStreamFrame(9);
+    CheckPacketHasSingleStreamFrame(10);
+    CheckPacketHasSingleStreamFrame(11);
+  }
+  EXPECT_FALSE(creator_->IsFecProtected());
 }
 
 // 1. Create and send one packet with MUST_FEC_PROTECT.

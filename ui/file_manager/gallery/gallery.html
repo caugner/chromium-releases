@@ -18,10 +18,13 @@
   <link rel="import" href="chrome://resources/polymer/v1_0/paper-button/paper-button.html">
   <link rel="import" href="chrome://resources/polymer/v1_0/paper-checkbox/paper-checkbox.html">
   <link rel="import" href="chrome://resources/polymer/v1_0/paper-input/paper-input.html">
+  <link rel="import" href="chrome://resources/polymer/v1_0/paper-progress/paper-progress.html">
   <link rel="import" href="chrome://resources/polymer/v1_0/paper-ripple/paper-ripple.html">
   <link rel="import" href="chrome://resources/polymer/v1_0/paper-slider/paper-slider.html">
+  <link rel="import" href="chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj/foreground/elements/files_ripple.html">
   <link rel="import" href="chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj/foreground/elements/files_toast.html">
   <link rel="import" href="chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj/foreground/elements/files_toggle_ripple.html">
+  <link rel="import" href="chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj/foreground/elements/files_tooltip.html">
 
   <script src="js/gallery_scripts.js"></script>
   <style is="custom-style">
@@ -45,6 +48,10 @@
       --paper-slider-knob-color: white;
       --paper-slider-secondary-color: transparent;
     }
+    paper-progress {
+      --paper-progress-container-color: rgba(0, 0, 0, 0.3);
+      --paper-progress-active-color: #1AC222;
+    }
   </style>
 </head>
 <body>
@@ -62,33 +69,53 @@
       <div class="button-spacer">
         <!-- Use button element for edit button to implement toggle button with
           -- custom ripple effect. -->
-        <button class="edit icon-button" i18n-values="title:GALLERY_EDIT"
+        <button class="edit icon-button" i18n-values="aria-label:GALLERY_EDIT"
+                has-tooltip
                 disabled>
           <div class="icon"></div>
           <files-toggle-ripple></files-toggle-ripple>
         </button>
-        <paper-button class="print icon-button"
-                      i18n-values="title:GALLERY_PRINT"
-                      disabled></paper-button>
-        <paper-button class="delete icon-button"
-                      i18n-values="title:GALLERY_DELETE"
-                      disabled></paper-button>
+        <button class="print icon-button"
+                i18n-values="aria-label:GALLERY_PRINT"
+                has-tooltip
+                disabled>
+          <div class="icon"></div>
+          <files-ripple></files-ripple>
+        </button>
+        <button class="delete icon-button"
+                i18n-values="aria-label:GALLERY_DELETE"
+                has-tooltip
+                disabled>
+          <div class="icon"></div>
+          <files-ripple></files-ripple>
+        </button>
         <!-- Use button element for mode button to implement toggle switch
           -- button. -->
         <button class="mode icon-button" disabled>
-          <div class="icon slide-mode" i18n-values="title:GALLERY_SLIDE"></div>
+          <div class="icon slide-mode" i18n-values="aria-label:GALLERY_SLIDE"
+               has-tooltip></div>
           <div class="icon thumbnail-mode"
-               i18n-values="title:GALLERY_THUMBNAIL"></div>
-          <paper-ripple></paper-ripple>
+               i18n-values="aria-label:GALLERY_THUMBNAIL"
+               has-tooltip></div>
+          <files-ripple></files-ripple>
         </button>
-        <paper-button class="slideshow icon-button"
-                      i18n-values="title:GALLERY_SLIDESHOW"
-                      disabled></paper-button>
-        <paper-button class="share icon-button"
-                      i18n-values="title:GALLERY_SHARE"
-                      disabled></paper-button>
+        <button class="slideshow icon-button"
+                i18n-values="aria-label:GALLERY_SLIDESHOW"
+                has-tooltip
+                disabled>
+          <div class="icon"></div>
+          <files-ripple></files-ripple>
+        </button>
+        <button class="share icon-button"
+                i18n-values="aria-label:GALLERY_SHARE"
+                has-tooltip
+                disabled>
+          <div class="icon"></div>
+          <files-ripple></files-ripple>
+        </button>
       </div>
     </div>
+    <paper-progress id="progress-bar" min="0" max="100" hidden></paper-progress>
     <div id="bottom-toolbar" class="toolbar bottom tool dimmable">
       <div class="slide-mode-toolbar">
         <div class="ribbon-spacer"></div>
@@ -117,6 +144,7 @@
     <div class="toast-stage">
       <files-toast></files-toast>
     </div>
+    <files-tooltip></files-tooltip>
   </div>
 </body>
 </html>

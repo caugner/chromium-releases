@@ -75,7 +75,7 @@ PACKAGE_INFO = {
         'com.google.android.apps.chrome.Main',
         '/data/local/chrome-command-line',
         'chrome_devtools_remote',
-        None),
+        'org.chromium.chrome.tests'),
     'legacy_browser': PackageInfo(
         'com.google.android.browser',
         'com.android.browser.BrowserActivity',
@@ -156,20 +156,16 @@ DEVICE_PERF_OUTPUT_DIR = (
 SCREENSHOTS_DIR = os.path.join(DIR_SOURCE_ROOT, 'out_screenshots')
 
 ANDROID_SDK_VERSION = version_codes.MARSHMALLOW
-ANDROID_SDK_BUILD_TOOLS_VERSION = '23.0.0'
+ANDROID_SDK_BUILD_TOOLS_VERSION = '23.0.1'
 ANDROID_SDK_ROOT = os.path.join(DIR_SOURCE_ROOT,
-                                'third_party/android_tools/sdk')
+                                'third_party', 'android_tools', 'sdk')
 ANDROID_SDK_TOOLS = os.path.join(ANDROID_SDK_ROOT,
                                  'build-tools', ANDROID_SDK_BUILD_TOOLS_VERSION)
 ANDROID_NDK_ROOT = os.path.join(DIR_SOURCE_ROOT,
-                                'third_party/android_tools/ndk')
+                                'third_party', 'android_tools', 'ndk')
 
 PROGUARD_SCRIPT_PATH = os.path.join(
     ANDROID_SDK_ROOT, 'tools', 'proguard', 'bin', 'proguard.sh')
-
-EMULATOR_SDK_ROOT = os.environ.get('ANDROID_EMULATOR_SDK_ROOT',
-                                   os.path.join(DIR_SOURCE_ROOT,
-                                                'android_emulator_sdk'))
 
 PROGUARD_ROOT = os.path.join(DIR_SOURCE_ROOT, 'third_party', 'proguard')
 
@@ -198,6 +194,7 @@ PYTHON_UNIT_TEST_SUITES = {
     'path': os.path.join(DIR_SOURCE_ROOT, 'build', 'android', 'gyp'),
     'test_modules': [
       'java_cpp_enum_tests',
+      'java_google_api_keys_tests',
     ]
   },
 }
@@ -205,7 +202,7 @@ PYTHON_UNIT_TEST_SUITES = {
 LOCAL_MACHINE_TESTS = ['junit', 'python']
 VALID_ENVIRONMENTS = ['local', 'remote_device']
 VALID_TEST_TYPES = ['gtest', 'instrumentation', 'junit', 'linker', 'monkey',
-                    'perf', 'python', 'uiautomator', 'uirobot']
+                    'perf', 'python', 'uirobot']
 VALID_DEVICE_TYPES = ['Android', 'iOS']
 
 

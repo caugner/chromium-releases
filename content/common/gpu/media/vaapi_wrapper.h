@@ -186,16 +186,17 @@ class CONTENT_EXPORT VaapiWrapper {
   // Destroy all previously-allocated (and not yet destroyed) coded buffers.
   void DestroyCodedBuffers();
 
-  // Blits a VASurface |va_surface_id_src| into another VASurface
-  // |va_surface_id_dest| applying pixel format conversion and scaling
+  // Blits a VASurface |va_surface_src| into another VASurface
+  // |va_surface_dest| applying pixel format conversion and scaling
   // if needed.
-  bool BlitSurface(VASurfaceID va_surface_id_src,
-                   const gfx::Size& src_size,
-                   VASurfaceID va_surface_id_dest,
-                   const gfx::Size& dest_size);
+  bool BlitSurface(const scoped_refptr<VASurface>& va_surface_src,
+                   const scoped_refptr<VASurface>& va_surface_dest);
 
   // Initialize static data before sandbox is enabled.
   static void PreSandboxInitialization();
+
+  // Get the created surfaces format.
+  unsigned int va_surface_format() const { return va_surface_format_; }
 
  private:
   struct ProfileInfo {
@@ -326,6 +327,9 @@ class CONTENT_EXPORT VaapiWrapper {
 
   // Allocated ids for VASurfaces.
   std::vector<VASurfaceID> va_surface_ids_;
+
+  // VA format of surfaces with va_surface_ids_.
+  unsigned int va_surface_format_;
 
   // Singleton instance of VADisplayState.
   static base::LazyInstance<VADisplayState> va_display_state_;

@@ -378,10 +378,6 @@
       Shows the labels of configs applied to targets that depend on this
       one (either directly or all of them).
 
-  forward_dependent_configs_from
-      Shows the labels of dependencies for which dependent configs will
-      be pushed to targets depending on the current one.
-
   script
   args
   depfile
@@ -459,8 +455,8 @@
       Tree output can not be used with the filtering or output flags:
       --as, --type, --testonly.
 
-  --type=(action|copy|executable|group|shared_library|source_set|
-          static_library)
+  --type=(action|copy|executable|group|loadable_module|shared_library|
+          source_set|static_library)
       Restrict outputs to targets matching the given type. If
       unspecified, no filtering will be performed.
 
@@ -598,8 +594,8 @@
       accordingly. When unspecified, the target's testonly flags are
       ignored.
 
-  --type=(action|copy|executable|group|shared_library|source_set|
-          static_library)
+  --type=(action|copy|executable|group|loadable_module|shared_library|
+          source_set|static_library)
       Restrict outputs to targets matching the given type. If
       unspecified, no filtering will be performed.
 
@@ -744,8 +740,8 @@
       Tree output can not be used with the filtering or output flags:
       --as, --type, --testonly.
 
-  --type=(action|copy|executable|group|shared_library|source_set|
-          static_library)
+  --type=(action|copy|executable|group|loadable_module|shared_library|
+          source_set|static_library)
       Restrict outputs to targets matching the given type. If
       unspecified, no filtering will be performed.
 
@@ -1029,15 +1025,14 @@
 ### **Variables valid in a config definition**:
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         defines, include_dirs, ldflags, lib_dirs, libs,
+         asmflags, defines, include_dirs, ldflags, lib_dirs, libs,
          precompiled_header, precompiled_source
 
 ```
 
 ### **Variables on a target used to apply configs**:
 ```
-  all_dependent_configs, configs, public_configs,
-  forward_dependent_configs_from
+  all_dependent_configs, configs, public_configs
 
 ```
 
@@ -1108,9 +1103,48 @@
 
   See also "gn help buildargs" for an overview.
 
+  The precise behavior of declare args is:
+
+   1. The declare_arg block executes. Any variables in the enclosing
+      scope are available for reading.
+
+   2. At the end of executing the block, any variables set within that
+      scope are saved globally as build arguments, with their current
+      values being saved as the "default value" for that argument.
+
+   3. User-defined overrides are applied. Anything set in "gn args"
+      now overrides any default values. The resulting set of variables
+      is promoted to be readable from the following code in the file.
+
+  This has some ramifications that may not be obvious:
+
+    - You should not perform difficult work inside a declare_args block
+      since this only sets a default value that may be discarded. In
+      particular, don't use the result of exec_script() to set the
+      default value. If you want to have a script-defined default, set
+      some default "undefined" value like [], "", or -1, and after
+      the declare_args block, call exec_script if the value is unset by
+      the user.
+
+    - Any code inside of the declare_args block will see the default
+      values of previous variables defined in the block rather than
+      the user-overridden value. This can be surprising because you will
+      be used to seeing the overridden value. If you need to make the
+      default value of one arg dependent on the possibly-overridden
+      value of another, write two separate declare_args blocks:
+
+        declare_args() {
+          enable_foo = true
+        }
+        declare_args() {
+          # Bar defaults to same user-overridden state as foo.
+          enable_bar = enable_foo
+        }
+
 ```
 
-### **Example**:
+### **Example**
+
 ```
   declare_args() {
     enable_teleporter = true
@@ -1228,9 +1262,9 @@
 
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         defines, include_dirs, ldflags, lib_dirs, libs,
+         asmflags, defines, include_dirs, ldflags, lib_dirs, libs,
          precompiled_header, precompiled_source
-  Deps: data_deps, deps, forward_dependent_configs_from, public_deps
+  Deps: data_deps, deps, public_deps
   Dependent configs: all_dependent_configs, public_configs
   General: check_includes, configs, data, inputs, output_name,
            output_extension, public, sources, testonly, visibility
@@ -1587,16 +1621,14 @@
   specify configs that apply to their dependents.
 
   Depending on a group is exactly like depending directly on that
-  group's deps. Direct dependent configs will get automatically
-  forwarded through the group so you shouldn't need to use
-  "forward_dependent_configs_from.
+  group's deps. 
 
 ```
 
 ### **Variables**
 
 ```
-  Deps: data_deps, deps, forward_dependent_configs_from, public_deps
+  Deps: data_deps, deps, public_deps
   Dependent configs: all_dependent_configs, public_configs
 
 ```
@@ -1649,6 +1681,32 @@
 
   # Looks in the current directory.
   import("my_vars.gni")
+
+
+```
+## **loadable_module**: Declare a loadable module target.
+
+```
+  This target type allows you to create an object file that is (and can
+  only be) loaded and unloaded at runtime.
+
+  A loadable module will be specified on the linker line for targets
+  listing the loadable module in its "deps". If you don't want this
+  (if you don't need to dynamically load the library at runtime), then
+  you should use a "shared_library" target type instead.
+
+```
+
+### **Variables**
+
+```
+  Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
+         asmflags, defines, include_dirs, ldflags, lib_dirs, libs,
+         precompiled_header, precompiled_source
+  Deps: data_deps, deps, public_deps
+  Dependent configs: all_dependent_configs, public_configs
+  General: check_includes, configs, data, inputs, output_name,
+           output_extension, public, sources, testonly, visibility
 
 
 ```
@@ -1995,7 +2053,8 @@
   A shared library will be specified on the linker line for targets
   listing the shared library in its "deps". If you don't want this
   (say you dynamically load the library at runtime), then you should
-  depend on the shared library via "data_deps" instead.
+  depend on the shared library via "data_deps" or, on Darwin
+  platforms, use a "loadable_module" target type instead.
 
 ```
 
@@ -2003,9 +2062,9 @@
 
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         defines, include_dirs, ldflags, lib_dirs, libs,
+         asmflags, defines, include_dirs, ldflags, lib_dirs, libs,
          precompiled_header, precompiled_source
-  Deps: data_deps, deps, forward_dependent_configs_from, public_deps
+  Deps: data_deps, deps, public_deps
   Dependent configs: all_dependent_configs, public_configs
   General: check_includes, configs, data, inputs, output_name,
            output_extension, public, sources, testonly, visibility
@@ -2044,9 +2103,9 @@
 
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         defines, include_dirs, ldflags, lib_dirs, libs,
+         asmflags, defines, include_dirs, ldflags, lib_dirs, libs,
          precompiled_header, precompiled_source
-  Deps: data_deps, deps, forward_dependent_configs_from, public_deps
+  Deps: data_deps, deps, public_deps
   Dependent configs: all_dependent_configs, public_configs
   General: check_includes, configs, data, inputs, output_name,
            output_extension, public, sources, testonly, visibility
@@ -2068,9 +2127,9 @@
 
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         defines, include_dirs, ldflags, lib_dirs, libs,
+         asmflags, defines, include_dirs, ldflags, lib_dirs, libs,
          precompiled_header, precompiled_source
-  Deps: data_deps, deps, forward_dependent_configs_from, public_deps
+  Deps: data_deps, deps, public_deps
   Dependent configs: all_dependent_configs, public_configs
   General: check_includes, configs, data, inputs, output_name,
            output_extension, public, sources, testonly, visibility
@@ -2401,7 +2460,7 @@
     depend_output  [string with substitutions]
         Valid for: "solink" only (optional)
 
-        These two files specify whch of the outputs from the solink
+        These two files specify which of the outputs from the solink
         tool should be used for linking and dependency tracking. These
         should match entries in the "outputs". If unspecified, the
         first item in the "outputs" array will be used for both. See
@@ -2518,6 +2577,7 @@
   along with a set of compiler-specific flags. The following expansions
   are available:
 
+    {{asmflags}}
     {{cflags}}
     {{cflags_c}}
     {{cflags_cc}}
@@ -3224,8 +3284,11 @@
   and Objective C++ compilers.
 
   To target one of these variants individually, use "cflags_c",
-  "cflags_cc", "cflags_objc", and "cflags_objcc", respectively.
-  These variant-specific versions will be appended to the "cflags".
+  "cflags_cc", "cflags_objc", and "cflags_objcc",
+  respectively.
+
+  These variant-specific versions of cflags* will be appended to the
+  "cflags".
 
 ```
 
@@ -3257,8 +3320,11 @@
   and Objective C++ compilers.
 
   To target one of these variants individually, use "cflags_c",
-  "cflags_cc", "cflags_objc", and "cflags_objcc", respectively.
-  These variant-specific versions will be appended to the "cflags".
+  "cflags_cc", "cflags_objc", and "cflags_objcc",
+  respectively.
+
+  These variant-specific versions of cflags* will be appended to the
+  "cflags".
 
 ```
 
@@ -3290,8 +3356,11 @@
   and Objective C++ compilers.
 
   To target one of these variants individually, use "cflags_c",
-  "cflags_cc", "cflags_objc", and "cflags_objcc", respectively.
-  These variant-specific versions will be appended to the "cflags".
+  "cflags_cc", "cflags_objc", and "cflags_objcc",
+  respectively.
+
+  These variant-specific versions of cflags* will be appended to the
+  "cflags".
 
 ```
 
@@ -3323,8 +3392,11 @@
   and Objective C++ compilers.
 
   To target one of these variants individually, use "cflags_c",
-  "cflags_cc", "cflags_objc", and "cflags_objcc", respectively.
-  These variant-specific versions will be appended to the "cflags".
+  "cflags_cc", "cflags_objc", and "cflags_objcc",
+  respectively.
+
+  These variant-specific versions of cflags* will be appended to the
+  "cflags".
 
 ```
 
@@ -3356,8 +3428,11 @@
   and Objective C++ compilers.
 
   To target one of these variants individually, use "cflags_c",
-  "cflags_cc", "cflags_objc", and "cflags_objcc", respectively.
-  These variant-specific versions will be appended to the "cflags".
+  "cflags_cc", "cflags_objc", and "cflags_objcc",
+  respectively.
+
+  These variant-specific versions of cflags* will be appended to the
+  "cflags".
 
 ```
 
@@ -3722,58 +3797,6 @@
   dependent configs are not forwarded.
 
   See also "public_deps" and "data_deps".
-
-
-```
-## **forward_dependent_configs_from**
-
-```
-  A list of target labels.
-
-  DEPRECATED. Use public_deps instead which will have the same effect.
-
-  Exposes the public_configs from a private dependent target as
-  public_configs of the current one. Each label in this list
-  must also be in the deps.
-
-  Generally you should use public_deps instead of this variable to
-  express the concept of exposing a dependency as part of a target's
-  public API. We're considering removing this variable.
-
-```
-
-### **Discussion**
-
-```
-  Sometimes you depend on a child library that exports some necessary
-  configuration via public_configs. If your target in turn exposes the
-  child library's headers in its public headers, it might mean that
-  targets that depend on you won't work: they'll be seeing the child
-  library's code but not the necessary configuration. This list
-  specifies which of your deps' direct dependent configs to expose as
-  your own.
-
-```
-
-### **Examples**
-
-```
-  If we use a given library "a" from our public headers:
-
-    deps = [ ":a", ":b", ... ]
-    forward_dependent_configs_from = [ ":a" ]
-
-  This example makes a "transparent" target that forwards a dependency
-  to another:
-
-    group("frob") {
-      if (use_system_frob) {
-        deps = ":system_frob"
-      } else {
-        deps = "//third_party/fallback_frob"
-      }
-      forward_dependent_configs_from = deps
-    }
 
 
 ```
@@ -4853,8 +4876,8 @@
 
   To a first approximation, the runtime dependencies of a target are
   the set of "data" files, data directories, and the shared libraries
-  from all transitive dependencies. Executables and shared libraries are
-  considered runtime dependencies of themselves.
+  from all transitive dependencies. Executables, shared libraries, and
+  loadable modules are considered runtime dependencies of themselves.
 
 ```
 

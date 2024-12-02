@@ -13,10 +13,10 @@
 #include "base/threading/thread_local.h"
 #include "base/threading/thread_restrictions.h"
 #include "blimp/client/compositor/blimp_context_provider.h"
+#include "blimp/client/compositor/blimp_layer_tree_settings.h"
 #include "blimp/client/compositor/blimp_output_surface.h"
-#include "blimp/client/compositor/blimp_task_graph_runner.h"
 #include "blimp/client/compositor/test/dummy_layer_driver.h"
-#include "blimp/common/compositor/blimp_layer_tree_settings.h"
+#include "blimp/common/compositor/blimp_task_graph_runner.h"
 #include "cc/layers/layer.h"
 #include "cc/output/output_surface.h"
 #include "cc/trees/layer_tree_host.h"
@@ -68,7 +68,6 @@ void BlimpCompositor::SetVisible(bool visible) {
         cc::LayerTreeHost::CreateThreaded(GetCompositorTaskRunner(), &params);
 
     host_->SetVisible(true);
-    host_->SetLayerTreeHostClientReady();
     host_->SetViewportSize(viewport_size_);
     host_->SetDeviceScaleFactor(device_scale_factor_);
 
@@ -100,7 +99,7 @@ void BlimpCompositor::BeginMainFrame(const cc::BeginFrameArgs& args) {}
 
 void BlimpCompositor::BeginMainFrameNotExpectedSoon() {}
 
-void BlimpCompositor::Layout() {}
+void BlimpCompositor::UpdateLayerTreeHost() {}
 
 void BlimpCompositor::ApplyViewportDeltas(
     const gfx::Vector2dF& inner_delta,

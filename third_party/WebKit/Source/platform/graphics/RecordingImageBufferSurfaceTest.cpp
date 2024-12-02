@@ -260,13 +260,19 @@ private:
         MockWebTaskRunner() : m_task(0) { }
         ~MockWebTaskRunner() override { }
 
-        virtual void postTask(const WebTraceLocation&, Task* task)
+        void postTask(const WebTraceLocation&, Task* task) override
         {
             EXPECT_EQ((Task*)0, m_task);
             m_task = task;
         }
 
         void postDelayedTask(const WebTraceLocation&, Task*, double delayMs) override { ASSERT_NOT_REACHED(); };
+
+        WebTaskRunner* clone() override
+        {
+            ASSERT_NOT_REACHED();
+            return nullptr;
+        }
 
         Task* m_task;
     };
@@ -332,7 +338,10 @@ private:
     class CurrentThreadPlatformMock : public Platform {
     public:
         CurrentThreadPlatformMock() { }
-        virtual void cryptographicallyRandomValues(unsigned char* buffer, size_t length) { ASSERT_NOT_REACHED(); }
+        virtual void cryptographicallyRandomValues(unsigned char* buffer, size_t length)
+        {
+            RELEASE_ASSERT_NOT_REACHED();
+        }
         WebThread* currentThread() override { return &m_currentThread; }
 
         void enterRunLoop() { m_currentThread.enterRunLoop(); }
@@ -358,7 +367,7 @@ class TestWrapperTask_ ## TEST_METHOD : public WebTaskRunner::Task {            
 #define CALL_TEST_TASK_WRAPPER(TEST_METHOD)                                                               \
     {                                                                                                     \
         AutoInstallCurrentThreadPlatformMock ctpm;                                                        \
-        Platform::current()->currentThread()->taskRunner()->postTask(FROM_HERE, new TestWrapperTask_ ## TEST_METHOD(this)); \
+        Platform::current()->currentThread()->taskRunner()->postTask(BLINK_FROM_HERE, new TestWrapperTask_ ## TEST_METHOD(this)); \
         ctpm.enterRunLoop();                                      \
     }
 

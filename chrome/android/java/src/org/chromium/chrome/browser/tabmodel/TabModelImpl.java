@@ -4,11 +4,10 @@
 
 package org.chromium.chrome.browser.tabmodel;
 
+import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ObserverList;
 import org.chromium.base.TraceEvent;
-import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
-import org.chromium.chrome.browser.device.DeviceClassManager;
 import org.chromium.chrome.browser.partnercustomizations.HomepageManager;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager.TabCreator;
@@ -37,7 +36,8 @@ public class TabModelImpl extends TabModelJniBridge {
      */
     private final List<Tab> mTabs = new ArrayList<Tab>();
 
-    private final ChromeActivity mActivity;
+    private final TabCreator mRegularTabCreator;
+    private final TabCreator mIncognitoTabCreator;
     private final TabModelSelectorUma mUma;
     private final TabModelOrderController mOrderController;
     private final TabContentManager mTabContentManager;
@@ -60,12 +60,14 @@ public class TabModelImpl extends TabModelJniBridge {
      */
     private int mIndex = INVALID_TAB_INDEX;
 
-    public TabModelImpl(boolean incognito, ChromeActivity activity, TabModelSelectorUma uma,
+    public TabModelImpl(boolean incognito, TabCreator regularTabCreator,
+            TabCreator incognitoTabCreator, TabModelSelectorUma uma,
             TabModelOrderController orderController, TabContentManager tabContentManager,
             TabPersistentStore tabSaver, TabModelDelegate modelDelegate) {
         super(incognito);
         initializeNative();
-        mActivity = activity;
+        mRegularTabCreator = regularTabCreator;
+        mIncognitoTabCreator = incognitoTabCreator;
         mUma = uma;
         mOrderController = orderController;
         mTabContentManager = tabContentManager;
@@ -231,7 +233,7 @@ public class TabModelImpl extends TabModelJniBridge {
 
     @Override
     public boolean supportsPendingClosures() {
-        return !isIncognito() && DeviceClassManager.enableUndo(mActivity);
+        return !isIncognito();
     }
 
     @Override
@@ -279,6 +281,9 @@ public class TabModelImpl extends TabModelJniBridge {
                 mIndex = insertIndex;
             }
         }
+
+        // Re-save the tab list now that it is being kept.
+        mTabSaver.saveTabListAsynchronously();
 
         for (TabModelObserver obs : mObservers) obs.tabClosureUndone(tab);
     }
@@ -363,7 +368,7 @@ public class TabModelImpl extends TabModelJniBridge {
 
         if (allowDelegation && mModelDelegate.closeAllTabsRequest(isIncognito())) return;
 
-        if (HomepageManager.isHomepageEnabled(mActivity)) {
+        if (HomepageManager.isHomepageEnabled(ApplicationStatus.getApplicationContext())) {
             commitAllTabClosures();
 
             for (int i = 0; i < getCount(); i++) getTabAt(i).setClosing(true);
@@ -468,7 +473,7 @@ public class TabModelImpl extends TabModelJniBridge {
                 for (TabModelObserver obs : mObservers) obs.didSelectTab(tab, type, lastId);
 
                 boolean wasAlreadySelected = tab.getId() == lastId;
-                if (!wasAlreadySelected && type == TabSelectionType.FROM_USER) {
+                if (!wasAlreadySelected && type == TabSelectionType.FROM_USER && mUma != null) {
                     // We only want to record when the user actively switches to a different tab.
                     mUma.userSwitchedToTab();
                 }
@@ -540,7 +545,7 @@ public class TabModelImpl extends TabModelJniBridge {
     private void finalizeTabClosure(Tab tab) {
         for (TabModelObserver obs : mObservers) obs.didCloseTab(tab);
 
-        mTabContentManager.removeTabThumbnail(tab.getId());
+        if (mTabContentManager != null) mTabContentManager.removeTabThumbnail(tab.getId());
         mTabSaver.removeTabFromQueues(tab);
 
         if (!isIncognito()) tab.createHistoricalTab();
@@ -676,13 +681,13 @@ public class TabModelImpl extends TabModelJniBridge {
 
     @Override
     protected TabCreator getTabCreator(boolean incognito) {
-        return mActivity.getTabCreator(incognito);
+        return incognito ? mIncognitoTabCreator : mRegularTabCreator;
     }
 
     @Override
     protected boolean createTabWithWebContents(
             boolean incognito, WebContents webContents, int parentId) {
-        return mActivity.getTabCreator(incognito).createTabWithWebContents(
+        return getTabCreator(incognito).createTabWithWebContents(
                 webContents, parentId, TabLaunchType.FROM_LONGPRESS_BACKGROUND);
     }
 

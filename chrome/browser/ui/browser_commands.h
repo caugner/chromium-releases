@@ -99,6 +99,9 @@ void BookmarkCurrentPageAllowingExtensionOverrides(Browser* browser);
 bool CanBookmarkCurrentPage(const Browser* browser);
 void BookmarkAllTabs(Browser* browser);
 bool CanBookmarkAllTabs(const Browser* browser);
+#if defined(TOOLKIT_VIEWS) && !defined(OS_MACOSX)
+void SaveCreditCard(Browser* browser);
+#endif
 void Translate(Browser* browser);
 void ManagePasswordsForPage(Browser* browser);
 #if defined(OS_WIN)
@@ -144,7 +147,6 @@ void ShowAppMenu(Browser* browser);
 void ShowAvatarMenu(Browser* browser);
 void ShowFastUserSwitcher(Browser* browser);
 void OpenUpdateChromeDialog(Browser* browser);
-void ToggleSpeechInput(Browser* browser);
 void DistillCurrentPage(Browser* browser);
 bool CanRequestTabletSite(content::WebContents* current_tab);
 bool IsRequestingTabletSite(Browser* browser);

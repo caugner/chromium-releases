@@ -14,7 +14,6 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/services/gcm/gcm_profile_service.h"
 #include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
 #include "chrome/browser/signin/chrome_proximity_auth_client.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
@@ -23,6 +22,7 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/login/user_names.h"
+#include "components/gcm_driver/gcm_profile_service.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/proximity_auth/cryptauth/base64url.h"
 #include "components/proximity_auth/cryptauth/cryptauth_access_token_fetcher.h"
@@ -133,6 +133,7 @@ void EasyUnlockServiceRegular::OnRemoteDevicesLoaded(
     dict->SetString("name", device.name);
     dict->SetString("psk", b64_psk);
     dict->SetString("bluetoothAddress", device.bluetooth_address);
+    dict->SetInteger("bluetoothType", static_cast<int>(device.bluetooth_type));
     dict->SetString("permitId", "permit://google.com/easyunlock/v1/" +
                                     proximity_auth_client()->GetAccountId());
     dict->SetString("permitRecord.id", b64_public_key);

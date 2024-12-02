@@ -27,7 +27,7 @@
 #include "chrome/browser/notifications/extension_welcome_notification_factory.h"
 #include "chrome/browser/notifications/notification_permission_context_factory.h"
 #include "chrome/browser/notifications/notifier_state_tracker_factory.h"
-#include "chrome/browser/password_manager/password_manager_setting_migrator_service.h"
+#include "chrome/browser/password_manager/password_manager_setting_migrator_service_factory.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/plugins/plugin_prefs_factory.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
@@ -125,6 +125,7 @@
 #if !defined(OS_ANDROID)
 #include "chrome/browser/profile_resetter/automatic_profile_resetter_factory.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
+#include "chrome/browser/usb/usb_chooser_context_factory.h"
 #endif
 
 #if defined(OS_WIN)
@@ -274,7 +275,7 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
   NTPResourceCacheFactory::GetInstance();
 #endif
   PasswordStoreFactory::GetInstance();
-  PasswordManagerSettingMigratorService::Factory::GetInstance();
+  PasswordManagerSettingMigratorServiceFactory::GetInstance();
 #if !defined(OS_ANDROID)
   PinnedTabServiceFactory::GetInstance();
 #endif
@@ -331,6 +332,9 @@ EnsureBrowserContextKeyedServiceFactoriesBuilt() {
 #endif
 #if defined(OS_WIN)
   TriggeredProfileResetterFactory::GetInstance();
+#endif
+#if !defined(OS_ANDROID)
+  UsbChooserContextFactory::GetInstance();
 #endif
   WebDataServiceFactory::GetInstance();
 }

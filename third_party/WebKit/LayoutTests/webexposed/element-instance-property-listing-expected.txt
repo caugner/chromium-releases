@@ -28,6 +28,7 @@ namespace http://www.w3.org/1999/xhtml
     property addEventListener
     property animate
     property appendChild
+    property attachShadow
     property attributes
     property baseURI
     property blur
@@ -287,7 +288,6 @@ html element audio
     property autoplay
     property buffered
     property canPlayType
-    property controller
     property controls
     property crossOrigin
     property currentSrc
@@ -299,7 +299,6 @@ html element audio
     property error
     property load
     property loop
-    property mediaGroup
     property mediaKeys
     property muted
     property networkState
@@ -481,7 +480,6 @@ html element frame
     property contentDocument
     property contentWindow
     property frameBorder
-    property getSVGDocument
     property longDesc
     property marginHeight
     property marginWidth
@@ -663,6 +661,7 @@ html element li
     property type
     property value
 html element link
+    property as
     property charset
     property crossOrigin
     property disabled
@@ -850,6 +849,8 @@ html element select
     property willValidate
 html element shadow
     property getDistributedNodes
+html element slot
+    property name
 html element small
 html element source
     property media
@@ -1029,7 +1030,6 @@ html element video
     property autoplay
     property buffered
     property canPlayType
-    property controller
     property controls
     property crossOrigin
     property currentSrc
@@ -1043,7 +1043,6 @@ html element video
     property height
     property load
     property loop
-    property mediaGroup
     property mediaKeys
     property muted
     property networkState
@@ -1113,6 +1112,7 @@ namespace http://www.w3.org/2000/svg
     property addEventListener
     property animate
     property appendChild
+    property attachShadow
     property attributes
     property baseURI
     property blur

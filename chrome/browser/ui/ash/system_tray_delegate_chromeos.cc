@@ -70,6 +70,7 @@
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #include "chrome/browser/ui/ash/cast_config_delegate_chromeos.h"
+#include "chrome/browser/ui/ash/cast_config_delegate_media_router.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/ash/networking_config_delegate_chromeos.h"
 #include "chrome/browser/ui/ash/system_tray_delegate_utils.h"
@@ -167,6 +168,12 @@ void BluetoothDeviceConnectError(
     device::BluetoothDevice::ConnectErrorCode error_code) {
 }
 
+scoped_ptr<ash::CastConfigDelegate> CreateCastConfigDelegate() {
+  if (CastConfigDelegateMediaRouter::IsEnabled())
+    return make_scoped_ptr(new CastConfigDelegateMediaRouter());
+  return make_scoped_ptr(new CastConfigDelegateChromeos());
+}
+
 void ShowSettingsSubPageForActiveUser(const std::string& sub_page) {
   chrome::ShowSettingsSubPageForProfile(
       ProfileManager::GetActiveUserProfile(), sub_page);
@@ -189,7 +196,7 @@ SystemTrayDelegateChromeOS::SystemTrayDelegateChromeOS()
       have_session_length_limit_(false),
       should_run_bluetooth_discovery_(false),
       session_started_(false),
-      cast_config_delegate_(new CastConfigDelegateChromeos()),
+      cast_config_delegate_(nullptr),
       networking_config_delegate_(new NetworkingConfigDelegateChromeos()),
       volume_control_delegate_(new VolumeController()),
       vpn_delegate_(new VPNDelegateChromeOS),
@@ -575,10 +582,10 @@ void SystemTrayDelegateChromeOS::ShowUserLogin() {
     for (user_manager::UserList::const_iterator it = logged_in_users.begin();
          it != logged_in_users.end();
          ++it) {
-      show_intro &= !multi_user_util::GetProfileFromUserID(
-                         multi_user_util::GetUserIDFromEmail((*it)->email()))
-                         ->GetPrefs()
-                         ->GetBoolean(prefs::kMultiProfileNeverShowIntro);
+      show_intro &=
+          !multi_user_util::GetProfileFromAccountId((*it)->GetAccountId())
+               ->GetPrefs()
+               ->GetBoolean(prefs::kMultiProfileNeverShowIntro);
       if (!show_intro)
         break;
     }
@@ -770,8 +777,9 @@ void SystemTrayDelegateChromeOS::ChangeProxySettings() {
   LoginDisplayHostImpl::default_host()->OpenProxySettings();
 }
 
-ash::CastConfigDelegate* SystemTrayDelegateChromeOS::GetCastConfigDelegate()
-    const {
+ash::CastConfigDelegate* SystemTrayDelegateChromeOS::GetCastConfigDelegate() {
+  if (!cast_config_delegate_)
+    cast_config_delegate_ = CreateCastConfigDelegate();
   return cast_config_delegate_.get();
 }
 
@@ -818,18 +826,19 @@ bool SystemTrayDelegateChromeOS::IsSearchKeyMappedToCapsLock() {
 
 ash::tray::UserAccountsDelegate*
 SystemTrayDelegateChromeOS::GetUserAccountsDelegate(
-    const std::string& user_id) {
-  if (!accounts_delegates_.contains(user_id)) {
+    const AccountId& account_id) {
+  auto it = accounts_delegates_.find(account_id);
+  if (it == accounts_delegates_.end()) {
     const user_manager::User* user =
-        user_manager::UserManager::Get()->FindUser(user_id);
+        user_manager::UserManager::Get()->FindUser(account_id);
     Profile* user_profile = ProfileHelper::Get()->GetProfileByUserUnsafe(user);
     CHECK(user_profile);
     accounts_delegates_.set(
-        user_id,
-        scoped_ptr<ash::tray::UserAccountsDelegate>(
-            new UserAccountsDelegateChromeOS(user_profile)));
+        account_id, scoped_ptr<ash::tray::UserAccountsDelegate>(
+                        new UserAccountsDelegateChromeOS(user_profile)));
+    it = accounts_delegates_.find(account_id);
   }
-  return accounts_delegates_.get(user_id);
+  return it->second;
 }
 
 void SystemTrayDelegateChromeOS::AddCustodianInfoTrayObserver(
@@ -1253,13 +1262,12 @@ void SystemTrayDelegateChromeOS::OnStoreError(policy::CloudPolicyStore* store) {
 
 // Overridden from ash::SessionStateObserver
 void SystemTrayDelegateChromeOS::UserAddedToSession(
-    const std::string& user_id) {
+    const AccountId& /*account_id*/) {
   GetSystemTrayNotifier()->NotifyUserAddedToSession();
 }
 
 void SystemTrayDelegateChromeOS::ActiveUserChanged(
-    const std::string& /* user_id */) {
-}
+    const AccountId& /* user_id */) {}
 
 // Overridden from chrome::BrowserListObserver.
 void SystemTrayDelegateChromeOS::OnBrowserRemoved(Browser* browser) {

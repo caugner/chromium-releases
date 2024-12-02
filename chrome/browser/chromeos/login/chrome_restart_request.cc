@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "ash/ash_switches.h"
+#include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
@@ -32,6 +33,7 @@
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/login/user_names.h"
 #include "components/policy/core/common/policy_switches.h"
+#include "components/signin/core/account_id/account_id.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
@@ -83,7 +85,6 @@ void DeriveCommandLine(const GURL& start_url,
     ::switches::kDisableGpuRasterization,
     ::switches::kDisableLowResTiling,
     ::switches::kDisableMediaSource,
-    ::switches::kDisablePersistentGpuMemoryBuffer,
     ::switches::kDisablePreferCompositingToLCDText,
     ::switches::kEnablePrefixedEncryptedMedia,
     ::switches::kDisablePanelFitting,
@@ -93,7 +94,6 @@ void DeriveCommandLine(const GURL& start_url,
     ::switches::kDisableSurfaces,
     ::switches::kDisableThreadedScrolling,
     ::switches::kDisableTouchDragDrop,
-    ::switches::kDisableTouchEditing,
     ::switches::kDisableZeroCopy,
     ::switches::kEnableBlinkFeatures,
     ::switches::kEnableCompositorAnimationTimelines,
@@ -108,13 +108,13 @@ void DeriveCommandLine(const GURL& start_url,
     ::switches::kEnableImageColorProfiles,
     ::switches::kEnableLogging,
     ::switches::kEnableLowResTiling,
-    ::switches::kEnablePersistentGpuMemoryBuffer,
+    ::switches::kEnablePartialRaster,
     ::switches::kEnablePinch,
     ::switches::kEnablePreferCompositingToLCDText,
     ::switches::kEnableRGBA4444Textures,
     ::switches::kEnableSlimmingPaintV2,
     ::switches::kEnableTouchDragDrop,
-    ::switches::kEnableTouchEditing,
+    ::switches::kEnableUseZoomForDSF,
     ::switches::kEnableViewport,
     ::switches::kEnableZeroCopy,
 #if defined(USE_OZONE)
@@ -147,6 +147,7 @@ void DeriveCommandLine(const GURL& start_url,
 #if defined(ENABLE_TOPCHROME_MD)
     ::switches::kTopChromeMD,
 #endif
+    ::switches::kUIDisablePartialSwap,
     ::switches::kUIEnableCompositorAnimationTimelines,
     ::switches::kUIPrioritizeInGpuProcess,
 #if defined(USE_CRAS)
@@ -186,10 +187,12 @@ void DeriveCommandLine(const GURL& start_url,
     // Please keep these in alphabetical order. Non-UI Compositor switches
     // here should also be added to
     // content/browser/renderer_host/render_process_host_impl.cc.
+    cc::switches::kDisableCachedPictureRaster,
     cc::switches::kDisableCompositedAntialiasing,
     cc::switches::kDisableMainFrameBeforeActivation,
     cc::switches::kDisableThreadedAnimation,
     cc::switches::kEnableBeginFrameScheduling,
+    cc::switches::kEnableCompositorPropertyTrees,
     cc::switches::kEnableGpuBenchmarking,
     cc::switches::kEnablePropertyTreeVerification,
     cc::switches::kEnableMainFrameBeforeActivation,
@@ -201,7 +204,6 @@ void DeriveCommandLine(const GURL& start_url,
     cc::switches::kShowScreenSpaceRects,
     cc::switches::kShowSurfaceDamageRects,
     cc::switches::kSlowDownRasterScaleFactor,
-    cc::switches::kUIDisablePartialSwap,
     chromeos::switches::kConsumerDeviceManagementUrl,
     chromeos::switches::kDbusStub,
     chromeos::switches::kDbusUnstubClients,
@@ -321,7 +323,8 @@ void GetOffTheRecordCommandLine(const GURL& start_url,
   otr_switches.SetString(switches::kGuestSession, std::string());
   otr_switches.SetString(::switches::kIncognito, std::string());
   otr_switches.SetString(::switches::kLoggingLevel, kGuestModeLoggingLevel);
-  otr_switches.SetString(switches::kLoginUser, chromeos::login::kGuestUserName);
+  otr_switches.SetString(switches::kLoginUser,
+                         login::GuestAccountId().GetUserEmail());
 
   // Override the home page.
   otr_switches.SetString(::switches::kHomePage,

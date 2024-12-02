@@ -31,6 +31,7 @@
 #include "core/frame/TopControls.h"
 
 #include "core/frame/FrameHost.h"
+#include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
 #include "core/layout/LayoutView.h"
 #include "core/page/Page.h"
@@ -95,6 +96,7 @@ public:
     {
         WebGestureEvent event;
         event.type = type;
+        event.sourceDevice = WebGestureDeviceTouchscreen;
         event.x = 100;
         event.y = 100;
         if (type == WebInputEvent::GestureScrollUpdate) {
@@ -118,12 +120,6 @@ public:
 private:
     std::string m_baseURL;
     FrameTestHelpers::WebViewHelper m_helper;
-
-    // To prevent platform differences in content layout, use mock
-    // scrollbars. This is especially needed for Mac, where the presence
-    // or absence of a mouse will change frame sizes because of different
-    // scrollbar themes.
-    FrameTestHelpers::UseMockScrollbarSettings m_useMockScrollbars;
 };
 
 #define EXPECT_POINT_EQ(expected, actual)               \

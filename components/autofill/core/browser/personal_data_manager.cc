@@ -5,14 +5,10 @@
 #include "components/autofill/core/browser/personal_data_manager.h"
 
 #include <algorithm>
-#include <functional>
-#include <iterator>
 
-#include "base/command_line.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/timezone.h"
-#include "base/logging.h"
-#include "base/memory/ref_counted.h"
+#include "base/metrics/field_trial.h"
 #include "base/prefs/pref_service.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
@@ -33,7 +29,9 @@
 #include "components/autofill/core/common/autofill_switches.h"
 #include "components/autofill/core/common/autofill_util.h"
 #include "components/signin/core/browser/account_tracker_service.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/signin_pref_names.h"
+#include "components/variations/variations_associated_data.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_data.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_formatter.h"
 
@@ -203,7 +201,19 @@ bool RankByMfu(const AutofillDataModel* a, const AutofillDataModel* b) {
   return a->use_date() > b->use_date();
 }
 
+// Returns whether sorting autofill profile suggestions by frecency is enabled.
+bool IsAutofillProfileSortingByFrecencyEnabled() {
+  const std::string group_name =
+      base::FieldTrialList::FindFullName(kFrecencyFieldTrialName);
+  return base::StartsWith(group_name, kFrecencyFieldTrialStateEnabled,
+                          base::CompareCase::SENSITIVE);
+}
+
 }  // namespace
+
+const char kFrecencyFieldTrialName[] = "AutofillProfileOrderByFrecency";
+const char kFrecencyFieldTrialStateEnabled[] = "Enabled";
+const char kFrecencyFieldTrialLimitParam[] = "limit";
 
 PersonalDataManager::PersonalDataManager(const std::string& app_locale)
     : database_(NULL),
@@ -221,10 +231,12 @@ PersonalDataManager::PersonalDataManager(const std::string& app_locale)
 void PersonalDataManager::Init(scoped_refptr<AutofillWebDataService> database,
                                PrefService* pref_service,
                                AccountTrackerService* account_tracker,
+                               SigninManagerBase* signin_manager,
                                bool is_off_the_record) {
   database_ = database;
   SetPrefService(pref_service);
   account_tracker_ = account_tracker;
+  signin_manager_ = signin_manager;
   is_off_the_record_ = is_off_the_record;
 
   if (!is_off_the_record_)
@@ -282,8 +294,7 @@ void PersonalDataManager::OnWebDataServiceRequestDone(
                               &server_profiles_);
 
         if (!server_profiles_.empty()) {
-          std::string account_id =
-              pref_service_->GetString(::prefs::kGoogleServicesAccountId);
+          std::string account_id = signin_manager_->GetAuthenticatedAccountId();
           base::string16 email =
               base::UTF8ToUTF16(
                   account_tracker_->GetAccountInfo(account_id).email);
@@ -495,7 +506,7 @@ void PersonalDataManager::RecordUseOf(const AutofillDataModel& data_model) {
 
   CreditCard* credit_card = GetCreditCardByGUID(data_model.guid());
   if (credit_card) {
-    credit_card->RecordUse();
+    credit_card->RecordAndLogUse();
 
     if (credit_card->record_type() == CreditCard::LOCAL_CARD)
       database_->UpdateCreditCard(*credit_card);
@@ -508,7 +519,7 @@ void PersonalDataManager::RecordUseOf(const AutofillDataModel& data_model) {
 
   AutofillProfile* profile = GetProfileByGUID(data_model.guid());
   if (profile) {
-    profile->RecordUse();
+    profile->RecordAndLogUse();
 
     if (profile->record_type() == AutofillProfile::LOCAL_PROFILE)
       database_->UpdateAutofillProfile(*profile);
@@ -786,7 +797,17 @@ std::vector<Suggestion> PersonalDataManager::GetProfileSuggestions(
       AutofillProfile::CanonicalizeProfileString(field_contents);
 
   std::vector<AutofillProfile*> profiles = GetProfiles(true);
-  std::sort(profiles.begin(), profiles.end(), RankByMfu);
+
+  if (IsAutofillProfileSortingByFrecencyEnabled()) {
+    base::Time comparison_time = base::Time::Now();
+    std::sort(profiles.begin(), profiles.end(),
+              [comparison_time](const AutofillDataModel* a,
+                                const AutofillDataModel* b) {
+                return a->CompareFrecency(b, comparison_time);
+              });
+  } else {
+    std::sort(profiles.begin(), profiles.end(), RankByMfu);
+  }
 
   std::vector<Suggestion> suggestions;
   // Match based on a prefix search.
@@ -860,6 +881,14 @@ std::vector<Suggestion> PersonalDataManager::GetProfileSuggestions(
   for (size_t i = 0; i < labels.size(); i++)
     unique_suggestions[i].label = labels[i];
 
+  // Get the profile suggestions limit value set for the current frecency field
+  // trial group or SIZE_MAX if no limit is defined.
+  std::string limit_str = variations::GetVariationParamValue(
+      kFrecencyFieldTrialName, kFrecencyFieldTrialLimitParam);
+  size_t limit = base::StringToSizeT(limit_str, &limit) ? limit : SIZE_MAX;
+
+  unique_suggestions.resize(std::min(unique_suggestions.size(), limit));
+
   return unique_suggestions;
 }
 
@@ -918,7 +947,6 @@ std::vector<Suggestion> PersonalDataManager::GetCreditCardSuggestions(
   for (auto outer_it = cards_to_suggest.begin();
        outer_it != cards_to_suggest.end();
        ++outer_it) {
-
     if ((*outer_it)->record_type() == CreditCard::FULL_SERVER_CARD) {
       for (auto inner_it = cards_to_suggest.begin();
            inner_it != cards_to_suggest.end();) {
@@ -1048,10 +1076,11 @@ std::string PersonalDataManager::MergeProfile(
   }
 
   // If the new profile was not merged with an existing one, add it to the list.
-  if (!matching_profile_found)
+  if (!matching_profile_found) {
     merged_profiles->push_back(new_profile);
-
-  AutofillMetrics::LogAutomaticProfileCreation(!matching_profile_found);
+    AutofillMetrics::LogProfileActionOnFormSubmitted(
+        AutofillMetrics::NEW_PROFILE_CREATED);
+  }
 
   return guid;
 }
@@ -1115,33 +1144,28 @@ void PersonalDataManager::SetProfiles(std::vector<AutofillProfile>* profiles) {
 
   // Any profiles that are not in the new profile list should be removed from
   // the web database.
-  for (std::vector<AutofillProfile*>::const_iterator iter =
-           web_profiles_.begin();
-       iter != web_profiles_.end(); ++iter) {
-    if (!FindByGUID<AutofillProfile>(*profiles, (*iter)->guid()))
-      database_->RemoveAutofillProfile((*iter)->guid());
+  for (const AutofillProfile* it : web_profiles_) {
+    if (!FindByGUID<AutofillProfile>(*profiles, it->guid()))
+      database_->RemoveAutofillProfile(it->guid());
   }
 
   // Update the web database with the existing profiles.
-  for (std::vector<AutofillProfile>::iterator iter = profiles->begin();
-       iter != profiles->end(); ++iter) {
-    if (FindByGUID<AutofillProfile>(web_profiles_, iter->guid()))
-      database_->UpdateAutofillProfile(*iter);
+  for (const AutofillProfile& it : *profiles) {
+    if (FindByGUID<AutofillProfile>(web_profiles_, it.guid()))
+      database_->UpdateAutofillProfile(it);
   }
 
   // Add the new profiles to the web database.  Don't add a duplicate.
-  for (std::vector<AutofillProfile>::iterator iter = profiles->begin();
-       iter != profiles->end(); ++iter) {
-    if (!FindByGUID<AutofillProfile>(web_profiles_, iter->guid()) &&
-        !FindByContents(web_profiles_, *iter))
-      database_->AddAutofillProfile(*iter);
+  for (const AutofillProfile& it : *profiles) {
+    if (!FindByGUID<AutofillProfile>(web_profiles_, it.guid()) &&
+        !FindByContents(web_profiles_, it))
+      database_->AddAutofillProfile(it);
   }
 
   // Copy in the new profiles.
   web_profiles_.clear();
-  for (std::vector<AutofillProfile>::iterator iter = profiles->begin();
-       iter != profiles->end(); ++iter) {
-    web_profiles_.push_back(new AutofillProfile(*iter));
+  for (const AutofillProfile& it : *profiles) {
+    web_profiles_.push_back(new AutofillProfile(it));
   }
 
   // Refresh our local cache and send notifications to observers.

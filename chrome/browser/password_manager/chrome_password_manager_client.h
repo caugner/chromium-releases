@@ -65,8 +65,6 @@ class ChromePasswordManagerClient
                                  saved_form_manager) override;
   void PasswordWasAutofilled(const autofill::PasswordFormMap& best_matches,
                              const GURL& origin) const override;
-  void PasswordAutofillWasBlocked(
-      const autofill::PasswordFormMap& best_matches) const override;
   PrefService* GetPrefs() override;
   password_manager::PasswordStore* GetPasswordStore() const override;
   password_manager::PasswordSyncState GetPasswordSyncState() const override;
@@ -76,7 +74,7 @@ class ChromePasswordManagerClient
   bool WasLastNavigationHTTPError() const override;
   bool DidLastPageLoadEncounterSSLErrors() const override;
   bool IsOffTheRecord() const override;
-  password_manager::PasswordManager* GetPasswordManager() override;
+  const password_manager::PasswordManager* GetPasswordManager() const override;
   autofill::AutofillManager* GetAutofillManagerForMainFrame() override;
   const GURL& GetMainFrameURL() const override;
   bool IsUpdatePasswordUIEnabled() const override;
@@ -142,10 +140,6 @@ class ChromePasswordManagerClient
   // Sends a message to the renderer with the current value of
   // |can_use_log_router_|.
   void NotifyRendererOfLoggingAvailability();
-
-  // Returns true if |url| is the reauth page for accessing the password
-  // website.
-  bool IsURLPasswordWebsiteReauth(const GURL& url) const;
 
   Profile* const profile_;
 

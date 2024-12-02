@@ -35,7 +35,7 @@ void QuicServerSession::Initialize() {
   QuicSpdySession::Initialize();
 }
 
-QuicCryptoServerStream* QuicServerSession::CreateQuicCryptoServerStream(
+QuicCryptoServerStreamBase* QuicServerSession::CreateQuicCryptoServerStream(
     const QuicCryptoServerConfig* crypto_config) {
   return new QuicCryptoServerStream(crypto_config, this);
 }
@@ -51,7 +51,7 @@ void QuicServerSession::OnConfigNegotiated() {
   // region, then pass it to the sent packet manager in preparation for possible
   // bandwidth resumption.
   const CachedNetworkParameters* cached_network_params =
-      crypto_stream_->previous_cached_network_params();
+      crypto_stream_->PreviousCachedNetworkParams();
   const bool last_bandwidth_resumption =
       ContainsQuicTag(config()->ReceivedConnectionOptions(), kBWRE);
   const bool max_bandwidth_resumption =
@@ -196,7 +196,7 @@ bool QuicServerSession::ShouldCreateIncomingDynamicStream(QuicStreamId id) {
   return true;
 }
 
-QuicDataStream* QuicServerSession::CreateIncomingDynamicStream(
+QuicSpdyStream* QuicServerSession::CreateIncomingDynamicStream(
     QuicStreamId id) {
   if (!ShouldCreateIncomingDynamicStream(id)) {
     return nullptr;
@@ -205,12 +205,12 @@ QuicDataStream* QuicServerSession::CreateIncomingDynamicStream(
   return new QuicSpdyServerStream(id, this);
 }
 
-QuicDataStream* QuicServerSession::CreateOutgoingDynamicStream() {
+QuicSpdyStream* QuicServerSession::CreateOutgoingDynamicStream() {
   DLOG(ERROR) << "Server push not yet supported";
   return nullptr;
 }
 
-QuicCryptoServerStream* QuicServerSession::GetCryptoStream() {
+QuicCryptoServerStreamBase* QuicServerSession::GetCryptoStream() {
   return crypto_stream_.get();
 }
 

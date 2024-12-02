@@ -42,15 +42,22 @@ source_set("enhanced_bookmarks") {
 
   deps = [
     "//base",
+    "//base:prefs",
     "//components/bookmarks/browser",
     "//components/enhanced_bookmarks/proto",
     "//components/keyed_service/core",
+    "//components/offline_pages",
+    "//components/pref_registry",
     "//components/signin/core/browser",
     "//components/sync_driver",
     "//components/variations",
+    "//google_apis",
+    "//net",
     "//skia",
     "//sql",
+    "//ui/base",
     "//ui/gfx",
+    "//ui/gfx/geometry",
     "//url",
   ]
 
@@ -64,9 +71,6 @@ if (is_android) {
   java_cpp_enum("enhanced_bookmarks_java_enums_srcjar") {
     sources = [
       "enhanced_bookmark_utils.h",
-    ]
-    outputs = [
-      "org/chromium/chrome/browser/enhancedbookmarks/LaunchLocation.java",
     ]
   }
 }
@@ -83,6 +87,8 @@ source_set("test_support") {
     ":enhanced_bookmarks",
     "//skia",
     "//testing/gtest",
+    "//ui/gfx/geometry",
+    "//url",
   ]
 }
 
@@ -96,6 +102,10 @@ source_set("unit_tests") {
   ]
   deps = [
     ":test_support",
+    "//base",
+    "//components/bookmarks/browser",
+    "//components/bookmarks/test",
     "//components/enhanced_bookmarks/proto",
+    "//sql",
   ]
 }

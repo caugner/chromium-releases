@@ -65,9 +65,7 @@ options = None
 
 # Map of: ToolchainName: (PackageName, SDKDir, arch).
 TOOLCHAIN_PACKAGE_MAP = {
-    'arm_newlib': ('nacl_arm_newlib', '%(platform)s_arm_newlib', 'arm'),
     'arm_glibc': ('nacl_arm_glibc', '%(platform)s_arm_glibc', 'arm'),
-    'x86_newlib': ('nacl_x86_newlib', '%(platform)s_x86_newlib', 'x86'),
     'x86_glibc': ('nacl_x86_glibc', '%(platform)s_x86_glibc', 'x86'),
     'arm_bionic': ('nacl_arm_bionic', '%(platform)s_arm_bionic', 'arm'),
     'pnacl': ('pnacl_newlib', '%(platform)s_pnacl', 'pnacl')
@@ -397,6 +395,9 @@ def GypNinjaInstall(pepperdir, toolchains):
     ['irt_core_newlib_x32.nexe', 'irt_core_x86_32.nexe'],
     ['irt_core_newlib_x64.nexe', 'irt_core_x86_64.nexe'],
   ]
+  arm_files = [
+    ['elf_loader_newlib_arm.nexe', 'elf_loader_arm.nexe'],
+  ]
 
   tools_files_64 = []
 
@@ -431,19 +432,18 @@ def GypNinjaInstall(pepperdir, toolchains):
       pair[0] += '.exe'
       pair[1] += '.exe'
 
-  InstallFiles(GetNinjaOutDir('x64'), tools_dir, tools_files_64)
-  InstallFiles(GetNinjaOutDir('ia32'), tools_dir, tools_files_32)
-
   # Add ARM binaries
   if platform == 'linux' and not options.no_arm_trusted:
-    arm_files = [
+    arm_files += [
       ['irt_core_newlib_arm.nexe', 'irt_core_arm.nexe'],
-      ['elf_loader_newlib_arm.nexe', 'elf_loader_arm.nexe'],
       ['nacl_helper_bootstrap', 'nacl_helper_bootstrap_arm'],
       ['nonsfi_loader_newlib_arm_nonsfi.nexe', 'nonsfi_loader_arm'],
       ['sel_ldr', 'sel_ldr_arm']
     ]
-    InstallFiles(GetNinjaOutDir('arm'), tools_dir, arm_files)
+
+  InstallFiles(GetNinjaOutDir('x64'), tools_dir, tools_files_64)
+  InstallFiles(GetNinjaOutDir('ia32'), tools_dir, tools_files_32)
+  InstallFiles(GetNinjaOutDir('arm'), tools_dir, arm_files)
 
   for tc in toolchains:
     if tc in ('host', 'clang-newlib'):
@@ -452,7 +452,7 @@ def GypNinjaInstall(pepperdir, toolchains):
       xarches = (None, 'ia32', 'x64', 'arm')
     elif tc in ('x86_glibc', 'x86_newlib'):
       xarches = ('ia32', 'x64')
-    elif tc in ('arm_glibc', 'arm_newlib', 'arm_bionic'):
+    elif tc in ('arm_glibc', 'arm_bionic'):
       xarches = ('arm',)
     else:
       raise AssertionError('unexpected toolchain value: %s' % tc)
@@ -465,15 +465,7 @@ def GypNinjaInstall(pepperdir, toolchains):
 
 
 def GypNinjaBuild_NaCl(rel_out_dir):
-  # TODO(binji): gyp_nacl doesn't build properly on Windows anymore; it only
-  # can use VS2010, not VS2013 which is now required by the Chromium repo. NaCl
-  # needs to be updated to perform the same logic as Chromium in detecting VS,
-  # which can now exist in the depot_tools directory.
-  # See https://code.google.com/p/nativeclient/issues/detail?id=4022
-  #
-  # For now, let's use gyp_chromium to build these components.
-#  gyp_py = os.path.join(NACL_DIR, 'build', 'gyp_nacl')
-  gyp_py = os.path.join(SRC_DIR, 'build', 'gyp_chromium')
+  gyp_py = os.path.join(NACL_DIR, 'build', 'gyp_nacl')
   nacl_core_sdk_gyp = os.path.join(NACL_DIR, 'build', 'nacl_core_sdk.gyp')
   all_gyp = os.path.join(NACL_DIR, 'build', 'all.gyp')
 
@@ -597,7 +589,7 @@ def BuildStepBuildToolchains(pepperdir, toolchains, build, clean):
       GypNinjaBuild_PPAPI('x64', GYPBUILD_DIR + '-x64',
                           ['use_nacl_clang=0'])
 
-    if set(toolchains) & set(['arm_glibc', 'arm_newlib']):
+    if 'arm_glibc' in toolchains:
       GypNinjaBuild_PPAPI('arm', GYPBUILD_DIR + '-arm',
                           ['use_nacl_clang=0'] )
 
@@ -953,8 +945,7 @@ def main(args):
 
   # NOTE: order matters here. This will be the order that is specified in the
   # Makefiles; the first toolchain will be the default.
-  toolchains = ['pnacl', 'x86_newlib', 'x86_glibc', 'arm_newlib', 'arm_glibc',
-                'clang-newlib', 'host']
+  toolchains = ['pnacl', 'x86_glibc', 'arm_glibc', 'clang-newlib', 'host']
 
   # Changes for experimental bionic builder
   if options.bionic:

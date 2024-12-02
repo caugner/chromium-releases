@@ -9,8 +9,8 @@
 #include "core/layout/LayoutView.h"
 #include "platform/graphics/Color.h"
 #include "platform/graphics/GraphicsContext.h"
-#include "platform/graphics/paint/DisplayItemList.h"
 #include "platform/graphics/paint/DrawingRecorder.h"
+#include "platform/graphics/paint/PaintController.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCanvas.h"
 #include "public/platform/WebThread.h"
@@ -19,7 +19,6 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkPaint.h"
-#include "web/WebGraphicsContextImpl.h"
 #include "web/WebLocalFrameImpl.h"
 #include "web/WebViewImpl.h"
 #include "web/tests/FrameTestHelpers.h"
@@ -58,7 +57,7 @@ protected:
             false /* enableJavascript */, nullptr /* webFrameClient */, nullptr /* webViewClient */,
             compositingMode == AcceleratedCompositing ? enableAcceleratedCompositing : disableAcceleratedCompositing);
         webViewImpl()->resize(WebSize(viewportWidth, viewportHeight));
-        webViewImpl()->layout();
+        webViewImpl()->updateAllLifecyclePhases();
         ASSERT_EQ(compositingMode == AcceleratedCompositing, webViewImpl()->isAcceleratedCompositingActive());
     }
 
@@ -71,44 +70,19 @@ private:
     FrameTestHelpers::WebViewHelper m_helper;
 };
 
-// PageOverlay that uses a WebCanvas to draw a solid color.
-class SimpleCanvasOverlay : public PageOverlay::Delegate {
+// PageOverlay that paints a solid color.
+class SolidColorOverlay : public PageOverlay::Delegate {
 public:
-    SimpleCanvasOverlay(SkColor color) : m_color(color) { }
+    SolidColorOverlay(Color color) : m_color(color) { }
 
-    void paintPageOverlay(WebGraphicsContext* context, const WebSize& size) const override
+    void paintPageOverlay(const PageOverlay& pageOverlay, GraphicsContext& graphicsContext, const WebSize& size) const override
     {
-        WebFloatRect rect(0, 0, size.width, size.height);
-        WebCanvas* canvas = context->beginDrawing(rect);
-        SkPaint paint;
-        paint.setColor(m_color);
-        paint.setStyle(SkPaint::kFill_Style);
-        canvas->drawRectCoords(0, 0, size.width, size.height, paint);
-        context->endDrawing();
-    }
-
-private:
-    SkColor m_color;
-};
-
-// PageOverlay that uses the underlying blink::GraphicsContext to paint a
-// solid color.
-class PrivateGraphicsContextOverlay : public PageOverlay::Delegate {
-public:
-    PrivateGraphicsContextOverlay(Color color) : m_color(color) { }
-
-    void paintPageOverlay(WebGraphicsContext* context, const WebSize& size) const override
-    {
-        GraphicsContext& graphicsContext = toWebGraphicsContextImpl(context)->graphicsContext();
-        if (DrawingRecorder::useCachedDrawingIfPossible(graphicsContext, *this, DisplayItem::PageOverlay))
+        if (DrawingRecorder::useCachedDrawingIfPossible(graphicsContext, pageOverlay, DisplayItem::PageOverlay))
             return;
         FloatRect rect(0, 0, size.width, size.height);
-        DrawingRecorder drawingRecorder(graphicsContext, *this, DisplayItem::PageOverlay, rect);
+        DrawingRecorder drawingRecorder(graphicsContext, pageOverlay, DisplayItem::PageOverlay, rect);
         graphicsContext.fillRect(rect, m_color);
     }
-
-    DisplayItemClient displayItemClient() const { return toDisplayItemClient(this); }
-    String debugName() const { return "PrivateGraphicsContextOverlay"; }
 
 private:
     Color m_color;
@@ -129,15 +103,14 @@ public:
     MOCK_METHOD2(onDrawRect, void(const SkRect&, const SkPaint&));
 };
 
-template <typename OverlayType>
-void PageOverlayTest::runPageOverlayTestWithAcceleratedCompositing()
+TEST_F(PageOverlayTest, PageOverlay_AcceleratedCompositing)
 {
     initialize(AcceleratedCompositing);
     webViewImpl()->layerTreeView()->setViewportSize(WebSize(viewportWidth, viewportHeight));
 
-    OwnPtr<PageOverlay> pageOverlay = PageOverlay::create(webViewImpl(), new OverlayType(SK_ColorYELLOW));
+    OwnPtr<PageOverlay> pageOverlay = PageOverlay::create(webViewImpl(), new SolidColorOverlay(SK_ColorYELLOW));
     pageOverlay->update();
-    webViewImpl()->layout();
+    webViewImpl()->updateAllLifecyclePhases();
 
     // Ideally, we would get results from the compositor that showed that this
     // page overlay actually winds up getting drawn on top of the rest.
@@ -152,22 +125,16 @@ void PageOverlayTest::runPageOverlayTestWithAcceleratedCompositing()
 
     // Paint the layer with a null canvas to get a display list, and then
     // replay that onto the mock canvas for examination.
-    GraphicsContext graphicsContext(graphicsLayer->displayItemList());
-    graphicsLayer->paint(graphicsContext, rect);
+    PaintController* paintController = graphicsLayer->paintController();
+    ASSERT(paintController);
+    GraphicsContext graphicsContext(*paintController);
+    IntRect intRect = rect;
+    graphicsLayer->paint(graphicsContext, &intRect);
 
-    graphicsContext.beginRecording(IntRect(rect));
-    graphicsLayer->displayItemList()->commitNewDisplayItemsAndReplay(graphicsContext);
+    graphicsContext.beginRecording(intRect);
+    paintController->commitNewDisplayItems();
+    paintController->paintArtifact().replay(graphicsContext);
     graphicsContext.endRecording()->playback(&canvas);
-}
-
-TEST_F(PageOverlayTest, SimpleCanvasOverlay_AcceleratedCompositing)
-{
-    runPageOverlayTestWithAcceleratedCompositing<SimpleCanvasOverlay>();
-}
-
-TEST_F(PageOverlayTest, PrivateGraphicsContextOverlay_AcceleratedCompositing)
-{
-    runPageOverlayTestWithAcceleratedCompositing<PrivateGraphicsContextOverlay>();
 }
 
 } // namespace

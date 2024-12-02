@@ -48,14 +48,9 @@ class InProcessContextProvider : public cc::ContextProvider {
   void InvalidateGrContext(uint32_t state) override;
   void SetupLock() override;
   base::Lock* GetLock() override;
-  void VerifyContexts() override;
   void DeleteCachedResources() override;
-  bool DestroyedOnMainThread() override;
   void SetLostContextCallback(
       const LostContextCallback& lost_context_callback) override;
-  void SetMemoryPolicyChangedCallback(
-      const MemoryPolicyChangedCallback& memory_policy_changed_callback)
-      override;
 
  private:
   InProcessContextProvider(
@@ -82,9 +77,6 @@ class InProcessContextProvider : public cc::ContextProvider {
   cc::ContextProvider::Capabilities capabilities_;
 
   LostContextCallback lost_context_callback_;
-
-  base::Lock destroyed_lock_;
-  bool destroyed_;
 
   base::Lock context_lock_;
 

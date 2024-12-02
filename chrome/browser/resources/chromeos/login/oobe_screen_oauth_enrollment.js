@@ -3,6 +3,13 @@
 // found in the LICENSE file.
 
 login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
+  /* Code which is embedded inside of the webview. See below for details.
+  /** @const */ var INJECTED_WEBVIEW_SCRIPT = String.raw`
+                      (function() {
+                         <include src="../keyboard/keyboard_utils.js">
+                         keyboard.initializeKeyboardFlow();
+                       })();`;
+
   /** @const */ var STEP_SIGNIN = 'signin';
   /** @const */ var STEP_WORKING = 'working';
   /** @const */ var STEP_ATTRIBUTE_PROMPT = 'attribute-prompt';
@@ -40,24 +47,36 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
 
     get isCancelDisabled() { return this.isCancelDisabled_ },
     set isCancelDisabled(disabled) {
-      if (disabled == this.isCancelDisabled)
-        return;
       this.isCancelDisabled_ = disabled;
     },
 
+    isManualEnrollment_: undefined,
+
+    /**
+     * An element containg navigation buttons.
+     */
+    navigation_: undefined,
+
+    /**
+     * Value contained in the last received 'backButton' event.
+     * @type {boolean}
+     * @private
+     */
+    lastBackMessageValue_: false,
+
     /** @override */
     decorate: function() {
-      var webview = document.createElement('webview');
-      webview.id = webview.name = 'oauth-enroll-auth-view';
-      $('oauth-enroll-auth-view-container').appendChild(webview);
-      this.authenticator_ = new cr.login.Authenticator(webview);
+      this.navigation_ = $('oauth-enroll-navigation');
+
+      this.authenticator_ =
+          new cr.login.Authenticator($('oauth-enroll-auth-view'));
 
       this.authenticator_.addEventListener('ready',
           (function() {
             if (this.currentStep_ != STEP_SIGNIN)
               return;
             this.isCancelDisabled = false;
-            chrome.send('frameLoadingCompleted', [0]);
+            chrome.send('frameLoadingCompleted');
           }).bind(this));
 
       this.authenticator_.addEventListener('authCompleted',
@@ -85,13 +104,15 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
             this.classList.toggle('saml', isSAML);
             if (Oobe.getInstance().currentScreen == this)
               Oobe.getInstance().updateScreenSize(this);
+            this.lastBackMessageValue_ = false;
+            this.updateControlsState();
           }).bind(this));
 
       this.authenticator_.addEventListener('backButton',
           (function(e) {
-            $('oauth-enroll-back-button').hidden = !e.detail;
+            this.lastBackMessageValue_ = !!e.detail;
             $('oauth-enroll-auth-view').focus();
-            $('login-header-bar').updateUI_();
+            this.updateControlsState();
           }).bind(this));
 
       this.authenticator_.insecureContentBlockedCallback =
@@ -119,17 +140,13 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
       $('oauth-enroll-success-card').addEventListener(
           'buttonclick', doneCallback);
 
-      $('oauth-enroll-cancel-button').addEventListener('click',
-                                                       this.cancel.bind(this));
-      $('oauth-enroll-refresh-button').addEventListener('click',
-                                                        this.cancel.bind(this));
+      this.navigation_.addEventListener('close', this.cancel.bind(this));
+      this.navigation_.addEventListener('refresh', this.cancel.bind(this));
 
-      $('oauth-enroll-back-button').addEventListener('click',
-          (function(e) {
-            $('oauth-enroll-back-button').hidden = true;
-            $('oauth-enroll-auth-view').back();
-            e.preventDefault();
-          }).bind(this));
+      this.navigation_.addEventListener('back', function() {
+        this.navigation_.backVisible = false;
+        $('oauth-enroll-auth-view').back();
+      }.bind(this));
 
       $('oauth-enroll-attribute-prompt-card').addEventListener('submit',
           this.onAttributesSubmitted.bind(this));
@@ -152,39 +169,33 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
     },
 
     /**
-     * Buttons in oobe wizard's button strip.
-     * @type {array} Array of Buttons.
-     */
-    get buttons() {
-      var buttons = [];
-      var ownerDocument = this.ownerDocument;
-
-      function makeButton(id, classes, label, handler) {
-        var button = ownerDocument.createElement('button');
-        button.id = id;
-        button.classList.add('oauth-enroll-button');
-        button.classList.add.apply(button.classList, classes);
-        button.textContent = label;
-        button.addEventListener('click', handler);
-        buttons.push(button);
-      }
-
-      return buttons;
-    },
-
-    /**
      * Event handler that is invoked just before the frame is shown.
      * @param {Object} data Screen init payload, contains the signin frame
      * URL.
      */
     onBeforeShow: function(data) {
+      if (Oobe.getInstance().forceKeyboardFlow) {
+        // We run the tab remapping logic inside of the webview so that the
+        // simulated tab events will use the webview tab-stops. Simulated tab
+        // events created from the webui treat the entire webview as one tab
+        // stop. Real tab events do not do this. See crbug.com/543865.
+        $('oauth-enroll-auth-view').addContentScripts([{
+          name: 'injectedTabHandler',
+          matches: ['http://*/*', 'https://*/*'],
+          js: { code: INJECTED_WEBVIEW_SCRIPT },
+          run_at: 'document_start'
+        }]);
+      }
+
       $('login-header-bar').signinUIState = SIGNIN_UI_STATE.ENROLLMENT;
-      $('inner-container').classList.add('new-gaia-flow');
+      $('progress-dots').hidden = true;
+      this.classList.remove('saml');
+
       var gaiaParams = {};
       gaiaParams.gaiaUrl = data.gaiaUrl;
       gaiaParams.clientId = data.clientId;
       gaiaParams.gaiaPath = 'embedded/setup/chromeos';
-      gaiaParams.isNewGaiaFlowChromeOS = true;
+      gaiaParams.isNewGaiaFlow = true;
       gaiaParams.needPassword = false;
       if (data.management_domain) {
         gaiaParams.enterpriseDomain = data.management_domain;
@@ -199,7 +210,9 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
         this.classList.toggle('mode-' + modes[i],
                               data.enrollment_mode == modes[i]);
       }
+      this.isManualEnrollment_ = data.enrollment_mode === 'manual';
       this.isCancelDisabled = true;
+
       this.showStep(STEP_SIGNIN);
     },
 
@@ -214,8 +227,6 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
     showAttributePromptStep: function(annotated_asset_id, annotated_location) {
       $('oauth-enroll-asset-id').value = annotated_asset_id;
       $('oauth-enroll-location').value = annotated_location;
-      $('oauth-enroll-back-button').hidden = true;
-
       this.showStep(STEP_ATTRIBUTE_PROMPT);
     },
 
@@ -249,7 +260,10 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
       } else if (step == STEP_ATTRIBUTE_PROMPT_ERROR) {
         $('oauth-enroll-attribute-prompt-error-card').submitButton.focus();
       }
+
       this.currentStep_ = step;
+      this.lastBackMessageValue_ = false;
+      this.updateControlsState();
     },
 
     /**
@@ -270,7 +284,9 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
     },
 
     doReload: function() {
+      this.lastBackMessageValue_ = false;
       this.authenticator_.reload();
+      this.updateControlsState();
     },
 
     /**
@@ -298,6 +314,30 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
       chrome.send('oauthEnrollAttributes',
                   [$('oauth-enroll-asset-id').value,
                    $('oauth-enroll-location').value]);
+    },
+
+    /**
+     * Returns true if we are at the begging of enrollment flow (i.e. the email
+     * page).
+     *
+     * @type {boolean}
+     */
+    isAtTheBeginning: function() {
+      return !this.navigation_.backVisible && this.currentStep_ == STEP_SIGNIN;
+    },
+
+    /**
+     * Updates visibility of navigation buttons.
+     */
+    updateControlsState: function() {
+      this.navigation_.backVisible = this.currentStep_ == STEP_SIGNIN &&
+                                     this.lastBackMessageValue_;
+      this.navigation_.refreshVisible = this.isAtTheBeginning() &&
+                                        !this.isManualEnrollment_;
+      this.navigation_.closeVisible = (this.currentStep_ == STEP_SIGNIN ||
+                                       this.currentStep_ == STEP_ERROR) &&
+                                      !this.navigation_.refreshVisible;
+      $('login-header-bar').updateUI_();
     }
   };
 });

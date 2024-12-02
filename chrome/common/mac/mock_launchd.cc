@@ -5,6 +5,7 @@
 #include "chrome/common/mac/mock_launchd.h"
 
 #include <CoreFoundation/CoreFoundation.h>
+#include <errno.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 
@@ -226,7 +227,7 @@ CFDictionaryRef MockLaunchd::CopyDictionaryByCheckingIn(CFErrorRef* error) {
 
 bool MockLaunchd::RemoveJob(CFStringRef label, CFErrorRef* error) {
   remove_called_ = true;
-  message_loop_->PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
+  message_loop_->PostTask(FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
   return true;
 }
 
@@ -235,7 +236,7 @@ bool MockLaunchd::RestartJob(Domain domain,
                              CFStringRef name,
                              CFStringRef session_type) {
   restart_called_ = true;
-  message_loop_->PostTask(FROM_HERE, base::MessageLoop::QuitClosure());
+  message_loop_->PostTask(FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
   return true;
 }
 

@@ -13,7 +13,7 @@
 #include "components/mus/surfaces/surfaces_context_provider.h"
 #include "components/mus/surfaces/surfaces_context_provider_delegate.h"
 #include "components/mus/surfaces/surfaces_state.h"
-#include "third_party/mojo/src/mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace cc {
@@ -56,6 +56,8 @@ class TopLevelDisplayClient : public cc::DisplayClient,
 
   // SurfaceFactoryClient implementation.
   void ReturnResources(const cc::ReturnedResourceArray& resources) override;
+  void SetBeginFrameSource(cc::SurfaceId surface_id,
+                           cc::BeginFrameSource* begin_frame_source) override;
 
   scoped_refptr<SurfacesState> surfaces_state_;
   cc::SurfaceFactory factory_;

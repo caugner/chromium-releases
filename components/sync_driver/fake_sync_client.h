@@ -22,12 +22,22 @@ class FakeSyncClient : public SyncClient {
   SyncService* GetSyncService() override;
   PrefService* GetPrefService() override;
   bookmarks::BookmarkModel* GetBookmarkModel() override;
+  favicon::FaviconService* GetFaviconService() override;
   history::HistoryService* GetHistoryService() override;
   scoped_refptr<password_manager::PasswordStore> GetPasswordStore() override;
+  ClearBrowsingDataCallback GetClearBrowsingDataCallback() override;
+  base::Closure GetPasswordStateChangedCallback() override;
   autofill::PersonalDataManager* GetPersonalDataManager() override;
   scoped_refptr<autofill::AutofillWebDataService> GetWebDataService() override;
+  BookmarkUndoService* GetBookmarkUndoServiceIfExists() override;
+  invalidation::InvalidationService* GetInvalidationService() override;
+  scoped_refptr<syncer::ExtensionsActivity> GetExtensionsActivity() override;
+  sync_sessions::SyncSessionsClient* GetSyncSessionsClient() override;
   base::WeakPtr<syncer::SyncableService> GetSyncableServiceForType(
       syncer::ModelType type) override;
+  scoped_refptr<syncer::ModelSafeWorker> CreateModelWorkerForGroup(
+      syncer::ModelSafeGroup group,
+      syncer::WorkerLoopDestructionObserver* observer) override;
   SyncApiComponentFactory* GetSyncApiComponentFactory() override;
 
  private:

@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.download;
 
 import android.Manifest.permission;
 import android.app.Activity;
+import android.app.DownloadManager;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -162,6 +163,7 @@ public class ChromeDownloadDelegate
             // Query the package manager to see if there's a registered handler that matches.
             Intent intent = new Intent(Intent.ACTION_VIEW);
             intent.setDataAndType(Uri.parse(downloadInfo.getUrl()), downloadInfo.getMimeType());
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             // If the intent is resolved to ourselves, we don't want to attempt to load the url
             // only to try and download it again.
             if (DownloadManagerService.openIntent(mContext, intent, false)) {
@@ -350,8 +352,9 @@ public class ChromeDownloadDelegate
             final PermissionCallback permissionCallback = new PermissionCallback() {
                 @Override
                 public void onRequestPermissionsResult(String[] permissions, int[] grantResults) {
-                    DownloadController.getInstance().onRequestFileAccessResult(
-                            callbackId, grantResults[0] == PackageManager.PERMISSION_GRANTED);
+                    DownloadController.getInstance().onRequestFileAccessResult(callbackId,
+                            grantResults.length > 0
+                                    && grantResults[0] == PackageManager.PERMISSION_GRANTED);
                 }
             };
 
@@ -362,6 +365,10 @@ public class ChromeDownloadDelegate
                             new DialogInterface.OnClickListener() {
                                 @Override
                                 public void onClick(DialogInterface dialog, int id) {
+                                    if (mTab == null) {
+                                        dialog.cancel();
+                                        return;
+                                    }
                                     mTab.getWindowAndroid().requestPermissions(
                                             new String[] {storagePermission}, permissionCallback);
                                 }
@@ -473,17 +480,20 @@ public class ChromeDownloadDelegate
             String filename, String fullDirPath, String externalStorageStatus) {
         if (fullDirPath == null) {
             Log.e(TAG, "Download failed: no SD card");
-            alertDownloadFailure(filename);
+            alertDownloadFailure(
+                    filename, DownloadManager.ERROR_DEVICE_NOT_FOUND);
             return false;
         }
         if (!externalStorageStatus.equals(Environment.MEDIA_MOUNTED)) {
+            int reason = DownloadManager.ERROR_DEVICE_NOT_FOUND;
             // Check to see if the SDCard is busy, same as the music app
             if (externalStorageStatus.equals(Environment.MEDIA_SHARED)) {
                 Log.e(TAG, "Download failed: SD card unavailable");
+                reason = DownloadManager.ERROR_FILE_ERROR;
             } else {
                 Log.e(TAG, "Download failed: no SD card");
             }
-            alertDownloadFailure(filename);
+            alertDownloadFailure(filename, reason);
             return false;
         }
         return true;
@@ -493,10 +503,11 @@ public class ChromeDownloadDelegate
      * Alerts user of download failure.
      *
      * @param fileName Name of the download file.
+     * @param reason Reason of failure defined in {@link DownloadManager}
      */
-    private void alertDownloadFailure(String fileName) {
+    private void alertDownloadFailure(String fileName, int reason) {
         DownloadManagerService.getDownloadManagerService(
-                mContext.getApplicationContext()).onDownloadFailed(fileName);
+                mContext.getApplicationContext()).onDownloadFailed(fileName, reason);
     }
 
     /**
@@ -643,7 +654,8 @@ public class ChromeDownloadDelegate
                     @Override
                     public void onRequestPermissionsResult(
                             String[] permissions, int[] grantResults) {
-                        if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                        if (grantResults.length > 0
+                                && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                             onDownloadStartNoStream(downloadInfo);
                         }
                     }

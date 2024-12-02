@@ -26,6 +26,9 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/ui/zoom/page_zoom.h"
+#include "components/ui/zoom/test/zoom_test_utils.h"
+#include "components/ui/zoom/zoom_controller.h"
 #include "content/public/browser/browser_plugin_guest_manager.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
@@ -33,6 +36,8 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/extension_registry.h"
@@ -41,6 +46,10 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "url/gurl.h"
+
+#if defined(TOOLKIT_VIEWS) && !defined(OS_MACOSX)
+#include "chrome/browser/ui/views/location_bar/zoom_bubble_view.h"
+#endif
 
 const int kNumberLoadTestParts = 10;
 
@@ -73,12 +82,12 @@ class PDFExtensionTest : public ExtensionApiTest,
   }
 
   bool PdfIsExpectedToFailLoad(const std::string& pdf_file) {
-    const char* kFailingPdfs[] = {
-        "pdf_private/cfuzz5.pdf",
-        "pdf_private/cfuzz6.pdf",
-        "pdf_private/crash-11-14-44.pdf",
-        "pdf_private/js.pdf",
-        "pdf_private/segv-ecx.pdf",
+    const char* const kFailingPdfs[] = {
+        // TODO(thestig): Investigate why this file doesn't fail when served by
+        // EmbeddedTestServer or another webserver.
+        // "pdf_private/cfuzz5.pdf",
+        "pdf_private/cfuzz6.pdf", "pdf_private/crash-11-14-44.pdf",
+        "pdf_private/js.pdf",     "pdf_private/segv-ecx.pdf",
         "pdf_private/tests.pdf",
     };
     for (size_t i = 0; i < arraysize(kFailingPdfs); ++i) {
@@ -412,6 +421,87 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, LinkPermissions) {
   EXPECT_EQ(GURL("about:blank"), invalid_link_url);
 }
 
+// This test ensures that titles are set properly for PDFs without /Title.
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, TabTitleWithNoTitle) {
+  GURL test_pdf_url(embedded_test_server()->GetURL("/pdf/test.pdf"));
+  content::WebContents* guest_contents = LoadPdfGetGuestContents(test_pdf_url);
+  ASSERT_TRUE(guest_contents);
+  EXPECT_EQ(base::ASCIIToUTF16("test.pdf"), guest_contents->GetTitle());
+  EXPECT_EQ(base::ASCIIToUTF16("test.pdf"),
+            browser()->tab_strip_model()->GetActiveWebContents()->GetTitle());
+}
+
+// This test ensures that titles are set properly for PDFs with /Title.
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, TabTitleWithTitle) {
+  GURL test_pdf_url(embedded_test_server()->GetURL("/pdf/test-title.pdf"));
+  content::WebContents* guest_contents = LoadPdfGetGuestContents(test_pdf_url);
+  ASSERT_TRUE(guest_contents);
+  EXPECT_EQ(base::ASCIIToUTF16("PDF title test"), guest_contents->GetTitle());
+  EXPECT_EQ(base::ASCIIToUTF16("PDF title test"),
+            browser()->tab_strip_model()->GetActiveWebContents()->GetTitle());
+}
+
+// This test ensures that titles are set properly for embedded PDFs with /Title.
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, TabTitleWithEmbeddedPdf) {
+  std::string url =
+      embedded_test_server()->GetURL("/pdf/test-title.pdf").spec();
+  std::string data_url =
+      "data:text/html,"
+      "<html><head><title>TabTitleWithEmbeddedPdf</title></head><body>"
+      "<embed type=\"application/pdf\" src=\"" +
+      url +
+      "\"></body></html>";
+  ui_test_utils::NavigateToURL(browser(), GURL(data_url));
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(pdf_extension_test_util::EnsurePDFHasLoaded(web_contents));
+  EXPECT_EQ(base::ASCIIToUTF16("TabTitleWithEmbeddedPdf"),
+            web_contents->GetTitle());
+}
+
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, PdfZoomWithoutBubble) {
+  using namespace ui_zoom;
+
+  GURL test_pdf_url(embedded_test_server()->GetURL("/pdf/test.pdf"));
+  content::WebContents* guest_contents = LoadPdfGetGuestContents(test_pdf_url);
+  ASSERT_TRUE(guest_contents);
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  // The PDF viewer always starts at default zoom, which for tests is 100% or
+  // zoom level 0.0. Here we look at the presets to find the next zoom level
+  // above 0. Ideally we should look at the zoom levels from the PDF viewer
+  // javascript, but we assume they'll always match the browser presets, which
+  // are easier to access.
+  std::vector<double> preset_zoom_levels = PageZoom::PresetZoomLevels(0.0);
+  std::vector<double>::iterator it =
+      std::find(preset_zoom_levels.begin(), preset_zoom_levels.end(), 0.0);
+  ASSERT_TRUE(it != preset_zoom_levels.end());
+  it++;
+  ASSERT_TRUE(it != preset_zoom_levels.end());
+  double new_zoom_level = *it;
+
+  auto zoom_controller = ZoomController::FromWebContents(web_contents);
+  // We expect a ZoomChangedEvent with can_show_bubble == false if the PDF
+  // extension behaviour is properly picked up. The test times out otherwise.
+  ZoomChangedWatcher watcher(zoom_controller,
+                             ZoomController::ZoomChangedEventData(
+                                 web_contents, 0.f, new_zoom_level,
+                                 ZoomController::ZOOM_MODE_MANUAL, false));
+
+  // Zoom PDF via script.
+#if defined(TOOLKIT_VIEWS) && !defined(OS_MACOSX)
+  EXPECT_EQ(nullptr, ZoomBubbleView::GetZoomBubble());
+#endif
+  ASSERT_TRUE(
+      content::ExecuteScript(guest_contents, "viewer.viewport.zoomIn();"));
+
+  watcher.Wait();
+#if defined(TOOLKIT_VIEWS) && !defined(OS_MACOSX)
+  EXPECT_EQ(nullptr, ZoomBubbleView::GetZoomBubble());
+#endif
+}
+
 class MaterialPDFExtensionTest : public PDFExtensionTest {
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kEnablePdfMaterialUI);
@@ -452,6 +542,7 @@ IN_PROC_BROWSER_TEST_F(MaterialPDFExtensionTest, Elements) {
   RunTestsInFile("material_elements_test.js", "test.pdf");
 }
 
+// TODO(tsergeant): Verify that flake is fixed. http://crbug.com/550015
 IN_PROC_BROWSER_TEST_F(MaterialPDFExtensionTest, ToolbarManager) {
   RunTestsInFile("toolbar_manager_test.js", "test.pdf");
 }

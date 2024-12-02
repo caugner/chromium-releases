@@ -8,8 +8,8 @@ import sys
 from telemetry import benchmark
 from telemetry.internal.browser import browser_finder
 
-sys.path.append(os.path.join(os.path.dirname(__file__), os.pardir,
-    os.pardir, 'variations'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..',
+    '..', 'variations'))
 import fieldtrial_util # pylint: disable=import-error
 
 
@@ -28,6 +28,10 @@ class PerfBenchmark(benchmark.Benchmark):
     # Subclass of PerfBenchmark should override  SetExtraBrowserOptions to add
     # more browser options rather than overriding CustomizeBrowserOptions.
     super(PerfBenchmark, self).CustomizeBrowserOptions(options)
+
+    # Enable taking screen shot on failed pages for all perf benchmarks.
+    options.take_screenshot_for_failed_page = True
+
     # The current field trial config is used for an older build in the case of
     # reference. This is a problem because we are then subjecting older builds
     # to newer configurations that may crash.  To work around this problem,
@@ -48,8 +52,8 @@ class PerfBenchmark(benchmark.Benchmark):
     return target_os
 
   def _GetVariationsBrowserArgs(self, finder_options):
-    variations_dir = os.path.join(os.path.dirname(__file__), os.pardir,
-        os.pardir, os.pardir, 'testing', 'variations')
+    variations_dir = os.path.join(os.path.dirname(__file__), '..',
+        '..', '..', 'testing', 'variations')
     possible_browser = browser_finder.FindBrowser(finder_options)
     if not possible_browser:
       return []

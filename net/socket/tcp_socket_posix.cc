@@ -21,7 +21,6 @@
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_util.h"
 #include "net/base/network_activity_monitor.h"
 #include "net/base/network_change_notifier.h"
 #include "net/socket/socket_net_log_params.h"
@@ -465,6 +464,10 @@ bool TCPSocketPosix::IsValid() const {
   return socket_ != NULL && socket_->socket_fd() != kInvalidSocket;
 }
 
+void TCPSocketPosix::DetachFromThread() {
+  socket_->DetachFromThread();
+}
+
 void TCPSocketPosix::StartLoggingMultipleConnectAttempts(
     const AddressList& addresses) {
   if (!logging_multiple_connect_attempts_) {
@@ -535,7 +538,7 @@ int TCPSocketPosix::HandleConnectCompleted(int rv) const {
   // Log the end of this attempt (and any OS error it threw).
   if (rv != OK) {
     net_log_.EndEvent(NetLog::TYPE_TCP_CONNECT_ATTEMPT,
-                      NetLog::IntegerCallback("os_error", errno));
+                      NetLog::IntCallback("os_error", errno));
   } else {
     net_log_.EndEvent(NetLog::TYPE_TCP_CONNECT_ATTEMPT);
   }

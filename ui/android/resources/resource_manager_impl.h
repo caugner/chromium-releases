@@ -9,6 +9,7 @@
 #include "ui/android/resources/resource_manager.h"
 #include "ui/android/ui_android_export.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/native_widget_types.h"
 
 namespace ui {
 
@@ -16,7 +17,7 @@ class UI_ANDROID_EXPORT ResourceManagerImpl : public ResourceManager {
  public:
   static ResourceManagerImpl* FromJavaObject(jobject jobj);
 
-  ResourceManagerImpl();
+  explicit ResourceManagerImpl(gfx::NativeWindow native_window);
   ~ResourceManagerImpl() override;
 
   void Init(cc::LayerTreeHost* host);
@@ -25,6 +26,8 @@ class UI_ANDROID_EXPORT ResourceManagerImpl : public ResourceManager {
   base::android::ScopedJavaLocalRef<jobject> GetJavaObject() override;
   Resource* GetResource(AndroidResourceType res_type, int res_id) override;
   void PreloadResource(AndroidResourceType res_type, int res_id) override;
+  CrushedSpriteResource* GetCrushedSpriteResource(
+      int bitmap_res_id, int metadata_res_id) override;
 
   // Called from Java
   // ----------------------------------------------------------
@@ -41,8 +44,25 @@ class UI_ANDROID_EXPORT ResourceManagerImpl : public ResourceManager {
                        jint aperture_top,
                        jint aperture_right,
                        jint aperture_bottom);
+  void OnCrushedSpriteResourceReady(JNIEnv* env,
+                                    jobject jobj,
+                                    jint bitmap_res_id,
+                                    jobject bitmap,
+                                    jobjectArray frame_rects,
+                                    jint unscaled_sprite_width,
+                                    jint unscaled_sprite_height,
+                                    jfloat scaled_sprite_width,
+                                    jfloat scaled_sprite_height);
+  void OnCrushedSpriteResourceReloaded(JNIEnv* env,
+                                       jobject jobj,
+                                       jint bitmap_res_id,
+                                       jobject bitmap);
 
   static bool RegisterResourceManager(JNIEnv* env);
+
+  // Helper method for processing crushed sprite metadata; public for testing.
+  CrushedSpriteResource::SrcDstRects ProcessCrushedSpriteFrameRects(
+      std::vector<std::vector<int>> frame_rects_vector);
 
  private:
   friend class TestResourceManagerImpl;
@@ -52,11 +72,17 @@ class UI_ANDROID_EXPORT ResourceManagerImpl : public ResourceManager {
                                        int res_id);
   virtual void RequestResourceFromJava(AndroidResourceType res_type,
                                        int res_id);
+  virtual void RequestCrushedSpriteResourceFromJava(int bitmap_res_id,
+                                                    int metadata_res_id,
+                                                    bool reloading);
 
   typedef IDMap<Resource, IDMapOwnPointer> ResourceMap;
+  typedef IDMap<CrushedSpriteResource, IDMapOwnPointer>
+      CrushedSpriteResourceMap;
 
   cc::LayerTreeHost* host_;
   ResourceMap resources_[ANDROID_RESOURCE_TYPE_COUNT];
+  CrushedSpriteResourceMap crushed_sprite_resources_;
 
   base::android::ScopedJavaGlobalRef<jobject> java_obj_;
 

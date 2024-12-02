@@ -154,19 +154,23 @@
           'product_name': '<(mac_product_name) Helper',
           'mac_bundle': 1,
           'dependencies': [
-            'chrome_dll',
+            'chrome_dll_dependency_shim',
             'infoplist_strings_tool',
+            'common_constants.gyp:version_header',
+          ],
+          'defines': [
+            'HELPER_EXECUTABLE'
           ],
           'sources': [
-            # chrome_exe_main_mac.cc's main() is the entry point for
+            # chrome_exe_main_mac.c's main() is the entry point for
             # the "chrome" (browser app) target.  All it does is jump
             # to chrome_dll's ChromeMain.  This is appropriate for
             # helper processes too, because the logic to discriminate
             # between process types at run time is actually directed
             # by the --type command line argument processed by
-            # ChromeMain.  Sharing chrome_exe_main_mac.cc with the
+            # ChromeMain.  Sharing chrome_exe_main_mac.c with the
             # browser app will suffice for now.
-            'app/chrome_exe_main_mac.cc',
+            'app/chrome_exe_main_mac.c',
             'app/helper-Info.plist',
           ],
           # TODO(mark): Come up with a fancier way to do this.  It should only
@@ -415,41 +419,6 @@
           ],
         },
         {
-          # GN version: //chrome:version_header
-          'target_name': 'chrome_version_header',
-          'type': 'none',
-          'hard_dependency': 1,
-          'actions': [
-            {
-              'action_name': 'version_header',
-              'variables': {
-                'lastchange_path':
-                  '<(DEPTH)/build/util/LASTCHANGE',
-                'branding_path': 'app/theme/<(branding_path_component)/BRANDING',
-              },
-              'inputs': [
-                '<(version_path)',
-                '<(branding_path)',
-                '<(lastchange_path)',
-                'version.h.in',
-              ],
-              'outputs': [
-                '<(SHARED_INTERMEDIATE_DIR)/version.h',
-              ],
-              'action': [
-                'python',
-                '<(version_py_path)',
-                '-f', '<(version_path)',
-                '-f', '<(branding_path)',
-                '-f', '<(lastchange_path)',
-                'version.h.in',
-                '<@(_outputs)',
-              ],
-              'message': 'Generating version header file: <@(_outputs)',
-            },
-          ],
-        },
-        {
           'target_name': 'crash_service',
           'type': 'executable',
           'dependencies': [
@@ -489,7 +458,6 @@
         },
       ],  # 'targets'
       'includes': [
-        'app_shim/app_shim_win.gypi',
         'chrome_watcher/chrome_watcher.gypi',
         'chrome_process_finder.gypi',
         'metro_utils.gypi',
@@ -567,20 +535,22 @@
             'chrome_resources.gyp:chrome_strings',
             'chrome_strings_grd',
             'chrome_version_java',
+            'content_setting_java',
+            'content_settings_type_java',
             'connection_security_levels_java',
             'connectivity_check_result_java',
             'document_tab_model_info_proto_java',
             'infobar_action_type_java',
-            'profile_account_management_metrics_java',
-            'content_setting_java',
-            'content_settings_type_java',
             'most_visited_tile_type_java',
             'page_info_connection_type_java',
+            'profile_account_management_metrics_java',
             'resource_id_java',
-            'tab_load_status_java',
             'shortcut_source_java',
+            'tab_load_status_java',
             '../base/base.gyp:base',
+            '../build/android/java_google_api_keys.gyp:google_api_keys_java',
             '../chrome/android/chrome_apk.gyp:custom_tabs_service_aidl',
+            '../components/components.gyp:autocomplete_match_type_java',
             '../components/components.gyp:bookmarks_java',
             '../components/components.gyp:dom_distiller_core_java',
             '../components/components.gyp:enhanced_bookmarks_java_enums_srcjar',
@@ -602,7 +572,6 @@
             '../third_party/android_media/android_media.gyp:android_media_java',
             '../third_party/android_protobuf/android_protobuf.gyp:protobuf_nano_javalib',
             '../third_party/android_swipe_refresh/android_swipe_refresh.gyp:android_swipe_refresh_java',
-            '../third_party/android_tools/android_tools.gyp:android_support_design_javalib',
             '../third_party/android_tools/android_tools.gyp:android_support_v7_appcompat_javalib',
             '../third_party/android_tools/android_tools.gyp:android_support_v7_mediarouter_javalib',
             '../third_party/android_tools/android_tools.gyp:android_support_v7_recyclerview_javalib',

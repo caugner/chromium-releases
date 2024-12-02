@@ -9,8 +9,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "cc/output/context_provider.h"
-#include "third_party/mojo/src/mojo/public/c/gles2/gles2.h"
-#include "third_party/mojo/src/mojo/public/cpp/system/core.h"
+#include "mojo/public/c/gles2/gles2_types.h"
+#include "mojo/public/cpp/system/core.h"
 
 namespace mus {
 
@@ -27,14 +27,9 @@ class ContextProvider : public cc::ContextProvider {
   void SetupLock() override;
   base::Lock* GetLock() override;
   Capabilities ContextCapabilities() override;
-  void VerifyContexts() override {}
   void DeleteCachedResources() override {}
-  bool DestroyedOnMainThread() override;
   void SetLostContextCallback(
       const LostContextCallback& lost_context_callback) override {}
-  void SetMemoryPolicyChangedCallback(
-      const MemoryPolicyChangedCallback& memory_policy_changed_callback)
-      override {}
 
  protected:
   friend class base::RefCountedThreadSafe<ContextProvider>;

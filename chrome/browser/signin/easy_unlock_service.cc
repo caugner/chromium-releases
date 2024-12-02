@@ -56,6 +56,7 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
+#include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user_manager.h"
 #endif
 
@@ -612,11 +613,9 @@ void EasyUnlockService::CheckCryptohomeKeysAndMaybeHardlock() {
   DCHECK(key_manager);
 
   key_manager->GetDeviceDataList(
-      chromeos::UserContext(user_id),
+      chromeos::UserContext(AccountId::FromUserEmail(user_id)),
       base::Bind(&EasyUnlockService::OnCryptohomeKeysFetchedForChecking,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 user_id,
-                 paired_devices));
+                 weak_ptr_factory_.GetWeakPtr(), user_id, paired_devices));
 #endif
 }
 
@@ -688,7 +687,6 @@ void EasyUnlockService::UpdateAppState() {
 
     if (!bluetooth_waking_up) {
       app_manager_->DisableAppIfLoaded();
-      ResetScreenlockState();
       proximity_auth_system_.reset();
 #if defined(OS_CHROMEOS)
       power_monitor_.reset();
@@ -840,6 +838,9 @@ void EasyUnlockService::OnRemoteDeviceChanged(
   if (remote_device) {
     PA_LOG(INFO) << "Remote device changed, recreating ProximityAuthSystem.";
     proximity_auth_system_.reset(new proximity_auth::ProximityAuthSystem(
+        GetType() == TYPE_SIGNIN
+            ? proximity_auth::ProximityAuthSystem::SIGN_IN
+            : proximity_auth::ProximityAuthSystem::SESSION_LOCK,
         *remote_device, proximity_auth_client()));
     proximity_auth_system_->Start();
   } else {

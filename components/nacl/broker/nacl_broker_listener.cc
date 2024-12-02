@@ -23,10 +23,6 @@
 #include "ipc/ipc_switches.h"
 #include "sandbox/win/src/sandbox_policy.h"
 
-#if defined(OS_WIN)
-#include "ipc/attachment_broker_unprivileged_win.h"
-#endif
-
 namespace {
 
 void SendReply(IPC::Channel* channel, int32 pid, bool result) {
@@ -36,10 +32,8 @@ void SendReply(IPC::Channel* channel, int32 pid, bool result) {
 }  // namespace
 
 NaClBrokerListener::NaClBrokerListener() {
-#if defined(OS_WIN)
-  attachment_broker_.reset(new IPC::AttachmentBrokerUnprivilegedWin);
-  IPC::AttachmentBroker::SetGlobal(attachment_broker_.get());
-#endif
+  attachment_broker_.reset(
+      IPC::AttachmentBrokerUnprivileged::CreateBroker().release());
 }
 
 NaClBrokerListener::~NaClBrokerListener() {
@@ -57,8 +51,7 @@ void NaClBrokerListener::Listen() {
 }
 
 // NOTE: changes to this method need to be reviewed by the security team.
-void NaClBrokerListener::PreSpawnTarget(sandbox::TargetPolicy* policy,
-                                        bool* success) {
+bool NaClBrokerListener::PreSpawnTarget(sandbox::TargetPolicy* policy) {
   // This code is duplicated in chrome_content_browser_client.cc.
 
   // Allow the server side of a pipe restricted to the "chrome.nacl."
@@ -68,7 +61,7 @@ void NaClBrokerListener::PreSpawnTarget(sandbox::TargetPolicy* policy,
       sandbox::TargetPolicy::SUBSYS_NAMED_PIPES,
       sandbox::TargetPolicy::NAMEDPIPES_ALLOW_ANY,
       L"\\\\.\\pipe\\chrome.nacl.*");
-  *success = (result == sandbox::SBOX_ALL_OK);
+  return result == sandbox::SBOX_ALL_OK;
 }
 
 void NaClBrokerListener::OnChannelConnected(int32 peer_pid) {
@@ -91,7 +84,7 @@ bool NaClBrokerListener::OnMessageReceived(const IPC::Message& msg) {
 
 void NaClBrokerListener::OnChannelError() {
   // The browser died unexpectedly, quit to avoid a zombie process.
-  base::MessageLoop::current()->Quit();
+  base::MessageLoop::current()->QuitWhenIdle();
 }
 
 void NaClBrokerListener::OnLaunchLoaderThroughBroker(
@@ -144,5 +137,5 @@ void NaClBrokerListener::OnLaunchDebugExceptionHandler(
 }
 
 void NaClBrokerListener::OnStopBroker() {
-  base::MessageLoop::current()->Quit();
+  base::MessageLoop::current()->QuitWhenIdle();
 }

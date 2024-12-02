@@ -5,8 +5,8 @@
 #ifndef UI_OZONE_PLATFORM_DRM_GPU_GBM_BUFFER_H_
 #define UI_OZONE_PLATFORM_DRM_GPU_GBM_BUFFER_H_
 
+#include "base/files/scoped_file.h"
 #include "base/macros.h"
-#include "base/memory/scoped_ptr.h"
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/ozone/platform/drm/gpu/gbm_buffer_base.h"
@@ -41,16 +41,20 @@ class GbmBuffer : public GbmBufferBase {
 
 class GbmPixmap : public NativePixmap {
  public:
-  GbmPixmap(const scoped_refptr<GbmBuffer>& buffer,
-            GbmSurfaceFactory* surface_manager);
-  bool Initialize();
-  void SetScalingCallback(const ScalingCallback& scaling_callback) override;
-  scoped_refptr<NativePixmap> GetScaledPixmap(gfx::Size new_size) override;
+  explicit GbmPixmap(GbmSurfaceFactory* surface_manager);
+  void Initialize(base::ScopedFD dma_buf, int dma_buf_pitch);
+  bool InitializeFromBuffer(const scoped_refptr<GbmBuffer>& buffer);
+  void SetProcessingCallback(
+      const ProcessingCallback& processing_callback) override;
+  scoped_refptr<NativePixmap> GetProcessedPixmap(
+      gfx::Size target_size,
+      gfx::BufferFormat target_format) override;
 
   // NativePixmap:
   void* GetEGLClientBuffer() override;
   int GetDmaBufFd() override;
   int GetDmaBufPitch() override;
+  gfx::BufferFormat GetBufferFormat() override;
   bool ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
                             int plane_z_order,
                             gfx::OverlayTransform plane_transform,
@@ -62,16 +66,18 @@ class GbmPixmap : public NativePixmap {
 
  private:
   ~GbmPixmap() override;
-  bool ShouldApplyScaling(const gfx::Rect& display_bounds,
-                          const gfx::RectF& crop_rect,
-                          gfx::Size* required_size);
+  bool ShouldApplyProcessing(const gfx::Rect& display_bounds,
+                             const gfx::RectF& crop_rect,
+                             gfx::Size* target_size,
+                             gfx::BufferFormat* target_format);
 
   scoped_refptr<GbmBuffer> buffer_;
-  int dma_buf_ = -1;
+  base::ScopedFD dma_buf_;
+  int dma_buf_pitch_ = -1;
 
   GbmSurfaceFactory* surface_manager_;
 
-  ScalingCallback scaling_callback_;
+  ProcessingCallback processing_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(GbmPixmap);
 };

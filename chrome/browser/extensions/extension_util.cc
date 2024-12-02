@@ -11,6 +11,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
 #include "chrome/browser/extensions/permissions_updater.h"
+#include "chrome/browser/extensions/scripting_permissions_modifier.h"
 #include "chrome/browser/extensions/shared_module_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
@@ -98,11 +99,11 @@ void SetAllowedScriptingOnAllUrlsHelper(
         ExtensionRegistry::Get(context)->enabled_extensions().GetByID(
             extension_id);
     if (extension) {
-      PermissionsUpdater updater(context);
+      ScriptingPermissionsModifier modifier(context, extension);
       if (allowed)
-        updater.GrantWithheldImpliedAllHosts(extension);
+        modifier.GrantWithheldImpliedAllHosts();
       else
-        updater.WithholdImpliedAllHosts(extension);
+        modifier.WithholdImpliedAllHosts();
 
       // If this was an update to permissions, we also need to sync the change.
       ExtensionSyncService* sync_service = ExtensionSyncService::Get(context);
@@ -237,11 +238,11 @@ void SetAllowedScriptingOnAllUrls(const std::string& extension_id,
                                   content::BrowserContext* context,
                                   bool allowed) {
   if (allowed != AllowedScriptingOnAllUrls(extension_id, context)) {
-    SetAllowedScriptingOnAllUrlsHelper(context, extension_id, allowed, true);
     ExtensionPrefs::Get(context)->UpdateExtensionPref(
         extension_id,
         kHasSetScriptOnAllUrlsPrefName,
         new base::FundamentalValue(true));
+    SetAllowedScriptingOnAllUrlsHelper(context, extension_id, allowed, true);
   }
 }
 

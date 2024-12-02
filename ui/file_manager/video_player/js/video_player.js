@@ -15,7 +15,6 @@ function FullWindowVideoControls(
   VideoControls.call(this,
       controlsContainer,
       this.onPlaybackError_.wrap(this),
-      loadTimeData.getString.wrap(loadTimeData),
       this.toggleFullScreen_.wrap(this),
       videoContainer);
 
@@ -26,6 +25,11 @@ function FullWindowVideoControls(
 
   this.updateStyle();
   window.addEventListener('resize', this.updateStyle.wrap(this));
+  var currentWindow = chrome.app.window.current();
+  currentWindow.onFullscreened.addListener(
+      this.onFullScreenChanged.bind(this, true));
+  currentWindow.onRestored.addListener(
+      this.onFullScreenChanged.bind(this, false));
   document.addEventListener('keydown', function(e) {
     switch (util.getKeyModifiers(e) + e.keyIdentifier) {
       // Handle debug shortcut keys.
@@ -44,7 +48,8 @@ function FullWindowVideoControls(
 
       case 'U+0020': // Space
       case 'MediaPlayPause':
-        this.togglePlayStateWithFeedback();
+        if (!e.target.classList.contains('menu-button'))
+          this.togglePlayStateWithFeedback();
         break;
       case 'U+001B': // Escape
         util.toggleFullScreen(
@@ -115,7 +120,7 @@ FullWindowVideoControls.prototype.getInactivityWatcher = function() {
  */
 FullWindowVideoControls.prototype.showErrorMessage = function(message) {
   var errorBanner = getRequiredElement('error');
-  errorBanner.textContent = loadTimeData.getString(message);
+  errorBanner.textContent = str(message);
   errorBanner.setAttribute('visible', 'true');
 
   // The window is hidden if the video has not loaded yet.
@@ -140,8 +145,7 @@ FullWindowVideoControls.prototype.onPlaybackError_ = function(error) {
     this.decodeErrorOccured = true;
   }
 
-  // Disable inactivity watcher, and disable the ui, by hiding tools manually.
-  this.getInactivityWatcher().disabled = true;
+  // Disable controls on the ui.
   getRequiredElement('video-player').setAttribute('disabled', 'true');
 
   // Detach the video element, since it may be unreliable and reset stored
@@ -218,43 +222,23 @@ VideoPlayer.prototype.prepare = function(videos) {
 
   document.ondragstart = preventDefault;
 
-  var maximizeButton = queryRequiredElement('.maximize-button');
-  maximizeButton.addEventListener(
-      'click',
-      function(event) {
-        var appWindow = chrome.app.window.current();
-        if (appWindow.isMaximized())
-          appWindow.restore();
-        else
-          appWindow.maximize();
-        event.stopPropagation();
-      }.wrap(null));
-  maximizeButton.addEventListener('mousedown', preventDefault);
-
-  var minimizeButton = queryRequiredElement('.minimize-button');
-  minimizeButton.addEventListener(
-      'click',
-      function(event) {
-        chrome.app.window.current().minimize();
-        event.stopPropagation();
-      }.wrap(null));
-  minimizeButton.addEventListener('mousedown', preventDefault);
-
-  var closeButton = queryRequiredElement('.close-button');
-  closeButton.addEventListener(
-      'click',
-      function(event) {
-        window.close();
-        event.stopPropagation();
-      }.wrap(null));
-  closeButton.addEventListener('mousedown', preventDefault);
-
   cr.ui.decorate(getRequiredElement('cast-menu'), cr.ui.Menu);
 
   this.controls_ = new FullWindowVideoControls(
       getRequiredElement('video-player'),
       getRequiredElement('video-container'),
       getRequiredElement('controls'));
+
+  var observer = new MutationObserver(function(mutations) {
+    var isLoadingOrDisabledChanged = mutations.some(function(mutation) {
+      return mutation.attributeName === 'loading' ||
+             mutation.attributeName === 'disabled';
+    });
+    if (isLoadingOrDisabledChanged)
+      this.updateInactivityWatcherState_();
+  }.bind(this));
+  observer.observe(getRequiredElement('video-player'),
+      { attributes: true, childList: false });
 
   var reloadVideo = function(e) {
     if (this.controls_.decodeErrorOccured &&
@@ -308,8 +292,6 @@ VideoPlayer.prototype.loadVideo_ = function(video, opt_callback) {
   this.loadQueue_.run(function(callback) {
     document.title = video.name;
 
-    getRequiredElement('title').innerText = video.name;
-
     var videoPlayerElement = getRequiredElement('video-player');
     if (this.currentPos_ === (this.videos_.length - 1))
       videoPlayerElement.setAttribute('last-video', true);
@@ -325,7 +307,6 @@ VideoPlayer.prototype.loadVideo_ = function(video, opt_callback) {
     getRequiredElement('video-player').removeAttribute('disabled');
     getRequiredElement('error').removeAttribute('visible');
     this.controls.detachMedia();
-    this.controls.getInactivityWatcher().disabled = true;
     this.controls.decodeErrorOccured = false;
     this.controls.casting = !!this.currentCast_;
 
@@ -405,7 +386,6 @@ VideoPlayer.prototype.loadVideo_ = function(video, opt_callback) {
               if (opt_callback)
                 opt_callback();
               videoPlayerElement.removeAttribute('loading');
-              this.controls.getInactivityWatcher().disabled = false;
             }
 
             this.videoElement_.removeEventListener('loadedmetadata', handler);
@@ -415,10 +395,12 @@ VideoPlayer.prototype.loadVideo_ = function(video, opt_callback) {
 
           this.videoElement_.addEventListener('play', function() {
             chrome.power.requestKeepAwake('display');
-          }.wrap());
+            this.updateInactivityWatcherState_();
+          }.wrap(this));
           this.videoElement_.addEventListener('pause', function() {
             chrome.power.releaseKeepAwake();
-          }.wrap());
+            this.updateInactivityWatcherState_();
+          }.wrap(this));
 
           this.videoElement_.load();
           callback();
@@ -504,8 +486,8 @@ VideoPlayer.prototype.onFirstVideoReady_ = function() {
 
   var oldLeft = window.screenX;
   var oldTop = window.screenY;
-  var oldWidth = window.outerWidth;
-  var oldHeight = window.outerHeight;
+  var oldWidth = window.innerWidth;
+  var oldHeight = window.innerHeight;
 
   if (!oldWidth && !oldHeight) {
     oldLeft = window.screen.availWidth / 2;
@@ -513,9 +495,12 @@ VideoPlayer.prototype.onFirstVideoReady_ = function() {
   }
 
   var appWindow = chrome.app.window.current();
-  appWindow.resizeTo(newWidth, newHeight);
-  appWindow.moveTo(oldLeft - (newWidth - oldWidth) / 2,
-                   oldTop - (newHeight - oldHeight) / 2);
+  appWindow.innerBounds.width = Math.round(newWidth);
+  appWindow.innerBounds.height = Math.round(newHeight);
+  appWindow.outerBounds.left = Math.max(
+      0, Math.round(oldLeft - (newWidth - oldWidth) / 2));
+  appWindow.outerBounds.top = Math.max(
+      0, Math.round(oldTop - (newHeight - oldHeight) / 2));
   appWindow.show();
 
   this.videoElement_.play();
@@ -596,7 +581,7 @@ VideoPlayer.prototype.setCastList = function(casts) {
   }
 
   var item = new cr.ui.MenuItem();
-  item.label = loadTimeData.getString('VIDEO_PLAYER_PLAY_THIS_COMPUTER');
+  item.label = str('VIDEO_PLAYER_PLAY_THIS_COMPUTER');
   item.setAttribute('aria-label', item.label);
   item.castLabel = '';
   item.addEventListener('activate', this.onCastSelected_.wrap(this, null));
@@ -661,6 +646,23 @@ VideoPlayer.prototype.onCurrentCastDisappear_ = function() {
 VideoPlayer.prototype.onCastSessionUpdate_ = function(alive) {
   if (!alive)
     this.unloadVideo();
+};
+
+/**
+ * Updates the MouseInactivityWatcher's disable property to prevent control
+ * panel from being hidden in some situations.
+ * @private
+ */
+VideoPlayer.prototype.updateInactivityWatcherState_ = function() {
+  var videoPlayerElement = getRequiredElement('video-player');
+  // If any of following condition is met, we don't hide the tool bar.
+  // - Loaded video is paused.
+  // - Loading a video is in progress.
+  // - Opening video has an error.
+  this.controls.getInactivityWatcher().disabled =
+      (this.videoElement_ && this.videoElement_.paused) ||
+      videoPlayerElement.hasAttribute('loading') ||
+      videoPlayerElement.hasAttribute('disabled');
 };
 
 var player = new VideoPlayer();

@@ -24,6 +24,7 @@ Untuk mendapatkan maklumat tentang privasi, sila lihat Dasar Privasi Google (htt
 <translation id="1546934824884762070">Ralat yang tidak dijangka telah berlaku. Sila laporkan masalah ini kepada pembangun.</translation>
 <translation id="1619813076098775562">Sambungan ke peranti Cast ditutup.</translation>
 <translation id="1643640058022401035">Tindakan meninggalkan halaman ini akan menamatkan sesi Chromoting anda.</translation>
+<translation id="1646994964686260497">Tiada peranti untuk disambungkan.</translation>
 <translation id="1654128982815600832">Mendayakan sambungan jauh untuk komputer ini…</translation>
 <translation id="170207782578677537">Gagal mendaftarkan komputer ini.</translation>
 <translation id="1704090719919187045">Pilihan Hos Chromoting</translation>
@@ -33,7 +34,6 @@ Untuk mendapatkan maklumat tentang privasi, sila lihat Dasar Privasi Google (htt
 <translation id="1770394049404108959">Saya tidak boleh membuka aplikasi ini.</translation>
 <translation id="177096447311351977">IP Saluran untuk klien: <ph name="CLIENT_GAIA_IDENTIFIER" /> ip='<ph name="CLIENT_IP_ADDRESS_AND_PORT" />' host_ip='<ph name="HOST_IP_ADDRESS_AND_PORT" />' channel='<ph name="CHANNEL_TYPE" />' connection='<ph name="CONNECTION_TYPE" />'.</translation>
 <translation id="1779766957982586368">Tutup tetingkap</translation>
-<translation id="1818475040640568770">Anda tidak mempunyai komputer yang berdaftar.</translation>
 <translation id="1841799852846221389">Melumpuhkan sambungan jauh untuk komputer ini…</translation>
 <translation id="189172778771606813">Tutup laci navigasi</translation>
 <translation id="195619862187186579">Reka letak papan kekunci</translation>
@@ -87,8 +87,6 @@ Untuk mendapatkan maklumat tentang privasi, sila lihat Dasar Privasi Google (htt
 <translation id="2926340305933667314">Gagal melumpuhkan akses jauh kepada komputer ini. Sila cuba lagi kemudian.</translation>
 <translation id="2930135165929238380">Beberapa komponen yang diperlukan didapati hilang. Sila pergi ke chrome://plugins dan pastikan Klien Natif didayakan.</translation>
 <translation id="2939145106548231838">Sahkan kepada hos</translation>
-<translation id="2998137343848432918">• Skrin Kredit ditambahkan.
-• Masalah apabila beralih kepada skrin penuh dengan papan kekunci kelihatan dibetulkan.</translation>
 <translation id="3020807351229499221">Gagal mengemas kini PIN. Sila cuba lagi kemudian.</translation>
 <translation id="3025388528294795783">Untuk membantu kami menyelesaikan masalah anda, sila beritahu kami masalahnya:</translation>
 <translation id="3027681561976217984">Mod sentuh</translation>
@@ -97,7 +95,6 @@ Untuk mendapatkan maklumat tentang privasi, sila lihat Dasar Privasi Google (htt
 <translation id="3150823315463303127">Hos gagal membaca dasar.</translation>
 <translation id="3194245623920924351">Desktop Jauh Chrome</translation>
 <translation id="3197730452537982411">Desktop Jauh</translation>
-<translation id="3244258558056547981">Tunjukkan paparan Cardboard.</translation>
 <translation id="3258789396564295715">Anda boleh mengakses komputer ini dengan selamat menggunakan Desktop Jauh Chrome.</translation>
 <translation id="327263477022142889">Ingin membantu meningkatkan Desktop Jauh Chrome? <ph name="LINK_BEGIN" />Jawab tinjauan.<ph name="LINK_END" /></translation>
 <translation id="3286521253923406898">Alat Kawalan Hos Chromoting</translation>
@@ -113,6 +110,7 @@ Untuk mendapatkan maklumat tentang privasi, sila lihat Dasar Privasi Google (htt
 <translation id="3606997049964069799">Anda tidak log masuk ke Chromium. Sila log masuk dan cuba lagi.</translation>
 <translation id="3649256019230929621">Minimumkan tetingkap</translation>
 <translation id="369442766917958684">Luar talian.</translation>
+<translation id="3695446226812920698">Ketahui caranya</translation>
 <translation id="3776024066357219166">Sesi Desktop Jauh Chrome anda telah tamat.</translation>
 <translation id="3785447812627779171">Hos
 Chromoting</translation>
@@ -125,6 +123,11 @@ Chromoting</translation>
 <translation id="3950820424414687140">Log masuk</translation>
 <translation id="3989511127559254552">Untuk meneruskan, anda mesti memberikan kebenaran akses lanjutan terlebih dahulu kepada komputer anda. Anda hanya perlu melakukannya sekali.</translation>
 <translation id="4006787130661126000">Anda mesti mendayakan sambungan jauh jika anda mahu menggunakan Desktop Jauh Chrome untuk mengakses komputer ini.</translation>
+<translation id="401121182145179743">Mula-mula anda perlu menyediakan komputer anda untuk akses jauh.</translation>
+<translation id="4028465833180158312">• Kemas kini UI Reka Bentuk Bahan.
+• Kredit pelesenan pihak ketiga.
+• Maklumat yang ditunjukkan bagi komputer jauh yang berada di luar talian.</translation>
+<translation id="405887016757208221">Komputer jauh gagal memulakan sesi. Jika masalah berterusan, sila cuba mengkonfigurasi hos sekali lagi.</translation>
 <translation id="4068946408131579958">Semua sambungan</translation>
 <translation id="409800995205263688">NOTA: Tetapan dasar membenarkan sambungan antara komputer dalam rangkaian anda sahaja.</translation>
 <translation id="4155497795971509630">Sesetengah komponen yang diperlukan hilang. Sila pastikan anda telah memasang versi terkini perisian dan cuba lagi.</translation>
@@ -149,6 +152,7 @@ Chromoting</translation>
 <translation id="4573676252416618192">Hos Desktop
 Jauh Chrome</translation>
 <translation id="4619978527973181021">Terima dan Pasang</translation>
+<translation id="4647791084836149355">Tunjukkan paparan Cardboard</translation>
 <translation id="4703799847237267011">Sesi Chromoting anda telah tamat.</translation>
 <translation id="4736223761657662401">Sejarah Sambungan</translation>
 <translation id="4741792197137897469">Pengesahan gagal. Sila log masuk ke Chrome sekali lagi.</translation>
@@ -170,7 +174,6 @@ Jauh Chrome</translation>
 <translation id="518094545883702183">Maklumat ini hanya digunakan untuk mendiagnosis masalah yang anda laporkan, hanya tersedia kepada seseorang yang menyiasat laporan anda dan dikekalkan selama tidak lebih daripada 30 hari.</translation>
 <translation id="5222676887888702881">Log keluar</translation>
 <translation id="5254120496627797685">Tindakan meninggalkan halaman ini akan menamatkan sesi Desktop Jauh Chrome anda.</translation>
-<translation id="5285241842433869526">Ketahui cara menyediakan komputer untuk akses jauh.</translation>
 <translation id="5308380583665731573">Sambung</translation>
 <translation id="5363265567587775042">Minta pemilik komputer yang ingin anda gunakan itu supaya mengklik “<ph name="SHARE" />” dan memberi anda kod aksesnya.</translation>
 <translation id="5379087427956679853">Desktop Jauh Chrome membolehkan anda berkongsi komputer anda dengan selamat melalui Web. Kedua-dua pengguna perlu menjalankan apl Desktop Jauh Chrome, yang boleh didapati di <ph name="URL" />.</translation>
@@ -207,6 +210,7 @@ Jauh Chrome</translation>
 <translation id="6284412385303060032">Hos yang berjalan pada skrin logik konsol telah ditutup untuk menyokong mod tirai dengan menukar kepada hos yang berjalan dalam sesi khusus pengguna.</translation>
 <translation id="629730747756840877">Akaun</translation>
 <translation id="6304318647555713317">Klien</translation>
+<translation id="6324708100353784493">Anda telah mendayakan mod penyepaduan Google Cardboard. Untuk menggunakan mod ini, masukkan peranti anda dalam pemapar yang serasi dengan Google Cardboard.</translation>
 <translation id="6381670701864002291">Sesuatu yang lain.</translation>
 <translation id="6398765197997659313">Keluar daripada skrin penuh</translation>
 <translation id="6441316101718669559">Integrasi desktop tidak disokong pada platform ini. Anda masih boleh menggunakan aplikasi, tetapi pengalaman pengguna akan diturun taraf.</translation>
@@ -257,6 +261,7 @@ Jauh Chrome</translation>
 <translation id="7869445566579231750">Anda tidak mempunyai kebenaran untuk menjalankan aplikasi ini.</translation>
 <translation id="7948001860594368197">Pilihan skrin</translation>
 <translation id="7970576581263377361">Pengesahan gagal. Sila log masuk ke Chromium sekali lagi.</translation>
+<translation id="7981525049612125370">Sesi jauh telah tamat tempoh.</translation>
 <translation id="8041721485428375115">Apabila memuat turun Pemasang Hos Desktop Jauh Chrome, anda bersetuju menerima <ph name="LINK_BEGIN" />Syarat Perkhidmatan<ph name="LINK_END" /> Google.</translation>
 <translation id="8073845705237259513">Untuk menggunakan Desktop Jauh Chrome, anda perlu menambahkan Akaun Google kepada peranti anda.</translation>
 <translation id="80739703311984697">Hos jauh memerlukan anda membuat pengesahan pada tapak web pihak ketiga. Untuk meneruskan, anda hendaklah memberikan Chromoting kebenaran tambahan untuk mengakses alamat ini:</translation>

@@ -104,6 +104,7 @@ floodColor
 floodOpacity
 font
 fontFamily
+fontFeatureSettings
 fontKerning
 fontSize
 fontStretch
@@ -113,8 +114,6 @@ fontVariantLigatures
 fontWeight
 getPropertyPriority
 getPropertyValue
-glyphOrientationHorizontal
-glyphOrientationVertical
 height
 imageRendering
 isolation
@@ -211,8 +210,10 @@ tableLayout
 textAlign
 textAlignLast
 textAnchor
+textCombineUpright
 textDecoration
 textIndent
+textOrientation
 textOverflow
 textRendering
 textShadow
@@ -281,7 +282,6 @@ webkitColumnSpan
 webkitColumnWidth
 webkitColumns
 webkitFilter
-webkitFontFeatureSettings
 webkitFontSizeDelta
 webkitFontSmoothing
 webkitHighlight

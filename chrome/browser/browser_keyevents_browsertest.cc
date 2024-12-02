@@ -117,7 +117,7 @@ class TestFinishObserver : public content::NotificationObserver {
     if (*dom_op_result.ptr() == "\"FINISHED\"") {
       finished_ = true;
       if (waiting_)
-        base::MessageLoopForUI::current()->Quit();
+        base::MessageLoopForUI::current()->QuitWhenIdle();
     }
   }
 
@@ -817,8 +817,9 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_PageUpDownKeys) {
 
 // AltKey is enabled only on Windows. See crbug.com/114537.
 #if defined(OS_WIN)
-// flaky on Windows - http://crbug.com/523255
-IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_FocusMenuBarByAltKey) {
+// If this flakes, disable and log details in http://crbug.com/523255.
+// TODO(sky): remove comment if proves stable and reenable other tests.
+IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, FocusMenuBarByAltKey) {
   static const KeyEventTestData kTestAltKey = {
     ui::VKEY_MENU, false, false, false, false,
     false, false, false, false, 2,

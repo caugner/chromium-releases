@@ -12,6 +12,7 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/renderer/net/net_error_page_controller.h"
 #include "components/error_page/common/net_error_info.h"
+#include "components/error_page/common/offline_page_types.h"
 #include "components/error_page/renderer/net_error_helper_core.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_frame_observer_tracker.h"
@@ -43,7 +44,7 @@ class NetErrorHelper
       public error_page::NetErrorHelperCore::Delegate,
       public NetErrorPageController::Delegate {
  public:
-  explicit NetErrorHelper(content::RenderFrame* render_view);
+  explicit NetErrorHelper(content::RenderFrame* render_frame);
   ~NetErrorHelper() override;
 
   // NetErrorPageController::Delegate implementation
@@ -65,22 +66,17 @@ class NetErrorHelper
   // RenderProcessObserver implementation.
   void NetworkStateChanged(bool online) override;
 
-  // Examines |frame| and |error| to see if this is an error worthy of a DNS
-  // probe.  If it is, initializes |error_strings| based on |error|,
-  // |is_failed_post|, and |locale| with suitable strings and returns true.
-  // If not, returns false, in which case the caller should look up error
-  // strings directly using LocalizedError::GetNavigationErrorStrings.
-  //
-  // Updates the NetErrorHelper with the assumption the page will be loaded
-  // immediately.
-  void GetErrorHTML(blink::WebFrame* frame,
-                    const blink::WebURLError& error,
+  // Initializes |error_html| with the HTML of an error page in response to
+  // |error|.  Updates internals state with the assumption the page will be
+  // loaded immediately.
+  void GetErrorHTML(const blink::WebURLError& error,
                     bool is_failed_post,
+                    bool is_ignoring_cache,
                     std::string* error_html);
 
-  // Returns whether a load for |url| in |frame| should have its error page
-  // suppressed.
-  bool ShouldSuppressErrorPage(blink::WebFrame* frame, const GURL& url);
+  // Returns whether a load for |url| in the |frame| the NetErrorHelper is
+  // attached to should have its error page suppressed.
+  bool ShouldSuppressErrorPage(const GURL& url);
 
  private:
   // NetErrorHelperCore::Delegate implementation:
@@ -88,26 +84,32 @@ class NetErrorHelper
       const blink::WebURLError& error,
       bool is_failed_post,
       bool can_use_local_diagnostics_service,
+      error_page::OfflinePageStatus offline_page_status,
       scoped_ptr<error_page::ErrorPageParams> params,
       bool* reload_button_shown,
       bool* show_saved_copy_button_shown,
       bool* show_cached_copy_button_shown,
+      bool* show_offline_pages_button_shown,
+      bool* show_offline_copy_button_shown,
       std::string* html) const override;
-  void LoadErrorPageInMainFrame(const std::string& html,
-                                const GURL& failed_url) override;
+  void LoadErrorPage(const std::string& html, const GURL& failed_url) override;
   void EnablePageHelperFunctions() override;
-  void UpdateErrorPage(const blink::WebURLError& error,
-                       bool is_failed_post,
-                       bool can_use_local_diagnostics_service) override;
+  void UpdateErrorPage(
+      const blink::WebURLError& error,
+      bool is_failed_post,
+      bool can_use_local_diagnostics_service,
+      error_page::OfflinePageStatus offline_page_status) override;
   void FetchNavigationCorrections(
       const GURL& navigation_correction_url,
       const std::string& navigation_correction_request_body) override;
   void CancelFetchNavigationCorrections() override;
   void SendTrackingRequest(const GURL& tracking_url,
                            const std::string& tracking_request_body) override;
-  void ReloadPage() override;
+  void ReloadPage(bool ignore_cache) override;
   void LoadPageFromCache(const GURL& page_url) override;
   void DiagnoseError(const GURL& page_url) override;
+  void ShowOfflinePages() override;
+  void LoadOfflineCopy(const GURL& page_url) override;
 
   void OnNetErrorInfo(int status);
   void OnSetCanShowNetworkDiagnosticsDialog(
@@ -123,6 +125,12 @@ class NetErrorHelper
 
   void OnTrackingRequestComplete(const blink::WebURLResponse& response,
                                  const std::string& data);
+
+#if defined(OS_ANDROID)
+  // Called to set the status of the offline pages that will be used to decide
+  // if offline related button will be provided in the error page.
+  void OnSetOfflinePageInfo(error_page::OfflinePageStatus offline_page_status);
+#endif
 
   scoped_ptr<content::ResourceFetcher> correction_fetcher_;
   scoped_ptr<content::ResourceFetcher> tracking_fetcher_;

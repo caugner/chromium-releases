@@ -14,19 +14,6 @@
 namespace extensions {
 
 ////////////////////////////////////////////////////////////////////////////////
-// PasswordsPrivateCanPasswordAccountBeManagedFunction
-
-PasswordsPrivateCanPasswordAccountBeManagedFunction::
-    ~PasswordsPrivateCanPasswordAccountBeManagedFunction() {}
-
-ExtensionFunction::ResponseAction
-    PasswordsPrivateCanPasswordAccountBeManagedFunction::Run() {
-  scoped_ptr<base::FundamentalValue> visible(new base::FundamentalValue(
-      password_manager::ManageAccountLinkExperimentEnabled()));
-  return RespondNow(OneArgument(visible.Pass()));
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // PasswordsPrivateRemoveSavedPasswordFunction
 
 PasswordsPrivateRemoveSavedPasswordFunction::

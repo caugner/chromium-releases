@@ -9,10 +9,6 @@
 #include "base/android/jni_weak_ref.h"
 #include "components/offline_pages/offline_page_model.h"
 
-namespace base {
-class FilePath;
-}
-
 namespace content {
 class BrowserContext;
 }
@@ -36,6 +32,8 @@ class OfflinePageBridge : public OfflinePageModel::Observer {
 
   // OfflinePageModel::Observer implementation.
   void OfflinePageModelLoaded(OfflinePageModel* model) override;
+  void OfflinePageModelChanged(OfflinePageModel* model) override;
+  void OfflinePageDeleted(int64 bookmark_id) override;
 
   void GetAllPages(JNIEnv* env,
                    jobject obj,
@@ -65,16 +63,15 @@ class OfflinePageBridge : public OfflinePageModel::Observer {
                    jobject j_callback_obj,
                    jlongArray bookmark_ids_array);
 
+  void CheckMetadataConsistency(JNIEnv* env, jobject obj);
+
  private:
   void NotifyIfDoneLoading() const;
-  static base::FilePath GetDownloadsPath(
-      content::BrowserContext* browser_context);
 
   JavaObjectWeakGlobalRef weak_java_ref_;
   // Not owned.
   OfflinePageModel* offline_page_model_;
-  // Not owned.
-  content::BrowserContext* browser_context_;
+
   DISALLOW_COPY_AND_ASSIGN(OfflinePageBridge);
 };
 

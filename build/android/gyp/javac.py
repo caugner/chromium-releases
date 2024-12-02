@@ -150,12 +150,6 @@ def _ConvertToJMakeArgs(javac_cmd, pdb_path):
   return new_args
 
 
-def _FilterJMakeOutput(stdout):
-  if md5_check.PRINT_EXPLANATIONS:
-    return stdout
-  return re.sub(r'\b(Jmake version|Writing project database).*?\n', '', stdout)
-
-
 def _FixTempPathsInIncrementalMetadata(pdb_path, temp_dir):
   # The .pdb records absolute paths. Fix up paths within /tmp (srcjars).
   if os.path.exists(pdb_path):
@@ -209,7 +203,8 @@ def _OnStaleMd5(changes, options, javac_cmd, java_files, classpath_inputs,
       os.makedirs(java_dir)
       for srcjar in options.java_srcjars:
         if changed_paths:
-          changed_paths.update(changes.IterChangedSubpaths(srcjar))
+          changed_paths.update(os.path.join(java_dir, f)
+                               for f in changes.IterChangedSubpaths(srcjar))
         build_utils.ExtractAll(srcjar, path=java_dir, pattern='*.java')
       jar_srcs = build_utils.FindInDirectory(java_dir, '*.java')
       jar_srcs = _FilterJavaFiles(jar_srcs, options.javac_includes)
@@ -237,11 +232,27 @@ def _OnStaleMd5(changes, options, javac_cmd, java_files, classpath_inputs,
       # being in a temp dir makes it unstable (breaks md5 stamping).
       cmd = javac_cmd + ['-d', classes_dir] + java_files
 
-      build_utils.CheckOutput(
+      # JMake prints out some diagnostic logs that we want to ignore.
+      # This assumes that all compiler output goes through stderr.
+      stdout_filter = lambda s: ''
+      if md5_check.PRINT_EXPLANATIONS:
+        stdout_filter = None
+
+      attempt_build = lambda: build_utils.CheckOutput(
           cmd,
           print_stdout=options.chromium_code,
-          stdout_filter=_FilterJMakeOutput,
+          stdout_filter=stdout_filter,
           stderr_filter=ColorJavacOutput)
+      try:
+        attempt_build()
+      except build_utils.CalledProcessError as e:
+        # Work-around for a bug in jmake (http://crbug.com/551449).
+        if 'project database corrupted' not in e.output:
+          raise
+        print ('Applying work-around for jmake project database corrupted '
+               '(http://crbug.com/551449).')
+        os.unlink(pdb_path)
+        attempt_build()
 
     if options.main_class or options.manifest_entry:
       entries = []

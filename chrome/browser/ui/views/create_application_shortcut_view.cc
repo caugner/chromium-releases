@@ -51,6 +51,10 @@
 #include "ui/views/window/dialog_client_view.h"
 #include "url/gurl.h"
 
+#if defined(OS_WIN)
+#include "base/win/shortcut.h"
+#endif  // defined(OS_WIN)
+
 namespace {
 
 const int kIconPreviewSizePixels = 32;
@@ -172,24 +176,11 @@ void AppInfoView::UpdateText(const base::string16& title,
 }
 
 void AppInfoView::UpdateIcon(const gfx::ImageFamily& image) {
-  // Get the icon closest to the desired preview size.
-  const gfx::Image* icon = image.GetBest(kIconPreviewSizePixels,
-                                         kIconPreviewSizePixels);
-  if (!icon || icon->IsEmpty())
-    // The family has no icons. Leave the image blank.
-    return;
-  const SkBitmap& bitmap = *icon->ToSkBitmap();
-  if (bitmap.width() == kIconPreviewSizePixels &&
-      bitmap.height() == kIconPreviewSizePixels) {
-    icon_->SetImage(gfx::ImageSkia::CreateFrom1xBitmap(bitmap));
-  } else {
-    // Resize the image to the desired size.
-    SkBitmap resized_bitmap = skia::ImageOperations::Resize(
-        bitmap, skia::ImageOperations::RESIZE_LANCZOS3,
-        kIconPreviewSizePixels, kIconPreviewSizePixels);
-
-    icon_->SetImage(gfx::ImageSkia::CreateFrom1xBitmap(resized_bitmap));
-  }
+  // Get an icon at the desired preview size (scaling from a larger image if
+  // none is available at that exact size).
+  gfx::Image icon =
+      image.CreateExact(kIconPreviewSizePixels, kIconPreviewSizePixels);
+  icon_->SetImage(icon.ToImageSkia());
 }
 
 void AppInfoView::OnPaint(gfx::Canvas* canvas) {
@@ -284,7 +275,7 @@ void CreateApplicationShortcutView::InitControls(DialogLayout dialog_layout) {
 
   // Win10 actively prevents creating shortcuts on the taskbar so we eliminate
   // that option from the dialog.
-  if (base::win::GetVersion() < base::win::VERSION_WIN10) {
+  if (base::win::CanPinShortcutToTaskbar()) {
     quick_launch_check_box_ = AddCheckbox(
         (base::win::GetVersion() >= base::win::VERSION_WIN7) ?
           l10n_util::GetStringUTF16(IDS_PIN_TO_TASKBAR_CHKBOX) :

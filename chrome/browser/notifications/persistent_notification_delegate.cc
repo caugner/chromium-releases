@@ -28,7 +28,8 @@ void PersistentNotificationDelegate::Close(bool by_user) {
   PlatformNotificationServiceImpl::GetInstance()->OnPersistentNotificationClose(
       browser_context_,
       persistent_notification_id_,
-      origin_);
+      origin_,
+      by_user);
 }
 
 void PersistentNotificationDelegate::Click() {
@@ -52,6 +53,16 @@ void PersistentNotificationDelegate::ButtonClick(int button_index) {
       persistent_notification_id_,
       origin_,
       button_index);
+}
+
+void PersistentNotificationDelegate::SettingsClick() {
+  PlatformNotificationServiceImpl::GetInstance()->OpenNotificationSettings(
+      browser_context_);
+  return;
+}
+
+bool PersistentNotificationDelegate::ShouldDisplaySettingsButton() {
+  return true;
 }
 
 std::string PersistentNotificationDelegate::id() const {

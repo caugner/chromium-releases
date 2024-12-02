@@ -21,61 +21,80 @@ class WebviewLoginTest : public OobeBaseTest {
     OobeBaseTest::SetUpCommandLine(command_line);
   }
 
+ protected:
+  void ClickNext() {
+    ExecuteJsInSigninFrame("document.getElementById('nextButton').click();");
+  }
+
+  void ExpectIdentifierPage() {
+    // First page: no back button, no close button, refresh button, #identifier
+    // input field.
+    JsExpect("!$('gaia-navigation').backVisible");
+    JsExpect("!$('gaia-navigation').closeVisible");
+    JsExpect("$('gaia-navigation').refreshVisible");
+    JsExpect("$('signin-frame').src.indexOf('#identifier') != -1");
+  }
+
+  void ExpectPasswordPage() {
+    // Second page: back button, close button, no refresh button,
+    // #challengepassword input field.
+    JsExpect("$('gaia-navigation').backVisible");
+    JsExpect("$('gaia-navigation').closeVisible");
+    JsExpect("!$('gaia-navigation').refreshVisible");
+    JsExpect("$('signin-frame').src.indexOf('#challengepassword') != -1");
+  }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(WebviewLoginTest);
 };
 
+// Basic signin with username and password.
 IN_PROC_BROWSER_TEST_F(WebviewLoginTest, Basic) {
   WaitForGaiaPageLoad();
 
-  JsExpect("$('close-button-item').hidden");
+  ExpectIdentifierPage();
 
   SetSignFormField("identifier", OobeBaseTest::kFakeUserEmail);
-  ExecuteJsInSigninFrame("document.getElementById('nextButton').click();");
-
-  JsExpect("$('close-button-item').hidden");
+  ClickNext();
+  ExpectPasswordPage();
 
   content::WindowedNotificationObserver session_start_waiter(
       chrome::NOTIFICATION_SESSION_STARTED,
       content::NotificationService::AllSources());
 
   SetSignFormField("password", OobeBaseTest::kFakeUserPassword);
-  ExecuteJsInSigninFrame("document.getElementById('nextButton').click();");
+  ClickNext();
 
   session_start_waiter.Wait();
 }
 
-// Flaky: http://crbug.com/512648.
+// Fails: http://crbug.com/512648.
 IN_PROC_BROWSER_TEST_F(WebviewLoginTest, DISABLED_BackButton) {
   WaitForGaiaPageLoad();
 
-  // Start: no back button, first page.
-  JsExpect("$('back-button-item').hidden");
-  JsExpect("$('signin-frame').src.indexOf('#identifier') != -1");
+  // Start with identifer page.
+  ExpectIdentifierPage();
 
-  // Next step: back button active, second page.
+  // Move to password page.
   SetSignFormField("identifier", OobeBaseTest::kFakeUserEmail);
-  ExecuteJsInSigninFrame("document.getElementById('nextButton').click();");
-  JsExpect("!$('back-button-item').hidden");
-  JsExpect("$('signin-frame').src.indexOf('#challengepassword') != -1");
+  ClickNext();
+  ExpectPasswordPage();
 
-  // One step back: no back button, first page.
-  ASSERT_TRUE(content::ExecuteScript(GetLoginUI()->GetWebContents(),
-                                     "$('back-button-item').click();"));
-  JsExpect("$('back-button-item').hidden");
-  JsExpect("$('signin-frame').src.indexOf('#identifier') != -1");
+  // Click back to identifier page.
+  JS().Evaluate("$('gaia-navigation').$.backButton.click();");
+  ExpectIdentifierPage();
 
-  // Next step (again): back button active, second page, user id remembered.
-  ExecuteJsInSigninFrame("document.getElementById('nextButton').click();");
-  JsExpect("!$('back-button-item').hidden");
-  JsExpect("$('signin-frame').src.indexOf('#challengepassword') != -1");
+  // Click next to password page, user id is remembered.
+  ClickNext();
+  ExpectPasswordPage();
 
   content::WindowedNotificationObserver session_start_waiter(
       chrome::NOTIFICATION_SESSION_STARTED,
       content::NotificationService::AllSources());
 
+  // Finish sign-up.
   SetSignFormField("password", OobeBaseTest::kFakeUserPassword);
-  ExecuteJsInSigninFrame("document.getElementById('nextButton').click();");
+  ClickNext();
 
   session_start_waiter.Wait();
 }
@@ -102,6 +121,13 @@ IN_PROC_BROWSER_TEST_F(WebviewLoginTest, AllowNewUser) {
 
   // flow=nosignup indicates that user creation is not allowed.
   JsExpect(frame_url + ".search('flow=nosignup') != -1");
+}
+
+IN_PROC_BROWSER_TEST_F(WebviewLoginTest, EmailPrefill) {
+  WaitForGaiaPageLoad();
+  JS().ExecuteAsync("Oobe.showSigninUI('user@example.com')");
+  WaitForGaiaPageReload();
+  EXPECT_EQ(fake_gaia_->prefilled_email(), "user@example.com");
 }
 
 }  // namespace chromeos

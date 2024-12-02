@@ -227,7 +227,12 @@ void InjectRawKeyEvent(WebContents* web_contents,
                        int modifiers) {
   NativeWebKeyboardEvent event;
   BuildSimpleWebKeyEvent(type, key_code, native_key_code, modifiers, &event);
-  web_contents->GetRenderViewHost()->ForwardKeyboardEvent(event);
+  WebContentsImpl* web_contents_impl =
+      static_cast<WebContentsImpl*>(web_contents);
+  RenderWidgetHostImpl* main_frame_rwh =
+      web_contents_impl->GetMainFrame()->GetRenderWidgetHost();
+  web_contents_impl->GetFocusedRenderWidgetHost(main_frame_rwh)
+      ->ForwardKeyboardEvent(event);
 }
 
 void GetCookiesCallback(std::string* cookies_out,
@@ -382,8 +387,8 @@ void WaitForResizeComplete(WebContents* web_contents) {
   aura::WindowTreeHost* window_host = content->GetHost();
   aura::WindowEventDispatcher* dispatcher = window_host->dispatcher();
   aura::test::WindowEventDispatcherTestApi dispatcher_test(dispatcher);
-  RenderWidgetHostImpl* widget_host =
-      RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
+  RenderWidgetHostImpl* widget_host = RenderWidgetHostImpl::From(
+      web_contents->GetRenderViewHost()->GetWidget());
   if (!IsResizeComplete(&dispatcher_test, widget_host)) {
     WindowedNotificationObserver resize_observer(
         NOTIFICATION_RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE,
@@ -397,8 +402,8 @@ bool IsResizeComplete(RenderWidgetHostImpl* widget_host) {
 }
 
 void WaitForResizeComplete(WebContents* web_contents) {
-  RenderWidgetHostImpl* widget_host =
-      RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
+  RenderWidgetHostImpl* widget_host = RenderWidgetHostImpl::From(
+      web_contents->GetRenderViewHost()->GetWidget());
   if (!IsResizeComplete(widget_host)) {
     WindowedNotificationObserver resize_observer(
         NOTIFICATION_RENDER_WIDGET_HOST_DID_UPDATE_BACKING_STORE,
@@ -431,9 +436,11 @@ void SimulateMouseClickAt(WebContents* web_contents,
   mouse_event.globalX = point.x() + offset.x();
   mouse_event.globalY = point.y() + offset.y();
   mouse_event.clickCount = 1;
-  web_contents->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
+  web_contents->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
+      mouse_event);
   mouse_event.type = blink::WebInputEvent::MouseUp;
-  web_contents->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
+  web_contents->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
+      mouse_event);
 }
 
 void SimulateMouseEvent(WebContents* web_contents,
@@ -443,7 +450,8 @@ void SimulateMouseEvent(WebContents* web_contents,
   mouse_event.type = type;
   mouse_event.x = point.x();
   mouse_event.y = point.y();
-  web_contents->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
+  web_contents->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(
+      mouse_event);
 }
 
 void SimulateMouseWheelEvent(WebContents* web_contents,
@@ -455,25 +463,27 @@ void SimulateMouseWheelEvent(WebContents* web_contents,
   wheel_event.y = point.y();
   wheel_event.deltaX = delta.x();
   wheel_event.deltaY = delta.y();
-  RenderWidgetHostImpl* widget_host =
-      RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
+  RenderWidgetHostImpl* widget_host = RenderWidgetHostImpl::From(
+      web_contents->GetRenderViewHost()->GetWidget());
   widget_host->ForwardWheelEvent(wheel_event);
 }
 
 void SimulateGestureScrollSequence(WebContents* web_contents,
                                    const gfx::Point& point,
                                    const gfx::Vector2dF& delta) {
-  RenderWidgetHostImpl* widget_host =
-      RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
+  RenderWidgetHostImpl* widget_host = RenderWidgetHostImpl::From(
+      web_contents->GetRenderViewHost()->GetWidget());
 
   blink::WebGestureEvent scroll_begin;
   scroll_begin.type = blink::WebGestureEvent::GestureScrollBegin;
+  scroll_begin.sourceDevice = blink::WebGestureDeviceTouchpad;
   scroll_begin.x = point.x();
   scroll_begin.y = point.y();
   widget_host->ForwardGestureEvent(scroll_begin);
 
   blink::WebGestureEvent scroll_update;
   scroll_update.type = blink::WebGestureEvent::GestureScrollUpdate;
+  scroll_update.sourceDevice = blink::WebGestureDeviceTouchpad;
   scroll_update.x = point.x();
   scroll_update.y = point.y();
   scroll_update.data.scrollUpdate.deltaX = delta.x();
@@ -484,6 +494,7 @@ void SimulateGestureScrollSequence(WebContents* web_contents,
 
   blink::WebGestureEvent scroll_end;
   scroll_end.type = blink::WebGestureEvent::GestureScrollEnd;
+  scroll_end.sourceDevice = blink::WebGestureDeviceTouchpad;
   scroll_end.x = point.x() + delta.x();
   scroll_end.y = point.y() + delta.y();
   widget_host->ForwardGestureEvent(scroll_end);
@@ -492,11 +503,12 @@ void SimulateGestureScrollSequence(WebContents* web_contents,
 void SimulateTapAt(WebContents* web_contents, const gfx::Point& point) {
   blink::WebGestureEvent tap;
   tap.type = blink::WebGestureEvent::GestureTap;
+  tap.sourceDevice = blink::WebGestureDeviceTouchpad;
   tap.x = point.x();
   tap.y = point.y();
   tap.modifiers = blink::WebInputEvent::ControlKey;
-  RenderWidgetHostImpl* widget_host =
-      RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
+  RenderWidgetHostImpl* widget_host = RenderWidgetHostImpl::From(
+      web_contents->GetRenderViewHost()->GetWidget());
   widget_host->ForwardGestureEvent(tap);
 }
 
@@ -505,19 +517,20 @@ void SimulateTapWithModifiersAt(WebContents* web_contents,
                                 const gfx::Point& point) {
   blink::WebGestureEvent tap;
   tap.type = blink::WebGestureEvent::GestureTap;
+  tap.sourceDevice = blink::WebGestureDeviceTouchpad;
   tap.x = point.x();
   tap.y = point.y();
   tap.modifiers = modifiers;
-  RenderWidgetHostImpl* widget_host =
-      RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
+  RenderWidgetHostImpl* widget_host = RenderWidgetHostImpl::From(
+      web_contents->GetRenderViewHost()->GetWidget());
   widget_host->ForwardGestureEvent(tap);
 }
 
 void SimulateTouchPressAt(WebContents* web_contents, const gfx::Point& point) {
   SyntheticWebTouchEvent touch;
   touch.PressPoint(point.x(), point.y());
-  RenderWidgetHostImpl* widget_host =
-      RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
+  RenderWidgetHostImpl* widget_host = RenderWidgetHostImpl::From(
+      web_contents->GetRenderViewHost()->GetWidget());
   widget_host->ForwardTouchEventWithLatencyInfo(touch, ui::LatencyInfo());
 }
 
@@ -528,12 +541,12 @@ void SimulateKeyPress(WebContents* web_contents,
                       bool alt,
                       bool command) {
   SimulateKeyPressWithCode(
-      web_contents, key_code, NULL, control, shift, alt, command);
+      web_contents, key_code, std::string(), control, shift, alt, command);
 }
 
 void SimulateKeyPressWithCode(WebContents* web_contents,
                               ui::KeyboardCode key_code,
-                              const char* code,
+                              const std::string& code,
                               bool control,
                               bool shift,
                               bool alt,
@@ -801,8 +814,7 @@ void FetchHistogramsFromChildProcesses() {
   runner->Run();
 }
 
-void SetupCrossSiteRedirector(
-    net::test_server::EmbeddedTestServer* embedded_test_server) {
+void SetupCrossSiteRedirector(net::EmbeddedTestServer* embedded_test_server) {
    embedded_test_server->RegisterRequestHandler(
        base::Bind(&CrossSiteRedirectResponseHandler,
                   embedded_test_server->base_url()));
@@ -1047,7 +1059,8 @@ bool WebContentsAddedObserver::RenderViewCreatedCalled() {
 
 bool RequestFrame(WebContents* web_contents) {
   DCHECK(web_contents);
-  return RenderWidgetHostImpl::From(web_contents->GetRenderViewHost())
+  return RenderWidgetHostImpl::From(
+             web_contents->GetRenderViewHost()->GetWidget())
       ->ScheduleComposite();
 }
 
@@ -1074,8 +1087,8 @@ bool FrameWatcher::OnMessageReceived(const IPC::Message& message) {
 
 void FrameWatcher::AttachTo(WebContents* web_contents) {
   DCHECK(web_contents);
-  RenderWidgetHostImpl* widget_host =
-      RenderWidgetHostImpl::From(web_contents->GetRenderViewHost());
+  RenderWidgetHostImpl* widget_host = RenderWidgetHostImpl::From(
+      web_contents->GetRenderViewHost()->GetWidget());
   widget_host->GetProcess()->AddFilter(this);
 }
 

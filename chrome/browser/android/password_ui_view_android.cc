@@ -10,11 +10,11 @@
 #include "base/metrics/field_trial.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/autofill/core/common/password_form.h"
+#include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/password_manager/core/browser/affiliation_utils.h"
 #include "components/password_manager/core/browser/password_bubble_experiment.h"
 #include "components/password_manager/core/common/experiments.h"
@@ -115,11 +115,6 @@ ScopedJavaLocalRef<jstring> GetAccountDashboardURL(
     const JavaParamRef<jclass>&) {
   return ConvertUTF8ToJavaString(env,
                                  chrome::kPasswordManagerAccountDashboardURL);
-}
-
-static jboolean ShouldDisplayManageAccountLink(JNIEnv* env,
-                                               const JavaParamRef<jclass>&) {
-  return password_manager::ManageAccountLinkExperimentEnabled();
 }
 
 static jboolean ShouldUseSmartLockBranding(JNIEnv* env,

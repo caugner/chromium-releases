@@ -76,7 +76,6 @@ class ExistingUserController : public LoginDisplay::Delegate,
 
   // LoginDisplay::Delegate: implementation
   void CancelPasswordChangedFlow() override;
-  void CreateAccount() override;
   void CompleteLogin(const UserContext& user_context) override;
   base::string16 GetConnectedNetworkName() override;
   bool IsSigninInProgress() const override;
@@ -255,8 +254,8 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Tests can use this to receive authentication status events.
   AuthStatusConsumer* auth_status_consumer_;
 
-  // Username of the last login attempt.
-  std::string last_login_attempt_username_;
+  // AccountId of the last login attempt.
+  AccountId last_login_attempt_account_id_ = EmptyAccountId();
 
   // OOBE/login display host.
   LoginDisplayHost* host_;

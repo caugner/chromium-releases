@@ -29,7 +29,8 @@ namespace {
 // UMA errors that the VaapiVideoDecodeAccelerator class reports.
 enum VAVDADecoderFailure {
   VAAPI_ERROR = 0,
-  VAVDA_DECODER_FAILURES_MAX,
+  // UMA requires that max must be greater than 1.
+  VAVDA_DECODER_FAILURES_MAX = 2,
 };
 }
 
@@ -291,7 +292,7 @@ VaapiPicture* VaapiVideoDecodeAccelerator::PictureById(
 
 VaapiVideoDecodeAccelerator::VaapiVideoDecodeAccelerator(
     const base::Callback<bool(void)>& make_context_current,
-    const base::Callback<void(uint32, uint32, scoped_refptr<gfx::GLImage>)>&
+    const base::Callback<void(uint32, uint32, scoped_refptr<gl::GLImage>)>&
         bind_image)
     : make_context_current_(make_context_current),
       state_(kUninitialized),
@@ -732,7 +733,7 @@ void VaapiVideoDecodeAccelerator::AssignPictureBuffers(
         vaapi_wrapper_.get(), make_context_current_, buffers[i].id(),
         buffers[i].texture_id(), requested_pic_size_));
 
-    scoped_refptr<gfx::GLImage> image = picture->GetImageToBind();
+    scoped_refptr<gl::GLImage> image = picture->GetImageToBind();
     if (image) {
       bind_image_.Run(buffers[i].internal_texture_id(),
                       VaapiPicture::GetGLTextureTarget(), image);
@@ -998,9 +999,9 @@ VaapiVideoDecodeAccelerator::CreateSurface() {
     return nullptr;
 
   DCHECK(!awaiting_va_surfaces_recycle_);
-  scoped_refptr<VASurface> va_surface(
-      new VASurface(available_va_surfaces_.front(), requested_pic_size_,
-                    va_surface_release_cb_));
+  scoped_refptr<VASurface> va_surface(new VASurface(
+      available_va_surfaces_.front(), requested_pic_size_,
+      vaapi_wrapper_->va_surface_format(), va_surface_release_cb_));
   available_va_surfaces_.pop_front();
 
   scoped_refptr<VaapiDecodeSurface> dec_surface =
@@ -1292,10 +1293,15 @@ VaapiVideoDecodeAccelerator::VaapiH264Accelerator::
 void VaapiVideoDecodeAccelerator::VaapiH264Accelerator::FillVAPicture(
     VAPictureH264* va_pic,
     scoped_refptr<H264Picture> pic) {
-  scoped_refptr<VaapiDecodeSurface> dec_surface =
-      H264PictureToVaapiDecodeSurface(pic);
+  VASurfaceID va_surface_id = VA_INVALID_SURFACE;
 
-  va_pic->picture_id = dec_surface->va_surface()->id();
+  if (!pic->nonexisting) {
+    scoped_refptr<VaapiDecodeSurface> dec_surface =
+        H264PictureToVaapiDecodeSurface(pic);
+    va_surface_id = dec_surface->va_surface()->id();
+  }
+
+  va_pic->picture_id = va_surface_id;
   va_pic->frame_idx = pic->frame_num;
   va_pic->flags = 0;
 

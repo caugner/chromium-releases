@@ -45,6 +45,13 @@ class ExtensionSyncService : public syncer::SyncableService,
   // all_urls_enabled).
   void SyncExtensionChangeIfNeeded(const extensions::Extension& extension);
 
+  // Returns whether the extension with the given |id| will be re-enabled once
+  // it is updated to the given |version|. This happens when we get a Sync
+  // update telling us to re-enable a newer version than what is currently
+  // installed.
+  bool HasPendingReenable(const std::string& id,
+                          const base::Version& version) const;
+
   // syncer::SyncableService implementation.
   syncer::SyncMergeResult MergeDataAndStartSyncing(
       syncer::ModelType type,
@@ -59,6 +66,12 @@ class ExtensionSyncService : public syncer::SyncableService,
 
   void SetSyncStartFlareForTesting(
       const syncer::SyncableService::StartSyncFlare& flare);
+
+  // Special hack: There was a bug where themes incorrectly ended up in the
+  // syncer::EXTENSIONS type. This is for cleaning up the data. crbug.com/558299
+  // DO NOT USE FOR ANYTHING ELSE!
+  // TODO(treib,devlin): Remove this after M52 or so.
+  void DeleteThemeDoNotUse(const extensions::Extension& theme);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(TwoClientAppsSyncTest, UnexpectedLaunchType);
@@ -110,6 +123,11 @@ class ExtensionSyncService : public syncer::SyncableService,
       bool include_everything,
       std::vector<extensions::ExtensionSyncData>* sync_data_list) const;
 
+  // Returns whether the given extension should be synced by this class.
+  // Filters out unsyncable extensions as well as themes (which are handled by
+  // ThemeSyncableService instead).
+  bool ShouldSync(const extensions::Extension& extension) const;
+
   // The normal profile associated with this ExtensionSyncService.
   Profile* profile_;
 
@@ -118,12 +136,21 @@ class ExtensionSyncService : public syncer::SyncableService,
   ScopedObserver<extensions::ExtensionPrefs,
                  extensions::ExtensionPrefsObserver> prefs_observer_;
 
+  // When this is set to true, any incoming updates (from the observers as well
+  // as from explicit SyncExtensionChangeIfNeeded calls) are ignored. This is
+  // set during ApplySyncData, so that ExtensionSyncService doesn't end up
+  // notifying itself while applying sync changes.
+  bool ignore_updates_;
+
   extensions::SyncBundle app_sync_bundle_;
   extensions::SyncBundle extension_sync_bundle_;
 
-  // Map from extension id to new version. Used to send the new version back to
-  // the sync server while we're waiting for an extension to update.
-  std::map<std::string, base::Version> pending_update_versions_;
+  // Map from extension id to pending update data. Used for two things:
+  // - To send the new version back to the sync server while we're waiting for
+  //   an extension to update.
+  // - For re-enables, to defer granting permissions until the version matches.
+  struct PendingUpdate;
+  std::map<std::string, PendingUpdate> pending_updates_;
 
   // Run()ning tells sync to try and start soon, because syncable changes
   // have started happening. It will cause sync to call us back

@@ -19,7 +19,6 @@ import android.widget.FrameLayout;
 import android.widget.Spinner;
 import android.widget.TextView;
 
-import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
 
 import java.util.ArrayList;
@@ -75,8 +74,16 @@ public class TranslateLanguagePanel
         layout.setMessage(changeLanguage);
 
         // Set up the spinners.
-        createSpinners(context);
-        layout.setCustomContent(mSourceSpinner, mTargetSpinner);
+        InfoBarControlLayout controlLayout = new InfoBarControlLayout(context);
+        View sourceSpinnerView = controlLayout.addSpinner(R.id.translate_infobar_source_spinner);
+        View targetSpinnerView = controlLayout.addSpinner(R.id.translate_infobar_target_spinner);
+        layout.setCustomContent(controlLayout);
+
+        mSourceSpinner =
+                (Spinner) sourceSpinnerView.findViewById(R.id.translate_infobar_source_spinner);
+        mTargetSpinner =
+                (Spinner) targetSpinnerView.findViewById(R.id.translate_infobar_target_spinner);
+        setUpSpinners(context);
 
         // Set up the buttons.
         layout.setButtons(context.getString(R.string.translate_button_done),
@@ -92,7 +99,7 @@ public class TranslateLanguagePanel
         mListener.onPanelClosed(ActionType.NONE);
     }
 
-    private void createSpinners(Context context) {
+    private void setUpSpinners(Context context) {
         mSourceAdapter = new LanguageArrayAdapter(context, R.layout.translate_spinner,
                 LANGUAGE_TYPE_SOURCE);
         mTargetAdapter = new LanguageArrayAdapter(context, R.layout.translate_spinner,
@@ -104,10 +111,7 @@ public class TranslateLanguagePanel
         mSourceAdapter.measureWidthRequiredForView();
         mTargetAdapter.measureWidthRequiredForView();
 
-        // Create the spinners.
-        LayoutInflater inflater = LayoutInflater.from(context);
-        mSourceSpinner = (Spinner) inflater.inflate(R.layout.spinner, null);
-        mTargetSpinner = (Spinner) inflater.inflate(R.layout.spinner, null);
+        // Set up the spinners.
         mSourceSpinner.setOnItemSelectedListener(this);
         mTargetSpinner.setOnItemSelectedListener(this);
         mSourceSpinner.setAdapter(mSourceAdapter);
@@ -223,8 +227,6 @@ public class TranslateLanguagePanel
         @Override
         public View getDropDownView(int position, View convertView, ViewGroup parent) {
             View result = super.getDropDownView(position, convertView, parent);
-            result.setBackgroundColor(ApiCompatibilityUtils.getColor(
-                    getContext().getResources(), R.color.infobar_background));
             if (result instanceof TextView) {
                 ((TextView) result).setText(getItem(position).toString());
             }

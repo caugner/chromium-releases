@@ -12,6 +12,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/timer/timer.h"
 #include "components/mus/public/interfaces/command_buffer.mojom.h"
+#include "gpu/command_buffer/common/constants.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace gpu {
@@ -47,10 +48,12 @@ class CommandBufferDriver {
 
   void set_client(scoped_ptr<Client> client) { client_ = client.Pass(); }
 
-  void Initialize(mojo::CommandBufferSyncClientPtr sync_client,
-                  mojo::CommandBufferLostContextObserverPtr loss_observer,
-                  mojo::ScopedSharedBufferHandle shared_state,
-                  mojo::Array<int32_t> attribs);
+  void Initialize(
+      mojo::InterfacePtrInfo<mojom::CommandBufferSyncClient> sync_client,
+      mojo::InterfacePtrInfo<mojom::CommandBufferLostContextObserver>
+          loss_observer,
+      mojo::ScopedSharedBufferHandle shared_state,
+      mojo::Array<int32_t> attribs);
   void SetGetBuffer(int32_t buffer);
   void Flush(int32_t put_offset);
   void MakeProgress(int32_t last_get_offset);
@@ -71,16 +74,19 @@ class CommandBufferDriver {
   bool MakeCurrent();
   bool DoInitialize(mojo::ScopedSharedBufferHandle shared_state,
                     mojo::Array<int32_t> attribs);
-  void OnResize(gfx::Size size, float scale_factor);
   bool OnWaitSyncPoint(uint32_t sync_point);
+  void OnFenceSyncRelease(uint64_t release);
+  bool OnWaitFenceSync(gpu::CommandBufferNamespace namespace_id,
+                       uint64_t command_buffer_id,
+                       uint64_t release);
   void OnSyncPointRetired();
   void OnParseError();
   void OnContextLost(uint32_t reason);
   void DestroyDecoder();
 
   scoped_ptr<Client> client_;
-  mojo::CommandBufferSyncClientPtr sync_client_;
-  mojo::CommandBufferLostContextObserverPtr loss_observer_;
+  mojom::CommandBufferSyncClientPtr sync_client_;
+  mojom::CommandBufferLostContextObserverPtr loss_observer_;
   scoped_ptr<gpu::CommandBufferService> command_buffer_;
   scoped_ptr<gpu::gles2::GLES2Decoder> decoder_;
   scoped_ptr<gpu::GpuScheduler> scheduler_;

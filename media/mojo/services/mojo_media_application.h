@@ -16,10 +16,9 @@ class MojoMediaApplication
     : public mojo::ApplicationDelegate,
       public mojo::InterfaceFactory<interfaces::ServiceFactory> {
  public:
-  static GURL AppUrl();
   static scoped_ptr<mojo::ApplicationDelegate> CreateApp();
 
-  MojoMediaApplication();
+  explicit MojoMediaApplication(bool enable_logging);
   ~MojoMediaApplication() final;
 
  private:
@@ -32,6 +31,7 @@ class MojoMediaApplication
   void Create(mojo::ApplicationConnection* connection,
               mojo::InterfaceRequest<interfaces::ServiceFactory> request) final;
 
+  bool enable_logging_;
   mojo::ApplicationImpl* app_impl_;
   scoped_refptr<MediaLog> media_log_;
 };

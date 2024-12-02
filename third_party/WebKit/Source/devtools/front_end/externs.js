@@ -226,11 +226,6 @@ DevToolsHost.showContextMenuAtPoint = function(x, y, items, document) { }
 /**
  * @param {string} message
  */
-DevToolsHost.sendMessageToBackend = function(message) { }
-
-/**
- * @param {string} message
- */
 DevToolsHost.sendMessageToEmbedder = function(message) { }
 
 /**
@@ -314,6 +309,8 @@ Adb.Browser;
 Adb.Device;
 /** @typedef {!Object.<string, string>} */
 Adb.PortForwardingConfig;
+/** @typedef {!{port: string, address: string}} */
+Adb.PortForwardingRule;
 
 /**
  * @constructor
@@ -538,6 +535,12 @@ CodeMirror.Pos.prototype.ch;
  * @return {number}
  */
 CodeMirror.cmpPos = function(pos1, pos2) { };
+
+/**
+ * @param {string} mode
+ * @param {?} definition
+ */
+CodeMirror.defineSimpleMode = function(mode, definition) {};
 
 /** @constructor */
 CodeMirror.StringStream = function(line)

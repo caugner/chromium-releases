@@ -11,6 +11,7 @@
 #include <queue>
 
 #include "base/base_paths.h"
+#include "base/bind.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
@@ -22,6 +23,7 @@
 #include "base/version.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_comptr.h"
+#include "chrome/common/chrome_version.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/helper.h"
@@ -29,7 +31,6 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/win/atl_module.h"
-#include "version.h"
 
 using ::testing::DoAll;
 using ::testing::HasSubstr;
@@ -949,6 +950,68 @@ TEST_P(GoogleUpdateWinTest, RetryAfterExternalUpdaterError) {
               OnUpdateCheckComplete(IsEmpty()));  // new_version
   BeginUpdateCheck(task_runner_, std::string(), false, 0,
                    mock_update_check_delegate_.AsWeakPtr());
+  task_runner_->RunUntilIdle();
+}
+
+TEST_P(GoogleUpdateWinTest, UpdateInstalledMultipleDelegates) {
+  CComObject<MockAppBundle>* mock_app_bundle = nullptr;
+  CComObject<MockApp>* mock_app = nullptr;
+  MakeGoogleUpdateMocks(&mock_app_bundle, &mock_app);
+
+  // Expect the bundle to be called on to start the update.
+  EXPECT_CALL(*mock_app_bundle, checkForUpdate()).WillOnce(Return(S_OK));
+  // Expect the bundle to be called on to start the install.
+  EXPECT_CALL(*mock_app_bundle, install()).WillOnce(Return(S_OK));
+
+  mock_app->PushState(STATE_INIT);
+  mock_app->PushState(STATE_CHECKING_FOR_UPDATE);
+  mock_app->PushUpdateAvailableState(new_version_);
+  mock_app->PushState(STATE_WAITING_TO_DOWNLOAD);
+  mock_app->PushProgressiveState(STATE_DOWNLOADING, 0);
+  mock_app->PushProgressiveState(STATE_DOWNLOADING, 25);
+  mock_app->PushProgressiveState(STATE_DOWNLOADING, 25);
+  mock_app->PushProgressiveState(STATE_DOWNLOADING, 75);
+  mock_app->PushState(STATE_WAITING_TO_INSTALL);
+  mock_app->PushProgressiveState(STATE_INSTALLING, 50);
+  mock_app->PushState(STATE_INSTALL_COMPLETE);
+
+  StrictMock<MockUpdateCheckDelegate> mock_update_check_delegate_2;
+  {
+    InSequence callback_sequence;
+    EXPECT_CALL(mock_update_check_delegate_,
+                OnUpgradeProgress(0, StrEq(new_version_)));
+    EXPECT_CALL(mock_update_check_delegate_2,
+                OnUpgradeProgress(0, StrEq(new_version_)));
+
+    EXPECT_CALL(mock_update_check_delegate_,
+                OnUpgradeProgress(12, StrEq(new_version_)));
+    EXPECT_CALL(mock_update_check_delegate_2,
+                OnUpgradeProgress(12, StrEq(new_version_)));
+
+    EXPECT_CALL(mock_update_check_delegate_,
+                OnUpgradeProgress(37, StrEq(new_version_)));
+    EXPECT_CALL(mock_update_check_delegate_2,
+                OnUpgradeProgress(37, StrEq(new_version_)));
+
+    EXPECT_CALL(mock_update_check_delegate_,
+                OnUpgradeProgress(50, StrEq(new_version_)));
+    EXPECT_CALL(mock_update_check_delegate_2,
+                OnUpgradeProgress(50, StrEq(new_version_)));
+
+    EXPECT_CALL(mock_update_check_delegate_,
+                OnUpgradeProgress(75, StrEq(new_version_)));
+    EXPECT_CALL(mock_update_check_delegate_2,
+                OnUpgradeProgress(75, StrEq(new_version_)));
+
+    EXPECT_CALL(mock_update_check_delegate_,
+                OnUpgradeComplete(StrEq(new_version_)));
+    EXPECT_CALL(mock_update_check_delegate_2,
+                OnUpgradeComplete(StrEq(new_version_)));
+  }
+  BeginUpdateCheck(task_runner_, std::string(), true, 0,
+                   mock_update_check_delegate_.AsWeakPtr());
+  BeginUpdateCheck(task_runner_, std::string(), true, 0,
+                   mock_update_check_delegate_2.AsWeakPtr());
   task_runner_->RunUntilIdle();
 }
 

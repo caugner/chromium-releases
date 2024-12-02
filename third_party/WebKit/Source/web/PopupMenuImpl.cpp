@@ -254,6 +254,7 @@ PopupMenuImpl::~PopupMenuImpl()
 
 DEFINE_TRACE(PopupMenuImpl)
 {
+    visitor->trace(m_chromeClient);
     visitor->trace(m_ownerElement);
     PopupMenu::trace(visitor);
 }
@@ -356,7 +357,7 @@ void PopupMenuImpl::addOption(ItemIterationContext& context, HTMLOptionElement& 
 {
     SharedBuffer* data = context.m_buffer;
     PagePopupClient::addString("{", data);
-    addProperty("label", element.text(), data);
+    addProperty("label", element.displayLabel(), data);
     addProperty("value", context.m_listIndex, data);
     if (!element.title().isEmpty())
         addProperty("title", element.title(), data);
@@ -405,14 +406,19 @@ void PopupMenuImpl::setValueAndClosePopup(int numValue, const String& stringValu
 {
     ASSERT(m_popup);
     ASSERT(m_ownerElement);
-    EventQueueScope scope;
     RefPtrWillBeRawPtr<PopupMenuImpl> protector(this);
     bool success;
     int listIndex = stringValue.toInt(&success);
     ASSERT(success);
-    m_ownerElement->valueChanged(listIndex);
-    if (m_popup)
-        m_chromeClient->closePagePopup(m_popup);
+    {
+        EventQueueScope scope;
+        m_ownerElement->valueChanged(listIndex);
+        if (m_popup)
+            m_chromeClient->closePagePopup(m_popup);
+        // 'change' event is dispatched here.  For compatbility with
+        // Angular 1.2, we need to dispatch a change event before
+        // mouseup/click events.
+    }
     // We dispatch events on the owner element to match the legacy behavior.
     // Other browsers dispatch click events before and after showing the popup.
     if (m_ownerElement) {
@@ -482,7 +488,7 @@ void PopupMenuImpl::updateFromElement()
     if (m_needsUpdate)
         return;
     m_needsUpdate = true;
-    ownerElement().document().postTask(FROM_HERE, createSameThreadTask(&PopupMenuImpl::update, PassRefPtrWillBeRawPtr<PopupMenuImpl>(this)));
+    ownerElement().document().postTask(BLINK_FROM_HERE, createSameThreadTask(&PopupMenuImpl::update, PassRefPtrWillBeRawPtr<PopupMenuImpl>(this)));
 }
 
 void PopupMenuImpl::update()

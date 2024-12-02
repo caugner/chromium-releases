@@ -13,12 +13,14 @@ namespace prefs {
 // preference.
 
 const char kAcceptLanguages[] = "intl.accept_languages";
+const char kBrowserStateInfoCache[] = "profile.info_cache";
 const char kBrowserStateLastUsed[] = "profile.last_used";
 const char kBrowserStatesLastActive[] = "profile.last_active_profiles";
 const char kBrowserStatesNumCreated[] = "profile.profiles_created";
 const char kDefaultCharset[] = "intl.charset_default";
 const char kEnableDoNotTrack[] = "enable_do_not_track";
 const char kHttpServerProperties[] = "net.http_server_properties";
+const char kMaxConnectionsPerProxy[] = "net.max_connections_per_proxy";
 const char kSavingBrowserHistoryDisabled[] = "history.saving_disabled";
 const char kSearchSuggestEnabled[] = "search.suggest_enabled";
 
@@ -43,6 +45,11 @@ const char kIosBookmarkFolderDefault[] = "ios.bookmark.default_folder";
 // the bookmark promo dialog.
 const char kIosBookmarkPromoAlreadySeen[] = "ios.bookmark.promo_already_seen";
 
+// Boolean which indicates whether browsing data migration is/was possible in
+// this or a previous cold start.
+const char kBrowsingDataMigrationHasBeenPossible[] =
+    "ios.browsing_data_migration_controller.migration_has_been_possible";
+
 // Boolean which indicates if the user has already set a "do not backup" bit to
 // the OTR Profiles's state stash path to ensure that the folder is not
 // automatically synced to iCloud/iTunes.
@@ -60,6 +67,10 @@ const char kIosHandoffToOtherDevices[] = "ios.handoff_to_other_devices";
 // session.
 const char kLastSessionExitedCleanly[] =
     "ios.user_experience_metrics.last_session_exited_cleanly";
+
+// True if the previous session was selected into the WKWebView control group.
+const char kLastSessionUsedWKWebViewControlGroup[] =
+    "ios.wkwebview_trial.was_control";
 
 // Preference that hold a boolean indicating whether metrics reporting should
 // be limited to wifi (when enabled).

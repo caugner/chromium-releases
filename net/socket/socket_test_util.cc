@@ -802,11 +802,11 @@ scoped_ptr<SSLClientSocket> MockClientSocketFactory::CreateSSLClientSocket(
   SSLSocketDataProvider* next_ssl_data = mock_ssl_data_.GetNext();
   if (!next_ssl_data->next_protos_expected_in_ssl_config.empty()) {
     EXPECT_EQ(next_ssl_data->next_protos_expected_in_ssl_config.size(),
-              ssl_config.next_protos.size());
+              ssl_config.alpn_protos.size());
     EXPECT_TRUE(
         std::equal(next_ssl_data->next_protos_expected_in_ssl_config.begin(),
                    next_ssl_data->next_protos_expected_in_ssl_config.end(),
-                   ssl_config.next_protos.begin()));
+                   ssl_config.alpn_protos.begin()));
   }
   return scoped_ptr<SSLClientSocket>(new MockSSLClientSocket(
       transport_socket.Pass(), host_and_port, ssl_config, next_ssl_data));
@@ -867,6 +867,11 @@ const BoundNetLog& MockClientSocket::NetLog() const {
 
 void MockClientSocket::GetConnectionAttempts(ConnectionAttempts* out) const {
   out->clear();
+}
+
+int64_t MockClientSocket::GetTotalReceivedBytes() const {
+  NOTIMPLEMENTED();
+  return 0;
 }
 
 void MockClientSocket::GetSSLCertRequestInfo(
@@ -1285,6 +1290,11 @@ int DeterministicMockUDPClientSocket::CompleteRead() {
   return helper_.CompleteRead();
 }
 
+int DeterministicMockUDPClientSocket::BindToNetwork(
+    NetworkChangeNotifier::NetworkHandle network) {
+  return ERR_NOT_IMPLEMENTED;
+}
+
 int DeterministicMockUDPClientSocket::Connect(const IPEndPoint& address) {
   if (connected_)
     return OK;
@@ -1649,6 +1659,11 @@ int MockUDPClientSocket::GetLocalAddress(IPEndPoint* address) const {
 
 const BoundNetLog& MockUDPClientSocket::NetLog() const {
   return net_log_;
+}
+
+int MockUDPClientSocket::BindToNetwork(
+    NetworkChangeNotifier::NetworkHandle network) {
+  return ERR_NOT_IMPLEMENTED;
 }
 
 int MockUDPClientSocket::Connect(const IPEndPoint& address) {

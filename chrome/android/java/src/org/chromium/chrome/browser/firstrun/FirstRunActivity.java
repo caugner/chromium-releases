@@ -14,7 +14,6 @@ import android.text.TextUtils;
 import android.util.Log;
 
 import org.chromium.base.ApplicationStatus;
-import org.chromium.base.FieldTrialList;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.metrics.RecordHistogram;
@@ -45,14 +44,12 @@ public class FirstRunActivity extends AppCompatActivity implements FirstRunPageD
     protected static final String TAG = "FirstRunActivity";
 
     // Incoming parameters:
-    public static final String ORIGINAL_INTENT = "OriginalIntent";
-    public static final String FIRE_ORIGINAL_INTENT = "FireOriginalIntent";
     public static final String COMING_FROM_CHROME_ICON = "ComingFromChromeIcon";
     public static final String USE_FRE_FLOW_SEQUENCER = "UseFreFlowSequencer";
 
-    public static final String SHOW_WELCOME_PAGE = "ShowWelcome";
-    public static final String SKIP_WELCOME_PAGE_IF_ACCEPTED_TOS = "SkipWelcomePageIfAcceptedToS";
-    public static final String SHOW_SIGNIN_PAGE = "ShowSignIn";
+    static final String SHOW_WELCOME_PAGE = "ShowWelcome";
+    static final String SHOW_SIGNIN_PAGE = "ShowSignIn";
+    static final String SHOW_DATA_REDUCTION_PAGE = "ShowDataReduction";
 
     // Outcoming results:
     public static final String RESULT_CLOSE_APP = "Close App";
@@ -105,7 +102,7 @@ public class FirstRunActivity extends AppCompatActivity implements FirstRunPageD
         if (mShowWelcomePage) mPages.add(pageOf(ToSAndUMAFirstRunFragment.class));
 
         // An optional Data Saver page.
-        if (FieldTrialList.findFullName("DataReductionProxyFREPromo").startsWith("Enabled")) {
+        if (mFreProperties.getBoolean(SHOW_DATA_REDUCTION_PAGE)) {
             mPages.add(pageOf(DataReductionProxyFirstRunFragment.class));
         }
 
@@ -140,7 +137,7 @@ public class FirstRunActivity extends AppCompatActivity implements FirstRunPageD
         mProfileDataCache.setProfile(Profile.getLastUsedProfile());
         new FirstRunFlowSequencer(this, mFreProperties) {
             @Override
-            public void onFlowIsKnown(Activity activity, Bundle freProperties) {
+            public void onFlowIsKnown(Bundle freProperties) {
                 if (freProperties == null) {
                     completeFirstRunExperience();
                     return;
@@ -148,10 +145,7 @@ public class FirstRunActivity extends AppCompatActivity implements FirstRunPageD
 
                 mFreProperties = freProperties;
                 mShowWelcomePage = mFreProperties.getBoolean(SHOW_WELCOME_PAGE);
-                if (mShowWelcomePage
-                        && mFreProperties.getBoolean(SKIP_WELCOME_PAGE_IF_ACCEPTED_TOS)) {
-                    mShowWelcomePage = !sGlue.didAcceptTermsOfService(getApplicationContext());
-                }
+
                 createPageSequence();
 
                 if (TextUtils.isEmpty(mResultSignInAccountName)) {
@@ -292,11 +286,6 @@ public class FirstRunActivity extends AppCompatActivity implements FirstRunPageD
         mFreProperties.putBoolean(RESULT_SHOW_SYNC_SETTINGS, mResultShowSyncSettings);
         FirstRunFlowSequencer.markFlowAsCompleted(this, mFreProperties);
 
-        if (mFreProperties.getBoolean(FirstRunActivity.FIRE_ORIGINAL_INTENT)) {
-            Intent originalIntent = mFreProperties.getParcelable(FirstRunActivity.ORIGINAL_INTENT);
-            startActivity(originalIntent);
-        }
-
         if (DataReductionPromoScreen
                 .getDisplayedDataReductionPromo(getApplicationContext())) {
             if (DataReductionProxySettings.getInstance().isDataReductionProxyEnabled()) {
@@ -373,7 +362,6 @@ public class FirstRunActivity extends AppCompatActivity implements FirstRunPageD
             }
         }
     }
-
 
     /**
      * Transitions to a given page.

@@ -259,16 +259,6 @@ std::string RoleToString(blink::WebAXRole role)
   }
 }
 
-std::string DeprecatedGetDescription(const blink::WebAXObject& object) {
-  std::string description = object.deprecatedAccessibilityDescription().utf8();
-  return description.insert(0, "AXDescription: ");
-}
-
-std::string DeprecatedGetHelpText(const blink::WebAXObject& object) {
-  std::string help_text = object.deprecatedHelpText().utf8();
-  return help_text.insert(0, "AXHelp: ");
-}
-
 std::string GetStringValue(const blink::WebAXObject& object) {
   std::string value;
   if (object.role() == blink::WebAXRoleColorWell) {
@@ -298,11 +288,6 @@ std::string GetRole(const blink::WebAXObject& object) {
   return role_string;
 }
 
-std::string DeprecatedGetTitle(const blink::WebAXObject& object) {
-  std::string title = object.deprecatedTitle().utf8();
-  return title.insert(0, "AXTitle: ");
-}
-
 std::string GetValueDescription(const blink::WebAXObject& object) {
   std::string value_description = object.valueDescription().utf8();
   return value_description.insert(0, "AXValueDescription: ");
@@ -314,12 +299,11 @@ std::string GetLanguage(const blink::WebAXObject& object) {
 }
 
 std::string GetAttributes(const blink::WebAXObject& object) {
-  // FIXME: Concatenate all attributes of the AXObject.
-  std::string attributes(DeprecatedGetTitle(object));
+  blink::WebAXNameFrom nameFrom;
+  blink::WebVector<blink::WebAXObject> nameObjects;
+  std::string attributes(object.name(nameFrom, nameObjects).utf8());
   attributes.append("\n");
   attributes.append(GetRole(object));
-  attributes.append("\n");
-  attributes.append(DeprecatedGetDescription(object));
   return attributes;
 }
 
@@ -596,29 +580,18 @@ WebAXObjectProxy::GetObjectTemplateBuilder(v8::Isolate* isolate) {
       .SetMethod("removeNotificationListener",
                  &WebAXObjectProxy::UnsetNotificationListener)
       //
-      // DEPRECATED accessible name and description accessors
-      //
-      .SetProperty("title", &WebAXObjectProxy::DeprecatedTitle)
-      .SetProperty("description", &WebAXObjectProxy::DeprecatedDescription)
-      .SetProperty("helpText", &WebAXObjectProxy::DeprecatedHelpText)
-      .SetMethod("titleUIElement", &WebAXObjectProxy::DeprecatedTitleUIElement)
-      .SetProperty("deprecatedTitle",
-                   &WebAXObjectProxy::DeprecatedTitle)
-      .SetProperty("deprecatedDescription",
-                   &WebAXObjectProxy::DeprecatedDescription)
-      .SetProperty("deprecatedHelpText",
-                   &WebAXObjectProxy::DeprecatedHelpText)
-      .SetMethod("deprecatedTitleUIElement",
-                 &WebAXObjectProxy::DeprecatedTitleUIElement)
-      //
       // NEW accessible name and description accessors
       //
       .SetProperty("name", &WebAXObjectProxy::Name)
       .SetProperty("nameFrom", &WebAXObjectProxy::NameFrom)
       .SetMethod("nameElementCount", &WebAXObjectProxy::NameElementCount)
-      .SetMethod("nameElementAtIndex", &WebAXObjectProxy::NameElementAtIndex);
-      // TODO(dmazzoni): add "description", etc. once LayoutTests have
-      // been updated to call deprecatedDescription instead.
+      .SetMethod("nameElementAtIndex", &WebAXObjectProxy::NameElementAtIndex)
+      .SetProperty("description", &WebAXObjectProxy::Description)
+      .SetProperty("descriptionFrom", &WebAXObjectProxy::DescriptionFrom)
+      .SetMethod("descriptionElementCount",
+                 &WebAXObjectProxy::DescriptionElementCount)
+      .SetMethod("descriptionElementAtIndex",
+                 &WebAXObjectProxy::DescriptionElementAtIndex);
 
 }
 
@@ -665,21 +638,6 @@ void WebAXObjectProxy::Reset()  {
 std::string WebAXObjectProxy::Role() {
   accessibility_object_.updateLayoutAndCheckValidity();
   return GetRole(accessibility_object_);
-}
-
-std::string WebAXObjectProxy::DeprecatedTitle() {
-  accessibility_object_.updateLayoutAndCheckValidity();
-  return DeprecatedGetTitle(accessibility_object_);
-}
-
-std::string WebAXObjectProxy::DeprecatedDescription() {
-  accessibility_object_.updateLayoutAndCheckValidity();
-  return DeprecatedGetDescription(accessibility_object_);
-}
-
-std::string WebAXObjectProxy::DeprecatedHelpText() {
-  accessibility_object_.updateLayoutAndCheckValidity();
-  return DeprecatedGetHelpText(accessibility_object_);
 }
 
 std::string WebAXObjectProxy::StringValue() {
@@ -1165,15 +1123,6 @@ v8::Local<v8::Object> WebAXObjectProxy::CellForColumnAndRow(
   return factory_->GetOrCreate(obj);
 }
 
-v8::Local<v8::Object> WebAXObjectProxy::DeprecatedTitleUIElement() {
-  accessibility_object_.updateLayoutAndCheckValidity();
-  blink::WebAXObject obj = accessibility_object_.deprecatedTitleUIElement();
-  if (obj.isNull())
-    return v8::Local<v8::Object>();
-
-  return factory_->GetOrCreate(obj);
-}
-
 void WebAXObjectProxy::SetSelectedTextRange(int selection_start,
                                             int length) {
   accessibility_object_.updateLayoutAndCheckValidity();
@@ -1357,21 +1306,30 @@ std::string WebAXObjectProxy::Name() {
 
 std::string WebAXObjectProxy::NameFrom() {
   accessibility_object_.updateLayoutAndCheckValidity();
-  blink::WebAXNameFrom nameFrom = blink::WebAXNameFromContents;
+  blink::WebAXNameFrom nameFrom = blink::WebAXNameFromUninitialized;
   blink::WebVector<blink::WebAXObject> nameObjects;
   accessibility_object_.name(nameFrom, nameObjects);
   switch(nameFrom) {
+    case blink::WebAXNameFromUninitialized:
+      return "";
     case blink::WebAXNameFromAttribute:
       return "attribute";
+    case blink::WebAXNameFromCaption:
+      return "caption";
     case blink::WebAXNameFromContents:
       return "contents";
     case blink::WebAXNameFromPlaceholder:
       return "placeholder";
     case blink::WebAXNameFromRelatedElement:
       return "relatedElement";
-    default:
-      return "unknown";
+    case blink::WebAXNameFromValue:
+      return "value";
+    case blink::WebAXNameFromTitle:
+      return "title";
   }
+
+  NOTREACHED();
+  return std::string();
 }
 
 int WebAXObjectProxy::NameElementCount() {
@@ -1390,6 +1348,71 @@ v8::Local<v8::Object> WebAXObjectProxy::NameElementAtIndex(unsigned index) {
   if (index >= nameObjects.size())
     return v8::Local<v8::Object>();
   return factory_->GetOrCreate(nameObjects[index]);
+}
+
+std::string WebAXObjectProxy::Description() {
+  accessibility_object_.updateLayoutAndCheckValidity();
+  blink::WebAXNameFrom nameFrom;
+  blink::WebVector<blink::WebAXObject> nameObjects;
+  accessibility_object_.name(nameFrom, nameObjects);
+  blink::WebAXDescriptionFrom descriptionFrom;
+  blink::WebVector<blink::WebAXObject> descriptionObjects;
+  return accessibility_object_.description(
+      nameFrom, descriptionFrom, descriptionObjects).utf8();
+}
+
+std::string WebAXObjectProxy::DescriptionFrom() {
+  accessibility_object_.updateLayoutAndCheckValidity();
+  blink::WebAXNameFrom nameFrom;
+  blink::WebVector<blink::WebAXObject> nameObjects;
+  accessibility_object_.name(nameFrom, nameObjects);
+  blink::WebAXDescriptionFrom descriptionFrom =
+      blink::WebAXDescriptionFromUninitialized;
+  blink::WebVector<blink::WebAXObject> descriptionObjects;
+  accessibility_object_.description(
+      nameFrom, descriptionFrom, descriptionObjects);
+  switch(descriptionFrom) {
+    case blink::WebAXDescriptionFromUninitialized:
+      return "";
+    case blink::WebAXDescriptionFromAttribute:
+      return "attribute";
+    case blink::WebAXDescriptionFromContents:
+      return "contents";
+    case blink::WebAXDescriptionFromPlaceholder:
+      return "placeholder";
+    case blink::WebAXDescriptionFromRelatedElement:
+      return "relatedElement";
+  }
+
+  NOTREACHED();
+  return std::string();
+}
+
+int WebAXObjectProxy::DescriptionElementCount() {
+  accessibility_object_.updateLayoutAndCheckValidity();
+  blink::WebAXNameFrom nameFrom;
+  blink::WebVector<blink::WebAXObject> nameObjects;
+  accessibility_object_.name(nameFrom, nameObjects);
+  blink::WebAXDescriptionFrom descriptionFrom;
+  blink::WebVector<blink::WebAXObject> descriptionObjects;
+  accessibility_object_.description(
+      nameFrom, descriptionFrom, descriptionObjects);
+  return static_cast<int>(descriptionObjects.size());
+}
+
+v8::Local<v8::Object> WebAXObjectProxy::DescriptionElementAtIndex(
+    unsigned index) {
+  accessibility_object_.updateLayoutAndCheckValidity();
+  blink::WebAXNameFrom nameFrom;
+  blink::WebVector<blink::WebAXObject> nameObjects;
+  accessibility_object_.name(nameFrom, nameObjects);
+  blink::WebAXDescriptionFrom descriptionFrom;
+  blink::WebVector<blink::WebAXObject> descriptionObjects;
+  accessibility_object_.description(
+      nameFrom, descriptionFrom, descriptionObjects);
+  if (index >= descriptionObjects.size())
+    return v8::Local<v8::Object>();
+  return factory_->GetOrCreate(descriptionObjects[index]);
 }
 
 RootWebAXObjectProxy::RootWebAXObjectProxy(

@@ -11,7 +11,10 @@
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_discovery_session.h"
+#include "device/bluetooth/bluetooth_gatt_characteristic.h"
 #include "device/bluetooth/bluetooth_gatt_connection.h"
+#include "device/bluetooth/bluetooth_gatt_notify_session.h"
+#include "device/bluetooth/bluetooth_gatt_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace device {
@@ -26,6 +29,8 @@ class BluetoothDevice;
 // BluetoothTest.
 class BluetoothTestBase : public testing::Test {
  public:
+  enum class Call { EXPECTED, NOT_EXPECTED };
+
   static const std::string kTestAdapterName;
   static const std::string kTestAdapterAddress;
 
@@ -43,9 +48,19 @@ class BluetoothTestBase : public testing::Test {
   BluetoothTestBase();
   ~BluetoothTestBase() override;
 
-  // Calls adapter_->StartDiscoverySession with this fixture's callbacks, and
-  // then RunLoop().RunUntilIdle().
-  void StartDiscoverySession();
+  // Checks that no unexpected calls have been made to callbacks.
+  // Overrides of this method should always call the parent's class method.
+  void TearDown() override;
+
+  // Calls adapter_->StartDiscoverySessionWithFilter with Low Energy transport,
+  // and this fixture's callbacks expecting success.
+  // Then RunLoop().RunUntilIdle().
+  void StartLowEnergyDiscoverySession();
+
+  // Calls adapter_->StartDiscoverySessionWithFilter with Low Energy transport,
+  // and this fixture's callbacks expecting error.
+  // Then RunLoop().RunUntilIdle().
+  void StartLowEnergyDiscoverySessionExpectedToFail();
 
   // Check if Low Energy is available. On Mac, we require OS X >= 10.10.
   virtual bool PlatformSupportsLowEnergy() = 0;
@@ -75,37 +90,116 @@ class BluetoothTestBase : public testing::Test {
   virtual BluetoothDevice* DiscoverLowEnergyDevice(int device_ordinal);
 
   // Simulates success of implementation details of CreateGattConnection.
-  virtual void CompleteGattConnection(BluetoothDevice* device) {}
+  virtual void SimulateGattConnection(BluetoothDevice* device) {}
 
   // Simulates failure of CreateGattConnection with the given error code.
-  virtual void FailGattConnection(BluetoothDevice* device,
-                                  BluetoothDevice::ConnectErrorCode) {}
+  virtual void SimulateGattConnectionError(BluetoothDevice* device,
+                                           BluetoothDevice::ConnectErrorCode) {}
 
   // Simulates GattConnection disconnecting.
-  virtual void CompleteGattDisconnection(BluetoothDevice* device) {}
+  virtual void SimulateGattDisconnection(BluetoothDevice* device) {}
 
-  // Remove the device from the adapter and delete it.
+  // Simulates success of discovering services. |uuids| is used to create a
+  // service for each UUID string. Multiple UUIDs with the same value produce
+  // multiple service instances.
+  virtual void SimulateGattServicesDiscovered(
+      BluetoothDevice* device,
+      const std::vector<std::string>& uuids) {}
+
+  // Simulates failure to discover services.
+  virtual void SimulateGattServicesDiscoveryError(BluetoothDevice* device) {}
+
+  // Simulates a Characteristic on a service.
+  virtual void SimulateGattCharacteristic(BluetoothGattService* service,
+                                          const std::string& uuid,
+                                          int properties) {}
+
+  // Remembers |characteristic|'s platform specific object to be used in a
+  // subsequent call to methods such as SimulateGattCharacteristicRead that
+  // accept a nullptr value to select this remembered characteristic. This
+  // enables tests where the platform attempts to reference characteristic
+  // objects after the Chrome objects have been deleted, e.g. with DeleteDevice.
+  virtual void RememberCharacteristicForSubsequentAction(
+      BluetoothGattCharacteristic* characteristic) {}
+
+  // Simulates a Characteristic Set Notify success.
+  virtual void SimulateGattNotifySessionStarted(
+      BluetoothGattCharacteristic* characteristic) {}
+
+  // Simulates a Characteristic Set Notify operation failing synchronously once
+  // for an unknown reason.
+  virtual void SimulateGattCharacteristicSetNotifyWillFailSynchronouslyOnce(
+      BluetoothGattCharacteristic* characteristic) {}
+
+  // Simulates a Characteristic Read operation succeeding, returning |value|.
+  // If |characteristic| is null, acts upon the characteristic provided to
+  // RememberCharacteristicForSubsequentAction.
+  virtual void SimulateGattCharacteristicRead(
+      BluetoothGattCharacteristic* characteristic,
+      const std::vector<uint8>& value) {}
+
+  // Simulates a Characteristic Read operation failing with a GattErrorCode.
+  virtual void SimulateGattCharacteristicReadError(
+      BluetoothGattCharacteristic* characteristic,
+      BluetoothGattService::GattErrorCode) {}
+
+  // Simulates a Characteristic Read operation failing synchronously once for an
+  // unknown reason.
+  virtual void SimulateGattCharacteristicReadWillFailSynchronouslyOnce(
+      BluetoothGattCharacteristic* characteristic) {}
+
+  // Simulates a Characteristic Write operation succeeding, returning |value|.
+  // If |characteristic| is null, acts upon the characteristic provided to
+  // RememberCharacteristicForSubsequentAction.
+  virtual void SimulateGattCharacteristicWrite(
+      BluetoothGattCharacteristic* characteristic) {}
+
+  // Simulates a Characteristic Write operation failing with a GattErrorCode.
+  virtual void SimulateGattCharacteristicWriteError(
+      BluetoothGattCharacteristic* characteristic,
+      BluetoothGattService::GattErrorCode) {}
+
+  // Simulates a Characteristic Write operation failing synchronously once for
+  // an unknown reason.
+  virtual void SimulateGattCharacteristicWriteWillFailSynchronouslyOnce(
+      BluetoothGattCharacteristic* characteristic) {}
+
+  // Removes the device from the adapter and deletes it.
   virtual void DeleteDevice(BluetoothDevice* device);
 
   // Callbacks that increment |callback_count_|, |error_callback_count_|:
-  void Callback();
-  void DiscoverySessionCallback(scoped_ptr<BluetoothDiscoverySession>);
-  void GattConnectionCallback(scoped_ptr<BluetoothGattConnection>);
-  void ErrorCallback();
-  void ConnectErrorCallback(enum BluetoothDevice::ConnectErrorCode);
+  void Callback(Call expected);
+  void DiscoverySessionCallback(Call expected,
+                                scoped_ptr<BluetoothDiscoverySession>);
+  void GattConnectionCallback(Call expected,
+                              scoped_ptr<BluetoothGattConnection>);
+  void NotifyCallback(Call expected, scoped_ptr<BluetoothGattNotifySession>);
+  void ReadValueCallback(Call expected, const std::vector<uint8>& value);
+  void ErrorCallback(Call expected);
+  void ConnectErrorCallback(Call expected,
+                            enum BluetoothDevice::ConnectErrorCode);
+  void GattErrorCallback(Call expected, BluetoothGattService::GattErrorCode);
 
   // Accessors to get callbacks bound to this fixture:
-  base::Closure GetCallback();
-  BluetoothAdapter::DiscoverySessionCallback GetDiscoverySessionCallback();
-  BluetoothDevice::GattConnectionCallback GetGattConnectionCallback();
-  BluetoothAdapter::ErrorCallback GetErrorCallback();
-  BluetoothDevice::ConnectErrorCallback GetConnectErrorCallback();
+  base::Closure GetCallback(Call expected);
+  BluetoothAdapter::DiscoverySessionCallback GetDiscoverySessionCallback(
+      Call expected);
+  BluetoothDevice::GattConnectionCallback GetGattConnectionCallback(
+      Call expected);
+  BluetoothGattCharacteristic::NotifySessionCallback GetNotifyCallback(
+      Call expected);
+  BluetoothGattCharacteristic::ValueCallback GetReadValueCallback(
+      Call expected);
+  BluetoothAdapter::ErrorCallback GetErrorCallback(Call expected);
+  BluetoothDevice::ConnectErrorCallback GetConnectErrorCallback(Call expected);
+  base::Callback<void(BluetoothGattService::GattErrorCode)>
+  GetGattErrorCallback(Call expected);
 
   // Reset all event count members to 0.
   void ResetEventCounts();
 
   // A Message loop is required by some implementations that will PostTasks and
-  // by base::RunLoop().RunUntilIdle() use in this fixuture.
+  // by base::RunLoop().RunUntilIdle() use in this fixture.
   base::MessageLoop message_loop_;
 
   scoped_refptr<BluetoothAdapter> adapter_;
@@ -113,10 +207,29 @@ class BluetoothTestBase : public testing::Test {
   ScopedVector<BluetoothGattConnection> gatt_connections_;
   enum BluetoothDevice::ConnectErrorCode last_connect_error_code_ =
       BluetoothDevice::ERROR_UNKNOWN;
+  ScopedVector<BluetoothGattNotifySession> notify_sessions_;
+  std::vector<uint8> last_read_value_;
+  std::vector<uint8> last_write_value_;
+  BluetoothGattService::GattErrorCode last_gatt_error_code_;
+
   int callback_count_ = 0;
   int error_callback_count_ = 0;
-  int gatt_connection_attempt_count_ = 0;
-  int gatt_disconnection_attempt_count_ = 0;
+  int gatt_connection_attempts_ = 0;
+  int gatt_disconnection_attempts_ = 0;
+  int gatt_discovery_attempts_ = 0;
+  int gatt_notify_characteristic_attempts_ = 0;
+  int gatt_read_characteristic_attempts_ = 0;
+  int gatt_write_characteristic_attempts_ = 0;
+
+  // The following values are used to make sure the correct callbacks
+  // have been called. They are not reset when calling ResetEventCounts().
+  int expected_success_callback_calls_ = 0;
+  int expected_error_callback_calls_ = 0;
+  int actual_success_callback_calls_ = 0;
+  int actual_error_callback_calls_ = 0;
+  bool unexpected_success_callback_ = false;
+  bool unexpected_error_callback_ = false;
+
   base::WeakPtrFactory<BluetoothTestBase> weak_factory_;
 };
 

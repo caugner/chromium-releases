@@ -62,9 +62,15 @@ class TestTouchEvent : public ui::TouchEvent {
                  int touch_id,
                  int flags,
                  base::TimeDelta timestamp)
-      : TouchEvent(type, root_location, flags, touch_id, timestamp,
-                   1.0f, 1.0f, 0.0f, 0.0f) {
-  }
+      : TouchEvent(type,
+                   root_location,
+                   flags,
+                   touch_id,
+                   timestamp,
+                   1.0f,
+                   1.0f,
+                   0.0f,
+                   0.0f) {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestTouchEvent);
@@ -364,11 +370,13 @@ void EventGenerator::GestureScrollSequenceWithCallback(
 
   float dx = static_cast<float>(end.x() - start.x()) / steps;
   float dy = static_cast<float>(end.y() - start.y()) / steps;
-  gfx::PointF location = start;
+  gfx::PointF location(start);
   for (int i = 0; i < steps; ++i) {
     location.Offset(dx, dy);
     timestamp += step_delay;
-    ui::TouchEvent move(ui::ET_TOUCH_MOVED, location, kTouchId, timestamp);
+    ui::TouchEvent move(ui::ET_TOUCH_MOVED, gfx::Point(), kTouchId, timestamp);
+    move.set_location_f(location);
+    move.set_root_location_f(location);
     Dispatch(&move);
     callback.Run(ui::ET_GESTURE_SCROLL_UPDATE, gfx::Vector2dF(dx, dy));
   }

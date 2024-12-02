@@ -201,10 +201,6 @@ const char kHostPairingOobe[] = "host-pairing-oobe";
 const char kIgnoreUserProfileMappingForTests[] =
     "ignore-user-profile-mapping-for-tests";
 
-// File to load internal display ICC file from.
-const char kInternalDisplayColorProfileFile[] =
-    "internal-display-color-profile-file";
-
 // Enables Chrome-as-a-login-manager behavior.
 const char kLoginManager[] = "login-manager";
 
@@ -289,8 +285,9 @@ const char kForceFirstRunUI[] = "force-first-run-ui";
 // Enables testing for auto update UI.
 const char kTestAutoUpdateUI[] = "test-auto-update-ui";
 
-// Enables waking the device based on the receipt of some network packets.
-const char kWakeOnPackets[] = "wake-on-packets";
+// Enables wake on wifi packet feature, which wakes the device on the receipt
+// of network packets from whitelisted sources.
+const char kWakeOnWifiPacket[] = "wake-on-wifi-packet";
 
 // Screenshot testing: specifies the directory where the golden screenshots are
 // stored.

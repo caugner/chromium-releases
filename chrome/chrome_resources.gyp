@@ -278,31 +278,84 @@
           },
           'includes': [ '../build/grit_action.gypi' ],
         },
+        {
+          # GN version: //chrome/app:settings_chromium_strings
+          'action_name': 'generate_settings_chromium_strings',
+          'variables': {
+            'grit_grd_file': 'app/settings_chromium_strings.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+        {
+          # GN version: //chrome/app:settings_google_chrome_strings
+          'action_name': 'generate_settings_google_chrome_strings',
+          'variables': {
+            'grit_grd_file': 'app/settings_google_chrome_strings.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
       ],
     },
     {
-      # GN version: //chrome/app:make_generated_resources_map
-      'target_name': 'chrome_strings_map',
+      # GN version: //chrome/browser/metrics/variations:chrome_ui_string_overrider_factory_gen_sources
+      'target_name': 'make_chrome_ui_string_overrider_factory',
       'type': 'none',
-      'dependencies': [ 'chrome_strings', ],
+      'hard_dependency': 1,
+      'dependencies': [
+        'chrome_strings',
+        '../components/components_strings.gyp:components_strings',
+      ],
       'actions': [
         {
-          'action_name': 'generate_resources_map',
+          'action_name': 'generate_ui_string_overrider',
           'inputs': [
-            'browser/metrics/variations/generate_resources_map.py',
-            '<(grit_out_dir)/grit/generated_resources.h'
+            '../components/variations/service/generate_ui_string_overrider.py',
+            '<(grit_out_dir)/grit/chromium_strings.h',
+	    '<(grit_out_dir)/grit/generated_resources.h',
+            '<(grit_out_dir)/grit/google_chrome_strings.h',
+            '<(grit_out_dir)/grit/settings_chromium_strings.h',
+            '<(grit_out_dir)/grit/settings_google_chrome_strings.h',
+            '<(grit_out_dir)/grit/settings_strings.h',
+            '<(SHARED_INTERMEDIATE_DIR)/components/strings/grit/components_chromium_strings.h',
+            '<(SHARED_INTERMEDIATE_DIR)/components/strings/grit/components_google_chrome_strings.h',
+	    '<(SHARED_INTERMEDIATE_DIR)/components/strings/grit/components_strings.h'
           ],
           'outputs': [
-            '<(SHARED_INTERMEDIATE_DIR)/chrome/browser/metrics/variations/generated_resources_map.cc',
+            '<(SHARED_INTERMEDIATE_DIR)/chrome/browser/metrics/variations/ui_string_overrider_factory.cc',
+            '<(SHARED_INTERMEDIATE_DIR)/chrome/browser/metrics/variations/ui_string_overrider_factory.h',
           ],
           'action': [
             'python',
-            'browser/metrics/variations/generate_resources_map.py',
-            '<(grit_out_dir)/grit/generated_resources.h',
-            '<(SHARED_INTERMEDIATE_DIR)/chrome/browser/metrics/variations/generated_resources_map.cc'
+            '../components/variations/service/generate_ui_string_overrider.py',
+            '-N', 'chrome_variations',
+            '-o', '<(SHARED_INTERMEDIATE_DIR)',
+            '-S', 'chrome/browser/metrics/variations/ui_string_overrider_factory.cc',
+            '-H', 'chrome/browser/metrics/variations/ui_string_overrider_factory.h',
+            '<(grit_out_dir)/grit/chromium_strings.h',
+	    '<(grit_out_dir)/grit/generated_resources.h',
+            '<(grit_out_dir)/grit/google_chrome_strings.h',
+            '<(grit_out_dir)/grit/settings_chromium_strings.h',
+            '<(grit_out_dir)/grit/settings_google_chrome_strings.h',
+            '<(grit_out_dir)/grit/settings_strings.h',
+            '<(SHARED_INTERMEDIATE_DIR)/components/strings/grit/components_chromium_strings.h',
+            '<(SHARED_INTERMEDIATE_DIR)/components/strings/grit/components_google_chrome_strings.h',
+	    '<(SHARED_INTERMEDIATE_DIR)/components/strings/grit/components_strings.h'
           ],
           'message': 'Generating generated resources map.',
         }
+      ],
+    },
+    {
+      # GN version: //chrome/browser/metrics/variations:chrome_ui_string_overrider_factory
+      'target_name': 'chrome_ui_string_overrider_factory',
+      'type': 'static_library',
+      'dependencies': [
+        '../components/components.gyp:variations_service',
+        'make_chrome_ui_string_overrider_factory',
+      ],
+      'sources': [
+        '<(SHARED_INTERMEDIATE_DIR)/chrome/browser/metrics/variations/ui_string_overrider_factory.cc',
+        '<(SHARED_INTERMEDIATE_DIR)/chrome/browser/metrics/variations/ui_string_overrider_factory.h',
       ],
     },
     {

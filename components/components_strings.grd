@@ -135,6 +135,8 @@
       <part file="app_modal_strings.grdp" />
       <part file="autofill_strings.grdp" />
       <part file="bookmark_bar_strings.grdp" />
+      <part file="browser_sync_strings.grdp" />
+      <part file="crash_strings.grdp" />
       <part file="data_reduction_proxy_strings.grdp" />
       <part file="dom_distiller_strings.grdp" />
       <part file="error_page_strings.grdp" />
@@ -147,7 +149,7 @@
       <part file="ssl_errors_strings.grdp" />
       <part file="translate_strings.grdp" />
       <part file="undo_strings.grdp" />
-      <part file="version_info.grdp" />
+      <part file="version_ui_strings.grdp" />
 
       <!-- Generic terms -->
       <message name="IDS_LEARN_MORE" desc="Learn more text">

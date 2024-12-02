@@ -87,12 +87,6 @@ enum WidgetState {
 };
 
 #if GTK_MAJOR_VERSION == 2
-const WidgetState kTextboxInactiveState = ACTIVE;
-#else
-const WidgetState kTextboxInactiveState = SELECTED;
-#endif
-
-#if GTK_MAJOR_VERSION == 2
 // Same order as enum WidgetState above
 const GtkStateType stateMap[] = {
   GTK_STATE_NORMAL,
@@ -246,15 +240,23 @@ SkColor NativeThemeGtk2::GetSystemColor(ColorId color_id) const {
       return GetTextAAColor(GetEntry(), NORMAL);
 
     // MenuItem
+#if GTK_MAJOR_VERSION == 2
+    case kColorId_SelectedMenuItemForegroundColor:
+      return GetTextColor(GetMenuItem(), SELECTED);
+    case kColorId_FocusedMenuItemBackgroundColor:
+      return GetBGColor(GetMenuItem(), SELECTED);
+#else
+    case kColorId_SelectedMenuItemForegroundColor:
+      return GetTextColor(GetMenuItem(), PRELIGHT);
+    case kColorId_FocusedMenuItemBackgroundColor:
+      return GetBGColor(GetMenuItem(), PRELIGHT);
+#endif
+
     case kColorId_EnabledMenuItemForegroundColor:
     case kColorId_DisabledEmphasizedMenuItemForegroundColor:
       return GetTextColor(GetMenuItem(), NORMAL);
     case kColorId_DisabledMenuItemForegroundColor:
       return GetTextColor(GetMenuItem(), INSENSITIVE);
-    case kColorId_SelectedMenuItemForegroundColor:
-      return GetTextColor(GetMenuItem(), SELECTED);
-    case kColorId_FocusedMenuItemBackgroundColor:
-      return GetBGColor(GetMenuItem(), SELECTED);
     case kColorId_HoverMenuItemBackgroundColor:
       return GetBGColor(GetMenuItem(), PRELIGHT);
     case kColorId_FocusedMenuButtonBorderColor:
@@ -278,11 +280,16 @@ SkColor NativeThemeGtk2::GetSystemColor(ColorId color_id) const {
       return GetBGColor(GetWindow(), NORMAL);
 
     // Link
-    // TODO(estade): get these from the gtk theme instead of hardcoding.
     case kColorId_LinkDisabled:
-      return SK_ColorBLACK;
-    case kColorId_LinkEnabled:
-      return SkColorSetRGB(0x33, 0x67, 0xD6);
+      return SkColorSetA(GetSystemColor(kColorId_LinkEnabled), 0xBB);
+    case kColorId_LinkEnabled: {
+      SkColor link_color = SK_ColorTRANSPARENT;
+      GetChromeStyleColor("link-color", &link_color);
+      if (link_color != SK_ColorTRANSPARENT)
+        return link_color;
+      // Default color comes from gtklinkbutton.c.
+      return SkColorSetRGB(0x00, 0x00, 0xEE);
+    }
     case kColorId_LinkPressed:
       return SK_ColorRED;
 
@@ -310,20 +317,35 @@ SkColor NativeThemeGtk2::GetSystemColor(ColorId color_id) const {
     case kColorId_BlueButtonShadowColor:
       return SK_ColorTRANSPARENT;
       // return GetTextColor(GetButton(), NORMAL);
+    case kColorId_CallToActionColor:
+      return GetSystemColor(kColorId_LinkEnabled);
 
     // Textfield
     case kColorId_TextfieldDefaultColor:
       return GetTextColor(GetEntry(), NORMAL);
     case kColorId_TextfieldDefaultBackground:
       return GetBaseColor(GetEntry(), NORMAL);
+
+#if GTK_MAJOR_VERSION == 2
     case kColorId_TextfieldReadOnlyColor:
-      return GetTextColor(GetEntry(), kTextboxInactiveState);
+      return GetTextColor(GetEntry(), ACTIVE);
     case kColorId_TextfieldReadOnlyBackground:
-      return GetBaseColor(GetEntry(), kTextboxInactiveState);
+      return GetBaseColor(GetEntry(), ACTIVE);
     case kColorId_TextfieldSelectionColor:
       return GetTextColor(GetEntry(), SELECTED);
     case kColorId_TextfieldSelectionBackgroundFocused:
       return GetBaseColor(GetEntry(), SELECTED);
+#else
+    case kColorId_TextfieldReadOnlyColor:
+      return GetTextColor(GetEntry(), SELECTED);
+    case kColorId_TextfieldReadOnlyBackground:
+      return GetBaseColor(GetEntry(), SELECTED);
+    case kColorId_TextfieldSelectionColor:
+      return GetTextColor(GetLabel(), SELECTED);
+    case kColorId_TextfieldSelectionBackgroundFocused:
+      return GetBaseColor(GetLabel(), SELECTED);
+#endif
+
 
     // Tooltips
     case kColorId_TooltipBackground:
@@ -355,34 +377,41 @@ SkColor NativeThemeGtk2::GetSystemColor(ColorId color_id) const {
 
       // Results Table
     case kColorId_ResultsTableNormalBackground:
-      return GetBaseColor(GetEntry(), NORMAL);
+      return GetSystemColor(kColorId_TextfieldDefaultBackground);
     case kColorId_ResultsTableHoveredBackground:
-      return color_utils::AlphaBlend(GetBaseColor(GetEntry(), NORMAL),
-                                     GetBaseColor(GetEntry(), SELECTED),
-                                     0x80);
+      return color_utils::AlphaBlend(
+          GetSystemColor(kColorId_TextfieldDefaultBackground),
+          GetSystemColor(kColorId_TextfieldSelectionBackgroundFocused),
+          0x80);
     case kColorId_ResultsTableSelectedBackground:
-      return GetBaseColor(GetEntry(), SELECTED);
+      return GetSystemColor(kColorId_TextfieldSelectionBackgroundFocused);
     case kColorId_ResultsTableNormalText:
     case kColorId_ResultsTableHoveredText:
-      return GetTextColor(GetEntry(), NORMAL);
+      return GetSystemColor(kColorId_TextfieldDefaultColor);
     case kColorId_ResultsTableSelectedText:
-      return GetTextColor(GetEntry(), SELECTED);
+      return GetSystemColor(kColorId_TextfieldSelectionColor);
     case kColorId_ResultsTableNormalDimmedText:
     case kColorId_ResultsTableHoveredDimmedText:
-      return color_utils::AlphaBlend(GetTextColor(GetEntry(), NORMAL),
-                                     GetBaseColor(GetEntry(), NORMAL),
-                                     0x80);
+    case kColorId_ResultsTableNormalHeadline:
+    case kColorId_ResultsTableHoveredHeadline:
+      return color_utils::AlphaBlend(
+          GetSystemColor(kColorId_TextfieldDefaultColor),
+          GetSystemColor(kColorId_TextfieldDefaultBackground),
+          0x80);
     case kColorId_ResultsTableSelectedDimmedText:
-      return color_utils::AlphaBlend(GetTextColor(GetEntry(), SELECTED),
-                                     GetBaseColor(GetEntry(), NORMAL),
-                                     0x80);
+    case kColorId_ResultsTableSelectedHeadline:
+      return color_utils::AlphaBlend(
+          GetSystemColor(kColorId_TextfieldSelectionColor),
+          GetSystemColor(kColorId_TextfieldDefaultBackground),
+          0x80);
     case kColorId_ResultsTableNormalUrl:
     case kColorId_ResultsTableHoveredUrl:
-      return NormalURLColor(GetTextColor(GetEntry(), NORMAL));
+      return NormalURLColor(GetSystemColor(kColorId_TextfieldDefaultColor));
 
     case kColorId_ResultsTableSelectedUrl:
-      return SelectedURLColor(GetTextColor(GetEntry(), SELECTED),
-                              GetBaseColor(GetEntry(), SELECTED));
+      return SelectedURLColor(
+          GetSystemColor(kColorId_TextfieldSelectionColor),
+          GetSystemColor(kColorId_TextfieldSelectionBackgroundFocused));
     case kColorId_ResultsTableNormalDivider:
       return color_utils::AlphaBlend(GetTextColor(GetWindow(), NORMAL),
                                      GetBGColor(GetWindow(), NORMAL),
@@ -423,15 +452,14 @@ SkColor NativeThemeGtk2::GetSystemColor(ColorId color_id) const {
 
     // Throbber
     case kColorId_ThrobberSpinningColor:
-    case kColorId_ThrobberLightColor: {
-      return GetBGColor(GetEntry(), SELECTED);
-    }
+    case kColorId_ThrobberLightColor:
+      return GetSystemColor(kColorId_TextfieldSelectionBackgroundFocused);
 
-    case kColorId_ThrobberWaitingColor: {
-      return color_utils::AlphaBlend(GetBGColor(GetEntry(), SELECTED),
-                                     GetBGColor(GetWindow(), NORMAL),
-                                     0x80);
-    }
+    case kColorId_ThrobberWaitingColor:
+      return color_utils::AlphaBlend(
+          GetSystemColor(kColorId_TextfieldSelectionBackgroundFocused),
+          GetBGColor(GetWindow(), NORMAL),
+          0x80);
 
     case kColorId_NumColors:
       NOTREACHED();
@@ -439,6 +467,22 @@ SkColor NativeThemeGtk2::GetSystemColor(ColorId color_id) const {
   }
 
   return kInvalidColorIdColor;
+}
+
+// Get ChromeGtkFrame theme colors. No-op in GTK3.
+bool NativeThemeGtk2::GetChromeStyleColor(const char* style_property,
+                                          SkColor* ret_color) const {
+#if GTK_MAJOR_VERSION == 2
+  GdkColor* style_color = nullptr;
+  gtk_widget_style_get(GetWindow(), style_property, &style_color, nullptr);
+  if (style_color) {
+    *ret_color = GdkColorToSkColor(*style_color);
+    gdk_color_free(style_color);
+    return true;
+  }
+#endif
+
+  return false;
 }
 
 GtkWidget* NativeThemeGtk2::GetWindow() const {

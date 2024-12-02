@@ -5,6 +5,8 @@
 #ifndef COMPONENTS_SYNC_DRIVER_SYNC_API_COMPONENT_FACTORY_H_
 #define COMPONENTS_SYNC_DRIVER_SYNC_API_COMPONENT_FACTORY_H_
 
+#include <string>
+
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/sync_driver/data_type_controller.h"
@@ -94,6 +96,7 @@ class SyncApiComponentFactory {
   // Creating this in the factory helps us mock it out in testing.
   virtual browser_sync::SyncBackendHost* CreateSyncBackendHost(
       const std::string& name,
+      SyncClient* sync_client,
       invalidation::InvalidationService* invalidator,
       const base::WeakPtr<sync_driver::SyncPrefs>& sync_prefs,
       const base::FilePath& sync_folder) = 0;

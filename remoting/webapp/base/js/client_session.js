@@ -24,7 +24,7 @@ var remoting = remoting || {};
 /**
  * @param {remoting.ClientPlugin} plugin
  * @param {remoting.SignalStrategy} signalStrategy Signal strategy.
- * @param {remoting.Logger} logger
+ * @param {remoting.SessionLogger} logger
  * @param {remoting.ClientSession.EventHandler} listener
  *
  * @constructor
@@ -57,7 +57,7 @@ remoting.ClientSession = function(
   /** @private */
   this.hasReceivedFrame_ = false;
 
-  /** @private {remoting.Logger} */
+  /** @private */
   this.logger_ = logger;
 
   /** @private */
@@ -135,6 +135,7 @@ remoting.ClientSession.EventHandler.prototype.onDisconnected =
 //
 // TODO(kelvinp): Merge this enum with remoting.ChromotingEvent.SessionState
 // once we have migrated away from XMPP-based logging (crbug.com/523423).
+//
 // NOTE: The enums here correspond to the Chromoting.Connections enumerated
 // histogram defined in src/tools/metrics/histograms/histograms.xml. UMA
 // histograms don't work well with negative values, so only non-negative values
@@ -177,7 +178,9 @@ remoting.ClientSession.ConnectionError = {
   SESSION_REJECTED: 2,
   INCOMPATIBLE_PROTOCOL: 3,
   NETWORK_FAILURE: 4,
-  HOST_OVERLOAD: 5
+  HOST_OVERLOAD: 5,
+  MAX_SESSION_LENGTH: 6,
+  HOST_CONFIGURATION_ERROR: 7
 };
 
 /**
@@ -305,9 +308,13 @@ remoting.ClientSession.prototype.disconnect = function(error) {
       '</jingle>' +
     '</cli:iq>');
 
-  var state = error.isNone() ?
-                  remoting.ClientSession.State.CLOSED :
-                  remoting.ClientSession.State.FAILED;
+  var state = remoting.ClientSession.State.FAILED;
+  if (error.hasTag(
+          remoting.Error.Tag.NONE,
+          remoting.Error.Tag.CLIENT_SUSPENDED)) {
+    state = remoting.ClientSession.State.CLOSED;
+  }
+
   this.error_ = error;
   this.setState_(state);
 };
@@ -332,7 +339,7 @@ remoting.ClientSession.prototype.getState = function() {
 };
 
 /**
- * @return {remoting.Logger}.
+ * @return {remoting.SessionLogger}.
  */
 remoting.ClientSession.prototype.getLogger = function() {
   return this.logger_;
@@ -453,30 +460,34 @@ remoting.ClientSession.prototype.onIncomingMessage_ = function(message) {
 remoting.ClientSession.prototype.onConnectionStatusUpdate =
     function(status, error) {
   if (status == remoting.ClientSession.State.FAILED) {
+    var errorTag = remoting.Error.Tag.UNEXPECTED;
     switch (error) {
       case remoting.ClientSession.ConnectionError.HOST_IS_OFFLINE:
-        this.error_ = new remoting.Error(
-            remoting.Error.Tag.HOST_IS_OFFLINE);
+        errorTag = remoting.Error.Tag.HOST_IS_OFFLINE;
         break;
       case remoting.ClientSession.ConnectionError.SESSION_REJECTED:
-        this.error_ = new remoting.Error(
-            remoting.Error.Tag.INVALID_ACCESS_CODE);
+        errorTag = remoting.Error.Tag.INVALID_ACCESS_CODE;
         break;
       case remoting.ClientSession.ConnectionError.INCOMPATIBLE_PROTOCOL:
-        this.error_ = new remoting.Error(
-            remoting.Error.Tag.INCOMPATIBLE_PROTOCOL);
+        errorTag = remoting.Error.Tag.INCOMPATIBLE_PROTOCOL;
         break;
       case remoting.ClientSession.ConnectionError.NETWORK_FAILURE:
-        this.error_ = new remoting.Error(
-            remoting.Error.Tag.P2P_FAILURE);
+        errorTag = remoting.Error.Tag.P2P_FAILURE;
         break;
       case remoting.ClientSession.ConnectionError.HOST_OVERLOAD:
-        this.error_ = new remoting.Error(
-            remoting.Error.Tag.HOST_OVERLOAD);
+        errorTag = remoting.Error.Tag.HOST_OVERLOAD;
+        break;
+      case remoting.ClientSession.ConnectionError.MAX_SESSION_LENGTH:
+        errorTag = remoting.Error.Tag.MAX_SESSION_LENGTH;
+        break;
+      case remoting.ClientSession.ConnectionError.HOST_CONFIGURATION_ERROR:
+        errorTag = remoting.Error.Tag.HOST_CONFIGURATION_ERROR;
         break;
       default:
         this.error_ = remoting.Error.unexpected();
     }
+    this.error_ = new remoting.Error(
+        errorTag, this.xmppErrorCache_.getFirstErrorStanza());
   }
   this.setState_(status);
 };
@@ -555,8 +566,7 @@ remoting.ClientSession.prototype.setState_ = function(newState) {
   this.notifyStateChanges_(oldState, this.state_);
   // Record state count in an UMA enumerated histogram.
   recordState(this.state_);
-  this.logger_.logClientSessionStateChange(
-      this.state_, this.error_, this.xmppErrorCache_.getFirstError());
+  this.logger_.logSessionStateChange(toSessionState(this.state_), this.error_);
 };
 
 /** @private */
@@ -604,8 +614,7 @@ function recordState(state) {
  */
 remoting.ClientSession.prototype.notifyStateChanges_ =
     function(oldState, newState) {
-  /** @type {remoting.Error} */
-  var error;
+  var error = this.getError();
   switch (this.state_) {
     case remoting.ClientSession.State.CONNECTED:
       console.log('Connection established.');
@@ -630,12 +639,11 @@ remoting.ClientSession.prototype.notifyStateChanges_ =
 
     case remoting.ClientSession.State.CLOSED:
       console.log('Connection closed.');
-      this.listener_.onDisconnected(remoting.Error.none());
+      this.listener_.onDisconnected(error);
       break;
 
     case remoting.ClientSession.State.CONNECTION_CANCELED:
     case remoting.ClientSession.State.FAILED:
-      error = this.getError();
       if (!error.isNone()) {
         console.error('Connection failed: ' + error.toString());
       }
@@ -643,7 +651,6 @@ remoting.ClientSession.prototype.notifyStateChanges_ =
       break;
 
     case remoting.ClientSession.State.CONNECTION_DROPPED:
-      error = this.getError();
       console.error('Connection dropped: ' + error.toString());
       this.listener_.onDisconnected(error);
       break;
@@ -652,6 +659,37 @@ remoting.ClientSession.prototype.notifyStateChanges_ =
       console.error('Unexpected client plugin state: ' + newState);
   }
 };
+
+/**
+ * TODO(kelvinp): Consolidate the two enums (crbug.com/504200)
+ * @param {remoting.ClientSession.State} state
+ * @return {remoting.ChromotingEvent.SessionState}
+ */
+function toSessionState(state) {
+  var SessionState = remoting.ChromotingEvent.SessionState;
+  switch(state) {
+    case remoting.ClientSession.State.UNKNOWN:
+      return SessionState.UNKNOWN;
+    case remoting.ClientSession.State.INITIALIZING:
+      return SessionState.INITIALIZING;
+    case remoting.ClientSession.State.CONNECTING:
+      return SessionState.CONNECTING;
+    case remoting.ClientSession.State.AUTHENTICATED:
+      return SessionState.AUTHENTICATED;
+    case remoting.ClientSession.State.CONNECTED:
+      return SessionState.CONNECTED;
+    case remoting.ClientSession.State.CLOSED:
+      return SessionState.CLOSED;
+    case remoting.ClientSession.State.FAILED:
+      return SessionState.CONNECTION_FAILED;
+    case remoting.ClientSession.State.CONNECTION_DROPPED:
+      return SessionState.CONNECTION_DROPPED;
+    case remoting.ClientSession.State.CONNECTION_CANCELED:
+      return SessionState.CONNECTION_CANCELED;
+    default:
+      throw new Error('Unknown session state : ' + state);
+  }
+}
 
 /**
  * @param {remoting.ClientSession.State} previous

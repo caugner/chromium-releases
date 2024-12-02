@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/time/time.h"
@@ -19,6 +20,9 @@ class VariationsSeed;
 }
 
 namespace variations {
+
+typedef base::Callback<void(std::string*, std::string*, std::string*)>
+    VariationsFirstRunSeedCallback;
 
 // VariationsSeedStore is a helper class for reading and writing the variations
 // seed from Local State.
@@ -34,7 +38,9 @@ class VariationsSeedStore {
 
   // Stores the given seed |data| (serialized protobuf) to local state, along
   // with a base64-encoded digital signature for seed and the date when it was
-  // fetched. If |is_delta_compressed| is true, treats |data| as being delta
+  // fetched. If |is_gzip_compressed| is true, treats |data| as being gzip
+  // compressed and decompresses it before any other processing.
+  // If |is_delta_compressed| is true, treats |data| as being delta
   // compressed and attempts to decode it first using the store's seed data.
   // The actual seed data will be base64 encoded for storage. If the string
   // is invalid, the existing prefs are untouched and false is returned.
@@ -46,11 +52,15 @@ class VariationsSeedStore {
                      const std::string& country_code,
                      const base::Time& date_fetched,
                      bool is_delta_compressed,
+                     bool is_gzip_compressed,
                      variations::VariationsSeed* parsed_seed);
 
   // Updates |kVariationsSeedDate| and logs when previous date was from a
   // different day.
   void UpdateSeedDateAndLogDayChange(const base::Time& server_date_fetched);
+
+  // Reports to UMA that the seed format specified by the server is unsupported.
+  void ReportUnsupportedSeedFormatError();
 
   // Returns the serial number of the last loaded or stored seed.
   const std::string& variations_serial_number() const {
@@ -68,6 +78,13 @@ class VariationsSeedStore {
 
   // Registers Local State prefs used by this class.
   static void RegisterPrefs(PrefRegistrySimple* registry);
+
+  // Registers callback for pulling variations first run seed from Java side
+  // in Chrome for Android.
+  void SetVariationsFirstRunSeedCallback(
+      const VariationsFirstRunSeedCallback& callback) {
+    get_variations_first_run_seed_ = callback;
+  }
 
  protected:
   // Note: UMA histogram enum - don't re-order or remove entries.
@@ -96,6 +113,12 @@ class VariationsSeedStore {
 
   // Clears all prefs related to variations seed storage.
   void ClearPrefs();
+
+#if defined(OS_ANDROID)
+  // Imports the variations seed data from Java side during the first
+  // Chrome for Android run.
+  void ImportFirstRunJavaSeed();
+#endif  // OS_ANDROID
 
   // Reads the variations seed data from prefs; returns true on success.
   bool ReadSeedData(std::string* seed_data);
@@ -127,6 +150,8 @@ class VariationsSeedStore {
 
   // Keeps track of an invalid signature.
   std::string invalid_base64_signature_;
+
+  VariationsFirstRunSeedCallback get_variations_first_run_seed_;
 
   DISALLOW_COPY_AND_ASSIGN(VariationsSeedStore);
 };

@@ -23,6 +23,7 @@ class SkBitmap;
 namespace blink {
 class WebContentSettingsClient;
 class WebFrame;
+class WebMediaStream;
 class WebString;
 class WebView;
 class WebURLResponse;
@@ -104,7 +105,6 @@ class TestRunner : public WebTestRunner,
   bool shouldDumpResourceRequestCallbacks() const;
   bool shouldDumpResourceResponseMIMETypes() const;
   bool shouldDumpStatusCallbacks() const;
-  bool shouldDumpProgressFinishedCallback() const;
   bool shouldDumpSpellCheckCallbacks() const;
   bool shouldWaitUntilExternalURLLoad() const;
   const std::set<std::string>* httpHeadersToClear() const;
@@ -435,11 +435,6 @@ class TestRunner : public WebTestRunner,
   // It takes no arguments, and ignores any that may be present.
   void DumpWindowStatusChanges();
 
-  // This function sets a flag that tells the test_shell to print a line of
-  // descriptive text for the progress finished callback. It takes no
-  // arguments, and ignores any that may be present.
-  void DumpProgressFinishedCallback();
-
   // This function sets a flag that tells the test_shell to dump all
   // the lines of descriptive text about spellcheck execution.
   void DumpSpellCheckCallbacks();
@@ -483,6 +478,9 @@ class TestRunner : public WebTestRunner,
   // policy passed to the decidePolicyForNavigation callback.
   void DumpNavigationPolicy();
 
+  // Dump current PageImportanceSignals for the page.
+  void DumpPageImportanceSignals();
+
   ///////////////////////////////////////////////////////////////////////////
   // Methods interacting with the WebTestProxy
 
@@ -499,6 +497,10 @@ class TestRunner : public WebTestRunner,
 
   // Allows layout tests to exec scripts at WebInspector side.
   void EvaluateInWebInspector(int call_id, const std::string& script);
+  // Allows layout tests to evaluate scripts in InspectorOverlay page.
+  // Script may have an output represented as a string, return values of other
+  // types would be ignored.
+  std::string EvaluateInWebInspectorOverlay(const std::string& script);
 
   // Clears all databases.
   void ClearAllDatabases();
@@ -764,10 +766,6 @@ class TestRunner : public WebTestRunner,
 
   // If true, the test_shell will dump all changes to window.status.
   bool dump_window_status_changes_;
-
-  // If true, the test_shell will output a descriptive line for the progress
-  // finished callback.
-  bool dump_progress_finished_callback_;
 
   // If true, the test_shell will output descriptive test for spellcheck
   // execution.

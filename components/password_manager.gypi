@@ -22,6 +22,7 @@
         '../third_party/re2/re2.gyp:re2',
         'password_manager_core_common',
         'password_manager_core_browser_proto',
+        'sync_driver',
         'url_formatter/url_formatter.gyp:url_formatter',
       ],
       'include_dirs': [
@@ -67,6 +68,7 @@
         'password_manager/core/browser/log_router.h',
         'password_manager/core/browser/login_database.cc',
         'password_manager/core/browser/login_database.h',
+        'password_manager/core/browser/login_database_ios.cc',
         'password_manager/core/browser/login_database_mac.cc',
         'password_manager/core/browser/login_database_posix.cc',
         'password_manager/core/browser/login_database_win.cc',
@@ -102,10 +104,16 @@
         'password_manager/core/browser/password_store_consumer.h',
         'password_manager/core/browser/password_store_default.cc',
         'password_manager/core/browser/password_store_default.h',
+        'password_manager/core/browser/password_store_factory_util.cc',
+        'password_manager/core/browser/password_store_factory_util.h',
+        'password_manager/core/browser/password_store_service.cc',
+        'password_manager/core/browser/password_store_service.h',
         'password_manager/core/browser/password_store_sync.cc',
         'password_manager/core/browser/password_store_sync.h',
         'password_manager/core/browser/password_syncable_service.cc',
         'password_manager/core/browser/password_syncable_service.h',
+        'password_manager/core/browser/password_ui_utils.cc',
+        'password_manager/core/browser/password_ui_utils.h',
         'password_manager/core/browser/psl_matching_helper.cc',
         'password_manager/core/browser/psl_matching_helper.h',
         'password_manager/core/browser/statistics_table.cc',
@@ -118,10 +126,13 @@
         'password_manager/core/browser/webdata/password_web_data_service_win.h',
       ],
       'conditions': [
+        ['OS=="ios"', {
+          'sources!': [
+            'password_manager/core/browser/login_database_posix.cc',
+          ],
+        }],
         ['OS=="mac"', {
           'sources!': [
-            # TODO(blundell): Provide the iOS login DB implementation and then
-            # also exclude the POSIX one from iOS. http://crbug.com/341429
             'password_manager/core/browser/login_database_posix.cc',
           ],
         }],
@@ -151,6 +162,9 @@
         '../base/base.gyp:base',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
+      ],
+      'export_dependent_settings': [
+        '../testing/gmock.gyp:gmock',
       ],
       'include_dirs': [
         '..',
@@ -215,6 +229,10 @@
       ],
       'sources': [
         # Note: sources list duplicated in GN build.
+        'password_manager/sync/browser/password_data_type_controller.cc',
+        'password_manager/sync/browser/password_data_type_controller.h',
+        'password_manager/sync/browser/password_manager_setting_migrator_service.cc',
+        'password_manager/sync/browser/password_manager_setting_migrator_service.h',
         'password_manager/sync/browser/password_model_worker.cc',
         'password_manager/sync/browser/password_model_worker.h',
         'password_manager/sync/browser/password_sync_util.cc',

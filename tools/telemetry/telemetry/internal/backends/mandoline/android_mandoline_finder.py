@@ -5,6 +5,7 @@
 """Finds android mandoline browsers that can be controlled by telemetry."""
 
 import os
+import logging
 
 from telemetry.core import platform
 from telemetry.internal.backends.mandoline import android_mandoline_backend
@@ -31,6 +32,7 @@ class PossibleAndroidMandolineBrowser(possible_browser.PossibleBrowser):
         android_platform._platform_backend)  # pylint: disable=W0212
     self._build_path = build_path
     self._local_apk = local_apk
+    self._chrome_root = finder_options.chrome_root
 
   def __repr__(self):
     return ('PossibleAndroidMandolineBrowser(browser_type=%s)' %
@@ -44,7 +46,7 @@ class PossibleAndroidMandolineBrowser(possible_browser.PossibleBrowser):
     mandoline_backend = android_mandoline_backend.AndroidMandolineBackend(
         self._platform_backend, finder_options.browser_options,
         finder_options.target_arch, self.browser_type, self._build_path,
-        apk_helper.GetPackageName(self._local_apk))
+        apk_helper.GetPackageName(self._local_apk), self._chrome_root)
     return browser.Browser(
         mandoline_backend, self._platform_backend, self._credentials_path)
 
@@ -86,16 +88,16 @@ def _FindAllPossibleBrowsers(finder_options, android_platform):
   if not android_platform or not CanFindAvailableBrowsers():
     return []
 
-  possible_browsers = []
+  if not finder_options.chrome_root:
+    logging.warning('Chrome build directory is not specified. Android Mandoline'
+                    ' browser is skipped.')
+    return []
 
-  if finder_options.chrome_root:
-    chrome_root = finder_options.chrome_root
-  else:
-    chrome_root = path.GetChromiumSrcDir()
+  possible_browsers = []
 
   # Add local builds.
   for build_dir, build_type in path.GetBuildDirectories():
-    build_path = os.path.join(chrome_root, build_dir, build_type)
+    build_path = os.path.join(finder_options.chrome_root, build_dir, build_type)
     local_apk = os.path.join(build_path, 'apks', 'Mandoline.apk')
     if os.path.exists(local_apk):
       possible_browsers.append(PossibleAndroidMandolineBrowser(

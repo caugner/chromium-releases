@@ -10,10 +10,10 @@
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "components/mus/public/cpp/scoped_view_ptr.h"
-#include "components/mus/public/cpp/tests/view_manager_test_base.h"
-#include "components/mus/public/cpp/view.h"
-#include "components/mus/public/cpp/view_tree_connection.h"
+#include "components/mus/public/cpp/scoped_window_ptr.h"
+#include "components/mus/public/cpp/tests/window_server_test_base.h"
+#include "components/mus/public/cpp/window.h"
+#include "components/mus/public/cpp/window_tree_connection.h"
 #include "mojo/util/filename_util.h"
 #include "url/gurl.h"
 
@@ -26,6 +26,8 @@ const char kTestTwoFile[] = "test_two.html";
 const char kTestTwoTitle[] = "Test Title Two";
 const char kTestThreeFile[] = "test_three.html";
 const char kTestThreeTitle[] = "Test Title Three";
+const char kTheWordGreenFiveTimes[] = "the_word_green_five_times.html";
+const char kTwoIframesWithGreen[] = "two_iframes_with_green.html";
 
 GURL GetTestFileURL(const std::string& file) {
   base::FilePath data_file;
@@ -38,10 +40,14 @@ GURL GetTestFileURL(const std::string& file) {
 }
 }
 
-class WebViewTest : public mus::ViewManagerTestBase,
+class WebViewTest : public mus::WindowServerTestBase,
                     public mojom::WebViewClient {
  public:
-  WebViewTest() : web_view_(this) {}
+  WebViewTest()
+      : web_view_(this),
+        quit_condition_(NO_QUIT),
+        active_find_match_(0),
+        find_count_(0) {}
   ~WebViewTest() override {}
 
   mojom::WebView* web_view() { return web_view_.web_view(); }
@@ -55,7 +61,18 @@ class WebViewTest : public mus::ViewManagerTestBase,
     return last_forward_button_state_;
   }
 
-  void StartNestedRunLoopUntilLoadingDone() {
+  int32_t active_find_match() const { return active_find_match_; }
+  int32_t find_count() const { return find_count_; }
+
+  enum NestedLoopQuitCondition {
+    NO_QUIT,
+    LOADING_DONE,
+    FINAL_FIND_UPATE,
+    ACTIVE_FIND_UPDATE,
+  };
+
+  void StartNestedRunLoopUntil(NestedLoopQuitCondition quit_condition) {
+    quit_condition_ = quit_condition;
     run_loop_.reset(new base::RunLoop);
     run_loop_->Run();
   }
@@ -64,36 +81,39 @@ class WebViewTest : public mus::ViewManagerTestBase,
     mojo::URLRequestPtr request(mojo::URLRequest::New());
     request->url = GetTestFileURL(file).spec();
     web_view()->LoadRequest(request.Pass());
-    StartNestedRunLoopUntilLoadingDone();
+    StartNestedRunLoopUntil(LOADING_DONE);
   }
 
  private:
   void QuitNestedRunLoop() {
     if (run_loop_) {
+      quit_condition_ = NO_QUIT;
       run_loop_->Quit();
     }
   }
 
   // Overridden from ApplicationDelegate:
   void Initialize(mojo::ApplicationImpl* app) override {
-    ViewManagerTestBase::Initialize(app);
+    WindowServerTestBase::Initialize(app);
     app_ = app;
   }
 
-  // Overridden from ViewTreeDelegate:
-  void OnEmbed(mus::View* root) override {
-    content_ = root->connection()->CreateView();
+  // Overridden from WindowTreeDelegate:
+  void OnEmbed(mus::Window* root) override {
+    content_ = root->connection()->NewWindow();
+    content_->SetBounds(root->bounds());
     root->AddChild(content_);
     content_->SetVisible(true);
 
     web_view_.Init(app_, content_);
 
-    ViewManagerTestBase::OnEmbed(root);
+    WindowServerTestBase::OnEmbed(root);
   }
 
   void TearDown() override {
-    mus::ScopedViewPtr::DeleteViewOrViewManager(window_manager()->GetRoot());
-    ViewManagerTestBase::TearDown();
+    mus::ScopedWindowPtr::DeleteWindowOrWindowManager(
+        window_manager()->GetRoot());
+    WindowServerTestBase::TearDown();
   }
 
   // Overridden from web_view::mojom::WebViewClient:
@@ -102,7 +122,7 @@ class WebViewTest : public mus::ViewManagerTestBase,
     navigation_url_ = url.get();
   }
   void LoadingStateChanged(bool is_loading, double progress) override {
-    if (is_loading == false)
+    if (is_loading == false && quit_condition_ == LOADING_DONE)
       QuitNestedRunLoop();
   }
   void BackForwardChanged(mojom::ButtonState back_button,
@@ -113,10 +133,23 @@ class WebViewTest : public mus::ViewManagerTestBase,
   void TitleChanged(const mojo::String& title) override {
     last_title_ = title.get();
   }
+  void FindInPageMatchCountUpdated(int32_t request_id,
+                                   int32_t count,
+                                   bool final_update) override {
+    find_count_ = count;
+    if (final_update && quit_condition_ == FINAL_FIND_UPATE)
+      QuitNestedRunLoop();
+  }
+  void FindInPageSelectionUpdated(int32_t request_id,
+                                  int32_t active_match_ordinal) override {
+    active_find_match_ = active_match_ordinal;
+    if (quit_condition_ == ACTIVE_FIND_UPDATE)
+      QuitNestedRunLoop();
+  }
 
   mojo::ApplicationImpl* app_;
 
-  mus::View* content_;
+  mus::Window* content_;
 
   web_view::WebView web_view_;
 
@@ -126,6 +159,11 @@ class WebViewTest : public mus::ViewManagerTestBase,
   std::string last_title_;
   mojom::ButtonState last_back_button_state_;
   mojom::ButtonState last_forward_button_state_;
+
+  NestedLoopQuitCondition quit_condition_;
+
+  int32_t active_find_match_;
+  int32_t find_count_;
 
   DISALLOW_COPY_AND_ASSIGN(WebViewTest);
 };
@@ -157,7 +195,7 @@ TEST_F(WebViewTest, CanGoBackAndForward) {
             last_forward_button_state());
 
   web_view()->GoBack();
-  StartNestedRunLoopUntilLoadingDone();
+  StartNestedRunLoopUntil(LOADING_DONE);
 
   EXPECT_EQ(GetTestFileURL(kTestOneFile).spec(), navigation_url());
   EXPECT_EQ(kTestOneTitle, last_title());
@@ -167,7 +205,7 @@ TEST_F(WebViewTest, CanGoBackAndForward) {
             last_forward_button_state());
 
   web_view()->GoForward();
-  StartNestedRunLoopUntilLoadingDone();
+  StartNestedRunLoopUntil(LOADING_DONE);
   EXPECT_EQ(GetTestFileURL(kTestTwoFile).spec(), navigation_url());
   EXPECT_EQ(kTestTwoTitle, last_title());
   EXPECT_EQ(mojom::ButtonState::BUTTON_STATE_ENABLED, last_back_button_state());
@@ -182,7 +220,7 @@ TEST_F(WebViewTest, NavigationClearsForward) {
   ASSERT_NO_FATAL_FAILURE(NavigateTo(kTestTwoFile));
 
   web_view()->GoBack();
-  StartNestedRunLoopUntilLoadingDone();
+  StartNestedRunLoopUntil(LOADING_DONE);
 
   EXPECT_EQ(GetTestFileURL(kTestOneFile).spec(), navigation_url());
   EXPECT_EQ(kTestOneTitle, last_title());
@@ -199,6 +237,85 @@ TEST_F(WebViewTest, NavigationClearsForward) {
   EXPECT_EQ(mojom::ButtonState::BUTTON_STATE_ENABLED, last_back_button_state());
   EXPECT_EQ(mojom::ButtonState::BUTTON_STATE_DISABLED,
             last_forward_button_state());
+}
+
+TEST_F(WebViewTest, Find) {
+  ASSERT_NO_FATAL_FAILURE(NavigateTo(kTheWordGreenFiveTimes));
+
+  web_view()->Find("Green", true);
+  StartNestedRunLoopUntil(FINAL_FIND_UPATE);
+  EXPECT_EQ(1, active_find_match());
+  EXPECT_EQ(5, find_count());
+}
+
+TEST_F(WebViewTest, FindAcrossIframes) {
+  ASSERT_NO_FATAL_FAILURE(NavigateTo(kTwoIframesWithGreen));
+
+  web_view()->Find("Green", true);
+  StartNestedRunLoopUntil(FINAL_FIND_UPATE);
+  EXPECT_EQ(13, find_count());
+}
+
+TEST_F(WebViewTest, FindWrapAroundOneFrame) {
+  ASSERT_NO_FATAL_FAILURE(NavigateTo(kTheWordGreenFiveTimes));
+
+  web_view()->Find("Green", true);
+  StartNestedRunLoopUntil(FINAL_FIND_UPATE);
+  EXPECT_EQ(1, active_find_match());
+
+  // Searching times 2 through 5 should increment the active find.
+  for (int i = 2; i < 6; ++i) {
+    web_view()->Find("Green", true);
+    StartNestedRunLoopUntil(ACTIVE_FIND_UPDATE);
+    EXPECT_EQ(i, active_find_match());
+  }
+
+  // We should wrap around.
+  web_view()->Find("Green", true);
+  StartNestedRunLoopUntil(ACTIVE_FIND_UPDATE);
+  EXPECT_EQ(1, active_find_match());
+}
+
+TEST_F(WebViewTest, FindForwardsAndBackwards) {
+  ASSERT_NO_FATAL_FAILURE(NavigateTo(kTheWordGreenFiveTimes));
+
+  web_view()->Find("Green", true);
+  StartNestedRunLoopUntil(FINAL_FIND_UPATE);
+  EXPECT_EQ(1, active_find_match());
+
+  // Navigate two forwards.
+  for (int i = 2; i < 4; ++i) {
+    web_view()->Find("Green", true);
+    StartNestedRunLoopUntil(ACTIVE_FIND_UPDATE);
+    EXPECT_EQ(i, active_find_match());
+  }
+
+  // Navigate two backwards.
+  for (int i = 2; i > 0; --i) {
+    web_view()->Find("Green", false);
+    StartNestedRunLoopUntil(ACTIVE_FIND_UPDATE);
+    EXPECT_EQ(i, active_find_match());
+  }
+}
+
+TEST_F(WebViewTest, FindWrapAroundMultipleFrames) {
+  ASSERT_NO_FATAL_FAILURE(NavigateTo(kTwoIframesWithGreen));
+
+  web_view()->Find("Green", true);
+  StartNestedRunLoopUntil(FINAL_FIND_UPATE);
+  EXPECT_EQ(1, active_find_match());
+
+  // Searching times 2 through 13 should increment the active find.
+  for (int i = 2; i < 14; ++i) {
+    web_view()->Find("Green", true);
+    StartNestedRunLoopUntil(ACTIVE_FIND_UPDATE);
+    EXPECT_EQ(i, active_find_match());
+  }
+
+  // We should wrap around.
+  web_view()->Find("Green", true);
+  StartNestedRunLoopUntil(ACTIVE_FIND_UPDATE);
+  EXPECT_EQ(1, active_find_match());
 }
 
 }  // namespace web_view

@@ -205,6 +205,11 @@ AccountConsistencyService::AccountConsistencyService(
   signin_manager_->AddObserver(this);
   web::BrowserState::GetActiveStateManager(browser_state_)->AddObserver(this);
   LoadFromPrefs();
+  if (signin_manager_->IsAuthenticated()) {
+    AddXChromeConnectedCookies();
+  } else {
+    RemoveXChromeConnectedCookies();
+  }
 }
 
 AccountConsistencyService::~AccountConsistencyService() {
@@ -388,6 +393,19 @@ void AccountConsistencyService::RemoveXChromeConnectedCookies() {
   for (const std::string& domain : domains_with_cookies) {
     RemoveXChromeConnectedCookieFromDomain(domain);
   }
+}
+
+void AccountConsistencyService::OnBrowsingDataRemoved() {
+  // X-CHROME-CONNECTED cookies have been removed, update internal state
+  // accordingly.
+  ResetWKWebView();
+  cookie_requests_.clear();
+  domains_with_cookies_.clear();
+  base::DictionaryValue dict;
+  signin_client_->GetPrefs()->Set(kDomainsWithCookiePref, dict);
+
+  // APISID cookie has been removed, notify the GCMS.
+  gaia_cookie_manager_service_->ForceOnCookieChangedProcessing();
 }
 
 void AccountConsistencyService::OnAddAccountToCookieCompleted(

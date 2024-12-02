@@ -54,7 +54,10 @@ AccountFetcherService::AccountFetcherService()
       signin_client_(nullptr),
       invalidation_service_(nullptr),
       network_fetches_enabled_(false),
+      profile_loaded_(false),
+      refresh_tokens_loaded_(false),
       shutdown_called_(false),
+      scheduled_refresh_enabled_(true),
       child_info_request_(nullptr) {}
 
 AccountFetcherService::~AccountFetcherService() {
@@ -70,12 +73,10 @@ void AccountFetcherService::RegisterPrefs(
 void AccountFetcherService::Initialize(
     SigninClient* signin_client,
     OAuth2TokenService* token_service,
-    AccountTrackerService* account_tracker_service,
-    invalidation::InvalidationService* invalidation_service) {
+    AccountTrackerService* account_tracker_service) {
   DCHECK(signin_client);
   DCHECK(!signin_client_);
   signin_client_ = signin_client;
-  invalidation_service_ = invalidation_service;
   DCHECK(account_tracker_service);
   DCHECK(!account_tracker_service_);
   account_tracker_service_ = account_tracker_service;
@@ -86,8 +87,6 @@ void AccountFetcherService::Initialize(
 
   last_updated_ = base::Time::FromInternalValue(
       signin_client_->GetPrefs()->GetInt64(kLastUpdatePref));
-
-  RefreshAllAccountInfo(true);
 }
 
 void AccountFetcherService::Shutdown() {
@@ -95,22 +94,8 @@ void AccountFetcherService::Shutdown() {
   // child_info_request_ is an invalidation handler and needs to be
   // unregistered during the lifetime of the invalidation service.
   child_info_request_.reset();
+  invalidation_service_ = nullptr;
   shutdown_called_ = true;
-}
-
-void AccountFetcherService::EnableNetworkFetches() {
-  DCHECK(CalledOnValidThread());
-  DCHECK(!network_fetches_enabled_);
-  network_fetches_enabled_ = true;
-  // If there are accounts in |pending_user_info_fetches_|, they were deemed
-  // invalid after being loaded from prefs and need to be fetched now instead of
-  // waiting after the timer.
-  for (const std::string& account_id : pending_user_info_fetches_)
-    StartFetchingUserInfo(account_id);
-  pending_user_info_fetches_.clear();
-
-  // Now that network fetches are enabled, schedule the next refresh.
-  ScheduleNextRefresh();
 }
 
 bool AccountFetcherService::IsAllUserInfoFetched() const {
@@ -119,7 +104,24 @@ bool AccountFetcherService::IsAllUserInfoFetched() const {
 
 void AccountFetcherService::FetchUserInfoBeforeSignin(
     const std::string& account_id) {
+  DCHECK(network_fetches_enabled_);
   RefreshAccountInfo(account_id, false);
+}
+
+void AccountFetcherService::SetupInvalidationsOnProfileLoad(
+    invalidation::InvalidationService* invalidation_service) {
+  DCHECK(!invalidation_service_);
+  DCHECK(!profile_loaded_);
+  DCHECK(!network_fetches_enabled_);
+  DCHECK(!child_info_request_);
+  invalidation_service_ = invalidation_service;
+  profile_loaded_ = true;
+  MaybeEnableNetworkFetches();
+}
+
+void AccountFetcherService::EnableNetworkFetchesForTest() {
+  SetupInvalidationsOnProfileLoad(nullptr);
+  OnRefreshTokensLoaded();
 }
 
 void AccountFetcherService::RefreshAllAccountInfo(bool only_fetch_if_invalid) {
@@ -153,6 +155,18 @@ void AccountFetcherService::UpdateChildInfo() {
   }
 }
 
+void AccountFetcherService::MaybeEnableNetworkFetches() {
+  DCHECK(CalledOnValidThread());
+  if (!profile_loaded_ || !refresh_tokens_loaded_)
+    return;
+  if (!network_fetches_enabled_) {
+    network_fetches_enabled_ = true;
+    ScheduleNextRefresh();
+  }
+  RefreshAllAccountInfo(true);
+  UpdateChildInfo();
+}
+
 void AccountFetcherService::RefreshAllAccountsAndScheduleNext() {
   DCHECK(network_fetches_enabled_);
   RefreshAllAccountInfo(false);
@@ -163,6 +177,8 @@ void AccountFetcherService::RefreshAllAccountsAndScheduleNext() {
 }
 
 void AccountFetcherService::ScheduleNextRefresh() {
+  if (!scheduled_refresh_enabled_)
+    return;
   DCHECK(!timer_.IsRunning());
   DCHECK(network_fetches_enabled_);
 
@@ -180,10 +196,7 @@ void AccountFetcherService::ScheduleNextRefresh() {
 void AccountFetcherService::StartFetchingUserInfo(
     const std::string& account_id) {
   DCHECK(CalledOnValidThread());
-  if (!network_fetches_enabled_) {
-    pending_user_info_fetches_.push_back(account_id);
-    return;
-  }
+  DCHECK(network_fetches_enabled_);
 
   if (!ContainsKey(user_info_requests_, account_id)) {
     DVLOG(1) << "StartFetching " << account_id;
@@ -212,17 +225,12 @@ void AccountFetcherService::ResetChildInfo() {
 
 void AccountFetcherService::RefreshAccountInfo(const std::string& account_id,
                                                bool only_fetch_if_invalid) {
+  DCHECK(network_fetches_enabled_);
   // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460 is
   // fixed.
   tracked_objects::ScopedTracker tracking_profile(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "422460 AccountFetcherService::OnRefreshTokenAvailable"));
-
-  TRACE_EVENT1("AccountFetcherService",
-               "AccountFetcherService::RefreshAccountInfo",
-               "account_id",
-               account_id);
-  DVLOG(1) << "AVAILABLE " << account_id;
+          "422460 AccountFetcherService::RefreshAccountInfo"));
 
   account_tracker_service_->StartTrackingAccount(account_id);
   const AccountInfo& info =
@@ -293,10 +301,19 @@ void AccountFetcherService::OnUserInfoFetchFailure(
 
 void AccountFetcherService::OnRefreshTokenAvailable(
     const std::string& account_id) {
+  TRACE_EVENT1("AccountFetcherService",
+               "AccountFetcherService::OnRefreshTokenAvailable",
+               "account_id",
+               account_id);
+  DVLOG(1) << "AVAILABLE " << account_id;
+
   // The SigninClient needs a "final init" in order to perform some actions
   // (such as fetching the signin token "handle" in order to look for password
   // changes) once everything is initialized and the refresh token is present.
   signin_client_->DoFinalInit();
+
+  if (!network_fetches_enabled_)
+    return;
   RefreshAccountInfo(account_id, true);
   UpdateChildInfo();
 }
@@ -307,16 +324,17 @@ void AccountFetcherService::OnRefreshTokenRevoked(
                "AccountFetcherService::OnRefreshTokenRevoked",
                "account_id",
                account_id);
-
   DVLOG(1) << "REVOKED " << account_id;
+
+  if (!network_fetches_enabled_)
+    return;
   user_info_requests_.erase(account_id);
   UpdateChildInfo();
   account_tracker_service_->StopTrackingAccount(account_id);
 }
 
 void AccountFetcherService::OnRefreshTokensLoaded() {
-  // OnRefreshTokenAvailable has been called for all accounts by this point.
-  // Maybe remove this after further investigation.
-  RefreshAllAccountInfo(true);
-  UpdateChildInfo();
+  DCHECK(CalledOnValidThread());
+  refresh_tokens_loaded_ = true;
+  MaybeEnableNetworkFetches();
 }

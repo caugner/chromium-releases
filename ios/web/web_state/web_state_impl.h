@@ -42,7 +42,7 @@ class WebStatePolicyDecider;
 class WebUIIOS;
 
 // Implementation of WebState.
-// Generally mirrors upstream's WebContents implementation.
+// Generally mirrors //content's WebContents implementation.
 // General notes on expected WebStateImpl ownership patterns:
 //  - Outside of tests, WebStateImpls are created
 //      (a) By @Tab, when creating a new Tab.
@@ -71,9 +71,7 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   // controller, or facade set, but which otherwise has the same state variables
   // as the calling object (including copies of the NavigationManager and its
   // attendant CRWSessionController).
-  // TODO(marq): Revisit this function and the ownership model described above;
-  // too this depends on and interacts directly with above-the-web-level
-  // information.
+  // TODO(crbug.com/546377): Clean up this method.
   WebStateImpl* CopyForSessionWindow();
 
   // Notifies the observers that a provisional navigation has started.
@@ -181,7 +179,7 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   void SetContentsMimeType(const std::string& mime_type);
 
   // Executes a JavaScript string on the page asynchronously.
-  // TODO(shreyasv): Rename this to ExecuteJavaScript for consitency with
+  // TODO(shreyasv): Rename this to ExecuteJavaScript for consistency with
   // upstream API.
   virtual void ExecuteJavaScriptAsync(const base::string16& script);
 
@@ -231,6 +229,7 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
   bool ContentIsHTML() const override;
   const base::string16& GetTitle() const override;
   bool IsLoading() const override;
+  bool IsBeingDestroyed() const override;
   const GURL& GetVisibleURL() const override;
   const GURL& GetLastCommittedURL() const override;
   GURL GetCurrentURL(URLVerificationTrustLevel* trust_level) const override;
@@ -255,6 +254,8 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
 
   // NavigationManagerDelegate:
   void NavigateToPendingEntry() override;
+  void OnNavigationItemsPruned(size_t pruned_item_count) override;
+  void OnNavigationItemChanged() override;
   void OnNavigationItemCommitted(
       const LoadCommittedDetails& load_details) override;
   WebState* GetWebState() override;
@@ -280,6 +281,9 @@ class WebStateImpl : public WebState, public NavigationManagerDelegate {
 
   // Stores whether the web state is currently loading a page.
   bool is_loading_;
+
+  // Stores whether the web state is currently being destroyed.
+  bool is_being_destroyed_;
 
   // The delegate used to pass state to the web contents facade.
   WebStateFacadeDelegate* facade_delegate_;

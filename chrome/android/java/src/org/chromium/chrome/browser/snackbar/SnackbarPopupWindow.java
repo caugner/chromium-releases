@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.snackbar;
 
+import android.graphics.drawable.GradientDrawable;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -11,6 +12,7 @@ import android.view.ViewGroup;
 import android.widget.PopupWindow;
 import android.widget.TextView;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
 import org.chromium.ui.base.DeviceFormFactor;
 
@@ -67,6 +69,25 @@ class SnackbarPopupWindow extends PopupWindow {
         mMessageView.setTemplate(snackbar.getTemplateText());
         setViewText(mMessageView, snackbar.getText(), animate);
         String actionText = snackbar.getActionText();
+
+        View view = getContentView();
+        int backgroundColor = snackbar.getBackgroundColor();
+        if (backgroundColor == 0) {
+            backgroundColor = ApiCompatibilityUtils.getColor(view.getResources(),
+                    R.color.snackbar_background_color);
+        }
+
+        if (DeviceFormFactor.isTablet(view.getContext())) {
+            // On tablet, snackbar popups have rounded corners.
+            view.setBackgroundResource(R.drawable.snackbar_background);
+            ((GradientDrawable) view.getBackground()).setColor(backgroundColor);
+        } else {
+            view.setBackgroundColor(backgroundColor);
+        }
+
+        if (snackbar.getBackgroundColor() != 0) {
+            view.setBackgroundColor(snackbar.getBackgroundColor());
+        }
         if (actionText != null) {
             mActionButtonView.setVisibility(View.VISIBLE);
             setViewText(mActionButtonView, snackbar.getActionText(), animate);

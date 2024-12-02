@@ -25,6 +25,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/login/user_names.h"
+#include "components/signin/core/account_id/account_id.h"
 #include "components/syncable_prefs/pref_service_syncable.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_service.h"
@@ -260,6 +261,9 @@ class AccessibilityManagerTest : public InProcessBrowserTest {
   content::NotificationRegistrar registrar_;
 
   MockBrailleController braille_controller_;
+
+  const AccountId test_account_id_ = AccountId::FromUserEmail(kTestUserName);
+
   DISALLOW_COPY_AND_ASSIGN(AccessibilityManagerTest);
 };
 
@@ -273,8 +277,8 @@ IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest, Login) {
   EXPECT_EQ(default_autoclick_delay(), GetAutoclickDelay());
 
   // Logs in.
-  user_manager::UserManager::Get()->UserLoggedIn(
-      kTestUserName, kTestUserName, true);
+  user_manager::UserManager::Get()->UserLoggedIn(test_account_id_,
+                                                 kTestUserName, true);
 
   // Confirms that the features still disabled just after login.
   EXPECT_FALSE(IsLargeCursorEnabled());
@@ -335,8 +339,8 @@ IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest, BrailleOnLoginScreen) {
 
 IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest, TypePref) {
   // Logs in.
-  user_manager::UserManager::Get()->UserLoggedIn(
-      kTestUserName, kTestUserName, true);
+  user_manager::UserManager::Get()->UserLoggedIn(test_account_id_,
+                                                 kTestUserName, true);
   user_manager::UserManager::Get()->SessionStarted();
 
   // Confirms that the features are disabled just after login.
@@ -395,8 +399,8 @@ IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest, TypePref) {
 
 IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest, ResumeSavedPref) {
   // Loads the profile of the user.
-  user_manager::UserManager::Get()->UserLoggedIn(
-      kTestUserName, kTestUserName, true);
+  user_manager::UserManager::Get()->UserLoggedIn(test_account_id_,
+                                                 kTestUserName, true);
 
   // Sets the pref to enable large cursor before login.
   SetLargeCursorEnabledPref(true);
@@ -440,8 +444,8 @@ IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest,
   MockAccessibilityObserver observer;
 
   // Logs in.
-  user_manager::UserManager::Get()->UserLoggedIn(
-      kTestUserName, kTestUserName, true);
+  user_manager::UserManager::Get()->UserLoggedIn(test_account_id_,
+                                                 kTestUserName, true);
   user_manager::UserManager::Get()->SessionStarted();
 
   EXPECT_FALSE(observer.observed());
@@ -500,8 +504,8 @@ IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest,
   MockAccessibilityObserver observer;
 
   // Logs in.
-  user_manager::UserManager::Get()->UserLoggedIn(
-      kTestUserName, kTestUserName, true);
+  user_manager::UserManager::Get()->UserLoggedIn(test_account_id_,
+                                                 kTestUserName, true);
   user_manager::UserManager::Get()->SessionStarted();
 
   EXPECT_FALSE(observer.observed());
@@ -565,13 +569,12 @@ class AccessibilityManagerUserTypeTest
   DISALLOW_COPY_AND_ASSIGN(AccessibilityManagerUserTypeTest);
 };
 
-// TODO(yoshiki): Enable a test for retail mode.
+// TODO(yoshiki): Enable a test for retail mode (i.e. RetailAccountId).
 INSTANTIATE_TEST_CASE_P(
     UserTypeInstantiation,
     AccessibilityManagerUserTypeTest,
     ::testing::Values(kTestUserName,
-                      chromeos::login::kGuestUserName,
-                      // chromeos::login::kRetailModeUserName,
+                      login::GuestAccountId().GetUserEmail().c_str(),
                       kTestSupervisedUserName));
 
 IN_PROC_BROWSER_TEST_P(AccessibilityManagerUserTypeTest,
@@ -593,8 +596,9 @@ IN_PROC_BROWSER_TEST_P(AccessibilityManagerUserTypeTest,
   EXPECT_EQ(kTestAutoclickDelayMs, GetAutoclickDelay());
 
   // Logs in.
-  const char* user_name = GetParam();
-  user_manager::UserManager::Get()->UserLoggedIn(user_name, user_name, true);
+  const AccountId account_id = AccountId::FromUserEmail(GetParam());
+  user_manager::UserManager::Get()->UserLoggedIn(
+      account_id, account_id.GetUserEmail(), true);
 
   // Confirms that the features are still enabled just after login.
   EXPECT_TRUE(IsLargeCursorEnabled());
@@ -622,8 +626,9 @@ IN_PROC_BROWSER_TEST_P(AccessibilityManagerUserTypeTest,
 
 IN_PROC_BROWSER_TEST_P(AccessibilityManagerUserTypeTest, BrailleWhenLoggedIn) {
   // Logs in.
-  const char* user_name = GetParam();
-  user_manager::UserManager::Get()->UserLoggedIn(user_name, user_name, true);
+  const AccountId account_id = AccountId::FromUserEmail(GetParam());
+  user_manager::UserManager::Get()->UserLoggedIn(
+      account_id, account_id.GetUserEmail(), true);
   user_manager::UserManager::Get()->SessionStarted();
   // This object watches for IME preference changes and reflects those in
   // the IME framework state.
@@ -668,8 +673,8 @@ IN_PROC_BROWSER_TEST_P(AccessibilityManagerUserTypeTest, BrailleWhenLoggedIn) {
 
 IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest, AccessibilityMenuVisibility) {
   // Log in.
-  user_manager::UserManager::Get()->UserLoggedIn(
-      kTestUserName, kTestUserName, true);
+  user_manager::UserManager::Get()->UserLoggedIn(test_account_id_,
+                                                 kTestUserName, true);
   user_manager::UserManager::Get()->SessionStarted();
 
   // Confirms that the features are disabled.

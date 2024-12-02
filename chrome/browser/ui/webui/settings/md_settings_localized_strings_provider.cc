@@ -5,13 +5,18 @@
 #include "chrome/browser/ui/webui/settings/md_settings_localized_strings_provider.h"
 
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/webui/policy_indicator_localized_strings_provider.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/google_chrome_strings.h"
 #include "chrome/grit/locale_settings.h"
+#include "chrome/grit/settings_chromium_strings.h"
+#include "chrome/grit/settings_google_chrome_strings.h"
 #include "chrome/grit/settings_strings.h"
+#include "components/google/core/browser/google_util.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -34,22 +39,8 @@ void AddCommonStrings(content::WebUIDataSource* html_source) {
   html_source->AddLocalizedString("basicPageTitle", IDS_SETTINGS_BASIC);
   html_source->AddLocalizedString("advancedPageTitle", IDS_SETTINGS_ADVANCED);
   html_source->AddLocalizedString("addLabel", IDS_ADD);
-#if defined(OS_CHROMEOS)
-  html_source->AddLocalizedString("controlledSettingShared",
-                                  IDS_OPTIONS_CONTROLLED_SETTING_SHARED);
-  html_source->AddLocalizedString("controlledSettingOwner",
-                                  IDS_OPTIONS_CONTROLLED_SETTING_OWNER);
-#endif
-  html_source->AddLocalizedString("controlledSettingPolicy",
-                                  IDS_OPTIONS_CONTROLLED_SETTING_POLICY);
-  html_source->AddLocalizedString("controlledSettingRecommendedMatches",
-                                  IDS_OPTIONS_CONTROLLED_SETTING_RECOMMENDED);
-  html_source->AddLocalizedString(
-      "controlledSettingRecommendedDiffers",
-      IDS_OPTIONS_CONTROLLED_SETTING_HAS_RECOMMENDATION);
-  html_source->AddLocalizedString("controlledSettingExtension",
-                                  IDS_SETTINGS_CONTROLLED_SETTING_EXTENSION);
   html_source->AddLocalizedString("learnMore", IDS_LEARN_MORE);
+  html_source->AddLocalizedString("cancel", IDS_CANCEL);
 }
 
 #if defined(OS_CHROMEOS)
@@ -67,11 +58,7 @@ void AddA11yStrings(content::WebUIDataSource* html_source) {
   html_source->AddLocalizedString(
       "stickyKeysLabel", IDS_SETTINGS_STICKY_KEYS_LABEL);
   html_source->AddLocalizedString(
-      "stickyKeysSublabel", IDS_SETTINGS_STICKY_KEYS_SUBLABEL);
-  html_source->AddLocalizedString(
       "chromeVoxLabel", IDS_SETTINGS_CHROMEVOX_LABEL);
-  html_source->AddLocalizedString(
-      "chromeVoxSublabel", IDS_SETTINGS_CHROMEVOX_SUBLABEL);
   html_source->AddLocalizedString(
       "screenMagnifierLabel", IDS_SETTINGS_SCREEN_MAGNIFIER_LABEL);
   html_source->AddLocalizedString(
@@ -115,7 +102,7 @@ void AddAppearanceStrings(content::WebUIDataSource* html_source) {
   html_source->AddLocalizedString(
       "setWallpaper", IDS_SETTINGS_SET_WALLPAPER);
   html_source->AddLocalizedString(
-      "getThemes", IDS_SETTINGS_GET_THEMES);
+      "getThemes", IDS_SETTINGS_THEMES);
   html_source->AddLocalizedString(
       "resetToDefaultTheme", IDS_SETTINGS_RESET_TO_DEFAULT_THEME);
   html_source->AddLocalizedString(
@@ -130,7 +117,18 @@ void AddAppearanceStrings(content::WebUIDataSource* html_source) {
       "changeHomePage", IDS_SETTINGS_CHANGE_HOME_PAGE);
   html_source->AddLocalizedString(
       "themesGalleryUrl", IDS_THEMES_GALLERY_URL);
+  html_source->AddLocalizedString(
+      "chooseFromWebStore", IDS_SETTINGS_WEB_STORE);
 }
+
+#if defined(OS_CHROMEOS)
+void AddBluetoothStrings(content::WebUIDataSource* html_source) {
+  html_source->AddLocalizedString(
+      "bluetoothPageTitle", IDS_SETTINGS_BLUETOOTH);
+  html_source->AddLocalizedString(
+      "enableBluetooth", IDS_SETTINGS_BLUETOOTH_ENABLE);
+}
+#endif
 
 void AddCertificateManagerStrings(content::WebUIDataSource* html_source) {
   html_source->AddLocalizedString("certificateManagerPageTitle",
@@ -204,6 +202,25 @@ void AddClearBrowsingDataStrings(content::WebUIDataSource* html_source) {
                                   IDS_SETTINGS_CLEAR_DATA_EVERYTHING);
 }
 
+#if !defined(OS_CHROMEOS)
+void AddDefaultBrowserStrings(content::WebUIDataSource* html_source) {
+  html_source->AddLocalizedString(
+      "defaultBrowser", IDS_SETTINGS_DEFAULT_BROWSER);
+  html_source->AddLocalizedString(
+      "defaultBrowserDefault", IDS_SETTINGS_DEFAULT_BROWSER_DEFAULT);
+  html_source->AddLocalizedString(
+      "defaultBrowserNotDefault", IDS_SETTINGS_DEFAULT_BROWSER_NOT_DEFAULT);
+  html_source->AddLocalizedString(
+      "defaultBrowserMakeDefault", IDS_SETTINGS_DEFAULT_BROWSER_MAKE_DEFAULT);
+  html_source->AddLocalizedString(
+      "defaultBrowserUnknown", IDS_SETTINGS_DEFAULT_BROWSER_UNKNOWN);
+  html_source->AddLocalizedString(
+      "defaultBrowserSecondary", IDS_SETTINGS_DEFAULT_BROWSER_SECONDARY);
+  html_source->AddLocalizedString(
+      "unableToSetDefaultBrowser", IDS_SETTINGS_DEFAULT_BROWSER_ERROR);
+}
+#endif
+
 void AddDownloadsStrings(content::WebUIDataSource* html_source) {
   html_source->AddLocalizedString(
       "downloadsPageTitle", IDS_SETTINGS_DOWNLOADS);
@@ -213,6 +230,40 @@ void AddDownloadsStrings(content::WebUIDataSource* html_source) {
       "changeDownloadLocation", IDS_SETTINGS_CHANGE_DOWNLOAD_LOCATION);
   html_source->AddLocalizedString(
       "promptForDownload", IDS_SETTINGS_PROMPT_FOR_DOWNLOAD);
+}
+
+void AddResetStrings(content::WebUIDataSource* html_source) {
+  html_source->AddLocalizedString(
+      "resetPageTitle", IDS_RESET_PROFILE_SETTINGS_SECTION_TITLE);
+  html_source->AddLocalizedString(
+      "resetPageDescription", IDS_RESET_PROFILE_SETTINGS_DESCRIPTION);
+  html_source->AddLocalizedString(
+      "resetPageExplanation", IDS_RESET_PROFILE_SETTINGS_EXPLANATION);
+  html_source->AddLocalizedString(
+      "resetPageCommit", IDS_RESET_PROFILE_SETTINGS_COMMIT_BUTTON);
+  html_source->AddLocalizedString(
+      "resetPageFeedback", IDS_RESET_PROFILE_SETTINGS_FEEDBACK);
+  html_source->AddString(
+      "resetPageLearnMoreUrl",
+      chrome::kResetProfileSettingsLearnMoreURL);
+
+#if defined(OS_CHROMEOS)
+  html_source->AddLocalizedString(
+      "powerwashTitle", IDS_OPTIONS_FACTORY_RESET);
+  html_source->AddString(
+      "powerwashDescription",
+      l10n_util::GetStringFUTF16(
+          IDS_OPTIONS_FACTORY_RESET_DESCRIPTION,
+          l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)));
+  html_source->AddLocalizedString(
+      "powerwashDialogTitle", IDS_OPTIONS_FACTORY_RESET_HEADING);
+  html_source->AddLocalizedString(
+      "powerwashDialogBody", IDS_OPTIONS_FACTORY_RESET_WARNING);
+  html_source->AddLocalizedString(
+      "powerwashDialogButton", IDS_RELAUNCH_BUTTON);
+  html_source->AddLocalizedString(
+      "powerwashLearnMoreUrl", IDS_FACTORY_RESET_HELP_URL);
+#endif
 }
 
 void AddDateTimeStrings(content::WebUIDataSource* html_source) {
@@ -297,6 +348,18 @@ void AddLanguagesStrings(content::WebUIDataSource* html_source) {
   html_source->AddLocalizedString(
       "restart",
       IDS_OPTIONS_SETTINGS_LANGUAGES_RELAUNCH_BUTTON);
+  html_source->AddLocalizedString(
+      "editDictionaryPageTitle",
+      IDS_SETTINGS_LANGUAGES_EDIT_DICTIONARY_TITLE);
+  html_source->AddLocalizedString(
+      "addDictionaryWordLabel",
+      IDS_SETTINGS_LANGUAGES_ADD_DICTIONARY_WORD);
+  html_source->AddLocalizedString(
+      "addDictionaryWordButton",
+      IDS_SETTINGS_LANGUAGES_ADD_DICTIONARY_WORD_BUTTON);
+  html_source->AddLocalizedString(
+      "customDictionaryWords",
+      IDS_SETTINGS_LANGUAGES_DICTIONARY_WORDS);
 }
 
 #if defined(OS_CHROMEOS)
@@ -341,6 +404,18 @@ void AddOnStartupStrings(content::WebUIDataSource* html_source) {
   html_source->AddLocalizedString(
       "onStartupEnterUrl",
       IDS_SETTINGS_ON_STARTUP_ENTER_URL);
+}
+
+void AddPasswordsAndFormsStrings(content::WebUIDataSource* html_source) {
+  html_source->AddLocalizedString(
+      "passwordsAndAutofillPageTitle",
+      IDS_SETTINGS_PASSWORDS_AND_AUTOFILL_PAGE_TITLE);
+  html_source->AddLocalizedString("autofill", IDS_SETTINGS_AUTOFILL);
+  html_source->AddLocalizedString("autofillDetail",
+                                  IDS_SETTINGS_AUTOFILL_DETAIL);
+  html_source->AddLocalizedString("passwords", IDS_SETTINGS_PASSWORDS);
+  html_source->AddLocalizedString("passwordsDetail",
+                                  IDS_SETTINGS_PASSWORDS_DETAIL);
 }
 
 void AddPrivacyStrings(content::WebUIDataSource* html_source) {
@@ -426,10 +501,14 @@ void AddSiteSettingsStrings(content::WebUIDataSource* html_source) {
                                   IDS_SETTINGS_SITE_SETTINGS);
   html_source->AddLocalizedString("siteSettingsAllSites",
                                   IDS_SETTINGS_SITE_SETTINGS_ALL_SITES);
+  html_source->AddLocalizedString("siteSettingsCamera",
+                                  IDS_SETTINGS_SITE_SETTINGS_CAMERA);
   html_source->AddLocalizedString("siteSettingsCookies",
                                   IDS_SETTINGS_SITE_SETTINGS_COOKIES);
   html_source->AddLocalizedString("siteSettingsLocation",
                                   IDS_SETTINGS_SITE_SETTINGS_LOCATION);
+  html_source->AddLocalizedString("siteSettingsMic",
+                                  IDS_SETTINGS_SITE_SETTINGS_MIC);
   html_source->AddLocalizedString("siteSettingsNotifications",
                                   IDS_SETTINGS_SITE_SETTINGS_NOTIFICATIONS);
   html_source->AddLocalizedString("siteSettingsImages",
@@ -445,23 +524,79 @@ void AddSiteSettingsStrings(content::WebUIDataSource* html_source) {
   html_source->AddLocalizedString("siteSettingsAskFirst",
                                   IDS_SETTINGS_SITE_SETTINGS_ASK_FIRST);
   html_source->AddLocalizedString(
+      "siteSettingsAskFirstRecommended",
+      IDS_SETTINGS_SITE_SETTINGS_ASK_FIRST_RECOMMENDED);
+  html_source->AddLocalizedString(
       "siteSettingsAskBeforeAccessing",
       IDS_SETTINGS_SITE_SETTINGS_ASK_BEFORE_ACCESSING);
+  html_source->AddLocalizedString(
+      "siteSettingsAskBeforeSending",
+      IDS_SETTINGS_SITE_SETTINGS_ASK_BEFORE_SENDING);
+  html_source->AddLocalizedString(
+      "siteSettingsCookiesAllowed",
+      IDS_SETTINGS_SITE_SETTINGS_COOKIES_ALLOW_SITES);
   html_source->AddLocalizedString("siteSettingsAllow",
                                   IDS_SETTINGS_SITE_SETTINGS_ALLOW);
   html_source->AddLocalizedString("siteSettingsBlock",
                                   IDS_SETTINGS_SITE_SETTINGS_BLOCK);
+  html_source->AddLocalizedString("siteSettingsAllowed",
+                                  IDS_SETTINGS_SITE_SETTINGS_ALLOWED);
+  html_source->AddLocalizedString(
+      "siteSettingsAllowedRecommended",
+      IDS_SETTINGS_SITE_SETTINGS_ALLOWED_RECOMMENDED);
+  html_source->AddLocalizedString("siteSettingsBlocked",
+                                  IDS_SETTINGS_SITE_SETTINGS_BLOCKED);
+  html_source->AddLocalizedString(
+      "siteSettingsBlockedRecommended",
+      IDS_SETTINGS_SITE_SETTINGS_BLOCKED_RECOMMENDED);
   html_source->AddLocalizedString("siteSettingsExceptions",
                                   IDS_SETTINGS_SITE_SETTINGS_EXCEPTIONS);
   html_source->AddLocalizedString("siteSettingsAddSite",
                                   IDS_SETTINGS_SITE_SETTINGS_ADD_SITE);
   html_source->AddLocalizedString("siteSettingsSiteUrl",
                                   IDS_SETTINGS_SITE_SETTINGS_SITE_URL);
+
+  html_source->AddLocalizedString("siteSettingsActionAllow",
+                                  IDS_SETTINGS_SITE_SETTINGS_ALLOW_MENU);
+  html_source->AddLocalizedString("siteSettingsActionBlock",
+                                  IDS_SETTINGS_SITE_SETTINGS_BLOCK_MENU);
+  html_source->AddLocalizedString("siteSettingsActionReset",
+                                  IDS_SETTINGS_SITE_SETTINGS_RESET_MENU);
+  html_source->AddLocalizedString("siteSettingsUsage",
+                                  IDS_SETTINGS_SITE_SETTINGS_USAGE);
+  html_source->AddLocalizedString("siteSettingsPermissions",
+                                  IDS_SETTINGS_SITE_SETTINGS_PERMISSIONS);
+  html_source->AddLocalizedString("siteSettingsClearAndReset",
+                                  IDS_SETTINGS_SITE_SETTINGS_CLEAR_BUTTON);
+  html_source->AddLocalizedString("siteSettingsDelete",
+                                  IDS_SETTINGS_SITE_SETTINGS_DELETE);
 }
 
 void AddSyncStrings(content::WebUIDataSource* html_source) {
-  html_source->AddLocalizedString("syncPageTitle",
-                                  IDS_SETTINGS_SYNC);
+  html_source->AddLocalizedString("peoplePageTitle", IDS_SETTINGS_SYNC_PEOPLE);
+  html_source->AddLocalizedString("syncOverview", IDS_SETTINGS_SYNC_OVERVIEW);
+  html_source->AddLocalizedString("syncSignin", IDS_SETTINGS_SYNC_SIGNIN);
+  html_source->AddLocalizedString("syncDisconnect",
+                                  IDS_SETTINGS_SYNC_DISCONNECT);
+  html_source->AddLocalizedString("syncDisconnectTitle",
+                                  IDS_SETTINGS_SYNC_DISCONNECT_TITLE);
+  std::string disconnect_help_url =
+      google_util::AppendGoogleLocaleParam(
+          GURL(chrome::kSyncGoogleDashboardURL),
+          g_browser_process->GetApplicationLocale())
+          .spec();
+  html_source->AddString(
+      "syncDisconnectExplanation",
+      l10n_util::GetStringFUTF16(IDS_SETTINGS_SYNC_DISCONNECT_EXPLANATION,
+                                 base::ASCIIToUTF16(disconnect_help_url)));
+  html_source->AddLocalizedString("syncDisconnectDeleteProfile",
+                                  IDS_SETTINGS_SYNC_DISCONNECT_DELETE_PROFILE);
+  html_source->AddLocalizedString("syncDisconnectConfirm",
+                                  IDS_SETTINGS_SYNC_DISCONNECT_CONFIRM);
+
+  html_source->AddLocalizedString("syncPageTitle", IDS_SETTINGS_SYNC);
+  html_source->AddLocalizedString("syncLoading", IDS_SETTINGS_SYNC_LOADING);
+  html_source->AddLocalizedString("syncTimeout", IDS_SETTINGS_SYNC_TIMEOUT);
   html_source->AddLocalizedString("syncEverythingMenuOption",
                                   IDS_SETTINGS_SYNC_EVERYTHING_MENU_OPTION);
   html_source->AddLocalizedString("chooseWhatToSyncMenuOption",
@@ -500,10 +635,25 @@ void AddSyncStrings(content::WebUIDataSource* html_source) {
       IDS_SETTINGS_ENCRYPT_WITH_SYNC_PASSPHRASE_LEARN_MORE_LINK);
   html_source->AddLocalizedString("useDefaultSettingsButton",
                                   IDS_SETTINGS_USE_DEFAULT_SETTINGS_BUTTON);
+  // TODO(dpapad): Remove this string and use IDS_CANCEL (see AddCommonStrings
+  // at the top of this file).
   html_source->AddLocalizedString("cancelButton",
                                   IDS_SETTINGS_CANCEL_BUTTON);
   html_source->AddLocalizedString("okButton",
                                   IDS_SETTINGS_OK_BUTTON);
+  html_source->AddLocalizedString("passphraseExplanationText",
+                                  IDS_SETTINGS_PASSPHRASE_EXPLANATION_TEXT);
+  html_source->AddLocalizedString("emptyPassphraseError",
+                                  IDS_SETTINGS_EMPTY_PASSPHRASE_ERROR);
+  html_source->AddLocalizedString("mismatchedPassphraseError",
+                                  IDS_SETTINGS_MISMATCHED_PASSPHRASE_ERROR);
+  html_source->AddLocalizedString("incorrectPassphraseError",
+                                  IDS_SETTINGS_INCORRECT_PASSPHRASE_ERROR);
+  html_source->AddLocalizedString("passphrasePlaceholder",
+                                  IDS_SETTINGS_PASSPHRASE_PLACEHOLDER);
+  html_source->AddLocalizedString(
+      "passphraseConfirmationPlaceholder",
+      IDS_SETTINGS_PASSPHRASE_CONFIRMATION_PLACEHOLDER);
 }
 
 void AddUsersStrings(content::WebUIDataSource* html_source) {
@@ -525,6 +675,38 @@ void AddUsersStrings(content::WebUIDataSource* html_source) {
                                   IDS_SETTINGS_USERS_ADD_USERS_LABEL);
 }
 
+void AddWebContentStrings(content::WebUIDataSource* html_source) {
+  html_source->AddLocalizedString("webContent", IDS_SETTINGS_WEB_CONTENT);
+  html_source->AddLocalizedString("pageZoom", IDS_SETTINGS_PAGE_ZOOM_LABEL);
+  html_source->AddLocalizedString("fontSize", IDS_SETTINGS_FONT_SIZE_LABEL);
+  html_source->AddLocalizedString("verySmall", IDS_SETTINGS_VERY_SMALL_FONT);
+  html_source->AddLocalizedString("small", IDS_SETTINGS_SMALL_FONT);
+  html_source->AddLocalizedString("medium", IDS_SETTINGS_MEDIUM_FONT);
+  html_source->AddLocalizedString("large", IDS_SETTINGS_LARGE_FONT);
+  html_source->AddLocalizedString("veryLarge", IDS_SETTINGS_VERY_LARGE_FONT);
+  html_source->AddLocalizedString("custom", IDS_SETTINGS_CUSTOM);
+  html_source->AddLocalizedString("customizeFonts",
+                                  IDS_SETTINGS_CUSTOMIZE_FONTS);
+  html_source->AddLocalizedString("fontsAndEncoding",
+                                  IDS_SETTINGS_FONTS_AND_ENCODING);
+  html_source->AddLocalizedString("standardFont",
+                                  IDS_SETTINGS_STANDARD_FONT_LABEL);
+  html_source->AddLocalizedString("serifFont", IDS_SETTINGS_SERIF_FONT_LABEL);
+  html_source->AddLocalizedString("sansSerifFont",
+                                  IDS_SETTINGS_SANS_SERIF_FONT_LABEL);
+  html_source->AddLocalizedString("fixedWidthFont",
+                                  IDS_SETTINGS_FIXED_WIDTH_FONT_LABEL);
+  html_source->AddLocalizedString("minimumFont",
+                                  IDS_SETTINGS_MINIMUM_FONT_SIZE_LABEL);
+  html_source->AddLocalizedString("encoding", IDS_SETTINGS_ENCODING_LABEL);
+  html_source->AddLocalizedString("tiny", IDS_SETTINGS_TINY_FONT_SIZE);
+  html_source->AddLocalizedString("huge", IDS_SETTINGS_HUGE_FONT_SIZE);
+  html_source->AddLocalizedString("loremIpsum", IDS_SETTINGS_LOREM_IPSUM);
+  html_source->AddLocalizedString("loading", IDS_SETTINGS_LOADING);
+  html_source->AddLocalizedString("advancedFontSettings",
+                                  IDS_SETTINGS_ADVANCED_FONT_SETTINGS);
+}
+
 }  // namespace
 
 namespace settings {
@@ -538,8 +720,14 @@ void AddLocalizedStrings(content::WebUIDataSource* html_source,
   AddAccountUITweaksStrings(html_source, profile);
 #endif
   AddAppearanceStrings(html_source);
+#if defined(OS_CHROMEOS)
+  AddBluetoothStrings(html_source);
+#endif
   AddCertificateManagerStrings(html_source);
   AddClearBrowsingDataStrings(html_source);
+#if !defined(OS_CHROMEOS)
+  AddDefaultBrowserStrings(html_source);
+#endif
   AddDateTimeStrings(html_source);
   AddDownloadsStrings(html_source);
 #if defined(OS_CHROMEOS)
@@ -550,12 +738,17 @@ void AddLocalizedStrings(content::WebUIDataSource* html_source,
   AddMultiProfilesStrings(html_source, profile);
 #endif
   AddOnStartupStrings(html_source);
+  AddPasswordsAndFormsStrings(html_source);
   AddPrivacyStrings(html_source);
+  AddResetStrings(html_source);
   AddSearchEnginesStrings(html_source);
   AddSearchStrings(html_source);
   AddSiteSettingsStrings(html_source);
   AddSyncStrings(html_source);
   AddUsersStrings(html_source);
+  AddWebContentStrings(html_source);
+
+  policy_indicator::AddLocalizedStrings(html_source);
 
   html_source->SetJsonPath(kLocalizedStringsFile);
 }

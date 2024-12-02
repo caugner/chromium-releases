@@ -18,11 +18,25 @@ source_set("zoom") {
 
   deps = [
     "//base",
+    "//base:prefs",
     "//content/public/browser",
     "//content/public/common",
     "//ipc",
     "//net",
     "//url",
+  ]
+}
+
+source_set("test_support") {
+  testonly = true
+  sources = [
+    "test/zoom_test_utils.cc",
+    "test/zoom_test_utils.h",
+  ]
+  deps = [
+    ":zoom",
+    "//base:base",
+    "//content/test:test_support",
   ]
 }
 
@@ -33,6 +47,8 @@ source_set("unit_tests") {
   ]
   deps = [
     ":zoom",
+    "//base:prefs",
+    "//content/public/common",
     "//testing/gtest",
   ]
 }

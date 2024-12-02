@@ -15,10 +15,6 @@
     ],
     'use_mesa_platform_null%': 0,
 
-    # TODO(dshwang): remove this flag when all gbm hardware supports vgem map.
-    # crbug.com/519587
-    'use_vgem_map%': 0,
-
     'use_drm_atomic%': 0,
   },
   'targets': [
@@ -47,8 +43,8 @@
         'OZONE_IMPLEMENTATION',
       ],
       'sources': [
-        'common/client_native_pixmap_factory_gbm.cc',
-        'common/client_native_pixmap_factory_gbm.h',
+        'client_native_pixmap_factory_gbm.cc',
+        'client_native_pixmap_factory_gbm.h',
         'common/drm_util.cc',
         'common/drm_util.h',
         'common/scoped_drm_types.cc',
@@ -72,10 +68,18 @@
         'gpu/drm_gpu_display_manager.h',
         'gpu/drm_gpu_platform_support.cc',
         'gpu/drm_gpu_platform_support.h',
+        'gpu/drm_thread.cc',
+        'gpu/drm_thread.h',
+        'gpu/drm_thread_message_proxy.cc',
+        'gpu/drm_thread_message_proxy.h',
+        'gpu/drm_thread_proxy.cc',
+        'gpu/drm_thread_proxy.h',
         'gpu/drm_vsync_provider.cc',
         'gpu/drm_vsync_provider.h',
         'gpu/drm_window.cc',
         'gpu/drm_window.h',
+        'gpu/drm_window_proxy.cc',
+        'gpu/drm_window_proxy.h',
         'gpu/gbm_buffer.cc',
         'gpu/gbm_buffer.h',
         'gpu/gbm_buffer_base.cc',
@@ -98,6 +102,8 @@
         'gpu/overlay_plane.h',
         'gpu/page_flip_request.cc',
         'gpu/page_flip_request.h',
+        'gpu/proxy_helpers.cc',
+        'gpu/proxy_helpers.h',
         'gpu/screen_manager.cc',
         'gpu/screen_manager.h',
         'host/channel_observer.h',
@@ -126,10 +132,12 @@
       ],
       'conditions': [
         ['use_vgem_map==1', {
-          'defines': ['USE_VGEM_MAP'],
+          'dependencies': [
+            '../ozone/ozone.gyp:vgem_map',
+          ],
           'sources': [
-            'gpu/client_native_pixmap_vgem.cc',
-            'gpu/client_native_pixmap_vgem.h',
+            'common/client_native_pixmap_vgem.cc',
+            'common/client_native_pixmap_vgem.h',
           ],
         }],
         ['use_drm_atomic == 1', {
@@ -165,9 +173,11 @@
           'gpu/drm_window_unittest.cc',
           'gpu/hardware_display_controller_unittest.cc',
           'gpu/hardware_display_plane_manager_unittest.cc',
+          'gpu/mock_buffer_generator.cc',
+          'gpu/mock_buffer_generator.h',
+          'gpu/mock_drm_device.cc',
+          'gpu/mock_drm_device.h',
           'gpu/screen_manager_unittest.cc',
-          'test/mock_drm_device.cc',
-          'test/mock_drm_device.h',
         ],
       },
     },

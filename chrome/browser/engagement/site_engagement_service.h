@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_ENGAGEMENT_SITE_ENGAGEMENT_SERVICE_H_
 
 #include <map>
+#include <set>
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
@@ -25,29 +26,35 @@ class Profile;
 
 class SiteEngagementScore {
  public:
-  // Keys used in the content settings dictionary.
-  static const char* kRawScoreKey;
-  static const char* kPointsAddedTodayKey;
-  static const char* kLastEngagementTimeKey;
-
   // The maximum number of points that are allowed.
   static const double kMaxPoints;
 
   // The maximum number of points that can be accrued in one day.
-  static const double kMaxPointsPerDay;
+  static double g_max_points_per_day;
 
   // The number of points given for navigations.
-  static const double kNavigationPoints;
+  static double g_navigation_points;
 
   // The number of points given for user input (indicating time-on-site).
-  static const double kUserInputPoints;
+  static double g_user_input_points;
+
+  // The number of points given for media playing. Initially calibrated such
+  // that at least 30 minutes of video watching or audio listening would be
+  // required to allow a site to reach the daily engagement maximum.
+  static double g_visible_media_playing_points;
+
+  // The number of points given for media playing in a non-visible tab.
+  static double g_hidden_media_playing_points;
 
   // Decaying works by removing a portion of the score periodically. This
   // constant determines how often that happens.
-  static const int kDecayPeriodInDays;
+  static int g_decay_period_in_days;
 
   // How much the score decays after every kDecayPeriodInDays.
-  static const double kDecayPoints;
+  static double g_decay_points;
+
+  // Update the default engagement settings via variations.
+  static void UpdateFromVariations();
 
   // The SiteEngagementService does not take ownership of |clock|. It is the
   // responsibility of the caller to make sure |clock| outlives this
@@ -67,7 +74,14 @@ class SiteEngagementScore {
   bool UpdateScoreDict(base::DictionaryValue* score_dict);
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(SiteEngagementScoreTest, PartiallyEmptyDictionary);
+  FRIEND_TEST_ALL_PREFIXES(SiteEngagementScoreTest, PopulatedDictionary);
   friend class SiteEngagementScoreTest;
+
+  // Keys used in the content settings dictionary.
+  static const char* kRawScoreKey;
+  static const char* kPointsAddedTodayKey;
+  static const char* kLastEngagementTimeKey;
 
   // This version of the constructor is used in unit tests.
   explicit SiteEngagementScore(base::Clock* clock);
@@ -117,10 +131,17 @@ class SiteEngagementScoreProvider {
 class SiteEngagementService : public KeyedService,
                               public SiteEngagementScoreProvider {
  public:
+  // The name of the site engagement variation field trial.
+  static const char kEngagementParams[];
+
   static SiteEngagementService* Get(Profile* profile);
 
   // Returns whether or not the SiteEngagementService is enabled.
   static bool IsEnabled();
+
+  // Clears engagement scores for the given origins.
+  static void ClearHistoryForURLs(Profile* profile,
+                                  const std::set<GURL>& origins);
 
   explicit SiteEngagementService(Profile* profile);
   ~SiteEngagementService() override;
@@ -136,6 +157,11 @@ class SiteEngagementService : public KeyedService,
   void HandleUserInput(const GURL& url,
                        SiteEngagementMetrics::EngagementType type);
 
+  // Update the karma score of the origin matching |url| for media playing. The
+  // points awarded are discounted if the media is being played in a non-visible
+  // tab.
+  void HandleMediaPlaying(const GURL& url, bool is_hidden);
+
   // Overridden from SiteEngagementScoreProvider:
   double GetScore(const GURL& url) override;
   double GetTotalEngagementPoints() override;
@@ -143,6 +169,7 @@ class SiteEngagementService : public KeyedService,
  private:
   FRIEND_TEST_ALL_PREFIXES(SiteEngagementServiceTest, CheckHistograms);
   FRIEND_TEST_ALL_PREFIXES(SiteEngagementServiceTest, CleanupEngagementScores);
+  FRIEND_TEST_ALL_PREFIXES(SiteEngagementServiceTest, ClearHistoryForURLs);
   FRIEND_TEST_ALL_PREFIXES(SiteEngagementServiceTest, GetMedianEngagement);
   FRIEND_TEST_ALL_PREFIXES(SiteEngagementServiceTest, GetTotalNavigationPoints);
   FRIEND_TEST_ALL_PREFIXES(SiteEngagementServiceTest, GetTotalUserInputPoints);

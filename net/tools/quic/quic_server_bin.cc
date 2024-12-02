@@ -25,7 +25,7 @@ int32 FLAGS_port = 6121;
 net::ProofSource* CreateProofSource(const base::FilePath& cert_path,
                                     const base::FilePath& key_path) {
   net::ProofSourceChromium* proof_source = new net::ProofSourceChromium();
-  CHECK(proof_source->Initialize(cert_path, key_path));
+  CHECK(proof_source->Initialize(cert_path, key_path, base::FilePath()));
   return proof_source;
 }
 
@@ -67,23 +67,25 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  net::IPAddressNumber ip;
-  CHECK(net::ParseIPLiteralToNumber("::", &ip));
-
-  net::QuicConfig config;
-  net::tools::QuicServer server(config, net::QuicSupportedVersions());
-  server.SetStrikeRegisterNoStartupPeriod();
   if (!line->HasSwitch("certificate_file")) {
     LOG(ERROR) << "missing --certificate_file";
     return 1;
   }
+
   if (!line->HasSwitch("key_file")) {
     LOG(ERROR) << "missing --key_file";
     return 1;
   }
-  server.SetProofSource(
+
+  net::IPAddressNumber ip;
+  CHECK(net::ParseIPLiteralToNumber("::", &ip));
+
+  net::QuicConfig config;
+  net::tools::QuicServer server(
       CreateProofSource(line->GetSwitchValuePath("certificate_file"),
-                        line->GetSwitchValuePath("key_file")));
+                        line->GetSwitchValuePath("key_file")),
+      config, net::QuicSupportedVersions());
+  server.SetStrikeRegisterNoStartupPeriod();
 
   int rc = server.Listen(net::IPEndPoint(ip, FLAGS_port));
   if (rc < 0) {

@@ -4,10 +4,11 @@
 
 #include "base/bind.h"
 #include "base/message_loop/message_loop.h"
+#include "base/rand_util.h"
 #include "base/test/launcher/unit_test_launcher.h"
 #include "base/test/test_suite.h"
 #include "build/build_config.h"
-#include "components/scheduler/child/scheduler_task_runner_delegate_impl.h"
+#include "components/scheduler/child/scheduler_tqm_delegate_impl.h"
 #include "components/scheduler/child/web_task_runner_impl.h"
 #include "components/scheduler/renderer/renderer_scheduler_impl.h"
 #include "components/scheduler/renderer/renderer_web_scheduler_impl.h"
@@ -57,8 +58,8 @@ class CurrentThreadMock : public blink::WebThread {
   }
 
  private:
-  scoped_refptr<scheduler::SchedulerTaskRunnerDelegate> task_runner_delegate_;
-  scoped_ptr<scheduler::RendererScheduler> scheduler_;
+  scoped_refptr<scheduler::SchedulerTqmDelegate> task_runner_delegate_;
+  scoped_ptr<scheduler::RendererSchedulerImpl> scheduler_;
   scoped_ptr<blink::WebScheduler> web_scheduler_;
   scoped_ptr<blink::WebTaskRunner> web_task_runner_;
 };
@@ -82,6 +83,7 @@ TestBlinkPlatformSupport::~TestBlinkPlatformSupport() {}
 void TestBlinkPlatformSupport::cryptographicallyRandomValues(
     unsigned char* buffer,
     size_t length) {
+  base::RandBytes(buffer, length);
 }
 
 const unsigned char* TestBlinkPlatformSupport::getTraceCategoryEnabledFlag(

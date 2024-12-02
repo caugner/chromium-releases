@@ -109,13 +109,14 @@ void SetRow(gfx::BufferFormat format,
       return;
     case gfx::BufferFormat::ATC:
     case gfx::BufferFormat::ATCIA:
+    case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::DXT1:
     case gfx::BufferFormat::DXT5:
     case gfx::BufferFormat::ETC1:
-    case gfx::BufferFormat::BGRX_8888:
+    case gfx::BufferFormat::RGBX_8888:
+    case gfx::BufferFormat::UYVY_422:
     case gfx::BufferFormat::YUV_420:
     case gfx::BufferFormat::YUV_420_BIPLANAR:
-    case gfx::BufferFormat::UYVY_422:
       NOTREACHED();
       return;
   }
@@ -126,7 +127,7 @@ void SetRow(gfx::BufferFormat format,
 GLenum InternalFormat(gfx::BufferFormat format) {
   switch (format) {
     case gfx::BufferFormat::R_8:
-      return GL_R8;
+      return GL_RED;
     case gfx::BufferFormat::RGBA_4444:
     case gfx::BufferFormat::RGBA_8888:
       return GL_RGBA;
@@ -134,13 +135,14 @@ GLenum InternalFormat(gfx::BufferFormat format) {
       return GL_BGRA_EXT;
     case gfx::BufferFormat::ATC:
     case gfx::BufferFormat::ATCIA:
+    case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::DXT1:
     case gfx::BufferFormat::DXT5:
     case gfx::BufferFormat::ETC1:
-    case gfx::BufferFormat::BGRX_8888:
+    case gfx::BufferFormat::RGBX_8888:
+    case gfx::BufferFormat::UYVY_422:
     case gfx::BufferFormat::YUV_420:
     case gfx::BufferFormat::YUV_420_BIPLANAR:
-    case gfx::BufferFormat::UYVY_422:
       NOTREACHED();
       return 0;
   }
@@ -153,8 +155,11 @@ GLenum InternalFormat(gfx::BufferFormat format) {
 
 // An end to end test that tests the whole GpuMemoryBuffer lifecycle.
 TEST_P(GpuMemoryBufferTest, Lifecycle) {
-  ASSERT_TRUE((GetParam() != gfx::BufferFormat::R_8) ||
-              gl_.GetCapabilities().texture_rg);
+  if (GetParam() == gfx::BufferFormat::R_8 &&
+      !gl_.GetCapabilities().texture_rg) {
+    LOG(WARNING) << "texture_rg not supported. Skipping test.";
+    return;
+  }
 
   GLuint texture_id = 0;
   glGenTextures(1, &texture_id);
@@ -170,22 +175,17 @@ TEST_P(GpuMemoryBufferTest, Lifecycle) {
       gfx::Size(kImageWidth, kImageHeight), GetParam()));
 
   // Map buffer for writing.
-  void* data;
-  bool rv = buffer->Map(&data);
-  DCHECK(rv);
-
-  uint8_t* mapped_buffer = static_cast<uint8_t*>(data);
-  ASSERT_TRUE(mapped_buffer != NULL);
-
+  ASSERT_TRUE(buffer->Map());
+  ASSERT_NE(nullptr, buffer->memory(0));
+  ASSERT_NE(0, buffer->stride(0));
   uint8_t pixel[] = {255u, 0u, 0u, 255u};
 
   // Assign a value to each pixel.
-  int stride = 0;
-  buffer->GetStride(&stride);
-  ASSERT_NE(stride, 0);
-  for (int y = 0; y < kImageHeight; ++y)
-    SetRow(GetParam(), mapped_buffer + y * stride, kImageWidth, pixel);
-
+  for (int y = 0; y < kImageHeight; ++y) {
+    SetRow(GetParam(),
+           static_cast<uint8_t*>(buffer->memory(0)) + y * buffer->stride(0),
+           kImageWidth, pixel);
+  }
   // Unmap the buffer.
   buffer->Unmap();
 

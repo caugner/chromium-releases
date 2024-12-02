@@ -46,10 +46,10 @@ gfx::Image InfoBarDelegate::GetIcon() const {
   if (ui::MaterialDesignController::IsModeMaterial()) {
     gfx::VectorIconId vector_id = GetVectorIconId();
     if (vector_id != gfx::VectorIconId::VECTOR_ICON_NONE) {
-      return gfx::Image(gfx::CreateVectorIcon(
-          vector_id, 18,
-          GetInfoBarType() == WARNING_TYPE ? SkColorSetRGB(0xFF, 0x67, 0)
-                                           : gfx::kGoogleBlue));
+      return gfx::Image(gfx::CreateVectorIcon(vector_id, 18,
+                                              GetInfoBarType() == WARNING_TYPE
+                                                  ? SkColorSetRGB(0xFF, 0x67, 0)
+                                                  : gfx::kGoogleBlue500));
     }
   }
 #endif
@@ -90,10 +90,6 @@ InsecureContentInfoBarDelegate*
   return nullptr;
 }
 
-MediaStreamInfoBarDelegate* InfoBarDelegate::AsMediaStreamInfoBarDelegate() {
-  return nullptr;
-}
-
 NativeAppInfoBarDelegate* InfoBarDelegate::AsNativeAppInfoBarDelegate() {
   return nullptr;
 }
@@ -131,6 +127,11 @@ translate::TranslateInfoBarDelegate*
 }
 
 #if defined(OS_ANDROID)
+MediaStreamInfoBarDelegateAndroid*
+InfoBarDelegate::AsMediaStreamInfoBarDelegateAndroid() {
+  return nullptr;
+}
+
 MediaThrottleInfoBarDelegate*
     InfoBarDelegate::AsMediaThrottleInfoBarDelegate() {
   return nullptr;

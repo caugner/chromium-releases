@@ -9,20 +9,24 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.provider.Browser;
+import android.text.TextUtils;
 
 import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.BookmarksBridge;
-import org.chromium.chrome.browser.BookmarksBridge.BookmarkItem;
 import org.chromium.chrome.browser.ChromeBrowserProviderClient;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.UrlConstants;
+import org.chromium.chrome.browser.bookmark.BookmarksBridge;
+import org.chromium.chrome.browser.bookmark.BookmarksBridge.BookmarkItem;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.enhancedbookmarks.EnhancedBookmarksModel.AddBookmarkCallback;
 import org.chromium.chrome.browser.favicon.FaviconHelper;
+import org.chromium.chrome.browser.ntp.NewTabPageUma;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.offlinepages.OfflinePageFreeUpSpaceCallback;
 import org.chromium.chrome.browser.offlinepages.OfflinePageFreeUpSpaceDialog;
@@ -81,8 +85,9 @@ public class EnhancedBookmarkUtils {
             return;
         }
 
-        bookmarkModel.addBookmarkAsync(bookmarkModel.getDefaultFolder(), 0, tab.getTitle(),
-                tab.getUrl(), tab.getWebContents(),
+        BookmarkId parent = bookmarkModel.getDefaultFolder();
+        bookmarkModel.addBookmarkAsync(parent, bookmarkModel.getChildCount(parent), tab.getTitle(),
+                tab.getUrl(), tab.getWebContents(), tab.isShowingErrorPage(),
                 createAddBookmarkCallback(bookmarkModel, snackbarManager, activity));
     }
 
@@ -103,45 +108,75 @@ public class EnhancedBookmarkUtils {
                 createAddBookmarkCallback(bookmarkModel, snackbarManager, activity));
     }
 
+    private static void showSnackbarForAddingBookmark(final EnhancedBookmarksModel bookmarkModel,
+            final SnackbarManager snackbarManager, final Activity activity,
+            final BookmarkId bookmarkId, final int saveResult, boolean isStorageAlmostFull) {
+        SnackbarController snackbarController = null;
+        int messageId;
+        int buttonId = 0;
+
+        OfflinePageBridge offlinePageBridge = bookmarkModel.getOfflinePageBridge();
+        if (offlinePageBridge == null) {
+            messageId = R.string.enhanced_bookmark_page_saved;
+        } else if (saveResult == AddBookmarkCallback.SKIPPED) {
+            messageId = R.string.offline_pages_page_skipped;
+        } else if (isStorageAlmostFull) {
+            messageId = saveResult == AddBookmarkCallback.SAVED
+                    ? R.string.offline_pages_page_saved_storage_near_full
+                    : R.string.offline_pages_page_failed_to_save_storage_near_full;
+            // Show "Free up space" button.
+            buttonId = R.string.offline_pages_free_up_space_title;
+            snackbarController = createSnackbarControllerForFreeUpSpaceButton(
+                    bookmarkModel, snackbarManager, activity);
+        } else {
+            messageId = saveResult == AddBookmarkCallback.SAVED
+                    ? R.string.offline_pages_page_saved
+                    : R.string.offline_pages_page_failed_to_save;
+        }
+
+        // Show "Edit" button when "Free up space" button is not desired, regardless
+        // whether the offline page was saved successfuly, because a bookmark was
+        // created and user might want to edit title.
+        if (buttonId == 0) {
+            buttonId = R.string.enhanced_bookmark_item_edit;
+            snackbarController = createSnackbarControllerForEditButton(
+                    bookmarkModel, activity, bookmarkId);
+        }
+
+        snackbarManager.showSnackbar(
+                Snackbar.make(activity.getString(messageId), snackbarController)
+                        .setAction(activity.getString(buttonId), null)
+                        .setSingleLine(false));
+    }
+
     private static AddBookmarkCallback createAddBookmarkCallback(
             final EnhancedBookmarksModel bookmarkModel, final SnackbarManager snackbarManager,
             final Activity activity) {
         return new AddBookmarkCallback() {
             @Override
-            public void onBookmarkAdded(BookmarkId bookmarkId, boolean pageSavedOffline) {
-                SnackbarController snackbarController;
-                int messageId;
-                int buttonId;
-
-                OfflinePageBridge offlinePageBridge = bookmarkModel.getOfflinePageBridge();
-                if (offlinePageBridge == null) {
-                    messageId = R.string.enhanced_bookmark_page_saved;
-                    buttonId = R.string.enhanced_bookmark_item_edit;
-                    snackbarController = createSnackbarControllerForEditButton(
-                            bookmarkModel, activity, bookmarkId);
-                } else if (OfflinePageUtils.isStorageAlmostFull()) {
-                    messageId = pageSavedOffline
-                            ? R.string.offline_pages_page_saved_storage_near_full
-                            : R.string.offline_pages_page_failed_to_save_storage_near_full;
-                    // Show "Free up space" button.
-                    buttonId = R.string.offline_pages_free_up_space_title;
-                    snackbarController = createSnackbarControllerForFreeUpSpaceButton(
-                            bookmarkModel, snackbarManager, activity);
-                } else {
-                    messageId = pageSavedOffline ? R.string.offline_pages_page_saved
-                                                 : R.string.offline_pages_page_failed_to_save;
-                    // Show "Edit" button even if offline page was not saved here, because a
-                    // bookmark was created and user might want to edit title.
-                    buttonId = R.string.enhanced_bookmark_item_edit;
-                    snackbarController = createSnackbarControllerForEditButton(
-                            bookmarkModel, activity, bookmarkId);
+            public void onBookmarkAdded(final BookmarkId bookmarkId, final int saveResult) {
+                // Shows the snackbar right away when offline pages feature is not enabled since
+                // there is no need to wait to get the storage info.
+                if (bookmarkModel.getOfflinePageBridge() == null) {
+                    showSnackbarForAddingBookmark(bookmarkModel, snackbarManager, activity,
+                                bookmarkId, saveResult, false);
+                    return;
                 }
 
-                snackbarManager.showSnackbar(
-                        Snackbar.make(activity.getString(messageId), snackbarController)
-                                .setAction(
-                                        buttonId == 0 ? null : activity.getString(buttonId), null)
-                                .setSingleLine(false));
+                // Gets the storage info asynchronously which is needed to produce the message for
+                // the snackbar.
+                new AsyncTask<Void, Void, Boolean>() {
+                    @Override
+                    protected Boolean doInBackground(Void... params) {
+                        return OfflinePageUtils.isStorageAlmostFull();
+                    }
+
+                    @Override
+                    protected void onPostExecute(Boolean isStorageAlmostFull) {
+                        showSnackbarForAddingBookmark(bookmarkModel, snackbarManager, activity,
+                                bookmarkId, saveResult, isStorageAlmostFull);
+                    }
+                }.execute();
             }
         };
     }
@@ -159,12 +194,14 @@ public class EnhancedBookmarkUtils {
 
             @Override
             public void onDismissNoAction(Object actionData) {
+                RecordUserAction.record("EnhancedBookmarks.EditAfterCreateButtonNotClicked");
                 // This method will be called only if the snackbar is dismissed by timeout.
                 bookmarkModel.destroy();
             }
 
             @Override
             public void onAction(Object actionData) {
+                RecordUserAction.record("EnhancedBookmarks.EditAfterCreateButtonClicked");
                 // Show edit activity with the name of parent folder highlighted.
                 startEditActivity(activity, bookmarkId, null);
                 bookmarkModel.destroy();
@@ -229,7 +266,7 @@ public class EnhancedBookmarkUtils {
             return false;
         }
         if (DeviceFormFactor.isTablet(activity)) {
-            openBookmark(activity, UrlConstants.BOOKMARKS_URL);
+            openUrl(activity, UrlConstants.BOOKMARKS_URL);
         } else {
             activity.startActivity(new Intent(activity, EnhancedBookmarkActivity.class));
         }
@@ -285,7 +322,37 @@ public class EnhancedBookmarkUtils {
         return BookmarkId.getBookmarkIdFromString(bundle.getString(BOOKMARK_SAVE_NAME));
     }
 
-    public static void openBookmark(Activity activity, String url) {
+    /**
+     * Opens a bookmark depending on connection status and reports UMA.
+     * @param model Enhanced bookmarks model to manage the bookmark.
+     * @param activity Activity requesting to open the bookmark.
+     * @param bookmarkId ID of the bookmark to be opened.
+     * @param launchLocation Location from which the bookmark is being opened.
+     * @return Whether the bookmark was successfully opened.
+     */
+    public static boolean openBookmark(EnhancedBookmarksModel model, Activity activity,
+            BookmarkId bookmarkId, int launchLocation) {
+        if (model.getBookmarkById(bookmarkId) == null) return false;
+
+        String url = model.getLaunchUrlAndMarkAccessed(activity, bookmarkId);
+
+        // TODO(jianli): Notify the user about the failure.
+        if (TextUtils.isEmpty(url)) return false;
+
+        NewTabPageUma.recordAction(NewTabPageUma.ACTION_OPENED_BOOKMARK);
+        if (url.startsWith("file:")) {
+            RecordHistogram.recordEnumeratedHistogram(
+                    "OfflinePages.LaunchLocation", launchLocation, LaunchLocation.COUNT);
+        } else {
+            RecordHistogram.recordEnumeratedHistogram(
+                    "Stars.LaunchLocation", launchLocation, LaunchLocation.COUNT);
+        }
+
+        openUrl(activity, url);
+        return true;
+    }
+
+    private static void openUrl(Activity activity, String url) {
         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
         intent.setClassName(activity.getApplicationContext().getPackageName(),
                 ChromeLauncherActivity.class.getName());

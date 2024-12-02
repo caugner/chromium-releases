@@ -24,8 +24,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if !defined(OS_ANDROID)
-#include "chrome/browser/ui/passwords/manage_passwords_icon.h"
-#include "chrome/browser/ui/passwords/manage_passwords_icon_mock.h"
+#include "chrome/browser/ui/passwords/manage_passwords_icon_view.h"
 #endif
 
 using ::testing::ElementsAre;
@@ -35,6 +34,23 @@ namespace {
 
 const int64 kSlowNavigationDelayInMS = 6000;
 const int64 kQuickNavigationDelayInMS = 500;
+
+#if !defined(OS_ANDROID)
+class TestManagePasswordsIconView : public ManagePasswordsIconView {
+ public:
+  TestManagePasswordsIconView() {}
+
+  void SetState(password_manager::ui::State state) override {
+    state_ = state;
+  }
+  password_manager::ui::State state() { return state_; }
+
+ private:
+  password_manager::ui::State state_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestManagePasswordsIconView);
+};
+#endif
 
 // This sublass is used to disable some code paths which are not essential for
 // testing.
@@ -104,19 +120,30 @@ void TestManagePasswordsUIController::NeverSavePasswordInternal() {
   OnLoginsChanged(list);
 }
 
+// TODO(crbug.com/554886) Centralise mock clients.
+class MockPasswordManagerClient
+    : public password_manager::StubPasswordManagerClient {
+ public:
+  MOCK_CONST_METHOD0(GetPasswordManager,
+                     const password_manager::PasswordManager*());
+};
+
 }  // namespace
 
 class ManagePasswordsUIControllerTest : public ChromeRenderViewHostTestHarness {
  public:
-  ManagePasswordsUIControllerTest() : password_manager_(&client_) {}
+  ManagePasswordsUIControllerTest() : password_manager_(&mock_client_) {}
 
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
 
+    ON_CALL(mock_client_, GetPasswordManager())
+        .WillByDefault(testing::Return(&password_manager_));
+
     // Create the test UIController here so that it's bound to
     // |test_web_contents_|, and will be retrieved correctly via
     // ManagePasswordsUIController::FromWebContents in |controller()|.
-    new TestManagePasswordsUIController(web_contents(), &client_);
+    new TestManagePasswordsUIController(web_contents(), &mock_client_);
 
     test_local_form_.origin = GURL("http://example.com");
     test_local_form_.username_value = base::ASCIIToUTF16("username");
@@ -134,9 +161,9 @@ class ManagePasswordsUIControllerTest : public ChromeRenderViewHostTestHarness {
   void ExpectIconStateIs(password_manager::ui::State state) {
 // No op on Android, where there is no icon.
 #if !defined(OS_ANDROID)
-    ManagePasswordsIconMock mock;
-    controller()->UpdateIconAndBubbleState(&mock);
-    EXPECT_EQ(state, mock.state());
+    TestManagePasswordsIconView view;
+    controller()->UpdateIconAndBubbleState(&view);
+    EXPECT_EQ(state, view.state());
 #endif
   }
 
@@ -168,7 +195,7 @@ class ManagePasswordsUIControllerTest : public ChromeRenderViewHostTestHarness {
   scoped_ptr<password_manager::PasswordFormManager> CreateFormManager();
 
  private:
-  password_manager::StubPasswordManagerClient client_;
+  MockPasswordManagerClient mock_client_;
   password_manager::StubPasswordManagerDriver driver_;
   password_manager::PasswordManager password_manager_;
 
@@ -182,9 +209,9 @@ ManagePasswordsUIControllerTest::CreateFormManagerWithBestMatches(
     const autofill::PasswordForm& observed_form,
     ScopedVector<autofill::PasswordForm> best_matches) {
   scoped_ptr<password_manager::PasswordFormManager> test_form_manager(
-      new password_manager::PasswordFormManager(&password_manager_, &client_,
-                                                driver_.AsWeakPtr(),
-                                                observed_form, true));
+      new password_manager::PasswordFormManager(
+          &password_manager_, &mock_client_, driver_.AsWeakPtr(), observed_form,
+          true));
   test_form_manager->SimulateFetchMatchingLoginsFromPasswordStore();
   test_form_manager->OnGetPasswordStoreResults(best_matches.Pass());
   return test_form_manager.Pass();
@@ -311,7 +338,7 @@ TEST_F(ManagePasswordsUIControllerTest, SlowNavigations) {
   controller()->OnPasswordSubmitted(test_form_manager.Pass());
   ExpectIconStateIs(password_manager::ui::PENDING_PASSWORD_STATE);
 
-  // Fake-navigate after a second. We expect the bubble's state to be reset
+  // Fake-navigate after 5 seconds. We expect the bubble's state to be reset
   // if a navigation occurs after this limit.
   controller()->SetElapsed(
       base::TimeDelta::FromMilliseconds(kSlowNavigationDelayInMS));
@@ -336,21 +363,6 @@ TEST_F(ManagePasswordsUIControllerTest, PasswordSubmittedToNonWebbyURL) {
   // it's being masked by the stub implementation of
   // ManagePasswordsUIControllerMock::PendingCredentials.
   EXPECT_EQ(GURL::EmptyGURL(), controller()->origin());
-
-  ExpectIconStateIs(password_manager::ui::INACTIVE_STATE);
-}
-
-TEST_F(ManagePasswordsUIControllerTest, BlacklistBlockedAutofill) {
-  scoped_ptr<autofill::PasswordForm> test_form(
-      new autofill::PasswordForm(test_local_form()));
-  test_form->blacklisted_by_user = true;
-  base::string16 kTestUsername = test_form->username_value;
-  autofill::PasswordFormMap map;
-  map.insert(kTestUsername, test_form.Pass());
-  controller()->OnBlacklistBlockedAutofill(map);
-
-  EXPECT_EQ(password_manager::ui::INACTIVE_STATE, controller()->state());
-  EXPECT_FALSE(controller()->PasswordPendingUserDecision());
 
   ExpectIconStateIs(password_manager::ui::INACTIVE_STATE);
 }
@@ -516,20 +528,6 @@ TEST_F(ManagePasswordsUIControllerTest, AutoSignin) {
   ExpectIconAndControllerStateIs(password_manager::ui::MANAGE_STATE);
 }
 
-TEST_F(ManagePasswordsUIControllerTest, AutoSigninClickThrough) {
-  ScopedVector<autofill::PasswordForm> local_credentials;
-  local_credentials.push_back(new autofill::PasswordForm(test_local_form()));
-  controller()->OnAutoSignin(local_credentials.Pass());
-  EXPECT_EQ(password_manager::ui::AUTO_SIGNIN_STATE, controller()->state());
-  EXPECT_EQ(test_local_form().origin, controller()->origin());
-  ASSERT_FALSE(controller()->GetCurrentForms().empty());
-  EXPECT_EQ(test_local_form(), *controller()->GetCurrentForms()[0]);
-  ExpectIconStateIs(password_manager::ui::AUTO_SIGNIN_STATE);
-
-  controller()->ManageAccounts();
-  ExpectIconAndControllerStateIs(password_manager::ui::MANAGE_STATE);
-}
-
 TEST_F(ManagePasswordsUIControllerTest, AutofillDuringAutoSignin) {
   ScopedVector<autofill::PasswordForm> local_credentials;
   local_credentials.push_back(new autofill::PasswordForm(test_local_form()));
@@ -578,4 +576,21 @@ TEST_F(ManagePasswordsUIControllerTest, PasswordUpdated) {
   ExpectIconStateIs(password_manager::ui::PENDING_PASSWORD_UPDATE_STATE);
   controller()->UpdatePassword(autofill::PasswordForm());
   ExpectIconStateIs(password_manager::ui::MANAGE_STATE);
+}
+
+TEST_F(ManagePasswordsUIControllerTest, NavigationWhenUpdateBubbleActive) {
+  scoped_ptr<password_manager::PasswordFormManager> test_form_manager(
+      CreateFormManager());
+  controller()->OnUpdatePasswordSubmitted(test_form_manager.Pass());
+  EXPECT_EQ(password_manager::ui::PENDING_PASSWORD_UPDATE_STATE,
+            controller()->state());
+  // Fake-navigate after 5 seconds. We expect the bubble's state to be reset
+  // if a navigation occurs after this limit.
+  controller()->SetElapsed(
+      base::TimeDelta::FromMilliseconds(kSlowNavigationDelayInMS));
+  controller()->DidNavigateMainFrame(content::LoadCommittedDetails(),
+                                     content::FrameNavigateParams());
+  EXPECT_EQ(password_manager::ui::INACTIVE_STATE, controller()->state());
+  // The following line shouldn't crash browser.
+  controller()->OnNoInteractionOnUpdate();
 }

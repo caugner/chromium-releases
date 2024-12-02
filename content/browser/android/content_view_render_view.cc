@@ -96,9 +96,9 @@ void ContentViewRenderView::SetNeedsComposite(JNIEnv* env, jobject obj) {
     compositor_->SetNeedsComposite();
 }
 
-void ContentViewRenderView::Layout() {
-  JNIEnv* env = base::android::AttachCurrentThread();
-  Java_ContentViewRenderView_onCompositorLayout(env, java_obj_.obj());
+void ContentViewRenderView::UpdateLayerTreeHost() {
+  // TODO(wkorman): Rename Layout to UpdateLayerTreeHost in all Android
+  // Compositor related classes.
 }
 
 void ContentViewRenderView::OnSwapBuffersCompleted(int pending_swap_buffers) {

@@ -6,6 +6,7 @@ import("//build/config/chrome_build.gni")
 import("//build/config/crypto.gni")
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
+import("//media/media_options.gni")
 import("//third_party/protobuf/proto_library.gni")
 
 # //build/config/android/rules.gni imports //tools/grit/grit_rule.gni, which
@@ -93,15 +94,17 @@ source_set("browser") {
     "//chrome:extra_resources",
     "//chrome:resources",
     "//chrome:strings",
-    "//chrome/app:generated_resources_map",
     "//chrome/app/resources:platform_locale_settings",
     "//chrome/app/theme:theme_resources",
+    "//chrome/browser/metrics/variations:chrome_ui_string_overrider_factory",
     "//chrome/browser/net:probe_message_proto",
     "//chrome/browser/ui",
     "//chrome/common",
     "//components/autofill/core/browser",
     "//components/bookmarks/browser",
     "//components/bookmarks/managed",
+    "//components/browser_sync/browser",
+    "//components/browser_sync/common",
     "//components/captive_portal",
     "//components/certificate_reporting",
     "//components/cloud_devices/common",
@@ -110,8 +113,10 @@ source_set("browser") {
     "//components/content_settings/content/common",
     "//components/content_settings/core/browser",
     "//components/content_settings/core/common",
+    "//components/cookie_config",
     "//components/crx_file",
     "//components/data_reduction_proxy/core/browser",
+    "//components/data_usage/core",
     "//components/data_use_measurement/core",
     "//components/device_event_log",
     "//components/domain_reliability",
@@ -131,7 +136,10 @@ source_set("browser") {
     "//components/metrics:gpu",
     "//components/metrics:net",
     "//components/metrics:profiler",
+    "//components/metrics:profiler_content",
     "//components/metrics/proto:proto",
+    "//components/metrics:ui",
+    "//components/metrics_services_manager",
     "//components/mime_util",
     "//components/navigation_metrics",
     "//components/network_time",
@@ -152,10 +160,12 @@ source_set("browser") {
     "//components/security_interstitials/core",
     "//components/signin/core/browser",
     "//components/ssl_errors",
-    "//components/startup_metric_utils",
+    "//components/startup_metric_utils/browser",
     "//components/strings",
     "//components/suggestions",
+    "//components/sync_bookmarks",
     "//components/sync_driver",
+    "//components/sync_sessions",
     "//components/tracing:startup_tracing",
     "//components/translate/core/browser",
     "//components/translate/core/common",
@@ -197,6 +207,7 @@ source_set("browser") {
     "//ui/strings",
     "//ui/resources",
   ]
+  data_deps = []
 
   sources +=
       rebase_path(gypi_values.chrome_browser_undo_sources, ".", "//chrome")
@@ -214,6 +225,9 @@ source_set("browser") {
                            ".",
                            "//chrome")
     sources += rebase_path(gypi_values.chrome_browser_content_settings_sources,
+                           ".",
+                           "//chrome")
+    sources += rebase_path(gypi_values.chrome_browser_data_usage_sources,
                            ".",
                            "//chrome")
     sources += rebase_path(gypi_values.chrome_browser_engagement_sources,
@@ -264,9 +278,9 @@ source_set("browser") {
     deps += [
       "//apps",
       "//cc",
-      "//chrome/app:generated_resources_map",
       "//chrome/app/theme:theme_resources",
       "//chrome/browser/devtools",
+      "//chrome/browser/metrics/variations:chrome_ui_string_overrider_factory",
       "//chrome/browser/resources:component_extension_resources",
       "//chrome/common/net",
       "//chrome/installer/util",
@@ -288,10 +302,13 @@ source_set("browser") {
       "//components/network_hints/common",
       "//components/password_manager/content/browser",
       "//components/password_manager/sync/browser",
-      "//components/plugins/common",
+      "//components/profile_metrics",
       "//components/proxy_config",
+      "//components/resources",
+      "//components/safe_browsing_db",
       "//components/safe_json",
       "//components/sessions",
+      "//components/ssl_config",
       "//components/storage_monitor",
       "//components/syncable_prefs",
       "//components/translate/content/browser",
@@ -302,11 +319,14 @@ source_set("browser") {
       "//components/web_cache/browser",
       "//components/web_modal",
       "//content/app/resources",
+      "//device/devices_app/usb/public/interfaces",
       "//media",
       "//media/midi",
       "//mojo/application/public/cpp",
       "//mojo/common",
       "//mojo/environment:chromium",
+      "//mojo/public/cpp/bindings",
+      "//mojo/public/js",
       "//net:extras",
       "//net:net_with_v8",
       "//storage/browser",
@@ -317,8 +337,6 @@ source_set("browser") {
       "//third_party/libaddressinput",
       "//third_party/libyuv",
       "//third_party/mojo/src/mojo/edk/system",
-      "//third_party/mojo/src/mojo/public/cpp/bindings",
-      "//third_party/mojo/src/mojo/public/js",
       "//third_party/re2",
       "//third_party/smhasher:cityhash",
       "//third_party/webrtc/modules/desktop_capture",
@@ -374,8 +392,8 @@ source_set("browser") {
     sources +=
         rebase_path(gypi_values.chrome_browser_mac_sources, ".", "//chrome")
     deps += [
-      #"app_shim"  TODO(GYP) bug 512600
-      #"browser_app_shim"  TODO(GYP) bug 512600
+      "//chrome/app_shim",
+      "//chrome/browser/apps/app_shim",
     ]
   }
   if (is_mac || is_android) {
@@ -486,7 +504,7 @@ source_set("browser") {
     deps += [
       "//chrome/browser/safe_browsing:chunk_proto",
       "//chrome/browser/safe_browsing:metadata_proto",
-      "//chrome/browser/safe_browsing:report_proto",
+      "//chrome/common/safe_browsing:proto",
     ]
     if (safe_browsing_mode == 1) {
       sources +=
@@ -497,11 +515,11 @@ source_set("browser") {
       if (is_win) {
         deps += [ "//chrome/browser/safe_browsing/incident_reporting:state_store_data_proto" ]
       }
-    } else if (safe_browsing_mode == 3) {
-      sources += rebase_path(
-              gypi_values.chrome_browser_safe_browsing_mobile_extended_sources,
-              ".",
-              "//chrome")
+    } else if (safe_browsing_mode == 2) {
+      sources +=
+          rebase_path(gypi_values.chrome_browser_safe_browsing_mobile_sources,
+                      ".",
+                      "//chrome")
     }
   }
 
@@ -528,17 +546,10 @@ source_set("browser") {
     deps += [ "//chrome/browser/chromeos" ]
   }
 
-  if (is_ios) {
-    sources -= [
-      "metrics/signin_status_metrics_provider_base.cc",
-      "metrics/signin_status_metrics_provider_base.h",
-    ]
-  }
-
   if (is_chromeos || is_ios) {
     sources -= [
-      "metrics/signin_status_metrics_provider.cc",
-      "metrics/signin_status_metrics_provider.h",
+      "signin/chrome_signin_status_metrics_provider_delegate.cc",
+      "signin/chrome_signin_status_metrics_provider_delegate.h",
     ]
   }
 
@@ -560,11 +571,27 @@ source_set("browser") {
   if (use_aura) {
     sources +=
         rebase_path(gypi_values.chrome_browser_aura_sources, ".", "//chrome")
+
+    # These files are only built in a GN build because they bring in
+    # dependencies that don't build with GYP.
+    sources += [
+      "mojo_runner_state.cc",
+      "mojo_runner_state.h",
+      "ui/views/frame/browser_frame_mus.cc",
+      "ui/views/frame/browser_frame_mus.h",
+    ]
     deps += [
+      "//components/mus/public/interfaces",
+      "//mojo/runner/child:lib",
+      "//mojo/converters/network",
       "//ui/aura",
       "//ui/compositor",
       "//ui/keyboard",
+      "//ui/keyboard:keyboard_with_content",
+      "//ui/views/mus",
     ]
+    defines += [ "MOJO_RUNNER_CLIENT" ]
+    data_deps += [ "//components/mus/example/wm:example_wm" ]
   }
   if (ui_compositor_image_transport) {
     deps += [ "//ui/gl" ]
@@ -682,7 +709,7 @@ source_set("browser") {
     ]
   }
 
-  if (!is_official_build) {
+  if (!is_chrome_branded) {
     sources += [
       "search/local_files_ntp_source.cc",
       "search/local_files_ntp_source.h",
@@ -700,6 +727,7 @@ source_set("browser") {
       ":delta_file_proto",
       ":jni_headers",
       "//components/cdm/browser",
+      "//components/data_usage/android",
       "//components/enhanced_bookmarks",
       "//components/precache/content",
       "//components/precache/core",
@@ -762,7 +790,7 @@ source_set("browser") {
     ]
     deps += [
       ":chrome_process_finder",
-      "//chrome:version_header",
+      "//chrome/common:version_header",
       "//chrome/installer/util:strings",
       "//chrome_elf",
       "//chrome_elf:constants",
@@ -864,22 +892,16 @@ source_set("browser") {
       "autofill/validation_rules_storage_factory.h",
     ]
   }
-  if (enable_wifi_bootstrapping) {
-    sources +=
-        rebase_path(gypi_values.chrome_browser_wifi_bootstrapping_sources,
-                    ".",
-                    "//chrome")
-    if (is_win || is_mac) {
-      # TODO(brettw) as of this writing wifi bootstrapping is set on Windows
-      # and Mac, so this test is meaningless. Can we merge these lists?
-      sources += rebase_path(
-              gypi_values.chrome_browser_wifi_bootstrapping_win_mac_sources,
-              ".",
-              "//chrome")
-    }
-  }
   if (enable_media_router) {
     deps += [ "//chrome/browser/media/router" ]
+  }
+
+  if (enable_mojo_media != "none") {
+    configs += [ "//media/mojo/services:enable_mojo_media_config" ]
+  }
+
+  if (enable_mojo_media == "utility") {
+    deps += [ "//media/mojo/services:application" ]
   }
 }
 
@@ -1014,12 +1036,6 @@ source_set("test_support") {
     "net/url_request_mock_util.h",
     "notifications/notification_test_util.cc",
     "notifications/notification_test_util.h",
-    "password_manager/mock_password_store_service.cc",
-    "password_manager/mock_password_store_service.h",
-    "password_manager/password_manager_test_base.cc",
-    "password_manager/password_manager_test_base.h",
-    "password_manager/test_password_store_service.cc",
-    "password_manager/test_password_store_service.h",
     "profile_resetter/profile_resetter_test_base.cc",
     "profile_resetter/profile_resetter_test_base.h",
     "search_engines/template_url_service_factory_test_util.cc",
@@ -1040,12 +1056,10 @@ source_set("test_support") {
     "signin/fake_signin_manager_builder.h",
     "ssl/ssl_client_auth_requestor_mock.cc",
     "ssl/ssl_client_auth_requestor_mock.h",
-    "sync/profile_sync_components_factory_mock.cc",
-    "sync/profile_sync_components_factory_mock.h",
     "sync/profile_sync_service_mock.cc",
     "sync/profile_sync_service_mock.h",
-    "ui/webui/signin/login_ui_test_utils.cc",
-    "ui/webui/signin/login_ui_test_utils.h",
+    "sync/profile_sync_test_util.cc",
+    "sync/profile_sync_test_util.h",
   ]
 
   configs += [ "//build/config:precompiled_headers" ]
@@ -1083,12 +1097,14 @@ source_set("test_support") {
 
   if (is_android) {
     sources -= [
-      "password_manager/password_manager_test_base.cc",
-      "password_manager/password_manager_test_base.h",
+      "download/test_download_shelf.cc",
+      "download/test_download_shelf.h",
+      "profile_resetter/profile_resetter_test_base.cc",
+      "profile_resetter/profile_resetter_test_base.h",
+      "sessions/session_restore_test_helper.cc",
+      "sessions/session_restore_test_helper.h",
       "sessions/session_service_test_helper.cc",
       "sessions/session_service_test_helper.h",
-      "ui/webui/signin/login_ui_test_utils.cc",
-      "ui/webui/signin/login_ui_test_utils.h",
     ]
   }
 
@@ -1177,8 +1193,6 @@ source_set("test_support") {
     sources += [
       "extensions/api/messaging/native_messaging_test_util.cc",
       "extensions/api/messaging/native_messaging_test_util.h",
-      "extensions/extension_notification_observer.cc",
-      "extensions/extension_notification_observer.h",
       "extensions/mock_extension_special_storage_policy.cc",
       "extensions/mock_extension_special_storage_policy.h",
       "extensions/test_blacklist.cc",
@@ -1219,13 +1233,30 @@ source_set("test_support") {
       "ui/app_list/test/test_app_list_controller_delegate.h",
     ]
   }
+}
 
-  if (enable_wifi_bootstrapping) {
-    sources += [
-      "local_discovery/wifi/mock_wifi_manager.cc",
-      "local_discovery/wifi/mock_wifi_manager.h",
-    ]
-  }
+# In GYP this is part of test_support_ui.
+source_set("test_support_ui") {
+  testonly = true
+
+  # Always include this via the main test support UI target.
+  visibility = [ "//chrome/test:test_support_ui" ]
+
+  sources = [
+    "password_manager/password_manager_test_base.cc",
+    "password_manager/password_manager_test_base.h",
+    "ui/webui/signin/login_ui_test_utils.cc",
+    "ui/webui/signin/login_ui_test_utils.h",
+  ]
+
+  configs += [ "//build/config:precompiled_headers" ]
+
+  deps = [
+    "//components/metrics:test_support",
+    "//components/password_manager/core/browser:test_support",
+    "//skia",
+    "//testing/gtest",
+  ]
 }
 
 if (enable_rlz_support) {

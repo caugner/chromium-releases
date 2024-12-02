@@ -67,7 +67,7 @@ public class LoFiBarPopupController implements SnackbarManager.SnackbarControlle
     @Override
     public void onAction(Object actionData) {
         mSnackbarManager.dismissSnackbars(this);
-        mTab.reloadIgnoringCache();
+        mTab.reloadDisableLoFi();
         DataReductionProxySettings.getInstance().incrementLoFiUserRequestsForImages();
         DataReductionProxyUma.dataReductionProxyLoFiUIAction(
                 DataReductionProxyUma.ACTION_LOAD_IMAGES_SNACKBAR_CLICKED);

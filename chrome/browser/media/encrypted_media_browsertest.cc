@@ -13,6 +13,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gtest/include/gtest/gtest-spi.h"
 #if defined(OS_ANDROID)
@@ -556,9 +557,6 @@ INSTANTIATE_TEST_CASE_P(SRC_ExternalClearKey,
                                 Values(SRC),
                                 Values(UNPREFIXED)));
 
-const char kExternalClearKeyDecryptOnlyKeySystem[] =
-    "org.chromium.externalclearkey.decryptonly";
-
 INSTANTIATE_TEST_CASE_P(MSE_ExternalClearKey_Prefixed,
                         EncryptedMediaTest,
                         Combine(Values(kExternalClearKeyKeySystem),
@@ -569,6 +567,10 @@ INSTANTIATE_TEST_CASE_P(MSE_ExternalClearKey,
                         Combine(Values(kExternalClearKeyKeySystem),
                                 Values(MSE),
                                 Values(UNPREFIXED)));
+
+const char kExternalClearKeyDecryptOnlyKeySystem[] =
+    "org.chromium.externalclearkey.decryptonly";
+
 // To reduce test time, only run ExternalClearKeyDecryptOnly with MSE.
 INSTANTIATE_TEST_CASE_P(MSE_ExternalClearKeyDecryptOnly_Prefixed,
                         EncryptedMediaTest,
@@ -599,11 +601,13 @@ INSTANTIATE_TEST_CASE_P(MSE_Widevine_Prefixed,
                                 Values(PREFIXED)));
 #endif  // !(defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD))
 
+#if !defined(OS_CHROMEOS)
 INSTANTIATE_TEST_CASE_P(MSE_Widevine,
                         EncryptedMediaTest,
                         Combine(Values(kWidevineKeySystem),
                                 Values(MSE),
                                 Values(UNPREFIXED)));
+#endif  // !defined(OS_CHROMEOS)
 #endif  // defined(WIDEVINE_CDM_AVAILABLE)
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_AudioOnly_WebM) {

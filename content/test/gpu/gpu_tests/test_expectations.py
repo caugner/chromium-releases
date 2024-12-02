@@ -19,12 +19,15 @@ import urlparse
 #   self.Fail('gl-enable-vertex-attrib.html',
 #       ['mac', 'release'], bug=123)
 
-OS_CONDITIONS = ['win', 'xp', 'vista', 'win7', 'win8', 'win10',
-                 'mac', 'leopard', 'snowleopard', 'lion', 'mountainlion',
-                 'mavericks', 'yosemite', 'linux', 'chromeos', 'android']
+WIN_CONDITIONS = ['xp', 'vista', 'win7', 'win8', 'win10']
+MAC_CONDITIONS = ['leopard', 'snowleopard', 'lion', 'mountainlion',
+                 'mavericks', 'yosemite']
+
+OS_CONDITIONS = ['win', 'mac', 'linux', 'chromeos', 'android'] + \
+                WIN_CONDITIONS + MAC_CONDITIONS
 
 BROWSER_TYPE_CONDITIONS = [
-    'android-webview-shell', 'android-content-shell', 'debug', 'release' ]
+    'android-webview-shell', 'android-content-shell', 'debug', 'release']
 
 class Expectation(object):
   """Represents a single test expectation for a page.
@@ -139,9 +142,11 @@ class TestExpectations(object):
     self._skip_matching_names = True
     for e in self._expectations:
       if self.ExpectationAppliesToPage(e, browser, page):
-        if (self._HasWildcardCharacters(e.pattern)):
+        if self._HasWildcardCharacters(e.pattern):
           self._expectations_with_wildcards.append(e)
         else:
+          if e.pattern in self._expectations_by_pattern:
+            print "WARNING: Non-wildcard pattern collision for", e.pattern
           self._expectations_by_pattern[e.pattern] = e
     self._built_expectation_cache = True
     self._skip_matching_names = False
@@ -163,8 +168,13 @@ class TestExpectations(object):
       url_path = components[2]
     # Chop any leading slash since the expectations used by this class
     # assume that.
-    if (url_path and url_path[0] == '/'):
+    if url_path and url_path[0] == '/':
       url_path = url_path[1:]
+    # Python's urlsplit doesn't seem to handle query arguments for
+    # file:// URLs properly. Split them off manually.
+    query_index = url_path.find('?')
+    if query_index > 0:
+      url_path = url_path[0:query_index]
     return url_path
 
   def _GetExpectationObjectForPage(self, browser, page):
@@ -192,6 +202,11 @@ class TestExpectations(object):
       if self.ExpectationAppliesToPage(e, browser, page):
         return e
     return None
+
+  def GetAllNonWildcardExpectations(self):
+    return [e for e in self._expectations
+              if not self._HasWildcardCharacters(e.pattern)]
+
 
   def GetExpectationForPage(self, browser, page):
     '''Fetches the expectation that applies to the given page.

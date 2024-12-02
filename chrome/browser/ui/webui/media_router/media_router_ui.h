@@ -13,6 +13,7 @@
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/media/router/issue.h"
 #include "chrome/browser/media/router/media_source.h"
 #include "chrome/browser/media/router/presentation_service_delegate_impl.h"
@@ -26,6 +27,10 @@ namespace content {
 class WebContents;
 }  // namespace content
 
+namespace extensions {
+class ExtensionRegistry;
+}  // namespace extensions
+
 namespace media_router {
 
 class IssuesObserver;
@@ -37,13 +42,13 @@ class MediaRouterWebUIMessageHandler;
 class MediaRoutesObserver;
 class MediaSink;
 class MediaSinksObserver;
-class CreatePresentationSessionRequest;
+class CreatePresentationConnectionRequest;
 
 // Implements the chrome://media-router user interface.
-class MediaRouterUI
-    : public ConstrainedWebDialogUI,
-      public QueryResultManager::Observer,
-      public PresentationServiceDelegateImpl::DefaultMediaSourceObserver {
+class MediaRouterUI : public ConstrainedWebDialogUI,
+                      public QueryResultManager::Observer,
+                      public PresentationServiceDelegateImpl::
+                          DefaultPresentationRequestObserver {
  public:
   // |web_ui| owns this object and is used to initialize the base class.
   explicit MediaRouterUI(content::WebUI* web_ui);
@@ -78,7 +83,7 @@ class MediaRouterUI
   void InitWithPresentationSessionRequest(
       content::WebContents* initiator,
       const base::WeakPtr<PresentationServiceDelegateImpl>& delegate,
-      scoped_ptr<CreatePresentationSessionRequest> presentation_request);
+      scoped_ptr<CreatePresentationConnectionRequest> presentation_request);
 
   // Closes the media router UI.
   void Close();
@@ -86,20 +91,12 @@ class MediaRouterUI
   // Notifies this instance that the UI has been initialized.
   void UIInitialized();
 
-  // Requests a route be created from the source determined by the preferred
-  // MediaCastMode, to the sink given by |sink_id|.
-  // The preferred cast mode is determined from the set of currently supported
-  // cast modes in |cast_modes_|.
-  // Returns false if unable to request the route.
+  // Requests a route be created from the source mapped to
+  // |cast_mode|, to the sink given by |sink_id|.
+  // Returns true if a route request is successfully submitted.
   // |OnRouteResponseReceived()| will be invoked when the route request
   // completes.
-  bool CreateRoute(const MediaSink::Id& sink_id);
-
-  // Requests a route be created from the source mapped to
-  // |cast_mode_override|, to the sink given by |sink_id|.
-  // Returns true if a route request is successfully submitted.
-  bool CreateRouteWithCastModeOverride(const MediaSink::Id& sink_id,
-                                       MediaCastMode cast_mode_override);
+  bool CreateRoute(const MediaSink::Id& sink_id, MediaCastMode cast_mode);
 
   // Calls MediaRouter to close the given route.
   void CloseRoute(const MediaRoute::Id& route_id);
@@ -110,19 +107,12 @@ class MediaRouterUI
   // Calls MediaRouter to clear the given issue.
   void ClearIssue(const Issue::Id& issue_id);
 
-  // Returns the header text that should be displayed in the UI when it is
-  // initially loaded. The header text is determined by the preferred cast mode.
-  std::string GetInitialHeaderText() const;
-
-  // Returns the tooltip text for the header that should be displayed
-  // in the UI when it is initially loaded. At present, this text is
-  // just the full hostname of the current site.
-  std::string GetInitialHeaderTextTooltip() const;
-
   // Returns the hostname of the default source's parent frame URL.
-  std::string GetFrameURLHost() const;
-  bool has_pending_route_request() const { return has_pending_route_request_; }
-  const GURL& frame_url() const { return frame_url_; }
+  std::string GetPresentationRequestSourceName() const;
+  std::string GetTruncatedPresentationRequestSourceName() const;
+  bool HasPendingRouteRequest() const {
+    return current_route_request_id_ != -1;
+  }
   const std::vector<MediaSinkWithCastModes>& sinks() const { return sinks_; }
   const std::vector<MediaRoute>& routes() const { return routes_; }
   const std::set<MediaCastMode>& cast_modes() const { return cast_modes_; }
@@ -134,6 +124,11 @@ class MediaRouterUI
  private:
   FRIEND_TEST_ALL_PREFIXES(MediaRouterUITest,
                            UIMediaRoutesObserverFiltersNonDisplayRoutes);
+  FRIEND_TEST_ALL_PREFIXES(MediaRouterUITest, GetExtensionNameExtensionPresent);
+  FRIEND_TEST_ALL_PREFIXES(MediaRouterUITest,
+                           GetExtensionNameEmptyWhenNotInstalled);
+  FRIEND_TEST_ALL_PREFIXES(MediaRouterUITest,
+                           GetExtensionNameEmptyWhenNotExtensionURL);
 
   class UIIssuesObserver;
   class UIMediaRoutesObserver : public MediaRoutesObserver {
@@ -154,6 +149,9 @@ class MediaRouterUI
     DISALLOW_COPY_AND_ASSIGN(UIMediaRoutesObserver);
   };
 
+  static std::string GetExtensionName(const GURL& url,
+                                      extensions::ExtensionRegistry* registry);
+
   // QueryResultManager::Observer
   void OnResultsUpdated(
       const std::vector<MediaSinkWithCastModes>& sinks) override;
@@ -168,27 +166,30 @@ class MediaRouterUI
 
   // Callback passed to MediaRouter to receive response to route creation
   // requests.
-  void OnRouteResponseReceived(const MediaSink::Id& sink_id,
+  void OnRouteResponseReceived(const int route_request_id,
+                               const MediaSink::Id& sink_id,
                                const MediaRoute* route,
                                const std::string& presentation_id,
                                const std::string& error);
 
-  bool DoCreateRoute(const MediaSink::Id& sink_id, MediaCastMode cast_mode);
+  // Creates and sends an issue if route creation times out.
+  void RouteCreationTimeout();
 
-  // Sets the source host name to be displayed in the UI.
-  // Gets cast modes from |query_result_manager_| and forwards it to UI.
-  // One of the Init* functions must have been called before.
-  void UpdateSourceHostAndCastModes(const GURL& frame_url);
+  // Initializes the dialog with mirroring sources derived from |initiator|.
+  void InitCommon(content::WebContents* initiator);
 
-  // Initializes the dialog with mirroring sources derived from |initiator|,
-  // and optional |default_source| and |default_frame_url| if any.
-  void InitCommon(content::WebContents* initiator,
-                  const MediaSource& default_source,
-                  const GURL& default_frame_url);
+  // PresentationServiceDelegateImpl::DefaultPresentationObserver
+  void OnDefaultPresentationChanged(
+      const PresentationRequest& presentation_request) override;
+  void OnDefaultPresentationRemoved() override;
 
-  // PresentationServiceDelegateImpl::DefaultMediaSourceObserver
-  void OnDefaultMediaSourceChanged(const MediaSource& source,
-                                   const GURL& frame_url) override;
+  // Updates the set of supported cast modes and sends the updated set to
+  // |handler_|.
+  void UpdateCastModes();
+
+  // Returns the default presentation request's frame URL if there is one.
+  // Otherwise returns an empty GURL.
+  GURL GetFrameURL() const;
 
   // Owned by the |web_ui| passed in the ctor, and guaranteed to be deleted
   // only after it has deleted |this|.
@@ -202,21 +203,28 @@ class MediaRouterUI
   // Set to true by |handler_| when the UI has been initialized.
   bool ui_initialized_;
 
-  // Set to |true| if there is a pending route request for this UI.
-  bool has_pending_route_request_;
-
   bool requesting_route_for_default_source_;
+
+  // Set to -1 if not tracking a pending route request.
+  int current_route_request_id_;
+
+  // Sequential counter for route requests. Used to update
+  // |current_route_request_id_| when there is a new route request.
+  int route_request_counter_;
 
   std::vector<MediaSinkWithCastModes> sinks_;
   std::vector<MediaRoute> routes_;
   CastModeSet cast_modes_;
-  GURL frame_url_;
 
   scoped_ptr<QueryResultManager> query_result_manager_;
 
   // If set, then the result of the next presentation route request will
   // be handled by this object.
-  scoped_ptr<CreatePresentationSessionRequest> presentation_request_;
+  scoped_ptr<CreatePresentationConnectionRequest> create_session_request_;
+
+  // Set to the presentation request corresponding to the presentation cast
+  // mode, if supported. Otherwise set to nullptr.
+  scoped_ptr<PresentationRequest> presentation_request_;
 
   // It's possible for PresentationServiceDelegateImpl to be destroyed before
   // this class.
@@ -231,6 +239,9 @@ class MediaRouterUI
 
   // Pointer to the MediaRouter for this instance's BrowserContext.
   MediaRouterMojoImpl* router_;
+
+  // Timer used to implement a timeout on a create route request.
+  base::OneShotTimer route_creation_timer_;
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
   // Therefore |weak_factory_| must be placed at the end.

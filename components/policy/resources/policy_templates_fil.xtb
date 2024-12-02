@@ -64,11 +64,9 @@
 
           Kinikilala lamang ang patakarang ito kung pinagana ang patakaran ng 'DefaultSearchProviderEnabled.'</translation>
 <translation id="1265053460044691532">Limitahan ang oras na maaaring mag-log in offline ang isang user na na-authenticate gamit ang SAML</translation>
-<translation id="1283072268083088623">Tinutukoy kung aling mga scheme ng Pagpapatotoo ng HTTP ang sinusuportahan ng <ph name="PRODUCT_NAME" />.
+<translation id="1291880496936992484">Babala: Tuluyan nang maalis ang RC4 sa <ph name="PRODUCT_NAME" /> pagkatapos ng bersyon 52 (tinatayang lalabas sa Setyembre 2016) at hindi na gagana ang patakarang ito.
 
-          Ang mga posibleng halaga ay 'basic,' 'digest,' 'ntlm' at 'negotiate.' Ihiwalay ang maramihang halaga gamit ang mga kuwit.
-
-          Kung hinayaang hindi nakatakda ang patakarang ito, gagamitin ang lahat ng apat na scheme.</translation>
+      Kung hindi itatakda ang patakaran, o kung itatakda ito sa false, hindi mae-enable ang mga RC4 na cipher suite sa TLS. Maaari itong itakda sa true upang manatili itong compatible sa isang lumang server. Isa lang itong pansamantalang solusyon at dapat pa ring i-configure ang server.</translation>
 <translation id="1297182715641689552">Gumamit ng .pac proxy script</translation>
 <translation id="1300635491585192248">Hulaan ang mga pagkilos sa network sa anumang network na hindi
           cellular</translation>
@@ -106,6 +104,7 @@
 <translation id="1426410128494586442">Oo</translation>
 <translation id="1427655258943162134">Address o URL ng mga proxy server</translation>
 <translation id="1435659902881071157">Configuration ng network sa antas ng device</translation>
+<translation id="1445397020763995734">Uri ng account para sa pagpapatotoo na HTTP Negotiate</translation>
 <translation id="1454846751303307294">Binibigyang-daan kang magtakda ng isang listahan ng mga pattern ng url na tumutukoy ng mga site na hindi pinapayagang magpatakbo ng JavaScript.
 
           Kung hinayaang hindi nakatakda ang patakarang ito gagamitin ang global na default na halaga para sa lahat ng site mula sa patakaran ng 'DefaultJavaScriptSetting' kung nakatakda ito, o kung hindi man ay sa personal na configuration ng user.</translation>
@@ -173,6 +172,15 @@
       Kung hindi nakatakda ang patakarang ito, walang Mga Tuntunin ng Serbisyo na ipapakita.
 
       Dapat itakda ang patakaran sa isang URL kung saan maaaring i-download ng <ph name="PRODUCT_OS_NAME" /> ang Mga Tuntunin ng Serbisyo. Dapat ay plain text ang Mga Tuntunin ng Serbisyo, na ihahatid bilang MIME type text/plain. Hindi pinapayagan ang markup.</translation>
+<translation id="1757339646969878244">I-configure ang mga opsyon sa malayuang pag-access sa host ng Chrome Remote Desktop.
+
+      Ang host ng Chrome Remote Desktop ay isang native na serbisyong gumagana sa target na
+      machine kung saan makakakonekta ang isang user gamit ang Chrome Remote Desktop
+      application.  Naka-package ang native na serbisyo at isinasagawa nang hiwalay sa
+      <ph name="PRODUCT_NAME" /> browser.
+
+      Binabalewala ang mga patakarang ito maliban na lang kung
+      naka-install ang host ng Chrome Remote Desktop.</translation>
 <translation id="1757688868319862958">Pinapayagan ang <ph name="PRODUCT_NAME" /> na magpatakbo ng mga plugin na nangangailangan ng pahintulot. Kung pinagana mo ang setting na ito, palaging tatakbo ang mga plugin na hindi pa luma. Kung hindi pinagana o hindi itinakda ang setting na ito, hihingan ang mga user ng mga pahintulot na magpatakbo ng mga plugin na nangangailangan ng pahintulot. Ito ang mga plugin na maaaring magkompromiso sa seguridad.</translation>
 <translation id="1803646570632580723">Listahan ng mga na-pin na app na ipapakita sa launcher</translation>
 <translation id="1808715480127969042">I-block ang cookies sa mga site na ito</translation>
@@ -226,7 +234,6 @@
 
           Para sa higit pang mga pagpipilian at detalyadong halimbawa, bisitahin ang:
           <ph name="PROXY_HELP_URL" /></translation>
-<translation id="1948757837129151165">Mga Patakaran para sa Pagpapatotoo ng HTTP</translation>
 <translation id="1956493342242507974">Kino-configure ang pamamahala sa power sa screen sa pag-login sa <ph name="PRODUCT_OS_NAME" />.
 
       Nagbibigay-daan sa iyo ang patakarang ito na i-configure kung paano kikilos ang <ph name="PRODUCT_OS_NAME" /> kapag walang gawain ang user sa loob ng ilang sandali habang ipinapakita ang screen sa pag-login. Kumokontrol ang patakaran ng maraming setting. Para sa mga indibidwal na semantics at saklaw ng value ng mga ito, tingnan ang mga naaangkop na patakararan na kumokontrol sa pamamahala sa power sa loob ng isang session. Ang mga natatanging paglihis sa mga patakarang ito ay:
@@ -246,6 +253,11 @@
 <translation id="2006530844219044261">Pamamahala ng power</translation>
 <translation id="201557587962247231">Dalas ng pag-upload ng mga ulat ng status ng device</translation>
 <translation id="2030905906517501646">Default na keyword ng provider ng paghahanap</translation>
+<translation id="206623763829450685">Tinutukoy kung aling mga scheme ng pagpapatotoo ng HTTP ang sinusuportahan ng <ph name="PRODUCT_NAME" />.
+
+          Ang mga posibleng value ay 'basic,' 'digest,' 'ntlm' at 'negotiate.' Paghiwa-hiwalayin ang maraming value gamit ang mga kuwit.
+
+          Kung hindi itatakda ang patakarang ito, gagamitin ang lahat ng apat na scheme.</translation>
 <translation id="2067011586099792101">I-block ang access sa mga site na nasa labas ng mga pack ng nilalaman</translation>
 <translation id="2077129598763517140">Gamitin ang pagpapabilis ng hardware kapag available</translation>
 <translation id="2077273864382355561">Delay ng pag-off ng screen kapag tumatakbo gamit ang power ng baterya</translation>
@@ -460,7 +472,6 @@
 <translation id="2592091433672667839">Tagal ng kawalan ng aktibidad bago ipakita ang screen saver sa screen sa pag-sign-in sa mode ng retail</translation>
 <translation id="2623014935069176671">Maghintay sa paunang aktibidad ng user</translation>
 <translation id="262740370354162807">Paganahin ang pagsusumite ng mga dokumento sa <ph name="CLOUD_PRINT_NAME" /></translation>
-<translation id="2629448496147630947">I-configure ang mga pagpipilian sa malayuang pag-access sa <ph name="PRODUCT_NAME" />. Binabalewala ang mga tampok na ito maliban kung naka-install ang web application ng Malayuang Pag-access.</translation>
 <translation id="2633084400146331575">Paganahin ang pasalitang feedback</translation>
 <translation id="2646290749315461919">Binibigyang-daan kang itakda kung pinapayagan o hindi ang mga website na subaybayan ang pisikal na lokasyon ng mga user. Maaaring payagan bilang default, tanggihan bilang ang pagsubaybay sa pisikal na lokasyon ng mga user, o maaaring tanungin ang user sa bawat pagkakataong humiling ng pisikal na lokasyon ang isang website.
 
@@ -517,6 +528,9 @@
       Kung iyong i-enable o i-disable ang setting na ito, hindi maaaring baguhin o i-override ng mga user ang setting na "I-enable ang proteksyon sa phishing at malware" sa <ph name="PRODUCT_NAME" />.
 
       Kung iiwanang hindi nakatakda ang patakarang ito, ma-e-enable ito, ngunit mababago ito ng user.</translation>
+<translation id="2801230735743888564">Nagbibigay-daan sa mga user na makapaglaro ng dinosaur easter egg game kapag offline ang device.
+
+      Kung itatakda sa False ang patakarang ito, kapag naka-offline ang device, hindi makakapaglaro ng dinosaur easter egg game ang mga user. Kung itatakda naman sa True ang setting na ito, makakapaglaro ng dinosaur game ang mga user. Kung hindi itatakda ang patakarang ito, hindi makakapaglaro ng dinosaur easter egg game ang mga user na naka-enroll sa Chrome OS, ngunit sa ibang mga pagkakataon, maaari itong malaro ng mga user.</translation>
 <translation id="2805707493867224476">Payagang magpakita ng mga pop-up ang lahat ng site</translation>
 <translation id="2808013382476173118">Ini-enable ang paggamit ng mga STUN server kapag sinusubukan ng mga malayuang kliyente na magtatag ng koneksyon sa makinang ito.
 
@@ -587,6 +601,38 @@
       Kung ie-enable mo ang setting na ito, ipapakita sa isang hiwalay na window ang anumang mga page ng pagpapatotoo ng captive portal (ibig sabihin, lahat ng web page simula sa page ng pag-signin ng captive portal hanggang sa maka-detect ang <ph name="PRODUCT_NAME" /> ng matagumpay na koneksyon sa internet) nang binabalewala ang lahat ng setting at paghihigpit ng patakaran para sa kasalukuyang user.
 
       Kung idi-disable mo ang setting na ito o kung iiwanan mo itong hindi nakatakda, ipapakita ang anumang mga page ng pagpapatotoo ng captive portal sa isang (regular) bagong tab ng browser, gamit ang mga setting ng proxy ng kasalukuyang user.</translation>
+<translation id="3001569025430882724">Ino-override ang mga panuntunan sa pagpili ng default na printer ng <ph name="PRODUCT_NAME" />.
+
+      Tinutukoy ng patakarang ito ang mga panuntunan para sa pagpili ng default na printer sa <ph name="PRODUCT_NAME" /> na nangyayari sa unang pagkakataon na gamitin ang function na pag-print sa isang profile.
+
+      Kapag nakatakda ang patakarang ito, susubukan ng <ph name="PRODUCT_NAME" /> na maghanap ng printer na tumutugma sa lahat ng tinukoy na attribute, at pipiliin ito bilang default na printer. Pipiliin ang unang printer na makikitang tutugma sa patakaran, at kung sakaling hindi natatangi ang pagtutugma, maaaring pumili ng anumang tumutugmang printer, depende sa pagkakasunud-sunod ng pagkakatuklas sa mga printer.
+
+      Kung hindi itatakda ang patakarang ito o hindi makakakita ng tumutugmang printer bago mag-timeout, magiging default na printer ang built-in na PDF printer o walang pipiliing printer, kapag hindi available ang PDF printer.
+
+      Ipa-parse ang value bilang JSON object, na sumusunod sa schema na nasa ibaba:
+      {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "Whether to limit the search of the matching printer to a specific set of printers.",
+            "type": {
+              "enum": [ "local", "cloud" ]
+            }
+          },
+          "idPattern": {
+            "description": "Regular expression to match printer id.",
+            "type": "string"
+          },
+          "namePattern": {
+            "description": "Regular expression to match printer display name.",
+            "type": "string"
+          }
+        }
+      }
+
+      Ang mga printer na nakakonekta sa Google Cloud Print ay itinuturing na "cloud," at ang iba pang mga printer ay inuuri bilang "lokal."
+      Nangangahulugan ang paglalaktaw ng field na tumutugma ang lahat ng value, halimbawa, magpapasimula ang Preview ng Pag-print ng pagtuklas sa lahat ng uri ng mga printer, lokal at cloud, kapag hindi tumukoy ng connectivity.
+      Dapat sundin ng mga pattern ng karaniwang expression ang JavaScript RegExp syntax at case-sensitive ang mga pagtutugma.</translation>
 <translation id="3021409116652377124">Huwag paganahin ang tagahanap ng plugin</translation>
 <translation id="3030000825273123558">Paganahin ang pag-uulat ng mga sukatan</translation>
 <translation id="3034580675120919256">Binibigyang-daan kang itakda kung pinapayagan o hindi ang mga website na magpatakbo ng JavaScript. Maaaring payagan para sa lahat ng website o tanggihan para sa lahat ng website ang pagpapatakbo ng JavaScript.
@@ -601,6 +647,11 @@
 <translation id="3067188277482006117">Kung true, magagamit ng user ang hardware sa mga Chrome device upang malayuang patunayan ang pagkakakilanlan nito sa CA ng privacy sa pamamagitan ng Enterprise Platform Keys API chrome.enterprise.platformKeysPrivate.challengeUserKey().
 
           Kung nakatakda ito sa false, o kung hindi ito nakatakda, mabibigo ang mga pagtawag sa API nang may code ng error.</translation>
+<translation id="3069958900488014740">Pinapayagang i-off ang pag-optimize ng WPAD (Web Proxy Auto-Discovery) sa <ph name="PRODUCT_NAME" />.
+
+      Kung nakatakda sa false ang patakarang ito, madi-disable ang pag-optimize ng WPAD na magsasanhi sa <ph name="PRODUCT_NAME" /> na maghintay nang mas matagal para sa mga DNS-based na WPAD server.  Kung hindi nakatakda o naka-enable ang patakarang ito, ie-enable ang pag-optimize ng WPAD.
+
+      Nakatakda man o paano man itinakda ang patakarang ito, hindi mababago ng mga user ang setting ng pag-optimize ng WPAD.</translation>
 <translation id="3072045631333522102">Screen saver na gagamitin sa screen sa pag-sign-in sa mode ng retail</translation>
 <translation id="3072847235228302527">Itakda ang Mga Tuntunin ng Serbisyo para sa isang account na lokal sa device</translation>
 <translation id="3096595567015595053">Listahan ng mga pinaganang plugin</translation>
@@ -909,8 +960,6 @@
           Iginagalang lang ang patakarang ito kung naka-enable ang patakarang 'DefaultSearchProviderEnabled.'</translation>
 <translation id="4320376026953250541">Microsoft Windows XP SP2 o mas bago</translation>
 <translation id="4325690621216251241">Magdagdag ng button sa pag-logout sa tray ng system</translation>
-<translation id="4337944790873898250">Kung itatakda ang patakarang ito sa true, ima-maximize ng <ph name="PRODUCT_NAME" /> nang walang kundisyon ang unang window na ipapakita sa unang pagtakbo.
-      Kung itatakda ang patakarang ito sa false o kung hindi ito iko-configure, may heuristic na magpapasya kung ima-maximize ang unang window na ipapakita, batay sa laki ng screen.</translation>
 <translation id="4349746760316962317">Kino-configure ang direktoryong gagamitin ng <ph name="PRODUCT_NAME" /> para sa pag-iimbak ng mga naka-cache na file sa disk.
 
       Kung itatakda mo ang patakarang ito, gagamitin ng <ph name="PRODUCT_NAME" /> ang ibinigay na direktoryo, tinukoy man ng user ang '--disk-cache-dir' na flag o hindi.
@@ -1069,6 +1118,11 @@
 <translation id="4962195944157514011">Tinutukoy ang URL ng search engine na ginamit kapag nagsasagawa ng isang default na paghahanap. Dapat na maglaman ng string na '<ph name="SEARCH_TERM_MARKER" />' ang URL, na papalitan sa panahon ng query ng mga terminong hinahanap ng user.
 
           Dapat na itakda ang pagpipiliang ito kapag pinagana ang patakarang 'DefaultSearchProviderEnabled' at kikilalanin lamang kung ito ang sitwasyon.</translation>
+<translation id="4971529314808359013">Pinapayagan kang tukuyin ang isang listahan ng mga pattern ng url na tumutukoy sa mga site kung saan awtomatiko dapat na pumili ang <ph name="PRODUCT_NAME" /> ng client certificate, kung kailangan ng site ng isang certificate.
+
+          Ang value ay dapat na isang array ng stringified na mga diksyunaryong JSON. Ang bawat diksyunaryo ay dapat na mayroong anyong { "pattern": "$URL_PATTERN", "filter" : $FILTER }, kung saan ang $URL_PATTERN ay isang pattern ng setting ng content. Nililimitahan ng $FILTER kung aling mga client certificate ang awtomatikong pipiliin ng browser. Anuman ang filter, ang mga certificate na tumutugma sa kahilingan sa certificate ng server ang pipiliin. Kung ang $FILTER ay may anyong { "ISSUER": { "CN": "$ISSUER_CN" } }, mga client certificate na ibinigay ng isang certificate na may CommonName $ISSUER_CN lang ang pipiliin. Kung ang $FILTER ay ang walang lamang diksyunaryo na {}, hindi na nililimitahan ang pagpili ng mga client certificate.
+
+          Kung hindi nakatakda ang patakarang ito, walang gagawing awtomatikong pagpili para sa anumang site.</translation>
 <translation id="4980301635509504364">Pahintulutan o tanggihan ang pagkuha ng video.
 
       Kung naka-enable o hindi naka-configure (default), tatanungin ang user para sa
@@ -1110,6 +1164,7 @@
       Tingnan ang https://www.chromium.org/administrators/policy-list-3/user-data-directory-variables para sa isang listahan ng mga variable na magagamit.
 
       Kung hinayaang hindi nakatakda ang patakarang ito, gagamitin ang default na path ng profile at magagawa itong i-override ng user gamit ang '--user-data-dir' na command line flag.</translation>
+<translation id="5130288486815037971">Kung naka-enable ang mga RC4 na cipher suite sa TLS o hindi</translation>
 <translation id="5141670636904227950">Itakda ang default na uri ng magnifier ng screen na naka-enable sa screen sa pag-login</translation>
 <translation id="5142301680741828703">Palaging i-render ang mga sumusunod na pattern ng URL sa <ph name="PRODUCT_FRAME_NAME" /></translation>
 <translation id="5148753489738115745">Binibigyang-daan kang tukuyin ang mga karagdagang parameter na ginagamit kapag nilunsad ng <ph name="PRODUCT_FRAME_NAME" /> ang <ph name="PRODUCT_NAME" />.
@@ -1254,22 +1309,6 @@ lumagpas na sa partikular na haba ng panahon ang oras na hindi ito nagamit.
       Kung itatakda mo ang patakarang ito, hindi ito mababago o ma-o-override ng mga user.
 
       Kung hinayaan na hindi nakatakda ang patakaran, mapipili ng mga user kung dapat na awtomatikong itago ang shelf.</translation>
-<translation id="5573397331902180200">Itinatakda ang isa o higit pang inirerekumendang lokal para sa mga pampublikong session, na nagbibigay-daan sa mga user na madaling pumili ng isa sa mga lokal na ito.
-
-      Maaaring pumili ang user ng lokal at layout ng keyboard bago magsimula ng pampublikong session. Bilang default, nakalista nang nakaayos ayon sa alpabeto ang lahat ng lokal na sinusuportahan ng <ph name="PRODUCT_OS_NAME" />. Maaari mong gamitin ang patakarang ito upang maglipat ng isang hanay ng mga inirerekumendang lokal sa itaas ng listahan.
-
-      Kung hindi nakatakda ang patakarang ito, paunang pipiliin ang kasalukuyang lokal ng UI.
-
-      Kung nakatakda ang patakarang ito, ililipat ang mga inirerekumendang lokal sa itaas ng listahan at makikitang hiwalay mula sa iba pang mga lokal. Ililista ang mga inirerekumendang lokal sa pagkakasunud-sunod kung paano lumalabas ang mga ito sa patakaran. Paunang pipiliin ang unang inirerekumendang lokal.
-
-      Kung mayroong mahigit sa isang inirerekumendang lokal, ipinagpalagay na gugustuhin ng mga user na pumili sa mga lokal na ito. Prominenteng iaalok ang pagpili ng lokal at layout ng keyboard kapag magsisimula ng pampublikong session. Kung hindi, ipinagpalagay na gugustuhin ng karamihan ng mga user na gamitin ang paunang piniling lokal. Hindi gaanong prominenteng iaalok ang lokal at layout ng keyboard kapag nag-aalok ng pampublikong session.
-
-      Kapag nakatakda ang patakarang ito at naka-enable ang awtomatikong pag-login (tingnan ang mga patakarang |DeviceLocalAccountAutoLoginId| at |DeviceLocalAccountAutoLoginDelay|), gagamitin ng awtomatikong sinimulang pampublikong session ang unang inirerekumendang lokal at ang pinakasikat na layout ng keyboard na tumutugma sa lokal na ito.
-
-      Ang paunang piniling layout ng keyboard ang palaging magiging pinakasikat na layout na tumutugma sa paunang piniling lokal.
-
-      Maaari lang itakda ang patakaran na ito bilang inirerekumenda. Maaari mong gamitin ang patakarang ito upang maglipat ng hanay ng mga inirerekumendang locale sa itaas ngunit pinapayagan ang mga user na pumili kailanman ng anumang lokal na sinusuportahan ng <ph name="PRODUCT_OS_NAME" /> para sa kanilang session.
-      </translation>
 <translation id="557658534286111200">Pinapagana o hindi pinapagana ang pag-edit ng bookmark</translation>
 <translation id="5586942249556966598">Walang gawin</translation>
 <translation id="5630352020869108293">Ipanumbalik ang huling session</translation>
@@ -1293,11 +1332,17 @@ lumagpas na sa partikular na haba ng panahon ang oras na hindi ito nagamit.
 
       Kung hindi nakatakda ang patakarang ito, o kung nakatakda sa false, gagamitin ng <ph name="PRODUCT_NAME" /> ang umiiral nang mga setting ng online na pagsusuri sa pagbawi.</translation>
 <translation id="5732972008943405952">I-import ang data ng form ng autofill mula sa default na browser sa unang pagtakbo</translation>
+<translation id="5751004203256768694">Tinutukoy ang uri ng account ng mga account na ibinibigay ng app sa pagpapatotoo ng Android na sumusuporta sa pagpapatotoo na HTTP Negotiate (hal., pagpapatotoo sa Kerberos). Available dapat ang impormasyong ito mula sa supplier ng app sa pagpapatotoo. Para sa higit pang mga detalye, pumunta sa https://goo.gl/hajyfN.
+
+          Kung walang ibibigay na setting, madi-disable sa Android ang pagpapatotoo na HTTP Negotiate.</translation>
 <translation id="5761030451068906335">Kino-configure ang mga proxy setting para sa <ph name="PRODUCT_NAME" />. Hindi pa handang gamitin ang patakarang ito, mangyaring huwag itong gamitin.</translation>
 <translation id="5765780083710877561">Paglalarawan:</translation>
 <translation id="5770738360657678870">Dev channel (maaaring hindi stable)</translation>
 <translation id="5774856474228476867">URL sa paghahanap ng default na provider ng paghahanap</translation>
 <translation id="5776485039795852974">Magtanong sa tuwing gustong ipakita ng site ang mga notification sa desktop</translation>
+<translation id="5781412041848781654">Tinutukoy kung aling library ng GSSAPI ang gagamitin para sa pagpapatotoo ng HTTP. Maaari kang magtakda ng pangalan ng library lang, o ng buong path.
+
+          Kung walang setting na ibibigay, babalik ang <ph name="PRODUCT_NAME" /> sa paggamit ng default na pangalan ng library.</translation>
 <translation id="5781806558783210276">Tinutukoy ang tagal ng oras na walang input ng user na kapag lumipas ay gagawin ang pagkilos kapag idle kapag tumatakbo gamit ang power ng baterya.
 
           Kapag nakatakda ang patakarang ito, tinutukoy nito ang tagal ng oras na dapat manatiling idle ang user bago gawin ng <ph name="PRODUCT_OS_NAME" /> ang pagkilos kapag idle, na maaaring hiwalay na i-configure.
@@ -1420,6 +1465,7 @@ lumagpas na sa partikular na haba ng panahon ang oras na hindi ito nagamit.
           Ang inirerekomendang paraan ng pag-lock ng screen sa idle ay ang i-enable ang pagla-lock ng screen habang naka-suspend at hayaang mag-suspend ang <ph name="PRODUCT_OS_NAME" /> pagkatapos ang itinakdang oras ng pagiging idle. Dapat lang gamitin ang patakarang ito kapag magaganap ang pagla-lock ng screen sa loob ng mas maikling panahon kaysa sa suspend o kapag hindi mo gustong mangyari ang pag-suspend habang naka-idle.
 
           Dapat tukuyin ang value ng patakaran sa milliseconds. Itinatakda ang mga value upang maging mas maikli ang mga ito kaysa sa itinakdang oras ng pagiging idle.</translation>
+<translation id="6111936128861357925">Pahintulutan ang Dinosaur Easter Egg Game</translation>
 <translation id="6114416803310251055">hindi na ginagamit</translation>
 <translation id="6145799962557135888">Binibigyang-daan kang magtakda ng isang listahan ng mga pattern ng url na tumutukoy ng mga site na pinapayagang magpatakbo ng JavaScript.
 
@@ -1852,6 +1898,7 @@ lumagpas na sa partikular na haba ng panahon ang oras na hindi ito nagamit.
 <translation id="7443616896860707393">Mga prompt ng Cross-origin HTTP Basic Auth</translation>
 <translation id="7468416082528382842">Lokasyon ng registry ng window:</translation>
 <translation id="7469554574977894907">Paganahin ang mga suhestiyon sa paghahanap</translation>
+<translation id="7485481791539008776">Mga panuntunan sa pagpili ng default na printer</translation>
 <translation id="749556411189861380">Iulat ang bersyon ng OS at firmware ng mga naka-enroll na device.
 
       Kung hindi nakatakda ang setting na ito o nakatakda ang ito sa True, iuulat paminsan-minsan ng mga naka-enroll na device ang bersyon ng OS at firmware. Kung nakatakda ang setting na ito sa False, hindi iuulat ang impormasyon ng bersyon.</translation>
@@ -1872,7 +1919,6 @@ lumagpas na sa partikular na haba ng panahon ang oras na hindi ito nagamit.
       Kung hindi nakatakda ang patakarang ito, gagamitin ang default na laki at ma-o-override ito ng user gamit ang --disk-cache-size flag.</translation>
 <translation id="7612157962821894603">Mga flag sa buong system na ilalapat sa pag-start up ng <ph name="PRODUCT_NAME" /></translation>
 <translation id="7614663184588396421">Listahan ng hindi pinaganang mga scheme ng protocol</translation>
-<translation id="7615123397791876280">Uri ng Account para sa Negotiate Authentication</translation>
 <translation id="7625444193696794922">Tinutukoy ang channel ng paglabas kung saan dapat naka-lock ang device.</translation>
 <translation id="7632724434767231364">Pangalan ng GSSAPI library</translation>
 <translation id="7635471475589566552">Kino-configure ang lokal ng application sa <ph name="PRODUCT_NAME" /> at pinipigilan ang mga user na baguhin ang lokal.
@@ -1911,6 +1957,22 @@ lumagpas na sa partikular na haba ng panahon ang oras na hindi ito nagamit.
 
           Kung hindi pinapagana o hindi nakatakda ang setting na ito, hindi papaganahin ang dalawang salik at gagamitin ang default na paggana ng pagkakaroon ng PIN na tinukoy ng user.</translation>
 <translation id="7750991880413385988">Buksan ang Pahina ng Bagong Tab</translation>
+<translation id="7761526206824804472">Nagtatakda ng isa o higit pang mga inirerekomendang lokal para sa isang pampublikong session, na nagbibigay-daan sa mga user na madaling pumili ng isa sa mga lokal na ito.
+
+      Makakapili ang user ng lokal at layout ng keyboard bago magsimula ng pampublikong session. Bilang default, nakalista ang lahat ng lokal na sinusuportahan ng <ph name="PRODUCT_OS_NAME" /> ayon sa pagkakasunud-sunod ng alpabeto. Magagamit mo ang patakarang ito upang maglipat ng hanay ng mga inirerekomendang lokal sa itaas ng listahan.
+
+      Kung hindi itatakda ang patakarang ito, paunang pipiliin ang kasalukuyang lokal ng UI.
+
+      Kung itatakda ang patakarang ito, ililipat ang mga inirerekomendang lokal sa itaas ng listahan at makikitang mahihiwalay sa lahat ng iba pang lokal. Ililista ang mga inirerekomendang lokal sa pagkakasunud-sunod ng mga ito sa paglabas sa patakaran. Paunang pipiliin ang unang inirerekomendang lokal.
+
+      Kung mayroong mahigit sa isang inirerekomendang lokal, ipinapalagay na gugustuhin ng mga user na pumili sa mga lokal na ito. Prominenteng iaalok ang pagpili ng lokal at layout ng keyboard kapag magsisimula ng pampublikong session. Kung hindi, ipinapalagay na gugustuhin ng karamihan ng mga user na gamitin ang paunang piniling lokal. Hindi gaanong prominenteng iaalok ang pagpili ng lokal at layout ng keyboard kapag magsisimula ng pampublikong session.
+
+      Kapag itinakda ang patakarang ito at na-enable ang awtomatikong pag-log in (tingnan ang mga patakarang |DeviceLocalAccountAutoLoginId| at |DeviceLocalAccountAutoLoginDelay|), gagamitin ng awtomatikong sinimulang pampublikong session ang unang inirerekomendang lokal at ang pinakasikat na layout ng keyboard na tumutugma sa lokal na ito.
+
+      Ang paunang piniling layout ng keyboard ang palaging magiging pinakasikat na layout na tumutugma sa paunang piniling lokal.
+
+      Maaari lang itakda ang patakarang ito tulad ng inirerekomenda. Magagamit mo ang patakarang ito upang maglipat ng hanay ng mga inirerekomendang lokal sa itaas, ngunit maaaring pumili anumang oras ang mga user ng anumang lokal na sinusuportahan ng <ph name="PRODUCT_OS_NAME" /> para sa kanilang session.
+      </translation>
 <translation id="7763311235717725977">Binibigyang-daan kang itakda kung pinapayagan o hindi ang mga website na magpakita ng mga larawan. Maaaring payagan para sa lahat ng website o tanggihan para sa lahat ng website ang pagpapakita ng mga larawan.
 
           Kung hinayaang hindi nakatakda ang patakarang ito, gagamitin ang 'AllowImages' at magagawa ng user na baguhin ito.</translation>
@@ -1937,9 +1999,6 @@ lumagpas na sa partikular na haba ng panahon ang oras na hindi ito nagamit.
 <translation id="7841880500990419427">Minimum na bersyon ng TLB na babalikan</translation>
 <translation id="7842869978353666042">I-configure ang mga pagpipilian sa Google Drive</translation>
 <translation id="7848840259379156480">Pinapayagan kang i-configure ang default na taga-render ng HTML kapag na-install ang <ph name="PRODUCT_FRAME_NAME" />. Ang default na setting ay upang payagan ang browser ng host na gawin ang pag-render, ngunit maaari mong i-override ito at i-render ng <ph name="PRODUCT_FRAME_NAME" /> ang mga pahina ng HTML bilang default.</translation>
-<translation id="7880891067740158163">Binibigyang-daan kang tumukoy ng isang listahan ng mga pattern ng url na tumutukoy sa mga site kung saan dapat awtomatikong pumili ng mga certificate ng client ang <ph name="PRODUCT_NAME" />, kung humiling ng isang certificate ang site.
-
-          Kung hinayaang hindi nakatakda ang patakaran walang gagawing awtomatikong pagpili para sa anumang site.</translation>
 <translation id="7882585827992171421">Sa retail mode lamang aktibo ang patakarang ito.
 
       Tinutukoy ang id ng extension na gagamitin bilang isang screen saver sa screen sa pag-sign-in. Ang extension ay dapat na bahagi ng AppPack na naka-configure para sa domain na ito sa pamamagitan ng patakarang AppPacks.</translation>
@@ -1980,12 +2039,6 @@ lumagpas na sa partikular na haba ng panahon ang oras na hindi ito nagamit.
 
           Kung iniwang hindi nakatakda ang patakarang ito, i-e-enable ang setting.</translation>
 <translation id="8073243368829195">Binibigyang-daan ang paggamit ng Smart Lock</translation>
-<translation id="8079569287249995869">Ine-enable ang pag-optimize ng WPAD sa <ph name="PRODUCT_NAME" /> at pinipigilan ang mga user na baguhin ang setting na ito.
-
-      Ang pagtatakda nito bilang naka-enable ay nagiging sanhi ng paghihintay ng <ph name="PRODUCT_NAME" /> ng mas maikling agwat para sa mga server ng WPAD na nakabatay sa DNS.
-
-      Kung iniwanang hindi nakatakda ang patakarang ito, i-e-enable ito at hindi ito
-      mababago ng user.</translation>
 <translation id="8099880303030573137">Idle delay kapag tumatakbo gamit ang power ng baterya</translation>
 <translation id="8102913158860568230">Default na setting ng mediastream</translation>
 <translation id="8104962233214241919">Awtomatikong pumili ng mga certificate ng client para sa mga site na ito</translation>
@@ -2043,21 +2096,21 @@ lumagpas na sa partikular na haba ng panahon ang oras na hindi ito nagamit.
 
       Kung hindi nakatakda ang patakarang ito, hindi magkakaroon ng mga pagbubukod sa blacklist mula sa patakarang 'URLBlacklist'.</translation>
 <translation id="8176035528522326671">Payagan ang user ng enterprise na maging pangunahing multiprofile na user lang (Default na pag-uugali para sa mga user na pinamamahalaan ng enterprise)</translation>
+<translation id="8191318459035150777">Kino-configure ang URL ng default na home page sa <ph name="PRODUCT_NAME" /> at pinipigilan ang mga user na mapalitan ito.
+
+          Ang home page ay ang page na binubuksan ng button ng Home. Pinamamahalaan ng mga patakaran ng RestoreOnStartup ang mga bumubukas na page sa startup.
+
+          Maaaring itakda ang uri ng home page sa isang URL na tutukuyin mo rito, o kaya, maaari itong itakda sa Page ng Bagong Tab. Kung pipiliin mo ang Page ng Bagong Tab, hindi mailalapat ang patakarang ito.
+
+          Kung ie-enable mo ang setting na ito, hindi na mapapalitan at magagawang <ph name="PRODUCT_NAME" /> ng mga user ang URL ng kanilang home page, ngunit kung gugustuhin nila, magagamit pa rin nila ang Page ng Bagong Tab bilang kanilang home page.
+
+          Kapag hindi mo itinakda ang patakarang ito at wala ring nakatakdang HomepageIsNewTabPage, mabibigyang-daan ang user na pumili ng sarili niyang home page.
+
+          Hindi available ang patakarang ito sa mga instance ng Windows na hindi kasama
+          sa isang Active Directory domain.</translation>
 <translation id="8197918588508433925">Tinutukoy ng patakarang ito ang mga pinapayagang extension upang magamit ang Enterprise Platform Keys API chrome.enterprise.platformKeysPrivate.challengeUserKey() para sa malayuang pagpapatunay. Dapat magdagdag ng mga extension sa listahang ito upang magamit ang API.
 
           Kung wala sa listahan ang isang extension, o hindi nakatakda ang listahan, mabibigo ang pagtawag sa API nang may code ng error.</translation>
-<translation id="8211174979203781791">Kino-configure ang default na URL ng home page sa <ph name="PRODUCT_NAME" /> at pinipigilan ang mga user na baguhin ito.
-
-          Ang home page ay ang page na binubuksan ng button na Home. Kinokontrol ng mga patakaran ng RestoreOnStartup ang mga page na bumubukas sa startup.
-
-          Maaaring itakda ang uri ng home page sa isang URL na tutukuyin mo rito o sa Page ng Bagong Tab. Kung pipiliin mo ang Page ng Bagong Tab, hindi ipapatupad ang patakarang ito.
-
-          Kung ie-enable mo ang setting na ito, hindi mababago ng mga user ang URL ng kanilang home page sa <ph name="PRODUCT_NAME" />, ngunit mapipili pa rin nila ang Page ng Bagong Tab bilang kanilang home page.
-
-          Kapag hindi itinakda ang patakarang ito, makakapili ang mismong user ng sarili niyang home page kung hindi rin nakatakda ang HomepageIsNewTabPage.
-
-          Hindi available ang patakarang ito sa mga instance ng Windows na hindi nakakonekta
-          sa isang domain ng Aktibong Direktoryo.</translation>
 <translation id="8244525275280476362">Maximum na pagkaantala ng pagkuha pagkatapos matukoy na di-wasto ang patakaran</translation>
 <translation id="8256688113167012935">Kinokontrol ang pangalan ng account na <ph name="PRODUCT_OS_NAME" /> na nakikita sa screen sa pag-login para sa katumbas na account na lokal sa device.
 
@@ -2077,9 +2130,6 @@ lumagpas na sa partikular na haba ng panahon ang oras na hindi ito nagamit.
 <translation id="8300455783946254851">Dini-disable ang pagsi-sync ng Google Drive sa <ph name="PRODUCT_OS_NAME" /> Files app kapag gumagamit ng mobile na koneksyon kapag nakatakda sa True. Sa sitwasyong iyon, naka-sync lang ang data sa Google Drive kapag nakakonekta sa pamamagitan ng WiFi o Ethernet.
 
           Kung hindi nakatakda o nakatakda sa False, makakapaglipat ang mga user ng mga file sa Google Drive sa pamamagitan ng mga mobile na koneksyon.</translation>
-<translation id="8303314579975657113">Tinutukoy kung aling library ng GSSAPI ang gagamitin para sa Pagpapatotoo ng HTTP. Makakapagtakda ka ng isang pangalan ng library, o isang buong daanan.
-
-          Kung walang ibinigay na setting, babalik ang <ph name="PRODUCT_NAME" /> sa paggamit ng default na pangalan ng library.</translation>
 <translation id="8329984337216493753">Sa mode ng retail lamang aktibo ang patakarang ito.
 
       Kapag nakatukoy ang DeviceIdleLogoutTimeout, tinutukoy ng patakarang ito ang tagal ng kahon ng babala gamit ang count down timer na ipinapakita sa user bago isagawa ang pag-logout.
@@ -2094,9 +2144,6 @@ lumagpas na sa partikular na haba ng panahon ang oras na hindi ito nagamit.
 <translation id="8369602308428138533">Delay ng pag-off ng screen kapag tumatakbo habang nakasaksak sa kuryente</translation>
 <translation id="8382184662529825177">I-enable ang paggamit ng malayuang pagpapatotoo para sa pagprotekta sa nilalaman para sa device</translation>
 <translation id="838870586332499308">Payagan ang roaming ng data</translation>
-<translation id="8407759228138103300">Tinutukoy ang uri ng account ng mga account na ibinigay ng app sa pagpapatotoo ng Android na sumusuporta sa pagpapatotoo na HTTP Negotiate (hal. pagpapatotoo sa Kerberos). Dapat na available ang impormasyong ito mula sa supplier ng app sa Pagpapatotoo. Para sa higit pang mga detalye, tingnan ang https://goo.gl/hajyfN.
-
-          Kung walang ibinigay na setting, madi-disable sa Android ang Negotiate Authentication.</translation>
 <translation id="8412312801707973447">Kung isinasagawa ang mga online na pagsusuri sa OCSP/CRL</translation>
 <translation id="8451988835943702790">Gamitin ang Pahina ng Bagong Tab bilang homepage</translation>
 <translation id="8465065632133292531">Mga parameter para sa instant na URL na ginagamit ang POST</translation>
@@ -2182,6 +2229,8 @@ lumagpas na sa partikular na haba ng panahon ang oras na hindi ito nagamit.
           Kung pinagana mo ang setting na ito, lalaktawan ang paghahanap ng CNAME at gagamitin ang pangalan ng server tulad ng inilagay.
 
           Kung hindi mo pinagana ang setting na ito o hinayaan itong hindi nakatakda, tutukuyin sa pamamagitan ng paghahanap ng CNAME ang canonical na pangalan ng server.</translation>
+<translation id="8774131509736383471">Kung itatakda sa true ang patakarang ito, ima-maximize ng <ph name="PRODUCT_NAME" /> ang unang lalabas na window sa unang pagpapatakbo nang walang limitasyon.
+      Kung itatakda sa false o kung hindi iko-configure ang patakarang ito, ibabatay sa laki ng screen ang pasya tungkol sa pagma-maximize sa unang lalabas na window.</translation>
 <translation id="8777120694819070607">Pinapayagan ng <ph name="PRODUCT_NAME" /> upang magpatakbo ng mga plugin na wala na sa panahon. Kung pinagana mo ang setting na ito, hindi gagamitin ang mga hindi napapanahong plugin at hihingi ng pahintulot ang mga user na patakbuhin ang mga ito. Kung hindi naitakada ang setting na ito, hihingan ng pahintulot ang mga user na magpatakbo ng mga hindi napapanahong plugin</translation>
 <translation id="87812015706645271">Kinakailangan nito na nagtutugma ang pangalan ng lokal na user at ang may-ari ng host ng malayuang pag-access</translation>
 <translation id="8782750230688364867">Tinutukoy ang porsyento ng pag-scale ng pag-antala bago magdilim ang screen kapag nasa presentation mode ang device.
@@ -2251,6 +2300,7 @@ lumagpas na sa partikular na haba ng panahon ang oras na hindi ito nagamit.
 <translation id="9042911395677044526">Nagbibigay-daan na malapat sa bawat user ang configuration ng pushing network sa isang <ph name="PRODUCT_OS_NAME" /> na device. Ang configuration ng network ay isang naka-format sa JSON  na string tulad ng tinutukoy ng format ng Configuration ng Open Network na inilalarawan sa <ph name="ONC_SPEC_URL" /></translation>
 <translation id="9084985621503260744">Tukuyin kung nakakaapekto ang aktibidad ng video sa pamamahala ng power</translation>
 <translation id="9096086085182305205">Whitelist ng server sa pagpapatotoo</translation>
+<translation id="9098553063150791878">Mga patakaran para sa pagpapatotoo ng HTTP</translation>
 <translation id="9104138886225968319">Nagpapadala ng mga heartbeat sa pagsubaybay sa server sa pamamahala upang magbigay-daan
       sa server na matukoy kung offline ang device.
 

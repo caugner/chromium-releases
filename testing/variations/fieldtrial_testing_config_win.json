@@ -1,4 +1,9 @@
 {
+    "AsyncSetAsDefault": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
     "AutofillClassifier": [
         {
             "group_name": "Enabled"
@@ -7,6 +12,14 @@
     "AutofillFieldMetadata": [
         {
             "group_name": "Enabled"
+        }
+    ],
+    "AutofillProfileOrderByFrecency": [
+        {
+            "group_name": "EnabledLimitTo3",
+            "params": {
+                "limit": "3"
+            }
         }
     ],
     "AutomaticTabDiscarding": [
@@ -84,6 +97,11 @@
             "group_name": "Enabled"
         }
     ],
+    "MaterialDesignDownloads": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
     "NetworkQualityEstimator": [
         {
             "group_name": "Enabled",
@@ -116,11 +134,6 @@
     "PasswordGeneration": [
         {
             "group_name": "Disabled"
-        }
-    ],
-    "PluginPowerSaver": [
-        {
-            "group_name": "Enabled"
         }
     ],
     "QUIC": [
@@ -215,6 +228,16 @@
             "params": {
                 "fetch_period_min": "30"
             }
+        }
+    ],
+    "WebRTC-LocalIPPermissionCheck": [
+        {
+            "group_name": "Enabled"
+        }
+    ],
+    "WebRTC-PeerConnectionDTLS1.2": [
+        {
+            "group_name": "Enabled"
         }
     ]
 }

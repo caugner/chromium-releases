@@ -13,6 +13,7 @@ import android.widget.TextView;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.widget.TintedDrawable;
 
 /**
@@ -21,7 +22,7 @@ import org.chromium.chrome.browser.widget.TintedDrawable;
  */
 public class NewTabPageToolbar extends LinearLayout {
 
-    private View mBookmarksButton, mRecentTabsButton;
+    private ViewGroup mBookmarksButton, mRecentTabsButton;
 
     /**
      * Constructor for inflating from xml.
@@ -42,9 +43,15 @@ public class NewTabPageToolbar extends LinearLayout {
     protected void onFinishInflate() {
         mBookmarksButton = initButton(R.id.bookmarks_button, R.drawable.btn_star);
         mRecentTabsButton = initButton(R.id.recent_tabs_button, R.drawable.btn_recents);
+        if (OfflinePageBridge.isEnabled()) {
+            ((TextView) mBookmarksButton.getChildAt(0)).setText(
+                    R.string.offline_pages_ntp_button_name);
+            ((TextView) mBookmarksButton.getChildAt(0)).setContentDescription(
+                    getResources().getString(R.string.offline_pages_ntp_button_accessibility));
+        }
     }
 
-    private View initButton(int buttonId, int drawableId) {
+    private ViewGroup initButton(int buttonId, int drawableId) {
         ViewGroup button = (ViewGroup) findViewById(buttonId);
         TextView textView = (TextView) button.getChildAt(0);
 

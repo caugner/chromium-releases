@@ -200,9 +200,8 @@ class FakeGCMInternalsBuilder : public GCMInternalsBuilder {
   scoped_ptr<ConnectionFactory> BuildConnectionFactory(
       const std::vector<GURL>& endpoints,
       const net::BackoffEntry::Policy& backoff_policy,
-      const scoped_refptr<net::HttpNetworkSession>& gcm_network_session,
-      const scoped_refptr<net::HttpNetworkSession>& http_network_session,
-      net::NetLog* net_log,
+      net::HttpNetworkSession* gcm_network_session,
+      net::HttpNetworkSession* http_network_session,
       GCMStatsRecorder* recorder) override;
 
  private:
@@ -234,9 +233,8 @@ scoped_ptr<MCSClient> FakeGCMInternalsBuilder::BuildMCSClient(
 scoped_ptr<ConnectionFactory> FakeGCMInternalsBuilder::BuildConnectionFactory(
     const std::vector<GURL>& endpoints,
     const net::BackoffEntry::Policy& backoff_policy,
-    const scoped_refptr<net::HttpNetworkSession>& gcm_network_session,
-    const scoped_refptr<net::HttpNetworkSession>& http_network_session,
-    net::NetLog* net_log,
+    net::HttpNetworkSession* gcm_network_session,
+    net::HttpNetworkSession* http_network_session,
     GCMStatsRecorder* recorder) {
   return make_scoped_ptr<ConnectionFactory>(new FakeConnectionFactory());
 }
@@ -375,6 +373,10 @@ class GCMClientImplTest : public testing::Test,
   }
 
  private:
+  // Must be declared first so that it is destroyed last. Injected to
+  // GCM client.
+  base::ScopedTempDir temp_directory_;
+
   // Variables used for verification.
   LastEvent last_event_;
   std::string last_app_id_;
@@ -393,8 +395,7 @@ class GCMClientImplTest : public testing::Test,
   scoped_refptr<base::TestMockTimeTaskRunner> task_runner_;
   base::ThreadTaskRunnerHandle task_runner_handle_;
 
-  // Injected to GCM client:
-  base::ScopedTempDir temp_directory_;
+  // Injected to GCM client.
   scoped_refptr<net::TestURLRequestContextGetter> url_request_context_getter_;
 };
 

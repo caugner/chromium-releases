@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_ANDROID_OFFLINE_PAGES_OFFLINE_PAGE_MHTML_ARCHIVER_H_
 
 #include <map>
+#include <string>
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
@@ -41,25 +42,25 @@ class OfflinePageMHTMLArchiver : public OfflinePageArchiver {
  public:
   // Returns the extension name of the offline page file.
   static std::string GetFileNameExtension();
+  // Creates a file name for the archive file based on url and title. Public for
+  // testing.
+  static base::FilePath GenerateFileName(const GURL& url,
+                                         const std::string& title);
 
-  OfflinePageMHTMLArchiver(content::WebContents* web_contents,
-                           const base::FilePath& archive_dir);
+  explicit OfflinePageMHTMLArchiver(content::WebContents* web_contents);
   ~OfflinePageMHTMLArchiver() override;
 
   // OfflinePageArchiver implementation:
-  void CreateArchive(const CreateArchiveCallback& callback) override;
+  void CreateArchive(const base::FilePath& archives_dir,
+                     const CreateArchiveCallback& callback) override;
 
  protected:
   // Allows to overload the archiver for testing.
-  explicit OfflinePageMHTMLArchiver(const base::FilePath& archive_dir);
+  OfflinePageMHTMLArchiver();
 
   // Try to generate MHTML.
   // Might be overridden for testing purpose.
-  virtual void GenerateMHTML();
-
-  // Actual call to generate MHTML.
-  // Might be overridden for testing purpose.
-  virtual void DoGenerateMHTML();
+  virtual void GenerateMHTML(const base::FilePath& archives_dir);
 
   // Callback for Generating MHTML.
   void OnGenerateMHTMLDone(const GURL& url,
@@ -75,9 +76,6 @@ class OfflinePageMHTMLArchiver : public OfflinePageArchiver {
   void ReportFailure(ArchiverResult result);
 
  private:
-  // Path to the archive directory. It the path is empty, creation of the
-  // archive will fail.
-  const base::FilePath archive_dir_;
   // Contents of the web page to be serialized. Not owned.
   content::WebContents* web_contents_;
 

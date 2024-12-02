@@ -9,6 +9,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
+import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
@@ -41,13 +42,13 @@ public class PassphraseActivityTest extends NativeLibraryTestBase {
         // Clear ProfileSyncService in case it was mocked.
         ProfileSyncService.overrideForTests(null);
         super.tearDown();
+        SigninTestUtil.get().resetSigninState();
     }
 
     /**
      * This is a regression test for http://crbug.com/469890.
-     * @SmallTest
-     * Constantly fails on M, fine on other platforms: http://crbug.com/517590
      */
+    @SmallTest
     @Feature({"Sync"})
     public void testCallbackAfterBackgrounded() throws Exception {
         getInstrumentation().waitForIdleSync();

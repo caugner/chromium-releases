@@ -19,6 +19,7 @@
 #include "chrome/browser/ui/autofill/autofill_popup_controller_impl.h"
 #include "chrome/browser/ui/autofill/create_card_unmask_prompt_view.h"
 #include "chrome/browser/ui/autofill/credit_card_scanner_controller.h"
+#include "chrome/browser/ui/autofill/save_card_bubble_controller_impl.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -53,7 +54,6 @@ namespace autofill {
 ChromeAutofillClient::ChromeAutofillClient(content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
       unmask_controller_(
-          base::Bind(&LoadRiskData, 0, web_contents),
           user_prefs::UserPrefs::Get(web_contents->GetBrowserContext()),
           Profile::FromBrowserContext(web_contents->GetBrowserContext())
               ->IsOffTheRecord()),
@@ -147,15 +147,37 @@ void ChromeAutofillClient::ShowUnmaskPrompt(
       card, delegate);
 }
 
-void ChromeAutofillClient::OnUnmaskVerificationResult(GetRealPanResult result) {
+void ChromeAutofillClient::OnUnmaskVerificationResult(
+    PaymentsRpcResult result) {
   unmask_controller_.OnVerificationResult(result);
 }
 
-void ChromeAutofillClient::ConfirmSaveCreditCard(
-    const base::Closure& save_card_callback) {
+void ChromeAutofillClient::ConfirmSaveCreditCardLocally(
+    const base::Closure& callback) {
+// TODO(bondd): Implement save card bubble for OS_MACOSX.
+#if defined(TOOLKIT_VIEWS) && !defined(OS_MACOSX)
+  // Do lazy initialization of SaveCardBubbleControllerImpl.
+  autofill::SaveCardBubbleControllerImpl::CreateForWebContents(web_contents());
+  autofill::SaveCardBubbleControllerImpl* controller =
+      autofill::SaveCardBubbleControllerImpl::FromWebContents(web_contents());
+  controller->SetCallback(callback);
+  controller->ShowBubble(false);
+#else
   AutofillCCInfoBarDelegate::Create(
-      InfoBarService::FromWebContents(web_contents()), this,
-      save_card_callback);
+      InfoBarService::FromWebContents(web_contents()), this, callback);
+#endif
+}
+
+void ChromeAutofillClient::ConfirmSaveCreditCardToCloud(
+    const base::Closure& callback,
+    scoped_ptr<base::DictionaryValue> legal_message) {
+  // TODO(bondd): Implement upload UI.
+  ConfirmSaveCreditCardLocally(callback);
+}
+
+void ChromeAutofillClient::LoadRiskData(
+    const base::Callback<void(const std::string&)>& callback) {
+  ::autofill::LoadRiskData(0, web_contents(), callback);
 }
 
 bool ChromeAutofillClient::HasCreditCardScanFeature() {

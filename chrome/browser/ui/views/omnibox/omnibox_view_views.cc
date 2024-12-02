@@ -845,6 +845,7 @@ void OmniboxViewViews::GetAccessibleState(ui::AXViewState* state) {
   if (popup_window_mode_) {
     state->AddStateFlag(ui::AX_STATE_READ_ONLY);
   } else {
+    state->AddStateFlag(ui::AX_STATE_EDITABLE);
     state->set_value_callback =
         base::Bind(&OmniboxViewViews::AccessibilitySetValue,
                    weak_ptr_factory_.GetWeakPtr());
@@ -1022,7 +1023,7 @@ void OmniboxViewViews::OnGetDragOperationsForTextfield(int* drag_operations) {
 
 void OmniboxViewViews::AppendDropFormats(
     int* formats,
-    std::set<ui::OSExchangeData::CustomFormat>* custom_formats) {
+    std::set<ui::Clipboard::FormatType>* format_types) {
   *formats = *formats | ui::OSExchangeData::URL;
 }
 

@@ -9,7 +9,7 @@
 #include "cc/quads/render_pass_draw_quad.h"
 #include "cc/quads/solid_color_draw_quad.h"
 #include "cc/test/fake_delegated_renderer_layer_impl.h"
-#include "cc/test/fake_impl_proxy.h"
+#include "cc/test/fake_impl_task_runner_provider.h"
 #include "cc/test/fake_layer_tree_host_impl.h"
 #include "cc/test/fake_layer_tree_host_impl_client.h"
 #include "cc/test/fake_output_surface.h"
@@ -31,20 +31,27 @@ namespace {
 class DelegatedRendererLayerImplTest : public testing::Test {
  public:
   DelegatedRendererLayerImplTest()
-      : proxy_(),
-        always_impl_thread_and_main_thread_blocked_(&proxy_),
+      : task_runner_provider_(),
+        always_impl_thread_and_main_thread_blocked_(&task_runner_provider_),
         output_surface_(FakeOutputSurface::Create3d()) {
     LayerTreeSettings settings;
     settings.minimum_occlusion_tracking_size = gfx::Size();
 
-    host_impl_.reset(new FakeLayerTreeHostImpl(
-        settings, &proxy_, &shared_bitmap_manager_, &task_graph_runner_));
+    host_impl_.reset(new FakeLayerTreeHostImpl(settings, &task_runner_provider_,
+                                               &shared_bitmap_manager_,
+                                               &task_graph_runner_));
+    host_impl_->SetVisible(true);
     host_impl_->InitializeRenderer(output_surface_.get());
     host_impl_->SetViewportSize(gfx::Size(10, 10));
   }
 
+  DrawResult PrepareToDrawFrame(LayerTreeHostImpl::FrameData* frame) {
+    host_impl_->active_tree()->BuildPropertyTreesForTesting();
+    return host_impl_->PrepareToDraw(frame);
+  }
+
  protected:
-  FakeImplProxy proxy_;
+  FakeImplTaskRunnerProvider task_runner_provider_;
   DebugScopedSetImplThreadAndMainThreadBlocked
       always_impl_thread_and_main_thread_blocked_;
   TestSharedBitmapManager shared_bitmap_manager_;
@@ -71,17 +78,17 @@ class DelegatedRendererLayerImplTestSimple
     root_layer->SetBounds(gfx::Size(100, 100));
     root_layer->SetHasRenderSurface(true);
 
-    layer_before->SetPosition(gfx::Point(20, 20));
+    layer_before->SetPosition(gfx::PointF(20.f, 20.f));
     layer_before->SetBounds(gfx::Size(14, 14));
     layer_before->SetDrawsContent(true);
     layer_before->SetHasRenderSurface(true);
 
-    layer_after->SetPosition(gfx::Point(5, 5));
+    layer_after->SetPosition(gfx::PointF(5.f, 5.f));
     layer_after->SetBounds(gfx::Size(15, 15));
     layer_after->SetDrawsContent(true);
     layer_after->SetHasRenderSurface(true);
 
-    delegated_renderer_layer->SetPosition(gfx::Point(3, 3));
+    delegated_renderer_layer->SetPosition(gfx::PointF(3.f, 3.f));
     delegated_renderer_layer->SetBounds(gfx::Size(10, 10));
     delegated_renderer_layer->SetDrawsContent(true);
     gfx::Transform transform;
@@ -141,7 +148,7 @@ TEST_F(DelegatedRendererLayerImplTest,
     root_layer->SetBounds(gfx::Size(100, 100));
     root_layer->SetHasRenderSurface(true);
 
-    delegated_renderer_layer->SetPosition(gfx::Point(3, 3));
+    delegated_renderer_layer->SetPosition(gfx::PointF(3.f, 3.f));
     delegated_renderer_layer->SetBounds(gfx::Size(10, 10));
     delegated_renderer_layer->SetDrawsContent(true);
     delegated_renderer_layer->SetHasRenderSurface(true);
@@ -173,7 +180,7 @@ TEST_F(DelegatedRendererLayerImplTest,
     host_impl_->active_tree()->SetRootLayer(root_layer.Pass());
 
     LayerTreeHostImpl::FrameData frame;
-    EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+    EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
     // Root layer has one render pass, and delegated renderer layer has two
     // contributing render passes and its own render pass.
@@ -195,7 +202,7 @@ TEST_F(DelegatedRendererLayerImplTest,
     host_impl_->SetViewportDamage(gfx::Rect(10, 10));
 
     LayerTreeHostImpl::FrameData frame;
-    EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+    EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
     // Each non-DelegatedRendererLayer added one RenderPass. The
     // DelegatedRendererLayer added two contributing passes.
@@ -220,7 +227,7 @@ TEST_F(DelegatedRendererLayerImplTest,
     root_layer->SetBounds(gfx::Size(100, 100));
     root_layer->SetHasRenderSurface(true);
 
-    delegated_renderer_layer->SetPosition(gfx::Point(3, 3));
+    delegated_renderer_layer->SetPosition(gfx::PointF(3.f, 3.f));
     delegated_renderer_layer->SetBounds(gfx::Size(10, 10));
     delegated_renderer_layer->SetDrawsContent(true);
     delegated_renderer_layer->SetHasRenderSurface(true);
@@ -253,7 +260,7 @@ TEST_F(DelegatedRendererLayerImplTest,
     host_impl_->ActivateSyncTree();
 
     LayerTreeHostImpl::FrameData frame;
-    EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+    EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
     // Root layer has one render pass, and delegated renderer layer has two
     // contributing render passes and its own render pass.
@@ -278,7 +285,7 @@ TEST_F(DelegatedRendererLayerImplTest,
     host_impl_->ActivateSyncTree();
     host_impl_->SetViewportDamage(gfx::Rect(100, 100));
     LayerTreeHostImpl::FrameData frame;
-    EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+    EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
     // Root layer has one render pass, and delegated renderer layer no longer
     // has contributing render passes.
@@ -291,7 +298,7 @@ TEST_F(DelegatedRendererLayerImplTest,
 
 TEST_F(DelegatedRendererLayerImplTestSimple, AddsContributingRenderPasses) {
   LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   // Each non-DelegatedRendererLayer added one RenderPass. The
   // DelegatedRendererLayer added two contributing passes.
@@ -325,7 +332,7 @@ TEST_F(DelegatedRendererLayerImplTestSimple, AddsContributingRenderPasses) {
 TEST_F(DelegatedRendererLayerImplTestSimple,
        AddsQuadsToContributingRenderPasses) {
   LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   // Each non-DelegatedRendererLayer added one RenderPass. The
   // DelegatedRendererLayer added two contributing passes.
@@ -360,7 +367,7 @@ TEST_F(DelegatedRendererLayerImplTestSimple,
 
 TEST_F(DelegatedRendererLayerImplTestSimple, AddsQuadsToTargetRenderPass) {
   LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   // Each non-DelegatedRendererLayer added one RenderPass. The
   // DelegatedRendererLayer added two contributing passes.
@@ -388,7 +395,7 @@ TEST_F(DelegatedRendererLayerImplTestSimple, AddsQuadsToTargetRenderPass) {
 TEST_F(DelegatedRendererLayerImplTestSimple,
        QuadsFromRootRenderPassAreModifiedForTheTarget) {
   LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   // Each non-DelegatedRendererLayer added one RenderPass. The
   // DelegatedRendererLayer added two contributing passes.
@@ -427,7 +434,7 @@ TEST_F(DelegatedRendererLayerImplTestSimple,
 
 TEST_F(DelegatedRendererLayerImplTestSimple, RenderPassTransformIsModified) {
   LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   // The delegated layer has a surface between it and the root.
   EXPECT_TRUE(delegated_renderer_layer_->render_target()->parent());
@@ -468,7 +475,7 @@ class DelegatedRendererLayerImplTestOwnSurface
 
 TEST_F(DelegatedRendererLayerImplTestOwnSurface, AddsRenderPasses) {
   LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   // Each non-DelegatedRendererLayer added one RenderPass. The
   // DelegatedRendererLayer added two contributing passes and its owned surface
@@ -507,7 +514,7 @@ TEST_F(DelegatedRendererLayerImplTestOwnSurface, AddsRenderPasses) {
 TEST_F(DelegatedRendererLayerImplTestOwnSurface,
        AddsQuadsToContributingRenderPasses) {
   LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   // Each non-DelegatedRendererLayer added one RenderPass. The
   // DelegatedRendererLayer added two contributing passes and its owned surface
@@ -544,7 +551,7 @@ TEST_F(DelegatedRendererLayerImplTestOwnSurface,
 
 TEST_F(DelegatedRendererLayerImplTestOwnSurface, AddsQuadsToTargetRenderPass) {
   LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   // Each non-DelegatedRendererLayer added one RenderPass. The
   // DelegatedRendererLayer added two contributing passes and its owned surface
@@ -570,7 +577,7 @@ TEST_F(DelegatedRendererLayerImplTestOwnSurface, AddsQuadsToTargetRenderPass) {
 TEST_F(DelegatedRendererLayerImplTestOwnSurface,
        QuadsFromRootRenderPassAreNotModifiedForTheTarget) {
   LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   // Each non-DelegatedRendererLayer added one RenderPass. The
   // DelegatedRendererLayer added two contributing passes and its owned surface
@@ -624,7 +631,7 @@ class DelegatedRendererLayerImplTestTransform
     root_layer->SetBounds(gfx::Size(100, 100));
     root_layer->SetHasRenderSurface(true);
 
-    delegated_renderer_layer->SetPosition(gfx::Point(20, 20));
+    delegated_renderer_layer->SetPosition(gfx::PointF(20.f, 20.f));
     delegated_renderer_layer->SetBounds(gfx::Size(75, 75));
     delegated_renderer_layer->SetDrawsContent(true);
     gfx::Transform transform;
@@ -792,7 +799,7 @@ TEST_F(DelegatedRendererLayerImplTestTransform, QuadsUnclipped_NoSurface) {
   SetUpTest();
 
   LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   const SharedQuadState* root_delegated_shared_quad_state = nullptr;
   const SharedQuadState* contrib_delegated_shared_quad_state = nullptr;
@@ -846,7 +853,7 @@ TEST_F(DelegatedRendererLayerImplTestTransform, QuadsClipped_NoSurface) {
   SetUpTest();
 
   LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   const SharedQuadState* root_delegated_shared_quad_state = nullptr;
   const SharedQuadState* contrib_delegated_shared_quad_state = nullptr;
@@ -906,7 +913,7 @@ TEST_F(DelegatedRendererLayerImplTestTransform, QuadsUnclipped_Surface) {
   delegated_renderer_layer_->SetHasRenderSurface(true);
 
   LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   const SharedQuadState* root_delegated_shared_quad_state = nullptr;
   const SharedQuadState* contrib_delegated_shared_quad_state = nullptr;
@@ -954,7 +961,7 @@ TEST_F(DelegatedRendererLayerImplTestTransform, QuadsClipped_Surface) {
   delegated_renderer_layer_->SetHasRenderSurface(true);
 
   LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   const SharedQuadState* root_delegated_shared_quad_state = nullptr;
   const SharedQuadState* contrib_delegated_shared_quad_state = nullptr;
@@ -1001,7 +1008,7 @@ TEST_F(DelegatedRendererLayerImplTestTransform, MismatchedDeviceScaleFactor) {
   SetUpTest();
 
   LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   const SharedQuadState* root_delegated_shared_quad_state = nullptr;
   const SharedQuadState* contrib_delegated_shared_quad_state = nullptr;
@@ -1050,7 +1057,7 @@ class DelegatedRendererLayerImplTestClip
     root_layer->SetBounds(gfx::Size(100, 100));
     root_layer->SetHasRenderSurface(true);
 
-    delegated_renderer_layer->SetPosition(gfx::Point(20, 20));
+    delegated_renderer_layer->SetPosition(gfx::PointF(20.f, 20.f));
     delegated_renderer_layer->SetBounds(gfx::Size(50, 50));
     delegated_renderer_layer->SetDrawsContent(true);
 
@@ -1153,14 +1160,15 @@ class DelegatedRendererLayerImplTestClip
     delegated_renderer_layer_ = delegated_renderer_layer.get();
 
     if (clip_delegated_renderer_layer_) {
-      gfx::Rect clip_rect(21, 27, 23, 21);
+      gfx::PointF clip_origin(21.f, 27.f);
+      gfx::Size clip_size(23, 21);
 
-      clip_layer->SetPosition(clip_rect.origin());
-      clip_layer->SetBounds(clip_rect.size());
+      clip_layer->SetPosition(clip_origin);
+      clip_layer->SetBounds(clip_size);
       clip_layer->SetMasksToBounds(true);
 
       origin_layer->SetPosition(
-          gfx::PointAtOffsetFromOrigin(-clip_rect.OffsetFromOrigin()));
+          gfx::PointF(-clip_origin.x(), -clip_origin.y()));
 
       origin_layer->AddChild(delegated_renderer_layer.Pass());
       clip_layer->AddChild(origin_layer.Pass());
@@ -1186,7 +1194,7 @@ TEST_F(DelegatedRendererLayerImplTestClip,
   SetUpTest();
 
   LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   ASSERT_EQ(2u, frame.render_passes.size());
   const QuadList& contrib_delegated_quad_list =
@@ -1215,7 +1223,7 @@ TEST_F(DelegatedRendererLayerImplTestClip,
   SetUpTest();
 
   LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   ASSERT_EQ(2u, frame.render_passes.size());
   const QuadList& contrib_delegated_quad_list =
@@ -1245,7 +1253,7 @@ TEST_F(DelegatedRendererLayerImplTestClip,
 
   LayerTreeHostImpl::FrameData frame;
   host_impl_->active_tree()->BuildPropertyTreesForTesting();
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   ASSERT_EQ(2u, frame.render_passes.size());
   const QuadList& contrib_delegated_quad_list =
@@ -1276,7 +1284,7 @@ TEST_F(DelegatedRendererLayerImplTestClip,
 
   LayerTreeHostImpl::FrameData frame;
   host_impl_->active_tree()->BuildPropertyTreesForTesting();
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   ASSERT_EQ(2u, frame.render_passes.size());
   const QuadList& contrib_delegated_quad_list =
@@ -1307,7 +1315,7 @@ TEST_F(DelegatedRendererLayerImplTestClip,
   delegated_renderer_layer_->SetHasRenderSurface(true);
 
   LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   ASSERT_EQ(3u, frame.render_passes.size());
   const QuadList& contrib_delegated_quad_list =
@@ -1336,7 +1344,7 @@ TEST_F(DelegatedRendererLayerImplTestClip,
   delegated_renderer_layer_->SetHasRenderSurface(true);
 
   LayerTreeHostImpl::FrameData frame;
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   ASSERT_EQ(3u, frame.render_passes.size());
   const QuadList& contrib_delegated_quad_list =
@@ -1367,7 +1375,7 @@ TEST_F(DelegatedRendererLayerImplTestClip,
 
   LayerTreeHostImpl::FrameData frame;
   host_impl_->active_tree()->BuildPropertyTreesForTesting();
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   ASSERT_EQ(3u, frame.render_passes.size());
   const QuadList& contrib_delegated_quad_list =
@@ -1396,7 +1404,7 @@ TEST_F(DelegatedRendererLayerImplTestClip, QuadsClipped_LayerClipped_Surface) {
 
   LayerTreeHostImpl::FrameData frame;
   host_impl_->active_tree()->BuildPropertyTreesForTesting();
-  EXPECT_EQ(DRAW_SUCCESS, host_impl_->PrepareToDraw(&frame));
+  EXPECT_EQ(DRAW_SUCCESS, PrepareToDrawFrame(&frame));
 
   ASSERT_EQ(3u, frame.render_passes.size());
   const QuadList& contrib_delegated_quad_list =

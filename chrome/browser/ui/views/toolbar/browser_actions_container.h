@@ -20,7 +20,6 @@
 #include "ui/views/view.h"
 #include "ui/views/widget/widget_observer.h"
 
-class BrowserActionsContainerObserver;
 class ExtensionPopup;
 
 namespace extensions {
@@ -64,7 +63,7 @@ class ResizeArea;
 //      - The container is set to a width smaller than needed to show all icons.
 //      - There is no other container in 'overflow' mode to handle the
 //        non-visible icons for this container.
-//   s: ToolbarView::kStandardSpacing pixels of empty space (before the wrench
+//   s: ToolbarView::kStandardSpacing pixels of empty space (before the app
 //      menu).
 // The reason the container contains the trailing space "s", rather than having
 // it be handled by the parent view, is so that when the chevron is invisible
@@ -190,9 +189,10 @@ class BrowserActionsContainer
   void ExecuteExtensionCommand(const extensions::Extension* extension,
                                const extensions::Command& command);
 
-  // Add or remove an observer.
-  void AddObserver(BrowserActionsContainerObserver* observer);
-  void RemoveObserver(BrowserActionsContainerObserver* observer);
+  // Returns the preferred width given the limit of |max_width|. (Unlike most
+  // views, since we don't want to show part of an icon or a large space after
+  // the omnibox, this is probably *not* |max_width|).
+  int GetWidthForMaxWidth(int max_width) const;
 
   // Overridden from views::View:
   gfx::Size GetPreferredSize() const override;
@@ -202,7 +202,7 @@ class BrowserActionsContainer
   void OnMouseEntered(const ui::MouseEvent& event) override;
   bool GetDropFormats(
       int* formats,
-      std::set<ui::OSExchangeData::CustomFormat>* custom_formats) override;
+      std::set<ui::Clipboard::FormatType>* format_types) override;
   bool AreDropTypesRequired() override;
   bool CanDrop(const ui::OSExchangeData& data) override;
   int OnDragUpdated(const ui::DropTargetEvent& event) override;
@@ -304,9 +304,6 @@ class BrowserActionsContainer
   // the difference between main and overflow.
   BrowserActionsContainer* main_container_;
 
-  // The current width of the container.
-  int container_width_;
-
   // The resize area for the container.
   views::ResizeArea* resize_area_;
 
@@ -330,6 +327,10 @@ class BrowserActionsContainer
   // Whether or not the info bubble has been shown, if it should be.
   bool shown_bubble_;
 
+  // When the container is resizing, this is the width at which it started.
+  // If the container is not resizing, -1.
+  int resize_starting_width_;
+
   // This is used while the user is resizing (and when the animations are in
   // progress) to know how wide the delta is between the current state and what
   // we should draw.
@@ -348,8 +349,6 @@ class BrowserActionsContainer
 
   // The extension bubble that is actively showing, if any.
   views::BubbleDelegateView* active_bubble_;
-
-  base::ObserverList<BrowserActionsContainerObserver> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserActionsContainer);
 };

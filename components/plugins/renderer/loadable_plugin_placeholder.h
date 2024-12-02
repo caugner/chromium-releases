@@ -72,6 +72,7 @@ class LoadablePluginPlaceholder : public PluginPlaceholderBase {
   // Javascript callbacks:
   void LoadCallback();
   void DidFinishLoadingCallback();
+  void DidFinishIconRepositionForTestingCallback();
 
  private:
   // WebViewPlugin::Delegate methods:
@@ -122,6 +123,9 @@ class LoadablePluginPlaceholder : public PluginPlaceholderBase {
   bool in_size_recheck_;
   gfx::Rect unobscured_rect_;
   base::OneShotTimer size_update_timer_;
+
+  // True if the power saver heuristic has already been run on this content.
+  bool heuristic_run_before_;
 
   base::WeakPtrFactory<LoadablePluginPlaceholder> weak_factory_;
 

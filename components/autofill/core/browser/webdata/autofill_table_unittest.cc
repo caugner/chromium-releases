@@ -157,9 +157,7 @@ TEST_F(AutofillTableTest, Autofill) {
   field.value = ASCIIToUTF16("Superman");
   base::Time now = base::Time::Now();
   base::TimeDelta two_seconds = base::TimeDelta::FromSeconds(2);
-  EXPECT_FALSE(table_->HasFormElements());
   EXPECT_TRUE(table_->AddFormFieldValue(field, &changes));
-  EXPECT_TRUE(table_->HasFormElements());
   std::vector<base::string16> v;
   for (int i = 0; i < 5; ++i) {
     field.value = ASCIIToUTF16("Clark Kent");
@@ -274,6 +272,77 @@ TEST_F(AutofillTableTest, Autofill) {
   EXPECT_TRUE(table_->GetFormValuesForElementName(
       ASCIIToUTF16("blank"), base::string16(), &v, 10));
   EXPECT_EQ(4U, v.size());
+}
+
+TEST_F(AutofillTableTest, Autofill_GetCountOfValuesContainedBetween) {
+  AutofillChangeList changes;
+  // This test makes time comparisons that are precise to a microsecond, but the
+  // database uses the time_t format which is only precise to a second.
+  // Make sure we use timestamps rounded to a second.
+  Time begin = Time::FromTimeT(Time::Now().ToTimeT());
+  Time now = begin;
+  TimeDelta second = TimeDelta::FromSeconds(1);
+
+  struct Entry {
+    const char* name;
+    const char* value;
+  } entries[] = {
+      { "Alter ego", "Superman" },
+      { "Name", "Superman" },
+      { "Name", "Clark Kent" },
+      { "Name", "Superman" },
+      { "Name", "Clark Sutter" },
+      { "Nomen", "Clark Kent" }
+  };
+
+  for (Entry entry : entries) {
+    FormFieldData field;
+    field.name = ASCIIToUTF16(entry.name);
+    field.value = ASCIIToUTF16(entry.value);
+    ASSERT_TRUE(table_->AddFormFieldValueTime(field, &changes, now));
+    now += second;
+  }
+
+  // While the entry "Alter ego" : "Superman" is entirely contained within
+  // the first second, the value "Superman" itself appears in another entry,
+  // so it is not contained.
+  EXPECT_EQ(0, table_->GetCountOfValuesContainedBetween(
+      begin, begin + second));
+
+  // No values are entirely contained within the first three seconds either
+  // (note that the second time constraint is exclusive).
+  EXPECT_EQ(0, table_->GetCountOfValuesContainedBetween(
+      begin, begin + 3 * second));
+
+  // Only "Superman" is entirely contained within the first four seconds.
+  EXPECT_EQ(1, table_->GetCountOfValuesContainedBetween(
+      begin, begin + 4 * second));
+
+  // "Clark Kent" and "Clark Sutter" are contained between the first
+  // and seventh second.
+  EXPECT_EQ(2, table_->GetCountOfValuesContainedBetween(
+      begin + second, begin + 7 * second));
+
+  // Beginning from the third second, "Clark Kent" is not contained.
+  EXPECT_EQ(1, table_->GetCountOfValuesContainedBetween(
+      begin + 3 * second, begin + 7 * second));
+
+  // We have three distinct values total.
+  EXPECT_EQ(3, table_->GetCountOfValuesContainedBetween(
+      begin, begin + 7 * second));
+
+  // And we should get the same result for unlimited time interval.
+  EXPECT_EQ(3, table_->GetCountOfValuesContainedBetween(Time(), Time::Max()));
+
+  // The null time interval is also interpreted as unlimited.
+  EXPECT_EQ(3, table_->GetCountOfValuesContainedBetween(Time(), Time()));
+
+  // An interval that does not fully contain any entries returns zero.
+  EXPECT_EQ(0, table_->GetCountOfValuesContainedBetween(
+      begin + second, begin + 2 * second));
+
+  // So does an interval which has no intersection with any entry.
+  EXPECT_EQ(0, table_->GetCountOfValuesContainedBetween(Time(), begin));
 }
 
 TEST_F(AutofillTableTest, Autofill_RemoveBetweenChanges) {

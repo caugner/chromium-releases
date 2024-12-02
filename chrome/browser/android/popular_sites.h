@@ -8,18 +8,19 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "url/gurl.h"
 
-namespace base {
-class FilePath;
-}
-
 namespace net {
 class URLRequestContextGetter;
+}
+
+namespace user_prefs {
+class PrefRegistrySyncable;
 }
 
 class FileDownloader;
@@ -34,12 +35,14 @@ class PopularSites {
     Site(const base::string16& title,
          const GURL& url,
          const GURL& favicon_url,
+         const GURL& large_icon_url,
          const GURL& thumbnail_url);
     ~Site();
 
     base::string16 title;
     GURL url;
     GURL favicon_url;
+    GURL large_icon_url;
     GURL thumbnail_url;
   };
 
@@ -49,15 +52,11 @@ class PopularSites {
   // locale. |override_country| (if non-empty) is used to override the
   // auto-detected country. |override_version|, if non-empty, will
   // override the baked-in default version.
-  // |override_filename|, if non-empty, will override the full filename
-  // (so |override_country| and |override_version| are ignored in this case).
-  // Set |force_download| to enfore re-downloading the suggestions file, even if
-  // it already exists on disk.
-  // TODO(treib): Get rid of |override_filename|.
+  // Set |force_download| to enforce re-downloading the suggestions file, even
+  // if it already exists on disk.
   PopularSites(Profile* profile,
                const std::string& override_country,
                const std::string& override_version,
-               const std::string& override_filename,
                bool force_download,
                const FinishedCallback& callback);
 
@@ -66,20 +65,41 @@ class PopularSites {
   PopularSites(Profile* profile,
                const GURL& url,
                const FinishedCallback& callback);
+
   ~PopularSites();
 
   const std::vector<Site>& sites() const { return sites_; }
 
+  // Register preferences used by this class.
+  static void RegisterProfilePrefs(
+      user_prefs::PrefRegistrySyncable* user_prefs);
+
  private:
+  PopularSites(Profile* profile,
+               const GURL& url,
+               bool force_download,
+               const FinishedCallback& callback);
+
+  // Fetch the popular sites at the given URL. |force_download| should be true
+  // if any previously downloaded site list should be overwritten.
   void FetchPopularSites(const GURL& url,
-                         net::URLRequestContextGetter* request_context,
-                         bool force_download);
-  void OnDownloadDone(const base::FilePath& path, bool success);
+                         bool force_download,
+                         bool is_fallback);
+
+  // If the download was not successful and it was not a fallback, attempt to
+  // download the fallback suggestions.
+  void OnDownloadDone(bool success, bool is_fallback);
+
+  void ParseSiteList(const base::FilePath& path);
   void OnJsonParsed(scoped_ptr<std::vector<Site>> sites);
 
   FinishedCallback callback_;
   scoped_ptr<FileDownloader> downloader_;
   std::vector<Site> sites_;
+
+  base::FilePath popular_sites_local_path_;
+
+  Profile* profile_;
 
   base::WeakPtrFactory<PopularSites> weak_ptr_factory_;
 

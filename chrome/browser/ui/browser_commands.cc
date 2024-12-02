@@ -17,7 +17,7 @@
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/dom_distiller/tab_utils.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/media/router/media_router_dialog_controller.h"
+#include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
@@ -26,6 +26,7 @@
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/accelerator_utils.h"
+#include "chrome/browser/ui/autofill/save_card_bubble_controller_impl.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils_desktop.h"
 #include "chrome/browser/ui/browser.h"
@@ -50,11 +51,11 @@
 #include "chrome/browser/ui/tab_dialogs.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/upgrade_detector.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/content_restriction.h"
 #include "chrome/common/pref_names.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/favicon/content/content_favicon_driver.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/sessions/core/live_tab_context.h"
@@ -108,6 +109,10 @@
 
 #if defined(ENABLE_RLZ)
 #include "components/rlz/rlz_tracker.h"
+#endif
+
+#if defined(ENABLE_MEDIA_ROUTER)
+#include "chrome/browser/media/router/media_router_dialog_controller.h"
 #endif
 
 namespace {
@@ -185,6 +190,8 @@ WebContents* GetTabAndRevertIfNecessary(Browser* browser,
     case NEW_FOREGROUND_TAB:
     case NEW_BACKGROUND_TAB: {
       WebContents* new_tab = current_tab->Clone();
+      if (disposition == NEW_BACKGROUND_TAB)
+        new_tab->WasHidden();
       browser->tab_strip_model()->AddWebContents(
           new_tab, -1, ui::PAGE_TRANSITION_LINK,
           (disposition == NEW_FOREGROUND_TAB) ?
@@ -802,6 +809,17 @@ bool CanBookmarkAllTabs(const Browser* browser) {
              CanBookmarkCurrentPageInternal(browser, false);
 }
 
+#if defined(TOOLKIT_VIEWS) && !defined(OS_MACOSX)
+void SaveCreditCard(Browser* browser) {
+  WebContents* web_contents =
+      browser->tab_strip_model()->GetActiveWebContents();
+  autofill::SaveCardBubbleControllerImpl* controller =
+      autofill::SaveCardBubbleControllerImpl::FromWebContents(web_contents);
+  DCHECK(controller);
+  controller->ShowBubble(true);
+}
+#endif
+
 void Translate(Browser* browser) {
   if (!browser->window()->IsActive())
     return;
@@ -914,7 +932,8 @@ bool CanBasicPrint(Browser* browser) {
 #endif  // ENABLE_BASIC_PRINTING
 
 bool CanRouteMedia(Browser* browser) {
-  if (!switches::MediaRouterEnabled() || browser->profile()->IsOffTheRecord())
+  Profile* profile = browser->profile();
+  if (profile->IsOffTheRecord() || !media_router::MediaRouterEnabled(profile))
     return false;
 
   // Do not allow user to open Media Router dialog when there is already an
@@ -923,6 +942,7 @@ bool CanRouteMedia(Browser* browser) {
 }
 
 void RouteMedia(Browser* browser) {
+#if defined(ENABLE_MEDIA_ROUTER)
   DCHECK(CanRouteMedia(browser));
 
   media_router::MediaRouterDialogController* dialog_controller =
@@ -932,6 +952,7 @@ void RouteMedia(Browser* browser) {
     return;
 
   dialog_controller->ShowMediaRouterDialog();
+#endif  // defined(ENABLE_MEDIA_ROUTER)
 }
 
 void EmailPageLocation(Browser* browser) {
@@ -1077,7 +1098,7 @@ void ToggleBookmarkBar(Browser* browser) {
 }
 
 void ShowAppMenu(Browser* browser) {
-  // We record the user metric for this event in WrenchMenu::RunMenu.
+  // We record the user metric for this event in AppMenu::RunMenu.
   browser->window()->ShowAppMenu();
 }
 
@@ -1108,15 +1129,6 @@ void OpenUpdateChromeDialog(Browser* browser) {
     content::RecordAction(UserMetricsAction("UpdateChrome"));
     browser->window()->ShowUpdateChromeDialog();
   }
-}
-
-void ToggleSpeechInput(Browser* browser) {
-  SearchTabHelper* search_tab_helper =
-      SearchTabHelper::FromWebContents(
-          browser->tab_strip_model()->GetActiveWebContents());
-  // |search_tab_helper| can be null in unit tests.
-  if (search_tab_helper)
-    search_tab_helper->ToggleVoiceSearch();
 }
 
 void DistillCurrentPage(Browser* browser) {

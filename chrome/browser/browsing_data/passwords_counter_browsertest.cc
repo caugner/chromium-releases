@@ -82,15 +82,20 @@ class PasswordsCounterTest : public InProcessBrowserTest,
     run_loop_->Run();
   }
 
-  uint32 GetResult() {
+  BrowsingDataCounter::ResultInt GetResult() {
     DCHECK(finished_);
     return result_;
   }
 
-  void Callback(bool finished, uint32 count) {
-    finished_ = finished;
-    result_ = count;
-    if (run_loop_ && finished)
+  void Callback(scoped_ptr<BrowsingDataCounter::Result> result) {
+    finished_ = result->Finished();
+
+    if (finished_) {
+      result_ = static_cast<BrowsingDataCounter::FinishedResult*>(
+          result.get())->Value();
+    }
+
+    if (run_loop_ && finished_)
       run_loop_->Quit();
   }
 
@@ -114,7 +119,7 @@ class PasswordsCounterTest : public InProcessBrowserTest,
   base::Time time_;
 
   bool finished_;
-  uint32 result_;
+  BrowsingDataCounter::ResultInt result_;
 };
 
 // Tests that the counter correctly counts each individual credential on

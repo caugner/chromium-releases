@@ -55,6 +55,8 @@ using content::WebContents;
 
 class LoginHandlerImpl;
 
+namespace {
+
 // Helper to remove the ref from an net::URLRequest to the LoginHandler.
 // Should only be called from the IO thread, since it accesses an
 // net::URLRequest.
@@ -62,29 +64,103 @@ void ResetLoginHandlerForRequest(net::URLRequest* request) {
   ResourceDispatcherHost::Get()->ClearLoginDelegateForRequest(request);
 }
 
-// Get the signon_realm under which this auth info should be stored.
-//
-// The format of the signon_realm for proxy auth is:
-//     proxy-host/auth-realm
-// The format of the signon_realm for server auth is:
-//     url-scheme://url-host[:url-port]/auth-realm
-//
-// Be careful when changing this function, since you could make existing
-// saved logins un-retrievable.
-std::string GetSignonRealm(const GURL& url,
-                           const net::AuthChallengeInfo& auth_info) {
-  std::string signon_realm;
-  if (auth_info.is_proxy) {
-    signon_realm = auth_info.challenger.ToString();
-    signon_realm.append("/");
+// Helper to create a PasswordForm for PasswordManager to start looking for
+// saved credentials.
+PasswordForm MakeInputForPasswordManager(const GURL& request_url,
+                                         net::AuthChallengeInfo* auth_info) {
+  PasswordForm dialog_form;
+  if (base::LowerCaseEqualsASCII(auth_info->scheme, "basic")) {
+    dialog_form.scheme = PasswordForm::SCHEME_BASIC;
+  } else if (base::LowerCaseEqualsASCII(auth_info->scheme, "digest")) {
+    dialog_form.scheme = PasswordForm::SCHEME_DIGEST;
   } else {
-    // Take scheme, host, and port from the url.
-    signon_realm = url.GetOrigin().spec();
-    // This ends with a "/".
+    dialog_form.scheme = PasswordForm::SCHEME_OTHER;
   }
-  signon_realm.append(auth_info.realm);
-  return signon_realm;
+  std::string host_and_port(auth_info->challenger.ToString());
+  if (auth_info->is_proxy) {
+    std::string origin = host_and_port;
+    // We don't expect this to already start with http:// or https://.
+    DCHECK(origin.find("http://") != 0 && origin.find("https://") != 0);
+    origin = std::string("http://") + origin;
+    dialog_form.origin = GURL(origin);
+  } else if (!auth_info->challenger.Equals(
+                 net::HostPortPair::FromURL(request_url))) {
+    dialog_form.origin = GURL();
+    NOTREACHED();  // crbug.com/32718
+  } else {
+    dialog_form.origin = GURL(request_url.scheme() + "://" + host_and_port);
+  }
+  dialog_form.signon_realm = GetSignonRealm(dialog_form.origin, *auth_info);
+  return dialog_form;
 }
+
+void ShowLoginPrompt(const GURL& request_url,
+                     net::AuthChallengeInfo* auth_info,
+                     LoginHandler* handler) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  WebContents* parent_contents = handler->GetWebContentsForLogin();
+  if (!parent_contents)
+    return;
+  prerender::PrerenderContents* prerender_contents =
+      prerender::PrerenderContents::FromWebContents(parent_contents);
+  if (prerender_contents) {
+    prerender_contents->Destroy(prerender::FINAL_STATUS_AUTH_NEEDED);
+    return;
+  }
+
+  // The realm is controlled by the remote server, so there is no reason
+  // to believe it is of a reasonable length.
+  base::string16 elided_realm;
+  gfx::ElideString(base::UTF8ToUTF16(auth_info->realm), 120, &elided_realm);
+
+  std::string languages;
+  content::WebContents* web_contents = handler->GetWebContentsForLogin();
+  if (web_contents) {
+    Profile* profile =
+        Profile::FromBrowserContext(web_contents->GetBrowserContext());
+    if (profile)
+      languages = profile->GetPrefs()->GetString(prefs::kAcceptLanguages);
+  }
+
+  base::string16 authority =
+      url_formatter::FormatUrlForSecurityDisplay(request_url, languages);
+  base::string16 explanation =
+      elided_realm.empty()
+          ? l10n_util::GetStringFUTF16(IDS_LOGIN_DIALOG_DESCRIPTION_NO_REALM,
+                                       authority)
+          : l10n_util::GetStringFUTF16(IDS_LOGIN_DIALOG_DESCRIPTION, authority,
+                                       elided_realm);
+
+  password_manager::PasswordManager* password_manager =
+      handler->GetPasswordManagerForLogin();
+
+  if (!password_manager) {
+#if defined(ENABLE_EXTENSIONS)
+    // A WebContents in a <webview> (a GuestView type) does not have a password
+    // manager, but still needs to be able to show login prompts.
+    if (guest_view::GuestViewBase::FromWebContents(parent_contents)) {
+      handler->BuildViewWithoutPasswordManager(explanation);
+      return;
+    }
+#endif
+    handler->CancelAuth();
+    return;
+  }
+
+  if (password_manager && password_manager->client()->IsLoggingActive()) {
+    password_manager::BrowserSavePasswordProgressLogger logger(
+        password_manager->client());
+    logger.LogMessage(
+        autofill::SavePasswordProgressLogger::STRING_SHOW_LOGIN_PROMPT_METHOD);
+  }
+
+  PasswordForm observed_form(
+      MakeInputForPasswordManager(request_url, auth_info));
+  handler->BuildViewWithPasswordManager(explanation, password_manager,
+                                        observed_form);
+}
+
+}  // namespace
 
 // ----------------------------------------------------------------------------
 // LoginHandler
@@ -106,7 +182,7 @@ LoginHandler::LoginHandler(net::AuthChallengeInfo* auth_info,
       password_manager_(NULL),
       login_model_(NULL) {
   // This constructor is called on the I/O thread, so we cannot load the nib
-  // here. BuildView() will be invoked on the UI thread later, so wait with
+  // here. BuildViewImpl() will be invoked on the UI thread later, so wait with
   // loading the nib until then.
   DCHECK(request_) << "LoginHandler constructed with NULL request";
   DCHECK(auth_info_.get()) << "LoginHandler constructed with NULL auth info";
@@ -136,13 +212,19 @@ void LoginHandler::OnRequestCancelled() {
   DoCancelAuth(true);
 }
 
-void LoginHandler::SetPasswordForm(const autofill::PasswordForm& form) {
-  password_form_ = form;
+void LoginHandler::BuildViewWithPasswordManager(
+    const base::string16& explanation,
+    password_manager::PasswordManager* password_manager,
+    const autofill::PasswordForm& observed_form) {
+  password_manager_ = password_manager;
+  password_form_ = observed_form;
+  LoginHandler::LoginModelData model_data(password_manager, observed_form);
+  BuildViewImpl(explanation, &model_data);
 }
 
-void LoginHandler::SetPasswordManager(
-    password_manager::PasswordManager* password_manager) {
-  password_manager_ = password_manager;
+void LoginHandler::BuildViewWithoutPasswordManager(
+    const base::string16& explanation) {
+  BuildViewImpl(explanation, nullptr);
 }
 
 WebContents* LoginHandler::GetWebContentsForLogin() const {
@@ -154,7 +236,7 @@ WebContents* LoginHandler::GetWebContentsForLogin() const {
 }
 
 password_manager::PasswordManager* LoginHandler::GetPasswordManagerForLogin() {
-  ChromePasswordManagerClient* client =
+  password_manager::PasswordManagerClient* client =
       ChromePasswordManagerClient::FromWebContents(GetWebContentsForLogin());
   return client ? client->GetPasswordManager() : nullptr;
 }
@@ -268,8 +350,7 @@ LoginHandler::~LoginHandler() {
 }
 
 void LoginHandler::SetModel(LoginModelData model_data) {
-  if (login_model_)
-    login_model_->RemoveObserver(this);
+  ResetModel();
   login_model_ = model_data.model;
   login_model_->AddObserverAndDeliverCredentials(this, model_data.form);
 }
@@ -366,13 +447,18 @@ void LoginHandler::NotifyAuthCancelled(bool dismiss_navigation) {
   NavigationController* controller = NULL;
 
   WebContents* requesting_contents = GetWebContentsForLogin();
-  if (requesting_contents)
+  if (requesting_contents) {
     controller = &requesting_contents->GetController();
-
-  if (dismiss_navigation && interstitial_delegate_)
-    interstitial_delegate_->DontProceed();
+    if (dismiss_navigation) {
+      content::InterstitialPage* interstitial_page =
+          requesting_contents->GetInterstitialPage();
+      if (interstitial_page)
+        interstitial_page->DontProceed();
+    }
+  }
 
   LoginNotificationDetails details(this);
+
   service->Notify(chrome::NOTIFICATION_AUTH_CANCELLED,
                   content::Source<NavigationController>(controller),
                   content::Details<LoginNotificationDetails>(&details));
@@ -432,110 +518,18 @@ void LoginHandler::CancelAuthDeferred() {
 // Closes the view_contents from the UI loop.
 void LoginHandler::CloseContentsDeferred() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
   CloseDialog();
-  if (interstitial_delegate_)
-    interstitial_delegate_->Proceed();
-}
 
-// Helper to create a PasswordForm for PasswordManager to start looking for
-// saved credentials.
-PasswordForm MakeInputForPasswordManager(const GURL& request_url,
-                                         net::AuthChallengeInfo* auth_info,
-                                         LoginHandler* handler) {
-  PasswordForm dialog_form;
-  if (base::LowerCaseEqualsASCII(auth_info->scheme, "basic")) {
-    dialog_form.scheme = PasswordForm::SCHEME_BASIC;
-  } else if (base::LowerCaseEqualsASCII(auth_info->scheme, "digest")) {
-    dialog_form.scheme = PasswordForm::SCHEME_DIGEST;
-  } else {
-    dialog_form.scheme = PasswordForm::SCHEME_OTHER;
-  }
-  std::string host_and_port(auth_info->challenger.ToString());
-  if (auth_info->is_proxy) {
-    std::string origin = host_and_port;
-    // We don't expect this to already start with http:// or https://.
-    DCHECK(origin.find("http://") != 0 && origin.find("https://") != 0);
-    origin = std::string("http://") + origin;
-    dialog_form.origin = GURL(origin);
-  } else if (!auth_info->challenger.Equals(
-      net::HostPortPair::FromURL(request_url))) {
-    dialog_form.origin = GURL();
-    NOTREACHED();  // crbug.com/32718
-  } else {
-    dialog_form.origin = GURL(request_url.scheme() + "://" + host_and_port);
-  }
-  dialog_form.signon_realm = GetSignonRealm(dialog_form.origin, *auth_info);
-  // Set the password form for the handler (by copy).
-  handler->SetPasswordForm(dialog_form);
-  return dialog_form;
-}
-
-void ShowLoginPrompt(const GURL& request_url,
-                     net::AuthChallengeInfo* auth_info,
-                     LoginHandler* handler) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  WebContents* parent_contents = handler->GetWebContentsForLogin();
-  if (!parent_contents)
+  WebContents* requesting_contents = GetWebContentsForLogin();
+  if (!requesting_contents)
     return;
-  prerender::PrerenderContents* prerender_contents =
-      prerender::PrerenderContents::FromWebContents(parent_contents);
-  if (prerender_contents) {
-    prerender_contents->Destroy(prerender::FINAL_STATUS_AUTH_NEEDED);
-    return;
-  }
-
-  // The realm is controlled by the remote server, so there is no reason
-  // to believe it is of a reasonable length.
-  base::string16 elided_realm;
-  gfx::ElideString(base::UTF8ToUTF16(auth_info->realm), 120, &elided_realm);
-
-  std::string languages;
-  content::WebContents* web_contents = handler->GetWebContentsForLogin();
-  if (web_contents) {
-    Profile* profile =
-        Profile::FromBrowserContext(web_contents->GetBrowserContext());
-    if (profile)
-      languages = profile->GetPrefs()->GetString(prefs::kAcceptLanguages);
-  }
-
-  base::string16 authority =
-      url_formatter::FormatUrlForSecurityDisplay(request_url, languages);
-  base::string16 explanation =
-      elided_realm.empty()
-          ? l10n_util::GetStringFUTF16(IDS_LOGIN_DIALOG_DESCRIPTION_NO_REALM,
-                                       authority)
-          : l10n_util::GetStringFUTF16(IDS_LOGIN_DIALOG_DESCRIPTION, authority,
-                                       elided_realm);
-
-  password_manager::PasswordManager* password_manager =
-      handler->GetPasswordManagerForLogin();
-
-  if (!password_manager) {
-#if defined(ENABLE_EXTENSIONS)
-    // A WebContents in a <webview> (a GuestView type) does not have a password
-    // manager, but still needs to be able to show login prompts.
-    if (guest_view::GuestViewBase::FromWebContents(parent_contents)) {
-      handler->BuildView(explanation, nullptr);
-      return;
-    }
-#endif
-    handler->CancelAuth();
-    return;
-  }
-
-  if (password_manager && password_manager->client()->IsLoggingActive()) {
-    password_manager::BrowserSavePasswordProgressLogger logger(
-        password_manager->client());
-    logger.LogMessage(
-        autofill::SavePasswordProgressLogger::STRING_SHOW_LOGIN_PROMPT_METHOD);
-  }
-
-  handler->SetPasswordManager(password_manager);
-
-  PasswordForm observed_form(
-      MakeInputForPasswordManager(request_url, auth_info, handler));
-  LoginHandler::LoginModelData model_data(password_manager, observed_form);
-  handler->BuildView(explanation, &model_data);
+  // If a (blank) login interstitial was displayed, proceed so that the
+  // navigation is committed.
+  content::InterstitialPage* interstitial_page =
+      requesting_contents->GetInterstitialPage();
+  if (interstitial_page)
+    interstitial_page->Proceed();
 }
 
 // This callback is run on the UI thread and creates a constrained window with
@@ -583,13 +577,15 @@ void LoginDialogCallback(const GURL& request_url,
                                         request_url,
                                         make_scoped_refptr(auth_info),
                                         make_scoped_refptr(handler));
-    // The interstitial delegate is owned by the interstitial that it creates.
-    // This cancels any existing interstitial.
-    handler->SetInterstitialDelegate(
-        (new LoginInterstitialDelegate(parent_contents, request_url, callback))
-            ->GetWeakPtr());
+    // This is owned by the interstitial it creates. It cancels any existing
+    // interstitial.
+    new LoginInterstitialDelegate(parent_contents,
+                                  request_url,
+                                  callback);
   } else {
-    ShowLoginPrompt(request_url, auth_info, handler);
+    ShowLoginPrompt(request_url,
+                    auth_info,
+                    handler);
   }
 }
 
@@ -606,4 +602,28 @@ LoginHandler* CreateLoginPrompt(net::AuthChallengeInfo* auth_info,
                  make_scoped_refptr(auth_info), make_scoped_refptr(handler),
                  is_main_frame));
   return handler;
+}
+
+// Get the signon_realm under which this auth info should be stored.
+//
+// The format of the signon_realm for proxy auth is:
+//     proxy-host/auth-realm
+// The format of the signon_realm for server auth is:
+//     url-scheme://url-host[:url-port]/auth-realm
+//
+// Be careful when changing this function, since you could make existing
+// saved logins un-retrievable.
+std::string GetSignonRealm(const GURL& url,
+                           const net::AuthChallengeInfo& auth_info) {
+  std::string signon_realm;
+  if (auth_info.is_proxy) {
+    signon_realm = auth_info.challenger.ToString();
+    signon_realm.append("/");
+  } else {
+    // Take scheme, host, and port from the url.
+    signon_realm = url.GetOrigin().spec();
+    // This ends with a "/".
+  }
+  signon_realm.append(auth_info.realm);
+  return signon_realm;
 }

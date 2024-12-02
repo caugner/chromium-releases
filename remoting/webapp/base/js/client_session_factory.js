@@ -53,9 +53,7 @@ remoting.ClientSessionFactory.prototype.createSession =
 
   function OnError(/** !remoting.Error */ error) {
     logger.logSessionStateChange(
-        remoting.ChromotingEvent.SessionState.CONNECTION_FAILED,
-        toConnectionError(error));
-
+        remoting.ChromotingEvent.SessionState.CONNECTION_FAILED, error);
     base.dispose(signalStrategy);
     base.dispose(clientPlugin);
     throw error;
@@ -67,14 +65,12 @@ remoting.ClientSessionFactory.prototype.createSession =
     return remoting.identity.getUserInfo();
   }).then(function(/** {email: string, name: string} */ userInfo) {
     logger.logSessionStateChange(
-        remoting.ChromotingEvent.SessionState.SIGNALING,
-        remoting.ChromotingEvent.ConnectionError.NONE);
+        remoting.ChromotingEvent.SessionState.SIGNALING);
     return connectSignaling(userInfo.email, token);
   }).then(function(/** remoting.SignalStrategy */ strategy) {
     signalStrategy = strategy;
     logger.logSessionStateChange(
-        remoting.ChromotingEvent.SessionState.CREATING_PLUGIN,
-        remoting.ChromotingEvent.ConnectionError.NONE);
+        remoting.ChromotingEvent.SessionState.CREATING_PLUGIN);
     return createPlugin(that.container_, that.requiredCapabilities_);
   }).then(function(/** remoting.ClientPlugin */ plugin) {
     clientPlugin = plugin;
@@ -125,17 +121,6 @@ function createPlugin(container, capabilities) {
   return plugin.initialize().then(function() {
     return plugin;
   });
-}
-
-/**
- * @param {remoting.Error} e
- * @return {remoting.ChromotingEvent.ConnectionError}
- */
-function toConnectionError(/** Error */ e) {
-  if (e instanceof remoting.Error) {
-    return e.toConnectionError();
-  }
-  return remoting.ChromotingEvent.ConnectionError.UNEXPECTED;
 }
 
 })();

@@ -6,6 +6,7 @@
 
 #include "base/auto_reset.h"
 #include "base/callback_helpers.h"
+#include "base/containers/scoped_ptr_map.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/utf_string_conversions.h"
@@ -16,6 +17,7 @@
 #include "chrome/browser/media/media_permission.h"
 #include "chrome/browser/media/media_stream_capture_indicator.h"
 #include "chrome/browser/media/media_stream_device_permissions.h"
+#include "chrome/browser/permissions/permission_uma_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
@@ -25,6 +27,8 @@
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/common/media_stream_request.h"
 #include "content/public/common/origin_util.h"
@@ -45,19 +49,11 @@ using content::BrowserThread;
 
 namespace {
 
-enum DevicePermissionActions {
-  kAllowHttps = 0,
-  kAllowHttp,
-  kDeny,
-  kCancel,
-  kPermissionActionsMax  // Must always be last!
-};
-
 // Returns true if the given ContentSettingsType is being requested in
 // |request|.
 bool ContentTypeIsRequested(ContentSettingsType type,
                             const content::MediaStreamRequest& request) {
-  if (request.request_type == content::MEDIA_OPEN_DEVICE)
+  if (request.request_type == content::MEDIA_OPEN_DEVICE_PEPPER_ONLY)
     return true;
 
   if (type == CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC)
@@ -69,6 +65,81 @@ bool ContentTypeIsRequested(ContentSettingsType type,
   return false;
 }
 
+using PermissionActionCallback =
+    base::Callback<void(ContentSettingsType, const GURL&)>;
+
+// Calls |action_function| for each permission requested by |request|.
+void RecordPermissionAction(const content::MediaStreamRequest& request,
+                            PermissionActionCallback callback) {
+  if (ContentTypeIsRequested(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
+                             request)) {
+    callback.Run(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
+                 request.security_origin);
+  }
+  if (ContentTypeIsRequested(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, request)) {
+    callback.Run(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
+                 request.security_origin);
+  }
+}
+
+// This helper class helps to measure the number of media stream requests that
+// occur. It ensures that only one request will be recorded per navigation, per
+// frame. TODO(raymes): Remove this when https://crbug.com/526324 is fixed.
+class MediaPermissionRequestLogger : content::WebContentsObserver {
+  // Map of <render process id, render frame id> ->
+  // MediaPermissionRequestLogger.
+  using RequestMap =
+      base::ScopedPtrMap<std::pair<int, int>,
+                         scoped_ptr<MediaPermissionRequestLogger>>;
+
+ public:
+  static void LogRequest(content::WebContents* contents,
+                         int render_process_id,
+                         int render_frame_id,
+                         bool is_secure) {
+    RequestMap::key_type key =
+        std::make_pair(render_process_id, render_frame_id);
+    if (!ContainsKey(GetRequestMap(), key)) {
+      UMA_HISTOGRAM_BOOLEAN("Pepper.SecureOrigin.MediaStreamRequest",
+                            is_secure);
+      GetRequestMap().set(key, make_scoped_ptr(new MediaPermissionRequestLogger(
+                                   contents, key)));
+    }
+  }
+
+ private:
+  MediaPermissionRequestLogger(content::WebContents* contents,
+                               RequestMap::key_type key)
+      : WebContentsObserver(contents), key_(key) {}
+
+  void PageChanged(content::RenderFrameHost* render_frame_host) {
+    if (std::make_pair(render_frame_host->GetProcess()->GetID(),
+                       render_frame_host->GetRoutingID()) == key_) {
+      GetRequestMap().erase(key_);
+    }
+  }
+
+  static RequestMap& GetRequestMap() {
+    CR_DEFINE_STATIC_LOCAL(RequestMap, request_map, ());
+    return request_map;
+  }
+
+  // content::WebContentsObserver overrides
+  void DidNavigateAnyFrame(
+      content::RenderFrameHost* render_frame_host,
+      const content::LoadCommittedDetails& details,
+      const content::FrameNavigateParams& params) override {
+    PageChanged(render_frame_host);
+  }
+
+  void RenderFrameDeleted(
+      content::RenderFrameHost* render_frame_host) override {
+    PageChanged(render_frame_host);
+  }
+
+  RequestMap::key_type key_;
+};
+
 }  // namespace
 
 MediaStreamDevicesController::MediaStreamDevicesController(
@@ -79,9 +150,10 @@ MediaStreamDevicesController::MediaStreamDevicesController(
       request_(request),
       callback_(callback),
       persist_permission_changes_(true) {
-  if (request_.request_type == content::MEDIA_OPEN_DEVICE) {
-    UMA_HISTOGRAM_BOOLEAN("Pepper.SecureOrigin.MediaStreamRequest",
-                          content::IsOriginSecure(request_.security_origin));
+  if (request_.request_type == content::MEDIA_OPEN_DEVICE_PEPPER_ONLY) {
+    MediaPermissionRequestLogger::LogRequest(
+        web_contents, request.render_process_id, request.render_frame_id,
+        content::IsOriginSecure(request_.security_origin));
   }
   profile_ = Profile::FromBrowserContext(web_contents->GetBrowserContext());
   content_settings_ = TabSpecificContentSettings::FromWebContents(web_contents);
@@ -124,6 +196,8 @@ MediaStreamDevicesController::MediaStreamDevicesController(
 
 MediaStreamDevicesController::~MediaStreamDevicesController() {
   if (!callback_.is_null()) {
+    RecordPermissionAction(
+        request_, base::Bind(PermissionUmaUtil::PermissionIgnored));
     callback_.Run(content::MediaStreamDevices(),
                   content::MEDIA_DEVICE_FAILED_DUE_TO_SHUTDOWN,
                   scoped_ptr<content::MediaStreamUI>());
@@ -162,8 +236,8 @@ const std::string& MediaStreamDevicesController::GetSecurityOriginSpec() const {
 void MediaStreamDevicesController::ForcePermissionDeniedTemporarily() {
   base::AutoReset<bool> persist_permissions(
       &persist_permission_changes_, false);
-  UMA_HISTOGRAM_ENUMERATION("Media.DevicePermissionActions",
-                            kDeny, kPermissionActionsMax);
+  // TODO(tsergeant): Determine whether it is appropriate to record permission
+  // action metrics here, as this is a different sort of user action.
   RunCallback(CONTENT_SETTING_BLOCK,
               CONTENT_SETTING_BLOCK,
               content::MEDIA_DEVICE_PERMISSION_DENIED);
@@ -204,14 +278,8 @@ GURL MediaStreamDevicesController::GetRequestingHostname() const {
 }
 
 void MediaStreamDevicesController::PermissionGranted() {
-  GURL origin(GetSecurityOriginSpec());
-  if (content::IsOriginSecure(origin)) {
-    UMA_HISTOGRAM_ENUMERATION("Media.DevicePermissionActions",
-                              kAllowHttps, kPermissionActionsMax);
-  } else {
-    UMA_HISTOGRAM_ENUMERATION("Media.DevicePermissionActions",
-                              kAllowHttp, kPermissionActionsMax);
-  }
+  RecordPermissionAction(
+      request_, base::Bind(PermissionUmaUtil::PermissionGranted));
   RunCallback(GetNewSetting(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
                             old_audio_setting_, CONTENT_SETTING_ALLOW),
               GetNewSetting(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
@@ -220,8 +288,8 @@ void MediaStreamDevicesController::PermissionGranted() {
 }
 
 void MediaStreamDevicesController::PermissionDenied() {
-  UMA_HISTOGRAM_ENUMERATION("Media.DevicePermissionActions",
-                            kDeny, kPermissionActionsMax);
+  RecordPermissionAction(
+      request_, base::Bind(PermissionUmaUtil::PermissionDenied));
   RunCallback(GetNewSetting(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
                             old_audio_setting_, CONTENT_SETTING_BLOCK),
               GetNewSetting(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
@@ -230,8 +298,8 @@ void MediaStreamDevicesController::PermissionDenied() {
 }
 
 void MediaStreamDevicesController::Cancelled() {
-  UMA_HISTOGRAM_ENUMERATION("Media.DevicePermissionActions",
-                            kCancel, kPermissionActionsMax);
+  RecordPermissionAction(
+      request_, base::Bind(PermissionUmaUtil::PermissionDismissed));
   RunCallback(old_audio_setting_, old_video_setting_,
               content::MEDIA_DEVICE_PERMISSION_DISMISSED);
 }
@@ -251,7 +319,7 @@ content::MediaStreamDevices MediaStreamDevicesController::GetDevices(
 
   content::MediaStreamDevices devices;
   switch (request_.request_type) {
-    case content::MEDIA_OPEN_DEVICE: {
+    case content::MEDIA_OPEN_DEVICE_PEPPER_ONLY: {
       const content::MediaStreamDevice* device = NULL;
       // For open device request, when requested device_id is empty, pick
       // the first available of the given type. If requested device_id is
@@ -392,7 +460,8 @@ void MediaStreamDevicesController::StorePermission(
   ContentSettingsPattern primary_pattern =
       ContentSettingsPattern::FromURLNoWildcard(request_.security_origin);
 
-  bool is_pepper_request = request_.request_type == content::MEDIA_OPEN_DEVICE;
+  bool is_pepper_request =
+      request_.request_type == content::MEDIA_OPEN_DEVICE_PEPPER_ONLY;
 
   if (IsAskingForAudio() && new_audio_setting != CONTENT_SETTING_ASK) {
     if (ShouldPersistContentSetting(new_audio_setting, request_.security_origin,
@@ -479,8 +548,11 @@ ContentSetting MediaStreamDevicesController::GetContentSetting(
   }
 
   if (ContentTypeIsRequested(content_type, request)) {
+    bool is_insecure_pepper_request =
+        request.request_type == content::MEDIA_OPEN_DEVICE_PEPPER_ONLY &&
+        request.security_origin.SchemeIs(url::kHttpScheme);
     MediaPermission permission(
-        content_type, request.request_type, request.security_origin,
+        content_type, is_insecure_pepper_request, request.security_origin,
         web_contents_->GetLastCommittedURL().GetOrigin(), profile_);
     return permission.GetPermissionStatusWithDeviceRequired(requested_device_id,
                                                             denial_reason);

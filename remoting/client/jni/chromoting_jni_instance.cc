@@ -21,7 +21,7 @@
 #include "remoting/protocol/chromium_port_allocator.h"
 #include "remoting/protocol/chromium_socket_factory.h"
 #include "remoting/protocol/host_stub.h"
-#include "remoting/protocol/libjingle_transport_factory.h"
+#include "remoting/protocol/ice_transport_factory.h"
 #include "remoting/protocol/negotiating_client_authenticator.h"
 #include "remoting/protocol/network_settings.h"
 #include "remoting/protocol/performance_tracker.h"
@@ -263,6 +263,18 @@ void ChromotingJniInstance::SendTextEvent(const std::string& text) {
   client_->input_stub()->InjectTextEvent(event);
 }
 
+void ChromotingJniInstance::SendTouchEvent(
+    const protocol::TouchEvent& touch_event) {
+  if (!jni_runtime_->network_task_runner()->BelongsToCurrentThread()) {
+    jni_runtime_->network_task_runner()->PostTask(
+        FROM_HERE,
+        base::Bind(&ChromotingJniInstance::SendTouchEvent, this, touch_event));
+    return;
+  }
+
+  client_->input_stub()->InjectTouchEvent(touch_event);
+}
+
 void ChromotingJniInstance::EnableVideoChannel(bool enable) {
   if (!jni_runtime_->network_task_runner()->BelongsToCurrentThread()) {
     jni_runtime_->network_task_runner()->PostTask(
@@ -416,7 +428,7 @@ void ChromotingJniInstance::ConnectToHostOnNetworkThread() {
                                               network_settings));
 
   scoped_ptr<protocol::TransportFactory> transport_factory(
-      new protocol::LibjingleTransportFactory(
+      new protocol::IceTransportFactory(
           signaling_.get(), port_allocator.Pass(), network_settings,
           protocol::TransportRole::CLIENT));
 

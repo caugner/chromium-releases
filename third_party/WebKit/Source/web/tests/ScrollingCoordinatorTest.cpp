@@ -25,6 +25,7 @@
 #include "config.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
 
+#include "core/frame/FrameView.h"
 #include "core/layout/LayoutPart.h"
 #include "core/layout/LayoutView.h"
 #include "core/layout/compositing/CompositedLayerMapping.h"
@@ -56,7 +57,7 @@ public:
 
         // OSX attaches main frame scrollbars to the VisualViewport so the VisualViewport layers need
         // to be initialized.
-        webViewImpl()->layout();
+        webViewImpl()->updateAllLifecyclePhases();
         webViewImpl()->setRootGraphicsLayer(
             webViewImpl()->mainFrameImpl()->frame()->view()->layoutView()->compositor()->rootGraphicsLayer());
     }
@@ -73,7 +74,7 @@ public:
 
     void forceFullCompositingUpdate()
     {
-        webViewImpl()->layout();
+        webViewImpl()->updateAllLifecyclePhases();
     }
 
     void registerMockedHttpURLLoad(const std::string& fileName)
@@ -534,8 +535,6 @@ TEST_F(ScrollingCoordinatorTest, setupScrollbarLayerShouldNotCrash)
 
 TEST_F(ScrollingCoordinatorTest, scrollbarsForceMainThreadOrHaveWebScrollbarLayer)
 {
-    blink::FrameTestHelpers::UseMockScrollbarSettings mockScrollbarSettings;
-
     registerMockedHttpURLLoad("trivial-scroller.html");
     navigateTo(m_baseURL + "trivial-scroller.html");
     forceFullCompositingUpdate();

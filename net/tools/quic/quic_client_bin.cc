@@ -19,7 +19,7 @@
 //   quic_client https://www.google.com --port=443  --host=${IP}
 //
 // Use a specific version:
-//   quic_client http://www.google.com --version=23  --host=${IP}
+//   quic_client http://www.google.com --quic_version=23  --host=${IP}
 //
 // Send a POST instead of a GET:
 //   quic_client http://www.google.com --body="this is a POST body" --host=${IP}
@@ -43,6 +43,7 @@
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -76,7 +77,7 @@ using std::endl;
 // The IP or hostname the quic client will connect to.
 string FLAGS_host = "";
 // The port to connect to.
-int32 FLAGS_port = 80;
+int32 FLAGS_port = 0;
 // If set, send a POST with this body.
 string FLAGS_body = "";
 // A semicolon separated list of key:value pairs to add to request headers.
@@ -176,16 +177,19 @@ int main(int argc, char *argv[]) {
           << " initial_mtu: " << FLAGS_initial_mtu;
 
   base::AtExitManager exit_manager;
+  base::MessageLoopForIO message_loop;
 
   // Determine IP address to connect to from supplied hostname.
   net::IPAddressNumber ip_addr;
 
-  // TODO(rtenneti): GURL's doesn't support default_protocol argument, thus
-  // protocol is required in the URL.
   GURL url(urls[0]);
   string host = FLAGS_host;
   if (host.empty()) {
     host = url.host();
+  }
+  int port = FLAGS_port;
+  if (port == 0) {
+    port = url.EffectiveIntPort();
   }
   if (!net::ParseIPLiteralToNumber(host, &ip_addr)) {
     net::AddressList addresses;
@@ -198,29 +202,29 @@ int main(int argc, char *argv[]) {
     ip_addr = addresses[0].address();
   }
 
-  string host_port = net::IPAddressToStringWithPort(ip_addr, FLAGS_port);
+  string host_port = net::IPAddressToStringWithPort(ip_addr, port);
   VLOG(1) << "Resolved " << host << " to " << host_port << endl;
 
   // Build the client, and try to connect.
   net::EpollServer epoll_server;
-  net::QuicServerId server_id(url.host(), FLAGS_port, /*is_https=*/true,
+  net::QuicServerId server_id(url.host(), url.EffectiveIntPort(),
                               net::PRIVACY_MODE_DISABLED);
   net::QuicVersionVector versions = net::QuicSupportedVersions();
   if (FLAGS_quic_version != -1) {
     versions.clear();
     versions.push_back(static_cast<net::QuicVersion>(FLAGS_quic_version));
   }
-  net::tools::QuicClient client(net::IPEndPoint(ip_addr, FLAGS_port), server_id,
-                                versions, &epoll_server);
   scoped_ptr<CertVerifier> cert_verifier;
   scoped_ptr<TransportSecurityState> transport_security_state;
-  client.set_initial_max_packet_length(
-      FLAGS_initial_mtu != 0 ? FLAGS_initial_mtu : net::kDefaultMaxPacketSize);
   // For secure QUIC we need to verify the cert chain.
   cert_verifier = CertVerifier::CreateDefault();
   transport_security_state.reset(new TransportSecurityState);
-  client.SetProofVerifier(new ProofVerifierChromium(
-      cert_verifier.get(), nullptr, transport_security_state.get()));
+  ProofVerifierChromium* proof_verifier = new ProofVerifierChromium(
+      cert_verifier.get(), nullptr, transport_security_state.get());
+  net::tools::QuicClient client(net::IPEndPoint(ip_addr, FLAGS_port), server_id,
+                                versions, &epoll_server, proof_verifier);
+  client.set_initial_max_packet_length(
+      FLAGS_initial_mtu != 0 ? FLAGS_initial_mtu : net::kDefaultMaxPacketSize);
   if (!client.Initialize()) {
     cerr << "Failed to initialize client." << endl;
     return 1;
@@ -268,8 +272,7 @@ int main(int argc, char *argv[]) {
 
   // Send the request.
   net::SpdyHeaderBlock header_block =
-      net::tools::SpdyBalsaUtils::RequestHeadersToSpdyHeaders(
-          headers, client.session()->connection()->version());
+      net::tools::SpdyBalsaUtils::RequestHeadersToSpdyHeaders(headers);
   client.SendRequestAndWaitForResponse(headers, FLAGS_body, /*fin=*/true);
 
   // Print request and response details.

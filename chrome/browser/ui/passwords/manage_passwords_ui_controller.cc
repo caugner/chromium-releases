@@ -30,7 +30,7 @@
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/password_manager/account_chooser_dialog_android.h"
 #else
-#include "chrome/browser/ui/passwords/manage_passwords_icon.h"
+#include "chrome/browser/ui/passwords/manage_passwords_icon_view.h"
 #endif
 
 using autofill::PasswordFormMap;
@@ -122,7 +122,7 @@ bool ManagePasswordsUIController::OnChooseCredentials(
     ScopedVector<autofill::PasswordForm> federated_credentials,
     const GURL& origin,
     base::Callback<void(const password_manager::CredentialInfo&)> callback) {
-  DCHECK_IMPLIES(local_credentials.empty(), !federated_credentials.empty());
+  DCHECK(!local_credentials.empty() || !federated_credentials.empty());
   passwords_data_.OnRequestCredentials(local_credentials.Pass(),
                                        federated_credentials.Pass(),
                                        origin);
@@ -170,12 +170,6 @@ void ManagePasswordsUIController::OnPasswordAutofilled(
     passwords_data_.OnPasswordAutofilled(password_form_map, origin);
     UpdateBubbleAndIconVisibility();
   }
-}
-
-void ManagePasswordsUIController::OnBlacklistBlockedAutofill(
-    const PasswordFormMap& password_form_map) {
-  passwords_data_.OnInactive();
-  UpdateBubbleAndIconVisibility();
 }
 
 void ManagePasswordsUIController::OnLoginsChanged(
@@ -252,41 +246,7 @@ void ManagePasswordsUIController::UpdatePassword(
 void ManagePasswordsUIController::ChooseCredential(
     const autofill::PasswordForm& form,
     password_manager::CredentialType credential_type) {
-  DCHECK_EQ(password_manager::ui::CREDENTIAL_REQUEST_STATE, state());
-  DCHECK(!passwords_data_.credentials_callback().is_null());
-
-  // Here, |credential_type| refers to whether the credential was originally
-  // passed into ::OnChooseCredentials as part of the |local_credentials| or
-  // |federated_credentials| lists (e.g. whether it is an existing credential
-  // saved for this origin, or whether we should synthesize a new
-  // FederatedCredential).
-  //
-  // If |credential_type| is federated, the credential MUST be returned as
-  // a FederatedCredential in order to prevent password information leaking
-  // cross-origin.
-  //
-  // If |credential_type| is local, the credential MIGHT be a PasswordCredential
-  // or it MIGHT be a FederatedCredential. We inspect the |federation_url|
-  // field to determine which we should return.
-  //
-  // TODO(mkwst): Clean this up. It is confusing.
-  password_manager::CredentialType type_to_return;
-  if (credential_type ==
-          password_manager::CredentialType::CREDENTIAL_TYPE_PASSWORD &&
-      form.federation_url.is_empty()) {
-    type_to_return = password_manager::CredentialType::CREDENTIAL_TYPE_PASSWORD;
-  } else if (credential_type ==
-             password_manager::CredentialType::CREDENTIAL_TYPE_EMPTY) {
-    type_to_return = password_manager::CredentialType::CREDENTIAL_TYPE_EMPTY;
-  } else {
-    type_to_return =
-        password_manager::CredentialType::CREDENTIAL_TYPE_FEDERATED;
-  }
-  password_manager::CredentialInfo info =
-      password_manager::CredentialInfo(form, type_to_return);
-  passwords_data_.credentials_callback().Run(info);
-  passwords_data_.set_credentials_callback(
-      ManagePasswordsState::CredentialsCallback());
+  passwords_data_.ChooseCredential(form, credential_type);
 }
 
 void ManagePasswordsUIController::SavePasswordInternal() {
@@ -320,13 +280,6 @@ void ManagePasswordsUIController::NeverSavePasswordInternal() {
       passwords_data_.form_manager();
   DCHECK(form_manager);
   form_manager->PermanentlyBlacklist();
-}
-
-void ManagePasswordsUIController::ManageAccounts() {
-  DCHECK_EQ(password_manager::ui::AUTO_SIGNIN_STATE, state());
-  passwords_data_.TransitionToState(password_manager::ui::MANAGE_STATE);
-  base::AutoReset<bool> resetter(&should_pop_up_bubble_, true);
-  UpdateBubbleAndIconVisibility();
 }
 
 void ManagePasswordsUIController::DidNavigateMainFrame(
@@ -377,7 +330,7 @@ bool ManagePasswordsUIController::PasswordOverridden() const {
 
 #if !defined(OS_ANDROID)
 void ManagePasswordsUIController::UpdateIconAndBubbleState(
-    ManagePasswordsIcon* icon) {
+    ManagePasswordsIconView* icon) {
   if (should_pop_up_bubble_) {
     // We must display the icon before showing the bubble, as the bubble would
     // be otherwise unanchored.
@@ -391,6 +344,25 @@ void ManagePasswordsUIController::UpdateIconAndBubbleState(
 
 void ManagePasswordsUIController::OnBubbleShown() {
   should_pop_up_bubble_ = false;
+}
+
+void ManagePasswordsUIController::OnNopeUpdateClicked() {
+  password_manager::PasswordFormManager* form_manager =
+      passwords_data_.form_manager();
+  DCHECK(form_manager);
+  form_manager->OnNopeUpdateClicked();
+}
+
+void ManagePasswordsUIController::OnNoInteractionOnUpdate() {
+  if (state() != password_manager::ui::PENDING_PASSWORD_UPDATE_STATE) {
+    // Do nothing if the state was changed. It can happen for example when the
+    // update bubble is active and a page navigation happens.
+    return;
+  }
+  password_manager::PasswordFormManager* form_manager =
+      passwords_data_.form_manager();
+  DCHECK(form_manager);
+  form_manager->OnNoInteractionOnUpdate();
 }
 
 void ManagePasswordsUIController::OnBubbleHidden() {

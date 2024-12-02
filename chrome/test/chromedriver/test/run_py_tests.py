@@ -424,7 +424,14 @@ class ChromeDriverTest(ChromeDriverBaseTest):
                             'to locate element: {"method":"tag name",'
                             '"selector":"divine"}',
                             self._driver.FindElement,
-                            'tag name','divine')
+                            'tag name', 'divine')
+
+  def testUnexpectedAlertOpenExceptionMessage(self):
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
+    self._driver.ExecuteScript('window.alert("Hi");')
+    self.assertRaisesRegexp(chromedriver.UnexpectedAlertOpen,
+                            'unexpected alert open: {Alert text : Hi}',
+                            self._driver.FindElement, 'tag name', 'divine')
 
   def testFindElements(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
@@ -519,9 +526,23 @@ class ChromeDriverTest(ChromeDriverBaseTest):
     value = self._driver.ExecuteScript('return arguments[0].value;', text)
     self.assertEquals('0123456789+-*/ Hi, there!', value)
 
+  def testGetElementAttribute(self):
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/attribute_colon_test.html'))
+    elem = self._driver.FindElement("name", "phones")
+    self.assertEquals('3', elem.GetAttribute('size'))
+
+  def testGetElementSpecialCharAttribute(self):
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/attribute_colon_test.html'))
+    elem = self._driver.FindElement("name", "phones")
+    self.assertEquals('colonvalue', elem.GetAttribute('ext:qtip'))
+
   def testGetCurrentUrl(self):
-    url = 'data:,%s' % uuid.uuid4()
+    url = self.GetHttpUrlForFile('/chromedriver/frame_test.html')
     self._driver.Load(url)
+    self.assertEquals(url, self._driver.GetCurrentUrl())
+    self._driver.SwitchToFrame(self._driver.FindElement('tagName', 'iframe'))
     self.assertEquals(url, self._driver.GetCurrentUrl())
 
   def testGoBackAndGoForward(self):
@@ -1138,12 +1159,14 @@ class ChromeDriverTest(ChromeDriverBaseTest):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/nested.html'))
     a = self._driver.FindElement('tag name', 'a')
     a.Click()
-    self.assertTrue(self._driver.GetCurrentUrl().endswith('#one'))
+    frame_url = self._driver.ExecuteScript('return window.location.href')
+    self.assertTrue(frame_url.endswith('#one'))
     frame = self._driver.FindElement('tag name', 'iframe')
     self._driver.SwitchToFrame(frame)
     a = self._driver.FindElement('tag name', 'a')
     a.Click()
-    self.assertTrue(self._driver.GetCurrentUrl().endswith('#two'))
+    frame_url = self._driver.ExecuteScript('return window.location.href')
+    self.assertTrue(frame_url.endswith('#two'))
 
   def testDoesntHangOnFragmentNavigation(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
@@ -1447,8 +1470,8 @@ class MobileEmulationCapabilityTest(ChromeDriverBaseTest):
     self.assertEqual(640, driver.ExecuteScript('return window.screen.height'))
     body_tag = driver.FindElement('tag name', 'body')
     self.assertEqual(
-        'Mozilla/5.0 (Linux; Android 4.4.4; en-us; Nexus 5 Build/JOP40D) '
-        'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/42.0.2307.2 Mobile '
+        'Mozilla/5.0 (Linux; Android 4.4.4; Nexus 5 Build/KTU84P) '
+        'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/38.0.2125.114 Mobile '
         'Safari/537.36',
         body_tag.GetText())
 

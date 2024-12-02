@@ -29,8 +29,8 @@ gfx::Image GlobalError::MenuItemIcon() {
   return ResourceBundle::GetSharedInstance().GetNativeImageNamed(
       IDR_INPUT_ALERT_MENU);
 #else
-  return gfx::Image(
-      gfx::CreateVectorIcon(gfx::VectorIconId::WARNING, 18, gfx::kAmber));
+  return gfx::Image(gfx::CreateVectorIcon(gfx::VectorIconId::WARNING, 18,
+                                          gfx::kGoogleYellow700));
 #endif
 }
 
@@ -62,7 +62,7 @@ bool GlobalErrorWithStandardBubble::ShouldCloseOnDeactivate() const {
 }
 
 gfx::Image GlobalErrorWithStandardBubble::GetBubbleViewIcon() {
-  // If you change this make sure to also change the menu icon and the wrench
+  // If you change this make sure to also change the menu icon and the app menu
   // icon color.
   return ResourceBundle::GetSharedInstance().GetNativeImageNamed(
       IDR_INPUT_ALERT);

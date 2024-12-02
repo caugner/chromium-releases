@@ -18,7 +18,7 @@ _DESKTOP_OS_NAMES = ['linux', 'mac', 'win']
 _STARTUP_TRACING_OS_NAMES = _DESKTOP_OS_NAMES + ['android']
 
 # The trace config file path should be the same as specified in
-# src/components/tracing/startup_tracing.cc
+# src/components/tracing/trace_config_file.[h|cc]
 _CHROME_TRACE_CONFIG_DIR_ANDROID = '/data/local/'
 _CHROME_TRACE_CONFIG_FILE_NAME = 'chrome-trace-config.json'
 
@@ -91,6 +91,10 @@ class ChromeTracingAgent(tracing_agent.TracingAgent):
           'Tracing is already running on platform backend %s.'
           % self._platform_backend)
 
+    if (trace_options.enable_android_graphics_memtrack and
+        self._platform_backend.GetOSName() == 'android'):
+      self._platform_backend.SetGraphicsMemoryTrackingEnabled(True)
+
     # Chrome tracing Agent needs to start tracing for chrome browsers that are
     # not yet started, and for the ones that already are. For the former, we
     # first setup the trace_config_file, which allows browsers that starts after
@@ -129,6 +133,10 @@ class ChromeTracingAgent(tracing_agent.TracingAgent):
           'Error when trying to stop Chrome tracing on devtools at port %s:\n%s'
           % (client.remote_port,
              ''.join(traceback.format_exception(*sys.exc_info()))))
+
+    if (self._trace_config.tracing_options.enable_android_graphics_memtrack and
+        self._platform_backend.GetOSName() == 'android'):
+      self._platform_backend.SetGraphicsMemoryTrackingEnabled(False)
 
     self._trace_config = None
     if raised_execption_messages:

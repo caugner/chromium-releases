@@ -49,9 +49,13 @@ class MockDebugDelegate : public QuicSentPacketManager::DebugDelegate {
 class QuicSentPacketManagerTest : public ::testing::TestWithParam<bool> {
  protected:
   QuicSentPacketManagerTest()
-      : manager_(Perspective::IS_SERVER, &clock_, &stats_, kCubic, kNack, true),
+      : manager_(Perspective::IS_SERVER, &clock_, &stats_, kCubic, kNack),
         send_algorithm_(new StrictMock<MockSendAlgorithm>),
         network_change_visitor_(new StrictMock<MockNetworkChangeVisitor>) {
+    // These tests only work with pacing enabled.
+    saved_FLAGS_quic_disable_pacing_ = FLAGS_quic_disable_pacing;
+    FLAGS_quic_disable_pacing = false;
+
     QuicSentPacketManagerPeer::SetSendAlgorithm(&manager_, send_algorithm_);
     // Disable tail loss probes for most tests.
     QuicSentPacketManagerPeer::SetMaxTailLossProbes(&manager_, 0);
@@ -68,7 +72,10 @@ class QuicSentPacketManagerTest : public ::testing::TestWithParam<bool> {
     EXPECT_CALL(*send_algorithm_, InRecovery()).Times(AnyNumber());
   }
 
-  ~QuicSentPacketManagerTest() override { STLDeleteElements(&packets_); }
+  ~QuicSentPacketManagerTest() override {
+    STLDeleteElements(&packets_);
+    FLAGS_quic_disable_pacing = saved_FLAGS_quic_disable_pacing_;
+  }
 
   QuicByteCount BytesInFlight() {
     return QuicSentPacketManagerPeer::GetBytesInFlight(&manager_);
@@ -265,6 +272,7 @@ class QuicSentPacketManagerTest : public ::testing::TestWithParam<bool> {
   QuicConnectionStats stats_;
   MockSendAlgorithm* send_algorithm_;
   scoped_ptr<MockNetworkChangeVisitor> network_change_visitor_;
+  bool saved_FLAGS_quic_disable_pacing_;
 };
 
 TEST_F(QuicSentPacketManagerTest, IsUnacked) {
@@ -493,7 +501,7 @@ TEST_F(QuicSentPacketManagerTest, LoseButDontRetransmitRevivedPacket) {
   QuicAckFrame ack_frame;
   ack_frame.largest_observed = 3;
   ack_frame.missing_packets.Add(1);
-  ack_frame.revived_packets.insert(1);
+  ack_frame.latest_revived_packet = 1;
   QuicPacketNumber acked[] = {2, 3};
   ExpectAcksAndLosses(true, acked, arraysize(acked), nullptr, 0);
   manager_.OnIncomingAck(ack_frame, clock_.ApproximateNow());
@@ -539,38 +547,12 @@ TEST_F(QuicSentPacketManagerTest, MarkLostThenReviveAndDontRetransmitPacket) {
   // Ack 5th packet (FEC) and revive 1st packet. 1st packet should now be
   // removed from pending retransmissions map.
   ack_frame.largest_observed = 5;
-  ack_frame.revived_packets.insert(1);
+  ack_frame.latest_revived_packet = 1;
   ExpectAck(5);
   manager_.OnIncomingAck(ack_frame, clock_.ApproximateNow());
 
   EXPECT_FALSE(manager_.HasPendingRetransmissions());
   VerifyRetransmittablePackets(nullptr, 0);
-}
-
-TEST_F(QuicSentPacketManagerTest, TruncatedAck) {
-  ValueRestore<bool> old_flag(&FLAGS_quic_disable_truncated_ack_handling,
-                              false);
-  SendDataPacket(1);
-  RetransmitAndSendPacket(1, 2);
-  RetransmitAndSendPacket(2, 3);
-  RetransmitAndSendPacket(3, 4);
-  RetransmitAndSendPacket(4, 5);
-
-  // Truncated ack with 4 NACKs, so the first packet is lost.
-  QuicAckFrame ack_frame;
-  ack_frame.largest_observed = 4;
-  ack_frame.missing_packets.Add(1, 5);
-  ack_frame.is_truncated = true;
-
-  QuicPacketNumber lost[] = {1};
-  ExpectAcksAndLosses(true, nullptr, 0, lost, arraysize(lost));
-  manager_.OnIncomingAck(ack_frame, clock_.Now());
-
-  // High water mark will be raised.
-  QuicPacketNumber unacked[] = {2, 3, 4, 5};
-  VerifyUnackedPackets(unacked, arraysize(unacked));
-  QuicPacketNumber retransmittable[] = {5};
-  VerifyRetransmittablePackets(retransmittable, arraysize(retransmittable));
 }
 
 TEST_F(QuicSentPacketManagerTest, AckPreviousTransmissionThenTruncatedAck) {

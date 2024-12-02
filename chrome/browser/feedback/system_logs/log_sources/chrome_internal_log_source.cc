@@ -10,15 +10,19 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/channel_info.h"
+#include "components/browser_sync/browser/profile_sync_service.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "components/sync_driver/about_sync_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/metrics/chromeos_metrics_provider.h"
+#endif
 
 #if defined(OS_WIN)
 #include "base/win/win_util.h"
@@ -30,11 +34,31 @@ const char kSyncDataKey[] = "about_sync_data";
 const char kExtensionsListKey[] = "extensions";
 const char kDataReductionProxyKey[] = "data_reduction_proxy";
 const char kChromeVersionTag[] = "CHROME VERSION";
-#if !defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
+const char kChromeEnrollmentTag[] = "ENTERPRISE_ENROLLED";
+#else
 const char kOsVersionTag[] = "OS VERSION";
 #endif
 #if defined(OS_WIN)
 const char kUsbKeyboardDetected[] = "usb_keyboard_detected";
+#endif
+
+#if defined(OS_CHROMEOS)
+std::string GetEnrollmentStatusString() {
+  switch (ChromeOSMetricsProvider::GetEnrollmentStatus()) {
+    case ChromeOSMetricsProvider::NON_MANAGED:
+      return "Not managed";
+    case ChromeOSMetricsProvider::MANAGED:
+      return "Managed";
+    case ChromeOSMetricsProvider::UNUSED:
+    case ChromeOSMetricsProvider::ERROR_GETTING_ENROLLMENT_STATUS:
+    case ChromeOSMetricsProvider::ENROLLMENT_STATUS_MAX:
+      return "Error retrieving status";
+  }
+  // For compilers that don't recognize all cases handled above.
+  NOTREACHED();
+  return std::string();
+}
 #endif
 
 }  // namespace
@@ -56,7 +80,9 @@ void ChromeInternalLogSource::Fetch(const SysLogsSourceCallback& callback) {
 
   response[kChromeVersionTag] = chrome::GetVersionString();
 
-#if !defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
+  response[kChromeEnrollmentTag] = GetEnrollmentStatusString();
+#else
   // On ChromeOS, this will be pulled in from the LSB_RELEASE.
   std::string os_version = base::SysInfo::OperatingSystemName() + ": " +
                            base::SysInfo::OperatingSystemVersion();

@@ -7,6 +7,7 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "media/base/media_keys.h"
@@ -38,9 +39,8 @@ class MojoCdmService : public interfaces::ContentDecryptionModule {
   void Initialize(const mojo::String& key_system,
                   const mojo::String& security_origin,
                   interfaces::CdmConfigPtr cdm_config,
-                  int32_t cdm_id,
-                  const mojo::Callback<void(interfaces::CdmPromiseResultPtr)>&
-                      callback) final;
+                  const mojo::Callback<void(interfaces::CdmPromiseResultPtr,
+                                            int32_t)>& callback) final;
   void SetServerCertificate(
       mojo::Array<uint8_t> certificate_data,
       const mojo::Callback<void(interfaces::CdmPromiseResultPtr)>& callback)
@@ -76,9 +76,8 @@ class MojoCdmService : public interfaces::ContentDecryptionModule {
 
  private:
   // Callback for CdmFactory::Create().
-  void OnCdmCreated(int cdm_id,
-                    scoped_ptr<MojoCdmPromise<>> promise,
-                    scoped_ptr<MediaKeys> cdm,
+  void OnCdmCreated(scoped_ptr<MojoCdmPromise<int>> promise,
+                    const scoped_refptr<MediaKeys>& cdm,
                     const std::string& error_message);
 
   // Callbacks for firing session events.
@@ -97,12 +96,17 @@ class MojoCdmService : public interfaces::ContentDecryptionModule {
                             uint32_t system_code,
                             const std::string& error_message);
 
+  // CDM ID to be assigned to the next successfully initialized CDM. This ID is
+  // unique per process. It will be used to locate the CDM by the media players
+  // living in the same process.
+  static int next_cdm_id_;
+
   mojo::StrongBinding<interfaces::ContentDecryptionModule> binding_;
   base::WeakPtr<MojoCdmServiceContext> context_;
 
   mojo::ServiceProvider* service_provider_;
   CdmFactory* cdm_factory_;
-  scoped_ptr<MediaKeys> cdm_;
+  scoped_refptr<MediaKeys> cdm_;
 
   // Set to a valid CDM ID if the |cdm_| is successfully created.
   int cdm_id_;

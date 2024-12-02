@@ -4,6 +4,7 @@
 
 #include "chrome/browser/media/router/media_router_dialog_controller.h"
 
+#include "chrome/browser/media/router/media_router_metrics.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -72,18 +73,21 @@ MediaRouterDialogController::~MediaRouterDialogController() {
 }
 
 bool MediaRouterDialogController::ShowMediaRouterDialogForPresentation(
-    scoped_ptr<CreatePresentationSessionRequest> request) {
+    scoped_ptr<CreatePresentationConnectionRequest> request) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   // Check if the media router dialog exists for |initiator| and return if so.
   if (IsShowingMediaRouterDialog())
     return false;
 
-  presentation_request_ = request.Pass();
+  create_connection_request_ = request.Pass();
   CreateMediaRouterDialog();
 
   // Show the initiator holding the existing media router dialog.
   ActivateInitiatorWebContents();
+
+  media_router::MediaRouterMetrics::RecordMediaRouterDialogOrigin(
+      media_router::PAGE);
 
   return true;
 }
@@ -110,14 +114,14 @@ void MediaRouterDialogController::ActivateInitiatorWebContents() {
   initiator_->GetDelegate()->ActivateContents(initiator_);
 }
 
-scoped_ptr<CreatePresentationSessionRequest>
-MediaRouterDialogController::TakePresentationRequest() {
-  return presentation_request_.Pass();
+scoped_ptr<CreatePresentationConnectionRequest>
+MediaRouterDialogController::TakeCreateConnectionRequest() {
+  return create_connection_request_.Pass();
 }
 
 void MediaRouterDialogController::Reset() {
   initiator_observer_.reset();
-  presentation_request_.reset();
+  create_connection_request_.reset();
 }
 
 }  // namespace media_router

@@ -15,10 +15,13 @@
 
 class DelayedResourceQueue;
 class DownloadRequestLimiter;
-class SafeBrowsingService;
 
 namespace extensions {
 class UserScriptListener;
+}
+
+namespace safe_browsing {
+class SafeBrowsingService;
 }
 
 // Implements ResourceDispatcherHostDelegate. Currently used by the Prerender
@@ -76,6 +79,9 @@ class ChromeResourceDispatcherHostDelegate
                            content::ResourceContext* resource_context,
                            content::ResourceResponse* response) override;
   void RequestComplete(net::URLRequest* url_request) override;
+  bool ShouldEnableLoFiMode(
+      const net::URLRequest& url_request,
+      content::ResourceContext* resource_context) override;
 
   // Called on the UI thread. Allows switching out the
   // ExternalProtocolHandler::Delegate for testing code.
@@ -97,7 +103,7 @@ class ChromeResourceDispatcherHostDelegate
       ScopedVector<content::ResourceThrottle>* throttles);
 
   scoped_refptr<DownloadRequestLimiter> download_request_limiter_;
-  scoped_refptr<SafeBrowsingService> safe_browsing_;
+  scoped_refptr<safe_browsing::SafeBrowsingService> safe_browsing_;
 #if defined(ENABLE_EXTENSIONS)
   scoped_refptr<extensions::UserScriptListener> user_script_listener_;
   std::map<net::URLRequest*, StreamTargetInfo> stream_target_info_;

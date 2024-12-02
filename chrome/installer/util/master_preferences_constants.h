@@ -17,13 +17,8 @@ namespace master_preferences {
 
 // Boolean. Use alternate text for the shortcut. Cmd line override present.
 extern const char kAltShortcutText[];
-// Boolean. Whether to instruct the installer to auto-launch chrome on computer
-// startup. The default (if not provided) is |false|.
-extern const char kAutoLaunchChrome[];
 // Boolean. This is to be a Chrome install. (When using MultiInstall)
 extern const char kChrome[];
-// Integer. Icon index from chrome.exe to use for shortcuts.
-extern const char kChromeShortcutIconIndex[];
 // Boolean. This is a legacy preference and should no longer be used; it is
 // kept around so that old master_preferences which specify
 // "create_all_shortcuts":false still enforce the new
@@ -68,9 +63,6 @@ extern const char kDoNotCreateQuickLaunchShortcut[];
 // Boolean. Prevent creation of the Taskbar (since Windows 7) shortcut on
 // install (and later on Active Setup for each user on a system-level install).
 extern const char kDoNotCreateTaskbarShortcut[];
-// Boolean. Prevent pinning Chrome to the Start Menu (since Windows 10) on
-// install (and later on Active Setup for each user on a system-level install).
-extern const char kDoNotCreateStartPin[];
 // Boolean. Do not launch Chrome after first install. Cmd line override present.
 extern const char kDoNotLaunchChrome[];
 // Boolean. Do not register with Google Update to have Chrome launched after

@@ -220,7 +220,7 @@ bool SystemTrayDelegate::GetBluetoothDiscovering() {
 void SystemTrayDelegate::ChangeProxySettings() {
 }
 
-CastConfigDelegate* SystemTrayDelegate::GetCastConfigDelegate() const {
+CastConfigDelegate* SystemTrayDelegate::GetCastConfigDelegate() {
   return nullptr;
 }
 
@@ -259,7 +259,7 @@ bool SystemTrayDelegate::IsSearchKeyMappedToCapsLock() {
 }
 
 tray::UserAccountsDelegate* SystemTrayDelegate::GetUserAccountsDelegate(
-    const std::string& user_id) {
+    const AccountId& account_id) {
   return nullptr;
 }
 

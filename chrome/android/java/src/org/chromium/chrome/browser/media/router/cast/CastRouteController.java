@@ -4,51 +4,98 @@
 
 package org.chromium.chrome.browser.media.router.cast;
 
+import android.content.Context;
+import android.os.Handler;
+import android.support.v4.util.ArrayMap;
+import android.util.SparseArray;
+
 import com.google.android.gms.cast.ApplicationMetadata;
 import com.google.android.gms.cast.Cast;
 import com.google.android.gms.cast.CastDevice;
+import com.google.android.gms.cast.MediaStatus;
+import com.google.android.gms.cast.RemoteMediaPlayer;
 import com.google.android.gms.common.api.GoogleApiClient;
 import com.google.android.gms.common.api.ResultCallback;
 import com.google.android.gms.common.api.Status;
 
+import org.chromium.base.ApplicationStatus;
 import org.chromium.base.Log;
+import org.chromium.chrome.R;
 import org.chromium.chrome.browser.media.router.ChromeMediaRouter;
 import org.chromium.chrome.browser.media.router.RouteController;
 import org.chromium.chrome.browser.media.router.RouteDelegate;
+import org.chromium.chrome.browser.media.ui.MediaNotificationInfo;
+import org.chromium.chrome.browser.media.ui.MediaNotificationListener;
+import org.chromium.chrome.browser.media.ui.MediaNotificationManager;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Locale;
+import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 
 /**
  * A wrapper around the established Cast application session.
  */
-public class CastRouteController implements RouteController {
+public class CastRouteController implements RouteController, MediaNotificationListener {
     private static final String TAG = "cr_MediaRouter";
 
     private static final String MEDIA_NAMESPACE = "urn:x-cast:com.google.cast.media";
-    private static final String RECEIVER_NAMESPACE = "urn:x-cast:com.google.cast.receiver";
+    private static final String GAMES_NAMESPACE = "urn:x-cast:com.google.cast.games";
+
     private static final String MEDIA_MESSAGE_TYPES[] = {
             "PLAY",
             "LOAD",
             "PAUSE",
             "SEEK",
-            "GET_STATUS",
             "STOP_MEDIA",
-            "SET_VOLUME",
-            "GET_STATUS",
+            "MEDIA_SET_VOLUME",
+            "MEDIA_GET_STATUS",
             "EDIT_TRACKS_INFO",
             "QUEUE_LOAD",
             "QUEUE_INSERT",
             "QUEUE_UPDATE",
             "QUEUE_REMOVE",
-            "QUEUE_REORDER"
+            "QUEUE_REORDER",
     };
+
+    private static final String MEDIA_SUPPORTED_COMMANDS[] = {
+            "pause",
+            "seek",
+            "stream_volume",
+            "stream_mute",
+    };
+
+    // Sequence number used when no sequence number is required or was initially passed.
+    private static final int INVALID_SEQUENCE_NUMBER = -1;
+
+    // Map associating types that have a different names outside of the media namespace and inside.
+    // In other words, some types are sent as MEDIA_FOO or FOO_MEDIA by the client by the Cast
+    // expect them to be named FOO. The reason being that FOO might exist in multiple namespaces
+    // but the client isn't aware of namespacing.
+    private static Map<String, String> sMediaOverloadedMessageTypes;
+
+    // Lock used to lazy initialize sMediaOverloadedMessageTypes.
+    private static final Object INIT_LOCK = new Object();
+
+    // The value is borrowed from the Android Cast SDK code to match their behavior.
+    private static final double MIN_VOLUME_LEVEL_DELTA = 1e-7;
+
+    private static class RequestRecord {
+        public final String clientId;
+        public final int sequenceNumber;
+
+        public RequestRecord(String clientId, int sequenceNumber) {
+            this.clientId = clientId;
+            this.sequenceNumber = sequenceNumber;
+        }
+    }
 
     private static class CastMessagingChannel implements Cast.MessageReceivedCallback {
         private final CastRouteController mSession;
@@ -59,15 +106,53 @@ public class CastRouteController implements RouteController {
 
         @Override
         public void onMessageReceived(CastDevice castDevice, String namespace, String message) {
-            if (MEDIA_NAMESPACE.equals(namespace) || RECEIVER_NAMESPACE.equals(namespace)) {
-                mSession.onMessage("v2_message", message);
-            } else {
-                mSession.onAppMessage(namespace, message);
+            Log.d(TAG, "Received message from Cast device: namespace=\"" + namespace
+                       + "\" message=\"" + message + "\"");
+
+            RequestRecord request = null;
+            try {
+                JSONObject jsonMessage = new JSONObject(message);
+                int requestId = jsonMessage.getInt("requestId");
+                if (mSession.mRequests.indexOfKey(requestId) >= 0) {
+                    request = mSession.mRequests.get(requestId);
+                    mSession.mRequests.delete(requestId);
+                }
+            } catch (JSONException e) {
+            }
+
+            if (MEDIA_NAMESPACE.equals(namespace)) {
+                mSession.onMediaMessage(message, request);
+                return;
+            }
+
+            mSession.onAppMessage(message, namespace, request);
+        }
+    }
+
+    /**
+     * Remove 'null' fields from a JSONObject. This method calls itself recursively until all the
+     * fields have been looked at.
+     * TODO(mlamouri): move to some util class?
+     */
+    private static void removeNullFields(Object object) throws JSONException {
+        if (object instanceof JSONArray) {
+            JSONArray array = (JSONArray) object;
+            for (int i = 0; i < array.length(); ++i) removeNullFields(array.get(i));
+        } else if (object instanceof JSONObject) {
+            JSONObject json = (JSONObject) object;
+            JSONArray names = json.names();
+            if (names == null) return;
+            for (int i = 0; i < names.length(); ++i) {
+                String key = names.getString(i);
+                if (json.isNull(key)) {
+                    json.remove(key);
+                } else {
+                    removeNullFields(json.get(key));
+                }
             }
         }
     }
 
-    private final String mMediaRouteId;
     private final String mOrigin;
     private final int mTabId;
     private final CastMessagingChannel mMessageChannel;
@@ -82,15 +167,20 @@ public class CastRouteController implements RouteController {
     private String mSessionId;
     private String mApplicationStatus;
     private ApplicationMetadata mApplicationMetadata;
-    private int mSequenceNumber;
     private boolean mStoppingApplication;
-    private boolean mDetached;
+    private MediaNotificationInfo.Builder mNotificationBuilder;
+    private RemoteMediaPlayer mMediaPlayer;
+
+    private SparseArray<RequestRecord> mRequests;
+    private Queue<RequestRecord> mVolumeRequests;
+    private ArrayMap<String, Queue<Integer>> mStopRequests;
+
+    private Handler mHandler;
 
     /**
      * Initializes a new {@link CastRouteController} instance.
      * @param apiClient The Google Play Services client used to create the session.
      * @param sessionId The session identifier to use with the Cast SDK.
-     * @param mediaRouteId The media route identifier associated with this session.
      * @param origin The origin of the frame requesting the route.
      * @param tabId the id of the tab containing the frame requesting the route.
      * @param source The {@link MediaSource} corresponding to this session.
@@ -102,14 +192,12 @@ public class CastRouteController implements RouteController {
             ApplicationMetadata metadata,
             String applicationStatus,
             CastDevice castDevice,
-            String mediaRouteId,
             String origin,
             int tabId,
             MediaSource source,
             RouteDelegate delegate) {
         mApiClient = apiClient;
         mSessionId = sessionId;
-        mMediaRouteId = mediaRouteId;
         mOrigin = origin;
         mTabId = tabId;
         mSource = source;
@@ -117,17 +205,63 @@ public class CastRouteController implements RouteController {
         mApplicationMetadata = metadata;
         mApplicationStatus = applicationStatus;
         mCastDevice = castDevice;
+        mRequests = new SparseArray<RequestRecord>();
+        mVolumeRequests = new ArrayDeque<RequestRecord>();
+        mStopRequests = new ArrayMap<String, Queue<Integer>>();
+        mHandler = new Handler();
 
         mMessageChannel = new CastMessagingChannel(this);
-        addNamespace(RECEIVER_NAMESPACE);
         addNamespace(MEDIA_NAMESPACE);
-    }
+        addNamespace(GAMES_NAMESPACE);
 
-    public CastRouteController createJoinedController(String mediaRouteId, String origin, int tabId,
-            MediaSource source) {
-        return new CastRouteController(mApiClient, mSessionId, mApplicationMetadata,
-                mApplicationStatus, mCastDevice, mediaRouteId, origin, tabId, source,
-                mRouteDelegate);
+        final Context context = ApplicationStatus.getApplicationContext();
+
+        if (mNamespaces.contains(MEDIA_NAMESPACE)) {
+            mMediaPlayer = new RemoteMediaPlayer();
+            mMediaPlayer.setOnStatusUpdatedListener(
+                    new RemoteMediaPlayer.OnStatusUpdatedListener() {
+                        @Override
+                        public void onStatusUpdated() {
+                            MediaStatus mediaStatus = mMediaPlayer.getMediaStatus();
+                            if (mediaStatus == null) return;
+
+                            int playerState = mediaStatus.getPlayerState();
+                            if (playerState == MediaStatus.PLAYER_STATE_PAUSED
+                                    || playerState == MediaStatus.PLAYER_STATE_PLAYING) {
+                                mNotificationBuilder.setPaused(
+                                        playerState != MediaStatus.PLAYER_STATE_PLAYING);
+                                mNotificationBuilder.setActions(MediaNotificationInfo.ACTION_STOP
+                                        | MediaNotificationInfo.ACTION_PLAY_PAUSE);
+                            } else {
+                                mNotificationBuilder.setActions(MediaNotificationInfo.ACTION_STOP);
+                            }
+                            MediaNotificationManager.show(context, mNotificationBuilder);
+                        }
+                    });
+        }
+
+        mNotificationBuilder = new MediaNotificationInfo.Builder()
+                .setTitle(mCastDevice.getFriendlyName())
+                .setPaused(false)
+                .setOrigin(origin)
+                .setTabId(tabId)
+                // TODO(avayvod): pass true here if initiated from the incognito mode.
+                // MediaRouter is disabled for Incognito mode for now, see https://crbug.com/525215
+                .setPrivate(false)
+                .setIcon(R.drawable.ic_notification_media_route)
+                .setActions(MediaNotificationInfo.ACTION_STOP)
+                .setId(R.id.presentation_notification)
+                .setListener(this);
+        MediaNotificationManager.show(context, mNotificationBuilder);
+
+        synchronized (INIT_LOCK) {
+            if (sMediaOverloadedMessageTypes == null) {
+                sMediaOverloadedMessageTypes = new HashMap<String, String>();
+                sMediaOverloadedMessageTypes.put("STOP_MEDIA", "STOP");
+                sMediaOverloadedMessageTypes.put("MEDIA_SET_VOLUME", "SET_VOLUME");
+                sMediaOverloadedMessageTypes.put("MEDIA_GET_STATUS", "GET_STATUS");
+            }
+        }
     }
 
     /**
@@ -137,35 +271,12 @@ public class CastRouteController implements RouteController {
         return mSessionId;
     }
 
+    /////////////////////////////////////////////////////////////////////////////////////////////
+    // RouteController implementation.
+
     @Override
     public void close() {
-        if (mStoppingApplication) return;
-
-        // close() have been called before from another code path.
-        if (mApiClient == null) return;
-
-        if (mApiClient.isConnected() || mApiClient.isConnecting()) {
-            mStoppingApplication = true;
-            Cast.CastApi.stopApplication(mApiClient, mSessionId)
-                    .setResultCallback(new ResultCallback<Status>() {
-                        @Override
-                        public void onResult(Status status) {
-                            onMessage("remove_session", "\"" + mSessionId + "\"");
-                            // TODO(avayvod): handle a failure to stop the application.
-                            // https://crbug.com/535577
-
-                            for (String namespace : mNamespaces) unregisterNamespace(namespace);
-                            mNamespaces.clear();
-
-                            mClients.clear();
-                            mSessionId = null;
-                            mApiClient = null;
-
-                            mRouteDelegate.onRouteClosed(CastRouteController.this);
-                            mStoppingApplication = false;
-                        }
-                    });
-        }
+        stopApplication();
     }
 
     @Override
@@ -177,13 +288,13 @@ public class CastRouteController implements RouteController {
     }
 
     @Override
-    public String getSourceId() {
-        return mSource.getUrn();
+    public void sendBinaryMessage(byte[] data, int callbackId) {
+        // TODO(crbug.com/524128): Implement this.
     }
 
     @Override
-    public String getRouteId() {
-        return mMediaRouteId;
+    public String getSourceId() {
+        return mSource.getUrn();
     }
 
     @Override
@@ -201,53 +312,140 @@ public class CastRouteController implements RouteController {
         return mTabId;
     }
 
+    /////////////////////////////////////////////////////////////////////////////////////////////
+    // MediaNotificationListener implementation.
+
     @Override
-    public void markDetached() {
-        mDetached = true;
+    public void onPlay(int actionSource) {
+        if (mMediaPlayer == null || isApiClientInvalid()) return;
+
+        mMediaPlayer.play(mApiClient);
     }
 
     @Override
-    public boolean isDetached() {
-        return mDetached;
+    public void onPause(int actionSource) {
+        if (mMediaPlayer == null || isApiClientInvalid()) return;
+
+        mMediaPlayer.pause(mApiClient);
     }
+
+    @Override
+    public void onStop(int actionSource) {
+        stopApplication();
+        mRouteDelegate.onSessionStopAction();
+    }
+
 
     /**
-     * Sends the internal Cast message to the Cast clients on the page via the media router.
-     * @param type The type of the message (e.g. "new_session" or "v2_message")
-     * @param message The message itself (encoded JSON).
+     * Forwards the media message to the page via the media router.
+     * The MEDIA_STATUS message needs to be sent to all the clients.
+     * @param message The media that's being send by the receiver.
+     * @param request The information about the client and the sequence number to respond with.
      */
-    public void onMessage(String type, String message) {
-        for (String client : mClients) {
-            mRouteDelegate.onMessage(mMediaRouteId,
-                    buildInternalMessage(type, message, client, mSequenceNumber));
+    public void onMediaMessage(String message, RequestRecord request) {
+        if (mMediaPlayer != null) {
+            mMediaPlayer.onMessageReceived(mCastDevice, MEDIA_NAMESPACE, message);
         }
-        mSequenceNumber++;
+
+        if (isMediaStatusMessage(message)) {
+            // MEDIA_STATUS needs to be sent to all the clients.
+            for (String clientId : mClients) {
+                if (request != null && clientId.equals(request.clientId)) continue;
+
+                sendClientMessageTo(
+                        clientId, "v2_message", message, INVALID_SEQUENCE_NUMBER);
+            }
+        }
+        if (request != null) {
+            sendClientMessageTo(request.clientId, "v2_message", message, request.sequenceNumber);
+        }
     }
 
     /**
      * Forwards the application specific message to the page via the media router.
-     * @param namespace The application specific namespace this message belongs to.
      * @param message The message within the namespace that's being send by the receiver.
+     * @param namespace The application specific namespace this message belongs to.
+     * @param request The information about the client and the sequence number to respond with.
      */
-    public void onAppMessage(String namespace, String message) {
+    public void onAppMessage(String message, String namespace, RequestRecord request) {
         try {
             JSONObject jsonMessage = new JSONObject();
             jsonMessage.put("sessionId", mSessionId);
             jsonMessage.put("namespaceName", namespace);
             jsonMessage.put("message", message);
-            onMessage("app_message", jsonMessage.toString());
+            if (request != null) {
+                sendClientMessageTo(request.clientId, "app_message",
+                        jsonMessage.toString(), request.sequenceNumber);
+            } else {
+                broadcastClientMessage("app_message", jsonMessage.toString());
+            }
         } catch (JSONException e) {
-            Log.d(TAG, "Failed to create the message wrapper", e);
+            Log.e(TAG, "Failed to create the message wrapper", e);
         }
+    }
+
+    private boolean isMediaStatusMessage(String message) {
+        try {
+            JSONObject jsonMessage = new JSONObject(message);
+            return "MEDIA_STATUS".equals(jsonMessage.getString("type"));
+        } catch (JSONException e) {
+            return false;
+        }
+    }
+
+    private void stopApplication() {
+        if (mStoppingApplication) return;
+
+        if (isApiClientInvalid()) return;
+
+        mStoppingApplication = true;
+        Cast.CastApi.stopApplication(mApiClient, mSessionId)
+                .setResultCallback(new ResultCallback<Status>() {
+                    @Override
+                    public void onResult(Status status) {
+                        for (String clientId : mClients) {
+                            Queue<Integer> sequenceNumbersForClient = mStopRequests.get(clientId);
+                            if (sequenceNumbersForClient == null) {
+                                sendClientMessageTo(clientId, "remove_session", mSessionId,
+                                        INVALID_SEQUENCE_NUMBER);
+                                continue;
+                            }
+
+                            for (int sequenceNumber : sequenceNumbersForClient) {
+                                sendClientMessageTo(
+                                        clientId, "remove_session", mSessionId, sequenceNumber);
+                            }
+                            mStopRequests.remove(clientId);
+                        }
+
+                        // TODO(avayvod): handle a failure to stop the application.
+                        // https://crbug.com/535577
+
+                        for (String namespace : mNamespaces) unregisterNamespace(namespace);
+                        mNamespaces.clear();
+
+                        mClients.clear();
+                        mSessionId = null;
+                        mApiClient = null;
+
+                        mRouteDelegate.onSessionClosed();
+                        mStoppingApplication = false;
+
+                        MediaNotificationManager.hide(
+                                mTabId, R.id.presentation_notification);
+                    }
+                });
     }
 
     private void addNamespace(String namespace) {
         assert !mNamespaces.contains(namespace);
-        if (!mApiClient.isConnected() && !mApiClient.isConnecting()) return;
+
+        if (isApiClientInvalid()) return;
 
         // If application metadata is null, register the callback anyway.
-        if (mApplicationMetadata != null
-                && !mApplicationMetadata.isNamespaceSupported(namespace)) return;
+        if (mApplicationMetadata != null && !mApplicationMetadata.isNamespaceSupported(namespace)) {
+            return;
+        }
 
         try {
             Cast.CastApi.setMessageReceivedCallbacks(mApiClient, namespace, mMessageChannel);
@@ -260,7 +458,7 @@ public class CastRouteController implements RouteController {
     private void unregisterNamespace(String namespace) {
         assert mNamespaces.contains(namespace);
 
-        if (!mApiClient.isConnected() && !mApiClient.isConnecting()) return;
+        if (isApiClientInvalid()) return;
 
         try {
             Cast.CastApi.removeMessageReceivedCallbacks(mApiClient, namespace);
@@ -270,6 +468,7 @@ public class CastRouteController implements RouteController {
     }
 
     private boolean handleInternalMessage(String message, int callbackId) {
+        Log.d(TAG, "Received message from client: %s", message);
         boolean success = true;
         try {
             JSONObject jsonMessage = new JSONObject(message);
@@ -277,15 +476,18 @@ public class CastRouteController implements RouteController {
             String messageType = jsonMessage.getString("type");
             if ("client_connect".equals(messageType)) {
                 success = handleClientConnectMessage(jsonMessage);
+            } else if ("leave_session".equals(messageType)) {
+                success = handleLeaveSessionMessage(jsonMessage);
             } else if ("v2_message".equals(messageType)) {
-                success = handleCastV2Message(message, jsonMessage);
+                success = handleCastV2Message(jsonMessage);
             } else if ("app_message".equals(messageType)) {
-                success = handleAppMessage(message, jsonMessage);
+                success = handleAppMessage(jsonMessage);
             } else {
-                Log.d(TAG, "Unsupported message: %s", message);
+                Log.e(TAG, "Unsupported message: %s", message);
                 return false;
             }
         } catch (JSONException e) {
+            Log.e(TAG, "JSONException while handling internal message: " + e);
             return false;
         }
 
@@ -301,8 +503,38 @@ public class CastRouteController implements RouteController {
 
         mClients.add(clientId);
 
-        mRouteDelegate.onMessage(mMediaRouteId,
-                buildInternalMessage("new_session", buildSessionMessage(), clientId, -1));
+        sendClientMessageTo(
+                clientId, "new_session", buildSessionMessage(), INVALID_SEQUENCE_NUMBER);
+
+        if (mMediaPlayer != null && !isApiClientInvalid()) mMediaPlayer.requestStatus(mApiClient);
+
+        return true;
+    }
+
+    // An example of the leave_session message.
+    //    {
+    //        "type": "leave_message",
+    //        "message": "<cast session id>",
+    //        "sequenceNumber": 0,  // optional
+    //        "timeoutMillis": 0,
+    //        "clientId": "<client id>"
+    //    }
+    private boolean handleLeaveSessionMessage(JSONObject jsonMessage) throws JSONException {
+        String clientId = jsonMessage.getString("clientId");
+
+        if (!mClients.contains(clientId)) return false;
+
+        String sessionId = jsonMessage.getString("message");
+        if (!mSessionId.equals(sessionId)) return false;
+
+        int sequenceNumber = jsonMessage.optInt("sequenceNumber", INVALID_SEQUENCE_NUMBER);
+
+        // TODO(avayvod): "leave" the other clients with the matching origin/tab id.
+        // See https://crbug.com/549957.
+        sendClientMessageTo(clientId, "leave_session", null, sequenceNumber);
+
+        mClients.remove(clientId);
+
         return true;
     }
 
@@ -317,7 +549,7 @@ public class CastRouteController implements RouteController {
     //        "timeoutMillis": 0,
     //        "clientId": "144042901280235697"
     //    }
-    private boolean handleCastV2Message(String message, JSONObject jsonMessage)
+    private boolean handleCastV2Message(JSONObject jsonMessage)
             throws JSONException {
         assert "v2_message".equals(jsonMessage.getString("type"));
 
@@ -326,11 +558,99 @@ public class CastRouteController implements RouteController {
 
         JSONObject jsonCastMessage = jsonMessage.getJSONObject("message");
         String messageType = jsonCastMessage.getString("type");
+        int sequenceNumber = jsonMessage.optInt("sequenceNumber", INVALID_SEQUENCE_NUMBER);
+
         if ("STOP".equals(messageType)) {
-            close();
+            handleStopMessage(clientId, sequenceNumber);
             return true;
-        } else if (Arrays.asList(MEDIA_MESSAGE_TYPES).contains(messageType)) {
-            return sendCastMessage(jsonMessage.getString("message"), MEDIA_NAMESPACE);
+        }
+
+        if ("SET_VOLUME".equals(messageType)) {
+            return handleVolumeMessage(
+                    jsonCastMessage.getJSONObject("volume"), clientId, sequenceNumber);
+        }
+
+        if (Arrays.asList(MEDIA_MESSAGE_TYPES).contains(messageType)) {
+            if (sMediaOverloadedMessageTypes.containsKey(messageType)) {
+                messageType = sMediaOverloadedMessageTypes.get(messageType);
+                jsonCastMessage.put("type", messageType);
+            }
+            return sendCastMessage(jsonCastMessage, MEDIA_NAMESPACE, clientId, sequenceNumber);
+        }
+
+        return true;
+    }
+
+    private void handleStopMessage(String clientId, int sequenceNumber) {
+        Queue<Integer> sequenceNumbersForClient = mStopRequests.get(clientId);
+        if (sequenceNumbersForClient == null) {
+            sequenceNumbersForClient = new ArrayDeque<Integer>();
+            mStopRequests.put(clientId, sequenceNumbersForClient);
+        }
+        sequenceNumbersForClient.add(sequenceNumber);
+
+        stopApplication();
+    }
+
+    // SET_VOLUME messages have a |level| and |muted| properties. One of them is
+    // |null| and the other one isn't. |muted| is expected to be a boolean while
+    // |level| is a float from 0.0 to 1.0.
+    // Example:
+    // {
+    //   "volume" {
+    //     "level": 0.9,
+    //     "muted": null
+    //   }
+    // }
+    private boolean handleVolumeMessage(
+            JSONObject volume, final String clientId, final int sequenceNumber)
+            throws JSONException {
+        if (volume == null) return false;
+
+        if (isApiClientInvalid()) return false;
+
+        boolean waitForVolumeChange = false;
+        try {
+            if (!volume.isNull("muted")) {
+                boolean newMuted = volume.getBoolean("muted");
+                if (Cast.CastApi.isMute(mApiClient) != newMuted) {
+                    Cast.CastApi.setMute(mApiClient, newMuted);
+                    waitForVolumeChange = true;
+                }
+            }
+            if (!volume.isNull("level")) {
+                double newLevel = volume.getDouble("level");
+                double currentLevel = Cast.CastApi.getVolume(mApiClient);
+                if (!Double.isNaN(currentLevel)
+                        && Math.abs(currentLevel - newLevel) > MIN_VOLUME_LEVEL_DELTA) {
+                    Cast.CastApi.setVolume(mApiClient, newLevel);
+                    waitForVolumeChange = true;
+                }
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to send volume command: " + e);
+            return false;
+        }
+
+        // For each successful volume message we need to respond with an empty "v2_message" so the
+        // Cast Web SDK can call the success callback of the page.
+        // If we expect the volume to change as the result of the command, we're relying on
+        // {@link Cast.CastListener#onVolumeChanged} to get called by the Android Cast SDK when the
+        // receiver status is updated. We keep the sequence number until then.
+        // If the volume doesn't change as the result of the command, we won't get notified by the
+        // Android SDK when the status update is received so we respond to the volume message
+        // immediately.
+        if (waitForVolumeChange) {
+            mVolumeRequests.add(new RequestRecord(clientId, sequenceNumber));
+        } else {
+            // It's usually bad to have request and response on the same call stack so post the
+            // response to the Android message loop.
+            mHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    sendClientMessageTo(clientId, "v2_message", null, sequenceNumber);
+                }
+            });
         }
 
         return true;
@@ -348,45 +668,72 @@ public class CastRouteController implements RouteController {
     //   "timeoutMillis":3000,
     //   "clientId":"14417311915272175"
     // }
-    private boolean handleAppMessage(String message, JSONObject jsonMessage) throws JSONException {
+    private boolean handleAppMessage(JSONObject jsonMessage) throws JSONException {
         assert "app_message".equals(jsonMessage.getString("type"));
 
         String clientId = jsonMessage.getString("clientId");
         if (!mClients.contains(clientId)) return false;
 
         JSONObject jsonAppMessageWrapper = jsonMessage.getJSONObject("message");
+
+        JSONObject actualMessage = jsonAppMessageWrapper.getJSONObject("message");
+        if (actualMessage == null) return false;
+
         if (!mSessionId.equals(jsonAppMessageWrapper.getString("sessionId"))) return false;
 
         String namespaceName = jsonAppMessageWrapper.getString("namespaceName");
         if (namespaceName == null || namespaceName.isEmpty()) return false;
 
         if (!mNamespaces.contains(namespaceName)) addNamespace(namespaceName);
-        sendCastMessage(jsonAppMessageWrapper.getString("message"), namespaceName);
 
-        return true;
+        int sequenceNumber = jsonMessage.optInt("sequenceNumber", INVALID_SEQUENCE_NUMBER);
+        return sendCastMessage(actualMessage, namespaceName, clientId, sequenceNumber);
     }
 
-    private boolean sendCastMessage(String message, String namespace) {
-        if (!mApiClient.isConnected() && !mApiClient.isConnecting()) return false;
+    private boolean sendCastMessage(
+            JSONObject message,
+            final String namespace,
+            final String clientId,
+            final int sequenceNumber) throws JSONException {
+        if (isApiClientInvalid()) return false;
 
-        if (!message.contains("\"requestId\"")) {
-            try {
-                JSONObject jsonMessage = new JSONObject(message);
-                jsonMessage.put("requestId", 0);
-                message = jsonMessage.toString();
-            } catch (JSONException e) {
-                Log.w(TAG, "Cast message is not a valid JSON");
+        removeNullFields(message);
+
+        // Map the request id to a valid sequence number only.
+        if (sequenceNumber != INVALID_SEQUENCE_NUMBER) {
+            // If for some reason, there is already a requestId other than 0, it
+            // is kept. Otherwise, one is generated. In all cases it's associated with the
+            // sequenceNumber passed by the client.
+            int requestId = message.optInt("requestId", 0);
+            if (requestId == 0) {
+                requestId = CastRequestIdGenerator.getNextRequestId();
+                message.put("requestId", requestId);
             }
+            mRequests.append(requestId, new RequestRecord(clientId, sequenceNumber));
         }
 
+        Log.d(TAG, "Sending message to Cast device in namespace %s: %s", namespace, message);
+
         try {
-            Cast.CastApi.sendMessage(mApiClient, namespace, message)
+            Cast.CastApi.sendMessage(mApiClient, namespace, message.toString())
                     .setResultCallback(
                             new ResultCallback<Status>() {
                                 @Override
                                 public void onResult(Status result) {
-                                    // TODO(avayvod): should actually report the result of sending
-                                    // status here.
+                                    if (!result.isSuccess()) {
+                                        // TODO(avayvod): should actually report back to the page.
+                                        // See https://crbug.com/550445.
+                                        Log.e(TAG, "Failed to send the message: " + result);
+                                        return;
+                                    }
+
+                                    // Media commands wait for the media status update as a result.
+                                    if (MEDIA_NAMESPACE.equals(namespace)) return;
+
+                                    // App messages wait for the empty message with the sequence
+                                    // number.
+                                    sendClientMessageTo(
+                                            clientId, "app_message", null, sequenceNumber);
                                 }
                             });
         } catch (Exception e) {
@@ -396,32 +743,86 @@ public class CastRouteController implements RouteController {
         return true;
     }
 
+    /**
+     * Modifies the received MediaStatus message to match the format expected by the client.
+     */
+    private void sanitizeMediaStatusMessage(JSONObject object) throws JSONException {
+        object.put("sessionId", mSessionId);
+
+        JSONArray mediaStatus = object.getJSONArray("status");
+        for (int i = 0; i < mediaStatus.length(); ++i) {
+            JSONObject status = mediaStatus.getJSONObject(i);
+            status.put("sessionId", mSessionId);
+            if (!status.has("supportedMediaCommands")) continue;
+
+            JSONArray commands = new JSONArray();
+            int bitfieldCommands = status.getInt("supportedMediaCommands");
+            for (int j = 0; j < 4; ++j) {
+                if ((bitfieldCommands & (1 << j)) != 0) {
+                    commands.put(MEDIA_SUPPORTED_COMMANDS[j]);
+                }
+            }
+
+            status.put("supportedMediaCommands", commands);  // Removes current entry.
+        }
+    }
+
     private String buildInternalMessage(
             String type, String message, String clientId, int sequenceNumber) {
-        return String.format(Locale.US,
-                "{ \"type\": \"%s\"," + "\"message\": %s," + "\"sequenceNumber\":%d,"
-                        + "\"timeoutMillis\":0," + "\"clientId\": \"%s\"}",
-                type, message, sequenceNumber, clientId);
+        JSONObject json = new JSONObject();
+        try {
+            json.put("type", type);
+            json.put("sequenceNumber", sequenceNumber);
+            json.put("timeoutMillis", 0);
+            json.put("clientId", clientId);
+
+            // TODO(mlamouri): we should have a more reliable way to handle string, null and Object
+            // messages.
+            if ("remove_session".equals(type) || message == null) {
+                json.put("message", message);
+            } else {
+                JSONObject jsonMessage = new JSONObject(message);
+                if ("v2_message".equals(type)
+                        && "MEDIA_STATUS".equals(jsonMessage.getString("type"))) {
+                    sanitizeMediaStatusMessage(jsonMessage);
+                }
+                json.put("message", jsonMessage);
+            }
+        } catch (JSONException e) {
+            Log.e(TAG, "Failed to build the reply: " + e);
+        }
+
+        Log.d(TAG, "Sending message to client: " + json);
+
+        return json.toString();
     }
 
     public void updateSessionStatus() {
-        if (mApiClient == null || (!mApiClient.isConnected() && !mApiClient.isConnecting())) return;
+        if (isApiClientInvalid()) return;
 
         try {
             mApplicationStatus = Cast.CastApi.getApplicationStatus(mApiClient);
             mApplicationMetadata = Cast.CastApi.getApplicationMetadata(mApiClient);
 
-            for (String clientId : mClients) {
-                mRouteDelegate.onMessage(mMediaRouteId, buildInternalMessage(
-                        "update_session", buildSessionMessage(), clientId, -1));
-            }
+            broadcastClientMessage("update_session", buildSessionMessage());
         } catch (IllegalStateException e) {
-            Log.d(TAG, "Can't get application status", e);
+            Log.e(TAG, "Can't get application status", e);
         }
     }
 
+    public void onVolumeChanged() {
+        updateSessionStatus();
+
+        if (mVolumeRequests.isEmpty()) return;
+
+        for (RequestRecord r : mVolumeRequests) {
+            sendClientMessageTo(r.clientId, "v2_message", null, r.sequenceNumber);
+        }
+        mVolumeRequests.clear();
+    }
+
     private String buildSessionMessage() {
-        if (!mApiClient.isConnected() && !mApiClient.isConnecting()) return "{}";
+        if (isApiClientInvalid()) return "{}";
 
         try {
             // "volume" is a part of "receiver" initialized below.
@@ -441,14 +842,20 @@ public class CastRouteController implements RouteController {
 
             JSONObject jsonMessage = new JSONObject();
             jsonMessage.put("sessionId", mSessionId);
-            jsonMessage.put("appId", mApplicationMetadata.getApplicationId());
-            jsonMessage.put("displayName", mApplicationMetadata.getName());
             jsonMessage.put("statusText", mApplicationStatus);
             jsonMessage.put("receiver", jsonReceiver);
-            jsonMessage.put("namespaces", extractNamespaces(mApplicationMetadata));
+            jsonMessage.put("namespaces", extractNamespaces());
             jsonMessage.put("media", new JSONArray());
             jsonMessage.put("status", "connected");
             jsonMessage.put("transportId", "web-4");
+
+            if (mApplicationMetadata != null) {
+                jsonMessage.put("appId", mApplicationMetadata.getApplicationId());
+                jsonMessage.put("displayName", mApplicationMetadata.getName());
+            } else {
+                jsonMessage.put("appId", mSource.getApplicationId());
+                jsonMessage.put("displayName", mCastDevice.getFriendlyName());
+            }
 
             return jsonMessage.toString();
         } catch (JSONException e) {
@@ -457,7 +864,19 @@ public class CastRouteController implements RouteController {
         }
     }
 
-    private JSONArray getCapabilities(CastDevice device) {
+    private void broadcastClientMessage(String type, String message) {
+        for (String clientId : mClients) {
+            sendClientMessageTo(clientId, type, message, INVALID_SEQUENCE_NUMBER);
+        }
+    }
+
+    private void sendClientMessageTo(
+            String clientId, String type, String message, int sequenceNumber) {
+        mRouteDelegate.onMessage(clientId,
+                buildInternalMessage(type, message, clientId, sequenceNumber));
+    }
+
+    static JSONArray getCapabilities(CastDevice device) {
         JSONArray jsonCapabilities = new JSONArray();
         if (device.hasCapability(CastDevice.CAPABILITY_AUDIO_IN)) {
             jsonCapabilities.put("audio_in");
@@ -474,7 +893,7 @@ public class CastRouteController implements RouteController {
         return jsonCapabilities;
     }
 
-    private JSONArray extractNamespaces(ApplicationMetadata metadata) throws JSONException {
+    private JSONArray extractNamespaces() throws JSONException {
         JSONArray jsonNamespaces = new JSONArray();
         // TODO(avayvod): Need a way to retrieve all the supported namespaces (e.g. YouTube).
         // See crbug.com/529680.
@@ -484,5 +903,9 @@ public class CastRouteController implements RouteController {
             jsonNamespaces.put(jsonNamespace);
         }
         return jsonNamespaces;
+    }
+
+    private boolean isApiClientInvalid() {
+        return mApiClient == null || (!mApiClient.isConnected() && !mApiClient.isConnecting());
     }
 }

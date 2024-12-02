@@ -6,6 +6,8 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/views/layout_constants.h"
+#include "chrome/browser/ui/views/location_bar/background_with_1_px_border.h"
+#include "ui/base/resource/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
@@ -68,16 +70,6 @@ void IconLabelBubbleView::SetBackgroundImageGrid(
   SetLabelBackgroundColor(CalculateImageColor(background_image));
 }
 
-void IconLabelBubbleView::SetBackgroundImageWithInsets(int background_image_id,
-                                                       gfx::Insets& insets) {
-  gfx::ImageSkia* background_image =
-      ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-          background_image_id);
-  background_painter_.reset(
-      views::Painter::CreateImagePainter(*background_image, insets));
-  SetLabelBackgroundColor(CalculateImageColor(background_image));
-}
-
 void IconLabelBubbleView::SetLabel(const base::string16& label) {
   label_->SetText(label);
 }
@@ -94,45 +86,78 @@ double IconLabelBubbleView::WidthMultiplier() const {
   return 1.0;
 }
 
+int IconLabelBubbleView::GetImageAndPaddingWidth() const {
+  const int image_width = image_->GetPreferredSize().width();
+  return image_width
+             ? image_width + GetLayoutConstant(ICON_LABEL_VIEW_INTERNAL_PADDING)
+             : 0;
+}
+
 gfx::Size IconLabelBubbleView::GetPreferredSize() const {
   // Height will be ignored by the LocationBarView.
   return GetSizeForLabelWidth(label_->GetPreferredSize().width());
 }
 
 void IconLabelBubbleView::Layout() {
+  // In MD mode, both extension icons and Chrome-provided icons are 16px,
+  // so it's not necessary to handle them differently. TODO(estade): clean
+  // this up when MD is on by default.
+  bool icon_has_enough_padding =
+      !is_extension_icon_ || ui::MaterialDesignController::IsModeMaterial();
   const int image_width = image()->GetPreferredSize().width();
   image_->SetBounds(std::min((width() - image_width) / 2,
-                             GetBubbleOuterPadding(!is_extension_icon_)),
+                             GetBubbleOuterPadding(icon_has_enough_padding)),
                     0, image_->GetPreferredSize().width(), height());
 
-  const int padding = GetLayoutConstant(LOCATION_BAR_HORIZONTAL_PADDING);
-  int pre_label_width =
-      GetBubbleOuterPadding(true) + (image_width ? (image_width + padding) : 0);
+  int pre_label_width = GetBubbleOuterPadding(true) + GetImageAndPaddingWidth();
   label_->SetBounds(pre_label_width, 0,
                     width() - pre_label_width - GetBubbleOuterPadding(false),
                     height());
 }
 
+void IconLabelBubbleView::OnNativeThemeChanged(
+    const ui::NativeTheme* native_theme) {
+  if (!ui::MaterialDesignController::IsModeMaterial())
+    return;
+
+  label_->SetEnabledColor(GetTextColor());
+  SkColor border_color = GetBorderColor();
+  SkColor background_color = SkColorSetA(border_color, 0x13);
+  set_background(
+      new BackgroundWith1PxBorder(background_color, border_color, false));
+  SetLabelBackgroundColor(background_color);
+}
+
 gfx::Size IconLabelBubbleView::GetSizeForLabelWidth(int width) const {
   gfx::Size size(image_->GetPreferredSize());
   if (ShouldShowBackground()) {
-    const int image_width = image_->GetPreferredSize().width();
-    const int padding = GetLayoutConstant(LOCATION_BAR_HORIZONTAL_PADDING);
-    const int non_label_width =
-        GetBubbleOuterPadding(true) +
-        (image_width ? (image_width + padding) : 0) +
-        GetBubbleOuterPadding(false);
+    const int non_label_width = GetBubbleOuterPadding(true) +
+                                GetImageAndPaddingWidth() +
+                                GetBubbleOuterPadding(false);
     size = gfx::Size(WidthMultiplier() * (width + non_label_width), 0);
-    size.SetToMax(background_painter_->GetMinimumSize());
+    if (!ui::MaterialDesignController::IsModeMaterial())
+      size.SetToMax(background_painter_->GetMinimumSize());
   }
 
   return size;
 }
 
-int IconLabelBubbleView::GetBubbleOuterPadding(bool by_icon) const {
+int IconLabelBubbleView::GetBubbleOuterPadding(bool leading) const {
+  if (ui::MaterialDesignController::IsModeMaterial())
+    return GetBubbleOuterPaddingMd(leading);
+
   return GetLayoutConstant(LOCATION_BAR_HORIZONTAL_PADDING) -
-      GetLayoutConstant(LOCATION_BAR_BUBBLE_HORIZONTAL_PADDING) +
-      (by_icon ? 0 : GetLayoutConstant(ICON_LABEL_VIEW_TRAILING_PADDING));
+         GetLayoutConstant(LOCATION_BAR_BUBBLE_HORIZONTAL_PADDING) +
+         (leading ? 0 : GetLayoutConstant(ICON_LABEL_VIEW_TRAILING_PADDING));
+}
+
+int IconLabelBubbleView::GetBubbleOuterPaddingMd(bool leading) const {
+  // When the image is empty, leading and trailing padding are equal.
+  if (image_->GetPreferredSize().IsEmpty() || !leading)
+    return GetLayoutConstant(ICON_LABEL_VIEW_TRAILING_PADDING);
+
+  // Leading padding is 2dp.
+  return 2;
 }
 
 void IconLabelBubbleView::SetLabelBackgroundColor(
@@ -158,4 +183,6 @@ void IconLabelBubbleView::OnPaint(gfx::Canvas* canvas) {
     return;
   if (background_painter_)
     background_painter_->Paint(canvas, size());
+  if (background())
+    background()->Paint(canvas, this);
 }

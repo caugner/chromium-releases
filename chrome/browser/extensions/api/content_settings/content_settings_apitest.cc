@@ -18,9 +18,9 @@
 #include "chrome/common/chrome_switches.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
-#include "components/content_settings/core/browser/plugins_field_trial.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/plugin_service.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/webplugininfo.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_registry.h"
@@ -31,8 +31,6 @@ namespace {
 void ReleaseBrowserProcessModule() {
   g_browser_process->ReleaseModule();
 }
-
-using content_settings::PluginsFieldTrial;
 
 }  // namespace
 
@@ -205,7 +203,7 @@ class ExtensionContentSettingsApiTest : public ExtensionApiTest {
     EXPECT_EQ(CONTENT_SETTING_ALLOW,
               map->GetContentSetting(
                   url, url, CONTENT_SETTINGS_TYPE_JAVASCRIPT, std::string()));
-    EXPECT_EQ(PluginsFieldTrial::GetDefaultPluginsContentSetting(),
+    EXPECT_EQ(CONTENT_SETTING_DETECT_IMPORTANT_CONTENT,
               map->GetContentSetting(
                   url, url, CONTENT_SETTINGS_TYPE_PLUGINS, std::string()));
     EXPECT_EQ(CONTENT_SETTING_BLOCK,

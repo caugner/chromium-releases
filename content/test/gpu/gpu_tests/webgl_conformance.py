@@ -1,19 +1,15 @@
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-import json
-import optparse
 import os
-import sys
 
-import gpu_test_base
-import path_util
-import webgl_conformance_expectations
-import webgl2_conformance_expectations
+from gpu_tests import gpu_test_base
+from gpu_tests import path_util
+from gpu_tests import webgl_conformance_expectations
+from gpu_tests import webgl2_conformance_expectations
 
 from telemetry.internal.browser import browser_finder
 from telemetry.page import page_test
-from telemetry.page import shared_page_state
 from telemetry.story.story_set import StorySet
 
 
@@ -82,24 +78,28 @@ class WebglConformanceValidator(gpu_test_base.ValidatorBase):
       raise page_test.Failure(_WebGLTestMessages(tab))
 
   def CustomizeBrowserOptions(self, options):
+    # --test-type=gpu is used only to suppress the "Google API Keys are missing"
+    # infobar, which causes flakiness in tests.
     options.AppendExtraBrowserArgs([
         '--disable-gesture-requirement-for-media-playback',
         '--disable-domain-blocking-for-3d-apis',
-        '--disable-gpu-process-crash-limit'
+        '--disable-gpu-process-crash-limit',
+        '--js-flags=--expose-gc',
+        '--test-type=gpu'
     ])
     browser = browser_finder.FindBrowser(options.finder_options)
     if (browser.target_os.startswith('android') and
-        browser.browser_type == 'android-webview-shell'):
-        # TODO(kbr): this is overly broad. We'd like to do this only on
-        # Nexus 9. It'll go away shortly anyway. crbug.com/499928
-        #
-        # The --ignore_egl_sync_failures is only there to work around
-        # some strange failure on the Nexus 9 bot, not reproducible on
-        # local hardware.
-        options.AppendExtraBrowserArgs([
-            '--disable-gl-extensions=GL_EXT_disjoint_timer_query',
-            '--ignore_egl_sync_failures'
-        ])
+      browser.browser_type == 'android-webview-shell'):
+      # TODO(kbr): this is overly broad. We'd like to do this only on
+      # Nexus 9. It'll go away shortly anyway. crbug.com/499928
+      #
+      # The --ignore_egl_sync_failures is only there to work around
+      # some strange failure on the Nexus 9 bot, not reproducible on
+      # local hardware.
+      options.AppendExtraBrowserArgs([
+        '--disable-gl-extensions=GL_EXT_disjoint_timer_query',
+        '--ignore_egl_sync_failures',
+      ])
 
 
 class Webgl2ConformanceValidator(WebglConformanceValidator):
@@ -107,12 +107,22 @@ class Webgl2ConformanceValidator(WebglConformanceValidator):
     super(Webgl2ConformanceValidator, self).__init__()
 
   def CustomizeBrowserOptions(self, options):
+    # --test-type=gpu is used only to suppress the "Google API Keys are missing"
+    # infobar, which causes flakiness in tests.
     options.AppendExtraBrowserArgs([
         '--disable-gesture-requirement-for-media-playback',
         '--disable-domain-blocking-for-3d-apis',
         '--disable-gpu-process-crash-limit',
-        '--enable-unsafe-es3-apis'
+        '--js-flags=--expose-gc',
+        '--enable-unsafe-es3-apis',
+        '--test-type=gpu'
     ])
+    browser = browser_finder.FindBrowser(options.finder_options)
+    if browser.target_os == 'darwin':
+      # crbug.com/539993
+      options.AppendExtraBrowserArgs([
+          '--disable-accelerated-video-decode'
+      ])
 
 class WebglConformancePage(gpu_test_base.PageBase):
   def __init__(self, story_set, test, expectations):
@@ -173,7 +183,7 @@ class WebglConformance(gpu_test_base.TestBase):
     return ps
 
   def _CreateExpectations(self):
-    assert (self._webgl_version == 1 or self._webgl_version == 2)
+    assert self._webgl_version == 1 or self._webgl_version == 2
     if self._webgl_version == 1:
       return webgl_conformance_expectations.WebGLConformanceExpectations(
           conformance_path)
@@ -220,9 +230,9 @@ class WebglConformance(gpu_test_base.TestBase):
             _CompareVersion(version, min_version_to_compare) < 0):
           continue
 
-        if (webgl2_only and (not ('.txt' in test_name)) and
-            ((not min_version_to_compare) or
-             (not min_version_to_compare.startswith('2')))):
+        if (webgl2_only and not '.txt' in test_name and
+            (not min_version_to_compare or
+             not min_version_to_compare.startswith('2'))):
           continue
 
         if '.txt' in test_name:

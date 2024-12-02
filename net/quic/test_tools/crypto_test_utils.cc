@@ -58,51 +58,6 @@ class CryptoFramerVisitor : public CryptoFramerVisitorInterface {
   vector<CryptoHandshakeMessage> messages_;
 };
 
-// MovePackets parses crypto handshake messages from packet number
-// |*inout_packet_index| through to the last packet (or until a packet fails to
-// decrypt) and has |dest_stream| process them. |*inout_packet_index| is updated
-// with an index one greater than the last packet processed.
-void MovePackets(PacketSavingConnection* source_conn,
-                 size_t *inout_packet_index,
-                 QuicCryptoStream* dest_stream,
-                 PacketSavingConnection* dest_conn) {
-  SimpleQuicFramer framer(source_conn->supported_versions());
-  CryptoFramer crypto_framer;
-  CryptoFramerVisitor crypto_visitor;
-
-  // In order to properly test the code we need to perform encryption and
-  // decryption so that the crypters latch when expected. The crypters are in
-  // |dest_conn|, but we don't want to try and use them there. Instead we swap
-  // them into |framer|, perform the decryption with them, and then swap them
-  // back.
-  QuicConnectionPeer::SwapCrypters(dest_conn, framer.framer());
-
-  crypto_framer.set_visitor(&crypto_visitor);
-
-  size_t index = *inout_packet_index;
-  for (; index < source_conn->encrypted_packets_.size(); index++) {
-    if (!framer.ProcessPacket(*source_conn->encrypted_packets_[index])) {
-      // The framer will be unable to decrypt forward-secure packets sent after
-      // the handshake is complete. Don't treat them as handshake packets.
-      break;
-    }
-
-    for (const QuicStreamFrame& stream_frame : framer.stream_frames()) {
-      ASSERT_TRUE(crypto_framer.ProcessInput(stream_frame.data));
-      ASSERT_FALSE(crypto_visitor.error());
-    }
-  }
-  *inout_packet_index = index;
-
-  QuicConnectionPeer::SwapCrypters(dest_conn, framer.framer());
-
-  ASSERT_EQ(0u, crypto_framer.InputBytesRemaining());
-
-  for (const CryptoHandshakeMessage& message : crypto_visitor.messages()) {
-    dest_stream->OnHandshakeMessage(message);
-  }
-}
-
 // HexChar parses |c| as a hex character. If valid, it sets |*value| to the
 // value of the hex character and returns true. Otherwise it returns false.
 bool HexChar(char c, uint8* value) {
@@ -166,25 +121,30 @@ class AsyncTestChannelIDSource : public ChannelIDSource,
 
 }  // anonymous namespace
 
+CryptoTestUtils::FakeServerOptions::FakeServerOptions()
+    : token_binding_enabled(false) {}
+
 CryptoTestUtils::FakeClientOptions::FakeClientOptions()
-    : dont_verify_certs(false),
-      channel_id_enabled(false),
-      channel_id_source_async(false) {
-}
+    : channel_id_enabled(false),
+      channel_id_source_async(false),
+      token_binding_enabled(false) {}
 
 // static
 int CryptoTestUtils::HandshakeWithFakeServer(
+    MockConnectionHelper* helper,
     PacketSavingConnection* client_conn,
-    QuicCryptoClientStream* client) {
+    QuicCryptoClientStream* client,
+    const FakeServerOptions& options) {
   PacketSavingConnection* server_conn = new PacketSavingConnection(
-      Perspective::IS_SERVER, client_conn->supported_versions());
+      helper, Perspective::IS_SERVER, client_conn->supported_versions());
 
   QuicConfig config = DefaultQuicConfig();
   QuicCryptoServerConfig crypto_config(QuicCryptoServerConfig::TESTING,
-                                       QuicRandom::GetInstance());
+                                       QuicRandom::GetInstance(),
+                                       ProofSourceForTesting());
   SetupCryptoServerConfigForTest(server_conn->clock(),
                                  server_conn->random_generator(), &config,
-                                 &crypto_config);
+                                 &crypto_config, options);
 
   TestQuicSpdyServerSession server_session(server_conn, config, &crypto_config);
 
@@ -193,7 +153,6 @@ int CryptoTestUtils::HandshakeWithFakeServer(
 
   CommunicateHandshakeMessages(client_conn, client, server_conn,
                                server_session.GetCryptoStream());
-
   CompareClientAndServerKeys(client, server_session.GetCryptoStream());
 
   return client->num_sent_client_hellos();
@@ -201,16 +160,17 @@ int CryptoTestUtils::HandshakeWithFakeServer(
 
 // static
 int CryptoTestUtils::HandshakeWithFakeClient(
+    MockConnectionHelper* helper,
     PacketSavingConnection* server_conn,
     QuicCryptoServerStream* server,
     const QuicServerId& server_id,
     const FakeClientOptions& options) {
   PacketSavingConnection* client_conn =
-      new PacketSavingConnection(Perspective::IS_CLIENT);
+      new PacketSavingConnection(helper, Perspective::IS_CLIENT);
   // Advance the time, because timers do not like uninitialized times.
   client_conn->AdvanceTime(QuicTime::Delta::FromSeconds(1));
 
-  QuicCryptoClientConfig crypto_config;
+  QuicCryptoClientConfig crypto_config(ProofVerifierForTesting());
   AsyncTestChannelIDSource* async_channel_id_source = nullptr;
   if (options.channel_id_enabled) {
 
@@ -221,13 +181,8 @@ int CryptoTestUtils::HandshakeWithFakeClient(
     }
     crypto_config.SetChannelIDSource(source);
   }
-  if (!options.dont_verify_certs && server_id.is_https()) {
-#if defined(USE_OPENSSL)
-    crypto_config.SetProofVerifier(ProofVerifierForTesting());
-#else
-    // TODO(rch): Implement a NSS proof source.
-    crypto_config.SetProofVerifier(FakeProofVerifierForTesting());
-#endif
+  if (options.token_binding_enabled) {
+    crypto_config.tb_key_params.push_back(kP256);
   }
   TestQuicSpdyClientSession client_session(client_conn, DefaultQuicConfig(),
                                            server_id, &crypto_config);
@@ -261,9 +216,11 @@ void CryptoTestUtils::SetupCryptoServerConfigForTest(
     const QuicClock* clock,
     QuicRandom* rand,
     QuicConfig* config,
-    QuicCryptoServerConfig* crypto_config) {
+    QuicCryptoServerConfig* crypto_config,
+    const FakeServerOptions& fake_options) {
   QuicCryptoServerConfig::ConfigOptions options;
   options.channel_id_enabled = true;
+  options.token_binding_enabled = fake_options.token_binding_enabled;
   scoped_ptr<CryptoHandshakeMessage> scfg(
       crypto_config->AddDefaultConfig(rand, clock, options));
 }
@@ -396,6 +353,40 @@ CommonCertSets* CryptoTestUtils::MockCommonCertSets(StringPiece cert,
                                                     uint64 hash,
                                                     uint32 index) {
   return new class MockCommonCertSets(cert, hash, index);
+}
+
+// static
+void CryptoTestUtils::FillInDummyReject(CryptoHandshakeMessage* rej,
+                                        bool reject_is_stateless) {
+  if (reject_is_stateless) {
+    rej->set_tag(kSREJ);
+  } else {
+    rej->set_tag(kREJ);
+  }
+
+  // Minimum SCFG that passes config validation checks.
+  // clang-format off
+  unsigned char scfg[] = {
+    // SCFG
+    0x53, 0x43, 0x46, 0x47,
+    // num entries
+    0x01, 0x00,
+    // padding
+    0x00, 0x00,
+    // EXPY
+    0x45, 0x58, 0x50, 0x59,
+    // EXPY end offset
+    0x08, 0x00, 0x00, 0x00,
+    // Value
+    '1',  '2',  '3',  '4',
+    '5',  '6',  '7',  '8'
+  };
+  // clang-format on
+  rej->SetValue(kSCFG, scfg);
+  rej->SetStringPiece(kServerNonceTag, "SERVER_NONCE");
+  vector<QuicTag> reject_reasons;
+  reject_reasons.push_back(CLIENT_NONCE_INVALID_FAILURE);
+  rej->SetVector(kRREJ, reject_reasons);
 }
 
 void CryptoTestUtils::CompareClientAndServerKeys(
@@ -615,6 +606,48 @@ CryptoHandshakeMessage CryptoTestUtils::Message(const char* message_tag, ...) {
 
   va_end(ap);
   return *parsed;
+}
+
+// static
+void CryptoTestUtils::MovePackets(PacketSavingConnection* source_conn,
+                                  size_t* inout_packet_index,
+                                  QuicCryptoStream* dest_stream,
+                                  PacketSavingConnection* dest_conn) {
+  SimpleQuicFramer framer(source_conn->supported_versions());
+  CryptoFramer crypto_framer;
+  CryptoFramerVisitor crypto_visitor;
+
+  // In order to properly test the code we need to perform encryption and
+  // decryption so that the crypters latch when expected. The crypters are in
+  // |dest_conn|, but we don't want to try and use them there. Instead we swap
+  // them into |framer|, perform the decryption with them, and then swap ther
+  // back.
+  QuicConnectionPeer::SwapCrypters(dest_conn, framer.framer());
+
+  crypto_framer.set_visitor(&crypto_visitor);
+
+  size_t index = *inout_packet_index;
+  for (; index < source_conn->encrypted_packets_.size(); index++) {
+    if (!framer.ProcessPacket(*source_conn->encrypted_packets_[index])) {
+      // The framer will be unable to decrypt forward-secure packets sent after
+      // the handshake is complete. Don't treat them as handshake packets.
+      break;
+    }
+
+    for (const QuicStreamFrame& stream_frame : framer.stream_frames()) {
+      ASSERT_TRUE(crypto_framer.ProcessInput(stream_frame.data));
+      ASSERT_FALSE(crypto_visitor.error());
+    }
+  }
+  *inout_packet_index = index;
+
+  QuicConnectionPeer::SwapCrypters(dest_conn, framer.framer());
+
+  ASSERT_EQ(0u, crypto_framer.InputBytesRemaining());
+
+  for (const CryptoHandshakeMessage& message : crypto_visitor.messages()) {
+    dest_stream->OnHandshakeMessage(message);
+  }
 }
 
 }  // namespace test

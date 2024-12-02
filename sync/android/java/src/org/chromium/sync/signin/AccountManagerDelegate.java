@@ -11,21 +11,17 @@ import android.accounts.AuthenticatorDescription;
 import android.os.Bundle;
 import android.os.Handler;
 
+import org.chromium.base.Callback;
+
 /**
  * Wrapper around the Android account manager, to facilitate dependency injection during testing.
  */
 public interface AccountManagerDelegate {
     /**
-     * A callback class that can be used to allow asynchronous methods.
+     * This method is deprecated; please use the asynchronous version below instead.
+     *
+     * See http://crbug.com/517697 for details.
      */
-    interface Callback<T> {
-        void gotResult(T value);
-    }
-
-    /**
-     * Use the asynchronous getAccountsByType(String, Callback<Account[]>) instead.
-     */
-    @Deprecated
     Account[] getAccountsByType(String type);
 
     void getAccountsByType(String type, Callback<Account[]> callback);

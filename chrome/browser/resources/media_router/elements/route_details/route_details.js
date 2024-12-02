@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 // This Polymer element shows information from media that is currently cast
-// to a device. It is assumed that |route| and |sink| correspond to each other.
+// to a device.
 Polymer({
   is: 'route-details',
 
@@ -28,20 +28,12 @@ Polymer({
     },
 
     /**
-     * The sink to show.
-     * @type {?media_router.Sink}
-     */
-    sink: {
-      type: Object,
-      value: null,
-    },
-
-    /**
      * The text for the stop casting button.
      * @private {string}
      */
     stopCastingButtonText_: {
       type: String,
+      readOnly: true,
       value: loadTimeData.getString('stopCastingButton'),
     },
 
@@ -55,15 +47,6 @@ Polymer({
       type: Boolean,
       value: true,
     },
-  },
-
-  /**
-   * Fires a back-click event. This is called when the back link is clicked.
-   *
-   * @private
-   */
-  back_: function() {
-    this.fire('back-click');
   },
 
   /**
@@ -111,14 +94,5 @@ Polymer({
       // Load was unsuccessful; fall back to default view.
       that.isCustomControllerHidden_ = true;
     });
-  },
-
-  /**
-   * Handles a click on the close button by firing a close-button-click event.
-   *
-   * @private
-   */
-  onCloseButtonClick_: function() {
-    this.fire('close-button-click');
   },
 });

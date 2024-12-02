@@ -11,13 +11,36 @@
 #include "components/omnibox/browser/in_memory_url_index.h"
 #include "ios/chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "ios/chrome/browser/browser_state/browser_state_otr_helper.h"
+#include "ios/chrome/browser/chrome_url_constants.h"
 #include "ios/chrome/browser/history/history_service_factory.h"
 #include "ios/chrome/browser/pref_names.h"
 #include "ios/public/provider/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #include "ios/web/public/web_thread.h"
 
 namespace ios {
+
+namespace {
+
+scoped_ptr<KeyedService> BuildInMemoryURLIndex(web::BrowserState* context) {
+  ios::ChromeBrowserState* browser_state =
+      ios::ChromeBrowserState::FromBrowserState(context);
+
+  SchemeSet schemes_to_whilelist;
+  schemes_to_whilelist.insert(kChromeUIScheme);
+
+  // Do not force creation of the HistoryService if saving history is disabled.
+  scoped_ptr<InMemoryURLIndex> in_memory_url_index(new InMemoryURLIndex(
+      ios::BookmarkModelFactory::GetForBrowserState(browser_state),
+      ios::HistoryServiceFactory::GetForBrowserState(
+          browser_state, ServiceAccessType::IMPLICIT_ACCESS),
+      web::WebThread::GetBlockingPool(), browser_state->GetStatePath(),
+      browser_state->GetPrefs()->GetString(ios::prefs::kAcceptLanguages),
+      schemes_to_whilelist));
+  in_memory_url_index->Init();
+  return in_memory_url_index.Pass();
+}
+
+}  // namespace
 
 // static
 InMemoryURLIndex* InMemoryURLIndexFactory::GetForBrowserState(
@@ -41,25 +64,15 @@ InMemoryURLIndexFactory::InMemoryURLIndexFactory()
 
 InMemoryURLIndexFactory::~InMemoryURLIndexFactory() {}
 
+// static
+BrowserStateKeyedServiceFactory::TestingFactoryFunction
+InMemoryURLIndexFactory::GetDefaultFactory() {
+  return &BuildInMemoryURLIndex;
+}
+
 scoped_ptr<KeyedService> InMemoryURLIndexFactory::BuildServiceInstanceFor(
     web::BrowserState* context) const {
-  ios::ChromeBrowserState* browser_state =
-      ios::ChromeBrowserState::FromBrowserState(context);
-
-  SchemeSet schemes_to_whilelist;
-  schemes_to_whilelist.insert(
-      ios::GetChromeBrowserProvider()->GetChromeUIScheme());
-
-  // Do not force creation of the HistoryService if saving history is disabled.
-  scoped_ptr<InMemoryURLIndex> in_memory_url_index(new InMemoryURLIndex(
-      ios::BookmarkModelFactory::GetForBrowserState(browser_state),
-      ios::HistoryServiceFactory::GetForBrowserState(
-          browser_state, ServiceAccessType::IMPLICIT_ACCESS),
-      web::WebThread::GetBlockingPool(), browser_state->GetStatePath(),
-      browser_state->GetPrefs()->GetString(ios::prefs::kAcceptLanguages),
-      schemes_to_whilelist));
-  in_memory_url_index->Init();
-  return in_memory_url_index.Pass();
+  return BuildInMemoryURLIndex(context);
 }
 
 web::BrowserState* InMemoryURLIndexFactory::GetBrowserStateToUse(

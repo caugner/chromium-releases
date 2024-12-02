@@ -67,6 +67,7 @@ def _SetupPrebuiltTools(device):
   device_tools = [
     'file_poller',
     'forwarder_dist/device_forwarder',
+    'memtrack_helper',
     'md5sum_dist/md5sum_bin',
     'purge_ashmem',
     'run_pie',
@@ -157,7 +158,7 @@ class AndroidPlatformBackend(
     try:
       self._can_access_protected_file_contents = (
           self._device.HasRoot() or self._device.NeedsSU())
-    except:
+    except Exception:
       logging.exception('New exception caused by DeviceUtils conversion')
       raise
     self._device_copy_script = None
@@ -249,6 +250,12 @@ class AndroidPlatformBackend(
       })
     return events
 
+  def CanTakeScreenshot(self):
+    return True
+
+  def TakeScreenshot(self, file_path):
+    return bool(self._device.TakeScreenshot(host_path=file_path))
+
   def SetFullPerformanceModeEnabled(self, enabled):
     if not self._enable_performance_mode:
       logging.warning('CPU governor will not be set!')
@@ -279,6 +286,22 @@ class AndroidPlatformBackend(
       return {}
     return super(AndroidPlatformBackend, self).GetCpuTimestamp()
 
+  def SetGraphicsMemoryTrackingEnabled(self, enabled):
+    if not enabled:
+      self.KillApplication('memtrack_helper')
+      return
+
+    if not android_prebuilt_profiler_helper.InstallOnDevice(
+        self._device, 'memtrack_helper'):
+      raise Exception('Error installing memtrack_helper.')
+    try:
+      cmd = android_prebuilt_profiler_helper.GetDevicePath('memtrack_helper')
+      cmd += ' -d'
+      self._device.RunShellCommand(cmd, as_root=True, check_return=True)
+    except Exception:
+      logging.exception('New exception caused by DeviceUtils conversion')
+      raise
+
   def PurgeUnpinnedMemory(self):
     """Purges the unpinned ashmem memory for the whole system.
 
@@ -294,7 +317,7 @@ class AndroidPlatformBackend(
     try:
       output = self._device.RunShellCommand(
           android_prebuilt_profiler_helper.GetDevicePath('purge_ashmem'))
-    except:
+    except Exception:
       logging.exception('New exception caused by DeviceUtils conversion')
       raise
     for l in output:
@@ -643,7 +666,7 @@ class AndroidPlatformBackend(
     try:
       self._EfficientDeviceDirectoryCopy(
           saved_profile_location, profile_dir)
-    except:
+    except Exception:
       logging.exception('New exception caused by DeviceUtils conversion')
       raise
     dumpsys = self._device.RunShellCommand('dumpsys package %s' % package)
@@ -699,7 +722,7 @@ class AndroidPlatformBackend(
       os.makedirs(output_profile_path)
     try:
       files = self._device.RunShellCommand(['ls', profile_dir])
-    except:
+    except Exception:
       logging.exception('New exception caused by DeviceUtils conversion')
       raise
     for f in files:
@@ -775,38 +798,9 @@ class AndroidPlatformBackend(
                                        stdout=subprocess.PIPE).communicate()[0])
     return ret
 
-  @staticmethod
-  def _IsScreenOn(input_methods):
-    """Parser method of IsScreenOn()
-
-    Args:
-      input_methods: Output from dumpsys input_methods
-
-    Returns:
-      boolean: True if screen is on, false if screen is off.
-
-    Raises:
-      ValueError: An unknown value is found for the screen state.
-      AndroidDeviceParsingError: Error in detecting screen state.
-    """
-    for line in input_methods:
-      if 'mScreenOn' in line or 'mInteractive' in line:
-        for pair in line.strip().split(' '):
-          key, value = pair.split('=', 1)
-          if key == 'mScreenOn' or key == 'mInteractive':
-            if value == 'true':
-              return True
-            elif value == 'false':
-              return False
-            else:
-              raise ValueError('Unknown value for %s: %s' % (key, value))
-    raise exceptions.AndroidDeviceParsingError(str(input_methods))
-
   def IsScreenOn(self):
     """Determines if device screen is on."""
-    input_methods = self._device.RunShellCommand(
-        'dumpsys input_method', check_return=True, large_output=True)
-    return self._IsScreenOn(input_methods)
+    return self._device.IsScreenOn()
 
   @staticmethod
   def _IsScreenLocked(input_methods):

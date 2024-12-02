@@ -5,8 +5,10 @@
 #include "components/html_viewer/layout_test_content_handler_impl.h"
 
 #include "base/bind.h"
+#include "components/html_viewer/global_state.h"
 #include "components/html_viewer/html_document_application_delegate.h"
 #include "components/html_viewer/html_widget.h"
+#include "components/html_viewer/layout_test_blink_settings_impl.h"
 #include "components/html_viewer/web_test_delegate_impl.h"
 #include "components/test_runner/web_frame_test_proxy.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
@@ -50,14 +52,16 @@ LayoutTestContentHandlerImpl::LayoutTestContentHandlerImpl(
     : ContentHandlerImpl(global_state, app, request.Pass()),
       test_interfaces_(test_interfaces),
       test_delegate_(test_delegate),
-      web_widget_proxy_(nullptr) {}
+      web_widget_proxy_(nullptr),
+      app_refcount_(app->app_lifetime_helper()->CreateAppRefCount()) {}
 
 LayoutTestContentHandlerImpl::~LayoutTestContentHandlerImpl() {
 }
 
 void LayoutTestContentHandlerImpl::StartApplication(
     mojo::InterfaceRequest<mojo::Application> request,
-    mojo::URLResponsePtr response) {
+    mojo::URLResponsePtr response,
+    const mojo::Callback<void()>& destruct_callback) {
   test_interfaces_->SetTestIsRunning(true);
   test_interfaces_->ConfigureForTestWithURL(GURL(), false);
 
@@ -65,7 +69,8 @@ void LayoutTestContentHandlerImpl::StartApplication(
   HTMLDocumentApplicationDelegate* delegate =
       new HTMLDocumentApplicationDelegate(
           request.Pass(), response.Pass(), global_state(),
-          app()->app_lifetime_helper()->CreateAppRefCount());
+          app()->app_lifetime_helper()->CreateAppRefCount(),
+          destruct_callback);
 
   delegate->set_html_factory(this);
 }
@@ -78,9 +83,12 @@ HTMLWidgetRootLocal* LayoutTestContentHandlerImpl::CreateHTMLWidgetRootLocal(
 
 HTMLFrame* LayoutTestContentHandlerImpl::CreateHTMLFrame(
     HTMLFrame::CreateParams* params) {
+  params->manager->global_state()->set_blink_settings(
+      new LayoutTestBlinkSettingsImpl());
+
   // The test harness isn't correctly set-up for iframes yet. So return a normal
   // HTMLFrame for iframes.
-  if (params->parent || !params->view || params->view->id() != params->id)
+  if (params->parent || !params->window || params->window->id() != params->id)
     return new HTMLFrame(params);
 
   using ProxyType =
