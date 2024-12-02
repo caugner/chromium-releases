@@ -209,6 +209,8 @@
 #include "content/public/browser/android/java_interfaces.h"
 #include "media/audio/android/audio_manager_android.h"
 #include "third_party/blink/public/mojom/android_font_lookup/android_font_lookup.mojom.h"
+#else
+#include "content/browser/hid/hid_service.h"
 #endif
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
@@ -217,6 +219,8 @@
 #include "components/services/font/public/mojom/font_service.mojom.h"  // nogncheck
 #include "content/browser/font_service.h"  // nogncheck
 #include "third_party/blink/public/mojom/memory_usage_monitor_linux.mojom.h"  // nogncheck
+
+#include "content/public/browser/stable_video_decoder_factory.h"
 #endif
 
 #if BUILDFLAG(IS_MAC)
@@ -1700,6 +1704,16 @@ bool RenderProcessHostImpl::Init() {
   CreateMessageFilters();
   RegisterMojoInterfaces();
 
+  // Call this now and not in OnProcessLaunched in case any mojo calls get
+  // dispatched before this.
+  GetRendererInterface()->InitializeRenderer(
+      GetContentClient()->browser()->GetUserAgentBasedOnPolicy(
+          browser_context_),
+      GetContentClient()->browser()->GetFullUserAgent(),
+      GetContentClient()->browser()->GetReducedUserAgent(),
+      GetContentClient()->browser()->GetUserAgentMetadata(),
+      storage_partition_impl_->cors_exempt_header_list());
+
   if (run_renderer_in_process()) {
     DCHECK(g_renderer_main_thread_factory);
     // Crank up a thread and run the initialization there.  With the way that
@@ -2094,6 +2108,23 @@ void RenderProcessHostImpl::CreateWebSocketConnector(
       std::move(receiver));
 }
 
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+void RenderProcessHostImpl::CreateStableVideoDecoder(
+    mojo::PendingReceiver<media::stable::mojom::StableVideoDecoder> receiver) {
+  if (!stable_video_decoder_factory_remote_.is_bound()) {
+    LaunchStableVideoDecoderFactory(
+        stable_video_decoder_factory_remote_.BindNewPipeAndPassReceiver());
+    stable_video_decoder_factory_remote_.reset_on_disconnect();
+  }
+
+  if (!stable_video_decoder_factory_remote_.is_bound())
+    return;
+
+  stable_video_decoder_factory_remote_->CreateStableVideoDecoder(
+      std::move(receiver));
+}
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+
 void RenderProcessHostImpl::DelayProcessShutdown(
     const base::TimeDelta& subframe_shutdown_timeout,
     const base::TimeDelta& unload_handler_timeout,
@@ -2177,26 +2208,6 @@ void RenderProcessHostImpl::DumpProfilingData(base::OnceClosure callback) {
   GetRendererInterface()->WriteClangProfilingProfile(std::move(callback));
 }
 #endif
-
-void RenderProcessHostImpl::EnableBlinkRuntimeFeatures(
-    const std::vector<std::string>& features) {
-  // To enable runtime features, the render process must be locked to the site
-  // (unless site isolation is explicitly disabled). These features are highly
-  // privileged, so the renderer process with such features enabled shouldn't
-  // be used for other sites.
-  //
-  // For WebUI schemes, process isolation is provided by SiteInfo
-  // ShouldLockProcessToSite().
-  //
-  // To isolate other sites, the embedder can override ContentBrowserClient
-  // ShouldLockProcessToSite().
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableSiteIsolation)) {
-    CHECK(GetProcessLock().is_locked_to_site());
-  }
-
-  GetRendererInterface()->EnableBlinkRuntimeFeatures(features);
-}
 
 void RenderProcessHostImpl::WriteIntoTrace(
     perfetto::TracedProto<perfetto::protos::pbzero::RenderProcessHost> proto)
@@ -2439,7 +2450,8 @@ void RenderProcessHostImpl::CreateDomStorageProvider(
 void RenderProcessHostImpl::BindMediaInterfaceProxy(
     mojo::PendingReceiver<media::mojom::InterfaceFactory> receiver) {
   if (!media_interface_proxy_)
-    media_interface_proxy_ = std::make_unique<FramelessMediaInterfaceProxy>();
+    media_interface_proxy_ =
+        std::make_unique<FramelessMediaInterfaceProxy>(this);
   media_interface_proxy_->Add(std::move(receiver));
 }
 
@@ -3056,7 +3068,7 @@ void RenderProcessHostImpl::NotifyRendererOfLockedStateUpdate() {
       GetContentClient()->browser()->IsIsolatedAppsDeveloperModeAllowed(
           GetBrowserContext());
 
-  GetRendererInterface()->SetIsDirectSocketEnabled(
+  GetRendererInterface()->SetIsIsolatedApplication(
       isolated_apps_developer_mode_allowed &&
       process_lock.GetWebExposedIsolationInfo().is_isolated_application());
 
@@ -3085,7 +3097,7 @@ StoragePartitionImpl* RenderProcessHostImpl::GetStoragePartition() {
 
 static void AppendCompositorCommandLineFlags(base::CommandLine* command_line) {
   command_line->AppendSwitchASCII(
-      switches::kNumRasterThreads,
+      blink::switches::kNumRasterThreads,
       base::NumberToString(NumberOfRendererRasterThreads()));
 
   int msaa_sample_count = GpuRasterizationMSAASampleCount();
@@ -3119,6 +3131,12 @@ void RenderProcessHostImpl::AppendRendererCommandLine(
   // in process listings. See https://crbug.com/1211558 for details.
   GetContentClient()->browser()->AppendExtraCommandLineSwitches(command_line,
                                                                 GetID());
+
+  static bool first_renderer_process = true;
+  if (first_renderer_process) {
+    command_line->AppendSwitch(kFirstRendererProcess);
+    first_renderer_process = false;
+  }
 
   if (IsPdf())
     command_line->AppendSwitch(switches::kPdfRenderer);
@@ -3239,6 +3257,7 @@ void RenderProcessHostImpl::PropagateBrowserCommandLineToRenderer(
     switches::kEnableWebGLDeveloperExtensions,
     switches::kEnableWebGLDraftExtensions,
     switches::kEnableWebGLImageChromium,
+    switches::kEnableWebGPUDeveloperFeatures,
     switches::kFileUrlPathAlias,
     switches::kForceDeviceScaleFactor,
     switches::kForceDisplayColorProfile,
@@ -3648,7 +3667,7 @@ int RenderProcessHostImpl::GetID() const {
 }
 
 base::SafeRef<RenderProcessHost> RenderProcessHostImpl::GetSafeRef() const {
-  return weak_ptr_factory_.GetSafeRef();
+  return safe_ref_factory_.GetSafeRef();
 }
 
 bool RenderProcessHostImpl::IsInitializedAndNotDead() {
@@ -4683,6 +4702,10 @@ void RenderProcessHostImpl::ResetIPC() {
   coordinator_connector_receiver_.reset();
   tracing_registration_.reset();
 
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+  stable_video_decoder_factory_remote_.reset();
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+
   // Destroy all embedded CompositorFrameSinks.
   embedded_frame_sink_provider_.reset();
 
@@ -4964,13 +4987,6 @@ void RenderProcessHostImpl::OnProcessLaunched() {
   }
 
   // Pass bits of global renderer state to the renderer.
-  GetRendererInterface()->InitializeRenderer(
-      GetContentClient()->browser()->GetUserAgentBasedOnPolicy(
-          browser_context_),
-      GetContentClient()->browser()->GetFullUserAgent(),
-      GetContentClient()->browser()->GetReducedUserAgent(),
-      GetContentClient()->browser()->GetUserAgentMetadata(),
-      storage_partition_impl_->cors_exempt_header_list());
   NotifyRendererOfLockedStateUpdate();
 
   // Send the initial system color info to the renderer.
@@ -5261,5 +5277,14 @@ void RenderProcessHostImpl::ProvideSwapFileForRenderer() {
           },
           std::move(allocator)));
 }
+
+#if !BUILDFLAG(IS_ANDROID)
+void RenderProcessHostImpl::BindHidService(
+    const url::Origin& origin,
+    mojo::PendingReceiver<blink::mojom::HidService> receiver) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  content::HidService::Create(GetBrowserContext(), origin, std::move(receiver));
+}
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 }  // namespace content

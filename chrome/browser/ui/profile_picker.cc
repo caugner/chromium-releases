@@ -124,6 +124,7 @@ GURL ProfilePicker::Params::GetInitialURL() const {
     case ProfilePicker::EntryPoint::kProfileLocked:
     case ProfilePicker::EntryPoint::kUnableToCreateBrowser:
     case ProfilePicker::EntryPoint::kBackgroundModeManager:
+    case ProfilePicker::EntryPoint::kProfileIdle:
       return base_url;
     case ProfilePicker::EntryPoint::kProfileMenuAddNewProfile:
       return base_url.Resolve("new-profile");
@@ -138,6 +139,10 @@ GURL ProfilePicker::Params::GetInitialURL() const {
 
 bool ProfilePicker::Params::CanReusePickerWindow(const Params& other) const {
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
+  LOG(WARNING) << "Checking window reusability from entry point "
+               << static_cast<int>(entry_point_) << " to "
+               << static_cast<int>(other.entry_point());
+
   // Some entry points have specific UIs that cannot be reused for other entry
   // points.
   base::flat_set<EntryPoint> exclusive_entry_points = {

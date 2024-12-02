@@ -80,7 +80,7 @@
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/search_engines/util.h"
-#include "components/services/app_service/public/mojom/types.mojom.h"
+#include "components/services/app_service/public/cpp/app_launch_util.h"
 #include "components/startup_metric_utils/browser/startup_metric_utils.h"
 #include "components/url_formatter/url_fixer.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -109,7 +109,7 @@
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
 #include "chrome/browser/ui/startup/lacros_first_run_service.h"
-#include "chromeos/startup/browser_init_params.h"
+#include "chromeos/startup/browser_params_proxy.h"
 #endif
 
 #if BUILDFLAG(IS_MAC)
@@ -380,10 +380,10 @@ Profile* GetPrivateProfileIfRequested(const base::CommandLine& command_line,
       /* show_warning= */ true);
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
   if (profiles::IsGuestModeEnabled()) {
-    const auto* init_params = chromeos::BrowserInitParams::Get();
+    const auto* init_params = chromeos::BrowserParamsProxy::Get();
     open_guest_profile =
         open_guest_profile ||
-        init_params->initial_browser_action ==
+        init_params->InitialBrowserAction() ==
             crosapi::mojom::InitialBrowserAction::kOpenGuestWindow;
   }
 #endif
@@ -406,9 +406,9 @@ Profile* GetPrivateProfileIfRequested(const base::CommandLine& command_line,
   } else {
     bool expect_incognito = command_line.HasSwitch(switches::kIncognito);
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
-    auto* init_params = chromeos::BrowserInitParams::Get();
+    auto* init_params = chromeos::BrowserParamsProxy::Get();
     expect_incognito |=
-        init_params->initial_browser_action ==
+        init_params->InitialBrowserAction() ==
         crosapi::mojom::InitialBrowserAction::kOpenIncognitoWindow;
 #endif
     LOG_IF(WARNING, expect_incognito)
@@ -522,7 +522,7 @@ bool MaybeLaunchAppShortcutWindow(const base::CommandLine& command_line,
         web_app::startup::FinalizeWebAppLaunch(
             LaunchMode::kAsWebAppInWindowByUrl, command_line, is_first_run,
             chrome::FindBrowserWithWebContents(web_contents),
-            apps::mojom::LaunchContainer::kLaunchContainerWindow);
+            apps::LaunchContainer::kLaunchContainerWindow);
         return true;
       }
     }
@@ -671,6 +671,7 @@ void StartupBrowserCreator::LaunchBrowser(
       // launch. This `StartupBrowserCreator` will get destroyed when the method
       // returns so the relevant data is copied over and passed to the callback.
       fre_service->OpenFirstRunIfNeeded(
+          LacrosFirstRunService::EntryPoint::kProcessStartup,
           base::BindOnce(&OpenNewWindowForFirstRun, command_line, profile,
                          cur_dir, first_run_tabs_, process_startup,
                          is_first_run, std::move(launch_mode_recorder)));
@@ -819,16 +820,16 @@ SessionStartupPref StartupBrowserCreator::GetSessionStartupPref(
   bool restore_last_session =
       command_line.HasSwitch(switches::kRestoreLastSession);
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
-  auto* init_params = chromeos::BrowserInitParams::Get();
-  if (init_params->initial_browser_action ==
+  auto* init_params = chromeos::BrowserParamsProxy::Get();
+  if (init_params->InitialBrowserAction() ==
           crosapi::mojom::InitialBrowserAction::kOpenNewTabPageWindow ||
-      init_params->initial_browser_action ==
+      init_params->InitialBrowserAction() ==
           crosapi::mojom::InitialBrowserAction::kOpenWindowWithUrls) {
     pref.type = SessionStartupPref::DEFAULT;
     return pref;
   }
   restore_last_session |=
-      init_params->initial_browser_action ==
+      init_params->InitialBrowserAction() ==
       crosapi::mojom::InitialBrowserAction::kRestoreLastSession;
 #endif
   if ((restore_last_session || did_restart) && !profile->IsNewProfile()) {
@@ -1476,7 +1477,7 @@ StartupProfilePathInfo GetStartupProfilePath(
   }
 
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
-  if (chromeos::BrowserInitParams::Get()->session_type ==
+  if (chromeos::BrowserParamsProxy::Get()->SessionType() ==
       crosapi::mojom::SessionType::kGuestSession) {
     return {ProfileManager::GetGuestProfilePath(),
             StartupProfileMode::kBrowserWindow};
