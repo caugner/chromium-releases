@@ -25,7 +25,6 @@
 #include "media/base/renderer_factory.h"
 #include "media/base/surface_manager.h"
 #include "media/base/text_track.h"
-#include "media/blink/buffered_data_source.h"
 #include "media/blink/buffered_data_source_host_impl.h"
 #include "media/blink/media_blink_export.h"
 #include "media/blink/multibuffer_data_source.h"
@@ -67,12 +66,12 @@ class GLES2Interface;
 }
 
 namespace media {
-class AudioHardwareConfig;
 class ChunkDemuxer;
 class GpuVideoAcceleratorFactories;
 class MediaLog;
 class UrlIndex;
 class VideoFrameCompositor;
+class WatchTimeReporter;
 class WebAudioSourceProviderImpl;
 class WebMediaPlayerDelegate;
 class WebTextTrackImpl;
@@ -129,6 +128,12 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   // True if the loaded media has a playable video/audio track.
   bool hasVideo() const override;
   bool hasAudio() const override;
+
+  void enabledAudioTracksChanged(
+      const blink::WebVector<blink::WebMediaPlayer::TrackId>& enabledTrackIds)
+      override;
+  void selectedVideoTrackChanged(
+      blink::WebMediaPlayer::TrackId* selectedTrackId) override;
 
   // Dimensions of the video.
   blink::WebSize naturalSize() const override;
@@ -212,7 +217,6 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
     GONE,
     PLAYING,
     PAUSED,
-    PAUSED_BUT_NOT_IDLE,
     ENDED,
   };
 
@@ -226,6 +230,9 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
 
  private:
   friend class WebMediaPlayerImplTest;
+
+  void EnableOverlay();
+  void DisableOverlay();
 
   void OnPipelineSuspended();
   void OnDemuxerOpened();
@@ -319,7 +326,7 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   //   - network_state_, ready_state_,
   //   - is_idle_, must_suspend_,
   //   - paused_, ended_,
-  //   - pending_suspend_resume_cycle_.
+  //   - pending_suspend_resume_cycle_,
   void UpdatePlayState();
 
   // Methods internal to UpdatePlayState().
@@ -341,6 +348,8 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   // paused state after some idle timeout.
   void ScheduleIdlePauseTimer();
 
+  void CreateWatchTimeReporter();
+
   blink::WebLocalFrame* frame_;
 
   // The playback state last reported to |delegate_|, to avoid setting duplicate
@@ -358,11 +367,11 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   blink::WebMediaPlayer::ReadyState highest_ready_state_;
 
   // Preload state for when |data_source_| is created after setPreload().
-  BufferedDataSource::Preload preload_;
+  MultibufferDataSource::Preload preload_;
 
   // Buffering strategy for when |data_source_| is created after
   // setBufferingStrategy().
-  BufferedDataSource::BufferingStrategy buffering_strategy_;
+  MultibufferDataSource::BufferingStrategy buffering_strategy_;
 
   // Task runner for posting tasks on Chrome's main thread. Also used
   // for DCHECKs so methods calls won't execute in the wrong thread.
@@ -424,10 +433,10 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   // changes.
   bool should_notify_time_changed_;
 
-  bool fullscreen_;
+  bool overlay_enabled_;
 
-  // Whether the current decoder requires a restart on fullscreen transitions.
-  bool decoder_requires_restart_for_fullscreen_;
+  // Whether the current decoder requires a restart on overlay transitions.
+  bool decoder_requires_restart_for_overlay_;
 
   blink::WebMediaPlayerClient* client_;
   blink::WebMediaPlayerEncryptedMediaClient* encrypted_client_;
@@ -459,7 +468,7 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   //
   // |demuxer_| will contain the appropriate demuxer based on which resource
   // load strategy we're using.
-  std::unique_ptr<BufferedDataSourceInterface> data_source_;
+  std::unique_ptr<MultibufferDataSource> data_source_;
   std::unique_ptr<Demuxer> demuxer_;
   ChunkDemuxer* chunk_demuxer_;
 
@@ -500,13 +509,16 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   // For canceling ongoing surface creation requests when exiting fullscreen.
   base::CancelableCallback<void(int)> surface_created_cb_;
 
-  // The current fullscreen surface id. Populated while in fullscreen once the
+  // The current overlay surface id. Populated while in fullscreen once the
   // surface is created.
-  int fullscreen_surface_id_;
+  int overlay_surface_id_;
 
   // If a surface is requested before it's finished being created, the request
   // is saved and satisfied once the surface is available.
   SurfaceCreatedCB pending_surface_request_cb_;
+
+  // Force to use SurfaceView instead of SurfaceTexture on Android.
+  bool force_video_overlays_;
 
   // Suppresses calls to OnPipelineError() after destruction / shutdown has been
   // started; prevents us from spuriously logging errors that are transient or
@@ -523,6 +535,10 @@ class MEDIA_BLINK_EXPORT WebMediaPlayerImpl
   // Called some-time after OnHidden() if the media was suspended in a playing
   // state as part of the call to OnHidden().
   base::OneShotTimer background_pause_timer_;
+
+  // Monitors the watch time of the played content.
+  std::unique_ptr<WatchTimeReporter> watch_time_reporter_;
+  bool is_encrypted_;
 
   DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerImpl);
 };

@@ -2,9 +2,8 @@ description('Tests if the spellchecker behaves correctly when the spellcheck att
     + 'is being changed by the script.');
 
 jsTestIsAsync = true;
-
-if (window.internals)
-    internals.settings.setUnifiedTextCheckerEnabled(true);
+if (window.testRunner)
+    testRunner.setMockSpellCheckerEnabled(true);
 
 var parent = document.createElement("div");
 document.body.appendChild(parent);

@@ -24,17 +24,7 @@
           "reason": "bounds change"
         },
         {
-          "object": "LayoutBlockFlow (relative positioned) DIV class='relative'",
-          "rect": [8, 186, 769, 642],
-          "reason": "bounds change"
-        },
-        {
           "object": "LayoutBlockFlow (relative positioned) DIV class='relative paddingTop'",
-          "rect": [8, 92, 769, 642],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutBlockFlow (relative positioned) DIV class='relative'",
           "rect": [8, 92, 769, 642],
           "reason": "bounds change"
         },
@@ -47,16 +37,6 @@
           "object": "LayoutBlockFlow HTML",
           "rect": [10, 94, 728, 90],
           "reason": "forced by layout"
-        },
-        {
-          "object": "LayoutView #document",
-          "rect": [10, 94, 728, 90],
-          "reason": "bounds change"
-        },
-        {
-          "object": "LayoutBlockFlow BODY",
-          "rect": [18, 102, 712, 74],
-          "reason": "bounds change"
         },
         {
           "object": "LayoutImage IMG",
@@ -85,10 +65,6 @@
       "reason": "layoutObject insertion"
     },
     {
-      "object": "LayoutBlockFlow (relative positioned) DIV class='relative'",
-      "reason": "bounds change"
-    },
-    {
       "object": "LayoutBlockFlow (relative positioned) DIV class='relative paddingTop'",
       "reason": "bounds change"
     },
@@ -102,7 +78,27 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "bounds change"
+      "reason": "location change"
+    },
+    {
+      "object": "VerticalScrollbar",
+      "reason": "scroll"
+    },
+    {
+      "object": "LayoutView #document",
+      "reason": "location change"
+    },
+    {
+      "object": "LayoutBlockFlow HTML",
+      "reason": "forced by layout"
+    },
+    {
+      "object": "LayoutBlockFlow BODY",
+      "reason": "location change"
+    },
+    {
+      "object": "LayoutView #document",
+      "reason": "scroll"
     }
   ]
 }

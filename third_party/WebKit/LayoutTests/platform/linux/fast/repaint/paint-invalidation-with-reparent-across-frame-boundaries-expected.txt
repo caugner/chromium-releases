@@ -14,11 +14,6 @@
           "reason": "layoutObject insertion"
         },
         {
-          "object": "LayoutBlockFlow BODY",
-          "rect": [18, 18, 284, 20],
-          "reason": "bounds change"
-        },
-        {
           "object": "LayoutBlockFlow DIV id='inner-target'",
           "rect": [18, 18, 284, 20],
           "reason": "layoutObject removal"
@@ -52,6 +47,14 @@
     {
       "object": "InlineTextBox 'abc'",
       "reason": "layoutObject insertion"
+    },
+    {
+      "object": "LayoutText #text",
+      "reason": "layoutObject removal"
+    },
+    {
+      "object": "LayoutBlockFlow DIV id='inner-target'",
+      "reason": "layoutObject removal"
     }
   ]
 }

@@ -73,7 +73,6 @@ FAIL If extends is spacer, should throw a NotSupportedError assert_throws: funct
 FAIL If extends is elementnametobeunknownelement, should throw a NotSupportedError assert_throws: function "() =>  {
         customElements.define('test-define-extend-' + name, class {}, { extends: name });
       }" did not throw
-PASS If constructor.observedAttributes throws, should rethrow 
 PASS If constructor.prototype throws, should rethrow 
 PASS If Type(constructor.prototype) is undefined, should throw a TypeError 
 PASS If Type(constructor.prototype) is string, should throw a TypeError 
@@ -89,6 +88,12 @@ PASS If constructor.prototype.disconnectedCallback is function, should succeed
 PASS If constructor.prototype.disconnectedCallback is null, should throw a TypeError 
 PASS If constructor.prototype.disconnectedCallback is object, should throw a TypeError 
 PASS If constructor.prototype.disconnectedCallback is integer, should throw a TypeError 
+PASS If constructor.prototype.adoptedCallback throws, should rethrow 
+PASS If constructor.prototype.adoptedCallback is undefined, should succeed 
+PASS If constructor.prototype.adoptedCallback is function, should succeed 
+PASS If constructor.prototype.adoptedCallback is null, should throw a TypeError 
+PASS If constructor.prototype.adoptedCallback is object, should throw a TypeError 
+PASS If constructor.prototype.adoptedCallback is integer, should throw a TypeError 
 PASS If constructor.prototype.attributeChangedCallback throws, should rethrow 
 PASS If constructor.prototype.attributeChangedCallback is undefined, should succeed 
 PASS If constructor.prototype.attributeChangedCallback is function, should succeed 

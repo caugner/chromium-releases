@@ -19,6 +19,11 @@
           "reason": "bounds change"
         },
         {
+          "object": "LayoutBlockFlow DIV id='root'",
+          "rect": [8, 208, 100, 100],
+          "reason": "incremental"
+        },
+        {
           "object": "LayoutBlockFlow (anonymous)",
           "rect": [8, 108, 100, 100],
           "reason": "bounds change"
@@ -51,10 +56,10 @@
     },
     {
       "object": "LayoutBlockFlow DIV id='root'",
-      "reason": "selection"
+      "reason": "incremental"
     },
     {
-      "object": "LayoutBlockFlow DIV id='firstLine'",
+      "object": "LayoutBlockFlow DIV id='root'",
       "reason": "selection"
     },
     {
@@ -67,23 +72,11 @@
     },
     {
       "object": "LayoutText #text",
-      "reason": "selection"
-    },
-    {
-      "object": "InlineTextBox '\u00A0'",
-      "reason": "selection"
-    },
-    {
-      "object": "LayoutText #text",
       "reason": "layoutObject insertion"
     },
     {
       "object": "InlineTextBox '\u00A0'",
       "reason": "layoutObject insertion"
-    },
-    {
-      "object": "LayoutBlockFlow (anonymous)",
-      "reason": "selection"
     },
     {
       "object": "LayoutBlockFlow (anonymous)",
@@ -103,11 +96,11 @@
     },
     {
       "object": "LayoutBR BR",
-      "reason": "bounds change"
+      "reason": "location change"
     },
     {
       "object": "InlineTextBox '\n'",
-      "reason": "bounds change"
+      "reason": "location change"
     }
   ]
 }

@@ -1,4 +1,7 @@
 // The sample API integrates origin trial checks at various entry points.
+// References to "partial interface" mean that the [OriginTrialEnabled]
+// IDL attribute is applied to an entire partial interface, instead of
+// applied to individual IDL members.
 
 // These tests verify that any gated parts of the API are not available.
 expect_failure = (t) => {
@@ -37,6 +40,14 @@ expect_failure = (t) => {
         assert_equals(window.internals['frobulatePartial'], undefined);
       }
   }, {
+    desc: 'Static attribute should not exist on partial interface, with trial disabled',
+    code: () => {
+        var internalsInterface = window.internals.constructor;
+        assert_false('frobulateStaticPartial' in internalsInterface);
+        assert_not_exists(internalsInterface, 'frobulateStaticPartial');
+        assert_equals(internalsInterface['frobulateStaticPartial'], undefined);
+      }
+  }, {
     desc: 'Constant should not exist on partial interface, with trial disabled',
     code: () => {
         assert_false('FROBULATE_CONST_PARTIAL' in window.internals);
@@ -49,6 +60,14 @@ expect_failure = (t) => {
         assert_false('frobulateMethodPartial' in window.internals);
         assert_not_exists(window.internals, 'frobulateMethodPartial');
         assert_equals(window.internals['frobulateMethodPartial'], undefined);
+      }
+  }, {
+    desc: 'Static method should not exist on partial interface, with trial disabled',
+    code: () => {
+        var internalsInterface = window.internals.constructor;
+        assert_false('frobulateStaticMethodPartial' in internalsInterface);
+        assert_not_exists(internalsInterface, 'frobulateStaticMethodPartial');
+        assert_equals(internalsInterface['frobulateStaticMethodPartial'], undefined);
       }
   }];
 
@@ -92,6 +111,12 @@ test(() => {
   }, 'Attribute should exist on partial interface and return value');
 
 test(() => {
+    var internalsInterface = window.internals.constructor;
+    assert_exists(internalsInterface, 'frobulateStaticPartial');
+    assert_true(internalsInterface.frobulateStaticPartial, 'Static attribute should return boolean value');
+  }, 'Static attribute should exist on partial interface and return value');
+
+test(() => {
     assert_idl_attribute(window.internals, 'FROBULATE_CONST_PARTIAL');
     assert_equals(window.internals.FROBULATE_CONST_PARTIAL, 2, 'Constant should return integer value');
   }, 'Constant should exist on partial interface and return value');
@@ -100,6 +125,12 @@ test(() => {
     assert_idl_attribute(window.internals, 'frobulateMethodPartial');
     assert_true(window.internals.frobulateMethodPartial(), 'Method should return boolean value');
   }, 'Method should exist on partial interface and return value');
+
+test(() => {
+    var internalsInterface = window.internals.constructor;
+    assert_exists(internalsInterface, 'frobulateStaticMethodPartial');
+    assert_true(internalsInterface.frobulateStaticMethodPartial(), 'Static method should return boolean value');
+  }, 'Static method should exist on partial interface and return value');
 
 fetch_tests_from_worker(new Worker('resources/enabled-worker.js'));
 };

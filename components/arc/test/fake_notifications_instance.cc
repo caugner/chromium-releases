@@ -6,11 +6,8 @@
 
 namespace arc {
 
-FakeNotificationsInstance::FakeNotificationsInstance(
-    mojo::InterfaceRequest<mojom::NotificationsInstance> request)
-    : binding_(this, std::move(request)) {}
-
-FakeNotificationsInstance::~FakeNotificationsInstance() {}
+FakeNotificationsInstance::FakeNotificationsInstance() = default;
+FakeNotificationsInstance::~FakeNotificationsInstance() = default;
 
 void FakeNotificationsInstance::SendNotificationEventToAndroid(
     const mojo::String& key,
@@ -18,15 +15,17 @@ void FakeNotificationsInstance::SendNotificationEventToAndroid(
   events_.emplace_back(key, event);
 }
 
+void FakeNotificationsInstance::CreateNotificationWindow(
+    const mojo::String& key) {}
+
+void FakeNotificationsInstance::CloseNotificationWindow(
+    const mojo::String& key) {}
+
 void FakeNotificationsInstance::Init(mojom::NotificationsHostPtr host_ptr) {}
 
 const std::vector<std::pair<mojo::String, mojom::ArcNotificationEvent>>&
 FakeNotificationsInstance::events() const {
   return events_;
-}
-
-void FakeNotificationsInstance::WaitForIncomingMethodCall() {
-  binding_.WaitForIncomingMethodCall();
 }
 
 }  // namespace arc

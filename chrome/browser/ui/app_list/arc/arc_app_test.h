@@ -27,6 +27,10 @@ class FakeChromeUserManager;
 class ScopedUserManagerEnabler;
 }
 
+namespace user_manager {
+class User;
+}
+
 class ArcAppListPrefs;
 class Profile;
 
@@ -59,6 +63,10 @@ class ArcAppTest {
     return fake_apps_;
   }
 
+  const std::vector<arc::mojom::AppInfo>& fake_default_apps() const {
+    return fake_default_apps_;
+  }
+
   const std::vector<arc::mojom::ShortcutInfo>& fake_shortcuts() const {
     return fake_shortcuts_;
   }
@@ -74,7 +82,7 @@ class ArcAppTest {
   arc::ArcAuthService* arc_auth_service() { return auth_service_.get(); }
 
  private:
-  void CreateUserAndLogin();
+  const user_manager::User* CreateUserAndLogin();
   bool FindPackage(const arc::mojom::ArcPackageInfo& package);
 
   // Unowned pointer.
@@ -87,6 +95,7 @@ class ArcAppTest {
   std::unique_ptr<arc::ArcAuthService> auth_service_;
   std::unique_ptr<chromeos::ScopedUserManagerEnabler> user_manager_enabler_;
   std::vector<arc::mojom::AppInfo> fake_apps_;
+  std::vector<arc::mojom::AppInfo> fake_default_apps_;
   std::vector<arc::mojom::ArcPackageInfo> fake_packages_;
   std::vector<arc::mojom::ShortcutInfo> fake_shortcuts_;
 

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 
+#include <memory>
 #include <string>
 
 #include "ash/shell.h"
@@ -12,6 +13,8 @@
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/ash/launcher/arc_app_deferred_launcher_controller.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/session_manager_client.h"
 #include "components/arc/arc_bridge_service.h"
 #include "ui/aura/window.h"
 #include "ui/display/display.h"
@@ -30,17 +33,21 @@ constexpr int kNexus5Height = 690;
 // Minimum required versions.
 constexpr int kMinVersion = 0;
 constexpr int kCanHandleResolutionMinVersion = 1;
+constexpr int kSendBroadcastMinVersion = 1;
 constexpr int kUninstallPackageMinVersion = 2;
+constexpr int kTaskSupportMinVersion = 3;
 constexpr int kShowPackageInfoMinVersion = 5;
 constexpr int kRemoveIconMinVersion = 9;
 constexpr int kShowPackageInfoOnPageMinVersion = 10;
 
 // Service name strings.
 constexpr char kCanHandleResolutionStr[] = "get resolution capability";
+constexpr char kCloseTaskStr[] = "close task";
 constexpr char kLaunchAppStr[] = "launch app";
+constexpr char kRemoveIconStr[] = "remove icon";
+constexpr char kSetActiveTaskStr[] = "set active task";
 constexpr char kShowPackageInfoStr[] = "show package info";
 constexpr char kUninstallPackageStr[] = "uninstall package";
-constexpr char kRemoveIconStr[] = "remove icon";
 
 // Helper function which returns the AppInstance. Create related logs when error
 // happens.
@@ -68,6 +75,12 @@ arc::mojom::AppInstance* GetAppInstance(int required_version,
   }
 
   return app_instance;
+}
+
+void PrioritizeArcInstanceCallback(bool success) {
+  VLOG(2) << "Finished prioritizing the instance: result=" << success;
+  if (!success)
+    LOG(ERROR) << "Failed to prioritize ARC";
 }
 
 // Find a proper size and position for a given rectangle on the screen.
@@ -159,6 +172,8 @@ class LaunchAppWithoutSize {
 }  // namespace
 
 const char kPlayStoreAppId[] = "gpkmicpkkebkmabiaedjognfppcchdfa";
+const char kPlayStorePackage[] = "com.android.vending";
+const char kPlayStoreActivity[] = "com.android.vending.AssetBrowserActivity";
 const char kSettingsAppId[] = "mconboelelhjpkbdhhiijkgcimoangdj";
 
 bool ShouldShowInLauncher(const std::string& app_id) {
@@ -215,21 +230,96 @@ bool LaunchApp(content::BrowserContext* context, const std::string& app_id) {
 bool LaunchApp(content::BrowserContext* context,
                const std::string& app_id,
                bool landscape_layout) {
-  const ArcAppListPrefs* prefs = ArcAppListPrefs::Get(context);
+  ArcAppListPrefs* prefs = ArcAppListPrefs::Get(context);
   std::unique_ptr<ArcAppListPrefs::AppInfo> app_info = prefs->GetApp(app_id);
   if (app_info && !app_info->ready) {
-    if (!ash::Shell::HasInstance())
-      return false;
+    ArcAuthService* auth_service = ArcAuthService::Get();
+    DCHECK(auth_service);
 
-    ChromeLauncherController* chrome_controller =
-        ChromeLauncherController::instance();
-    DCHECK(chrome_controller);
-    chrome_controller->GetArcDeferredLauncher()->RegisterDeferredLaunch(app_id);
+    bool arc_activated = false;
+    if (!auth_service->IsArcEnabled()) {
+      if (!prefs->IsDefault(app_id)) {
+        NOTREACHED();
+        return false;
+      }
+
+      auth_service->EnableArc();
+      if (!auth_service->IsArcEnabled()) {
+        NOTREACHED();
+        return false;
+      }
+      arc_activated = true;
+    }
+
+    // PlayStore item has special handling for shelf controllers. In order to
+    // avoid unwanted initial animation for PlayStore item do not create
+    // deferred launch request when PlayStore item enables Arc.
+    if (!arc_activated || app_id != kPlayStoreAppId) {
+      ChromeLauncherController* chrome_controller =
+          ChromeLauncherController::instance();
+      DCHECK(chrome_controller || !ash::Shell::HasInstance());
+      if (chrome_controller) {
+        chrome_controller->GetArcDeferredLauncher()->RegisterDeferredLaunch(
+            app_id);
+
+        // On some boards, ARC is booted with a restricted set of resources by
+        // default to avoid slowing down Chrome's user session restoration.
+        // However, the restriction should be lifted once the user explicitly
+        // tries to launch an ARC app.
+        VLOG(2) << "Prioritizing the instance";
+        chromeos::SessionManagerClient* session_manager_client =
+            chromeos::DBusThreadManager::Get()->GetSessionManagerClient();
+        session_manager_client->PrioritizeArcInstance(
+            base::Bind(PrioritizeArcInstanceCallback));
+      }
+    }
+    prefs->SetLastLaunchTime(app_id, base::Time::Now());
     return true;
   }
 
   return (new LaunchAppWithoutSize(context, app_id, landscape_layout))
       ->LaunchAndRelease();
+}
+
+void SetTaskActive(int task_id) {
+  arc::mojom::AppInstance* app_instance =
+      GetAppInstance(kTaskSupportMinVersion, kSetActiveTaskStr);
+  if (!app_instance)
+    return;
+  app_instance->SetTaskActive(task_id);
+}
+
+void CloseTask(int task_id) {
+  arc::mojom::AppInstance* app_instance =
+      GetAppInstance(kTaskSupportMinVersion, kCloseTaskStr);
+  if (!app_instance)
+    return;
+  app_instance->CloseTask(task_id);
+}
+
+void ShowTalkBackSettings() {
+  arc::ArcBridgeService* bridge_service = arc::ArcBridgeService::Get();
+  if (!bridge_service) {
+    VLOG(2) << "ARC bridge is not ready";
+    return;
+  }
+
+  arc::mojom::IntentHelperInstance *intent_helper_instance =
+      bridge_service->intent_helper()->instance();
+  if (!intent_helper_instance) {
+    VLOG(2) << "ARC intent helper instance is not ready";
+    return;
+  }
+  if (bridge_service->intent_helper()->version() < kSendBroadcastMinVersion) {
+    VLOG(2) << "ARC intent helper instance is too old";
+    return;
+  }
+
+  intent_helper_instance->SendBroadcast(
+          "org.chromium.arc.intent_helper.SHOW_TALKBACK_SETTINGS",
+          "org.chromium.arc.intent_helper",
+          "org.chromium.arc.intent_helper.SettingsReceiver",
+          "{}");
 }
 
 bool CanHandleResolution(content::BrowserContext* context,

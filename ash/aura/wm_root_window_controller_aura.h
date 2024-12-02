@@ -10,6 +10,7 @@
 #include "ash/common/wm_root_window_controller.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
+#include "ui/display/display_observer.h"
 
 namespace aura {
 class Window;
@@ -20,7 +21,8 @@ namespace ash {
 class RootWindowController;
 
 class ASH_EXPORT WmRootWindowControllerAura : public WmRootWindowController,
-                                              public ShellObserver {
+                                              public ShellObserver,
+                                              public display::DisplayObserver {
  public:
   explicit WmRootWindowControllerAura(
       RootWindowController* root_window_controller);
@@ -47,14 +49,18 @@ class ASH_EXPORT WmRootWindowControllerAura : public WmRootWindowController,
       int shell_container_id,
       views::Widget::InitParams* init_params) override;
   WmWindow* FindEventTarget(const gfx::Point& location_in_screen) override;
+  gfx::Point GetLastMouseLocationInRoot() override;
   void AddObserver(WmRootWindowControllerObserver* observer) override;
   void RemoveObserver(WmRootWindowControllerObserver* observer) override;
 
   // ShellObserver:
-  void OnDisplayWorkAreaInsetsChanged() override;
-  void OnFullscreenStateChanged(bool is_fullscreen,
-                                WmWindow* root_window) override;
   void OnShelfAlignmentChanged(WmWindow* root_window) override;
+
+  // DisplayObserver:
+  void OnDisplayAdded(const display::Display& display) override;
+  void OnDisplayRemoved(const display::Display& display) override;
+  void OnDisplayMetricsChanged(const display::Display& display,
+                               uint32_t metrics) override;
 
  private:
   RootWindowController* root_window_controller_;

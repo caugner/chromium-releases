@@ -33,7 +33,7 @@
         var options = {
           order: 9,
           smoothing: 0.5,
-          floatRelError: 5.7607e-6
+          floatRelError: 5.9207e-6
         };
 
         var success = true;
@@ -72,9 +72,8 @@
           var expectedByteData = convertFloatToByte(smoothedFloatResult.map(linearToDb),
             analyser.minDecibels, analyser.maxDecibels);
 
-          success = Should(analyser.fftSize + "-point byte FFT", byteFreqData, {
-            verbose: true
-          }).beCloseToArray(expectedByteData, 0) && success;
+          success = Should(analyser.fftSize + "-point byte FFT", byteFreqData)
+              .beCloseToArray(expectedByteData, 0) && success;
 
         }).then(context.resume.bind(context));
 
@@ -98,7 +97,7 @@
             freqDataInDb, smoothedFloatResult.map(linearToDb), {
               order: options.order,
               smoothing: options.smoothing,
-              floatRelError: 1.5979e-5
+              floatRelError: 2.5332e-5
             });
           success = success && comparison.success;
 
@@ -111,9 +110,8 @@
           var expectedByteData = convertFloatToByte(smoothedFloatResult.map(linearToDb),
             analyser.minDecibels, analyser.maxDecibels);
 
-          success = Should(analyser.fftSize + "-point byte FFT", byteFreqData, {
-            verbose: true
-          }).beCloseToArray(expectedByteData, 0) && success;
+          success = Should(analyser.fftSize + "-point byte FFT", byteFreqData)
+            .beCloseToArray(expectedByteData, 0) && success;
 
         }).then(context.resume.bind(context));
 

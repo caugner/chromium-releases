@@ -19,14 +19,14 @@
 <script>
 description("The spellchecker should work correctly if unified spellcheck path is used.");
 
+if (window.testRunner)
+    testRunner.setMockSpellCheckerEnabled(true);
+
 var container = document.getElementById('container');
 function removeChildren(node) {
     while (node.firstChild)
         node.removeChild(node.firstChild);
 }
-
-if (window.internals)
-    internals.settings.setUnifiedTextCheckerEnabled(true);
 
 var testData = [
     { text: 'zz', marked: ['zz'] },
@@ -78,9 +78,6 @@ function performTest(id, data) {
 for (var i = 0; i < testData.length; ++i) {
     performTest('test', testData[i]);
 }
-
-if (window.internals)
-    internals.settings.setUnifiedTextCheckerEnabled(false);
 
 var successfullyParsed = true;
 </script>
